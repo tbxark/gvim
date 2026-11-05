@@ -1,0 +1,232 @@
+package ui
+
+import (
+	"context"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/buffer"
+	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/internal/explorer"
+	palmodel "github.com/tbxark/gvim/internal/palette"
+	"github.com/tbxark/gvim/internal/theme"
+	"github.com/tbxark/gvim/internal/ui/editorpane"
+	"github.com/tbxark/gvim/internal/ui/grid"
+)
+
+// The interfaces in this file are the ones ui needs, written where ui uses
+// them. Concrete domain types satisfy them through the adapters in
+// internal/app, and test fakes implement them directly. ui does not import
+// the concrete finder, fsops, lsp or markdown packages.
+
+// EditorState is what the root model needs from the editor. The app adapter
+// wraps *editor.Editor and maps editor.Tab to TabInfo.
+//
+// Do runs a named action and may change the text. The other methods move the
+// caret or the viewport and never change the text, so they do not go through
+// Do. None of them scrolls the viewport to the caret, except through the
+// editor's own rules.
+type EditorState interface {
+	SetViewport(rows, cols int)
+	Do(a editor.Action, args map[string]any) editor.Result
+	Active() Document // the active document, or nil when no tab is open (the welcome screen shows)
+	Tabs() []TabInfo
+	Status() string
+	SetCursor(p buffer.Pos, extend bool)
+	ExtendSelection(p buffer.Pos, u editor.Unit)
+	ScrollBy(rows int)
+	ScrollTo(top int)
+}
+
+// Document is the view of the active buffer that the root and the text pane
+// read. It is the pane's view (editorpane.Document) plus the name and the first
+// visible line. The app adapter passes the editor's document through.
+type Document interface {
+	editorpane.Document
+	Name() string
+	Top() int // the first visible line of the viewport
+	// Encoding is the encoding label of the saved text, "ASCII" or "UTF-8".
+	Encoding() string
+}
+
+// TabInfo describes one tab of the tab strip.
+type TabInfo struct {
+	Name     string
+	Modified bool
+	Preview  bool
+	Active   bool
+}
+
+// ExplorerTree is the subset of *explorer.Tree used by the explorer panel. The
+// root passes a nil ExplorerTree when the explorer is hidden.
+type ExplorerTree interface {
+	Root() string
+	Rows() []explorer.Row
+	Selected() (explorer.Row, bool)
+	Move(delta int)
+	Toggle(path string) error
+	Reveal(path string) error
+	Reload() error
+	ScrollBy(n int)
+	ScrollOffset() int
+	ShowHidden() bool
+	SetShowHidden(v bool)
+}
+
+// FileIndex is the async file list from internal/finder. Nil leaves the palette's
+// file mode on its loading row.
+type FileIndex interface {
+	Snapshot() (files []string, loading bool)
+	Done() <-chan struct{}
+	Close()
+}
+
+// FileRanker scores paths for the palette and the browser filter. The fuzzy
+// scorer provides it (planned, see fuzzy). Nil leaves the palette's file rows
+// unranked.
+type FileRanker interface {
+	Rank(query string, files []string, limit int) []Ranked
+}
+
+// Ranked is one scored path. Indexes are the matched rune offsets, used for
+// highlighting.
+type Ranked struct {
+	Path    string
+	Indexes []int
+}
+
+// FileOps is the file-operation surface (fsops, planned). Nil until P6.
+type FileOps interface {
+	CreateFile(ctx context.Context, dir, name string) (string, error)
+	Rename(ctx context.Context, path, newName string) (string, error)
+	Trash(ctx context.Context, path string) error
+}
+
+// LSPSession is the subset of an LSP client the UI uses (M8). Nil until M8.
+type LSPSession interface {
+	DidOpen(ctx context.Context, uri, languageID string, version int32, text string) error
+	DidChange(ctx context.Context, uri string, version int32, text string) error
+	DidClose(ctx context.Context, uri string) error
+	Diagnostics() <-chan DiagnosticsEvent
+}
+
+// DiagnosticsEvent carries the diagnostics of one document version. The UI
+// skips empty sets.
+type DiagnosticsEvent struct {
+	URI     string
+	Version int32
+	Items   []Diagnostic
+}
+
+// Diagnostic is one problem at a position. Line and Col are zero-based.
+type Diagnostic struct {
+	Line, Col int
+	Severity  int
+	Message   string
+}
+
+// MarkdownRenderer renders a markdown preview at a fixed width. Nil until a
+// feature needs it (P8).
+type MarkdownRenderer interface {
+	Render(ctx context.Context, src string, width int) (string, error)
+}
+
+// Overlay is a layer drawn over the frame and given the input while it is on
+// top: the palette, the find bar, the prompts, the browser and the menu
+// dropdowns. Sub-packages implement it. The root keeps a stack of overlays.
+//
+// Routing. A key or mouse message goes to the top overlay first, and the root
+// does not handle it further. Other messages, such as the palette's file ranking
+// results, also go to the top overlay, and the root handles them as usual. Esc
+// is not forwarded: it pops the top overlay, so every overlay is cancelled by
+// Esc. After an Update, the root replaces the top overlay with the one Update
+// returned, or pops it when Update returns nil. It also pops any overlay that
+// reports Active false, so an overlay that is done can say so from Update or
+// from its state.
+//
+// Painting. Every active overlay is drawn after the frame, bottom of the stack
+// first. An overlay covers only the cells it draws. The cells it does not draw
+// keep the frame under them.
+type Overlay interface {
+	// Update handles one key or mouse message. It returns the overlay that
+	// takes this one's place (the same overlay to keep it, nil to close it), and
+	// the command the message starts.
+	Update(msg tea.Msg) (Overlay, tea.Cmd)
+	// Draw paints the overlay over the frame in g. The grid's size is the frame
+	// size.
+	Draw(g *grid.Grid)
+	// Active reports whether the overlay is still open.
+	Active() bool
+}
+
+// KeyPress is one key press in the keymap vocabulary: the key name ("p", "Left",
+// "F10", " ") and the modifiers, a subset of "ctrl", "alt" and "shift". The
+// keymap adapter canonicalizes it.
+type KeyPress struct {
+	Name string
+	Mods []string
+}
+
+// KeyContext names the UI area a key press lands in, as a keymap when-clause.
+type KeyContext string
+
+// The contexts the root model resolves keys in.
+const (
+	KeyContextNormal       KeyContext = "normal"
+	KeyContextFileExplorer KeyContext = "file_explorer"
+)
+
+// Command is a keymap binding resolved to an action and its arguments.
+type Command struct {
+	Action string
+	Args   map[string]any
+}
+
+// Keymap resolves key presses to commands. The app adapter wraps
+// *keymap.Map. The root model never sees keymap types.
+type Keymap interface {
+	Resolve(key KeyPress, ctx KeyContext) (Command, bool)
+}
+
+// Dialogs builds the dialogs the file actions open. The app adapter builds them
+// from internal/ui/dialog and checks the disk for the Save As prompt. Each one
+// answers with a dialog.Result, which the root applies. A nil Dialogs leaves the
+// actions that need a dialog with a notice, and nothing is lost.
+type Dialogs interface {
+	// Unsaved asks what to do with the edits of the tab called name: Save,
+	// Discard or Cancel.
+	Unsaved(name string, tag any) Overlay
+	// SaveAs asks for a path, prefilled with path. Save sends the path in Text.
+	// The dialog asks before it replaces an existing file, and Replace comes back
+	// when the user confirms.
+	SaveAs(path string, tag any) Overlay
+}
+
+// Deps is the constructor input. Editor, Keys and Theme are required. Explorer
+// is nil when the explorer is hidden. The other optional fields are nil until
+// the phase that wires them, and a nil field disables its feature.
+type Deps struct {
+	Editor   EditorState
+	Explorer ExplorerTree // nil when the explorer is hidden
+	// ShowExplorer shows the explorer at startup, with the root expanded. The app
+	// sets it when a folder argument is given. It has no effect without Explorer.
+	ShowExplorer bool
+	// Recents are the recent folders, newest first. The welcome screen lists up to
+	// five of them. Nil leaves the list empty.
+	Recents []string
+	Dialogs Dialogs    // nil: the unsaved and Save As dialogs are not offered
+	Files   FileIndex  // nil: the palette's file mode shows its loading row
+	Ranker  FileRanker // nil: the palette's file rows are not ranked
+	// Commands is the palette's command table, as internal/palette builds it. Nil
+	// means palmodel.Commands(nil): the builtin table with the default keymap's
+	// shortcuts.
+	Commands []palmodel.Entry
+	Ops      FileOps    // nil until P6
+	LSP      LSPSession // nil until M8
+	Markdown MarkdownRenderer
+	Keys     Keymap
+	Theme    theme.Theme
+	// Clock supplies the press times for double-click detection. Nil means time.Now.
+	Clock func() time.Time
+}

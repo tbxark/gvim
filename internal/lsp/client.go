@@ -1,0 +1,289 @@
+// Package lsp is a pure-Go Language Server Protocol client built on
+// go.lsp.dev/jsonrpc2 and go.lsp.dev/protocol.
+//
+// A Client wraps one JSON-RPC connection. Requests take a context.Context and
+// return when the server answers or the context ends. Notifications (initialized,
+// didOpen, didChange, didClose, exit) are writes that do not wait for a reply.
+// Diagnostics arrive on the channel returned by Client.Diagnostics.
+//
+// Only Start launches a process (with os/exec, and only when Config.Command is
+// set). NewClient wraps an existing io.ReadWriteCloser, which is how tests
+// connect the client to a fake server over io.Pipe.
+package lsp
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"sync"
+
+	"go.lsp.dev/jsonrpc2"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
+)
+
+// diagnosticsBuffer is the capacity of the Diagnostics channel.
+const diagnosticsBuffer = 64
+
+// ErrNoCommand is returned by Start when Config.Command is empty.
+var ErrNoCommand = errors.New("lsp: no server command")
+
+// Config describes a language server.
+type Config struct {
+	// Command is the program and its arguments. Only Start reads it; NewClient
+	// ignores it.
+	Command []string
+	// RootURI is the workspace root sent in initialize, for example
+	// "file:///home/u/proj". Empty means no root.
+	RootURI string
+	// Env, when non-nil, is appended to the parent environment of the server
+	// process.
+	Env []string
+}
+
+// Client is a connection to one language server. All methods are safe for
+// concurrent use. Close is safe to call more than once.
+type Client struct {
+	conn    jsonrpc2.Conn
+	server  protocol.Server
+	rwc     *guardedRWC
+	rootURI string
+
+	// ctx is passed to the read loop. Close cancels it after the connection
+	// has stopped.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// diags is closed after the read loop exits, so no send can follow the close.
+	diags chan DiagnosticsEvent
+
+	// proc is set only by Start.
+	proc *exec.Cmd
+
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// Start launches the server in cfg.Command with os/exec and connects to its
+// stdin and stdout. ctx is checked once, before the launch. It does not bind
+// the process lifetime: the server runs until Close (or until it exits).
+func Start(ctx context.Context, cfg Config) (*Client, error) {
+	if len(cfg.Command) == 0 {
+		return nil, ErrNoCommand
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...) //nolint:gosec // the caller chooses the server command
+	if cfg.Env != nil {
+		cmd.Env = append(os.Environ(), cfg.Env...)
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("lsp: stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return nil, fmt.Errorf("lsp: stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return nil, fmt.Errorf("lsp: start %s: %w", cfg.Command[0], err)
+	}
+
+	c := NewClient(procPipes{r: stdout, w: stdin}, cfg)
+	c.proc = cmd
+	return c, nil
+}
+
+// NewClient wraps rwc as a connection to a server and starts the read loop. The
+// caller owns rwc only until Close, which closes it. cfg.Command and cfg.Env are
+// ignored; cfg.RootURI is used by Initialize.
+func NewClient(rwc io.ReadWriteCloser, cfg Config) *Client {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c := &Client{
+		rwc:     &guardedRWC{rwc: rwc},
+		rootURI: cfg.RootURI,
+		ctx:     ctx,
+		cancel:  cancel,
+		diags:   make(chan DiagnosticsEvent, diagnosticsBuffer),
+	}
+	c.conn = jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(c.rwc))
+	c.server = protocol.ServerDispatcher(c.conn)
+
+	h := &clientHandler{c: c, rootURI: cfg.RootURI}
+	c.conn.Go(ctx, protocol.ClientHandler(h, jsonrpc2.MethodNotFoundHandler))
+
+	// The read loop is the only sender on diags. Done closes after the loop has
+	// exited, so closing diags here cannot race with a send.
+	go func() {
+		<-c.conn.Done()
+		close(c.diags)
+	}()
+	return c
+}
+
+// Initialize sends the initialize request with the root from Config.RootURI and
+// the client capabilities this package supports (publishDiagnostics and
+// synchronization). It returns the server's result. Call Initialized after it.
+func (c *Client) Initialize(ctx context.Context) (*protocol.InitializeResult, error) {
+	params := &protocol.InitializeParams{
+		Capabilities: clientCapabilities(),
+	}
+	if c.rootURI != "" {
+		root := uri.URI(c.rootURI)
+		params.WorkspaceFolders = protocol.NewNullable([]protocol.WorkspaceFolder{{URI: root, Name: "root"}})
+		// rootUri is deprecated in LSP 3.16 in favour of workspaceFolders, but
+		// older servers still read only rootUri, so both are sent.
+		params.RootURI = &root //nolint:staticcheck // deprecated, kept for older servers
+	}
+	res, err := c.server.Initialize(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("lsp: initialize: %w", err)
+	}
+	return res, nil
+}
+
+// Initialized sends the initialized notification, which ends the handshake.
+func (c *Client) Initialized(ctx context.Context) error {
+	if err := c.server.Initialized(ctx, &protocol.InitializedParams{}); err != nil {
+		return fmt.Errorf("lsp: initialized: %w", err)
+	}
+	return nil
+}
+
+// DidOpen sends textDocument/didOpen with the full text of the document.
+func (c *Client) DidOpen(ctx context.Context, docURI, languageID string, version int32, text string) error {
+	err := c.server.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        uri.URI(docURI),
+			LanguageID: protocol.LanguageKind(languageID),
+			Version:    version,
+			Text:       text,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("lsp: didOpen %s: %w", docURI, err)
+	}
+	return nil
+}
+
+// DidChange sends textDocument/didChange with the whole new text. The client
+// uses full-document sync, so there is no incremental edit.
+func (c *Client) DidChange(ctx context.Context, docURI string, version int32, text string) error {
+	err := c.server.DidChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
+			Version:                version,
+		},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			&protocol.TextDocumentContentChangeWholeDocument{Text: text},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("lsp: didChange %s: %w", docURI, err)
+	}
+	return nil
+}
+
+// DidClose sends textDocument/didClose.
+func (c *Client) DidClose(ctx context.Context, docURI string) error {
+	err := c.server.DidClose(ctx, &protocol.DidCloseTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
+	})
+	if err != nil {
+		return fmt.Errorf("lsp: didClose %s: %w", docURI, err)
+	}
+	return nil
+}
+
+// Shutdown sends the shutdown request. The server stops processing requests
+// but does not exit until it gets exit. Send Exit, then Close.
+func (c *Client) Shutdown(ctx context.Context) error {
+	if err := c.server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("lsp: shutdown: %w", err)
+	}
+	return nil
+}
+
+// Exit sends the exit notification. The server then terminates.
+func (c *Client) Exit(ctx context.Context) error {
+	if err := c.server.Exit(ctx); err != nil {
+		return fmt.Errorf("lsp: exit: %w", err)
+	}
+	return nil
+}
+
+// Diagnostics returns the channel of publishDiagnostics events. The channel is
+// closed when the connection ends, either after Close or after the server
+// closes its side of the transport.
+//
+// Delivery policy: the channel has capacity 64, and the read loop never blocks
+// on it. When the buffer is full, the oldest queued event is dropped to make room
+// for the newest one. A consumer that falls behind therefore sees the most
+// recent state of each document, not every intermediate version.
+func (c *Client) Diagnostics() <-chan DiagnosticsEvent {
+	return c.diags
+}
+
+// publish queues ev without blocking. Only the read loop calls it, so a
+// single-producer drop-oldest loop always finishes after at most one drop.
+func (c *Client) publish(ev DiagnosticsEvent) {
+	for {
+		select {
+		case c.diags <- ev:
+			return
+		default:
+		}
+		select {
+		case <-c.diags: // drop the oldest queued event
+		default:
+		}
+	}
+}
+
+// Close tears the connection down. It does not send shutdown or exit, so call
+// Shutdown and Exit first for a graceful stop. Close does this:
+//
+//  1. cancels the read loop context and closes the transport. This unblocks
+//     the read loop even when requests are still pending, and pending requests
+//     return an error.
+//  2. waits for the connection to terminate, which closes Diagnostics.
+//  3. for a process started by Start, closes its stdin and waits for it to
+//     exit, killing it after a short grace period.
+//
+// Close is idempotent: the first call does the work and every later call returns
+// the same result. Its error is the transport close error, if any.
+func (c *Client) Close() error {
+	c.closeOnce.Do(func() {
+		c.cancel()
+		_ = c.rwc.Close()
+		c.closeErr = c.conn.Close()
+		if c.proc != nil {
+			waitProcess(c.proc)
+		}
+	})
+	return c.closeErr
+}
+
+// clientCapabilities lists what this client supports: publishDiagnostics with
+// versions, and text document synchronization (full sync only).
+func clientCapabilities() protocol.ClientCapabilities {
+	return protocol.ClientCapabilities{
+		TextDocument: &protocol.TextDocumentClientCapabilities{
+			Synchronization: &protocol.TextDocumentSyncClientCapabilities{},
+			PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{
+				VersionSupport: new(true),
+			},
+		},
+	}
+}
+
+//go:fix inline

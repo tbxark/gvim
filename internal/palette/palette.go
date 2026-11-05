@@ -1,0 +1,365 @@
+// Package palette holds the command palette's entries and the logic that
+// filters and ranks them for a query, following Fresh's command registry
+// (crates/fresh-editor/src/input/command_registry.rs).
+//
+// The builtin command table (commands_gen.go) is generated from the Fresh
+// sources by gen/generate.py. Each entry's Keybinding comes from a keymap.Map,
+// so rebinding a key updates the palette too.
+//
+// The query has four modes, chosen by its first character: no prefix searches
+// files; ">" runs commands; ":" jumps to a line; "#" picks a buffer. Nothing is
+// forced: a query without ">" is a file query. Search ranks only command mode.
+// File search is internal/finder's; line and buffer modes are the editor's, and
+// Search returns nil for them.
+package palette
+
+import (
+	"cmp"
+	"slices"
+	"strings"
+
+	"github.com/tbxark/gvim/internal/fuzzy"
+	"github.com/tbxark/gvim/internal/keymap"
+)
+
+// SourceBuiltin is the Source of every command in the builtin table.
+const SourceBuiltin = "builtin"
+
+// normalContext is the KeyContext name used for the editor's normal mode.
+const normalContext = "Normal"
+
+// Entry is one row of the palette.
+type Entry struct {
+	Name        string // label shown in the list, for example "Add Cursor Above"
+	Keybinding  string // formatted shortcut, for example "⌃⌥↑"; empty when unbound
+	Description string
+	Action      string // Fresh action name, for example "add_cursor_above"
+	Source      string // SourceBuiltin for the builtin table
+	// Disabled is set by SearchIn: the command is listed but cannot run in the
+	// current state. Disabled entries sort after enabled ones.
+	Disabled bool
+
+	contexts       []string // KeyContext names the command is scoped to; empty means any
+	customContexts []string // custom context keys that must be active to show it
+}
+
+// builtinCommand is one generated row of commands_gen.go.
+type builtinCommand struct {
+	Name           string
+	Description    string
+	Action         string
+	Contexts       []string
+	CustomContexts []string
+}
+
+// Commands returns the builtin command entries in palette order. Keybinding is
+// the formatted shortcut of the entry's action in km, or empty when the action
+// has no binding in the normal or global context. A nil km means
+// keymap.Default().
+//
+// Bindings scoped to other contexts are not shown: the palette runs in the
+// normal editor context, so a key that only works in, say, a composite buffer
+// ("q" for Close Buffer) does not appear in its column.
+func Commands(km *keymap.Map) []Entry {
+	if km == nil {
+		km = keymap.Default()
+	}
+	chords := shortcutChords(km)
+	out := make([]Entry, 0, len(builtinCommands))
+	for _, c := range builtinCommands {
+		e := Entry{
+			Name:           c.Name,
+			Description:    c.Description,
+			Action:         c.Action,
+			Source:         SourceBuiltin,
+			contexts:       c.Contexts,
+			customContexts: c.CustomContexts,
+		}
+		if chord, ok := chords[c.Action]; ok {
+			e.Keybinding = FormatChord(chord)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// shortcutChords maps each action to the chord the palette shows for it: the
+// first binding in the normal context, else the first in the global context.
+// Bindings in any other context are skipped.
+func shortcutChords(km *keymap.Map) map[string]string {
+	normal := make(map[string]string)
+	global := make(map[string]string)
+	for _, b := range km.Bindings() {
+		switch b.When {
+		case keymap.ContextNormal:
+			if _, ok := normal[b.Action]; !ok {
+				normal[b.Action] = b.Chord
+			}
+		case keymap.ContextGlobal:
+			if _, ok := global[b.Action]; !ok {
+				global[b.Action] = b.Chord
+			}
+		}
+	}
+	for action, chord := range global {
+		if _, ok := normal[action]; !ok {
+			normal[action] = chord
+		}
+	}
+	return normal
+}
+
+// Mode is the kind of search the palette runs for a query.
+type Mode int
+
+// The palette modes. ModeFile is the default when the query has no prefix.
+const (
+	ModeFile Mode = iota
+	ModeCommand
+	ModeLine
+	ModeBuffer
+)
+
+// String returns a short name for the mode, for logs and tests.
+func (m Mode) String() string {
+	switch m {
+	case ModeCommand:
+		return "command"
+	case ModeLine:
+		return "line"
+	case ModeBuffer:
+		return "buffer"
+	}
+	return "file"
+}
+
+// ParseQuery splits a raw palette query into its mode and the text to search
+// for. The prefix character is removed; spaces in the text are kept.
+func ParseQuery(query string) (Mode, string) {
+	switch {
+	case strings.HasPrefix(query, ">"):
+		return ModeCommand, query[1:]
+	case strings.HasPrefix(query, ":"):
+		return ModeLine, query[1:]
+	case strings.HasPrefix(query, "#"):
+		return ModeBuffer, query[1:]
+	}
+	return ModeFile, query
+}
+
+// State is the editor state the availability rules read. It mirrors the
+// BufferCapabilities and flags the legacy palette consults. The zero value
+// describes no buffer at all.
+type State struct {
+	TextBuffer      bool // the active buffer holds the user's text (not a terminal or panel)
+	Editable        bool // the active buffer accepts edits
+	Modified        bool // the active buffer has unsaved changes
+	HasPath         bool // the active buffer is backed by a file
+	AnyModified     bool // some buffer has unsaved changes
+	HasLSPConfig    bool // the language has an LSP server configured
+	SelectionActive bool // a selection is active
+}
+
+// DefaultState describes a clean, file-backed text buffer with no LSP config and
+// no selection. It is the state of the palette parity scenarios.
+func DefaultState() State {
+	return State{TextBuffer: true, Editable: true, HasPath: true}
+}
+
+// Search returns the entries that match a raw query, best match first, for the
+// DefaultState. It handles only ModeCommand and returns nil for other modes.
+func Search(entries []Entry, query string) []Entry {
+	return SearchIn(entries, query, DefaultState())
+}
+
+// SearchIn is Search for an explicit editor state. It hides commands whose
+// custom contexts are not active, marks the rest Disabled from st, and ranks
+// them the way the legacy palette does.
+func SearchIn(entries []Entry, query string, st State) []Entry {
+	mode, text := ParseQuery(query)
+	if mode != ModeCommand {
+		return nil
+	}
+	visible := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if len(e.customContexts) > 0 {
+			continue // custom contexts are never active in this port
+		}
+		e.Disabled = !available(e, st)
+		visible = append(visible, e)
+	}
+	return Filter(visible, text)
+}
+
+// available reports whether a command can run in the normal editor context with
+// the given state. It follows is_available and the buffer checks in
+// command_registry.rs.
+func available(e Entry, st State) bool {
+	if len(e.contexts) > 0 && !slices.Contains(e.contexts, normalContext) {
+		return false
+	}
+	switch e.Action {
+	case "save":
+		return st.TextBuffer && st.Modified
+	case "save_as":
+		return st.TextBuffer
+	case "save_all":
+		return st.AnyModified
+	case "revert", "reload_with_encoding":
+		return st.TextBuffer && st.HasPath
+	case "lsp_restart", "lsp_toggle_for_buffer":
+		return st.HasLSPConfig
+	case "find_in_selection":
+		return st.SelectionActive
+	}
+	if editingActions[e.Action] {
+		return st.Editable
+	}
+	return true
+}
+
+// editingActions are the actions that change buffer text; they need an
+// editable buffer. The set is Fresh's is_buffer_mutating_action.
+var editingActions = map[string]bool{
+	"undo": true, "redo": true, "cut": true, "paste": true,
+	"delete_line": true, "delete_word_backward": true, "delete_word_forward": true,
+	"delete_to_line_end": true, "transpose_chars": true, "to_upper_case": true,
+	"to_lower_case": true, "sort_lines": true, "open_line": true,
+	"duplicate_line": true, "duplicate_line_above": true, "toggle_comment": true,
+	"dedent_selection": true, "replace": true, "query_replace": true,
+	"format_buffer": true, "trim_trailing_whitespace": true,
+	"ensure_final_newline": true, "lsp_rename": true, "shell_command_replace": true,
+}
+
+// Filter ranks entries against text, the query without its mode prefix.
+//
+// Each entry matches on its name first; if the name does not match and text is
+// not empty, it matches on its description. Results are sorted by, in order:
+// enabled before disabled; name matches before description matches; an exact
+// name match (case-insensitive, trimmed text) before other name matches; higher
+// match score first; then name in byte order. With an empty text every entry
+// matches, sorted only by disabled state and name.
+func Filter(entries []Entry, text string) []Entry {
+	type candidate struct {
+		e     Entry
+		kind  int // 0: name match, 1: description match
+		exact int // 0: exact name match, 1: otherwise
+		score int
+	}
+	trimmed := strings.TrimSpace(text)
+	pat := fuzzy.NewPattern(text)
+	var hits []candidate
+	for _, e := range entries {
+		if score, _, ok := pat.Match(e.Name); ok {
+			exact := 1
+			if trimmed != "" && asciiEqualFold(e.Name, trimmed) {
+				exact = 0
+			}
+			hits = append(hits, candidate{e: e, kind: 0, exact: exact, score: score})
+			continue
+		}
+		if text == "" {
+			continue
+		}
+		if score, _, ok := pat.Match(e.Description); ok {
+			hits = append(hits, candidate{e: e, kind: 1, exact: 1, score: score})
+		}
+	}
+	hasQuery := text != ""
+	slices.SortStableFunc(hits, func(a, b candidate) int {
+		if c := cmp.Compare(boolInt(a.e.Disabled), boolInt(b.e.Disabled)); c != 0 {
+			return c
+		}
+		if hasQuery {
+			if c := cmp.Compare(a.kind, b.kind); c != 0 {
+				return c
+			}
+			if c := cmp.Compare(a.exact, b.exact); c != 0 {
+				return c
+			}
+			if c := cmp.Compare(b.score, a.score); c != 0 {
+				return c
+			}
+		}
+		return cmp.Compare(a.e.Name, b.e.Name)
+	})
+	out := make([]Entry, len(hits))
+	for i, h := range hits {
+		out[i] = h.e
+	}
+	return out
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// asciiEqualFold compares two strings with ASCII case folding only, matching
+// Rust's eq_ignore_ascii_case.
+func asciiEqualFold(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range len(a) {
+		x, y := a[i], b[i]
+		if 'A' <= x && x <= 'Z' {
+			x += 'a' - 'A'
+		}
+		if 'A' <= y && y <= 'Z' {
+			y += 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
+}
+
+// modifierGlyphs are the macOS symbols the legacy palette shows, in the order
+// it writes them: ctrl, alt, shift.
+var modifierGlyphs = map[string]string{"ctrl": "⌃", "alt": "⌥", "shift": "⇧"}
+
+var keyGlyphs = map[string]string{
+	"up":        "↑",
+	"down":      "↓",
+	"left":      "←",
+	"right":     "→",
+	"enter":     "↩",
+	"backspace": "⌫",
+	"delete":    "⌦",
+	"escape":    "⎋",
+	"tab":       "⇥",
+	"space":     "Space",
+	"pageup":    "⇞",
+	"pagedown":  "⇟",
+	"home":      "↖",
+	"end":       "↘",
+}
+
+// FormatChord renders a canonical chord, such as "ctrl+alt+up", with the
+// symbols the palette uses: "⌃⌥↑". Single letters are upper-cased. An unknown
+// modifier returns the chord unchanged.
+func FormatChord(chord string) string {
+	parts := strings.Split(chord, "+")
+	key := parts[len(parts)-1]
+	var b strings.Builder
+	for _, m := range parts[:len(parts)-1] {
+		g, ok := modifierGlyphs[m]
+		if !ok {
+			return chord
+		}
+		b.WriteString(g)
+	}
+	switch {
+	case keyGlyphs[key] != "":
+		b.WriteString(keyGlyphs[key])
+	case len([]rune(key)) == 1:
+		b.WriteString(strings.ToUpper(key))
+	default:
+		b.WriteString(key)
+	}
+	return b.String()
+}
