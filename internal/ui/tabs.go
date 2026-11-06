@@ -1,32 +1,34 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/icons"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // Tab strip glyphs and labels (spec section 3). The modified marker is a dot
-// before the name, the exit glyph closes the tab, and the plus opens a new one.
+// before the name. The close and new-tab buttons come from the icon set (package
+// icons): one cell each, so the tab widths do not depend on the mode.
 const (
-	previewSuffix   = " (preview)" // the label of a preview tab
-	modifiedMark    = "●"          // before the name of a modified tab
-	tabCloseGlyph   = "×"          // closes the tab when clicked
-	tabNewGlyph     = "+"          // opens a new untitled tab
-	stripMoreBefore = "<"          // the left marker: tabs are scrolled off on the left
-	stripMoreAfter  = ">"          // the right marker: tabs are scrolled off on the right
+	previewSuffix = " (preview)" // the label of a preview tab
+	modifiedMark  = "●"          // before the name of a modified tab
 )
 
-// stripLabel is the name of one tab as the strip shows it: the modified marker
-// before the name, and " (preview)" after the name for a preview tab. An unnamed
-// tab reads as noNameLabel.
+// stripLabel is the name of one tab as the strip shows it: the file icon (when the
+// root gave one) before the name, the modified marker before that, and " (preview)"
+// after the name for a preview tab. An unnamed tab reads as noNameLabel.
 func stripLabel(t TabInfo) string {
 	base := strings.TrimSuffix(t.Name, previewSuffix)
 	if base == "" {
 		base = noNameLabel
+	}
+	if t.Icon != "" {
+		base = t.Icon + " " + base
 	}
 	if t.Modified {
 		base = modifiedMark + " " + base
@@ -35,6 +37,21 @@ func stripLabel(t TabInfo) string {
 		base += previewSuffix
 	}
 	return base
+}
+
+// stripTabs is the editor's tabs with the file type icon of the icon set filled in,
+// for the strip to place and draw. Plain mode has no file icons, so the tabs pass
+// through as they are.
+func (m *Model) stripTabs() []TabInfo {
+	tabs := m.ed.Tabs()
+	if m.view.icons.FileIcon("", false, false) == "" {
+		return tabs
+	}
+	out := slices.Clone(tabs)
+	for i := range out {
+		out[i].Icon = m.view.icons.FileIcon(strings.TrimSuffix(out[i].Name, previewSuffix), false, false)
+	}
+	return out
 }
 
 // strip is the tab strip of one row, placed by placeStrip. Its runs are both
@@ -79,17 +96,17 @@ func tabStarts(tabs []TabInfo) (starts []int, total int) {
 // a tab index: the window starts at that tab. placeStrip clamps it so the window
 // never ends past the last tab, and returns the clamped value in strip.first.
 // The painter and the hit test both read the runs, so they cannot drift apart.
-func placeStrip(x0, w int, tabs []TabInfo, first int) strip {
-	s := placeTabs(x0, w, tabs, first)
+func placeStrip(x0, w int, tabs []TabInfo, first int, ic icons.Mode) strip {
+	s := placeTabs(x0, w, tabs, first, ic)
 	if plusX := w - 1; plusX >= x0 {
-		s.runs = append(s.runs, run{x: plusX, w: 1, text: tabNewGlyph, kind: hitTabNew, index: 0})
+		s.runs = append(s.runs, run{x: plusX, w: 1, text: ic.Glyph(icons.New), kind: hitTabNew, index: 0})
 	}
 	return s
 }
 
 // placeTabs places the tabs and their markers, without the "+". It is placeStrip
 // for everything but the pinned plus.
-func placeTabs(x0, w int, tabs []TabInfo, first int) strip {
+func placeTabs(x0, w int, tabs []TabInfo, first int, ic icons.Mode) strip {
 	s := strip{active: -1}
 	for i, t := range tabs {
 		if t.Active {
@@ -104,7 +121,7 @@ func placeTabs(x0, w int, tabs []TabInfo, first int) strip {
 	avail := plusX - x0 // the cells left of the "+"
 	starts, total := tabStarts(tabs)
 	if total <= avail {
-		s.runs = tabRuns(tabs, x0)
+		s.runs = tabRuns(tabs, x0, ic)
 		return s
 	}
 
@@ -120,16 +137,16 @@ func placeTabs(x0, w int, tabs []TabInfo, first int) strip {
 
 	before, after := " ", " "
 	if s.before {
-		before = stripMoreBefore
+		before = ic.Glyph(icons.ScrollLeft)
 	}
 	if s.after {
-		after = stripMoreAfter
+		after = ic.Glyph(icons.ScrollRight)
 	}
 	s.runs = append(s.runs,
 		run{x: x0, w: 1, text: before, kind: hitTabScrollBefore},
 		run{x: x0 + avail - 1, w: 1, text: after, kind: hitTabScrollAfter},
 	)
-	for _, r := range tabRuns(tabs, 0) {
+	for _, r := range tabRuns(tabs, 0, ic) {
 		if c, ok := clipRunTo(r, off, off+window); ok {
 			c.x = x0 + 1 + (c.x - off)
 			s.runs = append(s.runs, c)
@@ -139,8 +156,8 @@ func placeTabs(x0, w int, tabs []TabInfo, first int) strip {
 }
 
 // tabRuns lays the tabs out from column x0 with no window: each tab is the name
-// with its blanks, the "×", and the trailing blank.
-func tabRuns(tabs []TabInfo, x0 int) []run {
+// with its blanks, the close button, and the trailing blank.
+func tabRuns(tabs []TabInfo, x0 int, ic icons.Mode) []run {
 	var runs []run
 	p := x0
 	for i, t := range tabs {
@@ -148,7 +165,7 @@ func tabRuns(tabs []TabInfo, x0 int) []run {
 		nw := ansi.StringWidth(name)
 		runs = append(runs,
 			run{x: p, w: nw, text: name, kind: hitTab, index: i},
-			run{x: p + nw, w: 1, text: tabCloseGlyph, kind: hitTabClose, index: i},
+			run{x: p + nw, w: 1, text: ic.Glyph(icons.Close), kind: hitTabClose, index: i},
 			run{x: p + nw + 1, w: 1, text: " ", kind: hitTab, index: i},
 		)
 		p += nw + 2

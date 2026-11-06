@@ -4,6 +4,8 @@ import (
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/ui/icons"
 )
 
 // Settings is the effective configuration that open_settings lists. The app fills
@@ -20,6 +22,10 @@ type Settings struct {
 	MenuBar             bool
 	ExplorerShowHidden  bool
 	ExplorerShowIgnored bool
+	UIIcons             string // the ui_icons setting: "auto", "plain" or "nerd"; empty reads as auto
+	UIIconsFont         string // the ui_icons_font setting
+	IconsMode           string // the icon set in use, "plain" or "nerd", after "auto" is resolved
+	IconsWhy            string // why that set: the setting, the font or the terminal
 	ConfigFile          string
 }
 
@@ -36,8 +42,20 @@ func settingsRows(s Settings) []listRow {
 		{left: "show_menu_bar", right: onOff(s.MenuBar)},
 		{left: "explorer_show_hidden", right: onOff(s.ExplorerShowHidden)},
 		{left: "explorer_show_ignored", right: onOff(s.ExplorerShowIgnored)},
+		{left: settingsIconsKey, right: iconsSettingText(s, iconModeOf(s))},
+		{left: "ui_icons_font", right: orNone(s.UIIconsFont)},
 		{left: "config_file", right: orNone(s.ConfigFile)},
 	}
+}
+
+// settingsIconsKey is the row of the icon setting. Choosing it opens the icon preview
+// instead of the config file.
+const settingsIconsKey = "ui_icons"
+
+// iconModeOf is the icon set in use. An empty or unknown name is plain.
+func iconModeOf(s Settings) icons.Mode {
+	mode, _ := icons.Parse(s.IconsMode)
+	return mode
 }
 
 // orNone is s, or "(none)" when s is empty.
@@ -56,11 +74,17 @@ func onOff(b bool) string {
 	return "off"
 }
 
-// openSettings shows the effective settings. Choosing any row, or pressing Enter,
-// opens the user config file: it is the only way to edit settings for now.
+// openSettings shows the effective settings. Choosing a row, or pressing Enter,
+// opens the user config file: it is the only way to edit settings for now. The
+// ui_icons row opens the icon preview instead.
 func (m *Model) openSettings() {
-	v := newListView("Settings", settingsRows(m.util.settings), m.listChrome(), func(v *listView, _ listRow) tea.Cmd {
+	v := newListView("Settings", settingsRows(m.util.settings), m.listChrome(), func(v *listView, r listRow) tea.Cmd {
 		v.active = false
+		if r.left == settingsIconsKey {
+			// The list is still on the stack while it runs, so the preview opens from
+			// a message, after the stack has popped the list.
+			return func() tea.Msg { return openIconPreviewMsg{} }
+		}
 		m.openConfigFile()
 		return nil
 	})

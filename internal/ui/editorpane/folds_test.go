@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/internal/fold"
+	"github.com/tbxark/gvim/internal/ui/icons"
 )
 
 // foldFixture is a function with a body of two lines, and a plain line after it.
@@ -32,6 +33,25 @@ func TestFoldMarkersShowOnTheFoldStartLine(t *testing.T) {
 			}
 			if got := cellAt(t, g, 5, 1).Text; got != " " {
 				t.Errorf("body line marker = %q, want none", got)
+			}
+		})
+	}
+}
+
+func TestFoldMarkersUseTheIconSet(t *testing.T) {
+	tests := []struct {
+		name   string
+		folded map[int]bool
+		want   string
+	}{
+		{"expanded", nil, icons.Nerd.Glyph(icons.FoldOpen)},
+		{"collapsed", map[int]bool{0: true}, icons.Nerd.Glyph(icons.FoldClosed)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := Pane{Doc: foldFixture(tc.folded), Icons: icons.Nerd}.Render(20, 5)
+			if got := cellAt(t, g, 5, 0).Text; got != tc.want {
+				t.Errorf("marker = %q, want %q", got, tc.want)
 			}
 		})
 	}

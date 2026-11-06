@@ -1,7 +1,6 @@
 package app
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/tbxark/gvim/internal/config"
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/keymap"
 	"github.com/tbxark/gvim/internal/theme"
@@ -124,11 +124,11 @@ func TestPluginDirIsPluginsUnderTheUserConfigDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, err := os.UserConfigDir()
+	base, err := config.Dir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(base, "gvim", "plugins"); got != want {
+	if want := filepath.Join(base, "plugins"); got != want {
 		t.Fatalf("pluginDir() = %q, want %q", got, want)
 	}
 }

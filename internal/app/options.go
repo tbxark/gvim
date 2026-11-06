@@ -33,7 +33,7 @@ type Options struct {
 	// directory. A non-empty root is also recorded in the recent list.
 	Root string
 	// Config is the user config file path. Empty means the default location,
-	// os.UserConfigDir()/gvim/config.json. A non-empty value replaces that
+	// ~/.config/gvim/config.json (config.Dir). A non-empty value replaces that
 	// default user file. The project file (.gvim/config.json at or above Root)
 	// still applies on top of it. A missing file is an error that names the path,
 	// so a typo does not silently drop the default user file.

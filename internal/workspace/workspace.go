@@ -2,7 +2,7 @@
 // roots used recently. A root is a directory: the file explorer shows it, and
 // the finder and open-file paths resolve against it.
 //
-// The recent list is JSON at gvim/recent.json under os.UserConfigDir. Only the
+// The recent list is JSON at gvim/recent.json under config.Dir. Only the
 // standard library is used.
 package workspace
 
@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/tbxark/gvim/internal/config"
 )
 
 // ErrNotDirectory is returned by Open and Switch when the path is not a
@@ -108,11 +110,11 @@ type recentFile struct {
 
 // recentPath returns the location of the recent list in the user config dir.
 func recentPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return "", fmt.Errorf("workspace: config dir: %w", err)
 	}
-	return filepath.Join(dir, "gvim", "recent.json"), nil
+	return filepath.Join(dir, "recent.json"), nil
 }
 
 // load reads the stored root paths. A missing file is an empty list.

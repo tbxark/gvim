@@ -28,6 +28,7 @@ import (
 	"github.com/tbxark/gvim/internal/buffer"
 	"github.com/tbxark/gvim/internal/syntax"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/icons"
 )
 
 // Document is the read-only view the pane paints. ui.Document has the same
@@ -92,6 +93,8 @@ type Pane struct {
 	HideTabArrows bool
 	// HideFoldMarkers draws no fold arrows. The zero value shows them.
 	HideFoldMarkers bool
+	// Icons picks the glyphs of the fold arrows. The zero value is the plain set.
+	Icons icons.Mode
 	// HideVerticalScrollbar leaves the scrollbar column blank: the thumb and the track
 	// are not drawn, and the change marks still are. The column is kept, so the text
 	// keeps its width.
@@ -173,8 +176,6 @@ const (
 	caretBarGlyph   = "▏" // the caret of CaretBar: a thin bar at the left edge of the cell
 	thumbHGlyph     = "━" // horizontal scrollbar thumb
 	trackHGlyph     = "─" // horizontal scrollbar track
-	foldOpen        = "▾" // fold marker of an expanded fold
-	foldClosed      = "▸" // fold marker of a collapsed fold
 )
 
 // GutterWidth is the width of the line-number gutter for a document with lines
@@ -225,6 +226,7 @@ type frame struct {
 	// The hidden parts of the pane (see Pane), and the caret shape.
 	noTabArrows bool
 	noFolds     bool
+	icons       icons.Mode
 	noVBar      bool
 	noHBar      bool
 	caretShape  CaretShape
@@ -256,6 +258,7 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 
 		noTabArrows: p.HideTabArrows,
 		noFolds:     p.HideFoldMarkers,
+		icons:       p.Icons,
 		noVBar:      p.HideVerticalScrollbar,
 		noHBar:      p.HideHorizontalScrollbar,
 		caretShape:  p.CaretShape,

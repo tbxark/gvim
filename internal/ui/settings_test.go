@@ -20,6 +20,10 @@ func testSettings() Settings {
 		MenuBar:             true,
 		ExplorerShowHidden:  false,
 		ExplorerShowIgnored: true,
+		UIIcons:             "nerd",
+		UIIconsFont:         "JetBrainsMono Nerd Font Mono",
+		IconsMode:           "nerd",
+		IconsWhy:            "set by ui_icons",
 		ConfigFile:          "/home/u/.config/gvim/config.json",
 	}
 }
@@ -35,9 +39,30 @@ func TestSettingsRowsShowTheEffectiveValues(t *testing.T) {
 		"show_menu_bar=on",
 		"explorer_show_hidden=off",
 		"explorer_show_ignored=on",
+		"ui_icons=nerd",
+		"ui_icons_font=JetBrainsMono Nerd Font Mono",
 		"config_file=/home/u/.config/gvim/config.json",
 	}
 	sameLines(t, "rows", rowsOf(settingsRows(testSettings())), want)
+}
+
+func TestSettingsRowsShowWhatAutoResolvedTo(t *testing.T) {
+	tests := []struct {
+		name string
+		s    Settings
+		want string
+	}{
+		{"unset reads as auto", Settings{}, "auto -> plain"},
+		{"auto found nerd", Settings{UIIcons: "auto", IconsMode: "nerd"}, "auto -> nerd"},
+		{"plain as written", Settings{UIIcons: "plain", IconsMode: "plain"}, "plain"},
+	}
+	for _, tt := range tests {
+		for _, row := range settingsRows(tt.s) {
+			if row.left == "ui_icons" && row.right != tt.want {
+				t.Errorf("%s: ui_icons row = %q, want %q", tt.name, row.right, tt.want)
+			}
+		}
+	}
 }
 
 func TestSettingsRowsSayWhenThereIsNoConfigFile(t *testing.T) {

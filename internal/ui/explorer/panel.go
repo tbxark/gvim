@@ -20,6 +20,7 @@ import (
 
 	tree "github.com/tbxark/gvim/internal/explorer"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/icons"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -49,6 +50,9 @@ type Geometry struct {
 	// absolute path. A row whose path is in Marks shows the letter in the column
 	// before the border. Nil shows no marks.
 	Marks map[string]rune
+	// Icons picks the glyphs of the title buttons and of the expand marks. The zero
+	// value is the plain set.
+	Icons icons.Mode
 }
 
 // Rows of the panel. The title is row 1 and the tree body starts at row 2
@@ -68,10 +72,10 @@ type (
 		Path    string
 		Preview bool
 	}
-	// ReloadMsg asks the root to reload the tree from disk: the "⟳" button and
+	// ReloadMsg asks the root to reload the tree from disk: the refresh button and
 	// Ctrl+R.
 	ReloadMsg struct{}
-	// CloseMsg asks the root to hide the panel: the "×" button.
+	// CloseMsg asks the root to hide the panel: the close button.
 	CloseMsg struct{}
 	// FocusMsg asks the root to give the panel keyboard focus. A press on the
 	// panel's title, border or empty body sends it.
@@ -204,7 +208,7 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 	body := style.Cell(p.styles.Explorer)
 	head := style.Cell(p.styles.ExplorerTitle)
 	dst.Fill(0, g.Width, titleRow, head)
-	dst.Put(0, titleRow, g.Width, HeaderFor(g.Width).Text, head)
+	dst.Put(0, titleRow, g.Width, HeaderFor(g.Width, g.Icons).Text, head)
 
 	rows := p.tree.Rows()
 	off := p.tree.ScrollOffset()
@@ -229,7 +233,7 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 			st := p.rowStyle(r, body)
 			dst.Fill(1, g.Width-1, y, st)
 			marker := g.Focused && hasSel && r.Path == sel.Path
-			drawRow(dst, r, y, g.Width, over, marker, g.Marks[r.Path], st, accent)
+			drawRow(dst, r, y, g.Width, over, marker, g.Marks[r.Path], g.Icons, st, accent)
 		}
 		if over {
 			st := track
@@ -253,33 +257,43 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 // cells per depth level. Names stop before the scrollbar column when over is set.
 // A non-zero mark is the git status letter, drawn in the last column before the
 // border, and the name stops one cell before it.
-func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark rune, st grid.Style, accent color.Color) {
+func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark rune, ic icons.Mode, st grid.Style, accent color.Color) {
 	end := width - 1
 	if over {
 		end--
 	}
+	// The name starts at column 3 plus two cells per depth level. A set with file
+	// icons draws the icon there and moves the name two cells right.
+	nameX := 3 + 2*r.Depth
+	fileIcon := ic.FileIcon(r.Name, r.IsDir, r.Expanded)
+	if fileIcon != "" {
+		nameX += 2
+	}
 	if mark != 0 {
-		if x := end - 1; x > 3+2*r.Depth {
-			dst.Set(x, y, string(mark), st)
+		if x := end - 1; x > nameX {
+			dst.Set(x, y, ic.GitMark(mark), st)
 			end = x - 1
 		}
 	}
 	icon := " "
 	if r.IsDir {
-		icon = "▶"
+		icon = ic.Glyph(icons.DirCollapsed)
 		if r.Expanded {
-			icon = "▼"
+			icon = ic.Glyph(icons.DirExpanded)
 		}
 	}
 	if x := 1 + 2*r.Depth; x < end {
 		dst.Set(x, y, icon, st)
+	}
+	if fileIcon != "" && nameX-2 < end {
+		dst.Set(nameX-2, y, fileIcon, st)
 	}
 	if marker && 1 < end {
 		bar := st
 		bar.FG = accent
 		dst.Set(1, y, "▌", bar)
 	}
-	dst.Put(3+2*r.Depth, y, end, r.Name, st)
+	dst.Put(nameX, y, end, r.Name, st)
 }
 
 // bodyRows is the number of tree rows the body shows.
@@ -321,7 +335,7 @@ func (p Panel) hitAt(g Geometry, x, y int) target {
 		return target{}
 	}
 	if y == titleRow {
-		h := HeaderFor(g.Width)
+		h := HeaderFor(g.Width, g.Icons)
 		switch x {
 		case h.Reload:
 			return target{zone: zoneReload}

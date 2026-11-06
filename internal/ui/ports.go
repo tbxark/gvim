@@ -88,6 +88,9 @@ type TabInfo struct {
 	Modified bool
 	Preview  bool
 	Active   bool
+	// Icon is the file type icon the strip draws before the name. The root fills it
+	// when the icon set has file icons; an editor leaves it empty.
+	Icon string
 }
 
 // ExplorerTree is the subset of *explorer.Tree used by the explorer panel. The

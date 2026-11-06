@@ -59,6 +59,9 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.adoptProject(msg), true
 	case shellDone:
 		return m.finishShell(msg), true
+	case openIconPreviewMsg:
+		m.openIconPreview()
+		return nil, true
 	}
 	return nil, false
 }

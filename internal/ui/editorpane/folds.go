@@ -3,6 +3,7 @@ package editorpane
 import (
 	"github.com/tbxark/gvim/internal/fold"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/icons"
 )
 
 // Folder is implemented by a Document that has indentation folds, as
@@ -90,9 +91,9 @@ func (f frame) paintFoldMarker(g *grid.Grid, i, y, end int) {
 	if !ok || f.noFolds {
 		return
 	}
-	mark := foldOpen
+	mark := f.icons.Glyph(icons.FoldOpen)
 	if collapsed {
-		mark = foldClosed
+		mark = f.icons.Glyph(icons.FoldClosed)
 	}
 	if f.gutter > 0 {
 		g.Set(f.gutter-1, y, mark, f.styles.Gutter)

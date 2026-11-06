@@ -12,6 +12,7 @@ import (
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/ui/explorer"
+	"github.com/tbxark/gvim/internal/ui/icons"
 	"github.com/tbxark/gvim/internal/ui/menubar"
 	"github.com/tbxark/gvim/internal/ui/prompt"
 	"github.com/tbxark/gvim/internal/ui/style"
@@ -40,6 +41,7 @@ type ViewOptions struct {
 	MouseCapture            bool
 	MouseHover              bool
 	ScrollSync              bool
+	UIIcons                 string // "plain" or "nerd"; empty and unknown names are plain
 }
 
 // DefaultViewOptions returns the settings gvim starts with when no config sets them.
@@ -68,6 +70,7 @@ type viewState struct {
 	mouseCapture, mouseHover      bool
 	scrollSync                    bool
 	debug                         bool // the status row shows the highlight ranges
+	icons                         icons.Mode
 }
 
 // newViewState returns the state for the starting options o.
@@ -76,7 +79,9 @@ func newViewState(o ViewOptions) viewState {
 	if cursor == "" {
 		cursor = cursorBlock
 	}
+	mode, _ := icons.Parse(o.UIIcons) // an unknown name is plain
 	return viewState{
+		icons:        mode,
 		tabBar:       o.ShowTabBar,
 		statusBar:    o.ShowStatusBar,
 		promptLine:   o.ShowPromptLine,
@@ -387,6 +392,7 @@ func (m *Model) viewLayout(in *layoutInput) {
 	in.hideStatus = in.hideStatus || !m.view.statusBar
 	in.showPromptLine = m.view.promptLine
 	in.hideVScroll = !m.view.vScroll
+	in.iconMode = m.view.icons
 	if doc := m.ed.Active(); doc != nil {
 		// The gutter of the layout is the focused pane's, so the layout follows the
 		// active document.
@@ -405,6 +411,7 @@ func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
 	p.VisibleWhitespace = editor.OverrideOr(s.Whitespace, m.view.whitespace)
 	p.IndentGuides = s.IndentGuidesOn()
 	p.HideFoldMarkers = !s.FoldIndicatorsOn()
+	p.Icons = m.view.icons
 	p.HideTabArrows = !s.TabIndicatorsOn()
 	p.HideVerticalScrollbar = !m.view.vScroll
 	p.HideHorizontalScrollbar = !m.view.hScroll

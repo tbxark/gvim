@@ -7,6 +7,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/ui/editorpane"
+	expanel "github.com/tbxark/gvim/internal/ui/explorer"
+	"github.com/tbxark/gvim/internal/ui/icons"
 )
 
 // Geometry from the responsive spec (blueprint section 4). The painter and the
@@ -24,7 +26,6 @@ const (
 	explorerMaxWidth     = 60 // spec section 3: the drag maximum
 	explorerDefaultWidth = 32 // spec section 3: the automatic width
 	explorerEditorMin    = 20 // the editor keeps this many columns when the frame allows
-	explorerTitleNeed    = 21 // narrowest width at which the title has its "─" fill
 
 	// The explorer panel's own rows. They do not move when the menu bar is hidden:
 	// the title is row 1 and the tree body starts at row 2 (explorer.Panel).
@@ -62,13 +63,14 @@ type layoutInput struct {
 	welcome          bool // no tab is open, so the welcome screen replaces the editor
 	recents          []string
 	status           statusView
-	hideMenuBar      bool // the menu row is not drawn; the tab strip takes row 0
-	hideStatus       bool // a suggestion list or the file browser is open
-	hideLineNumbers  bool // the gutter is not drawn
-	dockOpen         bool // the terminal dock is shown (dock.go); it takes rows under the body
-	hideTabBar       bool // the tab strip row is not drawn; the body takes it
-	showPromptLine   bool // the prompt row is drawn under the status row
-	hideVScroll      bool // the vertical scrollbar is not drawn, so its column is text
+	hideMenuBar      bool       // the menu row is not drawn; the tab strip takes row 0
+	hideStatus       bool       // a suggestion list or the file browser is open
+	hideLineNumbers  bool       // the gutter is not drawn
+	dockOpen         bool       // the terminal dock is shown (dock.go); it takes rows under the body
+	hideTabBar       bool       // the tab strip row is not drawn; the body takes it
+	showPromptLine   bool       // the prompt row is drawn under the status row
+	hideVScroll      bool       // the vertical scrollbar is not drawn, so its column is text
+	iconMode         icons.Mode // the glyphs of the explorer buttons and the tab buttons
 
 	// The split tree and the state of each leaf in reading order (split.go). A nil
 	// tree is one pane that shows lines. maximized gives the focused leaf the whole
@@ -147,9 +149,8 @@ type layout struct {
 	ex           int
 	exBottom     int // bottom border row, the last body row
 	exRows       int
-	exTitle      string // header row, exactly ex cells
-	exReloadX    int    // column of "⟳", -1 when the button is not drawn
-	exCloseX     int    // column of "×", -1 when the button is not drawn
+	exReloadX    int // column of the refresh button, -1 when the button is not drawn
+	exCloseX     int // column of the close button, -1 when the button is not drawn
 
 	// Editor area (section 4.2). The panes fill editorX..w-1 and bodyTop..bodyBottom.
 	// The gutter, textX, textW and scrollbar are those of the focused pane, which for
@@ -232,7 +233,7 @@ func computeLayout(w, h int, in layoutInput) layout {
 	if l.menuOn {
 		l.menuRuns = menuRuns(in.explorerFocus)
 	}
-	l.strip = placeStrip(l.editorX, w, in.tabs, in.tabFirst)
+	l.strip = placeStrip(l.editorX, w, in.tabs, in.tabFirst, in.iconMode)
 	if in.welcome {
 		l.welcomeOn = true
 		l.welcome = welcomeLines(l.editorX, max(w-l.editorX, 0), l.bodyTop, bodyRows, in.recents)
@@ -294,24 +295,14 @@ func (l *layout) setExplorer(in layoutInput) {
 	l.ex = explorerCols(l.w, in.explorerOverride)
 	l.exBottom = l.bodyBottom
 	l.exRows = in.explorerRows
-	l.exTitle = explorerTitle(l.ex)
-	l.exReloadX = buttonColumn(l.exTitle, "⟳")
-	l.exCloseX = buttonColumn(l.exTitle, "×")
+	header := expanel.HeaderFor(l.ex, in.iconMode)
+	l.exReloadX, l.exCloseX = header.Reload, header.Close
 }
 
 // gutterWidth is the width of the line-number gutter. It is the pane's gutter,
 // so the columns the layout reserves are the columns the pane paints.
 func gutterWidth(lines int) int {
 	return editorpane.GutterWidth(lines)
-}
-
-// buttonColumn is the first column of glyph in title, or -1 when it is absent.
-func buttonColumn(title, glyph string) int {
-	before, _, ok := strings.Cut(title, glyph)
-	if !ok {
-		return -1
-	}
-	return ansi.StringWidth(before)
 }
 
 // explorerCols is the explorer width E (spec section 3). The automatic width is
@@ -325,26 +316,6 @@ func explorerCols(w, override int) int {
 	}
 	hi := min(explorerMaxWidth, max(w-explorerEditorMin, explorerMinWidth))
 	return min(max(e, explorerMinWidth), hi, w)
-}
-
-// explorerTitle is the explorer header, exactly e cells wide (section 4.3). The
-// corner, the "×" and the "⟳" drop out in that order as the panel narrows.
-func explorerTitle(e int) string {
-	const head = "┌ File Explorer " // 16 cells
-	switch {
-	case e <= 16:
-		return ansi.Truncate(head, e, "")
-	case e == 17:
-		return head + "⟳"
-	case e == 18:
-		return head + "⟳┐"
-	case e == 19:
-		return head + "⟳─×"
-	case e == 20:
-		return head + "⟳─×┐"
-	default:
-		return head + strings.Repeat("─", e-explorerTitleNeed) + "⟳─×─┐"
-	}
 }
 
 // menuRuns places the menu bar labels (section 4.5). A label is shown with

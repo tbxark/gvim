@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/tbxark/gvim/internal/ui/grid"
 )
 
@@ -104,35 +102,6 @@ func TestScrollbarShowsOnlyWhenContentOverflows(t *testing.T) {
 	}
 	if !layoutFor(80, h, layoutInput{lines: 13}).scrollbar {
 		t.Error("13 lines in 12 rows do not show a scrollbar")
-	}
-}
-
-func TestExplorerTitleByWidth(t *testing.T) {
-	// Blueprint section 4.3, one entry per width.
-	tests := []struct {
-		e     int
-		title string
-	}{
-		{5, "┌ Fil"},
-		{12, "┌ File Explo"},
-		{15, "┌ File Explorer"},
-		{16, "┌ File Explorer "},
-		{17, "┌ File Explorer ⟳"},
-		{18, "┌ File Explorer ⟳┐"},
-		{19, "┌ File Explorer ⟳─×"},
-		{20, "┌ File Explorer ⟳─×┐"},
-		{21, "┌ File Explorer ⟳─×─┐"},
-		{30, "┌ File Explorer ─────────⟳─×─┐"},
-		{42, "┌ File Explorer ─────────────────────⟳─×─┐"},
-	}
-	for _, tt := range tests {
-		got := explorerTitle(tt.e)
-		if got != tt.title {
-			t.Errorf("explorerTitle(%d) = %q, want %q", tt.e, got, tt.title)
-		}
-		if w := ansi.StringWidth(got); w != tt.e {
-			t.Errorf("explorerTitle(%d) is %d cells wide", tt.e, w)
-		}
 	}
 }
 

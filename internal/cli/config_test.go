@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tbxark/gvim/internal/app"
+	"github.com/tbxark/gvim/internal/config"
 	"github.com/tbxark/gvim/internal/keymap"
 )
 
@@ -242,11 +243,11 @@ func TestConfigPathsOutput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			isolateHome(t)
-			userDir, err := os.UserConfigDir()
+			userDir, err := config.Dir()
 			if err != nil {
 				t.Fatal(err)
 			}
-			userFile := filepath.Join(userDir, "gvim", "config.json")
+			userFile := filepath.Join(userDir, "config.json")
 
 			base := t.TempDir()
 			root := filepath.Join(base, "work", "deep")
@@ -279,11 +280,11 @@ func TestConfigPathsOutput(t *testing.T) {
 // reported on stderr and skipped.
 func TestConfigShowReal(t *testing.T) {
 	isolateHome(t)
-	userDir, err := os.UserConfigDir()
+	userDir, err := config.Dir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(userDir, "gvim", "config.json"), `{"theme": "light", "tab_size": 2}`)
+	writeFile(t, filepath.Join(userDir, "config.json"), `{"theme": "light", "tab_size": 2}`)
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"tab_size": 8, "bogus": true}`)
 	t.Chdir(root)
@@ -321,11 +322,11 @@ func TestConfigShowReal(t *testing.T) {
 // paths lists it in place of the user file.
 func TestConfigFlagReachesShowAndPaths(t *testing.T) {
 	isolateHome(t)
-	userDir, err := os.UserConfigDir()
+	userDir, err := config.Dir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(userDir, "gvim", "config.json"), `{"theme": "light"}`)
+	writeFile(t, filepath.Join(userDir, "config.json"), `{"theme": "light"}`)
 	alt := filepath.Join(t.TempDir(), "alt.json")
 	writeFile(t, alt, `{"theme": "nord"}`)
 	t.Chdir(t.TempDir())
@@ -375,11 +376,11 @@ func TestConfigShowMissingFlagFileFails(t *testing.T) {
 // of the values in the user file.
 func TestConfigShowFlagsWinOverConfig(t *testing.T) {
 	isolateHome(t)
-	userDir, err := os.UserConfigDir()
+	userDir, err := config.Dir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(userDir, "gvim", "config.json"), `{"theme": "light", "keymap": "vscode"}`)
+	writeFile(t, filepath.Join(userDir, "config.json"), `{"theme": "light", "keymap": "vscode"}`)
 	t.Chdir(t.TempDir())
 
 	var stdout, stderr bytes.Buffer
@@ -443,11 +444,11 @@ func TestConfigShowEffectiveSettingsPrecedence(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			isolateHome(t)
 			if tt.userConfig != "" {
-				userDir, err := os.UserConfigDir()
+				userDir, err := config.Dir()
 				if err != nil {
 					t.Fatal(err)
 				}
-				writeFile(t, filepath.Join(userDir, "gvim", "config.json"), tt.userConfig)
+				writeFile(t, filepath.Join(userDir, "config.json"), tt.userConfig)
 			}
 			t.Chdir(t.TempDir())
 

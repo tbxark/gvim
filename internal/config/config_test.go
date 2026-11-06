@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,7 @@ func TestDefaults(t *testing.T) {
 		HighlightCurrentLine:    true,
 		MouseCapture:            true,
 		CursorStyle:             "block",
+		UIIcons:                 "auto",
 
 		PluginTimeout: 500 * time.Millisecond,
 	}
@@ -619,4 +621,30 @@ func jsonEqual(t *testing.T, a json.RawMessage, b string) bool {
 	xb, _ := json.Marshal(x)
 	yb, _ := json.Marshal(y)
 	return string(xb) == string(yb)
+}
+
+func TestDirIsDotConfigGvimOnUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses os.UserConfigDir")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if got, err := Dir(); err != nil || got != filepath.Join(home, ".config", "gvim") {
+		t.Errorf("Dir() = %q, %v, want ~/.config/gvim (no Library/Application Support on macOS)", got, err)
+	}
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if got, err := Dir(); err != nil || got != filepath.Join(xdg, "gvim") {
+		t.Errorf("Dir() = %q, %v, want gvim under XDG_CONFIG_HOME", got, err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "relative/dir")
+	if got, err := Dir(); err != nil || got != filepath.Join(home, ".config", "gvim") {
+		t.Errorf("Dir() = %q, %v, want a relative XDG_CONFIG_HOME ignored", got, err)
+	}
+	files, err := Paths()
+	if err != nil || files.User != filepath.Join(home, ".config", "gvim", "config.json") {
+		t.Errorf("Paths().User = %q, %v", files.User, err)
+	}
 }

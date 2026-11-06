@@ -49,6 +49,22 @@ func TestLoadViewKeysSetTheirFields(t *testing.T) {
 			func(c Config) bool { return c.CursorStyle == CursorStyleBlock }, "cursor_style"},
 		{"cursor not a string", `{"cursor_style": 1}`,
 			func(c Config) bool { return c.CursorStyle == CursorStyleBlock }, "cursor_style"},
+		{"icons nerd", `{"ui_icons": "nerd"}`,
+			func(c Config) bool { return c.UIIcons == UIIconsNerd }, ""},
+		{"icons plain", `{"ui_icons": "plain"}`,
+			func(c Config) bool { return c.UIIcons == UIIconsPlain }, ""},
+		{"icons auto", `{"ui_icons": "auto"}`,
+			func(c Config) bool { return c.UIIcons == UIIconsAuto }, ""},
+		{"icons unknown", `{"ui_icons": "emoji"}`,
+			func(c Config) bool { return c.UIIcons == UIIconsAuto }, "ui_icons"},
+		{"icons wrong case", `{"ui_icons": "Nerd"}`,
+			func(c Config) bool { return c.UIIcons == UIIconsAuto }, "ui_icons"},
+		{"icons not a string", `{"ui_icons": true}`,
+			func(c Config) bool { return c.UIIcons == UIIconsAuto }, "ui_icons"},
+		{"icons font", `{"ui_icons_font": "  JetBrainsMono Nerd Font Mono "}`,
+			func(c Config) bool { return c.UIIconsFont == "JetBrainsMono Nerd Font Mono" }, ""},
+		{"icons font not a string", `{"ui_icons_font": 12}`,
+			func(c Config) bool { return c.UIIconsFont == "" }, "ui_icons_font"},
 		{"line wrap not a bool", `{"line_wrap": "yes"}`,
 			func(c Config) bool { return c.LineWrap }, "line_wrap"},
 	}
@@ -100,5 +116,49 @@ func TestViewKeysDefaultsMatchTheStartingLayout(t *testing.T) {
 	}
 	if d.CursorStyle != CursorStyleBlock {
 		t.Errorf("cursor style default %q, want %q", d.CursorStyle, CursorStyleBlock)
+	}
+}
+
+func TestUIIconsDefaultsToAuto(t *testing.T) {
+	d := Defaults()
+	if d.UIIcons != UIIconsAuto || d.UIIconsFont != "" {
+		t.Fatalf("ui_icons default %q and font %q, want auto and none", d.UIIcons, d.UIIconsFont)
+	}
+}
+
+func TestUIIconsLayers(t *testing.T) {
+	tests := []struct {
+		name          string
+		user, project string
+		want          string
+		diagKey       string
+	}{
+		{"project over user", `{"ui_icons": "nerd"}`, `{"ui_icons": "plain"}`, UIIconsPlain, ""},
+		{"project sets user default", `{}`, `{"ui_icons": "nerd"}`, UIIconsNerd, ""},
+		{"user kept when project is silent", `{"ui_icons": "nerd"}`, `{"tab_size": 2}`, UIIconsNerd, ""},
+		{"invalid project value keeps the user value", `{"ui_icons": "nerd"}`, `{"ui_icons": "bogus"}`, UIIconsNerd, "ui_icons"},
+		{"invalid user value keeps the default", `{"ui_icons": "bogus"}`, `{}`, UIIconsAuto, "ui_icons"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			userFile := filepath.Join(dir, "user", "config.json")
+			root := filepath.Join(dir, "proj")
+			writeFile(t, userFile, tt.user)
+			writeFile(t, filepath.Join(root, ".gvim", "config.json"), tt.project)
+			cfg, diags, err := Load(Options{Root: root, UserFile: userFile})
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.UIIcons != tt.want {
+				t.Errorf("ui_icons = %q, want %q", cfg.UIIcons, tt.want)
+			}
+			switch {
+			case tt.diagKey == "" && len(diags) != 0:
+				t.Errorf("diagnostics %v, want none", diags)
+			case tt.diagKey != "" && (len(diags) != 1 || diags[0].Key != tt.diagKey):
+				t.Errorf("diagnostics %v, want one for %s", diags, tt.diagKey)
+			}
+		})
 	}
 }

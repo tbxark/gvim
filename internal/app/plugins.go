@@ -12,6 +12,7 @@ import (
 
 	goruntime "runtime"
 
+	"github.com/tbxark/gvim/internal/config"
 	"github.com/tbxark/gvim/internal/editor"
 	palmodel "github.com/tbxark/gvim/internal/palette"
 	"github.com/tbxark/gvim/internal/plugin"
@@ -27,11 +28,11 @@ var (
 // pluginDir returns the folder that holds the plugin files: gvim/plugins under
 // the user config directory.
 func pluginDir() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return "", fmt.Errorf("plugin dir: %w", err)
 	}
-	return filepath.Join(dir, "gvim", "plugins"), nil
+	return filepath.Join(dir, "plugins"), nil
 }
 
 // loadPlugins starts the plugin host over the plugin folder and loads every plugin

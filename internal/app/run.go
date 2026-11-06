@@ -17,6 +17,7 @@ import (
 	"github.com/tbxark/gvim/internal/session"
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/ui/icons"
 	"github.com/tbxark/gvim/internal/workspace"
 )
 
@@ -177,6 +178,8 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	proj := newProjectOpener(ctx, watcher, root, files)
 	deps := newUIDeps(ed, km, th, tree, files)
 	deps.Settings = settingsFor(opts, cfg)
+	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
+	deps.Settings.IconsMode, deps.Settings.IconsWhy = icon.Mode.String(), icon.Why
 	deps.SwitchKeymap = switchKeymapFor(cfg)
 	deps.LSP = newLSPPort(cfg.LSP)
 	// A folder argument shows the explorer at startup. Without one the explorer
@@ -199,6 +202,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 		MouseCapture:            cfg.MouseCapture,
 		MouseHover:              cfg.MouseHover,
 		ScrollSync:              cfg.ScrollSync,
+		UIIcons:                 icon.Mode.String(),
 	}
 	plugins, pluginNotices := loadPlugins(ed, deps.Editor, cfg.PluginTimeout)
 	deps.Root = ui.RootPorts{
@@ -356,6 +360,8 @@ func settingsFor(opts Options, cfg config.Config) ui.Settings {
 		MenuBar:             cfg.ShowMenuBar,
 		ExplorerShowHidden:  cfg.ExplorerShowHidden,
 		ExplorerShowIgnored: cfg.ExplorerShowIgnored,
+		UIIcons:             cfg.UIIcons,
+		UIIconsFont:         cfg.UIIconsFont,
 		ConfigFile:          opts.Config,
 	}
 	if opts.Theme != "" {

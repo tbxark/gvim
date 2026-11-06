@@ -1,7 +1,7 @@
 // Package config loads gvim's settings from JSON-with-comments files.
 //
 // Three layers are merged, lowest first: the built-in defaults, the user file
-// (os.UserConfigDir()/gvim/config.json), and the project file (.gvim/config.json
+// (Dir()/config.json (~/.config/gvim/config.json)), and the project file (.gvim/config.json
 // in the nearest directory at or above the project root that has one). A layer
 // sets only the keys it names. A later layer replaces the value of each key it
 // sets and keeps the others.
@@ -34,6 +34,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -59,6 +60,14 @@ const (
 	CursorStyleBlock     = "block"
 	CursorStyleBar       = "bar"
 	CursorStyleUnderline = "underline"
+)
+
+// Icon sets accepted by ui_icons. Auto lets the app pick from ui_icons_font and the
+// terminal.
+const (
+	UIIconsAuto  = "auto"
+	UIIconsPlain = "plain"
+	UIIconsNerd  = "nerd"
 )
 
 // DefaultPluginTimeout is the plugin_timeout_ms default. The plugin host applies the
@@ -108,6 +117,8 @@ type Config struct {
 	MouseHover              bool   // hover information on mouse movement, default false
 	ScrollSync              bool   // scroll split views of one buffer together, default false
 	CursorStyle             string // "block", "bar" or "underline"; default "block"
+	UIIcons                 string // "auto", "plain" or "nerd" glyphs for interface controls; default "auto"
+	UIIconsFont             string // font family the terminal uses, for ui_icons "auto"; default empty
 
 	// PluginTimeout is the longest one plugin call may run, default 500ms.
 	PluginTimeout time.Duration
@@ -150,6 +161,7 @@ func Defaults() Config {
 		HighlightCurrentLine:    true,
 		MouseCapture:            true,
 		CursorStyle:             CursorStyleBlock,
+		UIIcons:                 UIIconsAuto,
 
 		PluginTimeout: DefaultPluginTimeout,
 	}
@@ -191,17 +203,17 @@ type Options struct {
 	Root string
 
 	// UserFile is the user config file. An empty value means the default,
-	// os.UserConfigDir()/gvim/config.json.
+	// Dir()/config.json (~/.config/gvim/config.json).
 	UserFile string
 }
 
 // Files lists the config files gvim reads by default.
 type Files struct {
-	User string // os.UserConfigDir()/gvim/config.json
+	User string // Dir()/config.json (~/.config/gvim/config.json)
 }
 
 // Paths returns the default config file locations. It fails only when
-// os.UserConfigDir fails, which happens when no home directory is known.
+// Dir fails, which happens when no home directory is known.
 func Paths() (Files, error) {
 	user, err := defaultUserFile()
 	if err != nil {
@@ -210,13 +222,35 @@ func Paths() (Files, error) {
 	return Files{User: user}, nil
 }
 
-// defaultUserFile returns the default user config file path.
-func defaultUserFile() (string, error) {
-	dir, err := os.UserConfigDir()
+// Dir returns gvim's per-user directory, which holds config.json, plugins and the
+// recent list. It is gvim under $XDG_CONFIG_HOME when that is an absolute path, and
+// ~/.config/gvim otherwise, on macOS as on Linux. Windows uses os.UserConfigDir. It
+// fails only when no home directory is known.
+func Dir() (string, error) {
+	if runtime.GOOS == "windows" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return "", fmt.Errorf("config: user config dir: %w", err)
+		}
+		return filepath.Join(base, "gvim"), nil
+	}
+	if base := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(base) {
+		return filepath.Join(base, "gvim"), nil
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("config: user config dir: %w", err)
 	}
-	return filepath.Join(dir, "gvim", "config.json"), nil
+	return filepath.Join(home, ".config", "gvim"), nil
+}
+
+// defaultUserFile returns the default user config file path.
+func defaultUserFile() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.json"), nil
 }
 
 // ProjectFile returns the nearest .gvim/config.json at or above root. ok is
@@ -400,6 +434,21 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return fmt.Errorf("must be %q, %q or %q, got %q", CursorStyleBlock, CursorStyleBar, CursorStyleUnderline, s)
 		}
 		c.CursorStyle = s
+	case "ui_icons":
+		s, err := decodeString(raw)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains([]string{UIIconsAuto, UIIconsPlain, UIIconsNerd}, s) {
+			return fmt.Errorf("must be %q, %q or %q, got %q", UIIconsAuto, UIIconsPlain, UIIconsNerd, s)
+		}
+		c.UIIcons = s
+	case "ui_icons_font":
+		s, err := decodeString(raw)
+		if err != nil {
+			return err
+		}
+		c.UIIconsFont = strings.TrimSpace(s)
 	case "keybindings":
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 || trimmed[0] != '{' {

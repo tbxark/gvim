@@ -14,6 +14,11 @@ func isolateConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", home)
+	// ui_icons "auto" reads the terminal from these, so a test run inside kitty, WezTerm
+	// or Ghostty would otherwise start with Nerd Font icons.
+	for _, k := range []string{"KITTY_WINDOW_ID", "WEZTERM_EXECUTABLE", "GHOSTTY_RESOURCES_DIR", "TERM_PROGRAM", "TERM"} {
+		t.Setenv(k, "")
+	}
 }
 
 func TestValidate(t *testing.T) {

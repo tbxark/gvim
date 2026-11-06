@@ -1476,7 +1476,7 @@ func (m *Model) explorerAction(action string) (tea.Cmd, bool) {
 
 // explorerGeometry is the panel's place in the frame laid out as l.
 func (m *Model) explorerGeometry(l layout) expanel.Geometry {
-	return expanel.Geometry{Width: l.ex, Bottom: l.exBottom, Focused: m.explorerFocus, Marks: m.root.gitMarks}
+	return expanel.Geometry{Width: l.ex, Bottom: l.exBottom, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
 }
 
 // handleClick routes a left press to the part of the frame under it, and a
@@ -1843,7 +1843,7 @@ func (m *Model) layoutInput() layoutInput {
 		explorerOverride: m.explorerOverride,
 		split:            split,
 		leaves:           leaves,
-		tabs:             m.ed.Tabs(),
+		tabs:             m.stripTabs(),
 		tabFirst:         m.tabFirst,
 		welcome:          m.welcomeVisible(),
 		recents:          m.recents,
@@ -2175,7 +2175,7 @@ func (m *Model) revealActiveTab() {
 		return
 	}
 	l := m.layout()
-	m.setTabFirst(revealedFirst(m.ed.Tabs(), l.editorX, l.w, l.strip.first, i))
+	m.setTabFirst(revealedFirst(m.stripTabs(), l.editorX, l.w, l.strip.first, i))
 }
 
 // next says what a file action does once a save or a discard is done. The

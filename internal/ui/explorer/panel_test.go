@@ -16,6 +16,7 @@ import (
 	tree "github.com/tbxark/gvim/internal/explorer"
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/icons"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -103,7 +104,7 @@ func TestHeaderFor(t *testing.T) {
 		{30, "┌ File Explorer " + strings.Repeat("─", 9) + "⟳─×─┐", 25, 27},
 	}
 	for _, tt := range tests {
-		h := HeaderFor(tt.width)
+		h := HeaderFor(tt.width, icons.Plain)
 		if h.Text != tt.text {
 			t.Errorf("width %d: text %q, want %q", tt.width, h.Text, tt.text)
 		}
@@ -116,6 +117,28 @@ func TestHeaderFor(t *testing.T) {
 	}
 }
 
+func TestHeaderForNerdKeepsTheColumns(t *testing.T) {
+	t.Parallel()
+	refresh, closeBtn := icons.Nerd.Glyph(icons.Refresh), icons.Nerd.Glyph(icons.Close)
+	for width := 0; width <= 60; width++ {
+		plain, nerd := HeaderFor(width, icons.Plain), HeaderFor(width, icons.Nerd)
+		if nerd.Reload != plain.Reload || nerd.Close != plain.Close {
+			t.Errorf("width %d: nerd buttons at %d and %d, plain at %d and %d",
+				width, nerd.Reload, nerd.Close, plain.Reload, plain.Close)
+		}
+		if got := ansi.StringWidth(nerd.Text); got != width {
+			t.Errorf("width %d: nerd text is %d cells", width, got)
+		}
+		// The columns hold the glyphs, wherever they are.
+		if nerd.Reload >= 0 && ansi.Cut(nerd.Text, nerd.Reload, nerd.Reload+1) != refresh {
+			t.Errorf("width %d: column %d is not the refresh glyph in %q", width, nerd.Reload, nerd.Text)
+		}
+		if nerd.Close >= 0 && ansi.Cut(nerd.Text, nerd.Close, nerd.Close+1) != closeBtn {
+			t.Errorf("width %d: column %d is not the close glyph in %q", width, nerd.Close, nerd.Text)
+		}
+	}
+}
+
 func TestDrawRows(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
@@ -124,8 +147,8 @@ func TestDrawRows(t *testing.T) {
 	p.Draw(g, Geometry{Width: 12, Bottom: 7, Focused: true})
 	lines := g.Plain()
 
-	if lines[1] != HeaderFor(12).Text {
-		t.Errorf("title row %q, want %q", lines[1], HeaderFor(12).Text)
+	if lines[1] != HeaderFor(12, icons.Plain).Text {
+		t.Errorf("title row %q, want %q", lines[1], HeaderFor(12, icons.Plain).Text)
 	}
 	want := []string{
 		"│▌ proj    │", // the root is selected, so the marker shows
@@ -269,6 +292,39 @@ func TestPressTitleButtonsAndBody(t *testing.T) {
 		_, cmd := p.Update(click(tt.x, tt.y), g)
 		if got := run(cmd); got != tt.want {
 			t.Errorf("%s: sent %+v, want %+v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestPressTitleButtonsInNerdMode(t *testing.T) {
+	t.Parallel()
+	tr := openTree(t, fixture(t))
+	p := New(tr, style.Styles{}, nil)
+	g := Geometry{Width: 30, Bottom: 8, Icons: icons.Nerd}
+	gr := grid.New(30, 9)
+	p.Draw(gr, g)
+	for _, tt := range []struct {
+		name  string
+		x     int
+		glyph icons.Icon
+		want  tea.Msg
+	}{
+		{"reload", 25, icons.Refresh, ReloadMsg{}},
+		{"close", 27, icons.Close, CloseMsg{}},
+	} {
+		if got := gr.At(tt.x, 1).Text; got != icons.Nerd.Glyph(tt.glyph) {
+			t.Errorf("%s: cell %d holds %q, want the nerd glyph", tt.name, tt.x, got)
+		}
+		_, cmd := p.Update(click(tt.x, 1), g)
+		if got := run(cmd); got != tt.want {
+			t.Errorf("%s: sent %+v, want %+v", tt.name, got, tt.want)
+		}
+		// The cells beside a button do not press it.
+		for _, x := range []int{tt.x - 1, tt.x + 1} {
+			_, cmd := p.Update(click(x, 1), g)
+			if got := run(cmd); got != (FocusMsg{}) {
+				t.Errorf("%s: column %d sent %+v, want FocusMsg", tt.name, x, got)
+			}
 		}
 	}
 }
@@ -512,6 +568,67 @@ func TestDrawFolderGlyphsCollapsedAndExpanded(t *testing.T) {
 	p.Draw(g, Geometry{Width: 12, Bottom: 7})
 	if lines := g.Plain(); !strings.Contains(lines[3], "▼ a") || strings.Contains(lines[3], "▶") {
 		t.Fatalf("expanded folder row %q, want ▼ glyph", lines[3])
+	}
+}
+
+func TestDrawFolderGlyphsInNerdMode(t *testing.T) {
+	t.Parallel()
+	dir := fixture(t)
+	tr := openTree(t, dir)
+	p := New(tr, style.Styles{}, nil)
+	draw := func() *grid.Grid {
+		g := grid.New(12, 8)
+		p.Draw(g, Geometry{Width: 12, Bottom: 7, Icons: icons.Nerd})
+		return g
+	}
+	if got := draw().At(3, 3).Text; got != icons.Nerd.Glyph(icons.DirCollapsed) {
+		t.Fatalf("collapsed folder icon %q, want the nerd glyph", got)
+	}
+	must(t, tr.Toggle(filepath.Join(dir, "a")))
+	if got := draw().At(3, 3).Text; got != icons.Nerd.Glyph(icons.DirExpanded) {
+		t.Fatalf("expanded folder icon %q, want the nerd glyph", got)
+	}
+}
+
+func TestDrawFileIconsInNerdMode(t *testing.T) {
+	t.Parallel()
+	dir := fixture(t)
+	tr := openTree(t, dir)
+	p := New(tr, style.Styles{}, nil)
+	g := grid.New(24, 8)
+	p.Draw(g, Geometry{Width: 24, Bottom: 7, Icons: icons.Nerd})
+	at := func(x, y int) string { return g.At(x, y).Text }
+	// Row 3 is the folder a/ and row 4 is b.txt, both one level down: the expand
+	// mark at column 3, the type icon at 5 and the name from 7.
+	if at(3, 3) != icons.Nerd.Glyph(icons.DirCollapsed) || at(5, 3) != icons.Nerd.Glyph(icons.Folder) || at(7, 3) != "a" {
+		t.Errorf("folder row %q", g.Plain()[3])
+	}
+	if at(3, 4) != " " || at(5, 4) != icons.Nerd.FileIcon("b.txt", false, false) || at(7, 4) != "b" {
+		t.Errorf("file row %q", g.Plain()[4])
+	}
+	// The plain set keeps the name at column 5 and draws no type icon.
+	plain := grid.New(24, 8)
+	p.Draw(plain, Geometry{Width: 24, Bottom: 7})
+	if got := plain.At(5, 4).Text; got != "b" {
+		t.Errorf("plain file row %q, want the name at column 5", plain.Plain()[4])
+	}
+}
+
+func TestDrawGitMarksInNerdMode(t *testing.T) {
+	t.Parallel()
+	dir := fixture(t)
+	tr := openTree(t, dir)
+	p := New(tr, style.Styles{}, nil)
+	marks := map[string]rune{filepath.Join(dir, "b.txt"): 'M'}
+	for _, tt := range []struct {
+		mode icons.Mode
+		want string
+	}{{icons.Plain, "M"}, {icons.Nerd, icons.Nerd.GitMark('M')}} {
+		g := grid.New(24, 8)
+		p.Draw(g, Geometry{Width: 24, Bottom: 7, Marks: marks, Icons: tt.mode})
+		if got := g.At(22, 4).Text; got != tt.want {
+			t.Errorf("%v: git mark cell %q, want %q (%q)", tt.mode, got, tt.want, g.Plain()[4])
+		}
 	}
 }
 
