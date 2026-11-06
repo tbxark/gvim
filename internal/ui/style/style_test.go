@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/tbxark/gvim/internal/theme"
+	"github.com/tbxark/gvim/internal/ui/grid"
 )
 
 func loadDark(t *testing.T) theme.Theme {
@@ -29,6 +30,27 @@ func TestNewReadsTheDarkThemeColors(t *testing.T) {
 	}
 	if sel := Cell(s.Selection).BG; sel != (color.RGBA{R: 50, G: 50, B: 60, A: 255}) {
 		t.Errorf("selection bg = %v", sel)
+	}
+}
+
+func TestNewReadsTheSearchMatchColors(t *testing.T) {
+	s := New(loadDark(t))
+	match := Cell(s.Match)
+	if want := (color.RGBA{R: 100, G: 100, B: 20, A: 255}); match.BG != want {
+		t.Errorf("match bg = %v, want %v", match.BG, want)
+	}
+	if match.FG != nil || match.Bold {
+		t.Errorf("match sets a foreground or bold: %+v", match)
+	}
+	cur := Cell(s.CurrentMatch)
+	if want := (color.RGBA{R: 64, G: 170, B: 230, A: 255}); cur.BG != want {
+		t.Errorf("current match bg = %v, want %v", cur.BG, want)
+	}
+	if want := (color.RGBA{A: 255}); cur.FG != want {
+		t.Errorf("current match fg = %v, want %v", cur.FG, want)
+	}
+	if !cur.Bold {
+		t.Errorf("current match is not bold: %+v", cur)
 	}
 }
 
@@ -117,6 +139,60 @@ func TestZeroThemeGivesUnstyledRoles(t *testing.T) {
 	for _, st := range []lipgloss.Style{s.Editor, s.Menu, s.Status, s.TabBar} {
 		if c := Cell(st); c.FG != nil || c.BG != nil {
 			t.Errorf("zero theme gave colors %+v", c)
+		}
+	}
+}
+
+func rgb(r, g, b uint8) color.RGBA { return color.RGBA{R: r, G: g, B: b, A: 0xff} }
+
+func TestDisplayRolesReadTheirThemeKeys(t *testing.T) {
+	s := New(loadDark(t))
+	cases := []struct {
+		name string
+		got  grid.Style
+		fg   color.Color
+		bg   color.Color
+	}{
+		{"current line", Cell(s.CurrentLine), nil, rgb(40, 40, 40)},
+		{"ruler", Cell(s.Ruler), nil, rgb(50, 50, 50)},
+		{"secondary caret", Cell(s.SecondaryCaret), rgb(212, 212, 212), rgb(100, 100, 100)},
+		{"whitespace", Cell(s.Whitespace), rgb(70, 70, 70), rgb(30, 30, 30)},
+		{"occurrence", Cell(s.Occurrence), nil, rgb(75, 75, 75)},
+		{"diagnostic error", Cell(s.DiagError), lipgloss.Color("1"), nil},
+		{"diagnostic warning", Cell(s.DiagWarning), lipgloss.Color("3"), nil},
+		{"diagnostic info", Cell(s.DiagInfo), lipgloss.Color("4"), nil},
+		{"diagnostic hint", Cell(s.DiagHint), lipgloss.Color("7"), nil},
+		{"popup", Cell(s.Popup), lipgloss.Color("15"), rgb(30, 30, 30)},
+		{"popup selected", Cell(s.PopupSelected), rgb(255, 255, 255), rgb(58, 79, 120)},
+	}
+	for _, tc := range cases {
+		if tc.got.FG != tc.fg {
+			t.Errorf("%s fg = %v, want %v", tc.name, tc.got.FG, tc.fg)
+		}
+		if tc.got.BG != tc.bg {
+			t.Errorf("%s bg = %v, want %v", tc.name, tc.got.BG, tc.bg)
+		}
+	}
+}
+
+func TestEveryBundledThemeDefinesTheDisplayKeys(t *testing.T) {
+	names := theme.Names()
+	if len(names) == 0 {
+		t.Fatal("no bundled themes")
+	}
+	for _, name := range names {
+		th, err := theme.Load(name)
+		if err != nil {
+			t.Fatalf("load %s: %v", name, err)
+		}
+		for _, r := range []ref{
+			refCurrentLine, refInactiveCursor, refRuler, refWhitespace, refOccurrence,
+			refDiagError, refDiagWarning, refDiagInfo, refDiagHint,
+			refPopupText, refPopupBG, refPopupSelFG, refPopupSelBG,
+		} {
+			if _, ok := th.Value(r.section, r.key); !ok {
+				t.Errorf("theme %s has no %s.%s", name, r.section, r.key)
+			}
 		}
 	}
 }

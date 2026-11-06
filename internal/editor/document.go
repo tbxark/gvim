@@ -15,11 +15,17 @@ import (
 // Document is one open file: its text, the cursor, an optional selection, and
 // the first visible line of its viewport.
 type Document struct {
+	// Path is the absolute path of the file, or "" for an unnamed buffer.
 	Path   string
 	Buffer *buffer.Buffer
 	Cursor buffer.Pos
 	// Sel is nil when nothing is selected. Its Head always equals Cursor.
 	Sel *buffer.Selection
+	// extra holds the carets other than the primary one (Cursor and Sel), in
+	// document order. It is nil when there is one caret. See Cursors.
+	extra []Caret
+	// block is the block selection in progress, or nil. See blockStep.
+	block *blockState
 	// Top is the index of the first line shown in the editor pane.
 	Top int
 	// preview marks a tab opened by OpenPreview. A preview tab is replaced by
@@ -30,9 +36,16 @@ type Document struct {
 	// saved is the text as it was at open or the last save. It is the only
 	// saved-state record: SavedLines and LinesChangedSinceSave read it.
 	saved string
-	// encoding is "ASCII" or "UTF-8" for the saved text, computed on open and
-	// on save so that rendering never scans the text.
+	// encoding is the label of the encoding the saved text is written in (see
+	// encodingLabel). It is computed on open, on save and on set_encoding so
+	// that rendering never scans the text.
 	encoding string
+	// eol is the line ending of the saved text, eolLF or eolCRLF. The buffer
+	// always holds "\n" as its line break, and fileText converts it back.
+	eol string
+	// disk is the state of the file when it was opened or last saved. A save
+	// compares it with the file on disk, so an outside change is not overwritten.
+	disk diskState
 
 	// want is the column that vertical moves try to keep. -1 means unset,
 	// so the next vertical move takes the current column.
@@ -47,12 +60,47 @@ type Document struct {
 	// status is the message shown while this tab is active. Each tab keeps its
 	// own, so switching tabs never shows another tab's message.
 	status string
+	// codec is the encoding name the text was read with, from internal/encoding.
+	// Save encodes with it. "" means utf-8, the encoding of a new document.
+	codec string
+	// readOnly refuses every change to the text and to the file. See readonly.go.
+	readOnly bool
+	// findRange limits the find actions to this range when it is set. See
+	// doc_search.go.
+	findRange *buffer.Selection
+	// folded holds the start lines of the folds that are collapsed. See fold.go.
+	folded map[int]bool
+	// lastMulti is the last multi-caret edit, for undo and redo. See multiEditRecord.
+	lastMulti *multiEditRecord
+	// view holds the display settings of the document. See viewsettings.go.
+	view ViewSettings
 }
 
+// Line endings a document can save with.
+const (
+	eolLF   = "LF"
+	eolCRLF = "CRLF"
+)
+
 // newDocument returns a Document holding text at path. An empty path means
-// an unnamed buffer.
+// an unnamed buffer. Its line ending is LF until the caller sets another.
 func newDocument(path, text string) *Document {
-	return &Document{Path: path, Buffer: buffer.New(text), saved: text, encoding: encodingOf(path, text), want: -1}
+	return &Document{Path: path, Buffer: buffer.New(text), saved: text, encoding: encodingOf(path, text), want: -1, eol: eolLF}
+}
+
+// splitLineEnding turns the CRLF breaks of data into LF, the form the buffer
+// holds, and reports the ending the file uses. CRLF wins only when its breaks
+// outnumber the bare LF breaks, so a tie, or a text with no break, is LF. Bare
+// LF breaks in a CRLF file are written as CRLF on save, so the file ends up
+// with one ending.
+func splitLineEnding(data string) (text, eol string) {
+	crlf := strings.Count(data, "\r\n")
+	lf := strings.Count(data, "\n") - crlf
+	eol = eolLF
+	if crlf > lf {
+		eol = eolCRLF
+	}
+	return strings.ReplaceAll(data, "\r\n", "\n"), eol
 }
 
 // SavedLines returns the saved text split into lines on '\n', the same way
@@ -112,50 +160,107 @@ func (d *Document) HasSelection() bool {
 	return d.Sel != nil && d.Sel.Anchor != d.Sel.Head
 }
 
-// ErrNotUTF8 is returned by OpenFile when a file is not valid UTF-8.
-var ErrNotUTF8 = errors.New("file is not valid UTF-8")
-
 // ErrNoPath is returned by Save when the active buffer has no file name. The
 // caller runs Save As, which names the buffer and writes it.
 var ErrNoPath = errors.New("buffer has no file name")
 
-// readDocument loads path. A missing file yields an empty document that will
-// create the file on save, as an editor does for a new path.
-func readDocument(path string) (*Document, error) {
+// ErrChangedOnDisk is returned by Save when the file was changed on disk after
+// it was opened or last saved. Save writes nothing. Save As, to the same path,
+// writes the buffer over the file.
+var ErrChangedOnDisk = errors.New("changed on disk since it was opened; not saved. Save As keeps your version")
+
+// readDocument loads path, decoding it with decodeFile. A missing file yields an
+// empty document that will create the file on save, as an editor does for a new
+// path. That document takes defaultEOL, the ending for a new file.
+func readDocument(path, defaultEOL string) (*Document, error) {
+	// The state is taken before the read. A change between the two then shows
+	// as a difference on save, which is the safe side.
+	disk := diskStateOf(path)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return newDocument(path, ""), nil
+		d := newDocument(path, "")
+		d.eol = defaultEOL
+		return d, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	if !utf8.Valid(data) {
-		return nil, fmt.Errorf("open %s: %w", path, ErrNotUTF8)
+	decoded, codec, err := decodeFile(data)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	return newDocument(path, string(data)), nil
+	text, eol := splitLineEnding(decoded)
+	d := newDocument(path, text)
+	d.eol = eol
+	d.disk = disk
+	d.codec = codec
+	d.encoding = encodingLabel(codec, text)
+	return d, nil
 }
 
-// save writes the buffer to its path and marks it saved. An untitled buffer
-// returns ErrNoPath. The bytes are written exactly as the buffer holds them.
-func (d *Document) save() error {
-	if d.Path == "" {
-		return ErrNoPath
+// fileText returns text as it is written to disk: each "\n" becomes the
+// document's line ending.
+func (d *Document) fileText(text string) string {
+	if d.eol == eolCRLF {
+		return strings.ReplaceAll(text, "\n", "\r\n")
 	}
-	return d.writeTo(d.Path)
+	return text
 }
 
-// writeTo writes the buffer to path atomically (see writeFileAtomic) and marks
-// it saved. It does not change d.Path, so a caller that wants a new path sets
-// it only after success. On failure the buffer stays modified.
-func (d *Document) writeTo(path string) error {
-	text := d.Buffer.Text()
-	if err := writeFileAtomic(path, []byte(text)); err != nil {
-		return fmt.Errorf("save %s: %w", path, err)
+// tidyForSave applies the save-time options to the buffer, so the text written
+// is the text the buffer holds afterwards. The edits form one undo step. The
+// caret and selection are kept inside the text they were on.
+func (d *Document) tidyForSave(o Options) {
+	if !o.TrimTrailingWhitespace && !o.EnsureFinalNewline {
+		return
 	}
-	d.Buffer.MarkSaved()
-	d.saved = text
-	d.encoding = encodingOf(path, text)
-	return nil
+	before := d.Buffer.Text()
+	d.Buffer.Group(func() {
+		if o.TrimTrailingWhitespace {
+			d.trimTrailingWhitespace()
+		}
+		if o.EnsureFinalNewline {
+			d.ensureFinalNewline()
+		}
+	})
+	if d.Buffer.Text() != before {
+		// The edit is the newest undo group now, so a multi-caret record is stale.
+		d.lastMulti = nil
+	}
+	if caret := d.Buffer.Clamp(d.Cursor); caret != d.Cursor {
+		d.Cursor = caret
+		d.want = -1
+	}
+	if d.Sel != nil {
+		d.Sel.Anchor = d.Buffer.Clamp(d.Sel.Anchor)
+		d.Sel.Head = d.Cursor
+		if d.Sel.Anchor == d.Sel.Head {
+			d.Sel = nil
+		}
+	}
+}
+
+// trimTrailingWhitespace removes the trailing spaces and tabs of every line.
+func (d *Document) trimTrailingWhitespace() {
+	for i := range d.Buffer.Lines() {
+		line := d.Buffer.Line(i)
+		trimmed := strings.TrimRight(line, " \t")
+		if trimmed == line {
+			continue
+		}
+		from := buffer.Pos{Line: i, Col: utf8.RuneCountInString(trimmed)}
+		d.Buffer.Delete(from, buffer.Pos{Line: i, Col: d.Buffer.LineLen(i)})
+	}
+}
+
+// ensureFinalNewline ends the text with a line break. An empty text stays
+// empty, and so does one whose last line is already empty.
+func (d *Document) ensureFinalNewline() {
+	last := d.Buffer.Lines() - 1
+	if d.Buffer.LineLen(last) == 0 {
+		return
+	}
+	d.Buffer.Insert(d.Buffer.End(), "\n")
 }
 
 // move places the cursor at p. With extend set, the selection is grown from
@@ -189,10 +294,33 @@ func (d *Document) deleteSelection() bool {
 	return true
 }
 
-// Encoding reports the encoding of the saved text: "UTF-8" for an unnamed
-// buffer (the editor's startup buffer), "ASCII" for a named file whose saved
-// text has no byte above 0x7f, and "UTF-8" otherwise.
+// Encoding reports the encoding of the saved text, such as "UTF-8", "ASCII" (utf-8
+// text with no byte above 0x7f), "Windows-1252" or "UTF-16 LE". See encodingLabel.
 func (d *Document) Encoding() string { return d.encoding }
+
+// LineEnding is "LF" or "CRLF", the ending of the saved text. It is detected
+// when the file is opened, and a new document takes Options.DefaultLineEnding.
+func (d *Document) LineEnding() string { return d.eol }
+
+// setLineEnding changes the line ending that the next save writes. The text is
+// not changed, so the document keeps its modified state. Its argument "value" is
+// "lf" or "crlf". Any other value is an error, and the ending stays as it was.
+func setLineEnding(e *Editor, d *Document, args map[string]any) error {
+	value, ok := args["value"].(string)
+	if !ok {
+		return errors.New("set_line_ending: missing string argument \"value\"")
+	}
+	switch value {
+	case "lf":
+		d.eol = eolLF
+	case "crlf":
+		d.eol = eolCRLF
+	default:
+		return fmt.Errorf("set_line_ending: value %q is not \"lf\" or \"crlf\"", value)
+	}
+	e.setStatus("Line ending " + d.eol)
+	return nil
+}
 
 // encodingOf is the encoding label for text saved at path.
 func encodingOf(path, text string) string {

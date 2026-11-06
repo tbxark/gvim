@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -82,13 +83,13 @@ func TestConfigShowWithFakeLoader(t *testing.T) {
 					}
 					return "/work/proj", nil
 				},
-				load: func(root string) (app.ConfigView, error) {
+				load: func(root string, _ app.Options) (app.ConfigView, error) {
 					loaded = true
 					gotRoot = root
 					return tt.view, tt.loadErr
 				},
 			}
-			stdout, stderr, err := runTree(t, newConfigCommandWith(d), "show")
+			stdout, stderr, err := runTree(t, newConfigCommandWith(d, new(string), new(string), new(string)), "show")
 			if loaded != tt.wantLoaded {
 				t.Fatalf("loader called = %v, want %v", loaded, tt.wantLoaded)
 			}
@@ -139,9 +140,9 @@ func TestConfigPathsWithFakeFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := configDeps{
 				cwd:   func() (string, error) { return "/work", nil },
-				paths: func(string) ([]app.ConfigFile, error) { return tt.files, nil },
+				paths: func(string, string) ([]app.ConfigFile, error) { return tt.files, nil },
 			}
-			stdout, stderr, err := runTree(t, newConfigCommandWith(d), "paths")
+			stdout, stderr, err := runTree(t, newConfigCommandWith(d, new(string), new(string), new(string)), "paths")
 			if err != nil {
 				t.Fatalf("error = %v", err)
 			}
@@ -158,14 +159,45 @@ func TestConfigPathsWithFakeFiles(t *testing.T) {
 func TestConfigPathsErrorFails(t *testing.T) {
 	d := configDeps{
 		cwd:   func() (string, error) { return "/work", nil },
-		paths: func(string) ([]app.ConfigFile, error) { return nil, errors.New("no home") },
+		paths: func(string, string) ([]app.ConfigFile, error) { return nil, errors.New("no home") },
 	}
-	stdout, _, err := runTree(t, newConfigCommandWith(d), "paths")
+	stdout, _, err := runTree(t, newConfigCommandWith(d, new(string), new(string), new(string)), "paths")
 	if err == nil || !strings.Contains(err.Error(), "no home") {
 		t.Fatalf("error = %v, want it to contain %q", err, "no home")
 	}
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+}
+
+// TestConfigFlagValueReachesDeps checks that the value of --config is the path
+// that show and paths pass to their dependencies.
+func TestConfigFlagValueReachesDeps(t *testing.T) {
+	var loadPath, pathsPath string
+	d := configDeps{
+		cwd: func() (string, error) { return "/work", nil },
+		load: func(_ string, opts app.Options) (app.ConfigView, error) {
+			loadPath = opts.Config
+			return app.ConfigView{JSON: []byte("{}\n")}, nil
+		},
+		paths: func(_, configPath string) ([]app.ConfigFile, error) {
+			pathsPath = configPath
+			return nil, nil
+		},
+	}
+	flagPath := "/etc/gvim.json"
+	cmd := newConfigCommandWith(d, &flagPath, new(string), new(string))
+	if _, _, err := runTree(t, cmd, "show"); err != nil {
+		t.Fatalf("show error = %v", err)
+	}
+	if loadPath != flagPath {
+		t.Fatalf("load got config %q, want %q", loadPath, flagPath)
+	}
+	if _, _, err := runTree(t, cmd, "paths"); err != nil {
+		t.Fatalf("paths error = %v", err)
+	}
+	if pathsPath != flagPath {
+		t.Fatalf("paths got config %q, want %q", pathsPath, flagPath)
 	}
 }
 
@@ -271,6 +303,7 @@ func TestConfigShowReal(t *testing.T) {
   "ensure_final_newline": false,
   "auto_indent": true,
   "line_numbers": true,
+  "show_menu_bar": true,
   "explorer_show_hidden": false,
   "explorer_show_ignored": false
 }
@@ -280,6 +313,187 @@ func TestConfigShowReal(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "gvim: warning: ") || !strings.Contains(stderr.String(), "bogus: unknown setting") {
 		t.Fatalf("stderr = %q, want a warning about the bogus key", stderr.String())
+	}
+}
+
+// TestConfigFlagReachesShowAndPaths runs the real command with --config. The
+// alternate file replaces the default user file, so show prints its theme and
+// paths lists it in place of the user file.
+func TestConfigFlagReachesShowAndPaths(t *testing.T) {
+	isolateHome(t)
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(userDir, "gvim", "config.json"), `{"theme": "light"}`)
+	alt := filepath.Join(t.TempDir(), "alt.json")
+	writeFile(t, alt, `{"theme": "nord"}`)
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := Execute(context.Background(), []string{"--config", alt, "config", "show"}, &stdout, &stderr, nil)
+	if code != 0 {
+		t.Fatalf("show exit = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"theme": "nord"`) {
+		t.Fatalf("show stdout = %s, want the theme from %s", stdout.String(), alt)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Execute(context.Background(), []string{"--config", alt, "config", "paths"}, &stdout, &stderr, nil)
+	if code != 0 {
+		t.Fatalf("paths exit = %d, stderr = %q", code, stderr.String())
+	}
+	if want := "user     " + alt + " (exists)\n"; !strings.HasPrefix(stdout.String(), want) {
+		t.Fatalf("paths stdout = %q, want it to start with %q", stdout.String(), want)
+	}
+}
+
+// TestConfigShowMissingFlagFileFails checks that a --config path that does not
+// exist is an error that names the path, not a silent fall back to defaults.
+func TestConfigShowMissingFlagFileFails(t *testing.T) {
+	isolateHome(t)
+	t.Chdir(t.TempDir())
+	missing := filepath.Join(t.TempDir(), "absent.json")
+
+	var stdout, stderr bytes.Buffer
+	code := Execute(context.Background(), []string{"--config", missing, "config", "show"}, &stdout, &stderr, nil)
+	if code == 0 {
+		t.Fatalf("exit = 0, want failure; stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), missing) {
+		t.Fatalf("stderr = %q, want it to name %s", stderr.String(), missing)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+// TestConfigShowFlagsWinOverConfig runs the real command. The --theme and
+// --keymap flags name the settings the editor uses, so show prints them in place
+// of the values in the user file.
+func TestConfigShowFlagsWinOverConfig(t *testing.T) {
+	isolateHome(t)
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(userDir, "gvim", "config.json"), `{"theme": "light", "keymap": "vscode"}`)
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := Execute(context.Background(), []string{"--theme", "nord", "--keymap", "emacs", "config", "show"}, &stdout, &stderr, nil)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
+	}
+	if got["theme"] != "nord" || got["keymap"] != "emacs" {
+		t.Fatalf("theme = %v, keymap = %v; want nord and emacs from the flags\n%s", got["theme"], got["keymap"], stdout.String())
+	}
+}
+
+// TestConfigShowEffectiveSettingsPrecedence checks the precedence the editor uses
+// for theme and keymap: the flag, then the config file, then the default.
+func TestConfigShowEffectiveSettingsPrecedence(t *testing.T) {
+	tests := []struct {
+		name       string
+		userConfig string // written to the user file; empty writes no file
+		args       []string
+		wantTheme  string
+		wantKeymap string
+	}{
+		{
+			name:       "no flags, config sets both",
+			userConfig: `{"theme": "light", "keymap": "vscode"}`,
+			wantTheme:  "light",
+			wantKeymap: "vscode",
+		},
+		{
+			name:       "flags win over config",
+			userConfig: `{"theme": "light", "keymap": "vscode"}`,
+			args:       []string{"--theme", "nord", "--keymap", "emacs"},
+			wantTheme:  "nord",
+			wantKeymap: "emacs",
+		},
+		{
+			name:       "theme flag alone keeps the config keymap",
+			userConfig: `{"keymap": "vscode"}`,
+			args:       []string{"--theme", "nord"},
+			wantTheme:  "nord",
+			wantKeymap: "vscode",
+		},
+		{
+			name:       "keymap flag alone keeps the config theme",
+			userConfig: `{"theme": "light"}`,
+			args:       []string{"--keymap", "emacs"},
+			wantTheme:  "light",
+			wantKeymap: "emacs",
+		},
+		{
+			name:       "no flags and no config use the defaults",
+			wantTheme:  "dark",
+			wantKeymap: keymap.DefaultName(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateHome(t)
+			if tt.userConfig != "" {
+				userDir, err := os.UserConfigDir()
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, filepath.Join(userDir, "gvim", "config.json"), tt.userConfig)
+			}
+			t.Chdir(t.TempDir())
+
+			var stdout, stderr bytes.Buffer
+			args := append(append([]string{}, tt.args...), "config", "show")
+			code := Execute(context.Background(), args, &stdout, &stderr, nil)
+			if code != 0 {
+				t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+			}
+			var got map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
+			}
+			if got["theme"] != tt.wantTheme || got["keymap"] != tt.wantKeymap {
+				t.Fatalf("theme = %v, keymap = %v; want %s and %s", got["theme"], got["keymap"], tt.wantTheme, tt.wantKeymap)
+			}
+		})
+	}
+}
+
+// TestConfigShowRejectsUnknownFlagValue checks that show fails for a --theme or
+// --keymap name the editor would also refuse, instead of printing it.
+func TestConfigShowRejectsUnknownFlagValue(t *testing.T) {
+	tests := []struct {
+		args    []string
+		wantErr string
+	}{
+		{args: []string{"--theme", "neon", "config", "show"}, wantErr: `unknown theme "neon"`},
+		{args: []string{"--keymap", "vim", "config", "show"}, wantErr: `unknown keymap "vim"`},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			isolateHome(t)
+			t.Chdir(t.TempDir())
+			var stdout, stderr bytes.Buffer
+			code := Execute(context.Background(), tt.args, &stdout, &stderr, nil)
+			if code == 0 {
+				t.Fatalf("exit = 0, want failure; stdout = %q", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantErr) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tt.wantErr)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+		})
 	}
 }
 

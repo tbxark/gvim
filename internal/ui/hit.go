@@ -22,36 +22,42 @@ const (
 	hitStatusPalette
 	hitStatusSegment
 	hitWelcomeRow // a row of the welcome screen: a door or a recent folder
+
+	// hitSplitBorder is the line between two editor panes. Index is its index in
+	// layout.borders.
+	hitSplitBorder
 )
 
 // hitTarget is the result of a hit test. Index depends on Kind. Menu labels,
 // tabs, tab closes and welcome rows use their list index. Explorer rows, the editor text,
-// the gutter and the scrollbar use the row offset from the top of their area:
-// body row 0 is screen row 2 for the editor and the explorer. The caller maps
-// that offset to a line or a tree row.
+// the gutter and the scrollbar use the row offset from the top of their pane. A pane's
+// row 0 is its top row, and explorer tree row 0 is screen row 2 (explorerBodyTop). The
+// caller maps that offset to a line or a tree row. Pane is the index of the editor pane
+// under a press, into layout.panes.
 type hitTarget struct {
 	Kind  hitKind
 	Index int
+	Pane  int
 }
 
 // hit returns what is at column x, row y. Targets are checked in paint order,
-// top-most first: status row, menu bar, tab strip, explorer, editor. Under the
-// gate there are no targets.
+// top-most first: status row, menu bar, explorer title, tab strip, explorer,
+// editor. Under the gate there are no targets.
 func (l layout) hit(x, y int) hitTarget {
 	none := hitTarget{Kind: hitNone}
 	if l.gated || x < 0 || y < 0 || x >= l.w || y >= l.h {
 		return none
 	}
-	if y == l.statusY {
+	if l.statusOn && y == l.statusY {
 		return hitRuns(l.status, x, none)
 	}
-	if y == 0 {
+	if l.menuOn && y == 0 {
 		return hitRuns(l.menuRuns, x, none)
 	}
-	if y == 1 {
-		if l.explorerOpen && x < l.ex {
-			return l.hitExplorerTitle(x)
-		}
+	if l.explorerOpen && x < l.ex && y == explorerTitleRow {
+		return l.hitExplorerTitle(x)
+	}
+	if y == l.stripY {
 		return hitRuns(l.strip.runs, x, none)
 	}
 	if l.explorerOpen && x < l.ex && y <= l.exBottom {
@@ -97,23 +103,35 @@ func (l layout) hitExplorer(x, y int) hitTarget {
 	case x == 0 || y == l.exBottom:
 		return hitTarget{Kind: hitExplorerBody}
 	}
-	if row := y - l.bodyTop; row < l.exRows {
+	if row := y - explorerBodyTop; row < l.exRows {
 		return hitTarget{Kind: hitExplorerRow, Index: row}
 	}
 	return hitTarget{Kind: hitExplorerBody}
 }
 
-// hitEditor covers the editor body: the gutter, the text, and the last column
-// when the content overflows. The last column reports the track here.
+// hitEditor covers the editor panes: the gutter, the text, and the last column of a
+// pane whose content overflows, which reports the track. A line between two panes is
+// hitSplitBorder and takes no press.
 func (l layout) hitEditor(x, y int) hitTarget {
-	row := y - l.bodyTop
-	switch {
-	case x < l.textX:
-		return hitTarget{Kind: hitGutter, Index: row}
-	case l.scrollbar && x == l.w-1:
-		return hitTarget{Kind: hitScrollbarTrack, Index: row}
+	for i, p := range l.panes {
+		if !p.contains(x, y) {
+			continue
+		}
+		row := y - p.y
+		switch {
+		case x < p.textX:
+			return hitTarget{Kind: hitGutter, Index: row, Pane: i}
+		case p.scrollbar && x == p.x+p.w-1:
+			return hitTarget{Kind: hitScrollbarTrack, Index: row, Pane: i}
+		}
+		return hitTarget{Kind: hitEditorText, Index: row, Pane: i}
 	}
-	return hitTarget{Kind: hitEditorText, Index: row}
+	for i, b := range l.borders {
+		if b.contains(x, y) {
+			return hitTarget{Kind: hitSplitBorder, Index: i}
+		}
+	}
+	return hitTarget{Kind: hitNone}
 }
 
 // hitWelcome covers the welcome screen in the editor pane: its rows are targets,

@@ -39,6 +39,32 @@ type EditorState interface {
 	ScrollTo(top int)
 }
 
+// ShellRunner is the optional view of the editor that lets the root run a shell
+// command off the update loop. shell_command and shell_command_replace go through it
+// when the editor has it: BeginShell prepares the job, a tea.Cmd runs it with
+// editor.RunShellJob, and EndShell applies the output when the result comes back. An
+// editor without it runs the command in Do, which blocks until the command ends. The
+// app adapter implements it.
+type ShellRunner interface {
+	BeginShell(a editor.Action, args map[string]any) (editor.ShellJob, error)
+	EndShell(job editor.ShellJob, out string, runErr error) editor.Result
+}
+
+// formatterEditor is the formatter surface of the editor, an optional port that the root
+// asserts on EditorState, as it does fileEditor. The app adapter implements it. HasFormatter
+// reports whether the active buffer has a formatter, and it answers the Format Buffer row's
+// when-clause. An editor without it has no formatter, so the row stays disabled.
+type formatterEditor interface {
+	HasFormatter() bool
+}
+
+// rootEditor is the editor's workspace root, an optional port that the root asserts on
+// EditorState. The root calls SetRoot on its update loop when a project opens, so the editor
+// measures relative paths from the folder that is open now. The app adapter implements it.
+type rootEditor interface {
+	SetRoot(root string)
+}
+
 // Document is the view of the active buffer that the root and the text pane
 // read. It is the pane's view (editorpane.Document) plus the name and the first
 // visible line. The app adapter passes the editor's document through.
@@ -48,11 +74,16 @@ type Document interface {
 	Top() int // the first visible line of the viewport
 	// Encoding is the encoding label of the saved text, "ASCII" or "UTF-8".
 	Encoding() string
+	// LineEnding is "LF" or "CRLF", the ending of the saved text.
+	LineEnding() string
 }
 
-// TabInfo describes one tab of the tab strip.
+// TabInfo describes one tab of the tab strip. Path is the file the tab holds, or ""
+// for an untitled tab. The root uses it to watch the folders of the open tabs and to
+// reload the tabs whose files change.
 type TabInfo struct {
 	Name     string
+	Path     string
 	Modified bool
 	Preview  bool
 	Active   bool
@@ -72,6 +103,8 @@ type ExplorerTree interface {
 	ScrollOffset() int
 	ShowHidden() bool
 	SetShowHidden(v bool)
+	ShowIgnored() bool
+	SetShowIgnored(v bool)
 }
 
 // FileIndex is the async file list from internal/finder. Nil leaves the palette's
@@ -103,27 +136,85 @@ type FileOps interface {
 	Trash(ctx context.Context, path string) error
 }
 
-// LSPSession is the subset of an LSP client the UI uses (M8). Nil until M8.
+// LSPSession is the language-server port of the root. The app adapter wraps the
+// lsp.Manager of each workspace root. Positions and ranges are rune positions
+// (buffer.Pos), and the adapter converts them to and from the UTF-16 positions of
+// the protocol. Every call may wait on a server, so the root calls them only from
+// a tea.Cmd, never from Update. A nil port disables the language-server features.
 type LSPSession interface {
-	DidOpen(ctx context.Context, uri, languageID string, version int32, text string) error
-	DidChange(ctx context.Context, uri string, version int32, text string) error
-	DidClose(ctx context.Context, uri string) error
-	Diagnostics() <-chan DiagnosticsEvent
+	// SetRoot names the workspace root. Servers are kept per root.
+	SetRoot(root string)
+	// Supports reports whether a server is configured for languageID.
+	Supports(languageID string) bool
+	// Open sends the full text of the document at path, starting the server for
+	// languageID when it is not running.
+	Open(path, languageID, text string) error
+	// Change sends the full new text of an open document.
+	Change(path, text string) error
+	// Close sends the close of the document at path.
+	Close(path string) error
+	// Diagnostics returns the latest diagnostics of the document at path. ok is
+	// false until the server has published for it.
+	Diagnostics(path string) (DiagnosticsEvent, bool)
+	// Definition, Implementation and References return the places the symbol at
+	// at refers to.
+	Definition(path string, at buffer.Pos) ([]LSPLocation, error)
+	Implementation(path string, at buffer.Pos) ([]LSPLocation, error)
+	References(path string, at buffer.Pos) ([]LSPLocation, error)
+	// Hover returns the hover text at at, or "" when there is none.
+	Hover(path string, at buffer.Pos) (string, error)
+	// Completion returns the completion items at at.
+	Completion(path string, at buffer.Pos) ([]CompletionItem, error)
+	// Rename renames the symbol at at to name and returns the edits per file.
+	Rename(path string, at buffer.Pos, name string) ([]FileEdit, error)
+	// CodeActions returns the titles of the code actions at at.
+	CodeActions(path string, at buffer.Pos) ([]string, error)
+	// Restart shuts down the servers of the current root. The root reopens its
+	// documents after it.
+	Restart() error
+	// Stop shuts down every server.
+	Stop() error
 }
 
-// DiagnosticsEvent carries the diagnostics of one document version. The UI
-// skips empty sets.
+// DiagnosticsEvent is the diagnostics of one document. An empty Items list clears
+// them.
 type DiagnosticsEvent struct {
-	URI     string
-	Version int32
-	Items   []Diagnostic
+	Path  string
+	Items []Diagnostic
 }
 
-// Diagnostic is one problem at a position. Line and Col are zero-based.
+// Diagnostic is one problem in a document. Start and End are its rune range, and
+// Severity uses the LSP numbers, from editorpane.SeverityError to SeverityHint.
 type Diagnostic struct {
-	Line, Col int
-	Severity  int
-	Message   string
+	Start, End buffer.Pos
+	Severity   int
+	Message    string
+}
+
+// LSPLocation is a place in a document: the path and its rune range.
+type LSPLocation struct {
+	Path       string
+	Start, End buffer.Pos
+}
+
+// CompletionItem is one completion candidate. Insert is the text to insert, and
+// Range is the document range it replaces, or nil when the server gave none and
+// the text goes at the caret.
+type CompletionItem struct {
+	Label, Detail string
+	Insert        string
+	Range         *LSPRange
+}
+
+// LSPRange is a rune range in a document.
+type LSPRange struct {
+	Start, End buffer.Pos
+}
+
+// FileEdit is the text edits a rename makes in one document.
+type FileEdit struct {
+	Path  string
+	Edits []editor.LSPEdit
 }
 
 // MarkdownRenderer renders a markdown preview at a fixed width. Nil until a
@@ -212,6 +303,17 @@ type Deps struct {
 	// ShowExplorer shows the explorer at startup, with the root expanded. The app
 	// sets it when a folder argument is given. It has no effect without Explorer.
 	ShowExplorer bool
+	// HideMenuBar removes the menu bar row. The zero value shows it, as Fresh does.
+	HideMenuBar bool
+	// HideLineNumbers removes the line-number gutter. The zero value shows it.
+	HideLineNumbers bool
+	// TabSize is the columns per tab stop of the editor text. A tab expands to the next
+	// stop, and the indent guides, visible whitespace and indentation folds use it too.
+	// The zero value means 4.
+	TabSize int
+	// Notice is a startup message for the status row, such as the first config
+	// warning. Empty shows nothing.
+	Notice string
 	// Recents are the recent folders, newest first. The welcome screen lists up to
 	// five of them. Nil leaves the list empty.
 	Recents []string
@@ -223,10 +325,22 @@ type Deps struct {
 	// shortcuts.
 	Commands []palmodel.Entry
 	Ops      FileOps    // nil until P6
-	LSP      LSPSession // nil until M8
+	LSP      LSPSession // nil disables the language-server features
 	Markdown MarkdownRenderer
 	Keys     Keymap
 	Theme    theme.Theme
+	// Settings is the effective configuration that open_settings lists, and whose
+	// user file settings_activate opens. The zero value lists blank settings.
+	Settings Settings
+	// SwitchKeymap builds the keymap of the built-in preset called name.
+	// switch_keybinding_map calls it, and the root uses the keymap it returns for the
+	// next key press. Nil disables the switch.
+	SwitchKeymap func(name string) (Keymap, error)
 	// Clock supplies the press times for double-click detection. Nil means time.Now.
 	Clock func() time.Time
+	// View holds the starting display settings. Nil means DefaultViewOptions.
+	View *ViewOptions
+	// Root holds the optional ports of the root features: Switch Project, Live
+	// Grep, git markers, the file watcher and the auto-save interval.
+	Root RootPorts
 }

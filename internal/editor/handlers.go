@@ -3,6 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tbxark/gvim/internal/buffer"
 )
@@ -58,11 +59,88 @@ func buildHandlers() map[Action]handler {
 	})
 	h["insert_char"] = docAction(insertChar)
 	h["insert_newline"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.insertText("\n")
+		d.insertNewline(e.opts.AutoIndent)
 		return nil
 	})
 	h["insert_tab"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.insertText("\t")
+		e.insertTab(d)
+		return nil
+	})
+	h["dedent_selection"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.dedent(e.tabSizeOf(d))
+		return nil
+	})
+	h["duplicate_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.duplicateLines()
+		return nil
+	})
+	h["delete_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.deleteLine()
+		return nil
+	})
+	h["open_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.openLine()
+		return nil
+	})
+	h["select_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.selectLine()
+		return nil
+	})
+	h["expand_line_selection"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.expandLineSelection()
+		return nil
+	})
+	h["move_to_paragraph_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.jumpTo(paragraphUp(d.Buffer, d.Cursor.Line), false)
+		return nil
+	})
+	h["select_to_paragraph_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.jumpTo(paragraphUp(d.Buffer, d.Cursor.Line), true)
+		return nil
+	})
+	h["move_to_paragraph_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		target, ok := blankLineBelow(d.Buffer, d.Cursor.Line)
+		if !ok {
+			target = paragraphEnd(d.Buffer)
+		}
+		if d.Cursor.Less(target) {
+			d.jumpTo(target, false)
+		}
+		return nil
+	})
+	h["select_to_paragraph_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		target, ok := blankLineBelow(d.Buffer, d.Cursor.Line)
+		if !ok {
+			target = d.Buffer.End()
+		}
+		d.jumpTo(target, true)
+		return nil
+	})
+	h["to_upper_case"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.transformCase(strings.ToUpper)
+		return nil
+	})
+	h["to_lower_case"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.transformCase(strings.ToLower)
+		return nil
+	})
+	h["transpose_chars"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.transposeChars()
+		return nil
+	})
+	h["toggle_comment"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		return d.toggleComment()
+	})
+	h["scroll_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		e.scrollView(d, -1)
+		return nil
+	})
+	h["scroll_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		e.scrollView(d, 1)
+		return nil
+	})
+	h["recenter"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		e.recenter(d)
 		return nil
 	})
 	h["delete_backward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
@@ -130,22 +208,8 @@ func buildHandlers() map[Action]handler {
 		}
 		return nil
 	})
-	h["undo"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		if pos, ok := d.Buffer.Undo(); ok {
-			d.Cursor = d.Buffer.Clamp(pos)
-			d.Sel = nil
-			d.want = -1
-		}
-		return nil
-	})
-	h["redo"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		if pos, ok := d.Buffer.Redo(); ok {
-			d.Cursor = d.Buffer.Clamp(pos)
-			d.Sel = nil
-			d.want = -1
-		}
-		return nil
-	})
+	h["undo"] = docAction(undoAction)
+	h["redo"] = docAction(redoAction)
 	// save returns ErrNoPath for an untitled buffer. The UI then runs Save As.
 	h["save"] = func(e *Editor, _ map[string]any) error {
 		return e.Save()
@@ -157,9 +221,9 @@ func buildHandlers() map[Action]handler {
 		}
 		return e.saveAs(path, forced(args))
 	}
-	// The editor has one cursor, so there are no secondary cursors to remove.
-	// Escape sends this action, and it must do nothing and report nothing.
-	h["remove_secondary_cursors"] = func(*Editor, map[string]any) error {
+	// noop is how a keymap unbinds a key that a preset binds elsewhere, such as
+	// Alt+1 on macOS. It does nothing and reports nothing, with or without a tab.
+	h["noop"] = func(*Editor, map[string]any) error {
 		return nil
 	}
 	// new opens Untitled-N in a new tab. The untouched placeholder buffer is
@@ -209,6 +273,12 @@ func buildHandlers() map[Action]handler {
 		e.quit = true
 		return nil
 	}
+	registerCursorHandlers(h)
+	registerMarksHandlers(h)
+	registerTextCmdHandlers(h)
+	registerDocCmdHandlers(h)
+	registerTabSwitchHandlers(h)
+	registerDocumentHandlers(h)
 	return h
 }
 
@@ -222,7 +292,7 @@ func docAction(fn func(e *Editor, d *Document, args map[string]any) error) handl
 // pageHandler moves the cursor one pane in direction dir (-1 up, +1 down).
 func pageHandler(dir int, extend bool) handler {
 	return docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		pageMove(e, d, dir, extend)
+		pageMove(e, d, dir, extend || e.marking(d))
 		return nil
 	})
 }
@@ -268,7 +338,7 @@ func moveHandler(m motion, extend, vertical bool) handler {
 		if !vertical {
 			d.want = -1
 		}
-		d.move(m(d, e.rows), extend)
+		d.move(m(d, e.rows), extend || e.marking(d))
 		return nil
 	})
 }

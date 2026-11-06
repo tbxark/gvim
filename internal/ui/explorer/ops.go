@@ -3,6 +3,7 @@ package explorer
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -26,10 +27,18 @@ type (
 	RenameMsg struct{ Path string }
 	// DeleteMsg asks the root to confirm and move Path to the trash (Delete).
 	DeleteMsg struct{ Path string }
-	// CopyMsg puts Path on the explorer clipboard as a copy (Ctrl+C).
-	CopyMsg struct{ Path string }
-	// CutMsg puts Path on the explorer clipboard as a move (Ctrl+X).
-	CutMsg struct{ Path string }
+	// CopyMsg puts Path on the explorer clipboard as a copy (Ctrl+C). A
+	// multi-item copy sends Paths instead, every entry in display order.
+	CopyMsg struct {
+		Path  string
+		Paths []string
+	}
+	// CutMsg puts Path on the explorer clipboard as a move (Ctrl+X). A multi-item
+	// cut sends Paths instead, every entry in display order.
+	CutMsg struct {
+		Path  string
+		Paths []string
+	}
 	// PasteMsg pastes the explorer clipboard into Dir (Ctrl+V).
 	PasteMsg struct{ Dir string }
 )
@@ -54,13 +63,50 @@ const (
 var ErrConflict = errors.New("destination already exists")
 
 // selectedMsg returns the command that sends the message make builds from the
-// selected entry's path. With no selection it returns nil and nothing is sent.
-func (p Panel) selectedMsg(make func(path string) tea.Msg) tea.Cmd {
+// selected entry's path. With no selection it returns nil and nothing is sent. The
+// tree root cannot be renamed or deleted, so for it the command is a refusal, and
+// verb names the refused operation in the notice.
+func (p Panel) selectedMsg(verb string, make func(path string) tea.Msg) tea.Cmd {
 	sel, ok := p.tree.Selected()
 	if !ok {
 		return nil
 	}
+	if sel.Path == p.tree.Root() {
+		return rootRefused(verb)
+	}
 	return emit(make(sel.Path))
+}
+
+// rootRefused returns the command that reports an operation the tree root does not
+// allow. The root shows the error as a notice.
+func rootRefused(verb string) tea.Cmd {
+	return emit(ErrorMsg{Err: errors.New("the explorer root cannot be " + verb)})
+}
+
+// clipboardMsg is the CopyMsg, or the CutMsg when cut is set, for paths. One path
+// goes in the Path field, which single-item callers use. Several go in Paths, in
+// display order.
+func clipboardMsg(paths []string, cut bool) tea.Msg {
+	var path string
+	var many []string
+	if len(paths) == 1 {
+		path = paths[0]
+	} else {
+		many = paths
+	}
+	if cut {
+		return CutMsg{Path: path, Paths: many}
+	}
+	return CopyMsg{Path: path, Paths: many}
+}
+
+// Within reports whether path is dir or lies under it. Both are cleaned paths.
+func Within(path, dir string) bool {
+	if path == dir {
+		return true
+	}
+	sep := string(filepath.Separator)
+	return strings.HasPrefix(path, strings.TrimSuffix(dir, sep)+sep)
 }
 
 // targetDir is the directory a new entry or a paste goes into: the selected

@@ -19,8 +19,8 @@ type ListOptions struct {
 	ShowIgnored bool // include entries matched by a .gitignore
 	// IgnoreRoot is the directory whose .gitignore files apply to the listed
 	// directory: the files from IgnoreRoot down to dir, as the tree applies them
-	// from its root. Empty means dir is its own root. Unused when ShowIgnored
-	// is true.
+	// from its root. Empty means dir is its own root. It applies whether or not
+	// ShowIgnored is set, since it decides Entry.IsIgnored.
 	IgnoreRoot string
 }
 
@@ -32,6 +32,7 @@ type Entry struct {
 	IsDir     bool
 	IsSymlink bool
 	IsHidden  bool
+	IsIgnored bool // matched by a .gitignore; only listed when ShowIgnored is set
 	Size      int64
 	ModTime   time.Time
 }
@@ -50,20 +51,17 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 		return nil, fmt.Errorf("explorer: list %q: %w", dir, err)
 	}
 
-	var m gitignore.Matcher
-	var rel []string
-	if !opts.ShowIgnored {
-		root := abs
-		if opts.IgnoreRoot != "" {
-			if root, err = filepath.Abs(opts.IgnoreRoot); err != nil {
-				return nil, fmt.Errorf("explorer: list %q: %w", dir, err)
-			}
-		}
-		if rel, err = relSegments(root, abs); err != nil {
+	root := abs
+	if opts.IgnoreRoot != "" {
+		if root, err = filepath.Abs(opts.IgnoreRoot); err != nil {
 			return nil, fmt.Errorf("explorer: list %q: %w", dir, err)
 		}
-		m = gitignore.NewMatcher(ignoreRules(root, rel))
 	}
+	rel, err := relSegments(root, abs)
+	if err != nil {
+		return nil, fmt.Errorf("explorer: list %q: %w", dir, err)
+	}
+	m := gitignore.NewMatcher(ignoreRules(root, rel))
 
 	out := make([]Entry, 0, len(dirents))
 	for _, d := range dirents {
@@ -76,7 +74,8 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 		if err != nil {
 			continue // removed since ReadDir
 		}
-		if !opts.ShowIgnored && m.Match(append(slices.Clip(rel), name), isDir) {
+		ignored := m.Match(append(slices.Clip(rel), name), isDir)
+		if ignored && !opts.ShowIgnored {
 			continue
 		}
 		out = append(out, Entry{
@@ -84,6 +83,7 @@ func ListDir(dir string, opts ListOptions) ([]Entry, error) {
 			IsDir:     isDir,
 			IsSymlink: d.Type()&os.ModeSymlink != 0,
 			IsHidden:  hidden,
+			IsIgnored: ignored,
 			Size:      info.Size(),
 			ModTime:   info.ModTime(),
 		})

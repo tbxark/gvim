@@ -1,0 +1,274 @@
+package editor
+
+import (
+	"strings"
+	"testing"
+)
+
+// viewFlagCase runs one per-document flag action with args and checks the flag
+// it names reads want.
+type viewFlagCase struct {
+	name   string
+	action Action
+	args   map[string]any
+	flag   func(ViewSettings) bool
+	want   bool
+}
+
+func TestViewFlagActionsSetTheirOverride(t *testing.T) {
+	t.Parallel()
+	lineNumbers := func(s ViewSettings) bool { return OverrideOr(s.LineNumbers, false) }
+	wrap := func(s ViewSettings) bool { return OverrideOr(s.LineWrap, false) }
+	current := func(s ViewSettings) bool { return OverrideOr(s.CurrentLine, false) }
+	occurrences := func(s ViewSettings) bool { return OverrideOr(s.Occurrences, false) }
+	whitespace := func(s ViewSettings) bool { return OverrideOr(s.Whitespace, false) }
+	tests := []viewFlagCase{
+		{"line numbers on", "toggle_line_numbers_current_buffer", map[string]any{"value": true}, lineNumbers, true},
+		{"line numbers off", "toggle_line_numbers_current_buffer", map[string]any{"value": false}, lineNumbers, false},
+		{"wrap off", "toggle_line_wrap_current_buffer", map[string]any{"value": false}, wrap, false},
+		{"current line off", "toggle_current_line_highlight_current_buffer", map[string]any{"value": false}, current, false},
+		{"occurrences on", "toggle_occurrence_highlight_current_buffer", map[string]any{"value": true}, occurrences, true},
+		{"whitespace on", "toggle_whitespace_indicators", map[string]any{"value": true}, whitespace, true},
+		{"virtual space on", "toggle_virtual_space_current_buffer", map[string]any{"value": true},
+			func(s ViewSettings) bool { return s.VirtualSpaceOn() }, true},
+		{"indent guides on", "toggle_indentation_guide_current_buffer", map[string]any{"value": true},
+			func(s ViewSettings) bool { return s.IndentGuidesOn() }, true},
+		{"fold indicators off", "toggle_fold_indicators_current_buffer", map[string]any{"value": false},
+			func(s ViewSettings) bool { return s.FoldIndicatorsOn() }, false},
+		{"tab indicators off", "toggle_tab_indicators", map[string]any{"value": false},
+			func(s ViewSettings) bool { return s.TabIndicatorsOn() }, false},
+		{"page view on", "toggle_page_view", map[string]any{"value": true},
+			func(s ViewSettings) bool { return s.PageView }, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e, _ := openFixture(t, Options{}, "abc\n")
+			if r := e.Do(tt.action, tt.args); r.Err != nil {
+				t.Fatalf("Do(%s): %v", tt.action, r.Err)
+			}
+			if got := tt.flag(e.Active().ViewSettings()); got != tt.want {
+				t.Fatalf("%s: flag = %v, want %v", tt.action, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestViewFlagWithoutValueFlipsFromItsDefault(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		action Action
+		before bool // the flag as a new document reads it
+	}{
+		{"toggle_fold_indicators_current_buffer", true},
+		{"toggle_tab_indicators", true},
+		{"toggle_indentation_guide_current_buffer", false},
+		{"toggle_virtual_space_current_buffer", false},
+		{"toggle_page_view", false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.action), func(t *testing.T) {
+			t.Parallel()
+			e, _ := openFixture(t, Options{}, "abc\n")
+			run(t, e, tt.action)
+			after := e.Active().ViewSettings()
+			if got := viewFlagOf(after, tt.action); got == tt.before {
+				t.Fatalf("one toggle left the flag at %v, want %v", got, !tt.before)
+			}
+			run(t, e, tt.action)
+			if got := viewFlagOf(e.Active().ViewSettings(), tt.action); got != tt.before {
+				t.Fatalf("two toggles gave %v, want the default %v", got, tt.before)
+			}
+		})
+	}
+}
+
+// viewFlagOf reads the flag that action names, for the flip tests.
+func viewFlagOf(s ViewSettings, action Action) bool {
+	switch action {
+	case "toggle_fold_indicators_current_buffer":
+		return s.FoldIndicatorsOn()
+	case "toggle_tab_indicators":
+		return s.TabIndicatorsOn()
+	case "toggle_indentation_guide_current_buffer":
+		return s.IndentGuidesOn()
+	case "toggle_virtual_space_current_buffer":
+		return s.VirtualSpaceOn()
+	case "toggle_page_view":
+		return s.PageView
+	}
+	return false
+}
+
+func TestIndentationStyleFlipsFromTheEditorOption(t *testing.T) {
+	t.Parallel()
+	for _, useTabs := range []bool{false, true} {
+		e, _ := openFixture(t, Options{UseTabs: useTabs}, "abc\n")
+		run(t, e, "toggle_indentation_style")
+		if got := OverrideOr(e.Active().ViewSettings().IndentTabs, !useTabs); got == useTabs {
+			t.Fatalf("UseTabs=%v: one toggle kept the style, want it flipped", useTabs)
+		}
+	}
+}
+
+func TestRulersAddOnceAndRemove(t *testing.T) {
+	t.Parallel()
+	e, _ := openFixture(t, Options{}, "abc\n")
+	ruler := func() []int { return e.Active().ViewSettings().Rulers }
+	run := func(a Action, col int) error {
+		return e.Do(a, map[string]any{"column": col}).Err
+	}
+	if err := run("add_ruler", 80); err != nil {
+		t.Fatalf("add_ruler 80: %v", err)
+	}
+	if err := run("add_ruler", 80); err != nil {
+		t.Fatalf("second add_ruler 80: %v", err)
+	}
+	if err := run("add_ruler", 100); err != nil {
+		t.Fatalf("add_ruler 100: %v", err)
+	}
+	if got := ruler(); len(got) != 2 || got[0] != 80 || got[1] != 100 {
+		t.Fatalf("rulers = %v, want [80 100]", got)
+	}
+	if err := run("remove_ruler", 80); err != nil {
+		t.Fatalf("remove_ruler 80: %v", err)
+	}
+	if got := ruler(); len(got) != 1 || got[0] != 100 {
+		t.Fatalf("after remove rulers = %v, want [100]", got)
+	}
+	if err := run("remove_ruler", 7); err == nil {
+		t.Fatal("remove_ruler of a missing column succeeded, want an error")
+	}
+}
+
+func TestRulerRejectsBadColumns(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		action Action
+		args   map[string]any
+	}{
+		{"no column", "add_ruler", nil},
+		{"zero", "add_ruler", map[string]any{"column": 0}},
+		{"too large", "add_ruler", map[string]any{"column": 5000}},
+		{"not a number", "add_ruler", map[string]any{"column": "80"}},
+		{"remove missing", "remove_ruler", map[string]any{"column": 3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e, _ := openFixture(t, Options{}, "abc\n")
+			if r := e.Do(tt.action, tt.args); r.Err == nil {
+				t.Fatalf("Do(%s, %v) succeeded, want an error", tt.action, tt.args)
+			}
+			if got := e.Active().ViewSettings().Rulers; len(got) != 0 {
+				t.Fatalf("rulers = %v after a refused action, want none", got)
+			}
+		})
+	}
+}
+
+func TestTabSizeAndPageWidthAreStoredPerDocument(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		action  Action
+		args    map[string]any
+		wantErr bool
+		check   func(ViewSettings) int
+		want    int
+	}{
+		{"tab size 2", "set_tab_size", map[string]any{"size": 2}, false,
+			func(s ViewSettings) int { return s.TabSize }, 2},
+		{"tab size from JSON number", "set_tab_size", map[string]any{"size": float64(8)}, false,
+			func(s ViewSettings) int { return s.TabSize }, 8},
+		{"tab size zero", "set_tab_size", map[string]any{"size": 0}, true,
+			func(s ViewSettings) int { return s.TabSize }, 0},
+		{"tab size too big", "set_tab_size", map[string]any{"size": 17}, true,
+			func(s ViewSettings) int { return s.TabSize }, 0},
+		{"tab size missing", "set_tab_size", nil, true,
+			func(s ViewSettings) int { return s.TabSize }, 0},
+		{"page width 100", "set_page_width", map[string]any{"width": 100}, false,
+			func(s ViewSettings) int { return s.PageWidth }, 100},
+		{"page width zero", "set_page_width", map[string]any{"width": 0}, true,
+			func(s ViewSettings) int { return s.PageWidth }, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e, _ := openFixture(t, Options{}, "abc\n")
+			r := e.Do(tt.action, tt.args)
+			if (r.Err != nil) != tt.wantErr {
+				t.Fatalf("Do(%s) error = %v, want error %v", tt.action, r.Err, tt.wantErr)
+			}
+			if got := tt.check(e.Active().ViewSettings()); got != tt.want {
+				t.Fatalf("stored value = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetLanguageStoresTheNameOnTheDocument(t *testing.T) {
+	t.Parallel()
+	e, _ := openFixture(t, Options{}, "abc\n")
+	if r := e.Do("set_language", map[string]any{"name": " Go "}); r.Err != nil {
+		t.Fatalf("set_language: %v", r.Err)
+	}
+	if got := e.Tabs()[0].Language; got != "Go" {
+		t.Fatalf("tab language = %q, want %q", got, "Go")
+	}
+	if r := e.Do("set_language", map[string]any{"name": 3}); r.Err == nil {
+		t.Fatal("set_language with a number succeeded, want an error")
+	}
+}
+
+func TestViewSettingsArePerDocument(t *testing.T) {
+	t.Parallel()
+	e, _ := openFixture(t, Options{}, "abc\n")
+	first := e.Active()
+	run(t, e, "new")
+	second := e.Active()
+	if err := e.Do("add_ruler", map[string]any{"column": 40}).Err; err != nil {
+		t.Fatalf("add_ruler: %v", err)
+	}
+	e.Do("toggle_page_view", map[string]any{"value": true})
+	if len(first.ViewSettings().Rulers) != 0 || first.ViewSettings().PageView {
+		t.Fatal("a ruler or page view on one document leaked into another")
+	}
+	if got := second.ViewSettings().Rulers; len(got) != 1 || got[0] != 40 {
+		t.Fatalf("second document rulers = %v, want [40]", got)
+	}
+}
+
+func TestOverrideOrReturnsTheDefaultWithoutAnOverride(t *testing.T) {
+	t.Parallel()
+	yes, no := true, false
+	tests := []struct {
+		name string
+		p    *bool
+		def  bool
+		want bool
+	}{
+		{"nil follows default on", nil, true, true},
+		{"nil follows default off", nil, false, false},
+		{"override on beats default off", &yes, false, true},
+		{"override off beats default on", &no, true, false},
+	}
+	for _, tt := range tests {
+		if got := OverrideOr(tt.p, tt.def); got != tt.want {
+			t.Errorf("%s: OverrideOr = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestBadViewValueLeavesFlagUnchanged(t *testing.T) {
+	t.Parallel()
+	e, _ := openFixture(t, Options{}, "abc\n")
+	r := e.Do("toggle_fold_indicators_current_buffer", map[string]any{"value": "yes"})
+	if r.Err == nil || !strings.Contains(r.Err.Error(), "value") {
+		t.Fatalf("error = %v, want one about value", r.Err)
+	}
+	if !e.Active().ViewSettings().FoldIndicatorsOn() {
+		t.Fatal("a refused value changed the fold indicators flag")
+	}
+}

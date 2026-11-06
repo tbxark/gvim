@@ -191,9 +191,10 @@ func (m *Model) welcomeVisible() bool {
 }
 
 // runWelcome runs the row at index i of the welcome screen. A door runs its
-// action through dispatch, as its shortcut would. A recent folder is not
-// opened, because the explorer root is fixed for the session, so it shows the
-// same notice as the browser's Switch Project.
+// action through dispatch, as its shortcut would. A recent folder runs the
+// switch-project flow (switchProject) for its path. The open_folder action reaches
+// the same flow when the browser picks a folder, so the port opens the folder and
+// the tree adopts it.
 func (m *Model) runWelcome(i int) tea.Cmd {
 	items := welcomeItems(m.recents)
 	if i < 0 || i >= len(items) {
@@ -201,8 +202,7 @@ func (m *Model) runWelcome(i int) tea.Cmd {
 	}
 	it := items[i]
 	if it.path != "" {
-		m.notice = "Switch Project is not supported in this port yet"
-		return nil
+		return m.switchProject(it.path)
 	}
 	return m.dispatch(Command{Action: it.action})
 }

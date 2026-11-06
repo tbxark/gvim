@@ -24,10 +24,13 @@ const DefaultDelay = 200 * time.Millisecond
 
 // Changed reports that entries in some watched directories changed. Dirs holds
 // the directories that contained a changed entry since the previous Changed,
-// sorted and without duplicates. An overflow in the operating system's queue
-// reports every watched directory.
+// sorted and without duplicates. Files holds the paths of the changed entries
+// themselves, in the same way, so a reader can tell which file changed. An
+// overflow in the operating system's queue reports every watched directory and
+// no file.
 type Changed struct {
-	Dirs []string
+	Dirs  []string
+	Files []string
 }
 
 // Timer is a scheduled call that can be cancelled. *time.Timer satisfies it.
@@ -57,12 +60,13 @@ type Watcher struct {
 	out   chan Changed
 	loop  chan struct{} // closed when the event loop returns
 
-	mu      sync.Mutex
-	watched map[string]bool // directories added and not removed
-	pending map[string]bool // directories changed since the last Changed
-	timer   Timer           // the quiet period in progress, if any
-	gen     uint64          // identifies the current quiet period
-	closed  bool
+	mu           sync.Mutex
+	watched      map[string]bool // directories added and not removed
+	pending      map[string]bool // directories changed since the last Changed
+	pendingFiles map[string]bool // entries changed since the last Changed
+	timer        Timer           // the quiet period in progress, if any
+	gen          uint64          // identifies the current quiet period
+	closed       bool
 }
 
 // New starts a watcher. It fails if the operating system cannot provide one.
@@ -72,13 +76,14 @@ func New(opts Options) (*Watcher, error) {
 		return nil, fmt.Errorf("watch: start: %w", err)
 	}
 	w := &Watcher{
-		fsw:     fsw,
-		delay:   opts.Delay,
-		after:   opts.AfterFunc,
-		out:     make(chan Changed, 1),
-		loop:    make(chan struct{}),
-		watched: make(map[string]bool),
-		pending: make(map[string]bool),
+		fsw:          fsw,
+		delay:        opts.Delay,
+		after:        opts.AfterFunc,
+		out:          make(chan Changed, 1),
+		loop:         make(chan struct{}),
+		watched:      make(map[string]bool),
+		pending:      make(map[string]bool),
+		pendingFiles: make(map[string]bool),
 	}
 	if w.delay <= 0 {
 		w.delay = DefaultDelay
@@ -169,8 +174,8 @@ func (w *Watcher) run() {
 	}
 }
 
-// event records the directory that holds the changed entry. If the entry is
-// itself a watched directory, that directory changed too.
+// event records the directory that holds the changed entry, and the entry itself. If
+// the entry is itself a watched directory, that directory changed too.
 func (w *Watcher) event(ev fsnotify.Event) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -178,25 +183,28 @@ func (w *Watcher) event(ev fsnotify.Event) {
 	if w.watched[ev.Name] {
 		dirs = append(dirs, ev.Name)
 	}
-	w.schedule(dirs)
+	w.schedule(dirs, []string{ev.Name})
 }
 
 // overflow handles an error from fsnotify. Events may have been lost, so every
-// watched directory counts as changed.
+// watched directory counts as changed, and no file is named.
 func (w *Watcher) overflow() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.schedule(slices.Collect(maps.Keys(w.watched)))
+	w.schedule(slices.Collect(maps.Keys(w.watched)), nil)
 }
 
-// schedule marks dirs as changed and restarts the quiet period. The caller
+// schedule marks dirs and files as changed and restarts the quiet period. The caller
 // holds mu.
-func (w *Watcher) schedule(dirs []string) {
-	if w.closed || len(dirs) == 0 {
+func (w *Watcher) schedule(dirs, files []string) {
+	if w.closed || len(dirs)+len(files) == 0 {
 		return
 	}
 	for _, d := range dirs {
 		w.pending[d] = true
+	}
+	for _, f := range files {
+		w.pendingFiles[f] = true
 	}
 	if w.timer != nil {
 		w.timer.Stop()
@@ -206,31 +214,42 @@ func (w *Watcher) schedule(dirs []string) {
 	w.timer = w.after(w.delay, func() { w.fire(gen) })
 }
 
-// fire sends the pending directories as one Changed. A timer that was
+// fire sends the pending directories and files as one Changed. A timer that was
 // superseded by a later change, or that fires after Close, does nothing.
 func (w *Watcher) fire(gen uint64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.closed || gen != w.gen || len(w.pending) == 0 {
+	if w.closed || gen != w.gen || len(w.pending)+len(w.pendingFiles) == 0 {
 		return
 	}
 	w.timer = nil
-	ev := Changed{Dirs: slices.Sorted(maps.Keys(w.pending))}
+	ev := Changed{
+		Dirs:  slices.Sorted(maps.Keys(w.pending)),
+		Files: slices.Sorted(maps.Keys(w.pendingFiles)),
+	}
 	clear(w.pending)
+	clear(w.pendingFiles)
 	select {
 	case w.out <- ev:
 		return
 	default:
 	}
 	// The reader has not taken the previous Changed. Merge it into this one
-	// so the reader sees every directory. Only fire sends, and it holds mu, so
-	// the buffer is empty once the old value is taken.
+	// so the reader sees every directory and file. Only fire sends, and it holds
+	// mu, so the buffer is empty once the old value is taken.
 	select {
 	case old := <-w.out:
-		merged := append(old.Dirs, ev.Dirs...)
-		slices.Sort(merged)
-		ev.Dirs = slices.Compact(merged)
+		ev.Dirs = union(old.Dirs, ev.Dirs)
+		ev.Files = union(old.Files, ev.Files)
 	default:
 	}
 	w.out <- ev
+}
+
+// union returns the sorted paths of a and b, without duplicates. It does not change
+// either slice.
+func union(a, b []string) []string {
+	merged := append(slices.Clone(a), b...)
+	slices.Sort(merged)
+	return slices.Compact(merged)
 }

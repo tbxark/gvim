@@ -31,6 +31,7 @@ func (e *Editor) GotoLine(line, col int) error {
 		e.setStatus(err.Error())
 		return err
 	}
+	e.pushJump()
 	d := e.Active()
 	target := buffer.Pos{Line: min(line, d.Buffer.Lines()) - 1, Col: max(col, 1) - 1}
 	d.want = -1

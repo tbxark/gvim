@@ -730,3 +730,61 @@ func TestEnterOnEmptyRowsIsSafe(t *testing.T) {
 		t.Error("selected a row in an empty list")
 	}
 }
+
+// TestAltSCyclesSortAndKeepsDirectoriesFirst checks the sort orders. Alt+S cycles
+// Name, Size and Modified, each ascending, and a directory stays first in every
+// order. The directory is larger than the smallest file, so a sort that ignored
+// the kind would put it in the middle.
+func TestAltSCyclesSortAndKeepsDirectoriesFirst(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(dir, "d"), 0o755))
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	files := []struct {
+		name string
+		size int
+		age  time.Duration
+	}{
+		{"a.txt", 30, 3 * time.Hour},
+		{"b.txt", 1, 1 * time.Hour},
+		{"c.txt", 500, 2 * time.Hour},
+	}
+	for _, f := range files {
+		p := filepath.Join(dir, f.name)
+		must(t, os.WriteFile(p, make([]byte, f.size), 0o644))
+		must(t, os.Chtimes(p, base.Add(f.age), base.Add(f.age)))
+	}
+	b := New(Options{Dir: dir, Home: filepath.Join(dir, "home")})
+	if got, want := entryNames(b), []string{"d/", "a.txt", "b.txt", "c.txt"}; !slices.Equal(got, want) {
+		t.Fatalf("Name order = %v, want %v", got, want)
+	}
+	steps := []struct {
+		notice string
+		order  []string
+	}{
+		{"Sort by Size", []string{"d/", "b.txt", "a.txt", "c.txt"}},
+		{"Sort by Modified", []string{"d/", "b.txt", "c.txt", "a.txt"}},
+		{"Sort by Name", []string{"d/", "a.txt", "b.txt", "c.txt"}},
+	}
+	for _, s := range steps {
+		send(t, b, altKey('s'))
+		if got := b.Notice(); got != s.notice {
+			t.Errorf("notice = %q, want %q", got, s.notice)
+		}
+		if got := entryNames(b); !slices.Equal(got, s.order) {
+			t.Errorf("%s order = %v, want %v", s.notice, got, s.order)
+		}
+	}
+}
+
+// entryNames returns the names of the directory and file rows, in order, so the
+// special rows do not take part in the sort check.
+func entryNames(b *Browser) []string {
+	var out []string
+	for _, r := range b.Rows() {
+		if r.Kind == RowDir || r.Kind == RowFile {
+			out = append(out, r.Name)
+		}
+	}
+	return out
+}

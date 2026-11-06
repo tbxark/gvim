@@ -141,7 +141,7 @@ func TestRenderTopClampsToDocument(t *testing.T) {
 
 func TestRenderWrapsLongLineAtTextWidthMinusTwo(t *testing.T) {
 	// W=14 (legacy layout): the gutter is 6, so the wrap width is 14-6-2 = 6.
-	p := Pane{Doc: newDoc("hello world", "second line", "third")}
+	p := Pane{Wrap: true, Doc: newDoc("hello world", "second line", "third")}
 	assertRows(t, p.Render(14, 8), []string{
 		"  1 │ hello",
 		"    │ world",
@@ -190,7 +190,7 @@ func TestRenderSelectionWithoutBackgroundReverses(t *testing.T) {
 
 func TestCaretTracksRowsAcrossWrap(t *testing.T) {
 	d := newDoc("hello world", "second line", "third")
-	p := Pane{Doc: d}
+	p := Pane{Wrap: true, Doc: d}
 	cases := []struct {
 		name       string
 		line, col  int
@@ -352,7 +352,7 @@ func TestWrappedRowsTakeTheLineMarks(t *testing.T) {
 		saved:    []string{""},
 		modified: true,
 	}
-	g := Pane{Doc: d}.Render(14, 3)
+	g := Pane{Wrap: true, Doc: d}.Render(14, 3)
 	// Both rows of the changed line take the margin bar and the last-column mark.
 	for _, y := range []int{0, 1} {
 		if got := g.At(0, y).Text; got != "│" {
@@ -427,7 +427,7 @@ func TestHitOutsideTheBodyIsNone(t *testing.T) {
 }
 
 func TestHitWrappedRowMapsWithinTheLine(t *testing.T) {
-	p := Pane{Doc: newDoc("hello world", "second line", "third")}
+	p := Pane{Wrap: true, Doc: newDoc("hello world", "second line", "third")}
 	// Row 1 is "world", which starts at column 6 of the line.
 	if h := p.Hit(14, 8, 8, 1); h.Pos != (buffer.Pos{Line: 0, Col: 8}) {
 		t.Errorf("click on 'world' gave %+v, want column 8", h.Pos)

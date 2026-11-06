@@ -13,6 +13,16 @@
 //
 // The package does not choose the platform keymap. Keymap is empty unless a
 // file sets it, and the caller applies its own default.
+//
+// The lsp key maps a language ID to the language server that runs for it:
+// {"lsp": {"go": {"command": "gopls", "args": []}}}. No language server runs
+// unless the lsp key lists its language, so a fresh install starts none. A later
+// layer that sets lsp replaces the whole map.
+//
+// The formatters key maps a language name, or a file extension with its dot, to the
+// command that formats a buffer: {"formatters": {"go": "gofmt", ".go": "gofmt"}}. Keys
+// are matched without regard to case, and the language name is tried before the
+// extension. A later layer that sets formatters replaces the whole map.
 package config
 
 import (
@@ -21,9 +31,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/tailscale/hujson"
 )
@@ -41,6 +54,30 @@ const (
 	MaxTabSize = 16
 )
 
+// Cursor shapes accepted by cursor_style.
+const (
+	CursorStyleBlock     = "block"
+	CursorStyleBar       = "bar"
+	CursorStyleUnderline = "underline"
+)
+
+// DefaultPluginTimeout is the plugin_timeout_ms default. The plugin host applies the
+// same default when it is given no timeout.
+const DefaultPluginTimeout = 500 * time.Millisecond
+
+// Plugin timeout bounds, in milliseconds, accepted by plugin_timeout_ms.
+const (
+	MinPluginTimeoutMS = 1
+	MaxPluginTimeoutMS = 60000
+)
+
+// LSPServer is the language server for one language, as the lsp key writes it.
+// Command is the program, and Args are passed to it in order.
+type LSPServer struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+}
+
 // Config is the effective set of settings after all layers are merged.
 type Config struct {
 	Theme                  string // theme name, default "dark"
@@ -52,12 +89,46 @@ type Config struct {
 	EnsureFinalNewline     bool   // end the file with a newline on save
 	AutoIndent             bool   // copy indentation to new lines, default true
 	LineNumbers            bool   // show the line-number gutter, default true
+	ShowMenuBar            bool   // show the menu bar row, default true
 	ExplorerShowHidden     bool   // list dot-files in the explorer
 	ExplorerShowIgnored    bool   // list files matched by .gitignore in the explorer
 
-	// Keybindings is the raw JSON object of keybinding overrides, or nil. A
-	// layer that sets it replaces the value from the layers below it as a whole.
+	// The view keys set the starting state of the display toggles. The
+	// defaults keep the layout gvim had before they existed.
+	ShowTabBar              bool   // show the tab strip row, default true
+	ShowStatusBar           bool   // show the status row, default true
+	ShowPromptLine          bool   // show the prompt row under the status row, default false
+	ShowVerticalScrollbar   bool   // draw the vertical scrollbar, default true
+	ShowHorizontalScrollbar bool   // draw the horizontal scrollbar when lines are wider, default true
+	LineWrap                bool   // wrap long lines, default true
+	HighlightCurrentLine    bool   // tint the caret line, default true
+	HighlightOccurrences    bool   // highlight the other occurrences of the word at the caret, default false
+	ShowWhitespace          bool   // show spaces as dots and tabs as arrows, default false
+	MouseCapture            bool   // gvim takes the mouse; false leaves it to the terminal, default true
+	MouseHover              bool   // hover information on mouse movement, default false
+	ScrollSync              bool   // scroll split views of one buffer together, default false
+	CursorStyle             string // "block", "bar" or "underline"; default "block"
+
+	// PluginTimeout is the longest one plugin call may run, default 500ms.
+	PluginTimeout time.Duration
+
+	// Keybindings is the raw JSON object of keybinding overrides, or nil. Its
+	// schema is the bindings of a keymap file: {"bindings": [...]}. A layer that
+	// sets it replaces the value from the layers below it as a whole.
 	Keybindings json.RawMessage
+
+	// LSP maps a language ID to its language server, or is nil when no file sets
+	// the lsp key. A language that is not in the map runs no server.
+	LSP map[string]LSPServer
+
+	// Formatters maps a language name, or a file extension with its dot, to the shell
+	// command that formats a buffer, or is nil when no file sets the formatters key.
+	// The command reads the text on standard input and writes the result to standard
+	// output. A buffer whose language and extension are not in the map has no formatter.
+	Formatters map[string]string
+
+	// sources maps each key that a file set to the path of that file.
+	sources map[string]string
 }
 
 // Defaults returns the built-in settings, the lowest layer.
@@ -69,7 +140,26 @@ func Defaults() Config {
 		LineEnding:   LineEndingAuto,
 		AutoIndent:   true,
 		LineNumbers:  true,
+		ShowMenuBar:  true,
+
+		ShowTabBar:              true,
+		ShowStatusBar:           true,
+		ShowVerticalScrollbar:   true,
+		ShowHorizontalScrollbar: true,
+		LineWrap:                true,
+		HighlightCurrentLine:    true,
+		MouseCapture:            true,
+		CursorStyle:             CursorStyleBlock,
+
+		PluginTimeout: DefaultPluginTimeout,
 	}
+}
+
+// Source returns the path of the file that last set key, or "" when no file
+// sets it and the default applies. key is the setting name as the files write
+// it, for example "keybindings".
+func (c Config) Source(key string) string {
+	return c.sources[key]
 }
 
 // Diagnostic describes one problem found while loading. Loading continues past
@@ -226,9 +316,20 @@ func applyFile(cfg *Config, path string) []Diagnostic {
 	for _, key := range sortedKeys(keys) {
 		if err := cfg.set(key, keys[key]); err != nil {
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
+			continue
 		}
+		cfg.note(key, path)
 	}
 	return diags
+}
+
+// note records that the file at path set key. A later layer that sets the key
+// replaces the record.
+func (c *Config) note(key, path string) {
+	if c.sources == nil {
+		c.sources = make(map[string]string)
+	}
+	c.sources[key] = path
 }
 
 // sortedKeys returns the keys in order, so diagnostics come out in a stable
@@ -272,6 +373,15 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return fmt.Errorf("must be between %d and %d, got %d", MinTabSize, MaxTabSize, n)
 		}
 		c.TabSize = n
+	case "plugin_timeout_ms":
+		var n int
+		if err := json.Unmarshal(raw, &n); err != nil {
+			return fmt.Errorf("must be an integer")
+		}
+		if n < MinPluginTimeoutMS || n > MaxPluginTimeoutMS {
+			return fmt.Errorf("must be between %d and %d, got %d", MinPluginTimeoutMS, MaxPluginTimeoutMS, n)
+		}
+		c.PluginTimeout = time.Duration(n) * time.Millisecond
 	case "line_ending":
 		s, err := decodeString(raw)
 		if err != nil {
@@ -281,12 +391,33 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return fmt.Errorf("must be %q, %q or %q, got %q", LineEndingAuto, LineEndingLF, LineEndingCRLF, s)
 		}
 		c.LineEnding = s
+	case "cursor_style":
+		s, err := decodeString(raw)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains([]string{CursorStyleBlock, CursorStyleBar, CursorStyleUnderline}, s) {
+			return fmt.Errorf("must be %q, %q or %q, got %q", CursorStyleBlock, CursorStyleBar, CursorStyleUnderline, s)
+		}
+		c.CursorStyle = s
 	case "keybindings":
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 || trimmed[0] != '{' {
 			return fmt.Errorf("must be a JSON object")
 		}
 		c.Keybindings = append(json.RawMessage(nil), trimmed...)
+	case "lsp":
+		servers, err := decodeLSP(raw)
+		if err != nil {
+			return err
+		}
+		c.LSP = servers
+	case "formatters":
+		formatters, err := decodeFormatters(raw)
+		if err != nil {
+			return err
+		}
+		c.Formatters = formatters
 	default:
 		field, known := boolKeys[key]
 		if !known {
@@ -303,13 +434,69 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 
 // boolKeys maps each boolean setting to the field it sets.
 var boolKeys = map[string]func(*Config) *bool{
-	"insert_spaces":            func(c *Config) *bool { return &c.InsertSpaces },
-	"trim_trailing_whitespace": func(c *Config) *bool { return &c.TrimTrailingWhitespace },
-	"ensure_final_newline":     func(c *Config) *bool { return &c.EnsureFinalNewline },
-	"auto_indent":              func(c *Config) *bool { return &c.AutoIndent },
-	"line_numbers":             func(c *Config) *bool { return &c.LineNumbers },
-	"explorer_show_hidden":     func(c *Config) *bool { return &c.ExplorerShowHidden },
-	"explorer_show_ignored":    func(c *Config) *bool { return &c.ExplorerShowIgnored },
+	"insert_spaces":             func(c *Config) *bool { return &c.InsertSpaces },
+	"trim_trailing_whitespace":  func(c *Config) *bool { return &c.TrimTrailingWhitespace },
+	"ensure_final_newline":      func(c *Config) *bool { return &c.EnsureFinalNewline },
+	"auto_indent":               func(c *Config) *bool { return &c.AutoIndent },
+	"line_numbers":              func(c *Config) *bool { return &c.LineNumbers },
+	"show_menu_bar":             func(c *Config) *bool { return &c.ShowMenuBar },
+	"explorer_show_hidden":      func(c *Config) *bool { return &c.ExplorerShowHidden },
+	"explorer_show_ignored":     func(c *Config) *bool { return &c.ExplorerShowIgnored },
+	"show_tab_bar":              func(c *Config) *bool { return &c.ShowTabBar },
+	"show_status_bar":           func(c *Config) *bool { return &c.ShowStatusBar },
+	"show_prompt_line":          func(c *Config) *bool { return &c.ShowPromptLine },
+	"show_vertical_scrollbar":   func(c *Config) *bool { return &c.ShowVerticalScrollbar },
+	"show_horizontal_scrollbar": func(c *Config) *bool { return &c.ShowHorizontalScrollbar },
+	"line_wrap":                 func(c *Config) *bool { return &c.LineWrap },
+	"highlight_current_line":    func(c *Config) *bool { return &c.HighlightCurrentLine },
+	"highlight_occurrences":     func(c *Config) *bool { return &c.HighlightOccurrences },
+	"show_whitespace":           func(c *Config) *bool { return &c.ShowWhitespace },
+	"mouse_capture":             func(c *Config) *bool { return &c.MouseCapture },
+	"mouse_hover":               func(c *Config) *bool { return &c.MouseHover },
+	"scroll_sync":               func(c *Config) *bool { return &c.ScrollSync },
+}
+
+// decodeLSP reads the lsp key: an object from language ID to LSPServer. Each
+// server must name a command, and it may not have other fields.
+func decodeLSP(raw json.RawMessage) (map[string]LSPServer, error) {
+	trimmed := bytes.TrimSpace(raw)
+	var entries map[string]json.RawMessage
+	if len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &entries) != nil {
+		return nil, fmt.Errorf("must be a JSON object")
+	}
+	servers := make(map[string]LSPServer, len(entries))
+	for _, lang := range sortedKeys(entries) {
+		dec := json.NewDecoder(bytes.NewReader(entries[lang]))
+		dec.DisallowUnknownFields()
+		var s LSPServer
+		if err := dec.Decode(&s); err != nil {
+			return nil, fmt.Errorf("%s: %w", lang, err)
+		}
+		if s.Command == "" {
+			return nil, fmt.Errorf("%s: command must not be empty", lang)
+		}
+		servers[lang] = s
+	}
+	return servers, nil
+}
+
+// decodeFormatters reads the formatters key: an object from language name to the
+// command that formats it. Each command must be non-blank, and each language name
+// must be non-empty.
+func decodeFormatters(raw json.RawMessage) (map[string]string, error) {
+	var formatters map[string]string
+	if err := json.Unmarshal(raw, &formatters); err != nil {
+		return nil, fmt.Errorf("must be a JSON object of strings")
+	}
+	for _, lang := range slices.Sorted(maps.Keys(formatters)) {
+		if lang == "" {
+			return nil, fmt.Errorf("language name must not be empty")
+		}
+		if strings.TrimSpace(formatters[lang]) == "" {
+			return nil, fmt.Errorf("%s: command must not be empty", lang)
+		}
+	}
+	return formatters, nil
 }
 
 func decodeString(raw json.RawMessage) (string, error) {

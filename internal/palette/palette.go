@@ -53,18 +53,20 @@ type builtinCommand struct {
 }
 
 // Commands returns the builtin command entries in palette order. Keybinding is
-// the formatted shortcut of the entry's action in km, or empty when the action
-// has no binding in the normal or global context. A nil km means
-// keymap.Default().
+// the formatted primary shortcut of the entry's action in km, found with
+// keymap.Map.Primary as the menu finds its shortcuts. Only a single-chord shortcut
+// that the editor runs counts: a chord that an override took away, a global chord
+// that a normal binding takes, and a multi-key sequence are not shown. A nil km
+// means keymap.Default().
 //
 // Bindings scoped to other contexts are not shown: the palette runs in the
 // normal editor context, so a key that only works in, say, a composite buffer
-// ("q" for Close Buffer) does not appear in its column.
+// ("q" for Close Buffer) does not appear in its column. An action whose primary
+// binding is in another context has an empty Keybinding.
 func Commands(km *keymap.Map) []Entry {
 	if km == nil {
 		km = keymap.Default()
 	}
-	chords := shortcutChords(km)
 	out := make([]Entry, 0, len(builtinCommands))
 	for _, c := range builtinCommands {
 		e := Entry{
@@ -75,38 +77,12 @@ func Commands(km *keymap.Map) []Entry {
 			contexts:       c.Contexts,
 			customContexts: c.CustomContexts,
 		}
-		if chord, ok := chords[c.Action]; ok {
-			e.Keybinding = FormatChord(chord)
+		if b, ok := km.Primary(c.Action); ok && (b.When == keymap.ContextNormal || b.When == keymap.ContextGlobal) {
+			e.Keybinding = FormatChord(b.Chord)
 		}
 		out = append(out, e)
 	}
 	return out
-}
-
-// shortcutChords maps each action to the chord the palette shows for it: the
-// first binding in the normal context, else the first in the global context.
-// Bindings in any other context are skipped.
-func shortcutChords(km *keymap.Map) map[string]string {
-	normal := make(map[string]string)
-	global := make(map[string]string)
-	for _, b := range km.Bindings() {
-		switch b.When {
-		case keymap.ContextNormal:
-			if _, ok := normal[b.Action]; !ok {
-				normal[b.Action] = b.Chord
-			}
-		case keymap.ContextGlobal:
-			if _, ok := global[b.Action]; !ok {
-				global[b.Action] = b.Chord
-			}
-		}
-	}
-	for action, chord := range global {
-		if _, ok := normal[action]; !ok {
-			normal[action] = chord
-		}
-	}
-	return normal
 }
 
 // Mode is the kind of search the palette runs for a query.

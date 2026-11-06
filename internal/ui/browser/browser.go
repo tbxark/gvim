@@ -14,6 +14,7 @@
 package browser
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
 	"slices"
@@ -80,6 +81,44 @@ type Choose struct {
 	Path string
 }
 
+// sortMode is the order of the entries. Name is the order ListDir gives. Size and
+// Modified sort ascending. Directories come first in every order.
+type sortMode int
+
+const (
+	sortName sortMode = iota
+	sortSize
+	sortModified
+	sortModes // the number of modes; Alt+S cycles through them in order
+)
+
+// label is the name of the mode, as the border notice says it.
+func (m sortMode) label() string {
+	return [...]string{"Name", "Size", "Modified"}[m]
+}
+
+// sorted returns a copy of listed in the order of mode. Ties keep the order of
+// listed, which is by name.
+func sorted(listed []explorer.Entry, mode sortMode) []explorer.Entry {
+	out := slices.Clone(listed)
+	if mode == sortName {
+		return out
+	}
+	slices.SortStableFunc(out, func(a, b explorer.Entry) int {
+		if a.IsDir != b.IsDir {
+			if a.IsDir {
+				return -1
+			}
+			return 1
+		}
+		if mode == sortSize {
+			return cmp.Compare(a.Size, b.Size)
+		}
+		return a.ModTime.Compare(b.ModTime)
+	})
+	return out
+}
+
 // Options are the browser's inputs.
 type Options struct {
 	Dir        string // directory to start in; empty means the working directory
@@ -106,7 +145,9 @@ type Browser struct {
 	loaded       bool // entries were read for loadedDir with loadedHidden
 	loadedDir    string
 	loadedHidden bool
-	entries      []explorer.Entry
+	listed       []explorer.Entry // as ListDir returned them, in name order
+	entries      []explorer.Entry // listed, in the order of sort
+	sort         sortMode
 
 	rows   []Row
 	sel    int // index into rows of the selected row
@@ -192,13 +233,17 @@ func (b *Browser) Update(msg tea.Msg) (*Browser, tea.Cmd) {
 	return b, cmd
 }
 
-// key handles one key press. Alt+. toggles hidden entries, and printable text
-// extends the filter. Enter, Backspace, the arrows, the page keys, Home, End,
+// key handles one key press. Alt+. toggles hidden entries, Alt+S cycles the sort
+// order, and printable text extends the filter. Enter, Backspace, the arrows, the page keys, Home, End,
 // Right and Tab move through the list. Esc closes the browser; the root does not
 // normally forward it.
 func (b *Browser) key(k tea.Key) tea.Cmd {
 	if k.Mod&tea.ModAlt != 0 && k.Code == '.' {
 		b.toggleHidden()
+		return nil
+	}
+	if k.Mod&tea.ModAlt != 0 && k.Code == 's' {
+		b.cycleSort()
 		return nil
 	}
 	if k.Mod&(tea.ModCtrl|tea.ModAlt) == 0 && printable(k.Text) {
@@ -369,6 +414,14 @@ func (b *Browser) toggleHidden() {
 	b.refresh()
 }
 
+// cycleSort moves to the next sort order and says so on the border.
+func (b *Browser) cycleSort() {
+	b.sort = (b.sort + 1) % sortModes
+	b.notice = "Sort by " + b.sort.label()
+	b.entries = sorted(b.listed, b.sort)
+	b.refresh()
+}
+
 // move changes the selection by delta rows, clamped to the list.
 func (b *Browser) move(delta int) {
 	if len(b.rows) == 0 {
@@ -413,11 +466,12 @@ func (b *Browser) finish(msg tea.Msg) tea.Cmd {
 func (b *Browser) refresh() {
 	hidden := b.showHidden || strings.HasPrefix(b.input, ".")
 	if !b.loaded || b.loadedDir != b.dir || b.loadedHidden != hidden {
-		entries, err := b.list(b.dir, explorer.ListOptions{ShowHidden: hidden, ShowIgnored: true})
-		b.entries = entries
+		listed, err := b.list(b.dir, explorer.ListOptions{ShowHidden: hidden, ShowIgnored: true})
+		b.listed = listed
+		b.entries = sorted(listed, b.sort)
 		b.loaded, b.loadedDir, b.loadedHidden = true, b.dir, hidden
 		if err != nil {
-			b.entries = nil
+			b.listed, b.entries = nil, nil
 			b.notice = capitalize(err.Error())
 		}
 	}

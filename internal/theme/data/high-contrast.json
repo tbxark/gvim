@@ -32,6 +32,7 @@
     "ruler_bg": [50, 50, 50]
   },
   "ui": {
+    "popup_selection_fg": [255, 255, 255],
     "file_status_added_fg": [0, 255, 0],
     "file_status_modified_fg": [255, 255, 0],
     "file_status_deleted_fg": [255, 0, 0],

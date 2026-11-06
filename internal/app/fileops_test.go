@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
+	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/fsops"
 	expl "github.com/tbxark/gvim/internal/ui/explorer"
 )
@@ -14,10 +16,16 @@ import (
 // fakePaths records the editor follow-ups the adapter asks for. It stands in for
 // *editor.Editor, so the tests need no document.
 type fakePaths struct {
+	checked [][2]string
 	renamed [][2]string
 	closed  []string
 	force   []bool
 	err     error
+}
+
+func (f *fakePaths) CheckRename(oldPath, newPath string) error {
+	f.checked = append(f.checked, [2]string{oldPath, newPath})
+	return f.err
 }
 
 func (f *fakePaths) RenamePath(oldPath, newPath string) error {
@@ -196,6 +204,89 @@ func TestTrashMissingPathFails(t *testing.T) {
 	ops := newFileOps(&fakePaths{})
 	if err := ops.Trash(context.Background(), filepath.Join(t.TempDir(), "gone")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("trash of a missing path: err = %v, want not-exist", err)
+	}
+}
+
+// TestCheckRenameRefusesAnOpenTab checks the editor's dry run, which the root
+// calls in Update before a rename: a target held by another tab is refused, and
+// nothing on disk or in the tabs changes.
+func TestCheckRenameRefusesAnOpenTab(t *testing.T) {
+	t.Parallel()
+	root := tempRoot(t)
+	a := filepath.Join(root, "a.txt")
+	b := filepath.Join(root, "b.txt")
+	ed := editor.New(editor.Options{})
+	must(t, ed.OpenFile(a))
+	must(t, ed.OpenFile(b))
+	ops := newFileOps(ed)
+
+	if err := ops.CheckRename(a, b); !errors.Is(err, editor.ErrAlreadyOpen) {
+		t.Fatalf("CheckRename: err = %v, want editor.ErrAlreadyOpen", err)
+	}
+	if !exists(a) || exists(filepath.Join(root, "c.txt")) {
+		t.Error("the dry run touched the disk")
+	}
+	if got := ed.Tabs()[0].Path; got != a {
+		t.Errorf("tab A moved to %q", got)
+	}
+}
+
+// TestCheckRenameRefusesAMoveOntoAnOpenTab is the move case of the dry run.
+func TestCheckRenameRefusesAMoveOntoAnOpenTab(t *testing.T) {
+	t.Parallel()
+	root := tempRoot(t)
+	a := filepath.Join(root, "a.txt")
+	inSub := filepath.Join(root, "sub", "a.txt")
+	ed := editor.New(editor.Options{})
+	must(t, ed.OpenFile(a))
+	must(t, ed.OpenFile(inSub))
+	ops := newFileOps(ed)
+
+	if err := ops.CheckRename(a, inSub); !errors.Is(err, editor.ErrAlreadyOpen) {
+		t.Fatalf("CheckRename: err = %v, want editor.ErrAlreadyOpen", err)
+	}
+}
+
+// TestRenameDoesNotAskTheEditor pins the split: the disk operation itself does
+// not read the open tabs, so only the root's Update-side check decides.
+func TestRenameDoesNotAskTheEditor(t *testing.T) {
+	t.Parallel()
+	root := tempRoot(t)
+	a := filepath.Join(root, "a.txt")
+	paths := &fakePaths{err: errors.New("refused by editor")}
+	ops := newFileOps(paths)
+
+	if _, err := ops.Rename(context.Background(), a, "c.txt"); err != nil {
+		t.Fatalf("Rename: err = %v, want the disk rename to succeed", err)
+	}
+	if len(paths.checked) != 0 {
+		t.Errorf("Rename asked the editor: %v", paths.checked)
+	}
+	if exists(a) || !exists(filepath.Join(root, "c.txt")) {
+		t.Error("rename did not move the file")
+	}
+}
+
+// TestCheckRenameAsksTheEditorWithTheDestination checks that the adapter passes
+// the destination it will use: the same path Rename and Move would create.
+func TestCheckRenameAsksTheEditorWithTheDestination(t *testing.T) {
+	t.Parallel()
+	root := tempRoot(t)
+	a := filepath.Join(root, "a.txt")
+	c := filepath.Join(root, "c.txt")
+	inSub := filepath.Join(root, "sub", "a.txt")
+	refused := errors.New("refused by editor")
+	paths := &fakePaths{err: refused}
+	ops := newFileOps(paths)
+
+	if err := ops.CheckRename(a, c); !errors.Is(err, refused) {
+		t.Errorf("CheckRename(rename): err = %v, want the editor's refusal", err)
+	}
+	if err := ops.CheckRename(a, inSub); !errors.Is(err, refused) {
+		t.Errorf("CheckRename(move): err = %v, want the editor's refusal", err)
+	}
+	if want := [][2]string{{a, c}, {a, inSub}}; !slices.Equal(paths.checked, want) {
+		t.Errorf("CheckRename calls = %v, want %v", paths.checked, want)
 	}
 }
 

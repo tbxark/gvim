@@ -102,7 +102,7 @@ func (p *Palette) paintBox(g *grid.Grid, geo geometry) {
 		g.Set(0, y, "│", panel)
 		if len(p.rows) == 0 {
 			if k == 0 {
-				g.Put(geo.nameX, y, geo.w-1, emptyText(p.mode()), panel)
+				g.Put(geo.nameX, y, geo.w-1, p.emptyText(), panel)
 			}
 			continue
 		}

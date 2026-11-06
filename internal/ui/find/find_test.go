@@ -276,8 +276,8 @@ func TestQueryReplaceAnswers(t *testing.T) {
 	press(b, "tab")
 	typeText(b, "y")
 	b.StartQueryReplace()
-	if got := b.statusText(); got != queryPrompt {
-		t.Fatalf("status = %q, want the question", got)
+	if got := b.statusText(); got != "Replace? (y)es (n)o (a)ll (c)ancel" {
+		t.Fatalf("status = %q, want Fresh's question", got)
 	}
 
 	typeText(b, "y") // replace the first x
@@ -292,8 +292,8 @@ func TestQueryReplaceAnswers(t *testing.T) {
 	if got := f.text(); got != "y x y y" {
 		t.Fatalf("after !: text = %q, want %q", got, "y x y y")
 	}
-	if got := b.statusText(); got != "Replaced 3" {
-		t.Fatalf("status = %q, want %q", got, "Replaced 3")
+	if got := b.statusText(); got != "Replaced 3 occurrence(s)" {
+		t.Fatalf("status = %q, want %q", got, "Replaced 3 occurrence(s)")
 	}
 	if b.qr != nil {
 		t.Fatal("query-replace still running after !")
@@ -314,8 +314,8 @@ func TestQueryReplaceQuitKeepsEarlierReplacements(t *testing.T) {
 	if got := f.text(); got != "z x x" {
 		t.Fatalf("text = %q, want %q", got, "z x x")
 	}
-	if got := b.statusText(); got != "Replaced 1" {
-		t.Fatalf("status = %q, want %q", got, "Replaced 1")
+	if got := b.statusText(); got != "Replaced 1 occurrence(s)" {
+		t.Fatalf("status = %q, want %q", got, "Replaced 1 occurrence(s)")
 	}
 }
 
@@ -341,8 +341,8 @@ func TestStartQueryReplaceWithoutSearchText(t *testing.T) {
 	if b.qr != nil {
 		t.Fatal("query-replace started without search text")
 	}
-	if got := b.statusText(); got != noSearchText {
-		t.Fatalf("status = %q, want %q", got, noSearchText)
+	if got := b.statusText(); got != "Query replace: empty search query." {
+		t.Fatalf("status = %q, want Fresh's empty-query message", got)
 	}
 }
 
@@ -456,5 +456,126 @@ func TestAdvancePos(t *testing.T) {
 	}
 	if got := advancePos(start, "a\nbc"); got != (buffer.Pos{Line: 3, Col: 2}) {
 		t.Errorf("two lines: got %v", got)
+	}
+}
+
+func TestQueryReplaceAcceptsFreshAliases(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{name: "a replaces all remaining", key: "a", want: "z z z"},
+		{name: "c stops", key: "c", want: "z x x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFake("x x x")
+			b := Open(f, testStyles(), false)
+			typeText(b, "x")
+			press(b, "tab")
+			typeText(b, "z")
+			b.StartQueryReplace()
+			typeText(b, "y")
+			typeText(b, tt.key)
+			if got := f.text(); got != tt.want {
+				t.Fatalf("text = %q, want %q", got, tt.want)
+			}
+			if b.qr != nil {
+				t.Fatal("query-replace still running")
+			}
+		})
+	}
+}
+
+func TestQueryReplaceEscStopsAndKeepsTheBar(t *testing.T) {
+	t.Parallel()
+	f := newFake("x x x")
+	b := Open(f, testStyles(), false)
+	typeText(b, "x")
+	press(b, "tab")
+	typeText(b, "z")
+	b.StartQueryReplace()
+	typeText(b, "y")
+	press(b, "esc")
+
+	if got := f.text(); got != "z x x" {
+		t.Fatalf("text = %q, want %q", got, "z x x")
+	}
+	if b.qr != nil {
+		t.Fatal("Esc left query-replace running")
+	}
+	if !b.Active() {
+		t.Fatal("Esc in query-replace closed the bar; it only stops the run")
+	}
+	if got := b.statusText(); got != "Replaced 1 occurrence(s)" {
+		t.Fatalf("status = %q, want %q", got, "Replaced 1 occurrence(s)")
+	}
+}
+
+func TestReopenShowsTheHeldFieldsAndSearchesFromTheSelection(t *testing.T) {
+	t.Parallel()
+	f := newFake("x x x x")
+	b := Open(f, testStyles(), false)
+	typeText(b, "x")
+	press(b, "tab")
+	typeText(b, "z")
+	press(b, "esc")
+	if b.Active() {
+		t.Fatal("bar still active after Esc")
+	}
+
+	b.Reopen()
+	if !b.Active() {
+		t.Fatal("Reopen did not show the bar")
+	}
+	if got := b.Query().Text; got != "x" {
+		t.Fatalf("search text after Reopen = %q, want %q", got, "x")
+	}
+	if got := b.repl.Value(); got != "z" {
+		t.Fatalf("replacement text after Reopen = %q, want %q", got, "z")
+	}
+	if b.anchor != (buffer.Pos{Line: 0, Col: 0}) {
+		t.Fatalf("anchor = %+v, want the start of the selection 0:0", b.anchor)
+	}
+}
+
+func TestOpenStillAnchorsAtTheCaretWithASelection(t *testing.T) {
+	t.Parallel()
+	f := newFake("x x x x")
+	f.Select(search.Match{Start: buffer.Pos{Line: 0, Col: 0}, End: buffer.Pos{Line: 0, Col: 1}})
+	b := Open(f, testStyles(), false)
+	if b.anchor != (buffer.Pos{Line: 0, Col: 1}) {
+		t.Fatalf("anchor = %+v, want the caret 0:1 that Ctrl+F has always used", b.anchor)
+	}
+}
+
+func TestReopenSearchesFromTheCaretWithNoSelection(t *testing.T) {
+	t.Parallel()
+	f := newFake("x x x x")
+	b := Open(f, testStyles(), false)
+	typeText(b, "x")
+	press(b, "esc")
+	f.Place(buffer.Pos{Line: 0, Col: 3})
+
+	b.Reopen()
+	if b.anchor != (buffer.Pos{Line: 0, Col: 3}) {
+		t.Fatalf("anchor = %+v, want the caret 0:3", b.anchor)
+	}
+}
+
+func TestReopenDropsAQueryReplaceLeftRunning(t *testing.T) {
+	t.Parallel()
+	f := newFake("x x")
+	b := Open(f, testStyles(), false)
+	typeText(b, "x")
+	press(b, "tab")
+	typeText(b, "z")
+	b.StartQueryReplace()
+	b.Reopen()
+	if b.qr != nil {
+		t.Fatal("Reopen kept a query-replace run that the root left behind")
 	}
 }

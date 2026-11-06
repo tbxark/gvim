@@ -32,8 +32,8 @@ const (
 	searchLabel  = "Search:"
 	replaceLabel = "Replace:"
 	labelGap     = 3 // blank cells between two option labels
-	queryPrompt  = "Replace? (y/n/!/q)"
-	noSearchText = "No search text"
+	queryPrompt  = "Replace? (y)es (n)o (a)ll (c)ancel"
+	queryEmpty   = "Query replace: empty search query."
 )
 
 // The option toggles, in the order the options row shows them.
@@ -131,6 +131,23 @@ func Open(ed Editor, st style.Styles, withReplace bool) *Bar {
 	return b
 }
 
+// Reopen shows the bar again with the fields and options it held, for a bar that
+// is not on screen: one that Esc popped, or one that Esc closed. The bar searches
+// from the start of the selection when there is one, and from the caret
+// otherwise. A query-replace the bar left running is dropped. The root pushes the
+// bar back onto its overlay stack.
+func (b *Bar) Reopen() {
+	b.closed = false
+	b.qr = nil
+	b.anchor = b.ed.Cursor()
+	b.hasSel = false
+	if start, end, ok := b.ed.Selection(); ok {
+		b.anchor = start
+		b.hasSel, b.selStart, b.selEnd = true, start, end
+	}
+	b.focusRow()
+}
+
 // newField returns a text field with no prompt, a real caret, and no width
 // limit. Without a width the field never scrolls, so the caret column is the
 // cell count of the text before it.
@@ -163,12 +180,14 @@ func (b *Bar) ShowReplace() {
 	b.focusRow()
 }
 
-// StartQueryReplace begins asking about each match from the anchor, the caret
-// where the bar opened. Each answer is y to replace, n to skip, ! to replace the
-// rest, or q to stop. With no search text it only reports that.
+// StartQueryReplace begins asking about each match from the anchor, where the bar
+// opened or was last reopened. Each answer is y to replace, n to skip, ! or a to
+// replace the rest, and q or c to stop; Esc also stops. With no search text it
+// only reports that.
 func (b *Bar) StartQueryReplace() {
+	b.notice = ""
 	if b.search.Value() == "" {
-		b.status = noSearchText
+		b.status = queryEmpty
 		return
 	}
 	b.qr = &queryRun{from: b.anchor}
@@ -300,6 +319,13 @@ func (b *Bar) query() search.Query {
 // Query returns the search the bar holds, even after the bar is closed. The root
 // runs find_next and find_previous on it when the bar is not open.
 func (b *Bar) Query() search.Query { return b.query() }
+
+// Clear empties the search text and the match status, as clear_search does. The
+// options and the replacement text stay, and the highlights go with the text.
+func (b *Bar) Clear() {
+	b.search.SetValue("")
+	b.refresh(false)
+}
 
 // refresh recomputes the match status for the search text. With move set, the
 // selection goes to the first match at or after the anchor. An empty search
@@ -467,8 +493,8 @@ func (b *Bar) queryReplace(cur search.Match) error {
 }
 
 // queryKey answers the query-replace question. Escape ends the run, and each
-// key that is not an answer is ignored. y replaces the match, n skips it, !
-// replaces it and every later match, and q stops.
+// key that is not an answer is ignored. y replaces the match, n skips it, ! or a
+// replaces it and every later match, and q or c stops.
 func (b *Bar) queryKey(kp tea.KeyPressMsg) {
 	if tea.Key(kp).Keystroke() == "esc" {
 		b.finishQuery()
@@ -524,7 +550,7 @@ func (b *Bar) finishQuery() {
 	if b.qr == nil {
 		return
 	}
-	b.status = fmt.Sprintf("Replaced %d", b.qr.count)
+	b.status = fmt.Sprintf("Replaced %d occurrence(s)", b.qr.count)
 	b.qr = nil
 	b.clearSelection()
 }

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -197,9 +198,71 @@ func TestWelcomeHighlightStopsAtTheLastRow(t *testing.T) {
 	}
 }
 
-// Recent folders are listed up to five, and a click on one shows the notice that
-// the folder cannot be switched to in this port.
-func TestRecentFoldersAreCappedAndNotOpenedInThisPort(t *testing.T) {
+// welcomeProjectModel is a welcome screen over the project port p, which may be nil,
+// with the recent folders recents. The explorer roots at /ws.
+func welcomeProjectModel(t *testing.T, p *fakeProjects, recents ...string) *Model {
+	t.Helper()
+	ports := RootPorts{}
+	if p != nil {
+		ports.Projects = p
+	}
+	m := New(Deps{Editor: newTabFake(), Explorer: newFakeTree(3), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock, Recents: recents, Root: ports})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	return m
+}
+
+// A click on a recent folder runs the switch-project flow for that folder, the one the
+// open_folder action reaches through the browser: the port opens it and its tree
+// becomes the root. Without a port the flow shows the Switch Project notice.
+func TestRecentFolderRowSwitchesTheProject(t *testing.T) {
+	t.Parallel()
+	const folder = "/work/alpha"
+	tests := []struct {
+		name       string
+		projects   *fakeProjects // nil leaves the Projects port out
+		wantNotice string        // the notice when the port is out
+		wantRoot   string        // the explorer root after the click
+	}{
+		{
+			name:       "without a projects port the notice says so",
+			wantNotice: "Switch Project is not supported in this port yet",
+			wantRoot:   "/ws",
+		},
+		{
+			name:     "with a projects port the folder becomes the root",
+			projects: &fakeProjects{project: Project{Tree: treeAt(folder, 2)}},
+			wantRoot: folder,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := welcomeProjectModel(t, tc.projects, folder)
+			row, ok := welcomeRowAt(m, len(welcomeDoors))
+			if !ok {
+				t.Fatal("the recent folder row is not drawn")
+			}
+			_, cmd := m.Update(click(row.x+1, row.y, tea.MouseLeft))
+			drain(t, m, cmd)
+			if got := m.rootDir(); got != tc.wantRoot {
+				t.Fatalf("explorer root = %q, want %q", got, tc.wantRoot)
+			}
+			if tc.projects == nil {
+				if m.notice != tc.wantNotice {
+					t.Fatalf("notice = %q, want %q", m.notice, tc.wantNotice)
+				}
+				return
+			}
+			if !slices.Equal(tc.projects.opened, []string{folder}) {
+				t.Fatalf("the port opened %v, want [%s]", tc.projects.opened, folder)
+			}
+		})
+	}
+}
+
+// Recent folders are listed up to five. Without a projects port, a click on one shows
+// the notice that Switch Project is not supported.
+func TestRecentFoldersAreCappedAndNoticeWithoutProjects(t *testing.T) {
 	recents := []string{"/w/1", "/w/2", "/w/3", "/w/4", "/w/5", "/w/6"}
 	m, tf := welcomeModel(t, 80, 24, recents...)
 	if got := welcomeItemCount(recents); got != len(welcomeDoors)+welcomeRecentMax {

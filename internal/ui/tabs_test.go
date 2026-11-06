@@ -178,7 +178,7 @@ func TestPlaceStripEmptyStripHasOnlyPlus(t *testing.T) {
 
 func TestDrawTabStripPaintsTheFixtureRow(t *testing.T) {
 	g := grid.New(40, 3)
-	drawTabStrip(g, style.Styles{}, 0, placeStrip(0, 40, []TabInfo{{Name: "a.txt", Active: true}}, 0))
+	drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, 40, []TabInfo{{Name: "a.txt", Active: true}}, 0))
 	if g.At(0, 1).Text != " " || g.At(1, 1).Text != "a" || g.At(7, 1).Text != "×" || g.At(39, 1).Text != "+" {
 		t.Fatalf("tab row = %q, want the tab at column 0 and the plus at column 39", g.Plain()[1])
 	}
@@ -190,7 +190,7 @@ func TestDrawTabStripMarksTheActiveTab(t *testing.T) {
 		TabActive: lipgloss.NewStyle().Bold(true),
 	}
 	g := grid.New(40, 3)
-	drawTabStrip(g, st, 0, placeStrip(0, 40, []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}, 0))
+	drawTabStrip(g, st, 0, 1, placeStrip(0, 40, []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}, 0))
 	if g.At(1, 1).Style.Bold || !g.At(1, 1).Style.Italic {
 		t.Fatalf("inactive tab cell style = %+v", g.At(1, 1).Style)
 	}
@@ -207,7 +207,7 @@ func TestDrawTabStripMarksTheActiveTab(t *testing.T) {
 
 func TestDrawTabStripShowsTheModifiedMarker(t *testing.T) {
 	g := grid.New(40, 3)
-	drawTabStrip(g, style.Styles{}, 0, placeStrip(0, 40, []TabInfo{{Name: "a.txt", Modified: true, Active: true}}, 0))
+	drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, 40, []TabInfo{{Name: "a.txt", Modified: true, Active: true}}, 0))
 	row := strings.TrimRight(g.Plain()[1], " ")
 	if !strings.HasPrefix(row, " ● a.txt × ") {
 		t.Fatalf("modified tab row = %q, want the dot before the name", row)
@@ -220,7 +220,7 @@ func TestDrawTabStripShowsTheModifiedMarker(t *testing.T) {
 func TestDrawTabStripDrawsOverflowMarkers(t *testing.T) {
 	tabs := []TabInfo{{Name: "one.go"}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go", Active: true}}
 	g := grid.New(20, 3)
-	drawTabStrip(g, style.Styles{}, 0, placeStrip(0, 20, tabs, revealedFirst(tabs, 0, 20, 0, 3)))
+	drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, 20, tabs, revealedFirst(tabs, 0, 20, 0, 3)))
 	row := g.Plain()[1]
 	if ansi.StringWidth(row) != 20 {
 		t.Fatalf("row is %d cells wide", ansi.StringWidth(row))
@@ -240,7 +240,7 @@ func TestDrawTabStripDrawsOverflowMarkers(t *testing.T) {
 func TestDrawTabStripDrawsTheRightMarkerWhenTabsFollow(t *testing.T) {
 	tabs := []TabInfo{{Name: "one.go", Active: true}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go"}}
 	g := grid.New(20, 3)
-	drawTabStrip(g, style.Styles{}, 0, placeStrip(0, 20, tabs, 0))
+	drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, 20, tabs, 0))
 	row := g.Plain()[1]
 	if g.At(0, 1).Text != " " || g.At(18, 1).Text != stripMoreAfter {
 		t.Fatalf("markers in %q, want only the right marker", row)
@@ -250,7 +250,7 @@ func TestDrawTabStripDrawsTheRightMarkerWhenTabsFollow(t *testing.T) {
 func TestDrawTabStripWithNoTabsDoesNotPanic(t *testing.T) {
 	g := grid.New(10, 3)
 	s := placeStrip(0, 10, nil, 0)
-	drawTabStrip(g, style.Styles{}, 0, s)
+	drawTabStrip(g, style.Styles{}, 0, 1, s)
 	if len(s.runs) != 1 || s.runs[0].kind != hitTabNew {
 		t.Fatalf("runs = %+v", s.runs)
 	}
@@ -260,7 +260,7 @@ func TestPlaceStripWithNarrowRowDoesNotPanic(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.go", Active: true}}
 	for w := 0; w <= 6; w++ {
 		g := grid.New(w, 2)
-		drawTabStrip(g, style.Styles{}, 0, placeStrip(0, w, tabs, 0))
+		drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, w, tabs, 0))
 	}
 }
 

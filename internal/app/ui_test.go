@@ -58,8 +58,42 @@ func TestNewUIDepsLeavesNilExplorerNil(t *testing.T) {
 	if deps.Clock == nil || deps.Keys == nil || deps.Editor == nil {
 		t.Fatal("required ports are missing")
 	}
-	if deps.Ops != nil || deps.LSP != nil || deps.Markdown != nil {
+	if deps.LSP != nil || deps.Markdown != nil {
 		t.Fatal("ports for later phases are not nil")
+	}
+}
+
+func TestNewUIDepsWiresFileOpsToTheEditor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ed := editor.New(editor.Options{})
+	if err := ed.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	deps := newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil)
+	if deps.Ops == nil {
+		t.Fatal("Ops is nil: file operations are not wired")
+	}
+	newPath, err := deps.Ops.Rename(t.Context(), path, "b.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The root calls FollowRename from Update once the rename has finished, so
+	// the open document moves with the file.
+	follow, ok := deps.Ops.(interface {
+		FollowRename(oldPath, newPath string) error
+	})
+	if !ok {
+		t.Fatal("Ops does not follow renames in the editor")
+	}
+	if err := follow.FollowRename(path, newPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := ed.Active().Path; got != newPath {
+		t.Fatalf("open document path = %q, want %q after rename", got, newPath)
 	}
 }
 
@@ -103,7 +137,7 @@ func TestEditorAdapterMapsTabsAndDocument(t *testing.T) {
 	}
 	a := editorAdapter{ed: ed, spans: &spanCache{}}
 	tabs := a.Tabs()
-	if len(tabs) != 1 || tabs[0].Name != "a.txt" || !tabs[0].Active || tabs[0].Modified {
+	if len(tabs) != 1 || tabs[0].Name != "a.txt" || tabs[0].Path != path || !tabs[0].Active || tabs[0].Modified {
 		t.Fatalf("tabs = %+v", tabs)
 	}
 	doc := a.Active()
@@ -256,8 +290,16 @@ func TestBuildModelRendersAFrame(t *testing.T) {
 	if !strings.Contains(ansi.Strip(v.Content), "Ln 1, Col 1") {
 		t.Error("status row has no cursor position")
 	}
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}); cmd != nil {
-		t.Errorf("save returned a command: %v", cmd)
+	// Ctrl+S returns the write as a command, so the file is written when it runs.
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("save returned no command for the write")
+	}
+	for _, msg := range drainCmd(cmd) {
+		m.Update(msg)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "hello\n" {
+		t.Errorf("file after save of a clean document = %q, want it unchanged", got)
 	}
 }
 

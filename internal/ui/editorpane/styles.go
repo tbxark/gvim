@@ -15,12 +15,27 @@ const numKinds = int(syntax.KindNumber) + 1
 // Styles are the cell attributes the pane paints with. NewStyles builds them
 // from a theme. A zero Styles paints with the terminal defaults.
 type Styles struct {
-	Text      grid.Style           // editor fg on editor bg; the body and "~" rows
-	Selection grid.Style           // only BG is used: the selection background
-	Gutter    grid.Style           // line numbers, the margin bar and the change mark
-	Scrollbar grid.Style           // the track glyph: the track color as its foreground
-	Thumb     grid.Style           // the thumb glyph: the thumb color as its foreground
-	Syntax    [numKinds]grid.Style // per syntax kind: Text with the kind's foreground
+	Text         grid.Style           // editor fg on editor bg; the body and "~" rows
+	Selection    grid.Style           // only BG is used: the selection background
+	Gutter       grid.Style           // line numbers, the margin bar and the change mark
+	Scrollbar    grid.Style           // the track glyph: the track color as its foreground
+	Thumb        grid.Style           // the thumb glyph: the thumb color as its foreground
+	Match        grid.Style           // only BG is used: the background of a search match
+	CurrentMatch grid.Style           // the current search match: fg, bg and bold
+	Syntax       [numKinds]grid.Style // per syntax kind: Text with the kind's foreground
+	// SecondaryCaret paints the carets other than the primary one.
+	SecondaryCaret grid.Style
+	// CurrentLine is the background of the caret's text row. Only BG is used.
+	CurrentLine grid.Style
+	// Ruler is the background of a ruler column. Only BG is used.
+	Ruler grid.Style
+	// Whitespace is the color of visible whitespace and indent guides.
+	Whitespace grid.Style
+	// Occurrence is the background of the occurrences of the word at the caret.
+	Occurrence grid.Style
+	// DiagError, DiagWarning, DiagInfo and DiagHint give the color of a
+	// diagnostic underline by severity. Only FG is used.
+	DiagError, DiagWarning, DiagInfo, DiagHint grid.Style
 }
 
 // NewStyles returns the pane styles for th. The text and gutter roles come from
@@ -32,11 +47,23 @@ func NewStyles(th theme.Theme) Styles {
 	chrome := style.New(th)
 	text := style.Cell(chrome.Editor)
 	st := Styles{
-		Text:      text,
-		Selection: style.Cell(chrome.Selection),
-		Gutter:    style.Cell(chrome.Gutter),
-		Scrollbar: style.Cell(chrome.Scrollbar),
-		Thumb:     style.Cell(chrome.ScrollbarThumb),
+		Text:         text,
+		Selection:    style.Cell(chrome.Selection),
+		Gutter:       style.Cell(chrome.Gutter),
+		Scrollbar:    style.Cell(chrome.Scrollbar),
+		Thumb:        style.Cell(chrome.ScrollbarThumb),
+		Match:        style.Cell(chrome.Match),
+		CurrentMatch: style.Cell(chrome.CurrentMatch),
+
+		SecondaryCaret: style.Cell(chrome.SecondaryCaret),
+		CurrentLine:    style.Cell(chrome.CurrentLine),
+		Ruler:          style.Cell(chrome.Ruler),
+		Whitespace:     style.Cell(chrome.Whitespace),
+		Occurrence:     style.Cell(chrome.Occurrence),
+		DiagError:      style.Cell(chrome.DiagError),
+		DiagWarning:    style.Cell(chrome.DiagWarning),
+		DiagInfo:       style.Cell(chrome.DiagInfo),
+		DiagHint:       style.Cell(chrome.DiagHint),
 	}
 	for k := range st.Syntax {
 		kind := syntax.Kind(k)

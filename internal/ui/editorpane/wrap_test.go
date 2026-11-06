@@ -51,7 +51,7 @@ func TestCaretInSpansPicksTheRowOfAnIndex(t *testing.T) {
 }
 
 func TestExpandCellsTabsAndCarriageReturns(t *testing.T) {
-	got := expandCells([]rune("a\tb\r!"), nil, nil)
+	got := expandCells([]rune("a\tb\r!"), nil, nil, defaultTabSize)
 	var text []rune
 	for _, c := range got {
 		text = append(text, c.r)
@@ -64,11 +64,11 @@ func TestExpandCellsTabsAndCarriageReturns(t *testing.T) {
 func TestExpandedIndexAndRuneIndexAgreeWithTabs(t *testing.T) {
 	raw := []rune("a\tb")
 	// The rune b is at expanded index 4, after a and three tab blanks.
-	if got := expandedIndex(raw, 2); got != 4 {
+	if got := expandedIndex(raw, 2, defaultTabSize); got != 4 {
 		t.Errorf("expandedIndex(b) = %d, want 4", got)
 	}
 	// Display column 2 is a blank of the tab, which is rune 1.
-	if got := runeIndexAt(raw, 2); got != 1 {
+	if got := runeIndexAt(raw, 2, defaultTabSize); got != 1 {
 		t.Errorf("runeIndexAt(column 2) = %d, want 1", got)
 	}
 }

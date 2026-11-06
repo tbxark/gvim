@@ -48,6 +48,7 @@ func TestTypingAndDeletion(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
+		opts    Options
 		script  func(t *testing.T, e *Editor)
 		want    string
 		wantCur buffer.Pos
@@ -84,6 +85,7 @@ func TestTypingAndDeletion(t *testing.T) {
 		},
 		{
 			name: "tab inserts a tab rune",
+			opts: Options{UseTabs: true},
 			script: func(t *testing.T, e *Editor) {
 				run(t, e, "insert_tab")
 				typeText(t, e, "x")
@@ -113,7 +115,7 @@ func TestTypingAndDeletion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			e := New(Options{})
+			e := New(tt.opts)
 			tt.script(t, e)
 			if got := text(e); got != tt.want {
 				t.Fatalf("text = %q, want %q", got, tt.want)
@@ -238,6 +240,18 @@ func TestSelectMotionsExtendSelection(t *testing.T) {
 	}
 }
 
+func TestNoopIsSilentWithAndWithoutDocument(t *testing.T) {
+	t.Parallel()
+	e := New(Options{})
+	if r := e.Do("noop", nil); r.Err != nil {
+		t.Fatalf("noop with no document: %v", r.Err)
+	}
+	e.newUntitled()
+	if r := e.Do("noop", nil); r.Err != nil {
+		t.Fatalf("noop with a document: %v", r.Err)
+	}
+}
+
 func TestUnknownActionAndBadArguments(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
@@ -317,7 +331,9 @@ func TestOpenSaveRoundTripBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "héllo\r\nworld\n\nx"; string(got) != want {
+	// The input has one CRLF and one LF break, a tie, so the file is LF and
+	// its CRLF line is saved as LF. See TestMixedEndingsSaveWithTheMajorityEnding.
+	if want := "héllo\nworld\n\nx"; string(got) != want {
 		t.Fatalf("saved bytes = %q, want %q", got, want)
 	}
 	if e.Active().Modified() {
@@ -329,12 +345,13 @@ func TestOpenErrors(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bin")
-	if err := os.WriteFile(bad, []byte{0xff, 0xfe}, 0o600); err != nil {
+	// A UTF-16LE byte-order mark, then a lone high surrogate: no text decodes.
+	if err := os.WriteFile(bad, []byte{0xff, 0xfe, 0x00, 0xd8}, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	e := New(Options{})
-	if err := e.OpenFile(bad); !errors.Is(err, ErrNotUTF8) {
-		t.Fatalf("binary open err = %v, want ErrNotUTF8", err)
+	if err := e.OpenFile(bad); !errors.Is(err, ErrNotDecodable) {
+		t.Fatalf("binary open err = %v, want ErrNotDecodable", err)
 	}
 	if len(e.Tabs()) != 1 {
 		t.Fatal("failed open must not add a tab")

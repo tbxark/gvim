@@ -36,7 +36,39 @@ type Styles struct {
 	StatusPalette  lipgloss.Style // ui.status_palette_fg on ui.status_palette_bg
 	Scrollbar      lipgloss.Style // ui.scrollbar_track_fg on editor.bg
 	ScrollbarThumb lipgloss.Style // ui.scrollbar_thumb_fg on editor.bg
+	Match          lipgloss.Style // search.match_bg, the background only
+	CurrentMatch   lipgloss.Style // search.current_match_fg on search.current_match_bg
+	CurrentLine    lipgloss.Style // editor.current_line_bg, the background only
+	SecondaryCaret lipgloss.Style // editor.fg on editor.inactive_cursor
+	Ruler          lipgloss.Style // editor.ruler_bg, the background only
+	Whitespace     lipgloss.Style // editor.whitespace_indicator_fg on editor.bg
+	Occurrence     lipgloss.Style // ui.semantic_highlight_bg, the background only
+	DiagError      lipgloss.Style // diagnostic.error_fg, the foreground only
+	DiagWarning    lipgloss.Style // diagnostic.warning_fg, the foreground only
+	DiagInfo       lipgloss.Style // diagnostic.info_fg, the foreground only
+	DiagHint       lipgloss.Style // diagnostic.hint_fg, the foreground only
+	Popup          lipgloss.Style // ui.popup_text_fg on ui.popup_bg
+	PopupSelected  lipgloss.Style // ui.popup_selection_fg on ui.popup_selection_bg
 }
+
+// Theme keys of the roles that the editor pane and the status bar paint with.
+// The bundled themes must define each one, or the role paints with the
+// terminal default. style_test.go checks that they do.
+var (
+	refCurrentLine    = ref{"editor", "current_line_bg"}
+	refInactiveCursor = ref{"editor", "inactive_cursor"}
+	refRuler          = ref{"editor", "ruler_bg"}
+	refWhitespace     = ref{"editor", "whitespace_indicator_fg"}
+	refOccurrence     = ref{"ui", "semantic_highlight_bg"}
+	refDiagError      = ref{"diagnostic", "error_fg"}
+	refDiagWarning    = ref{"diagnostic", "warning_fg"}
+	refDiagInfo       = ref{"diagnostic", "info_fg"}
+	refDiagHint       = ref{"diagnostic", "hint_fg"}
+	refPopupText      = ref{"ui", "popup_text_fg"}
+	refPopupBG        = ref{"ui", "popup_bg"}
+	refPopupSelFG     = ref{"ui", "popup_selection_fg"}
+	refPopupSelBG     = ref{"ui", "popup_selection_bg"}
+)
 
 // ref names one theme value: a section and a key. An empty key means none.
 type ref struct{ section, key string }
@@ -59,6 +91,19 @@ func New(th theme.Theme) Styles {
 		StatusPalette:  build(th, ref{"ui", "status_palette_fg"}, ref{"ui", "status_palette_bg"}),
 		Scrollbar:      build(th, ref{"ui", "scrollbar_track_fg"}, ed),
 		ScrollbarThumb: build(th, ref{"ui", "scrollbar_thumb_fg"}, ed),
+		Match:          build(th, ref{}, ref{"search", "match_bg"}),
+		CurrentMatch:   build(th, ref{"search", "current_match_fg"}, ref{"search", "current_match_bg"}),
+		CurrentLine:    build(th, ref{}, refCurrentLine),
+		SecondaryCaret: build(th, ref{"editor", "fg"}, refInactiveCursor),
+		Ruler:          build(th, ref{}, refRuler),
+		Whitespace:     build(th, refWhitespace, ed),
+		Occurrence:     build(th, ref{}, refOccurrence),
+		DiagError:      build(th, refDiagError, ref{}),
+		DiagWarning:    build(th, refDiagWarning, ref{}),
+		DiagInfo:       build(th, refDiagInfo, ref{}),
+		DiagHint:       build(th, refDiagHint, ref{}),
+		Popup:          build(th, refPopupText, refPopupBG),
+		PopupSelected:  build(th, refPopupSelFG, refPopupSelBG),
 	}
 }
 

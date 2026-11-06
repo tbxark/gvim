@@ -51,14 +51,7 @@ func (e *Editor) SelectRange(anchor, head buffer.Pos) {
 	if d == nil {
 		return
 	}
-	anchor, head = d.Buffer.Clamp(anchor), d.Buffer.Clamp(head)
-	d.want = -1
-	d.Buffer.Break()
-	d.Cursor = head
-	d.Sel = nil
-	if anchor != head {
-		d.Sel = &buffer.Selection{Anchor: anchor, Head: head}
-	}
+	d.setRange(d.Buffer.Clamp(anchor), d.Buffer.Clamp(head))
 }
 
 // ScrollBy moves the viewport of the active document by rows lines. Positive
@@ -82,6 +75,26 @@ func (e *Editor) ScrollTo(top int) {
 // clampTop keeps a viewport top inside the document.
 func clampTop(d *Document, top int) int {
 	return min(max(top, 0), max(d.Buffer.Lines()-1, 0))
+}
+
+// scrollView moves the viewport of d by dir lines, for scroll_up and
+// scroll_down. The caret stays where it is while it is still shown. When the
+// scroll takes it off screen, it moves to the nearest line that is shown and
+// keeps its wanted column.
+func (e *Editor) scrollView(d *Document, dir int) {
+	d.Top = clampTop(d, d.Top+dir)
+	bottom := min(d.Top+e.rows-1, d.Buffer.Lines()-1)
+	line := min(max(d.Cursor.Line, d.Top), bottom)
+	if line != d.Cursor.Line {
+		d.move(verticalTarget(d, line), false)
+	}
+}
+
+// recenter sets the viewport so that the caret line is in its middle. The top
+// is clamped at the start of the document only, so near the end the lower rows
+// may be empty, as they are in Fresh.
+func (e *Editor) recenter(d *Document) {
+	d.Top = clampTop(d, d.Cursor.Line-e.rows/2)
 }
 
 // ActivateTab makes tab i the active tab. An index outside the open tabs is

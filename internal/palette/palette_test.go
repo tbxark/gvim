@@ -42,13 +42,32 @@ func TestKeybindingColumnFromKeymap(t *testing.T) {
 	tests := map[string]string{
 		"Add Cursor Above":         "⌃⌥↑",
 		"Add Cursor Below":         "⌃⌥↓",
-		"Add Cursor at Next Match": "⌃D",
 		"Add Cursors to Line Ends": "⌥⇧I",
 	}
 	for name, want := range tests {
 		if got := find(t, entries, name).Keybinding; got != want {
 			t.Errorf("%s keybinding = %q, want %q", name, got, want)
 		}
+	}
+}
+
+// The default preset binds Ctrl+D to Add Cursor at Next Match. The macOS keymap
+// rebinds Ctrl+D to Duplicate Line, so on macOS that shortcut is not in effect
+// and the palette shows none, the same as the menu.
+func TestKeybindingIgnoresShadowedBinding(t *testing.T) {
+	def, err := keymap.ByName("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, palette.Commands(def), "Add Cursor at Next Match").Keybinding; got != "⌃D" {
+		t.Errorf("default preset keybinding = %q, want ⌃D", got)
+	}
+	mac, err := keymap.ByName("macos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, palette.Commands(mac), "Add Cursor at Next Match").Keybinding; got != "" {
+		t.Errorf("macos keybinding = %q, want empty: Ctrl+D is Duplicate Line there", got)
 	}
 }
 
@@ -65,6 +84,33 @@ func TestKeybindingFollowsKeymap(t *testing.T) {
 	}
 	if got := find(t, entries, "Add Ruler").Keybinding; got != "" {
 		t.Fatalf("unbound command keybinding = %q, want empty", got)
+	}
+}
+
+// A chord that a user override takes away from an action is not its shortcut,
+// so the palette must not show it. The preset binds Save File to ctrl+s.
+func TestKeybindingHidesChordTakenByOverride(t *testing.T) {
+	base, err := keymap.ByName("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		override string
+	}{
+		{"global noop", `{"key":"s","modifiers":["ctrl"],"action":"noop"}`},
+		{"global non-noop", `{"key":"s","modifiers":["ctrl"],"action":"quick_open"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			km, err := base.WithOverrides([]byte(`{"bindings":[` + tt.override + `]}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := find(t, palette.Commands(km), "Save File").Keybinding; got != "" {
+				t.Fatalf("Save File keybinding = %q, want empty: ctrl+s no longer saves", got)
+			}
+		})
 	}
 }
 
@@ -217,4 +263,53 @@ func ExampleSearch() {
 	}
 	// Output:
 	// Add Cursor Below ⌃⌥↓
+}
+
+// The palette runs in the normal context, so a global chord that a normal binding
+// of another action takes is not the shortcut of the global action.
+func TestKeybindingIgnoresGlobalShadowedInNormal(t *testing.T) {
+	km, err := keymap.Load([]byte(`{"bindings":[
+		{"key":"s","modifiers":["ctrl"],"action":"save","when":"global"},
+		{"key":"s","modifiers":["ctrl"],"action":"quick_open","when":"normal"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, palette.Commands(km), "Save File").Keybinding; got != "" {
+		t.Fatalf("Save File keybinding = %q, want empty: ctrl+s runs Quick Open in normal", got)
+	}
+}
+
+// The TUI dispatches only single chords, so a multi-key binding never runs and the
+// shortcut column must not show it.
+func TestKeybindingIgnoresSequenceBinding(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "only a sequence",
+			src: `{"bindings":[
+				{"keys":[{"key":"x","modifiers":["ctrl"]},{"key":"s","modifiers":["ctrl"]}],"action":"save","when":"normal"}]}`,
+			want: "",
+		},
+		{
+			name: "sequence beside a global single chord",
+			src: `{"bindings":[
+				{"keys":[{"key":"x","modifiers":["ctrl"]},{"key":"s","modifiers":["ctrl"]}],"action":"save","when":"normal"},
+				{"key":"s","modifiers":["ctrl"],"action":"save","when":"global"}]}`,
+			want: "⌃S",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			km, err := keymap.Load([]byte(tt.src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := find(t, palette.Commands(km), "Save File").Keybinding; got != tt.want {
+				t.Fatalf("Save File keybinding = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }

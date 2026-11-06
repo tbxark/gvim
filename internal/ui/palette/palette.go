@@ -98,6 +98,11 @@ type Options struct {
 	Ranker Ranker
 	// Theme gives the chrome colors.
 	Theme theme.Theme
+	// Live opens the palette in Live Grep mode: the whole query is searched as text
+	// in the files, and the rows are the matching lines. Grep does the search. Live
+	// with a nil Grep shows no rows.
+	Live bool
+	Grep Grepper
 }
 
 // RunCommandMsg asks the root to run a command by its Fresh action name. It is
@@ -151,6 +156,7 @@ const (
 	rowBuffer
 	rowLine
 	rowMessage // informational; choosing it closes the palette and does nothing
+	rowGrep    // a Live Grep match: rel, line and col
 )
 
 // row is one line of the box.
@@ -198,6 +204,8 @@ type Palette struct {
 	inFile   bool
 	fileText string
 	shown    string
+	// live is true in Live Grep mode, which has no prefixes.
+	live bool
 }
 
 // New returns an open palette for opts. The query is the input and its rows are
@@ -214,6 +222,7 @@ func New(opts Options) *Palette {
 		opts:  opts,
 		state: st,
 		open:  true,
+		live:  opts.Live,
 		chrome: chrome{
 			panel:    style.Cell(ss.Menu),
 			selected: style.Cell(ss.MenuActive),
@@ -232,7 +241,13 @@ func New(opts Options) *Palette {
 // Init returns the command that ranks the file rows for the opening query. It is
 // nil for any other mode, and when no Ranker is wired. The root runs it once.
 func (p *Palette) Init() tea.Cmd {
-	if !p.open || !p.inFile {
+	if !p.open {
+		return nil
+	}
+	if p.live {
+		return p.grepCmd(p.seq, p.input.Value())
+	}
+	if !p.inFile {
 		return nil
 	}
 	return p.rankCmd(p.seq, p.fileText)
@@ -262,6 +277,8 @@ func (p *Palette) Update(msg tea.Msg) tea.Cmd {
 		return p.edit(msg)
 	case FileRankedMsg:
 		return p.applyFiles(msg)
+	case GrepResultMsg:
+		return p.applyGrep(msg)
 	case fileTickMsg:
 		if msg.Seq == p.seq && p.inFile {
 			return p.rankCmd(p.seq, p.fileText)
@@ -392,6 +409,9 @@ func (p *Palette) syncSize() {
 func (p *Palette) requery() tea.Cmd {
 	p.seq++
 	query := p.input.Value()
+	if p.live {
+		return p.liveQuery(p.seq, query)
+	}
 	mode, text := model.ParseQuery(query)
 	if mode != model.ModeFile {
 		p.inFile = false
@@ -540,14 +560,25 @@ func (r row) command(root string) tea.Cmd {
 		msg = ActivateBufferMsg{Index: r.index}
 	case rowLine:
 		msg = GotoLineMsg{Line: r.line, Col: r.col}
+	case rowGrep:
+		msg = OpenLineMsg{Path: filepath.Join(root, r.rel), Line: r.line, Col: r.col}
 	default:
 		return nil
 	}
 	return func() tea.Msg { return msg }
 }
 
-// emptyText is what an empty box says in the mode of the query.
-func emptyText(mode model.Mode) string {
+// emptyText is what an empty box says in the mode of the query. Live Grep has
+// its own text.
+func (p *Palette) emptyText() string {
+	if p.live {
+		return "No matches in files"
+	}
+	return modeEmptyText(p.mode())
+}
+
+// modeEmptyText is what an empty box says in the mode of the query.
+func modeEmptyText(mode model.Mode) string {
 	switch mode {
 	case model.ModeCommand:
 		return "No matching commands"

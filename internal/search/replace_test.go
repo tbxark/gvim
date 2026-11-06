@@ -295,6 +295,14 @@ func TestDecisionFromKey(t *testing.T) {
 		{'n', DecisionSkip, true},
 		{'!', DecisionReplaceAll, true},
 		{'q', DecisionQuit, true},
+		// Fresh's prompt reads "(a)ll" and "(c)ancel", so a and c are accepted too.
+		{'a', DecisionReplaceAll, true},
+		{'c', DecisionQuit, true},
+		{'Y', DecisionReplace, true},
+		{'N', DecisionSkip, true},
+		{'A', DecisionReplaceAll, true},
+		{'C', DecisionQuit, true},
+		{'Q', DecisionQuit, true},
 		{'x', DecisionSkip, false},
 	}
 	for _, tt := range tests {

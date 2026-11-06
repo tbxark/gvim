@@ -32,6 +32,8 @@ type Tree interface {
 	Toggle(path string) error
 	ScrollBy(n int)
 	ScrollOffset() int
+	ShowIgnored() bool
+	SetShowIgnored(v bool)
 }
 
 // Geometry is the panel's place in the frame. The root takes it from the layout:
@@ -42,6 +44,10 @@ type Geometry struct {
 	Width   int
 	Bottom  int
 	Focused bool
+	// Marks gives the git status letter of each changed path, keyed by its
+	// absolute path. A row whose path is in Marks shows the letter in the column
+	// before the border. Nil shows no marks.
+	Marks map[string]rune
 }
 
 // Rows of the panel. The title is row 1 and the tree body starts at row 2
@@ -72,8 +78,9 @@ type (
 	// ResizeMsg is a grip drag: the panel's new width in columns. The root clamps
 	// it (layout section 4.2) and stores it as the explorer override.
 	ResizeMsg struct{ Width int }
-	// ErrorMsg reports a failed tree action, such as a directory that cannot be
-	// read. The root shows it as a notice.
+	// ErrorMsg reports a failed or refused tree action, such as a directory that
+	// cannot be read, or a rename, delete or cut of the tree root. The root shows it
+	// as a notice.
 	ErrorMsg struct{ Err error }
 )
 
@@ -84,8 +91,9 @@ type Panel struct {
 	styles style.Styles
 	now    func() time.Time
 	clicks clickCounter
-	grip   bool // a grip drag is in progress
-	thumb  bool // a scrollbar drag is in progress
+	grip   bool       // a grip drag is in progress
+	thumb  bool       // a scrollbar drag is in progress
+	st     *transient // picks, pending cut and search text, shared by the copies of the panel
 }
 
 // New returns the panel over t. styles are the chrome styles of the frame, and
@@ -94,7 +102,7 @@ func New(t Tree, styles style.Styles, now func() time.Time) Panel {
 	if now == nil {
 		now = time.Now
 	}
-	return Panel{tree: t, styles: styles, now: now}
+	return Panel{tree: t, styles: styles, now: now, st: &transient{}}
 }
 
 // Update handles one mouse message in the panel's geometry g. A press, a drag,
@@ -121,9 +129,12 @@ func (p Panel) Update(msg tea.Msg, g Geometry) (Panel, tea.Cmd) {
 // Action runs one explorer key action and reports whether it handled it. The
 // root resolves keys through the keymap in the file_explorer context and passes
 // the action names here: file_explorer_up, _down, _page_up, _page_down, _open,
-// _expand, _collapse, _refresh, _new_file, _new_directory, _rename and _delete,
-// and the clipboard actions copy, cut and paste. File operations are sent as the
-// messages in ops.go. Any other name is not handled.
+// _expand, _collapse, _refresh, _toggle_select, _extend_selection_up and _down,
+// _select_all, _toggle_gitignored, _new_file, _new_directory, _rename and
+// _delete, and the clipboard actions copy, cut and paste. Up and Down preview a
+// file they land on. File operations are sent as the messages in ops.go. The
+// search keys are not here: the root calls TypeSearch, SearchBackspace and
+// ClearSearch. Any other name is not handled.
 func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 	if p.tree == nil {
 		return p, nil, false
@@ -135,19 +146,24 @@ func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 	case "file_explorer_new_directory":
 		cmd = emit(NewFolderMsg{Dir: p.targetDir()})
 	case "file_explorer_rename":
-		cmd = p.selectedMsg(func(path string) tea.Msg { return RenameMsg{Path: path} })
+		cmd = p.selectedMsg("renamed", func(path string) tea.Msg { return RenameMsg{Path: path} })
 	case "file_explorer_delete":
-		cmd = p.selectedMsg(func(path string) tea.Msg { return DeleteMsg{Path: path} })
+		cmd = p.selectedMsg("deleted", func(path string) tea.Msg { return DeleteMsg{Path: path} })
 	case "copy":
-		cmd = p.selectedMsg(func(path string) tea.Msg { return CopyMsg{Path: path} })
+		if paths := p.targets(); len(paths) > 0 {
+			cmd = emit(clipboardMsg(paths, false))
+			p.state().cut = nil
+		}
 	case "cut":
-		cmd = p.selectedMsg(func(path string) tea.Msg { return CutMsg{Path: path} })
+		cmd = p.cutCmd()
 	case "paste":
+		// The cut dimming stays until the root clears the clipboard, so a paste that
+		// stops partway leaves its entries dimmed.
 		cmd = emit(PasteMsg{Dir: p.targetDir()})
 	case "file_explorer_up":
-		p.tree.Move(-1)
+		cmd = p.moveCursor(-1)
 	case "file_explorer_down":
-		p.tree.Move(1)
+		cmd = p.moveCursor(1)
 	case "file_explorer_page_up":
 		p.tree.Move(-max(g.bodyRows(), 1))
 	case "file_explorer_page_down":
@@ -160,6 +176,17 @@ func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 		p.collapse()
 	case "file_explorer_refresh":
 		return p, emit(ReloadMsg{}), true
+	case "file_explorer_toggle_select":
+		p.togglePick()
+	case "file_explorer_extend_selection_up":
+		p.extend(-1)
+	case "file_explorer_extend_selection_down":
+		p.extend(1)
+	case "file_explorer_select_all":
+		p.selectAll()
+	case "file_explorer_toggle_gitignored":
+		p.tree.SetShowIgnored(!p.tree.ShowIgnored())
+		cmd = emit(ReloadMsg{})
 	default:
 		return p, nil, false
 	}
@@ -197,8 +224,10 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 		row := y - bodyTop
 		if idx := off + row; idx < len(rows) {
 			r := rows[idx]
+			st := p.rowStyle(r, body)
+			dst.Fill(1, g.Width-1, y, st)
 			marker := g.Focused && hasSel && r.Path == sel.Path
-			drawRow(dst, r, y, g.Width, over, marker, body)
+			drawRow(dst, r, y, g.Width, over, marker, g.Marks[r.Path], st)
 		}
 		if over {
 			st := track
@@ -220,10 +249,18 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 // drawRow paints one tree row at y. Column 1 holds the expand icon, or the
 // selection marker when marker is set. The name starts at column 3 plus two
 // cells per depth level. Names stop before the scrollbar column when over is set.
-func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, st grid.Style) {
+// A non-zero mark is the git status letter, drawn in the last column before the
+// border, and the name stops one cell before it.
+func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark rune, st grid.Style) {
 	end := width - 1
 	if over {
 		end--
+	}
+	if mark != 0 {
+		if x := end - 1; x > 3+2*r.Depth {
+			dst.Set(x, y, string(mark), st)
+			end = x - 1
+		}
 	}
 	icon := " "
 	if r.IsDir {
@@ -352,7 +389,7 @@ func (p Panel) rowPress(row, n int) (Panel, tea.Cmd) {
 	}
 	switch n {
 	case 1:
-		return p, emit(OpenFileMsg{Path: r.Path, Preview: true})
+		return p, previewCmd(r.Path)
 	case 2:
 		return p, emit(OpenFileMsg{Path: r.Path})
 	}

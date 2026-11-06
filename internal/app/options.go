@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tbxark/gvim/internal/keymap"
 	"github.com/tbxark/gvim/internal/theme"
@@ -31,17 +32,34 @@ type Options struct {
 	// Root is the directory the file explorer shows. Empty means the current
 	// directory. A non-empty root is also recorded in the recent list.
 	Root string
-	// Config is the config file path. Empty means the default location.
-	// Config loading is not implemented yet, so the value is accepted and
-	// not read.
+	// Config is the user config file path. Empty means the default location,
+	// os.UserConfigDir()/gvim/config.json. A non-empty value replaces that
+	// default user file. The project file (.gvim/config.json at or above Root)
+	// still applies on top of it. A missing file is an error that names the path,
+	// so a typo does not silently drop the default user file.
 	Config string
-	// Keymap is a built-in keymap name. Empty means the platform default.
+	// Keymap is a built-in keymap name. Empty means the config's keymap, or the
+	// platform default when no config file sets one.
 	Keymap string
-	// Theme is a bundled theme name. Empty means "dark".
+	// Theme is a bundled theme name. Empty means the config's theme, which is
+	// "dark" unless a config file sets another.
 	Theme string
 	// LogFile is the log file path. Empty means no log file. Logging is not
 	// implemented yet, so the value is accepted and not written.
 	LogFile string
+	// SessionDir holds the saved session: the open tabs, the unsaved text and the
+	// explorer state. Run saves it when the program ends. Run uses
+	// os.UserCacheDir()/gvim/session when this is empty. Without a directory, the
+	// session is not restored either, so a caller that builds the model for a test
+	// does not read the user's session.
+	SessionDir string
+	// AutoSaveInterval is how often the modified, named files are saved. Zero turns
+	// auto-save off. No config key sets it yet, so only a caller that sets it
+	// turns it on.
+	AutoSaveInterval time.Duration
+	// Diff opens the two files, in tabs 0 and 1, in the compare view. It needs exactly
+	// two files and no folder.
+	Diff bool
 }
 
 // Validate reports the first option that cannot be used. It does not touch
@@ -55,6 +73,14 @@ func (o Options) Validate() error {
 	}
 	if o.Theme != "" && !slices.Contains(theme.Names(), o.Theme) {
 		return fmt.Errorf("--theme: unknown theme %q (want %s)", o.Theme, strings.Join(theme.Names(), ", "))
+	}
+	if o.Diff {
+		if len(o.Files) != 2 {
+			return errors.New("--diff needs exactly two files")
+		}
+		if o.Root != "" {
+			return errors.New("--diff compares two files, not a folder")
+		}
 	}
 	for _, f := range o.Files {
 		if f.Path == "" {

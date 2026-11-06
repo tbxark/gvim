@@ -12,10 +12,13 @@ import (
 
 // configDeps are the functions the config commands call. The app package
 // supplies the real ones, and tests pass fakes. cwd gives the workspace root.
+// load gets the root flags that change the effective config (--config, --keymap
+// and --theme) as an app.Options, and paths gets the --config path. An unset flag
+// is empty.
 type configDeps struct {
 	cwd   func() (string, error)
-	load  func(root string) (app.ConfigView, error)
-	paths func(root string) ([]app.ConfigFile, error)
+	load  func(root string, opts app.Options) (app.ConfigView, error)
+	paths func(root, configPath string) ([]app.ConfigFile, error)
 }
 
 // defaultConfigDeps returns the dependencies that read the real working
@@ -25,24 +28,29 @@ func defaultConfigDeps() configDeps {
 }
 
 // newConfigCommand returns the config command group, wired to the real
-// dependencies.
-func newConfigCommand() *cobra.Command {
-	return newConfigCommandWith(defaultConfigDeps())
+// dependencies. The pointers are the values of the root --config, --keymap and
+// --theme flags, read when a command runs.
+func newConfigCommand(configPath, keymapName, themeName *string) *cobra.Command {
+	return newConfigCommandWith(defaultConfigDeps(), configPath, keymapName, themeName)
 }
 
-// newConfigCommandWith returns the config command group that uses d.
-func newConfigCommandWith(d configDeps) *cobra.Command {
+// newConfigCommandWith returns the config command group that uses d. The
+// pointers are the values of the --config, --keymap and --theme flags, read when
+// a command runs.
+func newConfigCommandWith(d configDeps, configPath, keymapName, themeName *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Inspect the configuration",
 	}
-	cmd.AddCommand(newConfigShowCommand(d), newConfigPathsCommand(d))
+	cmd.AddCommand(newConfigShowCommand(d, configPath, keymapName, themeName), newConfigPathsCommand(d, configPath))
 	return cmd
 }
 
-// newConfigShowCommand prints the effective configuration as JSON. Problems
-// in a config file go to stderr as warnings and do not change the exit code.
-func newConfigShowCommand(d configDeps) *cobra.Command {
+// newConfigShowCommand prints the effective configuration as JSON. The --keymap
+// and --theme flags override the config files, as they do when the editor starts.
+// Problems in a config file go to stderr as warnings and do not change the exit
+// code.
+func newConfigShowCommand(d configDeps, configPath, keymapName, themeName *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
 		Short: "Print the effective configuration",
@@ -57,7 +65,7 @@ stderr as a warning.`,
 				cmd.SilenceUsage = true
 				return err
 			}
-			view, err := d.load(root)
+			view, err := d.load(root, app.Options{Config: *configPath, Keymap: *keymapName, Theme: *themeName})
 			if err != nil {
 				cmd.SilenceUsage = true
 				return err
@@ -75,7 +83,7 @@ stderr as a warning.`,
 
 // newConfigPathsCommand prints the user and project config file locations and
 // whether each one exists.
-func newConfigPathsCommand(d configDeps) *cobra.Command {
+func newConfigPathsCommand(d configDeps, configPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "paths",
 		Short: "Print the config file paths",
@@ -90,7 +98,7 @@ directory with "missing".`,
 				cmd.SilenceUsage = true
 				return err
 			}
-			files, err := d.paths(root)
+			files, err := d.paths(root, *configPath)
 			if err != nil {
 				cmd.SilenceUsage = true
 				return err

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,8 +51,8 @@ type fakeServer struct {
 	// client sends publishDiagnostics back to the client under test.
 	client protocol.Client
 
-	// stall, when non-nil, makes Shutdown block until it is closed. Shutdown
-	// signals stallEntered first.
+	// stall, when non-nil, makes Shutdown and the request handlers that call park
+	// block until it is closed. Each one signals stallEntered first.
 	stall        chan struct{}
 	stallEntered chan struct{}
 
@@ -59,6 +60,23 @@ type fakeServer struct {
 	openCh   chan *protocol.DidOpenTextDocumentParams
 	changeCh chan *protocol.DidChangeTextDocumentParams
 	closeCh  chan *protocol.DidCloseTextDocumentParams
+
+	// requests receives the params of each request method in
+	// requests_fake_test.go, in arrival order. canned holds their replies.
+	requests chan any
+	canned   cannedReplies
+}
+
+// park blocks the calling handler until stall is closed. It does nothing when
+// stall is nil. The handler is made asynchronous first, so the read loop keeps
+// running and the client's $/cancelRequest write does not block behind it.
+func (s *fakeServer) park(ctx context.Context) {
+	if s.stall == nil {
+		return
+	}
+	jsonrpc2.Async(ctx)
+	recordTo(s.stallEntered, struct{}{})
+	<-s.stall
 }
 
 // recordTo sends v without blocking. A full channel drops the value instead of
@@ -80,13 +98,7 @@ func (s *fakeServer) Initialize(_ context.Context, p *protocol.InitializeParams)
 }
 
 func (s *fakeServer) Shutdown(ctx context.Context) error {
-	if s.stall != nil {
-		// Release the read loop first. Otherwise the client's $/cancelRequest
-		// write would block behind this handler.
-		jsonrpc2.Async(ctx)
-		recordTo(s.stallEntered, struct{}{})
-		<-s.stall
-	}
+	s.park(ctx)
 	return nil
 }
 
@@ -145,6 +157,13 @@ type pair struct {
 // It registers no cleanup, so callers that check goroutine counts can control
 // teardown.
 func startPair(cfg Config, stall chan struct{}) pair {
+	return startPairOver(cfg, stall, func(cli pipeRWC) io.ReadWriteCloser { return cli })
+}
+
+// startPairOver is startPair with the client end of the pipes passed through
+// wrap, so a test can put a transport such as gatedRWC between the client and
+// the fake server.
+func startPairOver(cfg Config, stall chan struct{}, wrap func(pipeRWC) io.ReadWriteCloser) pair {
 	cliEnd, srvEnd := newPipePair()
 
 	srv := &fakeServer{
@@ -154,13 +173,14 @@ func startPair(cfg Config, stall chan struct{}) pair {
 		openCh:       make(chan *protocol.DidOpenTextDocumentParams, 128),
 		changeCh:     make(chan *protocol.DidChangeTextDocumentParams, 128),
 		closeCh:      make(chan *protocol.DidCloseTextDocumentParams, 128),
+		requests:     make(chan any, 128),
 	}
-	srvConn := jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(srvEnd))
+	srvConn := jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(srvEnd), jsonrpc2.WithCodec(lspCodec{}))
 	srv.client = protocol.ClientDispatcher(srvConn)
 	srvConn.Go(context.Background(), protocol.ServerHandler(srv, jsonrpc2.MethodNotFoundHandler))
 
 	return pair{
-		client:  NewClient(cliEnd, cfg),
+		client:  NewClient(wrap(cliEnd), cfg),
 		srvConn: srvConn,
 		srv:     srv,
 		srvEnd:  srvEnd,
@@ -282,6 +302,42 @@ func TestInitializeRoundTrip(t *testing.T) {
 				t.Fatalf("server sync capability = %#v, want full", res.Capabilities.TextDocumentSync)
 			}
 		})
+	}
+}
+
+func TestInitializeSendsCodeActionLiteralSupport(t *testing.T) {
+	f := newFixture(t, Config{}, nil)
+	ctx := newTestContext(t)
+	if _, err := f.client.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	got := recv(t, f.srv.initCh, "initialize params")
+	td := got.Capabilities.TextDocument
+	if td == nil || td.CodeAction == nil {
+		t.Fatalf("client capabilities have no codeAction: %+v", td)
+	}
+	kinds := td.CodeAction.CodeActionLiteralSupport.CodeActionKind.ValueSet
+	for _, want := range []protocol.CodeActionKind{protocol.CodeActionKindQuickFix, protocol.CodeActionKindRefactor, protocol.CodeActionKindSource} {
+		if !slices.Contains(kinds, want) {
+			t.Errorf("codeActionLiteralSupport value set = %v, want it to include %q", kinds, want)
+		}
+	}
+}
+
+func TestDoneClosesWhenServerClosesPipe(t *testing.T) {
+	f := newFixture(t, Config{}, nil)
+	select {
+	case <-f.client.Done():
+		t.Fatal("Done closed while the server is connected")
+	default:
+	}
+
+	_ = f.srvEnd.Close()
+	select {
+	case <-f.client.Done():
+	case <-time.After(testTimeout):
+		t.Fatal("Done was not closed after the server closed the pipe")
 	}
 }
 

@@ -176,6 +176,59 @@ func TestCloseCancelsAndClosesEvents(t *testing.T) {
 	}
 }
 
+// TestChangedNamesTheChangedFiles checks that a Changed carries the paths of the entries
+// that changed, so a reader can tell which file changed and not only its folder. A burst
+// merges the names of its events, sorted and without duplicates.
+func TestChangedNamesTheChangedFiles(t *testing.T) {
+	w, clk := newFake(t)
+	w.event(fsnotify.Event{Name: "/ws/a/one.txt", Op: fsnotify.Write})
+	w.event(fsnotify.Event{Name: "/ws/b/three.txt", Op: fsnotify.Create})
+	w.event(fsnotify.Event{Name: "/ws/a/one.txt", Op: fsnotify.Write})
+	clk.fire(t, 2)
+
+	got := <-w.Events()
+	if want := []string{"/ws/a/one.txt", "/ws/b/three.txt"}; !slices.Equal(got.Files, want) {
+		t.Fatalf("Files = %v, want %v", got.Files, want)
+	}
+	noValue(t, w)
+}
+
+// TestSlowReaderGetsMergedFiles checks that the names of changed files are merged, as the
+// folders are, when the reader has not taken the previous Changed.
+func TestSlowReaderGetsMergedFiles(t *testing.T) {
+	w, clk := newFake(t)
+	w.event(fsnotify.Event{Name: "/ws/a/x", Op: fsnotify.Create})
+	clk.fire(t, 0)
+	w.event(fsnotify.Event{Name: "/ws/b/y", Op: fsnotify.Create})
+	clk.fire(t, 1)
+
+	got := <-w.Events()
+	if want := []string{"/ws/a/x", "/ws/b/y"}; !slices.Equal(got.Files, want) {
+		t.Fatalf("merged Files = %v, want %v", got.Files, want)
+	}
+	noValue(t, w)
+}
+
+// TestOverflowNamesNoFiles checks that an overflow, which may have lost any entry, reports
+// the watched folders and names no file, so no file is taken to have changed.
+func TestOverflowNamesNoFiles(t *testing.T) {
+	w, clk := newFake(t)
+	dir := t.TempDir()
+	if err := w.Add(dir); err != nil {
+		t.Fatalf("Add(%s) = %v", dir, err)
+	}
+	w.overflow()
+	clk.fire(t, 0)
+
+	got := <-w.Events()
+	if len(got.Files) != 0 {
+		t.Fatalf("overflow Files = %v, want none", got.Files)
+	}
+	if want := []string{dir}; !slices.Equal(got.Dirs, want) {
+		t.Fatalf("overflow Dirs = %v, want %v", got.Dirs, want)
+	}
+}
+
 func TestOverflowReportsEveryWatchedDir(t *testing.T) {
 	w, clk := newFake(t)
 	a, b := t.TempDir(), t.TempDir()
@@ -211,6 +264,32 @@ func TestCreateFileReportsChange(t *testing.T) {
 	case got, ok := <-w.Events():
 		if !ok || !slices.Contains(got.Dirs, dir) {
 			t.Fatalf("Changed = %+v (open %v), want Dirs to contain %s", got, ok, dir)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no Changed within 5s of creating a file")
+	}
+}
+
+// TestCreateFileNamesTheFile checks on the real file system that a created file is named by
+// the path it has in the watched folder. The root matches a document's file by that path.
+func TestCreateFileNamesTheFile(t *testing.T) {
+	dir := t.TempDir()
+	w, err := New(Options{})
+	if err != nil {
+		t.Skipf("fsnotify cannot start: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	if err := w.Add(dir); err != nil {
+		t.Fatalf("Add(%s) = %v", dir, err)
+	}
+	path := filepath.Join(dir, "new.txt")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got, ok := <-w.Events():
+		if !ok || !slices.Contains(got.Files, path) {
+			t.Fatalf("Changed = %+v (open %v), want Files to contain %s", got, ok, path)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no Changed within 5s of creating a file")

@@ -1,6 +1,7 @@
 package explorer
 
 import (
+	"reflect"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,16 +13,19 @@ import (
 // fakeTree is a Tree with fixed rows and a movable selection. It records what
 // the panel asks of it, so the tests can check the selection without a disk.
 type fakeTree struct {
-	root string
-	rows []tree.Row
-	sel  int
+	root    string
+	rows    []tree.Row
+	sel     int
+	ignored bool // the gitignored-entries setting
 }
 
-func (f *fakeTree) Root() string        { return f.root }
-func (f *fakeTree) Rows() []tree.Row    { return f.rows }
-func (f *fakeTree) ScrollOffset() int   { return 0 }
-func (f *fakeTree) ScrollBy(int)        {}
-func (f *fakeTree) Toggle(string) error { return nil }
+func (f *fakeTree) Root() string          { return f.root }
+func (f *fakeTree) Rows() []tree.Row      { return f.rows }
+func (f *fakeTree) ScrollOffset() int     { return 0 }
+func (f *fakeTree) ScrollBy(int)          {}
+func (f *fakeTree) Toggle(string) error   { return nil }
+func (f *fakeTree) ShowIgnored() bool     { return f.ignored }
+func (f *fakeTree) SetShowIgnored(v bool) { f.ignored = v }
 func (f *fakeTree) Move(delta int) {
 	f.sel = min(max(f.sel+delta, 0), len(f.rows)-1)
 }
@@ -82,7 +86,8 @@ func TestFileOperationKeysSendMessages(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s not handled", tt.action)
 			}
-			if got != tt.want {
+			// The clipboard messages hold a slice, so they cannot be compared with ==.
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("%s sent %#v, want %#v", tt.action, got, tt.want)
 			}
 		})
@@ -117,6 +122,56 @@ func TestEditorActionsAreNotHandledByThePanel(t *testing.T) {
 	for _, action := range []string{"undo", "save", "select_all"} {
 		if _, ok := act(t, opsTree(0), action); ok {
 			t.Errorf("%s handled by the explorer", action)
+		}
+	}
+}
+
+// TestTreeRootRefusesRenameDeleteAndCut checks that the tree root gets an error
+// instead of a rename, delete or cut message, and that a refused cut dims nothing.
+// A copy of the root is still sent.
+func TestTreeRootRefusesRenameDeleteAndCut(t *testing.T) {
+	t.Parallel()
+	tr := opsTree(0)
+	tr.rows = append([]tree.Row{{Name: "r", Path: "/r", IsDir: true, Expanded: true}}, tr.rows...)
+	tr.sel = 0
+	for _, action := range []string{"file_explorer_rename", "file_explorer_delete", "cut"} {
+		p := New(tr, style.Styles{}, nil)
+		next, cmd, ok := p.Action(action, testGeometry)
+		if !ok {
+			t.Fatalf("%s not handled", action)
+		}
+		if _, isErr := run(cmd).(ErrorMsg); !isErr {
+			t.Errorf("%s on the tree root sent %#v, want ErrorMsg", action, run(cmd))
+		}
+		if next.CutPending() {
+			t.Errorf("%s on the tree root left a cut pending", action)
+		}
+	}
+	p := New(tr, style.Styles{}, nil)
+	if _, got := doAction(t, p, "copy"); !reflect.DeepEqual(got, CopyMsg{Path: "/r"}) {
+		t.Errorf("copy of the tree root sent %#v, want CopyMsg for /r", got)
+	}
+}
+
+// TestWithinMatchesTheEntryAndWhatIsUnderIt checks the path test the clipboard uses
+// to find the entries a trashed, renamed or moved path takes with it. A sibling that
+// shares a name prefix is not under the path.
+func TestWithinMatchesTheEntryAndWhatIsUnderIt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		path, dir string
+		want      bool
+	}{
+		{"/r/a", "/r/a", true},
+		{"/r/a/x.txt", "/r/a", true},
+		{"/r/ab", "/r/a", false},
+		{"/r/b.txt", "/r/a", false},
+		{"/r/a", "/r/a/x.txt", false},
+		{"/r/a", "/", true},
+	}
+	for _, tt := range tests {
+		if got := Within(tt.path, tt.dir); got != tt.want {
+			t.Errorf("Within(%q, %q) = %v, want %v", tt.path, tt.dir, got, tt.want)
 		}
 	}
 }

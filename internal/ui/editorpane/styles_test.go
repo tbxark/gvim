@@ -4,8 +4,11 @@ import (
 	"image/color"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/tbxark/gvim/internal/syntax"
 	"github.com/tbxark/gvim/internal/theme"
+	"github.com/tbxark/gvim/internal/ui/grid"
 )
 
 func TestNewStylesKeepsTheTextBackgroundOnEverySyntaxKind(t *testing.T) {
@@ -69,6 +72,23 @@ func TestZeroStylesPaintWithTerminalDefaults(t *testing.T) {
 	}
 }
 
+func TestNewStylesSearchMatchColors(t *testing.T) {
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := NewStyles(th)
+	if st.Match.BG != (color.RGBA{R: 100, G: 100, B: 20, A: 255}) {
+		t.Errorf("match bg = %v, want the dark theme match color", st.Match.BG)
+	}
+	if st.CurrentMatch.BG != (color.RGBA{R: 64, G: 170, B: 230, A: 255}) {
+		t.Errorf("current match bg = %v, want the dark theme current match color", st.CurrentMatch.BG)
+	}
+	if st.CurrentMatch.FG != (color.RGBA{A: 255}) || !st.CurrentMatch.Bold {
+		t.Errorf("current match = %+v, want black and bold", st.CurrentMatch)
+	}
+}
+
 func TestNewStylesScrollbarGlyphColors(t *testing.T) {
 	th, err := theme.Parse([]byte(`{
 		"ui": {"scrollbar_thumb_fg": [255, 96, 255], "scrollbar_track_fg": [48, 47, 57]}
@@ -82,5 +102,34 @@ func TestNewStylesScrollbarGlyphColors(t *testing.T) {
 	}
 	if want := (color.RGBA{R: 48, G: 47, B: 57, A: 255}); st.Scrollbar.FG != want {
 		t.Errorf("track fg = %v, want %v", st.Scrollbar.FG, want)
+	}
+}
+
+func TestNewStylesReadsTheDisplayRoles(t *testing.T) {
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := NewStyles(th)
+	tests := []struct {
+		name string
+		got  grid.Style
+		fg   any
+		bg   any
+	}{
+		{"secondary caret", st.SecondaryCaret, color.RGBA{R: 212, G: 212, B: 212, A: 255}, color.RGBA{R: 100, G: 100, B: 100, A: 255}},
+		{"current line", st.CurrentLine, nil, color.RGBA{R: 40, G: 40, B: 40, A: 255}},
+		{"ruler", st.Ruler, nil, color.RGBA{R: 50, G: 50, B: 50, A: 255}},
+		{"whitespace", st.Whitespace, color.RGBA{R: 70, G: 70, B: 70, A: 255}, color.RGBA{R: 30, G: 30, B: 30, A: 255}},
+		{"occurrence", st.Occurrence, nil, color.RGBA{R: 75, G: 75, B: 75, A: 255}},
+		{"error", st.DiagError, lipgloss.Color("1"), nil},
+	}
+	for _, tc := range tests {
+		if tc.got.FG != tc.fg {
+			t.Errorf("%s fg = %v, want %v", tc.name, tc.got.FG, tc.fg)
+		}
+		if tc.got.BG != tc.bg {
+			t.Errorf("%s bg = %v, want %v", tc.name, tc.got.BG, tc.bg)
+		}
 	}
 }

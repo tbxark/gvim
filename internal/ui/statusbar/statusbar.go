@@ -21,15 +21,6 @@ import (
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
-// Segment indexes of the right-hand group, in display order. A Run of KindSegment
-// carries one of them in its Index.
-const (
-	SegmentPosition = iota // "Ln 1, Col 1"
-	SegmentEncoding        // "UTF-8" or "ASCII"
-	SegmentEOL             // "LF"
-	SegmentLanguage        // the chroma lexer name, "Text" when there is none
-)
-
 // Config holds the labels that come from configuration rather than from the
 // document. An empty field takes the default.
 type Config struct {
@@ -51,20 +42,23 @@ type Content struct {
 	Language string // the chroma lexer name, for example "Go" or "Text"
 }
 
-// Kind names what a click on a run reaches.
+// Kind names what a click on a run reaches. Each segment of the right-hand group
+// has its own kind, so a click can open that segment's picker.
 type Kind int
 
 const (
-	KindNone    Kind = iota // text only, or the gap
-	KindSegment             // a right-hand segment; Index is one of the Segment constants
+	KindNone       Kind = iota // text only, or the gap
+	KindPosition               // "Ln 1, Col 1": no picker
+	KindEncoding               // "UTF-8" or "ASCII": opens the encoding picker
+	KindLineEnding             // "LF": opens the line-ending picker
+	KindLanguage               // the chroma lexer name: opens the language picker
 )
 
 // Run is a piece of status text at a fixed column, with what a click on it reaches.
 type Run struct {
-	X, W  int // first column and width in cells
-	Text  string
-	Kind  Kind
-	Index int
+	X, W int // first column and width in cells
+	Text string
+	Kind Kind
 }
 
 // covers reports whether column x falls inside the run.
@@ -180,16 +174,16 @@ func (m Model) Runs(w int, c Content) []Run {
 	x := w - rightW
 	for _, seg := range right {
 		tw := ansi.StringWidth(seg.text)
-		runs = append(runs, Run{X: x, W: tw, Text: seg.text, Kind: KindSegment, Index: seg.index})
+		runs = append(runs, Run{X: x, W: tw, Text: seg.text, Kind: seg.kind})
 		x += tw
 	}
 	return runs
 }
 
-// segment is one right-hand item with its segment index.
+// segment is one right-hand item and the kind a click on it reaches.
 type segment struct {
-	text  string
-	index int
+	text string
+	kind Kind
 }
 
 // messageText is the left group: the message, with the spinner frame in front of
@@ -214,14 +208,13 @@ func pathText(path string) string {
 	return " " + path + " "
 }
 
-// rightSegments returns the right-hand items in display order. Their indexes do
-// not change when the trailing ones are dropped.
+// rightSegments returns the right-hand items in display order.
 func (m Model) rightSegments(c Content) []segment {
 	return []segment{
-		{text: " " + c.Position + " ", index: SegmentPosition},
-		{text: " " + c.Encoding + " ", index: SegmentEncoding},
-		{text: " " + c.EOL + " ", index: SegmentEOL},
-		{text: " " + c.Language + " ", index: SegmentLanguage},
+		{text: " " + c.Position + " ", kind: KindPosition},
+		{text: " " + c.Encoding + " ", kind: KindEncoding},
+		{text: " " + c.EOL + " ", kind: KindLineEnding},
+		{text: " " + c.Language + " ", kind: KindLanguage},
 	}
 }
 

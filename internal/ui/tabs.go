@@ -229,13 +229,13 @@ func stripHit(runs []run, x int) hitTarget {
 	return hitRuns(runs, x, hitTarget{Kind: hitNone})
 }
 
-// drawTabStrip paints the strip s on row 1 of g, from column x0. The strip fills
+// drawTabStrip paints the strip s on row y of g, from column x0. The strip fills
 // the row from x0. The label and the close glyph of the active tab take the
 // active style, the other tabs and the plus take the tab style, and the markers
 // take the bar style.
-func drawTabStrip(g *grid.Grid, st style.Styles, x0 int, s strip) {
+func drawTabStrip(g *grid.Grid, st style.Styles, x0, y int, s strip) {
 	barStyle := style.Cell(st.TabBar)
-	g.Fill(x0, g.Width(), 1, barStyle)
+	g.Fill(x0, g.Width(), y, barStyle)
 	tab, active := style.Cell(st.Tab), style.Cell(st.TabActive)
 	for _, r := range s.runs {
 		cell := tab
@@ -245,6 +245,6 @@ func drawTabStrip(g *grid.Grid, st style.Styles, x0 int, s strip) {
 		case r.kind != hitTabNew && r.index == s.active:
 			cell = active
 		}
-		g.Put(r.x, 1, g.Width(), r.text, cell)
+		g.Put(r.x, y, g.Width(), r.text, cell)
 	}
 }

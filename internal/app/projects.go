@@ -1,0 +1,79 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/tbxark/gvim/internal/explorer"
+	"github.com/tbxark/gvim/internal/explorer/watch"
+	"github.com/tbxark/gvim/internal/finder"
+	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/workspace"
+)
+
+// projectOpener is the root's Projects port. Opening a folder records it in the
+// recent list, builds its explorer tree, starts its file index and moves the
+// watcher to it. The index of the folder that was left is stopped. The opener holds
+// the current index, so close can stop it when the program ends.
+type projectOpener struct {
+	ctx     context.Context
+	watcher *watch.Watcher // nil when the watcher could not start
+
+	mu    sync.Mutex
+	root  string        // the folder the watcher watches
+	index *finder.Index // the file index of the current root
+}
+
+// Open makes path the project root. A failure to record the folder in the recent
+// list does not stop the open. A folder that cannot be opened is an error, and
+// nothing is changed.
+func (p *projectOpener) Open(path string) (ui.Project, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	r, err := workspace.Switch(path)
+	if r.Path() == "" {
+		if err == nil {
+			err = fmt.Errorf("open workspace %s: no root", path)
+		}
+		return ui.Project{}, err
+	}
+	tree, err := explorer.Open(r.Path())
+	if err != nil {
+		return ui.Project{}, err
+	}
+	idx := finder.Start(p.ctx, r.Path())
+	if p.watcher != nil {
+		if p.root != "" {
+			_ = p.watcher.Remove(p.root)
+		}
+		_ = p.watcher.Add(r.Path())
+	}
+	p.root = r.Path()
+	old := p.index
+	p.index = idx
+	if old != nil {
+		old.Close()
+	}
+	return ui.Project{Tree: tree, Files: idx, Recents: recentFolders()}, nil
+}
+
+// newProjectOpener returns the opener of the first root. Its index is files, and
+// when there is a watcher, the watcher is pointed at root.
+func newProjectOpener(ctx context.Context, watcher *watch.Watcher, root string, files *finder.Index) *projectOpener {
+	p := &projectOpener{ctx: ctx, watcher: watcher, index: files}
+	if watcher != nil {
+		_ = watcher.Add(root)
+		p.root = root
+	}
+	return p
+}
+
+// close stops the file index of the current root.
+func (p *projectOpener) close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.index != nil {
+		p.index.Close()
+	}
+}

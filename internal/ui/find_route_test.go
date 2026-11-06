@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -44,15 +43,31 @@ func (f *searchFake) FindMatches(q search.Query) ([]search.Match, error) {
 	return search.Find(buffer.New(strings.Join(f.doc.lines, "\n")), q)
 }
 
-// ReplaceMatch is not used by the navigation tests.
-func (f *searchFake) ReplaceMatch(search.Query, string, search.Match) (string, error) {
-	return "", errors.New("replace is not in the fake")
+// ReplaceMatch replaces m in the fake text with repl, as the editor does, and
+// returns the inserted text.
+func (f *searchFake) ReplaceMatch(q search.Query, repl string, m search.Match) (string, error) {
+	b := buffer.New(strings.Join(f.doc.lines, "\n"))
+	text, err := search.Replace(b, q, repl, m)
+	if err != nil {
+		return "", err
+	}
+	f.doc.lines = strings.Split(b.Text(), "\n")
+	return text, nil
 }
 
-// ReplaceMatches is not used by the navigation tests.
-func (f *searchFake) ReplaceMatches(search.Query, string) (int, error) {
-	return 0, errors.New("replace is not in the fake")
+// ReplaceMatches replaces every match of q in the fake text with repl.
+func (f *searchFake) ReplaceMatches(q search.Query, repl string) (int, error) {
+	b := buffer.New(strings.Join(f.doc.lines, "\n"))
+	n, err := search.ReplaceAll(b, q, repl)
+	if err != nil {
+		return 0, err
+	}
+	f.doc.lines = strings.Split(b.Text(), "\n")
+	return n, nil
 }
+
+// text returns the fake document text.
+func (f *searchFake) text() string { return strings.Join(f.doc.lines, "\n") }
 
 // selDoc is the fake document with the selection of its searchFake.
 type selDoc struct {
@@ -71,7 +86,14 @@ func (d selDoc) Selection() (a, h buffer.Pos, ok bool) {
 // newRouteModel returns a macOS-keymap model over ed, sized to 100 by 30.
 func newRouteModel(t *testing.T, ed EditorState) *Model {
 	t.Helper()
-	km, err := keymap.ByName("macos")
+	return newRouteModelPreset(t, ed, "macos")
+}
+
+// newRouteModelPreset returns a model over ed with the named built-in keymap,
+// sized to 100 by 30.
+func newRouteModelPreset(t *testing.T, ed EditorState, preset string) *Model {
+	t.Helper()
+	km, err := keymap.ByName(preset)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +108,25 @@ func newSearchModel(t *testing.T, lines ...string) (*Model, *searchFake) {
 	sf := &searchFake{fileEditorFake: &fileEditorFake{fakeEditor: newFakeEditor(lines...)}}
 	return newRouteModel(t, sf), sf
 }
+
+// newDefaultSearchModel is newSearchModel on the default keymap. The macOS keymap
+// binds Ctrl+Alt+R to lsp_rename, so the query_replace tests use the default one.
+func newDefaultSearchModel(t *testing.T, lines ...string) (*Model, *searchFake) {
+	t.Helper()
+	sf := &searchFake{fileEditorFake: &fileEditorFake{fakeEditor: newFakeEditor(lines...)}}
+	return newRouteModelPreset(t, sf, "default"), sf
+}
+
+// ctrlAlt returns a Ctrl+Alt press of code, a letter or a key such as tea.KeyRight.
+func ctrlAlt(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModCtrl | tea.ModAlt}
+}
+
+// noDocSearchFake is a searchFake with no tab open.
+type noDocSearchFake struct{ *searchFake }
+
+// Active reports that no document is open.
+func (noDocSearchFake) Active() Document { return nil }
 
 // runCmds runs cmd and feeds its message back to m, as the program does.
 func runCmds(m *Model, cmd tea.Cmd) {
@@ -113,7 +154,7 @@ func TestCtrlFOpensTheFindBarThroughTheRoot(t *testing.T) {
 	if !strings.Contains(rows[h-2], "[ ] Case Sensitive (⌥C)") || !strings.Contains(rows[h-2], "[ ] Regex (⌥R)") {
 		t.Errorf("row %d = %q, want the option toggles", h-2, rows[h-2])
 	}
-	if !strings.Contains(rows[h-3], "Trusted") {
+	if !strings.Contains(rows[h-3], "Local") {
 		t.Errorf("row %d = %q, want the status row above the bar", h-3, rows[h-3])
 	}
 	if l := m.layout(); l.statusY != h-3 || l.bodyBottom != h-4 {
@@ -229,3 +270,148 @@ func TestGotoPromptRejectsWhatIsNotALine(t *testing.T) {
 
 // Encoding satisfies Document for the selection fake.
 func (selDoc) Encoding() string { return "ASCII" }
+
+// LineEnding satisfies Document for the selection fake.
+func (selDoc) LineEnding() string { return "LF" }
+
+func TestAltAOpensTheFindBarWithTheReplaceRow(t *testing.T) {
+	m, _ := newDefaultSearchModel(t, "hello world")
+	press(m, tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
+
+	if !m.findOpen() {
+		t.Fatalf("overlay stack has %d entries after Alt+A, want the find bar", len(m.overlays))
+	}
+	if rows := m.findBar.Rows(); rows != 3 {
+		t.Fatalf("bar covers %d rows, want 3 with the replacement row", rows)
+	}
+	rows := screenRows(m)
+	if got := strings.TrimSpace(rows[len(rows)-1]); !strings.HasPrefix(got, "Replace:") {
+		t.Errorf("last row = %q, want the replacement row", got)
+	}
+}
+
+func TestSearchReplaceNextAndPrevStepThroughMatches(t *testing.T) {
+	m, sf := newDefaultSearchModel(t, "foo bar foo", "x foo")
+	press(m, ctrl('f'))
+	for _, r := range "foo" {
+		press(m, typed(string(r)))
+	}
+	press(m, special(tea.KeyEscape))
+	// The bar is closed and its search text is held. The selection is 0:0 to 0:3.
+
+	press(m, ctrlAlt(tea.KeyRight))
+	if sf.anchor != (buffer.Pos{Line: 0, Col: 8}) || m.notice != "Match 2 of 3" {
+		t.Fatalf("next selected from %+v with notice %q, want the match at 0:8 and %q", sf.anchor, m.notice, "Match 2 of 3")
+	}
+	press(m, ctrlAlt(tea.KeyRight))
+	if sf.anchor != (buffer.Pos{Line: 1, Col: 2}) {
+		t.Fatalf("second next selected from %+v, want the match at 1:2", sf.anchor)
+	}
+	press(m, ctrlAlt(tea.KeyLeft))
+	if sf.anchor != (buffer.Pos{Line: 0, Col: 8}) || m.notice != "Match 2 of 3" {
+		t.Fatalf("prev selected from %+v with notice %q, want the match at 0:8", sf.anchor, m.notice)
+	}
+}
+
+func TestSearchReplaceNavigationWithoutASearchSaysHowToStart(t *testing.T) {
+	m, _ := newDefaultSearchModel(t, "foo")
+	press(m, ctrlAlt(tea.KeyRight))
+	if m.notice != noActiveSearch {
+		t.Fatalf("notice = %q, want %q", m.notice, noActiveSearch)
+	}
+	if len(m.overlays) != 0 {
+		t.Errorf("the key opened %d overlays, want none", len(m.overlays))
+	}
+}
+
+// heldReplaceModel types x into the find bar with z as the replacement, then
+// closes the bar with Esc, which leaves the search and replacement held.
+func heldReplaceModel(t *testing.T, lines ...string) (*Model, *searchFake) {
+	t.Helper()
+	m, sf := newDefaultSearchModel(t, lines...)
+	press(m, ctrl('f'))
+	press(m, typed("x"))
+	press(m, special(tea.KeyTab))
+	press(m, typed("z"))
+	press(m, special(tea.KeyEscape))
+	if m.findOpen() {
+		t.Fatal("bar still open after Esc")
+	}
+	return m, sf
+}
+
+func TestQueryReplaceAnswersEachMatchFromTheHeldBar(t *testing.T) {
+	m, sf := heldReplaceModel(t, "x x x x")
+	press(m, ctrlAlt('r'))
+	if !m.findOpen() {
+		t.Fatalf("overlay stack has %d entries after Ctrl+Alt+R, want the find bar", len(m.overlays))
+	}
+	rows := screenRows(m)
+	h := len(rows)
+	if !strings.Contains(rows[h-2], "Replace? (y)es (n)o (a)ll (c)ancel") {
+		t.Fatalf("row %d = %q, want Fresh's query-replace question", h-2, rows[h-2])
+	}
+
+	press(m, typed("y")) // replace 0:0
+	if got := sf.text(); got != "z x x x" {
+		t.Fatalf("after y: text = %q, want %q", got, "z x x x")
+	}
+	press(m, typed("n")) // skip 0:2
+	if got := sf.text(); got != "z x x x" {
+		t.Fatalf("after n: text = %q, want no change", got)
+	}
+	press(m, typed("q"))
+	if got := sf.text(); got != "z x x x" {
+		t.Fatalf("after q: text = %q, want no change", got)
+	}
+	if rows := screenRows(m); !strings.Contains(rows[len(rows)-2], "Replaced 1 occurrence(s)") {
+		t.Fatalf("row %d = %q, want the count after q", len(rows)-2, rows[len(rows)-2])
+	}
+}
+
+func TestEscDuringQueryReplaceStopsTheRun(t *testing.T) {
+	m, sf := heldReplaceModel(t, "x x x")
+	press(m, ctrlAlt('r'))
+	press(m, typed("y"))
+	press(m, special(tea.KeyEscape))
+
+	if m.findOpen() {
+		t.Fatal("Esc left the find bar on the overlay stack")
+	}
+	if got := sf.text(); got != "z x x" {
+		t.Fatalf("text = %q, want the one replacement made before Esc", got)
+	}
+}
+
+func TestQueryReplaceWithoutASearchKeepsTheBarOpenAndSaysSo(t *testing.T) {
+	m, sf := newDefaultSearchModel(t, "x x")
+	press(m, ctrlAlt('r'))
+	if !m.findOpen() {
+		t.Fatal("Ctrl+Alt+R without a search did not open the bar")
+	}
+	rows := screenRows(m)
+	if !strings.Contains(rows[len(rows)-2], "Query replace: empty search query.") {
+		t.Fatalf("row %d = %q, want the empty-query message", len(rows)-2, rows[len(rows)-2])
+	}
+	if got := sf.text(); got != "x x" {
+		t.Fatalf("text = %q, want no change", got)
+	}
+}
+
+func TestSearchReplaceActionsNeedADocument(t *testing.T) {
+	for _, action := range []string{"start_search_replace", "search_replace_next_match", "search_replace_prev_match", "query_replace"} {
+		t.Run(action, func(t *testing.T) {
+			sf := &searchFake{fileEditorFake: &fileEditorFake{fakeEditor: newFakeEditor("x")}}
+			m := newRouteModel(t, noDocSearchFake{sf})
+			if err := m.Run(action); err != nil {
+				t.Fatalf("Run(%q) = %v, want it handled", action, err)
+			}
+			if m.notice != noDocumentNotice {
+				t.Errorf("notice = %q, want %q", m.notice, noDocumentNotice)
+			}
+			if m.findOpen() {
+				t.Error("the find bar opened with no document")
+			}
+		})
+	}
+}

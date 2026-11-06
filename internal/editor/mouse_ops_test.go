@@ -212,13 +212,14 @@ func TestOpenPreviewErrors(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bad.bin")
-	if err := os.WriteFile(bad, []byte{0xff, 0xfe}, 0o644); err != nil {
+	// A UTF-16LE byte-order mark, then a lone high surrogate: no text decodes.
+	if err := os.WriteFile(bad, []byte{0xff, 0xfe, 0x00, 0xd8}, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	e := New(Options{})
 	err := e.OpenPreview(bad)
-	if !errors.Is(err, ErrNotUTF8) {
-		t.Fatalf("OpenPreview(binary) = %v, want ErrNotUTF8", err)
+	if !errors.Is(err, ErrNotDecodable) {
+		t.Fatalf("OpenPreview(binary) = %v, want ErrNotDecodable", err)
 	}
 	if e.Status() != err.Error() {
 		t.Fatalf("status = %q, want %q", e.Status(), err.Error())

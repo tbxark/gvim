@@ -513,3 +513,28 @@ func TestDrawFolderGlyphsCollapsedAndExpanded(t *testing.T) {
 		t.Fatalf("expanded folder row %q, want ▼ glyph", lines[3])
 	}
 }
+
+// TestDrawGitMarkOnTheRow checks that a row whose absolute path has a git status
+// letter shows it in the last column before the border, and that the name keeps
+// the cells before the letter. A row without a mark shows a blank there.
+func TestDrawGitMarkOnTheRow(t *testing.T) {
+	t.Parallel()
+	dir := fixture(t)
+	tr := openTree(t, dir)
+	marks := map[string]rune{filepath.Join(dir, "b.txt"): 'M'}
+	g := grid.New(16, 8)
+	New(tr, style.Styles{}, nil).Draw(g, Geometry{Width: 16, Bottom: 7, Marks: marks})
+
+	if got := g.At(14, 4).Text; got != "M" {
+		t.Errorf("mark cell of b.txt = %q, want %q", got, "M")
+	}
+	if got := g.Plain()[4]; !strings.Contains(got, "b.txt") {
+		t.Errorf("row of b.txt = %q, want the name shown", got)
+	}
+	if got := g.At(14, 5).Text; got != " " {
+		t.Errorf("unmarked row c.txt has %q in the mark column, want blank", got)
+	}
+	if got := g.At(15, 4).Text; got != "│" {
+		t.Errorf("border after the mark = %q, want the border", got)
+	}
+}

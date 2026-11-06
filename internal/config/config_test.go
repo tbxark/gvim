@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeFile creates path with content, making parent directories.
@@ -39,6 +40,18 @@ func TestDefaults(t *testing.T) {
 		LineEnding:   "auto",
 		AutoIndent:   true,
 		LineNumbers:  true,
+		ShowMenuBar:  true,
+
+		ShowTabBar:              true,
+		ShowStatusBar:           true,
+		ShowVerticalScrollbar:   true,
+		ShowHorizontalScrollbar: true,
+		LineWrap:                true,
+		HighlightCurrentLine:    true,
+		MouseCapture:            true,
+		CursorStyle:             "block",
+
+		PluginTimeout: 500 * time.Millisecond,
 	}
 	if got := Defaults(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Defaults() = %+v, want %+v", got, want)
@@ -233,11 +246,16 @@ func TestLoadBadValuesAreDiagnosedPerKey(t *testing.T) {
 		{"tab size string", `{"tab_size": "4"}`, "tab_size", "must be an integer"},
 		{"line ending", `{"line_ending": "cr"}`, "line_ending", "must be"},
 		{"bool as string", `{"auto_indent": "yes"}`, "auto_indent", "must be true or false"},
+		{"menu bar as string", `{"show_menu_bar": "yes"}`, "show_menu_bar", "must be true or false"},
 		{"empty theme", `{"theme": ""}`, "theme", "must not be empty"},
 		{"theme not a string", `{"theme": 1}`, "theme", "must be a string"},
 		{"null value", `{"line_numbers": null}`, "line_numbers", "null"},
 		{"keybindings array", `{"keybindings": []}`, "keybindings", "must be a JSON object"},
 		{"unknown key", `{"tabsize": 2}`, "tabsize", "unknown setting"},
+		{"plugin timeout zero", `{"plugin_timeout_ms": 0}`, "plugin_timeout_ms", "between 1 and 60000"},
+		{"plugin timeout too large", `{"plugin_timeout_ms": 60001}`, "plugin_timeout_ms", "between 1 and 60000"},
+		{"plugin timeout string", `{"plugin_timeout_ms": "500"}`, "plugin_timeout_ms", "must be an integer"},
+		{"plugin timeout fraction", `{"plugin_timeout_ms": 1.5}`, "plugin_timeout_ms", "must be an integer"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -255,6 +273,75 @@ func TestLoadBadValuesAreDiagnosedPerKey(t *testing.T) {
 				t.Fatalf("cfg = %+v, want defaults after a bad %q", cfg, tt.key)
 			}
 		})
+	}
+}
+
+func TestLoadPluginTimeout(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want time.Duration
+	}{
+		{"default when unset", `{"theme": "dark"}`, 500 * time.Millisecond},
+		{"milliseconds", `{"plugin_timeout_ms": 1500}`, 1500 * time.Millisecond},
+		{"smallest allowed", `{"plugin_timeout_ms": 1}`, time.Millisecond},
+		{"largest allowed", `{"plugin_timeout_ms": 60000}`, 60 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			writeFile(t, path, tt.body)
+			cfg, diags, err := Load(Options{UserFile: path})
+			if err != nil || len(diags) != 0 {
+				t.Fatalf("Load = %v, %v, want no diagnostics", diags, err)
+			}
+			if cfg.PluginTimeout != tt.want {
+				t.Fatalf("PluginTimeout = %v, want %v", cfg.PluginTimeout, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadShowMenuBar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeFile(t, path, `{"show_menu_bar": false}`)
+	cfg, diags, err := Load(Options{UserFile: path})
+	if err != nil || len(diags) != 0 {
+		t.Fatalf("Load = %v, %v", diags, err)
+	}
+	if cfg.ShowMenuBar {
+		t.Fatal("show_menu_bar false was not applied")
+	}
+}
+
+func TestSourceNamesTheFileThatSetKey(t *testing.T) {
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "user.json")
+	root := filepath.Join(dir, "proj")
+	projFile := filepath.Join(root, ".gvim", "config.json")
+	writeFile(t, userFile, `{"keymap": "emacs", "theme": "light", "keybindings": {"bindings": []}, "tab_size": 99}`)
+	writeFile(t, projFile, `{"theme": "mono", "keybindings": {"bindings": [{"key": "s", "modifiers": ["ctrl"], "action": "noop"}]}}`)
+	cfg, diags, err := Load(Options{Root: root, UserFile: userFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diags) != 1 || diags[0].Key != "tab_size" {
+		t.Fatalf("diags = %+v, want the bad tab_size only", diags)
+	}
+	tests := []struct {
+		key  string
+		want string
+	}{
+		{"keymap", userFile},
+		{"theme", projFile},       // the project layer replaces the user value
+		{"keybindings", projFile}, // the project layer replaces the whole object
+		{"tab_size", ""},          // rejected in the user file, so the default stands
+		{"line_numbers", ""},      // set by no file
+	}
+	for _, tt := range tests {
+		if got := cfg.Source(tt.key); got != tt.want {
+			t.Errorf("Source(%q) = %q, want %q", tt.key, got, tt.want)
+		}
 	}
 }
 
@@ -421,6 +508,101 @@ func TestDiagnosticString(t *testing.T) {
 		if got := tt.d.String(); got != tt.want {
 			t.Errorf("String() = %q, want %q", got, tt.want)
 		}
+	}
+}
+
+func TestLoadLSPServers(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		want     map[string]LSPServer
+		wantDiag string // part of the diagnostic message for key lsp; empty when none
+	}{
+		{
+			name: "command and args",
+			body: `{"lsp": {"go": {"command": "gopls", "args": ["-remote=auto"]}}}`,
+			want: map[string]LSPServer{"go": {Command: "gopls", Args: []string{"-remote=auto"}}},
+		},
+		{
+			name: "args are optional",
+			body: `{"lsp": {"rust": {"command": "rust-analyzer"}}}`,
+			want: map[string]LSPServer{"rust": {Command: "rust-analyzer"}},
+		},
+		{
+			name: "empty map starts no server",
+			body: `{"lsp": {}}`,
+			want: map[string]LSPServer{},
+		},
+		{
+			name:     "missing command",
+			body:     `{"lsp": {"go": {"args": []}}}`,
+			wantDiag: "command must not be empty",
+		},
+		{
+			name:     "empty command",
+			body:     `{"lsp": {"go": {"command": ""}}}`,
+			wantDiag: "command must not be empty",
+		},
+		{
+			name:     "unknown field",
+			body:     `{"lsp": {"go": {"command": "gopls", "cmd": "x"}}}`,
+			wantDiag: `unknown field "cmd"`,
+		},
+		{
+			name:     "args not a list",
+			body:     `{"lsp": {"go": {"command": "gopls", "args": "x"}}}`,
+			wantDiag: "args",
+		},
+		{
+			name:     "not an object",
+			body:     `{"lsp": "gopls"}`,
+			wantDiag: "must be a JSON object",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			writeFile(t, path, tt.body)
+			cfg, diags, err := Load(Options{UserFile: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantDiag == "" {
+				if len(diags) != 0 {
+					t.Fatalf("diags = %v, want none", diags)
+				}
+				if !reflect.DeepEqual(cfg.LSP, tt.want) {
+					t.Fatalf("LSP = %+v, want %+v", cfg.LSP, tt.want)
+				}
+				return
+			}
+			if len(diags) != 1 || diags[0].Key != "lsp" || !strings.Contains(diags[0].Message, tt.wantDiag) {
+				t.Fatalf("diags = %+v, want one for key lsp containing %q", diags, tt.wantDiag)
+			}
+			if cfg.LSP != nil {
+				t.Fatalf("LSP = %+v after a bad lsp key, want none", cfg.LSP)
+			}
+		})
+	}
+}
+
+func TestLoadLSPProjectLayerReplacesUser(t *testing.T) {
+	dir := t.TempDir()
+	user := filepath.Join(dir, "user.json")
+	writeFile(t, user, `{"lsp": {"go": {"command": "gopls"}, "rust": {"command": "rust-analyzer"}}}`)
+	root := filepath.Join(dir, "proj")
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"lsp": {"python": {"command": "pylsp"}}}`)
+
+	cfg, diags, err := Load(Options{Root: root, UserFile: user})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("diags = %v, want none", diags)
+	}
+	want := map[string]LSPServer{"python": {Command: "pylsp"}}
+	if !reflect.DeepEqual(cfg.LSP, want) {
+		t.Fatalf("LSP = %+v, want %+v (the project map replaces the user map)", cfg.LSP, want)
 	}
 }
 

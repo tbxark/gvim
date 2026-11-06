@@ -1,6 +1,8 @@
 {
   "name": "solarized-dark",
   "editor": {
+    "inactive_cursor": [101, 123, 131],
+    "ruler_bg": [22, 72, 86],
     "bg": [0, 43, 54],
     "fg": [131, 148, 150],
     "cursor": [38, 139, 210],

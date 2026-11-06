@@ -87,21 +87,22 @@ func TestFixtureAt100Columns(t *testing.T) {
 	}
 }
 
-func TestRightGroupIsFlushAndSegmentsKeepTheirIndex(t *testing.T) {
+func TestRightGroupIsFlushAndSegmentsKeepTheirKind(t *testing.T) {
 	c := doc("", "")
 	runs := newBar().Runs(100, c)
 	var segs []Run
 	for _, r := range runs {
-		if r.Kind == KindSegment {
+		if r.Kind != KindNone {
 			segs = append(segs, r)
 		}
 	}
-	if len(segs) != 4 {
-		t.Fatalf("segments = %d, want 4", len(segs))
+	want := []Kind{KindPosition, KindEncoding, KindLineEnding, KindLanguage}
+	if len(segs) != len(want) {
+		t.Fatalf("segments = %d, want %d", len(segs), len(want))
 	}
 	for i, s := range segs {
-		if s.Index != i {
-			t.Errorf("segment %d has index %d", i, s.Index)
+		if s.Kind != want[i] {
+			t.Errorf("segment %d has kind %v, want %v", i, s.Kind, want[i])
 		}
 	}
 	last := segs[len(segs)-1]
@@ -116,18 +117,18 @@ func TestRightGroupDropsFromTheEnd(t *testing.T) {
 	c := doc("", "")
 	cases := []struct {
 		w    int
-		want []int // segment indexes that remain
+		want []Kind // segments that remain
 	}{
-		{100, []int{SegmentPosition, SegmentEncoding, SegmentEOL, SegmentLanguage}},
-		{60, []int{SegmentPosition, SegmentEncoding, SegmentEOL, SegmentLanguage}},
-		{40, []int{SegmentPosition, SegmentEncoding}},
-		{15, []int{SegmentPosition}},
+		{100, []Kind{KindPosition, KindEncoding, KindLineEnding, KindLanguage}},
+		{60, []Kind{KindPosition, KindEncoding, KindLineEnding, KindLanguage}},
+		{40, []Kind{KindPosition, KindEncoding}},
+		{15, []Kind{KindPosition}},
 	}
 	for _, tc := range cases {
-		var got []int
+		var got []Kind
 		for _, r := range newBar().Runs(tc.w, c) {
-			if r.Kind == KindSegment {
-				got = append(got, r.Index)
+			if r.Kind != KindNone {
+				got = append(got, r.Kind)
 			}
 		}
 		if len(got) != len(tc.want) {
@@ -179,20 +180,18 @@ func TestHitFindsSegmentsAndNone(t *testing.T) {
 	cases := []struct {
 		x    int
 		kind Kind
-		idx  int
 	}{
-		{70, KindSegment, SegmentPosition},
-		{84, KindSegment, SegmentEncoding},
-		{91, KindSegment, SegmentEOL},
-		{95, KindSegment, SegmentLanguage},
-		{50, KindNone, 0},  // the path
-		{2, KindNone, 0},   // the message
-		{100, KindNone, 0}, // past the row
+		{70, KindPosition},
+		{84, KindEncoding},
+		{91, KindLineEnding},
+		{95, KindLanguage},
+		{50, KindNone}, // the path
+		{2, KindNone},  // the message
+		{100, KindNone},
 	}
 	for _, tc := range cases {
-		got := m.Hit(w, c, tc.x)
-		if got.Kind != tc.kind || (tc.kind == KindSegment && got.Index != tc.idx) {
-			t.Errorf("Hit(%d) = %+v, want kind %v index %d", tc.x, got, tc.kind, tc.idx)
+		if got := m.Hit(w, c, tc.x); got.Kind != tc.kind {
+			t.Errorf("Hit(%d) = %+v, want kind %v", tc.x, got, tc.kind)
 		}
 	}
 }

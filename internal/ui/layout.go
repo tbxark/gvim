@@ -26,6 +26,11 @@ const (
 	explorerEditorMin    = 20 // the editor keeps this many columns when the frame allows
 	explorerTitleNeed    = 21 // narrowest width at which the title has its "─" fill
 
+	// The explorer panel's own rows. They do not move when the menu bar is hidden:
+	// the title is row 1 and the tree body starts at row 2 (explorer.Panel).
+	explorerTitleRow = 1
+	explorerBodyTop  = 2
+
 	labelGap       = 3 // blank cells between menu labels
 	noNameLabel    = "[No Name]"
 	paletteHelp    = "Palette: ⌃P"
@@ -57,6 +62,20 @@ type layoutInput struct {
 	welcome          bool // no tab is open, so the welcome screen replaces the editor
 	recents          []string
 	status           statusView
+	hideMenuBar      bool // the menu row is not drawn; the tab strip takes row 0
+	hideStatus       bool // a suggestion list or the file browser is open
+	hideLineNumbers  bool // the gutter is not drawn
+	dockOpen         bool // the terminal dock is shown (dock.go); it takes rows under the body
+	hideTabBar       bool // the tab strip row is not drawn; the body takes it
+	showPromptLine   bool // the prompt row is drawn under the status row
+	hideVScroll      bool // the vertical scrollbar is not drawn, so its column is text
+
+	// The split tree and the state of each leaf in reading order (split.go). A nil
+	// tree is one pane that shows lines. maximized gives the focused leaf the whole
+	// body, and the other leaves keep their index with no area.
+	split     *splitNode
+	leaves    []leafInfo
+	maximized bool
 }
 
 // statusView is the content of the status row. The status bar sub-model fills
@@ -64,7 +83,7 @@ type layoutInput struct {
 type statusView struct {
 	position string // for example "Ln 1, Col 1"
 	message  string
-	eol      string // "LF"
+	eol      string // "LF" or "CRLF"
 	encoding string // "ASCII" or "UTF-8"
 	language string // "Text"
 	lines    int    // line count; its digits set the message column
@@ -99,10 +118,28 @@ type layout struct {
 	gated bool // the minimum-size gate replaces the whole frame
 
 	// Row bands (section 4.1). The editor body is bodyTop..bodyBottom. Row 0 is
-	// the menu bar, row 1 the tab strip, and statusY the status row.
+	// the menu bar when menuOn, and the tab strip is stripY: row 1 with the menu
+	// bar, row 0 without it, and -1 when the tab bar is hidden. statusY is the
+	// status row, drawn only when statusOn. Without it the body takes that row.
 	bodyTop, bodyBottom int
+	menuOn              bool
+	stripY              int
 	statusY             int
+	statusOn            bool
 	scrollbar           bool // content overflows, so the last column is the scrollbar
+
+	// The prompt row sits under the status row, above the find bar. It is drawn only
+	// when promptOn is set, and it is empty except for the prompts that use it.
+	promptOn bool
+	promptY  int
+
+	// The terminal dock (dock.go) sits under the body, over the full width. Its rows
+	// dockY..dockY+dockH-1 are the title row and then the shell's rows. The body ends
+	// above it, so bodyBottom is already past the dock. dockOn is false while the dock
+	// is hidden or does not fit.
+	dockOn bool
+	dockY  int
+	dockH  int
 
 	// Explorer (sections 4.2 and 4.3). The panel covers columns 0..ex-1 and rows
 	// 1..exBottom. ex is zero when the panel is hidden.
@@ -114,14 +151,17 @@ type layout struct {
 	exReloadX    int    // column of "⟳", -1 when the button is not drawn
 	exCloseX     int    // column of "×", -1 when the button is not drawn
 
-	// Editor text area (section 4.2). The gutter sits at editorX and the text at textX.
+	// Editor area (section 4.2). The panes fill editorX..w-1 and bodyTop..bodyBottom.
+	// The gutter, textX, textW and scrollbar are those of the focused pane, which for
+	// one pane is the whole area: the gutter sits at editorX and the text at textX.
 	editorX int
 	gutter  int
 	textX   int
 	textW   int
 
-	// Row 0 and row 1 (sections 4.5 and 4.6). The strip is placed by placeStrip,
-	// which also gives the scroll position it used.
+	// The menu labels (section 4.5, row 0, empty when the bar is hidden) and the tab
+	// strip (section 4.6, row stripY). The strip is placed by placeStrip, which also
+	// gives the scroll position it used.
 	menuRuns []run
 	strip    strip
 
@@ -132,6 +172,13 @@ type layout struct {
 
 	// Status bar (section 4.5). Runs cover the whole row.
 	status []run
+
+	// Editor panes (split.go). panes holds them in reading order, and it is one pane
+	// when nothing is split. focus is the index of the focused pane. borders holds the
+	// lines between the panes.
+	panes   []splitPane
+	focus   int
+	borders []splitBorder
 }
 
 // computeLayout returns the geometry for a w by h terminal. It is pure: the
@@ -144,27 +191,97 @@ func computeLayout(w, h int, in layoutInput) layout {
 		return l
 	}
 
-	// The find bar takes rows under the status row, so the body and the status
-	// row move up by its height.
+	// The menu row is row 0 when it is shown, and the tab strip is the row under it.
+	// The find bar takes rows under the status row, so the body and the status row
+	// move up by its height.
+	l.menuOn = !in.hideMenuBar
+	stripRow := 0
+	if l.menuOn {
+		stripRow = 1
+	}
+	// A hidden tab strip gives its row to the body. stripY is -1 then, so no
+	// hit or paint reads the strip row.
+	l.stripY = stripRow
+	l.bodyTop = stripRow + 1
+	if in.hideTabBar {
+		l.stripY = -1
+		l.bodyTop = stripRow
+	}
 	l.statusY = h - 1 - in.findRows
-	l.bodyTop, l.bodyBottom = 2, l.statusY-1
+	if in.showPromptLine {
+		l.promptOn, l.promptY = true, l.statusY
+		l.statusY--
+	}
+	l.statusOn = !in.hideStatus
+	l.bodyBottom = l.statusY - 1
+	if !l.statusOn {
+		l.bodyBottom = l.statusY
+	}
+	if in.dockOpen {
+		l.setDock()
+	}
 	bodyRows := l.bodyBottom - l.bodyTop + 1
-	l.scrollbar = bodyRows > 0 && in.lines > bodyRows
 
 	l.setExplorer(in)
 	l.editorX = l.ex
-	l.gutter = gutterWidth(in.lines)
-	l.textX = l.editorX + l.gutter
-	l.textW = max(0, w-l.textX)
+	l.placePanes(in)
+	if in.hideVScroll {
+		l.hideScrollbars()
+	}
 
-	l.menuRuns = menuRuns(in.explorerFocus)
+	if l.menuOn {
+		l.menuRuns = menuRuns(in.explorerFocus)
+	}
 	l.strip = placeStrip(l.editorX, w, in.tabs, in.tabFirst)
 	if in.welcome {
 		l.welcomeOn = true
 		l.welcome = welcomeLines(l.editorX, max(w-l.editorX, 0), l.bodyTop, bodyRows, in.recents)
 	}
-	l.status = statusRuns(w, in.status)
+	if l.statusOn {
+		l.status = statusRuns(w, in.status)
+	}
 	return l
+}
+
+// hideScrollbars clears the scrollbar of every pane. The column stays in the pane, so
+// the text keeps its width.
+func (l *layout) hideScrollbars() {
+	for i := range l.panes {
+		l.panes[i].scrollbar = false
+	}
+	l.scrollbar = false
+}
+
+// The terminal dock's rows. The dock is a title row and at least three rows of shell,
+// and the editor keeps at least dockMinBody rows beside it.
+const (
+	dockMinRows = 4
+	dockMinBody = 3
+)
+
+// dockHeight is the rows the dock takes from the bottom of a body of bodyRows rows: a
+// third of the body and at least dockMinRows. It is zero when the body left over
+// would have fewer than dockMinBody rows.
+func dockHeight(bodyRows int) int {
+	h := max(bodyRows/3, dockMinRows)
+	if bodyRows-h < dockMinBody {
+		return 0
+	}
+	return h
+}
+
+// setDock takes the dock's rows from the bottom of the body. It does nothing when the
+// dock does not fit. The rows come off bodyBottom before the explorer and the
+// welcome screen are placed, so they shrink to the rows left.
+func (l *layout) setDock() {
+	h := dockHeight(l.bodyBottom - l.bodyTop + 1)
+	if h == 0 {
+		return
+	}
+	l.dockOn = true
+	l.dockH = h
+	l.dockY = l.bodyBottom - h + 1
+	l.bodyBottom -= h
 }
 
 // setExplorer fills the explorer fields. The panel spans rows 1..h-2 (section 4.1).
@@ -247,7 +364,6 @@ func menuRuns(explorerFocus bool) []run {
 // until the left group keeps at least min(floor(2W/5), 40) cells.
 func statusRuns(w int, s statusView) []run {
 	left := []string{
-		" Trusted ",
 		" Local ",
 		" " + padCells(s.position, positionWidth(s.lines)) + " ",
 		" " + s.message + " ",

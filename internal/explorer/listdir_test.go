@@ -148,6 +148,33 @@ func TestListDirEntryFields(t *testing.T) {
 	}
 }
 
+// TestListDirIgnoredFlagWithShowIgnored checks that an entry matched by a
+// .gitignore is listed with IsIgnored set when ShowIgnored lists it, and that
+// IgnoreRoot applies in that case too, so the tree can read every entry and its
+// ignored state in one call.
+func TestListDirIgnoredFlagWithShowIgnored(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		".gitignore":     "*.tmp\n",
+		"sub/.gitignore": "local.txt\n",
+		"sub/local.txt":  "",
+		"sub/a.tmp":      "",
+		"sub/b.go":       "",
+	})
+	entries, err := ListDir(filepath.Join(root, "sub"), ListOptions{ShowHidden: true, ShowIgnored: true, IgnoreRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		got[e.Name] = e.IsIgnored
+	}
+	want := map[string]bool{"a.tmp": true, "local.txt": true, "b.go": false, ".gitignore": false}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("IsIgnored by name = %v, want %v", got, want)
+	}
+}
+
 func TestListDirErrors(t *testing.T) {
 	if _, err := ListDir(filepath.Join(t.TempDir(), "absent"), ListOptions{}); err == nil {
 		t.Fatal("ListDir of a missing directory returned no error")

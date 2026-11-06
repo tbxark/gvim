@@ -45,21 +45,38 @@ func (p ConflictPolicy) String() string {
 // If dst does not exist, the copy is made. If dst exists, policy decides; see
 // ConflictPolicy. Only the top-level destination is checked: entries created
 // inside a new copy never conflict. The copy is built in a hidden staging
-// directory beside dst and renamed into place, so a failure partway through
-// leaves dst unchanged.
+// directory beside dst and renamed into place, so a failure while copying
+// leaves dst unchanged. With Overwrite, the old dst is renamed to a backup
+// beside it before the copy is renamed in, and the backup is removed afterwards.
+// An error names the backup when it holds the old contents: dst is then the new
+// copy (removing the backup failed), or missing (the old contents could not be
+// renamed back).
 //
 // Copy fails with ErrInvalidDest if dst is src, lies inside src, or contains
-// src. The parent of dst must already exist.
+// src. It also fails with ErrInvalidDest if src is a symbolic link whose target
+// is dst, lies inside dst, or is the same file as dst, because an overwrite
+// would remove the target. The parent of dst must already exist. src is cleaned
+// first, so a trailing separator does not make Copy follow a link.
 func Copy(src, dst string, policy ConflictPolicy) error {
 	if policy < Overwrite || policy > Cancel {
 		return fmt.Errorf("fsops: copy: unknown conflict policy %d", int(policy))
 	}
+	src = cleanPath(src)
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return opError("copy", src, err)
 	}
 	if contains(src, dst) || contains(dst, src) {
 		return fmt.Errorf("fsops: copy %s to %s: %w", src, dst, ErrInvalidDest)
+	}
+	if srcInfo.Mode()&fs.ModeSymlink != 0 {
+		onTarget, err := linkTargetIsDest(src, dst)
+		if err != nil {
+			return opError("copy", src, err)
+		}
+		if onTarget {
+			return fmt.Errorf("fsops: copy link %s onto its target %s: %w", src, dst, ErrInvalidDest)
+		}
 	}
 	replace := false
 	dstInfo, err := os.Lstat(dst)
@@ -84,9 +101,72 @@ func Copy(src, dst string, policy ConflictPolicy) error {
 	return place(src, srcInfo, dst, replace)
 }
 
+// linkTargetIsDest reports whether the symbolic link src points at dst, at a
+// path inside dst, or at the same file as dst. An overwriting Copy removes the
+// old dst, which would remove the target too.
+//
+// The directory holding the link is resolved through symbolic links before the
+// relative target is joined to it, and the final target comes from
+// EvalSymlinks(src), so the kernel's rules decide where the link leads. A path
+// that names dst's entry, or an alias of it, counts. A link that does not
+// resolve holds no content, so only a link that names dst is reported then.
+func linkTargetIsDest(src, dst string) (bool, error) {
+	link, err := os.Readlink(src)
+	if err != nil {
+		return false, err
+	}
+	dstPath, err := physicalPath(dst)
+	if err != nil {
+		// The parent of dst is missing, so the copy fails later with a clearer error.
+		return false, nil
+	}
+	srcDir, err := filepath.EvalSymlinks(filepath.Dir(src))
+	if err != nil {
+		return false, err
+	}
+	named := link
+	if !filepath.IsAbs(named) {
+		named = filepath.Join(srcDir, named)
+	}
+	if p, err := physicalPath(named); err == nil && p == dstPath {
+		return true, nil
+	}
+	realTarget, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return false, nil
+	}
+	if contains(dstPath, realTarget) {
+		return true, nil
+	}
+	targetInfo, err := os.Stat(realTarget)
+	if err != nil {
+		return false, nil
+	}
+	dstInfo, err := os.Lstat(dst)
+	return err == nil && os.SameFile(targetInfo, dstInfo), nil
+}
+
+// physicalPath returns the absolute form of path with its parent directory
+// resolved through symbolic links. The base name is kept, so a symbolic link at
+// path itself is not followed.
+func physicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, filepath.Base(abs)), nil
+}
+
+// renamePath renames the entries that an overwriting Copy moves. Tests replace
+// it to force a failure.
+var renamePath = os.Rename
+
 // place builds a copy of src in a staging directory beside dst, then renames
-// it onto dst. When replace is true, the existing dst is removed just before
-// the rename, after the copy has succeeded.
+// it onto dst. When replace is true, the existing dst is moved aside by swapIn.
 func place(src string, srcInfo fs.FileInfo, dst string, replace bool) error {
 	stage, err := os.MkdirTemp(filepath.Dir(dst), ".fsops-copy-*")
 	if err != nil {
@@ -99,12 +179,38 @@ func place(src string, srcInfo fs.FileInfo, dst string, replace bool) error {
 		return err
 	}
 	if replace {
-		if err := os.RemoveAll(dst); err != nil {
-			return opError("copy", dst, err)
-		}
+		return swapIn(staged, dst)
 	}
-	if err := os.Rename(staged, dst); err != nil {
+	if err := renamePath(staged, dst); err != nil {
 		return opError("copy", dst, err)
+	}
+	return nil
+}
+
+// swapIn puts the staged copy in place of the existing dst. The existing dst is
+// first renamed into a fresh backup directory beside it, so it is not deleted
+// before the new copy is in place. If the new copy cannot be renamed in, the
+// old dst is renamed back. Once the new copy is in place the backup is removed;
+// if that removal fails, the error names the backup path.
+func swapIn(staged, dst string) error {
+	backupDir, err := os.MkdirTemp(filepath.Dir(dst), ".fsops-backup-*")
+	if err != nil {
+		return opError("copy", dst, err)
+	}
+	backup := filepath.Join(backupDir, filepath.Base(dst))
+	if err := renamePath(dst, backup); err != nil {
+		_ = os.Remove(backupDir)
+		return opError("copy", dst, err)
+	}
+	if err := renamePath(staged, dst); err != nil {
+		if restoreErr := renamePath(backup, dst); restoreErr != nil {
+			return fmt.Errorf("fsops: copy to %s: %w; the old destination is kept at %s: %w", dst, err, backup, restoreErr)
+		}
+		_ = os.Remove(backupDir)
+		return opError("copy", dst, err)
+	}
+	if err := os.RemoveAll(backupDir); err != nil {
+		return fmt.Errorf("fsops: copy to %s: the new copy is in place, but the old destination could not be removed from %s: %w", dst, backup, err)
 	}
 	return nil
 }

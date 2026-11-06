@@ -25,17 +25,19 @@ const (
 	DecisionQuit
 )
 
-// DecisionFromKey maps a query-replace key to its Decision: 'y', 'n', '!' or
-// 'q'. It reports false for any other key, so the caller can ask again.
+// DecisionFromKey maps a query-replace key to its Decision: 'y' or 'n', '!' or
+// 'a' for all, and 'q' or 'c' to stop. Upper case is accepted too. These are the
+// keys of Fresh's prompt, "Replace? (y)es (n)o (a)ll (c)ancel". It reports false
+// for any other key, so the caller can ask again.
 func DecisionFromKey(key rune) (Decision, bool) {
 	switch key {
-	case 'y':
+	case 'y', 'Y':
 		return DecisionReplace, true
-	case 'n':
+	case 'n', 'N':
 		return DecisionSkip, true
-	case '!':
+	case '!', 'a', 'A':
 		return DecisionReplaceAll, true
-	case 'q':
+	case 'q', 'Q', 'c', 'C':
 		return DecisionQuit, true
 	}
 	return DecisionSkip, false

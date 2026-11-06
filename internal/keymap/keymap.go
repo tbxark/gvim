@@ -15,9 +15,12 @@
 package keymap
 
 import (
+	"bytes"
 	_ "embed" // for go:embed below
 	"encoding/json"
 	"fmt"
+	"io"
+	"reflect"
 	"regexp"
 	"runtime"
 	"slices"
@@ -215,10 +218,91 @@ func Load(data []byte) (*Map, error) {
 	return parse(data, nil)
 }
 
+// overrideFile is the JSON object WithOverrides reads. Only "bindings" is
+// allowed, so a misspelled key is an error and cannot silently drop bindings.
+type overrideFile struct {
+	Bindings []rawBinding `json:"bindings"`
+}
+
+// WithOverrides returns a new Map with the bindings in data applied on top of
+// m, as a child keymap file applies them to its parent. data is a JSON object in
+// the keymap file schema with only "bindings", for example
+//
+//	{"bindings": [{"key": "s", "modifiers": ["ctrl"], "action": "noop", "when": "normal"}]}
+//
+// A binding replaces the entry m has for the same context and chord, and a
+// "noop" binding unbinds the chord. A global binding, noop or not, also replaces
+// the chord in each non-global context where m binds it, because Resolve checks
+// the context before the global bindings. A binding for that context in data
+// still wins over the replacement. The entries of data are checked the way Load
+// checks a file: one chord bound to two actions is an error. m is not changed,
+// because built-in maps are shared. On error no map is returned.
+func (m *Map) WithOverrides(data []byte) (*Map, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var f overrideFile
+	if err := dec.Decode(&f); err != nil {
+		return nil, fmt.Errorf("keymap: overrides: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("keymap: overrides: unexpected data after the object")
+	}
+	own := make([]Binding, 0, len(f.Bindings))
+	for i, rb := range f.Bindings {
+		b, err := rb.binding()
+		if err != nil {
+			return nil, fmt.Errorf("keymap: overrides: binding %d: %w", i, err)
+		}
+		own = append(own, b)
+	}
+	if err := checkConflicts(own); err != nil {
+		return nil, err
+	}
+	list := make([]Binding, 0, len(m.bindings)+len(own))
+	list = append(list, m.bindings...)
+	list = append(list, m.expandGlobal(own)...)
+	list = append(list, own...)
+	return newMap(list), nil
+}
+
+// expandGlobal returns a copy of each global binding in own for each non-global
+// context where m binds the same chord. Without these copies the preset's
+// context binding would still win in its context. They go before own, so an
+// explicit binding in own for the same context and chord still wins.
+func (m *Map) expandGlobal(own []Binding) []Binding {
+	var out []Binding
+	seen := make(map[lookupKey]bool)
+	for _, g := range own {
+		if g.When != ContextGlobal {
+			continue
+		}
+		for _, b := range m.bindings {
+			k := lookupKey{b.When, b.Chord}
+			if b.Chord != g.Chord || b.When == ContextGlobal || seen[k] {
+				continue
+			}
+			seen[k] = true
+			out = append(out, Binding{Chord: g.Chord, Sequence: g.Sequence, Action: g.Action, Args: g.Args, When: b.When})
+		}
+	}
+	return out
+}
+
 func parse(data []byte, stack []string) (*Map, error) {
 	var f rawFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("keymap: parse: %w", err)
+	}
+	own := make([]Binding, 0, len(f.Bindings))
+	for i, rb := range f.Bindings {
+		b, err := rb.binding()
+		if err != nil {
+			return nil, fmt.Errorf("keymap: binding %d: %w", i, err)
+		}
+		own = append(own, b)
+	}
+	if err := checkConflicts(own); err != nil {
+		return nil, err
 	}
 	var list []Binding
 	if f.Inherits != nil && *f.Inherits != "" {
@@ -228,14 +312,37 @@ func parse(data []byte, stack []string) (*Map, error) {
 		}
 		list = append(list, parent.bindings...)
 	}
-	for i, rb := range f.Bindings {
-		b, err := rb.binding()
-		if err != nil {
-			return nil, fmt.Errorf("keymap: binding %d: %w", i, err)
-		}
-		list = append(list, b)
-	}
+	list = append(list, own...)
 	return newMap(list), nil
+}
+
+// checkConflicts rejects a file that binds one chord in one context to two
+// different actions, or to one action with different args. Repeating an
+// identical entry is allowed, because Fresh's default keymap lists the BackTab
+// alias of dedent_selection three times. Overrides of inherited bindings are
+// not checked here; a child preset replaces its parent's entry on purpose.
+func checkConflicts(own []Binding) error {
+	seen := make(map[lookupKey]Binding, len(own))
+	for _, b := range own {
+		k := lookupKey{b.When, b.Chord}
+		prev, ok := seen[k]
+		if !ok {
+			seen[k] = b
+			continue
+		}
+		if prev.Action != b.Action || !sameArgs(prev.Args, b.Args) {
+			return fmt.Errorf("keymap: %s in %s is bound to both %q and %q", b.Chord, b.When, prev.Action, b.Action)
+		}
+	}
+	return nil
+}
+
+// sameArgs treats a nil args map and an empty one as equal.
+func sameArgs(a, b map[string]any) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 // binding validates one raw entry and converts it to a Binding.
@@ -261,7 +368,11 @@ func (rb rawBinding) binding() (Binding, error) {
 		}
 		chords[i] = c
 	}
-	b := Binding{Action: rb.Action, Args: rb.Args, When: canonicalContext(rb.When), Comment: rb.Comment}
+	when, err := canonicalContext(rb.When)
+	if err != nil {
+		return Binding{}, err
+	}
+	b := Binding{Action: rb.Action, Args: rb.Args, When: when, Comment: rb.Comment}
 	if len(chords) == 1 {
 		b.Chord = chords[0]
 	} else {
@@ -271,20 +382,35 @@ func (rb rawBinding) binding() (Binding, error) {
 	return b, nil
 }
 
+// knownContexts lists every when-clause value the port accepts, in the spelling
+// the embedded keymaps use. Fresh's default keymap uses exactly these.
+var knownContexts = []Context{
+	ContextGlobal, ContextNormal, ContextPrompt, ContextFileExplorer,
+	ContextSearchPrompt, ContextCompositeBuffer, ContextTerminal, ContextPopup,
+	ContextMenu, ContextSettings, ContextDock, ContextCompletion,
+}
+
 // canonicalContext maps a when-clause to a Context, folding Fresh's alternative
-// spellings the way Fresh's KeyContext::from_when_clause does.
-func canonicalContext(when string) Context {
+// spellings the way Fresh's KeyContext::from_when_clause does. Any other value
+// is an error, so a typo cannot create a binding that never fires. Mode clauses
+// ("mode:...") are rejected because the port has no modes yet.
+func canonicalContext(when string) (Context, error) {
 	switch when {
 	case "":
-		return ContextGlobal
+		return ContextGlobal, nil
 	case string(ContextFileExplorerCS):
-		return ContextFileExplorer
+		return ContextFileExplorer, nil
 	case "search_prompt":
-		return ContextSearchPrompt
+		return ContextSearchPrompt, nil
 	case "composite_buffer":
-		return ContextCompositeBuffer
+		return ContextCompositeBuffer, nil
 	}
-	return Context(when)
+	for _, c := range knownContexts {
+		if string(c) == when {
+			return c, nil
+		}
+	}
+	return "", fmt.Errorf("unknown when clause %q", when)
 }
 
 // newMap indexes list. Later entries override earlier ones for the same
@@ -371,16 +497,18 @@ func (m *Map) BindingsFor(action string) []Binding {
 // Primary returns the binding a UI should show for action. It looks in
 // ContextNormal first, then ContextGlobal, then any other context. Within one
 // tier the simplest chord wins, using the rule Fresh's menu shortcuts follow:
-// single-key before multi-key, then fewest modifiers, then lowest modifier
-// bits, then chord text. On the macOS keymap that shows Redo as Ctrl+R, where
-// default.json also binds Ctrl+Y. Only bindings in effect count: an inherited
-// binding that the child keymap rebinds is skipped. ok is false when the action
-// has no binding.
+// fewest modifiers, then lowest modifier bits, then chord text. On the macOS
+// keymap that shows Redo as Ctrl+R, where default.json also binds Ctrl+Y. Only
+// bindings the editor runs count. An inherited binding that the child keymap
+// rebinds is skipped, a global binding that a normal binding of the same chord
+// takes is skipped, and a multi-key sequence is skipped because the TUI
+// dispatches only single chords. ok is false when the action has no such
+// binding.
 func (m *Map) Primary(action string) (Binding, bool) {
 	var best [3]*Binding // normal, global, other
 	for i := range m.bindings {
 		b := &m.bindings[i]
-		if b.Action != action || !m.effective(i) {
+		if b.Action != action || b.Sequence != nil || !m.effective(i) {
 			continue
 		}
 		tier := 2
@@ -484,24 +612,26 @@ func indexOfLetter(label string, want rune, taken map[rune]bool) int {
 	return -1
 }
 
-// effective reports whether binding i is the one Resolve uses for its context
-// and chord. A child keymap that rebinds a chord replaces the inherited entry,
-// so the inherited one must not be shown as the shortcut.
+// effective reports whether single-key binding i is in effect for its chord. A
+// child keymap that rebinds a chord replaces the inherited entry, so the
+// inherited one is not in effect and must not be shown as the shortcut. A global
+// binding is also not in effect when the normal context binds the same chord,
+// because Resolve checks the normal context before the global bindings.
 func (m *Map) effective(i int) bool {
 	b := m.bindings[i]
-	idx := m.index
-	if b.Sequence != nil {
-		idx = m.seq
+	if b.When == ContextGlobal {
+		if _, shadowed := m.index[lookupKey{ContextNormal, b.Chord}]; shadowed {
+			return false
+		}
 	}
-	return idx[lookupKey{b.When, b.Chord}] == i
+	return m.index[lookupKey{b.When, b.Chord}] == i
 }
 
-// chordRank orders chords by how simple they are, for Primary.
+// chordRank orders single chords by how simple they are, for Primary.
 type chordRank struct {
-	sequence bool
-	mods     int
-	bits     int
-	chord    string
+	mods  int
+	bits  int
+	chord string
 }
 
 // modifierBits matches the bit values Fresh's menu tie-break uses.
@@ -511,10 +641,7 @@ var modifierBits = []struct {
 }{{"ctrl", 2}, {"alt", 4}, {"shift", 1}, {"super", 8}}
 
 func rankOf(chord string) chordRank {
-	r := chordRank{chord: chord, sequence: strings.Contains(chord, " ")}
-	if r.sequence {
-		return r
-	}
+	r := chordRank{chord: chord}
 	rest := chord
 	for _, m := range modifierBits {
 		if after, ok := strings.CutPrefix(rest, m.name+"+"); ok {
@@ -527,9 +654,6 @@ func rankOf(chord string) chordRank {
 }
 
 func (a chordRank) less(b chordRank) bool {
-	if a.sequence != b.sequence {
-		return !a.sequence
-	}
 	if a.mods != b.mods {
 		return a.mods < b.mods
 	}
@@ -564,7 +688,8 @@ var namedKeys = map[string]string{
 }
 
 // Canonical builds a chord from a keymap-file key and its modifiers, using the
-// same spelling Normalize produces.
+// same spelling Normalize produces. The plus key is "+", or "ctrl++" with
+// modifiers; Normalize reads both back.
 func Canonical(key string, modifiers []string) (string, error) {
 	mods := make(map[string]bool, len(modifiers))
 	for _, m := range modifiers {
@@ -592,11 +717,14 @@ func Canonical(key string, modifiers []string) (string, error) {
 func Normalize(chord string) (string, error) {
 	mods := make(map[string]bool, 3)
 	var key string
-	for part := range strings.SplitSeq(chord, "+") {
+	for _, part := range chordParts(chord) {
 		lower := strings.ToLower(part)
 		if contains(modifierOrder, lower) {
 			mods[lower] = true
 			continue
+		}
+		if part == "" {
+			return "", fmt.Errorf("keymap: %q: empty key name", chord)
 		}
 		if key != "" {
 			return "", fmt.Errorf("keymap: %q has more than one key", chord)
@@ -612,6 +740,19 @@ func Normalize(chord string) (string, error) {
 		mods["shift"] = true
 	}
 	return join(mods, name), nil
+}
+
+// chordParts splits a chord at its "+" separators. The plus key is "+" as well,
+// so Canonical writes it last: "+" alone, or after the modifiers as in "ctrl++".
+// A plain split would read those as trailing empty parts.
+func chordParts(chord string) []string {
+	switch {
+	case chord == "+":
+		return []string{"+"}
+	case len(chord) > 2 && strings.HasSuffix(chord, "++"):
+		return append(strings.Split(chord[:len(chord)-2], "+"), "+")
+	}
+	return strings.Split(chord, "+")
 }
 
 func keyName(key string) (string, error) {

@@ -1,6 +1,8 @@
 {
   "name": "dracula",
   "editor": {
+    "inactive_cursor": [98, 114, 164],
+    "ruler_bg": [68, 71, 90],
     "bg": [40, 42, 54],
     "fg": [248, 248, 242],
     "cursor": [255, 121, 198],

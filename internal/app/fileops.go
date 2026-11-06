@@ -13,9 +13,11 @@ import (
 
 // fileOps is the explorer's file-operation adapter over internal/fsops. The
 // root runs the disk operations in a tea.Cmd, so the methods that touch the
-// disk never touch the editor. Editor follow-ups are separate methods. The root
-// calls them from Update, the goroutine that owns the editor, after the disk
-// operation has finished.
+// disk never change the editor. Editor follow-ups are separate methods, and the
+// root calls them from Update, the goroutine that owns the editor, after the disk
+// operation has finished. CheckRename is the one editor read that comes before a
+// rename or move; the root calls it from Update too, so the command never reads
+// the open tabs.
 //
 // Names are validated with fsops.Validate, so a bad name fails before the disk
 // is touched. A destination that exists fails with an error that matches
@@ -27,12 +29,13 @@ type fileOps struct {
 // pathEditor is the part of *editor.Editor the file operations use. Tests pass a
 // fake.
 type pathEditor interface {
+	CheckRename(oldPath, newPath string) error
 	RenamePath(oldPath, newPath string) error
 	CloseByPath(path string, force bool) error
 }
 
-// newFileOps returns the adapter over ed. ed is used only by FollowRename and
-// CloseDeleted.
+// newFileOps returns the adapter over ed. ed is used by CheckRename, FollowRename
+// and CloseDeleted.
 func newFileOps(ed pathEditor) fileOps {
 	return fileOps{ed: ed}
 }
@@ -65,9 +68,18 @@ func (fileOps) Mkdir(_ context.Context, dir, name string) (string, error) {
 	return p, nil
 }
 
+// CheckRename is the editor's dry run for a rename or move from oldPath to newPath.
+// It reads the open tabs and changes nothing. The root calls it from Update before
+// it starts the disk operation.
+func (f fileOps) CheckRename(oldPath, newPath string) error {
+	return f.ed.CheckRename(oldPath, newPath)
+}
+
 // Rename gives path the name newName in its own directory and returns the new
-// path. Renaming to the same name succeeds without a change.
-func (fileOps) Rename(_ context.Context, path, newName string) (string, error) {
+// path. Renaming to the same name succeeds without a change. Rename does not read
+// the open tabs. The root calls CheckRename from Update before it runs Rename, so
+// a rename onto the path of an open tab is refused before the disk is touched.
+func (f fileOps) Rename(_ context.Context, path, newName string) (string, error) {
 	if err := fsops.Validate(filepath.Dir(path), newName); err != nil {
 		return "", err
 	}
@@ -79,7 +91,7 @@ func (fileOps) Rename(_ context.Context, path, newName string) (string, error) {
 }
 
 // Move moves src into dstDir, keeping its name, and returns the new path.
-func (fileOps) Move(_ context.Context, src, dstDir string) (string, error) {
+func (f fileOps) Move(_ context.Context, src, dstDir string) (string, error) {
 	dst := filepath.Join(dstDir, filepath.Base(src))
 	if err := fsops.Move(src, dstDir); err != nil {
 		return "", classify(err)

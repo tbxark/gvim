@@ -64,15 +64,20 @@ func unitBounds(b *buffer.Buffer, p buffer.Pos, u Unit) (start, end buffer.Pos) 
 // If path is already open in a tab, that tab is activated and nothing is
 // loaded. A permanent tab is never turned into a preview.
 //
-// Like OpenFile, it returns an error wrapping ErrNotUTF8 or the file error,
+// Like OpenFile, it returns an error wrapping ErrNotDecodable or the file error,
 // and the same message is written to the status.
 func (e *Editor) OpenPreview(path string) error {
+	path, err := absPath(path)
+	if err != nil {
+		e.setStatus(err.Error())
+		return err
+	}
 	if i := e.pathIndex(path); i >= 0 {
 		e.switchTo(i)
 		e.setStatus("Opened " + e.docs[i].Name())
 		return nil
 	}
-	d, err := readDocument(path)
+	d, err := readDocument(path, e.defaultEOL())
 	if err != nil {
 		e.setStatus(err.Error())
 		return err

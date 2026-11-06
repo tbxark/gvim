@@ -1,6 +1,7 @@
 {
   "name": "nostalgia",
   "editor": {
+    "ruler_bg": [30, 30, 200],
     "bg": [0, 0, 170],
     "fg": [255, 255, 85],
     "cursor": [255, 255, 255],
@@ -31,6 +32,7 @@
     "whitespace_indicator_selected_fg": [85, 85, 255]
   },
   "ui": {
+    "popup_selection_fg": [255, 255, 255],
     "tab_active_fg": [0, 0, 0],
     "tab_active_bg": [170, 170, 170],
     "tab_inactive_fg": [255, 255, 85],

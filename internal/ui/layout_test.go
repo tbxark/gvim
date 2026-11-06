@@ -248,7 +248,7 @@ func TestStatusRightBlockAtBlueprintWidths(t *testing.T) {
 func TestStatusLeftGroupKeepsItsPosition(t *testing.T) {
 	s := statusView{position: "Ln 3, Col 7", message: "Saved", lines: 4, eol: "LF"}
 	row := statusRow(100, s)
-	if !strings.HasPrefix(row, " Trusted  Local  Ln 3, Col 7") {
+	if !strings.HasPrefix(row, " Local  Ln 3, Col 7") {
 		t.Errorf("status row = %q", row)
 	}
 	if !strings.Contains(row, " Saved ") {

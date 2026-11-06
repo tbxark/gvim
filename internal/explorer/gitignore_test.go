@@ -233,3 +233,81 @@ func TestNegationCannotReincludeUnderIgnoredDir(t *testing.T) {
 		t.Fatalf("hidden = %v, want build/, build/keep.txt, build/o", got)
 	}
 }
+
+// TestExpandAppliesIgnoreFileWrittenAfterOpen checks that a directory expanded
+// after the tree opened is filtered by the .gitignore on disk now. The root was
+// read before the file existed, so a copy taken at open time would be stale.
+func TestExpandAppliesIgnoreFileWrittenAfterOpen(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{"sub/": "", "sub/a.tmp": "", "sub/b.go": ""})
+	tree, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTree(t, root, map[string]string{".gitignore": "*.tmp\n"})
+	if err := tree.Expand(filepath.Join(root, "sub")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := shownEntries(t, tree), []string{"sub/", "sub/b.go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("shown = %v, want %v", got, want)
+	}
+}
+
+// TestTreeEntriesMatchListDir checks that every expanded directory draws the
+// entries ListDir gives for it, under each combination of the show options, so
+// the tree and the file browser cannot disagree about a listing.
+func TestTreeEntriesMatchListDir(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		".gitignore":      "*.log\nbuild/\n!keep.log\n",
+		".hidden":         "",
+		"a.log":           "",
+		"keep.log":        "",
+		"b.txt":           "",
+		"build/o.txt":     "",
+		"sub/":            "",
+		"sub/.gitignore":  "local.txt\n",
+		"sub/local.txt":   "",
+		"sub/c.go":        "",
+		"sub/d.log":       "",
+		"sub/deeper/z.md": "",
+	})
+	for _, show := range []struct{ hidden, ignored bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		tree, err := Open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tree.SetShowHidden(show.hidden)
+		tree.SetShowIgnored(show.ignored)
+		expandAll(t, tree, root)
+		opts := ListOptions{ShowHidden: show.hidden, ShowIgnored: show.ignored, IgnoreRoot: root}
+		for _, dir := range expandedDirs(tree) {
+			var got []string
+			for _, r := range tree.Rows() {
+				if filepath.Dir(r.Path) != dir {
+					continue
+				}
+				name := r.Name
+				if r.IsDir {
+					name += "/"
+				}
+				got = append(got, name)
+			}
+			want := listNames(t, dir, opts)
+			if !slices.Equal(got, want) {
+				t.Errorf("hidden=%v ignored=%v %s: tree draws %v, ListDir gives %v", show.hidden, show.ignored, dir, got, want)
+			}
+		}
+	}
+}
+
+// expandedDirs returns the paths of the directories the tree draws as open.
+func expandedDirs(tree *Tree) []string {
+	var out []string
+	for _, r := range tree.Rows() {
+		if r.IsDir && r.Expanded {
+			out = append(out, r.Path)
+		}
+	}
+	return out
+}

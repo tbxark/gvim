@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"slices"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -87,7 +88,31 @@ func (h findHost) Find(q search.Query) ([]search.Match, error) {
 	if !ok {
 		return nil, errSearchUnsupported
 	}
-	return s.FindMatches(q)
+	matches, err := s.FindMatches(q)
+	if err != nil {
+		return nil, err
+	}
+	// find_in_selection limits the find bar to the editor's search range.
+	if r, ok := h.m.ed.(searchRanger); ok {
+		if sel, limited := r.SearchRange(); limited {
+			matches = withinRange(matches, sel)
+		}
+	}
+	return matches, nil
+}
+
+// searchRanger is the optional view of the search range the editor keeps for
+// find_in_selection (see editor.SearchRange). The app adapter forwards it.
+type searchRanger interface {
+	SearchRange() (buffer.Selection, bool)
+}
+
+// withinRange keeps the matches that lie inside sel, in place.
+func withinRange(matches []search.Match, sel buffer.Selection) []search.Match {
+	from, to := sel.Ordered()
+	return slices.DeleteFunc(matches, func(m search.Match) bool {
+		return m.Start.Less(from) || to.Less(m.End)
+	})
 }
 
 // Select selects m. The anchor is the start of the match and the caret goes to
@@ -120,6 +145,50 @@ func (h findHost) ReplaceAll(q search.Query, repl string) (int, error) {
 	return s.ReplaceMatches(q, repl)
 }
 
+// findAction runs the search and replace actions: start_search_replace opens the
+// find bar with its replacement row, search_replace_next_match and
+// search_replace_prev_match step through the matches, and query_replace asks
+// about each match. It reports whether it handled the action. The uiAction
+// switch falls through to it.
+func (m *Model) findAction(action string) (tea.Cmd, bool) {
+	switch action {
+	case "start_search_replace", "search_replace_next_match", "search_replace_prev_match", "query_replace":
+	default:
+		return nil, false
+	}
+	if !m.hasDocument() {
+		m.notice = noDocumentNotice
+		return nil, true
+	}
+	switch action {
+	case "start_search_replace":
+		m.openFind(true)
+	case "search_replace_next_match":
+		m.findNavigate(true)
+	case "search_replace_prev_match":
+		m.findNavigate(false)
+	case "query_replace":
+		m.queryReplace()
+	}
+	return nil, true
+}
+
+// queryReplace starts query-replace from the bar's anchor, which is the start of
+// the selection or the caret. The bar's search and replacement texts are the ones
+// it holds, so a bar that Esc popped is shown again with them. With no search
+// text the bar says so and stays open.
+func (m *Model) queryReplace() {
+	switch {
+	case m.findBar == nil:
+		m.openFind(true)
+	case !m.findOpen():
+		m.findBar.Reopen()
+		m.showFind()
+	}
+	m.findBar.ShowReplace()
+	m.findBar.StartQueryReplace()
+}
+
 // findOpen reports whether a find bar is on the overlay stack. A closed bar is
 // popped, so the editor body gets its rows back.
 func (m *Model) findOpen() bool {
@@ -132,13 +201,18 @@ func (m *Model) findOpen() bool {
 }
 
 // openFind shows the find bar, with its replacement row when withReplace is set.
-// The bar takes rows from the editor body, so the body is resized and the caret is
-// kept on screen. A second bar is not opened over the first.
+// A second bar is not opened over the first.
 func (m *Model) openFind(withReplace bool) {
 	if m.findOpen() {
 		return
 	}
 	m.findBar = find.Open(findHost{m: m}, m.styles, withReplace)
+	m.showFind()
+}
+
+// showFind puts the find bar on top of the overlay stack. The bar takes rows from
+// the editor body, so the body is resized and the caret is kept on screen.
+func (m *Model) showFind() {
 	m.pushOverlay(findOverlay{b: m.findBar})
 	m.syncViewport()
 	m.revealCaret()

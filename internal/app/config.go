@@ -2,6 +2,9 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -44,25 +47,44 @@ type effectiveSettings struct {
 	EnsureFinalNewline     bool            `json:"ensure_final_newline"`
 	AutoIndent             bool            `json:"auto_indent"`
 	LineNumbers            bool            `json:"line_numbers"`
+	ShowMenuBar            bool            `json:"show_menu_bar"`
 	ExplorerShowHidden     bool            `json:"explorer_show_hidden"`
 	ExplorerShowIgnored    bool            `json:"explorer_show_ignored"`
 	Keybindings            json.RawMessage `json:"keybindings,omitempty"`
 }
 
 // LoadConfig merges the default, user and project config layers for root and
-// returns the result as printable text. A root that is not absolute is made
-// absolute first. The error is non-nil only when the result cannot be built.
-func LoadConfig(root string) (ConfigView, error) {
-	cfg, diags, err := config.Load(config.Options{Root: root})
+// returns the result as printable text. A non-empty opts.Config replaces the
+// default user file, as the --config flag does. A non-empty opts.Keymap and
+// opts.Theme replace the keymap and theme the files name, as --keymap and
+// --theme do; the defaults apply when neither is set. Other fields of opts are
+// not used. A root that is not absolute is made absolute first. The error is
+// non-nil when opts is invalid, when the result cannot be built, or when
+// opts.Config is set and does not exist.
+func LoadConfig(root string, opts Options) (ConfigView, error) {
+	if err := opts.Validate(); err != nil {
+		return ConfigView{}, err
+	}
+	if err := checkConfigFile(opts.Config); err != nil {
+		return ConfigView{}, err
+	}
+	cfg, diags, err := config.Load(config.Options{Root: root, UserFile: opts.Config})
 	if err != nil {
 		return ConfigView{}, err
 	}
-	keymapName := cfg.Keymap
+	keymapName := opts.Keymap
+	if keymapName == "" {
+		keymapName = cfg.Keymap
+	}
 	if keymapName == "" {
 		keymapName = keymap.DefaultName()
 	}
+	themeName := opts.Theme
+	if themeName == "" {
+		themeName = cfg.Theme
+	}
 	data, err := json.MarshalIndent(effectiveSettings{
-		Theme:                  cfg.Theme,
+		Theme:                  themeName,
 		Keymap:                 keymapName,
 		TabSize:                cfg.TabSize,
 		InsertSpaces:           cfg.InsertSpaces,
@@ -71,6 +93,7 @@ func LoadConfig(root string) (ConfigView, error) {
 		EnsureFinalNewline:     cfg.EnsureFinalNewline,
 		AutoIndent:             cfg.AutoIndent,
 		LineNumbers:            cfg.LineNumbers,
+		ShowMenuBar:            cfg.ShowMenuBar,
 		ExplorerShowHidden:     cfg.ExplorerShowHidden,
 		ExplorerShowIgnored:    cfg.ExplorerShowIgnored,
 		Keybindings:            cfg.Keybindings,
@@ -86,13 +109,19 @@ func LoadConfig(root string) (ConfigView, error) {
 }
 
 // ConfigPaths returns the user config file and the project config file for
-// root. The project entry is the nearest .gvim/config.json at or above root.
-// When none exists, its path is the one under root, and Exists is false. The
-// error is non-nil only when the user config directory is unknown.
-func ConfigPaths(root string) ([]ConfigFile, error) {
-	files, err := config.Paths()
-	if err != nil {
-		return nil, err
+// root. A non-empty configPath stands in for the user file, as it does in
+// LoadConfig. The project entry is the nearest .gvim/config.json at or above
+// root. When none exists, its path is the one under root, and Exists is false.
+// The error is non-nil only when configPath is empty and the user config
+// directory is unknown.
+func ConfigPaths(root, configPath string) ([]ConfigFile, error) {
+	user := configPath
+	if user == "" {
+		files, err := config.Paths()
+		if err != nil {
+			return nil, err
+		}
+		user = files.User
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
@@ -106,9 +135,23 @@ func ConfigPaths(root string) ([]ConfigFile, error) {
 		proj = filepath.Join(abs, ".gvim", "config.json")
 	}
 	return []ConfigFile{
-		{Label: "user", Path: files.User, Exists: isFile(files.User)},
+		{Label: "user", Path: user, Exists: isFile(user)},
 		{Label: "project", Path: proj, Exists: found},
 	}, nil
+}
+
+// checkConfigFile returns an error that names path when a config file was given
+// with --config and does not exist. An empty path is the default user file,
+// which may be absent, so it passes. Other stat failures are left to
+// config.Load, which reports them as diagnostics.
+func checkConfigFile(path string) error {
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("config file %s does not exist", path)
+	}
+	return nil
 }
 
 // isFile reports whether path is an existing regular file.

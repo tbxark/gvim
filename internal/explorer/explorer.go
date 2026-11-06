@@ -16,12 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-
-	"github.com/go-git/go-billy/v5"
-	"github.com/go-git/go-billy/v5/osfs"
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 // ErrNotDir is returned by Open and Toggle for a file path.
@@ -42,14 +37,12 @@ type Row struct {
 type node struct {
 	name     string
 	path     string
-	rel      []string // path segments relative to the tree root; nil for the root
 	isDir    bool
 	hidden   bool // name starts with "."
 	ignored  bool // matched by a .gitignore
 	parent   *node
 	children []*node
-	rules    []gitignore.Pattern // patterns that apply to this directory's entries
-	loaded   bool                // children have been read from disk
+	loaded   bool // children have been read from disk
 	expanded bool
 }
 
@@ -57,7 +50,6 @@ type node struct {
 // it from one goroutine.
 type Tree struct {
 	root        *node
-	fsys        billy.Filesystem // rooted at the tree root; reads .gitignore files
 	byPath      map[string]*node
 	selected    string // path of the selected row; empty means the first row
 	scroll      int    // index in Rows of the first row in view
@@ -79,7 +71,7 @@ func Open(dir string) (*Tree, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("explorer: open %q: %w", dir, ErrNotDir)
 	}
-	t := &Tree{byPath: make(map[string]*node), fsys: osfs.New(abs)}
+	t := &Tree{byPath: make(map[string]*node)}
 	t.root = &node{name: filepath.Base(abs), path: abs, isDir: true, expanded: true}
 	t.byPath[abs] = t.root
 	if err := t.load(t.root); err != nil {
@@ -212,8 +204,17 @@ func (t *Tree) ScrollOffset() int { return t.offset(len(t.Rows())) }
 func (t *Tree) offset(count int) int { return min(t.scroll, max(count-1, 0)) }
 
 // Reveal expands every ancestor of path, loading directories as needed, and
-// then selects path. It is how the sidebar follows the active file.
-func (t *Tree) Reveal(path string) error {
+// then selects path. It is how the sidebar follows the active file. It reads the
+// disk for a directory that is not loaded, so the UI calls RevealLoaded instead.
+func (t *Tree) Reveal(path string) error { return t.reveal(path, true) }
+
+// RevealLoaded is Reveal for the folders that a SnapshotFor listing has loaded. It
+// reads nothing from disk, so the UI can call it on the update loop. It returns
+// ErrNotFound when a folder on the way to path is not loaded.
+func (t *Tree) RevealLoaded(path string) error { return t.reveal(path, false) }
+
+// reveal is Reveal. When load is false it stops at a folder that is not loaded.
+func (t *Tree) reveal(path string, load bool) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("explorer: reveal %q: %w", path, err)
@@ -228,6 +229,9 @@ func (t *Tree) Reveal(path string) error {
 			continue
 		}
 		if !n.isDir {
+			return ErrNotFound
+		}
+		if !load && !n.loaded {
 			return ErrNotFound
 		}
 		if err := t.expand(n); err != nil {
@@ -390,47 +394,32 @@ func (t *Tree) adopt(n *node, children []*node) {
 	n.loaded = true
 }
 
-// scan reads the .gitignore and the entries of directory n. It sets n.rules to
-// the patterns that apply to n's entries: those of its parent, which include
-// the ancestors' ignore files, plus n's own. It returns every entry in display
-// order, with hidden and ignored set on each; Rows decides which ones to draw.
-func (t *Tree) scan(n *node) ([]*node, error) {
-	var inherited []gitignore.Pattern
-	if n.parent != nil {
-		inherited = n.parent.rules
-	}
-	n.rules = slices.Concat(inherited, readIgnore(t.fsys, n.rel))
+// listDir is the directory read behind every scan and Snapshot.Read. Tests swap it
+// to count the reads.
+var listDir = ListDir
 
-	entries, err := os.ReadDir(n.path)
+// scan reads the entries of directory n with ListDir. It returns every entry in
+// display order, with hidden and ignored set on each; Rows decides which ones to
+// draw. ListDir is given the tree root, so the ignore rules are the .gitignore
+// files on disk from the root down to n, read at this scan.
+func (t *Tree) scan(n *node) ([]*node, error) {
+	entries, err := listDir(n.path, ListOptions{ShowHidden: true, ShowIgnored: true, IgnoreRoot: t.root.path})
 	if err != nil {
-		return nil, fmt.Errorf("explorer: read %q: %w", n.path, err)
+		return nil, err
 	}
-	m := gitignore.NewMatcher(n.rules)
 	children := make([]*node, 0, len(entries))
 	for _, e := range entries {
-		name := e.Name()
-		isDir := e.IsDir()
-		if e.Type()&os.ModeSymlink != 0 {
-			if info, err := os.Stat(filepath.Join(n.path, name)); err == nil {
-				isDir = info.IsDir()
-			}
-		}
-		rel := append(slices.Clip(n.rel), name)
 		children = append(children, &node{
-			name:   name,
-			path:   filepath.Join(n.path, name),
-			rel:    rel,
-			isDir:  isDir,
-			hidden: strings.HasPrefix(name, "."),
+			name:   e.Name,
+			path:   filepath.Join(n.path, e.Name),
+			isDir:  e.IsDir,
+			hidden: e.IsHidden,
 			// git excludes everything under an excluded directory, so a
 			// negation cannot re-include an entry whose parent is ignored.
-			ignored: n.ignored || m.Match(rel, isDir),
+			ignored: n.ignored || e.IsIgnored,
 			parent:  n,
 		})
 	}
-	slices.SortFunc(children, func(a, b *node) int {
-		return entryOrder(a.isDir, a.name, b.isDir, b.name)
-	})
 	return children, nil
 }
 

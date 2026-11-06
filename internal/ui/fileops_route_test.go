@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -24,6 +25,27 @@ type fakeOps struct {
 	closed   []string
 	conflict bool
 	err      error
+	// failSrc, when set, limits err to a copy or move of that source path.
+	failSrc string
+	// refuse is what CheckRename returns; nil lets every rename or move through.
+	refuse error
+	// checked records the (old, new) pairs CheckRename was asked about.
+	checked [][2]string
+}
+
+// CheckRename records the question and returns refuse.
+func (f *fakeOps) CheckRename(oldPath, newPath string) error {
+	f.checked = append(f.checked, [2]string{oldPath, newPath})
+	return f.refuse
+}
+
+// errFor is the error a copy or move of src returns: err, unless failSrc names
+// another source.
+func (f *fakeOps) errFor(src string) error {
+	if f.failSrc != "" && f.failSrc != src {
+		return nil
+	}
+	return f.err
 }
 
 func (f *fakeOps) CreateFile(_ context.Context, dir, name string) (string, error) {
@@ -45,7 +67,7 @@ func (f *fakeOps) Rename(_ context.Context, path, newName string) (string, error
 func (f *fakeOps) Move(_ context.Context, src, dstDir string) (string, error) {
 	dst := filepath.Join(dstDir, filepath.Base(src))
 	f.calls = append(f.calls, "move "+src+" "+dst)
-	return dst, f.err
+	return dst, f.errFor(src)
 }
 
 func (f *fakeOps) Copy(_ context.Context, src, dstDir string, c expanel.Conflict) (string, error) {
@@ -55,7 +77,7 @@ func (f *fakeOps) Copy(_ context.Context, src, dstDir string, c expanel.Conflict
 	if f.conflict && c == expanel.ConflictCancel {
 		return "", errors.Join(expanel.ErrConflict, errors.New("exists"))
 	}
-	return dst, f.err
+	return dst, f.errFor(src)
 }
 
 func (f *fakeOps) Trash(_ context.Context, path string) error {
@@ -176,6 +198,31 @@ func TestRenameMovesOpenTabs(t *testing.T) {
 	}
 	if len(ops.renamed) != 1 || ops.renamed[0] != [2]string{"/ws/f0", "/ws/f2"} {
 		t.Fatalf("FollowRename = %v, want /ws/f0 to /ws/f2", ops.renamed)
+	}
+}
+
+// TestRenameOntoAnOpenTabIsRefusedInUpdate checks that the root asks the editor
+// before the command starts: a refused rename never reaches the disk, and the
+// refusal shows in the notice row.
+func TestRenameOntoAnOpenTabIsRefusedInUpdate(t *testing.T) {
+	refused := errors.New("rename: file already open in another tab")
+	ops := &fakeOps{refuse: refused}
+	m, _ := newOpsModel(t, ops)
+	m.Update(expanel.RenameMsg{Path: "/ws/f0"})
+	m.Update(special(tea.KeyBackspace))
+	typeText(m, "2")
+	_, cmd := m.Update(special(tea.KeyEnter))
+	settle(t, m, cmd)
+	if want := [][2]string{{"/ws/f0", "/ws/f2"}}; !reflect.DeepEqual(ops.checked, want) {
+		t.Fatalf("CheckRename asked %v, want %v", ops.checked, want)
+	}
+	for _, c := range ops.calls {
+		if strings.HasPrefix(c, "rename ") {
+			t.Fatalf("refused rename reached the disk: %v", ops.calls)
+		}
+	}
+	if m.notice != refused.Error() {
+		t.Fatalf("notice = %q, want %q", m.notice, refused.Error())
 	}
 }
 

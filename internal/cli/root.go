@@ -52,6 +52,7 @@ func NewRootCommand(run Runner) *cobra.Command {
 		keymapName string
 		themeName  string
 		logFile    string
+		diff       bool
 	)
 	root := &cobra.Command{
 		Use:   "gvim [DIR] [FILE[:LINE[:COL]]]...",
@@ -62,10 +63,12 @@ current directory with an empty buffer.
 A DIR argument sets the project root that the file explorer shows. At most one
 directory may be given. Each FILE opens in its own tab. A FILE that does not
 exist opens as an empty buffer and is created on save. FILE may end in :LINE or
-:LINE:COL to place the cursor.`,
+:LINE:COL to place the cursor. With --diff, exactly two FILE arguments open side
+by side in a compare view.`,
 		Example: `  gvim
   gvim ~/project
-  gvim ~/project main.go:42:7 README.md`,
+  gvim ~/project main.go:42:7 README.md
+  gvim --diff old.go new.go`,
 		Args:          cobra.ArbitraryArgs,
 		Version:       versionString(),
 		SilenceErrors: true,
@@ -81,6 +84,7 @@ exist opens as an empty buffer and is created on save. FILE may end in :LINE or
 				Keymap:  keymapName,
 				Theme:   themeName,
 				LogFile: logFile,
+				Diff:    diff,
 			}
 			if err := opts.Validate(); err != nil {
 				return err
@@ -99,11 +103,12 @@ exist opens as an empty buffer and is created on save. FILE may end in :LINE or
 	flags.StringVar(&keymapName, "keymap", "", "keymap `NAME`: default, macos, macos-gui, emacs or vscode (default: the platform keymap)")
 	flags.StringVar(&themeName, "theme", "", "theme `NAME` (default: dark)")
 	flags.StringVar(&logFile, "log-file", "", "log file `PATH` (default: no log file)")
+	root.Flags().BoolVar(&diff, "diff", false, "compare the two FILE arguments side by side")
 	_ = root.RegisterFlagCompletionFunc("keymap", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return keymapNames, cobra.ShellCompDirectiveNoFileComp
 	})
 
-	root.AddCommand(newVersionCommand(), newConfigCommand(), newGrammarCommand())
+	root.AddCommand(newVersionCommand(), newConfigCommand(&configPath, &keymapName, &themeName), newGrammarCommand())
 	// Cobra adds the completion command only when the root has subcommands,
 	// so this call comes after AddCommand.
 	root.InitDefaultCompletionCmd()

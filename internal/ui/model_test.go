@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,6 +27,7 @@ type fakeEditor struct {
 	args       []map[string]any
 	quitAction editor.Action // the action that reports quit
 	extends    []buffer.Pos  // the drag ends passed to ExtendSelection
+	root       string        // the workspace root that SetRoot gave
 }
 
 func newFakeEditor(lines ...string) *fakeEditor {
@@ -47,6 +49,9 @@ func (f *fakeEditor) Active() Document { return f.doc }
 func (f *fakeEditor) Tabs() []TabInfo  { return f.tabs }
 func (f *fakeEditor) Status() string   { return f.status }
 
+// SetRoot records the workspace root that the root gives the editor.
+func (f *fakeEditor) SetRoot(root string) { f.root = root }
+
 // SetCursor moves the fake caret. ExtendSelection records the drag ends, and the
 // scroll methods move the fake viewport, clamped the way the editor clamps it.
 func (f *fakeEditor) SetCursor(p buffer.Pos, _ bool) { f.doc.cursor = p }
@@ -64,6 +69,7 @@ type fakeDoc struct {
 	lines  []string
 	cursor buffer.Pos
 	top    int
+	eol    string // the line ending; empty means "LF"
 }
 
 func (d *fakeDoc) Name() string                { return "a.txt" }
@@ -73,6 +79,7 @@ func (d *fakeDoc) Line(i int) string           { return d.lines[i] }
 func (d *fakeDoc) SavedLines() []string        { return d.lines }
 func (d *fakeDoc) Top() int                    { return d.top }
 func (d *fakeDoc) Encoding() string            { return "ASCII" }
+func (d *fakeDoc) LineEnding() string          { return cmp.Or(d.eol, "LF") }
 func (d *fakeDoc) Cursor() buffer.Pos          { return d.cursor }
 func (d *fakeDoc) LineSpans(int) []syntax.Span { return nil }
 func (d *fakeDoc) Selection() (a, h buffer.Pos, ok bool) {
@@ -87,6 +94,7 @@ type fakeTree struct {
 	offset   int
 	moves    []int
 	scrolls  []int
+	ignored  bool // the gitignored-entries setting
 }
 
 func newFakeTree(n int) *fakeTree {
@@ -98,14 +106,16 @@ func newFakeTree(n int) *fakeTree {
 	return t
 }
 
-func (t *fakeTree) Root() string         { return "/ws" }
-func (t *fakeTree) Rows() []explorer.Row { return t.rows }
-func (t *fakeTree) ShowHidden() bool     { return false }
-func (t *fakeTree) SetShowHidden(bool)   {}
-func (t *fakeTree) Toggle(string) error  { return nil }
-func (t *fakeTree) Reveal(string) error  { return nil }
-func (t *fakeTree) Reload() error        { return nil }
-func (t *fakeTree) ScrollOffset() int    { return t.offset }
+func (t *fakeTree) Root() string          { return "/ws" }
+func (t *fakeTree) Rows() []explorer.Row  { return t.rows }
+func (t *fakeTree) ShowHidden() bool      { return false }
+func (t *fakeTree) SetShowHidden(bool)    {}
+func (t *fakeTree) ShowIgnored() bool     { return t.ignored }
+func (t *fakeTree) SetShowIgnored(v bool) { t.ignored = v }
+func (t *fakeTree) Toggle(string) error   { return nil }
+func (t *fakeTree) Reveal(string) error   { return nil }
+func (t *fakeTree) Reload() error         { return nil }
+func (t *fakeTree) ScrollOffset() int     { return t.offset }
 func (t *fakeTree) Selected() (explorer.Row, bool) {
 	if len(t.rows) == 0 {
 		return explorer.Row{}, false
@@ -193,6 +203,27 @@ func click(x, y int, b tea.MouseButton) tea.MouseClickMsg {
 	return tea.MouseClickMsg(tea.Mouse{X: x, Y: y, Button: b})
 }
 
+// TestStartupNoticeShowsInTheStatusRow checks that a notice given in Deps, such as
+// a config warning, is on the status row from the first frame.
+func TestStartupNoticeShowsInTheStatusRow(t *testing.T) {
+	t.Parallel()
+	const notice = "config: bad key"
+	m := New(Deps{
+		Editor: newFakeEditor("hello"), Keys: testKeys(), Theme: theme.Theme{},
+		Clock: testClock, Notice: notice,
+	})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	g := m.paint()
+	y := m.layout().statusY
+	var row strings.Builder
+	for x := range g.Width() {
+		row.WriteString(g.At(x, y).Text)
+	}
+	if !strings.Contains(row.String(), notice) {
+		t.Errorf("status row %q does not show the startup notice %q", row.String(), notice)
+	}
+}
+
 func TestNewStartsWithExplorerHiddenAndEditorFocused(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(3), 80, 24)
 	if m.explorerOpen || m.explorerFocus {
@@ -213,17 +244,19 @@ func TestToggleExplorerCyclesOpenFocusClose(t *testing.T) {
 		t.Fatalf("editor columns did not shrink for the panel: %d, was %d", ed.cols, full)
 	}
 
+	// With the explorer focused, Ctrl+B hides it and focus goes to the editor.
 	press(m, ctrl('b'))
-	if !m.explorerOpen || m.explorerFocus {
-		t.Fatalf("second toggle should keep the panel and move focus: open %v focused %v", m.explorerOpen, m.explorerFocus)
-	}
-
-	press(m, ctrl('b'))
-	if m.explorerOpen {
-		t.Fatal("third toggle should hide the panel")
+	if m.explorerOpen || m.explorerFocus {
+		t.Fatalf("second toggle with the explorer focused: open %v focused %v, want hidden", m.explorerOpen, m.explorerFocus)
 	}
 	if ed.cols != full {
 		t.Fatalf("editor columns after hiding = %d, want %d", ed.cols, full)
+	}
+
+	// Hidden, Ctrl+B shows the panel again and focuses it.
+	press(m, ctrl('b'))
+	if !m.explorerOpen || !m.explorerFocus {
+		t.Fatalf("third toggle: open %v focused %v, want shown and focused", m.explorerOpen, m.explorerFocus)
 	}
 	if len(ed.actions) != 0 {
 		t.Fatalf("toggles reached the editor: %v", ed.actions)

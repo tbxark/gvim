@@ -8,12 +8,14 @@ import (
 	"slices"
 	"time"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 
 	"github.com/tbxark/gvim/internal/buffer"
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/explorer"
 	"github.com/tbxark/gvim/internal/finder"
+	"github.com/tbxark/gvim/internal/fold"
 	"github.com/tbxark/gvim/internal/keymap"
 	palmodel "github.com/tbxark/gvim/internal/palette"
 	"github.com/tbxark/gvim/internal/search"
@@ -28,11 +30,11 @@ import (
 // table is built for the active keymap, so the palette shows its shortcuts. The
 // file ranker is always wired. A nil tree leaves the explorer out of the model,
 // and a nil files index leaves the palette's file mode on its loading row. The
-// optional ports (file operations, LSP and markdown) stay nil until their phases
-// add adapters for them here.
+// optional ports (LSP and markdown) stay nil until their phases add adapters for
+// them here. File operations follow renames and closes in ed.
 func newUIDeps(ed *editor.Editor, km *keymap.Map, th theme.Theme, tree *explorer.Tree, files *finder.Index) ui.Deps {
 	deps := ui.Deps{
-		Editor:   editorAdapter{ed: ed, spans: &spanCache{}},
+		Editor:   editorAdapter{ed: ed, spans: &spanCache{}, others: map[*editor.Document]*spanCache{}, saves: &autoSaveGate{}},
 		Keys:     keymapAdapter{km: km},
 		Theme:    th,
 		Clock:    time.Now,
@@ -40,6 +42,7 @@ func newUIDeps(ed *editor.Editor, km *keymap.Map, th theme.Theme, tree *explorer
 		Ranker:   rankPort{r: newFileRanker()},
 		Dialogs:  dialogPort{},
 		Recents:  recentFolders(),
+		Ops:      newFileOps(ed),
 	}
 	// Assign only a non-nil tree or index: a nil concrete pointer in the interface
 	// would look like an explorer or a file list that is present.
@@ -92,6 +95,13 @@ func (p rankPort) Record(rel string) {
 type editorAdapter struct {
 	ed    *editor.Editor
 	spans *spanCache
+	// others holds the span cache of each tab that is not active, so that a split
+	// pane showing such a tab lexes it once per edit. It is nil in a zero adapter,
+	// and the other tabs then have no spans.
+	others map[*editor.Document]*spanCache
+	// saves records whether a planned auto-save is writing. See autosave.go. It is
+	// nil in a zero adapter, and then nothing is refused.
+	saves *autoSaveGate
 }
 
 // SetViewport sizes the editor pane.
@@ -103,13 +113,124 @@ func (a editorAdapter) SetViewport(rows, cols int) {
 // built yet (the palette, the menu and the find bar). Those come back as
 // ErrUnknownAction without reaching the editor, so the status row keeps the
 // editor's own message. Every action may change the text, so the syntax spans
-// of the active document are marked stale first.
+// of the active document are marked stale first. A save is refused while a
+// planned write is pending, because its result is not yet recorded.
 func (a editorAdapter) Do(act editor.Action, args map[string]any) editor.Result {
-	a.spans.edited()
+	a.edited()
 	if !slices.Contains(editor.Actions(), act) {
 		return editor.Result{Err: fmt.Errorf("%w: %s", editor.ErrUnknownAction, act)}
 	}
+	if a.saves != nil && a.saves.writing && (act == "save" || act == "save_as" || act == "save_all") {
+		return editor.Result{Err: errAutoSaveWriting}
+	}
 	return a.ed.Do(act, args)
+}
+
+// PlanSave prepares the explicit save of the active document, as the editor's PlanSave
+// does. The plan is refused while a planned write is pending, as Do refuses a save. A
+// plan that is made marks the gate writing until ApplySavePlan records its result.
+func (a editorAdapter) PlanSave() (editor.SavePlan, error) {
+	if a.writePending() {
+		return editor.SavePlan{}, errAutoSaveWriting
+	}
+	p, err := a.ed.PlanSave()
+	a.markWriting(err)
+	return p, err
+}
+
+// PlanSaveAs prepares the Save As of the active document. It is refused and gated as
+// PlanSave is.
+func (a editorAdapter) PlanSaveAs(path string, force bool) (editor.SavePlan, error) {
+	if a.writePending() {
+		return editor.SavePlan{}, errAutoSaveWriting
+	}
+	p, err := a.ed.PlanSaveAs(path, force)
+	a.markWriting(err)
+	return p, err
+}
+
+// PlanSaveAll prepares the Save All of the modified tabs. It is refused and gated as
+// PlanSave is.
+func (a editorAdapter) PlanSaveAll() (editor.SavePlan, error) {
+	if a.writePending() {
+		return editor.SavePlan{}, errAutoSaveWriting
+	}
+	p, err := a.ed.PlanSaveAll()
+	a.markWriting(err)
+	return p, err
+}
+
+// WriteSave runs the writes of a plan. It reads only the plan, so the root calls it from
+// a command, off the update loop.
+func (a editorAdapter) WriteSave(p editor.SavePlan) []editor.SaveResult {
+	return p.Run()
+}
+
+// ApplySavePlan records the results of a planned save on the editor's goroutine, and
+// opens the gate again.
+func (a editorAdapter) ApplySavePlan(p editor.SavePlan, results []editor.SaveResult) error {
+	if a.saves != nil {
+		a.saves.writing = false
+	}
+	return a.ed.ApplySavePlan(p, results)
+}
+
+// PlanRevert prepares the reload of the active document, as the editor's PlanRevert does.
+// It is refused while a planned write is pending, as a save is, so the file is not read
+// half written.
+func (a editorAdapter) PlanRevert(force bool) (editor.RevertPlan, error) {
+	if a.writePending() {
+		return editor.RevertPlan{}, errAutoSaveWriting
+	}
+	return a.ed.PlanRevert(force)
+}
+
+// RunRevert reads the file of plan. It reads only the plan, so the root calls it from a
+// command, off the update loop.
+func (a editorAdapter) RunRevert(p editor.RevertPlan) editor.RevertResult {
+	return editor.RunRevert(p)
+}
+
+// ApplyRevert puts the read text into the planned document, on the editor's goroutine. The
+// text of a tab that is not active may change too, so every span cache is marked stale, as
+// EndShell does.
+func (a editorAdapter) ApplyRevert(p editor.RevertPlan, r editor.RevertResult) error {
+	a.spans.edited()
+	for _, c := range a.others {
+		c.edited()
+	}
+	return a.ed.ApplyRevert(p, r)
+}
+
+// HasFormatter reports whether the language of the active buffer has a formatter. The
+// menu's when-evaluator asks for it through an optional interface.
+func (a editorAdapter) HasFormatter() bool {
+	return a.ed.HasFormatter()
+}
+
+// writePending reports whether a planned write has not been applied yet. A nil gate is
+// never pending.
+func (a editorAdapter) writePending() bool {
+	return a.saves != nil && a.saves.writing
+}
+
+// markWriting marks the gate as writing after a plan that worked. A refused plan writes
+// nothing, so it leaves the gate as it is.
+func (a editorAdapter) markWriting(err error) {
+	if a.saves != nil && err == nil {
+		a.saves.writing = true
+	}
+}
+
+// edited marks the syntax spans stale for an edit to the active document. The
+// active document's text may be cached in the shared cache, and it may also be
+// cached in its split-pane cache from the time it was not active. Both are marked,
+// so a split pane never shows spans from before the edit. A nil cache is ignored.
+func (a editorAdapter) edited() {
+	a.spans.edited()
+	if doc := a.ed.Active(); doc != nil {
+		a.others[doc].edited()
+	}
 }
 
 // Active returns the active document, or nil when no tab is open. The nil is a
@@ -122,6 +243,62 @@ func (a editorAdapter) Active() ui.Document {
 	return documentAdapter{doc: doc, spans: a.spans}
 }
 
+// DocAt returns the document of tab i as a documentAdapter, or an untyped nil when
+// there is no tab i. The active tab uses the shared span cache, and every other tab
+// has its own. It implements the root's tabDocs port.
+func (a editorAdapter) DocAt(i int) ui.Document {
+	doc := a.ed.DocAt(i)
+	if doc == nil {
+		return nil
+	}
+	if doc == a.ed.Active() {
+		return documentAdapter{doc: doc, spans: a.spans}
+	}
+	return documentAdapter{doc: doc, spans: a.otherSpans(doc)}
+}
+
+// otherSpans returns the span cache of a tab that is not active, and makes it on
+// first use. When there are more caches than tabs, the caches of closed tabs are
+// dropped here, so a closed document is not kept alive.
+func (a editorAdapter) otherSpans(doc *editor.Document) *spanCache {
+	if a.others == nil {
+		return nil
+	}
+	c, ok := a.others[doc]
+	if !ok {
+		c = &spanCache{}
+		a.others[doc] = c
+	}
+	if n := len(a.ed.Tabs()); len(a.others) > n {
+		open := make(map[*editor.Document]bool, n)
+		for j := range n {
+			open[a.ed.DocAt(j)] = true
+		}
+		for d := range a.others {
+			if !open[d] {
+				delete(a.others, d)
+			}
+		}
+	}
+	return c
+}
+
+// BeginShell prepares a shell command for the root, which runs it off the update
+// loop. See editor.BeginShell.
+func (a editorAdapter) BeginShell(act editor.Action, args map[string]any) (editor.ShellJob, error) {
+	return a.ed.BeginShell(act, args)
+}
+
+// EndShell applies the output of a shell job. A replace can change a tab that is
+// not active, so every span cache is marked stale, not only the active one's.
+func (a editorAdapter) EndShell(job editor.ShellJob, out string, runErr error) editor.Result {
+	a.spans.edited()
+	for _, c := range a.others {
+		c.edited()
+	}
+	return a.ed.EndShell(job, out, runErr)
+}
+
 // FindMatches returns the matches of q in the active document, in document
 // order. It does not change the text. With no tab open there are no matches.
 func (a editorAdapter) FindMatches(q search.Query) ([]search.Match, error) {
@@ -132,37 +309,40 @@ func (a editorAdapter) FindMatches(q search.Query) ([]search.Match, error) {
 	return search.Find(doc.Buffer, q)
 }
 
+// SearchRange is the range that find_in_selection limits the search to, and false when
+// the search covers the whole document. The find bar reads it through the ui port.
+func (a editorAdapter) SearchRange() (buffer.Selection, bool) { return a.ed.SearchRange() }
+
 // ReplaceMatch replaces the match m of q with repl as one undo step, and returns
-// the inserted text. The syntax spans are marked stale first, because the text
-// changes. With no tab open it replaces nothing.
+// the inserted text. The editor checks the read-only flag. The syntax spans are
+// marked stale first, because the text changes.
 func (a editorAdapter) ReplaceMatch(q search.Query, repl string, m search.Match) (string, error) {
-	a.spans.edited()
-	doc := a.ed.Active()
-	if doc == nil {
-		return "", editor.ErrNoDocument
-	}
-	return search.Replace(doc.Buffer, q, repl, m)
+	a.edited()
+	return a.ed.ReplaceMatch(q, repl, m)
 }
 
 // ReplaceMatches replaces every match of q with repl as one undo step, and
-// returns how many it replaced. With no tab open it replaces nothing.
+// returns how many it replaced. The editor checks the read-only flag.
 func (a editorAdapter) ReplaceMatches(q search.Query, repl string) (int, error) {
-	a.spans.edited()
-	doc := a.ed.Active()
-	if doc == nil {
-		return 0, editor.ErrNoDocument
-	}
-	return search.ReplaceAll(doc.Buffer, q, repl)
+	a.edited()
+	return a.ed.ReplaceMatches(q, repl)
 }
 
-// Tabs maps the editor's tabs to the tab strip entries.
+// Tabs maps the editor's tabs to the tab strip entries. The path is carried too, so the
+// root can watch the folders of the open tabs and reload the tabs whose files change.
 func (a editorAdapter) Tabs() []ui.TabInfo {
 	tabs := a.ed.Tabs()
 	out := make([]ui.TabInfo, len(tabs))
 	for i, t := range tabs {
-		out[i] = ui.TabInfo{Name: t.Name, Modified: t.Modified, Preview: t.Preview, Active: t.Active}
+		out[i] = ui.TabInfo{Name: t.Name, Path: t.Path, Modified: t.Modified, Preview: t.Preview, Active: t.Active}
 	}
 	return out
+}
+
+// SetRoot names the workspace root of the editor, which copy_relative_file_path measures
+// from. The root calls it on its update loop when a project opens.
+func (a editorAdapter) SetRoot(root string) {
+	a.ed.SetRoot(root)
 }
 
 // Status returns the editor's status message.
@@ -201,6 +381,17 @@ func (a editorAdapter) OpenPreview(path string) error {
 	return a.ed.OpenPreview(path)
 }
 
+// LoadFunc returns the read of path that runs off the UI goroutine. See
+// editor.Editor.LoadFunc.
+func (a editorAdapter) LoadFunc(path string) func() (*editor.Document, error) {
+	return a.ed.LoadFunc(path)
+}
+
+// OpenLoaded opens a document read by LoadFunc in a permanent tab.
+func (a editorAdapter) OpenLoaded(d *editor.Document) {
+	a.ed.OpenLoaded(d)
+}
+
 // GotoLine moves the caret to line and col, both one-based.
 func (a editorAdapter) GotoLine(line, col int) error {
 	return a.ed.GotoLine(line, col)
@@ -232,11 +423,12 @@ func (a editorAdapter) Quit(force bool) []editor.Dirty {
 // spanCache holds the syntax spans of the active document. The lexer runs over
 // the whole text, because chroma is a stream lexer, and the result is kept until
 // the next edit. The text changes only through editorAdapter.Do, which calls
-// edited. A document switch starts a new lexer. The cache is used on the UI
-// goroutine only.
+// edited. A document switch, or a change of its language, starts a new lexer. The
+// cache is used on the UI goroutine only.
 type spanCache struct {
 	gen     uint64           // bumped by every edit
 	doc     *editor.Document // the document the lexer belongs to
+	lang    string           // the language the lexer was chosen for, as set with Set Language
 	plain   bool             // no lexer matched the document: no spans
 	hl      *syntax.Highlighter
 	spans   [][]syntax.Span
@@ -259,10 +451,11 @@ func (c *spanCache) lines(doc *editor.Document) [][]syntax.Span {
 	if c == nil {
 		return nil
 	}
-	if c.doc != doc {
+	if c.doc != doc || c.lang != doc.Language() {
 		c.doc = doc
+		c.lang = doc.Language()
 		c.valid = false
-		lexer := syntax.Detect(doc.Path, []byte(doc.Buffer.Text()))
+		lexer := documentLexer(doc)
 		c.plain = lexer == lexers.Fallback
 		c.hl = syntax.NewHighlighter(lexer)
 	}
@@ -281,6 +474,18 @@ func (c *spanCache) lines(doc *editor.Document) [][]syntax.Span {
 	return c.spans
 }
 
+// documentLexer returns the lexer of doc. A language set with Set Language names the
+// lexer, when the name matches one. Otherwise the file name and the text choose it, as
+// syntax.Detect does.
+func documentLexer(doc *editor.Document) chroma.Lexer {
+	if name := doc.Language(); name != "" {
+		if lexer := lexers.Get(name); lexer != nil {
+			return lexer
+		}
+	}
+	return syntax.Detect(doc.Path, []byte(doc.Buffer.Text()))
+}
+
 // documentAdapter is the read-only ui.Document view of one *editor.Document.
 type documentAdapter struct {
 	doc   *editor.Document
@@ -290,6 +495,9 @@ type documentAdapter struct {
 // Encoding reports the saved text's encoding label, computed by the editor when
 // the text was opened or saved.
 func (d documentAdapter) Encoding() string { return d.doc.Encoding() }
+
+// LineEnding is the ending of the saved text, as the editor reports it.
+func (d documentAdapter) LineEnding() string { return d.doc.LineEnding() }
 
 // Name is the file name, or "[No Name]" for an unnamed buffer.
 func (d documentAdapter) Name() string {
@@ -357,6 +565,22 @@ func (d documentAdapter) LineSpans(i int) []syntax.Span {
 	return spans[i]
 }
 
+// Cursors returns the extra carets of the document, which the pane paints in the
+// secondary caret style.
+func (d documentAdapter) Cursors() []editor.Caret { return d.doc.Cursors() }
+
+// Folds returns the indentation fold ranges, for a tab of tabWidth columns.
+func (d documentAdapter) Folds(tabWidth int) []fold.Range { return d.doc.Folds(tabWidth) }
+
+// Folded reports whether the fold that starts at line is collapsed.
+func (d documentAdapter) Folded(line int) bool { return d.doc.Folded(line) }
+
+// ViewSettings is the document's display settings, read by the view commands and the pane.
+func (d documentAdapter) ViewSettings() editor.ViewSettings { return d.doc.ViewSettings() }
+
+// Language is the document's language name, shown in the status row.
+func (d documentAdapter) Language() string { return d.doc.Language() }
+
 // keymapAdapter is the ui.Keymap view of *keymap.Map.
 type keymapAdapter struct {
 	km *keymap.Map
@@ -376,10 +600,39 @@ func (k keymapAdapter) Resolve(key ui.KeyPress, ctx ui.KeyContext) (ui.Command, 
 	return ui.Command{Action: b.Action, Args: b.Args}, true
 }
 
+// Bindings lists every binding of the keymap, in file order, with its canonical
+// chord and when-clause. It implements the root's BindingLister port.
+func (k keymapAdapter) Bindings() []ui.KeyBinding {
+	bs := k.km.Bindings()
+	out := make([]ui.KeyBinding, len(bs))
+	for i, b := range bs {
+		out[i] = keyBinding(b)
+	}
+	return out
+}
+
+// Primary returns the binding the UI shows for action, and false when the action has
+// no single-chord binding.
+func (k keymapAdapter) Primary(action string) (ui.KeyBinding, bool) {
+	b, ok := k.km.Primary(action)
+	if !ok {
+		return ui.KeyBinding{}, false
+	}
+	return keyBinding(b), true
+}
+
+// keyBinding maps a keymap binding to the root's view of it.
+func keyBinding(b keymap.Binding) ui.KeyBinding {
+	return ui.KeyBinding{Action: b.Action, Chord: b.Chord, Context: string(b.When)}
+}
+
 // keymapContext maps a UI key context to its keymap when-clause.
 func keymapContext(ctx ui.KeyContext) keymap.Context {
 	if ctx == ui.KeyContextFileExplorer {
 		return keymap.ContextFileExplorer
+	}
+	if ctx == ui.KeyContextTerminal {
+		return keymap.ContextTerminal
 	}
 	return keymap.ContextNormal
 }

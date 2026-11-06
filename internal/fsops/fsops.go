@@ -125,6 +125,16 @@ func Move(src, dstDir string) error {
 	return nil
 }
 
+// cleanPath cleans path so that a trailing separator does not make Lstat follow
+// a symbolic link. An empty path stays empty, because Clean would turn it into
+// "." and name the working directory.
+func cleanPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
 // opError wraps err with the operation and path. Existence failures also wrap
 // ErrConflict so callers can branch on it.
 func opError(op, path string, err error) error {

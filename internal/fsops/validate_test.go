@@ -57,6 +57,11 @@ func TestTrashCallsBackendWithPath(t *testing.T) {
 	var got []string
 	swapTrash(t, func(paths ...string) error {
 		got = append(got, paths...)
+		for _, p := range paths {
+			if err := os.RemoveAll(p); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 
@@ -82,6 +87,17 @@ func TestTrashMissingPathSkipsBackend(t *testing.T) {
 	}
 	if called {
 		t.Fatal("backend called for a missing path")
+	}
+}
+
+func TestTrashEmptyPathSkipsBackend(t *testing.T) {
+	calls := recordTrash(t)
+
+	if err := Trash(""); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("want ErrNotExist, got %v", err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("backend called with %v for an empty path", *calls)
 	}
 }
 

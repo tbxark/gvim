@@ -105,3 +105,85 @@ func TestSpansFromFind(t *testing.T) {
 		t.Fatalf("Spans() = %v, want %v", got, want)
 	}
 }
+
+func TestHighlights(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		text    string
+		matches []Match
+		line    int
+		current *Match
+		want    []Highlight
+	}{
+		{
+			name:    "no current match marks nothing",
+			text:    "foo bar foo",
+			matches: []Match{m(0, 0, 0, 3), m(0, 8, 0, 11)},
+			line:    0,
+			want: []Highlight{
+				{Line: 0, Start: 0, End: 3},
+				{Line: 0, Start: 8, End: 11},
+			},
+		},
+		{
+			name:    "the current match is marked and the others are not",
+			text:    "foo bar foo",
+			matches: []Match{m(0, 0, 0, 3), m(0, 8, 0, 11)},
+			line:    0,
+			current: new(m(0, 8, 0, 11)),
+			want: []Highlight{
+				{Line: 0, Start: 0, End: 3},
+				{Line: 0, Start: 8, End: 11, Current: true},
+			},
+		},
+		{
+			name:    "a current match on another line marks nothing here",
+			text:    "foo\nfoo",
+			matches: []Match{m(0, 0, 0, 3), m(1, 0, 1, 3)},
+			line:    0,
+			current: new(m(1, 0, 1, 3)),
+			want:    []Highlight{{Line: 0, Start: 0, End: 3}},
+		},
+		{
+			name:    "a multi-line current match marks its piece on each line",
+			text:    "ab cd\nef gh\nij",
+			matches: []Match{m(0, 3, 2, 1)},
+			line:    1,
+			current: new(m(0, 3, 2, 1)),
+			want:    []Highlight{{Line: 1, Start: 0, End: 5, Current: true}},
+		},
+		{
+			name:    "a line without matches gives nothing",
+			text:    "foo\nbar",
+			matches: []Match{m(0, 0, 0, 3)},
+			line:    1,
+			want:    nil,
+		},
+		{
+			name:    "a line outside the buffer gives nothing",
+			text:    "foo",
+			matches: []Match{m(0, 0, 0, 3)},
+			line:    5,
+			want:    nil,
+		},
+		{
+			name:    "columns count runes",
+			text:    "héllo wörld",
+			matches: []Match{m(0, 6, 0, 11)},
+			line:    0,
+			current: new(m(0, 6, 0, 11)),
+			want:    []Highlight{{Line: 0, Start: 6, End: 11, Current: true}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b := buffer.New(tt.text)
+			got := Highlights(b, tt.matches, tt.line, tt.current)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("Highlights() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

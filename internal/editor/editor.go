@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 )
 
 // Action is the name of an editor command, such as "move_left" or "save".
@@ -31,6 +32,35 @@ type Options struct {
 	// Empty starts the editor with no open document, which is the state of
 	// gvim started without files. The UI then shows its welcome screen.
 	Empty bool
+	// UseTabs makes Tab insert a literal tab. When it is false, Tab inserts
+	// spaces up to the next multiple of TabSize columns, and Shift+Tab removes
+	// one indent unit. The zero value is false, so a zero Options inserts
+	// spaces. The app should set UseTabs to the inverse of insert_spaces.
+	UseTabs bool
+	// TabSize is the columns per tab stop, and the width of one indent unit
+	// when UseTabs is false. Zero means 4.
+	TabSize int
+	// AutoIndent makes insert_newline copy the blanks at the start of the caret
+	// line into the new line. The zero value keeps the line start empty.
+	AutoIndent bool
+	// TrimTrailingWhitespace strips trailing spaces and tabs from every line on
+	// save. The buffer is changed to match, as one undo step.
+	TrimTrailingWhitespace bool
+	// EnsureFinalNewline ends the saved text with a line break, and the buffer
+	// gets it too. An empty text stays empty.
+	EnsureFinalNewline bool
+	// DefaultLineEnding is "LF" or "CRLF" for a document that has no file to
+	// read the ending from. Empty means "LF".
+	DefaultLineEnding string
+	// AutoSaveInterval is how often AutoSave saves the modified documents. Zero
+	// or a negative value turns auto-save off. See AutoSaveDue.
+	AutoSaveInterval time.Duration
+	// Root is the workspace root that copy_relative_file_path measures from. Empty
+	// means no root is known, and the relative copy then gives the absolute path.
+	Root string
+	// SessionDir is the directory of the saved session, which InterruptedSaves reads.
+	// Empty means there is no session, and InterruptedSaves lists nothing.
+	SessionDir string
 }
 
 // Result is what Do reports back to the caller.
@@ -39,6 +69,10 @@ type Result struct {
 	Err error
 	// Quit is true after the quit action succeeded; the caller should exit.
 	Quit bool
+	// Text is the text the action hands back, or "". copy_file_path and
+	// copy_relative_file_path set it to the path they copied, which the caller may
+	// also write to the terminal clipboard.
+	Text string
 }
 
 // Tab describes one open document for the tab strip.
@@ -78,6 +112,21 @@ type Editor struct {
 	untitledSeq int
 	// emptyStatus is the status message while no tab is open.
 	emptyStatus string
+	// opts is the configuration New was given, with TabSize defaulted.
+	opts Options
+	// extras is the state of the marks, navigation and dabbrev actions (marks.go).
+	extras extraState
+	// autoSaved is the time of the last AutoSave. It is zero before the first.
+	autoSaved time.Time
+	// prevDoc is the document that was active before the current one, for
+	// switch_to_previous_tab. It is a pointer, so a closed tab is not found.
+	prevDoc *Document
+	// formatters maps a language name or file extension to its formatter command. See
+	// SetFormatters.
+	formatters map[string]string
+	// resultText is the text the running action hands back in Result.Text. Do clears
+	// it before the action runs.
+	resultText string
 }
 
 // New returns an Editor. Unless opts.Empty is set, it holds one empty
@@ -91,11 +140,25 @@ func New(opts Options) *Editor {
 	if cols <= 0 {
 		cols = 80
 	}
-	e := &Editor{rows: rows, cols: cols}
+	if opts.TabSize <= 0 {
+		opts.TabSize = 4
+	}
+	e := &Editor{rows: rows, cols: cols, opts: opts}
 	if !opts.Empty {
-		e.docs = []*Document{newDocument("", "")}
+		d := newDocument("", "")
+		d.eol = e.defaultEOL()
+		e.docs = []*Document{d}
 	}
 	return e
+}
+
+// defaultEOL is the line ending of a document with no file to read it from:
+// CRLF when Options.DefaultLineEnding says so, LF otherwise.
+func (e *Editor) defaultEOL() string {
+	if e.opts.DefaultLineEnding == eolCRLF {
+		return eolCRLF
+	}
+	return eolLF
 }
 
 // Empty reports whether no tab is open. Active returns nil then, Tabs returns
@@ -114,34 +177,36 @@ func (e *Editor) SetViewport(rows, cols int) {
 // OpenFile opens path in a new tab and makes it active. If path is already open
 // in a tab, that tab is activated instead and its text is kept, not reloaded.
 // A missing file opens as an empty buffer bound to path, which is created on
-// save. Errors wrap ErrNotUTF8, ErrEmptyPath or the underlying file error. An
-// untouched placeholder or untitled buffer is replaced rather than kept.
+// save. A file that is not valid UTF-8 is decoded in its detected encoding, and
+// errors wrap ErrNotDecodable, ErrEmptyPath or the underlying file error. An
+// untouched placeholder or untitled buffer is replaced rather than kept. The
+// document's path is the absolute form of path.
 func (e *Editor) OpenFile(path string) error {
 	if path == "" {
 		err := fmt.Errorf("open: %w", ErrEmptyPath)
 		e.setStatus(err.Error())
 		return err
 	}
-	if i := e.pathIndex(path); i >= 0 {
-		e.docs[i].preview = false
-		e.switchTo(i)
-		e.setStatus("Opened " + e.docs[i].Name())
-		return nil
-	}
-	d, err := readDocument(path)
+	path, err := absPath(path)
 	if err != nil {
 		e.setStatus(err.Error())
 		return err
 	}
-	if e.pristineUntitled() {
-		// The untouched startup buffer is replaced, not kept as a tab.
-		e.docs[0] = d
-		e.switchTo(0)
-	} else {
-		e.docs = append(e.docs, d)
-		e.switchTo(len(e.docs) - 1)
+	if i := e.pathIndex(path); i >= 0 {
+		e.docs[i].preview = false
+		if i != e.active {
+			e.pushJump()
+		}
+		e.switchTo(i)
+		e.setStatus("Opened " + e.docs[i].Name())
+		return nil
 	}
-	e.setStatus("Opened " + d.Name())
+	d, err := readDocument(path, e.defaultEOL())
+	if err != nil {
+		e.setStatus(err.Error())
+		return err
+	}
+	e.OpenLoaded(d)
 	return nil
 }
 
@@ -151,6 +216,16 @@ func (e *Editor) Active() *Document {
 		return nil
 	}
 	return e.docs[e.active]
+}
+
+// DocAt returns the document of tab i, or nil when there is no tab i. Unlike
+// Active it does not change the active tab, so a split pane can show a tab that is
+// not active.
+func (e *Editor) DocAt(i int) *Document {
+	if i < 0 || i >= len(e.docs) {
+		return nil
+	}
+	return e.docs[i]
 }
 
 // Tabs returns the open documents in tab order.
@@ -204,21 +279,15 @@ func (e *Editor) SetLanguage(name string) {
 
 // Save writes the active document to its path and marks it saved. An untitled
 // buffer returns ErrNoPath, and the caller should run Save As, which calls
-// SaveAs. Errors wrap the file error and are also in the tab's status. With no
-// tab open it returns ErrNoDocument.
+// SaveAs. Errors wrap the file error and are also in the tab's status. A read-only
+// document returns ErrReadOnly, because a save would change its file. With no tab
+// open it returns ErrNoDocument.
 func (e *Editor) Save() error {
-	d := e.Active()
-	if d == nil {
-		err := ErrNoDocument
-		e.setStatus(err.Error())
+	p, err := e.PlanSave()
+	if err != nil {
 		return err
 	}
-	if err := d.save(); err != nil {
-		e.setStatus(err.Error())
-		return err
-	}
-	e.setStatus("Saved")
-	return nil
+	return e.ApplySavePlan(p, p.Run())
 }
 
 // Quit reports the tabs with unsaved edits, in tab order. If there are none, or
@@ -284,8 +353,17 @@ func (e *Editor) Do(a Action, args map[string]any) Result {
 	}
 	e.lastKind = kind
 
-	err := h(e, args)
-	if d = e.Active(); d != nil && d.preview && d.Modified() {
+	e.resultText = ""
+	r := e.finish(h(e, args))
+	r.Text = e.resultText
+	return r
+}
+
+// finish ends an action that ran with err. An edited preview tab becomes
+// permanent, err goes to the status, and the caret stays visible. Do and EndShell
+// both end this way.
+func (e *Editor) finish(err error) Result {
+	if d := e.Active(); d != nil && d.preview && d.Modified() {
 		// An edit makes a preview tab permanent.
 		d.preview = false
 	}
@@ -300,6 +378,7 @@ func (e *Editor) Do(a Action, args map[string]any) Result {
 // action needs a document, and Do refuses it with ErrNoDocument.
 var worksWithoutDocument = map[Action]bool{
 	"new":                      true,
+	"noop":                     true,
 	"quit":                     true,
 	"save":                     true,
 	"save_as":                  true,
@@ -324,8 +403,15 @@ func typingKind(a Action) string {
 	return ""
 }
 
-// switchTo makes tab i active and resets the typing-group state.
+// switchTo makes tab i active and resets the typing-group state. The tab that was
+// active becomes the previous tab, for switch_to_previous_tab.
 func (e *Editor) switchTo(i int) {
+	// closeAt can switch away from a tab that was the last one, so e.active may be
+	// past the end here.
+	inRange := func(j int) bool { return j >= 0 && j < len(e.docs) }
+	if inRange(e.active) && inRange(i) && e.docs[i] != e.docs[e.active] {
+		e.prevDoc = e.docs[e.active]
+	}
 	e.active = i
 	e.lastKind = ""
 }
@@ -352,6 +438,7 @@ func (e *Editor) newUntitled() *Document {
 	e.untitledSeq++
 	d := newDocument("", "")
 	d.untitled = e.untitledSeq
+	d.eol = e.defaultEOL()
 	return d
 }
 

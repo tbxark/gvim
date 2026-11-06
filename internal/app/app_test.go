@@ -70,16 +70,17 @@ func TestBuildModelOpensFilesAndMissingFiles(t *testing.T) {
 	}
 }
 
-func TestBuildModelRejectsNonUTF8File(t *testing.T) {
+func TestBuildModelRejectsUndecodableFile(t *testing.T) {
 	isolateConfig(t)
 	dir := t.TempDir()
-	// The editor opens only UTF-8 text, so this file is an error.
+	// A UTF-16LE byte-order mark, then a lone high surrogate: no text decodes, so
+	// the editor refuses the file.
 	bad := filepath.Join(dir, "bad.bin")
-	if err := os.WriteFile(bad, []byte{0xff, 0xfe}, 0o644); err != nil {
+	if err := os.WriteFile(bad, []byte{0xff, 0xfe, 0x00, 0xd8}, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := buildModel(t.Context(), Options{Files: []FileTarget{{Path: bad}}, Root: dir}); err == nil {
-		t.Fatal("buildModel() with a non-UTF-8 file returned no error")
+		t.Fatal("buildModel() with an undecodable file returned no error")
 	}
 }
 

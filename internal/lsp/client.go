@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"sync"
 
 	"go.lsp.dev/jsonrpc2"
@@ -59,6 +60,11 @@ type Client struct {
 
 	// diags is closed after the read loop exits, so no send can follow the close.
 	diags chan DiagnosticsEvent
+
+	// diagMu guards diagByURI, the latest publishDiagnostics event per document.
+	// Unlike diags, it is never trimmed by the drop-oldest policy.
+	diagMu    sync.Mutex
+	diagByURI map[string]DiagnosticsEvent
 
 	// proc is set only by Start.
 	proc *exec.Cmd
@@ -109,13 +115,14 @@ func NewClient(rwc io.ReadWriteCloser, cfg Config) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := &Client{
-		rwc:     &guardedRWC{rwc: rwc},
-		rootURI: cfg.RootURI,
-		ctx:     ctx,
-		cancel:  cancel,
-		diags:   make(chan DiagnosticsEvent, diagnosticsBuffer),
+		rwc:       &guardedRWC{rwc: rwc},
+		rootURI:   cfg.RootURI,
+		ctx:       ctx,
+		cancel:    cancel,
+		diags:     make(chan DiagnosticsEvent, diagnosticsBuffer),
+		diagByURI: make(map[string]DiagnosticsEvent),
 	}
-	c.conn = jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(c.rwc))
+	c.conn = jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(c.rwc), jsonrpc2.WithCodec(lspCodec{}))
 	c.server = protocol.ServerDispatcher(c.conn)
 
 	h := &clientHandler{c: c, rootURI: cfg.RootURI}
@@ -131,8 +138,9 @@ func NewClient(rwc io.ReadWriteCloser, cfg Config) *Client {
 }
 
 // Initialize sends the initialize request with the root from Config.RootURI and
-// the client capabilities this package supports (publishDiagnostics and
-// synchronization). It returns the server's result. Call Initialized after it.
+// the client capabilities this package supports (publishDiagnostics,
+// synchronization, and code action literals). It returns the server's result.
+// Call Initialized after it.
 func (c *Client) Initialize(ctx context.Context) (*protocol.InitializeResult, error) {
 	params := &protocol.InitializeParams{
 		Capabilities: clientCapabilities(),
@@ -221,6 +229,12 @@ func (c *Client) Exit(ctx context.Context) error {
 	return nil
 }
 
+// Done returns a channel that is closed once the connection has ended: the
+// server exited, its pipe closed, or Close was called.
+func (c *Client) Done() <-chan struct{} {
+	return c.conn.Done()
+}
+
 // Diagnostics returns the channel of publishDiagnostics events. The channel is
 // closed when the connection ends, either after Close or after the server
 // closes its side of the transport.
@@ -233,9 +247,27 @@ func (c *Client) Diagnostics() <-chan DiagnosticsEvent {
 	return c.diags
 }
 
-// publish queues ev without blocking. Only the read loop calls it, so a
-// single-producer drop-oldest loop always finishes after at most one drop.
+// DiagnosticsFor returns the latest publishDiagnostics event for docURI. Use it
+// for the current state of a document; Diagnostics is a bounded queue and can
+// omit intermediate events. ok is false until the server publishes for docURI.
+// An ok event with no diagnostics means the server cleared them. The returned
+// slice is a copy.
+func (c *Client) DiagnosticsFor(docURI string) (DiagnosticsEvent, bool) {
+	c.diagMu.Lock()
+	ev, ok := c.diagByURI[docURI]
+	c.diagMu.Unlock()
+	ev.Diagnostics = slices.Clone(ev.Diagnostics)
+	return ev, ok
+}
+
+// publish records ev as the latest event for its document and queues it without
+// blocking. Only the read loop calls it, so a single-producer drop-oldest loop
+// always finishes after at most one drop.
 func (c *Client) publish(ev DiagnosticsEvent) {
+	c.diagMu.Lock()
+	c.diagByURI[ev.URI] = ev
+	c.diagMu.Unlock()
+
 	for {
 		select {
 		case c.diags <- ev:
@@ -274,13 +306,28 @@ func (c *Client) Close() error {
 }
 
 // clientCapabilities lists what this client supports: publishDiagnostics with
-// versions, and text document synchronization (full sync only).
+// versions, text document synchronization (full sync only), and code action
+// literals, so a server may answer CodeActions with full actions, not only bare
+// commands.
 func clientCapabilities() protocol.ClientCapabilities {
 	return protocol.ClientCapabilities{
 		TextDocument: &protocol.TextDocumentClientCapabilities{
 			Synchronization: &protocol.TextDocumentSyncClientCapabilities{},
 			PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{
 				VersionSupport: new(true),
+			},
+			CodeAction: &protocol.CodeActionClientCapabilities{
+				CodeActionLiteralSupport: protocol.ClientCodeActionLiteralOptions{
+					CodeActionKind: protocol.ClientCodeActionKindOptions{
+						ValueSet: []protocol.CodeActionKind{
+							protocol.CodeActionKindQuickFix,
+							protocol.CodeActionKindRefactor,
+							protocol.CodeActionKindRefactorExtract,
+							protocol.CodeActionKindSource,
+							protocol.CodeActionKindSourceOrganizeImports,
+						},
+					},
+				},
 			},
 		},
 	}
