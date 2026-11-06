@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // SaveAs asks for the file name to save a buffer to. It has a text field and
@@ -27,10 +28,10 @@ var _ Overlay = (*SaveAs)(nil)
 
 // NewSaveAs returns the dialog with prefill in the name field. Tag comes back in
 // the Result, and checks are the path questions the opener answers.
-func NewSaveAs(clock Clock, prefill string, tag any, checks PathChecks) *SaveAs {
+func NewSaveAs(clock Clock, prefill string, tag any, checks PathChecks, ov style.Overlay) *SaveAs {
 	d := &SaveAs{input: newField(prefill), checks: checks, sizeText: prefill}
 	d.input.selectAll()
-	d.setup(clock, "Save As", tag, ChoiceCancel, saveButtons())
+	d.setup(clock, "Save As", tag, ChoiceCancel, saveButtons(), ov)
 	d.field = d.input
 	d.onPress = d.press
 	return d
@@ -59,7 +60,7 @@ func (d *SaveAs) Draw(g *grid.Grid) {
 	d.frame(g, d.natural(d.sizeText+" "), func(cw int) []row {
 		rows := []row{d.fieldRow()}
 		if d.errText != "" {
-			rows = append(rows, textRows(d.errText, cw, stErr)...)
+			rows = append(rows, textRows(d.errText, cw, d.ov.Error)...)
 		}
 		return rows
 	})

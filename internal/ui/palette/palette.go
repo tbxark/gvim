@@ -175,7 +175,8 @@ type row struct {
 	col      int
 }
 
-// chrome holds the grid styles of the palette, built from the theme.
+// chrome holds the grid styles of the palette: the overlay palette for the box, and
+// the theme's editor colors for the query line.
 type chrome struct {
 	panel    grid.Style // the box, the hint row and the empty cells
 	selected grid.Style // the highlighted row
@@ -218,14 +219,15 @@ func New(opts Options) *Palette {
 		st = *opts.State
 	}
 	ss := style.New(opts.Theme)
+	ov := ss.Overlay
 	p := &Palette{
 		opts:  opts,
 		state: st,
 		open:  true,
 		live:  opts.Live,
 		chrome: chrome{
-			panel:    style.Cell(ss.Menu),
-			selected: style.Cell(ss.MenuActive),
+			panel:    ov.Box,
+			selected: ov.Selected,
 			prompt:   style.Cell(ss.Editor),
 		},
 	}

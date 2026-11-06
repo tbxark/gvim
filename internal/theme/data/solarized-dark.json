@@ -75,7 +75,9 @@
     "settings_selected_fg": [253, 246, 227],
     "status_lsp_actionable_fg": [0, 0, 0],
     "status_lsp_actionable_bg": [181, 137, 0],
-    "file_explorer_pinned_bg": [4, 50, 62]
+    "file_explorer_pinned_bg": [4, 50, 62],
+    "accent_bg": [38, 139, 210],
+    "accent_fg": [253, 246, 227]
   },
   "search": {
     "match_bg": [181, 137, 0],

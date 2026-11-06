@@ -43,8 +43,8 @@ func TestSyntaxRGBThemesResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// dark.json: "keyword": [86, 156, 214]
-	want := theme.RGB{R: 86, G: 156, B: 214}
+	// dark.json: "keyword": [255, 123, 114]
+	want := theme.RGB{R: 255, G: 123, B: 114}
 	if got := th.RGBOr("syntax", theme.SyntaxKeyword, theme.RGB{}); got != want {
 		t.Fatalf("syntax.keyword = %v, want %v", got, want)
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui"
 	"github.com/tbxark/gvim/internal/ui/dialog"
+	"github.com/tbxark/gvim/internal/ui/style"
 	"github.com/tbxark/gvim/internal/workspace"
 )
 
@@ -643,13 +644,13 @@ func keymapContext(ctx ui.KeyContext) keymap.Context {
 type dialogPort struct{}
 
 // Unsaved opens the unsaved-changes dialog for the tab called name.
-func (dialogPort) Unsaved(name string, tag any) ui.Overlay {
-	return ui.WrapDialog(dialog.NewUnsavedChanges(time.Now, name, tag))
+func (dialogPort) Unsaved(name string, tag any, ov style.Overlay) ui.Overlay {
+	return ui.WrapDialog(dialog.NewUnsavedChanges(time.Now, name, tag, ov))
 }
 
 // SaveAs opens the Save As prompt prefilled with path. A path whose parent
 // folder is missing is refused inline, and an existing file needs a confirm.
-func (dialogPort) SaveAs(path string, tag any) ui.Overlay {
+func (dialogPort) SaveAs(path string, tag any, ov style.Overlay) ui.Overlay {
 	checks := dialog.PathChecks{
 		Exists: func(p string) bool {
 			_, err := os.Stat(p)
@@ -666,5 +667,5 @@ func (dialogPort) SaveAs(path string, tag any) ui.Overlay {
 			return nil
 		},
 	}
-	return ui.WrapDialog(dialog.NewSaveAs(time.Now, path, tag, checks))
+	return ui.WrapDialog(dialog.NewSaveAs(time.Now, path, tag, checks, ov))
 }

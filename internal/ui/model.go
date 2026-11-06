@@ -2107,7 +2107,7 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 		return
 	}
 	bar := style.Cell(m.styles.Status)
-	palette := style.Cell(m.styles.StatusPalette)
+	palette := style.Cell(m.styles.Accent)
 	g.Fill(0, g.Width(), l.statusY, bar)
 	for _, r := range l.status {
 		st := bar
@@ -2252,7 +2252,7 @@ func (m *Model) askUnsaved(f flow, name string) {
 		m.notice = "Unsaved changes in " + name
 		return
 	}
-	m.pushOverlay(m.dialogs.Unsaved(name, unsavedTag{f: f}))
+	m.pushOverlay(m.dialogs.Unsaved(name, unsavedTag{f: f}, m.styles.Overlay))
 }
 
 // askSaveAs opens the Save As prompt. It is prefilled with the path of the
@@ -2271,7 +2271,7 @@ func (m *Model) askSaveAs(f flow) {
 	if p, ok := doc.(pathEditor); ok && p.FilePath() != "" {
 		prefill = p.FilePath()
 	}
-	m.pushOverlay(m.dialogs.SaveAs(prefill, saveAsTag{f: f}))
+	m.pushOverlay(m.dialogs.SaveAs(prefill, saveAsTag{f: f}, m.styles.Overlay))
 }
 
 // dialogDone applies the answer of a file dialog. Each tag names the flow the

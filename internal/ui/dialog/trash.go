@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // ConfirmTrash asks before a file or folder moves to the Trash. The buttons are
@@ -18,12 +19,12 @@ var _ Overlay = (*ConfirmTrash)(nil)
 
 // NewConfirmTrash returns the dialog that asks about the item name. Tag comes
 // back in the Result.
-func NewConfirmTrash(clock Clock, name string, tag any) *ConfirmTrash {
+func NewConfirmTrash(clock Clock, name string, tag any, ov style.Overlay) *ConfirmTrash {
 	d := &ConfirmTrash{name: name}
 	d.setup(clock, "Confirm Delete", tag, ChoiceCancel, []button{
 		newButton("Move to Trash", 8, ChoiceMoveToTrash),
 		newButton("Cancel", 0, ChoiceCancel),
-	})
+	}, ov)
 	d.focus = 1
 	return d
 }

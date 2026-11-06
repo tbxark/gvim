@@ -105,7 +105,7 @@ func keybindingRows(l BindingLister) []listRow {
 // choosing a row does nothing. Typing filters the rows.
 func (m *Model) openHelp(title string) {
 	l, _ := m.keys.(BindingLister)
-	v := newListView(title, helpRows(l), chromeOf(m.styles), nil)
+	v := newListView(title, helpRows(l), m.listChrome(), nil)
 	if l == nil {
 		v.empty = noBindingsText
 	}

@@ -156,8 +156,8 @@ func welcomeItemCount(recents []string) int {
 // paintWelcome draws the welcome lines of l. The row at index sel is highlighted.
 // The screen covers the editor pane, so the explorer is not touched.
 func paintWelcome(g *grid.Grid, st style.Styles, l layout, sel int) {
-	base, selected := style.Cell(st.Editor), style.Cell(st.Selection)
-	text, chip, dim := style.Cell(st.Editor), style.Cell(st.MenuActive), style.Cell(st.Gutter)
+	base, selected := style.Cell(st.Editor), style.Cell(st.Accent)
+	text, chip, dim := style.Cell(st.Editor), st.Overlay.Idle, style.Cell(st.Gutter)
 	for _, r := range l.welcome {
 		switch r.role {
 		case welcomeBlank:

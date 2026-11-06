@@ -279,15 +279,15 @@ func TestRecentFoldersAreCappedAndNoticeWithoutProjects(t *testing.T) {
 	}
 }
 
-// The welcome screen is drawn with the highlight on the selected row.
-func TestWelcomeHighlightUsesTheSelectionStyle(t *testing.T) {
+// The welcome screen is drawn with the accent on the selected row.
+func TestWelcomeHighlightUsesTheAccent(t *testing.T) {
 	m, _ := welcomeModel(t, 80, 24)
-	m.styles = style.Styles{Selection: lipgloss.NewStyle().Bold(true)}
+	m.styles = style.Styles{Accent: lipgloss.NewStyle().Bold(true)}
 	press(m, special(tea.KeyDown))
 	row, _ := welcomeRowAt(m, 1)
 	g := m.paint()
 	if !g.At(row.x+1, row.y).Style.Bold {
-		t.Fatalf("selected row cell %+v is not styled as the selection", g.At(row.x+1, row.y).Style)
+		t.Fatalf("selected row cell %+v is not styled as the accent", g.At(row.x+1, row.y).Style)
 	}
 	if other, _ := welcomeRowAt(m, 0); g.At(other.x+1, other.y).Style.Bold {
 		t.Fatal("an unselected row takes the selection style")

@@ -38,23 +38,6 @@ type listRow struct {
 	value  string
 }
 
-// listChrome are the grid styles of the overlay boxes: the box, the highlighted
-// row and the secondary text.
-type listChrome struct {
-	panel    grid.Style
-	selected grid.Style
-	muted    grid.Style
-}
-
-// chromeOf returns the box styles for the theme styles ss. The menu colors are
-// used, so the boxes match the menu dropdowns.
-func chromeOf(ss style.Styles) listChrome {
-	panel := style.Cell(ss.Menu)
-	muted := panel
-	muted.Faint = true
-	return listChrome{panel: panel, selected: style.Cell(ss.MenuActive), muted: muted}
-}
-
 // listView is a titled, filterable, scrollable list in a centred box. Typed text
 // filters the rows, and a row keeps its group header while one of its rows
 // matches. Up and Down move the highlight over the items, skipping headers,
@@ -71,14 +54,14 @@ type listView struct {
 	top    int    // the first index into shown on screen
 	page   int    // the item rows on screen at the last draw
 	active bool
-	chrome listChrome
+	chrome style.Overlay
 	run    func(v *listView, r listRow) tea.Cmd // nil: choosing a row does nothing
 	box    rect                                 // the box at the last draw
 }
 
 // newListView returns an open list with rows, titled title. run is called when a
 // row is chosen, and it closes the list by clearing active when it means to.
-func newListView(title string, rows []listRow, chrome listChrome, run func(*listView, listRow) tea.Cmd) *listView {
+func newListView(title string, rows []listRow, chrome style.Overlay, run func(*listView, listRow) tea.Cmd) *listView {
 	v := &listView{
 		title:  title,
 		empty:  "No matches",
@@ -92,8 +75,9 @@ func newListView(title string, rows []listRow, chrome listChrome, run func(*list
 }
 
 // listBox returns the box of a list in a w by h frame, and the number of item rows
-// it holds. The box has a title row, a filter row, the items and a hint row. An
-// empty box means the frame is too small to show the list.
+// it holds. The title is on the top border and the hint on the bottom one, so the
+// box has a filter row and the items inside them. An empty box means the frame is
+// too small to show the list.
 func listBox(w, h int) (rect, int) {
 	r := centred(w, h, listMaxWidth, listMaxHeight)
 	if r.w == 0 {
@@ -312,7 +296,8 @@ func tailCells(s string, w int) string {
 const filterLabel = "Filter: "
 
 // draw paints the box over g. It records the box and the page size, so the keys
-// and the mouse use what is on screen.
+// and the mouse use what is on screen. The box has the border and title of the
+// dialogs, the filter row, the items, and the hint on the bottom border.
 func (v *listView) draw(g *grid.Grid) {
 	box, rows := listBox(g.Width(), g.Height())
 	v.box = box
@@ -321,16 +306,12 @@ func (v *listView) draw(g *grid.Grid) {
 		return
 	}
 	v.keepVisible()
-	panel := v.chrome.panel
-	for y := box.y; y < box.y+box.h; y++ {
-		g.Fill(box.x, box.x+box.w, y, panel)
-	}
-	end := box.x + box.w - 1
-	title := panel
-	title.Bold = true
-	g.Put(box.x+2, box.y, end, truncateCells(v.title, box.w-4), title)
-	labelX := box.x + 2 + g.Put(box.x+2, box.y+1, end, filterLabel, v.chrome.muted)
-	g.Put(labelX, box.y+1, end, tailCells(string(v.filter), end-1-labelX), panel)
+	ov := v.chrome
+	ov.PaintBox(g, box.x, box.y, box.w, box.h, v.title)
+	end := box.x + box.w - 2 // text stops before the padding cell at the right border
+	filterY := box.y + 1
+	labelX := box.x + 2 + g.Put(box.x+2, filterY, end, filterLabel, ov.Muted)
+	g.Put(labelX, filterY, end, tailCells(string(v.filter), end-labelX), ov.Box)
 
 	for k := range rows {
 		idx := v.top + k
@@ -339,20 +320,22 @@ func (v *listView) draw(g *grid.Grid) {
 		}
 		r := v.rows[v.shown[idx]]
 		y := box.y + 2 + k
-		st := panel
-		right := v.chrome.muted
+		st := ov.Box
+		right := ov.Muted
 		switch {
 		case r.header:
 			st.Bold = true
 		case idx == v.sel:
-			st = v.chrome.selected
+			st = ov.Selected
 			right = st
-			g.Fill(box.x+1, end, y, st)
+			g.Fill(box.x+1, box.x+box.w-1, y, st)
 		}
 		left, room := r.left, end-box.x-2
 		if r.right != "" {
-			rightX := end - 1 - ansi.StringWidth(r.right)
-			g.Put(rightX, y, end, r.right, right)
+			// A long value keeps its end, and the label keeps its own width.
+			value := tailCells(r.right, end-(box.x+2)-ansi.StringWidth(left)-2)
+			rightX := end - ansi.StringWidth(value)
+			g.Put(rightX, y, end, value, right)
 			room = rightX - (box.x + 2) - 2
 		}
 		if room > 0 {
@@ -360,9 +343,9 @@ func (v *listView) draw(g *grid.Grid) {
 		}
 	}
 	if len(v.shown) == 0 {
-		g.Put(box.x+2, box.y+2, end, v.empty, v.chrome.muted)
+		g.Put(box.x+2, box.y+2, end, v.empty, ov.Muted)
 	}
-	g.Put(box.x+2, box.y+box.h-1, end, truncateCells(listHint, box.w-4), v.chrome.muted)
+	g.Put(box.x+2, box.y+box.h-1, end, truncateCells(" "+listHint+" ", end-(box.x+2)), ov.Muted)
 }
 
 // listOverlay adapts *listView to Overlay. The list closes itself when it clears

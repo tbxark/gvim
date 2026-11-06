@@ -39,13 +39,6 @@ const labelStart = 1
 // implement. A dropdown row with no action, such as a submenu, reports it too.
 var ErrUnsupported = errors.New("menubar: action not supported")
 
-// Crush Charmtone colors of the spec (section 3, colors). The open title, the
-// highlighted row and the dropdown border use them whatever the theme is.
-var (
-	colorPrimary   = lipgloss.Color("#6B50FF") // Charple
-	colorOnPrimary = lipgloss.Color("#FFFAF1") // Butter
-)
-
 // Ports is what the menu bar needs from the root. The root implements it.
 type Ports interface {
 	// Run runs the action of an activated row. It returns ErrUnsupported for an
@@ -499,13 +492,13 @@ func (m Model) Hit(x, y int) Target {
 // and row is underlined, and no other cell is.
 func (m Model) Paint(g *grid.Grid) {
 	geo := m.geometry(g.Width(), g.Height())
-	g.Fill(0, g.Width(), 0, style.Cell(m.styles.bar))
+	g.Fill(0, g.Width(), 0, m.styles.bar)
 	for _, r := range geo.labels {
 		st := m.styles.bar
 		if r.title == m.title {
 			st = m.styles.activeLabel
 		}
-		putText(g, r.x, 0, g.Width(), r.title, style.Cell(st), r.acc)
+		putText(g, r.x, 0, g.Width(), r.title, st, r.acc)
 	}
 	if geo.hasBox {
 		m.paintBox(g, geo.box)
@@ -516,8 +509,8 @@ func (m Model) Paint(g *grid.Grid) {
 // their shortcuts, and the separator rules.
 func (m Model) paintBox(g *grid.Grid, box dropBox) {
 	b := lipgloss.RoundedBorder()
-	bg := style.Cell(m.styles.box)
-	border := style.Cell(m.styles.border)
+	bg := m.styles.box
+	border := m.styles.border
 	x0, right := box.x, box.x+box.w-1
 	rule := strings.Repeat(b.Top, box.w-2)
 	g.Put(x0, 1, x0+box.w, b.TopLeft+rule+b.TopRight, border)
@@ -530,9 +523,9 @@ func (m Model) paintBox(g *grid.Grid, box dropBox) {
 		switch {
 		case r.Separator:
 		case i == m.selected:
-			st = style.Cell(m.styles.selected)
+			st = m.styles.selected
 		case r.Disabled:
-			st = style.Cell(m.styles.disabled)
+			st = m.styles.disabled
 		}
 		g.Fill(x0, x0+box.w, y, bg)
 		g.Set(x0, y, b.Left, border)
@@ -563,23 +556,25 @@ func putText(g *grid.Grid, x, y, maxX int, text string, st grid.Style, acc accel
 	g.Set(x+acc.col, y, acc.text, under)
 }
 
-// styles are the lipgloss roles of the bar, built from the chrome styles and the
-// crush colors.
+// styles are the grid styles of the bar and the dropdown. The bar row keeps the
+// theme, and the dropdown takes the overlay palette.
 type styles struct {
-	bar, activeLabel, box, border, selected, disabled lipgloss.Style
+	bar, activeLabel, box, border, selected, disabled grid.Style
 }
 
-// newStyles derives the menu roles from the chrome styles. The open title and
-// the highlighted row use the primary color with onPrimary text, as crush's
-// selected item does. The dropdown border is primary. A disabled row is faint.
+// newStyles derives the menu roles from the chrome styles and the overlay
+// palette. The open title and the highlighted row take the selected colors, and
+// the dropdown border takes the primary color. A disabled row is faint.
 func newStyles(st style.Styles) styles {
-	onPrimary := lipgloss.NewStyle().Foreground(colorOnPrimary).Background(colorPrimary)
+	ov := st.Overlay
+	disabled := ov.Box
+	disabled.Faint = true
 	return styles{
-		bar:         st.Menu,
-		activeLabel: onPrimary,
-		box:         st.Menu,
-		border:      st.Menu.Foreground(colorPrimary),
-		selected:    onPrimary,
-		disabled:    st.Menu.Faint(true),
+		bar:         style.Cell(st.Menu),
+		activeLabel: ov.Selected,
+		box:         ov.Box,
+		border:      ov.Border,
+		selected:    ov.Selected,
+		disabled:    disabled,
 	}
 }

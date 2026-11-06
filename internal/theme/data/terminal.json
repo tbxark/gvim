@@ -110,7 +110,9 @@
     "file_status_renamed_fg": "Cyan",
     "file_status_untracked_fg": "Gray",
     "file_status_conflicted_fg": "Magenta",
-    "file_explorer_pinned_bg": "DarkGray"
+    "file_explorer_pinned_bg": "DarkGray",
+    "accent_bg": "Magenta",
+    "accent_fg": "White"
   },
   "search": {
     "match_bg": "Yellow",

@@ -67,13 +67,14 @@ type styles struct {
 	bar, label, field, active, warn grid.Style
 }
 
-// newStyles derives the prompt styles from the chrome styles.
+// newStyles derives the prompt styles from the chrome styles. The active choice
+// takes the selected color of the overlays, so it matches the highlighted rows.
 func newStyles(st style.Styles) styles {
 	return styles{
 		bar:    style.Cell(st.Menu),
 		label:  style.Cell(st.Menu),
 		field:  style.Cell(st.Editor),
-		active: style.Cell(st.MenuActive),
+		active: st.Overlay.Selected,
 		warn:   style.Cell(st.Menu),
 	}
 }

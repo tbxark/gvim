@@ -12,7 +12,7 @@ func TestFieldScrollsTailIntoView(t *testing.T) {
 	t.Parallel()
 	f := newField("0123456789abcdefghij")
 	g := grid.New(12, 1)
-	cx, ok := f.draw(g, 0, 0, 12, stField)
+	cx, ok := f.draw(g, 0, 0, 12, testOv.Idle)
 	if !ok || cx >= 12 {
 		t.Fatalf("caret %d ok=%v, want visible inside 12 cells", cx, ok)
 	}
@@ -26,7 +26,7 @@ func TestFieldCaretHiddenWithoutRoom(t *testing.T) {
 	t.Parallel()
 	f := newField("abc")
 	g := grid.New(4, 1)
-	if _, ok := f.draw(g, 0, 0, 0, stField); ok {
+	if _, ok := f.draw(g, 0, 0, 0, testOv.Idle); ok {
 		t.Fatal("caret reported in a zero-width field")
 	}
 }

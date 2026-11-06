@@ -26,14 +26,14 @@ type Styles struct {
 	Selection      lipgloss.Style // editor.fg on editor.selection_bg
 	Gutter         lipgloss.Style // editor.line_number_fg on editor.line_number_bg
 	Menu           lipgloss.Style // ui.menu_fg on ui.menu_bg
-	MenuActive     lipgloss.Style // ui.menu_active_fg on ui.menu_active_bg
+	Accent         lipgloss.Style // ui.accent_fg on ui.accent_bg, the one accent of the theme
+	TabActive      lipgloss.Style // ui.tab_active_fg on ui.tab_active_bg, the active tab
+	Overlay        Overlay        // the overlay boxes, from ui.popup and the accent
 	TabBar         lipgloss.Style // ui.tab_separator_bg, the strip behind the tabs
 	Tab            lipgloss.Style // ui.tab_inactive_fg on ui.tab_inactive_bg
-	TabActive      lipgloss.Style // ui.tab_active_fg on ui.tab_active_bg
 	Explorer       lipgloss.Style // editor.fg on editor.bg, the panel body
 	ExplorerTitle  lipgloss.Style // ui.menu_fg on ui.menu_bg, the panel header
 	Status         lipgloss.Style // ui.status_bar_fg on ui.status_bar_bg
-	StatusPalette  lipgloss.Style // ui.status_palette_fg on ui.status_palette_bg
 	Scrollbar      lipgloss.Style // ui.scrollbar_track_fg on editor.bg
 	ScrollbarThumb lipgloss.Style // ui.scrollbar_thumb_fg on editor.bg
 	Match          lipgloss.Style // search.match_bg, the background only
@@ -47,8 +47,6 @@ type Styles struct {
 	DiagWarning    lipgloss.Style // diagnostic.warning_fg, the foreground only
 	DiagInfo       lipgloss.Style // diagnostic.info_fg, the foreground only
 	DiagHint       lipgloss.Style // diagnostic.hint_fg, the foreground only
-	Popup          lipgloss.Style // ui.popup_text_fg on ui.popup_bg
-	PopupSelected  lipgloss.Style // ui.popup_selection_fg on ui.popup_selection_bg
 }
 
 // Theme keys of the roles that the editor pane and the status bar paint with.
@@ -66,8 +64,8 @@ var (
 	refDiagHint       = ref{"diagnostic", "hint_fg"}
 	refPopupText      = ref{"ui", "popup_text_fg"}
 	refPopupBG        = ref{"ui", "popup_bg"}
-	refPopupSelFG     = ref{"ui", "popup_selection_fg"}
-	refPopupSelBG     = ref{"ui", "popup_selection_bg"}
+	refAccentFG       = ref{"ui", "accent_fg"}
+	refAccentBG       = ref{"ui", "accent_bg"}
 )
 
 // ref names one theme value: a section and a key. An empty key means none.
@@ -81,14 +79,14 @@ func New(th theme.Theme) Styles {
 		Selection:      build(th, ref{"editor", "fg"}, ref{"editor", "selection_bg"}),
 		Gutter:         build(th, ref{"editor", "line_number_fg"}, ref{"editor", "line_number_bg"}),
 		Menu:           build(th, ref{"ui", "menu_fg"}, ref{"ui", "menu_bg"}),
-		MenuActive:     build(th, ref{"ui", "menu_active_fg"}, ref{"ui", "menu_active_bg"}),
+		Accent:         build(th, refAccentFG, refAccentBG),
+		TabActive:      build(th, ref{"ui", "tab_active_fg"}, ref{"ui", "tab_active_bg"}),
+		Overlay:        NewOverlay(th),
 		TabBar:         build(th, ref{}, ref{"ui", "tab_separator_bg"}),
 		Tab:            build(th, ref{"ui", "tab_inactive_fg"}, ref{"ui", "tab_inactive_bg"}),
-		TabActive:      build(th, ref{"ui", "tab_active_fg"}, ref{"ui", "tab_active_bg"}),
 		Explorer:       build(th, ref{"editor", "fg"}, ed),
 		ExplorerTitle:  build(th, ref{"ui", "menu_fg"}, ref{"ui", "menu_bg"}),
 		Status:         build(th, ref{"ui", "status_bar_fg"}, ref{"ui", "status_bar_bg"}),
-		StatusPalette:  build(th, ref{"ui", "status_palette_fg"}, ref{"ui", "status_palette_bg"}),
 		Scrollbar:      build(th, ref{"ui", "scrollbar_track_fg"}, ed),
 		ScrollbarThumb: build(th, ref{"ui", "scrollbar_thumb_fg"}, ed),
 		Match:          build(th, ref{}, ref{"search", "match_bg"}),
@@ -102,8 +100,6 @@ func New(th theme.Theme) Styles {
 		DiagWarning:    build(th, refDiagWarning, ref{}),
 		DiagInfo:       build(th, refDiagInfo, ref{}),
 		DiagHint:       build(th, refDiagHint, ref{}),
-		Popup:          build(th, refPopupText, refPopupBG),
-		PopupSelected:  build(th, refPopupSelFG, refPopupSelBG),
 	}
 }
 
@@ -218,4 +214,97 @@ func definedColor(c color.Color) color.Color {
 		return nil
 	}
 	return c
+}
+
+// Overlay is the grid styles of the overlay boxes: the dialogs, the lists, the
+// dropdowns, the popups, the palette and the browser. The box takes the theme's
+// popup colors, and the highlight and the border take its accent, so every box
+// looks alike within a theme.
+type Overlay struct {
+	Box      grid.Style // the fill of a box, and its text
+	Muted    grid.Style // secondary text: hints, labels and shortcuts
+	Error    grid.Style // an error message
+	Border   grid.Style // the rounded border of a box, and the fill of its title
+	Title    grid.Style // the title of a box
+	Selected grid.Style // the highlighted row
+	Focus    grid.Style // the focused button
+	Idle     grid.Style // an unfocused button, a text field and a blurred selection
+	Hover    grid.Style // a button under the pointer
+}
+
+// NewOverlay returns the overlay styles for th. The secondary roles are mixed from
+// the popup text and fill when both are RGB. Otherwise they are drawn with
+// attributes, so a theme in terminal colors still shows them.
+func NewOverlay(th theme.Theme) Overlay {
+	box := Cell(build(th, refPopupText, refPopupBG))
+	accent := build(th, refAccentFG, refAccentBG)
+	ov := Overlay{
+		Box:      box,
+		Error:    Cell(build(th, refDiagError, refPopupBG)),
+		Border:   Cell(build(th, refAccentBG, refPopupBG)),
+		Title:    box,
+		Selected: Cell(accent),
+		Focus:    Cell(accent.Bold(true)),
+	}
+	ov.Title.Bold = true
+	fill, okFill := rgbOf(Color(th, "ui", "popup_bg"))
+	text, okText := rgbOf(Color(th, "ui", "popup_text_fg"))
+	if okFill && okText {
+		ov.Muted = grid.Style{FG: toward(text, fill, 0.45), BG: fill}
+		ov.Idle = grid.Style{FG: text, BG: toward(fill, text, 0.25)}
+		ov.Hover = grid.Style{FG: text, BG: toward(fill, text, 0.4)}
+	} else {
+		ov.Muted = box
+		ov.Muted.Faint = true
+		ov.Idle = box
+		ov.Idle.Reverse = true
+		ov.Hover = box
+		ov.Hover.Reverse = true
+		ov.Hover.Bold = true
+	}
+	return ov
+}
+
+// rgbOf returns c as an RGB color. It is false for a nil color and for an ANSI
+// name, which cannot be mixed with another color.
+func rgbOf(c color.Color) (color.RGBA, bool) {
+	rgb, ok := c.(color.RGBA)
+	return rgb, ok
+}
+
+// toward moves from t of the way toward to. t is 0 at from and 1 at to.
+func toward(from, to color.RGBA, t float64) color.RGBA {
+	mix := func(a, b uint8) uint8 {
+		return uint8(float64(a) + (float64(b)-float64(a))*t + 0.5)
+	}
+	return color.RGBA{R: mix(from.R, to.R), G: mix(from.G, to.G), B: mix(from.B, to.B), A: 0xFF}
+}
+
+// PaintBox draws an overlay box of w by h cells at (x, y). The box is filled with
+// Box and framed by a rounded Border. Its title is written on the top border, after
+// the first cell, and a fill of ╱ in the border color runs from the title to the
+// top-right corner. The rows inside the border are the caller's.
+func (o Overlay) PaintBox(g *grid.Grid, x, y, w, h int, title string) {
+	for row := y; row < y+h; row++ {
+		g.Fill(x, x+w, row, o.Box)
+	}
+	b := lipgloss.RoundedBorder()
+	right, bottom := x+w-1, y+h-1
+	for cx := x + 1; cx < right; cx++ {
+		g.Set(cx, y, b.Top, o.Border)
+		g.Set(cx, bottom, b.Bottom, o.Border)
+	}
+	for ry := y + 1; ry < bottom; ry++ {
+		g.Set(x, ry, b.Left, o.Border)
+		g.Set(right, ry, b.Right, o.Border)
+	}
+	g.Set(x, y, b.TopLeft, o.Border)
+	g.Set(right, y, b.TopRight, o.Border)
+	g.Set(x, bottom, b.BottomLeft, o.Border)
+	g.Set(right, bottom, b.BottomRight, o.Border)
+
+	n := g.Put(x+2, y, right, " "+title+" ", o.Title)
+	for cx := x + 2 + n; cx < right; cx++ {
+		g.Set(cx, y, "╱", o.Border)
+	}
 }

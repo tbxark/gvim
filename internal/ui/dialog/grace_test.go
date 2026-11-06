@@ -30,7 +30,7 @@ func enterAt(t *testing.T, mk func(Clock) Overlay, c *fakeClock, offsets ...time
 func TestGraceIgnoresEnterAtOpen(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	got := enterAt(t, func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil) }, c, 0)
+	got := enterAt(t, func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil, testOv) }, c, 0)
 	if len(got) != 1 || got[0] {
 		t.Fatalf("Enter at open was accepted, want ignored")
 	}
@@ -51,7 +51,7 @@ func TestGraceEndsAt425Milliseconds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := newFakeClock()
-			got := enterAt(t, func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil) }, c, tt.offset)
+			got := enterAt(t, func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil, testOv) }, c, tt.offset)
 			if got[0] != tt.accepted {
 				t.Fatalf("accepted = %v at %v, want %v", got[0], tt.offset, tt.accepted)
 			}
@@ -66,7 +66,7 @@ func TestGraceIgnoredEnterExtendsWindow(t *testing.T) {
 	// extends it to 525ms. Enter at 500ms is ignored and extends it to 925ms.
 	// Enter at 900ms is ignored and extends it to 1325ms. Enter at 1325ms is
 	// accepted.
-	got := enterAt(t, func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil) }, c,
+	got := enterAt(t, func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil, testOv) }, c,
 		100*time.Millisecond, 500*time.Millisecond, 900*time.Millisecond, 1325*time.Millisecond)
 	want := []bool{false, false, false, true}
 	for i := range want {
@@ -87,7 +87,7 @@ func TestGraceExtensionCapsAt1500Milliseconds(t *testing.T) {
 		offsets = append(offsets, time.Duration(ms)*time.Millisecond)
 	}
 	offsets = append(offsets, 1500*time.Millisecond)
-	got := enterAt(t, func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil) }, c, offsets...)
+	got := enterAt(t, func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil, testOv) }, c, offsets...)
 	for i, ok := range got[:len(got)-1] {
 		if ok {
 			t.Fatalf("Enter %d at %v was accepted inside the grace window", i, offsets[i])
@@ -101,20 +101,20 @@ func TestGraceExtensionCapsAt1500Milliseconds(t *testing.T) {
 func TestGraceDoesNotAffectLettersEscAndClicks(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a", nil)
+	d := NewUnsavedChanges(c.Now, "a", nil, testOv)
 	_, cmd := d.Update(key("d"))
 	r, ok := answer(cmd)
 	if !ok || r.Choice != ChoiceDiscard {
 		t.Fatalf("a letter inside the grace window answered %+v, want Discard", r)
 	}
 
-	e := NewUnsavedChanges(c.Now, "a", nil)
+	e := NewUnsavedChanges(c.Now, "a", nil, testOv)
 	_, cmd = e.Update(key("esc"))
 	if r, _ := answer(cmd); r.Choice != ChoiceCancel {
 		t.Fatalf("Esc inside the grace window answered %v, want Cancel", r.Choice)
 	}
 
-	f := NewUnsavedChanges(c.Now, "a", nil)
+	f := NewUnsavedChanges(c.Now, "a", nil, testOv)
 	g := draw(f, 80, 24)
 	x, y := mustFind(t, g, "Discard")
 	_, cmd = f.Update(click(x, y))
@@ -126,11 +126,11 @@ func TestGraceDoesNotAffectLettersEscAndClicks(t *testing.T) {
 func TestGraceAppliesToEveryDialog(t *testing.T) {
 	t.Parallel()
 	makers := map[string]func(Clock) Overlay{
-		"unsaved": func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil) },
-		"trash":   func(clk Clock) Overlay { return NewConfirmTrash(clk, "a", nil) },
-		"saveas":  func(clk Clock) Overlay { return NewSaveAs(clk, "a.txt", nil, PathChecks{}) },
-		"open":    func(clk Clock) Overlay { return NewOpenFolder(clk, []string{"/x"}, "/x", nil, nil) },
-		"error":   func(clk Clock) Overlay { return NewErrorDialog(clk, "boom", nil) },
+		"unsaved": func(clk Clock) Overlay { return NewUnsavedChanges(clk, "a", nil, testOv) },
+		"trash":   func(clk Clock) Overlay { return NewConfirmTrash(clk, "a", nil, testOv) },
+		"saveas":  func(clk Clock) Overlay { return NewSaveAs(clk, "a.txt", nil, PathChecks{}, testOv) },
+		"open":    func(clk Clock) Overlay { return NewOpenFolder(clk, []string{"/x"}, "/x", nil, nil, testOv) },
+		"error":   func(clk Clock) Overlay { return NewErrorDialog(clk, "boom", nil, testOv) },
 	}
 	for name, mk := range makers {
 		t.Run(name, func(t *testing.T) {
@@ -149,7 +149,7 @@ func TestGraceAppliesToEveryDialog(t *testing.T) {
 
 func TestNilClockUsesRealTime(t *testing.T) {
 	t.Parallel()
-	d := NewErrorDialog(nil, "boom", nil)
+	d := NewErrorDialog(nil, "boom", nil, testOv)
 	// A dialog opened just now is still inside its grace window.
 	if _, cmd := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
 		t.Fatalf("Enter on a dialog opened with the real clock was accepted at once")

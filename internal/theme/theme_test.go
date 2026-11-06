@@ -33,7 +33,7 @@ func TestDarkEditorBackground(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := th.RGBOr("editor", "bg", theme.RGB{})
-	want := theme.RGB{R: 30, G: 30, B: 30}
+	want := theme.RGB{R: 13, G: 17, B: 23}
 	if got != want {
 		t.Fatalf("editor.bg = %v, want %v", got, want)
 	}
@@ -48,8 +48,12 @@ func TestRGBOrFallsBack(t *testing.T) {
 	if got := th.RGBOr("editor", "no_such_key", fallback); got != fallback {
 		t.Fatalf("missing key = %v, want fallback", got)
 	}
-	// ui.tab_active_bg is the named color "Blue" in dark.json, not RGB.
-	if got := th.RGBOr("ui", "tab_active_bg", fallback); got != fallback {
+	// ui.tab_active_bg is the named color "Default" in terminal.json, not RGB.
+	term, err := theme.Load("terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := term.RGBOr("ui", "tab_active_bg", fallback); got != fallback {
 		t.Fatalf("named color = %v, want fallback", got)
 	}
 }
@@ -59,9 +63,13 @@ func TestNamedAndModifierValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, ok := th.Value("ui", "tab_active_bg")
-	if !ok || c.IsRGB || c.Name != "Blue" {
-		t.Fatalf("tab_active_bg = %+v, %v; want name Blue", c, ok)
+	term, err := theme.Load("terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := term.Value("ui", "tab_active_fg")
+	if !ok || c.IsRGB || c.Name != "Yellow" {
+		t.Fatalf("terminal tab_active_fg = %+v, %v; want name Yellow", c, ok)
 	}
 	s, ok := th.Value("search", "current_match_fg")
 	if !ok || !s.IsRGB || len(s.Modifiers) != 1 || s.Modifiers[0] != "bold" {
@@ -117,5 +125,5 @@ func ExampleLoad() {
 	th, _ := theme.Load("dark")
 	c := th.RGBOr("editor", "bg", theme.RGB{})
 	fmt.Printf("%s background: #%02x%02x%02x\n", th.Name, c.R, c.G, c.B)
-	// Output: dark background: #1e1e1e
+	// Output: dark background: #0d1117
 }

@@ -5,6 +5,8 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // The grace period. Enter is ignored for graceQuiet after the dialog opens.
@@ -44,6 +46,7 @@ type modal struct {
 	opened   time.Time
 	graceEnd time.Time
 	buttons  []button
+	ov       style.Overlay // the overlay styles the box is drawn with
 	focus    int
 	hover    int // the button under the pointer, or -1
 	errText  string
@@ -62,7 +65,7 @@ type modal struct {
 
 // setup prepares the shared state. The dialog opens now, so its grace period
 // starts now.
-func (m *modal) setup(clock Clock, title string, tag any, escape Choice, buttons []button) {
+func (m *modal) setup(clock Clock, title string, tag any, escape Choice, buttons []button, ov style.Overlay) {
 	if clock == nil {
 		clock = time.Now
 	}
@@ -71,6 +74,7 @@ func (m *modal) setup(clock Clock, title string, tag any, escape Choice, buttons
 	m.tag = tag
 	m.escape = escape
 	m.buttons = buttons
+	m.ov = ov
 	m.opened = clock()
 	m.graceEnd = m.opened.Add(graceQuiet)
 	m.hover = -1

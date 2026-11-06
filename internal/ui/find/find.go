@@ -578,13 +578,13 @@ type styles struct {
 }
 
 // newStyles derives the bar styles: the menu colors for the bar and its labels,
-// the editor colors for the fields, and the active menu colors for the label of
-// the focused row.
+// the editor colors for the fields, and the selected overlay color for the label
+// of the focused row.
 func newStyles(st style.Styles) styles {
 	return styles{
 		bar:    style.Cell(st.Menu),
 		label:  style.Cell(st.Menu),
-		active: style.Cell(st.MenuActive),
+		active: st.Overlay.Selected,
 		field:  style.Cell(st.Editor),
 	}
 }

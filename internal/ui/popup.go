@@ -39,13 +39,11 @@ func (m *Model) ShowPopup(anchor popup.Point, title string, items []popup.Item) 
 	m.pushOverlay(popupOverlay{p: p})
 }
 
-// popupStyles are the popup's styles from the theme: the menu colors, with the
-// detail text faint.
-func popupStyles(ss style.Styles) popup.Styles {
-	panel := style.Cell(ss.Menu)
-	detail := panel
-	detail.Faint = true
-	return popup.Styles{Panel: panel, Selected: style.Cell(ss.MenuActive), Detail: detail}
+// popupStyles are the popup's styles: the overlay palette, the same as the
+// dialogs and the lists.
+func popupStyles(st style.Styles) popup.Styles {
+	ov := st.Overlay
+	return popup.Styles{Panel: ov.Box, Selected: ov.Selected, Detail: ov.Muted}
 }
 
 // popupFocus moves the topmost popup on the overlay stack to the top, so it takes

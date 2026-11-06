@@ -65,18 +65,18 @@ func (m *modal) listRows() []row {
 	l := m.list
 	l.keepVisible()
 	l.rects = l.rects[:0]
-	rows := []row{textRow("Recent folders", stMuted)}
+	rows := []row{textRow("Recent folders", m.ov.Muted)}
 	if len(l.items) == 0 {
-		return append(rows, textRow("No recent folders", stMuted))
+		return append(rows, textRow("No recent folders", m.ov.Muted))
 	}
 	for k := range min(listSize, len(l.items)-l.top) {
 		idx := l.top + k
 		rows = append(rows, func(g *grid.Grid, x, y, w int) {
-			st := stRowPlain
+			st := m.ov.Box
 			if idx == l.sel {
-				st = stRowIdle
+				st = m.ov.Idle
 				if m.listFocused() {
-					st = stRowFocus
+					st = m.ov.Selected
 				}
 				g.Fill(x, x+w, y, st)
 			}
@@ -93,7 +93,7 @@ func (m *modal) fieldRow() row {
 	f := m.field
 	return func(g *grid.Grid, x, y, w int) {
 		m.fieldAt = rect{x, y, w, 1}
-		cx, ok := f.draw(g, x, y, w, stField)
+		cx, ok := f.draw(g, x, y, w, m.ov.Idle)
 		m.caret = point{cx, y}
 		m.caretOK = ok
 	}

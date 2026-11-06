@@ -378,7 +378,7 @@ func TestSyntaxColorsStyleTheTextButNotChangeIt(t *testing.T) {
 	assertRows(t, g, []string{"  1 │ func x"})
 
 	keyword := st.Syntax[syntax.KindKeyword].FG
-	if keyword != (color.RGBA{R: 86, G: 156, B: 214, A: 255}) {
+	if keyword != (color.RGBA{R: 255, G: 123, B: 114, A: 255}) {
 		t.Errorf("keyword fg = %v, want the dark theme keyword color", keyword)
 	}
 	if got := g.At(6, 0).Style.FG; got != keyword {

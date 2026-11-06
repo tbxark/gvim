@@ -9,7 +9,7 @@ import (
 func TestUnsavedChangesEnterSavesAfterGrace(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", "tag")
+	d := NewUnsavedChanges(c.Now, "a.txt", "tag", testOv)
 	c.afterGrace()
 	next, cmd := d.Update(key("enter"))
 	if next != nil {
@@ -39,7 +39,7 @@ func TestUnsavedChangesLetters(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := newFakeClock()
-			d := NewUnsavedChanges(c.Now, "a.txt", nil)
+			d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 			c.afterGrace()
 			next, cmd := d.Update(key(tt.key))
 			if next != nil {
@@ -56,7 +56,7 @@ func TestUnsavedChangesLetters(t *testing.T) {
 func TestUnsavedChangesEscCancels(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	c.afterGrace()
 	_, cmd := d.Update(key("esc"))
 	mustClose(t, d, cmd, ChoiceCancel, "")
@@ -82,7 +82,7 @@ func TestUnsavedChangesFocusMovesWithTabAndArrows(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := newFakeClock()
-			d := NewUnsavedChanges(c.Now, "a.txt", nil)
+			d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 			c.afterGrace()
 			var o Overlay = d
 			for _, k := range tt.keys {
@@ -103,7 +103,7 @@ func TestUnsavedChangesFocusMovesWithTabAndArrows(t *testing.T) {
 func TestUnsavedChangesClickActivatesButton(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	g := draw(d, 80, 24)
 	x, y := mustFind(t, g, "Discard")
 	next, cmd := d.Update(click(x+1, y))
@@ -116,7 +116,7 @@ func TestUnsavedChangesClickActivatesButton(t *testing.T) {
 func TestUnsavedChangesClickBeforeDrawDoesNothing(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	c.afterGrace()
 	next, cmd := d.Update(click(10, 10))
 	mustOpen(t, next, cmd)
@@ -125,7 +125,7 @@ func TestUnsavedChangesClickBeforeDrawDoesNothing(t *testing.T) {
 func TestUnsavedChangesClickOutsideDoesNothing(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	g := draw(d, 80, 24)
 	if _, _, ok := find(g, "Save changes"); !ok {
 		t.Fatal("body is not drawn")
@@ -137,7 +137,7 @@ func TestUnsavedChangesClickOutsideDoesNothing(t *testing.T) {
 func TestUnsavedChangesDrawsBodyAndButtons(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "notes.md", nil)
+	d := NewUnsavedChanges(c.Now, "notes.md", nil, testOv)
 	g := draw(d, 80, 24)
 	for _, s := range []string{"Unsaved Changes", "Save changes to notes.md?", "Save", "Discard", "Cancel"} {
 		mustFind(t, g, s)
@@ -163,7 +163,7 @@ func TestConfirmTrashKeysAndFocus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := newFakeClock()
-			d := NewConfirmTrash(c.Now, "old.txt", "tag")
+			d := NewConfirmTrash(c.Now, "old.txt", "tag", testOv)
 			c.afterGrace()
 			var o Overlay = d
 			var last Result
@@ -189,7 +189,7 @@ func TestConfirmTrashKeysAndFocus(t *testing.T) {
 func TestConfirmTrashDrawsQuestionAndUnderlinesT(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewConfirmTrash(c.Now, "old.txt", nil)
+	d := NewConfirmTrash(c.Now, "old.txt", nil, testOv)
 	g := draw(d, 80, 24)
 	mustFind(t, g, `Move "old.txt" to Trash?`)
 	x, y := mustFind(t, g, "Move to Trash")
@@ -204,7 +204,7 @@ func TestConfirmTrashDrawsQuestionAndUnderlinesT(t *testing.T) {
 func TestConfirmTrashClickMovesToTrash(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewConfirmTrash(c.Now, "old.txt", nil)
+	d := NewConfirmTrash(c.Now, "old.txt", nil, testOv)
 	g := draw(d, 80, 24)
 	x, y := mustFind(t, g, "Move to Trash")
 	_, cmd := d.Update(click(x+2, y))

@@ -11,6 +11,7 @@ import (
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/dialog"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // tabFake is a fakeEditor whose tabs can be activated and closed. Each tab has a
@@ -140,12 +141,12 @@ type dialogCall struct {
 	tag  any
 }
 
-func (d *fakeDialogs) Unsaved(name string, tag any) Overlay {
+func (d *fakeDialogs) Unsaved(name string, tag any, _ style.Overlay) Overlay {
 	d.opened = append(d.opened, dialogCall{kind: "unsaved", text: name, tag: tag})
 	return &dialogOverlay{}
 }
 
-func (d *fakeDialogs) SaveAs(path string, tag any) Overlay {
+func (d *fakeDialogs) SaveAs(path string, tag any, _ style.Overlay) Overlay {
 	d.opened = append(d.opened, dialogCall{kind: "saveas", text: path, tag: tag})
 	return &dialogOverlay{}
 }

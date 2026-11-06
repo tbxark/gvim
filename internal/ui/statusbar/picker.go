@@ -41,7 +41,8 @@ type box struct {
 }
 
 // NewPicker returns the open picker for a segment kind, and false when the
-// segment has none. languages are the names the language picker offers.
+// segment has none. languages are the names the language picker offers. The
+// picker is drawn with the overlay styles of st.
 func NewPicker(kind Kind, languages []string, dispatch Dispatch, st style.Styles) (*Picker, bool) {
 	var items []string
 	var action string
@@ -55,12 +56,13 @@ func NewPicker(kind Kind, languages []string, dispatch Dispatch, st style.Styles
 	default:
 		return nil, false
 	}
+	ov := st.Overlay
 	return &Picker{
 		items:    items,
 		action:   action,
 		dispatch: dispatch,
-		popup:    style.Cell(st.Popup),
-		selected: style.Cell(st.PopupSelected),
+		popup:    ov.Box,
+		selected: ov.Selected,
 		open:     true,
 	}, true
 }

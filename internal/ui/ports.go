@@ -13,6 +13,7 @@ import (
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/editorpane"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // The interfaces in this file are the ones ui needs, written where ui uses
@@ -286,12 +287,12 @@ type Keymap interface {
 // actions that need a dialog with a notice, and nothing is lost.
 type Dialogs interface {
 	// Unsaved asks what to do with the edits of the tab called name: Save,
-	// Discard or Cancel.
-	Unsaved(name string, tag any) Overlay
+	// Discard or Cancel. The dialog is drawn with the overlay styles ov.
+	Unsaved(name string, tag any, ov style.Overlay) Overlay
 	// SaveAs asks for a path, prefilled with path. Save sends the path in Text.
 	// The dialog asks before it replaces an existing file, and Replace comes back
 	// when the user confirms.
-	SaveAs(path string, tag any) Overlay
+	SaveAs(path string, tag any, ov style.Overlay) Overlay
 }
 
 // Deps is the constructor input. Editor, Keys and Theme are required. Explorer

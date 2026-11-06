@@ -12,6 +12,7 @@
 package explorer
 
 import (
+	"image/color"
 	"slices"
 	"time"
 
@@ -216,6 +217,7 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 	}
 	track := grid.Style{BG: style.Cell(p.styles.Scrollbar).FG}
 	thumb := grid.Style{BG: style.Cell(p.styles.ScrollbarThumb).FG}
+	accent := style.Cell(p.styles.Accent).BG
 
 	for y := bodyTop; y < g.Bottom; y++ {
 		dst.Fill(0, g.Width, y, body)
@@ -227,7 +229,7 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 			st := p.rowStyle(r, body)
 			dst.Fill(1, g.Width-1, y, st)
 			marker := g.Focused && hasSel && r.Path == sel.Path
-			drawRow(dst, r, y, g.Width, over, marker, g.Marks[r.Path], st)
+			drawRow(dst, r, y, g.Width, over, marker, g.Marks[r.Path], st, accent)
 		}
 		if over {
 			st := track
@@ -251,7 +253,7 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 // cells per depth level. Names stop before the scrollbar column when over is set.
 // A non-zero mark is the git status letter, drawn in the last column before the
 // border, and the name stops one cell before it.
-func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark rune, st grid.Style) {
+func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark rune, st grid.Style, accent color.Color) {
 	end := width - 1
 	if over {
 		end--
@@ -273,7 +275,9 @@ func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark r
 		dst.Set(x, y, icon, st)
 	}
 	if marker && 1 < end {
-		dst.Set(1, y, "▌", st)
+		bar := st
+		bar.FG = accent
+		dst.Set(1, y, "▌", bar)
 	}
 	dst.Put(3+2*r.Depth, y, end, r.Name, st)
 }

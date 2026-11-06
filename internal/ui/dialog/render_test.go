@@ -7,19 +7,32 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
+
+// testOv is the overlay of the dark theme, which the dialog tests draw with.
+var testOv = mustOverlay()
+
+func mustOverlay() style.Overlay {
+	th, err := theme.Load("dark")
+	if err != nil {
+		panic(err)
+	}
+	return style.NewOverlay(th)
+}
 
 // allDialogs returns one of each dialog in its first state, with a clock that
 // has already passed the grace period.
 func allDialogs() []Overlay {
 	c := newFakeClock()
 	return []Overlay{
-		NewUnsavedChanges(c.Now, "a.txt", nil),
-		NewConfirmTrash(c.Now, "a.txt", nil),
-		NewSaveAs(c.Now, "a.txt", nil, PathChecks{Exists: func(string) bool { return true }}),
-		NewOpenFolder(c.Now, []string{"/a"}, "/a", nil, nil),
-		NewErrorDialog(c.Now, "boom", nil),
+		NewUnsavedChanges(c.Now, "a.txt", nil, testOv),
+		NewConfirmTrash(c.Now, "a.txt", nil, testOv),
+		NewSaveAs(c.Now, "a.txt", nil, PathChecks{Exists: func(string) bool { return true }}, testOv),
+		NewOpenFolder(c.Now, []string{"/a"}, "/a", nil, nil, testOv),
+		NewErrorDialog(c.Now, "boom", nil, testOv),
 	}
 }
 
@@ -58,7 +71,7 @@ func TestButtonUnderlineIndexMatchesHotkey(t *testing.T) {
 func TestOnlyTheHotkeyLetterIsUnderlined(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	g := draw(d, 80, 24)
 	x, y := mustFind(t, g, "Discard")
 	for i, r := range "Discard" {
@@ -79,7 +92,7 @@ func TestOnlyTheHotkeyLetterIsUnderlined(t *testing.T) {
 func TestBoxUsesRoundedPrimaryBorder(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	g := draw(d, 80, 24)
 	x, y := mustFind(t, g, "╭")
 	if fg, ok := g.At(x, y).Style.FG.(color.RGBA); !ok || fg != primary {
@@ -97,36 +110,34 @@ func TestBoxUsesRoundedPrimaryBorder(t *testing.T) {
 	}
 }
 
-func TestTitleFillRunsFromPrimaryToSecondary(t *testing.T) {
+func TestTitleFillIsTheAccent(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	g := draw(d, 80, 24)
 	x, y := mustFind(t, g, "╱")
 	end := x
 	for end < 80 && g.At(end, y).Text == "╱" {
+		if fg := g.At(end, y).Style.FG; fg != color.Color(primary) {
+			t.Fatalf("title fill cell %d is %v, want the accent %v", end, fg, primary)
+		}
 		end++
 	}
-	first := g.At(x, y).Style.FG
-	last := g.At(end-1, y).Style.FG
-	if first != color.Color(primary) {
-		t.Fatalf("first fill cell is %v, want primary", first)
-	}
-	if last != color.Color(secondary) {
-		t.Fatalf("last fill cell is %v, want secondary", last)
+	if end-x < 10 {
+		t.Fatalf("title fill is only %d cells", end-x)
 	}
 }
 
-func TestFocusedButtonIsSecondaryAndTabMovesIt(t *testing.T) {
+func TestFocusedButtonIsPrimaryAndTabMovesIt(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	// The button is "  Save  ". The body also says "Save changes", so the
 	// padding anchors the search on the button.
 	px, y := mustFind(t, draw(d, 80, 24), "  Save  ")
 	x := px + 2
-	if bg := draw(d, 80, 24).At(x, y).Style.BG; bg != color.Color(secondary) {
-		t.Fatalf("focused Save has background %v, want secondary", bg)
+	if bg := draw(d, 80, 24).At(x, y).Style.BG; bg != color.Color(primary) {
+		t.Fatalf("focused Save has background %v, want primary", bg)
 	}
 	d.Update(key("tab"))
 	g := draw(d, 80, 24)
@@ -134,15 +145,24 @@ func TestFocusedButtonIsSecondaryAndTabMovesIt(t *testing.T) {
 		t.Fatalf("blurred Save has background %v, want the Char blur color", bg)
 	}
 	dx, dy := mustFind(t, g, "Discard")
-	if bg := g.At(dx, dy).Style.BG; bg != color.Color(secondary) {
-		t.Fatalf("focused Discard has background %v, want secondary", bg)
+	if bg := g.At(dx, dy).Style.BG; bg != color.Color(primary) {
+		t.Fatalf("focused Discard has background %v, want primary", bg)
 	}
 }
+
+// The overlay colors the dialog tests pin, from the dark theme. primary is the
+// accent, which the border, the title fill and the focused button use. bgLessVis
+// is the unfocused button and fgMostSubtle the hovered one.
+var (
+	primary      = color.RGBA{0x2F, 0x81, 0xF7, 0xFF}
+	bgLessVis    = color.RGBA{0x43, 0x48, 0x4E, 0xFF}
+	fgMostSubtle = color.RGBA{0x64, 0x69, 0x6F, 0xFF}
+)
 
 func TestHoveredButtonIsOyster(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewUnsavedChanges(c.Now, "a.txt", nil)
+	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	g := draw(d, 80, 24)
 	x, y := mustFind(t, g, "Cancel")
 	d.Update(motion(x+1, y))
@@ -160,7 +180,7 @@ func TestHoveredButtonIsOyster(t *testing.T) {
 func TestDrawOnlyChangesTheBox(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewErrorDialog(c.Now, "boom", nil)
+	d := NewErrorDialog(c.Now, "boom", nil, testOv)
 	g := grid.New(80, 24)
 	for y := range 24 {
 		for x := range 80 {
@@ -211,7 +231,7 @@ func TestFocusedFieldShowsCaretInsideBox(t *testing.T) {
 	for range 120 {
 		long += "p"
 	}
-	d := NewSaveAs(c.Now, long, nil, PathChecks{})
+	d := NewSaveAs(c.Now, long, nil, PathChecks{}, testOv)
 	g := draw(d, 50, 16)
 	x, y, ok := d.Cursor(50, 16)
 	if !ok {

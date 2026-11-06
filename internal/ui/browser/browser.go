@@ -121,10 +121,10 @@ func sorted(listed []explorer.Entry, mode sortMode) []explorer.Entry {
 
 // Options are the browser's inputs.
 type Options struct {
-	Dir        string // directory to start in; empty means the working directory
-	FolderOnly bool   // Switch Project: list directories only, and Enter chooses one
-	Home       string // path of the "~/" row; empty means the user's home directory
-	Styles     style.Styles
+	Dir        string                                                                // directory to start in; empty means the working directory
+	FolderOnly bool                                                                  // Switch Project: list directories only, and Enter chooses one
+	Home       string                                                                // path of the "~/" row; empty means the user's home directory
+	Styles     style.Styles                                                          // the overlay styles of the box
 	Now        func() time.Time                                                      // press times; nil means time.Now
 	List       func(dir string, opts explorer.ListOptions) ([]explorer.Entry, error) // nil means explorer.ListDir
 }
@@ -624,24 +624,22 @@ func (b *Browser) Draw(g *grid.Grid) {
 	top := h - 2 - 3 - vis // the top border; the bottom border sits on row h-2
 	b.box = box{ok: true, x: x0, y: top, w: bw, h: vis}
 
-	edge := style.Cell(b.styles.Menu)
-	inner := style.Cell(b.styles.Explorer)
-	active := style.Cell(b.styles.MenuActive)
+	ov := b.styles.Overlay
 	title := " Open File "
 	if b.folderOnly {
 		title = " Switch Project "
 	}
-	frameRule(g, x0, top, bw, "┌", "┐", title, edge)
-	boxLine(g, x0, top+1, bw, "> "+b.input, edge, edge, 0)
-	boxLine(g, x0, top+2, bw, truncateLeft(b.dir, bw-4), edge, edge, 0)
+	ov.PaintBox(g, x0, top, bw, vis+4, title)
+	boxLine(g, x0, top+1, bw, "> "+b.input, ov.Idle, ov.Border, 0)
+	boxLine(g, x0, top+2, bw, truncateLeft(b.dir, bw-4), ov.Muted, ov.Border, 0)
 
 	over := len(b.rows) > vis
 	thumbStart, thumbLen := 0, 0
 	if over {
 		thumbStart, thumbLen = thumbOf(len(b.rows), vis, b.top)
 	}
-	track := grid.Style{BG: style.Cell(b.styles.Scrollbar).FG}
-	thumbSt := grid.Style{BG: style.Cell(b.styles.ScrollbarThumb).FG}
+	track := grid.Style{BG: ov.Idle.BG}
+	thumbSt := grid.Style{BG: ov.Muted.FG}
 	reserve := 0
 	if over {
 		reserve = 1
@@ -649,18 +647,18 @@ func (b *Browser) Draw(g *grid.Grid) {
 	for k := range vis {
 		y := top + 3 + k
 		idx := b.top + k
-		st := inner
+		st := ov.Box
 		text := ""
 		switch {
 		case idx < len(b.rows):
 			text = b.rows[idx].Name
 			if idx == b.sel {
-				st = active
+				st = ov.Selected
 			}
 		case len(b.rows) == 0:
 			text = "No matches"
 		}
-		boxLine(g, x0, y, bw, text, st, edge, reserve)
+		boxLine(g, x0, y, bw, text, st, ov.Border, reserve)
 		if over {
 			s := track
 			if k >= thumbStart && k < thumbStart+thumbLen {
@@ -676,19 +674,7 @@ func (b *Browser) Draw(g *grid.Grid) {
 	if b.notice != "" {
 		hint = " " + b.notice + " "
 	}
-	frameRule(g, x0, top+3+vis, bw, "└", "┘", hint, edge)
-}
-
-// frameRule draws one border row: the corners, a line between them, and text
-// from the second column.
-func frameRule(g *grid.Grid, x0, y, bw int, left, right, text string, st grid.Style) {
-	g.Fill(x0, x0+bw, y, st)
-	g.Set(x0, y, left, st)
-	g.Set(x0+bw-1, y, right, st)
-	for x := x0 + 1; x < x0+bw-1; x++ {
-		g.Set(x, y, "─", st)
-	}
-	g.Put(x0+2, y, x0+bw-2, text, st)
+	g.Put(x0+2, top+3+vis, x0+bw-2, hint, ov.Muted)
 }
 
 // boxLine draws one row of the box: the side borders, the inner fill, and text

@@ -12,6 +12,7 @@ import (
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/dialog"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // untitledDoc is a fake buffer that can be untitled. Its name follows the
@@ -106,13 +107,13 @@ type realDialogs struct {
 	paths []string
 }
 
-func (d *realDialogs) Unsaved(name string, tag any) Overlay {
-	return WrapDialog(dialog.NewUnsavedChanges(d.clock, name, tag))
+func (d *realDialogs) Unsaved(name string, tag any, ov style.Overlay) Overlay {
+	return WrapDialog(dialog.NewUnsavedChanges(d.clock, name, tag, ov))
 }
 
-func (d *realDialogs) SaveAs(path string, tag any) Overlay {
+func (d *realDialogs) SaveAs(path string, tag any, ov style.Overlay) Overlay {
 	d.paths = append(d.paths, path)
-	return WrapDialog(dialog.NewSaveAs(d.clock, path, tag, dialog.PathChecks{}))
+	return WrapDialog(dialog.NewSaveAs(d.clock, path, tag, dialog.PathChecks{}, ov))
 }
 
 // TestSaveAsReplacesPrefillAfterTwoUntitledBuffers types a name into the Save

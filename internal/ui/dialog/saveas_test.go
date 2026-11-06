@@ -11,7 +11,7 @@ import (
 func TestSaveAsPrefillIsDrawnAndEnterSaves(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "Untitled-1.txt", "tag", PathChecks{})
+	d := NewSaveAs(c.Now, "Untitled-1.txt", "tag", PathChecks{}, testOv)
 	g := draw(d, 80, 24)
 	mustFind(t, g, "Save As")
 	mustFind(t, g, "Untitled-1.txt")
@@ -31,7 +31,7 @@ func TestSaveAsPrefillIsDrawnAndEnterSaves(t *testing.T) {
 func TestSaveAsLetterTypesIntoField(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	o := typeText(t, d, "s")
 	if !o.Active() {
@@ -44,7 +44,7 @@ func TestSaveAsLetterTypesIntoField(t *testing.T) {
 func TestSaveAsFirstTypedKeyReplacesPrefill(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "/work/Untitled-2.txt", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "/work/Untitled-2.txt", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	o := typeText(t, d, "new.txt")
 	_, cmd := o.Update(key("enter"))
@@ -54,7 +54,7 @@ func TestSaveAsFirstTypedKeyReplacesPrefill(t *testing.T) {
 func TestSaveAsMoveKeyKeepsPrefill(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "ab", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "ab", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	d.Update(key("left"))
 	o := typeText(t, d, "x")
@@ -65,7 +65,7 @@ func TestSaveAsMoveKeyKeepsPrefill(t *testing.T) {
 func TestSaveAsPrefillReplacedOnlyOnce(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "ab", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "ab", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	typeText(t, d, "x")
 	o := typeText(t, d, "y")
@@ -77,7 +77,7 @@ func TestSaveAsLongPrefillIsDrawnInFull(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
 	path := "/var/folders/0000gn/T/acc-ltuuo_kf/ws/Untitled-2.txt"
-	d := NewSaveAs(c.Now, path, nil, PathChecks{})
+	d := NewSaveAs(c.Now, path, nil, PathChecks{}, testOv)
 	g := draw(d, 100, 30)
 	mustFind(t, g, path)
 	x, y, ok := find(g, path)
@@ -89,7 +89,7 @@ func TestSaveAsLongPrefillIsDrawnInFull(t *testing.T) {
 func TestSaveAsBackspaceAndCaret(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "dir/name", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "dir/name", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	d.Update(key("backspace"))
 	_, cmd := d.Update(key("enter"))
@@ -99,7 +99,7 @@ func TestSaveAsBackspaceAndCaret(t *testing.T) {
 func TestSaveAsEmptyPathShowsInlineError(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	next, cmd := d.Update(key("enter"))
 	mustOpen(t, next, cmd)
@@ -116,7 +116,7 @@ func TestSaveAsValidateRejectionKeepsDialogOpenUntilFixed(t *testing.T) {
 		}
 		return nil
 	}}
-	d := NewSaveAs(c.Now, "missing/a.txt", nil, checks)
+	d := NewSaveAs(c.Now, "missing/a.txt", nil, checks, testOv)
 	c.afterGrace()
 	next, cmd := d.Update(key("enter"))
 	mustOpen(t, next, cmd)
@@ -139,7 +139,7 @@ func TestSaveAsExistingPathAsksToReplace(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
 	checks := PathChecks{Exists: func(path string) bool { return path == "a.txt" }}
-	d := NewSaveAs(c.Now, "a.txt", "tag", checks)
+	d := NewSaveAs(c.Now, "a.txt", "tag", checks, testOv)
 	c.afterGrace()
 	next, cmd := d.Update(key("enter"))
 	mustOpen(t, next, cmd)
@@ -156,7 +156,7 @@ func TestSaveAsOverwriteCancelReturnsToNameWithTextKept(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
 	checks := PathChecks{Exists: func(path string) bool { return path == "a.txt" }}
-	d := NewSaveAs(c.Now, "a.txt", nil, checks)
+	d := NewSaveAs(c.Now, "a.txt", nil, checks, testOv)
 	c.afterGrace()
 	d.Update(key("enter")) // asks to replace a.txt; Cancel has the focus
 	next, cmd := d.Update(key("enter"))
@@ -188,7 +188,7 @@ func TestSaveAsOverwriteKeysAndEsc(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := newFakeClock()
-			d := NewSaveAs(c.Now, "a.txt", nil, checks)
+			d := NewSaveAs(c.Now, "a.txt", nil, checks, testOv)
 			c.afterGrace()
 			d.Update(key("enter"))
 			_, cmd := d.Update(key(tt.key))
@@ -210,12 +210,12 @@ func TestSaveAsOverwriteKeysAndEsc(t *testing.T) {
 func TestSaveAsAltLettersActivateButtons(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "a.txt", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "a.txt", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	_, cmd := d.Update(altKey('c'))
 	mustClose(t, d, cmd, ChoiceCancel, "")
 
-	e := NewSaveAs(c.Now, "a.txt", nil, PathChecks{})
+	e := NewSaveAs(c.Now, "a.txt", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	_, cmd = e.Update(altKey('s'))
 	mustClose(t, e, cmd, ChoiceSave, "a.txt")
@@ -224,13 +224,13 @@ func TestSaveAsAltLettersActivateButtons(t *testing.T) {
 func TestSaveAsTabToButtonsAndClick(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "a.txt", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "a.txt", nil, PathChecks{}, testOv)
 	c.afterGrace()
 	d.Update(key("tab"))
 	_, cmd := d.Update(key("enter"))
 	mustClose(t, d, cmd, ChoiceSave, "a.txt")
 
-	e := NewSaveAs(c.Now, "a.txt", nil, PathChecks{})
+	e := NewSaveAs(c.Now, "a.txt", nil, PathChecks{}, testOv)
 	g := draw(e, 80, 24)
 	x, y := mustFind(t, g, "Cancel")
 	_, cmd = e.Update(click(x, y))
@@ -240,7 +240,7 @@ func TestSaveAsTabToButtonsAndClick(t *testing.T) {
 func TestSaveAsCursorFollowsFieldFocus(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "abc", nil, PathChecks{})
+	d := NewSaveAs(c.Now, "abc", nil, PathChecks{}, testOv)
 	g := draw(d, 80, 24)
 	x, y, ok := d.Cursor(80, 24)
 	if !ok {
@@ -259,7 +259,7 @@ func TestSaveAsCursorFollowsFieldFocus(t *testing.T) {
 func TestSaveAsWithoutExistsSavesImmediately(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewSaveAs(c.Now, "a.txt", nil, PathChecks{Validate: func(string) error { return nil }})
+	d := NewSaveAs(c.Now, "a.txt", nil, PathChecks{Validate: func(string) error { return nil }}, testOv)
 	c.afterGrace()
 	_, cmd := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mustClose(t, d, cmd, ChoiceSave, "a.txt")

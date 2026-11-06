@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // filterRows is a list with two groups, used by the filter tests.
@@ -45,7 +46,7 @@ func TestListFilterKeepsOnlyMatchingRowsAndTheirHeaders(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := newListView("T", filterRows(), listChrome{}, nil)
+			v := newListView("T", filterRows(), style.Overlay{}, nil)
 			for _, r := range tt.typed {
 				v.update(tea.KeyPressMsg{Code: r, Text: string(r)})
 			}
@@ -62,7 +63,7 @@ func TestListFilterKeepsOnlyMatchingRowsAndTheirHeaders(t *testing.T) {
 }
 
 func TestListBackspaceWidensTheFilter(t *testing.T) {
-	v := newListView("T", filterRows(), listChrome{}, nil)
+	v := newListView("T", filterRows(), style.Overlay{}, nil)
 	v.update(tea.KeyPressMsg{Code: 'z', Text: "z"})
 	if len(v.shown) != 0 {
 		t.Fatalf("filter z shows %v, want nothing", shownLefts(v))
@@ -74,7 +75,7 @@ func TestListBackspaceWidensTheFilter(t *testing.T) {
 }
 
 func TestListArrowsSkipHeaders(t *testing.T) {
-	v := newListView("T", filterRows(), listChrome{}, nil)
+	v := newListView("T", filterRows(), style.Overlay{}, nil)
 	if got, _ := v.selected(); got.left != "save" {
 		t.Fatalf("first highlight = %q, want save (the first item after its header)", got.left)
 	}
@@ -107,7 +108,7 @@ func TestListEnterRunsTheHighlightedRow(t *testing.T) {
 		v.active = false
 		return nil
 	}
-	v := newListView("T", filterRows(), listChrome{}, run)
+	v := newListView("T", filterRows(), style.Overlay{}, run)
 	v.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	v.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if strings.Join(ran, ",") != "open" {
@@ -119,7 +120,7 @@ func TestListEnterRunsTheHighlightedRow(t *testing.T) {
 }
 
 func TestListEnterWithoutRunDoesNothing(t *testing.T) {
-	v := newListView("T", filterRows(), listChrome{}, nil)
+	v := newListView("T", filterRows(), style.Overlay{}, nil)
 	if cmd := v.update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
 		t.Fatalf("Enter with no run returned a command")
 	}
@@ -134,7 +135,7 @@ func TestListClickChoosesItemButNotHeader(t *testing.T) {
 		ran = append(ran, r.left)
 		return nil
 	}
-	v := newListView("T", filterRows(), listChrome{}, run)
+	v := newListView("T", filterRows(), style.Overlay{}, run)
 	g := grid.New(80, 24)
 	v.draw(g)
 	// The list rows start two rows under the box top. The first row is the
@@ -151,7 +152,7 @@ func TestListClickChoosesItemButNotHeader(t *testing.T) {
 }
 
 func TestListDrawShowsTitleFilterAndRows(t *testing.T) {
-	v := newListView("Keyboard Shortcuts", filterRows(), listChrome{}, nil)
+	v := newListView("Keyboard Shortcuts", filterRows(), style.Overlay{}, nil)
 	g := grid.New(60, 20)
 	v.draw(g)
 	rows := g.Plain()
@@ -177,7 +178,7 @@ func TestListDrawShowsTitleFilterAndRows(t *testing.T) {
 
 func TestListDrawHighlightsSelectedRow(t *testing.T) {
 	selected := grid.Style{Bold: true}
-	v := newListView("T", filterRows(), listChrome{selected: selected}, nil)
+	v := newListView("T", filterRows(), style.Overlay{Selected: selected}, nil)
 	g := grid.New(60, 20)
 	v.draw(g)
 	box, _ := listBox(60, 20)
@@ -195,7 +196,7 @@ func TestListScrollKeepsHighlightVisible(t *testing.T) {
 	for i := range 40 {
 		rows = append(rows, listRow{left: "item" + string(rune('a'+i%26)) + string(rune('a'+i/26))})
 	}
-	v := newListView("T", rows, listChrome{}, nil)
+	v := newListView("T", rows, style.Overlay{}, nil)
 	g := grid.New(60, 12)
 	v.draw(g)
 	_, n := listBox(60, 12)
@@ -212,7 +213,7 @@ func TestListScrollKeepsHighlightVisible(t *testing.T) {
 }
 
 func TestListCursorFollowsFilterText(t *testing.T) {
-	v := newListView("T", filterRows(), listChrome{}, nil)
+	v := newListView("T", filterRows(), style.Overlay{}, nil)
 	g := grid.New(60, 20)
 	v.draw(g)
 	box, _ := listBox(60, 20)
@@ -230,7 +231,7 @@ func TestListCursorFollowsFilterText(t *testing.T) {
 }
 
 func TestListCtrlKeysDoNotTypeIntoFilter(t *testing.T) {
-	v := newListView("T", filterRows(), listChrome{}, nil)
+	v := newListView("T", filterRows(), style.Overlay{}, nil)
 	v.update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	if len(v.filter) != 0 {
 		t.Fatalf("ctrl+a typed %q into the filter", string(v.filter))
@@ -261,7 +262,7 @@ func TestListBoxFitsTheFrame(t *testing.T) {
 }
 
 func TestListLongFilterShowsItsEnd(t *testing.T) {
-	v := newListView("T", filterRows(), listChrome{}, nil)
+	v := newListView("T", filterRows(), style.Overlay{}, nil)
 	g := grid.New(60, 20)
 	v.draw(g)
 	for _, r := range strings.Repeat("x", 80) + "END" {
@@ -280,7 +281,7 @@ func TestListLongFilterShowsItsEnd(t *testing.T) {
 
 func TestListDrawSurvivesANarrowFrame(t *testing.T) {
 	rows := []listRow{{left: "a-very-long-action-name", right: "ctrl+alt+shift+f12  file_explorer"}}
-	v := newListView("T", rows, listChrome{}, nil)
+	v := newListView("T", rows, style.Overlay{}, nil)
 	for _, w := range []int{4, 12, 16, 20} {
 		g := grid.New(w, 12)
 		v.draw(g) // must not panic
@@ -291,6 +292,29 @@ func TestListDrawSurvivesANarrowFrame(t *testing.T) {
 		box, _ := listBox(w, 12)
 		if x < box.x || x >= box.x+box.w {
 			t.Errorf("width %d: caret column %d is outside the box %+v", w, x, box)
+		}
+	}
+}
+
+func TestListLongValueKeepsItsLabelInsideTheBox(t *testing.T) {
+	t.Parallel()
+	long := "/private/var/folders/tmp/" + strings.Repeat("segment/", 10) + "config.json"
+	rows := []listRow{{left: "config_file", right: long}}
+	v := newListView("Settings", rows, style.Overlay{}, nil)
+	g := grid.New(100, 20)
+	v.draw(g)
+	box := v.box
+	y := box.y + 2
+	text := g.Lines()[y]
+	if !strings.Contains(text, "config_file") {
+		t.Fatalf("the label is hidden by a long value: row %d = %q", y, text)
+	}
+	if !strings.Contains(text, "config.json") {
+		t.Fatalf("the end of the value is not shown: row %d = %q", y, text)
+	}
+	for x := range box.x {
+		if c := g.At(x, y); c.Text != "" && c.Text != " " {
+			t.Fatalf("the value spills out of the box at column %d: %q", x, c.Text)
 		}
 	}
 }

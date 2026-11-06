@@ -4,8 +4,6 @@ import (
 	"image/color"
 	"testing"
 
-	"charm.land/lipgloss/v2"
-
 	"github.com/tbxark/gvim/internal/syntax"
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/grid"
@@ -17,7 +15,7 @@ func TestNewStylesKeepsTheTextBackgroundOnEverySyntaxKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := NewStyles(th)
-	bg := color.RGBA{R: 30, G: 30, B: 30, A: 255}
+	bg := color.RGBA{R: 13, G: 17, B: 23, A: 255}
 	if st.Text.BG != bg {
 		t.Fatalf("text bg = %v, want editor bg", st.Text.BG)
 	}
@@ -26,7 +24,7 @@ func TestNewStylesKeepsTheTextBackgroundOnEverySyntaxKind(t *testing.T) {
 			t.Errorf("kind %v bg = %v, want editor bg", syntax.Kind(k), st.Syntax[k].BG)
 		}
 	}
-	if st.Selection.BG != (color.RGBA{R: 50, G: 50, B: 60, A: 255}) {
+	if st.Selection.BG != (color.RGBA{R: 23, G: 51, B: 90, A: 255}) {
 		t.Errorf("selection bg = %v", st.Selection.BG)
 	}
 }
@@ -78,13 +76,13 @@ func TestNewStylesSearchMatchColors(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := NewStyles(th)
-	if st.Match.BG != (color.RGBA{R: 100, G: 100, B: 20, A: 255}) {
+	if st.Match.BG != (color.RGBA{R: 82, G: 65, B: 27, A: 255}) {
 		t.Errorf("match bg = %v, want the dark theme match color", st.Match.BG)
 	}
-	if st.CurrentMatch.BG != (color.RGBA{R: 64, G: 170, B: 230, A: 255}) {
+	if st.CurrentMatch.BG != (color.RGBA{R: 227, G: 179, B: 65, A: 255}) {
 		t.Errorf("current match bg = %v, want the dark theme current match color", st.CurrentMatch.BG)
 	}
-	if st.CurrentMatch.FG != (color.RGBA{A: 255}) || !st.CurrentMatch.Bold {
+	if st.CurrentMatch.FG != (color.RGBA{R: 13, G: 17, B: 23, A: 255}) || !st.CurrentMatch.Bold {
 		t.Errorf("current match = %+v, want black and bold", st.CurrentMatch)
 	}
 }
@@ -117,12 +115,12 @@ func TestNewStylesReadsTheDisplayRoles(t *testing.T) {
 		fg   any
 		bg   any
 	}{
-		{"secondary caret", st.SecondaryCaret, color.RGBA{R: 212, G: 212, B: 212, A: 255}, color.RGBA{R: 100, G: 100, B: 100, A: 255}},
-		{"current line", st.CurrentLine, nil, color.RGBA{R: 40, G: 40, B: 40, A: 255}},
-		{"ruler", st.Ruler, nil, color.RGBA{R: 50, G: 50, B: 50, A: 255}},
-		{"whitespace", st.Whitespace, color.RGBA{R: 70, G: 70, B: 70, A: 255}, color.RGBA{R: 30, G: 30, B: 30, A: 255}},
-		{"occurrence", st.Occurrence, nil, color.RGBA{R: 75, G: 75, B: 75, A: 255}},
-		{"error", st.DiagError, lipgloss.Color("1"), nil},
+		{"secondary caret", st.SecondaryCaret, color.RGBA{R: 230, G: 237, B: 243, A: 255}, color.RGBA{R: 72, G: 79, B: 88, A: 255}},
+		{"current line", st.CurrentLine, nil, color.RGBA{R: 24, G: 28, B: 34, A: 255}},
+		{"ruler", st.Ruler, nil, color.RGBA{R: 26, G: 30, B: 36, A: 255}},
+		{"whitespace", st.Whitespace, color.RGBA{R: 72, G: 79, B: 88, A: 255}, color.RGBA{R: 13, G: 17, B: 23, A: 255}},
+		{"occurrence", st.Occurrence, nil, color.RGBA{R: 39, G: 43, B: 49, A: 255}},
+		{"error", st.DiagError, color.RGBA{R: 255, G: 123, B: 114, A: 255}, nil},
 	}
 	for _, tc := range tests {
 		if tc.got.FG != tc.fg {

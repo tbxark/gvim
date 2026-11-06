@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	tree "github.com/tbxark/gvim/internal/explorer"
+	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/grid"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
@@ -536,5 +537,22 @@ func TestDrawGitMarkOnTheRow(t *testing.T) {
 	}
 	if got := g.At(15, 4).Text; got != "│" {
 		t.Errorf("border after the mark = %q, want the border", got)
+	}
+}
+
+func TestDrawMarkerIsTheAccent(t *testing.T) {
+	t.Parallel()
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := style.New(th)
+	tr := openTree(t, fixture(t))
+	g := grid.New(12, 8)
+	New(tr, st, nil).Draw(g, Geometry{Width: 12, Bottom: 7, Focused: true})
+	// The root row is selected, so its marker is the first cell after the border.
+	want := style.Cell(st.Accent).BG
+	if c := g.At(1, 2); c.Text != "▌" || c.Style.FG != want {
+		t.Fatalf("marker cell %q has fg %v, want the accent %v", c.Text, c.Style.FG, want)
 	}
 }

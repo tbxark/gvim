@@ -14,7 +14,6 @@ import (
 
 	"github.com/tbxark/gvim/internal/explorer"
 	"github.com/tbxark/gvim/internal/ui/grid"
-	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // fixture writes a directory with sub/ (holding inner.md), a.go, b.txt and a
@@ -561,8 +560,7 @@ func TestDrawScrollbarInBox(t *testing.T) {
 	for i := range 20 {
 		must(t, os.WriteFile(filepath.Join(base, string(rune('a'+i))+".txt"), nil, 0o644))
 	}
-	styles := style.Styles{}
-	b := New(Options{Dir: base, Home: t.TempDir(), Styles: styles})
+	b := New(Options{Dir: base, Home: t.TempDir()})
 	g := grid.New(60, 12) // window of six rows
 	b.Draw(g)
 	if !b.box.ok || b.vis != 6 {
@@ -581,10 +579,10 @@ func TestDrawFullBoxRowsStayInside(t *testing.T) {
 	g := grid.New(60, 20)
 	b.Draw(g)
 	last := b.box.y + 3 + b.box.h
-	if g.At(b.box.x, last).Text != "└" || g.At(b.box.x+b.box.w-1, last).Text != "┘" {
+	if g.At(b.box.x, last).Text != "╰" || g.At(b.box.x+b.box.w-1, last).Text != "╯" {
 		t.Errorf("bottom corners missing on row %d", last)
 	}
-	if g.At(b.box.x, b.box.y).Text != "┌" {
+	if g.At(b.box.x, b.box.y).Text != "╭" {
 		t.Error("top corner missing")
 	}
 }

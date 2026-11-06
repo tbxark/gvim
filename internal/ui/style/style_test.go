@@ -22,13 +22,13 @@ func loadDark(t *testing.T) theme.Theme {
 func TestNewReadsTheDarkThemeColors(t *testing.T) {
 	s := New(loadDark(t))
 	editor := Cell(s.Editor)
-	if editor.FG != (color.RGBA{R: 212, G: 212, B: 212, A: 255}) {
+	if editor.FG != (color.RGBA{R: 230, G: 237, B: 243, A: 255}) {
 		t.Errorf("editor fg = %v", editor.FG)
 	}
-	if editor.BG != (color.RGBA{R: 30, G: 30, B: 30, A: 255}) {
+	if editor.BG != (color.RGBA{R: 13, G: 17, B: 23, A: 255}) {
 		t.Errorf("editor bg = %v", editor.BG)
 	}
-	if sel := Cell(s.Selection).BG; sel != (color.RGBA{R: 50, G: 50, B: 60, A: 255}) {
+	if sel := Cell(s.Selection).BG; sel != (color.RGBA{R: 23, G: 51, B: 90, A: 255}) {
 		t.Errorf("selection bg = %v", sel)
 	}
 }
@@ -36,17 +36,17 @@ func TestNewReadsTheDarkThemeColors(t *testing.T) {
 func TestNewReadsTheSearchMatchColors(t *testing.T) {
 	s := New(loadDark(t))
 	match := Cell(s.Match)
-	if want := (color.RGBA{R: 100, G: 100, B: 20, A: 255}); match.BG != want {
+	if want := (color.RGBA{R: 82, G: 65, B: 27, A: 255}); match.BG != want {
 		t.Errorf("match bg = %v, want %v", match.BG, want)
 	}
 	if match.FG != nil || match.Bold {
 		t.Errorf("match sets a foreground or bold: %+v", match)
 	}
 	cur := Cell(s.CurrentMatch)
-	if want := (color.RGBA{R: 64, G: 170, B: 230, A: 255}); cur.BG != want {
+	if want := (color.RGBA{R: 227, G: 179, B: 65, A: 255}); cur.BG != want {
 		t.Errorf("current match bg = %v, want %v", cur.BG, want)
 	}
-	if want := (color.RGBA{A: 255}); cur.FG != want {
+	if want := (color.RGBA{R: 13, G: 17, B: 23, A: 255}); cur.FG != want {
 		t.Errorf("current match fg = %v, want %v", cur.FG, want)
 	}
 	if !cur.Bold {
@@ -54,11 +54,17 @@ func TestNewReadsTheSearchMatchColors(t *testing.T) {
 	}
 }
 
-func TestNamedColorsBecomeANSIEntries(t *testing.T) {
-	s := New(loadDark(t))
-	// The dark theme names Yellow for the active tab, which is ANSI entry 3.
-	if got := Cell(s.TabActive).FG; got != lipgloss.Color("3") {
-		t.Errorf("active tab fg = %v, want ANSI 3", got)
+func TestAccentComesFromTheTheme(t *testing.T) {
+	t.Parallel()
+	c := Cell(New(loadDark(t)).Accent)
+	if want := color.Color(color.RGBA{R: 47, G: 129, B: 247, A: 255}); c.BG != want {
+		t.Errorf("dark accent bg = %v, want %v", c.BG, want)
+	}
+	if want := color.Color(color.RGBA{R: 239, G: 248, B: 255, A: 255}); c.FG != want {
+		t.Errorf("dark accent fg = %v, want %v", c.FG, want)
+	}
+	if c := Cell(New(theme.Theme{}).Accent); c.FG != nil || c.BG != nil {
+		t.Errorf("zero theme gave an accent %+v", c)
 	}
 }
 
@@ -153,17 +159,15 @@ func TestDisplayRolesReadTheirThemeKeys(t *testing.T) {
 		fg   color.Color
 		bg   color.Color
 	}{
-		{"current line", Cell(s.CurrentLine), nil, rgb(40, 40, 40)},
-		{"ruler", Cell(s.Ruler), nil, rgb(50, 50, 50)},
-		{"secondary caret", Cell(s.SecondaryCaret), rgb(212, 212, 212), rgb(100, 100, 100)},
-		{"whitespace", Cell(s.Whitespace), rgb(70, 70, 70), rgb(30, 30, 30)},
-		{"occurrence", Cell(s.Occurrence), nil, rgb(75, 75, 75)},
-		{"diagnostic error", Cell(s.DiagError), lipgloss.Color("1"), nil},
-		{"diagnostic warning", Cell(s.DiagWarning), lipgloss.Color("3"), nil},
-		{"diagnostic info", Cell(s.DiagInfo), lipgloss.Color("4"), nil},
-		{"diagnostic hint", Cell(s.DiagHint), lipgloss.Color("7"), nil},
-		{"popup", Cell(s.Popup), lipgloss.Color("15"), rgb(30, 30, 30)},
-		{"popup selected", Cell(s.PopupSelected), rgb(255, 255, 255), rgb(58, 79, 120)},
+		{"current line", Cell(s.CurrentLine), nil, rgb(24, 28, 34)},
+		{"ruler", Cell(s.Ruler), nil, rgb(26, 30, 36)},
+		{"secondary caret", Cell(s.SecondaryCaret), rgb(230, 237, 243), rgb(72, 79, 88)},
+		{"whitespace", Cell(s.Whitespace), rgb(72, 79, 88), rgb(13, 17, 23)},
+		{"occurrence", Cell(s.Occurrence), nil, rgb(39, 43, 49)},
+		{"diagnostic error", Cell(s.DiagError), rgb(255, 123, 114), nil},
+		{"diagnostic warning", Cell(s.DiagWarning), rgb(210, 153, 34), nil},
+		{"diagnostic info", Cell(s.DiagInfo), rgb(88, 166, 255), nil},
+		{"diagnostic hint", Cell(s.DiagHint), rgb(110, 118, 129), nil},
 	}
 	for _, tc := range cases {
 		if tc.got.FG != tc.fg {
@@ -172,6 +176,41 @@ func TestDisplayRolesReadTheirThemeKeys(t *testing.T) {
 		if tc.got.BG != tc.bg {
 			t.Errorf("%s bg = %v, want %v", tc.name, tc.got.BG, tc.bg)
 		}
+	}
+}
+
+func TestOverlayTakesThePopupColorsAndTheAccent(t *testing.T) {
+	t.Parallel()
+	ov := New(loadDark(t)).Overlay
+	if got := ov.Box; got.FG != color.Color(rgb(230, 237, 243)) || got.BG != color.Color(rgb(13, 17, 23)) {
+		t.Errorf("box = %v on %v, want the popup text on the popup fill", got.FG, got.BG)
+	}
+	if got := ov.Selected; got.FG != color.Color(rgb(239, 248, 255)) || got.BG != color.Color(rgb(47, 129, 247)) {
+		t.Errorf("selected = %v on %v, want the accent text on the accent", got.FG, got.BG)
+	}
+	if got := ov.Border; got.FG != color.Color(rgb(47, 129, 247)) {
+		t.Errorf("border fg = %v, want the accent", got.FG)
+	}
+	if got := ov.Idle; got.BG != color.Color(rgb(67, 72, 78)) {
+		t.Errorf("idle button bg = %v, want the popup fill mixed toward its text", got.BG)
+	}
+	if got := ov.Hover; got.BG != color.Color(rgb(100, 105, 111)) {
+		t.Errorf("hover button bg = %v", got.BG)
+	}
+	if got := ov.Muted; got.FG != color.Color(rgb(132, 138, 144)) {
+		t.Errorf("muted fg = %v", got.FG)
+	}
+}
+
+func TestOverlayWithoutRGBUsesAttributes(t *testing.T) {
+	t.Parallel()
+	th, err := theme.Parse([]byte(`{"ui": {"popup_bg": "Default", "popup_text_fg": "Default"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ov := NewOverlay(th)
+	if !ov.Muted.Faint || !ov.Idle.Reverse || !ov.Hover.Reverse || !ov.Hover.Bold {
+		t.Errorf("secondary roles without RGB = muted %+v idle %+v hover %+v", ov.Muted, ov.Idle, ov.Hover)
 	}
 }
 
@@ -188,11 +227,25 @@ func TestEveryBundledThemeDefinesTheDisplayKeys(t *testing.T) {
 		for _, r := range []ref{
 			refCurrentLine, refInactiveCursor, refRuler, refWhitespace, refOccurrence,
 			refDiagError, refDiagWarning, refDiagInfo, refDiagHint,
-			refPopupText, refPopupBG, refPopupSelFG, refPopupSelBG,
+			refPopupText, refPopupBG, refAccentFG, refAccentBG,
 		} {
 			if _, ok := th.Value(r.section, r.key); !ok {
 				t.Errorf("theme %s has no %s.%s", name, r.section, r.key)
 			}
 		}
+	}
+}
+
+func TestActiveTabReadsItsOwnThemeKeys(t *testing.T) {
+	t.Parallel()
+	c := Cell(New(loadDark(t)).TabActive)
+	if want := color.Color(rgb(23, 51, 90)); c.BG != want {
+		t.Errorf("active tab bg = %v, want the weak accent tint %v", c.BG, want)
+	}
+	if want := color.Color(rgb(230, 237, 243)); c.FG != want {
+		t.Errorf("active tab fg = %v, want the editor text %v", c.FG, want)
+	}
+	if c := Cell(New(loadDark(t)).Accent); c.BG == Cell(New(loadDark(t)).TabActive).BG {
+		t.Error("the active tab takes the accent color")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // UnsavedChanges asks what to do with a buffer that has unsaved changes. The
@@ -18,13 +19,13 @@ var _ Overlay = (*UnsavedChanges)(nil)
 
 // NewUnsavedChanges returns the dialog for the buffer name. Tag comes back in
 // the Result.
-func NewUnsavedChanges(clock Clock, name string, tag any) *UnsavedChanges {
+func NewUnsavedChanges(clock Clock, name string, tag any, ov style.Overlay) *UnsavedChanges {
 	d := &UnsavedChanges{name: name}
 	d.setup(clock, "Unsaved Changes", tag, ChoiceCancel, []button{
 		newButton("Save", 0, ChoiceSave),
 		newButton("Discard", 0, ChoiceDiscard),
 		newButton("Cancel", 0, ChoiceCancel),
-	})
+	}, ov)
 	return d
 }
 

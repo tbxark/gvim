@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // utilities is the state of the overlays in this group: the settings that
@@ -53,9 +54,9 @@ func (m *Model) utilityAction(action string) bool {
 	return true
 }
 
-// listChrome returns the box styles of the theme.
-func (m *Model) listChrome() listChrome {
-	return chromeOf(m.styles)
+// listChrome returns the overlay styles that the lists and the text boxes share.
+func (m *Model) listChrome() style.Overlay {
+	return m.styles.Overlay
 }
 
 // keymapChecked reports whether the menu row menuKey, such as "keymap_emacs", is
@@ -79,35 +80,29 @@ type boxView struct {
 	onKey   func(k tea.Key) (done bool)
 	tour    *tourState // set on the tour only: tour_next and tour_prev step it
 	active  bool
-	chrome  listChrome
+	chrome  style.Overlay
 	box     rect // the box at the last draw
 }
 
 // boxMaxWidth is the widest a text box is drawn.
 const boxMaxWidth = 76
 
-// draw paints the box: the title on the first row, one row per body line, and the
-// footer on the last row. The body has no blank rows, so a long body keeps the
-// first rows it can show.
+// draw paints the box with the border and title of the dialogs. The title is on
+// the top border and the footer on the bottom one, so the body lines fill the rows
+// between them. A long body keeps the first rows it can show.
 func (v *boxView) draw(g *grid.Grid) {
 	title, lines, footer := v.content()
 	box := centred(g.Width(), g.Height(), boxMaxWidth, len(lines)+2)
 	v.box = box
-	if box.w == 0 {
+	if box.w == 0 || box.h < 3 {
 		return
 	}
-	panel := v.chrome.panel
-	for y := box.y; y < box.y+box.h; y++ {
-		g.Fill(box.x, box.x+box.w, y, panel)
-	}
-	end := box.x + box.w - 1
-	bold := panel
-	bold.Bold = true
-	g.Put(box.x+2, box.y, end, truncateCells(title, box.w-4), bold)
+	end := box.x + box.w - 2 // text stops before the padding cell at the right border
+	v.chrome.PaintBox(g, box.x, box.y, box.w, box.h, title)
 	for k := range min(len(lines), box.h-2) {
-		g.Put(box.x+2, box.y+1+k, end, truncateCells(lines[k], box.w-4), panel)
+		g.Put(box.x+2, box.y+1+k, end, truncateCells(lines[k], end-(box.x+2)), v.chrome.Box)
 	}
-	g.Put(box.x+2, box.y+box.h-1, end, truncateCells(footer, box.w-4), v.chrome.muted)
+	g.Put(box.x+2, box.y+box.h-1, end, truncateCells(" "+footer+" ", end-(box.x+2)), v.chrome.Muted)
 }
 
 // boxOverlay adapts *boxView to Overlay. The box closes itself when onKey reports

@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // ErrorDialog shows a message, such as a failed save, with one OK button. Esc
@@ -17,11 +18,11 @@ var _ Overlay = (*ErrorDialog)(nil)
 
 // NewErrorDialog returns the dialog that shows message. Tag comes back in the
 // Result.
-func NewErrorDialog(clock Clock, message string, tag any) *ErrorDialog {
+func NewErrorDialog(clock Clock, message string, tag any, ov style.Overlay) *ErrorDialog {
 	d := &ErrorDialog{message: message}
 	d.setup(clock, "Error", tag, ChoiceOK, []button{
 		newButton("OK", 0, ChoiceOK),
-	})
+	}, ov)
 	return d
 }
 

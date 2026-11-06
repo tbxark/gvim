@@ -100,9 +100,9 @@ func TestStyleFromThemeUsesThemeRGB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// dark.json: "keyword": [86, 156, 214]
-	if got := style.Get(chroma.Keyword).Colour.String(); got != "#569cd6" {
-		t.Fatalf("keyword colour = %s, want theme #569cd6", got)
+	// dark.json: "keyword": [255, 123, 114]
+	if got := style.Get(chroma.Keyword).Colour.String(); got != "#ff7b72" {
+		t.Fatalf("keyword colour = %s, want theme #ff7b72", got)
 	}
 	// Keys the theme defines win over the palette, and the rest keep it.
 	if got := style.Get(chroma.Comment).Colour; got == CrushStyle.Get(chroma.Comment).Colour {

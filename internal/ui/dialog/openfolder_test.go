@@ -11,7 +11,7 @@ import (
 func TestOpenFolderDrawsFieldAndRecentList(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, []string{"/src/one", "/src/two"}, "/src", nil, nil)
+	d := NewOpenFolder(c.Now, []string{"/src/one", "/src/two"}, "/src", nil, nil, testOv)
 	g := draw(d, 80, 24)
 	for _, s := range []string{"Open Folder", "/src", "Recent folders", "/src/one", "/src/two", "Open", "Cancel"} {
 		mustFind(t, g, s)
@@ -21,7 +21,7 @@ func TestOpenFolderDrawsFieldAndRecentList(t *testing.T) {
 func TestOpenFolderEnterOpensTypedPath(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, []string{"/recent"}, "  /typed  ", "tag", nil)
+	d := NewOpenFolder(c.Now, []string{"/recent"}, "  /typed  ", "tag", nil, testOv)
 	c.afterGrace()
 	_, cmd := d.Update(key("enter"))
 	mustClose(t, d, cmd, ChoiceOpen, "/typed")
@@ -30,7 +30,7 @@ func TestOpenFolderEnterOpensTypedPath(t *testing.T) {
 func TestOpenFolderEmptyPathShowsError(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, nil, "", nil, nil)
+	d := NewOpenFolder(c.Now, nil, "", nil, nil, testOv)
 	c.afterGrace()
 	next, cmd := d.Update(key("enter"))
 	mustOpen(t, next, cmd)
@@ -47,7 +47,7 @@ func TestOpenFolderValidateRejectsThenAccepts(t *testing.T) {
 		}
 		return nil
 	}
-	d := NewOpenFolder(c.Now, nil, "/nope", nil, validate)
+	d := NewOpenFolder(c.Now, nil, "/nope", nil, validate, testOv)
 	c.afterGrace()
 	next, cmd := d.Update(key("enter"))
 	mustOpen(t, next, cmd)
@@ -77,7 +77,7 @@ func TestOpenFolderDownMovesIntoListAndEnterOpensSelected(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := newFakeClock()
-			d := NewOpenFolder(c.Now, []string{"/a", "/b", "/c"}, "/typed", nil, nil)
+			d := NewOpenFolder(c.Now, []string{"/a", "/b", "/c"}, "/typed", nil, nil, testOv)
 			c.afterGrace()
 			var o Overlay = d
 			var cmd tea.Cmd
@@ -95,7 +95,7 @@ func TestOpenFolderDownMovesIntoListAndEnterOpensSelected(t *testing.T) {
 func TestOpenFolderEnterOnEmptyListDoesNothing(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, nil, "/typed", nil, nil)
+	d := NewOpenFolder(c.Now, nil, "/typed", nil, nil, testOv)
 	c.afterGrace()
 	d.Update(key("down"))
 	next, cmd := d.Update(key("enter"))
@@ -109,7 +109,7 @@ func TestOpenFolderListScrollKeepsSelectionVisible(t *testing.T) {
 		items = append(items, fmt.Sprintf("/dir%02d", i))
 	}
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, items, "/x", nil, nil)
+	d := NewOpenFolder(c.Now, items, "/x", nil, nil, testOv)
 	c.afterGrace()
 	for range 8 {
 		d.Update(key("down"))
@@ -124,7 +124,7 @@ func TestOpenFolderListScrollKeepsSelectionVisible(t *testing.T) {
 func TestOpenFolderClickSelectsRowThenEnterOpensIt(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, []string{"/a", "/b"}, "/x", nil, nil)
+	d := NewOpenFolder(c.Now, []string{"/a", "/b"}, "/x", nil, nil, testOv)
 	g := draw(d, 80, 24)
 	x, y := mustFind(t, g, "/b")
 	next, cmd := d.Update(click(x, y))
@@ -143,12 +143,12 @@ func TestOpenFolderClickSelectsRowThenEnterOpensIt(t *testing.T) {
 func TestOpenFolderButtonsAndAltKeys(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, nil, "/x", nil, nil)
+	d := NewOpenFolder(c.Now, nil, "/x", nil, nil, testOv)
 	c.afterGrace()
 	_, cmd := d.Update(altKey('o'))
 	mustClose(t, d, cmd, ChoiceOpen, "/x")
 
-	e := NewOpenFolder(c.Now, nil, "/x", nil, nil)
+	e := NewOpenFolder(c.Now, nil, "/x", nil, nil, testOv)
 	c.afterGrace()
 	_, cmd = e.Update(altKey('c'))
 	mustClose(t, e, cmd, ChoiceCancel, "")
@@ -157,7 +157,7 @@ func TestOpenFolderButtonsAndAltKeys(t *testing.T) {
 func TestOpenFolderLetterTypesIntoField(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, nil, "/x", nil, nil)
+	d := NewOpenFolder(c.Now, nil, "/x", nil, nil, testOv)
 	c.afterGrace()
 	o := typeText(t, d, "o")
 	if !o.Active() {
@@ -170,7 +170,7 @@ func TestOpenFolderLetterTypesIntoField(t *testing.T) {
 func TestOpenFolderTabOrderAndEsc(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, []string{"/a"}, "/x", nil, nil)
+	d := NewOpenFolder(c.Now, []string{"/a"}, "/x", nil, nil, testOv)
 	c.afterGrace()
 	// Stops: field, list, Open, Cancel. Four Tabs come back to the field.
 	for range 4 {
@@ -180,7 +180,7 @@ func TestOpenFolderTabOrderAndEsc(t *testing.T) {
 	_, cmd := d.Update(key("enter"))
 	mustClose(t, d, cmd, ChoiceOpen, "/xy")
 
-	e := NewOpenFolder(c.Now, []string{"/a"}, "/x", nil, nil)
+	e := NewOpenFolder(c.Now, []string{"/a"}, "/x", nil, nil, testOv)
 	_, cmd = e.Update(key("esc"))
 	mustClose(t, e, cmd, ChoiceCancel, "")
 }
@@ -188,7 +188,7 @@ func TestOpenFolderTabOrderAndEsc(t *testing.T) {
 func TestOpenFolderCancelButtonClick(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
-	d := NewOpenFolder(c.Now, nil, "/x", nil, nil)
+	d := NewOpenFolder(c.Now, nil, "/x", nil, nil, testOv)
 	g := draw(d, 80, 24)
 	x, y := mustFind(t, g, "Cancel")
 	_, cmd := d.Update(click(x, y))

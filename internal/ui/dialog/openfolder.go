@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/style"
 )
 
 // OpenFolder asks for a folder to open as the explorer root. The dialog has a
@@ -24,12 +25,12 @@ var _ Overlay = (*OpenFolder)(nil)
 // NewOpenFolder returns the dialog with prefill in the path field and recent in
 // the list, most recent first. Tag comes back in the Result. validate is
 // optional. It answers why a path cannot be opened.
-func NewOpenFolder(clock Clock, recent []string, prefill string, tag any, validate func(path string) error) *OpenFolder {
+func NewOpenFolder(clock Clock, recent []string, prefill string, tag any, validate func(path string) error, ov style.Overlay) *OpenFolder {
 	d := &OpenFolder{input: newField(prefill), validate: validate}
 	d.setup(clock, "Open Folder", tag, ChoiceCancel, []button{
 		newButton("Open", 0, ChoiceOpen),
 		newButton("Cancel", 0, ChoiceCancel),
-	})
+	}, ov)
 	d.field = d.input
 	d.list = newRecentList(recent)
 	d.onPress = d.press
@@ -47,9 +48,9 @@ func (d *OpenFolder) Draw(g *grid.Grid) {
 	d.frame(g, d.natural(d.list.items...), func(cw int) []row {
 		rows := []row{d.fieldRow()}
 		if d.errText != "" {
-			rows = append(rows, textRows(d.errText, cw, stErr)...)
+			rows = append(rows, textRows(d.errText, cw, d.ov.Error)...)
 		}
-		rows = append(rows, textRow("", stText))
+		rows = append(rows, textRow("", d.ov.Box))
 		return append(rows, d.listRows()...)
 	})
 }

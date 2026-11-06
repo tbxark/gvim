@@ -2,6 +2,7 @@ package menubar
 
 import (
 	"errors"
+	"image/color"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +12,13 @@ import (
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/grid"
 	"github.com/tbxark/gvim/internal/ui/style"
+)
+
+// The accent colors the menu tests pin, from the dark theme: the accent of the
+// selected row and the text on it.
+var (
+	colorPrimary   = color.RGBA{0x2F, 0x81, 0xF7, 0xFF}
+	colorOnPrimary = color.RGBA{0xEF, 0xF8, 0xFF, 0xFF}
 )
 
 // fakePorts implements Ports. Run records the actions it is given and fails
@@ -43,7 +51,19 @@ func allOn() *fakePorts {
 
 // newBar returns a closed menu bar on a w by h frame, with ports p.
 func newBar(p Ports, w, h int) Model {
-	return New(p, style.New(theme.Theme{})).SetSize(w, h)
+	return New(p, darkStyles).SetSize(w, h)
+}
+
+// darkStyles are the chrome styles of the dark theme, which the menu tests draw
+// with, so the dropdown has its accent.
+var darkStyles = mustDarkStyles()
+
+func mustDarkStyles() style.Styles {
+	th, err := theme.Load("dark")
+	if err != nil {
+		panic(err)
+	}
+	return style.New(th)
 }
 
 // press returns a left press at (x, y).
