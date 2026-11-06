@@ -21,8 +21,12 @@ import (
 )
 
 // NerdFontsVersion is the Nerd Fonts release the code points below were checked
-// against: each is present in JetBrainsMono Nerd Font Mono 3.5.1. They are Font
-// Awesome glyphs, which Nerd Fonts has kept at these code points across releases.
+// against: each is present in JetBrainsMono Nerd Font Mono 3.5.1. The controls (close,
+// refresh, new, the arrows) all come from the Codicons set, and the file, folder and
+// git icons from sets that match each other, because Nerd Font Mono scales every glyph
+// on its own: a mixed pair such as fa-chevron_right with fa-chevron_down, or fa-times
+// with fa-refresh, draws one glyph visibly larger or heavier than its neighbour.
+// Codicons need Nerd Fonts 2.2 or later.
 const NerdFontsVersion = "3.5.1"
 
 // Mode selects the glyph set. The zero value is Plain, so a caller that sets no mode
@@ -90,15 +94,15 @@ type entry struct {
 
 // table is indexed by Icon. Both modes cover every use.
 var table = [count]entry{
-	Close:        {"×", "\uf00d", "nf-fa-times"},
-	Refresh:      {"⟳", "\uf021", "nf-fa-refresh"},
-	New:          {"+", "\uf067", "nf-fa-plus"},
-	DirExpanded:  {"▼", "\uf078", "nf-fa-chevron_down"},
-	DirCollapsed: {"▶", "\uf054", "nf-fa-chevron_right"},
-	ScrollLeft:   {"<", "\uf053", "nf-fa-chevron_left"},
-	ScrollRight:  {">", "\uf054", "nf-fa-chevron_right"},
-	FoldOpen:     {"▾", "\uf078", "nf-fa-chevron_down"},
-	FoldClosed:   {"▸", "\uf054", "nf-fa-chevron_right"},
+	Close:        {"×", "\ueab8", "nf-cod-chrome_close"},
+	Refresh:      {"⟳", "\ueb37", "nf-cod-refresh"},
+	New:          {"+", "\uea60", "nf-cod-add"},
+	DirExpanded:  {"▼", "\ueab4", "nf-cod-chevron_down"},
+	DirCollapsed: {"▶", "\ueab6", "nf-cod-chevron_right"},
+	ScrollLeft:   {"<", "\ueab5", "nf-cod-chevron_left"},
+	ScrollRight:  {">", "\ueab6", "nf-cod-chevron_right"},
+	FoldOpen:     {"▾", "\ueab4", "nf-cod-chevron_down"},
+	FoldClosed:   {"▸", "\ueab6", "nf-cod-chevron_right"},
 	Folder:       {"", "\uf07b", "nf-fa-folder"},
 	FolderOpen:   {"", "\uf07c", "nf-fa-folder_open"},
 	File:         {"", "\uf15b", "nf-fa-file"},
@@ -237,8 +241,8 @@ var gitMarks = map[rune]fileIcon{
 	'M': {"\uf459", "nf-oct-diff_modified"},
 	'D': {"\uf458", "nf-oct-diff_removed"},
 	'R': {"\uf45a", "nf-oct-diff_renamed"},
-	'U': {"\uf128", "nf-fa-question"},
-	'C': {"\uf071", "nf-fa-warning"},
+	'U': {"\uf420", "nf-oct-question"},
+	'C': {"\uf421", "nf-oct-alert"},
 }
 
 // GitMark returns the text that draws the git status letter r in mode m: the letter
