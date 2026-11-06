@@ -40,14 +40,15 @@ func TestOccurrenceUsesTheWordBeforeACaretJustPastIt(t *testing.T) {
 	}
 }
 
-func TestOccurrencesOffWhileTextIsSelected(t *testing.T) {
-	d := newDoc("foo foo")
-	d.cursor = buffer.Pos{Col: 1}
-	d.selected, d.anchor, d.head = true, buffer.Pos{}, buffer.Pos{Col: 3}
+func TestOccurrenceWordIsDroppedWhileTextIsSelected(t *testing.T) {
+	// The word at the caret is "foo", but the selection is "oo b": the word is no longer marked.
+	d := newDoc("foo foo bar")
+	d.cursor = buffer.Pos{Col: 4}
+	d.selected, d.anchor, d.head = true, buffer.Pos{Col: 1}, buffer.Pos{Col: 5}
 	p := Pane{Doc: d, Occurrences: true, Styles: Styles{Occurrence: grid.Style{BG: cGray}, Selection: grid.Style{BG: cBlue}}}
 	g := p.Render(20, 1)
-	if c := cellAt(t, g, 12, 0); bgOf(c) == cGray {
-		t.Error("occurrence painted while text is selected")
+	if c := cellAt(t, g, 6, 0); bgOf(c) == cGray {
+		t.Error("the word at the caret is painted while text is selected")
 	}
 }
 

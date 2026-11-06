@@ -402,14 +402,14 @@ func TestRemoveSecondaryCursors(t *testing.T) {
 		want  carets
 	}{
 		{
-			name: "clears the extra carets and keeps the primary selection",
+			name: "clears the extra carets and the primary selection",
 			text: "ab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 1), false)
 				run(t, e, "add_cursor_below")
 				e.SelectRange(caretPos(1, 0), caretPos(1, 1))
 			},
-			want: carets{primary: Caret{Cursor: caretPos(1, 1), Sel: caretSel(caretPos(1, 0), caretPos(1, 1))}},
+			want: carets{primary: Caret{Cursor: caretPos(1, 1)}},
 		},
 		{
 			name: "is silent with one caret",
@@ -661,16 +661,16 @@ func TestTabAppliesAtEveryCaret(t *testing.T) {
 		want     carets
 	}{
 		{
-			name: "inserts spaces up to the tab stop at every caret",
+			name: "inserts tab_size spaces at every caret",
 			text: "ab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 1), false)
 				run(t, e, "add_cursor_below")
 			},
-			wantText: "a   b\nc   d",
+			wantText: "a    b\nc    d",
 			want: carets{
-				primary: Caret{Cursor: caretPos(1, 4)},
-				extras:  []Caret{{Cursor: caretPos(0, 4)}},
+				primary: Caret{Cursor: caretPos(1, 5)},
+				extras:  []Caret{{Cursor: caretPos(0, 5)}},
 			},
 		},
 		{
@@ -688,7 +688,7 @@ func TestTabAppliesAtEveryCaret(t *testing.T) {
 			},
 		},
 		{
-			name: "a caret after an earlier caret on one line indents from the column after that edit",
+			name: "two carets on one line each insert a full indent",
 			text: "ab",
 			setup: func(t *testing.T, e *Editor) {
 				e.Active().setCarets([]caret{
@@ -696,10 +696,10 @@ func TestTabAppliesAtEveryCaret(t *testing.T) {
 					{anchor: caretPos(0, 2), head: caretPos(0, 2)},
 				})
 			},
-			wantText: "a   b   ",
+			wantText: "a    b    ",
 			want: carets{
-				primary: Caret{Cursor: caretPos(0, 4)},
-				extras:  []Caret{{Cursor: caretPos(0, 8)}},
+				primary: Caret{Cursor: caretPos(0, 5)},
+				extras:  []Caret{{Cursor: caretPos(0, 10)}},
 			},
 		},
 		{
@@ -725,62 +725,6 @@ func TestTabAppliesAtEveryCaret(t *testing.T) {
 			setCaretsAfter(t, e, tt.setup)
 			if r := e.Do("insert_tab", nil); r.Err != nil {
 				t.Fatalf("insert_tab: %v", r.Err)
-			}
-			if text(e) != tt.wantText {
-				t.Fatalf("text = %q, want %q", text(e), tt.wantText)
-			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestOtherActionsWorkOnThePrimaryCaretOnly(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		action   Action
-		setup    func(t *testing.T, e *Editor)
-		wantText string
-		want     carets
-	}{
-		{
-			name:   "move_right moves the primary caret and leaves the extra one",
-			action: "move_right",
-			setup: func(t *testing.T, e *Editor) {
-				e.SetCursor(caretPos(0, 1), false)
-				run(t, e, "add_cursor_below")
-			},
-			wantText: "ab\ncd",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 2)},
-				extras:  []Caret{{Cursor: caretPos(0, 1)}},
-			},
-		},
-		{
-			name:   "paste inserts into the primary caret only",
-			action: "paste",
-			setup: func(t *testing.T, e *Editor) {
-				e.SetCursor(caretPos(0, 1), false)
-				run(t, e, "add_cursor_below")
-				e.clipboard = "Q"
-			},
-			wantText: "ab\ncQd",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 2)},
-				extras:  []Caret{{Cursor: caretPos(0, 1)}},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			e := New(Options{})
-			typeText(t, e, "ab\ncd")
-			setCaretsAfter(t, e, tt.setup)
-			if r := e.Do(tt.action, nil); r.Err != nil {
-				t.Fatalf("%s: %v", tt.action, r.Err)
 			}
 			if text(e) != tt.wantText {
 				t.Fatalf("text = %q, want %q", text(e), tt.wantText)

@@ -28,6 +28,14 @@ const (
 	hitSplitBorder
 )
 
+// The Index of a hitStatusSegment target: the line ending, the encoding or the language
+// of the status row.
+const (
+	statusSegmentEOL = iota
+	statusSegmentEncoding
+	statusSegmentLanguage
+)
+
 // hitTarget is the result of a hit test. Index depends on Kind. Menu labels,
 // tabs, tab closes and welcome rows use their list index. Explorer rows, the editor text,
 // the gutter and the scrollbar use the row offset from the top of their pane. A pane's

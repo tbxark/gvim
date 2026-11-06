@@ -36,6 +36,8 @@ type Styles struct {
 	// DiagError, DiagWarning, DiagInfo and DiagHint give the color of a
 	// diagnostic underline by severity. Only FG is used.
 	DiagError, DiagWarning, DiagInfo, DiagHint grid.Style
+	// Decor are the foregrounds of guides, bracket highlights and the fold placeholder.
+	Decor DecorStyles
 }
 
 // NewStyles returns the pane styles for th. The text and gutter roles come from
@@ -64,6 +66,7 @@ func NewStyles(th theme.Theme) Styles {
 		DiagWarning:    style.Cell(chrome.DiagWarning),
 		DiagInfo:       style.Cell(chrome.DiagInfo),
 		DiagHint:       style.Cell(chrome.DiagHint),
+		Decor:          newDecorStyles(chrome.Decor, text, style.Cell(chrome.Gutter)),
 	}
 	for k := range st.Syntax {
 		kind := syntax.Kind(k)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -225,7 +226,9 @@ func (m *Model) lspReconcile() tea.Cmd {
 		}
 		path := docPath(doc)
 		lang := m.lspLanguage(doc)
-		if path == "" || !s.enabled(lang) || s.off[path] {
+		if path == "" || !s.enabled(lang) || s.off[path] || isLargeDoc(doc) {
+			// A server is sent the whole text of a document on each change, which a
+			// large document cannot give without reading the file.
 			continue
 		}
 		seen[path] = true
@@ -274,7 +277,7 @@ func (m *Model) lspWatchActive() tea.Cmd {
 		return nil
 	}
 	tr := m.lsp.tracks[docPath(doc)]
-	if tr == nil {
+	if tr == nil || isLargeDoc(doc) {
 		return nil
 	}
 	text := lspDocText(doc)
@@ -840,6 +843,10 @@ func (m *Model) lspAsked(ask lspAsk) tea.Cmd {
 		m.notice = "No language server for " + lang
 		return nil
 	}
+	if why := lspLargeReason(doc); why != "" {
+		m.notice = "LSP: " + why
+		return nil
+	}
 	switch tr := m.lsp.tracks[path]; {
 	case tr != nil && tr.state == lspOpen:
 	case tr != nil && tr.state == lspOpening:
@@ -891,6 +898,10 @@ func (m *Model) askLSPRename() {
 	path := docPath(doc)
 	if m.lsp.port == nil || path == "" || !m.lsp.enabled(m.lspLanguage(doc)) {
 		m.notice = "No language server for " + m.lspLanguage(doc)
+		return
+	}
+	if why := lspLargeReason(doc); why != "" {
+		m.notice = "LSP: " + why
 		return
 	}
 	at := doc.Cursor()
@@ -969,6 +980,10 @@ func (m *Model) lspToggle() tea.Cmd {
 		m.notice = noDocumentNotice
 		return nil
 	}
+	if why := lspLargeReason(doc); why != "" {
+		m.notice = "LSP: " + why
+		return nil
+	}
 	path := docPath(doc)
 	s := &m.lsp
 	if s.off[path] {
@@ -1005,6 +1020,8 @@ func (m *Model) lspStatus() string {
 	switch {
 	case !m.lsp.enabled(lang):
 		return "LSP: no server is configured for " + lang
+	case lspLargeReason(doc) != "":
+		return "LSP: " + lspLargeReason(doc)
 	case m.lsp.off[path]:
 		return "LSP: off for this buffer"
 	case m.lsp.stopped:
@@ -1142,8 +1159,24 @@ func (m *Model) lspRel(path string) string {
 	return path
 }
 
+// lspLargeReason is why no language server serves doc, or "" when its size does not
+// stop one. A document in large file mode is never sent to a server: the server is
+// given the whole text on each change, and the text is not held.
+func lspLargeReason(doc Document) string {
+	ld, ok := doc.(LargeDoc)
+	if !ok || !ld.Large() {
+		return ""
+	}
+	return "File too large (" + strconv.FormatInt(ld.Index().Size, 10) + " bytes)"
+}
+
 // lspDocText is the text of doc, lines joined with a newline, as the server holds it.
+// Nothing calls it for a document in large file mode; it gives no text for one, in
+// case a call is added, rather than reading the file.
 func lspDocText(doc Document) string {
+	if isLargeDoc(doc) {
+		return ""
+	}
 	var b strings.Builder
 	for i := range doc.LineCount() {
 		if i > 0 {

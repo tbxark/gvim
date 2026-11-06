@@ -4,8 +4,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 // Span is a run of runes [Start, End) on the zero-based line Line.
@@ -30,48 +28,6 @@ func IndentWidth(line string, tabWidth int) int {
 		}
 	}
 	return col
-}
-
-// IndentGuides returns the display columns where indent guides belong on line:
-// one column per indent level, at the start of that level.
-func IndentGuides(line string, tabWidth int) []int {
-	tabWidth = max(tabWidth, 1)
-	levels := IndentWidth(line, tabWidth) / tabWidth
-	var guides []int
-	for i := range levels {
-		guides = append(guides, i*tabWidth)
-	}
-	return guides
-}
-
-// VisibleWhitespace returns line with each space shown as a middle dot and
-// each tab shown as an arrow followed by spaces up to the next tab stop.
-// Tab stops are counted in display columns, so a wide character takes two.
-func VisibleWhitespace(line string, tabWidth int) string {
-	tabWidth = max(tabWidth, 1)
-	var b strings.Builder
-	col := 0
-	start := 0
-	for i, r := range line {
-		if r != '\t' {
-			continue
-		}
-		col += writeText(&b, line[start:i])
-		n := tabWidth - col%tabWidth
-		b.WriteRune('→')
-		b.WriteString(strings.Repeat(" ", n-1))
-		col += n
-		start = i + 1
-	}
-	writeText(&b, line[start:])
-	return b.String()
-}
-
-// writeText writes s with its spaces shown as middle dots and returns the
-// display width of s.
-func writeText(b *strings.Builder, s string) int {
-	b.WriteString(strings.ReplaceAll(s, " ", "·"))
-	return ansi.StringWidth(s)
 }
 
 // Occurrences returns the whole-word matches of word in lines. A match must not

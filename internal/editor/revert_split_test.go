@@ -51,15 +51,6 @@ func TestPlanRevertRefusals(t *testing.T) {
 			wantErr: ErrNoPath,
 		},
 		{
-			name: "a read-only document is refused",
-			setup: func(t *testing.T) *Editor {
-				e, _ := openRevertable(t, "a\n")
-				run(t, e, "toggle_read_only")
-				return e
-			},
-			wantErr: ErrReadOnly,
-		},
-		{
 			name: "a modified document is refused without force",
 			setup: func(t *testing.T) *Editor {
 				e, _ := openRevertable(t, "a\n")

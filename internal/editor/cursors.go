@@ -5,7 +5,6 @@ import (
 	"errors"
 	"maps"
 	"slices"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/buffer"
@@ -14,12 +13,14 @@ import (
 // Multi-caret editing. A Document has one primary caret, Cursor and Sel, and
 // any number of extra carets, which Cursors reports.
 //
-// Typing, Enter, Tab, Backspace and Delete apply at every caret, each as one
-// undo step. The add-caret actions, add_cursors_to_line_ends and the block
-// selection actions create the carets. remove_secondary_cursors drops the extra
-// carets. Every other action works on the primary caret alone and leaves the
-// extra carets where they are, so their positions can go stale after a text
-// change. Undo and redo drop the extra carets, because they cannot restore them.
+// Typing, Enter, Tab, Backspace, Delete, cut and paste apply at every caret, each
+// as one undo step, and copy takes the text of every caret (see clip_ops.go). The
+// add-caret actions, add_cursors_to_line_ends and the block selection actions create
+// the carets. remove_secondary_cursors drops the extra carets. The motions,
+// select_word and the paragraph jumps run at every caret (motion_carets.go). Every
+// other action works on the primary caret alone and leaves the extra carets where
+// they are, so their positions can go stale after a text change. Undo and redo drop
+// the extra carets, because they cannot restore them.
 // Carets that meet are merged, so no two carets overlap or sit at one point.
 
 // errFirstLine and errLastLine are returned when a caret cannot be added above
@@ -34,6 +35,8 @@ var (
 type Caret struct {
 	Cursor buffer.Pos
 	Sel    *buffer.Selection
+	// want is the display column vertical moves aim at, plus one. Zero is unset.
+	want int
 }
 
 // Cursors returns the extra carets in document order. The primary caret is
@@ -62,6 +65,8 @@ func (d *Document) Cursors() []Caret {
 type caret struct {
 	anchor, head buffer.Pos
 	primary      bool
+	// want is the wanted column of vertical moves, plus one. Zero is unset.
+	want int
 }
 
 // bounds returns the caret's selection in document order. An empty caret has
@@ -127,7 +132,7 @@ func mergeCarets(a, b caret) caret {
 	if b.primary {
 		w = b
 	}
-	m := caret{primary: a.primary || b.primary}
+	m := caret{primary: a.primary || b.primary, want: w.want}
 	if w.head.Less(w.anchor) {
 		m.anchor, m.head = hi, lo
 	} else {
@@ -147,14 +152,14 @@ func comparePos(p, q buffer.Pos) int {
 // The positions are clamped into the text. An extra caret can be stale after an
 // action that changed the text, and an edit must not use a position past the end.
 func (d *Document) allCarets() []caret {
-	p := caret{anchor: d.Cursor, head: d.Cursor, primary: true}
+	p := caret{anchor: d.Cursor, head: d.Cursor, primary: true, want: d.want + 1}
 	if d.Sel != nil {
 		p.anchor = d.Sel.Anchor
 	}
 	cs := make([]caret, 0, 1+len(d.extra))
 	cs = append(cs, d.clampCaret(p))
 	for _, x := range d.extra {
-		c := caret{anchor: x.Cursor, head: x.Cursor}
+		c := caret{anchor: x.Cursor, head: x.Cursor, want: x.want}
 		if x.Sel != nil {
 			c.anchor = x.Sel.Anchor
 		}
@@ -172,8 +177,8 @@ func (d *Document) clampCaret(c caret) caret {
 
 // setCarets makes cs the carets of d. The list is normalized first. The
 // primary caret becomes Cursor and Sel, and the others become the extra carets.
-// The wanted column and the block selection are reset, so a block step sets
-// its block after it calls setCarets.
+// Each caret keeps its wanted column, and the block selection is reset, so a
+// block step sets its block after it calls setCarets.
 func (d *Document) setCarets(cs []caret) {
 	cs = normalize(cs)
 	d.want = -1
@@ -181,10 +186,10 @@ func (d *Document) setCarets(cs []caret) {
 	d.extra = nil
 	for _, c := range cs {
 		if c.primary {
-			d.Cursor, d.Sel = c.head, c.selection()
+			d.Cursor, d.Sel, d.want = c.head, c.selection(), c.want-1
 			continue
 		}
-		d.extra = append(d.extra, Caret{Cursor: c.head, Sel: c.selection()})
+		d.extra = append(d.extra, Caret{Cursor: c.head, Sel: c.selection(), want: c.want})
 	}
 }
 
@@ -223,6 +228,10 @@ type edit struct {
 // and each recorded end moves past the edits applied after it.
 func (d *Document) applyEdits(edits []edit) []buffer.Pos {
 	ends := make([]buffer.Pos, len(edits))
+	if d.planErr != nil {
+		// The planning failed (see failPlan): no edit is made.
+		return ends
+	}
 	d.Buffer.Group(func() {
 		for i := len(edits) - 1; i >= 0; i-- {
 			e := edits[i]
@@ -334,6 +343,9 @@ func (d *Document) editAtCarets(plan func(c caret) edit) {
 		edits[i] = plan(c)
 	}
 	ends := d.applyEdits(edits)
+	if d.editRefused() {
+		return
+	}
 	out := make([]caret, len(cs))
 	for i, c := range cs {
 		out[i] = caret{anchor: ends[i], head: ends[i], primary: c.primary}
@@ -350,43 +362,27 @@ func replaceEdit(c caret, text string) edit {
 }
 
 // typeAtCarets types the text at every caret, replacing each selection. It is
-// the multi-caret form of insertText.
-func typeAtCarets(_ *Editor, d *Document, args map[string]any) error {
+// the multi-caret form of insertText, with the smart rules of typeText.
+func typeAtCarets(e *Editor, d *Document, args map[string]any) error {
 	text, ok := args["text"].(string)
 	if !ok {
 		return errors.New("insert_char: missing string argument \"text\"")
 	}
-	d.editAtCarets(func(c caret) edit { return replaceEdit(c, text) })
+	e.typeText(d, text)
 	return nil
 }
 
-// newlineAtCarets breaks the line at every caret, replacing each selection. With
-// AutoIndent each new line starts with the blanks before its caret, as
-// insertNewline does for the primary caret.
+// newlineAtCarets breaks the line at every caret, replacing each selection, with
+// the indent rules of newline.
 func newlineAtCarets(e *Editor, d *Document, _ map[string]any) error {
-	d.editAtCarets(func(c caret) edit {
-		text := "\n"
-		if e.opts.AutoIndent {
-			lo, _ := c.bounds()
-			text += leadingBlanks(d.Buffer.Line(lo.Line), lo.Col)
-		}
-		return replaceEdit(c, text)
-	})
+	e.newline(d)
 	return nil
 }
 
 // deleteBackwardAtCarets removes each selection, or the character before each
-// empty caret, which may be a line break.
-func deleteBackwardAtCarets(_ *Editor, d *Document, _ map[string]any) error {
-	d.editAtCarets(func(c caret) edit {
-		if lo, hi := c.bounds(); lo != hi {
-			return edit{from: lo, to: hi}
-		}
-		if prev, ok := prevPos(d.Buffer, c.head); ok {
-			return edit{from: prev, to: c.head}
-		}
-		return edit{from: c.head, to: c.head}
-	})
+// empty caret, with the smart rules of backspace.
+func deleteBackwardAtCarets(e *Editor, d *Document, _ map[string]any) error {
+	e.backspace(d)
 	return nil
 }
 
@@ -407,35 +403,15 @@ func deleteForwardAtCarets(_ *Editor, d *Document, _ map[string]any) error {
 
 // tabAtCarets handles Tab at every caret. If any caret has a selection, every
 // line that a selection covers is indented, as Tab does for the primary caret.
-// Otherwise each empty caret gets an indent up to its next tab stop, or a tab
+// Otherwise each empty caret gets one indent unit: tab_size spaces, or a tab
 // character when UseTabs is set.
-//
-// Two carets on one line each see the indent of the carets before them. The
-// column is measured on the line as it is after those indents, so a caret after
-// an earlier caret reaches the next tab stop of the text it actually sits in.
 func tabAtCarets(e *Editor, d *Document, _ map[string]any) error {
 	if d.hasAnySelection() {
 		d.indentSelectedLines(e.indentUnit(d))
 		return nil
 	}
-	var line []rune // the caret line with the indents applied so far
-	lineNo, shift := -1, 0
-	size := e.tabSizeOf(d)
-	d.editAtCarets(func(c caret) edit {
-		text := "\t"
-		if !e.indentTabs(d) {
-			if c.head.Line != lineNo {
-				lineNo, shift = c.head.Line, 0
-				line = []rune(d.Buffer.Line(lineNo))
-			}
-			at := c.head.Col + shift
-			col := displayColumn(line, at, size)
-			text = strings.Repeat(" ", size-col%size)
-			line = slices.Insert(line, at, []rune(text)...)
-			shift += len(text)
-		}
-		return replaceEdit(c, text)
-	})
+	unit := e.indentUnit(d)
+	d.editAtCarets(func(c caret) edit { return replaceEdit(c, unit) })
 	return nil
 }
 
@@ -477,6 +453,7 @@ func (d *Document) indentSelectedLines(unit string) {
 		c := &cs[i]
 		selected := c.anchor != c.head
 		c.anchor = indentedPoint(c.anchor, lines, width, selected)
+		c.want = 0
 		c.head = indentedPoint(c.head, lines, width, false)
 	}
 	before := d.Cursor
@@ -556,6 +533,17 @@ func (d *Document) addCaretVertical(dir, tabSize int) error {
 // selections are cleared. The primary caret stays on the first line it covers.
 // Carets that land on the same line end merge.
 func (d *Document) cursorsToLineEnds() {
+	if d.large != nil {
+		n := 0
+		for _, c := range d.allCarets() {
+			first, last := caretLines(c)
+			n += last - first + 1
+		}
+		if n > maxLargeCarets {
+			d.failPlan(errTooManyCarets())
+			return
+		}
+	}
 	var out []caret
 	for _, c := range d.allCarets() {
 		first, last := caretLines(c)
@@ -600,13 +588,14 @@ func registerCursorHandlers(h map[Action]handler) {
 	h["insert_tab"] = withCarets(h["insert_tab"], tabAtCarets)
 	h["delete_backward"] = withCarets(h["delete_backward"], deleteBackwardAtCarets)
 	h["delete_forward"] = withCarets(h["delete_forward"], deleteForwardAtCarets)
+	registerMotionCaretHandlers(h)
 	h["undo"] = collapseCarets(h["undo"])
 	h["redo"] = collapseCarets(h["redo"])
 	h["add_cursor_above"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		return d.addCaretVertical(-1, e.opts.TabSize)
+		return d.addCaretVertical(-1, e.tabSizeOf(d))
 	})
 	h["add_cursor_below"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		return d.addCaretVertical(1, e.opts.TabSize)
+		return d.addCaretVertical(1, e.tabSizeOf(d))
 	})
 	h["add_cursor_next_match"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
 		return d.addNextMatch()
@@ -615,11 +604,13 @@ func registerCursorHandlers(h map[Action]handler) {
 		d.cursorsToLineEnds()
 		return nil
 	})
-	// Escape sends this action. With no extra carets it does nothing and
-	// reports nothing.
+	// Escape sends this action. It drops the extra carets, the selection and mark
+	// mode, as Fresh does, and reports nothing.
 	h["remove_secondary_cursors"] = func(e *Editor, _ map[string]any) error {
 		if d := e.Active(); d != nil {
 			d.clearCarets()
+			d.Sel = nil
+			delete(e.extras.marked, d)
 		}
 		return nil
 	}

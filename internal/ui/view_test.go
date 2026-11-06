@@ -68,6 +68,7 @@ func (r realDoc) Encoding() string                  { return r.d.Encoding() }
 func (r realDoc) LineEnding() string                { return r.d.LineEnding() }
 func (r realDoc) ViewSettings() editor.ViewSettings { return r.d.ViewSettings() }
 func (r realDoc) Language() string                  { return r.d.Language() }
+func (r realDoc) Version() uint64                   { return r.d.Buffer.Version() }
 func (r realDoc) Cursors() []editor.Caret           { return r.d.Cursors() }
 func (r realDoc) Folds(tab int) []fold.Range        { return r.d.Folds(tab) }
 func (r realDoc) Folded(line int) bool              { return r.d.Folded(line) }
@@ -619,5 +620,37 @@ func TestFoldIndicatorsCurrentBufferHidesTheArrow(t *testing.T) {
 	runAction(t, m, "toggle_fold_indicators_current_buffer")
 	if got := viewCell(t, m, x, y).Text; got == "▾" || got == "▸" {
 		t.Errorf("the fold arrow is still drawn: %q", got)
+	}
+}
+
+// TestOccurrenceHighlightGoesOffWithAnEditUntilTheCaretMoves is Fresh's rule: typing
+// drops the highlight, and it stays off until the caret moves for another reason.
+func TestOccurrenceHighlightGoesOffWithAnEditUntilTheCaretMoves(t *testing.T) {
+	o := DefaultViewOptions()
+	o.HighlightOccurrences = true
+	m, _ := viewModel(t, o, "fo foo foo\n", 40, 8)
+	l := m.layout()
+	marked := func(col int) bool {
+		return viewCell(t, m, l.textX+col, l.bodyTop).Style.BG != viewCell(t, m, l.textX+3, l.bodyTop).Style.BG
+	}
+	frame := func() { m.Update(tea.WindowSizeMsg{Width: 40, Height: 8}) }
+	move := func() {
+		runAction(t, m, "move_right")
+		frame()
+	}
+	move()
+	move()
+	m.Update(typed("o")) // "foo foo foo", the caret at the end of the first foo
+	if marked(4) || marked(8) {
+		t.Error("the other foos are still marked right after the edit")
+	}
+	frame() // a frame that changes nothing
+	if marked(4) {
+		t.Error("the highlight came back without the caret moving")
+	}
+	move() // onto the space after the first foo
+	move() // the start of the second foo
+	if !marked(8) {
+		t.Error("the highlight did not come back after the caret moved")
 	}
 }

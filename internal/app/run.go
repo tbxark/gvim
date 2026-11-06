@@ -17,6 +17,7 @@ import (
 	"github.com/tbxark/gvim/internal/session"
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/ui/find"
 	"github.com/tbxark/gvim/internal/ui/icons"
 	"github.com/tbxark/gvim/internal/workspace"
 )
@@ -47,6 +48,8 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	defer rt.close()
 	runErr := ui.Run(ctx, rt.model)
+	// An error ends the program with the user's text unsettled: a signal, not a quit.
+	rt.interrupted = runErr != nil
 	rt.exit()
 	return runErr
 }
@@ -55,9 +58,24 @@ func Run(ctx context.Context, opts Options) error {
 // and fast. Then the language servers stop and the dock closes, each with its own
 // deadline, so a hung server or shell delays only its own step and never the save.
 func (r *runtime) exit() {
+	if err := r.saveSearch(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: search history:", err)
+	}
+	if r.interrupted && r.sessionDir == "" && r.recoveryWriter != nil {
+		// No session is saved, so the recovery copy is the only one of the unsaved text.
+		// Write it once more, as it stands now, and keep it.
+		_ = r.recoveryWriter.Plan()()
+	}
 	if err := r.save(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: session:", err)
+	} else if r.recovery != "" && (!r.interrupted || r.sessionDir != "") {
+		if clearRecovery(r.recovery) == nil {
+			_ = os.RemoveAll(r.recovery)
+		}
 	}
+	// The files of large documents are closed after the session is saved: the save
+	// reads the documents.
+	r.ed.Close()
 	r.model.Close()
 }
 
@@ -70,9 +88,21 @@ type runtime struct {
 	projects   *projectOpener
 	watcher    *watch.Watcher // nil when no watch was started
 	sessionDir string         // empty when the session is neither restored nor saved
+	searchDir  string         // where the find history and toggles are kept; empty for nowhere
+	// stashDir is the session directory even when the session is not saved. A stash of
+	// the unsaved edits of a large file can be written there without a session file.
+	stashDir string
 	// kept are the saved files whose unsaved text could not be restored. The session
 	// save lists them, so their stash files survive until the next start.
 	kept []session.FileState
+	// recovery is the crash-recovery directory, which a clean exit empties. It is empty
+	// when there is none.
+	recovery string
+	// recoveryWriter writes the recovery copy; it is nil when there is none.
+	recoveryWriter ui.RecoveryPort
+	// interrupted is set when the program ended by a signal and not a quit. The recovery
+	// copy then stays when no session is saved to hold the unsaved text.
+	interrupted bool
 }
 
 // close stops the file index of the current root and the watcher.
@@ -89,6 +119,75 @@ func (r *runtime) save() error {
 		return nil
 	}
 	return writeSession(r.ed, r.sessionDir, r.model.ExplorerState(), r.kept)
+}
+
+// saveSearch writes the find histories and toggles to the session directory. They
+// are kept after a start with file arguments too, which saves no session.
+func (r *runtime) saveSearch() error {
+	st, ok := r.model.SearchState()
+	if !ok || r.searchDir == "" {
+		return nil
+	}
+	return session.SaveSearch(r.searchDir, session.Search{
+		Find: st.Find, Replace: st.Replace,
+		Case: st.Case, Word: st.Word, Regex: st.Regex, Confirm: st.ConfirmEach,
+	})
+}
+
+// loadSearch gives the model the find state saved by an earlier run.
+func loadSearch(model *ui.Model, dir string) {
+	if dir == "" {
+		return
+	}
+	s, ok, err := session.LoadSearch(dir)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: search history:", err)
+		return
+	}
+	if ok {
+		model.SetSearchState(find.State{
+			Find: s.Find, Replace: s.Replace,
+			Case: s.Case, Word: s.Word, Regex: s.Regex, ConfirmEach: s.Confirm,
+		})
+	}
+}
+
+// stashForQuit writes the unsaved edits of the large documents before the program
+// ends, and returns the error that stops the quit when it cannot. Such a document is
+// not held whole, so its edits survive only as a stash. With a saved session the
+// stash is part of the session. Without one, when files were given on the command
+// line, each stash is a file of its own in the session directory.
+func (r *runtime) stashForQuit() error {
+	var docs []*editor.Document
+	for _, d := range r.ed.UnsavedDocs() {
+		if d.Large() {
+			docs = append(docs, d)
+		}
+	}
+	if len(docs) == 0 {
+		return nil
+	}
+	if r.sessionDir != "" {
+		return r.save()
+	}
+	if r.stashDir == "" {
+		return errors.New("there is no session directory to keep them in")
+	}
+	for _, d := range docs {
+		st, ok := d.OverlayStash()
+		if !ok {
+			continue
+		}
+		if _, err := session.StashOverlay(r.stashDir, st); err != nil {
+			return err
+		}
+		if failed, ok := d.FailedStash(); ok {
+			if _, err := session.StashOverlay(r.stashDir, failed); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // buildModel builds the UI model and returns it with the file index of the root. It
@@ -132,11 +231,16 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	tree.SetShowIgnored(cfg.ExplorerShowIgnored)
 	// Without files the editor starts empty, and the welcome screen shows.
 	edOpts := editorOptions(cfg, len(opts.Files) == 0)
-	edOpts.AutoSaveInterval = opts.AutoSaveInterval
+	interval := autoSaveInterval(opts.AutoSaveInterval, cfg)
+	edOpts.AutoSaveInterval = interval
 	edOpts.Root = root
 	edOpts.SessionDir = opts.SessionDir
 	ed := newEditor(edOpts)
 	ed.SetFormatters(cfg.Formatters)
+	ed.SetLanguageSettings(languageSettings(cfg))
+	ed.SetStringContext(newStringContext())
+	ed.SetNonCodeContext(newNonCodeContext())
+	ed.SetEphemeralFilePatterns(cfg.EphemeralFilePatterns)
 	var sess session.Session
 	restored := false
 	var failed []unrestored
@@ -152,8 +256,14 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 			tree.SetShowIgnored(s.ShowIgnored)
 		}
 	}
+	var openNotices []string
 	for _, f := range opts.Files {
-		if err := ed.OpenFile(f.Path); err != nil {
+		if err := openFile(ed, f.Path); err != nil {
+			if errors.Is(err, editor.ErrTooLargeToTranscode) {
+				// Only this file is lost: the others open, and the status row says why.
+				openNotices = append(openNotices, err.Error())
+				continue
+			}
 			return nil, err
 		}
 		if f.Line > 0 {
@@ -162,6 +272,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 			}
 		}
 	}
+	recNotice := recoverFromCrash(ed, opts.SessionDir, watching)
 	if opts.Diff && len(ed.Tabs()) != 2 {
 		return nil, errors.New("--diff needs two different files")
 	}
@@ -177,6 +288,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	watcher, events := startWatcher(watching)
 	proj := newProjectOpener(ctx, watcher, root, files)
 	deps := newUIDeps(ed, km, th, tree, files)
+	if a, ok := deps.Editor.(editorAdapter); ok {
+		a.spans.setContext(cfg.HighlightContextBytes)
+	}
 	deps.Settings = settingsFor(opts, cfg)
 	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
 	deps.Settings.IconsMode, deps.Settings.IconsWhy = icon.Mode.String(), icon.Why
@@ -188,32 +302,20 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	deps.HideLineNumbers = !cfg.LineNumbers
 	deps.HideMenuBar = !cfg.ShowMenuBar
 	deps.TabSize = cfg.TabSize
-	deps.View = &ui.ViewOptions{
-		ShowTabBar:              cfg.ShowTabBar,
-		ShowStatusBar:           cfg.ShowStatusBar,
-		ShowPromptLine:          cfg.ShowPromptLine,
-		ShowVerticalScrollbar:   cfg.ShowVerticalScrollbar,
-		ShowHorizontalScrollbar: cfg.ShowHorizontalScrollbar,
-		LineWrap:                cfg.LineWrap,
-		HighlightCurrentLine:    cfg.HighlightCurrentLine,
-		HighlightOccurrences:    cfg.HighlightOccurrences,
-		ShowWhitespace:          cfg.ShowWhitespace,
-		CursorStyle:             cfg.CursorStyle,
-		MouseCapture:            cfg.MouseCapture,
-		MouseHover:              cfg.MouseHover,
-		ScrollSync:              cfg.ScrollSync,
-		UIIcons:                 icon.Mode.String(),
-	}
+	deps.View = viewOptions(cfg, icon.Mode.String())
+	deps.Languages = languageSettings(cfg)
 	plugins, pluginNotices := loadPlugins(ed, deps.Editor, cfg.PluginTimeout)
 	deps.Root = ui.RootPorts{
 		Projects: proj,
-		Grep:     liveGrep{},
+		Grep:     grepFor(edOpts),
 		Git:      gitStatus{},
 		Watch:    events,
-		AutoSave: opts.AutoSaveInterval,
+		AutoSave: interval,
 		Plugins:  plugins,
 		Stashes:  stashesFor(opts.SessionDir),
 	}
+	deps.Root.AutoRevertPoll = autoRevertPoll(cfg)
+	deps.Root.Recovery, deps.Root.RecoveryEvery = recoveryPort(ed, cfg, opts.SessionDir, watching)
 	if watcher != nil {
 		// Assign only a running watcher: a nil *watch.Watcher in the interface is not nil.
 		deps.Root.WatchDirs = watcher
@@ -226,11 +328,16 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 		notices = append(notices, diags[0].String())
 	}
 	notices = append(notices, pluginNotices...)
+	notices = append(notices, openNotices...)
 	if n := restoreNotice(failed); n != "" {
 		notices = append(notices, n)
 	}
+	if recNotice != "" {
+		notices = append(notices, recNotice)
+	}
 	deps.Notice = strings.Join(notices, "; ")
 	model := newUI(deps)
+	loadSearch(model, opts.SessionDir)
 	model.SetDock(ui.DockPorts{Starter: termStarter{ctx: ctx}, Clipboard: systemClipboard{}})
 	if opts.Diff {
 		// The two files are in tabs 0 and 1: the tab count was checked above.
@@ -242,14 +349,21 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	if len(opts.Files) > 0 {
 		sessionDir = ""
 	}
-	return &runtime{
+	rt := &runtime{
 		model:      model,
 		ed:         ed,
 		projects:   proj,
 		watcher:    watcher,
 		sessionDir: sessionDir,
+		searchDir:  opts.SessionDir,
+		stashDir:   opts.SessionDir,
 		kept:       keptFiles(failed),
-	}, nil
+		recovery:   recoveryDirFor(opts.SessionDir, watching),
+
+		recoveryWriter: deps.Root.Recovery,
+	}
+	model.SetQuitStash(rt.stashForQuit)
+	return rt, nil
 }
 
 // keptFiles returns the files of failed, in order, for the session save to list.
@@ -292,6 +406,21 @@ func editorOptions(cfg config.Config, empty bool) editor.Options {
 		TrimTrailingWhitespace: cfg.TrimTrailingWhitespace,
 		EnsureFinalNewline:     cfg.EnsureFinalNewline,
 		DefaultLineEnding:      ending,
+
+		AutoClose:                              cfg.AutoClose,
+		AutoSurround:                           cfg.AutoSurround,
+		VirtualSpace:                           cfg.VirtualSpace,
+		ScrollOffset:                           cfg.ScrollOffset,
+		AutoReadOnly:                           cfg.AutoReadOnly,
+		SnapshotInterval:                       cfg.SnapshotInterval,
+		ConfirmQuit:                            cfg.ConfirmQuit,
+		AutoCreateEmptyBufferOnLastBufferClose: cfg.AutoCreateEmptyBufferOnLastBufferClose,
+		RecoveryEnabled:                        cfg.RecoveryEnabled,
+		AutoRecoverySaveIntervalSecs:           cfg.AutoRecoverySaveIntervalSecs,
+		AutoRevertPollIntervalMS:               cfg.AutoRevertPollIntervalMS,
+		LargeFileThresholdBytes:                cfg.LargeFileThresholdBytes,
+		LargeFileMode:                          true,
+		EstimatedLineLength:                    cfg.EstimatedLineLength,
 	}
 }
 

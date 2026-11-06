@@ -55,7 +55,7 @@ func (m *Model) resizeFocused(delta int) {
 	}
 	parent.ratio = clampRatio(parent.share() + delta)
 	m.syncViewport()
-	m.revealCaretVisual()
+	m.revealCaretVisual(0)
 }
 
 // toggleMaximize shows only the focused pane, or, when it is already shown alone, lays out
@@ -72,5 +72,5 @@ func (m *Model) toggleMaximize() {
 	}
 	m.splits.maximized = !m.splits.maximized
 	m.syncViewport()
-	m.revealCaretVisual()
+	m.revealCaretVisual(0)
 }

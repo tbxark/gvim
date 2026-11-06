@@ -2,24 +2,34 @@ package editorpane
 
 import (
 	"image/color"
-	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/display"
 	"github.com/tbxark/gvim/internal/ui/grid"
 )
 
-// guideGlyph is the indent guide drawn in the leading blanks.
-const guideGlyph = '│'
-
 // markOccurrences sets the occurrence mark of each whole-word match of the word at
-// the caret. It is set on the cells of the line, which the search matches then
-// override.
-func (f frame) markOccurrences(raw []rune, cells []cell) {
-	if f.occWord == "" || f.styles.Occurrence.BG == nil {
+// the caret, or of each match of the selected text. It is set on the cells of line
+// i, which the search matches then override. The selection itself is left to the
+// selection color.
+func (f frame) markOccurrences(i int, raw []rune, cells []cell) {
+	if f.styles.Occurrence.BG == nil {
 		return
 	}
-	for _, s := range display.Occurrences([]string{string(raw)}, f.occWord) {
+	var spans []display.Span
+	switch fx := f.fx; {
+	case fx.occSel != "":
+		for _, col := range display.Matches(string(raw), fx.occSel) {
+			if i == fx.occLine && col+f.off == fx.occFrom {
+				continue
+			}
+			spans = append(spans, display.Span{Start: col, End: col + utf8.RuneCountInString(fx.occSel)})
+		}
+	case f.occWord != "":
+		spans = display.Occurrences([]string{string(raw)}, f.occWord)
+	}
+	for _, s := range spans {
 		from, to := expandedIndex(raw, s.Start, f.tab), expandedIndex(raw, s.End, f.tab)
 		for k := from; k < to && k < len(cells); k++ {
 			cells[k].match = max(cells[k].match, matchOccurrence)
@@ -37,7 +47,7 @@ func (f frame) markDiagnostics(i int, raw []rune, cells []cell) {
 		if d.Severity < SeverityError || d.Severity > SeverityHint {
 			continue
 		}
-		from, to := expandedIndex(raw, d.Start, f.tab), expandedIndex(raw, d.End, f.tab)
+		from, to := expandedIndex(raw, d.Start-f.off, f.tab), expandedIndex(raw, d.End-f.off, f.tab)
 		for k := from; k < to && k < len(cells); k++ {
 			if cells[k].diag == 0 || d.Severity < cells[k].diag {
 				cells[k].diag = d.Severity
@@ -60,34 +70,6 @@ func (f frame) diagnosticFG(sev int) color.Color {
 		return f.styles.DiagHint.FG
 	}
 	return nil
-}
-
-// markWhitespace replaces the blanks of a line with the visible whitespace marks
-// and draws the indent guides, when those options are on. The marks come from
-// display.VisibleWhitespace, which gives one rune per cell of the expanded line,
-// so the two sequences line up. A carriage return has no cell and is left out.
-func (f frame) markWhitespace(text string, cells []cell) {
-	if f.visWS {
-		vis := []rune(display.VisibleWhitespace(strings.ReplaceAll(text, "\r", ""), f.tab))
-		if len(vis) == len(cells) {
-			for j, r := range vis {
-				if r == '→' && f.noTabArrows {
-					r = ' '
-				}
-				if r != cells[j].r {
-					cells[j].r, cells[j].ws = r, true
-				}
-			}
-		}
-	}
-	if f.guides {
-		// A guide takes the place of a blank or a space mark, and leaves a tab arrow.
-		for _, col := range display.IndentGuides(text, f.tab) {
-			if col < len(cells) && (cells[col].r == ' ' || cells[col].r == selectedBlank) {
-				cells[col].r, cells[col].ws = guideGlyph, true
-			}
-		}
-	}
 }
 
 // paintRulers tints the ruler columns of the text rows. A ruler shows only on the

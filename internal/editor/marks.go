@@ -120,7 +120,7 @@ func jumpToBookmark(e *Editor, args map[string]any) error {
 		return fmt.Errorf("bookmark '%s': buffer no longer exists", slot)
 	}
 	e.pushJump()
-	e.goToJump(jumpEntry(mark))
+	e.goToJump(jumpEntry{doc: mark.doc, pos: mark.pos})
 	e.setStatus(fmt.Sprintf("Jumped to bookmark '%s'", slot))
 	return nil
 }

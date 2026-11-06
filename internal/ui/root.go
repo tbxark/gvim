@@ -21,13 +21,15 @@ type rootState struct {
 	// watched holds the folders of the open documents that were asked of the file
 	// watcher, so each one is added once. See watchSync.
 	watched map[string]bool
+	// recoveryFailed is set while the last write of the crash-recovery copy failed.
+	recoveryFailed bool
 }
 
 // rootInit returns the commands the root starts when the program starts: the git
 // status of the tree, the file watch, the folders of the open documents and the
 // auto-save tick.
 func (m *Model) rootInit() tea.Cmd {
-	return tea.Batch(m.gitCmd(), m.autoSaveCmd(), m.watchWait(), m.watchSync())
+	return tea.Batch(m.gitCmd(), m.autoSaveCmd(), m.watchWait(), m.watchSync(), m.revertPollCmd(), m.recoveryCmd())
 }
 
 // rootMessage handles the messages of the root features. It reports whether it
@@ -43,6 +45,10 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.autoSaveTick(), true
 	case autoSaveDoneMsg:
 		return m.autoSaveDone(msg), true
+	case recoveryTickMsg:
+		return m.recoveryTick(), true
+	case recoveryDoneMsg:
+		return m.recoveryDone(msg), true
 	case treeListingMsg:
 		return m.treeListed(msg), true
 	case watchMsg:
@@ -50,8 +56,11 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 	case browser.Choose:
 		return m.switchProject(msg.Path), true
 	case palette.OpenLineMsg:
-		m.openFileAt(msg.Path, msg.Line, msg.Col)
+		cmd := m.openFileCmd(msg.Path, false, msg.Line, msg.Col)
 		m.focusEditor()
+		return cmd, true
+	case openLoadedMsg:
+		m.openLoaded(msg)
 		return nil, true
 	case palette.GrepResultMsg:
 		m.root.lastGrep = msg.Text

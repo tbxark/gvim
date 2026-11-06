@@ -66,7 +66,8 @@ func TestIndentGuidesMarkEachLevelInTheLeadingBlanks(t *testing.T) {
 		{"two levels, first column", 6, 1, "│"},
 		{"two levels, second level", 10, 1, "│"},
 		{"no indent, no guide", 6, 2, "c"},
-		{"two blanks are not a level", 6, 3, " "},
+		{"two blanks under a line at column 0 get its guide", 6, 3, "│"},
+		{"the second blank is not a guide", 7, 3, " "},
 	}
 	for _, tc := range tests {
 		if got := cellAt(t, g, tc.x, tc.y).Text; got != tc.want {
@@ -85,15 +86,32 @@ func TestIndentGuidesOffByDefault(t *testing.T) {
 	}
 }
 
-func TestIndentGuideKeepsATabArrow(t *testing.T) {
-	p := Pane{
-		Doc:               newDoc("\tx"),
-		IndentGuides:      true,
-		VisibleWhitespace: true,
-		Styles:            Styles{Whitespace: grid.Style{FG: cGray}},
+func TestIndentGuideKeepsTheTabStopAndMovesTheTabArrowRight(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string // the text cells from column 6
+	}{
+		{"one tab", "\tx", "│→  x"},
+		{"two tabs", "\t\tx", "│→  │→  x"},
+		{"a tab of one cell keeps its arrow", "   \t\tx", "│··→│→  x"},
 	}
-	g := p.Render(20, 1)
-	if got := cellAt(t, g, 6, 0).Text; got != "→" {
-		t.Errorf("first cell of the tab = %q, want the arrow", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := Pane{
+				Doc:               newDoc(tc.line),
+				IndentGuides:      true,
+				VisibleWhitespace: true,
+				Styles:            Styles{Whitespace: grid.Style{FG: cGray}},
+			}
+			g := p.Render(20, 1)
+			var got []rune
+			for i := range len([]rune(tc.want)) {
+				got = append(got, []rune(cellAt(t, g, 6+i, 0).Text)...)
+			}
+			if string(got) != tc.want {
+				t.Errorf("cells = %q, want %q", string(got), tc.want)
+			}
+		})
 	}
 }

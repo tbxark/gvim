@@ -45,11 +45,11 @@ type ShellJob struct {
 	doc      *Document
 	from, to buffer.Pos
 	selected bool
-	// snapshot is the whole text of doc when BeginShell ran. EndShell applies a
-	// replace only while the text is still the same, so an edit anywhere in the
-	// document while the command runs stops the result, not only an edit inside
-	// the range.
-	snapshot string
+	// snapshot marks the whole text of doc when BeginShell ran (see contentMark).
+	// EndShell applies a replace only while the text is still the same, so an edit
+	// anywhere in the document while the command runs stops the result, not only an
+	// edit inside the range.
+	snapshot contentMark
 	// format is true for format_buffer, so that the status says it formatted.
 	format bool
 }
@@ -101,16 +101,28 @@ func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error
 	if replace && d.readOnly {
 		return ShellJob{}, ErrReadOnly
 	}
+	if replace {
+		if err := d.refuseEditWhileRestoring(string(action)); err != nil {
+			return ShellJob{}, err
+		}
+	}
 	from, to := buffer.Pos{}, d.Buffer.End()
 	selected := d.HasSelection()
 	if selected {
 		from, to = d.Sel.Ordered()
+	} else if d.large != nil {
+		// The input would be the whole text of the file.
+		return ShellJob{}, errLargeAction(action)
 	}
-	input := d.Buffer.Range(from, to)
+	_ = d.takeRefusal()
+	input, err := d.readRange(from, to)
+	if err != nil {
+		return ShellJob{}, fmt.Errorf("%s: %w", action, err)
+	}
 	// Without a selection the input is the whole text, so it is the snapshot too.
-	snapshot := input
+	snapshot := contentMark{text: input}
 	if selected {
-		snapshot = d.Buffer.Text()
+		snapshot = d.contentMark()
 	}
 	return ShellJob{
 		Command:  command,
@@ -164,7 +176,10 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 	if d.readOnly {
 		return ErrReadOnly
 	}
-	if e.indexOfDoc(d) < 0 || d.Buffer.Text() != job.snapshot {
+	if err := d.refuseEditWhileRestoring("shell_command_replace"); err != nil {
+		return err
+	}
+	if e.indexOfDoc(d) < 0 || d.contentMark() != job.snapshot {
 		return errShellStale
 	}
 	caret := d.Cursor

@@ -47,6 +47,7 @@ type Styles struct {
 	DiagWarning    lipgloss.Style // diagnostic.warning_fg, the foreground only
 	DiagInfo       lipgloss.Style // diagnostic.info_fg, the foreground only
 	DiagHint       lipgloss.Style // diagnostic.hint_fg, the foreground only
+	Decor          Decor          // guides, bracket highlights and selected whitespace marks
 }
 
 // Theme keys of the roles that the editor pane and the status bar paint with.
@@ -100,6 +101,7 @@ func New(th theme.Theme) Styles {
 		DiagWarning:    build(th, refDiagWarning, ref{}),
 		DiagInfo:       build(th, refDiagInfo, ref{}),
 		DiagHint:       build(th, refDiagHint, ref{}),
+		Decor:          newDecor(th),
 	}
 }
 

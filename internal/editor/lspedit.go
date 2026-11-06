@@ -35,6 +35,9 @@ func (e *Editor) ApplyLSPEdits(path string, edits []LSPEdit) error {
 	if len(edits) == 0 {
 		return nil
 	}
+	if err := d.refuseEditWhileRestoring("apply edits"); err != nil {
+		return err
+	}
 	ordered := slices.Clone(edits)
 	slices.SortStableFunc(ordered, func(a, b LSPEdit) int {
 		switch {

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/tbxark/gvim/internal/buffer"
 )
 
 // Version is the only session format version this package reads and writes.
@@ -21,6 +23,10 @@ const (
 	fileName    = "session.json"
 	stashPrefix = "stash-"
 	stashSuffix = ".txt"
+	// An overlay stash holds the unsaved edits of a large file as JSON (see
+	// OverlayStash).
+	overlayPrefix = "overlay-"
+	overlaySuffix = ".json"
 )
 
 // Session is the saved state of one editor session.
@@ -41,6 +47,29 @@ type FileState struct {
 	Col       int    `json:"col"`
 	Top       int    `json:"top"`
 	StashFile string `json:"stashFile,omitempty"`
+	// OverlayFile names the overlay stash of a large file: its unsaved edits as a
+	// delta over the file (StashOverlay). A file has a StashFile or an OverlayFile,
+	// never both.
+	OverlayFile string `json:"overlayFile,omitempty"`
+}
+
+// OverlayStash is the unsaved edits of a large file, kept without the file's
+// text: the edited lines and which lines of the file stay as they are. It is
+// valid only over the file it was taken from, which the identity fields name.
+type OverlayStash struct {
+	Version int `json:"version"`
+	// Path is the file the edits belong to.
+	Path string `json:"path"`
+	// Size and MTimeUnixNano are the size and modification time of the file the
+	// document read, Skip the bytes of byte-order mark before its text, and EOL the
+	// line ending of the document. The overlay is put back only onto a file that
+	// has the same values.
+	Size          int64  `json:"size"`
+	MTimeUnixNano int64  `json:"mtimeUnixNano"`
+	Skip          int64  `json:"skip,omitzero"`
+	EOL           string `json:"eol,omitempty"`
+	// Overlay is the edits.
+	Overlay buffer.OverlayState `json:"overlay"`
 }
 
 // Save writes s to dir/session.json. Save always writes the current Version,
@@ -69,14 +98,17 @@ func Save(dir string, s Session) error {
 	if prevErr != nil {
 		return nil
 	}
-	keep := make(map[string]bool, len(s.Files))
+	keep := make(map[string]bool, 2*len(s.Files))
 	for _, f := range s.Files {
 		keep[f.StashFile] = true
+		keep[f.OverlayFile] = true
 	}
 	var stale []string
 	for _, f := range prev.Files {
-		if !keep[f.StashFile] {
-			stale = append(stale, f.StashFile)
+		for _, name := range []string{f.StashFile, f.OverlayFile} {
+			if !keep[name] {
+				stale = append(stale, name)
+			}
 		}
 	}
 	// Remove stashes only after the new session is on disk. If Save fails
@@ -134,14 +166,51 @@ func Load(dir string) (Session, bool, error) {
 // StashContent stores text in a new stash file in dir and returns the file's
 // name. Put the name in FileState.StashFile so that Save keeps the file.
 func StashContent(dir, text string) (string, error) {
+	return writeStash(dir, stashPrefix+"*"+stashSuffix, []byte(text))
+}
+
+// StashOverlay stores the overlay of a large file in a new stash file in dir and
+// returns the file's name. Put the name in FileState.OverlayFile so that Save keeps
+// the file. The file is JSON, so the edited lines can be read from it by hand.
+func StashOverlay(dir string, o OverlayStash) (string, error) {
+	o.Version = Version
+	data, err := json.Marshal(o, jsontext.Multiline(true))
+	if err != nil {
+		return "", fmt.Errorf("session: encode overlay: %w", err)
+	}
+	return writeStash(dir, overlayPrefix+"*"+overlaySuffix, data)
+}
+
+// ReadOverlay returns the overlay stash file name in dir. name must be an overlay
+// stash name returned by StashOverlay.
+func ReadOverlay(dir, name string) (OverlayStash, error) {
+	if !isOverlayName(name) {
+		return OverlayStash{}, fmt.Errorf("session: invalid overlay stash name %q", name)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return OverlayStash{}, err
+	}
+	var o OverlayStash
+	if err := json.Unmarshal(data, &o); err != nil {
+		return OverlayStash{}, fmt.Errorf("session: decode %s: %w", name, err)
+	}
+	if o.Version != Version {
+		return OverlayStash{}, fmt.Errorf("session: unsupported overlay version %d, want %d", o.Version, Version)
+	}
+	return o, nil
+}
+
+// writeStash writes data to a new file in dir, named by pattern, and syncs it.
+func writeStash(dir, pattern string, data []byte) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	f, err := os.CreateTemp(dir, stashPrefix+"*"+stashSuffix)
+	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return "", err
 	}
-	_, err = f.WriteString(text)
+	_, err = f.Write(data)
 	if err == nil {
 		err = f.Sync()
 	}
@@ -158,7 +227,7 @@ func StashContent(dir, text string) (string, error) {
 // ReadStash returns the text of the stash file name in dir. name must be a
 // stash name returned by StashContent.
 func ReadStash(dir, name string) (string, error) {
-	if !isStashName(name) {
+	if !isTextName(name) {
 		return "", fmt.Errorf("session: invalid stash name %q", name)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, name))
@@ -168,12 +237,22 @@ func ReadStash(dir, name string) (string, error) {
 	return string(data), nil
 }
 
-// isStashName reports whether name is a bare file name that StashContent could
-// have returned. A name with a directory part is rejected, so ReadStash never
-// leaves dir.
+// isStashName reports whether name is a bare file name that StashContent or
+// StashOverlay could have returned. A name with a directory part is rejected, so
+// no read or removal leaves dir.
 func isStashName(name string) bool {
+	return isTextName(name) || isOverlayName(name)
+}
+
+func isTextName(name string) bool {
 	return strings.HasPrefix(name, stashPrefix) &&
 		strings.HasSuffix(name, stashSuffix) &&
+		filepath.Base(name) == name
+}
+
+func isOverlayName(name string) bool {
+	return strings.HasPrefix(name, overlayPrefix) &&
+		strings.HasSuffix(name, overlaySuffix) &&
 		filepath.Base(name) == name
 }
 

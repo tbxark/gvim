@@ -175,10 +175,11 @@ func (m *modal) key(kp tea.KeyPressMsg) tea.Cmd {
 	if m.field != nil {
 		m.focus = 0
 		before := m.field.value()
-		m.field.key(kp)
+		cmd := m.field.key(kp)
 		if m.field.value() != before {
 			m.errText = ""
 		}
+		return cmd
 	}
 	return nil
 }

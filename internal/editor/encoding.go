@@ -33,6 +33,11 @@ var labels = map[string]string{
 	"windows-1252": "Windows-1252",
 	"iso-8859-1":   "Latin-1",
 	"shift_jis":    "Shift-JIS",
+	"windows-1250": "Windows-1250",
+	"windows-1251": "Windows-1251",
+	"gbk":          "GBK",
+	"gb18030":      "GB18030",
+	"euc-kr":       "EUC-KR",
 }
 
 // byteOrderMark is the U+FEFF that a byte-order mark decodes to. The text of a
@@ -49,8 +54,13 @@ var bomCodecs = map[string]bool{"utf-8-bom": true, "utf-16le": true, "utf-16be":
 // mark back. Other data gets the encoding that encoding.Detect picks, and is
 // decoded with it. When that fails and the detected encoding is windows-1252,
 // shift_jis is tried next, because Shift_JIS text can hold bytes that windows-1252
-// leaves undefined. Data that does not decode returns an error wrapping
-// ErrNotDecodable.
+// leaves undefined. Detection looks at the first 8 KiB only, so when the detected
+// encoding is another legacy one (a Windows code page or a CJK encoding) a later
+// byte can be undefined in it; then windows-1252 and iso-8859-1 are tried, and
+// iso-8859-1 defines every byte. Data that does not decode returns an error
+// wrapping ErrNotDecodable. A byte-order mark or a windows-1252 verdict that fails is
+// not retried in iso-8859-1, so broken UTF-16 and undefined windows-1252 bytes stay
+// refused.
 func decodeFile(data []byte) (text, codec string, err error) {
 	if utf8.Valid(data) {
 		if rest, ok := strings.CutPrefix(string(data), byteOrderMark); ok {
@@ -59,16 +69,24 @@ func decodeFile(data []byte) (text, codec string, err error) {
 		return string(data), defaultCodec, nil
 	}
 	codec = encoding.Detect(data)
-	text, err = encoding.Decode(codec, data)
-	if err != nil && codec == "windows-1252" {
-		if sjis, sjisErr := encoding.Decode("shift_jis", data); sjisErr == nil {
-			return sjis, "shift_jis", nil
+	candidates := []string{codec}
+	switch codec {
+	case "windows-1252":
+		candidates = append(candidates, "shift_jis")
+	case "windows-1250", "windows-1251", "gbk", "gb18030", "euc-kr", "shift_jis":
+		candidates = append(candidates, "windows-1252", "iso-8859-1")
+	}
+	var first error
+	for _, c := range candidates {
+		text, err = encoding.Decode(c, data)
+		if err == nil {
+			return text, c, nil
+		}
+		if first == nil {
+			first = err
 		}
 	}
-	if err != nil {
-		return "", "", fmt.Errorf("%w: %w", ErrNotDecodable, err)
-	}
-	return text, codec, nil
+	return "", "", fmt.Errorf("%w: %w", ErrNotDecodable, first)
 }
 
 // encodeText returns text in codec, with the byte-order mark the codec has. The
@@ -125,15 +143,32 @@ func codecArg(action Action, args map[string]any) (string, error) {
 	return name, nil
 }
 
-// setEncoding changes the encoding that the next save uses. The text is kept. A
-// save that the new encoding cannot hold fails, and the buffer stays modified.
+// textSample is the text that the encoding label is judged by: all of the text of a
+// document, and the head of a large document, as when the file was opened.
+func (d *Document) textSample() string {
+	if d.large != nil {
+		return d.Buffer.TextPrefix(largeSampleSize)
+	}
+	return d.Buffer.Text()
+}
+
+// setEncoding changes the encoding that the next save uses. The text is kept, and
+// a new encoding marks the document modified. A save that the new encoding cannot
+// hold fails, and the buffer stays modified. A large document takes only utf-8 and
+// utf-8-bom, and any other name returns ErrLargeFile.
 func setEncoding(e *Editor, d *Document, args map[string]any) error {
 	name, err := codecArg("set_encoding", args)
 	if err != nil {
 		return err
 	}
+	if d.large != nil && name != defaultCodec && name != "utf-8-bom" {
+		// A large document is read and written as UTF-8 text, with or without a
+		// byte-order mark. Any other encoding would transcode the whole file.
+		return fmt.Errorf("set_encoding: %w", ErrLargeFile)
+	}
+	d.markMetaChanged(name != d.codecName())
 	d.codec = name
-	d.encoding = encodingLabel(name, d.Buffer.Text())
+	d.encoding = encodingLabel(name, d.textSample())
 	e.setStatus("Encoding " + d.encoding)
 	return nil
 }
@@ -150,7 +185,13 @@ func reloadWithEncoding(e *Editor, d *Document, args map[string]any) error {
 	if d.Path == "" {
 		return fmt.Errorf("reload: %w", ErrNoPath)
 	}
-	if d.Modified() && !forced(args) {
+	// The reload reads the whole file. That is not done for a document in large file
+	// mode, nor for a file that has grown into one since it was opened.
+	if d.large != nil || e.isLargePath(d.Path) {
+		return fmt.Errorf("reload_with_encoding: %w", ErrLargeFile)
+	}
+	// A changed encoding or line ending alone is given up by the reload.
+	if d.Buffer.Modified() && !forced(args) {
 		return fmt.Errorf("%s: %w", d.Name(), ErrUnsaved)
 	}
 	// The disk state is taken before the read, as readDocument does.
@@ -164,6 +205,7 @@ func reloadWithEncoding(e *Editor, d *Document, args map[string]any) error {
 		return fmt.Errorf("reload %s: %w: %w", d.Path, ErrNotDecodable, err)
 	}
 	text, eol := splitLineEnding(decoded)
+	_ = d.Buffer.Close()
 	d.Buffer = buffer.New(text)
 	d.Cursor = d.Buffer.Clamp(d.Cursor)
 	d.Sel = nil
@@ -171,7 +213,9 @@ func reloadWithEncoding(e *Editor, d *Document, args map[string]any) error {
 	d.folded = nil
 	d.saved = text
 	d.eol = eol
+	d.ends = lineEnds(decoded)
 	d.codec = name
+	d.metaDirty = false
 	d.encoding = encodingLabel(name, text)
 	d.disk = disk
 	e.setStatus("Reloaded as " + d.encoding)

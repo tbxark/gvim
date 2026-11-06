@@ -28,13 +28,48 @@ func TestFindLineHighlights(t *testing.T) {
 		want  []search.Highlight
 	}{
 		{
-			name:  "the open bar marks the selected match and not the others",
+			name:  "the open bar marks every match and none as current while typing",
 			setup: func(m *Model) { openBarWith(m, "foo") },
 			line:  0,
+			want: []search.Highlight{
+				{Line: 0, Start: 0, End: 3},
+				{Line: 0, Start: 8, End: 11},
+			},
+		},
+		{
+			name: "Enter closes the bar and keeps the highlights, the selected match current",
+			setup: func(m *Model) {
+				openBarWith(m, "foo")
+				press(m, special(tea.KeyEnter))
+			},
+			line: 0,
 			want: []search.Highlight{
 				{Line: 0, Start: 0, End: 3, Current: true},
 				{Line: 0, Start: 8, End: 11},
 			},
+		},
+		{
+			name: "F3 after Enter moves the current match",
+			setup: func(m *Model) {
+				openBarWith(m, "foo")
+				press(m, special(tea.KeyEnter))
+				press(m, special(tea.KeyF3))
+			},
+			line: 0,
+			want: []search.Highlight{
+				{Line: 0, Start: 0, End: 3},
+				{Line: 0, Start: 8, End: 11, Current: true},
+			},
+		},
+		{
+			name: "clear_search drops the highlights of a kept search",
+			setup: func(m *Model) {
+				openBarWith(m, "foo")
+				press(m, special(tea.KeyEnter))
+				m.editorDo("clear_search", nil)
+			},
+			line: 0,
+			want: nil,
 		},
 		{
 			name:  "a later line gets its own matches",
@@ -123,9 +158,12 @@ func TestPaneHighlightsAreTheFindRuns(t *testing.T) {
 		want  []editorpane.Highlight
 	}{
 		{
-			name:  "an open bar gives the match runs of the line, the selected one marked",
-			setup: func(m *Model) { openBarWith(m, "foo") },
-			line:  0,
+			name: "a kept search gives the match runs of the line, the selected one marked",
+			setup: func(m *Model) {
+				openBarWith(m, "foo")
+				press(m, special(tea.KeyEnter))
+			},
+			line: 0,
 			want: []editorpane.Highlight{
 				{Start: 0, End: 3, Current: true},
 				{Start: 8, End: 11},

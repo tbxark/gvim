@@ -50,14 +50,14 @@ func TestCaretInSpansPicksTheRowOfAnIndex(t *testing.T) {
 	}
 }
 
-func TestExpandCellsTabsAndCarriageReturns(t *testing.T) {
+func TestExpandCellsTabsAndControlCharacters(t *testing.T) {
 	got := expandCells([]rune("a\tb\r!"), nil, nil, defaultTabSize)
 	var text []rune
 	for _, c := range got {
 		text = append(text, c.r)
 	}
-	if string(text) != "a   b!" {
-		t.Errorf("expanded = %q, want %q", string(text), "a   b!")
+	if string(text) != "a   b<0D>!" {
+		t.Errorf("expanded = %q, want %q", string(text), "a   b<0D>!")
 	}
 }
 
@@ -80,5 +80,35 @@ func TestWrappedRowsStaySingleRowsWhenTheWidthIsTooSmall(t *testing.T) {
 	g := p.Render(8, 1)
 	if got := rowsOf(g)[0]; got != "  1 │ h" {
 		t.Errorf("row = %q, want the first character only", got)
+	}
+}
+
+func TestWrapRowsKeepsAGluedRunOnOneRow(t *testing.T) {
+	// glue[i] joins rune i to rune i+1, as the four runes of a control escape are.
+	tests := []struct {
+		name string
+		text string
+		glue []int // indexes joined to the next rune
+		w    int
+		want []span
+	}{
+		{"an escape that does not fit moves down whole", "abcd<07>ef", []int{4, 5, 6}, 6, []span{{0, 4}, {4, 10}}},
+		{"an escape that fits stays", "ab<07>", []int{2, 3, 4}, 6, []span{{0, 6}}},
+		{"an escape ending at the edge stays", "ab<07>cd", []int{2, 3, 4}, 6, []span{{0, 6}, {6, 8}}},
+		{"a blank before the escape still breaks", "ab cd<07>", []int{5, 6, 7}, 6, []span{{0, 3}, {3, 9}}},
+		{"an escape wider than the row is cut", "ab<07>", []int{2, 3, 4}, 3, []span{{0, 2}, {2, 5}, {5, 6}}},
+		{"no glue is the plain rule", "abcd<07>ef", nil, 6, []span{{0, 6}, {6, 10}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			glue := make([]bool, len([]rune(tc.text)))
+			for _, i := range tc.glue {
+				glue[i] = true
+			}
+			got, _ := wrapHanging([]rune(tc.text), tc.w, false, glue)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("wrapHanging(%q, %d) = %v, want %v", tc.text, tc.w, got, tc.want)
+			}
+		})
 	}
 }

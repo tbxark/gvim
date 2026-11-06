@@ -331,9 +331,10 @@ func TestOpenSaveRoundTripBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The input has one CRLF and one LF break, a tie, so the file is LF and
-	// its CRLF line is saved as LF. See TestMixedEndingsSaveWithTheMajorityEnding.
-	if want := "héllo\nworld\n\nx"; string(got) != want {
+	// The input has one CRLF and one LF break, a tie, so the file is LF. The
+	// first line keeps its CRLF and the new lines take LF. See
+	// TestMixedLineEndingsAreKeptOnSave.
+	if want := "héllo\r\nworld\n\nx"; string(got) != want {
 		t.Fatalf("saved bytes = %q, want %q", got, want)
 	}
 	if e.Active().Modified() {

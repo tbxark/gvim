@@ -79,6 +79,15 @@ type Document interface {
 	LineEnding() string
 }
 
+// LargeDoc is the optional view of a Document in large file mode, as *editor.Document
+// has it and the app adapter forwards it. The root asserts it on the active document.
+// Large reports whether the document is in that mode, and Index how much of its line
+// index exists. A document without it is not large.
+type LargeDoc interface {
+	Large() bool
+	Index() buffer.IndexInfo
+}
+
 // TabInfo describes one tab of the tab strip. Path is the file the tab holds, or ""
 // for an untitled tab. The root uses it to watch the folders of the open tabs and to
 // reload the tabs whose files change.
@@ -344,6 +353,10 @@ type Deps struct {
 	Clock func() time.Time
 	// View holds the starting display settings. Nil means DefaultViewOptions.
 	View *ViewOptions
+	// Languages resolves the per-language settings (config languages.<id> merged over
+	// the global options) of a document from its language name and file path. Nil
+	// means no language overrides: the global options apply to every document.
+	Languages editor.SettingsResolver
 	// Root holds the optional ports of the root features: Switch Project, Live
 	// Grep, git markers, the file watcher and the auto-save interval.
 	Root RootPorts

@@ -22,6 +22,9 @@ type lspTab struct {
 	path   string
 	lines  []string
 	cursor buffer.Pos
+	// large makes the tab's document report large file mode, with size bytes.
+	large bool
+	size  int64
 }
 
 // lspEd is an editor whose tabs have paths. It records the files opened, the
@@ -130,6 +133,12 @@ func (d *lspDoc) Selection() (a, h buffer.Pos, ok bool) {
 	return d.t.cursor, d.t.cursor, false
 }
 func (d *lspDoc) LineSpans(int) []syntax.Span { return nil }
+
+// Large and Index are the large file view of the document, when its tab is large.
+func (d *lspDoc) Large() bool { return d.t.large }
+func (d *lspDoc) Index() buffer.IndexInfo {
+	return buffer.IndexInfo{Size: d.t.size, Indexed: d.t.size, Lines: d.LineCount(), Complete: true}
+}
 
 // fakeLSP is an LSPSession that records its calls and returns canned results.
 type fakeLSP struct {

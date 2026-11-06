@@ -14,6 +14,18 @@
 // The package does not choose the platform keymap. Keymap is empty unless a
 // file sets it, and the caller applies its own default.
 //
+// Fresh compatibility. The files also accept the nested layout of Fresh's
+// config.json: an "editor" object holds the editing and display options under
+// Fresh's names, a "languages" object holds per-language overrides, and
+// "file_explorer" holds the explorer options. gvim's older flat top-level keys
+// (tab_size, insert_spaces, show_whitespace, ...) keep working as aliases of the
+// nested keys. When one file sets both spellings of an option, the nested one
+// wins. Across layers the later layer wins whichever spelling it uses. Fresh keys
+// that gvim has no use for (clipboard, terminal, plugins, ...) are accepted and
+// ignored, so a Fresh config file loads without diagnostics. See editoropts.go
+// for the editor options and language.go for the per-language settings and the
+// resolver Config.EditorFor.
+//
 // The lsp key maps a language ID to the language server that runs for it:
 // {"lsp": {"go": {"command": "gopls", "args": []}}}. No language server runs
 // unless the lsp key lists its language, so a fresh install starts none. A later
@@ -47,6 +59,7 @@ const (
 	LineEndingAuto = "auto"
 	LineEndingLF   = "lf"
 	LineEndingCRLF = "crlf"
+	LineEndingCR   = "cr" // accepted for Fresh configs; gvim has no CR documents, so it opens LF
 )
 
 // Tab width bounds accepted by tab_size.
@@ -93,7 +106,7 @@ type Config struct {
 	Keymap                 string // keymap name as written in a file; empty when no file sets one
 	TabSize                int    // columns per tab stop, default 4
 	InsertSpaces           bool   // insert spaces for Tab, default true
-	LineEnding             string // "auto", "lf" or "crlf"; default "auto"
+	LineEnding             string // "auto", "lf", "crlf" or "cr"; default "auto"
 	TrimTrailingWhitespace bool   // strip trailing blanks on save
 	EnsureFinalNewline     bool   // end the file with a newline on save
 	AutoIndent             bool   // copy indentation to new lines, default true
@@ -122,6 +135,25 @@ type Config struct {
 
 	// PluginTimeout is the longest one plugin call may run, default 500ms.
 	PluginTimeout time.Duration
+
+	// The fields below are the Fresh "editor" options that gvim added with the
+	// nested config layout. Each default is Fresh's. The doc of the option and its
+	// consumer are in editoropts.go and in the contract. The existing fields above
+	// that have a Fresh name are aliases of editor.<name>: LineNumbers, LineWrap,
+	// AutoIndent, TabSize, HighlightCurrentLine, HighlightOccurrences,
+	// ShowMenuBar, ShowTabBar, ShowStatusBar, ShowPromptLine and the scrollbars.
+	// InsertSpaces is the inverse of editor.use_tabs.
+	EditorOptions
+
+	// DefaultLanguage is default_language: the language whose settings apply to a
+	// file whose type is not detected. Empty means none.
+	DefaultLanguage string
+
+	// Languages holds the languages.<id> entries that the files set, with ids
+	// lowercased. It is nil when no file sets any. The built-in per-language
+	// defaults (Go and Makefile use tabs, Markdown does not auto-close) are not
+	// stored here: EditorFor merges them in.
+	Languages map[string]LanguageSettings
 
 	// Keybindings is the raw JSON object of keybinding overrides, or nil. Its
 	// schema is the bindings of a keymap file: {"bindings": [...]}. A layer that
@@ -164,6 +196,8 @@ func Defaults() Config {
 		UIIcons:                 UIIconsAuto,
 
 		PluginTimeout: DefaultPluginTimeout,
+
+		EditorOptions: defaultEditorOptions(),
 	}
 }
 
@@ -347,12 +381,30 @@ func applyFile(cfg *Config, path string) []Diagnostic {
 	}
 
 	var diags []Diagnostic
+	// The flat keys are applied first and the nested sections after them, so that
+	// when a file sets both spellings of an option the nested one wins.
 	for _, key := range sortedKeys(keys) {
+		if isSection(key) {
+			continue
+		}
 		if err := cfg.set(key, keys[key]); err != nil {
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
 			continue
 		}
 		cfg.note(key, path)
+	}
+	for _, section := range sections {
+		raw, ok := keys[section]
+		if !ok {
+			continue
+		}
+		applied, failures := cfg.setSection(section, raw)
+		for _, key := range applied {
+			cfg.note(key, path)
+		}
+		for _, f := range failures {
+			diags = append(diags, Diagnostic{Path: path, Key: f.key, Message: f.err.Error()})
+		}
 	}
 	return diags
 }
@@ -398,15 +450,6 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return err
 		}
 		c.Keymap = s
-	case "tab_size":
-		var n int
-		if err := json.Unmarshal(raw, &n); err != nil {
-			return fmt.Errorf("must be an integer")
-		}
-		if n < MinTabSize || n > MaxTabSize {
-			return fmt.Errorf("must be between %d and %d, got %d", MinTabSize, MaxTabSize, n)
-		}
-		c.TabSize = n
 	case "plugin_timeout_ms":
 		var n int
 		if err := json.Unmarshal(raw, &n); err != nil {
@@ -416,24 +459,6 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return fmt.Errorf("must be between %d and %d, got %d", MinPluginTimeoutMS, MaxPluginTimeoutMS, n)
 		}
 		c.PluginTimeout = time.Duration(n) * time.Millisecond
-	case "line_ending":
-		s, err := decodeString(raw)
-		if err != nil {
-			return err
-		}
-		if !slices.Contains([]string{LineEndingAuto, LineEndingLF, LineEndingCRLF}, s) {
-			return fmt.Errorf("must be %q, %q or %q, got %q", LineEndingAuto, LineEndingLF, LineEndingCRLF, s)
-		}
-		c.LineEnding = s
-	case "cursor_style":
-		s, err := decodeString(raw)
-		if err != nil {
-			return err
-		}
-		if !slices.Contains([]string{CursorStyleBlock, CursorStyleBar, CursorStyleUnderline}, s) {
-			return fmt.Errorf("must be %q, %q or %q, got %q", CursorStyleBlock, CursorStyleBar, CursorStyleUnderline, s)
-		}
-		c.CursorStyle = s
 	case "ui_icons":
 		s, err := decodeString(raw)
 		if err != nil {
@@ -451,10 +476,21 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		c.UIIconsFont = strings.TrimSpace(s)
 	case "keybindings":
 		trimmed := bytes.TrimSpace(raw)
+		if isEmptyArray(trimmed) {
+			// Fresh writes "keybindings": [] for no overrides. gvim's overrides are
+			// an object, so an empty list sets none.
+			return nil
+		}
 		if len(trimmed) == 0 || trimmed[0] != '{' {
 			return fmt.Errorf("must be a JSON object")
 		}
 		c.Keybindings = append(json.RawMessage(nil), trimmed...)
+	case "default_language":
+		s, err := decodeString(raw)
+		if err != nil {
+			return err
+		}
+		c.DefaultLanguage = strings.TrimSpace(s)
 	case "lsp":
 		servers, err := decodeLSP(raw)
 		if err != nil {
@@ -468,6 +504,12 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		}
 		c.Formatters = formatters
 	default:
+		if slices.Contains(fileOnlyKeys, key) {
+			return nil // a Fresh key that gvim has no use for
+		}
+		if opt, ok := editorByFlat[key]; ok {
+			return opt.set(c, raw)
+		}
 		field, known := boolKeys[key]
 		if !known {
 			return fmt.Errorf("unknown setting")
@@ -481,32 +523,39 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 	return nil
 }
 
-// boolKeys maps each boolean setting to the field it sets.
+// boolKeys maps each boolean setting that has no Fresh counterpart to the field it
+// sets. The settings that do have one are in editorOptions.
 var boolKeys = map[string]func(*Config) *bool{
-	"insert_spaces":             func(c *Config) *bool { return &c.InsertSpaces },
-	"trim_trailing_whitespace":  func(c *Config) *bool { return &c.TrimTrailingWhitespace },
-	"ensure_final_newline":      func(c *Config) *bool { return &c.EnsureFinalNewline },
-	"auto_indent":               func(c *Config) *bool { return &c.AutoIndent },
-	"line_numbers":              func(c *Config) *bool { return &c.LineNumbers },
-	"show_menu_bar":             func(c *Config) *bool { return &c.ShowMenuBar },
-	"explorer_show_hidden":      func(c *Config) *bool { return &c.ExplorerShowHidden },
-	"explorer_show_ignored":     func(c *Config) *bool { return &c.ExplorerShowIgnored },
-	"show_tab_bar":              func(c *Config) *bool { return &c.ShowTabBar },
-	"show_status_bar":           func(c *Config) *bool { return &c.ShowStatusBar },
-	"show_prompt_line":          func(c *Config) *bool { return &c.ShowPromptLine },
-	"show_vertical_scrollbar":   func(c *Config) *bool { return &c.ShowVerticalScrollbar },
-	"show_horizontal_scrollbar": func(c *Config) *bool { return &c.ShowHorizontalScrollbar },
-	"line_wrap":                 func(c *Config) *bool { return &c.LineWrap },
-	"highlight_current_line":    func(c *Config) *bool { return &c.HighlightCurrentLine },
-	"highlight_occurrences":     func(c *Config) *bool { return &c.HighlightOccurrences },
-	"show_whitespace":           func(c *Config) *bool { return &c.ShowWhitespace },
-	"mouse_capture":             func(c *Config) *bool { return &c.MouseCapture },
-	"mouse_hover":               func(c *Config) *bool { return &c.MouseHover },
-	"scroll_sync":               func(c *Config) *bool { return &c.ScrollSync },
+	"insert_spaces":         func(c *Config) *bool { return &c.InsertSpaces },
+	"explorer_show_hidden":  func(c *Config) *bool { return &c.ExplorerShowHidden },
+	"explorer_show_ignored": func(c *Config) *bool { return &c.ExplorerShowIgnored },
+	"mouse_capture":         func(c *Config) *bool { return &c.MouseCapture },
+	"scroll_sync":           func(c *Config) *bool { return &c.ScrollSync },
+}
+
+// lspEntry is one language server entry. Command and Args are what gvim uses. The other
+// fields are the ones Fresh's config writes; they are accepted and ignored, except that
+// "enabled": false makes the entry start no server.
+type lspEntry struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+	Enabled *bool    `json:"enabled"`
+
+	Name                *json.RawMessage `json:"name"`
+	AutoStart           *json.RawMessage `json:"auto_start"`
+	RootMarkers         *json.RawMessage `json:"root_markers"`
+	Env                 *json.RawMessage `json:"env"`
+	LanguageIDOverrides *json.RawMessage `json:"language_id_overrides"`
+	InitOptions         *json.RawMessage `json:"initialization_options"`
+	OnlyFeatures        *json.RawMessage `json:"only_features"`
+	ExceptFeatures      *json.RawMessage `json:"except_features"`
+	ProcessLimits       *json.RawMessage `json:"process_limits"`
 }
 
 // decodeLSP reads the lsp key: an object from language ID to LSPServer. Each
-// server must name a command, and it may not have other fields.
+// server must name a command, and it may not have other fields than gvim's and
+// Fresh's. A language may also give a list of servers, as Fresh allows; the first
+// enabled one is used. A server with "enabled": false starts nothing.
 func decodeLSP(raw json.RawMessage) (map[string]LSPServer, error) {
 	trimmed := bytes.TrimSpace(raw)
 	var entries map[string]json.RawMessage
@@ -515,16 +564,27 @@ func decodeLSP(raw json.RawMessage) (map[string]LSPServer, error) {
 	}
 	servers := make(map[string]LSPServer, len(entries))
 	for _, lang := range sortedKeys(entries) {
-		dec := json.NewDecoder(bytes.NewReader(entries[lang]))
-		dec.DisallowUnknownFields()
-		var s LSPServer
-		if err := dec.Decode(&s); err != nil {
-			return nil, fmt.Errorf("%s: %w", lang, err)
+		list := []json.RawMessage{entries[lang]}
+		if t := bytes.TrimSpace(entries[lang]); len(t) > 0 && t[0] == '[' {
+			if err := json.Unmarshal(t, &list); err != nil {
+				return nil, fmt.Errorf("%s: %w", lang, err)
+			}
 		}
-		if s.Command == "" {
-			return nil, fmt.Errorf("%s: command must not be empty", lang)
+		for _, item := range list {
+			var e lspEntry
+			if err := decodeStrict(item, &e); err != nil {
+				return nil, fmt.Errorf("%s: %w", lang, err)
+			}
+			if e.Enabled != nil && !*e.Enabled {
+				continue
+			}
+			if e.Command == "" {
+				return nil, fmt.Errorf("%s: command must not be empty", lang)
+			}
+			if _, taken := servers[lang]; !taken {
+				servers[lang] = LSPServer{Command: e.Command, Args: e.Args}
+			}
 		}
-		servers[lang] = s
 	}
 	return servers, nil
 }
@@ -558,4 +618,9 @@ func decodeString(raw json.RawMessage) (string, error) {
 
 func isNull(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// isEmptyArray reports whether raw, already trimmed, is "[]" with optional blanks inside.
+func isEmptyArray(raw []byte) bool {
+	return len(raw) >= 2 && raw[0] == '[' && len(bytes.TrimSpace(raw[1:len(raw)-1])) == 0 && raw[len(raw)-1] == ']'
 }

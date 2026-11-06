@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // openRevertable opens a file holding disk and returns the editor and the path.
@@ -123,5 +124,49 @@ func TestRevertRefusedOnReadOnlyDocument(t *testing.T) {
 	}
 	if got := e.Active().Buffer.Text(); got != "a\n" {
 		t.Fatalf("text = %q, want it unchanged", got)
+	}
+}
+
+// A reload that finds the file the editor itself just saved changes nothing, so it must not
+// replace the "Saved" status with a "Reverted" one: the watcher reports every own save.
+func TestRevertOfTheEditorsOwnSaveKeepsTheStatus(t *testing.T) {
+	t.Parallel()
+	e, path := openRevertable(t, "a\n")
+	typeText(t, e, "x")
+	run(t, e, "save")
+	d := e.Active()
+	if d.Modified() {
+		t.Fatal("document is modified after the save")
+	}
+	status := d.status
+	plan := e.PlanRevertPath(path)
+	if err := e.ApplyRevert(plan, RunRevert(plan)); err != nil {
+		t.Fatalf("ApplyRevert: %v", err)
+	}
+	if d.status != status {
+		t.Errorf("status = %q, want %q", d.status, status)
+	}
+	if got := d.Buffer.Text(); got != "xa\n" {
+		t.Errorf("text = %q", got)
+	}
+}
+
+func TestRevertOfARewrittenFileWithTheSameTextSaysReverted(t *testing.T) {
+	t.Parallel()
+	e, path := openRevertable(t, "a\n")
+	d := e.Active()
+	putFile(t, path, "a\n")
+	if err := os.Chtimes(path, time.Now().Add(time.Hour), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	plan := e.PlanRevertPath(path)
+	if err := e.ApplyRevert(plan, RunRevert(plan)); err != nil {
+		t.Fatalf("ApplyRevert: %v", err)
+	}
+	if d.status != "Reverted a.txt" {
+		t.Errorf("status = %q", d.status)
+	}
+	if !d.disk.sameAs(diskStateOf(path)) {
+		t.Error("the disk state was not adopted")
 	}
 }

@@ -53,9 +53,10 @@ type Options struct {
 	// session is not restored either, so a caller that builds the model for a test
 	// does not read the user's session.
 	SessionDir string
-	// AutoSaveInterval is how often the modified, named files are saved. Zero turns
-	// auto-save off. No config key sets it yet, so only a caller that sets it
-	// turns it on.
+	// AutoSaveInterval is how often the modified, named files are saved. Zero defers to
+	// the config: editor.auto_save_enabled turns auto-save on at
+	// editor.auto_save_interval_secs, and it is off when the config does not enable it.
+	// A non-zero value wins over the config.
 	AutoSaveInterval time.Duration
 	// Diff opens the two files, in tabs 0 and 1, in the compare view. It needs exactly
 	// two files and no folder.

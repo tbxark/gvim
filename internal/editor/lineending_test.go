@@ -78,12 +78,12 @@ func TestCRLFEditSavesWithCRLF(t *testing.T) {
 	}
 }
 
-func TestMixedEndingsSaveWithTheMajorityEnding(t *testing.T) {
+func TestMixedEndingsKeepTheirEndingOnSave(t *testing.T) {
 	t.Parallel()
 	e, path := openFixture(t, Options{}, "a\r\nb\nc\r\n")
 	run(t, e, "save")
-	if got, want := readFile(t, path), "a\r\nb\r\nc\r\n"; got != want {
-		t.Fatalf("saved %q, want %q (CRLF is the majority)", got, want)
+	if got, want := readFile(t, path), "a\r\nb\nc\r\n"; got != want {
+		t.Fatalf("saved %q, want %q (each line keeps its ending)", got, want)
 	}
 }
 

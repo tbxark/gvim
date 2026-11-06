@@ -6,7 +6,7 @@ import (
 	"github.com/tbxark/gvim/internal/buffer"
 )
 
-func TestTabInsertsSpacesToNextStop(t *testing.T) {
+func TestTabInsertsTabSizeSpaces(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -16,11 +16,11 @@ func TestTabInsertsSpacesToNextStop(t *testing.T) {
 		wantCol int
 	}{
 		{"empty line", "", 0, "    ", 4},
-		{"two columns in", "ab", 2, "ab  ", 4},
-		{"three columns in", "abc", 3, "abc ", 4},
+		{"two columns in", "ab", 2, "ab    ", 6},
+		{"three columns in", "abc", 3, "abc    ", 7},
 		{"on a stop", "abcd", 4, "abcd    ", 8},
 		{"after a tab", "a\t", 2, "a\t    ", 6},
-		{"tab counts its width", "a\tb", 3, "a\tb   ", 6},
+		{"inside the text", "ab", 1, "a    b", 5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -53,8 +53,8 @@ func TestTabSizeZeroMeansFour(t *testing.T) {
 	e := docWith(Options{}, "ab")
 	e.SetCursor(buffer.Pos{Line: 0, Col: 2}, false)
 	run(t, e, "insert_tab")
-	if got := text(e); got != "ab  " {
-		t.Fatalf("text = %q, want two spaces to column 4", got)
+	if got := text(e); got != "ab    " {
+		t.Fatalf("text = %q, want four spaces", got)
 	}
 }
 
@@ -169,7 +169,7 @@ func TestAutoIndentCopiesLeadingWhitespace(t *testing.T) {
 		wantCol  int
 	}{
 		{"spaces", "  foo", 5, "  foo\n  ", 1, 2},
-		{"tab", "\tfoo", 4, "\tfoo\n\t", 1, 1},
+		{"tab becomes tab_size spaces without use_tabs", "\tfoo", 4, "\tfoo\n    ", 1, 4},
 		{"no indent", "foo", 3, "foo\n", 1, 0},
 		{"caret inside the indent copies up to the caret", "    foo", 2, "  \n    foo", 1, 2},
 		{"caret at column 0 copies nothing", "  foo", 0, "\n  foo", 1, 0},

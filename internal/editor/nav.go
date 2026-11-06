@@ -9,10 +9,22 @@ import (
 // jumpHistoryMax is how many places the navigation history keeps, as in Fresh.
 const jumpHistoryMax = 100
 
-// jumpEntry is one place in the navigation history: a tab and a caret position.
+// jumpEntry is one place in the navigation history: a tab, a caret position and,
+// when text was selected there, the selection anchor.
 type jumpEntry struct {
-	doc *Document
-	pos buffer.Pos
+	doc      *Document
+	pos      buffer.Pos
+	anchor   buffer.Pos
+	selected bool
+}
+
+// jumpEntryOf is the place d is at now.
+func jumpEntryOf(d *Document) jumpEntry {
+	en := jumpEntry{doc: d, pos: d.Cursor}
+	if d.HasSelection() {
+		en.anchor, en.selected = d.Sel.Anchor, true
+	}
+	return en
 }
 
 // jumpHistory is the list of places that navigate_back and navigate_forward
@@ -54,7 +66,7 @@ func (e *Editor) pushJump() {
 	if d == nil || e.pristineUntitled() {
 		return
 	}
-	e.extras.jumps.push(jumpEntry{doc: d, pos: d.Cursor})
+	e.extras.jumps.push(jumpEntryOf(d))
 }
 
 // goToJump switches to the tab of en and puts the caret at its position. A
@@ -68,7 +80,11 @@ func (e *Editor) goToJump(en jumpEntry) {
 	d := en.doc
 	d.Cursor = d.Buffer.Clamp(en.pos)
 	d.Sel = nil
+	if a := d.Buffer.Clamp(en.anchor); en.selected && a != d.Cursor {
+		d.Sel = &buffer.Selection{Anchor: a, Head: d.Cursor}
+	}
 	d.want = -1
+	e.ensureVisibleForJump(d)
 }
 
 // navigateBack goes to the previous place. At the newest place it first keeps
@@ -81,7 +97,7 @@ func navigateBack(e *Editor, _ map[string]any) error {
 	}
 	if h.cur == len(h.entries)-1 {
 		if d := e.Active(); d != nil {
-			h.push(jumpEntry{doc: d, pos: d.Cursor})
+			h.push(jumpEntryOf(d))
 		}
 	}
 	e.stepJump(-1)

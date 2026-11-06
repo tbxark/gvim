@@ -32,5 +32,5 @@ func (m *Model) dragBorder(x, y int) {
 	}
 	node.ratio = ratioAt(at-origin, extent-1)
 	m.syncViewport()
-	m.revealCaretVisual()
+	m.revealCaretVisual(0)
 }

@@ -2,6 +2,7 @@ package search
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/tbxark/gvim/internal/buffer"
 )
@@ -9,6 +10,14 @@ import (
 // ErrNoMatch is returned by Replace when m is not a match of q in the buffer
 // as it is now, for example because the text changed after Find.
 var ErrNoMatch = errors.New("search: no match of the query at the given position")
+
+// ErrMatchTooLarge is returned by ReplaceAt for a match whose lines are more than
+// 4 MiB long together. ReplaceAt reads those lines whole to check the match, so a
+// match over a huge part of a large file is refused.
+var ErrMatchTooLarge = errors.New("search: match too large to replace")
+
+// maxReplaceBytes is the most text ReplaceAt reads to check a match.
+const maxReplaceBytes = 4 << 20
 
 // Decision is the caller's answer to one query-replace prompt.
 type Decision int
@@ -60,6 +69,72 @@ func Replace(b *buffer.Buffer, q Query, repl string, m Match) (string, error) {
 			b.Group(func() { apply(b, m, text) })
 			return text, nil
 		}
+	}
+	return "", ErrNoMatch
+}
+
+// ReplaceAt is Replace for a buffer of any size, a large one included. It
+// replaces the match m of q in b with repl, as one undo group, and returns the
+// text that was inserted. It reads only the lines that m covers, so it does not
+// need the match list that Replace builds from the whole buffer; m is usually
+// one of the matches of a Scan or the result of FindNext.
+//
+// m must be a match of q in the text of its own lines, as Find sees them. The
+// text outside those lines can change which matches Find would list (a match
+// that overlaps an earlier one is not listed there), which ReplaceAt does not
+// see. A regex is expanded as Replace does.
+//
+// If m is not such a match, or the query is empty, it returns ErrNoMatch. A
+// match whose lines are over 4 MiB together returns ErrMatchTooLarge, and a line
+// of a large buffer that is longer than the buffer reads returns
+// buffer.ErrLineTooLong. When a large buffer refuses the edit (a line that
+// cannot be edited, too many unsaved changes), the text is unchanged and the
+// reason is returned. A pattern that does not compile returns an error.
+func ReplaceAt(b *buffer.Buffer, q Query, repl string, m Match) (string, error) {
+	first, last := m.Start.Line, m.End.Line
+	if q.Text == "" || first < 0 || last < first || last >= b.Lines() || m.End.Less(m.Start) {
+		return "", ErrNoMatch
+	}
+	re, err := compile(q)
+	if err != nil {
+		return "", err
+	}
+	// Each line is at least one byte with its line break, so a span of more
+	// lines than the limit is too large without asking for any of them.
+	if last-first >= maxReplaceBytes {
+		return "", ErrMatchTooLarge
+	}
+	size := 0
+	for i := first; i <= last; i++ {
+		if b.LineCut(i) {
+			return "", buffer.ErrLineTooLong
+		}
+		if size += b.LineBytes(i) + 1; size > maxReplaceBytes {
+			return "", ErrMatchTooLarge
+		}
+	}
+	var sb strings.Builder
+	sb.Grow(size)
+	for i := first; i <= last; i++ {
+		if i > first {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(b.Line(i))
+	}
+	d := newWindow(first, sb.String())
+	r := result{doc: d, re: re}
+	for _, loc := range d.locate(re, q) {
+		h := d.hit(loc)
+		if h.Match != m {
+			continue
+		}
+		text := r.expansion(h, q, repl)
+		_ = b.Refusal() // a refusal that was not reported is not this edit's
+		b.Group(func() { apply(b, m, text) })
+		if err := b.Refusal(); err != nil {
+			return "", err
+		}
+		return text, nil
 	}
 	return "", ErrNoMatch
 }

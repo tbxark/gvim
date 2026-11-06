@@ -194,15 +194,19 @@ func TestFindBarNavigatesAndCtrlGContinuesAfterClose(t *testing.T) {
 	for _, r := range "foo" {
 		press(m, typed(string(r)))
 	}
-	// Typing selects the first match at or after the caret.
-	if !sf.sel || sf.anchor != (buffer.Pos{Line: 0, Col: 0}) || sf.doc.cursor != (buffer.Pos{Line: 0, Col: 3}) {
+	// Typing only searches: the caret and the selection stay.
+	if sf.sel || sf.doc.cursor != (buffer.Pos{Line: 0, Col: 0}) {
 		t.Fatalf("after typing, selection anchor %+v head %+v (selected %v)", sf.anchor, sf.doc.cursor, sf.sel)
+	}
+	// Enter jumps to the first match and closes the bar.
+	press(m, special(tea.KeyEnter))
+	if m.findOpen() || !sf.sel || sf.anchor != (buffer.Pos{Line: 0, Col: 0}) || sf.doc.cursor != (buffer.Pos{Line: 0, Col: 3}) {
+		t.Fatalf("after Enter, open %v, selection anchor %+v head %+v (selected %v)", m.findOpen(), sf.anchor, sf.doc.cursor, sf.sel)
 	}
 	press(m, special(tea.KeyF3))
 	if sf.anchor != (buffer.Pos{Line: 0, Col: 8}) {
 		t.Fatalf("F3 selected from %+v, want the second match at 0:8", sf.anchor)
 	}
-	press(m, special(tea.KeyEscape))
 
 	// The bar is closed, but its search text still drives Ctrl+G.
 	press(m, ctrl('g'))
@@ -296,7 +300,7 @@ func TestSearchReplaceNextAndPrevStepThroughMatches(t *testing.T) {
 	for _, r := range "foo" {
 		press(m, typed(string(r)))
 	}
-	press(m, special(tea.KeyEscape))
+	press(m, special(tea.KeyEnter))
 	// The bar is closed and its search text is held. The selection is 0:0 to 0:3.
 
 	press(m, ctrlAlt(tea.KeyRight))

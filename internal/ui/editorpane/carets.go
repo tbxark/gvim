@@ -37,7 +37,13 @@ func (f *frame) setSelections(doc Document) {
 // style no colors, the cell is reversed, as the primary caret is.
 func (f frame) paintSecondaryCarets(g *grid.Grid) {
 	st := f.styles.SecondaryCaret
+	first, last := f.windowLines()
 	for _, p := range f.extra {
+		// Finding the cell of a caret lays out the rows of the window, so a caret
+		// that is not in the window must not ask: a document can have thousands.
+		if p.Line < first || p.Line > last {
+			continue
+		}
 		x, y, ok := f.cellOf(p)
 		if !ok || x < f.gutter || x >= f.w-1 {
 			continue
@@ -55,4 +61,15 @@ func (f frame) paintSecondaryCarets(g *grid.Grid) {
 		}
 		g.Set(x, y, text, st)
 	}
+}
+
+// windowLines returns the first line of the window and the last line that can be in
+// it. A line takes at least one row, so the window holds no line past the h-th one
+// after the first, counting the lines a fold hides as none.
+func (f frame) windowLines() (first, last int) {
+	last = f.top
+	for n := 1; n < f.h && last < f.lines; n++ {
+		last = f.next(last)
+	}
+	return f.top, last
 }

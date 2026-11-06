@@ -71,7 +71,7 @@ func TestExpandedFoldShowsEveryLine(t *testing.T) {
 func TestCollapsedFoldHidesItsBodyAndNumbersTheRest(t *testing.T) {
 	g := Pane{Doc: foldFixture(map[int]bool{0: true})}.Render(20, 4)
 	assertRows(t, g, []string{
-		"  1 │▸func a() {",
+		"  1 │▸func a() { ..",
 		"  4 │ }",
 		"  5 │ z",
 		"~",
@@ -99,7 +99,7 @@ func TestFoldMarkerFollowsTheTextWhenTheGutterIsHidden(t *testing.T) {
 		col    int // the column of the marker, or -1 when the row has none
 	}{
 		{"expanded", 20, nil, "▾", 10},
-		{"collapsed", 20, map[int]bool{0: true}, "▸", 10},
+		{"collapsed", 20, map[int]bool{0: true}, "▸", 14}, // after the " ..." placeholder
 		{"full row has no free cell", 10, map[int]bool{0: true}, "", -1},
 	}
 	for _, tc := range tests {

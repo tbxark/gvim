@@ -13,6 +13,8 @@
 package prompt
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -135,12 +137,19 @@ func (l *Line) Active() bool { return !l.closed }
 // Value returns the current input.
 func (l *Line) Value() string { return l.field.Value() }
 
-// Update handles one message. Key presses are handled as described on Line.
-// The returned command is the Done message when the prompt submits, and nil
+// Update handles one message. Key presses are handled as described on Line. A paste, and
+// the clipboard text that Ctrl+V asked for, go to the text field. The returned command is
+// the Done message when the prompt submits, the clipboard read of Ctrl+V, and nil
 // otherwise.
 func (l *Line) Update(msg tea.Msg) (*Line, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
+		if p, ok := msg.(tea.PasteMsg); ok {
+			l.untouch(p.Content != "")
+			p.Content = strings.ReplaceAll(strings.ReplaceAll(p.Content, "\r\n", "\n"), "\r", "\n")
+			msg = p
+		}
+		l.edit(msg)
 		return l, nil
 	}
 	switch tea.Key(kp).Keystroke() {
@@ -158,18 +167,34 @@ func (l *Line) Update(msg tea.Msg) (*Line, tea.Cmd) {
 		l.closed = true
 		return l, done(Done{Tag: l.tag, Outcome: Submitted, Text: text})
 	}
+	l.untouch(kp.Text != "" && kp.Mod&^tea.ModShift == 0)
+	cmd := l.edit(kp)
+	if tea.Key(kp).Keystroke() != "ctrl+v" {
+		cmd = nil
+	}
+	return l, cmd
+}
+
+// untouch ends the prefill. The text it held goes when replaces is set.
+func (l *Line) untouch(replaces bool) {
 	if l.prefill {
 		l.prefill = false
-		if kp.Text != "" && kp.Mod&^tea.ModShift == 0 {
+		if replaces {
 			l.field.SetValue("")
 		}
 	}
+}
+
+// edit gives msg to the text field and clears the rejection when the text changed. It
+// returns the command of the field, which is the clipboard read for Ctrl+V.
+func (l *Line) edit(msg tea.Msg) tea.Cmd {
 	before := l.field.Value()
-	l.field, _ = l.field.Update(kp)
+	var cmd tea.Cmd
+	l.field, cmd = l.field.Update(msg)
 	if l.field.Value() != before {
 		l.errText = ""
 	}
-	return l, nil
+	return cmd
 }
 
 // Draw paints the prompt on the bottom row of g: the label, the input, and a

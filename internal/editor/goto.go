@@ -18,6 +18,10 @@ var ErrBadLine = errors.New("line numbers start at 1")
 // goes to the end of that line. A column below 1 goes to the first column. A
 // line below 1 moves nothing and returns an error wrapping ErrBadLine.
 //
+// In a large document whose line index is incomplete, a line the index has not
+// reached waits: the status shows the progress of the scan, and the caret moves when
+// the index gets to the line (see pending.go). A later GotoLine replaces the wait.
+//
 // GotoLine is the target of the go-to-line prompt. The goto_line action does not
 // use it: Ctrl+G in the default keymap only reports the find message.
 func (e *Editor) GotoLine(line, col int) error {
@@ -31,13 +35,28 @@ func (e *Editor) GotoLine(line, col int) error {
 		e.setStatus(err.Error())
 		return err
 	}
-	e.pushJump()
 	d := e.Active()
+	if d.large != nil {
+		// A new goto replaces the one that waits for the index.
+		d.large.pending = nil
+		if info := d.Index(); line > info.Lines && !info.Complete {
+			d.large.pending = &pending{kind: pendingGoto, line: line, col: col, from: jumpEntryOf(d)}
+			e.setStatus(scanningStatus(info))
+			return nil
+		}
+	}
+	e.pushJump()
+	e.gotoIn(d, line, col)
+	return nil
+}
+
+// gotoIn moves the caret of d to a 1-based line and column, as GotoLine does, with the
+// line and column clamped into the text. d need not be the active document.
+func (e *Editor) gotoIn(d *Document, line, col int) {
 	target := buffer.Pos{Line: min(line, d.Buffer.Lines()) - 1, Col: max(col, 1) - 1}
 	d.want = -1
 	d.move(d.Buffer.Clamp(target), false)
-	e.ensureVisible(d)
-	return nil
+	e.ensureVisibleForJump(d)
 }
 
 // ParseLineCol reads the input of the go-to-line prompt: "N" for a line, or

@@ -1,41 +1,14 @@
 package editor
 
 import (
-	"fmt"
-	"path/filepath"
+	"maps"
+	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/buffer"
 )
-
-// commentTokens maps a lowercased file extension, with its dot, to its line
-// comment token. An extension with no entry has no comment token, and
-// toggle_comment says so rather than guessing.
-var commentTokens = map[string]string{
-	".go":   "//",
-	".rs":   "//",
-	".c":    "//",
-	".h":    "//",
-	".cc":   "//",
-	".cpp":  "//",
-	".cxx":  "//",
-	".hpp":  "//",
-	".js":   "//",
-	".jsx":  "//",
-	".mjs":  "//",
-	".ts":   "//",
-	".tsx":  "//",
-	".java": "//",
-	".py":   "#",
-	".sh":   "#",
-	".bash": "#",
-	".zsh":  "#",
-	".rb":   "#",
-	".yaml": "#",
-	".yml":  "#",
-	".toml": "#",
-}
 
 // lineEdit is one edit inside a line: the runes inserted at col, or the runes
 // removed from col on.
@@ -70,28 +43,42 @@ func (e lineEdit) move(p buffer.Pos, strict bool) buffer.Pos {
 	return p
 }
 
-// toggleComment comments the selected lines, or the caret line, unless every
-// one of them is already commented. Then it removes the token from each. A
-// comment is the token and one space, placed at column 0. An uncomment removes
-// one space after the token when there is one. The caret and selection move
-// with the text. The token comes from the file extension. It fails when the
-// buffer is untitled or its extension has no comment token.
-func (d *Document) toggleComment() error {
-	ext := strings.ToLower(filepath.Ext(d.Path))
-	token, ok := commentTokens[ext]
-	if !ok {
-		what := ext
-		switch {
-		case d.Path == "":
-			what = "untitled"
-		case ext == "":
-			what = filepath.Base(d.Path)
+// commentPrefix returns the line comment token of d, without surrounding blanks, or
+// "" when its language has none. A language chosen with Set Language decides when it
+// has a prefix. Otherwise the effective settings of the file decide, which hold the
+// languages.<id>.comment_prefix of the config and Fresh's built-in prefixes.
+func (e *Editor) commentPrefix(d *Document) string {
+	if d.language != "" && e.languages != nil {
+		if p := strings.TrimSpace(e.languages(d.language, "").CommentPrefix); p != "" {
+			return p
 		}
-		return fmt.Errorf("toggle_comment: no comment token for %s", what)
 	}
-	first, last := d.selectedLines()
+	return strings.TrimSpace(e.SettingsFor(d).CommentPrefix)
+}
+
+// toggleComment comments the selected lines, and the line of every caret without a
+// selection, unless every one of them is already commented. Then it removes the
+// token from each. A comment is the token and one space, placed at column 0. An
+// uncomment removes one space after the token when there is one. Every caret and
+// selection moves with the text. The token is the comment_prefix of the document's
+// language (see commentPrefix). It does nothing, as Fresh does, when the language has none.
+func (e *Editor) toggleComment(d *Document) error {
+	token := e.commentPrefix(d)
+	if token == "" {
+		return nil
+	}
+	width := utf8.RuneCountInString(token)
+	cs := d.allCarets()
+	lineSet := make(map[int]bool)
+	for _, c := range cs {
+		first, last := caretLines(c)
+		for line := first; line <= last; line++ {
+			lineSet[line] = true
+		}
+	}
+	lines := slices.Sorted(maps.Keys(lineSet))
 	allCommented := true
-	for line := first; line <= last; line++ {
+	for _, line := range lines {
 		if !strings.HasPrefix(strings.TrimLeftFunc(d.Buffer.Line(line), unicode.IsSpace), token) {
 			allCommented = false
 			break
@@ -99,10 +86,10 @@ func (d *Document) toggleComment() error {
 	}
 	var edits []lineEdit
 	d.Buffer.Group(func() {
-		for line := first; line <= last; line++ {
+		for _, line := range lines {
 			if !allCommented {
 				d.Buffer.Insert(buffer.Pos{Line: line}, token+" ")
-				edits = append(edits, lineEdit{line: line, inserted: len(token) + 1})
+				edits = append(edits, lineEdit{line: line, inserted: width + 1})
 				continue
 			}
 			runes := []rune(d.Buffer.Line(line))
@@ -110,7 +97,7 @@ func (d *Document) toggleComment() error {
 			for indent < len(runes) && unicode.IsSpace(runes[indent]) {
 				indent++
 			}
-			n := len(token)
+			n := width
 			if strings.HasPrefix(string(runes[indent:]), token+" ") {
 				n++
 			}
@@ -124,11 +111,16 @@ func (d *Document) toggleComment() error {
 		}
 		return p
 	}
-	d.Cursor = adjust(d.Cursor, d.Sel != nil)
-	if d.Sel != nil {
-		d.Sel.Anchor = adjust(d.Sel.Anchor, true)
-		d.Sel.Head = d.Cursor
+	for i := range cs {
+		if cs[i].anchor == cs[i].head {
+			// An empty caret moves as one point, so it never grows a selection.
+			cs[i].head = adjust(cs[i].head, false)
+			cs[i].anchor = cs[i].head
+			continue
+		}
+		cs[i].head = adjust(cs[i].head, true)
+		cs[i].anchor = adjust(cs[i].anchor, true)
 	}
-	d.want = -1
+	d.setCarets(cs)
 	return nil
 }

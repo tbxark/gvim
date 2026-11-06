@@ -31,6 +31,7 @@ type Highlighter struct {
 	lines   int
 	spans   [][]Span
 	skipped bool
+	wins    []windowEntry // newest first, see LinesWindow
 }
 
 // NewHighlighter returns a Highlighter for lexer. A nil lexer means
@@ -102,4 +103,77 @@ func (h *Highlighter) Invalidate() {
 	defer h.mu.Unlock()
 	h.valid = false
 	h.spans = nil
+	h.wins = nil
+}
+
+// windowCacheSize is how many windows a Highlighter keeps. A window is the lexed
+// run of lines around one viewport, so this is how many panes of one document can
+// scroll without lexing each other's lines again.
+const windowCacheSize = 4
+
+// Window is the spans of a run of consecutive lines of a buffer, which starts at
+// line First. A document too large to lex whole is highlighted through windows
+// around the lines on screen.
+type Window struct {
+	First int
+	Spans [][]Span
+}
+
+// Line returns the spans of line i, or nil when i is outside the window.
+func (w Window) Line(i int) []Span {
+	k := i - w.First
+	if k < 0 || k >= len(w.Spans) {
+		return nil
+	}
+	return w.Spans[k]
+}
+
+// windowKey identifies a lexed window: the version of the buffer, the line the
+// window starts at and the number of lines it holds.
+type windowKey struct{ version, first, lines int }
+
+type windowEntry struct {
+	key windowKey
+	win Window
+}
+
+// LinesWindow returns the spans of text, which are the lines of a buffer from line
+// first on, at the given buffer version. Only the window is lexed, so the text
+// before it is not known: a token that began above the window is read from the
+// window's own start. The caller passes enough lines above the lines it shows for
+// that to be rare.
+//
+// The newest windows are kept, by (version, first, len(text)), so two panes that
+// scroll the same buffer do not lex each other's lines again. Like Lines, it
+// returns plain spans when lexing fails or text is larger than MaxHighlightBytes.
+// Spans are shared with the cache, so callers must not modify them.
+func (h *Highlighter) LinesWindow(version, first int, text []string) Window {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	key := windowKey{version: version, first: first, lines: len(text)}
+	for i, e := range h.wins {
+		if e.key == key {
+			copy(h.wins[1:i+1], h.wins[:i])
+			h.wins[0] = e
+			return e.win
+		}
+	}
+	var spans [][]Span
+	h.skipped = size(text) > MaxHighlightBytes
+	if !h.skipped {
+		if s, err := Tokenize(h.lexer, text); err == nil {
+			spans = s
+		}
+	}
+	if spans == nil {
+		spans = plainSpans(text)
+	}
+	win := Window{First: first, Spans: spans}
+	h.wins = append(h.wins, windowEntry{})
+	copy(h.wins[1:], h.wins)
+	h.wins[0] = windowEntry{key: key, win: win}
+	if len(h.wins) > windowCacheSize {
+		h.wins = h.wins[:windowCacheSize]
+	}
+	return win
 }

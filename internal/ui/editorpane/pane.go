@@ -14,7 +14,9 @@
 //
 // Soft wrap follows the legacy rule (internal/tui/wrap.go, derived from the
 // legacy screens). With Wrap on, a buffer line wider than the wrap width takes
-// several rows, and the wrap width is the text area less two columns. With Wrap
+// several rows, and the wrap width is the text area less two columns (or Opts.WrapColumn
+// when that is smaller), with the rows after the first indented as the line is when
+// Opts.WrapIndent is set. With Wrap
 // off, each line is one row, and the window moves by display columns (Left).
 // The caret and the mouse both work in display rows, but the editor moves and
 // scrolls by buffer lines.
@@ -68,6 +70,9 @@ type Pane struct {
 	// Left is the first visible display column when Wrap is off. The pane moves
 	// it so the caret stays on the window.
 	Left int
+	// KeepLeft keeps Left as it is, even when the caret is off the window. The root
+	// sets it while the view is panned by the wheel.
+	KeepLeft bool
 	// Wrap breaks a line wider than the text area over several rows. Off, each
 	// line is one row, cut at the right edge, and the body shows a horizontal
 	// scrollbar on its last row when a line is wider than the text area.
@@ -81,8 +86,8 @@ type Pane struct {
 	VisibleWhitespace bool
 	// CurrentLine tints the text row of the caret line.
 	CurrentLine bool
-	// Occurrences paints the whole-word matches of the word at the caret. Nothing
-	// is painted while text is selected.
+	// Occurrences paints the whole-word matches of the word at the caret. While
+	// text is selected on one line, it paints the other matches of that text instead.
 	Occurrences bool
 	// Diagnostics gives the diagnostic spans of line i. Nil paints none.
 	Diagnostics func(line int) []DiagnosticSpan
@@ -104,6 +109,9 @@ type Pane struct {
 	HideHorizontalScrollbar bool
 	// CaretShape is how the caret cell is drawn. The zero value is CaretBlock.
 	CaretShape CaretShape
+	// Opts are the editor.* display options: relative numbers, hanging indent,
+	// guides, whitespace marks and bracket highlights. The zero value is the plain pane.
+	Opts Options
 }
 
 // CaretShape is the look of the caret cell. The root shapes the terminal caret the
@@ -159,6 +167,10 @@ type Hit struct {
 	Kind HitKind
 	Pos  buffer.Pos
 	Row  int
+	// Fold is set for a gutter hit on the first row of a line that starts a fold
+	// that a click may toggle: any collapsed fold, and an open one while the
+	// fold markers show.
+	Fold bool
 }
 
 // Gutter sizes. The number field is at least three digits wide, and it widens
@@ -170,7 +182,6 @@ const (
 	tildeText       = "~"
 	changeBar       = "│" // margin bar: new or grown line
 	changeScroll    = "▌" // last column: line differs from the saved text
-	selectedBlank   = '·' // selected blanks are drawn as middle dots (legacy)
 	thumbGlyph      = "┃" // scrollbar thumb: secondary color (spec section 3)
 	trackGlyph      = "│" // scrollbar track: separator color (spec section 3)
 	caretBarGlyph   = "▏" // the caret of CaretBar: a thin bar at the left edge of the cell
@@ -192,6 +203,18 @@ type frame struct {
 	styles Styles
 	w, h   int // h is the number of text rows; the horizontal bar is not one
 	lines  int
+	// display is the line count that sizes the gutter and the scrollbar thumb. It is
+	// lines, except in a large document whose line index is still being built, where
+	// it is the estimate of the final count when that is larger.
+	display int
+	// win is the document's window onto very long lines, or nil when it has none or
+	// the document is not large. See large.go.
+	win LineWindower
+	// off and cut describe the line being laid out when it is shown as a window:
+	// off is the rune column where the window starts, and cut says the window ends
+	// before the line does. Both are zero for a line shown whole.
+	off    int
+	cut    bool
 	top    int
 	gutter int
 	wrap   bool
@@ -220,8 +243,6 @@ type frame struct {
 	occWord string
 	curLine bool
 	rulers  []int
-	guides  bool
-	visWS   bool
 	diags   func(line int) []DiagnosticSpan
 	// The hidden parts of the pane (see Pane), and the caret shape.
 	noTabArrows bool
@@ -230,6 +251,9 @@ type frame struct {
 	noVBar      bool
 	noHBar      bool
 	caretShape  CaretShape
+	keepLeft    bool
+	opts        Options
+	fx          *frameFX // the state of the options, set by initFX
 }
 
 // newFrame builds the frame for a w by h pane. It reports false when there is
@@ -239,21 +263,21 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		return frame{}, false
 	}
 	lines := max(p.Doc.LineCount(), 1)
+	display := max(DisplayLines(p.Doc), lines)
 	f := frame{
 		doc:        p.Doc,
 		styles:     p.Styles,
 		w:          w,
 		h:          h,
 		lines:      lines,
-		gutter:     GutterWidth(lines),
-		wrap:       p.Wrap,
+		display:    display,
+		gutter:     GutterWidth(display),
+		wrap:       p.wrapOn(),
 		tab:        p.tabSize(),
 		caret:      p.Doc.Cursor(),
 		highlights: p.Highlights,
 		curLine:    p.CurrentLine,
 		rulers:     p.Rulers,
-		guides:     p.IndentGuides,
-		visWS:      p.VisibleWhitespace,
 		diags:      p.Diagnostics,
 
 		noTabArrows: p.HideTabArrows,
@@ -262,21 +286,29 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		noVBar:      p.HideVerticalScrollbar,
 		noHBar:      p.HideHorizontalScrollbar,
 		caretShape:  p.CaretShape,
+		keepLeft:    p.KeepLeft,
 	}
 	if p.HideGutter {
 		f.gutter = 0
 	}
 	f.wrapW = (w - f.gutter) - 2 // the legacy wrap width: text area less two
+	if isLarge(p.Doc) {
+		f.win, _ = p.Doc.(LineWindower)
+	}
 	f.setFolds(p.Doc)
 	f.top = f.visibleAtOrAbove(min(max(p.Top, 0), lines-1))
 	f.setSelections(p.Doc)
-	if p.Occurrences && len(f.sels) == 0 && f.caret.Line < lines {
-		f.occWord = wordAt([]rune(p.Doc.Line(f.caret.Line)), f.caret.Col)
-	}
+	f.initFX(p)
 	f.placeHorizontal(p.Left, h)
 	// The vertical overflow counts the text rows left after the horizontal bar.
-	f.overflow = f.visibleCount() > f.h
-	if p.Doc.Modified() {
+	f.overflow = f.visibleCount() > f.h || (f.display > f.lines && f.display > f.h)
+	switch {
+	case isLarge(p.Doc):
+		// The saved text of a large document is not held, so there is nothing to diff
+		// the lines against. The margin bar marks the modified lines on screen, and the
+		// scrollbar carries no change marks.
+		f.bar = f.dirtyRows()
+	case p.Doc.Modified():
 		f.bar, f.scroll = f.changes()
 	}
 	return f, true
@@ -360,15 +392,18 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 			if f.gutter > 0 {
 				label := fmt.Sprintf("%*s │ ", f.gutter-gutterSeparator, "")
 				if k == 0 {
-					label = fmt.Sprintf("%*d │ ", f.gutter-gutterSeparator, i+1)
+					label = fmt.Sprintf("%*d │ ", f.gutter-gutterSeparator, f.lineNumber(i))
 				}
-				g.Put(0, y, f.w-1, label, f.styles.Gutter)
+				g.Put(0, y, f.w-1, label, f.numberStyle(i))
 			}
-			cells := ln.cells[sp.from:sp.to]
-			if f.left > 0 {
-				cells = dropColumns(cells, f.left)
+			cells := f.rowCells(ln, k, sp)
+			if drop := f.dropFor(ln); drop > 0 {
+				cells = dropColumns(cells, drop)
 			}
 			end := f.paintCells(g, y, cells, cur)
+			if k == len(ln.spans)-1 {
+				end = f.paintFoldPlaceholder(g, i, y, end, cur)
+			}
 			if cur && f.styles.CurrentLine.BG != nil {
 				g.Fill(end, f.w-1, y, grid.Style{FG: f.styles.Text.FG, BG: f.styles.CurrentLine.BG})
 			}
@@ -427,12 +462,24 @@ func (f frame) style(c cell, cur bool) grid.Style {
 		st.BG = f.styles.Match.BG
 	case c.match == matchOccurrence && f.styles.Occurrence.BG != nil:
 		st.BG = f.styles.Occurrence.BG
+		// The band lands where syntax colors live, so text that would vanish on it
+		// is moved to a readable color.
+		if fg := repairedFG(st.FG, st.BG); fg != nil {
+			st.FG = fg
+		}
 	case cur && f.styles.CurrentLine.BG != nil:
 		st.BG = f.styles.CurrentLine.BG
 	}
-	if c.ws && f.styles.Whitespace.FG != nil {
-		st.FG = f.styles.Whitespace.FG
+	if c.ws {
+		fg := f.styles.Whitespace.FG
+		if c.sel && f.styles.Decor.WhitespaceSelected.FG != nil {
+			fg = f.styles.Decor.WhitespaceSelected.FG
+		}
+		if fg != nil {
+			st.FG = fg
+		}
 	}
+	f.decorStyle(c, &st)
 	if c.diag != 0 {
 		if fg := f.diagnosticFG(c.diag); fg != nil {
 			st.FG = fg
@@ -487,7 +534,7 @@ func (p Pane) Caret(w, h int) (x, y int, ok bool) {
 // horizontal scrollbar takes. With Wrap on there is no bar, so it is h. The root
 // sizes the editor viewport from it.
 func (p Pane) BodyRows(w, h int) int {
-	if p.Wrap {
+	if p.wrapOn() {
 		return max(h, 0)
 	}
 	f, ok := p.newFrame(w, h)
@@ -502,11 +549,24 @@ func (p Pane) BodyRows(w, h int) int {
 // the pane's top. A caret above the window takes its own line. A caret below takes
 // the fewest lines that fit above it, so the scroll is as short as it can be.
 func (p Pane) RevealTop(w, h int) int {
+	return p.RevealTopMargin(w, h, 0)
+}
+
+// RevealTopMargin is RevealTop that also keeps margin display rows between the caret
+// row and the top or bottom of the body, as the scroll-off setting asks. The margin
+// is at most half the body, and it gives way at the start and the end of the
+// document, where there is no text to show beyond the caret. The view moves by whole
+// lines, so a wrapped line at the edge can leave a little more than margin rows.
+func (p Pane) RevealTopMargin(w, h, margin int) int {
 	f, ok := p.newFrame(w, h)
 	if !ok {
 		return p.Top
 	}
-	return f.revealTop()
+	top := f.revealTop()
+	if margin <= 0 || f.caret.Line < 0 || f.caret.Line >= f.lines || (f.hidden != nil && f.hidden[f.caret.Line]) {
+		return top
+	}
+	return f.withMargin(top, min(margin, (f.h-1)/2))
 }
 
 // tabSize is the tab width of the pane: TabSize, or the default when it is zero.
@@ -532,7 +592,8 @@ func (f frame) revealTop() int {
 	// The caret is below the body. Count the rows from the caret's line up to the
 	// caret's own row, then add the lines above it while they fit.
 	ln := f.layoutLine(c, false)
-	k, _ := caretInSpans(ln.geom, ln.spans, expandedIndex([]rune(f.doc.Line(c)), f.caret.Col, f.tab))
+	raw, off := f.lineRaw(c)
+	k, _ := caretInSpans(ln.geom, ln.spans, expandedIndex(raw, f.caret.Col-off, f.tab))
 	rows, top := k+1, c
 	for prev := f.prevLine(top); prev >= f.top; prev = f.prevLine(top) {
 		n := len(f.layoutLine(prev, false).spans)
@@ -545,6 +606,50 @@ func (f frame) revealTop() int {
 	return top
 }
 
+// withMargin moves top, a top that shows the caret row, so that margin rows of text
+// sit above the caret row while the lines above allow it, and as many below it as
+// the document has, up to margin.
+func (f frame) withMargin(top, margin int) int {
+	for f.caretRow(top) < margin {
+		prev := f.prevLine(top)
+		if prev < 0 {
+			break
+		}
+		top = prev
+	}
+	need := 1 + f.rowsBelowCaret(margin)
+	for top < f.caret.Line && f.caretRow(top)+need > f.h {
+		top = f.next(top)
+	}
+	return top
+}
+
+// caretRow is the display row of the caret counted from line top, past the body if
+// the caret is below it.
+func (f frame) caretRow(top int) int {
+	y := 0
+	for i := top; i < f.lines; i = f.next(i) {
+		ln := f.layoutLine(i, false)
+		if i == f.caret.Line {
+			k, _ := caretInSpans(ln.geom, ln.spans, expandedIndex([]rune(f.doc.Line(i)), f.caret.Col, f.tab))
+			return y + k
+		}
+		y += len(ln.spans)
+	}
+	return y
+}
+
+// rowsBelowCaret is the number of display rows after the caret row, up to limit.
+func (f frame) rowsBelowCaret(limit int) int {
+	ln := f.layoutLine(f.caret.Line, false)
+	k, _ := caretInSpans(ln.geom, ln.spans, expandedIndex([]rune(f.doc.Line(f.caret.Line)), f.caret.Col, f.tab))
+	n := len(ln.spans) - 1 - k
+	for i := f.next(f.caret.Line); i < f.lines && n < limit; i = f.next(i) {
+		n += len(f.layoutLine(i, false).spans)
+	}
+	return min(n, limit)
+}
+
 // cellOf finds the cell of a document position by walking the rows from the
 // top line. ok is false when the position is above the window, below the body,
 // or on a line hidden by a fold.
@@ -552,10 +657,22 @@ func (f frame) cellOf(p buffer.Pos) (x, y int, ok bool) {
 	for i := f.top; i < f.lines && y < f.h; i = f.next(i) {
 		ln := f.layoutLine(i, false)
 		if i == p.Line {
-			raw := []rune(f.doc.Line(i))
-			k, cells := caretInSpans(ln.geom, ln.spans, expandedIndex(raw, p.Col, f.tab))
+			raw, _ := f.lineRaw(i)
+			rel := p.Col - ln.off
+			if ln.long {
+				rel = min(max(rel, 0), len(raw))
+			}
+			k, cells := caretInSpans(ln.geom, ln.spans, expandedIndex(raw, rel, f.tab))
+			if ln.long {
+				// A caret outside the window of a long line is on no cell of it, and its
+				// column goes on past the window's edge as if the cells did.
+				cells += p.Col - ln.off - rel
+			}
 			y += k
-			return f.gutter + cells - f.left, y, y < f.h
+			if k > 0 {
+				cells += ln.indent
+			}
+			return f.gutter + cells - f.dropFor(ln), y, y < f.h
 		}
 		y += len(ln.spans)
 	}
@@ -573,7 +690,8 @@ func (p Pane) Hit(w, h, x, y int) Hit {
 	}
 	switch {
 	case x < f.gutter:
-		return Hit{Kind: HitGutter, Pos: buffer.Pos{Line: f.rowAt(y).line}, Row: y}
+		r := f.rowAt(y)
+		return Hit{Kind: HitGutter, Pos: buffer.Pos{Line: r.line}, Row: y, Fold: r.valid && r.span.from == 0 && f.foldable(r.line)}
 	case f.overflow && !f.noVBar && x == w-1:
 		start, length := f.thumb()
 		if y >= start && y < start+length {
@@ -604,9 +722,10 @@ func (p Pane) ScrollTopFor(h, row int) int {
 		return 0
 	}
 	lines := max(p.Doc.LineCount(), 1)
-	_, length := thumbOf(lines, h, 0)
+	display := max(DisplayLines(p.Doc), lines)
+	_, length := thumbOf(display, h, 0)
 	pos := max(row-length/2, 0)
-	top := (pos*lines + h/2) / h
+	top := (pos*display + h/2) / h
 	return min(top, max(lines-h, 0))
 }
 
@@ -618,12 +737,13 @@ func (p Pane) Thumb(h int) (start, length int) {
 		return 0, 0
 	}
 	lines := max(p.Doc.LineCount(), 1)
-	return thumbOf(lines, h, min(max(p.Top, 0), lines-1))
+	display := max(DisplayLines(p.Doc), lines)
+	return thumbOf(display, h, min(max(p.Top, 0), lines-1))
 }
 
 // thumb is the scrollbar thumb of the frame: its first body row and length.
 func (f frame) thumb() (start, length int) {
-	return thumbOf(f.lines, f.h, f.top)
+	return thumbOf(f.display, f.h, f.top)
 }
 
 // thumbOf sizes the thumb for lines document lines in a body h rows tall, with
@@ -640,14 +760,19 @@ func (f frame) posAt(x, row int) buffer.Pos {
 	r := f.rowAt(row)
 	cells := r.startCells()
 	if x >= f.gutter {
-		cells += x - f.gutter + f.left
+		cells += x - f.gutter + f.dropFor(r.ln)
+		if r.span.from > 0 {
+			// The hanging indent of a continuation row is not text: a press in it is the row's start.
+			cells = max(cells-r.ln.indent, r.startCells())
+		}
 		if !r.last && cells >= r.endCells() {
 			// A click past the end of a row that is not the last one lands on its
 			// last character, not on the first character of the next row.
 			cells = r.endCells() - 1
 		}
 	}
-	return buffer.Pos{Line: r.line, Col: runeIndexAt([]rune(f.doc.Line(r.line)), cells, f.tab)}
+	raw, off := f.lineRaw(r.line)
+	return buffer.Pos{Line: r.line, Col: off + runeIndexAt(raw, cells, f.tab)}
 }
 
 // Blit copies src into dst with its top-left cell at (x0, y0). Cells outside dst

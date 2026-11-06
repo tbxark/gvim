@@ -299,6 +299,9 @@ func (p *Palette) Update(msg tea.Msg) tea.Cmd {
 		case tea.MouseWheelDown:
 			p.nav.ScrollBy(wheelRows)
 		}
+	default:
+		// The clipboard text that Ctrl+V asked for reaches the query line here.
+		return p.edit(msg)
 	}
 	return nil
 }
@@ -339,14 +342,19 @@ func (p *Palette) key(msg tea.KeyPressMsg) tea.Cmd {
 	return p.edit(msg)
 }
 
-// edit gives msg to the query line and requeries when the query changed.
+// edit gives msg to the query line and requeries when the query changed. The command of
+// Ctrl+V, which reads the clipboard, is returned too.
 func (p *Palette) edit(msg tea.Msg) tea.Cmd {
 	before := p.input.Value()
-	p.input, _ = p.input.Update(msg)
-	if p.input.Value() == before {
-		return nil
+	var read tea.Cmd
+	p.input, read = p.input.Update(msg)
+	if kp, ok := msg.(tea.KeyPressMsg); !ok || tea.Key(kp).Keystroke() != "ctrl+v" {
+		read = nil
 	}
-	return p.requery()
+	if p.input.Value() == before {
+		return read
+	}
+	return tea.Batch(read, p.requery())
 }
 
 // click runs the row under a left click. Other buttons, and clicks that miss the

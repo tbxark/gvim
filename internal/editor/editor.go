@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/tbxark/gvim/internal/buffer"
 )
 
 // Action is the name of an editor command, such as "move_left" or "save".
@@ -33,15 +35,15 @@ type Options struct {
 	// gvim started without files. The UI then shows its welcome screen.
 	Empty bool
 	// UseTabs makes Tab insert a literal tab. When it is false, Tab inserts
-	// spaces up to the next multiple of TabSize columns, and Shift+Tab removes
-	// one indent unit. The zero value is false, so a zero Options inserts
+	// TabSize spaces, and Shift+Tab removes one indent unit. The zero value is false, so a zero Options inserts
 	// spaces. The app should set UseTabs to the inverse of insert_spaces.
 	UseTabs bool
 	// TabSize is the columns per tab stop, and the width of one indent unit
 	// when UseTabs is false. Zero means 4.
 	TabSize int
-	// AutoIndent makes insert_newline copy the blanks at the start of the caret
-	// line into the new line. The zero value keeps the line start empty.
+	// AutoIndent makes insert_newline indent the new line like the caret line, one
+	// level deeper after a line that ends in { [ ( or :, and makes a typed closing
+	// bracket re-indent its line. The zero value keeps the line start empty.
 	AutoIndent bool
 	// TrimTrailingWhitespace strips trailing spaces and tabs from every line on
 	// save. The buffer is changed to match, as one undo step.
@@ -61,6 +63,68 @@ type Options struct {
 	// SessionDir is the directory of the saved session, which InterruptedSaves reads.
 	// Empty means there is no session, and InterruptedSaves lists nothing.
 	SessionDir string
+
+	// The options below come from the Fresh editor.* config options. The zero value of
+	// each is "off" or 0, so a plain Options{} switches them off; the app sets them from
+	// the config, whose defaults are Fresh's. Except AutoClose, AutoSurround and the large file
+	// options, none of them changes behaviour yet: see the contract for the consumer of each. The two that are not plain values, the
+	// language resolver and the ephemeral patterns, are set with SetLanguageSettings and
+	// SetEphemeralFilePatterns so that Options stays comparable.
+
+	// AutoClose (editor.auto_close, Fresh default true) makes typing an opener insert its
+	// closer. AutoSurround (editor.auto_surround, default true) makes it wrap a
+	// selection. A language can switch either off; SettingsFor gives the result.
+	AutoClose    bool
+	AutoSurround bool
+	// VirtualSpace is editor.virtual_space: VirtualSpaceOff (default), VirtualSpaceBlock or
+	// VirtualSpaceOn. Empty reads as off.
+	VirtualSpace string
+	// ScrollOffset is editor.scroll_offset (default 3): the lines kept visible above and
+	// below the caret. Zero keeps none.
+	ScrollOffset int
+	// AutoReadOnly is editor.auto_read_only (default true): open files that are not
+	// writable, or that sit in a library folder, as read-only.
+	AutoReadOnly bool
+	// SnapshotInterval is editor.snapshot_interval (default 100): the edits between undo
+	// snapshots.
+	SnapshotInterval int
+	// ConfirmQuit is editor.confirm_quit (default false): quit asks even when no buffer
+	// has unsaved edits.
+	ConfirmQuit bool
+	// AutoCreateEmptyBufferOnLastBufferClose is
+	// editor.auto_create_empty_buffer_on_last_buffer_close (default true): closing the
+	// last tab opens an empty buffer instead of the welcome screen.
+	AutoCreateEmptyBufferOnLastBufferClose bool
+	// RecoveryEnabled is editor.recovery_enabled (default true), and
+	// AutoRecoverySaveIntervalSecs is editor.auto_recovery_save_interval_secs
+	// (default 2): the crash-recovery copies of modified buffers.
+	RecoveryEnabled              bool
+	AutoRecoverySaveIntervalSecs int
+	// AutoRevertPollIntervalMS is editor.auto_revert_poll_interval_ms (default 2000): how
+	// often an open file is checked for changes on disk when no watcher event arrives.
+	AutoRevertPollIntervalMS int
+	// LargeFileThresholdBytes is editor.large_file_threshold_bytes (default 10485760):
+	// a file of at least this many bytes opens in large file mode, where the text stays
+	// on disk and only an index of its lines is kept in memory (see large.go). Zero
+	// turns large file mode off. Fresh differs here: its zero makes every file large.
+	// EstimatedLineLength is editor.estimated_line_length (default 80), the line
+	// length that the line count estimate assumes before enough lines are known.
+	LargeFileThresholdBytes int
+	EstimatedLineLength     int
+	// LargeFileMode enables large file mode. It is not a config key: it is the
+	// switch that the app always sets (editorOptions), and that the editor tests
+	// leave off unless they test large file mode. Large file mode needs it and a
+	// positive LargeFileThresholdBytes; a file of at least that size opens large.
+	LargeFileMode bool
+
+	// largeGeom, openSrc, fullLoadMax and indexBatch are for tests. A zero largeGeom
+	// means the defaults of buffer.LargeOptions, a nil openSrc buffer.OpenFileSource,
+	// a zero fullLoadMax maxFullLoad and a zero indexBatch indexBatchBytes. openSrc is
+	// a pointer so that Options stays comparable.
+	largeGeom   buffer.LargeOptions
+	openSrc     *sourceOpener
+	fullLoadMax int64
+	indexBatch  int64
 }
 
 // Result is what Do reports back to the caller.
@@ -114,6 +178,16 @@ type Editor struct {
 	emptyStatus string
 	// opts is the configuration New was given, with TabSize defaulted.
 	opts Options
+	// rowMap reports where a line wraps (SetRowMapper).
+	rowMap RowMapper
+	// languages resolves the per-language settings (SetLanguageSettings).
+	languages SettingsResolver
+	// inString tells whether a position is inside a string literal (SetStringContext).
+	inString StringContext
+	// nonCode masks comments and strings for the indent rules (SetNonCodeContext).
+	nonCode NonCodeContext
+	// ephemeral holds editor.ephemeral_file_patterns (SetEphemeralFilePatterns).
+	ephemeral []string
 	// extras is the state of the marks, navigation and dabbrev actions (marks.go).
 	extras extraState
 	// autoSaved is the time of the last AutoSave. It is zero before the first.
@@ -180,7 +254,10 @@ func (e *Editor) SetViewport(rows, cols int) {
 // save. A file that is not valid UTF-8 is decoded in its detected encoding, and
 // errors wrap ErrNotDecodable, ErrEmptyPath or the underlying file error. An
 // untouched placeholder or untitled buffer is replaced rather than kept. The
-// document's path is the absolute form of path.
+// document's path is the absolute form of path. A file of at
+// least Options.LargeFileThresholdBytes opens in large file mode (see large.go) when
+// Options.LargeFileMode is set. If it is not UTF-8, the error is an
+// ErrLargeNeedsFullLoad, and the caller may load it with LoadFullFunc.
 func (e *Editor) OpenFile(path string) error {
 	if path == "" {
 		err := fmt.Errorf("open: %w", ErrEmptyPath)
@@ -201,7 +278,7 @@ func (e *Editor) OpenFile(path string) error {
 		e.setStatus("Opened " + e.docs[i].Name())
 		return nil
 	}
-	d, err := readDocument(path, e.defaultEOL())
+	d, err := loadDocument(path, e.loadSpec())
 	if err != nil {
 		e.setStatus(err.Error())
 		return err
@@ -354,7 +431,28 @@ func (e *Editor) Do(a Action, args map[string]any) Result {
 	e.lastKind = kind
 
 	e.resultText = ""
-	r := e.finish(h(e, args))
+	var mark jumpMark
+	if a != "navigate_back" && a != "navigate_forward" {
+		mark = e.markJump()
+	}
+	// A refusal belongs to the action that caused it, so none from before is left over.
+	// A refused action in a large document puts the carets back (see takeRefusal).
+	var carets *cursorSnapshot
+	if d != nil && d.large != nil {
+		_ = d.takeRefusal()
+		carets = d.snapCursors()
+	}
+	err := h(e, args)
+	if carets != nil && e.Active() == d {
+		if refused := d.takeRefusal(); refused != nil {
+			d.restoreCursors(carets)
+			if err == nil {
+				err = refused
+			}
+		}
+	}
+	r := e.finish(err)
+	e.recordJump(mark)
 	r.Text = e.resultText
 	return r
 }
@@ -366,6 +464,13 @@ func (e *Editor) finish(err error) Result {
 	if d := e.Active(); d != nil && d.preview && d.Modified() {
 		// An edit makes a preview tab permanent.
 		d.preview = false
+	}
+	if d := e.Active(); d != nil && d.large != nil {
+		// A large document refuses an edit or a read it cannot do. The reason is the
+		// action's error unless the action has one already.
+		if refused := d.takeRefusal(); err == nil {
+			err = refused
+		}
 	}
 	if err != nil {
 		e.setStatus(err.Error())
@@ -416,18 +521,30 @@ func (e *Editor) switchTo(i int) {
 	e.lastKind = ""
 }
 
-// ensureVisible scrolls the document so its cursor line is inside the pane. It
+// ensureVisible scrolls the document so its cursor line is inside the pane,
+// keeping the scroll-off margin from the pane edge once the caret has moved. It
 // does nothing when d is nil.
 func (e *Editor) ensureVisible(d *Document) {
 	if d == nil {
 		return
 	}
 	line := d.Cursor.Line
-	if line < d.Top {
-		d.Top = line
+	margin := 0
+	if d.Cursor != d.seen {
+		margin = e.scrollMargin()
 	}
-	if line >= d.Top+e.rows {
-		d.Top = line - e.rows + 1
+	d.seen = d.Cursor
+	if line < d.Top+margin {
+		d.Top = line - margin
+	}
+	if line >= d.Top+e.rows-margin {
+		top := line - e.rows + 1 + margin
+		if margin > 0 {
+			// Do not scroll past the end just to keep the margin, and never scroll
+			// up when the view already shows more than the end.
+			top = max(min(top, d.Buffer.Lines()-e.rows), line-e.rows+1, d.Top)
+		}
+		d.Top = top
 	}
 	d.Top = max(d.Top, 0)
 }
@@ -449,5 +566,5 @@ func (e *Editor) pristineUntitled() bool {
 		return false
 	}
 	d := e.docs[0]
-	return d.Path == "" && !d.Modified() && d.Buffer.Text() == ""
+	return d.Path == "" && !d.Modified() && d.Buffer.Empty()
 }

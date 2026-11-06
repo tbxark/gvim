@@ -104,7 +104,10 @@ func (e *Editor) RenamePath(oldPath, newPath string) error {
 // taken before the read, as readDocument does, so a change between the two shows
 // as a difference on save.
 func (d *Document) followDisk(path string) {
-	if !d.disk.exists {
+	if !d.disk.exists || d.large != nil {
+		// A large document is never read here: its file is too big, and its text is not
+		// held. The record stays, so a move that kept the size and the time of the file
+		// reads as no change, and any other move reads as an outside change on save.
 		return
 	}
 	now := diskStateOf(path)
@@ -208,6 +211,7 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 		switch {
 		case victim(d):
 			removed++
+			e.releaseDoc(d)
 			if i < e.active {
 				beforeActive++
 			}

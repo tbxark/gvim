@@ -13,6 +13,7 @@ import (
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/session"
 	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/ui/find"
 )
 
 // newSessionEditor returns an editor with no documents, as gvim starts without
@@ -278,5 +279,30 @@ func TestRuntimeWiresTheRootFeatures(t *testing.T) {
 	// The status row cuts the notice short, so the check looks for its start.
 	if strings.Contains(ansi.Strip(rt.model.View().Content), "Live Grep is not supported") {
 		t.Fatal("live grep is not wired: the model says it is not supported")
+	}
+}
+
+// TestSearchHistoryAndTogglesSurviveARestart saves the find state of one runtime
+// and starts another over the same directory, with file arguments, which skip the
+// session itself.
+func TestSearchHistoryAndTogglesSurviveARestart(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a.txt")
+	must(t, os.WriteFile(file, []byte("foo bar\n"), 0o644))
+	sessDir := filepath.Join(dir, "session")
+
+	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir, Files: []FileTarget{{Path: file}}}, false)
+	must(t, err)
+	rt.model.SetSearchState(find.State{Find: []string{"foo"}, Replace: []string{"baz"}, Regex: true})
+	must(t, rt.saveSearch())
+	rt.close()
+
+	rt2, err := buildRuntime(t.Context(), Options{SessionDir: sessDir, Files: []FileTarget{{Path: file}}}, false)
+	must(t, err)
+	defer rt2.close()
+	st, ok := rt2.model.SearchState()
+	if !ok || len(st.Find) != 1 || st.Find[0] != "foo" || len(st.Replace) != 1 || st.Replace[0] != "baz" || !st.Regex {
+		t.Fatalf("restored search state = %+v (%v)", st, ok)
 	}
 }

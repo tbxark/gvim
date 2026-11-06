@@ -83,6 +83,10 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 		}
 		return ShellJob{}, fmt.Errorf("format_buffer: %w for %s", ErrNoFormatter, d.language)
 	}
+	if d.large != nil {
+		// The formatter takes the whole text of the file.
+		return ShellJob{}, errLargeAction("format_buffer")
+	}
 	text := d.Buffer.Text()
 	return ShellJob{
 		Command:  command,
@@ -94,6 +98,6 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 		doc:      d,
 		from:     buffer.Pos{},
 		to:       d.Buffer.End(),
-		snapshot: text,
+		snapshot: contentMark{text: text},
 	}, nil
 }

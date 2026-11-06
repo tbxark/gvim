@@ -65,3 +65,24 @@ func TestStashesNeedASessionDirectory(t *testing.T) {
 		t.Fatal("stashesFor(dir) is nil, so the review has no port")
 	}
 }
+
+// TestInterruptedListsTheOverlayStashesOfLargeFiles checks that the unsaved edits of a
+// large file, which the session keeps as an overlay stash, are in the review too, so the
+// user can find the file that the session kept.
+func TestInterruptedListsTheOverlayStashesOfLargeFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := session.Save(dir, session.Session{Files: []session.FileState{
+		{Path: "/ws/big.txt", OverlayFile: "overlay-1.json"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := sessionStashes{dir: dir}.Interrupted()
+	if err != nil {
+		t.Fatalf("Interrupted: %v", err)
+	}
+	want := []ui.Interrupted{{Path: "/ws/big.txt", Stash: filepath.Join(dir, "overlay-1.json")}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Interrupted = %v, want %v", got, want)
+	}
+}

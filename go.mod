@@ -17,6 +17,7 @@ require (
 	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/hymkor/trash-go v0.3.0
+	github.com/rivo/uniseg v0.4.7
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
@@ -24,6 +25,7 @@ require (
 	go.lsp.dev/protocol v1.0.1
 	go.lsp.dev/uri v1.0.1
 	golang.org/x/image v0.47.0
+	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
 )
 
@@ -56,7 +58,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.30 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/pjbgf/sha1cd v0.7.0 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
@@ -64,6 +65,5 @@ require (
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

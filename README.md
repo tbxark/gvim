@@ -1,0 +1,302 @@
+# gvim (agent notes)
+
+> Written for coding agents developing this project, not for end users. It will be
+> replaced by a user-facing README once the project is finished.
+
+## What this is
+
+gvim is a terminal editor written in Go. It is a port of the Fresh TUI (Rust, reference
+checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
+(`internal/ui/grid`), not bubbles components.
+
+- `CLAUDE.md` holds the behavior rules and an architecture summary.
+- `migration/ARCH-v4.md` is the design record: package table, allowed imports, phases,
+  acceptance gates. Where it conflicts with `migration/BLUEPRINT*.md`, ARCH-v4 wins.
+
+## Layout
+
+- `main.go` → `internal/cli` (cobra flags and arguments) → `app.Run`.
+- `internal/app`: the composition root, and the only package that imports concrete
+  adapters. `buildModel` and `buildRuntime` are in `run.go`.
+- `internal/ui`: the single Bubble Tea root model. `ports.go` defines its interfaces,
+  and `layout.go` is the geometry source for painting and hit testing.
+- Domain packages (`buffer`, `editor`, `search`, `explorer`, `finder`, `fuzzy`, `palette`,
+  `keymap`, `theme`, `syntax`, `fsops`, `workspace`, `config`, `lsp`) must not import
+  bubbletea, bubbles or lipgloss.
+- `internal/uitest`: an in-process test harness for the real UI (see Debugging).
+- `internal/term`: runs a program in a pseudo-terminal and keeps a model of its screen.
+- `cmd/gvimdebug`: the debug page. It runs gvim in a pseudo-terminal and serves its
+  screen over HTTP (see Debugging).
+- `refs/`: read-only reference checkouts. Do not edit or import them. `_attic/` is the
+  retired TUI and is ignored by `./...`.
+- No Makefile, no `.sphere/`, no proto or ent generation.
+
+## Build and run
+
+Requirements: the Go toolchain named in `go.mod`, `golangci-lint` v2 for lint, and
+Python 3 for two generators. Google Chrome and `playwright-core` are only needed for
+scripted screenshots of the debug page.
+
+```sh
+go build ./...                              # compile all packages
+go build -o /tmp/gvim .                     # build the binary outside the repo
+go run . [DIR] [FILE[:LINE[:COL]]]...       # run the TUI
+go run . --help                             # full flag list
+go run ./cmd/gvimdebug -- "$PWD" main.go    # run the TUI behind the debug page
+```
+
+Build the binary outside the repo root. A `gvim` binary there is not in `.gitignore`.
+
+The shipped binary must stay pure Go:
+
+```sh
+CGO_ENABLED=0 go build ./...
+bash migration/tools/purity_check.sh        # prints PURE_GO_OK
+bash migration/tools/import_rules_check.sh  # prints IMPORT_RULES_OK
+```
+
+Gates to pass before calling work done:
+
+```sh
+go vet ./...
+golangci-lint run ./...                     # 0 issues at the time of writing
+go test ./...                               # all pass at the time of writing
+go test ./internal/ui -run TestName         # one test while iterating
+go test -race ./...                         # test-only; needs cgo
+```
+
+Generated files. Do not edit them by hand:
+
+- `internal/palette/commands_gen.go`: `python3 internal/palette/gen/generate.py refs/fresh`
+- `internal/ui/menubar/menu_table_gen.go`: `python3 migration/tools/gen_menus.py`
+  (`--check` reports drift)
+
+`CLAUDE.md` mentions `migration/tui_parity.py` and `migration/parity/`. Neither is in the
+working tree, so do not rely on them.
+
+## Debugging the TUI
+
+Use the lowest layer that shows the bug.
+
+### 1. Unit tests that drive `Update`
+
+Most UI logic can be tested without a terminal. Build the model, send messages, and
+assert on the model state, the emitted `tea.Cmd`s, layout rectangles and hit-map results.
+Examples: `internal/ui/footer_test.go`, `internal/ui/hit_test.go`. To check rendering,
+assert a few specific cells of the grid, not the whole frame.
+
+### 2. `uitest`: the real program in memory
+
+`uitest.Start(t, model, width, height)` runs the program in memory. It parses the output
+with the `charmbracelet/x/vt` emulator and returns a session.
+
+```go
+s := uitest.Start(t, m, 100, 30)
+s.Key("ctrl+p")                  // also s.Type("abc"), s.Click(x, y), s.Wheel(x, y, true)
+s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Palette") })
+sc := s.Screen()                 // sc.Cell(x, y), sc.Row(y), sc.Find(text)
+s.Screenshot("/tmp/frame.png")
+```
+
+Key and mouse calls only queue messages. Call `WaitFor` or `Settle` before reading the
+screen, or you may read a stale frame.
+
+Key spec: a single character is that key. Otherwise, join the modifiers `ctrl`, `alt`
+and `shift` to a key name with `+`, for example `ctrl+s` or `shift+down`. Key names:
+`enter esc tab backspace delete space up down left right home end pgup pgdown f1`–`f12`.
+
+Read `internal/uitest/session.go` before writing a new harness.
+
+### 3. Screenshot sweep
+
+```sh
+GVIM_SHOTS=/tmp/gvim-shots go test -run TestWriteScreenshots -count=1 ./internal/app/
+```
+
+This writes 10 PNG frames from `internal/app/screenshots_test.go`: welcome, one file,
+explorer, menu, palette, command palette, find, save-as, unsaved changes, and twelve tabs.
+Open them with an image-capable read tool. They are for looking at, not for assertions.
+The test skips without `GVIM_SHOTS`.
+
+### 4. Debug page: `cmd/gvimdebug`
+
+This command runs gvim in a pseudo-terminal, using `internal/term`, and serves its screen
+on a local web page. It is a debug view, not a copy of your terminal (see Fidelity below).
+The arguments after the flags go to gvim unchanged, so `--` ends the
+debug flags:
+
+```sh
+go run ./cmd/gvimdebug -- "$PWD" main.go
+go run ./cmd/gvimdebug -addr 127.0.0.1:9000 -- --diff old.go new.go
+```
+
+Flags:
+
+- `-addr`: where the page listens. Default `127.0.0.1:8765`.
+- `-cols`, `-rows`: the terminal size. Default 140×40.
+- `-bin`: a prebuilt gvim binary to run. By default each start builds this module into a
+  temp directory, so it must be run from inside the module.
+- `-real-home`: keep the user's HOME and config. By default gvim gets a temp HOME, so a
+  debug run does not read or write the user's session, recent files or config.
+- `-font PATH`: a font file for the screen. The server serves it at `/font`, and the page
+  loads it with `FontFace`. Use it when the browser cannot find the installed font by name.
+  Safari did not find JetBrains Mono Nerd Font by name, and showed boxes for the icons.
+  Example: `-font ~/Library/Fonts/JetBrainsMonoNerdFontMono-Regular.ttf`.
+
+The page at `/` shows the screen. The cursor cell is inverted. Keys typed while the focus
+is outside a field go to gvim. The page is split into `index.html` (layout), `app.css`
+(styles) and `app.js` (behaviour), all embedded in the binary. The layout has:
+
+- A top bar with the connection (`live`, `reconnecting`), gvim's status and a Restart
+  button. The status is one of `running`, `exited: …`, `building`, `build failed`,
+  `start failed` or `stopped`. A failed build keeps the page up. The build output goes to
+  the terminal that runs the command, not to the page.
+- The screen on the left, and a panel on the right with a Size card, a key field,
+  quick-key buttons, a text area and mouse help. The Size card sets gvim's columns and
+  rows, has a "Fit to window" switch, and changes the font size with A− and A+. The screen
+  uses JetBrainsMono NFM, the family name written in the font file, then JetBrainsMono
+  Nerd Font Mono, Symbols Nerd Font Mono and Menlo. These are looked up by name, and each
+  browser matches names in its own way. With `-font`, the page loads the file instead. A
+  terminal's font setting needs the family name `JetBrainsMono NFM` for this font file.
+- A bottom bar with the terminal size, the cursor position and the last error.
+
+Mouse input on the screen: click, right-click and scroll send a mouse event to the cell
+under the pointer. The page updates as soon as gvim draws, because the server pushes each
+change over `/events`.
+
+The HTTP API:
+
+| Method | Path       | Body                                                  | Response |
+|--------|------------|-------------------------------------------------------|----------|
+| GET    | `/`        |                                                       | the page; `/app.css` and `/app.js` are served beside it |
+| GET    | `/events`  |                                                       | server-sent events, one JSON state on connect and after every change: `{"status","frame","cols","rows","cursor":{"row","col","visible"}}` |
+| GET    | `/frame`   |                                                       | the screen as HTML spans; empty when gvim is not running |
+| GET    | `/status`  |                                                       | the status line |
+| POST   | `/key`     | one key spec, as in `uitest` above                     | 204; 400 for an unknown key; 409 when gvim is not running |
+| POST   | `/text`    | text; each character is typed, `\n` sends Enter        | 204 |
+| POST   | `/mouse`   | `{"action":"click","button":"left","x":3,"y":7}`      | 204; 400 for a bad action or button |
+| POST   | `/restart` |                                                       | 204; 500 with the build error |
+| POST   | `/resize`  | `{"cols":120,"rows":30}`                              | 204; 400 outside 10–400 columns or 4–200 rows. A running gvim is resized at once, and the next start keeps the size |
+
+Mouse actions are `click`, `press`, `release`, `move`, `wheel-up` and `wheel-down`. Buttons
+are `left`, `middle` and `right`. Coordinates are zero-based screen cells.
+
+```sh
+curl -d 'ctrl+e' 127.0.0.1:8765/key        # focus the file explorer
+curl -d 'down' 127.0.0.1:8765/key
+curl -d '{"action":"click","button":"left","x":3,"y":7}' \
+     -H 'Content-Type: application/json' 127.0.0.1:8765/mouse
+curl -X POST 127.0.0.1:8765/restart
+curl 127.0.0.1:8765/frame > /tmp/frame.html
+```
+
+### Automating the page
+
+Use the page from Playwright rather than from curl when you need to wait for the result of
+an action. Every control has a `data-testid`, and each quick-key button has a `data-key`:
+
+| Selector | What it is |
+|----------|------------|
+| `[data-testid=screen]` | the screen; its text is `innerText` |
+| `[data-testid=status]` | the status chip; `data-state` is `running`, `building`, `stopped`, `exited` or `failed` |
+| `[data-testid=connection]` | the stream chip; `data-state` is `connecting`, `live` or `reconnecting` |
+| `[data-testid=size]`, `[data-testid=cursor]` | the terminal size and the cursor position |
+| `[data-testid=message]` | the last input error; empty when the last input was accepted |
+| `[data-testid=key-input]`, `[data-testid=key-send]` | the key field and its button |
+| `[data-testid=text-input]`, `[data-testid=text-send]` | the text area and its button |
+| `[data-testid=restart]` | the Restart button |
+| `[data-testid=cols-input]`, `[data-testid=rows-input]`, `[data-testid=resize-apply]` | the size fields and their Apply button |
+| `[data-testid=fit-toggle]` | the "Fit to window" checkbox |
+| `[data-testid=font-smaller]`, `[data-testid=font-larger]`, `[data-testid=font-size]` | the font size buttons and the current size |
+| `[data-testid=screen-card]` | the box around the screen, which the fit measures |
+| `[data-key="ctrl+e"]` | a quick-key button; the attribute is the key spec |
+
+`window.gvimdebug` drives the page from script:
+
+- `key(spec)`, `text(s)`, `mouse({action, button, x, y})`, `resize(cols, rows)` and
+  `restart()` each return a promise. It resolves when the server accepts the input, and
+  rejects with the server's message when it does not.
+- `frames` is the number of states drawn so far. Read it before an action, then call
+  `waitForFrame(before)` to wait for the next state that gvim pushed.
+- `screenText()` returns the screen as plain text.
+
+```js
+const before = await page.evaluate(() => window.gvimdebug.frames);
+await page.evaluate(() => window.gvimdebug.key('ctrl+e'));
+await page.evaluate(n => window.gvimdebug.waitForFrame(n), before);
+const text = await page.evaluate(() => window.gvimdebug.screenText());
+```
+
+To screenshot the page, use Playwright. `playwright-core` with
+`chromium.launch({ channel: 'chrome' })` drives the installed Chrome, so no browser download
+is needed. Load the URL, wait for `[data-testid=status][data-state=running]`, then call
+`page.screenshot`. The script used so far lives outside the repo at
+`/tmp/gvim-shot/tools/`. Recreate it if it is gone.
+
+The key and mouse encodings are in `cmd/gvimdebug/keys.go`, with table-driven tests in
+`keys_test.go`.
+
+### Fidelity: what the page is and is not
+
+The page is a debug view, not a copy of the terminal you use. gvim's output goes through a
+terminal emulator (`charmbracelet/x/vt`, via `internal/term`), and each cell is drawn as
+text in the browser. Use the page to check layout, colours and input behaviour. Check the
+final look in a real terminal.
+
+Differences to keep in mind:
+
+- **Emulator.** The screen is what `x/vt` makes of gvim's output, not what your terminal
+  app would show. An escape sequence the emulator does not handle is shown differently,
+  or not at all.
+- **Font and metrics.** Glyphs come from the font the page loads (`-font`, or the installed
+  font names), not from your terminal's font. Line height is 1.25 em, and the cell width is
+  the font's advance. So the same `-cols` can fit a different width in the browser.
+  Nerd Font icons take the width the font gives them.
+- **Attributes.** Only foreground, background, bold, underline and reverse are drawn.
+  Italic, faint, strikethrough, blink and styled underlines are not drawn.
+- **Default colours.** A cell without a colour uses fixed dark defaults (`#d0d0d0` on
+  `#101012`), not your terminal theme.
+- **Cursor.** The cursor is drawn as an inverted cell while it is visible. Its shape (block,
+  bar, underline) and blinking are not shown.
+- **Keys and mouse.** Keys are encoded by a fixed table (`cmd/gvimdebug/keys.go`), so a key
+  combination outside it is rejected or sent differently. The page sends a left click, a
+  right click and the wheel. Middle clicks, modifier-clicks and drags are not sent from the
+  page. The API also takes `press`, `release` and `move`.
+- **Not shown.** Selection and copy, scrollback, the bell, the window title and image
+  protocols. The page has none of them.
+
+Known limits:
+
+- The screen is the only output. Model internals are not exposed.
+- Wide characters are not aligned. The second cell of a wide character is drawn as a space.
+- The size starts at `-cols` and `-rows`. The Size card changes it while gvim runs, and
+  "Fit to window" follows the browser window. Turning fit off keeps the last size. The
+  next restart keeps the size too.
+- Icons need gvim's config to ask for them. The debug run uses a temp config, so gvim
+  shows plain text. Use `-real-home` to read your own `ui_icons` setting.
+- The browser takes some shortcuts (Ctrl+T, Ctrl+W, Cmd+*). Use the quick-key buttons or
+  `curl` for those.
+- Every code change needs a restart, which rebuilds gvim and resets the editor state. There
+  is no hot reload.
+- The page listens on loopback only and has no authentication.
+
+## Testing rules
+
+From `CLAUDE.md`:
+
+- Plain Go unit tests: table-driven, asserting values and behavior.
+- No golden or snapshot tests for the TUI, no full-frame string comparisons, and no new
+  `migration/parity` scenarios.
+- Fix a bug with a regression test that fails first.
+- Keep the existing `testdata` fixtures. Do not regenerate them to make a test pass.
+- `TestWriteScreenshots` is a debugging aid. It is gated by an environment variable, skips
+  by default, and asserts nothing, so `go test ./...` stays green.
+
+## Working rules for agents
+
+- Keep diffs surgical. Match the surrounding style, and do not refactor adjacent code.
+- Do not commit or push unless asked. Do not run commands with outside side effects
+  (publishing, tagging, deploying).
+- Do not edit or import `refs/` or `_attic/`.
+- Before finishing, run `go vet ./...`, `golangci-lint run ./...`, both purity and import
+  gates, and `go test ./...`.

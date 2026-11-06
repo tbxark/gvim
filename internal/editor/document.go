@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/buffer"
+	"github.com/tbxark/gvim/internal/encoding"
 )
 
 // Document is one open file: its text, the cursor, an optional selection, and
@@ -28,6 +29,9 @@ type Document struct {
 	block *blockState
 	// Top is the index of the first line shown in the editor pane.
 	Top int
+	// seen is the caret as ensureVisible last saw it. The scroll-off margin
+	// applies only when the caret has moved since.
+	seen buffer.Pos
 	// preview marks a tab opened by OpenPreview. A preview tab is replaced by
 	// the next preview and becomes permanent once it is edited or opened again
 	// with OpenFile.
@@ -43,6 +47,10 @@ type Document struct {
 	// eol is the line ending of the saved text, eolLF or eolCRLF. The buffer
 	// always holds "\n" as its line break, and fileText converts it back.
 	eol string
+	// ends is the ending of each line break of saved when the file mixes LF and CRLF,
+	// and nil otherwise. A save writes the recorded ending for a line it did not
+	// change. See files_lineend.go.
+	ends []string
 	// disk is the state of the file when it was opened or last saved. A save
 	// compares it with the file on disk, so an outside change is not overwritten.
 	disk diskState
@@ -60,11 +68,21 @@ type Document struct {
 	// status is the message shown while this tab is active. Each tab keeps its
 	// own, so switching tabs never shows another tab's message.
 	status string
+	// saveNote is what the status says after the last save of a document that is not large,
+	// in place of "Saved", or empty. See savedStatus.
+	saveNote string
 	// codec is the encoding name the text was read with, from internal/encoding.
 	// Save encodes with it. "" means utf-8, the encoding of a new document.
 	codec string
 	// readOnly refuses every change to the text and to the file. See readonly.go.
 	readOnly bool
+	// binary marks a file that is not text. It is read-only and cannot be saved. See
+	// binary.go.
+	binary bool
+	// metaDirty is set when the encoding or the line ending was changed since the
+	// last save, which leaves the text as it is but changes the file. See
+	// markMetaChanged.
+	metaDirty bool
 	// findRange limits the find actions to this range when it is set. See
 	// doc_search.go.
 	findRange *buffer.Selection
@@ -74,6 +92,11 @@ type Document struct {
 	lastMulti *multiEditRecord
 	// view holds the display settings of the document. See viewsettings.go.
 	view ViewSettings
+	// large is the state of a document in large file mode, and nil for any other.
+	// See large.go.
+	large *largeDoc
+	// planErr is why the edit being planned must not be made, or nil. See failPlan.
+	planErr error
 }
 
 // Line endings a document can save with.
@@ -90,9 +113,8 @@ func newDocument(path, text string) *Document {
 
 // splitLineEnding turns the CRLF breaks of data into LF, the form the buffer
 // holds, and reports the ending the file uses. CRLF wins only when its breaks
-// outnumber the bare LF breaks, so a tie, or a text with no break, is LF. Bare
-// LF breaks in a CRLF file are written as CRLF on save, so the file ends up
-// with one ending.
+// outnumber the bare LF breaks, so a tie, or a text with no break, is LF. The
+// ending of each break of a mixed file is kept by lineEnds.
 func splitLineEnding(data string) (text, eol string) {
 	crlf := strings.Count(data, "\r\n")
 	lf := strings.Count(data, "\n") - crlf
@@ -106,16 +128,24 @@ func splitLineEnding(data string) (text, eol string) {
 // SavedLines returns the saved text split into lines on '\n', the same way
 // buffer.New splits its content. The text is the one at open or at the last
 // save. The result is a new slice on every call, so the caller may change it.
-// An unnamed, unsaved buffer has the single empty line [""].
+// An unnamed, unsaved buffer has the single empty line [""]. A large document does
+// not keep its saved text, so it returns nil.
 func (d *Document) SavedLines() []string {
+	if d.large != nil {
+		return nil
+	}
 	return strings.Split(d.saved, "\n")
 }
 
 // LinesChangedSinceSave returns the 0-based indexes of lines whose content
 // differs from SavedLines: the text at open or at the last save. The
 // comparison is line by line, so inserting or deleting a line marks every
-// line below it as changed. It returns nil when nothing differs.
+// line below it as changed. It returns nil when nothing differs, and for a large
+// document, which has no saved text to compare with.
 func (d *Document) LinesChangedSinceSave() []int {
+	if d.large != nil {
+		return nil
+	}
 	saved := d.SavedLines()
 	var changed []int
 	for i := range d.Buffer.Lines() {
@@ -150,9 +180,19 @@ func (d *Document) Language() string {
 	return d.language
 }
 
-// Modified reports whether the buffer has unsaved edits.
+// Modified reports whether the document has unsaved changes: edits to the text, a new
+// encoding or line ending, or stashed edits of a large document that wait for the line
+// index or could not be put back. The stash is the user's text, so closing the tab asks
+// first, and a quit does.
 func (d *Document) Modified() bool {
-	return d.Buffer.Modified()
+	return d.dirty() || d.holdsStash()
+}
+
+// dirty reports whether saving d would write something: edits to the text, or a new
+// encoding or line ending. A stash that is held does not count, since the text on
+// screen is not it.
+func (d *Document) dirty() bool {
+	return d.Buffer.Modified() || d.metaDirty
 }
 
 // HasSelection reports whether a non-empty selection exists.
@@ -171,19 +211,27 @@ var ErrChangedOnDisk = errors.New("changed on disk since it was opened; not save
 
 // readDocument loads path, decoding it with decodeFile. A missing file yields an
 // empty document that will create the file on save, as an editor does for a new
-// path. That document takes defaultEOL, the ending for a new file.
-func readDocument(path, defaultEOL string) (*Document, error) {
+// path. That document takes the spec's line ending, the ending for a new file. A file
+// of at least the spec's large threshold opens in large file mode instead, without
+// being read whole (see readLargeDocument).
+func readDocument(path string, spec loadSpec) (*Document, error) {
 	// The state is taken before the read. A change between the two then shows
 	// as a difference on save, which is the safe side.
 	disk := diskStateOf(path)
+	if disk.exists && spec.large.isLarge(disk.size) {
+		return readLargeDocument(path, disk, spec.large)
+	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		d := newDocument(path, "")
-		d.eol = defaultEOL
+		d.eol = spec.eol
 		return d, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	if encoding.IsBinary(data) {
+		return binaryDocument(path, data, disk), nil
 	}
 	decoded, codec, err := decodeFile(data)
 	if err != nil {
@@ -192,6 +240,7 @@ func readDocument(path, defaultEOL string) (*Document, error) {
 	text, eol := splitLineEnding(decoded)
 	d := newDocument(path, text)
 	d.eol = eol
+	d.ends = lineEnds(decoded)
 	d.disk = disk
 	d.codec = codec
 	d.encoding = encodingLabel(codec, text)
@@ -201,6 +250,9 @@ func readDocument(path, defaultEOL string) (*Document, error) {
 // fileText returns text as it is written to disk: each "\n" becomes the
 // document's line ending.
 func (d *Document) fileText(text string) string {
+	if d.ends != nil {
+		return d.mixedText(text)
+	}
 	if d.eol == eolCRLF {
 		return strings.ReplaceAll(text, "\n", "\r\n")
 	}
@@ -209,21 +261,31 @@ func (d *Document) fileText(text string) string {
 
 // tidyForSave applies the save-time options to the buffer, so the text written
 // is the text the buffer holds afterwards. The edits form one undo step. The
-// caret and selection are kept inside the text they were on.
+// caret and selection are kept inside the text they were on. A large document is
+// tidied only when its index is complete, because the last line is not known before,
+// and only with the final newline: trimming would edit every line of the file. A
+// refused edit leaves the document as it is: the file is saved without that change,
+// and the status after the save says so (see Document.savedStatus).
 func (d *Document) tidyForSave(o Options) {
 	if !o.TrimTrailingWhitespace && !o.EnsureFinalNewline {
 		return
 	}
-	before := d.Buffer.Text()
+	if d.large != nil && !d.Index().Complete {
+		return
+	}
+	before := d.contentMark()
 	d.Buffer.Group(func() {
-		if o.TrimTrailingWhitespace {
+		if o.TrimTrailingWhitespace && d.large == nil {
 			d.trimTrailingWhitespace()
 		}
 		if o.EnsureFinalNewline {
 			d.ensureFinalNewline()
 		}
 	})
-	if d.Buffer.Text() != before {
+	if d.large != nil && d.Buffer.Refusal() != nil {
+		d.large.tidyNote = "Saved without final newline: last line not editable"
+	}
+	if d.contentMark() != before {
 		// The edit is the newest undo group now, so a multi-caret record is stale.
 		d.lastMulti = nil
 	}
@@ -303,21 +365,27 @@ func (d *Document) Encoding() string { return d.encoding }
 func (d *Document) LineEnding() string { return d.eol }
 
 // setLineEnding changes the line ending that the next save writes. The text is
-// not changed, so the document keeps its modified state. Its argument "value" is
-// "lf" or "crlf". Any other value is an error, and the ending stays as it was.
+// not changed, but the file will be, so a new ending marks the document modified.
+// Its argument "value" is "lf" or "crlf". Any other value is an error, and the
+// ending stays as it was.
 func setLineEnding(e *Editor, d *Document, args map[string]any) error {
 	value, ok := args["value"].(string)
 	if !ok {
 		return errors.New("set_line_ending: missing string argument \"value\"")
 	}
+	var eol string
 	switch value {
 	case "lf":
-		d.eol = eolLF
+		eol = eolLF
 	case "crlf":
-		d.eol = eolCRLF
+		eol = eolCRLF
 	default:
 		return fmt.Errorf("set_line_ending: value %q is not \"lf\" or \"crlf\"", value)
 	}
+	d.markMetaChanged(eol != d.eol || d.ends != nil)
+	d.eol = eol
+	// An explicit choice writes one ending for every line.
+	d.ends = nil
 	e.setStatus("Line ending " + d.eol)
 	return nil
 }

@@ -80,3 +80,38 @@ func TestHorizontalBarRowIsNotTextAndCountsForTheVerticalBar(t *testing.T) {
 		t.Errorf("row 3 at the gutter = %q, want the horizontal bar thumb", got)
 	}
 }
+
+// TestRevealTopMarginKeepsRowsAroundTheCaret uses ten lines of "hello world" that
+// wrap at W=14 into two rows each, in a pane eight rows tall.
+func TestRevealTopMarginKeepsRowsAroundTheCaret(t *testing.T) {
+	tests := []struct {
+		name      string
+		line, col int
+		top       int
+		margin    int
+		want      int
+	}{
+		{"no margin keeps a caret that is on screen", 3, 0, 0, 0, 0},
+		{"the bottom margin scrolls down by whole lines", 3, 0, 0, 2, 1},
+		{"the top margin scrolls up by whole lines", 5, 0, 5, 2, 4},
+		{"the second row of a wrapped line counts as its own row", 3, 7, 0, 2, 1},
+		{"the start of the document gives way", 0, 0, 0, 2, 0},
+		{"the end of the document gives way", 9, 7, 6, 2, 6},
+		{"the margin is at most half the body", 3, 0, 0, 10, 1},
+		{"a caret inside the margins keeps the top", 2, 0, 0, 2, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := make([]string, 10)
+			for i := range lines {
+				lines[i] = "hello world"
+			}
+			d := newDoc(lines...)
+			d.cursor = buffer.Pos{Line: tc.line, Col: tc.col}
+			p := Pane{Doc: d, Wrap: true, Top: tc.top}
+			if got := p.RevealTopMargin(14, 8, tc.margin); got != tc.want {
+				t.Fatalf("RevealTopMargin = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

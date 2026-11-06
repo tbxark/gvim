@@ -14,6 +14,7 @@ import (
 var (
 	_ CaretLister = (*editor.Document)(nil)
 	_ Folder      = (*editor.Document)(nil)
+	_ LargeDoc    = (*editor.Document)(nil)
 )
 
 // caretDoc is a fakeDoc with extra carets, the way *editor.Document reports them.

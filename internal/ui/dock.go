@@ -367,7 +367,12 @@ func (m *Model) sendSelection() tea.Cmd {
 	if doc == nil {
 		return nil
 	}
-	text := pasteText(selectedText(doc))
+	text, ok := sentText(doc)
+	if !ok {
+		m.notice = "Selection too large to send in large file mode"
+		return nil
+	}
+	text = pasteText(text)
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}

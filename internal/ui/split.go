@@ -182,7 +182,7 @@ func (m *Model) splitFocused(dir splitDir) {
 	m.splits.focus = f.b
 	m.splits.comparing = false
 	m.syncViewport()
-	m.revealCaretVisual()
+	m.revealCaretVisual(0)
 }
 
 // moveFocus moves the focus delta panes along the reading order, and wraps at the
@@ -236,7 +236,7 @@ func (m *Model) focusLeaf(n *splitNode) {
 		m.ed.ScrollTo(n.top)
 	}
 	m.syncViewport()
-	m.revealCaretVisual()
+	m.revealCaretVisual(0)
 }
 
 // keepFocused copies the active tab and the viewport top into the focused leaf, so the
@@ -261,14 +261,14 @@ func (m *Model) splitInput() (*splitNode, []leafInfo) {
 		if n != m.splits.focus {
 			infos[i] = leafInfo{tab: n.tab, top: n.top}
 			if doc := m.docAt(n.tab); doc != nil {
-				infos[i].lines = doc.LineCount()
+				infos[i].lines = displayLines(doc)
 			}
 			continue
 		}
 		infos[i] = leafInfo{tab: m.activeTab(), focused: true}
 		if doc := m.ed.Active(); doc != nil {
 			infos[i].top = doc.Top()
-			infos[i].lines = doc.LineCount()
+			infos[i].lines = displayLines(doc)
 		}
 	}
 	return m.splits.root, infos
@@ -299,9 +299,11 @@ func (m *Model) leafDoc(n *splitNode) Document {
 
 // closeTab closes tab i through the tab port. A tab that closes updates the leaves.
 func (m *Model) closeTab(t tabEditor, i int, force bool) error {
+	path := m.tabPath(i)
 	if err := t.CloseTab(i, force); err != nil {
 		return err
 	}
+	m.cancelSavesOf(path)
 	m.tabRemoved(i)
 	return nil
 }
@@ -310,8 +312,10 @@ func (m *Model) closeTab(t tabEditor, i int, force bool) error {
 // close_tab, updates the leaves as closeTab does.
 func (m *Model) editorDo(a editor.Action, args map[string]any) editor.Result {
 	before, active := len(m.ed.Tabs()), m.activeTab()
+	path := m.tabPath(active)
 	res := m.ed.Do(a, args)
 	if len(m.ed.Tabs()) == before-1 {
+		m.cancelSavesOf(path)
 		m.tabRemoved(active)
 	}
 	if a == "clear_search" && m.findBar != nil {
@@ -414,7 +418,11 @@ func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 		Doc: doc, Top: p.top, Styles: m.panes, TabSize: m.tabSize,
 		Diagnostics: m.lspSpans(doc),
 	}
-	return m.viewPane(pane, doc)
+	pane = m.viewPane(pane, doc)
+	if p.focused {
+		pane = m.applyPan(pane, doc)
+	}
+	return pane
 }
 
 // focusedBodyRows is the number of text rows of the focused pane, which is the
@@ -433,8 +441,9 @@ func (m *Model) focusedBodyRows() int {
 // screen. The editor counts buffer lines, and a wrapped line takes several rows, so
 // its own reveal can leave the caret below the body. The top it moves to is the one
 // the pane paints with (editorpane.RevealTop), so the caret, the hit map and the
-// paint agree on the row.
-func (m *Model) revealCaretVisual() {
+// paint agree on the row. margin is the rows kept between the caret row and the edge
+// of the body, and it is 0 for a caret that did not move by the keyboard.
+func (m *Model) revealCaretVisual(margin int) {
 	doc := m.ed.Active()
 	if doc == nil {
 		return
@@ -445,7 +454,7 @@ func (m *Model) revealCaretVisual() {
 		return
 	}
 	fp := l.focusedPane()
-	if top := m.paneGeometry(fp, doc).RevealTop(fp.w, fp.h); top != doc.Top() {
+	if top := m.paneGeometry(fp, doc).RevealTopMargin(fp.w, fp.h, margin); top != doc.Top() {
 		m.ed.ScrollTo(top)
 	}
 }

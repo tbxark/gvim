@@ -64,6 +64,13 @@ type RootPorts struct {
 	// AutoSave is the interval of auto-save. Zero turns it off. The editor
 	// saves on its own schedule through the same value (editor.Options).
 	AutoSave time.Duration
+	// AutoRevertPoll is how often the open files are checked for changes the watcher
+	// does not report (editor.auto_revert_poll_interval_ms). Zero turns the poll off.
+	AutoRevertPoll time.Duration
+	// Recovery writes the crash-recovery copy of the unsaved text every RecoveryEvery.
+	// Nil or a zero interval turns it off.
+	Recovery      RecoveryPort
+	RecoveryEvery time.Duration
 	// Plugins lists the plugin commands in the command palette and runs the one
 	// that is chosen. Nil leaves the plugin commands out.
 	Plugins palette.PluginRunner

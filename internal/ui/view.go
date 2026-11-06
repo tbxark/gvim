@@ -42,6 +42,83 @@ type ViewOptions struct {
 	MouseHover              bool
 	ScrollSync              bool
 	UIIcons                 string // "plain" or "nerd"; empty and unknown names are plain
+
+	// The fields below are the Fresh editor.* display options. The app fills them from
+	// the config, whose defaults are Fresh's, and DefaultViewOptions returns the same
+	// defaults; a test that sets one should start from DefaultViewOptions. None of them
+	// is read by the painting yet unless the contract says so. The ones a language can
+	// override (line wrap, wrap column, page view, page width, tab marks, indentation
+	// guides) are in the per-document editor.LanguageSettings, not here.
+
+	RelativeLineNumbers        bool   // editor.relative_line_numbers, default false
+	HideCurrentLineOnSelection bool   // editor.hide_current_line_on_selection, default false
+	HighlightCurrentColumn     bool   // editor.highlight_current_column, default false
+	WrapIndent                 bool   // editor.wrap_indent, default true
+	SyntaxHighlighting         bool   // editor.syntax_highlighting, default true
+	ShowTilde                  bool   // editor.show_tilde, default true
+	Rulers                     []int  // editor.rulers: 1-based columns, default none
+	IndentationGuideMode       string // editor.indentation_guide: "none", "all" or "active"; empty reads as none
+	IndentationGuideGlyph      string // editor.indentation_guide_glyph; empty reads as "▏"
+	RainbowIndentation         bool   // editor.rainbow_indentation, default false
+	Whitespace                 WhitespaceOptions
+	HighlightMatchingBrackets  bool // editor.highlight_matching_brackets, default true
+	RainbowBrackets            bool // editor.rainbow_brackets, default true
+	Search                     SearchOptions
+	StatusBar                  StatusBarOptions
+	MenuBarMnemonics           bool // editor.menu_bar_mnemonics, default true
+	Animations                 bool // editor.animations, default true
+	CursorJumpAnimation        bool // editor.cursor_jump_animation, default true
+	ViewportEdgeFade           bool // editor.viewport_edge_fade, default true
+	SmoothScroll               bool // editor.smooth_scroll, default true
+	UseTerminalBG              bool // editor.use_terminal_bg, default false
+	SetWindowTitle             bool // editor.set_window_title, default true
+	TerminalAutoTitle          bool // editor.terminal_auto_title, default true
+	ScreensaverEnabled         bool // editor.screensaver_enabled, default false
+	ScreensaverIdleMinutes     int  // editor.screensaver_idle_minutes, default 5
+
+	// Mouse. Zero reads as the default.
+
+	MouseWheelScrollLines int // editor.mouse_wheel_scroll_lines, default 3 (the wheelRows constant today)
+	DoubleClickTimeMS     int // editor.double_click_time_ms, default 500 (doubleClickWindow today)
+	MouseHoverDelayMS     int // editor.mouse_hover_delay_ms, default 500
+
+	// Language-server display.
+
+	EnableInlayHints           bool // editor.enable_inlay_hints, default true
+	EnableSemanticTokensFull   bool // editor.enable_semantic_tokens_full, default false
+	DiagnosticsInlineText      bool // editor.diagnostics_inline_text, default false
+	CompletionPopupAutoShow    bool // editor.completion_popup_auto_show, default false
+	QuickSuggestions           bool // editor.quick_suggestions, default true
+	QuickSuggestionsDelayMS    int  // editor.quick_suggestions_delay_ms, default 150
+	SuggestOnTriggerCharacters bool // editor.suggest_on_trigger_characters, default true
+}
+
+// WhitespaceOptions are the editor.whitespace_* options that are not per language.
+// ShowWhitespace on ViewOptions is editor.whitespace_show, the master switch. The tab
+// flags are per language and are in editor.LanguageSettings.
+type WhitespaceOptions struct {
+	SpacesLeading  bool // default false
+	SpacesInner    bool // default false
+	SpacesTrailing bool // default false
+	Newlines       bool // default false
+	CarriageReturn bool // default false
+	InSelection    bool // marks show inside a selection even when hidden elsewhere, default true
+}
+
+// SearchOptions are editor.search: the starting state of the find bar.
+type SearchOptions struct {
+	CaseSensitive bool
+	WholeWord     bool
+	Regex         bool
+	ConfirmEach   bool // ask before each replacement
+}
+
+// StatusBarOptions are editor.status_bar: the status row elements as Fresh names them,
+// such as "{cursor}" and "{language}". Empty lists mean gvim's own layout.
+type StatusBarOptions struct {
+	Left      []string
+	Right     []string
+	Separator string
 }
 
 // DefaultViewOptions returns the settings gvim starts with when no config sets them.
@@ -56,6 +133,31 @@ func DefaultViewOptions() ViewOptions {
 		HighlightCurrentLine:    true,
 		MouseCapture:            true,
 		CursorStyle:             cursorBlock,
+
+		WrapIndent:                true,
+		SyntaxHighlighting:        true,
+		ShowTilde:                 true,
+		IndentationGuideMode:      "none",
+		IndentationGuideGlyph:     "\u258f",
+		Whitespace:                WhitespaceOptions{InSelection: true},
+		HighlightMatchingBrackets: true,
+		RainbowBrackets:           true,
+		MenuBarMnemonics:          true,
+		Animations:                true,
+		CursorJumpAnimation:       true,
+		ViewportEdgeFade:          true,
+		SmoothScroll:              true,
+		SetWindowTitle:            true,
+		TerminalAutoTitle:         true,
+		ScreensaverIdleMinutes:    5,
+		MouseWheelScrollLines:     3,
+		DoubleClickTimeMS:         500,
+		MouseHoverDelayMS:         500,
+		EnableInlayHints:          true,
+		QuickSuggestions:          true,
+		QuickSuggestionsDelayMS:   150,
+
+		SuggestOnTriggerCharacters: true,
 	}
 }
 
@@ -71,6 +173,11 @@ type viewState struct {
 	scrollSync                    bool
 	debug                         bool // the status row shows the highlight ranges
 	icons                         icons.Mode
+	// opts are the starting options, kept whole so that the Fresh display options
+	// above the toggles are readable by the painting (m.view.opts.ShowTilde, ...).
+	opts ViewOptions
+	// languages resolves the per-language settings of a document. Nil means none.
+	languages editor.SettingsResolver
 }
 
 // newViewState returns the state for the starting options o.
@@ -81,6 +188,7 @@ func newViewState(o ViewOptions) viewState {
 	}
 	mode, _ := icons.Parse(o.UIIcons) // an unknown name is plain
 	return viewState{
+		opts:         o,
 		icons:        mode,
 		tabBar:       o.ShowTabBar,
 		statusBar:    o.ShowStatusBar,
@@ -159,6 +267,10 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 	case "toggle_line_wrap":
 		m.view.lineWrap = !m.view.lineWrap
 		m.notice = onOffNotice("Line wrap", m.view.lineWrap)
+		if doc := m.ed.Active(); doc != nil && isLargeDoc(doc) {
+			// The pane never wraps a large document (see editorpane wrapOn).
+			m.notice += " (not available in large file mode)"
+		}
 	case "toggle_current_line_highlight":
 		m.view.currentLine = !m.view.currentLine
 		m.notice = onOffNotice("Current line highlight", m.view.currentLine)
@@ -175,6 +287,10 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 		return m.bufferFlag(action, args, editor.OverrideOr(m.docViewSettings().Occurrences, m.view.occurrences))
 	case "toggle_whitespace_indicators":
 		return m.bufferFlag(action, args, editor.OverrideOr(m.docViewSettings().Whitespace, m.view.whitespace))
+	case "toggle_indentation_guide_current_buffer":
+		// The toggle flips what is drawn, which the mode, the buffer and the language
+		// decide together, not the buffer's own override.
+		return m.bufferFlag(action, args, m.guidesDrawn())
 	case "add_ruler", "remove_ruler":
 		if _, ok := args["column"]; ok {
 			return nil, false
@@ -249,6 +365,17 @@ func shownNotice(what string, shown bool) string {
 // onOffNotice is the status text of a setting that is on or off.
 func onOffNotice(what string, on bool) string {
 	return what + ": " + onOff(on)
+}
+
+// guidesDrawn reports whether the active document draws indentation guides.
+func (m *Model) guidesDrawn() bool {
+	doc := m.ed.Active()
+	if doc == nil {
+		return false
+	}
+	ls := m.docLanguageSettings(doc)
+	mode := editor.ResolveIndentGuide(m.view.opts.IndentationGuideMode, m.docViewSettings().IndentGuides, ls.IndentationGuide)
+	return mode != editor.GuidesNone
 }
 
 // bufferFlag sets a per-buffer flag to the opposite of cur, through the editor. A call
@@ -404,10 +531,12 @@ func (m *Model) viewLayout(in *layoutInput) {
 // view state. Nothing else of the pane changes.
 func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
 	s := docViewOf(doc)
-	p.Wrap = editor.OverrideOr(s.LineWrap, m.view.lineWrap)
+	// A large document is never wrapped: a wrapped line of a megabyte would be laid out
+	// in full to find its rows.
+	p.Wrap = editor.OverrideOr(s.LineWrap, m.view.lineWrap) && !isLargeDoc(doc)
 	p.HideGutter = !editor.OverrideOr(s.LineNumbers, !m.hideLineNumbers)
 	p.CurrentLine = editor.OverrideOr(s.CurrentLine, m.view.currentLine)
-	p.Occurrences = editor.OverrideOr(s.Occurrences, m.view.occurrences)
+	p.Occurrences = editor.OverrideOr(s.Occurrences, m.view.occurrences) && !m.occurrencesOff(doc)
 	p.VisibleWhitespace = editor.OverrideOr(s.Whitespace, m.view.whitespace)
 	p.IndentGuides = s.IndentGuidesOn()
 	p.HideFoldMarkers = !s.FoldIndicatorsOn()
@@ -417,10 +546,15 @@ func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
 	p.HideHorizontalScrollbar = !m.view.hScroll
 	p.CaretShape = m.caretShape()
 	p.Rulers = s.Rulers
+	// The tab width is the language's (which holds the global tab_size where the
+	// language sets none), unless the buffer set its own.
+	if n := m.docLanguageSettings(doc).TabSize; n > 0 {
+		p.TabSize = n
+	}
 	if s.TabSize > 0 {
 		p.TabSize = s.TabSize
 	}
-	return p
+	return m.viewRender(p, doc, s)
 }
 
 // caretShape is the caret shape of the pane for the cursor style.
@@ -517,6 +651,24 @@ func (m *Model) viewHolds(name string) (bool, bool) {
 		return m.view.scrollSync, true
 	}
 	return false, false
+}
+
+// languageSettings returns the effective settings of a document with the given language
+// name and file path: Deps.Languages applied, or the Fresh defaults when it is nil. The
+// document's own ViewSettings are not applied; read them with docViewSettings.
+func (m *Model) languageSettings(language, path string) editor.LanguageSettings {
+	if m.view.languages != nil {
+		return m.view.languages(language, path)
+	}
+	return editor.LanguageSettings{
+		TabSize:                m.tabSize,
+		LineWrap:               m.view.lineWrap,
+		PageWidth:              editor.DefaultPageWidth,
+		WhitespaceTabsLeading:  true,
+		WhitespaceTabsInner:    true,
+		WhitespaceTabsTrailing: true,
+		IndentationGuide:       true,
+	}
 }
 
 // viewOptionsOf returns the options o, or the defaults when o is nil.

@@ -6,11 +6,6 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-// u32 returns a pointer to v, for the optional fields of the protocol types.
-//
-//go:fix inline
-func u32(v uint32) *uint32 { return new(v) }
-
 // withActive returns sig with the parameter at index n marked as the active one.
 func withActive(sig protocol.SignatureInformation, n uint32) protocol.SignatureInformation {
 	sig.ActiveParameter = protocol.NewNullable[uint32](n)

@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/tbxark/gvim/internal/buffer"
 )
 
 // handler runs one action against the editor.
@@ -59,7 +57,7 @@ func buildHandlers() map[Action]handler {
 	})
 	h["insert_char"] = docAction(insertChar)
 	h["insert_newline"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.insertNewline(e.opts.AutoIndent)
+		e.newline(d)
 		return nil
 	})
 	h["insert_tab"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
@@ -71,7 +69,7 @@ func buildHandlers() map[Action]handler {
 		return nil
 	})
 	h["duplicate_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.duplicateLines()
+		d.duplicateLines(false)
 		return nil
 	})
 	h["delete_line"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
@@ -91,15 +89,26 @@ func buildHandlers() map[Action]handler {
 		return nil
 	})
 	h["move_to_paragraph_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.jumpTo(paragraphUp(d.Buffer, d.Cursor.Line), false)
+		target, limited := paragraphUp(d.Buffer, d.Cursor.Line)
+		if limited {
+			return ErrScanLimit
+		}
+		d.jumpTo(target, false)
 		return nil
 	})
 	h["select_to_paragraph_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.jumpTo(paragraphUp(d.Buffer, d.Cursor.Line), true)
+		target, limited := paragraphUp(d.Buffer, d.Cursor.Line)
+		if limited {
+			return ErrScanLimit
+		}
+		d.jumpTo(target, true)
 		return nil
 	})
 	h["move_to_paragraph_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		target, ok := blankLineBelow(d.Buffer, d.Cursor.Line)
+		target, ok, limited := blankLineBelow(d.Buffer, d.Cursor.Line)
+		if limited {
+			return ErrScanLimit
+		}
 		if !ok {
 			target = paragraphEnd(d.Buffer)
 		}
@@ -109,7 +118,10 @@ func buildHandlers() map[Action]handler {
 		return nil
 	})
 	h["select_to_paragraph_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		target, ok := blankLineBelow(d.Buffer, d.Cursor.Line)
+		target, ok, limited := blankLineBelow(d.Buffer, d.Cursor.Line)
+		if limited {
+			return ErrScanLimit
+		}
 		if !ok {
 			target = d.Buffer.End()
 		}
@@ -129,7 +141,7 @@ func buildHandlers() map[Action]handler {
 		return nil
 	})
 	h["toggle_comment"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		return d.toggleComment()
+		return e.toggleComment(d)
 	})
 	h["scroll_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
 		e.scrollView(d, -1)
@@ -144,7 +156,7 @@ func buildHandlers() map[Action]handler {
 		return nil
 	})
 	h["delete_backward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.deleteBackward()
+		e.backspace(d)
 		return nil
 	})
 	h["delete_forward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
@@ -152,62 +164,32 @@ func buildHandlers() map[Action]handler {
 		return nil
 	})
 	h["delete_word_backward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.deleteTo(wordLeft(d.Buffer, d.Cursor))
+		d.deleteWord(true)
 		return nil
 	})
 	h["delete_word_forward"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.deleteTo(wordRight(d.Buffer, d.Cursor))
+		d.deleteWord(false)
 		return nil
 	})
 	h["delete_to_line_start"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		if d.Cursor.Col == 0 {
-			d.deleteBackward()
-			return nil
-		}
-		d.deleteTo(buffer.Pos{Line: d.Cursor.Line})
+		d.deleteToLineStart()
 		return nil
 	})
 	h["delete_to_line_end"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		end := buffer.Pos{Line: d.Cursor.Line, Col: d.Buffer.LineLen(d.Cursor.Line)}
-		if d.Cursor == end {
-			d.deleteForward()
-			return nil
-		}
-		d.deleteTo(end)
+		d.deleteToLineEnd()
 		return nil
 	})
 	h["move_line_up"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.moveLine(-1)
+		d.moveLines(-1)
 		return nil
 	})
 	h["move_line_down"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.moveLine(1)
+		d.moveLines(1)
 		return nil
 	})
-	h["copy"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		text, err := d.copySelection()
-		if err != nil {
-			return err
-		}
-		e.clipboard = text
-		return nil
-	})
-	h["cut"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		text, err := d.copySelection()
-		if err != nil {
-			return err
-		}
-		e.clipboard = text
-		d.deleteSelection()
-		return nil
-	})
-	h["paste"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		if e.clipboard != "" {
-			d.insertText(e.clipboard)
-			e.setStatus("Pasted")
-		}
-		return nil
-	})
+	h["copy"] = docAction(copyAction)
+	h["cut"] = docAction(cutAction)
+	h["paste"] = docAction(pasteAction)
 	h["undo"] = docAction(undoAction)
 	h["redo"] = docAction(redoAction)
 	// save returns ErrNoPath for an untitled buffer. The UI then runs Save As.
@@ -231,6 +213,7 @@ func buildHandlers() map[Action]handler {
 	h["new"] = func(e *Editor, _ map[string]any) error {
 		d := e.newUntitled()
 		if e.pristineUntitled() && e.docs[0].untitled == 0 {
+			e.releaseDoc(e.docs[0])
 			e.docs[0] = d
 			e.switchTo(0)
 		} else {
@@ -292,7 +275,7 @@ func docAction(fn func(e *Editor, d *Document, args map[string]any) error) handl
 // pageHandler moves the cursor one pane in direction dir (-1 up, +1 down).
 func pageHandler(dir int, extend bool) handler {
 	return docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		pageMove(e, d, dir, extend || e.marking(d))
+		e.pageCarets(d, dir, extend || e.marking(d))
 		return nil
 	})
 }
@@ -317,11 +300,11 @@ func pageMove(e *Editor, d *Document, dir int, extend bool) {
 	newTop := min(max(oldTop+delta, 0), max(lines-rows, 0))
 	if newTop == oldTop {
 		line := min(max(d.Cursor.Line+delta, 0), lines-1)
-		d.move(verticalTarget(d, line), extend)
+		d.move(e.verticalTarget(d, d.Cursor, line), extend)
 		return
 	}
 
-	margin := min(scrollOff, (rows-1)/2)
+	margin := min(max(scrollOff, e.opts.ScrollOffset), (rows-1)/2)
 	row := d.Cursor.Line - oldTop
 	if row < 0 || row >= rows {
 		row = margin // an off-screen caret lands at the margin
@@ -329,26 +312,23 @@ func pageMove(e *Editor, d *Document, dir int, extend bool) {
 	row = min(max(row, margin), rows-1-margin)
 	line := min(newTop+row, lines-1)
 	d.Top = newTop
-	d.move(verticalTarget(d, line), extend)
+	d.move(e.verticalTarget(d, d.Cursor, line), extend)
 }
 
 // moveHandler runs a cursor motion, optionally extending the selection.
 func moveHandler(m motion, extend, vertical bool) handler {
 	return docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		if !vertical {
-			d.want = -1
-		}
-		d.move(m(d, e.rows), extend || e.marking(d))
+		e.moveCarets(d, m, extend || e.marking(d), vertical)
 		return nil
 	})
 }
 
-func insertChar(_ *Editor, d *Document, args map[string]any) error {
+func insertChar(e *Editor, d *Document, args map[string]any) error {
 	text, ok := args["text"].(string)
 	if !ok {
 		return errors.New("insert_char: missing string argument \"text\"")
 	}
-	d.insertText(text)
+	e.typeText(d, text)
 	return nil
 }
 

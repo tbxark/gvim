@@ -24,16 +24,53 @@ type span struct{ from, to int }
 // cells using the break rule above. An empty line still has one row. A width
 // under two cells does not wrap, so the line stays one row.
 func wrapSpans(runes []rune, w int) []span {
+	return wrapRows(runes, w, 0, nil)
+}
+
+// minContinuation is the least width of a continuation row after its hanging indent.
+// A line indented deeper than the row leaves is not given a hanging indent.
+const minContinuation = 10
+
+// wrapHanging is wrapSpans with a hanging indent when hang is set. The rows after
+// the first start under the first character of the line: they are indent cells
+// narrower, and the indent is the number of leading blanks of the line. It is zero
+// when the line has no continuation row, or when it would leave a row under
+// minContinuation cells. glue may be nil; glue[i] joins rune i to rune i+1, so a
+// row does not break between them unless the run is wider than the row.
+func wrapHanging(runes []rune, w int, hang bool, glue []bool) (spans []span, indent int) {
+	if hang {
+		for indent < len(runes) && runes[indent] == ' ' {
+			indent++
+		}
+		if indent+minContinuation > w {
+			indent = 0
+		}
+	}
+	spans = wrapRows(runes, w, indent, glue)
+	if len(spans) == 1 {
+		indent = 0
+	}
+	return spans, indent
+}
+
+// wrapRows splits runes into rows of w cells, the rows after the first being indent
+// cells narrower. A rune glued to the next one (see wrapHanging) is not split from it:
+// the row breaks before the run, as Fresh keeps a <XX> byte token whole.
+func wrapRows(runes []rune, w, indent int, glue []bool) []span {
 	if w < 2 {
 		return []span{{0, len(runes)}}
 	}
 	var out []span
 	start := 0
 	for {
+		limit := w
+		if start > 0 {
+			limit -= indent
+		}
 		end, cells := start, 0
 		for end < len(runes) {
 			cw := ansi.StringWidth(string(runes[end]))
-			if cells+cw > w {
+			if cells+cw > limit {
 				break
 			}
 			cells += cw
@@ -46,6 +83,17 @@ func wrapSpans(runes []rune, w int) []span {
 			// One rune is wider than the row. It takes a row of its own.
 			end = start + 1
 		}
+		if end > start && end < len(runes) && isGlued(glue, end-1) {
+			// The row ends inside a glued run: break before the run, unless the
+			// run starts the row, where it is cut as a wide word is.
+			first := end - 1
+			for first > start && isGlued(glue, first-1) {
+				first--
+			}
+			if first > start {
+				end = first
+			}
+		}
 		brk := end
 		for j := end - 1; j >= start; j-- {
 			if runes[j] == ' ' {
@@ -56,6 +104,11 @@ func wrapSpans(runes []rune, w int) []span {
 		out = append(out, span{start, brk})
 		start = brk
 	}
+}
+
+// isGlued reports whether rune i is joined to the rune after it.
+func isGlued(glue []bool, i int) bool {
+	return i >= 0 && i < len(glue) && glue[i]
 }
 
 // caretInSpans returns the display row holding expanded rune index idx, and the

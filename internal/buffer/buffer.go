@@ -45,6 +45,9 @@ func (s Selection) Ordered() (from, to Pos) {
 // value has no lines and must not be used.
 type Buffer struct {
 	lines [][]rune
+	// big is set for a large buffer, which reads its text from a file source
+	// and leaves lines nil. See OpenLarge.
+	big *bigStore
 
 	undo []*group
 	redo []*group
@@ -54,6 +57,9 @@ type Buffer struct {
 	// inside the outermost one and is nil when depth is zero.
 	depth int
 	txn   *group
+	// txnRefused records that an edit inside the outermost Group was refused.
+	// Only large buffers refuse edits.
+	txnRefused bool
 
 	// clock stamps each edit for undo grouping. See SetClock.
 	clock func() time.Time
@@ -101,16 +107,25 @@ func (b *Buffer) setText(text string) {
 
 // Lines returns the number of lines. An empty buffer has one line.
 func (b *Buffer) Lines() int {
+	if b.big != nil {
+		return b.big.lines()
+	}
 	return len(b.lines)
 }
 
 // Line returns line i without its newline. Out-of-range indexes are clamped.
 func (b *Buffer) Line(i int) string {
+	if b.big != nil {
+		return b.big.line(i)
+	}
 	return string(b.lines[b.clampLine(i)])
 }
 
 // LineLen returns the number of runes on line i. Out-of-range indexes are clamped.
 func (b *Buffer) LineLen(i int) int {
+	if b.big != nil {
+		return b.big.lineLen(i)
+	}
 	return len(b.lines[b.clampLine(i)])
 }
 
@@ -118,6 +133,9 @@ func (b *Buffer) LineLen(i int) int {
 // It returns false at the end of a line, where the position holds a newline or
 // the end of the document.
 func (b *Buffer) RuneAt(p Pos) (rune, bool) {
+	if b.big != nil {
+		return b.big.runeAt(p)
+	}
 	if p.Line < 0 || p.Line >= len(b.lines) {
 		return 0, false
 	}
@@ -130,6 +148,9 @@ func (b *Buffer) RuneAt(p Pos) (rune, bool) {
 
 // Text returns the whole document joined with '\n'.
 func (b *Buffer) Text() string {
+	if b.big != nil {
+		return b.bigText(b.big.text())
+	}
 	var sb strings.Builder
 	for i, l := range b.lines {
 		if i > 0 {
@@ -143,6 +164,9 @@ func (b *Buffer) Text() string {
 // Range returns the text between from and to, in document order, with
 // newlines included. Positions are clamped.
 func (b *Buffer) Range(from, to Pos) string {
+	if b.big != nil {
+		return b.bigText(b.big.rangeText(from, to))
+	}
 	from, to = b.Clamp(from), b.Clamp(to)
 	if to.Less(from) {
 		from, to = to, from
@@ -167,6 +191,9 @@ func (b *Buffer) Range(from, to Pos) string {
 // Clamp returns p moved into the document: the line is kept within the
 // buffer and the column within the line.
 func (b *Buffer) Clamp(p Pos) Pos {
+	if b.big != nil {
+		return b.big.clamp(p)
+	}
 	p.Line = b.clampLine(p.Line)
 	p.Col = min(max(p.Col, 0), len(b.lines[p.Line]))
 	return p
@@ -174,23 +201,33 @@ func (b *Buffer) Clamp(p Pos) Pos {
 
 // End returns the position after the last rune of the document.
 func (b *Buffer) End() Pos {
+	if b.big != nil {
+		return b.big.end()
+	}
 	last := len(b.lines) - 1
 	return Pos{last, len(b.lines[last])}
 }
 
 // Insert inserts s at p and returns the position just after the inserted text.
-// p is clamped first. Inserting the empty string changes nothing.
+// p is clamped first. Inserting the empty string changes nothing. A large
+// buffer can refuse an edit: Insert then does nothing and returns p, and
+// Refusal says why.
 func (b *Buffer) Insert(p Pos, s string) Pos {
 	p = b.Clamp(p)
 	if s == "" {
 		return p
+	}
+	if b.big != nil {
+		return b.bigInsert(p, s)
 	}
 	b.record(opInsert, p, s)
 	return b.insertRaw(p, s)
 }
 
 // Delete removes the text between from and to, in either order, and returns
-// the removed text. Both positions are clamped.
+// the removed text. Both positions are clamped. A large buffer returns "" for
+// a removed span over InlineOpMax, and can refuse an edit: Delete then does
+// nothing and returns "", and Refusal says why.
 func (b *Buffer) Delete(from, to Pos) string {
 	from, to = b.Clamp(from), b.Clamp(to)
 	if to.Less(from) {
@@ -198,6 +235,9 @@ func (b *Buffer) Delete(from, to Pos) string {
 	}
 	if from == to {
 		return ""
+	}
+	if b.big != nil {
+		return b.bigDelete(from, to)
 	}
 	text := b.Range(from, to)
 	b.record(opDelete, from, text)
@@ -222,6 +262,9 @@ func (b *Buffer) MarkSaved() {
 }
 
 func (b *Buffer) clampLine(i int) int {
+	if b.big != nil {
+		return b.big.clampLine(i)
+	}
 	return min(max(i, 0), len(b.lines)-1)
 }
 

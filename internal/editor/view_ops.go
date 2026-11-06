@@ -30,7 +30,10 @@ const previewSuffix = " (preview)"
 // SetCursor moves the caret to p, which is clamped into the document. With
 // extend set, the selection grows from its existing anchor, or from the old
 // caret when there is no selection; otherwise any selection is cleared. The
-// wanted column for the next vertical move becomes the new column.
+// wanted column for the next vertical move becomes the new column. A column
+// inside a grapheme cluster moves back to the start of the cluster, except that
+// a selection growing forward from its anchor moves on to the end of the
+// cluster, so it never collapses onto the anchor.
 //
 // SetCursor does not scroll the viewport, so a caret placed off-screen stays
 // off-screen until an action that moves the viewport runs.
@@ -40,7 +43,23 @@ func (e *Editor) SetCursor(p buffer.Pos, extend bool) {
 		return
 	}
 	d.want = -1
-	d.move(d.Buffer.Clamp(p), extend)
+	mark := e.markJump()
+	p = d.Buffer.Clamp(p)
+	snapped := snapToCluster(d.Buffer, p)
+	if extend && snapped != p {
+		anchor := d.Cursor
+		if d.Sel != nil {
+			anchor = d.Sel.Anchor
+		}
+		if anchor.Less(p) {
+			snapped.Col = nextBoundary(d.Buffer, p.Line, snapped.Col)
+		}
+	}
+	d.move(snapped, extend)
+	d.seen = d.Cursor
+	if !extend {
+		e.recordJump(mark)
+	}
 }
 
 // SelectRange selects the text between anchor and head, both clamped into the
@@ -51,7 +70,10 @@ func (e *Editor) SelectRange(anchor, head buffer.Pos) {
 	if d == nil {
 		return
 	}
+	mark := e.markJump()
 	d.setRange(d.Buffer.Clamp(anchor), d.Buffer.Clamp(head))
+	d.seen = d.Cursor
+	e.recordJump(mark)
 }
 
 // ScrollBy moves the viewport of the active document by rows lines. Positive
@@ -80,13 +102,26 @@ func clampTop(d *Document, top int) int {
 // scrollView moves the viewport of d by dir lines, for scroll_up and
 // scroll_down. The caret stays where it is while it is still shown. When the
 // scroll takes it off screen, it moves to the nearest line that is shown and
-// keeps its wanted column.
+// keeps its wanted column. A scroll down stops at the last page.
 func (e *Editor) scrollView(d *Document, dir int) {
-	d.Top = clampTop(d, d.Top+dir)
-	bottom := min(d.Top+e.rows-1, d.Buffer.Lines()-1)
-	line := min(max(d.Cursor.Line, d.Top), bottom)
+	top := clampTop(d, d.Top+dir)
+	if dir > 0 && top > d.Buffer.Lines()-e.rows {
+		// As in Fresh, a scroll down stops when the last line is at the bottom of the
+		// view, so a document that fits the screen does not scroll.
+		return
+	}
+	d.Top = top
+	// The scroll-off margin applies at an edge only while there is text beyond it.
+	lo, hi := d.Top, min(d.Top+e.rows-1, d.Buffer.Lines()-1)
+	if d.Top > 0 {
+		lo += e.scrollMargin()
+	}
+	if d.Top+e.rows < d.Buffer.Lines() {
+		hi -= e.scrollMargin()
+	}
+	line := min(max(d.Cursor.Line, lo), max(hi, lo))
 	if line != d.Cursor.Line {
-		d.move(verticalTarget(d, line), false)
+		d.move(e.verticalTarget(d, d.Cursor, line), false)
 	}
 }
 
@@ -151,6 +186,7 @@ func (e *Editor) closeAt(i int, force bool) error {
 		return fmt.Errorf("close %s: %w", d.Name(), ErrUnsaved)
 	}
 	e.docs = slices.Delete(e.docs, i, i+1)
+	e.releaseDoc(d)
 	if len(e.docs) == 0 {
 		e.active = 0
 		e.lastKind = ""

@@ -12,8 +12,12 @@ var ErrNoFold = errors.New("no fold starts on this line")
 
 // Folds returns the indentation fold ranges of the text, ordered by start line,
 // with tabWidth as the width of a tab. The ranges are recomputed on every call,
-// so they always match the text. A fold nested in another comes after it.
+// so they always match the text. A fold nested in another comes after it. A large
+// document has no folds: finding them reads every line.
 func (d *Document) Folds(tabWidth int) []fold.Range {
+	if d.large != nil {
+		return nil
+	}
 	lines := make([]string, d.Buffer.Lines())
 	for i := range lines {
 		lines[i] = d.Buffer.Line(i)
@@ -102,12 +106,21 @@ func (d *Document) revealCarets(from, tabWidth int) {
 // it is collapsed already. A collapsed start that no longer begins a fold, because
 // the text above it changed, can still be expanded.
 func toggleFold(e *Editor, d *Document, _ map[string]any) error {
-	line := d.Cursor.Line
+	return e.toggleFoldAt(d, d.Cursor.Line)
+}
+
+// toggleFoldAt is toggleFold for the fold that starts at line.
+func (e *Editor) toggleFoldAt(d *Document, line int) error {
+	if d.large != nil {
+		// A large document has no folds, so "no fold starts on this line" would be
+		// untrue of a line that looks like it starts one.
+		return &largeError{msg: "folds are not available in large file mode", errs: []error{ErrLargeFile}}
+	}
 	if d.folded[line] {
 		delete(d.folded, line)
 		return nil
 	}
-	for _, r := range d.Folds(e.opts.TabSize) {
+	for _, r := range d.Folds(e.tabSizeOf(d)) {
 		if r.Start == line {
 			if d.folded == nil {
 				d.folded = map[int]bool{}

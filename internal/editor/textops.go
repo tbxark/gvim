@@ -1,8 +1,6 @@
 package editor
 
 import (
-	"strings"
-
 	"github.com/tbxark/gvim/internal/buffer"
 )
 
@@ -45,48 +43,6 @@ func (d *Document) selectedLines() (first, last int) {
 	return from.Line, last
 }
 
-// duplicateLines copies the lines that selectedLines covers onto the line below
-// them. The caret and selection move with the copy, so they keep their place in
-// the text. On the last line, the copy is joined with a new line break.
-func (d *Document) duplicateLines() {
-	first, last := d.selectedLines()
-	block := make([]string, 0, last-first+1)
-	for line := first; line <= last; line++ {
-		block = append(block, d.Buffer.Line(line))
-	}
-	text := strings.Join(block, "\n")
-	d.Buffer.Group(func() {
-		if last+1 < d.Buffer.Lines() {
-			d.Buffer.Insert(buffer.Pos{Line: last + 1}, text+"\n")
-		} else {
-			d.Buffer.Insert(buffer.Pos{Line: last, Col: d.Buffer.LineLen(last)}, "\n"+text)
-		}
-	})
-	n := last - first + 1
-	d.Cursor.Line += n
-	if d.Sel != nil {
-		d.Sel.Anchor.Line += n
-		d.Sel.Head = d.Cursor
-	}
-	d.want = -1
-}
-
-// deleteLine removes the caret line with its line break. On the last line the
-// text goes but the break before it stays, so the text ends with an empty line.
-// Any selection is dropped, and the selection's text is not deleted. The caret
-// moves to column 0 of the line that takes the deleted line's place.
-func (d *Document) deleteLine() {
-	line := d.Cursor.Line
-	if line+1 < d.Buffer.Lines() {
-		d.Buffer.Delete(buffer.Pos{Line: line}, buffer.Pos{Line: line + 1})
-	} else {
-		d.Buffer.Delete(buffer.Pos{Line: line}, buffer.Pos{Line: line, Col: d.Buffer.LineLen(line)})
-	}
-	d.Sel = nil
-	d.Cursor = buffer.Pos{Line: line}
-	d.want = -1
-}
-
 // openLine inserts a line break at the caret and leaves the caret where it was,
 // so the text after the caret moves to a new line below. A selection is dropped
 // without deleting its text.
@@ -116,51 +72,6 @@ func (d *Document) expandLineSelection() {
 	start, _ := buffer.LineBounds(d.Buffer, low.Line)
 	_, end := buffer.LineBounds(d.Buffer, high.Line)
 	d.setRange(start, end)
-}
-
-// transposeChars swaps the character before the caret with the one at it, and
-// moves the caret past the pair. At the start or end of a line there is no
-// character on both sides, so nothing changes. Line breaks are never swapped.
-// A selection is dropped.
-func (d *Document) transposeChars() {
-	p := d.Cursor
-	if p.Col == 0 || p.Col >= d.Buffer.LineLen(p.Line) {
-		return
-	}
-	from := buffer.Pos{Line: p.Line, Col: p.Col - 1}
-	to := buffer.Pos{Line: p.Line, Col: p.Col + 1}
-	pair := []rune(d.Buffer.Range(from, to))
-	swapped := string(pair[1]) + string(pair[0])
-	d.Buffer.Group(func() {
-		d.Buffer.Delete(from, to)
-		d.Buffer.Insert(from, swapped)
-	})
-	d.Cursor = buffer.Pos{Line: p.Line, Col: p.Col + 1}
-	d.Sel = nil
-	d.want = -1
-}
-
-// transformCase converts the selection, or else the word at or just before the
-// caret, with fn. The caret ends after the converted text and any selection is
-// dropped. Text that does not change leaves the caret and selection alone.
-func (d *Document) transformCase(fn func(string) string) {
-	from, to, ok := d.caseTarget()
-	if !ok {
-		return
-	}
-	old := d.Buffer.Range(from, to)
-	converted := fn(old)
-	if converted == old {
-		return
-	}
-	var end buffer.Pos
-	d.Buffer.Group(func() {
-		d.Buffer.Delete(from, to)
-		end = d.Buffer.Insert(from, converted)
-	})
-	d.Cursor = end
-	d.Sel = nil
-	d.want = -1
 }
 
 // caseTarget returns the range that a case conversion changes: the selection,

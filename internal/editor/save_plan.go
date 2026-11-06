@@ -1,6 +1,9 @@
 package editor
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // SavePlan is an explicit save prepared on the editor's goroutine: Save, Save As or
 // Save All. PlanSave, PlanSaveAs and PlanSaveAll build it and change no file. Run
@@ -19,9 +22,17 @@ type SavePlan struct {
 // Run writes the planned files one after another and returns their results. It reads
 // only the plan, so it may run in a command.
 func (p SavePlan) Run() []SaveResult {
+	return p.RunContext(context.Background())
+}
+
+// RunContext is Run for a caller that may stop the writes. A large document that is
+// being written stops at the next step of about 1 MiB when ctx is cancelled, removes
+// its temporary file and reports the context's error. The files after it are not
+// written, and carry the same error.
+func (p SavePlan) RunContext(ctx context.Context) []SaveResult {
 	results := make([]SaveResult, len(p.jobs))
 	for i, j := range p.jobs {
-		results[i] = j.Run()
+		results[i] = j.RunContext(ctx)
 	}
 	return results
 }
@@ -36,6 +47,13 @@ func (e *Editor) PlanSave() (SavePlan, error) {
 		err := ErrNoDocument
 		e.setStatus(err.Error())
 		return SavePlan{}, err
+	}
+	// A large document whose file changed under it is read-only, but the reason is the
+	// change, not a setting.
+	_ = d.CheckSource()
+	if d.frozen() {
+		e.setStatus(errFileChanged.Error())
+		return SavePlan{}, errFileChanged
 	}
 	if d.readOnly {
 		err := ErrReadOnly
@@ -94,7 +112,7 @@ func (e *Editor) PlanSaveAll() (SavePlan, error) {
 	}
 	p := SavePlan{all: true}
 	for _, d := range e.docs {
-		if !d.Modified() {
+		if !d.dirty() {
 			continue
 		}
 		switch {
@@ -117,6 +135,10 @@ func (e *Editor) PlanSaveAll() (SavePlan, error) {
 func (e *Editor) ApplySavePlan(p SavePlan, results []SaveResult) error {
 	err := e.ApplySaves(results)
 	if p.all {
+		for _, r := range results {
+			// The summary replaces the note of a large document's save.
+			_ = r.job.doc.savedStatus()
+		}
 		return e.saveAllStatus(results, p)
 	}
 	if len(results) == 0 || err != nil {
@@ -127,6 +149,6 @@ func (e *Editor) ApplySavePlan(p SavePlan, results []SaveResult) error {
 		d.rename(p.renameTo)
 		d.preview = false
 	}
-	d.status = "Saved"
+	d.status = d.savedStatus()
 	return nil
 }

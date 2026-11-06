@@ -89,8 +89,11 @@ type statusView struct {
 	encoding string // "ASCII" or "UTF-8"
 	language string // "Text"
 	lines    int    // line count; its digits set the message column
-	warnSlot bool   // reserve the blank warning-counter slot
-	warnings int    // warning count; shown as " [⚠ N] " when above zero
+	large    string // the chip of a document in large file mode, with the index progress, or ""
+
+	warnSlot bool // reserve the blank warning-counter slot
+	warnings int  // warning count; shown as " [⚠ N] " when above zero
+	readOnly bool // the document is read-only; shown as " [RO] "
 }
 
 // run is a piece of text at a fixed column, together with what a click on it
@@ -342,20 +345,28 @@ func statusRuns(w int, s statusView) []run {
 	type segment struct {
 		text string
 		kind hitKind
+		id   int // the run index of a hitStatusSegment: one of the statusSegment constants
 	}
-	right := []segment{
-		{" " + s.eol + " ", hitStatusSegment},
-		{" " + s.encoding + " ", hitStatusSegment},
-		{" " + s.language + " ", hitStatusSegment},
+	var right []segment
+	if s.large != "" {
+		right = append(right, segment{" " + s.large + " ", hitNone, 0})
 	}
+	if s.readOnly {
+		right = append(right, segment{" [RO] ", hitNone, 0})
+	}
+	right = append(right,
+		segment{" " + s.eol + " ", hitStatusSegment, statusSegmentEOL},
+		segment{" " + s.encoding + " ", hitStatusSegment, statusSegmentEncoding},
+		segment{" " + s.language + " ", hitStatusSegment, statusSegmentLanguage},
+	)
 	switch {
 	case s.warnings > 0:
-		right = append(right, segment{" [⚠ " + strconv.Itoa(s.warnings) + "] ", hitNone})
+		right = append(right, segment{" [⚠ " + strconv.Itoa(s.warnings) + "] ", hitNone, 0})
 	case s.warnSlot:
 		// The blank keeps the columns the counter takes once it is known.
-		right = append(right, segment{strings.Repeat(" ", warnBlankWidth), hitNone})
+		right = append(right, segment{strings.Repeat(" ", warnBlankWidth), hitNone, 0})
 	}
-	right = append(right, segment{" " + paletteHelp + " ", hitStatusPalette})
+	right = append(right, segment{" " + paletteHelp + " ", hitStatusPalette, 0})
 
 	minLeft := min(2*w/5, 40)
 	budget := w - (minLeft + 1)
@@ -393,7 +404,11 @@ func statusRuns(w int, s statusView) []run {
 
 	x = w - rightWidth()
 	for i, seg := range right {
-		runs = append(runs, newRun(x, seg.text, seg.kind, i))
+		index := i
+		if seg.kind == hitStatusSegment {
+			index = seg.id
+		}
+		runs = append(runs, newRun(x, seg.text, seg.kind, index))
 		x += ansi.StringWidth(seg.text)
 	}
 	return runs

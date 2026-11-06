@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gvimdebug</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app">
+
+    <header class="topbar">
+      <div class="brand">gvimdebug</div>
+      <span class="chip" data-testid="connection" data-state="connecting">connecting</span>
+      <span class="chip" data-testid="status" data-state="stopped"></span>
+      <div class="spacer"></div>
+      <button type="button" class="primary" data-testid="restart">Restart</button>
+    </header>
+
+    <main class="layout">
+      <section class="screen-card" data-testid="screen-card" aria-label="gvim screen">
+        <pre class="term" data-testid="screen"></pre>
+      </section>
+      <pre class="term measure" data-testid="measure" aria-hidden="true">MMMMMMMMMM</pre>
+
+      <aside class="side" aria-label="input">
+        <section class="card">
+          <h2>Size</h2>
+          <div class="row">
+            <input class="num" type="number" min="10" max="400" data-testid="cols-input" aria-label="columns">
+            <span class="times">×</span>
+            <input class="num" type="number" min="4" max="200" data-testid="rows-input" aria-label="rows">
+            <button type="button" data-testid="resize-apply">Apply</button>
+          </div>
+          <label class="check">
+            <input type="checkbox" data-testid="fit-toggle">
+            Fit to window
+          </label>
+          <div class="font-row">
+            <button type="button" data-testid="font-smaller" aria-label="smaller font">A−</button>
+            <span data-testid="font-size"></span>
+            <button type="button" data-testid="font-larger" aria-label="larger font">A+</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Key</h2>
+          <div class="row">
+            <input type="text" data-testid="key-input" placeholder="ctrl+p, shift+down, f10, +"
+                   autocomplete="off" spellcheck="false">
+            <button type="button" data-testid="key-send">Send</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Quick keys</h2>
+          <div class="quick-keys" data-testid="quick-keys"></div>
+        </section>
+
+        <section class="card">
+          <h2>Text</h2>
+          <textarea data-testid="text-input" placeholder="Typed one key at a time. A newline sends Enter."
+                    spellcheck="false"></textarea>
+          <div class="row end">
+            <button type="button" data-testid="text-send">Type</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Mouse</h2>
+          <p>Click, right-click or scroll on the screen. The cell under the pointer gets the event.</p>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="bottombar">
+      <span data-testid="size"></span>
+      <span data-testid="cursor"></span>
+      <span class="message" data-testid="message" role="alert"></span>
+    </footer>
+
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

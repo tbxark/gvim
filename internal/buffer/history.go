@@ -30,6 +30,10 @@ type op struct {
 	kind opKind
 	from Pos
 	text string
+	// big marks an op whose text was too large to keep (text is empty), and
+	// end is the position Redo reports. Both are zero in a memory buffer.
+	big bool
+	end Pos
 }
 
 // group is one undo step. Its ops are in the order they were applied. Undo
@@ -43,6 +47,11 @@ type group struct {
 	// stamped in the same window join the group. Group steps leave it zero
 	// and are never joined.
 	bucket int64
+	// sb and sa are the large-buffer states on either side of the group and
+	// cost is the estimated bytes the group keeps alive (lastCost is the
+	// share of the newest edit). All are zero in a memory buffer.
+	sb, sa         bigState
+	cost, lastCost int64
 }
 
 // add appends o to the group. When o continues the last op as one run of
@@ -90,6 +99,9 @@ func (b *Buffer) record(kind opKind, from Pos, text string) {
 // mergeable reports whether next continues prev as one run of typing or
 // deleting. Runs are not broken at whitespace; grouping is by time.
 func mergeable(prev, next *op) bool {
+	if prev.big || next.big {
+		return false
+	}
 	if prev.kind != next.kind {
 		return false
 	}
@@ -109,11 +121,104 @@ func merge(prev, next *op) {
 	switch {
 	case prev.kind == opInsert:
 		prev.text += next.text
+		prev.end = next.end
 	case advance(next.from, next.text) == prev.from:
 		prev.from = next.from
 		prev.text = next.text + prev.text
+		prev.end = prev.from
 	default:
 		prev.text += next.text
+	}
+}
+
+// addBounded is add for large buffers: ops are not merged past InlineOpMax of
+// stored text. It reports whether o was folded into the last op.
+func (g *group) addBounded(o op) (merged bool) {
+	if n := len(g.ops); n > 0 && len(g.ops[n-1].text)+len(o.text) <= InlineOpMax && mergeable(&g.ops[n-1], &o) {
+		merge(&g.ops[n-1], &o)
+		return true
+	}
+	g.ops = append(g.ops, o)
+	return false
+}
+
+// noteEdit adds a large-buffer edit to g and makes ns its end state. An edit
+// folded into the previous op replaces that op's share of the cost instead of
+// adding to it, because the literal line it replaced is no longer reachable
+// from the group's end state.
+func (g *group) noteEdit(o op, ns bigState, cost int64) {
+	if g.addBounded(o) {
+		g.cost += max(0, cost-g.lastCost)
+	} else {
+		g.cost += cost
+	}
+	g.lastCost = cost
+	g.sa = ns
+}
+
+// recordBig appends a large-buffer edit to history and makes ns the current
+// state. It follows record: the edit clears the redo stack and joins the
+// group being built, or the open undo group of the same wall-clock bucket, or
+// starts a new group. big says the edit text was too large to keep inline;
+// cost is the estimated bytes the edit's literal lines add.
+func (b *Buffer) recordBig(kind opKind, from, end Pos, text string, big bool, ns bigState, cost int64) {
+	s := b.big
+	old := s.st
+	if big {
+		text = ""
+	}
+	o := op{kind: kind, from: from, text: text, big: big, end: end}
+	cost += int64(len(text))
+	b.redo = nil
+	b.seq++
+	next := b.seq
+	s.st = ns
+
+	if b.depth > 0 {
+		b.txn.noteEdit(o, ns, cost)
+		b.ver = next
+		return
+	}
+	bucket := bucketOf(b.now())
+	if n := len(b.undo); n > 0 && b.open && b.undo[n-1].bucket == bucket {
+		g := b.undo[n-1]
+		g.noteEdit(o, ns, cost)
+		g.after = next
+		b.ver = next
+		b.trimHistory()
+		return
+	}
+	g := &group{before: b.ver, after: next, bucket: bucket, sb: old}
+	g.noteEdit(o, ns, cost)
+	b.undo = append(b.undo, g)
+	b.open = true
+	b.ver = next
+	b.trimHistory()
+}
+
+// historyBytes is the estimated memory the undo and redo stacks keep alive.
+func (b *Buffer) historyBytes() int64 {
+	var n int64
+	for _, g := range b.undo {
+		n += g.cost
+	}
+	for _, g := range b.redo {
+		n += g.cost
+	}
+	return n
+}
+
+// trimHistory drops the oldest undo groups while a large buffer's history is
+// over its group or byte cap. The newest group always stays, so the last edit
+// can be undone however large it was.
+func (b *Buffer) trimHistory() {
+	s := b.big
+	if s == nil {
+		return
+	}
+	for len(b.undo) > 1 && (len(b.undo) > s.maxGroups || b.historyBytes() > s.maxHistory) {
+		b.undo[0] = nil
+		b.undo = b.undo[1:]
 	}
 }
 
@@ -138,11 +243,18 @@ func (b *Buffer) Break() {
 // One Undo then restores the old text, and one Redo puts the new text back.
 func (b *Buffer) Group(fn func()) {
 	outer := b.depth == 0
+	var snap txnSnap
 	if outer {
+		snap = txnSnap{redo: b.redo, open: b.open, ver: b.ver}
+		if b.big != nil {
+			snap.sb = b.big.st
+		}
 		b.Break()
-		b.txn = &group{before: b.ver}
+		b.txn = &group{before: b.ver, sb: snap.sb}
+		b.txnRefused = false
 	}
 	b.depth++
+	completed := false
 	defer func() {
 		b.depth--
 		if !outer {
@@ -150,14 +262,35 @@ func (b *Buffer) Group(fn func()) {
 		}
 		g := b.txn
 		b.txn = nil
+		refused := b.txnRefused
+		b.txnRefused = false
+		if b.big != nil && completed && refused {
+			// A large buffer refused an edit (or a read) inside the group, so
+			// the group is dropped whole: the steps that did succeed would be
+			// half of an action. After a panic the edits stay instead.
+			b.big.st, b.redo, b.open, b.ver = snap.sb, snap.redo, snap.open, snap.ver
+			return
+		}
 		b.open = false
 		if len(g.ops) == 0 {
 			return
 		}
 		g.after = b.ver
 		b.undo = append(b.undo, g)
+		b.trimHistory()
 	}()
 	fn()
+	completed = true
+}
+
+// txnSnap is what an outermost Group saves so a refused group can be undone
+// without trace. record replaces redo instead of changing it, so keeping the
+// slice header is enough.
+type txnSnap struct {
+	sb   bigState
+	redo []*group
+	open bool
+	ver  uint64
 }
 
 // Undo reverts the newest undo group and reports the position where the
@@ -171,12 +304,17 @@ func (b *Buffer) Undo() (Pos, bool) {
 	g := b.undo[n-1]
 	b.undo = b.undo[:n-1]
 
-	// Revert newest first so each op sees the document it produced.
-	for _, o := range slices.Backward(g.ops) {
-		if o.kind == opInsert {
-			b.deleteRaw(o.from, advance(o.from, o.text))
-		} else {
-			b.insertRaw(o.from, o.text)
+	if b.big != nil {
+		// A large buffer swaps in the immutable state from before the group.
+		b.big.st = g.sb
+	} else {
+		// Revert newest first so each op sees the document it produced.
+		for _, o := range slices.Backward(g.ops) {
+			if o.kind == opInsert {
+				b.deleteRaw(o.from, advance(o.from, o.text))
+			} else {
+				b.insertRaw(o.from, o.text)
+			}
 		}
 	}
 	b.ver = g.before
@@ -197,12 +335,17 @@ func (b *Buffer) Redo() (Pos, bool) {
 	b.redo = b.redo[:n-1]
 
 	var at Pos
-	for _, o := range g.ops {
-		if o.kind == opInsert {
-			at = b.insertRaw(o.from, o.text)
-		} else {
-			b.deleteRaw(o.from, advance(o.from, o.text))
-			at = o.from
+	if b.big != nil {
+		b.big.st = g.sa
+		at = g.ops[len(g.ops)-1].end
+	} else {
+		for _, o := range g.ops {
+			if o.kind == opInsert {
+				at = b.insertRaw(o.from, o.text)
+			} else {
+				b.deleteRaw(o.from, advance(o.from, o.text))
+				at = o.from
+			}
 		}
 	}
 	b.undo = append(b.undo, g)

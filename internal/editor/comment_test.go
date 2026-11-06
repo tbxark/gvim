@@ -14,13 +14,14 @@ func openNamed(t *testing.T, name, text string) *Editor {
 	path := filepath.Join(t.TempDir(), name)
 	putFile(t, path, text)
 	e := New(Options{})
+	e.SetLanguageSettings(configResolver())
 	if err := e.OpenFile(path); err != nil {
 		t.Fatalf("OpenFile: %v", err)
 	}
 	return e
 }
 
-func TestToggleCommentUsesTheExtensionToken(t *testing.T) {
+func TestToggleCommentUsesTheLanguagePrefix(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		file string
@@ -30,25 +31,28 @@ func TestToggleCommentUsesTheExtensionToken(t *testing.T) {
 		{"main.rs", "// x"},
 		{"a.c", "// x"},
 		{"a.h", "// x"},
-		{"a.cc", "// x"},
 		{"a.cpp", "// x"},
-		{"a.cxx", "// x"},
-		{"a.hpp", "// x"},
 		{"a.js", "// x"},
-		{"a.jsx", "// x"},
-		{"a.mjs", "// x"},
-		{"a.ts", "// x"},
 		{"a.tsx", "// x"},
 		{"Main.java", "// x"},
-		{"MAIN.GO", "// x"},
 		{"a.py", "# x"},
 		{"a.sh", "# x"},
-		{"a.bash", "# x"},
-		{"a.zsh", "# x"},
 		{"a.rb", "# x"},
 		{"a.yaml", "# x"},
-		{"a.yml", "# x"},
 		{"a.toml", "# x"},
+		{"Makefile", "# x"},
+		{"Dockerfile", "# x"},
+		{"a.lua", "-- x"},
+		{"a.sql", "-- x"},
+		{"a.hs", "-- x"},
+		{"a.tex", "% x"},
+		{"a.erl", "% x"},
+		{"a.ini", "; x"},
+		{"a.f90", "! x"},
+		{"a.php", "// x"},
+		{"a.swift", "// x"},
+		{"a.zig", "// x"},
+		{"a.nix", "# x"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -62,13 +66,40 @@ func TestToggleCommentUsesTheExtensionToken(t *testing.T) {
 	}
 }
 
-func TestToggleCommentIgnoresTheLanguageName(t *testing.T) {
+func TestToggleCommentFollowsSetLanguage(t *testing.T) {
 	t.Parallel()
 	e := openNamed(t, "main.go", "x")
 	e.SetLanguage("python")
 	run(t, e, "toggle_comment")
-	if got := text(e); got != "// x" {
-		t.Fatalf("text = %q, want %q", got, "// x")
+	if got := text(e); got != "# x" {
+		t.Fatalf("text = %q, want %q", got, "# x")
+	}
+}
+
+func TestToggleCommentUsesTheConfiguredPrefix(t *testing.T) {
+	t.Parallel()
+	e := docWith(Options{}, "x")
+	e.SetLanguageSettings(func(string, string) LanguageSettings {
+		return LanguageSettings{CommentPrefix: "REM"}
+	})
+	run(t, e, "toggle_comment")
+	if got := text(e); got != "REM x" {
+		t.Fatalf("text = %q, want %q", got, "REM x")
+	}
+	run(t, e, "toggle_comment")
+	if got := text(e); got != "x" {
+		t.Fatalf("text after the second toggle = %q, want x", got)
+	}
+}
+
+func TestToggleCommentWithoutAResolverHasNoPrefix(t *testing.T) {
+	t.Parallel()
+	e := docWith(Options{}, "x")
+	if r := e.Do("toggle_comment", nil); r.Err != nil {
+		t.Fatalf("toggle_comment without any language settings = %v, want a silent no-op", r.Err)
+	}
+	if got := text(e); got != "x" {
+		t.Fatalf("text = %q, want it unchanged", got)
 	}
 }
 
@@ -143,7 +174,27 @@ func TestToggleCommentCaretRules(t *testing.T) {
 			if got := e.Active().Cursor; got != tt.wantCursor {
 				t.Fatalf("caret = %+v, want %+v", got, tt.wantCursor)
 			}
+			if sel := e.Active().Sel; sel != nil {
+				t.Fatalf("selection = %+v, want none after toggling an empty caret", sel)
+			}
 		})
+	}
+}
+
+func TestToggleCommentEmptyCaretsLeaveNoSelection(t *testing.T) {
+	t.Parallel()
+	e := openNamed(t, "main.go", "foo\nbar")
+	e.Active().setCarets([]caret{
+		{anchor: caretPos(0, 0), head: caretPos(0, 0), primary: true},
+		{anchor: caretPos(1, 0), head: caretPos(1, 0)},
+	})
+	run(t, e, "toggle_comment")
+	want := carets{
+		primary: Caret{Cursor: caretPos(0, 3)},
+		extras:  []Caret{{Cursor: caretPos(1, 3)}},
+	}
+	if got := caretState(e); !sameCarets(got, want) {
+		t.Fatalf("carets = %s, want %s", got, want)
 	}
 }
 
@@ -209,32 +260,81 @@ func TestToggleCommentTwiceIsIdentity(t *testing.T) {
 	}
 }
 
-func TestToggleCommentWithoutACommentTokenFails(t *testing.T) {
+func TestToggleCommentWithoutACommentPrefixDoesNothing(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		file string // empty for an untitled buffer
-		want string
 	}{
-		{"untitled buffer", "", "toggle_comment: no comment token for untitled"},
-		{"txt file", "notes.txt", "toggle_comment: no comment token for .txt"},
-		{"unknown extension", "data.xyz", "toggle_comment: no comment token for .xyz"},
-		{"file with no extension", "Makefile", "toggle_comment: no comment token for Makefile"},
+		{"untitled buffer", ""},
+		{"txt file", "notes.txt"},
+		{"unknown extension", "data.xyz"},
+		{"json has none", "data.json"},
+		{"markdown has none", "README.md"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			e := docWith(Options{}, "x")
+			e.SetLanguageSettings(configResolver())
 			if tt.file != "" {
 				e = openNamed(t, tt.file, "x")
 			}
-			r := e.Do("toggle_comment", nil)
-			if r.Err == nil || r.Err.Error() != tt.want {
-				t.Fatalf("Do(toggle_comment) error = %v, want %q", r.Err, tt.want)
+			if r := e.Do("toggle_comment", nil); r.Err != nil {
+				t.Fatalf("Do(toggle_comment) error = %v, want a silent no-op", r.Err)
 			}
 			if got := text(e); got != "x" {
 				t.Fatalf("text = %q, want it unchanged", got)
 			}
 		})
+	}
+}
+
+func TestToggleCommentAtEveryCaret(t *testing.T) {
+	t.Parallel()
+	e := openNamed(t, "main.go", "a\n  b\nc\nd")
+	e.Active().setCarets([]caret{
+		{anchor: caretPos(0, 1), head: caretPos(0, 1), primary: true},
+		{anchor: caretPos(1, 3), head: caretPos(1, 3)},
+		{anchor: caretPos(3, 0), head: caretPos(3, 1)},
+	})
+	run(t, e, "toggle_comment")
+	if got := text(e); got != "// a\n//   b\nc\n// d" {
+		t.Fatalf("text = %q", got)
+	}
+	want := carets{
+		primary: Caret{Cursor: caretPos(0, 4)},
+		extras: []Caret{
+			{Cursor: caretPos(1, 6)},
+			{Cursor: caretPos(3, 4), Sel: caretSel(caretPos(3, 0), caretPos(3, 4))},
+		},
+	}
+	if got := caretState(e); !sameCarets(got, want) {
+		t.Fatalf("carets = %s, want %s", got, want)
+	}
+	run(t, e, "undo")
+	if got := text(e); got != "a\n  b\nc\nd" {
+		t.Fatalf("text after undo = %q, want one step", got)
+	}
+}
+
+func TestToggleCommentUncommentsOnlyWhenEveryCaretLineIsCommented(t *testing.T) {
+	t.Parallel()
+	e := openNamed(t, "main.go", "// a\nb\n// c")
+	e.Active().setCarets([]caret{
+		{anchor: caretPos(0, 0), head: caretPos(0, 0), primary: true},
+		{anchor: caretPos(1, 0), head: caretPos(1, 0)},
+	})
+	run(t, e, "toggle_comment")
+	if got := text(e); got != "// // a\n// b\n// c" {
+		t.Fatalf("text = %q, want both caret lines commented", got)
+	}
+	e.Active().setCarets([]caret{
+		{anchor: caretPos(0, 0), head: caretPos(0, 0), primary: true},
+		{anchor: caretPos(2, 0), head: caretPos(2, 0)},
+	})
+	run(t, e, "toggle_comment")
+	if got := text(e); got != "// a\n// b\nc" {
+		t.Fatalf("text = %q, want both uncommented", got)
 	}
 }

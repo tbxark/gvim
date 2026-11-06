@@ -122,7 +122,7 @@ func TestMarkModeExtendsSelectionUntilCancelled(t *testing.T) {
 		{"moves without a mark select nothing", []Action{"move_right", "move_right"}, "", 3},
 		{"mark mode lasts over several moves", []Action{"set_mark", "move_right", "move_right", "move_right"}, "bcd", 4},
 		{"cancel_mark keeps the selection", []Action{"set_mark", "move_right", "cancel_mark"}, "b", 2},
-		{"a move after cancel_mark drops the selection", []Action{"set_mark", "move_right", "cancel_mark", "move_right"}, "", 3},
+		{"a move after cancel_mark collapses the selection to its right edge", []Action{"set_mark", "move_right", "cancel_mark", "move_right"}, "", 2},
 		{"clear_mark drops the selection at once", []Action{"set_mark", "move_right", "clear_mark"}, "", 2},
 		{"clear_mark leaves mark mode off", []Action{"set_mark", "clear_mark", "move_right", "move_right"}, "", 3},
 	}

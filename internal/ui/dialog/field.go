@@ -60,10 +60,15 @@ func (f *field) clearPrefill(replace bool) {
 	}
 }
 
-// key edits the text with one key press.
-func (f *field) key(kp tea.KeyPressMsg) {
+// key edits the text with one key press. It returns the clipboard read that Ctrl+V starts.
+func (f *field) key(kp tea.KeyPressMsg) tea.Cmd {
 	f.clearPrefill(replacesPrefill(kp))
-	f.in, _ = f.in.Update(kp)
+	var cmd tea.Cmd
+	f.in, cmd = f.in.Update(kp)
+	if tea.Key(kp).Keystroke() != "ctrl+v" {
+		return nil
+	}
+	return cmd
 }
 
 // update passes any other message to the input model. A paste replaces an

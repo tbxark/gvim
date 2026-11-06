@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tbxark/gvim/internal/buffer"
+	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/search"
 	"github.com/tbxark/gvim/internal/ui/palette"
 )
@@ -23,11 +24,26 @@ const (
 // liveGrep is the palette's Grepper over internal/search. It reads the files of the
 // index one at a time, within the limits above, and searches each one for the query
 // as literal text, without regard to case. It is called from a tea.Cmd.
-type liveGrep struct{}
+type liveGrep struct {
+	// skipFrom is the size in bytes from which a file is skipped: the files that open
+	// in large file mode. Only the first grepMaxFileBytes of such a file would be
+	// searched, and a miss in the rest would look like no match. Zero skips none.
+	skipFrom int64
+}
+
+// grepFor returns the live grep for an editor with the options o. It skips the
+// files that the editor opens in large file mode.
+func grepFor(o editor.Options) liveGrep {
+	if o.LargeFileMode && o.LargeFileThresholdBytes > 0 {
+		return liveGrep{skipFrom: int64(o.LargeFileThresholdBytes)}
+	}
+	return liveGrep{}
+}
 
 // Search returns at most limit hits of query, one per matching line, in file order.
-// The files are relative to root. A file that cannot be read is skipped.
-func (liveGrep) Search(root string, files []string, query string, limit int) ([]palette.GrepHit, error) {
+// The files are relative to root. A file that cannot be read is skipped, and so is a
+// file of skipFrom bytes or more.
+func (g liveGrep) Search(root string, files []string, query string, limit int) ([]palette.GrepHit, error) {
 	if query == "" || limit <= 0 {
 		return nil, nil
 	}
@@ -36,7 +52,7 @@ func (liveGrep) Search(root string, files []string, query string, limit int) ([]
 		if i >= grepMaxFiles {
 			break
 		}
-		text, ok := readSearchable(filepath.Join(root, filepath.FromSlash(rel)))
+		text, ok := readSearchable(filepath.Join(root, filepath.FromSlash(rel)), g.skipFrom)
 		if !ok {
 			continue
 		}
@@ -66,14 +82,19 @@ func (liveGrep) Search(root string, files []string, query string, limit int) ([]
 }
 
 // readSearchable returns the first grepMaxFileBytes of the file at path. It reports
-// false when the file cannot be read or looks binary: a NUL byte in its first
-// grepBinaryProbe bytes.
-func readSearchable(path string) (string, bool) {
+// false when the file cannot be read, is skipFrom bytes or more (when skipFrom is not
+// zero), or looks binary: a NUL byte in its first grepBinaryProbe bytes.
+func readSearchable(path string, skipFrom int64) (string, bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", false
 	}
 	defer func() { _ = f.Close() }()
+	if skipFrom > 0 {
+		if info, err := f.Stat(); err != nil || info.Size() >= skipFrom {
+			return "", false
+		}
+	}
 	data, err := io.ReadAll(io.LimitReader(f, grepMaxFileBytes))
 	if err != nil {
 		return "", false

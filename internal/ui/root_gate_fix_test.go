@@ -24,8 +24,9 @@ func TestExtractTabToNewWorkspaceSaysItCannotMove(t *testing.T) {
 	}
 }
 
-// TestToggleAutoRevertFlagsTheCurrentBuffer checks the flag on the current buffer: a
-// toggle turns it on and the next one turns it off, and a buffer with no file has none.
+// TestToggleAutoRevertFlagsTheCurrentBuffer checks the flag on the current buffer: auto-revert
+// is on until a toggle turns it off, the next toggle turns it on again, and a buffer with no
+// file has none.
 func TestToggleAutoRevertFlagsTheCurrentBuffer(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -35,10 +36,11 @@ func TestToggleAutoRevertFlagsTheCurrentBuffer(t *testing.T) {
 		notice  string
 		on      bool
 	}{
-		{name: "no tab", ed: docEditor{fakeEditor: newFakeEditor("x")}, toggles: 1, notice: noDocumentNotice},
-		{name: "untitled buffer", ed: newDocEditor("", false), toggles: 1, notice: editor.ErrNoPath.Error()},
-		{name: "first toggle turns it on", ed: newDocEditor("/ws/a.txt", false), toggles: 1, notice: "Auto-revert on for a.txt", on: true},
-		{name: "second toggle turns it off", ed: newDocEditor("/ws/a.txt", false), toggles: 2, notice: "Auto-revert off for a.txt"},
+		{name: "no tab", ed: docEditor{fakeEditor: newFakeEditor("x")}, toggles: 1, notice: noDocumentNotice, on: true},
+		{name: "untitled buffer", ed: newDocEditor("", false), toggles: 1, notice: editor.ErrNoPath.Error(), on: true},
+		{name: "on before any toggle", ed: newDocEditor("/ws/a.txt", false), on: true},
+		{name: "first toggle turns it off", ed: newDocEditor("/ws/a.txt", false), toggles: 1, notice: "Auto-revert off for a.txt"},
+		{name: "second toggle turns it on", ed: newDocEditor("/ws/a.txt", false), toggles: 2, notice: "Auto-revert on for a.txt", on: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -50,40 +52,40 @@ func TestToggleAutoRevertFlagsTheCurrentBuffer(t *testing.T) {
 			if m.notice != tt.notice {
 				t.Fatalf("notice = %q, want %q", m.notice, tt.notice)
 			}
-			if on := m.fix.autoRevert["/ws/a.txt"]; on != tt.on {
+			if on := m.autoRevertOn("/ws/a.txt"); on != tt.on {
 				t.Fatalf("auto-revert flag = %v, want %v", on, tt.on)
 			}
 		})
 	}
 }
 
-// TestAutoRevertReloadsAFlaggedBufferWhenItsFileChanges checks that the watcher's report of
-// a changed file reloads the flagged, clean buffer through the revert split. A modified
-// buffer, an unflagged one, a sibling file in the same folder and a folder that changed
-// without the file are left alone.
-func TestAutoRevertReloadsAFlaggedBufferWhenItsFileChanges(t *testing.T) {
+// TestAutoRevertReloadsABufferWhenItsFileChanges checks that the watcher's report of a
+// changed file reloads the clean buffer through the revert split, as every buffer has
+// auto-revert on until it is switched off. A modified buffer, one switched off, a sibling file
+// in the same folder and a folder that changed without the file are left alone.
+func TestAutoRevertReloadsABufferWhenItsFileChanges(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
-		flag      bool
+		off       bool // auto-revert is switched off for the buffer
 		dirty     bool
 		dirs      []string
 		files     []string
 		wantPlans int // the PlanRevert calls
 		notice    string
 	}{
-		{name: "flagged, clean, file changed", flag: true, dirs: []string{"/ws"}, files: []string{"/ws/a.txt"}, wantPlans: 1},
-		{name: "flagged, clean, a sibling file changed", flag: true, dirs: []string{"/ws"}, files: []string{"/ws/b.txt"}},
-		{name: "flagged, clean, only the folder changed", flag: true, dirs: []string{"/ws"}},
-		{name: "flagged, modified, file changed", flag: true, dirty: true, dirs: []string{"/ws"}, files: []string{"/ws/a.txt"}, notice: "a.txt changed on disk; unsaved changes kept"},
-		{name: "not flagged, file changed", dirs: []string{"/ws"}, files: []string{"/ws/a.txt"}},
+		{name: "clean, file changed", dirs: []string{"/ws"}, files: []string{"/ws/a.txt"}, wantPlans: 1},
+		{name: "clean, a sibling file changed", dirs: []string{"/ws"}, files: []string{"/ws/b.txt"}},
+		{name: "clean, only the folder changed", dirs: []string{"/ws"}},
+		{name: "modified, file changed", dirty: true, dirs: []string{"/ws"}, files: []string{"/ws/a.txt"}, notice: "a.txt changed on disk; unsaved changes kept"},
+		{name: "switched off, file changed", off: true, dirs: []string{"/ws"}, files: []string{"/ws/a.txt"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ed := &revertEditor{docEditor: newDocEditor("/ws/a.txt", tt.dirty)}
 			m := newRevertModel(t, ed)
-			if tt.flag {
+			if tt.off {
 				rootPaletteRun(m, "toggle_auto_revert")
 			}
 			m.Update(watchMsg{dirs: tt.dirs, files: tt.files})
@@ -142,68 +144,69 @@ func (e *autoTabsEditor) ApplyRevert(plan editor.RevertPlan, _ editor.RevertResu
 }
 
 // TestAutoRevertFollowsTheChangedFile checks which open documents reload when the watcher
-// reports a changed file. A flagged clean document reloads when its own file changed, whether
-// it is the active tab, a background tab, or a file in a folder that is not the root. A
-// flagged document with unsaved edits keeps its text, and an unflagged one, a sibling file and
-// a folder that changed without the file are left alone.
+// reports a changed file. A clean document reloads when its own file changed, whether it is
+// the active tab, a background tab, or a file in a folder that is not the root. A document with
+// unsaved edits keeps its text, and one switched off, a sibling file and a folder that changed
+// without the file are left alone.
 func TestAutoRevertFollowsTheChangedFile(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
 		active    int
 		tabs      []revertDoc
-		flag      []string // the flagged paths
+		off       []string // the paths auto-revert is switched off for
 		files     []string // the changed files the watcher reports
 		dirs      []string // the changed folders the watcher reports
 		wantReads []string // the paths read, which are also the paths applied
 		notice    string
 	}{
 		{
-			name: "a flagged background tab reloads when its file changes",
-			tabs: []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
-			flag: []string{"/ws/b.txt"}, files: []string{"/ws/b.txt"}, wantReads: []string{"/ws/b.txt"},
+			name:  "a background tab reloads when its file changes",
+			tabs:  []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
+			files: []string{"/ws/b.txt"}, wantReads: []string{"/ws/b.txt"},
 		},
 		{
-			name: "a flagged active tab reloads when its file changes",
-			tabs: []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
-			flag: []string{"/ws/a.txt"}, files: []string{"/ws/a.txt"}, wantReads: []string{"/ws/a.txt"},
+			name:  "the active tab reloads when its file changes",
+			tabs:  []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
+			files: []string{"/ws/a.txt"}, wantReads: []string{"/ws/a.txt"},
 		},
 		{
-			name: "a flagged file in a folder that is not the root reloads",
-			tabs: []revertDoc{openDoc("/ws/a.txt", false), openDoc("/other/b.txt", false)},
-			flag: []string{"/other/b.txt"}, files: []string{"/other/b.txt"}, wantReads: []string{"/other/b.txt"},
+			name:  "a file in a folder that is not the root reloads",
+			tabs:  []revertDoc{openDoc("/ws/a.txt", false), openDoc("/other/b.txt", false)},
+			files: []string{"/other/b.txt"}, wantReads: []string{"/other/b.txt"},
 		},
 		{
-			name: "two flagged files that changed both reload, active first",
-			tabs: []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
-			flag: []string{"/ws/a.txt", "/ws/b.txt"}, files: []string{"/ws/b.txt", "/ws/a.txt"},
+			name:      "two files that changed both reload, active first",
+			tabs:      []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
+			files:     []string{"/ws/b.txt", "/ws/a.txt"},
 			wantReads: []string{"/ws/a.txt", "/ws/b.txt"},
 		},
 		{
-			name:  "an unflagged background tab does not reload",
+			name:  "a background tab switched off does not reload",
 			tabs:  []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
+			off:   []string{"/ws/b.txt"},
 			files: []string{"/ws/b.txt"},
 		},
 		{
-			name: "a flagged file does not reload for a sibling that changed",
-			tabs: []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
-			flag: []string{"/ws/b.txt"}, files: []string{"/ws/c.txt"},
+			name:  "a file does not reload for a sibling that changed",
+			tabs:  []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
+			files: []string{"/ws/c.txt"},
 		},
 		{
-			name: "a flagged file does not reload when only its folder changed",
+			name: "a file does not reload when only its folder changed",
 			tabs: []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", false)},
-			flag: []string{"/ws/b.txt"}, dirs: []string{"/ws"},
+			dirs: []string{"/ws"},
 		},
 		{
-			name: "a flagged background tab with unsaved edits is kept",
-			tabs: []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", true)},
-			flag: []string{"/ws/b.txt"}, files: []string{"/ws/b.txt"},
+			name:   "a background tab with unsaved edits is kept",
+			tabs:   []revertDoc{openDoc("/ws/a.txt", false), openDoc("/ws/b.txt", true)},
+			files:  []string{"/ws/b.txt"},
 			notice: "b.txt changed on disk; unsaved changes kept",
 		},
 		{
-			name: "a flagged active tab with unsaved edits is kept",
-			tabs: []revertDoc{openDoc("/ws/a.txt", true), openDoc("/ws/b.txt", false)},
-			flag: []string{"/ws/a.txt"}, files: []string{"/ws/a.txt"},
+			name:   "the active tab with unsaved edits is kept",
+			tabs:   []revertDoc{openDoc("/ws/a.txt", true), openDoc("/ws/b.txt", false)},
+			files:  []string{"/ws/a.txt"},
 			notice: "a.txt changed on disk; unsaved changes kept",
 		},
 	}
@@ -213,8 +216,8 @@ func TestAutoRevertFollowsTheChangedFile(t *testing.T) {
 			ed := newAutoTabsEditor(tt.active, tt.tabs...)
 			m := newRevertModel(t, ed)
 			m.fix.autoRevert = make(map[string]bool)
-			for _, p := range tt.flag {
-				m.fix.autoRevert[p] = true
+			for _, p := range tt.off {
+				m.fix.autoRevert[p] = false
 			}
 			_, cmd := m.Update(watchMsg{dirs: tt.dirs, files: tt.files})
 			feedMessages(m, cmd)
@@ -232,12 +235,11 @@ func TestAutoRevertFollowsTheChangedFile(t *testing.T) {
 }
 
 // TestAutoRevertFallsBackToTheRevertAction checks that an editor without the revert split
-// is reloaded through the revert action when its flagged buffer's file changes.
+// is reloaded through the revert action when its buffer's file changes.
 func TestAutoRevertFallsBackToTheRevertAction(t *testing.T) {
 	t.Parallel()
 	ed := newDocEditor("/ws/a.txt", false)
 	m := newRevertModel(t, ed)
-	rootPaletteRun(m, "toggle_auto_revert")
 	m.Update(watchMsg{dirs: []string{"/ws"}, files: []string{"/ws/a.txt"}})
 	var reverts int
 	for _, a := range ed.actions {

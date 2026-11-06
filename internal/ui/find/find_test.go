@@ -34,6 +34,8 @@ func (f *fakeEditor) Selection() (start, end buffer.Pos, ok bool) {
 	return f.sel.Start, f.sel.End, true
 }
 
+func (f *fakeEditor) Text(start, end buffer.Pos) string { return f.buf.Range(start, end) }
+
 func (f *fakeEditor) Find(q search.Query) ([]search.Match, error) {
 	return search.Find(f.buf, q)
 }
@@ -87,6 +89,16 @@ func key(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'w', Mod: tea.ModAlt}
 	case "alt+r":
 		return tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt}
+	case "alt+i":
+		return tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt}
+	case "ctrl+f":
+		return tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+	case "ctrl+alt+r":
+		return tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl | tea.ModAlt}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
 	}
 	r := []rune(name)[0]
 	return tea.KeyPressMsg{Code: r, Text: name}
@@ -111,26 +123,25 @@ func frame(b *Bar, w, h int) []string {
 	return g.Plain()
 }
 
-func TestTypingSelectsFirstMatchAfterAnchor(t *testing.T) {
+func TestTypingCountsMatchesFromTheAnchor(t *testing.T) {
 	t.Parallel()
 	f := newFake("foo bar foo\nfoo")
-	f.cursor = buffer.Pos{Line: 0, Col: 4}
+	f.cursor = pos(0, 4)
 	b := Open(f, testStyles(), false)
 	typeText(b, "foo")
 
-	want := search.Match{Start: buffer.Pos{Line: 0, Col: 8}, End: buffer.Pos{Line: 0, Col: 11}}
-	if f.sel == nil || *f.sel != want {
-		t.Fatalf("selection = %v, want %v", f.sel, want)
+	if f.sel != nil {
+		t.Fatalf("typing selected %v", f.sel)
 	}
 	if got := b.statusText(); got != "Match 2 of 3" {
 		t.Fatalf("status = %q, want %q", got, "Match 2 of 3")
 	}
 }
 
-func TestEnterAndF3StepAndWrap(t *testing.T) {
+func TestF3StepsAndWraps(t *testing.T) {
 	t.Parallel()
 	f := newFake("foo bar foo\nfoo")
-	f.cursor = buffer.Pos{Line: 0, Col: 4}
+	f.cursor = pos(0, 4)
 	b := Open(f, testStyles(), false)
 	typeText(b, "foo")
 
@@ -139,10 +150,11 @@ func TestEnterAndF3StepAndWrap(t *testing.T) {
 		status string
 		start  buffer.Pos
 	}{
-		{"enter", "Match 3 of 3", buffer.Pos{Line: 1, Col: 0}},
-		{"enter", "Match 1 of 3", buffer.Pos{Line: 0, Col: 0}},
-		{"shift+f3", "Match 3 of 3", buffer.Pos{Line: 1, Col: 0}},
-		{"f3", "Match 1 of 3", buffer.Pos{Line: 0, Col: 0}},
+		{"f3", "Match 2 of 3", pos(0, 8)},
+		{"f3", "Match 3 of 3", pos(1, 0)},
+		{"f3", "Match 1 of 3", pos(0, 0)},
+		{"shift+f3", "Match 3 of 3", pos(1, 0)},
+		{"alt+enter", "Match 1 of 3", pos(0, 0)},
 	}
 	for _, tt := range tests {
 		press(b, tt.key)
@@ -152,6 +164,9 @@ func TestEnterAndF3StepAndWrap(t *testing.T) {
 		if f.sel == nil || f.sel.Start != tt.start {
 			t.Fatalf("after %s: selection = %v, want start %v", tt.key, f.sel, tt.start)
 		}
+	}
+	if !b.Active() {
+		t.Fatal("stepping closed the bar")
 	}
 }
 
@@ -210,32 +225,12 @@ func TestInvalidRegexShowsError(t *testing.T) {
 	}
 }
 
-func TestReplaceCurrentReplacesSelectionAndAdvances(t *testing.T) {
-	t.Parallel()
-	f := newFake("a a a")
-	b := Open(f, testStyles(), false)
-	typeText(b, "a")
-	press(b, "tab")
-	typeText(b, "b")
-	press(b, "enter")
-
-	if got := f.text(); got != "b a a" {
-		t.Fatalf("text = %q, want %q", got, "b a a")
-	}
-	if got := b.statusText(); got != "Match 1 of 2" {
-		t.Fatalf("status = %q, want %q", got, "Match 1 of 2")
-	}
-	if f.sel == nil || f.sel.Start != (buffer.Pos{Line: 0, Col: 2}) {
-		t.Fatalf("selection = %v, want the match at column 2", f.sel)
-	}
-}
-
 func TestEnterInReplaceWithoutMatchChangesNothing(t *testing.T) {
 	t.Parallel()
 	f := newFake("a b")
 	b := Open(f, testStyles(), false)
 	typeText(b, "a")
-	typeText(b, "x") // the query "ax" has no match; the "a" selection stays
+	typeText(b, "x") // the query "ax" has no match
 	press(b, "tab")
 	typeText(b, "Q")
 	press(b, "enter")

@@ -14,27 +14,36 @@ type docLines struct{ d Document }
 // Lines is the number of lines of the document.
 func (l docLines) Lines() int { return l.d.LineCount() }
 
-// LineLen is the rune length of line i.
-func (l docLines) LineLen(i int) int { return utf8.RuneCountInString(l.d.Line(i)) }
+// LineLen is the rune length of line i. A document that knows it without building
+// the text of the line is asked first: a large document caches the decoded line.
+func (l docLines) LineLen(i int) int {
+	if ll, ok := l.d.(interface{ LineLen(i int) int }); ok {
+		return ll.LineLen(i)
+	}
+	return utf8.RuneCountInString(l.d.Line(i))
+}
 
 // noHighlights is the line function when no search is shown.
 func noHighlights(int) []search.Highlight { return nil }
 
 // findLineHighlights returns the search highlights of the active document as a
 // function of the line. The highlights are the matches of the find bar's search
-// while the bar is open. The current match is the selection, when the selection
-// is one of them. The matches are found once, here, so the caller makes the
-// function once per frame and calls it for each line it paints. The function
-// gives nothing when the bar is closed, the search text is empty or invalid, or
-// there is no match.
+// while the bar is open, or closed by Enter with the search kept. The current
+// match is the selection, when the selection is one of them. The matches are found
+// once, here, so the caller makes the function once per frame and calls it for each
+// line it paints. The function gives nothing when no bar search is shown, the
+// search text is empty or invalid, or there is no match.
 func (m *Model) findLineHighlights() func(line int) []search.Highlight {
 	doc := m.ed.Active()
-	if !m.findOpen() || doc == nil {
+	if !m.findShown() || doc == nil {
 		return noHighlights
 	}
 	q := m.findBar.Query()
 	if q.Text == "" {
 		return noHighlights
+	}
+	if ss, ok := m.streamSearch(); ok {
+		return m.largeVisibleHighlights(ss, doc, q)
 	}
 	h := findHost{m: m}
 	matches, err := h.Find(q)

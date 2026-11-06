@@ -148,3 +148,38 @@ func TestTypingReplacesEachLineOfABlock(t *testing.T) {
 		t.Fatalf("carets = %v, want %v", got, want)
 	}
 }
+
+func TestBlockSelectHorizontalStepMovesByCluster(t *testing.T) {
+	t.Parallel()
+	// The second cluster is e followed by a combining acute, two runes wide.
+	const text = "ae\u0301b"
+	tests := []struct {
+		name  string
+		start buffer.Pos
+		steps []Action
+		want  carets
+	}{
+		{
+			name:  "right steps over the whole cluster",
+			start: caretPos(0, 0),
+			steps: []Action{"block_select_right", "block_select_right"},
+			want:  carets{primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
+		},
+		{
+			name:  "left steps back over the whole cluster",
+			start: caretPos(0, 3),
+			steps: []Action{"block_select_left"},
+			want:  carets{primary: Caret{Cursor: caretPos(0, 1), Sel: caretSel(caretPos(0, 3), caretPos(0, 1))}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := docAt(text, tt.start.Line, tt.start.Col)
+			run(t, e, tt.steps...)
+			if got := caretState(e); !sameCarets(got, tt.want) {
+				t.Fatalf("carets = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

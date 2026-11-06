@@ -50,6 +50,9 @@ func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 // featureMessage handles the messages of the root features in this file group. It
 // reports whether it took msg, and the command the message starts.
 func (m *Model) featureMessage(msg tea.Msg) (tea.Cmd, bool) {
+	if cmd, ok := m.clipMessage(msg); ok {
+		return cmd, true
+	}
 	switch msg := msg.(type) {
 	case interruptedMsg:
 		m.reviewed(msg)

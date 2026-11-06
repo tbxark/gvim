@@ -24,6 +24,7 @@ func (e *Editor) ExtendSelection(p buffer.Pos, u Unit) {
 	}
 	p = d.Buffer.Clamp(p)
 	d.want = -1
+	defer func() { d.seen = d.Cursor }()
 	if u == UnitChar {
 		d.move(p, true)
 		return
@@ -62,7 +63,8 @@ func unitBounds(b *buffer.Buffer, p buffer.Pos, u Unit) (start, end buffer.Pos) 
 // permanent tab.
 //
 // If path is already open in a tab, that tab is activated and nothing is
-// loaded. A permanent tab is never turned into a preview.
+// loaded. A permanent tab is never turned into a preview. A file that opens in large
+// file mode is not previewed: nothing is loaded, and the status says to open it.
 //
 // Like OpenFile, it returns an error wrapping ErrNotDecodable or the file error,
 // and the same message is written to the status.
@@ -77,7 +79,13 @@ func (e *Editor) OpenPreview(path string) error {
 		e.setStatus("Opened " + e.docs[i].Name())
 		return nil
 	}
-	d, err := readDocument(path, e.defaultEOL())
+	if e.isLargePath(path) {
+		// A preview loads on the update loop. A large file opens through LoadFunc
+		// or OpenFile, which a click on it does not do.
+		e.setStatus("Large file: open it to load")
+		return nil
+	}
+	d, err := loadDocument(path, e.loadSpec())
 	if err != nil {
 		e.setStatus(err.Error())
 		return err
@@ -85,16 +93,18 @@ func (e *Editor) OpenPreview(path string) error {
 	d.preview = true
 	switch i := e.previewIndex(); {
 	case i >= 0:
+		e.releaseDoc(e.docs[i])
 		e.docs[i] = d
 		e.switchTo(i)
 	case e.pristineUntitled():
 		// Like OpenFile, the untouched startup buffer is replaced, not kept.
+		e.releaseDoc(e.docs[0])
 		e.docs[0] = d
 		e.switchTo(0)
 	default:
 		e.docs = append(e.docs, d)
 		e.switchTo(len(e.docs) - 1)
 	}
-	e.setStatus("Opened " + d.Name())
+	e.setStatus(d.openStatus())
 	return nil
 }

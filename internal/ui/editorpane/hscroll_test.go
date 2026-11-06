@@ -51,11 +51,12 @@ func TestCaretPastTheRightEdgeScrollsTheLineLeft(t *testing.T) {
 	d := newDoc("0123456789abcdef")
 	d.cursor = buffer.Pos{Col: 10}
 	g := Pane{Doc: d}.Render(12, 3)
-	// Column 10 is the sixth text column, so the window starts at column 6.
-	if got := barRow(t, g, 0); got != "6789a" {
-		t.Errorf("row 0 = %q, want columns 6 to 10", got)
+	// The window keeps two columns (the margin of a five-column window) right of
+	// the caret at column 10, so it starts at column 8.
+	if got := barRow(t, g, 0); got != "89abc" {
+		t.Errorf("row 0 = %q, want columns 8 to 12", got)
 	}
-	if c := cellAt(t, g, 10, 0); !c.Style.Reverse || c.Text != "a" {
+	if c := cellAt(t, g, 8, 0); !c.Style.Reverse || c.Text != "a" {
 		t.Errorf("caret cell = %q reversed %v, want a reversed", c.Text, c.Style.Reverse)
 	}
 }
@@ -114,24 +115,25 @@ func TestCaretAndMouseFollowTheScrolledWindow(t *testing.T) {
 	d := newDoc("0123456789abcdef")
 	d.cursor = buffer.Pos{Col: 10}
 	p := Pane{Doc: d}
-	// The caret is at column 10, which the window shows at x = 6 + (10 - 6).
-	if x, y, ok := p.Caret(12, 3); !ok || x != 10 || y != 0 {
-		t.Errorf("Caret = (%d,%d,%v), want (10,0,true)", x, y, ok)
+	// The window starts at column 8 (see TestCaretPastTheRightEdgeScrollsTheLineLeft),
+	// so the caret at column 10 is shown at x = 6 + (10 - 8).
+	if x, y, ok := p.Caret(12, 3); !ok || x != 8 || y != 0 {
+		t.Errorf("Caret = (%d,%d,%v), want (8,0,true)", x, y, ok)
 	}
-	// The first text cell is column 6 of the line.
-	if pos := p.PosAt(12, 3, 6, 0); pos != (buffer.Pos{Col: 6}) {
-		t.Errorf("PosAt first text cell = %+v, want column 6", pos)
+	// The first text cell is column 8 of the line.
+	if pos := p.PosAt(12, 3, 6, 0); pos != (buffer.Pos{Col: 8}) {
+		t.Errorf("PosAt first text cell = %+v, want column 8", pos)
 	}
-	if h := p.Hit(12, 3, 8, 0); h.Kind != HitText || h.Pos != (buffer.Pos{Col: 8}) {
-		t.Errorf("Hit on x=8 = %+v, want text at column 8", h)
+	if h := p.Hit(12, 3, 8, 0); h.Kind != HitText || h.Pos != (buffer.Pos{Col: 10}) {
+		t.Errorf("Hit on x=8 = %+v, want text at column 10", h)
 	}
 }
 
 func TestRulerFollowsTheScrolledWindow(t *testing.T) {
 	d := newDoc("0123456789abcdef")
 	d.cursor = buffer.Pos{Col: 10}
-	// Ruler 8 is text column 7, which the window at column 6 shows at x = 6 + 1.
-	p := Pane{Doc: d, Rulers: []int{8}, Styles: Styles{Ruler: grid.Style{BG: cGray}}}
+	// Ruler 10 is text column 9, which the window at column 8 shows at x = 6 + 1.
+	p := Pane{Doc: d, Rulers: []int{10}, Styles: Styles{Ruler: grid.Style{BG: cGray}}}
 	if c := cellAt(t, p.Render(12, 3), 7, 1); bgOf(c) != cGray {
 		t.Errorf("ruler cell bg = %v, want the ruler on the scrolled window", bgOf(c))
 	}

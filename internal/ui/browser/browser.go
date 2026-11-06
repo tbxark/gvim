@@ -225,6 +225,8 @@ func (b *Browser) Update(msg tea.Msg) (*Browser, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		cmd = b.key(tea.Key(msg))
+	case tea.PasteMsg:
+		b.paste(msg.Content)
 	case tea.MouseClickMsg:
 		cmd = b.click(tea.Mouse(msg))
 	case tea.MouseWheelMsg:
@@ -558,6 +560,24 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// paste extends the filter with pasted text. A line break becomes a space and any other
+// unprintable rune is dropped.
+func (b *Browser) paste(s string) {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n':
+			return ' '
+		case unicode.IsPrint(r):
+			return r
+		}
+		return -1
+	}, s)
+	if s != "" {
+		b.setInput(b.input + s)
+	}
 }
 
 // printable reports whether s is text the user typed: non-empty, with only

@@ -186,6 +186,12 @@ func (a editorAdapter) PlanRevert(force bool) (editor.RevertPlan, error) {
 	return a.ed.PlanRevert(force)
 }
 
+// PlanRevertPath prepares the reload of the tab whose file is path, which need not be the
+// active one, as the editor's PlanRevertPath does. It reads no file.
+func (a editorAdapter) PlanRevertPath(path string) editor.RevertPlan {
+	return a.ed.PlanRevertPath(path)
+}
+
 // RunRevert reads the file of plan. It reads only the plan, so the root calls it from a
 // command, off the update loop.
 func (a editorAdapter) RunRevert(p editor.RevertPlan) editor.RevertResult {
@@ -267,7 +273,7 @@ func (a editorAdapter) otherSpans(doc *editor.Document) *spanCache {
 	}
 	c, ok := a.others[doc]
 	if !ok {
-		c = &spanCache{}
+		c = a.spans.fresh()
 		a.others[doc] = c
 	}
 	if n := len(a.ed.Tabs()); len(a.others) > n {
@@ -388,6 +394,12 @@ func (a editorAdapter) LoadFunc(path string) func() (*editor.Document, error) {
 	return a.ed.LoadFunc(path)
 }
 
+// IsLargePath reports whether path would open in large file mode. See
+// editor.Editor.IsLargePath.
+func (a editorAdapter) IsLargePath(path string) bool {
+	return a.ed.IsLargePath(path)
+}
+
 // OpenLoaded opens a document read by LoadFunc in a permanent tab.
 func (a editorAdapter) OpenLoaded(d *editor.Document) {
 	a.ed.OpenLoaded(d)
@@ -424,8 +436,9 @@ func (a editorAdapter) Quit(force bool) []editor.Dirty {
 // spanCache holds the syntax spans of the active document. The lexer runs over
 // the whole text, because chroma is a stream lexer, and the result is kept until
 // the next edit. The text changes only through editorAdapter.Do, which calls
-// edited. A document switch, or a change of its language, starts a new lexer. The
-// cache is used on the UI goroutine only.
+// edited. A document switch, or a change of its language, starts a new lexer. A
+// large document is lexed in windows of lines instead, kept by the version of its
+// text (spans_large.go). The cache is used on the UI goroutine only.
 type spanCache struct {
 	gen     uint64           // bumped by every edit
 	doc     *editor.Document // the document the lexer belongs to
@@ -435,6 +448,11 @@ type spanCache struct {
 	spans   [][]syntax.Span
 	valid   bool   // spans were lexed
 	lexedAt uint64 // gen the spans were lexed at
+
+	// The spans of a large document are lexed in windows, see spans_large.go.
+	large        largeSpans
+	contextBytes int  // highlight_context_bytes; read only when contextSet
+	contextSet   bool // contextBytes was set from the config
 }
 
 // edited marks the spans stale. It is called before every action. A nil cache
@@ -452,15 +470,9 @@ func (c *spanCache) lines(doc *editor.Document) [][]syntax.Span {
 	if c == nil {
 		return nil
 	}
-	if c.doc != doc || c.lang != doc.Language() {
-		c.doc = doc
-		c.lang = doc.Language()
-		c.valid = false
-		lexer := documentLexer(doc)
-		c.plain = lexer == lexers.Fallback
-		c.hl = syntax.NewHighlighter(lexer)
-	}
-	if c.plain {
+	c.useLexer(doc)
+	if c.plain || doc.Large() {
+		// A large document is never lexed whole: see window.
 		return nil
 	}
 	if !c.valid || c.lexedAt != c.gen {
@@ -475,6 +487,21 @@ func (c *spanCache) lines(doc *editor.Document) [][]syntax.Span {
 	return c.spans
 }
 
+// useLexer starts a new lexer when the cache is used for another document, or when
+// the language of the document changed.
+func (c *spanCache) useLexer(doc *editor.Document) {
+	if c.doc == doc && c.lang == doc.Language() {
+		return
+	}
+	c.doc = doc
+	c.lang = doc.Language()
+	c.valid = false
+	c.large = largeSpans{}
+	lexer := documentLexer(doc)
+	c.plain = lexer == lexers.Fallback
+	c.hl = syntax.NewHighlighter(lexer)
+}
+
 // documentLexer returns the lexer of doc. A language set with Set Language names the
 // lexer, when the name matches one. Otherwise the file name and the text choose it, as
 // syntax.Detect does.
@@ -484,8 +511,14 @@ func documentLexer(doc *editor.Document) chroma.Lexer {
 			return lexer
 		}
 	}
-	return syntax.Detect(doc.Path, []byte(doc.Buffer.Text()))
+	// Detect looks at the head of the text only, so the head is all it is given: a
+	// large document never builds its whole text for this.
+	return syntax.Detect(doc.Path, []byte(doc.Buffer.TextPrefix(lexerHeadBytes)))
 }
+
+// lexerHeadBytes is how much of the start of a document syntax.Detect is given. It is
+// at least what Detect reads (its analyse limit is 16 KiB).
+const lexerHeadBytes = 16 << 10
 
 // documentAdapter is the read-only ui.Document view of one *editor.Document.
 type documentAdapter struct {
@@ -523,6 +556,11 @@ func (d documentAdapter) Line(i int) string {
 // SavedLines is the text at open or the last save, split into lines. The pane
 // diffs it against the buffer for the change marks.
 func (d documentAdapter) SavedLines() []string {
+	if d.doc.Large() {
+		// The saved text of a large document is not held; the pane marks the changed
+		// lines through LineDirty.
+		return nil
+	}
 	return d.doc.SavedLines()
 }
 
@@ -559,6 +597,10 @@ func (d documentAdapter) Selection() (anchor, head buffer.Pos, ok bool) {
 // LineSpans returns the syntax spans of line i, or nil when no lexer matched
 // the document or i is out of range. The spans are lexed once per edit.
 func (d documentAdapter) LineSpans(i int) []syntax.Span {
+	if d.doc.Large() {
+		// The lexer runs over a window of the lines on screen, not over the text.
+		return d.spans.window(d.doc, i)
+	}
 	spans := d.spans.lines(d.doc)
 	if i < 0 || i >= len(spans) {
 		return nil
@@ -578,6 +620,9 @@ func (d documentAdapter) Folded(line int) bool { return d.doc.Folded(line) }
 
 // ViewSettings is the document's display settings, read by the view commands and the pane.
 func (d documentAdapter) ViewSettings() editor.ViewSettings { return d.doc.ViewSettings() }
+
+// Version is the version of the document's text, which changes with every edit.
+func (d documentAdapter) Version() uint64 { return d.doc.Buffer.Version() }
 
 // Language is the document's language name, shown in the status row.
 func (d documentAdapter) Language() string { return d.doc.Language() }
@@ -646,6 +691,11 @@ type dialogPort struct{}
 // Unsaved opens the unsaved-changes dialog for the tab called name.
 func (dialogPort) Unsaved(name string, tag any, ov style.Overlay) ui.Overlay {
 	return ui.WrapDialog(dialog.NewUnsavedChanges(time.Now, name, tag, ov))
+}
+
+// Error shows message with one OK button.
+func (dialogPort) Error(message string, tag any, ov style.Overlay) ui.Overlay {
+	return ui.WrapDialog(dialog.NewErrorDialog(time.Now, message, tag, ov))
 }
 
 // SaveAs opens the Save As prompt prefilled with path. A path whose parent

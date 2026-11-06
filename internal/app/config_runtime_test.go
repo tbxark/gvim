@@ -109,6 +109,29 @@ var defaultEditorOptions = editor.Options{
 	TabSize:           4,
 	AutoIndent:        true,
 	DefaultLineEnding: "LF",
+
+	// The Fresh editor.* defaults, which the config supplies without a file.
+	AutoClose:                              true,
+	AutoSurround:                           true,
+	VirtualSpace:                           "off",
+	ScrollOffset:                           3,
+	AutoReadOnly:                           true,
+	SnapshotInterval:                       100,
+	AutoCreateEmptyBufferOnLastBufferClose: true,
+	RecoveryEnabled:                        true,
+	AutoRecoverySaveIntervalSecs:           2,
+	AutoRevertPollIntervalMS:               2000,
+	LargeFileThresholdBytes:                10485760,
+	LargeFileMode:                          true,
+	EstimatedLineLength:                    80,
+}
+
+// withEditorDefaults is defaultEditorOptions with the tab size and line ending replaced.
+func withEditorDefaults(tabSize int, ending string) editor.Options {
+	o := defaultEditorOptions
+	o.TabSize = tabSize
+	o.DefaultLineEnding = ending
+	return o
 }
 
 func TestConfigEditorSettingsReachEditor(t *testing.T) {
@@ -420,8 +443,8 @@ func TestConfigFlagReplacesUserFileAndProjectStillApplies(t *testing.T) {
 		project string
 		want    editor.Options
 	}{
-		{"no project file", ``, editor.Options{TabSize: 4, AutoIndent: true, DefaultLineEnding: "CRLF"}},
-		{"project file applies over the flag file", `{"tab_size": 2}`, editor.Options{TabSize: 2, AutoIndent: true, DefaultLineEnding: "CRLF"}},
+		{"no project file", ``, withEditorDefaults(4, "CRLF")},
+		{"project file applies over the flag file", `{"tab_size": 2}`, withEditorDefaults(2, "CRLF")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

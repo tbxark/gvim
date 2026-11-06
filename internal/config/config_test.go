@@ -54,6 +54,10 @@ func TestDefaults(t *testing.T) {
 		UIIcons:                 "auto",
 
 		PluginTimeout: 500 * time.Millisecond,
+
+		// The Fresh editor.* defaults are asserted option by option in
+		// TestEditorDefaultsAreFreshs.
+		EditorOptions: defaultEditorOptions(),
 	}
 	if got := Defaults(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Defaults() = %+v, want %+v", got, want)
@@ -246,13 +250,13 @@ func TestLoadBadValuesAreDiagnosedPerKey(t *testing.T) {
 		{"tab size too large", `{"tab_size": 99}`, "tab_size", "between 1 and 16"},
 		{"tab size zero", `{"tab_size": 0}`, "tab_size", "between 1 and 16"},
 		{"tab size string", `{"tab_size": "4"}`, "tab_size", "must be an integer"},
-		{"line ending", `{"line_ending": "cr"}`, "line_ending", "must be"},
+		{"line ending", `{"line_ending": "lf2"}`, "line_ending", "must be"},
 		{"bool as string", `{"auto_indent": "yes"}`, "auto_indent", "must be true or false"},
 		{"menu bar as string", `{"show_menu_bar": "yes"}`, "show_menu_bar", "must be true or false"},
 		{"empty theme", `{"theme": ""}`, "theme", "must not be empty"},
 		{"theme not a string", `{"theme": 1}`, "theme", "must be a string"},
 		{"null value", `{"line_numbers": null}`, "line_numbers", "null"},
-		{"keybindings array", `{"keybindings": []}`, "keybindings", "must be a JSON object"},
+		{"keybindings array", `{"keybindings": [{"key": "x"}]}`, "keybindings", "must be a JSON object"},
 		{"unknown key", `{"tabsize": 2}`, "tabsize", "unknown setting"},
 		{"plugin timeout zero", `{"plugin_timeout_ms": 0}`, "plugin_timeout_ms", "between 1 and 60000"},
 		{"plugin timeout too large", `{"plugin_timeout_ms": 60001}`, "plugin_timeout_ms", "between 1 and 60000"},
@@ -382,7 +386,7 @@ func TestLoadDiagnosticsOrderUserBeforeProject(t *testing.T) {
 	root := filepath.Join(dir, "proj")
 	writeFile(t, userFile, `{"tab_size": 0}`)
 	projFile := filepath.Join(root, ".gvim", "config.json")
-	writeFile(t, projFile, `{"line_ending": "cr"}`)
+	writeFile(t, projFile, `{"line_ending": "lf2"}`)
 	_, diags, err := Load(Options{Root: root, UserFile: userFile})
 	if err != nil {
 		t.Fatal(err)

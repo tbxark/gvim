@@ -20,6 +20,14 @@ type asyncReverter interface {
 	ApplyRevert(plan editor.RevertPlan, res editor.RevertResult) error
 }
 
+// pathReverter is the optional part of the revert surface that plans the reload of a tab
+// that is not the active one. Its plan carries the editor's settings, so a large file is
+// reopened as a large file. Without it the plan holds the path alone, and the file is read
+// whole.
+type pathReverter interface {
+	PlanRevertPath(path string) editor.RevertPlan
+}
+
 // revertTag is the tag of the Discard changes? confirm that Revert File opens.
 type revertTag struct{}
 
@@ -123,7 +131,14 @@ func (m *Model) revertRetryAnswer(d prompt.Done) tea.Cmd {
 	return m.revertFile(false)
 }
 
-// toggleAutoRevert turns auto-revert on or off for the active buffer's file. The flag
+// autoRevertOn reports whether auto-revert follows the file at path. Every file has it
+// on, as in Fresh, until Toggle Auto-Revert switches it off.
+func (m *Model) autoRevertOn(path string) bool {
+	on, set := m.fix.autoRevert[path]
+	return !set || on
+}
+
+// toggleAutoRevert turns auto-revert on or off for the active buffer's file. The choice
 // follows the path, so it stays with the file while the file is open.
 func (m *Model) toggleAutoRevert() tea.Cmd {
 	doc := m.ed.Active()
@@ -137,16 +152,15 @@ func (m *Model) toggleAutoRevert() tea.Cmd {
 		return nil
 	}
 	name := filepath.Base(p)
-	if m.fix.autoRevert[p] {
-		delete(m.fix.autoRevert, p)
-		m.notice = "Auto-revert off for " + name
-		return nil
-	}
 	if m.fix.autoRevert == nil {
 		m.fix.autoRevert = map[string]bool{}
 	}
-	m.fix.autoRevert[p] = true
-	m.notice = "Auto-revert on for " + name
+	on := !m.autoRevertOn(p)
+	m.fix.autoRevert[p] = on
+	m.notice = "Auto-revert off for " + name
+	if on {
+		m.notice = "Auto-revert on for " + name
+	}
 	return nil
 }
 
@@ -174,12 +188,12 @@ func (m *Model) openTabFiles() []tabFile {
 	return out
 }
 
-// autoRevertChanged reloads each flagged document whose own file the watcher reports as
-// changed, whether it is the active tab or a background tab. A folder that changed without
+// autoRevertChanged reloads each document whose own file the watcher reports as
+// changed, whether it is the active tab or a background tab, unless auto-revert is off for it. A folder that changed without
 // its file reloads nothing. A document with unsaved edits keeps its text, and the notice says
 // so. It returns the commands that read the files.
 func (m *Model) autoRevertChanged(files []string) tea.Cmd {
-	if len(files) == 0 || len(m.fix.autoRevert) == 0 {
+	if len(files) == 0 {
 		return nil
 	}
 	changed := make(map[string]bool, len(files))
@@ -188,7 +202,7 @@ func (m *Model) autoRevertChanged(files []string) tea.Cmd {
 	}
 	var cmds []tea.Cmd
 	for _, f := range m.openTabFiles() {
-		if !m.fix.autoRevert[f.path] || !changed[filepath.Clean(f.path)] {
+		if !m.autoRevertOn(f.path) || !changed[filepath.Clean(f.path)] {
 			continue
 		}
 		if f.modified {
@@ -200,7 +214,7 @@ func (m *Model) autoRevertChanged(files []string) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// autoReload returns the command that reads the file of a clean flagged document. The
+// autoReload returns the command that reads the file of a clean document. The
 // active tab is planned by the editor's PlanRevert, as Revert File plans it. PlanRevert plans
 // only the active tab, so a background tab's plan is built from its path, and its apply finds
 // the tab by that path. An editor without the revert split reverts its active tab through the
@@ -220,5 +234,9 @@ func (m *Model) autoReload(f tabFile) tea.Cmd {
 		}
 		return readRevert(as, plan, true)
 	}
-	return readRevert(as, editor.RevertPlan{Path: f.path}, true)
+	plan := editor.RevertPlan{Path: f.path}
+	if pp, ok := m.ed.(pathReverter); ok {
+		plan = pp.PlanRevertPath(f.path)
+	}
+	return readRevert(as, plan, true)
 }

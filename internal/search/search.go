@@ -9,10 +9,13 @@
 package search
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -39,8 +42,10 @@ type Match struct {
 	Start, End buffer.Pos
 }
 
-// Find returns every match of q in b, in document order. Matches do not
-// overlap, and empty matches are skipped. An empty query returns no matches
+// Find returns every match of q in b, in document order. It reads the whole
+// buffer, so a large buffer is refused with ErrLargeBuffer; use FindNext,
+// FindVisible or Scan there. Matches do not overlap. A regex can give empty matches, such as ^ or x*, except right where
+// the previous match ended. An empty query returns no matches
 // and no error. A regex that does not compile returns an error.
 func Find(b *buffer.Buffer, q Query) ([]Match, error) {
 	r, err := run(b, q)
@@ -73,8 +78,13 @@ type result struct {
 	hits []hit
 }
 
-// run searches b for q. It returns an empty result for an empty query.
+// run searches b for q. It returns an empty result for an empty query. A large
+// buffer is refused before any text is read, because newDocument would read
+// every line of it.
 func run(b *buffer.Buffer, q Query) (result, error) {
+	if b.Large() {
+		return result{}, ErrLargeBuffer
+	}
 	if q.Text == "" {
 		return result{}, nil
 	}
@@ -90,9 +100,57 @@ func run(b *buffer.Buffer, q Query) (result, error) {
 	return r, nil
 }
 
-// compile builds the regexp for q. Literal text is escaped, so it is never
-// interpreted as a pattern.
+// compileCacheSize is how many compiled queries are kept. The find bar asks for the
+// highlights of the visible rows on every frame, and each ask would compile the
+// query again, which for a long query takes longer than the frame.
+const compileCacheSize = 4
+
+// compiled is the result of compiling a query, kept with the query it is for. An error
+// is kept too, so a query that does not compile is not tried again on every frame.
+type compiled struct {
+	q  Query
+	re *regexp.Regexp
+	// err is the error compile gives for q.
+	err error
+}
+
+var (
+	compileMu    sync.Mutex
+	compileCache []compiled // the most recent first
+)
+
+// compile builds the regexp for q, from the cache when q was compiled lately. A
+// *regexp.Regexp is safe for concurrent use, so the scan of a large document, which
+// runs in another goroutine, shares it.
 func compile(q Query) (*regexp.Regexp, error) {
+	compileMu.Lock()
+	for i, c := range compileCache {
+		if c.q == q {
+			copy(compileCache[1:i+1], compileCache[:i])
+			compileCache[0] = c
+			compileMu.Unlock()
+			return c.re, c.err
+		}
+	}
+	compileMu.Unlock()
+	re, err := compileQuery(q)
+	compileMu.Lock()
+	compileCache = append([]compiled{{q: q, re: re, err: err}}, compileCache...)
+	if len(compileCache) > compileCacheSize {
+		compileCache = compileCache[:compileCacheSize]
+	}
+	compileMu.Unlock()
+	return re, err
+}
+
+// maxErrorQuery is the longest query text that an error message quotes. A longer
+// one (a large selection used as the search) would make the message as large as the
+// selection, and the message is measured on every frame it is shown.
+const maxErrorQuery = 200
+
+// compileQuery builds the regexp for q. Literal text is escaped, so it is never
+// interpreted as a pattern.
+func compileQuery(q Query) (*regexp.Regexp, error) {
 	pattern := q.Text
 	if !q.Regex {
 		pattern = regexp.QuoteMeta(pattern)
@@ -109,16 +167,27 @@ func compile(q Query) (*regexp.Regexp, error) {
 	}
 	re, err := regexp.Compile("(?" + flags + ")" + pattern)
 	if err != nil {
+		if len(q.Text) > maxErrorQuery {
+			// The cause quotes the pattern too, so only its code is kept.
+			var se *syntax.Error
+			if errors.As(err, &se) {
+				return nil, fmt.Errorf("search: invalid pattern (%d bytes): %s", len(q.Text), se.Code)
+			}
+			return nil, fmt.Errorf("search: invalid pattern (%d bytes)", len(q.Text))
+		}
 		return nil, fmt.Errorf("search: invalid pattern %q: %w", q.Text, err)
 	}
 	return re, nil
 }
 
 // document is the buffer text as one string, with the byte offset where each
-// line starts, so byte offsets from regexp convert to buffer positions.
+// line starts, so byte offsets from regexp convert to buffer positions. first is
+// the buffer line number of the first line of text: 0 for a whole buffer, more
+// for a window of it (see newWindow).
 type document struct {
 	text      string
 	lineStart []int
+	first     int
 }
 
 func newDocument(b *buffer.Buffer) document {
@@ -140,7 +209,7 @@ func (d document) pos(off int) buffer.Pos {
 	line := sort.Search(len(d.lineStart), func(i int) bool {
 		return d.lineStart[i] > off
 	}) - 1
-	return buffer.Pos{Line: line, Col: utf8.RuneCountInString(d.text[d.lineStart[line]:off])}
+	return buffer.Pos{Line: d.first + line, Col: utf8.RuneCountInString(d.text[d.lineStart[line]:off])}
 }
 
 // hit builds a hit from submatch offsets of d.text. loc[0:2] is the whole match.
@@ -161,7 +230,7 @@ func (d document) locate(re *regexp.Regexp, q Query) [][]int {
 		kept := all[:0]
 		for _, loc := range all {
 			s, e := loc[0], loc[1]
-			if s == e || (q.WholeWord && !isWholeWord(d.text, s, e)) {
+			if q.WholeWord && !isWholeWord(d.text, s, e) {
 				continue
 			}
 			kept = append(kept, loc)
@@ -234,7 +303,7 @@ func isWordRune(r rune) bool {
 
 // expansion returns the text that replaces h. A literal query replaces with
 // repl unchanged. A regex query expands $1, ${name} and the like from the
-// captures of h.
+// captures of h, after reading \n, \t, \r and \\ as characters.
 func (r result) expansion(h hit, q Query, repl string) string {
 	if !q.Regex {
 		return repl
@@ -247,5 +316,68 @@ func (r result) expansion(h hit, q Query, repl string) string {
 		}
 		groups[i] = g - h.start
 	}
+	repl = normalizeReplacement(interpretEscapes(repl))
 	return string(r.re.ExpandString(nil, repl, r.doc.text[h.start:h.end], groups))
+}
+
+// interpretEscapes turns \n, \t, \r and \\ in a replacement template into the
+// characters they stand for, as Fresh does. Any other escape, and a trailing
+// lone backslash, pass through unchanged.
+func interpretEscapes(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var sb strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			sb.WriteByte(s[i])
+			continue
+		}
+		switch s[i+1] {
+		case 'n':
+			sb.WriteByte('\n')
+		case 't':
+			sb.WriteByte('\t')
+		case 'r':
+			sb.WriteByte('\r')
+		case '\\':
+			sb.WriteByte('\\')
+		default:
+			sb.WriteByte('\\')
+			continue
+		}
+		i++
+	}
+	return sb.String()
+}
+
+// normalizeReplacement rewrites $N as ${N}, so a number followed by letters
+// ("$1px") is group 1 and not a group named "1px". "$$" stays a literal dollar.
+func normalizeReplacement(s string) string {
+	if !strings.Contains(s, "$") {
+		return s
+	}
+	var sb strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '$' || i+1 == len(s) {
+			sb.WriteByte(s[i])
+			continue
+		}
+		if s[i+1] == '$' {
+			sb.WriteString("$$")
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			j++
+		}
+		if j == i+1 {
+			sb.WriteByte('$')
+			continue
+		}
+		sb.WriteString("${" + s[i+1:j] + "}")
+		i = j - 1
+	}
+	return sb.String()
 }

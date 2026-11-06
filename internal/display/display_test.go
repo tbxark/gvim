@@ -5,40 +5,6 @@ import (
 	"testing"
 )
 
-func TestIndentGuides(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		line     string
-		tabWidth int
-		want     []int
-	}{
-		{"empty line", "", 4, nil},
-		{"no indent", "x", 4, nil},
-		{"indent shorter than one level", "  x", 4, nil},
-		{"one level of spaces", "    x", 4, []int{0}},
-		{"two levels of spaces", "        x", 4, []int{0, 4}},
-		{"one tab", "\tx", 4, []int{0}},
-		{"two tabs", "\t\tx", 4, []int{0, 4}},
-		{"tab counts to next tab stop after spaces", "    \tx", 4, []int{0, 4}},
-		{"space then tab reaches one level", " \tx", 4, []int{0}},
-		{"wide tab stop", "\tx", 8, []int{0}},
-		{"whitespace-only line uses its width", "    ", 4, []int{0}},
-		{"multi-byte text after indent", "    日本", 4, []int{0}},
-		{"multi-byte text is not indent", "日    本", 4, nil},
-		{"tab width below one is treated as one", "  x", 0, []int{0, 1}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := IndentGuides(tc.line, tc.tabWidth)
-			if !slices.Equal(got, tc.want) {
-				t.Errorf("IndentGuides(%q, %d) = %v, want %v", tc.line, tc.tabWidth, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestIndentWidth(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -63,40 +29,6 @@ func TestIndentWidth(t *testing.T) {
 			t.Parallel()
 			if got := IndentWidth(tc.line, tc.tabWidth); got != tc.want {
 				t.Errorf("IndentWidth(%q, %d) = %d, want %d", tc.line, tc.tabWidth, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestVisibleWhitespace(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		line     string
-		tabWidth int
-		want     string
-	}{
-		{"empty line", "", 4, ""},
-		{"plain text unchanged", "abc", 4, "abc"},
-		{"space becomes middle dot", "a b", 4, "a·b"},
-		{"run of spaces", "  ", 4, "··"},
-		{"tab at column zero", "\t", 4, "→   "},
-		{"tab moves to next stop", "a\tb", 4, "a→  b"},
-		{"tab on a stop takes a full tab width", "abcd\te", 4, "abcd→   e"},
-		{"two tabs", "\t\t", 4, "→   →   "},
-		{"wide tab stop", "\t", 8, "→       "},
-		{"tab width one is only the arrow", "\t", 1, "→"},
-		{"tab width below one is treated as one", "\t", 0, "→"},
-		{"wide character moves tab stop by two", "日\tx", 4, "日→ x"},
-		{"wide character before space", "日 本", 4, "日·本"},
-		{"precomposed letter is one column", "é\t", 4, "é→  "},
-		{"non-breaking space is unchanged", "a\u00a0b", 4, "a\u00a0b"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := VisibleWhitespace(tc.line, tc.tabWidth); got != tc.want {
-				t.Errorf("VisibleWhitespace(%q, %d) = %q, want %q", tc.line, tc.tabWidth, got, tc.want)
 			}
 		})
 	}

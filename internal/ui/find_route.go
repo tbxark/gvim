@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -16,6 +17,10 @@ import (
 // text is held. It is the legacy text, and the legacy screen shows it.
 const noActiveSearch = "No active search. Press Ctrl+F to search."
 
+// noTextToSearch is the status text of find_selection_next and find_selection_previous
+// when there is no selection and the caret is not on a word.
+const noTextToSearch = "No text to search"
+
 // errSearchUnsupported is what the find bar reports when the editor the root
 // wraps cannot search. The bar shows it in place of the match count.
 var errSearchUnsupported = errors.New("search is not supported in this port")
@@ -28,6 +33,16 @@ type searchPort interface {
 	FindMatches(q search.Query) ([]search.Match, error)
 	ReplaceMatch(q search.Query, repl string, m search.Match) (string, error)
 	ReplaceMatches(q search.Query, repl string) (int, error)
+}
+
+// selectionTexter is the optional view of what find_selection_next and
+// find_selection_previous search for: the selected text, or the word at the caret,
+// and where it lies. The app adapter forwards it. An editor without it keeps the
+// editor's own find_selection actions. ok is false when there is nothing to search
+// for; err says why a selection was refused, as a selection too large to be the search
+// text of a large document is.
+type selectionTexter interface {
+	SelectionOrWord() (text string, from, to buffer.Pos, ok bool, err error)
 }
 
 // findOverlay adapts *find.Bar to Overlay. The bar cannot name Overlay, because
@@ -50,6 +65,9 @@ func (o findOverlay) Draw(g *grid.Grid) { o.b.Draw(g) }
 
 // Active reports whether the bar is still open.
 func (o findOverlay) Active() bool { return o.b.Active() }
+
+// Dismiss is called when Esc pops the bar: it puts the caret and selection back.
+func (o findOverlay) Dismiss() { o.b.Cancel() }
 
 // findHost is the find.Editor the bar works through. It reads the active document
 // and moves the caret and the selection through the EditorState port, so every
@@ -79,6 +97,39 @@ func (h findHost) Selection() (start, end buffer.Pos, ok bool) {
 		a, b = b, a
 	}
 	return a, b, true
+}
+
+// Streaming reports whether the active document is searched in a stream: it is in
+// large file mode and the editor can search it so. The find bar then asks Next for a
+// match and does not call Find.
+func (h findHost) Streaming() bool {
+	_, ok := h.m.streamSearch()
+	return ok
+}
+
+// Next is the match to go to from from in a large document: the first match that
+// starts at or after from, or with forward unset the last one that starts before it.
+func (h findHost) Next(q search.Query, from buffer.Pos, forward bool) (search.Match, bool, error) {
+	ss, ok := h.m.streamSearch()
+	if !ok {
+		return search.Match{}, false, errSearchUnsupported
+	}
+	match, found, scanned, err := ss.FindNext(q, from, !forward)
+	if err == nil && !found && !scanned {
+		err = find.ErrSearchLimit
+	}
+	return match, found, err
+}
+
+// IndexPartial reports whether the active document is large and its line index is not
+// complete, so a search of it reaches only the part that is indexed.
+func (h findHost) IndexPartial() bool {
+	doc := h.m.ed.Active()
+	if doc == nil {
+		return false
+	}
+	ld, ok := doc.(LargeDoc)
+	return ok && ld.Large() && !ld.Index().Complete
 }
 
 // Find returns the matches of q in the active document. An editor without search
@@ -113,6 +164,20 @@ func withinRange(matches []search.Match, sel buffer.Selection) []search.Match {
 	return slices.DeleteFunc(matches, func(m search.Match) bool {
 		return m.Start.Less(from) || to.Less(m.End)
 	})
+}
+
+// Text returns the text from start to end of the active document. The bar asks for
+// a selection on one line only.
+func (h findHost) Text(start, end buffer.Pos) string {
+	doc := h.m.ed.Active()
+	if doc == nil || start.Line != end.Line {
+		return ""
+	}
+	r := []rune(doc.Line(start.Line))
+	if end.Col > len(r) || start.Col > end.Col {
+		return ""
+	}
+	return string(r[start.Col:end.Col])
 }
 
 // Select selects m. The anchor is the start of the match and the caret goes to
@@ -152,8 +217,12 @@ func (h findHost) ReplaceAll(q search.Query, repl string) (int, error) {
 // switch falls through to it.
 func (m *Model) findAction(action string) (tea.Cmd, bool) {
 	switch action {
-	case "start_search_replace", "search_replace_next_match", "search_replace_prev_match", "query_replace":
+	case "start_search_replace", "search_replace_next_match", "search_replace_prev_match", "query_replace",
+		"find_selection_next", "find_selection_previous":
 	default:
+		return nil, false
+	}
+	if _, ok := m.ed.(selectionTexter); !ok && strings.HasPrefix(action, "find_selection") {
 		return nil, false
 	}
 	if !m.hasDocument() {
@@ -169,6 +238,10 @@ func (m *Model) findAction(action string) (tea.Cmd, bool) {
 		m.findNavigate(false)
 	case "query_replace":
 		m.queryReplace()
+	case "find_selection_next":
+		m.findSelection(true)
+	case "find_selection_previous":
+		m.findSelection(false)
 	}
 	return nil, true
 }
@@ -201,13 +274,58 @@ func (m *Model) findOpen() bool {
 }
 
 // openFind shows the find bar, with its replacement row when withReplace is set.
-// A second bar is not opened over the first.
+// A second bar is not opened over the first. The search text is filled in from the
+// selection or the last search, and the toggles and histories carry over from the
+// bar before.
 func (m *Model) openFind(withReplace bool) {
 	if m.findOpen() {
 		return
 	}
-	m.findBar = find.Open(findHost{m: m}, m.styles, withReplace)
+	m.findBar = m.newFindBar(withReplace)
+	m.findBar.Prefill()
 	m.showFind()
+}
+
+// newFindBar returns a find bar over the active document. It starts from the
+// toggles of editor.search, or from those of the last bar, whose histories it
+// shares.
+func (m *Model) newFindBar(withReplace bool) *find.Bar {
+	b := find.Open(findHost{m: m}, m.styles, withReplace)
+	if m.findBar != nil {
+		b.Inherit(m.findBar)
+		return b
+	}
+	if m.searchSeed != nil {
+		b.Load(*m.searchSeed)
+		return b
+	}
+	o := m.view.opts.Search
+	b.SetOptions(o.CaseSensitive, o.WholeWord, o.Regex, o.ConfirmEach)
+	return b
+}
+
+// SetSearchState gives the first find bar the histories and toggles of an earlier
+// run, which replace the editor.search defaults. Call it before the
+// first search.
+func (m *Model) SetSearchState(st find.State) { m.searchSeed = &st }
+
+// SearchState reports the histories and toggles to keep for the next run: those of
+// the last find bar, or the seed when no bar was opened. ok is false when there
+// are none.
+func (m *Model) SearchState() (find.State, bool) {
+	switch {
+	case m.findBar != nil:
+		return m.findBar.State(), true
+	case m.searchSeed != nil:
+		return *m.searchSeed, true
+	}
+	return find.State{}, false
+}
+
+// findShown reports whether the search of the find bar is on screen: the bar is
+// open, or Enter closed it with the search kept.
+func (m *Model) findShown() bool {
+	return m.findOpen() || (m.findBar != nil && m.findBar.Committed())
 }
 
 // showFind puts the find bar on top of the overlay stack. The bar takes rows from
@@ -232,6 +350,10 @@ func (m *Model) findNavigate(forward bool) {
 		m.notice = noActiveSearch
 		return
 	}
+	if ss, ok := m.streamSearch(); ok {
+		m.largeFindNavigate(ss, q, forward)
+		return
+	}
 	h := findHost{m: m}
 	matches, err := h.Find(q)
 	if err != nil {
@@ -249,11 +371,15 @@ func (m *Model) findNavigate(forward bool) {
 	var idx int
 	if forward {
 		idx, _ = search.Next(matches, end, true)
+		if m := matches[idx]; m.Start == m.End && m.Start == end {
+			// The caret is on an empty match, which is the current one.
+			idx, _ = search.Next(matches, buffer.Pos{Line: end.Line, Col: end.Col + 1}, true)
+		}
 	} else {
 		idx, _ = search.Prev(matches, start, true)
 	}
 	h.Select(matches[idx])
-	m.revealCaret()
+	m.revealCaretCentered()
 	m.notice = search.StatusText(idx, len(matches))
 }
 
@@ -272,4 +398,91 @@ func (m *Model) revealCaret() {
 	case line >= top+rows:
 		m.ed.ScrollTo(line - rows + 1)
 	}
+}
+
+// findSelection runs find_selection_next and find_selection_previous. When the
+// caret is already on a match of the search the find bar holds, that search just
+// goes on. Otherwise the selected text, or the word at the caret, becomes the
+// search under the bar's case, whole-word and regex toggles, so its matches are
+// highlighted and F3 goes on from it, and the next or previous match of it is
+// selected.
+func (m *Model) findSelection(forward bool) {
+	if m.findBar != nil && m.findBar.Query().Text != "" && m.onFindMatch() {
+		m.findNavigate(forward)
+		return
+	}
+	text, from, to, ok, err := m.ed.(selectionTexter).SelectionOrWord()
+	if err != nil {
+		m.notice = err.Error()
+		return
+	}
+	if !ok {
+		if m.findBar != nil {
+			m.findNavigate(forward)
+			return
+		}
+		m.notice = noTextToSearch
+		return
+	}
+	if m.findBar == nil {
+		m.findBar = m.newFindBar(false)
+	}
+	m.findBar.SetSearch(text)
+	h := findHost{m: m}
+	if ss, ok := m.streamSearch(); ok {
+		at := to
+		if !forward {
+			at = from
+		}
+		match, found, scanned, err := ss.FindNext(m.findBar.Query(), at, !forward)
+		m.afterLargeFind(h, match, found, scanned, err, at, forward)
+		return
+	}
+	matches, err := h.Find(m.findBar.Query())
+	if err != nil {
+		m.notice = err.Error()
+		return
+	}
+	var idx int
+	var found bool
+	if forward {
+		idx, found = search.Next(matches, to, true)
+	} else {
+		idx, found = search.Prev(matches, from, true)
+	}
+	if !found {
+		m.notice = search.StatusText(0, 0)
+		return
+	}
+	h.Select(matches[idx])
+	m.revealCaret()
+	m.notice = search.StatusText(idx, len(matches))
+}
+
+// onFindMatch reports whether the selection is a match of the bar's search, or the
+// caret is at the start of one when nothing is selected, as Fresh does.
+func (m *Model) onFindMatch() bool {
+	h := findHost{m: m}
+	if ss, ok := m.streamSearch(); ok {
+		// The match that starts at the selection, or at the caret, is found without
+		// a list of the matches.
+		if at, end, sel := h.Selection(); sel {
+			match, found, _, err := ss.FindNext(m.findBar.Query(), at, false)
+			return err == nil && found && match.Start == at && match.End == end
+		}
+		// The last match that starts at or before the caret holds the caret or none does.
+		at := h.Cursor()
+		match, found, _, err := ss.FindNext(m.findBar.Query(), buffer.Pos{Line: at.Line, Col: at.Col + 1}, true)
+		return err == nil && found && !at.Less(match.Start) && !match.End.Less(at)
+	}
+	matches, err := h.Find(m.findBar.Query())
+	if err != nil {
+		return false
+	}
+	start, end, ok := h.Selection()
+	if !ok {
+		c := h.Cursor()
+		return slices.ContainsFunc(matches, func(x search.Match) bool { return x.Start == c })
+	}
+	return slices.Contains(matches, search.Match{Start: start, End: end})
 }

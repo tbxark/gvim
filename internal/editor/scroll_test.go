@@ -119,3 +119,36 @@ func TestRecenterKeepsSelection(t *testing.T) {
 		t.Fatalf("selection = %+v, want it kept", d.Sel)
 	}
 }
+
+// Fresh clamps a scroll so that the viewport stays filled, so a document that fits the
+// screen, or one already scrolled to its last page, does not scroll at all and the caret
+// stays where it is.
+func TestScrollDownDoesNotScrollPastTheLastPage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		lines   int
+		top     int
+		caret   buffer.Pos
+		wantTop int
+	}{
+		{"document shorter than the screen", 4, 0, buffer.Pos{Line: 0, Col: 0}, 0},
+		{"document exactly the screen", 5, 0, buffer.Pos{Line: 0, Col: 0}, 0},
+		{"last page already shown", 10, 5, buffer.Pos{Line: 5, Col: 0}, 5},
+		{"one line before the last page", 10, 4, buffer.Pos{Line: 6, Col: 0}, 5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := scrollDoc(tt.lines, tt.top, tt.caret)
+			run(t, e, "scroll_down")
+			d := e.Active()
+			if d.Top != tt.wantTop {
+				t.Errorf("Top = %d, want %d", d.Top, tt.wantTop)
+			}
+			if tt.wantTop == tt.top && d.Cursor != tt.caret {
+				t.Errorf("caret = %+v, want it unmoved at %+v", d.Cursor, tt.caret)
+			}
+		})
+	}
+}

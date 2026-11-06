@@ -66,8 +66,11 @@ func (c *dabbrevCycle) begin(d *Document) error {
 	if prefix == "" {
 		return errors.New("dabbrev: no word before the cursor")
 	}
-	candidates := dabbrevCandidates(d.Buffer, start, prefix)
+	candidates, limited := dabbrevCandidates(d.Buffer, start, prefix)
 	if len(candidates) == 0 {
+		if limited {
+			return fmt.Errorf("dabbrev: %w", ErrScanLimit)
+		}
 		return fmt.Errorf("dabbrev: no earlier word starts with %q", prefix)
 	}
 	*c = dabbrevCycle{doc: d, start: start, end: d.Cursor, prefix: prefix, candidates: candidates, index: -1}
@@ -119,14 +122,19 @@ func dabbrevIsWord(r rune) bool {
 // with prefix, nearest first. Those are the words left of the prefix on its
 // line, then the words of the lines above, each read from right to left. A word
 // must be longer than the prefix. Matching ignores case unless the prefix has an
-// uppercase letter, which is Fresh's smart case.
-func dabbrevCandidates(b *buffer.Buffer, start buffer.Pos, prefix string) []string {
+// uppercase letter, which is Fresh's smart case. In a large document the scan reads
+// at most the lines and bytes of a scan budget; limited reports that it stopped there
+// before it reached the first line, so earlier words may exist.
+func dabbrevCandidates(b *buffer.Buffer, start buffer.Pos, prefix string) (out []string, limited bool) {
 	exact := strings.ContainsFunc(prefix, unicode.IsUpper)
 	fold := strings.ToLower(prefix)
 	plen := utf8.RuneCountInString(prefix)
 	seen := map[string]bool{}
-	var out []string
+	budget := newScanBudget(b)
 	for line := start.Line; line >= 0; line-- {
+		if !budget.take(b, line) {
+			return out, true
+		}
 		rs := []rune(b.Line(line))
 		end := len(rs)
 		if line == start.Line {
@@ -148,7 +156,7 @@ func dabbrevCandidates(b *buffer.Buffer, start buffer.Pos, prefix string) []stri
 			}
 		}
 	}
-	return out
+	return out, false
 }
 
 // dabbrevWords splits rs into its runs of word characters, left to right.

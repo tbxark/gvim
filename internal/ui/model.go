@@ -64,6 +64,9 @@ type Model struct {
 	// find_previous can run on its search text. The bar is on the overlay stack
 	// only while findOpen reports it.
 	findBar *find.Bar
+	// searchSeed is the find state of an earlier run, for the first find bar. It is
+	// nil when there is none.
+	searchSeed *find.State
 
 	width, height int
 	explorerOpen  bool    // the panel is shown
@@ -93,6 +96,7 @@ type Model struct {
 	clicks    clickCounter
 	lastPress int // the count of the last editor press, see pressEditor
 	drag      drag
+	mx        mouseExtra // modifier clicks and the sideways pan, see motion_mouse.go
 	// langs memoizes languageFor by file name.
 	langs map[string]string
 
@@ -118,8 +122,12 @@ type Model struct {
 	dock dockState
 	// view is the display state the view commands change (see view.go).
 	view viewState
+	// occ pauses the occurrence highlight after an edit (see occurrence.go).
+	occ occTrack
 	// fix is the state of the root fixes (see root_fix.go).
 	fix fixState
+	// large is the state of the root for documents in large file mode (see large.go).
+	large largeState
 }
 
 // drag is the pointer gesture in progress: a text selection, or a grab of the
@@ -129,6 +137,10 @@ type drag struct {
 	thumb  bool         // the scrollbar thumb: motion moves the viewport
 	unit   editor.Unit  // the unit a text drag grows the selection by
 	border *splitBorder // the split line the press took: motion moves its split's ratio
+	// last is the pointer of the latest motion of a text drag, and tick is the number
+	// of the autoscroll tick in flight, or 0 when none is (see dragSelect).
+	last tea.Mouse
+	tick int
 }
 
 var _ tea.Model = (*Model)(nil)
@@ -169,6 +181,7 @@ func New(deps Deps) *Model {
 		lsp:             lspState{port: deps.LSP},
 		view:            newViewState(viewOptionsOf(deps.View)),
 	}
+	m.view.languages = deps.Languages
 	m.notes.record("", deps.Notice)
 	// Assign only a non-nil source: a nil concrete value in an interface would
 	// look like a file index or ranker that is present.
@@ -195,6 +208,7 @@ func New(deps Deps) *Model {
 	if ops, ok := deps.Ops.(explorerOps); ok {
 		m.ops = ops
 	}
+	m.installRowMapper()
 	return m
 }
 
@@ -219,6 +233,8 @@ var dockCloseWait = 2 * time.Second
 // once the session is saved. A shell that does not close in time is left to the exit of
 // the process.
 func (m *Model) Close() {
+	m.large.stop()
+	m.cancelStream()
 	m.lspClose()
 	done := make(chan struct{})
 	go func() {
@@ -236,7 +252,7 @@ func (m *Model) Close() {
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.
 func (m *Model) Init() tea.Cmd {
-	return m.rootInit()
+	return tea.Batch(m.rootInit(), m.indexSync())
 }
 
 // Update implements tea.Model. It runs update, then keeps the split panes on tabs
@@ -256,16 +272,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = tea.Batch(cmd, m.lspUpdate(msg))
 	cmd = tea.Batch(cmd, m.dockSync())
 	cmd = tea.Batch(cmd, m.watchSync())
+	cmd = tea.Batch(cmd, m.indexSync(), m.searchSync())
 	m.notes.record(before, m.notice)
 	m.reconcileTabs()
+	m.trackOccurrences()
 	sized := m.bodyRows() != rows
 	if sized {
 		m.syncViewport()
 	}
 	// A move of the caret, or a new body size, keeps the caret's display row on
 	// screen. A wheel notch moves neither, so it is not undone here.
-	if resized || sized || m.caretNow() != at {
-		m.revealCaretVisual()
+	if moved := m.caretNow() != at; resized || sized || moved {
+		margin := 0
+		if moved {
+			margin = m.scrollMarginFor(msg)
+		}
+		m.revealCaretVisual(margin)
 	}
 	if resized || m.activeTab() != active || len(m.ed.Tabs()) != count {
 		m.revealActiveTab()
@@ -283,10 +305,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if m.overlayInput(msg) {
+		barWasOpen := m.findOpen()
 		cmd := m.routeOverlay(msg)
 		// An overlay that opened or closed the find bar changes the editor body.
 		m.syncViewport()
-		if _, isKey := msg.(tea.KeyPressMsg); isKey && m.findOpen() {
+		if _, isKey := msg.(tea.KeyPressMsg); isKey && (barWasOpen || m.findOpen()) {
 			m.revealCaret()
 		}
 		return m, cmd
@@ -312,6 +335,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if done, ok := msg.(saveDoneMsg); ok {
 		return m, tea.Batch(overlayCmd, m.saveDone(done))
 	}
+	if cmd, ok := m.largeMessage(msg); ok {
+		return m, tea.Batch(overlayCmd, cmd)
+	}
 	if cmd, ok := m.rootMessage(msg); ok {
 		return m, tea.Batch(overlayCmd, cmd)
 	}
@@ -335,8 +361,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = ""
 		cmd = m.handleClick(msg)
 	case tea.MouseMotionMsg:
-		m.handleDrag(msg.Mouse())
-		cmd = m.explorerMouse(msg)
+		cmd = tea.Batch(m.handleDrag(msg.Mouse()), m.explorerMouse(msg))
+	case dragScrollMsg:
+		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
 		m.drag = drag{}
 		cmd = m.explorerMouse(msg)
@@ -347,7 +374,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case menubar.Failed:
 		m.notice = failedNotice(msg)
 	case expanel.OpenFileMsg:
-		m.openFile(msg.Path, msg.Preview)
+		cmd = m.openFileCmd(msg.Path, msg.Preview, 0, 0)
 		if !msg.Preview {
 			m.focusEditor()
 		}
@@ -381,7 +408,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileResultMsg:
 		cmd = tea.Batch(m.fileDone(msg), m.gitCmd())
 	case browser.Open:
-		m.openFileAt(msg.Path, msg.Line, msg.Col)
+		cmd = m.openFileCmd(msg.Path, false, msg.Line, msg.Col)
 		m.focusEditor()
 	case palette.RunCommandMsg:
 		cmd = m.runCommand(msg.Action)
@@ -389,7 +416,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.recorder != nil {
 			m.recorder.Record(msg.Rel)
 		}
-		m.openFile(msg.Path, false)
+		cmd = m.openFileCmd(msg.Path, false, 0, 0)
 		m.focusEditor()
 	case palette.GotoLineMsg:
 		// The ':' mode opens the go-to-line prompt with the chosen position, so the
@@ -422,7 +449,7 @@ func (m *Model) routeMenu(msg tea.Msg) (bool, tea.Cmd) {
 	m.pending = nil
 	if m.quitting {
 		m.quitting = false
-		return true, tea.Batch(cmd, tea.Quit)
+		return true, tea.Batch(cmd, m.quit())
 	}
 	// A message that is not taken only closes the dropdown. Its command is nil,
 	// unless a row ran an explorer action that started one.
@@ -470,6 +497,10 @@ func (m *Model) Run(action string) error {
 	if m.explorerFocus && clipboardActions[action] {
 		return nil
 	}
+	if cmd, ok := m.editorPaste(action, nil); ok {
+		m.pending = tea.Batch(m.pending, cmd)
+		return nil
+	}
 	res := m.editorDo(editor.Action(action), nil)
 	m.syncViewport()
 	if errors.Is(res.Err, editor.ErrUnknownAction) {
@@ -478,6 +509,7 @@ func (m *Model) Run(action string) error {
 	if res.Quit {
 		m.quitting = true
 	}
+	m.pending = tea.Batch(m.pending, m.clipboardOut(action, res))
 	return nil
 }
 
@@ -546,17 +578,25 @@ func (m *Model) openFile(path string, preview bool) {
 		m.notice = "Opening files is not supported in this port"
 		return
 	}
+	var err error
 	if preview {
-		_ = f.OpenPreview(path)
+		err = f.OpenPreview(path)
 	} else {
-		_ = f.OpenFile(path)
+		err = f.OpenFile(path)
 	}
 	m.syncViewport()
+	// A large file that is not UTF-8 opens only if the user agrees to load it whole.
+	m.maybeAskFullLoad(err)
 }
 
 // openFileAt opens path and moves the caret to line and col when line is set.
 func (m *Model) openFileAt(path string, line, col int) {
-	m.openFile(path, false)
+	m.openAt(path, false, line, col)
+}
+
+// openAt is openFileAt for a permanent tab or a preview.
+func (m *Model) openAt(path string, preview bool, line, col int) {
+	m.openFile(path, preview)
 	if f, ok := m.ed.(fileEditor); ok && line > 0 {
 		if err := f.GotoLine(line, col); err != nil {
 			m.notice = err.Error()
@@ -824,6 +864,10 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 			job.policy = expanel.ConflictOverwrite
 		}
 		return m.runJob(job)
+	case overwriteSaveTag:
+		return m.overwriteAnswer(tag, d)
+	case fullLoadTag:
+		return m.fullLoadAnswer(tag, d)
 	case gotoTag:
 		if d.Outcome == prompt.Submitted {
 			m.gotoText(d.Text)
@@ -1151,7 +1195,7 @@ func (m *Model) runCommand(action string) tea.Cmd {
 	m.pending = nil
 	if m.quitting {
 		m.quitting = false
-		return tea.Batch(cmd, tea.Quit)
+		return tea.Batch(cmd, m.quit())
 	}
 	return cmd
 }
@@ -1303,12 +1347,15 @@ func (m *Model) dispatch(cmd Command) tea.Cmd {
 	if m.explorerFocus && clipboardActions[cmd.Action] {
 		return nil
 	}
+	if c, ok := m.editorPaste(cmd.Action, cmd.Args); ok {
+		return c
+	}
 	res := m.editorDo(editor.Action(cmd.Action), cmd.Args)
 	m.syncViewport()
 	if res.Quit {
-		return tea.Quit
+		return m.quit()
 	}
-	return nil
+	return m.clipboardOut(cmd.Action, res)
 }
 
 // uiAction runs the command when the root handles it. It reports whether it did,
@@ -1338,6 +1385,9 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 	}
 	if cmd, ok := m.viewAction(action, args); ok {
 		return cmd, true
+	}
+	if m.encodingAction(action, args) {
+		return nil, true
 	}
 	switch action {
 	case "toggle_file_explorer":
@@ -1496,6 +1546,7 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		return nil
 	}
 	count := m.clicks.press(m.now(), mo.X, mo.Y)
+	m.noteMods(mo)
 	m.drag = drag{}
 	if m.dockPress(mo.Y) {
 		return nil
@@ -1525,6 +1576,8 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		return m.explorerMouse(msg)
 	case hitStatusPalette:
 		return m.openPalette(">")
+	case hitStatusSegment:
+		return m.statusSegmentClick(t.Index)
 	case hitEditorText, hitGutter, hitScrollbarTrack:
 		m.pressPane(t.Pane, mo.X, mo.Y, count)
 	case hitSplitBorder:
@@ -1565,6 +1618,9 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
 		m.ed.ScrollTo(p.ScrollTopFor(m.bodyRows(), hit.Row))
 		m.drag = drag{active: true, thumb: true}
 	case editorpane.HitText, editorpane.HitGutter:
+		if hit.Fold && m.toggleFoldAt(hit.Pos.Line) {
+			return
+		}
 		m.drag = m.placeCaret(hit.Pos, count)
 	}
 }
@@ -1573,6 +1629,11 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
 // for counts 2 and 3. It returns the drag that follows the press, which grows
 // the selection by the same unit.
 func (m *Model) placeCaret(pos buffer.Pos, count int) drag {
+	if count == 1 && m.mx.extend {
+		m.ed.SetCursor(pos, true)
+		return drag{active: true, unit: editor.UnitChar}
+	}
+	m.collapseCarets()
 	switch count {
 	case 2:
 		m.ed.SetCursor(pos, false)
@@ -1589,32 +1650,32 @@ func (m *Model) placeCaret(pos buffer.Pos, count int) drag {
 
 // handleDrag moves the grab of a text selection or of the scrollbar thumb. The
 // pointer may leave the pane: the thumb follows the row, and the text end
-// follows the nearest cell.
-func (m *Model) handleDrag(mo tea.Mouse) {
+// follows the nearest cell. It returns the command that keeps a text drag
+// scrolling while the pointer is held outside the pane.
+func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 	if !m.drag.active || mo.Button != tea.MouseLeft {
-		return
+		return nil
 	}
 	if m.drag.border != nil {
 		m.dragBorder(mo.X, mo.Y)
-		return
+		return nil
 	}
 	doc := m.ed.Active()
 	if doc == nil {
-		return
+		return nil
 	}
 	fp := m.layout().focusedPane()
 	w, h := fp.w, fp.h
 	if h <= 0 || w <= 0 {
-		return
+		return nil
 	}
-	x := min(max(mo.X-fp.x, 0), w-1)
-	y := min(max(mo.Y-fp.y, 0), h-1)
-	p := m.paneFor(fp, doc)
 	if m.drag.thumb {
-		m.ed.ScrollTo(p.ScrollTopFor(h, y))
-		return
+		y := min(max(mo.Y-fp.y, 0), h-1)
+		m.ed.ScrollTo(m.paneFor(fp, doc).ScrollTopFor(h, y))
+		return nil
 	}
-	m.ed.ExtendSelection(p.PosAt(w, h, x, y), m.drag.unit)
+	m.drag.last = mo
+	return m.dragSelect(false)
 }
 
 // handleWheel scrolls the panel's tree over the explorer, and the editor
@@ -1638,6 +1699,9 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	case hitExplorerRow, hitExplorerBody, hitExplorerTitleClose, hitExplorerTitleReload, hitExplorerGrip:
 		return m.explorerMouse(msg)
 	case hitEditorText, hitGutter, hitScrollbarTrack:
+		if m.panWheel(t.Pane, mo) {
+			return nil
+		}
 		delta := 0
 		switch mo.Button {
 		case tea.MouseWheelUp:
@@ -1858,7 +1922,7 @@ func (m *Model) layoutInput() layoutInput {
 		in.findRows = m.findBar.Rows()
 	}
 	if doc := m.ed.Active(); doc != nil {
-		in.lines = doc.LineCount()
+		in.lines = displayLines(doc)
 	}
 	if m.explorerOpen && m.tree != nil {
 		in.explorerOpen = true
@@ -1899,10 +1963,14 @@ func (m *Model) statusView() statusView {
 	if doc := m.ed.Active(); doc != nil {
 		c := doc.Cursor()
 		s.position = "Ln " + strconv.Itoa(c.Line+1) + ", Col " + strconv.Itoa(c.Col+1)
-		s.lines = doc.LineCount()
+		s.lines = displayLines(doc)
+		s.large = largeLabel(doc)
 		s.eol = doc.LineEnding()
 		s.encoding = doc.Encoding()
 		s.language = m.languageFor(doc.Name())
+		if ro, ok := doc.(interface{ ReadOnly() bool }); ok {
+			s.readOnly = ro.ReadOnly()
+		}
 	}
 	m.viewStatus(&s)
 	return s
@@ -2076,6 +2144,9 @@ func (m *Model) pushOverlay(o Overlay) {
 // is no longer active is popped. Esc pops the top overlay and is not forwarded.
 func (m *Model) routeOverlay(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok && tea.Key(k).Code == tea.KeyEscape {
+		if d, ok := m.overlays[len(m.overlays)-1].(interface{ Dismiss() }); ok {
+			d.Dismiss()
+		}
 		m.popOverlay()
 		return nil
 	}
@@ -2233,11 +2304,11 @@ func (m *Model) requestClose(index int) tea.Cmd {
 func (m *Model) quitLoop() tea.Cmd {
 	t := m.tabPort()
 	if t == nil {
-		return tea.Quit
+		return m.quit()
 	}
 	dirty := t.Quit(false)
 	if len(dirty) == 0 {
-		return tea.Quit
+		return m.quit()
 	}
 	d := dirty[0]
 	t.ActivateTab(d.Index)

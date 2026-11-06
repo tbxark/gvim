@@ -1,6 +1,9 @@
 package editor
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrReadOnly is returned by an action that would change a read-only document,
 // and by Save, which would change its file. The status shows "read-only".
@@ -54,6 +57,9 @@ func (d *Document) ReadOnly() bool {
 
 // toggleReadOnly turns the read-only flag of the document on or off.
 func toggleReadOnly(e *Editor, d *Document, _ map[string]any) error {
+	if d.binary {
+		return fmt.Errorf("toggle_read_only: %w", ErrBinary)
+	}
 	d.readOnly = !d.readOnly
 	if d.readOnly {
 		e.setStatus("Read-only mode on")
@@ -88,7 +94,15 @@ func guardDocument(name Action, fn handler) handler {
 		before := e.Active()
 		var from int
 		if before != nil {
-			if before.readOnly && textChanging[name] {
+			if err := before.refuseInLargeMode(name); err != nil {
+				return err
+			}
+			if handled, err := e.gateOnIndex(before, name, args); handled {
+				return err
+			}
+			// A large document whose file changed under it is read-only, and revert is
+			// how it is made usable again.
+			if before.readOnly && textChanging[name] && (name != "revert" || !before.frozen()) {
 				return ErrReadOnly
 			}
 			if textChanging[name] && name != "undo" && name != "redo" {
@@ -105,7 +119,7 @@ func guardDocument(name Action, fn handler) handler {
 			if d != before {
 				from = d.Cursor.Line
 			}
-			d.revealCarets(from, e.opts.TabSize)
+			d.revealCarets(from, e.tabSizeOf(d))
 		}
 		return err
 	}

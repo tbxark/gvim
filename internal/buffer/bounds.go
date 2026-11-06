@@ -9,7 +9,7 @@ type Class uint8
 const (
 	// ClassSpace is a whitespace character, or a position with no character.
 	ClassSpace Class = iota
-	// ClassWord is a letter, digit or underscore.
+	// ClassWord is a letter, digit, underscore or combining mark.
 	ClassWord
 	// ClassPunct is any other visible character.
 	ClassPunct
@@ -21,7 +21,7 @@ func classOf(r rune, ok bool) Class {
 	switch {
 	case !ok || unicode.IsSpace(r):
 		return ClassSpace
-	case unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_':
+	case unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || unicode.IsMark(r):
 		return ClassWord
 	default:
 		return ClassPunct
@@ -49,18 +49,19 @@ func (b *Buffer) ClassAt(p Pos) Class {
 // class of p before calling.
 func WordBounds(b *Buffer, p Pos) (start, end Pos) {
 	p = b.Clamp(p)
-	if _, ok := b.RuneAt(p); !ok {
+	line := b.lineRunes(p.Line)
+	if p.Col >= len(line) {
 		if p.Col == 0 {
 			return p, p
 		}
 		p.Col--
 	}
-	cls := b.ClassAt(p)
+	cls := classOf(line[p.Col], true)
 	start, end = p, Pos{Line: p.Line, Col: p.Col + 1}
-	for start.Col > 0 && b.ClassAt(Pos{Line: p.Line, Col: start.Col - 1}) == cls {
+	for start.Col > 0 && classOf(line[start.Col-1], true) == cls {
 		start.Col--
 	}
-	for end.Col < b.LineLen(p.Line) && b.ClassAt(end) == cls {
+	for end.Col < len(line) && classOf(line[end.Col], true) == cls {
 		end.Col++
 	}
 	return start, end

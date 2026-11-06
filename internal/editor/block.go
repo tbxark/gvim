@@ -23,13 +23,22 @@ func blockHandler(dLine, dCol int) handler {
 // block anchor to the new caret. The rectangle has one caret per line, and each
 // caret selects the rectangle's columns on its line. A line shorter than the
 // rectangle's left edge gets a caret at its end. The caret is clamped to its
-// line, as a plain move is, so a short line narrows the rectangle.
+// line, as a plain move is, so a short line narrows the rectangle. A sideways step
+// crosses one grapheme cluster. The rectangle's columns are rune columns, as
+// Fresh's are byte offsets, so a vertical step keeps the rune column.
 func (d *Document) blockStep(dLine, dCol int) {
 	anchor := d.Cursor
 	if d.block != nil && d.block.at == d.Cursor {
 		anchor = d.block.anchor
 	}
-	at := d.Buffer.Clamp(buffer.Pos{Line: d.Cursor.Line + dLine, Col: d.Cursor.Col + dCol})
+	col := d.Cursor.Col
+	switch {
+	case dCol > 0 && col < d.Buffer.LineLen(d.Cursor.Line):
+		col = nextBoundary(d.Buffer, d.Cursor.Line, col)
+	case dCol < 0 && col > 0:
+		col = prevBoundary(d.Buffer, d.Cursor.Line, col)
+	}
+	at := d.Buffer.Clamp(buffer.Pos{Line: d.Cursor.Line + dLine, Col: col})
 	d.setBlock(anchor, at)
 }
 
@@ -37,6 +46,10 @@ func (d *Document) blockStep(dLine, dCol int) {
 // line from the top line to the bottom line.
 func (d *Document) setBlock(anchor, at buffer.Pos) {
 	first, last := min(anchor.Line, at.Line), max(anchor.Line, at.Line)
+	if d.large != nil && last-first+1 > maxLargeCarets {
+		d.failPlan(errTooManyCarets())
+		return
+	}
 	cs := make([]caret, 0, last-first+1)
 	for line := first; line <= last; line++ {
 		n := d.Buffer.LineLen(line)

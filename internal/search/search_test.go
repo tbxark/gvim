@@ -2,6 +2,7 @@ package search
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/buffer"
@@ -105,10 +106,28 @@ func TestFind(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "empty regex match is skipped",
+			name: "empty regex matches are kept",
 			text: "abc",
 			q:    Query{Text: "x*", Regex: true},
-			want: nil,
+			want: []Match{m(0, 0, 0, 0), m(0, 1, 0, 1), m(0, 2, 0, 2), m(0, 3, 0, 3)},
+		},
+		{
+			name: "caret anchors every line",
+			text: "a\nb",
+			q:    Query{Text: "^", Regex: true},
+			want: []Match{m(0, 0, 0, 0), m(1, 0, 1, 0)},
+		},
+		{
+			name: "dollar anchors every line end",
+			text: "ab\ncd",
+			q:    Query{Text: "$", Regex: true},
+			want: []Match{m(0, 2, 0, 2), m(1, 2, 1, 2)},
+		},
+		{
+			name: "empty match next to a match is dropped",
+			text: "aab",
+			q:    Query{Text: "a*", Regex: true},
+			want: []Match{m(0, 0, 0, 2), m(0, 3, 0, 3)},
 		},
 		{
 			name: "zero matches",
@@ -151,5 +170,60 @@ func TestFindLiteralParenthesis(t *testing.T) {
 	}
 	if want := []Match{m(0, 1, 0, 2)}; !slices.Equal(got, want) {
 		t.Fatalf("Find() = %v, want %v", got, want)
+	}
+}
+
+func TestCompileKeepsTheCompiledQuery(t *testing.T) {
+	q := Query{Text: "needle[0-9]+", Regex: true, CaseSensitive: true}
+	a, err := compile(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := compile(q)
+	if a != b {
+		t.Error("a second compile of the same query built the regexp again")
+	}
+	other := q
+	other.WholeWord = true
+	if c, _ := compile(other); c == a {
+		t.Error("a query that differs in a toggle shared the regexp")
+	}
+	// Past the size of the cache the oldest query goes, and compile still answers.
+	for i := range 2 * compileCacheSize {
+		if _, err := compile(Query{Text: strings.Repeat("x", i+1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c, err := compile(q); err != nil || c == nil {
+		t.Errorf("compile after the cache turned over = %v, %v", c, err)
+	}
+}
+
+func TestCompileErrorOfALongQueryIsShort(t *testing.T) {
+	tests := []struct {
+		name      string
+		q         Query
+		quoted    bool
+		maxLength int
+	}{
+		{"short pattern is quoted", Query{Text: "(abc", Regex: true}, true, 200},
+		{"long pattern is not", Query{Text: strings.Repeat("(", 5000), Regex: true}, false, 200},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := compile(tc.q)
+			if err == nil {
+				t.Fatal("the pattern compiled")
+			}
+			if got := strings.Contains(err.Error(), tc.q.Text); got != tc.quoted {
+				t.Errorf("error quotes the pattern = %v, want %v", got, tc.quoted)
+			}
+			if len(err.Error()) > tc.maxLength {
+				t.Errorf("error is %d bytes, want at most %d", len(err.Error()), tc.maxLength)
+			}
+			if !strings.Contains(err.Error(), "invalid pattern") {
+				t.Errorf("error = %q, want it to say the pattern is invalid", err)
+			}
+		})
 	}
 }

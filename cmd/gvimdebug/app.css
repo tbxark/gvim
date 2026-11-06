@@ -1,0 +1,286 @@
+/* Styles of the gvimdebug page. The screen uses the dark colours gvim draws by default. */
+
+:root {
+  --bg: #0c0c0e;
+  --panel: #151518;
+  --panel-2: #1c1c21;
+  --line: #2a2a31;
+  --text: #d6d6dc;
+  --muted: #858592;
+  --accent: #5b8def;
+  --term-bg: #101012;
+  /* Font family of the screen. "gvim screen" is the font file the server gives, when
+     there is one (see app.js). The other names are installed fonts, for a browser that
+     cannot load the file. The first name is the family name written in the font file;
+     the second is the name Nerd Fonts v2 used. */
+  --term-family: "gvim screen", "JetBrainsMono NFM", "JetBrainsMono Nerd Font Mono", "Symbols Nerd Font Mono", Menlo, monospace;
+  /* Font size of the screen. The page sets it from the settings, see app.js. */
+  --term-size: 14px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100vh;
+}
+
+/* Top bar: the brand, the connection and gvim's status, and the restart button. */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 4px;
+}
+
+.spacer { flex: 1; }
+
+/* A chip shows a state word with a coloured dot. data-state sets the dot colour. */
+
+.chip {
+  --dot: #6b6b76;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: Menlo, monospace;
+  font-size: 12px;
+}
+
+.chip::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot);
+}
+
+[data-state="live"], [data-state="running"] { --dot: #4ec07a; }
+[data-state="connecting"], [data-state="reconnecting"], [data-state="building"] { --dot: #e0b04a; }
+[data-state="exited"], [data-state="failed"] { --dot: #e26a6a; }
+[data-state="stopped"] { --dot: #6b6b76; }
+
+/* Main area: the screen on the left, the input panel on the right. */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  padding: 16px;
+  align-items: start;
+}
+
+.screen-card {
+  min-width: 0;
+  overflow: auto;
+  padding: 12px;
+  background: var(--term-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* The screen and the measure line share one font, so the measure gives the cell size. */
+.term {
+  margin: 0;
+  font-family: var(--term-family);
+  font-size: var(--term-size);
+  line-height: 1.25;
+  white-space: pre;
+}
+
+/* The measure line is laid out to find the cell size, and is never shown. */
+.measure {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  visibility: hidden;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+}
+
+.row.end { justify-content: flex-end; margin-top: 8px; }
+
+.times {
+  align-self: center;
+  color: var(--muted);
+}
+
+/* Controls */
+
+input, textarea, button {
+  font: inherit;
+  color: var(--text);
+}
+
+input, textarea {
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+input { flex: 1; font-family: Menlo, monospace; }
+
+input.num {
+  flex: none;
+  width: 72px;
+  text-align: center;
+}
+
+input[type="checkbox"] {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+textarea {
+  width: 100%;
+  height: 72px;
+  resize: vertical;
+  font-family: Menlo, monospace;
+}
+
+input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button {
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #24242b;
+  border-color: #3d3d47;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button.primary {
+  background: #26406b;
+  border-color: #3a5c96;
+}
+
+button.primary:hover { background: #2d4c7f; }
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.font-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.font-row span {
+  flex: 1;
+  text-align: center;
+  color: var(--muted);
+  font-family: Menlo, monospace;
+}
+
+.quick-keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+}
+
+.quick-keys button {
+  padding: 5px 6px;
+  font-family: Menlo, monospace;
+  font-size: 12px;
+}
+
+/* Bottom bar: the terminal size, the cursor, and the last error. */
+
+.bottombar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-family: Menlo, monospace;
+  font-size: 12px;
+}
+
+.message {
+  margin-left: auto;
+  color: #f09a94;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+}

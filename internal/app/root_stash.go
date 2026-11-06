@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"path/filepath"
 
 	"github.com/tbxark/gvim/internal/session"
@@ -20,10 +21,12 @@ func (s sessionStashes) Interrupted() ([]ui.Interrupted, error) {
 	}
 	var out []ui.Interrupted
 	for _, f := range sess.Files {
-		if f.StashFile == "" {
+		// A large file keeps its unsaved edits as an overlay stash.
+		name := cmp.Or(f.StashFile, f.OverlayFile)
+		if name == "" {
 			continue
 		}
-		out = append(out, ui.Interrupted{Path: f.Path, Stash: filepath.Join(s.dir, f.StashFile)})
+		out = append(out, ui.Interrupted{Path: f.Path, Stash: filepath.Join(s.dir, name)})
 	}
 	return out, nil
 }

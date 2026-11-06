@@ -8,7 +8,7 @@ import (
 
 func TestNames(t *testing.T) {
 	t.Parallel()
-	want := []string{"utf-8", "utf-8-bom", "utf-16le", "utf-16be", "windows-1252", "iso-8859-1", "shift_jis"}
+	want := []string{"utf-8", "utf-8-bom", "utf-16le", "utf-16be", "windows-1252", "iso-8859-1", "shift_jis", "windows-1250", "windows-1251", "gbk", "gb18030", "euc-kr"}
 	if got := Names(); !slices.Equal(got, want) {
 		t.Errorf("Names() = %q, want %q", got, want)
 	}

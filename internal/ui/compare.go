@@ -14,6 +14,10 @@ func (m *Model) openCompare(left, right int) bool {
 	if left < 0 || right < 0 || left >= n || right >= n {
 		return false
 	}
+	if name := m.largeTabIn(left, right); name != "" {
+		m.notice = name + " is too large to compare"
+		return false
+	}
 	a, b := &splitNode{tab: left}, &splitNode{tab: right}
 	m.splits.root = &splitNode{dir: sideBySide, a: a, b: b}
 	m.splits.focus = nil
@@ -29,6 +33,10 @@ func (m *Model) openCompare(left, right int) bool {
 func (m *Model) compareStep(forward bool) {
 	if !m.splits.comparing {
 		m.notice = "No compare view is open"
+		return
+	}
+	if name := m.largeCompared(); name != "" {
+		m.notice = name + " is too large to compare"
 		return
 	}
 	hunks, ok := m.compareHunks()
@@ -65,10 +73,39 @@ func (m *Model) compareHunks() (hunks []diff.Hunk, ok bool) {
 		return nil, false
 	}
 	left, right := m.leafDoc(m.splits.root.a), m.leafDoc(m.splits.root.b)
-	if left == nil || right == nil {
+	if left == nil || right == nil || isLargeDoc(left) || isLargeDoc(right) {
+		// The diff takes all the lines of both sides, which a large document does not
+		// hold.
 		return nil, false
 	}
 	return diff.Lines(textLines(left), textLines(right)), true
+}
+
+// largeTabIn returns the name of the first of the tabs i and j whose document is in
+// large file mode, or "" when neither is. A tab that does not exist is not large.
+func (m *Model) largeTabIn(i, j int) string {
+	tabs, ok := m.ed.(tabDocs)
+	if !ok {
+		return ""
+	}
+	for _, k := range []int{i, j} {
+		if doc := tabs.DocAt(k); doc != nil && isLargeDoc(doc) {
+			return doc.Name()
+		}
+	}
+	return ""
+}
+
+// largeCompared returns the name of the document of the compare view that is in large
+// file mode, or "" when there is none. A document can become large after the view
+// opened, by a reload of its file.
+func (m *Model) largeCompared() string {
+	for _, n := range []*splitNode{m.splits.root.a, m.splits.root.b} {
+		if doc := m.leafDoc(n); doc != nil && isLargeDoc(doc) {
+			return doc.Name()
+		}
+	}
+	return ""
 }
 
 // compareSwitch swaps the two sides of the compare view. The focus stays with the

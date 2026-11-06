@@ -1,6 +1,11 @@
 package editor
 
-import "github.com/tbxark/gvim/internal/search"
+import (
+	"errors"
+
+	"github.com/tbxark/gvim/internal/buffer"
+	"github.com/tbxark/gvim/internal/search"
+)
 
 // ReplaceMatch replaces the match m of q with repl in the active document, as one
 // undo step, and returns the inserted text. A read-only document is refused with
@@ -11,7 +16,32 @@ func (e *Editor) ReplaceMatch(q search.Query, repl string, m search.Match) (stri
 	if err != nil {
 		return "", err
 	}
+	if d.large != nil {
+		return replaceMatchLarge(e, d, q, repl, m)
+	}
 	return search.Replace(d.Buffer, q, repl, m)
+}
+
+// replaceMatchLarge is ReplaceMatch for a large document. search.ReplaceAt reads only
+// the lines of the match, where search.Replace would list every match of the file. A
+// refusal (a line that cannot be edited, too many unsaved changes, a match over
+// the size that is read to check it) leaves the text as it was and goes to the
+// status row in the words of the other large-file refusals.
+func replaceMatchLarge(e *Editor, d *Document, q search.Query, repl string, m search.Match) (string, error) {
+	out, err := search.ReplaceAt(d.Buffer, q, repl, m)
+	switch {
+	case err == nil:
+		return out, nil
+	case errors.Is(err, search.ErrMatchTooLarge):
+		err = &largeError{msg: "replace: match too large for large file mode", errs: []error{ErrLargeFile, err}}
+	case errors.Is(err, buffer.ErrLineTooLong), errors.Is(err, buffer.ErrInvalidUTF8),
+		errors.Is(err, buffer.ErrOverlayFull), errors.Is(err, buffer.ErrSourceChanged):
+		err = d.refusalError(err)
+	default:
+		return out, err // no match, or a pattern that does not compile: the caller reports it
+	}
+	e.setStatus(err.Error())
+	return "", err
 }
 
 // ReplaceMatches replaces every match of q with repl in the active document, as
@@ -22,6 +52,12 @@ func (e *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
 	r, limited := e.SearchRange()
 	d, err := e.writableActive()
 	if err != nil {
+		return 0, err
+	}
+	if d.large != nil {
+		// Replace All lists every match of the document.
+		err := &largeError{msg: "Replace All is not available in large file mode", errs: []error{ErrLargeFile}}
+		e.setStatus(err.Error())
 		return 0, err
 	}
 	if !limited {
@@ -56,6 +92,8 @@ func (e *Editor) writableActive() (*Document, error) {
 		err = ErrNoDocument
 	case d.readOnly:
 		err = ErrReadOnly
+	default:
+		err = d.refuseEditWhileRestoring("replace")
 	}
 	if err != nil {
 		e.setStatus(err.Error())

@@ -11,6 +11,10 @@ import (
 // duplicate above, trim, final newline, and copy as plain text.
 func registerTextCmdHandlers(h map[Action]handler) {
 	h["sort_lines"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
+		if d.large != nil && !d.hasAnySelection() {
+			// Sorting the whole document reads every line of it.
+			return errLargeAction("sort_lines")
+		}
 		d.sortLines()
 		return nil
 	})
@@ -19,7 +23,7 @@ func registerTextCmdHandlers(h map[Action]handler) {
 		return nil
 	})
 	h["duplicate_line_above"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
-		d.duplicateLinesAbove()
+		d.duplicateLines(true)
 		return nil
 	})
 	h["trim_trailing_whitespace"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
@@ -42,11 +46,17 @@ func registerTextCmdHandlers(h map[Action]handler) {
 	// colours as rich text, and gvim has no rich-text clipboard, so that part is
 	// not done.
 	h["copy_with_theme"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		text, err := d.copySelection()
+		if !d.hasAnySelection() {
+			return ErrNothingSelected
+		}
+		text, _, err := d.copyText()
 		if err != nil {
 			return err
 		}
-		e.clipboard = text
+		if text == "" {
+			return ErrNothingSelected
+		}
+		e.clipboard, e.resultText = text, text
 		e.setStatus("Copied as plain text")
 		return nil
 	})
@@ -59,6 +69,10 @@ func registerTextCmdHandlers(h map[Action]handler) {
 // sort is one undo step. The selection then covers the sorted lines. Text with
 // fewer than two lines, or already in order, is left alone.
 func (d *Document) sortLines() {
+	if len(d.extra) > 0 && d.hasAnySelection() {
+		d.sortLinesAtCarets()
+		return
+	}
 	first, last := 0, d.Buffer.Lines()-1
 	if d.HasSelection() {
 		first, last = d.selectedLines()
@@ -66,6 +80,10 @@ func (d *Document) sortLines() {
 		last--
 	}
 	if last <= first {
+		return
+	}
+	if err := d.checkLines(first, last, "sorted"); err != nil {
+		d.failPlan(err)
 		return
 	}
 	lines := make([]string, 0, last-first+1)
@@ -108,10 +126,12 @@ func (d *Document) expandSelection() {
 	}
 	lineFrom, _ := buffer.LineBounds(d.Buffer, from.Line)
 	_, lineTo := buffer.LineBounds(d.Buffer, to.Line)
-	levels = append(levels,
-		buffer.Selection{Anchor: lineFrom, Head: lineTo},
-		buffer.Selection{Anchor: buffer.Pos{}, Head: d.Buffer.End()},
-	)
+	levels = append(levels, buffer.Selection{Anchor: lineFrom, Head: lineTo})
+	if d.large == nil || d.Index().Complete {
+		// While the index of a large document is being built the end of the
+		// buffer is not the end of the document, so the last level is left out.
+		levels = append(levels, buffer.Selection{Anchor: buffer.Pos{}, Head: d.Buffer.End()})
+	}
 	for _, lv := range levels {
 		lvFrom, lvTo := lv.Ordered()
 		if from.Less(lvFrom) || lvTo.Less(to) || (lvFrom == from && lvTo == to) {
@@ -136,28 +156,13 @@ func (d *Document) wordAt(p buffer.Pos) (from, to buffer.Pos, ok bool) {
 	return from, to, true
 }
 
-// duplicateLinesAbove copies the lines that selectedLines covers, as one block, above
-// the first of them. The copy takes the place of the original: the caret and the
-// selection keep their line numbers, so they now sit on the copy.
-func (d *Document) duplicateLinesAbove() {
-	first, last := d.selectedLines()
-	block := make([]string, 0, last-first+1)
-	for line := first; line <= last; line++ {
-		block = append(block, d.Buffer.Line(line))
-	}
-	d.Buffer.Group(func() {
-		d.Buffer.Insert(buffer.Pos{Line: first}, strings.Join(block, "\n")+"\n")
-	})
-	d.want = -1
-}
-
 // trimTrailing removes the trailing blanks of every line, as one undo step. It
 // reports whether the text changed. The caret and selection are kept inside the
 // text afterwards.
 func (d *Document) trimTrailing() bool {
-	before := d.Buffer.Text()
+	before := d.contentMark()
 	d.Buffer.Group(d.trimTrailingWhitespace)
-	if d.Buffer.Text() == before {
+	if d.contentMark() == before {
 		return false
 	}
 	d.clampToText()
@@ -167,9 +172,9 @@ func (d *Document) trimTrailing() bool {
 // ensureFinalLineBreak adds a final line break when the text lacks one, as one undo
 // step. It reports whether the text changed.
 func (d *Document) ensureFinalLineBreak() bool {
-	before := d.Buffer.Text()
+	before := d.contentMark()
 	d.Buffer.Group(d.ensureFinalNewline)
-	return d.Buffer.Text() != before
+	return d.contentMark() != before
 }
 
 // clampToText moves the caret and the selection back into the text after an edit

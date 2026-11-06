@@ -7,11 +7,15 @@ import (
 	"github.com/tbxark/gvim/internal/ui/prompt"
 )
 
-// fixState is the state of the root fixes: the files that auto-revert follows. Its
-// zero value follows none.
+// fixState is the state of the root fixes: the choices about auto-revert. Its zero value
+// leaves auto-revert on for every file.
 type fixState struct {
-	// autoRevert holds the paths whose buffers reload when their folder changes on disk.
+	// autoRevert holds the choice Toggle Auto-Revert made for a path: false switches the
+	// reload of its buffer off. A path that is not there is on. See autoRevertOn.
 	autoRevert map[string]bool
+	// polled holds the stamp of the change the poll last acted on for each path. See
+	// revertPolled.
+	polled map[string]string
 }
 
 // fixAction runs the actions the root fixes own: Revert File, the tab list, the copy of
@@ -56,6 +60,10 @@ func (m *Model) fixMessage(msg tea.Msg) (tea.Cmd, bool) {
 		}
 	case watchMsg:
 		return m.autoRevertChanged(msg.files), false
+	case revertPollMsg:
+		return m.revertPollTick(), true
+	case revertStatMsg:
+		return m.revertPolled(msg), true
 	}
 	return nil, false
 }

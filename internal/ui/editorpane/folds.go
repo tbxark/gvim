@@ -18,10 +18,12 @@ type Folder interface {
 }
 
 // setFolds fills the fold markers and the hidden lines of the frame from doc.
-// A document that is not a Folder, or that has no folds, leaves both nil.
+// A document that is not a Folder, that has no folds, or that is in large file mode,
+// leaves both nil.
 func (f *frame) setFolds(doc Document) {
 	fl, ok := doc.(Folder)
-	if !ok {
+	if !ok || isLarge(doc) {
+		// The folds of a large document would be found by reading all of it.
 		return
 	}
 	ranges := fl.Folds(f.tab)
@@ -38,6 +40,13 @@ func (f *frame) setFolds(doc Document) {
 		}
 	}
 	f.hidden = fold.Visible(f.lines, ranges, collapsed)
+}
+
+// foldable reports whether a click may toggle the fold that starts at line i: it is
+// collapsed, which stays possible with the markers hidden, or its marker shows.
+func (f frame) foldable(i int) bool {
+	collapsed, ok := f.folds[i]
+	return ok && (collapsed || !f.noFolds)
 }
 
 // visibleCount is the number of lines that are not hidden by a fold.

@@ -11,11 +11,13 @@ import (
 	textenc "golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/encoding/korean"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 )
 
 var (
-	names      = []string{"utf-8", "utf-8-bom", "utf-16le", "utf-16be", "windows-1252", "iso-8859-1", "shift_jis"}
+	names      = []string{"utf-8", "utf-8-bom", "utf-16le", "utf-16be", "windows-1252", "iso-8859-1", "shift_jis", "windows-1250", "windows-1251", "gbk", "gb18030", "euc-kr"}
 	utf8BOM    = []byte{0xef, 0xbb, 0xbf}
 	utf16LEBOM = []byte{0xff, 0xfe}
 	utf16BEBOM = []byte{0xfe, 0xff}
@@ -27,8 +29,9 @@ func Names() []string {
 }
 
 // Detect returns the name of the encoding of data. A byte-order mark decides
-// first. Otherwise valid UTF-8 is "utf-8". Any other data is "windows-1252",
-// which is a heuristic: UTF-16 data without a byte-order mark also gets it.
+// first. Otherwise valid UTF-8 is "utf-8". Any other data goes to detectLegacy,
+// which guesses UTF-16 without a mark, a CJK encoding or a Windows code page, and
+// answers "windows-1252" when nothing else fits.
 func Detect(data []byte) string {
 	switch {
 	case bytes.HasPrefix(data, utf8BOM):
@@ -40,7 +43,7 @@ func Detect(data []byte) string {
 	case utf8.Valid(data):
 		return "utf-8"
 	default:
-		return "windows-1252"
+		return detectLegacy(data)
 	}
 }
 
@@ -67,7 +70,7 @@ func Decode(name string, data []byte) (string, error) {
 		return "", fmt.Errorf("encoding: decode %s: %w", name, err)
 	}
 	// The x/text decoders write U+FFFD for bytes they do not define. None of the
-	// three tables maps a byte sequence to U+FFFD, so its presence means the input
+	// tables maps a byte sequence to U+FFFD, so its presence means the input
 	// was invalid.
 	if bytes.ContainsRune(out, utf8.RuneError) {
 		return "", invalidBytes(name)
@@ -100,7 +103,7 @@ func Encode(name string, text string) ([]byte, error) {
 	return out, nil
 }
 
-// table returns the x/text codec for a single-byte or Shift_JIS name, or nil.
+// table returns the x/text codec for a legacy (non-Unicode) name, or nil.
 func table(name string) textenc.Encoding {
 	switch name {
 	case "windows-1252":
@@ -109,6 +112,16 @@ func table(name string) textenc.Encoding {
 		return charmap.ISO8859_1
 	case "shift_jis":
 		return japanese.ShiftJIS
+	case "windows-1250":
+		return charmap.Windows1250
+	case "windows-1251":
+		return charmap.Windows1251
+	case "gbk":
+		return simplifiedchinese.GBK
+	case "gb18030":
+		return simplifiedchinese.GB18030
+	case "euc-kr":
+		return korean.EUCKR
 	}
 	return nil
 }

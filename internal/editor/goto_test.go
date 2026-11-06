@@ -118,12 +118,12 @@ func TestGotoLineScrollsCaretIntoView(t *testing.T) {
 	}
 }
 
-func TestRemoveSecondaryCursorsIsSilentNoOp(t *testing.T) {
+func TestRemoveSecondaryCursorsClearsSelectionAndMarkSilently(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})
 	typeText(t, e, "text")
 	e.SetCursor(buffer.Pos{Line: 0, Col: 2}, false)
-	e.SelectRange(buffer.Pos{Line: 0, Col: 0}, buffer.Pos{Line: 0, Col: 2})
+	run(t, e, "set_mark", "move_right")
 	before := e.Active().Cursor
 	const status = "before"
 	e.setStatus(status)
@@ -135,8 +135,15 @@ func TestRemoveSecondaryCursorsIsSilentNoOp(t *testing.T) {
 	if e.Status() != status {
 		t.Fatalf("status = %q, want unchanged %q", e.Status(), status)
 	}
-	if e.Active().Cursor != before || e.Active().Sel == nil {
-		t.Fatal("remove_secondary_cursors must not move the caret or selection")
+	if e.Active().Cursor != before || e.Active().Sel != nil {
+		t.Fatalf("caret %+v, sel %+v: want the caret kept and the selection cleared", e.Active().Cursor, e.Active().Sel)
+	}
+	if e.marking(e.Active()) {
+		t.Fatal("remove_secondary_cursors must end mark mode")
+	}
+	run(t, e, "move_right")
+	if e.Active().Sel != nil {
+		t.Fatal("a move after Esc extended a selection, mark mode should be off")
 	}
 	if text(e) != "text" {
 		t.Fatalf("text changed to %q", text(e))

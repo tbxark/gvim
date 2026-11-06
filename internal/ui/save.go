@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,12 +23,17 @@ type asyncSaver interface {
 
 // saveDoneMsg is the outcome of the writes of an explicit save. The results are applied
 // on the update loop, and then the flow goes on. then is the unsaved-changes flow that
-// waits for the save, and reload says the explorer reloads after a Save As.
+// waits for the save, and reload says the explorer reloads after a Save As. ask is set
+// for a Save of the active document, whose refusal over a changed file asks to overwrite.
 type saveDoneMsg struct {
 	plan    editor.SavePlan
 	results []editor.SaveResult
 	then    flow
 	reload  bool
+	ask     bool
+	// id numbers the write among those in flight, so that a quit can stop it and wait
+	// for it. Zero is a write that nothing tracks.
+	id int
 }
 
 // save runs Ctrl+S. An untitled buffer has no path, so the Save As prompt opens instead.
@@ -40,7 +46,7 @@ func (m *Model) save() tea.Cmd {
 func (m *Model) saveThen(f flow) tea.Cmd {
 	if as, ok := m.ed.(asyncSaver); ok {
 		p, err := as.PlanSave()
-		return m.planned(as, p, err, f, false)
+		return m.planned(as, p, err, f, false, true)
 	}
 	return m.finished(m.ed.Do("save", nil).Err, f, false)
 }
@@ -52,7 +58,7 @@ func (m *Model) saveThen(f flow) tea.Cmd {
 func (m *Model) saveAs(path string, force bool, f flow) tea.Cmd {
 	if as, ok := m.ed.(asyncSaver); ok {
 		p, err := as.PlanSaveAs(path, force)
-		return m.planned(as, p, err, f, true)
+		return m.planned(as, p, err, f, true, false)
 	}
 	args := map[string]any{"path": path, "force": force}
 	return m.finished(m.ed.Do("save_as", args).Err, f, true)
@@ -63,7 +69,7 @@ func (m *Model) saveAs(path string, force bool, f flow) tea.Cmd {
 func (m *Model) saveAll() tea.Cmd {
 	if as, ok := m.ed.(asyncSaver); ok {
 		p, err := as.PlanSaveAll()
-		return m.planned(as, p, err, flow{}, false)
+		return m.plannedFor(true, as, p, err, flow{}, false, false)
 	}
 	return m.finished(m.ed.Do("save_all", nil).Err, flow{}, false)
 }
@@ -71,23 +77,47 @@ func (m *Model) saveAll() tea.Cmd {
 // planned starts the writes of a planned save. A plan that was refused goes to finished,
 // which shows the refusal. Otherwise the command writes the files, and its result comes
 // back as a saveDoneMsg. The command reads only the plan, so it writes off the loop.
-func (m *Model) planned(as asyncSaver, p editor.SavePlan, err error, f flow, reload bool) tea.Cmd {
+func (m *Model) planned(as asyncSaver, p editor.SavePlan, err error, f flow, reload, ask bool) tea.Cmd {
+	return m.plannedFor(false, as, p, err, f, reload, ask)
+}
+
+// plannedFor is planned, with all set when the plan saves every modified tab.
+func (m *Model) plannedFor(all bool, as asyncSaver, p editor.SavePlan, err error, f flow, reload, ask bool) tea.Cmd {
 	if err != nil {
 		return m.finished(err, f, reload)
 	}
+	// The write of a large document takes long: it can be stopped by a quit, and the
+	// notice row says it is running.
+	id, ctx := m.beginSave(all)
+	m.savingStatus()
 	return func() tea.Msg {
-		return saveDoneMsg{plan: p, results: as.WriteSave(p), then: f, reload: reload}
+		return saveDoneMsg{plan: p, results: writeSave(ctx, as, p), then: f, reload: reload, ask: ask, id: id}
 	}
 }
 
 // saveDone applies the results of a save's writes on the update loop, and then goes on
 // with the flow the save was started for.
 func (m *Model) saveDone(msg saveDoneMsg) tea.Cmd {
+	m.endSave(msg.id)
+	m.clearSaving()
 	as, ok := m.ed.(asyncSaver)
 	if !ok {
+		return m.quitIfWaiting()
+	}
+	err := as.ApplySavePlan(msg.plan, msg.results)
+	if cmd := m.quitIfWaiting(); cmd != nil {
+		// A quit was waiting for this write. Its results are recorded, and the program ends.
+		return cmd
+	}
+	if errors.Is(err, context.Canceled) {
+		// The write was stopped, because its tab closed. Nothing is wrong with the file.
+		m.notice = "Save cancelled"
 		return nil
 	}
-	return m.finished(as.ApplySavePlan(msg.plan, msg.results), msg.then, msg.reload)
+	if msg.ask && errors.Is(err, editor.ErrChangedOnDisk) && m.askOverwriteSave(err, msg.then) {
+		return nil
+	}
+	return m.finished(err, msg.then, msg.reload)
 }
 
 // finished goes on with the flow of an explicit save, once the editor has answered. A

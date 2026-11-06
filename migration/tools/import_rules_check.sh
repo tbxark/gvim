@@ -17,6 +17,8 @@
 #   R6  internal/cli does not import internal/ui, editor, lsp or markdown.
 #   R7  only main and internal/cli may import internal/app; only main may
 #       import internal/cli.
+#   R8  no production package (anything in the dependency tree of the main
+#       package) imports internal/buffer/buffertest, the test-support sources.
 #
 # Packages that do not exist yet are skipped. Bash 3.2 compatible (macOS).
 
@@ -39,6 +41,13 @@ edges=$(printf '%s\n' "$graph" | awk -v mod="$mod" -F': ' '
     n = split($2, imps, " ")
     for (i = 1; i <= n; i++) print pkg "\t" imps[i]
   }')
+
+# Packages of the shipped binary, for R8.
+if ! prod=$(go list -deps -f '{{.ImportPath}}' . 2>&1); then
+  echo "import_rules_check: go list failed:" >&2
+  echo "$prod" >&2
+  exit 2
+fi
 
 count=0
 report=""
@@ -134,6 +143,11 @@ while IFS=$'\t' read -r pkg imp; do
     if under "$irel" internal/cli && [ -n "$rel" ]; then
       add R7 "$pkg" "$imp"
     fi
+  fi
+
+  # R8
+  if [ "$imp" = "$mod/internal/buffer/buffertest" ] && printf '%s\n' "$prod" | grep -qxF "$pkg"; then
+    add R8 "$pkg" "$imp"
   fi
 done <<<"$edges"
 

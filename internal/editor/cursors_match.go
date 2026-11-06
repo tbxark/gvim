@@ -23,7 +23,8 @@ var errAllMatchesSelected = errors.New("all matches are already selected")
 // document. An occurrence that would meet a caret already there is skipped. The
 // first one that does not meet a caret gets a new caret, which becomes the
 // primary caret. The old primary becomes an extra caret. A backward selection
-// makes the new caret backward too.
+// makes the new caret backward too. A large document selects the word only: the
+// search for the next occurrence needs its whole text, and returns ErrLargeFile.
 func (d *Document) addNextMatch() error {
 	if !d.HasSelection() {
 		from, to, ok := d.caseTarget()
@@ -40,6 +41,11 @@ func (d *Document) addNextMatch() error {
 		return nil
 	}
 
+	if d.large != nil {
+		// The next occurrence is found in the whole text, which a large document
+		// does not hold.
+		return errLargeAction("add_cursor_next_match")
+	}
 	lo, hi := d.Sel.Ordered()
 	backward := d.Sel.Head.Less(d.Sel.Anchor)
 	text := d.Buffer.Text()

@@ -27,7 +27,7 @@ func (f frame) markMatches(i int, raw []rune, cells []cell) {
 		if h.Current {
 			kind = matchCurrent
 		}
-		from, to := expandedIndex(raw, h.Start, f.tab), expandedIndex(raw, h.End, f.tab)
+		from, to := expandedIndex(raw, h.Start-f.off, f.tab), expandedIndex(raw, h.End-f.off, f.tab)
 		for k := from; k < to; k++ {
 			cells[k].match = max(cells[k].match, kind)
 		}
