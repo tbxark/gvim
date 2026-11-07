@@ -94,6 +94,8 @@ type statusView struct {
 	warnSlot bool // reserve the blank warning-counter slot
 	warnings int  // warning count; shown as " [⚠ N] " when above zero
 	readOnly bool // the document is read-only; shown as " [RO] "
+
+	extra []statusItem // the items of plugins (plugin_status.go)
 }
 
 // run is a piece of text at a fixed column, together with what a click on it
@@ -333,20 +335,38 @@ func menuRuns(explorerFocus bool) []run {
 	return runs
 }
 
+// statusMessageMin is the room, in cells, that plugin items on the left leave to the
+// status message at least.
+const statusMessageMin = 24
+
 // statusRuns lays out the status row (section 4.5). The left group is cut first
 // to the room the right group leaves. The right group is dropped from its end
 // until the left group keeps at least min(floor(2W/5), 40) cells.
 func statusRuns(w int, s statusView) []run {
-	left := []string{
-		" Local ",
-		" " + padCells(s.position, positionWidth(s.lines)) + " ",
-		" " + s.message + " ",
-	}
 	type segment struct {
 		text string
 		kind hitKind
-		id   int // the run index of a hitStatusSegment: one of the statusSegment constants
+		id   int // the run index of a hitStatusSegment (one of the statusSegment constants) or of a hitStatusPlugin
 	}
+	// A plugin item is clickable when it has an on_click function; its run index is its
+	// place in s.extra.
+	pluginSeg := func(i int) segment {
+		it := s.extra[i]
+		if it.clickable {
+			return segment{" " + it.text + " ", hitStatusPlugin, i}
+		}
+		return segment{" " + it.text + " ", hitNone, 0}
+	}
+	left := []segment{
+		{" Local ", hitNone, 0},
+		{" " + padCells(s.position, positionWidth(s.lines)) + " ", hitNone, 0},
+	}
+	for i, it := range s.extra {
+		if !it.right {
+			left = append(left, pluginSeg(i))
+		}
+	}
+	left = append(left, segment{" " + s.message + " ", hitNone, 0})
 	var right []segment
 	if s.large != "" {
 		right = append(right, segment{" " + s.large + " ", hitNone, 0})
@@ -359,6 +379,11 @@ func statusRuns(w int, s statusView) []run {
 		segment{" " + s.encoding + " ", hitStatusSegment, statusSegmentEncoding},
 		segment{" " + s.language + " ", hitStatusSegment, statusSegmentLanguage},
 	)
+	for i, it := range s.extra {
+		if it.right {
+			right = append(right, pluginSeg(i))
+		}
+	}
 	switch {
 	case s.warnings > 0:
 		right = append(right, segment{" [⚠ " + strconv.Itoa(s.warnings) + "] ", hitNone, 0})
@@ -388,16 +413,29 @@ func statusRuns(w int, s statusView) []run {
 	var runs []run
 	room := w - rightWidth()
 	x := 0
-	for _, text := range left {
+	// left is " Local ", the position, the plugin items, the message. The items share what
+	// the others leave, with the first cells of the message kept for it: a plugin cannot
+	// push a notice out of the row.
+	itemRoom := room - ansi.StringWidth(left[0].text) - ansi.StringWidth(left[1].text) -
+		min(ansi.StringWidth(left[len(left)-1].text), statusMessageMin)
+	for i, seg := range left {
 		if room <= 0 {
 			break
 		}
+		text := seg.text
+		if i >= 2 && i < len(left)-1 {
+			if itemRoom <= 0 {
+				continue
+			}
+			text = truncateCells(text, itemRoom)
+			itemRoom -= ansi.StringWidth(text)
+		}
 		tw := ansi.StringWidth(text)
 		if tw > room {
-			runs = append(runs, newRun(x, truncateCells(text, room), hitNone, 0))
+			runs = append(runs, newRun(x, truncateCells(text, room), seg.kind, seg.id))
 			break
 		}
-		runs = append(runs, newRun(x, text, hitNone, 0))
+		runs = append(runs, newRun(x, text, seg.kind, seg.id))
 		x += tw
 		room -= tw
 	}
@@ -405,7 +443,7 @@ func statusRuns(w int, s statusView) []run {
 	x = w - rightWidth()
 	for i, seg := range right {
 		index := i
-		if seg.kind == hitStatusSegment {
+		if seg.kind == hitStatusSegment || seg.kind == hitStatusPlugin {
 			index = seg.id
 		}
 		runs = append(runs, newRun(x, seg.text, seg.kind, index))

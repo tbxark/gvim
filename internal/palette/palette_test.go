@@ -21,8 +21,9 @@ func find(t *testing.T, entries []palette.Entry, name string) palette.Entry {
 
 func TestCommandsFromBuiltinTable(t *testing.T) {
 	entries := palette.Commands(nil)
-	if len(entries) != 206 {
-		t.Fatalf("Commands() = %d entries, want 206", len(entries))
+	// 206 generated rows and the 4 hand-written Plugin: rows of plugin_commands.go.
+	if len(entries) != 210 {
+		t.Fatalf("Commands() = %d entries, want 210", len(entries))
 	}
 	if entries[0].Name != "Add Cursor Above" || entries[1].Name != "Add Cursor Below" {
 		t.Fatalf("first entries = %q, %q; want byte order", entries[0].Name, entries[1].Name)

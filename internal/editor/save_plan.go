@@ -48,6 +48,10 @@ func (e *Editor) PlanSave() (SavePlan, error) {
 		e.setStatus(err.Error())
 		return SavePlan{}, err
 	}
+	if d.ext.virtual {
+		e.setStatus(ErrVirtual.Error())
+		return SavePlan{}, ErrVirtual
+	}
 	// A large document whose file changed under it is read-only, but the reason is the
 	// change, not a setting.
 	_ = d.CheckSource()
@@ -78,6 +82,10 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 		err := fmt.Errorf("save as: %w", ErrNoDocument)
 		e.setStatus(err.Error())
 		return SavePlan{}, err
+	}
+	if d.ext.virtual {
+		e.setStatus(ErrVirtual.Error())
+		return SavePlan{}, ErrVirtual
 	}
 	path, err := absPath(path)
 	if err != nil {

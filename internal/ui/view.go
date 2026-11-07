@@ -498,6 +498,7 @@ func (m *Model) applyTheme(name string) {
 	}
 	m.util.settings.Theme = name
 	m.notice = "Theme: " + name
+	m.plugThemeChanged(name)
 }
 
 // openLocales lists the locales built in. English is the only one, so the list has

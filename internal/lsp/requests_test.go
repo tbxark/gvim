@@ -548,3 +548,46 @@ func TestRequestsReturnWhenContextEnds(t *testing.T) {
 		})
 	}
 }
+
+func TestRequestRaw(t *testing.T) {
+	hover := &protocol.Hover{Contents: &protocol.MarkupContent{Kind: protocol.MarkupKindPlainText, Value: "doc text"}}
+	tests := []struct {
+		name     string
+		hover    *protocol.Hover
+		fail     bool
+		method   string
+		wantJSON string // substring of the raw result; "null" for a null result
+		wantErr  string
+	}{
+		{name: "hover result is the raw json", hover: hover, method: "textDocument/hover", wantJSON: `"value":"doc text"`},
+		{name: "null result", method: "textDocument/hover", wantJSON: "null"},
+		{name: "server error", fail: true, method: "textDocument/hover", wantErr: errRefused.Error()},
+		{name: "unknown method", method: "foo/bar", wantErr: "foo/bar"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t, Config{}, nil)
+			ctx := newTestContext(t)
+			f.srv.canned.hover = tt.hover
+			f.srv.canned.fail = tt.fail
+			params := map[string]any{
+				"textDocument": map[string]any{"uri": reqDocURI},
+				"position":     map[string]any{"line": 7.0, "character": 12.0},
+			}
+			got, err := f.client.Request(ctx, tt.method, params)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Request error = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Request: %v", err)
+			}
+			if !strings.Contains(string(got), tt.wantJSON) {
+				t.Fatalf("Request = %s, want it to contain %s", got, tt.wantJSON)
+			}
+			wantDocPosition(t, nextRequest[*protocol.HoverParams](t, f.srv, "hover params").TextDocumentPositionParams)
+		})
+	}
+}

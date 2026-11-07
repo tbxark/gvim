@@ -1,0 +1,6 @@
+{
+  "name": "goto_with_selection",
+  "version": "1.0.0",
+  "description": "Go to Line with Selection: select from the caret to a line you type",
+  "api": 1
+}

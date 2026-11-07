@@ -419,3 +419,30 @@ func TestSearchReplaceActionsNeedADocument(t *testing.T) {
 		})
 	}
 }
+
+// selectingEditorFake records which of the two jumps ran.
+type selectingEditorFake struct {
+	*fileEditorFake
+	selecting bool
+}
+
+func (f *selectingEditorFake) GotoLineSelecting(line, col int) error {
+	f.selecting = true
+	f.line, f.col = line, col
+	return nil
+}
+
+func TestGotoPromptSelectsAndOtherJumpsDoNot(t *testing.T) {
+	ed := &selectingEditorFake{fileEditorFake: &fileEditorFake{fakeEditor: newFakeEditor("one", "two")}}
+	m := newRouteModel(t, ed)
+	m.openAt("x.txt", false, 2, 1)
+	if ed.selecting || ed.line != 2 {
+		t.Fatalf("openAt: selecting = %v, line = %d; a jump must use GotoLine", ed.selecting, ed.line)
+	}
+	press(m, ctrl('l'))
+	press(m, typed("1"))
+	runCmds(m, press(m, special(tea.KeyEnter)))
+	if !ed.selecting || ed.line != 1 {
+		t.Fatalf("prompt: selecting = %v, line = %d; the prompt must use GotoLineSelecting", ed.selecting, ed.line)
+	}
+}

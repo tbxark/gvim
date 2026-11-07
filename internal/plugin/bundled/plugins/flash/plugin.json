@@ -1,0 +1,7 @@
+{
+  "name": "flash",
+  "version": "1.0.0",
+  "description": "Flash: label-based jump to any visible match in every window",
+  "api": 1,
+  "default_enabled": false
+}

@@ -240,6 +240,20 @@ func (a editorAdapter) edited() {
 	}
 }
 
+// editedDoc marks the syntax spans of d stale for an edit made through the plugin port.
+// The document need not be the active tab: a split pane can show a tab that is not, and
+// that pane's cache is marked too. The shared cache belongs to the active document, so it
+// is only marked when d is that one.
+func (a editorAdapter) editedDoc(d *editor.Document) {
+	if d == nil {
+		return
+	}
+	if d == a.ed.Active() {
+		a.spans.edited()
+	}
+	a.others[d].edited()
+}
+
 // Active returns the active document, or nil when no tab is open. The nil is a
 // nil interface, so the root's nil check works.
 func (a editorAdapter) Active() ui.Document {
@@ -410,6 +424,12 @@ func (a editorAdapter) GotoLine(line, col int) error {
 	return a.ed.GotoLine(line, col)
 }
 
+// GotoLineSelecting is GotoLine for the go-to-line prompt: in mark mode it extends the
+// selection to the line.
+func (a editorAdapter) GotoLineSelecting(line, col int) error {
+	return a.ed.GotoLineSelecting(line, col)
+}
+
 // ActivateTab makes tab i the active tab. An index outside the tabs is ignored.
 func (a editorAdapter) ActivateTab(i int) {
 	a.ed.ActivateTab(i)
@@ -564,6 +584,11 @@ func (d documentAdapter) SavedLines() []string {
 	return d.doc.SavedLines()
 }
 
+// MemoChanges keeps the change marks of the pane until the text or the saved text changes.
+func (d documentAdapter) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, scroll map[int]bool) {
+	return d.doc.MemoChanges(compute)
+}
+
 // HasPath reports whether the document has a file on disk. Save and revert need
 // it, and an unnamed buffer has none.
 func (d documentAdapter) HasPath() bool {
@@ -665,6 +690,16 @@ func (k keymapAdapter) Primary(action string) (ui.KeyBinding, bool) {
 		return ui.KeyBinding{}, false
 	}
 	return keyBinding(b), true
+}
+
+// Label formats the primary binding of action, as the palette shows it, or "" when the
+// action has none. The root reads it for the plugin commands and for gvim.keymap.label.
+func (k keymapAdapter) Label(action string) string {
+	b, ok := k.km.Primary(action)
+	if !ok {
+		return ""
+	}
+	return palmodel.FormatChord(b.Chord)
 }
 
 // keyBinding maps a keymap binding to the root's view of it.

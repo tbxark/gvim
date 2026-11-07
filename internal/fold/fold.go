@@ -19,14 +19,26 @@ type Range struct {
 // a range belong to it, and blank lines never open one. Indentation is measured
 // with display.IndentWidth.
 func Ranges(lines []string, tabWidth int) []Range {
-	tabWidth = max(tabWidth, 1)
-	indent := make([]int, len(lines))
+	return RangesFunc(len(lines), func(i int) (int, bool) {
+		if strings.TrimSpace(lines[i]) == "" {
+			return 0, true
+		}
+		return display.IndentWidth(lines[i], tabWidth), false
+	})
+}
+
+// RangesFunc is Ranges over n lines that are not held as strings: indent returns the
+// display width of the indentation of line i and whether the line is blank. A blank
+// line is one that has only white space, as strings.TrimSpace sees it.
+func RangesFunc(n int, indentOf func(i int) (width int, blank bool)) []Range {
+	indent := make([]int, n)
 	var nonBlank []int
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "" {
+	for i := range n {
+		w, blank := indentOf(i)
+		if blank {
 			continue
 		}
-		indent[i] = display.IndentWidth(line, tabWidth)
+		indent[i] = w
 		nonBlank = append(nonBlank, i)
 	}
 

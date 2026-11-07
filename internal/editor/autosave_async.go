@@ -66,7 +66,7 @@ func (e *Editor) PlanAutoSave(now time.Time) []SaveJob {
 	e.autoSaved = now
 	var jobs []SaveJob
 	for _, d := range e.docs {
-		if d.Untitled() || d.readOnly || d.large != nil || !d.Modified() {
+		if d.ext.virtual || d.Untitled() || d.readOnly || d.large != nil || !d.Modified() {
 			continue
 		}
 		jobs = append(jobs, d.planSave(d.Path, e.opts))
@@ -163,7 +163,7 @@ func (e *Editor) ApplySaves(results []SaveResult) error {
 			e.applyLargeSave(r)
 			continue
 		}
-		d.saved = r.job.text
+		d.setSaved(r.job.text)
 		d.saveNote = r.note
 		if d.ends != nil {
 			d.ends = r.job.ends

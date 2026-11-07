@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/internal/explorer/watch"
+	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/ui/palette"
 )
 
@@ -71,9 +72,19 @@ type RootPorts struct {
 	// Nil or a zero interval turns it off.
 	Recovery      RecoveryPort
 	RecoveryEvery time.Duration
-	// Plugins lists the plugin commands in the command palette and runs the one
-	// that is chosen. Nil leaves the plugin commands out.
-	Plugins palette.PluginRunner
+	// Plugins is the plugin runtime. Nil turns plugins off: the palette lists
+	// only the built-in commands.
+	Plugins pluginapi.Runtime
+	// PluginEditor is the editor as the plugins see it. Nil makes the buffer calls of a
+	// plugin answer unsupported.
+	PluginEditor PluginEditor
+	// PluginKeys builds the keymap that holds the plugins' key bindings: the preset, then
+	// the bindings, then the user's own. preset names the built-in keymap to start from, or
+	// is "" for the one the session started with. The root uses it when the bindings
+	// change, and with the new preset name when the keymap is switched, so a switch keeps
+	// them. A keymap can come back with an error that names what was left out. Nil leaves
+	// the keymap as it is.
+	PluginKeys func(preset string, b []pluginapi.Binding) (Keymap, error)
 	// Stashes lists the files whose unsaved text an interrupted save kept, for
 	// Review Interrupted Saves. Nil shows a notice when the review is run.
 	Stashes InterruptedSaves

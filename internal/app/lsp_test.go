@@ -12,6 +12,7 @@ import (
 	"github.com/tbxark/gvim/internal/config"
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/lsp"
+	"github.com/tbxark/gvim/internal/pluginapi"
 )
 
 func TestNewLSPPortWithoutServersIsNil(t *testing.T) {
@@ -89,6 +90,15 @@ func TestLSPPortRequestsForUnopenedDocumentsAreNotOpen(t *testing.T) {
 	}
 }
 
+func TestLSPPortRequestForAnUnopenedDocumentIsNotFound(t *testing.T) {
+	t.Parallel()
+	port := newLSPPort(map[string]config.LSPServer{"go": {Command: "gopls"}})
+	_, err := port.Request(filepath.Join(t.TempDir(), "a.go"), "textDocument/hover", map[string]any{})
+	if pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
+		t.Fatalf("Request: err = %v, want a not_found error", err)
+	}
+}
+
 func TestLSPPortOpenForUnconfiguredLanguageStartsNothing(t *testing.T) {
 	t.Parallel()
 	port := newLSPPort(map[string]config.LSPServer{"go": {Command: "gopls"}})
@@ -116,6 +126,7 @@ func TestUIDiagnosticsUseRuneColumns(t *testing.T) {
 		Range:    protocol.Range{Start: protocol.Position{Line: 0, Character: 3}, End: protocol.Position{Line: 1, Character: 2}},
 		Severity: protocol.DiagnosticSeverityWarning,
 		Message:  protocol.String("odd"),
+		Source:   protocol.NewOptional("gopls"),
 	}})
 	if len(items) != 1 {
 		t.Fatalf("items = %+v, want one", items)
@@ -123,6 +134,9 @@ func TestUIDiagnosticsUseRuneColumns(t *testing.T) {
 	got := items[0]
 	if got.Start != (buffer.Pos{Line: 0, Col: 2}) || got.End != (buffer.Pos{Line: 1, Col: 2}) {
 		t.Fatalf("range = %+v..%+v, want rune positions (0,2)..(1,2)", got.Start, got.End)
+	}
+	if got.Source != "gopls" {
+		t.Fatalf("source = %q, want gopls", got.Source)
 	}
 	if got.Severity != 2 || got.Message != "odd" {
 		t.Fatalf("severity and message = %d %q, want 2 odd", got.Severity, got.Message)

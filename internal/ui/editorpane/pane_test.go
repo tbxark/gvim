@@ -512,3 +512,34 @@ func TestBlitCopiesCellsAtOffset(t *testing.T) {
 		t.Errorf("cell outside the blit = %q", got)
 	}
 }
+
+// memoDoc is a fakeDoc that keeps the change marks, as editor.Document does.
+type memoDoc struct {
+	fakeDoc
+	memoCalls int
+}
+
+func (d *memoDoc) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, scroll map[int]bool) {
+	d.memoCalls++
+	return compute()
+}
+
+func TestChangeMarksAskTheDocumentThatKeepsThem(t *testing.T) {
+	d := &memoDoc{fakeDoc: fakeDoc{
+		lines:    []string{"one", "TWO", "three"},
+		saved:    []string{"one", "two", "three"},
+		modified: true,
+	}}
+	g := Pane{Doc: d}.Render(20, 3)
+	if d.memoCalls != 1 {
+		t.Fatalf("MemoChanges called %d times, want 1", d.memoCalls)
+	}
+	if got := g.At(0, 1).Text; got != "│" {
+		t.Errorf("changed line bar = %q, want │", got)
+	}
+	d.modified = false
+	Pane{Doc: d}.Render(20, 3)
+	if d.memoCalls != 1 {
+		t.Errorf("an unmodified document asked for the change marks")
+	}
+}

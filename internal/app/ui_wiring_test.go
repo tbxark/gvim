@@ -127,6 +127,19 @@ func TestSettingsForPrefersFlagsOverConfig(t *testing.T) {
 	}
 }
 
+// TestSettingsForCarriesTheSaveOptions checks the settings only gvim.config.get reads.
+func TestSettingsForCarriesTheSaveOptions(t *testing.T) {
+	t.Parallel()
+	cfg := config.Defaults()
+	cfg.LineEnding = config.LineEndingCRLF
+	cfg.TrimTrailingWhitespace = true
+	cfg.EnsureFinalNewline = true
+	s := settingsFor(Options{}, cfg)
+	if s.LineEnding != "crlf" || !s.TrimTrailingWhitespace || !s.EnsureFinalNewline {
+		t.Fatalf("settingsFor = %q %v %v, want crlf true true", s.LineEnding, s.TrimTrailingWhitespace, s.EnsureFinalNewline)
+	}
+}
+
 // TestSwitchKeymapKeepsTheConfigKeybindings checks that a keymap switch applies the
 // config overrides, so a binding the user removed stays removed.
 func TestSwitchKeymapKeepsTheConfigKeybindings(t *testing.T) {

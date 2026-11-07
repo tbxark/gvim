@@ -11,6 +11,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/buffer"
 	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/internal/pluginapi"
 )
 
 // openText writes text to name in a temporary folder and opens it in a new editor.
@@ -100,6 +101,23 @@ func TestStringContextReusesTheWindowUntilTheTextChanges(t *testing.T) {
 	}
 	if c.lexed != 2 {
 		t.Fatalf("lexed %d windows after an edit, want 2", c.lexed)
+	}
+}
+
+// A virtual buffer whose text is replaced gets a new Buffer; the cache must not serve the
+// lines of the old one for it (S18-3).
+func TestStringContextSeesReplacedVirtualText(t *testing.T) {
+	pe, ed, _ := pluginEditorOver(t, "x")
+	id, err := pe.CreateBuffer(pluginapi.CreateBuffer{Name: "v", Language: "go", Text: "x := \"a\""})
+	must(t, err)
+	doc, _, _ := ed.DocByID(editor.DocID(id))
+	c := &stringCache{}
+	if !c.inString(doc, buffer.Pos{Col: 7}) {
+		t.Fatal("a position inside the string is not in a string")
+	}
+	must(t, pe.SetContent(id, []pluginapi.ContentEntry{{Text: "x := ab"}}))
+	if c.inString(doc, buffer.Pos{Col: 7}) {
+		t.Fatal("the cache served the lines of the replaced text")
 	}
 }
 

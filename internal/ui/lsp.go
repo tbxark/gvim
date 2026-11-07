@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -226,7 +227,7 @@ func (m *Model) lspReconcile() tea.Cmd {
 		}
 		path := docPath(doc)
 		lang := m.lspLanguage(doc)
-		if path == "" || !s.enabled(lang) || s.off[path] || isLargeDoc(doc) {
+		if path == "" || isVirtualDoc(doc) || !s.enabled(lang) || s.off[path] || isLargeDoc(doc) {
 			// A server is sent the whole text of a document on each change, which a
 			// large document cannot give without reading the file.
 			continue
@@ -250,7 +251,7 @@ func (m *Model) lspReconcile() tea.Cmd {
 			cmds = append(cmds, m.lspCloseCmd(path))
 		}
 		delete(s.tracks, path)
-		delete(s.diags, path)
+		m.lspDropDiags(path)
 	}
 	for _, path := range sortedKeys(s.tracks) {
 		cmds = append(cmds, m.lspSendFor(s.tracks[path]))
@@ -377,6 +378,9 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 		m.notice = msg.err.Error()
 		return nil, true
 	case popup.Chosen:
+		if cmd, ok := m.pluginPopupChosen(msg); ok {
+			return cmd, true
+		}
 		if pick, ok := msg.Item.Data.(lspPick); ok {
 			return m.lspChosen(pick, msg.Index), true
 		}
@@ -472,6 +476,7 @@ func (m *Model) lspPoll() tea.Cmd {
 func (m *Model) lspDiags(msg lspDiagsMsg) tea.Cmd {
 	s := &m.lsp
 	for _, ev := range msg.events {
+		m.plugDiagnosticsChanged(ev.Path, s.diags[ev.Path], ev.Items)
 		if len(ev.Items) == 0 {
 			delete(s.diags, ev.Path)
 			continue
@@ -488,6 +493,17 @@ func (m *Model) lspDiags(msg lspDiagsMsg) tea.Cmd {
 	}
 	s.polling = false
 	return nil
+}
+
+// lspDropDiags forgets the diagnostics of a document, and tells the plugins that they
+// went (diagnostics_updated with zero counts) when it had some.
+func (m *Model) lspDropDiags(path string) {
+	old, ok := m.lsp.diags[path]
+	if !ok {
+		return
+	}
+	m.plugDiagnosticsChanged(path, old, nil)
+	delete(m.lsp.diags, path)
 }
 
 // lspServerDone applies the end of lsp_restart or lsp_stop. A restart closes every
@@ -511,6 +527,9 @@ func (m *Model) lspServerDone(msg lspServerMsg) tea.Cmd {
 	case "stop":
 		s.stopped = true
 		s.tracks = nil
+		for _, path := range slices.Sorted(maps.Keys(s.diags)) {
+			m.lspDropDiags(path)
+		}
 		s.diags = nil
 		s.polling = false
 		if msg.err == nil {
@@ -999,7 +1018,7 @@ func (m *Model) lspToggle() tea.Cmd {
 	m.notice = "LSP is off for this buffer"
 	tr := s.tracks[path]
 	delete(s.tracks, path)
-	delete(s.diags, path)
+	m.lspDropDiags(path)
 	if tr != nil && tr.state != lspClosed {
 		return m.lspCloseCmd(path)
 	}

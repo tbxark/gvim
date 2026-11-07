@@ -73,10 +73,11 @@ func (r *runtime) exit() {
 			_ = os.RemoveAll(r.recovery)
 		}
 	}
-	// The files of large documents are closed after the session is saved: the save
-	// reads the documents.
-	r.ed.Close()
+	// The model closes first: the plugins' shutdown handlers may still read the documents.
+	// The files of large documents are closed after the session is saved: the save reads
+	// the documents.
 	r.model.Close()
+	r.ed.Close()
 }
 
 // runtime is a built session: the UI model, the editor it shows, and the resources
@@ -288,8 +289,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	watcher, events := startWatcher(watching)
 	proj := newProjectOpener(ctx, watcher, root, files)
 	deps := newUIDeps(ed, km, th, tree, files)
-	if a, ok := deps.Editor.(editorAdapter); ok {
-		a.spans.setContext(cfg.HighlightContextBytes)
+	adapter, _ := deps.Editor.(editorAdapter)
+	if adapter.spans != nil {
+		adapter.spans.setContext(cfg.HighlightContextBytes)
 	}
 	deps.Settings = settingsFor(opts, cfg)
 	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
@@ -304,14 +306,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	deps.TabSize = cfg.TabSize
 	deps.View = viewOptions(cfg, icon.Mode.String())
 	deps.Languages = languageSettings(cfg)
-	plugins, pluginNotices := loadPlugins(ed, deps.Editor, cfg.PluginTimeout)
 	deps.Root = ui.RootPorts{
 		Projects: proj,
 		Grep:     grepFor(edOpts),
 		Git:      gitStatus{},
 		Watch:    events,
 		AutoSave: interval,
-		Plugins:  plugins,
 		Stashes:  stashesFor(opts.SessionDir),
 	}
 	deps.Root.AutoRevertPoll = autoRevertPoll(cfg)
@@ -320,14 +320,18 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 		// Assign only a running watcher: a nil *watch.Watcher in the interface is not nil.
 		deps.Root.WatchDirs = watcher
 	}
-	// Notice is the first config problem, then the plugin load notices, then any
-	// session file whose unsaved text was kept, for the status row. Every warning
-	// still goes to stderr, before the alternate screen starts.
+	// The plugin runtime is always wired. With --no-plugins its loader is disabled.
+	pw := newPluginRuntime(adapter, cfg, opts, presetKeymap(opts.Keymap, cfg), proj.rootDir)
+	deps.Root.Plugins = pw.rt
+	deps.Root.PluginEditor = pw.edit
+	deps.Root.PluginKeys = pw.keys
+	// Notice is the first config problem, then any session file whose unsaved
+	// text was kept, for the status row. Every warning still goes to stderr,
+	// before the alternate screen starts.
 	var notices []string
 	if len(diags) > 0 {
 		notices = append(notices, diags[0].String())
 	}
-	notices = append(notices, pluginNotices...)
 	notices = append(notices, openNotices...)
 	if n := restoreNotice(failed); n != "" {
 		notices = append(notices, n)
@@ -444,6 +448,20 @@ func runKeymap(flag string, cfg config.Config) (*keymap.Map, error) {
 	return keymapWithOverrides(km, cfg)
 }
 
+// presetKeymap returns the built-in keymap a session starts from, before the user's
+// keybindings: the flag, else the config keymap, else the platform default. runKeymap has
+// checked the name by then, so a bad one falls back to the default here.
+func presetKeymap(flag string, cfg config.Config) *keymap.Map {
+	name := flag
+	if name == "" {
+		name = cfg.Keymap
+	}
+	if km, err := keymapFor(name); err == nil {
+		return km
+	}
+	return keymap.Default()
+}
+
 // keymapWithOverrides applies the config keybindings to km. Without them km is
 // returned unchanged. A bad override names the config file that set it.
 func keymapWithOverrides(km *keymap.Map, cfg config.Config) (*keymap.Map, error) {
@@ -492,6 +510,10 @@ func settingsFor(opts Options, cfg config.Config) ui.Settings {
 		UIIcons:             cfg.UIIcons,
 		UIIconsFont:         cfg.UIIconsFont,
 		ConfigFile:          opts.Config,
+
+		LineEnding:             cfg.LineEnding,
+		TrimTrailingWhitespace: cfg.TrimTrailingWhitespace,
+		EnsureFinalNewline:     cfg.EnsureFinalNewline,
 	}
 	if opts.Theme != "" {
 		s.Theme = opts.Theme

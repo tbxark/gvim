@@ -34,12 +34,16 @@ const minSplitExtent = 3
 // The focused leaf takes both from the editor, so its own fields are stale until the
 // focus leaves it (keepFocused). An inner node divides its area between a, the top
 // or left child, and b, the bottom or right child. ratio is the percentage a takes.
+// A leaf has an id, the window id of the plugin API. It is given on first use (idOf) and
+// stays with the window through splits, closes and focus changes; a split passes it to
+// the child that keeps the old pane.
 type splitNode struct {
 	dir   splitDir
 	a, b  *splitNode
 	ratio int // the percentage of the area the first child takes; zero means splitEven
 	tab   int
 	top   int
+	id    uint64 // the window id, or zero until idOf gives one
 }
 
 // splitEven is the share of the first child in an even split, and the share a zero ratio
@@ -75,6 +79,16 @@ type splitSet struct {
 	maximized bool       // the focused leaf fills the body and the other leaves have no area
 	seenTab   int        // the active tab noteTab last saw, or -1
 	prevTab   int        // the tab that was active before the last switch, or -1
+	lastID    uint64     // the last window id idOf gave out; ids are never reused
+}
+
+// idOf returns the window id of leaf n, giving it the next one when it has none.
+func (s *splitSet) idOf(n *splitNode) uint64 {
+	if n.id == 0 {
+		s.lastID++
+		n.id = s.lastID
+	}
+	return n.id
 }
 
 // newSplitSet returns the state with one leaf, which has the focus.
@@ -158,9 +172,16 @@ func (m *Model) splitAction(action string) {
 // child, shows the same tab at the same top, and takes the focus. A pane too small to
 // hold two children is not split.
 func (m *Model) splitFocused(dir splitDir) {
+	if msg := m.trySplit(dir); msg != "" {
+		m.notice = msg
+	}
+}
+
+// trySplit is splitFocused that returns the reason a split did not happen, or "" when it
+// did, instead of showing it.
+func (m *Model) trySplit(dir splitDir) string {
 	if !m.hasDocument() {
-		m.notice = noDocumentNotice
-		return
+		return noDocumentNotice
 	}
 	// The room is measured on the panes as they are laid out, so a maximized pane is
 	// restored first.
@@ -171,18 +192,20 @@ func (m *Model) splitFocused(dir splitDir) {
 		extent = fp.h
 	}
 	if extent < minSplitExtent {
-		m.notice = "Not enough room to split"
-		return
+		return "Not enough room to split"
 	}
 	m.keepFocused()
 	f := m.splits.focus
 	f.dir = dir
-	f.a = &splitNode{tab: f.tab, top: f.top}
+	// The first child is the pane as it was, so it keeps the window id.
+	f.a = &splitNode{tab: f.tab, top: f.top, id: f.id}
 	f.b = &splitNode{tab: f.tab, top: f.top}
+	f.id = 0
 	m.splits.focus = f.b
 	m.splits.comparing = false
 	m.syncViewport()
 	m.revealCaretVisual(0)
+	return ""
 }
 
 // moveFocus moves the focus delta panes along the reading order, and wraps at the
@@ -419,6 +442,7 @@ func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 		Diagnostics: m.lspSpans(doc),
 	}
 	pane = m.viewPane(pane, doc)
+	pane = m.plugDecor(pane, doc)
 	if p.focused {
 		pane = m.applyPan(pane, doc)
 	}

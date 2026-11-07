@@ -192,6 +192,7 @@ func (b *Buffer) RestoreOverlay(o OverlayState) error {
 	b.open = false
 	b.ver = b.seq
 	b.trimHistory()
+	b.notifyCoarse(false)
 	return nil
 }
 

@@ -172,6 +172,29 @@ func (b *Buffer) Close() error {
 	return nil
 }
 
+// LinesBytesOver reports whether the text of lines i..j (inclusive, joined by newlines) is
+// certainly longer than limit bytes, and a number of bytes that it is at least. It answers
+// from the line index and the edit overlay alone and reads no line, in time that does not
+// depend on the number of lines, so a caller can refuse a request that is too large
+// before it does the work of finding out. A false answer says nothing: the text may be
+// longer all the same. A memory buffer, which a caller measures line by line at no
+// cost, and a large buffer that holds a line cut at the line cap, whose length the index
+// does not know, always answer false.
+func (b *Buffer) LinesBytesOver(i, j int, limit int64) (n int64, over bool) {
+	s := b.big
+	if s == nil || s.hugeSeen() || i < 0 || j >= s.lines() || i > j {
+		return 0, false
+	}
+	// The estimate counts a CRLF as two bytes, but the text joins lines with one newline:
+	// a byte per terminator comes off so it stays a lower bound.
+	joins := int64(j - i)
+	est, err := s.spanBytes(i, j, limit+joins)
+	if err != nil {
+		return 0, false
+	}
+	return est - joins, est-joins > limit
+}
+
 // Stats reports the buffer's work counters.
 func (b *Buffer) Stats() Stats {
 	s := b.big

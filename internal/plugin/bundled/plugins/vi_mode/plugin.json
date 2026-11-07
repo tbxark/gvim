@@ -1,0 +1,7 @@
+{
+  "name": "vi_mode",
+  "version": "1.0.0",
+  "description": "Vi-style modal editing: normal, insert and visual modes, counts, operators, motions, text objects, registers, dot repeat and : commands",
+  "api": 1,
+  "default_enabled": false
+}

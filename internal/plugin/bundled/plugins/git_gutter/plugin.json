@@ -1,0 +1,7 @@
+{
+  "name": "git_gutter",
+  "version": "1.0.0",
+  "description": "Git change markers in the gutter and on the scrollbar, and Next/Previous Change",
+  "api": 1,
+  "default_enabled": true
+}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -18,12 +19,14 @@ import (
 	"github.com/tbxark/gvim/internal/config"
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/lsp"
+	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/ui"
 )
 
 // lspRequestTimeout bounds one request to a server. The Manager bounds its own
-// steps (start, handshake, document notifications) separately.
-const lspRequestTimeout = 10 * time.Second
+// steps (start, handshake, document notifications) separately. It is a variable so
+// that a test can shorten it.
+var lspRequestTimeout = 10 * time.Second
 
 // lspStopTimeout bounds the shutdown of the servers, on lsp_stop and at exit.
 const lspStopTimeout = 5 * time.Second
@@ -214,6 +217,39 @@ func (p *lspPort) CodeActions(path string, at buffer.Pos) ([]string, error) {
 	return titles, nil
 }
 
+// maxRequestResult bounds the raw JSON result of Request that is decoded: a plugin must
+// not be able to make the editor build a value of any size.
+const maxRequestResult = 4 << 20
+
+// Request sends one request of the protocol to the server that has the document at path
+// open, and returns the decoded JSON result. The caller bounds nothing: the call is
+// limited by lspRequestTimeout, and the result by maxRequestResult.
+func (p *lspPort) Request(path, method string, params any) (any, error) {
+	c, _, err := p.client(path)
+	if err != nil {
+		if errors.Is(err, lsp.ErrNotOpen) {
+			return nil, pluginapi.Errf(pluginapi.CodeNotFound, "%v", err)
+		}
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
+	defer cancel()
+	raw, err := c.Request(ctx, method, params)
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return nil, pluginapi.Errf(pluginapi.CodeTimeout, "%s did not answer in %v", method, lspRequestTimeout)
+	case err != nil:
+		return nil, err
+	case len(raw) > maxRequestResult:
+		return nil, pluginapi.Errf(pluginapi.CodeTooLarge, "the result of %s is over %d bytes", method, maxRequestResult)
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("lsp: %s: bad result: %w", method, err)
+	}
+	return out, nil
+}
+
 // Restart shuts down the servers of the current root. The Manager forgets their
 // documents, and the root opens them again on its next sync.
 func (p *lspPort) Restart() error {
@@ -401,11 +437,13 @@ func (l textLines) rangeOf(r *protocol.Range) *ui.LSPRange {
 func uiDiagnostics(lines textLines, ds []protocol.Diagnostic) []ui.Diagnostic {
 	out := make([]ui.Diagnostic, 0, len(ds))
 	for _, d := range ds {
+		source, _ := d.Source.Get()
 		out = append(out, ui.Diagnostic{
 			Start:    lines.fromLSP(d.Range.Start),
 			End:      lines.fromLSP(d.Range.End),
 			Severity: int(d.Severity),
 			Message:  diagnosticText(d.Message),
+			Source:   source,
 		})
 	}
 	return out

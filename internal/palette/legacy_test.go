@@ -26,12 +26,33 @@ func loadLegacyLists(t *testing.T) map[string][]string {
 	return l.Queries
 }
 
+// freshCommands is Commands as the legacy palette lists it: without the rows gvim adds
+// for its plugin manager, and with the generated text of the rows that gvimRenames
+// rewrites from init.ts to init.lua. The captured lists are Fresh's, so they stay as
+// they are and the gvim additions are taken out of the table they are compared with.
+func freshCommands() []Entry {
+	orig := map[string]builtinCommand{}
+	for _, c := range builtinCommands {
+		orig[c.Action] = c
+	}
+	var out []Entry
+	for _, e := range Commands(nil) {
+		c, ok := orig[e.Action]
+		if !ok {
+			continue
+		}
+		e.Name, e.Description = c.Name, c.Description
+		out = append(out, e)
+	}
+	return out
+}
+
 // TestSearchMatchesLegacyPalette checks the complete ranked list, not only the
 // first rows, for every query captured from the legacy palette.
 func TestSearchMatchesLegacyPalette(t *testing.T) {
 	for query, want := range loadLegacyLists(t) {
 		var got []string
-		for _, e := range Search(Commands(nil), ">"+query) {
+		for _, e := range Search(freshCommands(), ">"+query) {
 			got = append(got, e.Name)
 		}
 		if !slices.Equal(got, want) {

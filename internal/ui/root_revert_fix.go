@@ -74,6 +74,13 @@ func (m *Model) revertAnswer(d prompt.Done) tea.Cmd {
 // the file. The plan's refusal is the notice. An editor without the revert surface runs
 // the revert action, and the editor's refusal is the notice.
 func (m *Model) startRevert(force bool) tea.Cmd {
+	cmd, _ := m.startRevertErr(force)
+	return cmd
+}
+
+// startRevertErr is startRevert that also returns the refusal, which the plugin host
+// reports instead of guessing it from the notice row.
+func (m *Model) startRevertErr(force bool) (tea.Cmd, error) {
 	as, ok := m.ed.(asyncReverter)
 	if !ok {
 		res := m.editorDo("revert", map[string]any{"force": force})
@@ -81,14 +88,14 @@ func (m *Model) startRevert(force bool) tea.Cmd {
 		if res.Err != nil {
 			m.notice = res.Err.Error()
 		}
-		return nil
+		return nil, res.Err
 	}
 	plan, err := as.PlanRevert(force)
 	if err != nil {
 		m.notice = err.Error()
-		return nil
+		return nil, err
 	}
-	return readRevert(as, plan, false)
+	return readRevert(as, plan, false), nil
 }
 
 // readRevert returns the command that reads the file of plan. The read runs in the command,
@@ -103,23 +110,32 @@ func readRevert(as asyncReverter, plan editor.RevertPlan, auto bool) tea.Cmd {
 // the buffer keeps its text. A text that changed after the plan asks again, since the file
 // read may no longer match the buffer. An auto-revert does not ask: its notice says why.
 func (m *Model) revertDone(msg revertDoneMsg) tea.Cmd {
+	_ = m.revertDoneErr(msg)
+	return nil
+}
+
+// revertDoneErr is revertDone that also returns why the buffer was not reverted.
+func (m *Model) revertDoneErr(msg revertDoneMsg) error {
 	as, ok := m.ed.(asyncReverter)
 	if !ok {
-		return nil
+		return msg.result.Err
 	}
 	if msg.result.Err != nil {
 		m.notice = msg.result.Err.Error()
-		return nil
+		return msg.result.Err
 	}
 	err := as.ApplyRevert(msg.plan, msg.result)
 	m.syncViewport()
+	if err == nil {
+		m.plugReverted(msg.plan.Path)
+	}
 	switch {
 	case errors.Is(err, editor.ErrStaleRevert) && !msg.auto:
 		m.pushOverlay(confirmOverlay{c: prompt.NewConfirm(m.styles, "Text changed during the revert. Try again?", revertRetryTag{})})
 	case err != nil:
 		m.notice = err.Error()
 	}
-	return nil
+	return err
 }
 
 // revertRetryAnswer runs the revert again when the retry confirm answered Yes. It goes

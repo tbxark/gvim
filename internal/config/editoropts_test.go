@@ -455,7 +455,7 @@ func TestNestedEditorParsing(t *testing.T) {
 		}},
 		{"default_language", `{"default_language": "bash"}`, func(c Config) bool { return c.DefaultLanguage == "bash" }},
 		{"empty keybindings list", `{"keybindings": []}`, func(c Config) bool { return c.Keybindings == nil }},
-		{"ignored fresh keys", `{"check_for_updates": false, "clipboard": {"use_osc52": true}, "plugins": {}, "version": 1}`, func(c Config) bool { return true }},
+		{"ignored fresh keys", `{"check_for_updates": false, "clipboard": {"use_osc52": true}, "version": 1}`, func(c Config) bool { return true }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

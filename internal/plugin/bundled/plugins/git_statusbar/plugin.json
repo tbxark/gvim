@@ -1,0 +1,7 @@
+{
+  "name": "git_statusbar",
+  "version": "1.0.0",
+  "description": "The current git branch as a status bar item",
+  "api": 1,
+  "default_enabled": true
+}

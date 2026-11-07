@@ -8,6 +8,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/buffer"
 	"github.com/tbxark/gvim/internal/syntax"
+	"github.com/tbxark/gvim/internal/ui/grid"
 )
 
 // defaultTabSize is the tab width in cells when Pane.TabSize is zero.
@@ -28,6 +29,8 @@ type cell struct {
 	lvl   uint8     // the rainbow level of the mark
 	pair  bool      // a bracket of the pair at the caret
 	glue  bool      // joined to the next cell: a cell of a control escape but the last
+	dec   uint16    // the look an overlay gives the cell: an index into overlayFX.looks plus one, or 0
+	rep   uint16    // the text an overlay draws instead of the rune: repHidden, an index into overlayFX.reps plus two, or 0
 }
 
 // blankKind says whether a cell is a blank of the text: a space, the first cell of a
@@ -53,7 +56,7 @@ const (
 // sameAttr reports whether two cells paint with the same attributes.
 func (c cell) sameAttr(o cell) bool {
 	return c.kind == o.kind && c.sel == o.sel && c.match == o.match && c.ws == o.ws && c.diag == o.diag &&
-		c.mark == o.mark && c.lvl == o.lvl && c.pair == o.pair
+		c.mark == o.mark && c.lvl == o.lvl && c.pair == o.pair && c.dec == o.dec && c.rep == o.rep && c.rep < 2
 }
 
 // line is one buffer line laid out for painting. geom holds the expanded runes
@@ -75,6 +78,9 @@ type line struct {
 	pad    []cell
 	off    int
 	long   bool
+	// tail is the look of the row past the end of the text, when an overlay gives it one.
+	tail    grid.Style
+	hasTail bool
 }
 
 // layoutLine lays out buffer line i. styled also resolves the syntax kinds and
@@ -115,6 +121,7 @@ func (f frame) layoutLine(i int, styled bool) line {
 		f.markOccurrences(i, raw, ln.cells)
 		f.markMatches(i, raw, ln.cells)
 		f.markDiagnostics(i, raw, ln.cells)
+		f.markOverlays(i, raw, &ln)
 		f.decorate(i, raw, kinds, &ln)
 	}
 	return ln
@@ -199,6 +206,8 @@ func cellAdvance(col int, r rune, tab int) int {
 		return tab - col%tab
 	case controlRune(r):
 		return controlWidth
+	case r < 0x7f: // printable ASCII, the common case, with no string to build
+		return 1
 	}
 	return ansi.StringWidth(string(r))
 }
@@ -242,6 +251,30 @@ func expandedIndex(raw []rune, col, tab int) int {
 		}
 	}
 	return out
+}
+
+// expandedTable returns expandedIndex(raw, col, tab) for every col of 0..len(raw), in one
+// pass over raw, for a caller that asks about many columns of one line.
+func expandedTable(raw []rune, tab int) []int {
+	out := make([]int, len(raw)+1)
+	n, cells := 0, 0
+	for i, r := range raw {
+		out[i] = n
+		adv := cellAdvance(cells, r, tab)
+		cells += adv
+		if r == '\t' || controlRune(r) {
+			n += adv
+		} else {
+			n++
+		}
+	}
+	out[len(raw)] = n
+	return out
+}
+
+// lookup is expandedIndex(raw, col, tab) read from a table made by expandedTable.
+func lookup(table []int, col int) int {
+	return table[min(max(col, 0), len(table)-1)]
 }
 
 // runeIndexAt returns the rune index of the character that covers display

@@ -100,6 +100,15 @@ func (f frame) paintHorizontalBar(g *grid.Grid) {
 	}
 }
 
+// droppedBeyond returns how many of the n columns that dropColumns drops are past the end
+// of cells: the distance by which the row ended left of the window.
+func droppedBeyond(cells []cell, n int) int {
+	for _, c := range cells {
+		n -= ansi.StringWidth(string(c.r))
+	}
+	return max(n, 0)
+}
+
 // dropColumns returns cells without its first n display columns. A cell that
 // straddles the cut is dropped with the columns before it.
 func dropColumns(cells []cell, n int) []cell {

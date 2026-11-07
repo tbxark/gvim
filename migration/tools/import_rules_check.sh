@@ -13,12 +13,25 @@
 #   R3  internal/editor does not import internal/ui, lsp, markdown, finder or fsops.
 #   R4  internal/search does not import internal/editor or internal/ui.
 #   R5  internal/ui does not import internal/app or internal/cli, and (ARCH-v4
-#       section 2) not the concrete lsp, markdown, finder or fsops packages.
+#       section 2) not the concrete lsp, markdown, finder or fsops packages. It
+#       does not import internal/plugin, internal/plugin/... or internal/luapat
+#       either; it may import internal/pluginapi and internal/decor.
 #   R6  internal/cli does not import internal/ui, editor, lsp or markdown.
 #   R7  only main and internal/cli may import internal/app; only main may
-#       import internal/cli.
+#       import internal/cli. Only internal/app (and main through it) may import
+#       internal/plugin; its own sub-packages may import each other.
 #   R8  no production package (anything in the dependency tree of the main
 #       package) imports internal/buffer/buffertest, the test-support sources.
+#   R9  internal/pluginapi and internal/decor import no package of this module
+#       and no charm.land/* or github.com/charmbracelet/* package.
+#   R10 internal/plugin/... (bundled and plugintest included) and internal/luapat
+#       import only the standard library, github.com/yuin/gopher-lua (and its
+#       sub-packages), github.com/tailscale/hujson, internal/pluginapi and
+#       internal/luapat, internal/plugin/bundled (the embedded Lua that require and
+#       discovery read), and (only
+#       plugintest) internal/plugin/.... No charm.land/*.
+#   R11 internal/editor, internal/buffer and internal/decor do not import
+#       internal/pluginapi.
 #
 # Packages that do not exist yet are skipped. Bash 3.2 compatible (macOS).
 
@@ -122,7 +135,8 @@ while IFS=$'\t' read -r pkg imp; do
   if under "$rel" internal/ui && [ "$ours" = 1 ]; then
     if under "$irel" internal/app || under "$irel" internal/cli ||
       under "$irel" internal/lsp || under "$irel" internal/markdown ||
-      under "$irel" internal/finder || under "$irel" internal/fsops; then
+      under "$irel" internal/finder || under "$irel" internal/fsops ||
+      under "$irel" internal/plugin || under "$irel" internal/luapat; then
       add R5 "$pkg" "$imp"
     fi
   fi
@@ -143,11 +157,52 @@ while IFS=$'\t' read -r pkg imp; do
     if under "$irel" internal/cli && [ -n "$rel" ]; then
       add R7 "$pkg" "$imp"
     fi
+    if under "$irel" internal/plugin && [ -n "$rel" ] && [ "$rel" != internal/app ] &&
+      ! under "$rel" internal/plugin; then
+      add R7 "$pkg" "$imp"
+    fi
   fi
 
   # R8
   if [ "$imp" = "$mod/internal/buffer/buffertest" ] && printf '%s\n' "$prod" | grep -qxF "$pkg"; then
     add R8 "$pkg" "$imp"
+  fi
+
+  # R9
+  if [ "$rel" = internal/pluginapi ] || [ "$rel" = internal/decor ]; then
+    case "$imp" in
+      "$mod" | "$mod"/* | charm.land/* | github.com/charmbracelet/*)
+        add R9 "$pkg" "$imp"
+        ;;
+    esac
+  fi
+
+  # R10
+  if under "$rel" internal/plugin || under "$rel" internal/luapat; then
+    if [ "$ours" = 1 ]; then
+      if [ "$irel" != internal/pluginapi ] && [ "$irel" != internal/luapat ] &&
+        [ "$irel" != internal/plugin/bundled ] &&
+        { ! under "$rel" internal/plugin/plugintest || ! under "$irel" internal/plugin; }; then
+        add R10 "$pkg" "$imp"
+      fi
+    else
+      first=${imp%%/*}
+      case "$first" in
+        *.*)
+          case "$imp" in
+            github.com/yuin/gopher-lua | github.com/yuin/gopher-lua/* | github.com/tailscale/hujson) ;;
+            *) add R10 "$pkg" "$imp" ;;
+          esac
+          ;;
+      esac
+    fi
+  fi
+
+  # R11
+  if [ "$imp" = "$mod/internal/pluginapi" ]; then
+    if under "$rel" internal/editor || under "$rel" internal/buffer || under "$rel" internal/decor; then
+      add R11 "$pkg" "$imp"
+    fi
   fi
 done <<<"$edges"
 

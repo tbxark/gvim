@@ -118,6 +118,75 @@ func TestGotoLineScrollsCaretIntoView(t *testing.T) {
 	}
 }
 
+// GotoLine is the jump used by LSP, session restore and CLI positions: it always clears
+// the selection. Only GotoLineSelecting (the go-to-line prompt) extends it in mark mode.
+func TestGotoLineJumpsClearTheSelectionEvenInMarkMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		actions   []Action
+		selecting bool
+		wantSel   bool
+	}{
+		{"mark mode: a jump clears the selection", []Action{"set_mark"}, false, false},
+		{"mark mode: the prompt selects up to the line", []Action{"set_mark"}, true, true},
+		{"the prompt without a mark is a plain goto", nil, true, false},
+		{"after clear_mark the prompt is plain", []Action{"set_mark", "clear_mark"}, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := New(Options{})
+			typeText(t, e, "aaa\nbbb\nccc\nddd")
+			e.SetCursor(buffer.Pos{Line: 1, Col: 1}, false)
+			if len(tt.actions) > 0 {
+				run(t, e, tt.actions...)
+			}
+			goto_ := e.GotoLine
+			if tt.selecting {
+				goto_ = e.GotoLineSelecting
+			}
+			if err := goto_(4, 2); err != nil {
+				t.Fatal(err)
+			}
+			d := e.Active()
+			if d.Cursor != (buffer.Pos{Line: 3, Col: 1}) {
+				t.Fatalf("caret = %v, want 3:1", d.Cursor)
+			}
+			want := buffer.Pos{Line: 1, Col: 1}
+			switch {
+			case tt.wantSel && (d.Sel == nil || d.Sel.Anchor != want || d.Sel.Head != d.Cursor):
+				t.Fatalf("selection = %+v, want %v to %v", d.Sel, want, d.Cursor)
+			case !tt.wantSel && d.Sel != nil:
+				t.Fatalf("selection = %+v, want none", d.Sel)
+			}
+		})
+	}
+}
+
+func TestPendingGotoKeepsItsSelectingFlag(t *testing.T) {
+	t.Parallel()
+	for _, selecting := range []bool{false, true} {
+		e, d := openLarge(t, largeOptions(), lineText(400))
+		start := d.Cursor
+		run(t, e, "set_mark")
+		goto_ := e.GotoLine
+		if selecting {
+			goto_ = e.GotoLineSelecting
+		}
+		if err := goto_(300, 3); err != nil {
+			t.Fatal(err)
+		}
+		stepUntil(t, e, func() bool { return d.large.pending == nil })
+		if want := (buffer.Pos{Line: 299, Col: 2}); d.Cursor != want {
+			t.Fatalf("selecting=%v: caret = %v, want %v", selecting, d.Cursor, want)
+		}
+		if got := d.Sel != nil && d.Sel.Anchor == start; got != selecting {
+			t.Fatalf("selecting=%v: selection = %+v", selecting, d.Sel)
+		}
+	}
+}
+
 func TestRemoveSecondaryCursorsClearsSelectionAndMarkSilently(t *testing.T) {
 	t.Parallel()
 	e := New(Options{})

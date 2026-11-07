@@ -42,13 +42,44 @@ func (m *Model) save() tea.Cmd {
 }
 
 // saveThen runs the save of the active tab, and then goes on with f. The save is planned
-// here and written by the command it returns, so the file is not written in Update.
+// here and written by the command it returns, so the file is not written in Update. The
+// plugins may cancel it first (before_file_save), which ends the flow as well. A buffer
+// without a path (the Save As dialog follows and raises the event for its target) and a
+// read-only one (the editor refuses) are not gated, because nothing is written for them.
 func (m *Model) saveThen(f flow) tea.Cmd {
+	if !m.activeSaveWrites() {
+		cmd, _ := m.saveThenErr(f)
+		return cmd
+	}
+	cancel, _, gate := m.pluginSaveGate("manual")
+	if cancel {
+		return gate
+	}
+	cmd, _ := m.saveThenErr(f)
+	return tea.Batch(gate, cmd)
+}
+
+// activeSaveWrites reports whether a save of the active buffer can write a file: it has a
+// path and is writable. Without a plugin editor port it says yes, as the gate then has
+// nothing to name.
+func (m *Model) activeSaveWrites() bool {
+	pe := m.plug.pe
+	if pe == nil {
+		return true
+	}
+	info, ok := pe.Buffer(pe.ActiveBuffer())
+	return !ok || (info.Path != "" && !info.ReadOnly)
+}
+
+// saveThenErr is saveThen that also returns the error of the plan or of the editor's
+// save, which the plugin host reports instead of guessing it from the notice row.
+func (m *Model) saveThenErr(f flow) (tea.Cmd, error) {
 	if as, ok := m.ed.(asyncSaver); ok {
 		p, err := as.PlanSave()
-		return m.planned(as, p, err, f, false, true)
+		return m.planned(as, p, err, f, false, true), err
 	}
-	return m.finished(m.ed.Do("save", nil).Err, f, false)
+	err := m.ed.Do("save", nil).Err
+	return m.finished(err, f, false), err
 }
 
 // saveAs runs Save As to path. The editor refuses a path that another tab has open, and
@@ -56,17 +87,37 @@ func (m *Model) saveThen(f flow) tea.Cmd {
 // before it sends Replace, so the refusal only shows up when the dialog could not check
 // the disk. A success reloads the explorer and goes on with the flow.
 func (m *Model) saveAs(path string, force bool, f flow) tea.Cmd {
+	cancel, gate := m.pluginSaveAsGate(path)
+	if cancel {
+		return gate
+	}
+	cmd, _ := m.saveAsErr(path, force, f)
+	return tea.Batch(gate, cmd)
+}
+
+// saveAsErr is saveAs that also returns the error of the plan or of the editor's save.
+func (m *Model) saveAsErr(path string, force bool, f flow) (tea.Cmd, error) {
 	if as, ok := m.ed.(asyncSaver); ok {
 		p, err := as.PlanSaveAs(path, force)
-		return m.planned(as, p, err, f, true, false)
+		return m.planned(as, p, err, f, true, false), err
 	}
 	args := map[string]any{"path": path, "force": force}
-	return m.finished(m.ed.Do("save_as", args).Err, f, true)
+	err := m.ed.Do("save_as", args).Err
+	return m.finished(err, f, true), err
 }
 
 // saveAll runs save_all. Its summary is the status of the active tab, which the editor
-// sets when the results are applied.
+// sets when the results are applied. The plugins may cancel it first (before_file_save).
 func (m *Model) saveAll() tea.Cmd {
+	cancel, gate := m.pluginSaveAllGate("manual")
+	if cancel {
+		return gate
+	}
+	return tea.Batch(gate, m.saveAllPlanned())
+}
+
+// saveAllPlanned plans and starts the writes of save_all.
+func (m *Model) saveAllPlanned() tea.Cmd {
 	if as, ok := m.ed.(asyncSaver); ok {
 		p, err := as.PlanSaveAll()
 		return m.plannedFor(true, as, p, err, flow{}, false, false)
@@ -105,6 +156,7 @@ func (m *Model) saveDone(msg saveDoneMsg) tea.Cmd {
 		return m.quitIfWaiting()
 	}
 	err := as.ApplySavePlan(msg.plan, msg.results)
+	m.plugSaved(msg.results)
 	if cmd := m.quitIfWaiting(); cmd != nil {
 		// A quit was waiting for this write. Its results are recorded, and the program ends.
 		return cmd

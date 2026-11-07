@@ -112,6 +112,16 @@ type Pane struct {
 	// Opts are the editor.* display options: relative numbers, hanging indent,
 	// guides, whitespace marks and bracket highlights. The zero value is the plain pane.
 	Opts Options
+
+	// The overlay hooks (see overlays.go) give the decorations of one line. The root sets
+	// them in paneGeometry, the one place that builds the pane for the painter and the
+	// hit test alike. Nil paints none.
+	Overlays    func(line int) []StyledSpan       // styled runs, rune columns
+	RowStyle    func(line int) (grid.Style, bool) // the look of whole rows
+	EOL         func(line int) []VirtualText      // text after the last cell
+	Replaces    func(line int) []Replacement      // text over single cells
+	Gutter      func(line int) (GutterMark, bool) // replaces the change bar
+	ScrollMarks func(line int) (ScrollMark, bool) // colors the last column
 }
 
 // CaretShape is the look of the caret cell. The root shapes the terminal caret the
@@ -254,6 +264,8 @@ type frame struct {
 	keepLeft    bool
 	opts        Options
 	fx          *frameFX // the state of the options, set by initFX
+	hooks       overlayHooks
+	dx          *overlayFX // the looks of the overlays; nil when the pane has no overlay hook
 }
 
 // newFrame builds the frame for a w by h pane. It reports false when there is
@@ -287,6 +299,10 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		noHBar:      p.HideHorizontalScrollbar,
 		caretShape:  p.CaretShape,
 		keepLeft:    p.KeepLeft,
+		hooks:       p.overlayHooks(),
+	}
+	if f.hooks.any() {
+		f.dx = &overlayFX{}
 	}
 	if p.HideGutter {
 		f.gutter = 0
@@ -314,13 +330,26 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 	return f, true
 }
 
+// ChangeMemo is implemented by a Document that keeps the change marks until its text or
+// its saved text changes, as *editor.Document does. A repaint then does not diff all the
+// lines again. The maps are shared between frames and are only read.
+type ChangeMemo interface {
+	MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, scroll map[int]bool)
+}
+
 // changes diffs the saved lines against the current lines.
 func (f frame) changes() (bar, scroll map[int]bool) {
-	cur := make([]string, f.lines)
-	for i := range cur {
-		cur[i] = f.doc.Line(i)
+	compute := func() (map[int]bool, map[int]bool) {
+		cur := make([]string, f.lines)
+		for i := range cur {
+			cur[i] = f.doc.Line(i)
+		}
+		return changeMarks(f.doc.SavedLines(), cur)
 	}
-	return changeMarks(f.doc.SavedLines(), cur)
+	if m, ok := f.doc.(ChangeMemo); ok {
+		return m.MemoChanges(compute)
+	}
+	return compute()
 }
 
 // Render paints the pane into a new w by h grid. Body rows past the end of the
@@ -397,7 +426,11 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 				g.Put(0, y, f.w-1, label, f.numberStyle(i))
 			}
 			cells := f.rowCells(ln, k, sp)
+			// skip is how far left of the window the line ended: its virtual text starts
+			// that many columns left of the first text column.
+			skip := 0
 			if drop := f.dropFor(ln); drop > 0 {
+				skip = droppedBeyond(cells, drop)
 				cells = dropColumns(cells, drop)
 			}
 			end := f.paintCells(g, y, cells, cur)
@@ -406,6 +439,10 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 			}
 			if cur && f.styles.CurrentLine.BG != nil {
 				g.Fill(end, f.w-1, y, grid.Style{FG: f.styles.Text.FG, BG: f.styles.CurrentLine.BG})
+			}
+			f.paintRowTail(g, ln, y, end, cur)
+			if k == len(ln.spans)-1 {
+				f.paintVirtualText(g, ln, i, y, end, skip, cur)
 			}
 			if k == 0 {
 				// The marker is drawn after the text, so it never covers a text cell.
@@ -436,7 +473,12 @@ func (f frame) paintCells(g *grid.Grid, y int, cells []cell, cur bool) int {
 		}
 		var b strings.Builder
 		for _, c := range cells[start:end] {
-			b.WriteRune(c.r)
+			switch {
+			case c.rep == 0:
+				b.WriteRune(c.r)
+			case c.rep > repHidden:
+				b.WriteString(f.dx.repText(c.rep))
+			}
 		}
 		x += g.Put(x, y, maxX, b.String(), f.style(cells[start], cur))
 		start = end
@@ -480,6 +522,9 @@ func (f frame) style(c cell, cur bool) grid.Style {
 		}
 	}
 	f.decorStyle(c, &st)
+	if c.dec != 0 {
+		st = PatchStyle(st, f.dx.look(c.dec))
+	}
 	if c.diag != 0 {
 		if fg := f.diagnosticFG(c.diag); fg != nil {
 			st.FG = fg
@@ -503,10 +548,15 @@ func (f frame) paintMarks(g *grid.Grid, rows []rowInfo) {
 	last := f.w - 1
 	thumbStart, thumbLen := f.thumb()
 	for _, r := range rows {
-		if f.bar[r.line] && f.gutter > 0 {
+		if text, st, ok := f.gutterMark(r.line); ok {
+			g.Set(0, r.y, text, st)
+		} else if f.bar[r.line] && f.gutter > 0 {
 			g.Set(0, r.y, changeBar, f.styles.Gutter)
 		}
+		st, marked := f.scrollMark(r.line)
 		switch {
+		case marked:
+			g.Set(last, r.y, changeScroll, st)
 		case f.scroll[r.line]:
 			g.Set(last, r.y, changeScroll, f.styles.Gutter)
 		case f.overflow && f.noVBar:

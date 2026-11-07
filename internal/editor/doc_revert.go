@@ -244,7 +244,7 @@ func (e *Editor) ApplyRevert(plan RevertPlan, res RevertResult) error {
 func (d *Document) adoptFile(text string, fresh *Document) {
 	d.Buffer.MarkSaved()
 	d.metaDirty = false
-	d.saved = text
+	d.setSaved(text)
 	if fresh == nil {
 		return
 	}
@@ -298,9 +298,9 @@ func revertDocument(e *Editor, _ *Document, args map[string]any) error {
 func (e *Editor) swapFile(d, fresh *Document) {
 	cursor, top := d.Cursor, d.Top
 	e.releaseDoc(d)
-	d.Buffer = fresh.Buffer
+	d.setBuffer(fresh.Buffer)
 	d.large = fresh.large
-	d.saved = fresh.saved
+	d.setSaved(fresh.saved)
 	d.eol, d.ends, d.disk = fresh.eol, fresh.ends, fresh.disk
 	d.codec, d.encoding = fresh.codec, fresh.encoding
 	d.readOnly, d.binary = fresh.readOnly, fresh.binary

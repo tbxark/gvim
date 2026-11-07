@@ -44,6 +44,7 @@ internal/ui/                  bubbletea v2 root model; consumer-defined interfac
   statusbar/                  status line, notices, spinner
   style/                      lipgloss styles built from internal/theme (the only lipgloss user besides components)
   grid/                       cell surface (from internal/tui/grid.go)
+  picker/                     list overlay with filtering for plugin pickers and the plugin manager (no ui import)
 internal/buffer/              text storage, Pos
 internal/editor/              Editor, Document, Tab, Action, Result
 internal/search/              find and replace over buffer lines (stdlib regexp)
@@ -58,6 +59,12 @@ internal/syntax/              chroma lexer resolution, token spans per visible r
 internal/explorer/            model only: Tree, ListDir, gitignore
 internal/config/              (new) JSONC via tailscale/hujson, layered user and project config
 internal/lsp/                 (new, M8) go.lsp.dev client
+internal/pluginapi/           (new) plugin contract: plain types, Host and Runtime interfaces, error codes; stdlib only
+internal/plugin/              (new) Lua runtime on yuin/gopher-lua: sandbox, tasks, API modules, loader
+  bundled/                    //go:embed of the bundled Lua plugins (plugins/) and Lua modules (lib/)
+  plugintest/                 fake Host and OS, manual clock, Harness for plugin tests
+internal/luapat/              (new) Lua 5.1 pattern matcher with a step budget
+internal/decor/               (new) decoration store: namespaced items per buffer, edit anchoring; pure data
 internal/markdown/            (new, when needed) glamour/v2 renderer
 ```
 
@@ -66,9 +73,9 @@ internal/markdown/            (new, when needed) glamour/v2 renderer
 | `main` | `main()` | `internal/cli`, `internal/app`, stdlib | nothing |
 | `internal/cli` | `Execute(ctx, args, stdout, stderr, run Runner) int`, `NewRootCommand(run Runner) *cobra.Command`, `ParseTargets(args, stat) (Targets, error)`; `Runner func(ctx, app.Options) error` | cobra, pflag, `internal/app` (Options type only), stdlib | `ui`, `editor`, `lsp`, `markdown`, bubbletea |
 | `internal/app` | `Options`, `FileTarget`, `(Options).Validate()`, `Run(ctx, Options) error`, adapters | every domain and ui package, `internal/lsp`, `internal/markdown`, `internal/config`, stdlib | domain packages, `internal/ui` and its sub-packages, `internal/lsp`, `internal/markdown`, `internal/cli` (cli imports app, so app must not import cli), cobra |
-| `internal/ui` | `New(Deps) *Model` (tea.Model), `Deps`, the interfaces in section 3 | bubbletea, bubbles, lipgloss, `internal/ui/*`, value types from `editor`, `explorer`, `keymap`, `theme` | `app`, `cli`, `lsp` (concrete), `markdown` (concrete), `finder` (concrete), `fsops` |
+| `internal/ui` | `New(Deps) *Model` (tea.Model), `Deps`, the interfaces in section 3 | bubbletea, bubbles, lipgloss, `internal/ui/*`, value types from `editor`, `explorer`, `keymap`, `theme`, `internal/pluginapi`, `internal/decor` | `app`, `cli`, `lsp` (concrete), `markdown` (concrete), `finder` (concrete), `fsops`, `plugin` and `plugin/...`, `luapat` |
 | `internal/ui/editorpane` | `Pane`, `Document` interface | `buffer`, `syntax` (Span type), `grid`, `style`, lipgloss | `ui` root, `app` |
-| `internal/ui/palette`, `find`, `prompt`, `browser`, `explorer`, `menubar`, `statusbar` | sub-models with `Update(msg) (Model, tea.Cmd)` and `View` | bubbles, `style`, `grid`, domain model packages | `ui` root, `app` (sub-packages never import their parent) |
+| `internal/ui/palette`, `find`, `prompt`, `browser`, `explorer`, `menubar`, `statusbar`, `picker` | sub-models with `Update(msg) (Model, tea.Cmd)` and `View` | bubbles, `style`, `grid`, domain model packages | `ui` root, `app` (sub-packages never import their parent) |
 | `internal/buffer` | `Pos`, buffer ops | stdlib | nothing in this repo may be imported from `buffer`; it imports no internal package and no tea or lipgloss Large file mode (`OpenLarge`, `Snapshot`, `IndexScan`, `Rebase`; files `large_*.go`) keeps a file of at least `editor.large_file_threshold_bytes` on disk behind a line index and an edit overlay; `app` turns it on (`editor.Options.LargeFileMode`), and the caps are `buffer.MaxMaterialize` (16 MiB) for `Text`/`Range` and `buffer.DefaultMaxLine` (1 MiB) for a line. `GVIM_BIG_FILE=path go test ./internal/buffer -bench Large` and `go test ./internal/app -run TestBigFileAcceptance` measure it on a real file (not run in CI) |
 | `internal/editor` | `New(Options) *Editor`, `Active`, `Tabs`, `Status`, `Do`, `SetViewport`, `OpenFile`, `OpenPreview`, `SaveAs`, `RenamePath`, `CloseByPath`, `GotoLine`, `ExtendSelection`, `SetCursor`, `SelectRange`, `ScrollBy` [V, names read from the source with grep, not from `go doc`] | `buffer`, `search`, stdlib | `ui`, `lsp`, `markdown`, `finder`, `fsops` (app orchestrates renames across both), tea, lipgloss |
 | `internal/search` | find, replace, expand (planned) | `buffer`, stdlib | `editor`, `ui` (editor imports search) |
@@ -83,7 +90,45 @@ internal/markdown/            (new, when needed) glamour/v2 renderer
 | `internal/explorer` | `Open(dir) (*Tree, error)`, `Tree` methods, `ListDir(dir, ListOptions) ([]Entry, error)` [V] | stdlib | `ui`, `fsops`, `finder`, tea |
 | `internal/config` | `Load(paths) (Config, error)`, `Paths()` (planned, GAP item 27) | `hujson`, stdlib | `ui`, `editor` |
 | `internal/lsp` (M8) | `Start`, `Initialize`, `DidOpen`, `DidChange`, `DidClose`, `Shutdown`, `Close`, `Diagnostics() <-chan DiagnosticsEvent` (see section 6) | `go.lsp.dev/protocol`, `go.lsp.dev/jsonrpc2`, stdlib | `ui`, `editor`, `app` (app adapts) |
+| `internal/pluginapi` | `Host` and its parts, `Runtime`, `Services`, `Unsupported`, `Version`, `Error`/`Errf`/`CodeOf`, the plain data types | stdlib only (rule R9) | imports nothing of this repo; imported by `ui`, `plugin`, `app`, but never by `buffer`, `editor`, `decor` (rule R11) |
+| `internal/plugin` | `plugin.New(Options) *Runtime` (implements `pluginapi.Runtime`), `plugin.Compile`, `plugin.APIVersion`, sub-packages `bundled` (embedded Lua) and `plugintest` (test harness) | `pluginapi`, `luapat`, `plugin/bundled` (the embedded Lua that `require` and discovery read, through `bundled.Lib` and `bundled.FS`), `yuin/gopher-lua`, `hujson`, stdlib (rule R10); `plugintest` also `plugin/...` | `ui` and its sub-packages (R5), anything but `app` (R7), tea, lipgloss, `editor`, `buffer`, `config`, `lsp`, `fsops`, `finder`, `decor` |
+| `internal/luapat` | `Find`, `Match`, `GMatch`, `Gsub` with a step budget, a cancel hook and output caps | stdlib (rule R10) | `ui`; imported by `plugin` only |
+| `internal/decor` | decoration store keyed by buffer, plugin and namespace; byte columns | stdlib (rule R9) | imports nothing of this repo; imported by `ui` and `app`, never by `buffer`, `editor` (rule R11) |
 | `internal/markdown` (when needed) | `New(style string, opts ...Option) (*Renderer, error)`, `Render(ctx, src, width)` | `charm.land/glamour/v2`, stdlib | `ui`, `app` (app adapts) |
+
+### 2a. Plugin system files by package
+
+The Lua plugin system (design record: the Lua plugin design; user documentation: `docs/plugins/`)
+touches these packages. Every row obeys the import rules above (R1 to R11 in
+`migration/tools/import_rules_check.sh`).
+
+| Package | Files | Role |
+|---|---|---|
+| `internal/pluginapi` | `api.go host.go keys.go runtime.go unsupported.go` | the contract: plain types, `Host` (`BufferHost`, `WindowHost`, `CommandHost`, `UIHost`, `DecorHost`, `WorkspaceHost`), `Runtime`, `Services`, `Version`, `Error` codes; `Unsupported` implements every `Host` method |
+| `internal/plugin` | `runtime.go plugin.go task.go slice.go sandbox.go stdlib*.go require.go convert.go handles.go limits.go log.go os.go nopos.go hostcall.go` | the runtime core: state per plugin, tasks and the yield protocol, budgets and strikes, the heap guard, sandbox, `require`, Go to Lua conversion, quotas (`limits.go` is the single source of the caps) |
+| | `api_buf.go api_win.go api_cmd.go api_events.go api_keys.go api_ui.go api_status.go api_decor.go api_fs.go api_proc.go api_timer.go api_async.go api_state.go api_path.go api_root.go api_workspace.go api_plugins.go api_lsp.go api_data.go api_modules.go bindings.go` | one installer per `gvim.*` area; `api_modules.go` lists them in order |
+| | `data_json.go data_re.go data_text.go data_diff.go data_time.go data_utf8.go data_settings.go ioruntime.go uiinfo.go` | the data libraries, settings, the shared IO await, and what the ui reads from the runtime (`InitFile`, `NoPlugins`) |
+| | `discover.go manifest.go order.go lifecycle.go control.go` | the loader: discovery as `Work`, manifests, load order, enable and disable, reload, `load_text`, unload |
+| `internal/plugin/bundled` | `embed.go`, `plugins/<name>/`, `lib/git.lua` | the embedded Lua plugins and Lua modules |
+| `internal/plugin/plugintest` | `harness.go fakehost.go fake_*.go streams.go nopos.go` | the fake host (one `fake_<area>.go` per area, `fake_lsp.go` included), fake OS, manual clock, `Harness` |
+| `internal/luapat` | `luapat.go matcher.go` | the Lua pattern matcher with a step budget |
+| `internal/decor` | `decor.go apply.go line.go` | the decoration store: namespaces, anchors that follow edits, a per-line query |
+| `internal/buffer` | `observer.go bytecol.go` | the change observer and byte-column helpers |
+| `internal/editor` | `docid.go edit_api.go changes.go tabs_move.go docops_id.go save_info.go virtual.go` | document ids and generations, bulk `ApplyEdits`, change listeners and per-consumer `TakeChanges`, `MoveTab`, the id-based operations, `SaveResult.Written`, virtual documents |
+| `internal/search` | `range.go lines.go` | `FindRange` and `FindLines` (bounded, host-side search for plugins) |
+| `internal/keymap` | `chord.go` | `NormalizeChord`, `ValidateChord` |
+| `internal/palette` | `plugins.go plugin_commands.go` | `PluginEntry` and the plugin manager rows |
+| `internal/lsp` | `raw.go` | `Client.Request`, a generic request with a raw JSON result, behind `gvim.lsp.request` |
+| `internal/ui` | `plugin_host.go plugin_pump.go plugin_cmds.go plugin_events.go plugin_prompts.go plugin_keys.go plugin_idle.go plugin_status.go plugin_decor.go plugin_win.go plugin_virtual.go plugin_manager.go plugin_init.go plugin_quit.go plugin_lsp.go` | the host side: the pump (`Runtime` calls, deferral, `Work` as `tea.Cmd`), the event raise sites, overlays, key layer and modes, status items, decorations, windows, virtual buffers, manager, init.lua commands, quit and LSP |
+| `internal/ui/picker` | `picker.go` | the picker overlay used by plugin pickers and the manager |
+| `internal/ui/editorpane` | `decorstyles.go` | paints decorations (highlight, line, eol, gutter, scroll, replace) |
+| `internal/app` | `plugins.go pluginedit.go pluginos*.go pluginservices.go plugindecor.go pluginvirtual.go` | the composition: `plugin.New` with the real OS (process groups, fsnotify watchers with a kqueue entry limit, `os.OpenRoot`), the `BufferEditor` over the editor, `Services` (width, diff, fuzzy, grep, decode, git root and branch), the decoration listener, virtual buffers |
+| `internal/config`, `internal/cli` | `Config.Plugins`, `--no-plugins`, `--plugin PATH` | plugin settings by layer and the flags |
+
+Gates specific to the plugin system: `TestStubsMatchRuntime` and `TestDocsCoverTheAPI`
+(`docs/plugins` against the live runtime), `TestBundledPluginsIdleHeap` (the default-enabled bundled
+plugins keep at most 8 MiB of heap while idle), and the budget tests, which assert on step counts and
+budget errors, not on wall-clock thresholds.
 
 ## 3. Consumer-defined interfaces
 
@@ -265,7 +310,7 @@ Behavior:
 - Directory-or-file classification uses `os.Stat` through an injected `stat` function in `internal/cli/args.go`, so tests do not touch the disk.
 - A file named `config`, `grammar`, `completion` or `help` must be written `./name`. This is a cobra rule, observed in the prototype [V].
 - `workspace open DIR` is omitted (decision 14).
-- Fresh flags not adopted: `--cmd`, `--update`, `--skill`, `--attach`, `--stdin`, `--wait`, `--no-plugins`, `--safe`, `--event-log`, `--restore`, `--simple`, `--diff`, `--locale`, `--gui`, `--web`. Revisit `--stdin` and `--wait` after M2.
+- Fresh flags not adopted: `--cmd`, `--update`, `--skill`, `--attach`, `--stdin`, `--wait`, `--safe`, `--event-log`, `--restore`, `--simple`, `--diff`, `--locale`, `--gui`, `--web`. Revisit `--stdin` and `--wait` after M2. `--no-plugins` and `--plugin PATH` are adopted for the Lua plugin system (they land with the config and cli stage).
 
 Cobra API names (cobra analyst, `go doc`, not re-run here): `ExecuteContext`, `InitDefaultCompletionCmd`, `GenZshCompletion`, `GenBashCompletionV2`, `RegisterFlagCompletionFunc`, `MarkFlagsMutuallyExclusive`, `RangeArgs`, `ExactValidArgs`, `OnlyValidArgs` [A, from `go doc`]. Mutual exclusion and flag completion are not run.
 
@@ -375,7 +420,7 @@ Keep it concrete so the gates are not argued each time:
 - **R6. The owner's go-language-server path.** The directive names a path that does not resolve. This file uses `go.lsp.dev`. If the owner wants `github.com/go-language-server/...`, it needs a fork or a `replace` directive, and that is an owner decision.
 - **R7. Golden retirement is an owner decision.** Sections 1.9 and 8 retire four golden sets as gates. This file records that as the directive, not as a gate-less pass. The 26-scenario floor still gates the text pane.
 - **R8. Not run in this pass:** `golangci-lint`, `go fix -diff`, `go test` in the gvim repo, the repo's `purity_check.sh`, `import_rules_check.sh` (it does not exist yet), cobra mutual exclusion and flag completion, and the planned `fuzzy`, `fsops`, `config` and `syntax` APIs. Those names are proposals.
-- **R9. slowjs C lineage (GAP-v3 §4).** The plugin runtime decision is out of scope here, but its C-derived engine remains an open owner decision.
+- **R9. Plugin runtime.** Lua on `github.com/yuin/gopher-lua` v1.1.2 (pure Go, no cgo), per the Lua plugin design record. The earlier JavaScript candidates (slowjs, goja, esbuild) are not used and are no longer dependencies.
 - **R10. Interfaces are not compiled.** The Go blocks in section 3 are signatures for review. They were not compiled against the domain packages in this pass.
 - **R11. Clipboard, directory picker, and encoding (`x/text`)** were not evaluated for v4, and this file does not decide them.
 - **R12. The repo was not run.** Only the scratch module at `/tmp/arch5/final` was built in this pass. The analyst scratch modules under `/tmp/arch4/*` were cited, not rebuilt. No commits were made.

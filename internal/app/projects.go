@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tbxark/gvim/internal/explorer"
 	"github.com/tbxark/gvim/internal/explorer/watch"
@@ -23,6 +24,10 @@ type projectOpener struct {
 	mu    sync.Mutex
 	root  string        // the folder the watcher watches
 	index *finder.Index // the file index of the current root
+
+	// current is the root of the latest Open, or of the first root. It is read without
+	// the lock: the plugins ask for the root from any goroutine, and Open can take a while.
+	current atomic.Pointer[string]
 }
 
 // Open makes path the project root. A failure to record the folder in the recent
@@ -50,6 +55,8 @@ func (p *projectOpener) Open(path string) (ui.Project, error) {
 		_ = p.watcher.Add(r.Path())
 	}
 	p.root = r.Path()
+	root := r.Path()
+	p.current.Store(&root)
 	old := p.index
 	p.index = idx
 	if old != nil {
@@ -62,11 +69,20 @@ func (p *projectOpener) Open(path string) (ui.Project, error) {
 // when there is a watcher, the watcher is pointed at root.
 func newProjectOpener(ctx context.Context, watcher *watch.Watcher, root string, files *finder.Index) *projectOpener {
 	p := &projectOpener{ctx: ctx, watcher: watcher, index: files}
+	p.current.Store(&root)
 	if watcher != nil {
 		_ = watcher.Add(root)
 		p.root = root
 	}
 	return p
+}
+
+// rootDir returns the folder of the current project root.
+func (p *projectOpener) rootDir() string {
+	if r := p.current.Load(); r != nil {
+		return *r
+	}
+	return ""
 }
 
 // close stops the file index of the current root.

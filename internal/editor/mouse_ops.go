@@ -94,15 +94,15 @@ func (e *Editor) OpenPreview(path string) error {
 	switch i := e.previewIndex(); {
 	case i >= 0:
 		e.releaseDoc(e.docs[i])
-		e.docs[i] = d
+		e.setDoc(i, d)
 		e.switchTo(i)
 	case e.pristineUntitled():
 		// Like OpenFile, the untouched startup buffer is replaced, not kept.
 		e.releaseDoc(e.docs[0])
-		e.docs[0] = d
+		e.setDoc(0, d)
 		e.switchTo(0)
 	default:
-		e.docs = append(e.docs, d)
+		e.addDoc(d)
 		e.switchTo(len(e.docs) - 1)
 	}
 	e.setStatus(d.openStatus())

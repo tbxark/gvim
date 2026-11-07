@@ -97,6 +97,7 @@ type LineOptions struct {
 	SelectAll bool                    // Input is a prefill: the first printable key replaces it
 	Tag       any                     // returned in Done
 	Validate  func(text string) error // checked on Enter; a rejection keeps the prompt open and shows the error
+	OnChange  func(text string)       // called with the new text after an edit changed it; may be nil
 }
 
 // Line is a one-line text prompt. Enter submits the input, Esc closes the
@@ -106,6 +107,7 @@ type Line struct {
 	field    textinput.Model
 	tag      any
 	validate func(text string) error
+	onChange func(text string)
 	errText  string
 	styles   styles
 	closed   bool
@@ -126,6 +128,7 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 		field:    f,
 		tag:      o.Tag,
 		validate: o.Validate,
+		onChange: o.OnChange,
 		styles:   newStyles(st),
 		prefill:  o.SelectAll && o.Input != "",
 	}
@@ -193,6 +196,9 @@ func (l *Line) edit(msg tea.Msg) tea.Cmd {
 	l.field, cmd = l.field.Update(msg)
 	if l.field.Value() != before {
 		l.errText = ""
+		if l.onChange != nil {
+			l.onChange(l.field.Value())
+		}
 	}
 	return cmd
 }
@@ -244,11 +250,32 @@ type Confirm struct {
 	yes    bool // the focus is on Yes
 	closed bool
 	styles styles
+
+	yesText, noText string // the labels of the answers
 }
 
 // NewConfirm returns a Yes/No prompt that asks label. The focus starts on No.
 func NewConfirm(st style.Styles, label string, tag any) *Confirm {
-	return &Confirm{label: label, tag: tag, styles: newStyles(st)}
+	return NewConfirmWith(st, label, tag, ConfirmOptions{})
+}
+
+// ConfirmOptions tune a Yes/No prompt. The zero value is the plain prompt.
+type ConfirmOptions struct {
+	Yes, No    string // the labels of the answers; empty keeps "Yes" and "No"
+	DefaultYes bool   // the focus starts on Yes
+}
+
+// NewConfirmWith returns a Yes/No prompt that asks label, with the labels and the first
+// focus of o.
+func NewConfirmWith(st style.Styles, label string, tag any, o ConfirmOptions) *Confirm {
+	c := &Confirm{label: label, tag: tag, styles: newStyles(st), yes: o.DefaultYes, yesText: o.Yes, noText: o.No}
+	if c.yesText == "" {
+		c.yesText = "Yes"
+	}
+	if c.noText == "" {
+		c.noText = "No"
+	}
+	return c
 }
 
 // Active reports whether the prompt is open.
@@ -305,9 +332,9 @@ func (c *Confirm) Draw(g *grid.Grid) {
 	} else {
 		noStyle = c.styles.active
 	}
-	x += g.Put(x, y, w, "[ Yes ]", yesStyle)
+	x += g.Put(x, y, w, "[ "+c.yesText+" ]", yesStyle)
 	x += g.Put(x, y, w, " ", c.styles.bar)
-	g.Put(x, y, w, "[ No ]", noStyle)
+	g.Put(x, y, w, "[ "+c.noText+" ]", noStyle)
 }
 
 // Cursor reports no caret: a confirm has no text field.

@@ -26,6 +26,10 @@ const (
 	// hitSplitBorder is the line between two editor panes. Index is its index in
 	// layout.borders.
 	hitSplitBorder
+
+	// hitStatusPlugin is a clickable status item of a plugin. Index is its place in the
+	// list plugStatusItems returns.
+	hitStatusPlugin
 )
 
 // The Index of a hitStatusSegment target: the line ending, the encoding or the language

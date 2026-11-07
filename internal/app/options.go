@@ -61,6 +61,12 @@ type Options struct {
 	// Diff opens the two files, in tabs 0 and 1, in the compare view. It needs exactly
 	// two files and no folder.
 	Diff bool
+	// NoPlugins skips plugin discovery and loading, including the user's init.lua.
+	// Plugins named by PluginPaths still load.
+	NoPlugins bool
+	// PluginPaths are plugins to load besides the discovered ones: each is a .lua
+	// file or a plugin directory, given with --plugin.
+	PluginPaths []string
 }
 
 // Validate reports the first option that cannot be used. It does not touch
@@ -81,6 +87,11 @@ func (o Options) Validate() error {
 		}
 		if o.Root != "" {
 			return errors.New("--diff compares two files, not a folder")
+		}
+	}
+	for _, p := range o.PluginPaths {
+		if strings.TrimSpace(p) == "" {
+			return errors.New("--plugin: path is empty")
 		}
 	}
 	for _, f := range o.Files {

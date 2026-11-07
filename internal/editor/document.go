@@ -37,9 +37,16 @@ type Document struct {
 	// with OpenFile.
 	preview bool
 
+	// foldMemo is the fold ranges found last, see Folds.
+	foldMemo foldMemo
+	// changesMemo is the change marks computed last, see MemoChanges.
+	changesMemo changesMemo
+
 	// saved is the text as it was at open or the last save. It is the only
 	// saved-state record: SavedLines and LinesChangedSinceSave read it.
 	saved string
+	// savedGen changes whenever saved is set. See setSaved.
+	savedGen uint64
 	// encoding is the label of the encoding the saved text is written in (see
 	// encodingLabel). It is computed on open, on save and on set_encoding so
 	// that rendering never scans the text.
@@ -97,6 +104,11 @@ type Document struct {
 	large *largeDoc
 	// planErr is why the edit being planned must not be made, or nil. See failPlan.
 	planErr error
+	// seam is the id, buffer generation and change tracking of the document. See docid.go.
+	seam docSeam
+	// ext is the plugin-facing state: virtual documents, buffer mode, text properties.
+	// See virtual.go.
+	ext docExt
 }
 
 // Line endings a document can save with.
@@ -123,6 +135,35 @@ func splitLineEnding(data string) (text, eol string) {
 		eol = eolCRLF
 	}
 	return strings.ReplaceAll(data, "\r\n", "\n"), eol
+}
+
+// setSaved records text as the saved state. Every assignment of d.saved goes through
+// it, so that what is cached against the saved text (MemoChanges) is dropped.
+func (d *Document) setSaved(text string) {
+	d.saved = text
+	d.savedGen = genCounter.Add(1)
+}
+
+// MemoChanges returns what compute returns, and calls it again only when the text, or the
+// saved text it is compared with, is not the one of the last call. The pane asks for the
+// change marks on every repaint; they cost a pass over all lines. The maps are shared
+// between calls, so the caller must not change them.
+func (d *Document) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, scroll map[int]bool) {
+	key := changesKey{gen: d.Gen(), ver: d.Buffer.Version(), saved: d.savedGen}
+	if !d.changesMemo.ok || d.changesMemo.key != key {
+		d.changesMemo.bar, d.changesMemo.scroll = compute()
+		d.changesMemo.key, d.changesMemo.ok = key, true
+	}
+	return d.changesMemo.bar, d.changesMemo.scroll
+}
+
+type changesKey struct{ gen, ver, saved uint64 }
+
+// changesMemo is the change marks MemoChanges computed last.
+type changesMemo struct {
+	ok          bool
+	key         changesKey
+	bar, scroll map[int]bool
 }
 
 // SavedLines returns the saved text split into lines on '\n', the same way
@@ -162,6 +203,8 @@ func (d *Document) Name() string {
 	switch {
 	case d.Path != "":
 		return filepath.Base(d.Path)
+	case d.ext.virtual:
+		return "*" + d.ext.name + "*"
 	case d.untitled > 0:
 		return fmt.Sprintf("Untitled-%d", d.untitled)
 	default:
@@ -192,7 +235,7 @@ func (d *Document) Modified() bool {
 // encoding or line ending. A stash that is held does not count, since the text on
 // screen is not it.
 func (d *Document) dirty() bool {
-	return d.Buffer.Modified() || d.metaDirty
+	return !d.ext.virtual && (d.Buffer.Modified() || d.metaDirty)
 }
 
 // HasSelection reports whether a non-empty selection exists.
@@ -218,6 +261,9 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	// The state is taken before the read. A change between the two then shows
 	// as a difference on save, which is the safe side.
 	disk := diskStateOf(path)
+	if disk.special {
+		return nil, fmt.Errorf("open %s: not a regular file", path)
+	}
 	if disk.exists && spec.large.isLarge(disk.size) {
 		return readLargeDocument(path, disk, spec.large)
 	}

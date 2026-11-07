@@ -35,7 +35,8 @@ type unrestored struct {
 
 // saveSession writes the open tabs of ed to dir. Each file keeps its cursor and its
 // first visible line. A modified tab keeps its text in a stash file, so the unsaved
-// edits come back with the session. An untitled tab with no text is not kept. The
+// edits come back with the session. An untitled tab with no text is not kept, and neither
+// is a virtual one, which belongs to a plugin and is not a file. The
 // explorer state goes in as it is. The active tab is kept as the index among the
 // saved tabs, and the editor's own active tab is put back.
 func saveSession(ed *editor.Editor, dir string, st ui.ExplorerState) error {
@@ -64,7 +65,7 @@ func writeSession(ed *editor.Editor, dir string, st ui.ExplorerState, kept []ses
 	for i := range tabs {
 		ed.ActivateTab(i)
 		doc := ed.Active()
-		if doc == nil || (doc.Path == "" && !doc.Modified()) {
+		if doc == nil || doc.Virtual() || (doc.Path == "" && !doc.Modified()) {
 			continue
 		}
 		fs := session.FileState{

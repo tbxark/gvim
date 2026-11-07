@@ -1,372 +1,503 @@
-// Package plugin hosts user plugins written in JavaScript or TypeScript.
-//
-// Each plugin file runs in its own goja runtime and sees only the gvim global.
-// TypeScript files are transpiled with esbuild before they run. Plugin JavaScript
-// is interrupted once a call outlives the host timeout. A native Go call made from
-// JavaScript, such as an Editor method, is not interrupted: the call returns when
-// that Go code returns. Until then the plugin is busy, and further calls into it
-// fail at once.
 package plugin
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"maps"
-	"os"
-	"path/filepath"
-	"slices"
+	"regexp"
+	"runtime/debug"
+	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/dop251/goja"
-	"github.com/evanw/esbuild/pkg/api"
+	lua "github.com/yuin/gopher-lua"
+	"github.com/yuin/gopher-lua/parse"
+
+	"github.com/tbxark/gvim/internal/pluginapi"
 )
 
+// Plugin statuses (pluginapi.PluginInfo.Status).
 const (
-	defaultTimeout    = 500 * time.Millisecond
-	defaultLoadBudget = 2 * time.Second
+	statusLoading   = "loading"
+	statusLoaded    = "loaded"
+	statusFailed    = "failed"
+	statusSuspended = "suspended"
+	statusDisabled  = "disabled"
 )
 
-// Editor is the set of editor operations a plugin may call through the gvim
-// global. Its methods run on the goroutine that called Run or Load, while the
-// calling plugin is busy. They must not call back into the Host.
-type Editor interface {
-	Notify(msg string)
-	InsertText(text string) error
-	ActivePath() string
-	SetStatus(text string)
+// Plugin source kinds (pluginapi.PluginInfo.Source).
+const (
+	SourceBundled = "bundled"
+	SourceUser    = "user"
+	SourceCLI     = "cli"
+	SourceInit    = "init"
+	SourceBuffer  = "buffer"
+)
+
+var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
+
+// MaxLuaFile is the largest .lua file the runtime compiles (AMENDMENTS C20).
+const MaxLuaFile = 256 << 10
+
+// Compiled is one compiled file of a plugin: a state-independent prototype, or the error
+// that stopped it. Compiling happens in Work, never on the UI goroutine.
+type Compiled struct {
+	Proto *lua.FunctionProto
+	Err   error
 }
 
-// Options configures a Host.
-type Options struct {
-	// Dir holds the plugin files. Only .js and .ts files directly in Dir are loaded.
-	Dir    string
-	Editor Editor
-	// Timeout bounds each plugin call, and the top-level code of each file in Load.
-	// Zero means 500 milliseconds.
-	Timeout time.Duration
-	// LoadBudget bounds the top-level code of all the files in Load together. Zero
-	// means 2 seconds.
-	LoadBudget time.Duration
-}
-
-// Command is a command registered by a plugin.
-type Command struct {
-	Name  string
-	Label string
-}
-
-// Host loads plugin files and runs the commands they register.
-type Host struct {
-	dir        string
-	editor     Editor
-	timeout    time.Duration
-	loadBudget time.Duration
-
-	// mu guards commands and each plugin's busy flag. It is held only for short
-	// reads and updates, never while plugin code runs, so Commands and Close never
-	// wait for a running command.
-	mu       sync.Mutex
-	commands map[string]*command
-}
-
-// plugin is one loaded file and the runtime it runs in.
-type plugin struct {
-	file string
-	vm   *goja.Runtime
-	// errorCtor is the Error constructor as it was before plugin code ran, so a
-	// plugin that replaces the global Error does not change what is thrown.
-	errorCtor goja.Value
-	// busy is set while a call (a command, or the file's top-level code) runs on
-	// vm. Guarded by Host.mu.
-	busy bool
-}
-
-type command struct {
-	Command
-	owner *plugin
-	fn    goja.Callable
-}
-
-// New creates a Host. It does not read Dir; call Load for that.
-func New(opts Options) (*Host, error) {
-	if opts.Editor == nil {
-		return nil, errors.New("plugin: Options.Editor is nil")
-	}
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-	budget := opts.LoadBudget
-	if budget <= 0 {
-		budget = defaultLoadBudget
-	}
-	return &Host{
-		dir:        opts.Dir,
-		editor:     opts.Editor,
-		timeout:    timeout,
-		loadBudget: budget,
-		commands:   map[string]*command{},
-	}, nil
-}
-
-// Load runs every .js and .ts file directly in Dir and returns one error per
-// file that failed. A failed file registers no commands; other files still
-// load. The top-level code of all the files shares one load budget. A file that
-// starts after the budget is spent is not run, and its error says so. Load is
-// meant to be called once, before Run.
-func (h *Host) Load() []error {
-	entries, err := os.ReadDir(h.dir)
-	if err != nil {
-		return []error{fmt.Errorf("plugin: read dir: %w", err)}
-	}
-	deadline := time.Now().Add(h.loadBudget)
-	var errs []error
-	for _, e := range entries {
-		if e.IsDir() || !isPluginFile(e.Name()) {
+// Compile compiles every .lua file of a plugin (key: path relative to the plugin
+// directory, slash-separated). Chunk names are "<plugin>/<relpath>". It is pure and safe to
+// call from any goroutine.
+func Compile(plugin string, files map[string]string) map[string]*Compiled {
+	out := make(map[string]*Compiled, len(files))
+	for rel, src := range files {
+		if !strings.HasSuffix(rel, ".lua") {
 			continue
 		}
-		path := filepath.Join(h.dir, e.Name())
-		left := time.Until(deadline)
-		if left <= 0 {
-			errs = append(errs, fmt.Errorf("plugin %s: not loaded, the load budget of %s ran out", path, h.loadBudget))
-			continue
-		}
-		if err := h.loadFile(path, min(h.timeout, left)); err != nil {
-			errs = append(errs, fmt.Errorf("plugin %s: %w", path, err))
-		}
+		proto, err := CompileSource(plugin+"/"+rel, src)
+		out[rel] = &Compiled{Proto: proto, Err: err}
 	}
-	return errs
-}
-
-// Commands returns the registered commands sorted by name.
-func (h *Host) Commands() []Command {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	out := make([]Command, 0, len(h.commands))
-	for _, c := range h.commands {
-		out = append(out, c.Command)
-	}
-	slices.SortFunc(out, func(a, b Command) int { return strings.Compare(a.Name, b.Name) })
 	return out
 }
 
-// Run calls the command registered under name. A JavaScript command is
-// interrupted at the host timeout, and Run then returns a timed out error. A
-// native Go call inside the command is not interrupted, so Run returns only when
-// that call returns. Until then the plugin is busy, and a second Run into the
-// same plugin returns a busy error at once.
-func (h *Host) Run(name string) error {
-	h.mu.Lock()
-	c, ok := h.commands[name]
-	h.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("plugin: unknown command %q", name)
+// CompileSource compiles one chunk. The name is used verbatim in messages.
+func CompileSource(chunk, src string) (*lua.FunctionProto, error) {
+	if len(src) > MaxLuaFile {
+		return nil, pluginapi.Errf(pluginapi.CodeLimit, "%s: source too large (%d bytes, max %d)", chunk, len(src), MaxLuaFile)
 	}
-	if !h.claim(c.owner) {
-		return fmt.Errorf("plugin %s: command %q: busy, an earlier call into this plugin has not returned", c.owner.file, name)
-	}
-	defer h.release(c.owner)
-
-	err := h.call(c.owner, h.timeout, func() error {
-		_, err := c.fn(goja.Undefined())
-		return err
-	})
+	stmts, err := parse.Parse(strings.NewReader(src), chunk)
 	if err != nil {
-		return fmt.Errorf("plugin %s: command %q: %w", c.owner.file, name, err)
+		return nil, err
+	}
+	return lua.Compile(stmts, chunk)
+}
+
+// Source describes one plugin to load.
+type Source struct {
+	Name, Version string
+	Kind          string // SourceBundled ... SourceBuffer
+	Dir           string // "" for single-file and buffer plugins
+	File          string // absolute path of the entry file; "" for bundled and buffer plugins
+	Main          string // entry file, relative to the plugin; "" means init.lua
+	Compiled      map[string]*Compiled
+	// Settings and ProjectSettings are plugins.<name>.settings of the user and of the project
+	// layer of the config; gvim.settings.define merges them over the defaults (AMENDMENTS C11).
+	Settings, ProjectSettings map[string]any
+}
+
+// plugin is the runtime state of one plugin: its Lua state, tasks, registrations and
+// counters. A tombstone (failed or disabled) keeps only the row for the manager.
+type plugin struct {
+	r       *Runtime
+	name    string
+	version string
+	dir     string
+	file    string // Source.File
+	kindStr string // pluginapi.PluginInfo.Source
+	gen     uint64
+	status  string
+	errMsg  string
+	dead    bool
+
+	L   *lua.LState
+	tag *lua.LUserData // the unforgeable yield tag
+	// awaitFrom is the thread that made the await being served, for error positions.
+	awaitFrom *lua.LState
+	yielded   bool        // a coroutine yielded since the last resume started
+	goPanic   *goPanic    // the last Go panic of a guarded API function in this resume
+	pre       *lua.LTable // functions returned by the prelude
+	gvim      *lua.LTable
+
+	pctx    context.Context
+	pcancel context.CancelCauseFunc
+
+	roots   map[*lua.LState]*task
+	tasks   map[*task]struct{}
+	mainT   *task
+	coDepth int
+	// resuming holds the threads that are inside a resume right now (an ancestor of the running
+	// thread has status "normal"): resuming one again would recurse without bound in the Go VM.
+	resuming map[*lua.LState]struct{}
+	parked   int // waits with a parked task
+	evq      []item
+
+	inflight int // waits with Work
+	strikes  []time.Time
+
+	stormDrains int // consecutive Drains that hit the cascade cap with this plugin's events queued
+	userStorm   int // consecutive cut Drains with this plugin's tasks or commands still queued
+
+	commands map[string]*command
+	subs     map[string][]*subscription
+	nsubs    int
+	susp     *suspendTable
+	fnSeq    int
+
+	files    map[string]*Compiled
+	main     string
+	loaded   map[string]lua.LValue
+	loading  map[string]bool
+	reqDepth int
+
+	kinds   map[string]*handleKind
+	handles map[idHandle]*lua.LUserData
+	areas   map[string]*lua.LTable
+	mk      map[string]lua.LValue
+	mkv     map[string]lua.LValue
+	feature map[string]bool
+
+	data      dataState // settings, exports and caches of the data API (api_data.go)
+	unloadFns []*lua.LFunction
+	cleanups  []func()
+	format    lua.LValue // the stock string.format, for logging
+	tostring  lua.LValue // the stock tostring
+}
+
+// muted plugins receive no events, timers or key layers (failed, suspended or gone).
+func (p *plugin) muted() bool {
+	return p.dead || p.status == statusSuspended || p.status == statusFailed
+}
+
+func (p *plugin) info() pluginapi.PluginInfo {
+	n := 0
+	for _, l := range p.subs {
+		for _, s := range l {
+			if s.active {
+				n++
+			}
+		}
+	}
+	return pluginapi.PluginInfo{
+		Name: p.name, Version: p.version, Source: p.kindStr, Dir: p.dir, File: p.file,
+		Status: p.status, Err: p.errMsg,
+		Commands: len(p.commands), Subscriptions: n,
+		Enabled: p.status != statusDisabled,
+	}
+}
+
+func (p *plugin) mainFinished() {
+	if p.status == statusLoading {
+		p.status = statusLoaded
+	}
+}
+
+// addCleanup registers a function unload calls (in reverse order) to release what an API
+// area holds for the plugin: timers, watchers, processes.
+func (p *plugin) addCleanup(f func()) { p.cleanups = append(p.cleanups, f) }
+
+// ---------- commands ----------
+
+// command is a plugin command; the function stays here, the host only sees CommandInfo.
+type command struct {
+	id, name string
+	fn       lua.LValue
+	info     pluginapi.CommandInfo
+}
+
+// findCommand resolves the action id "<plugin>.<name>".
+func (r *Runtime) findCommand(id string) (*command, *plugin) {
+	name, rest, ok := strings.Cut(id, ".")
+	if !ok {
+		return nil, nil
+	}
+	p := r.plugins[name]
+	if p == nil || p.dead || p.L == nil {
+		return nil, nil
+	}
+	c := p.commands[rest]
+	if c == nil {
+		return nil, nil
+	}
+	return c, p
+}
+
+// addCommand registers (or replaces) a command and publishes the plugin's command set.
+func (p *plugin) addCommand(c *command) error {
+	if _, ok := p.commands[c.name]; !ok && len(p.commands) >= QuotaCommands {
+		return pluginapi.Errf(pluginapi.CodeLimit, "command quota (%d)", QuotaCommands)
+	}
+	p.commands[c.name] = c
+	p.syncCommands()
+	return nil
+}
+
+func (p *plugin) removeCommand(name string) {
+	if _, ok := p.commands[name]; ok {
+		delete(p.commands, name)
+		p.syncCommands()
+	}
+}
+
+// syncCommands replaces the host's command set of this plugin.
+func (p *plugin) syncCommands() {
+	infos := make([]pluginapi.CommandInfo, 0, len(p.commands))
+	for _, c := range p.commands {
+		infos = append(infos, c.info)
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
+	p.r.host.SetCommands(p.name, infos)
+}
+
+// ---------- subscriptions ----------
+
+// subscription is a registered event handler.
+type subscription struct {
+	id       uint64
+	p        *plugin
+	event    string
+	fn       *lua.LFunction
+	once     bool
+	active   bool
+	failures int
+	filter   func(pluginapi.Event) bool // nil: every event
+}
+
+func (s *subscription) accepts(e pluginapi.Event) bool { return s.filter == nil || s.filter(e) }
+
+func (p *plugin) addSub(event string, fn *lua.LFunction, once bool) (*subscription, error) {
+	if p.nsubs >= QuotaSubscriptions {
+		return nil, pluginapi.Errf(pluginapi.CodeLimit, "subscription quota (%d)", QuotaSubscriptions)
+	}
+	p.fnSeq++
+	s := &subscription{id: uint64(p.fnSeq), p: p, event: event, fn: fn, once: once, active: true}
+	p.subs[event] = append(p.subs[event], s)
+	p.nsubs++
+	p.r.wantsChanged()
+	return s, nil
+}
+
+func (p *plugin) removeSub(s *subscription) {
+	if !s.active {
+		return
+	}
+	s.active = false
+	p.nsubs--
+	p.r.wantsChanged()
+	l := p.subs[s.event]
+	for i, x := range l {
+		if x == s {
+			p.subs[s.event] = append(l[:i:i], l[i+1:]...)
+			break
+		}
+	}
+	if len(p.subs[s.event]) == 0 {
+		delete(p.subs, s.event)
+	}
+}
+
+// ---------- loading ----------
+
+// LoadPlugin creates the state of a plugin and starts its main chunk as a task (budget
+// class "load"). The main chunk may await; the status is "loading" until it returns. A
+// failure to start, or later in the main chunk, leaves the plugin failed with everything it
+// registered rolled back; see Plugins. All files must be compiled (Compile).
+//
+// Call it on the UI goroutine. Discovery, ordering and dependencies are the loader's job
+// (stage S10); this is the entry it builds on.
+func (r *Runtime) LoadPlugin(s Source) error {
+	defer r.enter("LoadPlugin")()
+	if r.stopped {
+		return pluginapi.Errf(pluginapi.CodeClosed, "the plugin runtime is stopped")
+	}
+	if !nameRE.MatchString(s.Name) {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "invalid plugin name %q (want [a-z][a-z0-9_]*, at most 40 characters)", s.Name)
+	}
+	if old := r.plugins[s.Name]; old != nil {
+		if !old.dead {
+			return pluginapi.Errf(pluginapi.CodeConflict, "plugin %q is already loaded", s.Name)
+		}
+		r.forget(old) // a tombstone (failed or disabled): replace it
+	}
+	main := s.Main
+	if main == "" {
+		main = "init.lua"
+	}
+	r.nextGen++
+	p := &plugin{
+		r: r, name: s.Name, version: s.Version, dir: s.Dir, file: s.File, kindStr: s.Kind, gen: r.nextGen,
+		status: statusLoading, main: main, files: s.Compiled,
+		roots: map[*lua.LState]*task{}, tasks: map[*task]struct{}{},
+		commands: map[string]*command{}, subs: map[string][]*subscription{},
+		loaded: map[string]lua.LValue{}, loading: map[string]bool{},
+		kinds: map[string]*handleKind{}, handles: map[idHandle]*lua.LUserData{},
+		areas: map[string]*lua.LTable{}, mk: map[string]lua.LValue{}, mkv: map[string]lua.LValue{},
+		feature: map[string]bool{},
+		data:    dataState{user: s.Settings, project: s.ProjectSettings},
+	}
+	r.plugins[p.name] = p
+	r.order = append(r.order, p)
+	r.wantsChanged()
+
+	c := s.Compiled[main]
+	switch {
+	case c == nil:
+		return r.failStart(p, pluginapi.Errf(pluginapi.CodeNotFound, "%s/%s not found", s.Name, main))
+	case c.Err != nil:
+		return r.failStart(p, c.Err)
+	}
+	p.pctx, p.pcancel = context.WithCancelCause(context.Background())
+	if err := r.initState(p); err != nil {
+		return r.failStart(p, err)
+	}
+	fn := p.L.NewFunctionFromProto(c.Proto)
+	t, err := r.newTask(p, originLoad, fn, "load")
+	if err != nil {
+		return r.failStart(p, err)
+	}
+	p.mainT = t
+	if r.depth > 0 {
+		r.enqueue(item{t: t})
+	} else {
+		r.runTask(t, nil)
 	}
 	return nil
 }
 
-// Close drops all registered commands. It does not wait for a running command:
-// that call finishes on its own, and its Run returns the result. A plugin
-// runtime is released once no call refers to it.
-func (h *Host) Close() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	clear(h.commands)
-}
-
-// claim marks p busy for one call. It reports false when p already is busy.
-func (h *Host) claim(p *plugin) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if p.busy {
-		return false
-	}
-	p.busy = true
-	return true
-}
-
-// release clears the busy mark that claim set.
-func (h *Host) release(p *plugin) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	p.busy = false
-}
-
-func isPluginFile(name string) bool {
-	return strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".ts")
-}
-
-// loadFile runs one plugin file, with its top-level code bounded by timeout. On
-// failure it removes the commands the file registered before failing.
-func (h *Host) loadFile(path string, timeout time.Duration) error {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	code := string(src)
-	if strings.HasSuffix(path, ".ts") {
-		if code, err = transpile(code); err != nil {
-			return err
-		}
-	}
-
-	// The file is busy until its top-level code returns, so a command it has
-	// already registered cannot run on its runtime at the same time.
-	p := &plugin{file: path, vm: goja.New(), busy: true}
-	if err := h.installAPI(p); err != nil {
-		return err
-	}
-	err = h.call(p, timeout, func() error {
-		_, err := p.vm.RunScript(path, code)
-		return err
-	})
-	h.release(p)
-	if err != nil {
-		h.mu.Lock()
-		maps.DeleteFunc(h.commands, func(_ string, c *command) bool { return c.owner == p })
-		h.mu.Unlock()
-	}
+// failStart records a plugin that could not start as failed and returns the error.
+func (r *Runtime) failStart(p *plugin, err error) error {
+	r.logf(p.name, levelError, "load failed: "+err.Error())
+	r.unload(p, unloadOptions{final: statusFailed, err: err.Error(), quiet: true})
 	return err
 }
 
-// installAPI sets the gvim global, the only host object a plugin can reach.
-func (h *Host) installAPI(p *plugin) error {
-	p.errorCtor = p.vm.Get("Error")
-	gv := p.vm.NewObject()
-	fns := map[string]func(goja.FunctionCall) goja.Value{
-		"registerCommand": func(c goja.FunctionCall) goja.Value { return h.registerCommand(p, c) },
-		"notify": func(c goja.FunctionCall) goja.Value {
-			h.editor.Notify(c.Argument(0).String())
-			return goja.Undefined()
-		},
-		"insertText": func(c goja.FunctionCall) goja.Value {
-			if err := h.editor.InsertText(c.Argument(0).String()); err != nil {
-				p.throw(err.Error())
+// initState builds the sandboxed state of p, installs the API and keeps panics inside.
+func (r *Runtime) initState(p *plugin) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("creating the plugin state: %v\n%s", rec, debug.Stack())
+		}
+	}()
+	return p.buildState()
+}
+
+func stackString() string { return string(debug.Stack()) }
+
+// UnloadPlugin removes a plugin completely: its on_unload handlers run, then everything it
+// owns goes (see unload). Unknown names are ignored.
+func (r *Runtime) UnloadPlugin(name string) {
+	defer r.enter("UnloadPlugin")()
+	if p := r.plugins[name]; p != nil {
+		r.unload(p, unloadOptions{})
+	}
+}
+
+// unloadOptions tune unload.
+type unloadOptions struct {
+	final string // status of the tombstone left behind ("" removes the plugin from the list)
+	err   string // error text of a failed tombstone
+	quiet bool   // skip on_unload (Stop, failed starts)
+}
+
+// unload releases everything a plugin owns, in this order: on_unload handlers (200 ms in all,
+// no yield); cancel the plugin context and bump the generation (parked tasks, Work and timers
+// can no longer be resumed); drop waits and queued work, resolve the waits other plugins
+// have into this one; run the cleanups of the API areas (timers, watchers, processes);
+// tell the host to drop commands, bindings, modes, overlays, decorations and key waits;
+// close the state. Afterwards the host resource set and the runtime registry equal their
+// state before the load.
+func (r *Runtime) unload(p *plugin, o unloadOptions) {
+	if p.dead {
+		return
+	}
+	if p.L != nil && !o.quiet && r.depth == 0 {
+		end := time.Now().Add(unloadBudget) // one budget for all the hooks together
+		for _, fn := range p.unloadFns {
+			left := time.Until(end)
+			if left <= 0 {
+				r.logf(p.name, levelWarn, "on_unload: budget spent, remaining hooks skipped")
+				break
 			}
-			return goja.Undefined()
-		},
-		"activePath": func(goja.FunctionCall) goja.Value {
-			return p.vm.ToValue(h.editor.ActivePath())
-		},
-		"setStatus": func(c goja.FunctionCall) goja.Value {
-			h.editor.SetStatus(c.Argument(0).String())
-			return goja.Undefined()
-		},
-	}
-	for name, fn := range fns {
-		if err := gv.Set(name, fn); err != nil {
-			return err
-		}
-	}
-	return p.vm.Set("gvim", gv)
-}
-
-// registerCommand implements gvim.registerCommand(name, label, fn). Invalid
-// arguments and duplicate names throw into the calling plugin.
-func (h *Host) registerCommand(p *plugin, c goja.FunctionCall) goja.Value {
-	name, ok := c.Argument(0).Export().(string)
-	if !ok || name == "" {
-		panic(p.vm.NewTypeError("registerCommand: name must be a non-empty string"))
-	}
-	label, ok := c.Argument(1).Export().(string)
-	if !ok {
-		panic(p.vm.NewTypeError("registerCommand: label must be a string"))
-	}
-	fn, ok := goja.AssertFunction(c.Argument(2))
-	if !ok {
-		panic(p.vm.NewTypeError("registerCommand: fn must be a function"))
-	}
-	h.mu.Lock()
-	_, dup := h.commands[name]
-	if !dup {
-		h.commands[name] = &command{Name: name, Label: label, owner: p, fn: fn}
-	}
-	h.mu.Unlock()
-	if dup {
-		p.throw(fmt.Sprintf("registerCommand: command %q is already registered", name))
-	}
-	return goja.Undefined()
-}
-
-// throw raises a JavaScript Error whose message is msg. Only the message crosses
-// into JavaScript. The Go error that produced it is not attached, so plugin code
-// cannot reach a Go value through the caught error.
-func (p *plugin) throw(msg string) {
-	e, err := p.vm.New(p.errorCtor, p.vm.ToValue(msg))
-	if err != nil {
-		e = p.vm.NewTypeError(msg)
-	}
-	panic(e)
-}
-
-// call runs fn on p's runtime. If fn outlives timeout, the runtime is interrupted
-// and call reports a timeout instead of fn's error. A native Go call inside fn is
-// not interrupted, so call returns only after fn does.
-func (h *Host) call(p *plugin, timeout time.Duration, fn func() error) error {
-	var (
-		mu    sync.Mutex
-		done  bool
-		fired bool
-	)
-	timer := time.AfterFunc(timeout, func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if !done {
-			fired = true
-			p.vm.Interrupt("timeout")
-		}
-	})
-	err := fn()
-	timer.Stop()
-
-	// Once done is set under mu, a late timer callback does nothing, so
-	// ClearInterrupt below cannot race with an Interrupt.
-	mu.Lock()
-	done = true
-	timedOut := fired
-	mu.Unlock()
-	p.vm.ClearInterrupt()
-
-	if timedOut {
-		return fmt.Errorf("timed out after %s", timeout)
-	}
-	return err
-}
-
-// transpile strips TypeScript types and lowers the source to ES2020.
-func transpile(src string) (string, error) {
-	res := api.Transform(src, api.TransformOptions{
-		Loader: api.LoaderTS,
-		Target: api.ES2020,
-	})
-	if len(res.Errors) > 0 {
-		msgs := make([]string, 0, len(res.Errors))
-		for _, m := range res.Errors {
-			if m.Location != nil {
-				msgs = append(msgs, fmt.Sprintf("line %d:%d: %s", m.Location.Line, m.Location.Column+1, m.Text))
-			} else {
-				msgs = append(msgs, m.Text)
+			if _, rerr := r.callSync(p, fn, left, "on_unload"); rerr != nil {
+				r.logf(p.name, levelWarn, "on_unload: "+rerr.msg)
 			}
 		}
-		return "", errors.New(strings.Join(msgs, "; "))
 	}
-	return string(res.Code), nil
+	p.dead = true
+	r.wantsChanged()
+	if p.pcancel != nil {
+		p.pcancel(errCancelled)
+	}
+	// Waits: its own are abandoned, other plugins' calls into it fail.
+	for _, w := range r.waits {
+		switch {
+		case w.p == p:
+			r.cancelWait(w)
+		case w.target == p.name && w.p != nil && !w.p.dead:
+			r.inbox = append(r.inbox, pluginapi.Completion{Token: w.token, Err: "closed: plugin reloaded"})
+		}
+	}
+	for t := range p.tasks {
+		t.done = true
+		if t.cancelThread != nil {
+			t.cancelThread()
+		}
+	}
+	p.tasks = map[*task]struct{}{}
+	p.roots = map[*lua.LState]*task{}
+	p.evq = nil
+	r.userq = filterItems(r.userq, p)
+	r.cmdq = filterCmds(r.cmdq, p)
+	for i := len(p.cleanups) - 1; i >= 0; i-- {
+		p.cleanups[i]()
+	}
+	p.cleanups = nil
+	r.host.OwnerGone(p.name, p.gen)
+	p.commands = map[string]*command{}
+	p.subs = map[string][]*subscription{}
+	p.nsubs = 0
+	p.unloadFns = nil
+	p.handles = map[idHandle]*lua.LUserData{}
+	if p.L != nil {
+		if r.closeHook != nil {
+			r.closeHook(p)
+		}
+		func() {
+			defer func() { _ = recover() }()
+			p.L.Close()
+		}()
+		p.L = nil
+	}
+	p.gvim, p.pre, p.tag = nil, nil, nil
+	p.kinds, p.areas, p.mk, p.mkv = map[string]*handleKind{}, map[string]*lua.LTable{}, map[string]lua.LValue{}, map[string]lua.LValue{}
+	p.loaded, p.loading, p.files = map[string]lua.LValue{}, map[string]bool{}, nil
+
+	if o.final == "" {
+		r.forget(p)
+		return
+	}
+	p.status, p.errMsg = o.final, o.err
+}
+
+// forget removes p from the registry.
+func (r *Runtime) forget(p *plugin) {
+	r.wantsChanged()
+	if r.plugins[p.name] == p {
+		delete(r.plugins, p.name)
+	}
+	for i, x := range r.order {
+		if x == p {
+			r.order = append(r.order[:i:i], r.order[i+1:]...)
+			break
+		}
+	}
+}
+
+func filterItems(q []item, p *plugin) []item {
+	out := q[:0]
+	for _, it := range q {
+		if it.t.p != p {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func filterCmds(q []cmdReq, p *plugin) []cmdReq {
+	out := q[:0]
+	for _, c := range q {
+		if c.p != p {
+			out = append(out, c)
+		}
+	}
+	return out
 }

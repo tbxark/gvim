@@ -42,21 +42,8 @@ func (e *Editor) SetCursor(p buffer.Pos, extend bool) {
 	if d == nil {
 		return
 	}
-	d.want = -1
 	mark := e.markJump()
-	p = d.Buffer.Clamp(p)
-	snapped := snapToCluster(d.Buffer, p)
-	if extend && snapped != p {
-		anchor := d.Cursor
-		if d.Sel != nil {
-			anchor = d.Sel.Anchor
-		}
-		if anchor.Less(p) {
-			snapped.Col = nextBoundary(d.Buffer, p.Line, snapped.Col)
-		}
-	}
-	d.move(snapped, extend)
-	d.seen = d.Cursor
+	d.placeCursor(p, extend)
 	if !extend {
 		e.recordJump(mark)
 	}
@@ -71,8 +58,7 @@ func (e *Editor) SelectRange(anchor, head buffer.Pos) {
 		return
 	}
 	mark := e.markJump()
-	d.setRange(d.Buffer.Clamp(anchor), d.Buffer.Clamp(head))
-	d.seen = d.Cursor
+	d.selectBetween(anchor, head)
 	e.recordJump(mark)
 }
 

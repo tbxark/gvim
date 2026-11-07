@@ -105,8 +105,11 @@ func saveTarget(path string) (string, error) {
 // file again, so a change made by another program is not overwritten.
 type diskState struct {
 	exists bool
-	size   int64
-	mtime  time.Time
+	// special is set for a file that is neither regular nor a directory: a FIFO, a device
+	// or a socket. Opening one can block, so readDocument does not read it.
+	special bool
+	size    int64
+	mtime   time.Time
 }
 
 // diskStateOf returns the state of the file at path, following a symbolic link.
@@ -117,7 +120,12 @@ func diskStateOf(path string) diskState {
 	if err != nil {
 		return diskState{}
 	}
-	return diskState{exists: true, size: info.Size(), mtime: info.ModTime()}
+	return diskState{
+		exists:  true,
+		special: !info.Mode().IsRegular() && !info.IsDir(),
+		size:    info.Size(),
+		mtime:   info.ModTime(),
+	}
 }
 
 // sameAs reports whether s and o describe the same file state.

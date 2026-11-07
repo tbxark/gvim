@@ -128,6 +128,9 @@ type Model struct {
 	fix fixState
 	// large is the state of the root for documents in large file mode (see large.go).
 	large largeState
+	// plug is the plugin host state (see plugin_pump.go). Its runtime is nil when
+	// plugins are off, and every hook is a nil check then.
+	plug pluginState
 }
 
 // drag is the pointer gesture in progress: a text selection, or a grab of the
@@ -157,9 +160,6 @@ func New(deps Deps) *Model {
 	commands := deps.Commands
 	if commands == nil {
 		commands = palmodel.Commands(nil)
-	}
-	if deps.Root.Plugins != nil {
-		commands = slices.Concat(commands, deps.Root.Plugins.Commands())
 	}
 	m := &Model{
 		ed:              deps.Editor,
@@ -209,6 +209,7 @@ func New(deps Deps) *Model {
 		m.ops = ops
 	}
 	m.installRowMapper()
+	m.plug = newPluginState(m, deps.Root)
 	return m
 }
 
@@ -236,6 +237,7 @@ func (m *Model) Close() {
 	m.large.stop()
 	m.cancelStream()
 	m.lspClose()
+	m.pluginStop()
 	done := make(chan struct{})
 	go func() {
 		m.closeDock()
@@ -252,7 +254,7 @@ func (m *Model) Close() {
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.rootInit(), m.indexSync())
+	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit())
 }
 
 // Update implements tea.Model. It runs update, then keeps the split panes on tabs
@@ -265,9 +267,11 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	active, count, rows := m.activeTab(), len(m.ed.Tabs()), m.bodyRows()
 	at := m.caretNow()
+	snap := m.pluginSnapshot()
 	_, resized := msg.(tea.WindowSizeMsg)
 	m.util.recordEvent(msg)
 	before := m.notice
+	m.plug.ui.updates++
 	next, cmd := m.update(msg)
 	cmd = tea.Batch(cmd, m.lspUpdate(msg))
 	cmd = tea.Batch(cmd, m.dockSync())
@@ -275,6 +279,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = tea.Batch(cmd, m.indexSync(), m.searchSync())
 	m.notes.record(before, m.notice)
 	m.reconcileTabs()
+	cmd = tea.Batch(cmd, m.pluginTail(snap, msg), m.pluginIdle(msg))
 	m.trackOccurrences()
 	sized := m.bodyRows() != rows
 	if sized {
@@ -292,6 +297,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if resized || m.activeTab() != active || len(m.ed.Tabs()) != count {
 		m.revealActiveTab()
 	}
+	cmd = tea.Batch(cmd, m.pluginViewTail(snap))
 	return next, cmd
 }
 
@@ -305,6 +311,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if m.overlayInput(msg) {
+		// handleKey never sees a key an overlay takes, so the panic chord is checked here.
+		if k, ok := msg.(tea.KeyPressMsg); ok {
+			if cmd, panicked := m.pluginPanicKey(tea.Key(k)); panicked {
+				return m, cmd
+			}
+		}
 		barWasOpen := m.findOpen()
 		cmd := m.routeOverlay(msg)
 		// An overlay that opened or closed the find bar changes the editor body.
@@ -312,6 +324,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if _, isKey := msg.(tea.KeyPressMsg); isKey && (barWasOpen || m.findOpen()) {
 			m.revealCaret()
 		}
+		return m, cmd
+	}
+	if cmd, ok := m.pluginMessage(msg); ok {
 		return m, cmd
 	}
 	// A message that is not input still goes to the top overlay, because an overlay
@@ -354,6 +369,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncMenu()
 		m.syncViewport()
 		m.followSelection()
+		m.pluginReady()
 	case tea.KeyPressMsg:
 		m.notice = ""
 		return m, m.handleKey(tea.Key(msg))
@@ -485,7 +501,9 @@ func failedNotice(f menubar.Failed) string {
 // know is reported as menubar.ErrUnsupported. A quit is sent after the menu
 // closes, through quitting.
 func (m *Model) Run(action string) error {
+	defer m.plugSource(srcMenu)()
 	m.recordCommand(Command{Action: action})
+	defer m.plugCommand(action, nil)()
 	if cmd, ok := m.uiAction(action, nil); ok {
 		m.pending = tea.Batch(m.pending, cmd)
 		return nil
@@ -502,6 +520,7 @@ func (m *Model) Run(action string) error {
 		return nil
 	}
 	res := m.editorDo(editor.Action(action), nil)
+	m.plugFailed(res.Err)
 	m.syncViewport()
 	if errors.Is(res.Err, editor.ErrUnknownAction) {
 		return menubar.ErrUnsupported
@@ -533,6 +552,13 @@ func (m *Model) Holds(name string) bool {
 		return doc != nil && hasPath(doc)
 	case "can_save_all":
 		return slices.ContainsFunc(m.ed.Tabs(), func(t TabInfo) bool { return t.Modified })
+	case "read_only":
+		ro, ok := doc.(interface{ ReadOnly() bool })
+		return ok && ro.ReadOnly()
+	case "modified":
+		return doc != nil && doc.Modified()
+	case "large":
+		return doc != nil && isLargeDoc(doc)
 	case "formatter_available":
 		f, ok := m.ed.(formatterEditor)
 		return ok && f.HasFormatter()
@@ -551,7 +577,11 @@ func (m *Model) Holds(name string) bool {
 	case "file_explorer_show_gitignored":
 		return m.tree != nil && m.tree.ShowIgnored()
 	}
-	return false
+	if lang, ok := strings.CutPrefix(name, "language:"); ok {
+		return doc != nil && m.lspLanguage(doc) == strings.ToLower(lang)
+	}
+	on, _ := m.pluginContext(name)
+	return on
 }
 
 // hasPath reports whether the document has a file name on disk. A Document that
@@ -570,13 +600,25 @@ type fileEditor interface {
 	GotoLine(line, col int) error
 }
 
+// selectingGoto is the go-to-line prompt's jump. An editor that has it extends the
+// selection to the line while mark mode is on; the other jumps (LSP, session restore,
+// file:line arguments) go through GotoLine, which clears the selection.
+type selectingGoto interface {
+	GotoLineSelecting(line, col int) error
+}
+
 // openFile opens path as a preview tab or a permanent one. The editor reports
 // a failure in its status row.
 func (m *Model) openFile(path string, preview bool) {
+	_ = m.openFileErr(path, preview)
+}
+
+// openFileErr is openFile that also returns why the file did not open.
+func (m *Model) openFileErr(path string, preview bool) error {
 	f, ok := m.ed.(fileEditor)
 	if !ok {
 		m.notice = "Opening files is not supported in this port"
-		return
+		return errors.New("opening files is not supported in this port")
 	}
 	var err error
 	if preview {
@@ -587,6 +629,7 @@ func (m *Model) openFile(path string, preview bool) {
 	m.syncViewport()
 	// A large file that is not UTF-8 opens only if the user agrees to load it whole.
 	m.maybeAskFullLoad(err)
+	return err
 }
 
 // openFileAt opens path and moves the caret to line and col when line is set.
@@ -596,12 +639,18 @@ func (m *Model) openFileAt(path string, line, col int) {
 
 // openAt is openFileAt for a permanent tab or a preview.
 func (m *Model) openAt(path string, preview bool, line, col int) {
-	m.openFile(path, preview)
+	_ = m.openAtErr(path, preview, line, col)
+}
+
+// openAtErr is openAt that also returns why the file did not open.
+func (m *Model) openAtErr(path string, preview bool, line, col int) error {
+	err := m.openFileErr(path, preview)
 	if f, ok := m.ed.(fileEditor); ok && line > 0 {
-		if err := f.GotoLine(line, col); err != nil {
-			m.notice = err.Error()
+		if gerr := f.GotoLine(line, col); gerr != nil {
+			m.notice = gerr.Error()
 		}
 	}
+	return err
 }
 
 // reloadTree rereads the explorer tree from disk. A failure is shown as a notice.
@@ -842,6 +891,9 @@ func validateName(text string) error {
 // answer applies a prompt's Done. A text prompt submits a name, and a confirm
 // answers Yes or No. It returns the disk operation the answer starts, if any.
 func (m *Model) answer(d prompt.Done) tea.Cmd {
+	if cmd, ok := m.pluginAnswer(d); ok {
+		return cmd
+	}
 	switch tag := d.Tag.(type) {
 	case viewTag:
 		return m.viewAnswer(tag, d)
@@ -1114,7 +1166,7 @@ func (m *Model) openPalette(query string) tea.Cmd {
 	p := palette.New(palette.Options{
 		Query:    query,
 		Root:     m.rootDir(),
-		Commands: m.commands,
+		Commands: m.allCommands(),
 		Buffers:  m.paletteBuffers(),
 		Files:    m.files,
 		Ranker:   m.ranker,
@@ -1184,10 +1236,7 @@ func (a rankerAdapter) Rank(query string, files []string, limit int) []palette.R
 // runCommand runs the action of a palette row. It returns the command the action
 // started, and tea.Quit when the action quit the editor.
 func (m *Model) runCommand(action string) tea.Cmd {
-	if name, ok := palmodel.PluginName(action); ok {
-		m.runPlugin(name)
-		return nil
-	}
+	defer m.plugSource(srcPalette)()
 	if err := m.Run(action); err != nil {
 		m.notice = failedNotice(menubar.Failed{Label: action, Err: err})
 	}
@@ -1200,18 +1249,6 @@ func (m *Model) runCommand(action string) tea.Cmd {
 	return cmd
 }
 
-// runPlugin runs the plugin command called name on this goroutine, bounded by the
-// host's timeout. The text the command left, or its error, becomes the notice. The
-// palette lists plugin rows only when Plugins is set, so it is not nil here.
-func (m *Model) runPlugin(name string) {
-	notice, err := m.root.ports.Plugins.Run(name)
-	if err != nil {
-		notice = err.Error()
-	}
-	m.notice = notice
-	m.syncViewport()
-}
-
 // gotoLine moves the caret to line and col, both one-based, in the active file.
 func (m *Model) gotoLine(line, col int) {
 	f, ok := m.ed.(fileEditor)
@@ -1219,7 +1256,11 @@ func (m *Model) gotoLine(line, col int) {
 		m.notice = "Go to line is not supported in this port"
 		return
 	}
-	if err := f.GotoLine(line, col); err != nil {
+	goTo := f.GotoLine
+	if sg, ok := m.ed.(selectingGoto); ok {
+		goTo = sg.GotoLineSelecting
+	}
+	if err := goTo(line, col); err != nil {
 		m.notice = err.Error()
 	}
 	m.syncViewport()
@@ -1246,6 +1287,9 @@ func (m *Model) activateTab(i int) {
 // handleKey resolves one key press and returns the command it starts, which is
 // tea.Quit when the editor reports quit.
 func (m *Model) handleKey(k tea.Key) tea.Cmd {
+	if cmd, panicked := m.pluginPanicKey(k); panicked {
+		return cmd
+	}
 	kp, text := translateKey(k)
 	if len(kp.Mods) == 0 && kp.Name == "F6" {
 		m.cycleFocus()
@@ -1264,12 +1308,18 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 			return cmd
 		}
 	}
+	if cmd, ok := m.pluginKey(k); ok {
+		return cmd
+	}
 	ctx := KeyContextNormal
 	if m.explorerFocus {
 		ctx = KeyContextFileExplorer
 	}
 	if m.keys != nil {
 		if cmd, ok := m.keys.Resolve(kp, ctx); ok {
+			if m.pluginGate(kp, ctx, cmd) {
+				return nil
+			}
 			return m.dispatch(cmd)
 		}
 		if ctx == KeyContextFileExplorer {
@@ -1333,7 +1383,9 @@ var clipboardActions = map[string]bool{"copy": true, "cut": true, "paste": true}
 // dispatch runs one command. Focus and explorer actions are handled here. The
 // editor runs everything else.
 func (m *Model) dispatch(cmd Command) tea.Cmd {
+	defer m.plugSource(srcKey)()
 	m.recordCommand(cmd)
+	defer m.plugCommand(cmd.Action, cmd.Args)()
 	// A forced close is the Discard of the unsaved dialog, so it goes to the
 	// editor. Any other close asks first.
 	if forced, _ := cmd.Args["force"].(bool); cmd.Action != "close_tab" || !forced {
@@ -1351,6 +1403,7 @@ func (m *Model) dispatch(cmd Command) tea.Cmd {
 		return c
 	}
 	res := m.editorDo(editor.Action(cmd.Action), cmd.Args)
+	m.plugFailed(res.Err)
 	m.syncViewport()
 	if res.Quit {
 		return m.quit()
@@ -1374,6 +1427,9 @@ func (m *Model) dispatch(cmd Command) tea.Cmd {
 // text, and only while the explorer has focus. The split and compare actions go to
 // splitAction.
 func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
+	if cmd, ok := m.pluginAction(action, args); ok {
+		return cmd, true
+	}
 	if cmd, ok := m.fixAction(action, args); ok {
 		return cmd, true
 	}
@@ -1578,6 +1634,8 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		return m.openPalette(">")
 	case hitStatusSegment:
 		return m.statusSegmentClick(t.Index)
+	case hitStatusPlugin:
+		return m.plugStatusClick(t.Index)
 	case hitEditorText, hitGutter, hitScrollbarTrack:
 		m.pressPane(t.Pane, mo.X, mo.Y, count)
 	case hitSplitBorder:
@@ -1973,6 +2031,7 @@ func (m *Model) statusView() statusView {
 		}
 	}
 	m.viewStatus(&s)
+	s.extra = m.plugStatusItems()
 	return s
 }
 
@@ -2148,7 +2207,7 @@ func (m *Model) routeOverlay(msg tea.Msg) tea.Cmd {
 			d.Dismiss()
 		}
 		m.popOverlay()
-		return nil
+		return m.plugDismissed()
 	}
 	top := m.overlays[len(m.overlays)-1]
 	next, cmd := top.Update(msg)

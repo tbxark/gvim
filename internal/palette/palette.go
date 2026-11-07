@@ -38,6 +38,9 @@ type Entry struct {
 	// Disabled is set by SearchIn: the command is listed but cannot run in the
 	// current state. Disabled entries sort after enabled ones.
 	Disabled bool
+	// When holds the Holds-style predicates of a plugin command ("has_buffer",
+	// "!read_only", "language:go"). The ui evaluates them; available does not read them.
+	When []string
 
 	contexts       []string // KeyContext names the command is scoped to; empty means any
 	customContexts []string // custom context keys that must be active to show it
@@ -67,8 +70,11 @@ func Commands(km *keymap.Map) []Entry {
 	if km == nil {
 		km = keymap.Default()
 	}
-	out := make([]Entry, 0, len(builtinCommands))
-	for _, c := range builtinCommands {
+	out := make([]Entry, 0, len(builtinCommands)+len(pluginCommands))
+	for _, c := range slices.Concat(builtinCommands, pluginCommands) {
+		if r, ok := gvimRenames[c.Action]; ok {
+			c.Name, c.Description = cmp.Or(r.Name, c.Name), r.Description
+		}
 		e := Entry{
 			Name:           c.Name,
 			Description:    c.Description,

@@ -1,413 +1,331 @@
 package app
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
-	"time"
-
-	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/config"
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/theme"
+	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/ui"
 )
 
-// writePluginFiles isolates the user config and writes files into the plugin
-// folder it gives, so that buildRuntime finds them.
-func writePluginFiles(t *testing.T, files map[string]string) {
-	t.Helper()
+func pluginAdapter() editorAdapter {
+	return editorAdapter{ed: editor.New(editor.Options{}), spans: &spanCache{}, others: map[*editor.Document]*spanCache{}}
+}
+
+// TestNewPluginRuntimeIsCreatedForNoPlugins: --no-plugins still creates the runtime, with
+// its loader disabled, so the manager can say why nothing is loaded (FINAL 4.4).
+func TestNewPluginRuntimeIsCreatedForNoPlugins(t *testing.T) {
 	isolateConfig(t)
-	dir, err := pluginDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, body := range files {
-		writeTestFile(t, filepath.Join(dir, name), body)
-	}
-}
-
-// pluginRuntime builds the runtime of a session that has one file open. It must
-// follow writePluginFiles, which isolates the user config that the plugin folder
-// comes from.
-func pluginRuntime(t *testing.T) *runtime {
-	t.Helper()
-	rt, err := buildRuntime(t.Context(), projectRoot(t, ""), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(rt.close)
-	rt.model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	return rt
-}
-
-// pluginMsgs runs cmd and returns the messages it produces, looking into batches.
-func pluginMsgs(cmd tea.Cmd) []tea.Msg {
-	if cmd == nil {
-		return nil
-	}
-	msg := cmd()
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		var out []tea.Msg
-		for _, c := range batch {
-			out = append(out, pluginMsgs(c)...)
-		}
-		return out
-	}
-	if msg == nil {
-		return nil
-	}
-	return []tea.Msg{msg}
-}
-
-// pluginFeed passes every message cmd produces back to the model, as the program
-// does.
-func pluginFeed(m *ui.Model, cmd tea.Cmd) {
-	for _, msg := range pluginMsgs(cmd) {
-		_, next := m.Update(msg)
-		pluginFeed(m, next)
-	}
-}
-
-// pluginKey sends one key press and feeds the commands it starts.
-func pluginKey(m *ui.Model, msg tea.KeyPressMsg) {
-	_, cmd := m.Update(msg)
-	pluginFeed(m, cmd)
-}
-
-// pluginPalette opens the command palette, types query and returns the frame.
-// It closes the palette again with Esc.
-func pluginPalette(t *testing.T, m *ui.Model, query string) string {
-	t.Helper()
-	if err := m.Run("command_palette"); err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range query {
-		pluginKey(m, tea.KeyPressMsg{Code: r, Text: string(r)})
-	}
-	frame := ansi.Strip(m.View().Content)
-	pluginKey(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	return frame
-}
-
-// pluginRowShows reports whether one line of frame shows label as a plugin
-// command. The query line also holds the typed label, so the row must also show
-// the plugin source.
-func pluginRowShows(frame, label string) bool {
-	for line := range strings.SplitSeq(frame, "\n") {
-		if strings.Contains(line, label) && strings.Contains(line, "plugin") {
-			return true
-		}
-	}
-	return false
-}
-
-// pluginChoose opens the command palette, types query and presses Enter, which
-// runs the highlighted row.
-func pluginChoose(t *testing.T, m *ui.Model, query string) {
-	t.Helper()
-	if err := m.Run("command_palette"); err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range query {
-		pluginKey(m, tea.KeyPressMsg{Code: r, Text: string(r)})
-	}
-	pluginKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-}
-
-func TestPluginDirIsPluginsUnderTheUserConfigDir(t *testing.T) {
-	isolateConfig(t)
-	got, err := pluginDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	base, err := config.Dir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(base, "plugins"); got != want {
-		t.Fatalf("pluginDir() = %q, want %q", got, want)
-	}
-}
-
-func TestMissingPluginDirIsSilent(t *testing.T) {
-	isolateConfig(t)
-	ed := editor.New(editor.Options{})
-	r, notices := loadPlugins(ed, newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil).Editor, 0)
-	if len(notices) != 0 {
-		t.Fatalf("notices = %q, want none for a missing plugin folder", notices)
-	}
-	if cmds := r.Commands(); len(cmds) != 0 {
-		t.Fatalf("Commands() = %d entries, want none", len(cmds))
-	}
-}
-
-func TestPluginCommandsAreListedWithTheirLabels(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"greet.js": `gvim.registerCommand("greet", "Say Hello", () => {});`,
-		"shout.ts": `gvim.registerCommand("shout", "Shout It", (): void => {});`,
-	})
-	m := pluginRuntime(t).model
-	for _, label := range []string{"Say Hello", "Shout It"} {
-		if frame := pluginPalette(t, m, label); !pluginRowShows(frame, label) {
-			t.Errorf("palette typed %q has no plugin row labelled %q:\n%s", label, label, frame)
-		}
-	}
-}
-
-func TestChoosingPluginCommandInsertsTextAtTheCaret(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"stamp.js": `gvim.registerCommand("stamp", "Insert Stamp", () => { gvim.insertText("[ok]"); });`,
-	})
-	rt := pluginRuntime(t)
-	pluginChoose(t, rt.model, "Insert Stamp")
-	if got := rt.ed.Active().Buffer.Text(); !strings.HasPrefix(got, "[ok]hello") {
-		t.Fatalf("buffer = %q, want the stamp inserted at the caret before hello", got)
-	}
-}
-
-func TestChoosingPluginCommandShowsItsStatusText(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"status.js": `gvim.registerCommand("status", "Report Status", () => { gvim.setStatus("plugin ready"); });`,
-	})
-	m := pluginRuntime(t).model
-	pluginChoose(t, m, "Report Status")
-	if frame := ansi.Strip(m.View().Content); !strings.Contains(frame, "plugin ready") {
-		t.Fatalf("status row does not show the plugin's status text:\n%s", frame)
-	}
-}
-
-func TestBrokenPluginIsNoticedAndTheOthersStillLoad(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"a_broken.js": `gvim.registerCommand("bad", "Bad Command", () => {`,
-		"b_good.js":   `gvim.registerCommand("good", "Good Command", () => {});`,
-	})
-	m := pluginRuntime(t).model
-	if frame := ansi.Strip(m.View().Content); !strings.Contains(frame, "plugin a_broken.js") {
-		t.Errorf("status row does not name the broken plugin:\n%s", frame)
-	}
-	if frame := pluginPalette(t, m, "Good Command"); !pluginRowShows(frame, "Good Command") {
-		t.Error("the good plugin's command is not listed after the broken one failed")
-	}
-	if frame := pluginPalette(t, m, "Bad Command"); pluginRowShows(frame, "Bad Command") {
-		t.Error("the broken plugin's command is listed")
-	}
-}
-
-func TestPluginRunnerReturnsNoticesAndErrors(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"say.js":   `gvim.registerCommand("say", "Say", () => { gvim.notify("hi"); gvim.setStatus("there"); });`,
-		"lines.js": `gvim.registerCommand("lines", "Lines", () => { gvim.notify("a\nb"); });`,
-		"boom.js":  `gvim.registerCommand("boom", "Boom", () => { throw new Error("kaboom"); });`,
-	})
-	folder, err := pluginDir()
-	if err != nil {
-		t.Fatal(err)
-	}
 	tests := []struct {
-		name       string
-		command    string
-		wantNotice string
-		wantErr    string
+		name     string
+		opts     Options
+		disabled bool
 	}{
-		{name: "notify and set status are joined", command: "say", wantNotice: "hi; there"},
-		{name: "a newline stays on one row", command: "lines", wantNotice: "a b"},
-		{name: "a thrown error is returned", command: "boom", wantErr: "kaboom"},
-		{name: "an unknown command is an error", command: "missing", wantErr: `unknown command "missing"`},
+		{"default", Options{}, false},
+		{"--no-plugins", Options{NoPlugins: true}, true},
+		{"--no-plugins --plugin", Options{NoPlugins: true, PluginPaths: []string{"x.lua"}}, true},
+		{"--plugin", Options{PluginPaths: []string{"x.lua"}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// The runner is built on this goroutine, which is the one that runs it.
-			ed := editor.New(editor.Options{})
-			r, notices := loadPlugins(ed, newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil).Editor, 0)
-			if len(notices) != 0 {
-				t.Fatalf("load notices = %q, want none", notices)
+			pw := newPluginRuntime(pluginAdapter(), config.Config{}, tt.opts, keymap.Default(), func() string { return "" })
+			if pw == nil || pw.rt == nil || pw.edit == nil || pw.keys == nil {
+				t.Fatalf("wiring = %+v, want the runtime, the editor and the key builder", pw)
 			}
-			notice, err := r.Run(tt.command)
-			if notice != tt.wantNotice {
-				t.Errorf("notice = %q, want %q", notice, tt.wantNotice)
-			}
-			switch {
-			case tt.wantErr == "" && err != nil:
-				t.Errorf("err = %v, want nil", err)
-			case tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)):
-				t.Errorf("err = %v, want it to contain %q", err, tt.wantErr)
-			}
-			if err != nil && strings.Contains(err.Error(), folder) {
-				t.Errorf("err %q names the full plugin folder %q", err, folder)
+			_, notices := pw.rt.Control(pluginapi.Control{Op: "reload_all"})
+			got := len(notices) == 1 && strings.Contains(notices[0].Text, "disabled by --no-plugins")
+			if got != tt.disabled {
+				t.Fatalf("reload_all notices = %+v, disabled = %v, want %v", notices, got, tt.disabled)
 			}
 		})
 	}
 }
 
-func TestPluginErrorsAreOneShortLine(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"boom.js":  `gvim.registerCommand("boom", "Boom", () => { throw new Error("kaboom"); });`,
-		"broke.js": `gvim.registerCommand("broke", "Broke", () => {`,
-		"fine.js":  `gvim.registerCommand("fine", "Fine", () => {});`,
+// TestBuildRuntimeWiresThePluginPorts: the model gets the runtime, the editor port and the
+// key builder, with plugins on or off.
+func TestBuildRuntimeWiresThePluginPorts(t *testing.T) {
+	isolateConfig(t)
+	var got ui.RootPorts
+	prev := newUI
+	t.Cleanup(func() { newUI = prev })
+	newUI = func(d ui.Deps) *ui.Model {
+		got = d.Root
+		return prev(d)
+	}
+	for _, tt := range []struct {
+		name string
+		opts Options
+	}{{"on", Options{Root: t.TempDir()}}, {"--no-plugins", Options{Root: t.TempDir(), NoPlugins: true}}} {
+		t.Run(tt.name, func(t *testing.T) {
+			got = ui.RootPorts{}
+			rt, err := buildRuntime(t.Context(), tt.opts, false)
+			must(t, err)
+			defer rt.close()
+			if got.Plugins == nil || got.PluginEditor == nil || got.PluginKeys == nil {
+				t.Fatalf("plugin ports = %+v, want all set", got)
+			}
+		})
+	}
+}
+
+// TestPluginConfigReachesTheLoader checks that plugins.<name>.enabled and .settings of the
+// config files, and plugin_timeout_ms, reach the runtime.
+func TestPluginConfigReachesTheLoader(t *testing.T) {
+	isolateConfig(t)
+	writeUserFile(t, "config.json", `{
+  "plugin_timeout_ms": 80,
+  "plugins": {"cfg": {"settings": {"greeting": "hi from config", "count": 3}}, "off": {"enabled": false}}
+}`)
+	writeUserFile(t, "plugins/cfg.lua", `
+local gvim = require "gvim"
+local s = gvim.settings.define{
+  greeting = { type = "string", default = "default" },
+  count = { type = "integer", default = 1 },
+}
+gvim.command.register{ name = "show", title = "Show Settings", run = function()
+  gvim.notify(s.greeting .. " " .. s.count)
+end }
+`)
+	writeUserFile(t, "plugins/off.lua", `error("must not load")`)
+	s := newSession(t, Options{})
+	s.waitStatus("cfg", "loaded")
+	s.waitStatus("off", "disabled")
+	s.runCommand("Show Settings")
+	if got := s.statusRow(); !strings.Contains(got, "hi from config 3") {
+		t.Fatalf("status row = %q, want the settings of the config", got)
+	}
+}
+
+func TestPluginKeymapLayers(t *testing.T) {
+	cfg := config.Config{}
+	userSaves := config.Config{Keybindings: json.RawMessage(`{"bindings":[{"key":"s","modifiers":["ctrl"],"action":"save_all","when":"normal"}]}`)}
+	resolve := func(km *keymap.Map, chord string) string {
+		t.Helper()
+		b, ok := km.Resolve(chord, keymap.ContextNormal)
+		if !ok {
+			return ""
+		}
+		return b.Action
+	}
+	preset := keymap.Default()
+	if got := resolve(preset, "ctrl+s"); got != "save" {
+		t.Fatalf("preset ctrl+s = %q", got)
+	}
+
+	t.Run("a plugin binding beats the preset", func(t *testing.T) {
+		km, err := pluginKeymap(preset, cfg, []pluginapi.Binding{{Chord: "ctrl+s", Action: "hello.hello", Plugin: "hello"}})
+		must(t, err)
+		if got := resolve(km, "ctrl+s"); got != "hello.hello" {
+			t.Fatalf("ctrl+s = %q, want the plugin command", got)
+		}
+		if got := resolve(preset, "ctrl+s"); got != "save" {
+			t.Fatalf("the preset was changed: ctrl+s = %q", got)
+		}
 	})
-	folder, err := pluginDir()
-	if err != nil {
+	t.Run("the user's keybindings beat the plugin", func(t *testing.T) {
+		km, err := pluginKeymap(preset, userSaves, []pluginapi.Binding{{Chord: "ctrl+s", Action: "hello.hello", Plugin: "hello"}})
+		must(t, err)
+		if got := resolve(km, "ctrl+s"); got != "save_all" {
+			t.Fatalf("ctrl+s = %q, want the user's binding", got)
+		}
+	})
+	t.Run("a new chord, a modifier combination, the plus key and a sequence", func(t *testing.T) {
+		km, err := pluginKeymap(preset, cfg, []pluginapi.Binding{
+			{Chord: "ctrl+alt+shift+j", Action: "p.one", Plugin: "p"},
+			{Chord: "Alt+F9", Action: "p.two", Plugin: "p"},
+			{Chord: "ctrl++", Action: "p.plus", Plugin: "p"},
+			{Chord: "ctrl+k ctrl+j", Action: "p.seq", Plugin: "p", Args: map[string]any{"n": float64(2)}},
+		})
+		must(t, err)
+		for chord, want := range map[string]string{"ctrl+alt+shift+j": "p.one", "alt+F9": "p.two", "ctrl++": "p.plus"} {
+			if got := resolve(km, chord); got != want {
+				t.Errorf("%s = %q, want %q", chord, got, want)
+			}
+		}
+		b, ok := km.ResolveSequence([]string{"ctrl+k", "ctrl+j"}, keymap.ContextNormal)
+		if !ok || b.Action != "p.seq" || b.Args["n"] != float64(2) {
+			t.Errorf("sequence = %+v, %v", b, ok)
+		}
+	})
+	t.Run("a bad chord is dropped and named, the others stay", func(t *testing.T) {
+		km, err := pluginKeymap(preset, cfg, []pluginapi.Binding{
+			{Chord: "ctrl+nonsense", Action: "p.bad", Plugin: "p"}, {Chord: "", Action: "p.empty", Plugin: "q"}, {Chord: "ctrl+alt+j", Action: "p.good", Plugin: "p"},
+		})
+		if err == nil || !strings.Contains(err.Error(), "ctrl+nonsense") || !strings.Contains(err.Error(), "q:") {
+			t.Fatalf("error = %v, want it to name the bad chords", err)
+		}
+		if km == nil || resolve(km, "ctrl+alt+j") != "p.good" {
+			t.Fatalf("the good binding is lost: %v", km)
+		}
+	})
+	t.Run("no plugin bindings: the preset with the user's layer", func(t *testing.T) {
+		km, err := pluginKeymap(preset, userSaves, nil)
+		must(t, err)
+		if got := resolve(km, "ctrl+s"); got != "save_all" {
+			t.Fatalf("ctrl+s = %q", got)
+		}
+	})
+	t.Run("a broken user layer is an error and no map", func(t *testing.T) {
+		bad := config.Config{Keybindings: json.RawMessage(`{"bindings":[{"key":"s","modifiers":["bogus"],"action":"x"}]}`)}
+		km, err := pluginKeymap(preset, bad, nil)
+		if err == nil || km != nil {
+			t.Fatalf("pluginKeymap = %v, %v", km, err)
+		}
+	})
+}
+
+func TestSplitChord(t *testing.T) {
+	tests := []struct {
+		chord, key string
+		mods       []string
+	}{
+		{"a", "a", []string{}},
+		{"ctrl+s", "s", []string{"ctrl"}},
+		{"ctrl+alt+shift+F5", "F5", []string{"ctrl", "alt", "shift"}},
+		{"+", "+", []string{}},
+		{"ctrl++", "+", []string{"ctrl"}},
+		{"ctrl+alt++", "+", []string{"ctrl", "alt"}},
+	}
+	for _, tt := range tests {
+		key, mods := splitChord(tt.chord)
+		if key != tt.key || !slices.Equal(mods, tt.mods) {
+			t.Errorf("splitChord(%q) = %q, %v, want %q, %v", tt.chord, key, mods, tt.key, tt.mods)
+		}
+	}
+}
+
+func TestKeymapAdapterLabel(t *testing.T) {
+	k := keymapAdapter{km: keymap.Default()}
+	if got := k.Label("save"); got == "" || !strings.HasSuffix(got, "S") {
+		t.Errorf("Label(save) = %q, want a formatted ctrl+s", got)
+	}
+	if got := k.Label("no_such_action"); got != "" {
+		t.Errorf("Label of an unbound action = %q", got)
+	}
+	// A plugin command bound through the layered keymap gets a label.
+	km, err := pluginKeymap(keymap.Default(), config.Config{}, []pluginapi.Binding{{Chord: "ctrl+alt+j", Action: "hello.hello", Plugin: "hello"}})
+	must(t, err)
+	if got := (keymapAdapter{km: km}).Label("hello.hello"); got == "" {
+		t.Error("Label of a plugin command bound by a plugin is empty")
+	}
+}
+
+// TestPluginKeysPortBuildsALayeredKeymap: the RootPorts.PluginKeys function returns a
+// keymap the root can resolve with.
+func TestPluginKeysPortBuildsALayeredKeymap(t *testing.T) {
+	pw := newPluginRuntime(pluginAdapter(), config.Config{}, Options{}, keymap.Default(), func() string { return "" })
+	k, err := pw.keys("", []pluginapi.Binding{{Chord: "ctrl+alt+j", Action: "hello.hello", Plugin: "hello"}})
+	must(t, err)
+	cmd, ok := k.Resolve(ui.KeyPress{Name: "j", Mods: []string{"ctrl", "alt"}}, ui.KeyContextNormal)
+	if !ok || cmd.Action != "hello.hello" {
+		t.Fatalf("resolved %+v, %v", cmd, ok)
+	}
+	if cmd, ok := k.Resolve(ui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, ui.KeyContextNormal); !ok || cmd.Action != "save" {
+		t.Fatalf("the preset bindings are lost: %+v, %v", cmd, ok)
+	}
+	// The error of a partial failure comes with a usable keymap; a total one with none.
+	k, err = pw.keys("", []pluginapi.Binding{{Chord: "bogus+", Action: "x", Plugin: "p"}})
+	if err == nil || k == nil {
+		t.Fatalf("keys = %v, %v, want the keymap and the error about the bad chord", k, err)
+	}
+}
+
+func TestProjectOpenerTracksTheRoot(t *testing.T) {
+	isolateConfig(t)
+	first, second := t.TempDir(), t.TempDir()
+	p := newProjectOpener(t.Context(), nil, first, nil)
+	if got := p.rootDir(); got != first {
+		t.Fatalf("rootDir = %q, want %q", got, first)
+	}
+	if _, err := p.Open(second); err != nil {
 		t.Fatal(err)
 	}
-	ed := editor.New(editor.Options{Empty: true})
-	r, notices := loadPlugins(ed, newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil).Editor, 0)
-	if len(notices) != 1 {
-		t.Fatalf("load notices = %q, want one for the broken file", notices)
-	}
-	for _, msg := range notices {
-		checkPluginLine(t, msg, folder, "broke.js")
-	}
-	_, runErr := r.Run("boom")
-	if runErr == nil {
-		t.Fatal("Run(boom) returned no error")
-	}
-	checkPluginLine(t, runErr.Error(), folder, "boom.js")
-}
-
-// checkPluginLine checks that a notice is one line, names the plugin file and does
-// not repeat the plugin folder.
-func checkPluginLine(t *testing.T, msg, folder, file string) {
-	t.Helper()
-	if strings.Contains(msg, "\n") {
-		t.Errorf("notice %q spans more than one line", msg)
-	}
-	if !strings.Contains(msg, file) {
-		t.Errorf("notice %q does not name %s", msg, file)
-	}
-	if strings.Contains(msg, folder) {
-		t.Errorf("notice %q repeats the plugin folder %q", msg, folder)
+	defer p.close()
+	want, _ := filepath.EvalSymlinks(second)
+	if got, _ := filepath.EvalSymlinks(p.rootDir()); got != want {
+		t.Fatalf("rootDir after Open = %q, want %q", p.rootDir(), second)
 	}
 }
 
-func TestPluginCommandLabelDefaultsToItsName(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"nameless.js": `gvim.registerCommand("nameless", "", () => {});`,
-	})
-	ed := editor.New(editor.Options{})
-	r, _ := loadPlugins(ed, newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil).Editor, 0)
-	cmds := r.Commands()
-	if len(cmds) != 1 || cmds[0].Name != "nameless" || cmds[0].Action != "plugin:nameless" {
-		t.Fatalf("Commands() = %+v, want one entry named nameless with action plugin:nameless", cmds)
+// TestPluginDirsFollowTheWorkspaceRoot: the directories the plugins get report the current
+// root, which a project switch changes, and the config directory and the home.
+func TestPluginDirsFollowTheWorkspaceRoot(t *testing.T) {
+	isolateConfig(t)
+	root := "/first"
+	dirs := pluginDirs("/cfg/gvim", func() string { return root })
+	d := dirs()
+	home, _ := os.UserHomeDir()
+	cwd, _ := os.Getwd()
+	if d.Root != "/first" || d.Config != "/cfg/gvim" || d.Home != home || d.Cwd != cwd || d.Temp != os.TempDir() {
+		t.Fatalf("dirs = %+v", d)
+	}
+	root = "/second"
+	if got := dirs().Root; got != "/second" {
+		t.Fatalf("Root after the switch = %q, want /second", got)
 	}
 }
 
-func TestPluginEditorActivePathAndInsertText(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "doc.txt")
-	writeTestFile(t, path, "hello\n")
+// TestOneBadBindingKeepsOthers: the keymap rejects the bindings of one plugin (an empty
+// action, an argument JSON cannot hold), and only that plugin's bindings are dropped.
+func TestOneBadBindingKeepsOthers(t *testing.T) {
+	preset := keymap.Default()
 	tests := []struct {
-		name          string
-		open          bool
-		wantPath      string
-		wantInsertErr bool
+		name string
+		bad  pluginapi.Binding
 	}{
-		{name: "no document", open: false, wantPath: "", wantInsertErr: true},
-		{name: "a file document", open: true, wantPath: path, wantInsertErr: false},
+		{"empty action", pluginapi.Binding{Chord: "ctrl+alt+m", Action: "", Plugin: "c"}},
+		{"unmarshalable args", pluginapi.Binding{Chord: "ctrl+alt+m", Action: "c.x", Plugin: "c", Args: map[string]any{"f": func() {}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Without Empty the editor starts with an untitled document.
-			ed := editor.New(editor.Options{Empty: !tt.open})
-			if tt.open {
-				if err := ed.OpenFile(path); err != nil {
-					t.Fatal(err)
+			km, err := pluginKeymap(preset, config.Config{}, []pluginapi.Binding{
+				{Chord: "ctrl+alt+j", Action: "a.one", Plugin: "a"},
+				tt.bad,
+				{Chord: "ctrl+alt+n", Action: "d.x", Plugin: "d"},
+				{Chord: "ctrl+alt+o", Action: "c.ok", Plugin: "c"}, // a second binding of the dropped plugin
+			})
+			if err == nil || !strings.Contains(err.Error(), "plugin 'c'") {
+				t.Fatalf("error = %v, want plugin 'c' named", err)
+			}
+			if km == nil {
+				t.Fatal("no keymap: one plugin's bad binding unbound the others")
+			}
+			for chord, want := range map[string]string{"ctrl+alt+j": "a.one", "ctrl+alt+n": "d.x", "ctrl+alt+m": "", "ctrl+alt+o": ""} {
+				got := ""
+				if b, ok := km.Resolve(chord, keymap.ContextNormal); ok {
+					got = b.Action
+				}
+				if got != want {
+					t.Errorf("%s = %q, want %q", chord, got, want)
 				}
 			}
-			pe := &pluginEditor{ed: ed, state: newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil).Editor, owner: goroutineID()}
-			if got := pe.ActivePath(); got != tt.wantPath {
-				t.Errorf("ActivePath() = %q, want %q", got, tt.wantPath)
-			}
-			if err := pe.InsertText("X"); (err != nil) != tt.wantInsertErr {
-				t.Errorf("InsertText error = %v, want error %v", err, tt.wantInsertErr)
-			}
 		})
 	}
 }
 
-func TestPluginEditorRefusesOtherGoroutines(t *testing.T) {
-	calls := []struct {
-		name string
-		call func(*pluginEditor)
-	}{
-		{name: "Notify", call: func(p *pluginEditor) { p.Notify("x") }},
-		{name: "SetStatus", call: func(p *pluginEditor) { p.SetStatus("x") }},
-		{name: "InsertText", call: func(p *pluginEditor) { _ = p.InsertText("x") }},
-		{name: "ActivePath", call: func(p *pluginEditor) { _ = p.ActivePath() }},
-	}
-	for _, c := range calls {
-		t.Run(c.name, func(t *testing.T) {
-			// The adapter is built on this goroutine, so it is the owner here.
-			ed := editor.New(editor.Options{})
-			pe := &pluginEditor{ed: ed, state: newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil).Editor, owner: goroutineID()}
-			// On the owner goroutine the call returns normally.
-			c.call(pe)
-			// On another goroutine it panics, and the panic is caught here.
-			done := make(chan any, 1)
-			go func() {
-				defer func() { done <- recover() }()
-				c.call(pe)
-			}()
-			if got := <-done; got == nil {
-				t.Fatalf("%s from another goroutine did not panic", c.name)
-			}
-		})
-	}
-}
-
-// TestPluginTimeoutIsTheConfiguredLimit checks that a plugin call is cut off at the
-// timeout the runner was loaded with, and at the default when none is given.
-func TestPluginTimeoutIsTheConfiguredLimit(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"spin.js": `gvim.registerCommand("spin", "Spin", () => { while (true) {} });`,
+// TestPluginBindingConflictDropsOnlyLoser: the first plugin in load order keeps a chord,
+// the loser is named, and the loser's other bindings stay.
+func TestPluginBindingConflictDropsOnlyLoser(t *testing.T) {
+	km, err := pluginKeymap(keymap.Default(), config.Config{}, []pluginapi.Binding{
+		{Chord: "ctrl+alt+j", Action: "a.one", Plugin: "a"}, {Chord: "Alt+Ctrl+J", Action: "b.one", Plugin: "b"},
+		{Chord: "ctrl+alt+k", Action: "b.two", Plugin: "b"},
 	})
-	tests := []struct {
-		name    string
-		timeout time.Duration
-		want    string
-	}{
-		{name: "a configured limit", timeout: 50 * time.Millisecond, want: "timed out after 50ms"},
-		{name: "zero is the default limit", timeout: 0, want: "timed out after 500ms"},
+	if err == nil || !strings.Contains(err.Error(), "plugin 'b': key ctrl+alt+j already bound by plugin 'a'") {
+		t.Fatalf("error = %v, want the loser reported", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ed := editor.New(editor.Options{})
-			r, notices := loadPlugins(ed, newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil).Editor, tt.timeout)
-			if len(notices) != 0 {
-				t.Fatalf("load notices = %q, want none", notices)
-			}
-			if _, err := r.Run("spin"); err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("Run(spin) error = %v, want it to contain %q", err, tt.want)
-			}
-		})
+	if km == nil {
+		t.Fatal("no keymap")
 	}
-}
-
-// TestPluginTimeoutFromConfigReachesTheCommand checks that plugin_timeout_ms in the
-// config file is the limit that a palette choice of a plugin command runs under.
-func TestPluginTimeoutFromConfigReachesTheCommand(t *testing.T) {
-	writePluginFiles(t, map[string]string{
-		"spin.js": `gvim.registerCommand("spin", "Spin Forever", () => { while (true) {} });`,
-	})
-	rt, err := buildRuntime(t.Context(), projectRoot(t, `{"plugin_timeout_ms": 50}`), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(rt.close)
-	rt.model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-
-	// The status row cuts the message short, so the limit is read from the time the
-	// choice takes: the default limit is 500ms, and the configured 50ms must end the
-	// call well before it.
-	start := time.Now()
-	pluginChoose(t, rt.model, "Spin Forever")
-	if elapsed := time.Since(start); elapsed > 400*time.Millisecond {
-		t.Errorf("the choice took %v, want the configured 50ms limit to end the call", elapsed)
-	}
-	if frame := ansi.Strip(rt.model.View().Content); !strings.Contains(frame, "timed out") {
-		t.Fatalf("status row does not report the timeout:\n%s", frame)
+	for chord, want := range map[string]string{"ctrl+alt+j": "a.one", "ctrl+alt+k": "b.two"} {
+		if b, ok := km.Resolve(chord, keymap.ContextNormal); !ok || b.Action != want {
+			t.Errorf("%s = %+v, %v, want %q", chord, b, ok, want)
+		}
 	}
 }

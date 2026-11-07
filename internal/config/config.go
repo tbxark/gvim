@@ -21,10 +21,15 @@
 // (tab_size, insert_spaces, show_whitespace, ...) keep working as aliases of the
 // nested keys. When one file sets both spellings of an option, the nested one
 // wins. Across layers the later layer wins whichever spelling it uses. Fresh keys
-// that gvim has no use for (clipboard, terminal, plugins, ...) are accepted and
+// that gvim has no use for (clipboard, terminal, ...) are accepted and
 // ignored, so a Fresh config file loads without diagnostics. See editoropts.go
 // for the editor options and language.go for the per-language settings and the
 // resolver Config.EditorFor.
+//
+// The plugins key, {"plugins": {"name": {"enabled": false, "settings": {...}}}}, is
+// read per layer into Config.Plugins (see PluginConfig). The project layer can only
+// disable a plugin, and plugin_timeout_ms from the project layer can only lower the
+// user's value.
 //
 // The lsp key maps a language ID to the language server that runs for it:
 // {"lsp": {"go": {"command": "gopls", "args": []}}}. No language server runs
@@ -133,8 +138,13 @@ type Config struct {
 	UIIcons                 string // "auto", "plain" or "nerd" glyphs for interface controls; default "auto"
 	UIIconsFont             string // font family the terminal uses, for ui_icons "auto"; default empty
 
-	// PluginTimeout is the longest one plugin call may run, default 500ms.
+	// PluginTimeout is the longest one plugin call may run, default 500ms. The
+	// project layer may only lower it (see lowerPluginTimeout).
 	PluginTimeout time.Duration
+
+	// Plugins holds the plugins.<name> entries that the files set, or is nil when
+	// no file sets any. Names are kept as written, known or not.
+	Plugins map[string]PluginConfig
 
 	// The fields below are the Fresh "editor" options that gvim added with the
 	// nested config layout. Each default is Fresh's. The doc of the option and its
@@ -200,6 +210,30 @@ func Defaults() Config {
 		EditorOptions: defaultEditorOptions(),
 	}
 }
+
+// PluginConfig is the plugins.<name> entry of the config files.
+//
+// The two layers are kept apart because they have different trust: the user layer
+// is the user's own, the project layer comes from a repository that may be
+// hostile. Settings holds the user layer's "settings" object and ProjectSettings
+// the project layer's. They are never merged here. The plugin host merges a
+// project value over the user value only for keys the plugin declared
+// project = true.
+type PluginConfig struct {
+	// Enabled is the "enabled" flag, or nil when no file sets it. The project
+	// layer can only set it to false.
+	Enabled         *bool
+	Settings        map[string]any // "settings" from the user layer, or nil
+	ProjectSettings map[string]any // "settings" from the project layer, or nil
+}
+
+// layer is the kind of config file being applied.
+type layer int
+
+const (
+	layerUser layer = iota
+	layerProject
+)
 
 // Source returns the path of the file that last set key, or "" when no file
 // sets it and the default applies. key is the setting name as the files write
@@ -342,7 +376,7 @@ func Load(opts Options) (Config, []Diagnostic, error) {
 		}
 	}
 	if userPath != "" {
-		diags = append(diags, applyFile(&cfg, userPath)...)
+		diags = append(diags, applyFile(&cfg, userPath, layerUser)...)
 	}
 
 	if opts.Root == "" {
@@ -353,14 +387,15 @@ func Load(opts Options) (Config, []Diagnostic, error) {
 		return cfg, diags, err
 	}
 	if ok {
-		diags = append(diags, applyFile(&cfg, projectPath)...)
+		diags = append(diags, applyFile(&cfg, projectPath, layerProject)...)
 	}
 	return cfg, diags, nil
 }
 
 // applyFile reads one layer file and applies each of its keys to cfg. It
-// returns the diagnostics for the file. A missing file applies nothing.
-func applyFile(cfg *Config, path string) []Diagnostic {
+// returns the diagnostics for the file. A missing file applies nothing. l says
+// which layer the file is: the project layer is restricted for the plugin keys.
+func applyFile(cfg *Config, path string, l layer) []Diagnostic {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -387,9 +422,26 @@ func applyFile(cfg *Config, path string) []Diagnostic {
 		if isSection(key) {
 			continue
 		}
-		if err := cfg.set(key, keys[key]); err != nil {
-			diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
+		switch {
+		case key == "plugins":
+			applied, failures := cfg.setPlugins(keys[key], l)
+			for _, k := range applied {
+				cfg.note(k, path)
+			}
+			for _, f := range failures {
+				diags = append(diags, Diagnostic{Path: path, Key: f.key, Message: f.err.Error()})
+			}
 			continue
+		case key == "plugin_timeout_ms" && l == layerProject:
+			if err := cfg.lowerPluginTimeout(keys[key]); err != nil {
+				diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
+				continue
+			}
+		default:
+			if err := cfg.set(key, keys[key]); err != nil {
+				diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
+				continue
+			}
 		}
 		cfg.note(key, path)
 	}

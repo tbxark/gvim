@@ -220,3 +220,46 @@ func TestFoldRevealRunsOnTheTabThatBecomesActive(t *testing.T) {
 		t.Fatalf("caret in the folded tab = %+v, want 0:0", folded.Cursor)
 	}
 }
+
+// TestFoldsAreKeptPerVersionAndTabWidth checks that the ranges are not found again for a
+// frame when the text and the tab width are the same (every repaint and every key asks),
+// and that an edit, an undo and a tab width that changes the ranges are seen.
+func TestFoldsAreKeptPerVersionAndTabWidth(t *testing.T) {
+	t.Parallel()
+	e, _ := openFixture(t, Options{}, "a\n  b\n  c\nd\n")
+	d := e.Active()
+	same := func(x, y []fold.Range) bool { return len(x) > 0 && len(y) > 0 && &x[0] == &y[0] }
+
+	first := d.Folds(4)
+	if want := []fold.Range{{Start: 0, End: 2}}; !slices.Equal(first, want) {
+		t.Fatalf("Folds = %v, want %v", first, want)
+	}
+	if again := d.Folds(4); !same(first, again) {
+		t.Error("Folds found the ranges again for the same text and tab width")
+	}
+
+	e.SetCursor(buffer.Pos{Line: 3}, false)
+	if r := e.Do("insert_char", map[string]any{"text": "\n  x"}); r.Err != nil {
+		t.Fatal(r.Err)
+	}
+	if got, want := d.Folds(4), []fold.Range{{Start: 0, End: 4}}; !slices.Equal(got, want) {
+		t.Errorf("Folds after an edit = %v, want %v", got, want)
+	}
+	run(t, e, "undo")
+	if got, want := d.Folds(4), []fold.Range{{Start: 0, End: 2}}; !slices.Equal(got, want) {
+		t.Errorf("Folds after undo = %v, want %v", got, want)
+	}
+
+	// The tab is indented more than the two spaces under it only when it is 4 wide.
+	tabs, _ := openFixture(t, Options{}, "\ta\n  b\n")
+	td := tabs.Active()
+	if got := td.Folds(4); len(got) != 0 {
+		t.Fatalf("Folds(4) = %v, want none", got)
+	}
+	if got, want := td.Folds(1), []fold.Range{{Start: 0, End: 1}}; !slices.Equal(got, want) {
+		t.Fatalf("Folds(1) = %v, want %v", got, want)
+	}
+	if got := td.Folds(4); len(got) != 0 {
+		t.Fatalf("Folds(4) again = %v, want none", got)
+	}
+}

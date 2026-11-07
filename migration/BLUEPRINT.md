@@ -1,5 +1,12 @@
 # BLUEPRINT: gvim as a Go port of Fresh
 
+> **Superseded (plugin runtime).** Rows R10, Q2 and the dependency notes (goja plus esbuild) describe the old plan. The plugin runtime in this repository is **Lua on
+> `github.com/yuin/gopher-lua`** (`internal/plugin`), not JavaScript. The JS system (`goja`, `esbuild`,
+> `slowjs`) was removed completely, and `.js`/`.ts` files in the plugin folder are never executed.
+> The design record is the Lua plugin design (`docs/plugins/` for users and plugin authors,
+> `migration/ARCH-v4.md` for the package graph). Everything below that talks about a JavaScript or
+> TypeScript runtime, `RegisterHostFunc`, Promises, `slowjs`, `goja` or `esbuild` is history.
+
 Status: working blueprint, 2026-11-05. Written after a static audit of the Go tree at
 HEAD `57311c1` plus the uncommitted changes listed in §6.0. Scope is the Fresh terminal editor
 at `refs/fresh` (read-only reference). Where this file and `ARCH-v4.md` disagree on package

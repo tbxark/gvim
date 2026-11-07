@@ -23,6 +23,9 @@ checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
 - Domain packages (`buffer`, `editor`, `search`, `explorer`, `finder`, `fuzzy`, `palette`,
   `keymap`, `theme`, `syntax`, `fsops`, `workspace`, `config`, `lsp`) must not import
   bubbletea, bubbles or lipgloss.
+- `internal/pluginapi`, `internal/plugin`, `internal/luapat`, `internal/decor`: the Lua plugin
+  system (see Lua plugins below).
+- `docs/plugins/`: the plugin author documentation and the `gvim.d.lua` type stubs.
 - `internal/uitest`: an in-process test harness for the real UI (see Debugging).
 - `internal/term`: runs a program in a pseudo-terminal and keeps a model of its screen.
 - `cmd/gvimdebug`: the debug page. It runs gvim in a pseudo-terminal and serves its
@@ -279,6 +282,49 @@ Known limits:
 - Every code change needs a restart, which rebuilds gvim and resets the editor state. There
   is no hot reload.
 - The page listens on loopback only and has no authentication.
+
+## Lua plugins
+
+gvim runs plugins written in Lua 5.1 on `github.com/yuin/gopher-lua` (pure Go). The old
+JavaScript system (goja, esbuild) is gone. Users and plugin authors read `docs/plugins/README.md`;
+the design record is `migration/ARCH-v4.md` (package graph and the plugin files by package).
+
+- `internal/pluginapi`: the contract. Plain types, the `Host` and `Runtime` interfaces, error
+  codes, `Unsupported`. Stdlib only.
+- `internal/plugin`: the runtime (sandbox, tasks and the yield protocol, budgets, strikes, the
+  loader, every `gvim.*` area in `api_*.go`). It imports no ui, editor or buffer package.
+  `plugin/bundled` embeds the bundled plugins (`plugins/`) and Lua modules (`lib/`);
+  `plugin/plugintest` is the fake host, fake OS, manual clock and `Harness` that plugin tests use.
+- `internal/luapat`: the Lua pattern matcher with a step budget that replaces `string.find`,
+  `match`, `gmatch` and `gsub`. `internal/decor`: the decoration store.
+- `internal/ui/plugin_*.go` is the host side (pump, events, prompts, keys, status, decorations,
+  windows, virtual buffers, manager, init.lua, LSP). `internal/app/plugin*.go` wires the runtime to the real editor
+  (`pluginedit.go`, `pluginos*.go`, `pluginservices.go`, `plugins.go`). Update does no IO: plugin
+  work runs in `tea.Cmd`s as `pluginapi.Work`.
+- All Lua runs on the Bubble Tea update goroutine. A host method runs inside a Lua call and must
+  never call into the runtime; it validates and defers (`m.plug.later`).
+
+Plugin gates, besides the usual ones:
+
+```sh
+go test ./internal/plugin/... ./internal/luapat ./internal/pluginapi ./internal/decor
+go test -run 'TestStubsMatchRuntime|TestDocs' ./internal/plugin   # docs/plugins vs the runtime
+go test -run TestBundledPluginsIdleHeap -v ./internal/app          # memory gate, prints the numbers
+go test -race ./internal/plugin/... ./internal/luapat ./internal/ui/... ./internal/app
+```
+
+- `docs/plugins/gvim.d.lua` must declare exactly the functions a live plugin state has, and every
+  function must appear in the Markdown (`TestStubsMatchRuntime`, `TestDocsCoverTheAPI`). Adding
+  an API function means adding it to `gvim.d.lua` and to the right page of `docs/plugins/`.
+  Every file in `docs/plugins/examples/` is loaded and run by `TestDocsExamples`.
+- The default-enabled bundled plugins may keep at most 8 MiB of heap while idle
+  (`TestBundledPluginsIdleHeap`; about 6.5 MiB today). When a new bundled plugin breaks it, set
+  `default_enabled: false` in its `plugin.json` (largest first) and update `docs/plugins/bundled.md`.
+- Tests that depend on time budgets assert on step counts or budget errors, with at most one
+  generous wall-clock sanity bound. Do not add a tight wall-clock threshold.
+- gopher-lua v1.1.2 miscompiles `a, b = b, a` on two local variables. Do not write it in Lua
+  plugins (bundled or tests).
+- `.js` and `.ts` plugins are never run.
 
 ## Testing rules
 

@@ -618,7 +618,7 @@ var fileOnlyKeys = []string{
 	"$schema", "version", "locale", "check_for_updates", "self_update", "auto_attach",
 	"open_last_workspace", "sidebar", "file_browser", "clipboard", "terminal",
 	"keybinding_maps", "active_keybinding_map", "lsp_enabled", "universal_lsp",
-	"warnings", "plugins", "packages", "env", "menu",
+	"warnings", "packages", "env", "menu",
 }
 
 // sectionFailure is one rejected key inside a section, with its full dotted name.
@@ -684,4 +684,93 @@ func decodeObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
 		return nil, errors.New("must be a JSON object")
 	}
 	return m, nil
+}
+
+// lowerPluginTimeout applies plugin_timeout_ms from the project layer. The
+// effective value is min(user, project): a repository can shorten the time a
+// plugin may run but never extend it. A larger value is rejected and the value
+// from the layers below stays.
+func (c *Config) lowerPluginTimeout(raw json.RawMessage) error {
+	before := c.PluginTimeout
+	if err := c.set("plugin_timeout_ms", raw); err != nil {
+		return err
+	}
+	if c.PluginTimeout > before {
+		c.PluginTimeout = before
+		return errors.New("project config cannot raise plugin_timeout_ms")
+	}
+	return nil
+}
+
+// setPlugins applies the "plugins" object of one layer: {"<name>": {"enabled": bool,
+// "settings": {...}}}. It returns the dotted names of the keys that were applied and
+// the rejected ones, in key order. A name that is not an object, or a key that is
+// rejected, leaves that entry unchanged. The project layer cannot set enabled to
+// true, so a repository can switch a plugin off or tune it but never turn code on.
+func (c *Config) setPlugins(raw json.RawMessage, l layer) (applied []string, failed []sectionFailure) {
+	entries, err := decodeObject(raw)
+	if err != nil {
+		return nil, []sectionFailure{{"plugins", err}}
+	}
+	for _, name := range sortedKeys(entries) {
+		full := "plugins." + name
+		fields, err := decodeObject(entries[name])
+		if err != nil {
+			failed = append(failed, sectionFailure{full, err})
+			continue
+		}
+		for _, k := range sortedKeys(fields) {
+			key := full + "." + k
+			if err := c.setPluginField(name, k, fields[k], l); err != nil {
+				failed = append(failed, sectionFailure{key, err})
+				continue
+			}
+			applied = append(applied, key)
+		}
+	}
+	return applied, failed
+}
+
+// setPluginField applies one key of plugins.<name>. "path" is Fresh's key for a plugin
+// location; gvim finds plugins by directory, so it is accepted and ignored.
+func (c *Config) setPluginField(name, key string, raw json.RawMessage, l layer) error {
+	if isNull(raw) {
+		return errors.New("null is not a valid value")
+	}
+	switch key {
+	case "enabled":
+		var v bool
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return errors.New("must be true or false")
+		}
+		if l == layerProject && v {
+			return errors.New("project config cannot enable a plugin")
+		}
+		pc := c.Plugins[name]
+		pc.Enabled = &v
+		c.putPlugin(name, pc)
+	case "settings":
+		var v map[string]any
+		if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &v) != nil {
+			return errors.New("must be a JSON object")
+		}
+		pc := c.Plugins[name]
+		if l == layerProject {
+			pc.ProjectSettings = v
+		} else {
+			pc.Settings = v
+		}
+		c.putPlugin(name, pc)
+	case "path":
+	default:
+		return errors.New("unknown setting")
+	}
+	return nil
+}
+
+func (c *Config) putPlugin(name string, pc PluginConfig) {
+	if c.Plugins == nil {
+		c.Plugins = make(map[string]PluginConfig)
+	}
+	c.Plugins[name] = pc
 }

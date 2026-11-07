@@ -1,190 +1,228 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
+	"runtime/debug"
 	"strings"
-	"time"
-
-	goruntime "runtime"
 
 	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	palmodel "github.com/tbxark/gvim/internal/palette"
+	"github.com/tbxark/gvim/internal/keymap"
 	"github.com/tbxark/gvim/internal/plugin"
+	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/ui"
-	uipalette "github.com/tbxark/gvim/internal/ui/palette"
 )
 
-var (
-	_ uipalette.PluginRunner = (*pluginRunner)(nil)
-	_ plugin.Editor          = (*pluginEditor)(nil)
-)
-
-// pluginDir returns the folder that holds the plugin files: gvim/plugins under
-// the user config directory.
-func pluginDir() (string, error) {
-	dir, err := config.Dir()
-	if err != nil {
-		return "", fmt.Errorf("plugin dir: %w", err)
-	}
-	return filepath.Join(dir, "plugins"), nil
+// pluginWiring is what the Lua plugin runtime adds to a session: the runtime, the editor as
+// the plugins see it, and the builder of the keymap that holds their bindings.
+type pluginWiring struct {
+	rt   *plugin.Runtime
+	edit *pluginEditor
+	keys func(preset string, b []pluginapi.Binding) (ui.Keymap, error)
 }
 
-// loadPlugins starts the plugin host over the plugin folder and loads every plugin
-// in it. It returns the runner that the palette and the root use, and the notices
-// for the status row: one for each plugin that failed to load or did not load within
-// the host's load budget, and any text the plugins showed while loading. A missing
-// folder means no plugins, and gives no notice. timeout bounds each plugin call; zero
-// means the host default.
+// newPluginRuntime builds the plugin runtime of a session. It starts nothing: the model's
+// Init starts the runtime, whose first Work discovers the plugins, and the plugins load
+// when that Work comes back. The sources are the plugins embedded in the binary, the user's
+// plugin folder and init.lua (config.Dir()), and the --plugin paths. root reports the
+// workspace root as it is now, since opening a project changes it. preset is the keymap
+// before the user's keybindings, which the plugin bindings are layered on.
 //
-// The editor adapter remembers the goroutine that calls loadPlugins, and every
-// adapter method checks it. The caller must be the UI goroutine. app.Run builds
-// the runtime on the goroutine that then runs the program, so this holds there.
-func loadPlugins(ed *editor.Editor, state ui.EditorState, timeout time.Duration) (*pluginRunner, []string) {
-	pe := &pluginEditor{ed: ed, state: state, owner: goroutineID()}
-	r := &pluginRunner{editor: pe}
-	dir, err := pluginDir()
-	if err != nil {
-		return r, []string{"plugins: " + err.Error()}
+// With --no-plugins the runtime is still created, with the loader disabled: it discovers
+// and loads nothing but the --plugin paths, and the plugin manager can say why.
+func newPluginRuntime(a editorAdapter, cfg config.Config, opts Options, preset *keymap.Map, root func() string) *pluginWiring {
+	cfgDir, _ := config.Dir()
+	ld := &plugin.LoaderOptions{
+		Paths:    opts.PluginPaths,
+		Disabled: opts.NoPlugins,
+		Enabled:  map[string]bool{},
+		Settings: map[string]plugin.PluginSettings{},
 	}
-	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
-		return r, nil
+	if cfgDir != "" {
+		ld.UserDir = filepath.Join(cfgDir, "plugins")
+		ld.InitFile = filepath.Join(cfgDir, "init.lua")
+		ld.StateFile = filepath.Join(cfgDir, "plugin-state.json")
 	}
-	host, err := plugin.New(plugin.Options{Dir: dir, Editor: pe, Timeout: timeout})
-	if err != nil {
-		return r, []string{"plugins: " + err.Error()}
-	}
-	r.host, r.dir = host, dir
-	var notices []string
-	for _, err := range host.Load() {
-		notices = append(notices, r.short(err))
-	}
-	if text := pe.take(); text != "" {
-		notices = append(notices, text)
-	}
-	return r, notices
-}
-
-// pluginRunner is the plugin host of a session, as the palette and the root see
-// it. host is nil when no plugin folder could be used, and then there are no
-// commands.
-type pluginRunner struct {
-	editor *pluginEditor
-	host   *plugin.Host
-	dir    string
-}
-
-// Commands returns one palette entry per plugin command. A command with an empty
-// label is shown by its name.
-func (r *pluginRunner) Commands() []palmodel.Entry {
-	if r.host == nil {
-		return nil
-	}
-	cmds := r.host.Commands()
-	out := make([]palmodel.Entry, 0, len(cmds))
-	for _, c := range cmds {
-		label := c.Label
-		if label == "" {
-			label = c.Name
+	for name, pc := range cfg.Plugins {
+		if pc.Enabled != nil {
+			ld.Enabled[name] = *pc.Enabled
 		}
-		out = append(out, palmodel.PluginEntry(c.Name, label))
+		if pc.Settings != nil || pc.ProjectSettings != nil {
+			ld.Settings[name] = plugin.PluginSettings{User: pc.Settings, Project: pc.ProjectSettings}
+		}
 	}
-	return out
+	osys := newPluginOS(pluginDirs(cfgDir, root))
+	return &pluginWiring{
+		rt: plugin.New(plugin.Options{
+			Timeout:  cfg.PluginTimeout,
+			OS:       osys,
+			Services: pluginServices{},
+			Version:  gvimVersion(),
+			Loader:   ld,
+		}),
+		edit: newPluginEditor(a),
+		keys: func(name string, bs []pluginapi.Binding) (ui.Keymap, error) {
+			base := preset
+			if name != "" {
+				// A keymap switch: the plugin bindings go over the preset it chose.
+				b, err := keymapFor(name)
+				if err != nil {
+					return nil, err
+				}
+				base = b
+			}
+			km, err := pluginKeymap(base, cfg, bs)
+			if km == nil {
+				return nil, err
+			}
+			return keymapAdapter{km: km}, err
+		},
+	}
 }
 
-// Run runs the command called name on the calling goroutine, which is the UI
-// goroutine, bounded by the host's timeout. It returns the notices the command
-// left and the error that stopped it. Notices from an earlier call are dropped
-// first.
-func (r *pluginRunner) Run(name string) (string, error) {
-	if r.host == nil {
-		return "", errors.New("plugin: no plugins are loaded")
+// pluginDirs reports the directories gvim.dirs gives the plugins. It is evaluated at every
+// call, because the workspace root changes when a project is opened.
+func pluginDirs(cfgDir string, root func() string) func() plugin.Dirs {
+	home, _ := os.UserHomeDir()
+	return func() plugin.Dirs {
+		cwd, _ := os.Getwd()
+		return plugin.Dirs{Config: cfgDir, Home: home, Temp: os.TempDir(), Cwd: cwd, Root: root()}
 	}
-	r.editor.take()
-	err := r.host.Run(name)
-	notice := r.editor.take()
+}
+
+// gvimVersion is the module version of the binary, or "dev" for a build from a work tree.
+func gvimVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
+
+// pluginKeymap layers the plugins' key bindings into a keymap: the preset, then the
+// bindings, then the user's own keybindings, so the user always wins. Plugin bindings
+// are bindings of the normal context; the ui checks their when-clauses when the key is
+// pressed.
+//
+// When two bindings take the same chord the first in load order wins, and the loser is
+// reported. A binding that is not a valid chord is left out. If the keymap rejects the
+// bindings together, each plugin's bindings are tried alone and only the plugins whose
+// bindings fail are left out. The error lists everything that was left out; the map is
+// still returned with the rest, so one bad binding does not unbind the others. If the
+// user's own layer cannot be applied there is no map.
+func pluginKeymap(preset *keymap.Map, cfg config.Config, bs []pluginapi.Binding) (*keymap.Map, error) {
+	var dropped []string
+	var order []string // plugins, in the order of their first binding
+	groups := map[string][]bindingEntry{}
+	owner := map[string]string{} // canonical chord -> plugin that holds it
+	for _, b := range bs {
+		steps, canon, err := chordSteps(b.Chord)
+		if err != nil {
+			dropped = append(dropped, fmt.Sprintf("%s: %q: %v", b.Plugin, b.Chord, err))
+			continue
+		}
+		if first, taken := owner[canon]; taken {
+			dropped = append(dropped, fmt.Sprintf("plugin '%s': key %s already bound by plugin '%s'", b.Plugin, canon, first))
+			continue
+		}
+		owner[canon] = b.Plugin
+		if _, seen := groups[b.Plugin]; !seen {
+			order = append(order, b.Plugin)
+		}
+		groups[b.Plugin] = append(groups[b.Plugin], bindingEntry{
+			Keys: steps, Action: b.Action, Args: b.Args, When: string(keymap.ContextNormal),
+		})
+	}
+	km := preset
+	var all []bindingEntry
+	for _, name := range order {
+		all = append(all, groups[name]...)
+	}
+	if len(all) > 0 {
+		var err error
+		if km, err = withBindings(preset, all); err != nil {
+			// Find the plugins that fail on their own, then build again without them.
+			all = all[:0]
+			for _, name := range order {
+				if _, err := withBindings(preset, groups[name]); err != nil {
+					dropped = append(dropped, fmt.Sprintf("plugin '%s': %v", name, err))
+					continue
+				}
+				all = append(all, groups[name]...)
+			}
+			km = preset
+			if len(all) > 0 {
+				if km, err = withBindings(preset, all); err != nil {
+					return nil, fmt.Errorf("plugin key bindings: %w", err)
+				}
+			}
+		}
+	}
+	km, err := keymapWithOverrides(km, cfg)
 	if err != nil {
-		return notice, errors.New(r.short(err))
+		return nil, err
 	}
-	return notice, nil
-}
-
-// short returns the text of err with the plugin folder cut from it, so that the
-// file name comes first in the status row. It is only called when r.host is set,
-// so r.dir is not empty.
-func (r *pluginRunner) short(err error) string {
-	return strings.ReplaceAll(err.Error(), r.dir+string(filepath.Separator), "")
-}
-
-// pluginEditor is the plugin.Editor of a session. The host calls its methods from
-// Load and Run, and both run on the UI goroutine. A call from any other goroutine
-// panics, because the editor is not safe to use there.
-type pluginEditor struct {
-	ed    *editor.Editor // reads the active document
-	state ui.EditorState // inserts text, so that the syntax caches see the edit
-	owner uint64         // the goroutine that built the adapter
-	notes []string       // the Notify and SetStatus texts since the last take
-}
-
-// onUI panics when the caller is not the goroutine that built p.
-func (p *pluginEditor) onUI() {
-	if goroutineID() != p.owner {
-		panic("plugin: editor call from a goroutine other than the UI goroutine")
+	if len(dropped) > 0 {
+		return km, fmt.Errorf("plugin key bindings ignored: %s", strings.Join(dropped, "; "))
 	}
+	return km, nil
 }
 
-// Notify keeps msg as a notice for the status row.
-func (p *pluginEditor) Notify(msg string) {
-	p.onUI()
-	p.notes = append(p.notes, msg)
+// bindingEntry is a binding in the schema of the keymap override file.
+type bindingEntry struct {
+	Keys   []map[string]any `json:"keys"`
+	Action string           `json:"action"`
+	Args   map[string]any   `json:"args,omitempty"`
+	When   string           `json:"when"`
 }
 
-// SetStatus keeps text as a notice for the status row.
-func (p *pluginEditor) SetStatus(text string) {
-	p.onUI()
-	p.notes = append(p.notes, text)
-}
-
-// InsertText types text at the caret of the active document, as one insert_char
-// action. It fails the way typing does: with no document open, or with a read-only
-// one.
-func (p *pluginEditor) InsertText(text string) error {
-	p.onUI()
-	return p.state.Do(editor.Action("insert_char"), map[string]any{"text": text}).Err
-}
-
-// ActivePath returns the file path of the active document. It is "" when no
-// document is open or the document has no file yet.
-func (p *pluginEditor) ActivePath() string {
-	p.onUI()
-	if doc := p.ed.Active(); doc != nil {
-		return doc.Path
+// withBindings is the keymap m with the bindings es layered over it.
+func withBindings(m *keymap.Map, es []bindingEntry) (*keymap.Map, error) {
+	data, err := json.Marshal(map[string]any{"bindings": es})
+	if err != nil {
+		return nil, err
 	}
-	return ""
+	return m.WithOverrides(data)
 }
 
-// take returns the notes joined by "; " and clears them. Newlines become spaces,
-// so the notice stays on one row.
-func (p *pluginEditor) take() string {
-	text := strings.ReplaceAll(strings.Join(p.notes, "; "), "\n", " ")
-	p.notes = nil
-	return text
-}
-
-// goroutineID returns the id of the calling goroutine. The runtime does not export
-// it, so it is read from the first line of the stack trace, "goroutine N [state]:".
-func goroutineID() uint64 {
-	var buf [64]byte
-	n := goruntime.Stack(buf[:], false)
-	fields := strings.Fields(string(buf[:n]))
-	if len(fields) < 2 {
-		return 0
+// chordSteps splits a chord of the plugin API ("ctrl+shift+f", or "g g" for a sequence)
+// into the key and modifiers of each step in the keymap file schema, and returns the
+// canonical spelling of the whole chord.
+func chordSteps(chord string) (steps []map[string]any, canon string, err error) {
+	if err := keymap.ValidateChord(chord); err != nil {
+		return nil, "", err
 	}
-	id, _ := strconv.ParseUint(fields[1], 10, 64)
-	return id
+	fields := strings.Fields(chord)
+	if len(fields) == 0 {
+		return nil, "", errors.New("empty chord")
+	}
+	if len(fields) > 4 {
+		return nil, "", errors.New("a sequence has at most 4 steps")
+	}
+	parts := make([]string, len(fields))
+	for i, f := range fields {
+		c, err := keymap.Normalize(f)
+		if err != nil {
+			return nil, "", err
+		}
+		parts[i] = c
+		key, mods := splitChord(c)
+		steps = append(steps, map[string]any{"key": key, "modifiers": mods})
+	}
+	return steps, strings.Join(parts, " "), nil
+}
+
+// splitChord splits a canonical chord into its key and its modifiers. The plus key is "+"
+// alone or after the modifiers, as in "ctrl++".
+func splitChord(c string) (key string, mods []string) {
+	switch {
+	case c == "+":
+		return "+", []string{}
+	case strings.HasSuffix(c, "++"):
+		return "+", strings.Split(strings.TrimSuffix(c, "++"), "+")
+	}
+	parts := strings.Split(c, "+")
+	return parts[len(parts)-1], append([]string{}, parts[:len(parts)-1]...)
 }

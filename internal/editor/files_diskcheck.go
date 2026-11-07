@@ -26,6 +26,9 @@ func (e *Editor) PlanDiskCheck() func() []DiskChange {
 	}
 	var files []recorded
 	for _, d := range e.docs {
+		if d.ext.virtual {
+			continue
+		}
 		// A large document keeps its file open. The check is an fstat of that
 		// descriptor, which tells a file rewritten in place from one that another
 		// program replaced; the latter does not touch the file the document reads.

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -67,6 +68,13 @@ type Buffer struct {
 	ver   uint64 // version of the current content
 	saved uint64 // version at the last MarkSaved call
 	seq   uint64 // source of fresh version numbers
+
+	// obs is the change observer. See SetObserver.
+	obs func(Change)
+	// starts[i] is the offset in Text where line i starts, valid for the first
+	// startsValid lines. See ByteOffset.
+	starts      []int
+	startsValid int
 }
 
 // New returns a Buffer containing text. Lines are split on '\n'; a trailing
@@ -74,6 +82,18 @@ type Buffer struct {
 func New(text string) *Buffer {
 	b := &Buffer{clock: time.Now}
 	b.setText(text)
+	return b
+}
+
+// NewAfter returns a Buffer containing text whose version numbers all differ from every
+// one prev has issued, so a cache keyed on Buffer.Version alone cannot take the new text
+// for the content of prev. Its history is empty and it is not modified.
+func NewAfter(text string, prev *Buffer) *Buffer {
+	b := New(text)
+	if prev != nil {
+		b.seq = max(prev.seq, prev.ver) + 1
+		b.ver, b.saved = b.seq, b.seq
+	}
 	return b
 }
 
@@ -119,6 +139,33 @@ func (b *Buffer) Line(i int) string {
 		return b.big.line(i)
 	}
 	return string(b.lines[b.clampLine(i)])
+}
+
+// LineIndent returns the display width of the leading spaces and tabs of line i, with
+// tabWidth as the width of a tab, and whether the line is blank (white space only). It
+// does not build the line as a string. Out-of-range indexes are clamped.
+func (b *Buffer) LineIndent(i, tabWidth int) (width int, blank bool) {
+	tabWidth = max(tabWidth, 1)
+	var line []rune
+	if b.big != nil {
+		line = []rune(b.big.line(i))
+	} else {
+		line = b.lines[b.clampLine(i)]
+	}
+	counting := true
+	for _, r := range line {
+		switch {
+		case counting && r == ' ':
+			width++
+		case counting && r == '\t':
+			width = (width/tabWidth + 1) * tabWidth
+		case unicode.IsSpace(r):
+			counting = false
+		default:
+			return width, false
+		}
+	}
+	return width, true
 }
 
 // LineLen returns the number of runes on line i. Out-of-range indexes are clamped.
@@ -220,8 +267,16 @@ func (b *Buffer) Insert(p Pos, s string) Pos {
 	if b.big != nil {
 		return b.bigInsert(p, s)
 	}
+	var c Change
+	if b.obs != nil {
+		c = b.changeOf(p, p, s, "")
+	}
 	b.record(opInsert, p, s)
-	return b.insertRaw(p, s)
+	end := b.insertRaw(p, s)
+	if b.obs != nil {
+		b.notify(c)
+	}
+	return end
 }
 
 // Delete removes the text between from and to, in either order, and returns
@@ -240,8 +295,15 @@ func (b *Buffer) Delete(from, to Pos) string {
 		return b.bigDelete(from, to)
 	}
 	text := b.Range(from, to)
+	var c Change
+	if b.obs != nil {
+		c = b.changeOf(from, to, "", text)
+	}
 	b.record(opDelete, from, text)
 	b.deleteRaw(from, to)
+	if b.obs != nil {
+		b.notify(c)
+	}
 	return text
 }
 
@@ -271,6 +333,7 @@ func (b *Buffer) clampLine(i int) int {
 // insertRaw applies an insertion without touching history and returns the
 // position after the inserted text. p must already be clamped.
 func (b *Buffer) insertRaw(p Pos, s string) Pos {
+	b.forgetStarts(p.Line)
 	end := advance(p, s)
 	parts := strings.Split(s, "\n")
 	line := b.lines[p.Line]
@@ -294,6 +357,7 @@ func (b *Buffer) insertRaw(p Pos, s string) Pos {
 // deleteRaw removes the range from..to without touching history. Both
 // positions must be clamped and ordered.
 func (b *Buffer) deleteRaw(from, to Pos) {
+	b.forgetStarts(from.Line)
 	head := b.lines[from.Line][:from.Col]
 	tail := b.lines[to.Line][to.Col:]
 	joined := slices.Concat(head, tail)

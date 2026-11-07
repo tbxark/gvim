@@ -84,6 +84,25 @@ func TestExecuteFlagsReachOptions(t *testing.T) {
 			want: app.Options{Files: []app.FileTarget{{Path: "missing.go", Line: 12, Col: 4}}},
 		},
 		{
+			name: "no-plugins flag",
+			args: []string{"--no-plugins"},
+			want: app.Options{NoPlugins: true},
+		},
+		{
+			name: "plugin flag is repeatable and keeps commas",
+			args: []string{"--plugin", "/p/a.lua", "--plugin=/p/b,c"},
+			want: app.Options{PluginPaths: []string{"/p/a.lua", "/p/b,c"}},
+		},
+		{
+			name: "no-plugins with plugin and positional arguments",
+			args: []string{"a.txt", "--plugin", "x.lua", "--no-plugins", "b.txt:2"},
+			want: app.Options{
+				NoPlugins:   true,
+				PluginPaths: []string{"x.lua"},
+				Files:       []app.FileTarget{{Path: "a.txt"}, {Path: "b.txt", Line: 2}},
+			},
+		},
+		{
 			name: "directory root and files",
 			args: []string{dir, "a.txt", "b.txt:3"},
 			want: app.Options{
@@ -122,6 +141,9 @@ func TestExecuteRejectsBadInputWithoutRunning(t *testing.T) {
 		{name: "unknown theme", args: []string{"--theme", "neon"}, wantCode: 1, wantErr: `unknown theme "neon"`},
 		{name: "unknown flag", args: []string{"--no-such-flag"}, wantCode: 1, wantErr: "unknown flag"},
 		{name: "missing flag value", args: []string{"--keymap"}, wantCode: 1, wantErr: "needs an argument"},
+		{name: "empty plugin path", args: []string{"--plugin", ""}, wantCode: 1, wantErr: "--plugin: path is empty"},
+		{name: "missing plugin value", args: []string{"--plugin"}, wantCode: 1, wantErr: "needs an argument"},
+		{name: "no-plugins takes no value", args: []string{"--no-plugins=maybe"}, wantCode: 1, wantErr: "invalid argument"},
 		{name: "two directories", args: []string{dir, t.TempDir()}, wantCode: 1, wantErr: "only one directory"},
 	}
 	for _, tt := range tests {
@@ -216,7 +238,7 @@ func TestExecuteHelpListsCommandTree(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
 	}
-	for _, want := range []string{"version", "config", "grammar", "completion", "help", "--config", "--keymap", "--theme", "--log-file"} {
+	for _, want := range []string{"version", "config", "grammar", "completion", "help", "--config", "--keymap", "--theme", "--log-file", "--no-plugins", "--plugin"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help misses %q:\n%s", want, stdout)
 		}

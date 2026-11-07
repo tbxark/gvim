@@ -16,8 +16,8 @@ import (
 
 // Style is the set of attributes of one cell. A nil color is the terminal default.
 type Style struct {
-	FG, BG                                  color.Color
-	Bold, Faint, Italic, Underline, Reverse bool
+	FG, BG                                          color.Color
+	Bold, Faint, Italic, Underline, Strike, Reverse bool
 }
 
 // Cell is one terminal cell. A wide grapheme occupies its own cell followed by
@@ -187,7 +187,7 @@ func (g *Grid) String() string {
 // nil color and a color that is not nil never match.
 func sameStyle(a, b Style) bool {
 	if a.Bold != b.Bold || a.Faint != b.Faint || a.Italic != b.Italic ||
-		a.Underline != b.Underline || a.Reverse != b.Reverse {
+		a.Underline != b.Underline || a.Strike != b.Strike || a.Reverse != b.Reverse {
 		return false
 	}
 	return sameColor(a.FG, b.FG) && sameColor(a.BG, b.BG)
@@ -217,6 +217,9 @@ func sgr(st Style) string {
 	}
 	if st.Underline {
 		s = s.Underline(true)
+	}
+	if st.Strike {
+		s = s.Strikethrough(true)
 	}
 	if st.Reverse {
 		s = s.Reverse(true)

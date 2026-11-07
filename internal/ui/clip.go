@@ -90,6 +90,9 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 			m.notice = noDocumentNotice
 			return nil, true
 		}
+		if cmd, ok := m.pluginPaste(msg.Content); ok {
+			return cmd, true
+		}
 		m.editorDo("paste", map[string]any{"text": msg.Content})
 		m.syncViewport()
 		return nil, true

@@ -167,7 +167,7 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 	if !job.Replace {
 		nd := e.newUntitled()
 		nd.Buffer.Insert(buffer.Pos{}, out)
-		e.docs = append(e.docs, nd)
+		e.addDoc(nd)
 		e.switchTo(len(e.docs) - 1)
 		e.setStatus("Shell output in " + nd.Name())
 		return nil

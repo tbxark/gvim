@@ -154,6 +154,16 @@ func TestLinesEncodeAttributesAndANSIColors(t *testing.T) {
 	}
 }
 
+func TestLinesEncodeStrikeAndSplitRunsOnIt(t *testing.T) {
+	g := New(2, 1)
+	g.Set(0, 0, "a", Style{Strike: true})
+	g.Set(1, 0, "b", Style{})
+	want := "\x1b[0;9ma\x1b[0mb" // a strike cell and a plain cell are two runs
+	if line := g.Lines()[0]; line != want {
+		t.Errorf("line = %q, want %q", line, want)
+	}
+}
+
 func TestStringJoinsRows(t *testing.T) {
 	g := New(2, 2)
 	g.Put(0, 0, 2, "ab", Style{})

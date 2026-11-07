@@ -25,6 +25,7 @@ var textChanging = map[Action]bool{
 	"to_upper_case":            true,
 	"to_lower_case":            true,
 	"transpose_chars":          true,
+	"toggle_case":              true,
 	"toggle_comment":           true,
 	"delete_backward":          true,
 	"delete_forward":           true,

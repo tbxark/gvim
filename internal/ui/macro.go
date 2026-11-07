@@ -64,6 +64,10 @@ var macroControl = map[string]bool{
 	"prompt_record_macro":  true,
 	"stop_macro_recording": true,
 	"play_last_macro":      true,
+	// They act on the macro that was recorded, so a recording that contained one would
+	// open the name prompt again when played, and save itself into init.lua.
+	"prompt_save_macro_to_init": true,
+	"prompt_promote_macro":      true,
 }
 
 // macroAction runs one of the macro actions: prompt_record_macro starts a recording,
@@ -149,10 +153,12 @@ func (m *Model) macroContext() macroCtx {
 }
 
 // recordCommand adds cmd to the recording, with the focus it is issued in, when a
-// recording is on, a playback is not running and the command is not a macro action.
+// recording is on, a playback is not running and the command is not a macro action. A
+// command a plugin runs through command.run is not recorded (only the plugin command the
+// user issued is), and neither is a plugin command that asked not to be.
 func (m *Model) recordCommand(cmd Command) {
 	mc := &m.root.macro
-	if !mc.recording || mc.playing || macroControl[cmd.Action] {
+	if !mc.recording || mc.playing || macroControl[cmd.Action] || m.plugNoRecord(cmd.Action) {
 		return
 	}
 	mc.cmds = append(mc.cmds, macroStep{cmd: cmd, ctx: m.macroContext()})

@@ -53,6 +53,8 @@ func NewRootCommand(run Runner) *cobra.Command {
 		themeName  string
 		logFile    string
 		diff       bool
+		noPlugins  bool
+		pluginPath []string
 	)
 	root := &cobra.Command{
 		Use:   "gvim [DIR] [FILE[:LINE[:COL]]]...",
@@ -85,6 +87,9 @@ by side in a compare view.`,
 				Theme:   themeName,
 				LogFile: logFile,
 				Diff:    diff,
+
+				NoPlugins:   noPlugins,
+				PluginPaths: pluginPath,
 			}
 			if err := opts.Validate(); err != nil {
 				return err
@@ -104,6 +109,8 @@ by side in a compare view.`,
 	flags.StringVar(&themeName, "theme", "", "theme `NAME` (default: dark)")
 	flags.StringVar(&logFile, "log-file", "", "log file `PATH` (default: no log file)")
 	root.Flags().BoolVar(&diff, "diff", false, "compare the two FILE arguments side by side")
+	root.Flags().BoolVar(&noPlugins, "no-plugins", false, "do not discover or load plugins (--plugin still loads)")
+	root.Flags().StringArrayVar(&pluginPath, "plugin", nil, "load the plugin at `PATH` (a .lua file or a plugin directory); repeatable")
 	_ = root.RegisterFlagCompletionFunc("keymap", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return keymapNames, cobra.ShellCompDirectiveNoFileComp
 	})

@@ -270,6 +270,34 @@ func TestConfigKeybindingsOverridePreset(t *testing.T) {
 	}
 }
 
+// TestBundledDocKeybindingsExampleLoads checks that the keybindings example of
+// docs/plugins/bundled.md is valid config and binds the plugin command, and that the
+// map-of-chords form it once showed is refused.
+func TestBundledDocKeybindingsExampleLoads(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/plugins/bundled.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, found := strings.Cut(string(doc), "```json\n")
+	if !found {
+		t.Fatal("bundled.md has no json example")
+	}
+	example, _, _ := strings.Cut(rest, "```")
+	if !strings.Contains(example, `"keybindings"`) {
+		t.Fatalf("the first json example is not the keybindings one: %s", example)
+	}
+	got, err := buildCaptured(t, projectRoot(t, example))
+	if err != nil {
+		t.Fatalf("the documented keybindings example does not load: %v", err)
+	}
+	if action := resolveAction(t, keymapOf(t, got.deps), "ctrl+alt+j"); action != "flash.jump" {
+		t.Fatalf("ctrl+alt+j = %q, want flash.jump", action)
+	}
+	if _, err := buildCaptured(t, projectRoot(t, `{"keybindings": {"ctrl+alt+j": "flash.jump"}}`)); err == nil {
+		t.Fatal("a map of chords is accepted as keybindings")
+	}
+}
+
 // A global noop without "when" unbinds ctrl+s everywhere. The default keymap
 // binds save to ctrl+s in normal context, so that binding must not survive.
 func TestConfigGlobalNoopUnbindsSaveInNormal(t *testing.T) {

@@ -3,7 +3,6 @@ package editor
 import (
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/tbxark/gvim/internal/buffer"
 )
@@ -29,41 +28,7 @@ func (e *Editor) ApplyLSPEdits(path string, edits []LSPEdit) error {
 	if d == nil {
 		return fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
-	if d.ReadOnly() {
-		return ErrReadOnly
-	}
-	if len(edits) == 0 {
-		return nil
-	}
-	if err := d.refuseEditWhileRestoring("apply edits"); err != nil {
-		return err
-	}
-	ordered := slices.Clone(edits)
-	slices.SortStableFunc(ordered, func(a, b LSPEdit) int {
-		switch {
-		case a.From.Less(b.From):
-			return 1
-		case b.From.Less(a.From):
-			return -1
-		}
-		return 0
-	})
-	d.Buffer.Group(func() {
-		for _, ed := range ordered {
-			from, to := d.Buffer.Clamp(ed.From), d.Buffer.Clamp(ed.To)
-			if to.Less(from) {
-				from, to = to, from
-			}
-			d.Buffer.Delete(from, to)
-			d.Buffer.Insert(from, ed.Text)
-		}
-	})
-	d.Cursor = d.Buffer.Clamp(d.Cursor)
-	d.Sel = nil
-	d.extra = nil
-	d.block = nil
-	d.want = -1
-	return nil
+	return d.applyEditList(edits, EditOptions{Cursor: cursorDrop}, true)
 }
 
 // lspDocAt returns the open document whose path is path, or nil.

@@ -31,6 +31,20 @@ func (l *noticeLog) record(before, after string) {
 	}
 }
 
+// keep keeps text now, for a notice that is set along with others in one update (the
+// plugin loader reports each failed plugin in the same drain). record keeps only the
+// notice that is showing at the end of an update, so without this the earlier ones are
+// lost. Like record, it does not keep a repeat of the last notice kept.
+func (l *noticeLog) keep(text string) {
+	if text == "" || text == l.last() {
+		return
+	}
+	l.items = append(l.items, text)
+	if n := len(l.items) - warningLimit; n > 0 {
+		l.items = l.items[n:]
+	}
+}
+
 // last returns the newest notice kept, or "" when none is.
 func (l *noticeLog) last() string {
 	if len(l.items) == 0 {

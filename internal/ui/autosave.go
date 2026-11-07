@@ -52,11 +52,15 @@ func (m *Model) autoSaveTick() tea.Cmd {
 	if !as.AutoSaveDue(now) {
 		return m.autoSaveCmd()
 	}
+	cancel, gate := m.pluginAutoSaveGate()
+	if cancel {
+		return tea.Batch(gate, m.autoSaveCmd())
+	}
 	jobs := as.PlanAutoSave(now)
 	if len(jobs) == 0 {
-		return m.autoSaveCmd()
+		return tea.Batch(gate, m.autoSaveCmd())
 	}
-	return autoSaveWrite(jobs)
+	return tea.Batch(gate, autoSaveWrite(jobs))
 }
 
 // autoSaveWrite returns the command that runs the planned saves. It reads no editor
@@ -79,6 +83,7 @@ func (m *Model) autoSaveDone(msg autoSaveDoneMsg) tea.Cmd {
 		if err := as.ApplyAutoSave(msg.results); err != nil {
 			m.notice = "auto-save failed: " + err.Error()
 		}
+		m.plugSaved(msg.results)
 	}
 	return m.autoSaveCmd()
 }

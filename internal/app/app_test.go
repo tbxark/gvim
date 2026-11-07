@@ -33,6 +33,8 @@ func TestValidate(t *testing.T) {
 		{name: "bundled theme", opts: Options{Theme: "dark"}},
 		{name: "file with line and column", opts: Options{Files: []FileTarget{{Path: "a.go", Line: 3, Col: 2}}}},
 		{name: "missing file is valid", opts: Options{Files: []FileTarget{{Path: "new.txt"}}}},
+		{name: "plugin options", opts: Options{NoPlugins: true, PluginPaths: []string{"a.lua", "dir"}}},
+		{name: "empty plugin path", opts: Options{PluginPaths: []string{"a.lua", " "}}, wantErr: "--plugin: path is empty"},
 		{name: "unknown keymap", opts: Options{Keymap: "vim"}, wantErr: `unknown keymap "vim"`},
 		{name: "unknown theme", opts: Options{Theme: "neon"}, wantErr: `unknown theme "neon"`},
 		{name: "empty file path", opts: Options{Files: []FileTarget{{Path: ""}}}, wantErr: "file path is empty"},

@@ -4,8 +4,9 @@ import tea "charm.land/bubbletea/v2"
 
 // featureAction runs an action of the root features in this file group: the warnings,
 // the bookmark and macro commands, the hidden-files toggle, the stash review, the
-// screen commands and the dumps. It reports whether it handled the action, and the
-// command the action starts. The commands that cannot work in gvim are in notice_na.go.
+// screen commands, the dumps and the plugin management commands (plugin_manager.go). It
+// reports whether it handled the action, and the command the action starts. The commands
+// that cannot work in gvim are in notice_na.go.
 func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 	switch action {
 	case "show_warnings":
@@ -16,10 +17,11 @@ func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 		// The editor keeps the bookmark slots and does not list them, so there is
 		// nothing to show yet.
 		m.notice = "List Bookmarks is not available yet: the editor does not list its bookmark slots"
-	case "load_plugin_from_buffer":
-		// The plugin host loads the whole plugin folder, and has no call to load one
-		// file, so the buffer cannot be loaded as a plugin yet.
-		m.notice = "Load Plugin from Buffer is not available yet: the plugin host cannot load one file"
+	case "plugin_manager", "plugin_show_log", "plugin_reload", "plugin_reload_all", "load_plugin_from_buffer",
+		"init_check", "init_edit", "init_reload", "prompt_save_macro_to_init", "prompt_promote_macro":
+		return m.pluginUIAction(action), true
+	case "quit_discard":
+		return m.quitDiscard(), true
 	case "list_macros":
 		m.listMacros()
 	case "prompt_set_bookmark":
@@ -51,6 +53,9 @@ func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 // reports whether it took msg, and the command the message starts.
 func (m *Model) featureMessage(msg tea.Msg) (tea.Cmd, bool) {
 	if cmd, ok := m.clipMessage(msg); ok {
+		return cmd, true
+	}
+	if cmd, ok := m.pluginManagerMessage(msg); ok {
 		return cmd, true
 	}
 	switch msg := msg.(type) {

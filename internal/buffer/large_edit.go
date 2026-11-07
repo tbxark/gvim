@@ -36,6 +36,7 @@ func (b *Buffer) bigInsert(p Pos, text string) Pos {
 	}
 	end := advance(p, text)
 	b.recordBig(opInsert, p, end, text, len(text) > InlineOpMax, ns, cost)
+	b.notifyCoarse(false)
 	return end
 }
 
@@ -49,6 +50,7 @@ func (b *Buffer) bigDelete(from, to Pos) string {
 		return ""
 	}
 	b.recordBig(opDelete, from, from, text, tooBig, ns, cost)
+	b.notifyCoarse(false)
 	return text
 }
 

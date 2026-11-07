@@ -674,18 +674,24 @@ func (m *Model) clearSaving() {
 // its head, indexes the start and lists its directory, which Update must not wait for.
 // Any other file is opened at once.
 func (m *Model) openFileCmd(path string, preview bool, line, col int) tea.Cmd {
+	cmd, _ := m.openFileCmdErr(path, preview, line, col)
+	return cmd
+}
+
+// openFileCmdErr is openFileCmd that also returns why a file opened at once did not open.
+// A large file's read has no error yet; it arrives in the message of the command.
+func (m *Model) openFileCmdErr(path string, preview bool, line, col int) (tea.Cmd, error) {
 	ge, ok := m.ed.(gotoEditor)
 	pc, isPC := m.ed.(pathClassifier)
 	if !ok || !isPC || preview || !pc.IsLargePath(path) {
-		m.openAt(path, preview, line, col)
-		return nil
+		return nil, m.openAtErr(path, preview, line, col)
 	}
 	m.notice = "Opening " + filepath.Base(path) + "..."
 	load := ge.LoadFunc(path)
 	return func() tea.Msg {
 		doc, err := load()
 		return openLoadedMsg{doc: doc, err: err, path: path, line: line, col: col}
-	}
+	}, nil
 }
 
 // openLoaded opens the large file that openFileCmd read. A file that is not UTF-8 asks

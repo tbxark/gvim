@@ -1,5 +1,12 @@
 # ROUND-PLAN: finishing the remaining features
 
+> **Superseded (plugin runtime).** Q2 and the T2 track (goja runtime, esbuild transpile) describe the old plan. The plugin runtime in this repository is **Lua on
+> `github.com/yuin/gopher-lua`** (`internal/plugin`), not JavaScript. The JS system (`goja`, `esbuild`,
+> `slowjs`) was removed completely, and `.js`/`.ts` files in the plugin folder are never executed.
+> The design record is the Lua plugin design (`docs/plugins/` for users and plugin authors,
+> `migration/ARCH-v4.md` for the package graph). Everything below that talks about a JavaScript or
+> TypeScript runtime, `RegisterHostFunc`, Promises, `slowjs`, `goja` or `esbuild` is history.
+
 Status: in progress. Each phase is one workflow: parallel tracks in their own worktrees, one
 integrator agent that applies the patches to the main tree and runs the gates, then parallel
 read-only reviewers and a verifier. Tracks never edit the main tree. Each track exports
@@ -8,7 +15,7 @@ read-only reviewers and a verifier. Tracks never edit the main tree. Each track 
 ## Defaults chosen where the blueprint had an open question
 
 - Q1 terminal: in scope (PTY pane and dock).
-- Q2 plugin runtime: github.com/dop251/goja for JavaScript, github.com/evanw/esbuild for TypeScript.
+- Q2 plugin runtime: Lua on github.com/yuin/gopher-lua (decided later; the goja and esbuild choice made here was replaced, and the JS system is removed). See docs/plugins/.
 - Q3 macOS quick-open keys: keep Fresh's macos.json behaviour.
 - Q4 config path: keep the current path (os.UserConfigDir()/gvim). Changing it is a separate decision.
 - macOS trash: keep the freedesktop home trash (owner decision still open).

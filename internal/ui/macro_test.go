@@ -91,6 +91,34 @@ func TestMacroControlActionsAreNotRecorded(t *testing.T) {
 	}
 }
 
+// TestMacroToInitActionsAreNotRecorded checks that saving or promoting the recorded macro
+// while a recording is on is not a step of that recording: replaying it would open the
+// name prompt again, and the saved command would contain the save action.
+func TestMacroToInitActionsAreNotRecorded(t *testing.T) {
+	t.Parallel()
+	for _, action := range []string{"prompt_save_macro_to_init", "prompt_promote_macro"} {
+		t.Run(action, func(t *testing.T) {
+			t.Parallel()
+			ed := newFakeEditor("x")
+			m := newTestModel(t, ed, nil, 80, 20)
+			m.keys = macroKeys()
+
+			must(t, m.Run("prompt_record_macro"))
+			press(m, typed("a"))
+			must(t, m.Run("stop_macro_recording"))
+			must(t, m.Run("prompt_record_macro"))
+			press(m, typed("b"))
+			must(t, m.Run(action))
+			press(m, special(tea.KeyEscape)) // the name prompt
+			must(t, m.Run("stop_macro_recording"))
+			got := m.root.macro.last
+			if len(got) != 1 || got[0].cmd.Action != "insert_char" {
+				t.Fatalf("recorded %v, want one insert_char", got)
+			}
+		})
+	}
+}
+
 // TestMacroPlayWhileRecordingIsNotRecorded checks that a playback made while the
 // recorder is on does not add its own actions to the recording.
 func TestMacroPlayWhileRecordingIsNotRecorded(t *testing.T) {

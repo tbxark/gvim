@@ -26,6 +26,8 @@ type pending struct {
 	kind pendingKind
 	// line and col are the 1-based target of a goto.
 	line, col int
+	// selecting is set when the goto extends the selection in mark mode (GotoLineSelecting).
+	selecting bool
 	// from is where the caret was when the goto was asked, for the jump list.
 	from jumpEntry
 	// name and args are the action to run. ver and cursor are the version of the text
@@ -119,7 +121,7 @@ func (e *Editor) resolvePending(d *Document) {
 		if e.Active() == d {
 			e.extras.jumps.push(p.from)
 		}
-		e.gotoIn(d, p.line, p.col)
+		e.gotoIn(d, p.line, p.col, p.selecting)
 	case pendingAction:
 		if !info.Complete {
 			return

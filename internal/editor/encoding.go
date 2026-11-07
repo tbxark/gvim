@@ -206,12 +206,12 @@ func reloadWithEncoding(e *Editor, d *Document, args map[string]any) error {
 	}
 	text, eol := splitLineEnding(decoded)
 	_ = d.Buffer.Close()
-	d.Buffer = buffer.New(text)
+	d.setBuffer(buffer.New(text))
 	d.Cursor = d.Buffer.Clamp(d.Cursor)
 	d.Sel = nil
 	d.want = -1
 	d.folded = nil
-	d.saved = text
+	d.setSaved(text)
 	d.eol = eol
 	d.ends = lineEnds(decoded)
 	d.codec = name

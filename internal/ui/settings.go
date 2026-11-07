@@ -27,6 +27,11 @@ type Settings struct {
 	IconsMode           string // the icon set in use, "plain" or "nerd", after "auto" is resolved
 	IconsWhy            string // why that set: the setting, the font or the terminal
 	ConfigFile          string
+
+	// Read by gvim.config.get only; open_settings does not list them.
+	LineEnding             string // line_ending: "auto", "lf", "crlf" or "cr"
+	TrimTrailingWhitespace bool
+	EnsureFinalNewline     bool
 }
 
 // settingsRows returns one row per setting, named as the config file names it. An

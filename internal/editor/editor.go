@@ -201,6 +201,8 @@ type Editor struct {
 	// resultText is the text the running action hands back in Result.Text. Do clears
 	// it before the action runs.
 	resultText string
+	// seam is the state of the plugin seams: ids, change tracking (docid.go, changes.go).
+	seam seamState
 }
 
 // New returns an Editor. Unless opts.Empty is set, it holds one empty
@@ -221,7 +223,7 @@ func New(opts Options) *Editor {
 	if !opts.Empty {
 		d := newDocument("", "")
 		d.eol = e.defaultEOL()
-		e.docs = []*Document{d}
+		e.addDoc(d)
 	}
 	return e
 }
@@ -566,5 +568,5 @@ func (e *Editor) pristineUntitled() bool {
 		return false
 	}
 	d := e.docs[0]
-	return d.Path == "" && !d.Modified() && d.Buffer.Empty()
+	return d.Path == "" && !d.ext.virtual && !d.Modified() && d.Buffer.Empty()
 }

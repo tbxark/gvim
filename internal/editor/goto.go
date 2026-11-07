@@ -22,9 +22,21 @@ var ErrBadLine = errors.New("line numbers start at 1")
 // reached waits: the status shows the progress of the scan, and the caret moves when
 // the index gets to the line (see pending.go). A later GotoLine replaces the wait.
 //
-// GotoLine is the target of the go-to-line prompt. The goto_line action does not
-// use it: Ctrl+G in the default keymap only reports the find message.
+// GotoLine is the jump of LSP results, session restore and file:line arguments. The
+// goto_line action does not use it: Ctrl+G in the default keymap only reports the find
+// message.
 func (e *Editor) GotoLine(line, col int) error {
+	return e.gotoLine(line, col, false)
+}
+
+// GotoLineSelecting is GotoLine for the go-to-line prompt. In mark mode (set_mark) it
+// extends the selection from its anchor, as every plain move does, so "set mark, then go
+// to line" selects up to that line. Without a mark it is GotoLine.
+func (e *Editor) GotoLineSelecting(line, col int) error {
+	return e.gotoLine(line, col, true)
+}
+
+func (e *Editor) gotoLine(line, col int, selecting bool) error {
 	if e.Empty() {
 		err := fmt.Errorf("goto line %d: %w", line, ErrNoDocument)
 		e.setStatus(err.Error())
@@ -40,22 +52,23 @@ func (e *Editor) GotoLine(line, col int) error {
 		// A new goto replaces the one that waits for the index.
 		d.large.pending = nil
 		if info := d.Index(); line > info.Lines && !info.Complete {
-			d.large.pending = &pending{kind: pendingGoto, line: line, col: col, from: jumpEntryOf(d)}
+			d.large.pending = &pending{kind: pendingGoto, line: line, col: col, selecting: selecting, from: jumpEntryOf(d)}
 			e.setStatus(scanningStatus(info))
 			return nil
 		}
 	}
 	e.pushJump()
-	e.gotoIn(d, line, col)
+	e.gotoIn(d, line, col, selecting)
 	return nil
 }
 
 // gotoIn moves the caret of d to a 1-based line and column, as GotoLine does, with the
-// line and column clamped into the text. d need not be the active document.
-func (e *Editor) gotoIn(d *Document, line, col int) {
+// line and column clamped into the text. d need not be the active document. With
+// selecting set and mark mode on, the move extends the selection from its anchor.
+func (e *Editor) gotoIn(d *Document, line, col int, selecting bool) {
 	target := buffer.Pos{Line: min(line, d.Buffer.Lines()) - 1, Col: max(col, 1) - 1}
 	d.want = -1
-	d.move(d.Buffer.Clamp(target), false)
+	d.move(d.Buffer.Clamp(target), selecting && e.marking(d))
 	e.ensureVisibleForJump(d)
 }
 

@@ -269,6 +269,10 @@ func (b *Buffer) Group(fn func()) {
 			// the group is dropped whole: the steps that did succeed would be
 			// half of an action. After a panic the edits stay instead.
 			b.big.st, b.redo, b.open, b.ver = snap.sb, snap.redo, snap.open, snap.ver
+			if len(g.ops) > 0 {
+				// The edits that were reported are gone.
+				b.notifyCoarse(false)
+			}
 			return
 		}
 		b.open = false
@@ -304,6 +308,7 @@ func (b *Buffer) Undo() (Pos, bool) {
 	g := b.undo[n-1]
 	b.undo = b.undo[:n-1]
 
+	var seen []Change
 	if b.big != nil {
 		// A large buffer swaps in the immutable state from before the group.
 		b.big.st = g.sb
@@ -311,8 +316,15 @@ func (b *Buffer) Undo() (Pos, bool) {
 		// Revert newest first so each op sees the document it produced.
 		for _, o := range slices.Backward(g.ops) {
 			if o.kind == opInsert {
-				b.deleteRaw(o.from, advance(o.from, o.text))
+				to := advance(o.from, o.text)
+				if b.obs != nil {
+					seen = append(seen, b.changeOf(o.from, to, "", o.text))
+				}
+				b.deleteRaw(o.from, to)
 			} else {
+				if b.obs != nil {
+					seen = append(seen, b.changeOf(o.from, o.from, o.text, ""))
+				}
 				b.insertRaw(o.from, o.text)
 			}
 		}
@@ -320,6 +332,7 @@ func (b *Buffer) Undo() (Pos, bool) {
 	b.ver = g.before
 	b.redo = append(b.redo, g)
 	b.open = false
+	b.notifyStep(seen)
 	return g.ops[0].from, true
 }
 
@@ -335,15 +348,23 @@ func (b *Buffer) Redo() (Pos, bool) {
 	b.redo = b.redo[:n-1]
 
 	var at Pos
+	var seen []Change
 	if b.big != nil {
 		b.big.st = g.sa
 		at = g.ops[len(g.ops)-1].end
 	} else {
 		for _, o := range g.ops {
 			if o.kind == opInsert {
+				if b.obs != nil {
+					seen = append(seen, b.changeOf(o.from, o.from, o.text, ""))
+				}
 				at = b.insertRaw(o.from, o.text)
 			} else {
-				b.deleteRaw(o.from, advance(o.from, o.text))
+				to := advance(o.from, o.text)
+				if b.obs != nil {
+					seen = append(seen, b.changeOf(o.from, to, "", o.text))
+				}
+				b.deleteRaw(o.from, to)
 				at = o.from
 			}
 		}
@@ -351,5 +372,6 @@ func (b *Buffer) Redo() (Pos, bool) {
 	b.undo = append(b.undo, g)
 	b.ver = g.after
 	b.open = false
+	b.notifyStep(seen)
 	return at, true
 }

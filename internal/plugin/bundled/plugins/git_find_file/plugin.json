@@ -1,0 +1,7 @@
+{
+  "name": "git_find_file",
+  "version": "1.0.0",
+  "description": "Fuzzy-find and open a file tracked by git",
+  "api": 1,
+  "default_enabled": true
+}

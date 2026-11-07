@@ -56,9 +56,10 @@ func (m *Model) switchKeymap(name string) {
 		m.notice = "Keymap " + name + ": " + err.Error()
 		return
 	}
-	m.keys = k
+	m.keys = m.pluginSwitchKeymap(name, k)
 	m.util.settings.Keymap = name
 	m.notice = "Keymap: " + name
+	m.plugConfigChanged()
 }
 
 // errNoKeymap is the error of a switch that returned neither a keymap nor an error.

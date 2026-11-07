@@ -18,11 +18,6 @@ func TestNotApplicableCommandsSayWhy(t *testing.T) {
 		{"workspace_trust_prompt", "workspace trust model"},
 		{"update_fresh", "does not update itself"},
 		{"open_update_log", "does not update itself"},
-		{"init_check", "init script"},
-		{"init_edit", "init script"},
-		{"init_reload", "init script"},
-		{"prompt_save_macro_to_init", "init script"},
-		{"prompt_promote_macro", "init script"},
 		{"trigger_wave_animation", "easter egg"},
 		{"inspect_theme_at_cursor", "reverse video"},
 	}
@@ -53,7 +48,6 @@ func TestUnfinishedCommandsSayWhatIsMissing(t *testing.T) {
 		want   string
 	}{
 		{"list_bookmarks", "List Bookmarks is not available yet: the editor does not list its bookmark slots"},
-		{"load_plugin_from_buffer", "Load Plugin from Buffer is not available yet: the plugin host cannot load one file"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.action, func(t *testing.T) {

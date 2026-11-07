@@ -10,6 +10,7 @@ import (
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/explorer"
 	palmodel "github.com/tbxark/gvim/internal/palette"
+	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/editorpane"
 	"github.com/tbxark/gvim/internal/ui/grid"
@@ -39,6 +40,13 @@ type EditorState interface {
 	ScrollBy(rows int)
 	ScrollTo(top int)
 }
+
+// PluginEditor is the port of the editor that plugins use: documents by id, edits in API
+// coordinates, tabs, change tracking. The app builds it over the editor and passes it as
+// RootPorts.PluginEditor. It cannot be an optional method set of EditorState: both have a
+// SetCursor, with different parameters, so one type cannot implement both. Without it a
+// plugin's buffer calls answer unsupported.
+type PluginEditor = pluginapi.BufferEditor
 
 // ShellRunner is the optional view of the editor that lets the root run a shell
 // command off the update loop. shell_command and shell_command_replace go through it
@@ -182,6 +190,12 @@ type LSPSession interface {
 	Rename(path string, at buffer.Pos, name string) ([]FileEdit, error)
 	// CodeActions returns the titles of the code actions at at.
 	CodeActions(path string, at buffer.Pos) ([]string, error)
+	// Request sends the request method with params to the server that has the document at
+	// path open, and returns its decoded JSON result (nil for a null result). Params and
+	// the result are in the protocol's own form, UTF-16 columns included. The error says
+	// what failed through pluginapi codes: a document that is not open is CodeNotFound, a
+	// request that outlived its time limit is CodeTimeout.
+	Request(path, method string, params any) (any, error)
 	// Restart shuts down the servers of the current root. The root reopens its
 	// documents after it.
 	Restart() error
@@ -202,6 +216,7 @@ type Diagnostic struct {
 	Start, End buffer.Pos
 	Severity   int
 	Message    string
+	Source     string // the tool that found it ("gopls"), or empty
 }
 
 // LSPLocation is a place in a document: the path and its rune range.

@@ -214,10 +214,10 @@ func buildHandlers() map[Action]handler {
 		d := e.newUntitled()
 		if e.pristineUntitled() && e.docs[0].untitled == 0 {
 			e.releaseDoc(e.docs[0])
-			e.docs[0] = d
+			e.setDoc(0, d)
 			e.switchTo(0)
 		} else {
-			e.docs = append(e.docs, d)
+			e.addDoc(d)
 			e.switchTo(len(e.docs) - 1)
 		}
 		e.setStatus("New buffer")
@@ -257,6 +257,7 @@ func buildHandlers() map[Action]handler {
 		return nil
 	}
 	registerCursorHandlers(h)
+	registerViHandlers(h)
 	registerMarksHandlers(h)
 	registerTextCmdHandlers(h)
 	registerDocCmdHandlers(h)

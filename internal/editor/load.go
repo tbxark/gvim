@@ -43,10 +43,10 @@ func (e *Editor) OpenLoaded(d *Document) {
 	if e.pristineUntitled() {
 		// The untouched startup buffer is replaced, not kept as a tab.
 		e.releaseDoc(e.docs[0])
-		e.docs[0] = d
+		e.setDoc(0, d)
 		e.switchTo(0)
 	} else {
-		e.docs = append(e.docs, d)
+		e.addDoc(d)
 		e.switchTo(len(e.docs) - 1)
 	}
 	e.setStatus(d.openStatus())

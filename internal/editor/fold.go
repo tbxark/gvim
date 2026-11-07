@@ -11,18 +11,38 @@ import (
 var ErrNoFold = errors.New("no fold starts on this line")
 
 // Folds returns the indentation fold ranges of the text, ordered by start line,
-// with tabWidth as the width of a tab. The ranges are recomputed on every call,
-// so they always match the text. A fold nested in another comes after it. A large
-// document has no folds: finding them reads every line.
+// with tabWidth as the width of a tab. The ranges always match the text: they are
+// found again when the text or tabWidth is not the one of the last call, and the
+// same slice is returned until then, so the caller must not change it. A fold
+// nested in another comes after it. A large document has no folds: finding them
+// reads every line.
 func (d *Document) Folds(tabWidth int) []fold.Range {
 	if d.large != nil {
 		return nil
 	}
-	lines := make([]string, d.Buffer.Lines())
-	for i := range lines {
-		lines[i] = d.Buffer.Line(i)
+	key := foldKey{gen: d.Gen(), ver: d.Buffer.Version(), tab: tabWidth}
+	if d.foldMemo.ok && d.foldMemo.key == key {
+		return d.foldMemo.ranges
 	}
-	return fold.Ranges(lines, tabWidth)
+	d.foldMemo.ranges = fold.RangesFunc(d.Buffer.Lines(), func(i int) (int, bool) {
+		return d.Buffer.LineIndent(i, tabWidth)
+	})
+	d.foldMemo.key, d.foldMemo.ok = key, true
+	return d.foldMemo.ranges
+}
+
+// foldKey identifies the input of fold.Ranges: the buffer, its content version and
+// the tab width.
+type foldKey struct {
+	gen, ver uint64
+	tab      int
+}
+
+// foldMemo is the ranges Folds found last.
+type foldMemo struct {
+	ok     bool
+	key    foldKey
+	ranges []fold.Range
 }
 
 // Folded reports whether the fold that starts at line is collapsed. It does not

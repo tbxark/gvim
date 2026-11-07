@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,6 +26,8 @@ type lspTab struct {
 	// large makes the tab's document report large file mode, with size bytes.
 	large bool
 	size  int64
+	// virtual makes the tab's document report that it is a plugin's virtual buffer.
+	virtual bool
 }
 
 // lspEd is an editor whose tabs have paths. It records the files opened, the
@@ -134,6 +137,9 @@ func (d *lspDoc) Selection() (a, h buffer.Pos, ok bool) {
 }
 func (d *lspDoc) LineSpans(int) []syntax.Span { return nil }
 
+// Virtual says whether the document is a plugin's virtual buffer.
+func (d *lspDoc) Virtual() bool { return d.t.virtual }
+
 // Large and Index are the large file view of the document, when its tab is large.
 func (d *lspDoc) Large() bool { return d.t.large }
 func (d *lspDoc) Index() buffer.IndexInfo {
@@ -159,6 +165,9 @@ type fakeLSP struct {
 	titles  []string
 	reqErr  error
 	diags   map[string]DiagnosticsEvent
+
+	requests []string // "<path> <method> <params>" of every Request
+	reply    any      // the result of Request
 
 	renameName string
 }
@@ -203,6 +212,12 @@ func (f *fakeLSP) CodeActions(string, buffer.Pos) ([]string, error) {
 	return f.titles, f.reqErr
 }
 
+// Request records the request and answers the canned result.
+func (f *fakeLSP) Request(path, method string, params any) (any, error) {
+	f.requests = append(f.requests, fmt.Sprintf("%s %s %v", path, method, params))
+	return f.reply, f.reqErr
+}
+
 // SignatureHelp returns the canned signature text.
 func (f *fakeLSP) SignatureHelp(string, buffer.Pos) (string, error) { return f.sig, f.reqErr }
 
@@ -218,6 +233,12 @@ type lspTest struct {
 // are set to a millisecond, so a command that waits on them returns at once.
 func newLSPTest(t *testing.T, port *fakeLSP, tabs ...*lspTab) *lspTest {
 	t.Helper()
+	return newLSPTestWith(t, port, RootPorts{}, tabs...)
+}
+
+// newLSPTestWith is newLSPTest with the root ports of the plugin system.
+func newLSPTestWith(t *testing.T, port *fakeLSP, root RootPorts, tabs ...*lspTab) *lspTest {
+	t.Helper()
 	lspDebounce, lspPollEvery = time.Millisecond, time.Millisecond
 	t.Cleanup(func() { lspDebounce, lspPollEvery = 300*time.Millisecond, 300*time.Millisecond })
 	ed := &lspEd{tabs: tabs}
@@ -232,7 +253,7 @@ func newLSPTest(t *testing.T, port *fakeLSP, tabs ...*lspTab) *lspTest {
 	if port != nil {
 		session = port
 	}
-	m := New(Deps{Editor: ed, Keys: keys, Theme: theme.Theme{}, Clock: testClock, LSP: session})
+	m := New(Deps{Editor: ed, Keys: keys, Theme: theme.Theme{}, Clock: testClock, LSP: session, Root: root})
 	lt := &lspTest{t: t, m: m, ed: ed, port: port}
 	// The first sync opens the active tab. The window size is a message the root
 	// takes like any other, and the commands it starts run as they would in a program.
