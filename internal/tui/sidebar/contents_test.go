@@ -373,3 +373,29 @@ func TestContentsDrawMessages(t *testing.T) {
 		t.Errorf("row = %q, want the stale message", got)
 	}
 }
+
+// TestContentsHeadingsReturnsTheScan checks the getter the root uses to publish the
+// section's fold ranges: the headings of the current scan, in line order.
+func TestContentsHeadingsReturnsTheScan(t *testing.T) {
+	t.Parallel()
+	c := scanContents(t, DefaultSettings(), "# A\n## B\ntext\n# C")
+	heads := c.Headings()
+	if len(heads) != 3 {
+		t.Fatalf("headings = %v, want three", heads)
+	}
+	for i, want := range []struct {
+		line  int
+		level int
+		title string
+	}{{0, 1, "A"}, {1, 2, "B"}, {3, 1, "C"}} {
+		h := heads[i]
+		if h.Line != want.line || h.Level != want.level || h.Title != want.title {
+			t.Errorf("heading %d = %+v, want line %d level %d title %q", i, h, want.line, want.level, want.title)
+		}
+	}
+	// The returned slice is a copy: changing it does not change the section.
+	heads[0].Title = "changed"
+	if got := c.Headings()[0].Title; got != "A" {
+		t.Errorf("the getter does not copy: %q", got)
+	}
+}

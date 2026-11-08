@@ -117,6 +117,19 @@ type UIHost interface {
 	UnmountWidgetPanel(id PanelID)
 	WidgetCommand(id PanelID, a WidgetAction) error
 	WidgetMutate(id PanelID, m WidgetMutation) error
+	// Buffer groups and scroll-sync groups (tier 1b group-lite). A group owns the split
+	// windows it created and the panel buffers it made; CloseBufferGroup and OwnerGone
+	// close them. SetPanelContent replaces one panel's styled content.
+	CreateBufferGroup(plugin string, id BufferGroupID, o BufferGroupSpec) error
+	SetPanelContent(plugin string, id BufferGroupID, panel string, entries []ContentEntry) error
+	SetBufferGroupTitle(id BufferGroupID, segments []BufferGroupTitleSegment) error
+	SetBufferGroupPanelVisible(id BufferGroupID, panel string, visible bool) error
+	FocusBufferGroupPanel(id BufferGroupID, panel string) error
+	CloseBufferGroup(id BufferGroupID)
+	BufferGroupPanels(id BufferGroupID) []BufferGroupPanel
+	CreateScrollSyncGroup(plugin string, id uint64, left, right WinID) error
+	SetScrollSyncAnchors(id uint64, anchors []ScrollAnchor) error
+	RemoveScrollSyncGroup(id uint64)
 	// Registrations: whole-set replace per plugin, idempotent, cheap.
 	SetCommands(plugin string, cmds []CommandInfo)
 	SetBindings(plugin string, b []Binding)
@@ -154,6 +167,24 @@ type WorkspaceHost interface {
 	ThemeColor(key string) (r, g, b uint8, ok bool)
 	// ThemeNames lists the themes the editor has built in, sorted.
 	ThemeNames() []string
+	// ThemeFiles lists every theme the editor offers: the built-ins and the user themes.
+	ThemeFiles() []ThemeFileInfo
+	// ThemeSchema is the theme model: the color key table, the attribute-only keys and
+	// the named colors.
+	ThemeSchema() ThemeSchema
+	// ThemeUserDir is the directory user theme files are saved in.
+	ThemeUserDir() string
+	// ThemeFileExists reports whether ref names a theme file on disk.
+	ThemeFileExists(ref string) bool
+	// ThemeData returns the resolved theme ref as theme-file JSON.
+	ThemeData(ref string) (string, error)
+	// SaveThemeFile validates data as a theme file, saves it in the user theme dir as name
+	// and returns its portable ref.
+	SaveThemeFile(name, data string) (string, error)
+	// DeleteThemeFile removes a user theme file.
+	DeleteThemeFile(ref string) error
+	// ReloadThemes rescans the user theme dir; a non-empty ref is applied afterwards.
+	ReloadThemes(ref string) error
 	// ThemeOverrides is the current session override map ("section.key" -> text color),
 	// and whether one is set. SetThemeOverrides replaces it; an empty or nil map clears
 	// it. The editor applies overrides on top of the active theme and resets them on the

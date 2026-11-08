@@ -353,6 +353,10 @@ type mdInline struct {
 	t    *mdTokenizer
 	line int
 	s    string
+	// collect makes the reader record the delimiter runs it hides for the page
+	// view (see MarkdownInlineMarkers); marks holds them, in bytes of the line.
+	collect bool
+	marks   []mark
 }
 
 func (p *mdInline) emit(from, to int, k Kind) { p.t.add(p.line, from, to, k) }
@@ -375,6 +379,7 @@ func (p *mdInline) parse(lo, hi int, base Kind) {
 		case '`':
 			n := runLength(s, i, hi, '`')
 			if j := findRun(s, i+n, hi, '`', n); j >= 0 {
+				p.markCode(i, n, j)
 				flush(i)
 				p.emit(i, j+n, KindString)
 				i, seg = j+n, j+n
@@ -404,6 +409,7 @@ func (p *mdInline) parse(lo, hi int, base Kind) {
 		case '~':
 			if n := runLength(s, i, hi, '~'); n == 2 {
 				if j := findRun(s, i+2, hi, '~', 2); j > i+2 {
+					p.markStrike(i, j)
 					flush(i)
 					p.emit(i, j+2, KindStrike)
 					i, seg = j+2, j+2

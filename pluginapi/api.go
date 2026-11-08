@@ -430,6 +430,28 @@ type ThemeInfo struct {
 	Dark bool
 }
 
+// ThemeFileInfo is one theme the editor offers, for the theme-file APIs.
+type ThemeFileInfo struct {
+	Name    string
+	Ref     string
+	Builtin bool
+}
+
+// ThemeKeyInfo is one color key of the theme model, for the theme editor's schema.
+type ThemeKeyInfo struct {
+	Name     string // "section.key"
+	Kind     string // "required" | "fallback" | "optional"
+	Fallback string
+}
+
+// ThemeSchema is the theme model as a plugin sees it: the key table, the attribute-only
+// keys and the named colors. It is the gvim equivalent of Fresh's JSON theme schema.
+type ThemeSchema struct {
+	Keys         []ThemeKeyInfo
+	ModifierOnly []string
+	NamedColors  []string
+}
+
 // DiagnosticInfo is one LSP diagnostic, with byte columns.
 type DiagnosticInfo struct {
 	Range    Range

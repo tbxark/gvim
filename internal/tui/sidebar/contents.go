@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"slices"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -195,6 +197,11 @@ func (c *Contents) SetOpen(open bool) {
 		c.focus = false
 	}
 }
+
+// Headings returns the headings of the current scan, in line order. The root
+// uses them to publish the section's fold ranges. The slice is a copy; a later
+// scan replaces it.
+func (c *Contents) Headings() []outline.Heading { return slices.Clone(c.headings) }
 
 // Collapsed reports whether the reader folded the section into its header row.
 func (c *Contents) Collapsed() bool { return c.collapsed }

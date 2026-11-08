@@ -1,0 +1,7 @@
+{
+  "name": "diagnostics_panel",
+  "version": "1.0.0",
+  "description": "Every open document's language-server diagnostics in one panel, grouped by file; Enter jumps to the location",
+  "api": 2,
+  "default_enabled": true
+}

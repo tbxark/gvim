@@ -189,6 +189,11 @@ type Config struct {
 	// behaviour options (see config/fileexplorer.go). Fresh's defaults.
 	FileExplorer FileExplorerConfig
 
+	// Contents is the contents section: settings of the native Contents (Markdown
+	// outline) sidebar section, formerly Fresh's bundled markdown_toc plugin (see
+	// config/contents.go).
+	Contents ContentsConfig
+
 	// The view keys set the starting state of the display toggles. The
 	// defaults keep the layout gvim had before they existed.
 	ShowTabBar              bool   // show the tab strip row, default true
@@ -551,6 +556,10 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			continue
 		case key == "terminal":
 			diags = append(diags, cfg.setTerminal(keys[key], l, path)...)
+			cfg.note(key, path)
+			continue
+		case key == "contents":
+			diags = append(diags, cfg.setContents(keys[key], l, path)...)
 			cfg.note(key, path)
 			continue
 		case key == "universal_lsp" && l == layerProject:

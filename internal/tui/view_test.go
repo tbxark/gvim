@@ -445,27 +445,46 @@ func TestTabSizeFromThePromptSetsTheTabStop(t *testing.T) {
 	}
 }
 
-func TestSetPageWidthStoresTheWidthAndSaysItIsNotDrawn(t *testing.T) {
+func TestSetPageWidthStoresTheWidthAndReachesThePane(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 120, 8)
+	runAction(t, m, "toggle_page_view")
 	runAction(t, m, "set_page_width")
-	press(m, typed("120"))
+	press(m, typed("40"))
 	settle(t, m, press(m, special(tea.KeyEnter)))
-	if got := docViewOf(m.ed.Active()).PageWidth; got != 120 {
-		t.Fatalf("page width = %d, want 120", got)
+	if got := docViewOf(m.ed.Active()).PageWidth; got != 40 {
+		t.Fatalf("page width = %d, want 40", got)
 	}
-	if !frameHas(m, "not drawn in this port") {
-		t.Error("the status row does not say the page width is not drawn")
+	p := m.viewPane(editorpane.Pane{}, m.ed.Active())
+	if !p.PageView.On || p.PageView.Measure != 40 {
+		t.Fatalf("pane page view = %+v, want it on at measure 40", p.PageView)
+	}
+	if !frameHas(m, "Page width 40 for this buffer") {
+		t.Error("the status row does not say the page width")
 	}
 }
 
-func TestPageViewIsStoredAndNotDrawn(t *testing.T) {
+func TestPageViewToggleDrawsAndSaysSo(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 120, 8)
 	runAction(t, m, "toggle_page_view")
-	if !docViewOf(m.ed.Active()).PageView {
+	if v := docViewOf(m.ed.Active()).PageView; v == nil || !*v {
 		t.Fatal("page view was not stored")
 	}
-	if !frameHas(m, "not drawn in this port") {
-		t.Error("the status row does not say the page view is not drawn")
+	if p := m.viewPane(editorpane.Pane{}, m.ed.Active()); !p.PageView.On {
+		t.Fatal("the page view did not reach the pane")
+	}
+	if !frameHas(m, "Page view: on for this buffer") {
+		t.Error("the status row does not say the page view is on")
+	}
+	// A second toggle turns it off for the buffer and says so.
+	runAction(t, m, "toggle_page_view")
+	if v := docViewOf(m.ed.Active()).PageView; v == nil || *v {
+		t.Fatal("the second toggle did not turn the page view off")
+	}
+	if p := m.viewPane(editorpane.Pane{}, m.ed.Active()); p.PageView.On {
+		t.Fatal("the pane kept the page view after it was turned off")
+	}
+	if !frameHas(m, "Page view: off for this buffer") {
+		t.Error("the status row does not say the page view is off")
 	}
 }
 

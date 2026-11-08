@@ -15,7 +15,7 @@ Reload command, per-setting reset, and what is deferred.
 ## 1. The schema
 
 `config/settings_schema.go` holds the descriptor table the page is built from:
-68 settings, each a `config.Setting` with
+69 settings, each a `config.Setting` with
 
 - `Path`: where the value lives in the file, such as `{"editor", "tab_size"}`;
 - `Kind`: `bool`, `int`, `enum`, `string`, or `page` (a row that opens
@@ -25,15 +25,18 @@ Reload command, per-setting reset, and what is deferred.
   leaf package and must not import them);
 - `Min`/`Max` for an int;
 - `Layers`: `LayerUser` and/or `LayerProject` (the keymap, the terminal
-  shell and its arguments are user-only, because a project must not change what
-  keys do or what program gvim executes);
+  shell and its arguments, and `contents.fold_buffer` — the retired
+  markdown_toc plugin's setting — are user-only, because a project must not
+  change what keys do, what program gvim executes, or how the reader's outline
+  behaves);
 - `Apply`: `ApplyLive` or `ApplyRestart` (section 5);
 - `Value(Config)` and `Encode(text)`: the current value as the page shows
   it, and the JSON to write for a value the page produced. A page row's
   `Value` is its summary ("2 commands"), and `Encode` refuses.
 
 The sections are Interface, Display, Whitespace, Editing, Search, Explorer,
-Session, Mouse, Languages, Formatters, Status Bar, File Explorer and Terminal.
+Contents, Session, Mouse, Languages, Formatters, Status Bar, File Explorer and
+Terminal.
 The scalar rows cover the settings gvim reads today; the structured rows open
 the sub-pages of section 4.
 
@@ -219,9 +222,10 @@ service and the root:
 interval, `editor.recovery_enabled`, `editor.virtual_space`,
 `editor.scroll_offset`, the default line ending, trim-trailing-whitespace and
 ensure-final-newline on save, `editor.auto_read_only`, `mouse_capture`, and
-the whole `terminal` section (the dock is built at startup). The LSP, plugin
-and large-file settings are not in the page at all yet (deferred), and they keep
-their own restart boundary when edited by hand.
+the whole `terminal` section (the dock is built at startup), and
+`contents.fold_buffer` (the Contents section reads its settings when it
+starts). The LSP, plugin and large-file settings are not in the page at all yet
+(deferred), and they keep their own restart boundary when edited by hand.
 
 **Command-line flags win over the file** for the running editor, as they already
 do: setting the theme or the keymap while `--theme`/`--keymap` is given
@@ -265,6 +269,7 @@ opens the icon preview).
 | `config/settings_structured.go` | the structured knowledge: language override fields, language ids, status-bar element names, removable paths, page summaries, explorer width, `DecodeLayer` |
 | `config/patch.go` | `Edit` (set or remove), `PatchBytes` (surgical hujson patch with the reset cascade), `ValidateEdits` |
 | `config/config.go` | `applyObject`, the shared key-application path |
+| `config/contents.go` | the native `contents.fold_buffer` key, its project-layer rule (ignored: the retired markdown_toc plugin's settings are the user's) and `ContentsFoldBuffer`, the effective value with the plugin-key fallback |
 | `internal/tui/ports.go` | `SettingsPort`, `SettingsSnapshot`, `SettingsItem`, `SettingsStructure`, `SettingEdit`, `SettingsChange` |
 | `internal/tui/settings.go` | the main page, reset, reload action, `applySettingsChange`, the settings messages |
 | `internal/tui/settings_structure.go` | the generic structured sub-page (map, list, fields, languages, dual) |

@@ -86,8 +86,8 @@ func (e *Editor) SettingsFor(d *Document) LanguageSettings {
 	if d.View().LineWrap != nil {
 		s.LineWrap = *d.View().LineWrap
 	}
-	if d.View().PageView {
-		s.PageView = true
+	if d.View().PageView != nil {
+		s.PageView = *d.View().PageView
 	}
 	if d.View().PageWidth > 0 {
 		s.PageWidth = d.View().PageWidth

@@ -12,17 +12,19 @@ import (
 // ErrNoFold is returned by toggle_fold when no fold starts on the caret line.
 var ErrNoFold = errors.New("no fold starts on this line")
 
-// Folds returns the indentation fold ranges of the text, ordered by start line,
-// with tabWidth as the width of a tab. The ranges always match the text: they are
-// found again when the text or tabWidth is not the one of the last call, and the
-// same slice is returned until then, so the caller must not change it. A fold
-// nested in another comes after it. A large document has no folds: finding them
-// reads every line.
+// Folds returns the fold ranges of the text: the indentation folds, merged with
+// the ranges an external source (a language server) and an outline source (the
+// Contents section) gave, ordered by start line, with tabWidth as the width of a
+// tab. The ranges always match the text: they are found again when the text,
+// tabWidth or a source's ranges are not the ones of the last call, and the same
+// slice is returned until then, so the caller must not change it. A fold nested in
+// another comes after it. A large document has no folds: finding them reads every
+// line.
 func (d *Document) Folds(tabWidth int) []fold.Range {
 	if d.large != nil {
 		return nil
 	}
-	key := foldKey{Gen: d.Gen(), Ver: d.Buffer.Version(), Tab: tabWidth, Rev: d.externalRev}
+	key := foldKey{Gen: d.Gen(), Ver: d.Buffer.Version(), Tab: tabWidth, Rev: d.externalRev, OutlineRev: d.outlineRev}
 	m := &d.FoldMemo
 	if m.Ok && m.Key == key {
 		return m.Ranges
@@ -45,9 +47,13 @@ func (d *Document) Folds(tabWidth int) []fold.Range {
 					m.Indents[i], same = v, false
 				}
 			}
+			// A new text version can invalidate the outline source's ranges even
+			// when the edit did not change any indentation, so the merged set is
+			// found again whenever the version moved and an outline source exists.
+			outlineMoved := d.outlineSet && m.Key.Ver != key.Ver
 			m.Key, m.Serial = key, b.EditSerial()
-			if !same {
-				m.Ranges = mergeFoldRanges(m.findRanges(), d.externalFolds)
+			if !same || outlineMoved {
+				m.Ranges = mergeFoldRanges(m.findRanges(), d.externalFolds, d.currentOutlineFolds())
 			}
 			return m.Ranges
 		}
@@ -57,7 +63,7 @@ func (d *Document) Folds(tabWidth int) []fold.Range {
 		m.Indents[i] = indentOf(i)
 	}
 	m.Buf, m.Key, m.Serial, m.Ok = b, key, b.EditSerial(), true
-	m.Ranges = mergeFoldRanges(m.findRanges(), d.externalFolds)
+	m.Ranges = mergeFoldRanges(m.findRanges(), d.externalFolds, d.currentOutlineFolds())
 	return m.Ranges
 }
 
@@ -80,17 +86,45 @@ func (d *Document) SetExternalFolds(ranges []fold.Range, rev uint64) {
 // for a caller that merges its own view.
 func (d *Document) ExternalFolds() []fold.Range { return slices.Clone(d.externalFolds) }
 
-// mergeFoldRanges merges the external ranges into the indentation ranges, ordered
-// by start line and with exact duplicates removed. A range nested in another keeps
-// its place after it, as fold.Ranges returns nesting: the pane and the fold actions
-// read the same ordering from both sources.
-func mergeFoldRanges(indent, external []fold.Range) []fold.Range {
-	if len(external) == 0 {
+// SetOutlineFolds replaces the structural fold ranges an outline source gave, tied
+// to the text version they were computed from. The ranges merge into Folds only
+// while the text still has that version: an edit drops them until the source
+// publishes the ranges of the new text, so a stale range never folds a line it was
+// not computed for. An empty list clears them, and a document that has no outline
+// source keeps none. The fold memo is invalidated, so the merged set is found again.
+func (d *Document) SetOutlineFolds(ranges []fold.Range, textVersion uint64) {
+	d.outlineFolds = slices.Clone(ranges)
+	d.outlineVer = textVersion
+	d.outlineSet = len(ranges) > 0
+	d.outlineRev++
+	d.FoldMemo.Ok = false
+}
+
+// OutlineFolds returns a copy of the outline ranges last given, whether or not the
+// text still has the version they were computed from.
+func (d *Document) OutlineFolds() []fold.Range { return slices.Clone(d.outlineFolds) }
+
+// currentOutlineFolds is the outline source's ranges as Folds uses them: nothing
+// when the source gave none, or when the text changed since they were computed.
+func (d *Document) currentOutlineFolds() []fold.Range {
+	if !d.outlineSet || d.outlineVer != d.Buffer.Version() {
+		return nil
+	}
+	return d.outlineFolds
+}
+
+// mergeFoldRanges merges the external and outline ranges into the indentation
+// ranges, ordered by start line and with exact duplicates removed. A range nested
+// in another keeps its place after it, as fold.Ranges returns nesting: the pane and
+// the fold actions read the same ordering from every source.
+func mergeFoldRanges(indent, external, outline []fold.Range) []fold.Range {
+	if len(external) == 0 && len(outline) == 0 {
 		return indent
 	}
-	out := make([]fold.Range, 0, len(indent)+len(external))
+	out := make([]fold.Range, 0, len(indent)+len(external)+len(outline))
 	out = append(out, indent...)
 	out = append(out, external...)
+	out = append(out, outline...)
 	slices.SortStableFunc(out, func(a, b fold.Range) int {
 		if a.Start != b.Start {
 			return cmp.Compare(a.Start, b.Start)
@@ -103,9 +137,10 @@ func mergeFoldRanges(indent, external []fold.Range) []fold.Range {
 // foldKey identifies the input of fold.Ranges: the buffer, its content version, the
 // tab width and the revision of the external (language server) ranges.
 type foldKey struct {
-	Gen, Ver uint64
-	Tab      int
-	Rev      uint64
+	Gen, Ver   uint64
+	Tab        int
+	Rev        uint64
+	OutlineRev uint64
 }
 
 // foldMemo is the ranges Folds found last, and what they were found from: the indentation of

@@ -191,6 +191,35 @@ type fakePluginEditor struct {
 	moves       []int
 	groups      int
 	cursors     []pluginapi.Pos
+	contents    map[pluginapi.BufferID][]pluginapi.ContentEntry
+	created     []pluginapi.BufferID
+}
+
+// CreateBuffer makes a virtual buffer for the tests: it joins the port's list and the fake
+// editor's tabs, so the split tree can show it.
+func (f *fakePluginEditor) CreateBuffer(o pluginapi.CreateBuffer) (pluginapi.BufferID, error) {
+	id := pluginapi.BufferID(len(f.bufs) + 1)
+	for _, b := range f.bufs {
+		id = max(id, b.ID+1)
+	}
+	f.bufs = append(f.bufs, pluginapi.BufferInfo{ID: id, Name: o.Name, Virtual: true, ReadOnly: o.ReadOnly})
+	if f.ed != nil {
+		f.ed.tabs = append(f.ed.tabs, TabInfo{Name: o.Name})
+	}
+	f.created = append(f.created, id)
+	return id, nil
+}
+
+// SetContent stores a virtual buffer's content.
+func (f *fakePluginEditor) SetContent(id pluginapi.BufferID, entries []pluginapi.ContentEntry) error {
+	if _, ok := f.Buffer(id); !ok {
+		return pluginapi.Errf(pluginapi.CodeClosed, "no buffer %d", id)
+	}
+	if f.contents == nil {
+		f.contents = map[pluginapi.BufferID][]pluginapi.ContentEntry{}
+	}
+	f.contents[id] = append([]pluginapi.ContentEntry(nil), entries...)
+	return nil
 }
 
 func (f *fakePluginEditor) ListBuffers() []pluginapi.BufferInfo { return f.bufs }

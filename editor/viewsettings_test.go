@@ -41,7 +41,7 @@ func TestViewFlagActionsSetTheirOverride(t *testing.T) {
 		{"tab indicators off", "toggle_tab_indicators", map[string]any{"value": false},
 			func(s ViewSettings) bool { return s.TabIndicatorsOn() }, false},
 		{"page view on", "toggle_page_view", map[string]any{"value": true},
-			func(s ViewSettings) bool { return s.PageView }, true},
+			func(s ViewSettings) bool { return s.PageView != nil && *s.PageView }, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
@@ -98,7 +98,7 @@ func viewFlagOf(s ViewSettings, action Action) bool {
 	case "toggle_virtual_space_current_buffer":
 		return s.VirtualSpaceOn()
 	case "toggle_page_view":
-		return s.PageView
+		return s.PageView != nil && *s.PageView
 	}
 	return false
 }
@@ -295,7 +295,7 @@ func TestViewSettingsArePerDocument(t *testing.T) {
 		t.Fatalf("add_ruler: %v", err)
 	}
 	e.Do("toggle_page_view", map[string]any{"value": true})
-	if len(first.ViewSettings().Rulers) != 0 || first.ViewSettings().PageView {
+	if len(first.ViewSettings().Rulers) != 0 || first.ViewSettings().PageView != nil {
 		t.Fatal("a ruler or page view on one document leaked into another")
 	}
 	if got := second.ViewSettings().Rulers; len(got) != 1 || got[0] != 40 {

@@ -62,10 +62,17 @@ type SearchRequest struct {
 
 // Match is one matching line of a file.
 type Match struct {
-	Line, Col int    // 1-based position of the match
-	Len       int    // the match's length in runes on its line
-	Text      string // the whole line, trailing blanks removed
+	Line, Col int    // 1-based start of the match
+	Len       int    // the match's length in runes on its first line
+	Text      string // the match's first line, trailing blanks removed
+	// EndLine and EndCol are the 1-based exclusive end of the match, so a match
+	// that spans lines shows its whole range. For a single-line match EndLine is
+	// Line and EndCol is Col+Len.
+	EndLine, EndCol int
 }
+
+// MultiLine reports whether the match spans more than one line.
+func (m Match) MultiLine() bool { return m.EndLine > m.Line }
 
 // FileMatches is one file's matches.
 type FileMatches struct {
@@ -170,6 +177,34 @@ type Replacer interface {
 // GitGrepper runs git grep. The app implements it, and the panel calls it from a tea.Cmd.
 type GitGrepper interface {
 	GitGrep(GitRequest) (GitResult, error)
+}
+
+// PreviewRequest asks for one match's file context, for the preview column.
+type PreviewRequest struct {
+	Path  string
+	Name  string // the display path of the file
+	Dirty bool   // the text came from an open buffer
+	// Text is the open buffer's text the panel already holds; empty means the preview
+	// reads the file from disk (and applies the search read caps).
+	Text string
+	// Line, Col, EndLine and EndCol are the 1-based match range, End exclusive.
+	Line, Col, EndLine, EndCol int
+	// Lines is the most context lines the preview wants.
+	Lines int
+}
+
+// PreviewResult is one match's context: a window of the file's lines.
+type PreviewResult struct {
+	Start int      // 0-based file line of Lines[0]
+	Lines []string // the context lines, tabs unexpanded
+	Err   string   // why the file could not be read or previewed
+}
+
+// Previewer reads a match's context for the panel's preview column. The app
+// implements it; the panel calls it from a tea.Cmd, never from Update. An empty
+// PreviewResult.Err and no lines means the file has no lines to show.
+type Previewer interface {
+	Preview(PreviewRequest) (PreviewResult, error)
 }
 
 // Files is the file index snapshot the panel searches, for AllFiles. The finder index

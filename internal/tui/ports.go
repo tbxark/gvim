@@ -291,6 +291,10 @@ type Diagnostic struct {
 	Severity   int
 	Message    string
 	Source     string // the tool that found it ("gopls"), or empty
+	// Code is the server's diagnostic code (for example "unused"), when it sent
+	// one. The plugin diagnostic info keeps its own shape; this is for the native
+	// panel and list.
+	Code string
 }
 
 // LSPLocation is a place in a document: the path and its rune range.
@@ -741,6 +745,12 @@ type ThemeCatalog interface {
 	SaveTheme(name string, th theme.Theme) (string, error)
 	// DeleteTheme removes a user theme file.
 	DeleteTheme(ref string) error
+	// UserDir is the directory user theme files live in.
+	UserDir() string
+	// ThemePath is where the user theme file for ref lives (it may not exist yet).
+	ThemePath(ref string) (string, error)
+	// Data is the resolved theme ref as theme-file JSON.
+	Data(ref string) (string, error)
 }
 
 // ThemeInfo is one theme the catalog offers.

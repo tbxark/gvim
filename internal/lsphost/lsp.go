@@ -14,6 +14,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1062,9 +1063,22 @@ func uiDiagnostics(lines textLines, ds []protocol.Diagnostic) []tui.Diagnostic {
 			Severity: int(d.Severity),
 			Message:  diagnosticText(d.Message),
 			Source:   source,
+			Code:     diagnosticCode(d.Code),
 		})
 	}
 	return out
+}
+
+// diagnosticCode returns a diagnostic's code as text. The protocol allows a
+// number or a string; either way it is shown as it stands.
+func diagnosticCode(code protocol.ProgressToken) string {
+	switch v := code.(type) {
+	case protocol.String:
+		return string(v)
+	case protocol.Integer:
+		return strconv.FormatInt(int64(v), 10)
+	}
+	return ""
 }
 
 // diagnosticText returns the message of a diagnostic as plain text. The protocol

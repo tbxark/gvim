@@ -98,16 +98,16 @@ func (f viewFlag) current(e *Editor, d *Document) bool {
 	return OverrideOr(*f.field(d.View()), f.def(e))
 }
 
-// togglePageView sets the page view flag. It is stored only: drawing the page
-// view belongs to the Markdown compose/rendered-view work, deferred to its own
-// round (docs/parity.md backlog #12), so no paint reads it yet.
+// togglePageView sets the page view flag of the buffer. The page view is drawn
+// from the per-document view state (docs/markdown.md): the text is centered in a
+// page and, for Markdown, the inline marks are composed.
 func togglePageView(e *Editor, d *Document, args map[string]any) error {
-	value, err := boolArg(args, "value", !d.View().PageView)
+	current, err := boolArg(args, "value", !OverrideOr(d.View().PageView, false))
 	if err != nil {
 		return err
 	}
-	d.View().PageView = value
-	e.setStatus("Page view: " + onOff(value) + " for this buffer (not drawn in this port)")
+	d.View().PageView = &current
+	e.setStatus("Page view: " + onOff(current) + " for this buffer")
 	return nil
 }
 
@@ -152,15 +152,15 @@ func setTabSize(e *Editor, d *Document, args map[string]any) error {
 	return nil
 }
 
-// setPageWidth sets the page view width of the document, from "width". The width
-// is stored; the page view is not drawn.
+// setPageWidth sets the page view width of the document, from "width". The page
+// view draws the text in a page of that many columns; see docs/markdown.md.
 func setPageWidth(e *Editor, d *Document, args map[string]any) error {
 	width, err := intArg(args, "width", 1, MaxViewColumn)
 	if err != nil {
 		return err
 	}
 	d.View().PageWidth = width
-	e.setStatus(fmt.Sprintf("Page width %d for this buffer (not drawn in this port)", width))
+	e.setStatus(fmt.Sprintf("Page width %d for this buffer", width))
 	return nil
 }
 

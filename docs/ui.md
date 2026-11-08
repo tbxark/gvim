@@ -145,6 +145,21 @@ region:
   writes through the normal save path. Search and replace never reuse the offsets of an
   older result: every file carries a content hash from the search, and a file whose text
   changed is skipped.
+- **Selected-match preview column** (while the result rows have the focus) follows the
+  palette's file-preview conventions: a muted `│` divider at the right of the result
+  region, a right-aligned line-number gutter, and a column only when the card's inner text
+  width is at least 64 cells (the column takes 24..60 cells, the rows keep at least 30); a
+  narrower card drops the column and keeps the full-width rows. The column's first row is
+  the header `path:line` (with `–endLine:endCol` for a multi-line match, and `(unsaved)`
+  for an open buffer); the lines come from the open buffer's snapshot or, for a closed
+  file, from a bounded read with the search caps (a large, binary or non-UTF-8 file shows
+  the reason instead of lines). The match's line or lines take the selected style and the
+  matched runes are bold. The column is a plain-text window bounded by the result
+  region's height: it does not scroll and has no syntax colours, and a multi-line match
+  longer than the window shows its first lines. Enter still opens the match.
+- **Multi-line matches**: a regex match that spans lines is one row whose location reads
+  `startLine:startCol–endLine:endCol` (the end exclusive); its text is the first line and
+  the preview shows the whole range, while replace still applies the exact range.
 - **Project search results as a list** (Alt+Q, or "Project Search Results in List" in
   the palette) is gvim's quickfix export: the result set opens in the shared list
   overlay, grouped by file, filterable, with Enter jumping to a match and the list
@@ -158,10 +173,11 @@ region:
   finished search (1 is no matches), 2 or more is an error notice. File globs for Git
   Grep are not implemented (that needs git pathspecs; see the residuals below).
 - **Residuals of the search surfaces**: streaming or batched results (the port is one
-  asynchronous search and the sheet shows "searching…" until it lands), a split preview
-  pane (a match row already shows its line and Enter jumps), multi-line regex rows (a
-  multi-line match is one row at its start line), replacing in very large files (they are
-  skipped with a reason), provider scopes beyond files and the current buffer.
+  asynchronous search and the sheet shows "searching…" until it lands), a preview window
+  that scrolls or syntax-colours its lines (it is a bounded plain-text window), a
+  multi-line match longer than the preview column (it shows its first lines), replacing
+  in very large files (they are skipped with a reason), provider scopes beyond files and
+  the current buffer.
 
 ## 3. Component map
 

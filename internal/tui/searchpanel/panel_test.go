@@ -2,6 +2,7 @@ package searchpanel
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -751,5 +752,245 @@ func TestGitModeCanExportItsResults(t *testing.T) {
 	}
 	if items := p.ExportItems(); len(items) != 2 || !items[0].Header {
 		t.Fatalf("git export items = %+v", items)
+	}
+}
+
+func TestMultiLineMatchRowShowsItsRange(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: SearchResult{Files: []FileMatches{{
+		Path: "/w/a.go", Name: "a.go", Hash: 9,
+		Matches: []Match{{
+			Line: 1, Col: 3, Len: 3, Text: "x foo", EndLine: 2, EndCol: 4,
+		}},
+	}}}}
+	p := New(searchOptions(s))
+	search(t, p, "foo")
+	g := draw(p, 100, 30)
+	if !hasRow(g, "1:3–2:4") {
+		t.Fatalf("the multi-line match row has no end range:\n%s", g)
+	}
+}
+
+// fakePreviewer records each preview request and answers with a fixed result.
+type fakePreviewer struct {
+	result PreviewResult
+	err    error
+	reqs   []PreviewRequest
+}
+
+func (f *fakePreviewer) Preview(req PreviewRequest) (PreviewResult, error) {
+	f.reqs = append(f.reqs, req)
+	return f.result, f.err
+}
+
+// previewPanel returns a sample-result panel with a previewer wired, searched.
+func previewPanel(t *testing.T, pv *fakePreviewer) (*Panel, *fakeSearcher) {
+	t.Helper()
+	s := &fakeSearcher{result: sampleResult()}
+	o := searchOptions(s)
+	o.Previewer = pv
+	p := New(o)
+	search(t, p, "foo")
+	return p, s
+}
+
+// focusResultsFeeding focuses the result rows and runs the preview commands, as the
+// program does when the selection moves.
+func focusResultsFeeding(t *testing.T, p *Panel) {
+	t.Helper()
+	for i := 0; i < 3; i++ {
+		_, cmd := p.Update(specialKey(tea.KeyTab))
+		feedPanel(t, p, cmd)
+	}
+}
+
+// feedPanel runs a panel command and gives its message back to the panel.
+func feedPanel(t *testing.T, p *Panel, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if msg == nil {
+		return
+	}
+	p.Update(msg)
+}
+
+// previewTextStart is the column where the text of preview line number line (1-based)
+// starts: the gutter, its space, and the divider " │ ".
+func previewTextStart(geo geometry, line int) int {
+	gutter := len(strconv.Itoa(max(line, 1)))
+	return geo.prevX + gutter + 3
+}
+
+// previewGeo is the panel's geometry with the preview column, for tests.
+func previewGeo(p *Panel) geometry {
+	geo := layoutFor(100, 30, p.git)
+	p.previewColumns(&geo)
+	return geo
+}
+
+func TestPreviewShowsTheSelectedMatchContext(t *testing.T) {
+	t.Parallel()
+	pv := &fakePreviewer{result: PreviewResult{Start: 0, Lines: []string{"x", "func foo() {", "y"}}}
+	p, _ := previewPanel(t, pv)
+	// With the focus in a field there is no preview column.
+	if hasRow(draw(p, 100, 30), "a.go:2") {
+		t.Fatal("the preview column is painted while the focus is in a field")
+	}
+	focusResultsFeeding(t, p)
+	if len(pv.reqs) != 1 {
+		t.Fatalf("preview requests = %d, want one", len(pv.reqs))
+	}
+	if req := pv.reqs[0]; req.Path != "/w/a.go" || req.Line != 2 || req.Col != 3 || req.Text != "" {
+		t.Fatalf("preview request = %+v, want a closed a.go at 2:3 without text", req)
+	}
+	g := draw(p, 100, 30)
+	if !hasRow(g, "a.go:2") {
+		t.Fatalf("the preview header is not painted:\n%s", g)
+	}
+	geo := previewGeo(p)
+	if !geo.preview {
+		t.Fatal("the preview column is not reserved")
+	}
+	// "func foo() {" is file line 2; the match starts at rune 2 and is 3 runes long.
+	y := geo.resultsTop + 1 + 1
+	start := previewTextStart(geo, 2)
+	if cell := g.At(start+2, y); !cell.Style.Bold {
+		t.Fatalf("the matched runes are not bold at %d,%d: %+v", start+2, y, cell.Style)
+	}
+	if g.At(start, y).Style.Bold {
+		t.Fatal("the runes before the match are bold")
+	}
+	// The match line takes the selected style.
+	if got, want := g.At(geo.prevX, y).Style.BG, p.styles.selected.BG; got != want {
+		t.Fatalf("match line background = %v, want %v", got, want)
+	}
+}
+
+func TestPreviewHidesBelowTheWidthThreshold(t *testing.T) {
+	t.Parallel()
+	pv := &fakePreviewer{result: PreviewResult{Start: 0, Lines: []string{"x", "func foo() {", "y"}}}
+	p, _ := previewPanel(t, pv)
+	focusResultsFeeding(t, p)
+	if hasRow(draw(p, 60, 30), "a.go:2") {
+		t.Fatal("the preview column is painted in a narrow card")
+	}
+	narrow := layoutFor(60, 30, p.git)
+	p.previewColumns(&narrow)
+	if narrow.preview {
+		t.Fatal("the narrow card reserves the preview column")
+	}
+	if !hasRow(draw(p, 100, 30), "a.go:2") {
+		t.Fatal("the preview column is hidden in a wide card")
+	}
+}
+
+func TestPreviewStatesAndUnsavedText(t *testing.T) {
+	t.Parallel()
+	// The open buffer's snapshot travels with the request and marks the header.
+	pv := &fakePreviewer{result: PreviewResult{Start: 1, Lines: []string{"one", "unsaved foo", "three"}}}
+	s := &fakeSearcher{result: SearchResult{Files: []FileMatches{{
+		Path: "/w/a.go", Name: "a.go", Hash: 3, Dirty: true,
+		Matches: []Match{{Line: 2, Col: 9, Len: 3, Text: "unsaved foo"}},
+	}}}}
+	o := searchOptions(s)
+	o.OpenFiles = []SourceFile{{Path: "/w/a.go", Name: "a.go", Text: "one\nunsaved foo\nthree", Dirty: true}}
+	o.Previewer = pv
+	p := New(o)
+	search(t, p, "foo")
+	focusResultsFeeding(t, p)
+	if len(pv.reqs) != 1 || pv.reqs[0].Text != "one\nunsaved foo\nthree" || !pv.reqs[0].Dirty {
+		t.Fatalf("preview request = %+v, want the unsaved text", pv.reqs)
+	}
+	g := draw(p, 100, 30)
+	if !hasRow(g, "a.go:2 (unsaved)") {
+		t.Fatalf("the header does not mark the unsaved buffer:\n%s", g)
+	}
+	// A preview reason is shown in the column.
+	pv2 := &fakePreviewer{result: PreviewResult{Err: "binary file"}}
+	p2, _ := previewPanel(t, pv2)
+	focusResultsFeeding(t, p2)
+	if !hasRow(draw(p2, 100, 30), "Preview unavailable: binary file") {
+		t.Fatal("the preview reason is not shown")
+	}
+}
+
+func TestPreviewLoadingAndDedupe(t *testing.T) {
+	t.Parallel()
+	pv := &fakePreviewer{result: PreviewResult{Start: 0, Lines: []string{"x", "func foo() {", "y"}}}
+	p, _ := previewPanel(t, pv)
+	// Entering the rows shows loading until the command runs.
+	for i := 0; i < 3; i++ {
+		_, cmd := p.Update(specialKey(tea.KeyTab))
+		if i == 2 {
+			if cmd == nil {
+				t.Fatal("entering the rows started no preview")
+			}
+			if !hasRow(draw(p, 100, 30), "…") {
+				t.Fatal("the loading state is not painted")
+			}
+			feedPanel(t, p, cmd)
+		}
+	}
+	// The same target does not fetch again; a new selection does.
+	if cmd := p.previewCmd(); cmd != nil {
+		t.Fatal("the same preview target fetched again")
+	}
+	// The first Down stays on the file's first match (same preview); the second is a new
+	// target.
+	if _, cmd := p.Update(specialKey(tea.KeyDown)); cmd != nil {
+		t.Fatal("moving to the same first match fetched the preview again")
+	}
+	_, cmd := p.Update(specialKey(tea.KeyDown))
+	feedPanel(t, p, cmd)
+	if len(pv.reqs) != 2 {
+		t.Fatalf("preview requests = %d, want the second selection's", len(pv.reqs))
+	}
+	if req := pv.reqs[1]; req.Line != 5 {
+		t.Fatalf("second request = %+v, want the next match's line", req)
+	}
+}
+
+func TestPreviewMultiLineHighlightsTheWholeRange(t *testing.T) {
+	t.Parallel()
+	// The match spans lines 2-4: first line from column 7, middle line whole, last line
+	// up to column 4.
+	s := &fakeSearcher{result: SearchResult{Files: []FileMatches{{
+		Path: "/w/a.go", Name: "a.go", Hash: 5,
+		Matches: []Match{{Line: 2, Col: 7, Len: 3, Text: "start foo", EndLine: 4, EndCol: 4}},
+	}}}}
+	pv := &fakePreviewer{result: PreviewResult{Start: 0, Lines: []string{"pre", "start foo", "middle", "end bar", "post"}}}
+	o := searchOptions(s)
+	o.Previewer = pv
+	p := New(o)
+	search(t, p, "foo")
+	focusResultsFeeding(t, p)
+	g := draw(p, 100, 30)
+	if !hasRow(g, "2:7–4:4") {
+		t.Fatalf("the row has no multi-line range:\n%s", g)
+	}
+	geo := previewGeo(p)
+	// Line 2: runes from 7 (0-based 6) to the end are bold.
+	if !g.At(previewTextStart(geo, 2)+6, geo.resultsTop+2).Style.Bold {
+		t.Fatal("the first line's matched runes are not bold")
+	}
+	// Line 3 (middle): bold from the start.
+	if !g.At(previewTextStart(geo, 3), geo.resultsTop+3).Style.Bold {
+		t.Fatal("the middle line is not fully bold")
+	}
+	// Line 4: bold from the start to column 4 (exclusive, so runes 0-2); the rest is not.
+	if !g.At(previewTextStart(geo, 4)+2, geo.resultsTop+4).Style.Bold {
+		t.Fatal("the last line's matched runes are not bold")
+	}
+	if g.At(previewTextStart(geo, 4)+4, geo.resultsTop+4).Style.Bold {
+		t.Fatal("runes past the match end are bold on the last line")
+	}
+	// All three match lines take the selected style.
+	for k := 1; k <= 3; k++ {
+		if got, want := g.At(geo.prevX, geo.resultsTop+1+k).Style.BG, p.styles.selected.BG; got != want {
+			t.Fatalf("line %d background = %v, want %v", k+1, got, want)
+		}
 	}
 }

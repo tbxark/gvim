@@ -116,11 +116,35 @@ func (Unsupported) SetModes(string, []ModeInfo)                {}
 func (Unsupported) SetContext(string, string, bool)            {}
 func (Unsupported) SetStatusItems(string, []StatusItem)        {}
 func (Unsupported) SetMenuItems(string, []MenuItem)            {}
-func (Unsupported) SetInputMode(string, string) error          { return unsupported("SetInputMode") }
-func (Unsupported) SetClipboard(string)                        {}
-func (Unsupported) Focus(string) error                         { return unsupported("Focus") }
-func (Unsupported) ScreenSize() (int, int)                     { return 0, 0 }
-func (Unsupported) OwnerGone(string, uint64)                   {}
+func (Unsupported) CreateBufferGroup(string, BufferGroupID, BufferGroupSpec) error {
+	return unsupported("CreateBufferGroup")
+}
+func (Unsupported) SetPanelContent(string, BufferGroupID, string, []ContentEntry) error {
+	return unsupported("SetPanelContent")
+}
+func (Unsupported) SetBufferGroupTitle(BufferGroupID, []BufferGroupTitleSegment) error {
+	return unsupported("SetBufferGroupTitle")
+}
+func (Unsupported) SetBufferGroupPanelVisible(BufferGroupID, string, bool) error {
+	return unsupported("SetBufferGroupPanelVisible")
+}
+func (Unsupported) FocusBufferGroupPanel(BufferGroupID, string) error {
+	return unsupported("FocusBufferGroupPanel")
+}
+func (Unsupported) CloseBufferGroup(BufferGroupID)                     {}
+func (Unsupported) BufferGroupPanels(BufferGroupID) []BufferGroupPanel { return nil }
+func (Unsupported) CreateScrollSyncGroup(string, uint64, WinID, WinID) error {
+	return unsupported("CreateScrollSyncGroup")
+}
+func (Unsupported) SetScrollSyncAnchors(uint64, []ScrollAnchor) error {
+	return unsupported("SetScrollSyncAnchors")
+}
+func (Unsupported) RemoveScrollSyncGroup(uint64)      {}
+func (Unsupported) SetInputMode(string, string) error { return unsupported("SetInputMode") }
+func (Unsupported) SetClipboard(string)               {}
+func (Unsupported) Focus(string) error                { return unsupported("Focus") }
+func (Unsupported) ScreenSize() (int, int)            { return 0, 0 }
+func (Unsupported) OwnerGone(string, uint64)          {}
 
 // DecorHost.
 
@@ -141,7 +165,17 @@ func (Unsupported) Config(string) (any, bool)                  { return nil, fal
 func (Unsupported) Theme() ThemeInfo                           { return ThemeInfo{} }
 func (Unsupported) ThemeColor(string) (r, g, b uint8, ok bool) { return 0, 0, 0, false }
 func (Unsupported) ThemeNames() []string                       { return nil }
-func (Unsupported) ThemeOverrides() (map[string]string, bool)  { return nil, false }
+func (Unsupported) ThemeFiles() []ThemeFileInfo                { return nil }
+func (Unsupported) ThemeSchema() ThemeSchema                   { return ThemeSchema{} }
+func (Unsupported) ThemeUserDir() string                       { return "" }
+func (Unsupported) ThemeFileExists(string) bool                { return false }
+func (Unsupported) ThemeData(string) (string, error)           { return "", unsupported("ThemeData") }
+func (Unsupported) SaveThemeFile(string, string) (string, error) {
+	return "", unsupported("SaveThemeFile")
+}
+func (Unsupported) DeleteThemeFile(string) error              { return unsupported("DeleteThemeFile") }
+func (Unsupported) ReloadThemes(string) error                 { return unsupported("ReloadThemes") }
+func (Unsupported) ThemeOverrides() (map[string]string, bool) { return nil, false }
 func (Unsupported) SetThemeOverrides(map[string]string) error {
 	return unsupported("SetThemeOverrides")
 }

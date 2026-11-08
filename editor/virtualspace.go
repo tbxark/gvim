@@ -22,7 +22,7 @@ func (e *Editor) virtualSpace(d *Document) bool {
 	if e == nil || d == nil || len(d.Extra) != 0 || d.LargeState() != nil {
 		return false
 	}
-	if e.SettingsFor(d).LineWrap {
+	if e.SettingsFor(d).LineWrap || e.SettingsFor(d).PageView {
 		return false
 	}
 	if v := d.View().VirtualSpace; v != nil {
@@ -44,7 +44,7 @@ func (e *Editor) virtualBlock(d *Document) bool {
 	if e == nil || d == nil || d.LargeState() != nil {
 		return false
 	}
-	if e.SettingsFor(d).LineWrap {
+	if e.SettingsFor(d).LineWrap || e.SettingsFor(d).PageView {
 		return false
 	}
 	if v := d.View().VirtualSpace; v != nil {

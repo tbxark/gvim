@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/outline"
@@ -57,6 +58,14 @@ type tocState struct {
 	// out.
 	seq   int
 	armed bool
+	// outlinePath names the document whose heading fold ranges are published to
+	// the editor's outline fold source, and applied maps a heading's byte offset
+	// to the line where its section is folded in that document. folded holds the
+	// headings the reader collapsed in the section: keyed by byte, like Fresh's
+	// plugin keeps them, so a rescan moves a fold with its heading.
+	outlinePath string
+	folded      map[int]bool
+	applied     map[int]int
 }
 
 // dividerState is a press on the Contents header: a drag resizes the section,
@@ -94,14 +103,150 @@ func (m *Model) initContents(deps Deps) {
 	m.contents.FoldHook = m.tocFoldHook
 }
 
-// tocFoldHook folds the buffer section under a heading when fold_buffer is on.
-// gvim's folds are indentation folds, so a plain Markdown heading usually opens
-// none; docs/sidebar.md records the difference from Fresh's per-heading ranges.
+// tocFoldHook folds or unfolds the buffer section under a Contents heading when
+// fold_buffer is on. The section's rows and the buffer folds are two views of the
+// heading's collapsed state, keyed by the heading's byte offset as Fresh's plugin
+// keys them, so a rescan moves a fold with its heading instead of leaving it on
+// the line the heading used to be at.
 func (m *Model) tocFoldHook(heading outline.Heading, expanded bool) {
 	if !m.contents.FoldBuffer() {
 		return
 	}
-	m.toggleFoldAt(heading.Line)
+	if m.toc.folded == nil {
+		m.toc.folded = map[int]bool{}
+	}
+	if expanded {
+		delete(m.toc.folded, heading.Byte)
+	} else {
+		m.toc.folded[heading.Byte] = true
+	}
+	m.applyOutlineFolds(m.contents.Headings())
+}
+
+// outlineFoldSetter is the optional editor part that takes the Contents section's
+// heading fold ranges, tied to the text version they describe. The app adapter
+// implements it; an editor without it publishes no folds.
+type outlineFoldSetter interface {
+	SetOutlineFolds(path string, ranges []fold.Range, textVersion uint64)
+}
+
+// foldStateReader is the optional editor part that reports whether the fold
+// starting on a line is collapsed. The section asks before it unfolds a heading,
+// so a fold the reader made by hand is not toggled back.
+type foldStateReader interface {
+	FoldedAt(line int) bool
+}
+
+// publishOutlineFolds gives the editor the heading fold ranges of the open section:
+// every heading's section as a toggleable range, tied to the text version they were
+// scanned from. That is Fresh's markdown_toc behaviour — setFoldingRanges publishes
+// every section, nothing is pre-collapsed, and the standard fold keybindings use
+// the ranges. The ranges apply only while the text keeps that version, so an edit
+// drops them until the next rescan; the folds the reader made are then re-applied
+// by heading byte, so a shifted heading never folds the wrong line. A closed section,
+// a non-Markdown buffer, fold_buffer off, or a document without a text version
+// clears the source instead.
+func (m *Model) publishOutlineFolds(doc Document) {
+	path := docPath(doc)
+	version, versioned := docVersion(doc)
+	setter, _ := m.ed.(outlineFoldSetter)
+	switch {
+	case setter == nil, path == "", !versioned, !m.contents.Open(),
+		!m.toc.enabled, !m.contents.FoldBuffer(), !isMarkdownName(doc.Name()):
+		m.clearOutlineFolds(path)
+		return
+	}
+	if m.toc.outlinePath != path {
+		m.toc.outlinePath = path
+		m.toc.applied = nil
+	}
+	heads := m.contents.Headings()
+	ranges := make([]fold.Range, 0, len(heads))
+	for _, h := range heads {
+		if h.EndLine > h.Line {
+			ranges = append(ranges, fold.Range{Start: h.Line, End: h.EndLine})
+		}
+	}
+	setter.SetOutlineFolds(path, ranges, version)
+	m.applyOutlineFolds(heads)
+}
+
+// applyOutlineFolds makes the buffer's heading folds match the section's folded
+// set: a folded heading gets its fold at the heading's current line, an unfolded
+// one is opened, and a fold whose heading moved is moved with it. The fold state is
+// checked before a fold is toggled, so a fold the reader made by hand on a heading
+// line is not toggled back, and a fold that could not be made (no published range
+// yet) is not remembered as applied.
+func (m *Model) applyOutlineFolds(heads []outline.Heading) {
+	toggler, _ := m.ed.(foldToggler)
+	if toggler == nil {
+		return
+	}
+	state, _ := m.ed.(foldStateReader)
+	if m.toc.applied == nil {
+		m.toc.applied = map[int]int{}
+	}
+	want := make(map[int]int, len(m.toc.folded))
+	for _, h := range heads {
+		if m.toc.folded[h.Byte] && h.EndLine > h.Line {
+			want[h.Byte] = h.Line
+		}
+	}
+	for key, line := range m.toc.applied {
+		if l, ok := want[key]; ok && l == line {
+			continue
+		}
+		if state == nil || state.FoldedAt(line) {
+			toggler.ToggleFoldAt(line)
+		}
+		delete(m.toc.applied, key)
+	}
+	for key, line := range want {
+		if l, ok := m.toc.applied[key]; ok && l == line {
+			continue
+		}
+		if state != nil && state.FoldedAt(line) {
+			m.toc.applied[key] = line
+			continue
+		}
+		if toggler.ToggleFoldAt(line) {
+			m.toc.applied[key] = line
+		}
+	}
+}
+
+// clearOutlineFolds clears the published heading ranges and opens the folds the
+// section applied to the active document. activePath is the active document's
+// path: a switch clears the ranges of the document left behind without trying to
+// touch the folds of the new one.
+func (m *Model) clearOutlineFolds(activePath string) {
+	if m.toc.outlinePath != "" && m.toc.outlinePath == activePath {
+		m.unfoldApplied()
+	}
+	if setter, ok := m.ed.(outlineFoldSetter); ok && m.toc.outlinePath != "" {
+		setter.SetOutlineFolds(m.toc.outlinePath, nil, 0)
+	}
+	m.toc.outlinePath = ""
+	m.toc.applied = nil
+}
+
+// unfoldApplied opens every fold the section applied to the active document.
+func (m *Model) unfoldApplied() {
+	state, _ := m.ed.(foldStateReader)
+	for _, line := range m.toc.applied {
+		if state == nil || state.FoldedAt(line) {
+			m.toggleFoldAt(line)
+		}
+	}
+}
+
+// resetOutlineFolds forgets the buffer-fold bookkeeping of the section: the folded
+// heading set and the lines applied. It runs where the section is reset (a new
+// buffer, Show Outline), so every row starts expanded again and no heading's fold
+// outlives its row's state.
+func (m *Model) resetOutlineFolds() {
+	m.toc.folded = nil
+	m.toc.applied = nil
 }
 
 // contentsSync notices what changed since the last message: a new active
@@ -112,6 +257,7 @@ func (m *Model) contentsSync() tea.Cmd {
 	doc := m.ed.Active()
 	if m.tree == nil || doc == nil {
 		if m.contents.Open() {
+			m.clearOutlineFolds("")
 			m.contents.SetOpen(false)
 		}
 		m.toc.ident = ""
@@ -119,10 +265,14 @@ func (m *Model) contentsSync() tea.Cmd {
 	}
 	ident := fmt.Sprintf("%d\x00%s", m.activeTab(), doc.Name())
 	if ident != m.toc.ident {
+		// The published ranges of the document left behind are cleared; the new
+		// document publishes its own from its scan.
+		m.clearOutlineFolds("")
 		m.toc.ident = ident
 		m.toc.closed = false
 		m.toc.scanned = false
 		m.contents.Reset()
+		m.resetOutlineFolds()
 		markdown := isMarkdownName(doc.Name())
 		switch {
 		case !markdown || !m.toc.enabled || m.toc.closed:
@@ -137,6 +287,7 @@ func (m *Model) contentsSync() tea.Cmd {
 		return nil
 	}
 	if !isMarkdownName(doc.Name()) {
+		m.clearOutlineFolds(docPath(doc))
 		m.contents.SetOpen(false)
 		return nil
 	}
@@ -196,6 +347,7 @@ func (m *Model) closeContents() {
 	}
 	m.toc.wanted = false
 	m.toc.closed = true
+	m.clearOutlineFolds(docPath(m.ed.Active()))
 	m.contents.SetOpen(false)
 	if m.contentsFocus {
 		m.focusEditor()
@@ -213,6 +365,7 @@ func (m *Model) rescanContents() {
 	m.toc.scanned = true
 	m.toc.armed = false
 	m.toc.version, m.toc.versionOK = docVersion(doc)
+	m.publishOutlineFolds(doc)
 	m.setContentsViewRows()
 	m.contents.Follow(doc.Cursor().Line, doc.Top(), m.editorFocused())
 }
@@ -254,6 +407,7 @@ func (m *Model) markdownTOCShown() {
 	m.toc.wanted = true
 	m.toc.closed = false
 	m.contents.Reset()
+	m.resetOutlineFolds()
 	m.openContents(true)
 }
 
@@ -312,6 +466,13 @@ func (m *Model) sidebarSpecs() []sidebar.Spec {
 			Collapsed: m.contents.Collapsed(),
 		})
 	}
+	if m.diag.Open() {
+		specs = append(specs, sidebar.Spec{
+			Kind:      sidebar.KindDiagnostics,
+			Rows:      m.diag.Rows(),
+			Collapsed: m.diag.Collapsed(),
+		})
+	}
 	// The plugin sections stack under the native ones (plugin_panels.go).
 	specs = append(specs, m.pluginSidebarSpecs()...)
 	return specs
@@ -332,6 +493,7 @@ func (m *Model) takeContentsFocus() {
 	m.tabFocus = false
 	m.explorerFocus = false
 	m.dock.SetFocus(false)
+	m.diag.focus = false
 	m.contentsFocus = true
 	m.contents.SetFocus(true)
 	m.contents.SetOpen(true)
@@ -540,6 +702,12 @@ func (m *Model) paintSidebar(g *grid.Grid, l layout) {
 			Title:     sec.Title,
 			NoClose:   sec.NoClose,
 		}
+		if sec.Kind == sidebar.KindDiagnostics {
+			// A native section with a dynamic title: the counts, or an ellipsis
+			// while the servers are starting. It has no close button; the header
+			// click folds it and the palette row closes it.
+			spec.Title, spec.NoClose = m.diagHeaderTitle(), true
+		}
 		sidebar.PaintHeader(g, l.ExX, l.Ex, sec.HeaderY, sidebar.HeaderFor(l.Ex, m.view.icons, spec), m.styles)
 		if sec.Collapsed {
 			continue
@@ -549,6 +717,8 @@ func (m *Model) paintSidebar(g *grid.Grid, l layout) {
 			m.explorerPanel.DrawBody(g, m.explorerGeometry(l))
 		case sidebar.KindContents:
 			m.contents.Draw(g, l.ExX, l.Ex, sec, m.view.icons, m.styles)
+		case sidebar.KindDiagnostics:
+			m.paintDiagPanel(g, l, sec)
 		case sidebar.KindPlugin:
 			if mp := m.pluginSectionAt(sec.Index); mp != nil {
 				m.paintPluginSection(g, l, mp)

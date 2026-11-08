@@ -15,12 +15,13 @@ type ViewSettings struct {
 	TabIndicators  *bool // default on; arrows for tabs, under Whitespace
 	VirtualSpace   *bool // default off; the caret may sit past the end of lines (see virtualspace.go)
 	IndentTabs     *bool // true: Tab inserts tabs; nil follows Options.UseTabs
-	// PageView is stored only: the pane does not draw the page view. The page
-	// view belongs to the Markdown compose/rendered view, which is deferred to its
-	// own round (docs/parity.md backlog #12), so the flag is kept for the config
-	// and the toggle but has no paint.
-	PageView bool
-	// PageWidth is the width of the page view in columns. Zero means the default.
+	// PageView is the per-buffer page view switch: nil follows the language's
+	// page_view (which the config layers resolve), and a set value overrides it.
+	// The page view centers the text in a page of PageWidth columns and, for
+	// Markdown, composes the inline marks (see docs/markdown.md).
+	PageView *bool
+	// PageWidth is the width of the page view in columns. Zero means the
+	// language's page_width, and then the viewport.
 	PageWidth int
 	// Rulers are the 1-based columns that carry a ruler, in the order added.
 	Rulers []int
@@ -57,6 +58,15 @@ func (s ViewSettings) TabIndicatorsOn() bool { return OverrideOr(s.TabIndicators
 // when it is unset the editor's editor.virtual_space decides (see
 // document/virtualspace.go and editor/virtualspace.go).
 func (s ViewSettings) VirtualSpaceOn() bool { return OverrideOr(s.VirtualSpace, false) }
+
+// PageViewOverride returns the per-buffer page view switch, and false when the
+// buffer has not set one and the language's page_view decides.
+func (s ViewSettings) PageViewOverride() (bool, bool) {
+	if s.PageView == nil {
+		return false, false
+	}
+	return *s.PageView, true
+}
 
 // ViewSettings returns the display settings of the document. The flags are
 // shared with the document, so the caller reads them and does not change them.

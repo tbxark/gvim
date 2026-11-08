@@ -1,8 +1,8 @@
 # Bundled plugins
 
-gvim ships nine plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships ten plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
-`config.json` can override them). Seven are on by default; `flash` and `vi_mode` are off until you
+`config.json` can override them). Eight are on by default; `flash` and `vi_mode` are off until you
 turn them on:
 
 ```jsonc
@@ -20,6 +20,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `git_find_file` | on | Git Find File, Git Find File: Reload | none |
 | `git_blame` | on (idle until toggled) | Git: Toggle Blame, Git: Show Commit, Git: Copy Commit Hash | `debounce_ms` (150, 50 to 2000, project), `summary_width` (60, 10 to 200, project) |
 | `merge_conflict` | on | Merge: Start Resolution, Next Conflict, Previous Conflict, Use Ours, Take Theirs, Use Both, Resolve Conflict... | none |
+| `diagnostics_panel` | on | Show Diagnostics Panel, Toggle Diagnostics Panel | none |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
 | `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
@@ -69,6 +70,24 @@ clipboard.
 one under the caret as ours, theirs or both in one undo step. **Start Resolution** turns on a key mode
 (`n`/`p` next and previous, `u` ours, `t` theirs, `b` both, `q` leaves). It never reads a whole buffer:
 it asks the host for the marker lines and rescans only what an edit touched.
+
+**diagnostics_panel** (the first Fresh plugin port; reduced): lists every diagnostic the language
+servers have published, grouped by file the way Fresh's panel groups them (a file header, then
+`[E] line:col message` rows with the source in the right column; `E`/`W`/`I`/`H` are error, warning,
+info and hint). **Show Diagnostics Panel** opens it filtered to the current file, **Toggle
+Diagnostics Panel** opens or closes it, and the **All files** toggle inside the panel switches the
+filter to every open document (Fresh's `a` key). Enter jumps to the diagnostic and closes the panel
+so the keyboard goes back to the editor (a v1 widget panel holds it while it is focused; Fresh's dock
+panel stays open), Esc closes it, `diagnostics_updated` rebuilds the rows live, and activating
+another file re-filters them. At most 500 diagnostics are listed (the API can return 50 000); a
+message is cut to its first line and 120 cells, and paths and sources are bounded too. Ported from
+`refs/fresh/crates/fresh-editor/plugins/diagnostics_panel.ts` (275 lines) on the live-panel part of
+its `plugins/lib/finder.ts` (1862 lines). Not ported from the Finder library: prompt mode and search
+sources, the preview pane, `syncWithEditor`/`navigateOnCursorMove`, the utility-dock placement, the
+`q`/`a`/`r` panel keys (the filter is a widget toggle, refresh is automatic, Esc closes) and Fresh's
+severity colours. The diagnostic *code* is not shown because gvim's LSP API carries the source but
+no code. Like every bundled plugin it binds no key; bind `diagnostics_panel.toggle_diagnostics_panel`
+yourself.
 
 **The Markdown outline is not a plugin in gvim.** Fresh ships the Contents section as the bundled
 plugin `markdown_toc.ts`; gvim builds it into the TUI as the sidebar section under the File Explorer
@@ -136,15 +155,16 @@ Measured with the plugin set of this release (macOS arm64, Go 1.27, pure heap in
 
 | | Heap |
 |---|---|
-| the editor session without plugins | 1.7 MiB |
-| the same session with the 7 default-enabled plugins loaded and idle | 7.4 MiB |
-| **cost of the default set** | **about 5.7 MiB** (gate: 8 MiB) |
+| the editor session without plugins | 1.85 MiB |
+| the same session with the 8 default-enabled plugins loaded and idle | about 8.4 MiB |
+| **cost of the default set** | **about 6.6 MiB** (gate: 8 MiB) |
 
 The gate passes, so no bundled plugin was flipped to `default_enabled: false` for memory. Per plugin, in
 a bare runtime that holds only that plugin (each figure includes about 0.3 MiB for the runtime itself, and
 the first one loaded pays for the shared prelude): `goto_with_selection` 0.6 MiB, `git_find_file` 0.7,
-`git_statusbar` 0.8, `tab_actions` 0.85, `git_gutter` 1.0, `git_blame` 1.15,
+`git_statusbar` 0.8, `tab_actions` 0.85, `diagnostics_panel` about 0.9 (measured as the rise of
+the default set when it joined it, not in a bare runtime), `git_gutter` 1.0, `git_blame` 1.15,
 `merge_conflict` 1.35, `flash` 1.55, and **`vi_mode` 6.9 MiB**. `vi_mode` is the one that would bust the
-budget (the default set plus vi would be about 12 MiB), which is why it is off by default; `flash` is off by
+budget (the default set plus vi would be about 13 MiB), which is why it is off by default; `flash` is off by
 default as well. If you do not use the git plugins, switching them off in the config saves about
 4 MiB.

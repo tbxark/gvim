@@ -133,6 +133,12 @@ type Pane struct {
 	// guides, whitespace marks and bracket highlights. The zero value is the plain pane.
 	Opts Options
 
+	// PageView is the centered page view: the text is laid out in a page of
+	// PageView.Measure columns, centered between margins, with the gutter and the
+	// horizontal scroll hidden. For Markdown the inline marks are composed (see
+	// pageview.go. The zero value is the normal full-width pane.
+	PageView PageView
+
 	// The overlay hooks (see overlays.go) give the decorations of one line. The root sets
 	// them in paneGeometry, the one place that builds the pane for the painter and the
 	// hit test alike. Nil paints none.
@@ -334,11 +340,15 @@ type frame struct {
 	noHBar      bool
 	caretShape  CaretShape
 	keepLeft    bool
-	opts        Options
-	fx          *frameFX // the state of the options, set by initFX
-	hooks       overlayHooks
-	dx          *overlayFX // the looks of the overlays; nil when the pane has no overlay hook
-	marks       []TrackMark
+	// pageOn is the page view: the gutter is the left margin and the wrap width is
+	// the page measure. pageMarkdown makes the inline marks composed.
+	pageOn, pageMarkdown bool
+	pageMeasure          int
+	opts                 Options
+	fx                   *frameFX // the state of the options, set by initFX
+	hooks                overlayHooks
+	dx                   *overlayFX // the looks of the overlays; nil when the pane has no overlay hook
+	marks                []TrackMark
 }
 
 // newFrame builds the frame for a w by h pane. It reports false when there is
@@ -349,21 +359,40 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 	}
 	lines := max(p.Doc.LineCount(), 1)
 	display := max(DisplayLines(p.Doc), lines)
+	wrapped := p.wrapOn()
+	margin, measure := 0, 0
+	if p.PageView.On {
+		// The page is centered in the text area; the gutter becomes the left
+		// margin, so the line numbers and fold markers are hidden with it.
+		textW := max(w-1, 1)
+		measure = p.PageView.Measure
+		if measure <= 0 || measure > textW {
+			measure = textW
+		}
+		measure = min(max(measure, minPageViewWidth), textW)
+		margin = (textW - measure) / 2
+		wrapped = true
+		p.Rulers = nil
+		p.IndentGuides = false
+	}
 	f := frame{
-		doc:        p.Doc,
-		styles:     p.Styles,
-		w:          w,
-		h:          h,
-		lines:      lines,
-		display:    display,
-		gutter:     GutterWidth(display),
-		wrap:       p.wrapOn(),
-		tab:        p.tabSize(),
-		caret:      p.Doc.Cursor(),
-		highlights: p.Highlights,
-		curLine:    p.CurrentLine,
-		rulers:     p.Rulers,
-		diags:      p.Diagnostics,
+		doc:          p.Doc,
+		styles:       p.Styles,
+		w:            w,
+		h:            h,
+		lines:        lines,
+		display:      display,
+		gutter:       GutterWidth(display),
+		wrap:         wrapped,
+		pageOn:       p.PageView.On,
+		pageMarkdown: p.PageView.On && p.PageView.Markdown,
+		pageMeasure:  measure,
+		tab:          p.tabSize(),
+		caret:        p.Doc.Cursor(),
+		highlights:   p.Highlights,
+		curLine:      p.CurrentLine,
+		rulers:       p.Rulers,
+		diags:        p.Diagnostics,
 
 		noTabArrows: p.HideTabArrows,
 		noFolds:     p.HideFoldMarkers,
@@ -379,13 +408,19 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		f.dx = &overlayFX{}
 	}
 	f.inlineDiag = p.InlineDiagnostics
-	if vd, ok := p.Doc.(VirtualDocument); ok && !f.wrap {
+	if vd, ok := p.Doc.(VirtualDocument); ok && !f.wrap && !f.pageOn {
 		f.virtual = vd.VirtualColumns()
 	}
-	if p.HideGutter {
+	if p.PageView.On {
+		f.gutter = margin
+	} else if p.HideGutter {
 		f.gutter = 0
 	}
-	f.wrapW = (w - f.gutter) - 2 // the legacy wrap width: text area less two
+	if f.pageOn {
+		f.wrapW = f.pageMeasure
+	} else {
+		f.wrapW = (w - f.gutter) - 2 // the legacy wrap width: text area less two
+	}
 	if windowed(p.Doc) {
 		f.win, _ = p.Doc.(LineWindower)
 	}
@@ -396,7 +431,9 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 	f.top = f.visibleAtOrAbove(min(max(p.Top, 0), lines-1))
 	f.setSelections(p.Doc)
 	f.setBlock(p.Doc)
-	f.setVirtualLines(p.Doc)
+	if !f.pageOn {
+		f.setVirtualLines(p.Doc)
+	}
 	f.initFX(p)
 	switch {
 	case f.fill != nil && p.TopRow > 0 && f.top == p.Top:
@@ -683,7 +720,7 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 				continue // a pane with fillers counts the rows of the top block in topRow
 			}
 			ln := rd.ln
-			if f.gutter > 0 {
+			if f.gutter > 0 && !f.pageOn {
 				label := fmt.Sprintf("%*s │ ", f.gutter-gutterSeparator, "")
 				if rd.first {
 					label = fmt.Sprintf("%*d │ ", f.gutter-gutterSeparator, f.lineNumber(i))
@@ -706,7 +743,7 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 				end = f.paintFoldPlaceholder(g, i, y, end, cur)
 			}
 			if cur && f.styles.CurrentLine.BG != nil {
-				g.Fill(end, f.w-1, y, grid.Style{FG: f.styles.Text.FG, BG: f.styles.CurrentLine.BG})
+				g.Fill(end, f.textRight(), y, grid.Style{FG: f.styles.Text.FG, BG: f.styles.CurrentLine.BG})
 			}
 			f.paintRowTail(g, ln, y, end, cur)
 			f.paintBlockVirtual(g, i, y, end, widthAll)
@@ -825,7 +862,9 @@ func (f frame) paintMarks(g *grid.Grid, rows []rowInfo) {
 			f.paintBar(g, r.y, thumbStart, thumbLen)
 			continue
 		}
-		if text, st, ok := f.gutterMark(r.line); ok {
+		if f.pageOn {
+			// The page view hides the gutter, its column numbers and change bar.
+		} else if text, st, ok := f.gutterMark(r.line); ok {
 			g.Set(0, r.y, text, st)
 		} else if f.bar[r.line] && f.gutter > 0 {
 			g.Set(0, r.y, changeBar, f.styles.Gutter)
@@ -1130,6 +1169,9 @@ func (f frame) cellOf(p buffer.Pos) (x, y int, ok bool) {
 		if i == p.Line {
 			raw, _ := f.lineRaw(i)
 			rel := p.Col - ln.off
+			if ln.srcToDisp != nil {
+				rel = mapSrcColumn(ln, rel)
+			}
 			if ln.long {
 				rel = min(max(rel, 0), len(raw))
 			}
@@ -1347,7 +1389,11 @@ func (f frame) posAt(x, row int) buffer.Pos {
 			cells = r.endCells() - 1
 		}
 	}
-	return buffer.Pos{Line: r.line, Col: r.ln.off + runeIndexAt(r.ln.raw, cells, f.tab)}
+	pos := runeIndexAt(r.ln.raw, cells, f.tab)
+	if r.ln.dispToSrc != nil {
+		pos = mapDispColumn(r.ln, pos)
+	}
+	return buffer.Pos{Line: r.line, Col: r.ln.off + pos}
 }
 
 // Blit copies src into dst with its top-left cell at (x0, y0). Cells outside dst

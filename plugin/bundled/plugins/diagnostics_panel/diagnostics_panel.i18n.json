@@ -1,0 +1,22 @@
+{
+  "en": {
+    "cmd.show_diagnostics_panel": "Show Diagnostics Panel",
+    "cmd.show_diagnostics_panel_desc": "Open the diagnostics panel",
+    "cmd.toggle_diagnostics_panel": "Toggle Diagnostics Panel",
+    "cmd.toggle_diagnostics_panel_desc": "Open the diagnostics panel, or close it when it is open",
+    "panel.header": "Diagnostics (%{filter})",
+    "panel.current_file": "Current File",
+    "panel.all_files": "All Files",
+    "panel.all_files_toggle": "All files",
+    "panel.count": "%{count} items",
+    "panel.no_diagnostics": "No diagnostics",
+    "panel.hint_goto": "Enter: jump",
+    "panel.hint_close": "Esc: close",
+    "status.failed_to_open": "Failed to open diagnostics panel",
+    "status.closed": "Diagnostics panel closed",
+    "status.jumped_to": "Jumped to %{file}:%{line}",
+    "status.failed_to_jump": "Could not open %{file}",
+    "status.diagnostics_count": "Diagnostics: %{count} items",
+    "status.showing": "Showing: %{label}"
+  }
+}

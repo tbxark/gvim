@@ -110,7 +110,8 @@ outline. A document in large-file mode is not scanned.
 **Rows**: one heading per row, indented two cells per level (gvim's tree
 convention; Fresh's sidebar widget indents one column per level). A heading with
 deeper headings after it wears the disclosure glyph (`▼` open, `▶` folded);
-folding a heading hides its section of the tree, not the buffer. The selected
+folding a heading hides its section of the tree, and with `fold_buffer` on it also
+folds the heading's section in the buffer (§6). The selected
 row follows the heading the caret is under, or the heading at the top of the
 pane in `scroll` mode and while the editor pane does not have the keyboard. The
 selection is always painted (a background band) so it can be read while editing;
@@ -171,13 +172,16 @@ declared as project-level, and markdown_toc declared none):
 | `enabled` | boolean | `true` | the section exists at all; off means no rows and the palette command says it is disabled |
 | `max_depth` | integer 1-6 | `6` | headings deeper than this are not rows of the tree |
 | `follow` | `"cursor"`/`"scroll"` | `"cursor"` | which heading the selected row follows |
-| `fold_buffer` | boolean | `false` | folding a heading also folds the editor's fold on that line (see the gap below) |
+| `fold_buffer` | boolean | `false` | folding a heading also folds its section in the buffer, and unfolding opens it (see §6). gvim's native key is `contents.fold_buffer` (user layer, applies on restart); the Fresh-compatible `plugins.markdown_toc.settings.fold_buffer` still works, and the native key wins when both are set |
 | `rows` | integer 1-200 | `10` | body rows the section asks for; a divider drag overrides it for the session |
 | `auto_open` | boolean | `true` | show the section when a Markdown buffer becomes active, hide it when the buffer is not Markdown |
 
 `rows` and the divider drag's value are session state, not saved in the session
 file yet; the config value is used from the next start. The
 `markdown_toc_toggle_follow` action flips `follow` for the session.
+`contents.fold_buffer` is a native Settings-page row (section Contents,
+user layer, applies on restart), shown with the effective value; writing it does
+not touch the retired plugin's settings path.
 
 ## 5. Commands
 
@@ -192,6 +196,12 @@ The palette rows keep the retired plugin's names, so they are where they were:
 The actions are in `commands/markdown_commands.go`, the hand-written table the
 compare rows also use, because the section is not in the generated Fresh table.
 They are ordinary ui actions, so a keybinding may name them.
+
+There is **no fold command and no menu row**: Fresh's `markdown_toc` registers
+exactly Toggle Table of Contents, Follow Cursor/Scroll and Focus Contents, and
+folding is the section's own disclosure gesture (a click on the row's glyph, or
+Left/Right while the section has the keyboard). gvim adds no row, keeping the
+palette at Fresh's surface.
 
 **Auto-open**: with `auto_open` on, the section appears when a Markdown buffer
 becomes active and hides when the active buffer is not Markdown; closing it hides
@@ -213,11 +223,18 @@ Show Outline, and stays available across buffer switches once shown.
 - The palette commands are Show Outline / Close Outline (the names gvim's plugin
   used) rather than Fresh's single Toggle Table of Contents; both reach the same
   section.
-- **Residual gap — `fold_buffer`**: gvim's editor folds are indentation folds,
-  and a Markdown heading usually opens none, so folding a Contents row folds the
-  editor's fold on that line only when the line happens to open one. Fresh
-  publishes per-heading fold ranges; gvim's editor has no port for ranges from
-  outside yet. The setting is read, plumbed and documented here.
+- **`fold_buffer` is implemented** (round 6, R1-1), matching Fresh's
+  `markdown_toc`: with the setting on, the section publishes every heading's section
+  as a toggleable fold range at the scanned text version (so the standard fold
+  keybinding sees them), nothing is pre-collapsed, and collapsing/expanding a row
+  folds/unfolds that heading's range in the buffer. The ranges go through a
+  separate outline fold source that is dropped when the text version changes, and
+  the reader's folded headings are re-applied by heading byte offset after a
+  rescan, so an edit never folds the wrong line. Divergences from Fresh: gvim
+  publishes the ranges only while the section is open (Fresh publishes while it
+  tracks a Markdown buffer even with the panel hidden), and the setting applies on
+  restart (the Settings row is marked restart; Fresh re-reads plugin settings per
+  event).
 - Residual gap — the sidebar itself cannot move to the right side or be
   resized to fewer than its minimum (the pre-existing explorer limits), and the
   section list is not persisted in the session.
@@ -235,6 +252,8 @@ Show Outline, and stays available across buffer switches once shown.
 | focus cycle | `internal/tui/root_sidebar.go` |
 | palette rows | `commands/markdown_commands.go` |
 | config wiring | `internal/app/markdown_toc.go` (plus `internal/app/plugins_markdown_toc_test.go`: the end-to-end tests) |
+| fold_buffer ranges and lifecycle | `document/fold.go` (outline source, text-version guard), `editor/outline_folds.go`, `internal/uiadapter/outline_folds.go`, `internal/tui/markdown_toc.go` (publish/re-apply/clear), `internal/tui/sidebar/contents.go` (`Headings`); tests `editor/outline_folds_test.go`, `internal/tui/markdown_toc_fold_test.go` |
+| native `contents.fold_buffer` | `config/contents.go` (parse, project layer ignored, effective value with the plugin-key fallback), `config/settings_schema.go` row, `internal/app/markdown_toc.go`; tests `config/contents_test.go` |
 
 No test compares whole frames: the tests assert layout rectangles, hit targets,
 widget state and a few painted cells.

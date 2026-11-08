@@ -169,3 +169,51 @@ func TestProjectSearchGlobFiltersResults(t *testing.T) {
 		t.Fatalf("the glob still searches b.txt:\n%s", sc)
 	}
 }
+
+// TestProjectSearchPreviewEndToEnd: the selected match's context shows in the preview
+// column while the result rows have the focus, and Enter still jumps.
+func TestProjectSearchPreviewEndToEnd(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"a.txt": "one\ntwo target three\nfour\n",
+	})
+	s := startProjectSearchSession(t, root, "a.txt", 110, 32)
+	s.Key("alt+a")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Search & Replace") })
+	s.Type("target")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("1 match in 1 file") })
+	s.Key("tab")
+	s.Key("tab")
+	s.Key("tab") // the result rows: the preview follows the selection
+	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("a.txt:2") })
+	if !strings.Contains(sc.String(), "one") || !strings.Contains(sc.String(), "four") {
+		t.Fatalf("the preview does not show the context lines:\n%s", sc)
+	}
+	if !strings.Contains(sc.String(), "two target three") {
+		t.Fatalf("the preview does not show the match's line:\n%s", sc)
+	}
+	s.Key("enter")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("a.txt") })
+}
+
+// TestProjectSearchMultiLineRowAndPreviewEndToEnd: a regex match across lines gets the
+// range row and the preview shows both of its lines.
+func TestProjectSearchMultiLineRowAndPreviewEndToEnd(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"a.txt": "xxx foo\nbar yyy\n",
+	})
+	s := startProjectSearchSession(t, root, "a.txt", 110, 32)
+	s.Key("alt+a")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Search & Replace") })
+	s.Key("alt+r") // regex
+	s.Type("foo\\s+bar")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("1 match in 1 file") })
+	s.Key("tab")
+	s.Key("tab")
+	s.Key("tab")
+	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("a.txt:1–2:4") })
+	if !strings.Contains(sc.String(), "xxx foo") || !strings.Contains(sc.String(), "bar yyy") {
+		t.Fatalf("the preview does not show the whole match:\n%s", sc)
+	}
+}

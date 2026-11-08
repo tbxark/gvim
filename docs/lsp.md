@@ -308,8 +308,37 @@ words in the buffer and everything else do not depend on it.
 - **Diagnostics, pull.** A server that answers `textDocument/diagnostic` instead of publishing is
   asked for the document's diagnostics when no server published any: a server that published is
   never also pulled from, so a problem is reported once. Pulled sets are cached for the document
-  version, so the 300 ms diagnostics poll does not ask again while the text has not changed. The
-  workspace diagnostics view (the diagnostics panel) is not drawn yet; see the last section.
+  version, so the 300 ms diagnostics poll does not ask again while the text has not changed.
+
+## The diagnostics panel and the fix list
+
+The diagnostics of every file a server reported on — open files and files it reported without
+them being open — are collected in one workspace store. The 300 ms diagnostics poll replaces the
+whole store each time, so a diagnostic a server dropped disappears, and stopping the servers
+empties it; the panel and the list read the same store.
+
+**Toggle Diagnostics Sidebar** (the palette, `toggle_diagnostics_panel`) shows the native
+**Diagnostics** section of the sidebar. Its header carries the workspace counts (`E:1 W:2 I:3`,
+the parts of `{diagnostics}`), or an ellipsis while the servers are still starting or the first
+diagnostics are pending. The body lists each file with its per-file counts, then that file's
+diagnostics most severe first, each with its severity mark, message, source (and the server's
+diagnostic code when it sent one) and line:column. The plugin API's diagnostic info is separate:
+it carries severity, line/column, message and source but not the code, so the bundled
+diagnostics-panel plugin's rows show those fields. Up
+and Down move the selection, PageUp/PageDown a page, Home and End its ends, Enter opens the
+selected diagnostic's file at its position and gives the keyboard back to the editor, and Escape
+does the same without jumping. A click on a row selects and jumps; a click on the header folds
+the section. F6 reaches the section after the Contents section, matching its place in the column.
+The section has no close button: the header click folds it and the palette row closes it.
+
+**Diagnostics List** (`open_diagnostics_list`) opens the same diagnostics in the shared filterable
+list overlay — the quickfix view: type to filter, choose a row to jump to it, and the list stays
+open after a jump, like a fix list. Escape closes it.
+
+The panel's empty states are its progress display: "No language server is configured", "Starting
+language servers…" while a server starts, "Waiting for diagnostics…" when the servers are on but
+nothing has arrived, and "No diagnostics" otherwise. The status row keeps its own `LSP …` starting
+state; no new animation is involved.
 - **Format Buffer.** It formats with an external formatter when there is one, and otherwise asks
   the language server (`textDocument/formatting`). The caret stays on its text when the formatter
   adds or removes lines above it. With neither a formatter nor a server, the status row says which
@@ -343,8 +372,9 @@ Servers only start for files that have a name on disk, and not for files in larg
 
 ## What is not here yet
 
-The diagnostics panel (a native sidebar section listing the workspace's diagnostics grouped by
-file, with a jump to each and a palette toggle) is not drawn yet: the data it needs is already
-collected (`WorkspaceDiagnostics` in the port, and pull diagnostics), so it is the next slice.
-The same holds for a quickfix list. Inlay hints use the end-of-line tier; inline insertion at the
-hint's character position is a later refinement (docs/parity.md, backlog #7).
+The workspace store lists the files the servers reported on, which is not every file in the
+workspace: there is no workspace-folder-wide diagnostics request for files no server has mentioned
+yet. Inlay hints use the end-of-line tier; inserting them inline at the hint's own character
+position is a later refinement. No built-in universal language server ships (Fresh's quicklsp is
+not available), so `universal_lsp` is config-only, and `process_limits` is parsed but not
+enforced. See docs/parity.md, backlog #7.

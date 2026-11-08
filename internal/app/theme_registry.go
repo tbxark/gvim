@@ -89,3 +89,26 @@ func (c *themeCatalog) SaveTheme(name string, th theme.Theme) (string, error) {
 
 // DeleteTheme removes a user theme file and rescans.
 func (c *themeCatalog) DeleteTheme(ref string) error { return c.reg.DeleteTheme(ref) }
+
+// UserDir is the directory user theme files live in.
+func (c *themeCatalog) UserDir() string { return c.reg.UserDir() }
+
+// ThemePath is where the user theme file for ref lives; it may not exist yet.
+func (c *themeCatalog) ThemePath(ref string) (string, error) { return c.reg.ThemePath(ref) }
+
+// Data returns the resolved theme ref as theme-file JSON.
+func (c *themeCatalog) Data(ref string) (string, error) {
+	th, err := c.reg.Load(ref)
+	if err != nil {
+		return "", err
+	}
+	name := filepath.Base(ref)
+	if i := strings.IndexByte(name, '.'); i > 0 {
+		name = name[:i]
+	}
+	data, err := th.MarshalFile(name)
+	if err != nil {
+		return "", fmt.Errorf("theme: encode %s: %w", ref, err)
+	}
+	return string(data), nil
+}

@@ -84,7 +84,7 @@ end, { debounce = 300 })
 | `lsp_status_clicked` | `{}` | the LSP status pill in the status row was clicked (the server list popup opened) |
 | `lsp_server_error` | `{error}` | a language-server call failed; `error` is the message the status row shows |
 | `action_popup_result` | `{popup, action}` | an action popup opened with `gvim.ui.action_popup` closed; `popup` is its overlay id and `action` the chosen action id, or nil |
-| `widget_event` | `{panel, event, widget?, index?, checked?, value?, x?, y?, button?, wheel?}` | a mounted widget panel or sidebar section: `activate`, `toggle`, `select`, `focus`, `focus_gained`, `focus_lost`, `value`, `close`, `cancel` and `mouse_click`/`mouse_move`/`mouse_wheel` (see [api-ui.md](api-ui.md#widget-panels-and-sidebar-sections)) |
+| `widget_event` | `{panel, event, widget?, index?, checked?, value?, cursor_byte?, included?, focus_key?, target_key?, target_index?, x?, y?, button?, wheel?}` | a mounted widget panel or sidebar section: `activate`, `toggle`, `select`, `expand`, `change`, `completion_request`/accept/dismiss`, `drag`/drop/dragend`, `focus`, `focus_gained`, `focus_lost`, `value`, `close`, `cancel` and `mouse_click`/`mouse_move`/`mouse_wheel` (see [api-ui.md](api-ui.md#widget-panels-and-sidebar-sections)) |
 | `<plugin>:<name>` | the payload of `gvim.emit` | a plugin emitted it |
 
 Details worth knowing:
@@ -105,7 +105,7 @@ Details worth knowing:
 * `diagnostics_updated` is raised from the editor's own diagnostics poll (about three times a second
   while a document is open); read the diagnostics with `gvim.lsp.diagnostics(ev.buf)`.
 
-* `widget_event` is the input of the panels the plugin mounted: `panel` is the id `mount_widget_panel`/`mount_sidebar_section` returned, `event` says what happened, `widget` is the key of the widget it is about (an item or node key for a list/tree row, "" when the event is panel-level), `index` is the 1-based row for a list/tree event, and `checked`/`value` carry a toggle or a tree expansion state. The mouse events add the frame cell `x`/`y`, the `button` and the `wheel` delta. See [api-ui.md](api-ui.md#widget-panels-and-sidebar-sections).
+* `widget_event` is the input of the panels the plugin mounted: `panel` is the id `mount_widget_panel`/`mount_sidebar_section` returned, `event` says what happened, `widget` is the key of the widget it is about, `index` is the 1-based row, `checked`/`value`/`cursor_byte`/`included` carry the state after the event, `focus_key` is the widget that holds the panel focus afterwards, and the tree drag events add `target_key` (the row under the pointer) and `target_index`. The mouse events add the frame cell `x`/`y`, the `button` and the `wheel` delta. A text field raises `change` on every edit (with `value`,`cursor_byte` and, while its completion list is open, `completion_request`/`completion_accept`/`completion_dismiss`); a dropdown, number or radio raises `change` with `value`/`index`; a tree raises `expand` with `checked` = expanded. See [api-ui.md](api-ui.md#widget-panels-and-sidebar-sections).
 
 ## before_file_save and the veto
 

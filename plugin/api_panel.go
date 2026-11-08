@@ -103,7 +103,12 @@ func installPanel(e *apiEnv) {
 			L.ArgError(2, "action table expected")
 		}
 		o := bufTableOpts{t: t}
-		a := pluginapi.WidgetAction{Kind: optString(&o, "kind"), Delta: o.integer("delta", 0)}
+		a := pluginapi.WidgetAction{
+			Kind:  optString(&o, "kind"),
+			Delta: o.integer("delta", 0),
+			Key:   clipText(optString(&o, "key"), maxPanelKey),
+			Text:  clipText(optString(&o, "text"), maxPanelString),
+		}
 		if o.err != "" {
 			L.ArgError(2, o.err)
 		}
@@ -123,6 +128,65 @@ func installPanel(e *apiEnv) {
 			Checked:   o.boolean("checked", false),
 			Index:     o.integer("index", 1) - 1, // 1-based in Lua
 			Value:     clipText(optString(&o, "value"), maxPanelString),
+			FocusKey:  clipText(optString(&o, "focus_key"), maxPanelKey),
+			SourceKey: clipText(optString(&o, "source_key"), maxPanelKey),
+			AfterKey:  clipText(optString(&o, "after_key"), maxPanelKey),
+			Label:     clipText(optString(&o, "label"), maxPanelString),
+			Commit:    o.boolean("commit", false),
+			Number:    floatNumber(&o, "number", 0),
+		}
+		if c := o.get("cursor_byte"); c != lua.LNil {
+			if n, ok := c.(lua.LNumber); ok {
+				mu.CursorByte, mu.HasCursor = clampInt(float64(n)), true
+			} else {
+				o.fail("option 'cursor_byte' must be a number")
+			}
+		}
+		if v := o.get("after_key"); v != lua.LNil {
+			mu.HasAfter = true
+		}
+		for _, lit := range []struct {
+			key string
+			dst *[]string
+		}{{"included", &mu.Included}, {"keys", &mu.Keys}, {"item_keys", &mu.ItemKeys}} {
+			vals, err := stringArrayField(t, lit.key)
+			if err != nil {
+				return bufRet(L, err)
+			}
+			*lit.dst = vals
+		}
+		if raw := t.RawGetString("items"); raw != lua.LNil {
+			list, ok := raw.(*lua.LTable)
+			if !ok {
+				return bufRet(L, invalidErr("mutation 'items' must be a table"))
+			}
+			items, err := widgetItemsFromLuaTable(list)
+			if err != nil {
+				return bufRet(L, err)
+			}
+			mu.Items = items
+		}
+		if raw := t.RawGetString("new_nodes"); raw != lua.LNil {
+			list, ok := raw.(*lua.LTable)
+			if !ok {
+				return bufRet(L, invalidErr("mutation 'new_nodes' must be a table"))
+			}
+			nodes, err := widgetNodesFromLuaTable(list)
+			if err != nil {
+				return bufRet(L, err)
+			}
+			mu.NewNodes = nodes
+		}
+		if raw := t.RawGetString("entries"); raw != lua.LNil {
+			list, ok := raw.(*lua.LTable)
+			if !ok {
+				return bufRet(L, invalidErr("mutation 'entries' must be a table"))
+			}
+			runs, err := widgetRunsFromLuaTable(list)
+			if err != nil {
+				return bufRet(L, err)
+			}
+			mu.Entries = runs
 		}
 		if o.err != "" {
 			L.ArgError(2, o.err)
@@ -155,6 +219,11 @@ func panelMountFromLua(L *lua.LState, specIdx, optsIdx int, sidebar bool) (plugi
 	m.Title = clipText(optString(&o, "title"), maxPanelTitle)
 	m.Focus = o.boolean("focus", false)
 	m.WidthPct, m.HeightPct = o.integer("width", 0), o.integer("height", 0)
+	m.Page = o.boolean("page", false)
+	if v := o.get("auto_focus_first"); v != lua.LNil {
+		on := o.boolean("auto_focus_first", true)
+		m.AutoFocusFirst = &on
+	}
 	if sidebar {
 		m.Placement = pluginapi.PlacementSidebar
 		m.Rows = o.integer("rows", 0)
@@ -241,6 +310,16 @@ var widgetKinds = map[string]pluginapi.WidgetKind{
 	"toggle":  pluginapi.WidgetToggle,
 	"list":    pluginapi.WidgetList,
 	"tree":    pluginapi.WidgetTree,
+
+	"dropdown":       pluginapi.WidgetDropdown,
+	"number":         pluginapi.WidgetNumber,
+	"radio":          pluginapi.WidgetRadio,
+	"dualList":       pluginapi.WidgetDualList,
+	"labeledSection": pluginapi.WidgetLabeledSection,
+	"component":      pluginapi.WidgetComponent,
+	"overlay":        pluginapi.WidgetOverlay,
+	"popup":          pluginapi.WidgetPopup,
+	"windowEmbed":    pluginapi.WidgetWindowEmbed,
 }
 
 // widgetFromLua reads one widget node. n counts the nodes of the whole spec.
@@ -287,11 +366,38 @@ func widgetFromLua(v lua.LValue, depth int, n *int) (pluginapi.Widget, error) {
 	if intent, ok := o.str("intent"); ok {
 		w.Intent = intent
 	}
+	w.Placeholder = clipText(optString(&o, "placeholder"), maxPanelString)
+	w.FieldWidth = o.integer("field_width", 0)
+	w.FullWidth = o.boolean("full_width", false)
+	w.Rows = o.integer("rows", 0)
+	w.MinRows = o.integer("min_rows", 0)
+	w.MaxRows = o.integer("max_rows", 0)
+	w.ReadOnly = o.boolean("read_only", false)
+	w.Markdown = o.boolean("markdown", false)
+	w.Combo = o.boolean("combo", false)
+	w.Integer = o.boolean("integer", false)
+	w.Percent = o.boolean("percent", false)
+	w.Open = o.boolean("open", false)
+	w.ScrollOffset = o.integer("scroll_offset", 0)
+	w.Number = floatNumber(&o, "value", 0)
+	w.Min = floatNumber(&o, "min", 0)
+	w.Max = floatNumber(&o, "max", 0)
+	w.Step = floatNumber(&o, "step", 0)
+	w.Title = clipText(optString(&o, "title"), maxPanelString)
+	w.WidthPct = o.integer("width_pct", 0)
+	w.WidthCols = o.integer("width_cols", 0)
+	if win := o.integer("window", 0); win > 0 {
+		w.Window = pluginapi.WinID(win)
+	}
 	if o.err != "" {
 		return w, invalidErr("%s", o.err)
 	}
+	if err := widgetListFields(t, &w); err != nil {
+		return w, err
+	}
 	switch kind {
-	case pluginapi.WidgetRow, pluginapi.WidgetCol:
+	case pluginapi.WidgetRow, pluginapi.WidgetCol, pluginapi.WidgetLabeledSection,
+		pluginapi.WidgetComponent, pluginapi.WidgetOverlay, pluginapi.WidgetPopup:
 		children, err := widgetChildrenFromLua(t)
 		if err != nil {
 			return w, err
@@ -334,7 +440,11 @@ func widgetTextFromLua(t *lua.LTable, w *pluginapi.Widget) error {
 	o := bufTableOpts{t: t}
 	text, ok := o.str("text")
 	if !ok {
-		text, _ = o.str("value")
+		// "value" is the text field's content; the number widget's value is a number and is
+		// read by the widget parser itself, so only a string is taken here.
+		if v, isStr := o.get("value").(lua.LString); isStr {
+			text = string(v)
+		}
 	}
 	if len(text) > maxPanelString {
 		return pluginapi.Errf(pluginapi.CodeLimit, "widget text is longer than %d bytes", maxPanelString)
@@ -436,6 +546,11 @@ func widgetItemsFromLua(t *lua.LTable) ([]pluginapi.WidgetItem, error) {
 	if !ok {
 		return nil, invalidErr("items must be a table, got %s", vt.Type())
 	}
+	return widgetItemsFromLuaTable(list)
+}
+
+// widgetItemsFromLuaTable reads a list's item array directly.
+func widgetItemsFromLuaTable(list *lua.LTable) ([]pluginapi.WidgetItem, error) {
 	if list.Len() > maxPanelItems {
 		return nil, pluginapi.Errf(pluginapi.CodeLimit, "a list takes at most %d items", maxPanelItems)
 	}
@@ -479,6 +594,11 @@ func widgetNodesFromLua(t *lua.LTable) ([]pluginapi.WidgetNode, error) {
 	if !ok {
 		return nil, invalidErr("nodes must be a table, got %s", vt.Type())
 	}
+	return widgetNodesFromLuaTable(list)
+}
+
+// widgetNodesFromLuaTable reads a tree's node array directly.
+func widgetNodesFromLuaTable(list *lua.LTable) ([]pluginapi.WidgetNode, error) {
 	if list.Len() > maxPanelNodes {
 		return nil, pluginapi.Errf(pluginapi.CodeLimit, "a tree takes at most %d nodes", maxPanelNodes)
 	}
@@ -490,13 +610,28 @@ func widgetNodesFromLua(t *lua.LTable) ([]pluginapi.WidgetNode, error) {
 		}
 		o := bufTableOpts{t: x}
 		nd := pluginapi.WidgetNode{
-			Text:     optString(&o, "text"),
-			Detail:   optString(&o, "detail"),
-			Key:      clipText(optString(&o, "key"), maxPanelKey),
-			Depth:    o.integer("depth", 0),
-			Checked:  o.boolean("checked", false),
-			Expanded: o.boolean("expanded", false),
-			Leaf:     o.boolean("leaf", false),
+			Text:      optString(&o, "text"),
+			Detail:    optString(&o, "detail"),
+			Key:       clipText(optString(&o, "key"), maxPanelKey),
+			Depth:     o.integer("depth", 0),
+			Checked:   o.boolean("checked", false),
+			Expanded:  o.boolean("expanded", false),
+			Leaf:      o.boolean("leaf", false),
+			Draggable: o.boolean("draggable", false),
+			Flush:     o.boolean("flush", false),
+		}
+		if ev := x.RawGetString("extra_lines"); ev != lua.LNil {
+			list, ok := ev.(*lua.LTable)
+			if !ok {
+				return nil, invalidErr("node %d: extra_lines must be a table", i)
+			}
+			for j := 1; j <= list.Len() && j <= maxPanelItems; j++ {
+				run, err := widgetRunFromLua(list.RawGetInt(j))
+				if err != nil {
+					return nil, invalidErr("node %d: extra_lines: %s", i, err)
+				}
+				nd.ExtraLines = append(nd.ExtraLines, run)
+			}
 		}
 		if o.err != "" {
 			return nil, invalidErr("node %d: %s", i, o.err)
@@ -505,6 +640,73 @@ func widgetNodesFromLua(t *lua.LTable) ([]pluginapi.WidgetNode, error) {
 			return nil, pluginapi.Errf(pluginapi.CodeInvalid, "node %d is malformed", i)
 		}
 		out = append(out, nd)
+	}
+	return out, nil
+}
+
+// widgetListFields reads the options/completions/included lists and the extra node fields.
+func widgetListFields(t *lua.LTable, w *pluginapi.Widget) error {
+	var err error
+	if w.Options, err = stringArrayField(t, "options"); err != nil {
+		return err
+	}
+	if w.Completions, err = stringArrayField(t, "completions"); err != nil {
+		return err
+	}
+	if w.Included, err = stringArrayField(t, "included"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// stringArrayField reads an optional array of strings, clipped to the text cap.
+func stringArrayField(t *lua.LTable, name string) ([]string, error) {
+	v := t.RawGetString(name)
+	if v == lua.LNil {
+		return nil, nil
+	}
+	list, ok := v.(*lua.LTable)
+	if !ok {
+		return nil, invalidErr("option %q: table expected", name)
+	}
+	if list.Len() > maxPanelItems {
+		return nil, pluginapi.Errf(pluginapi.CodeLimit, "option %q takes at most %d values", name, maxPanelItems)
+	}
+	out := make([]string, 0, list.Len())
+	for i := 1; i <= list.Len(); i++ {
+		s, ok := list.RawGetInt(i).(lua.LString)
+		if !ok {
+			return nil, invalidErr("option %q: strings expected", name)
+		}
+		out = append(out, clipText(string(s), maxPanelString))
+	}
+	return out, nil
+}
+
+// floatNumber reads an optional number option.
+func floatNumber(o *bufTableOpts, key string, def float64) float64 {
+	switch v := o.get(key).(type) {
+	case *lua.LNilType:
+		return def
+	case lua.LNumber:
+		return float64(v)
+	}
+	o.fail("option '" + key + "' must be a number")
+	return def
+}
+
+// widgetRunsFromLuaTable reads an array of styled runs.
+func widgetRunsFromLuaTable(list *lua.LTable) ([]pluginapi.WidgetRun, error) {
+	if list.Len() > maxPanelItems {
+		return nil, pluginapi.Errf(pluginapi.CodeLimit, "at most %d entries", maxPanelItems)
+	}
+	out := make([]pluginapi.WidgetRun, 0, list.Len())
+	for i := 1; i <= list.Len(); i++ {
+		run, err := widgetRunFromLua(list.RawGetInt(i))
+		if err != nil {
+			return nil, invalidErr("entry %d: %s", i, err)
+		}
+		out = append(out, run)
 	}
 	return out, nil
 }

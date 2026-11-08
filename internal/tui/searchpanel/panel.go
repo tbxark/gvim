@@ -108,8 +108,11 @@ type Options struct {
 	History  []string
 	Searcher Searcher
 	Grepper  GitGrepper
-	Styles   style.Styles
-	Theme    theme.Theme
+	// Previewer reads the selected match's context for the preview column. Nil hides
+	// the column.
+	Previewer Previewer
+	Styles    style.Styles
+	Theme     theme.Theme
 }
 
 // Panel is the project-wide Search and Replace sheet, or the Git Grep sheet when Git is
@@ -123,6 +126,10 @@ type Panel struct {
 
 	searcher Searcher
 	grepper  GitGrepper
+
+	// previewer reads the selected match's context; preview is the column's state.
+	previewer Previewer
+	preview   previewState
 
 	// openFiles and current are the snapshots the searches see for unsaved text. Their
 	// source is the root, which refreshes them after a replacement.
@@ -182,6 +189,23 @@ type gitDoneMsg struct {
 	err    error
 }
 
+// previewState is the preview column's last target and its fetched context.
+type previewState struct {
+	seq     int
+	req     PreviewRequest
+	hasReq  bool
+	loading bool
+	result  PreviewResult
+	err     string
+}
+
+// previewDoneMsg brings a preview back to the update loop.
+type previewDoneMsg struct {
+	seq    int
+	result PreviewResult
+	err    error
+}
+
 // New returns the panel.
 func New(o Options) *Panel {
 	p := &Panel{
@@ -192,6 +216,7 @@ func New(o Options) *Panel {
 		git:       o.Git,
 		searcher:  o.Searcher,
 		grepper:   o.Grepper,
+		previewer: o.Previewer,
 		openFiles: o.OpenFiles,
 		current:   o.Current,
 		modes:     o.Modes,
@@ -259,9 +284,21 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		return p, p.searchCmd(msg.seq)
 	case searchDoneMsg:
 		p.applySearch(msg)
-		return p, nil
+		return p, p.previewCmd()
 	case gitDoneMsg:
 		p.applyGit(msg)
+		return p, p.previewCmd()
+	case previewDoneMsg:
+		if msg.seq == p.preview.seq {
+			p.preview.loading = false
+			if msg.err != nil {
+				p.preview.err = msg.err.Error()
+				p.preview.result = PreviewResult{}
+			} else {
+				p.preview.result = msg.result
+				p.preview.err = msg.result.Err
+			}
+		}
 		return p, nil
 	}
 	return p, nil
@@ -277,10 +314,10 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 		return nil, nil
 	case "tab":
 		p.cycleFocus(1)
-		return p, nil
+		return p, p.previewCmd()
 	case "shift+tab":
 		p.cycleFocus(-1)
-		return p, nil
+		return p, p.previewCmd()
 	case "alt+c":
 		p.modes.CaseSensitive = !p.modes.CaseSensitive
 		return p, p.requery()
@@ -315,7 +352,12 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 		return p, p.walkHistory(name == "up")
 	}
 	if p.focus == focusResults {
-		return p, p.resultsKey(name)
+		// A key that runs a command (Enter, Shift+Enter) keeps its command; the others
+		// move or fold, so the preview follows the new selection.
+		if cmd := p.resultsKey(name); cmd != nil {
+			return p, cmd
+		}
+		return p, p.previewCmd()
 	}
 	// A field takes the key. A change of the search text starts a new search after the
 	// debounce; a change of the replacement text changes nothing until it is applied.
@@ -450,6 +492,113 @@ func (p *Panel) walkHistory(up bool) tea.Cmd {
 	}
 	p.query.SetValue(p.history[p.histIndex])
 	return p.requery()
+}
+
+// selectedMatch returns the match the preview follows: the selected match row's match,
+// or the first match of the selected file row.
+func (p *Panel) selectedMatch() (Match, FileMatches, bool) {
+	if len(p.rows) == 0 {
+		return Match{}, FileMatches{}, false
+	}
+	r := p.rows[clamp(p.selected, 0, len(p.rows)-1)]
+	if r.file < 0 || r.file >= len(p.fileMatches) {
+		return Match{}, FileMatches{}, false
+	}
+	f := p.fileMatches[r.file]
+	if len(f.Matches) == 0 {
+		return Match{}, FileMatches{}, false
+	}
+	if r.kind == rowFile {
+		return f.Matches[0], f, true
+	}
+	if r.match < 0 || r.match >= len(f.Matches) {
+		return Match{}, FileMatches{}, false
+	}
+	return f.Matches[r.match], f, true
+}
+
+// previewTarget builds the preview request of the selected row. The open buffer's
+// snapshot text travels with it, so an unsaved file previews without a disk read.
+func (p *Panel) previewTarget() (PreviewRequest, bool) {
+	if p.previewer == nil {
+		return PreviewRequest{}, false
+	}
+	m, f, ok := p.selectedMatch()
+	if !ok {
+		return PreviewRequest{}, false
+	}
+	endLine, endCol := m.EndLine, m.EndCol
+	if !m.MultiLine() || endLine <= 0 {
+		endLine, endCol = m.Line, m.Col+max(m.Len, 1)
+	}
+	req := PreviewRequest{
+		Path: f.Path, Name: f.Name, Dirty: f.Dirty,
+		Line: m.Line, Col: m.Col, EndLine: endLine, EndCol: endCol,
+		Lines: p.previewContextLines(),
+	}
+	for _, s := range p.openFiles {
+		if s.Path != "" && s.Path == f.Path {
+			req.Text = s.Text
+			break
+		}
+	}
+	return req, true
+}
+
+// previewContextLines is the most context lines the preview column can show: the result
+// rows minus the header row.
+func (p *Panel) previewContextLines() int {
+	if p.width > 0 && p.height > 0 {
+		if geo := layoutFor(p.width, p.height, p.git); geo.results > 1 {
+			return geo.results - 1
+		}
+	}
+	return 18
+}
+
+// wantsPreview reports whether the preview column should be visible: the result rows
+// have the focus, there are rows, and a previewer is wired.
+func (p *Panel) wantsPreview() bool {
+	return p.previewer != nil && p.focus == focusResults && len(p.rows) > 0
+}
+
+// samePreview reports whether two preview requests name the same context. The line
+// capacity is not part of the identity: a bigger column can paint more of the lines the
+// same result already has, and a smaller one shows fewer.
+func samePreview(a, b PreviewRequest) bool {
+	a.Lines, b.Lines = 0, 0
+	return a == b
+}
+
+// previewCmd fetches the selected row's context unless the column already shows it. It
+// is the only path that reads a file, and it runs as a tea.Cmd.
+func (p *Panel) previewCmd() tea.Cmd {
+	req, ok := p.previewTarget()
+	if !ok || !p.wantsPreview() {
+		if p.preview.hasReq {
+			p.preview.seq++
+			p.preview.hasReq = false
+			p.preview.loading = false
+			p.preview.result = PreviewResult{}
+			p.preview.err = ""
+		}
+		return nil
+	}
+	if p.preview.hasReq && samePreview(p.preview.req, req) && (p.preview.loading || p.preview.err == "") {
+		return nil
+	}
+	rev := p.previewer
+	p.preview.seq++
+	seq := p.preview.seq
+	p.preview.req = req
+	p.preview.hasReq = true
+	p.preview.loading = true
+	p.preview.err = ""
+	p.preview.result = PreviewResult{}
+	return func() tea.Msg {
+		res, err := rev.Preview(req)
+		return previewDoneMsg{seq: seq, result: res, err: err}
+	}
 }
 
 // field returns the focused text field.

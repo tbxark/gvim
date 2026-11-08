@@ -666,6 +666,7 @@ func (m *Model) promptOpen() bool {
 // view state. Nothing else of the pane changes.
 func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
 	s := docViewOf(doc)
+	p.PageView = m.pageViewFor(doc)
 	// A large document wraps as the setting says: a line of more than editorpane.LongLineRunes
 	// is laid out in segments, a few of them at a time, so its length costs nothing.
 	p.Wrap = editor.OverrideOr(s.LineWrap, m.view.lineWrap)
@@ -693,6 +694,64 @@ func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
 		p.TabSize = s.TabSize
 	}
 	return m.viewRender(p, doc, s)
+}
+
+// pageViewFor returns the page view of doc. It is on when the buffer's override
+// says so, or else the language's page_view (which the config layers resolve).
+// The measure is the buffer's page width, else the language's, else
+// editor.page_width; an unset or too wide width fills the text area. A
+// large-file document falls back to the normal pane, and a non-Markdown document
+// gets the margins without the inline compose.
+func (m *Model) pageViewFor(doc Document) editorpane.PageView {
+	if doc == nil {
+		return editorpane.PageView{}
+	}
+	s := docViewOf(doc)
+	on, ok := s.PageViewOverride()
+	if !ok {
+		on = m.docLanguageSettings(doc).PageView
+	}
+	if !on {
+		return editorpane.PageView{}
+	}
+	if large, ok := doc.(LargeDoc); ok && large.Large() {
+		return editorpane.PageView{}
+	}
+	measure := s.PageWidth
+	if measure <= 0 {
+		measure = m.docLanguageSettings(doc).PageWidth
+	}
+	return editorpane.PageView{On: true, Measure: measure, Markdown: m.markdownDoc(doc)}
+}
+
+// pageViewActive reports whether the active document is in the page view. The
+// virtual space and the virtual lines are off there: the page wraps its text, so
+// there is no empty region past a line.
+func (m *Model) pageViewActive() bool {
+	doc := m.ed.Active()
+	return doc != nil && m.pageViewFor(doc).On
+}
+
+// markdownDoc reports whether doc gets the Markdown compose: its path has a
+// Markdown suffix, or the detected language is markdown.
+func (m *Model) markdownDoc(doc Document) bool {
+	if p, ok := doc.(pathEditor); ok {
+		switch path := strings.ToLower(p.FilePath()); {
+		case strings.HasSuffix(path, ".md"), strings.HasSuffix(path, ".markdown"), strings.HasSuffix(path, ".mdx"):
+			return true
+		}
+	}
+	if l, ok := doc.(interface{ Language() string }); ok {
+		switch strings.ToLower(l.Language()) {
+		case "markdown", "multimarkdown", "mdx":
+			return true
+		}
+	}
+	switch strings.ToLower(m.languageFor(doc.Name())) {
+	case "markdown", "multimarkdown", "mdx":
+		return true
+	}
+	return false
 }
 
 // caretShape is the caret shape of the pane for the cursor style.

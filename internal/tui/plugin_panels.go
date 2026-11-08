@@ -133,11 +133,13 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 	}
 	o.Title = cleanText(o.Title)
 	opts := pluginpanel.Options{
-		Chrome:   m.styles.Overlay,
-		Resolve:  m.widgetColor,
-		Title:    o.Title,
-		Framed:   o.Placement == pluginapi.PlacementFloat,
-		Closable: o.Closable,
+		Chrome:         m.styles.Overlay,
+		Resolve:        m.widgetColor,
+		Title:          o.Title,
+		Framed:         o.Placement == pluginapi.PlacementFloat,
+		Closable:       o.Closable,
+		Page:           o.Page,
+		AutoFocusFirst: o.AutoFocusFirst,
 	}
 	if old := m.plug.panels.get(id); old != nil {
 		old.owner, old.mount = plugin, o
@@ -205,7 +207,7 @@ func (h *pluginHost) WidgetCommand(id pluginapi.PanelID, a pluginapi.WidgetActio
 		return pluginapi.Errf(pluginapi.CodeClosed, "panel %d is not mounted", id)
 	}
 	switch a.Kind {
-	case "focusAdvance", "activate", "selectMove":
+	case "focusAdvance", "activate", "selectMove", "textInputKey", "textInputChar", "key":
 	default:
 		return pluginapi.Errf(pluginapi.CodeInvalid, "unknown widget action %q", a.Kind)
 	}
@@ -223,7 +225,9 @@ func (h *pluginHost) WidgetMutate(id pluginapi.PanelID, mu pluginapi.WidgetMutat
 		return pluginapi.Errf(pluginapi.CodeClosed, "panel %d is not mounted", id)
 	}
 	switch mu.Kind {
-	case "setChecked", "setSelectedIndex", "setValue":
+	case "setChecked", "setSelectedIndex", "setValue", "setNumber", "setDropdown", "setCompletions",
+		"setDualIncluded", "setItems", "setExpandedKeys", "setCheckedKeys", "appendTreeNodes",
+		"setRawEntries", "setFocusKey", "previewTreeMove", "endTreeMovePreview":
 	default:
 		return pluginapi.Errf(pluginapi.CodeInvalid, "unknown widget mutation %q", mu.Kind)
 	}
@@ -311,8 +315,13 @@ func (m *Model) emitWidgetResult(id pluginapi.PanelID, res pluginpanel.Result) {
 		m.unmountPanel(id)
 		return
 	}
+	focusKey := ""
+	if mp := m.plug.panels.get(id); mp != nil {
+		focusKey = mp.panel.FocusedKey()
+	}
 	for _, ev := range res.Events {
 		ev.Panel = uint64(id)
+		ev.FocusKey = focusKey
 		m.plugEmitWidget(ev)
 	}
 }
@@ -330,11 +339,26 @@ func (m *Model) plugEmitWidget(ev pluginapi.WidgetEvent) {
 	if ev.Index >= 0 {
 		data["index"] = ev.Index + 1
 	}
-	if ev.Event == "toggle" || ev.Event == "select" && ev.Value != "" {
+	if ev.Event == "toggle" || ev.Event == "expand" {
 		data["checked"] = ev.Checked
 	}
 	if ev.Value != "" {
 		data["value"] = ev.Value
+	}
+	if ev.CursorByte >= 0 {
+		data["cursor_byte"] = ev.CursorByte
+	}
+	if ev.Included != nil {
+		data["included"] = ev.Included
+	}
+	if ev.FocusKey != "" {
+		data["focus_key"] = ev.FocusKey
+	}
+	if ev.TargetKey != "" || ev.Event == "drag" || ev.Event == "drop" {
+		data["target_key"] = ev.TargetKey
+	}
+	if ev.TargetIndex >= 0 {
+		data["target_index"] = ev.TargetIndex + 1
 	}
 	if len(ev.Event) > 6 && ev.Event[:6] == "mouse_" {
 		data["x"], data["y"] = ev.X, ev.Y
@@ -533,6 +557,7 @@ func panelKeyOf(k tea.Key) pluginpanel.Key {
 // rectangle or a plugin sidebar section. It reports whether it took the message.
 func (m *Model) pluginPanelMouse(msg tea.Msg) (tea.Cmd, bool) {
 	var mo tea.Mouse
+	release := false
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
 		mo = tea.Mouse(msg)
@@ -540,6 +565,8 @@ func (m *Model) pluginPanelMouse(msg tea.Msg) (tea.Cmd, bool) {
 		mo = tea.Mouse(msg)
 	case tea.MouseWheelMsg:
 		mo = tea.Mouse(msg)
+	case tea.MouseReleaseMsg:
+		mo, release = tea.Mouse(msg), true
 	default:
 		return nil, false
 	}
@@ -550,10 +577,10 @@ func (m *Model) pluginPanelMouse(msg tea.Msg) (tea.Cmd, bool) {
 		if mp == nil || mp.mount.Placement == pluginapi.PlacementSidebar {
 			continue
 		}
-		if !mp.rect.Contains(mo.X, mo.Y) {
+		if !mp.rect.Contains(mo.X, mo.Y) && !mp.panel.Dragging() {
 			continue
 		}
-		return m.panelMouseInput(mp, mo, false), true
+		return m.panelMouseInput(mp, mo, false, release), true
 	}
 	// A plugin sidebar section: its header folds it and focuses it, its close button
 	// unmounts it, and its body is the panel.
@@ -587,18 +614,18 @@ func (m *Model) pluginPanelMouse(msg tea.Msg) (tea.Cmd, bool) {
 		if _, isClick := msg.(tea.MouseClickMsg); isClick {
 			m.focusPluginSection(mp)
 		}
-		return m.panelMouseInput(mp, mo, true), true
+		return m.panelMouseInput(mp, mo, true, release), true
 	}
 	return nil, false
 }
 
 // panelMouseInput hands a mouse message to one panel. sectional says the panel is a sidebar
 // section, whose body coordinates are the panel's own rectangle.
-func (m *Model) panelMouseInput(mp *mountedPanel, mo tea.Mouse, sectional bool) tea.Cmd {
-	if !sectional && !mp.rect.Contains(mo.X, mo.Y) {
+func (m *Model) panelMouseInput(mp *mountedPanel, mo tea.Mouse, sectional, release bool) tea.Cmd {
+	if !sectional && !mp.rect.Contains(mo.X, mo.Y) && !mp.panel.Dragging() {
 		return nil
 	}
-	in := pluginpanel.Mouse{X: mo.X, Y: mo.Y}
+	in := pluginpanel.Mouse{X: mo.X, Y: mo.Y, Release: release}
 	switch mo.Button {
 	case tea.MouseLeft:
 		in.Button = "left"

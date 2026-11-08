@@ -250,6 +250,37 @@ func installBuf(e *apiEnv) {
 		L.Push(p.toLua(host().FindBuffer(L.CheckString(1))))
 		return 1
 	})
+	// gvim.buf.text_properties_at_cursor(buf?) -> map | nil: the properties of the entry
+	// under the buffer's primary caret (the buffer defaults to the current one), the form
+	// Fresh's getTextPropertiesAtCursor returns.
+	e.set(area, "text_properties_at_cursor", func(L *lua.LState) int {
+		id := host().ActiveBuffer()
+		if L.Get(1) != lua.LNil {
+			id = pluginapi.BufferID(checkID(L, 1, kindBuffer))
+		}
+		if id == 0 {
+			L.Push(lua.LNil)
+			return 1
+		}
+		carets, err := host().Cursors(id)
+		if err != nil {
+			return bufRet(L, err)
+		}
+		var pos pluginapi.Pos
+		if len(carets) > 0 {
+			pos = carets[0].Pos
+		}
+		props, err := host().PropsAt(id, pos)
+		if err != nil {
+			return bufRet(L, err)
+		}
+		if props == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+		L.Push(p.toLua(props))
+		return 1
+	})
 	e.set(area, "new", func(L *lua.LState) int {
 		h := host()
 		if err := h.Do("new", nil, 1); err != nil {

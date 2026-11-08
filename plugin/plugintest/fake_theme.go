@@ -14,6 +14,19 @@ type FakeTheme struct {
 	Overrides map[string]string
 	// Err, when set, is returned by SetThemeOverrides and keeps the map.
 	Err error
+	// Saved are the theme files SaveThemeFile wrote, in order.
+	Saved []FakeThemeFile
+	// Data is theme-file JSON by ref for ThemeData reads of unsaved refs.
+	Data map[string]string
+	// SaveErr, when set, is returned by SaveThemeFile.
+	SaveErr error
+	// UserDir is ThemeUserDir's answer.
+	UserDir string
+	// Schema is ThemeSchema's answer.
+	Schema pluginapi.ThemeSchema
+	// Reloads counts ReloadThemes calls and Applied is the last ref applied.
+	Reloads int
+	Applied string
 }
 
 // FakeTheme returns the theme state of the fake host.
@@ -65,3 +78,96 @@ func (f *FakeHost) SetThemeOverrides(overrides map[string]string) error {
 }
 
 var _ pluginapi.Host = (*FakeHost)(nil)
+
+// FakeThemeFile is one saved user theme of the fake host.
+type FakeThemeFile struct {
+	Name string
+	Data string
+	Ref  string
+}
+
+// ThemeFiles lists the fake's built-in and saved themes.
+func (f *FakeHost) ThemeFiles() []pluginapi.ThemeFileInfo {
+	f.rec("ThemeFiles")
+	t := f.FakeTheme()
+	out := make([]pluginapi.ThemeFileInfo, 0, len(t.Themes)+len(t.Saved))
+	for _, name := range t.Themes {
+		out = append(out, pluginapi.ThemeFileInfo{Name: name, Ref: name, Builtin: true})
+	}
+	for _, saved := range t.Saved {
+		out = append(out, pluginapi.ThemeFileInfo{Name: saved.Name, Ref: saved.Ref})
+	}
+	return out
+}
+
+// ThemeSchema returns the fake theme schema.
+func (f *FakeHost) ThemeSchema() pluginapi.ThemeSchema {
+	f.rec("ThemeSchema")
+	return f.FakeTheme().Schema
+}
+
+// ThemeUserDir returns the fake user theme dir.
+func (f *FakeHost) ThemeUserDir() string {
+	f.rec("ThemeUserDir")
+	return f.FakeTheme().UserDir
+}
+
+// ThemeFileExists reports whether a saved theme has the ref.
+func (f *FakeHost) ThemeFileExists(ref string) bool {
+	f.rec("ThemeFileExists", ref)
+	for _, saved := range f.FakeTheme().Saved {
+		if saved.Ref == ref {
+			return true
+		}
+	}
+	return false
+}
+
+// ThemeData returns the saved theme's data, or the fake data of a built-in.
+func (f *FakeHost) ThemeData(ref string) (string, error) {
+	f.rec("ThemeData", ref)
+	t := f.FakeTheme()
+	for _, saved := range t.Saved {
+		if saved.Ref == ref {
+			return saved.Data, nil
+		}
+	}
+	if data, ok := t.Data[ref]; ok {
+		return data, nil
+	}
+	return "", pluginapi.Errf(pluginapi.CodeNotFound, "theme %q is not found", ref)
+}
+
+// SaveThemeFile records a saved theme.
+func (f *FakeHost) SaveThemeFile(name, data string) (string, error) {
+	f.rec("SaveThemeFile", name, data)
+	t := f.FakeTheme()
+	if t.SaveErr != nil {
+		return "", t.SaveErr
+	}
+	ref := name + ".json"
+	t.Saved = append(t.Saved, FakeThemeFile{Name: name, Data: data, Ref: ref})
+	return ref, nil
+}
+
+// DeleteThemeFile forgets a saved theme.
+func (f *FakeHost) DeleteThemeFile(ref string) error {
+	f.rec("DeleteThemeFile", ref)
+	t := f.FakeTheme()
+	for i, saved := range t.Saved {
+		if saved.Ref == ref {
+			t.Saved = append(t.Saved[:i:i], t.Saved[i+1:]...)
+			return nil
+		}
+	}
+	return pluginapi.Errf(pluginapi.CodeNotFound, "theme %q is not found", ref)
+}
+
+// ReloadThemes records the rescan.
+func (f *FakeHost) ReloadThemes(ref string) error {
+	f.rec("ReloadThemes", ref)
+	t := f.FakeTheme()
+	t.Reloads++
+	t.Applied = ref
+	return nil
+}

@@ -46,6 +46,16 @@ type Document struct {
 	// the fold memo. See SetExternalFolds.
 	externalFolds []fold.Range
 	externalRev   uint64
+	// outlineFolds are the structural fold ranges an outline source (the Contents
+	// sidebar section) gave, and outlineVer is the text version they were computed
+	// from. Folds merges them only while the text still has that version, so an
+	// edit drops them until the source publishes again: a stale range can never
+	// fold lines it was not computed for. outlineRev counts the sets, so a publish
+	// invalidates the fold memo. See SetOutlineFolds.
+	outlineFolds []fold.Range
+	outlineVer   uint64
+	outlineRev   uint64
+	outlineSet   bool
 	// changesMemo is the change marks computed last, see MemoChanges.
 	ChangesMemo changesMemo
 	// valueMemo holds what MemoValue kept for the current text.

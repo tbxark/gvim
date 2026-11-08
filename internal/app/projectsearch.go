@@ -88,10 +88,12 @@ func (s *projectSearch) ProjectSearch(req searchpanel.SearchRequest) (searchpane
 		fm := searchpanel.FileMatches{Path: path, Name: name, Hash: hashText(text), Dirty: dirty}
 		for _, m := range matches {
 			fm.Matches = append(fm.Matches, searchpanel.Match{
-				Line: m.Start.Line + 1,
-				Col:  m.Start.Col + 1,
-				Len:  matchRunes(b, m),
-				Text: strings.TrimRight(b.Line(m.Start.Line), "\r"),
+				Line:    m.Start.Line + 1,
+				Col:     m.Start.Col + 1,
+				Len:     matchRunes(b, m),
+				Text:    strings.TrimRight(b.Line(m.Start.Line), "\r"),
+				EndLine: m.End.Line + 1,
+				EndCol:  m.End.Col + 1,
 			})
 			if total+len(fm.Matches) >= limit {
 				capped = true
@@ -228,6 +230,62 @@ func (s *projectSearch) ProjectReplace(req searchpanel.ReplaceRequest) (searchpa
 		}
 	}
 	return out, nil
+}
+
+// Preview returns a window of a file's lines around one match, for the search panel's
+// preview column: the request's Text when the panel already holds an open buffer, else
+// a bounded read of the file with the same large/binary/non-UTF-8 caps as a search. The
+// window is centred on the match and shifted to reach the match's end when it spans
+// lines.
+func (s *projectSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.PreviewResult, error) {
+	var out searchpanel.PreviewResult
+	if req.Lines <= 0 {
+		return out, nil
+	}
+	text := req.Text
+	if text == "" {
+		var reason string
+		text, reason = readSearchableFile(req.Path, s.skipFrom)
+		if reason != "" {
+			out.Err = reason
+			return out, nil
+		}
+	}
+	lines := strings.Split(text, "\n")
+	if n := len(lines); n > 1 && lines[n-1] == "" {
+		// A trailing line break does not add a line to preview.
+		lines = lines[:n-1]
+	}
+	start := req.Line - 1
+	start = clampInt(start, 0, max(len(lines)-1, 0))
+	end := req.EndLine - 1
+	if end < start {
+		end = start
+	}
+	// Centre the window on the match; a match longer than the window starts at its
+	// first line and so truncates (the bounded column cannot show it whole).
+	span := end - start + 1
+	first := start
+	if span < req.Lines {
+		first = start - (req.Lines-span)/2
+	}
+	first = clampInt(first, 0, max(len(lines)-req.Lines, 0))
+	out.Start = first
+	for k := first; k < len(lines) && k < first+req.Lines; k++ {
+		out.Lines = append(out.Lines, strings.TrimRight(lines[k], ""))
+	}
+	return out, nil
+}
+
+// clampInt clamps v into [lo, hi].
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // validateQuery reports a query the search cannot run at all. An invalid regex is the

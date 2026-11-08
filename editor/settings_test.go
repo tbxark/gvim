@@ -53,7 +53,7 @@ func TestSettingsForViewSettingsWinOverLanguage(t *testing.T) {
 		{"tab size", ViewSettings{TabSize: 3}, func(s LanguageSettings) bool { return s.TabSize == 3 }},
 		{"indent tabs off", ViewSettings{IndentTabs: &no}, func(s LanguageSettings) bool { return !s.UseTabs }},
 		{"line wrap off", ViewSettings{LineWrap: &no}, func(s LanguageSettings) bool { return !s.LineWrap }},
-		{"page view", ViewSettings{PageView: true, PageWidth: 100}, func(s LanguageSettings) bool {
+		{"page view", ViewSettings{PageView: &yes, PageWidth: 100}, func(s LanguageSettings) bool {
 			return s.PageView && s.PageWidth == 100
 		}},
 		{"line wrap on keeps the rest", ViewSettings{LineWrap: &yes}, func(s LanguageSettings) bool {

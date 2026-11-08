@@ -62,6 +62,8 @@ type Mouse struct {
 	X, Y   int
 	Button string
 	Wheel  int
+	// Release marks the release of the left button after a press, for a tree drag.
+	Release bool
 }
 
 // Result is what one input did to the panel: whether the panel took it, the widget events
@@ -87,10 +89,19 @@ type Options struct {
 	// Closable makes Escape (and a close click, when the root routes one) unmount the
 	// panel: the root raises a cancel widget_event.
 	Closable bool
+	// Page makes the whole panel content one scrolling window when no focused widget
+	// takes a movement key.
+	Page bool
+	// AutoFocusFirst (nil: true) starts the panel on its first tabbable widget when the
+	// spec has no FocusKey. A page panel usually sets false so nothing starts focused.
+	AutoFocusFirst *bool
 }
 
 // instance is the state of one keyed widget. A value is set only once the host owns it: a
-// spec update does not overwrite what the user did.
+// spec update does not overwrite what the user did. The tier-1b fields carry the interactive
+// state: a text field's content, caret and selection, a number, the included set of a dual
+// list, the items of a list rebuilt by a mutation, a tree's appended nodes and its checked
+// keys.
 type instance struct {
 	checked     bool
 	haveChecked bool
@@ -99,6 +110,41 @@ type instance struct {
 	value       string
 	haveValue   bool
 	expanded    map[string]bool // node key -> expanded, for a tree
+	// text
+	text     string
+	haveText bool
+	cursor   int // byte offset into text
+	textTop  int // first visible line of a multiline field
+	selStart int // byte offsets; selStart == selEnd means no selection
+	selEnd   int
+	// number
+	number     float64
+	haveNumber bool
+	// dualList
+	included     []string
+	haveIncluded bool
+	// list/tree rebuilds and tree checks
+	items       []pluginapi.WidgetItem
+	haveItems   bool
+	nodes       []pluginapi.WidgetNode
+	haveNodes   bool
+	runs        []pluginapi.WidgetRun
+	haveRuns    bool
+	checkedKeys map[string]bool // tree node key -> checked
+	// dropdown open state
+	open     bool
+	haveOpen bool
+	// text completion list (host-owned while the popup is open)
+	completions        []string
+	haveCompletions    bool
+	completionSel      int
+	completionOpen     bool
+	completionHaveOpen bool
+	// tree drag preview (increment B: recorded here, painted by the tree)
+	previewHave  bool
+	previewSrc   string
+	previewAfter string
+	previewLabel string
 }
 
 // focusRef identifies one focusable widget of the spec, in depth-first order.
@@ -117,6 +163,9 @@ type Panel struct {
 	title    string
 	framed   bool
 	closable bool
+	page     bool
+	// autoFocus says whether a panel without a FocusKey seeds its first tabbable widget.
+	autoFocus bool
 
 	inst map[string]*instance
 
@@ -131,6 +180,16 @@ type Panel struct {
 	lastMouse       int
 	haveMouse       bool
 	lastVisibleRows int // rows of the last list/tree window, for page moves
+
+	// page mode: pageTop is the first content row shown, contentRows the content height of
+	// the last draw.
+	pageTop     int
+	contentRows int
+	// overlays are the transient paint-on-top regions of the last draw (the option list of
+	// an open dropdown, the completion candidates of a focused text field).
+	overlays []panelOverlay
+	// drag is the tree row drag in progress: the source widget and node key.
+	drag *treeDrag
 }
 
 // New returns a panel for spec. The state of keyed widgets starts empty: the spec's seeds
@@ -142,6 +201,8 @@ func New(spec pluginapi.WidgetPanel, o Options) *Panel {
 		title:     o.Title,
 		framed:    o.Framed,
 		closable:  o.Closable,
+		page:      o.Page,
+		autoFocus: o.AutoFocusFirst == nil || *o.AutoFocusFirst,
 		inst:      map[string]*instance{},
 		focus:     -1,
 		lastMouse: -1,
@@ -184,7 +245,9 @@ func (p *Panel) setSpec(spec pluginapi.WidgetPanel) {
 			return
 		}
 	}
-	p.focus = 0
+	if p.autoFocus {
+		p.focus = 0
+	}
 }
 
 // focusKey returns the key of the focused widget, "" when none.
@@ -242,6 +305,9 @@ func (p *Panel) Update(spec pluginapi.WidgetPanel) {
 	p.setSpec(spec)
 }
 
+// Dragging reports whether a tree row drag is in progress in this panel.
+func (p *Panel) Dragging() bool { return p.drag != nil }
+
 // Contains reports whether the panel's last draw covers the cell (x, y).
 func (p *Panel) Contains(x, y int) bool { return p.rect.Contains(x, y) }
 
@@ -291,8 +357,35 @@ func validateWidget(w pluginapi.Widget, depth int, n *int) error {
 				return err
 			}
 		}
-	case pluginapi.WidgetLabel, pluginapi.WidgetText, pluginapi.WidgetRaw, pluginapi.WidgetHintBar,
-		pluginapi.WidgetSpacer, pluginapi.WidgetDivider, pluginapi.WidgetButton, pluginapi.WidgetToggle:
+	case pluginapi.WidgetLabel, pluginapi.WidgetRaw, pluginapi.WidgetHintBar,
+		pluginapi.WidgetSpacer, pluginapi.WidgetDivider, pluginapi.WidgetButton, pluginapi.WidgetToggle,
+		pluginapi.WidgetWindowEmbed:
+	case pluginapi.WidgetText:
+		if w.Key == "" {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "an editable text field needs a key")
+		}
+		if w.Rows < 0 || w.Rows > 200 || w.MinRows < 0 || w.MaxRows < 0 {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "a text field's row counts are outside 0..200")
+		}
+		if len(w.Completions) > MaxItems {
+			return pluginapi.Errf(pluginapi.CodeLimit, "a text field takes at most %d completions", MaxItems)
+		}
+	case pluginapi.WidgetNumber, pluginapi.WidgetDropdown, pluginapi.WidgetRadio, pluginapi.WidgetDualList:
+		if w.Key == "" {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "an interactive widget needs a key")
+		}
+		if len(w.Options) > MaxItems {
+			return pluginapi.Errf(pluginapi.CodeLimit, "a control takes at most %d options", MaxItems)
+		}
+	case pluginapi.WidgetLabeledSection, pluginapi.WidgetComponent, pluginapi.WidgetOverlay, pluginapi.WidgetPopup:
+		if len(w.Children) > 1 {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "a %s wraps at most one widget", string(w.Kind))
+		}
+		for _, c := range w.Children {
+			if err := validateWidget(c, depth+1, n); err != nil {
+				return err
+			}
+		}
 	case pluginapi.WidgetList:
 		if len(w.Items) > MaxItems {
 			return pluginapi.Errf(pluginapi.CodeLimit, "a list takes at most %d items", MaxItems)
@@ -428,6 +521,125 @@ func (p *Panel) value(w pluginapi.Widget) string {
 	return w.Text
 }
 
+// ---- interactive instance state ----
+
+// textValue returns a text field's content: the host's edited text once the user typed,
+// else the spec seed.
+func (p *Panel) textValue(w pluginapi.Widget) string {
+	if in := p.inst[w.Key]; in != nil && in.haveText {
+		return in.text
+	}
+	return w.Text
+}
+
+// setText stores a text field's content and caret, clamping the caret to the content.
+func (p *Panel) setText(w pluginapi.Widget, text string, cursor int) {
+	in := p.instFor(w.Key)
+	if in == nil {
+		return
+	}
+	in.text, in.haveText = text, true
+	in.cursor = clamp(cursor, 0, len(text))
+	if in.selStart > len(text) {
+		in.selStart = len(text)
+	}
+	if in.selEnd > len(text) {
+		in.selEnd = len(text)
+	}
+}
+
+// textCursor returns the caret byte offset of a text field, clamped to its content.
+func (p *Panel) textCursor(w pluginapi.Widget) int {
+	if in := p.inst[w.Key]; in != nil && in.haveText {
+		return clamp(in.cursor, 0, len(in.text))
+	}
+	return len(w.Text)
+}
+
+// textSelection returns the selected byte range of a text field, (0,0) for none.
+func (p *Panel) textSelection(w pluginapi.Widget) (int, int) {
+	in := p.inst[w.Key]
+	if in == nil || in.selStart == in.selEnd {
+		return 0, 0
+	}
+	return min(in.selStart, in.selEnd), max(in.selStart, in.selEnd)
+}
+
+// setSelection stores a text field's selection normalized.
+func (p *Panel) setSelection(w pluginapi.Widget, start, end int) {
+	in := p.instFor(w.Key)
+	if in == nil {
+		return
+	}
+	in.selStart, in.selEnd = min(start, end), max(start, end)
+}
+
+// numberValue returns a number widget's value.
+func (p *Panel) numberValue(w pluginapi.Widget) float64 {
+	if in := p.inst[w.Key]; in != nil && in.haveNumber {
+		return in.number
+	}
+	return w.Number
+}
+
+// setNumber stores a number widget's value, clamped to its bounds.
+func (p *Panel) setNumber(w pluginapi.Widget, v float64) {
+	if in := p.instFor(w.Key); in != nil {
+		in.number, in.haveNumber = clampNumber(w, v), true
+	}
+}
+
+// clampNumber clamps v to the number widget's min/max.
+func clampNumber(w pluginapi.Widget, v float64) float64 {
+	if w.Min != 0 || w.Max != 0 {
+		if v < w.Min {
+			v = w.Min
+		}
+		if w.Max != 0 && v > w.Max {
+			v = w.Max
+		}
+	}
+	return v
+}
+
+// includedSet returns a dual list's included values as a set.
+func (p *Panel) includedSet(w pluginapi.Widget) map[string]bool {
+	set := map[string]bool{}
+	src := w.Included
+	if in := p.inst[w.Key]; in != nil && in.haveIncluded {
+		src = in.included
+	}
+	for _, v := range src {
+		set[v] = true
+	}
+	return set
+}
+
+// setIncluded stores a dual list's included values.
+func (p *Panel) setIncluded(w pluginapi.Widget, included []string) {
+	if in := p.instFor(w.Key); in != nil {
+		in.included, in.haveIncluded = append([]string(nil), included...), true
+	}
+}
+
+// listItems returns a list's rows: the host's rebuilt rows once a mutation replaced them,
+// else the spec's.
+func (p *Panel) listItems(w pluginapi.Widget) []pluginapi.WidgetItem {
+	if in := p.inst[w.Key]; in != nil && in.haveItems {
+		return in.items
+	}
+	return w.Items
+}
+
+// treeNodes returns a tree's nodes: appended/updated rows once a mutation changed them, else
+// the spec's.
+func (p *Panel) treeNodes(w pluginapi.Widget) []pluginapi.WidgetNode {
+	if in := p.inst[w.Key]; in != nil && in.haveNodes {
+		return in.nodes
+	}
+	return w.Nodes
+}
+
 // ---- focus ----
 
 // collect appends the focusable widgets of the subtree in depth-first order.
@@ -444,7 +656,9 @@ func (p *Panel) collect(w pluginapi.Widget, path string, depth int) {
 // isFocusable reports whether a widget kind joins the Tab ring.
 func isFocusable(k pluginapi.WidgetKind) bool {
 	switch k {
-	case pluginapi.WidgetButton, pluginapi.WidgetToggle, pluginapi.WidgetList, pluginapi.WidgetTree:
+	case pluginapi.WidgetButton, pluginapi.WidgetToggle, pluginapi.WidgetList, pluginapi.WidgetTree,
+		pluginapi.WidgetText, pluginapi.WidgetNumber, pluginapi.WidgetDropdown, pluginapi.WidgetRadio,
+		pluginapi.WidgetDualList:
 		return true
 	}
 	return false

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -314,5 +315,91 @@ func TestProjectReplaceOnlySelectedMatches(t *testing.T) {
 	}
 	if len(out.Files) != 0 {
 		t.Fatalf("a non-hit selection produced edits: %+v", out.Files)
+	}
+}
+
+func TestProjectSearchMultiLineRanges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"a.txt": "x foo\nbar y\n"})
+	s := newProjectSearch(editor.Options{})
+	req := projectSearchRequest(dir, []string{"a.txt"}, `foo\nbar`)
+	req.Options = searchpanel.MatchOptions{Regex: true}
+	res, err := s.ProjectSearch(req)
+	if err != nil {
+		t.Fatalf("ProjectSearch: %v", err)
+	}
+	if len(res.Files) != 1 || len(res.Files[0].Matches) != 1 {
+		t.Fatalf("matches = %+v, want one", res.Files)
+	}
+	m := res.Files[0].Matches[0]
+	if m.Line != 1 || m.Col != 3 || !m.MultiLine() {
+		t.Fatalf("match start = %d:%d multi %v, want 1:3 multi-line", m.Line, m.Col, m.MultiLine())
+	}
+	if m.EndLine != 2 || m.EndCol != 4 {
+		t.Fatalf("match end = %d:%d, want 2:4", m.EndLine, m.EndCol)
+	}
+	// The replacement plan keeps the exact multi-line range.
+	rep := searchpanel.ReplaceRequest{
+		Root: dir, Query: `foo\nbar`, Replacement: "Z",
+		Options: searchpanel.MatchOptions{Regex: true},
+		Files: []searchpanel.ReplaceFile{{
+			Path: filepath.Join(dir, "a.txt"), Name: "a.txt", Hash: res.Files[0].Hash,
+		}},
+	}
+	out, err := s.ProjectReplace(rep)
+	if err != nil {
+		t.Fatalf("ProjectReplace: %v", err)
+	}
+	if len(out.Files) != 1 || len(out.Files[0].Edits) != 1 {
+		t.Fatalf("edits = %+v, want one", out.Files)
+	}
+	edit := out.Files[0].Edits[0]
+	if edit.From.Line != 0 || edit.From.Col != 2 || edit.To.Line != 1 || edit.To.Col != 3 {
+		t.Fatalf("edit range = %+v..%+v, want 0:2..1:3", edit.From, edit.To)
+	}
+}
+
+func TestProjectPreviewContext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	lines := make([]string, 10)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line%d", i+1)
+	}
+	writeTree(t, dir, map[string]string{"a.txt": strings.Join(lines, "\n") + "\n"})
+	s := newProjectSearch(editor.Options{})
+	file := filepath.Join(dir, "a.txt")
+	// The window is centred on a single-line match.
+	res, err := s.Preview(searchpanel.PreviewRequest{Path: file, Line: 6, Col: 1, EndLine: 6, EndCol: 2, Lines: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err != "" || res.Start != 3 || len(res.Lines) != 5 {
+		t.Fatalf("preview = start %d lines %v err %q, want lines 4-8", res.Start, res.Lines, res.Err)
+	}
+	if res.Lines[0] != "line4" || res.Lines[4] != "line8" {
+		t.Fatalf("preview lines = %v", res.Lines)
+	}
+	// A match that fits the window is shown whole, even when it spans lines.
+	res, err = s.Preview(searchpanel.PreviewRequest{Path: file, Line: 4, Col: 1, EndLine: 6, EndCol: 5, Lines: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Start > 3 || res.Start+len(res.Lines) < 6 {
+		t.Fatalf("multi-line preview start %d lines %d does not cover 4..6", res.Start, len(res.Lines))
+	}
+	// The panel's unsaved text is used instead of the disk.
+	res, err = s.Preview(searchpanel.PreviewRequest{
+		Path: file, Text: "unsaved one\nunsaved two\n", Dirty: true,
+		Line: 2, Col: 1, EndLine: 2, EndCol: 2, Lines: 4,
+	})
+	if err != nil || len(res.Lines) != 2 || res.Lines[0] != "unsaved one" || res.Lines[1] != "unsaved two" {
+		t.Fatalf("unsaved preview = %+v, %v", res, err)
+	}
+	// A large or unreadable file is a reason, not lines.
+	res, err = s.Preview(searchpanel.PreviewRequest{Path: filepath.Join(dir, "gone.txt"), Line: 1, Col: 1, EndLine: 1, EndCol: 2, Lines: 4})
+	if err != nil || res.Err != "unreadable file" {
+		t.Fatalf("missing file preview = %+v, %v", res, err)
 	}
 }

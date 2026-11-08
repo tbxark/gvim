@@ -553,6 +553,36 @@ function gvim.buf.new() end
 ---@param opts {name?: string, text?: string, language?: string, read_only?: boolean, mode?: string, focus?: boolean}
 ---@return Buffer|nil, string?
 function gvim.buf.create(opts) end
+---@param name string
+---@param layout string JSON layout: a leaf {type:"scrollable"|"fixed", id=, bufferId?} or
+---  {type="split", direction = "h"|"v", ratio=, first=, second=}
+---@return integer|nil group id, string?
+function gvim.buf.create_group(name, layout) end
+---@param id integer
+---@param panel string
+---@param entries {text: string, style?: Style, segments?: Segment[], props?: table}[]
+---@return true|nil, string?
+function gvim.buf.set_panel_content(id, panel, entries) end
+---@param id integer
+---@param segments {text?: string, panel?: string}[]
+---@return true|nil, string?
+function gvim.buf.set_group_title(id, segments) end
+---@param id integer
+---@param panel string
+---@param visible boolean
+---@return true|nil, string?
+function gvim.buf.set_panel_visible(id, panel, visible) end
+---@param id integer
+---@param panel string
+---@return true|nil, string?
+function gvim.buf.focus_panel(id, panel) end
+---@param id integer
+---@return true
+function gvim.buf.close_group(id) end
+---@param id integer
+---@return {name: string, buf: Buffer, window?: Window, visible: boolean}[]|nil, string?
+function gvim.buf.group_panels(id) end
+
 
 gvim.win = {}
 ---@return Window|nil
@@ -564,6 +594,19 @@ function gvim.win.list() end
 function gvim.win.get(id) end
 ---@return true
 function gvim.win.equalize() end
+---@param id integer a plugin-chosen id
+---@param left Window the leader window
+---@param right Window the follower window
+---@return true|nil, string?
+function gvim.win.create_scroll_sync(id, left, right) end
+---@param id integer
+---@param anchors {left: integer, right: integer}[] 0-based line pairs
+---@return true|nil, string?
+function gvim.win.set_scroll_sync_anchors(id, anchors) end
+---@param id integer
+---@return true
+function gvim.win.remove_scroll_sync(id) end
+
 
 -- commands, keys, modes, events
 
@@ -675,14 +718,17 @@ function gvim.emit(name, payload) end
 ---@field checked? boolean
 ---@field expanded? boolean seed of the node's children; the host owns it after the first draw
 ---@field leaf? boolean the node has no children even when the next node is deeper
+---@field draggable? boolean the row is pickable; drag/drop/dragend widget_events follow
+---@field flush? boolean a leaf's text starts at its indent, not after a disclosure gutter
+---@field extra_lines? WidgetRun[] extra rows under a card node
 
 ---@class Widget
----@field kind "row"|"col"|"label"|"text"|"raw"|"hintBar"|"spacer"|"divider"|"button"|"toggle"|"list"|"tree"
+---@field kind "row"|"col"|"label"|"text"|"raw"|"hintBar"|"spacer"|"divider"|"button"|"toggle"|"list"|"tree"|"dropdown"|"number"|"radio"|"dualList"|"labeledSection"|"component"|"overlay"|"popup"|"windowEmbed"
 ---@field key? string stable identity across updates; required for state a mutation changes
----@field children? Widget[] row and col
----@field text? string label text, the read-only text block, the divider glyph
----@field label? string button and toggle text
----@field value? string text: the read-only text block (text is accepted too)
+---@field children? Widget[] row, col and the one-child wrappers (labeledSection/component/overlay/popup)
+---@field text? string label text, the editable text field's seed/read-only block, the divider glyph
+---@field label? string button and toggle text, number label
+---@field value? string (number) seed value; the text field reads "text"
 ---@field runs? WidgetRun[] label segments; raw rows; hintBar entries
 ---@field style? Style
 ---@field checked? boolean toggle
@@ -692,11 +738,35 @@ function gvim.emit(name, payload) end
 ---@field intent? "primary"|"secondary" button look
 ---@field items? (string|WidgetItem)[] list
 ---@field nodes? WidgetNode[] tree
----@field selected_index? integer 1-based index of the selected list/tree row; absent means none
+---@field selected_index? integer 1-based index of the selected list/tree/dropdown/radio/dual row; absent means none
 ---@field visible_rows? integer list/tree window; 0 shares the panel height
 ---@field checkable? boolean tree: draw the checked seeds
 ---@field cols? integer spacer width in a row (default 1)
 ---@field flex? boolean spacer: take the free width of a row
+---@field options? string[] dropdown, radio and dualList: the selectable values
+---@field number? number number: seed value
+---@field min? number
+---@field max? number
+---@field step? number default 1
+---@field integer? boolean
+---@field percent? boolean
+---@field combo? boolean dropdown: also accept typed text
+---@field placeholder? string text field: shown while empty
+---@field field_width? integer text field: visible columns (0 auto)
+---@field full_width? boolean text field: stretch to the enclosing width
+---@field rows? integer text field: editing rows (0/1 single line, >=2 multi-line)
+---@field min_rows? integer
+---@field max_rows? integer text field: grow with its text up to this many rows
+---@field read_only? boolean text field: caret/selection only
+---@field markdown? boolean text field: accepted, rendered as plain text in this slice
+---@field open? boolean dropdown: the option list starts expanded
+---@field scroll_offset? integer dropdown: first visible option
+---@field completions? string[] text field: host-drawn candidate list
+---@field included? string[] dualList: the values initially included
+---@field title? string labeledSection/popup: the box legend
+---@field width_pct? integer labeledSection in a row: percentage of the row width
+---@field width_cols? integer labeledSection in a row: exact columns (wins over width_pct)
+---@field window? integer windowEmbed: the window id (0 draws placeholders)
 
 gvim.ui = {}
 ---@param opts? {prompt?: string, default?: string, select_all?: boolean, history?: string[], validate?: fun(text: string): string|nil, on_change?: fun(text: string)}
@@ -734,7 +804,7 @@ function gvim.ui.focus(area) end
 ---@return {width: integer, height: integer}
 function gvim.ui.size() end
 ---@param spec Widget|{root: Widget, focus_key?: string}
----@param opts? {placement?: "float"|"buffer", buf?: Buffer, title?: string, width?: integer, height?: integer, focus?: boolean, closable?: boolean}
+---@param opts? {placement?: "float"|"buffer", buf?: Buffer, title?: string, width?: integer, height?: integer, focus?: boolean, closable?: boolean, page?: boolean, auto_focus_first?: boolean}
 ---@return integer|nil panel id, string?
 function gvim.ui.mount_widget_panel(spec, opts) end
 ---@param id integer
@@ -745,11 +815,11 @@ function gvim.ui.update_widget_panel(id, spec) end
 ---@return true
 function gvim.ui.unmount_widget_panel(id) end
 ---@param id integer
----@param action {kind: "focusAdvance"|"activate"|"selectMove", delta?: integer}
+---@param action {kind: "focusAdvance"|"activate"|"selectMove"|"textInputKey"|"textInputChar"|"key", delta?: integer, key?: string, text?: string}
 ---@return true|nil, string?
 function gvim.ui.widget_command(id, action) end
 ---@param id integer
----@param mutation {kind: "setChecked"|"setSelectedIndex"|"setValue", widget_key: string, checked?: boolean, index?: integer, value?: string}
+---@param mutation {kind: "setChecked"|"setSelectedIndex"|"setValue"|"setNumber"|"setDropdown"|"setCompletions"|"setDualIncluded"|"setItems"|"setExpandedKeys"|"setCheckedKeys"|"appendTreeNodes"|"setRawEntries"|"setFocusKey"|"previewTreeMove"|"endTreeMovePreview", widget_key?: string, focus_key?: string, checked?: boolean, index?: integer, value?: string, cursor_byte?: integer, number?: number, included?: string[], items?: (string|WidgetItem)[], item_keys?: string[], keys?: string[], new_nodes?: WidgetNode[], entries?: WidgetRun[], source_key?: string, after_key?: string, label?: string, commit?: boolean}
 ---@return true|nil, string?
 function gvim.ui.widget_mutate(id, mutation) end
 ---@param spec Widget|{root: Widget, focus_key?: string}
@@ -950,6 +1020,9 @@ function gvim.git.blame(path, opts) end
 function gvim.git.commit(dir, hash) end
 
 gvim.lsp = {}
+---@param buf? Buffer the buffer whose primary caret's properties are read (default: current)
+---@return table|nil the properties of the entry under the caret, string?
+function gvim.buf.text_properties_at_cursor(buf) end
 ---@param buf? Buffer
 ---@return Diagnostic[]|nil, string?
 function gvim.lsp.diagnostics(buf) end
@@ -1206,6 +1279,29 @@ function gvim.theme.color(key) end
 function gvim.theme.is_dark() end
 ---@return string[] the built-in theme names
 function gvim.theme.builtin_themes() end
+---@return string the user theme directory
+function gvim.theme.user_dir() end
+---@param ref string
+---@return boolean
+function gvim.theme.file_exists(ref) end
+---@param ref string
+---@return string|nil resolved theme as theme-file JSON, string?
+function gvim.theme.data(ref) end
+---@return {name: string, ref: string, builtin: boolean}[]
+function gvim.theme.all() end
+---@param name string
+---@param data string a theme file's JSON (at most 1 MiB)
+---@return string|nil portable ref, string?
+function gvim.theme.save_file(name, data) end
+---@param ref string a user theme
+---@return true|nil, string?
+function gvim.theme.delete_file(ref) end
+---@param ref? string a theme to apply after the rescan
+---@return true|nil, string?
+function gvim.theme.reload(ref) end
+---@return {keys: {name: string, kind: "required"|"fallback"|"optional", fallback?: string}[], modifier_only: string[], named_colors: string[]}
+function gvim.theme.schema() end
+
 ---@param colors table<string, string> "section.key" -> "#RRGGBB", a named color or "Default"
 ---@return true|nil, string?
 function gvim.theme.override(colors) end

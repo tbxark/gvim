@@ -2,6 +2,7 @@ package searchpanel
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -21,6 +22,15 @@ const (
 	labelCols = 9
 	// fileIndent is the indent of a match row below its file header.
 	fileIndent = "  "
+	// The preview column follows the palette's file preview conventions (docs/ui.md):
+	// it appears when the result rows have the focus and the card has room for it beside
+	// them. A narrower frame keeps the full-width rows.
+	previewMinText   = 64
+	previewMinWidth  = 24
+	previewMaxWidth  = 60
+	previewShare     = 2
+	previewMinList   = 30
+	previewColumnGap = 2
 	// optionGap is the blank cells between two option labels.
 	optionGap = 2
 	// emptyText and searchingText are what the result region says before and while it
@@ -42,6 +52,12 @@ type geometry struct {
 	optY                int
 
 	x0, end int // the inner text columns: from the padding to the right padding
+	// listEnd is the end of the result row text: end, or the gap before the preview
+	// column when it is painted.
+	listEnd int
+	// preview is true when the preview column is painted; divX is its divider.
+	preview              bool
+	divX, prevX, prevEnd int
 }
 
 // layoutFor places the panel in a w by h frame. The card docks to the last row; it keeps
@@ -98,9 +114,12 @@ func (p *Panel) Draw(g *grid.Grid) {
 		return
 	}
 	p.width, p.height = g.Width(), g.Height()
+	geo.listEnd = geo.end
+	p.previewColumns(&geo)
 	boxW, boxH := geo.right-geo.left+1, geo.bottom-geo.top+1
 	p.styles.ov.PaintBox(g, geo.left, geo.top, boxW, boxH, p.title())
 	p.paintResults(g, geo)
+	p.paintPreview(g, geo)
 	p.drawField(g, geo.searchY, searchLabelText, &p.query, p.focus == focusSearch, geo)
 	if geo.replY >= 0 {
 		p.drawField(g, geo.replY, replaceLabelText, &p.replace, p.focus == focusReplace, geo)
@@ -166,7 +185,7 @@ func (p *Panel) paintResults(g *grid.Grid, geo geometry) {
 		return
 	}
 	write := func(text string, st grid.Style) {
-		g.Put(geo.x0, geo.resultsTop, geo.end, text, st)
+		g.Put(geo.x0, geo.resultsTop, geo.listEnd, text, st)
 	}
 	switch {
 	case p.errText != "":
@@ -200,7 +219,7 @@ func (p *Panel) paintRow(g *grid.Grid, geo geometry, y, i int) {
 	selected := i == p.selected
 	base := p.styles.file
 	if selected {
-		g.Fill(geo.left+1, geo.right, y, p.styles.selected)
+		g.Fill(geo.left+1, geo.listEnd, y, p.styles.selected)
 		base = p.styles.selected
 	}
 	box := checkbox(p.fileChecked(r.file))
@@ -218,22 +237,188 @@ func (p *Panel) paintRow(g *grid.Grid, geo geometry, y, i int) {
 				}
 			}
 		}
-		g.Put(geo.x0, y, geo.end, fmt.Sprintf("%s%s%s (%d/%d)", box, mark, r.path, done, r.count), base)
+		g.Put(geo.x0, y, geo.listEnd, fmt.Sprintf("%s%s%s (%d/%d)", box, mark, r.path, done, r.count), base)
 		return
 	}
 	box = checkbox(p.matchChecked(r.file, r.match))
 	prefix := fmt.Sprintf("%s%s%d:%d ", box, fileIndent, r.line, r.col)
+	if m := p.fileMatches[r.file].Matches[r.match]; m.MultiLine() {
+		prefix = fmt.Sprintf("%s%s%d:%d–%d:%d ", box, fileIndent, r.line, r.col, m.EndLine, m.EndCol)
+	}
 	x := geo.x0
-	x += g.Put(x, y, geo.end, prefix, faint(base))
+	x += g.Put(x, y, geo.listEnd, prefix, faint(base))
 	// The text, with the matched runes bold.
 	runes := []rune(r.text)
 	hlStart := min(max(r.hlStart, 0), len(runes))
 	hlEnd := min(max(r.hlEnd, hlStart), len(runes))
-	x += g.Put(x, y, geo.end, string(runes[:hlStart]), base)
+	x += g.Put(x, y, geo.listEnd, string(runes[:hlStart]), base)
 	bold := base
 	bold.Bold = true
-	x += g.Put(x, y, geo.end, string(runes[hlStart:hlEnd]), bold)
-	g.Put(x, y, geo.end, string(runes[hlEnd:]), base)
+	x += g.Put(x, y, geo.listEnd, string(runes[hlStart:hlEnd]), bold)
+	g.Put(x, y, geo.listEnd, string(runes[hlEnd:]), base)
+}
+
+// previewColumns reserves the right-hand preview column when the result rows have the
+// focus and the card has room for it beside them: the palette's file-preview
+// conventions, scaled to the result region. A narrower card keeps the full-width rows.
+func (p *Panel) previewColumns(geo *geometry) {
+	geo.listEnd = geo.end
+	geo.preview = false
+	if !p.wantsPreview() || geo.results < 3 {
+		return
+	}
+	inner := geo.end - geo.x0
+	if inner < previewMinText {
+		return
+	}
+	previewW := min(max(inner*previewShare/5, previewMinWidth), previewMaxWidth)
+	div := geo.end - previewW
+	if div-geo.x0 < previewMinList {
+		return
+	}
+	geo.preview = true
+	geo.divX = div
+	geo.prevX = div + 2
+	geo.prevEnd = geo.end + 1
+	geo.listEnd = div - previewColumnGap
+}
+
+// paintPreview paints the preview column: the divider, the path:line header, and the
+// selected match's context lines with the match lines selected and the matched runes
+// bold.
+func (p *Panel) paintPreview(g *grid.Grid, geo geometry) {
+	if !geo.preview {
+		return
+	}
+	for k := 0; k < geo.results; k++ {
+		g.Put(geo.divX, geo.resultsTop+k, geo.divX+1, "│", p.styles.hint)
+	}
+	req, ok := p.previewTarget()
+	if !ok {
+		return
+	}
+	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req), p.styles.label)
+	s := p.preview
+	switch {
+	case s.loading:
+		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "…", p.styles.label)
+		return
+	case s.err != "":
+		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "Preview unavailable: "+s.err, p.styles.label)
+		return
+	case len(s.result.Lines) == 0:
+		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "No lines", p.styles.label)
+		return
+	}
+	m, _, _ := p.selectedMatch()
+	last := s.result.Start + len(s.result.Lines)
+	gutter := len(strconv.Itoa(max(last, 1)))
+	rows := geo.results - 1
+	for k := 0; k < len(s.result.Lines) && k < rows; k++ {
+		y := geo.resultsTop + 1 + k
+		fileLine := s.result.Start + k
+		num := fmt.Sprintf("%*d", gutter, fileLine+1)
+		from, to, inMatch := previewSpan(m, fileLine, s.result.Lines[k])
+		text, hlStart, hlEnd := expandPreviewLine(s.result.Lines[k], from, to)
+		base := p.styles.field
+		if inMatch {
+			g.Fill(geo.prevX, geo.prevEnd, y, p.styles.selected)
+			base = p.styles.selected
+		}
+		x := geo.prevX
+		x += g.Put(x, y, geo.prevEnd, num+" │ ", p.styles.label)
+		runes := []rune(text)
+		hlStart = min(max(hlStart, 0), len(runes))
+		hlEnd = min(max(hlEnd, hlStart), len(runes))
+		x += g.Put(x, y, geo.prevEnd, string(runes[:hlStart]), base)
+		bold := base
+		bold.Bold = true
+		x += g.Put(x, y, geo.prevEnd, string(runes[hlStart:hlEnd]), bold)
+		g.Put(x, y, geo.prevEnd, string(runes[hlEnd:]), base)
+	}
+}
+
+// previewHeader is the column's first row: the path and line (and range, and unsaved
+// marker) that the lines below show.
+func previewHeader(req PreviewRequest) string {
+	header := fmt.Sprintf("%s:%d", req.Name, req.Line)
+	if req.EndLine > req.Line {
+		header += fmt.Sprintf("–%d:%d", req.EndLine, req.EndCol)
+	}
+	if req.Dirty {
+		header += " (unsaved)"
+	}
+	return header
+}
+
+// previewSpan returns the rune span of the match on one preview line. fileLine and the
+// span are 0-based; inMatch reports whether the line belongs to the match. An exclusive
+// end exactly at a line start (EndCol one past the line break) ends the match on the
+// line before it.
+func previewSpan(m Match, fileLine int, line string) (from, to int, inMatch bool) {
+	runes := len([]rune(line))
+	startLine := m.Line - 1
+	endLine := m.EndLine - 1
+	endCol := m.EndCol - 1
+	if !m.MultiLine() || endLine < startLine {
+		endLine, endCol = startLine, m.Col-1+max(m.Len, 1)
+	}
+	if endCol == 0 && endLine > startLine {
+		endLine--
+		endCol = -1
+	}
+	if fileLine < startLine || fileLine > endLine {
+		return 0, 0, false
+	}
+	switch {
+	case startLine == endLine:
+		from, to = m.Col-1, endCol
+		if to < 0 {
+			to = runes
+		}
+	case fileLine == startLine:
+		from, to = m.Col-1, runes
+	case fileLine == endLine:
+		from, to = 0, endCol
+		if to < 0 {
+			to = runes
+		}
+	default:
+		from, to = 0, runes
+	}
+	from = min(max(from, 0), runes)
+	to = min(max(to, from), runes)
+	return from, to, true
+}
+
+// expandPreviewLine expands the tabs of one preview line and returns the display rune
+// span of the matched part, so painting can bold it.
+func expandPreviewLine(line string, from, to int) (text string, hlStart, hlEnd int) {
+	var b strings.Builder
+	disp := 0
+	hlStart, hlEnd = -1, -1
+	for i, r := range []rune(line) {
+		if i == from {
+			hlStart = disp
+		}
+		if i == to {
+			hlEnd = disp
+		}
+		if r == '\t' {
+			b.WriteString("    ")
+			disp += 4
+			continue
+		}
+		b.WriteRune(r)
+		disp++
+	}
+	if hlStart < 0 {
+		hlStart = disp
+	}
+	if hlEnd < 0 {
+		hlEnd = disp
+	}
+	return b.String(), hlStart, hlEnd
 }
 
 // drawField paints one labelled input row on y. The focused label takes the active

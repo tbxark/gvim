@@ -21,6 +21,10 @@ func (p *mdInline) link(i, hi int, base Kind, flush func(int), seg *int) (int, b
 		if closeP < 0 {
 			return 0, false
 		}
+		// The page view shows the link text: the opening bracket and the
+		// "](" ... ")" tail (destination included) are its delimiters.
+		p.mark(i, i+1, MarkerLink)
+		p.mark(closeB, closeP+1, MarkerLink)
 		flush(i)
 		p.emit(i, i+1, base)
 		p.parse(i+1, closeB, KindString)
@@ -44,6 +48,8 @@ func (p *mdInline) link(i, hi int, base Kind, flush func(int), seg *int) (int, b
 			return 0, false
 		}
 		closeR += after + 1
+		p.mark(i, i+1, MarkerLink)
+		p.mark(closeB, closeR+1, MarkerLink)
 		flush(i)
 		p.emit(i, i+1, base)
 		p.parse(i+1, closeB, KindString)
@@ -119,6 +125,12 @@ func (p *mdInline) emphasis(i, hi int, base Kind, flush func(int), seg *int) (in
 	m := runLength(s, j, hi, c)
 	use := min(n, m, 3)
 	kind := combine(base, use)
+	markerKind := MarkerEmphasis
+	if use >= 2 {
+		markerKind = MarkerStrong
+	}
+	p.mark(i, i+n, markerKind)
+	p.mark(j, j+m, markerKind)
 	flush(i)
 	p.emit(i, i+n-use, base)
 	p.emit(i+n-use, i+n, kind)

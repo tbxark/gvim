@@ -52,6 +52,10 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		glob = m.proj.panel.Glob()
 		history = m.proj.panel.History()
 	}
+	var previewer searchpanel.Previewer
+	if pv, ok := m.root.ports.ProjectSearch.(searchpanel.Previewer); ok {
+		previewer = pv
+	}
 	p := searchpanel.New(searchpanel.Options{
 		Root:      m.rootDir(),
 		Files:     m.files,
@@ -61,6 +65,7 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		Scope:     scope,
 		Glob:      glob,
 		History:   history,
+		Previewer: previewer,
 		Git:       git,
 		Searcher:  m.root.ports.ProjectSearch,
 		Grepper:   m.root.ports.GitGrep,

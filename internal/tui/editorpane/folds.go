@@ -97,6 +97,11 @@ func (f frame) prevLine(i int) int {
 // after the row's text, so no text cell is overwritten. When the text fills the row
 // there is no such cell before the scrollbar column, and no marker is drawn.
 func (f frame) paintFoldMarker(g *grid.Grid, i, y, end int) {
+	if f.pageOn {
+		// The page view hides the gutter and the fold markers; the collapsed fold
+		// placeholder still shows in the text.
+		return
+	}
 	collapsed, ok := f.folds[i]
 	if !ok || f.noFolds {
 		return

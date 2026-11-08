@@ -8,39 +8,78 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/theme"
 )
 
 // tocDoc is the active document of a tocEditor: the fake document under another
-// name, with the text version the Contents section watches.
+// name, with the file path and text version the Contents section watches.
 type tocDoc struct {
 	*fakeDoc
 	name    string
+	path    string
 	version uint64
 }
 
 func (d tocDoc) Name() string    { return d.name }
 func (d tocDoc) Version() uint64 { return d.version }
 
+// FilePath is the document's path, so the section's fold ranges can be published
+// for it.
+func (d tocDoc) FilePath() string {
+	if d.path != "" {
+		return d.path
+	}
+	return d.name
+}
+
 // tocEditor is a fake editor whose active buffer is a Markdown (or other) file
 // the test names, whose text version the test can bump as an edit would, and
-// which records the go-to-line jumps of the Contents section.
+// which records the go-to-line jumps of the Contents section. It also implements
+// the optional outline-fold ports: SetOutlineFolds records what the section
+// published, and FoldedAt/ToggleFoldAt give the section a fold state to drive.
 type tocEditor struct {
 	*fakeEditor
 	name    string
 	version uint64
 	gotos   []int
+
+	// outlinePath, outlineRanges, outlineVersion and outlineSet are the last
+	// ranges the section published, with the text version they describe.
+	outlinePath    string
+	outlineRanges  []fold.Range
+	outlineVersion uint64
+	outlineSet     bool
+	// folded is the map of the fold starts the section toggled, keyed by line.
+	folded map[int]bool
+	// toggles are the fold starts the section toggled, in order.
+	toggles []int
 }
 
 func newTOCEditor(name string, lines ...string) *tocEditor {
-	e := &tocEditor{fakeEditor: newFakeEditor(lines...), name: name}
+	e := &tocEditor{fakeEditor: newFakeEditor(lines...), name: name, folded: map[int]bool{}}
 	e.tabs = []TabInfo{{Name: name, Active: true}}
 	return e
 }
 
 func (e *tocEditor) Active() Document {
-	return tocDoc{fakeDoc: e.doc, name: e.name, version: e.version}
+	return tocDoc{fakeDoc: e.doc, name: e.name, path: e.name, version: e.version}
+}
+
+// SetOutlineFolds records the heading fold ranges the Contents section published.
+func (e *tocEditor) SetOutlineFolds(path string, ranges []fold.Range, textVersion uint64) {
+	e.outlinePath, e.outlineRanges, e.outlineVersion, e.outlineSet = path, ranges, textVersion, true
+}
+
+// FoldedAt reports whether the fold starting on line is collapsed.
+func (e *tocEditor) FoldedAt(line int) bool { return e.folded[line] }
+
+// ToggleFoldAt collapses or expands the fold starting on line and records it.
+func (e *tocEditor) ToggleFoldAt(line int) bool {
+	e.folded[line] = !e.folded[line]
+	e.toggles = append(e.toggles, line)
+	return true
 }
 
 func (e *tocEditor) GotoLine(line, col int) error {

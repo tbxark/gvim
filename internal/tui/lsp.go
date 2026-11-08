@@ -60,6 +60,11 @@ type lspState struct {
 	// dimmed.
 	diags       map[string][]Diagnostic
 	diagVersion map[string]diagVersion
+	// wsDiags is the workspace diagnostics the panel and the quickfix list show:
+	// every file a server reported on, open or not, as the port merged it at the
+	// last workspace poll. The poll replaces the whole list, so a publish or pull
+	// update is reflected; it is cleared on stop.
+	wsDiags []FileDiagnostics
 	// off holds the documents with LSP turned off by toggle.
 	off map[string]bool
 	// muted holds the languages the user muted from the status popup: no server
@@ -214,8 +219,9 @@ type (
 	lspDebounceMsg struct{ seq int }
 	lspPollMsg     struct{}
 	lspDiagsMsg    struct {
-		events    []DiagnosticsEvent
-		workspace []WorkspaceEdit
+		events         []DiagnosticsEvent
+		workspace      []WorkspaceEdit
+		workspaceDiags []FileDiagnostics
 	}
 	lspReplyMsg struct {
 		ask     lspAsk
@@ -613,9 +619,12 @@ func (m *Model) lspPoll() tea.Cmd {
 		if port == nil {
 			return nil
 		}
-		// Drain the edits a server asked for even when the documents are gone: a
-		// command can send one after its buffer closed.
-		return func() tea.Msg { return lspDiagsMsg{workspace: port.WorkspaceEdits()} }
+		// Drain the edits a server asked for and take a last workspace diagnostics
+		// snapshot: a server may report on files that are not open, and the panel
+		// lists them after the last document closed.
+		return func() tea.Msg {
+			return lspDiagsMsg{workspace: port.WorkspaceEdits(), workspaceDiags: port.WorkspaceDiagnostics()}
+		}
 	}
 	port := s.port
 	return func() tea.Msg {
@@ -625,7 +634,20 @@ func (m *Model) lspPoll() tea.Cmd {
 				events = append(events, ev)
 			}
 		}
-		return lspDiagsMsg{events: events, workspace: port.WorkspaceEdits()}
+		return lspDiagsMsg{events: events, workspace: port.WorkspaceEdits(), workspaceDiags: port.WorkspaceDiagnostics()}
+	}
+}
+
+// lspWorkspacePoll is the on-demand workspace diagnostics refresh: the panel and the
+// quickfix list call it when they open, because the poll loop stops while no
+// document is open.
+func (m *Model) lspWorkspacePoll() tea.Cmd {
+	port := m.lsp.port
+	if port == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return lspDiagsMsg{workspace: port.WorkspaceEdits(), workspaceDiags: port.WorkspaceDiagnostics()}
 	}
 }
 
@@ -649,6 +671,9 @@ func (m *Model) lspDiags(msg lspDiagsMsg) tea.Cmd {
 		}
 		s.diagVersion[ev.Path] = diagVersion{version: ev.Version, versioned: ev.Versioned}
 	}
+	// The workspace list is authoritative for the panel: a server may drop a
+	// diagnostic, so replace it rather than merge.
+	s.wsDiags = msg.workspaceDiags
 	var cmds []tea.Cmd
 	for _, edit := range msg.workspace {
 		cmds = append(cmds, m.applyServerWorkspaceEdit(edit))
@@ -702,6 +727,7 @@ func (m *Model) lspServerDone(msg lspServerMsg) tea.Cmd {
 	case "stop":
 		s.stopped = true
 		s.tracks = nil
+		s.wsDiags = nil
 		for _, path := range slices.Sorted(maps.Keys(s.diags)) {
 			m.lspDropDiags(path)
 		}
@@ -1118,6 +1144,10 @@ func (m *Model) lspAction(action string) (tea.Cmd, bool) {
 		// server state in the UI can follow.
 		m.plugEmit("lsp_status_clicked", map[string]any{})
 		return m.lspStatusCmd(), true
+	case "toggle_diagnostics_panel":
+		return m.toggleDiagnosticsPanel(), true
+	case "open_diagnostics_list":
+		return m.openDiagnosticsList(), true
 	case "lsp_enable_language":
 		return m.lspSetLanguageEnabled(true), true
 	case "lsp_disable_language":

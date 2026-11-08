@@ -20,16 +20,24 @@ const (
 	hitListRow
 	hitTreeRow
 	hitTreeDisclosure
+	hitText
+	hitNumber
+	hitDropdown
+	hitRadio
+	hitDualRow
+	hitOverlayItem
 )
 
 // hit is one interactive region of the last draw, in frame cells.
 type hit struct {
-	r        Rect
-	kind     hitKind
-	focusIdx int    // index into the focus ring, -1 for a non-focusable region
-	path     string // path of the widget the region belongs to
-	index    int    // item row (list) or node index (tree)
-	disabled bool
+	r          Rect
+	kind       hitKind
+	focusIdx   int    // index into the focus ring, -1 for a non-focusable region
+	path       string // path of the widget the region belongs to
+	index      int    // item row (list), node index (tree) or overlay row
+	disabled   bool
+	overlay    string // hitOverlayItem: "dropdown" or "completion"
+	overlayKey string // hitOverlayItem: the widget key the overlay belongs to
 }
 
 // hitAt returns the hit under the cell, the last drawn region first.
@@ -48,6 +56,7 @@ func (p *Panel) hitAt(x, y int) (hit, bool) {
 func (p *Panel) Draw(g *grid.Grid, r Rect) {
 	p.rect = r
 	p.hits = p.hits[:0]
+	p.overlays = p.overlays[:0]
 	x, y, w, h := r.X, r.Y, r.W, r.H
 	if p.framed {
 		if w < 4 || h < 2 {
@@ -63,8 +72,88 @@ func (p *Panel) Draw(g *grid.Grid, r Rect) {
 	if w <= 0 || h <= 0 {
 		return
 	}
+	if p.page {
+		p.drawPage(g, x, y, w, h)
+		return
+	}
+	p.contentRows = h
 	pt := &painter{g: g, p: p}
 	pt.node(p.spec.Root, x, y, w, h)
+	p.paintOverlays(g)
+}
+
+// drawPage paints the whole content into a scratch surface and copies the page window
+// (pageTop..pageTop+h) into the panel: page mode scrolls the content as one surface, so a
+// row is never half painted over the frame.
+func (p *Panel) drawPage(g *grid.Grid, x, y, w, h int) {
+	contentH := max(measureHeight(p.spec.Root), h)
+	scratch := grid.New(w, contentH)
+	pt := &painter{g: scratch, p: p}
+	pt.node(p.spec.Root, 0, 0, w, contentH)
+	p.contentRows = contentH
+	p.pageTop = clamp(p.pageTop, 0, max(contentH-h, 0))
+	// Blit the visible window: runs of styled cells, wide graphemes kept whole.
+	for row := 0; row < h; row++ {
+		src := p.pageTop + row
+		if src >= contentH {
+			break
+		}
+		col := 0
+		for col < w {
+			cell := scratch.At(col, src)
+			if cell.Text == "" {
+				col++
+				continue
+			}
+			run := cell.Text
+			end := col + 1
+			for end < w {
+				next := scratch.At(end, src)
+				if next.Text == "" || !sameCellStyle(next.Style, cell.Style) {
+					break
+				}
+				run += next.Text
+				end++
+			}
+			g.Put(x+col, y+row, x+w, run, cell.Style)
+			col = end
+		}
+	}
+	// Hits and overlays move with the content and drop outside the page window.
+	kept := p.hits[:0]
+	for _, ht := range p.hits {
+		ht.r.Y += y - p.pageTop
+		ht.r.X += x
+		if ht.r.Y >= y && ht.r.Y < y+h {
+			kept = append(kept, ht)
+		}
+	}
+	p.hits = kept
+	for i := range p.overlays {
+		p.overlays[i].rect.Y += y - p.pageTop
+		p.overlays[i].rect.X += x
+	}
+	p.paintOverlays(g)
+}
+
+// sameCellStyle compares two grid styles, colors included.
+func sameCellStyle(a, b grid.Style) bool {
+	if a.Bold != b.Bold || a.Faint != b.Faint || a.Italic != b.Italic ||
+		a.Underline != b.Underline || a.Strike != b.Strike || a.Reverse != b.Reverse {
+		return false
+	}
+	return sameCellColor(a.FG, b.FG) && sameCellColor(a.BG, b.BG)
+}
+
+func sameCellColor(a, b interface {
+	RGBA() (uint32, uint32, uint32, uint32)
+}) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+	return ar == br && ag == bg && ab == bb && aa == ba
 }
 
 // painter paints one subtree and numbers the focusable widgets in depth-first order, the
@@ -88,7 +177,7 @@ func (pt *painter) node(w pluginapi.Widget, x, y, wd, h int) {
 	case pluginapi.WidgetLabel:
 		pt.label(w, x, y, wd)
 	case pluginapi.WidgetText:
-		pt.text(w, x, y, wd, h)
+		pt.textField(w, x, y, wd, h)
 	case pluginapi.WidgetRaw:
 		pt.raw(w, x, y, wd, h)
 	case pluginapi.WidgetHintBar:
@@ -105,6 +194,24 @@ func (pt *painter) node(w pluginapi.Widget, x, y, wd, h int) {
 		pt.list(w, x, y, wd, h)
 	case pluginapi.WidgetTree:
 		pt.tree(w, x, y, wd, h)
+	case pluginapi.WidgetDropdown:
+		pt.dropdown(w, x, y, wd)
+	case pluginapi.WidgetNumber:
+		pt.numberField(w, x, y, wd)
+	case pluginapi.WidgetRadio:
+		pt.radio(w, x, y, wd, h)
+	case pluginapi.WidgetDualList:
+		pt.dualList(w, x, y, wd, h)
+	case pluginapi.WidgetLabeledSection:
+		pt.labeledSection(w, x, y, wd, h)
+	case pluginapi.WidgetComponent, pluginapi.WidgetOverlay:
+		if len(w.Children) > 0 {
+			pt.node(w.Children[0], x, y, wd, h)
+		}
+	case pluginapi.WidgetPopup:
+		pt.paintPopup(w, x, y, wd, h)
+	case pluginapi.WidgetWindowEmbed:
+		pt.paintWindowEmbed(w, x, y, wd, h)
 	}
 }
 
@@ -114,7 +221,9 @@ func (pt *painter) node(w pluginapi.Widget, x, y, wd, h int) {
 // block, a list or a tree). The other kinds are inline and take their natural width.
 func isBlock(k pluginapi.WidgetKind) bool {
 	switch k {
-	case pluginapi.WidgetCol, pluginapi.WidgetText, pluginapi.WidgetRaw, pluginapi.WidgetList, pluginapi.WidgetTree:
+	case pluginapi.WidgetCol, pluginapi.WidgetText, pluginapi.WidgetRaw, pluginapi.WidgetList, pluginapi.WidgetTree,
+		pluginapi.WidgetLabeledSection, pluginapi.WidgetComponent, pluginapi.WidgetOverlay,
+		pluginapi.WidgetPopup, pluginapi.WidgetWindowEmbed, pluginapi.WidgetRadio:
 		return true
 	}
 	return false
@@ -267,8 +376,8 @@ func measureWidth(w pluginapi.Widget) int {
 		return ansi.StringWidth(Sanitize(w.Text))
 	case pluginapi.WidgetText:
 		n := 0
-		for _, line := range strings.Split(Sanitize(w.Text), "\n") {
-			n = max(n, ansi.StringWidth(line))
+		for _, line := range strings.Split(w.Text, "\n") {
+			n = max(n, ansi.StringWidth(Sanitize(line)))
 		}
 		return n
 	case pluginapi.WidgetRaw:
@@ -304,6 +413,39 @@ func measureWidth(w pluginapi.Widget) int {
 			n = max(n, line)
 		}
 		return n
+	case pluginapi.WidgetDropdown:
+		n := 0
+		for _, o := range w.Options {
+			n = max(n, ansi.StringWidth(o))
+		}
+		return max(n+6, 10)
+	case pluginapi.WidgetNumber:
+		return ansi.StringWidth(w.Label) + 8
+	case pluginapi.WidgetRadio:
+		n := 0
+		for _, o := range w.Options {
+			n = max(n, ansi.StringWidth(o)+5)
+		}
+		return n
+	case pluginapi.WidgetDualList:
+		n := 0
+		for _, o := range w.Options {
+			n = max(n, ansi.StringWidth(o)+5)
+		}
+		return n
+	case pluginapi.WidgetLabeledSection, pluginapi.WidgetComponent, pluginapi.WidgetOverlay,
+		pluginapi.WidgetPopup:
+		n := 0
+		if len(w.Children) > 0 {
+			n = measureWidth(w.Children[0])
+		}
+		switch w.Kind {
+		case pluginapi.WidgetLabeledSection, pluginapi.WidgetPopup:
+			return n + 2
+		}
+		return n
+	case pluginapi.WidgetWindowEmbed:
+		return 20
 	case pluginapi.WidgetTree:
 		n := 0
 		for _, nd := range w.Nodes {
@@ -337,7 +479,14 @@ func measureHeight(w pluginapi.Widget) int {
 		}
 		return max(n, 1)
 	case pluginapi.WidgetText:
-		return max(len(strings.Split(Sanitize(w.Text), "\n")), 1)
+		lines := lineCount(w.Text)
+		switch {
+		case w.MaxRows > 0:
+			return min(max(lines, max(w.MinRows, 1)), max(w.MaxRows, 1))
+		case w.Rows > 1:
+			return max(w.Rows, 1)
+		}
+		return max(lines, 1)
 	case pluginapi.WidgetRaw:
 		return max(len(w.Runs), 1)
 	case pluginapi.WidgetList:
@@ -350,8 +499,26 @@ func measureHeight(w pluginapi.Widget) int {
 			return min(w.VisibleRows, max(len(w.Nodes), 1))
 		}
 		return min(max(len(w.Nodes), 1), DefaultVisibleRows)
+	case pluginapi.WidgetDropdown, pluginapi.WidgetNumber:
+		return 1
+	case pluginapi.WidgetRadio, pluginapi.WidgetDualList:
+		return max(len(w.Options), 1)
+	case pluginapi.WidgetLabeledSection, pluginapi.WidgetPopup:
+		return measureHeight(wrapperChild(w)) + 2
+	case pluginapi.WidgetComponent, pluginapi.WidgetOverlay:
+		return measureHeight(wrapperChild(w))
+	case pluginapi.WidgetWindowEmbed:
+		return max(w.Rows, 3)
 	}
 	return 1
+}
+
+// wrapperChild returns the wrapped widget of a wrapper node (a zero row when empty).
+func wrapperChild(w pluginapi.Widget) pluginapi.Widget {
+	if len(w.Children) > 0 {
+		return w.Children[0]
+	}
+	return pluginapi.Widget{Kind: pluginapi.WidgetRow}
 }
 
 // ---- styles ----
@@ -437,18 +604,8 @@ func (pt *painter) label(node pluginapi.Widget, x, y, wd int) {
 	pt.g.Put(x, y, x+wd, elide(Sanitize(pt.p.value(node)), wd), base)
 }
 
-func (pt *painter) text(node pluginapi.Widget, x, y, wd, h int) {
-	base := pt.p.styleOf(node)
-	for i, line := range strings.Split(Sanitize(pt.p.value(node)), "\n") {
-		if i >= h {
-			break
-		}
-		pt.g.Put(x, y+i, x+wd, elide(line, wd), base)
-	}
-}
-
 func (pt *painter) raw(node pluginapi.Widget, x, y, wd, h int) {
-	for i, r := range node.Runs {
+	for i, r := range pt.p.rawRuns(node) {
 		if i >= h {
 			break
 		}
@@ -546,26 +703,27 @@ func (pt *painter) list(node pluginapi.Widget, x, y, wd, h int) {
 		pt.fi++
 	}
 	base := pt.p.styleOf(node)
-	rows := min(len(node.Items), max(h, 0))
+	items := pt.p.listItems(node)
+	rows := min(len(items), max(h, 0))
 	if node.VisibleRows > 0 {
 		rows = min(rows, node.VisibleRows)
 	}
 	sel := pt.p.selected(node)
-	if sel < 0 && len(node.Items) > 0 {
+	if sel < 0 && len(items) > 0 {
 		sel = 0
 	}
-	top := windowTop(sel, rows, len(node.Items))
+	top := windowTop(sel, rows, len(items))
 	pt.p.lastVisibleRows = max(rows, 1)
-	if len(node.Items) == 0 {
+	if len(items) == 0 {
 		pt.g.Put(x, y, x+wd, elide("(empty)", wd), pt.p.chrome.Muted)
 		return
 	}
 	for k := 0; k < rows; k++ {
 		i := top + k
-		if i >= len(node.Items) {
+		if i >= len(items) {
 			break
 		}
-		it := node.Items[i]
+		it := items[i]
 		st := base
 		switch {
 		case i == sel && focused:
@@ -642,6 +800,7 @@ func (pt *painter) tree(node pluginapi.Widget, x, y, wd, h int) {
 	}
 	base := pt.p.styleOf(node)
 	vis := pt.p.visible(node)
+	vis, _ = pt.p.previewOrder(node, vis)
 	rows := min(len(vis), max(h, 0))
 	if node.VisibleRows > 0 {
 		rows = min(rows, node.VisibleRows)
@@ -694,7 +853,7 @@ func (pt *painter) tree(node pluginapi.Widget, x, y, wd, h int) {
 		cx += pt.g.Put(cx, y+k, x+wd, disclosure, pt.p.chrome.Muted)
 		if node.Checkable {
 			chip := "[ ]"
-			if vn.node.Checked {
+			if pt.p.treeChecked(node, vn.node) {
 				chip = "[x]"
 			}
 			cx += pt.g.Put(cx, y+k, x+wd, chip+" ", st)
@@ -724,9 +883,10 @@ func (p *Panel) acceptsFocus(w pluginapi.Widget) bool {
 // when the following node is deeper (unless it says Leaf); its children are drawn only
 // while it is expanded.
 func (p *Panel) visible(w pluginapi.Widget) []visNode {
-	out := make([]visNode, 0, len(w.Nodes))
+	nodes := p.treeNodes(w)
+	out := make([]visNode, 0, len(nodes))
 	var stack []bool
-	for i, nd := range w.Nodes {
+	for i, nd := range nodes {
 		for len(stack) > nd.Depth {
 			stack = stack[:len(stack)-1]
 		}
@@ -737,7 +897,7 @@ func (p *Panel) visible(w pluginapi.Widget) []visNode {
 				break
 			}
 		}
-		children := !nd.Leaf && i+1 < len(w.Nodes) && w.Nodes[i+1].Depth > nd.Depth
+		children := !nd.Leaf && i+1 < len(nodes) && nodes[i+1].Depth > nd.Depth
 		if !hidden {
 			out = append(out, visNode{node: nd, index: i, children: children, expanded: children && p.expanded(w, nd)})
 		}

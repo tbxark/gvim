@@ -98,11 +98,15 @@ type Model struct {
 	contents          sidebar.Contents
 	contentsFocus     bool
 	explorerCollapsed bool
-	toc               tocState
-	divider           dividerState
-	chord             []KeyPress // the first keys of a multi-key binding, waiting for the next
-	clockArmed        bool       // a {clock} redraw tick is in flight (see clockCmd)
-	dialogs           Dialogs    // the file dialogs; nil disables them
+	// diag is the native Diagnostics sidebar section (see diagpanel.go). It
+	// keeps the section's open/collapsed/rows/selection state; the diagnostics
+	// themselves are in the root's workspace store (lspState.wsDiags).
+	diag       diagState
+	toc        tocState
+	divider    dividerState
+	chord      []KeyPress // the first keys of a multi-key binding, waiting for the next
+	clockArmed bool       // a {clock} redraw tick is in flight (see clockCmd)
+	dialogs    Dialogs    // the file dialogs; nil disables them
 	// hideMenuBar comes from Deps and stays put. hideLineNumbers starts from
 	// Deps and is flipped by toggle_line_numbers.
 	hideMenuBar     bool
@@ -423,6 +427,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(cmd, m.clockCmd())
 	}
 	cmd = tea.Batch(cmd, m.pluginViewTail(snap))
+	m.syncScrollGroups()
 	return next, cmd
 }
 
@@ -458,12 +463,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
-	// A mounted widget panel with the keyboard takes the keys before the plugin key
-	// layers and the editor keymap.
-	if cmd, ok := m.pluginPanelKey(msg); ok {
+	// A plugin key layer (a mode or a key wait) sees the key before a mounted widget
+	// panel's smart dispatch: the panel is the fallback while a plugin holds the keyboard.
+	if cmd, ok := m.pluginMessage(msg); ok {
 		return m, cmd
 	}
-	if cmd, ok := m.pluginMessage(msg); ok {
+	// A mounted widget panel with the keyboard takes the keys before the editor keymap.
+	if cmd, ok := m.pluginPanelKey(msg); ok {
 		return m, cmd
 	}
 	// A message that is not input still goes to the top overlay, because an overlay
@@ -536,6 +542,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dragScrollMsg:
 		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
+		if panelCmd, taken := m.pluginPanelMouse(msg); taken {
+			cmd = panelCmd
+			break
+		}
 		td := m.drag.tab
 		m.drag = drag{}
 		if td != nil {
@@ -1491,6 +1501,11 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 	if m.contentsFocus {
 		return m.contentsKey(kp, text)
 	}
+	// The Diagnostics section is a fix list: its keys move the selection and Enter
+	// jumps, and the app-wide keys keep their Normal bindings.
+	if m.diag.focus {
+		return m.diagKey(kp, text)
+	}
 	ctx := KeyContextNormal
 	if m.explorerFocus {
 		ctx = KeyContextFileExplorer
@@ -1804,6 +1819,16 @@ func (m *Model) explorerGeometry(l layout) expanel.Geometry {
 	return expanel.Geometry{X: l.ExX, Width: l.Ex, Top: top, Bottom: bottom, Right: l.ExRight, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
 }
 
+// sidebarSection returns the layout section at index, for the mouse routing that
+// has to know which kind of section a row belongs to.
+func (m *Model) sidebarSection(index int) (sidebar.Section, bool) {
+	sections := m.layout().Sections
+	if index < 0 || index >= len(sections) {
+		return sidebar.Section{}, false
+	}
+	return sections[index], true
+}
+
 // handleClick routes a left press to the part of the frame under it, and a
 // middle press on a tab closes the tab. A press on the explorer goes to the
 // panel, which answers with its own messages. Presses that have no effect yet
@@ -1868,13 +1893,31 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	case hitExplorerTitleClose, hitExplorerTitleReload, hitExplorerGrip:
 		return m.explorerMouse(msg)
 	case hitSidebarHeader:
+		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
+			m.pressDiagHeader()
+			return nil
+		}
 		return m.pressSidebarHeader(t.Section, mo.Y)
 	case hitSidebarClose:
+		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
+			// The Diagnostics section has no close button (NoClose); a stray press
+			// on that cell closes it, as the palette row does.
+			m.diag.open = false
+			m.focusEditor()
+			return nil
+		}
 		m.closeContents()
 		return nil
 	case hitSidebarRow:
+		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
+			return m.pressDiagRow(t.Index)
+		}
 		return m.pressContentsRow(t.Index, mo.X)
 	case hitSidebarBody:
+		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
+			m.takeDiagFocus()
+			return nil
+		}
 		m.takeContentsFocus()
 		return nil
 	case hitStatusPalette:
@@ -1971,6 +2014,9 @@ func (m *Model) placeCaret(pos buffer.Pos, count int, virtual int) drag {
 // press asked for, when the editor has vertical virtual space on. It reports
 // whether it took the press; false falls back to the clamped caret.
 func (m *Model) placeVirtualLine(hit editorpane.Hit) bool {
+	if m.pageViewActive() {
+		return false
+	}
 	vl, ok := m.ed.(virtualLinesEditor)
 	if !ok {
 		return false
@@ -1989,6 +2035,9 @@ func (m *Model) placeVirtualLine(hit editorpane.Hit) bool {
 // end has already put the caret there.
 func (m *Model) parkVirtualCaret(n int) {
 	if n <= 0 {
+		return
+	}
+	if m.pageViewActive() {
 		return
 	}
 	if vs, ok := m.ed.(VirtualSpaceEditor); ok && vs.VirtualSpaceEnabled() {
@@ -2138,6 +2187,7 @@ func (m *Model) takeExplorerFocus() {
 	m.explorerFocus = true
 	m.contentsFocus = false
 	m.contents.SetFocus(false)
+	m.diag.focus = false
 }
 
 // focusEditor gives keyboard focus back to the editor. The panel stays visible.
@@ -2145,6 +2195,7 @@ func (m *Model) focusEditor() {
 	m.explorerFocus = false
 	m.contentsFocus = false
 	m.contents.SetFocus(false)
+	m.diag.focus = false
 	m.tabFocus = false
 	m.dock.SetFocus(false)
 }
@@ -2159,6 +2210,7 @@ const (
 	stageTabs
 	stageExplorer
 	stageContents
+	stageDiagnostics
 )
 
 // stage reports where keyboard focus is now.
@@ -2172,6 +2224,8 @@ func (m *Model) stage() focusStage {
 		return stageExplorer
 	case m.contentsFocus:
 		return stageContents
+	case m.diag.focus:
+		return stageDiagnostics
 	}
 	return stageEditor
 }
@@ -2190,6 +2244,11 @@ func (m *Model) cycleFocus() {
 	}
 	if m.contents.Open() {
 		order = append(order, stageContents)
+	}
+	// The Diagnostics section follows Contents in the F6 order, matching its place
+	// in the column.
+	if m.diag.Open() {
+		order = append(order, stageDiagnostics)
 	}
 	order = append(order, stageEditor)
 	cur := m.stage()
@@ -2221,6 +2280,8 @@ func (m *Model) setStage(s focusStage) {
 		m.focusExplorer()
 	case stageContents:
 		m.focusContents()
+	case stageDiagnostics:
+		m.focusDiagnostics()
 	default:
 		m.focusEditor()
 	}

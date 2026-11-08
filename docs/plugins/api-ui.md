@@ -128,44 +128,87 @@ gvim.ui.widget_mutate(id, mutation) -> true | nil, err
 gvim.ui.mount_sidebar_section(spec, opts?) -> id | nil, err
 ```
 
-A **spec** is a widget tree: a node with a `kind` and, for a row or a col, `children`. A panel
-spec may also be `{ root = <widget>, focus_key = "<key>" }`. The v1 subset is `row`, `col`,
-`label`, `text` (a read-only text block), `raw`, `hintBar`, `spacer`, `divider`, `button`, `toggle`,
-`list` and `tree`; there is no editable text field, dropdown, radio or dual list yet.
+A **spec** is a widget tree: a node with a `kind` and, for a row, a col or a wrapper, `children`. A
+panel spec may also be `{ root = <widget>, focus_key = "<key>" }`. The kinds are:
+
+* layout: `row`, `col`, `spacer` (`cols` blank cells, or `flex = true`), `divider` (one-cell
+  `text`, default `─`), `label` (text or styled `segments`/`runs` and `style`, all the
+  [conventions](conventions.md#types) colour forms), `raw` (one row per `runs` entry), `hintBar`
+  (a muted row of `runs`, entries separated by two spaces);
+* display and behaviour: `button` (`label`, `intent`, `disabled`, initial `focused`), `toggle`
+  (`label`, `checked`, `indeterminate`), `list` (`items`: strings or
+  `{text, detail, key, checked, disabled}`, `selected_index` 1-based, `visible_rows`), `tree`
+  (`nodes`: `{text, detail, key, depth, checked, expanded, leaf, draggable, flush, extra_lines}`,
+  `checkable`, `selected_index`, `visible_rows`);
+* interactive (tier 1b): `text` (an editable field), `number`, `dropdown`, `radio`, `dualList`;
+* wrappers: `labeledSection`, `component`, `overlay` and `popup` (one child each; `title` names a
+  labeledSection/popup box), and `windowEmbed` (draws placeholder rows: a panel cannot embed a
+  live editor pane).
+
+**Text fields.** `text` is the editable input. `text` (or `value`) is the seed content; `rows` > 1
+makes it multi-line, `max_rows` (with `min_rows`) makes it grow with its content, `field_width`
+limits the visible columns, `full_width` stretches it, `placeholder` shows while empty and
+`read_only = true` keeps the caret and selection but refuses edits (the tier-1a read-only block
+is now a read-only text field). `completions` is a candidate list the host draws under the field
+when it is focused: Up/Down move the highlight, Tab/Enter accept, Esc dismisses. Every edit
+raises a `change` widget event with `value` and `cursor_byte`. A text field needs a `key`.
+
+**Number, dropdown, radio, dual list.** `number` has a seed `value` (also `number`), `min`,
+`max`, `step`, `integer` and `percent`; Up/Down step, PageUp/PageDown step by ten, Home/End jump
+to the bounds, and each change raises a `change` event with the formatted `value`. `dropdown` has
+`options` and a 1-based `selected_index`; Enter opens the option list, Up/Down move the highlight,
+Enter chooses (a `change` with `index` and `value`), Esc closes; closed, the arrows change the
+value directly. `radio` renders one row per option and moves the selection with the arrows
+(`change` on every move). `dualList` (the tier-1b simplification: one column, the included rows
+marked `[x]`) moves with Up/Down and toggles inclusion with Space/Enter (`change` with `included`).
 
 * `kind` is required on every node. `key` is the stable identity of a node across updates: the
-  host keeps focus, the selected row, the checked state, the expanded tree nodes and the
-  text a mutation replaced for matching keys. Key the widgets whose state matters.
-* `label` takes `text` (or styled `segments`/`runs`) and `style`; `button` and `toggle`
-  take `label`; `text` takes `value` (or `text`); `divider` takes a one-cell `text` glyph
-  (default `─`). The colours are the [conventions](conventions.md#types) forms.
-* A `list` takes `items` (strings or `{text, detail, key, checked, disabled}`) and a 1-based
-  `selected_index`; a `tree` takes `nodes` (`{text, detail, key, depth, checked, expanded, leaf}`)
-  with `depth` 0 for a root row and a `selected_index`. The host windows both to the panel
-  height (or `visible_rows`) and scrolls the selection into view.
-* `spacer` is `cols` blank cells in a row (default 1), or `flex = true` to take the free
-  width; in a column it is one blank row. A `hintBar` is a muted row of `runs`, entries
-  separated by two spaces.
+  host keeps the focus, the selection, the checked state, the expanded tree nodes, the text and
+  caret, the number, the included set and the rebuilt rows for matching keys. Key every widget
+  whose state the user changes; the interactive kinds require it.
+* A `list`'s and `tree`'s rows are windowed to the panel height (or `visible_rows`) and scroll the
+  selection into view. A tree's expansion is the host's after the first draw; mutations change it.
+* The colours are the [conventions](conventions.md#types) forms.
 
 **Mount options.** `placement` is `"float"` (the default: a centred card, `width`/`height` as
 percentages of the frame) or `"buffer"` (the panel is painted over the window that shows the
 plugin's virtual buffer named by `buf`). `title` is the card title, `focus = true` gives the panel
-the keyboard at once and `closable = true` (the default) makes Escape unmount it with a `cancel`
-widget event. `gvim.ui.mount_sidebar_section` takes `title`, `rows` (body rows; 0 shares the
-column) and `closable`, and appends the panel as a section under the file explorer; clicking
-its header folds it, and `update_widget_panel`/`unmount_widget_panel` work on it like on any panel.
+the keyboard at once, `closable = true` (the default) makes Escape unmount it with a `cancel`
+widget event, `page = true` makes the whole content one scrolling page (the arrows scroll it when
+no focused widget takes them) and `auto_focus_first` (default `true`) says whether a panel
+without `focus_key` starts on its first tabbable widget. `gvim.ui.mount_sidebar_section` takes
+`title`, `rows` (body rows; 0 shares the column) and `closable`, and appends the panel as a
+section under the file explorer.
 
 **Actions** (`gvim.ui.widget_command`) go to the focused widget: `focusAdvance` (`delta` moves the
-focus ring, Tab), `activate` (Enter/Space) and `selectMove` (`delta` moves a list/tree selection).
+focus ring, Tab), `activate` (Enter/Space), `selectMove` (`delta` moves a list/tree/dropdown/radio/
+dual-list selection), `textInputChar` (`text`), `textInputKey` (`key`: `backspace`, `delete`,
+`left`, `right`, `home`, `end`, ...) and `key` (the generic form the host maps to the matching
+smart key). A plugin mode's bindings dispatch into these.
 
-**Mutations** (`gvim.ui.widget_mutate`) change one keyed widget without re-sending the spec:
-`setChecked`, `setSelectedIndex` (1-based) and `setValue`.
+**Mutations** (`gvim.ui.widget_mutate`) change one keyed widget without re-sending the spec, and
+keep every other widget's state: `setValue` (`value`, optional `cursor_byte` for a text field),
+`setCompletions` (`items`), `setChecked`, `setSelectedIndex` (1-based), `setNumber` (`number`),
+`setDropdown` (`index`), `setDualIncluded` (`included`), `setItems` (`items`, `item_keys`),
+`setExpandedKeys` (`keys`), `setCheckedKeys` (`keys`, `checked`), `appendTreeNodes` (`new_nodes`),
+`setRawEntries` (`entries`), `setFocusKey` (`focus_key`), and the tree drag preview pair
+`previewTreeMove` (`source_key`, `after_key`, `label`) and `endTreeMovePreview` (`commit`).
 
 The host routes the panel's keys and mouse to the plugin as `widget_event` events (see
-[events.md](events.md)): `activate`, `toggle`, `select`, `focus`, `focus_gained`, `focus_lost`,
-`value`, `close`, `cancel` and the mouse events. A panel with the keyboard swallows the keys its
-widgets do not use, so typing in a panel never edits the buffer under it; Escape (or a click
-outside a floating card) gives the keyboard back.
+[events.md](events.md)): `activate`, `toggle`, `select`, `expand`, `change` (`value`,
+`cursor_byte`, `index` or `included` depending on the widget), `completion_request`,
+`completion_accept`, `completion_dismiss`, `drag`/`drop`/`dragend`, `focus`, `focus_gained`,
+`focus_lost`, `close`, `cancel` and the mouse events; every event carries `focus_key`, the widget
+that holds the panel focus afterwards. Plugin key layers (modes and key waits) see a key before
+the host's smart dispatch, so a mode can turn typing into widget commands; the host's dispatch is
+the fallback. A panel with the keyboard swallows keys its widgets do not use, so typing in a panel
+never edits the buffer under it; Escape (or a click outside) gives the keyboard back.
+
+**Caps and sanitisation.** A panel tree is at most 2000 widgets, nested at most 8 deep; a list
+takes 2000 items, a dropdown/radio/dual list 2000 options, a text field 2000 completion
+candidates; one string is 4 KiB, one key 128 bytes, a text field at most 200 editing rows; a
+plugin mounts at most 8 panels (`limit`) and a plugin section asks for at most 100 body rows.
+Text that reaches the grid is sanitised: control characters become spaces.
 
 ```lua
 local id = gvim.ui.mount_widget_panel({

@@ -135,7 +135,97 @@ func installTheme(e *apiEnv) {
 		L.Push(out)
 		return 1
 	})
+
+	// Theme files (tier 1b): the theme editor and the theme pickers a port needs.
+	e.set(t, "user_dir", func(L *lua.LState) int {
+		L.Push(lua.LString(r.guard.ThemeUserDir()))
+		return 1
+	})
+	e.set(t, "file_exists", func(L *lua.LState) int {
+		L.Push(lua.LBool(r.guard.ThemeFileExists(L.CheckString(1))))
+		return 1
+	})
+	e.set(t, "data", func(L *lua.LState) int {
+		data, err := r.guard.ThemeData(L.CheckString(1))
+		if err != nil {
+			v, msg := errTuple(err)
+			L.Push(v)
+			L.Push(msg)
+			return 2
+		}
+		L.Push(lua.LString(data))
+		return 1
+	})
+	e.set(t, "all", func(L *lua.LState) int {
+		files := r.guard.ThemeFiles()
+		out := L.CreateTable(len(files), 0)
+		for _, f := range files {
+			row := L.CreateTable(0, 3)
+			row.RawSetString("name", lua.LString(f.Name))
+			row.RawSetString("ref", lua.LString(f.Ref))
+			row.RawSetString("builtin", lua.LBool(f.Builtin))
+			out.Append(row)
+		}
+		L.Push(out)
+		return 1
+	})
+	e.set(t, "save_file", func(L *lua.LState) int {
+		name := L.CheckString(1)
+		data := L.CheckString(2)
+		if len(data) > maxThemeFileBytes {
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "a theme file is at most %d KiB", maxThemeFileBytes>>10))
+		}
+		ref, err := r.guard.SaveThemeFile(name, data)
+		if err != nil {
+			v, msg := errTuple(err)
+			L.Push(v)
+			L.Push(msg)
+			return 2
+		}
+		L.Push(lua.LString(ref))
+		return 1
+	})
+	e.set(t, "delete_file", func(L *lua.LState) int {
+		return bufTrue(L, r.guard.DeleteThemeFile(L.CheckString(1)))
+	})
+	e.set(t, "reload", func(L *lua.LState) int {
+		ref := ""
+		if v := L.Get(1); v != lua.LNil {
+			ref = L.CheckString(1)
+		}
+		return bufTrue(L, r.guard.ReloadThemes(ref))
+	})
+	e.set(t, "schema", func(L *lua.LState) int {
+		schema := r.guard.ThemeSchema()
+		out := L.CreateTable(0, 3)
+		keys := L.CreateTable(len(schema.Keys), 0)
+		for _, k := range schema.Keys {
+			row := L.CreateTable(0, 3)
+			row.RawSetString("name", lua.LString(k.Name))
+			row.RawSetString("kind", lua.LString(k.Kind))
+			if k.Fallback != "" {
+				row.RawSetString("fallback", lua.LString(k.Fallback))
+			}
+			keys.Append(row)
+		}
+		out.RawSetString("keys", keys)
+		mods := L.CreateTable(len(schema.ModifierOnly), 0)
+		for _, m := range schema.ModifierOnly {
+			mods.Append(lua.LString(m))
+		}
+		out.RawSetString("modifier_only", mods)
+		names := L.CreateTable(len(schema.NamedColors), 0)
+		for _, n := range schema.NamedColors {
+			names.Append(lua.LString(n))
+		}
+		out.RawSetString("named_colors", names)
+		L.Push(out)
+		return 1
+	})
 }
+
+// maxThemeFileBytes bounds a theme file a plugin writes.
+const maxThemeFileBytes = 1 << 20
 
 // Caps of a session theme override set.
 const (

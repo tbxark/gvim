@@ -162,3 +162,29 @@ and value 64 bytes): the values are `#RRGGBB`, Fresh's named colours (`"Red"`, `
 returns `nil, err` and keeps the current look. For fast animation loops prefer a
 `gvim.timer.every` that calls `override` with a small map.
 
+**Theme files.** For the theme editor and the theme pickers:
+
+```text
+gvim.theme.user_dir() -> string                  -- where user theme files are saved
+gvim.theme.file_exists(ref) -> boolean           -- a user theme file on disk
+gvim.theme.data(ref) -> string | nil, err        -- the resolved theme as theme-file JSON
+gvim.theme.all() -> { {name, ref, builtin}, ... } -- every theme the editor offers
+gvim.theme.save_file(name, data) -> ref | nil, err -- validate JSON, save in the user dir
+gvim.theme.delete_file(ref) -> true | nil, err
+gvim.theme.reload(ref?) -> true | nil, err       -- rescan; apply ref afterwards when given
+gvim.theme.schema() -> {
+  keys = { { name = "editor.bg", kind = "required"|"fallback"|"optional", fallback? } ... },
+  modifier_only = { "editor.selection_modifier", ... },
+  named_colors = { "Red", ... },
+}
+```
+
+`save_file` keeps the theme editor honest: the data is parsed and resolved as a theme file
+(`theme.ParseFile` + `theme.Resolve`) before it is written, so a broken theme is refused with
+`invalid`. At most 1 MiB. `schema()` is gvim's shape of Fresh's JSON theme schema: the color
+key table with each key's kind and fallback, the attribute-only keys and the named colors —
+a plugin renders its own editor from it instead of resolving a `$ref` JSON schema (a documented
+divergence). `reload` rescans the user theme directory and applies the named ref through the
+normal theme path, so `theme_changed` fires and the session overrides are cleared, as for any
+theme change.
+

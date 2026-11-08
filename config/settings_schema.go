@@ -96,6 +96,7 @@ const (
 	SectionEditing    = "Editing"
 	SectionSearch     = "Search"
 	SectionExplorer   = "Explorer"
+	SectionContents   = "Contents"
 	SectionSession    = "Session"
 	SectionMouse      = "Mouse"
 )
@@ -255,6 +256,12 @@ var settingsTable = []Setting{
 	{Path: []string{"explorer_show_ignored"}, Section: SectionExplorer, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.ExplorerShowIgnored }), encode: encodeBool},
+
+	// Contents (the Markdown outline sidebar section; the retired markdown_toc
+	// plugin's fold_buffer setting is the same behavior under Fresh's plugin path).
+	{Path: []string{"contents", "fold_buffer"}, Section: SectionContents, Kind: SettingBool,
+		Layers: LayerUser, Apply: ApplyRestart,
+		value: boolValue(func(c Config) bool { return c.ContentsFoldBuffer() }), encode: encodeBool},
 
 	// Session.
 	{Path: []string{"editor", "hot_exit"}, Section: SectionSession, Kind: SettingBool,

@@ -109,6 +109,8 @@ type pluginState struct {
 	panels pluginPanels
 	// menus are the rows plugins added to the menu bar dropdowns (plugin_menus.go).
 	menus menus
+	// groups are the buffer groups and scroll-sync groups (plugin_groups.go).
+	groups pluginGroups
 	// virtual records who made each virtual buffer (plugin_virtual.go).
 	virtual pluginVirtual
 

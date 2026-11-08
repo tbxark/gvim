@@ -411,3 +411,18 @@ func TestPanelShiftEnterScopesTheConfirmation(t *testing.T) {
 		t.Fatalf("confirmed replacements = %+v", r.reqs)
 	}
 }
+
+func TestProjectLSPEditsKeepMultiLineRanges(t *testing.T) {
+	t.Parallel()
+	edits := projectLSPEdits([]searchpanel.ReplaceEdit{{
+		From: searchpanel.Position{Line: 0, Col: 4},
+		To:   searchpanel.Position{Line: 2, Col: 3},
+		Text: "Z",
+	}})
+	if len(edits) != 1 {
+		t.Fatalf("edits = %+v", edits)
+	}
+	if edits[0].From != (buffer.Pos{Line: 0, Col: 4}) || edits[0].To != (buffer.Pos{Line: 2, Col: 3}) {
+		t.Fatalf("converted edit = %+v, want the exact multi-line range", edits[0])
+	}
+}

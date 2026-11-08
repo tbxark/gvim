@@ -61,6 +61,25 @@ func (f *fakeThemeCatalog) DeleteTheme(ref string) error {
 	return nil
 }
 
+// UserDir is the fake user theme directory.
+func (f *fakeThemeCatalog) UserDir() string { return "" }
+
+// ThemePath is where the fake user theme file for ref would live.
+func (f *fakeThemeCatalog) ThemePath(ref string) (string, error) { return ref, nil }
+
+// Data is the resolved fake theme as theme-file JSON.
+func (f *fakeThemeCatalog) Data(ref string) (string, error) {
+	th, err := f.Load(ref)
+	if err != nil {
+		return "", err
+	}
+	data, err := th.MarshalFile(strings.TrimSuffix(ref, ".json"))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 func newThemeTestModel(t *testing.T, catalog ThemeCatalog) *Model {
 	t.Helper()
 	th, err := theme.Load("dark")

@@ -81,7 +81,9 @@ the result rows; `Alt+A` switches between all files and the current file; `Alt+C
 toggle Case, Regex and Whole; the file-glob field takes comma or space separated patterns (`*.go`,
 `src/**`); Up and Down in the search field walk the session's earlier patterns. In the match tree,
 `Space` checks or unchecks the focused row (a file row takes all its matches), `a` checks every
-match, `n` unchecks every match, and `Enter` on a match opens it. `Alt+Enter` replaces every
+match, `n` unchecks every match, and `Enter` on a match opens it. While the result rows have
+the focus the selected match's context shows in a preview column at the right of the results
+(it hides in a narrow window; no key is added for it). `Alt+Enter` replaces every
 checked match and `Shift+Enter` replaces the focused row alone (its checked matches for a file
 row), each after a confirmation; the changed files stay as unsaved tabs ("N files changed in M tabs;
 Save All to write"). `Alt+Q` lists the result set as a filterable list whose `Enter` jumps to a

@@ -86,6 +86,10 @@ type line struct {
 	// tail is the look of the row past the end of the text, when an overlay gives it one.
 	tail    grid.Style
 	hasTail bool
+	// Page view mapping: srcToDisp maps a source rune column to the composed rune
+	// column, and dispToSrc the reverse. They are nil outside the composed page view.
+	srcToDisp []int
+	dispToSrc []int
 }
 
 // layoutKey is what the layout of a line without paint attributes depends on besides
@@ -132,6 +136,9 @@ func (f frame) layoutLine(i int, styled bool) line {
 
 // layout is layoutLine without the memo.
 func (f frame) layout(i int, styled bool) line {
+	if f.pageOn && f.pageMarkdown {
+		return f.layoutCompose(i, styled)
+	}
 	var text string
 	var off int
 	long := f.isLong(i)

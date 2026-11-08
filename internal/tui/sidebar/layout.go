@@ -30,6 +30,10 @@ const (
 	// KindContents is the Markdown outline, stacked under the explorer while it
 	// is open.
 	KindContents
+	// KindDiagnostics is the workspace diagnostics panel, stacked under Contents.
+	// Its body is painted by the root (diagpanel.go); the plugin sections use the
+	// reserved KindPlugin value in sections.go and are unaffected.
+	KindDiagnostics
 )
 
 // Spec is one section's state for the layout: the body rows it asks for and

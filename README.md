@@ -33,6 +33,13 @@ checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
   `scrollback_lines`), OSC 7 working-directory tracking, Ctrl+Click paths, mouse
   forwarding, `close_on_exit`, and the deferred list (reflow, OSC 52, agent
   re-exec, Windows ConPTY, terminal tabs).
+- `docs/markdown.md` is the design record for the Markdown page view (compose):
+  the per-buffer page width resolution and centered margin, the inline compose
+  (concealed emphasis/strong/inline-code/link/strike markers, caret-line reveal,
+  rules and quote bars, list/quote hanging indents), and the source↔composed
+  mapping for the caret, mouse, selection, search highlights, folds and soft rows,
+  with the large-file fallback and the deferred list (tables, fence frames, dual
+  view).
 - `docs/parity.md` is the live parity record for the "full Fresh feature parity" goal:
   the by-area matrix with evidence, the deliberate differences, and the ranked backlog of
   the remaining rounds. It is the map for the next rounds; update the affected row when a
@@ -456,7 +463,7 @@ go test -race ./plugin/... ./plugin/pattern ./internal/tui/... ./internal/app
   an API function means adding it to `gvim.d.lua` and to the right page of `docs/plugins/`.
   Every file in `docs/plugins/examples/` is loaded and run by `TestDocsExamples`.
 - The default-enabled bundled plugins may keep at most 8 MiB of heap while idle
-  (`TestBundledPluginsIdleHeap`; about 5.7 MiB today). When a new bundled plugin breaks it, set
+  (`TestBundledPluginsIdleHeap`; about 6.6 MiB today). When a new bundled plugin breaks it, set
   `default_enabled: false` in its `plugin.json` (largest first) and update `docs/plugins/bundled.md`.
 - Tests that depend on time budgets assert on step counts or budget errors, with at most one
   generous wall-clock sanity bound. Do not add a tight wall-clock threshold.

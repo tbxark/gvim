@@ -512,6 +512,7 @@ func (h *pluginHost) OwnerGone(plugin string, gen uint64) {
 	m.plugKeysGone(plugin, gen)
 	m.plugPanelsGone(plugin, gen)
 	m.plugMenusGone(plugin, gen)
+	m.plugGroupsGone(plugin, gen)
 	m.plugPromptsGone(plugin, gen)
 	m.plugStatusGone(plugin, gen)
 	m.plugDecorGone(plugin, gen)

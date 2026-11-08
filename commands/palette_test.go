@@ -26,10 +26,11 @@ func TestCommandsFromBuiltinTable(t *testing.T) {
 	// of keys_commands.go, the Reload Configuration row of settings_commands.go, the
 	// Search and Replace in Project, Git Grep and Project Search Results in List rows of
 	// search_commands.go, the Edit Theme row of theme_commands.go, the 2 Compare
-	// rows of compare_commands.go, the 3 Markdown Contents rows of markdown_commands.go
-	// and the 4 Plugin: rows of plugin_commands.go.
-	if len(entries) != 222 {
-		t.Fatalf("Commands() = %d entries, want 222", len(entries))
+	// rows of compare_commands.go, the 3 Markdown Contents rows of markdown_commands.go,
+	// the Toggle Diagnostics Sidebar and Diagnostics List rows of lsp_commands.go and the
+	// 4 Plugin: rows of plugin_commands.go.
+	if len(entries) != 224 {
+		t.Fatalf("Commands() = %d entries, want 224", len(entries))
 	}
 	if entries[0].Name != "Add Cursor Above" || entries[1].Name != "Add Cursor Below" {
 		t.Fatalf("first entries = %q, %q; want byte order", entries[0].Name, entries[1].Name)

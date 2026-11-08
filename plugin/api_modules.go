@@ -29,6 +29,7 @@ var installers = []func(*apiEnv){
 	installKeys,
 	installUI,
 	installPanel,
+	installGroups,
 	installI18n,
 	installMenu,
 	installDecor,

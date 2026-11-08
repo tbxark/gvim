@@ -18,13 +18,14 @@ import (
 // bundled plugin shipped enabled.
 func markdownTOCConfig(cfg config.Config) *tui.MarkdownTOC {
 	out := tui.DefaultMarkdownTOC()
-	pc, ok := cfg.Plugins["markdown_toc"]
-	if !ok {
-		return &out
+	if pc, ok := cfg.Plugins["markdown_toc"]; ok {
+		if pc.Enabled != nil {
+			out.Enabled = *pc.Enabled
+		}
+		out.Settings = sidebar.ParseSettings(pc.Settings)
 	}
-	if pc.Enabled != nil {
-		out.Enabled = *pc.Enabled
-	}
-	out.Settings = sidebar.ParseSettings(pc.Settings)
+	// The native contents key overrides the retired plugin's settings path when the
+	// user file sets it (config.ContentsFoldBuffer keeps both compatible).
+	out.Settings.FoldBuffer = cfg.ContentsFoldBuffer()
 	return &out
 }
