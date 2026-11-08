@@ -654,8 +654,7 @@ still loads unchanged.
   workspace root is expanded remotely (one bounded shell command) so the palette root and
   the walk use the remote absolute path; a failed expansion leaves the root unchanged and
   surfaces the enumeration error, never a local fallback. Remote rows join with slashes and
-  the local file preview is never used for a remote file mode (the remote data bullet below wires an authority-backed previewer). Gaps: remote
-  git `ls-files` (Fresh prefers git through the backend spawner) is not wired, remote file
+  the local file preview is never used for a remote file mode (the remote data bullet below wires an authority-backed previewer). Gaps: the finder index itself still walks the backend rather than listing git's files (the project-search grep fallback now uses `git ls-files`; the finder does not), remote file
   preview and Live Grep-over-remote are follow-ups (Live Grep is refused with a notice in a
   remote workspace instead of silently searching the local project, the palette file
   preview is cleared, and the local git-status adapter is replaced by an inert one: local
@@ -671,7 +670,28 @@ still loads unchanged.
   truncation, and validates the query locally before any remote run. Git Grep resolves the
   repository remotely (git rev-parse --show-toplevel), then runs git grep -n --column in
   the remote repo root and returns absolute remote paths, so a hit opens through the
-  remote document access; the local git state is never consulted. Project Replace now runs
+  remote document access; the local git state is never consulted.
+  Grep (Live Grep) has an explicit remote scope rather than "whatever grep walks": in a git
+  work tree it reads Fresh's project-file listing once (`git rev-parse
+  --is-inside-work-tree`, then one bounded `git ls-files -z -s --cached --others
+  --exclude-standard`) and only results in that listing enter a batch. Tracked files are
+  therefore kept even when they match .gitignore (and tracked dotfiles are listed, as Fresh
+  does), untracked ignored files are absent, nested repositories/submodules are accepted by
+  their listed prefix (their inner ignore rules are not applied by that one git call), and
+  untracked hidden entries are dropped. Outside a git work tree the fallback filters hidden
+  entries only, because Fresh's walk does not consult .gitignore outside a repository. When
+  the probe/listing fails, times out or is truncated, the candidate list is never guessed
+  at (the scope falls back to hidden-only filtering): using the .gitignore rules alone
+  would wrongly drop tracked files that match an ignore pattern, and the grep path has no
+  other .gitignore source. This is bounded and streamed like the search itself. The
+  remote tool's output cap and the panel's Limit still apply before this filter, so an
+  ignored-heavy tree can return fewer than Limit results; the ripgrep path is unchanged
+  (rg applies its own ignore/hidden rules), so a tracked file that matches .gitignore is
+  still omitted there while Fresh's git candidate list (and the grep fallback above)
+  includes it - that tracked-file difference on the rg path is recorded, and when the
+  panel supplies a finder file snapshot that snapshot (already ignore-filtered) is
+  authoritative. No local file is read anywhere in this path.
+  Project Replace now runs
   on the remote host through the authority file system (see the remote-project-replace
   bullet below). The current-file and open-buffers scopes now search the editor's remote
   document snapshots (the authority loaded that text; unsaved edits included) with the same
@@ -681,8 +701,11 @@ still loads unchanged.
   the authority's bounded windowed read with an honest truncated marker and stale-request guard
   (the panel's sequence drops superseded answers; a disconnected authority is an error, never a
   local read). Remaining remote gaps: the preview is plain text (no remote syntax spans) and
-  head-only for files over 256 KiB, and remote .gitignore/candidate filtering stays out of the
-  search list. The remote
+  head-only for files over 256 KiB; the grep fallback's scope depends on a complete remote
+  git candidate listing (a failed/truncated listing degrades to hidden-only filtering, and
+  the degradation is not surfaced as a separate notice); nested-repository contents are
+  accepted without applying their inner ignore rules; and the filter runs after the tool's
+  output cap, so the result count can be below Limit. The remote
   ~/~user root is expanded by the remote shell; authority.QuoteDir keeps the tilde word
   expandable and quotes only the tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is
   not a tilde expansion in sh/bash.
@@ -851,8 +874,10 @@ still loads unchanged.
   the count of files already atomically written; there is no cross-file rollback and no
   undo history for the direct writes (undo across a remote run is a recorded residual).
   Files open in the editor (dirty buffers) are skipped: their buffer text is not the remote
-  file's text and writing under a live buffer is never safe; remote .gitignore/large-file
-  filtering stays out of the candidate list (the remote search caps it first). The local
+  file's text and writing under a live buffer is never safe; remote large-file filtering
+  stays out of the candidate list (the remote search caps it first), and candidate ignore
+  filtering follows the search-list scope above (including its tracked-file difference on
+  the rg path). The local
   project-search preview and the local git-status adapter stay cleared for a remote launch.
   Tests: `internal/app/remote_replace_test.go` (remote multi-file write with a local decoy
   untouched, stale-hash skip, changed-mtime skip from the pre-write stat, write failure

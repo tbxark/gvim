@@ -40,6 +40,32 @@ func TestCompletionItemKeepsResolveFields(t *testing.T) {
 	if withLD.Detail != "(use std::collections::HashMap)" || withLD.Label != "HashMap" {
 		t.Fatalf("labelDetails item = %+v, want the path as detail and the bare label", withLD)
 	}
+	// Fresh's lsp_items_to_popup_items puts labelDetails detail and description
+	// together (detail trimmed at the start, then a space, then description) and
+	// keeps the bare label as the inserted text.
+	desc := "std::collections"
+	both := completionItem(protocol.CompletionItem{
+		Label:        "HashMap",
+		LabelDetails: &protocol.CompletionItemLabelDetails{Detail: &labelDetail, Description: &desc},
+	})
+	if both.Detail != "(use std::collections::HashMap) std::collections" {
+		t.Fatalf("labelDetails detail+description = %q", both.Detail)
+	}
+	if both.InsertText != "HashMap" {
+		t.Fatalf("labelDetails insert = %q, want the bare label", both.InsertText)
+	}
+	descOnly := completionItem(protocol.CompletionItem{
+		Label:        "HashMap",
+		LabelDetails: &protocol.CompletionItemLabelDetails{Description: &desc},
+	})
+	if descOnly.Detail != "std::collections" {
+		t.Fatalf("labelDetails description = %q", descOnly.Detail)
+	}
+	// Without labelDetails the item's own detail is the dimmed text.
+	fallback := completionItem(protocol.CompletionItem{Label: "len", Detail: protocol.NewOptional("fn len()")})
+	if fallback.Detail != "fn len()" || fallback.InsertText != "len" {
+		t.Fatalf("fallback item = %+v, want the server detail and the bare label insert", fallback)
+	}
 	plain := completionItem(protocol.CompletionItem{Label: "x"})
 	if plain.Snippet || plain.HasData || len(plain.AdditionalTextEdits) != 0 {
 		t.Fatalf("plain item = %+v, want no resolve metadata", plain)

@@ -133,7 +133,7 @@ allocating and raises `resulting string too large` (or the stated error) beyond 
 | `gvim.diff.compare_buffers` | 1 000 000 lines and 16 MiB per side; a binary buffer is `invalid`, a large-file mode buffer or one over the caps is `too_large` |
 | `gvim.diff.replace_range` | one edit per call (the `b:edit` edit and inserted-byte caps apply); a read-only, binary, out-of-range or stale-version call returns `false` and changes nothing |
 | `fs.read` | 16 MiB (option `max`); `fs.list` 100 000 entries; `fs.walk` 100 000 entries |
-| `fs.copy` (remote authority) | each file is read whole, at most 16 MiB (`too_large`); a directory tree is at most 100 000 entries (`limit`); a tree containing a symbolic link is `unsupported`; no streaming and no metadata preservation |
+| `fs.copy` (remote authority) | streamed in 1 MiB `ReadRange`/`WriteStream` windows when the backend has the streamed-write surface (no per-file size cap; destination atomic, temp aborted on failure/cancel); a backend without it keeps the whole-file fallback at 16 MiB per file (`too_large`); a directory tree is at most 100 000 entries (`limit`); a tree containing a symbolic link is `unsupported`; no directory modes/mtimes or other metadata preservation |
 | `proc` | argv 1024 entries and 1 MiB, env 256 entries, output 8 MiB per stream, stdin queue 8 MiB |
 | `s .. s` (concatenation) | **cannot be capped** (it is a VM instruction); the heap guard is the net |
 | patterns (`string.*`) | 2 000 000 steps plus 8 per subject byte, pattern at most 256 bytes, subject at most 16 MiB |

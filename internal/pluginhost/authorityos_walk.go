@@ -19,6 +19,9 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
+	"io"
+	"io/fs"
 	"path"
 	"sort"
 	"strings"
@@ -35,6 +38,9 @@ const (
 	remoteCopyFileMax = 16 << 20
 	// remoteWalkDefaultEntries matches the local Walk's default when MaxEntries is zero.
 	remoteWalkDefaultEntries = 50_000
+	// remoteCopyChunk is the bounded ReadRange window of a streamed remote copy, matching
+	// the authority's windowed-read cap.
+	remoteCopyChunk = 1 << 20
 )
 
 // RealPath resolves symbolic links on the workspace machine through the authority's
@@ -157,24 +163,10 @@ func (o *authorityOS) Copy(ctx context.Context, from, to string) error {
 	default:
 		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: not a regular file (remote copy supports files and directory trees)", from)
 	}
-	if st.Size > remoteCopyFileMax {
-		return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded)", from, remoteCopyFileMax)
-	}
 	if d, err := o.files().Stat(ctx, dst); err == nil && d.Kind == "dir" {
 		return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination is a directory", to)
 	}
-	data, err := o.files().ReadFile(ctx, src, remoteCopyFileMax)
-	if err != nil {
-		return mapErr(err, from)
-	}
-	if int64(len(data)) > remoteCopyFileMax {
-		return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded)", from, remoteCopyFileMax)
-	}
-	opts := hostos.WriteOptions{}
-	if st.Mode != 0 {
-		opts.Mode = st.Mode
-	}
-	return mapErr(o.files().WriteFile(ctx, dst, data, opts), to)
+	return o.copyFile(ctx, src, dst, from, st.Size, st.Mode)
 }
 
 func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom string) error {
@@ -219,23 +211,93 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom string
 				return err
 			}
 		case "file":
-			if entry.Size > remoteCopyFileMax {
-				return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded)", entry.Path, remoteCopyFileMax)
-			}
-			data, err := o.files().ReadFile(ctx, entry.Path, remoteCopyFileMax)
-			if err != nil {
-				return mapErr(err, entry.Path)
-			}
-			if int64(len(data)) > remoteCopyFileMax {
-				return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded)", entry.Path, remoteCopyFileMax)
-			}
-			if err := mapErr(o.files().WriteFile(ctx, target, data, hostos.WriteOptions{}), target); err != nil {
+			if err := o.copyFile(ctx, entry.Path, target, entry.Path, entry.Size, 0); err != nil {
 				return err
 			}
 		default:
 			// Sockets, devices and the like are not copied, as locally.
 		}
 	}
+	return nil
+}
+
+// copyFile copies one remote file. When the backend has the authority's streamed-write
+// surface, it copies in bounded ReadRange windows into an atomic WriteStream: memory is
+// one chunk, the destination is untouched until Commit, and a failure/cancellation Aborts
+// the temporary file (so an existing destination survives). Without that surface it keeps
+// the previous whole-file fallback, whose 16 MiB cap is deliberately conservative because
+// a whole-file ReadFile/WriteFile pair is neither streaming nor atomic on every backend.
+func (o *authorityOS) copyFile(ctx context.Context, src, dst, display string, size int64, mode fs.FileMode) error {
+	if streamer := authority.WriteStreams(o.files()); streamer != nil {
+		return o.copyStreamedFile(ctx, streamer, src, dst, display, size, mode)
+	}
+	if size > remoteCopyFileMax {
+		return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded on this backend: it has no streamed-write surface)", display, remoteCopyFileMax)
+	}
+	data, err := o.files().ReadFile(ctx, src, remoteCopyFileMax)
+	if err != nil {
+		return mapErr(err, src)
+	}
+	if int64(len(data)) > remoteCopyFileMax {
+		return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded on this backend: it has no streamed-write surface)", display, remoteCopyFileMax)
+	}
+	opts := hostos.WriteOptions{}
+	if mode != 0 {
+		opts.Mode = mode
+	}
+	return mapErr(o.files().WriteFile(ctx, dst, data, opts), dst)
+}
+
+// copyStreamedFile copies exactly the source size observed before the copy. A source that
+// shrank (short ReadRange/EOF) fails, aborting the target temp; growth beyond the initial
+// size is not copied (recorded residual). Cancellation is checked between chunks and the
+// abort uses a background context so the temp file is still removed.
+func (o *authorityOS) copyStreamedFile(ctx context.Context, streamer authority.WriteStreamer, src, dst, display string, size int64, mode fs.FileMode) error {
+	opts := hostos.WriteOptions{Atomic: true}
+	if mode != 0 {
+		opts.Mode = mode
+	}
+	ws, err := streamer.WriteStream(ctx, dst, opts)
+	if err != nil {
+		return mapErr(err, dst)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			ws.Abort(context.Background())
+		}
+	}()
+	files := o.files()
+	var off int64
+	for off < size {
+		if err := ctx.Err(); err != nil {
+			return mapErr(err, "")
+		}
+		want := min(remoteCopyChunk, size-off)
+		chunk, rerr := files.ReadRange(ctx, src, off, want)
+		if len(chunk) > 0 {
+			if werr := ws.Write(ctx, chunk); werr != nil {
+				return mapErr(werr, dst)
+			}
+			off += int64(len(chunk))
+		}
+		if off >= size {
+			break
+		}
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				return pluginapi.Errf(pluginapi.CodeIO, "%s: the source changed during copy (read %d of %d bytes); the destination was not replaced", display, off, size)
+			}
+			return mapErr(rerr, src)
+		}
+		if len(chunk) == 0 {
+			return pluginapi.Errf(pluginapi.CodeIO, "%s: the source changed during copy (no data at %d of %d bytes); the destination was not replaced", display, off, size)
+		}
+	}
+	if err := ws.Commit(ctx); err != nil {
+		return mapErr(err, dst)
+	}
+	committed = true
 	return nil
 }
 

@@ -1,6 +1,12 @@
 package editor
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/tbxark/gvim/document"
+)
 
 func TestDabbrevExpandCyclesCandidates(t *testing.T) {
 	t.Parallel()
@@ -83,5 +89,184 @@ func TestDabbrevExpandCyclesCandidates(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// withDabbrevDocs returns an editor with one tab per text and the given tab active.
+func withDabbrevDocs(active int, texts ...string) *Editor {
+	e := New(Options{Rows: 5, Cols: 80})
+	e.docs = nil
+	for _, text := range texts {
+		e.docs = append(e.docs, newDocument("", text))
+	}
+	e.switchTo(active)
+	return e
+}
+
+// TestDabbrevMultiBufferCyclesOtherBuffers: after the active buffer's candidates,
+// repeated presses cycle the other open buffers' words in tab order, then restore
+// the typed prefix.
+func TestDabbrevMultiBufferCyclesOtherBuffers(t *testing.T) {
+	t.Parallel()
+	e := withDabbrevDocs(0, "fox fo", "foobar\n", "foobaz\n")
+	marksCaret(e, 0, 6)
+	want := []string{"fox fox", "fox foobar", "fox foobaz", "fox fo"}
+	for i, w := range want {
+		if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+			t.Fatalf("press %d: %v", i+1, r.Err)
+		}
+		if got := e.Active().Buffer.Line(0); got != w {
+			t.Fatalf("after press %d line = %q, want %q", i+1, got, w)
+		}
+	}
+}
+
+// TestDabbrevMultiBufferWithoutActiveMatches: other buffers are searched when the
+// active buffer has no candidate; the first press already inserts one.
+func TestDabbrevMultiBufferWithoutActiveMatches(t *testing.T) {
+	t.Parallel()
+	e := withDabbrevDocs(0, "xy fo", "foobar\n")
+	marksCaret(e, 0, 5)
+	if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+		t.Fatalf("first press: %v", r.Err)
+	}
+	if got := e.Active().Buffer.Line(0); got != "xy foobar" {
+		t.Fatalf("line = %q, want the other buffer's word", got)
+	}
+	if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+		t.Fatalf("second press: %v", r.Err)
+	}
+	if got := e.Active().Buffer.Line(0); got != "xy fo" {
+		t.Fatalf("after the cycle line = %q, want the prefix", got)
+	}
+}
+
+// TestDabbrevMultiBufferDeduplicates: a word already offered by the active buffer
+// is not offered again from another buffer, and a word shared by two other buffers
+// appears once.
+func TestDabbrevMultiBufferDeduplicates(t *testing.T) {
+	t.Parallel()
+	e := withDabbrevDocs(0, "foobar fo", "foobar\n", "foobaz foobar\n")
+	marksCaret(e, 0, 10)
+	want := []string{"foobar foobar", "foobar foobaz", "foobar fo"}
+	for i, w := range want {
+		if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+			t.Fatalf("press %d: %v", i+1, r.Err)
+		}
+		if got := e.Active().Buffer.Line(0); got != w {
+			t.Fatalf("after press %d line = %q, want %q", i+1, got, w)
+		}
+	}
+}
+
+// TestDabbrevMultiBufferBoundedBuffers: only DabbrevOtherBufferLimit other buffers
+// are scanned, so a session with many tabs stays cheap.
+func TestDabbrevMultiBufferBoundedBuffers(t *testing.T) {
+	t.Parallel()
+	texts := []string{"fo"}
+	for i := 0; i < document.DabbrevOtherBufferLimit+4; i++ {
+		texts = append(texts, fmt.Sprintf("fooword%d\n", i))
+	}
+	e := withDabbrevDocs(0, texts...)
+	marksCaret(e, 0, 2)
+	// Candidate i (0-based) comes from other buffer i; after the last included
+	// buffer the next press restores the prefix.
+	for i := 0; i < document.DabbrevOtherBufferLimit; i++ {
+		if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+			t.Fatalf("press %d: %v", i+1, r.Err)
+		}
+		want := fmt.Sprintf("fooword%d", i)
+		if got := e.Active().Buffer.Line(0); got != want {
+			t.Fatalf("after press %d line = %q, want %q", i+1, got, want)
+		}
+	}
+	if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+		t.Fatalf("restore press: %v", r.Err)
+	}
+	if got := e.Active().Buffer.Line(0); got != "fo" {
+		t.Fatalf("after the bounded cycle line = %q, want the prefix", got)
+	}
+}
+
+// TestDabbrevMultiBufferWindowIsBounded: only the middle window of a large other
+// buffer is scanned, so a word at the start is outside the bounded window while a
+// word in the middle is found.
+func TestDabbrevMultiBufferWindowIsBounded(t *testing.T) {
+	t.Parallel()
+	var sb strings.Builder
+	sb.WriteString("foofar\n")
+	const filler = 3000
+	for i := 0; i < filler; i++ {
+		if i == filler/2 {
+			sb.WriteString("foonear\n")
+			continue
+		}
+		sb.WriteString(strings.Repeat("x", 100))
+		sb.WriteString("\n")
+	}
+	e := withDabbrevDocs(0, "zz fo", sb.String())
+	marksCaret(e, 0, 5)
+	if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+		t.Fatalf("first press: %v", r.Err)
+	}
+	if got := e.Active().Buffer.Line(0); got != "zz foonear" {
+		t.Fatalf("line = %q, want the middle window's word, not the far one", got)
+	}
+}
+
+// TestDabbrevMultiBufferSmartCaseAndUndo: an uppercase prefix matches other-buffer
+// words case-sensitively, and one press is one undo step.
+func TestDabbrevMultiBufferSmartCaseAndUndo(t *testing.T) {
+	t.Parallel()
+	e := withDabbrevDocs(0, "FO", "FOOBAR\n", "foobar\n")
+	marksCaret(e, 0, 2)
+	if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+		t.Fatalf("uppercase prefix press: %v", r.Err)
+	}
+	if got := e.Active().Buffer.Line(0); got != "FOOBAR" {
+		t.Fatalf("line = %q, want the case-sensitive match only", got)
+	}
+	if _, ok := e.Active().Buffer.Undo(); !ok {
+		t.Fatal("Undo reported no group")
+	}
+	if got := e.Active().Buffer.Line(0); got != "FO" {
+		t.Fatalf("after undo line = %q, want the prefix", got)
+	}
+	// A lowercase prefix matches either case; FOOBAR is before foobar in tab order.
+	e = withDabbrevDocs(0, "fo", "FOOBAR\n", "foobar\n")
+	marksCaret(e, 0, 2)
+	if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+		t.Fatalf("lowercase prefix press: %v", r.Err)
+	}
+	if got := e.Active().Buffer.Line(0); got != "FOOBAR" {
+		t.Fatalf("line = %q, want the first case-insensitive match", got)
+	}
+}
+
+// TestDabbrevCandidateLimit: one session returns at most DabbrevMaxCandidates
+// candidates (Fresh's 30), nearest first; the next press restores the prefix.
+func TestDabbrevCandidateLimit(t *testing.T) {
+	t.Parallel()
+	words := make([]string, document.DabbrevMaxCandidates+5)
+	for i := range words {
+		words[i] = fmt.Sprintf("fooword%02d", i)
+	}
+	line := strings.Join(words, " ") + " fo"
+	e := withDabbrevDocs(0, line)
+	marksCaret(e, 0, len([]rune(line)))
+	for i := 0; i < document.DabbrevMaxCandidates; i++ {
+		if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+			t.Fatalf("press %d: %v", i+1, r.Err)
+		}
+		want := fmt.Sprintf("fooword%02d", len(words)-1-i)
+		if got := e.Active().Buffer.Line(0); !strings.HasSuffix(got, want) {
+			t.Fatalf("after press %d line = %q, want suffix %q", i+1, got, want)
+		}
+	}
+	if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+		t.Fatalf("restore press: %v", r.Err)
+	}
+	if got := e.Active().Buffer.Line(0); got != line {
+		t.Fatalf("after the capped cycle line = %q, want the prefix restored", got)
 	}
 }

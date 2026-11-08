@@ -51,16 +51,22 @@ func (f *fakeRemoteFiles) ReadFile(_ context.Context, p string, max int64) ([]by
 	}
 	return []byte(data), nil
 }
-func (f *fakeRemoteFiles) ReadRange(ctx context.Context, p string, off, n int64) ([]byte, error) {
-	data, err := f.ReadFile(ctx, p, n)
-	if err != nil {
-		return nil, err
+func (f *fakeRemoteFiles) ReadRange(_ context.Context, p string, off, n int64) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data, ok := f.files[p]
+	if !ok {
+		return nil, io.ErrUnexpectedEOF
 	}
-	if off > int64(len(data)) {
+	if off < 0 || off > int64(len(data)) {
 		return nil, io.EOF
 	}
 	end := min(off+n, int64(len(data)))
-	return data[off:end], nil
+	out := append([]byte(nil), data[off:end]...)
+	if end < off+n {
+		return out, io.EOF
+	}
+	return out, nil
 }
 func (f *fakeRemoteFiles) WriteFile(_ context.Context, p string, data []byte, _ hostos.WriteOptions) error {
 	f.mu.Lock()

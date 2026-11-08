@@ -434,3 +434,153 @@ func TestRemoteSearchPreviewHeadAndErrors(t *testing.T) {
 		t.Fatalf("disconnected preview err = %q", res.Err)
 	}
 }
+
+// gitLsEntry builds one field of git ls-files -z -s output: a tracked entry (mode/object/
+// stage tab path) or, with an empty mode, a bare untracked/nested path.
+func gitLsEntry(mode, p string) string {
+	if mode == "" {
+		return p + "\x00"
+	}
+	return mode + " 0000000000000000000000000000000000000000 0\t" + p + "\x00"
+}
+
+// grepScopeOneShot answers the grep fallback and the Fresh-style git candidate commands.
+func grepScopeOneShot(repo bool, lsFiles []byte, grepOut string, truncated bool) *fakeOneShot {
+	return &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("grep")}, nil
+		}
+		joined := strings.Join(argv, " ")
+		switch {
+		case strings.Contains(joined, "rev-parse"):
+			if repo {
+				return hostos.ProcResult{Stdout: []byte("true")}, nil
+			}
+			return hostos.ProcResult{Stdout: []byte("false")}, nil
+		case strings.Contains(joined, "ls-files"):
+			return hostos.ProcResult{Stdout: lsFiles, Truncated: truncated}, nil
+		case len(argv) > 0 && argv[0] == "grep":
+			return hostos.ProcResult{Stdout: []byte(grepOut)}, nil
+		}
+		return hostos.ProcResult{}, errors.New("unexpected remote command: " + joined)
+	}}
+}
+
+func remoteSearchFileNames(t *testing.T, batches []searchpanel.SearchBatch) []string {
+	t.Helper()
+	var names []string
+	for _, b := range batches {
+		for _, f := range b.Files {
+			names = append(names, f.Name)
+		}
+	}
+	return names
+}
+
+// TestRemoteGrepFallbackUsesFreshGitCandidateScope checks the grep fallback in a git
+// worktree accepts exactly Fresh's project_files scope: the remote git listing includes
+// tracked files even when they match .gitignore (tracked.log here) and tracked dotfiles
+// (.config), while untracked ignored entries (b.log, build/, sub/c.tmp) are simply absent;
+// results below a nested repository listed by name are accepted, untracked hidden entries
+// are dropped, and no local file is read.
+func TestRemoteGrepFallbackUsesFreshGitCandidateScope(t *testing.T) {
+	decoy := t.TempDir()
+	if err := os.WriteFile(filepath.Join(decoy, "b.log"), []byte("local decoy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ls := gitLsEntry("100644", "a.go") +
+		gitLsEntry("100644", "tracked.log") +
+		gitLsEntry("100644", "keep.log") +
+		gitLsEntry("100644", "sub/d.go") +
+		gitLsEntry("100644", ".config") +
+		gitLsEntry("160000", "nested") +
+		gitLsEntry("", "otherrepo/")
+	out := "./a.go:1:todo a\n" +
+		"./tracked.log:1:todo t\n" +
+		"./keep.log:1:todo k\n" +
+		"./sub/d.go:1:todo d\n" +
+		"./b.log:1:todo b\n" +
+		"./build/x.go:1:todo x\n" +
+		"./sub/c.tmp:1:todo c\n" +
+		"./.hidden/secret.go:1:todo s\n" +
+		"./.config:1:todo cfg\n" +
+		"./nested/inner.go:1:todo n\n" +
+		"./otherrepo/x.go:1:todo o\n"
+	one := grepScopeOneShot(true, []byte(ls), out, false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	names := remoteSearchFileNames(t, collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil)))
+	want := "a.go,tracked.log,keep.log,sub/d.go,.config,nested/inner.go,otherrepo/x.go"
+	if got := strings.Join(names, ","); got != want {
+		t.Fatalf("files = %v, want %s", names, want)
+	}
+	// The local decoy directory is unrelated and unchanged: every command ran with the
+	// remote cwd and no local path appears in any argv.
+	if got, _ := os.ReadFile(filepath.Join(decoy, "b.log")); string(got) != "local decoy" {
+		t.Fatalf("a local decoy file changed: %q", got)
+	}
+	for _, c := range one.recorded() {
+		if c.cwd != "/remote/w" {
+			t.Fatalf("remote command cwd = %q, want /remote/w", c.cwd)
+		}
+	}
+}
+
+// TestRemoteGrepFallbackOutsideGitKeepsIgnoreRulesOut checks a non-git workspace is the
+// Fresh walk scope: .gitignore is NOT consulted (b.log stays), hidden entries are dropped,
+// and no local fallback appears.
+func TestRemoteGrepFallbackOutsideGitKeepsIgnoreRulesOut(t *testing.T) {
+	one := grepScopeOneShot(false, nil, "./a.go:1:todo a\n./b.log:1:todo b\n./.hidden/secret.go:1:todo s\n", false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	names := remoteSearchFileNames(t, collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil)))
+	if got := strings.Join(names, ","); got != "a.go,b.log" {
+		t.Fatalf("files = %v, want a.go,b.log (no gitignore outside a repository, hidden dropped)", names)
+	}
+}
+
+// TestRemoteGrepFallbackTruncatedGitListingDegrades checks an incomplete git candidate list
+// (truncated output) is never guessed at: the scope falls back to hidden-only filtering,
+// so a tracked-ignored file and an ignored file both stay visible instead of risking a
+// wrongly dropped tracked file. This is a documented limitation.
+func TestRemoteGrepFallbackTruncatedGitListingDegrades(t *testing.T) {
+	ls := gitLsEntry("100644", "a.go") + gitLsEntry("100644", "tracked.log")
+	out := "./a.go:1:todo a\n./tracked.log:1:todo t\n./b.log:1:todo b\n./.hidden/x.go:1:todo x\n"
+	one := grepScopeOneShot(true, []byte(ls), out, true)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	names := remoteSearchFileNames(t, collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil)))
+	if got := strings.Join(names, ","); got != "a.go,tracked.log,b.log" {
+		t.Fatalf("files = %v, want hidden-only filtering under a truncated listing", names)
+	}
+}
+
+// TestParseGitLsFilesEntry checks the tracked/submodule/untracked split of the candidate
+// listing.
+func TestParseGitLsFilesEntry(t *testing.T) {
+	for _, tc := range []struct {
+		entry              string
+		path               string
+		tracked, submodule bool
+	}{
+		{"100644 abc 0\ta.go", "a.go", true, false},
+		{"100755 abc 0\tscript.sh", "script.sh", true, false},
+		{"160000 abc 0\tvendor/sub", "vendor/sub", true, true},
+		{"untracked.txt", "untracked.txt", false, false},
+		{"nested/", "nested/", false, false},
+	} {
+		path, tracked, submodule := parseGitLsFilesEntry(tc.entry)
+		if path != tc.path || tracked != tc.tracked || submodule != tc.submodule {
+			t.Fatalf("parse %q = %q tracked=%v submodule=%v; want %q %v %v", tc.entry, path, tracked, submodule, tc.path, tc.tracked, tc.submodule)
+		}
+	}
+}

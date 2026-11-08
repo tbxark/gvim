@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -161,6 +162,13 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
 		return
 	}
+	// The grep fallback has no ignore rules of its own (and grep would descend hidden
+	// directories): narrow its output to Fresh's project-file scope. ripgrep already does
+	// that itself, and an index-backed search arrives already filtered by the finder.
+	var scope *remoteGrepResultScope
+	if tool == "grep" && allowed == nil {
+		scope = s.newGrepResultScope(ctx)
+	}
 	res, err := s.run(ctx, s.root, remoteSearchArgv(tool, req))
 	if err != nil {
 		if cancelled() {
@@ -214,6 +222,9 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if !ok {
 			continue
 		}
+		if scope != nil && !scope.allows(rel) {
+			continue
+		}
 		if allowed != nil && !allowed[rel] {
 			continue
 		}
@@ -236,6 +247,124 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		return
 	}
 	flush(true)
+}
+
+// remoteGrepResultScope narrows the grep fallback to Fresh's project-file scope. Fresh
+// lists a git work tree with `git ls-files --cached --others --exclude-standard`: tracked
+// files are listed even when they match .gitignore, untracked ignored files are left out,
+// and nested repositories/submodules are listed only by name. The scope asks the remote
+// host for the same listing once and accepts only results in it. Outside a git work tree,
+// or when the listing fails/times out/is truncated, it degrades to hidden-only filtering
+// (Fresh's walk leaves hidden entries out) and the search continues, never reading local
+// files.
+type remoteGrepResultScope struct {
+	// listed is true only when the git candidate list is complete and membership is
+	// authoritative; tracked entries (including tracked dotfiles) are accepted, untracked
+	// dotfiles are not.
+	listed    bool
+	tracked   map[string]bool
+	untracked map[string]bool
+	// prefixes are nested repositories/submodules git lists only by name. Their contents
+	// are accepted when their own path is not hidden; the inner repository's own ignore
+	// rules are not applied by this single git call.
+	prefixes []string
+}
+
+// newGrepResultScope probes the remote workspace and, in a git work tree, reads the same
+// bounded candidate list Fresh's project_files uses. Any failure (missing git, not a
+// repository, error, truncation) leaves listed false, so the scope only drops hidden
+// entries: an unavailable candidate list must not be guessed at, because guessing with the
+// .gitignore rules alone would wrongly drop tracked files that match an ignore pattern.
+func (s *remoteSearch) newGrepResultScope(ctx context.Context) *remoteGrepResultScope {
+	scope := &remoteGrepResultScope{}
+	if s.files == nil {
+		return scope
+	}
+	res, err := s.run(ctx, s.root, []string{"git", "rev-parse", "--is-inside-work-tree"})
+	if err != nil || res.Code != 0 || strings.TrimSpace(string(res.Stdout)) != "true" {
+		return scope
+	}
+	files, err := s.run(ctx, s.root, []string{"git", "-c", "core.quotePath=false", "ls-files", "-z", "-s", "--cached", "--others", "--exclude-standard"})
+	if err != nil || files.Code != 0 || files.Truncated {
+		return scope
+	}
+	scope.listed = true
+	scope.tracked = make(map[string]bool)
+	scope.untracked = make(map[string]bool)
+	for _, raw := range strings.Split(string(files.Stdout), "\x00") {
+		if raw == "" {
+			continue
+		}
+		pathPart, tracked, submodule := parseGitLsFilesEntry(raw)
+		if pathPart == "" || pathPart == ".git" || strings.HasPrefix(pathPart, ".git/") {
+			continue
+		}
+		if !utf8.ValidString(pathPart) {
+			continue // Fresh drops non-UTF-8 names from project_files too.
+		}
+		switch {
+		case submodule:
+			scope.prefixes = append(scope.prefixes, strings.TrimSuffix(pathPart, "/")+"/")
+		case tracked:
+			scope.tracked[pathPart] = true
+		case strings.HasSuffix(pathPart, "/"):
+			scope.prefixes = append(scope.prefixes, pathPart)
+		default:
+			scope.untracked[pathPart] = true
+		}
+	}
+	return scope
+}
+
+// parseGitLsFilesEntry splits one NUL field of `git ls-files -z -s`: a tracked entry is
+// "<mode> <object> <stage>\t<path>" (mode 160000 is a submodule), an untracked one is the
+// bare path (a nested repository path ends with '/').
+func parseGitLsFilesEntry(entry string) (pathPart string, tracked, submodule bool) {
+	if tab := strings.IndexByte(entry, '\t'); tab >= 0 {
+		header, pathPart := entry[:tab], entry[tab+1:]
+		fields := strings.Fields(header)
+		if len(fields) > 0 && fields[0] == "160000" {
+			return pathPart, true, true
+		}
+		return pathPart, true, false
+	}
+	return entry, false, false
+}
+
+// allows reports whether rel (project-relative, slash separated) is in the grep fallback's
+// scope. With a complete git listing, membership decides: a tracked file is always
+// accepted (Fresh lists tracked files even when they match .gitignore, and tracked dotfiles
+// are listed), an untracked dotfile is dropped, and entries below a nested repository are
+// accepted unless the remaining path is hidden. Without a listing only hidden entries are
+// dropped. Paths that escape the workspace or are absolute/empty are refused.
+func (sc *remoteGrepResultScope) allows(rel string) bool {
+	clean := path.Clean(rel)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
+		return false
+	}
+	hidden := func(p string) bool {
+		for _, seg := range strings.Split(p, "/") {
+			if strings.HasPrefix(seg, ".") {
+				return true
+			}
+		}
+		return false
+	}
+	if !sc.listed {
+		return !hidden(clean)
+	}
+	if sc.tracked[clean] {
+		return true
+	}
+	if sc.untracked[clean] {
+		return !hidden(clean)
+	}
+	for _, prefix := range sc.prefixes {
+		if strings.HasPrefix(clean, prefix) {
+			return !hidden(strings.TrimPrefix(clean, prefix))
+		}
+	}
+	return false
 }
 
 // remoteAllowedFiles turns the panel's project-relative file snapshot into a membership set

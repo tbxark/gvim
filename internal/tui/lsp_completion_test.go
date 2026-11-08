@@ -178,3 +178,46 @@ func TestCompletionResolveFailureChangesNothing(t *testing.T) {
 		t.Fatalf("notice = %q, want the resolve error", lt.m.notice)
 	}
 }
+
+// TestCompletionLabelDetailsShownAndBareLabelInserted checks labelDetails are
+// user-visible as the dimmed detail beside the bare label (the row's Label is the
+// bare identifier, Detail is the import path), that filtering uses the label/insert
+// text and not the detail, and that accepting inserts the bare label once.
+func TestCompletionLabelDetailsShownAndBareLabelInserted(t *testing.T) {
+	port := newFakeLSP("go")
+	port.items = []CompletionItem{{
+		Label:  "HashMap",
+		Detail: "(use std::collections::HashMap)",
+		Insert: "HashMap",
+	}}
+	lt := completionTest(t, port, []string{"Has"}, buffer.Pos{Line: 0, Col: 3})
+	feedCommand(lt, lt.m.completionAsked())
+	if lt.m.lsp.comp == nil {
+		t.Fatal("the completion popup did not open")
+	}
+	rows := lt.popup().Items()
+	if len(rows) != 1 {
+		t.Fatalf("rows = %v, want one candidate", rows)
+	}
+	if rows[0].Label != "HashMap" {
+		t.Fatalf("row label = %q, want the bare identifier (labelDetails must not leak into it)", rows[0].Label)
+	}
+	if rows[0].Detail != "(use std::collections::HashMap)" {
+		t.Fatalf("row detail = %q, want the labelDetails text", rows[0].Detail)
+	}
+
+	// Typing h narrows by the word label ("Hash"), not by the detail text.
+	lt.feed(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if labels := completionLabels(lt); len(labels) != 1 || labels[0] != "HashMap" {
+		t.Fatalf("filtered items = %v, want HashMap", labels)
+	}
+
+	// Accepting inserts the bare label, replacing the typed word; the detail path
+	// never reaches the document.
+	lt.feed(tea.KeyPressMsg{Code: tea.KeyTab})
+	edits := lt.ed.applied["/p/a.go"]
+	want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 4}, Text: "HashMap"}
+	if len(edits) != 1 || edits[0] != want {
+		t.Fatalf("applied = %+v, want the bare label inserted over the typed prefix %+v", edits, want)
+	}
+}

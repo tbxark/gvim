@@ -320,9 +320,27 @@ never apply an item against older text.
 Multi-buffer words are ported for the popup: a bounded window from the middle of every other open
 tab (64 KiB each, at most 8, in tab order rather than Fresh's MRU order) contributes words below
 the active buffer's, and a word the active buffer already has is not duplicated. Dabbrev cycling
-(`dabbrev_expand`, emacs M-/) already existed in gvim: it completes from earlier words of the
-active buffer, cycles on repeated presses with smart case and a bounded scan; Fresh's multi-buffer
-dabbrev (other buffers after the active one) is not ported, a documented residual.
+(`dabbrev_expand`, emacs M-/) uses the same multi-buffer view: the first press collects the
+active buffer's earlier words nearest-first and then the other open tabs' words in tab order, from
+a bounded middle window per buffer (`DabbrevOtherBufferBytes` = 64 KiB, at most
+`DabbrevOtherBufferLimit` = 8 tabs, `DabbrevMaxCandidates` = 30 total). Repeated presses cycle
+through that list, the last press restores the typed prefix, each replacement is one undo step,
+matching is smart-case (an uppercase prefix is case-sensitive, a lowercase one ignores case),
+and a word already offered by the active buffer or an earlier tab is not offered again.
+Large and virtual other buffers are skipped (their windows are not read); the active large file
+keeps its existing bounded backward scan. The one deliberate deviation is buffer order: other
+tabs are searched in tab order, not Fresh's most-recently-used order (the same deviation as the
+popup's multi-buffer words; gvim does not keep an editor-wide MRU list).
+
+Completion rows show labelDetails the way Fresh does: the bare identifier is the row
+label, and the dimmed text after it is labelDetails.detail followed by labelDetails.description
+when the server sent them, or the item's plain detail when it did not. Filtering and acceptance
+use the bare label/insert text, so the import path in labelDetails never leaks into the typed
+prefix filter or the buffer. Completion-item documentation is not displayed: Fresh's
+create_client_capabilities advertises resolveSupport for documentation only because
+rust-analyzer withholds resolveProvider otherwise, and its completion popup likewise renders
+label/detail only; gvim keeps the same server-compatibility advertisement and the same visible
+behaviour.
 
 **Accepting a language-server completion.** A server item is inserted with everything the
 server asked for in one edit: its snippet text is expanded, the import edits of an
@@ -333,16 +351,16 @@ a command (the popup never blocks on it). Snippets are the subset Fresh expands:
 `\$`, `\\`, `\}` and `\|` escapes; the caret goes to the final stop, and a later
 final stop wins. gvim advertises `snippetSupport` and tracks `insertTextFormat` (Fresh
 deliberately does neither and only heuristically detects snippets) and advertises
-`resolveSupport` for `additionalTextEdits` + `documentation` (only the edits are used;
-documentation is not rendered). The insert and every additional edit are applied as one
+`resolveSupport` for `additionalTextEdits` + `documentation` (only the edits are applied;
+the documentation property is advertised for server compatibility, and Fresh does not display
+completion documentation either). The insert and every additional edit are applied as one
 atomic edit guarded by the document version captured when the completion was asked and by
 an overlap check: if the document changed, or the main edit and an additional edit overlap,
 nothing is written and the status row says why ("completion is stale…", "completion edits
 overlap…"). A resolve reply is applied the same way; if the document changed while it was in
 flight, it is refused instead of editing newer text. Not ported from Fresh: tabstop
 navigation (Fresh does not navigate either — it inserts defaults and jumps to the final
-stop), `labelDetails` rendering (Fresh shows the import path from it; gvim shows
-label/detail only), documentation rendering, multi-cursor insertion (gvim has a single
+stop), multi-cursor insertion (gvim has a single
 caret), and the request-id bookkeeping Fresh keeps for a completion that is re-asked while
 open.
 
