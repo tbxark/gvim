@@ -53,14 +53,15 @@ func remoteEditingNotice(spec *authority.RemoteSpec, startupOpen string) string 
 	label := "SSH:" + spec.Display()
 	if startupOpen != "" {
 		return "Remote editing: opening " + startupOpen + " over " + label +
-			"; saves, save as, reload and disk checks go to the remote host, and language " +
-			"servers run on the remote host too (restarted after a reconnect). Remote " +
-			"explorer, external-change watching and crash recovery are not available yet; " +
-			"local files are unchanged"
+			"; saves, save as, reload and disk checks go to the remote host, language " +
+			"servers run on the remote host too (restarted after a reconnect), and file " +
+			"changes on the remote host are watched. Remote explorer and crash recovery are " +
+			"not available yet; local files are unchanged"
 	}
 	return "Remote workspace " + label + " at " + spec.Workspace() +
-		": opened the SSH terminal; language servers run on the remote host. Remote file " +
-		"browsing is not available yet. No local files are opened or changed"
+		": opened the SSH terminal; language servers run on the remote host, and file " +
+		"changes on the remote host are watched. Remote file browsing is not available " +
+		"yet. No local files are opened or changed"
 }
 
 // remoteFileAccess implements document.FileAccess over an authority slot. It never falls

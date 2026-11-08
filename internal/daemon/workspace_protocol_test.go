@@ -103,3 +103,46 @@ func TestWorkspaceListFrame(t *testing.T) {
 		t.Fatalf("list = %+v", got)
 	}
 }
+
+// TestOpenFileWireCompatibility checks the open_file frame stays backward compatible: a
+// legacy payload (paths only) decodes with no Files, and a current payload carries the
+// client cwd and positional files.
+func TestOpenFileWireCompatibility(t *testing.T) {
+	var legacy bytes.Buffer
+	fw := NewFrameWriter(&legacy)
+	if err := fw.WriteFrame(TypeOpenFile, []byte(`{"paths":["a.txt","b.txt"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	f, err := ReadFrame(&legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old OpenFile
+	if err := DecodeJSON(f, &old); err != nil {
+		t.Fatal(err)
+	}
+	if len(old.Paths) != 2 || len(old.Files) != 0 || old.Cwd != "" {
+		t.Fatalf("legacy OpenFile = %+v", old)
+	}
+	var current bytes.Buffer
+	fw = NewFrameWriter(&current)
+	want := OpenFile{
+		Cwd:   "/client",
+		Paths: []string{"rel/a.txt"},
+		Files: []OpenFileTarget{{Path: "rel/a.txt", Line: 3, Col: 2}, {Path: "/abs/b.txt"}},
+	}
+	if err := fw.WriteJSON(TypeOpenFile, want); err != nil {
+		t.Fatal(err)
+	}
+	f, err = ReadFrame(&current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got OpenFile
+	if err := DecodeJSON(f, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Cwd != want.Cwd || len(got.Paths) != 1 || len(got.Files) != 2 || got.Files[0].Line != 3 || got.Files[0].Col != 2 {
+		t.Fatalf("current OpenFile = %+v", got)
+	}
+}

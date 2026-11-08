@@ -39,6 +39,12 @@ func TestTranslateCommands(t *testing.T) {
 	if got := find(de, "terminal_tab_new").Name; got != "New Terminal Tab" {
 		t.Errorf("German terminal_tab_new = %q, want the English fallback", got)
 	}
+	if got := find(de, "close_tab").Description; got != "Den aktuellen Tab im aktuellen Split schließen" {
+		t.Errorf("German close_tab description = %q, want Fresh's translated description", got)
+	}
+	if got := find(de, "terminal_tab_new").Description; got != "Start another shell in a new dock tab" {
+		t.Errorf("German terminal_tab_new description = %q, want the English fallback", got)
+	}
 	if got := find(de, "init_edit").Name; got != "init: Edit init.lua" {
 		t.Errorf("German init_edit = %q, want the gvim English fallback", got)
 	}
@@ -81,17 +87,21 @@ func TestPaletteSearchesAndRunsTranslatedTitles(t *testing.T) {
 }
 
 // TestExtractedCommandKeysExist checks the CI invariant behind the extraction: every
-// command entry that names a catalogue key has that key in the English catalogue, so a
-// stale generated table or a missing en.json entry is caught before the palette silently
-// falls back to English. Descriptions are the next slice and are not required yet.
+// command entry that names a title or description catalogue key has that key in the
+// English catalogue, so a stale generated table or a missing en.json entry is caught
+// before the palette silently falls back to English.
 func TestExtractedCommandKeysExist(t *testing.T) {
 	t.Parallel()
 	for _, e := range commands.Commands(nil) {
-		if e.I18nKey == "" {
-			continue
+		check := func(kind, key string) {
+			if key == "" {
+				return
+			}
+			if got := i18n.T("en", key, nil); got == key {
+				t.Errorf("%s: %s key %q is not in the English catalogue", e.Action, kind, key)
+			}
 		}
-		if got := i18n.T("en", e.I18nKey, nil); got == e.I18nKey {
-			t.Errorf("%s: title key %q is not in the English catalogue", e.Action, e.I18nKey)
-		}
+		check("title", e.I18nKey)
+		check("description", e.DescKey)
 	}
 }

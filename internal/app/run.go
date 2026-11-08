@@ -167,6 +167,10 @@ func requireTerminal(f *os.File) error {
 // and fast. Then the language servers stop and the dock closes, each with its own
 // deadline, so a hung server or shell delays only its own step and never the save.
 func (r *runtime) exit() {
+	if r.skipSave {
+		// No clean save happened, so this exit must not delete the recovery copy.
+		r.interrupted = true
+	}
 	if err := r.saveSearch(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: search history:", err)
 	}
@@ -177,7 +181,7 @@ func (r *runtime) exit() {
 	}
 	if err := r.save(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: session:", err)
-	} else if r.recovery != "" && (!r.interrupted || r.sessionDir != "") {
+	} else if r.recovery != "" && (!r.interrupted || r.sessionDir != "") && !r.skipSave {
 		if restore.ClearRecovery(r.recovery) == nil {
 			_ = os.RemoveAll(r.recovery)
 		}
@@ -213,18 +217,29 @@ type runtime struct {
 	// interrupted is set when the program ended by a signal and not a quit. The recovery
 	// copy then stays when no session is saved to hold the unsaved text.
 	interrupted bool
+	// skipSave is set by the daemon exit path when a capture write is still in flight at
+	// the exit deadline: that write holds the newest snapshot and owns the workspace lock,
+	// so the exit must not write the session itself (it would race it) and must keep the
+	// crash-recovery copy instead of clearing it.
+	skipSave bool
 	// log is the --log-file writer; nil when there is none.
 	log *fileLog
 	// auth is the workspace authority slot of the session (docs/authority.md): the
 	// local backend, or the SSH backend of a remote launch.
 	auth authority.Slot
+	// remoteWatch is the remote external-change bridge of a remote launch; nil for a
+	// local launch, whose filewatch.Watcher is in watcher.
+	remoteWatch *remoteWatch
 }
 
-// close stops the file index of the current root and the watcher.
+// close stops the file index of the current root, the watcher and the remote watch.
 func (r *runtime) close() {
 	r.projects.Close()
 	if r.watcher != nil {
 		_ = r.watcher.Close()
+	}
+	if r.remoteWatch != nil {
+		_ = r.remoteWatch.Close()
 	}
 	if r.auth != nil {
 		_ = r.auth.Close()
@@ -234,7 +249,7 @@ func (r *runtime) close() {
 
 // save writes the session, when a session directory is set.
 func (r *runtime) save() error {
-	if r.sessionDir == "" {
+	if r.sessionDir == "" || r.skipSave {
 		return nil
 	}
 	if err := restore.WriteSession(r.ed, r.sessionDir, r.model.ExplorerState(), r.kept); err != nil {
@@ -633,6 +648,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// local bookkeeping only; the load itself runs in that command and a failure is a
 		// retryable notice, never an empty local buffer.
 		deps.StartupOpen = setupRemoteEditing(ed, authSlot, opts.Remote)
+		deps.StartupLine, deps.StartupCol = opts.Remote.Line, opts.Remote.Col
 		// LSP over SSH: the servers run on the remote host through the slot's
 		// LongRunning surface; a local server must never start for a remote buffer.
 		if deps.LSP != nil {
@@ -643,6 +659,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			}
 		}
 	}
+	// Remote external-change watching: bridge the authority's remote watch into the root's
+	// existing watch pipeline (RootPorts.Watch/WatchDirs). A local launch gets nil here and
+	// keeps its fsnotify watcher; the remote writer never touches the local filesystem.
+	remoteFileWatch := setupRemoteWatch(ctx, &deps, authSlot, opts.Remote)
 	// The one-shots of the session go through the slot: git grep here, the shell and
 	// formatter runner below, the dock terminal through its starter.
 	deps.Root.GitGrep = gitGrep{spawnEnv: envProvider.Overlay, oneShot: authSlot.OneShot()}
@@ -734,6 +754,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 				}
 				return uiadapter.SystemClipboard{}.Write(text) == nil
 			},
+			// A child OSC 52 read request is answered with the system clipboard only
+			// when the gvim extension is on and the workspace is trusted. The answer
+			// is bounded and queued as terminal input; no reply on failure/empty/too
+			// large, so an unavailable clipboard never blocks the child's paste.
+			OSC52Query: dockOSC52Query(cfg, trustedLive, systemClipboardRead),
 		}),
 		Clipboard: uiadapter.SystemClipboard{},
 		Effects: tui.DockEffects{
@@ -779,7 +804,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			// LSP over SSH: after the connection is back, restart the remote servers
 			// that were running before the drop (never on the update goroutine; the
 			// manager honours trust and cancellation and starts no duplicate).
-			AfterReconnect: func() (int, error) { return restartLSPAfterReconnect(authSlot, deps.LSP) },
+			// External-change watching restarts on the new carrier too; the generation
+			// bump there drops events from the dead one before they can reach the UI.
+			AfterReconnect: func() (int, error) {
+				remoteFileWatch.Reconnected()
+				return restartLSPAfterReconnect(authSlot, deps.LSP)
+			},
 		})
 		model.OpenAuthorityTerminalAtStart()
 	}
@@ -818,6 +848,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		recoveryWriter: deps.Root.Recovery,
 		log:            logFile,
 		auth:           authSlot,
+		remoteWatch:    remoteFileWatch,
 	}
 	model.SetQuitStash(rt.stashForQuit)
 	return rt, nil

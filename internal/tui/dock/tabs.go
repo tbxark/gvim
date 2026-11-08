@@ -40,6 +40,9 @@ type Tabs struct {
 	ports   Ports
 	effects Effects
 	names   []string // per tab: "" means the default name
+	// drag is the in-flight strip drag: the Fresh tab-drag gesture reorders a tab
+	// by pressing its label, moving past the threshold and releasing over the strip.
+	drag tabDrag
 	// nextGen is the next shell-generation namespace. Messages carry only a
 	// generation, and every Panel counts its generations from 0, so each tab gets a
 	// disjoint million-wide range; otherwise an output/exit of one tab could match
@@ -221,13 +224,28 @@ func (t *Tabs) currentName() string {
 	return t.tabLabel(t.active)
 }
 
-// tabStartedMsg is the started message of one tab, tagged with the tab's index so
+// tabStartedMsg is the started message of one tab, tagged with the tab's Panel so
 // the container routes it to that tab only: startedMsg itself carries no
 // generation, and two tabs starting in a row would otherwise each consume the
-// other's message.
+// other's message. The Panel pointer (not an index) keeps the routing correct
+// when tabs are reordered while a start is in flight.
 type tabStartedMsg struct {
-	index int
+	tab   *Panel
 	inner tea.Msg
+}
+
+// tabDragThreshold is Fresh's tab-drag activation distance: movement of more than
+// three cells from the press turns a click into a drag (types/drag.rs).
+const tabDragThreshold = 3
+
+// tabDrag is one mouse drag of a strip label. on is a press on a label, active is
+// the drag past the threshold, and x is the latest pointer column.
+type tabDrag struct {
+	from   int
+	startX int
+	x      int
+	on     bool
+	active bool
 }
 
 // NewTab adds a tab at the end, makes it active, and starts its shell. A dock at
@@ -261,8 +279,8 @@ func (t *Tabs) NewTab() tea.Cmd {
 	if cmd == nil {
 		return nil
 	}
-	index := t.active
-	return func() tea.Msg { return tabStartedMsg{index: index, inner: cmd()} }
+	tab := t.tabs[len(t.tabs)-1]
+	return func() tea.Msg { return tabStartedMsg{tab: tab, inner: cmd()} }
 }
 
 // SetActive makes tab i active. It reports false for an out-of-range index.
@@ -292,6 +310,63 @@ func (t *Tabs) wrap(delta int) {
 	}
 	i := ((t.active+delta)%len(t.tabs) + len(t.tabs)) % len(t.tabs)
 	t.SetActive(i)
+}
+
+// MoveActive moves the active tab by delta (-1 left, +1 right) within the dock,
+// keeping its identity, its shell and its focus: only the order of the tab list
+// changes. It reports whether the tab moved. The palette's Move Tab To Left/Right
+// commands and the Ctrl+Shift+PageUp/PageDown keys use it.
+func (t *Tabs) MoveActive(delta int) bool {
+	if delta == 0 || t.active < 0 || t.active >= len(t.tabs) {
+		return false
+	}
+	to := t.active + delta
+	if to < 0 || to >= len(t.tabs) {
+		return false
+	}
+	t.moveTab(t.active, to)
+	return true
+}
+
+// moveTab moves tab from index from to index to, carrying its name and its running
+// session and keeping the active tab active (it follows its own move). No session
+// is started, closed, resized or repainted.
+func (t *Tabs) moveTab(from, to int) {
+	n := len(t.tabs)
+	if from < 0 || from >= n || to < 0 || to >= n || from == to {
+		return
+	}
+	active := t.active
+	tab := t.tabs[from]
+	name := t.names[from]
+	t.tabs = append(t.tabs[:from], t.tabs[from+1:]...)
+	t.names = append(t.names[:from], t.names[from+1:]...)
+	t.tabs = append(t.tabs, nil)
+	copy(t.tabs[to+1:], t.tabs[to:])
+	t.tabs[to] = tab
+	t.names = append(t.names, "")
+	copy(t.names[to+1:], t.names[to:])
+	t.names[to] = name
+	switch {
+	case active == from:
+		t.active = to
+	case from < active && to >= active:
+		t.active = active - 1
+	case from > active && to <= active:
+		t.active = active + 1
+	}
+}
+
+// dropTab reorders tab from where the strip would insert it at insert (the index
+// of the tab the pointer is before, len for the end), applying Fresh's
+// remove-then-adjust rule. A drop on the tab's own place does nothing.
+func (t *Tabs) dropTab(from, insert int) {
+	to := min(max(insert, 0), len(t.tabs))
+	if from < to {
+		to--
+	}
+	to = min(max(to, 0), len(t.tabs)-1)
+	t.moveTab(from, to)
 }
 
 // CloseTab closes the active tab's shell and removes the tab. The last tab
@@ -356,12 +431,12 @@ func (t *Tabs) Restart() tea.Cmd {
 	if len(t.tabs) == 0 {
 		return t.NewTab()
 	}
-	index := t.active
-	cmd := t.Active().Restart()
+	tab := t.Active()
+	cmd := tab.Restart()
 	if cmd == nil {
 		return nil
 	}
-	return func() tea.Msg { return tabStartedMsg{index: index, inner: cmd()} }
+	return func() tea.Msg { return tabStartedMsg{tab: tab, inner: cmd()} }
 }
 
 // Agents returns the configured agent presets the Run Agent picker offers.
@@ -402,8 +477,8 @@ func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
 	if cmd == nil {
 		return nil, ok
 	}
-	index := t.active
-	return func() tea.Msg { return tabStartedMsg{index: index, inner: cmd()} }, ok
+	tab := t.tabs[len(t.tabs)-1]
+	return func() tea.Msg { return tabStartedMsg{tab: tab, inner: cmd()} }, ok
 }
 
 // Open reports whether the dock is shown.
@@ -613,10 +688,10 @@ func (t *Tabs) Press(l frame.Layout, y int) bool {
 func (t *Tabs) Update(msg tea.Msg) (tea.Cmd, bool) {
 	var cmds []tea.Cmd
 	any := false
-	for i, p := range t.tabs {
+	for _, p := range t.tabs {
 		update := msg
 		if ts, ok := msg.(tabStartedMsg); ok {
-			if ts.index != i {
+			if ts.tab != p {
 				continue
 			}
 			update = ts.inner
@@ -657,11 +732,22 @@ func (t *Tabs) Sync() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// TabKey handles the dock's quick-switch keys. It reports whether k was one of
-// them. The keys work while the dock has the keyboard focus, even in keyboard
-// capture, and are documented in docs/terminal.md; they are not keymap data.
+// TabKey handles the dock's tab keys: Ctrl+PageDown/PageUp switch tabs and
+// Ctrl+Shift+PageDown/PageUp move the active tab right/left (Fresh's Move Tab To
+// Right/Left commands). The keys work while the dock has the keyboard focus, even
+// in keyboard capture, and are documented in docs/terminal.md; they are not keymap
+// data. Shift on a page key only arrives in terminals that report modified keys
+// (xterm-style CSI 5;6~ / CSI-u); elsewhere Ctrl+Shift+PgUp arrives as Ctrl+PgUp
+// and switches, which is why the palette rows and the mouse drag stay the
+// guaranteed reorder paths.
 func (t *Tabs) TabKey(k tea.Key) bool {
 	switch {
+	case k.Code == tea.KeyPgDown && k.Mod == tea.ModCtrl|tea.ModShift:
+		t.MoveActive(1)
+		return true
+	case k.Code == tea.KeyPgUp && k.Mod == tea.ModCtrl|tea.ModShift:
+		t.MoveActive(-1)
+		return true
 	case k.Code == tea.KeyPgDown && k.Mod == tea.ModCtrl:
 		t.Next()
 		return true
@@ -672,26 +758,91 @@ func (t *Tabs) TabKey(k tea.Key) bool {
 	return false
 }
 
-// Mouse routes mouse input: a click on the dock's title row selects a tab, and
-// everything else goes to the active tab's body.
+// Mouse routes mouse input. A left press on the strip selects a tab and starts a
+// potential drag; moving past Fresh's three-cell threshold with the button down
+// makes it a drag; releasing over the strip reorders the tab to the pointer's
+// insertion point (a release anywhere else cancels without switching tabs, and
+// the drag never turns into a body selection). All other mouse input goes to the
+// active tab's body.
 func (t *Tabs) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
-	if click, ok := msg.(tea.MouseClickMsg); ok && l.DockOn && click.Button == tea.MouseLeft && click.Y == l.DockY {
-		if i, ok := t.tabAtX(l.W, click.X); ok {
-			t.SetActive(i)
-			// A press on the strip is still a press on the dock: it takes the
-			// keyboard when a shell runs (the host's focus gate refuses otherwise).
-			if t.host.Focus != nil {
-				t.host.Focus()
+	switch m := msg.(type) {
+	case tea.MouseClickMsg:
+		if l.DockOn && m.Button == tea.MouseLeft && m.Y == l.DockY {
+			if i, ok := t.tabAtX(l.W, m.X); ok {
+				t.SetActive(i)
+				t.drag = tabDrag{from: i, startX: m.X, x: m.X, on: true}
+				// A press on the strip is still a press on the dock: it takes the
+				// keyboard when a shell runs (the host's focus gate refuses otherwise).
+				if t.host.Focus != nil {
+					t.host.Focus()
+				}
+				return nil, true
+			}
+			t.drag = tabDrag{}
+			return nil, true
+		}
+	case tea.MouseMotionMsg:
+		if t.drag.on {
+			t.drag.x = m.X
+			if !t.drag.active && dragDistance(m.X-t.drag.startX) > tabDragThreshold {
+				t.drag.active = true
+			}
+			// The drag owns the pointer until release, even when it leaves the strip:
+			// a body motion must not start a selection under the dragged label.
+			return nil, true
+		}
+	case tea.MouseReleaseMsg:
+		if t.drag.on {
+			drag := t.drag
+			t.drag = tabDrag{}
+			if drag.active && l.DockOn && m.Y == l.DockY {
+				t.dropTab(drag.from, t.tabInsertAtX(l.W, m.X))
 			}
 			return nil, true
 		}
-		return nil, true
 	}
 	p := t.Active()
 	if p == nil {
 		return nil, false
 	}
 	return p.Mouse(msg, l, count)
+}
+
+// dragDistance is the absolute distance of a drag move.
+func dragDistance(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// tabInsertAtX maps a title-row column to Fresh's tab-drop insertion index: the
+// left half of a label inserts before that tab, its right half after, and a
+// column past the last label inserts at the end.
+func (t *Tabs) tabInsertAtX(w, x int) int {
+	col := 1
+	for i := range t.tabs {
+		n := ansi.StringWidth(" " + t.stripLabel(i) + " ")
+		mid := col + n/2
+		if x < mid {
+			return i
+		}
+		col += n
+		if col >= w {
+			return i + 1
+		}
+	}
+	return len(t.tabs)
+}
+
+// tabInsertCol is the strip column the drop marker for tabInsertAtX draws at.
+func (t *Tabs) tabInsertCol(w, x int) int {
+	idx := t.tabInsertAtX(w, x)
+	col := 1
+	for i := 0; i < idx && i < len(t.tabs); i++ {
+		col += ansi.StringWidth(" " + t.stripLabel(i) + " ")
+	}
+	return min(max(col, 0), max(w-1, 0))
 }
 
 // tabAtX maps a title-row column to a tab index. The strip mirrors drawStrip.
@@ -744,6 +895,13 @@ func (t *Tabs) drawStrip(g *grid.Grid, l frame.Layout, st style.Styles) {
 		x += g.Put(x, l.DockY, l.W-1, label, cell)
 		if x >= l.W-1 {
 			return
+		}
+	}
+	if t.drag.active {
+		// Where the dragged tab would land: Fresh shows a drop indicator during the
+		// drag, so the gesture is visible before the button is released.
+		if col := t.tabInsertCol(l.W, t.drag.x); col < l.W {
+			g.Put(col, l.DockY, min(col+1, l.W), "┃", active)
 		}
 	}
 }

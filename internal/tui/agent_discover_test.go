@@ -388,3 +388,152 @@ func TestStartWorkspaceLaunchKeepsTheRecordAndDedupsBySource(t *testing.T) {
 		t.Fatalf("empty-dir launch dir = %q, want the workspace root", got)
 	}
 }
+
+// externalReport is a scan report with the two local transcript stores and no
+// tmux findings.
+func externalReport() agentdiscover.Report {
+	return agentdiscover.Report{
+		Installed:     true,
+		AllowCommands: true,
+		External: agentdiscover.ExternalReport{
+			Installed: true,
+			Sessions: []agentdiscover.ExternalSession{{
+				Tool: agentdiscover.ExternalClaude, ID: "22222222-aaaa-bbbb-cccc-000000000002",
+				Title: "proj", CWD: "/home/u/proj", Path: "/home/u/.claude/projects/x/22222222.jsonl",
+				Agent:      "claude",
+				ResumeArgv: []string{"claude", "--resume", "22222222-aaaa-bbbb-cccc-000000000002"},
+				Exact:      true,
+			}, {
+				Tool: agentdiscover.ExternalCodex, ID: "abcdef01-2345-6789-abcd-ef0123456789",
+				Title: "codexproj", CWD: "/home/u/codexproj",
+				Agent: "codex", ResumeArgv: []string{"codex", "resume", "--last"}, Exact: false,
+			}},
+			Tools: []agentdiscover.ExternalTool{
+				{ID: agentdiscover.ExternalClaude, Name: "Claude Code", Installed: true, Count: 1},
+				{ID: agentdiscover.ExternalCodex, Name: "Codex CLI", Installed: true, Count: 1},
+			},
+		},
+	}
+}
+
+func newExternalDiscoverModel(t *testing.T, report agentdiscover.Report) (*Model, *fakeStarter) {
+	t.Helper()
+	starter := newFakeStarter()
+	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter})
+	m.SetAgentDiscoverer(&fakeDiscoverer{report: report})
+	return m, starter
+}
+
+func TestDiscoverListsLocalAgentTranscripts(t *testing.T) {
+	m, starter := newExternalDiscoverModel(t, externalReport())
+	cmd := rootPaletteRun(m, "discover_agent_sessions")
+	runDiscoverDone(t, m, cmd)
+	o, ok := discoverOverlay(m)
+	if !ok {
+		t.Fatal("the picker is not open")
+	}
+	if got := o.p.Rows(); got != 2 {
+		t.Fatalf("rows = %d, want the two transcript sessions", got)
+	}
+	// Listing is just a scan: nothing is started until the user acts.
+	if len(starter.launches) != 0 || len(starter.dirs) != 0 {
+		t.Fatalf("the scan started a terminal: launches %+v dirs %v", starter.launches, starter.dirs)
+	}
+	g := grid.New(100, 24)
+	o.Draw(g)
+	plain := strings.Join(g.Plain(), " ")
+	for _, want := range []string{"Claude Code", "proj", "Codex CLI", "codexproj", "claude --resume", "codex resume --last"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("painted picker = %q, want %q", plain, want)
+		}
+	}
+	// The inexact Codex resume says so on its detail line (the painted row may be
+	// clipped by the picker width).
+	if detail := discoverRowDetail(o.rows[1]); !strings.Contains(detail, "resumes the newest session in that directory") {
+		t.Fatalf("codex detail = %q, want the inexact-resume note", detail)
+	}
+}
+
+func TestDiscoverResumesATranscriptAndDedupsItsSource(t *testing.T) {
+	m, starter := newExternalDiscoverModel(t, externalReport())
+	cmd := rootPaletteRun(m, "discover_agent_sessions")
+	runDiscoverDone(t, m, cmd)
+	_, resume := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // first row: Claude Code proj
+	dockSettle(t, m, resume)
+	if len(starter.launches) != 1 {
+		t.Fatalf("launches = %+v, want the claude resume", starter.launches)
+	}
+	got := starter.launches[0]
+	if !slices.Equal(got.Argv, []string{"claude", "--resume", "22222222-aaaa-bbbb-cccc-000000000002"}) {
+		t.Fatalf("resume argv = %v", got.Argv)
+	}
+	if !slices.Equal(got.ResumeArgv, got.Argv) || got.Agent != "claude" || !got.Ephemeral {
+		t.Fatalf("launch record = %+v", got)
+	}
+	if got.Source != "claude-code:22222222-aaaa-bbbb-cccc-000000000002" {
+		t.Fatalf("source = %q", got.Source)
+	}
+	if len(starter.launchDirs) != 1 || starter.launchDirs[0] != "/home/u/proj" {
+		t.Fatalf("launch dirs = %v, want the session cwd", starter.launchDirs)
+	}
+	if m.dock.Count() != 1 || m.dock.Name(0) != "Claude Code:proj" {
+		t.Fatalf("dock = %d tabs, name %q", m.dock.Count(), m.dock.Name(0))
+	}
+	// Choosing the same transcript again focuses the tab that already resumed it.
+	cmd = rootPaletteRun(m, "discover_agent_sessions")
+	runDiscoverDone(t, m, cmd)
+	_, resume = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	dockSettle(t, m, resume)
+	if len(starter.launches) != 1 || m.dock.Count() != 1 {
+		t.Fatalf("a repeated choice duplicated the resume: launches %+v tabs %d", starter.launches, m.dock.Count())
+	}
+}
+
+func TestDiscoverImportsATranscriptWorkspace(t *testing.T) {
+	m, _ := newExternalDiscoverModel(t, externalReport())
+	workspaces := &launchWorkspaces{}
+	m.SetWorkspacePort(workspaces)
+	cmd := rootPaletteRun(m, "discover_agent_sessions")
+	runDiscoverDone(t, m, cmd)
+	m.Update(typed("i"))
+	if len(workspaces.roots) != 1 || workspaces.roots[0] != "/home/u/proj" {
+		t.Fatalf("import roots = %v", workspaces.roots)
+	}
+	if workspaces.labels[0] != "claude:proj" {
+		t.Fatalf("import label = %q", workspaces.labels[0])
+	}
+	launch := workspaces.launch[0]
+	if !slices.Equal(launch.Argv, []string{"claude", "--resume", "22222222-aaaa-bbbb-cccc-000000000002"}) {
+		t.Fatalf("import launch argv = %v", launch.Argv)
+	}
+	if launch.Agent != "claude" || !launch.Ephemeral || launch.Dir != "/home/u/proj" {
+		t.Fatalf("import launch = %+v", launch)
+	}
+	if launch.Source != "claude-code:22222222-aaaa-bbbb-cccc-000000000002" {
+		t.Fatalf("import source = %q", launch.Source)
+	}
+}
+
+func TestDiscoverTranscriptProblemsAndNoDirectory(t *testing.T) {
+	report := externalReport()
+	report.External.Sessions[0].CWD = ""
+	report.External.Problems = []string{"Claude Code: permission denied"}
+	m, _ := newExternalDiscoverModel(t, report)
+	cmd := rootPaletteRun(m, "discover_agent_sessions")
+	runDiscoverDone(t, m, cmd)
+	o, _ := discoverOverlay(m)
+	g := grid.New(100, 24)
+	o.Draw(g)
+	if plain := strings.Join(g.Plain(), " "); !strings.Contains(plain, "Discovery problems") || !strings.Contains(plain, "permission denied") {
+		t.Fatalf("painted picker = %q, want the transcript problem stated", plain)
+	}
+	workspaces := &launchWorkspaces{}
+	m.SetWorkspacePort(workspaces)
+	m.Update(typed("i"))
+	if len(workspaces.roots) != 0 {
+		t.Fatalf("imported a transcript with no directory: %v", workspaces.roots)
+	}
+	if !strings.Contains(m.notice, "records no directory") {
+		t.Fatalf("notice = %q, want the missing-directory explanation", m.notice)
+	}
+}

@@ -18,6 +18,19 @@ import (
 // opens in its editor) after the hello. It blocks until the daemon detaches this client,
 // exits, the connection drops, or ctx is canceled.
 func AttachClient(ctx context.Context, name string, files []string) error {
+	targets := make([]OpenFileTarget, len(files))
+	for i, path := range files {
+		targets[i] = OpenFileTarget{Path: path}
+	}
+	cwd, _ := os.Getwd()
+	return AttachClientTargets(ctx, name, cwd, targets)
+}
+
+// AttachClientTargets is AttachClient for positional launch targets: each target's path
+// is sent as given (relative paths are resolved by the daemon against cwd, the client's
+// working directory) with its 1-based Line/Col. The legacy Paths field is still filled,
+// so an older daemon opens the files without positions.
+func AttachClientTargets(ctx context.Context, name, cwd string, files []OpenFileTarget) error {
 	conn, err := Attach(name)
 	if err != nil {
 		return err
@@ -34,7 +47,11 @@ func AttachClient(ctx context.Context, name string, files []string) error {
 		return err
 	}
 	if len(files) > 0 {
-		if err := fw.WriteJSON(TypeOpenFile, OpenFile{Paths: files}); err != nil {
+		paths := make([]string, len(files))
+		for i, f := range files {
+			paths[i] = f.Path
+		}
+		if err := fw.WriteJSON(TypeOpenFile, OpenFile{Paths: paths, Cwd: cwd, Files: files}); err != nil {
 			return err
 		}
 	}

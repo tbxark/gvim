@@ -579,6 +579,8 @@ type Deps struct {
 	// disconnected read is a retryable notice rather than an empty buffer, and the
 	// open is retried after the authority reconnects.
 	StartupOpen string
+	// StartupLine and StartupCol are the optional 1-based startup position.
+	StartupLine, StartupCol int
 	// Warnings are config problems that Show Warnings lists, each as one entry, besides the
 	// Notice that the status row shows.
 	Warnings []string

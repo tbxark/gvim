@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/agentdiscover"
+	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/picker"
 )
@@ -57,7 +58,7 @@ func (m *Model) SetAgentDiscoverer(d AgentDiscoverer) { m.discover = d }
 
 const (
 	agentDiscoverTitle    = "Discover Agent Sessions"
-	agentDiscoverScanning = "Scanning for tmux sessions…"
+	agentDiscoverScanning = "Scanning for local agent sessions…"
 	agentDiscoverNone     = "No agent sessions found."
 	agentDiscoverFooter   = "Enter opens · i imports as a workspace · Ctrl+R scans again · Esc closes"
 	agentDiscoverMissing  = "Agent discovery is not available in this session"
@@ -67,7 +68,9 @@ const (
 	// workspace layer predates the queued launch: the workspace exists but the
 	// session's terminal was not started there.
 	agentDiscoverNoQueuedLaunch = "Import: this daemon build cannot start the session's terminal in the new workspace; the workspace was created - open its terminal and run: "
-	agentDiscoverNoTmux         = "tmux is not running on this machine (no socket found in $TMUX_TMPDIR or /tmp)"
+	agentDiscoverNoTmux         = "tmux is not running and no Claude Code/Codex transcripts were found"
+	agentDiscoverResumeFailed   = "Terminal: could not resume the discovered agent session"
+	agentDiscoverNoSessionID    = "Import: the session records no directory"
 )
 
 // agentDiscoverOverlay is the discovery picker. It owns the report, so nothing is
@@ -77,7 +80,14 @@ type agentDiscoverOverlay struct {
 	p      *picker.Picker
 	seq    int // scan generation: a report for an older scan is dropped
 	report agentdiscover.Report
-	rows   []agentdiscover.Session // the sessions, indexed by picker item ID
+	rows   []discoverRow // the rows, indexed by picker item ID
+}
+
+// discoverRow is one row of the merged picker: an outside tmux session, or a
+// local Claude Code/Codex transcript. Exactly one field is set.
+type discoverRow struct {
+	tmux     *agentdiscover.Session
+	external *agentdiscover.ExternalSession
 }
 
 // agentDiscoverDoneMsg carries one scan's report back to the update loop.
@@ -124,7 +134,8 @@ func (o *agentDiscoverOverlay) Draw(g *grid.Grid) { o.p.Draw(g) }
 func (o *agentDiscoverOverlay) Active() bool      { return o.p.Active() }
 
 // cmdFor turns what the picker asks of its owner into commands: the ranking, and
-// the chosen session opening in a new dock tab.
+// the chosen row opening in a new dock tab. A tmux row attaches; a Claude
+// Code/Codex transcript row starts its agent's resume command.
 func (o *agentDiscoverOverlay) cmdFor(r picker.Result) tea.Cmd {
 	var cmds []tea.Cmd
 	if r.Cmd != nil {
@@ -139,40 +150,92 @@ func (o *agentDiscoverOverlay) cmdFor(r picker.Result) tea.Cmd {
 		if !ok || chosen.ID < 0 || chosen.ID >= len(o.rows) {
 			continue
 		}
-		session := o.rows[chosen.ID]
-		cmd, ok := o.m.dock.StartDiscovered(session.AttachArgv, discoverTabName(session))
-		if !ok {
-			o.m.notice = "Terminal: could not open the discovered session"
+		row := o.rows[chosen.ID]
+		if row.tmux != nil {
+			session := *row.tmux
+			cmd, ok := o.m.dock.StartDiscovered(session.AttachArgv, discoverTabName(session))
+			if !ok {
+				o.m.notice = "Terminal: could not open the discovered session"
+				continue
+			}
+			cmds = append(cmds, cmd)
 			continue
 		}
-		cmds = append(cmds, cmd)
+		if row.external != nil {
+			cmds = append(cmds, o.startExternal(*row.external))
+		}
 	}
 	return tea.Batch(cmds...)
 }
 
-// importSelected creates (or reuses) a workspace for the selected session's
-// directory and closes the picker. The workspace registry enforces one workspace
-// per canonical root, so importing the same directory twice reuses it; a session
-// without a recorded directory cannot be imported. Import needs the daemon's
-// workspace layer; a direct launch states that instead.
+// startExternal starts the discovered transcript's resume command in a new
+// ephemeral terminal tab, in the session's directory. A repeated choice of the
+// same session focuses the tab that already resumed it instead of starting a
+// second copy. The argv is the fixed registry template built by the scanner; the
+// transcript itself never supplies a program, only the validated session id.
+func (o *agentDiscoverOverlay) startExternal(session agentdiscover.ExternalSession) tea.Cmd {
+	source := externalSource(session)
+	if source != "" {
+		if idx, ok := o.m.dock.FindSource(source); ok {
+			o.m.dock.SetActive(idx)
+			o.m.dock.Focus()
+			return nil
+		}
+	}
+	launch := terminal.Launch{
+		Argv:       append([]string(nil), session.ResumeArgv...),
+		Agent:      session.Agent,
+		ResumeArgv: append([]string(nil), session.ResumeArgv...),
+		Ephemeral:  true,
+		Source:     source,
+	}
+	cmd, ok := o.m.dock.StartProgram(launch, externalTabName(session), session.CWD)
+	if !ok {
+		o.m.notice = agentDiscoverResumeFailed
+		return nil
+	}
+	return cmd
+}
+
+// importSelected creates (or reuses) a workspace for the selected row's
+// directory and closes the picker. A tmux row imports its attach argv; a
+// transcript row imports its resume command. The registry enforces one workspace
+// per canonical root; Import needs the daemon's workspace layer.
 func (o *agentDiscoverOverlay) importSelected() (Overlay, tea.Cmd) {
 	id, ok := o.p.SelectedID()
 	if !ok || id < 0 || id >= len(o.rows) {
 		return o, nil
 	}
-	session := o.rows[id]
+	row := o.rows[id]
 	if o.m.workspace == nil {
 		o.m.notice = agentDiscoverNoDaemon
 		return o, nil
 	}
-	root := strings.TrimSpace(session.Path)
-	if root == "" {
-		o.m.notice = "Import: the session records no directory"
+	var root, label string
+	var launch WorkspaceLaunch
+	var fallback string
+	switch {
+	case row.tmux != nil:
+		session := *row.tmux
+		root = strings.TrimSpace(session.Path)
+		label = discoverImportLabel(session)
+		launch = discoverWorkspaceLaunch(session)
+		fallback = strings.Join(session.AttachArgv, " ")
+	case row.external != nil:
+		session := *row.external
+		root = strings.TrimSpace(session.CWD)
+		label = discoverExternalImportLabel(session)
+		launch = discoverExternalWorkspaceLaunch(session)
+		fallback = strings.Join(session.ResumeArgv, " ")
+	default:
 		return o, nil
 	}
-	label := discoverImportLabel(session)
+	if root == "" {
+		o.m.notice = agentDiscoverNoSessionID
+		return o, nil
+	}
 	if launcher, ok := o.m.workspace.(WorkspaceLauncher); ok {
-		cmd, err := launcher.CreateWithLaunch(root, label, discoverWorkspaceLaunch(session))
+		cmd, err := launcher.CreateWithLaunch(root, label, launch)
 		if err != nil {
 			o.m.notice = "Import: " + err.Error()
 			return o, nil
@@ -186,13 +249,12 @@ func (o *agentDiscoverOverlay) importSelected() (Overlay, tea.Cmd) {
 		o.m.notice = "Import: " + err.Error()
 		return o, nil
 	}
-	o.m.notice = agentDiscoverNoQueuedLaunch + strings.Join(session.AttachArgv, " ")
+	o.m.notice = agentDiscoverNoQueuedLaunch + fallback
 	return nil, cmd
 }
 
-// discoverWorkspaceLaunch is the terminal Import starts in the new workspace: the
-// session's qualified attach argv as launch and resume, in its directory, with the
-// durable source identity.
+// discoverWorkspaceLaunch is the terminal Import starts in the new workspace for
+// a tmux row: the qualified attach argv as launch and resume, in its directory.
 func discoverWorkspaceLaunch(session agentdiscover.Session) WorkspaceLaunch {
 	return WorkspaceLaunch{
 		Argv:       append([]string(nil), session.AttachArgv...),
@@ -205,9 +267,29 @@ func discoverWorkspaceLaunch(session agentdiscover.Session) WorkspaceLaunch {
 	}
 }
 
-// discoverImportLabel is the workspace label of an imported session.
+// discoverExternalWorkspaceLaunch is the terminal Import starts for a transcript
+// row: the agent's fixed resume argv, run in the recorded session directory.
+func discoverExternalWorkspaceLaunch(session agentdiscover.ExternalSession) WorkspaceLaunch {
+	return WorkspaceLaunch{
+		Argv:       append([]string(nil), session.ResumeArgv...),
+		Name:       externalTabName(session),
+		Agent:      session.Agent,
+		ResumeArgv: append([]string(nil), session.ResumeArgv...),
+		Ephemeral:  true,
+		Dir:        session.CWD,
+		Source:     externalSource(session),
+	}
+}
+
+// discoverImportLabel is the workspace label of an imported tmux session.
 func discoverImportLabel(session agentdiscover.Session) string {
 	return "tmux:" + session.Name
+}
+
+// discoverExternalImportLabel is the workspace label of an imported transcript
+// session: the tool and the session's title, bounded.
+func discoverExternalImportLabel(session agentdiscover.ExternalSession) string {
+	return clipDiscoveryText(session.Agent+":"+session.Title, 80)
 }
 
 // scan starts one scan in a command and returns the report's message.
@@ -220,79 +302,174 @@ func (o *agentDiscoverOverlay) scan() tea.Cmd {
 	}
 }
 
-// fill installs one scan's report: the rows, their labels and a status line that
-// states what could not be queried.
+// fill installs one scan's report: the merged rows, their labels and a status
+// line that states what could not be read or queried.
 func (o *agentDiscoverOverlay) fill(report agentdiscover.Report) picker.Result {
 	o.report = report
-	o.rows = report.Sessions
-	items := make([]picker.Item, len(report.Sessions))
-	for i, session := range report.Sessions {
-		items[i] = picker.Item{ID: i, Text: discoverRowText(session), Detail: discoverRowDetail(session)}
+	rows := make([]discoverRow, 0, len(report.Sessions)+len(report.External.Sessions))
+	for i := range report.Sessions {
+		rows = append(rows, discoverRow{tmux: &report.Sessions[i]})
+	}
+	for i := range report.External.Sessions {
+		rows = append(rows, discoverRow{external: &report.External.Sessions[i]})
+	}
+	o.rows = rows
+	items := make([]picker.Item, len(rows))
+	for i, row := range rows {
+		items[i] = picker.Item{ID: i, Text: discoverRowText(row), Detail: discoverRowDetail(row)}
 	}
 	res := o.p.SetItems(items)
 	o.p.SetStatus(discoverStatus(report))
 	return res
 }
 
-// discoverRowText is a session's row title: its name, with the attachment and
-// probable-agent markers.
-func discoverRowText(session agentdiscover.Session) string {
-	text := session.Name
-	if session.Attached {
-		text += " · attached"
+// discoverRowText is a row's title: a tmux session's name with its markers, or a
+// transcript's tool and directory title.
+func discoverRowText(row discoverRow) string {
+	if row.tmux != nil {
+		text := row.tmux.Name
+		if row.tmux.Attached {
+			text += " · attached"
+		}
+		if len(row.tmux.Agents) > 0 {
+			text += " · " + strings.Join(row.tmux.Agents, ",")
+		}
+		return text
 	}
-	if len(session.Agents) > 0 {
-		text += " · " + strings.Join(session.Agents, ",")
+	if row.external == nil {
+		return ""
 	}
-	return text
+	return externalToolName(row.external.Tool) + " · " + row.external.Title
 }
 
-// discoverRowDetail is a session's second row: the server, pane count and path.
-func discoverRowDetail(session agentdiscover.Session) string {
-	parts := []string{"tmux", session.Server}
-	if session.Panes > 1 {
-		parts = append(parts, "panes")
-	} else if session.Panes == 1 {
-		parts = append(parts, "1 pane")
+// discoverRowDetail is a row's second line: for tmux the server and panes, for a
+// transcript the directory, the resume command and its exactness.
+func discoverRowDetail(row discoverRow) string {
+	if row.tmux != nil {
+		parts := []string{"tmux", row.tmux.Server}
+		if row.tmux.Panes > 1 {
+			parts = append(parts, "panes")
+		} else if row.tmux.Panes == 1 {
+			parts = append(parts, "1 pane")
+		}
+		if row.tmux.Path != "" {
+			parts = append(parts, row.tmux.Path)
+		}
+		if row.tmux.SocketOnly {
+			parts = append(parts, "server not queried")
+		}
+		return strings.Join(parts, " · ")
 	}
-	if session.Path != "" {
-		parts = append(parts, session.Path)
+	if row.external == nil {
+		return ""
 	}
-	if session.SocketOnly {
-		parts = append(parts, "server not queried")
+	session := row.external
+	parts := []string{"resume: " + strings.Join(session.ResumeArgv, " ")}
+	if session.CWD != "" {
+		parts = append(parts, session.CWD)
+	}
+	if !session.Exact {
+		parts = append(parts, "resumes the newest session in that directory")
 	}
 	return strings.Join(parts, " · ")
 }
 
-// discoverStatus is the picker's status line: the scan's problems, or why the
-// list is empty.
+// discoverStatus is the picker's status line: the scan's problems, why the list
+// is empty, or that a bound cut some rows.
 func discoverStatus(report agentdiscover.Report) string {
-	if len(report.Problems) > 0 {
-		return "Discovery problems: " + strings.Join(report.Problems, "; ")
+	problems := append(append([]string(nil), report.Problems...), report.External.Problems...)
+	if len(problems) > 0 {
+		return "Discovery problems: " + strings.Join(problems, "; ")
 	}
-	if !report.Installed {
-		return agentDiscoverNoTmux
-	}
-	if len(report.Sessions) == 0 {
+	if len(report.Sessions) == 0 && len(report.External.Sessions) == 0 {
+		if !report.Installed && !report.External.Installed {
+			return agentDiscoverNoTmux
+		}
 		return agentDiscoverNone
 	}
-	if report.Truncated {
+	if report.Truncated || report.External.Truncated {
 		return "Some sessions were left out: the scan hit its bound"
 	}
-	if !report.AllowCommands {
+	if !report.AllowCommands && len(report.Sessions) > 0 {
 		return "tmux servers were not queried; their session lists are unknown"
 	}
 	return ""
 }
 
-// discoverTabName is the dock tab label of a discovered session: the tmux session
-// name, prefixed so it reads as somebody else's session.
+// discoverTabName is the dock tab label of a discovered tmux session.
 func discoverTabName(session agentdiscover.Session) string {
 	name := "tmux:" + session.Name
 	if len(session.Agents) > 0 {
 		name += " · " + strings.Join(session.Agents, ",")
 	}
-	return name
+	return clipDiscoveryText(name, 80)
+}
+
+// externalToolName is the display name of an external store.
+func externalToolName(tool string) string {
+	if tool == agentdiscover.ExternalCodex {
+		return "Codex CLI"
+	}
+	return "Claude Code"
+}
+
+// externalSource is a transcript session's durable identity in the dock, used to
+// focus an existing resumed tab instead of opening a duplicate.
+func externalSource(session agentdiscover.ExternalSession) string {
+	if session.ID == "" {
+		return ""
+	}
+	return session.Tool + ":" + session.ID
+}
+
+// externalTabName is the dock tab label of a resumed transcript session.
+func externalTabName(session agentdiscover.ExternalSession) string {
+	name := externalToolName(session.Tool) + ":" + session.Title
+	return clipDiscoveryText(name, 80)
+}
+
+// clipDiscoveryText bounds a display label on a rune boundary.
+func clipDiscoveryText(text string, max int) string {
+	if len(text) <= max {
+		return text
+	}
+	cut := text[:max]
+	for len(cut) > 0 && !utf8Valid(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut
+}
+
+// utf8Valid reports whether s is valid UTF-8 (small helper for label clipping).
+func utf8Valid(s string) bool {
+	for len(s) > 0 {
+		c := s[0]
+		if c < 0x80 {
+			s = s[1:]
+			continue
+		}
+		size := 0
+		switch {
+		case c&0xe0 == 0xc0:
+			size = 2
+		case c&0xf0 == 0xe0:
+			size = 3
+		case c&0xf8 == 0xf0:
+			size = 4
+		default:
+			return false
+		}
+		if len(s) < size {
+			return false
+		}
+		for i := 1; i < size; i++ {
+			if s[i]&0xc0 != 0x80 {
+				return false
+			}
+		}
+		s = s[size:]
+	}
+	return true
 }
 
 // openAgentDiscover opens the discovery picker and starts its first scan. The

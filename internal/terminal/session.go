@@ -263,7 +263,7 @@ func (s *Session) readOutput() {
 func (s *Session) feed(p []byte) bool {
 	// The OSC 52 scan happens before the emulator write and outside the lock: the
 	// hook may touch the clipboard (IO), and x/vt ignores the sequence anyway.
-	s.osc52p.scan(p, s.osc52.emit)
+	s.osc52p.scan(p, s.osc52.emit, s.osc52.query)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {

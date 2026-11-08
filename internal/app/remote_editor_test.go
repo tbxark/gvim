@@ -266,10 +266,13 @@ func TestRemoteEditingNoticeDescribesLSP(t *testing.T) {
 			t.Fatalf("file notice still claims LSP over SSH is unavailable: %q", file)
 		}
 	}
-	for _, gap := range []string{"Remote explorer", "external-change watching", "crash recovery", "local files are unchanged"} {
-		if !strings.Contains(file, gap) {
-			t.Fatalf("file notice = %q, missing %q", file, gap)
+	for _, want := range []string{"Remote explorer", "crash recovery", "file changes on the remote host are watched", "local files are unchanged"} {
+		if !strings.Contains(file, want) {
+			t.Fatalf("file notice = %q, missing %q", file, want)
 		}
+	}
+	if strings.Contains(file, "external-change watching and crash recovery are not available") {
+		t.Fatalf("file notice still calls remote watching unavailable: %q", file)
 	}
 
 	dirSpec := &authority.RemoteSpec{User: "u", Host: "h", Path: "/remote/proj/"}
@@ -279,6 +282,9 @@ func TestRemoteEditingNoticeDescribesLSP(t *testing.T) {
 	}
 	if !strings.Contains(dir, "Remote file browsing is not available yet") {
 		t.Fatalf("workspace notice = %q, want the remaining browsing gap", dir)
+	}
+	if !strings.Contains(dir, "file changes on the remote host are watched") {
+		t.Fatalf("workspace notice = %q, want the watched remote changes", dir)
 	}
 	for _, stale := range []string{"LSP over SSH are not available", "LSP over SSH is not available"} {
 		if strings.Contains(dir, stale) {

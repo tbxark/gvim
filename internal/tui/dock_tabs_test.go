@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -57,5 +58,60 @@ func TestTerminalTabCommands(t *testing.T) {
 	dockRun(t, m, "terminal_tab_close")
 	if got := m.dock.Count(); got != 0 || m.dock.Open() {
 		t.Fatalf("tabs = %d open = %v after closing the last tab", got, m.dock.Open())
+	}
+}
+
+func TestTerminalTabReorderCommands(t *testing.T) {
+	starter := &shellsStarter{}
+	m := newTerminalModel(t, newFakeTree(3), dockKeys(), starter)
+	dockRun(t, m, "open_terminal")
+	dockRun(t, m, "terminal_tab_new")
+	dockRun(t, m, "terminal_tab_new")
+	if m.dock.Count() != 3 || len(starter.dirs) != 3 {
+		t.Fatalf("tabs = %d starts = %d, want 3", m.dock.Count(), len(starter.dirs))
+	}
+	// Give the tabs distinct names so the order is observable (the default names are
+	// positional and stay "Terminal N" after a reorder).
+	for i, name := range []string{"one", "two", "three"} {
+		m.dock.SetActive(i)
+		dockRun(t, m, "terminal_tab_rename")
+		press(m, typed(name))
+		dockSettle(t, m, press(m, special(tea.KeyEnter)))
+	}
+	names := func() string { return strings.Join(m.dock.TabNames(), ",") }
+	if got := names(); got != "one,two,three" {
+		t.Fatalf("names = %q", got)
+	}
+	// The third tab is active; move it left, then back right.
+	dockRun(t, m, "terminal_tab_move_left")
+	if got := names(); got != "one,three,two" {
+		t.Fatalf("order after move left = %q", got)
+	}
+	if m.dock.ActiveIndex() != 1 {
+		t.Fatalf("active after move left = %d", m.dock.ActiveIndex())
+	}
+	dockRun(t, m, "terminal_tab_move_right")
+	if got := names(); got != "one,two,three" {
+		t.Fatalf("order after move right = %q", got)
+	}
+	// Keyboard chord: Ctrl+Shift+PgUp moves the active tab left.
+	m.dock.SetActive(1)
+	dockSettle(t, m, press(m, tea.KeyPressMsg{Code: tea.KeyPgUp, Mod: tea.ModCtrl | tea.ModShift}))
+	if got := names(); got != "two,one,three" {
+		t.Fatalf("order after Ctrl+Shift+PgUp = %q", got)
+	}
+	if m.dock.ActiveIndex() != 0 {
+		t.Fatalf("active after Ctrl+Shift+PgUp = %d", m.dock.ActiveIndex())
+	}
+	// At the first tab a move left is a no-op, and no shell was touched.
+	dockRun(t, m, "terminal_tab_move_left")
+	if got := names(); got != "two,one,three" {
+		t.Fatalf("edge move changed the order: %q", got)
+	}
+	if len(starter.dirs) != 3 {
+		t.Fatalf("reorder started shells: %d", len(starter.dirs))
+	}
+	if !m.dock.Running() {
+		t.Fatal("reorder stopped the running shell")
 	}
 }

@@ -55,8 +55,12 @@ type Server struct {
 	// helloCols/helloRows are the attached client's last known terminal size, so a
 	// program that starts after the hello still gets a window-size message.
 	helloCols, helloRows int
-	// openFiles, when set, opens the paths of a client's open_file frame.
+	// openFiles, when set, opens the paths of a client's open_file frame (the legacy
+	// callback: bare paths only).
 	openFiles func(paths []string)
+	// openFilesAt, when set, receives the full open_file request (client cwd, bare
+	// Paths for older clients, positional Files for current ones).
+	openFilesAt func(req OpenFile)
 	// workspace, when set, answers the workspace_* frames (list/select/new/close/
 	// rename). The app wires it to the workspace layer; nil means the protocol is not
 	// available in this daemon and the client gets a notice.
@@ -83,10 +87,20 @@ func (s *Server) Path() string { return s.path }
 // Name is the socket name of the server: the file name without .sock.
 func (s *Server) Name() string { return strings.TrimSuffix(filepath.Base(s.path), ".sock") }
 
-// OnOpenFiles sets the callback that opens a client's requested paths.
+// OnOpenFiles sets the callback that opens a client's requested paths (the legacy
+// bare-path callback; OnOpenFilesAt takes precedence when both are set).
 func (s *Server) OnOpenFiles(fn func(paths []string)) {
 	s.mu.Lock()
 	s.openFiles = fn
+	s.mu.Unlock()
+}
+
+// OnOpenFilesAt sets the callback that receives the whole open_file request: the client's
+// cwd and either the positional Files or the legacy Paths. The daemon resolves relative
+// paths against req.Cwd.
+func (s *Server) OnOpenFilesAt(fn func(req OpenFile)) {
+	s.mu.Lock()
+	s.openFilesAt = fn
 	s.mu.Unlock()
 }
 
@@ -267,13 +281,16 @@ func (s *Server) handleConn(conn net.Conn) {
 			}
 		case TypeOpenFile:
 			var req OpenFile
-			if DecodeJSON(f, &req) != nil || len(req.Paths) == 0 {
+			if DecodeJSON(f, &req) != nil || (len(req.Paths) == 0 && len(req.Files) == 0) {
 				continue
 			}
 			s.mu.Lock()
-			open := s.openFiles
+			openAt, open := s.openFilesAt, s.openFiles
 			s.mu.Unlock()
-			if open != nil {
+			switch {
+			case openAt != nil:
+				openAt(req)
+			case open != nil:
 				open(req.Paths)
 			}
 		case TypeDetach:

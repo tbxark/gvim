@@ -134,6 +134,6 @@ func (t *Tabs) startLaunchRecordAt(launch terminal.Launch, name, dir string) (te
 	if cmd == nil {
 		return nil, false
 	}
-	index := t.active
-	return func() tea.Msg { return tabStartedMsg{index: index, inner: cmd()} }, true
+	tab := t.tabs[t.active]
+	return func() tea.Msg { return tabStartedMsg{tab: tab, inner: cmd()} }, true
 }

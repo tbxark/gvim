@@ -3,6 +3,7 @@ package app
 import (
 	"testing"
 
+	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/i18n"
 )
 
@@ -41,5 +42,20 @@ func TestSettingsLabelsUseTheCatalogue(t *testing.T) {
 	// not the key.
 	if item := findItem(t, de, "theme"); item.Name != "theme" || item.Section != "Interface" {
 		t.Errorf("German unmapped label = %q/%q, want the English fallback", item.Name, item.Section)
+	}
+}
+
+// TestEverySettingsLabelHasACatalogueKey checks the CI invariant: every scalar settings
+// row and section has an English catalogue entry, so the label extraction cannot silently
+// fall back because a new setting was added without its key.
+func TestEverySettingsLabelHasACatalogueKey(t *testing.T) {
+	t.Parallel()
+	for _, setting := range config.Settings() {
+		if got := i18n.T("en", settingLabelKey(setting), nil); got == settingLabelKey(setting) {
+			t.Errorf("%s: row label key %q is not in the English catalogue", setting.Key(), settingLabelKey(setting))
+		}
+		if got := i18n.T("en", settingsSectionKey(setting.Section), nil); got == settingsSectionKey(setting.Section) {
+			t.Errorf("%s: section label key %q is not in the English catalogue", setting.Section, settingsSectionKey(setting.Section))
+		}
 	}
 }

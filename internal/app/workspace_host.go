@@ -29,6 +29,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/daemon"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/session"
 )
 
 // errWorkspaceStale is the outcome of a switch a newer request superseded.
@@ -70,6 +71,10 @@ type workspaceManager struct {
 	writers map[string]*captureWriter
 	// writeSnapshotFn is a test hook replacing writeSnapshot.
 	writeSnapshotFn func(*workspaceSession, *captureSnapshot) error
+	// captureWriterGate is a test hook called by runWriter before it takes the per-workspace
+	// write lock; it lets a test hold a writer BEFORE it commits (the delayed-writer
+	// regression for the exit commit token). Nil in production.
+	captureWriterGate func()
 	// lastNotice is the last failure reported to the user (test/observability).
 	lastNotice string
 	now        func() time.Time
@@ -706,11 +711,62 @@ func (m *workspaceManager) closeSync(id string) error {
 	return m.closeWorkspace(id)
 }
 
-// openFile opens a client's file in the workspace that already has it open, switching
-// first when that is another workspace. A path open nowhere opens in the active
-// workspace. The open-file message is posted after the (possibly asynchronous) switch.
-func (m *workspaceManager) openFile(path string) {
-	canonical := canonicalWorkspaceFile(path)
+// workspaceOpenTarget is one resolved client open-file request: an absolute (or
+// client-cwd-resolved) path and its optional 1-based position.
+type workspaceOpenTarget struct {
+	path      string
+	line, col int
+}
+
+// workspacePosition is a position saved in a workspace's layout.
+type workspacePosition struct{ line, col int }
+
+// openFiles opens a client's open-file request: each path is routed to the workspace that
+// owns it. A materialized owner is switched to; a dormant owner is detected from its saved
+// layout and materialized/switched asynchronously (the single-writer rule applies to
+// dormant workspaces too). A path owned nowhere opens in the active workspace. Positions
+// from the request survive to the editor; a dormant owner's saved position is used when
+// the request has none and the file has to be opened fresh after materialization.
+func (m *workspaceManager) openFiles(req daemon.OpenFile) {
+	for _, target := range openTargetsFromRequest(req) {
+		m.openTarget(target)
+	}
+}
+
+// openTargetsFromRequest resolves the request's paths against the client's cwd (a client
+// may attach from another directory) and merges the legacy Paths with the positional
+// Files field. Files wins when both are present; legacy Paths still work unchanged.
+func openTargetsFromRequest(req daemon.OpenFile) []workspaceOpenTarget {
+	base := req.Cwd
+	if base == "" {
+		base, _ = os.Getwd()
+	}
+	var out []workspaceOpenTarget
+	resolve := func(path string, line, col int) {
+		if path == "" {
+			return
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(base, path)
+		}
+		out = append(out, workspaceOpenTarget{path: filepath.Clean(path), line: line, col: col})
+	}
+	if len(req.Files) > 0 {
+		for _, f := range req.Files {
+			resolve(f.Path, f.Line, f.Col)
+		}
+		return out
+	}
+	for _, path := range req.Paths {
+		resolve(path, 0, 0)
+	}
+	return out
+}
+
+// openTarget routes one resolved path to its owning workspace and posts the open at the
+// requested position.
+func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
+	canonical := canonicalWorkspaceFile(target.path)
 	m.mu.Lock()
 	ownerID := ""
 	for id, s := range m.sessions {
@@ -721,18 +777,75 @@ func (m *workspaceManager) openFile(path string) {
 	}
 	active := m.active
 	m.mu.Unlock()
+	saved := workspacePosition{}
+	if ownerID == "" {
+		if id, pos, ok := m.dormantOwner(canonical); ok {
+			ownerID, saved = id, pos
+		}
+	}
 	if ownerID != "" && ownerID != active {
 		if _, err := m.selectSync(ownerID); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: switch to the open file's workspace:", err)
+			// The owner was detected but could not be materialized. Report and keep
+			// the current workspace: opening the path in another workspace would
+			// violate the single-writer rule and could conflict with the dormant
+			// workspace's unsaved stash.
+			m.notify(fmt.Errorf("open %s in its workspace: %w; the file was not opened", canonical, err))
+			return
 		}
+	}
+	line, col := target.line, target.col
+	if line == 0 && ownerID != "" {
+		// No request position: a dormant owner's restored caret is its saved one; if
+		// the materialization could not restore the file, open it at the saved position.
+		line, col = saved.line, saved.col
 	}
 	m.mu.Lock()
 	host := m.host
 	_, ok := m.sessions[m.active]
 	m.mu.Unlock()
 	if ok && host != nil {
-		host.PostOpenFile(canonical)
+		host.PostOpenFileAt(canonical, line, col)
 	}
+}
+
+// dormantOwner finds the workspace that has canonical open according to its saved layout.
+// It reads the layout from the registry file first and falls back to the per-workspace
+// session file. A layout entry is ignored when the file is gone and it has no unsaved
+// stash/overlay (stale layout), so a deleted file does not materialize a workspace for
+// nothing.
+func (m *workspaceManager) dormantOwner(canonical string) (string, workspacePosition, bool) {
+	entries, _ := m.reg.List()
+	for _, e := range entries {
+		m.mu.Lock()
+		_, materialized := m.sessions[e.File.StableID]
+		m.mu.Unlock()
+		if materialized {
+			continue
+		}
+		layout := e.File.Layout
+		if layout == nil {
+			if dir, derr := m.reg.SessionDir(e.File.StableID); derr == nil {
+				if sess, ok, err := session.Load(dir); err == nil && ok {
+					layout = &sess
+				}
+			}
+		}
+		if layout == nil {
+			continue
+		}
+		for _, f := range layout.Files {
+			if f.Path == "" || canonicalWorkspaceFile(f.Path) != canonical {
+				continue
+			}
+			if f.StashFile == "" && f.OverlayFile == "" {
+				if _, err := os.Stat(canonical); err != nil {
+					continue // stale layout entry: the file is gone and has no unsaved text
+				}
+			}
+			return e.File.StableID, workspacePosition{line: f.Line, col: f.Col}, true
+		}
+	}
+	return "", workspacePosition{}, false
 }
 
 // canonicalWorkspaceFile makes an absolute clean path for the open-path comparison.
@@ -767,63 +880,36 @@ func sessionHasPath(rt *runtime, canonical string) bool {
 // program ended; no UI callbacks are possible, so snapshots are taken here and the writes
 // run in workers. It waits for every write before closing the runtimes, so a quit cannot
 // drop the unsaved text of any workspace.
+// closeAll is the compatibility form of the checked exit save: tests and deferred
+// cleanup call it without an outcome. The daemon's exit path uses closeAllChecked, which
+// returns the durability error; this wrapper only reports it on stderr. The one overall
+// deadline of the checked path supersedes waitWrites' per-job timeout for the exit.
 func (m *workspaceManager) closeAll() {
-	m.mu.Lock()
-	if m.cancel != nil {
-		m.cancel()
-	}
-	active := m.sessions[m.active]
-	delete(m.sessions, m.active)
-	m.mu.Unlock()
-	if active != nil {
-		m.enqueueCapture(active)
-	}
-	m.mu.Lock()
-	ids := make([]string, 0, len(m.sessions))
-	for id := range m.sessions {
-		ids = append(ids, id)
-	}
-	m.mu.Unlock()
-	for _, id := range ids {
-		m.mu.Lock()
-		s := m.sessions[id]
-		m.mu.Unlock()
-		if s != nil {
-			m.enqueueCapture(s)
-		}
-	}
-	if err := m.waitWrites(30 * time.Second); err != nil {
+	if err := m.closeAllChecked(workspaceExitTimeout); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: workspace save:", err)
-	}
-	if active != nil {
-		active.rt.exit()
-	}
-	for _, id := range ids {
-		m.mu.Lock()
-		s := m.sessions[id]
-		delete(m.sessions, id)
-		m.mu.Unlock()
-		if s != nil {
-			s.rt.exit()
-		}
 	}
 }
 
 // runDaemonHost serves the daemon with the workspace layer (#19a): one tea program over
 // the host model, the registry's foreground workspace materialized eagerly, and the
 // workspace protocol/open-file requests routed through the manager.
-func runDaemonHost(ctx context.Context, srv *daemon.Server, opts Options) error {
+func runDaemonHost(ctx context.Context, srv *daemon.Server, opts Options) (err error) {
 	ws, err := newWorkspaceManager(ctx, opts)
 	if err != nil {
 		return err
 	}
-	defer ws.closeAll()
-	srv.OnWorkspaceRequest(ws.handleRequest)
-	srv.OnOpenFiles(func(paths []string) {
-		for _, path := range paths {
-			ws.openFile(path)
+	defer func() {
+		// The exit save is part of the outcome: a capture write that failed, timed out or
+		// could not be rescued makes the daemon exit non-zero instead of reporting a clean
+		// quit after losing the captured workspace state.
+		saveErr := ws.closeAllChecked(workspaceExitTimeout)
+		if saveErr != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "gvim: error: workspace save:", saveErr)
 		}
-	})
+		err = errors.Join(err, saveErr)
+	}()
+	srv.OnWorkspaceRequest(ws.handleRequest)
+	srv.OnOpenFilesAt(ws.openFiles)
 	host := tui.NewWorkspaceHost(ws.ForegroundModel())
 	ws.setHost(host)
 	go srv.Serve(ctx)

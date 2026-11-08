@@ -62,14 +62,25 @@ type Resize struct {
 	Rows int `json:"rows"`
 }
 
-// OpenFile asks the daemon to open paths. Wait makes the client wait for the
-// daemon's answer (a notice/output) instead of returning at once; Split opens the
-// paths in a horizontal split when the daemon supports it.
+// OpenFile asks the daemon to open paths. Paths is the legacy wire shape (bare
+// paths, no positions); Files is the positional form a current client sends. Both may
+// be present: a receiver that knows Files prefers it, and an older receiver still sees
+// Paths. Cwd is the client's working directory, against which a relative Path/File is
+// resolved by the daemon (the client may run in another directory than the editor).
 type OpenFile struct {
 	Paths []string `json:"paths"`
 	Wait  bool     `json:"wait,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`
 	Split bool     `json:"split,omitempty"`
+	// Files carries each requested path with its optional 1-based position.
+	Files []OpenFileTarget `json:"files,omitempty"`
+}
+
+// OpenFileTarget is one requested file and its optional 1-based line/column.
+type OpenFileTarget struct {
+	Path string `json:"path"`
+	Line int    `json:"line,omitempty"`
+	Col  int    `json:"col,omitempty"`
 }
 
 // WriteFrame writes one frame to w.

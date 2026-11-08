@@ -5,6 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+go test ./i18n -count=1 -run TestCatalogueHeapBudget -v
 go test ./i18n -count=1 \
   -run 'TestEmbeddedLocaleFiles|TestEmbeddedCataloguesValidate|TestEnglishIsTheSourceOfTruth|TestLocaleCoverage|TestCoverageFor|TestValidateCatalogue|TestPluralCategoriesPerLocale'
 

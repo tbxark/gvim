@@ -180,3 +180,41 @@ func TestStartWorkspaceLaunchStartsInDock(t *testing.T) {
 		t.Fatal("an empty launch returned a command")
 	}
 }
+
+// TestWorkspaceHostReplaysSizeOnSwitch checks a shown model gets the last known window
+// size (a daemon host has no terminal to ask): without the replay the new workspace paints
+// at width 0 after a switch.
+func TestWorkspaceHostReplaysSizeOnSwitch(t *testing.T) {
+	one := statusViewModel(t, nil)
+	two := statusViewModel(t, nil)
+	h := NewWorkspaceHost(one)
+	h.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	h.Show(two)
+	_, cmd := h.Update(struct{}{})
+	// Run the pending batch as the program loop would and feed the messages back.
+	var run func(tea.Cmd)
+	var msgs []tea.Msg
+	run = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		msg := c()
+		switch m := msg.(type) {
+		case nil:
+		case tea.BatchMsg:
+			for _, sub := range m {
+				run(sub)
+			}
+		default:
+			msgs = append(msgs, msg)
+		}
+	}
+	run(cmd)
+	for _, msg := range msgs {
+		_, next := h.Update(msg)
+		run(next)
+	}
+	if two.width != 100 || two.height != 30 {
+		t.Fatalf("the shown model size = %dx%d, want 100x30", two.width, two.height)
+	}
+}

@@ -15,9 +15,10 @@ import (
 // startup open only went through the async path.
 type remoteStartupEditor struct {
 	*fakeEditor
-	loadErr error
-	loads   int
-	opened  *editor.Document
+	loadErr   error
+	loads     int
+	opened    *editor.Document
+	line, col int
 }
 
 func newRemoteStartupEditor() *remoteStartupEditor {
@@ -42,11 +43,30 @@ func (e *remoteStartupEditor) OpenFile(string) error { return nil }
 
 func (e *remoteStartupEditor) OpenPreview(string) error { return nil }
 
-func (e *remoteStartupEditor) GotoLine(int, int) error { return nil }
+func (e *remoteStartupEditor) GotoLine(line, col int) error {
+	e.line, e.col = line, col
+	return nil
+}
 
 // startupModel builds a model whose first command opens a remote file.
 func startupModel(e *remoteStartupEditor) *Model {
 	return New(Deps{Editor: e, StartupOpen: "/remote/a.txt", Theme: theme.Theme{}, Clock: testClock, Keys: fakeKeymap{}})
+}
+
+func TestStartupOpenUsesRequestedPositionAfterRetry(t *testing.T) {
+	e := newRemoteStartupEditor()
+	m := New(Deps{Editor: e, StartupOpen: "/remote/a.txt", StartupLine: 3, StartupCol: 5, Theme: theme.Theme{}, Clock: testClock, Keys: fakeKeymap{}})
+	e.loadErr = errors.New("disconnected")
+	m.Update(m.startupOpenCmd()())
+	e.loadErr = nil
+	_, retry := m.Update(authorityReconnectedMsg{})
+	if retry == nil {
+		t.Fatal("reconnect did not retry")
+	}
+	m.Update(retry())
+	if e.opened == nil || e.line != 3 || e.col != 5 {
+		t.Fatalf("open = %v, position = %d:%d; want opened at 3:5", e.opened, e.line, e.col)
+	}
 }
 
 // TestStartupOpenRetriesAfterReconnect checks the remote startup-open path: a load failure

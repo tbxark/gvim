@@ -144,8 +144,9 @@ type Model struct {
 	// Deps.StartupOpen); startupPending stays set until the asynchronous read succeeds,
 	// so an authority reconnect retries a failed startup open and a failure never turns
 	// into an empty buffer.
-	startupOpen    string
-	startupPending bool
+	startupOpen             string
+	startupLine, startupCol int
+	startupPending          bool
 
 	clicks    clickCounter
 	lastPress int // the count of the last editor press, see pressEditor
@@ -254,6 +255,8 @@ func New(deps Deps) *Model {
 		tabSize:         deps.TabSize,
 		notice:          deps.Notice,
 		startupOpen:     deps.StartupOpen,
+		startupLine:     deps.StartupLine,
+		startupCol:      deps.StartupCol,
 		startupPending:  deps.StartupOpen != "",
 		splits:          newSplitSet(),
 		util:            utilities{settings: deps.Settings, settingsPort: deps.SettingsPort, themeCatalog: deps.ThemeCatalog, switchKeymap: deps.SwitchKeymap},

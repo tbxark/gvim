@@ -29,10 +29,10 @@ func TestCommandsFromBuiltinTable(t *testing.T) {
 	// rows of compare_commands.go, the 3 Markdown Contents rows of markdown_commands.go,
 	// the Toggle Diagnostics Sidebar and Diagnostics List rows of lsp_commands.go, the
 	// 4 Plugin: rows of plugin_commands.go, the Run Agent and Discover Agent Sessions
-	// rows of terminal_commands.go and agent_discover_commands.go, and the 5 terminal-tab
+	// rows of terminal_commands.go and agent_discover_commands.go, and the 7 terminal-tab
 	// rows of terminal_commands.go.
-	if len(entries) != 236 {
-		t.Fatalf("Commands() = %d entries, want 236", len(entries))
+	if len(entries) != 238 {
+		t.Fatalf("Commands() = %d entries, want 238", len(entries))
 	}
 	if entries[0].Name != "Add Cursor Above" || entries[1].Name != "Add Cursor Below" {
 		t.Fatalf("first entries = %q, %q; want byte order", entries[0].Name, entries[1].Name)

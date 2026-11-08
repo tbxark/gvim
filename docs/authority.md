@@ -5,9 +5,9 @@ remote-spec parsing, the SSH backend for terminal/one-shot/long-running children
 remote `FileSystem`, and the connection-state hooks are implemented in `authority/` and
 `internal/terminal/session_backend.go`. The editor's file I/O and the language servers of a
 remote workspace are routed through the slot (§6), including automatic server restart after
-a reconnect; the remaining residuals are listed in §7 (remote explorer, external-change
-watch, remote large files, reconnect retry/backoff, remote trust store, terminal respawn as
-an open parity gap).
+a reconnect and remote external-change watching (the authority watch bridged into the root's
+watch pipeline); the remaining residuals are listed in §7 (remote explorer, remote large
+files, reconnect retry/backoff, remote trust store, terminal respawn as an open parity gap).
 
 ## 1. The slot and its four surfaces
 
@@ -165,6 +165,22 @@ deliberately does not take.
   the remote host (absolute or `~`-rooted; a relative path is rejected rather than resolved
   against the local working directory), `~` expands through the remote shell's `$HOME`
   (cached), and `~user` is refused (recorded residual).
+- Remote external-change watching (landed): the directories of the open documents are
+  watched on the remote host through `authority Files().Watch` (the polled remote watcher)
+  and bridged into the root's existing watch pipeline (`RootPorts.Watch`/`WatchDirs`), so
+  the tree reload and auto-revert work as for a local file. The bridge
+  (`internal/app/remote_watch.go`) is asynchronous: one goroutine per directory with its
+  own cancellable context, events coalesced off the update goroutine over the same quiet
+  window (150 ms), no local filesystem fallback (it never uses fsnotify/os.Stat for the
+  remote paths). Each watch is tagged with a generation; `Reconnected()` (called from the
+  existing `AuthorityHooks.AfterReconnect` next to the LSP restart) bumps it, cancels the
+  old watches and restarts them for the desired directories, so an event or late flush from
+  the dead carrier is dropped before it can reach the UI. A watch that fails or ends while
+  disconnected waits for the reconnect; while connected it retries with a bounded backoff
+  (1 s doubling to 10 s). `Close` cancels every watch, waits for the goroutines and closes
+  the channel. Fresh parity: Fresh's remote external-change detection is the metadata poll
+  (`watch_file` records the authority mtime); gvim keeps that poll (`PlanDiskCheck` over
+  `document.FileAccess`) and adds this authority watch bridge on top.
 - LSP over SSH (landed): the language servers of a remote workspace start on the remote
   host through the authority's `LongRunning` surface (a separate ssh exec channel with
   piped stdio), not as local `exec.Command`s. The manager gained a `SetSpawner` seam (nil =
@@ -218,10 +234,12 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
   the local session, opens the SSH terminal at `RemoteSpec.Workspace()`, mounts a real
   remote `FileSystem` and routes the editor's file I/O through it (see §6). The file named
   by the remote target is opened by the root's first command; a directory target opens the
-  terminal only (the remote explorer is a recorded residual). The launch is scoped: no local
-  file watcher, no local crash-recovery copy of remote text, and no local language server
-  for remote buffers (`deps.LSP` is nil for a remote launch) — each is explicit here, not a
-  global change. The status row shows `SSH:user@host` or `SSH:user@host · disconnected`
+  terminal only (the remote explorer is a recorded residual). The launch is scoped: the
+  local fsnotify watcher is replaced by the remote watch bridge (the directories of the open
+  documents are watched on the remote host, so a change another program makes reaches the
+  tree/auto-revert like a local one), the crash-recovery copy of remote text is off, and
+  the language servers are routed to the remote host — each is explicit here, not a global
+  change. The status row shows `SSH:user@host` or `SSH:user@host · disconnected`
   (hand-written English this round; the statusbar owner extracts
   `gvim.status.remote_ssh` / `remote_ssh_disconnected` in the i18n slice). After a
   reconnect, the remote language servers that were running are restarted automatically and
@@ -245,10 +263,13 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
 Residuals of this slice (documented, not bugs):
 
 - Remote residuals of the landed routing: remote explorer/listing (a directory target
-  opens the terminal only; the palette/explorer still describe the local tree), no remote
-  external-change watch (a file changed on the host is picked up by Revert/Reopen and by the
-  disk check, not by fsnotify-in-the-background), remote large-file mode (a document over
-  the 64 MiB read cap fails with the too-large error instead of opening lazily), remote
+  opens the terminal only; the palette/explorer still describe the local tree), remote
+  external-change watching covers only the directories of open documents (the workspace tree
+  itself is not watched because the remote explorer is not implemented, and the authority
+  watch is polled at ~500 ms plus the 150 ms coalescing window, with a rename reported as
+  remove+create; manual Revert/Reopen and the periodic disk check remain the fallback), remote
+  large-file mode (a document over the 64 MiB read cap fails with the too-large error
+  instead of opening lazily), remote
   crash recovery and hot-exit (deliberately skipped for a remote launch so remote text is
   never copied into a local cache), `~user` expansion, special remote files (the helper's
   kind mapping only knows file/dir/symlink; a FIFO read is bounded by the context and fails
@@ -318,6 +339,15 @@ Residuals of this slice (documented, not bugs):
   remains: start gvim on `user@host:/proj`, edit/save/revert a file, start a language
   server, drop the connection and reactivate the window — the server restarts and the
   notice says how many; restart the terminal explicitly.
+- Remote external-change watching (`internal/app/remote_watch_test.go`, a fake authority slot
+  and controllable hostos.Watch): events from the remote watch become `filewatch.Changed`
+  values with the changed file and its directory; a burst is coalesced; Close cancels the
+  authority watch, closes the channel and is idempotent; Reconnected cancels the old watch,
+  starts a new one for the desired directory and drops an event/flush from the pre-reconnect
+  watch; nothing is watched on a disconnected authority and a reconnect starts it; a
+  duplicate Add gets one watch; a nil authority degrades safely. Fresh parity: Fresh's
+  remote external changes are the authority metadata poll; gvim keeps that poll and adds this
+  authority-watch bridge on top.
 - CLI and app rules: remote forms reach `Targets.Remote`, malformed/mixed launches are startup
   errors, and `Options.Validate` repeats them.
 - TUI: the connected/disconnected segment, activation reconnect, the password prompt and

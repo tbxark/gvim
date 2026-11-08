@@ -46,6 +46,11 @@ type TermStarterOptions struct {
 	// text. The host decides whether the feature is on (clipboard.use_osc52 and a
 	// trusted workspace); a nil hook leaves the feature inert.
 	OSC52 func(selection, text string) bool
+	// OSC52Query, when not nil, is installed on every new session as its clipboard
+	// read-request handler: a child's OSC 52 "?" query calls it with the selection
+	// and receives clipboard text back as terminal input. The host decides whether
+	// it is on (clipboard.osc52_paste and a trusted workspace); nil is inert.
+	OSC52Query func(selection string) (string, bool)
 	// Authority is the workspace authority slot of the session (nil for none). The
 	// local backend returns a launch with no backend, so the local PTY starts as
 	// before; a remote backend returns a transport the dock drives through
@@ -137,6 +142,9 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 			if s.opts.OSC52 != nil {
 				sess.SetOSC52Handler(s.opts.OSC52)
 			}
+			if s.opts.OSC52Query != nil {
+				sess.SetOSC52QueryHandler(s.opts.OSC52Query)
+			}
 			return sess, nil
 		}
 	}
@@ -150,6 +158,9 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 	}
 	if s.opts.OSC52 != nil {
 		sess.SetOSC52Handler(s.opts.OSC52)
+	}
+	if s.opts.OSC52Query != nil {
+		sess.SetOSC52QueryHandler(s.opts.OSC52Query)
 	}
 	return sess, nil
 }

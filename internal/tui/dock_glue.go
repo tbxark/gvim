@@ -125,6 +125,12 @@ func (m *Model) dockAction(action string) (tea.Cmd, bool) {
 	case "terminal_tab_rename":
 		m.renameDockTabPrompt()
 		return nil, true
+	case "terminal_tab_move_left":
+		m.dock.MoveActive(-1)
+		return nil, true
+	case "terminal_tab_move_right":
+		m.dock.MoveActive(1)
+		return nil, true
 	case "send_selection_to_terminal":
 		return m.sendSelection(), true
 	}

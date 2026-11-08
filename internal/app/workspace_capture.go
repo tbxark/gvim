@@ -11,6 +11,8 @@ package app
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tbxark/gvim/buffer"
@@ -142,8 +144,20 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 // captureWriter is the ordered write queue of one workspace: snapshots are written in
 // the order they were taken, so a newer snapshot can never be overwritten by an older
 // one, and a switch never waits on the previous write.
+//
+// mu serializes the writes of this workspace and is held ACROSS writeSnapshot, which is
+// what lets the exit path tell an in-flight (newest) write from an idle writer: the exit
+// fallback TryLocks it, and only when it succeeds may it supersede the queued snapshots.
+// seq numbers the snapshots, committed is the newest one written (or superseded by the
+// fallback), and stopped means a newer path committed: queued snapshots must not write.
+// The UI goroutine never takes mu (enqueue only bumps the atomic seq), so a slow disk
+// cannot freeze Update.
 type captureWriter struct {
-	q chan *captureWrite
+	q         chan *captureWrite
+	mu        sync.Mutex
+	seq       atomic.Uint64
+	committed uint64
+	stopped   bool
 }
 
 // captureWrite is one queued snapshot write.
@@ -151,6 +165,7 @@ type captureWrite struct {
 	sess *workspaceSession
 	snap *captureSnapshot
 	job  *saveJob
+	seq  uint64
 }
 
 // enqueueCapture snapshots the workspace on the UI goroutine and queues its write on the
@@ -177,16 +192,33 @@ func (m *workspaceManager) enqueueCapture(s *workspaceSession) *saveJob {
 		go m.runWriter(w)
 	}
 	m.mu.Unlock()
-	w.q <- &captureWrite{sess: s, snap: snap, job: job}
+	// The UI goroutine must not wait on the writer's lock; the sequence is atomic.
+	seq := w.seq.Add(1)
+	w.q <- &captureWrite{sess: s, snap: snap, job: job, seq: seq}
 	return job
 }
 
-// runWriter writes one workspace's snapshots in queue order.
+// runWriter writes one workspace's snapshots in queue order. The per-workspace lock is
+// held across the write and the commit, so a snapshot either writes the newest confirmed
+// state or is skipped as superseded; the delayed-writer regression covers the case the
+// exit path raced a queued older snapshot.
 func (m *workspaceManager) runWriter(w *captureWriter) {
 	for c := range w.q {
+		if m.captureWriterGate != nil {
+			m.captureWriterGate()
+		}
 		write := m.writeSnapshot
 		if m.writeSnapshotFn != nil {
 			write = m.writeSnapshotFn
+		}
+		w.mu.Lock()
+		if w.stopped || c.seq <= w.committed {
+			// A newer path (the exit fallback, or a later snapshot) already committed:
+			// this snapshot must not overwrite it, not even atomically with older data.
+			w.mu.Unlock()
+			c.job.err = nil
+			close(c.job.done)
+			continue
 		}
 		err := write(c.sess, c.snap)
 		if err == nil {
@@ -195,7 +227,10 @@ func (m *workspaceManager) runWriter(w *captureWriter) {
 			layout := c.snap.layout
 			_, _ = m.reg.UpdateLayout(c.sess.ws.File.StableID, &layout)
 			_, _ = m.reg.Touch(c.sess.ws.File.StableID, m.now())
-		} else {
+			w.committed = c.seq
+		}
+		w.mu.Unlock()
+		if err != nil {
 			m.notify(fmt.Errorf("save workspace %q: %w", c.sess.ws.File.Label, err))
 		}
 		c.job.err = err

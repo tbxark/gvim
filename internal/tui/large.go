@@ -752,7 +752,7 @@ func (m *Model) startupOpenCmd() tea.Cmd {
 	if !m.startupPending || m.startupOpen == "" {
 		return nil
 	}
-	cmd, _ := m.openFileCmdErr(m.startupOpen, false, 0, 0)
+	cmd, _ := m.openFileCmdErr(m.startupOpen, false, m.startupLine, m.startupCol)
 	return cmd
 }
 

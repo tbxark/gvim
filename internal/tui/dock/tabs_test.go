@@ -405,3 +405,205 @@ func TestTabsTitleStripIsCellAware(t *testing.T) {
 		t.Fatalf("active after the cell-aware click = %d, want 1", got)
 	}
 }
+
+// tabX returns the first and middle title-row columns of tab i's strip label.
+func tabX(tabs *Tabs, i int) (start, mid int) {
+	col := 1
+	for j := 0; j < i; j++ {
+		col += ansi.StringWidth(" " + tabs.stripLabel(j) + " ")
+	}
+	n := ansi.StringWidth(" " + tabs.stripLabel(i) + " ")
+	return col, col + n/2
+}
+
+// TestTabsMoveActiveReordersKeepsSessionsAndPersistence checks the reorder API:
+// only the order changes, running sessions keep their identity, the active tab
+// follows its move, the edges are no-ops, and the saved order/active index follow.
+func TestTabsMoveActiveReordersKeepsSessionsAndPersistence(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, starter := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	for i, name := range []string{"alpha", "beta", "gamma"} {
+		tabs.SetActive(i)
+		tabs.RenameActive(name)
+	}
+	terms := make([]*fakeTerm, 3)
+	for i := range tabs.tabs {
+		terms[i] = starter.terms[i]
+		if tabs.tabs[i].term != terms[i] {
+			t.Fatalf("tab %d does not hold starter terminal %d", i, i)
+		}
+	}
+	if len(starter.dirs) != 3 {
+		t.Fatalf("starts = %d, want 3", len(starter.dirs))
+	}
+
+	// Move the active (alpha, index 0) one to the right.
+	tabs.SetActive(0)
+	if !tabs.MoveActive(1) {
+		t.Fatal("MoveActive(1) did not move")
+	}
+	if got := strings.Join(tabs.TabNames(), ","); got != "beta,alpha,gamma" {
+		t.Fatalf("order after move right = %q", got)
+	}
+	if tabs.ActiveIndex() != 1 || tabs.ActiveName() != "alpha" {
+		t.Fatalf("active = %d %q, want the moved tab", tabs.ActiveIndex(), tabs.ActiveName())
+	}
+	// The sessions moved with their tabs and none was restarted or closed.
+	if tabs.tabs[1].term != terms[0] || tabs.tabs[0].term != terms[1] {
+		t.Fatal("the running sessions did not move with their tabs")
+	}
+	if len(starter.dirs) != 3 || starter.terms[0].closed {
+		t.Fatalf("reorder touched the sessions: starts %d closed %v", len(starter.dirs), starter.terms[0].closed)
+	}
+	// Move back left; the edges are no-ops.
+	if !tabs.MoveActive(-1) || strings.Join(tabs.TabNames(), ",") != "alpha,beta,gamma" {
+		t.Fatalf("move left = %v order %q", tabs.MoveActive(-1), tabs.TabNames())
+	}
+	tabs.SetActive(0)
+	if tabs.MoveActive(-1) {
+		t.Fatal("moving the first tab left reported a move")
+	}
+	tabs.SetActive(2)
+	if tabs.MoveActive(1) {
+		t.Fatal("moving the last tab right reported a move")
+	}
+	// Reorder again and check the saved order and active index.
+	tabs.SetActive(2) // gamma
+	tabs.MoveActive(-1)
+	st := tabs.SavedState()
+	names := make([]string, len(st.Tabs))
+	for i := range st.Tabs {
+		names[i] = st.Tabs[i].Name
+	}
+	if strings.Join(names, ",") != "alpha,gamma,beta" || st.ActiveTab != 1 {
+		t.Fatalf("saved order = %q active %d", names, st.ActiveTab)
+	}
+	restored, _ := newTestTabs(t, &notices)
+	restored.Restore(st)
+	// A restored tab is read-only/dead, so its label keeps the exited marker; the
+	// saved order and active index are what the reorder had to preserve.
+	if strings.Join(restored.TabNames(), ",") != "alpha (exited),gamma (exited),beta (exited)" || restored.ActiveIndex() != 1 {
+		t.Fatalf("restored order = %q active %d", restored.TabNames(), restored.ActiveIndex())
+	}
+}
+
+// TestTabsTabKeyReorder checks the documented keys: Ctrl+Shift+PgUp/PgDn move the
+// active tab, plain Ctrl+PgUp/PgDn still switch, and a move at an edge is consumed
+// without changing the order.
+func TestTabsTabKeyReorder(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	tabs.SetActive(0)
+	right := tea.Key{Code: tea.KeyPgDown, Mod: tea.ModCtrl | tea.ModShift}
+	if !tabs.TabKey(right) {
+		t.Fatal("Ctrl+Shift+PgDown was not taken")
+	}
+	if got := tabs.ActiveIndex(); got != 1 {
+		t.Fatalf("active after move right = %d, want 1", got)
+	}
+	left := tea.Key{Code: tea.KeyPgUp, Mod: tea.ModCtrl | tea.ModShift}
+	if !tabs.TabKey(left) || tabs.ActiveIndex() != 0 {
+		t.Fatalf("move left: taken %v active %d", tabs.TabKey(left), tabs.ActiveIndex())
+	}
+	// Plain Ctrl+PgDown switches; it must not reorder.
+	before := strings.Join(tabs.TabNames(), ",")
+	if !tabs.TabKey(tea.Key{Code: tea.KeyPgDown, Mod: tea.ModCtrl}) {
+		t.Fatal("Ctrl+PgDown was not taken as a switch")
+	}
+	if tabs.ActiveIndex() != 1 || strings.Join(tabs.TabNames(), ",") != before {
+		t.Fatalf("Ctrl+PgDown changed the order/active: %q %d", tabs.TabNames(), tabs.ActiveIndex())
+	}
+	// At the edge the chord is still consumed, but nothing moves.
+	tabs.SetActive(2)
+	if !tabs.TabKey(right) {
+		t.Fatal("the edge move chord was not consumed")
+	}
+	if tabs.ActiveIndex() != 2 || strings.Join(tabs.TabNames(), ",") != before {
+		t.Fatalf("edge move changed state: active %d order %q", tabs.ActiveIndex(), tabs.TabNames())
+	}
+}
+
+// stripLayout is the dock layout the strip tests draw in: the title row is row 2.
+func stripLayout() frame.Layout { return frame.Layout{DockOn: true, DockY: 2, DockH: 4, W: 60} }
+
+// TestTabsDragReorder drives Fresh's tab-drag gesture: press a label, move past the
+// three-cell threshold, release over the strip; the drop inserts at the pointer's
+// side of the label. Sub-threshold releases are clicks, and a release outside the
+// strip cancels without switching tabs.
+func TestTabsDragReorder(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	for i, name := range []string{"alpha", "beta", "gamma"} {
+		tabs.SetActive(i)
+		tabs.RenameActive(name)
+	}
+	l := stripLayout()
+	g := grid.New(60, 8)
+	tabs.Draw(g, l, style.Styles{})
+	tabs.SetActive(0)
+	startX, _ := tabX(tabs, 0)
+	_, gammaMid := tabX(tabs, 2)
+
+	// Press alpha's label, drag past the threshold to the right half of gamma, and
+	// release there: alpha inserts after gamma.
+	tabs.Mouse(tea.MouseClickMsg{X: startX, Y: 2, Button: tea.MouseLeft}, l, 1)
+	if !tabs.drag.on || tabs.drag.from != 0 {
+		t.Fatalf("press did not start a drag: %+v", tabs.drag)
+	}
+	tabs.Mouse(tea.MouseMotionMsg{X: gammaMid + 2, Y: 2, Button: tea.MouseLeft}, l, 1)
+	if !tabs.drag.active {
+		t.Fatal("the drag did not pass the threshold")
+	}
+	// The drop marker paints while dragging.
+	g = grid.New(60, 8)
+	tabs.Draw(g, l, style.Styles{})
+	if row := g.Plain()[2]; !strings.Contains(row, "┃") {
+		t.Fatalf("strip = %q, want the drop marker", row)
+	}
+	tabs.Mouse(tea.MouseReleaseMsg{X: gammaMid + 2, Y: 2, Button: tea.MouseLeft}, l, 1)
+	if tabs.drag.on {
+		t.Fatal("the release left the drag active")
+	}
+	if got := strings.Join(tabs.TabNames(), ","); got != "beta,gamma,alpha" {
+		t.Fatalf("order after the drop = %q", got)
+	}
+	if tabs.ActiveIndex() != 2 {
+		t.Fatalf("active after the drop = %d, want the dragged tab", tabs.ActiveIndex())
+	}
+
+	// A sub-threshold press/release is a click: no reorder.
+	tabs.SetActive(0)
+	betaStart, _ := tabX(tabs, 0)
+	tabs.Mouse(tea.MouseClickMsg{X: betaStart, Y: 2, Button: tea.MouseLeft}, l, 1)
+	tabs.Mouse(tea.MouseMotionMsg{X: betaStart + 2, Y: 2, Button: tea.MouseLeft}, l, 1)
+	tabs.Mouse(tea.MouseReleaseMsg{X: betaStart + 2, Y: 2, Button: tea.MouseLeft}, l, 1)
+	if got := strings.Join(tabs.TabNames(), ","); got != "beta,gamma,alpha" {
+		t.Fatalf("a click reordered: %q", got)
+	}
+
+	// A drag released outside the strip cancels and does not switch tabs (the press
+	// had selected the dragged tab, gamma at index 2).
+	tabs.SetActive(1)
+	gammaStart, _ := tabX(tabs, 1)
+	tabs.Mouse(tea.MouseClickMsg{X: gammaStart, Y: 2, Button: tea.MouseLeft}, l, 1)
+	tabs.Mouse(tea.MouseMotionMsg{X: gammaStart + 20, Y: 5, Button: tea.MouseLeft}, l, 1)
+	tabs.Mouse(tea.MouseReleaseMsg{X: gammaStart + 20, Y: 5, Button: tea.MouseLeft}, l, 1)
+	if got := strings.Join(tabs.TabNames(), ","); got != "beta,gamma,alpha" {
+		t.Fatalf("a cancelled drag reordered: %q", got)
+	}
+	if tabs.ActiveIndex() != 1 {
+		t.Fatalf("a cancelled drag changed the active tab to %d", tabs.ActiveIndex())
+	}
+}

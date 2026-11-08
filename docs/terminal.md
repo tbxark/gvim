@@ -178,11 +178,28 @@ background tabs' exited markers current.
   keyboard capture, but not while the scrollback pager owns them. They are not
   keymap data. Everything else goes to the active shell as before.
 - **Commands.** New Terminal Tab, Close Terminal Tab, Next Terminal Tab, Previous
-  Terminal Tab and Rename Terminal Tab (hand-written English titles, no Fresh i18n
-  keys); Rename opens a one-line prompt prefilled with the current name, and an
-  empty answer restores the default `Terminal N`. Run Agent... is the terminal's
-  agent row (see Agent sessions and Run Agent). There are no default keymap
-  bindings beyond the documented quick-switch keys.
+  Terminal Tab, Rename Terminal Tab and Move Tab To Left / Move Tab To Right
+  (hand-written English titles; the Move rows are Fresh's tab_actions command
+  names, no Fresh i18n keys for the dock tabs); Rename opens a one-line prompt
+  prefilled with the current name, and an empty answer restores the default
+  `Terminal N`. Run Agent... is the terminal's agent row (see Agent sessions and
+  Run Agent). There are no default keymap bindings beyond the documented dock keys.
+- **Reordering.** Move Tab To Left / Move Tab To Right move the active tab one
+  slot (the palette rows, and Ctrl+Shift+PageUp / Ctrl+Shift+PageDown while the
+  dock has the keyboard). Fresh's tab drag is the mouse path: press a tab label,
+  drag more than three cells (Fresh's threshold), and release over the strip. The
+  drop inserts on the pointer's side of a label: its left half inserts before that
+  tab, its right half after, and past the last label at the end; a `┃` marker in
+  the active-tab style shows where it will land. A press that never passes the
+  threshold is a click, and a drag released off the strip cancels without
+  switching tabs or starting a selection. Reordering only permutes the tab list: a
+  tab keeps its name, transcript, launch record and running PTY, the active tab
+  follows its own move, and the dock does not start, resize or close any process.
+  Shift on a page key only arrives in terminals that report modified keys
+  (xterm-style CSI 5;6~ / CSI-u); where Ctrl+Shift+PageUp is indistinguishable from
+  Ctrl+PageUp, the chord switches instead and the palette rows and the drag remain
+  the guaranteed reorder paths. gvim's dock has no splits, so Fresh's drag-to-split
+  and per-tab split moves are not offered (see Deferred).
 - **Lifecycle.** A new tab starts its own shell in the workspace root and takes the
   focus. Closing a tab closes its shell immediately (gvim has no running-process
   prompt; closing the editor prompts as before) and removes the tab; closing the
@@ -203,7 +220,9 @@ background tabs' exited markers current.
   migration-safe. Bounds:
   at most 16 tabs, each with the existing per-transcript bound (500 rows / 1 MiB,
   trailing blanks trimmed, control characters stripped); a corrupt file cannot
-  make the loader allocate more. Restored tabs are **read-only and dead** with
+  make the loader allocate more. The order of the `tabs` array, not the tab
+  names, is the saved tab order, and the active index tells which tab is shown on
+  restore, so a reorder survives an editor restart. Restored tabs are **read-only and dead** with
   their saved names and active index, exactly like the single restored terminal:
   no PTY is restarted automatically; Restart per tab starts a fresh shell (using
   the saved launch record and launch directory when present: the agent
@@ -246,8 +265,7 @@ terminal record.
 Residuals of this pairing: Fresh restores terminal tabs **Live** and respawns the
 PTY on activation; gvim restores them read-only/dead until the user restarts (the
 same deliberate deviation as for a single terminal). A buffer shared across
-workspaces, extract-tab and per-workspace tab reordering are the #19b policy
-decisions and remain open.
+workspaces and extract-tab are the #19b policy decisions and remain open.
 
 ## Persistence and reflow
 
@@ -377,15 +395,16 @@ the saved record. This is deliberate (Fresh's rule): reopening a workspace never
 silently re-runs a finished process, which for an agent would mean resuming the
 conversation unasked.
 
-## Agent discovery (tmux)
+## Agent discovery (tmux and local transcripts)
 
-The first discovery slice (`internal/agentdiscover`) finds tmux sessions that
-already exist outside gvim, so an agent running in tmux can be rejoined instead of
-started again. It is **read-only discovery**, not control: gvim asks tmux for its
-sessions and panes, builds each session's attach argv, and later lets the user
-open one in a terminal tab (level 0 in Fresh's tmux terms — tmux draws the panes,
-so gvim's splits/scrollback/search stop at the attached client). Control mode
-(`tmux -CC`, one gvim terminal per tmux pane) is explicitly not built.
+`internal/agentdiscover` finds agent work that already exists outside gvim so it
+can be rejoined instead of started again, from two sources: tmux sessions (a
+client is running or was left behind) and the local conversation stores of the
+Claude Code and Codex CLIs (the conversation exists on disk, whether or not a
+process runs now). It is **read-only discovery**, not control: a tmux tab attaches
+the existing client at level 0 in Fresh's terms (tmux draws the panes, so gvim's
+splits/scrollback/search stop at the attached client; control mode `tmux -CC` is
+explicitly not built), and a transcript row starts the agent's own resume command.
 
 - **Scan.** Walk `$TMUX_TMPDIR` (else `/tmp`) for `tmux-<uid>/` directories and
 their sockets, then, when commands are allowed, run
@@ -395,7 +414,26 @@ scan never writes. A scan is bounded (2 s per command, 256 KiB per command
 output, 200 sessions, 2000 panes, 500 sockets, 2000 socket dirs) and returns a
 bounded problem list instead of an error, so a missing tmux, a stale socket, or a
 permission failure is shown as a stated reason.
-- **Rows.** A session carries its name, `session_path`, creation time, attachment
+- **Local agent transcripts.** The Claude Code store is
+`~/.claude/projects/<bucket>/<uuid>.jsonl`; only that depth is listed (a deeper
+transcript is a sub-agent's, shares its parent's id and cannot be resumed on its
+own). The Codex store is `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`
+(`CODEX_HOME` else `~/.codex`); a rollout whose `session_meta.originator` names
+the ChatGPT desktop app is skipped, because it is a different product and gvim
+knows no resume command for it. For each transcript the scan reads only a bounded
+header (256 KiB for Claude, 64 KiB for Codex; empty, malformed or truncated lines
+are skipped), takes `cwd` and the session id from the records (Claude's bucket name
+is lossy and is only a fallback title), keeps the newest 50 per store before
+reading, and stops a store walk at 5001 entries. The whole scan is bounded and
+returns a problem list instead of an error. It starts **no process and runs no
+command**: only the two stores are read, after an explicit user action. Transcript
+bytes and session ids are untrusted data: a session id has to be a short
+alphanumeric/`-._` token before it is placed in the fixed resume template, and
+nothing else from a transcript becomes an argv. Claude resumes exactly
+(`claude --resume <id>`); Codex has no id-addressed resume, so its fixed command is
+`codex resume --last`, which rejoins the newest session in that directory — the row
+says so, and the resume is inexact.
+- **Rows.** A tmux session carries its name, `session_path`, creation time, attachment
 state, pane count and the attach argv qualified by socket
 (`tmux -S <socket> attach -t <name>` — a bare `tmux attach` cannot reach a server
 on a non-default socket). Panes whose foreground command is a known agent name
@@ -430,7 +468,15 @@ qualified attach argv in a **new ephemeral dock tab** named `tmux:<session>`
 (plus the agents when known); the tab records the attach argv as both its launch
 and its resume argv, so a user Restart reattaches. Its tab title and persisted
 launch/agent metadata flow through the same terminal record as a Run Agent
-session. **i** imports the selected session as a workspace: it asks the daemon's
+session. A transcript row reads `Claude Code · <directory>` or `Codex CLI ·
+<directory>`, with the resume command and the directory (and Codex's
+inexactness note) on its detail line. Enter on it starts the agent's fixed resume
+argv in a **new ephemeral dock tab** in the transcript's recorded directory; the
+tab records the resume argv as launch and resume and a durable source identity
+(`claude-code:<id>` / `codex-cli:<id>`), so choosing the same transcript again
+focuses the tab instead of starting a second copy. A transcript with no recorded
+directory cannot be resumed or imported (the row says why).
+**i** imports the selected session as a workspace: it asks the daemon's
 workspace layer to create (or reuse) the workspace for the session's
 `session_path` as root, labelled `tmux:<session>`, **and to start the session's
 attach argv in that workspace's dock once it is materialized and shown** — the
@@ -447,7 +493,13 @@ that instead of importing. Restart of the imported tab reattaches (the attach ar
 is both launch and resume). Empty states are stated: no tmux/socket, no sessions,
 socket exists but the server was not queried, a session with no directory cannot
 be imported, or the scan's bounded problem list ('Discovery problems:').
-- **Limitations.** Registry v1 still stores one workspace per canonical root and
+- **Limitations.** Discovery is a snapshot: it does not watch the stores, so a new
+conversation appears on the next explicit scan (Ctrl+R), and a transcript row says
+a conversation exists, not that a process runs. Codex's resume is inexact
+(newest-in-cwd), and its desktop-app sessions are not offered. Sub-agent Claude
+transcripts are not listed, and a transcript whose records carry no cwd cannot be
+imported. Everything is local only: no remote-machine stores. Registry v1 still
+stores one workspace per canonical root and
 has no initial-terminal-launch field, so a second tmux session sharing a directory
 gets its own attach tab in the shared workspace but not its own workspace (layout
 and files are shared; per-session workspaces need a source identity in the
@@ -480,6 +532,7 @@ uses:
 | `terminal.resume_agents` | bool, `true` | a restart of an exited agent terminal runs its recorded resume argv instead of its launch argv. Turn it off to re-run the launch command. |
 | `terminal.agents` | `[{ "name", "command", "args", "resume_args" }]`, empty | **gvim extension**: the agent presets Run Agent... offers and the resume metadata a restart uses (see Agent sessions and Run Agent). User layer only. |
 | `clipboard.use_osc52` | bool, `false` | let a program in the dock write the system clipboard with the OSC 52 escape (base64 text). Off by default: the child's output is untrusted data. When it is on, a write happens only if the workspace is trusted and only for the clipboard selection (selector `c` or empty); primary/select selections and cut-buffer numbers are ignored. The bytes still go to the emulator, which ignores the sequence. |
+| `clipboard.osc52_paste` | bool, `false` | **gvim extension**: answer a child's OSC 52 *read* request (`ESC ] 52 ; c ; ? BEL`) with the system clipboard, sent back to the child as terminal input. Off by default (a child reading the host clipboard is host data pasted into untrusted output). When on and the workspace is trusted: only selector `c`/empty is answered; text is capped at 64 KiB (larger, empty or unreadable clipboard = no reply); the response is base64 in `ESC ] 52 ; c ; … BEL` queued through the session's input inbox; restored/read-only transcripts and untrusted workspaces install no handler. |
 
 The other Fresh `terminal` key is accepted and ignored, so a Fresh config file
 loads without diagnostics: `skip_app_execution_alias`. `terminal.shell`,
@@ -585,17 +638,20 @@ These are known gaps, not bugs:
 - **reflow** of live or saved output: x/vt has no reflow, so a resize clips or
   pads the live screen and stored transcript rows keep their old widths (see
   Persistence and reflow).
-- **tab drag/reorder and per-tab split terminals**: the dock's tabs are fixed in
-  order and one shell per tab. Workspace scoping landed with #19a (see Terminal
-  tabs in daemon workspaces); sharing a buffer across workspaces is the #19b
-  policy decision.
-- **agent discovery remainder** (#20b): the local tmux scanner and its picker are
-  in place (see Agent discovery and Run Agent), the Run Agent dialog has a
-  per-launch directory choice, and Import creates a workspace for the session's
-  directory. Still open: an imported workspace cannot carry the attach argv yet
-  (registry v1 has no initial-terminal-launch field), dock/agent rows outside the
-  picker, scanning of GNU screen/zellij and remote machines, and any agent
-  identity beyond the foreground-command name match.
+- **drag-to-split and per-tab split terminals**: the dock's tabs reorder within
+  its strip (see Reordering) but the dock is one shell per tab with no splits, so
+  Fresh's drag-a-tab-onto-a-pane-to-split it, extract-tab and per-split tab strips
+  are not offered. Workspace scoping landed with #19a (see Terminal tabs in daemon
+  workspaces); sharing a buffer across workspaces is the #19b policy decision.
+- **agent discovery remainder** (#20b): the local tmux scanner and the local
+  Claude Code/Codex transcript scanner share one picker (see Agent discovery and
+  Run Agent), the Run Agent dialog has a per-launch directory choice, and Import
+  creates a workspace for a session's directory. Still open: an imported workspace
+  cannot carry the attach argv yet (registry v1 has no initial-terminal-launch
+  field), dock/agent rows outside the picker, scanning of GNU screen/zellij and
+  remote machines, live-session detection for transcripts (a row is a
+  conversation, not a running process), and any agent identity beyond the
+  foreground-command name match.
 - **live ephemeral PTY restore**: Fresh restarts a saved terminal tab's PTY on
   restore and appends the saved transcript; gvim deliberately restores the tab
   read-only and dead, so no process (and no agent conversation) is re-run unasked.
@@ -603,12 +659,21 @@ These are known gaps, not bugs:
 - **live-screen reflow** — **decision:** only the stored transcript is re-wrapped; the
   live screen stays clipped or padded on a resize because x/vt has no reflow and adding it
   would mean owning the emulator's scrollback reflow (see Persistence and reflow).
-- **OSC 52 read (paste)** — **decision:** the gap is recorded and deliberately not
-  bridged. The dock parses a child's OSC 52 *write* (opt-in, Trusted-only, write-only); a
-  child *reading* the clipboard through OSC 52 (a paste request) gets no reply. Answering it
-  needs an app-to-terminal response channel, a trust decision for reads, and x/vt query
-  support — no seam exists today, and gvim's Ctrl+V paste path is the editor's, not the
-  child's.
+- **OSC 52 read (paste)** — **implemented (opt-in)**, unlike Fresh, which explicitly does
+  not answer reads. gvim's own OSC 52 parser now recognizes the read request
+  (`ESC ] 52 ; c ; ? BEL`) and the session's input inbox is a real app-to-terminal
+  response channel: with `clipboard.osc52_paste` on and the workspace trusted, the dock
+  reads the system clipboard through the existing timeout-bounded adapter and queues a
+  base64 `ESC ] 52 ; c ; … BEL` response as terminal input, so the child receives it on
+  its stdin exactly as it would from a terminal. Limits: selector `c`/empty only
+  (primary/select and cut-buffer queries are ignored); one response per request; text over
+  64 KiB, an empty clipboard or a read failure sends nothing (the child times out rather
+  than hangs); the response is bounded under the parser's 128 KiB sequence cap; the outer
+  terminal and x/vt are not involved (x/vt ignores incoming OSC 52, gvim's parser owns
+  it); restored/read-only transcripts have no live PTY and no handler; an untrusted
+  workspace installs no handler even when the config is on. There is no reply for a child
+  that ignores its stdin or has no read path — the capability is "response can reach the
+  child's PTY input", not a promise that a given program consumes it.
 - **the kitty keyboard protocol** — **decision:** not ported, because there is no seam to
   port against. x/vt v0.1.0 encodes child keys with legacy bytes only; its `SendKey` carries
   the explicit `TODO: Support Kitty, CSI u, and XTerm modifyOtherKeys` and the emulator

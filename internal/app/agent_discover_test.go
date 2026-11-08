@@ -73,3 +73,37 @@ func TestAgentDiscovererKnownAgents(t *testing.T) {
 		t.Fatalf("known agents = %v, want %v", d.known, want)
 	}
 }
+
+// TestAgentDiscovererIncludesLocalAgentTranscripts checks the app adapter merges
+// the read-only Claude Code/Codex stores into the same scan report the picker
+// receives: no command is started for it (the tmux store here is empty, and the
+// external scan only reads files).
+func TestAgentDiscovererIncludesLocalAgentTranscripts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	dir := filepath.Join(home, ".claude", "projects", "-tmp-proj")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	record := "{\"type\":\"user\",\"cwd\":\"/tmp/proj\",\"sessionId\":\"11111111-2222-3333-4444-555555555555\"}"
+	if err := os.WriteFile(filepath.Join(dir, "11111111-2222-3333-4444-555555555555.jsonl"), []byte(record+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := newAgentDiscoverer(func() string { return "/ws" }, nil, nil)
+	report := d.Discover(context.Background())
+	if len(report.External.Sessions) != 1 {
+		t.Fatalf("external sessions = %+v, want the Claude transcript", report.External.Sessions)
+	}
+	row := report.External.Sessions[0]
+	if row.Agent != "claude" || row.CWD != "/tmp/proj" {
+		t.Fatalf("external row = %+v", row)
+	}
+	if !slices.Equal(row.ResumeArgv, []string{"claude", "--resume", "11111111-2222-3333-4444-555555555555"}) {
+		t.Fatalf("resume argv = %v", row.ResumeArgv)
+	}
+	if len(report.External.Tools) != 2 || !report.External.Tools[0].Installed {
+		t.Fatalf("tools = %+v", report.External.Tools)
+	}
+}

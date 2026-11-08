@@ -457,9 +457,16 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   a switcher list, root-then-label prompts, and a hand-written `WS <label>` status item.
   The workspace protocol frames drive the same manager (workspace_list/select/new/close/
   rename answer with the list and the active id; errors are notices). An open-file request
-  for a path open in another workspace switches to that workspace instead of duplicating
-  the buffer (single-writer v1; shared buffers are #19b) and a path open nowhere opens in
-  the active workspace. Discovery Import uses the additive
+  carries the client's cwd and either the legacy bare `paths` or the positional `files`
+  (path + 1-based line/column): relative paths resolve against the client's cwd, and the
+  position reaches the editor. A path open in a materialized workspace switches to that
+  workspace; a path open in a *dormant* workspace is detected from its saved layout, then
+  that workspace is materialized and activated asynchronously with the file focused (a
+  saved position is kept when the request has none, a stale layout entry whose file is
+  gone and has no stash is ignored, and stash text restores the file). A detected owner
+  that fails to materialize is an error with the current workspace kept - it is never
+  re-opened in another workspace (single-writer v1; shared buffers are #19b). A path open
+  nowhere opens in the active workspace. Discovery Import uses the additive
   `WorkspaceLauncher.CreateWithLaunch(root, label, launch)` port: the manager creates or
   reuses the workspace, remembers the discovered session's attach argv keyed by stable id,
   and starts it in that workspace's dock once materialization + Show install the model
@@ -478,8 +485,33 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   goroutine (the registry itself is concurrency-safe for the UI, socket and writer
   goroutines). Ordering: a close waits for that workspace's queued writes, and daemon quit
   snapshots every materialized workspace, waits for every write before closing the
-  runtimes (active first); the synchronous save in the runtime close is the fallback and
-  reports its errors. Switching itself does NOT wait for the disk write (that is the point
+  runtimes (active first). The exit path is checked (`closeAllChecked`, #19a review): all
+  capture writes share ONE deadline (the old closeAll waited per write); a failed or
+  timed-out capture is retried with the runtime's synchronous save (the same fallback a
+  workspace close uses); when that also fails the runtime's crash-recovery copy is written
+  so the text survives for the next start, and the error names the recovery path. The
+  runtimes are closed only after those attempts, and any capture failure is returned, so
+  the daemon exits non-zero instead of reporting a clean quit (the compatibility closeAll
+  wrapper only prints the error; tests and deferred cleanup still use it). This matches
+  Fresh's hot-exit promise that a daemon shutdown never drops unsaved work quietly (Fresh
+  flushes its per-buffer recovery store for every workspace at normal shutdown and keeps
+  the still-modified entries); gvim's last resort is the recovery copy plus a named error.
+  Overwrite protection (delayed-writer follow-up): each workspace has a write lock and a
+  snapshot sequence/commit token (`captureWriter`). `runWriter` holds the lock across the
+  write and the registry update and commits its sequence; the exit fallback only runs when
+  it can TryLock, and then sets `stopped` and `committed = seq`, so a delayed queued older
+  snapshot skips its write instead of overwriting the confirmed newer state (regression:
+  a gated writer plus a fallback commit). If TryLock fails, a write is in flight holding
+  the lock with the NEWEST snapshot: the exit runs no fallback (that would be the
+  overwrite race), marks that runtime `skipSave` so its own synchronous exit save cannot
+  race it either, keeps the crash-recovery copy as the last resort, and the daemon exits
+  non-zero while the in-flight write is left to finish. Limits, honestly: a writer stuck
+  inside the filesystem cannot be interrupted or waited out (the recovery copy plus the
+  non-zero exit is the best effort, and a hard kill before it finishes loses that last
+  capture while the previous session file stays intact); the fallback save does not
+  rewrite the registry layout (the last captured layout stays; the session file is
+  authoritative for content); and a workspace without a session directory cannot persist
+  (the registry always gives daemon workspaces one). Switching itself does NOT wait for the disk write (that is the point
   of the writer); a crash between snapshot and write loses that last capture, while the
   previous session file stays intact — this is the documented limitation of the slice, and
   a failed write is reported (tested with a read-only session directory and an injected

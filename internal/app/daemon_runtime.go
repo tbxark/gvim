@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/tbxark/gvim/internal/daemon"
 )
@@ -18,11 +19,15 @@ func attachToDaemon(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	files := make([]string, 0, len(opts.Files))
+	targets := make([]daemon.OpenFileTarget, 0, len(opts.Files))
 	for _, f := range opts.Files {
-		files = append(files, f.Path)
+		targets = append(targets, daemon.OpenFileTarget{Path: f.Path, Line: f.Line, Col: f.Col})
 	}
-	return daemon.AttachClient(ctx, name, files)
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
+	return daemon.AttachClientTargets(ctx, name, cwd, targets)
 }
 
 // attachDaemonName uses the same resolved root as daemon startup. An explicit

@@ -23,14 +23,18 @@ type WorkspaceHost struct {
 	mu      sync.Mutex
 	active  *Model
 	program *tea.Program
-	// pendingCmd is batched into the next returned command: the first Init of a model
-	// shown since the last Update, and a window-size request so a swapped-in workspace
-	// repaints at the client's size. A warm model is not Init'ed again: its runtime and
-	// state continue where the switch left them.
-	pendingCmd tea.Cmd
+	// pendingShow marks a model shown since the last Update; pendingCmd carries its first
+	// Init (nil when the model has nothing to start). The next Update replays the known
+	// window size so the swapped-in workspace paints at the client's size. A warm model is
+	// not Init'ed again: its runtime and state continue where the switch left them.
+	pendingShow bool
+	pendingCmd  tea.Cmd
 	// initialized marks the models whose Init already ran (the first is the program's own
 	// Init; every later one is started by Show).
 	initialized map[*Model]bool
+	// width/height remember the last window size the program saw, so a model shown on a
+	// workspace switch is sized (a daemon host has no terminal to ask).
+	width, height int
 }
 
 // NewWorkspaceHost returns a host over active.
@@ -51,14 +55,13 @@ func (h *WorkspaceHost) Show(m *Model) {
 	if m == nil {
 		return
 	}
-	cmd := func() tea.Msg { return tea.RequestWindowSize() }
 	h.mu.Lock()
 	h.active = m
+	h.pendingShow = true
 	if !h.initialized[m] {
 		h.initialized[m] = true
-		cmd = tea.Batch(m.Init(), cmd)
+		h.pendingCmd = m.Init()
 	}
-	h.pendingCmd = cmd
 	h.mu.Unlock()
 }
 
@@ -110,14 +113,24 @@ func (h *WorkspaceHost) Notify(text string) {
 	h.Do(func() { h.Active().Notify(text) })
 }
 
+// openFileAtMsg is a client open-file request with an optional 1-based position.
+type openFileAtMsg struct {
+	path      string
+	line, col int
+}
+
 // PostOpenFile sends a client's open-file request to the active model through the program
 // queue (call it after Show, so the request lands in the workspace that took the file).
-func (h *WorkspaceHost) PostOpenFile(path string) {
+func (h *WorkspaceHost) PostOpenFile(path string) { h.PostOpenFileAt(path, 0, 0) }
+
+// PostOpenFileAt is PostOpenFile with a position: line/col are moved to after the file is
+// focused (line 0 keeps the restored/existing caret).
+func (h *WorkspaceHost) PostOpenFileAt(path string, line, col int) {
 	h.mu.Lock()
 	p := h.program
 	h.mu.Unlock()
 	if p != nil {
-		p.Send(OpenFileMessage(path))
+		p.Send(openFileAtMsg{path: path, line: line, col: col})
 	}
 }
 
@@ -143,10 +156,21 @@ func (h *WorkspaceHost) Init() tea.Cmd { return h.Active().Init() }
 // workspace model. A model shown during this update starts with its Init.
 func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	if size, ok := msg.(tea.WindowSizeMsg); ok && size.Width > 0 && size.Height > 0 {
+		// Ignore a 0x0 size: a daemon's program output is not a terminal, so a window
+		// size request can come back as 0x0 and must not erase the client's size.
+		h.mu.Lock()
+		h.width, h.height = size.Width, size.Height
+		h.mu.Unlock()
+	}
 	switch msg := msg.(type) {
 	case hostCallMsg:
 		msg.fn()
 		close(msg.done)
+	case openFileAtMsg:
+		cmd := h.Active().openFileCmd(msg.path, false, msg.line, msg.col)
+		h.Active().focusEditor()
+		return h, cmd
 	default:
 		next, c := h.Active().Update(msg)
 		if m, ok := next.(*Model); ok {
@@ -157,11 +181,20 @@ func (h *WorkspaceHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = c
 	}
 	h.mu.Lock()
-	pending := h.pendingCmd
-	h.pendingCmd = nil
+	pending, shown := h.pendingCmd, h.pendingShow
+	h.pendingCmd, h.pendingShow = nil, false
+	width, height := h.width, h.height
 	h.mu.Unlock()
-	if pending != nil {
-		return h, tea.Batch(pending, cmd)
+	if shown {
+		// The shown model has no window size of its own: replay the last one so it paints
+		// at the attached client's size. This must happen even when Init is nil.
+		if width > 0 && height > 0 {
+			cmd = tea.Batch(cmd, func() tea.Msg { return tea.WindowSizeMsg{Width: width, Height: height} })
+		}
+		if pending != nil {
+			cmd = tea.Batch(pending, cmd)
+		}
+		return h, cmd
 	}
 	return h, cmd
 }

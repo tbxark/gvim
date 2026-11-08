@@ -22,4 +22,6 @@ var terminalCommands = []builtinCommand{
 	{Name: "Next Terminal Tab", Description: "Show the next dock terminal tab", Action: "terminal_tab_next", Contexts: []string{"Normal", "FileExplorer", "Terminal"}},
 	{Name: "Previous Terminal Tab", Description: "Show the previous dock terminal tab", Action: "terminal_tab_previous", Contexts: []string{"Normal", "FileExplorer", "Terminal"}},
 	{Name: "Rename Terminal Tab", Description: "Name the active dock terminal tab", Action: "terminal_tab_rename", Contexts: []string{"Normal", "FileExplorer", "Terminal"}},
+	{Name: "Move Tab To Left", Description: "Move the active terminal tab left", Action: "terminal_tab_move_left", Contexts: []string{"Normal", "FileExplorer", "Terminal"}},
+	{Name: "Move Tab To Right", Description: "Move the active terminal tab right", Action: "terminal_tab_move_right", Contexts: []string{"Normal", "FileExplorer", "Terminal"}},
 }

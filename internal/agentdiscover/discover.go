@@ -95,6 +95,10 @@ type Report struct {
 	Problems []string
 	// Truncated says a scan bound stopped the walk.
 	Truncated bool
+	// External carries the local agent-transcript findings of the same scan
+	// (Claude Code and Codex CLI conversation stores), merged by the UI with the
+	// tmux rows. Filling it is optional: the tmux-only scan leaves it zero.
+	External ExternalReport
 }
 
 // agentSet returns the probable-agent command names: the built-in set plus the

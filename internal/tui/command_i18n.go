@@ -15,10 +15,12 @@ func translateCommands(entries []commands.Entry) []commands.Entry {
 	out := make([]commands.Entry, len(entries))
 	copy(out, entries)
 	for i := range out {
-		if out[i].I18nKey == "" {
-			continue
+		if out[i].I18nKey != "" {
+			out[i].Name = i18n.TOr("", out[i].I18nKey, out[i].Name, nil)
 		}
-		out[i].Name = i18n.TOr("", out[i].I18nKey, out[i].Name, nil)
+		if out[i].DescKey != "" {
+			out[i].Description = i18n.TOr("", out[i].DescKey, out[i].Description, nil)
+		}
 	}
 	return out
 }

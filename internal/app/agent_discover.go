@@ -39,11 +39,16 @@ func newAgentDiscoverer(root func() string, gate func(context.Context, []string,
 
 // Discover runs one scan, in the caller's command goroutine.
 func (d *agentDiscoverer) Discover(ctx context.Context) agentdiscover.Report {
-	return agentdiscover.Scan(ctx, agentdiscover.Config{
+	report := agentdiscover.Scan(ctx, agentdiscover.Config{
 		Runner:        gatedScanRunner{d: d},
 		AllowCommands: true,
 		KnownAgents:   d.known,
 	})
+	// The transcript stores are read-only: no command, no shell, nothing beyond
+	// the user's own Claude Code/Codex files. It runs in the same effect command as
+	// the tmux scan, never on the update loop.
+	report.External = agentdiscover.ScanExternal(ctx, agentdiscover.ExternalOptions{})
+	return report
 }
 
 // gatedScanRunner runs every tmux command through the session's spawn gate and

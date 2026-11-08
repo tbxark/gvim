@@ -198,7 +198,7 @@ Main page keys:
 | Ctrl+E | close the page and open that layer's raw config file in a tab |
 | Esc | close the page; with pending changes it asks first |
 
-**Labels.** Section titles and row labels of the Interface, Display and Terminal sections (plus the two rows Fresh names: `editor.auto_close` and `editor.whitespace_show`) are extracted into the i18n catalogue: a non-English locale shows the translated label where Fresh has one, and every other row/section keeps its English schema name (the values, keys and pending/reset behaviour are unchanged). See [i18n.md](i18n.md).
+**Labels.** Every scalar settings row and section label is extracted into the i18n catalogue (`gvim.settings.field.*`/`gvim.settings.section.*`); the two rows Fresh names (`editor.auto_close`, `editor.whitespace_show`) are mapped to Fresh's `settings.field.*` keys, so a non-English locale shows Fresh's translated label for them while the others keep their English schema name until a translation pass. Values, keys, pending/reset and layer behaviour are unchanged; structured sub-page labels are not extracted yet. See [i18n.md](i18n.md).
 
 **Theme preview.** The `theme` row carries a four-chip preview: editor background, editor foreground, gvim's accent (`ui.accent_bg/fg`) and Fresh's popup selection (`ui.popup_selection_bg/fg`), resolved from the catalogue by the app (cached when the service is built and on every Reload, so the page never reads a theme file on the update loop). The footer names the chips (`swatches: bg · fg · accent · popup`); the preview follows the effective theme after Save/Reload. The row's value and pending/reset behaviour are unchanged, and a URL/packaged ref still fails validation with the loader's clear refusal.
 
