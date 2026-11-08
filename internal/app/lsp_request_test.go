@@ -32,6 +32,10 @@ func TestFakeLSPServerProcess(t *testing.T) {
 	if os.Getenv(fakeLSPEnv) == "" {
 		t.Skip("runs only as the server process of the lspPort tests")
 	}
+	if os.Getenv(fakeLSPEnv) == "die" {
+		fmt.Fprintln(os.Stderr, "fake server: cannot start: bad configuration")
+		os.Exit(3)
+	}
 	in := bufio.NewReader(os.Stdin)
 	for {
 		n := -1
@@ -79,6 +83,8 @@ func TestFakeLSPServerProcess(t *testing.T) {
 				send(id, "null")
 			}(msg.ID)
 			continue
+		case "textDocument/formatting":
+			result = `[{"range":{"start":{"line":1,"character":4},"end":{"line":1,"character":6}},"newText":" "}]`
 		case "textDocument/inlayHint":
 			result = strings.Repeat("[", 12000) + strings.Repeat("]", 12000)
 		case "textDocument/documentSymbol":

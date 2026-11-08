@@ -115,7 +115,8 @@ func TestPluginManagerDisableAndEnable(t *testing.T) {
 func TestPluginManagerCannotToggleAConfigLockedPlugin(t *testing.T) {
 	s := newManagerSession(t)
 	s.choosePluginAction("locked_one", "Enable", 0)
-	s.until("the refusal", func() bool { return strings.Contains(s.statusRow(), "plugins.locked_one.enabled") })
+	// The message is long, so it can wrap onto the notice band above the status row.
+	s.until("the refusal", func() bool { return strings.Contains(s.noticeText(), "plugin 'locked_one' is set in config") })
 	if got := s.status("locked_one"); got != "disabled" {
 		t.Fatalf("status = %q, want it unchanged", got)
 	}
@@ -180,7 +181,7 @@ func TestInitLuaCommands(t *testing.T) {
 	}
 
 	s.runCommand("init: Check init.lua")
-	s.until("the check", func() bool { return strings.Contains(s.statusRow(), "syntax OK") })
+	s.until("the check", func() bool { return strings.Contains(s.noticeText(), "syntax OK") })
 
 	must(t, os.WriteFile(initPath, []byte(mgrHello), 0o644))
 	s.runCommand("init: Reload init.lua")
@@ -190,7 +191,7 @@ func TestInitLuaCommands(t *testing.T) {
 
 	must(t, os.WriteFile(initPath, []byte("this is not lua"), 0o644))
 	s.runCommand("init: Check init.lua")
-	s.until("the syntax error", func() bool { return strings.Contains(s.statusRow(), "init.lua:") })
+	s.until("the syntax error", func() bool { return strings.Contains(s.noticeText(), "init.lua:") })
 }
 
 // TestLoadPluginFromBuffer loads the active buffer as a plugin.

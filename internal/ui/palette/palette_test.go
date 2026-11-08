@@ -135,11 +135,34 @@ func fakeCommands(n int) []model.Entry {
 func TestPromptShowsQueryAndCaretCell(t *testing.T) {
 	p := New(commandOptions(">save", nil))
 	g := draw(p, 100, 30)
-	if got := rowText(g, 29); got != ">save" {
-		t.Fatalf("prompt row = %q, want %q", got, ">save")
+	// The query starts at the name column, so it lines up with the rows above it.
+	x := layoutFor(100, 30).nameX
+	if got := rowText(g, 29); got != strings.Repeat(" ", x)+">save" {
+		t.Fatalf("prompt row = %q, want %q after %d blanks", got, ">save", x)
 	}
-	if caret := g.At(5, 29); !caret.Style.Reverse || caret.Text != " " {
+	if caret := g.At(x+5, 29); !caret.Style.Reverse || caret.Text != " " {
 		t.Errorf("caret cell = %+v, want a reversed blank after the query", caret)
+	}
+}
+
+// TestEveryBoxRowHasBothBorders checks that the item rows are closed by a bar on
+// the right, at any width, with rows, with a selection and with an empty list.
+func TestEveryBoxRowHasBothBorders(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{{"commands", ">"}, {"no match", ">zzzqqq"}} {
+		for _, w := range []int{20, 80, 100, 140} {
+			t.Run(fmt.Sprintf("%s %d", tc.name, w), func(t *testing.T) {
+				g := draw(New(commandOptions(tc.query, nil)), w, 30)
+				geo := layoutFor(w, 30)
+				for y := geo.top + 1; y < geo.bottom; y++ {
+					if l, r := g.At(geo.left, y).Text, g.At(geo.right, y).Text; l != "│" || r != "│" {
+						t.Errorf("row %d borders = %q, %q, want bars", y, l, r)
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -152,7 +175,6 @@ func TestEmptyBoxSaysWhatIsMissing(t *testing.T) {
 		{"no command matches", commandOptions(">zzzqqq", nil), "No matching commands"},
 		{"no buffer matches", Options{Query: "#zzz", Buffers: []Buffer{{Name: "a.txt"}}}, "No matching buffers"},
 		{"file index done", Options{Query: "zzz", Files: &fakeFiles{}, Ranker: &fakeRanker{}}, "No matching files"},
-		{"line not a number", Options{Query: ":x"}, "No matching lines"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -163,6 +185,37 @@ func TestEmptyBoxSaysWhatIsMissing(t *testing.T) {
 				t.Errorf("box does not show %q", tt.message)
 			}
 		})
+	}
+}
+
+// A ':' query that is not a line number says so, and Enter keeps the palette open instead of
+// closing it without a word (AK-11). "No matching lines" used to be the whole answer.
+func TestLineModeExplainsAQueryThatIsNotALine(t *testing.T) {
+	tests := []struct {
+		query, message string
+	}{
+		{":abc", "Not a line number: abc"},
+		{":x", "Not a line number: x"},
+		{":", "Type a line number"},
+		{":0", "Line numbers start at 1"},
+		{":3:", "Not a line number: 3:"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			p := New(Options{Query: tt.query})
+			settle(t, p, p.Init(), 4)
+			if !hasRow(draw(p, 100, 30), tt.message) {
+				t.Errorf("box does not show %q", tt.message)
+			}
+			if cmd := p.Update(key(tea.KeyEnter)); cmd != nil || !p.Active() {
+				t.Errorf("Enter on the message: cmd=%v active=%v, want nil and still open", cmd, p.Active())
+			}
+		})
+	}
+	p := New(Options{Query: ":12"})
+	settle(t, p, p.Init(), 4)
+	if cmd := p.Update(key(tea.KeyEnter)); cmd == nil || p.Active() {
+		t.Error("a valid line no longer jumps and closes")
 	}
 }
 
@@ -522,11 +575,14 @@ func TestLayoutRules(t *testing.T) {
 		nameEnd  int
 		footerOK bool
 	}{
-		{100, 30, 16, 35, 33, true, 3, 35, true},
-		{80, 24, 10, 35, 13, true, 3, 35, true},
-		{40, 15, 1, 31, 0, false, 1, 31, true},
-		{32, 15, 1, -1, 0, false, 1, 31, true},
-		{60, 3, -1, 32, 0, true, 2, 32, true},
+		{100, 30, 16, 67, 0, true, 3, 65, true},
+		{80, 24, 10, 47, 0, true, 3, 45, true},
+		{40, 15, 1, -1, 0, false, 2, 38, true},
+		{32, 15, 1, -1, 0, false, 2, 30, true},
+		{60, 3, -1, 41, 0, false, 3, 39, true},
+		{120, 40, 26, 53, 32, true, 3, 51, true},
+		{200, 50, 36, 109, 55, true, 4, 107, true},
+		{20, 10, 0, -1, 0, false, 2, 18, true},
 	}
 	for _, tt := range tests {
 		g := layoutFor(tt.w, tt.h)

@@ -37,6 +37,8 @@ func TestViMoves(t *testing.T) {
 		{"down onto a shorter line lands on its last character", "abcdef\nxy", buffer.Pos{Line: 0, Col: 4}, "vi_move_down", buffer.Pos{Line: 1, Col: 1}},
 		{"down onto an empty line", "abcdef\n\nxyz", buffer.Pos{Line: 0, Col: 4}, "vi_move_down", buffer.Pos{Line: 1, Col: 0}},
 		{"down on the last line stays", "abc\ndef", buffer.Pos{Line: 1, Col: 1}, "vi_move_down", buffer.Pos{Line: 1, Col: 1}},
+		{"down stops above the empty line after the final line break", "abc\ndef\n", buffer.Pos{Line: 1, Col: 1}, "vi_move_down", buffer.Pos{Line: 1, Col: 1}},
+		{"down onto the last line before the final line break", "abc\ndef\n", buffer.Pos{Line: 0, Col: 1}, "vi_move_down", buffer.Pos{Line: 1, Col: 1}},
 		{"up keeps the column", "abcdef\nghijkl", buffer.Pos{Line: 1, Col: 3}, "vi_move_up", buffer.Pos{Line: 0, Col: 3}},
 		{"up onto a shorter line lands on its last character", "xy\nabcdef", buffer.Pos{Line: 1, Col: 4}, "vi_move_up", buffer.Pos{Line: 0, Col: 1}},
 		{"up on the first line stays", "abc\ndef", buffer.Pos{Line: 0, Col: 2}, "vi_move_up", buffer.Pos{Line: 0, Col: 2}},

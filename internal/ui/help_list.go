@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -24,8 +26,12 @@ const listWheelRows = 3
 // draw, when it does not know the frame size yet.
 const listDefaultPage = 8
 
-// listHint is the row under the items. It names the keys the list takes.
-const listHint = "Type to filter, Up/Down move, Enter run, Esc close"
+// listHint is the row under the items of a list that runs a row. It names the keys the list
+// takes. A list that runs nothing shows readOnlyHint, and a list can set its own.
+const (
+	listHint     = "Type to filter, Up/Down move, Enter run, Esc close"
+	readOnlyHint = "Type to filter, Up/Down move, Esc close"
+)
 
 // listRow is one row of a listView. A header row names a group and cannot be
 // chosen. left is the main text, such as an action or a setting, and right is
@@ -54,9 +60,17 @@ type listView struct {
 	top    int    // the first index into shown on screen
 	page   int    // the item rows on screen at the last draw
 	active bool
+	// bestFirst puts the rows whose text is the filter, then those that start with it,
+	// before the rest, so typing a name reaches its row first.
+	bestFirst bool
+	// fit makes the box no taller than the rows need, for a list of a few rows.
+	fit    bool
 	chrome style.Overlay
 	run    func(v *listView, r listRow) tea.Cmd // nil: choosing a row does nothing
+	hint   string                               // the footer; empty means listHint, or readOnlyHint when run is nil
 	box    rect                                 // the box at the last draw
+	maxW   int                                  // the widest the box is drawn; zero is listMaxWidth
+	cut    func(s string, room int) string      // fits a row to room cells; nil cuts at the end
 }
 
 // newListView returns an open list with rows, titled title. run is called when a
@@ -79,7 +93,20 @@ func newListView(title string, rows []listRow, chrome style.Overlay, run func(*l
 // box has a filter row and the items inside them. An empty box means the frame is
 // too small to show the list.
 func listBox(w, h int) (rect, int) {
-	r := centred(w, h, listMaxWidth, listMaxHeight)
+	return listBoxFor(w, h, listMaxHeight)
+}
+
+// listBoxFor is listBox for a list of n rows: a box that is not taller than its rows
+// need, so two rows do not sit in a box of 28.
+func listBoxFor(w, h, n int) (rect, int) { return listBoxSized(w, h, n, 0) }
+
+// listBoxSized is listBoxFor for a list that may be maxW cells wide; zero is
+// listMaxWidth.
+func listBoxSized(w, h, n, maxW int) (rect, int) {
+	if maxW == 0 {
+		maxW = listMaxWidth
+	}
+	r := centred(w, h, maxW, min(listMaxHeight, n+3))
 	if r.w == 0 {
 		return rect{}, 0
 	}
@@ -87,10 +114,11 @@ func listBox(w, h int) (rect, int) {
 }
 
 // centred returns a box of at most bw by bh cells, centred in a w by h frame and
-// kept two cells inside each edge. A frame too small for a box with a title row and
-// one body row gives an empty rect.
+// kept space.ListMargin cells inside the left and right edge and one row inside the
+// top and bottom. A frame too small for a box with a title row and one body row
+// gives an empty rect.
 func centred(w, h, bw, bh int) rect {
-	bw, bh = min(bw, w-4), min(bh, h-2)
+	bw, bh = min(bw, w-2*space.ListMargin(w)), min(bh, h-2)
 	if bw < 12 || bh < 3 {
 		return rect{}
 	}
@@ -108,7 +136,7 @@ func (v *listView) recompute() {
 			head = i
 			continue
 		}
-		if needle != "" && !strings.Contains(strings.ToLower(r.left+" "+r.right), needle) {
+		if needle != "" && !strings.Contains(strings.ToLower(r.left+" "+r.right+" "+r.value), needle) {
 			continue
 		}
 		if head >= 0 {
@@ -117,7 +145,27 @@ func (v *listView) recompute() {
 		}
 		v.shown = append(v.shown, i)
 	}
+	if v.bestFirst && needle != "" {
+		v.rankShown(needle)
+	}
 	v.sel, v.top = v.firstItem(), 0
+}
+
+// rankShown moves the rows whose text equals needle, then those that start with it,
+// ahead of the others. The order within each group is kept. A list with
+// bestFirst has no headers.
+func (v *listView) rankShown(needle string) {
+	rank := func(i int) int {
+		left := strings.ToLower(v.rows[i].left)
+		switch {
+		case left == needle:
+			return 0
+		case strings.HasPrefix(left, needle):
+			return 1
+		}
+		return 2
+	}
+	slices.SortStableFunc(v.shown, func(a, b int) int { return rank(a) - rank(b) })
 }
 
 // firstItem is the index in shown of the first item, or 0 when there is none.
@@ -299,7 +347,11 @@ const filterLabel = "Filter: "
 // and the mouse use what is on screen. The box has the border and title of the
 // dialogs, the filter row, the items, and the hint on the bottom border.
 func (v *listView) draw(g *grid.Grid) {
-	box, rows := listBox(g.Width(), g.Height())
+	n := listMaxHeight
+	if v.fit {
+		n = len(v.rows)
+	}
+	box, rows := listBoxSized(g.Width(), g.Height(), n, v.maxW)
 	v.box = box
 	v.page = rows
 	if rows == 0 {
@@ -339,13 +391,32 @@ func (v *listView) draw(g *grid.Grid) {
 			room = rightX - (box.x + 2) - 2
 		}
 		if room > 0 {
-			g.Put(box.x+2, y, end, truncateCells(left, room), st)
+			g.Put(box.x+2, y, end, v.fitText(left, room), st)
 		}
 	}
 	if len(v.shown) == 0 {
 		g.Put(box.x+2, box.y+2, end, v.empty, ov.Muted)
 	}
-	g.Put(box.x+2, box.y+box.h-1, end, truncateCells(" "+listHint+" ", end-(box.x+2)), ov.Muted)
+	g.Put(box.x+2, box.y+box.h-1, end, truncateCells(" "+v.footer()+" ", end-(box.x+2)), ov.Muted)
+}
+
+// footer is the hint under the items: the keys this list takes.
+func (v *listView) footer() string {
+	switch {
+	case v.hint != "":
+		return v.hint
+	case v.run == nil:
+		return readOnlyHint
+	}
+	return listHint
+}
+
+// fitText shortens a row's text to room cells, with the list's own cut when it has one.
+func (v *listView) fitText(s string, room int) string {
+	if v.cut != nil {
+		return v.cut(s, room)
+	}
+	return truncateCells(s, room)
 }
 
 // listOverlay adapts *listView to Overlay. The list closes itself when it clears

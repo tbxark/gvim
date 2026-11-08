@@ -25,8 +25,21 @@ func changeMarks(saved, cur []string) (bar, scroll map[int]bool) {
 	if scroll != nil && len(cur) != len(saved) {
 		scroll[len(cur)] = true
 	}
-	bar = barMarks(saved, cur)
+	plain := make([]curLine, len(cur))
+	for i, text := range cur {
+		plain[i] = curLine{text: text}
+	}
+	bar = barMarks(saved, plain)
 	return bar, scroll
+}
+
+// curLine is a current line for barMarks. A line the caller did not read, because it is too
+// long to compare, has its length in runes instead of its text: it equals no saved line, and
+// as a paired line it is marked unless it got shorter than its saved partner.
+type curLine struct {
+	text  string
+	runes int
+	long  bool
 }
 
 // barMarks aligns the saved and current lines and marks the current lines that
@@ -35,7 +48,7 @@ func changeMarks(saved, cur []string) (bar, scroll map[int]bool) {
 // alignment. Between anchors, the current lines are paired with saved lines from
 // the end of each gap. A paired line is marked when it is not a pure deletion of
 // its saved partner, and an unpaired line is always marked.
-func barMarks(saved, cur []string) map[int]bool {
+func barMarks(saved []string, cur []curLine) map[int]bool {
 	var bar map[int]bool
 	mark := func(i int) {
 		if bar == nil {
@@ -45,11 +58,11 @@ func barMarks(saved, cur []string) map[int]bool {
 	}
 
 	p := 0
-	for p < len(saved) && p < len(cur) && saved[p] == cur[p] {
+	for p < len(saved) && p < len(cur) && cur[p].is(saved[p]) {
 		p++
 	}
 	s := 0
-	for s < len(saved)-p && s < len(cur)-p && saved[len(saved)-1-s] == cur[len(cur)-1-s] {
+	for s < len(saved)-p && s < len(cur)-p && cur[len(cur)-1-s].is(saved[len(saved)-1-s]) {
 		s++
 	}
 	a := saved[p : len(saved)-s]
@@ -73,7 +86,7 @@ func barMarks(saved, cur []string) map[int]bool {
 	for i, v := range slices.Backward(a) {
 		for j := len(b) - 1; j >= 0; j-- {
 			switch {
-			case v == b[j]:
+			case b[j].is(v):
 				table[i][j] = table[i+1][j+1] + 1
 			case table[i+1][j] >= table[i][j+1]:
 				table[i][j] = table[i+1][j]
@@ -86,7 +99,7 @@ func barMarks(saved, cur []string) map[int]bool {
 	var anchors []anchor
 	for i, j := 0, 0; i < len(a) && j < len(b); {
 		switch {
-		case a[i] == b[j]:
+		case b[j].is(a[i]):
 			anchors = append(anchors, anchor{i, j})
 			i++
 			j++
@@ -105,13 +118,25 @@ func barMarks(saved, cur []string) map[int]bool {
 		for bi := an.bj - 1; bi >= bj0; bi-- {
 			t := an.bj - 1 - bi
 			ai := an.ai - 1 - t
-			if ai < ai0 || !isSubsequence(b[bi], a[ai]) {
+			if ai < ai0 || !b[bi].keeps(a[ai]) {
 				mark(p + bi)
 			}
 		}
 		ai0, bj0 = an.ai+1, an.bj+1
 	}
 	return bar
+}
+
+// is reports whether the line was read and is the text s.
+func (c curLine) is(s string) bool { return !c.long && c.text == s }
+
+// keeps reports whether the line only lost text relative to its saved partner a. A line that
+// was read keeps when it is a subsequence of a; a line that was not read keeps when it is shorter.
+func (c curLine) keeps(a string) bool {
+	if c.long {
+		return c.runes < len(a)
+	}
+	return isSubsequence(c.text, a)
 }
 
 // isSubsequence reports whether every rune of short appears in long in order. A

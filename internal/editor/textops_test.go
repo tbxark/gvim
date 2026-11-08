@@ -458,8 +458,12 @@ func TestCaseConversion(t *testing.T) {
 			if d.Cursor != tt.wantCursor {
 				t.Fatalf("caret = %+v, want %+v", d.Cursor, tt.wantCursor)
 			}
-			if d.Sel != nil && tt.wantText != tt.text {
-				t.Fatalf("selection = %+v, want none after a change", d.Sel)
+			// A conversion of a selection keeps it selected; a word has none.
+			if tt.at.sel != nil && tt.wantText != tt.text && !selectionEqual(d.Sel, tt.at.sel) {
+				t.Fatalf("selection = %+v, want %+v kept", d.Sel, tt.at.sel)
+			}
+			if tt.at.sel == nil && d.Sel != nil {
+				t.Fatalf("selection = %+v, want none", d.Sel)
 			}
 		})
 	}

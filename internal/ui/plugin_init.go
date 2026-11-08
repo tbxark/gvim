@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/ui/prompt"
 )
 
@@ -54,6 +55,28 @@ const initTemplate = `-- init.lua: your own Lua script for gvim. It loads after 
 
 // initExamplesMarker is the line of initTemplate after which every line is an example.
 const initExamplesMarker = "-- Examples"
+
+// initCheckControl is the init_check request. When init.lua is open with changes that are not
+// saved, the check reads that buffer: the file on disk is not what the user is about to save.
+func (m *Model) initCheckControl() pluginapi.Control {
+	c := pluginapi.Control{Op: "init_check"}
+	pe := m.plug.pe
+	path := m.initFilePath()
+	if pe == nil || path == "" {
+		return c
+	}
+	id := pe.FindBuffer(path)
+	if id == 0 {
+		return c
+	}
+	if info, ok := pe.Buffer(id); !ok || !info.Modified || info.Large {
+		return c
+	}
+	if text, _, err := pe.FullText(id); err == nil && len(text) <= pluginSourceMax {
+		c.Text = text
+	}
+	return c
+}
 
 // initFilePath is the path of init.lua, or "" when the runtime has none.
 func (m *Model) initFilePath() string {

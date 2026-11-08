@@ -50,6 +50,40 @@ func arange(l1, c1, l2, c2 int) pluginapi.Range {
 	return pluginapi.Range{From: apos(l1, c1), To: apos(l2, c2)}
 }
 
+// FindBuffer matches files the way the editor does when it opens a path, so a plugin that
+// opens a file the editor already has under another spelling (a symlink) gets that buffer.
+func TestPluginEditorFindsBufferBySpelling(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	must(t, os.Mkdir(real, 0o755))
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("no symlinks: %v", err)
+	}
+	must(t, os.WriteFile(filepath.Join(real, "a.txt"), []byte("a\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(real, "b.txt"), []byte("b\n"), 0o644))
+	ed := editor.New(editor.Options{})
+	must(t, ed.OpenFile(filepath.Join(real, "a.txt")))
+	must(t, ed.OpenFile(filepath.Join(link, "b.txt")))
+	pe := newPluginEditor(editorAdapter{ed: ed, spans: &spanCache{}, others: map[*editor.Document]*spanCache{}})
+	ids := map[string]pluginapi.BufferID{}
+	for _, b := range pe.ListBuffers() {
+		ids[filepath.Base(b.Path)] = b.ID
+	}
+	for name, spelling := range map[string]string{
+		"a.txt": filepath.Join(link, "a.txt"),
+		"b.txt": filepath.Join(real, "b.txt"),
+	} {
+		if got := pe.FindBuffer(spelling); got == 0 || got != ids[name] {
+			t.Errorf("FindBuffer(%s) = %d, want %d", spelling, got, ids[name])
+		}
+	}
+	if got := pe.FindBuffer(filepath.Join(link, "none.txt")); got != 0 {
+		t.Errorf("FindBuffer(missing) = %d, want 0", got)
+	}
+}
+
 func TestPluginEditorListsBuffers(t *testing.T) {
 	isolateConfig(t)
 	dir := t.TempDir()

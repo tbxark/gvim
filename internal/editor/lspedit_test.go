@@ -117,3 +117,63 @@ func TestApplyLSPEditsClampsTheCaret(t *testing.T) {
 		t.Fatalf("selection survived the edit: %+v", d.Sel)
 	}
 }
+
+// TestApplyLSPEditsKeepsTheCaretOnItsText checks that a format that adds or removes lines above
+// the caret moves the caret with its text, instead of leaving it at the same line and column.
+func TestApplyLSPEditsKeepsTheCaretOnItsText(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		text  string
+		caret buffer.Pos
+		edits []LSPEdit
+		want  buffer.Pos
+	}{
+		{"a line inserted above", "a\nb\nc\n", buffer.Pos{Line: 2, Col: 1},
+			[]LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 0}, Text: "new\n"}}, buffer.Pos{Line: 3, Col: 1}},
+		{"lines removed above", "a\nb\nc\nd\n", buffer.Pos{Line: 3, Col: 1},
+			[]LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 2}}}, buffer.Pos{Line: 1, Col: 1}},
+		{"an edit on the caret's line before it", "x := 1\n", buffer.Pos{Line: 0, Col: 6},
+			[]LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 0, Col: 1}, Text: "yy"}}, buffer.Pos{Line: 0, Col: 8}},
+		{"an edit below leaves it", "a\nb\n", buffer.Pos{Line: 0, Col: 1},
+			[]LSPEdit{{From: buffer.Pos{Line: 1}, To: buffer.Pos{Line: 1, Col: 1}, Text: "zzz"}}, buffer.Pos{Line: 0, Col: 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e, path := openFixture(t, Options{}, tt.text)
+			d := e.Active()
+			d.Cursor = tt.caret
+			if err := e.ApplyLSPEdits(path, tt.edits); err != nil {
+				t.Fatal(err)
+			}
+			if d.Cursor != tt.want {
+				t.Fatalf("caret = %+v, want %+v in %q", d.Cursor, tt.want, d.Buffer.Text())
+			}
+		})
+	}
+}
+
+// TestApplyLSPEditsKeepsTheExtraCarets checks that a format does not drop the other carets, and
+// that each of them moves with its text.
+func TestApplyLSPEditsKeepsTheExtraCarets(t *testing.T) {
+	t.Parallel()
+	e, path := openFixture(t, Options{}, "a\nb\nc\n")
+	d := e.Active()
+	e.Do("add_cursor_below", nil)
+	if len(d.Cursors()) != 1 {
+		t.Fatalf("setup: %d extra carets, want 1", len(d.Cursors()))
+	}
+	lines := []int{d.Cursor.Line, d.Cursors()[0].Cursor.Line}
+	edit := []LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 0}, Text: "new\n"}}
+	if err := e.ApplyLSPEdits(path, edit); err != nil {
+		t.Fatal(err)
+	}
+	extra := d.Cursors()
+	if len(extra) != 1 {
+		t.Fatalf("extra carets = %+v after the edit, want one", extra)
+	}
+	if got := []int{d.Cursor.Line, extra[0].Cursor.Line}; got[0] != lines[0]+1 || got[1] != lines[1]+1 {
+		t.Fatalf("caret lines = %v, want %v moved down one line", got, lines)
+	}
+}

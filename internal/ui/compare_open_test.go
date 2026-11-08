@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -40,5 +41,24 @@ func TestOpenCompareShowsTwoTabsAsTheCompareView(t *testing.T) {
 				t.Fatalf("Comparing() = %v, want %v", got, tt.wantComparing)
 			}
 		})
+	}
+}
+
+// TestOpenCompareReportsTheFirstDifference checks that the --diff entry point says how many
+// differences the view has and goes to the first one, as the palette command does. The
+// startup notice names the file only, and the first change of cmpFiles is on line 1.
+func TestOpenCompareReportsTheFirstDifference(t *testing.T) {
+	t.Parallel()
+	f := newCmpFake(cmpFiles, "/w/a.txt", "/w/b.txt")
+	m, _ := newCmpModel(t, f)
+	m.notice = "Opened a.txt"
+	if !m.OpenCompare(0, 1) {
+		t.Fatal("OpenCompare() = false, want the view")
+	}
+	if !strings.HasPrefix(m.notice, "Difference 1/") {
+		t.Errorf("notice = %q, want it to say which difference the view is on", m.notice)
+	}
+	if got := m.ed.Active().Cursor().Line; got != 1 {
+		t.Errorf("focused cursor line = %d, want 1, the first difference", got)
 	}
 }

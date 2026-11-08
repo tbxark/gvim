@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,14 +23,21 @@ func helpKeys() fakeBindings {
 			{Action: "find_next", Chord: "f3", Context: "file_explorer"},
 		},
 		primary: map[string]KeyBinding{
-			"save":      {Action: "save", Chord: "ctrl+s", Context: "normal"},
-			"quit":      {Action: "quit", Chord: "ctrl+q", Context: "global"},
-			"find_next": {Action: "find_next", Chord: "f3", Context: "file_explorer"},
+			"save":         {Action: "save", Chord: "ctrl+s", Context: "normal"},
+			"quit":         {Action: "quit", Chord: "ctrl+q", Context: "global"},
+			"find_next":    {Action: "find_next", Chord: "f3", Context: "file_explorer"},
+			"show_help":    {Action: "show_help", Chord: "f1", Context: "normal"},
+			"save_chord":   {Action: "save_chord", Chord: "ctrl+x ctrl+s", Context: "normal"},
+			"popup_cancel": {Action: "popup_cancel", Chord: "escape", Context: "popup"},
 		},
 	}
 }
 
-func TestHelpRowsGroupByContextWithPrimaryChords(t *testing.T) {
+// TestHelpRowsGroupByContextWithPrimaryShortcuts: the rows are described in words, show the
+// shortcut as every other label does, and sit under a readable context heading. The old
+// version of this test pinned the raw action ids and chords ("save=ctrl+s"). The popup row is
+// left out: gvim resolves no keys in the popup context, so the help does not list one.
+func TestHelpRowsGroupByContextWithPrimaryShortcuts(t *testing.T) {
 	tests := []struct {
 		name string
 		l    BindingLister
@@ -44,16 +52,14 @@ func TestHelpRowsGroupByContextWithPrimaryChords(t *testing.T) {
 			name: "groups follow context order, then other contexts; noop is left out",
 			l:    helpKeys(),
 			want: []string{
-				"# normal",
-				"save=ctrl+s",
-				"show_help=f1",
-				"save_chord=ctrl+x ctrl+s",
-				"# file_explorer",
-				"find_next=f3",
-				"# global",
-				"quit=ctrl+q",
-				"# popup",
-				"popup_cancel=escape",
+				"# Editor",
+				"Save=Ctrl+S",
+				"Show help=F1",
+				"Save chord=Ctrl+X Ctrl+S",
+				"# File Explorer",
+				"Find next=F3",
+				"# Everywhere",
+				"Quit=Ctrl+Q",
 			},
 		},
 	}
@@ -61,37 +67,7 @@ func TestHelpRowsGroupByContextWithPrimaryChords(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var rows []listRow
 			if tt.l != nil {
-				rows = helpRows(tt.l)
-			}
-			sameLines(t, "rows", rowsOf(rows), tt.want)
-		})
-	}
-}
-
-func TestKeybindingRowsListOnlyBindingsInEffect(t *testing.T) {
-	l := fakeBindings{list: []KeyBinding{
-		{Action: "copy", Chord: "ctrl+c", Context: "normal"},
-		{Action: "save", Chord: "ctrl+s", Context: "normal"},
-		{Action: "quit", Chord: "ctrl+c", Context: "normal"}, // replaces copy for this chord
-		{Action: "quit", Chord: "ctrl+q", Context: "global"},
-	}}
-	tests := []struct {
-		name string
-		l    BindingLister
-		want []string
-	}{
-		{"nil lister", nil, nil},
-		{
-			name: "a later binding of the same chord and context replaces the earlier one",
-			l:    l,
-			want: []string{"save=ctrl+s  normal", "quit=ctrl+c  normal", "quit=ctrl+q  global"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var rows []listRow
-			if tt.l != nil {
-				rows = keybindingRows(tt.l)
+				rows = helpRows(tt.l, nil)
 			}
 			sameLines(t, "rows", rowsOf(rows), tt.want)
 		})
@@ -116,8 +92,12 @@ func TestShowHelpOpensOverlayWithTheKeymapBindings(t *testing.T) {
 			if len(m.overlays) != 1 {
 				t.Fatalf("overlays = %d, want 1", len(m.overlays))
 			}
-			if !frameHas(m, tt.title) || !frameHas(m, "ctrl+s") || !frameHas(m, "show_help") {
+			if !frameHas(m, tt.title) || !frameHas(m, "Save File") || !frameHas(m, "Ctrl+S") || !frameHas(m, "Show Manual") {
 				t.Fatalf("frame does not show the title %q and the bindings", tt.title)
+			}
+			// The footer names only keys that work: Enter does nothing in a read-only help.
+			if frameHas(m, "Enter run") || !frameHas(m, "Type to filter, Up/Down move, Esc close") {
+				t.Fatalf("the footer of %s is wrong:\n%s", tt.title, strings.Join(frameText(m), "\n"))
 			}
 		})
 	}

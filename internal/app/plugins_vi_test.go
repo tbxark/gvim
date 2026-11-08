@@ -47,8 +47,8 @@ func TestViModeIsOffByDefault(t *testing.T) {
 }
 
 // TestViModeEndToEnd plays a vi session on the real editor: normal mode swallows letters,
-// operators, counts, insert mode, the : prompt, visual mode, search, undo, and the way
-// out through the panic chord, three Esc presses, and the toggle command.
+// operators, counts, insert mode, the : prompt, visual mode, search, undo, the way out through
+// the panic chord and the toggle command, and that three Esc presses do not end vi.
 func TestViModeEndToEnd(t *testing.T) {
 	s := viSession(t, "hello world\nsecond line\nthird\n")
 
@@ -171,17 +171,25 @@ func TestViModeEndToEnd(t *testing.T) {
 		t.Fatalf("x after the toggle: %q, want %q", got, "Q"+before[1:])
 	}
 
-	// three Esc presses within 600 ms clear the input mode too
+	// Three Esc presses in a row are a habit, not the panic chord: vi binds Esc itself, so the
+	// press is answered every time and vi stays on (the chord and the toggle are the ways out).
+	// This used to switch vi off.
+	t0 := s.text()
 	s.esc()
 	s.esc()
 	s.esc()
-	s.until("vi to end after three Esc", func() bool { return !strings.Contains(s.statusRow(), "-- NORMAL --") })
-	s.typeText("z")
 	s.settle(20 * time.Millisecond)
-	if got := s.text(); got != "Qz"+before[1:] {
-		t.Fatalf("after three Esc a key must type: %q", got)
+	if !strings.Contains(s.statusRow(), "-- NORMAL --") {
+		t.Fatalf("three Esc switched vi off: status %q", s.statusRow())
 	}
-	// and the toggle command turns it on again
+	s.typeText("x")
+	s.settle(20 * time.Millisecond)
+	if got := s.text(); len(got) != len(t0)-1 {
+		t.Fatalf("after three Esc a key must still be a command: %q (was %q)", got, t0)
+	}
+	// and the toggle command turns it off and on again
+	s.runCommand("Vi Mode: Toggle")
+	s.until("vi off", func() bool { return !strings.Contains(s.statusRow(), "-- NORMAL --") })
 	s.runCommand("Vi Mode: Toggle")
 	s.until("vi on once more", func() bool { return strings.Contains(s.statusRow(), "-- NORMAL --") })
 }

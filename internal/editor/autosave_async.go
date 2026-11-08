@@ -155,7 +155,7 @@ func (e *Editor) ApplySaves(results []SaveResult) error {
 	for _, r := range results {
 		d := r.job.doc
 		if r.err != nil {
-			d.status = r.err.Error()
+			d.fail(r.err)
 			errs = append(errs, r.err)
 			continue
 		}

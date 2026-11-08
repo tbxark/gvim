@@ -25,8 +25,24 @@ func (systemClipboard) Write(text string) error {
 
 // writeClipboard feeds text to the first of cmds that is installed and succeeds.
 func writeClipboard(cmds [][]string, text string) error {
+	tools := make([]clipboardTool, len(cmds))
+	for i, argv := range cmds {
+		tools[i] = clipboardTool{argv: argv, input: clipboardInput(argv[0], text)}
+	}
+	return runClipboardTools(tools, "no clipboard tool found; install pbcopy, wl-copy, xclip or xsel")
+}
+
+// clipboardTool is a command and what it reads on stdin.
+type clipboardTool struct {
+	argv  []string
+	input []byte
+}
+
+// runClipboardTools runs the first of tools that is installed and succeeds.
+func runClipboardTools(tools []clipboardTool, none string) error {
 	var last error
-	for _, argv := range cmds {
+	for _, tool := range tools {
+		argv := tool.argv
 		path, err := exec.LookPath(argv[0])
 		if err != nil {
 			continue
@@ -35,7 +51,7 @@ func writeClipboard(cmds [][]string, text string) error {
 		// Stdout and stderr stay unset: xclip and wl-copy fork a process that serves the
 		// selection, and an attached pipe would keep Run waiting for it.
 		cmd := exec.CommandContext(ctx, path, argv[1:]...)
-		cmd.Stdin = bytes.NewReader(clipboardInput(argv[0], text))
+		cmd.Stdin = bytes.NewReader(tool.input)
 		err = cmd.Run()
 		cancel()
 		if err == nil {
@@ -46,7 +62,38 @@ func writeClipboard(cmds [][]string, text string) error {
 	if last != nil {
 		return last
 	}
-	return errors.New("no clipboard tool found; install pbcopy, wl-copy, xclip or xsel")
+	return errors.New(none)
+}
+
+// The rich-text half of the system clipboard, which copy with formatting uses.
+var _ ui.HTMLClipboardWriter = systemClipboard{}
+
+// WriteHTML puts html on the system clipboard, with text as its plain-text form where the
+// platform's tool can hold both. It fails when no tool that takes HTML is installed.
+func (systemClipboard) WriteHTML(html, text string) error {
+	tools := clipboardHTMLTools(goruntime.GOOS, html, text)
+	if len(tools) == 0 {
+		return errors.New("this platform has no rich-text clipboard tool")
+	}
+	return runClipboardTools(tools, "no rich-text clipboard tool found; install osascript, wl-copy or xclip")
+}
+
+// clipboardHTMLTools lists the commands that put html on the clipboard on goos, in the
+// order they are tried. macOS sets the HTML and the plain text together through
+// osascript, with both as hex data so no quoting is needed. wl-copy and xclip own one
+// type at a time, so they hold only the HTML. Windows has no tool that takes HTML.
+func clipboardHTMLTools(goos, html, text string) []clipboardTool {
+	switch goos {
+	case "darwin":
+		script := fmt.Sprintf("set the clipboard to {«class utf8»:«data utf8%x», «class HTML»:«data HTML%x»}\n", text, html)
+		return []clipboardTool{{argv: []string{"osascript", "-"}, input: []byte(script)}}
+	case "linux":
+		return []clipboardTool{
+			{argv: []string{"wl-copy", "--type", "text/html"}, input: []byte(html)},
+			{argv: []string{"xclip", "-selection", "clipboard", "-t", "text/html", "-in"}, input: []byte(html)},
+		}
+	}
+	return nil
 }
 
 // clipboardInput is the bytes tool reads for text. clip.exe decodes its input with the

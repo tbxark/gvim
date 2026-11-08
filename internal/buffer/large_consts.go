@@ -32,6 +32,7 @@ var (
 	ErrLineTooLong         = errors.New("buffer: line too long to edit")
 	ErrInvalidUTF8         = errors.New("buffer: line is not valid UTF-8; not edited")
 	ErrOverlayFull         = errors.New("buffer: too many unsaved bytes; save first")
+	ErrLineOverBudget      = errors.New("buffer: line too big to edit: its runes do not fit the unsaved-edit budget")
 	ErrIndexPending        = errors.New("buffer: line index is not complete")
 	ErrUnsupportedPlatform = errors.New("buffer: large file mode needs a 64-bit platform")
 )

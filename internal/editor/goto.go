@@ -39,12 +39,12 @@ func (e *Editor) GotoLineSelecting(line, col int) error {
 func (e *Editor) gotoLine(line, col int, selecting bool) error {
 	if e.Empty() {
 		err := fmt.Errorf("goto line %d: %w", line, ErrNoDocument)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	if line < 1 {
 		err := fmt.Errorf("goto line %d: %w", line, ErrBadLine)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	d := e.Active()

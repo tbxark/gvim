@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
@@ -38,7 +40,18 @@ func TestNestedConfigReachesEditorAndUI(t *testing.T) {
 	if v == nil {
 		t.Fatal("Deps.View is nil")
 	}
-	if !v.RelativeLineNumbers || v.ShowTilde || !slices.Equal(v.Rulers, []int{80, 100}) ||
+	// The rulers are the editor's: each buffer it opens starts with them.
+	path := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := got.ed.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if r := got.ed.Active().ViewSettings().Rulers; !slices.Equal(r, []int{80, 100}) {
+		t.Errorf("rulers of an opened buffer = %v, want the configured [80 100]", r)
+	}
+	if !v.RelativeLineNumbers || v.ShowTilde ||
 		v.IndentationGuideMode != "all" || v.MouseWheelScrollLines != 5 || v.DoubleClickTimeMS != 250 ||
 		v.WrapIndent || !v.Whitespace.SpacesInner || !v.Search.Regex || v.StatusBar.Separator != "|" {
 		t.Errorf("Deps.View = %+v", *v)

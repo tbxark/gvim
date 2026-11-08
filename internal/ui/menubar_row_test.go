@@ -1,27 +1,29 @@
 package ui
 
-import (
-	"maps"
-	"testing"
-)
+import "testing"
 
-// TestMenuRowUnderlinesOnlyAcceleratorsInTheFrame paints the root frame at 100
-// columns and checks row 0. Only the accelerator letters of the menu labels may
-// be underlined, and the blank cell at column 0 must not be.
-func TestMenuRowUnderlinesOnlyAcceleratorsInTheFrame(t *testing.T) {
+// TestMenuRowHasNoUnderlinedMnemonics paints the root frame at 100 columns and checks that
+// no cell of the menu bar row, nor of an open dropdown, is underlined: the menus have no
+// mnemonics. It replaces a test that pinned an underlined letter in each label.
+func TestMenuRowHasNoUnderlinedMnemonics(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(3), 100, 30)
-	g := m.paint()
-	got := map[[2]int]string{}
-	for x := range g.Width() {
-		if c := g.At(x, 0); c.Style.Underline {
-			got[[2]int{x, 0}] = c.Text
+	check := func(when string) {
+		t.Helper()
+		g := m.paint()
+		for y := range g.Height() {
+			for x := range g.Width() {
+				if c := g.At(x, y); c.Style.Underline && (y == 0 || m.menu.IsOpen()) {
+					t.Fatalf("%s: cell (%d,%d) %q is underlined", when, x, y, c.Text)
+				}
+			}
 		}
 	}
-	want := map[[2]int]string{
-		{1, 0}: "F", {8, 0}: "E", {15, 0}: "V", {22, 0}: "S",
-		{34, 0}: "G", {39, 0}: "L", {45, 0}: "H",
+	check("closed bar")
+	if err := m.Run("menu_activate"); err != nil {
+		t.Fatal(err)
 	}
-	if !maps.Equal(got, want) {
-		t.Fatalf("row 0 underlined cells = %v, want %v (row = %q)", got, want, g.Plain()[0])
+	if !m.menu.IsOpen() {
+		t.Fatal("menu_activate did not open the menu")
 	}
+	check("open dropdown")
 }

@@ -50,7 +50,7 @@ const (
 // optionLabels are the toggle labels, and optionNotes the status messages that
 // report a change, indexed like the options.
 var (
-	optionLabels = [numOptions]string{"Case Sensitive (⌥C)", "Whole Word (⌥W)", "Regex (⌥R)", "Confirm Each (⌥I)"}
+	optionLabels = [numOptions]string{"Case Sensitive (Alt+C)", "Whole Word (Alt+W)", "Regex (Alt+R)", "Confirm Each (Alt+I)"}
 	optionNotes  = [numOptions]string{"Case-sensitive search", "Whole-word search", "Regex search", "Confirm each"}
 )
 

@@ -6,7 +6,6 @@ import (
 	"github.com/tbxark/gvim/internal/buffer"
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/syntax"
-	"github.com/tbxark/gvim/internal/ui/editorpane"
 )
 
 // Syntax spans of a large document. Its text is not held, so the lexer cannot run over
@@ -23,14 +22,42 @@ const (
 	// no window.
 	windowBack  = 100
 	windowAhead = 200
+	// hotBack and hotAhead are the same for the first window after the text changed. A
+	// key typed in a big document lexes a window again, and most of the lines of a wide
+	// one are not on screen yet: a window as long as the screen is cheaper by a factor of
+	// three, and the lines past it are lexed when they are scrolled to.
+	hotBack  = 24
+	hotAhead = 80
 	// maxContextLines bounds the context in lines, for a document of short lines.
 	maxContextLines = 2000
 	// maxSpanWindows is how many windows are kept: one for each pane that shows the
 	// document.
 	maxSpanWindows = 4
+	// windowedBytes is the size of the text from which a document is highlighted
+	// through windows, as a large one is. Lexing a whole text again after each edit
+	// takes about a millisecond per KiB, which a keystroke cannot afford past this.
+	windowedBytes = 64 << 10
+	// maxLexedLineBytes is the longest line that is lexed. A longer line has no spans: the
+	// lexer allocates a few hundred bytes a character, so a paragraph of a few thousand
+	// characters costs milliseconds and megabytes on every key press while it is typed,
+	// and a line of a megabyte costs seconds. Vim's synmaxcol and VS Code's
+	// maxTokenizationLineLength are the same bound.
+	maxLexedLineBytes = 4096
 	// plainTextLexer is the name of the lexer chroma matches to .txt files.
 	plainTextLexer = "plaintext"
 )
+
+// lineSize is the length of line i that the highlighting guards compare with its limits. A large
+// buffer has the bytes of the line from its index. A memory buffer has the runes, which it
+// counts in no time, where its bytes would be counted by reading the line: a line of megabytes
+// would cost that on every key. The runes are the fewer, so a line of multibyte text is lexed
+// a little past the limit in bytes.
+func lineSize(b *buffer.Buffer, i int) int {
+	if b.Large() {
+		return b.LineBytes(i)
+	}
+	return b.LineLen(i)
+}
 
 // largeSpans holds the lexed windows of one large document at one version of its
 // text.
@@ -38,6 +65,9 @@ type largeSpans struct {
 	buf     *buffer.Buffer
 	version uint64
 	wins    []spanWindow // newest first
+	// hot is set when the text changed since the last window was lexed: the next window is
+	// a short one.
+	hot bool
 }
 
 // spanWindow is a lexed run of lines. It answers for the lines from served to last.
@@ -91,14 +121,16 @@ func (c *spanCache) window(doc *editor.Document, i int) []syntax.Span {
 	}
 	ver := b.Version()
 	if c.large.buf != b || c.large.version != ver {
-		c.large = largeSpans{buf: b, version: ver}
+		// A buffer seen for the first time is not an edit: it is scrolled to.
+		c.large = largeSpans{buf: b, version: ver, hot: c.large.buf == b}
 	}
 	for _, w := range c.large.wins {
 		if i >= w.served && i <= w.last {
 			return w.spans[i-w.first]
 		}
 	}
-	w := c.lexWindow(b, ver, i)
+	w := c.lexWindow(b, ver, i, c.large.hot)
+	c.large.hot = false
 	c.large.wins = slices.Insert(c.large.wins, 0, w)
 	if len(c.large.wins) > maxSpanWindows {
 		c.large.wins = c.large.wins[:maxSpanWindows]
@@ -106,20 +138,25 @@ func (c *spanCache) window(doc *editor.Document, i int) []syntax.Span {
 	return w.spans[i-w.first]
 }
 
-// lexWindow lexes the lines around line i.
-func (c *spanCache) lexWindow(b *buffer.Buffer, ver uint64, i int) spanWindow {
-	served := max(i-windowBack, 0)
+// lexWindow lexes the lines around line i, a short window when hot.
+func (c *spanCache) lexWindow(b *buffer.Buffer, ver uint64, i int, hot bool) spanWindow {
+	back, ahead := windowBack, windowAhead
+	if hot {
+		back, ahead = hotBack, hotAhead
+	}
+	served := max(i-back, 0)
 	first := max(served-contextLines(b, served, c.context()), 0)
-	last := min(i+windowAhead, b.Lines()-1)
+	last := min(i+ahead, b.Lines()-1)
 	if first == 0 {
 		served = 0
 	}
 	text := make([]string, last-first+1)
 	var long []int
 	for k := range text {
-		if b.LineBytes(first+k) > editorpane.LongLineRunes {
-			// The pane paints such a line as a window of its own and wants no spans of
-			// it. Lexing it would cost more than the rest of the window together.
+		if lineSize(b, first+k) > maxLexedLineBytes {
+			// Lexing such a line would cost more than the rest of the window together,
+			// and the pane paints a line past editorpane.LongLineRunes as a window of its
+			// own that wants no spans.
 			long = append(long, k)
 			continue
 		}
@@ -137,8 +174,28 @@ func (c *spanCache) lexWindow(b *buffer.Buffer, ver uint64, i int) spanWindow {
 func contextLines(b *buffer.Buffer, from, bytes int) int {
 	n, sum := 0, 0
 	for j := from - 1; j >= 0 && n < maxContextLines && sum < bytes; j-- {
-		sum += b.LineBytes(j) + 1
+		sum += lineSize(b, j) + 1
 		n++
 	}
 	return n
+}
+
+// windowed reports whether doc is highlighted through windows: a large document, and
+// a document of more than windowedBytes. The size is measured again only after the
+// text changed. A nil cache answers as for a large document alone.
+func (c *spanCache) windowed(doc *editor.Document) bool {
+	if doc.Large() {
+		return true
+	}
+	if c == nil {
+		return false
+	}
+	if ver := doc.Version(); !c.sizedOK || c.sized != ver {
+		n := 0
+		for i, lines := 0, doc.Buffer.Lines(); i < lines && n <= windowedBytes; i++ {
+			n += lineSize(doc.Buffer, i) + 1
+		}
+		c.sized, c.sizedOK, c.big = ver, true, n > windowedBytes
+	}
+	return c.big
 }

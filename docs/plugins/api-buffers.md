@@ -16,6 +16,12 @@ gvim.buf.new() -> Buffer | nil, err                  -- an untitled, editable ta
 gvim.buf.create(opts) -> Buffer | nil, err           -- a virtual buffer, see below
 ```
 
+A relative `path` is resolved against the workspace root (`gvim.workspace.root()`), which is also the
+base of the paths `gvim.workspace.grep` and `gvim.workspace.files` return: pass those to `open` as
+they are. (`gvim.fs` and `gvim.proc` still resolve relative paths against the process's working
+directory.) A path that does not exist is not an error: `open` opens a new empty buffer named after
+it, which is saved to that path (check with `gvim.fs.exists` when you want a miss).
+
 `open` options: `pos = Pos` (where to put the cursor), `focus = true`, `preview = false`
 (a preview tab, replaced by the next preview), `background = false` (open without switching to
 it). Opening a large file that needs a full load (a non-UTF-8 large file) returns
@@ -38,7 +44,10 @@ b:line_count() -> integer | nil        -- nil while a large file is still being 
 ```
 
 `path` is `nil` for an untitled buffer, `language` is the language set with **Set Language** or
-the one detected from the file name (never from the content). `encoding` and `line_ending` are the
+the one detected from the file name (never from the content). A language is its id, the key of the
+`languages` table of the configuration: `go`, `rust`, `python`, `javascript`, `typescript`, `c`, `cpp`,
+`java`, `json`, `yaml`, `toml`, `markdown`, `makefile`, `dockerfile`, `ruby`, `bash` (for `.sh`, `.bash`
+and `.zsh`; there is no `sh` or `zsh`), and so on, plus any language the user defined. `encoding` and `line_ending` are the
 editor's labels (`"UTF-8"`, `"LF"`, ...).
 
 ### Reading
@@ -171,6 +180,12 @@ b:get_option(name) -> value | nil
   **verbatim** (add your own `"\n"`). An entry with `segments` uses the concatenated segments as
   its text and ignores `text`. Each content write gives the buffer a new generation, so it drops
   the decorations other plugins put on it.
+* **Streaming into a read-only buffer.** `b:append` and the other edits fail with `read_only` on a
+  read-only virtual buffer, and `set_content` replaces the whole text and every style, so calling it
+  for each line of a process's output is quadratic (30 000 lines took about a minute of CPU). Append
+  in batches instead (collect lines for a timer tick or a few hundred lines):
+  `b:set_read_only(false); b:append(chunk); b:set_read_only(true)`. Use `set_content` for the
+  rewrite of a whole view, not for each new line.
 * `props_at(pos)` returns the merged `props` of the entries covering `pos` (default: the
   cursor), or `nil`. Props answer only for the state they were set for: after any edit they are gone
   (an undo back to that state brings them back).

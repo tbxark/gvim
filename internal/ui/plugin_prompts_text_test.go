@@ -122,11 +122,11 @@ func TestPluginInputShowsTheCaret(t *testing.T) {
 	m, rt := newPromptModel(t)
 	openVia(t, m, rt, func(h pluginapi.Host) { _ = h.Input(1, pluginapi.InputSpec{Prompt: "Name:", Default: "ab"}) })
 	x, y, ok := m.caret()
-	if !ok || y != m.height-1 || x != len("Name: ab") {
+	if !ok || y != m.height-1 || x != 1+len("Name: ab") {
 		t.Fatalf("caret = %d,%d,%v, want the end of the text on the bottom row", x, y, ok)
 	}
 	typeInto(m, "c")
-	if x, _, _ := m.caret(); x != len("Name: abc") {
+	if x, _, _ := m.caret(); x != 1+len("Name: abc") {
 		t.Fatalf("caret after typing at column %d", x)
 	}
 }

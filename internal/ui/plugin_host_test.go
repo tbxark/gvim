@@ -474,6 +474,15 @@ func TestHostUIMethods(t *testing.T) {
 		if m.notice != "p: careful" {
 			t.Fatalf("warn notice = %q", m.notice)
 		}
+		// the runtime's messages name the plugin themselves: the name is not put in front twice
+		h.Notify("rterr", pluginapi.LevelError, "rterr: rterr/rterr.lua:4: boom")
+		if m.notice != "rterr: rterr/rterr.lua:4: boom" {
+			t.Fatalf("doubled prefix: %q", m.notice)
+		}
+		h.Notify("wc", pluginapi.LevelError, "wc suspended after 3 strikes (Plugin: Manager)")
+		if m.notice != "wc suspended after 3 strikes (Plugin: Manager)" {
+			t.Fatalf("doubled name: %q", m.notice)
+		}
 		h.Notify("", pluginapi.LevelError, "bad")
 		if m.notice != "bad" {
 			t.Fatalf("error notice = %q", m.notice)

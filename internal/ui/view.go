@@ -56,7 +56,6 @@ type ViewOptions struct {
 	WrapIndent                 bool   // editor.wrap_indent, default true
 	SyntaxHighlighting         bool   // editor.syntax_highlighting, default true
 	ShowTilde                  bool   // editor.show_tilde, default true
-	Rulers                     []int  // editor.rulers: 1-based columns, default none
 	IndentationGuideMode       string // editor.indentation_guide: "none", "all" or "active"; empty reads as none
 	IndentationGuideGlyph      string // editor.indentation_guide_glyph; empty reads as "▏"
 	RainbowIndentation         bool   // editor.rainbow_indentation, default false
@@ -267,10 +266,6 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 	case "toggle_line_wrap":
 		m.view.lineWrap = !m.view.lineWrap
 		m.notice = onOffNotice("Line wrap", m.view.lineWrap)
-		if doc := m.ed.Active(); doc != nil && isLargeDoc(doc) {
-			// The pane never wraps a large document (see editorpane wrapOn).
-			m.notice += " (not available in large file mode)"
-		}
 	case "toggle_current_line_highlight":
 		m.view.currentLine = !m.view.currentLine
 		m.notice = onOffNotice("Current line highlight", m.view.currentLine)
@@ -307,10 +302,7 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 		}
 		m.askNumber(action, "width", "Page width:", editor.MaxViewColumn)
 	case "set_language":
-		if _, ok := args["name"]; ok {
-			return nil, false
-		}
-		m.askText(action, "name", "Language:")
+		return m.languageAction(args)
 	case "select_cursor_style":
 		if s, ok := args["style"].(string); ok {
 			m.setCursorStyle(s)
@@ -400,14 +392,6 @@ func (m *Model) askNumber(action, key, label string, hi int) {
 			}
 			return nil
 		},
-	})})
-}
-
-// askText opens the prompt for the name a view command takes as its argument.
-func (m *Model) askText(action, key, label string) {
-	m.pushOverlay(lineOverlay{l: prompt.NewLine(m.styles, prompt.LineOptions{
-		Label: label,
-		Tag:   viewTag{action: action, key: key, text: true},
 	})})
 }
 
@@ -532,9 +516,9 @@ func (m *Model) viewLayout(in *layoutInput) {
 // view state. Nothing else of the pane changes.
 func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
 	s := docViewOf(doc)
-	// A large document is never wrapped: a wrapped line of a megabyte would be laid out
-	// in full to find its rows.
-	p.Wrap = editor.OverrideOr(s.LineWrap, m.view.lineWrap) && !isLargeDoc(doc)
+	// A large document wraps as the setting says: a line of more than editorpane.LongLineRunes
+	// is laid out in segments, a few of them at a time, so its length costs nothing.
+	p.Wrap = editor.OverrideOr(s.LineWrap, m.view.lineWrap)
 	p.HideGutter = !editor.OverrideOr(s.LineNumbers, !m.hideLineNumbers)
 	p.CurrentLine = editor.OverrideOr(s.CurrentLine, m.view.currentLine)
 	p.Occurrences = editor.OverrideOr(s.Occurrences, m.view.occurrences) && !m.occurrencesOff(doc)
@@ -546,7 +530,9 @@ func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
 	p.HideVerticalScrollbar = !m.view.vScroll
 	p.HideHorizontalScrollbar = !m.view.hScroll
 	p.CaretShape = m.caretShape()
-	p.Rulers = s.Rulers
+	// The rulers are the buffer's own. Each buffer starts with the configured ones
+	// (editor.SetRulers), so one can be removed from a buffer.
+	p.Rulers = slices.Clone(s.Rulers)
 	// The tab width is the language's (which holds the global tab_size where the
 	// language sets none), unless the buffer set its own.
 	if n := m.docLanguageSettings(doc).TabSize; n > 0 {
@@ -597,7 +583,7 @@ func (m *Model) viewStatus(s *statusView) {
 	// The language a set_language command named is shown, in place of the one the
 	// file name gives.
 	if lang, ok := m.ed.Active().(interface{ Language() string }); ok && lang.Language() != "" {
-		s.language = lang.Language()
+		s.language = languageLabel(lang.Language())
 	}
 	if m.view.debug {
 		s.message = m.debugText()

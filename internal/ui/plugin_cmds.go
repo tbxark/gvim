@@ -99,7 +99,7 @@ func (m *Model) pluginAction(action string, args map[string]any) (tea.Cmd, bool)
 	if p.rt == nil || p.direct > 0 || !p.rt.Owns(action) {
 		return nil, false
 	}
-	if info, ok := p.info(action); ok && !m.whenHolds(info.When) {
+	if info, ok := p.info(action); ok && !m.checkedWhenHolds(info) {
 		m.notice = cmdTitle(info) + " is not available now"
 		return nil, true
 	}
@@ -175,6 +175,13 @@ func (m *Model) whenHolds(when []string) bool {
 	return true
 }
 
+// checkedWhenHolds is whenHolds for the when-clause of a command, which also warns once about a
+// name that no condition answers.
+func (m *Model) checkedWhenHolds(c pluginapi.CommandInfo) bool {
+	m.plugCheckWhen(c.Plugin, c.ID, c.When)
+	return m.whenHolds(c.When)
+}
+
 // keyLabeler is the optional part of Keymap that formats the primary binding of an
 // action. The app adapter implements it once plugin bindings are part of the keymap.
 type keyLabeler interface {
@@ -186,14 +193,15 @@ type keyLabeler interface {
 // listed, and neither is one whose when-clause fails now.
 func (m *Model) allCommands() []palmodel.Entry {
 	p := &m.plug
+	base := slices.Concat(m.commands, m.compareCommands())
 	if len(p.order) == 0 {
-		return m.commands
+		return base
 	}
-	out := slices.Clone(m.commands)
+	out := base
 	kl, _ := m.keys.(keyLabeler)
 	for _, plugin := range p.order {
 		for _, c := range p.commands[plugin] {
-			if c.Hidden || !m.whenHolds(c.When) {
+			if c.Hidden || !m.checkedWhenHolds(c) {
 				continue
 			}
 			e := palmodel.PluginEntry(c.ID, cmdTitle(c), c.Description, c.Plugin, c.When)

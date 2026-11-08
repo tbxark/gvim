@@ -155,6 +155,42 @@ const rangeMemoMax = 4096
 // the cache holds and read them all again on every frame, an idle one too; the memo
 // answers from the spans instead. The span of a terminated line never changes, so an
 // entry is never stale. Safe for concurrent use.
+// hugeMemoMax is how many huge indexes a hugeMemo keeps before it starts again. Each index
+// holds a mark for every stride runes of its line, so the bound is small.
+const hugeMemoMax = 64
+
+// hugeMemo holds the indexes of the huge base lines of one source. The buffer and its
+// snapshots share it: an index is immutable once built, and building one reads the whole
+// line, so one is built once for all of them. A nil hugeMemo keeps nothing.
+type hugeMemo struct {
+	mu sync.Mutex
+	m  map[int]*hugeLine
+}
+
+func newHugeMemo() *hugeMemo { return &hugeMemo{m: make(map[int]*hugeLine)} }
+
+func (hm *hugeMemo) get(b int) (*hugeLine, bool) {
+	if hm == nil {
+		return nil, false
+	}
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	h, ok := hm.m[b]
+	return h, ok
+}
+
+func (hm *hugeMemo) put(b int, h *hugeLine) {
+	if hm == nil {
+		return
+	}
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	if len(hm.m) >= hugeMemoMax {
+		clear(hm.m)
+	}
+	hm.m[b] = h
+}
+
 type rangeMemo struct {
 	mu sync.Mutex
 	m  map[int]lineSpan

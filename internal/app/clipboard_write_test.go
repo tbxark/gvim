@@ -124,3 +124,36 @@ func TestClipboardInput(t *testing.T) {
 		})
 	}
 }
+
+func TestClipboardHTMLTools(t *testing.T) {
+	tests := []struct {
+		goos  string
+		argv0 []string
+		input string
+	}{
+		{"darwin", []string{"osascript", "-"}, "set the clipboard to {«class utf8»:«data utf8" + "6126" + "», «class HTML»:«data HTML" + "3c623e" + "»}\n"},
+		{"linux", []string{"wl-copy", "--type", "text/html"}, "<b>"},
+		{"windows", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			tools := clipboardHTMLTools(tt.goos, "<b>", "a&")
+			if tt.argv0 == nil {
+				if len(tools) != 0 {
+					t.Fatalf("tools = %v, want none", tools)
+				}
+				return
+			}
+			if len(tools) == 0 || !slices.Equal(tools[0].argv, tt.argv0) || string(tools[0].input) != tt.input {
+				t.Fatalf("first tool = %+v, want %v with input %q", tools, tt.argv0, tt.input)
+			}
+		})
+	}
+}
+
+func TestSystemClipboardWriteHTMLFailsWithoutATool(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if err := (systemClipboard{}).WriteHTML("<b>", "b"); err == nil {
+		t.Fatal("WriteHTML with no tool on PATH returned nil")
+	}
+}

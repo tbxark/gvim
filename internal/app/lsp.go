@@ -51,7 +51,11 @@ func newLSPPort(servers map[string]config.LSPServer) ui.LSPSession {
 // columns. Its methods may block on a server, so the root calls them only from
 // commands.
 type lspPort struct {
-	servers map[string]lsp.ServerConfig // by language ID; read only after construction
+	servers map[string]lsp.ServerConfig // by language ID: the servers that start on their own; read only after construction
+	// startable is every server that can run, the ones in servers and the ones that only
+	// start by hand. Nil in a port built from servers alone.
+	startable map[string]lsp.ServerConfig
+	info      map[string]ui.LSPServerInfo // what the config does with each language; read only too
 
 	mu       sync.Mutex
 	root     string
@@ -60,9 +64,12 @@ type lspPort struct {
 }
 
 // lspDocRec is one open document: the root whose manager holds it, its language
-// ID and the text the server was last sent. A record is replaced, never changed.
+// ID and the text the server was last sent. A record is replaced, never changed. lines is
+// text split on newlines, made once when the text is set, so that the diagnostics poll and
+// each request do not split the whole document again.
 type lspDocRec struct {
 	root, lang, text string
+	lines            textLines
 }
 
 // SetRoot names the workspace root that new documents are opened under.
@@ -72,23 +79,34 @@ func (p *lspPort) SetRoot(root string) {
 	p.root = root
 }
 
-// Supports reports whether a server is configured for lang.
+// Supports reports whether a server starts on its own for lang.
 func (p *lspPort) Supports(lang string) bool {
 	_, ok := p.servers[lang]
 	return ok
 }
 
+// runnable is the servers the managers can start: all of startable, or the servers that start
+// on their own when the port has no other.
+func (p *lspPort) runnable() map[string]lsp.ServerConfig {
+	if p.startable != nil {
+		return p.startable
+	}
+	return p.servers
+}
+
 // Open sends the text of the document at path, starting its server if needed. A
 // document that fails to open is not kept.
 func (p *lspPort) Open(path, lang, text string) error {
+	lang = openLanguage(path, lang)
 	p.mu.Lock()
 	root := p.root
 	p.mu.Unlock()
+	root = serverRoot(path, p.runnable()[lang].RootMarkers, root)
 	mgr := p.managerFor(root)
-	p.setDoc(path, lspDocRec{root: root, lang: lang, text: text})
+	p.setDoc(path, lspDocRec{root: root, lang: lang, text: text, lines: newTextLines(text)})
 	if err := mgr.Open(path, lang, text); err != nil {
 		p.dropDoc(path)
-		return err
+		return unavailable(lang, err)
 	}
 	return nil
 }
@@ -100,7 +118,7 @@ func (p *lspPort) Change(path, text string) error {
 	if !ok || mgr == nil {
 		return fmt.Errorf("%w: %s", lsp.ErrNotOpen, path)
 	}
-	p.setDoc(path, lspDocRec{root: rec.root, lang: rec.lang, text: text})
+	p.setDoc(path, lspDocRec{root: rec.root, lang: rec.lang, text: text, lines: newTextLines(text)})
 	return mgr.Change(path, text)
 }
 
@@ -129,7 +147,7 @@ func (p *lspPort) Diagnostics(path string) (ui.DiagnosticsEvent, bool) {
 	if !ok {
 		return ui.DiagnosticsEvent{}, false
 	}
-	return ui.DiagnosticsEvent{Path: path, Items: uiDiagnostics(newTextLines(rec.text), ev.Diagnostics)}, true
+	return ui.DiagnosticsEvent{Path: path, Items: uiDiagnostics(rec.lines, ev.Diagnostics)}, true
 }
 
 // Definition returns the definitions of the symbol at at.
@@ -254,15 +272,16 @@ func (p *lspPort) Request(path, method string, params any) (any, error) {
 // documents, and the root opens them again on its next sync.
 func (p *lspPort) Restart() error {
 	p.mu.Lock()
-	mgr := p.managers[p.root]
-	delete(p.managers, p.root)
+	mgrs := slices.Collect(maps.Values(p.managers))
+	p.managers = make(map[string]*lsp.Manager)
 	p.mu.Unlock()
-	if mgr == nil {
-		return nil
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)
 	defer cancel()
-	return mgr.Shutdown(ctx)
+	var errs []error
+	for _, mgr := range mgrs {
+		errs = append(errs, mgr.Shutdown(ctx))
+	}
+	return errors.Join(errs...)
 }
 
 // Stop shuts down every server of every root and forgets every document.
@@ -316,7 +335,7 @@ func (p *lspPort) call(path string, at buffer.Pos, fn func(context.Context, *lsp
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
 	defer cancel()
-	return fn(ctx, c, lsp.PathURI(path), newTextLines(rec.text).toLSP(at))
+	return fn(ctx, c, lsp.PathURI(path), rec.lines.toLSP(at))
 }
 
 // client returns the client of the document at path. When its server has exited,
@@ -359,7 +378,7 @@ func (p *lspPort) managerFor(root string) *lsp.Manager {
 	defer p.mu.Unlock()
 	mgr, ok := p.managers[root]
 	if !ok {
-		mgr = lsp.NewManager(root, p.servers)
+		mgr = lsp.NewManager(root, p.runnable())
 		p.managers[root] = mgr
 	}
 	return mgr

@@ -135,7 +135,7 @@ func (e *Editor) ActivateTab(i int) {
 func (e *Editor) CloseTab(i int, force bool) error {
 	err := e.closeAt(i, force)
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 	}
 	return err
 }

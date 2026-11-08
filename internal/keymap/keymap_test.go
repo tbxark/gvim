@@ -1,7 +1,6 @@
 package keymap_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -13,8 +12,10 @@ func TestDefaultParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(base.Bindings()); got != 276 {
-		t.Fatalf("default bindings = %d, want 276 (count in default.json)", got)
+	// The common-set pruning: the count is bounded in TestPresetsStayCommon, here only that
+	// the file is far smaller than Fresh's 276.
+	if got := len(base.Bindings()); got == 0 || got >= 276 {
+		t.Fatalf("default bindings = %d, want a pruned set below Fresh's 276", got)
 	}
 	m := keymap.Default()
 	if keymap.Default() != m {
@@ -25,8 +26,10 @@ func TestDefaultParses(t *testing.T) {
 	}
 }
 
+// TestResolveRequiredChords checks chords of the default keymap. It uses the default preset by
+// name: keymap.Default is the macOS keymap on darwin, which binds the same actions to other keys.
 func TestResolveRequiredChords(t *testing.T) {
-	m := keymap.Default()
+	m := mustPreset(t, "default")
 	tests := []struct {
 		chord string
 		ctx   keymap.Context
@@ -35,11 +38,9 @@ func TestResolveRequiredChords(t *testing.T) {
 		{"ctrl+p", keymap.ContextNormal, "quick_open"},
 		{"ctrl+b", keymap.ContextNormal, "toggle_file_explorer"},
 		{"ctrl+s", keymap.ContextNormal, "save"},
-		{"F10", keymap.ContextGlobal, "menu_activate"},
-		{"alt+f", keymap.ContextGlobal, "menu_open"},
+		{"ctrl+shift+p", keymap.ContextGlobal, "command_palette"},
 		{"ctrl+alt+up", keymap.ContextNormal, "add_cursor_above"},
-		{"alt+shift+i", keymap.ContextNormal, "add_cursors_to_line_ends"},
-		{"ctrl+e", keymap.ContextPrompt, "prompt_move_end"},
+		{"alt+shift+down", keymap.ContextNormal, "duplicate_line"},
 		{"ctrl+e", keymap.ContextFileExplorer, "focus_editor"},
 	}
 	for _, tc := range tests {
@@ -182,29 +183,30 @@ func TestPrimaryPrefersNormalThenGlobal(t *testing.T) {
 }
 
 func TestArgsDecode(t *testing.T) {
-	b, ok := keymap.Default().Resolve("alt+f", keymap.ContextGlobal)
+	m, err := keymap.Load([]byte(`{"bindings":[
+		{"key":"f","modifiers":["alt"],"action":"menu_open","args":{"name":"File"},"when":"global"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, ok := m.Resolve("alt+f", keymap.ContextGlobal)
 	if !ok {
 		t.Fatal("alt+f unbound")
 	}
 	if b.Args["name"] != "File" {
 		t.Fatalf("args = %v, want name=File", b.Args)
 	}
-	var check map[string]any
-	if err := json.Unmarshal([]byte(`{"name":"File"}`), &check); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func ExampleDefault() {
 	m := keymap.Default()
-	for _, chord := range []string{"ctrl+p", "ctrl+s", "F10"} {
+	for _, chord := range []string{"ctrl+p", "ctrl+s", "ctrl+z"} {
 		b, _ := m.Resolve(chord, keymap.ContextNormal)
 		fmt.Println(chord, "->", b.Action)
 	}
 	// Output:
 	// ctrl+p -> quick_open
 	// ctrl+s -> save
-	// F10 -> menu_activate
+	// ctrl+z -> undo
 }
 
 func TestPrimaryFallbacks(t *testing.T) {
@@ -524,9 +526,9 @@ func TestPrimaryIgnoresGlobalShadowedInNormal(t *testing.T) {
 	}
 }
 
-// The TUI dispatches only single chords, so a multi-key binding never runs. Primary
-// skips it and returns a single-chord binding of the action instead.
-func TestPrimarySkipsSequenceBindings(t *testing.T) {
+// Primary shows a single chord when the action has one, and a multi-key sequence only
+// when it has not (the TUI dispatches sequences, so a label can show one).
+func TestPrimaryPrefersSingleChordsToSequences(t *testing.T) {
 	tests := []struct {
 		name string
 		src  string
@@ -536,7 +538,7 @@ func TestPrimarySkipsSequenceBindings(t *testing.T) {
 			name: "only a sequence",
 			src: `{"bindings":[
 				{"keys":[{"key":"x","modifiers":["ctrl"]},{"key":"s","modifiers":["ctrl"]}],"action":"save_all","when":"normal"}]}`,
-			want: "",
+			want: "ctrl+x ctrl+s",
 		},
 		{
 			name: "sequence in normal beside a global single chord",

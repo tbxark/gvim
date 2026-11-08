@@ -166,9 +166,10 @@ func (e *Editor) ApplyIndex(r IndexResult) (more bool) {
 		// A source that changed under the scan shows as such from now on.
 		_ = d.CheckSource()
 		l.pending = nil
-		d.status = fmt.Sprintf("Index failed: %v", r.err)
+		d.fail(fmt.Errorf("Index failed: %w", r.err))
 		if note := d.stashUnsaved(); note != "" {
 			d.status += ". " + note
+			d.statusErr = d.status
 		}
 		return false
 	case info.Complete:

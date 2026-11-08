@@ -71,7 +71,7 @@ func unitBounds(b *buffer.Buffer, p buffer.Pos, u Unit) (start, end buffer.Pos) 
 func (e *Editor) OpenPreview(path string) error {
 	path, err := absPath(path)
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	if i := e.pathIndex(path); i >= 0 {
@@ -87,7 +87,7 @@ func (e *Editor) OpenPreview(path string) error {
 	}
 	d, err := loadDocument(path, e.loadSpec())
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	d.preview = true

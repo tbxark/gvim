@@ -83,17 +83,25 @@ func (m *Model) toggleFoldAt(line int) bool {
 }
 
 // dragScrollEvery is the period of the autoscroll of a text drag whose pointer is held
-// outside the pane.
-const dragScrollEvery = 50 * time.Millisecond
+// outside the pane. dragMaxStep is the most lines (or columns) a tick moves the head.
+// A tick moves it 1 + the distance of the pointer from the edge, up to that cap: about
+// 14 lines a second at the edge row, 28 one row beyond, and at most 71 farther out.
+const (
+	dragScrollEvery = 70 * time.Millisecond
+	dragMaxStep     = 5
+)
 
 // dragScrollMsg is the autoscroll tick of a text drag. seq names the tick armed last,
 // so a tick left over from an earlier drag does nothing.
 type dragScrollMsg struct{ seq int }
 
 // dragSelect grows the selection of a text drag to the latest pointer. While the
-// pointer is on the edge row or beyond it, it arms a tick that grows the selection
-// again, so the view keeps scrolling with the pointer held still. A tick that moved
-// nothing, as at the end of the document, ends the chain; the next motion restarts it.
+// pointer is on the edge row or column or beyond it, it arms a tick that grows the
+// selection again, so the view keeps scrolling with the pointer held still. A tick
+// that moved nothing, as at the end of the document, ends the chain; the next motion
+// restarts it. A motion goes to the cell under the pointer, and a tick moves the head
+// from where it is by a step that grows with the distance (see dragStep). Beyond the
+// left or right edge the head also moves along the line while Wrap is off.
 func (m *Model) dragSelect(fromTick bool) tea.Cmd {
 	doc := m.ed.Active()
 	fp := m.layout().focusedPane()
@@ -106,8 +114,18 @@ func (m *Model) dragSelect(fromTick bool) tea.Cmd {
 	x := min(max(m.drag.last.X-fp.x, 0), w-1)
 	py := m.drag.last.Y - fp.y
 	before := doc.Cursor()
-	m.ed.ExtendSelection(m.dragPos(p, doc, w, h, x, py), m.drag.unit)
-	outside := py <= 0 || py >= max(p.BodyRows(w, h), 1)-1
+	pos := m.dragPos(p, doc, w, h, x, py)
+	last := max(p.BodyRows(w, h), 1) - 1
+	vs, vd := pastEdge(py, 0, last)
+	var hs, hd int
+	if p.PansSideways() {
+		hs, hd = pastEdge(m.drag.last.X-fp.x, fp.gutter, w-2)
+	}
+	if fromTick {
+		pos = dragStepPos(doc, pos, before, vs*dragStep(vd), hs*dragStep(hd), vs != 0, hs != 0)
+	}
+	m.ed.ExtendSelection(pos, m.drag.unit)
+	outside := vs != 0 || hs != 0
 	stalled := fromTick && m.ed.Active().Cursor() == before
 	if !outside || stalled {
 		m.drag.tick = 0
@@ -120,6 +138,41 @@ func (m *Model) dragSelect(fromTick bool) tea.Cmd {
 	m.drag.tick = m.mx.dragSeq
 	seq := m.drag.tick
 	return tea.Tick(dragScrollEvery, func(time.Time) tea.Msg { return dragScrollMsg{seq: seq} })
+}
+
+// pastEdge says whether v is past either edge of a span, and how far. side is +1 on or
+// beyond the high edge hi, -1 on or before the low edge lo, and 0 between them; dist is
+// the number of cells beyond the edge itself (0 on it).
+func pastEdge(v, lo, hi int) (side, dist int) {
+	switch {
+	case v >= hi:
+		return 1, v - hi
+	case v <= lo:
+		return -1, lo - v
+	}
+	return 0, 0
+}
+
+// dragStep is the number of lines (or columns) a tick moves the head when the pointer is
+// d cells beyond the edge: one more than the distance, up to dragMaxStep.
+func dragStep(d int) int { return min(1+d, dragMaxStep) }
+
+// dragStepPos is the end of the selection after an autoscroll tick. pointer is the
+// position of the pointer cell and head where the selection ends now. dy and dx are the
+// signed steps in lines and columns, used where the pointer is past that axis' edge
+// (vert, horiz). The head moves from where it was, so the speed does not depend on how
+// the view follows the caret. On an axis where the pointer is within the edges, the
+// position of the pointer cell is kept.
+func dragStepPos(doc Document, pointer, head buffer.Pos, dy, dx int, vert, horiz bool) buffer.Pos {
+	pos := pointer
+	if vert {
+		pos.Line = min(max(head.Line+dy, 0), doc.LineCount()-1)
+		pos.Col = min(pointer.Col, utf8.RuneCountInString(doc.Line(pos.Line)))
+	}
+	if horiz {
+		pos.Col = min(max(head.Col+dx, 0), utf8.RuneCountInString(doc.Line(pos.Line)))
+	}
+	return pos
 }
 
 // dragScroll handles an autoscroll tick: it grows the selection toward the pointer
@@ -160,6 +213,20 @@ func (m *Model) applyPan(pane editorpane.Pane, doc Document) editorpane.Pane {
 		pane.Left, pane.KeepLeft = pv.left, true
 	}
 	return pane
+}
+
+// panBar pans the focused pane so that the horizontal thumb is under the frame column
+// x, for a press or a drag on the horizontal scrollbar. The caret stays where it is.
+func (m *Model) panBar(x int) {
+	doc := m.ed.Active()
+	fp := m.layout().focusedPane()
+	if doc == nil || fp.w <= 0 || fp.h <= 0 {
+		return
+	}
+	m.mx.pan = panView{
+		on: true, left: m.paneGeometry(fp, doc).HScrollFor(fp.w, fp.h, x-fp.x),
+		tab: m.activeTab(), caret: doc.Cursor(),
+	}
 }
 
 // panWheel pans the view for a sideways wheel notch, or for a notch up or down with

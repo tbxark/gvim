@@ -12,15 +12,27 @@ package popup
 
 import (
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 )
 
 // maxRows is the most item rows a popup shows at once.
 const maxRows = 10
+
+// The box around the items: two border rows, the narrowest box and the blank cells
+// between a label and its detail.
+const (
+	borderRows  = 2
+	minBoxWidth = 8
+	detailGap   = 2
+	// marginMinFrame is the narrowest frame in which a box keeps its margin.
+	marginMinFrame = 32
+)
 
 // pageStep is the number of rows PageUp and PageDown move the highlight.
 const pageStep = 8
@@ -48,7 +60,8 @@ type Chosen struct {
 
 // Styles are the grid styles of a popup. A zero value leaves the terminal default.
 type Styles struct {
-	Panel    grid.Style // the box and its title row
+	Panel    grid.Style // the box and its title
+	Border   grid.Style // the border; the zero value draws it in Panel
 	Selected grid.Style // the highlighted row
 	Detail   grid.Style // the detail text after a label
 }
@@ -98,6 +111,9 @@ func (p *Popup) Active() bool { return p.open }
 
 // Selected is the index of the highlighted item.
 func (p *Popup) Selected() int { return p.sel }
+
+// Items returns a copy of the items the popup lists.
+func (p *Popup) Items() []Item { return slices.Clone(p.items) }
 
 // Update handles one key or mouse message and returns the command it starts: the
 // Chosen message when a row is chosen. Other messages are ignored.
@@ -185,13 +201,15 @@ func (p *Popup) keepVisible() {
 	p.top = max(0, min(p.top, len(p.items)-p.rows))
 }
 
-// rowAt returns the item under the cell (x, y) in the last draw. The title row and
-// the cells outside the box are not items.
+// rowAt returns the item under the cell (x, y) in the last draw. The borders and the
+// cells outside the box are not items. The padding cells beside an item are part of
+// its highlighted row.
 func (p *Popup) rowAt(x, y int) (int, bool) {
-	if !p.box.contains(x, y) || y == p.box.y {
+	b := p.box
+	if !b.contains(x, y) || y <= b.y || y > b.y+p.rows || x <= b.x || x >= b.x+b.w-1 {
 		return 0, false
 	}
-	i := p.top + (y - p.box.y - 1)
+	i := p.top + (y - b.y - 1)
 	if i < 0 || i >= len(p.items) {
 		return 0, false
 	}
@@ -200,25 +218,42 @@ func (p *Popup) rowAt(x, y int) (int, bool) {
 
 // Draw paints the box over g. It records the box, so that a mouse position maps
 // to a row. Draw changes no item and no highlight, except to keep the highlight in
-// the window when the frame height changed.
+// the window when the frame height changed. The box has a rounded border with the
+// title on its top edge, a padding cell between the border and the text on each
+// side, and a margin from the edges of the frame when the frame has room for it.
 func (p *Popup) Draw(g *grid.Grid) {
-	if !p.open || g.Width() <= 0 || g.Height() < 2 {
+	if !p.open || g.Width() < minBoxWidth || g.Height() < borderRows+1 {
 		p.box = rect{}
 		return
 	}
 	w, h := g.Width(), g.Height()
 	p.rows = visibleRows(len(p.items), h)
 	p.keepVisible()
-	p.box = placeBox(p.anchor, boxWidth(p.title, p.items, w), p.rows+1, w, h)
+	p.box = placeBox(p.anchor, boxWidth(p.title, p.items, w), p.rows+borderRows, w, h)
 
-	panel := p.styles.Panel
+	panel, border := p.styles.Panel, p.styles.Border
+	if border == (grid.Style{}) {
+		border = panel
+	}
 	b := p.box
-	g.Fill(b.x, b.x+b.w, b.y, panel)
+	right, bottom := b.x+b.w-1, b.y+b.h-1
+	for y := b.y; y <= bottom; y++ {
+		g.Fill(b.x, b.x+b.w, y, panel)
+	}
+	g.Put(b.x, b.y, b.x+b.w, "╭"+strings.Repeat("─", b.w-2)+"╮", border)
+	g.Put(b.x, bottom, b.x+b.w, "╰"+strings.Repeat("─", b.w-2)+"╯", border)
+	for y := b.y + 1; y < bottom; y++ {
+		g.Set(b.x, y, "│", border)
+		g.Set(right, y, "│", border)
+	}
 	titled := panel
 	titled.Bold = true
-	g.Put(b.x+1, b.y, b.x+b.w, p.title, titled)
+	if p.title != "" {
+		g.Put(b.x+2, b.y, right, " "+p.title+" ", titled)
+	}
+	inner, end := b.x+1+space.PadX, right-space.PadX
 	if len(p.items) == 0 {
-		g.Put(b.x+1, b.y+1, b.x+b.w, "No items", p.styles.Detail)
+		g.Put(inner, b.y+1, end, "No items", p.styles.Detail)
 		return
 	}
 	for k := range p.rows {
@@ -231,49 +266,85 @@ func (p *Popup) Draw(g *grid.Grid) {
 		if i == p.sel {
 			st = p.styles.Selected
 		}
-		g.Fill(b.x, b.x+b.w, y, st)
-		end := b.x + b.w - 1
-		x := b.x + 1 + g.Put(b.x+1, y, end, p.items[i].Label, st)
+		g.Fill(b.x+1, right, y, st)
+		x := inner + g.Put(inner, y, end, space.End(p.items[i].Label, end-inner), st)
 		if d := p.items[i].Detail; d != "" {
 			detail := p.styles.Detail
 			if i == p.sel {
 				detail = st
 				detail.Faint = true
 			}
-			g.Put(x+2, y, end, d, detail)
+			g.Put(x+detailGap, y, end, space.End(d, end-x-detailGap), detail)
 		}
 	}
 }
 
-// visibleRows is the number of item rows a popup shows in a frame h rows high. An
-// empty popup still has one row, for its message.
+// visibleRows is the number of item rows a popup shows in a frame h rows high, with
+// the two border rows around them. An empty popup still has one row, for its message.
 func visibleRows(n, h int) int {
-	return min(max(n, 1), maxRows, h-1)
+	return min(max(n, 1), maxRows, max(h-borderRows, 1))
 }
 
 // boxWidth is the width of a popup box with title and items in a frame fw cells
-// wide. The box has one cell of padding on each side of the widest line.
+// wide: the widest line, a padding cell and a border on each side. The title sits on
+// the top border, between one border dash and the corner on each side. A box wider
+// than the frame, less its margin, is cut to it and the long rows end with "…".
 func boxWidth(title string, items []Item, fw int) int {
-	w := ansi.StringWidth(title)
+	body := 0
 	for _, it := range items {
 		n := ansi.StringWidth(it.Label)
 		if it.Detail != "" {
-			n += 2 + ansi.StringWidth(it.Detail)
+			n += detailGap + ansi.StringWidth(it.Detail)
 		}
-		w = max(w, n)
+		body = max(body, n)
 	}
-	return min(w+2, fw)
+	if len(items) == 0 {
+		body = len("No items")
+	}
+	w := body + 2*(1+space.PadX)
+	if title != "" {
+		w = max(w, ansi.StringWidth(title)+2+4)
+	}
+	return min(max(w, minBoxWidth), max(fw-2*edgeMargin(fw, w), minBoxWidth), fw)
+}
+
+// edgeMargin is the cells a box w wide keeps from the left and right edge of a frame
+// fw wide: one when the frame has room for it on both sides, else none.
+func edgeMargin(fw, w int) int {
+	if fw >= w+2*space.PadX && fw >= marginMinFrame {
+		return space.PadX
+	}
+	return 0
 }
 
 // placeBox places a w by h box for a popup anchored at anchor in a fw by fh frame.
 // The box goes on the row below the anchor, or above it when it does not fit there,
-// and it is moved to stay inside the frame.
+// and it is moved to stay inside the frame, one cell from its left and right edges
+// and from its bottom row when there is room.
 func placeBox(anchor Point, w, h, fw, fh int) rect {
-	x := max(0, min(anchor.X, fw-w))
+	m := edgeMargin(fw, w)
+	x := max(m, min(anchor.X, fw-w-m))
+	x = max(x, 0)
 	y := anchor.Y + 1
-	if y+h > fh {
+	if y+h > fh-m {
 		y = anchor.Y - h
 	}
-	y = max(0, min(y, fh-h))
+	y = max(0, min(y, fh-h-m))
+	y = max(y, 0)
 	return rect{x: x, y: y, w: w, h: h}
+}
+
+// maxTextWidth is the widest a row of wrapped text is made, however wide the frame: longer
+// lines are hard to read.
+const maxTextWidth = 80
+
+// TextWidth is the width in cells that a caller wraps long rows to so that they show whole in
+// a popup in a frame fw cells wide: the room between the borders and padding of the widest box
+// the frame allows, and at most maxTextWidth.
+func TextWidth(fw int) int {
+	box := fw
+	if fw >= marginMinFrame {
+		box = fw - 2*space.PadX
+	}
+	return max(min(box-2*(1+space.PadX), maxTextWidth), 1)
 }

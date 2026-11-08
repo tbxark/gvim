@@ -192,10 +192,10 @@ func TestToggleCaseRefindsAndReports(t *testing.T) {
 		t.Fatalf("after case toggle and edit: status = %q, want %q", got, "Match 1 of 1")
 	}
 	rows := frame(b, 60, 6)
-	if !strings.Contains(rows[4], "[x] Case Sensitive (⌥C)") {
+	if !strings.Contains(rows[4], "[x] Case   ") {
 		t.Fatalf("options row %q does not show the checked case option", rows[4])
 	}
-	if !strings.Contains(rows[4], "[ ] Whole Word (⌥W)") {
+	if !strings.Contains(rows[4], "[ ] Word   ") {
 		t.Fatalf("options row %q does not show the unchecked whole-word option", rows[4])
 	}
 }
@@ -376,10 +376,11 @@ func TestDrawRowsWithAndWithoutReplace(t *testing.T) {
 	b := Open(newFake("x"), testStyles(), false)
 	typeText(b, "x")
 	rows := frame(b, 60, 10)
-	if !strings.HasPrefix(rows[8], " [ ] Case Sensitive (⌥C)") {
+	// At 60 columns the full labels with their hints do not fit, so the short names show.
+	if !strings.HasPrefix(rows[8], " [ ] Case   [ ] Word") {
 		t.Fatalf("options row = %q", rows[8])
 	}
-	if !strings.HasPrefix(rows[9], "Search: x") {
+	if !strings.HasPrefix(rows[9], " Search:  x") {
 		t.Fatalf("search row = %q", rows[9])
 	}
 	if !strings.Contains(rows[9], "Match 1 of 1") {
@@ -388,13 +389,13 @@ func TestDrawRowsWithAndWithoutReplace(t *testing.T) {
 
 	press(b, "tab")
 	rows = frame(b, 60, 10)
-	if !strings.HasPrefix(rows[7], " [ ] Case Sensitive") {
+	if !strings.HasPrefix(rows[7], " [ ] Case   [ ] Word") {
 		t.Fatalf("with replace: options row = %q", rows[7])
 	}
-	if !strings.HasPrefix(rows[8], "Search: x") {
+	if !strings.HasPrefix(rows[8], " Search:  x") {
 		t.Fatalf("with replace: search row = %q", rows[8])
 	}
-	if !strings.HasPrefix(rows[9], "Replace:") {
+	if !strings.HasPrefix(rows[9], " Replace:") {
 		t.Fatalf("with replace: replace row = %q", rows[9])
 	}
 }
@@ -404,14 +405,14 @@ func TestCursorFollowsTheFocusedField(t *testing.T) {
 	b := Open(newFake("x"), testStyles(), false)
 	typeText(b, "fo")
 	x, y, ok := b.Cursor(60, 10)
-	if !ok || x != len("Search: ")+2 || y != 9 {
-		t.Fatalf("Cursor = (%d, %d, %v), want (%d, 9, true)", x, y, ok, len("Search: ")+2)
+	if !ok || x != 1+len("Replace: ")+2 || y != 9 {
+		t.Fatalf("Cursor = (%d, %d, %v), want (%d, 9, true)", x, y, ok, 1+len("Replace: ")+2)
 	}
 
 	press(b, "tab")
 	typeText(b, "r")
 	x, y, ok = b.Cursor(60, 10)
-	if !ok || x != len("Replace: ")+1 || y != 9 {
+	if !ok || x != 1+len("Replace: ")+1 || y != 9 {
 		t.Fatalf("replace Cursor = (%d, %d, %v)", x, y, ok)
 	}
 }

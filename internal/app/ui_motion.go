@@ -6,6 +6,7 @@ import "github.com/tbxark/gvim/internal/editor"
 var _ interface {
 	ToggleFoldAt(line int) bool
 	SetRowMapper(f editor.RowMapper)
+	SetRowWindowMapper(f editor.RowWindowMapper)
 	ScrollMargin() int
 } = editorAdapter{}
 
@@ -19,6 +20,13 @@ func (a editorAdapter) ToggleFoldAt(line int) bool {
 // Up, Down, Home and End move by display row. It is the ui's rowMapped port.
 func (a editorAdapter) SetRowMapper(f editor.RowMapper) {
 	a.ed.SetRowMapper(f)
+}
+
+// SetRowWindowMapper gives the editor the function that reports the rows around a column of a
+// line too long to list, so that Up, Down, Home and End move by display row there too. It is
+// the ui's rowWindowMapped port.
+func (a editorAdapter) SetRowWindowMapper(f editor.RowWindowMapper) {
+	a.ed.SetRowWindowMapper(f)
 }
 
 // ScrollMargin is the scroll-off margin in rows. It is the ui's scrollMargined port.

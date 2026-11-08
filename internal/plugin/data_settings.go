@@ -3,9 +3,13 @@ package plugin
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
+	"strings"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"github.com/tbxark/gvim/internal/pluginapi"
 )
 
 // gvim.settings and gvim.config.
@@ -225,6 +229,7 @@ func (p *plugin) computeSettings(st *settingsState) {
 			}
 		}
 	}
+	p.warnUnknownSettings(st)
 	var dropped []string
 	for k := range p.data.project {
 		if s := st.specs[k]; s == nil || !s.project {
@@ -343,4 +348,40 @@ func installConfig(e *apiEnv) {
 		L.Push(p.toLua(v))
 		return 1
 	})
+}
+
+// warnUnknownSettings tells the user, once per key, about a key of plugins.<name>.settings
+// that the plugin does not define: a typo would otherwise do nothing and say nothing.
+func (p *plugin) warnUnknownSettings(st *settingsState) {
+	var bad []string
+	for _, layer := range []map[string]any{p.data.user, p.data.project} {
+		for k := range layer {
+			if st.specs[k] == nil && !p.data.warned[k] && !slices.Contains(bad, k) {
+				bad = append(bad, k)
+			}
+		}
+	}
+	sort.Strings(bad)
+	for _, k := range bad {
+		if p.data.warned == nil {
+			p.data.warned = map[string]bool{}
+		}
+		p.data.warned[k] = true
+		known := "the plugin defines no settings"
+		if len(st.keys) > 0 {
+			known = "known: " + strings.Join(st.keys, ", ")
+		}
+		msg := fmt.Sprintf("config plugins.%s.settings has '%s', which the plugin does not define (%s)", p.name, clipMsg(k, 40), known)
+		p.r.logf(p.name, levelWarn, msg)
+		p.r.notify(p, pluginapi.LevelWarn, p.name+": "+msg)
+	}
+}
+
+// warnSettingsWithoutSchema is warnUnknownSettings for a plugin that finished loading
+// without calling gvim.settings.define: every key of its config settings is unknown.
+func (p *plugin) warnSettingsWithoutSchema() {
+	if p.data.settings != nil || (len(p.data.user) == 0 && len(p.data.project) == 0) {
+		return
+	}
+	p.warnUnknownSettings(&settingsState{})
 }

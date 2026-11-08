@@ -282,10 +282,10 @@ func TestScrollbarThumbFollowsTop(t *testing.T) {
 	thumb, track := grid.Style{FG: color.RGBA{R: 1, A: 255}}, grid.Style{FG: color.RGBA{G: 1, A: 255}}
 	st := Styles{Thumb: thumb, Scrollbar: track}
 	g := Pane{Doc: &fakeDoc{lines: lines}, Top: 20, Styles: st}.Render(20, 10)
-	// Top 20 puts the thumb at row 20*10/30 = 6, three rows long.
+	// Top 20 is the last page, so the three-row thumb sits at the bottom: rows 7 to 9.
 	for y := range 10 {
 		want := track.FG
-		if y >= 6 && y < 9 {
+		if y >= 7 && y < 10 {
 			want = thumb.FG
 		}
 		if got := g.At(19, y).Style.FG; got != want {
@@ -481,18 +481,34 @@ func TestScrollTopForPlacesThumbNearPointer(t *testing.T) {
 	}
 	const h = 27
 	for row := range h {
-		top := Pane{Doc: &fakeDoc{lines: lines}}.ScrollTopFor(h, row)
+		top := Pane{Doc: &fakeDoc{lines: lines}}.ScrollTopFor(40, h, row)
 		start, length := Pane{Doc: &fakeDoc{lines: lines}, Top: top}.Thumb(h)
 		centre := start + length/2
 		if d := centre - row; d < -2 || d > 2 {
 			t.Errorf("row %d: top %d puts the thumb centre at %d", row, top, centre)
 		}
 	}
-	if got := (Pane{Doc: &fakeDoc{lines: lines}}).ScrollTopFor(h, 0); got != 0 {
+	if got := (Pane{Doc: &fakeDoc{lines: lines}}).ScrollTopFor(40, h, 0); got != 0 {
 		t.Errorf("track press at the top gave top %d, want 0", got)
 	}
-	if got := (Pane{Doc: &fakeDoc{lines: lines}}).ScrollTopFor(h, 500); got != 200-h {
+	if got := (Pane{Doc: &fakeDoc{lines: lines}}).ScrollTopFor(40, h, 500); got != 200-h {
 		t.Errorf("track press at the bottom gave top %d, want %d", got, 200-h)
+	}
+}
+
+// TestScrollbarReachesTheEndOfALongFile checks that the bottom of the track is the
+// last page, and that the thumb of the last page rests on the bottom of the track.
+func TestScrollbarReachesTheEndOfALongFile(t *testing.T) {
+	tests := []struct{ lines, h int }{{2695, 37}, {200, 27}, {38, 37}, {10000, 5}}
+	for _, tc := range tests {
+		doc := &fakeDoc{lines: make([]string, tc.lines)}
+		last := tc.lines - tc.h
+		if got := (Pane{Doc: doc}).ScrollTopFor(40, tc.h, tc.h-1); got != last {
+			t.Errorf("%d lines, h %d: a press on the last track row gave top %d, want %d", tc.lines, tc.h, got, last)
+		}
+		if start, length := (Pane{Doc: doc, Top: last}).Thumb(tc.h); start+length != tc.h {
+			t.Errorf("%d lines, h %d: the thumb of the last page ends at row %d, want %d", tc.lines, tc.h, start+length, tc.h)
+		}
 	}
 }
 
@@ -541,5 +557,37 @@ func TestChangeMarksAskTheDocumentThatKeepsThem(t *testing.T) {
 	Pane{Doc: d}.Render(20, 3)
 	if d.memoCalls != 1 {
 		t.Errorf("an unmodified document asked for the change marks")
+	}
+}
+
+// TestScrollbarReachesTheEndOfAWrappedFile checks that with Line Wrap on, the bottom
+// of the track is the last page: the rows of the last lines are all on screen, and the
+// thumb of that page rests on the bottom of the track.
+func TestScrollbarReachesTheEndOfAWrappedFile(t *testing.T) {
+	const w, h, n = 40, 21, 200
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %03d of the file lorem ipsum dolor sit", i+1) // wraps to 2 rows in 40 columns
+	}
+	doc := &fakeDoc{lines: lines}
+	p := Pane{Doc: doc, Wrap: true}
+	top := p.ScrollTopFor(w, h, h-1)
+	p.Top = top
+	frame, ok := p.newFrame(w, h)
+	if !ok {
+		t.Fatal("no frame")
+	}
+	if want := frame.lastPageTop(); top != want {
+		t.Errorf("a press on the last track row gave top %d, want the last page %d", top, want)
+	}
+	rows := p.Render(w, h).Plain()
+	if !strings.Contains(strings.Join(rows, "\n"), "line 200 of") {
+		t.Errorf("the last line is not on screen after a press on the last track row (top %d)", top)
+	}
+	if start, length := frame.thumb(); start+length != h {
+		t.Errorf("the thumb of the last page ends at row %d, want %d", start+length, h)
+	}
+	if got := (Pane{Doc: doc, Wrap: true}).ScrollTopFor(w, h, 0); got != 0 {
+		t.Errorf("a press on the first track row gave top %d, want 0", got)
 	}
 }

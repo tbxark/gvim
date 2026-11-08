@@ -348,6 +348,8 @@ const (
 type InputSpec struct {
 	Prompt, Default string
 	SelectAll       bool
+	// History holds earlier answers, oldest first; Up and Down in the prompt walk them.
+	History []string
 	// Validate and OnChange are closures made by the runtime. The ui calls them on the UI goroutine
 	// from Update: Validate runs Lua synchronously (25 ms, no yield) and a non-nil error keeps the
 	// prompt open (prompt.LineOptions.Validate); OnChange only enqueues a callback task, which the

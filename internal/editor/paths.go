@@ -78,7 +78,7 @@ func (d *Document) rename(path string) {
 func (e *Editor) RenamePath(oldPath, newPath string) error {
 	targets, moving, err := e.renamePlan(oldPath, newPath)
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	for i, d := range e.docs {
@@ -181,12 +181,12 @@ func (e *Editor) CheckRename(oldPath, newPath string) error {
 func (e *Editor) CloseByPath(path string, force bool) error {
 	if path == "" {
 		err := fmt.Errorf("close: %w", ErrEmptyPath)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	path, err := absPath(path)
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	victim := func(d *Document) bool {
@@ -197,7 +197,7 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 		for _, d := range e.docs {
 			if victim(d) && d.Modified() {
 				err := fmt.Errorf("close %s: %w", d.Name(), ErrUnsaved)
-				e.setStatus(err.Error())
+				e.setError(err)
 				return err
 			}
 		}

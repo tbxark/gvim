@@ -99,6 +99,16 @@ Codes: `read_only closed too_large invalid not_found busy timeout cancelled io e
 unsupported conflict limit stale`. `gvim.err_code(err)` returns the code of an error string (or
 `nil`).
 
+* **What an uncaught error looks like.** The message is `file:line: text`, where the file is the chunk
+  name `<plugin>/<file relative to the plugin>` (`hello/hello.lua`, `init/init.lua`; user plugins live
+  under `plugins/` of the configuration directory, `init.lua` beside it). gvim names the callee where
+  it can: `attempt to call a non-function object (field 'notifyy')` (also `global`, `local`,
+  `upvalue`, `method`); a line with several calls is left unnamed. A syntax error is `file:line:column:
+  syntax error near 'token'`. A runaway recursion is `file:line: lua callstack overflow`. The
+  **status row** shows the position last, `text (file:line)`, so that a row cut at its width keeps what
+  went wrong; the log has the usual form and a traceback of at most 14 lines (a repeated frame counts
+  once: `... the line above repeats 29 more times`), in which an anonymous function is
+  `in function <hello/hello.lua:7>`.
 * A function whose host capability does not exist (a stage the editor does not implement, no
   language server configured) returns `nil, "unsupported: <name>"`. `gvim.has(feature)` reports
   features: `decor`, `windows`, `virtual_buffers`, `input`, `lsp` (a language server is

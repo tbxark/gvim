@@ -47,6 +47,11 @@ type FileState struct {
 	Col       int    `json:"col"`
 	Top       int    `json:"top"`
 	StashFile string `json:"stashFile,omitempty"`
+	// Size and MTimeUnixNano are the size and modification time of the file the text
+	// of StashFile was based on, or zero when unknown. A start that finds the file
+	// different does not let a save overwrite it unasked.
+	Size          int64 `json:"size,omitzero"`
+	MTimeUnixNano int64 `json:"mtimeUnixNano,omitzero"`
 	// OverlayFile names the overlay stash of a large file: its unsaved edits as a
 	// delta over the file (StashOverlay). A file has a StashFile or an OverlayFile,
 	// never both.

@@ -77,6 +77,29 @@ func (p Pane) HScroll(w, h int) (left, most int) {
 	return f.left, max(f.contentW-(f.w-1-f.gutter), 0)
 }
 
+// HScrollFor returns the first display column that puts the horizontal thumb on the
+// bar cell x (a pane column), for a press or a drag on the bar. A cell left of the
+// track gives 0 and one right of it the largest first column, so the ends of the
+// track are the ends of the longest visible line. It returns 0 when there is no bar.
+func (p Pane) HScrollFor(w, h, x int) int {
+	f, ok := p.newFrame(w, h)
+	if !ok || !f.hbar {
+		return 0
+	}
+	track := f.w - 1 - f.gutter
+	if track <= 0 || f.contentW <= 0 {
+		return 0
+	}
+	length := min(track, max(1, track*track/f.contentW))
+	most := max(f.contentW-track, 0)
+	span := track - length
+	if span <= 0 {
+		return 0
+	}
+	pos := min(max(x-f.gutter-length/2, 0), span)
+	return (pos*most + span/2) / span
+}
+
 // paintHorizontalBar draws the horizontal scrollbar on its row, from the gutter to
 // the column before the last one. The track is a "─" in the track style and the
 // thumb a "━" in the thumb style. The thumb's length is the share of the text
@@ -120,3 +143,7 @@ func dropColumns(cells []cell, n int) []cell {
 	}
 	return nil
 }
+
+// PansSideways reports whether a line wider than the text area is cut at the right edge
+// and the view moves along it: Wrap is off, or the document is one that is never wrapped.
+func (p Pane) PansSideways() bool { return !p.wrapOn() }

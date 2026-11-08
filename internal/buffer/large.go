@@ -119,6 +119,7 @@ func OpenLarge(src Source, o LargeOptions) (*Buffer, error) {
 			},
 			pages:   newPageCache(chunk, o.CachePages, o.Budget, stats),
 			ranges:  newRangeMemo(),
+			huges:   newHugeMemo(),
 			stats:   stats,
 			maxLine: int64(o.MaxLine),
 		},

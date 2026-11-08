@@ -21,25 +21,6 @@ func keyB() fakeBindings {
 	}}
 }
 
-func TestKeybindingEditorListsActionChordAndContext(t *testing.T) {
-	keys := fakeBindings{list: []KeyBinding{
-		{Action: "save", Chord: "ctrl+s", Context: "normal"},
-		{Action: "quit", Chord: "ctrl+q", Context: "global"},
-	}}
-	ed := newFakeEditor("hello")
-	m := newUtilityModel(t, ed, keys, Settings{}, nil)
-	if err := m.Run("open_keybinding_editor"); err != nil {
-		t.Fatalf("Run = %v, want nil", err)
-	}
-	if !frameHas(m, "Keybindings") || !frameHas(m, "save") || !frameHas(m, "ctrl+q  global") {
-		t.Fatal("the keybinding editor does not list the bindings with their chord and context")
-	}
-	press(m, typed("q"))
-	if !frameHas(m, "quit") || frameHas(m, "save") {
-		t.Fatal("the filter did not narrow the keybinding list to quit")
-	}
-}
-
 func TestSwitchOverlayListsPresetsAndMarksTheActiveOne(t *testing.T) {
 	ed := newFakeEditor("hello")
 	m := newUtilityModel(t, ed, keyA(), Settings{Keymap: "emacs"}, nil)

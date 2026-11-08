@@ -67,9 +67,13 @@ func CompileSource(chunk, src string) (*lua.FunctionProto, error) {
 	}
 	stmts, err := parse.Parse(strings.NewReader(src), chunk)
 	if err != nil {
-		return nil, err
+		return nil, readableCompileError(chunk, src, err)
 	}
-	return lua.Compile(stmts, chunk)
+	proto, err := lua.Compile(stmts, chunk)
+	if err != nil {
+		return nil, readableCompileError(chunk, src, err)
+	}
+	return proto, nil
 }
 
 // Source describes one plugin to load.
@@ -123,15 +127,18 @@ type plugin struct {
 
 	inflight int // waits with Work
 	strikes  []time.Time
+	decorNS  map[string]bool // the decoration namespaces the plugin made (cleared when it is suspended)
+	pace     timerPace       // the timer pace budget (timerpace.go)
 
 	stormDrains int // consecutive Drains that hit the cascade cap with this plugin's events queued
 	userStorm   int // consecutive cut Drains with this plugin's tasks or commands still queued
 
-	commands map[string]*command
-	subs     map[string][]*subscription
-	nsubs    int
-	susp     *suspendTable
-	fnSeq    int
+	commands   map[string]*command
+	bindWarned map[string]bool // key bindings of an unknown action already named (lint_bindings.go)
+	subs       map[string][]*subscription
+	nsubs      int
+	susp       *suspendTable
+	fnSeq      int
 
 	files    map[string]*Compiled
 	main     string

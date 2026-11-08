@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -140,12 +141,20 @@ func cutAction(e *Editor, d *Document, _ map[string]any) error {
 	return nil
 }
 
+// ErrPasteTooLarge is the refusal of a paste of more than buffer.MaxMaterialize bytes.
+// The paste runs on the UI goroutine, and copies and splits the text several times,
+// so a paste of hundreds of megabytes would freeze the editor and exhaust memory.
+var ErrPasteTooLarge = fmt.Errorf("paste too large (limit %d MiB)", buffer.MaxMaterialize>>20)
+
 // pasteAction inserts the "text" argument, which the UI fills from the system
 // clipboard or a bracketed paste, or else the private register.
 func pasteAction(e *Editor, d *Document, args map[string]any) error {
 	text, ok := args["text"].(string)
 	if !ok {
 		text = e.clipboard
+	}
+	if len(text) > buffer.MaxMaterialize {
+		return ErrPasteTooLarge
 	}
 	if text = normalizePaste(text); text != "" {
 		d.pasteText(text)

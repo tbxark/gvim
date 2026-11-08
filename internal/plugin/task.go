@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -267,6 +270,8 @@ func (r *Runtime) runTask(t *task, args []lua.LValue) {
 	p := t.p
 	sl := r.newSlice(p.pctx, r.budget(t.origin))
 	defer sl.finish()
+	began := time.Now()
+	defer func() { p.paceRan(time.Since(began)) }()
 	for {
 		res := r.resume(t, sl, args)
 		if t.cancelled {
@@ -546,6 +551,8 @@ func (r *Runtime) classify(t *task, sl *slice, res resumeResult) *runError {
 	default:
 		re.msg = res.err.Error()
 	}
+	re.trace = compactTrace(re.trace)
+	re.msg = withPosition(nameCallError(re.msg, t.p.protos(), t.origin == originLoad), re.trace)
 	// A yield inside a function gopher-lua calls from Go (sort comparator, gsub callback,
 	// metamethod, for-in iterator) corrupts the call: it surfaces as "can not yield" or, after
 	// the resume, as a nil dereference. Report what the plugin did.
@@ -613,7 +620,7 @@ func (r *Runtime) noteFailure(p *plugin, re *runError) { r.report(p, "callback",
 
 // report logs a failure, applies the strike rules and tells the user.
 func (r *Runtime) report(p *plugin, label string, re *runError, limit time.Duration) {
-	r.logf(p.name, levelError, label+": "+re.msg+traceSuffix(re.trace))
+	r.logf(p.name, levelError, label+": "+re.msg+traceSuffix(re.trace)+filesSuffix(p, re.msg))
 	switch re.kind {
 	case failCancelled:
 		return
@@ -628,16 +635,19 @@ func (r *Runtime) report(p *plugin, label string, re *runError, limit time.Durat
 		case failTimeout:
 			text = fmt.Sprintf("%s: %s timed out (%d ms), strike %d/%d", p.name, label, limit.Milliseconds(), min(n, strikeLimit), strikeLimit)
 		case failMemory:
+			// the runaway allocation is garbage now: give it back instead of leaving it to the
+			// scavenger, which would hold it for minutes
+			debug.FreeOSMemory()
 			text = fmt.Sprintf("%s: %s stopped by the memory limit, strike %d/%d", p.name, label, min(n, strikeLimit), strikeLimit)
 		default:
 			text = fmt.Sprintf("%s: %s failed (%s), strike %d/%d", p.name, label, firstLine(re.msg), min(n, strikeLimit), strikeLimit)
 		}
 		r.notify(p, pluginapi.LevelError, text)
 		if suspended {
-			r.notify(p, pluginapi.LevelError, fmt.Sprintf("%s suspended after %d strikes (Plugin: Manager)", p.name, strikeLimit))
+			r.notify(p, pluginapi.LevelError, fmt.Sprintf("suspended after %d strikes (Plugin: Manager)", strikeLimit))
 		}
 	default:
-		r.notify(p, pluginapi.LevelError, p.name+": "+firstLine(re.msg))
+		r.notify(p, pluginapi.LevelError, p.name+": "+statusText(re.msg))
 	}
 }
 
@@ -679,6 +689,10 @@ func (r *Runtime) strike(p *plugin, why string) (n int, suspended bool) {
 		r.wantsChanged()
 		p.evq = nil
 		_ = r.host.SetInputMode(p.name, "")
+		r.host.SetStatusItems(p.name, nil)
+		for _, ns := range slices.Sorted(maps.Keys(p.decorNS)) {
+			r.host.DecorClear(p.name, ns, 0) // marks nothing updates any more would go stale
+		}
 		r.logf(p.name, levelError, "suspended: "+why)
 		return n, true
 	}
@@ -700,9 +714,26 @@ func traceback(th *lua.LState) string {
 		if sb.Len() > 0 {
 			sb.WriteByte('\n')
 		}
-		fmt.Fprintf(&sb, "\t%s:%d: in %s %q", dbg.Source, dbg.CurrentLine, dbg.What, dbg.Name)
+		sb.WriteString(frameText(dbg))
 	}
-	return sb.String()
+	return compactTrace(sb.String())
+}
+
+// frameText renders one frame the way reference Lua does: "src:line: in function 'name'", or
+// "in function <src:linedefined>" for a function that has no name, which is what a command's
+// own function is (gopher-lua calls the bottom frame of a coroutine "main chunk" whatever it is).
+func frameText(dbg *lua.Debug) string {
+	if dbg.What == "Go" || dbg.What == "G" || dbg.CurrentLine < 0 {
+		return "\t[Go]: in function '" + dbg.Name + "'"
+	}
+	where := fmt.Sprintf("\t%s:%d: in ", dbg.Source, dbg.CurrentLine)
+	switch {
+	case dbg.What == "main" && dbg.LineDefined <= 0:
+		return where + "main chunk"
+	case dbg.Name == "" || dbg.Name == "(anonymous)" || dbg.Name == "?" || dbg.Name == "main chunk" || strings.HasPrefix(dbg.Name, "<"):
+		return fmt.Sprintf("%sfunction <%s:%d>", where, dbg.Source, dbg.LineDefined)
+	}
+	return where + "function '" + dbg.Name + "'"
 }
 
 // awaitWhere is the position of the plugin code that made the await being served: the
@@ -876,3 +907,16 @@ func (c *awaitCall) NewToken() pluginapi.Token { return c.r.newToken() }
 // CheckPark reports the quota error when the plugin may not park another task. Call it
 // before a Host async call.
 func (c *awaitCall) CheckPark(withWork bool) error { return c.p.checkPark(withWork) }
+
+// filesSuffix says where the files of the plugin are, under an error at a position: the chunk
+// names are relative ("rterr/rterr.lua") and do not say that.
+func filesSuffix(p *plugin, msg string) string {
+	where := p.dir
+	if where == "" {
+		where = p.file
+	}
+	if where == "" || !strings.HasPrefix(msg, p.name+"/") {
+		return ""
+	}
+	return "\n\t(plugin files: " + where + ")"
+}

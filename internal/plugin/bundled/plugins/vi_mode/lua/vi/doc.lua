@@ -10,7 +10,22 @@ local M = {}
 -- CANCEL is thrown (with error) to abandon the command being read. The reader catches it.
 M.CANCEL = setmetatable({}, { __tostring = function() return "vi: cancelled" end })
 
-local buf, cache, nlines
+local buf, cache, nlines, total
+
+-- A text that ends in a line break has an empty line after it in the host. It is not a line
+-- of the file (vi never lands on it, and what crosses it would eat the line break), so
+-- the count leaves it out (line() still answers for it, as the caret can be put there by
+-- the editor, and gives an empty line). keep_last is set when the caret is on it: an insert that opened
+-- a line at the end of a text that had no line break makes a real last line.
+local keep_last = false
+
+local function settle(n)
+  total = n
+  if n and n > 1 and not keep_last and buf:line(n - 1) == "" then
+    return n - 1
+  end
+  return n
+end
 
 -- The line cache is a table of chunks of CHUNK lines, not a table keyed by the line number:
 -- gopher-lua pads the array part of a table with nils up to an integer key, so a cache keyed
@@ -47,8 +62,12 @@ function M.begin()
   buf = gvim.buf.current()
   cache = {}
   nlines = nil
+  keep_last = false
   if buf then
     nlines = buf:line_count()
+    local c = nlines and buf:cursor()
+    keep_last = c ~= nil and c.line >= nlines - 1
+    nlines = settle(nlines)
   end
   if not buf or not nlines then
     return nil
@@ -64,12 +83,16 @@ function M.count() return nlines end
 -- invalidate forgets the cached lines after an edit.
 function M.invalidate()
   cache = {}
-  nlines = buf:line_count() or nlines
+  nlines = settle(buf:line_count()) or nlines
 end
+
+-- trailing reports whether the text ends in a line break, which has the empty line of the
+-- host after it.
+function M.trailing() return total ~= nil and total > nlines end
 
 -- line returns the text of line l (0-based), or nil past the ends.
 function M.line(l)
-  if l < 0 or l >= nlines then
+  if l < 0 or l >= (total or nlines) then
     return nil
   end
   local s = cached(l)

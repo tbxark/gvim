@@ -62,10 +62,10 @@ func (a editorAdapter) StartScan(q search.Query, startLine int) (*search.Scan, e
 
 // FindNext finds the match to go to from the position from in the active large
 // document, without a list of matches. See search.FindNext.
-func (a editorAdapter) FindNext(q search.Query, from buffer.Pos, backward bool) (search.Match, bool, bool, error) {
+func (a editorAdapter) FindNext(q search.Query, from buffer.Pos, backward bool, at search.Cursor) (search.Match, bool, bool, search.Cursor, error) {
 	d := a.ed.Active()
 	if d == nil {
-		return search.Match{}, false, true, editor.ErrNoDocument
+		return search.Match{}, false, true, search.Cursor{}, editor.ErrNoDocument
 	}
 	snap := d.Buffer.Snapshot()
 	defer snap.Release()
@@ -73,7 +73,7 @@ func (a editorAdapter) FindNext(q search.Query, from buffer.Pos, backward bool) 
 	if backward {
 		dir = search.Backward
 	}
-	return search.FindNext(snap, q, from, dir, 0)
+	return search.FindNextAt(snap, q, from, dir, 0, at)
 }
 
 // VisibleMatches returns the matches of q that touch lines first through last of the
@@ -110,9 +110,20 @@ func (d documentAdapter) LineDirty(i int) bool { return d.doc.Buffer.LineDirty(i
 // LineLen is the rune length of line i.
 func (d documentAdapter) LineLen(i int) int { return d.doc.Buffer.LineLen(i) }
 
+// HasLongLine reports whether a line of the document is longer than editorpane.WindowedLineRunes.
+// The pane then shows the document without wrap, and the long lines through a
+// window, as it does a large one.
+func (d documentAdapter) HasLongLine() bool { return d.doc.HasLongLine(editorpane.WindowedLineRunes) }
+
 // LineBytes is the stored length of line i in bytes, found without reading the line
-// of a large document.
-func (d documentAdapter) LineBytes(i int) int { return d.doc.Buffer.LineBytes(i) }
+// of a large document. It is an upper bound of the runes of the line, which is all the
+// pane asks of it, so a document in memory answers with the runes, which it has counted.
+func (d documentAdapter) LineBytes(i int) int {
+	if !d.doc.Large() {
+		return d.doc.Buffer.LineLen(i)
+	}
+	return d.doc.Buffer.LineBytes(i)
+}
 
 // LineSlice is the text of runes [col, col+n) of line i. A long line of a large
 // document is shown through it, so the pane never builds the text of the whole line.

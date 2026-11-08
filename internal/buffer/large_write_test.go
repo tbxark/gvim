@@ -82,12 +82,25 @@ func TestLargeSnapshotReadsMatchMemory(t *testing.T) {
 					t.Fatalf("Line(%d) = %q, want %q", i, got, w)
 				}
 			}
+			// A huge line is a chunk of its own, while the memory copy of the cut lines joins it
+			// with its neighbours. Such a corpus is checked for that rule instead of the memory
+			// copy's chunks; the windows still join to the text.
+			huge := false
+			for i := 0; i < s.Lines() && !huge; i++ {
+				_, huge = s.LongLine(i)
+			}
 			for _, maxBytes := range []int{1, 7, 20, 64, 1 << 20} {
 				var parts []string
 				for from := 0; ; {
 					first, n, text := s.Chunk(from, maxBytes)
 					mf, mn, mt := ms.Chunk(from, maxBytes)
-					if first != mf || n != mn || text != mt {
+					if huge {
+						for k := 0; k < n && n > 1; k++ {
+							if _, long := s.LongLine(first + k); long {
+								t.Fatalf("Chunk(%d, %d) joins huge line %d to %d other lines", from, maxBytes, first+k, n-1)
+							}
+						}
+					} else if first != mf || n != mn || text != mt {
 						t.Fatalf("Chunk(%d, %d) = %d %d %q, memory %d %d %q", from, maxBytes, first, n, text, mf, mn, mt)
 					}
 					if n == 0 {
@@ -103,7 +116,13 @@ func TestLargeSnapshotReadsMatchMemory(t *testing.T) {
 				for to := len(want); ; {
 					first, n, text := s.ChunkBefore(to, maxBytes)
 					mf, mn, mt := ms.ChunkBefore(to, maxBytes)
-					if first != mf || n != mn || text != mt {
+					if huge {
+						for k := 0; k < n && n > 1; k++ {
+							if _, long := s.LongLine(first + k); long {
+								t.Fatalf("ChunkBefore(%d, %d) joins huge line %d to %d other lines", to, maxBytes, first+k, n-1)
+							}
+						}
+					} else if first != mf || n != mn || text != mt {
 						t.Fatalf("ChunkBefore(%d, %d) = %d %d %q, memory %d %d %q", to, maxBytes, first, n, text, mf, mn, mt)
 					}
 					if n == 0 {

@@ -9,11 +9,35 @@ type rowMapped interface {
 	SetRowMapper(f editor.RowMapper)
 }
 
+// rowWindowMapped is the optional editor port that takes the function reporting the rows
+// around a column of a line that is too long to list. The app adapter implements it.
+type rowWindowMapped interface {
+	SetRowWindowMapper(f editor.RowWindowMapper)
+}
+
 // installRowMapper gives the editor the wrapped rows of the focused pane.
 func (m *Model) installRowMapper() {
 	if s, ok := m.ed.(rowMapped); ok {
 		s.SetRowMapper(m.rowStarts)
 	}
+	if s, ok := m.ed.(rowWindowMapped); ok {
+		s.SetRowWindowMapper(m.rowWindow)
+	}
+}
+
+// rowWindow returns the columns at which the rows around column col of a tall line of the
+// active document start in the focused pane. tall is false for a line that is not tall.
+func (m *Model) rowWindow(line, col int) (starts []int, tall bool) {
+	doc := m.ed.Active()
+	if doc == nil {
+		return nil, false
+	}
+	l := m.layout()
+	if l.gated {
+		return nil, false
+	}
+	fp := l.focusedPane()
+	return m.paneGeometry(fp, doc).RowWindow(fp.w, fp.h, line, col)
 }
 
 // rowStarts returns the columns at which the display rows of a line of the active

@@ -8,19 +8,23 @@ import (
 
 	model "github.com/tbxark/gvim/internal/palette"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 )
 
 // maxRows is the most item rows the box shows (n = clamp(H-4, 0, 10)).
 const maxRows = 10
 
-// Column rules of the legacy palette (BLUEPRINT-v2 section 4.4, and the layout
-// of the legacy screens). They are kept as numbers, so the legacy columns can be
-// checked against them.
+// Column widths of the rows, in cells. They come out of the width of the box, so a
+// wide terminal gives every column more room instead of cutting names at a fixed
+// column.
 const (
-	descColumn   = 49 // the description starts here when it is shown
-	descMinStart = 67 // the description width is W - 67 and shown when at least 1
-	keysMinWidth = 33 // the shortcut column is shown from this frame width
-	sourceEnd    = 43 // the source ends no further left than this column
+	keysWidth     = 16  // the shortcut column
+	keysMinText   = 44  // the text width from which the shortcut column is shown
+	descMinText   = 100 // the text width from which the description column is shown
+	srcMinText    = 60  // the text width from which the source label is shown
+	srcReserveMax = 14  // the cells the source label may take, with its gap
+	columnGap     = 2   // blank cells between the columns
+	descShare     = 3   // the description column takes descShare tenths of the text
 )
 
 // visibleRows is n, the number of item rows in a frame H rows high.
@@ -38,36 +42,83 @@ type geometry struct {
 	footY   int // the hint row
 	promptY int // the query line
 
+	left, right int // the columns of the box's left and right border
+
 	nameX, nameEnd int // the name column; nameEnd is exclusive
 	keysX, keysEnd int // the shortcut column; keysX is -1 when hidden
 	descX, descW   int // the description column; descW is 0 when hidden
 	srcX           int // the source column's leftmost cell
 	srcOK          bool
+	textEnd        int // the end, exclusive, of every column: one padding cell before the border
 }
 
 // layoutFor places the palette in a w by h frame. It is a pure function of the
-// size, so painting and hit testing read the same numbers.
+// size, so painting and hit testing read the same numbers. The box keeps a margin
+// from the left and right edges (space.Margin), and its text keeps a padding cell
+// from the borders.
 func layoutFor(w, h int) geometry {
 	n := visibleRows(h)
+	m := space.Margin(w)
+	left, right := m, w-1-m
 	g := geometry{
 		w: w, h: h, rows: n,
 		top: h - 4 - n, bottom: h - 3,
 		footY: h - 2, promptY: h - 1,
-		nameX:   min(max(w-58, 1), 3),
-		nameEnd: w - 1,
-		keysX:   -1,
-		keysEnd: w - 1,
-		srcX:    sourceEnd,
+		left: left, right: right,
+		keysX: -1,
 	}
-	if w >= keysMinWidth {
-		g.keysX = min(max(w-28, 31), 35)
-		g.nameEnd = g.keysX
+	// A frame too narrow for a box with an inside gives the whole width to the name.
+	g.nameX = min(left+1+space.PadX, max(right-1, 0))
+	g.textEnd = max(right-space.PadX, g.nameX)
+	g.nameEnd, g.keysEnd, g.srcX = g.textEnd, g.textEnd, g.textEnd
+	tw := g.textEnd - g.nameX
+	edge := g.textEnd
+	if tw >= srcMinText {
+		g.srcOK = true
+		g.srcX = edge - min(srcReserveMax, tw/5)
+		edge = g.srcX
+		g.keysEnd = edge
 	}
-	if d := w - descMinStart; d >= 1 {
-		g.descX, g.descW = descColumn, d
-		g.keysEnd = descColumn
+	if tw >= descMinText {
+		g.descW = tw*descShare/10 - columnGap
+		g.descX = edge - g.descW
+		edge = g.descX - columnGap
+		g.keysEnd = edge
 	}
-	g.srcOK = w-1 > sourceEnd
+	if tw >= keysMinText {
+		g.keysX = edge - keysWidth
+		g.nameEnd = g.keysX - columnGap
+		g.keysEnd = max(g.keysEnd, g.keysX)
+	} else {
+		g.nameEnd = edge
+	}
+	return g
+}
+
+// fitColumns narrows the name column of a command list to its longest name, and gives
+// the cells it frees to the description column. The shortcut column moves left with
+// the name, so names, shortcuts and descriptions read as one row on a wide terminal
+// instead of sitting at the two ends of the box. Nothing changes without a
+// description column, or when a name needs the whole column.
+func (g geometry) fitColumns(rows []row) geometry {
+	if g.descW == 0 || g.keysX < 0 {
+		return g
+	}
+	longest := 0
+	for _, r := range rows {
+		if nameEnd(g, r) == g.nameEnd {
+			longest = max(longest, ansi.StringWidth(r.name))
+		}
+	}
+	freed := g.nameEnd - g.nameX - longest
+	if longest == 0 || freed <= 0 {
+		return g
+	}
+	g.nameEnd -= freed
+	g.keysX -= freed
+	g.keysEnd -= freed
+	g.descX -= freed
+	g.descW += freed
 	return g
 }
 
@@ -75,7 +126,7 @@ func layoutFor(w, h int) geometry {
 // The row above the box is blanked when the box reaches the top, as the legacy
 // palette did, so that the palette covers the menu row.
 func (p *Palette) paint(g *grid.Grid) {
-	geo := layoutFor(g.Width(), g.Height())
+	geo := layoutFor(g.Width(), g.Height()).fitColumns(p.rows)
 	if geo.top <= 0 {
 		g.Fill(0, geo.w, 0, p.chrome.panel)
 	}
@@ -83,26 +134,34 @@ func (p *Palette) paint(g *grid.Grid) {
 		p.paintBox(g, geo)
 	}
 	g.Fill(0, geo.w, geo.footY, p.chrome.panel)
-	g.Put(0, geo.footY, geo.w, truncate(hint, geo.w), p.chrome.panel)
+	text := hint
+	if p.live {
+		text = liveHint
+	}
+	g.Put(geo.left, geo.footY, geo.w, truncate(text, geo.w-geo.left), p.chrome.panel)
 	g.Fill(0, geo.w, geo.promptY, p.chrome.prompt)
-	p.drawInput(g, geo.promptY)
+	p.drawInput(g, geo.promptY, geo.nameX)
 }
 
-// paintBox draws the bordered box and the rows in view. The left border is a
-// single bar, with no right border, as in the legacy palette.
+// paintBox draws the bordered box and the rows in view. Every row has a bar at
+// each side.
 func (p *Palette) paintBox(g *grid.Grid, geo geometry) {
 	panel := p.chrome.panel
-	g.Fill(0, geo.w, geo.top, panel)
-	g.Put(0, geo.top, geo.w, "┌"+rule("─", geo.w-2)+"┐", panel)
+	boxW := geo.right - geo.left + 1
+	g.Fill(geo.left, geo.right+1, geo.top, panel)
+	g.Put(geo.left, geo.top, geo.right+1, "╭"+rule("─", boxW-2)+"╮", panel)
 
 	first, count := p.nav.Window()
 	for k := range geo.rows {
 		y := geo.top + 1 + k
-		g.Fill(0, geo.w, y, panel)
-		g.Set(0, y, "│", panel)
+		g.Fill(geo.left, geo.right+1, y, panel)
+		g.Set(geo.left, y, "│", panel)
+		if boxW > 1 {
+			g.Set(geo.right, y, "│", panel)
+		}
 		if len(p.rows) == 0 {
 			if k == 0 {
-				g.Put(geo.nameX, y, geo.w-1, p.emptyText(), panel)
+				g.Put(geo.nameX, y, geo.textEnd, p.emptyText(), panel)
 			}
 			continue
 		}
@@ -112,17 +171,17 @@ func (p *Palette) paintBox(g *grid.Grid, geo geometry) {
 		idx := first + k
 		selected := idx == p.nav.Selected()
 		if selected {
-			g.Fill(1, geo.w-1, y, p.chrome.selected)
+			g.Fill(geo.left+1, geo.right, y, p.chrome.selected)
 		}
 		p.paintRow(g, geo, y, p.rows[idx], selected)
 	}
 
 	// With no item rows the bottom border has no corner, as in the legacy palette.
-	corner := "┘"
+	corner := "╯"
 	if geo.rows == 0 {
 		corner = " "
 	}
-	g.Put(0, geo.bottom, geo.w, "└"+rule("─", geo.w-2)+corner, panel)
+	g.Put(geo.left, geo.bottom, geo.right+1, "╰"+rule("─", boxW-2)+corner, panel)
 }
 
 // paintRow draws the columns of one row: the name, the shortcut, the description
@@ -144,48 +203,65 @@ func (p *Palette) paintRow(g *grid.Grid, geo geometry, y int, r row, selected bo
 		g.Put(geo.descX, y, geo.descX+geo.descW, truncate(r.desc, geo.descW), faint(base))
 	}
 	if geo.srcOK && r.source != "" {
-		// Right-aligned so the last character is at column w-2, never left of srcX.
-		x := max(geo.w-1-ansi.StringWidth(r.source), geo.srcX)
-		g.Put(x, y, geo.w-1, truncate(r.source, geo.w-1-x), faint(base))
+		// Right-aligned so the last character is at the end of the text area, never
+		// left of srcX.
+		x := max(geo.textEnd-ansi.StringWidth(r.source), geo.srcX)
+		g.Put(x, y, geo.textEnd, truncate(r.source, geo.textEnd-x), faint(base))
 	}
 }
 
-// drawName writes the name column. Matched runes of a file row are bold. The cut
-// keeps the prefix of the name, so a rune at index i of the cut is the rune at
-// index i of the name whenever the two are equal.
+// nameEnd is where the name of r is cut. A command row has a shortcut and a
+// description column, so its name ends before the shortcut column. The other rows
+// have neither, so their name runs up to the source label, or to the end of the text
+// area when the frame is too narrow for the label.
+func nameEnd(geo geometry, r row) int {
+	if r.kind == rowCommand || r.keys != "" || r.desc != "" {
+		return geo.nameEnd
+	}
+	end := geo.textEnd
+	if geo.srcOK && r.source != "" {
+		end = max(geo.textEnd-ansi.StringWidth(r.source), geo.srcX) - columnGap
+	}
+	return end
+}
+
+// drawName writes the name column. Matched runes are bold. A name that does not fit
+// is shortened: a file path in the middle, keeping its base name, a grep row around
+// the match, and anything else at its end. The matched offsets follow the cut.
 func (p *Palette) drawName(g *grid.Grid, geo geometry, y int, r row, st grid.Style) {
-	width := geo.nameEnd - geo.nameX
+	end := nameEnd(geo, r)
+	width := end - geo.nameX
 	if width <= 0 {
 		return
 	}
-	cut := truncate(r.name, width)
-	if len(r.hl) == 0 {
-		g.Put(geo.nameX, y, geo.nameEnd, cut, st)
+	shown, hl := fitName(r, width)
+	if len(hl) == 0 {
+		g.Put(geo.nameX, y, end, shown, st)
 		return
 	}
-	orig, shown := []rune(r.name), []rune(cut)
 	x := geo.nameX
-	for i, c := range shown {
+	for i, c := range []rune(shown) {
 		s := st
-		if i < len(orig) && orig[i] == c && slices.Contains(r.hl, i) {
+		if slices.Contains(hl, i) {
 			s.Bold = true
 		}
-		x += g.Put(x, y, geo.nameEnd, string(c), s)
+		x += g.Put(x, y, end, string(c), s)
 	}
 }
 
-// drawInput writes the query on row y and reverses the cell under the caret.
-// The row scrolls so that the caret stays in view.
-func (p *Palette) drawInput(g *grid.Grid, y int) {
+// drawInput writes the query on row y from column x0 and reverses the cell under
+// the caret. The row scrolls so that the caret stays in view.
+func (p *Palette) drawInput(g *grid.Grid, y, x0 int) {
 	w := g.Width()
+	x0 = min(x0, max(w-1, 0))
 	runes := []rune(p.input.Value())
 	pos := min(max(p.input.Position(), 0), len(runes))
 	start := 0
-	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-1 {
+	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-x0-1 {
 		start++
 	}
 	base := p.chrome.prompt
-	x := 0
+	x := x0
 	for i := start; i < len(runes); i++ {
 		st := base
 		if i == pos {
@@ -211,10 +287,7 @@ func truncate(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	if ansi.StringWidth(s) <= w {
-		return s
-	}
-	return ansi.Truncate(s, w-1, "") + "…"
+	return space.End(s, w)
 }
 
 // rule repeats ch n times, or nothing when n is not positive.

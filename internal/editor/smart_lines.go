@@ -431,8 +431,10 @@ func (d *Document) transposeChars() {
 }
 
 // transformCase converts the selection of each caret, or else the word at or just
-// before it, with fn. The caret ends after the converted text and its selection is
-// dropped. Text that does not change leaves the caret and selection alone.
+// before it, with fn. A selection stays selected over the converted text, in its
+// direction, so the next conversion needs no new selection. A word has no selection,
+// and the caret ends after it. Text that does not change leaves the caret and
+// selection alone.
 func (d *Document) transformCase(fn func(string) string) {
 	cs := d.allCarets()
 	plans := make([]caretPlan, len(cs))
@@ -444,6 +446,9 @@ func (d *Document) transformCase(fn func(string) string) {
 		old := d.planRange(from, to)
 		if converted := fn(old); converted != old {
 			plans[i].edit = &edit{from: from, to: to, text: converted}
+			if c.anchor != c.head {
+				plans[i].place, plans[i].anchor = keepSelection(from, converted, c.head.Less(c.anchor))
+			}
 		}
 	}
 	d.applyPlans(cs, plans)

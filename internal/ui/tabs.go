@@ -8,6 +8,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/ui/grid"
 	"github.com/tbxark/gvim/internal/ui/icons"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -17,6 +18,8 @@ import (
 const (
 	previewSuffix = " (preview)" // the label of a preview tab
 	modifiedMark  = "●"          // before the name of a modified tab
+	// comparePairMark is before the name of each of the two tabs of a compare view.
+	comparePairMark = "⇄"
 )
 
 // stripLabel is the name of one tab as the strip shows it: the file icon (when the
@@ -44,12 +47,24 @@ func stripLabel(t TabInfo) string {
 // through as they are.
 func (m *Model) stripTabs() []TabInfo {
 	tabs := m.ed.Tabs()
-	if m.view.icons.FileIcon("", false, false) == "" {
+	plain := m.view.icons.FileIcon("", false, false) == ""
+	pair := m.splits.comparing && !m.splits.root.leaf()
+	if plain && !pair {
 		return tabs
 	}
 	out := slices.Clone(tabs)
 	for i := range out {
-		out[i].Icon = m.view.icons.FileIcon(strings.TrimSuffix(out[i].Name, previewSuffix), false, false)
+		if !plain {
+			out[i].Icon = m.view.icons.FileIcon(strings.TrimSuffix(out[i].Name, previewSuffix), false, false)
+		}
+	}
+	if pair {
+		// The two files of a comparison are two tabs, so the strip says they belong together.
+		for _, n := range []*splitNode{m.splits.root.a, m.splits.root.b} {
+			if n.tab >= 0 && n.tab < len(out) {
+				out[n.tab].Name = comparePairMark + " " + out[n.tab].Name
+			}
+		}
 	}
 	return out
 }
@@ -68,7 +83,7 @@ type strip struct {
 // tabCells is the width of one tab in cells: the label " name " followed by the
 // "×" and one blank. Tabs follow each other with no gap.
 func tabCells(t TabInfo) int {
-	return ansi.StringWidth(" "+stripLabel(t)+" ") + 2
+	return ansi.StringWidth(space.Pad(stripLabel(t))) + 2
 }
 
 // tabStarts returns the first cell of every tab, measured from the strip's left
@@ -161,7 +176,7 @@ func tabRuns(tabs []TabInfo, x0 int, ic icons.Mode) []run {
 	var runs []run
 	p := x0
 	for i, t := range tabs {
-		name := " " + stripLabel(t) + " "
+		name := space.Pad(stripLabel(t))
 		nw := ansi.StringWidth(name)
 		runs = append(runs,
 			run{x: p, w: nw, text: name, kind: hitTab, index: i},

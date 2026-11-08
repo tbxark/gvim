@@ -111,13 +111,22 @@ func (b *Buffer) LineBytes(i int) int {
 	return runesLen(b.lineRunes(i))
 }
 
-// LineCut reports whether line i is shown cut: a large buffer's line that is
+// LineCut reports whether line i is shown cut by Line: a large buffer's line that is
 // longer than the line cap, or the still unterminated first line of a source
-// whose index has not found a line break within the cap. Only a prefix of such
-// a line can be read, so copying or re-inserting its text would lose the rest.
+// whose index has not found a line break within the cap. Line gives only a prefix of
+// such a line, so copying a line through it, or re-inserting its text, would lose the
+// rest. Range and LineSlice read a line over the cap to its end.
 // A memory buffer never cuts a line. Out-of-range indexes are clamped.
 func (b *Buffer) LineCut(i int) bool {
 	return b.big != nil && b.big.lineCut(i)
+}
+
+// LineUnfinished reports whether line i is shown cut because the index of a large buffer has not
+// found its end yet. A line longer than the line cap is cut for Line, but is read to its end by
+// Range and LineSlice, so it is not unfinished. A memory buffer has no such line. Out-of-range
+// indexes are clamped.
+func (b *Buffer) LineUnfinished(i int) bool {
+	return b.big != nil && b.big.lineUnfinished(i)
 }
 
 // LineSlice returns runes [col, col+n) of line i, clamped to the line.

@@ -9,10 +9,13 @@ Pure functions on path strings, no IO.
 ```text
 gvim.path.join(...) -> string        gvim.path.dirname(p) -> string      gvim.path.basename(p) -> string
 gvim.path.extname(p) -> string       gvim.path.is_absolute(p) -> boolean gvim.path.normalize(p) -> string
-gvim.path.relative(base, p) -> string   gvim.path.split(p) -> dir, file
+gvim.path.relative(base, p) -> string | nil, err   gvim.path.split(p) -> dir, file
 gvim.path.to_uri(p) -> string        gvim.path.from_uri(u) -> string | nil, err
 gvim.path.sep                        -- "/" or "\\"
 ```
+
+`relative` fails with `nil, err` when one path is relative and the other absolute (for example a
+root-relative hit of `workspace.grep` and `workspace.root()`): join the hit to the root first.
 
 ## gvim.fs
 
@@ -65,7 +68,8 @@ gvim.env.get(name) -> string | nil
 `argv` is an array and there is **no shell**: `{"git", "status", "-s"}`. At most 1024 entries and
 1 MiB in all. Options of `run`: `cwd`, `env = {K = "V"}` (added to the environment; at most 256),
 `stdin = "text"`, `timeout_ms = 60000` (at most 600 000), `max_output = 8 MiB` per stream,
-`merge_stderr = false`.
+`merge_stderr = false`. `spawn` takes the same options (`merge_stderr` included), plus
+the ones below.
 
 ```lua
 local r = gvim.proc.run({ "git", "rev-parse", "--short", "HEAD" }, { cwd = gvim.workspace.root() })
@@ -110,7 +114,10 @@ Callbacks are event-class tasks (`min(50 ms, plugin_timeout_ms)`). At most 64 li
 sleeps resumes with a fresh budget.
 
 `gvim.timer.sleep(0)` is the way to give the editor a turn in a long loop: every slice has a time
-budget, and a loop that does 2000 items of work per turn stays inside it.
+budget, and a loop that does 2000 items of work per turn stays inside it. A loop that yields often
+with no work to do (a bare `sleep(0)` spin) is throttled: its turns wait for the throttle floor and it
+is warned once. It is struck only while it keeps a core busy through that floor; a loop that does real
+work between its turns is throttled at most. See [limits.md](limits.md) (Timer pace).
 
 ## gvim.async
 
@@ -149,10 +156,18 @@ gvim.workspace.git_branch(root) ⏳ -> name | nil, err
 
 * `root` is the workspace root now (it changes when the user opens a project).
 * `files` is a snapshot of the editor's file index, no IO; `opts.limit` (default and maximum 50 000);
-  `loading` is true while the index is still being built.
-* `grep` searches the workspace with the editor's live grep. opts `regex = false`,
-  `case_sensitive = false`, `max = 2000` (at most 20 000). `line` and `col` are **0-based**, `col` a
-  **byte** offset into `text`.
+  `loading` is true while the index is still being built. The paths are **relative to the workspace
+  root**, with `/` separators.
+* `grep` searches the files of the same file index (at most the first 2000 files of the index; a file
+  that looks binary or is over 1 MiB is skipped), with one hit per matching line. In a git work
+  tree the index is `git ls-files` (tracked and untracked files that are not ignored: a hidden
+  directory or a `node_modules` that git does not ignore is searched). Without git it is a walk
+  that honours `.gitignore` and skips hidden entries and `.git`, `node_modules`, `target`,
+  `__pycache__`, `.hg` and `.svn`. opts `regex = false`, `case_sensitive = false`, `max = 2000` (at
+  most 20 000): the search stops after `max` hits, and there is no `truncated` flag, so a result of
+  exactly `max` hits may be incomplete. `path` is **relative to the workspace root**: `gvim.buf.open` takes it as it is, but
+  join it with `gvim.workspace.root()` before `gvim.fs` or `gvim.path.relative`. `line` and
+  `col` are **0-based**, `col` a **byte** offset into `text`.
 * `git_root` and `git_branch` read the repository with the editor's own reader, with no `git`
   binary. They are the fallback of `gvim.git.root` and `gvim.git.branch` when no binary is
   installed; prefer `gvim.git`.

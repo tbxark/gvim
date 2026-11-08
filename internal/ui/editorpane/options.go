@@ -102,6 +102,17 @@ type frameFX struct {
 
 	// wins are the windows of the long lines laid out in this frame, by line.
 	wins map[int]window
+	// long says which lines are painted through a window, once asked, by line.
+	long map[int]bool
+	// tall says which lines are wrapped in segments, once asked, by line. segs are the
+	// segments laid out in this frame. See longwrap.go.
+	tall map[int]bool
+	segs map[segKey]*segment
+	// plain are the lines laid out without paint attributes in this frame, by line.
+	plain map[int]line
+	// caretRow is the display row of the caret in its own line, once known.
+	caretRow   int
+	caretRowOK bool
 }
 
 // initFX fills the option state of the frame. It runs once the selections and the

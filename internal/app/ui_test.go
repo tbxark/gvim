@@ -41,6 +41,60 @@ func TestKeymapAdapterResolvesInTheContext(t *testing.T) {
 	}
 }
 
+func TestKeymapAdapterResolvesSequences(t *testing.T) {
+	em, err := keymap.ByName("emacs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := keymapAdapter{km: em}
+	cx := ui.KeyPress{Name: "x", Mods: []string{"ctrl"}}
+	cs := ui.KeyPress{Name: "s", Mods: []string{"ctrl"}}
+	tests := []struct {
+		name       string
+		steps      []ui.KeyPress
+		action     string
+		ok, prefix bool
+	}{
+		{"first key is a prefix, not a binding", []ui.KeyPress{cx}, "", false, true},
+		{"C-x C-s saves", []ui.KeyPress{cx, cs}, "save", true, false},
+		{"C-x k closes", []ui.KeyPress{cx, {Name: "k"}}, "close", true, false},
+		{"M-g g goes to a line", []ui.KeyPress{{Name: "g", Mods: []string{"alt"}}, {Name: "g"}}, "goto_line", true, false},
+		{"a miss", []ui.KeyPress{cx, {Name: "q"}}, "", false, false},
+		{"a single binding is no prefix", []ui.KeyPress{cs}, "", false, false},
+		{"a bad key name", []ui.KeyPress{{Name: "NoSuchKey"}}, "", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, ok, prefix := k.ResolveSequence(tt.steps, ui.KeyContextNormal)
+			if cmd.Action != tt.action || ok != tt.ok || prefix != tt.prefix {
+				t.Errorf("ResolveSequence = %q, %v, %v; want %q, %v, %v", cmd.Action, ok, prefix, tt.action, tt.ok, tt.prefix)
+			}
+		})
+	}
+}
+
+func TestKeymapAdapterResolvesSuperBindings(t *testing.T) {
+	km, err := keymap.ByName("macos-gui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := keymapAdapter{km: km}
+	tests := []struct {
+		key    ui.KeyPress
+		action string
+	}{
+		{ui.KeyPress{Name: "s", Mods: []string{"super"}}, "save"},
+		{ui.KeyPress{Name: "p", Mods: []string{"super"}}, "quick_open"},
+		{ui.KeyPress{Name: "q", Mods: []string{"super"}}, "quit"},
+	}
+	for _, tt := range tests {
+		cmd, ok := k.Resolve(tt.key, ui.KeyContextNormal)
+		if !ok || cmd.Action != tt.action {
+			t.Errorf("%v = %+v, %v; want %s", tt.key, cmd, ok, tt.action)
+		}
+	}
+}
+
 func TestKeymapContextMapping(t *testing.T) {
 	if got := keymapContext(ui.KeyContextFileExplorer); got != keymap.ContextFileExplorer {
 		t.Errorf("explorer context = %q", got)

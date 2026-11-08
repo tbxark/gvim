@@ -304,3 +304,20 @@ func stripFences(md string) string {
 	}
 	return strings.Trim(strings.Join(kept, "\n"), "\n")
 }
+
+// Formatting asks the server to format the whole document and returns the text edits it
+// wants, in the order the server gave them. tabSize and insertSpaces are the editor's
+// settings. A server with no formatting answers with a null result, which is no edits.
+func (c *Client) Formatting(ctx context.Context, docURI string, tabSize int, insertSpaces bool) ([]protocol.TextEdit, error) {
+	edits, err := c.server.Formatting(ctx, &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
+		Options: protocol.FormattingOptions{
+			TabSize:      uint32(max(tabSize, 1)),
+			InsertSpaces: insertSpaces,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lsp: formatting %s: %w", docURI, err)
+	}
+	return edits, nil
+}

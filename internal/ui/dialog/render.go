@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 )
 
 // The width of a dialog's content, in cells. The box adds two border cells and
@@ -58,7 +59,7 @@ func wrapText(s string, width int) []string {
 // allows.
 func fitWidth(frameWidth, natural int) int {
 	cw := min(max(natural, minContent), maxContent)
-	cw = min(cw, frameWidth-boxChrome)
+	cw = min(cw, frameWidth-boxChrome-2*space.Margin(frameWidth))
 	return max(cw, 1)
 }
 

@@ -42,10 +42,25 @@ operation that you called (an edit, a big read, a search) is not charged to the 
 * **Strikes**: a timeout, a Go panic or a heap-guard cancel is a strike; three within 60 seconds suspend
   the plugin (`suspended` in the manager; its commands still run, its events, timers and key layers
   stop). Ordinary Lua errors are not strikes.
-* **Heap guard**: while a slice runs, the heap is sampled every 5 ms; if it grew by more than 256 MiB
-  since the slice began, the slice is cancelled (after a forced collection confirms it). It measures the
-  whole process, so a large file loading at the same time could cancel an innocent plugin; it is a
-  circuit breaker, not an accountant.
+* **Heap guard**: the heap is read when a slice begins and sampled every millisecond once the slice has
+  run for 2 ms; if the allocated objects grew by more than 128 MiB, a forced collection confirms that the
+  *live* heap grew by that much, and the slice is cancelled (at once, without waiting for the collection,
+  when the growth passes the limit plus the live heap that was there). It measures the whole process, so a
+  large file loading at the same time could cancel an innocent plugin; it is a circuit breaker, not an
+  accountant. A single Lua instruction cannot be interrupted, so the peak is the limit plus what the
+  instruction that crossed it allocated: see [the heap guard and a single concatenation](#the-heap-guard-and-a-single-concatenation) below.
+* **Timer pace**: a plugin that loops on `gvim.timer.sleep(0)` (or `after`/`every` with a delay under 10 ms),
+  or whose timer callbacks keep the editor busy (400 ms of every second), never trips a slice budget but
+  can burn a core. gvim counts the arms of a second and the busy time of every task slice of the plugin
+  (timers, sleeps, commands and events alike). Two hot seconds in a row throttle the plugin: its timers and
+  sleeps wait at least 100 ms (or four times its longest callback), a warning goes to the log and the
+  status row **once**, and the loop goes on at a pace the editor can afford. While it is throttled only the
+  busy time counts: a second with 150 ms or more of task time is hot, and five hot seconds in a row give a
+  strike (three suspend the plugin, as for any runaway). A loop that waits out the floor between its turns
+  is calm, so a bare `sleep(0)` spin is throttled and warned, but not struck; a callback that keeps the core
+  busy through the floor is struck. Three calm seconds lift the throttle. A plugin that waits for real
+  intervals is never affected, and a cooperative job that does a little work between its turns is only
+  throttled (`TestCooperativeJobIsNotSuspended`).
 * `plugin_timeout_ms` is read from the config (default 500, 1 to 60000); the project config can only
   lower it. The load budget is capped at 5 s even for 60000.
 
@@ -133,11 +148,62 @@ So: a setting value is data from a stranger. **Never** use one as a command line
 overwrite, as a URL or as shell text without validating it, and declare `project = true` only for harmless
 presentation keys (labels, depth, a delay, a colour). The bundled plugins do exactly that.
 
+### The heap guard and a single concatenation
+
+gvim runs the unmodified gopher-lua, and one `..` is a single VM instruction that nothing can interrupt:
+the heap guard can cancel a slice only *between* instructions, so the peak is the guard's limit plus
+what the instruction that crossed it allocated. `runtime/metrics` is read between instructions (every
+millisecond, from the heap as it was when the slice began), and the limit is 128 MiB, so that the usual
+overshoot stays near twice the guard. Measured peak resident size, one process per case, on the
+default guard (128 MiB; the process itself is about 10 MiB; `internal/plugin/membomb_unix_test.go`
+repeats these and fails when one grows past its bound):
+
+| Plugin code | Peak | Times the guard |
+|---|---|---|
+| `s = s .. s` from one byte, in a loop | 268 MiB (a 256 MiB guard: 525 MiB, a 64 MiB guard: 140 MiB) | 2.1 |
+| the same from a 60 MiB string, from a 33 MiB string | 192 MiB, 243 MiB | 1.5, 1.9 |
+| keeping a new 1 MiB string in a table, in a loop | 150 MiB | 1.2 |
+| `s = s .. s .. s .. s` from 1 MiB (four operands) | 354 MiB | 2.8 |
+| one `..` over 8 operands of 60 MiB (256 MiB guard) | 553 MiB | 2.2 |
+| one `..` over **100** operands of 60 MiB (256 MiB guard) | **5.2 GiB** | 20 |
+| one `..` over 20 operands of 16 MiB (default 128 MiB guard, measured by the review) | 416 MiB, about 57 MiB idle | 3.3 |
+
+The rows marked "256 MiB guard" were measured with a 256 MiB guard; the others with the default 128 MiB.
+
+The last two rows are the part that stays unbounded: a chain `a .. b .. c ...` is one instruction that
+allocates every operand at once, so its peak is the number of operands (at most about 250, the register
+limit of a Lua function) times the largest string the plugin holds (at most 64 MiB from the API, and
+whatever earlier steps left under the guard). A plugin has to write such an expression on purpose with
+huge operands; recovery is `--no-plugins`. Bounding it would take a rewrite of long chains into pairs at
+compile time, or a patch of the VM. gvim does neither, and the residual is open (decision recorded in the
+follow-up review, not in the code):
+
+* **Left open: a long chain is not bounded.** Rewriting the syntax tree into left-nested pairs does not
+  work with gopher-lua's compiler, which flattens right-nested concatenations and removes the instructions
+  of the operand it compiled before it emits its own. A bytecode rewrite (split each multi-operand
+  `OP_CONCAT` into pairwise steps that reuse the operand registers, then move the result) needs the jumps,
+  `LOADBOOL` skips and line information relocated after the insertion, which is fragile across gopher-lua
+  versions. Rejecting long chains at load time would refuse ordinary code, and a cap on the operand count
+  still allows the cap times the operand size.
+* A dozen short pieces copy about six times their length in one instruction, which is negligible; the
+  cost is only for chains of large operands.
+
+Every other single call that could make a large string or a large stack is capped by the runtime, by
+gopher-lua's own options, or by the guard, and is measured above the same way:
+
+| Call | Bound |
+|---|---|
+| `string.rep`, `string.format`, `table.concat`, `gsub`, `json.encode` | the result is at most 64 MiB (`MaxString`; `string.format` 1 MiB): `resulting string too large`, 71 MiB peak |
+| `("x"):byte(1, -1)`, `unpack(t, 1, 1e8)`, `string.char(unpack(t))` | `string slice too long` / `too many results to unpack`, from the registry limit `RegistryMaxSize` of 1 048 576 slots (about 16 MiB), no growth |
+| a table with a far integer key, `t[1e9] = 1` | `lua.MaxArrayIndex` is 1 048 576: keys above it live in the hash part, nothing is padded |
+| recursion | `CallStackSize` 256 frames, 190 nested coroutine resumes |
+| a table that keeps growing, strings kept in a table | the heap guard, between instructions: 150 MiB peak for 1 MiB elements |
+
 ## Residual risks
 
-1. **`s = s .. s` cannot be capped.** One doubling step near the heap-guard threshold can peak at about
-   three times the threshold before the guard (5 ms sampling plus a forced collection) fires.
-   Recovery is `--no-plugins`.
+1. **`..` cannot be interrupted or capped.** See [above](#the-heap-guard-and-a-single-concatenation): a doubling string peaks at
+   about twice the heap guard, and one concatenation of many large operands is the part that stays
+   unbounded. Recovery is `--no-plugins`.
 2. **The heap guard's forced collection costs CPU** on very large heaps (hundreds of MiB); it runs at
    most once per slice and only on a candidate.
 3. **The heap guard measures the process**, not the plugin (above).
@@ -176,7 +242,10 @@ plugin system will fix without a new stage.
 * **One editor input mode at a time.** Entering a mode ends the previous one. Pending-sequence state of a
   buffer mode is not reset by `b:set_mode`, and `mode_changed` is raised for the editor-wide mode only.
 * **The panic chord shadows `ctrl+shift+6` while plugin input is active** (a plugin mode, key wait or
-  overlay); every shipped preset binds it to *Set Bookmark 6*, which works as usual otherwise.
+  overlay); every shipped preset binds it to *Set Bookmark 6*, which works as usual otherwise. Three
+  quick `Esc` presses are the chord only while the input is stuck (a plugin mode that does not bind
+  `Esc`, a key wait, a plugin prompt), so a mode that uses `Esc` itself, like vi_mode, is not switched
+  off by Esc mashing.
 * **`Style.strike` is not drawn** (the cell grid has no strike attribute).
 * **Decorations do not survive undo** of the edit that removed their anchors, and are dropped on a
   whole-buffer replace; set them again on `buffer_changed`. Those of a closed buffer are freed at the next

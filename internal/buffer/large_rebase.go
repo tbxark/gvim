@@ -14,7 +14,7 @@ var ErrRebaseMismatch = errors.New("buffer: written file does not match rebase c
 
 // snapshot returns the large snapshot state of s's current text.
 func (s *bigStore) snapshot() *bigSnap {
-	g := &bigSnap{r: s.baseReader, st: s.st, hugeBase: s.hugeSeen()}
+	g := &bigSnap{r: s.baseReader, st: s.st, hugeBase: s.hugeSeen(), idxStride: s.stride(), idxChunk: s.chunk()}
 	if s.src.retain() {
 		g.held = true
 	} else {
@@ -61,6 +61,7 @@ func (b *Buffer) Rebase(src Source, res WriteResult, ver uint64, prefixLen int64
 		},
 		pages:   newPageCache(res.Chunk, old.pages.want, s.budget, s.stats),
 		ranges:  newRangeMemo(),
+		huges:   newHugeMemo(),
 		stats:   s.stats,
 		maxLine: old.maxLine,
 	}

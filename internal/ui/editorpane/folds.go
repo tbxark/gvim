@@ -22,8 +22,9 @@ type Folder interface {
 // leaves both nil.
 func (f *frame) setFolds(doc Document) {
 	fl, ok := doc.(Folder)
-	if !ok || isLarge(doc) {
-		// The folds of a large document would be found by reading all of it.
+	if !ok || isLarge(doc) || f.fill != nil {
+		// The folds of a large document would be found by reading all of it. A pane with
+		// fillers shows every line, so that the rows of two panes keep matching.
 		return
 	}
 	ranges := fl.Folds(f.tab)

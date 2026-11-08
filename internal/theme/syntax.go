@@ -1,9 +1,8 @@
 package theme
 
 // Keys in the "syntax" section of a theme file. The syntax highlighter asks
-// for these eight; every bundled theme defines all of them. Some themes also
-// define variable_builtin and punctuation_* keys, which the highlighter does
-// not use.
+// for these nine; every bundled theme defines all of them. Some themes also
+// define punctuation_* keys, which the highlighter does not use.
 const (
 	SyntaxKeyword  = "keyword"
 	SyntaxString   = "string"
@@ -13,6 +12,9 @@ const (
 	SyntaxVariable = "variable"
 	SyntaxConstant = "constant"
 	SyntaxOperator = "operator"
+	// SyntaxVariableBuiltin colours self, this and the like. Every bundled theme
+	// defines it, as Fresh's themes do; a theme that does not falls back to variable.
+	SyntaxVariableBuiltin = "variable_builtin"
 )
 
 // Syntax returns the value for key in the "syntax" section. ok is false when

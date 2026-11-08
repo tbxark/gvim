@@ -243,6 +243,9 @@ func TestExecuteHelpListsCommandTree(t *testing.T) {
 			t.Errorf("help misses %q:\n%s", want, stdout)
 		}
 	}
+	if strings.Contains(stdout, "nothing is written") || !strings.Contains(stdout, "plugin log to PATH") {
+		t.Errorf("help must say what --log-file writes:\n%s", stdout)
+	}
 	if rec.calls != 0 {
 		t.Fatalf("runner called %d times, want 0", rec.calls)
 	}

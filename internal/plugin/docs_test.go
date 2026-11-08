@@ -447,3 +447,85 @@ func TestDocsQuotasMatchLimits(t *testing.T) {
 		}
 	}
 }
+
+// TestDocsStateKnownBehaviour pins statements of the docs that plugin authors and vi users
+// ran into: what the runtime does differs from what one would assume. The behaviour itself
+// is tested where it lives: TestUnloadAndShutdownHooksCannotWait, TestSelectIndexIsOneBased,
+// TestBufVirtualReadOnlyAndMode, TestGrepScopeIsTheFileIndex (internal/app) and
+// TestViOwnsOnlyDocumentedCtrlKeys (internal/plugin/bundled). This keeps the docs from losing the note.
+// Whitespace is collapsed, so a line break in the Markdown does not matter.
+func TestDocsStateKnownBehaviour(t *testing.T) {
+	tests := []struct {
+		file    string
+		must    []string
+		mustNot []string
+	}{
+		{
+			file:    "api-core.md",
+			must:    []string{"no status-bar counter", "cannot touch files"},
+			mustNot: []string{"`[warn N]`", "a file you wrote"},
+		},
+		{
+			file:    "api-ui.md",
+			must:    []string{"every item, strings included"},
+			mustNot: []string{"(what to show for an item that is not a string)"},
+		},
+		{
+			file: "api-buffers.md",
+			must: []string{
+				"resolved against the workspace root",
+				"opens a new empty buffer",
+				"set_read_only(false)",
+				"`bash`",
+			},
+		},
+		{
+			file: "api-system.md",
+			must: []string{
+				"relative to the workspace root",
+				"no `truncated` flag",
+				"`spawn` takes the same options",
+				"`nil, err`",
+			},
+		},
+		{
+			file:    "api-commands.md",
+			must:    []string{"⌃S"},
+			mustNot: []string{`("Ctrl+S")`},
+		},
+		{
+			file:    "README.md",
+			must:    []string{"--log-file PATH` appends the notices", "the file is current while gvim runs", "binds `Esc`"},
+			mustNot: []string{"is not written", "not implemented"},
+		},
+		{
+			file: "../../internal/plugin/bundled/plugins/vi_mode/README.md",
+			must: []string{"Vim's insert-mode ctrl keys", "`ctrl+w`"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			doc := strings.Join(strings.Fields(readDoc(t, tt.file)), " ")
+			for _, s := range tt.must {
+				if !strings.Contains(doc, s) {
+					t.Errorf("%s does not say %q", tt.file, s)
+				}
+			}
+			for _, s := range tt.mustNot {
+				if strings.Contains(doc, s) {
+					t.Errorf("%s still says %q", tt.file, s)
+				}
+			}
+		})
+	}
+}
+
+// gvim.mode.leave does not end a buffer-local mode, so the docs say how to leave one (RV-06).
+func TestDocsSayBufferLocalModesLeaveWithSetMode(t *testing.T) {
+	doc := readDoc(t, "api-commands.md")
+	for _, want := range []string{"`gvim.mode.leave()` does not end a buffer-local mode", "`b:set_mode(nil)`"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("api-commands.md lacks %q", want)
+		}
+	}
+}

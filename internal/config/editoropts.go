@@ -617,7 +617,7 @@ func isSection(key string) bool { return slices.Contains(sections, key) }
 var fileOnlyKeys = []string{
 	"$schema", "version", "locale", "check_for_updates", "self_update", "auto_attach",
 	"open_last_workspace", "sidebar", "file_browser", "clipboard", "terminal",
-	"keybinding_maps", "active_keybinding_map", "lsp_enabled", "universal_lsp",
+	"universal_lsp",
 	"warnings", "packages", "env", "menu",
 }
 

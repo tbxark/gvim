@@ -31,10 +31,17 @@
 // disable a plugin, and plugin_timeout_ms from the project layer can only lower the
 // user's value.
 //
+// The keymap and keybindings keys change what the user's keys do, so only the user file
+// sets them: the project layer is refused with a diagnostic (unlike Fresh, where a project's
+// keybindings replace the user's). keybindings is Fresh's list of {key, modifiers, action,
+// when} entries; an object {"bindings": [...]} is accepted too.
+//
 // The lsp key maps a language ID to the language server that runs for it:
-// {"lsp": {"go": {"command": "gopls", "args": []}}}. No language server runs
-// unless the lsp key lists its language, so a fresh install starts none. A later
-// layer that sets lsp replaces the whole map.
+// {"lsp": {"go": {"command": "gopls", "args": []}}}. It overrides the built-in table of
+// servers (internal/lsp), which starts a server for a language when its program is on
+// PATH. An entry with "enabled": false turns the server of its language off, and the
+// top-level lsp_enabled key turns all of them off. A later layer that sets lsp replaces
+// the whole map.
 //
 // The formatters key maps a language name, or a file extension with its dot, to the
 // command that formats a buffer: {"formatters": {"go": "gofmt", ".go": "gofmt"}}. Keys
@@ -99,10 +106,19 @@ const (
 )
 
 // LSPServer is the language server for one language, as the lsp key writes it.
-// Command is the program, and Args are passed to it in order.
+// Command is the program, and Args are passed to it in order. An entry that turns a
+// built-in server on ("enabled": true or "auto_start": true) may leave Command empty: the
+// built-in program runs, with Args when they are given.
 type LSPServer struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args,omitempty"`
+	// Dormant is "auto_start": false: the server is not started when a file opens, only by
+	// Start/Restart LSP Server.
+	Dormant bool `json:"-"`
+	// RootMarkers are the file names that mark the root of a project (root_markers). The
+	// server of a file runs in the nearest directory above the file that holds one of them,
+	// and in the workspace root when none does.
+	RootMarkers []string `json:"root_markers,omitempty"`
 }
 
 // Config is the effective set of settings after all layers are merged.
@@ -165,14 +181,24 @@ type Config struct {
 	// stored here: EditorFor merges them in.
 	Languages map[string]LanguageSettings
 
-	// Keybindings is the raw JSON object of keybinding overrides, or nil. Its
-	// schema is the bindings of a keymap file: {"bindings": [...]}. A layer that
-	// sets it replaces the value from the layers below it as a whole.
+	// Keybindings is the raw JSON of the user's keybinding overrides, or nil. It is the
+	// list Fresh documents, [{"key": "s", "modifiers": ["ctrl"], "action": "save"}], or
+	// an object {"bindings": [...]}. Only the user file can set it: the project layer
+	// is refused with a diagnostic.
 	Keybindings json.RawMessage
 
 	// LSP maps a language ID to its language server, or is nil when no file sets
-	// the lsp key. A language that is not in the map runs no server.
+	// the lsp key. A language that is not in the map runs the built-in server for it,
+	// if there is one and its program is on PATH.
 	LSP map[string]LSPServer
+
+	// LSPDisabled holds the languages whose lsp entries are all "enabled": false, so
+	// their built-in server does not run either. It is nil when there are none.
+	LSPDisabled map[string]bool
+
+	// LSPEnabled is the lsp_enabled master switch, default true. False starts no
+	// language server on its own.
+	LSPEnabled bool
 
 	// Formatters maps a language name, or a file extension with its dot, to the shell
 	// command that formats a buffer, or is nil when no file sets the formatters key.
@@ -202,6 +228,7 @@ func Defaults() Config {
 		LineWrap:                true,
 		HighlightCurrentLine:    true,
 		MouseCapture:            true,
+		LSPEnabled:              true,
 		CursorStyle:             CursorStyleBlock,
 		UIIcons:                 UIIconsAuto,
 
@@ -437,6 +464,19 @@ func applyFile(cfg *Config, path string, l layer) []Diagnostic {
 				diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
 				continue
 			}
+		case (key == "keybindings" || key == "keymap" || key == "active_keybinding_map" || key == "keybinding_maps") && l == layerProject:
+			// A repository must not decide what the user's keys do, so the project layer
+			// can neither switch the keymap nor bind a key. Say so instead of ignoring it.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set " + key + ": it changes what keys do, so set it in the user config"})
+			continue
+		case key == "lsp" && l == layerProject:
+			// A repository must not choose the program gvim starts, so the project layer
+			// can only switch servers off or on, never name a command.
+			ds, ok := cfg.setProjectLSP(path, keys[key])
+			diags = append(diags, ds...)
+			if !ok {
+				continue
+			}
 		default:
 			if err := cfg.set(key, keys[key]); err != nil {
 				diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
@@ -444,6 +484,9 @@ func applyFile(cfg *Config, path string, l layer) []Diagnostic {
 			}
 		}
 		cfg.note(key, path)
+		if key == "active_keybinding_map" {
+			cfg.note("keymap", path)
+		}
 	}
 	for _, section := range sections {
 		raw, ok := keys[section]
@@ -496,12 +539,20 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return fmt.Errorf("must not be empty")
 		}
 		c.Theme = s
-	case "keymap":
+	case "keymap", "active_keybinding_map":
+		// Fresh's documented name for the keymap is active_keybinding_map, so a Fresh
+		// config picks the same keymap here. keymap is processed after it, so it wins when
+		// a file has both.
 		s, err := decodeString(raw)
 		if err != nil {
 			return err
 		}
 		c.Keymap = s
+	case "keybinding_maps":
+		// Fresh's custom keymap files. gvim has none: its own bindings go in keybindings.
+		if trimmed := bytes.TrimSpace(raw); string(trimmed) != "{}" {
+			return fmt.Errorf("custom keybinding maps are not supported; put the keys in keybindings")
+		}
 	case "plugin_timeout_ms":
 		var n int
 		if err := json.Unmarshal(raw, &n); err != nil {
@@ -529,12 +580,11 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 	case "keybindings":
 		trimmed := bytes.TrimSpace(raw)
 		if isEmptyArray(trimmed) {
-			// Fresh writes "keybindings": [] for no overrides. gvim's overrides are
-			// an object, so an empty list sets none.
+			// Fresh writes "keybindings": [] for no overrides.
 			return nil
 		}
-		if len(trimmed) == 0 || trimmed[0] != '{' {
-			return fmt.Errorf("must be a JSON object")
+		if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[') {
+			return fmt.Errorf("must be a list of bindings")
 		}
 		c.Keybindings = append(json.RawMessage(nil), trimmed...)
 	case "default_language":
@@ -544,11 +594,11 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		}
 		c.DefaultLanguage = strings.TrimSpace(s)
 	case "lsp":
-		servers, err := decodeLSP(raw)
+		servers, disabled, err := decodeLSP(raw)
 		if err != nil {
 			return err
 		}
-		c.LSP = servers
+		c.LSP, c.LSPDisabled = servers, disabled
 	case "formatters":
 		formatters, err := decodeFormatters(raw)
 		if err != nil {
@@ -583,19 +633,20 @@ var boolKeys = map[string]func(*Config) *bool{
 	"explorer_show_ignored": func(c *Config) *bool { return &c.ExplorerShowIgnored },
 	"mouse_capture":         func(c *Config) *bool { return &c.MouseCapture },
 	"scroll_sync":           func(c *Config) *bool { return &c.ScrollSync },
+	"lsp_enabled":           func(c *Config) *bool { return &c.LSPEnabled },
 }
 
-// lspEntry is one language server entry. Command and Args are what gvim uses. The other
-// fields are the ones Fresh's config writes; they are accepted and ignored, except that
-// "enabled": false makes the entry start no server.
+// lspEntry is one language server entry. Command, Args, RootMarkers, auto_start and
+// "enabled" are what gvim uses. The other fields are the ones Fresh's config writes; they
+// are accepted and ignored.
 type lspEntry struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
-	Enabled *bool    `json:"enabled"`
+	Command     string   `json:"command"`
+	Args        []string `json:"args"`
+	Enabled     *bool    `json:"enabled"`
+	RootMarkers []string `json:"root_markers"`
 
 	Name                *json.RawMessage `json:"name"`
 	AutoStart           *json.RawMessage `json:"auto_start"`
-	RootMarkers         *json.RawMessage `json:"root_markers"`
 	Env                 *json.RawMessage `json:"env"`
 	LanguageIDOverrides *json.RawMessage `json:"language_id_overrides"`
 	InitOptions         *json.RawMessage `json:"initialization_options"`
@@ -605,40 +656,111 @@ type lspEntry struct {
 }
 
 // decodeLSP reads the lsp key: an object from language ID to LSPServer. Each
-// server must name a command, and it may not have other fields than gvim's and
-// Fresh's. A language may also give a list of servers, as Fresh allows; the first
-// enabled one is used. A server with "enabled": false starts nothing.
-func decodeLSP(raw json.RawMessage) (map[string]LSPServer, error) {
+// server must name a command, unless it turns a built-in server on, and it may not have
+// other fields than gvim's and Fresh's. A language may also give a list of servers, as
+// Fresh allows; the first enabled one is used. A server with "enabled": false starts
+// nothing, and a language whose servers are all disabled is returned in disabled, so its
+// built-in server stays off too.
+func decodeLSP(raw json.RawMessage) (servers map[string]LSPServer, disabled map[string]bool, err error) {
 	trimmed := bytes.TrimSpace(raw)
 	var entries map[string]json.RawMessage
 	if len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &entries) != nil {
-		return nil, fmt.Errorf("must be a JSON object")
+		return nil, nil, fmt.Errorf("must be a JSON object")
 	}
-	servers := make(map[string]LSPServer, len(entries))
+	servers = make(map[string]LSPServer, len(entries))
 	for _, lang := range sortedKeys(entries) {
 		list := []json.RawMessage{entries[lang]}
 		if t := bytes.TrimSpace(entries[lang]); len(t) > 0 && t[0] == '[' {
 			if err := json.Unmarshal(t, &list); err != nil {
-				return nil, fmt.Errorf("%s: %w", lang, err)
+				return nil, nil, fmt.Errorf("%s: %w", lang, err)
 			}
 		}
+		off := false
 		for _, item := range list {
 			var e lspEntry
 			if err := decodeStrict(item, &e); err != nil {
-				return nil, fmt.Errorf("%s: %w", lang, err)
+				return nil, nil, fmt.Errorf("%s: %w", lang, err)
 			}
 			if e.Enabled != nil && !*e.Enabled {
+				off = true
 				continue
 			}
-			if e.Command == "" {
-				return nil, fmt.Errorf("%s: command must not be empty", lang)
+			if e.Command == "" && !turnsOn(e) && !setsAutoStart(e) {
+				return nil, nil, fmt.Errorf("%s: command must not be empty", lang)
 			}
 			if _, taken := servers[lang]; !taken {
-				servers[lang] = LSPServer{Command: e.Command, Args: e.Args}
+				servers[lang] = LSPServer{Command: e.Command, Args: e.Args, Dormant: autoStartOff(e), RootMarkers: e.RootMarkers}
 			}
 		}
+		if _, on := servers[lang]; off && !on {
+			if disabled == nil {
+				disabled = make(map[string]bool)
+			}
+			disabled[lang] = true
+		}
 	}
-	return servers, nil
+	return servers, disabled, nil
+}
+
+// setProjectLSP applies the lsp key of the project file. Unlike the user's, it adds to the
+// entries below it instead of replacing them, and it cannot run a program: an entry with a
+// command is dropped, and the args of one without are removed, each with a diagnostic that
+// says to set it in the user config. What is left switches languages off ("enabled": false),
+// turns a built-in server on, keeps it dormant (auto_start) or names the root markers. An
+// entry cannot replace the user's entry for the language. ok is false when the key is not
+// valid, and the diagnostic says why.
+func (c *Config) setProjectLSP(path string, raw json.RawMessage) (diags []Diagnostic, ok bool) {
+	servers, disabled, err := decodeLSP(raw)
+	if err != nil {
+		return []Diagnostic{{Path: path, Key: "lsp", Message: err.Error()}}, false
+	}
+	refuse := func(lang, what string) {
+		diags = append(diags, Diagnostic{Path: path, Key: "lsp", Message: fmt.Sprintf(
+			"project config cannot set lsp.%s.%s: it chooses a program to run, so set it in the user config", lang, what)})
+	}
+	for _, lang := range slices.Sorted(maps.Keys(servers)) {
+		s := servers[lang]
+		switch {
+		case s.Command != "":
+			refuse(lang, "command")
+			continue
+		case len(s.Args) > 0:
+			refuse(lang, "args")
+			s.Args = nil
+		}
+		if _, has := c.LSP[lang]; has {
+			continue
+		}
+		if c.LSP == nil {
+			c.LSP = make(map[string]LSPServer)
+		}
+		c.LSP[lang] = s
+	}
+	for lang := range disabled {
+		if c.LSPDisabled == nil {
+			c.LSPDisabled = make(map[string]bool)
+		}
+		c.LSPDisabled[lang] = true
+	}
+	return diags, true
+}
+
+// turnsOn reports whether an entry without a command asks for the built-in server:
+// "enabled": true or "auto_start": true.
+func turnsOn(e lspEntry) bool {
+	return (e.Enabled != nil && *e.Enabled) || autoStartIs(e, true)
+}
+
+// setsAutoStart reports whether the entry gives auto_start a boolean value.
+func setsAutoStart(e lspEntry) bool { return autoStartIs(e, true) || autoStartIs(e, false) }
+
+// autoStartOff reports whether the entry sets "auto_start": false.
+func autoStartOff(e lspEntry) bool { return autoStartIs(e, false) }
+
+// autoStartIs reports whether the entry's auto_start is the boolean want.
+func autoStartIs(e lspEntry, want bool) bool {
+	var b bool
+	return e.AutoStart != nil && json.Unmarshal(*e.AutoStart, &b) == nil && b == want
 }
 
 // decodeFormatters reads the formatters key: an object from language name to the

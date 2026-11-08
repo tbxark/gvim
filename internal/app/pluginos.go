@@ -217,13 +217,13 @@ func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo p
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(target), ".gvim-*.tmp")
 	if err != nil {
-		return mapErr(err, p)
+		return mapErr(ontarget(err, p), p)
 	}
 	name := tmp.Name()
 	fail := func(err error) error {
 		_ = tmp.Close()
 		_ = os.Remove(name)
-		return mapErr(err, p)
+		return mapErr(ontarget(err, p), p)
 	}
 	if _, err := tmp.Write(data); err != nil {
 		return fail(err)
@@ -236,13 +236,27 @@ func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo p
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(name)
-		return mapErr(err, p)
+		return mapErr(ontarget(err, p), p)
 	}
 	if err := os.Rename(name, target); err != nil {
 		_ = os.Remove(name)
-		return mapErr(err, p)
+		return mapErr(ontarget(err, p), p)
 	}
 	return nil
+}
+
+// ontarget rewrites an error of the temporary file of an atomic write so that it names the
+// file the plugin asked for, which is what the plugin knows: ".gvim-123.tmp" is not its file.
+func ontarget(err error, target string) error {
+	var perr *fs.PathError
+	var lerr *os.LinkError
+	switch {
+	case errors.As(err, &perr):
+		return &fs.PathError{Op: perr.Op, Path: target, Err: perr.Err}
+	case errors.As(err, &lerr):
+		return &fs.PathError{Op: lerr.Op, Path: target, Err: lerr.Err}
+	}
+	return err
 }
 
 // ReadDir implements plugin.OS.

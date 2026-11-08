@@ -160,16 +160,17 @@ func TestLargeReadMatchesMemoryBuffer(t *testing.T) {
 				}
 				b.ApplyIndex(batch)
 			}
-			compareWithMemory(t, b, want, c.exactBytes)
+			compareWithMemory(t, b, want, wantLines(c.data, int(c.skip), 1<<30), c.exactBytes)
 		})
 	}
 }
 
-// compareWithMemory checks every read method against a memory buffer that holds
-// the expected lines.
-func compareWithMemory(t *testing.T, b *buffer.Buffer, want []string, exactBytes bool) {
+// compareWithMemory checks every read method against a memory buffer that holds the lines of
+// the source. Line is the one exception: it shows a line over MaxLine cut, as want has it,
+// while the other reads, from Range to LineSlice, reach the whole of such a line.
+func compareWithMemory(t *testing.T, b *buffer.Buffer, want, full []string, exactBytes bool) {
 	t.Helper()
-	m := buffer.New(strings.Join(want, "\n"))
+	m := buffer.New(strings.Join(full, "\n"))
 	if b.Lines() != m.Lines() {
 		t.Fatalf("Lines = %d, want %d", b.Lines(), m.Lines())
 	}
@@ -196,7 +197,7 @@ func compareWithMemory(t *testing.T, b *buffer.Buffer, want []string, exactBytes
 		}
 	}
 	for i := -1; i <= m.Lines(); i++ {
-		if got, w := b.Line(i), m.Line(i); got != w {
+		if got, w := b.Line(i), want[min(max(i, 0), len(want)-1)]; got != w {
 			t.Errorf("Line(%d) = %q, want %q", i, got, w)
 		}
 		if got, w := b.LineLen(i), m.LineLen(i); got != w {
@@ -843,7 +844,7 @@ func TestLargeOpenFileSource(t *testing.T) {
 	}
 	indexAll(t, b)
 	want := wantLines(data, 0, tMaxLine)
-	compareWithMemory(t, b, want, true)
+	compareWithMemory(t, b, want, want, true)
 
 	if err := b.Close(); err != nil {
 		t.Fatal(err)

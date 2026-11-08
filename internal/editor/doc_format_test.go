@@ -2,6 +2,8 @@ package editor
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/buffer"
@@ -258,6 +260,206 @@ func TestFormatBufferLooksUpTheFormatter(t *testing.T) {
 			}
 			if got := text(e); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)
+			}
+		})
+	}
+}
+
+// TestFormatterCommandKnowsTheFileName checks that $FILE in a formatter command is the path of
+// the document, quoted for the shell, which is how prettier and ruff pick their parser.
+func TestFormatterCommandKnowsTheFileName(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "a b")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		path, want string
+	}{
+		{filepath.Join(dir, "it's.ts"), filepath.Join(dir, "it's.ts") + "\n"},
+		{filepath.Join(dir, "plain.ts"), filepath.Join(dir, "plain.ts") + "\n"},
+		{"", "[No Name]\n"},
+	}
+	for _, tt := range tests {
+		e := docWith(Options{}, "x")
+		e.Active().Path = tt.path
+		cmd := "cat >/dev/null; printf '%s\\n' $FILE"
+		e.SetFormatters(map[string]string{"text": cmd})
+		e.SetLanguage("text")
+		if r := e.Do("format_buffer", nil); r.Err != nil {
+			t.Fatalf("%q: format_buffer: %v", tt.path, r.Err)
+		}
+		if got := e.Active().Buffer.Text(); got != tt.want {
+			t.Errorf("%q: $FILE gave %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+// TestFormatterFindsTheLanguageOfAFileFromItsName checks that a formatters key given as a
+// language name finds the formatter of a file opened with no language set: the editor asks
+// the namer the app gives it for the name of the file's language ("Go" for x.go), as the
+// highlighter names it. docs/lsp.md says the key can be a name, so "go" must match x.go.
+func TestFormatterFindsTheLanguageOfAFileFromItsName(t *testing.T) {
+	t.Parallel()
+	const upper = "tr a-z A-Z"
+	goNamer := func(path string) string {
+		if filepath.Ext(path) == ".go" {
+			return "Go"
+		}
+		return ""
+	}
+	tests := []struct {
+		name       string
+		file       string
+		namer      func(string) string
+		formatters map[string]string
+		want       bool
+	}{
+		{
+			name:       "a language name key matches an opened file of that language",
+			file:       "x.go",
+			namer:      goNamer,
+			formatters: map[string]string{"go": upper},
+			want:       true,
+		},
+		{
+			name:       "a language name key is matched without case",
+			file:       "x.go",
+			namer:      goNamer,
+			formatters: map[string]string{"GO": upper},
+			want:       true,
+		},
+		{
+			name:       "a language name key of another language does not match",
+			file:       "x.go",
+			namer:      goNamer,
+			formatters: map[string]string{"rust": upper},
+			want:       false,
+		},
+		{
+			name:       "a file the namer gives no language has no formatter by name",
+			file:       "x.txt",
+			namer:      goNamer,
+			formatters: map[string]string{"go": upper},
+			want:       false,
+		},
+		{
+			name:       "without a namer the name key cannot match a file with no language",
+			file:       "x.go",
+			formatters: map[string]string{"go": upper},
+			want:       false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := openNamed(t, tt.file, "hello\n")
+			e.SetLanguageNamer(tt.namer)
+			e.SetFormatters(tt.formatters)
+			if got := e.HasFormatter(); got != tt.want {
+				t.Fatalf("HasFormatter = %t, want %t", got, tt.want)
+			}
+			if !tt.want {
+				return
+			}
+			if r := e.Do("format_buffer", nil); r.Err != nil {
+				t.Fatalf("format_buffer: %v", r.Err)
+			}
+			if got := text(e); got != "HELLO\n" {
+				t.Fatalf("text = %q, want %q", got, "HELLO\n")
+			}
+		})
+	}
+}
+
+// TestLanguageNamerIsNotCalledForALanguageSetWithSetLanguage checks that a language set with
+// SetLanguage wins, so the namer is only a fallback for a document with no language.
+func TestLanguageNamerIsNotCalledForALanguageSetWithSetLanguage(t *testing.T) {
+	t.Parallel()
+	e := openNamed(t, "x.go", "hello\n")
+	e.SetLanguageNamer(func(string) string { return "Rust" })
+	e.SetFormatters(map[string]string{"go": "tr a-z A-Z", "rust": "tr a-z A-Z"})
+	e.SetLanguage("go")
+	if !e.HasFormatter() {
+		t.Fatal("HasFormatter = false, want the formatter of the language set with SetLanguage")
+	}
+}
+
+// TestFormatBufferKeepsTheCaretOnItsText checks that an external formatter which adds or
+// removes lines above the caret leaves the caret on its text, as docs/lsp.md says for Format
+// Buffer. A caret on a line the formatter kept keeps its column.
+func TestFormatBufferKeepsTheCaretOnItsText(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		text      string
+		caret     buffer.Pos
+		formatter string
+		wantText  string
+		want      buffer.Pos
+	}{
+		{
+			name:      "a blank line removed above the caret moves it up",
+			text:      "a\n\n\nb\n",
+			caret:     buffer.Pos{Line: 3},
+			formatter: `tr -s '\n'`,
+			wantText:  "a\nb\n",
+			want:      buffer.Pos{Line: 1},
+		},
+		{
+			name:      "lines removed above the caret move it up and keep its column",
+			text:      "package main\n\n\n\nfunc main() {\n\tx := 1\n}\n",
+			caret:     buffer.Pos{Line: 5, Col: 2},
+			formatter: `sed '/^$/d'`,
+			wantText:  "package main\nfunc main() {\n\tx := 1\n}\n",
+			want:      buffer.Pos{Line: 2, Col: 2},
+		},
+		{
+			name:      "a line added above the caret moves it down",
+			text:      "a\nb\n",
+			caret:     buffer.Pos{Line: 1, Col: 1},
+			formatter: `printf 'x\n'; cat`,
+			wantText:  "x\na\nb\n",
+			want:      buffer.Pos{Line: 2, Col: 1},
+		},
+		{
+			name:      "a caret above the change stays where it is",
+			text:      "a\n\n\nb\n",
+			caret:     buffer.Pos{Line: 0, Col: 1},
+			formatter: `tr -s '\n'`,
+			wantText:  "a\nb\n",
+			want:      buffer.Pos{Line: 0, Col: 1},
+		},
+		{
+			name:      "a caret on a line the formatter changes keeps its column",
+			text:      "hello\nworld\n",
+			caret:     buffer.Pos{Line: 1, Col: 2},
+			formatter: `tr a-z A-Z`,
+			wantText:  "HELLO\nWORLD\n",
+			want:      buffer.Pos{Line: 1, Col: 2},
+		},
+		{
+			name:      "a caret on a removed line goes to the line that follows it",
+			text:      "a\n\nb\n",
+			caret:     buffer.Pos{Line: 1},
+			formatter: `sed '/^$/d'`,
+			wantText:  "a\nb\n",
+			want:      buffer.Pos{Line: 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := formatDoc(tt.text, "go", map[string]string{"go": tt.formatter})
+			e.Active().Cursor = tt.caret
+			if r := e.Do("format_buffer", nil); r.Err != nil {
+				t.Fatalf("format_buffer: %v", r.Err)
+			}
+			if got := text(e); got != tt.wantText {
+				t.Fatalf("text = %q, want %q", got, tt.wantText)
+			}
+			if got := e.Active().Cursor; got != tt.want {
+				t.Fatalf("caret = %v, want %v", got, tt.want)
 			}
 		})
 	}

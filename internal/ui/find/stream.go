@@ -37,8 +37,6 @@ type StreamInfo struct {
 	// Partial says that the line index of the document was not complete when the scan
 	// began, so only the indexed part was searched.
 	Partial bool
-	// Truncated says that a line was too long to be read in full.
-	Truncated bool
 	// Regex says that the query is a regular expression.
 	Regex bool
 	// Elapsed is how long the scan has been running.
@@ -102,9 +100,6 @@ func (b *Bar) streamStatus() string {
 	if s.Partial {
 		text += PartialIndexText
 	}
-	if s.Truncated {
-		text += " (some lines over 1 MiB were not fully searched)"
-	}
 	return text
 }
 
@@ -140,7 +135,7 @@ func group(n int) string {
 var ErrSearchLimit = errors.New("search limit reached")
 
 // SearchLimitText is the status for ErrSearchLimit.
-const SearchLimitText = "Search limit reached"
+const SearchLimitText = "Search limit reached, repeat to continue"
 
 // PartialIndexText is what a status says when only the part of a large document that
 // the line index has reached was searched.

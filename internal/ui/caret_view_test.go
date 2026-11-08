@@ -132,3 +132,35 @@ func TestDepsTabSizeSetsTheTabStopOfThePane(t *testing.T) {
 		t.Errorf("cell (%d, %d) = %q, want the b at tab stop 8", p.textX+8, p.y, got)
 	}
 }
+
+// TestWheelDownIsNotUndoneWhenAWideLineChangesTheBodyHeight scrolls a file whose
+// fifth line is wider than the pane. The horizontal scrollbar row shows only while a
+// wide line is on screen, so a notch that brings that line in or out of view changes
+// the body height. That must not pull the view back to the caret on line 1.
+func TestWheelDownIsNotUndoneWhenAWideLineChangesTheBodyHeight(t *testing.T) {
+	var sb strings.Builder
+	for i := 1; i <= 200; i++ {
+		if i == 5 {
+			sb.WriteString(strings.Repeat("x", 300))
+		} else {
+			sb.WriteString("line")
+		}
+		sb.WriteByte('\n')
+	}
+	m, ed := viewModel(t, DefaultViewOptions(), sb.String(), 60, 14)
+	runAction(t, m, "toggle_line_wrap")
+	if m.layout().panes[0].textW >= 300 {
+		t.Fatal("setup: the wide line fits the pane")
+	}
+	if got := m.ed.Active().Top(); got != 0 {
+		t.Fatalf("setup: top = %d", got)
+	}
+	l := m.layout()
+	p := l.panes[0]
+	for i := 1; i <= 6; i++ {
+		m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.x + p.gutter + 2, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
+		if got, want := ed.Active().Top, i*wheelRows; got != want {
+			t.Fatalf("after %d notches the view top is %d, want %d", i, got, want)
+		}
+	}
+}

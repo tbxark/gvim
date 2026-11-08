@@ -244,8 +244,8 @@ func TestCutDimsRowsUntilPasteOrCopy(t *testing.T) {
 	}
 	dst := grid.New(16, 10)
 	p.Draw(dst, testGeometry)
-	// x.txt is body row 1, drawn at y 3; its name starts at column 5.
-	if !dst.At(5, 3).Style.Faint {
+	// x.txt is body row 1, drawn at y 3; its name starts at column 6.
+	if !dst.At(6, 3).Style.Faint {
 		t.Error("cut row x.txt is not dimmed")
 	}
 	if dst.At(3, 2).Style.Faint {
@@ -272,7 +272,7 @@ func TestPickedRowsUseTheSelectionBackground(t *testing.T) {
 	p, _ = doAction(t, p, "file_explorer_toggle_select")
 	dst := grid.New(16, 10)
 	p.Draw(dst, testGeometry)
-	// b.txt is body row 2, drawn at y 4, its name at column 3.
+	// b.txt is body row 2, drawn at y 4, its name at column 4.
 	want := style.Cell(selection).BG
 	if got := dst.At(3, 4).Style.BG; got == nil || got != want {
 		t.Errorf("picked row background = %v, want %v", got, want)
@@ -449,8 +449,8 @@ func TestCarryCutKeepsThePendingCutInARebuiltPanel(t *testing.T) {
 	}
 	dst := grid.New(16, 10)
 	rebuilt.Draw(dst, testGeometry)
-	// x.txt is body row 1, drawn at y 3; its name starts at column 5.
-	if !dst.At(5, 3).Style.Faint {
+	// x.txt is body row 1, drawn at y 3; its name starts at column 6.
+	if !dst.At(6, 3).Style.Faint {
 		t.Error("cut row x.txt is not dimmed in the rebuilt panel")
 	}
 }

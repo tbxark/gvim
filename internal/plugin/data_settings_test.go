@@ -63,7 +63,8 @@ func TestSettingsDefineAndUserLayer(t *testing.T) {
 		{"above the maximum", map[string]any{"ratio": 1.5}, "3 x a true 0.5 p,q safe", "setting 'ratio': 1.5 is above the maximum 1"},
 		{"not in the enum", map[string]any{"mode": "c"}, "3 x a true 0.5 p,q safe", "setting 'mode': expected one of [a b]"},
 		{"list with a non-string", map[string]any{"names": []any{"a", 1.0}}, "3 x a true 0.5 p,q safe", "setting 'names': expected a list of strings"},
-		{"unknown keys are ignored", map[string]any{"nope": 1.0}, "3 x a true 0.5 p,q safe", ""},
+		// an unknown key does nothing, and the user is told once, naming it (a typo would be silent)
+		{"unknown keys are ignored and reported", map[string]any{"nope": 1.0}, "3 x a true 0.5 p,q safe", "config plugins.t.settings has 'nope', which the plugin does not define"},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
@@ -100,7 +101,7 @@ func TestProjectSettingsOnlyForProjectKeys(t *testing.T) {
 		{"project key wins over the default", nil, map[string]any{"label": "p"}, "3 p a true 0.5 p,q safe", nil},
 		{"other keys are dropped", map[string]any{"cmd": "mine"}, map[string]any{"cmd": "rm -rf /", "mode": "b"},
 			"3 x a true 0.5 p,q mine", []string{"project setting 'cmd' ignored (not project=true)", "project setting 'mode' ignored (not project=true)"}},
-		{"unknown keys are dropped too", nil, map[string]any{"extra": "z"}, "3 x a true 0.5 p,q safe", []string{"project setting 'extra' ignored (not project=true)"}},
+		{"unknown keys are dropped too", nil, map[string]any{"extra": "z"}, "3 x a true 0.5 p,q safe", []string{"config plugins.t.settings has 'extra', which the plugin does not define", "project setting 'extra' ignored (not project=true)"}},
 		{"a bad project value keeps the user value", map[string]any{"depth": 7.0}, map[string]any{"depth": 99.0},
 			"7 x a true 0.5 p,q safe", []string{"project setting 'depth': 99 is above the maximum 10; ignored"}},
 		{"a bad project type keeps the default", nil, map[string]any{"label": 5.0}, "3 x a true 0.5 p,q safe", []string{"project setting 'label': expected a string; ignored"}},

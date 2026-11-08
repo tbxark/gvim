@@ -1,6 +1,7 @@
 package editorpane
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/buffer"
@@ -89,5 +90,33 @@ func TestCaretLineTintCoversEveryWrappedRow(t *testing.T) {
 	}
 	if bgOf(cellAt(t, g, 6, 4)) == cGray {
 		t.Error("row of the next line is tinted")
+	}
+}
+
+// A caret on a wide grapheme restyles its two cells and moves nothing after it.
+func TestCaretOnWideGraphemeDoesNotShiftTheRow(t *testing.T) {
+	st := Styles{SecondaryCaret: grid.Style{BG: cRed}}
+	for _, tc := range []struct {
+		name string
+		doc  Document
+	}{
+		{"primary", newDoc("日本語 end")},
+		{"selection", &fakeDoc{lines: []string{"日本語 end"}, selected: true, head: buffer.Pos{Col: 1}, cursor: buffer.Pos{Col: 1}}},
+		{"secondary", caretDoc{fakeDoc: newDoc("日本語 end"), extra: []editor.Caret{{Cursor: buffer.Pos{Line: 0, Col: 0}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := Pane{Doc: tc.doc, Styles: st}
+			g := p.Render(30, 2)
+			row := g.Plain()[0]
+			if want := "日本語 end"; !strings.Contains(row, want) {
+				t.Errorf("row = %q, want it to contain %q", row, want)
+			}
+			if c := cellAt(t, g, 7, 0); c.Text != "" {
+				t.Errorf("continuation cell = %q, want empty", c.Text)
+			}
+			if c := cellAt(t, g, 8, 0); c.Text != "本" {
+				t.Errorf("next grapheme = %q, want 本", c.Text)
+			}
+		})
 	}
 }

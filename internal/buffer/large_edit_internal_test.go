@@ -211,7 +211,7 @@ func TestMergedTypingCostsOneLine(t *testing.T) {
 }
 
 func TestVersionsFollowEditsUndoRedoAndRefusals(t *testing.T) {
-	b := openIndexed(t, strings.Repeat("l", 70)+"\nshort\n") // first line is cut: not editable
+	b := openIndexed(t, "\xff"+strings.Repeat("l", 69)+"\nshort\n") // invalid UTF-8: not editable
 	if b.Version() != 0 {
 		t.Fatalf("fresh version %d", b.Version())
 	}

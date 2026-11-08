@@ -41,7 +41,7 @@ func (e *Editor) saveAllStatus(results []SaveResult, p SavePlan) error {
 	msg := saveAllMessage(len(results)-failed, p.untitled, p.readOnly, failed)
 	if first != nil {
 		err := fmt.Errorf("%s: %w", msg, first)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	e.setStatus(msg)

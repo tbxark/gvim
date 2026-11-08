@@ -151,11 +151,11 @@ func TestAdapterSearchesALargeDocumentWithoutAList(t *testing.T) {
 	if _, err := a.FindMatches(q); err == nil {
 		t.Errorf("FindMatches lists the matches of a large document")
 	}
-	m, found, scanned, err := a.FindNext(q, buffer.Pos{Line: 1}, false)
+	m, found, scanned, _, err := a.FindNext(q, buffer.Pos{Line: 1}, false, search.Cursor{})
 	if err != nil || !found || !scanned || m.Start.Line != 1000 {
 		t.Fatalf("FindNext = %+v %v %v %v, want the match on line 1000", m, found, scanned, err)
 	}
-	m, found, _, err = a.FindNext(q, buffer.Pos{Line: 1000}, true)
+	m, found, _, _, err = a.FindNext(q, buffer.Pos{Line: 1000}, true, search.Cursor{})
 	if err != nil || !found || m.Start.Line != 0 {
 		t.Fatalf("FindNext backward = %+v %v %v, want the match on line 0", m, found, err)
 	}

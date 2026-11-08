@@ -71,7 +71,7 @@ func TestCtrlPOpensThePaletteThroughTheRoot(t *testing.T) {
 	if got := strings.TrimSpace(rows[h-2]); got != "file  |  >command  |  :line  |  #buffer" {
 		t.Errorf("hint row = %q, want the palette hint", got)
 	}
-	if !strings.HasPrefix(rows[h-3], "└") {
+	if got := strings.TrimLeft(rows[h-3], "~ "); !strings.HasPrefix(got, "╰") {
 		t.Errorf("row %d = %q, want the bottom border of the palette box", h-3, rows[h-3])
 	}
 	if !strings.Contains(strings.Join(rows, "\n"), "Clear Warnings") {

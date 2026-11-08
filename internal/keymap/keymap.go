@@ -26,7 +26,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"unicode"
 )
 
 //go:embed default.json
@@ -97,7 +96,15 @@ type Binding struct {
 	Args     map[string]any
 	When     Context
 	Comment  string
+
+	// inherited is set on a binding a keymap took from its parent, so that Primary can
+	// prefer the keymap's own bindings when it picks the one to show.
+	inherited bool
 }
+
+// actionTwins names, for an action, the action whose bindings also run it: Close Buffer
+// ("close") is closing the current tab, which the keymaps bind as "close_tab".
+var actionTwins = map[string]string{"close": "close_tab"}
 
 // Map holds the parsed bindings of one keymap, with inherited bindings
 // included. A Map is immutable after construction and is safe for concurrent
@@ -310,7 +317,10 @@ func parse(data []byte, stack []string) (*Map, error) {
 		if err != nil {
 			return nil, fmt.Errorf("keymap: inherits %q: %w", *f.Inherits, err)
 		}
-		list = append(list, parent.bindings...)
+		for _, b := range parent.bindings {
+			b.inherited = true
+			list = append(list, b)
+		}
 	}
 	list = append(list, own...)
 	return newMap(list), nil
@@ -382,6 +392,19 @@ func (rb rawBinding) binding() (Binding, error) {
 	return b, nil
 }
 
+// ConsultedContexts are the contexts gvim resolves a key in: the editor (normal, with global as
+// the fallback), the file explorer and the terminal dock. The overlays (prompts, popups, menus,
+// settings, the find bar) answer their keys in code, so a binding in any other context does
+// nothing. The keybinding editor lists these contexts only, and a user binding in another one is
+// skipped with a warning.
+var ConsultedContexts = []Context{ContextGlobal, ContextNormal, ContextFileExplorer, ContextTerminal}
+
+// Consulted reports whether gvim resolves keys in the context named by when, one of
+// ConsultedContexts.
+func Consulted(when Context) bool {
+	return slices.Contains(ConsultedContexts, when)
+}
+
 // knownContexts lists every when-clause value the port accepts, in the spelling
 // the embedded keymaps use. Fresh's default keymap uses exactly these.
 var knownContexts = []Context{
@@ -447,7 +470,7 @@ func (m *Map) Resolve(chord string, ctx Context) (Binding, bool) {
 	if err != nil {
 		return Binding{}, false
 	}
-	return m.lookup(m.index, c, ctx)
+	return m.lookup(m.index, append([]string{c}, terminalEquivalents(c)...), ctx)
 }
 
 // ResolveSequence returns the binding for a sequence of chords typed in order,
@@ -466,18 +489,51 @@ func (m *Map) ResolveSequence(steps []string, ctx Context) (Binding, bool) {
 		canon[i] = c
 	}
 	if len(canon) == 1 {
-		return m.lookup(m.index, canon[0], ctx)
+		return m.lookup(m.index, append([]string{canon[0]}, terminalEquivalents(canon[0])...), ctx)
 	}
-	return m.lookup(m.seq, strings.Join(canon, " "), ctx)
+	return m.lookup(m.seq, []string{strings.Join(canon, " ")}, ctx)
 }
 
-func (m *Map) lookup(idx map[lookupKey]int, chord string, ctx Context) (Binding, bool) {
-	if i, ok := idx[lookupKey{ctx, chord}]; ok {
-		return m.bindings[i], true
+// HasSequencePrefix reports whether steps are the leading chords of a multi-key
+// binding that ctx or the global context holds, so that one more key may complete
+// it. Each step is normalized. A sequence that ends at steps is not a longer one,
+// so only a binding with more steps counts. It is false for no steps.
+func (m *Map) HasSequencePrefix(steps []string, ctx Context) bool {
+	if len(steps) == 0 {
+		return false
+	}
+	canon := make([]string, len(steps))
+	for i, s := range steps {
+		c, err := Normalize(s)
+		if err != nil {
+			return false
+		}
+		canon[i] = c
+	}
+	prefix := strings.Join(canon, " ") + " "
+	for k := range m.seq {
+		if (k.when == ctx || k.when == ContextGlobal) && strings.HasPrefix(k.chord, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// lookup finds the first of chords that ctx binds, and then the first that the
+// global context binds. chords lists the chord as pressed, then the chords whose
+// binding it stands for on a terminal (see terminalEquivalents). A binding of the
+// chord itself therefore wins over a binding of an equivalent one.
+func (m *Map) lookup(idx map[lookupKey]int, chords []string, ctx Context) (Binding, bool) {
+	for _, chord := range chords {
+		if i, ok := idx[lookupKey{ctx, chord}]; ok {
+			return m.bindings[i], true
+		}
 	}
 	if ctx != ContextGlobal {
-		if i, ok := idx[lookupKey{ContextGlobal, chord}]; ok {
-			return m.bindings[i], true
+		for _, chord := range chords {
+			if i, ok := idx[lookupKey{ContextGlobal, chord}]; ok {
+				return m.bindings[i], true
+			}
 		}
 	}
 	return Binding{}, false
@@ -494,21 +550,26 @@ func (m *Map) BindingsFor(action string) []Binding {
 	return out
 }
 
-// Primary returns the binding a UI should show for action. It looks in
-// ContextNormal first, then ContextGlobal, then any other context. Within one
-// tier the simplest chord wins, using the rule Fresh's menu shortcuts follow:
-// fewest modifiers, then lowest modifier bits, then chord text. On the macOS
-// keymap that shows Redo as Ctrl+R, where default.json also binds Ctrl+Y. Only
-// bindings the editor runs count. An inherited binding that the child keymap
-// rebinds is skipped, a global binding that a normal binding of the same chord
-// takes is skipped, and a multi-key sequence is skipped because the TUI
-// dispatches only single chords. ok is false when the action has no such
-// binding.
+// Primary returns the binding a UI should show for action. A preset's own binding comes
+// before one it only inherits, so Emacs shows Save As as C-x C-w and not the inherited
+// Ctrl+Shift+S. Among bindings of one origin a single chord beats a multi-key sequence:
+// Emacs shows Undo as Ctrl+/ and not C-x u, but Save as C-x C-s because it has no single
+// chord. The normal and global contexts come before any other context, and normal before
+// global for one kind of binding. Within one tier the simplest single chord wins, using the
+// rule Fresh's menu shortcuts follow: fewest modifiers, then lowest modifier bits, then
+// chord text. Among sequences the shorter wins, then the chord text. Only bindings the
+// editor runs count. An inherited binding that the child keymap rebinds is skipped, a global
+// binding that a normal binding of the same chord takes is skipped, and a single chord that
+// starts a sequence is skipped because it is a prefix and never runs by itself. An action
+// with a twin in actionTwins also counts the twin's bindings: Close Buffer shows the key
+// that closes the tab. ok is false when the action has no such binding.
 func (m *Map) Primary(action string) (Binding, bool) {
-	var best [3]*Binding // normal, global, other
+	// best is indexed by origin (own, inherited), kind (single, sequence) and tier (normal,
+	// global, other).
+	var best [2][2][3]*Binding
 	for i := range m.bindings {
 		b := &m.bindings[i]
-		if b.Action != action || b.Sequence != nil || !m.effective(i) {
+		if (b.Action != action && b.Action != actionTwins[action]) || !m.effective(i) {
 			continue
 		}
 		tier := 2
@@ -518,113 +579,70 @@ func (m *Map) Primary(action string) (Binding, bool) {
 		case ContextGlobal:
 			tier = 1
 		}
-		if best[tier] == nil || rankOf(b.Chord).less(rankOf(best[tier].Chord)) {
-			best[tier] = b
+		origin, kind := 0, 0
+		if b.inherited {
+			origin = 1
+		}
+		if b.Sequence != nil {
+			kind = 1
+		}
+		if cur := &best[origin][kind][tier]; *cur == nil || simpler(*b, **cur) {
+			*cur = b
 		}
 	}
-	for _, b := range best {
-		if b != nil {
-			return *b, true
+	// The keys of the editor itself, own before inherited and single before sequence, come
+	// before the keys of other contexts, which a menu or palette does not show.
+	for origin := range best {
+		for kind := range best[origin] {
+			for tier := range 2 {
+				if b := best[origin][kind][tier]; b != nil {
+					return *b, true
+				}
+			}
+		}
+	}
+	for kind := range 2 {
+		for origin := range best {
+			if b := best[origin][kind][2]; b != nil {
+				return *b, true
+			}
 		}
 	}
 	return Binding{}, false
 }
 
-// MenuEntry is one menu title or dropdown item that needs an accelerator.
-// Action is the action the item runs and is empty for a menu title. Letter is
-// the preferred accelerator. It is matched inside Label, exact case first and
-// then either case. Zero, or a letter that Label lacks or an earlier entry
-// already took, falls back to the first free letter of Label.
-type MenuEntry struct {
-	Label  string
-	Action string
-	Letter rune
+// simpler reports whether a is the simpler binding to show than b, which has the same
+// kind: by chordRank for single chords, by step count and then chord text for sequences.
+func simpler(a, b Binding) bool {
+	if a.Sequence == nil {
+		return rankOf(a.Chord).less(rankOf(b.Chord))
+	}
+	if len(a.Sequence) != len(b.Sequence) {
+		return len(a.Sequence) < len(b.Sequence)
+	}
+	return a.Chord < b.Chord
 }
 
-// Accelerator is the accelerator of one MenuEntry, as a menu shows it.
-type Accelerator struct {
-	Label   string
-	Letter  rune    // accelerator letter as it appears in Label; 0 when none
-	Index   int     // rune index of Letter in Label, for underlining; -1 when none
-	Binding Binding // Primary binding of the entry's action
-	Bound   bool    // false when the entry has no action or the action is unbound
-}
-
-// Accelerators labels the entries of one menu, in order. Preferred letters are
-// placed first, then each remaining entry takes the first free letter of its
-// label, scanning left to right. Letters are unique within the call, compared
-// case-insensitively. Each entry also gets the Primary binding of its action,
-// which is the shortcut the menu shows.
-func (m *Map) Accelerators(entries []MenuEntry) []Accelerator {
-	out := make([]Accelerator, len(entries))
-	taken := make(map[rune]bool, len(entries))
-	assign := func(i, at int) {
-		r := []rune(entries[i].Label)[at]
-		out[i].Letter, out[i].Index = r, at
-		taken[unicode.ToLower(r)] = true
-	}
-	for i, e := range entries {
-		out[i] = Accelerator{Label: e.Label, Index: -1}
-		if e.Letter == 0 {
-			continue
-		}
-		at := indexOfLetter(e.Label, e.Letter, taken)
-		if at >= 0 {
-			assign(i, at)
-		}
-	}
-	for i, e := range entries {
-		if out[i].Letter == 0 {
-			for at, r := range []rune(e.Label) {
-				if unicode.IsLetter(r) && !taken[unicode.ToLower(r)] {
-					assign(i, at)
-					break
-				}
-			}
-		}
-		if e.Action == "" {
-			continue
-		}
-		if b, ok := m.Primary(e.Action); ok {
-			out[i].Binding, out[i].Bound = b, true
-		}
-	}
-	return out
-}
-
-// indexOfLetter returns the rune index of want in label, preferring an exact
-// case match, or -1 when label lacks it or want is already taken.
-func indexOfLetter(label string, want rune, taken map[rune]bool) int {
-	if taken[unicode.ToLower(want)] {
-		return -1
-	}
-	runes := []rune(label)
-	for i, r := range runes {
-		if r == want {
-			return i
-		}
-	}
-	for i, r := range runes {
-		if unicode.ToLower(r) == unicode.ToLower(want) {
-			return i
-		}
-	}
-	return -1
-}
-
-// effective reports whether single-key binding i is in effect for its chord. A
+// effective reports whether binding i is in effect for its chord. A
 // child keymap that rebinds a chord replaces the inherited entry, so the
 // inherited one is not in effect and must not be shown as the shortcut. A global
 // binding is also not in effect when the normal context binds the same chord,
 // because Resolve checks the normal context before the global bindings.
 func (m *Map) effective(i int) bool {
 	b := m.bindings[i]
+	if b.Sequence != nil {
+		return m.seq[lookupKey{b.When, b.Chord}] == i
+	}
 	if b.When == ContextGlobal {
 		if _, shadowed := m.index[lookupKey{ContextNormal, b.Chord}]; shadowed {
 			return false
 		}
 	}
-	return m.index[lookupKey{b.When, b.Chord}] == i
+	if m.index[lookupKey{b.When, b.Chord}] != i {
+		return false
+	}
+	// A chord that starts a sequence is a prefix and does not run on its own.
+	return !m.HasSequencePrefix([]string{b.Chord}, b.When)
 }
 
 // chordRank orders single chords by how simple they are, for Primary.
@@ -665,7 +683,24 @@ func (a chordRank) less(b chordRank) bool {
 
 var modifierOrder = []string{"ctrl", "alt", "shift", "super"}
 
-var functionKey = regexp.MustCompile(`^[Ff]([1-9]|1[0-2])$`)
+// functionKey matches f1 to f35, the range Fresh's keyboard.md documents.
+var functionKey = regexp.MustCompile(`^[Ff]([1-9]|[12][0-9]|3[0-5])$`)
+
+// modifierAliases are the modifier spellings Fresh's parse_modifiers accepts besides
+// the canonical four: control is ctrl, and cmd, command and meta are super.
+var modifierAliases = map[string]string{
+	"control": "ctrl", "cmd": "super", "command": "super", "meta": "super",
+}
+
+// modifierName returns the canonical modifier for a spelling, folding case and the
+// aliases of modifierAliases. ok is false for anything that is not a modifier.
+func modifierName(s string) (string, bool) {
+	s = strings.ToLower(s)
+	if a, ok := modifierAliases[s]; ok {
+		s = a
+	}
+	return s, contains(modifierOrder, s)
+}
 
 var namedKeys = map[string]string{
 	"backspace": "backspace",
@@ -685,6 +720,33 @@ var namedKeys = map[string]string{
 	"up":        "up",
 	" ":         "space",
 	"space":     "space",
+
+	// The aliases and the non-printing keys of Fresh's docs/configuration/keyboard.md.
+	"esc": "escape", "ret": "enter", "return": "enter", "bs": "backspace", "del": "delete",
+	"ins": "insert", "spc": "space", "pgup": "pageup", "pgdn": "pagedown",
+	"capslock": "capslock", "scrolllock": "scrolllock", "numlock": "numlock",
+	"printscreen": "printscreen", "pause": "pause", "menu": "menu",
+
+	// X11 keysym spellings of punctuation.
+	"asterisk": "*", "star": "*", "plus": "+", "minus": "-", "hyphen": "-", "slash": "/",
+	"period": ".", "dot": ".", "equal": "=", "equals": "=", "backslash": `\`, "comma": ",",
+	"semicolon": ";", "colon": ":", "apostrophe": "'", "quote": "'", "quotedbl": `"`,
+	"doublequote": `"`, "grave": "`", "backtick": "`", "tilde": "~", "exclam": "!",
+	"exclamation": "!", "at": "@", "numbersign": "#", "hash": "#", "dollar": "$",
+	"percent": "%", "asciicircum": "^", "caret": "^", "ampersand": "&", "underscore": "_",
+	"bar": "|", "pipe": "|", "question": "?", "less": "<", "lessthan": "<", "greater": ">",
+	"greaterthan": ">", "parenleft": "(", "parenright": ")", "bracketleft": "[",
+	"bracketright": "]", "braceleft": "{", "braceright": "}",
+
+	// The keypad keys are aliases of the main keyboard, as in Fresh; kp_begin is the one
+	// key with no main-keyboard twin.
+	"kp_0": "0", "kp_1": "1", "kp_2": "2", "kp_3": "3", "kp_4": "4", "kp_5": "5",
+	"kp_6": "6", "kp_7": "7", "kp_8": "8", "kp_9": "9", "kp_decimal": ".", "kp_divide": "/",
+	"kp_multiply": "*", "kp_subtract": "-", "kp_add": "+", "kp_enter": "enter",
+	"kp_equal": "=", "kp_separator": ",", "kp_left": "left", "kp_right": "right",
+	"kp_up": "up", "kp_down": "down", "kp_page_up": "pageup", "kp_page_down": "pagedown",
+	"kp_home": "home", "kp_end": "end", "kp_insert": "insert", "kp_delete": "delete",
+	"kp_begin": "keypadbegin",
 }
 
 // Canonical builds a chord from a keymap-file key and its modifiers, using the
@@ -693,11 +755,11 @@ var namedKeys = map[string]string{
 func Canonical(key string, modifiers []string) (string, error) {
 	mods := make(map[string]bool, len(modifiers))
 	for _, m := range modifiers {
-		m = strings.ToLower(m)
-		if !contains(modifierOrder, m) {
-			return "", fmt.Errorf("unknown modifier %q", m)
+		name, ok := modifierName(m)
+		if !ok {
+			return "", fmt.Errorf("unknown modifier %q", strings.ToLower(m))
 		}
-		mods[m] = true
+		mods[name] = true
 	}
 	name, err := keyName(key)
 	if err != nil {
@@ -718,9 +780,8 @@ func Normalize(chord string) (string, error) {
 	mods := make(map[string]bool, 3)
 	var key string
 	for _, part := range chordParts(chord) {
-		lower := strings.ToLower(part)
-		if contains(modifierOrder, lower) {
-			mods[lower] = true
+		if name, ok := modifierName(part); ok {
+			mods[name] = true
 			continue
 		}
 		if part == "" {

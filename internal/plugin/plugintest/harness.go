@@ -26,11 +26,15 @@ type Options struct {
 	// EventBudget raises the 50 ms cap of event and timer slices (0: the spec's 50 ms), for
 	// tests that run real Lua and must not time out on a busy machine.
 	EventBudget time.Duration
-	HeapLimit   int64
-	Services    pluginapi.Services // nil: a *FakeServices
-	OS          plugin.OS          // nil: a fresh *FakeOS
-	Host        *FakeHost          // nil: a fresh one
-	Now         func() time.Time   // clock of the runtime (nil: the harness's manual clock)
+	// HeapLimit is the heap guard (0: 4 GiB). The guard measures the whole process, and the
+	// tests of a package share one while they run in parallel, so the limit of the editor
+	// would cancel an innocent plugin because of the allocations of another test. The tests
+	// of the guard itself set their own limit.
+	HeapLimit int64
+	Services  pluginapi.Services // nil: a *FakeServices
+	OS        plugin.OS          // nil: a fresh *FakeOS
+	Host      *FakeHost          // nil: a fresh one
+	Now       func() time.Time   // clock of the runtime (nil: the harness's manual clock)
 }
 
 // Harness plays the ui for a runtime: it starts it, calls Run/Emit/Resolve, pumps Drain
@@ -81,8 +85,12 @@ func New(t *testing.T, files Files, o Options) *Harness {
 	if now == nil {
 		now = h.Now
 	}
+	heap := o.HeapLimit
+	if heap == 0 {
+		heap = 4 << 30
+	}
 	h.RT = plugin.New(plugin.Options{
-		Timeout: o.Timeout, EventBudget: o.EventBudget, HeapLimit: o.HeapLimit, OS: osImpl, Services: svc,
+		Timeout: o.Timeout, EventBudget: o.EventBudget, HeapLimit: heap, OS: osImpl, Services: svc,
 		Version: "test", Platform: "test", CheckGoroutine: true, Now: now,
 	})
 	h.Sources = h.sources()

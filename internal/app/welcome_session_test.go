@@ -131,9 +131,17 @@ func TestTabStripOverflowAtSixtyColumns(t *testing.T) {
 	if got := s.Screen().Cell(59, 1).Char; got != "+" {
 		t.Fatalf("plus moved after scrolling: %q", got)
 	}
+	// A click on + opens its menu, as Fresh's does. Its second row, New File, opens the
+	// untitled tab.
 	s.Click(59, 1)
+	sc = s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("New Terminal") })
+	if !sc.Contains("New File") {
+		t.Fatalf("clicking + did not open its menu:\n%s", sc)
+	}
+	s.Key("down")
+	s.Key("enter")
 	sc = s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Untitled-1") })
 	if !sc.Contains("Untitled-1") {
-		t.Fatalf("clicking + did not open an untitled tab:\n%s", sc)
+		t.Fatalf("New File from the + menu did not open an untitled tab:\n%s", sc)
 	}
 }

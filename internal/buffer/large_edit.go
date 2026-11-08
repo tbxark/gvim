@@ -35,6 +35,7 @@ func (b *Buffer) bigInsert(p Pos, text string) Pos {
 		return p
 	}
 	end := advance(p, text)
+	b.nonASCII += countNonASCII(text)
 	b.recordBig(opInsert, p, end, text, len(text) > InlineOpMax, ns, cost)
 	b.notifyCoarse(false)
 	return end
@@ -71,7 +72,7 @@ func (s *bigStore) checkEdit(growth int64) error {
 
 // editableLine returns document line i for an edit that reads it, or the
 // reason it cannot be edited: its source bytes are not valid UTF-8, or it is
-// longer than MaxLine and only shown cut.
+// longer than MaxLine and its runes would not fit the overlay (see wholeLine).
 func (s *bigStore) editableLine(i int) (lineInfo, error) {
 	li, err := s.info(i)
 	switch {
@@ -80,7 +81,7 @@ func (s *bigStore) editableLine(i int) (lineInfo, error) {
 	case s.err != nil:
 		return li, s.err
 	case li.huge:
-		return li, ErrLineTooLong
+		return s.wholeLine(i)
 	case li.invalid:
 		return li, ErrInvalidUTF8
 	}
@@ -193,11 +194,16 @@ func (s *bigStore) planDelete(from, to Pos) (ns bigState, text string, tooBig bo
 			if li, err = s.info(to.Line); err != nil {
 				return
 			}
-			switch {
+			switch h := s.hugeOf(to.Line); {
+			case li.huge && h != nil && to.Line == s.lines()-1 && to.Col >= h.runes:
+				// The range runs past the end of a huge last line: nothing of it is kept,
+				// so the line is not read.
 			case li.huge:
-				// A line shown cut can only go whole, with the document's end.
-				if to.Line != s.lines()-1 || to.Col < len(li.runes) {
-					return ns, "", false, 0, ErrLineTooLong
+				if li, err = s.wholeLine(to.Line); err != nil {
+					return ns, "", false, 0, err
+				}
+				if to.Col < len(li.runes) {
+					tail = li.runes[to.Col:]
 				}
 			case to.Col < len(li.runes):
 				if li.invalid {

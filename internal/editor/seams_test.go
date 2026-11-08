@@ -1000,9 +1000,12 @@ func TestApplyEditsOnLargeDocument(t *testing.T) {
 
 func TestApplyEditsRefusedInLargeDocumentChangesNothing(t *testing.T) {
 	t.Parallel()
-	// Line 100 is longer than the line cap, so it is shown cut and cannot be edited.
+	// Line 100 is longer than the line cap, so it is read whole for an edit, and its runes do not
+	// fit the overlay budget: the edit is refused, and the edit before it in the group is undone.
 	content := lineText(100) + strings.Repeat("a", 200) + "\n" + lineText(100)
-	e, d := openLarge(t, largeOptions(), content)
+	opts := largeOptions()
+	opts.largeGeom.MaxOverlayBytes = 400
+	e, d := openLarge(t, opts, content)
 	indexAll(t, e)
 	before := d.Version()
 	err := e.ApplyEdits(d.ID(), []LSPEdit{lspEdit(2, 0, 2, 4, "LINE"), lspEdit(100, 0, 100, 1, "x")}, EditOptions{})

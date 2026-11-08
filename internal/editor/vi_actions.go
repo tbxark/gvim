@@ -68,15 +68,25 @@ var (
 // wanted column like the plain vertical motions do, and keeps it on a character.
 func (e *Editor) viVertical(d *Document, dir int) buffer.Pos {
 	from := d.Cursor
-	if to, ok := e.visualVertical(d, from, dir); ok {
+	if to, ok := e.visualVertical(d, from, dir); ok && to.Line <= viLastLine(d.Buffer) {
 		return onLastChar(d.Buffer, to)
 	}
 	line := from.Line + dir
-	if line < 0 || line >= d.Buffer.Lines() {
+	if line < 0 || line > viLastLine(d.Buffer) {
 		e.wantFrom(d, from)
 		return from
 	}
 	return onLastChar(d.Buffer, e.verticalTarget(d, from, line))
+}
+
+// viLastLine is the last line vi can be on. The empty line after the final line break of
+// the text is not a line of the file.
+func viLastLine(b *buffer.Buffer) int {
+	last := b.Lines() - 1
+	if last > 0 && b.LineLen(last) == 0 {
+		last--
+	}
+	return last
 }
 
 // registerViHandlers adds the vi_mode actions to h.

@@ -39,9 +39,12 @@ type LineWindower interface {
 }
 
 const (
-	// LongLineRunes is the length from which a line of a large document is painted
-	// through a window. A line that is not longer than this is painted whole.
-	LongLineRunes = 16384
+	// LongLineRunes is the length from which a line is painted through a window, or with
+	// wrap on through segments. A line that is not longer than this is painted whole.
+	LongLineRunes = 4096
+	// WindowedLineRunes is the length of a line from which a document that is not large
+	// is painted like a large one (see LongLiner).
+	WindowedLineRunes = LongLineRunes
 	// longWindow is the number of runes of a long line that are laid out. It is far
 	// more than a screen is wide, so the window covers the visible columns and the
 	// margin around the caret.
@@ -52,6 +55,25 @@ const (
 	// headRunes is how much of a line the indent scans read.
 	headRunes = 256
 )
+
+// LongLiner is implemented by a Document that can tell whether any of its lines is longer
+// than WindowedLineRunes, as *editor.Document's adapter does. Such a document is painted like
+// a large one: its long lines are read and laid out through windows, or with wrap on in
+// segments (see longwrap.go), because laying out a line of megabytes in full for every frame
+// and every caret query takes seconds.
+type LongLiner interface {
+	HasLongLine() bool
+}
+
+// windowed reports whether doc is painted through windows: it is in large file mode, or
+// it has a line longer than WindowedLineRunes.
+func windowed(doc Document) bool {
+	if isLarge(doc) {
+		return true
+	}
+	ll, ok := doc.(LongLiner)
+	return ok && ll.HasLongLine()
+}
 
 // isLarge reports whether doc is in large file mode.
 func isLarge(doc Document) bool {
@@ -71,10 +93,11 @@ func DisplayLines(doc Document) int {
 	return n
 }
 
-// wrapOn reports whether the pane wraps lines. A large document is never wrapped: a
-// wrapped line of a megabyte would be laid out in full to find its rows.
+// wrapOn reports whether the pane wraps lines. A line of more than LongLineRunes in a
+// document read through windows is laid out in segments (see longwrap.go), so it wraps too.
+// A pane with fillers never wraps: a wrapped line would push the two sides out of step.
 func (p Pane) wrapOn() bool {
-	return p.Wrap && !isLarge(p.Doc)
+	return p.Wrap && p.Fillers == nil
 }
 
 // dirtyRows marks the visible lines that were changed since the file was opened or
@@ -106,7 +129,18 @@ type window struct {
 // isLong reports whether line i is painted through a window: the document is large,
 // wrap is off, and the line is longer than LongLineRunes.
 func (f frame) isLong(i int) bool {
-	return f.win != nil && !f.wrap && f.win.LineBytes(i) > LongLineRunes
+	if f.win == nil || f.wrap {
+		return false
+	}
+	if long, ok := f.fx.long[i]; ok {
+		return long
+	}
+	long := f.win.LineBytes(i) > LongLineRunes
+	if f.fx.long == nil {
+		f.fx.long = make(map[int]bool)
+	}
+	f.fx.long[i] = long
+	return long
 }
 
 // window returns the window of long line i. It starts at the first visible column,
@@ -130,11 +164,8 @@ func (f frame) window(i int) window {
 // lineRaw returns the runes of line i that are laid out and the column of the first
 // one: the whole line, or the window of a long line.
 func (f frame) lineRaw(i int) (raw []rune, off int) {
-	if f.isLong(i) {
-		w := f.window(i)
-		return []rune(w.text), w.off
-	}
-	return []rune(f.doc.Line(i)), 0
+	ln := f.layoutLine(i, false)
+	return ln.raw, ln.off
 }
 
 // dropFor is how many display columns of the laid out line ln are to the left of

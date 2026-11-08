@@ -1,5 +1,7 @@
 package ui
 
+import "github.com/tbxark/gvim/internal/ui/space"
+
 // rect is a rectangle of frame cells: its first column and row, and its size.
 type rect struct{ x, y, w, h int }
 
@@ -140,6 +142,12 @@ func (l *layout) placePanes(in layoutInput) {
 		var li leafInfo
 		if i < len(leaves) {
 			li = leaves[i]
+		}
+		// With the gutter hidden the text would start on the pane's first column, right
+		// against the explorer border or the split line. The pane gives up PadX cells
+		// at its left edge for that, so its text starts PadX cells in.
+		if in.hideLineNumbers && r.w > space.PadX {
+			r.x, r.w = r.x+space.PadX, r.w-space.PadX
 		}
 		p := splitPane{rect: r, tab: li.tab, top: li.top, focused: li.focused}
 		if !in.hideLineNumbers {

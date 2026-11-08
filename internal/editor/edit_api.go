@@ -25,10 +25,6 @@ const (
 	CursorKeep
 	// CursorEnd puts the one primary caret at the end of the last edit.
 	CursorEnd
-
-	// cursorDrop keeps the primary caret, clamped, and drops the selection and
-	// the other carets, as ApplyLSPEdits always did.
-	cursorDrop CursorMode = 100
 )
 
 // EditOptions are the options of ApplyEdits.

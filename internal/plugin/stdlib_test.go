@@ -79,6 +79,14 @@ func TestStdlibFormat(t *testing.T) {
 	}
 }
 
+// concatBudget is the CPU bound of table.concat over 200 000 strings, in seconds: the race
+// detector makes the same work several times slower.
+var concatBudget = map[bool]string{false: "0.1", true: "2"}[stdlibRace]
+
+// catastrophicBudget is the CPU bound, in seconds, of a backtracking pattern that must be refused
+// in time: the race detector makes the matcher slower, so the bound is scaled like concatBudget.
+var catastrophicBudget = map[bool]string{false: "0.5", true: "5"}[stdlibRace]
+
 func TestStdlibStringTable(t *testing.T) {
 	luaRows(t, []row{
 		{"rep", `T.spy(("ab"):rep(3), ("ab"):rep(0) == "", ("ab"):rep(-5) == "", ("ab"):rep(3, ","), (""):rep(1e9) == "")`, "ababab true true ab,ab,ab true"},
@@ -88,7 +96,7 @@ func TestStdlibStringTable(t *testing.T) {
 		{"concat", `T.spy(table.concat({1, 2, "x", 4.5}, ", "))`, "1, 2, x, 4.5"},
 		{"concat range", `T.spy(table.concat({"a", "b", "c"}, "-", 2, 3), table.concat({}) == "", table.concat({"a"}, ",", 2, 1) == "")`, "b-c true true"},
 		{"concat bad element", `T.spy(pcall(table.concat, {1, {}, 3}))`, "~invalid value (at index 2) in table for 'concat'"},
-		{"concat 200k", `local t = {} for i = 1, 200000 do t[i] = "x" end local c = os.clock() local s = table.concat(t) T.spy(#s, os.clock() - c < 0.1)`, "200000 true"},
+		{"concat 200k", `local t = {} for i = 1, 200000 do t[i] = "x" end local c = os.clock() local s = table.concat(t) T.spy(#s, os.clock() - c < ` + concatBudget + `)`, "200000 true"},
 		{"unpack", `T.spy(select("#", unpack({1, 2, 3})), (unpack({1, 2, 3}, 2)), unpack == table.unpack)`, "3 2 true"},
 		{"unpack 5000", `T.spy(select("#", unpack({}, 1, 5000)))`, "5000"},
 		{"unpack too many", `T.spy(pcall(unpack, {}, 1, 100001))`, "~too many results to unpack"},
@@ -171,7 +179,7 @@ func TestStdlibPatterns(t *testing.T) {
 		{"plain search has no limit", `local s = ("x"):rep(17 * 1024 * 1024) T.spy(s:find("y"), s:find("xy", 1, true))`, "nil nil"},
 		{"catastrophic", `local s = ("a"):rep(30) .. "b" local c = os.clock()
 			local ok, e = pcall(string.find, s, ("a*"):rep(10) .. "c")
-			T.spy(ok, tostring(e):find("pattern too complex") ~= nil, os.clock() - c < 0.5, ("abc"):find("b"))`, "false true true 2 2"},
+			T.spy(ok, tostring(e):find("pattern too complex") ~= nil, os.clock() - c < ` + catastrophicBudget + `, ("abc"):find("b"))`, "false true true 2 2"},
 	}, plugintest.Options{Timeout: 2 * time.Second})
 }
 
@@ -262,9 +270,13 @@ func TestStdlibCaps(t *testing.T) {
 		{name: "json_decode_64MiB_array", want: "nil json: too many nodes true",
 			body: `local s = table.concat({"[", ("0,"):rep(20 * 1024 * 1024), "0]"})
 				local c = os.clock() local v, e = json.decode(s) T.spy(v, e, os.clock() - c < LIMIT)`},
-		{name: "json_decode_over_64MiB", want: "nil limit: json: input larger than 67108864 bytes true",
-			body: `local a = ("x"):rep(40 * 1024 * 1024) local s = a .. a
-				local c = os.clock() local v, e = json.decode(s) T.spy(v, e, os.clock() - c < LIMIT)`},
+		// Stock gopher-lua does not cap the concatenation operator, so an 80 MiB result is built
+		// (the fork that refused it at 64 MiB is gone). The row checks the length and the time
+		// bound.
+		{name: "concat_over_64MiB", want: "true 83886080 true",
+			body: `local a = ("x"):rep(40 * 1024 * 1024)
+				local c = os.clock() local ok, e = pcall(function() return a .. a end)
+				T.spy(ok, #e, os.clock() - c < LIMIT)`},
 		{name: "json_decode_depth_1000", want: "nil json: too deep true",
 			body: `local s = ("["):rep(1000) .. ("]"):rep(1000)
 				local c = os.clock() local v, e = json.decode(s) T.spy(v, e, os.clock() - c < LIMIT)`},

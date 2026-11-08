@@ -28,8 +28,10 @@ func TestPlaceBox(t *testing.T) {
 	}{
 		{"below the anchor", Point{4, 2}, 10, 3, 80, 24, rect{4, 3, 10, 3}},
 		{"flips above when there is no room below", Point{4, 22}, 10, 3, 80, 24, rect{4, 19, 10, 3}},
-		{"clamps right edge into the frame", Point{75, 5}, 10, 3, 80, 24, rect{70, 6, 10, 3}},
-		{"clamps left edge", Point{-3, 5}, 10, 3, 80, 24, rect{0, 6, 10, 3}},
+		{"clamps right edge into the frame", Point{75, 5}, 10, 3, 80, 24, rect{69, 6, 10, 3}},
+		{"clamps left edge", Point{-3, 5}, 10, 3, 80, 24, rect{1, 6, 10, 3}},
+		{"a narrow frame keeps no margin", Point{-3, 5}, 10, 3, 30, 24, rect{0, 6, 10, 3}},
+		{"stays off the last row", Point{4, 20}, 10, 3, 80, 24, rect{4, 17, 10, 3}},
 		{"clamps top when flipped does not fit", Point{1, 1}, 10, 30, 80, 24, rect{1, 0, 10, 30}},
 	}
 	for _, tt := range tests {
@@ -49,8 +51,8 @@ func TestBoxWidthFitsTitleAndDetail(t *testing.T) {
 		fw    int
 		want  int
 	}{
-		{"title wider than rows", "Remote workspace", []Item{{Label: "a"}}, 80, 18},
-		{"label and detail", "T", []Item{{Label: "abc", Detail: "wxyz"}}, 80, 11},
+		{"title wider than rows", "Remote workspace", []Item{{Label: "a"}}, 80, 22},
+		{"label and detail", "T", []Item{{Label: "abc", Detail: "wxyz"}}, 80, 13},
 		{"capped at the frame", "T", []Item{{Label: strings.Repeat("x", 50)}}, 20, 20},
 	}
 	for _, tt := range tests {
@@ -205,12 +207,12 @@ func TestDrawPaintsTitleRowsAndDetail(t *testing.T) {
 func TestDrawScrollsToKeepHighlightVisible(t *testing.T) {
 	p := New(Styles{})
 	p.Show(Point{0, 0}, "T", items(10))
-	g := grid.New(20, 4) // three item rows fit under the title
+	g := grid.New(20, 5) // three item rows fit between the borders
 	p.Draw(g)
 	for range 5 {
 		p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
-	g = grid.New(20, 4)
+	g = grid.New(20, 5)
 	p.Draw(g)
 	rows := g.Plain()
 	if !strings.Contains(rows[3], "i5") {

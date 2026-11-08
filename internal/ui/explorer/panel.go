@@ -21,6 +21,7 @@ import (
 	tree "github.com/tbxark/gvim/internal/explorer"
 	"github.com/tbxark/gvim/internal/ui/grid"
 	"github.com/tbxark/gvim/internal/ui/icons"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -153,7 +154,7 @@ func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 	case "file_explorer_rename":
 		cmd = p.selectedMsg("renamed", func(path string) tea.Msg { return RenameMsg{Path: path} })
 	case "file_explorer_delete":
-		cmd = p.selectedMsg("deleted", func(path string) tea.Msg { return DeleteMsg{Path: path} })
+		cmd = p.deleteCmd()
 	case "copy":
 		if paths := p.targets(); len(paths) > 0 {
 			cmd = emit(clipboardMsg(paths, false))
@@ -173,6 +174,10 @@ func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 		p.tree.Move(-max(g.bodyRows(), 1))
 	case "file_explorer_page_down":
 		p.tree.Move(max(g.bodyRows(), 1))
+	case "file_explorer_first":
+		cmd = p.moveCursor(-len(p.tree.Rows()))
+	case "file_explorer_last":
+		cmd = p.moveCursor(len(p.tree.Rows()))
 	case "file_explorer_open":
 		cmd = p.openSelected()
 	case "file_explorer_expand":
@@ -252,19 +257,22 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 	}
 }
 
-// drawRow paints one tree row at y. Column 1 holds the expand icon, or the
-// selection marker when marker is set. The name starts at column 3 plus two
-// cells per depth level. Names stop before the scrollbar column when over is set.
-// A non-zero mark is the git status letter, drawn in the last column before the
-// border, and the name stops one cell before it.
+// drawRow paints one tree row at y. Column 1 is the padding cell, which holds the
+// selection marker when marker is set. The expand icon is at column 2 and the name at
+// column 4, plus two cells per depth level. Names stop one padding cell before the
+// border, and before the scrollbar column when over is set; a name that does not fit
+// ends with "…". A non-zero mark is the git status letter, drawn in the last column
+// before that padding, and the name stops one cell before it.
 func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark rune, ic icons.Mode, st grid.Style, accent color.Color) {
-	end := width - 1
+	end := width - 1 - space.PadX
 	if over {
 		end--
 	}
-	// The name starts at column 3 plus two cells per depth level. A set with file
-	// icons draws the icon there and moves the name two cells right.
-	nameX := 3 + 2*r.Depth
+	// Column 1 is the padding cell, so the expand icon is at column 2 and the name
+	// at column 4, plus two cells per depth level. A set with file icons draws the
+	// icon at the name's place and moves the name two cells right.
+	iconX := 1 + space.PadX + 2*r.Depth
+	nameX := iconX + 2
 	fileIcon := ic.FileIcon(r.Name, r.IsDir, r.Expanded)
 	if fileIcon != "" {
 		nameX += 2
@@ -282,8 +290,8 @@ func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark r
 			icon = ic.Glyph(icons.DirExpanded)
 		}
 	}
-	if x := 1 + 2*r.Depth; x < end {
-		dst.Set(x, y, icon, st)
+	if iconX < end {
+		dst.Set(iconX, y, icon, st)
 	}
 	if fileIcon != "" && nameX-2 < end {
 		dst.Set(nameX-2, y, fileIcon, st)
@@ -293,7 +301,7 @@ func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark r
 		bar.FG = accent
 		dst.Set(1, y, "▌", bar)
 	}
-	dst.Put(nameX, y, end, r.Name, st)
+	dst.Put(nameX, y, end, space.Name(r.Name, end-nameX), st)
 }
 
 // bodyRows is the number of tree rows the body shows.

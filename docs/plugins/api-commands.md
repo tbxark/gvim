@@ -44,7 +44,10 @@ gvim.command.register {
   `when` fails shows `"<title> is not available now"` and does nothing. Names are everything the
   menus know (`has_buffer`, `has_selection`, `can_save`, `modified`, `read_only`, `large`,
   `file_explorer`, `file_explorer_focused`, ...), `language:<id>` (for example `language:go`), and
-  the contexts your plugins set with [`gvim.context`](#gvimcontext).
+  the contexts your plugins set with [`gvim.context`](#gvimcontext). A name that none of those answers
+  (a typo such as `has_bufferr`) is reported once, naming it, the first time the clause is evaluated; a
+  context counts as known once any plugin has set it, to either value, so declare one with
+  `gvim.context.set(name, false)` when your plugin loads.
 * A macro that records a plugin command records the command id once, not what the command does
   through `command.run` (no double recording).
 
@@ -117,11 +120,18 @@ gvim.keymap.set("ctrl+shift+f", "hello.hello", { when = { "has_buffer" } })
 * The key resolution order in the editor is: panic chords, a pending `next_key` wait, the editor
   input mode, the buffer mode, then plugin bindings and the keymap.
 * **The panic chords** (`ctrl+^` and `ctrl+alt+shift+esc` always; `ctrl+shift+6`, which an enhanced
-  keyboard reports for `ctrl+^`, and three quick `Esc` only while plugin input is active) are handled
-  first and cannot be rebound. Every shipped preset binds `ctrl+shift+6` to *Set Bookmark 6* (Fresh
+  keyboard reports for `ctrl+^`, while plugin input is active; three quick `Esc` presses only while the
+  input is *stuck*: each press finds a key wait, a plugin prompt or popup, or a mode that does not bind
+  `Esc`) are handled first and cannot be rebound. A mode that binds `Esc` itself answers every press, so
+  Esc mashing in vi_mode is not a panic. Every shipped preset binds `ctrl+shift+6` to *Set Bookmark 6* (Fresh
   parity), so that key clears plugin input while a plugin mode, key wait or overlay is active and sets
   bookmark 6 otherwise.
-* `keymap.label(action)` returns the formatted primary binding of an action (`"Ctrl+S"`), or `nil`.
+* `keymap.label(action)` returns the formatted primary binding of an action, in the glyph form of the
+  palette and the menus (`"⌃S"`, `"⌃⇧P"`, not `"Ctrl+S"`), or `nil`.
+* `keymap.set` (and `command.register`) return `nil, err` for a bad chord, name or `when`. A plugin that
+  ignores the result would just lack the key, so every such failure is also written to the plugin log
+  and shown once on the status row, naming the key. A key bound to an action that does not exist is
+  reported the first time it is pressed.
 * A command's `keys = {...}` is sugar for `keymap.set`. Key bindings with a `mode` never enter the
   keymap: they live in the mode table.
 
@@ -146,7 +156,7 @@ gvim.mode.define {
     n = function() goto_next() end,
     ["u"] = "my_plugin.use_ours",            -- an action name works too
     ["g g"] = function() gvim.command.run("goto_start") end,   -- sequences are fine here
-    q = function() gvim.mode.leave() end,
+    q = function() gvim.mode.leave() end,            -- editor-wide modes only (see below)
   },
   text = "swallow",                          -- what unbound printable keys do
   paste = "swallow",
@@ -172,7 +182,13 @@ gvim.mode.enter("resolve")
 * A mode `status` label is cut at the status-cell limit and always comes first among the plugin's
   status items. `mode_changed` is raised on every change ([events.md](events.md)).
 * A buffer can have a **buffer-local mode** with `b:set_mode(name)` (virtual buffers); it is found by
-  the bare name.
+  the bare name. While it is the active buffer's mode the status row shows its `status` label, or
+  `-- NAME --` when it has none, first among the plugin items; a mode that does not bind `Esc` adds
+  `(Esc x3 leaves)`, which is the way out (the panic chord clears the mode of that buffer until the
+  plugin sets it again). Keys the mode swallows are not echoed anywhere else, so bind `Esc` (or another
+  key) to leave it. `gvim.mode.leave()` does not end a buffer-local mode: it only ends the editor-wide
+  mode, so a binding that calls it does nothing in a buffer-local mode. Inside one, leave with
+  `b:set_mode(nil)` (the example below uses `mode.leave` for an editor-wide mode only).
 
 ## gvim.context
 

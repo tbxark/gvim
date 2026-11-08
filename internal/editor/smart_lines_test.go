@@ -259,7 +259,7 @@ func TestCaseConversionAtEveryCaret(t *testing.T) {
 		want     carets
 	}{
 		{"words", "to_upper_case", "foo bar", []caret{at(0, 1), at(0, 5)}, "FOO BAR", wantCarets(plain(0, 3), plain(0, 7))},
-		{"selections", "to_upper_case", "ab cd", []caret{span(caretPos(0, 0), caretPos(0, 2)), span(caretPos(0, 3), caretPos(0, 5))}, "AB CD", wantCarets(plain(0, 2), plain(0, 5))},
+		{"selections", "to_upper_case", "ab cd", []caret{span(caretPos(0, 0), caretPos(0, 2)), span(caretPos(0, 3), caretPos(0, 5))}, "AB CD", wantCarets(Caret{Cursor: caretPos(0, 2), Sel: &buffer.Selection{Anchor: caretPos(0, 0), Head: caretPos(0, 2)}}, Caret{Cursor: caretPos(0, 5), Sel: &buffer.Selection{Anchor: caretPos(0, 3), Head: caretPos(0, 5)}})},
 		{"lower", "to_lower_case", "AB\nCD", []caret{at(0, 1), at(1, 0)}, "ab\ncd", wantCarets(plain(0, 2), plain(1, 2))},
 		{"an unchanged caret stays", "to_upper_case", "FOO bar", []caret{at(0, 1), at(0, 5)}, "FOO BAR", wantCarets(plain(0, 1), plain(0, 7))},
 		{"two carets in one word convert it once", "to_upper_case", "foo", []caret{at(0, 1), at(0, 2)}, "FOO", wantCarets(plain(0, 3))},

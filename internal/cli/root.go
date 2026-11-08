@@ -92,6 +92,9 @@ by side in a compare view.`,
 				PluginPaths: pluginPath,
 			}
 			if err := opts.Validate(); err != nil {
+				// The message names the flag and the valid values: the whole usage text
+				// after it would only bury it.
+				cmd.SilenceUsage = true
 				return err
 			}
 			// Runtime errors are not usage errors, so they print no usage text.
@@ -107,7 +110,7 @@ by side in a compare view.`,
 	flags.StringVar(&configPath, "config", "", "config file `PATH` (default: the platform config directory)")
 	flags.StringVar(&keymapName, "keymap", "", "keymap `NAME`: default, macos, macos-gui, emacs or vscode (default: the platform keymap)")
 	flags.StringVar(&themeName, "theme", "", "theme `NAME` (default: dark)")
-	flags.StringVar(&logFile, "log-file", "", "log file `PATH` (default: no log file)")
+	flags.StringVar(&logFile, "log-file", "", "append the status-row notices and the plugin log to `PATH`")
 	root.Flags().BoolVar(&diff, "diff", false, "compare the two FILE arguments side by side")
 	root.Flags().BoolVar(&noPlugins, "no-plugins", false, "do not discover or load plugins (--plugin still loads)")
 	root.Flags().StringArrayVar(&pluginPath, "plugin", nil, "load the plugin at `PATH` (a .lua file or a plugin directory); repeatable")

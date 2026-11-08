@@ -172,11 +172,15 @@ func TestPluginKeymapLayers(t *testing.T) {
 			t.Fatalf("ctrl+s = %q", got)
 		}
 	})
-	t.Run("a broken user layer is an error and no map", func(t *testing.T) {
-		bad := config.Config{Keybindings: json.RawMessage(`{"bindings":[{"key":"s","modifiers":["bogus"],"action":"x"}]}`)}
+	t.Run("a broken user entry is left out and the rest applies", func(t *testing.T) {
+		bad := config.Config{Keybindings: json.RawMessage(`[{"key":"s","modifiers":["bogus"],"action":"x"},{"key":"j","modifiers":["alt"],"action":"save_all"}]`)}
 		km, err := pluginKeymap(preset, bad, nil)
-		if err == nil || km != nil {
-			t.Fatalf("pluginKeymap = %v, %v", km, err)
+		must(t, err)
+		if got := resolve(km, "alt+j"); got != "save_all" {
+			t.Fatalf("alt+j = %q, want the good entry", got)
+		}
+		if got := resolve(km, "ctrl+s"); got != "save" {
+			t.Fatalf("ctrl+s = %q, want the preset's save", got)
 		}
 	})
 }

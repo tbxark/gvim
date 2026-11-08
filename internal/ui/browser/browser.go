@@ -28,6 +28,7 @@ import (
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/explorer"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -122,6 +123,7 @@ func sorted(listed []explorer.Entry, mode sortMode) []explorer.Entry {
 // Options are the browser's inputs.
 type Options struct {
 	Dir        string                                                                // directory to start in; empty means the working directory
+	Title      string                                                                // the box title; empty means " Open File " (" Switch Project " for folders)
 	FolderOnly bool                                                                  // Switch Project: list directories only, and Enter chooses one
 	Home       string                                                                // path of the "~/" row; empty means the user's home directory
 	Styles     style.Styles                                                          // the overlay styles of the box
@@ -134,6 +136,7 @@ type Options struct {
 type Browser struct {
 	dir        string
 	folderOnly bool
+	title      string
 	home       string
 	showHidden bool
 	input      string
@@ -179,6 +182,7 @@ func New(opts Options) *Browser {
 	b := &Browser{
 		dir:        dir,
 		folderOnly: opts.FolderOnly,
+		title:      opts.Title,
 		home:       home,
 		styles:     opts.Styles,
 		now:        opts.Now,
@@ -632,7 +636,7 @@ func truncateLeft(s string, w int) string {
 func (b *Browser) Draw(g *grid.Grid) {
 	b.box = box{}
 	w, h := g.Width(), g.Height()
-	bw := min(boxMaxWidth, w-2)
+	bw := min(boxMaxWidth, w-2*space.ListMargin(w))
 	if bw < boxMinWidth || h < boxMinH {
 		return
 	}
@@ -648,6 +652,9 @@ func (b *Browser) Draw(g *grid.Grid) {
 	title := " Open File "
 	if b.folderOnly {
 		title = " Switch Project "
+	}
+	if b.title != "" {
+		title = " " + b.title + " "
 	}
 	ov.PaintBox(g, x0, top, bw, vis+4, title)
 	boxLine(g, x0, top+1, bw, "> "+b.input, ov.Idle, ov.Border, 0)
@@ -698,12 +705,14 @@ func (b *Browser) Draw(g *grid.Grid) {
 }
 
 // boxLine draws one row of the box: the side borders, the inner fill, and text
-// from the third column. reserve cells at the right stay free for the scrollbar.
+// from the third column to one padding cell before the right border. reserve cells
+// at the right stay free for the scrollbar. Text that does not fit ends with "…".
 func boxLine(g *grid.Grid, x0, y, bw int, text string, inner, edge grid.Style, reserve int) {
 	g.Fill(x0+1, x0+bw-1, y, inner)
 	g.Set(x0, y, "│", edge)
 	g.Set(x0+bw-1, y, "│", edge)
-	g.Put(x0+2, y, x0+bw-1-reserve, text, inner)
+	end := x0 + bw - 1 - space.PadX - reserve
+	g.Put(x0+2, y, end, space.End(text, end-(x0+2)), inner)
 }
 
 // thumbOf sizes the scrollbar thumb for lines rows in a window of h rows, with

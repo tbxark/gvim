@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tbxark/gvim/internal/buffer"
+	"github.com/tbxark/gvim/internal/diff"
 )
 
 // ErrNoFormatter is returned by format_buffer when no formatter is set for the
@@ -29,11 +30,23 @@ func (e *Editor) SetFormatters(formatters map[string]string) {
 	}
 }
 
+// SetLanguageNamer sets the function that names the language of a file from its path, as the
+// highlighter does ("Go" for x.go, "" for plain text). A document with no language set with
+// SetLanguage is named by it, so a formatters key given as a language name ("go") matches a
+// file opened from disk. The function runs on the caller's goroutine, on every menu check, so
+// it should cache. Nil means that only the language set and the extension are used.
+func (e *Editor) SetLanguageNamer(namer func(path string) string) { e.languageNamer = namer }
+
 // formatterOf returns the formatter command of d, or "" when it has none. The language
-// name is tried first, then the file extension with its dot, so a file opened from disk
-// with no language set still finds the formatter of its extension.
+// name is tried first (the one set with SetLanguage, else the one the namer gives the file),
+// then the file extension with its dot, so a file with no language still finds the formatter
+// of its extension.
 func (e *Editor) formatterOf(d *Document) string {
-	if lang := strings.ToLower(d.language); lang != "" {
+	lang := d.language
+	if lang == "" && e.languageNamer != nil && d.Path != "" {
+		lang = e.languageNamer(d.Path)
+	}
+	if lang = strings.ToLower(lang); lang != "" {
 		if command := e.formatters[lang]; command != "" {
 			return command
 		}
@@ -89,7 +102,7 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 	}
 	text := d.Buffer.Text()
 	return ShellJob{
-		Command:  command,
+		Command:  expandFile(command, d),
 		Input:    text,
 		Dir:      shellDir(d),
 		Replace:  true,
@@ -100,4 +113,40 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 		to:       d.Buffer.End(),
 		snapshot: contentMark{text: text},
 	}, nil
+}
+
+// formatLine returns the line of the formatted text that line of the text before it goes
+// to. hunks are the line hunks between the two texts (diff.Lines). A line the formatter kept
+// moves with the lines above it. A line in a run it changed goes to the line of the new run at
+// the same offset, or to the run's last line when the new run is shorter, and a line in a run it
+// removed goes to the line that follows the run.
+func formatLine(hunks []diff.Hunk, line int) int {
+	shift := 0
+	for _, h := range hunks {
+		if line < h.OldStart {
+			break
+		}
+		if h.OldLines > 0 && line < h.OldStart+h.OldLines {
+			if h.NewLines == 0 {
+				return h.NewStart
+			}
+			return h.NewStart + min(line-h.OldStart, h.NewLines-1)
+		}
+		shift += h.NewLines - h.OldLines
+	}
+	return line + shift
+}
+
+// expandFile replaces $FILE in a formatter command with the path of d, quoted for the shell:
+// prettier and ruff read the text on standard input and use the name to pick their parser. A
+// document with no path gives its name.
+func expandFile(command string, d *Document) string {
+	if !strings.Contains(command, "$FILE") {
+		return command
+	}
+	name := d.Path
+	if name == "" {
+		name = d.Name()
+	}
+	return strings.ReplaceAll(command, "$FILE", "'"+strings.ReplaceAll(name, "'", `'\''`)+"'")
 }

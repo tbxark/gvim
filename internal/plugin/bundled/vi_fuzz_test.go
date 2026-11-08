@@ -20,6 +20,7 @@ func TestViRandomKeysNeverBreakThePlugin(t *testing.T) {
 		"one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten",
 		"héllo wörld 世界 ünï\ncafé 12 -3 0x1f\n\t\ttabbed line",
 		"{\n  a: [1, 2, 3],\n  b: (x + y) * 2,\n}\n\nend",
+		"one\ntwo\n\nthree (x)\n",
 	}
 	keys := []string{
 		"h", "j", "k", "l", "w", "b", "e", "W", "B", "E", "0", "^", "$", "G", "g", "z", "H", "M", "L",
@@ -95,6 +96,7 @@ func TestViRandomCommandsNeverBreakThePlugin(t *testing.T) {
 		"one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten",
 		"héllo wörld 世界 ünï\ncafé 12 -3 0x1f\n\t\ttabbed line\n\n\nx",
 		"{\n  a: [1, 2, 3],\n  b: (x + y) * 2,\n  c: <b>bold</b>,\n}\n\nend",
+		"one\ntwo\n\nthree (x)\nfour\n",
 	}
 	commands := []string{
 		"dw", "dd", "3dd", "cwX<Esc>", "ciwY<Esc>", "yiw", "p", "P", "dap", "yap", "yy", "di(", "da(", "ci\"Z<Esc>", "x", "X",

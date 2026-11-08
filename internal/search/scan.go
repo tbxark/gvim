@@ -41,21 +41,22 @@ type ScanStats struct {
 // are found first. The text is read in windows of about 1 MiB of whole lines. As
 // in FindNext, a multi-line match that crosses a window boundary is not found, and
 // the lines on either side of the starting line are searched in different
-// windows. Lines longer than the line cap of a large buffer are searched only as
-// far as they are readable (see Truncated).
+// windows. A huge line, which is longer than the line cap of a large buffer, is
+// searched in windows of runes of its own (see hugeSpan), so every match in it is found.
 type Scan struct {
-	snap      *buffer.Snapshot
-	re        *regexp.Regexp
-	q         Query
-	version   uint64
-	start     int // line the scan began at
-	total     int // lines in the snapshot
-	window    int // bytes per window
-	limit     int // MaxMatches; tests lower it
-	partial   bool
-	truncated bool
+	snap    *buffer.Snapshot
+	re      *regexp.Regexp
+	q       Query
+	version uint64
+	start   int // line the scan began at
+	total   int // lines in the snapshot
+	window  int // bytes per window
+	limit   int // MaxMatches; tests lower it
+	partial bool
+	huge    hugeSpan // the windows of a huge line; tests make them small
 
 	line    int // next line to read
+	col     int // the next column of the huge line sc.line to search
 	end     int // end of the current part (exclusive)
 	wrapped bool
 	wrapAt  int // len(matches) when the wrap began
@@ -94,13 +95,13 @@ func newScan(s *buffer.Snapshot, q Query, startLine, window, limit int) (*Scan, 
 	total := s.Lines()
 	sc := &Scan{
 		snap: s, re: re, q: q, version: s.Version(),
-		start:     min(max(startLine, 0), max(total-1, 0)),
-		total:     total,
-		window:    max(window, 1),
-		limit:     max(limit, 1),
-		partial:   !s.IndexComplete(),
-		truncated: s.HugeLine(),
-		began:     time.Now(),
+		start:   min(max(startLine, 0), max(total-1, 0)),
+		total:   total,
+		window:  max(window, 1),
+		limit:   max(limit, 1),
+		partial: !s.IndexComplete(),
+		huge:    defaultHuge,
+		began:   time.Now(),
 	}
 	sc.line, sc.end = sc.start, total
 	if re == nil {
@@ -142,6 +143,10 @@ func (sc *Scan) window1() {
 		sc.wrapped, sc.wrapAt = true, len(sc.matches)
 		sc.line, sc.end = 0, sc.start
 	}
+	if runes, long := sc.snap.LongLine(sc.line); long {
+		sc.hugeWindow(runes)
+		return
+	}
 	first, n, text := sc.snap.Chunk(sc.line, sc.window)
 	if err := sc.snap.Err(); err != nil {
 		// Lines that could not be read came back empty, so a search of them
@@ -178,6 +183,38 @@ func (sc *Scan) window1() {
 		sc.finish()
 		return
 	}
+	sc.coverIfDone()
+}
+
+// hugeWindow searches the next window of the huge line sc.line, which has runes runes. When
+// the window is the last of the line, the scan goes on to the next line.
+func (sc *Scan) hugeWindow(runes int) {
+	lo := sc.col
+	hi := min(lo+sc.huge.window, runes)
+	first, text := sc.huge.text(sc.snap, sc.line, runes, lo, hi)
+	if err := sc.snap.Err(); err != nil {
+		sc.err = err
+		sc.finish()
+		return
+	}
+	sc.stats.BytesScanned += int64(len(text))
+	for _, m := range hugeMatches(sc.line, first, text, sc.re, sc.q, lo, hi) {
+		if len(sc.matches) >= sc.limit {
+			sc.capped = true
+			break
+		}
+		sc.matches = append(sc.matches, m)
+	}
+	if sc.capped {
+		sc.finish()
+		return
+	}
+	if hi < runes {
+		sc.col = hi
+		return
+	}
+	sc.col = 0
+	sc.line++
 	sc.coverIfDone()
 }
 
@@ -239,10 +276,6 @@ func (sc *Scan) Done() bool { return sc.done }
 // Capped reports whether the scan stopped at the match cap, so there are more
 // matches than Matches lists.
 func (sc *Scan) Capped() bool { return sc.capped }
-
-// Truncated reports whether the document has a line longer than a large buffer
-// reads, which is searched only as far as it is readable.
-func (sc *Scan) Truncated() bool { return sc.truncated }
 
 // Partial reports whether the snapshot was taken before the line index of a large
 // buffer was complete, so that the scan covers only the part of the file that was

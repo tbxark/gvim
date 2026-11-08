@@ -118,12 +118,32 @@ local function ex(line)
   D.begin()
 end
 
--- prompt reads a line from the user. nil: cancelled.
-local function prompt(label, default)
+local MAX_HISTORY = 100
+
+-- remember adds a line to the history of the prompts of kind ("ex" or "search"): a line that is
+-- already there moves to the end.
+local function remember(kind, text)
+  local list = S.history[kind]
+  for i = #list, 1, -1 do
+    if list[i] == text then
+      table.remove(list, i)
+    end
+  end
+  list[#list + 1] = text
+  while #list > MAX_HISTORY do
+    table.remove(list, 1)
+  end
+end
+
+-- prompt reads a line from the user. nil: cancelled. kind names the history Up and Down walk.
+local function prompt(label, default, kind)
   local text = await(function()
-    return gvim.ui.input { prompt = label, default = default or "", select_all = false }
+    return gvim.ui.input { prompt = label, default = default or "", select_all = false, history = S.history[kind] }
   end)
   D.begin()
+  if text and text ~= "" and text ~= default then
+    remember(kind, text)
+  end
   return text
 end
 
@@ -202,8 +222,20 @@ local function enter_insert(cmd, count, opts)
         end
       else
         apply_text(text, count)
+        if opts.block then
+          M.finish_block_insert({ block = opts.block }, text)
+        end
       end
     else
+      if opts.line_open then
+        for _ = 2, count do
+          if opts.line_open == "below" then
+            open_below()
+          else
+            open_above()
+          end
+        end
+      end
       local cur = D.cursor()
       local s = D.line(cur.line)
       if cur.col > 0 and cur.col >= #s then
@@ -276,6 +308,15 @@ function M.leave_insert()
           local more = string.rep(text, ins.count - 1)
           D.replace(cur, cur, more)
           D.set_cursor(D.advance(cur, more))
+        end
+      end
+    elseif ins and ins.line_open and ins.count > 1 and text == "" then
+      -- 3o<Esc>: nothing was typed, and the lines are opened all the same
+      for _ = 2, ins.count do
+        if ins.line_open == "below" then
+          open_below()
+        else
+          open_above()
         end
       end
     elseif ins and ins.cmd and not text then
@@ -456,8 +497,8 @@ local function motion_fn(cmd)
   end
   if cmd.pattern then
     return function(c)
-      S.last_search = { pattern = cmd.pattern, forward = cmd.forward }
-      return Search.motion(cmd.pattern, cmd.forward, c.count, c.p)
+      S.last_search = { pattern = cmd.pattern, forward = cmd.forward, nosmart = cmd.nosmart }
+      return Search.motion(cmd.pattern, cmd.forward, c.count, c.p, cmd.nosmart)
     end
   end
   return Mo.table[key]
@@ -465,7 +506,7 @@ end
 
 -- read_pattern asks for the pattern of / and ?.
 local function read_pattern(forward)
-  local text = prompt(forward and "/" or "?", "")
+  local text = prompt(forward and "/" or "?", "", "search")
   if text == nil then
     cancel()
   end
@@ -489,7 +530,9 @@ local function star_cmd(key, count)
   else
     pat = Search.star_pattern(word, 1) -- g* and g#: no word boundaries
   end
-  return { kind = "motion", key = key, pattern = pat, forward = key == "*" or key == "g*", count = count }
+  return {
+    kind = "motion", key = key, pattern = pat, forward = key == "*" or key == "g*", count = count, nosmart = true,
+  }
 end
 
 local MOTION_KEYS = {}
@@ -528,14 +571,24 @@ local function parse_motion(k, count)
   return cmd
 end
 
--- do_motion moves the caret.
-local function do_motion(cmd)
+-- do_motion moves the caret. sticky is the position $ left the caret at when the command
+-- before this one was $ or a j or k that followed it: vi's j and k then keep to the end of
+-- the line, whatever its length.
+local function do_motion(cmd, sticky)
   local cur = D.cursor()
   local c = { p = cur, count = cmd.count or 1, has_count = cmd.count ~= nil, arg = cmd.arg }
   local fn = motion_fn(cmd)
   local r = fn(c)
   if not r then
     fail()
+  end
+  local vertical = r.act == "vi_move_down" or r.act == "vi_move_up"
+  if sticky and vertical and D.eq(sticky, cur) and r.pos.line ~= cur.line then
+    local l = r.pos.line
+    local p = D.on_char(P(l, #D.line(l)))
+    D.set_cursor(p)
+    S.sticky_eol = p
+    return
   end
   if r.act then
     if not run_action(r.act, c.count) then
@@ -547,6 +600,9 @@ local function do_motion(cmd)
     S.prev_pos = cur
   end
   D.set_cursor(D.on_char(r.pos))
+  if cmd.key == "$" or cmd.key == "end" then
+    S.sticky_eol = D.cursor()
+  end
 end
 
 -- ---------- operators ----------
@@ -554,14 +610,19 @@ end
 local OPERATORS = { d = true, c = true, y = true, [">"] = true, ["<"] = true }
 local GOPERATORS = { ["g~"] = true, gu = true, gU = true, ["g?"] = true }
 
+-- Commands of Vim that vi_mode does not have are named in a message, and the keys that belong
+-- to the command are read and dropped: left to the grammar, "cgnX<Esc>" would run X as a
+-- command and "qa" would insert text. Both are defined below parse_operator, which they use.
+local not_ported, swallow_text, NOT_PORTED
+
 -- text_object reads the key after i or a and returns the object command.
 local function parse_object(include)
   local k = getkey()
-  if k == "escape" then
+  if k == "escape" or k == "ctrl+[" or k == "ctrl+c" then
     cancel()
   end
   if not Obj.table[k] then
-    cancel()
+    fail("not a text object: " .. (include and "a" or "i") .. display(k))
   end
   return { include = include, key = k }
 end
@@ -599,12 +660,93 @@ local function parse_operator(op, count1, reg)
     cmd.obj = parse_object(k == "a")
     return cmd
   end
-  local mc = parse_motion(k, count)
+  local mc, named = parse_motion(k, count)
   if not mc then
-    cancel()
+    if named == "escape" or named == "ctrl+[" or named == "ctrl+c" then
+      cancel()
+    end
+    if NOT_PORTED[named] then
+      -- a change operator is followed by the text it replaces with: it is not run as commands
+      return not_ported(named, count, nil, false, op == "c")
+    end
+    fail("not a motion: " .. display(named))
   end
   cmd.motion = mc
   return cmd
+end
+
+-- NOT_PORTED are the commands of Vim that vi_mode does not have. follow says which keys belong
+-- to the command: "motion" (an operator: a motion, an object or the doubled key), "char" (a
+-- register name) or "text" (what is typed until Esc).
+local MACRO_HINT = "use the editor's Record Macro and Play Last Macro commands"
+NOT_PORTED = {
+  R = { what = "R (replace mode)", follow = "text" },
+  q = { what = "q (recording a macro)", follow = "char", hint = MACRO_HINT },
+  ["@"] = { what = "@ (running a macro)", follow = "char", hint = MACRO_HINT },
+  ["="] = { what = "= (re-indenting)", follow = "motion" },
+  ["!"] = { what = "! (filtering through a program)", follow = "motion" },
+  gq = { what = "gq (formatting)", follow = "motion" },
+  gw = { what = "gw (formatting)", follow = "motion" },
+  ["g@"] = { what = "g@ (operatorfunc)", follow = "motion" },
+  gn = { what = "gn (selecting the next match)" },
+  gN = { what = "gN (selecting the previous match)" },
+  ["g;"] = { what = "g; (the change list)" },
+  ["g,"] = { what = "g, (the change list)" },
+  ["g&"] = { what = "g& (repeating :s on all lines)" },
+  ga = { what = "ga (the code of the character)" },
+  g8 = { what = "g8 (the bytes of the character)" },
+  gs = { what = "gs (sleeping)" },
+  gx = { what = "gx (opening the link)" },
+  K = { what = "K (looking up the word)" },
+  Q = { what = "Q (Ex mode)" },
+  U = { what = "U (undoing the changes of a line)" },
+  tab = { what = "Tab (the jump list)" },
+  zf = { what = "zf (creating a fold)", follow = "motion", hint = "vi_mode has no folds" },
+}
+
+-- swallow_text drops the keys that follow a command that vi_mode does not have, until Esc. The
+-- notice says so, and it is said again for every key that is dropped: the editor clears the status
+-- row on each key, so a notice said once would be gone after the first one.
+function swallow_text(what, notice)
+  S.pending = what
+  M.hooks.status()
+  while true do
+    local k = getkey()
+    if k == "escape" or k == "ctrl+[" or k == "ctrl+c" then
+      cancel()
+    end
+    S.pending = what
+    gvim.notify(notice, "warn")
+    M.hooks.status()
+  end
+end
+
+-- not_ported says that the command key is not supported, and reads the keys that belong to it.
+-- A visual command takes no motion. text asks to swallow what is typed after it, for a change
+-- operator.
+function not_ported(key, count, reg, visual, text)
+  local def = NOT_PORTED[key]
+  local msg = "not supported: " .. def.what
+  if def.hint then
+    msg = msg .. ": " .. def.hint
+  end
+  local follow = def.follow
+  if text then
+    follow = "text"
+  elseif visual and follow == "motion" then
+    follow = nil
+  end
+  if follow == "text" then
+    gvim.notify(msg .. "; keys are ignored until Esc", "warn")
+    swallow_text(display(key), msg .. "; keys are ignored until Esc")
+  end
+  gvim.notify(msg, "warn")
+  if follow == "motion" then
+    parse_operator(key, count, reg)
+  elseif follow == "char" then
+    getkey()
+  end
+  cancel()
 end
 
 -- change_range deletes the range and starts an insert at its start.
@@ -738,12 +880,19 @@ local function scroll(cmd)
     end
   elseif k == "ctrl+y" then
     run_action("scroll_up", count)
-  elseif k == "ctrl+d" then
-    run_action("scroll_down", half)
-    run_action("vi_move_down", half)
-  elseif k == "ctrl+u" then
-    run_action("scroll_up", half)
-    run_action("vi_move_up", half)
+  elseif k == "ctrl+d" or k == "ctrl+u" then
+    -- The window scrolls half a page and the caret moves as many lines. The scroll drags the
+    -- caret along to keep it inside the window, so the move is what is still missing.
+    local down = k == "ctrl+d"
+    local from = D.cursor().line
+    run_action(down and "scroll_down" or "scroll_up", half)
+    local want = down and math.min(from + half, D.count() - 1) or math.max(from - half, 0)
+    local now = D.cursor().line
+    if want > now then
+      run_action("vi_move_down", want - now)
+    elseif want < now then
+      run_action("vi_move_up", now - want)
+    end
   elseif k == "ctrl+f" or k == "pagedown" then
     for _ = 1, count or 1 do
       gvim.command.run("move_page_down")
@@ -757,7 +906,7 @@ end
 
 local function set_mark(name)
   if not name:find("^%a$") and name ~= "'" and name ~= "`" then
-    fail()
+    fail("E191: Argument must be a letter or forward/backward quote")
   end
   local cur = D.cursor()
   if name == "'" or name == "`" then
@@ -770,8 +919,10 @@ end
 -- exec runs a parsed command.
 local function exec(cmd)
   local kind = cmd.kind
+  local sticky = S.sticky_eol
+  S.sticky_eol = nil
   if kind == "motion" then
-    do_motion(cmd)
+    do_motion(cmd, sticky)
   elseif kind == "op" then
     exec_op(cmd)
   elseif kind == "insert" then
@@ -899,6 +1050,8 @@ local function dot(count)
   local ok, err = pcall(function()
     if copy.kind == "visual_op" then
       M.exec_visual_op(copy)
+    elseif copy.kind == "block_insert" then
+      M.replay_block_insert(copy)
     else
       exec(copy)
     end
@@ -920,6 +1073,12 @@ local SCROLL = {
   ["ctrl+d"] = true, ["ctrl+u"] = true, ["ctrl+f"] = true, ["ctrl+b"] = true, ["ctrl+e"] = true,
   ["ctrl+y"] = true, pageup = true, pagedown = true,
 }
+
+-- FOLD_KEYS are the keys after z that work on folds.
+local FOLD_KEYS = {}
+for k in ("fFdDoOcCaAvxXmMrRnNiEjk"):gmatch(".") do
+  FOLD_KEYS[k] = true
+end
 
 local function normal_command()
   S.pending = ""
@@ -966,12 +1125,15 @@ local function normal_command()
       M.hooks.set_mode("vi_visual")
       apply_visual()
       return
-    elseif kk == "ga" or kk == "g8" then
-      return
+    elseif NOT_PORTED[kk] then
+      return not_ported(kk, count, reg)
     end
     local cmd = parse_motion(kk, count)
     if not cmd then
-      cancel()
+      if k2 == "escape" or k2 == "ctrl+[" or k2 == "ctrl+c" then
+        cancel()
+      end
+      fail("not a vi command: " .. kk)
     end
     cmd.count = count
     return exec(cmd)
@@ -1003,7 +1165,7 @@ local function normal_command()
     return enter_visual(k == "v" and "v" or (k == "V" and "V" or "b"))
   end
   if k == ":" then
-    local text = prompt(":", "")
+    local text = prompt(":", "", "ex")
     if text and text ~= "" then
       ex(text)
     end
@@ -1015,11 +1177,19 @@ local function normal_command()
       ex("x")
     elseif k2 == "Q" then
       ex("q!")
+    elseif k2 ~= "escape" and k2 ~= "ctrl+[" and k2 ~= "ctrl+c" then
+      fail("not a vi command: Z" .. display(k2) .. " (ZZ and ZQ are)")
     end
     return
   end
   if k == "z" then
     local k2 = getkey()
+    if NOT_PORTED["z" .. k2] then
+      return not_ported("z" .. k2, count, reg)
+    end
+    if FOLD_KEYS[k2] then
+      fail("not supported: z" .. k2 .. " (folds)")
+    end
     if k2 == "z" or k2 == "." then
       gvim.command.run("recenter")
     elseif k2 == "t" or k2 == "enter" then
@@ -1033,6 +1203,8 @@ local function normal_command()
       if w and type(v) == "table" then
         w:scroll_to(math.max(0, D.cursor().line - v.height + 1))
       end
+    elseif k2 ~= "escape" and k2 ~= "ctrl+[" and k2 ~= "ctrl+c" then
+      fail("not a vi command: z" .. display(k2))
     end
     return
   end
@@ -1042,19 +1214,19 @@ local function normal_command()
   if k == "ctrl+g" then
     return ex("file")
   end
-  if k == "tab" or k == "insert" or k == "ctrl+l" or k == "q" or k == "@" then
-    if k == "q" or k == "@" then
-      gvim.notify("vi: use the editor's macro commands (Record Macro / Play Last Macro)")
-    end
+  if NOT_PORTED[k] then
+    return not_ported(k, count, reg)
+  end
+  if k == "insert" or k == "ctrl+l" then
     return
   end
 
-  -- a motion; a key that is no command at all is ignored (vi beeps)
+  -- a motion; a key that is no command at all says so (vi beeps)
   local mc = parse_motion(k, count)
   if mc then
     return exec(mc)
   end
-  S.pending = ""
+  fail("not a vi command: " .. display(k))
 end
 
 -- ---------- visual-mode commands ----------
@@ -1109,11 +1281,49 @@ local function visual_motion(cmd)
   end
 end
 
+-- extend_object is a text object asked for again while an area of more than one character
+-- is selected: words and paragraphs add the next one to the area, the other objects take
+-- the one around the area. It returns the object, or nil when the area is not one to
+-- extend (then the object is the one around the caret).
+local function extend_object(fn, key, include, count)
+  local V = S.vis
+  local a, h = V.anchor, V.head
+  if D.cmp(a, h) >= 0 then
+    return nil
+  end
+  local linewise = V.mode == "V"
+  local sel_to = linewise and P(h.line + 1, 0) or D.after(h)
+  if key == "p" or ((key == "w" or key == "W") and not linewise) then
+    if linewise and h.line + 1 >= D.count() or D.cmp(sel_to, h) <= 0 then
+      return nil
+    end
+    local o = fn({ p = sel_to, count = count }, include)
+    if not o then
+      return nil
+    end
+    return { from = linewise and P(a.line, 0) or a, to = o.to, kind = o.kind }
+  end
+  if linewise then
+    return nil
+  end
+  for k = count, count + 8 do
+    local o = fn({ p = h, count = k }, include)
+    if not o then
+      return nil
+    end
+    if D.le(o.from, a) and D.le(sel_to, o.to) and not (D.eq(o.from, a) and D.eq(o.to, sel_to)) then
+      return o
+    end
+  end
+  return nil
+end
+
 -- visual_object selects a text object.
 local function visual_object(cmd, include)
   local V = S.vis
   local fn = Obj.table[cmd.key]
-  local o = fn({ p = V.head, count = cmd.count or 1 }, include)
+  local count = cmd.count or 1
+  local o = extend_object(fn, cmd.key, include, count) or fn({ p = V.head, count = count }, include)
   if not o then
     fail()
   end
@@ -1144,13 +1354,15 @@ local function swap_ends()
 end
 
 -- put_over replaces the visual area with a register (p; P leaves the register alone).
+local pasting -- {text=, kind=} while a paste replaces the area: put_over puts it, not a register
+
 local function put_over(rng, cmd, keep_register)
-  if Reg.is_clip(cmd.reg) then
+  if not pasting and Reg.is_clip(cmd.reg) then
     Ops.delete(rng, "_", false)
     gvim.command.run("paste")
     return
   end
-  local v = Reg.get(cmd.reg)
+  local v = pasting or Reg.get(cmd.reg)
   if not v then
     fail("E353: Nothing in register " .. (cmd.reg or '"'))
   end
@@ -1345,6 +1557,9 @@ end
 local function block_insert(append)
   local rng = visual_range()
   local to_eol = S.vis.to_eol
+  -- what is typed is added to this command when the insert ends, and . repeats it
+  local cmd = { kind = "block_insert", append = append, shape = area_shape(rng) }
+  S.last_change = cmd
   leave_visual(true)
   local first = rng.first
   local s = D.line(first)
@@ -1369,7 +1584,40 @@ local function block_insert(append)
   if col then
     D.set_cursor(P(first, col))
   end
-  enter_insert(nil, 1, { block = { first = rng.first, last = rng.last, left = rng.left, right = rng.right, append = append, to_eol = to_eol } })
+  enter_insert(cmd, 1, { block = { first = rng.first, last = rng.last, left = rng.left, right = rng.right, append = append, to_eol = to_eol } })
+end
+
+-- replay_block_insert is . after a block I or A: the text goes into a block of the same
+-- size at the caret.
+function M.replay_block_insert(cmd)
+  local text = S.replay and S.replay.text
+  if not text or text == "" or text:find("\n", 1, true) then
+    return
+  end
+  local sh = cmd.shape
+  local cur = D.cursor()
+  local left = char_index(cur.line, cur.col)
+  local right = (not sh.eol) and left + sh.width or nil
+  local b = {
+    first = cur.line, last = math.min(cur.line + sh.lines - 1, D.count() - 1), left = left, right = right,
+    append = cmd.append, to_eol = sh.eol,
+  }
+  local s = D.line(b.first)
+  local col
+  if cmd.append and not sh.eol then
+    local have = T.count(s, 0, #s)
+    if have < right then
+      D.replace(P(b.first, #s), P(b.first, #s), string.rep(" ", right - have))
+      s = D.line(b.first)
+    end
+    col = T.advance(s, 0, right)
+  elseif cmd.append then
+    col = #s
+  else
+    col = T.advance(s, 0, left)
+  end
+  D.replace(P(b.first, col), P(b.first, col), text)
+  M.finish_block_insert({ block = b }, text)
 end
 
 local function visual_command()
@@ -1412,7 +1660,7 @@ local function visual_command()
   end
   if k == ":" then
     leave_visual() -- sets the marks '< and '>
-    local text = prompt(":", "'<,'>")
+    local text = prompt(":", "'<,'>", "ex")
     if text and text ~= "" then
       ex(text)
     end
@@ -1490,9 +1738,15 @@ local function visual_command()
       end
       return
     end
+    if NOT_PORTED[kk] then
+      return not_ported(kk, count, reg, true)
+    end
     local cmd = parse_motion(kk, count)
     if not cmd then
-      cancel()
+      if k2 == "escape" or k2 == "ctrl+[" or k2 == "ctrl+c" then
+        cancel()
+      end
+      fail("not a vi command: " .. kk)
     end
     cmd.count = count
     visual_motion(cmd)
@@ -1520,9 +1774,12 @@ local function visual_command()
     return
   end
 
+  if NOT_PORTED[k] then
+    return not_ported(k, count, reg, true)
+  end
   local mc = parse_motion(k, count)
   if not mc then
-    cancel()
+    fail("not a vi command: " .. display(k))
   end
   visual_motion(mc)
   apply_visual()
@@ -1555,6 +1812,107 @@ local function main()
       end
     end
   end
+end
+
+-- ---------- what the editor does to vi: pastes and selections ----------
+
+-- paste handles text pasted into the normal or the visual mode (the insert mode lets the editor
+-- insert it). In the normal mode it goes in before the caret, as P puts it; in the visual mode
+-- it replaces the area, as p does. A paste that ends in a line break is put as lines.
+function M.paste(text)
+  text = text:gsub("\r\n?", "\n")
+  if text == "" then
+    return
+  end
+  if busy or S.pending ~= "" then
+    gvim.notify("the paste was ignored: a command is waiting for its keys", "warn")
+    return
+  end
+  if not D.begin() then
+    gvim.notify("vi: this file is too big to edit until its index is ready", "warn")
+    return
+  end
+  local value = { text = text, kind = text:sub(-1) == "\n" and "line" or "char" }
+  local last = S.last_change
+  local ok, err = pcall(function()
+    if S.mode == "visual" and S.vis then
+      pasting = value
+      reader = nil -- the reader waits inside visual_command: the next key starts over in the normal mode
+      visual_op("P", 1, nil)
+    else
+      Ops.put(nil, 1, true, false, value)
+      clamp_cursor()
+    end
+  end)
+  pasting = nil
+  S.last_change = last -- . does not repeat a paste
+  M.hooks.status()
+  if not ok and err ~= CANCEL then
+    error(err, 0)
+  end
+end
+
+-- expected_selection is the anchor and the caret the editor has while the visual area V is shown.
+local function expected_selection(V)
+  local a, h = V.anchor, V.head
+  if V.mode == "V" then
+    if a.line <= h.line then
+      return P(a.line, 0), P(h.line, D.len(h.line))
+    end
+    return P(a.line, D.len(a.line)), P(h.line, 0)
+  end
+  if D.le(a, h) then
+    return a, D.after(h)
+  end
+  return D.after(a), h
+end
+
+-- adopt_selection makes a selection that vi did not make (a mouse drag, a double click, shift and
+-- an arrow key, Select All) the visual area, so that d, y, c and the rest act on it, and ends the
+-- visual mode when a click took the selection away. It runs when the editor says the selection
+-- changed, and only reads what the editor has now.
+function M.adopt_selection()
+  if busy or S.pending ~= "" or S.mode == "insert" or not D.begin() then
+    return
+  end
+  local carets = D.buf():cursors()
+  local c = type(carets) == "table" and carets[1]
+  if not c then
+    return
+  end
+  local pos = P(c.pos.line, c.pos.col)
+  local anchor = c.anchor and P(c.anchor.line, c.anchor.col)
+  local V = S.vis
+  if S.mode == "visual" and V then
+    if V.mode == "b" then
+      return -- a block is shown with highlights, not as the selection
+    end
+    local ea, ec = expected_selection(V)
+    if D.eq(anchor or pos, ea) and D.eq(pos, ec) then
+      return -- vi's own selection
+    end
+    if not anchor or D.eq(anchor, pos) then
+      reader = nil
+      leave_visual(true)
+      D.set_cursor(D.on_char(pos), false)
+      M.hooks.status()
+      return
+    end
+  elseif not anchor or D.eq(anchor, pos) then
+    return
+  end
+  -- the editor's selection is [from, to); the head of the visual area is the last character in it
+  local from, to = D.min(anchor, pos), D.max(anchor, pos)
+  local last = D.dec(to)
+  if D.le(anchor, pos) then
+    S.vis = { mode = "v", anchor = from, head = last }
+  else
+    S.vis = { mode = "v", anchor = last, head = from }
+  end
+  S.mode = "visual"
+  reader = nil -- it waits inside normal_command, and the next key belongs to visual_command
+  M.hooks.set_mode("vi_visual")
+  M.hooks.status()
 end
 
 -- reset forgets the command being read and the visual area, and goes back to normal mode.

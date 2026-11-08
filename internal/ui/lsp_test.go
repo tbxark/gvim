@@ -3,7 +3,9 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +30,9 @@ type lspTab struct {
 	size  int64
 	// virtual makes the tab's document report that it is a plugin's virtual buffer.
 	virtual bool
+	// texts counts the reads of the whole text: a line count followed by every line, as the
+	// LSP sync reads the text of a document.
+	texts int
 }
 
 // lspEd is an editor whose tabs have paths. It records the files opened, the
@@ -42,7 +47,12 @@ type lspEd struct {
 	loadErr error
 	// actions records the editor actions the root ran, in order.
 	actions []string
+	// formatter is what HasFormatter reports.
+	formatter bool
 }
+
+// HasFormatter reports whether the active buffer has a formatter, as the editor does.
+func (e *lspEd) HasFormatter() bool { return e.formatter }
 
 func (e *lspEd) SetViewport(int, int) {}
 
@@ -50,6 +60,9 @@ func (e *lspEd) SetViewport(int, int) {}
 // the caret, so a test can read the document back.
 func (e *lspEd) Do(a editor.Action, args map[string]any) editor.Result {
 	e.actions = append(e.actions, string(a))
+	if a == "next_buffer" && len(e.tabs) > 0 {
+		e.active = (e.active + 1) % len(e.tabs)
+	}
 	if a == "insert_char" && len(e.tabs) > 0 {
 		t := e.tabs[e.active]
 		text, _ := args["text"].(string)
@@ -75,7 +88,7 @@ func (e *lspEd) DocAt(i int) Document {
 func (e *lspEd) Tabs() []TabInfo {
 	out := make([]TabInfo, len(e.tabs))
 	for i, t := range e.tabs {
-		out[i] = TabInfo{Name: filepath.Base(t.path), Active: i == e.active}
+		out[i] = TabInfo{Name: filepath.Base(t.path), Path: t.path, Active: i == e.active}
 	}
 	return out
 }
@@ -106,12 +119,24 @@ func (e *lspEd) LoadFunc(path string) func() (*editor.Document, error) {
 // OpenLoaded records the path of a document that LoadFunc read as opened.
 func (e *lspEd) OpenLoaded(d *editor.Document) {
 	e.opened = append(e.opened, d.Path)
+	for i, t := range e.tabs {
+		if t.path == d.Path {
+			e.active = i
+			return
+		}
+	}
+	e.tabs = append(e.tabs, &lspTab{path: d.Path, lines: []string{""}})
+	e.active = len(e.tabs) - 1
 }
+
 func (e *lspEd) GotoLine(line, col int) error {
 	e.gotos = append(e.gotos, [2]int{line, col})
 	return nil
 }
 func (e *lspEd) ApplyLSPEdits(path string, edits []editor.LSPEdit) error {
+	if !slices.ContainsFunc(e.tabs, func(t *lspTab) bool { return t.path == path }) {
+		return fmt.Errorf("%w: %s", editor.ErrNotOpen, path)
+	}
 	if e.applied == nil {
 		e.applied = map[string][]editor.LSPEdit{}
 	}
@@ -122,11 +147,25 @@ func (e *lspEd) ApplyLSPEdits(path string, edits []editor.LSPEdit) error {
 // lspDoc is the view of one lspTab that the root reads.
 type lspDoc struct{ t *lspTab }
 
-func (d *lspDoc) Name() string         { return filepath.Base(d.t.path) }
-func (d *lspDoc) FilePath() string     { return d.t.path }
-func (d *lspDoc) Modified() bool       { return false }
-func (d *lspDoc) LineCount() int       { return max(len(d.t.lines), 1) }
-func (d *lspDoc) Line(i int) string    { return d.t.lines[i] }
+func (d *lspDoc) Name() string     { return filepath.Base(d.t.path) }
+func (d *lspDoc) FilePath() string { return d.t.path }
+func (d *lspDoc) Modified() bool   { return false }
+func (d *lspDoc) LineCount() int {
+	d.t.texts++
+	return max(len(d.t.lines), 1)
+}
+func (d *lspDoc) Line(i int) string { return d.t.lines[i] }
+
+// Version is a hash of the lines, so it changes exactly when the text does, as a buffer's
+// version does. It reads the lines directly, so it does not count as a read.
+func (d *lspDoc) Version() uint64 {
+	h := fnv.New64a()
+	for _, l := range d.t.lines {
+		_, _ = h.Write([]byte(l))
+		_, _ = h.Write([]byte{0})
+	}
+	return h.Sum64()
+}
 func (d *lspDoc) SavedLines() []string { return d.t.lines }
 func (d *lspDoc) Top() int             { return 0 }
 func (d *lspDoc) Encoding() string     { return "UTF-8" }
@@ -354,6 +393,39 @@ func TestLSPOpensTheActiveDocumentOnce(t *testing.T) {
 	}
 }
 
+// TestLSPWatchReadsTheTextOnlyWhenItIsSent checks the cost of the watch on the active document.
+// Reading the text costs the length of the file, and every key press runs the watch: a message
+// that leaves the document alone reads nothing, and an edit reads the text once, when the debounce
+// timer fires, not on the key press.
+func TestLSPWatchReadsTheTextOnlyWhenItIsSent(t *testing.T) {
+	port := newFakeLSP("go")
+	tab := &lspTab{path: "/p/a.go", lines: []string{"package a", "var x = 1"}}
+	lt := newLSPTest(t, port, tab)
+	lt.open()
+
+	lt.m.lspWatchActive() // the first look after the open reads the text once
+	tab.texts = 0
+	for range 3 {
+		lt.m.lspWatchActive()
+	}
+	if tab.texts != 0 {
+		t.Fatalf("looks at an unchanged document read the text %d times, want none", tab.texts)
+	}
+
+	tab.lines[1] = "var x = 2"
+	arm := lt.m.lspWatchActive()
+	if tab.texts != 0 {
+		t.Fatalf("a key press read the text %d times, want none until the debounce fires", tab.texts)
+	}
+	lt.settle(arm, 3)
+	if tab.texts == 0 {
+		t.Fatal("the debounce read no text")
+	}
+	if len(port.changes) != 1 || port.changes[0] != "package a\nvar x = 2" {
+		t.Fatalf("changes = %q, want one change with the edited text", port.changes)
+	}
+}
+
 func TestLSPSendsDebouncedChangesWithTheLatestText(t *testing.T) {
 	port := newFakeLSP("go")
 	tab := &lspTab{path: "/p/a.go", lines: []string{"package a"}}
@@ -412,6 +484,34 @@ func TestLSPWithoutAPortNoticesEveryAction(t *testing.T) {
 		if lt.m.notice == "" {
 			t.Fatalf("%s: no notice without a language server", action)
 		}
+	}
+}
+
+// The no-server notices name the config key that starts a server, so a user who has
+// not configured one learns how.
+func TestLSPNoServerNoticesNameTheConfigKey(t *testing.T) {
+	tab := func() *lspTab { return &lspTab{path: "/p/a.go", lines: []string{"package a"}} }
+	tests := []struct {
+		name   string
+		port   *fakeLSP
+		action string
+		want   string
+	}{
+		{"hover without a port", nil, "lsp_hover", "lsp.go.command"},
+		{"rename without a port", nil, "lsp_rename", "lsp.go.command"},
+		{"definition for another language", newFakeLSP("rust"), "lsp_goto_definition", "lsp.go.command"},
+		{"rename for another language", newFakeLSP("rust"), "lsp_rename", "lsp.go.command"},
+		{"restart without a port", nil, "lsp_restart", `"lsp"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lt := newLSPTest(t, tt.port, tab())
+			lt.act(tt.action)
+			got := lt.m.notice
+			if !strings.Contains(got, "No language server") || !strings.Contains(got, "config.json") || !strings.Contains(got, tt.want) {
+				t.Fatalf("notice = %q, want a no-server notice that names config.json and %s", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -621,6 +721,59 @@ func TestLSPRenameAppliesTheEditsToTheDocument(t *testing.T) {
 	}
 	if got := lt.ed.applied["/p/a.go"]; len(got) != 1 || got[0].Text != "New" {
 		t.Fatalf("applied = %+v, want the rename edit", got)
+	}
+}
+
+// A rename that reaches a file no tab holds opens it, edits it, and leaves the
+// tab the user was in active. The notice says the file was opened unsaved.
+func TestLSPRenameOpensAndEditsFilesThatAreNotOpen(t *testing.T) {
+	edit := func(text string) []editor.LSPEdit {
+		return []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: text}}
+	}
+	port := newFakeLSP("go")
+	port.renames = []FileEdit{
+		{Path: "/p/a.go", Edits: edit("New")},
+		{Path: "/p/a_test.go", Edits: edit("New")},
+	}
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"   "}})
+	lt.open()
+
+	lt.act("lsp_rename")
+	lt.feed(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	_, cmd := lt.m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	lt.settle(cmd, 6)
+
+	if got := lt.ed.applied["/p/a_test.go"]; len(got) != 1 || got[0].Text != "New" {
+		t.Fatalf("applied to the unopened file = %+v, want the rename edit", got)
+	}
+	if want := []string{"/p/a_test.go"}; !slices.Equal(lt.ed.opened, want) {
+		t.Fatalf("opened = %v, want %v", lt.ed.opened, want)
+	}
+	if lt.ed.active != 0 {
+		t.Fatalf("active tab = %d, want the tab the rename started in (0)", lt.ed.active)
+	}
+	if got := lt.m.notice; strings.Contains(got, "not changed") || !strings.Contains(got, "2 files") {
+		t.Fatalf("notice = %q, want 2 files renamed and no skipped", got)
+	}
+}
+
+func TestLSPRenameReadFailureOfAnUnopenedFileIsShown(t *testing.T) {
+	port := newFakeLSP("go")
+	port.renames = []FileEdit{{Path: "/p/b.go", Edits: []editor.LSPEdit{{Text: "New"}}}}
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"   "}})
+	lt.ed.loadErr = errors.New("read failed")
+	lt.open()
+
+	lt.act("lsp_rename")
+	lt.feed(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	_, cmd := lt.m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	lt.settle(cmd, 6)
+
+	if got := lt.m.notice; got != "read failed" {
+		t.Fatalf("notice = %q, want the read error", got)
+	}
+	if len(lt.ed.opened) != 0 {
+		t.Fatalf("opened = %v, want none", lt.ed.opened)
 	}
 }
 

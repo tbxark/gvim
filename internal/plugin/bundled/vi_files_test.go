@@ -104,9 +104,15 @@ func TestViFileCommands(t *testing.T) {
 		if !strings.Contains(v.notices(), "a 1:0") {
 			t.Fatalf("notices = %q", v.notices())
 		}
+		// :reg lists the registers in a popup, a row each (a status row holds one line)
 		v.keys(":«reg»")
-		if !strings.Contains(v.notices(), `"0 abc^J`) {
-			t.Fatalf("notices = %q", v.notices())
+		pop := v.host.UI().Last("popup")
+		if pop == nil || !pop.Open || pop.Popup.Title != "Registers" {
+			t.Fatalf("no popup: %+v", pop)
+		}
+		rows := strings.Join(pop.Popup.Lines, "\n")
+		if !strings.Contains(rows, `"0    abc^J`) || !strings.Contains(rows, "Type  Name  Content") {
+			t.Fatalf("registers popup:\n%s", rows)
 		}
 	})
 	t.Run("k sets a mark", func(t *testing.T) {

@@ -604,7 +604,7 @@ func TestLSPFreshShapes(t *testing.T) {
 			map[string]LSPServer{"py": {Command: "b", Args: []string{"x"}}}},
 		{"disabled without command", `{"lsp": {"py": {"enabled": false}}}`, map[string]LSPServer{}},
 		{"fresh fields", `{"lsp": {"go": {"command": "gopls", "auto_start": true, "env": {"A": "b"}, "root_markers": ["go.mod"], "only_features": null, "initialization_options": {"x": 1}, "process_limits": {"enabled": true}}}}`,
-			map[string]LSPServer{"go": {Command: "gopls"}}},
+			map[string]LSPServer{"go": {Command: "gopls", RootMarkers: []string{"go.mod"}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -636,5 +636,51 @@ func TestFreshOnlyValuesAreAccepted(t *testing.T) {
 	}
 	if cfg.MouseWheelScrollLines != 0 || cfg.LineEnding != LineEndingCR {
 		t.Errorf("wheel lines %d, line ending %q", cfg.MouseWheelScrollLines, cfg.LineEnding)
+	}
+}
+
+func TestLSPDisabledAndTurnedOnEntries(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		want         map[string]LSPServer
+		wantDisabled map[string]bool
+	}{
+		{"disabled without command", `{"lsp": {"go": {"enabled": false}}}`, map[string]LSPServer{}, map[string]bool{"go": true}},
+		{"disabled with command", `{"lsp": {"go": {"command": "gopls", "enabled": false}}}`, map[string]LSPServer{}, map[string]bool{"go": true}},
+		{"a later enabled entry keeps the language on",
+			`{"lsp": {"py": [{"command": "a", "enabled": false}, {"command": "b"}]}}`,
+			map[string]LSPServer{"py": {Command: "b"}}, nil},
+		{"enabled without a command turns the built-in on", `{"lsp": {"odin": {"enabled": true}}}`,
+			map[string]LSPServer{"odin": {}}, nil},
+		{"auto_start without a command turns the built-in on", `{"lsp": {"odin": {"auto_start": true, "args": ["-x"]}}}`,
+			map[string]LSPServer{"odin": {Args: []string{"-x"}}}, nil},
+		{"other languages are not disabled", `{"lsp": {"go": {"enabled": false}, "rust": {"command": "ra"}}}`,
+			map[string]LSPServer{"rust": {Command: "ra"}}, map[string]bool{"go": true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, diags := loadBody(t, tt.body)
+			if len(diags) != 0 {
+				t.Fatalf("diagnostics: %v", diags)
+			}
+			if !reflect.DeepEqual(cfg.LSP, tt.want) || !reflect.DeepEqual(cfg.LSPDisabled, tt.wantDisabled) {
+				t.Errorf("LSP = %+v disabled %v, want %+v disabled %v", cfg.LSP, cfg.LSPDisabled, tt.want, tt.wantDisabled)
+			}
+		})
+	}
+}
+
+func TestLSPEnabledMasterSwitch(t *testing.T) {
+	cfg, diags := loadBody(t, `{}`)
+	if len(diags) != 0 || !cfg.LSPEnabled {
+		t.Fatalf("default: enabled %v diagnostics %v, want on", cfg.LSPEnabled, diags)
+	}
+	cfg, diags = loadBody(t, `{"lsp_enabled": false}`)
+	if len(diags) != 0 || cfg.LSPEnabled {
+		t.Errorf("lsp_enabled false: enabled %v diagnostics %v, want off", cfg.LSPEnabled, diags)
+	}
+	if _, diags = loadBody(t, `{"lsp_enabled": "no"}`); len(diags) != 1 {
+		t.Errorf("a string for lsp_enabled gave %d diagnostics, want 1", len(diags))
 	}
 }

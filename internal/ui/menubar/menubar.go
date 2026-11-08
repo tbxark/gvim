@@ -9,16 +9,15 @@
 // Geometry is computed here from the frame size, and Paint and Hit read the
 // same geometry, so a label and its click target cannot drift apart.
 //
-// Every title and every dropdown row has an accelerator: the first letter of its
-// label that no earlier label in the same list took. Paint underlines that one
-// cell and nothing else.
+// The menus have no mnemonics: no Alt+letter opens a title and no underlined letter
+// activates a row. They are used with the mouse, with the arrow keys once open, and
+// through the palette command that opens the bar.
 package menubar
 
 import (
 	"errors"
 	"slices"
 	"strings"
-	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -26,6 +25,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -34,6 +34,14 @@ const labelGap = 3
 
 // labelStart is the column of the first label.
 const labelStart = 1
+
+// moreTitle is the title of the overflow marker, the last cell of the bar when the
+// labels do not all fit. Its dropdown lists the labels that are not shown.
+const moreTitle = "⋯"
+
+// moreCols is the number of columns the marker takes with the blank before it. The
+// labels shown end before the last moreCols columns of a bar that overflows.
+const moreCols = 2
 
 // ErrUnsupported is the error Ports.Run returns for an action the port does not
 // implement. A dropdown row with no action, such as a submenu, reports it too.
@@ -49,6 +57,13 @@ type Ports interface {
 	Holds(key string) bool
 }
 
+// KeyLabeler is an optional part of Ports. KeyLabel returns the shortcut of action in
+// the active keymap, as the menu shows it, or "" when the keymap has none. ok is false
+// when there is no keymap to ask, and the rows then keep the shortcut of the table.
+type KeyLabeler interface {
+	KeyLabel(action string) (label string, ok bool)
+}
+
 // Failed is emitted as a command when an activated row could not run. The root
 // shows Label in the status row, and Err is ErrUnsupported when the row has no
 // implementation.
@@ -61,10 +76,13 @@ type Failed struct {
 type TargetKind int
 
 const (
-	TargetNone   TargetKind = iota // outside the bar and the open dropdown
-	TargetLabel                    // a bar label; Index is its position in Labels
-	TargetItem                     // a dropdown row; Index is its position in Rows
-	TargetBorder                   // a dropdown border or separator
+	TargetNone      TargetKind = iota // outside the bar and the open dropdown
+	TargetLabel                       // a bar label; Index is its position in Labels
+	TargetItem                        // a dropdown row; Index is its position in Rows
+	TargetBorder                      // a dropdown border or separator
+	TargetSubItem                     // a row of the open submenu; Index is its position in SubRows
+	TargetSubBorder                   // a submenu border or separator
+	TargetMore                        // the overflow marker at the right end of the bar
 )
 
 // Target is the result of Hit.
@@ -83,10 +101,20 @@ type Model struct {
 	title         string // label of the open dropdown, "" when closed
 	rows          []Row
 	selected      int // index of the highlighted row, -1 when none can be highlighted
+	scroll        int // index of the first row shown, when the rows do not fit the frame
+	sub           subMenu
 }
 
-// keys are the bindings the open dropdown answers. Every other key falls through,
-// except a letter that is the accelerator of a row, which Consumes reports.
+// subMenu is the open submenu of a row: the row it hangs from, its highlighted
+// child and the first child shown.
+type subMenu struct {
+	open     bool
+	parent   int
+	selected int
+	scroll   int
+}
+
+// keys are the bindings the open dropdown answers. Every other key falls through.
 var keys = struct {
 	Up, Down, Left, Right, Enter, Close key.Binding
 }{
@@ -106,7 +134,15 @@ func New(ports Ports, st style.Styles) Model {
 
 // SetSize sets the frame size that Hit uses. Paint takes the size from its grid.
 func (m Model) SetSize(w, h int) Model {
+	resized := w != m.w || h != m.h
 	m.w, m.h = w, h
+	if resized && m.title == moreTitle {
+		// The labels the list shows depend on the width, so a resize closes it.
+		m = m.Close()
+	}
+	if m.IsOpen() {
+		m = m.reveal()
+	}
 	return m
 }
 
@@ -114,7 +150,7 @@ func (m Model) SetSize(w, h int) Model {
 // dropdown whose label leaves the bar closes.
 func (m Model) WithExplorerFocus(on bool) Model {
 	m.explorerFocus = on
-	if m.title != "" && !slices.Contains(barLabels(on), m.title) {
+	if m.title != "" && m.title != moreTitle && !slices.Contains(barLabels(on), m.title) {
 		m = m.Close()
 	}
 	return m
@@ -133,6 +169,27 @@ func (m Model) Title() string { return m.title }
 
 // Rows returns the rows of the open dropdown. The slice is a copy.
 func (m Model) Rows() []Row { return slices.Clone(m.rows) }
+
+// SubOpen reports whether a submenu is open.
+func (m Model) SubOpen() bool { return m.sub.open }
+
+// SubRows returns the rows of the open submenu, or nil when none is open. The slice
+// is a copy.
+func (m Model) SubRows() []Row {
+	if !m.sub.open {
+		return nil
+	}
+	return slices.Clone(m.rows[m.sub.parent].children)
+}
+
+// SubSelected is the highlighted row of the open submenu, or -1 when none is open or
+// no row can be highlighted.
+func (m Model) SubSelected() int {
+	if !m.sub.open {
+		return -1
+	}
+	return m.sub.selected
+}
 
 // Selected is the highlighted row, or -1 when no row can be highlighted.
 func (m Model) Selected() int { return m.selected }
@@ -171,42 +228,54 @@ func (m Model) Prev() Model {
 	return m.move(-1)
 }
 
-// Select activates the highlighted row, as Enter does. The dropdown closes
-// whether or not the row ran. It does nothing when the bar is closed.
+// Select activates the highlighted row, as Enter does. A row with a submenu opens
+// it. Any other row closes the dropdown whether or not it ran. It does nothing when
+// the bar is closed.
 func (m Model) Select() (Model, tea.Cmd) {
 	if !m.IsOpen() {
 		return m, nil
 	}
+	if m.sub.open {
+		if m.sub.selected < 0 {
+			return m.openSub(m.sub.parent), nil
+		}
+		return m.Close().run(m.rows[m.sub.parent].children[m.sub.selected])
+	}
 	if m.selected < 0 {
 		return m.Close(), nil
 	}
-	row := m.rows[m.selected]
+	return m.activate(m.selected)
+}
+
+// activate runs row i of the dropdown. A row with a submenu opens it and leaves the
+// dropdown open.
+func (m Model) activate(i int) (Model, tea.Cmd) {
+	row := m.rows[i]
+	if row.Opens != "" {
+		return m.openTitle(row.Opens), nil
+	}
+	if row.Submenu && !row.Disabled && len(row.children) > 0 {
+		return m.openSub(i), nil
+	}
 	return m.Close().run(row)
 }
 
-// Accelerator opens the title whose accelerator is letter (case-insensitive),
-// whether or not a dropdown is open. It is the route for Alt+letter. It reports
-// false, and leaves the model as it is, when no title has that letter. A letter
-// in an open dropdown is a row accelerator and reaches Update instead.
-func (m Model) Accelerator(letter rune) (Model, bool) {
-	letter = unicode.ToLower(letter)
-	for i, r := range labelRuns(m.explorerFocus) {
-		if letter != 0 && r.acc.key == letter {
-			return m.Open(i), true
-		}
-	}
-	return m, false
+// openSub opens the submenu of row i with its first selectable row highlighted.
+func (m Model) openSub(i int) Model {
+	m.selected = i
+	m.sub = subMenu{open: true, parent: i, selected: stepIn(m.rows[i].children, -1, 1)}
+	return m.reveal()
 }
 
 // Close closes the dropdown. It does nothing when the bar is closed.
 func (m Model) Close() Model {
-	m.title, m.rows, m.selected = "", nil, -1
+	m.title, m.rows, m.selected, m.scroll, m.sub = "", nil, -1, 0, subMenu{}
 	return m
 }
 
 // Consumes reports whether msg belongs to the open dropdown, so the root must not
 // route it further. A key the dropdown answers is consumed: the arrows, Enter,
-// Esc, and a letter that is the accelerator of a row. A left press on a label, a
+// and Esc. A left press on a label, a
 // row or a border is consumed. A press anywhere else is not, because it closes
 // the dropdown and still reaches what is under it. Hover is not consumed.
 func (m Model) Consumes(msg tea.Msg) bool {
@@ -215,13 +284,15 @@ func (m Model) Consumes(msg tea.Msg) bool {
 	}
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if key.Matches(msg, keys.Up, keys.Down, keys.Left, keys.Right, keys.Enter, keys.Close) {
-			return true
-		}
-		return m.rowWithAccel(letterOf(msg)) >= 0
+		return key.Matches(msg, keys.Up, keys.Down, keys.Left, keys.Right, keys.Enter, keys.Close)
 	case tea.MouseClickMsg:
 		mo := msg.Mouse()
 		return mo.Button == tea.MouseLeft && m.Hit(mo.X, mo.Y).Kind != TargetNone
+	case tea.MouseWheelMsg:
+		// A wheel notch over a dropdown scrolls it, not the editor under it.
+		mo := msg.Mouse()
+		k := m.Hit(mo.X, mo.Y).Kind
+		return k != TargetNone && k != TargetLabel && k != TargetMore
 	}
 	return false
 }
@@ -245,6 +316,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.IsOpen() {
 			return m.hover(msg.Mouse()), nil
 		}
+	case tea.MouseWheelMsg:
+		if m.IsOpen() {
+			return m.wheel(msg.Mouse()), nil
+		}
 	}
 	return m, nil
 }
@@ -254,24 +329,47 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) key(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Close):
+		if m.sub.open {
+			m.sub = subMenu{}
+			return m, nil
+		}
 		return m.Close(), nil
 	case key.Matches(msg, keys.Up):
-		m.selected = m.step(m.selected, -1)
+		m = m.stepSelection(-1)
 	case key.Matches(msg, keys.Down):
-		m.selected = m.step(m.selected, 1)
+		m = m.stepSelection(1)
 	case key.Matches(msg, keys.Left):
-		m = m.Prev()
+		if m.sub.open {
+			m.sub = subMenu{}
+		} else {
+			m = m.Prev()
+		}
 	case key.Matches(msg, keys.Right):
-		m = m.Next()
+		switch {
+		case m.sub.open:
+			if m.sub.selected < 0 {
+				m = m.openSub(m.sub.parent)
+			}
+		case m.selected >= 0 && m.rows[m.selected].Submenu && len(m.rows[m.selected].children) > 0:
+			m = m.openSub(m.selected)
+		default:
+			m = m.Next()
+		}
 	case key.Matches(msg, keys.Enter):
 		return m.Select()
-	default:
-		if i := m.rowWithAccel(letterOf(msg)); i >= 0 {
-			row := m.rows[i]
-			return m.Close().run(row)
-		}
 	}
 	return m, nil
+}
+
+// stepSelection moves the highlight of the open list one selectable row in dir and
+// scrolls it into view.
+func (m Model) stepSelection(dir int) Model {
+	if m.sub.open {
+		m.sub.selected = stepFrom(m.rows[m.sub.parent].children, m.sub.selected, dir)
+	} else {
+		m.selected = stepFrom(m.rows, m.selected, dir)
+	}
+	return m.reveal()
 }
 
 // click handles a left press. A label toggles its dropdown, a row runs, a border
@@ -279,35 +377,18 @@ func (m Model) key(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 func (m Model) click(mo tea.Mouse) (Model, tea.Cmd) {
 	t := m.Hit(mo.X, mo.Y)
 	switch t.Kind {
-	case TargetLabel:
-		title := Labels(m.explorerFocus)[t.Index]
+	case TargetLabel, TargetMore:
+		title := m.titleOf(t)
 		if m.IsOpen() && title == m.title {
 			return m.Close(), nil
 		}
 		return m.openTitle(title), nil
 	case TargetItem:
-		row := m.rows[t.Index]
-		return m.Close().run(row)
+		return m.activate(t.Index)
+	case TargetSubItem:
+		return m.Close().run(m.rows[m.sub.parent].children[t.Index])
 	}
 	return m.Close(), nil
-}
-
-// hover follows the pointer while a dropdown is open. A label that is not the
-// open one switches to its dropdown, and a selectable row under the pointer is
-// highlighted.
-func (m Model) hover(mo tea.Mouse) Model {
-	t := m.Hit(mo.X, mo.Y)
-	switch t.Kind {
-	case TargetLabel:
-		if title := Labels(m.explorerFocus)[t.Index]; title != m.title {
-			return m.openTitle(title)
-		}
-	case TargetItem:
-		if m.rows[t.Index].selectable() {
-			m.selected = t.Index
-		}
-	}
-	return m
 }
 
 // run runs an activated row. Separators and disabled rows do nothing. A row
@@ -334,12 +415,47 @@ func failed(label string, err error) tea.Cmd {
 }
 
 // openTitle opens the dropdown of the label title with its first selectable row
-// highlighted. The rows are read from the table when the dropdown opens.
+// highlighted. The rows are read from the table when the dropdown opens, and the
+// overflow marker's rows are the labels the bar does not show.
 func (m Model) openTitle(title string) Model {
 	m.title = title
-	m.rows = dropdownRows(title, m.holds)
-	m.selected = m.step(-1, 1)
-	return m
+	if title == moreTitle {
+		m.rows = m.overflowRows()
+	} else {
+		m.rows = dropdownRows(title, m.holds, m.keyOf())
+	}
+	m.scroll, m.sub = 0, subMenu{}
+	m.selected = stepIn(m.rows, -1, 1)
+	return m.reveal()
+}
+
+// overflowRows lists the labels the bar does not show at its width, in bar order. Each
+// row opens the dropdown of its label.
+func (m Model) overflowRows() []Row {
+	shown, _ := barFit(labelRuns(m.explorerFocus), m.w)
+	titles := Labels(m.explorerFocus)
+	rows := make([]Row, 0, len(titles)-len(shown))
+	for _, title := range titles[len(shown):] {
+		rows = append(rows, Row{Label: title, Opens: title})
+	}
+	return rows
+}
+
+// titleOf is the title a bar target opens: the label at its index, or the marker.
+func (m Model) titleOf(t Target) string {
+	if t.Kind == TargetMore {
+		return moreTitle
+	}
+	return Labels(m.explorerFocus)[t.Index]
+}
+
+// keyOf returns the lookup of the shortcut of an action in the active keymap, or nil
+// when the ports have no keymap to ask.
+func (m Model) keyOf() func(action string) (string, bool) {
+	if kl, ok := m.ports.(KeyLabeler); ok {
+		return kl.KeyLabel
+	}
+	return nil
 }
 
 // move opens the dropdown of the label dir places from the open one, wrapping
@@ -353,29 +469,15 @@ func (m Model) move(dir int) Model {
 	return m.openTitle(titles[(i+dir+len(titles))%len(titles)])
 }
 
-// step returns the index of the next selectable row from start in direction dir
-// (+1 or -1). It stays at start when no row is found.
-func (m Model) step(start, dir int) int {
-	for i := start + dir; i >= 0 && i < len(m.rows); i += dir {
-		if m.rows[i].selectable() {
+// stepIn returns the index of the next selectable row of rows from start in
+// direction dir (+1 or -1). It stays at start when no row is found.
+func stepIn(rows []Row, start, dir int) int {
+	for i := start + dir; i >= 0 && i < len(rows); i += dir {
+		if rows[i].selectable() {
 			return i
 		}
 	}
 	return start
-}
-
-// rowWithAccel returns the index of the row whose accelerator is letter, or -1.
-// A zero letter matches nothing.
-func (m Model) rowWithAccel(letter rune) int {
-	if letter == 0 {
-		return -1
-	}
-	for i, r := range m.rows {
-		if r.acc.key == letter {
-			return i
-		}
-	}
-	return -1
 }
 
 // holds evaluates a context key through the ports. Without ports nothing holds.
@@ -383,67 +485,176 @@ func (m Model) holds(name string) bool {
 	return m.ports != nil && m.ports.Holds(name)
 }
 
-// labelRun is one bar label: its first column, its width, its text and the
-// accelerator that opens it.
+// labelRun is one bar label: its first column, its width and its text.
 type labelRun struct {
 	x, w  int
 	title string
-	acc   accel
 }
 
 // labelRuns places the bar labels with labelGap blanks between them.
 func labelRuns(explorerFocus bool) []labelRun {
 	titles := barLabels(explorerFocus)
-	accels := pickAccels(titles)
 	var runs []labelRun
 	x := labelStart
-	for i, title := range titles {
+	for _, title := range titles {
 		w := ansi.StringWidth(title)
-		runs = append(runs, labelRun{x: x, w: w, title: title, acc: accels[i]})
+		runs = append(runs, labelRun{x: x, w: w, title: title})
 		x += w + labelGap
 	}
 	return runs
 }
 
-// dropBox is the open dropdown rectangle. Its top border is row 1, its bottom
-// border is row bottom, and its rows start at row 2.
+// barFit returns the leading runs that a w-column bar shows. When the last run does not
+// fit, the labels shown end before the last moreCols columns, and more is true: the
+// marker takes the last column.
+func barFit(runs []labelRun, w int) (shown []labelRun, more bool) {
+	if len(runs) == 0 {
+		return runs, false
+	}
+	if last := runs[len(runs)-1]; last.x+last.w <= w {
+		return runs, false
+	}
+	n := 0
+	for n < len(runs) && runs[n].x+runs[n].w <= w-moreCols {
+		n++
+	}
+	return runs[:n], true
+}
+
+// titleRun is the bar run that a title occupies in a w-column frame: its label, or the
+// marker in the last column. ok is false for a label the bar does not have.
+func titleRun(runs []labelRun, title string, w int) (labelRun, bool) {
+	if title == moreTitle {
+		return labelRun{x: w - 1, w: 1, title: moreTitle}, true
+	}
+	for _, r := range runs {
+		if r.title == title {
+			return r, true
+		}
+	}
+	return labelRun{}, false
+}
+
+// dropBox is a dropdown rectangle: the dropdown of a label, or a submenu. Its top
+// border is row top, its rows start at row top+1 and its bottom border is row
+// bottom. When the rows do not fit, it shows the rows from index first.
 type dropBox struct {
 	x, w, bottom int
+	top          int
+	first        int
+	rows         []Row
+	selected     int
 }
+
+// visible is the number of rows the box shows.
+func (b dropBox) visible() int { return b.bottom - b.top - 1 }
 
 // geometry is the placement of the bar and of the open dropdown in a frame.
 type geometry struct {
 	labels []labelRun
 	box    dropBox
 	hasBox bool
+	sub    dropBox
+	hasSub bool
 }
 
 // geometry computes the placement for a w by h frame. The dropdown hangs one
-// column left of its label. Its width is the widest row with its shortcut, plus
-// a two-cell margin and the right border. It is clipped to the frame width, and
-// its bottom border stops above the last row.
+// column left of its label, and is moved left when it would pass the right edge.
+// Its width is the widest row with its shortcut, plus space.PadX on both sides and
+// the two borders. Its bottom border stops above the status row, and a dropdown with
+// more rows than fit shows the window that holds the highlighted row. The submenu
+// of the highlighted row opens beside the dropdown, on its right when there is
+// room and on its left otherwise.
 func (m Model) geometry(w, h int) geometry {
-	g := geometry{labels: labelRuns(m.explorerFocus)}
+	runs := labelRuns(m.explorerFocus)
+	shown, more := barFit(runs, w)
+	g := geometry{labels: shown}
+	if more {
+		// A copy: shown shares the backing array of runs, which the lookup below reads.
+		g.labels = append(slices.Clone(shown), labelRun{x: w - 1, w: 1, title: moreTitle})
+	}
 	if !m.IsOpen() {
 		return g
 	}
-	for _, r := range g.labels {
-		if r.title != m.title {
-			continue
-		}
-		box := dropBox{
-			x:      max(r.x-1, 0),
-			w:      min(w, contentWidth(m.rows)+3),
-			bottom: min(2+len(m.rows), h-1),
-		}
-		g.box = box
-		g.hasBox = box.w >= 4 && box.bottom >= 2
+	// The dropdown of a label the bar does not show still hangs from where it is, clamped
+	// into the frame, so the keys can open it there.
+	if r, ok := titleRun(runs, m.title, w); ok {
+		g.box = layoutBox(m.rows, m.selected, m.scroll, r.x-1, 1, w, h)
+		g.hasBox = usable(g.box)
+	}
+	if m.sub.open && g.hasBox {
+		children := m.rows[m.sub.parent].children
+		g.sub = m.subBox(g, children, w, h)
+		g.hasSub = usable(g.sub)
 	}
 	return g
 }
 
-// contentWidth is the width of the widest row: its label, and its shortcut
-// after one blank. Separators do not count.
+// subBox places the submenu of the highlighted row. It opens beside the dropdown,
+// level with its parent row, on the right when there is room and on the left
+// otherwise. When neither side has room it is placed against the frame's right edge
+// and moved off the parent row, below it or above it, so the parent's label stays
+// visible.
+func (m Model) subBox(g geometry, children []Row, w, h int) dropBox {
+	rowY := g.box.top + 1 + m.sub.parent - g.box.first
+	top := max(1, min(rowY-1, h-3-len(children)))
+	x := g.box.x + g.box.w
+	bw := min(w, boxWidth(children))
+	if x+bw <= w {
+		return layoutBox(children, m.sub.selected, m.sub.scroll, x, top, w, h)
+	}
+	if g.box.x-bw >= 0 {
+		return layoutBox(children, m.sub.selected, m.sub.scroll, g.box.x-bw, top, w, h)
+	}
+	x = w - bw
+	if below := rowY + 1; below+1+len(children) <= h-2 {
+		top = below
+	} else if above := rowY - 2 - len(children); above >= 1 {
+		top = above
+	} else {
+		top = min(rowY+1, max(h-4, 1))
+	}
+	return layoutBox(children, m.sub.selected, m.sub.scroll, x, top, w, h)
+}
+
+// usable reports whether a box is big enough to draw.
+func usable(b dropBox) bool { return b.w >= 4 && b.visible() >= 1 }
+
+// layoutBox places the rows in a box whose top border is row top, at column x or as
+// near as the w by h frame allows. The last row of the frame is the status row, so
+// the bottom border is at most on the row above it.
+func layoutBox(rows []Row, selected, scroll, x, top, w, h int) dropBox {
+	bw := min(w, boxWidth(rows))
+	visible := min(len(rows), max(h-3-top, 0))
+	first := min(max(scroll, 0), len(rows)-visible)
+	if selected >= 0 {
+		first = max(min(first, selected), selected-visible+1)
+	}
+	return dropBox{
+		x: min(max(x, 0), max(w-bw, 0)), w: bw,
+		top: top, bottom: top + 1 + visible,
+		first: first, rows: rows, selected: selected,
+	}
+}
+
+// reveal keeps the highlighted rows inside the window of the dropdown and of the
+// submenu, after the highlight or the frame size changed.
+func (m Model) reveal() Model {
+	g := m.geometry(m.w, m.h)
+	if g.hasBox {
+		m.scroll = g.box.first
+	}
+	if g.hasSub {
+		m.sub.scroll = g.sub.first
+	}
+	return m
+}
+
+// checkboxWidth is the width of the box a checkbox row draws before its label.
+const checkboxWidth = 2
+
+// contentWidth is the width of the widest row: its checkbox, its label, and its
+// shortcut after one blank. Separators do not count.
 func contentWidth(rows []Row) int {
 	content := 0
 	for _, r := range rows {
@@ -451,6 +662,9 @@ func contentWidth(rows []Row) int {
 			continue
 		}
 		cw := ansi.StringWidth(r.Label)
+		if r.Checkbox {
+			cw += checkboxWidth
+		}
 		if r.Keys != "" {
 			cw += 1 + ansi.StringWidth(r.Keys)
 		}
@@ -458,6 +672,10 @@ func contentWidth(rows []Row) int {
 	}
 	return content
 }
+
+// boxWidth is the width of a dropdown that shows rows: the content between the
+// two borders, with space.PadX of padding on each side.
+func boxWidth(rows []Row) int { return contentWidth(rows) + 2 + 2*space.PadX }
 
 // Hit returns what is at column x, row y of the frame set by SetSize.
 func (m Model) Hit(x, y int) Target {
@@ -468,28 +686,47 @@ func (m Model) Hit(x, y int) Target {
 	if y == 0 {
 		for i, r := range g.labels {
 			if x >= r.x && x < r.x+r.w {
+				if r.title == moreTitle {
+					return Target{Kind: TargetMore}
+				}
 				return Target{Kind: TargetLabel, Index: i}
 			}
 		}
 		return Target{Kind: TargetNone}
 	}
-	if !g.hasBox || x < g.box.x || x >= g.box.x+g.box.w || y > g.box.bottom {
-		return Target{Kind: TargetNone}
+	if g.hasSub {
+		if t, ok := hitBox(g.sub, x, y, TargetSubItem, TargetSubBorder); ok {
+			return t
+		}
 	}
-	if y == 1 || y == g.box.bottom {
-		return Target{Kind: TargetBorder}
+	if g.hasBox {
+		if t, ok := hitBox(g.box, x, y, TargetItem, TargetBorder); ok {
+			return t
+		}
 	}
-	i := y - 2
-	if i >= len(m.rows) || m.rows[i].Separator {
-		return Target{Kind: TargetBorder}
+	return Target{Kind: TargetNone}
+}
+
+// hitBox returns what is at (x, y) of box: a border, a separator, or a row of the
+// kind item. The border kind says which box the border belongs to. ok is false
+// outside the box.
+func hitBox(box dropBox, x, y int, item, border TargetKind) (Target, bool) {
+	if x < box.x || x >= box.x+box.w || y < box.top || y > box.bottom {
+		return Target{}, false
 	}
-	return Target{Kind: TargetItem, Index: i}
+	if y == box.top || y == box.bottom || x == box.x || x == box.x+box.w-1 {
+		return Target{Kind: border}, true
+	}
+	i := box.first + y - box.top - 1
+	if i >= len(box.rows) || box.rows[i].Separator {
+		return Target{Kind: border}, true
+	}
+	return Target{Kind: item, Index: i}, true
 }
 
 // Paint draws the bar on row 0 of g and, when a dropdown is open, the dropdown
 // below it. The open label takes the active style, and the highlighted row takes
-// the selected style. A disabled row is drawn dim. The accelerator of each label
-// and row is underlined, and no other cell is.
+// the selected style. A disabled row is drawn dim. No cell is underlined.
 func (m Model) Paint(g *grid.Grid) {
 	geo := m.geometry(g.Width(), g.Height())
 	g.Fill(0, g.Width(), 0, m.styles.bar)
@@ -498,31 +735,41 @@ func (m Model) Paint(g *grid.Grid) {
 		if r.title == m.title {
 			st = m.styles.activeLabel
 		}
-		putText(g, r.x, 0, g.Width(), r.title, st, r.acc)
+		g.Put(r.x, 0, g.Width(), r.title, st)
 	}
 	if geo.hasBox {
 		m.paintBox(g, geo.box)
 	}
+	if geo.hasSub {
+		m.paintBox(g, geo.sub)
+	}
 }
 
-// paintBox draws the dropdown rows inside box: the rounded border, the rows with
-// their shortcuts, and the separator rules.
+// checkGlyph is the box a checkbox row draws before its label.
+func checkGlyph(checked bool) string {
+	if checked {
+		return "☑ "
+	}
+	return "☐ "
+}
+
+// paintBox draws the rows of box in view: the rounded border, the rows with their
+// shortcuts, and the separator rules.
 func (m Model) paintBox(g *grid.Grid, box dropBox) {
 	b := lipgloss.RoundedBorder()
 	bg := m.styles.box
 	border := m.styles.border
 	x0, right := box.x, box.x+box.w-1
 	rule := strings.Repeat(b.Top, box.w-2)
-	g.Put(x0, 1, x0+box.w, b.TopLeft+rule+b.TopRight, border)
-	for i, r := range m.rows {
-		y := 2 + i
-		if y >= box.bottom {
-			break
-		}
+	g.Put(x0, box.top, x0+box.w, b.TopLeft+rule+b.TopRight, border)
+	for k := range box.visible() {
+		i := box.first + k
+		y := box.top + 1 + k
+		r := box.rows[i]
 		st := bg
 		switch {
 		case r.Separator:
-		case i == m.selected:
+		case i == box.selected:
 			st = m.styles.selected
 		case r.Disabled:
 			st = m.styles.disabled
@@ -531,29 +778,23 @@ func (m Model) paintBox(g *grid.Grid, box dropBox) {
 		g.Set(x0, y, b.Left, border)
 		g.Set(right, y, b.Right, border)
 		if r.Separator {
-			g.Put(x0+2, y, right, strings.Repeat("─", box.w-3), bg)
+			g.Put(x0+1+space.PadX, y, right-space.PadX, strings.Repeat("─", max(box.w-2-2*space.PadX, 0)), bg)
 			continue
 		}
 		g.Fill(x0+1, right, y, st)
-		putText(g, x0+2, y, right, r.Label, st, r.acc)
+		edge := right - space.PadX
+		x := x0 + 1 + space.PadX
+		if r.Checkbox {
+			g.Put(x, y, edge, checkGlyph(r.Checked), st)
+			x += checkboxWidth
+		}
+		g.Put(x, y, edge, r.Label, st)
 		if r.Keys != "" {
-			g.Put(right-ansi.StringWidth(r.Keys), y, right, r.Keys, st)
+			g.Put(edge-ansi.StringWidth(r.Keys), y, edge, r.Keys, st)
 		}
 	}
 	g.Put(x0, box.bottom, x0+box.w, b.BottomLeft+rule+b.BottomRight, border)
-}
-
-// putText writes text at (x, y), clipped to the column maxX, and underlines the
-// cell of its accelerator letter. The underline is set on that one cell, so the
-// spaces around it keep the plain style.
-func putText(g *grid.Grid, x, y, maxX int, text string, st grid.Style, acc accel) {
-	g.Put(x, y, maxX, text, st)
-	if acc.key == 0 || x+acc.col >= maxX {
-		return
-	}
-	under := st
-	under.Underline = true
-	g.Set(x+acc.col, y, acc.text, under)
+	paintMore(g, box, border)
 }
 
 // styles are the grid styles of the bar and the dropdown. The bar row keeps the

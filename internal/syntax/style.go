@@ -62,7 +62,7 @@ var styleSlots = []styleSlot{
 		themeKey: theme.SyntaxFunction,
 		colour:   crushFunction,
 		tokens: []chroma.TokenType{
-			chroma.NameFunction, chroma.NameBuiltin, chroma.NameDecorator,
+			chroma.NameFunction, chroma.NameBuiltin,
 		},
 	},
 	{
@@ -74,13 +74,17 @@ var styleSlots = []styleSlot{
 	{
 		themeKey: theme.SyntaxVariable,
 		tokens: []chroma.TokenType{
-			chroma.NameVariable, chroma.NameBuiltinPseudo, chroma.NameAttribute, chroma.NameProperty,
+			chroma.NameVariable, chroma.NameAttribute, chroma.NameProperty,
 		},
+	},
+	{
+		themeKey: theme.SyntaxVariableBuiltin,
+		tokens:   []chroma.TokenType{chroma.NameBuiltinPseudo},
 	},
 	{
 		themeKey: theme.SyntaxConstant,
 		tokens: []chroma.TokenType{
-			chroma.KeywordConstant, chroma.NameConstant, chroma.NameEntity,
+			chroma.KeywordConstant, chroma.NameConstant, chroma.NameEntity, chroma.NameDecorator,
 		},
 	},
 	{

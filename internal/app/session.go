@@ -98,6 +98,7 @@ func writeSession(ed *editor.Editor, dir string, st ui.ExplorerState, kept []ses
 				return err
 			}
 			fs.StashFile = name
+			stampDisk(&fs, doc)
 		}
 		if i == orig {
 			active = len(files)
@@ -214,6 +215,11 @@ func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace boo
 	}
 	if f.StashFile != "" {
 		replaceText(doc, text)
+		if f.MTimeUnixNano != 0 {
+			// The text was edited from the file as it was then. Keep that as the
+			// baseline, so a file that changed since is not overwritten unasked.
+			doc.ExpectDisk(f.Size, f.MTimeUnixNano)
+		}
 	}
 	if f.Line > 0 {
 		_ = ed.GotoLine(f.Line, max(f.Col, 1))
@@ -266,4 +272,12 @@ func activeIndex(ed *editor.Editor) int {
 		}
 	}
 	return -1
+}
+
+// stampDisk records in fs the state of the file that the unsaved text of doc is based
+// on, so a restore can tell whether the file changed after the stash was taken.
+func stampDisk(fs *session.FileState, doc *editor.Document) {
+	if size, mtime, ok := doc.DiskStamp(); ok {
+		fs.Size, fs.MTimeUnixNano = size, mtime
+	}
 }

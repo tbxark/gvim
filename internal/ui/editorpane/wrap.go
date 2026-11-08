@@ -1,6 +1,11 @@
 package editorpane
 
-import "github.com/charmbracelet/x/ansi"
+import (
+	"slices"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
+)
 
 // Soft wrap (display only). A buffer line wider than the wrap width is shown on
 // several display rows. The editor still moves by buffer lines, so only painting,
@@ -55,25 +60,34 @@ func wrapHanging(runes []rune, w int, hang bool, glue []bool) (spans []span, ind
 
 // wrapRows splits runes into rows of w cells, the rows after the first being indent
 // cells narrower. A rune glued to the next one (see wrapHanging) is not split from it:
-// the row breaks before the run, as Fresh keeps a <XX> byte token whole.
+// the row breaks before the run, as Fresh keeps a <XX> byte token whole. A grapheme
+// cluster is one unit of the width of the whole cluster, as the grid paints it.
 func wrapRows(runes []rune, w, indent int, glue []bool) []span {
+	return wrapRowsFrom(runes, w, indent, glue, false)
+}
+
+// wrapRowsFrom is wrapRows for a piece of a longer line. With cont set the piece continues
+// the line, so its first row is a continuation row: it is indent cells narrower, as the rows
+// after the first of a line are.
+func wrapRowsFrom(runes []rune, w, indent int, glue []bool, cont bool) []span {
 	if w < 2 {
 		return []span{{0, len(runes)}}
 	}
 	var out []span
 	start := 0
+	cw := clusterWidths(runes)
 	for {
 		limit := w
-		if start > 0 {
+		if start > 0 || cont {
 			limit -= indent
 		}
 		end, cells := start, 0
 		for end < len(runes) {
-			cw := ansi.StringWidth(string(runes[end]))
-			if cells+cw > limit {
+			n := cw(end)
+			if cells+n > limit {
 				break
 			}
-			cells += cw
+			cells += n
 			end++
 		}
 		if end == len(runes) {
@@ -82,6 +96,9 @@ func wrapRows(runes []rune, w, indent int, glue []bool) []span {
 		if end == start {
 			// One rune is wider than the row. It takes a row of its own.
 			end = start + 1
+			for end < len(runes) && cw(end) == 0 {
+				end++
+			}
 		}
 		if end > start && end < len(runes) && isGlued(glue, end-1) {
 			// The row ends inside a glued run: break before the run, unless the
@@ -97,7 +114,9 @@ func wrapRows(runes []rune, w, indent int, glue []bool) []span {
 		brk := end
 		for j := end - 1; j >= start; j-- {
 			if runes[j] == ' ' {
-				brk = j + 1
+				if breaksBeforeToken(runes, cw, start, j+1, w, indent, cont) {
+					brk = j + 1
+				}
 				break
 			}
 		}
@@ -105,6 +124,56 @@ func wrapRows(runes []rune, w, indent int, glue []bool) []span {
 		start = brk
 	}
 }
+
+// breaksBeforeToken reports whether the row that starts at start ends before the token
+// that begins at brk, so the token moves to the next row. A token that fits a fresh row
+// moves, as the legacy rule has it. A token wider than a fresh row moves only when the
+// row already holds the floor of Fresh's wrap machine, the larger of w-16 and w/2 cells,
+// hanging indent included. Otherwise it is split on this row, and a marker such as "- "
+// is not left alone before a long unspaced run.
+func breaksBeforeToken(runes []rune, cw func(int) int, start, brk, w, indent int, cont bool) bool {
+	fresh := w - indent
+	t, tokenW := brk, 0
+	for t < len(runes) && runes[t] != ' ' && tokenW <= fresh {
+		tokenW += cw(t)
+		t++
+	}
+	if tokenW <= fresh {
+		// The token is whole: it ends within the row, or it fits a fresh row.
+		return true
+	}
+	col := ansi.StringWidth(string(runes[start:brk]))
+	if start > 0 || cont {
+		col += indent
+	}
+	return col >= max(w-wrapLookback, w/2)
+}
+
+// clusterWidths returns the width of rune i as wrapping counts it: the width of its
+// grapheme cluster on the first rune of the cluster, and none on the others, so a row
+// never ends inside a cluster. A line of printable ASCII, the common case, is one cell
+// a rune with nothing built.
+func clusterWidths(runes []rune) func(int) int {
+	if !slices.ContainsFunc(runes, func(r rune) bool { return r >= 0x80 }) {
+		return func(int) int { return 1 }
+	}
+	widths := make([]int8, len(runes))
+	rest, i := string(runes), 0
+	for rest != "" {
+		gr, w := ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth)
+		if gr == "" {
+			break
+		}
+		widths[i] = int8(w)
+		i += utf8.RuneCountInString(gr)
+		rest = rest[len(gr):]
+	}
+	return func(i int) int { return int(widths[i]) }
+}
+
+// wrapLookback is how far below the width a row may end to move a long token down,
+// as Fresh's WRAP_MAX_LOOKBACK.
+const wrapLookback = 16
 
 // isGlued reports whether rune i is joined to the rune after it.
 func isGlued(glue []bool, i int) bool {

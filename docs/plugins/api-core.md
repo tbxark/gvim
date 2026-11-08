@@ -37,7 +37,8 @@ gvim.status(msg)            -- the same as gvim.notify(msg, "info")
   arguments joined with spaces through `tostring`. `print(...)` logs at info level its arguments joined with tabs through `tostring`, so unlike
   `gvim.log.info("a", 1)` it never treats the first argument as a format. A line is cut at
   4 KiB. The log keeps the last 2000 entries (**Plugin: Show Log**).
-* `warn` and `error` also go to the user's warnings log and its `[warn N]` counter.
+* `warn` and `error` also go to the user's warnings list (**Show Warnings**). There is no status-bar counter
+  for them: the `[⚠ N]` counter on the status row counts language server diagnostics only.
 * `notify` shows the text on the status row (newlines become spaces, 512 bytes at most);
   `warn` and `error` also go to the warnings log.
 * Formatting runs inside your slice, so a `__tostring` metamethod is budgeted like any Lua.
@@ -55,7 +56,10 @@ gvim.plugin.on_unload(fn) -> true | nil, err
 `on_unload` functions run when the plugin is unloaded or reloaded, in the order given. They must
 not wait, get 200 ms in all, and are abandoned after that. At most 16 can be registered.
 Everything the plugin registered is closed by the runtime anyway; use `on_unload` for what only you
-know about (a file you wrote, a state you keep).
+know about (a state you keep). An `on_unload` function cannot touch files: every `gvim.fs` function
+waits, so `gvim.fs.write` or `gvim.fs.remove` in it (or in a `shutdown` handler) is refused with
+`async call inside a Go callback: on_unload must not yield` in the log and does nothing. To remove a
+file you created, delete it when you are done with it, or on the next load.
 
 ## gvim.settings
 

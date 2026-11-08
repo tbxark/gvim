@@ -19,6 +19,8 @@ func TestNonUTF8FilesOpenAndSaveByteForByte(t *testing.T) {
 		{"windows-1252 without a break", "na\xefve", "naïve", "Windows-1252"},
 		{"UTF-16LE with BOM", "\xff\xfeh\x00i\x00\r\x00\n\x00", "hi\n", "UTF-16 LE"},
 		{"UTF-16BE with BOM", "\xfe\xff\x00h\x00i", "hi", "UTF-16 BE"},
+		{"UTF-16LE without BOM", "c\x00a\x00f\x00\xe9\x00\n\x00", "caf\u00e9\n", "UTF-16 LE"},
+		{"UTF-16BE without BOM", "\x00c\x00a\x00f\x00\xe9\x00\n", "caf\u00e9\n", "UTF-16 BE"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

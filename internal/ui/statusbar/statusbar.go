@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -249,7 +250,7 @@ func truncateLeftCells(s string, w int) string {
 	if n <= w {
 		return s
 	}
-	return "…" + ansi.TruncateLeft(s, n-(w-1), "")
+	return "…" + space.Tail(s, w-1)
 }
 
 // Hit returns the run under column x of a w-cell row, or a KindNone run when no

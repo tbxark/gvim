@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/theme"
+	"github.com/tbxark/gvim/internal/ui/space"
 )
 
 // chromeKeys is testKeys with the chords the chrome tests press: Esc in the
@@ -142,10 +143,11 @@ func TestExplorerRowsStartAtRowTwoWithoutMenuBar(t *testing.T) {
 	}
 }
 
+// With the gutter hidden the text starts PadX cells into the pane, not on its first column.
 func TestHiddenLineNumbersLayoutHasNoGutter(t *testing.T) {
 	l := layoutFor(80, 24, layoutInput{hideLineNumbers: true, lines: 4})
-	if l.gutter != 0 || l.textX != 0 || l.textW != 80 {
-		t.Fatalf("gutter %d textX %d textW %d, want 0, 0 and 80", l.gutter, l.textX, l.textW)
+	if l.gutter != 0 || l.textX != space.PadX || l.textW != 80-space.PadX {
+		t.Fatalf("gutter %d textX %d textW %d, want 0, %d and %d", l.gutter, l.textX, l.textW, space.PadX, 80-space.PadX)
 	}
 }
 
@@ -160,7 +162,7 @@ func TestToggleLineNumbersFlipsTheGutter(t *testing.T) {
 	if l := m.layout(); l.gutter != 0 {
 		t.Fatalf("gutter %d after the toggle, want 0", l.gutter)
 	}
-	if row := m.paint().Plain()[2]; !strings.HasPrefix(row, "hello") {
+	if row := m.paint().Plain()[2]; !strings.HasPrefix(row, " hello") {
 		t.Fatalf("body row %q does not start with the text", row)
 	}
 	if err := m.Run("toggle_line_numbers"); err != nil {

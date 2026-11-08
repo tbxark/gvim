@@ -21,14 +21,42 @@ func (d *Document) Folds(tabWidth int) []fold.Range {
 		return nil
 	}
 	key := foldKey{gen: d.Gen(), ver: d.Buffer.Version(), tab: tabWidth}
-	if d.foldMemo.ok && d.foldMemo.key == key {
-		return d.foldMemo.ranges
+	m := &d.foldMemo
+	if m.ok && m.key == key {
+		return m.ranges
 	}
-	d.foldMemo.ranges = fold.RangesFunc(d.Buffer.Lines(), func(i int) (int, bool) {
-		return d.Buffer.LineIndent(i, tabWidth)
-	})
-	d.foldMemo.key, d.foldMemo.ok = key, true
-	return d.foldMemo.ranges
+	b := d.Buffer
+	indentOf := func(i int) int32 {
+		if w, blank := b.LineIndent(i, tabWidth); !blank {
+			return int32(w)
+		}
+		return -1
+	}
+	if m.ok && m.buf == b && m.key.gen == key.gen && m.key.tab == tabWidth && len(m.indents) == b.Lines() {
+		// Typing does not change the indentation of a line, nor the folds. The lines that
+		// edits touched since the last call are read again, and when each is as it was, so
+		// are the ranges.
+		if lo, hi, ok := b.EditedSince(m.serial); ok && hi < len(m.indents) {
+			same := true
+			for i := lo; i <= hi; i++ {
+				if v := indentOf(i); v != m.indents[i] {
+					m.indents[i], same = v, false
+				}
+			}
+			m.key, m.serial = key, b.EditSerial()
+			if !same {
+				m.ranges = m.findRanges()
+			}
+			return m.ranges
+		}
+	}
+	m.indents = make([]int32, b.Lines())
+	for i := range m.indents {
+		m.indents[i] = indentOf(i)
+	}
+	m.buf, m.key, m.serial, m.ok = b, key, b.EditSerial(), true
+	m.ranges = m.findRanges()
+	return m.ranges
 }
 
 // foldKey identifies the input of fold.Ranges: the buffer, its content version and
@@ -38,11 +66,22 @@ type foldKey struct {
 	tab      int
 }
 
-// foldMemo is the ranges Folds found last.
+// foldMemo is the ranges Folds found last, and what they were found from: the indentation of
+// every line (or -1 for a blank one) in the buffer at edit serial serial.
 type foldMemo struct {
-	ok     bool
-	key    foldKey
-	ranges []fold.Range
+	ok      bool
+	key     foldKey
+	buf     *buffer.Buffer
+	serial  uint64
+	indents []int32
+	ranges  []fold.Range
+}
+
+// findRanges finds the ranges of the remembered indentation.
+func (m *foldMemo) findRanges() []fold.Range {
+	return fold.RangesFunc(len(m.indents), func(i int) (int, bool) {
+		return int(m.indents[i]), m.indents[i] < 0
+	})
 }
 
 // Folded reports whether the fold that starts at line is collapsed. It does not

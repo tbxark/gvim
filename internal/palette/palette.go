@@ -70,8 +70,8 @@ func Commands(km *keymap.Map) []Entry {
 	if km == nil {
 		km = keymap.Default()
 	}
-	out := make([]Entry, 0, len(builtinCommands)+len(pluginCommands))
-	for _, c := range slices.Concat(builtinCommands, pluginCommands) {
+	out := make([]Entry, 0, len(builtinCommands)+len(compareCommands)+len(pluginCommands))
+	for _, c := range slices.Concat(builtinCommands, compareCommands, pluginCommands) {
 		if r, ok := gvimRenames[c.Action]; ok {
 			c.Name, c.Description = cmp.Or(r.Name, c.Name), r.Description
 		}
@@ -300,48 +300,7 @@ func asciiEqualFold(a, b string) bool {
 	return true
 }
 
-// modifierGlyphs are the macOS symbols the legacy palette shows, in the order
-// it writes them: ctrl, alt, shift.
-var modifierGlyphs = map[string]string{"ctrl": "⌃", "alt": "⌥", "shift": "⇧"}
-
-var keyGlyphs = map[string]string{
-	"up":        "↑",
-	"down":      "↓",
-	"left":      "←",
-	"right":     "→",
-	"enter":     "↩",
-	"backspace": "⌫",
-	"delete":    "⌦",
-	"escape":    "⎋",
-	"tab":       "⇥",
-	"space":     "Space",
-	"pageup":    "⇞",
-	"pagedown":  "⇟",
-	"home":      "↖",
-	"end":       "↘",
-}
-
-// FormatChord renders a canonical chord, such as "ctrl+alt+up", with the
-// symbols the palette uses: "⌃⌥↑". Single letters are upper-cased. An unknown
-// modifier returns the chord unchanged.
-func FormatChord(chord string) string {
-	parts := strings.Split(chord, "+")
-	key := parts[len(parts)-1]
-	var b strings.Builder
-	for _, m := range parts[:len(parts)-1] {
-		g, ok := modifierGlyphs[m]
-		if !ok {
-			return chord
-		}
-		b.WriteString(g)
-	}
-	switch {
-	case keyGlyphs[key] != "":
-		b.WriteString(keyGlyphs[key])
-	case len([]rune(key)) == 1:
-		b.WriteString(strings.ToUpper(key))
-	default:
-		b.WriteString(key)
-	}
-	return b.String()
-}
+// FormatChord renders a canonical chord, or a multi-key sequence, as plain text:
+// "Ctrl+Alt+Up", "Ctrl+X Ctrl+S". It is keymap.FormatChord, the one label style of the
+// menus, the palette, the welcome screen, the status row and the help.
+func FormatChord(chord string) string { return keymap.FormatChord(chord) }

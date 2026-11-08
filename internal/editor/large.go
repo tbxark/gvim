@@ -389,9 +389,9 @@ func (d *Document) CheckSource() error {
 	switch {
 	case errors.Is(err, buffer.ErrSourceChanged):
 		d.readOnly = true
-		d.status = errFileChanged.Error()
+		d.fail(errFileChanged)
 	case errors.Is(err, buffer.ErrSourceGrew):
-		d.status = errFileGrew.Error()
+		d.fail(errFileGrew)
 	default:
 		return err
 	}
@@ -399,6 +399,7 @@ func (d *Document) CheckSource() error {
 	// status says where.
 	if note := d.stashUnsaved(); note != "" {
 		d.status += ". " + note
+		d.statusErr = d.status
 	}
 	return err
 }

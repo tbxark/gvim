@@ -276,3 +276,13 @@ func TestRunsWithNarrowWidthsDoNotPanic(t *testing.T) {
 		_ = rowText(m, w, doc("x", "/a"))
 	}
 }
+
+func TestTruncateLeftCellsNeverOverflowsOnWideRunes(t *testing.T) {
+	t.Parallel()
+	path := "/home/用户/文档/我的-项目/报告-最终版.txt"
+	for w := 1; w <= 40; w++ {
+		if got := truncateLeftCells(path, w); ansi.StringWidth(got) > w {
+			t.Errorf("truncateLeftCells(path, %d) = %q is %d cells wide", w, got, ansi.StringWidth(got))
+		}
+	}
+}

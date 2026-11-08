@@ -104,10 +104,51 @@ func TestWrapOnKeepsTheWholeLineAndNoBar(t *testing.T) {
 	}
 }
 
-func TestHitOnTheHorizontalBarIsNone(t *testing.T) {
+func TestHitOnTheHorizontalBarIsTheBar(t *testing.T) {
 	p := Pane{Doc: newDoc("0123456789abcdef")}
-	if h := p.Hit(12, 3, 7, 2); h.Kind != HitNone {
-		t.Errorf("hit on the bar = %+v, want none", h)
+	if h := p.Hit(12, 3, 7, 2); h.Kind != HitHScrollbar || h.Col != 7 {
+		t.Errorf("hit on the bar = %+v, want the horizontal scrollbar at column 7", h)
+	}
+	// The gutter cells of the bar row are not the bar.
+	if h := p.Hit(12, 3, 2, 2); h.Kind != HitNone {
+		t.Errorf("hit on the gutter of the bar row = %+v, want none", h)
+	}
+	// Without a bar the last row is text.
+	if h := (Pane{Doc: newDoc("0123")}).Hit(12, 3, 7, 2); h.Kind == HitHScrollbar {
+		t.Errorf("hit on a row with no bar = %+v", h)
+	}
+}
+
+// TestHScrollForPutsTheThumbUnderThePointer: the ends of the track are the ends of the
+// longest line, a press in the middle lands between, and the answer grows with x.
+func TestHScrollForPutsTheThumbUnderThePointer(t *testing.T) {
+	long := strings.Repeat("x", 300)
+	p := Pane{Doc: newDoc(long)}
+	const w, h, gutter = 60, 5, 6
+	_, most := p.HScroll(w, h)
+	if most != 300-(w-1-gutter) {
+		t.Fatalf("setup: most = %d", most)
+	}
+	if got := p.HScrollFor(w, h, gutter-4); got != 0 {
+		t.Errorf("left of the track gave %d, want 0", got)
+	}
+	if got := p.HScrollFor(w, h, w-1); got != most {
+		t.Errorf("right end gave %d, want %d", got, most)
+	}
+	prev := -1
+	for x := gutter; x < w; x++ {
+		got := p.HScrollFor(w, h, x)
+		if got < prev || got < 0 || got > most {
+			t.Fatalf("x=%d gave %d after %d (most %d)", x, got, prev, most)
+		}
+		prev = got
+	}
+	mid := p.HScrollFor(w, h, gutter+(w-1-gutter)/2)
+	if mid <= 0 || mid >= most {
+		t.Errorf("the middle of the track gave %d, want it between 0 and %d", mid, most)
+	}
+	if got := (Pane{Doc: newDoc("short")}).HScrollFor(w, h, 30); got != 0 {
+		t.Errorf("a pane with no bar gave %d, want 0", got)
 	}
 }
 

@@ -293,6 +293,31 @@ func TestGitGutterNavigationWithoutChanges(t *testing.T) {
 	}
 }
 
+// The plugin never scans a buffer in large-file mode, so navigation says that, not "No changes".
+func TestGitGutterNavigationInLargeFileMode(t *testing.T) {
+	r := gutterRig(t, "a\nb\n", "a\nB\n")
+	for _, b := range r.host.Buffers {
+		if b.Info.ID == r.ids[gutterFile] {
+			b.Info.Large = true
+		}
+	}
+	r.emit("after_file_open", gutterFile, nil)
+	for _, cmd := range []string{"git_gutter.next_change", "git_gutter.prev_change"} {
+		if err := r.h.Run(cmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := r.h.NoticeTexts()
+	if len(got) == 0 || got[len(got)-1] != "Git changes are not tracked in large-file mode" {
+		t.Errorf("notices = %v, want the large-file message", got)
+	}
+	for _, n := range got {
+		if n == "No changes" {
+			t.Errorf("notices = %v: a large file was reported as unchanged", got)
+		}
+	}
+}
+
 // For a file git does not track, navigation falls back to the unsaved changes.
 func TestGitGutterNavigationFallsBackToTheSavedText(t *testing.T) {
 	r := startRig(t, rigOpts{
@@ -338,5 +363,49 @@ end }`,
 	// "b" became "B", and the trailing "e" line is gone.
 	if len(got) != 1 || got[0] != "modified@1x1,deleted@3x1|nil|nil" {
 		t.Errorf("notices = %v (log %v)", got, r.h.LogText(""))
+	}
+}
+
+// A commit made outside the editor moves HEAD under an open file: the plugin watches the git
+// directory and reads HEAD again, so the marks of lines that now match it go. Changes of other
+// files of the directory (index.lock, written by every git command) are ignored.
+func TestGitGutterFollowsAnExternalCommit(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"git_gutter"},
+		buffers: []rigBuffer{{gutterFile, "a\nB\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.SetDir("/w")
+			o.SetFile("/w/.git/HEAD", "ref: refs/heads/main\n")
+			o.Script(repoArgv, plugintest.ProcScript{Stdout: "/w\n.git/HEAD\n"})
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\n"})
+		},
+	})
+	r.emit("after_file_open", gutterFile, nil)
+	if got := marks(r.decor("git_gutter", "git_gutter", gutterFile)); !slices.Equal(got, []string{"1:│:change"}) {
+		t.Fatalf("gutter = %v", got)
+	}
+	if n := len(r.os.Watches()); n != 1 {
+		t.Fatalf("watchers = %d, want one on the git directory", n)
+	}
+	shows := r.runs("show")
+
+	r.os.Emit("/w/.git/index.lock", "create")
+	r.h.Settle()
+	if n := r.runs("show"); n != shows {
+		t.Errorf("a change of index.lock ran git show %d more times", n-shows)
+	}
+
+	// `git commit -a`: HEAD now holds the buffer's text.
+	r.os.Rescript(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nB\n"})
+	r.os.Emit("/w/.git/COMMIT_EDITMSG", "write")
+	r.h.Settle()
+	if n := r.runs("show"); n != shows+1 {
+		t.Errorf("after the commit git show ran %d times, want %d", n, shows+1)
+	}
+	if got := r.decor("git_gutter", "git_gutter", gutterFile); len(got) != 0 {
+		t.Errorf("marks after an external commit of the same text: %v", marks(got))
+	}
+	if p := r.problems(); len(p) != 0 {
+		t.Errorf("problems: %v", p)
 	}
 }

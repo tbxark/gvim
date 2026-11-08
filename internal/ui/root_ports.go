@@ -3,6 +3,7 @@ package ui
 import (
 	"time"
 
+	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/explorer/watch"
 	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/ui/palette"
@@ -72,6 +73,13 @@ type RootPorts struct {
 	// Nil or a zero interval turns it off.
 	Recovery      RecoveryPort
 	RecoveryEvery time.Duration
+	// FullLoadPrompts are the files named at startup that are large and not UTF-8, so
+	// they were not opened. The root asks about each once it runs, as it does for a file
+	// opened from a menu, instead of decoding it whole before the first frame.
+	FullLoadPrompts []editor.ErrLargeNeedsFullLoad
+	// Keybindings reads and writes the user's custom keybindings for the keybinding
+	// editor. Nil makes the editor read only.
+	Keybindings KeybindingStore
 	// Plugins is the plugin runtime. Nil turns plugins off: the palette lists
 	// only the built-in commands.
 	Plugins pluginapi.Runtime

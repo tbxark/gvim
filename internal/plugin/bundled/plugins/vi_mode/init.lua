@@ -10,16 +10,17 @@
 --
 -- The plugin is off unless plugins.vi_mode.enabled is true. Once loaded it starts in
 -- normal mode (set plugins.vi_mode.settings.auto_start to false to start with vi off and
--- turn it on with "Vi Mode: Toggle"). Esc pressed three times quickly, or the panic chord
--- ctrl+^, clears every plugin input mode, vi's included; Toggle brings it back.
+-- turn it on with "Vi Mode: Toggle"). The panic chord ctrl+^ clears every plugin input mode,
+-- vi's included; Toggle brings it back. Esc pressed three times does not: vi binds Esc.
 --
 -- Not ported: macros (q, @: the editor has its own), the jump list (ctrl+o, ctrl+i),
--- replace mode (R), sentences, folds, and shell filters.
+-- replace mode (R), sentences, folds, and shell filters. Each says so when it is typed.
 local gvim = require "gvim"
 local S = require "vi.state"
 local D = require "vi.doc"
 local Reg = require "vi.reg"
 local N = require "vi.normal"
+local Search = require "vi.search"
 
 local settings = gvim.settings.define {
   auto_start = {
@@ -54,9 +55,13 @@ local settings = gvim.settings.define {
     type = "boolean", default = true,
     description = "* and # search for the word under the caret.",
   },
+  hlsearch = {
+    type = "boolean", default = true,
+    description = "Highlight the matches of the last search in the window (:noh hides them until the next search).",
+  },
 }
 -- settings is a read-only view: copy the values into a table the :set command can change
-for _, name in ipairs { "auto_start", "arrow_keys", "ctrl_keys", "ignore_case", "smart_case", "shift_width", "clipboard_yank", "search_word_under_cursor" } do
+for _, name in ipairs { "auto_start", "arrow_keys", "ctrl_keys", "ignore_case", "smart_case", "shift_width", "clipboard_yank", "search_word_under_cursor", "hlsearch" } do
   S.settings[name] = settings[name]
 end
 Reg.opts.clipboard = settings.clipboard_yank
@@ -112,6 +117,10 @@ local function text_handler(ctx)
   if type(text) ~= "string" then
     return
   end
+  if ctx.args.paste then
+    N.paste(text)
+    return
+  end
   local col = 0
   while col < #text do
     local b = text:byte(col + 1)
@@ -132,6 +141,7 @@ local function command_bindings()
   local b = {
     escape = key("escape"),
     ["ctrl+["] = key("escape"),
+    ["ctrl+c"] = key("escape"), -- an interrupt: it ends a pending command and the visual mode
     enter = key("enter"),
     backspace = key("backspace"),
     tab = key("tab"),
@@ -161,7 +171,7 @@ local function insert_bindings()
   local function leave()
     N.leave_insert()
   end
-  local b = { escape = leave, ["ctrl+["] = leave }
+  local b = { escape = leave, ["ctrl+["] = leave, ["ctrl+c"] = leave }
   for name, action in pairs(MOVES) do
     b[name] = function()
       N.insert_broken()
@@ -172,11 +182,11 @@ local function insert_bindings()
 end
 
 gvim.mode.define {
-  name = "vi_normal", text = text_handler, paste = "swallow", fallthrough = true,
+  name = "vi_normal", text = text_handler, paste = "text", fallthrough = true,
   bindings = command_bindings(),
 }
 gvim.mode.define {
-  name = "vi_visual", text = text_handler, paste = "swallow", fallthrough = true,
+  name = "vi_visual", text = text_handler, paste = "text", fallthrough = true,
   bindings = command_bindings(),
 }
 gvim.mode.define {
@@ -206,6 +216,7 @@ local function disable(quiet)
     return
   end
   S.enabled = false
+  Search.hide()
   N.reset(true)
   current_mode = nil
   gvim.mode.leave()
@@ -243,7 +254,7 @@ gvim.plugins.export {
 local me = gvim.plugin.name
 local displaced -- the plugin whose mode replaced ours
 
--- If the editor's input mode is cleared (the panic chord, three Esc) vi is off: that is
+-- If the editor's input mode is cleared (the panic chord) vi is off: that is
 -- what the user asked for. If another plugin's mode replaces ours, vi waits and comes back
 -- when that mode ends.
 gvim.on("mode_changed", function(ev)
@@ -254,6 +265,7 @@ gvim.on("mode_changed", function(ev)
     if ev.plugin ~= me and ev.previous_plugin == me then
       displaced = ev.plugin
       S.suspended = true
+      Search.hide()
       status()
     end
     return
@@ -274,6 +286,7 @@ gvim.on("mode_changed", function(ev)
   if ev.previous_plugin == me and gvim.mode.current() == nil then
     S.enabled = false
     N.reset(true)
+    Search.hide()
     current_mode = nil
     status()
     gvim.notify("vi mode off: plugin input was cleared (run Vi Mode: Toggle to turn it on again)")
@@ -291,6 +304,7 @@ gvim.on("buffer_activated", function(ev)
   local own = info and info.mode ~= nil and info.mode ~= ""
   if own and not S.suspended then
     S.suspended = true
+    Search.hide()
     N.reset()
     current_mode = nil
     gvim.mode.leave()
@@ -313,6 +327,32 @@ gvim.on("buffer_activated", function(ev)
   end
 end)
 
+-- A selection that vi did not make (a mouse drag, a double click, shift and an arrow key) is the
+-- visual mode: d, y and c act on it.
+gvim.on("selection_changed", function()
+  if not S.enabled or S.suspended then
+    return
+  end
+  local ok, err = pcall(N.adopt_selection)
+  if not ok and err ~= D.CANCEL then
+    gvim.log.warn("vi_mode: selection: %s", tostring(err))
+  end
+end)
+
+-- The matches of the last search are painted for the lines the window shows: scrolling and
+-- editing paint them again, and so does another buffer.
+local function repaint()
+  if S.enabled and not S.suspended then
+    Search.show()
+  end
+end
+gvim.on("viewport_changed", repaint, { debounce = 50 })
+gvim.on("buffer_changed", repaint, { debounce = 150 })
+gvim.on("buffer_activated", function()
+  Search.hide()
+  repaint()
+end)
+
 gvim.on("buffer_closed", function(ev)
   for name, m in pairs(S.marks) do
     if m.buf == ev.id then
@@ -323,6 +363,7 @@ end)
 
 local function save_state()
   gvim.state.set("registers", Reg.snapshot())
+  gvim.state.set("history", S.history)
   if S.last_search then
     gvim.state.set("search", S.last_search.pattern)
   end
@@ -334,6 +375,19 @@ gvim.plugin.on_unload(save_state)
 -- ---------- start ----------
 
 Reg.restore(gvim.state.get("registers"))
+local saved_history = gvim.state.get("history")
+if type(saved_history) == "table" then
+  for _, kind in ipairs { "ex", "search" } do
+    local list = saved_history[kind]
+    if type(list) == "table" then
+      for _, line in ipairs(list) do
+        if type(line) == "string" and line ~= "" and #S.history[kind] < 100 then
+          S.history[kind][#S.history[kind] + 1] = line
+        end
+      end
+    end
+  end
+end
 local saved = gvim.state.get("search")
 if type(saved) == "string" and saved ~= "" then
   S.last_search = { pattern = saved, forward = true }

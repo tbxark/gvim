@@ -3,7 +3,6 @@ package editor
 import (
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // handler runs one action against the editor.
@@ -129,11 +128,11 @@ func buildHandlers() map[Action]handler {
 		return nil
 	})
 	h["to_upper_case"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.transformCase(strings.ToUpper)
+		d.transformCase(upperCase)
 		return nil
 	})
 	h["to_lower_case"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
-		d.transformCase(strings.ToLower)
+		d.transformCase(lowerCase)
 		return nil
 	})
 	h["transpose_chars"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
@@ -293,6 +292,9 @@ const scrollOff = 3
 // full page at the end. If the viewport cannot scroll, the caret moves by the
 // same amount instead.
 func pageMove(e *Editor, d *Document, dir int, extend bool) {
+	if e.pageInTallLine(d, dir, extend) {
+		return
+	}
 	rows := e.rows
 	lines := d.Buffer.Lines()
 	delta := max(rows-min(pageOverlap, rows-1), 1) * dir

@@ -140,8 +140,10 @@ func (m *Model) plannedFor(all bool, as asyncSaver, p editor.SavePlan, err error
 	// The write of a large document takes long: it can be stopped by a quit, and the
 	// notice row says it is running.
 	id, ctx := m.beginSave(all)
+	done := m.large.saves[id].done
 	m.savingStatus()
 	return func() tea.Msg {
+		defer close(done)
 		return saveDoneMsg{plan: p, results: writeSave(ctx, as, p), then: f, reload: reload, ask: ask, id: id}
 	}
 }
@@ -157,6 +159,12 @@ func (m *Model) saveDone(msg saveDoneMsg) tea.Cmd {
 	}
 	err := as.ApplySavePlan(msg.plan, msg.results)
 	m.plugSaved(msg.results)
+	if m.large.quitAfterSave && len(m.large.saves) == 0 {
+		m.large.quitAfterSave = false
+		if err == nil {
+			return m.quitLoop()
+		}
+	}
 	if cmd := m.quitIfWaiting(); cmd != nil {
 		// A quit was waiting for this write. Its results are recorded, and the program ends.
 		return cmd

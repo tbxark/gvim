@@ -68,6 +68,12 @@ var macroControl = map[string]bool{
 	// open the name prompt again when played, and save itself into init.lua.
 	"prompt_save_macro_to_init": true,
 	"prompt_promote_macro":      true,
+	// Opening the palette is not an edit. The command the user picks from it is
+	// recorded, and replaying the opening would leave the palette open.
+	"quick_open":         true,
+	"command_palette":    true,
+	"quick_open_files":   true,
+	"quick_open_buffers": true,
 }
 
 // macroAction runs one of the macro actions: prompt_record_macro starts a recording,

@@ -7,31 +7,28 @@ import (
 	"github.com/tbxark/gvim/internal/keymap"
 )
 
-// presetCounts holds Bindings() lengths, which include inherited entries:
-// macos = default (276) + 64, macos-gui = macos + 54, emacs = default + 104,
-// vscode = default + 4.
-var presetCounts = map[string]int{
-	"default":   276,
-	"macos":     276 + 64,
-	"macos-gui": 276 + 64 + 54,
-	"emacs":     276 + 104,
-	"vscode":    276 + 4,
-}
-
 func TestByNameLoadsEveryPreset(t *testing.T) {
-	for name, want := range presetCounts {
+	for _, name := range []string{"default", "macos", "macos-gui", "emacs", "vscode"} {
 		m, err := keymap.ByName(name)
 		if err != nil {
 			t.Errorf("ByName(%q): %v", name, err)
 			continue
 		}
-		if got := len(m.Bindings()); got != want {
-			t.Errorf("ByName(%q) bindings = %d, want %d", name, got, want)
+		if len(m.Bindings()) == 0 {
+			t.Errorf("ByName(%q) has no bindings", name)
 		}
 		again, err := keymap.ByName(name)
 		if err != nil || again != m {
 			t.Errorf("ByName(%q) must return the cached map on repeat calls (err %v)", name, err)
 		}
+	}
+	// A child holds its parent's bindings and its own: the counts are not pinned (the
+	// presets are pruned to the common set; TestPresetsStayCommon bounds them), only the
+	// inheritance is.
+	n := func(name string) int { return len(mustPreset(t, name).Bindings()) }
+	if n("macos") <= n("default") || n("macos-gui") <= n("macos") || n("emacs") <= n("default") || n("vscode") <= n("default") {
+		t.Errorf("a child preset must hold more bindings than its parent: default %d, macos %d, macos-gui %d, emacs %d, vscode %d",
+			n("default"), n("macos"), n("macos-gui"), n("emacs"), n("vscode"))
 	}
 }
 
@@ -82,7 +79,8 @@ func TestMacosRedoAndUndo(t *testing.T) {
 	if b, ok := m.Resolve("ctrl+r", keymap.ContextNormal); !ok || b.Action != "redo" {
 		t.Fatalf("macos ctrl+r = %+v, %v; want redo", b, ok)
 	}
-	// default.json's Ctrl+Y is not removed by the macOS file, so it still redoes.
+	// Ctrl+Y is inherited from default.json and still redoes: the macOS file keeps it as
+	// well as Ctrl+R, as the macOS spec lists both.
 	if b, ok := m.Resolve("ctrl+y", keymap.ContextNormal); !ok || b.Action != "redo" {
 		t.Fatalf("macos ctrl+y = %+v, %v; want inherited redo", b, ok)
 	}
@@ -105,21 +103,17 @@ func TestMacosRebindsAreVisibleOnlyInNormalContext(t *testing.T) {
 		want  string
 	}{
 		{"ctrl+a", keymap.ContextNormal, "select_all"},
-		{"ctrl+a", keymap.ContextPrompt, "prompt_move_start"},
 		{"ctrl+e", keymap.ContextNormal, "focus_file_explorer"},
-		{"ctrl+e", keymap.ContextPrompt, "prompt_move_end"},
 		{"ctrl+d", keymap.ContextNormal, "duplicate_line"},
 		{"ctrl+k", keymap.ContextNormal, "delete_line"},
 		{"ctrl+w", keymap.ContextNormal, "close_tab"},
 		{"alt+w", keymap.ContextNormal, "close_tab"},
 		{"alt+s", keymap.ContextNormal, "save_as"},
-		{"alt+o", keymap.ContextNormal, "open_folder"},
 		{"ctrl+e", keymap.ContextFileExplorer, "focus_editor"},
 		{"ctrl+b", keymap.ContextFileExplorer, "focus_editor"},
 		{"ctrl+b", keymap.ContextNormal, "toggle_file_explorer"},
 		{"ctrl+g", keymap.ContextNormal, "find_next"},
 		{"ctrl+l", keymap.ContextNormal, "goto_line"},
-		{"ctrl+u", keymap.ContextNormal, "delete_to_line_start"},
 		{"ctrl+t", keymap.ContextNormal, "command_palette"},
 	}
 	for _, tc := range tests {
@@ -146,20 +140,25 @@ func TestInheritanceChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// macos-gui inherits macos, which inherits default.
-	if b, ok := gui.Resolve("ctrl+p", keymap.ContextGlobal); !ok || b.Action != "quick_open" {
-		t.Errorf("macos-gui ctrl+p = %+v, %v; want default's quick_open", b, ok)
+	// macos-gui inherits macos, which inherits default. It binds each common action to its
+	// Cmd chord and disables the Ctrl chord it had, so Ctrl+P and Ctrl+R do nothing there.
+	if b, ok := gui.Resolve("ctrl+p", keymap.ContextGlobal); !ok || b.Action != "noop" {
+		t.Errorf("macos-gui ctrl+p = %+v, %v; want noop, Cmd+P is quick open", b, ok)
 	}
-	if b, ok := gui.Resolve("ctrl+r", keymap.ContextNormal); !ok || b.Action != "redo" {
-		t.Errorf("macos-gui ctrl+r = %+v, %v; want macos redo", b, ok)
+	if b, ok := gui.Resolve("super+p", keymap.ContextGlobal); !ok || b.Action != "quick_open" {
+		t.Errorf("macos-gui super+p = %+v, %v; want quick_open", b, ok)
+	}
+	if b, ok := gui.Resolve("ctrl+r", keymap.ContextNormal); !ok || b.Action != "noop" {
+		t.Errorf("macos-gui ctrl+r = %+v, %v; want noop, Cmd+Shift+Z is redo", b, ok)
 	}
 	if b, ok := gui.Resolve("super+s", keymap.ContextNormal); !ok || b.Action != "save" {
 		t.Errorf("macos-gui super+s = %+v, %v; want save", b, ok)
 	}
-	// The menu shows the simplest chord, as gen_menus does: ctrl+s (bit 2)
-	// ranks ahead of super+s (bit 8) at the same modifier count.
-	if b, ok := gui.Primary("save"); !ok || b.Chord != "ctrl+s" {
-		t.Errorf("macos-gui Primary(save) = %+v, %v; want ctrl+s", b, ok)
+	// The menu shows the preset's own binding before an inherited one (AK-08), so the GUI
+	// keymap shows Cmd+S and not the Ctrl+S it inherits. Fresh's menu shows the simplest
+	// chord instead, ctrl+s.
+	if b, ok := gui.Primary("save"); !ok || b.Chord != "super+s" {
+		t.Errorf("macos-gui Primary(save) = %+v, %v; want super+s", b, ok)
 	}
 
 	vs, err := keymap.ByName("vscode")
@@ -186,8 +185,9 @@ func TestEmacsSequences(t *testing.T) {
 	if got := b.Sequence; len(got) != 2 || got[0] != "ctrl+x" || got[1] != "ctrl+s" {
 		t.Fatalf("Sequence = %v, want [ctrl+x ctrl+s]", got)
 	}
-	if b, ok := em.ResolveSequence([]string{"Ctrl+X", "S"}, keymap.ContextNormal); !ok || b.Action != "save_all" {
-		t.Fatalf("C-x s (normalized) = %+v, %v; want save_all", b, ok)
+	// C-x s (save_all) is not a common action, so the emacs preset does not bind it.
+	if b, ok := em.ResolveSequence([]string{"Ctrl+X", "S"}, keymap.ContextNormal); ok {
+		t.Fatalf("C-x s = %+v; want no binding, save_all is not a common action", b)
 	}
 	if b, ok := em.ResolveSequence([]string{"alt+g", "g"}, keymap.ContextNormal); !ok || b.Action != "goto_line" {
 		t.Fatalf("M-g g = %+v, %v; want goto_line", b, ok)
@@ -201,12 +201,54 @@ func TestEmacsSequences(t *testing.T) {
 	if b, ok := em.Resolve("ctrl+p", keymap.ContextGlobal); !ok || b.Action != "noop" {
 		t.Fatalf("emacs ctrl+p = %+v, %v; want noop override", b, ok)
 	}
-	// Bindings it does not override are inherited from default.
-	if b, ok := em.Resolve("ctrl+q", keymap.ContextNormal); !ok || b.Action != "quit" {
-		t.Fatalf("emacs ctrl+q = %+v, %v; want inherited quit", b, ok)
+	// Ctrl+Z is suspend in Emacs, so the preset disables the inherited undo key there; undo is
+	// C-/ in this preset.
+	if b, ok := em.Resolve("ctrl+z", keymap.ContextNormal); !ok || b.Action != "noop" {
+		t.Fatalf("emacs ctrl+z = %+v, %v; want the noop override", b, ok)
+	}
+	if b, ok := em.Resolve("ctrl+/", keymap.ContextNormal); !ok || b.Action != "undo" {
+		t.Fatalf("emacs ctrl+/ = %+v, %v; want undo", b, ok)
+	}
+	// Ctrl+Q is Quit in default but quoted-insert in Emacs, so the preset frees it and the
+	// menu shows the C-x chord for Quit.
+	if b, ok := em.Resolve("ctrl+q", keymap.ContextNormal); !ok || b.Action != "noop" {
+		t.Fatalf("emacs ctrl+q = %+v, %v; want the noop override", b, ok)
 	}
 	if _, ok := em.ResolveSequence(nil, keymap.ContextNormal); ok {
 		t.Fatal("empty sequence must not resolve")
+	}
+}
+
+func TestHasSequencePrefix(t *testing.T) {
+	em, err := keymap.ByName("emacs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		steps []string
+		ctx   keymap.Context
+		want  bool
+	}{
+		{"first step of C-x C-s", []string{"ctrl+x"}, keymap.ContextNormal, true},
+		{"normalized spelling", []string{"Ctrl+X"}, keymap.ContextNormal, true},
+		{"first step of M-g g", []string{"alt+g"}, keymap.ContextNormal, true},
+		{"a complete sequence is not a prefix", []string{"ctrl+x", "ctrl+s"}, keymap.ContextNormal, false},
+		{"an unrelated key", []string{"ctrl+s"}, keymap.ContextNormal, false},
+		{"a wrong second step", []string{"ctrl+x", "ctrl+z"}, keymap.ContextNormal, false},
+		{"another context", []string{"ctrl+x"}, keymap.ContextFileExplorer, false},
+		{"no steps", nil, keymap.ContextNormal, false},
+		{"not a key", []string{"bogus+"}, keymap.ContextNormal, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := em.HasSequencePrefix(tt.steps, tt.ctx); got != tt.want {
+				t.Errorf("HasSequencePrefix(%v, %s) = %v, want %v", tt.steps, tt.ctx, got, tt.want)
+			}
+		})
+	}
+	if keymap.Default().HasSequencePrefix([]string{"ctrl+x"}, keymap.ContextNormal) {
+		t.Error("the default keymap has no sequence, yet ctrl+x is a prefix")
 	}
 }
 
@@ -227,8 +269,8 @@ func TestLoadInheritance(t *testing.T) {
 	if b, ok := m.Resolve("ctrl+s", keymap.ContextNormal); !ok || b.Action != "other" {
 		t.Fatalf("own ctrl+s = %+v, %v; want override of save", b, ok)
 	}
-	if got := len(m.Bindings()); got != 276+2 {
-		t.Fatalf("bindings = %d, want 278", got)
+	if got, want := len(m.Bindings()), len(mustPreset(t, "default").Bindings())+2; got != want {
+		t.Fatalf("bindings = %d, want the parent's plus 2 (%d)", got, want)
 	}
 }
 

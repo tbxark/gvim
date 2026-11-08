@@ -440,7 +440,11 @@ func (h *pluginHost) Notify(plugin string, level pluginapi.Level, msg string) {
 	case plugin != "":
 		// A plugin's own notice replaces the status row, with its name in front.
 		m.plug.ui.notices = nil
-		m.notice = plugin + ": " + msg
+		m.notice = msg
+		// The runtime's own messages already name the plugin ("rterr: boom", "wc suspended ...").
+		if !strings.HasPrefix(msg, plugin+": ") && !strings.HasPrefix(msg, plugin+" ") {
+			m.notice = plugin + ": " + msg
+		}
 		m.notes.keep(m.notice)
 		return
 	}

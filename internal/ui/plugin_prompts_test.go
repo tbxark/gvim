@@ -77,7 +77,7 @@ func TestPluginInputRoundTrip(t *testing.T) {
 			if len(m.overlays) != 1 {
 				t.Fatalf("%d overlays after the command, want the prompt", len(m.overlays))
 			}
-			if row := frameRow(m, m.height-1); !strings.HasPrefix(row, "Name: x") {
+			if row := frameRow(m, m.height-1); !strings.HasPrefix(row, " Name: x") {
 				t.Fatalf("prompt row = %q", row)
 			}
 			tt.keys(m)
@@ -566,7 +566,7 @@ func TestPluginDismissDoesNotRunThePluginInsideRouteOverlay(t *testing.T) {
 			if len(m.overlays) != 1 {
 				t.Fatalf("%d overlays, want only the next prompt", len(m.overlays))
 			}
-			if row := frameRow(m, m.height-1); !strings.HasPrefix(row, "Next:") {
+			if row := frameRow(m, m.height-1); !strings.HasPrefix(row, " Next:") {
 				t.Fatalf("top overlay row = %q", row)
 			}
 			if m.plug.ui.busy != inRoute {

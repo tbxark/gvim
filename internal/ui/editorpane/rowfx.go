@@ -32,13 +32,14 @@ func (f frame) numberStyle(i int) grid.Style {
 // rowCells are the cells of display row k of a laid out line, whose span is sp.
 // The last row also takes the cells past the text, and a continuation row starts
 // with the hanging indent.
-func (f frame) rowCells(ln line, k int, sp span) []cell {
-	hi := sp.to
-	if k == len(ln.spans)-1 {
+func (f frame) rowCells(rd rowDesc) []cell {
+	ln := rd.ln
+	hi := rd.sp.to
+	if rd.k == len(ln.spans)-1 && rd.last {
 		hi = len(ln.cells)
 	}
-	cells := ln.cells[sp.from:hi]
-	if k > 0 && ln.indent > 0 {
+	cells := ln.cells[rd.sp.from:hi]
+	if rd.cont() && ln.indent > 0 {
 		cells = slices.Concat(ln.pad, cells)
 	}
 	return cells

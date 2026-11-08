@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1055,6 +1056,19 @@ func bufConvertTrue(c pluginapi.Completion) []lua.LValue {
 	return []lua.LValue{lua.LTrue, lua.LTrue}
 }
 
+// rootPath resolves a relative path against the workspace root, the base of the paths that
+// gvim.workspace.files and grep return, so that those can be handed to gvim.buf.open as they are.
+// An absolute path, or a session with no root, is left as it is.
+func (r *Runtime) rootPath(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	if root := r.os.Dirs().Root; root != "" {
+		return filepath.Join(root, path)
+	}
+	return path
+}
+
 // awaitBufOpen is gvim.buf.open(path, opts?).
 func awaitBufOpen(c *awaitCall) {
 	var req pluginapi.OpenRequest
@@ -1071,7 +1085,7 @@ func awaitBufOpen(c *awaitCall) {
 		c.Fail(pluginapi.Errf(pluginapi.CodeInvalid, "empty path"))
 		return
 	}
-	req.Path = string(s)
+	req.Path = c.r.rootPath(string(s))
 	t, ok := bufOptional(c, 1, "open")
 	if !ok {
 		return

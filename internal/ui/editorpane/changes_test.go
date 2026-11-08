@@ -65,3 +65,57 @@ func TestIsSubsequence(t *testing.T) {
 		t.Errorf("ca is not a subsequence of abc")
 	}
 }
+
+// matchDoc is a fakeDoc that compares lines in place, as the editor's adapter does, and
+// records the lines the pane builds as strings.
+type matchDoc struct {
+	*fakeDoc
+	built []int
+}
+
+func (d *matchDoc) Line(i int) string {
+	d.built = append(d.built, i)
+	return d.fakeDoc.Line(i)
+}
+func (d *matchDoc) LineIs(i int, text string) bool { return d.lines[i] == text }
+
+// The change marks of a document that compares lines in place equal changeMarks of all
+// the lines, as far as they are drawn, and only the lines between the first and the last
+// change are built, also when the line count changed.
+func TestFrameChangesBuildsOnlyTheChangedLines(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		saved, cur []string
+		wantBuilt  []int
+	}{
+		{"edit in the middle", []string{"a", "b", "c", "d", "e"}, []string{"a", "b", "C", "d", "e"}, []int{2}},
+		{"two edits", []string{"a", "b", "c", "d", "e"}, []string{"A", "b", "c", "d", "E"}, []int{0, 1, 2, 3, 4}},
+		{"gained text at the end", []string{"a", "b", "c"}, []string{"a", "b", "cc"}, []int{2}},
+		{"nothing differs", []string{"a", "b"}, []string{"a", "b"}, []int{}},
+		{"line added", []string{"a", "b", "c"}, []string{"a", "b", "x", "c"}, []int{2}},
+		{"line removed", []string{"a", "b", "c"}, []string{"a", "c"}, []int{}},
+		{"non-ASCII line", []string{"é", "日本", "x"}, []string{"é", "日本語", "x"}, []int{1}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := &matchDoc{fakeDoc: &fakeDoc{lines: tc.cur, saved: tc.saved, modified: true}}
+			// The rows on screen cover every line and the row past the last one.
+			f := frame{doc: d, lines: len(tc.cur), h: len(tc.cur) + 1}
+			bar, scroll := f.changes()
+			wantBar, wantScroll := changeMarks(tc.saved, tc.cur)
+			if !maps.Equal(bar, wantBar) || !maps.Equal(scroll, wantScroll) {
+				t.Errorf("marks = %v, %v; want %v, %v", bar, scroll, wantBar, wantScroll)
+			}
+			if len(d.built) != len(tc.wantBuilt) {
+				t.Fatalf("built lines %v, want %v", d.built, tc.wantBuilt)
+			}
+			for i := range d.built {
+				if d.built[i] != tc.wantBuilt[i] {
+					t.Fatalf("built lines %v, want %v", d.built, tc.wantBuilt)
+				}
+			}
+		})
+	}
+}

@@ -231,7 +231,7 @@ func TestSetOptionsAndConfirmLabel(t *testing.T) {
 		t.Fatalf("query = %+v", q)
 	}
 	rows := frame(b, 100, 6)
-	if want := "[x] Confirm Each (⌥I)"; !strings.Contains(rows[4], want) {
+	if want := "[x] Confirm Each (Alt+I)"; !strings.Contains(rows[4], want) {
 		t.Fatalf("options row %q lacks %q", rows[4], want)
 	}
 }

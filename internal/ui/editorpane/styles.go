@@ -10,7 +10,7 @@ import (
 )
 
 // numKinds is the number of syntax kinds, KindPlain included.
-const numKinds = int(syntax.KindNumber) + 1
+const numKinds = int(syntax.KindCount)
 
 // Styles are the cell attributes the pane paints with. NewStyles builds them
 // from a theme. A zero Styles paints with the terminal defaults.
@@ -75,6 +75,11 @@ func NewStyles(th theme.Theme) Styles {
 			continue
 		}
 		st.Syntax[k].FG = syntaxFG(th, kind, text.FG)
+		attrs := kind.Attrs()
+		st.Syntax[k].Bold = attrs&syntax.AttrBold != 0
+		st.Syntax[k].Italic = attrs&syntax.AttrItalic != 0
+		st.Syntax[k].Underline = attrs&syntax.AttrUnderline != 0
+		st.Syntax[k].Strike = attrs&syntax.AttrStrike != 0
 	}
 	return st
 }
@@ -84,6 +89,10 @@ func NewStyles(th theme.Theme) Styles {
 func syntaxFG(th theme.Theme, kind syntax.Kind, base color.Color) color.Color {
 	key := kind.ThemeKey()
 	c, ok := th.Syntax(key)
+	if fb := kind.ThemeFallbackKey(); !ok && fb != "" {
+		key = fb
+		c, ok = th.Syntax(key)
+	}
 	switch {
 	case !ok:
 		return base

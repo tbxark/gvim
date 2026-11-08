@@ -652,7 +652,7 @@ function gvim.emit(name, payload) end
 -- ui, clipboard, decorations
 
 gvim.ui = {}
----@param opts? {prompt?: string, default?: string, select_all?: boolean, validate?: fun(text: string): string|nil, on_change?: fun(text: string)}
+---@param opts? {prompt?: string, default?: string, select_all?: boolean, history?: string[], validate?: fun(text: string): string|nil, on_change?: fun(text: string)}
 ---@return string|nil, string?
 function gvim.ui.input(opts) end
 ---@param msg string
@@ -717,7 +717,7 @@ function gvim.path.is_absolute(p) end
 function gvim.path.normalize(p) end
 ---@param base string
 ---@param p string
----@return string
+---@return string|nil, string?
 function gvim.path.relative(base, p) end
 ---@param p string
 ---@return string, string
@@ -827,11 +827,11 @@ gvim.workspace = {}
 ---@return string
 function gvim.workspace.root() end
 ---@param opts? {limit?: integer}
----@return {files: string[], loading: boolean}
+---@return {files: string[], loading: boolean} -- paths relative to the workspace root
 function gvim.workspace.files(opts) end
 ---@param query string
 ---@param opts? {regex?: boolean, case_sensitive?: boolean, max?: integer}
----@return {path: string, line: integer, col: integer, text: string}[]|nil, string?
+---@return {path: string, line: integer, col: integer, text: string}[]|nil, string? -- path is relative to the workspace root
 function gvim.workspace.grep(query, opts) end
 ---@param dir string
 ---@return string|nil

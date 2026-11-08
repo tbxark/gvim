@@ -97,7 +97,6 @@ func viewOptions(cfg config.Config, icons string) *ui.ViewOptions {
 		WrapIndent:                 cfg.WrapIndent,
 		SyntaxHighlighting:         cfg.SyntaxHighlighting,
 		ShowTilde:                  cfg.ShowTilde,
-		Rulers:                     append([]int(nil), cfg.Rulers...),
 		IndentationGuideMode:       cfg.IndentationGuide,
 		IndentationGuideGlyph:      cfg.IndentationGuideGlyph,
 		RainbowIndentation:         cfg.RainbowIndentation,

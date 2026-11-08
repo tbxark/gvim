@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -315,4 +316,55 @@ func TestGrepSkipsFilesLargerThanItReads(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("hits = %+v, want edge.txt and ok.txt", got)
 	}
+}
+
+// TestGrepScopeIsTheFileIndex backs the docs of workspace.grep: it searches what the file
+// index lists. Inside a git work tree that is git's list (tracked and untracked files that
+// are not ignored, hidden directories and node_modules included); elsewhere it is a walk
+// that honours .gitignore and skips hidden entries and node_modules.
+func TestGrepScopeIsTheFileIndex(t *testing.T) {
+	fill := func(t *testing.T, root string) {
+		t.Helper()
+		for rel, text := range map[string]string{
+			".gitignore":           "build/\n",
+			"src/a.txt":            "needle\n",
+			"build/out.txt":        "needle\n",
+			".hidden/h.txt":        "needle\n",
+			"node_modules/m/m.txt": "needle\n",
+		} {
+			path := filepath.Join(root, filepath.FromSlash(rel))
+			must(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			must(t, os.WriteFile(path, []byte(text), 0o644))
+		}
+	}
+	paths := func(t *testing.T, root string) []string {
+		t.Helper()
+		hits, err := pluginServices{}.Grep(t.Context(), pluginapi.GrepRequest{Root: root, Query: "needle"})
+		must(t, err)
+		var out []string
+		for _, h := range hits {
+			out = append(out, h.Path)
+		}
+		slices.Sort(out)
+		return out
+	}
+	t.Run("walk", func(t *testing.T) {
+		t.Setenv("PATH", "") // no git binary: the finder walks the directory
+		root := t.TempDir()
+		fill(t, root)
+		if got, want := paths(t, root), []string{"src/a.txt"}; !slices.Equal(got, want) {
+			t.Fatalf("paths = %v, want %v", got, want)
+		}
+	})
+	t.Run("git work tree", func(t *testing.T) {
+		if _, err := exec.LookPath("git"); err != nil {
+			t.Skip("no git binary")
+		}
+		root := t.TempDir()
+		fill(t, root)
+		gitIn(t, root, "init")
+		if got, want := paths(t, root), []string{".hidden/h.txt", "node_modules/m/m.txt", "src/a.txt"}; !slices.Equal(got, want) {
+			t.Fatalf("paths = %v, want %v", got, want)
+		}
+	})
 }

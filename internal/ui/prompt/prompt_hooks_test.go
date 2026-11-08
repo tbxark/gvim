@@ -40,7 +40,7 @@ func TestConfirmWithLabelsAndDefault(t *testing.T) {
 	t.Parallel()
 	c := NewConfirmWith(testStyles(), "Replace?", "tag", ConfirmOptions{Yes: "Do it", No: "Keep", DefaultYes: true})
 	rows := draw(c, 60, 3)
-	if got := strings.TrimRight(rows[2], " "); got != "Replace? [ Do it ] [ Keep ]" {
+	if got := strings.TrimRight(rows[2], " "); got != " Replace? [ Do it ] [ Keep ]" {
 		t.Fatalf("row = %q", got)
 	}
 	// The focus starts on Yes, so Enter answers it.
@@ -50,7 +50,7 @@ func TestConfirmWithLabelsAndDefault(t *testing.T) {
 	}
 	// NewConfirm is the plain form.
 	plain := NewConfirm(testStyles(), "Q?", "t")
-	if got := strings.TrimRight(draw(plain, 60, 3)[2], " "); got != "Q? [ Yes ] [ No ]" {
+	if got := strings.TrimRight(draw(plain, 60, 3)[2], " "); got != " Q? [ Yes ] [ No ]" {
 		t.Fatalf("plain row = %q", got)
 	}
 }

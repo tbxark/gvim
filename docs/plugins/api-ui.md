@@ -9,7 +9,9 @@ gvim.ui.choose(msg, choices) ⏳ -> id | nil
 gvim.ui.select(items, opts?) ⏳ -> item, index | nil
 ```
 
-* **`input`**: opts `prompt`, `default`, `select_all = true`, `validate = fn(text) -> err|nil`
+* **`input`**: opts `prompt`, `default`, `select_all = true`, `history = { "earlier", "answers" }` (oldest
+  first, the last 100 strings; Up and Down in the prompt walk it, and Down past the newest brings back
+  what was typed), `validate = fn(text) -> err|nil`
   (runs on every keystroke; it must be synchronous and cannot wait; return an error *string* to show
   it and refuse Enter) and `on_change = fn(text)` (runs as a callback task). A callback that
   raises is logged and does not trap the user. Returns the text, or `nil` when the user pressed Esc.
@@ -19,8 +21,9 @@ gvim.ui.select(items, opts?) ⏳ -> item, index | nil
   on Esc. It is a picker without filtering.
 * **`select`**: a filtering picker over `items` (strings, or tables with `text`, `detail`,
   `keybinding`, `disabled`). opts `title`, `filter = "fuzzy"|"none"`, `initial_query`,
-  `placeholder`, `footer` and `format = fn(item) -> string` (what to show for an item that is not a
-  string). It returns **your item** and its **1-based position** in `items`, or `nil` on Esc.
+  `placeholder`, `footer` and `format = fn(item) -> string` (the text of a row; it is called for
+  every item, strings included, so handle both kinds when you mix them, and return a string). It
+  returns **your item** and its **1-based position** in `items`, or `nil` on Esc.
   Up to 50 000 items; the filtering runs in a background command, not in the update, and 100 rows
   are drawn.
 

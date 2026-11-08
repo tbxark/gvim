@@ -138,3 +138,31 @@ func TestSaveRefusedWhileAutoSaveWritesShowsInTheStatusRow(t *testing.T) {
 		t.Fatal("the status row does not say that the save was refused")
 	}
 }
+
+// TestEmacsCtrlXCtrlSSavesWithoutCuttingTheLine checks that the first key of an Emacs
+// sequence only starts it: C-x does not cut the line, and C-x C-s saves the file.
+func TestEmacsCtrlXCtrlSSavesWithoutCuttingTheLine(t *testing.T) {
+	isolateConfig(t)
+	path := filepath.Join(t.TempDir(), "a.txt")
+	must(t, os.WriteFile(path, []byte("abc\nxyz\n"), 0o644))
+	ed := editor.New(editor.Options{})
+	must(t, ed.OpenFile(path))
+	if res := ed.Do("insert_char", map[string]any{"text": "X"}); res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	em, err := keymap.ByName("emacs")
+	must(t, err)
+	m := ui.New(newUIDeps(ed, em, theme.Theme{}, nil, nil))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	if got := ed.Active().Buffer.Text(); got != "Xabc\nxyz\n" {
+		t.Fatalf("buffer after C-x = %q, want it unchanged", got)
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	drainCmd(cmd)
+	data, err := os.ReadFile(path)
+	must(t, err)
+	if string(data) != "Xabc\nxyz\n" {
+		t.Errorf("file after C-x C-s = %q, want the edit saved", data)
+	}
+}

@@ -24,6 +24,7 @@ type cannedReplies struct {
 	rename         *protocol.WorkspaceEdit
 	codeActions    []protocol.CommandOrCodeAction
 	implementation protocol.DefinitionResult
+	formatting     []protocol.TextEdit
 }
 
 // Each handler below records its params, parks when the test asked for it, and
@@ -99,4 +100,13 @@ func (s *fakeServer) SignatureHelp(ctx context.Context, p *protocol.SignatureHel
 		return nil, errRefused
 	}
 	return s.canned.signature, nil
+}
+
+func (s *fakeServer) Formatting(ctx context.Context, p *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+	recordTo[any](s.requests, p)
+	s.park(ctx)
+	if s.canned.fail {
+		return nil, errRefused
+	}
+	return s.canned.formatting, nil
 }

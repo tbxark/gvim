@@ -591,3 +591,47 @@ func TestRequestRaw(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatting(t *testing.T) {
+	edit := protocol.TextEdit{Range: rng(0, 0, 0, 5), NewText: "package"}
+	tests := []struct {
+		name     string
+		answer   []protocol.TextEdit
+		fail     bool
+		tabSize  int
+		spaces   bool
+		wantSize uint32
+		want     []protocol.TextEdit
+	}{
+		{name: "edits", answer: []protocol.TextEdit{edit}, tabSize: 4, spaces: false, wantSize: 4, want: []protocol.TextEdit{edit}},
+		{name: "spaces", answer: []protocol.TextEdit{edit}, tabSize: 2, spaces: true, wantSize: 2, want: []protocol.TextEdit{edit}},
+		{name: "null result is no edits", tabSize: 4, wantSize: 4},
+		{name: "a tab size under one is one", tabSize: 0, wantSize: 1},
+		{name: "server error", fail: true, tabSize: 4, wantSize: 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t, Config{}, nil)
+			ctx := newTestContext(t)
+			f.srv.canned.formatting = tt.answer
+			f.srv.canned.fail = tt.fail
+
+			got, err := f.client.Formatting(ctx, reqDocURI, tt.tabSize, tt.spaces)
+			p := nextRequest[*protocol.DocumentFormattingParams](t, f.srv, "formatting params")
+			if string(p.TextDocument.URI) != reqDocURI || p.Options.TabSize != tt.wantSize || p.Options.InsertSpaces != tt.spaces {
+				t.Fatalf("server got %q with %+v, want %q with tab size %d and spaces %v",
+					p.TextDocument.URI, p.Options, reqDocURI, tt.wantSize, tt.spaces)
+			}
+			if tt.fail {
+				wantRefused(t, err)
+				return
+			}
+			if err != nil {
+				t.Fatalf("Formatting: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("Formatting = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

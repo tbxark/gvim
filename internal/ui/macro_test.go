@@ -119,6 +119,30 @@ func TestMacroToInitActionsAreNotRecorded(t *testing.T) {
 	}
 }
 
+// TestMacroPaletteOpeningIsNotRecorded checks that opening the palette to stop the
+// recording (Ctrl+P, then Record Macro) is not the last step of the macro: replaying
+// it would open the palette at the end.
+func TestMacroPaletteOpeningIsNotRecorded(t *testing.T) {
+	t.Parallel()
+	for _, action := range []string{"quick_open", "command_palette", "quick_open_files", "quick_open_buffers"} {
+		t.Run(action, func(t *testing.T) {
+			t.Parallel()
+			ed := newFakeEditor("x")
+			m := newTestModel(t, ed, nil, 80, 20)
+			m.keys = macroKeys()
+
+			must(t, m.Run("prompt_record_macro"))
+			press(m, typed("a"))
+			must(t, m.Run(action))
+			must(t, m.Run("stop_macro_recording"))
+			got := m.root.macro.last
+			if len(got) != 1 || got[0].cmd.Action != "insert_char" {
+				t.Fatalf("recorded %v, want one insert_char", got)
+			}
+		})
+	}
+}
+
 // TestMacroPlayWhileRecordingIsNotRecorded checks that a playback made while the
 // recorder is on does not add its own actions to the recording.
 func TestMacroPlayWhileRecordingIsNotRecorded(t *testing.T) {
@@ -323,10 +347,10 @@ func TestMacroReplaySkipsWhatTheFocusCannotRun(t *testing.T) {
 			wantExplorer: true,
 		},
 		{
-			name: "the palette stops the rest of the macro",
+			name: "an overlay stops the rest of the macro",
 			record: func(m *Model) {
-				m.dispatch(Command{Action: "command_palette"})
-				press(m, special(tea.KeyEscape)) // closes the palette before the next step
+				m.dispatch(Command{Action: "goto_line"})
+				press(m, special(tea.KeyEscape)) // closes the overlay before the next step
 				save(m)
 			},
 			wantSkipped: 1,

@@ -219,6 +219,8 @@ func installDecor(e *apiEnv) {
 	host := func() pluginapi.Host { return p.r.guard }
 
 	names := map[string]bool{}
+	p.decorNS = names
+	p.decorNS = names
 	e.set(area, "namespace", func(L *lua.LState) int {
 		name := L.CheckString(1)
 		switch {

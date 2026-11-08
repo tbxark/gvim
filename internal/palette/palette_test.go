@@ -2,6 +2,7 @@ package palette_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/keymap"
@@ -21,9 +22,11 @@ func find(t *testing.T, entries []palette.Entry, name string) palette.Entry {
 
 func TestCommandsFromBuiltinTable(t *testing.T) {
 	entries := palette.Commands(nil)
-	// 206 generated rows and the 4 hand-written Plugin: rows of plugin_commands.go.
-	if len(entries) != 210 {
-		t.Fatalf("Commands() = %d entries, want 210", len(entries))
+	// 206 generated rows, then the hand-written rows: the Open Menu Bar and Live Grep rows
+	// of keys_commands.go, the 2 Compare rows of compare_commands.go and the 4 Plugin: rows
+	// of plugin_commands.go.
+	if len(entries) != 214 {
+		t.Fatalf("Commands() = %d entries, want 214", len(entries))
 	}
 	if entries[0].Name != "Add Cursor Above" || entries[1].Name != "Add Cursor Below" {
 		t.Fatalf("first entries = %q, %q; want byte order", entries[0].Name, entries[1].Name)
@@ -39,11 +42,15 @@ func TestCommandsFromBuiltinTable(t *testing.T) {
 }
 
 func TestKeybindingColumnFromKeymap(t *testing.T) {
-	entries := palette.Commands(keymap.Default())
+	def, err := keymap.ByName("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := palette.Commands(def)
 	tests := map[string]string{
-		"Add Cursor Above":         "⌃⌥↑",
-		"Add Cursor Below":         "⌃⌥↓",
-		"Add Cursors to Line Ends": "⌥⇧I",
+		"Add Cursor Above": "Ctrl+Alt+Up",
+		"Add Cursor Below": "Ctrl+Alt+Down",
+		"Duplicate Line":   "Alt+Shift+Down",
 	}
 	for name, want := range tests {
 		if got := find(t, entries, name).Keybinding; got != want {
@@ -53,22 +60,22 @@ func TestKeybindingColumnFromKeymap(t *testing.T) {
 }
 
 // The default preset binds Ctrl+D to Add Cursor at Next Match. The macOS keymap
-// rebinds Ctrl+D to Duplicate Line, so on macOS that shortcut is not in effect
-// and the palette shows none, the same as the menu.
+// rebinds Ctrl+D to Duplicate Line, so on macOS that shortcut is not in effect: the
+// palette shows the Ctrl+Alt+D the macOS keymap gives it, the same as the menu.
 func TestKeybindingIgnoresShadowedBinding(t *testing.T) {
 	def, err := keymap.ByName("default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := find(t, palette.Commands(def), "Add Cursor at Next Match").Keybinding; got != "⌃D" {
-		t.Errorf("default preset keybinding = %q, want ⌃D", got)
+	if got := find(t, palette.Commands(def), "Add Cursor at Next Match").Keybinding; got != "Ctrl+D" {
+		t.Errorf("default preset keybinding = %q, want Ctrl+D", got)
 	}
 	mac, err := keymap.ByName("macos")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := find(t, palette.Commands(mac), "Add Cursor at Next Match").Keybinding; got != "" {
-		t.Errorf("macos keybinding = %q, want empty: Ctrl+D is Duplicate Line there", got)
+	if got := find(t, palette.Commands(mac), "Add Cursor at Next Match").Keybinding; got != "Ctrl+Alt+D" {
+		t.Errorf("macos keybinding = %q, want Ctrl+Alt+D: Ctrl+D is Duplicate Line there", got)
 	}
 }
 
@@ -80,7 +87,7 @@ func TestKeybindingFollowsKeymap(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := palette.Commands(km)
-	if got := find(t, entries, "Add Cursor Above").Keybinding; got != "⌃⌥↑" {
+	if got := find(t, entries, "Add Cursor Above").Keybinding; got != "Ctrl+Alt+Up" {
 		t.Fatalf("custom keymap keybinding = %q", got)
 	}
 	if got := find(t, entries, "Add Ruler").Keybinding; got != "" {
@@ -116,10 +123,22 @@ func TestKeybindingHidesChordTakenByOverride(t *testing.T) {
 }
 
 func TestKeybindingShowsOnlyNormalOrGlobalContext(t *testing.T) {
-	// Close Buffer's only default key is "q" in the compositeBuffer context, so
-	// the palette shows no key for it (legacy mouse case M18).
-	if got := find(t, palette.Commands(keymap.Default()), "Close Buffer").Keybinding; got != "" {
-		t.Fatalf("Close Buffer keybinding = %q, want empty", got)
+	// Close Buffer's own keys are in the compositeBuffer context ("q"), which a palette does
+	// not show. It shows the key that closes the tab instead, which the keymaps bind as
+	// close_tab (AK-08; it used to show none, legacy mouse case M18).
+	def, err := keymap.ByName("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, palette.Commands(def), "Close Buffer").Keybinding; got != "Alt+W" {
+		t.Fatalf("Close Buffer keybinding = %q, want Alt+W", got)
+	}
+	only, err := keymap.Load([]byte(`{"bindings":[{"key":"q","modifiers":[],"action":"close","when":"compositeBuffer"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, palette.Commands(only), "Close Buffer").Keybinding; got != "" {
+		t.Fatalf("Close Buffer keybinding = %q, want empty for a key of another context", got)
 	}
 	// Other contexts are skipped even when they come first in the file; normal
 	// wins over global whatever the order.
@@ -134,11 +153,11 @@ func TestKeybindingShowsOnlyNormalOrGlobalContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := palette.Commands(km)
-	if got := find(t, entries, "Close Buffer").Keybinding; got != "⌥W" {
-		t.Errorf("Close Buffer keybinding = %q, want normal ⌥W", got)
+	if got := find(t, entries, "Close Buffer").Keybinding; got != "Alt+W" {
+		t.Errorf("Close Buffer keybinding = %q, want normal Alt+W", got)
 	}
-	if got := find(t, entries, "Redo").Keybinding; got != "⌃V" {
-		t.Errorf("Redo keybinding = %q, want normal ⌃V", got)
+	if got := find(t, entries, "Redo").Keybinding; got != "Ctrl+V" {
+		t.Errorf("Redo keybinding = %q, want normal Ctrl+V", got)
 	}
 	if got := find(t, entries, "Undo").Keybinding; got != "" {
 		t.Errorf("Undo keybinding = %q, want empty (prompt-only)", got)
@@ -147,12 +166,13 @@ func TestKeybindingShowsOnlyNormalOrGlobalContext(t *testing.T) {
 
 func TestFormatChord(t *testing.T) {
 	tests := map[string]string{
-		"ctrl+d":        "⌃D",
-		"ctrl+alt+up":   "⌃⌥↑",
-		"alt+shift+i":   "⌥⇧I",
+		"ctrl+d":        "Ctrl+D",
+		"ctrl+alt+up":   "Ctrl+Alt+Up",
+		"alt+shift+i":   "Alt+Shift+I",
 		"F10":           "F10",
-		"shift+tab":     "⇧⇥",
-		"ctrl+pagedown": "⌃⇟",
+		"shift+tab":     "Shift+Tab",
+		"ctrl+pagedown": "Ctrl+PgDn",
+		"ctrl+x ctrl+s": "Ctrl+X Ctrl+S",
 		"weird+key+x":   "weird+key+x",
 	}
 	for chord, want := range tests {
@@ -263,7 +283,7 @@ func ExampleSearch() {
 		fmt.Printf("%s %s\n", e.Name, e.Keybinding)
 	}
 	// Output:
-	// Add Cursor Below ⌃⌥↓
+	// Add Cursor Below Ctrl+Alt+Down
 }
 
 // The palette runs in the normal context, so a global chord that a normal binding
@@ -280,9 +300,9 @@ func TestKeybindingIgnoresGlobalShadowedInNormal(t *testing.T) {
 	}
 }
 
-// The TUI dispatches only single chords, so a multi-key binding never runs and the
-// shortcut column must not show it.
-func TestKeybindingIgnoresSequenceBinding(t *testing.T) {
+// A multi-key sequence is a shortcut like any other: the column shows it when the action has
+// no single chord, and a single chord wins when it has both.
+func TestKeybindingShowsSequenceBinding(t *testing.T) {
 	tests := []struct {
 		name string
 		src  string
@@ -292,14 +312,14 @@ func TestKeybindingIgnoresSequenceBinding(t *testing.T) {
 			name: "only a sequence",
 			src: `{"bindings":[
 				{"keys":[{"key":"x","modifiers":["ctrl"]},{"key":"s","modifiers":["ctrl"]}],"action":"save","when":"normal"}]}`,
-			want: "",
+			want: "Ctrl+X Ctrl+S",
 		},
 		{
 			name: "sequence beside a global single chord",
 			src: `{"bindings":[
 				{"keys":[{"key":"x","modifiers":["ctrl"]},{"key":"s","modifiers":["ctrl"]}],"action":"save","when":"normal"},
 				{"key":"s","modifiers":["ctrl"],"action":"save","when":"global"}]}`,
-			want: "⌃S",
+			want: "Ctrl+S",
 		},
 	}
 	for _, tt := range tests {
@@ -312,5 +332,42 @@ func TestKeybindingIgnoresSequenceBinding(t *testing.T) {
 				t.Fatalf("Save File keybinding = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// PC54: the macos-gui rows read "super+d" next to rows with glyphs. Every row is now one style, and
+// the Super key is named Cmd on macOS.
+func TestKeybindingColumnOfTheGUIKeymapIsOneStyle(t *testing.T) {
+	gui, err := keymap.ByName("macos-gui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := palette.Commands(gui)
+	if got, want := find(t, entries, "Add Cursor at Next Match").Keybinding, keymap.SuperName+"+D"; got != want {
+		t.Errorf("Add Cursor at Next Match = %q, want %q", got, want)
+	}
+	if got := find(t, entries, "Query Replace").Keybinding; got != "" && got != keymap.SuperName+"+H" {
+		t.Errorf("Query Replace = %q", got)
+	}
+	for _, e := range entries {
+		for _, raw := range []string{"super+", "ctrl+", "alt+", "shift+", "⌃", "⌥", "⇧"} {
+			if strings.Contains(e.Keybinding, raw) {
+				t.Errorf("%s shows %q: not the plain label style", e.Name, e.Keybinding)
+			}
+		}
+	}
+}
+
+// There is no project-wide Search and Replace, so the palette says that Live Grep only
+// searches, and that Replace works on one buffer.
+func TestSearchAndReplaceScopeIsSaidInThePalette(t *testing.T) {
+	entries := palette.Commands(nil)
+	for name, want := range map[string]string{
+		"Live Grep": "search only",
+		"Replace":   "current buffer",
+	} {
+		if got := find(t, entries, name).Description; !strings.Contains(got, want) {
+			t.Errorf("%s: description %q does not say %q", name, got, want)
+		}
 	}
 }

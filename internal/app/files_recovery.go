@@ -77,6 +77,7 @@ func (w *recoveryWriter) Plan() func() error {
 			buf: d.Buffer,
 			ver: d.Buffer.Version(),
 		}
+		stampDisk(&e.state, d)
 		if prev, ok := w.last[d]; ok && prev.buf == e.buf && prev.ver == e.ver {
 			e.name = prev.name
 		} else if d.Large() {
@@ -148,22 +149,32 @@ func (w *recoveryWriter) Plan() func() error {
 // so the writer, which starts again in dir, does not replace the stashes of the files
 // that failed.
 func recoverCrash(ed *editor.Editor, dir string) ([]unrestored, int) {
+	failed, n, spent := restoreCrash(ed, dir)
+	if spent {
+		_ = clearRecovery(dir)
+	}
+	return failed, n
+}
+
+// restoreCrash is recoverCrash without the removal of the copy. spent reports that every
+// file was restored, so the copy in dir may go once the text is safe somewhere else. A
+// copy with failures has been moved aside already.
+func restoreCrash(ed *editor.Editor, dir string) (failed []unrestored, n int, spent bool) {
 	s, ok, err := session.Load(dir)
 	if err != nil || !ok || len(s.Files) == 0 {
-		return nil, 0
+		return nil, 0, false
 	}
 	prev := activeIndex(ed)
-	failed := restoreFiles(ed, dir, s, true)
+	failed = restoreFiles(ed, dir, s, true)
 	if prev >= 0 {
 		ed.ActivateTab(prev)
 	}
 	if len(failed) == 0 {
-		_ = clearRecovery(dir)
-	} else {
-		_ = os.RemoveAll(dir + ".failed")
-		_ = os.Rename(dir, dir+".failed")
+		return nil, len(s.Files), true
 	}
-	return failed, len(s.Files) - len(failed)
+	_ = os.RemoveAll(dir + ".failed")
+	_ = os.Rename(dir, dir+".failed")
+	return failed, len(s.Files) - len(failed), false
 }
 
 // clearRecovery empties the copy in dir: a clean exit has nothing to recover.

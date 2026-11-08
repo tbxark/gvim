@@ -111,3 +111,32 @@ func TestWithoutARowMapperMotionIsByLine(t *testing.T) {
 		t.Fatalf("caret = %+v, want the line end 0:25", got)
 	}
 }
+
+// A page inside a wrapped line taller than the viewport moves by display rows. A page of
+// buffer lines would jump over the line and its middle rows could never be reached.
+func TestPageInATallWrappedLineMovesByRows(t *testing.T) {
+	t.Parallel()
+	text := strings.Repeat("a", 100) + "\nend" // ten rows of ten, in a viewport of eight
+	tests := []struct {
+		name  string
+		start buffer.Pos
+		act   Action
+		want  buffer.Pos
+	}{
+		{"page down moves one page of rows", caretPos(0, 3), "move_page_down", caretPos(0, 53)}, // 8 rows less 3 of overlap
+		{"page up moves back", caretPos(0, 83), "move_page_up", caretPos(0, 33)},
+		{"page down on the last rows leaves the line", caretPos(0, 63), "move_page_down", caretPos(1, 3)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := docAt(text, tt.start.Line, tt.start.Col)
+			e.SetViewport(8, 20)
+			e.SetRowMapper(wrapEvery(e, 10))
+			run(t, e, tt.act)
+			if got := e.Active().Cursor; got != tt.want {
+				t.Fatalf("caret = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

@@ -176,10 +176,14 @@ type Editor struct {
 	untitledSeq int
 	// emptyStatus is the status message while no tab is open.
 	emptyStatus string
+	// emptyErr is emptyStatus when it is an error, as Document.statusErr is.
+	emptyErr string
 	// opts is the configuration New was given, with TabSize defaulted.
 	opts Options
 	// rowMap reports where a line wraps (SetRowMapper).
 	rowMap RowMapper
+	// rowWin reports the rows around a column of a line too long to list (SetRowWindowMapper).
+	rowWin RowWindowMapper
 	// languages resolves the per-language settings (SetLanguageSettings).
 	languages SettingsResolver
 	// inString tells whether a position is inside a string literal (SetStringContext).
@@ -188,6 +192,8 @@ type Editor struct {
 	nonCode NonCodeContext
 	// ephemeral holds editor.ephemeral_file_patterns (SetEphemeralFilePatterns).
 	ephemeral []string
+	// rulers holds editor.rulers (SetRulers), the columns every new text buffer starts with.
+	rulers []int
 	// extras is the state of the marks, navigation and dabbrev actions (marks.go).
 	extras extraState
 	// autoSaved is the time of the last AutoSave. It is zero before the first.
@@ -198,6 +204,9 @@ type Editor struct {
 	// formatters maps a language name or file extension to its formatter command. See
 	// SetFormatters.
 	formatters map[string]string
+	// languageNamer names the language of a file from its path, for a document with no
+	// language set with SetLanguage. See SetLanguageNamer.
+	languageNamer func(path string) string
 	// resultText is the text the running action hands back in Result.Text. Do clears
 	// it before the action runs.
 	resultText string
@@ -263,12 +272,12 @@ func (e *Editor) SetViewport(rows, cols int) {
 func (e *Editor) OpenFile(path string) error {
 	if path == "" {
 		err := fmt.Errorf("open: %w", ErrEmptyPath)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	path, err := absPath(path)
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	if i := e.pathIndex(path); i >= 0 {
@@ -282,7 +291,7 @@ func (e *Editor) OpenFile(path string) error {
 	}
 	d, err := loadDocument(path, e.loadSpec())
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 		return err
 	}
 	e.OpenLoaded(d)
@@ -345,6 +354,38 @@ func (e *Editor) setStatus(msg string) {
 	}
 	e.emptyStatus = msg
 }
+
+// setError sets err as the status message of the active tab, or of the empty editor,
+// and marks the message as an error (see StatusIsError).
+func (e *Editor) setError(err error) {
+	msg := err.Error()
+	e.setStatus(msg)
+	if d := e.Active(); d != nil {
+		d.statusErr = msg
+		return
+	}
+	e.emptyErr = msg
+}
+
+// fail sets err as the status of d and marks it as an error.
+func (d *Document) fail(err error) {
+	d.status = err.Error()
+	d.statusErr = d.status
+}
+
+// StatusIsError reports whether the current status message reports a failure, as
+// opposed to a note such as "Saved" or "Copied". The warnings log keeps the failures.
+func (e *Editor) StatusIsError() bool {
+	if d := e.Active(); d != nil {
+		return d.status != "" && d.status == d.statusErr
+	}
+	return e.emptyStatus != "" && e.emptyStatus == e.emptyErr
+}
+
+// ClearStatus drops the status message of the active tab, or of the empty editor. The
+// UI calls it when the user acts, so a message such as "Saved" does not outlive the
+// next edit. Other tabs keep their messages.
+func (e *Editor) ClearStatus() { e.setStatus("") }
 
 // SetLanguage records the lexer name of the active tab. The UI resolves the
 // name (internal/syntax) and sets it, because the lexer depends on the file
@@ -417,13 +458,13 @@ func (e *Editor) Do(a Action, args map[string]any) Result {
 	h, ok := handlers[a]
 	if !ok {
 		err := fmt.Errorf("%w: %s", ErrUnknownAction, a)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return Result{Err: err}
 	}
 	d := e.Active()
 	if d == nil && !worksWithoutDocument[a] {
 		err := ErrNoDocument
-		e.setStatus(err.Error())
+		e.setError(err)
 		return Result{Err: err}
 	}
 	kind := typingKind(a)
@@ -475,7 +516,7 @@ func (e *Editor) finish(err error) Result {
 		}
 	}
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 	}
 	e.ensureVisible(e.Active())
 	return Result{Err: err, Quit: e.quit}

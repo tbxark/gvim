@@ -23,7 +23,39 @@ var (
 	utf16BEBOM = []byte{0xfe, 0xff}
 )
 
-// Names returns the encoding names that Decode and Encode accept.
+// byteOrder is a byte order that reads and appends 16-bit units.
+type byteOrder interface {
+	binary.ByteOrder
+	binary.AppendByteOrder
+}
+
+// utf16Kind is a UTF-16 byte order and whether its files carry a byte-order mark.
+// The "-nobom" names are not in names: they are what a file that was read without a
+// mark is saved as, so that the save does not add one. They are not offered to the user.
+type utf16Kind struct {
+	order byteOrder
+	bom   []byte
+}
+
+var utf16Kinds = map[string]utf16Kind{
+	"utf-16le":       {binary.LittleEndian, utf16LEBOM},
+	"utf-16be":       {binary.BigEndian, utf16BEBOM},
+	"utf-16le-nobom": {binary.LittleEndian, nil},
+	"utf-16be-nobom": {binary.BigEndian, nil},
+}
+
+// NoBOM returns the name of the UTF-16 encoding with the byte order of name that
+// writes no byte-order mark, or name when it is not "utf-16le" or "utf-16be".
+func NoBOM(name string) string {
+	switch name {
+	case "utf-16le", "utf-16be":
+		return name + "-nobom"
+	}
+	return name
+}
+
+// Names returns the encoding names that Decode and Encode accept, without the
+// "-nobom" UTF-16 names (see NoBOM).
 func Names() []string {
 	return slices.Clone(names)
 }
@@ -56,10 +88,9 @@ func Decode(name string, data []byte) (string, error) {
 		return decodeUTF8(name, data)
 	case "utf-8-bom":
 		return decodeUTF8(name, bytes.TrimPrefix(data, utf8BOM))
-	case "utf-16le":
-		return decodeUTF16(name, bytes.TrimPrefix(data, utf16LEBOM), binary.LittleEndian)
-	case "utf-16be":
-		return decodeUTF16(name, bytes.TrimPrefix(data, utf16BEBOM), binary.BigEndian)
+	}
+	if k, ok := utf16Kinds[name]; ok {
+		return decodeUTF16(name, bytes.TrimPrefix(data, k.bom), k.order)
 	}
 	codec := table(name)
 	if codec == nil {
@@ -79,7 +110,7 @@ func Decode(name string, data []byte) (string, error) {
 }
 
 // Encode converts text to bytes in the named encoding. "utf-8-bom" and the
-// UTF-16 names write their byte-order mark first. Text the encoding cannot
+// UTF-16 names, but not their "-nobom" forms, write their byte-order mark first. Text the encoding cannot
 // represent, including invalid UTF-8, is an error.
 func Encode(name string, text string) ([]byte, error) {
 	switch name {
@@ -87,10 +118,9 @@ func Encode(name string, text string) ([]byte, error) {
 		return encodeUTF8(name, text, nil)
 	case "utf-8-bom":
 		return encodeUTF8(name, text, utf8BOM)
-	case "utf-16le":
-		return encodeUTF16(name, text, binary.LittleEndian)
-	case "utf-16be":
-		return encodeUTF16(name, text, binary.BigEndian)
+	}
+	if k, ok := utf16Kinds[name]; ok {
+		return encodeUTF16(name, text, k.order, k.bom != nil)
 	}
 	codec := table(name)
 	if codec == nil {
@@ -170,16 +200,22 @@ func encodeUTF8(name, text string, bom []byte) ([]byte, error) {
 	return append(slices.Clone(bom), text...), nil
 }
 
-// encodeUTF16 writes the byte-order mark and then the code units of text.
-func encodeUTF16(name, text string, order binary.ByteOrder) ([]byte, error) {
+// encodeUTF16 writes the byte-order mark, when bom is set, and then the code units
+// of text.
+func encodeUTF16(name, text string, order byteOrder, bom bool) ([]byte, error) {
 	if !utf8.ValidString(text) {
 		return nil, invalidText(name)
 	}
 	units := utf16.Encode([]rune(text))
-	out := make([]byte, 2*(len(units)+1))
-	order.PutUint16(out, 0xfeff)
-	for i, u := range units {
-		order.PutUint16(out[2*(i+1):], u)
+	var out []byte
+	if bom {
+		out = order.AppendUint16(out, 0xfeff)
+	}
+	for _, u := range units {
+		out = order.AppendUint16(out, u)
+	}
+	if out == nil {
+		out = []byte{}
 	}
 	return out, nil
 }

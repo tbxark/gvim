@@ -101,15 +101,23 @@ func (r *Runtime) say(level pluginapi.Level, text string) { r.host.Notify("", le
 
 // pluginState is plugin-state.json: the plugins the user enabled or disabled in the
 // manager. It is below plugins.<name>.enabled of the configuration in precedence.
-type pluginState struct{ enabled, disabled map[string]bool }
+type pluginState struct {
+	enabled, disabled map[string]bool
+	// warnedUnknown holds the plugin names already reported as not installed, so a reload does
+	// not report them again.
+	warnedUnknown map[string]bool
+}
 
 func (s pluginState) clone() pluginState {
-	c := pluginState{enabled: map[string]bool{}, disabled: map[string]bool{}}
+	c := pluginState{enabled: map[string]bool{}, disabled: map[string]bool{}, warnedUnknown: map[string]bool{}}
 	for k := range s.enabled {
 		c.enabled[k] = true
 	}
 	for k := range s.disabled {
 		c.disabled[k] = true
+	}
+	for k := range s.warnedUnknown {
+		c.warnedUnknown[k] = true
 	}
 	return c
 }
@@ -334,14 +342,14 @@ func (r *Runtime) applyDiscovery(d *discovery, startup bool, done func(*batch)) 
 				msg = c.problems[0]
 			}
 			if !startup && running && prev[c.name] != nil {
-				b.errs = append(b.errs, fmt.Sprintf("plugin '%s': reload aborted: %s (the running version is kept)", c.name, firstLine(msg)))
+				b.errs = append(b.errs, fmt.Sprintf("plugin '%s': reload aborted: %s (the running version is kept)", c.name, statusText(msg)))
 				r.logf(c.name, levelError, "reload aborted: "+msg)
 				d.cands[i] = prev[c.name]
 				continue
 			}
 			if c.err != "" {
 				c.reason = c.err
-				b.errs = append(b.errs, fmt.Sprintf("plugin '%s': %s", c.name, firstLine(c.err)))
+				b.errs = append(b.errs, fmt.Sprintf("plugin '%s': %s", c.name, statusText(c.err)))
 				r.logf(c.name, levelError, "cannot load: "+c.err)
 				continue
 			}
@@ -692,12 +700,15 @@ func (b *batch) settle(it *bitem) {
 func (b *batch) ok(it *bitem) {
 	it.st = itemOK
 	it.c.reason = ""
+	if p := b.r.plugins[it.c.name]; p != nil && !p.dead {
+		p.warnSettingsWithoutSchema()
+	}
 }
 
 func (b *batch) fail(it *bitem, msg string) {
 	it.st = itemFailed
 	it.c.reason = msg
-	b.errs = append(b.errs, fmt.Sprintf("plugin '%s': %s", it.c.name, firstLine(msg)))
+	b.errs = append(b.errs, fmt.Sprintf("plugin '%s': %s", it.c.name, statusText(msg)))
 }
 
 func (b *batch) skip(it *bitem, why string) {
@@ -717,6 +728,7 @@ func (b *batch) finish() {
 		b.r.dropWait(w)
 	}
 	b.flush()
+	b.r.lintBindings()
 	if b.done != nil {
 		b.done(b)
 	}

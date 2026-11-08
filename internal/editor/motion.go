@@ -201,7 +201,7 @@ var (
 	// On a wrapped line, Home first goes to the start of the caret's row. On the
 	// first row it toggles between the first non-blank and the line start.
 	motionSmartHome = func(e *Editor, d *Document, _ bool) buffer.Pos {
-		if starts := e.rowStarts(d.Cursor.Line); starts != nil && rowOf(starts, d.Cursor.Col) > 0 {
+		if starts, _ := e.rowStartsAt(d.Cursor.Line, d.Cursor.Col); starts != nil && rowOf(starts, d.Cursor.Col) > 0 {
 			p, _ := e.visualLineStart(d.Cursor)
 			return p
 		}

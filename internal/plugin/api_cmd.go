@@ -65,10 +65,7 @@ func installCmd(e *apiEnv) {
 		spec := L.CheckTable(1)
 		c, keys, err := parseCommandSpec(L, p, spec)
 		if err != nil {
-			v, msg := errTuple(err)
-			L.Push(v)
-			L.Push(msg)
-			return 2
+			return p.registrationFailed(L, "command.register", err)
 		}
 		if _, dup := p.commands[c.name]; dup {
 			L.RaiseError("command %q is already registered", c.name)

@@ -175,3 +175,38 @@ func TestWithinMatchesTheEntryAndWhatIsUnderIt(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteActsOnThePickedRows(t *testing.T) {
+	t.Parallel()
+	p := New(opsTree(1), style.Styles{}, nil)
+	g := Geometry{Width: 16, Bottom: 9, Focused: true}
+	do := func(action string) tea.Msg {
+		var cmd tea.Cmd
+		var ok bool
+		p, cmd, ok = p.Action(action, g)
+		if !ok {
+			t.Fatalf("%s not handled", action)
+		}
+		return run(cmd)
+	}
+	do("file_explorer_toggle_select") // x.txt
+	do("file_explorer_down")
+	do("file_explorer_toggle_select") // b.txt
+	want := DeleteMsg{Paths: []string{"/r/a/x.txt", "/r/b.txt"}}
+	if got := do("file_explorer_delete"); !reflect.DeepEqual(got, want) {
+		t.Errorf("delete of two picked rows sent %#v, want %#v", got, want)
+	}
+}
+
+func TestDeleteLeavesTheRootOutOfSeveral(t *testing.T) {
+	t.Parallel()
+	tr := opsTree(1)
+	tr.rows = append([]tree.Row{{Name: "r", Path: "/r", IsDir: true}}, tr.rows...)
+	tr.sel = 0
+	p := New(tr, style.Styles{}, nil)
+	g := Geometry{Width: 16, Bottom: 9, Focused: true}
+	_, cmd, _ := p.Action("file_explorer_delete", g)
+	if _, ok := run(cmd).(ErrorMsg); !ok {
+		t.Error("a delete of the root alone is not refused")
+	}
+}

@@ -3,6 +3,7 @@ package ui
 import (
 	"math"
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -66,10 +67,23 @@ func (m *Model) plugStatusItems() []statusItem {
 	}
 	ks := &m.plug.keys
 	var out []statusItem
-	if ks.editor != (modeRef{}) {
-		if um := m.findMode(ks.editor); um != nil && um.info.Status != "" {
+	if um := m.activeMode(); um != nil {
+		// The mode of the editor shows the label its plugin gave it. The mode of a buffer, which
+		// has no plugin code to draw one, always has a label, and one that does not bind Esc
+		// says how to leave it.
+		text, owner := um.info.Status, ks.editor.plugin
+		if ks.editor == (modeRef{}) {
+			owner = um.info.Plugin
+			if text == "" {
+				text = "-- " + strings.ToUpper(um.info.Name) + " --"
+			}
+			if um.root.next["escape"] == nil {
+				text += " (Esc x3 leaves)"
+			}
+		}
+		if text != "" {
 			out = append(out, statusItem{
-				id: "mode:" + um.info.Name, plugin: ks.editor.plugin, text: plainCells(um.info.Status), prio: math.MaxInt,
+				id: "mode:" + um.info.Name, plugin: owner, text: plainCells(text), prio: math.MaxInt,
 			})
 		}
 	}

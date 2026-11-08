@@ -10,8 +10,9 @@ import (
 // the effective values, the table exported to other plugins, the compiled regular
 // expressions and the markers of json.
 type dataState struct {
-	user, project map[string]any // plugins.<name>.settings of the two config layers
-	settings      *settingsState // set by gvim.settings.define
+	user, project map[string]any  // plugins.<name>.settings of the two config layers
+	settings      *settingsState  // set by gvim.settings.define
+	warned        map[string]bool // config keys already reported as unknown
 
 	exports     map[string]lua.LValue // exported functions
 	exportsData map[string]any        // exported plain data

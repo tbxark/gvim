@@ -36,9 +36,9 @@ func TestClassifyTokenTypes(t *testing.T) {
 		{chroma.CommentPreprocFile, KindString},
 		{chroma.NameFunction, KindFunction},
 		{chroma.NameFunctionMagic, KindFunction},
-		{chroma.NameDecorator, KindFunction},
+		{chroma.NameDecorator, KindAttribute},
 		{chroma.NameBuiltin, KindFunction},
-		{chroma.NameBuiltinPseudo, KindVariable},
+		{chroma.NameBuiltinPseudo, KindBuiltin},
 		{chroma.NameClass, KindType},
 		{chroma.NameException, KindType},
 		{chroma.NameNamespace, KindType},
@@ -82,6 +82,15 @@ func TestKindThemeKeys(t *testing.T) {
 		KindConstant: "constant",
 		KindOperator: "operator",
 		KindNumber:   "constant",
+
+		KindAttribute: "constant",
+		KindBuiltin:   "variable_builtin",
+		KindHeading:   "keyword",
+		KindStrong:    "constant",
+		KindEmphasis:  "variable",
+		KindLink:      "function",
+		KindQuote:     "comment",
+		KindStrike:    "comment",
 	}
 	for k, want := range tests {
 		if got := k.ThemeKey(); got != want {

@@ -3,6 +3,9 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -11,6 +14,7 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/buffer"
 	"github.com/tbxark/gvim/internal/editor"
@@ -19,6 +23,7 @@ import (
 	"github.com/tbxark/gvim/internal/syntax"
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/browser"
+	"github.com/tbxark/gvim/internal/ui/ctxmenu"
 	"github.com/tbxark/gvim/internal/ui/dialog"
 	"github.com/tbxark/gvim/internal/ui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/ui/explorer"
@@ -27,6 +32,7 @@ import (
 	"github.com/tbxark/gvim/internal/ui/menubar"
 	"github.com/tbxark/gvim/internal/ui/palette"
 	"github.com/tbxark/gvim/internal/ui/prompt"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -69,10 +75,11 @@ type Model struct {
 	searchSeed *find.State
 
 	width, height int
-	explorerOpen  bool    // the panel is shown
-	explorerFocus bool    // the panel has keyboard focus
-	tabFocus      bool    // the tab strip has keyboard focus (F6 cycle)
-	dialogs       Dialogs // the file dialogs; nil disables them
+	explorerOpen  bool       // the panel is shown
+	explorerFocus bool       // the panel has keyboard focus
+	tabFocus      bool       // the tab strip has keyboard focus (F6 cycle)
+	chord         []KeyPress // the first keys of a multi-key binding, waiting for the next
+	dialogs       Dialogs    // the file dialogs; nil disables them
 	// hideMenuBar comes from Deps and stays put. hideLineNumbers starts from
 	// Deps and is flipped by toggle_line_numbers.
 	hideMenuBar     bool
@@ -84,6 +91,9 @@ type Model struct {
 	explorerOverride int
 
 	overlays []Overlay // the stack; the last one is on top and gets the input first
+
+	// rowTop is the view's offset into a wrapped top line, see viewrow.go.
+	rowTop rowTop
 
 	menu          menubar.Model // the menu bar and its open dropdown
 	explorerPanel expanel.Panel // paints the explorer and answers its key actions
@@ -138,6 +148,8 @@ type Model struct {
 type drag struct {
 	active bool
 	thumb  bool         // the scrollbar thumb: motion moves the viewport
+	hbar   bool         // the horizontal scrollbar: motion pans the view sideways
+	tab    *tabDrag     // a tab of the strip: motion moves it along the strip
 	unit   editor.Unit  // the unit a text drag grows the selection by
 	border *splitBorder // the split line the press took: motion moves its split's ratio
 	// last is the pointer of the latest motion of a text drag, and tick is the number
@@ -161,6 +173,7 @@ func New(deps Deps) *Model {
 	if commands == nil {
 		commands = palmodel.Commands(nil)
 	}
+	commands = withoutHidden(commands)
 	m := &Model{
 		ed:              deps.Editor,
 		tree:            deps.Explorer,
@@ -182,7 +195,11 @@ func New(deps Deps) *Model {
 		view:            newViewState(viewOptionsOf(deps.View)),
 	}
 	m.view.languages = deps.Languages
+	m.notes.sink = deps.NoticeSink
 	m.notes.record("", deps.Notice)
+	for _, w := range deps.Warnings {
+		m.notes.keep(w)
+	}
 	// Assign only a non-nil source: a nil concrete value in an interface would
 	// look like a file index or ranker that is present.
 	if deps.Files != nil {
@@ -217,7 +234,22 @@ func New(deps Deps) *Model {
 // reported as the context's error. Run leaves the language servers and the dock
 // running: the caller saves what it must, and then calls Close.
 func Run(ctx context.Context, m *Model) error {
-	_, err := tea.NewProgram(m, tea.WithContext(ctx)).Run()
+	return runProgram(ctx, m, os.Stdout)
+}
+
+// resetCursorStyle is the terminal's own caret shape. The frame sets a blinking block
+// as its caret shape, and the renderer restores only the shapes it did not start with,
+// so the shape is reset here after the program ends, as it is after a signal.
+var resetCursorStyle = ansi.SetCursorStyle(0)
+
+// runProgram runs m with the options opts, and then resets the caret shape on out, which
+// is where the program writes.
+func runProgram(ctx context.Context, m *Model, out io.Writer, opts ...tea.ProgramOption) error {
+	p := tea.NewProgram(m, append([]tea.ProgramOption{tea.WithContext(ctx)}, opts...)...)
+	stop := onContinue(func() { p.Send(tea.RequestWindowSize()) })
+	_, err := p.Run()
+	stop()
+	_, _ = io.WriteString(out, resetCursorStyle)
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -228,13 +260,18 @@ func Run(ctx context.Context, m *Model) error {
 // shorten it.
 var dockCloseWait = 2 * time.Second
 
-// Close stops the language servers, and then closes the dock. Each step has its own
+// Close stops the writes of large files in flight, and waits for them to remove their
+// temporary files (at most quitWait). It stops the language servers, and then closes the
+// dock. Each of the last two steps has its own
 // deadline: the port bounds the shutdown of the servers, and the shell gets dockCloseWait.
 // So a hung server or shell delays only its own step. The caller runs Close after Run,
 // once the session is saved. A shell that does not close in time is left to the exit of
 // the process.
 func (m *Model) Close() {
+	// A signal ends the program without a quit, so the writes in flight are stopped here
+	// and waited for: they remove their temporary files before the process exits.
 	m.large.stop()
+	m.waitSaves()
 	m.cancelStream()
 	m.lspClose()
 	m.pluginStop()
@@ -266,11 +303,11 @@ func (m *Model) Init() tea.Cmd {
 // every message, because the editor moves it to the caret.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	active, count, rows := m.activeTab(), len(m.ed.Tabs()), m.bodyRows()
-	at := m.caretNow()
+	at, top := m.caretNow(), m.viewTop()
 	snap := m.pluginSnapshot()
 	_, resized := msg.(tea.WindowSizeMsg)
 	m.util.recordEvent(msg)
-	before := m.notice
+	before, beforeStatus := m.notice, m.ed.Status()
 	m.plug.ui.updates++
 	next, cmd := m.update(msg)
 	cmd = tea.Batch(cmd, m.lspUpdate(msg))
@@ -278,27 +315,45 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = tea.Batch(cmd, m.watchSync())
 	cmd = tea.Batch(cmd, m.indexSync(), m.searchSync())
 	m.notes.record(before, m.notice)
+	m.noteStatus(beforeStatus)
 	m.reconcileTabs()
 	cmd = tea.Batch(cmd, m.pluginTail(snap, msg), m.pluginIdle(msg))
 	m.trackOccurrences()
 	sized := m.bodyRows() != rows
+	moved := m.caretNow() != at
+	// A scroll that moves the view but not the caret can still change the body
+	// size, when a line wider than the pane enters or leaves the view and the
+	// horizontal scrollbar row comes or goes. The scroll is kept then.
+	scrolled := !resized && !moved && m.viewTop() != top
 	if sized {
+		keep := m.viewTop()
 		m.syncViewport()
+		if scrolled {
+			m.ed.ScrollTo(keep)
+		}
 	}
 	// A move of the caret, or a new body size, keeps the caret's display row on
 	// screen. A wheel notch moves neither, so it is not undone here.
-	if moved := m.caretNow() != at; resized || sized || moved {
+	if resized || (sized && !scrolled) || moved || m.bandAppeared(before, beforeStatus) {
 		margin := 0
 		if moved {
 			margin = m.scrollMarginFor(msg)
 		}
 		m.revealCaretVisual(margin)
 	}
+	m.syncCompare()
 	if resized || m.activeTab() != active || len(m.ed.Tabs()) != count {
 		m.revealActiveTab()
 	}
 	cmd = tea.Batch(cmd, m.pluginViewTail(snap))
 	return next, cmd
+}
+
+// bandAppeared reports whether this update gave the status row a message that needs
+// the notice band, so the caret has to be kept above it. A message the status row
+// shows whole, and the band staying while the user scrolls, do not count.
+func (m *Model) bandAppeared(notice, status string) bool {
+	return (m.notice != notice || m.ed.Status() != status) && len(m.layout().notice) > 0
 }
 
 // update handles one message. While an overlay is open, key and mouse messages
@@ -371,24 +426,42 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.followSelection()
 		m.pluginReady()
 	case tea.KeyPressMsg:
-		m.notice = ""
+		m.expireStatus()
 		return m, m.handleKey(tea.Key(msg))
 	case tea.MouseClickMsg:
-		m.notice = ""
+		// The band is hit-tested before the message expires: once it is gone the
+		// click would land on the body cell that was under it.
+		onBand := m.layout().onNotice(msg.X, msg.Y)
+		m.expireStatus()
+		m.chord = nil
+		if onBand {
+			break
+		}
 		cmd = m.handleClick(msg)
+		m.rebaseFind()
 	case tea.MouseMotionMsg:
 		cmd = tea.Batch(m.handleDrag(msg.Mouse()), m.explorerMouse(msg))
 	case dragScrollMsg:
 		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
+		td := m.drag.tab
 		m.drag = drag{}
+		if td != nil {
+			m.dropTab(td)
+		}
 		cmd = m.explorerMouse(msg)
 	case tea.MouseWheelMsg:
+		// Scrolling is navigation, so a message ends with it as it does with a key or a click.
+		m.expireStatus()
 		cmd = m.handleWheel(msg)
 	case dialog.Result:
 		cmd = m.dialogDone(msg)
 	case menubar.Failed:
 		m.notice = failedNotice(msg)
+	case ctxmenu.Chosen:
+		cmd = m.contextChosen(msg)
+	case ctxmenu.Reroute:
+		cmd = m.rightClick(msg.Press)
 	case expanel.OpenFileMsg:
 		cmd = m.openFileCmd(msg.Path, msg.Preview, 0, 0)
 		if !msg.Preview {
@@ -412,7 +485,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case expanel.RenameMsg:
 		m.askRename(msg.Path)
 	case expanel.DeleteMsg:
-		m.askDelete(msg.Path)
+		if len(msg.Paths) > 0 {
+			m.askDelete(msg.Paths...)
+		} else {
+			m.askDelete(msg.Path)
+		}
 	case expanel.CopyMsg:
 		m.clip = newClipboard(msg.Path, msg.Paths, false)
 	case expanel.CutMsg:
@@ -424,6 +501,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileResultMsg:
 		cmd = tea.Batch(m.fileDone(msg), m.gitCmd())
 	case browser.Open:
+		if m.splits.pick != nil {
+			m.comparePicked(msg.Path)
+			break
+		}
 		cmd = m.openFileCmd(msg.Path, false, msg.Line, msg.Col)
 		m.focusEditor()
 	case palette.RunCommandMsg:
@@ -435,9 +516,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.openFileCmd(msg.Path, false, 0, 0)
 		m.focusEditor()
 	case palette.GotoLineMsg:
-		// The ':' mode opens the go-to-line prompt with the chosen position, so the
-		// user confirms it there.
-		m.openGoto(gotoInput(msg.Line, msg.Col))
+		// The ':' mode jumps at once, as Fresh's does: one Enter reaches the line.
+		m.gotoLine(msg.Line, msg.Col)
+		m.focusEditor()
 	case palette.ActivateBufferMsg:
 		m.activateTab(msg.Index)
 	}
@@ -472,13 +553,15 @@ func (m *Model) routeMenu(msg tea.Msg) (bool, tea.Cmd) {
 	return taken, cmd
 }
 
-// isLabelPress reports whether msg is a left press on a label of the menu bar.
+// isLabelPress reports whether msg is a left press on a label of the menu bar, or on
+// its overflow marker.
 func isLabelPress(bar menubar.Model, msg tea.Msg) bool {
 	mo, ok := msg.(tea.MouseClickMsg)
 	if !ok || mo.Button != tea.MouseLeft {
 		return false
 	}
-	return bar.Hit(mo.X, mo.Y).Kind == menubar.TargetLabel
+	k := bar.Hit(mo.X, mo.Y).Kind
+	return k == menubar.TargetLabel || k == menubar.TargetMore
 }
 
 // syncMenu gives the menu bar the frame size and the explorer focus of the
@@ -501,6 +584,10 @@ func failedNotice(f menubar.Failed) string {
 // know is reported as menubar.ErrUnsupported. A quit is sent after the menu
 // closes, through quitting.
 func (m *Model) Run(action string) error {
+	args := map[string]any(nil)
+	if name, ok := strings.CutPrefix(action, menubar.CopyThemePrefix); ok {
+		action, args = "copy_with_theme", map[string]any{"theme": name}
+	}
 	defer m.plugSource(srcMenu)()
 	m.recordCommand(Command{Action: action})
 	defer m.plugCommand(action, nil)()
@@ -519,7 +606,7 @@ func (m *Model) Run(action string) error {
 		m.pending = tea.Batch(m.pending, cmd)
 		return nil
 	}
-	res := m.editorDo(editor.Action(action), nil)
+	res := m.editorDo(editor.Action(action), args)
 	m.plugFailed(res.Err)
 	m.syncViewport()
 	if errors.Is(res.Err, editor.ErrUnknownAction) {
@@ -528,7 +615,7 @@ func (m *Model) Run(action string) error {
 	if res.Quit {
 		m.quitting = true
 	}
-	m.pending = tea.Batch(m.pending, m.clipboardOut(action, res))
+	m.pending = tea.Batch(m.pending, m.clipboardOutArgs(action, args, res))
 	return nil
 }
 
@@ -548,6 +635,8 @@ func (m *Model) Holds(name string) bool {
 		return true
 	case "keymap_default", "keymap_emacs", "keymap_vscode", "keymap_macos_gui":
 		return m.util.keymapChecked(name)
+	case "inlay_hints":
+		return m.lsp.inlay
 	case "can_save", "can_revert":
 		return doc != nil && hasPath(doc)
 	case "can_save_all":
@@ -561,7 +650,7 @@ func (m *Model) Holds(name string) bool {
 		return doc != nil && isLargeDoc(doc)
 	case "formatter_available":
 		f, ok := m.ed.(formatterEditor)
-		return ok && f.HasFormatter()
+		return ok && f.HasFormatter() || m.lspCanFormat()
 	case "has_selection", "can_cut", "can_copy":
 		if doc == nil {
 			return false
@@ -736,7 +825,7 @@ type (
 		folder bool
 	}
 	renameTag    struct{ path string }
-	deleteTag    struct{ path string }
+	deleteTag    struct{ paths []string }
 	overwriteTag struct{ job fileJob }
 	gotoTag      struct{}
 )
@@ -756,16 +845,6 @@ func (m *Model) openGoto(input string) {
 		Tag:      gotoTag{},
 		Validate: prompt.ValidateLineCol,
 	})})
-}
-
-// gotoInput is the text the go-to-line prompt starts with for a position picked
-// from the palette. The column is shown only when it is not the first.
-func gotoInput(line, col int) string {
-	s := strconv.Itoa(line)
-	if col > 1 {
-		s += ":" + strconv.Itoa(col)
-	}
-	return s
 }
 
 // gotoText applies the text of the go-to-line prompt. The prompt has already
@@ -857,13 +936,17 @@ func (m *Model) askRename(path string) {
 	})})
 }
 
-// askDelete opens the Yes/No confirm for trashing path. The focus starts on No.
-func (m *Model) askDelete(path string) {
-	if !m.needOps() {
+// askDelete opens the Yes/No confirm for trashing paths. The focus starts on No. With
+// several paths the question counts them.
+func (m *Model) askDelete(paths ...string) {
+	if !m.needOps() || len(paths) == 0 {
 		return
 	}
-	q := "Delete " + filepath.Base(path) + "?"
-	m.pushOverlay(confirmOverlay{c: prompt.NewConfirm(m.styles, q, deleteTag{path: path})})
+	q := "Delete " + filepath.Base(paths[0]) + "?"
+	if len(paths) > 1 {
+		q = fmt.Sprintf("Delete %d items?", len(paths))
+	}
+	m.pushOverlay(confirmOverlay{c: prompt.NewConfirm(m.styles, q, deleteTag{paths: paths})})
 }
 
 // askOverwrite asks whether a copy that hit an existing destination may replace
@@ -907,7 +990,11 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		return m.runJob(fileJob{kind: jobRename, path: tag.path, name: d.Text})
 	case deleteTag:
 		if d.Outcome == prompt.Yes {
-			return m.runJob(fileJob{kind: jobTrash, path: tag.path})
+			jobs := make([]fileJob, len(tag.paths))
+			for i, p := range tag.paths {
+				jobs[i] = fileJob{kind: jobTrash, path: p}
+			}
+			return m.runJobs(jobs)
 		}
 	case overwriteTag:
 		job := tag.job
@@ -1124,6 +1211,7 @@ func (m *Model) reveal(path string) {
 // openBrowser shows the file browser over the frame. folderOnly is the Switch
 // Project mode: the list has folders only, and Enter chooses one.
 func (m *Model) openBrowser(folderOnly bool) {
+	m.splits.pick = nil
 	dir := ""
 	if m.tree != nil {
 		dir = m.tree.Root()
@@ -1163,10 +1251,12 @@ func (o browserOverlay) Active() bool { return o.b.Active() }
 // openPalette shows the command palette with query as its input and returns the
 // command that ranks its files, if the query is a file query.
 func (m *Model) openPalette(query string) tea.Cmd {
+	st := m.paletteState()
 	p := palette.New(palette.Options{
 		Query:    query,
 		Root:     m.rootDir(),
 		Commands: m.allCommands(),
+		State:    &st,
 		Buffers:  m.paletteBuffers(),
 		Files:    m.files,
 		Ranker:   m.ranker,
@@ -1174,6 +1264,25 @@ func (m *Model) openPalette(query string) tea.Cmd {
 	})
 	m.pushOverlay(paletteOverlay{p: p})
 	return p.Init()
+}
+
+// paletteState describes the editor for the palette, which marks the commands the
+// state does not allow as disabled.
+func (m *Model) paletteState() palmodel.State {
+	st := palmodel.State{
+		AnyModified: slices.ContainsFunc(m.ed.Tabs(), func(t TabInfo) bool { return t.Modified }),
+	}
+	doc := m.ed.Active()
+	if doc == nil {
+		return st
+	}
+	st.TextBuffer, st.Editable, st.HasPath = true, true, hasPath(doc)
+	st.Modified = doc.Modified()
+	_, _, st.SelectionActive = doc.Selection()
+	if m.lsp.port != nil {
+		st.HasLSPConfig = m.lspStartable(m.lspLanguage(doc))
+	}
+	return st
 }
 
 // rootDir is the explorer's root, or the empty string when there is no explorer.
@@ -1213,6 +1322,10 @@ func (o paletteOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 
 // Draw paints the palette over the frame.
 func (o paletteOverlay) Draw(g *grid.Grid) { o.p.Draw(g) }
+
+// Covers reports whether the point is on the palette card. The root gives a press
+// elsewhere to the frame.
+func (o paletteOverlay) Covers(x, y, w, h int) bool { return o.p.Covers(x, y, w, h) }
 
 // Active reports whether the palette is still open.
 func (o paletteOverlay) Active() bool { return o.p.Active() }
@@ -1316,6 +1429,9 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 		ctx = KeyContextFileExplorer
 	}
 	if m.keys != nil {
+		if cmd, handled := m.chordKey(kp, ctx); handled {
+			return cmd
+		}
 		if cmd, ok := m.keys.Resolve(kp, ctx); ok {
 			if m.pluginGate(kp, ctx, cmd) {
 				return nil
@@ -1331,6 +1447,9 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 		}
 	}
 	if m.explorerFocus {
+		if cmd, ok := m.explorerEdgeKey(kp); ok {
+			return cmd
+		}
 		// A typed letter that no binding claims searches the tree. It never
 		// reaches the text.
 		if r, ok := singleRune(text); ok {
@@ -1404,11 +1523,12 @@ func (m *Model) dispatch(cmd Command) tea.Cmd {
 	}
 	res := m.editorDo(editor.Action(cmd.Action), cmd.Args)
 	m.plugFailed(res.Err)
+	m.plugUnknownAction(cmd.Action, res.Err)
 	m.syncViewport()
 	if res.Quit {
 		return m.quit()
 	}
-	return m.clipboardOut(cmd.Action, res)
+	return m.clipboardOutArgs(cmd.Action, cmd.Args, res)
 }
 
 // uiAction runs the command when the root handles it. It reports whether it did,
@@ -1458,10 +1578,12 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		m.focusEditor()
 		return nil, false
 	case "menu_activate":
-		if !m.hideMenuBar {
-			m.syncMenu()
-			m.menu = m.menu.Activate()
+		if m.hideMenuBar {
+			m.notice = menuHiddenNotice
+			break
 		}
+		m.syncMenu()
+		m.menu = m.menu.Activate()
 	case "menu_open":
 		name, _ := args["name"].(string)
 		m.openMenu(name)
@@ -1528,7 +1650,8 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 	case "split_horizontal", "split_vertical", "next_split", "prev_split", "close_split",
 		"next_pane", "prev_pane", "next_window", "prev_window",
 		"increase_split_size", "decrease_split_size", "toggle_maximize_split", "switch_to_previous_tab",
-		"compare_next_difference", "compare_prev_difference", "compare_switch_side":
+		"compare_next_difference", "compare_prev_difference", "compare_switch_side",
+		"compare_files", "compare_with_file", "compare_copy_change", "compare_take_change", "compare_close":
 		m.splitAction(action)
 	default:
 		if cmd, ok := m.lspAction(action); ok {
@@ -1548,12 +1671,17 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 	return nil, true
 }
 
+// menuHiddenNotice is what Open Menu Bar says while the bar is hidden, so the command is not
+// silent.
+const menuHiddenNotice = "The menu bar is hidden: run Toggle Menu Bar to show it"
+
 // openMenu opens the dropdown of the bar label called name, the way Fresh's
 // menu_open does. The name is matched without case. A name that is not a label of
 // the bar leaves the menu as it is, so Explorer opens nothing while the explorer
 // has no focus. A hidden menu bar opens nothing.
 func (m *Model) openMenu(name string) {
 	if m.hideMenuBar {
+		m.notice = menuHiddenNotice
 		return
 	}
 	m.syncMenu()
@@ -1598,6 +1726,9 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		}
 		return nil
 	}
+	if mo.Button == tea.MouseRight {
+		return m.rightClick(msg)
+	}
 	if mo.Button != tea.MouseLeft {
 		return nil
 	}
@@ -1611,10 +1742,12 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	case hitTab:
 		m.focusEditor()
 		m.activateTab(t.Index)
+		m.drag = drag{active: true, tab: &tabDrag{index: t.Index, startX: mo.X, startY: mo.Y}}
 	case hitTabClose:
 		return m.requestClose(t.Index)
 	case hitTabNew:
-		return m.dispatch(Command{Action: "new"})
+		// As Fresh's "+", the button opens a small menu of what a new tab can be.
+		m.showContextMenu(mo, plusMenuItems())
 	case hitTabScrollBefore:
 		m.scrollTabs(-1)
 	case hitTabScrollAfter:
@@ -1673,8 +1806,11 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
 	case editorpane.HitScrollbarThumb:
 		m.drag = drag{active: true, thumb: true}
 	case editorpane.HitScrollbarTrack:
-		m.ed.ScrollTo(p.ScrollTopFor(m.bodyRows(), hit.Row))
+		m.ed.ScrollTo(p.ScrollTopFor(m.layout().focusedPane().w, m.bodyRows(), hit.Row))
 		m.drag = drag{active: true, thumb: true}
+	case editorpane.HitHScrollbar:
+		m.drag = drag{active: true, hbar: true}
+		m.panBar(hit.Col + m.layout().focusedPane().x)
 	case editorpane.HitText, editorpane.HitGutter:
 		if hit.Fold && m.toggleFoldAt(hit.Pos.Line) {
 			return
@@ -1718,6 +1854,10 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 		m.dragBorder(mo.X, mo.Y)
 		return nil
 	}
+	if m.drag.tab != nil {
+		m.dragTab(mo)
+		return nil
+	}
 	doc := m.ed.Active()
 	if doc == nil {
 		return nil
@@ -1727,9 +1867,19 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 	if h <= 0 || w <= 0 {
 		return nil
 	}
+	if m.drag.hbar {
+		m.panBar(mo.X)
+		return nil
+	}
 	if m.drag.thumb {
-		y := min(max(mo.Y-fp.y, 0), h-1)
-		m.ed.ScrollTo(m.paneFor(fp, doc).ScrollTopFor(h, y))
+		// The track is the text rows, as the press maps it: the horizontal bar under
+		// them is not part of it.
+		rows := m.bodyRows()
+		if rows <= 0 {
+			return nil
+		}
+		y := min(max(mo.Y-fp.y, 0), rows-1)
+		m.ed.ScrollTo(m.paneFor(fp, doc).ScrollTopFor(w, rows, y))
 		return nil
 	}
 	m.drag.last = mo
@@ -1969,6 +2119,7 @@ func (m *Model) layoutInput() layoutInput {
 		tabFirst:         m.tabFirst,
 		welcome:          m.welcomeVisible(),
 		recents:          m.recents,
+		doorKeys:         m.welcomeDoorKeys(),
 		status:           m.statusView(),
 		hideMenuBar:      m.hideMenuBar,
 		hideStatus:       m.statusHidden(),
@@ -2017,7 +2168,8 @@ func (m *Model) statusView() statusView {
 	if m.notice != "" {
 		s.message = m.notice
 	}
-	s.warnSlot, s.warnings = m.lsp.port != nil, m.lspWarnings()
+	s.warnSlot, s.warnings = m.lspShowsWarnings(), m.lspWarnings()
+	s.lsp = m.lspPill()
 	if doc := m.ed.Active(); doc != nil {
 		c := doc.Cursor()
 		s.position = "Ln " + strconv.Itoa(c.Line+1) + ", Col " + strconv.Itoa(c.Col+1)
@@ -2031,12 +2183,13 @@ func (m *Model) statusView() statusView {
 		}
 	}
 	m.viewStatus(&s)
+	s.paletteHint = m.paletteHint()
 	s.extra = m.plugStatusItems()
 	return s
 }
 
 // noDocumentNotice is the status text for an action that needs an open tab.
-const noDocumentNotice = "No open document. Press Ctrl+N to create one."
+const noDocumentNotice = "No open document. Use File > New File to create one."
 
 // untitledName is the display name the editor gives a buffer with no path.
 const untitledName = "[No Name]"
@@ -2099,6 +2252,7 @@ func (m *Model) paint() *grid.Grid {
 		g.Fill(0, g.Width(), y, body)
 	}
 	m.paintEditor(g, l)
+	m.paintDropZone(g)
 	m.paintDock(g, l)
 	drawTabStrip(g, m.styles, l.editorX, l.stripY, l.strip)
 	if l.explorerOpen {
@@ -2183,6 +2337,17 @@ func (m *Model) overlayInput(msg tea.Msg) bool {
 	if len(m.overlays) == 0 {
 		return false
 	}
+	if mo, isMouse := mouseOf(msg); isMouse {
+		if cv, ok := m.overlays[len(m.overlays)-1].(interface{ Covers(x, y, w, h int) bool }); ok && !cv.Covers(mo.X, mo.Y, m.width, m.height) {
+			// A press or a wheel notch off the overlay's card is not the overlay's: it
+			// reaches the frame, as Fresh's prompt layer lets it through.
+			return false
+		}
+		if m.topFindBar() != nil {
+			// The find bar takes the mouse only over its own rows.
+			return m.findMouse(msg)
+		}
+	}
 	switch msg.(type) {
 	case tea.KeyPressMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg:
 		return true
@@ -2200,9 +2365,10 @@ func (m *Model) pushOverlay(o Overlay) {
 
 // routeOverlay gives msg to the top overlay and applies the result: the
 // overlay it returns takes its place, a nil return pops it, and an overlay that
-// is no longer active is popped. Esc pops the top overlay and is not forwarded.
+// is no longer active is popped. Esc pops the top overlay and is not forwarded,
+// unless the overlay asks for it (see takesEscape).
 func (m *Model) routeOverlay(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyPressMsg); ok && tea.Key(k).Code == tea.KeyEscape {
+	if k, ok := msg.(tea.KeyPressMsg); ok && m.overlayCancels(tea.Key(k)) {
 		if d, ok := m.overlays[len(m.overlays)-1].(interface{ Dismiss() }); ok {
 			d.Dismiss()
 		}
@@ -2245,6 +2411,11 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 			st = palette
 		}
 		g.Put(r.x, l.statusY, g.Width(), r.text, st)
+	}
+	for i, text := range l.notice {
+		y := l.noticeY + i
+		g.Fill(l.noticeX, g.Width(), y, bar)
+		g.Put(l.noticeX+space.PadX, y, g.Width(), text, bar)
 	}
 }
 
@@ -2368,6 +2539,15 @@ func (m *Model) quitLoop() tea.Cmd {
 	dirty := t.Quit(false)
 	if len(dirty) == 0 {
 		return m.quit()
+	}
+	// A tab stays modified until the results of its write are applied, so the question
+	// would be stale by the time the write ends. Wait for the write instead, and ask
+	// then if the tab is still modified. A second quit asks at once, for a write that
+	// does not end.
+	if len(m.large.saves) > 0 && !m.large.quitAfterSave {
+		m.large.quitAfterSave = true
+		m.notice = "Quit when the save has finished"
+		return nil
 	}
 	d := dirty[0]
 	t.ActivateTab(d.Index)
@@ -2503,6 +2683,10 @@ func translateKey(k tea.Key) (KeyPress, string) {
 		kp.Mods = append(kp.Mods, "alt")
 	}
 	shift := k.Mod&tea.ModShift != 0
+	// Super is the Command key. A terminal that does not use the kitty keyboard
+	// protocol sends it as xterm's modifier 9, which the decoder reads as Meta, so
+	// Meta stands for it here: the keymap has no meta modifier.
+	super := k.Mod&(tea.ModSuper|tea.ModMeta) != 0
 
 	named := true
 	switch {
@@ -2528,8 +2712,11 @@ func translateKey(k tea.Key) (KeyPress, string) {
 	if shift && (named || unicode.IsLetter(k.Code)) {
 		kp.Mods = append(kp.Mods, "shift")
 	}
+	if super {
+		kp.Mods = append(kp.Mods, "super")
+	}
 	var text string
-	if k.Text != "" && k.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
+	if k.Text != "" && k.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModSuper|tea.ModMeta) == 0 {
 		text = k.Text
 	}
 	return kp, text

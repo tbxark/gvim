@@ -9,18 +9,6 @@ import (
 // keymapPresets are the built-in keymaps the switch lists, in menu order.
 var keymapPresets = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 
-// openKeybindingEditor shows the bindings of the active keymap, one row each, with
-// the action, the chord and the context. The list is read-only: the keybindings
-// are edited in the config file.
-func (m *Model) openKeybindingEditor() {
-	l, _ := m.keys.(BindingLister)
-	v := newListView("Keybindings", keybindingRows(l), m.listChrome(), nil)
-	if l == nil {
-		v.empty = noBindingsText
-	}
-	m.pushOverlay(listOverlay{v: v})
-}
-
 // openKeymapSwitch lists the built-in keymaps. The active one is marked, and
 // choosing a row switches to it.
 func (m *Model) openKeymapSwitch() {
@@ -37,6 +25,7 @@ func (m *Model) openKeymapSwitch() {
 		m.switchKeymap(r.value)
 		return nil
 	})
+	v.hint = "Type to filter, Up/Down move, Enter switch, Esc close"
 	m.pushOverlay(listOverlay{v: v})
 }
 
@@ -57,8 +46,9 @@ func (m *Model) switchKeymap(name string) {
 		return
 	}
 	m.keys = m.pluginSwitchKeymap(name, k)
+	m.relabelCommands()
 	m.util.settings.Keymap = name
-	m.notice = "Keymap: " + name
+	m.notice = "Keymap: " + name + " for this session; set \"keymap\" in the config to keep it"
 	m.plugConfigChanged()
 }
 

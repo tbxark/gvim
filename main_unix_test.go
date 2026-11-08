@@ -12,10 +12,10 @@ import (
 )
 
 // TestShutdownSignalsCancelTheContext checks that closing the terminal (SIGHUP) and a plain
-// kill (SIGTERM) cancel the context of the program, as an interrupt does, so that the
+// kill (SIGTERM) and SIGQUIT cancel the context of the program, as an interrupt does, so that the
 // session and the unsaved text are saved on the way out.
 func TestShutdownSignalsCancelTheContext(t *testing.T) {
-	for _, sig := range []syscall.Signal{syscall.SIGHUP, syscall.SIGTERM} {
+	for _, sig := range []syscall.Signal{syscall.SIGHUP, syscall.SIGTERM, syscall.SIGQUIT} {
 		t.Run(sig.String(), func(t *testing.T) {
 			ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals...)
 			defer stop()

@@ -161,7 +161,7 @@ func (h *Highlighter) LinesWindow(version, first int, text []string) Window {
 	var spans [][]Span
 	h.skipped = size(text) > MaxHighlightBytes
 	if !h.skipped {
-		if s, err := Tokenize(h.lexer, text); err == nil {
+		if s, err := tokenize(h.lexer, text, first > 0); err == nil {
 			spans = s
 		}
 	}
@@ -176,4 +176,20 @@ func (h *Highlighter) LinesWindow(version, first int, text []string) Window {
 		h.wins = h.wins[:windowCacheSize]
 	}
 	return win
+}
+
+// Fragment returns the spans of text, which is one line, or a piece of one that is too long
+// to lex with the lines around it. Nothing is kept. Like Lines, it returns one plain span
+// when lexing fails or text is larger than MaxHighlightBytes. The result covers text, in byte
+// offsets, and is nil for empty text.
+func (h *Highlighter) Fragment(text string) []Span {
+	if text == "" {
+		return nil
+	}
+	if len(text) <= MaxHighlightBytes {
+		if spans, err := Tokenize(h.lexer, []string{text}); err == nil {
+			return spans[0]
+		}
+	}
+	return []Span{{Start: 0, End: len(text), Kind: KindPlain}}
 }

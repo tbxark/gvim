@@ -3,7 +3,6 @@ package app
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -34,18 +33,28 @@ func startApp(t *testing.T, text string) (*uitest.Session, string) {
 	return uitest.Start(t, m, 100, 30), path
 }
 
-func TestF10OpensTheFileMenuAndUnderlinesAccelerators(t *testing.T) {
+// TestPaletteOpensTheMenuBar: with F10 gone, the "Open Menu Bar" palette command opens the File
+// menu, and no cell of the bar is underlined.
+func TestPaletteOpensTheMenuBar(t *testing.T) {
 	s, _ := startApp(t, "hello\n")
-	s.Key("f10")
+	s.Key("ctrl+p")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Open Menu Bar") || sc.Contains(">") })
+	s.Type("open menu bar")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Open Menu Bar") })
+	s.Key("enter")
 	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("New File") })
-	if got := sc.Underlined(0); !slices.Equal(got, []string{"F", "E", "V", "S", "G", "L", "H"}) {
-		t.Fatalf("underlined menu-bar cells = %q, want one accelerator letter per title", got)
+	if got := sc.Underlined(0); len(got) != 0 {
+		t.Fatalf("underlined menu-bar cells = %q, want none", got)
 	}
 }
 
 func TestHoverSlidesTheOpenDropdownAcrossTitles(t *testing.T) {
 	s, _ := startApp(t, "hello\n")
-	s.Key("f10")
+	fx, fy, ok := s.Screen().Find("File")
+	if !ok || fy != 0 {
+		t.Fatal("File title not on the menu bar")
+	}
+	s.Click(fx, fy)
 	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("New File") })
 	// Find the Edit title on the bar, then hover it: its dropdown must replace
 	// the File dropdown, with no click.
@@ -73,11 +82,11 @@ func TestCtrlWOnADirtyTabAsksBeforeClosing(t *testing.T) {
 	}
 }
 
-func TestMenuBarUnderlinesAcceleratorsWhileClosed(t *testing.T) {
+func TestMenuBarHasNoUnderlinedMnemonicsWhileClosed(t *testing.T) {
 	s, _ := startApp(t, "hello\n")
 	sc := s.Screen()
-	if got := sc.Underlined(0); !slices.Equal(got, []string{"F", "E", "V", "S", "G", "L", "H"}) {
-		t.Fatalf("closed menu bar underlines = %q, want one accelerator letter per title:\n%s", got, sc)
+	if got := sc.Underlined(0); len(got) != 0 {
+		t.Fatalf("closed menu bar underlines = %q, want none:\n%s", got, sc)
 	}
 }
 

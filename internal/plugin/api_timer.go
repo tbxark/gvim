@@ -39,7 +39,7 @@ type luaTimer struct {
 
 func (t *luaTimer) handleString() string { return fmt.Sprint(t.id) }
 
-func (t *luaTimer) arm() { t.stop = t.p.afterTimer(t.period, t.fire) }
+func (t *luaTimer) arm() { t.stop = t.p.afterTimer(t.p.paceArm(t.period), t.fire) }
 
 // finish ends the timer: it no longer counts against the quota.
 func (t *luaTimer) finish() {
@@ -133,7 +133,7 @@ func awaitSleep(c *awaitCall) {
 		return
 	}
 	c.Park(&parkSpec{
-		Work:    &pluginapi.Work{After: max(time.Duration(ms*float64(time.Millisecond)), timerPeriod)},
+		Work:    &pluginapi.Work{After: max(c.p.paceArm(time.Duration(ms*float64(time.Millisecond))), timerPeriod)},
 		Convert: func(pluginapi.Completion) []lua.LValue { return []lua.LValue{lua.LTrue, lua.LTrue} },
 	})
 }
@@ -194,7 +194,7 @@ func installTimer(e *apiEnv) {
 				live++
 				db.armed = true
 			}
-			db.stop = p.afterTimer(db.period, db.fire)
+			db.stop = p.afterTimer(p.paceArm(db.period), db.fire)
 			return 0
 		})))
 		return 1

@@ -19,7 +19,7 @@ func topTour(m *Model) (*tourState, bool) {
 	return nil, false
 }
 
-func TestTourHasSixSlidesThatFitAnEightyColumnFrame(t *testing.T) {
+func TestTourHasSixSlides(t *testing.T) {
 	if len(tourSlides) != 6 {
 		t.Fatalf("tour has %d slides, want 6", len(tourSlides))
 	}
@@ -27,11 +27,55 @@ func TestTourHasSixSlidesThatFitAnEightyColumnFrame(t *testing.T) {
 		if s.title == "" || len(s.lines) == 0 {
 			t.Errorf("slide %d has no title or no text", i+1)
 		}
-		for _, l := range s.lines {
-			if w := ansi.StringWidth(l); w > 72 {
-				t.Errorf("slide %d line is %d cells wide: %q", i+1, w, l)
+	}
+}
+
+// The tour names no fixed key: a {action} is the shortcut in the active keymap, a sequence
+// included, or the palette command when the keymap has none, and every line fits the box. The
+// old tour spelled Ctrl+B, F10 and Alt+A whatever the keymap was.
+func TestTourTextFollowsTheKeymapAndFitsTheBox(t *testing.T) {
+	tests := []struct {
+		name string
+		keys Keymap
+		want []string // phrases that must be in the first slides
+		not  []string
+	}{
+		{"shortcuts of the keymap", hintKeys(map[string]string{"new": "ctrl+x ctrl+n", "toggle_file_explorer": "ctrl+x d", "quick_open": "alt+x"}),
+			[]string{"Ctrl+X Ctrl+N starts a new file", "Ctrl+X D shows or hides", "Alt+X opens the palette"}, []string{"Ctrl+B", "F10", "Alt+A", "{"}},
+		// The explorer's keys are read from the keymap too, so a keymap that moves them changes
+		// the tour: rename and delete are not written as F2 and Delete in the text.
+		{"explorer keys of the keymap", hintKeys(map[string]string{"file_explorer_rename": "ctrl+r", "file_explorer_delete": "ctrl+d"}),
+			[]string{"Ctrl+R renames the selected entry", "Ctrl+D moves it to the trash"}, []string{"F2 renames", "Delete moves"}},
+		{"no keymap listing", testKeys(),
+			[]string{`"New File" in the palette starts a new file`}, []string{"Ctrl+N", "F10", "{"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newUtilityModel(t, newFakeEditor("hello"), tc.keys, Settings{}, nil)
+			var all []string
+			for i := range tourSlides {
+				m.overlays = nil
+				m.openTour(i)
+				_, lines, _ := m.overlays[0].(boxOverlay).v.content()
+				for _, l := range lines {
+					if w := ansi.StringWidth(l); w > tourTextWidth {
+						t.Errorf("slide %d line is %d cells wide: %q", i+1, w, l)
+					}
+				}
+				all = append(all, lines...)
 			}
-		}
+			text := strings.Join(all, " ")
+			for _, want := range tc.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("the tour lacks %q:\n%s", want, strings.Join(all, "\n"))
+				}
+			}
+			for _, bad := range tc.not {
+				if strings.Contains(text, bad) {
+					t.Errorf("the tour still has %q:\n%s", bad, strings.Join(all, "\n"))
+				}
+			}
+		})
 	}
 }
 

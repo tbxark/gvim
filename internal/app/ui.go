@@ -371,6 +371,18 @@ func (a editorAdapter) Status() string {
 	return a.ed.Status()
 }
 
+// StatusIsError reports whether the status message is a failure, so the warnings log
+// keeps it and leaves out notes such as "Saved".
+func (a editorAdapter) StatusIsError() bool {
+	return a.ed.StatusIsError()
+}
+
+// ClearStatus drops the status message of the active tab. The root calls it when the
+// user presses a key or clicks, so a stale message does not stay on the status row.
+func (a editorAdapter) ClearStatus() {
+	a.ed.ClearStatus()
+}
+
 // SetCursor moves the caret, and extend grows the selection from its anchor.
 func (a editorAdapter) SetCursor(p buffer.Pos, extend bool) {
 	a.ed.SetCursor(p, extend)
@@ -441,6 +453,16 @@ func (a editorAdapter) CloseTab(i int, force bool) error {
 	return a.ed.CloseTab(i, force)
 }
 
+// MoveTabTo moves tab from to index to, for a drag of a tab along the strip. The active
+// tab stays on its document.
+func (a editorAdapter) MoveTabTo(from, to int) error {
+	ids := a.ed.DocIDs()
+	if from < 0 || from >= len(ids) || to < 0 || to >= len(ids) {
+		return fmt.Errorf("move tab: no tab at %d or %d", from, to)
+	}
+	return a.ed.MoveTab(ids[from], to-from)
+}
+
 // CloseNeedsConfirm reports whether closing tab i would be refused for unsaved
 // edits, so the root can ask first.
 func (a editorAdapter) CloseNeedsConfirm(i int) (bool, error) {
@@ -455,24 +477,35 @@ func (a editorAdapter) Quit(force bool) []editor.Dirty {
 
 // spanCache holds the syntax spans of the active document. The lexer runs over
 // the whole text, because chroma is a stream lexer, and the result is kept until
-// the next edit. The text changes only through editorAdapter.Do, which calls
-// edited. A document switch, or a change of its language, starts a new lexer. A
+// the next change of the text, which its version tells: an action that only moves
+// the caret or the viewport lexes nothing, although it calls edited. A document
+// that is too big to lex per keystroke is lexed in windows (windowed). A document switch, or a change of its language, starts a new lexer. A
 // large document is lexed in windows of lines instead, kept by the version of its
 // text (spans_large.go). The cache is used on the UI goroutine only.
 type spanCache struct {
-	gen     uint64           // bumped by every edit
+	gen     uint64           // bumped by every action that may edit
 	doc     *editor.Document // the document the lexer belongs to
 	lang    string           // the language the lexer was chosen for, as set with Set Language
 	plain   bool             // no lexer matched the document: no spans
 	hl      *syntax.Highlighter
 	spans   [][]syntax.Span
-	valid   bool   // spans were lexed
-	lexedAt uint64 // gen the spans were lexed at
+	valid   bool           // spans were lexed
+	lexedAt uint64         // gen the spans were lexed at
+	lexedV  editor.Version // the text version the spans were lexed at
+	lexes   int            // how many times the whole text was lexed, the version Highlighter sees
+
+	// sized is the text version size was measured at, and big whether the text was
+	// then over windowedBytes.
+	sized   editor.Version
+	sizedOK bool
+	big     bool
 
 	// The spans of a large document are lexed in windows, see spans_large.go.
 	large        largeSpans
 	contextBytes int  // highlight_context_bytes; read only when contextSet
 	contextSet   bool // contextBytes was set from the config
+	// segs are the spans of the pieces of very long lines, see spans_long.go.
+	segs []segSpans
 }
 
 // edited marks the spans stale. It is called before every action. A nil cache
@@ -491,17 +524,23 @@ func (c *spanCache) lines(doc *editor.Document) [][]syntax.Span {
 		return nil
 	}
 	c.useLexer(doc)
-	if c.plain || doc.Large() {
+	if c.plain || c.windowed(doc) {
 		// A large document is never lexed whole: see window.
 		return nil
 	}
-	if !c.valid || c.lexedAt != c.gen {
+	// Only a change of the text lexes again. An action that moves the caret or the
+	// viewport marks the cache edited, but the version of the text is the same.
+	if ver := doc.Version(); !c.valid || c.lexedV != ver {
 		text := make([]string, doc.Buffer.Lines())
 		for i := range text {
-			text[i] = doc.Buffer.Line(i)
+			if lineSize(doc.Buffer, i) <= maxLexedLineBytes {
+				text[i] = doc.Buffer.Line(i)
+			}
 		}
-		c.spans = c.hl.Lines(int(c.gen), text)
+		c.lexes++
+		c.spans = c.hl.Lines(c.lexes, text)
 		c.lexedAt = c.gen
+		c.lexedV = ver
 		c.valid = true
 	}
 	return c.spans
@@ -517,6 +556,7 @@ func (c *spanCache) useLexer(doc *editor.Document) {
 	c.lang = doc.Language()
 	c.valid = false
 	c.large = largeSpans{}
+	c.segs = nil
 	lexer := documentLexer(doc)
 	c.plain = lexer == lexers.Fallback
 	c.hl = syntax.NewHighlighter(lexer)
@@ -584,6 +624,29 @@ func (d documentAdapter) SavedLines() []string {
 	return d.doc.SavedLines()
 }
 
+// SavedLinesShared is SavedLines without the copy. The pane only reads it.
+func (d documentAdapter) SavedLinesShared() []string {
+	if d.doc.Large() {
+		return nil
+	}
+	return d.doc.SavedLinesShared()
+}
+
+// EditedLines is the range of lines that may differ from the saved text. See
+// editor.Document.EditedLines.
+func (d documentAdapter) EditedLines() (lo, hi int, ok bool) { return d.doc.EditedLines() }
+
+// LineIs reports whether line i is text, without building the line. The pane compares
+// the lines with the saved lines this way for the change marks.
+func (d documentAdapter) LineIs(i int, text string) bool {
+	return d.doc.Buffer.LineEquals(i, text)
+}
+
+// MemoValue keeps a value the pane worked out from the text until the text changes.
+func (d documentAdapter) MemoValue(key any, compute func() any) any {
+	return d.doc.MemoValue(key, compute)
+}
+
 // MemoChanges keeps the change marks of the pane until the text or the saved text changes.
 func (d documentAdapter) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, scroll map[int]bool) {
 	return d.doc.MemoChanges(compute)
@@ -622,7 +685,7 @@ func (d documentAdapter) Selection() (anchor, head buffer.Pos, ok bool) {
 // LineSpans returns the syntax spans of line i, or nil when no lexer matched
 // the document or i is out of range. The spans are lexed once per edit.
 func (d documentAdapter) LineSpans(i int) []syntax.Span {
-	if d.doc.Large() {
+	if d.spans.windowed(d.doc) {
 		// The lexer runs over a window of the lines on screen, not over the text.
 		return d.spans.window(d.doc, i)
 	}
@@ -631,6 +694,12 @@ func (d documentAdapter) LineSpans(i int) []syntax.Span {
 		return nil
 	}
 	return spans[i]
+}
+
+// LineSpansIn returns the syntax spans of text, runes [col, ...) of line i, which is a piece
+// of a very long line. See spanCache.segment.
+func (d documentAdapter) LineSpansIn(i, col int, text string) []syntax.Span {
+	return d.spans.segment(d.doc, i, col, text)
 }
 
 // Cursors returns the extra carets of the document, which the pane paints in the
@@ -671,6 +740,26 @@ func (k keymapAdapter) Resolve(key ui.KeyPress, ctx ui.KeyContext) (ui.Command, 
 	return ui.Command{Action: b.Action, Args: b.Args}, true
 }
 
+// ResolveSequence looks up the key presses typed in order among the multi-key bindings.
+// A press that does not canonicalize ends the sequence.
+func (k keymapAdapter) ResolveSequence(steps []ui.KeyPress, ctx ui.KeyContext) (cmd ui.Command, ok, prefix bool) {
+	chords := make([]string, len(steps))
+	for i, s := range steps {
+		c, err := keymap.Canonical(s.Name, s.Mods)
+		if err != nil {
+			return ui.Command{}, false, false
+		}
+		chords[i] = c
+	}
+	kctx := keymapContext(ctx)
+	if len(chords) > 1 {
+		if b, found := k.km.ResolveSequence(chords, kctx); found {
+			return ui.Command{Action: b.Action, Args: b.Args}, true, false
+		}
+	}
+	return ui.Command{}, false, k.km.HasSequencePrefix(chords, kctx)
+}
+
 // Bindings lists every binding of the keymap, in file order, with its canonical
 // chord and when-clause. It implements the root's BindingLister port.
 func (k keymapAdapter) Bindings() []ui.KeyBinding {
@@ -682,8 +771,8 @@ func (k keymapAdapter) Bindings() []ui.KeyBinding {
 	return out
 }
 
-// Primary returns the binding the UI shows for action, and false when the action has
-// no single-chord binding.
+// Primary returns the binding the UI shows for action, a multi-key sequence when the action
+// has no single chord, and false when it has no binding the editor runs.
 func (k keymapAdapter) Primary(action string) (ui.KeyBinding, bool) {
 	b, ok := k.km.Primary(action)
 	if !ok {

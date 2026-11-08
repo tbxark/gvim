@@ -43,7 +43,10 @@ type splitNode struct {
 	ratio int // the percentage of the area the first child takes; zero means splitEven
 	tab   int
 	top   int
-	id    uint64 // the window id, or zero until idOf gives one
+	// topRow is how many display rows of line top are scrolled off, for a pane of a compare
+	// view: it lets the pane start inside the filler rows after a line (see syncCompare).
+	topRow int
+	id     uint64 // the window id, or zero until idOf gives one
 }
 
 // splitEven is the share of the first child in an even split, and the share a zero ratio
@@ -72,14 +75,17 @@ func (n *splitNode) leaves() []*splitNode {
 
 // splitSet is the split state of the root model.
 type splitSet struct {
-	root      *splitNode // the tree; one leaf when nothing is split
-	focus     *splitNode // the focused leaf, always a leaf of root
-	tabs      int        // the tab count the leaves were last checked against
-	comparing bool       // the root is a compare view: two leaves side by side
-	maximized bool       // the focused leaf fills the body and the other leaves have no area
-	seenTab   int        // the active tab noteTab last saw, or -1
-	prevTab   int        // the tab that was active before the last switch, or -1
-	lastID    uint64     // the last window id idOf gave out; ids are never reused
+	root      *splitNode   // the tree; one leaf when nothing is split
+	focus     *splitNode   // the focused leaf, always a leaf of root
+	tabs      int          // the tab count the leaves were last checked against
+	comparing bool         // the root is a compare view: two leaves side by side
+	diff      compareDiff  // the differences of the compare view that were last computed
+	owned     []string     // the files the compare view opened itself, which closing it closes too
+	pick      *comparePick // a compare command that waits for the file browser, or nil
+	maximized bool         // the focused leaf fills the body and the other leaves have no area
+	seenTab   int          // the active tab noteTab last saw, or -1
+	prevTab   int          // the tab that was active before the last switch, or -1
+	lastID    uint64       // the last window id idOf gave out; ids are never reused
 }
 
 // idOf returns the window id of leaf n, giving it the next one when it has none.
@@ -165,6 +171,8 @@ func (m *Model) splitAction(action string) {
 		m.compareStep(false)
 	case "compare_switch_side":
 		m.compareSwitch()
+	case "compare_files", "compare_with_file", "compare_copy_change", "compare_take_change", "compare_close":
+		m.compareCommand(action)
 	}
 }
 
@@ -257,6 +265,9 @@ func (m *Model) focusLeaf(n *splitNode) {
 	m.activateTab(n.tab)
 	if m.ed.Active() != nil {
 		m.ed.ScrollTo(n.top)
+		if m.splits.comparing {
+			m.setTopRow(n.topRow)
+		}
 	}
 	m.syncViewport()
 	m.revealCaretVisual(0)
@@ -272,6 +283,9 @@ func (m *Model) keepFocused() {
 	f.tab = m.activeTab()
 	if doc := m.ed.Active(); doc != nil {
 		f.top = doc.Top()
+		if m.splits.comparing {
+			f.topRow = m.topRow(f.top)
+		}
 	}
 }
 
@@ -354,6 +368,9 @@ func (m *Model) editorDo(a editor.Action, args map[string]any) editor.Result {
 // the last tab. With no tab left the splits collapse.
 func (m *Model) tabRemoved(i int) {
 	n := len(m.ed.Tabs())
+	// A compare view is its two tabs together: with one of them gone it ends, as Fresh's
+	// closes the whole group, instead of leaving the other file shown twice, unmarked.
+	endsCompare := m.splits.comparing && !m.splits.root.leaf() && (m.splits.root.a.tab == i || m.splits.root.b.tab == i)
 	for _, leaf := range m.splits.root.leaves() {
 		if leaf == m.splits.focus {
 			continue
@@ -368,7 +385,7 @@ func (m *Model) tabRemoved(i int) {
 	m.splits.seenTab = shiftTab(m.splits.seenTab, i)
 	m.splits.prevTab = shiftTab(m.splits.prevTab, i)
 	m.splits.tabs = n
-	if n == 0 {
+	if n == 0 || endsCompare {
 		m.collapseSplits()
 	}
 }
@@ -393,6 +410,7 @@ func (m *Model) collapseSplits() {
 	f.a, f.b = nil, nil
 	m.splits.root = f
 	m.splits.comparing = false
+	m.splits.owned = nil
 	m.splits.maximized = false
 }
 
@@ -404,8 +422,9 @@ func (m *Model) scrollPane(i, delta int) {
 		return
 	}
 	n := leaves[i]
-	if n == m.splits.focus {
-		m.ed.ScrollBy(delta)
+	if n == m.splits.focus || m.splits.comparing {
+		// The two sides of a compare view scroll together, from the focused one.
+		m.scrollFocused(delta)
 		return
 	}
 	doc := m.docAt(n.tab)
@@ -443,8 +462,11 @@ func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 	}
 	pane = m.viewPane(pane, doc)
 	pane = m.plugDecor(pane, doc)
+	pane = m.lspGutter(pane, doc)
+	pane = m.compareDecor(p, pane)
 	if p.focused {
 		pane = m.applyPan(pane, doc)
+		pane.TopRow = m.topRow(p.top)
 	}
 	return pane
 }
@@ -478,9 +500,22 @@ func (m *Model) revealCaretVisual(margin int) {
 		return
 	}
 	fp := l.focusedPane()
-	if top := m.paneGeometry(fp, doc).RevealTopMargin(fp.w, fp.h, margin); top != doc.Top() {
+	// The notice band is painted over the bottom rows of the pane: the caret is kept
+	// above it, so the line being edited is not hidden by the message.
+	h := max(fp.h-max(fp.y+fp.h-l.bandTop(), 0), 1)
+	top, row := m.paneGeometry(fp, doc).RevealView(fp.w, h, margin)
+	if top != doc.Top() {
 		m.ed.ScrollTo(top)
 	}
+	m.setTopRow(row)
+}
+
+// viewTop is the first visible line of the active document, or 0 with no document.
+func (m *Model) viewTop() int {
+	if doc := m.ed.Active(); doc != nil {
+		return doc.Top()
+	}
+	return 0
 }
 
 // caretAt is the active tab and the caret of its document. Update compares it
@@ -510,6 +545,9 @@ func (m *Model) pressPane(i, x, y, count int) {
 	m.focusPane(i)
 	if ok {
 		m.ed.ScrollTo(top)
+		if m.splits.comparing {
+			m.setTopRow(p.TopRow)
+		}
 	}
 	m.pressEditor(p, hit, count)
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/tbxark/gvim/internal/syntax"
 	"github.com/tbxark/gvim/internal/theme"
 	"github.com/tbxark/gvim/internal/ui/editorpane"
+	"github.com/tbxark/gvim/internal/ui/find"
 )
 
 // largeEditor is a fake editor whose documents are the real documents of a real
@@ -27,11 +29,13 @@ type largeEditor struct {
 	*fakeEditor
 	ed *editor.Editor
 
-	savedCalls int         // calls of SavedLines
-	snapshots  int         // snapshots taken for scans and F3
-	rowReads   int         // lines read for the visible highlights
-	lineCalls  map[int]int // calls of Line, by line
-	cancelled  bool        // a write saw its context cancelled
+	savedCalls int           // calls of SavedLines
+	snapshots  int           // snapshots taken for scans and F3
+	rowReads   int           // lines read for the visible highlights
+	lineCalls  map[int]int   // calls of Line, by line
+	cancelled  bool          // a write saw its context cancelled
+	cancelWork time.Duration // how long a write takes to clean up after it was cancelled
+	nextBudget int64         // the read budget of FindNext; 0 is the default
 }
 
 var (
@@ -108,6 +112,7 @@ func (e *largeEditor) WriteSave(p editor.SavePlan) []editor.SaveResult {
 }
 func (e *largeEditor) WriteSaveContext(ctx context.Context, p editor.SavePlan) []editor.SaveResult {
 	<-ctx.Done() // the write waits to be cancelled, so a test can quit while it runs
+	time.Sleep(e.cancelWork)
 	e.cancelled = true
 	return p.RunContext(ctx)
 }
@@ -133,7 +138,7 @@ func (e *largeEditor) StartScan(q search.Query, startLine int) (*search.Scan, er
 	return sc, err
 }
 
-func (e *largeEditor) FindNext(q search.Query, from buffer.Pos, backward bool) (search.Match, bool, bool, error) {
+func (e *largeEditor) FindNext(q search.Query, from buffer.Pos, backward bool, at search.Cursor) (search.Match, bool, bool, search.Cursor, error) {
 	e.snapshots++
 	snap := e.ed.Active().Buffer.Snapshot()
 	defer snap.Release()
@@ -141,7 +146,7 @@ func (e *largeEditor) FindNext(q search.Query, from buffer.Pos, backward bool) (
 	if backward {
 		dir = search.Backward
 	}
-	return search.FindNext(snap, q, from, dir, 0)
+	return search.FindNextAt(snap, q, from, dir, e.nextBudget, at)
 }
 
 func (e *largeEditor) VisibleMatches(q search.Query, first, last int) ([]search.Match, error) {
@@ -707,6 +712,33 @@ func TestSavingShowsTheNoticeAndAQuitStopsTheWriteAndWaitsForIt(t *testing.T) {
 	}
 }
 
+// A signal ends the program without a quit: Run returns and the caller closes the model.
+// The write in flight must be stopped and must have removed its temporary file before
+// Close returns, or the process exits with a half-written copy next to the file.
+func TestCloseStopsTheWriteInFlightAndWaitsForIt(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := writeLines(t, dir, "a.txt", bigFile, 40, 0)
+	m, le := newLargeModel(t, path)
+	le.cancelWork = 100 * time.Millisecond
+	feedAll(t, m, start(m), 10)
+	le.ed.Do("insert_char", map[string]any{"text": "Z"})
+	cmd := press(m, ctrl('s'))
+	done := make(chan []tea.Msg, 1)
+	go func() { done <- runCmd(cmd) }()
+	m.Close()
+	if !le.cancelled {
+		t.Fatalf("Close returned while the write was still running")
+	}
+	if len(ofType[saveDoneMsg](<-done)) != 1 {
+		t.Fatalf("the write did not end")
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, ".a.txt.gvim-*"))
+	if len(left) != 0 {
+		t.Errorf("the write left %v", left)
+	}
+}
+
 func TestQuitWaitEndsAtItsTimeout(t *testing.T) {
 	t.Parallel()
 	m, _ := newLargeModel(t)
@@ -777,29 +809,33 @@ func TestPaneOfALargeDocumentNeverReadsTheSavedLines(t *testing.T) {
 	}
 }
 
-func TestLargeDocumentIsNotWrapped(t *testing.T) {
+// A large document wraps as the setting says, as any other does: its long lines are laid out in
+// segments, so the wrap costs nothing in proportion to their length.
+func TestLargeDocumentWrapsWhenTheSettingSaysSo(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	m, le := newLargeModel(t, writeLines(t, dir, "a.txt", bigFile, 400, 0))
 	start(m)
-	p := m.viewPane(editorpane.Pane{Wrap: true}, le.Active())
-	if p.Wrap {
-		t.Errorf("a large document is painted wrapped")
+	if p := m.viewPane(editorpane.Pane{}, le.Active()); !p.Wrap {
+		t.Errorf("a large document is painted unwrapped while line wrap is on")
+	}
+	m.view.lineWrap = false
+	if p := m.viewPane(editorpane.Pane{}, le.Active()); p.Wrap {
+		t.Errorf("a large document is painted wrapped while line wrap is off")
 	}
 }
 
-// TestWrapToggleOfALargeDocumentSaysItDoesNotApply is the regression test for
-// "Line wrap: on" being the answer to a toggle that changes nothing on screen.
-func TestWrapToggleOfALargeDocumentSaysItDoesNotApply(t *testing.T) {
+// The toggle of the wrap of a large document says what it did, and nothing else.
+func TestWrapToggleOfALargeDocumentIsPlain(t *testing.T) {
 	t.Parallel()
 	m, _ := newLargeModel(t, writeLines(t, t.TempDir(), "a.txt", bigFile, 40, 0))
 	start(m)
-	for range 2 {
+	for _, want := range []string{"Line wrap: off", "Line wrap: on"} {
 		if err := m.Run("toggle_line_wrap"); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(m.notice, "Line wrap: ") || !strings.Contains(m.notice, "not available in large file mode") {
-			t.Errorf("notice = %q, want the wrap setting and that a large file does not wrap", m.notice)
+		if m.notice != want {
+			t.Errorf("notice = %q, want %q", m.notice, want)
 		}
 	}
 }
@@ -933,5 +969,115 @@ func TestClosingTheBarEndsTheScan(t *testing.T) {
 	m.Update(runs[0])
 	if !runs[0].run.scan.Done() {
 		t.Errorf("the scan was not closed when its last step ended")
+	}
+}
+
+// TestRepeatingF3GoesOnWhereTheLastSearchStopped is the regression test for F3 on a
+// document whose next match is farther than one search budget: every press used to
+// start again at the caret and read the same first budget, so the match was never
+// reached.
+func TestRepeatingF3GoesOnWhereTheLastSearchStopped(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Only line 0 has the needle, so F3 from it must go around the whole file.
+	m, le := newLargeModel(t, writeLines(t, dir, "a.txt", bigFile, 40, 1<<30))
+	feedAll(t, m, start(m), 10)
+	feedAll(t, m, findLargeBar(m, "needle"), 400)
+	press(m, special(tea.KeyEnter)) // close the bar with the match on line 0 selected
+	le.nextBudget = 1 << 20
+
+	presses := 0
+	for ; presses < 20; presses++ {
+		press(m, special(tea.KeyF3))
+		if m.notice != find.SearchLimitText {
+			break
+		}
+	}
+	if presses == 0 {
+		t.Fatalf("the first F3 did not run out of its %d byte budget, so the test checks nothing", le.nextBudget)
+	}
+	if m.notice != "Search wrapped" {
+		t.Fatalf("notice after %d F3 presses = %q, want %q", presses+1, m.notice, "Search wrapped")
+	}
+	if a, _, ok := le.Active().Selection(); !ok || a.Line != 0 {
+		t.Errorf("selection after wrapping = %+v (%v), want the match on line 0", a, ok)
+	}
+}
+
+// TestF3DoesNotResumeAnotherSearch checks that the position a limited search stopped
+// at is used only by the same search: a different position starts at the beginning.
+func TestF3DoesNotResumeAnotherSearch(t *testing.T) {
+	t.Parallel()
+	m := &Model{}
+	q := search.Query{Text: "x"}
+	snap := buffer.New("a\nb").Snapshot()
+	defer snap.Release()
+	_, _, _, cur, _ := search.FindNextAt(snap, q, buffer.Pos{}, search.Forward, 1, search.Cursor{})
+	if cur == (search.Cursor{}) {
+		t.Fatal("a search with a budget of one byte did not stop part way")
+	}
+	ss := &nextStub{cur: cur}
+	_, _, _, _ = m.findNext(ss, q, buffer.Pos{Line: 1}, false)
+	_, _, _, _ = m.findNext(ss, q, buffer.Pos{Line: 2}, false)
+	_, _, _, _ = m.findNext(ss, q, buffer.Pos{Line: 2}, true)
+	_, _, _, _ = m.findNext(ss, q, buffer.Pos{Line: 2}, true)
+	for i, want := range []bool{false, false, false, true} {
+		if got := ss.ats[i] != (search.Cursor{}); got != want {
+			t.Errorf("call %d resumed = %v, want %v", i, got, want)
+		}
+	}
+}
+
+// nextStub is a streamSearcher whose FindNext always runs out of budget, with a
+// cursor that is not the zero one.
+type nextStub struct {
+	streamSearcher
+	cur search.Cursor
+	ats []search.Cursor
+}
+
+func (s *nextStub) SearchKey() (any, uint64, bool, bool) { return nil, 1, true, true }
+func (s *nextStub) FindNext(_ search.Query, _ buffer.Pos, _ bool, at search.Cursor) (search.Match, bool, bool, search.Cursor, error) {
+	s.ats = append(s.ats, at)
+	return search.Match{}, false, false, s.cur, nil
+}
+
+// A file named on the command line that is large and not UTF-8 is not read before the
+// first frame: the app hands it over, and the root asks whether to load it once running.
+func TestInitAsksAboutLargeFilesThatAreNotUTF8(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		prompts []editor.ErrLargeNeedsFullLoad
+	}{
+		{"none", nil},
+		{"one", []editor.ErrLargeNeedsFullLoad{{Path: "a.log", Size: 1 << 30, Codec: "iso-8859-1"}}},
+		{"two", []editor.ErrLargeNeedsFullLoad{{Path: "a.log"}, {Path: "b.log"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			le := newLargeEditor(t)
+			km, err := keymap.ByName("default")
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := New(Deps{Editor: le, Keys: presetKeymap{km: km}, Theme: theme.Theme{}, Clock: testClock,
+				Root: RootPorts{FullLoadPrompts: tt.prompts}})
+			start(m)
+			prompts := ofType[fullLoadPromptMsg](runCmd(m.Init()))
+			if len(prompts) != len(tt.prompts) {
+				t.Fatalf("Init sent %d prompts, want %d", len(prompts), len(tt.prompts))
+			}
+			for i, p := range prompts {
+				if p.err != tt.prompts[i] {
+					t.Errorf("prompt %d = %+v, want %+v", i, p.err, tt.prompts[i])
+				}
+				m.Update(p)
+			}
+			if len(m.overlays) != len(tt.prompts) {
+				t.Errorf("%d overlays, want one question per file (%d)", len(m.overlays), len(tt.prompts))
+			}
+		})
 	}
 }

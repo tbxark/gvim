@@ -51,9 +51,13 @@ func TestSwitchKeymapKeepsPluginBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A chord that the emacs preset binds differently from the startup preset.
+	// A chord that the emacs preset binds differently from the startup preset. A binding the
+	// emacs preset itself replaces (Ctrl+L of default.json) is not in effect, so it is skipped.
 	var chord keymap.Binding
 	for _, b := range emacs.Bindings() {
+		if e, ok := emacs.Resolve(b.Chord, keymap.ContextNormal); !ok || e.Action != b.Action {
+			continue
+		}
 		if d, ok := keymap.Default().Resolve(b.Chord, keymap.ContextNormal); b.When == keymap.ContextNormal && b.Sequence == nil && (!ok || d.Action != b.Action) {
 			chord = b
 			break

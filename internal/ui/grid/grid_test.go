@@ -71,6 +71,29 @@ func TestZeroWidthMarkAttachesToPreviousCell(t *testing.T) {
 	}
 }
 
+// TestPutDropsControlCharacters checks that a control character never reaches a cell:
+// a newline, a carriage return, an escape or a bell would otherwise be written to the
+// terminal inside the frame.
+func TestPutDropsControlCharacters(t *testing.T) {
+	tests := []struct{ name, in, want string }{
+		{"newline", "nl\nname", "nlname"},
+		{"carriage return", "cr\rname", "crname"},
+		{"crlf", "a\r\nb", "ab"},
+		{"escape and bell", "a\x1b]0;x\x07b", "a]0;xb"},
+		{"delete and c1", "a\x7fb\u0085c", "abc"},
+		{"mark still attaches", "e\u0301\nx", "e\u0301x"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := New(12, 1)
+			g.Put(0, 0, 12, tc.in, Style{})
+			if got := strings.TrimRight(g.Plain()[0], " "); got != tc.want {
+				t.Errorf("Put(%q) painted %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestOverwritingWideHalfBlanksThePair(t *testing.T) {
 	g := New(4, 1)
 	g.Put(0, 0, 4, "日", Style{})
@@ -170,5 +193,24 @@ func TestStringJoinsRows(t *testing.T) {
 	g.Put(0, 1, 2, "cd", Style{})
 	if got := g.String(); got != "ab\ncd" {
 		t.Errorf("String() = %q", got)
+	}
+}
+
+func TestRestylingWideGraphemeKeepsItsContinuation(t *testing.T) {
+	rev := Style{Reverse: true}
+	g := New(6, 1)
+	g.Put(0, 0, 6, "日本x", Style{})
+	g.Set(0, 0, "日", rev)
+	if got := g.Plain()[0]; got != "日本x " {
+		t.Errorf("row = %q, want the text unmoved", got)
+	}
+	if c := g.At(1, 0); c.Text != "" || !c.Style.Reverse {
+		t.Errorf("continuation cell = %+v, want empty text in the new style", c)
+	}
+	if c := g.At(2, 0); c.Text != "本" || c.Style.Reverse {
+		t.Errorf("next grapheme = %+v, want it untouched", c)
+	}
+	if got := ansi.StringWidth(g.Lines()[0]); got != 6 {
+		t.Errorf("row width = %d, want 6", got)
 	}
 }

@@ -220,7 +220,7 @@ func (f frame) markOverlays(i int, raw []rune, ln *line) {
 }
 
 // winCut reports whether the laid out line is a window that ends before its line does.
-func (f frame) winCut(ln *line) bool { return ln.long && len(ln.geom) >= longWindow }
+func (f frame) winCut(ln *line) bool { return ln.long && ln.cutEnd }
 
 // applyLook adds the patch p to the looks of cells[from:to].
 func (f frame) applyLook(cells []cell, from, to int, p grid.Style) {

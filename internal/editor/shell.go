@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/buffer"
+	"github.com/tbxark/gvim/internal/diff"
 )
 
 // shellTimeout bounds one shell command. It is a variable so that a test can
@@ -184,14 +185,22 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 	}
 	caret := d.Cursor
 	var after buffer.Pos
+	var hunks []diff.Hunk
+	if job.format {
+		// The snapshot is the text the formatter was given, which is the text now.
+		hunks = diff.Lines(strings.Split(job.snapshot.text, "\n"), strings.Split(out, "\n"))
+	}
 	d.Buffer.Group(func() {
 		d.Buffer.Delete(job.from, job.to)
 		after = d.Buffer.Insert(job.from, out)
 	})
 	d.lastMulti = nil
-	if job.selected {
+	switch {
+	case job.selected:
 		d.Cursor = after
-	} else {
+	case job.format:
+		d.Cursor = d.Buffer.Clamp(buffer.Pos{Line: formatLine(hunks, caret.Line), Col: caret.Col})
+	default:
 		d.Cursor = d.Buffer.Clamp(caret)
 	}
 	d.Sel = nil

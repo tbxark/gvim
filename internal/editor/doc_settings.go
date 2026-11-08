@@ -5,6 +5,7 @@ package editor
 // state of the document do not change.
 func resetBufferSettings(e *Editor, d *Document, _ map[string]any) error {
 	d.view = ViewSettings{}
+	e.seedRulers(d)
 	e.setStatus("Buffer settings reset")
 	return nil
 }

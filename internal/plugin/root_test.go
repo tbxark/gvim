@@ -144,7 +144,8 @@ func TestNoticeDedupe(t *testing.T) {
 func TestCommandErrorNotice(t *testing.T) {
 	h := start(t, `T.command("go", function() local x = nil; return x.field end)`)
 	_ = h.Run("t.go", nil)
-	if !noticeHas(h, "t: t/init.lua:") || !noticeHas(h, "attempt to index") {
+	// the position goes last, where a cut status row loses the least
+	if !noticeHas(h, "t: attempt to index") || !noticeHas(h, "(t/init.lua:1)") {
 		t.Fatalf("notices = %v", h.NoticeTexts())
 	}
 	if n := len(h.NoticeTexts()); n != 1 {

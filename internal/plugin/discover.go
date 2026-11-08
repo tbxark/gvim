@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -204,6 +205,9 @@ func (l *LoaderOptions) gather(ctx context.Context, osys OS, cfgDir string, st *
 		}
 	}
 	d.cands = shadow(all, &d.notes)
+	if !l.Disabled {
+		l.noteUnknownConfig(d)
+	}
 	for i, c := range d.cands {
 		c.seq = i
 		c.decide(l.Enabled, &d.state)
@@ -684,4 +688,33 @@ func compileText(ctx context.Context, name, src string) *candidate {
 	case <-ctx.Done():
 	}
 	return &candidate{name: name, kind: SourceBuffer, err: "timeout: compiling took too long, abandoned"}
+}
+
+// noteUnknownConfig adds a notice for each plugin the configuration names (plugins.<name>)
+// that is not installed: a misspelt name would otherwise configure nothing and say nothing.
+func (l *LoaderOptions) noteUnknownConfig(d *discovery) {
+	known := make(map[string]bool, len(d.cands))
+	for _, c := range d.cands {
+		known[c.name] = true
+	}
+	var bad []string
+	add := func(name string) {
+		if !known[name] && !slices.Contains(bad, name) && !d.state.warnedUnknown[name] {
+			bad = append(bad, name)
+		}
+	}
+	for name := range l.Enabled {
+		add(name)
+	}
+	for name := range l.Settings {
+		add(name)
+	}
+	sort.Strings(bad)
+	if d.state.warnedUnknown == nil {
+		d.state.warnedUnknown = map[string]bool{}
+	}
+	for _, name := range bad {
+		d.state.warnedUnknown[name] = true
+		d.notes = append(d.notes, note{text: fmt.Sprintf("config plugins.%s: no plugin of that name is installed (a typo?)", name), warn: true})
+	}
 }

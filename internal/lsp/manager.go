@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,16 @@ const managerTimeout = 10 * time.Second
 type ServerConfig struct {
 	Command []string
 	Args    []string
+	// Name is what messages call the server. Empty means its program.
+	Name string
+	// Install says how to get the server, for the message of a server that is not on PATH.
+	Install string
+	// LanguageID is the languageId that didOpen carries, when it differs from the language
+	// the server is keyed by (the "tsx" server of TypeScript says "typescriptreact").
+	LanguageID string
+	// RootMarkers are the names (or globs) of the files that mark a project root. They are
+	// for the caller that picks the workspace root of a file; the Manager does not read them.
+	RootMarkers []string
 }
 
 // Manager runs one language server per language ID and tracks the documents
@@ -115,6 +126,9 @@ func (m *Manager) Open(path, languageID, text string) error {
 	c, err := m.serverFor(languageID)
 	if err != nil {
 		return err
+	}
+	if id := m.servers[languageID].LanguageID; id != "" {
+		languageID = id
 	}
 
 	m.sendMu.Lock()
@@ -229,7 +243,7 @@ func (m *Manager) serverFor(languageID string) (*Client, error) {
 	epoch := m.epoch
 	m.mu.Unlock()
 
-	c, err := m.startServer(sc)
+	c, err := m.startServer(languageID, sc)
 
 	m.mu.Lock()
 	if m.starts[languageID] == s {
@@ -255,15 +269,23 @@ func (m *Manager) serverFor(languageID string) (*Client, error) {
 }
 
 // startServer launches the server for sc and runs the initialize handshake. Each
-// step has its own deadline. A server that fails a step is closed.
-func (m *Manager) startServer(sc ServerConfig) (*Client, error) {
+// step has its own deadline. A server that fails a step is closed. A failure names the
+// language and the server: a program that is not installed is a *NotInstalledError that
+// carries the install hint, and a handshake that fails is a *StartError with the command
+// line and what the server wrote to its error output.
+func (m *Manager) startServer(lang string, sc ServerConfig) (*Client, error) {
+	command := append(slices.Clone(sc.Command), sc.Args...)
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
 	c, err := m.start(ctx, Config{
-		Command: append(slices.Clone(sc.Command), sc.Args...),
+		Command: command,
 		RootURI: m.rootURI,
 	})
 	cancel()
 	if err != nil {
+		var ni *NotInstalledError
+		if errors.As(err, &ni) {
+			ni.Language, ni.Install = lang, sc.Install
+		}
 		return nil, err
 	}
 	err = m.step(context.Background(), c, func(ctx context.Context) error {
@@ -274,8 +296,13 @@ func (m *Manager) startServer(sc ServerConfig) (*Client, error) {
 		err = m.step(context.Background(), c, c.Initialized)
 	}
 	if err != nil {
+		// The process is gone or stopped once it is closed, so what it wrote is all there.
 		_ = c.Close()
-		return nil, err
+		name := sc.Name
+		if name == "" && len(sc.Command) > 0 {
+			name = sc.Command[0]
+		}
+		return nil, &StartError{Language: lang, Name: name, Command: strings.Join(command, " "), Stderr: c.StderrTail(), Err: err}
 	}
 	return c, nil
 }

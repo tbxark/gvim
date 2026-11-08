@@ -19,19 +19,17 @@ func latin1File(t *testing.T, dir string) string {
 	return path
 }
 
-func TestFileArgumentsOpenANonUTF8FileOfLargeSize(t *testing.T) {
+// A large file that is not UTF-8 is not decoded whole before the first frame: it gets no
+// tab, and the UI asks about it once it runs (ui.RootPorts.FullLoadPrompts).
+func TestFileArgumentsLeaveANonUTF8FileOfLargeSizeToThePrompt(t *testing.T) {
 	root := t.TempDir()
 	other := filepath.Join(root, "a.txt")
 	must(t, os.WriteFile(other, []byte("a\n"), 0o644))
 	l1 := latin1File(t, root)
 	rt := largeRuntime(t, root, `{"editor": {"large_file_threshold_bytes": 1024}}`, other, l1)
 	tabs := rt.ed.Tabs()
-	if len(tabs) != 2 || tabs[1].Path != l1 {
-		t.Fatalf("tabs = %+v, want both files", tabs)
-	}
-	d := rt.ed.Active()
-	if d.Large() || d.Buffer.Line(0) != "café line" {
-		t.Errorf("large %v, line 0 = %q: want the file decoded whole", d.Large(), d.Buffer.Line(0))
+	if len(tabs) != 1 || tabs[0].Path != other {
+		t.Fatalf("tabs = %+v, want only the file that opens at once", tabs)
 	}
 }
 

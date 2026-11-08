@@ -9,6 +9,7 @@ import (
 	"github.com/tbxark/gvim/internal/ui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/ui/explorer"
 	"github.com/tbxark/gvim/internal/ui/icons"
+	"github.com/tbxark/gvim/internal/ui/space"
 )
 
 // Geometry from the responsive spec (blueprint section 4). The painter and the
@@ -34,8 +35,17 @@ const (
 
 	labelGap       = 3 // blank cells between menu labels
 	noNameLabel    = "[No Name]"
-	paletteHelp    = "Palette: ⌃P"
+	paletteHelp    = "Palette: Ctrl+P"
 	warnBlankWidth = 7 // " [⚠ N] " for one digit, reserved while the counter is unknown
+
+	// A status message too long for the status row wraps onto up to maxNoticeRows rows
+	// right above it, the notice band. The band is painted over the bottom rows of the
+	// body, so it never moves the text, and it goes when the next key or click expires
+	// the message. It leaves the top body row alone and is not drawn in a frame
+	// narrower than noticeMinWidth.
+	maxNoticeRows  = 3
+	noticeMinWidth = 20
+	noticeMinText  = 8 // the least text a band row keeps when an explorer takes the left
 )
 
 // barLabels is the menu bar, in order. "Explorer" joins it while the explorer
@@ -62,6 +72,7 @@ type layoutInput struct {
 	tabFirst         int  // the tab strip's scroll position, a tab index
 	welcome          bool // no tab is open, so the welcome screen replaces the editor
 	recents          []string
+	doorKeys         []string // the welcome doors' shortcuts in the active keymap; nil for the defaults
 	status           statusView
 	hideMenuBar      bool       // the menu row is not drawn; the tab strip takes row 0
 	hideStatus       bool       // a suggestion list or the file browser is open
@@ -91,11 +102,14 @@ type statusView struct {
 	lines    int    // line count; its digits set the message column
 	large    string // the chip of a document in large file mode, with the index progress, or ""
 
-	warnSlot bool // reserve the blank warning-counter slot
-	warnings int  // warning count; shown as " [⚠ N] " when above zero
-	readOnly bool // the document is read-only; shown as " [RO] "
+	lsp      string // the language-server pill ("LSP", "LSP (off)"), or "" for a language with no server
+	warnSlot bool   // reserve the blank warning-counter slot
+	warnings int    // warning count; shown as " [⚠ N] " when above zero
+	readOnly bool   // the document is read-only; shown as " [RO] "
 
 	extra []statusItem // the items of plugins (plugin_status.go)
+
+	paletteHint string // the palette hint of the right group; empty for paletteHelp
 }
 
 // run is a piece of text at a fixed column, together with what a click on it
@@ -134,6 +148,13 @@ type layout struct {
 	statusY             int
 	statusOn            bool
 	scrollbar           bool // content overflows, so the last column is the scrollbar
+
+	// The notice band: a status message that does not fit the status row, wrapped onto
+	// the rows right above it and painted over the body (see setNotice). notice is empty
+	// when the message fits; noticeY is the first row of the band.
+	noticeX int // the band's first column, the editor's left edge
+	noticeY int
+	notice  []string
 
 	// The prompt row sits under the status row, above the find bar. It is drawn only
 	// when promptOn is set, and it is empty except for the prompts that use it.
@@ -219,6 +240,9 @@ func computeLayout(w, h int, in layoutInput) layout {
 		l.statusY--
 	}
 	l.statusOn = !in.hideStatus
+	if l.statusOn {
+		l.setNotice(in.status, in.explorerWidth(w))
+	}
 	l.bodyBottom = l.statusY - 1
 	if !l.statusOn {
 		l.bodyBottom = l.statusY
@@ -241,12 +265,113 @@ func computeLayout(w, h int, in layoutInput) layout {
 	l.strip = placeStrip(l.editorX, w, in.tabs, in.tabFirst, in.iconMode)
 	if in.welcome {
 		l.welcomeOn = true
-		l.welcome = welcomeLines(l.editorX, max(w-l.editorX, 0), l.bodyTop, bodyRows, in.recents)
+		l.welcome = welcomeLines(l.editorX, max(w-l.editorX, 0), l.bodyTop, bodyRows, in.recents, in.doorKeys)
 	}
 	if l.statusOn {
-		l.status = statusRuns(w, in.status)
+		st := in.status
+		if len(l.notice) > 0 {
+			// The band shows the message, so the status row does not repeat it.
+			st.message = ""
+		}
+		l.status = statusRuns(w, st)
 	}
 	return l
+}
+
+// setNotice wraps a status message that does not fit the status row onto the rows
+// above it. The rows are the body's, drawn over, and the first body row stays. The band
+// starts at column x0, the editor's left edge, so an open explorer keeps its border.
+func (l *layout) setNotice(s statusView, x0 int) {
+	room := min(l.statusY-l.bodyTop-1, maxNoticeRows)
+	if room <= 0 {
+		return
+	}
+	if rows := statusNotice(l.w, x0, s, room); len(rows) > 0 {
+		l.notice = rows
+		l.noticeX = x0
+		l.noticeY = l.statusY - len(rows)
+	}
+}
+
+// explorerWidth is the columns the explorer panel takes at the left of a w cells wide
+// frame, or zero when it is closed.
+func (in layoutInput) explorerWidth(w int) int {
+	if !in.explorerOpen {
+		return 0
+	}
+	return explorerCols(w, in.explorerOverride)
+}
+
+// statusNotice is the message of s wrapped to the rows of the notice band, at most
+// maxRows of them, or nil when the status row shows the whole message. The band runs
+// from column x0 to the right edge. The full text is in Show Warnings.
+func statusNotice(w, x0 int, s statusView, maxRows int) []string {
+	if s.message == "" || w < noticeMinWidth || w-x0-2*space.PadX < noticeMinText {
+		return nil
+	}
+	if _, cut := statusRunsCut(w, s); !cut {
+		return nil
+	}
+	return noticeRows(s.message, w-x0-2*space.PadX, maxRows)
+}
+
+// noticeRows wraps text onto at most maxRows rows of width cells. A text that needs more
+// rows loses its middle first (space.Middle), so its start and its end both stay: the end
+// of a message is usually the reason. The budget shrinks until the wrapped rows fit.
+func noticeRows(text string, width, maxRows int) []string {
+	budget := width * maxRows
+	for {
+		rows := wrapText(space.Middle(text, budget), width)
+		if len(rows) <= maxRows || budget <= width {
+			return rows
+		}
+		budget -= max(width/4, 1)
+	}
+}
+
+// wrapText breaks s into rows of at most width cells, at its spaces. A word longer than
+// the room left on a row fills that row first and goes on in the next, so a long path does
+// not leave the row before it nearly empty.
+func wrapText(s string, width int) []string {
+	var rows []string
+	if width <= 0 {
+		return nil
+	}
+	cur := ""
+	for _, word := range strings.Fields(s) {
+		for word != "" {
+			sep := ""
+			if cur != "" {
+				sep = " "
+			}
+			room := width - ansi.StringWidth(cur+sep)
+			switch ww := ansi.StringWidth(word); {
+			case ww <= room:
+				cur += sep + word
+				word = ""
+			case ww <= width:
+				// The word fits a row of its own: start the next row with it.
+				if cur != "" {
+					rows = append(rows, cur)
+				}
+				cur = ""
+			case room > 0:
+				// Longer than any row: the room left takes its start.
+				head := ansi.Truncate(word, room, "")
+				cur += sep + head
+				word = ansi.TruncateLeft(word, ansi.StringWidth(head), "")
+				rows = append(rows, cur)
+				cur = ""
+			default:
+				rows = append(rows, cur)
+				cur = ""
+			}
+		}
+	}
+	if cur != "" {
+		rows = append(rows, cur)
+	}
+	return rows
 }
 
 // hideScrollbars clears the scrollbar of every pane. The column stays in the pane, so
@@ -339,10 +464,21 @@ func menuRuns(explorerFocus bool) []run {
 // status message at least.
 const statusMessageMin = 24
 
+// statusItemKeep is the most cells of plugin items on the left that the right group of the
+// status row gives way for.
+const statusItemKeep = 36
+
 // statusRuns lays out the status row (section 4.5). The left group is cut first
 // to the room the right group leaves. The right group is dropped from its end
 // until the left group keeps at least min(floor(2W/5), 40) cells.
 func statusRuns(w int, s statusView) []run {
+	runs, _ := statusRunsCut(w, s)
+	return runs
+}
+
+// statusRunsCut is statusRuns, and it also reports whether the status message was cut
+// or dropped to fit the row.
+func statusRunsCut(w int, s statusView) ([]run, bool) {
 	type segment struct {
 		text string
 		kind hitKind
@@ -353,32 +489,35 @@ func statusRuns(w int, s statusView) []run {
 	pluginSeg := func(i int) segment {
 		it := s.extra[i]
 		if it.clickable {
-			return segment{" " + it.text + " ", hitStatusPlugin, i}
+			return segment{space.Pad(it.text), hitStatusPlugin, i}
 		}
-		return segment{" " + it.text + " ", hitNone, 0}
+		return segment{space.Pad(it.text), hitNone, 0}
 	}
 	left := []segment{
-		{" Local ", hitNone, 0},
-		{" " + padCells(s.position, positionWidth(s.lines)) + " ", hitNone, 0},
+		{space.Pad("Local"), hitNone, 0},
+		{space.Pad(padCells(s.position, positionWidth(s.lines))), hitStatusSegment, statusSegmentPosition},
 	}
 	for i, it := range s.extra {
 		if !it.right {
 			left = append(left, pluginSeg(i))
 		}
 	}
-	left = append(left, segment{" " + s.message + " ", hitNone, 0})
+	left = append(left, segment{space.Pad(s.message), hitNone, 0})
 	var right []segment
 	if s.large != "" {
-		right = append(right, segment{" " + s.large + " ", hitNone, 0})
+		right = append(right, segment{space.Pad(s.large), hitNone, 0})
 	}
 	if s.readOnly {
-		right = append(right, segment{" [RO] ", hitNone, 0})
+		right = append(right, segment{space.Pad("[RO]"), hitNone, 0})
 	}
 	right = append(right,
-		segment{" " + s.eol + " ", hitStatusSegment, statusSegmentEOL},
-		segment{" " + s.encoding + " ", hitStatusSegment, statusSegmentEncoding},
-		segment{" " + s.language + " ", hitStatusSegment, statusSegmentLanguage},
+		segment{space.Pad(s.eol), hitStatusSegment, statusSegmentEOL},
+		segment{space.Pad(s.encoding), hitStatusSegment, statusSegmentEncoding},
+		segment{space.Pad(s.language), hitStatusSegment, statusSegmentLanguage},
 	)
+	if s.lsp != "" {
+		right = append(right, segment{space.Pad(s.lsp), hitStatusSegment, statusSegmentLSP})
+	}
 	for i, it := range s.extra {
 		if it.right {
 			right = append(right, pluginSeg(i))
@@ -386,15 +525,28 @@ func statusRuns(w int, s statusView) []run {
 	}
 	switch {
 	case s.warnings > 0:
-		right = append(right, segment{" [⚠ " + strconv.Itoa(s.warnings) + "] ", hitNone, 0})
+		right = append(right, segment{space.Pad("[⚠ " + strconv.Itoa(s.warnings) + "]"), hitNone, 0})
 	case s.warnSlot:
 		// The blank keeps the columns the counter takes once it is known.
 		right = append(right, segment{strings.Repeat(" ", warnBlankWidth), hitNone, 0})
 	}
-	right = append(right, segment{" " + paletteHelp + " ", hitStatusPalette, 0})
+	hint := paletteHelp
+	if s.paletteHint != "" {
+		hint = s.paletteHint
+	}
+	right = append(right, segment{space.Pad(hint), hitStatusPalette, 0})
 
-	minLeft := min(2*w/5, 40)
-	budget := w - (minLeft + 1)
+	// The label of a modal plugin is the only sign of its state, so it comes before the right
+	// group (the palette hint, then the language and the rest go first) and before " Local ".
+	itemW := 0
+	for i, it := range s.extra {
+		if !it.right {
+			itemW += ansi.StringWidth(pluginSeg(i).text)
+		}
+	}
+	itemW = min(itemW, statusItemKeep)
+	posW := ansi.StringWidth(left[1].text)
+	msgW := min(ansi.StringWidth(left[len(left)-1].text), statusMessageMin)
 	keep := 0
 	if w >= 15 {
 		keep = 1
@@ -406,11 +558,26 @@ func statusRuns(w int, s statusView) []run {
 		}
 		return total
 	}
-	for rightWidth() > budget && len(right) > keep {
-		right = right[:len(right)-1]
+	full := right
+	for pass := 0; ; pass++ {
+		minLeft := min(2*w/5, 40)
+		if itemW > 0 {
+			base := ansi.StringWidth(left[0].text) + posW + itemW + msgW
+			minLeft = max(minLeft, base)
+		}
+		budget := w - (minLeft + 1)
+		right = full
+		for rightWidth() > budget && len(right) > keep {
+			right = right[:len(right)-1]
+		}
+		if itemW == 0 || pass > 0 || w-rightWidth() >= ansi.StringWidth(left[0].text)+posW+itemW+msgW {
+			break
+		}
+		left[0].text = "" // still no room for the label: " Local " goes
 	}
 
 	var runs []run
+	cut := s.message != ""
 	room := w - rightWidth()
 	x := 0
 	// left is " Local ", the position, the plugin items, the message. The items share what
@@ -423,6 +590,9 @@ func statusRuns(w int, s statusView) []run {
 			break
 		}
 		text := seg.text
+		if text == "" {
+			continue
+		}
 		if i >= 2 && i < len(left)-1 {
 			if itemRoom <= 0 {
 				continue
@@ -436,6 +606,9 @@ func statusRuns(w int, s statusView) []run {
 			break
 		}
 		runs = append(runs, newRun(x, text, seg.kind, seg.id))
+		if i == len(left)-1 {
+			cut = strings.Contains(s.message, "\n")
+		}
 		x += tw
 		room -= tw
 	}
@@ -449,7 +622,7 @@ func statusRuns(w int, s statusView) []run {
 		runs = append(runs, newRun(x, seg.text, seg.kind, index))
 		x += ansi.StringWidth(seg.text)
 	}
-	return runs
+	return runs, cut
 }
 
 // positionWidth is the width of the cursor position item. The message column

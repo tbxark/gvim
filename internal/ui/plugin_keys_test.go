@@ -78,7 +78,9 @@ type noDocFake struct{ *fakeEditor }
 func (noDocFake) Active() Document { return nil }
 
 // plugOverlayStub is an overlay a plugin opened.
-type plugOverlayStub struct{ dismissed bool }
+type plugOverlayStub struct{ dismissed, takesEsc bool }
+
+func (o *plugOverlayStub) TakesEscape() bool { return o.takesEsc }
 
 func (o *plugOverlayStub) Update(tea.Msg) (Overlay, tea.Cmd) { return o, nil }
 func (o *plugOverlayStub) Draw(*grid.Grid)                   {}

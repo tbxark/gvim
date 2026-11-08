@@ -43,9 +43,16 @@ func TestWelcomeShowsWhenNoTabIsOpen(t *testing.T) {
 	}
 	g := m.paint()
 	all := strings.Join(g.Plain(), "\n")
-	for _, want := range []string{welcomeTitle[1], welcomeSubtitleText, "New File", "Ctrl+N", "Open File", "Ctrl+O", "Open Folder", "Alt+O", "Command Palette", "Ctrl+T", "Explorer", "Ctrl+B"} {
+	for _, want := range []string{welcomeTitle[1], welcomeSubtitleText, "New File", "Open File", "Open Folder", "Command Palette", "Explorer"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("welcome screen lacks %q:\n%s", want, all)
+		}
+	}
+	// A keymap that cannot list its bindings gives no keys: the doors do not carry the
+	// keys of one preset.
+	for _, bad := range []string{"Ctrl+N", "Ctrl+O", "Alt+O", "Ctrl+T", "Ctrl+B"} {
+		if strings.Contains(all, bad) {
+			t.Errorf("welcome screen shows the fixed key %q:\n%s", bad, all)
 		}
 	}
 }
@@ -304,7 +311,7 @@ func TestWelcomeInAShortFrameDoesNotPanic(t *testing.T) {
 
 // welcomeLines places the block on the pane and keeps the title centred.
 func TestWelcomeTitleIsCentredInTheBlock(t *testing.T) {
-	lines := welcomeLines(0, 80, 0, 30, nil)
+	lines := welcomeLines(0, 80, 0, 30, nil, nil)
 	var title []welcomeLine
 	for _, r := range lines {
 		if r.role == welcomeTitleRow {

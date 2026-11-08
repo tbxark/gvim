@@ -215,7 +215,7 @@ func TestInitCheckAndReload(t *testing.T) {
 	// A syntax error is reported with its line, and neither check nor reload disturbs v2.
 	e.disk.put(initFile, "T.spy('init v3')\nlocal x = = 1")
 	e.control("init_check", "")
-	if !e.noticeHas("init/init.lua line:2") {
+	if !e.noticeHas("syntax error near '=' (init/init.lua:2:11)") {
 		t.Fatalf("notices = %v", e.notices())
 	}
 	plugin.ResetSpy(e.h.RT)
@@ -454,5 +454,28 @@ func TestDefaultOpenRefusesSymlinksOutOfThePluginDirectory(t *testing.T) {
 	}
 	if p, _ := h.Plugin("dots"); p.Status != "loaded" {
 		t.Errorf("dots = %+v", p)
+	}
+}
+
+// TestReloadAllSaysWhenAReloadWasAborted: the last notice of Reload All must not claim a clean
+// success when a plugin's reload was aborted by a syntax error; it names the plugin and the file.
+func TestReloadAllSaysWhenAReloadWasAborted(t *testing.T) {
+	e := newEnv(t)
+	e.user("a.lua", `T.command("v", function() T.spy("a1") end)`)
+	e.user("b.lua", `T.command("v", function() T.spy("b1") end)`)
+	e.start()
+	e.user("b.lua", `T.command("v", function() T.spy("b2") end) +`)
+	e.control("reload_all", "")
+	last := e.h.Host.Notices[len(e.h.Host.Notices)-1]
+	if last.Level != pluginapi.LevelWarn {
+		t.Errorf("the last notice has level %q, want warn: %q", last.Level, last.Msg)
+	}
+	for _, want := range []string{"plugin 'b'", "reload aborted", "b/b.lua"} {
+		if !strings.Contains(last.Msg, want) {
+			t.Errorf("the last notice %q lacks %q", last.Msg, want)
+		}
+	}
+	if strings.HasPrefix(last.Msg, "2 plugin(s) loaded") {
+		t.Errorf("the last notice starts with a success count: %q", last.Msg)
 	}
 }

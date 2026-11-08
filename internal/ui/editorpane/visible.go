@@ -33,30 +33,47 @@ func (p Pane) VisibleRows(w, h, limit int) []RowSpan {
 	var out []RowSpan
 	y := 0
 	for i := f.top; i < f.lines && y < f.h && len(out) < limit; i = f.next(i) {
-		ln := f.layoutLine(i, false)
-		raw, _ := f.lineRaw(i)
-		starts := runeStarts(raw, f.tab)
-		bytes := byteStarts(raw)
-		base := 0
-		if ln.long && ln.off > 0 {
-			// The window starts at a rune column; the row's columns are bytes of the line.
-			base = len(f.win.LineSlice(i, 0, ln.off))
+		anchor := 0
+		if i == f.top && f.fill == nil {
+			anchor = f.topRow
 		}
-		col := func(exp int) int {
-			j := sort.SearchInts(starts, exp)
-			return base + bytes[j]
-		}
-		for k, sp := range ln.spans {
-			if y >= f.h || len(out) >= limit {
-				break
+		// The filler rows of a pane take body rows but are not text rows, so they are not listed.
+		above := f.fillAbove(i)
+		y += f.fillShown(i, 0, above)
+		// The columns of the rows are bytes of the line, found from the runes of the laid out
+		// line or segment, which the rows of one share.
+		var (
+			cur           line
+			starts, bytes []int
+			base          int
+			haveCur       bool
+		)
+		for _, rd := range f.lineRows(i, false, anchor, min(f.h-y, limit-len(out))) {
+			if f.fill != nil && i == f.top && above+rd.k < f.topRow {
+				continue // a pane with fillers counts the rows of the top block in topRow
 			}
-			from, to := sp.from, sp.to
+			if !haveCur || rd.ln.off != cur.off {
+				cur, haveCur = rd.ln, true
+				starts, bytes = runeStarts(cur.raw, f.tab), byteStarts(cur.raw)
+				base = 0
+				if cur.long && cur.off > 0 {
+					// The window starts at a rune column; the row's columns are bytes of the line.
+					base = len(f.win.LineSlice(i, 0, cur.off))
+				}
+			}
+			col := func(exp int) int {
+				j := sort.SearchInts(starts, exp)
+				return base + bytes[j]
+			}
+			from, to := rd.sp.from, rd.sp.to
 			if !f.wrap {
-				from, to = visibleCells(ln.geom, f.dropFor(ln), textW)
+				from, to = visibleCells(rd.ln.geom, f.dropFor(rd.ln), textW)
 			}
-			out = append(out, RowSpan{Line: i, From: col(from), To: col(to), Wrapped: k > 0})
+			out = append(out, RowSpan{Line: i, From: col(from), To: col(to), Wrapped: !rd.first})
 			y++
 		}
+		// A pane with fillers does not wrap, so the text of a line is one row.
+		y += f.fillShown(i, above+1, f.fillAfter(i))
 	}
 	return out
 }

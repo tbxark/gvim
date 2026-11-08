@@ -101,6 +101,7 @@ func (m *Model) startRevertErr(force bool) (tea.Cmd, error) {
 // readRevert returns the command that reads the file of plan. The read runs in the command,
 // and the result is applied when its message reaches Update.
 func readRevert(as asyncReverter, plan editor.RevertPlan, auto bool) tea.Cmd {
+	plan.Auto = auto
 	return func() tea.Msg {
 		return revertDoneMsg{plan: plan, result: as.RunRevert(plan), auto: auto}
 	}

@@ -84,9 +84,9 @@ func TestWheelOverTabRowScrollsByOneTab(t *testing.T) {
 	}
 }
 
-// A click on ">" scrolls by one tab, the "+" stays on screen, and clicking it
-// opens an untitled tab.
-func TestClickRightMarkerScrollsAndPlusStillOpensTab(t *testing.T) {
+// A click on ">" scrolls by one tab, the "+" stays on screen, and clicking it opens the
+// menu of new tabs, whose New File row opens an untitled tab.
+func TestClickRightMarkerScrollsAndPlusOpensItsMenu(t *testing.T) {
 	m, tf := stripModel(t, 60, twelveTabs()...)
 	tf.active = 0
 	tf.sync()
@@ -110,8 +110,12 @@ func TestClickRightMarkerScrollsAndPlusStillOpensTab(t *testing.T) {
 	}
 	_, cmd := m.Update(click(59, 1, tea.MouseLeft))
 	drain(t, m, cmd)
+	if n := len(tf.names); n != 12 {
+		t.Fatalf("clicking + changed the tabs to %v, want the menu only", tf.names)
+	}
+	chooseRow(t, m, "New File")
 	if n := len(tf.names); n != 13 || tf.names[12] != "Untitled-13" {
-		t.Fatalf("clicking + left tabs %v, want an untitled tab added", tf.names)
+		t.Fatalf("New File left tabs %v, want an untitled tab added", tf.names)
 	}
 	if !tabsOnScreen(m)[12] {
 		t.Fatal("the new untitled tab is not on screen")
@@ -146,11 +150,13 @@ func TestMarkersAppearOnlyWhenOverflowing(t *testing.T) {
 	}
 }
 
-// Adding and closing tabs keep the active tab on screen.
+// Adding and closing tabs keep the active tab on screen. The + menu's New File row adds
+// the tab.
 func TestAddingATabKeepsTheNewTabVisible(t *testing.T) {
 	m, _ := stripModel(t, 60, twelveTabs()...)
 	_, cmd := m.Update(click(59, 1, tea.MouseLeft))
 	drain(t, m, cmd)
+	chooseRow(t, m, "New File")
 	if !tabsOnScreen(m)[12] {
 		t.Fatalf("the new tab 12 is not on screen; first = %d", m.tabFirst)
 	}

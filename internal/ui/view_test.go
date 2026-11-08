@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -44,7 +45,12 @@ func (r realEditor) Tabs() []TabInfo {
 	return out
 }
 
-func (r realEditor) Status() string                      { return r.ed.Status() }
+func (r realEditor) Status() string { return r.ed.Status() }
+
+// ClearStatus drops the status message on a key or click, as the app adapter does, so the
+// message that opening the file sets does not stay as a notice band over the body.
+func (r realEditor) ClearStatus() { r.ed.ClearStatus() }
+
 func (r realEditor) SetCursor(p buffer.Pos, extend bool) { r.ed.SetCursor(p, extend) }
 func (r realEditor) ExtendSelection(p buffer.Pos, u editor.Unit) {
 	r.ed.ExtendSelection(p, u)
@@ -85,11 +91,17 @@ func (r realDoc) Selection() (anchor, head buffer.Pos, ok bool) {
 // the styles have colors to compare.
 func viewModel(t *testing.T, o ViewOptions, text string, w, h int) (*Model, *editor.Editor) {
 	t.Helper()
+	return viewModelWith(t, editor.New(editor.Options{}), o, text, w, h)
+}
+
+// viewModelWith is viewModel over ed, so that a test can set the editor's options before
+// the file is opened.
+func viewModelWith(t *testing.T, ed *editor.Editor, o ViewOptions, text string, w, h int) (*Model, *editor.Editor) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "doc.txt")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ed := editor.New(editor.Options{})
 	if err := ed.OpenFile(path); err != nil {
 		t.Fatal(err)
 	}
@@ -206,14 +218,18 @@ func TestVerticalScrollbarToggleClearsTheColumn(t *testing.T) {
 }
 
 func TestHorizontalScrollbarToggleGivesItsRowBack(t *testing.T) {
-	m, _ := viewModel(t, DefaultViewOptions(), strings.Repeat("x", 200)+"\nb\nc\n", 40, 8)
+	m, ed := viewModel(t, DefaultViewOptions(), strings.Repeat("x", 200)+"\nb\nc\n", 40, 8)
 	runAction(t, m, "toggle_line_wrap")
+	// In a 40-column frame the notice band is drawn over the last body row.
+	m.notice = ""
+	ed.ClearStatus()
 	last := m.layout().bodyBottom
 	x := m.layout().textX
 	if got := viewCell(t, m, x, last).Text; got != "━" && got != "─" {
 		t.Fatalf("setup: the last body row %q is not the horizontal bar", got)
 	}
 	runAction(t, m, "toggle_horizontal_scrollbar")
+	m.notice = ""
 	if got := viewCell(t, m, x, last).Text; got == "━" || got == "─" {
 		t.Errorf("the bar is still drawn on row %d after the toggle", last)
 	}
@@ -337,8 +353,11 @@ func TestLineNumbersCurrentBufferHidesOnlyTheCurrentBuffer(t *testing.T) {
 		t.Fatalf("setup: gutter cell %q, want the line number 1", got)
 	}
 	runAction(t, m, "toggle_line_numbers_current_buffer")
-	if got := viewCell(t, m, 0, y).Text; got != "a" {
-		t.Errorf("after the toggle the first cell is %q, want the text a", got)
+	if got := viewCell(t, m, 0, y).Text; got != " " {
+		t.Errorf("after the toggle the first cell is %q, want the padding", got)
+	}
+	if got := viewCell(t, m, 1, y).Text; got != "a" {
+		t.Errorf("after the toggle the text starts at %q, want the text a after the padding", got)
 	}
 	if m.hideLineNumbers {
 		t.Error("the global line numbers setting changed with the current buffer toggle")
@@ -371,6 +390,43 @@ func TestRulerAddAndRemoveThroughThePrompt(t *testing.T) {
 	settle(t, m, press(m, special(tea.KeyEnter)))
 	if got := docViewOf(m.ed.Active()).Rulers; len(got) != 0 {
 		t.Errorf("rulers = %v after remove_ruler, want none", got)
+	}
+}
+
+func TestConfigRulersReachThePane(t *testing.T) {
+	tests := []struct {
+		name   string
+		config []int
+		add    string
+		remove string
+		want   []int
+	}{
+		{"config only", []int{20, 40}, "", "", []int{20, 40}},
+		{"buffer ruler joins config", []int{20}, "5", "", []int{20, 5}},
+		{"duplicate stays once", []int{5}, "5", "", []int{5}},
+		{"none", nil, "", "", nil},
+		{"a configured ruler can be removed from the buffer", []int{20, 40}, "", "20", []int{40}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := editor.New(editor.Options{})
+			ed.SetRulers(tc.config)
+			m, _ := viewModelWith(t, ed, DefaultViewOptions(), "abc\nxyz\n", 40, 8)
+			if tc.add != "" {
+				runAction(t, m, "add_ruler")
+				press(m, typed(tc.add))
+				settle(t, m, press(m, special(tea.KeyEnter)))
+			}
+			if tc.remove != "" {
+				runAction(t, m, "remove_ruler")
+				press(m, typed(tc.remove))
+				settle(t, m, press(m, special(tea.KeyEnter)))
+			}
+			p := m.viewPane(editorpane.Pane{}, m.ed.Active())
+			if !slices.Equal(p.Rulers, tc.want) {
+				t.Errorf("pane rulers = %v, want %v", p.Rulers, tc.want)
+			}
+		})
 	}
 }
 

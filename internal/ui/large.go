@@ -49,8 +49,9 @@ type streamSearcher interface {
 	StartScan(q search.Query, startLine int) (*search.Scan, error)
 	// FindNext returns the match to go to from the position from: the first match
 	// that starts at or after it, or with backward the last one that starts before
-	// it. scanned is false when the search ran out of its budget before it knew.
-	FindNext(q search.Query, from buffer.Pos, backward bool) (m search.Match, found, scanned bool, err error)
+	// it. scanned is false when the search ran out of its budget before it knew;
+	// next then says where it stopped, and passing it back as at goes on from there.
+	FindNext(q search.Query, from buffer.Pos, backward bool, at search.Cursor) (m search.Match, found, scanned bool, next search.Cursor, err error)
 	// VisibleMatches returns the matches that touch lines first through last.
 	VisibleMatches(q search.Query, first, last int) ([]search.Match, error)
 }
@@ -126,10 +127,15 @@ type largeState struct {
 	indexBusy bool
 	// stream is the scan that counts the matches for the find bar, or nil.
 	stream *searchRun
+	// nav is where the last F3, Enter or Shift+F3 search ran out of its budget, or nil.
+	nav *navResume
 	// saves are the writes in flight, by number.
 	saves    map[int]*saveRun
 	nextSave int
 	quitting bool // a quit waits for the cancelled saves
+	// quitAfterSave is set by a quit that found a write in flight: the tab it would ask
+	// about is being saved, so the quit waits for the write and asks again if needed.
+	quitAfterSave bool
 	// quitStash writes the unsaved edits of large documents before a quit, or nil.
 	quitStash func() error
 }
@@ -316,6 +322,9 @@ type saveRun struct {
 	cancel  context.CancelFunc
 	paths   []string
 	stopped bool
+	// done is closed when the command that writes has returned, and so has removed the
+	// temporary file of a stopped write.
+	done chan struct{}
 }
 
 // stop stops the write.
@@ -335,7 +344,7 @@ func (m *Model) beginSave(all bool) (int, context.Context) {
 	if m.large.saves == nil {
 		m.large.saves = make(map[int]*saveRun)
 	}
-	run := &saveRun{cancel: cancel}
+	run := &saveRun{cancel: cancel, done: make(chan struct{})}
 	for i, t := range m.ed.Tabs() {
 		if t.Path != "" && (t.Active || (all && t.Modified)) {
 			run.paths = append(run.paths, m.tabPath(i))
@@ -344,6 +353,20 @@ func (m *Model) beginSave(all bool) (int, context.Context) {
 	m.large.nextSave++
 	m.large.saves[m.large.nextSave] = run
 	return m.large.nextSave, ctx
+}
+
+// waitSaves waits until the writes in flight have returned, for at most quitWait. A write
+// that was stopped removes its temporary file before it returns.
+func (m *Model) waitSaves() {
+	timer := time.NewTimer(quitWait)
+	defer timer.Stop()
+	for _, run := range m.large.saves {
+		select {
+		case <-run.done:
+		case <-timer.C:
+			return
+		}
+	}
 }
 
 // endSave forgets a write that ended.
@@ -548,15 +571,14 @@ func (m *Model) searchSync() tea.Cmd {
 func (m *Model) publishStream(r *searchRun) {
 	sc := r.scan
 	info := find.StreamInfo{
-		Progress:  sc.Progress(),
-		Count:     len(sc.Matches()),
-		Done:      sc.Done(),
-		Capped:    sc.Capped(),
-		Partial:   sc.Partial(),
-		Truncated: sc.Truncated(),
-		Regex:     r.key.q.Regex,
-		Elapsed:   sc.Stats().Elapsed,
-		Err:       r.err,
+		Progress: sc.Progress(),
+		Count:    len(sc.Matches()),
+		Done:     sc.Done(),
+		Capped:   sc.Capped(),
+		Partial:  sc.Partial(),
+		Regex:    r.key.q.Regex,
+		Elapsed:  sc.Stats().Elapsed,
+		Err:      r.err,
 	}
 	if info.Done {
 		info.Matches = sc.Matches()
@@ -597,12 +619,40 @@ func (m *Model) largeFindNavigate(ss streamSearcher, q search.Query, forward boo
 	if !forward {
 		from = start
 	}
-	match, found, scanned, err := ss.FindNext(q, from, !forward)
+	match, found, scanned, err := m.findNext(ss, q, from, !forward)
 	if forward && found && match.Start == match.End && match.Start == end {
 		// The caret is on an empty match, which is the current one.
-		match, found, scanned, err = ss.FindNext(q, buffer.Pos{Line: end.Line, Col: end.Col + 1}, false)
+		match, found, scanned, err = m.findNext(ss, q, buffer.Pos{Line: end.Line, Col: end.Col + 1}, false)
 	}
 	m.afterLargeFind(h, match, found, scanned, err, from, forward)
+}
+
+// navResume is a navigation search that ran out of its budget: the text, the
+// position and the direction it searched, and where it stopped.
+type navResume struct {
+	key      searchKey
+	from     buffer.Pos
+	backward bool
+	at       search.Cursor
+}
+
+// findNext is ss.FindNext for the keys that move to a match. A search over more text
+// than one budget stops with scanned false, and the same search asked again (same
+// text, query, position and direction) goes on from where it stopped, so repeating
+// F3 or Enter reaches a match that is farther than one budget.
+func (m *Model) findNext(ss streamSearcher, q search.Query, from buffer.Pos, backward bool) (search.Match, bool, bool, error) {
+	doc, ver, complete, _ := ss.SearchKey()
+	key := searchKey{doc: doc, version: ver, complete: complete, q: q}
+	var at search.Cursor
+	if r := m.large.nav; r != nil && r.key == key && r.from == from && r.backward == backward {
+		at = r.at
+		m.large.nav = nil
+	}
+	match, found, scanned, next, err := ss.FindNext(q, from, backward, at)
+	if err == nil && !found && !scanned {
+		m.large.nav = &navResume{key: key, from: from, backward: backward, at: next}
+	}
+	return match, found, scanned, err
 }
 
 // afterLargeFind selects the match a large search found, or says why none was.

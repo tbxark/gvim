@@ -166,12 +166,25 @@ split) and loads the new source. Plugins that `requires` it reload after it.
 ```text
 gvim --no-plugins          do not discover or load any plugin, not even init.lua
 gvim --plugin PATH         load the .lua file or plugin directory at PATH; repeatable
+gvim --log-file PATH       append the status-row notices and the plugin log to PATH
 ```
+
+The plugin log in memory holds the last 2000 entries (**Plugin: Show Log**) and is gone when gvim
+exits; `--log-file` keeps it (below).
 
 `--plugin` still loads when combined with `--no-plugins`. `--no-plugins` is the way out when a
 plugin makes the editor unusable. Pressing `ctrl+^` or `ctrl+alt+shift+esc` at any time, or
-`ctrl+shift+6` or `Esc` three times within 600 ms while a plugin mode, key wait or plugin overlay is
-active, clears every plugin input mode and key capture and closes plugin prompts: the *panic chords*.
+`ctrl+shift+6` while a plugin holds the keyboard, or `Esc` three times within 600 ms while the plugin
+input is *stuck*, clears every plugin input mode and key capture and closes plugin prompts: the *panic
+chords*. The input is stuck when each of the three presses finds a plugin waiting for a key
+(`gvim.input.next_key`), a plugin prompt, picker or popup open, or an active mode that does not bind
+`Esc` itself. A mode that binds `Esc` (vi_mode does) answers every press, so Esc mashing never counts.
+
+`--log-file PATH` appends the notices of the status row (what **Show Warnings** lists) and the plugin
+log (what **Plugin: Show Log** shows, every level) to the file, one line each with a time stamp, and
+writes them as they happen: the file is current while gvim runs and has what a `shutdown` handler or a
+crash left. The file is opened for appending and created when missing. A path that cannot be written
+is a notice and gvim runs without a log.
 
 ## What a plugin is allowed to do
 

@@ -29,7 +29,11 @@ type rootState struct {
 // status of the tree, the file watch, the folders of the open documents and the
 // auto-save tick.
 func (m *Model) rootInit() tea.Cmd {
-	return tea.Batch(m.gitCmd(), m.autoSaveCmd(), m.watchWait(), m.watchSync(), m.revertPollCmd(), m.recoveryCmd())
+	cmds := []tea.Cmd{m.gitCmd(), m.autoSaveCmd(), m.watchWait(), m.watchSync(), m.revertPollCmd(), m.recoveryCmd()}
+	for _, err := range m.root.ports.FullLoadPrompts {
+		cmds = append(cmds, func() tea.Msg { return fullLoadPromptMsg{err: err} })
+	}
+	return tea.Batch(cmds...)
 }
 
 // rootMessage handles the messages of the root features. It reports whether it
@@ -70,6 +74,9 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.finishShell(msg), true
 	case openIconPreviewMsg:
 		m.openIconPreview()
+		return nil, true
+	case keybindSavedMsg:
+		m.keybindSaved(msg)
 		return nil, true
 	}
 	return nil, false

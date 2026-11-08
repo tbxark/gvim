@@ -78,7 +78,7 @@ func TestLineStartsWithInputAndCaretAtEnd(t *testing.T) {
 		t.Fatalf("Value = %q", got)
 	}
 	x, y, ok := l.Cursor(40, 5)
-	if !ok || y != 4 || x != len("Save as: /tmp/a.txt") {
+	if !ok || y != 4 || x != 1+len("Save as: /tmp/a.txt") {
 		t.Fatalf("Cursor = (%d, %d, %v)", x, y, ok)
 	}
 }
@@ -138,7 +138,7 @@ func TestLineDrawShowsLabelAndInput(t *testing.T) {
 	t.Parallel()
 	l := NewLine(testStyles(), LineOptions{Label: "New folder:", Input: "src"})
 	rows := draw(l, 30, 6)
-	if !strings.HasPrefix(rows[5], "New folder: src") {
+	if !strings.HasPrefix(rows[5], " New folder: src") {
 		t.Fatalf("bottom row = %q", rows[5])
 	}
 	if strings.TrimSpace(rows[4]) != "" {
@@ -230,7 +230,7 @@ func TestConfirmDrawShowsBothAnswers(t *testing.T) {
 	t.Parallel()
 	c := NewConfirm(testStyles(), "Delete a.txt? (y/n)", nil)
 	rows := draw(c, 50, 4)
-	if !strings.HasPrefix(rows[3], "Delete a.txt? (y/n) [ Yes ] [ No ]") {
+	if !strings.HasPrefix(rows[3], " Delete a.txt? (y/n) [ Yes ] [ No ]") {
 		t.Fatalf("bottom row = %q", rows[3])
 	}
 	if _, _, ok := c.Cursor(50, 4); ok {

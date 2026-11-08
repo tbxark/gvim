@@ -243,6 +243,15 @@ local ok, e = v:insert(gvim.pos(0, 0), "a")
 T.spy(tostring(ok), gvim.err_code(e))
 T.spy(v:set_read_only(false), v:insert(gvim.pos(0, 0), "a"), v:text())`,
 			want: "false true true|nil read_only|true true ax"},
+		{name: "streaming recipe: append works between set_read_only(false) and (true)", body: `
+local v = gvim.buf.create{name = "o", text = "a\n", read_only = true}
+local ok, e = v:append("x\n")
+T.spy(tostring(ok), gvim.err_code(e))
+v:set_read_only(false)
+T.spy(v:append("b\n"), v:set_read_only(true), v:text())
+local ok2, e2 = v:append("c\n")
+T.spy(tostring(ok2), gvim.err_code(e2))`,
+			want: "nil read_only|true true a\nb\n|nil read_only"},
 		{name: "set_read_only on a regular buffer", body: `local ok, e = b:set_read_only(true) T.spy(tostring(ok), e)`,
 			want: "nil invalid: buffer 1 is not a virtual buffer"},
 		{name: "set_read_only needs a boolean", body: `local v = gvim.buf.create{name = "o"} T.spy((pcall(v.set_read_only, v, "yes")))`, want: "false"},

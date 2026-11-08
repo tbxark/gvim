@@ -10,6 +10,8 @@ package grid
 import (
 	"image/color"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -64,8 +66,17 @@ func (g *Grid) At(x, y int) Cell {
 
 // Set places one grapheme in the cell at (x, y), replacing what was there. It
 // does not clip a wide grapheme; use Put for text that may be wider than one cell.
+// Writing the grapheme a cell already holds only restyles it, and a wide grapheme
+// keeps its continuation cell, which takes the style too.
 func (g *Grid) Set(x, y int, text string, st Style) {
 	if x < 0 || y < 0 || x >= g.w || y >= g.h {
+		return
+	}
+	if c := &g.cells[y][x]; c.Text == text && text != "" {
+		c.Style = st
+		if x+1 < g.w && g.cells[y][x+1].Text == "" {
+			g.cells[y][x+1].Style = st
+		}
 		return
 	}
 	g.breakPairs(x, y)
@@ -100,6 +111,12 @@ func (g *Grid) Put(x, y, maxX int, s string, st Style) int {
 		}
 		rest = rest[len(gr):]
 		if w == 0 {
+			// A control character has no width and no glyph. It is dropped, because
+			// written into a cell it would reach the terminal as a control (a newline
+			// or a carriage return in a file name moves the cursor under the frame).
+			if r, _ := utf8.DecodeRuneInString(gr); unicode.IsControl(r) {
+				continue
+			}
 			// Zero-width graphemes, such as combining marks, attach to the lead
 			// cell of the grapheme before them.
 			if p := x - 1; x > start && p >= 0 && p < g.w {

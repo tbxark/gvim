@@ -21,6 +21,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -98,6 +99,9 @@ type LineOptions struct {
 	Tag       any                     // returned in Done
 	Validate  func(text string) error // checked on Enter; a rejection keeps the prompt open and shows the error
 	OnChange  func(text string)       // called with the new text after an edit changed it; may be nil
+	// History holds earlier answers, oldest first. Up shows the previous one, Down the next, and
+	// Down past the newest brings back what was typed before Up.
+	History []string
 }
 
 // Line is a one-line text prompt. Enter submits the input, Esc closes the
@@ -112,6 +116,10 @@ type Line struct {
 	styles   styles
 	closed   bool
 	prefill  bool // the text is an untouched prefill that the next typed text replaces
+
+	history []string // earlier answers, oldest first
+	at      int      // the entry of history shown; len(history) is the text being typed
+	draft   string   // the text being typed, while an entry is shown
 }
 
 // NewLine returns a text prompt with the options of o. The field is focused.
@@ -131,6 +139,8 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 		onChange: o.OnChange,
 		styles:   newStyles(st),
 		prefill:  o.SelectAll && o.Input != "",
+		history:  o.History,
+		at:       len(o.History),
 	}
 }
 
@@ -159,6 +169,12 @@ func (l *Line) Update(msg tea.Msg) (*Line, tea.Cmd) {
 	case "esc":
 		l.closed = true
 		return l, nil
+	case "up", "down", "ctrl+p", "ctrl+n":
+		if len(l.history) > 0 {
+			k := tea.Key(kp).Keystroke()
+			l.walk(k == "up" || k == "ctrl+p")
+			return l, nil
+		}
 	case "enter":
 		text := l.field.Value()
 		if l.validate != nil {
@@ -176,6 +192,33 @@ func (l *Line) Update(msg tea.Msg) (*Line, tea.Cmd) {
 		cmd = nil
 	}
 	return l, cmd
+}
+
+// walk shows the previous (back) or the next entry of the history. The text being typed is kept
+// for the way back down.
+func (l *Line) walk(back bool) {
+	l.untouch(false)
+	if l.at == len(l.history) {
+		l.draft = l.field.Value()
+	}
+	if back {
+		l.at = max(l.at-1, 0)
+	} else {
+		l.at = min(l.at+1, len(l.history))
+	}
+	text := l.draft
+	if l.at < len(l.history) {
+		text = l.history[l.at]
+	}
+	if text == l.field.Value() {
+		return
+	}
+	l.field.SetValue(text)
+	l.field.CursorEnd()
+	l.errText = ""
+	if l.onChange != nil {
+		l.onChange(text)
+	}
 }
 
 // untouch ends the prefill. The text it held goes when replaces is set.
@@ -212,16 +255,24 @@ func (l *Line) Draw(g *grid.Grid) {
 	}
 	w := g.Width()
 	g.Fill(0, w, y, l.styles.bar)
-	end := w
+	end := l.inputEnd(w)
+	if end < w {
+		g.Put(end+1, y, w, l.errText, l.styles.warn)
+	}
+	x := space.PadX + g.Put(space.PadX, y, end, l.label+" ", l.styles.label)
+	shown, _ := space.Window(l.field.Value(), l.field.Position(), end-x)
+	g.Put(x, y, end, shown, l.styles.field)
+}
+
+// inputEnd is the column where the input stops on a row w cells wide: before the
+// rejection message when there is one.
+func (l *Line) inputEnd(w int) int {
 	if l.errText != "" {
-		x := w - ansi.StringWidth(l.errText) - 1
-		if x > 0 {
-			g.Put(x, y, w, l.errText, l.styles.warn)
-			end = x - 1
+		if x := w - ansi.StringWidth(l.errText) - 1; x > 0 {
+			return x - 1
 		}
 	}
-	x := g.Put(0, y, end, l.label+" ", l.styles.label)
-	g.Put(x, y, end, l.field.Value(), l.styles.field)
+	return w
 }
 
 // Cursor returns the caret in a frame of w by h cells. ok is false when the
@@ -231,9 +282,9 @@ func (l *Line) Cursor(w, h int) (x, y int, ok bool) {
 	if y < 0 {
 		return 0, 0, false
 	}
-	runes := []rune(l.field.Value())
-	pos := min(l.field.Position(), len(runes))
-	x = ansi.StringWidth(l.label+" ") + ansi.StringWidth(string(runes[:pos]))
+	x = space.PadX + ansi.StringWidth(l.label+" ")
+	_, col := space.Window(l.field.Value(), l.field.Position(), l.inputEnd(w)-x)
+	x += col
 	if x >= w {
 		return 0, 0, false
 	}
@@ -325,7 +376,7 @@ func (c *Confirm) Draw(g *grid.Grid) {
 	}
 	w := g.Width()
 	g.Fill(0, w, y, c.styles.bar)
-	x := g.Put(0, y, w, c.label+" ", c.styles.label)
+	x := space.PadX + g.Put(space.PadX, y, w, c.label+" ", c.styles.label)
 	yesStyle, noStyle := c.styles.label, c.styles.label
 	if c.yes {
 		yesStyle = c.styles.active

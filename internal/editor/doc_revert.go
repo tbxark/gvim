@@ -28,6 +28,9 @@ type RevertPlan struct {
 	Force bool
 	// Modified is true when the document has unsaved edits, which the reload replaces.
 	Modified bool
+	// Auto marks a reload that the editor started because the file changed on disk. Its
+	// status says "Reloaded", not "Reverted", which reads as if the user discarded changes.
+	Auto bool
 
 	planned bool        // PlanRevert made the plan, so mark holds the document's content
 	eol     string      // the line ending of the document, which the read keeps when it can
@@ -68,14 +71,14 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 		err = ErrNoPath
 	}
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 		return RevertPlan{}, err
 	}
 	switch {
 	case d.restoring():
 		// A swap of the file would drop the stashed edits that wait for the index.
 		err := fmt.Errorf("revert %s: %w", d.Name(), ErrRestoring)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return RevertPlan{}, err
 	case d.large != nil && d.Modified():
 		// The edits of a large document are an overlay on its file. They are not
@@ -84,13 +87,13 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 			msg:  fmt.Sprintf("revert %s: a large file with unsaved changes is not reverted; save it or close it", d.Name()),
 			errs: []error{ErrLargeFile},
 		}
-		e.setStatus(err.Error())
+		e.setError(err)
 		return RevertPlan{}, err
 	case d.large == nil && e.isLargePath(d.Path):
 		// A file that has grown into a large one since the document was opened is not
 		// read whole.
 		err := fmt.Errorf("revert %s: %w", d.Name(), ErrLargeFile)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return RevertPlan{}, err
 	}
 	plan := RevertPlan{
@@ -107,7 +110,7 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 	}
 	if plan.Modified && !force {
 		err := fmt.Errorf("revert %s: %w", d.Name(), ErrUnsaved)
-		e.setStatus(err.Error())
+		e.setError(err)
 		return plan, err
 	}
 	return plan, nil
@@ -171,6 +174,8 @@ func (e *Editor) ApplyRevert(plan RevertPlan, res RevertResult) error {
 		e.releaseDoc(res.fresh)
 		return fmt.Errorf("revert %s: %w", filepath.Base(plan.Path), ErrNoDocument)
 	}
+	d.revertAuto = plan.Auto
+	defer func() { d.revertAuto = false }()
 	freshLarge := res.fresh != nil && res.fresh.large != nil
 	var err error
 	switch {
@@ -194,7 +199,7 @@ func (e *Editor) ApplyRevert(plan RevertPlan, res RevertResult) error {
 	if err != nil {
 		e.releaseDoc(res.fresh)
 		err = fmt.Errorf("revert %s: %w", d.Name(), err)
-		d.status = err.Error()
+		d.fail(err)
 		return err
 	}
 	if d.large != nil {
@@ -219,7 +224,7 @@ func (e *Editor) ApplyRevert(plan RevertPlan, res RevertResult) error {
 			return nil
 		}
 		d.adoptFile(res.Text, res.fresh)
-		d.status = "Reverted " + d.Name()
+		d.status = d.revertedStatus()
 		return nil
 	}
 	d.Buffer.Group(func() {
@@ -234,7 +239,7 @@ func (e *Editor) ApplyRevert(plan RevertPlan, res RevertResult) error {
 	d.findRange = nil
 	d.clampToText()
 	d.want = -1
-	d.status = "Reverted " + d.Name()
+	d.status = d.revertedStatus()
 	return nil
 }
 
@@ -318,5 +323,14 @@ func (e *Editor) swapFile(d, fresh *Document) {
 			kind: pendingGoto, line: cursor.Line + 1, col: cursor.Col + 1, from: jumpEntryOf(d),
 		}
 	}
-	d.status = "Reverted " + d.Name()
+	d.status = d.revertedStatus()
+}
+
+// revertedStatus is the status after a reload from disk: "Reverted a.txt" for a revert the
+// user asked for, and "Reloaded a.txt from disk" for one made because the file changed.
+func (d *Document) revertedStatus() string {
+	if d.revertAuto {
+		return "Reloaded " + d.Name() + " from disk"
+	}
+	return "Reverted " + d.Name()
 }

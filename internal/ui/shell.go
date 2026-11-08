@@ -24,6 +24,11 @@ func (m *Model) shellAction(action string, args map[string]any) (tea.Cmd, bool) 
 	if action != "shell_command" && action != "shell_command_replace" && action != "format_buffer" {
 		return nil, false
 	}
+	if action == "format_buffer" {
+		if cmd, ok := m.lspFormat(); ok {
+			return cmd, true
+		}
+	}
 	sr, ok := m.ed.(ShellRunner)
 	if !ok {
 		return nil, false

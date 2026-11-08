@@ -40,14 +40,19 @@ func recoveryPort(ed *editor.Editor, cfg config.Config, sessionDir string, real 
 }
 
 // recoverFromCrash restores the unsaved text that earlier runs left in the recovery
-// folder of sessionDir, except the copy of a run that is still going, and returns the notice for the status row, or "" when there
-// was nothing to recover.
-func recoverFromCrash(ed *editor.Editor, sessionDir string, real bool) string {
+// folder of sessionDir, except the copy of a run that is still going, and returns the notice
+// for the status row, or "" when there was nothing to recover. The copies it restored from
+// are removed once port, when it is not nil, has written the copy of this run.
+func recoverFromCrash(ed *editor.Editor, sessionDir string, real bool, port ui.RecoveryPort) string {
 	root := recoveryRootFor(sessionDir, real)
 	if root == "" {
 		return ""
 	}
-	failed, n := recoverAbandoned(ed, root, processAlive)
+	var protect func() error
+	if port != nil {
+		protect = func() error { return port.Plan()() }
+	}
+	failed, n := recoverAbandoned(ed, root, processAlive, protect)
 	switch {
 	case len(failed) > 0:
 		return fmt.Sprintf("recovery: %d file(s) restored; the unsaved text of %d more is kept in the .failed folders of %s", n, len(failed), root)

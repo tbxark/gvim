@@ -83,6 +83,6 @@ const (
 	userStormDrains  = 10   // consecutive cut Drains with a plugin's own tasks queued: a strike
 	maxFailureStreak = 5    // consecutive failures after which a subscription is dropped
 	guardStartAfter  = 2 * time.Millisecond
-	guardSampleEvery = 5 * time.Millisecond
-	defaultHeapLimit = 256 << 20
+	guardSampleEvery = time.Millisecond
+	defaultHeapLimit = 128 << 20
 )

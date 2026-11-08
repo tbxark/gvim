@@ -151,3 +151,19 @@ func TestHiddenMenuBarIsSkippedByF6(t *testing.T) {
 		t.Fatalf("F6 from the tab strip reached stage %v, want the editor", m.stage())
 	}
 }
+
+// The Open Menu Bar command says why nothing opened while the bar is hidden.
+func TestOpenMenuBarCommandExplainsAHiddenBar(t *testing.T) {
+	for _, action := range []string{"menu_activate", "menu_open"} {
+		m := menuModel(t, true)
+		m.dispatch(Command{Action: action, Args: map[string]any{"name": "File"}})
+		if m.menu.IsOpen() || m.notice != menuHiddenNotice {
+			t.Errorf("%s with the bar hidden: open %v, notice %q", action, m.menu.IsOpen(), m.notice)
+		}
+	}
+	m := menuModel(t, false)
+	runAction(t, m, "menu_activate")
+	if !m.menu.IsOpen() || m.menu.Title() != "File" {
+		t.Errorf("menu_activate opened %q, want File", m.menu.Title())
+	}
+}

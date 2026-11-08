@@ -70,6 +70,19 @@ func TestUIInput(t *testing.T) {
 			},
 		},
 		{
+			name: "history reaches the host",
+			body: `T.spy(gvim.ui.input{prompt = ":", history = {"a", "b"}})`,
+			answer: func(h *plugintest.Harness, o *plugintest.FakeOverlay) {
+				answer(h, o, "b")
+			},
+			want: "b",
+			check: func(t *testing.T, o *plugintest.FakeOverlay) {
+				if !slices.Equal(o.Input.History, []string{"a", "b"}) {
+					t.Fatalf("history = %q", o.Input.History)
+				}
+			},
+		},
+		{
 			name: "no options at all",
 			body: `T.spy(tostring(gvim.ui.input()))`,
 			answer: func(h *plugintest.Harness, o *plugintest.FakeOverlay) {
@@ -121,6 +134,7 @@ func TestUIInputBadArguments(t *testing.T) {
 		{"options not a table", `gvim.ui.input("x")`, "table expected"},
 		{"prompt not a string", `gvim.ui.input{prompt = 1.5}`, "option 'prompt' must be a string"},
 		{"validate not a function", `gvim.ui.input{validate = 3}`, "option 'validate' must be a function"},
+		{"history not a table", `gvim.ui.input{history = "x"}`, "option 'history': table of strings expected"},
 		{"confirm needs a string", `gvim.ui.confirm(1)`, "string expected"},
 		{"choose needs a table", `gvim.ui.choose("m", 1)`, "table expected"},
 		{"select needs a table", `gvim.ui.select("x")`, "table expected"},
@@ -297,6 +311,9 @@ T.spy(it == items[2], it.n, i)`, 1, "true 20 2", []string{"x", "y"}},
 		{"format maps the display text", `
 local it, i = gvim.ui.select({ {name = "p"}, {name = "q"} }, {format = function(x) return "<" .. x.name .. ">" end})
 T.spy(it.name, i)`, 1, "q 2", []string{"<p>", "<q>"}},
+		{"format is called for string items too", `
+local it, i = gvim.ui.select({ "a", {name = "q"} }, {format = function(x) return "<" .. (type(x) == "string" and x or x.name) .. ">" end})
+T.spy(it, i)`, 0, "a 1", []string{"<a>", "<q>"}},
 		{"cancel", `local it, i = gvim.ui.select({"a"}) T.spy(tostring(it), tostring(i))`, nil, "nil nil", []string{"a"}},
 	}
 	for _, tt := range rows {

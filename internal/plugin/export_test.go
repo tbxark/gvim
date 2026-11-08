@@ -16,6 +16,9 @@ import (
 // extra await kinds for the task tests, and read access to the registry. It is compiled
 // into the test binary only.
 
+// DefaultHeapLimit is the heap guard of the editor, for the tests that measure it.
+const DefaultHeapLimit = defaultHeapLimit
+
 var spies = map[*Runtime]*[]string{}
 
 // lastTok is the token of the latest t_host wait of each runtime.

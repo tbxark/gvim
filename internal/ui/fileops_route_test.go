@@ -243,6 +243,20 @@ func TestDeleteAsksAndTrashesOnYes(t *testing.T) {
 	}
 }
 
+func TestDeleteOfSeveralEntriesAsksOnceAndTrashesAll(t *testing.T) {
+	ops := &fakeOps{}
+	m, _ := newOpsModel(t, ops)
+	m.Update(expanel.DeleteMsg{Paths: []string{"/ws/f0", "/ws/f1"}})
+	if len(m.overlays) != 1 {
+		t.Fatalf("%d questions, want one", len(m.overlays))
+	}
+	_, cmd := m.Update(typed("y"))
+	settle(t, m, cmd)
+	if want := []string{"trash /ws/f0", "trash /ws/f1"}; !equalStrings(ops.calls, want) {
+		t.Fatalf("calls = %v, want %v", ops.calls, want)
+	}
+}
+
 func TestDeleteDefaultsToNo(t *testing.T) {
 	ops := &fakeOps{}
 	m, _ := newOpsModel(t, ops)

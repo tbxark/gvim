@@ -60,8 +60,14 @@ func (f frame) bracketsOf(i int, raw []rune, kinds []syntax.Kind, cells []cell) 
 	}
 	bs.next = i + 1
 	if rainbow {
+		// One pass maps every column: expandedIndex per bracket is quadratic on a
+		// line of 200 KB.
+		var table []int
 		f.walkBrackets(raw, kinds, func(col int, r rune, depth int) {
-			if x := expandedIndex(raw, col, f.tab); x < len(cells) {
+			if table == nil {
+				table = expandedTable(raw, f.tab)
+			}
+			if x := table[col]; x < len(cells) {
 				cells[x].mark, cells[x].lvl = markBracket, uint8(depth%style.RainbowLevels)
 			}
 		})
@@ -117,8 +123,9 @@ func (f frame) findPair() ([2]buffer.Pos, bool) {
 // bracketAtCaret returns the position of the bracket under the caret, or else just
 // before it.
 func (f frame) bracketAtCaret() (buffer.Pos, bool) {
-	if f.caret.Line >= f.lines || f.isLong(f.caret.Line) {
-		// A window shows part of its line, so a pair at the caret there is not looked for.
+	if f.caret.Line >= f.lines || f.isLong(f.caret.Line) || f.isTall(f.caret.Line) {
+		// A window shows part of its line, as a segment does, so a pair at the caret there is
+		// not looked for.
 		return buffer.Pos{}, false
 	}
 	text := f.doc.Line(f.caret.Line)

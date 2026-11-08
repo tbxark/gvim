@@ -428,8 +428,8 @@ func TestStartupProblemsAreNotHiddenByEachOther(t *testing.T) {
 	s.waitStatus("p1", "failed")
 	s.waitStatus("p2", "failed")
 	s.settle(30 * time.Millisecond)
-	if row := s.statusRow(); !strings.Contains(row, "plugin 'p1'") {
-		t.Errorf("status row %q lacks the first error", row)
+	if row := s.noticeText(); !strings.Contains(row, "plugin 'p1'") {
+		t.Errorf("status row and notice band %q lack the first error", row)
 	}
 	s.runCommand("Show Warnings")
 	for _, want := range []string{"plugin 'p1'", "plugin 'p2'", "JavaScript plugin(s) ignored"} {

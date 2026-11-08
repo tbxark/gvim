@@ -35,12 +35,12 @@ func replaceMatchLarge(e *Editor, d *Document, q search.Query, repl string, m se
 	case errors.Is(err, search.ErrMatchTooLarge):
 		err = &largeError{msg: "replace: match too large for large file mode", errs: []error{ErrLargeFile, err}}
 	case errors.Is(err, buffer.ErrLineTooLong), errors.Is(err, buffer.ErrInvalidUTF8),
-		errors.Is(err, buffer.ErrOverlayFull), errors.Is(err, buffer.ErrSourceChanged):
+		errors.Is(err, buffer.ErrOverlayFull), errors.Is(err, buffer.ErrLineOverBudget), errors.Is(err, buffer.ErrSourceChanged):
 		err = d.refusalError(err)
 	default:
 		return out, err // no match, or a pattern that does not compile: the caller reports it
 	}
-	e.setStatus(err.Error())
+	e.setError(err)
 	return "", err
 }
 
@@ -57,7 +57,7 @@ func (e *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
 	if d.large != nil {
 		// Replace All lists every match of the document.
 		err := &largeError{msg: "Replace All is not available in large file mode", errs: []error{ErrLargeFile}}
-		e.setStatus(err.Error())
+		e.setError(err)
 		return 0, err
 	}
 	if !limited {
@@ -96,7 +96,7 @@ func (e *Editor) writableActive() (*Document, error) {
 		err = d.refuseEditWhileRestoring("replace")
 	}
 	if err != nil {
-		e.setStatus(err.Error())
+		e.setError(err)
 		return nil, err
 	}
 	d.lastMulti = nil

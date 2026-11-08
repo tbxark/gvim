@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"path/filepath"
-	"strings"
 
 	"github.com/alecthomas/chroma/v2/lexers"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/search"
-	"github.com/tbxark/gvim/internal/syntax"
 )
 
 // Limits of one Edit call (AMENDMENTS C18): the edits, and the bytes they insert plus
@@ -77,7 +75,7 @@ func editorErr(err error) error {
 		return pluginapi.Errf(pluginapi.CodeLimit, "%v", err)
 	case errors.Is(err, editor.ErrLargeFile), errors.Is(err, buffer.ErrLargeBuffer), errors.Is(err, search.ErrLargeBuffer),
 		errors.Is(err, search.ErrRangeTooLarge), errors.Is(err, buffer.ErrOverCap), errors.Is(err, buffer.ErrLineTooLong),
-		errors.Is(err, buffer.ErrOverlayFull):
+		errors.Is(err, buffer.ErrOverlayFull), errors.Is(err, buffer.ErrLineOverBudget):
 		return pluginapi.Errf(pluginapi.CodeTooLarge, "%v", err)
 	}
 	return pluginapi.Errf(pluginapi.CodeInvalid, "%v", err)
@@ -184,10 +182,7 @@ func (p *pluginEditor) language(d *editor.Document) string {
 	if l, ok := p.langs[d.Path]; ok {
 		return l
 	}
-	l := ""
-	if n := strings.ToLower(syntax.Detect(d.Path, nil).Config().Name); n != "" && !isPlainLexer(n) {
-		l = n
-	}
+	l := fileLanguage(d.Path)
 	if len(p.langs) >= pluginLangCache {
 		clear(p.langs)
 	}
@@ -232,11 +227,10 @@ func (p *pluginEditor) FindBuffer(path string) pluginapi.BufferID {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	path = filepath.Clean(path)
-	for i := range p.ed.DocIDs() {
-		if d := p.ed.DocAt(i); d.Path != "" && filepath.Clean(d.Path) == path {
-			return pluginapi.BufferID(d.ID())
-		}
+	// by file, as the editor does when it opens a path: a symlink or another spelling of the
+	// path of an open file names the tab that has it
+	if i, ok := p.ed.DocumentIndexByPath(filepath.Clean(path)); ok {
+		return pluginapi.BufferID(p.ed.DocAt(i).ID())
 	}
 	return 0
 }

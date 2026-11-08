@@ -459,18 +459,25 @@ func bigLineSnapshot(t *testing.T, text string) *buffer.Buffer {
 	return b
 }
 
-func TestScanTruncatedAndPartialFlags(t *testing.T) {
+func TestScanPartialFlag(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("y", 200) // over the test line cap of 64
 	t.Run("huge line", func(t *testing.T) {
-		b, _ := largeBuffer(t, "a\n"+long+"\nb")
-		sc, err := NewScan(b.Snapshot(), Query{Text: "a"}, 0)
+		// The huge line is searched in full: its last byte is a match.
+		b, _ := largeBuffer(t, "a\n"+long+"z\nb")
+		sc, err := NewScan(b.Snapshot(), Query{Text: "z"}, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer sc.Close()
-		if !sc.Truncated() || sc.Partial() {
-			t.Errorf("Truncated %v, Partial %v; want true, false", sc.Truncated(), sc.Partial())
+		if done, err := sc.Step(time.Hour); !done || err != nil {
+			t.Fatalf("Step = %v, %v; want the scan done", done, err)
+		}
+		if want := []Match{{Start: buffer.Pos{Line: 1, Col: 200}, End: buffer.Pos{Line: 1, Col: 201}}}; !equalMatches(sc.Matches(), want) {
+			t.Errorf("matches = %v, want %v", sc.Matches(), want)
+		}
+		if sc.Partial() {
+			t.Errorf("Partial = true; the index of this document is complete")
 		}
 	})
 	t.Run("short lines", func(t *testing.T) {
@@ -480,8 +487,8 @@ func TestScanTruncatedAndPartialFlags(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer sc.Close()
-		if sc.Truncated() || sc.Partial() {
-			t.Errorf("Truncated %v, Partial %v; want false, false", sc.Truncated(), sc.Partial())
+		if sc.Partial() {
+			t.Errorf("Partial = true, want false")
 		}
 	})
 	t.Run("memory", func(t *testing.T) {
@@ -490,8 +497,8 @@ func TestScanTruncatedAndPartialFlags(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer sc.Close()
-		if sc.Truncated() || sc.Partial() {
-			t.Errorf("a memory buffer: Truncated %v, Partial %v; want false, false", sc.Truncated(), sc.Partial())
+		if sc.Partial() {
+			t.Errorf("a memory buffer: Partial = true, want false")
 		}
 	})
 	t.Run("index not complete", func(t *testing.T) {

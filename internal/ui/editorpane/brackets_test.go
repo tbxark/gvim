@@ -1,7 +1,9 @@
 package editorpane
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/internal/buffer"
 	"github.com/tbxark/gvim/internal/syntax"
@@ -136,5 +138,21 @@ func TestRainbowDepthCountsBracketsAboveTheWindow(t *testing.T) {
 	}
 	if got := cellAt(t, g, 6, 1).Style.FG; got != cRed {
 		t.Errorf("outer closer fg = %v, want the first depth color", got)
+	}
+}
+
+// The brackets of one very long line are marked in time that grows with the line, not
+// with its square: a minified file is one line of 200 KB.
+func TestRainbowBracketsOnOneHugeLineAreLinear(t *testing.T) {
+	d := newDoc(strings.Repeat("[1,2],", 40000))
+	d.cursor = buffer.Pos{Col: 3}
+	p := Pane{Doc: d, Styles: bracketStyles(), Opts: Options{HighlightBrackets: true, RainbowBrackets: true}}
+	start := time.Now()
+	g := p.Render(60, 3)
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("rendering took %v", took)
+	}
+	if got := cellAt(t, g, 6, 0).Style.FG; got != cRed {
+		t.Errorf("first bracket fg = %v, want the depth color", got)
 	}
 }

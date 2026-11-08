@@ -18,6 +18,7 @@ import (
 	"github.com/tbxark/gvim/internal/ui/editorpane"
 	"github.com/tbxark/gvim/internal/ui/popup"
 	"github.com/tbxark/gvim/internal/ui/prompt"
+	"github.com/tbxark/gvim/internal/ui/space"
 )
 
 // lspDebounce is how long the root waits after the last edit before it sends the
@@ -69,6 +70,15 @@ type lspState struct {
 	inlay bool
 	// comp is the open completion popup, or nil.
 	comp *lspCompletion
+	// unavailable holds the languages whose server cannot run (its program is not installed,
+	// or it failed to start), with the reason. No document of such a language is sent until
+	// lsp_restart. noted holds the languages whose reason was already shown.
+	unavailable map[string]*LSPUnavailableError
+	noted       map[string]bool
+	// forced holds the languages the user started by hand (Start/Restart LSP Server), whose
+	// server then runs although it does not start on its own: lsp_enabled is off, the language
+	// is muted, or the server is manual.
+	forced map[string]bool
 }
 
 // lspLayout is the tab layout a sync saw: the number of tabs, the active one and
@@ -95,6 +105,13 @@ type lspTrack struct {
 	state      lspDocState
 	busy       bool // an open or change command is in flight
 	want, have string
+	// dirty is set when the active document changed since want was read. The text is read
+	// when the debounce timer fires (lspFresh), not on each key press.
+	dirty bool
+	// ver is the version of the document at the last look, when verOK is set. A look at the
+	// same version does nothing.
+	ver   uint64
+	verOK bool
 }
 
 // lspCompletion is the open completion popup, with the items it lists and the
@@ -162,9 +179,20 @@ type (
 	}
 	lspServerMsg struct {
 		action string
+		lang   string // the language a restart was asked for, "" for all
 		err    error
 	}
 	lspErrMsg struct{ err error }
+	// lspRenameLoadedMsg is the files of a rename that were not open, read in a
+	// command. docs and errs run parallel to edits. files counts the files already
+	// changed, and back is the path of the tab the rename started in.
+	lspRenameLoadedMsg struct {
+		edits []FileEdit
+		docs  []*editor.Document
+		errs  []error
+		files int
+		back  string
+	}
 	// lspLoadedMsg is the file a goto read. Its tab opens, and the caret moves to
 	// line and col, one-based.
 	lspLoadedMsg struct {
@@ -241,7 +269,8 @@ func (m *Model) lspReconcile() tea.Cmd {
 			}
 			s.tracks[path] = tr
 		}
-		tr.want = lspDocText(doc)
+		tr.want, tr.dirty = lspDocText(doc), false
+		tr.ver, tr.verOK = docVersion(doc)
 	}
 	for path, tr := range s.tracks {
 		if seen[path] {
@@ -270,8 +299,10 @@ func sortedKeys(m map[string]*lspTrack) []string {
 	return keys
 }
 
-// lspWatchActive notices an edit to the active document. The text is compared with
-// the last text seen, and a change arms the debounce timer.
+// lspWatchActive notices an edit to the active document. An edit marks the track dirty and arms
+// the debounce timer. The text is read when the timer fires (lspFresh), not here: reading it costs
+// the length of the file, and every key press comes through the watch. A look at a document whose
+// version has not moved does nothing.
 func (m *Model) lspWatchActive() tea.Cmd {
 	doc := m.ed.Active()
 	if doc == nil {
@@ -281,12 +312,37 @@ func (m *Model) lspWatchActive() tea.Cmd {
 	if tr == nil || isLargeDoc(doc) {
 		return nil
 	}
-	text := lspDocText(doc)
-	if text == tr.want {
+	ver, versioned := docVersion(doc)
+	if versioned && tr.verOK && tr.ver == ver {
 		return nil
 	}
-	tr.want = text
+	tr.ver, tr.verOK = ver, versioned
+	tr.dirty = true
 	return m.lspArm()
+}
+
+// lspFresh reads the text of the active document into tr.want when the document changed since
+// its last read, so that a send, or the check that a reply needs one, has the latest text. It
+// does nothing while the document is not the active one: a switch of tabs runs the reconcile,
+// which reads every open document.
+func (m *Model) lspFresh(tr *lspTrack) {
+	if !tr.dirty {
+		return
+	}
+	doc := m.ed.Active()
+	if doc == nil || docPath(doc) != tr.path {
+		return
+	}
+	tr.want, tr.dirty = lspDocText(doc), false
+}
+
+// docVersion returns the version of the text of doc, and false when doc does not report one.
+func docVersion(doc Document) (uint64, bool) {
+	v, ok := doc.(versionedDoc)
+	if !ok {
+		return 0, false
+	}
+	return v.Version(), true
 }
 
 // lspArm starts a debounce timer. The newest timer is the only one that sends.
@@ -301,6 +357,7 @@ func (m *Model) lspArm() tea.Cmd {
 // for a closed document, or a change when the text differs. Nothing is sent while
 // a command for tr is in flight, or after lsp_stop.
 func (m *Model) lspSendFor(tr *lspTrack) tea.Cmd {
+	m.lspFresh(tr)
 	if tr.busy || m.lsp.stopped {
 		return nil
 	}
@@ -372,6 +429,12 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 	case lspLoadedMsg:
 		m.lspLoaded(msg)
 		return nil, true
+	case lspRenameLoadedMsg:
+		m.lspRenameLoaded(msg)
+		return nil, true
+	case lspFormatMsg:
+		m.lspFormatted(msg)
+		return nil, true
 	case lspServerMsg:
 		return m.lspServerDone(msg), true
 	case lspErrMsg:
@@ -403,7 +466,7 @@ func (m *Model) lspOpened(msg lspOpenedMsg) tea.Cmd {
 	tr.busy = false
 	if msg.err != nil {
 		tr.state = lspClosed
-		m.notice = msg.err.Error()
+		m.lspOpenFailed(tr, msg.err)
 		return nil
 	}
 	tr.state, tr.have = lspOpen, msg.text
@@ -412,7 +475,7 @@ func (m *Model) lspOpened(msg lspOpenedMsg) tea.Cmd {
 		s.polling = true
 		cmds = append(cmds, m.lspPollArm())
 	}
-	if tr.want != tr.have {
+	if tr.dirty || tr.want != tr.have {
 		cmds = append(cmds, m.lspArm())
 	}
 	return tea.Batch(cmds...)
@@ -434,7 +497,7 @@ func (m *Model) lspChanged(msg lspChangedMsg) tea.Cmd {
 		return nil
 	}
 	tr.have = msg.text
-	if tr.want != tr.have {
+	if tr.dirty || tr.want != tr.have {
 		return m.lspArm()
 	}
 	return nil
@@ -517,6 +580,13 @@ func (m *Model) lspServerDone(msg lspServerMsg) tea.Cmd {
 	switch msg.action {
 	case "restart":
 		s.stopped = false
+		s.unavailable, s.noted = nil, nil
+		if msg.lang != "" {
+			if s.forced == nil {
+				s.forced = make(map[string]bool)
+			}
+			s.forced[msg.lang] = true
+		}
 		for _, tr := range s.tracks {
 			tr.state, tr.busy, tr.have = lspClosed, false, ""
 		}
@@ -551,11 +621,11 @@ func (m *Model) lspReply(r lspReplyMsg) tea.Cmd {
 	case lspAskDefinition, lspAskImplementation, lspAskReferences:
 		return m.lspLocations(r)
 	case lspAskHover:
-		m.lspHover(r.text)
+		m.lspHover(r.path, r.at, r.text)
 	case lspAskCompletion:
 		m.lspCompletions(r)
 	case lspAskRename:
-		m.lspRenamed(r.edits)
+		return m.lspRenamed(r.edits)
 	case lspAskCodeActions:
 		m.lspCodeActions(r.titles)
 	case lspAskSignature:
@@ -635,15 +705,40 @@ func (m *Model) lspLoaded(msg lspLoadedMsg) {
 	m.focusEditor()
 }
 
-// lspHover shows the hover text in a popup, one row per line.
-func (m *Model) lspHover(text string) {
-	if strings.TrimSpace(text) == "" {
-		m.notice = "No hover information"
-		return
-	}
+// lspHover shows the hover text in a popup, one row per line, and a line wider than the popup
+// over several rows, so that no message is cut. The diagnostics that cover the position come
+// first, with their severity and source, so one popup says both what the server knows of the
+// symbol and what it found wrong with it, as Fresh's hover does. Without any text there is a
+// notice.
+func (m *Model) lspHover(path string, at buffer.Pos, text string) {
 	var items []popup.Item
-	for line := range strings.SplitSeq(text, "\n") {
-		items = append(items, popup.Item{Label: line})
+	width := popup.TextWidth(m.width)
+	add := func(line string) {
+		for _, row := range space.Wrap(line, width, len(line)+1) {
+			items = append(items, popup.Item{Label: row})
+		}
+	}
+	diags := m.diagsAt(path, at)
+	for _, d := range diags {
+		for i, line := range strings.Split(strings.TrimSpace(d.Message), "\n") {
+			if i == 0 {
+				line = diagText(Diagnostic{Severity: d.Severity, Source: d.Source, Message: line})
+			}
+			add(line)
+		}
+	}
+	if strings.TrimSpace(text) == "" {
+		if len(items) == 0 {
+			m.notice = "No hover information"
+			return
+		}
+	} else {
+		if len(diags) > 0 {
+			items = append(items, popup.Item{Label: ""})
+		}
+		for line := range strings.SplitSeq(text, "\n") {
+			add(line)
+		}
 	}
 	m.lspPopup("Hover", items)
 }
@@ -816,9 +911,9 @@ func (m *Model) lspAction(action string) (tea.Cmd, bool) {
 	case "jump_to_previous_error":
 		m.jumpToError(false)
 	case "lsp_restart":
-		return m.lspServerCmd("restart"), true
+		return m.lspRestart(), true
 	case "lsp_stop":
-		return m.lspServerCmd("stop"), true
+		return m.lspServerCmd("stop", ""), true
 	case "lsp_toggle_for_buffer":
 		return m.lspToggle(), true
 	case "show_lsp_status":
@@ -840,6 +935,12 @@ func (m *Model) lspAction(action string) (tea.Cmd, bool) {
 	return nil, true
 }
 
+// noServerNotice is the notice for a language that no server is configured for. It
+// names the config key that starts one.
+func noServerNotice(lang string) string {
+	return fmt.Sprintf("No language server for %s: set lsp.%s.command in config.json", lang, lang)
+}
+
 // lspAsked starts a request of kind ask for the caret of the active document. A
 // request needs a configured server and a document the server holds.
 func (m *Model) lspAsked(ask lspAsk) tea.Cmd {
@@ -854,12 +955,8 @@ func (m *Model) lspAsked(ask lspAsk) tea.Cmd {
 		return nil
 	}
 	lang := m.lspLanguage(doc)
-	if m.lsp.port == nil {
-		m.notice = "No language server is configured"
-		return nil
-	}
-	if !m.lsp.enabled(lang) {
-		m.notice = "No language server for " + lang
+	if m.lsp.port == nil || !m.lsp.enabled(lang) {
+		m.notice = m.lspNoServer(lang)
 		return nil
 	}
 	if why := lspLargeReason(doc); why != "" {
@@ -916,7 +1013,7 @@ func (m *Model) askLSPRename() {
 	}
 	path := docPath(doc)
 	if m.lsp.port == nil || path == "" || !m.lsp.enabled(m.lspLanguage(doc)) {
-		m.notice = "No language server for " + m.lspLanguage(doc)
+		m.notice = m.lspNoServer(m.lspLanguage(doc))
 		return
 	}
 	if why := lspLargeReason(doc); why != "" {
@@ -941,25 +1038,97 @@ func (m *Model) lspRenameDone(tag lspRenameTag, d prompt.Done) tea.Cmd {
 }
 
 // lspRenamed applies the edits of a rename to the open documents, one undo step
-// each. A file that is not open is skipped and counted in the notice.
-func (m *Model) lspRenamed(edits []FileEdit) {
+// each. A file that is not open is read in the returned command, and
+// lspRenameLoadedMsg opens it and applies its edits, as Fresh does. Those files stay
+// unsaved, like the open ones.
+func (m *Model) lspRenamed(edits []FileEdit) tea.Cmd {
 	files, skipped := 0, 0
+	var closed []FileEdit
 	for _, fe := range edits {
 		err := m.applyLSPEdits(fe.Path, fe.Edits)
 		switch {
 		case errors.Is(err, editor.ErrNotOpen):
-			skipped++
+			closed = append(closed, fe)
 		case err != nil:
 			m.notice = err.Error()
-			return
+			return nil
 		default:
 			files++
 		}
 	}
 	m.lsp.stale = true
+	ge, ok := m.ed.(gotoEditor)
+	if !ok {
+		skipped, closed = len(closed), nil
+	}
+	if len(closed) == 0 {
+		m.lspRenameNotice(files, skipped, 0)
+		return nil
+	}
+	back := ""
+	if doc := m.ed.Active(); doc != nil {
+		back = docPath(doc)
+	}
+	loads := make([]func() (*editor.Document, error), len(closed))
+	for i, fe := range closed {
+		loads[i] = ge.LoadFunc(fe.Path)
+	}
+	return func() tea.Msg {
+		msg := lspRenameLoadedMsg{edits: closed, files: files, back: back}
+		for _, load := range loads {
+			doc, err := load()
+			msg.docs = append(msg.docs, doc)
+			msg.errs = append(msg.errs, err)
+		}
+		return msg
+	}
+}
+
+// lspRenameLoaded opens the files a rename read and applies their edits. The tab the
+// rename started in is active again at the end, so a refactor does not move the user.
+func (m *Model) lspRenameLoaded(msg lspRenameLoadedMsg) {
+	ge, ok := m.ed.(gotoEditor)
+	if !ok {
+		return
+	}
+	files, opened := msg.files, 0
+	for i, fe := range msg.edits {
+		if msg.errs[i] != nil {
+			m.notice = msg.errs[i].Error()
+			continue
+		}
+		ge.OpenLoaded(msg.docs[i])
+		if err := m.applyLSPEdits(fe.Path, fe.Edits); err != nil {
+			m.notice = err.Error()
+			continue
+		}
+		files++
+		opened++
+	}
+	if msg.back != "" {
+		for i, t := range m.ed.Tabs() {
+			if t.Path == msg.back {
+				m.activateTab(i)
+				break
+			}
+		}
+	}
+	m.lsp.stale = true
+	m.syncViewport()
+	if opened == len(msg.edits) {
+		m.lspRenameNotice(files, 0, opened)
+	}
+}
+
+// lspRenameNotice says how many files a rename changed, how many it skipped, and how
+// many of the changed ones it had to open.
+func (m *Model) lspRenameNotice(files, skipped, opened int) {
 	m.notice = fmt.Sprintf("Renamed in %d files", files)
+	if opened > 0 {
+		m.notice += fmt.Sprintf("; %d opened with unsaved changes", opened)
+	}
 	if skipped > 0 {
-		m.notice += fmt.Sprintf("; %d files are not open and were not changed", skipped)
+		m.notice += fmt.Sprintf("; %d not open, not changed", skipped)
 	}
 }
 
@@ -973,11 +1142,45 @@ func (m *Model) applyLSPEdits(path string, edits []editor.LSPEdit) error {
 	return ed.ApplyLSPEdits(path, edits)
 }
 
-// lspServerCmd is the command for lsp_restart and lsp_stop.
-func (m *Model) lspServerCmd(action string) tea.Cmd {
+// lspRestart is Start/Restart LSP Server. It restarts the servers, and for the language of the
+// active document it also starts a server that does not start on its own, as Fresh's manual
+// start does. A language with no server at all gets the notice that says so.
+func (m *Model) lspRestart() tea.Cmd {
+	lang := ""
+	if doc := m.ed.Active(); doc != nil && m.lsp.port != nil {
+		lang = m.lspLanguage(doc)
+		if !m.lspStartable(lang) {
+			m.notice = m.lspNoServer(lang)
+			return nil
+		}
+	}
+	return m.lspServerCmd("restart", lang)
+}
+
+// lspStartable reports whether a server can run for lang: it starts on its own, or the
+// configuration knows a program for it and only a switch keeps it off.
+func (m *Model) lspStartable(lang string) bool {
 	port := m.lsp.port
 	if port == nil {
-		m.notice = "No language server is configured"
+		return false
+	}
+	if port.Supports(lang) {
+		return true
+	}
+	d, ok := port.(lspDescriber)
+	if !ok {
+		return false
+	}
+	info := d.Server(lang)
+	return info.State != LSPServerNone && info.Command != ""
+}
+
+// lspServerCmd is the command for lsp_restart and lsp_stop. lang is the language a restart
+// starts by hand, or "".
+func (m *Model) lspServerCmd(action, lang string) tea.Cmd {
+	port := m.lsp.port
+	if port == nil {
+		m.notice = `No language server is configured: add an "lsp" entry to config.json`
 		return nil
 	}
 	return func() tea.Msg {
@@ -987,7 +1190,7 @@ func (m *Model) lspServerCmd(action string) tea.Cmd {
 		} else {
 			err = port.Stop()
 		}
-		return lspServerMsg{action: action, err: err}
+		return lspServerMsg{action: action, lang: lang, err: err}
 	}
 }
 
@@ -1037,8 +1240,10 @@ func (m *Model) lspStatus() string {
 	lang := m.lspLanguage(doc)
 	path := docPath(doc)
 	switch {
+	case m.lsp.unavailable[lang] != nil:
+		return "LSP: " + m.lsp.unavailable[lang].Error()
 	case !m.lsp.enabled(lang):
-		return "LSP: no server is configured for " + lang
+		return "LSP: " + lowerFirst(m.lspNoServer(lang))
 	case lspLargeReason(doc) != "":
 		return "LSP: " + lspLargeReason(doc)
 	case m.lsp.off[path]:
@@ -1049,6 +1254,9 @@ func (m *Model) lspStatus() string {
 	state := "not started"
 	if tr := m.lsp.tracks[path]; tr != nil {
 		state = map[lspDocState]string{lspClosed: "closed", lspOpening: "starting", lspOpen: "open"}[tr.state]
+	}
+	if note := m.lspServerNote(lang); note != "" {
+		return "LSP: " + lang + " " + note + " " + state
 	}
 	return "LSP: " + lang + " server " + state
 }
@@ -1102,6 +1310,7 @@ func (m *Model) jumpToError(forward bool) {
 		}
 	}
 	m.ed.SetCursor(target.Start, false)
+	m.notice = diagText(target) + " (" + diagPosition(list, target) + ")"
 }
 
 // lspSpans returns the diagnostic underlines of doc for the editor pane. It is nil
@@ -1159,7 +1368,7 @@ func (m *Model) lspClose() {
 // enabled reports whether a server serves language lang and the root has not
 // stopped it.
 func (s *lspState) enabled(lang string) bool {
-	return s.port != nil && !s.stopped && s.port.Supports(lang)
+	return s.port != nil && !s.stopped && s.unavailable[lang] == nil && (s.forced[lang] || s.port.Supports(lang))
 }
 
 // lspLanguage is the language ID of doc: the lower-case name of its language, the

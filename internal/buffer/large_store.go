@@ -31,6 +31,7 @@ type baseReader struct {
 	g       gridView
 	pages   *pageCache
 	ranges  *rangeMemo
+	huges   *hugeMemo // the huge indexes of this source, see large_huge.go
 	stats   *statCounters
 	maxLine int64
 	// frozen, when set, is the error that stops further source reads; cached
@@ -48,7 +49,9 @@ type bigStore struct {
 	budget *PageBudget
 	dec    *lineCache
 	huge   bool // a line longer than MaxLine has been seen
-	err    error
+	// strideOver and chunkOver replace the stride and the chunk of huge line indexes, in tests.
+	strideOver, chunkOver int
+	err                   error
 	// refusal is the reason the last read or edit was refused (Refusal).
 	refusal error
 	grew    bool
@@ -255,11 +258,23 @@ func (s *bigStore) line(i int) string {
 	return out
 }
 
-func (s *bigStore) lineLen(i int) int { return len(s.runesOf(i)) }
+func (s *bigStore) lineLen(i int) int {
+	if h := s.hugeOf(i); h != nil {
+		return h.runes
+	}
+	return len(s.runesOf(i))
+}
 
 func (s *bigStore) runeAt(p Pos) (rune, bool) {
 	if p.Line < 0 || p.Line >= s.lines() {
 		return 0, false
+	}
+	if h := s.hugeOf(p.Line); h != nil {
+		if p.Col < 0 || p.Col >= h.runes {
+			return 0, false
+		}
+		r, _ := utf8.DecodeRuneInString(s.hugeSlice(h, p.Col, 1))
+		return r, true
 	}
 	line := s.runesOf(p.Line)
 	if p.Col < 0 || p.Col >= len(line) {
@@ -286,11 +301,16 @@ func (s *bigStore) end() Pos {
 
 // lineBytesLen is the stored UTF-8 length of line i without its terminator,
 // found from the index without reading a base line. Invalid bytes count as
-// one byte each, and a line longer than MaxLine counts as MaxLine.
+// one byte each. A line longer than MaxLine counts as its runes, which are
+// read once to find out (see large_huge.go), and as MaxLine while the first
+// line is not yet terminated.
 func (s *bigStore) lineBytesLen(i int) int {
 	r := s.ref(s.clampLine(i))
 	if r.isLit {
 		return r.nb
+	}
+	if h := s.hugeBase(r.base); h != nil {
+		return h.runes
 	}
 	start, end, _, err := s.lineRange(r.base)
 	if err != nil {
@@ -314,6 +334,13 @@ func (s *bigStore) lineCut(i int) bool {
 	return err == nil && end-start > s.maxLine
 }
 
+// lineUnfinished reports whether line i is the first line of a source whose index has not
+// found its end: only a prefix of it can be read until the index goes on. It reads no line.
+func (s *bigStore) lineUnfinished(i int) bool {
+	r := s.ref(s.clampLine(i))
+	return !r.isLit && r.base == 0 && s.g.provisional()
+}
+
 // lineSlice returns runes [col, col+n) of line i. A base line that is not
 // cached is decoded only as far as col+n and is not cached.
 func (s *bigStore) lineSlice(i, col, n int) string {
@@ -321,6 +348,9 @@ func (s *bigStore) lineSlice(i, col, n int) string {
 	col, n = max(col, 0), max(n, 0)
 	runes := r.lit
 	if !r.isLit {
+		if h := s.hugeBase(r.base); h != nil {
+			return s.hugeSlice(h, col, n)
+		}
 		d := s.dec.get(r.base)
 		if d == nil {
 			return s.baseSlice(r.base, col, n)
@@ -411,6 +441,19 @@ func (s *bigStore) rangeLimited(from, to Pos, limit int64) (string, error) {
 		return "", nil
 	}
 	if from.Line == to.Line {
+		if h := s.hugeOf(from.Line); h != nil {
+			if int64(to.Col-from.Col) > limit {
+				return "", ErrOverCap
+			}
+			out := s.hugeSlice(h, from.Col, to.Col-from.Col)
+			if s.err != nil {
+				return "", s.err
+			}
+			if int64(len(out)) > limit {
+				return "", ErrOverCap
+			}
+			return out, nil
+		}
 		li, err := s.info(from.Line)
 		if err != nil {
 			return "", err
@@ -434,7 +477,15 @@ func (s *bigStore) rangeLimited(from, to Pos, limit int64) (string, error) {
 	}
 	var sb strings.Builder
 	// A column of 0 takes the line whole, so it is read but not decoded.
-	if from.Col == 0 {
+	if h := s.hugeOf(from.Line); h != nil {
+		if int64(h.runes-from.Col) > limit {
+			return "", ErrOverCap
+		}
+		sb.WriteString(s.hugeSlice(h, from.Col, h.runes-from.Col))
+		if s.err != nil {
+			return "", s.err
+		}
+	} else if from.Col == 0 {
 		text, err := s.lineString(from.Line)
 		if err != nil {
 			return "", err
@@ -449,6 +500,16 @@ func (s *bigStore) rangeLimited(from, to Pos, limit int64) (string, error) {
 	}
 	for i := from.Line + 1; i < to.Line; i++ {
 		sb.WriteByte('\n')
+		if h := s.hugeOf(i); h != nil {
+			if int64(h.runes) > limit {
+				return "", ErrOverCap
+			}
+			sb.WriteString(s.hugeSlice(h, 0, h.runes))
+			if s.err != nil {
+				return "", s.err
+			}
+			continue
+		}
 		text, err := s.lineString(i)
 		if err != nil {
 			return "", err
@@ -459,7 +520,15 @@ func (s *bigStore) rangeLimited(from, to Pos, limit int64) (string, error) {
 		}
 	}
 	sb.WriteByte('\n')
-	if to.Col > 0 {
+	if h := s.hugeOf(to.Line); h != nil {
+		if int64(to.Col) > limit {
+			return "", ErrOverCap
+		}
+		sb.WriteString(s.hugeSlice(h, 0, to.Col))
+		if s.err != nil {
+			return "", s.err
+		}
+	} else if to.Col > 0 {
 		tail, err := s.info(to.Line)
 		if err != nil {
 			return "", err
@@ -502,6 +571,10 @@ func (s *bigStore) textPrefix(maxBytes int) string {
 	for i, n := 0, s.lines(); i < n && sb.Len() < maxBytes; i++ {
 		if i > 0 {
 			sb.WriteByte('\n')
+		}
+		if h := s.hugeOf(i); h != nil {
+			sb.WriteString(s.hugeSlice(h, 0, maxBytes-sb.Len()))
+			continue
 		}
 		text, err := s.lineString(i)
 		if err != nil {

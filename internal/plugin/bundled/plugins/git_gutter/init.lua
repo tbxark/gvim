@@ -9,7 +9,9 @@
 -- what you type (after a short pause). The HEAD text is read once per file with `git show`,
 -- kept (bounded) and compared with the buffer by the host: no line arrays are built in Lua,
 -- and a large buffer is never scanned by this plugin (the host reads it in one piece, or
--- refuses it). Outside a repository, or for an untracked file, the plugin stays idle.
+-- refuses it). Outside a repository, or for an untracked file, the plugin stays idle. The
+-- directory that holds HEAD is watched, so a commit, checkout or reset made in another
+-- terminal makes the plugin read HEAD again.
 --
 -- Exports for other plugins: hunks(buf_id) -> { {type = "added"|"modified"|"deleted",
 -- line = first line (0-based), count = lines}, ... } for a buffer that is tracked by git.
@@ -32,8 +34,14 @@ local MAX_ITEMS = 10000                -- bars per buffer (the host allows 50 00
 local YIELD_EVERY = 2000           -- bars built per turn of the scheduler
 local MAX_PASSES = 3                   -- recomputations of one request when the buffer keeps changing
 
+-- The files of the git directory that change when HEAD's content may have moved. The
+-- directory is watched, not these files: git replaces them by renaming a lock file over them.
+local HEAD_FILES = { HEAD = true, ORIG_HEAD = true, COMMIT_EDITMSG = true, index = true }
+
 local states = {}      -- buffer id -> state
 local cache_bytes = 0
+local git_dirs = {}    -- directory of a file -> its git directory | false (none known)
+local watchers = {}    -- git directory -> watcher
 
 -- A state: { id, path, head = HEAD text | nil, tracked = nil (unknown) | true | false,
 --            checked_at, running, again, want_fetch, marked, hunks, regions, at_version }
@@ -147,6 +155,44 @@ local function clear_marks(b, st)
   st.hunks, st.regions, st.at_version = {}, {}, nil
 end
 
+local request
+
+-- watch_repo watches the git directory of the repository that holds path (once per
+-- directory), so that a change of HEAD made elsewhere refreshes the markers of the buffers
+-- in that repository.
+local function watch_repo(path)
+  local dir = gvim.path.dirname(path)
+  if git_dirs[dir] ~= nil then
+    return
+  end
+  git_dirs[dir] = false
+  local repo = git.repo(dir)
+  if not repo or not repo.head then
+    return
+  end
+  local gitdir = gvim.path.dirname(repo.head)
+  git_dirs[dir] = gitdir
+  if watchers[gitdir] then
+    return
+  end
+  local w = gvim.fs.watch(gitdir, function(ev)
+    if ev.kind == "error" or not HEAD_FILES[gvim.path.basename(ev.path or "")] then
+      return
+    end
+    for id, st in pairs(states) do
+      if st.tracked and st.path and git_dirs[gvim.path.dirname(st.path)] == gitdir then
+        local b = gvim.buf.get(id)
+        if b then
+          request(b, true)
+        end
+      end
+    end
+  end, { debounce_ms = 200 })
+  if w then
+    watchers[gitdir] = w
+  end
+end
+
 -- update brings the markers of buffer b up to date. With fetch it asks git for the HEAD
 -- text again; otherwise it uses the text it has. It awaits, so the buffer may be edited or
 -- closed meanwhile: after each await the state is checked, and a snapshot that is out of
@@ -220,7 +266,7 @@ end
 -- request recomputes the markers of b. At most one computation runs per buffer: a request
 -- that arrives meanwhile makes the running one go round again. It returns when its own
 -- computation is done.
-local function request(b, fetch)
+function request(b, fetch)
   local st = track(b)
   st.want_fetch = st.want_fetch or fetch
   if st.running then
@@ -234,6 +280,9 @@ local function request(b, fetch)
     local f = st.want_fetch
     st.want_fetch = false
     local ok, err = pcall(update, b, st, f)
+    if ok and st.tracked and st.path then
+      ok, err = pcall(watch_repo, st.path)
+    end
     if not ok then
       gvim.log.warn("git_gutter: %s", tostring(err))
     end
@@ -304,6 +353,11 @@ end
 local function jump(direction)
   local b = gvim.buf.current()
   if not b then
+    return
+  end
+  local info = b:info()
+  if info and info.large then
+    gvim.notify("Git changes are not tracked in large-file mode")
     return
   end
   local lines = change_lines(b)
@@ -383,3 +437,9 @@ gvim.plugins.export {
     return out
   end,
 }
+
+gvim.plugin.on_unload(function()
+  for _, w in pairs(watchers) do
+    w:stop()
+  end
+end)

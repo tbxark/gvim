@@ -9,6 +9,7 @@ package buffer
 import (
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -69,12 +70,25 @@ type Buffer struct {
 	saved uint64 // version at the last MarkSaved call
 	seq   uint64 // source of fresh version numbers
 
+	// nonASCII counts the runes above 0x7f in the text. insertRaw and deleteRaw keep it,
+	// so NonASCII is O(1). A large buffer counts the text typed into it, and never
+	// subtracts text it cannot see.
+	nonASCII int
+
 	// obs is the change observer. See SetObserver.
 	obs func(Change)
 	// starts[i] is the offset in Text where line i starts, valid for the first
 	// startsValid lines. See ByteOffset.
 	starts      []int
 	startsValid int
+	// span is the part of the text that edits touched since it was saved. See EditedLines.
+	span editSpan
+	// serial counts the edits, and journal keeps the last of them. See EditedSince.
+	serial  uint64
+	journal [journalSize]editNote
+	// snaps counts the memory snapshots taken and not released. They share the lines, so
+	// while one is alive the lines are not edited in place.
+	snaps atomic.Int32
 }
 
 // New returns a Buffer containing text. Lines are split on '\n'; a trailing
@@ -82,6 +96,7 @@ type Buffer struct {
 func New(text string) *Buffer {
 	b := &Buffer{clock: time.Now}
 	b.setText(text)
+	b.resetSpan()
 	return b
 }
 
@@ -123,6 +138,45 @@ func (b *Buffer) setText(text string) {
 	for i, p := range parts {
 		b.lines[i] = []rune(p)
 	}
+	b.nonASCII = countNonASCII(text)
+}
+
+// NonASCII reports whether the text has a rune above 0x7f, which is any character that
+// ASCII does not hold. Typed, pasted and deleted text is counted as it changes, so the
+// answer is current without a scan.
+func (b *Buffer) NonASCII() bool { return b.nonASCII > 0 }
+
+// countNonASCII is the number of runes above 0x7f in s.
+func countNonASCII(s string) int {
+	n := 0
+	for _, r := range s {
+		if r >= utf8.RuneSelf {
+			n++
+		}
+	}
+	return n
+}
+
+// countNonASCIIIn is the number of runes above 0x7f between from and to, which are
+// clamped and ordered.
+func (b *Buffer) countNonASCIIIn(from, to Pos) int {
+	n := 0
+	for i := from.Line; i <= to.Line; i++ {
+		line := b.lines[i]
+		lo, hi := 0, len(line)
+		if i == from.Line {
+			lo = from.Col
+		}
+		if i == to.Line {
+			hi = to.Col
+		}
+		for _, r := range line[lo:hi] {
+			if r >= utf8.RuneSelf {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // Lines returns the number of lines. An empty buffer has one line.
@@ -139,6 +193,26 @@ func (b *Buffer) Line(i int) string {
 		return b.big.line(i)
 	}
 	return string(b.lines[b.clampLine(i)])
+}
+
+// LineEquals reports whether line i is text, without building the line as a string.
+// Out-of-range indexes are clamped.
+func (b *Buffer) LineEquals(i int, text string) bool {
+	if b.big != nil {
+		return b.big.line(i) == text
+	}
+	line := b.lines[b.clampLine(i)]
+	if len(line) > len(text) {
+		return false // a rune takes at least one byte
+	}
+	n := 0
+	for _, r := range text {
+		if n >= len(line) || line[n] != r {
+			return false
+		}
+		n++
+	}
+	return n == len(line)
 }
 
 // LineIndent returns the display width of the leading spaces and tabs of line i, with
@@ -321,6 +395,7 @@ func (b *Buffer) Modified() bool {
 func (b *Buffer) MarkSaved() {
 	b.saved = b.ver
 	b.open = false
+	b.resetSpan()
 }
 
 func (b *Buffer) clampLine(i int) int {
@@ -334,16 +409,26 @@ func (b *Buffer) clampLine(i int) int {
 // position after the inserted text. p must already be clamped.
 func (b *Buffer) insertRaw(p Pos, s string) Pos {
 	b.forgetStarts(p.Line)
+	b.nonASCII += countNonASCII(s)
 	end := advance(p, s)
-	parts := strings.Split(s, "\n")
 	line := b.lines[p.Line]
-	head := slices.Clone(line[:p.Col])
-	tail := slices.Clone(line[p.Col:])
-
-	if len(parts) == 1 {
-		b.lines[p.Line] = slices.Concat(head, []rune(s), tail)
+	if !strings.Contains(s, "\n") {
+		// Text on one line goes into the line. With no snapshot of the text alive, that is
+		// done where the line is, and takes the move of the text after the caret, none when
+		// typing at the end of the line, which grows it in place. A snapshot shares the
+		// lines, so with one the edit makes a new line, as it always did.
+		switch {
+		case b.snaps.Load() == 0:
+			b.lines[p.Line] = slices.Insert(line, p.Col, []rune(s)...)
+		default:
+			b.lines[p.Line] = slices.Concat(line[:p.Col], []rune(s), line[p.Col:])
+		}
+		b.noteEdit(p.Line, p.Line, 0)
 		return end
 	}
+	parts := strings.Split(s, "\n")
+	head := slices.Clone(line[:p.Col])
+	tail := slices.Clone(line[p.Col:])
 	inserted := make([][]rune, 0, len(parts))
 	inserted = append(inserted, slices.Concat(head, []rune(parts[0])))
 	for _, part := range parts[1 : len(parts)-1] {
@@ -351,6 +436,7 @@ func (b *Buffer) insertRaw(p Pos, s string) Pos {
 	}
 	inserted = append(inserted, slices.Concat([]rune(parts[len(parts)-1]), tail))
 	b.lines = slices.Replace(b.lines, p.Line, p.Line+1, inserted...)
+	b.noteEdit(p.Line, end.Line, len(parts)-1)
 	return end
 }
 
@@ -358,10 +444,24 @@ func (b *Buffer) insertRaw(p Pos, s string) Pos {
 // positions must be clamped and ordered.
 func (b *Buffer) deleteRaw(from, to Pos) {
 	b.forgetStarts(from.Line)
+	b.nonASCII -= b.countNonASCIIIn(from, to)
+	if from.Line == to.Line {
+		// Text on one line comes out of the line, where it is when no snapshot shares it.
+		line := b.lines[from.Line]
+		switch {
+		case b.snaps.Load() == 0:
+			b.lines[from.Line] = slices.Delete(line, from.Col, to.Col)
+		default:
+			b.lines[from.Line] = slices.Concat(line[:from.Col], line[to.Col:])
+		}
+		b.noteEdit(from.Line, from.Line, 0)
+		return
+	}
 	head := b.lines[from.Line][:from.Col]
 	tail := b.lines[to.Line][to.Col:]
 	joined := slices.Concat(head, tail)
 	b.lines = slices.Replace(b.lines, from.Line, to.Line+1, joined)
+	b.noteEdit(from.Line, from.Line, from.Line-to.Line)
 }
 
 // advance returns the position reached after typing s starting at p.

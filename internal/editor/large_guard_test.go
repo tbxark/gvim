@@ -218,16 +218,21 @@ func TestLargeRefusalIsTheResultOfTheAction(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
+		mod     func(*Options)
 		want    error
 		msg     string
 	}{
 		{name: "invalid UTF-8", content: "ok line\nbad \xff line\nafter\n", want: buffer.ErrInvalidUTF8, msg: "line 6002 is not valid UTF-8"},
-		{name: "line over the cap", content: "ok line\n" + strings.Repeat("y", 100) + "\nafter\n", want: buffer.ErrLineTooLong, msg: "line 6002 is longer than 1 MiB"},
+		{name: "line too big for the overlay", content: "ok line\n" + strings.Repeat("y", 100) + "\nafter\n", mod: func(o *Options) { o.largeGeom.MaxOverlayBytes = 256 }, want: buffer.ErrLineOverBudget, msg: "too big to edit"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			e, d := openIndexed(t, largeOptions(), withHead(tt.content))
+			opts := largeOptions()
+			if tt.mod != nil {
+				tt.mod(&opts)
+			}
+			e, d := openIndexed(t, opts, withHead(tt.content))
 			if err := e.GotoLine(headLines+2, 1); err != nil {
 				t.Fatal(err)
 			}
@@ -484,8 +489,6 @@ func TestLargeLineCutShortIsNotCopiedOrRewritten(t *testing.T) {
 		{name: "duplicate the line", action: "duplicate_line"},
 		{name: "move the line up", action: "move_line_up"},
 		{name: "move the line down", action: "move_line_down"},
-		{name: "copy a selection that ends at the cut end", action: "copy", sel: []buffer.Pos{{Line: 0}, {Line: 1, Col: 64}}},
-		{name: "upper case a selection over the line", action: "to_upper_case", sel: []buffer.Pos{{Line: 0}, {Line: 2}}},
 		{name: "sort a selection over the line", action: "sort_lines", sel: []buffer.Pos{{Line: 0}, {Line: 2, Col: 1}}},
 	}
 	for _, tt := range tests {
@@ -525,6 +528,29 @@ func TestLargeCopyOfAnUncutSelectionStillWorks(t *testing.T) {
 	run(t, e, "cut")
 	if e.clipboard != "last\nta" || d.Buffer.Line(2) != "il" {
 		t.Errorf("clipboard %q, line 2 %q", e.clipboard, d.Buffer.Line(2))
+	}
+}
+
+// A line over the line cap is read to its end by a range, so a selection over it is copied and
+// converted whole, though the line is not edited by typing in it.
+func TestLargeRangesOverAHugeLineAreExact(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("y", 100) // MaxLine is 64 in the tests
+	e, d := openIndexed(t, largeOptions(), pad("head\n"+long+"\nlast\ntail\n"))
+	selectRange(d, buffer.Pos{Line: 0}, buffer.Pos{Line: 1, Col: 100})
+	run(t, e, "copy")
+	if e.clipboard != "head\n"+long {
+		t.Errorf("clipboard = %q, want the line whole", e.clipboard)
+	}
+	selectRange(d, buffer.Pos{Line: 1, Col: 70}, buffer.Pos{Line: 2, Col: 2})
+	run(t, e, "copy")
+	if want := long[70:] + "\nla"; e.clipboard != want {
+		t.Errorf("clipboard = %q, want %q", e.clipboard, want)
+	}
+	selectRange(d, buffer.Pos{Line: 0}, buffer.Pos{Line: 2})
+	run(t, e, "to_upper_case")
+	if got := d.Buffer.Line(1); got != strings.ToUpper(long) {
+		t.Errorf("line 1 after to_upper_case = %q", got)
 	}
 }
 

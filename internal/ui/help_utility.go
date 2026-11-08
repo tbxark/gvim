@@ -23,6 +23,10 @@ type utilities struct {
 // the action is one of them. The root calls it before the editor, so an action
 // named here never reaches the editor.
 func (m *Model) utilityAction(action string) bool {
+	if name, ok := strings.CutPrefix(action, "switch_keybinding_map:"); ok {
+		m.switchKeymap(name)
+		return true
+	}
 	switch action {
 	case "show_help":
 		m.openHelp("Help")

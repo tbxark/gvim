@@ -26,6 +26,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/fuzzy"
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -499,6 +500,7 @@ func (p *Picker) click(m tea.Mouse) []Event {
 // geom is the placement of the picker in a frame; painting and hit testing share it.
 type geom struct {
 	w, h      int
+	left, bw  int // the box's left border column and its width: the frame less its margins
 	top, boxH int // the box, borders included; boxH is 0 when it does not fit
 	rows      int // item rows in the box
 	footY     int
@@ -507,7 +509,8 @@ type geom struct {
 
 // layoutFor places the picker in a w by h frame.
 func (p *Picker) layoutFor(w, h int) geom {
-	g := geom{w: w, h: h, queryY: -1, footY: h - 1}
+	m := space.Margin(w)
+	g := geom{w: w, h: h, left: m, bw: w - 2*m, queryY: -1, footY: h - 1}
 	if p.hasInput() {
 		g.queryY = h - 1
 		g.footY = h - 2
@@ -525,7 +528,7 @@ func (p *Picker) layoutFor(w, h int) geom {
 // rowAt maps a frame cell to the index of the row under it.
 func (p *Picker) rowAt(x, y int) (int, bool) {
 	g := p.box
-	if g.boxH == 0 || x < 1 || x >= g.w-1 {
+	if g.boxH == 0 || x <= g.left || x >= g.left+g.bw-1 {
 		return 0, false
 	}
 	k := y - g.top - 1
@@ -555,19 +558,19 @@ func (p *Picker) Draw(g *grid.Grid) {
 
 	if geo.boxH > 0 {
 		ov := style.Overlay{Box: p.st.box, Border: p.st.border, Title: p.st.title}
-		ov.PaintBox(g, 0, geo.top, w, geo.boxH, p.title)
+		ov.PaintBox(g, geo.left, geo.top, geo.bw, geo.boxH, p.title)
 		p.paintRows(g, geo)
 	}
 	p.paintFooter(g, geo)
 	if geo.queryY >= 0 {
-		p.paintQuery(g, geo.queryY)
+		p.paintQuery(g, geo.queryY, geo.left+space.PadX)
 	}
 }
 
 // paintRows draws the rows in view inside the box.
 func (p *Picker) paintRows(g *grid.Grid, geo geom) {
 	if len(p.rows) == 0 {
-		g.Put(2, geo.top+1, geo.w-2, "No items", p.st.muted)
+		g.Put(geo.left+2, geo.top+1, geo.left+geo.bw-2, "No items", p.st.muted)
 		return
 	}
 	for k := range geo.rows {
@@ -580,7 +583,7 @@ func (p *Picker) paintRows(g *grid.Grid, geo geom) {
 		base := p.st.box
 		if sel {
 			base = p.st.selected
-			g.Fill(1, geo.w-1, y, base)
+			g.Fill(geo.left+1, geo.left+geo.bw-1, y, base)
 		}
 		p.paintRow(g, geo, y, p.rows[i], base)
 	}
@@ -590,19 +593,19 @@ func (p *Picker) paintRows(g *grid.Grid, geo geom) {
 // it, and the key binding at the right edge.
 func (p *Picker) paintRow(g *grid.Grid, geo geom, y int, r row, base grid.Style) {
 	it := r.it
-	end := geo.w - 2
+	end := geo.left + geo.bw - 2
 	text := base
 	if it.Disabled {
 		text.Faint = true
 	}
 	if it.Keybinding != "" {
 		kw := ansi.StringWidth(it.Keybinding)
-		if x := end - kw; x > 4 {
+		if x := end - kw; x > geo.left+4 {
 			g.Put(x, y, end, it.Keybinding, faint(base))
 			end = x - 2
 		}
 	}
-	x := 2
+	x := geo.left + 2
 	if len(r.hl) == 0 {
 		x += g.Put(x, y, end, truncate(it.Text, end-x), text)
 	} else {
@@ -647,28 +650,29 @@ func (p *Picker) paintFooter(g *grid.Grid, geo geom) {
 	}
 	rw := ansi.StringWidth(right)
 	if rw > 0 {
-		g.Put(max(geo.w-rw-1, 0), y, geo.w, right, p.st.muted)
+		g.Put(max(geo.left+geo.bw-rw-1, 0), y, geo.w, right, p.st.muted)
 	}
 	if p.footer != "" {
-		g.Put(1, y, max(geo.w-rw-3, 1), truncate(p.footer, geo.w-rw-4), p.st.muted)
+		g.Put(geo.left+1, y, max(geo.left+geo.bw-rw-3, 1), truncate(p.footer, geo.bw-rw-4), p.st.muted)
 	}
 }
 
 // paintQuery writes the query on row y with the caret cell reversed. The row scrolls so
 // that the caret stays in view. An empty query shows the placeholder.
-func (p *Picker) paintQuery(g *grid.Grid, y int) {
+func (p *Picker) paintQuery(g *grid.Grid, y, x0 int) {
 	w := g.Width()
+	x0 = min(x0, max(w-1, 0))
 	g.Fill(0, w, y, p.st.prompt)
 	runes := []rune(p.input.Value())
 	if len(runes) == 0 && p.placeholder != "" {
-		g.Put(1, y, w, truncate(p.placeholder, w-1), faint(p.st.prompt))
+		g.Put(x0+1, y, w, truncate(p.placeholder, w-x0-1), faint(p.st.prompt))
 	}
 	pos := min(max(p.input.Position(), 0), len(runes))
 	start := 0
-	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-2 {
+	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-x0-1 {
 		start++
 	}
-	x := 0
+	x := x0
 	for i := start; i < len(runes); i++ {
 		st := p.st.prompt
 		if i == pos {

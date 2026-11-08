@@ -88,12 +88,14 @@ func (e *Editor) adopt(d *Document) {
 // addDoc appends d as the last tab. Every place that adds a tab calls it.
 func (e *Editor) addDoc(d *Document) {
 	e.adopt(d)
+	e.seedRulers(d)
 	e.docs = append(e.docs, d)
 }
 
 // setDoc puts d in place of tab i, whose document the caller has released.
 func (e *Editor) setDoc(i int, d *Document) {
 	e.adopt(d)
+	e.seedRulers(d)
 	e.docs[i] = d
 }
 

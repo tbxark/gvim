@@ -242,9 +242,26 @@ func (d document) locate(re *regexp.Regexp, q Query) [][]int {
 	// After a rejected whole-word candidate, the scan resumes one rune past
 	// its start, so a valid match that overlaps it is still found. This is
 	// what the legacy \b(?:...)\b pattern does.
+	//
+	// A case-insensitive literal is wrapped in (?i), which leaves the regexp
+	// without a literal prefix and about six times slower than strings.Index.
+	// When the query and the text are both ASCII, folding the text to lower
+	// case keeps every offset, and the match is the same as the regexp's.
 	var out [][]int
+	haystack, needle := "", ""
+	fold := foldsASCII(q, d.text)
+	if fold {
+		haystack, needle = strings.ToLower(d.text), strings.ToLower(q.Text)
+	}
 	for pos := 0; pos < len(d.text); {
-		loc := re.FindStringIndex(d.text[pos:])
+		var loc []int
+		if fold {
+			if i := strings.Index(haystack[pos:], needle); i >= 0 {
+				loc = []int{i, i + len(needle)}
+			}
+		} else {
+			loc = re.FindStringIndex(d.text[pos:])
+		}
 		if loc == nil {
 			break
 		}
@@ -258,6 +275,24 @@ func (d document) locate(re *regexp.Regexp, q Query) [][]int {
 		pos = s + size
 	}
 	return out
+}
+
+// foldsASCII reports whether the literal q can be found in text by folding the
+// text to lower case and using strings.Index: the match must ignore case, and q
+// and text must be ASCII. Outside ASCII the regexp folds more than lower case
+// (the Kelvin sign matches k), so it is left to the regexp.
+func foldsASCII(q Query, text string) bool {
+	return !q.CaseSensitive && q.Text != "" && isASCII(q.Text) && isASCII(text)
+}
+
+// isASCII reports whether s holds only ASCII bytes.
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // isWholeWord reports whether text[s:e] has word boundaries on both sides,

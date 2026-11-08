@@ -2,6 +2,7 @@ package editorpane
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -108,6 +109,59 @@ func TestWrapRowsKeepsAGluedRunOnOneRow(t *testing.T) {
 			got, _ := wrapHanging([]rune(tc.text), tc.w, false, glue)
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("wrapHanging(%q, %d) = %v, want %v", tc.text, tc.w, got, tc.want)
+			}
+		})
+	}
+}
+
+// A token that does not fit a fresh row breaks before itself only when the row already
+// holds enough: Fresh's row floor, the larger of w-16 and w/2. A short marker before a
+// long unspaced run is not stranded on a row of its own.
+func TestWrapRowsSplitsALongTokenOnTheSameRowBelowTheFloor(t *testing.T) {
+	long := strings.Repeat("a", 60)
+	tests := []struct {
+		name   string
+		text   string
+		w      int
+		indent int
+		want   []span
+	}{
+		{"a list marker stays with the run", "- " + long, 30, 0, []span{{0, 30}, {30, 60}, {60, 62}}},
+		{"a word before the run stays with it", "word " + long, 30, 0, []span{{0, 30}, {30, 60}, {60, 65}}},
+		{"a row past the floor breaks before the run", "0123456789abcdef " + long, 30, 0, []span{{0, 17}, {17, 47}, {47, 77}}},
+		{"a token that fits a fresh row breaks before itself", "- " + strings.Repeat("b", 28), 30, 0, []span{{0, 30}}},
+		{"a token that fits the next row moves down", "- " + strings.Repeat("b", 29), 30, 0, []span{{0, 2}, {2, 31}}},
+		{"cjk run after a marker", "- " + strings.Repeat("中", 40), 30, 0, []span{{0, 16}, {16, 31}, {31, 42}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := wrapRows([]rune(tc.text), tc.w, tc.indent, nil)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("wrapRows(%q, %d) = %v, want %v", tc.text, tc.w, got, tc.want)
+			}
+		})
+	}
+}
+
+// A grapheme cluster is measured whole and never split across rows: a skin-tone emoji,
+// a flag and a family are two cells each, as the grid and the caret count them.
+func TestWrapRowsMeasuresClustersWhole(t *testing.T) {
+	tests := []struct {
+		name    string
+		cluster string
+		per     int // runes in one cluster
+	}{
+		{"skin tone", "👍🏽", 2},
+		{"flag", "🇨🇳", 2},
+		{"family", "👨‍👩‍👧‍👦", 7},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// "x" and 20 clusters at 30 cells: 14 clusters fit the first row after the x.
+			got := wrapSpans([]rune("x"+strings.Repeat(tc.cluster, 20)), 30)
+			want := []span{{0, 1 + 14*tc.per}, {1 + 14*tc.per, 1 + 20*tc.per}}
+			if !slices.Equal(got, want) {
+				t.Errorf("rows = %v, want %v", got, want)
 			}
 		})
 	}

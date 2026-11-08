@@ -3,7 +3,9 @@ package plugin_test
 import (
 	"fmt"
 	"runtime"
+	"runtime/metrics"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,6 +71,54 @@ T.command("go", function() n = n + 1 if n == 1 then while true do end end T.spy(
 	}
 }
 
+// A suspended plugin drops its input mode, so its status items must go too: a stale
+// "-- NORMAL --" would tell the user a mode is on that is not.
+func TestSuspendedPluginDropsItsStatusItems(t *testing.T) {
+	h := start(t, `
+require("gvim").ui.statusbar.item{ id = "mode", text = "-- NORMAL --" }
+T.command("go", function() while true do end end)`, plugintest.Options{Timeout: 20 * time.Millisecond})
+	if got := h.Host.Status["t"]; len(got) != 1 {
+		t.Fatalf("status items before = %+v, want the one the plugin made", got)
+	}
+	for range 3 {
+		_ = timed(t, h)
+	}
+	if status(h, "t") != "suspended" {
+		t.Fatalf("status = %q", status(h, "t"))
+	}
+	if got := h.Host.Status["t"]; len(got) != 0 {
+		t.Errorf("status items of a suspended plugin = %+v, want none", got)
+	}
+}
+
+// The decorations of a suspended plugin go with its mode and status items: they would go
+// stale, since nothing updates them any more.
+func TestSuspendedPluginDropsItsDecorations(t *testing.T) {
+	host := plugintest.NewFakeHost()
+	host.AddBuffer("a.go", "one\ntwo")
+	h := start(t, `
+local ns = require("gvim").decor.namespace("marks")
+T.command("mark", function()
+  ns:set(require("gvim").buf.current(), { { kind = "line", line = 0 } })
+end)
+T.command("go", function() while true do end end)`, plugintest.Options{Host: host, Timeout: 20 * time.Millisecond})
+	if err := h.Run("t.mark", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := host.Decor().Items("t", "marks", 1); len(got) != 1 {
+		t.Fatalf("decorations before = %+v, want the one the plugin set", got)
+	}
+	for range 3 {
+		_ = timed(t, h)
+	}
+	if status(h, "t") != "suspended" {
+		t.Fatalf("status = %q", status(h, "t"))
+	}
+	if got := host.Decor().Items("t", "marks", 1); len(got) != 0 {
+		t.Errorf("decorations of a suspended plugin = %+v, want none", got)
+	}
+}
+
 func TestStrikesSuspendAndExpire(t *testing.T) {
 	h := start(t, `
 T.command("go", function() while true do end end)
@@ -95,6 +145,10 @@ T.on("tick", function() T.spy("tick") end)`, plugintest.Options{Timeout: 20 * ti
 	}
 	if !noticeHas(h, "suspended after 3 strikes") {
 		t.Fatalf("notices = %v", h.NoticeTexts())
+	}
+	// the app puts "t: " in front of a plugin's notice, so the text must not name it again
+	if noticeHas(h, "t suspended after") {
+		t.Fatalf("the suspension notice repeats the plugin name: %v", h.NoticeTexts())
 	}
 	// suspended: events are muted, commands still run
 	h.Emit(pluginapi.Event{Name: "tick"})
@@ -406,6 +460,65 @@ end)`, plugintest.Options{Timeout: 5 * time.Second, HeapLimit: 64 << 20})
 	}
 }
 
+// A string that doubles in one instruction (s = s .. s) is the fastest way to allocate. The
+// instruction cannot be interrupted and stock gopher-lua does not cap it, so the heap guard
+// stops the plugin with its memory-limit error after the doubling that crossed the limit, and
+// the memory goes back to the system after it.
+func TestHeapGuardStopsADoublingString(t *testing.T) {
+	if testing.Short() {
+		t.Skip("allocates memory")
+	}
+	const limit = 64 << 20
+	h := start(t, `T.command("go", function() local s = "x" while true do s = s .. s end end)`,
+		plugintest.Options{Timeout: 5 * time.Second, HeapLimit: limit})
+	var base runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&base)
+	live := []metrics.Sample{{Name: "/gc/heap/live:bytes"}}
+	metrics.Read(live)
+	var peak atomic.Uint64
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		var m runtime.MemStats
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(time.Millisecond):
+			}
+			runtime.ReadMemStats(&m)
+			if m.HeapSys-m.HeapReleased > peak.Load() {
+				peak.Store(m.HeapSys - m.HeapReleased)
+			}
+		}
+	}()
+	_ = timed(t, h)
+	close(stop)
+	<-done
+	if !noticeHas(h, "memory limit") {
+		t.Fatalf("notices = %v log = %v", h.NoticeTexts(), h.LogText(""))
+	}
+	grown := int64(peak.Load()) - int64(base.HeapSys-base.HeapReleased)
+	t.Logf("heap grew by %d MiB (limit %d MiB)", grown>>20, limit>>20)
+	// The guard cancels a slice that grew the heap by the limit, plus the live heap of the
+	// process while it confirms with a collection, and the doubling that is in flight cannot be
+	// interrupted: it allocates one more step, about the size of what was allocated so far. So
+	// the worst case is a little over twice that. docs/plugins/limits.md has the measured
+	// numbers for the editor's own limit.
+	// The test process has other heap and a short run decides how far the doubling got before
+	// the guard looked, so the bound here is loose; a process of its own stays near 2x the
+	// limit (limits.md).
+	if bound := 4 * (int64(limit) + int64(live[0].Value.Uint64())); grown > bound {
+		t.Errorf("heap grew by %d MiB before the plugin was stopped, want under %d MiB", grown>>20, bound>>20)
+	}
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	if left := int64(after.HeapSys-after.HeapReleased) - int64(base.HeapSys-base.HeapReleased); left > 2*limit {
+		t.Errorf("%d MiB are still held after the plugin was stopped, want them returned", left>>20)
+	}
+}
+
 func TestHeapGuardIgnoresGarbageWithLargeLiveHeap(t *testing.T) {
 	if testing.Short() {
 		t.Skip("allocates memory")
@@ -417,6 +530,9 @@ func TestHeapGuardIgnoresGarbageWithLargeLiveHeap(t *testing.T) {
 	for i := 0; i < len(live); i += 4096 {
 		live[i] = 1
 	}
+	// The guard's baseline is the live size of the last collection, so collect once now:
+	// otherwise a baseline taken before the array existed counts the array as plugin growth.
+	runtime.GC()
 	h := start(t, `T.command("go", function()
   for i = 1, 30 do local s = string.rep("y", 16 * 1024 * 1024) end
   T.spy("churned")

@@ -80,9 +80,10 @@ type pluginKeys struct {
 	bufOff  map[uint64]string // buffers whose mode the panic chord switched off, with the mode name
 	seq     seqState
 	ctx     map[string]map[string]bool
+	ctxSeen map[string]bool // contexts a plugin ever set, to either value
+	warned  map[string]bool // typo warnings already shown (plugin_warn.go)
 	wait    pluginapi.Token // the pending key capture, 0 when none
-	esc     []time.Time
-	escSeen bool // a plugin input state was active at an Esc of the current run
+	esc     []time.Time     // the recent Esc presses that found the plugin input stuck
 
 	status statusState
 	idle   pluginIdle
@@ -159,6 +160,15 @@ func (m *Model) plugKeymapDirty() {
 		m.plugRebuildKeymap()
 		return nil
 	})
+}
+
+// pluginBindingsForEditor are the plugin bindings the keymap layers over its preset, for the
+// keybinding editor's preview. It is nil without a plugin runtime.
+func (m *Model) pluginBindingsForEditor() []pluginapi.Binding {
+	if m.plug.rt == nil {
+		return nil
+	}
+	return m.plugBindingsInOrder()
 }
 
 // plugBindingsInOrder returns the bindings of every plugin in load order, so the first
@@ -272,6 +282,9 @@ func (m *Model) pluginGate(kp KeyPress, ctx KeyContext, cmd Command) bool {
 		return false
 	}
 	for _, b := range ks.gated[chord] {
+		if b.Action == cmd.Action {
+			m.plugCheckWhen(b.Plugin, b.Action, b.When)
+		}
 		if b.Action == cmd.Action && !m.whenHolds(b.When) {
 			title := b.Action
 			if info, ok := m.plug.info(b.Action); ok {
@@ -411,6 +424,10 @@ func (m *Model) setEditorMode(ref modeRef) {
 // SetContext sets or clears a plugin context.
 func (h *pluginHost) SetContext(plugin, name string, on bool) {
 	ks := &h.m.plug.keys
+	if ks.ctxSeen == nil {
+		ks.ctxSeen = make(map[string]bool)
+	}
+	ks.ctxSeen[name] = true
 	if !on {
 		delete(ks.ctx[plugin], name)
 		return
@@ -700,8 +717,8 @@ func panicAlias(k tea.Key) bool {
 // overlay (a plugin picker, popup or prompt is an overlay, and handleKey never sees its
 // keys). It reports whether k is a panic chord, which clears every plugin mode, key wait
 // and overlay, and which no layer may intercept, and the command that results. Each key
-// press reaches it once. The third trigger is three Esc presses within escWindow while a
-// plugin mode, key wait or overlay is active.
+// press reaches it once. The third trigger is three Esc presses within escWindow that each
+// find the plugin input stuck (pluginEscStuck).
 func (m *Model) pluginPanicKey(k tea.Key) (tea.Cmd, bool) {
 	if f := m.plug.panicKey; f != nil && f(k) {
 		return nil, true
@@ -715,21 +732,63 @@ func (m *Model) pluginPanicKey(k tea.Key) (tea.Cmd, bool) {
 		return m.plugPanic(), true
 	}
 	if k.Code != tea.KeyEscape || k.Mod != 0 {
-		ks.esc, ks.escSeen = nil, false
+		ks.esc = nil
 		return nil, false
 	}
 	now := m.now()
 	ks.esc = slices.DeleteFunc(ks.esc, func(t time.Time) bool { return now.Sub(t) > escWindow })
-	if len(ks.esc) == 0 {
-		ks.escSeen = false
+	if !m.pluginEscStuck() {
+		// Esc does what the plugin made it do: pressing it again and again is a habit, not a plea.
+		ks.esc = nil
+		return nil, false
 	}
 	ks.esc = append(ks.esc, now)
-	ks.escSeen = ks.escSeen || m.pluginInputActive()
-	if len(ks.esc) >= escPresses && ks.escSeen {
-		ks.esc, ks.escSeen = nil, false
+	if len(ks.esc) >= escPresses {
+		ks.esc = nil
 		return m.plugPanic(), true
 	}
 	return nil, false
+}
+
+// pluginCancelKey reports whether k is ctrl+c on an overlay a plugin opened (a prompt, picker or
+// popup): it cancels like Esc does, as it does in a terminal and in vi's `:` and `/` prompts.
+func (m *Model) pluginCancelKey(k tea.Key) bool {
+	if k.Mod != tea.ModCtrl || k.Code != 'c' || len(m.overlays) == 0 {
+		return false
+	}
+	_, ok := m.overlays[len(m.overlays)-1].(plugOverlay)
+	return ok
+}
+
+// overlayCancels reports whether k closes the top overlay: Esc does, unless the overlay asks for
+// Esc itself (takesEscape), and ctrl+c does for a plugin overlay (pluginCancelKey).
+func (m *Model) overlayCancels(k tea.Key) bool {
+	if k.Code == tea.KeyEscape {
+		return len(m.overlays) > 0 && !takesEscape(m.overlays[len(m.overlays)-1])
+	}
+	return m.pluginCancelKey(k)
+}
+
+// pluginEscStuck reports whether an Esc press finds the plugin input stuck: a plugin waits for
+// a key (Esc is only a key to it), has a prompt, picker or popup open, or the active mode does
+// not bind Esc, so that the key does nothing and the user may have no other way out. A mode
+// that binds Esc itself, like vi's, answers it: the press is not a panic, however often it is
+// repeated.
+func (m *Model) pluginEscStuck() bool {
+	if m.keyWaiting() {
+		return true
+	}
+	for _, o := range m.overlays {
+		if _, ok := o.(plugOverlay); ok {
+			return true
+		}
+	}
+	um := m.activeMode()
+	if um == nil {
+		return false
+	}
+	n := um.root.next["escape"]
+	return n == nil || !n.bound
 }
 
 // plugPanic clears the plugin input: the input mode, the key capture, the mode of the active

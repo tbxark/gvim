@@ -150,6 +150,10 @@ func (e *Editor) typeText(d *Document, text string) {
 	d.editPlaced(func(c caret) (edit, placeFn) { return e.planChar(d, s, rules, tab, c, r) }, plain)
 }
 
+// maxIndentScan is how many runes of a line, from its start, count as its indent. A line
+// with more blanks than this before the caret is not indented, as far as typing goes.
+const maxIndentScan = 1024
+
 // planChar plans typing ch at one caret, in Fresh's order: wrap a selection, step
 // over a closer that is already there, fix the indent of a typed closer, dedent a
 // line that the character makes a trigger keyword, close a typed opener, or type the
@@ -164,8 +168,10 @@ func (e *Editor) planChar(d *Document, s LanguageSettings, rules *indentRules, t
 		}
 	}
 	after, hasAfter := d.Buffer.RuneAt(hi)
-	line := []rune(d.Buffer.Line(lo.Line))
-	atIndent := blankPrefix(line, lo.Col) && lo.Col > 0
+	// Only the text before the caret matters here, and only while it can be indent, so a
+	// very long line is not read whole for every character typed on it.
+	line := []rune(d.Buffer.LineSlice(lo.Line, 0, min(lo.Col, maxIndentScan)))
+	atIndent := lo.Col > 0 && lo.Col <= maxIndentScan && blankPrefix(line, lo.Col)
 	step := func(end buffer.Pos) buffer.Pos { return buffer.Pos{Line: end.Line, Col: end.Col + 1} }
 
 	if s.AutoClose && hasAfter && after == ch && (ch != '\'' || (lang != "markdown" && lang != "mdx")) {

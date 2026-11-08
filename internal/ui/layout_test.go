@@ -204,7 +204,7 @@ func TestStatusRightBlockAtBlueprintWidths(t *testing.T) {
 		{40, "LF  ASCII  Text "},
 		{41, "LF  ASCII  Text  [⚠ 2] "},
 		{60, "LF  ASCII  Text  [⚠ 2] "},
-		{62, "LF  ASCII  Text  [⚠ 2]  Palette: ⌃P "},
+		{70, "LF  ASCII  Text  [⚠ 2]  Palette: Ctrl+P "},
 	}
 	for _, tt := range tests {
 		row := statusRow(tt.w, s)

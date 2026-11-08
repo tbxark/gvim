@@ -181,6 +181,13 @@ func (s *pluginSession) statusRow() string {
 	return strings.TrimSpace(rows[len(rows)-1])
 }
 
+// noticeText is the status row with the notice band above it, where a message that
+// is too long for the row wraps. It is the last four rows of the frame.
+func (s *pluginSession) noticeText() string {
+	rows := s.rows()
+	return strings.Join(rows[max(len(rows)-4, 0):], "\n")
+}
+
 func (s *pluginSession) press(k tea.KeyPressMsg) { s.t.Helper(); s.send(k) }
 
 func (s *pluginSession) typeText(text string) {

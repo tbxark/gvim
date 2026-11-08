@@ -161,7 +161,7 @@ func TestThumbSizeComesFromTheEstimate(t *testing.T) {
 	}
 	// A track press at the middle asks for a line in the estimate's scale, which the
 	// exact lines clamp.
-	if top := (Pane{Doc: big}).ScrollTopFor(20, 10); top != 40-20 {
+	if top := (Pane{Doc: big}).ScrollTopFor(40, 20, 10); top != 40-20 {
 		t.Errorf("ScrollTopFor = %d, want the last full page %d", top, 40-20)
 	}
 }
@@ -205,19 +205,23 @@ func TestPaneLargeDocMarksOnlyVisibleDirtyLines(t *testing.T) {
 	}
 }
 
-func TestPaneLargeDocNeverWraps(t *testing.T) {
+// A large document wraps its lines as any other does, when the pane wraps: a line wider than the
+// pane takes several rows, and no horizontal bar takes a row.
+func TestPaneLargeDocWrapsItsLines(t *testing.T) {
 	long := strings.Repeat("word ", 40)
 	spy := newSpy(30, func(int) string { return long })
 	g := Pane{Doc: spy, Wrap: true}.Render(40, 6)
-	// A wrapped line would take several rows: the gutter shows consecutive numbers
-	// on consecutive rows only if every line is one row.
-	for y := range 5 {
-		if got := strings.Fields(g.Plain()[y])[0]; got != string(rune('1'+y)) {
-			t.Errorf("row %d number = %q, want %q", y, got, string(rune('1'+y)))
-		}
+	rows := g.Plain()
+	if got := strings.Fields(rows[0])[0]; got != "1" {
+		t.Errorf("row 0 number = %q, want 1", got)
 	}
-	if got := (Pane{Doc: spy, Wrap: true}).BodyRows(40, 6); got != 5 {
-		t.Errorf("BodyRows = %d, want 5: the horizontal bar takes a row and nothing wraps", got)
+	// The gutter shows a number on the first row of a line only, and the line takes more than
+	// one row, so row 1 shows none.
+	if f := strings.Fields(rows[1]); len(f) == 0 || f[0] != "│" {
+		t.Errorf("row 1 = %q, want a continuation row with no line number", rows[1])
+	}
+	if got := (Pane{Doc: spy, Wrap: true}).BodyRows(40, 6); got != 6 {
+		t.Errorf("BodyRows = %d, want 6: wrap leaves no horizontal bar", got)
 	}
 }
 

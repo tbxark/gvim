@@ -131,3 +131,47 @@ func TestNewStylesReadsTheDisplayRoles(t *testing.T) {
 		}
 	}
 }
+
+// A kind's attributes reach its style, and a theme without variable_builtin paints
+// builtins with the variable colour.
+func TestSyntaxStylesCarryAttributesAndFallbacks(t *testing.T) {
+	th, err := theme.Parse([]byte(`{
+		"editor": {"fg": [10, 20, 30], "bg": [0, 0, 0]},
+		"syntax": {"variable": [4, 5, 6], "keyword": [1, 2, 3], "constant": [7, 8, 9]}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := NewStyles(th)
+	attrs := func(k syntax.Kind) [4]bool {
+		s := st.Syntax[k]
+		return [4]bool{s.Bold, s.Italic, s.Underline, s.Strike}
+	}
+	tests := []struct {
+		kind syntax.Kind
+		want [4]bool
+	}{
+		{syntax.KindHeading, [4]bool{true, false, false, false}},
+		{syntax.KindStrong, [4]bool{true, false, false, false}},
+		{syntax.KindEmphasis, [4]bool{false, true, false, false}},
+		{syntax.KindStrongEmphasis, [4]bool{true, true, false, false}},
+		{syntax.KindLink, [4]bool{false, false, true, false}},
+		{syntax.KindStrike, [4]bool{false, false, false, true}},
+		{syntax.KindKeyword, [4]bool{}},
+		{syntax.KindPlain, [4]bool{}},
+	}
+	for _, tt := range tests {
+		if got := attrs(tt.kind); got != tt.want {
+			t.Errorf("%v attributes (bold, italic, underline, strike) = %v, want %v", tt.kind, got, tt.want)
+		}
+	}
+	if got, want := st.Syntax[syntax.KindBuiltin].FG, (color.RGBA{R: 4, G: 5, B: 6, A: 255}); got != want {
+		t.Errorf("builtin fg = %v, want the variable colour %v", got, want)
+	}
+	if got, want := st.Syntax[syntax.KindAttribute].FG, (color.RGBA{R: 7, G: 8, B: 9, A: 255}); got != want {
+		t.Errorf("attribute fg = %v, want the constant colour %v", got, want)
+	}
+	if got, want := st.Syntax[syntax.KindHeading].FG, (color.RGBA{R: 1, G: 2, B: 3, A: 255}); got != want {
+		t.Errorf("heading fg = %v, want the keyword colour %v", got, want)
+	}
+}

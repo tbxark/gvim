@@ -3,9 +3,11 @@ package bundled_test
 import (
 	"fmt"
 	"io/fs"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/plugin/bundled"
@@ -55,6 +57,9 @@ type vi struct {
 	sets int // SetCursor calls seen so far: any other one resets the wanted column, as in the editor
 	// lenient: a plugin error does not fail the test (the test provokes one)
 	lenient bool
+	// scrolls: scroll_up and scroll_down move the window as the editor's do, and drag the
+	// caret along to stay a few lines inside it
+	scrolls bool
 }
 
 func newVi(t *testing.T, text string) *vi {
@@ -143,7 +148,8 @@ func (v *vi) modeInfo() (pluginapi.ModeInfo, bool) {
 
 // keys plays a key sequence. Plain characters are text. <Esc> <CR> <BS> <Tab> <Del>
 // <Space> <Left> <Right> <Up> <Down> <Home> <End> <PageUp> <PageDown> <lt> and <C-x> are
-// named keys. «text» answers the open prompt, <in!> dismisses it.
+// named keys. «text» answers the open prompt, <in!> dismisses it, <pick:N> chooses row N
+// of the open picker.
 func (v *vi) keys(s string) *vi {
 	v.t.Helper()
 	for len(s) > 0 {
@@ -187,6 +193,12 @@ func (v *vi) named(name string) {
 		v.press(" ")
 	case name == "in!":
 		v.answerInput(nil)
+	case strings.HasPrefix(name, "pick:"):
+		n, err := strconv.Atoi(strings.TrimPrefix(name, "pick:"))
+		if err != nil {
+			v.t.Fatalf("bad key <%s>", name)
+		}
+		v.answerPick(n)
 	case strings.HasPrefix(name, "C-"):
 		v.press("ctrl+" + strings.ToLower(strings.TrimPrefix(name, "C-")))
 	default:
@@ -211,6 +223,17 @@ func (v *vi) answerInput(text *string) {
 		val = *text
 	}
 	v.h.Resolve(pluginapi.Completion{Token: o.Token, Values: []any{val}})
+}
+
+// answerPick chooses row n (0-based) of the picker the plugin opened, as ui.choose does.
+func (v *vi) answerPick(n int) {
+	v.t.Helper()
+	o := v.host.UI().Last("picker")
+	if o == nil || !o.Open {
+		v.t.Fatal("no picker is open")
+	}
+	o.Open = false
+	v.h.Resolve(pluginapi.Completion{Token: o.Token, Values: []any{n}})
 }
 
 // press delivers one key.
@@ -330,6 +353,62 @@ func (v *vi) setCursor(p pluginapi.Pos) {
 	v.sets = v.host.CallCount("SetCursor")
 }
 
+// scrollMargin is the scroll-off of the test editor.
+const scrollMargin = 3
+
+// scroll plays the editor's scrollView: the window moves one line, and the caret moves to
+// the nearest line that is shown, a margin inside the edges that have text beyond them.
+func (v *vi) scroll(c pluginapi.Pos, down bool) pluginapi.Pos {
+	w := v.host.Window(v.host.CurrentWindow())
+	lines := len(v.buf().Lines)
+	top := w.TopLine - 1
+	if down {
+		top = w.TopLine + 1
+	}
+	top = min(max(top, 0), lines-1)
+	if down && top > lines-w.Height {
+		return c
+	}
+	w.TopLine = top
+	lo, hi := top, min(top+w.Height-1, lines-1)
+	if top > 0 {
+		lo += scrollMargin
+	}
+	if top+w.Height < lines {
+		hi -= scrollMargin
+	}
+	c.Line = min(max(c.Line, lo), max(hi, lo))
+	c.Col = min(c.Col, len(v.buf().Lines[c.Line]))
+	return c
+}
+
+// clusterAfter is the length in bytes of the character at col: a rune and its combining marks,
+// as the editor's own moves see it.
+func clusterAfter(line string, col int) int {
+	_, n := utf8.DecodeRuneInString(line[col:])
+	for col+n < len(line) {
+		r, size := utf8.DecodeRuneInString(line[col+n:])
+		if !unicode.Is(unicode.Mn, r) {
+			break
+		}
+		n += size
+	}
+	return n
+}
+
+// clusterBefore is the length in bytes of the character that ends at col.
+func clusterBefore(line string, col int) int {
+	n := 0
+	for col-n > 0 {
+		r, size := utf8.DecodeLastRuneInString(line[:col-n])
+		n += size
+		if !unicode.Is(unicode.Mn, r) {
+			break
+		}
+	}
+	return n
+}
+
 // action plays the editor actions vi_mode runs.
 func (v *vi) action(name string, args map[string]any, count int) error {
 	c := v.cursor()
@@ -337,8 +416,7 @@ func (v *vi) action(name string, args map[string]any, count int) error {
 		if l == "" {
 			return 0
 		}
-		_, size := utf8.DecodeLastRuneInString(l)
-		return len(l) - size
+		return len(l) - clusterBefore(l, len(l))
 	}
 	vertical := name == "vi_move_up" || name == "vi_move_down" || name == "move_up" || name == "move_down"
 	if n := v.host.CallCount("SetCursor"); !vertical || c != v.last || n != v.sets {
@@ -355,23 +433,21 @@ func (v *vi) action(name string, args map[string]any, count int) error {
 		switch name {
 		case "move_left_in_line", "move_left":
 			if c.Col > 0 {
-				_, size := utf8.DecodeLastRuneInString(line[:c.Col])
-				c.Col -= size
+				c.Col -= clusterBefore(line, c.Col)
 			}
 		case "move_right_in_line":
 			if c.Col >= len(line) {
 				c.Col = lastCol(line)
 			} else {
-				_, size := utf8.DecodeRuneInString(line[c.Col:])
-				c.Col = min(c.Col+size, lastCol(line))
+				c.Col = min(c.Col+clusterAfter(line, c.Col), lastCol(line))
 			}
 		case "move_right":
 			if c.Col < len(line) {
-				_, size := utf8.DecodeRuneInString(line[c.Col:])
-				c.Col += size
+				c.Col += clusterAfter(line, c.Col)
 			}
 		case "vi_move_down", "move_down":
-			if c.Line+1 < len(lines) {
+			// vi does not go onto the empty line after the final line break
+			if c.Line+1 < len(lines) && (name != "vi_move_down" || c.Line+2 < len(lines) || lines[c.Line+1] != "") {
 				c.Line++
 				c.Col = min(v.want, len(lines[c.Line]))
 				if name == "vi_move_down" {
@@ -392,11 +468,13 @@ func (v *vi) action(name string, args map[string]any, count int) error {
 			c.Col = len(line)
 		case "toggle_case":
 			if c.Col < len(line) {
-				r, size := utf8.DecodeRuneInString(line[c.Col:])
+				r, first := utf8.DecodeRuneInString(line[c.Col:])
+				size := clusterAfter(line, c.Col)
 				sw := strings.ToUpper(string(r))
 				if sw == string(r) {
 					sw = strings.ToLower(string(r))
 				}
+				sw += line[c.Col+first : c.Col+size]
 				v.edit(c, pluginapi.Pos{Line: c.Line, Col: c.Col + size}, sw)
 				c.Col += len(sw)
 			}
@@ -404,7 +482,11 @@ func (v *vi) action(name string, args map[string]any, count int) error {
 			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 			v.edit(c, c, "\n"+indent)
 			c = v.cursor()
-		case "recenter", "scroll_up", "scroll_down", "move_page_up", "move_page_down", "paste", "clear_search",
+		case "scroll_up", "scroll_down":
+			if v.scrolls {
+				c = v.scroll(c, name == "scroll_down")
+			}
+		case "recenter", "move_page_up", "move_page_down", "paste", "clear_search",
 			"close_tab", "quit", "quit_discard", "save", "save_all", "next_buffer", "prev_buffer", "new",
 			"split_horizontal", "split_vertical", "close_split", "toggle_maximize_split":
 		default:

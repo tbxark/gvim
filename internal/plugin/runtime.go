@@ -49,8 +49,11 @@ type Options struct {
 	// the one that called Start. GVIM_PLUGIN_DEBUG=1 turns it on as well.
 	CheckGoroutine bool
 	// HeapLimit is the retained-heap growth in one slice that cancels it
-	// (0: 256 MiB). See slice.runGuard.
+	// (0: 128 MiB). See slice.runGuard.
 	HeapLimit int64
+	// LogSink, when set, is called with each entry added to the plugin log, for --log-file. It
+	// runs on the goroutine that calls the runtime and must not block.
+	LogSink func(pluginapi.LogEntry)
 	// Loader configures plugin discovery; nil discovers nothing (Start returns no Work and
 	// plugins are added with LoadPlugin).
 	Loader *LoaderOptions
@@ -129,7 +132,7 @@ func New(o Options) *Runtime {
 		debug:     os.Getenv("GVIM_PLUGIN_DEBUG") == "1",
 		plugins:   map[string]*plugin{},
 		waits:     map[pluginapi.Token]*wait{},
-		log:       &logRing{},
+		log:       &logRing{sink: o.LogSink},
 		noticeAt:  map[string]time.Time{},
 	}
 	switch {

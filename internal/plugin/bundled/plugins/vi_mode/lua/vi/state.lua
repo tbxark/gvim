@@ -9,8 +9,10 @@ local S = {
 
   -- what the next command remembers
   last_find = nil, -- {ch=, forward=, till=} for ; and ,
-  last_search = nil, -- {pattern=, forward=} for n and N
+  last_search = nil, -- {pattern=, forward=, nosmart=} for n and N
+  hl = nil, -- {pattern=, nosmart=} while the matches of a search are highlighted
   last_change = nil, -- the command . repeats
+  sticky_eol = nil, -- where $ left the caret, while j and k keep to the end of the line
   prev_pos = nil, -- the position before the last jump, for '' and ``
   marks = {}, -- name -> {buf=, line=, col=}
   visual_marks = nil, -- {from=, to=} of the last visual area, for '< and '>
@@ -21,6 +23,9 @@ local S = {
 
   -- a command being read: the keys shown in the status row
   pending = "",
+
+  -- what was typed at the : and / prompts, oldest first (Up and Down in the prompt walk it)
+  history = { ex = {}, search = {} },
 
   -- the insert in progress
   ins = nil,

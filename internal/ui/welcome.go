@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/ui/grid"
+	"github.com/tbxark/gvim/internal/ui/space"
 	"github.com/tbxark/gvim/internal/ui/style"
 )
 
@@ -41,13 +42,15 @@ type welcomeItem struct {
 	path   string
 }
 
-// welcomeDoors are the doors, in order. The shortcuts are the macOS keymap's.
+// welcomeDoors are the doors, in order. They carry no keys: the keys come from the active
+// keymap (see doorKeys), and a keymap that cannot be asked shows none rather than the keys
+// of one preset.
 var welcomeDoors = []welcomeItem{
-	{label: "New File", key: "Ctrl+N", action: "new"},
-	{label: "Open File", key: "Ctrl+O", action: "open"},
-	{label: "Open Folder", key: "Alt+O", action: "switch_project"},
-	{label: "Command Palette", key: "Ctrl+T", action: "command_palette"},
-	{label: "Explorer", key: "Ctrl+B", action: "focus_file_explorer"},
+	{label: "New File", action: "new"},
+	{label: "Open File", action: "open"},
+	{label: "Open Folder", action: "switch_project"},
+	{label: "Command Palette", action: "command_palette"},
+	{label: "Explorer", action: "focus_file_explorer"},
 }
 
 // welcomeItems lists the rows a click or Enter can reach: the doors, then up
@@ -76,24 +79,35 @@ const (
 // the index of the row in welcomeItems, or -1 for a line that is not a row. keyX
 // is the column of the key, or -1 when the line has none.
 type welcomeLine struct {
-	role welcomeRole
-	x, y int
-	w    int // the row width, which is the width of the highlight
-	text string
-	keyX int
-	key  string
-	item int
+	role   welcomeRole
+	x, y   int
+	w      int // the row width, which is the width of the highlight
+	text   string
+	labelX int // a row: the column of the label, inside the highlight's padding
+	keyX   int
+	key    string
+	item   int
 }
 
 // welcomeLines places the welcome block in the pane that starts at column x0
 // and is paneW cells wide, with rows bodyTop to bodyTop+bodyRows-1. The block is
-// centred, and the rows that do not fit are dropped.
-func welcomeLines(x0, paneW, bodyTop, bodyRows int, recents []string) []welcomeLine {
-	items := welcomeItems(recents)
-	bw := welcomeWidth(items)
-	if paneW < bw {
-		bw = max(paneW, 0)
+// centred, and the rows that do not fit are dropped. doorKeys, when it is not nil,
+// are the shortcuts of the doors in the active keymap, one per door, and replace the
+// keys of welcomeDoors.
+func welcomeLines(x0, paneW, bodyTop, bodyRows int, recents []string, doorKeys []string) []welcomeLine {
+	if paneW <= 0 {
+		return nil // no room: a row's highlight would reach into the explorer
 	}
+	items := welcomeItems(recents)
+	for i, k := range doorKeys {
+		if i < len(welcomeDoors) {
+			items[i].key = k
+		}
+	}
+	// The block keeps a margin of PadX cells from the pane edge, and a row's highlight
+	// reaches PadX cells beyond the text on each side, so a full block is 4*PadX cells
+	// narrower than the pane.
+	bw := min(welcomeWidth(items), max(paneW-4*space.PadX, 0))
 	var rows []welcomeLine // y is the offset from the top of the block
 	blank := welcomeLine{role: welcomeBlank, item: -1, keyX: -1}
 	for _, t := range welcomeTitle {
@@ -111,7 +125,7 @@ func welcomeLines(x0, paneW, bodyTop, bodyRows int, recents []string) []welcomeL
 			role = welcomeRecentRow
 		}
 		label := padCells(truncateCells(it.label, welcomeLabelW-1), welcomeLabelW)
-		rows = append(rows, welcomeLine{role: role, text: label, keyX: welcomeLabelW, key: truncateCells(it.key, max(bw-welcomeLabelW, 0)), item: i, w: bw})
+		rows = append(rows, welcomeLine{role: role, text: label, keyX: welcomeLabelW, key: fitKey(it, max(bw-welcomeLabelW, 0)), item: i, w: bw + 2*space.PadX})
 	}
 
 	top := bodyTop + max((bodyRows-len(rows))/2, 0)
@@ -128,6 +142,7 @@ func welcomeLines(x0, paneW, bodyTop, bodyRows int, recents []string) []welcomeL
 		case welcomeTitleRow, welcomeSubtitle:
 			r.x = left + max((bw-r.w)/2, 0)
 		case welcomeDoorRow, welcomeRecentRow:
+			r.x, r.labelX = left-space.PadX, left
 			r.keyX += left
 		}
 		out = append(out, r)
@@ -171,7 +186,7 @@ func paintWelcome(g *grid.Grid, st style.Styles, l layout, sel int) {
 				rowStyle = selected
 			}
 			g.Fill(r.x, r.x+r.w, r.y, rowStyle)
-			g.Put(r.x, r.y, g.Width(), r.text, rowStyle)
+			g.Put(r.labelX, r.y, g.Width(), r.text, rowStyle)
 			keyStyle := chip
 			switch {
 			case r.item == sel:
@@ -222,4 +237,13 @@ func (m *Model) welcomeKey(name string) (tea.Cmd, bool) {
 		return nil, false
 	}
 	return nil, true
+}
+
+// fitKey fits the right column of a welcome row in w cells. A shortcut is cut at the end,
+// and the path of a recent folder gives up its middle and keeps its last directory.
+func fitKey(it welcomeItem, w int) string {
+	if it.path != "" {
+		return space.Path(it.key, w)
+	}
+	return space.End(it.key, w)
 }

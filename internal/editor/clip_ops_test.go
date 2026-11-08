@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/buffer"
@@ -262,6 +263,22 @@ func TestPaste(t *testing.T) {
 				t.Fatalf("one undo gives %q, want %q", got, tt.text)
 			}
 		})
+	}
+}
+
+func TestPasteOverTheCapIsRefused(t *testing.T) {
+	t.Parallel()
+	e := clipEditor(t, "abc")
+	big := strings.Repeat("x", buffer.MaxMaterialize+1)
+	r := e.Do("paste", map[string]any{"text": big})
+	if !errors.Is(r.Err, ErrPasteTooLarge) {
+		t.Fatalf("err = %v, want ErrPasteTooLarge", r.Err)
+	}
+	if got := text(e); got != "abc" {
+		t.Fatalf("text changed to %d bytes", len(got))
+	}
+	if got := e.Status(); !strings.Contains(got, "too large") {
+		t.Fatalf("status = %q, want the refusal", got)
 	}
 }
 

@@ -150,16 +150,20 @@ T.spy(w.truncated)`, want: "README.md file|src dir|src/a.go file|false"},
 	}
 }
 
+// A write of more than 64 MiB never reaches the OS: gvim.fs.write refuses the data first. Stock
+// gopher-lua does not cap the concatenation operator, so the command builds the 64 MiB+1 string
+// and the size check of the write API is what stops it.
 func TestFSWriteTooLargeIsRefusedBeforeTheOS(t *testing.T) {
 	fos := plugintest.NewFakeOS()
 	// Building a 64 MiB string is real work: the command gets a budget that a busy machine
 	// cannot exhaust (this test is about the size check, not about the time budget).
 	h := cmd(t, "", `
--- table.concat and string.rep stop at 64 MiB (S9), so the VM concat builds the 64 MiB + 1 string.
 local half = string.rep("x", 33554432)
-local v, e = gvim.fs.write("/work/huge", half .. half .. "x")
-T.spy(tostring(v), gvim.err_code(e))`, plugintest.Options{OS: fos, Timeout: 20 * time.Second})
-	if got := spyText(h); got != "nil too_large" {
+local ok, err = pcall(function() return half .. half .. "x" end)
+T.spy(tostring(ok), #err)
+local wok, werr = pcall(function() local _, e = gvim.fs.write("/work/huge", err) return e end)
+T.spy(tostring(wok), tostring(werr):match("data is larger than %d+ bytes") or tostring(werr))`, plugintest.Options{OS: fos, Timeout: 20 * time.Second})
+	if got := spyText(h); got != "true 67108865|true data is larger than 67108864 bytes" {
 		t.Fatalf("spy = %q log=%v", got, h.LogText(""))
 	}
 	if fos.Exists("/work/huge") {

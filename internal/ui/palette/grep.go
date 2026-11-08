@@ -3,6 +3,8 @@ package palette
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -102,13 +104,18 @@ func grepRows(msg GrepResultMsg) []row {
 	}
 	rows := make([]row, 0, len(msg.Hits))
 	for _, h := range msg.Hits {
-		text := strings.TrimSpace(strings.ReplaceAll(h.Text, "\t", " "))
+		spaced := strings.ReplaceAll(h.Text, "\t", " ")
+		text := strings.TrimSpace(spaced)
+		lead := utf8.RuneCountInString(spaced) - utf8.RuneCountInString(strings.TrimLeftFunc(spaced, unicode.IsSpace))
 		rows = append(rows, row{
 			kind: rowGrep,
 			name: fmt.Sprintf("%s:%d: %s", h.Rel, h.Line, text),
 			rel:  h.Rel,
 			line: h.Line,
 			col:  h.Col,
+			text: text,
+			mcol: max(h.Col-1-lead, 0),
+			qlen: utf8.RuneCountInString(msg.Text),
 		})
 	}
 	return rows

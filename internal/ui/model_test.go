@@ -481,7 +481,7 @@ func TestViewPaintsTheFrameAt80x24(t *testing.T) {
 		}
 	}
 	plain := ansi.Strip(v.Content)
-	for _, want := range []string{"File", "Ln 1, Col 1", "Palette: ⌃P", "File Explorer"} {
+	for _, want := range []string{"File", "Ln 1, Col 1", "Palette: Ctrl+P", "File Explorer"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("frame lacks %q", want)
 		}

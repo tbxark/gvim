@@ -7,7 +7,33 @@ local M = {}
 
 local byte, sub = string.byte, string.sub
 
--- next returns the column of the character after the one at col, or #s at the last one.
+-- mark_len is the length in bytes of the combining mark that starts at byte i (1-based), or
+-- 0 when there is none: the accents of U+0300..036F, 1AB0..1AFF, 1DC0..1DFF, 20D0..20FF,
+-- FE20..FE2F and the variation selectors FE00..FE0F.
+local function mark_len(s, i)
+  local b = byte(s, i)
+  if not b or b < 0xCC then
+    return 0
+  end
+  local b2, b3 = byte(s, i + 1), byte(s, i + 2)
+  if b == 0xCC or (b == 0xCD and b2 and b2 <= 0xAF) then
+    return 2
+  end
+  if not (b2 and b3) then
+    return 0
+  end
+  if b == 0xE1 and ((b2 == 0xAA and b3 >= 0xB0) or b2 == 0xAB or b2 == 0xB7) then
+    return 3
+  elseif b == 0xE2 and b2 == 0x83 and b3 >= 0x90 then
+    return 3
+  elseif b == 0xEF and b2 == 0xB8 and (b3 <= 0x8F or (b3 >= 0xA0 and b3 <= 0xAF)) then
+    return 3
+  end
+  return 0
+end
+
+-- next returns the column of the character after the one at col, or #s at the last one. A
+-- character is a code point with the combining marks that follow it.
 function M.next(s, col)
   local b = byte(s, col + 1)
   if not b then
@@ -25,7 +51,27 @@ function M.next(s, col)
   if c > #s then
     c = #s
   end
+  while true do
+    local m = mark_len(s, c + 1)
+    if m == 0 then
+      break
+    end
+    c = math.min(c + m, #s)
+  end
   return c
+end
+
+-- prev_point is the column of the code point before col.
+local function prev_point(s, col)
+  local i = col -- 1-based index of the byte before col
+  while i > 1 do
+    local b = byte(s, i)
+    if b < 0x80 or b >= 0xC0 then
+      break
+    end
+    i = i - 1
+  end
+  return i - 1
 end
 
 -- prev returns the column of the character before col (0 at the start).
@@ -36,15 +82,11 @@ function M.prev(s, col)
   if col > #s then
     col = #s
   end
-  local i = col -- 1-based index of the byte before col
-  while i > 1 do
-    local b = byte(s, i)
-    if b < 0x80 or b >= 0xC0 then
-      break
-    end
-    i = i - 1
+  local c = prev_point(s, col)
+  while c > 0 and mark_len(s, c + 1) > 0 do
+    c = prev_point(s, c)
   end
-  return i - 1
+  return c
 end
 
 -- last returns the column of the last character of s, 0 for an empty line.
@@ -79,7 +121,11 @@ function M.align(s, col)
     end
     i = i - 1
   end
-  return i - 1
+  local c = i - 1
+  while c > 0 and mark_len(s, c + 1) > 0 do
+    c = prev_point(s, c)
+  end
+  return c
 end
 
 -- chars returns the characters of s in an array.

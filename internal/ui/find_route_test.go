@@ -117,11 +117,6 @@ func newDefaultSearchModel(t *testing.T, lines ...string) (*Model, *searchFake) 
 	return newRouteModelPreset(t, sf, "default"), sf
 }
 
-// ctrlAlt returns a Ctrl+Alt press of code, a letter or a key such as tea.KeyRight.
-func ctrlAlt(code rune) tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: code, Mod: tea.ModCtrl | tea.ModAlt}
-}
-
 // noDocSearchFake is a searchFake with no tab open.
 type noDocSearchFake struct{ *searchFake }
 
@@ -151,7 +146,7 @@ func TestCtrlFOpensTheFindBarThroughTheRoot(t *testing.T) {
 	if got := strings.TrimSpace(rows[h-1]); got != "Search:" {
 		t.Errorf("last row = %q, want the search row", got)
 	}
-	if !strings.Contains(rows[h-2], "[ ] Case Sensitive (⌥C)") || !strings.Contains(rows[h-2], "[ ] Regex (⌥R)") {
+	if !strings.Contains(rows[h-2], "[ ] Case Sensitive (Alt+C)") || !strings.Contains(rows[h-2], "[ ] Regex (Alt+R)") {
 		t.Errorf("row %d = %q, want the option toggles", h-2, rows[h-2])
 	}
 	if !strings.Contains(rows[h-3], "Local") {
@@ -180,7 +175,7 @@ func TestCtrlGWithoutASearchSaysHowToStart(t *testing.T) {
 	if m.notice != noActiveSearch {
 		t.Fatalf("notice = %q, want %q", m.notice, noActiveSearch)
 	}
-	if !strings.Contains(strings.Join(screenRows(m), "\n"), "No active search. Press Ctrl+F") {
+	if !strings.Contains(strings.Join(screenRows(m), "\n"), "No active search. Use Edit > Find") {
 		t.Error("the status row does not show the message")
 	}
 	if len(m.overlays) != 0 {
@@ -218,25 +213,33 @@ func TestFindBarNavigatesAndCtrlGContinuesAfterClose(t *testing.T) {
 	}
 }
 
-func TestPaletteColonOpensTheGotoPrompt(t *testing.T) {
-	ed := &fileEditorFake{fakeEditor: newFakeEditor("one", "two", "three")}
-	m := newRouteModel(t, ed)
-	press(m, ctrl('p'))
-	press(m, special(tea.KeyBackspace)) // the ">" prefix goes, leaving an empty query
-	press(m, typed(":"))
-	press(m, typed("2"))
-	runCmds(m, press(m, special(tea.KeyEnter)))
-
-	o, ok := m.overlays[len(m.overlays)-1].(lineOverlay)
-	if !ok {
-		t.Fatalf("top overlay = %T after the ':' row, want the go-to-line prompt", m.overlays[len(m.overlays)-1])
-	}
-	if got := o.l.Value(); got != "2" {
-		t.Fatalf("prompt text = %q, want the chosen line 2", got)
-	}
-	runCmds(m, press(m, special(tea.KeyEnter)))
-	if ed.line != 2 || ed.col != 1 {
-		t.Fatalf("GotoLine(%d, %d) after the prompt, want (2, 1)", ed.line, ed.col)
+// TestPaletteColonJumpsOnTheFirstEnter: Fresh's palette ":" mode jumps to the line the
+// query names (docs/features/command-palette.md), so one Enter is enough and no second
+// prompt opens. The previous test pinned the extra go-to-line prompt that PC54 reported.
+func TestPaletteColonJumpsOnTheFirstEnter(t *testing.T) {
+	for _, tc := range []struct {
+		query     string
+		line, col int
+	}{
+		{":2", 2, 1},
+		{":3:2", 3, 2},
+	} {
+		ed := &fileEditorFake{fakeEditor: newFakeEditor("one", "two", "three")}
+		m := newRouteModel(t, ed)
+		press(m, ctrl('p'))
+		press(m, special(tea.KeyBackspace)) // the ">" prefix goes, leaving an empty query
+		for _, r := range tc.query {
+			press(m, typed(string(r)))
+		}
+		runCmds(m, press(m, special(tea.KeyEnter)))
+		if ed.line != tc.line || ed.col != tc.col {
+			t.Errorf("%q: GotoLine(%d, %d) after one Enter, want (%d, %d)", tc.query, ed.line, ed.col, tc.line, tc.col)
+		}
+		for _, o := range m.overlays {
+			if _, ok := o.(lineOverlay); ok {
+				t.Errorf("%q: a go-to-line prompt opened after the jump", tc.query)
+			}
+		}
 	}
 }
 
@@ -278,12 +281,12 @@ func (selDoc) Encoding() string { return "ASCII" }
 // LineEnding satisfies Document for the selection fake.
 func (selDoc) LineEnding() string { return "LF" }
 
-func TestAltAOpensTheFindBarWithTheReplaceRow(t *testing.T) {
+func TestStartSearchReplaceOpensTheFindBarWithTheReplaceRow(t *testing.T) {
 	m, _ := newDefaultSearchModel(t, "hello world")
-	press(m, tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
+	doAction(m, "start_search_replace")
 
 	if !m.findOpen() {
-		t.Fatalf("overlay stack has %d entries after Alt+A, want the find bar", len(m.overlays))
+		t.Fatalf("overlay stack has %d entries after start_search_replace, want the find bar", len(m.overlays))
 	}
 	if rows := m.findBar.Rows(); rows != 3 {
 		t.Fatalf("bar covers %d rows, want 3 with the replacement row", rows)
@@ -303,15 +306,15 @@ func TestSearchReplaceNextAndPrevStepThroughMatches(t *testing.T) {
 	press(m, special(tea.KeyEnter))
 	// The bar is closed and its search text is held. The selection is 0:0 to 0:3.
 
-	press(m, ctrlAlt(tea.KeyRight))
+	doAction(m, "search_replace_next_match")
 	if sf.anchor != (buffer.Pos{Line: 0, Col: 8}) || m.notice != "Match 2 of 3" {
 		t.Fatalf("next selected from %+v with notice %q, want the match at 0:8 and %q", sf.anchor, m.notice, "Match 2 of 3")
 	}
-	press(m, ctrlAlt(tea.KeyRight))
+	doAction(m, "search_replace_next_match")
 	if sf.anchor != (buffer.Pos{Line: 1, Col: 2}) {
 		t.Fatalf("second next selected from %+v, want the match at 1:2", sf.anchor)
 	}
-	press(m, ctrlAlt(tea.KeyLeft))
+	doAction(m, "search_replace_prev_match")
 	if sf.anchor != (buffer.Pos{Line: 0, Col: 8}) || m.notice != "Match 2 of 3" {
 		t.Fatalf("prev selected from %+v with notice %q, want the match at 0:8", sf.anchor, m.notice)
 	}
@@ -319,7 +322,7 @@ func TestSearchReplaceNextAndPrevStepThroughMatches(t *testing.T) {
 
 func TestSearchReplaceNavigationWithoutASearchSaysHowToStart(t *testing.T) {
 	m, _ := newDefaultSearchModel(t, "foo")
-	press(m, ctrlAlt(tea.KeyRight))
+	doAction(m, "search_replace_next_match")
 	if m.notice != noActiveSearch {
 		t.Fatalf("notice = %q, want %q", m.notice, noActiveSearch)
 	}
@@ -346,7 +349,7 @@ func heldReplaceModel(t *testing.T, lines ...string) (*Model, *searchFake) {
 
 func TestQueryReplaceAnswersEachMatchFromTheHeldBar(t *testing.T) {
 	m, sf := heldReplaceModel(t, "x x x x")
-	press(m, ctrlAlt('r'))
+	doAction(m, "query_replace")
 	if !m.findOpen() {
 		t.Fatalf("overlay stack has %d entries after Ctrl+Alt+R, want the find bar", len(m.overlays))
 	}
@@ -375,7 +378,7 @@ func TestQueryReplaceAnswersEachMatchFromTheHeldBar(t *testing.T) {
 
 func TestEscDuringQueryReplaceStopsTheRun(t *testing.T) {
 	m, sf := heldReplaceModel(t, "x x x")
-	press(m, ctrlAlt('r'))
+	doAction(m, "query_replace")
 	press(m, typed("y"))
 	press(m, special(tea.KeyEscape))
 
@@ -389,7 +392,7 @@ func TestEscDuringQueryReplaceStopsTheRun(t *testing.T) {
 
 func TestQueryReplaceWithoutASearchKeepsTheBarOpenAndSaysSo(t *testing.T) {
 	m, sf := newDefaultSearchModel(t, "x x")
-	press(m, ctrlAlt('r'))
+	doAction(m, "query_replace")
 	if !m.findOpen() {
 		t.Fatal("Ctrl+Alt+R without a search did not open the bar")
 	}

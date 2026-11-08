@@ -27,17 +27,20 @@ const defaultCodec = "utf-8"
 // labels are the Encoding labels of the encodings that are not utf-8. utf-8 has
 // its own rule in encodingLabel.
 var labels = map[string]string{
-	"utf-8-bom":    "UTF-8 BOM",
-	"utf-16le":     "UTF-16 LE",
-	"utf-16be":     "UTF-16 BE",
-	"windows-1252": "Windows-1252",
-	"iso-8859-1":   "Latin-1",
-	"shift_jis":    "Shift-JIS",
-	"windows-1250": "Windows-1250",
-	"windows-1251": "Windows-1251",
-	"gbk":          "GBK",
-	"gb18030":      "GB18030",
-	"euc-kr":       "EUC-KR",
+	"utf-8-bom": "UTF-8 BOM",
+	"utf-16le":  "UTF-16 LE",
+	"utf-16be":  "UTF-16 BE",
+
+	"utf-16le-nobom": "UTF-16 LE",
+	"utf-16be-nobom": "UTF-16 BE",
+	"windows-1252":   "Windows-1252",
+	"iso-8859-1":     "Latin-1",
+	"shift_jis":      "Shift-JIS",
+	"windows-1250":   "Windows-1250",
+	"windows-1251":   "Windows-1251",
+	"gbk":            "GBK",
+	"gb18030":        "GB18030",
+	"euc-kr":         "EUC-KR",
 }
 
 // byteOrderMark is the U+FEFF that a byte-order mark decodes to. The text of a
@@ -80,6 +83,10 @@ func decodeFile(data []byte) (text, codec string, err error) {
 	for _, c := range candidates {
 		text, err = encoding.Decode(c, data)
 		if err == nil {
+			if !hasUTF16BOM(data) {
+				// The file has no mark, so the save must not add one.
+				c = encoding.NoBOM(c)
+			}
 			return text, c, nil
 		}
 		if first == nil {
@@ -87,6 +94,11 @@ func decodeFile(data []byte) (text, codec string, err error) {
 		}
 	}
 	return "", "", fmt.Errorf("%w: %w", ErrNotDecodable, first)
+}
+
+// hasUTF16BOM reports whether data starts with a UTF-16 byte-order mark.
+func hasUTF16BOM(data []byte) bool {
+	return len(data) >= 2 && (data[0] == 0xff && data[1] == 0xfe || data[0] == 0xfe && data[1] == 0xff)
 }
 
 // encodeText returns text in codec, with the byte-order mark the codec has. The

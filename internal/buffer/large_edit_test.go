@@ -320,18 +320,21 @@ func TestLargeEditRefusals(t *testing.T) {
 		want error
 	}{
 		{
-			name: "line too long",
+			// A huge line is edited by reading it whole, which the overlay budget may refuse.
+			name: "line too big for the overlay",
 			data: long + "\nshort\n",
+			mod:  func(o *buffer.LargeOptions) { o.MaxOverlayBytes = 256 },
 			do:   func(b *buffer.Buffer, _ *buffertest.MemSource) { b.Insert(buffer.Pos{Line: 0, Col: 3}, "X") },
-			want: buffer.ErrLineTooLong,
+			want: buffer.ErrLineOverBudget,
 		},
 		{
-			name: "delete inside a long line",
+			name: "delete inside a line too big for the overlay",
 			data: "short\n" + long + "\n",
+			mod:  func(o *buffer.LargeOptions) { o.MaxOverlayBytes = 256 },
 			do: func(b *buffer.Buffer, _ *buffertest.MemSource) {
 				b.Delete(buffer.Pos{Line: 1, Col: 2}, buffer.Pos{Line: 1, Col: 4})
 			},
-			want: buffer.ErrLineTooLong,
+			want: buffer.ErrLineOverBudget,
 		},
 		{
 			name: "invalid utf8",
@@ -421,7 +424,7 @@ func textOf(b *buffer.Buffer) string {
 }
 
 func TestRefusedEditDoesNotTouchRedoOrSeq(t *testing.T) {
-	long := strings.Repeat("a", 100)
+	long := "\xff" + strings.Repeat("a", 99) // invalid UTF-8: refused
 	b := bigEditOpen(t, "one\ntwo\n"+long+"\n", nil)
 	b.Insert(buffer.Pos{Line: 0, Col: 3}, "!")
 	b.Break()
@@ -436,7 +439,7 @@ func TestRefusedEditDoesNotTouchRedoOrSeq(t *testing.T) {
 	if got := b.Delete(buffer.Pos{Line: 2, Col: 1}, buffer.Pos{Line: 2, Col: 2}); got != "" {
 		t.Errorf("refused Delete returned %q", got)
 	}
-	if !errors.Is(b.Refusal(), buffer.ErrLineTooLong) {
+	if !errors.Is(b.Refusal(), buffer.ErrInvalidUTF8) {
 		t.Error("no refusal recorded")
 	}
 	if b.Version() != ver {
@@ -449,7 +452,7 @@ func TestRefusedEditDoesNotTouchRedoOrSeq(t *testing.T) {
 }
 
 func TestGroupRefusalRolledBack(t *testing.T) {
-	long := strings.Repeat("a", 100)
+	long := "\xff" + strings.Repeat("a", 99) // invalid UTF-8: refused
 	newBuf := func(t *testing.T) *buffer.Buffer {
 		b := bigEditOpen(t, "one\ntwo\n"+long+"\nfour\n", nil)
 		b.Insert(buffer.Pos{Line: 0, Col: 3}, "!")
@@ -471,7 +474,7 @@ func TestGroupRefusalRolledBack(t *testing.T) {
 			b.Insert(buffer.Pos{Line: 2, Col: 1}, "refused")
 			b.Insert(buffer.Pos{Line: 3, Col: 0}, "B")
 		})
-		if !errors.Is(b.Refusal(), buffer.ErrLineTooLong) {
+		if !errors.Is(b.Refusal(), buffer.ErrInvalidUTF8) {
 			t.Error("Refusal does not report the refused edit")
 		}
 		if textOf(b) != text || b.Version() != ver {
@@ -679,7 +682,9 @@ func TestLargeDeleteFromColZeroToLineStartReadsNothing(t *testing.T) {
 	if after := b.Stats(); after.DecodedRunes != before.DecodedRunes {
 		t.Errorf("Delete decoded %d runes", after.DecodedRunes-before.DecodedRunes)
 	}
-	if want := long[:64] + "\n\ufffd\ufffd\n"; got != want {
+	// The text Delete returns, which undo puts back, is the whole of the line that is longer
+	// than MaxLine, read from the source.
+	if want := long + "\n\ufffd\ufffd\n"; got != want {
 		t.Errorf("Delete returned %q, want %q", got, want)
 	}
 	if b.Line(0) != "keep" || b.Line(1) != "rest" || b.Lines() != 3 {
@@ -687,21 +692,46 @@ func TestLargeDeleteFromColZeroToLineStartReadsNothing(t *testing.T) {
 	}
 }
 
-func TestLargeDeleteMidHugeTailRefused(t *testing.T) {
+// A delete that ends inside a huge line is made: the line is read whole, and the part of it
+// that goes is removed, with the rest of it joined to the first line.
+func TestLargeDeleteMidHugeLineIsMade(t *testing.T) {
 	long := strings.Repeat("y", 100)
 	b := bigEditOpen(t, "head\n"+long+"\nlast\n", nil)
-	// The cut line is not the last one, so a delete ending inside it is refused.
-	b.Delete(buffer.Pos{Line: 0, Col: 1}, buffer.Pos{Line: 1, Col: 10})
-	if err := b.Refusal(); !errors.Is(err, buffer.ErrLineTooLong) {
-		t.Errorf("Refusal = %v, want ErrLineTooLong", err)
+	if got := b.Delete(buffer.Pos{Line: 0, Col: 1}, buffer.Pos{Line: 1, Col: 10}); got != "ead\n"+strings.Repeat("y", 10) {
+		t.Errorf("Delete returned %q", got)
 	}
-	// Ending at the end of its cut text is not enough either.
-	b.Delete(buffer.Pos{Line: 0, Col: 1}, buffer.Pos{Line: 1, Col: b.LineLen(1)})
-	if err := b.Refusal(); !errors.Is(err, buffer.ErrLineTooLong) {
-		t.Errorf("Refusal = %v, want ErrLineTooLong", err)
+	if err := b.Refusal(); err != nil {
+		t.Fatalf("Refusal = %v, want none", err)
 	}
-	if b.Modified() || b.Line(0) != "head" {
-		t.Error("refused deletes changed the buffer")
+	if want := "h" + strings.Repeat("y", 90); b.Line(0) != want || b.Line(1) != "last" || b.Lines() != 3 { // the file ends in a line break, so a last empty line counts
+		t.Errorf("lines after the delete: %q %q (%d)", b.Line(0), b.Line(1), b.Lines())
+	}
+}
+
+// A huge line is edited whole: typing at its start and its end, and Enter at its end, are made,
+// and undo takes each of them back.
+func TestHugeLineIsEditedWhole(t *testing.T) {
+	long := strings.Repeat("y", 100)
+	b := bigEditOpen(t, "head\n"+long+"\nlast\n", nil)
+	b.Insert(buffer.Pos{Line: 1, Col: 0}, "X")
+	b.Break()
+	b.Insert(buffer.Pos{Line: 1, Col: b.LineLen(1)}, "Z")
+	b.Break()
+	b.Insert(buffer.Pos{Line: 1, Col: b.LineLen(1)}, "\nnew")
+	if err := b.Refusal(); err != nil {
+		t.Fatalf("Refusal = %v, want none", err)
+	}
+	if b.Lines() != 5 || b.Line(1) != "X"+long+"Z" || b.Line(2) != "new" || b.Line(3) != "last" {
+		t.Fatalf("lines after the edits: %d lines, %q %q %q", b.Lines(), b.Line(1), b.Line(2), b.Line(3))
+	}
+	for range 3 {
+		if _, ok := b.Undo(); !ok {
+			t.Fatal("Undo failed")
+		}
+	}
+	// The undone line is a huge line again, which Line shows cut, so its text is read with LineSlice.
+	if b.Lines() != 4 || b.LineLen(1) != len(long) || b.LineSlice(1, 0, len(long)) != long {
+		t.Errorf("after undo: %d lines, line 1 has %d runes", b.Lines(), b.LineLen(1))
 	}
 }
 

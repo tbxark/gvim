@@ -72,15 +72,16 @@ func TestViColonCommands(t *testing.T) {
 		{":%d", "a\nb", [2]int{0, 0}, ":«%d»", "", [2]int{0, 0}, ""},
 		{":d then p", "a\nb", [2]int{0, 0}, ":«d»p", "b\na", [2]int{1, 0}, ""},
 		{":2,3y then P", "a\nb\nc", [2]int{0, 0}, ":«2,3y»P", "b\nc\na\nb\nc", [2]int{0, 0}, ""},
-		{":g/x/d", "ax\nb\ncx\nd", [2]int{0, 0}, ":«g/x/d»", "b\nd", [2]int{0, 0}, ""},
+		// Vim leaves the caret on the line that took the place of the last deleted one
+		{":g/x/d", "ax\nb\ncx\nd", [2]int{0, 0}, ":«g/x/d»", "b\nd", [2]int{1, 0}, ""},
 		{":g! deletes the lines that do not match", "ax\nb\ncx", [2]int{0, 0}, ":«g!/x/d»", "ax\ncx", [2]int{1, 0}, ""},
 		{":v/x/d", "ax\nb\ncx", [2]int{0, 0}, ":«v/x/d»", "ax\ncx", [2]int{1, 0}, ""},
 		{":g/x/s/a/b/", "ax\nb\nax", [2]int{0, 0}, ":«g/x/s/a/b/»", "bx\nb\nbx", [2]int{2, 0}, ""},
 		{":g with consecutive lines", "x\nx\nb\nx", [2]int{0, 0}, ":«g/x/d»", "b", [2]int{0, 0}, ""},
-		{":j", "a\nb\nc", [2]int{0, 0}, ":«j»", "a b\nc", [2]int{0, 1}, ""},
-		{":1,3j", "a\nb\nc\nd", [2]int{0, 0}, ":«1,3j»", "a b c\nd", [2]int{0, 3}, ""},
+		{":j", "a\nb\nc", [2]int{0, 0}, ":«j»", "a b\nc", [2]int{0, 0}, ""},            // Vim 9.1: the caret is on the first non-blank of the joined line
+		{":1,3j", "a\nb\nc\nd", [2]int{0, 0}, ":«1,3j»", "a b c\nd", [2]int{0, 0}, ""}, // Vim 9.1: first non-blank of the joined line
 		{":>", "a\nb", [2]int{0, 0}, ":«>»", "    a\nb", [2]int{0, 4}, ""},
-		{":%>>", "a\nb", [2]int{0, 0}, ":«%>>»", "        a\n        b", [2]int{0, 8}, ""},
+		{":%>>", "a\nb", [2]int{0, 0}, ":«%>>»", "        a\n        b", [2]int{1, 8}, ""}, // Vim 9.1: the caret is on the last line of the range
 		{":<", "    a", [2]int{0, 4}, ":«<»", "a", [2]int{0, 0}, ""},
 		{":m0 moves a line to the top", "a\nb\nc", [2]int{2, 0}, ":«m0»", "c\na\nb", [2]int{0, 0}, ""},
 		{":m$ moves a line to the end", "a\nb\nc", [2]int{0, 0}, ":«m$»", "b\nc\na", [2]int{2, 0}, ""},
@@ -243,11 +244,12 @@ func TestViEveryKeyIsHandled(t *testing.T) {
 			t.Errorf("key %q left the mode %q", ch, v.mode())
 		}
 	}
-	// pasted text is swallowed in normal mode and typed in insert mode
+	// pasted text goes to the mode's text function in normal mode (it is put as P puts it, see
+	// TestViPaste; it used to be swallowed) and is typed in insert mode
 	v := newVi(t, text)
 	info, _ := v.modeInfo()
-	if info.Paste != pluginapi.TextSwallow {
-		t.Errorf("normal mode paste policy = %v, want swallow", info.Paste)
+	if info.Paste != pluginapi.TextHandler {
+		t.Errorf("normal mode paste policy = %v, want the text handler", info.Paste)
 	}
 	v.keys("i")
 	info, _ = v.modeInfo()

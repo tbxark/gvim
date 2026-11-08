@@ -50,6 +50,7 @@ func TestDefaults(t *testing.T) {
 		LineWrap:                true,
 		HighlightCurrentLine:    true,
 		MouseCapture:            true,
+		LSPEnabled:              true,
 		CursorStyle:             "block",
 		UIIcons:                 "auto",
 
@@ -127,12 +128,12 @@ func TestLoadLayering(t *testing.T) {
 func TestLoadProjectOnlyLayer(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "proj")
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"keymap": "emacs", "line_ending": "crlf"}`)
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"line_ending": "crlf"}`)
 	cfg, diags, err := Load(Options{Root: root, UserFile: filepath.Join(dir, "absent.json")})
 	if err != nil || len(diags) != 0 {
 		t.Fatalf("Load = %v, %v", diags, err)
 	}
-	if cfg.Keymap != "emacs" || cfg.LineEnding != "crlf" {
+	if cfg.LineEnding != "crlf" {
 		t.Fatalf("cfg = %+v", cfg)
 	}
 }
@@ -167,7 +168,9 @@ func TestLoadJSONCCommentsAndTrailingCommas(t *testing.T) {
 	}
 }
 
-func TestLoadKeybindingsReplaceWholesale(t *testing.T) {
+// TestLoadKeybindingsComeFromTheUserLayerOnly replaces a test that pinned the project
+// object replacing the user's wholesale (Fresh's rule): a project file cannot rebind keys.
+func TestLoadKeybindingsComeFromTheUserLayerOnly(t *testing.T) {
 	dir := t.TempDir()
 	userFile := filepath.Join(dir, "user.json")
 	root := filepath.Join(dir, "proj")
@@ -177,8 +180,8 @@ func TestLoadKeybindingsReplaceWholesale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !jsonEqual(t, cfg.Keybindings, `{"c":"z"}`) {
-		t.Fatalf("keybindings = %s, want the project object only", cfg.Keybindings)
+	if !jsonEqual(t, cfg.Keybindings, `{"a":"x","b":"y"}`) {
+		t.Fatalf("keybindings = %s, want the user object only", cfg.Keybindings)
 	}
 }
 
@@ -256,7 +259,7 @@ func TestLoadBadValuesAreDiagnosedPerKey(t *testing.T) {
 		{"empty theme", `{"theme": ""}`, "theme", "must not be empty"},
 		{"theme not a string", `{"theme": 1}`, "theme", "must be a string"},
 		{"null value", `{"line_numbers": null}`, "line_numbers", "null"},
-		{"keybindings array", `{"keybindings": [{"key": "x"}]}`, "keybindings", "must be a JSON object"},
+		{"keybindings string", `{"keybindings": "ctrl+s"}`, "keybindings", "must be a list of bindings"},
 		{"unknown key", `{"tabsize": 2}`, "tabsize", "unknown setting"},
 		{"plugin timeout zero", `{"plugin_timeout_ms": 0}`, "plugin_timeout_ms", "between 1 and 60000"},
 		{"plugin timeout too large", `{"plugin_timeout_ms": 60001}`, "plugin_timeout_ms", "between 1 and 60000"},
@@ -331,8 +334,9 @@ func TestSourceNamesTheFileThatSetKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(diags) != 1 || diags[0].Key != "tab_size" {
-		t.Fatalf("diags = %+v, want the bad tab_size only", diags)
+	// The bad tab_size, and the project file's keybindings, which a project cannot set.
+	if len(diags) != 2 || diags[0].Key != "tab_size" || diags[1].Key != "keybindings" {
+		t.Fatalf("diags = %+v, want the bad tab_size and the refused project keybindings", diags)
 	}
 	tests := []struct {
 		key  string
@@ -340,7 +344,7 @@ func TestSourceNamesTheFileThatSetKey(t *testing.T) {
 	}{
 		{"keymap", userFile},
 		{"theme", projFile},       // the project layer replaces the user value
-		{"keybindings", projFile}, // the project layer replaces the whole object
+		{"keybindings", userFile}, // the project layer cannot set it
 		{"tab_size", ""},          // rejected in the user file, so the default stands
 		{"line_numbers", ""},      // set by no file
 	}
@@ -592,23 +596,69 @@ func TestLoadLSPServers(t *testing.T) {
 	}
 }
 
-func TestLoadLSPProjectLayerReplacesUser(t *testing.T) {
-	dir := t.TempDir()
-	user := filepath.Join(dir, "user.json")
-	writeFile(t, user, `{"lsp": {"go": {"command": "gopls"}, "rust": {"command": "rust-analyzer"}}}`)
-	root := filepath.Join(dir, "proj")
-	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"lsp": {"python": {"command": "pylsp"}}}`)
+// TestLoadLSPProjectLayerCannotRunAProgram checks the rule that a repository does not choose
+// what program gvim starts: the project file may switch a language server off, or turn a
+// built-in one on, but its command and args are refused with a diagnostic, and the user's own
+// entries stay.
+func TestLoadLSPProjectLayerCannotRunAProgram(t *testing.T) {
+	const user = `{"lsp": {"go": {"command": "my-gopls"}, "rust": {"command": "ra", "args": ["-x"]}}}`
+	tests := []struct {
+		name         string
+		project      string
+		want         map[string]LSPServer
+		wantDisabled map[string]bool
+		wantDiags    int
+	}{
+		{"a command is refused", `{"lsp": {"python": {"command": "touch", "args": ["/tmp/pwned"]}}}`,
+			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}}, nil, 1},
+		{"a command cannot replace the user's", `{"lsp": {"go": {"command": "touch"}}}`,
+			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}}, nil, 1},
+		{"args alone are refused too", `{"lsp": {"rust": {"args": ["-c", "x"], "enabled": true}}}`,
+			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}}, nil, 1},
+		{"a project can switch a language off", `{"lsp": {"go": {"enabled": false}}}`,
+			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}}, map[string]bool{"go": true}, 0},
+		{"a project can turn a built-in server on", `{"lsp": {"odin": {"enabled": true}}}`,
+			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}, "odin": {}}, nil, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			userFile := filepath.Join(dir, "user.json")
+			writeFile(t, userFile, user)
+			root := filepath.Join(dir, "proj")
+			writeFile(t, filepath.Join(root, ".gvim", "config.json"), tt.project)
+			cfg, diags, err := Load(Options{Root: root, UserFile: userFile})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(diags) != tt.wantDiags {
+				t.Fatalf("diags = %v, want %d", diags, tt.wantDiags)
+			}
+			for _, d := range diags {
+				if d.Key != "lsp" || !strings.Contains(d.Message, "user config") {
+					t.Errorf("diagnostic %+v does not tell the user to set it in the user config", d)
+				}
+			}
+			if !reflect.DeepEqual(cfg.LSP, tt.want) || !reflect.DeepEqual(cfg.LSPDisabled, tt.wantDisabled) {
+				t.Fatalf("LSP = %+v disabled %v, want %+v disabled %v", cfg.LSP, cfg.LSPDisabled, tt.want, tt.wantDisabled)
+			}
+		})
+	}
+}
 
-	cfg, diags, err := Load(Options{Root: root, UserFile: user})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestLoadLSPAutoStartAndRootMarkers(t *testing.T) {
+	cfg, diags := loadBody(t, `{"lsp": {
+		"go": {"auto_start": false},
+		"rust": {"command": "ra", "auto_start": true, "root_markers": ["Cargo.toml", ".git"]}}}`)
 	if len(diags) != 0 {
-		t.Fatalf("diags = %v, want none", diags)
+		t.Fatalf("diags = %v", diags)
 	}
-	want := map[string]LSPServer{"python": {Command: "pylsp"}}
+	want := map[string]LSPServer{
+		"go":   {Dormant: true},
+		"rust": {Command: "ra", RootMarkers: []string{"Cargo.toml", ".git"}},
+	}
 	if !reflect.DeepEqual(cfg.LSP, want) {
-		t.Fatalf("LSP = %+v, want %+v (the project map replaces the user map)", cfg.LSP, want)
+		t.Fatalf("LSP = %+v, want %+v", cfg.LSP, want)
 	}
 }
 

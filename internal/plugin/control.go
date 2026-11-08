@@ -37,6 +37,17 @@ func (r *Runtime) doControl(c pluginapi.Control) ([]pluginapi.Work, []pluginapi.
 					r.say(pluginapi.LevelWarn, fmt.Sprintf("%d plugin(s) loaded; %s (the user plugins keep running)", len(b.okNames()), why))
 					return
 				}
+				if len(b.errs) > 0 {
+					// The last notice is what stays on the status row: it must not read as a
+					// success when a reload was aborted or a plugin failed. The first problem
+					// comes first, because the row is cut at its width.
+					more := ""
+					if n := len(b.errs) - 1; n > 0 {
+						more = fmt.Sprintf(" (+%d more)", n)
+					}
+					r.say(pluginapi.LevelWarn, fmt.Sprintf("%s%s; %d plugin(s) loaded (Plugin: Show Log)", firstLine(b.errs[0]), more, r.loadedCount()))
+					return
+				}
 				r.say(pluginapi.LevelInfo, fmt.Sprintf("%d plugin(s) loaded", len(b.okNames())))
 			})
 		})}, nil
@@ -47,9 +58,9 @@ func (r *Runtime) doControl(c pluginapi.Control) ([]pluginapi.Work, []pluginapi.
 	case "load_text":
 		return r.ctlLoadText(c.Name, c.Text)
 	case "init_check":
-		return r.ctlInit(false)
+		return r.ctlInit(false, c.Text)
 	case "init_reload":
-		return r.ctlInit(true)
+		return r.ctlInit(true, "")
 	}
 	return nil, warnN("plugin control %q is unknown", c.Op)
 }
@@ -140,7 +151,7 @@ func (r *Runtime) reloadScanned(name string, nc *candidate, verb string) {
 
 func (r *Runtime) abortReload(name, why string) {
 	r.logf(name, levelError, "reload aborted: "+why)
-	r.say(pluginapi.LevelWarn, fmt.Sprintf("plugin '%s': reload aborted: %s (the running version is kept)", name, firstLine(why)))
+	r.say(pluginapi.LevelWarn, fmt.Sprintf("plugin '%s': reload aborted: %s (the running version is kept)", name, statusText(why)))
 }
 
 // replace stops the dependants and the old version of nc.name, then loads nc and starts the
@@ -206,7 +217,7 @@ func (r *Runtime) ctlEnable(name string) ([]pluginapi.Work, []pluginapi.Notice) 
 		if nc.err != "" {
 			l.install(nc)
 			nc.reason = nc.err
-			r.say(pluginapi.LevelError, fmt.Sprintf("plugin '%s': %s", name, firstLine(nc.err)))
+			r.say(pluginapi.LevelError, fmt.Sprintf("plugin '%s': %s", name, statusText(nc.err)))
 			return
 		}
 		_, why := r.replace(nc, func(b *batch) {
@@ -326,7 +337,7 @@ func (r *Runtime) ctlLoadText(stem, text string) ([]pluginapi.Work, []pluginapi.
 			return
 		}
 		if nc.err != "" {
-			r.say(pluginapi.LevelWarn, fmt.Sprintf("plugin '%s': %s", name, firstLine(nc.err)))
+			r.say(pluginapi.LevelWarn, fmt.Sprintf("plugin '%s': %s", name, statusText(nc.err)))
 			return
 		}
 		r.reloadScanned(name, nc, verb)
@@ -336,8 +347,9 @@ func (r *Runtime) ctlLoadText(stem, text string) ([]pluginapi.Work, []pluginapi.
 // ---------- init.lua ----------
 
 // ctlInit is init_check (compile init.lua and report the first error) and init_reload
-// (reload the plugin "init").
-func (r *Runtime) ctlInit(reload bool) ([]pluginapi.Work, []pluginapi.Notice) {
+// (reload the plugin "init"). init_check with text checks that text, the unsaved buffer of
+// init.lua, instead of the file on disk.
+func (r *Runtime) ctlInit(reload bool, text string) ([]pluginapi.Work, []pluginapi.Notice) {
 	if n := r.loaderUnavailable(); n != nil {
 		return nil, n
 	}
@@ -347,16 +359,42 @@ func (r *Runtime) ctlInit(reload bool) ([]pluginapi.Work, []pluginapi.Notice) {
 	}
 	ref := opts.initRef()
 	where := filepath.Join(ref.dir, ref.file)
+	if !reload && text != "" {
+		return []pluginapi.Work{r.newWork(func(ctx context.Context) (any, string) {
+			return compileText(ctx, "init", text), ""
+		}, func(v any, errText string) {
+			nc, _ := v.(*candidate)
+			switch {
+			case nc == nil:
+				r.say(pluginapi.LevelWarn, "init.lua (unsaved buffer): could not be checked: "+errText)
+			case nc.err != "":
+				r.say(pluginapi.LevelWarn, "init.lua (unsaved buffer): "+statusText(nc.err))
+			default:
+				r.say(pluginapi.LevelInfo, "init.lua (unsaved buffer): syntax OK")
+			}
+		})}, nil
+	}
 	return []pluginapi.Work{r.rescan(ref, func(nc *candidate) {
 		switch {
 		case nc.err != "" && reload:
 			r.abortReload("init", nc.err)
 		case nc.err != "":
-			r.say(pluginapi.LevelWarn, "init.lua: "+firstLine(nc.err))
+			r.say(pluginapi.LevelWarn, "init.lua: "+statusText(nc.err))
 		case !reload:
 			r.say(pluginapi.LevelInfo, "init.lua: syntax OK ("+where+")")
 		default:
 			r.reloadScanned("init", nc, "reloaded")
 		}
 	})}, nil
+}
+
+// loadedCount is the number of plugins that are loaded now.
+func (r *Runtime) loadedCount() int {
+	n := 0
+	for _, p := range r.plugins {
+		if p.status == statusLoaded && !p.dead {
+			n++
+		}
+	}
+	return n
 }

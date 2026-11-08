@@ -80,10 +80,12 @@ func errLineCut(line int, what string) error {
 	}
 }
 
-// cutLineIn returns the first line of the range from..to whose text is cut short, or
-// -1. A cut line matters when the range takes it whole: when it continues past the
-// line break, or when it reaches the end of the part of the line that can be read. The
-// cost is one look per line, and none when the file has no line over the cap.
+// cutLineIn returns the first line of the range from..to whose text can only be read in part,
+// or -1. A line over the line cap is read to its end by Range, so only the first line of a
+// source whose index is not complete is cut short, and it matters when the range takes it
+// whole: when it continues past the line break, or when it reaches the end of the part of the
+// line that can be read. The cost is one look per line, and none when the file has no line
+// over the cap.
 func (d *Document) cutLineIn(from, to buffer.Pos) int {
 	if d.large == nil || !d.Index().HugeLine {
 		return -1
@@ -92,11 +94,11 @@ func (d *Document) cutLineIn(from, to buffer.Pos) int {
 		from, to = to, from
 	}
 	for line := from.Line; line < to.Line; line++ {
-		if d.Buffer.LineCut(line) {
+		if d.Buffer.LineUnfinished(line) {
 			return line
 		}
 	}
-	if d.Buffer.LineCut(to.Line) && to.Col >= d.Buffer.LineLen(to.Line) {
+	if d.Buffer.LineUnfinished(to.Line) && to.Col >= d.Buffer.LineLen(to.Line) {
 		return to.Line
 	}
 	return -1
@@ -243,6 +245,8 @@ func (d *Document) refusalError(err error) error {
 		msg = which + " is not valid UTF-8: not editable"
 	case errors.Is(err, buffer.ErrOverlayFull):
 		msg = "too many unsaved changes: save first"
+	case errors.Is(err, buffer.ErrLineOverBudget):
+		msg = which + " is too big to edit in large file mode"
 	case errors.Is(err, buffer.ErrSourceChanged):
 		msg = "file changed on disk: reload or Save As after reloading"
 	case errors.Is(err, buffer.ErrOverCap):

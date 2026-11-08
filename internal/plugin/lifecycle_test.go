@@ -470,3 +470,15 @@ for i = 1, 10 do gvim.plugin.on_unload(function() while true do end end) end`}, 
 		t.Fatalf("unload took %v with ten runaway hooks, want about 200 ms", took)
 	}
 }
+
+// TestUnloadAndShutdownHooksCannotWait backs the docs: every gvim.fs call waits, so an
+// on_unload hook or a shutdown handler cannot write or delete a file.
+func TestUnloadAndShutdownHooksCannotWait(t *testing.T) {
+	h := startFiles(t, plugintest.Files{"a.lua": `
+local gvim = require "gvim"
+gvim.plugin.on_unload(function() gvim.fs.write("/tmp/gvim-never", "x") end)`})
+	h.Unload("a")
+	if !logHas(h, "a", "on_unload must not yield") {
+		t.Fatalf("log %v", h.LogText("a"))
+	}
+}

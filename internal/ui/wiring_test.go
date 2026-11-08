@@ -152,7 +152,7 @@ func TestScrollbarTrackPressMovesTheViewport(t *testing.T) {
 	row := 6
 	m.Update(click(l.w-1, l.bodyTop+row, tea.MouseLeft))
 	p := m.pane(m.ed.Active())
-	if want := p.ScrollTopFor(m.bodyRows(), row); ed.doc.top != want || want == 0 {
+	if want := p.ScrollTopFor(l.focusedPane().w, m.bodyRows(), row); ed.doc.top != want || want == 0 {
 		t.Fatalf("viewport top = %d, want %d (non-zero)", ed.doc.top, want)
 	}
 }

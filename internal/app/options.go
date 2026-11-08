@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/internal/keymap"
+	"github.com/tbxark/gvim/internal/pluginapi"
 	"github.com/tbxark/gvim/internal/theme"
 )
 
@@ -44,8 +45,9 @@ type Options struct {
 	// Theme is a bundled theme name. Empty means the config's theme, which is
 	// "dark" unless a config file sets another.
 	Theme string
-	// LogFile is the log file path. Empty means no log file. Logging is not
-	// implemented yet, so the value is accepted and not written.
+	// LogFile is the log file path. Empty means no log file. The notices of the status row
+	// (warnings and errors) and the plugin log are appended to it, one line each. A path that
+	// cannot be written is a notice, and the editor runs without a log.
 	LogFile string
 	// SessionDir holds the saved session: the open tabs, the unsaved text and the
 	// explorer state. Run saves it when the program ends. Run uses
@@ -67,6 +69,9 @@ type Options struct {
 	// PluginPaths are plugins to load besides the discovered ones: each is a .lua
 	// file or a plugin directory, given with --plugin.
 	PluginPaths []string
+
+	// pluginLog receives the plugin log for LogFile; set by buildRuntime.
+	pluginLog func(pluginapi.LogEntry)
 }
 
 // Validate reports the first option that cannot be used. It does not touch

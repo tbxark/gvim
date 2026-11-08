@@ -100,8 +100,19 @@ end
 
 -- ---------- indent ----------
 
+-- tab_size is the tab size of the active buffer (:set ts=N sets it), else the editor's.
 local function tab_size()
-  local ts = gvim.config.get("tab_size")
+  local ts
+  local b = D.buf()
+  if b then
+    local ok, v = pcall(b.get_option, b, "tab_size")
+    if ok then
+      ts = v
+    end
+  end
+  if type(ts) ~= "number" then
+    ts = gvim.config.get("tab_size")
+  end
   if type(ts) ~= "number" or ts < 1 then
     ts = 4
   end
@@ -116,8 +127,13 @@ local function shift_width()
   return tab_size()
 end
 
+-- indent_string is width columns of indent: spaces, or tabs and spaces. :set et and :set noet
+-- decide; without them the editor's insert_spaces does.
 local function indent_string(width)
-  local spaces = gvim.config.get("insert_spaces")
+  local spaces = S.settings.expand_tab
+  if spaces == nil then
+    spaces = gvim.config.get("insert_spaces")
+  end
   if spaces == false then
     local ts = tab_size()
     return string.rep("\t", math.floor(width / ts)) .. string.rep(" ", width % ts)
@@ -233,6 +249,9 @@ function M.delete(rng, name, change)
     D.replace(P(first, 0), P(last + 1, 0), "")
   elseif first > 0 then
     D.replace(P(first - 1, D.len(first - 1)), P(last, D.len(last)), "")
+  elseif D.trailing() then
+    -- the whole text goes, and its final line break with it
+    D.replace(P(0, 0), P(last + 1, 0), "")
   else
     D.replace(P(0, 0), P(last, D.len(last)), "")
   end
@@ -268,6 +287,21 @@ function M.case(rng, op, start)
   local first, last, left, right = rng.first, rng.last, 0, nil
   if rng.kind == "block" then
     left, right = rng.left, rng.right
+  end
+  D.preload(first, last)
+  if rng.kind == "line" then
+    -- whole lines: one edit for the run, not one for each line
+    local lines, changed = D.lines(first, last), false
+    for i, s in ipairs(lines) do
+      local new = convert(op, s)
+      changed = changed or new ~= s
+      lines[i] = new
+    end
+    if changed then
+      D.replace(P(first, 0), P(last, D.len(last)), table.concat(lines, "\n"))
+    end
+    D.set_cursor(D.on_char(P(first, start and math.min(start.col, T.last(D.line(first))) or 0)))
+    return
   end
   for l = first, last do
     local s = D.line(l)
@@ -307,23 +341,29 @@ function M.join(first, n, spaces)
     return false
   end
   local last = first + n - 1
-  local acc = D.line(first)
-  local at = #acc
+  D.preload(first, last)
+  -- the pieces go into a table: joining thousands of lines by concatenation copies the whole
+  -- result for each of them
+  local head = D.line(first)
+  local acc, total, prev_end = { head }, #head, head:sub(-1)
+  local at = total
   for l = first + 1, last do
     local s = D.line(l)
-    at = #acc
+    at = total
     if spaces then
       s = s:gsub("^[ \t]+", "")
-      local prev_end = acc:sub(-1)
-      if s ~= "" and s:sub(1, 1) ~= ")" and #acc > 0 and prev_end ~= "\t" then
-        if prev_end ~= " " then
-          acc = acc .. " "
-        end
+      if s ~= "" and s:sub(1, 1) ~= ")" and total > 0 and prev_end ~= "\t" and prev_end ~= " " then
+        acc[#acc + 1] = " "
+        total = total + 1
       end
     end
-    acc = acc .. s
+    if s ~= "" then
+      acc[#acc + 1] = s
+      total = total + #s
+      prev_end = s:sub(-1)
+    end
   end
-  D.replace(P(first, 0), P(last, D.len(last)), acc)
+  D.replace(P(first, 0), P(last, D.len(last)), table.concat(acc))
   D.set_cursor(D.on_char(P(first, at)))
   return true
 end
@@ -332,9 +372,10 @@ end
 
 -- put pastes the register name (nil: the unnamed one) count times, before the caret or
 -- after it. With after_text (gp, gP) the caret ends after the new text. The text of the
--- system clipboard cannot be read, so for "+ and "* the editor's own paste runs.
-function M.put(name, count, before, after_text)
-  if Reg.is_clip(name) then
+-- system clipboard cannot be read, so for "+ and "* the editor's own paste runs. value ({text=,
+-- kind=}) is put instead of a register: the text of a paste.
+function M.put(name, count, before, after_text, value)
+  if value == nil and Reg.is_clip(name) then
     if not before then
       local cur = D.cursor()
       local s = D.line(cur.line)
@@ -348,7 +389,7 @@ function M.put(name, count, before, after_text)
     end
     return
   end
-  local v = Reg.get(name)
+  local v = value or Reg.get(name)
   if not v then
     D.fail("E353: Nothing in register " .. (name or '"'))
   end

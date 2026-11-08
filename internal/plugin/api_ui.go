@@ -200,6 +200,21 @@ func (p *plugin) validator(fn *lua.LFunction) func(string) error {
 	}
 }
 
+// uiMaxHistory is how many answers of the history option an input prompt keeps.
+const uiMaxHistory = 100
+
+// historyFromLua reads the history option: the last uiMaxHistory strings of the list.
+func historyFromLua(t *lua.LTable) []string {
+	n := t.Len()
+	var out []string
+	for i := max(1, n-uiMaxHistory+1); i <= n; i++ {
+		if s, ok := t.RawGetInt(i).(lua.LString); ok {
+			out = append(out, clipText(string(s), uiMaxText))
+		}
+	}
+	return out
+}
+
 // changeCallback makes the OnChange closure of an input prompt: it only queues a callback
 // task; the ui drains the runtime afterwards.
 func (p *plugin) changeCallback(fn *lua.LFunction) func(string) {
@@ -226,6 +241,14 @@ func awaitInput(c *awaitCall) {
 		spec.Default = clipText(def, uiMaxText)
 	}
 	validate, onChange := optFunc(&o, "validate"), optFunc(&o, "on_change")
+	if hv := o.get("history"); hv != lua.LNil {
+		tbl, ok := hv.(*lua.LTable)
+		if !ok {
+			c.Bad(1, "input", "option 'history': table of strings expected")
+			return
+		}
+		spec.History = historyFromLua(tbl)
+	}
 	if o.err != "" {
 		c.Bad(1, "input", o.err)
 		return

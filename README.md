@@ -283,6 +283,25 @@ Known limits:
   is no hot reload.
 - The page listens on loopback only and has no authentication.
 
+## Language servers
+
+gvim starts a language server by itself, as Fresh does: it has a built-in table of servers, and a
+file of a language opens its server when the program is on `PATH` (`gopls`, `rust-analyzer`,
+`pylsp`, `typescript-language-server`, `clangd` and about fifty more). When the program is missing
+the status row says which one and how to install it, once per language. Override or turn off a
+server per language, or all of them, in `~/.config/gvim/config.json` or the project's
+`.gvim/config.json`:
+
+```json
+{ "lsp": { "python": { "command": "pyright-langserver", "args": ["--stdio"] }, "rust": { "enabled": false } } }
+```
+
+`"lsp_enabled": false` turns every server off. See `docs/lsp.md` for the table, the messages and what
+the servers add (diagnostics, Format Buffer through the server, and the rest).
+
+Rename (F2) edits every file the server returns. Files that are not open are opened in new tabs, edited
+and left unsaved, like the open ones. Save them with Save All.
+
 ## Lua plugins
 
 gvim runs plugins written in Lua 5.1 on `github.com/yuin/gopher-lua` (pure Go). The old

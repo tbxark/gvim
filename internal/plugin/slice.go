@@ -42,6 +42,11 @@ type slice struct {
 
 	pausedFlag atomic.Bool // read by the heap guard goroutine
 	done       chan struct{}
+
+	// obj0 and live0 are the heap when the slice began, read there and not when the guard
+	// goroutine starts: what a slice allocates before the guard looks is still its growth.
+	// live0 starts as an upper bound and the first collection that confirms nothing lowers it.
+	obj0, live0 uint64
 }
 
 // newSlice starts a slice under parent with the given Lua-time budget.
@@ -49,6 +54,11 @@ func (r *Runtime) newSlice(parent context.Context, budget time.Duration) *slice 
 	ctx, cancel := context.WithCancelCause(parent)
 	now := time.Now()
 	s := &slice{r: r, ctx: ctx, cancel: cancel, budget: budget, start: now, armedAt: now, done: make(chan struct{})}
+	s.obj0, s.live0 = readHeap()
+	// The live size of the last collection is stale: whatever the process allocated and kept
+	// since (a file being loaded) is not in it, and the confirming collection would count that
+	// as the plugin's growth. The allocated objects are an upper bound of what is live now.
+	s.live0 = max(s.live0, s.obj0)
 	s.timer = time.AfterFunc(budget, func() { cancel(errSliceDeadline) })
 	s.hard = time.AfterFunc(budget*hardFactor, func() { cancel(errHardDeadline) })
 	s.guardStart = time.AfterFunc(guardStartAfter, s.runGuard)
@@ -116,6 +126,31 @@ func readHeap() (objects, live uint64) {
 	return
 }
 
+// heapRunaway forces a collection and, while it runs, goes on sampling: the slice is
+// cancelled as soon as the allocated objects are more than ceiling over obj0, because the
+// goroutine of the slice does not stop for the collection. It reports whether it cancelled
+// the slice or the slice ended meanwhile, and false when the collection finished.
+func (s *slice) heapRunaway(obj0, ceiling uint64, tick <-chan time.Time) bool {
+	collected := make(chan struct{})
+	go func() {
+		runtime.GC()
+		close(collected)
+	}()
+	for {
+		if obj, _ := readHeap(); obj > obj0 && obj-obj0 > ceiling {
+			s.cancel(errMemory)
+			return true
+		}
+		select {
+		case <-s.done:
+			return true
+		case <-collected:
+			return false
+		case <-tick:
+		}
+	}
+}
+
 // maxGuardGCs bounds the forced collections of one slice.
 const maxGuardGCs = 8
 
@@ -137,7 +172,7 @@ func (s *slice) runGuard() {
 		return
 	default:
 	}
-	obj0, live0 := readHeap()
+	obj0, live0 := s.obj0, s.live0
 	threshold := func() uint64 { return max(uint64(s.r.heapLimit), live0/2) }
 	tick := time.NewTicker(guardSampleEvery)
 	defer tick.Stop()
@@ -158,7 +193,13 @@ func (s *slice) runGuard() {
 		if gcs++; gcs > maxGuardGCs {
 			return
 		}
-		runtime.GC()
+		// Garbage cannot explain more than the live heap on top of the limit (the GC runs
+		// when the heap has doubled), so this much new allocation is runaway growth, and
+		// the slice is cancelled without waiting for the collection that would confirm it.
+		ceiling := limit + live0
+		if s.heapRunaway(obj0, ceiling, tick.C) {
+			return
+		}
 		obj1, live := readHeap()
 		if live > live0 && live-live0 > limit {
 			s.cancel(errMemory)

@@ -1,6 +1,9 @@
 package editor
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -138,6 +141,66 @@ func TestRulersAddOnceAndRemove(t *testing.T) {
 	}
 	if err := run("remove_ruler", 7); err == nil {
 		t.Fatal("remove_ruler of a missing column succeeded, want an error")
+	}
+}
+
+// The configured rulers start every buffer, as Fresh seeds them ("Rulers are per-buffer.
+// The rulers config setting can also set default rulers"), so a buffer can remove one.
+func TestConfigRulersSeedEveryBuffer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	first := filepath.Join(dir, "a.txt")
+	second := filepath.Join(dir, "b.txt")
+	for _, p := range []string{first, second} {
+		if err := os.WriteFile(p, []byte("abc\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := New(Options{})
+	e.SetRulers([]int{20, 40})
+	if err := e.OpenFile(first); err != nil {
+		t.Fatal(err)
+	}
+	rulers := func() []int { return e.Active().ViewSettings().Rulers }
+	if got := rulers(); !slices.Equal(got, []int{20, 40}) {
+		t.Fatalf("first buffer rulers = %v, want the configured [20 40]", got)
+	}
+	if err := e.Do("remove_ruler", map[string]any{"column": 20}).Err; err != nil {
+		t.Fatalf("remove_ruler of a configured column: %v", err)
+	}
+	if got := rulers(); !slices.Equal(got, []int{40}) {
+		t.Fatalf("after remove_ruler rulers = %v, want [40]", got)
+	}
+	if err := e.OpenFile(second); err != nil {
+		t.Fatal(err)
+	}
+	if got := rulers(); !slices.Equal(got, []int{20, 40}) {
+		t.Fatalf("second buffer rulers = %v, want [20 40]: the removal is per buffer", got)
+	}
+	if err := e.Do("reset_buffer_settings", nil).Err; err != nil {
+		t.Fatal(err)
+	}
+	if got := rulers(); !slices.Equal(got, []int{20, 40}) {
+		t.Fatalf("after reset rulers = %v, want the configured [20 40] back", got)
+	}
+	id := e.NewVirtual(VirtualOptions{Name: "list", Text: "x\n"})
+	d, _, err := e.docByID(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.ViewSettings().Rulers; len(got) != 0 {
+		t.Fatalf("virtual buffer rulers = %v, want none (Fresh draws no rulers on virtual buffers)", got)
+	}
+}
+
+// The editor opens with an empty buffer, which exists before the config is read, so the
+// configured rulers reach it too.
+func TestConfigRulersReachTheStartingBuffer(t *testing.T) {
+	t.Parallel()
+	e := New(Options{})
+	e.SetRulers([]int{20})
+	if got := e.Active().ViewSettings().Rulers; !slices.Equal(got, []int{20}) {
+		t.Fatalf("starting buffer rulers = %v, want the configured [20]", got)
 	}
 }
 

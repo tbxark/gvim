@@ -32,12 +32,14 @@ const (
 	hitStatusPlugin
 )
 
-// The Index of a hitStatusSegment target: the line ending, the encoding or the language
-// of the status row.
+// The Index of a hitStatusSegment target: the line ending, the encoding, the language or
+// the caret position of the status row.
 const (
 	statusSegmentEOL = iota
 	statusSegmentEncoding
 	statusSegmentLanguage
+	statusSegmentPosition // the line and column of the caret: opens Go to Line
+	statusSegmentLSP      // the state of the language server: shows its status
 )
 
 // hitTarget is the result of a hit test. Index depends on Kind. Menu labels,
@@ -62,6 +64,9 @@ func (l layout) hit(x, y int) hitTarget {
 	}
 	if l.statusOn && y == l.statusY {
 		return hitRuns(l.status, x, none)
+	}
+	if l.onNotice(x, y) {
+		return none // the notice band covers the body rows under it
 	}
 	if l.menuOn && y == 0 {
 		return hitRuns(l.menuRuns, x, none)
@@ -155,4 +160,20 @@ func (l layout) hitWelcome(x, y int) hitTarget {
 		}
 	}
 	return hitTarget{Kind: hitNone}
+}
+
+// onNotice reports whether cell (x, y) is on the notice band, the rows that a long
+// status message covers above the status row. The band starts at the editor's left edge,
+// so the explorer beside it is not covered.
+func (l layout) onNotice(x, y int) bool {
+	return !l.gated && len(l.notice) > 0 && x >= l.noticeX && x < l.w && y >= l.noticeY && y < l.statusY
+}
+
+// bandTop is the first row the notice band covers, or the frame height when there is
+// no band.
+func (l layout) bandTop() int {
+	if len(l.notice) == 0 {
+		return l.h
+	}
+	return l.noticeY
 }

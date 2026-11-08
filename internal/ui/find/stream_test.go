@@ -84,7 +84,6 @@ func TestStreamStatusShowsProgressThenTheCount(t *testing.T) {
 		{"none", StreamInfo{Done: true}, "No matches"},
 		{"capped", StreamInfo{Done: true, Count: 100000, Capped: true}, "100,000+ matches"},
 		{"partial", StreamInfo{Done: true, Count: 0, Partial: true}, "No matches (line index not complete: only the part indexed was searched)"},
-		{"long lines", StreamInfo{Done: true, Count: 0, Truncated: true}, "No matches (some lines over 1 MiB were not fully searched)"},
 		{"error", StreamInfo{Err: errors.New("bad pattern")}, "bad pattern"},
 	}
 	for _, tc := range tests {

@@ -67,7 +67,7 @@ func (m *Model) pluginUIAction(action string) tea.Cmd {
 	case "load_plugin_from_buffer":
 		return m.loadPluginFromBuffer()
 	case "init_check":
-		return m.pluginControl(pluginapi.Control{Op: "init_check"})
+		return m.pluginControl(m.initCheckControl())
 	case "init_reload":
 		return m.pluginControl(pluginapi.Control{Op: "init_reload"})
 	case "init_edit":

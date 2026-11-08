@@ -2,13 +2,18 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
-// tourSlide is one slide of the built-in tour. Its lines are static text about the
-// screen, and each line fits an 80 column frame.
+// tourSlide is one slide of the built-in tour. Its lines are text about the screen. A
+// {action} in a line stands for the shortcut of that action in the active keymap, or for
+// its palette command when the keymap gives it none (see tourText), so the tour is right for
+// every keymap. A line that grows past the box wraps.
 type tourSlide struct {
 	title string
 	lines []string
@@ -21,28 +26,48 @@ var tourSlides = []tourSlide{
 		"Right or Enter steps forward, Left steps back, and Esc closes the tour.",
 	}},
 	{"Tabs and files", []string{
-		"Each open file has a tab across the top. Ctrl+N starts a new file.",
-		"Alt+W closes the tab. Ctrl+PageUp and Ctrl+PageDown move between tabs.",
-		"Ctrl+O opens a file in the browser, and Ctrl+S saves the current one.",
+		"Each open file has a tab across the top. {new} starts a new file.",
+		"{close_tab} closes the tab. {next_buffer} and {prev_buffer} move between tabs.",
+		"{open} opens a file in the browser, and {save} saves the current one.",
 	}},
 	{"File explorer", []string{
-		"Ctrl+B shows or hides the file explorer on the left.",
-		"Ctrl+E moves the focus to it. Enter opens the selected file.",
-		"F2 renames the selected entry, and Delete moves it to the trash.",
+		"{toggle_file_explorer} shows or hides the file explorer on the left.",
+		"{focus_file_explorer} moves the focus to it. Enter opens the selected file.",
+		"{file_explorer_rename} renames the selected entry, and {file_explorer_delete} moves it to the trash.",
 	}},
 	{"Quick open", []string{
-		"Ctrl+P opens the palette. Type a file name to open that file.",
+		"{quick_open} opens the palette. Type a file name to open that file.",
 		"Type > for commands, : for a line number, and # for an open tab.",
 	}},
 	{"Find and replace", []string{
-		"Ctrl+F searches the current file, and F3 jumps to the next match.",
-		"Ctrl+R opens replace. Alt+A starts a search and replace.",
+		"{search} searches the current file, and {find_next} jumps to the next match.",
+		"{replace} opens replace, and {goto_line} goes to a line.",
 	}},
 	{"Help and settings", []string{
-		"F1 lists the keyboard shortcuts of the active keymap.",
-		"F10 opens the menu bar. Edit > Settings... lists the effective settings.",
-		"Ctrl+Alt+N and Ctrl+Alt+P step through this tour from the editor.",
+		"{show_help} lists the keyboard shortcuts of the active keymap.",
+		"The menus open with a click. Edit > Settings... lists the effective settings.",
+		"Edit > Keybinding Editor... changes a shortcut and saves it to the config.",
 	}},
+}
+
+// tourTextWidth is the widest a line of the tour is drawn: the box less its borders and padding.
+const tourTextWidth = boxMaxWidth - 4
+
+// tourToken matches the {action} placeholders of a tour line.
+var tourToken = regexp.MustCompile(`\{([a-z_]+)\}`)
+
+// tourText writes a tour line for the active keymap: each {action} becomes the action's
+// shortcut as every other label shows it, or, when the keymap binds it to nothing, the name
+// of its palette command in quotes, so the line still tells the reader what to do.
+func (m *Model) tourText(line string) string {
+	describe := m.actionDescriber()
+	return tourToken.ReplaceAllStringFunc(line, func(tok string) string {
+		action := tok[1 : len(tok)-1]
+		if key := m.shortcutOf(action); key != "" {
+			return key
+		}
+		return `"` + describe(action) + `" in the palette`
+	})
 }
 
 // tourFooter is the last row of the tour box.
@@ -64,7 +89,13 @@ func (m *Model) openTour(slide int) {
 	v.content = func() (string, []string, string) {
 		s := tourSlides[st.slide]
 		title := fmt.Sprintf("Tour: %s (%d of %d)", s.title, st.slide+1, len(tourSlides))
-		return title, s.lines, tourFooter
+		var lines []string
+		for _, l := range s.lines {
+			// A shortcut can be long (a sequence) and a palette command longer, so a line
+			// wraps to the box instead of losing its end.
+			lines = append(lines, strings.Split(ansi.Wrap(m.tourText(l), tourTextWidth, ""), "\n")...)
+		}
+		return title, lines, tourFooter
 	}
 	v.onKey = func(k tea.Key) bool {
 		switch k.Keystroke() {

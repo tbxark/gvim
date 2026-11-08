@@ -23,9 +23,13 @@ type logRing struct {
 	mu      sync.Mutex
 	entries []pluginapi.LogEntry
 	start   int
+	sink    func(pluginapi.LogEntry) // Options.LogSink
 }
 
 func (l *logRing) add(e pluginapi.LogEntry) {
+	if l.sink != nil {
+		l.sink(e)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if len(l.entries) < maxLogRing {

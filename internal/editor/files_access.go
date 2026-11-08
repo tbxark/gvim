@@ -3,7 +3,6 @@ package editor
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -40,14 +39,9 @@ func libraryPath(path string) bool {
 }
 
 // unwritable reports whether the file at path exists and cannot be opened for
-// writing by this process. Opening it does not change it.
+// writing by this process. It does not change the file.
 func unwritable(path string) bool {
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
-	if err == nil {
-		_ = f.Close()
-		return false
-	}
-	return errors.Is(err, fs.ErrPermission)
+	return errors.Is(writeAccess(path), fs.ErrPermission)
 }
 
 // loadDocument reads path as readDocument does. With autoRO set (the

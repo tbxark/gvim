@@ -127,9 +127,11 @@ func TestBarRowFixture(t *testing.T) {
 	}
 }
 
-func TestBarRowCutAtNarrowWidth(t *testing.T) {
+// TestBarRowMarksTheLabelsCutAtNarrowWidth: Edit does not fit in 10 columns, so it is
+// replaced by the overflow marker in the last column, not cut in half.
+func TestBarRowMarksTheLabelsCutAtNarrowWidth(t *testing.T) {
 	rows := paintRows(newBar(allOn(), 10, 4))
-	if got := strings.TrimRight(rows[0], " "); got != " File   Ed" {
+	if got := strings.TrimRight(rows[0], " "); got != " File    "+moreTitle {
 		t.Fatalf("narrow bar row = %q", got)
 	}
 }
@@ -150,7 +152,7 @@ func TestDropdownFixture(t *testing.T) {
 	if !strings.HasPrefix(rows[1], "╭") {
 		t.Fatalf("top border row = %q", rows[1])
 	}
-	if !strings.HasPrefix(rows[2], "│ New File") || !strings.Contains(rows[2], "⌃N") {
+	if !strings.HasPrefix(rows[2], "│ New File") || strings.Contains(rows[2], "⌃") {
 		t.Fatalf("first row = %q", rows[2])
 	}
 	if !strings.HasPrefix(rows[4], "│") || strings.Contains(rows[4], "New File") {
@@ -284,26 +286,49 @@ func TestEnterOnDisabledRowDoesNothing(t *testing.T) {
 	}
 }
 
-func TestSubmenuRowReportsUnsupported(t *testing.T) {
+// Copy with Formatting is a submenu that Fresh fills at run time with one row per
+// theme. Enter opens it, and a row runs copy_with_theme with that theme.
+func TestCopyWithFormattingOpensOneRowPerTheme(t *testing.T) {
 	p := allOn()
 	m := newBar(p, 60, 30).Activate().move(1) // Edit
-	// Edit: Undo, Redo, separator, Cut, Copy, Copy with Formatting (submenu).
 	for range 4 {
 		m, _ = send(m, keyMsg("down"))
 	}
 	if m.Rows()[m.Selected()].Label != "Copy with Formatting" {
 		t.Fatalf("selected %q, want the submenu row", m.Rows()[m.Selected()].Label)
 	}
-	_, cmd := send(m, keyMsg("enter"))
-	if cmd == nil {
-		t.Fatal("submenu row returned no failure command")
+	m, cmd := send(m, keyMsg("enter"))
+	if cmd != nil || !m.SubOpen() {
+		t.Fatalf("Enter on Copy with Formatting: submenu open %v, cmd %v", m.SubOpen(), cmd != nil)
+	}
+	var got []string
+	for _, r := range m.SubRows() {
+		got = append(got, r.Label)
+	}
+	if want := theme.Names(); !slices.Equal(got, want) {
+		t.Fatalf("submenu rows = %v, want the themes %v", got, want)
+	}
+	m, _ = send(m, keyMsg("enter"))
+	if want := []string{CopyThemePrefix + theme.Names()[0]}; !slices.Equal(p.ran, want) {
+		t.Fatalf("ran %v, want %v", p.ran, want)
+	}
+	if m.IsOpen() {
+		t.Fatal("running a theme row left the menu open")
+	}
+}
+
+func TestSubmenuWithoutRowsReportsUnsupported(t *testing.T) {
+	m := newBar(allOn(), 60, 30)
+	m.title = "File"
+	m.rows = []Row{{Label: "Empty", Submenu: true}}
+	m.selected = 0
+	m2, cmd := send(m, keyMsg("enter"))
+	if cmd == nil || m2.IsOpen() {
+		t.Fatalf("a submenu row with no children: cmd %v, open %v", cmd != nil, m2.IsOpen())
 	}
 	msg, ok := cmd().(Failed)
-	if !ok || msg.Label != "Copy with Formatting" || !errors.Is(msg.Err, ErrUnsupported) {
+	if !ok || msg.Label != "Empty" || !errors.Is(msg.Err, ErrUnsupported) {
 		t.Fatalf("failure = %#v", cmd())
-	}
-	if len(p.ran) != 0 {
-		t.Fatalf("submenu row called Run with %v", p.ran)
 	}
 }
 
@@ -456,14 +481,17 @@ func TestDropdownIsClippedToTheFrame(t *testing.T) {
 	if len(rows) != 6 {
 		t.Fatalf("rows = %d", len(rows))
 	}
-	if !strings.HasPrefix(rows[5], "╰") {
-		t.Fatalf("bottom border is not on the last row inside the frame: %q", rows[5])
+	// The last row is the status row, so the bottom border is the row above it.
+	if !strings.HasPrefix(rows[4], "╰") {
+		t.Fatalf("bottom border is not on the row above the status row: %q", rows[4])
 	}
-	if strings.Contains(rows[5], "⌃Q") {
-		t.Fatalf("a row was drawn over the bottom border: %q", rows[5])
+	if strings.TrimSpace(rows[5]) != "" {
+		t.Fatalf("the dropdown drew on the status row: %q", rows[5])
+	}
+	if strings.Contains(rows[4], "⌃Q") {
+		t.Fatalf("a row was drawn over the bottom border: %q", rows[4])
 	}
 }
-
 func TestTinyFrameDoesNotPanic(t *testing.T) {
 	for _, size := range [][2]int{{1, 1}, {3, 3}, {4, 2}} {
 		m := newBar(allOn(), size[0], size[1]).Activate()

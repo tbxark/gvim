@@ -326,3 +326,60 @@ func TestFindNextConcurrentWithEditsAndIndex(t *testing.T) {
 		t.Errorf("concurrent search = %+v, repeat = %+v", got, again)
 	}
 }
+
+// TestFindNextAtContinuesWhereTheBudgetRanOut checks that a match farther than one
+// budget is reached by passing the returned cursor back, in both directions, with
+// and without the wrap, and that each call reads about one budget.
+func TestFindNextAtContinuesWhereTheBudgetRanOut(t *testing.T) {
+	t.Parallel()
+	const n = 4000
+	q := Query{Text: "needle"}
+
+	tests := []struct {
+		name string
+		from buffer.Pos
+		dir  Dir
+		want int // the line of the match, which is far from from in the direction of travel
+	}{
+		{"forward", buffer.Pos{}, Forward, n - 2},
+		{"forward through the wrap", buffer.Pos{Line: n - 1}, Forward, n - 3},
+		{"backward", buffer.Pos{Line: n - 1}, Backward, 3},
+		{"backward through the wrap", buffer.Pos{Line: 1}, Backward, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, src := largeBuffer(t, numbered(n, tt.want))
+			snap := b.Snapshot()
+			defer snap.Release()
+			budget := src.Size() / 8
+			var at Cursor
+			for call := 1; call <= 20; call++ {
+				before := b.Stats().ReadBytes
+				m, found, scanned, next, err := findNextAt(snap, q, tt.from, tt.dir, budget, 64, at)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if read := b.Stats().ReadBytes - before; read > 2*budget {
+					t.Errorf("call %d read %d bytes for a budget of %d", call, read, budget)
+				}
+				if found {
+					if !scanned || m.Start.Line != tt.want {
+						t.Fatalf("found %v scanned %v after %d calls, want line %d", m, scanned, call, tt.want)
+					}
+					if call == 1 {
+						t.Fatalf("the first call found the match, so the budget %d did not limit it", budget)
+					}
+					return
+				}
+				if scanned {
+					t.Fatalf("call %d searched the whole document and found nothing", call)
+				}
+				if next == at {
+					t.Fatalf("call %d made no progress: cursor stayed %+v", call, at)
+				}
+				at = next
+			}
+			t.Fatal("the match was not reached in 20 calls")
+		})
+	}
+}

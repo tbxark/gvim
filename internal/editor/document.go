@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -41,12 +42,19 @@ type Document struct {
 	foldMemo foldMemo
 	// changesMemo is the change marks computed last, see MemoChanges.
 	changesMemo changesMemo
+	// valueMemo holds what MemoValue kept for the current text.
+	valueMemo valueMemo
+	// longMemo is the answer HasLongLine gave last.
+	longMemo longMemo
 
 	// saved is the text as it was at open or the last save. It is the only
 	// saved-state record: SavedLines and LinesChangedSinceSave read it.
 	saved string
 	// savedGen changes whenever saved is set. See setSaved.
 	savedGen uint64
+	// savedSplit is saved split into lines, kept for the savedGen it was split at, so
+	// that the change marks of a big document do not split the text on every edit.
+	savedSplit splitMemo
 	// encoding is the label of the encoding the saved text is written in (see
 	// encodingLabel). It is computed on open, on save and on set_encoding so
 	// that rendering never scans the text.
@@ -72,9 +80,15 @@ type Document struct {
 	// language is the lexer name the UI set with SetLanguage. It is cleared
 	// when the path changes, because the lexer depends on the file name.
 	language string
+	// revertAuto is set while ApplyRevert applies an automatic reload (RevertPlan.Auto), so
+	// that the status it leaves says "Reloaded".
+	revertAuto bool
 	// status is the message shown while this tab is active. Each tab keeps its
 	// own, so switching tabs never shows another tab's message.
 	status string
+	// statusErr is the status text when the status is an error. It equals status only
+	// while the message is that error, so a later message is not taken for one.
+	statusErr string
 	// saveNote is what the status says after the last save of a document that is not large,
 	// in place of "Saved", or empty. See savedStatus.
 	saveNote string
@@ -157,6 +171,68 @@ func (d *Document) MemoChanges(compute func() (bar, scroll map[int]bool)) (bar, 
 	return d.changesMemo.bar, d.changesMemo.scroll
 }
 
+// MemoValue returns the value kept for key, or calls compute and keeps what it returns.
+// The values are dropped when the text changes, so a caller keeps what it worked out
+// from the text, such as the layout of a long line, across the repaints and the queries
+// of a single edit. At most memoValues are kept.
+func (d *Document) MemoValue(key any, compute func() any) any {
+	m := &d.valueMemo
+	if ver := (changesKey{gen: d.Gen(), ver: d.Buffer.Version()}); m.vals == nil || m.key != ver || len(m.vals) >= memoValues {
+		m.key, m.vals = ver, make(map[any]any)
+	}
+	v, ok := m.vals[key]
+	if !ok {
+		v = compute()
+		m.vals[key] = v
+	}
+	return v
+}
+
+// HasLongLine reports whether any line of the document has more than limit runes. A large
+// document answers false: its lines are read through windows already. The answer is kept
+// until the text changes, so the pane may ask on every frame.
+func (d *Document) HasLongLine(limit int) bool {
+	if d.large != nil {
+		return false
+	}
+	m := &d.longMemo
+	key := changesKey{gen: d.Gen(), ver: d.Buffer.Version()}
+	if !m.ok || m.key != key || m.limit != limit {
+		m.has = false
+		for i := range d.Buffer.Lines() {
+			if d.Buffer.LineLen(i) > limit {
+				m.has = true
+				break
+			}
+		}
+		m.key, m.limit, m.ok = key, limit, true
+	}
+	return m.has
+}
+
+// longMemo is the answer of HasLongLine for the text of version key.
+type longMemo struct {
+	ok, has bool
+	key     changesKey
+	limit   int
+}
+
+// memoValues is how many values MemoValue keeps for one text: a screenful and some.
+const memoValues = 256
+
+// valueMemo is the values MemoValue keeps for the text of version key.
+type valueMemo struct {
+	key  changesKey
+	vals map[any]any
+}
+
+// splitMemo is the saved text split into lines.
+type splitMemo struct {
+	ok    bool
+	gen   uint64
+	lines []string
+}
+
 type changesKey struct{ gen, ver, saved uint64 }
 
 // changesMemo is the change marks MemoChanges computed last.
@@ -172,10 +248,31 @@ type changesMemo struct {
 // An unnamed, unsaved buffer has the single empty line [""]. A large document does
 // not keep its saved text, so it returns nil.
 func (d *Document) SavedLines() []string {
+	return slices.Clone(d.SavedLinesShared())
+}
+
+// SavedLinesShared is SavedLines without the copy: the slice is kept by the document, so
+// the caller must not change it, and it is only good until the saved text changes. The pane
+// reads it on every frame, and a copy of a big document's lines is a megabyte.
+func (d *Document) SavedLinesShared() []string {
 	if d.large != nil {
 		return nil
 	}
-	return strings.Split(d.saved, "\n")
+	if m := &d.savedSplit; !m.ok || m.gen != d.savedGen {
+		m.lines, m.gen, m.ok = strings.Split(d.saved, "\n"), d.savedGen, true
+	}
+	return d.savedSplit.lines
+}
+
+// EditedLines returns the lines [lo, hi) that may differ from the saved text: the lines
+// before lo and from hi on are the saved ones, counted from the start and from the end of
+// the text. ok is false for a large document, which holds no saved text. See
+// buffer.Buffer.EditedLines.
+func (d *Document) EditedLines() (lo, hi int, ok bool) {
+	if d.large != nil {
+		return 0, 0, false
+	}
+	return d.Buffer.EditedLines()
 }
 
 // LinesChangedSinceSave returns the 0-based indexes of lines whose content
@@ -404,7 +501,26 @@ func (d *Document) deleteSelection() bool {
 
 // Encoding reports the encoding of the saved text, such as "UTF-8", "ASCII" (utf-8
 // text with no byte above 0x7f), "Windows-1252" or "UTF-16 LE". See encodingLabel.
-func (d *Document) Encoding() string { return d.encoding }
+//
+// The utf-8 labels of a document with a path follow its text as it is edited, because
+// the buffer counts its non-ASCII runes. A large document keeps the label it had at
+// open and save, and can only go from ASCII to UTF-8 as text is typed into it. An
+// untitled document keeps "UTF-8".
+func (d *Document) Encoding() string {
+	if d.codecName() != defaultCodec || d.Path == "" {
+		return d.encoding
+	}
+	if d.large != nil {
+		if d.encoding == "ASCII" && d.Buffer.NonASCII() {
+			return "UTF-8"
+		}
+		return d.encoding
+	}
+	if d.Buffer.NonASCII() {
+		return "UTF-8"
+	}
+	return "ASCII"
+}
 
 // LineEnding is "LF" or "CRLF", the ending of the saved text. It is detected
 // when the file is opened, and a new document takes Options.DefaultLineEnding.

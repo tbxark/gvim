@@ -20,7 +20,9 @@ import (
 // shutdownSignals end the program the way a quit does: the session and the unsaved text are
 // saved before the process exits. SIGHUP is the closing of the terminal window and SIGTERM
 // is a plain kill, and either would otherwise end the process with the unsaved text lost.
-var shutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+// SIGQUIT would make the Go runtime dump the goroutines and exit without restoring the
+// terminal.
+var shutdownSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals...)

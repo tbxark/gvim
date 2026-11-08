@@ -66,8 +66,9 @@ type Client struct {
 	diagMu    sync.Mutex
 	diagByURI map[string]DiagnosticsEvent
 
-	// proc is set only by Start.
-	proc *exec.Cmd
+	// proc is set only by Start. stderr holds the tail of its error output.
+	proc   *exec.Cmd
+	stderr *tailBuffer
 
 	closeOnce sync.Once
 	closeErr  error
@@ -84,7 +85,18 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, err
 	}
 
-	cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...) //nolint:gosec // the caller chooses the server command
+	// The program is looked up here, so a server that is not installed is told apart from
+	// one that failed, and nothing is launched for it. Start runs in a command, never in
+	// the update loop, so the PATH search is off the loop.
+	path, err := exec.LookPath(cfg.Command[0])
+	if err != nil {
+		return nil, &NotInstalledError{Command: cfg.Command[0]}
+	}
+	cmd := exec.Command(path, cfg.Command[1:]...) //nolint:gosec // the caller chooses the server command
+	stderr := &tailBuffer{max: stderrKeep}
+	cmd.Stderr = stderr
+	// A grandchild that keeps the error pipe open must not keep Close waiting.
+	cmd.WaitDelay = killGrace
 	if cfg.Env != nil {
 		cmd.Env = append(os.Environ(), cfg.Env...)
 	}
@@ -105,7 +117,18 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 
 	c := NewClient(procPipes{r: stdout, w: stdin}, cfg)
 	c.proc = cmd
+	c.stderr = stderr
 	return c, nil
+}
+
+// stderrKeep is how much of a server's error output the client keeps.
+const stderrKeep = 8 << 10
+
+// StderrTail returns the last lines of what the server process wrote to its error output,
+// for the message of a server that failed. It is empty for a client that was not launched by
+// Start. Call it after Close to be sure the process has written all it had.
+func (c *Client) StderrTail() string {
+	return c.stderr.tail(4, 400)
 }
 
 // NewClient wraps rwc as a connection to a server and starts the read loop. The

@@ -63,3 +63,38 @@ func TestBuildModelDiffOpensTheCompareView(t *testing.T) {
 		t.Fatal("the model is not in the compare view after --diff")
 	}
 }
+
+// TestBuildRuntimeDiffSurvivesRecoveredTabs checks that crash recovery, which adds tabs
+// after the files of the command line, does not make --diff refuse to start: the compare
+// view opens on the two files that were asked for, and the recovered tab stays after them.
+func TestBuildRuntimeDiffSurvivesRecoveredTabs(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	a, b, c := filepath.Join(dir, "a.txt"), filepath.Join(dir, "b.txt"), filepath.Join(dir, "c.txt")
+	writeTestFile(t, a, "one\n")
+	writeTestFile(t, b, "two\n")
+	writeTestFile(t, c, "three\n")
+	sessDir := filepath.Join(dir, "session")
+
+	crashed := newSessionEditor()
+	must(t, crashed.OpenFile(c))
+	crashed.Do("insert_char", map[string]any{"text": "Z"})
+	must(t, newRecoveryWriter(crashed, recoveryDir(sessDir)).Plan()())
+
+	opts := projectRoot(t, "")
+	opts.SessionDir = sessDir
+	opts.Diff = true
+	opts.Files = []FileTarget{{Path: a}, {Path: b}}
+	rt, err := buildRuntime(t.Context(), opts, true)
+	if err != nil {
+		t.Fatalf("buildRuntime() with a recovered tab: %v", err)
+	}
+	t.Cleanup(rt.close)
+	if !rt.model.Comparing() {
+		t.Fatal("the model is not in the compare view")
+	}
+	names, _ := tabNames(rt.ed)
+	if len(names) != 3 || names[0] != "a.txt" || names[1] != "b.txt" {
+		t.Fatalf("tabs %v, want a.txt and b.txt first, then the recovered tab", names)
+	}
+}

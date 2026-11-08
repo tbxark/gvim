@@ -293,10 +293,10 @@ func TestReplaceActionTypesIntoTheSearchRowFirst(t *testing.T) {
 	}
 }
 
-func TestQueryReplaceFromAFreshCtrlAltR(t *testing.T) {
+func TestQueryReplaceFromAFreshBar(t *testing.T) {
 	t.Parallel()
 	m, sf := newDefaultSearchModel(t, "x x")
-	press(m, ctrlAlt('r'))
+	doAction(m, "query_replace")
 	press(m, typed("x"))
 	press(m, special(tea.KeyEnter)) // to the replacement row
 	press(m, typed("y"))

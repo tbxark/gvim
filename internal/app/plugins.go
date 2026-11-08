@@ -61,6 +61,7 @@ func newPluginRuntime(a editorAdapter, cfg config.Config, opts Options, preset *
 			OS:       osys,
 			Services: pluginServices{},
 			Version:  gvimVersion(),
+			LogSink:  opts.pluginLog,
 			Loader:   ld,
 		}),
 		edit: newPluginEditor(a),
@@ -113,6 +114,18 @@ func gvimVersion() string {
 // still returned with the rest, so one bad binding does not unbind the others. If the
 // user's own layer cannot be applied there is no map.
 func pluginKeymap(preset *keymap.Map, cfg config.Config, bs []pluginapi.Binding) (*keymap.Map, error) {
+	km, err := pluginLayer(preset, bs)
+	if km == nil {
+		return nil, err
+	}
+	return keymapWithOverrides(km, cfg), err
+}
+
+// pluginLayer is the preset with the plugins' key bindings layered over it, and without the
+// user's keybindings. The keybinding editor previews its pending list over this layer, so a
+// plugin's binding stays in the table while the list is being changed. pluginKeymap is this
+// layer plus the saved user keybindings.
+func pluginLayer(preset *keymap.Map, bs []pluginapi.Binding) (*keymap.Map, error) {
 	var dropped []string
 	var order []string // plugins, in the order of their first binding
 	groups := map[string][]bindingEntry{}
@@ -159,10 +172,6 @@ func pluginKeymap(preset *keymap.Map, cfg config.Config, bs []pluginapi.Binding)
 				}
 			}
 		}
-	}
-	km, err := keymapWithOverrides(km, cfg)
-	if err != nil {
-		return nil, err
 	}
 	if len(dropped) > 0 {
 		return km, fmt.Errorf("plugin key bindings ignored: %s", strings.Join(dropped, "; "))

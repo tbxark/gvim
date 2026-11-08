@@ -1,5 +1,7 @@
 package editor
 
+import "slices"
+
 // Values of Options.VirtualSpace, as the config key editor.virtual_space writes them.
 const (
 	VirtualSpaceOff   = "off"
@@ -93,6 +95,24 @@ func (e *Editor) SetEphemeralFilePatterns(patterns []string) {
 // EphemeralFilePatterns returns the patterns that SetEphemeralFilePatterns set. The
 // caller must not change the slice.
 func (e *Editor) EphemeralFilePatterns() []string { return e.ephemeral }
+
+// SetRulers sets editor.rulers: the 1-based columns that every text buffer starts with, the
+// ones open already included. A buffer may then remove one of them, as Fresh's per-buffer
+// rulers allow. The slice is copied.
+func (e *Editor) SetRulers(cols []int) {
+	e.rulers = slices.Clone(cols)
+	for _, d := range e.docs {
+		e.seedRulers(d)
+	}
+}
+
+// seedRulers gives a text buffer the configured rulers, as its own starting list. A
+// virtual buffer gets none: Fresh draws no rulers on those.
+func (e *Editor) seedRulers(d *Document) {
+	if !d.ext.virtual {
+		d.view.Rulers = slices.Clone(e.rulers)
+	}
+}
 
 // SettingsResolver returns the settings for a document with the given language name
 // (Document.Language, which may be empty) and file path (which may be empty).

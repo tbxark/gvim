@@ -435,6 +435,9 @@ func (m *Model) openInput(t pluginapi.Token, o pluginapi.InputSpec) tea.Cmd {
 		SelectAll: o.SelectAll,
 		Tag:       pluginInputTag{tok: t},
 	}
+	for _, h := range o.History {
+		opts.History = append(opts.History, cleanText(h))
+	}
 	if o.Validate != nil {
 		// The text a validator returns is shown in the prompt: it is cleaned like the rest.
 		opts.Validate = func(text string) error {

@@ -228,6 +228,7 @@ func (e *Editor) continueRestore(d *Document) (note string) {
 	if err := e.tryRestore(d); err != nil {
 		l.restoreErr = err
 		d.status = fmt.Sprintf("The unsaved changes could not be restored and are kept in the session: %v", err)
+		d.statusErr = d.status
 		return d.status
 	}
 	if l.restore == nil {

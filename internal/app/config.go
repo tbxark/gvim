@@ -105,6 +105,7 @@ func LoadConfig(root string, opts Options) (ConfigView, error) {
 	for _, d := range diags {
 		view.Warnings = append(view.Warnings, d.String())
 	}
+	view.Warnings = append(view.Warnings, keybindingWarnings(cfg)...)
 	return view, nil
 }
 

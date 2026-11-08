@@ -42,9 +42,8 @@ func registerTextCmdHandlers(h map[Action]handler) {
 		}
 		return nil
 	})
-	// copy_with_theme copies the plain text only. Fresh also copies the syntax
-	// colours as rich text, and gvim has no rich-text clipboard, so that part is
-	// not done.
+	// copy_with_theme copies the plain text. The syntax colours as rich text are the
+	// root's part (ui.copyFormatted), since they need the theme and the clipboard.
 	h["copy_with_theme"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
 		if !d.hasAnySelection() {
 			return ErrNothingSelected

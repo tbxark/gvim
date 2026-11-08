@@ -143,26 +143,27 @@ func TestDrawRows(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
 	p := New(tr, style.Styles{}, nil)
-	g := grid.New(12, 8)
-	p.Draw(g, Geometry{Width: 12, Bottom: 7, Focused: true})
+	g := grid.New(14, 8)
+	p.Draw(g, Geometry{Width: 14, Bottom: 7, Focused: true})
 	lines := g.Plain()
 
-	if lines[1] != HeaderFor(12, icons.Plain).Text {
-		t.Errorf("title row %q, want %q", lines[1], HeaderFor(12, icons.Plain).Text)
+	if lines[1] != HeaderFor(14, icons.Plain).Text {
+		t.Errorf("title row %q, want %q", lines[1], HeaderFor(14, icons.Plain).Text)
 	}
+	// Column 1 is the padding cell, and the marker lives there beside the expand icon.
 	want := []string{
-		"│▌ proj    │", // the root is selected, so the marker shows
-		"│  ▶ a     │",
-		"│    b.txt │",
-		"│    c.txt │",
-		"│          │", // the body is blank below the last row
+		"│▌▼ proj     │", // the root is selected, so the marker shows
+		"│   ▶ a      │",
+		"│     b.txt  │",
+		"│     c.txt  │",
+		"│            │", // the body is blank below the last row
 	}
 	for i, w := range want {
 		if got := lines[2+i]; got != w {
 			t.Errorf("row %d = %q, want %q", 2+i, got, w)
 		}
 	}
-	if got, w := lines[7], "└──────────┘"; got != w {
+	if got, w := lines[7], "└────────────┘"; got != w {
 		t.Errorf("bottom border %q, want %q", got, w)
 	}
 }
@@ -198,8 +199,9 @@ func TestDrawScrollbar(t *testing.T) {
 			t.Errorf("row %d scrollbar cell BG %v, want track %v", y, got, track)
 		}
 	}
-	// The bar takes the column left of the border, and names stop before it.
-	if got := g.Plain()[3]; got != "│    longn │" {
+	// The bar takes the column left of the border, and names stop a padding cell
+	// before it and end with an ellipsis.
+	if got := g.Plain()[3]; got != "│     lo…  │" {
 		t.Errorf("row 3 %q, want the name cut before the scrollbar", got)
 	}
 	if got := g.At(11, 3).Text; got != "│" {
@@ -577,15 +579,15 @@ func TestDrawFolderGlyphsInNerdMode(t *testing.T) {
 	tr := openTree(t, dir)
 	p := New(tr, style.Styles{}, nil)
 	draw := func() *grid.Grid {
-		g := grid.New(12, 8)
-		p.Draw(g, Geometry{Width: 12, Bottom: 7, Icons: icons.Nerd})
+		g := grid.New(14, 8)
+		p.Draw(g, Geometry{Width: 14, Bottom: 7, Icons: icons.Nerd})
 		return g
 	}
-	if got := draw().At(3, 3).Text; got != icons.Nerd.Glyph(icons.DirCollapsed) {
+	if got := draw().At(4, 3).Text; got != icons.Nerd.Glyph(icons.DirCollapsed) {
 		t.Fatalf("collapsed folder icon %q, want the nerd glyph", got)
 	}
 	must(t, tr.Toggle(filepath.Join(dir, "a")))
-	if got := draw().At(3, 3).Text; got != icons.Nerd.Glyph(icons.DirExpanded) {
+	if got := draw().At(4, 3).Text; got != icons.Nerd.Glyph(icons.DirExpanded) {
 		t.Fatalf("expanded folder icon %q, want the nerd glyph", got)
 	}
 }
@@ -599,18 +601,18 @@ func TestDrawFileIconsInNerdMode(t *testing.T) {
 	p.Draw(g, Geometry{Width: 24, Bottom: 7, Icons: icons.Nerd})
 	at := func(x, y int) string { return g.At(x, y).Text }
 	// Row 3 is the folder a/ and row 4 is b.txt, both one level down: the expand
-	// mark at column 3, the type icon at 5 and the name from 7.
-	if at(3, 3) != icons.Nerd.Glyph(icons.DirCollapsed) || at(5, 3) != icons.Nerd.Glyph(icons.Folder) || at(7, 3) != "a" {
+	// mark at column 4, the type icon at 6 and the name from 8.
+	if at(4, 3) != icons.Nerd.Glyph(icons.DirCollapsed) || at(6, 3) != icons.Nerd.Glyph(icons.Folder) || at(8, 3) != "a" {
 		t.Errorf("folder row %q", g.Plain()[3])
 	}
-	if at(3, 4) != " " || at(5, 4) != icons.Nerd.FileIcon("b.txt", false, false) || at(7, 4) != "b" {
+	if at(4, 4) != " " || at(6, 4) != icons.Nerd.FileIcon("b.txt", false, false) || at(8, 4) != "b" {
 		t.Errorf("file row %q", g.Plain()[4])
 	}
-	// The plain set keeps the name at column 5 and draws no type icon.
+	// The plain set keeps the name at column 6 and draws no type icon.
 	plain := grid.New(24, 8)
 	p.Draw(plain, Geometry{Width: 24, Bottom: 7})
-	if got := plain.At(5, 4).Text; got != "b" {
-		t.Errorf("plain file row %q, want the name at column 5", plain.Plain()[4])
+	if got := plain.At(6, 4).Text; got != "b" {
+		t.Errorf("plain file row %q, want the name at column 6", plain.Plain()[4])
 	}
 }
 
@@ -626,14 +628,14 @@ func TestDrawGitMarksInNerdMode(t *testing.T) {
 	}{{icons.Plain, "M"}, {icons.Nerd, icons.Nerd.GitMark('M')}} {
 		g := grid.New(24, 8)
 		p.Draw(g, Geometry{Width: 24, Bottom: 7, Marks: marks, Icons: tt.mode})
-		if got := g.At(22, 4).Text; got != tt.want {
+		if got := g.At(21, 4).Text; got != tt.want {
 			t.Errorf("%v: git mark cell %q, want %q (%q)", tt.mode, got, tt.want, g.Plain()[4])
 		}
 	}
 }
 
 // TestDrawGitMarkOnTheRow checks that a row whose absolute path has a git status
-// letter shows it in the last column before the border, and that the name keeps
+// letter shows it in the last column before the padding cell, and that the name keeps
 // the cells before the letter. A row without a mark shows a blank there.
 func TestDrawGitMarkOnTheRow(t *testing.T) {
 	t.Parallel()
@@ -643,13 +645,13 @@ func TestDrawGitMarkOnTheRow(t *testing.T) {
 	g := grid.New(16, 8)
 	New(tr, style.Styles{}, nil).Draw(g, Geometry{Width: 16, Bottom: 7, Marks: marks})
 
-	if got := g.At(14, 4).Text; got != "M" {
+	if got := g.At(13, 4).Text; got != "M" {
 		t.Errorf("mark cell of b.txt = %q, want %q", got, "M")
 	}
 	if got := g.Plain()[4]; !strings.Contains(got, "b.txt") {
 		t.Errorf("row of b.txt = %q, want the name shown", got)
 	}
-	if got := g.At(14, 5).Text; got != " " {
+	if got := g.At(13, 5).Text; got != " " {
 		t.Errorf("unmarked row c.txt has %q in the mark column, want blank", got)
 	}
 	if got := g.At(15, 4).Text; got != "│" {

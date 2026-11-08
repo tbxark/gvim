@@ -45,6 +45,10 @@ const (
 	noNameText = "[No Name]"
 	// hint is the row under the box that lists the four modes.
 	hint = "  file  |  >command  |  :line  |  #buffer"
+
+	// liveHint is the hint row of Live Grep, which has no prefixes: the whole query is the
+	// text searched for.
+	liveHint = "  type text to search the files  |  Enter open  |  Esc close"
 )
 
 // Files is the file list the file mode searches. *finder.Index satisfies it.
@@ -173,6 +177,11 @@ type row struct {
 	index    int
 	line     int
 	col      int
+	// A grep row keeps its line text apart from name, so the label can be cut around the
+	// match: text is the trimmed line, mcol the match's rune offset in it and qlen the
+	// match's length in runes.
+	text       string
+	mcol, qlen int
 }
 
 // chrome holds the grid styles of the palette: the overlay palette for the box, and
@@ -389,14 +398,25 @@ func (p *Palette) run(i int) tea.Cmd {
 	return r.command(p.opts.Root)
 }
 
+// Covers reports whether the point (x, y) of a w by h frame is on the palette card:
+// its list, its footer and its query row, within the box. A press elsewhere is not the
+// palette's, and the frame takes it.
+func (p *Palette) Covers(x, y, w, h int) bool {
+	if !p.open || w <= 0 || h <= 0 {
+		return false
+	}
+	geo := layoutFor(w, h)
+	return x > geo.left && x < geo.right && y >= geo.top && y <= geo.promptY
+}
+
 // rowAt maps a frame cell to the index of the row under it. The row spans the
-// box minus its left border, and only rows in view count.
+// box between its borders, and only rows in view count.
 func (p *Palette) rowAt(x, y int) (int, bool) {
 	if p.height <= 0 {
 		return 0, false
 	}
 	geo := layoutFor(p.width, p.height)
-	if x < 1 || x >= geo.w {
+	if x <= geo.left || x >= geo.right {
 		return 0, false
 	}
 	k := y - geo.top - 1
@@ -490,13 +510,25 @@ func (p *Palette) rowsFor(query string) []row {
 	case model.ModeLine:
 		line, col, ok := editor.ParseLineCol(text)
 		if !ok {
-			return nil
+			return []row{{kind: rowMessage, name: notLineText(text), disabled: true}}
 		}
 		return []row{{kind: rowLine, name: "Go to line " + strconv.Itoa(line), line: line, col: col}}
 	case model.ModeBuffer:
 		return p.bufferRows(text)
 	}
 	return nil
+}
+
+// notLineText says why text is not a line number, for the ':' mode's message row.
+func notLineText(text string) string {
+	text = strings.TrimSpace(text)
+	switch {
+	case text == "":
+		return "Type a line number, for example 120 or 120:5"
+	case strings.Trim(text, "0") == "":
+		return "Line numbers start at 1"
+	}
+	return "Not a line number: " + text
 }
 
 // commandRows turns the matched command entries into rows.

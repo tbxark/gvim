@@ -213,6 +213,14 @@ T.spy(tostring(m), m:name())`)
 		}
 	})
 
+	t.Run("uses_esc", func(t *testing.T) {
+		h := start(t, gv+`gvim.mode.define{ name = "own", bindings = { escape = function() end } } gvim.mode.define{ name = "plain" }`)
+		ms := h.Host.Modes["t"]
+		if len(ms) != 2 || ms[0].Bindings["escape"] == "" || ms[1].Bindings["escape"] != "" {
+			t.Fatalf("modes = %+v", ms)
+		}
+	})
+
 	t.Run("swallow text and paste", func(t *testing.T) {
 		h := start(t, gv+`gvim.mode.define{ name = "ro", text = "swallow", paste = "swallow" }`)
 		m := h.Host.Modes["t"][0]

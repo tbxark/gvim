@@ -280,7 +280,7 @@ type Overlay interface {
 }
 
 // KeyPress is one key press in the keymap vocabulary: the key name ("p", "Left",
-// "F10", " ") and the modifiers, a subset of "ctrl", "alt" and "shift". The
+// "F10", " ") and the modifiers, a subset of "ctrl", "alt", "shift" and "super". The
 // keymap adapter canonicalizes it.
 type KeyPress struct {
 	Name string
@@ -306,6 +306,16 @@ type Command struct {
 // *keymap.Map. The root model never sees keymap types.
 type Keymap interface {
 	Resolve(key KeyPress, ctx KeyContext) (Command, bool)
+}
+
+// SequenceKeymap is the optional part of a Keymap that holds multi-key bindings, such
+// as Emacs's C-x C-s. A Keymap without it has single-key bindings only.
+type SequenceKeymap interface {
+	// ResolveSequence looks up the key presses typed in order. ok reports that steps
+	// are a whole binding, which has at least two steps. prefix reports that steps
+	// begin a longer binding, so one more key may complete it. A single press is
+	// never a binding here, only a prefix.
+	ResolveSequence(steps []KeyPress, ctx KeyContext) (cmd Command, ok, prefix bool)
 }
 
 // Dialogs builds the dialogs the file actions open. The app adapter builds them
@@ -342,6 +352,12 @@ type Deps struct {
 	// Notice is a startup message for the status row, such as the first config
 	// warning. Empty shows nothing.
 	Notice string
+	// Warnings are config problems that Show Warnings lists, each as one entry, besides the
+	// Notice that the status row shows.
+	Warnings []string
+	// NoticeSink, when set, is called with the text of each notice the root keeps (the warnings
+	// of Show Warnings), for --log-file. It runs on the update goroutine and must not block.
+	NoticeSink func(text string)
 	// Recents are the recent folders, newest first. The welcome screen lists up to
 	// five of them. Nil leaves the list empty.
 	Recents []string

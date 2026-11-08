@@ -162,3 +162,21 @@ func TestLiveGrepErrorIsShownAsARow(t *testing.T) {
 		t.Fatal("the search error is not shown")
 	}
 }
+
+// Live Grep has no mode prefixes, so its hint row must not advertise the quick-open ones (PC54).
+func TestLiveGrepHintRowAdvertisesNoPrefixes(t *testing.T) {
+	t.Parallel()
+	p := New(liveOptions("", &fakeFiles{}, &fakeGrepper{}))
+	g := draw(p, 100, 30)
+	foot := rowText(g, layoutFor(100, 30).footY)
+	if strings.Contains(foot, ">command") || strings.Contains(foot, "#buffer") || strings.Contains(foot, ":line") {
+		t.Errorf("hint row %q lists quick-open prefixes", foot)
+	}
+	if !strings.Contains(foot, "Enter open") {
+		t.Errorf("hint row %q does not say what Enter does", foot)
+	}
+	q := draw(New(Options{Query: ">save"}), 100, 30)
+	if got := rowText(q, layoutFor(100, 30).footY); !strings.Contains(got, ">command") {
+		t.Errorf("the quick-open hint row changed: %q", got)
+	}
+}

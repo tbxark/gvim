@@ -1,13 +1,16 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/session"
+	"github.com/tbxark/gvim/internal/ui"
 )
 
 // stashFiles lists the stash files in dir.
@@ -270,7 +273,7 @@ func TestRecoverAbandonedLeavesRunningProcessesAlone(t *testing.T) {
 	writeCrashCopy(t, b, "G", gone)
 
 	ed := newSessionEditor()
-	failed, n := recoverAbandoned(ed, root, func(pid int) bool { return pid == 111 })
+	failed, n := recoverAbandoned(ed, root, func(pid int) bool { return pid == 111 }, nil)
 	if len(failed) != 0 || n != 1 {
 		t.Fatalf("recoverAbandoned = %d recovered, failed %v, want 1 and none", n, failed)
 	}
@@ -294,7 +297,7 @@ func TestRecoverAbandonedTakesTheLeftoverOfOwnPid(t *testing.T) {
 	root := filepath.Join(dir, "recovery")
 	writeCrashCopy(t, a, "X", ownRecoveryDir(root))
 
-	_, n := recoverAbandoned(newSessionEditor(), root, func(int) bool { return true })
+	_, n := recoverAbandoned(newSessionEditor(), root, func(int) bool { return true }, nil)
 	if n != 1 {
 		t.Fatalf("recovered %d files, want 1", n)
 	}
@@ -310,7 +313,7 @@ func TestRecoverAbandonedKeepsWhatItCannotRestore(t *testing.T) {
 	must(t, err)
 	must(t, session.Save(gone, session.Session{Files: []session.FileState{{Path: dir, StashFile: name}}}))
 
-	failed, n := recoverAbandoned(newSessionEditor(), root, func(int) bool { return false })
+	failed, n := recoverAbandoned(newSessionEditor(), root, func(int) bool { return false }, nil)
 	if n != 0 || len(failed) != 1 {
 		t.Fatalf("recoverAbandoned = %d recovered, failed %v, want 0 and one failure", n, failed)
 	}
@@ -370,6 +373,139 @@ func TestInterruptedExitKeepsTheRecoveryCopyWhenNoSessionIsSaved(t *testing.T) {
 				if text, err := session.ReadStash(rt.recovery, s.Files[0].StashFile); err != nil || text != "Zone\n" {
 					t.Fatalf("stash = %q, %v, want the unsaved text", text, err)
 				}
+			}
+		})
+	}
+}
+
+// TestRecoverCrashDoesNotOverwriteAFileChangedSinceTheCopy checks that recovered text is
+// based on the file as it was when the copy was taken: when the file changed on disk after
+// the crash, a save refuses to overwrite it, as it would had the file changed during the
+// edit.
+func TestRecoverCrashDoesNotOverwriteAFileChangedSinceTheCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		change   func(path string)
+		wantSave bool
+	}{
+		{"file changed on disk", func(path string) {
+			must(t, os.WriteFile(path, []byte("one\ntwo\nTEAMMATE\n"), 0o644))
+		}, false},
+		{"file untouched", func(string) {}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			a := filepath.Join(dir, "a.txt")
+			must(t, os.WriteFile(a, []byte("one\ntwo\n"), 0o644))
+			rec := filepath.Join(dir, "recovery")
+			writeCrashCopy(t, a, "MINE", rec)
+			tt.change(a)
+
+			ed := newSessionEditor()
+			if failed, n := recoverCrash(ed, rec); len(failed) != 0 || n != 1 {
+				t.Fatalf("recoverCrash = %d recovered, failed %v", n, failed)
+			}
+			if got := ed.Active().Buffer.Text(); got != "MINEone\ntwo\n" {
+				t.Fatalf("recovered text = %q", got)
+			}
+			err := ed.Save()
+			if tt.wantSave {
+				must(t, err)
+				return
+			}
+			if !errors.Is(err, editor.ErrChangedOnDisk) {
+				t.Fatalf("Save = %v, want ErrChangedOnDisk", err)
+			}
+			if got, _ := os.ReadFile(a); string(got) != "one\ntwo\nTEAMMATE\n" {
+				t.Fatalf("file on disk = %q, want the newer content kept", got)
+			}
+		})
+	}
+}
+
+// TestRestoreSessionKeepsTheBaselineOfStashedText is the same check for the stash that a
+// saved session keeps.
+func TestRestoreSessionKeepsTheBaselineOfStashedText(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	must(t, os.WriteFile(a, []byte("one\n"), 0o644))
+	sessDir := filepath.Join(dir, "session")
+	ed := newSessionEditor()
+	must(t, ed.OpenFile(a))
+	ed.Do("insert_char", map[string]any{"text": "Z"})
+	must(t, saveSession(ed, sessDir, ui.ExplorerState{}))
+	must(t, os.WriteFile(a, []byte("one\nnew\n"), 0o644))
+
+	s, ok, err := session.Load(sessDir)
+	must(t, err)
+	if !ok {
+		t.Fatal("no session saved")
+	}
+	fresh := newSessionEditor()
+	if failed := restoreSession(fresh, sessDir, s); len(failed) != 0 {
+		t.Fatalf("restoreSession failed: %v", failed)
+	}
+	if err := fresh.Save(); !errors.Is(err, editor.ErrChangedOnDisk) {
+		t.Fatalf("Save = %v, want ErrChangedOnDisk", err)
+	}
+}
+
+// TestRecoveredTextIsCopiedBeforeTheOldCopyGoes checks that a start which restores the copy
+// of a crashed run writes its own copy at once, so a second crash before the first timer
+// tick does not lose the text.
+func TestRecoveredTextIsCopiedBeforeTheOldCopyGoes(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	b := filepath.Join(dir, "b.txt")
+	must(t, os.WriteFile(b, []byte("two\n"), 0o644))
+	sessDir := filepath.Join(dir, "session")
+	writeCrashCopy(t, b, "Z", filepath.Join(recoveryDir(sessDir), "222"))
+
+	opts := projectRoot(t, "")
+	opts.SessionDir = sessDir
+	rt, err := buildRuntime(t.Context(), opts, true)
+	must(t, err)
+	t.Cleanup(rt.close)
+
+	// No tick has run. The copy of this process must hold the text already.
+	s, ok, err := session.Load(rt.recovery)
+	must(t, err)
+	if !ok || len(s.Files) != 1 || s.Files[0].Path != b {
+		t.Fatalf("own recovery copy = %+v (found %v), want b.txt", s, ok)
+	}
+	if text, err := session.ReadStash(rt.recovery, s.Files[0].StashFile); err != nil || text != "Ztwo\n" {
+		t.Fatalf("own stash = %q, %v, want the recovered text", text, err)
+	}
+}
+
+// TestRecoverAbandonedKeepsTheOldCopyWhenTheNewOneCannotBeWritten checks that the old copy
+// is removed only after the protect step worked.
+func TestRecoverAbandonedKeepsTheOldCopyWhenTheNewOneCannotBeWritten(t *testing.T) {
+	tests := []struct {
+		name        string
+		protect     func() error
+		wantOldLeft bool
+	}{
+		{"protect fails", func() error { return errors.New("disk full") }, true},
+		{"protect works", func() error { return nil }, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			b := filepath.Join(dir, "b.txt")
+			must(t, os.WriteFile(b, []byte("two\n"), 0o644))
+			root := filepath.Join(dir, "recovery")
+			gone := filepath.Join(root, "222")
+			writeCrashCopy(t, b, "G", gone)
+
+			_, n := recoverAbandoned(newSessionEditor(), root, func(int) bool { return false }, tt.protect)
+			if n != 1 {
+				t.Fatalf("recovered %d files, want 1", n)
+			}
+			s, ok, _ := session.Load(gone)
+			if left := ok && len(s.Files) == 1 && len(stashFiles(t, gone)) == 1; left != tt.wantOldLeft {
+				t.Fatalf("old copy left = %v, want %v", left, tt.wantOldLeft)
 			}
 		})
 	}

@@ -75,6 +75,7 @@ func (m *Model) openLineEndings() {
 		v.active = false
 		return m.dispatch(Command{Action: "set_line_ending", Args: map[string]any{"value": r.value}})
 	})
+	v.fit = true
 	m.pushOverlay(listOverlay{v: v})
 }
 
@@ -89,6 +90,10 @@ func (m *Model) statusSegmentClick(i int) tea.Cmd {
 		return m.dispatch(Command{Action: "set_encoding"})
 	case statusSegmentLanguage:
 		return m.dispatch(Command{Action: "set_language"})
+	case statusSegmentPosition:
+		return m.dispatch(Command{Action: "goto_line"})
+	case statusSegmentLSP:
+		return m.dispatch(Command{Action: "show_lsp_status"})
 	}
 	return nil
 }

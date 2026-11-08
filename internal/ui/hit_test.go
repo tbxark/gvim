@@ -95,9 +95,13 @@ func TestHitNothingOutsideTheFrame(t *testing.T) {
 
 func TestHitStatusRowIsNotTheBody(t *testing.T) {
 	l := layoutFor(80, 24, layoutInput{})
-	// The left status group has no targets, so a press there is not an editor press.
-	if got := l.hit(10, l.statusY); got.Kind != hitNone {
+	// The message of the left status group has no target, so a press there is not an
+	// editor press. The caret position before it is the Go to Line target.
+	if got := l.hit(40, l.statusY); got.Kind != hitNone {
 		t.Errorf("status row press = %+v", got)
+	}
+	if got := l.hit(10, l.statusY); got.Kind != hitStatusSegment || got.Index != statusSegmentPosition {
+		t.Errorf("caret position press = %+v", got)
 	}
 	if got := l.hit(10, l.statusY-1); got.Kind != hitEditorText {
 		t.Errorf("row above status = %+v", got)

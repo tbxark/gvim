@@ -17,27 +17,36 @@ type Snapshot struct {
 	lines [][]rune
 	ver   uint64
 	big   *bigSnap // set for a snapshot of a large buffer; lines is nil then
+	// owner is the memory buffer the snapshot shares its lines with, until it is released.
+	owner *Buffer
 }
 
 // Snapshot returns an immutable view of the current text. A large buffer
 // answers in O(1): the snapshot keeps the immutable overlay state and a
 // reference to the source, and reads the source only when it is read. A memory
-// buffer copies its line headers (O(lines)); the rune data is shared because
-// edits replace lines instead of changing them in place.
+// buffer copies its line headers (O(lines)); the rune data is shared, because while a
+// snapshot is alive edits replace lines instead of changing them in place. Release it, or the
+// buffer edits its lines by copying them from then on.
 func (b *Buffer) Snapshot() *Snapshot {
 	if b.big != nil {
 		return &Snapshot{ver: b.ver, big: b.big.snapshot()}
 	}
-	return &Snapshot{lines: slices.Clone(b.lines), ver: b.ver}
+	b.snaps.Add(1)
+	return &Snapshot{lines: slices.Clone(b.lines), ver: b.ver, owner: b}
 }
 
 // Release drops the snapshot's hold on its resources. A large snapshot lets go
 // of its source, which stays open for it until then even when the buffer has
-// moved on (Rebase) or closed. It is a no-op for a memory snapshot and safe to
-// call more than once. A released snapshot must not be read.
+// moved on (Rebase) or closed. A memory snapshot stops holding the lines of its buffer
+// back from being edited in place. It is safe to call more than once. A released
+// snapshot must not be read.
 func (s *Snapshot) Release() {
 	if s.big != nil {
 		s.big.release()
+	}
+	if o := s.owner; o != nil {
+		s.owner = nil
+		o.snaps.Add(-1)
 	}
 }
 
@@ -60,6 +69,26 @@ func (s *Snapshot) Version() uint64 { return s.ver }
 // always complete.
 func (s *Snapshot) IndexComplete() bool {
 	return s.big == nil || s.big.r.g.complete()
+}
+
+// LongLine reports whether line i is huge, that is longer than MaxLine, and if so
+// its length in runes. Line and Chunk return a huge line cut short; LineRunes reads
+// any part of it. A memory snapshot has no huge line.
+func (s *Snapshot) LongLine(i int) (runes int, ok bool) {
+	if s.big != nil {
+		return s.big.longLine(i)
+	}
+	return 0, false
+}
+
+// LineRunes returns the runes [col, col+n) of line i, clamped to the line, as Line
+// decodes them (an invalid byte is U+FFFD). It reads only those runes, so a window of
+// a huge line costs the window and not the line.
+func (s *Snapshot) LineRunes(i, col, n int) string {
+	if s.big != nil {
+		return s.big.lineRunes(i, col, n)
+	}
+	return runesString(s.lines[min(max(i, 0), len(s.lines)-1)], col, n)
 }
 
 // HugeLine reports whether the snapshot has a line longer than MaxLine, which
@@ -87,9 +116,10 @@ func (s *Snapshot) Line(i int) string {
 
 // Chunk returns whole lines starting at from, joined by "\n", for streaming
 // search. It takes lines while the text stays within maxBytes, but always at
-// least one, so a longer first line comes back whole. first is from clamped
-// into [0, Lines()] and n is the number of lines returned; n is 0 only when
-// from is at or past the end.
+// least one, so a longer first line comes back whole. A huge line (see LongLine)
+// is a chunk of its own: it is not joined to the lines before it, and the chunk
+// ends after it, cut as Line cuts it. first is from clamped into [0, Lines()] and
+// n is the number of lines returned; n is 0 only when from is at or past the end.
 func (s *Snapshot) Chunk(from, maxBytes int) (first, n int, text string) {
 	if s.big != nil {
 		return s.big.chunk(from, maxBytes)

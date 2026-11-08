@@ -3,6 +3,7 @@ package explorer
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -25,8 +26,12 @@ type (
 	NewFolderMsg struct{ Dir string }
 	// RenameMsg asks the root to prompt for a new name for Path (F2).
 	RenameMsg struct{ Path string }
-	// DeleteMsg asks the root to confirm and move Path to the trash (Delete).
-	DeleteMsg struct{ Path string }
+	// DeleteMsg asks the root to confirm and move Path to the trash (Delete). With
+	// several picked rows it sends Paths instead, every entry in display order.
+	DeleteMsg struct {
+		Path  string
+		Paths []string
+	}
 	// CopyMsg puts Path on the explorer clipboard as a copy (Ctrl+C). A
 	// multi-item copy sends Paths instead, every entry in display order.
 	CopyMsg struct {
@@ -75,6 +80,24 @@ func (p Panel) selectedMsg(verb string, make func(path string) tea.Msg) tea.Cmd 
 		return rootRefused(verb)
 	}
 	return emit(make(sel.Path))
+}
+
+// deleteCmd is the DeleteMsg for the targets: the picked rows, or the cursor row when
+// none is picked, as Fresh's delete acts on its effective selection. The tree root is
+// left out of several, and a delete of only the root is refused.
+func (p Panel) deleteCmd() tea.Cmd {
+	root := p.tree.Root()
+	paths := slices.DeleteFunc(p.targets(), func(q string) bool { return q == root })
+	switch len(paths) {
+	case 0:
+		if len(p.targets()) > 0 {
+			return rootRefused("deleted")
+		}
+		return nil
+	case 1:
+		return emit(DeleteMsg{Path: paths[0]})
+	}
+	return emit(DeleteMsg{Paths: paths})
 }
 
 // rootRefused returns the command that reports an operation the tree root does not

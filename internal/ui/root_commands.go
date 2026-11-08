@@ -59,6 +59,9 @@ func (m *Model) featureMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return cmd, true
 	}
 	switch msg := msg.(type) {
+	case warningDetailMsg:
+		m.openWarningDetail(msg.text)
+		return nil, true
 	case interruptedMsg:
 		m.reviewed(msg)
 		return nil, true

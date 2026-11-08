@@ -15,7 +15,7 @@ import (
 
 // noActiveSearch is the status text of find_next and find_previous when no search
 // text is held. It is the legacy text, and the legacy screen shows it.
-const noActiveSearch = "No active search. Press Ctrl+F to search."
+const noActiveSearch = "No active search. Use Edit > Find... to start one."
 
 // noTextToSearch is the status text of find_selection_next and find_selection_previous
 // when there is no selection and the caret is not on a word.
@@ -114,7 +114,7 @@ func (h findHost) Next(q search.Query, from buffer.Pos, forward bool) (search.Ma
 	if !ok {
 		return search.Match{}, false, errSearchUnsupported
 	}
-	match, found, scanned, err := ss.FindNext(q, from, !forward)
+	match, found, scanned, err := h.m.findNext(ss, q, from, !forward)
 	if err == nil && !found && !scanned {
 		err = find.ErrSearchLimit
 	}
@@ -434,7 +434,7 @@ func (m *Model) findSelection(forward bool) {
 		if !forward {
 			at = from
 		}
-		match, found, scanned, err := ss.FindNext(m.findBar.Query(), at, !forward)
+		match, found, scanned, err := m.findNext(ss, m.findBar.Query(), at, !forward)
 		m.afterLargeFind(h, match, found, scanned, err, at, forward)
 		return
 	}
@@ -467,12 +467,12 @@ func (m *Model) onFindMatch() bool {
 		// The match that starts at the selection, or at the caret, is found without
 		// a list of the matches.
 		if at, end, sel := h.Selection(); sel {
-			match, found, _, err := ss.FindNext(m.findBar.Query(), at, false)
+			match, found, _, _, err := ss.FindNext(m.findBar.Query(), at, false, search.Cursor{})
 			return err == nil && found && match.Start == at && match.End == end
 		}
 		// The last match that starts at or before the caret holds the caret or none does.
 		at := h.Cursor()
-		match, found, _, err := ss.FindNext(m.findBar.Query(), buffer.Pos{Line: at.Line, Col: at.Col + 1}, true)
+		match, found, _, _, err := ss.FindNext(m.findBar.Query(), buffer.Pos{Line: at.Line, Col: at.Col + 1}, true, search.Cursor{})
 		return err == nil && found && !at.Less(match.Start) && !match.End.Less(at)
 	}
 	matches, err := h.Find(m.findBar.Query())

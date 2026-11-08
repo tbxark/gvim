@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
+
 	"github.com/tbxark/gvim/internal/config"
 	"github.com/tbxark/gvim/internal/editor"
 	"github.com/tbxark/gvim/internal/explorer"
@@ -37,6 +39,9 @@ func Run(ctx context.Context, opts Options) error {
 	if err := opts.Validate(); err != nil {
 		return err
 	}
+	if err := requireTerminal(os.Stdout); err != nil {
+		return err
+	}
 	if opts.SessionDir == "" {
 		if dir, err := defaultSessionDir(); err == nil {
 			opts.SessionDir = dir
@@ -48,10 +53,27 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	defer rt.close()
 	runErr := ui.Run(ctx, rt.model)
+	if runErr != nil {
+		rt.log.write("error", runErr.Error())
+	}
 	// An error ends the program with the user's text unsettled: a signal, not a quit.
 	rt.interrupted = runErr != nil
 	rt.exit()
 	return runErr
+}
+
+// errNotTerminal is the error of a run whose standard output is not a terminal. The
+// terminal UI would write its escape sequences into the file or pipe and draw no frame,
+// while the keyboard still reads from the terminal, so the program would be invisible and
+// could not be told to quit.
+var errNotTerminal = errors.New("standard output is not a terminal")
+
+// requireTerminal returns errNotTerminal when f is not a terminal.
+func requireTerminal(f *os.File) error {
+	if f == nil || !term.IsTerminal(f.Fd()) {
+		return errNotTerminal
+	}
+	return nil
 }
 
 // exit ends the session in order. The session is saved first, because it is local
@@ -104,6 +126,8 @@ type runtime struct {
 	// interrupted is set when the program ended by a signal and not a quit. The recovery
 	// copy then stays when no session is saved to hold the unsaved text.
 	interrupted bool
+	// log is the --log-file writer; nil when there is none.
+	log *fileLog
 }
 
 // close stops the file index of the current root and the watcher.
@@ -112,6 +136,7 @@ func (r *runtime) close() {
 	if r.watcher != nil {
 		_ = r.watcher.Close()
 	}
+	r.log.Close()
 }
 
 // save writes the session, when a session directory is set.
@@ -211,7 +236,7 @@ func buildModel(ctx context.Context, opts Options) (*ui.Model, *finder.Index, er
 // With no file arguments and a session directory, the saved session is restored
 // first. With file arguments the session is neither restored nor saved, so the saved
 // session stays as it is. When watching is set, the tree root is watched for changes.
-func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, error) {
+func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime, err error) {
 	if err := checkConfigFile(opts.Config); err != nil {
 		return nil, err
 	}
@@ -237,11 +262,13 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	edOpts.Root = root
 	edOpts.SessionDir = opts.SessionDir
 	ed := newEditor(edOpts)
-	ed.SetFormatters(cfg.Formatters)
+	ed.SetFormatters(formattersFor(cfg, lookPath))
+	ed.SetLanguageNamer(newFileLanguage())
 	ed.SetLanguageSettings(languageSettings(cfg))
 	ed.SetStringContext(newStringContext())
 	ed.SetNonCodeContext(newNonCodeContext())
 	ed.SetEphemeralFilePatterns(cfg.EphemeralFilePatterns)
+	ed.SetRulers(cfg.Rulers)
 	var sess session.Session
 	restored := false
 	var failed []unrestored
@@ -258,8 +285,15 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 		}
 	}
 	var openNotices []string
+	var fullLoads []editor.ErrLargeNeedsFullLoad
 	for _, f := range opts.Files {
-		if err := openFile(ed, f.Path); err != nil {
+		if err := ed.OpenFile(f.Path); err != nil {
+			var need editor.ErrLargeNeedsFullLoad
+			if errors.As(err, &need) {
+				// Decoding it whole would hold the first frame back. The UI asks.
+				fullLoads = append(fullLoads, need)
+				continue
+			}
 			if errors.Is(err, editor.ErrTooLargeToTranscode) {
 				// Only this file is lost: the others open, and the status row says why.
 				openNotices = append(openNotices, err.Error())
@@ -273,14 +307,17 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 			}
 		}
 	}
-	recNotice := recoverFromCrash(ed, opts.SessionDir, watching)
+	// Counted before crash recovery, which adds tabs of its own after the two files.
 	if opts.Diff && len(ed.Tabs()) != 2 {
 		return nil, errors.New("--diff needs two different files")
 	}
-	km, err := runKeymap(opts.Keymap, cfg)
+	recPort, recEvery := recoveryPort(ed, cfg, opts.SessionDir, watching)
+	recNotice := recoverFromCrash(ed, opts.SessionDir, watching, recPort)
+	choice, err := runKeymap(opts.Keymap, cfg)
 	if err != nil {
 		return nil, err
 	}
+	km := choice.km
 	th, err := runTheme(opts.Theme, cfg)
 	if err != nil {
 		return nil, err
@@ -288,7 +325,14 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	files := startFiles(ctx, root)
 	watcher, events := startWatcher(watching)
 	proj := newProjectOpener(ctx, watcher, root, files)
+	logFile, logNotice := startLogFile(opts.LogFile, diags)
+	if logFile != nil {
+		opts.pluginLog = logFile.Plugin
+	}
 	deps := newUIDeps(ed, km, th, tree, files)
+	if logFile != nil {
+		deps.NoticeSink = logFile.Notice
+	}
 	adapter, _ := deps.Editor.(editorAdapter)
 	if adapter.spans != nil {
 		adapter.spans.setContext(cfg.HighlightContextBytes)
@@ -296,8 +340,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	deps.Settings = settingsFor(opts, cfg)
 	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
 	deps.Settings.IconsMode, deps.Settings.IconsWhy = icon.Mode.String(), icon.Why
-	deps.SwitchKeymap = switchKeymapFor(cfg)
-	deps.LSP = newLSPPort(cfg.LSP)
+	deps.Settings.Keymap = choice.name
+	keys := newKeybindingStore(deps.Settings.ConfigFile, cfg)
+	liveCfg := func() config.Config { return keys.current(cfg) }
+	deps.SwitchKeymap = switchKeymapWith(liveCfg)
+	deps.LSP = newLSPPortFor(cfg)
 	// A folder argument shows the explorer at startup. Without one the explorer
 	// stays hidden until Ctrl+B, unless the session had it open.
 	deps.ShowExplorer = opts.Root != "" || (restored && sess.Explorer)
@@ -314,8 +361,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 		AutoSave: interval,
 		Stashes:  stashesFor(opts.SessionDir),
 	}
+	deps.Root.Keybindings = keys
 	deps.Root.AutoRevertPoll = autoRevertPoll(cfg)
-	deps.Root.Recovery, deps.Root.RecoveryEvery = recoveryPort(ed, cfg, opts.SessionDir, watching)
+	deps.Root.Recovery, deps.Root.RecoveryEvery = recPort, recEvery
+	deps.Root.FullLoadPrompts = fullLoads
 	if watcher != nil {
 		// Assign only a running watcher: a nil *watch.Watcher in the interface is not nil.
 		deps.Root.WatchDirs = watcher
@@ -328,23 +377,33 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	// Notice is the first config problem, then any session file whose unsaved
 	// text was kept, for the status row. Every warning still goes to stderr,
 	// before the alternate screen starts.
+	// Every config problem is kept for Show Warnings. The status row shows the first one, with
+	// how many there are and where to read them when there are more.
+	problems := configProblems(diags, choice.warnings)
 	var notices []string
-	if len(diags) > 0 {
-		notices = append(notices, diags[0].String())
+	if n := configNotice(problems); n != "" {
+		notices = append(notices, n)
 	}
+	deps.Warnings = append(problems, choice.replaced...)
 	notices = append(notices, openNotices...)
+	if logNotice != "" {
+		notices = append(notices, logNotice)
+	}
 	if n := restoreNotice(failed); n != "" {
 		notices = append(notices, n)
 	}
 	if recNotice != "" {
 		notices = append(notices, recNotice)
 	}
+	if logNotice != "" {
+		notices = append(notices, logNotice)
+	}
 	deps.Notice = strings.Join(notices, "; ")
 	model := newUI(deps)
 	loadSearch(model, opts.SessionDir)
 	model.SetDock(ui.DockPorts{Starter: termStarter{ctx: ctx}, Clipboard: systemClipboard{}})
 	if opts.Diff {
-		// The two files are in tabs 0 and 1: the tab count was checked above.
+		// The two files are in tabs 0 and 1: the tab count was checked before recovery.
 		model.OpenCompare(0, 1)
 	}
 	// File arguments skip the restore, so the session is not saved either. A save
@@ -353,7 +412,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 	if len(opts.Files) > 0 {
 		sessionDir = ""
 	}
-	rt := &runtime{
+	rt = &runtime{
 		model:      model,
 		ed:         ed,
 		projects:   proj,
@@ -365,6 +424,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (*runtime, e
 		recovery:   recoveryDirFor(opts.SessionDir, watching),
 
 		recoveryWriter: deps.Root.Recovery,
+		log:            logFile,
 	}
 	model.SetQuitStash(rt.stashForQuit)
 	return rt, nil
@@ -428,24 +488,42 @@ func editorOptions(cfg config.Config, empty bool) editor.Options {
 	}
 }
 
+// keymapChoice is the keymap a session starts with: the keymap, the name of the preset it
+// is built on, and what is wrong with the config that chose it.
+type keymapChoice struct {
+	km       *keymap.Map
+	name     string
+	warnings []string
+	// replaced are the preset bindings the config's keybindings take over (replacedBindings).
+	replaced []string
+}
+
 // runKeymap returns the keymap a session uses. The flag names a built-in keymap,
 // and when it is empty the config keymap is used, and the platform default when
-// the config sets none. The config keybindings are applied on top of that
-// keymap. A bad name or a bad override stops startup with an error that names
-// the config file when the config is the source.
-func runKeymap(flag string, cfg config.Config) (*keymap.Map, error) {
+// the config sets none. The config keybindings are applied on top of that keymap.
+// A bad flag stops startup. A config keymap that does not exist, and a keybinding that
+// cannot be applied, do not: they are warnings, the default keymap stands for the first,
+// and the binding is left out for the second.
+func runKeymap(flag string, cfg config.Config) (keymapChoice, error) {
 	name := flag
 	if name == "" {
 		name = cfg.Keymap
 	}
+	var warnings []string
 	km, err := keymapFor(name)
 	if err != nil {
-		if flag == "" {
-			err = inConfigFile(cfg, "keymap", err)
+		if flag != "" {
+			return keymapChoice{}, err
 		}
-		return nil, err
+		err = fmt.Errorf("%w (valid keymaps: %s); using the %s keymap", err, strings.Join(builtinKeymaps, ", "), keymap.DefaultName())
+		warnings = append(warnings, inConfigFile(cfg, "keymap", err).Error())
+		km, name = keymap.Default(), ""
 	}
-	return keymapWithOverrides(km, cfg)
+	if name == "" {
+		name = keymap.DefaultName()
+	}
+	warnings = append(warnings, keybindingWarnings(cfg)...)
+	return keymapChoice{km: keymapWithOverrides(km, cfg), name: name, warnings: warnings, replaced: replacedBindings(km, cfg)}, nil
 }
 
 // presetKeymap returns the built-in keymap a session starts from, before the user's
@@ -462,33 +540,22 @@ func presetKeymap(flag string, cfg config.Config) *keymap.Map {
 	return keymap.Default()
 }
 
-// keymapWithOverrides applies the config keybindings to km. Without them km is
-// returned unchanged. A bad override names the config file that set it.
-func keymapWithOverrides(km *keymap.Map, cfg config.Config) (*keymap.Map, error) {
-	if cfg.Keybindings == nil {
-		return km, nil
-	}
-	out, err := km.WithOverrides(cfg.Keybindings)
-	if err != nil {
-		return nil, inConfigFile(cfg, "keybindings", err)
-	}
-	return out, nil
-}
-
 // switchKeymapFor returns the SwitchKeymap port of a session. It builds the named
 // built-in keymap with the config keybindings applied, as runKeymap does, so an
 // override survives a switch.
 func switchKeymapFor(cfg config.Config) func(name string) (ui.Keymap, error) {
+	return switchKeymapWith(func() config.Config { return cfg })
+}
+
+// switchKeymapWith is switchKeymapFor over the config as it is when the switch happens:
+// the keybinding editor changes the keybindings during the session.
+func switchKeymapWith(cfgNow func() config.Config) func(name string) (ui.Keymap, error) {
 	return func(name string) (ui.Keymap, error) {
 		km, err := keymapFor(name)
 		if err != nil {
 			return nil, err
 		}
-		km, err = keymapWithOverrides(km, cfg)
-		if err != nil {
-			return nil, err
-		}
-		return keymapAdapter{km: km}, nil
+		return keymapAdapter{km: keymapWithOverrides(km, cfgNow())}, nil
 	}
 }
 
@@ -547,6 +614,16 @@ func runTheme(flag string, cfg config.Config) (theme.Theme, error) {
 		return theme.Theme{}, err
 	}
 	return th, nil
+}
+
+// configProblems lists the problems of loading the config: the diagnostics of the files, then the
+// keymap and keybinding warnings, one line each.
+func configProblems(diags []config.Diagnostic, warnings []string) []string {
+	out := make([]string, 0, len(diags)+len(warnings))
+	for _, d := range diags {
+		out = append(out, d.String())
+	}
+	return append(out, warnings...)
 }
 
 // inConfigFile prefixes err with the config file that set key. When no file set

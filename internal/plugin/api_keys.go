@@ -251,7 +251,7 @@ func installKeymap(e *apiEnv) {
 	e.set(area, "set", func(L *lua.LState) int {
 		chord, err := p.checkChord(L.CheckString(1))
 		if err != nil {
-			return bufRet(L, err)
+			return p.registrationFailed(L, "keymap.set", err)
 		}
 		target := L.Get(2)
 		switch v := target.(type) {
@@ -265,23 +265,23 @@ func installKeymap(e *apiEnv) {
 		}
 		o, err := readKeymapOpts(L, p, 3)
 		if err != nil {
-			return bufRet(L, err)
+			return p.registrationFailed(L, "keymap.set", err)
 		}
 		k := p.keys()
 		var md *modeDef
 		switch {
 		case o.mode != "":
 			if md = k.modes[o.mode]; md == nil {
-				return bufRet(L, pluginapi.Errf(pluginapi.CodeNotFound, "mode %q is not defined", o.mode))
+				return p.registrationFailed(L, "keymap.set", pluginapi.Errf(pluginapi.CodeNotFound, "mode %q is not defined", o.mode))
 			}
 			if len(o.when) > 0 {
-				return bufRet(L, pluginapi.Errf(pluginapi.CodeInvalid, "when applies to bindings of the normal context, not of a mode"))
+				return p.registrationFailed(L, "keymap.set", pluginapi.Errf(pluginapi.CodeInvalid, "when applies to bindings of the normal context, not of a mode"))
 			}
 			if _, replace := md.info.Bindings[bindingKey(chord)]; !replace && len(md.info.Bindings) >= maxModeBindings {
-				return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "mode binding quota (%d)", maxModeBindings))
+				return p.registrationFailed(L, "keymap.set", pluginapi.Errf(pluginapi.CodeLimit, "mode binding quota (%d)", maxModeBindings))
 			}
 		case strings.Contains(chord, " "):
-			return bufRet(L, pluginapi.Errf(pluginapi.CodeInvalid, "key sequence %q needs a mode: the editing keymap resolves single keys only", clipMsg(chord, 40)))
+			return p.registrationFailed(L, "keymap.set", pluginapi.Errf(pluginapi.CodeInvalid, "key sequence %q needs a mode: the editing keymap resolves single keys only", clipMsg(chord, 40)))
 		}
 		isNew := !p.bindings().has(chord)
 		if md != nil {
@@ -289,12 +289,12 @@ func installKeymap(e *apiEnv) {
 		}
 		if isNew {
 			if err := k.room(1); err != nil {
-				return bufRet(L, err)
+				return p.registrationFailed(L, "keymap.set", err)
 			}
 		}
 		action, made, err := k.action(L, target, o.desc)
 		if err != nil {
-			return bufRet(L, err)
+			return p.registrationFailed(L, "keymap.set", err)
 		}
 		if md != nil {
 			old := md.info.Bindings[bindingKey(chord)]
@@ -315,7 +315,7 @@ func installKeymap(e *apiEnv) {
 				if made {
 					k.dropIfOrphan(action)
 				}
-				return bufRet(L, err)
+				return p.registrationFailed(L, "keymap.set", err)
 			}
 		}
 		k.seq++
@@ -794,4 +794,14 @@ func (p *plugin) keyTable(k pluginapi.Key) *lua.LTable {
 	t.RawSetString("shift", lua.LBool(k.Shift))
 	t.RawSetString("super", lua.LBool(k.Super))
 	return t
+}
+
+// registrationFailed returns the failure pair of a registration call (a command, a key) and
+// says so once in the log and on the status row: a plugin that does not look at the result
+// would otherwise have no command or key and no hint why.
+func (p *plugin) registrationFailed(L *lua.LState, what string, err error) int {
+	msg := what + ": " + errString(err)
+	p.r.logf(p.name, levelWarn, msg)
+	p.r.notify(p, pluginapi.LevelWarn, p.name+": "+msg)
+	return bufRet(L, err)
 }

@@ -16,84 +16,12 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
-
-	"github.com/tbxark/gvim/internal/theme"
 )
 
 // maxAnalyseBytes bounds how much content lexers.Analyse scores. Analyse
 // runs every registered lexer's heuristic, which is slow on large files, and
 // the signals it uses (shebang, doctype, leading markers) are near the start.
 const maxAnalyseBytes = 16 << 10
-
-// Kind is the highlight class of a span. The set is intentionally small;
-// several chroma token types map to the same Kind.
-type Kind uint8
-
-// Kinds, in the order Kind values are listed in this package.
-const (
-	KindPlain Kind = iota
-	KindKeyword
-	KindString
-	KindComment
-	KindFunction
-	KindType
-	KindVariable
-	KindConstant
-	KindOperator
-	KindNumber
-)
-
-// String returns a short lowercase name for k, for logs and tests.
-func (k Kind) String() string {
-	switch k {
-	case KindKeyword:
-		return "keyword"
-	case KindString:
-		return "string"
-	case KindComment:
-		return "comment"
-	case KindFunction:
-		return "function"
-	case KindType:
-		return "type"
-	case KindVariable:
-		return "variable"
-	case KindConstant:
-		return "constant"
-	case KindOperator:
-		return "operator"
-	case KindNumber:
-		return "number"
-	default:
-		return "plain"
-	}
-}
-
-// ThemeKey returns the key in the theme's "syntax" section for k. It is ""
-// for KindPlain, which should use the editor foreground. KindNumber has no
-// theme key of its own, so it uses "constant".
-func (k Kind) ThemeKey() string {
-	switch k {
-	case KindKeyword:
-		return theme.SyntaxKeyword
-	case KindString:
-		return theme.SyntaxString
-	case KindComment:
-		return theme.SyntaxComment
-	case KindFunction:
-		return theme.SyntaxFunction
-	case KindType:
-		return theme.SyntaxType
-	case KindVariable:
-		return theme.SyntaxVariable
-	case KindConstant, KindNumber:
-		return theme.SyntaxConstant
-	case KindOperator:
-		return theme.SyntaxOperator
-	default:
-		return ""
-	}
-}
 
 // Span is a half-open byte range [Start, End) within one line, with its Kind.
 type Span struct {
@@ -105,7 +33,7 @@ type Span struct {
 //
 // Builtins: a builtin function name (NameBuiltin, such as len or print) is
 // KindFunction. A builtin pseudo-variable (NameBuiltinPseudo, such as self or
-// this) is KindVariable. Word operators such as "and" are KindKeyword. Heading
+// this) is KindBuiltin. A decorator or annotation is KindAttribute. Word operators such as "and" are KindKeyword. Heading
 // tokens from markup lexers are KindKeyword. Punctuation, plain names, text,
 // and error tokens are KindPlain.
 func Classify(t chroma.TokenType) Kind {
@@ -126,11 +54,11 @@ func Classify(t chroma.TokenType) Kind {
 		case chroma.NameBuiltin:
 			return KindFunction
 		case chroma.NameBuiltinPseudo:
-			return KindVariable
+			return KindBuiltin
 		case chroma.NameConstant, chroma.NameEntity:
 			return KindConstant
 		case chroma.NameDecorator:
-			return KindFunction
+			return KindAttribute
 		case chroma.NameKeyword, chroma.NameTag:
 			return KindKeyword
 		case chroma.NameOperator:
@@ -261,19 +189,34 @@ func shebangLexer(content []byte) chroma.Lexer {
 //
 // A nil lexer means lexers.Fallback.
 func Tokenize(lexer chroma.Lexer, text []string) ([][]Span, error) {
+	return tokenize(lexer, text, false)
+}
+
+// tokenize is Tokenize for text that may be a piece from the middle of a document, with inside
+// set. A tokenizer that reads what only the start of a document can hold, such as the front
+// matter of markdown, then does not look for it.
+func tokenize(lexer chroma.Lexer, text []string, inside bool) ([][]Span, error) {
 	if lexer == nil {
 		lexer = lexers.Fallback
+	}
+	if tz, ok := tokenizers[lexer.Config().Name]; ok {
+		return tz(text, inside), nil
 	}
 	src := joinLines(text)
 	it, err := lexer.Tokenise(nil, src)
 	if err != nil {
 		return nil, err
 	}
+	it = fixedTokens(lexer, it)
 
 	raw := make([][]Span, len(text))
 	line, col := 0, 0
 	for tok := it(); tok != chroma.EOF; tok = it() {
 		kind := Classify(tok.Type)
+		if line == 0 && col == 0 && tok.Type == chroma.CommentPreproc && strings.HasPrefix(tok.Value, "#!") {
+			// A shell lexer reports the "#!" line as preprocessor text. It is a comment.
+			kind = KindComment
+		}
 		v := tok.Value
 		for {
 			seg := v

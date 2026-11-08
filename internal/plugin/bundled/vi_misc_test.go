@@ -396,8 +396,10 @@ func TestViVerticalAtTheFirstAndLastLine(t *testing.T) {
 		{"3j on the last line", "3j", []string{"vi_move_down"}, "abc"},
 		{"dj on the last line fails", "dj", nil, "abc"},
 		{"dk on the first line fails", "dk", nil, "abc"},
-		{"gj stays put on the last line", "gj", nil, "abc"},
-		{"gk stays put on the first line", "gk", nil, "abc"},
+		// gj and gk are display-row aware like j and k: the editor's action decides at the ends
+		{"gj on the last line", "gj", []string{"vi_move_down"}, "abc"},
+		{"gk on the first line", "gk", []string{"vi_move_up"}, "abc"},
+		{"dgj on the last line fails", "dgj", nil, "abc"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

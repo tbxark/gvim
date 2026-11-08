@@ -305,8 +305,11 @@ M.table["j"] = function(c) return vertical(c, 1, "vi_move_down") end
 M.table["down"] = M.table["j"]
 M.table["k"] = function(c) return vertical(c, -1, "vi_move_up") end
 M.table["up"] = M.table["k"]
-M.table["gj"] = function(c) return vertical(c, 1, "move_down") end
-M.table["gk"] = function(c) return vertical(c, -1, "move_up") end
+-- gj and gk go by display rows, and so do the editor's vi_move_* actions that j and k run: they
+-- are the same moves, including the first and last line of a wrapped buffer, where the action
+-- can still move a row and stops at the end of the text.
+M.table["gj"] = M.table["j"]
+M.table["gk"] = M.table["k"]
 
 -- first_nonblank_line goes delta lines (the count minus one for _) and lands on the first
 -- non-blank character.
@@ -704,10 +707,21 @@ local function mark_pos(name)
 end
 M.mark_pos = mark_pos
 
+-- Marks Vim sets itself (the last change, the last insert, ...) that vi_mode does not keep.
+local UNKEPT_MARKS = { ["."] = true, ["["] = true, ["]"] = true, ["^"] = true, ['"'] = true, ["("] = true, [")"] = true, ["{"] = true, ["}"] = true }
+
+-- no_mark ends a jump to a mark that is not there, saying why.
+local function no_mark(name)
+  if UNKEPT_MARKS[name] then
+    D.fail("not supported: the mark " .. name .. " (a-z, A-Z, ', `, < and > are kept)")
+  end
+  D.fail("E20: Mark not set")
+end
+
 M.table["'"] = function(c)
   local m = mark_pos(c.arg)
   if not m then
-    return nil
+    no_mark(c.arg)
   end
   local l = math.max(0, math.min(m.line, D.count() - 1))
   return result(D.first_nonblank(l), "line", { jump = true })
@@ -716,7 +730,7 @@ end
 M.table["`"] = function(c)
   local m = mark_pos(c.arg)
   if not m then
-    return nil
+    no_mark(c.arg)
   end
   return result(D.clamp(m), "exclusive", { jump = true })
 end

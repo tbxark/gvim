@@ -22,7 +22,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `merge_conflict` | on | Merge: Start Resolution, Next Conflict, Previous Conflict, Use Ours, Take Theirs, Use Both, Resolve Conflict... | none |
 | `markdown_toc` | on | Markdown: Show Outline, Markdown: Close Outline | `max_depth` (6, 1 to 6), `follow` (`cursor` or `scroll`) |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
-| `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor` |
+| `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
 None of them binds a default key (Fresh's presets use most chords); bind one yourself, with
 `gvim.keymap.set("ctrl+alt+j", "flash.jump")` in your `init.lua`, or in `config.json`:
@@ -48,7 +48,8 @@ bar in the gutter for added and modified lines, a triangle where lines were dele
 scrollbar. **Next Change** and **Previous Change** jump between changed regions. Unlike Fresh it compares
 the *buffer*, so the marks follow unsaved typing after a short pause. The HEAD text is read once per
 file with `git show` and compared in the host (no line arrays in Lua); a file outside a repository or
-untracked is left alone. Exports `hunks(buf_id)` for other plugins (`{type = "added"|"modified"|"deleted",
+untracked is left alone, and so is a buffer in large-file mode: it gets no marks, and **Next Change** and
+**Previous Change** say that git changes are not tracked there. Exports `hunks(buf_id)` for other plugins (`{type = "added"|"modified"|"deleted",
 line, count}`).
 
 **git_statusbar**: the current branch (the first seven digits of the commit for a detached HEAD) on
@@ -83,14 +84,28 @@ character after a match is not used.
 
 **vi_mode**: vi-style modal editing: normal, insert, visual (character, line, block) and operator-pending
 modes, counts, operators with motions and text objects, registers, marks, `.` repeat, and `:` commands.
-It starts in normal mode (`auto_start`); **Vi Mode: Toggle** switches it off and on. The panic chords
-(`ctrl+^` and three quick `Esc`) clear every plugin input mode, vi's included: vi says so, and **Vi Mode:
-Toggle** brings it back. Keys vi does not bind (`ctrl+s`, `alt+...`, function keys) still reach the editor.
+It starts in normal mode (`auto_start`); **Vi Mode: Toggle** switches it off and on. The panic chord
+`ctrl+^` clears every plugin input mode, vi's included: vi says so, and **Vi Mode: Toggle** brings it back.
+Three quick `Esc` presses do **not** (vi binds `Esc`, so mashing it is normal). `ctrl+c` is an `Esc`: it
+leaves insert and visual mode and cancels a pending command and the `:` and `/` prompts. Keys vi does not
+bind (`ctrl+s`, `alt+...`, function keys) still reach the editor. A selection made with the mouse (a drag,
+a double click) or with shift and the arrow keys is the visual mode, so `d`, `y`, `c` and the rest act on
+it; a paste puts the text before the caret in normal mode (like `P`), replaces the selection in visual
+mode and is inserted in insert mode. A Vim command vi does not have (`gn`, `gq`, `=`, `R`, `@`, ...)
+says `vi: ... is not supported`, and the keys that belong to it (the motion of `gq`, the text typed
+after `cgn` or `R` until `Esc`, the register of `q`) are dropped instead of running as commands.
+The `:` and `/` prompts keep a history (Up and Down), the matches of a search are highlighted in the
+window (`:noh` hides them, `:set nohls` or the `hlsearch` setting turns it off), a search that wraps says
+so, and `:set` changes `hls`, `et`, `ts` and `sw` for real and refuses what the editor decides (`ai`, `is`).
 Exports `toggle`, `enable`, `disable` and `is_enabled`. Its README
 (`internal/plugin/bundled/plugins/vi_mode/README.md`) lists the keys; the differences from Vim are:
 
+* Vim's insert-mode ctrl keys (`ctrl+w`, `ctrl+u`, `ctrl+o`, `ctrl+r`, `ctrl+d`, ...) and the `ctrl+w`
+  window prefix are not provided: they run the keymap's own binding (`ctrl+o` opens the file picker,
+  `ctrl+r` Replace, and on the macOS keymap `ctrl+w` closes the tab);
 * no macros (`q`, `@`; use the editor's own), jump list, replace mode (`R` outside visual), sentences,
-  folds, `:!` filters, `:normal`;
+  folds, `:!` filters, `:normal`, `gn`/`cgn`, `gq`/`gw`/`=`/`!`, `g;`, and the marks `'.` `` `[ `` `']` `^`
+  (each says it is not supported);
 * marks do not move when the text changes;
 * a count insert (`3ix<Esc>`) or `.` repeat is one more undo step; a change operator and the text typed
   after it (`cw foo<Esc>`) are two undo steps, because the editor has no undo group that stays open
