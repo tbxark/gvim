@@ -102,6 +102,9 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 			Col:  doc.Cursor.Col + 1,
 			Top:  doc.Top,
 		}
+		if doc.Path == "" {
+			fs.Label = doc.Label()
+		}
 		if view := doc.View(); view != nil {
 			if view.PageView != nil {
 				on := *view.PageView

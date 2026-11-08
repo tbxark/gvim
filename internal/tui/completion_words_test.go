@@ -577,3 +577,44 @@ func TestCompletionSettingsApplyLive(t *testing.T) {
 		t.Fatalf("copy = %+v, want only completion_popup_auto_show taken", got)
 	}
 }
+
+// TestCompletionMultiBufferMRUOrder: other tabs are scanned in MRU order, so their
+// words rank by how recently the tab was used, not by tab position.
+func TestCompletionMultiBufferMRUOrder(t *testing.T) {
+	active := &lspTab{path: "/p/a.go", lines: []string{"al"}, cursor: buffer.Pos{Line: 0, Col: 2}}
+	second := &lspTab{path: "/p/b.txt", lines: []string{"alphabet"}}
+	third := &lspTab{path: "/p/c.txt", lines: []string{"alpaca"}}
+	lt := newLSPTest(t, nil, active, second, third)
+	lt.open()
+	// Active index 0, then tab 2 (c) is more recently used than tab 1 (b).
+	lt.ed.recent = []int{0, 2, 1}
+	feedCompletion(t, lt, lt.m.completionAsked())
+	labels := completionLabels(lt)
+	pos := func(label string) int {
+		for i, l := range labels {
+			if l == label {
+				return i
+			}
+		}
+		return -1
+	}
+	alpaca, alphabet := pos("alpaca"), pos("alphabet")
+	if alpaca < 0 || alphabet < 0 {
+		t.Fatalf("items = %v, want both other-tab words", labels)
+	}
+	if alpaca > alphabet {
+		t.Fatalf("items = %v, want the MRU tab 2 word before tab 1", labels)
+	}
+	// Without MRU history the order falls back to tab order (b before c).
+	lt.m.lsp.comp = nil
+	lt.ed.recent = nil
+	feedCompletion(t, lt, lt.m.completionAsked())
+	labels = completionLabels(lt)
+	alpaca, alphabet = pos("alpaca"), pos("alphabet")
+	if alpaca < 0 || alphabet < 0 {
+		t.Fatalf("fallback items = %v, want both other-tab words", labels)
+	}
+	if alphabet > alpaca {
+		t.Fatalf("fallback items = %v, want tab order (b before c)", labels)
+	}
+}

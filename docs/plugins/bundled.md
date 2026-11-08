@@ -214,8 +214,9 @@ instead), no implementation listener (that list lives in lsp_navigation), and no
 registers none).
 
 **dashboard** (reduced Fresh port): a read-only start-screen tab shown when the editor has no file
-open — a centred frame with the repository state (branch, ahead/behind the default branch,
-working-tree counts, origin), recently visited files, keyboard-navigable quick actions (settings,
+open — a centred frame with the repository state (branch, upstream tracking `↑ahead ↓behind` or
+`no upstream`, ahead/behind the default branch, working-tree counts, origin), recently visited
+files, keyboard-navigable quick actions (settings,
 explorer, live grep, theme, Git Log, diagnostics) and best-effort `df` disk rows. Tab/Down/j and
 Shift-Tab/Up/k move, Enter activates (a buffer-local mode); **Show Dashboard** reopens it. It
 auto-opens on an empty editor and after the last file closes (`show_on_empty`) and closes when a file

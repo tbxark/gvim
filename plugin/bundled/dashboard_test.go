@@ -32,6 +32,19 @@ func dashboardGitScript(o *plugintest.FakeOS) {
 	o.Script(gitArgv("symbolic-ref", "--short", "refs/remotes/origin/HEAD"), plugintest.ProcScript{Code: 1})
 	o.Script(gitArgv("rev-parse", "--verify", "main"), plugintest.ProcScript{Stdout: "abc\n"})
 	o.Script(gitArgv("rev-list", "--left-right", "--count", "main...HEAD"), plugintest.ProcScript{Stdout: "2\t3\n"})
+	o.Script(gitArgv("rev-list", "--left-right", "--count", "HEAD...@{upstream}"), plugintest.ProcScript{Stdout: "2\t4\n"})
+}
+
+// dashboardNoUpstreamScript answers the dashboard's git reads but not the upstream
+// one: the branch has no @{upstream}, so the section must show "no upstream".
+func dashboardNoUpstreamScript(o *plugintest.FakeOS) {
+	o.Bin["git"] = "/usr/bin/git"
+	o.Script(gitArgv("rev-parse", "--abbrev-ref", "HEAD"), plugintest.ProcScript{Stdout: "main\n"})
+	o.Script(gitArgv("remote", "get-url", "origin"), plugintest.ProcScript{Stdout: "git@example.com:me/repo.git\n"})
+	o.Script(gitArgv("status", "--porcelain=v1"), plugintest.ProcScript{Stdout: " M a.txt\n?? b.txt\n"})
+	o.Script(gitArgv("symbolic-ref", "--short", "refs/remotes/origin/HEAD"), plugintest.ProcScript{Code: 1})
+	o.Script(gitArgv("rev-parse", "--verify", "main"), plugintest.ProcScript{Stdout: "abc\n"})
+	o.Script(gitArgv("rev-list", "--left-right", "--count", "main...HEAD"), plugintest.ProcScript{Stdout: "2\t3\n"})
 }
 
 // dashboardBuffer returns the dashboard's virtual buffer, or 0.
@@ -118,7 +131,7 @@ func TestDashboardAutoOpensAndShowsSections(t *testing.T) {
 		t.Errorf("active buffer = %d, want the dashboard %d", got, id)
 	}
 	text := dashboardText(t, r.host)
-	for _, want := range []string{"FRESH", "Git", "branch", "main", "working tree", "1 changed", "1 untracked", "↑3 ↓2", "Actions", "Show Dashboard"} {
+	for _, want := range []string{"FRESH", "Git", "branch", "main", "tracking", "↑2 ↓4", "working tree", "1 changed", "1 untracked", "↑3 ↓2", "Actions", "Show Dashboard"} {
 		if want == "Show Dashboard" {
 			continue // the dashboard content lists actions, not the palette title
 		}
@@ -249,5 +262,23 @@ func TestDashboardRecentRowsAreLineTargets(t *testing.T) {
 	}
 	if got := r.host.LineTargets(id); len(got) != 0 {
 		t.Errorf("targets after close = %+v", got)
+	}
+}
+
+// TestDashboardGitShowsNoUpstream: a branch without an upstream still renders the
+// tracking row, keyed "no upstream" and muted, while the rest of the section works.
+func TestDashboardGitShowsNoUpstream(t *testing.T) {
+	t.Parallel()
+	r := startRig(t, rigOpts{
+		plugins: []string{dashboardPlugin},
+		script:  dashboardNoUpstreamScript,
+	})
+	dashboardReady(t, r)
+	text := dashboardText(t, r.host)
+	if !strings.Contains(text, "tracking") || !strings.Contains(text, "no upstream") {
+		t.Fatalf("dashboard text misses the no-upstream tracking row:\n%s", text)
+	}
+	if strings.Contains(text, "↑2 ↓4") {
+		t.Fatalf("dashboard invented upstream counts:\n%s", text)
 	}
 }

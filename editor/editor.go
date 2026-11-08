@@ -211,6 +211,11 @@ type Editor struct {
 	// prevDoc is the document that was active before the current one, for
 	// switch_to_previous_tab. It is a pointer, so a closed tab is not found.
 	prevDoc *Document
+	// recent is the editor's MRU tab history: the active document first, then the
+	// documents in the order they were last active. Closed documents are dropped by
+	// releaseDoc; missing ones are skipped when the order is read. Multi-buffer
+	// completion and dabbrev read it (RecentTabIndices).
+	recent []*Document
 	// formatters maps a language name or file extension to its formatter command. See
 	// SetFormatters.
 	formatters map[string]string
@@ -609,6 +614,9 @@ func (e *Editor) switchTo(i int) {
 	}
 	e.active = i
 	e.lastKind = ""
+	if inRange(i) {
+		e.touchRecent(e.docs[i])
+	}
 }
 
 // ensureVisible scrolls the document so its cursor line is inside the pane,

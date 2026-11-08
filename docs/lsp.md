@@ -318,19 +318,21 @@ guard, and a re-filtered list captures the document version after the edit, so a
 never apply an item against older text.
 
 Multi-buffer words are ported for the popup: a bounded window from the middle of every other open
-tab (64 KiB each, at most 8, in tab order rather than Fresh's MRU order) contributes words below
-the active buffer's, and a word the active buffer already has is not duplicated. Dabbrev cycling
-(`dabbrev_expand`, emacs M-/) uses the same multi-buffer view: the first press collects the
-active buffer's earlier words nearest-first and then the other open tabs' words in tab order, from
-a bounded middle window per buffer (`DabbrevOtherBufferBytes` = 64 KiB, at most
-`DabbrevOtherBufferLimit` = 8 tabs, `DabbrevMaxCandidates` = 30 total). Repeated presses cycle
-through that list, the last press restores the typed prefix, each replacement is one undo step,
-matching is smart-case (an uppercase prefix is case-sensitive, a lowercase one ignores case),
-and a word already offered by the active buffer or an earlier tab is not offered again.
+tab (64 KiB each, at most 8) contributes words below the active buffer's, and a word the active
+buffer already has is not duplicated. Other tabs are scanned in Fresh's MRU order: the editor
+keeps its tab-activation history (`editor.Editor.RecentTabIndices`, active tab first), keyed by
+document identity rather than tab index, so closing a tab or moving tabs keeps the surviving
+order and only drops the closed document; an editor without that history falls back to tab
+order. Dabbrev cycling (`dabbrev_expand`, emacs M-/) uses the same multi-buffer view: the first
+press collects the active buffer's earlier words nearest-first and then the other open tabs' words
+in MRU order, from a bounded middle window per buffer (`DabbrevOtherBufferBytes` = 64 KiB, at
+most `DabbrevOtherBufferLimit` = 8 tabs, `DabbrevMaxCandidates` = 30 total). Repeated presses
+cycle through that list, the last press restores the typed prefix, each replacement is one undo
+step, matching is smart-case (an uppercase prefix is case-sensitive, a lowercase one ignores
+case), and a word already offered by the active buffer or an earlier tab is not offered again.
 Large and virtual other buffers are skipped (their windows are not read); the active large file
-keeps its existing bounded backward scan. The one deliberate deviation is buffer order: other
-tabs are searched in tab order, not Fresh's most-recently-used order (the same deviation as the
-popup's multi-buffer words; gvim does not keep an editor-wide MRU list).
+keeps its existing bounded backward scan. The active buffer always ranks first; the bounded
+window/limit and the cycle/undo behaviour are unchanged.
 
 Completion rows show labelDetails the way Fresh does: the bare identifier is the row
 label, and the dimmed text after it is labelDetails.detail followed by labelDetails.description

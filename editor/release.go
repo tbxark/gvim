@@ -17,6 +17,7 @@ func (e *Editor) releaseDoc(d *Document) {
 	if d == nil {
 		return
 	}
+	e.forgetRecent(d)
 	if l := d.LargeState(); l != nil {
 		l.Pending = nil
 		if !l.InFlight {

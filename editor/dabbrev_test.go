@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -268,5 +269,67 @@ func TestDabbrevCandidateLimit(t *testing.T) {
 	}
 	if got := e.Active().Buffer.Line(0); got != line {
 		t.Fatalf("after the capped cycle line = %q, want the prefix restored", got)
+	}
+}
+
+// TestRecentTabIndicesMRUOrder: the active tab is first, then the tabs in activation
+// order; closing and reordering tabs keeps the surviving documents' order (identity is
+// the document, not the tab index).
+func TestRecentTabIndicesMRUOrder(t *testing.T) {
+	t.Parallel()
+	e := withDabbrevDocs(0, "a", "b", "c")
+	e.switchTo(1)
+	e.switchTo(2)
+	e.switchTo(0)
+	if got, want := e.RecentTabIndices(), []int{0, 2, 1}; !slices.Equal(got, want) {
+		t.Fatalf("RecentTabIndices = %v, want %v", got, want)
+	}
+	// Move the last-active other tab (C, index 2) before A; identity survives the move.
+	if err := e.MoveTab(e.DocIDs()[2], -2); err != nil {
+		t.Fatalf("MoveTab: %v", err)
+	}
+	if got, want := e.RecentTabIndices(), []int{1, 0, 2}; !slices.Equal(got, want) {
+		t.Fatalf("RecentTabIndices after MoveTab = %v, want %v (A=1, C=0, B=2)", got, want)
+	}
+	// Close B (index 2 now): the remaining MRU order is A then C.
+	if err := e.CloseTab(2, true); err != nil {
+		t.Fatalf("CloseTab: %v", err)
+	}
+	// A is still active at index 1 after C moved before it; C follows at index 0.
+	if got, want := e.RecentTabIndices(), []int{1, 0}; !slices.Equal(got, want) {
+		t.Fatalf("RecentTabIndices after close = %v, want %v", got, want)
+	}
+	// Restoration: tabs are adopted one by one and then the saved active tab is
+	// activated. Identity is the document, so the active tab is first and the rest keep
+	// their add/activation order.
+	r := New(Options{Empty: true})
+	r.addDoc(newDocument("", "x"))
+	r.addDoc(newDocument("", "y"))
+	r.addDoc(newDocument("", "z"))
+	r.ActivateTab(1)
+	if got, want := r.RecentTabIndices(), []int{1, 2, 0}; !slices.Equal(got, want) {
+		t.Fatalf("RecentTabIndices after restore = %v, want %v", got, want)
+	}
+}
+
+// TestDabbrevMultiBufferMRUOrder: other tabs are searched most-recently-used first,
+// not in tab order.
+func TestDabbrevMultiBufferMRUOrder(t *testing.T) {
+	t.Parallel()
+	// Tab order is active, foob, fooc; activation order makes fooc the most recent
+	// other tab, so the cycle must offer fooc before foob.
+	e := withDabbrevDocs(0, "fo", "foob\n", "fooc\n")
+	e.switchTo(1)
+	e.switchTo(2)
+	e.switchTo(0)
+	marksCaret(e, 0, 2)
+	want := []string{"fooc", "foob", "fo"}
+	for i, w := range want {
+		if r := e.Do("dabbrev_expand", nil); r.Err != nil {
+			t.Fatalf("press %d: %v", i+1, r.Err)
+		}
+		if got := e.Active().Buffer.Line(0); got != w {
+			t.Fatalf("after press %d line = %q, want %q", i+1, got, w)
+		}
 	}
 }

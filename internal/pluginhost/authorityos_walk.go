@@ -197,8 +197,32 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom string
 	if err := claimCtx(ctx); err != nil {
 		return err
 	}
-	if err := m.Mkdir(ctx, dst, true); err != nil {
-		return mapErr(err, dst)
+	if creator := authority.DirectoryCreators(o.files()); creator != nil {
+		// Create missing ancestors (a benign operation), then claim the destination root
+		// with one exclusive mkdir. The old path used mkdir -p on the destination itself:
+		// a directory created concurrently between the Stat check and that mkdir was
+		// silently merged into (and its files could be overwritten). MkdirNew fails
+		// atomically with fs.ErrExist, so the copy refuses a destination that appeared
+		// meanwhile.
+		if parent := path.Dir(dst); parent != "." && parent != "/" {
+			if err := mapErr(m.Mkdir(ctx, parent, true), parent); err != nil {
+				return err
+			}
+		}
+		if err := creator.MkdirNew(ctx, dst); err != nil {
+			if errors.Is(err, fs.ErrExist) {
+				return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination already exists (atomic no-overwrite claim; a concurrent creator won)", dst)
+			}
+			return mapErr(err, dst)
+		}
+	} else {
+		// The backend cannot guarantee an atomic claim: keep the previous check-then-mkdir
+		// behaviour instead of failing a copy that used to work, and record the residual
+		// race (the Stat check above, and Mkdir with parents, can merge into a concurrent
+		// creator). Current authority backends implement DirectoryCreator.
+		if err := mapErr(m.Mkdir(ctx, dst, true), dst); err != nil {
+			return err
+		}
 	}
 	for _, entry := range res.Entries {
 		if err := claimCtx(ctx); err != nil {

@@ -624,7 +624,21 @@ still loads unchanged.
   after opening: a workspace that is being materialized while another is focused loads
   independently until Focus resolves it, exactly when the restored unsaved text is final.
   The daemon tests this with a dormant workspace whose saved session restores the same
-  file with a stale stash. Tests also cover
+  file with a stale stash. The conflict copy is pathless and labelled, so its later save
+  and close cannot silently overwrite the owner: Save As to a path another materialized
+  workspace owns is refused at plan time even with force (closing the local mirror tab
+  does not bypass it), Save As on a read-only mirror is refused instead of forking under
+  the registry, and Save As to a NEW path registers that file as the saving workspace's
+  canonical shared buffer, so another workspace opening it shares/requests ownership
+  rather than getting an independent copy that could overwrite it. Save As on a SHARED
+  OWNER rekeys the buffer: the entry and its mirrors follow the renamed buffer to the new
+  path, the old path stops being shared and reloads independently from its untouched file.
+  The conflict tab's label is persisted with the session (`session.FileState.Label` for a
+  pathless buffer, written by both session writers and restored by `RestoreSession`), so an
+  eviction/rematerialize or daemon restart keeps the preserved copy identifiable as
+  `[shared conflict] <name>` instead of a plain `Untitled-N` tab; its text and pathless
+  safety survive repeated restores, and the owner's live text and the disk file are never
+  replaced by a stale restored copy. Tests also cover
   open in two workspaces, mirror read-only-until-ownership, edit propagation, ownership
   back-and-forth with undo/unsaved state, conflict notice, close-owner promotion, owner-tab
   close promotion, mirror-tab close without a prompt, the last-view prompt, CloseByPath
@@ -671,26 +685,30 @@ still loads unchanged.
   repository remotely (git rev-parse --show-toplevel), then runs git grep -n --column in
   the remote repo root and returns absolute remote paths, so a hit opens through the
   remote document access; the local git state is never consulted.
-  Grep (Live Grep) has an explicit remote scope rather than "whatever grep walks": in a git
-  work tree it reads Fresh's project-file listing once (`git rev-parse
+  Project search (Live Grep) has an explicit remote scope rather than "whatever the tool
+  walks": in a git work tree it reads Fresh's project-file listing once (`git rev-parse
   --is-inside-work-tree`, then one bounded `git ls-files -z -s --cached --others
   --exclude-standard`) and only results in that listing enter a batch. Tracked files are
   therefore kept even when they match .gitignore (and tracked dotfiles are listed, as Fresh
   does), untracked ignored files are absent, nested repositories/submodules are accepted by
   their listed prefix (their inner ignore rules are not applied by that one git call), and
-  untracked hidden entries are dropped. Outside a git work tree the fallback filters hidden
-  entries only, because Fresh's walk does not consult .gitignore outside a repository. When
-  the probe/listing fails, times out or is truncated, the candidate list is never guessed
-  at (the scope falls back to hidden-only filtering): using the .gitignore rules alone
-  would wrongly drop tracked files that match an ignore pattern, and the grep path has no
-  other .gitignore source. This is bounded and streamed like the search itself. The
-  remote tool's output cap and the panel's Limit still apply before this filter, so an
-  ignored-heavy tree can return fewer than Limit results; the ripgrep path is unchanged
-  (rg applies its own ignore/hidden rules), so a tracked file that matches .gitignore is
-  still omitted there while Fresh's git candidate list (and the grep fallback above)
-  includes it - that tracked-file difference on the rg path is recorded, and when the
-  panel supplies a finder file snapshot that snapshot (already ignore-filtered) is
-  authoritative. No local file is read anywhere in this path.
+  untracked hidden entries are dropped. With a complete listing, the ripgrep path is run
+  with `--no-ignore --hidden -g !.git` and then filtered by the same candidate scope: that
+  is what makes a tracked file which matches .gitignore searchable on the rg path too
+  (rg's own ignore rules omit it, unlike Fresh's git candidate list); the `!.git` glob keeps
+  the repository metadata out of the widened scan. The grep fallback (no rg on the host)
+  runs its ordinary recursive grep and relies on the candidate filter, so its `.gitignore`
+  behaviour comes from git, not from grep. Outside a git work tree the grep fallback filters
+  hidden entries only (Fresh's walk does not consult .gitignore outside a repository) and
+  rg keeps its own defaults. When the probe/listing fails, times out or is truncated, the
+  candidate list is never guessed at (the scope falls back to hidden-only filtering): using
+  the .gitignore rules alone would wrongly drop tracked files that match an ignore pattern.
+  This is bounded and streamed like the search itself. The remote tool's output cap and the
+  panel's Limit still apply before this filter, so an ignored-heavy tree can return fewer
+  than Limit results; in particular the widened rg scan of hidden/ignored trees can consume
+  that cap before candidate-visible results (a recorded limitation). When the panel supplies
+  a finder file snapshot that snapshot (already ignore-filtered) is authoritative. No local
+  file is read anywhere in this path.
   Project Replace now runs
   on the remote host through the authority file system (see the remote-project-replace
   bullet below). The current-file and open-buffers scopes now search the editor's remote
@@ -701,11 +719,13 @@ still loads unchanged.
   the authority's bounded windowed read with an honest truncated marker and stale-request guard
   (the panel's sequence drops superseded answers; a disconnected authority is an error, never a
   local read). Remaining remote gaps: the preview is plain text (no remote syntax spans) and
-  head-only for files over 256 KiB; the grep fallback's scope depends on a complete remote
-  git candidate listing (a failed/truncated listing degrades to hidden-only filtering, and
-  the degradation is not surfaced as a separate notice); nested-repository contents are
-  accepted without applying their inner ignore rules; and the filter runs after the tool's
-  output cap, so the result count can be below Limit. The remote
+  head-only for files over 256 KiB; the whole-tree candidate scope depends on a complete
+  remote git candidate listing (a failed/truncated listing degrades to hidden-only
+  filtering and, on the rg path, keeps rg's defaults - so a tracked file matching
+  .gitignore can still be omitted there; the degradation is not surfaced as a separate
+  notice); nested-repository contents are accepted without applying their inner ignore
+  rules; and the filter runs after the tool's output cap, so the result count can be below
+  Limit. The remote
   ~/~user root is expanded by the remote shell; authority.QuoteDir keeps the tilde word
   expandable and quotes only the tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is
   not a tilde expansion in sh/bash.
@@ -1132,8 +1152,8 @@ still loads unchanged.
   and per-runtime instance-state bounds beyond the workspace count for
   warm co-tenants, the initial terminal-launch record in a workspace descriptor (the
   discovery Import can create a workspace but not attach an argv to it yet), shared
-  shared-buffer follow-ups beyond the bounded slice above (startup-restore sharing, tab-close
-  promotion, large/remote sharing; #19b),
+  shared-buffer follow-ups beyond the bounded slice above (plugin/API-created tab sharing,
+  daemon open-file owner switch, large/remote sharing; #19b),
   a workspace switcher that shows live runtime details (the list shows label/root/state
   only), and making the capture write itself cancellable/ordered under a slow disk beyond
   the quit wait. The extract flow still leaves these open: the cross-workspace

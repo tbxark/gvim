@@ -52,6 +52,12 @@ type FileState struct {
 	Col       int    `json:"col"`
 	Top       int    `json:"top"`
 	StashFile string `json:"stashFile,omitempty"`
+	// Label is the display label of a saved unnamed buffer (an untitled buffer, a
+	// restored shared-buffer conflict copy). Named tabs take their name from Path, so
+	// this is only written for a pathless document with unsaved text. Optional and
+	// additive: an older session file has no label and restores as an ordinary untitled
+	// buffer.
+	Label string `json:"label,omitempty"`
 	// Size and MTimeUnixNano are the size and modification time of the file the text
 	// of StashFile was based on, or zero when unknown. A start that finds the file
 	// different does not let a save overwrite it unasked.

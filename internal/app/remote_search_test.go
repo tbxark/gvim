@@ -584,3 +584,199 @@ func TestParseGitLsFilesEntry(t *testing.T) {
 		}
 	}
 }
+
+// rgScopeOneShot answers the rg path and the Fresh-style git candidate commands.
+func rgScopeOneShot(repo bool, lsFiles []byte, rgOut string, truncated bool) *fakeOneShot {
+	return &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		joined := strings.Join(argv, " ")
+		switch {
+		case strings.Contains(joined, "rev-parse"):
+			if repo {
+				return hostos.ProcResult{Stdout: []byte("true")}, nil
+			}
+			return hostos.ProcResult{Stdout: []byte("false")}, nil
+		case strings.Contains(joined, "ls-files"):
+			return hostos.ProcResult{Stdout: lsFiles, Truncated: truncated}, nil
+		case len(argv) > 0 && argv[0] == "rg":
+			return hostos.ProcResult{Stdout: []byte(rgOut)}, nil
+		}
+		return hostos.ProcResult{}, errors.New("unexpected remote command: " + joined)
+	}}
+}
+
+func rgArgv(one *fakeOneShot) []string {
+	for _, c := range one.recorded() {
+		if len(c.argv) > 0 && c.argv[0] == "rg" {
+			return c.argv
+		}
+	}
+	return nil
+}
+
+// TestRemoteRipgrepUsesFreshGitCandidateScope checks the rg path now finds tracked files
+// that match .gitignore (Fresh's git candidate list includes them): with a complete remote
+// git listing rg runs with --no-ignore --hidden (excluding .git) and the candidate scope
+// keeps tracked-ignored files/tracked dotfiles, drops untracked ignored and untracked
+// hidden results, and accepts descendants of nested repositories. No local file is read.
+func TestRemoteRipgrepUsesFreshGitCandidateScope(t *testing.T) {
+	decoy := t.TempDir()
+	if err := os.WriteFile(filepath.Join(decoy, "b.log"), []byte("local decoy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ls := gitLsEntry("100644", "a.go") +
+		gitLsEntry("100644", "tracked.log") +
+		gitLsEntry("100644", "keep.log") +
+		gitLsEntry("100644", "sub/d.go") +
+		gitLsEntry("100644", ".config") +
+		gitLsEntry("160000", "nested") +
+		gitLsEntry("", "otherrepo/")
+	out := "a.go:1:1:todo a\n" +
+		"tracked.log:1:1:todo t\n" +
+		"keep.log:1:1:todo k\n" +
+		"sub/d.go:1:1:todo d\n" +
+		"b.log:1:1:todo b\n" +
+		"build/x.go:1:1:todo x\n" +
+		"sub/c.tmp:1:1:todo c\n" +
+		".hidden/secret.go:1:1:todo s\n" +
+		".config:1:1:todo cfg\n" +
+		"nested/inner.go:1:1:todo n\n" +
+		"otherrepo/x.go:1:1:todo o\n"
+	one := rgScopeOneShot(true, []byte(ls), out, false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	names := remoteSearchFileNames(t, collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil)))
+	want := "a.go,tracked.log,keep.log,sub/d.go,.config,nested/inner.go,otherrepo/x.go"
+	if got := strings.Join(names, ","); got != want {
+		t.Fatalf("files = %v, want %s", names, want)
+	}
+	argv := rgArgv(one)
+	joined := strings.Join(argv, " ")
+	for _, flag := range []string{"--no-ignore", "--hidden", "-g !.git"} {
+		if !strings.Contains(joined, flag) {
+			t.Fatalf("rg argv = %v, missing %q", argv, flag)
+		}
+	}
+	if got, _ := os.ReadFile(filepath.Join(decoy, "b.log")); string(got) != "local decoy" {
+		t.Fatalf("a local decoy file changed: %q", got)
+	}
+}
+
+// TestRemoteRipgrepWithoutCompleteListingKeepsDefaults checks a non-git workspace (or an
+// incomplete candidate listing) does NOT widen rg: no --no-ignore/--hidden flags, and only
+// hidden results are dropped. rg's own ignore rules still apply on the remote host, so a
+// tracked-ignored file is still omitted there: that is the recorded limitation.
+func TestRemoteRipgrepWithoutCompleteListingKeepsDefaults(t *testing.T) {
+	one := rgScopeOneShot(false, nil, "a.go:1:1:todo a\nb.log:1:1:todo b\n.hidden/x.go:1:1:todo x\n", false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	names := remoteSearchFileNames(t, collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil)))
+	if got := strings.Join(names, ","); got != "a.go,b.log" {
+		t.Fatalf("files = %v, want a.go,b.log (hidden dropped, no candidate widening)", names)
+	}
+	argv := rgArgv(one)
+	joined := strings.Join(argv, " ")
+	if strings.Contains(joined, "--no-ignore") || strings.Contains(joined, "--hidden") || strings.Contains(joined, "!.git") {
+		t.Fatalf("rg argv = %v, want the default ignore/hidden scope", argv)
+	}
+}
+
+// TestRemoteRipgrepTruncatedListingKeepsDefaults checks a truncated candidate listing is
+// not guessed at: rg keeps its own scope (no widening) and the search still completes.
+func TestRemoteRipgrepTruncatedListingKeepsDefaults(t *testing.T) {
+	ls := gitLsEntry("100644", "a.go")
+	one := rgScopeOneShot(true, []byte(ls), "a.go:1:1:todo a\ntracked.log:1:1:todo t\n", true)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	names := remoteSearchFileNames(t, collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil)))
+	if got := strings.Join(names, ","); got != "a.go,tracked.log" {
+		t.Fatalf("files = %v, want no candidate filtering on a truncated listing", names)
+	}
+	argv := rgArgv(one)
+	if strings.Contains(strings.Join(argv, " "), "--no-ignore") {
+		t.Fatalf("rg argv = %v, want no widening on a truncated listing", argv)
+	}
+}
+
+// TestRemoteSearchTimeoutWithCandidateScope checks the candidate commands share the search
+// context: a hanging git probe still ends in the bounded timeout notice, never a hang or a
+// local fallback.
+func TestRemoteSearchTimeoutWithCandidateScope(t *testing.T) {
+	one := &fakeOneShot{script: func(ctx context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		<-ctx.Done()
+		return hostos.ProcResult{}, ctx.Err()
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	s.timeout = 50 * time.Millisecond
+	start := time.Now()
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("the scope timeout took %s", time.Since(start))
+	}
+	if len(batches) != 1 || !batches[0].Done || !strings.Contains(batches[0].Err, "timed out") {
+		t.Fatalf("batches = %+v", batches)
+	}
+}
+
+// TestRemoteSearchCancellationWithCandidateScope checks a cancelled search also cancels the
+// candidate-scope git commands: the channel closes with no Done batch and nothing falls back
+// to a local search.
+func TestRemoteSearchCancellationWithCandidateScope(t *testing.T) {
+	started := make(chan struct{})
+	one := &fakeOneShot{script: func(ctx context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-ctx.Done()
+		return hostos.ProcResult{}, ctx.Err()
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	cancel := make(chan struct{})
+	ch := s.ProjectSearchBatches(searchpanel.SearchRequest{Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles}, cancel)
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the candidate-scope git command did not start")
+	}
+	close(cancel)
+	var seenDone bool
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case b, ok := <-ch:
+			if !ok {
+				if seenDone {
+					t.Fatal("a cancelled search sent a Done batch")
+				}
+				return
+			}
+			if b.Done {
+				seenDone = true
+			}
+		case <-deadline:
+			t.Fatal("a cancelled search did not close its channel")
+		}
+	}
+}

@@ -121,3 +121,39 @@ func TestSessionDirDefaultsToTheUserCache(t *testing.T) {
 		t.Fatalf("DefaultSessionDir() = %q, want %q", dir, want)
 	}
 }
+
+// TestSessionRoundTripKeepsUntitledBufferLabel: the label of a preserved unnamed buffer
+// (a shared-buffer conflict copy) is part of the session, so a restart/repeated restore
+// keeps the buffer recognisable instead of showing a plain Untitled-N tab.
+func TestSessionRoundTripKeepsUntitledBufferLabel(t *testing.T) {
+	apptest.IsolateConfig(t)
+	sessDir := t.TempDir()
+	ed := apptest.NewSessionEditor()
+	ed.Do("new", nil)
+	if res := ed.Do("insert_char", map[string]any{"text": "stale unsaved"}); res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	ed.Active().SetLabel("[shared conflict] shared.txt")
+	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{}))
+
+	s, ok, err := session.Load(sessDir)
+	apptest.Must(t, err)
+	if !ok {
+		t.Fatal("no session was saved")
+	}
+	if len(s.Files) != 1 || s.Files[0].Label != "[shared conflict] shared.txt" {
+		t.Fatalf("saved files = %+v, want the conflict label", s.Files)
+	}
+	restored := apptest.NewSessionEditor()
+	RestoreSession(restored, sessDir, s)
+	doc := restored.Active()
+	if doc == nil || doc.Buffer.Text() != "stale unsaved" {
+		t.Fatalf("restored untitled text = %+v", doc)
+	}
+	if got := doc.Label(); got != "[shared conflict] shared.txt" {
+		t.Fatalf("restored label = %q, want the conflict label", got)
+	}
+	if doc.Name() != "[shared conflict] shared.txt" {
+		t.Fatalf("restored tab name = %q", doc.Name())
+	}
+}

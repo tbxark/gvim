@@ -41,8 +41,10 @@ type lspTab struct {
 // lspEd is an editor whose tabs have paths. It records the files opened, the
 // lines it was sent to, and the edits applied to each path.
 type lspEd struct {
-	tabs    []*lspTab
-	active  int
+	tabs   []*lspTab
+	active int
+	// recent is the explicit MRU tab order (active first); nil falls back to tab order.
+	recent  []int
 	opened  []string
 	gotos   [][2]int
 	applied map[string][]editor.LSPEdit
@@ -114,6 +116,11 @@ func (e *lspEd) DocAt(i int) Document {
 	}
 	return &lspDoc{t: e.tabs[i]}
 }
+
+// RecentTabIndices returns the fake's explicit MRU order, or nil to make the caller
+// fall back to tab order.
+func (e *lspEd) RecentTabIndices() []int { return e.recent }
+
 func (e *lspEd) Tabs() []TabInfo {
 	out := make([]TabInfo, len(e.tabs))
 	for i, t := range e.tabs {

@@ -165,11 +165,15 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	// The grep fallback has no ignore rules of its own (and grep would descend hidden
 	// directories): narrow its output to Fresh's project-file scope. ripgrep already does
 	// that itself, and an index-backed search arrives already filtered by the finder.
-	var scope *remoteGrepResultScope
-	if tool == "grep" && allowed == nil {
-		scope = s.newGrepResultScope(ctx)
+	// Both tools use Fresh's project-file scope on the whole-tree path: one candidate
+	// listing decides what is searched, which is what makes a tracked file that matches
+	// .gitignore searchable (ripgrep's own ignore rules omit it). An index-backed search
+	// arrives already filtered by the finder.
+	var scope *remoteProjectResultScope
+	if allowed == nil {
+		scope = s.newProjectResultScope(ctx)
 	}
-	res, err := s.run(ctx, s.root, remoteSearchArgv(tool, req))
+	res, err := s.run(ctx, s.root, remoteSearchArgv(tool, req, scope))
 	if err != nil {
 		if cancelled() {
 			return
@@ -249,7 +253,8 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	flush(true)
 }
 
-// remoteGrepResultScope narrows the grep fallback to Fresh's project-file scope. Fresh
+// remoteProjectResultScope narrows the whole-tree remote project search to Fresh's
+// project-file scope. Fresh
 // lists a git work tree with `git ls-files --cached --others --exclude-standard`: tracked
 // files are listed even when they match .gitignore, untracked ignored files are left out,
 // and nested repositories/submodules are listed only by name. The scope asks the remote
@@ -257,7 +262,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 // or when the listing fails/times out/is truncated, it degrades to hidden-only filtering
 // (Fresh's walk leaves hidden entries out) and the search continues, never reading local
 // files.
-type remoteGrepResultScope struct {
+type remoteProjectResultScope struct {
 	// listed is true only when the git candidate list is complete and membership is
 	// authoritative; tracked entries (including tracked dotfiles) are accepted, untracked
 	// dotfiles are not.
@@ -270,13 +275,13 @@ type remoteGrepResultScope struct {
 	prefixes []string
 }
 
-// newGrepResultScope probes the remote workspace and, in a git work tree, reads the same
+// newProjectResultScope probes the remote workspace and, in a git work tree, reads the same
 // bounded candidate list Fresh's project_files uses. Any failure (missing git, not a
 // repository, error, truncation) leaves listed false, so the scope only drops hidden
 // entries: an unavailable candidate list must not be guessed at, because guessing with the
 // .gitignore rules alone would wrongly drop tracked files that match an ignore pattern.
-func (s *remoteSearch) newGrepResultScope(ctx context.Context) *remoteGrepResultScope {
-	scope := &remoteGrepResultScope{}
+func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProjectResultScope {
+	scope := &remoteProjectResultScope{}
 	if s.files == nil {
 		return scope
 	}
@@ -337,7 +342,7 @@ func parseGitLsFilesEntry(entry string) (pathPart string, tracked, submodule boo
 // are listed), an untracked dotfile is dropped, and entries below a nested repository are
 // accepted unless the remaining path is hidden. Without a listing only hidden entries are
 // dropped. Paths that escape the workspace or are absolute/empty are refused.
-func (sc *remoteGrepResultScope) allows(rel string) bool {
+func (sc *remoteProjectResultScope) allows(rel string) bool {
 	clean := path.Clean(rel)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
 		return false
@@ -405,7 +410,7 @@ func (s *remoteSearch) probeTool(ctx context.Context) (string, error) {
 // remoteSearchArgv builds the remote search command line: no shell, the query is a single
 // -e argument. rg uses its vimgrep output (file:line:byte-column:text); grep falls back to
 // -r -n -I and the column is recovered from the line text.
-func remoteSearchArgv(tool string, req searchpanel.SearchRequest) []string {
+func remoteSearchArgv(tool string, req searchpanel.SearchRequest, scope *remoteProjectResultScope) []string {
 	switch tool {
 	case "rg":
 		argv := []string{"rg", "--vimgrep", "--no-heading", "--color", "never", "--no-messages"}
@@ -417,6 +422,14 @@ func remoteSearchArgv(tool string, req searchpanel.SearchRequest) []string {
 		}
 		if !req.Options.Regex {
 			argv = append(argv, "-F")
+		}
+		if scope != nil && scope.listed {
+			// The complete Fresh candidate list is available: search ignored and hidden
+			// entries too and let the scope decide, so tracked files that match
+			// .gitignore are found (rg's default ignore rules would omit them). .git is
+			// never in the candidate list. Without a complete listing this stays out:
+			// guessing would both miss tracked-ignored files and widen the scope wrongly.
+			argv = append(argv, "--no-ignore", "--hidden", "-g", "!.git")
 		}
 		return append(argv, "-e", req.Query, ".")
 	default:

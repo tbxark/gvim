@@ -408,11 +408,17 @@ func (m *Model) wordSnapshot(doc Document) (editor.WordSnapshot, bool) {
 	}, true
 }
 
-// otherWordBuffers captures a bounded word window from every other open tab, in tab
-// order (Fresh uses MRU order; gvim's tabs are ordered, so this is the documented
-// residual). The windows are read on the update goroutine like the active one: no
-// disk I/O, large-file documents skipped, and at most editor.OtherWordBufferLimit
-// buffers with editor.OtherWordBufferBytes each.
+// recentTabDocs is the optional MRU order of the editor's tabs: the active tab first,
+// then the tabs in the order they were last active. The app adapter implements it; a
+// fake or an editor without it falls back to tab order.
+type recentTabDocs interface {
+	RecentTabIndices() []int
+}
+
+// otherWordBuffers captures a bounded word window from every other open tab in MRU
+// order, the order Fresh's other-buffer scanning uses. The windows are read on the
+// update goroutine like the active one: no disk I/O, large-file documents skipped, and
+// at most editor.OtherWordBufferLimit buffers with editor.OtherWordBufferBytes each.
 func (m *Model) otherWordBuffers() []editor.WordBuffer {
 	tabs, ok := m.ed.(tabDocs)
 	if !ok {
@@ -420,8 +426,18 @@ func (m *Model) otherWordBuffers() []editor.WordBuffer {
 	}
 	infos := m.ed.Tabs()
 	active := m.activeTab()
+	order := make([]int, 0, len(infos))
+	if recent, ok := m.ed.(recentTabDocs); ok {
+		order = append(order, recent.RecentTabIndices()...)
+	}
+	if len(order) == 0 {
+		// A fake or an editor without MRU history: tab order is the fallback.
+		for i := range infos {
+			order = append(order, i)
+		}
+	}
 	out := make([]editor.WordBuffer, 0, editor.OtherWordBufferLimit)
-	for i := range infos {
+	for _, i := range order {
 		if i == active {
 			continue
 		}

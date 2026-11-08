@@ -271,6 +271,13 @@ func (a *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
 
 // Tabs maps the editor's tabs to the tab strip entries. The path is carried too, so the
 // root can watch the folders of the open tabs and reload the tabs whose files change.
+// RecentTabIndices returns the editor's open tabs in MRU order (the active tab first),
+// as editor.Editor.RecentTabIndices does. The TUI's multi-buffer completion reads it;
+// without it completion falls back to tab order.
+func (a *Editor) RecentTabIndices() []int {
+	return a.ed.RecentTabIndices()
+}
+
 func (a *Editor) Tabs() []tui.TabInfo {
 	tabs := a.ed.Tabs()
 	out := make([]tui.TabInfo, len(tabs))

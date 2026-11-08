@@ -224,10 +224,22 @@ local function fetch_git()
       behind, ahead = tonumber(a), tonumber(b)
     end
   end
+  -- Upstream tracking, as Fresh's dashboard shows it: commits ahead/behind the
+  -- branch's @{upstream}. A branch without an upstream (or a detached HEAD) has none,
+  -- and the row says so instead of failing the section.
+  local track_ahead, track_behind, upstream = 0, 0, false
+  local tracking = trimmed(git_out(root, { "rev-list", "--left-right", "--count", "HEAD...@{upstream}" }, 4096))
+  local ta, tb = tracking:match("^(%d+)%s+(%d+)$")
+  if ta then
+    upstream = true
+    track_ahead, track_behind = tonumber(ta), tonumber(tb)
+  end
   state.git = {
     at = now_ms(), branch = branch, url = url, base = base,
     staged = staged, changed = changed, untracked = untracked,
-    ahead = ahead, behind = behind, missing = false,
+    ahead = ahead, behind = behind,
+    upstream = upstream, track_ahead = track_ahead, track_behind = track_behind,
+    missing = false,
   }
 end
 
@@ -337,6 +349,12 @@ local function build_rows(inner)
     kv("branch", state.git.branch, STYLE.title)
     if state.git.base then
       kv("vs " .. state.git.base, string.format("↑%d ↓%d", state.git.ahead, state.git.behind), STYLE.number)
+    end
+    if state.git.upstream then
+      local color = (state.git.track_ahead + state.git.track_behind) > 0 and STYLE.accent or STYLE.ok
+      kv("tracking", string.format("↑%d ↓%d", state.git.track_ahead, state.git.track_behind), color)
+    else
+      kv("tracking", "no upstream", STYLE.muted)
     end
     kv("working tree", string.format("%d changed · %d staged · %d untracked",
       state.git.changed, state.git.staged, state.git.untracked),

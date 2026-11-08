@@ -233,3 +233,181 @@ func TestWorkspaceSharedBuffersStartupRestoreConflict(t *testing.T) {
 		t.Fatalf("the startup restore wrote the shared file: %q, %v", raw, err)
 	}
 }
+
+// conflictDocFrom returns the untitled [shared conflict] tab of ed, or nil.
+func conflictDocFrom(ed *editor.Editor) *editor.Document {
+	if ed == nil {
+		return nil
+	}
+	for i := 0; i < len(ed.Tabs()); i++ {
+		d := ed.DocAt(i)
+		if d != nil && d.Path == "" && d.Modified() && strings.Contains(d.Label(), "[shared conflict]") {
+			return d
+		}
+	}
+	return nil
+}
+
+// TestWorkspaceSharedBuffersConflictLabelSurvivesRepeatedRestore: a startup-restore
+// conflict tab keeps its [shared conflict] label, text and pathless safety across an
+// eviction/rematerialize cycle and a second one; the live owner's text and the disk file
+// are untouched, and Save As registers the new file in the shared registry so a later
+// restore cannot turn it into an independent copy.
+func TestWorkspaceSharedBuffersConflictLabelSurvivesRepeatedRestore(t *testing.T) {
+	isolateConfig(t)
+	workspacesDir := t.TempDir()
+	t.Setenv("GVIM_WORKSPACE_DIR", workspacesDir)
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	path := filepath.Join(rootA, "shared.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := newWorkspaceManager(t.Context(), Options{
+		Root:       rootA,
+		SessionDir: t.TempDir(),
+		Daemon:     &DaemonOptions{Mode: DaemonServe},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.closeAll)
+	m.mu.Lock()
+	aSession := m.sessions[m.active]
+	m.mu.Unlock()
+	if aSession == nil || aSession.rt == nil {
+		t.Fatal("no foreground workspace runtime")
+	}
+	if err := aSession.rt.ed.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	aSession.rt.ed.Active().Buffer.Insert(buffer.Pos{}, "owner ")
+
+	// Dormant B restores the same path with stale unsaved text.
+	wsB, _, err := m.reg.Create(rootB, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB := wsB.File.StableID
+	dirB, err := m.reg.SessionDir(idB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stash, err := session.StashContent(dirB, "stale unsaved\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := session.Session{Version: 1, Root: rootB, Files: []session.FileState{{Path: path, StashFile: stash, Line: 1}}}
+	if err := session.Save(dirB, layout); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.reg.UpdateLayout(idB, &layout); err != nil {
+		t.Fatal(err)
+	}
+	selectB := func() *workspaceSession {
+		t.Helper()
+		cmd, serr := m.Select(idB)
+		runWorkspaceCmd(t, cmd, serr)
+		m.mu.Lock()
+		sess := m.sessions[idB]
+		m.mu.Unlock()
+		if sess == nil {
+			t.Fatal("B was not materialized")
+		}
+		return sess
+	}
+	evictB := func() {
+		t.Helper()
+		m.materializedCap = 1
+		m.evictToCap()
+		m.materializedCap = 8
+		m.mu.Lock()
+		_, still := m.sessions[idB]
+		m.mu.Unlock()
+		if still {
+			t.Fatal("B was not evicted")
+		}
+	}
+	bSession := selectB()
+	conflict := conflictDocFrom(bSession.rt.ed)
+	if conflict == nil {
+		t.Fatalf("no conflict tab after startup restore: %+v", bSession.rt.ed.Tabs())
+	}
+	wantText := conflict.Buffer.Text()
+	wantLabel := conflict.Label()
+
+	// A owns again; evict B; change the live owner text while B is dormant.
+	if cmd, serr := m.Select(aSession.ws.File.StableID); true {
+		runWorkspaceCmd(t, cmd, serr)
+	}
+	evictB()
+	aSession.rt.ed.Active().InsertText("-more")
+	ownerText := aSession.rt.ed.Active().Buffer.Text()
+
+	for cycle := 1; cycle <= 2; cycle++ {
+		bSession = selectB()
+		if got := bSession.rt.ed.Active().Buffer.Text(); got != ownerText {
+			t.Fatalf("cycle %d: the restored workspace did not take the live owner text: %q, want %q", cycle, got, ownerText)
+		}
+		got := conflictDocFrom(bSession.rt.ed)
+		if got == nil {
+			t.Fatalf("cycle %d: the conflict tab lost its label on restore: %+v", cycle, bSession.rt.ed.Tabs())
+		}
+		if got.Label() != wantLabel || got.Buffer.Text() != wantText {
+			t.Fatalf("cycle %d: conflict tab = label %q text %q, want label %q text %q", cycle, got.Label(), got.Buffer.Text(), wantLabel, wantText)
+		}
+		if got.Path != "" {
+			t.Fatalf("cycle %d: the conflict tab regained a file path: %q", cycle, got.Path)
+		}
+		if raw, err := os.ReadFile(path); err != nil || string(raw) != "one\ntwo\n" {
+			t.Fatalf("cycle %d: restore wrote the shared file: %q, %v", cycle, raw, err)
+		}
+		// Back to A and evict B again for the next cycle.
+		if cmd, serr := m.Select(aSession.ws.File.StableID); true {
+			runWorkspaceCmd(t, cmd, serr)
+		}
+		evictB()
+	}
+
+	// Save As the restored conflict tab: the new file becomes B's shared owner.
+	bSession = selectB()
+	conflict = conflictDocFrom(bSession.rt.ed)
+	if conflict == nil {
+		t.Fatal("no conflict tab before save-as")
+	}
+	idx := -1
+	for i := 0; i < len(bSession.rt.ed.Tabs()); i++ {
+		if bSession.rt.ed.DocAt(i) == conflict {
+			idx = i
+		}
+	}
+	bSession.rt.ed.ActivateTab(idx)
+	newPath := filepath.Join(rootB, "kept.txt")
+	if err := bSession.rt.ed.SaveAs(newPath); err != nil {
+		t.Fatalf("save the restored conflict: %v", err)
+	}
+	if raw, err := os.ReadFile(newPath); err != nil || string(raw) != wantText {
+		t.Fatalf("new file = %q, %v, want the conflict text", raw, err)
+	}
+	if got := m.shared.OwnerLabel(m.shared.CanonicalPath(newPath)); got != "B" {
+		t.Fatalf("new file owner = %q, want B", got)
+	}
+	// One more cycle: the new file is restored and re-registered as shared.
+	if cmd, serr := m.Select(aSession.ws.File.StableID); true {
+		runWorkspaceCmd(t, cmd, serr)
+	}
+	evictB()
+	bSession = selectB()
+	found := false
+	for i := 0; i < len(bSession.rt.ed.Tabs()); i++ {
+		if d := bSession.rt.ed.DocAt(i); d != nil && d.Path == newPath {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the saved-as file was not restored: %+v", bSession.rt.ed.Tabs())
+	}
+	if got := m.shared.OwnerLabel(m.shared.CanonicalPath(newPath)); got != "B" {
+		t.Fatalf("after restore, the new file owner = %q, want B", got)
+	}
+}

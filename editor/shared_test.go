@@ -420,3 +420,218 @@ func TestSharedBuffersAdoptLoadedUnmodified(t *testing.T) {
 		t.Fatal("the shared entry lost its owner label")
 	}
 }
+
+// sharedConflictEditor sets up two workspaces sharing path: a owns it with live unsaved
+// text, b restores an unsaved stale copy of the same path and takes ownership once, then
+// a takes ownership back. b therefore holds a mirror tab and an untitled conflict copy.
+func sharedConflictEditor(t *testing.T, shared *SharedBuffers) (a, b *Editor, path, conflictText string) {
+	t.Helper()
+	path = writeSharedFile(t, "base\n")
+	a = New(Options{Empty: true, Shared: shared})
+	b = New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	a.Active().Buffer.Insert(buffer.Pos{}, "owner ")
+	restored := document.NewStdinDocument("stale\n")
+	restored.Rename(path)
+	restored.Buffer.Insert(buffer.Pos{}, "stale ")
+	b.OpenLoaded(restored)
+	shared.Focus(b)
+	shared.Focus(a)
+	for i := 0; i < len(b.Tabs()); i++ {
+		if d := b.DocAt(i); d != nil && d.Path == "" {
+			conflictText = d.Buffer.Text()
+		}
+	}
+	if conflictText == "" {
+		t.Fatal("the conflict tab is missing")
+	}
+	return a, b, path, conflictText
+}
+
+// TestSharedBuffersConflictSaveAsCannotOverwriteOwner: Save As (even forced) to the path
+// the other workspace owns is refused, so a restored conflict copy can never overwrite
+// the owner's live file; the disk and the owner's text stay untouched.
+func TestSharedBuffersConflictSaveAsCannotOverwriteOwner(t *testing.T) {
+	shared := NewSharedBuffers()
+	shared.Label = func(ed *Editor) string {
+		switch ed {
+		case nil:
+			return ""
+		}
+		return "A"
+	}
+	a, b, path, _ := sharedConflictEditor(t, shared)
+	// Close the mirror tab: only the conflict copy is left in b, so the ordinary open-tab
+	// check cannot catch the target; the shared registry must.
+	for i := 0; i < len(b.Tabs()); i++ {
+		if d := b.DocAt(i); d != nil && d.Path == path {
+			if err := b.CloseTab(i, true); err != nil {
+				t.Fatalf("close mirror: %v", err)
+			}
+			break
+		}
+	}
+	var conflictIdx = -1
+	for i := 0; i < len(b.Tabs()); i++ {
+		if d := b.DocAt(i); d != nil && d.Path == "" && d.Modified() {
+			conflictIdx = i
+			break
+		}
+	}
+	if conflictIdx < 0 {
+		t.Fatal("no conflict tab")
+	}
+	b.ActivateTab(conflictIdx)
+	if _, err := b.PlanSaveAs(path, true); err == nil || !strings.Contains(err.Error(), "open in A") {
+		t.Fatalf("forced save-as over the owner = %v, want a shared-ownership refusal", err)
+	}
+	if err := b.SaveAs(path); err == nil {
+		t.Fatal("save-as over the owner's path succeeded")
+	}
+	if raw, err := os.ReadFile(path); err != nil || string(raw) != "base\n" {
+		t.Fatalf("the refused save-as wrote the disk: %q, %v", raw, err)
+	}
+	if got := a.Active().Buffer.Text(); got != "owner base\n" {
+		t.Fatalf("the owner's text changed: %q", got)
+	}
+	if b.Active() == nil || !strings.Contains(b.Active().Buffer.Text(), "stale") {
+		t.Fatalf("the conflict text was lost: %+v", b.Active())
+	}
+}
+
+// TestSharedBuffersConflictSaveAsNewPathBecomesShared: saving a restored conflict copy
+// under a new name makes that file the workspace's canonical shared buffer, so another
+// workspace opening it shares it instead of opening an independent copy that could
+// overwrite it later.
+func TestSharedBuffersConflictSaveAsNewPathBecomesShared(t *testing.T) {
+	shared := NewSharedBuffers()
+	labels := map[*Editor]string{}
+	shared.Label = func(ed *Editor) string { return labels[ed] }
+	a, b, _, conflictText := sharedConflictEditor(t, shared)
+	labels[a], labels[b] = "A", "B"
+	newPath := filepath.Join(t.TempDir(), "kept.txt")
+	var conflictIdx = -1
+	for i := 0; i < len(b.Tabs()); i++ {
+		if d := b.DocAt(i); d != nil && d.Path == "" && d.Modified() {
+			conflictIdx = i
+			break
+		}
+	}
+	b.ActivateTab(conflictIdx)
+	if err := b.SaveAs(newPath); err != nil {
+		t.Fatalf("save the conflict copy: %v", err)
+	}
+	if raw, err := os.ReadFile(newPath); err != nil || string(raw) != conflictText {
+		t.Fatalf("new file = %q, %v; want the conflict text", raw, err)
+	}
+	if got := shared.OwnerLabel(shared.CanonicalPath(newPath)); got != "B" {
+		t.Fatalf("new file owner = %q, want B (the save-as must register the path)", got)
+	}
+	// A third workspace opening the new path sees the shared buffer: it takes ownership
+	// as the focused workspace and b keeps a mirror of the same text, not an independent
+	// duplicate.
+	c := New(Options{Empty: true, Shared: shared})
+	labels[c] = "C"
+	shared.Focus(c)
+	if err := c.OpenFile(newPath); err != nil {
+		t.Fatal(err)
+	}
+	if c.Active().SharedMirror() {
+		t.Fatal("the focused workspace did not take ownership of the shared new file")
+	}
+	if got := c.Active().Buffer.Text(); got != conflictText {
+		t.Fatalf("new workspace text = %q, want the saved conflict text", got)
+	}
+	if !b.Active().SharedMirror() && b.Active().Path == newPath {
+		t.Fatal("b kept the canonical document instead of becoming a mirror")
+	}
+}
+
+// TestSharedBuffersOwnerSaveAsRekeysViews: Save As on a shared owner keeps one buffer
+// identity: the old path stops being shared and its untouched disk file can be opened
+// independently, while the mirrors follow the renamed buffer to the new path.
+func TestSharedBuffersOwnerSaveAsRekeysViews(t *testing.T) {
+	shared := NewSharedBuffers()
+	labels := map[*Editor]string{}
+	shared.Label = func(ed *Editor) string { return labels[ed] }
+	dir := t.TempDir()
+	path1 := filepath.Join(dir, "one.txt")
+	path2 := filepath.Join(dir, "two.txt")
+	if err := os.WriteFile(path1, []byte("one\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	labels[a], labels[b] = "A", "B"
+	shared.Focus(a)
+	if err := a.OpenFile(path1); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.OpenFile(path1); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(b)
+	shared.Focus(a)
+	if !b.Active().SharedMirror() {
+		t.Fatal("b did not start as the mirror")
+	}
+	if err := a.SaveAs(path2); err != nil {
+		t.Fatalf("owner save-as: %v", err)
+	}
+	if got := shared.OwnerLabel(shared.CanonicalPath(path1)); got != "" {
+		t.Fatalf("the old path is still shared by %q", got)
+	}
+	if got := shared.OwnerLabel(shared.CanonicalPath(path2)); got != "A" {
+		t.Fatalf("the new path owner = %q, want A", got)
+	}
+	if b.Active() == nil || b.Active().Path != path2 || !b.Active().SharedMirror() {
+		t.Fatalf("the mirror view did not follow the renamed buffer: %+v", b.Active())
+	}
+	if raw, err := os.ReadFile(path1); err != nil || string(raw) != "one\n" {
+		t.Fatalf("save-as changed the old file: %q, %v", raw, err)
+	}
+	// The old path is no longer shared: opening it elsewhere loads the untouched file as
+	// an ordinary independent buffer.
+	c := New(Options{Empty: true, Shared: shared})
+	labels[c] = "C"
+	shared.Focus(c)
+	if err := c.OpenFile(path1); err != nil {
+		t.Fatal(err)
+	}
+	if c.Active().SharedMirror() {
+		t.Fatal("the old path reopened as a mirror")
+	}
+	for i := 0; i < len(b.Tabs()); i++ {
+		if d := b.DocAt(i); d != nil && d.Path == path1 {
+			t.Fatal("b still has a view of the old path")
+		}
+	}
+}
+
+// TestSharedBuffersMirrorSaveAsRefused: a read-only mirror is a view of another
+// workspace's buffer; Save As must not fork it into an independent file under the
+// registry's nose.
+func TestSharedBuffersMirrorSaveAsRefused(t *testing.T) {
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	path := writeSharedFile(t, "plain\n")
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(b)
+	shared.Focus(a)
+	if !b.Active().SharedMirror() {
+		t.Fatal("b is not a mirror")
+	}
+	if err := b.SaveAs(filepath.Join(t.TempDir(), "copy.txt")); err == nil || !strings.Contains(err.Error(), "read-only mirror") {
+		t.Fatalf("save-as on a mirror = %v, want a refusal", err)
+	}
+}

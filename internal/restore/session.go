@@ -83,6 +83,11 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 			Col:  doc.Cursor.Col + 1,
 			Top:  doc.Top,
 		}
+		if doc.Path == "" {
+			// The label of a preserved unnamed buffer (a shared-buffer conflict copy)
+			// survives the session, so a repeated restore keeps it recognisable.
+			fs.Label = doc.Label()
+		}
 		if view := doc.View(); view != nil {
 			if view.PageView != nil {
 				on := *view.PageView
@@ -267,6 +272,9 @@ func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace boo
 	doc := ed.Active()
 	if doc == nil {
 		return false, errors.New("no tab was opened")
+	}
+	if f.Path == "" && f.Label != "" {
+		doc.SetLabel(f.Label)
 	}
 	if f.StashFile != "" && doc.Large() {
 		// The stash is a whole text, and a large document is never replaced whole.

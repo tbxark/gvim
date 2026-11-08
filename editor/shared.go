@@ -529,6 +529,87 @@ func (s *SharedBuffers) DropEditor(e *Editor) {
 	}
 }
 
+// CheckSaveAs refuses a Save As target that another workspace owns (or that this
+// workspace owns with a different document). A save-as must never write a file that is
+// live as another workspace's canonical document: the write would silently diverge from
+// the owner's in-memory text, and a later owner save would overwrite the saved copy. A
+// read-only mirror cannot be saved-as either: it is a view of another workspace's
+// buffer, and a copy would fork it without the registry knowing.
+func (s *SharedBuffers) CheckSaveAs(e *Editor, d *document.Document, path string) error {
+	if s == nil || e == nil || d == nil || path == "" {
+		return nil
+	}
+	if d.SharedMirror() {
+		return errors.New("save as: the tab is a read-only mirror of another workspace's buffer; focus its workspace to take ownership first")
+	}
+	canonical := sharedCanonical(path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[canonical]
+	if entry == nil {
+		return nil
+	}
+	if entry.owner == e && entry.doc == d {
+		return nil
+	}
+	return fmt.Errorf("save as: %s is open in %s; save under another name or close it there first",
+		filepath.Base(canonical), s.label(entry.owner))
+}
+
+// AfterSaveAs updates the registry after a document actually took newPath (Save As
+// renamed it). A shared OWNER keeps its buffer identity: the entry is rekeyed to the new
+// path, its mirrors follow (their view shows the renamed buffer) and the old path stops
+// being shared, so opening it later loads the untouched old file independently. A
+// conflict/untitled copy that becomes a real file is registered as the owner of its new
+// path, so another workspace opening it shares instead of opening an independent copy
+// that could overwrite it. oldPath is the document's path before the save ("" for an
+// untitled buffer); the caller stays within the registry's UI goroutine.
+func (s *SharedBuffers) AfterSaveAs(e *Editor, d *document.Document, oldPath, newPath string) {
+	if s == nil || e == nil || d == nil || newPath == "" || d.SharedMirror() {
+		return
+	}
+	newCanonical := sharedCanonical(newPath)
+	oldCanonical := ""
+	if oldPath != "" {
+		oldCanonical = sharedCanonical(oldPath)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if oldCanonical != "" && oldCanonical != newCanonical {
+		if entry := s.entries[oldCanonical]; entry != nil && entry.owner == e && entry.doc == d {
+			// The buffer was renamed: keep one canonical document and one entry, now
+			// keyed by the new path. The views in other workspaces follow it, matching
+			// Fresh's "view state is per split, buffer identity is shared".
+			delete(s.entries, oldCanonical)
+			s.unwatchLocked(entry)
+			entry.canonical = newCanonical
+			for _, mirror := range entry.mirrors {
+				mirror.Rename(d.Path)
+				if err := mirror.SyncMirrorFrom(d); err != nil {
+					mirror.SetSharedMirrorStatus("Cross-workspace mirror: " + err.Error())
+				} else {
+					mirror.SetSharedMirrorStatus("Mirror of " + s.label(e) + ": read-only until focused")
+				}
+			}
+			s.entries[newCanonical] = entry
+			s.watchLocked(entry, e)
+			return
+		}
+	}
+	if _, exists := s.entries[newCanonical]; exists {
+		// Another workspace claimed the path between the plan and the apply (the write
+		// already happened): do not replace its entry; keep this document independent
+		// and say so instead of silently sharing two different texts.
+		if entry := s.entries[newCanonical]; entry != nil && (entry.owner != e || entry.doc != d) {
+			d.Status = "Saved, but " + filepath.Base(newCanonical) + " is open in " + s.label(entry.owner) + "; the copy stays independent"
+		}
+		return
+	}
+	entry := &sharedEntry{canonical: newCanonical, owner: e, doc: d, mirrors: map[*Editor]*document.Document{}}
+	s.entries[newCanonical] = entry
+	s.watchLocked(entry, e)
+}
+
 // CanonicalPath returns the registry key of path (exposed for the app's open-path
 // routing to compare with its own canonical form).
 func (s *SharedBuffers) CanonicalPath(path string) string { return sharedCanonical(path) }

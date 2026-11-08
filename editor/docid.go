@@ -21,13 +21,18 @@ func (e *Editor) addDoc(d *Document) {
 	e.adopt(d)
 	e.seedRulers(d)
 	e.docs = append(e.docs, d)
+	e.touchRecent(d)
 }
 
 // setDoc puts d in place of tab i, whose document the caller has released.
 func (e *Editor) setDoc(i int, d *Document) {
+	if i >= 0 && i < len(e.docs) {
+		e.forgetRecent(e.docs[i])
+	}
 	e.adopt(d)
 	e.seedRulers(d)
 	e.docs[i] = d
+	e.touchRecent(d)
 }
 
 // adoptAll adopts every document, for the callers that look documents up.

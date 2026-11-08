@@ -102,6 +102,12 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 		e.setError(err)
 		return SavePlan{}, err
 	}
+	if e.shared != nil {
+		if err := e.shared.CheckSaveAs(e, d, path); err != nil {
+			e.setError(err)
+			return SavePlan{}, err
+		}
+	}
 	job := d.PlanSave(path, e.opts.documentSettings())
 	job.CheckDisk = false
 	job.RefuseExisting = !force
@@ -154,8 +160,14 @@ func (e *Editor) ApplySavePlan(p SavePlan, results []SaveResult) error {
 	}
 	d := results[0].Job.Doc
 	if p.renameTo != "" {
+		oldPath := d.Path
 		d.Rename(p.renameTo)
 		d.SetPreview(false)
+		if e.shared != nil {
+			// Save As may have renamed a shared owner's buffer (its views follow) or
+			// turned a restored conflict copy into a real file (it becomes the owner).
+			e.shared.AfterSaveAs(e, d, oldPath, p.renameTo)
+		}
 	}
 	// The note is taken either way. An edit that landed while the write was in flight
 	// leaves the status empty, since the buffer is no longer the text that was saved.
