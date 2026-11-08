@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/plugin"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // TestKqueueDirLimit: on kqueue platforms a directory with more than 512 entries is not

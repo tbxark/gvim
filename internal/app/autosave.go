@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/editor"
 )
 
 // errAutoSaveWriting is what an explicit save returns while a planned auto-save is

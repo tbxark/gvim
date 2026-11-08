@@ -6,9 +6,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/tbxark/gvim/internal/decor"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // Virtual buffers of the plugin host (stage S18, FINAL X10): the BufferEditor methods that
@@ -155,7 +155,7 @@ func (p textPos) after(s string) textPos {
 type contentBuilder struct {
 	text  strings.Builder
 	at    textPos
-	items []decor.Item
+	items []decorations.Item
 	props []editor.PropSpan
 }
 
@@ -164,8 +164,8 @@ func (c *contentBuilder) full() error {
 	switch {
 	case c.text.Len() > editor.MaxVirtualText:
 		return pluginapi.Errf(pluginapi.CodeTooLarge, "content is over %d bytes", editor.MaxVirtualText)
-	case len(c.items) > decor.MaxPerNamespace:
-		return pluginapi.Errf(pluginapi.CodeLimit, "too many styled runs in the content (max %d)", decor.MaxPerNamespace)
+	case len(c.items) > decorations.MaxPerNamespace:
+		return pluginapi.Errf(pluginapi.CodeLimit, "too many styled runs in the content (max %d)", decorations.MaxPerNamespace)
 	}
 	return nil
 }
@@ -187,8 +187,8 @@ func (c *contentBuilder) style(start textPos, text string, st pluginapi.Style, p
 	if end == start {
 		return
 	}
-	c.items = append(c.items, decor.Item{
-		Kind: decor.Highlight, FromLine: start.line, FromCol: start.col, ToLine: end.line, ToCol: end.col,
+	c.items = append(c.items, decorations.Item{
+		Kind: decorations.Highlight, FromLine: start.line, FromCol: start.col, ToLine: end.line, ToCol: end.col,
 		Style: contentStyle(st), Priority: priority,
 	})
 }
@@ -221,11 +221,11 @@ func (c *contentBuilder) entry(e pluginapi.ContentEntry) error {
 }
 
 // contentStyle converts the style of a content run to a decoration style.
-func contentStyle(s pluginapi.Style) decor.Style {
-	color := func(c pluginapi.Color) decor.Color {
-		return decor.Color{Key: c.Key, R: c.R, G: c.G, B: c.B, Set: c.Set}
+func contentStyle(s pluginapi.Style) decorations.Style {
+	color := func(c pluginapi.Color) decorations.Color {
+		return decorations.Color{Key: c.Key, R: c.R, G: c.G, B: c.B, Set: c.Set}
 	}
-	return decor.Style{
+	return decorations.Style{
 		FG: color(s.FG), BG: color(s.BG),
 		Bold: s.Bold, Italic: s.Italic, Underline: s.Underline, Strike: s.Strike, Reverse: s.Reverse, Extend: s.Extend,
 	}
@@ -259,7 +259,7 @@ func (p *pluginEditor) SetContent(id pluginapi.BufferID, entries []pluginapi.Con
 		err = p.decor.Set(uint64(id), virtualOwner(id), virtualNS, c.items)
 	}
 	p.a.editedDoc(d)
-	if errors.Is(err, decor.ErrFull) {
+	if errors.Is(err, decorations.ErrFull) {
 		return pluginapi.Errf(pluginapi.CodeLimit, "too many styled runs in the content")
 	}
 	return editorErr(err)

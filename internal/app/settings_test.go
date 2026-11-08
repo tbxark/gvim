@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/tui"
 )
 
 func TestNestedConfigReachesEditorAndUI(t *testing.T) {
@@ -69,7 +69,7 @@ func TestDefaultConfigGivesFreshViewDefaults(t *testing.T) {
 	}
 	// The status bar lists are the one place where DefaultViewOptions leaves the
 	// layout to gvim, and the icon set is resolved from the terminal.
-	want := ui.DefaultViewOptions()
+	want := tui.DefaultViewOptions()
 	v.StatusBar = want.StatusBar
 	v.UIIcons = want.UIIcons
 	if !reflect.DeepEqual(v, want) {

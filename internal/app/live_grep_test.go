@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/ui/palette"
+	"github.com/tbxark/gvim/internal/tui/palette"
 )
 
 // writeTree writes each file under dir, creating the folders it needs.

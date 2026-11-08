@@ -3,10 +3,10 @@ package app
 import (
 	"path/filepath"
 
-	"github.com/tbxark/gvim/internal/gitx"
+	"github.com/tbxark/gvim/gitstate"
 )
 
-// gitStatus is the root's GitStatus port over internal/gitx. It finds the work tree
+// gitStatus is the root's GitStatus port over internal/gitstate. It finds the work tree
 // that holds the folder and returns the status letter of each changed path, keyed
 // by absolute path.
 type gitStatus struct{}
@@ -14,11 +14,11 @@ type gitStatus struct{}
 // Marks returns the status letters of the work tree that holds dir. A folder
 // outside a repository has none.
 func (gitStatus) Marks(dir string) (map[string]rune, error) {
-	root, ok := gitx.FindRoot(dir)
+	root, ok := gitstate.FindRoot(dir)
 	if !ok {
 		return nil, nil
 	}
-	st, err := gitx.Status(root)
+	st, err := gitstate.Status(root)
 	if err != nil {
 		return nil, err
 	}
@@ -30,19 +30,19 @@ func (gitStatus) Marks(dir string) (map[string]rune, error) {
 }
 
 // gitMark is the letter the explorer shows for a changed path.
-func gitMark(s gitx.FileStatus) rune {
+func gitMark(s gitstate.FileStatus) rune {
 	switch s {
-	case gitx.Added:
+	case gitstate.Added:
 		return 'A'
-	case gitx.Modified:
+	case gitstate.Modified:
 		return 'M'
-	case gitx.Deleted:
+	case gitstate.Deleted:
 		return 'D'
-	case gitx.Untracked:
+	case gitstate.Untracked:
 		return 'U'
-	case gitx.Renamed:
+	case gitstate.Renamed:
 		return 'R'
-	case gitx.Conflicted:
+	case gitstate.Conflicted:
 		return 'C'
 	}
 	return '?'

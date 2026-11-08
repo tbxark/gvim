@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/session"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/session"
 )
 
 // recoveryDirName is the folder of the session directory that holds the crash-recovery

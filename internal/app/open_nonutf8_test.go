@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/session"
 )
 
 // latin1File writes a Latin-1 file of about 5 KiB, which is large for a 1 KiB threshold.
@@ -20,7 +20,7 @@ func latin1File(t *testing.T, dir string) string {
 }
 
 // A large file that is not UTF-8 is not decoded whole before the first frame: it gets no
-// tab, and the UI asks about it once it runs (ui.RootPorts.FullLoadPrompts).
+// tab, and the UI asks about it once it runs (tui.RootPorts.FullLoadPrompts).
 func TestFileArgumentsLeaveANonUTF8FileOfLargeSizeToThePrompt(t *testing.T) {
 	root := t.TempDir()
 	other := filepath.Join(root, "a.txt")
@@ -43,7 +43,7 @@ func TestSessionRestoreOpensANonUTF8FileOfLargeSize(t *testing.T) {
 	d, err := load()
 	must(t, err)
 	ed.OpenLoaded(d)
-	must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 	s, _, err := session.Load(sess)
 	must(t, err)
 
@@ -57,7 +57,7 @@ func TestSessionRestoreOpensANonUTF8FileOfLargeSize(t *testing.T) {
 
 	// Unsaved text of such a file comes back as well.
 	ed.Do("insert_char", map[string]any{"text": "typed "})
-	must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 	s, _, err = session.Load(sess)
 	must(t, err)
 	ed3 := editor.New(largeOpts())

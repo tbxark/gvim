@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	expanel "github.com/tbxark/gvim/internal/ui/explorer"
+	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 )
 
 const conflictFile = "head\n" +

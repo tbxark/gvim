@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/session"
 )
 
 // saveWithFailedRestore writes a session whose one file has unsaved text in a stash
@@ -37,7 +37,7 @@ func saveWithFailedRestore(t *testing.T, carry bool) (sessDir, stash string, fai
 			carried = append(carried, u.file)
 		}
 	}
-	must(t, writeSession(ed, sessDir, ui.ExplorerState{}, carried))
+	must(t, writeSession(ed, sessDir, tui.ExplorerState{}, carried))
 	return sessDir, stash, failed
 }
 

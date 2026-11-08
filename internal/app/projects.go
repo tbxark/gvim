@@ -6,11 +6,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tbxark/gvim/internal/explorer"
-	"github.com/tbxark/gvim/internal/explorer/watch"
-	"github.com/tbxark/gvim/internal/finder"
-	"github.com/tbxark/gvim/internal/ui"
-	"github.com/tbxark/gvim/internal/workspace"
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/internal/filewatch"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/workspace"
 )
 
 // projectOpener is the root's Projects port. Opening a folder records it in the
@@ -19,7 +19,7 @@ import (
 // the current index, so close can stop it when the program ends.
 type projectOpener struct {
 	ctx     context.Context
-	watcher *watch.Watcher // nil when the watcher could not start
+	watcher *filewatch.Watcher // nil when the watcher could not start
 
 	mu    sync.Mutex
 	root  string        // the folder the watcher watches
@@ -33,7 +33,7 @@ type projectOpener struct {
 // Open makes path the project root. A failure to record the folder in the recent
 // list does not stop the open. A folder that cannot be opened is an error, and
 // nothing is changed.
-func (p *projectOpener) Open(path string) (ui.Project, error) {
+func (p *projectOpener) Open(path string) (tui.Project, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	r, err := workspace.Switch(path)
@@ -41,11 +41,11 @@ func (p *projectOpener) Open(path string) (ui.Project, error) {
 		if err == nil {
 			err = fmt.Errorf("open workspace %s: no root", path)
 		}
-		return ui.Project{}, err
+		return tui.Project{}, err
 	}
 	tree, err := explorer.Open(r.Path())
 	if err != nil {
-		return ui.Project{}, err
+		return tui.Project{}, err
 	}
 	idx := finder.Start(p.ctx, r.Path())
 	if p.watcher != nil {
@@ -62,12 +62,12 @@ func (p *projectOpener) Open(path string) (ui.Project, error) {
 	if old != nil {
 		old.Close()
 	}
-	return ui.Project{Tree: tree, Files: idx, Recents: recentFolders()}, nil
+	return tui.Project{Tree: tree, Files: idx, Recents: recentFolders()}, nil
 }
 
 // newProjectOpener returns the opener of the first root. Its index is files, and
 // when there is a watcher, the watcher is pointed at root.
-func newProjectOpener(ctx context.Context, watcher *watch.Watcher, root string, files *finder.Index) *projectOpener {
+func newProjectOpener(ctx context.Context, watcher *filewatch.Watcher, root string, files *finder.Index) *projectOpener {
 	p := &projectOpener{ctx: ctx, watcher: watcher, index: files}
 	p.current.Store(&root)
 	if watcher != nil {

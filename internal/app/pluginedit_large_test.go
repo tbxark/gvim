@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // largeIndexedPluginEditor opens a file of the given number of 13 byte lines in large file

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/search"
-	"github.com/tbxark/gvim/internal/ui/palette"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/search"
 )
 
 // Limits of a live grep. A query reads at most grepMaxFiles files of the index,

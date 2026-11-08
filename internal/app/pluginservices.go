@@ -9,15 +9,15 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/diff"
-	"github.com/tbxark/gvim/internal/encoding"
-	"github.com/tbxark/gvim/internal/finder"
-	"github.com/tbxark/gvim/internal/fuzzy"
-	"github.com/tbxark/gvim/internal/gitx"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/search"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/diff"
+	"github.com/tbxark/gvim/encoding"
+	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/fuzzy"
+	"github.com/tbxark/gvim/gitstate"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/search"
 )
 
 // pluginServices is pluginapi.Services over the domain packages: display width and
@@ -207,11 +207,11 @@ func (pluginServices) Decode(name string, data []byte) (string, error) {
 }
 
 // GitRoot returns the work tree root that holds dir.
-func (pluginServices) GitRoot(dir string) (string, bool) { return gitx.FindRoot(dir) }
+func (pluginServices) GitRoot(dir string) (string, bool) { return gitstate.FindRoot(dir) }
 
 // GitBranch returns the checked-out branch of the work tree root.
 func (pluginServices) GitBranch(root string) (string, error) {
-	b, err := gitx.Branch(root)
+	b, err := gitstate.Branch(root)
 	if err != nil {
 		return "", pluginapi.Errf(pluginapi.CodeNotFound, "%v", err)
 	}

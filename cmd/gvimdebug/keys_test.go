@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/term"
+	"github.com/tbxark/gvim/internal/terminal"
 )
 
 func TestEncodeKey(t *testing.T) {
@@ -101,10 +101,10 @@ func TestMouseBytesRejects(t *testing.T) {
 }
 
 func TestFrameHTMLEscapesAndStyles(t *testing.T) {
-	sc := term.NewScreen(1, 3, []term.Cell{
+	sc := terminal.NewScreen(1, 3, []terminal.Cell{
 		{Rune: '<'},
-		{Rune: 'b', Style: term.Style{Bold: true}},
-		{Rune: '&', Style: term.Style{Bold: true}},
+		{Rune: 'b', Style: terminal.Style{Bold: true}},
+		{Rune: '&', Style: terminal.Style{Bold: true}},
 	})
 	got := frameHTML(sc)
 	for _, want := range []string{"&lt;", "&amp;", "font-weight:bold;"} {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/ui/icons"
+	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/uitest"
 )
 

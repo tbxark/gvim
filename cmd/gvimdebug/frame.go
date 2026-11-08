@@ -6,7 +6,7 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/tbxark/gvim/internal/term"
+	"github.com/tbxark/gvim/internal/terminal"
 )
 
 // Default colours of a cell that gvim did not colour: the dark theme's defaults.
@@ -18,7 +18,7 @@ var (
 // frameHTML renders a screen as one line of spans per row. A run of cells with the
 // same style is one span, and every colour is written out in full. The cursor cell is
 // drawn inverted while the cursor is visible.
-func frameHTML(sc term.Screen) string {
+func frameHTML(sc terminal.Screen) string {
 	var b strings.Builder
 	for row := range sc.Rows {
 		open := ""
@@ -51,7 +51,7 @@ func frameHTML(sc term.Screen) string {
 
 // cellCSS is the inline style of a cell: its colours, bold and underline. Reverse
 // video and the cursor both swap the colours, so both together swap them back.
-func cellCSS(c term.Cell, cursor bool) string {
+func cellCSS(c terminal.Cell, cursor bool) string {
 	fg, bg := colorOf(c.Style.Fg, defaultFg), colorOf(c.Style.Bg, defaultBg)
 	if c.Style.Reverse != cursor {
 		fg, bg = bg, fg

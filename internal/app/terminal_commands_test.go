@@ -10,12 +10,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/explorer"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
-	"github.com/tbxark/gvim/internal/ui/palette"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
 // recordingStarter records the directory of each start and fails it, so no shell
@@ -26,7 +26,7 @@ type recordingStarter struct {
 
 var errNoShellInTest = errors.New("no shell in this test")
 
-func (s *recordingStarter) Start(dir string, cols, rows int) (ui.Terminal, error) {
+func (s *recordingStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
 	s.dirs = append(s.dirs, dir)
 	return nil, errNoShellInTest
 }
@@ -81,9 +81,9 @@ func TestTerminalPaletteCommandsRunInTheApp(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			m := ui.New(newUIDeps(editor.New(editor.Options{}), keymap.Default(), theme.Theme{}, tree, nil))
+			m := tui.New(newUIDeps(editor.New(editor.Options{}), keymap.Default(), theme.Theme{}, tree, nil))
 			starter := &recordingStarter{}
-			m.SetDock(ui.DockPorts{Starter: starter})
+			m.SetDock(tui.DockPorts{Starter: starter})
 			m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 			_, cmd := m.Update(palette.RunCommandMsg{Action: tt.action})

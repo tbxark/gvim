@@ -9,9 +9,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // openText writes text to name in a temporary folder and opens it in a new editor.

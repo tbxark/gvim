@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 
-	"github.com/tbxark/gvim/internal/finder"
-	"github.com/tbxark/gvim/internal/ui/palette"
+	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/internal/tui/palette"
 )
 
 // Compile-time checks: the file index and the ranker satisfy the ports the

@@ -7,21 +7,21 @@ import (
 
 	"github.com/go-git/go-git/v5"
 
-	"github.com/tbxark/gvim/internal/gitx"
+	"github.com/tbxark/gvim/gitstate"
 )
 
 func TestGitMarkLetters(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		status gitx.FileStatus
+		status gitstate.FileStatus
 		want   rune
 	}{
-		{gitx.Added, 'A'},
-		{gitx.Modified, 'M'},
-		{gitx.Deleted, 'D'},
-		{gitx.Untracked, 'U'},
-		{gitx.Renamed, 'R'},
-		{gitx.Conflicted, 'C'},
+		{gitstate.Added, 'A'},
+		{gitstate.Modified, 'M'},
+		{gitstate.Deleted, 'D'},
+		{gitstate.Untracked, 'U'},
+		{gitstate.Renamed, 'R'},
+		{gitstate.Conflicted, 'C'},
 	}
 	for _, tt := range tests {
 		if got := gitMark(tt.status); got != tt.want {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate internal/ui/menubar/menu_table_gen.go from the legacy Fresh menu source.
+"""Generate internal/tui/menubar/menu_table_gen.go from the legacy Fresh menu source.
 
 The menu bar is read from refs/fresh/crates/fresh-editor-core/src/config.rs,
 function MenuConfig::translated_menus(). Labels come from locales/en.json, the
@@ -31,7 +31,7 @@ EN_JSON = LEGACY / "crates" / "fresh-editor-core" / "locales" / "en.json"
 DEFAULT_KEYMAP = LEGACY / "crates" / "fresh-editor-core" / "keymaps" / "default.json"
 MACOS_KEYMAP = LEGACY / "crates" / "fresh-editor-core" / "keymaps" / "macos.json"
 CARGO_TOML = LEGACY / "Cargo.toml"
-OUT = ROOT / "internal" / "ui" / "menubar" / "menu_table_gen.go"
+OUT = ROOT / "internal" / "tui" / "menubar" / "menu_table_gen.go"
 
 FN_SIGNATURE = "pub fn translated_menus() -> Vec<Menu> {"
 ITEM_RE = re.compile(r"MenuItem::(Action|Separator|Submenu|DynamicSubmenu|Label)\s*\{")

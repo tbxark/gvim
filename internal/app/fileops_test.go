@@ -8,9 +8,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/fsops"
-	expl "github.com/tbxark/gvim/internal/ui/explorer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/fsops"
+	expl "github.com/tbxark/gvim/internal/tui/explorer"
 )
 
 // fakePaths records the editor follow-ups the adapter asks for. It stands in for
@@ -320,7 +320,7 @@ func TestClassifyMarksConflicts(t *testing.T) {
 }
 
 // TestFileOpsHasTheRootPortMethods checks the method set the root asserts on
-// Deps.Ops (ui.explorerOps). The root's assertion is silent when it fails, so a
+// Deps.Ops (tui.explorerOps). The root's assertion is silent when it fails, so a
 // missing method would only show as "not supported" at run time.
 func TestFileOpsHasTheRootPortMethods(t *testing.T) {
 	t.Parallel()

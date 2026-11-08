@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/theme"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/theme"
 )
 
 // FileTarget is one file argument. Line and Col are 1-based. Zero means the

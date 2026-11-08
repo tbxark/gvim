@@ -3,9 +3,9 @@ package app
 import (
 	"time"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
 )
 
 // languageSettings returns the resolver that gives the editor and the UI the effective
@@ -74,8 +74,8 @@ func autoSaveInterval(flagged time.Duration, cfg config.Config) time.Duration {
 
 // viewOptions returns the starting display options that cfg gives. icons is the
 // resolved icon set, "plain" or "nerd".
-func viewOptions(cfg config.Config, icons string) *ui.ViewOptions {
-	return &ui.ViewOptions{
+func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
+	return &tui.ViewOptions{
 		ShowTabBar:              cfg.ShowTabBar,
 		ShowStatusBar:           cfg.ShowStatusBar,
 		ShowPromptLine:          cfg.ShowPromptLine,
@@ -100,7 +100,7 @@ func viewOptions(cfg config.Config, icons string) *ui.ViewOptions {
 		IndentationGuideMode:       cfg.IndentationGuide,
 		IndentationGuideGlyph:      cfg.IndentationGuideGlyph,
 		RainbowIndentation:         cfg.RainbowIndentation,
-		Whitespace: ui.WhitespaceOptions{
+		Whitespace: tui.WhitespaceOptions{
 			SpacesLeading:  cfg.WhitespaceSpacesLeading,
 			SpacesInner:    cfg.WhitespaceSpacesInner,
 			SpacesTrailing: cfg.WhitespaceSpacesTrailing,
@@ -110,13 +110,13 @@ func viewOptions(cfg config.Config, icons string) *ui.ViewOptions {
 		},
 		HighlightMatchingBrackets: cfg.HighlightMatchingBrackets,
 		RainbowBrackets:           cfg.RainbowBrackets,
-		Search: ui.SearchOptions{
+		Search: tui.SearchOptions{
 			CaseSensitive: cfg.Search.CaseSensitive,
 			WholeWord:     cfg.Search.WholeWord,
 			Regex:         cfg.Search.Regex,
 			ConfirmEach:   cfg.Search.ConfirmEach,
 		},
-		StatusBar: ui.StatusBarOptions{
+		StatusBar: tui.StatusBarOptions{
 			Left:      append([]string(nil), cfg.StatusBar.Left...),
 			Right:     append([]string(nil), cfg.StatusBar.Right...),
 			Separator: cfg.StatusBar.Separator,

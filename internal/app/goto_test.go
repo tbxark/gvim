@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/editor"
 )
 
 // A goto reads the file in a command and opens it in Update. The adapter's read and

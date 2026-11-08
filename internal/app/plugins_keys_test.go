@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // resolveNormal resolves a single-step chord in the normal context.
-func resolveNormal(t *testing.T, k ui.Keymap, name string, mods ...string) string {
+func resolveNormal(t *testing.T, k tui.Keymap, name string, mods ...string) string {
 	t.Helper()
-	cmd, ok := k.Resolve(ui.KeyPress{Name: name, Mods: mods}, ui.KeyContextNormal)
+	cmd, ok := k.Resolve(tui.KeyPress{Name: name, Mods: mods}, tui.KeyContextNormal)
 	if !ok {
 		return ""
 	}

@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/app"
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/keymap"
+	"github.com/tbxark/gvim/keymap"
 )
 
 // runTree runs a command tree with args and returns its stdout, its stderr and

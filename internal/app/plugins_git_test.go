@@ -10,9 +10,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/internal/decor"
-	"github.com/tbxark/gvim/internal/ui"
-	expanel "github.com/tbxark/gvim/internal/ui/explorer"
+	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/internal/tui"
+	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 )
 
 // The bundled git ports against the real runtime, the real editor and a real repository
@@ -31,12 +31,12 @@ func gitIn(t *testing.T, dir string, args ...string) {
 }
 
 // decorStoreSession starts a session and captures the decoration store of its editor port.
-func decorStoreSession(t *testing.T, opts Options) (*pluginSession, *decor.Store) {
+func decorStoreSession(t *testing.T, opts Options) (*pluginSession, *decorations.Store) {
 	t.Helper()
-	var store *decor.Store
+	var store *decorations.Store
 	prev := newUI
-	newUI = func(d ui.Deps) *ui.Model {
-		if src, ok := d.Root.PluginEditor.(interface{ DecorStore() *decor.Store }); ok {
+	newUI = func(d tui.Deps) *tui.Model {
+		if src, ok := d.Root.PluginEditor.(interface{ DecorStore() *decorations.Store }); ok {
 			store = src.DecorStore()
 		}
 		return prev(d)
@@ -54,7 +54,7 @@ func decorStoreSession(t *testing.T, opts Options) (*pluginSession, *decor.Store
 
 // gutterMarks returns the lines that carry a gutter bar of the git_gutter plugin, with
 // their text.
-func gutterMarks(st *decor.Store, doc uint64) map[int]string {
+func gutterMarks(st *decorations.Store, doc uint64) map[int]string {
 	out := map[int]string{}
 	for _, it := range st.Items(doc, "git_gutter", "git_gutter") {
 		out[it.FromLine] = it.Text
@@ -147,9 +147,9 @@ func TestGitPortsCommandsOnARealRepository(t *testing.T) {
 	doc := uint64(s.rt.ed.Active().ID())
 
 	s.runCommand("Git: Toggle Blame")
-	blame := func() []decor.Item { return store.Items(doc, "git_blame", "blame") }
+	blame := func() []decorations.Item { return store.Items(doc, "git_blame", "blame") }
 	s.until("the blame text", func() bool { return len(blame()) == 1 })
-	if it := blame()[0]; it.Kind != decor.EOL || it.FromLine != 0 || it.Text != "  t, just now \u2022 first commit" {
+	if it := blame()[0]; it.Kind != decorations.EOL || it.FromLine != 0 || it.Text != "  t, just now \u2022 first commit" {
 		t.Errorf("blame item = %+v", it)
 	}
 

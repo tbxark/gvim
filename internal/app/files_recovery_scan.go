@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/session"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/session"
 )
 
 // ownRecoveryDir is the directory inside root where this process keeps its crash-recovery

@@ -11,23 +11,23 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/explorer"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
-	"github.com/tbxark/gvim/internal/ui/palette"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
 func TestTerminalKeyContextMapping(t *testing.T) {
 	tests := []struct {
 		name string
-		ctx  ui.KeyContext
+		ctx  tui.KeyContext
 		want keymap.Context
 	}{
-		{name: "terminal dock", ctx: ui.KeyContextTerminal, want: keymap.ContextTerminal},
-		{name: "file explorer", ctx: ui.KeyContextFileExplorer, want: keymap.ContextFileExplorer},
-		{name: "normal editor", ctx: ui.KeyContextNormal, want: keymap.ContextNormal},
+		{name: "terminal dock", ctx: tui.KeyContextTerminal, want: keymap.ContextTerminal},
+		{name: "file explorer", ctx: tui.KeyContextFileExplorer, want: keymap.ContextFileExplorer},
+		{name: "normal editor", ctx: tui.KeyContextNormal, want: keymap.ContextNormal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,7 +108,7 @@ func (p cmdPump) start(cmd tea.Cmd) {
 
 // until feeds messages to m until the frame text satisfies ok. It fails the test at
 // the deadline, and it shows the last frame.
-func (p cmdPump) until(t *testing.T, m *ui.Model, ok func(frame string) bool) {
+func (p cmdPump) until(t *testing.T, m *tui.Model, ok func(frame string) bool) {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
@@ -140,8 +140,8 @@ func TestDockRunsAShellAndShowsItsOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := ui.New(newUIDeps(editor.New(editor.Options{}), keymap.Default(), theme.Theme{}, tree, nil))
-	m.SetDock(ui.DockPorts{Starter: termStarter{ctx: ctx}})
+	m := tui.New(newUIDeps(editor.New(editor.Options{}), keymap.Default(), theme.Theme{}, tree, nil))
+	m.SetDock(tui.DockPorts{Starter: termStarter{ctx: ctx}})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	p := newCmdPump(ctx)

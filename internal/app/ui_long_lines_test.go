@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
 // TestRootFramesOfLongLinesReadOnlyTheWindows is the regression test for a frame that
@@ -22,7 +22,7 @@ func TestRootFramesOfLongLinesReadOnlyTheWindows(t *testing.T) {
 	must(t, os.WriteFile(path, []byte(strings.Repeat(line, 80)), 0o644))
 	ed := openBig(t, path)
 	finishIndex(t, editorAdapter{ed: ed})
-	m := ui.New(newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil))
+	m := tui.New(newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil))
 	m.Update(tea.WindowSizeMsg{Width: 140, Height: 45})
 	ed.Do("goto_line", map[string]any{"line": 40})
 	m.View()

@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tbxark/gvim/internal/plugin"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // pluginOS is the real plugin.OS: files through the os package (os.OpenRoot for every

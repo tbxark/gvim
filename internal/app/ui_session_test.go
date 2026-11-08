@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/uitest"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
 // startApp runs the real UI on a file in a temporary directory, sized 100 by
@@ -29,7 +29,7 @@ func startApp(t *testing.T, text string) (*uitest.Session, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := ui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
+	m := tui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
 	return uitest.Start(t, m, 100, 30), path
 }
 

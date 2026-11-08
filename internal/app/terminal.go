@@ -8,8 +8,8 @@ import (
 	goruntime "runtime"
 	"time"
 
-	"github.com/tbxark/gvim/internal/term"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui"
 )
 
 // The terminal dock's adapters: a shell from internal/term, and the system clipboard
@@ -18,9 +18,9 @@ import (
 
 // Both adapters satisfy the ports the dock expects.
 var (
-	_ ui.Terminal        = (*term.Session)(nil)
-	_ ui.TerminalStarter = termStarter{}
-	_ ui.ClipboardReader = systemClipboard{}
+	_ tui.Terminal        = (*terminal.Session)(nil)
+	_ tui.TerminalStarter = termStarter{}
+	_ tui.ClipboardReader = systemClipboard{}
 )
 
 // clipboardReadTimeout bounds one clipboard read, so a stuck helper cannot hold the
@@ -35,8 +35,8 @@ type termStarter struct {
 
 // Start runs the user's shell in dir with the given size. It returns a nil Terminal
 // with the error, so the dock never holds a typed nil.
-func (s termStarter) Start(dir string, cols, rows int) (ui.Terminal, error) {
-	sess, err := term.Start(s.ctx, term.Options{Dir: dir, Cols: cols, Rows: rows})
+func (s termStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
+	sess, err := terminal.Start(s.ctx, terminal.Options{Dir: dir, Cols: cols, Rows: rows})
 	if err != nil {
 		return nil, err
 	}

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/lsp"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/lsp"
 )
 
 // lspConfig is the default config with the lsp parts of a user file laid on it.
@@ -48,7 +48,7 @@ func TestBuiltInServersNeedNoConfig(t *testing.T) {
 			if sc.Command[0] != tt.command || !slices.Equal(sc.Args, tt.args) {
 				t.Errorf("server = %v %v, want %s %v", sc.Command, sc.Args, tt.command, tt.args)
 			}
-			if got := info[tt.lang]; got.State != ui.LSPServerOn || got.Command != tt.command || got.Install == "" {
+			if got := info[tt.lang]; got.State != tui.LSPServerOn || got.Command != tt.command || got.Install == "" {
 				t.Errorf("info = %+v, want an on server with an install hint", got)
 			}
 		})
@@ -64,13 +64,13 @@ func TestManualServersWaitForTheConfig(t *testing.T) {
 		if _, ok := servers[lang]; ok {
 			t.Errorf("%s runs without being turned on", lang)
 		}
-		if info[lang].State != ui.LSPServerManual {
+		if info[lang].State != tui.LSPServerManual {
 			t.Errorf("%s state = %v, want manual", lang, info[lang].State)
 		}
 	}
 	// "enabled": true without a command runs the built-in program.
 	servers, info = lspServers(lspConfig(map[string]config.LSPServer{"odin": {}}, nil))
-	if sc, ok := servers["odin"]; !ok || sc.Command[0] != "ols" || info["odin"].State != ui.LSPServerOn {
+	if sc, ok := servers["odin"]; !ok || sc.Command[0] != "ols" || info["odin"].State != tui.LSPServerOn {
 		t.Errorf("odin turned on: server %v ok %v info %+v, want ols running", sc, ok, info["odin"])
 	}
 }
@@ -111,7 +111,7 @@ func TestUserCanSwitchServersOff(t *testing.T) {
 	if _, ok := servers["go"]; ok {
 		t.Error("go still runs after its entry was disabled")
 	}
-	if info["go"].State != ui.LSPServerOffLanguage {
+	if info["go"].State != tui.LSPServerOffLanguage {
 		t.Errorf("go state = %v, want off for the language", info["go"].State)
 	}
 	if _, ok := servers["rust"]; !ok {
@@ -130,7 +130,7 @@ func TestUserCanSwitchServersOff(t *testing.T) {
 		t.Errorf("%d servers run with lsp_enabled false", len(servers))
 	}
 	for _, lang := range []string{"go", "rust", "newlang"} {
-		if info[lang].State != ui.LSPServerOffAll {
+		if info[lang].State != tui.LSPServerOffAll {
 			t.Errorf("%s state = %v, want off for all", lang, info[lang].State)
 		}
 	}
@@ -144,9 +144,9 @@ func TestOpeningWithAMissingProgramGivesTheInstallHint(t *testing.T) {
 	dir := t.TempDir()
 	port.SetRoot(dir)
 	err := port.Open(filepath.Join(dir, "a.go"), "go", "package a")
-	var ue *ui.LSPUnavailableError
+	var ue *tui.LSPUnavailableError
 	if !errors.As(err, &ue) {
-		t.Fatalf("Open error = %v, want a *ui.LSPUnavailableError", err)
+		t.Fatalf("Open error = %v, want a *tui.LSPUnavailableError", err)
 	}
 	if !ue.Missing || ue.Command != "gopls" || ue.Language != "go" || !strings.Contains(ue.Install, "go install golang.org/x/tools/gopls@latest") {
 		t.Errorf("error = %+v, want gopls missing with its install command", ue)
@@ -168,7 +168,7 @@ func TestOpeningWithAServerThatDiesNamesTheCommandAndItsOutput(t *testing.T) {
 	dir := t.TempDir()
 	port.SetRoot(dir)
 	err = port.Open(filepath.Join(dir, "a.go"), "go", "package a")
-	var ue *ui.LSPUnavailableError
+	var ue *tui.LSPUnavailableError
 	if !errors.As(err, &ue) || ue.Missing {
 		t.Fatalf("Open error = %v, want an unavailable server that is not missing", err)
 	}
@@ -185,15 +185,15 @@ func TestOpeningWithAServerThatDiesNamesTheCommandAndItsOutput(t *testing.T) {
 func TestPortDescribesLanguagesFromTheConfig(t *testing.T) {
 	port := newLSPPortFor(config.Defaults())
 	d, ok := port.(interface {
-		Server(string) ui.LSPServerInfo
+		Server(string) tui.LSPServerInfo
 	})
 	if !ok {
 		t.Fatal("the port does not describe servers")
 	}
-	if got := d.Server("go"); got.State != ui.LSPServerOn || got.Command != "gopls" {
+	if got := d.Server("go"); got.State != tui.LSPServerOn || got.Command != "gopls" {
 		t.Errorf("go = %+v", got)
 	}
-	if got := d.Server("text"); got.State != ui.LSPServerNone {
+	if got := d.Server("text"); got.State != tui.LSPServerNone {
 		t.Errorf("text = %+v, want none", got)
 	}
 	if !port.Supports("go") || port.Supports("odin") || port.Supports("text") {
@@ -273,12 +273,12 @@ func TestDormantAndSwitchedOffServersCanBeStartedByHand(t *testing.T) {
 		name  string
 		cfg   func() config.Config
 		lang  string
-		state ui.LSPServerState
+		state tui.LSPServerState
 	}{
-		{"lsp_enabled false", func() config.Config { c := config.Defaults(); c.LSPEnabled = false; return c }, "go", ui.LSPServerOffAll},
-		{"a language muted", func() config.Config { return lspConfig(nil, map[string]bool{"go": true}) }, "go", ui.LSPServerOffLanguage},
-		{"a manual server", config.Defaults, "odin", ui.LSPServerManual},
-		{"auto_start false", func() config.Config { return lspConfig(map[string]config.LSPServer{"go": {Dormant: true}}, nil) }, "go", ui.LSPServerManual},
+		{"lsp_enabled false", func() config.Config { c := config.Defaults(); c.LSPEnabled = false; return c }, "go", tui.LSPServerOffAll},
+		{"a language muted", func() config.Config { return lspConfig(nil, map[string]bool{"go": true}) }, "go", tui.LSPServerOffLanguage},
+		{"a manual server", config.Defaults, "odin", tui.LSPServerManual},
+		{"auto_start false", func() config.Config { return lspConfig(map[string]config.LSPServer{"go": {Dormant: true}}, nil) }, "go", tui.LSPServerManual},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

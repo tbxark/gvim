@@ -3,9 +3,9 @@ package app
 import (
 	"slices"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/syntax"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // Syntax spans of a large document. Its text is not held, so the lexer cannot run over

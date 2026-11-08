@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/uitest"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
 // startEmptyApp runs the real UI with no tab open, as gvim started without files.
@@ -24,7 +24,7 @@ func startEmptyApp(t *testing.T, w, h int) *uitest.Session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := ui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
+	m := tui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
 	return uitest.Start(t, m, w, h)
 }
 
@@ -48,7 +48,7 @@ func startFilesApp(t *testing.T, w, h int, names ...string) *uitest.Session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := ui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
+	m := tui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
 	return uitest.Start(t, m, w, h)
 }
 

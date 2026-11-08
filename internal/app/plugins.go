@@ -9,11 +9,11 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/plugin"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // pluginWiring is what the Lua plugin runtime adds to a session: the runtime, the editor as
@@ -21,7 +21,7 @@ import (
 type pluginWiring struct {
 	rt   *plugin.Runtime
 	edit *pluginEditor
-	keys func(preset string, b []pluginapi.Binding) (ui.Keymap, error)
+	keys func(preset string, b []pluginapi.Binding) (tui.Keymap, error)
 }
 
 // newPluginRuntime builds the plugin runtime of a session. It starts nothing: the model's
@@ -65,7 +65,7 @@ func newPluginRuntime(a editorAdapter, cfg config.Config, opts Options, preset *
 			Loader:   ld,
 		}),
 		edit: newPluginEditor(a),
-		keys: func(name string, bs []pluginapi.Binding) (ui.Keymap, error) {
+		keys: func(name string, bs []pluginapi.Binding) (tui.Keymap, error) {
 			base := preset
 			if name != "" {
 				// A keymap switch: the plugin bindings go over the preset it chose.

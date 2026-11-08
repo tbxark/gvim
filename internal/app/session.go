@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/session"
 )
 
 // defaultSessionDir is the session directory Run uses when Options.SessionDir is
@@ -39,7 +39,7 @@ type unrestored struct {
 // is a virtual one, which belongs to a plugin and is not a file. The
 // explorer state goes in as it is. The active tab is kept as the index among the
 // saved tabs, and the editor's own active tab is put back.
-func saveSession(ed *editor.Editor, dir string, st ui.ExplorerState) error {
+func saveSession(ed *editor.Editor, dir string, st tui.ExplorerState) error {
 	return writeSession(ed, dir, st, nil)
 }
 
@@ -47,7 +47,7 @@ func saveSession(ed *editor.Editor, dir string, st ui.ExplorerState) error {
 // the open tabs. A kept file is one whose unsaved text restoreSession could not put
 // back. Its stash file is named in the new session, so the save does not remove it,
 // and the next start tries to restore it again.
-func writeSession(ed *editor.Editor, dir string, st ui.ExplorerState, kept []session.FileState) error {
+func writeSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []session.FileState) error {
 	tabs := ed.Tabs()
 	orig := -1
 	for i, t := range tabs {

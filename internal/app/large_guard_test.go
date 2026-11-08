@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/session"
 )
 
 // openLargeEditor opens a file of about 4 KiB in an editor whose threshold is 1 KiB,
@@ -38,7 +38,7 @@ func TestSessionStashesALargeDocumentWithoutItsText(t *testing.T) {
 	dir := t.TempDir()
 	ed, path := openLargeEditor(t, dir)
 	sess := filepath.Join(dir, "session")
-	must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 	s, ok, err := session.Load(sess)
 	must(t, err)
 	if !ok || len(s.Files) != 1 || s.Files[0].Path != path {

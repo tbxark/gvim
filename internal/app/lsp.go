@@ -15,12 +15,12 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/lsp"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // lspRequestTimeout bounds one request to a server. The Manager bounds its own
@@ -34,7 +34,7 @@ const lspStopTimeout = 5 * time.Second
 // newLSPPort returns the language-server port for the servers of the config, or
 // nil when no server is configured, so that no LSP feature is on. Nothing starts
 // here: a server starts when its first document opens.
-func newLSPPort(servers map[string]config.LSPServer) ui.LSPSession {
+func newLSPPort(servers map[string]config.LSPServer) tui.LSPSession {
 	if len(servers) == 0 {
 		return nil
 	}
@@ -45,7 +45,7 @@ func newLSPPort(servers map[string]config.LSPServer) ui.LSPSession {
 	return &lspPort{servers: cfg, managers: make(map[string]*lsp.Manager), docs: make(map[string]lspDocRec)}
 }
 
-// lspPort is the ui.LSPSession over the language servers. It keeps one lsp.Manager
+// lspPort is the tui.LSPSession over the language servers. It keeps one lsp.Manager
 // per workspace root, created on the first use of the root. It also keeps the
 // text of each open document, which converts the positions of the protocol to rune
 // columns. Its methods may block on a server, so the root calls them only from
@@ -55,7 +55,7 @@ type lspPort struct {
 	// startable is every server that can run, the ones in servers and the ones that only
 	// start by hand. Nil in a port built from servers alone.
 	startable map[string]lsp.ServerConfig
-	info      map[string]ui.LSPServerInfo // what the config does with each language; read only too
+	info      map[string]tui.LSPServerInfo // what the config does with each language; read only too
 
 	mu       sync.Mutex
 	root     string
@@ -134,38 +134,38 @@ func (p *lspPort) Close(path string) error {
 
 // Diagnostics returns the latest diagnostics the server published for the document
 // at path. ok is false when there are none yet, or the document is not open.
-func (p *lspPort) Diagnostics(path string) (ui.DiagnosticsEvent, bool) {
+func (p *lspPort) Diagnostics(path string) (tui.DiagnosticsEvent, bool) {
 	rec, mgr, ok := p.lookup(path)
 	if !ok || mgr == nil {
-		return ui.DiagnosticsEvent{}, false
+		return tui.DiagnosticsEvent{}, false
 	}
 	c, ok := mgr.ClientFor(path)
 	if !ok {
-		return ui.DiagnosticsEvent{}, false
+		return tui.DiagnosticsEvent{}, false
 	}
 	ev, ok := c.DiagnosticsFor(lsp.PathURI(path))
 	if !ok {
-		return ui.DiagnosticsEvent{}, false
+		return tui.DiagnosticsEvent{}, false
 	}
-	return ui.DiagnosticsEvent{Path: path, Items: uiDiagnostics(rec.lines, ev.Diagnostics)}, true
+	return tui.DiagnosticsEvent{Path: path, Items: uiDiagnostics(rec.lines, ev.Diagnostics)}, true
 }
 
 // Definition returns the definitions of the symbol at at.
-func (p *lspPort) Definition(path string, at buffer.Pos) ([]ui.LSPLocation, error) {
+func (p *lspPort) Definition(path string, at buffer.Pos) ([]tui.LSPLocation, error) {
 	return p.locations(path, at, func(ctx context.Context, c *lsp.Client, u string, pos protocol.Position) ([]protocol.Location, error) {
 		return c.Definition(ctx, u, pos)
 	})
 }
 
 // Implementation returns the implementations of the symbol at at.
-func (p *lspPort) Implementation(path string, at buffer.Pos) ([]ui.LSPLocation, error) {
+func (p *lspPort) Implementation(path string, at buffer.Pos) ([]tui.LSPLocation, error) {
 	return p.locations(path, at, func(ctx context.Context, c *lsp.Client, u string, pos protocol.Position) ([]protocol.Location, error) {
 		return c.Implementation(ctx, u, pos)
 	})
 }
 
 // References returns the references to the symbol at at, with its declaration.
-func (p *lspPort) References(path string, at buffer.Pos) ([]ui.LSPLocation, error) {
+func (p *lspPort) References(path string, at buffer.Pos) ([]tui.LSPLocation, error) {
 	return p.locations(path, at, func(ctx context.Context, c *lsp.Client, u string, pos protocol.Position) ([]protocol.Location, error) {
 		return c.References(ctx, u, pos, true)
 	})
@@ -184,7 +184,7 @@ func (p *lspPort) Hover(path string, at buffer.Pos) (string, error) {
 
 // Completion returns the completion items at at. A range the server gave is in the
 // rune columns of the document, as the editor needs it.
-func (p *lspPort) Completion(path string, at buffer.Pos) ([]ui.CompletionItem, error) {
+func (p *lspPort) Completion(path string, at buffer.Pos) ([]tui.CompletionItem, error) {
 	var items []lsp.CompletionItem
 	err := p.call(path, at, func(ctx context.Context, c *lsp.Client, u string, pos protocol.Position) error {
 		var err error
@@ -195,16 +195,16 @@ func (p *lspPort) Completion(path string, at buffer.Pos) ([]ui.CompletionItem, e
 		return nil, err
 	}
 	lines := newTextLines(p.textOf(path))
-	out := make([]ui.CompletionItem, len(items))
+	out := make([]tui.CompletionItem, len(items))
 	for i, it := range items {
-		out[i] = ui.CompletionItem{Label: it.Label, Detail: it.Detail, Insert: it.InsertText, Range: lines.rangeOf(it.EditRange)}
+		out[i] = tui.CompletionItem{Label: it.Label, Detail: it.Detail, Insert: it.InsertText, Range: lines.rangeOf(it.EditRange)}
 	}
 	return out, nil
 }
 
 // Rename renames the symbol at at to name. It returns the edits per file, in order
 // of path.
-func (p *lspPort) Rename(path string, at buffer.Pos, name string) ([]ui.FileEdit, error) {
+func (p *lspPort) Rename(path string, at buffer.Pos, name string) ([]tui.FileEdit, error) {
 	var edits map[string][]protocol.TextEdit
 	err := p.call(path, at, func(ctx context.Context, c *lsp.Client, u string, pos protocol.Position) error {
 		var err error
@@ -302,7 +302,7 @@ func (p *lspPort) Stop() error {
 
 // locations runs a request that returns locations, and converts the result to rune
 // positions of each file.
-func (p *lspPort) locations(path string, at buffer.Pos, ask func(context.Context, *lsp.Client, string, protocol.Position) ([]protocol.Location, error)) ([]ui.LSPLocation, error) {
+func (p *lspPort) locations(path string, at buffer.Pos, ask func(context.Context, *lsp.Client, string, protocol.Position) ([]protocol.Location, error)) ([]tui.LSPLocation, error) {
 	var locs []protocol.Location
 	err := p.call(path, at, func(ctx context.Context, c *lsp.Client, u string, pos protocol.Position) error {
 		var err error
@@ -313,7 +313,7 @@ func (p *lspPort) locations(path string, at buffer.Pos, ask func(context.Context
 		return nil, err
 	}
 	texts := make(map[string]textLines)
-	out := make([]ui.LSPLocation, 0, len(locs))
+	out := make([]tui.LSPLocation, 0, len(locs))
 	for _, l := range locs {
 		file := uri.URI(l.URI).FsPath()
 		lines, ok := texts[file]
@@ -321,7 +321,7 @@ func (p *lspPort) locations(path string, at buffer.Pos, ask func(context.Context
 			lines = newTextLines(p.textOf(file))
 			texts[file] = lines
 		}
-		out = append(out, ui.LSPLocation{Path: file, Start: lines.fromLSP(l.Range.Start), End: lines.fromLSP(l.Range.End)})
+		out = append(out, tui.LSPLocation{Path: file, Start: lines.fromLSP(l.Range.Start), End: lines.fromLSP(l.Range.End)})
 	}
 	return out, nil
 }
@@ -445,19 +445,19 @@ func (l textLines) toLSP(p buffer.Pos) protocol.Position {
 }
 
 // rangeOf converts a protocol range, or returns nil for a nil range.
-func (l textLines) rangeOf(r *protocol.Range) *ui.LSPRange {
+func (l textLines) rangeOf(r *protocol.Range) *tui.LSPRange {
 	if r == nil {
 		return nil
 	}
-	return &ui.LSPRange{Start: l.fromLSP(r.Start), End: l.fromLSP(r.End)}
+	return &tui.LSPRange{Start: l.fromLSP(r.Start), End: l.fromLSP(r.End)}
 }
 
 // uiDiagnostics converts the diagnostics of one document to rune ranges.
-func uiDiagnostics(lines textLines, ds []protocol.Diagnostic) []ui.Diagnostic {
-	out := make([]ui.Diagnostic, 0, len(ds))
+func uiDiagnostics(lines textLines, ds []protocol.Diagnostic) []tui.Diagnostic {
+	out := make([]tui.Diagnostic, 0, len(ds))
 	for _, d := range ds {
 		source, _ := d.Source.Get()
-		out = append(out, ui.Diagnostic{
+		out = append(out, tui.Diagnostic{
 			Start:    lines.fromLSP(d.Range.Start),
 			End:      lines.fromLSP(d.Range.End),
 			Severity: int(d.Severity),
@@ -485,14 +485,14 @@ func diagnosticText(m protocol.InlayHintTooltip) string {
 // fileEdits converts the edits of a rename, keyed by document URI, to the edits of
 // each file. text gives the text of a path, which the positions are converted with.
 // The files are in order of their paths.
-func fileEdits(edits map[string][]protocol.TextEdit, text func(path string) string) []ui.FileEdit {
+func fileEdits(edits map[string][]protocol.TextEdit, text func(path string) string) []tui.FileEdit {
 	keys := slices.Collect(maps.Keys(edits))
 	slices.Sort(keys)
-	out := make([]ui.FileEdit, 0, len(keys))
+	out := make([]tui.FileEdit, 0, len(keys))
 	for _, k := range keys {
 		file := uri.URI(k).FsPath()
 		lines := newTextLines(text(file))
-		fe := ui.FileEdit{Path: file}
+		fe := tui.FileEdit{Path: file}
 		for _, e := range edits[k] {
 			fe.Edits = append(fe.Edits, editor.LSPEdit{
 				From: lines.fromLSP(e.Range.Start),

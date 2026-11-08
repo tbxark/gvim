@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/decor"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/session"
 )
 
 // virtualOver returns a plugin port over an editor with one regular tab holding "regular"
@@ -242,7 +242,7 @@ func TestPluginSetContentIsAtomicAndReplacesWhole(t *testing.T) {
 		t.Fatal("SetContent marked the buffer modified")
 	}
 	// A content that does not fit changes nothing.
-	tooMany := make([]pluginapi.ContentEntry, decor.MaxPerNamespace+1)
+	tooMany := make([]pluginapi.ContentEntry, decorations.MaxPerNamespace+1)
 	for i := range tooMany {
 		tooMany[i] = pluginapi.ContentEntry{Text: "x\n", Style: bold}
 	}
@@ -555,7 +555,7 @@ func TestSessionLeavesOutVirtualBuffers(t *testing.T) {
 	must(t, ed.ActivateID(id))
 	must(t, ed.ApplyEdits(id, []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{}, Text: "X"}}, editor.EditOptions{}))
 	sess := filepath.Join(dir, "session")
-	must(t, saveSession(ed, sess, ui.ExplorerState{}))
+	must(t, saveSession(ed, sess, tui.ExplorerState{}))
 	s, ok, err := session.Load(sess)
 	must(t, err)
 	if !ok || len(s.Files) != 1 || s.Files[0].Path != file {

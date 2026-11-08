@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/plugin"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // An atomic write that fails names the file the plugin asked for, not the ".gvim-*.tmp" file it

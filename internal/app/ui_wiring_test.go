@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
 )
 
 // openNamed opens one file per name, in order, so the last name is the active tab.
@@ -85,7 +85,7 @@ func TestKeymapAdapterListsItsBindings(t *testing.T) {
 		t.Fatalf("Bindings() has %d entries, want %d", len(got), len(want))
 	}
 	for i, b := range want {
-		if w := (ui.KeyBinding{Action: b.Action, Chord: b.Chord, Context: string(b.When)}); got[i] != w {
+		if w := (tui.KeyBinding{Action: b.Action, Chord: b.Chord, Context: string(b.When)}); got[i] != w {
 			t.Fatalf("Bindings()[%d] = %+v, want %+v", i, got[i], w)
 		}
 	}
@@ -151,7 +151,7 @@ func TestSwitchKeymapKeepsTheConfigKeybindings(t *testing.T) {
 	if err != nil || km == nil {
 		t.Fatalf("switch to emacs = %v, %v; want a keymap", km, err)
 	}
-	if cmd, ok := km.Resolve(ui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, ui.KeyContextNormal); ok && cmd.Action != "noop" {
+	if cmd, ok := km.Resolve(tui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, tui.KeyContextNormal); ok && cmd.Action != "noop" {
 		t.Fatalf("ctrl+s resolves to %q after the switch; the config override should unbind it", cmd.Action)
 	}
 	if _, err := switchTo("no-such-keymap"); err == nil {

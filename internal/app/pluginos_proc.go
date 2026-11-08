@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tbxark/gvim/internal/plugin"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // Processes of the plugin OS (AMENDMENTS C16). Every child runs in its own process group so a

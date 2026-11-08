@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // uiPlugin exercises the prompts, pickers and popups of the plugin API through the real

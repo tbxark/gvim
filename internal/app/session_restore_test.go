@@ -10,10 +10,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/ui"
-	"github.com/tbxark/gvim/internal/ui/find"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/find"
+	"github.com/tbxark/gvim/session"
 )
 
 // newSessionEditor returns an editor with no documents, as gvim starts without
@@ -55,7 +55,7 @@ func TestSessionRoundTripKeepsTabsCursorsActiveAndUnsavedText(t *testing.T) {
 	if res := ed.Do("insert_char", map[string]any{"text": "Z"}); res.Err != nil {
 		t.Fatal(res.Err)
 	}
-	must(t, saveSession(ed, sessDir, ui.ExplorerState{Open: true, ShowHidden: true}))
+	must(t, saveSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true}))
 
 	restored := newSessionEditor()
 	s, ok, err := session.Load(sessDir)
@@ -112,7 +112,7 @@ func TestSessionRestoresUnsavedUntitledText(t *testing.T) {
 	if res := ed.Do("insert_char", map[string]any{"text": "hello"}); res.Err != nil {
 		t.Fatal(res.Err)
 	}
-	must(t, saveSession(ed, sessDir, ui.ExplorerState{}))
+	must(t, saveSession(ed, sessDir, tui.ExplorerState{}))
 
 	s, _, err := session.Load(sessDir)
 	must(t, err)
@@ -137,7 +137,7 @@ func TestSessionDropsEmptyUntitledTabs(t *testing.T) {
 	ed := newSessionEditor()
 	must(t, ed.OpenFile(file))
 	ed.Do("new", nil)
-	must(t, saveSession(ed, sessDir, ui.ExplorerState{}))
+	must(t, saveSession(ed, sessDir, tui.ExplorerState{}))
 
 	s, _, err := session.Load(sessDir)
 	must(t, err)
@@ -156,7 +156,7 @@ func TestBuildRuntimeRestoresTheSessionWhenNoFilesGiven(t *testing.T) {
 	sessDir := filepath.Join(dir, "session")
 	ed := newSessionEditor()
 	must(t, ed.OpenFile(file))
-	must(t, saveSession(ed, sessDir, ui.ExplorerState{Open: true, ShowHidden: true, ShowIgnored: true}))
+	must(t, saveSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true, ShowIgnored: true}))
 
 	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir}, false)
 	must(t, err)
@@ -183,7 +183,7 @@ func TestBuildRuntimeWithFilesDoesNotRestore(t *testing.T) {
 	sessDir := filepath.Join(dir, "session")
 	ed := newSessionEditor()
 	must(t, ed.OpenFile(saved))
-	must(t, saveSession(ed, sessDir, ui.ExplorerState{}))
+	must(t, saveSession(ed, sessDir, tui.ExplorerState{}))
 
 	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir, Files: []FileTarget{{Path: given}}}, false)
 	must(t, err)

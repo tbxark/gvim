@@ -11,20 +11,20 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/explorer"
-	"github.com/tbxark/gvim/internal/finder"
-	"github.com/tbxark/gvim/internal/fold"
-	"github.com/tbxark/gvim/internal/keymap"
-	palmodel "github.com/tbxark/gvim/internal/palette"
-	"github.com/tbxark/gvim/internal/search"
-	"github.com/tbxark/gvim/internal/syntax"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
-	"github.com/tbxark/gvim/internal/ui/dialog"
-	"github.com/tbxark/gvim/internal/ui/style"
-	"github.com/tbxark/gvim/internal/workspace"
+	"github.com/tbxark/gvim/buffer"
+	commands "github.com/tbxark/gvim/commands"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/fold"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/dialog"
+	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/search"
+	"github.com/tbxark/gvim/syntax"
+	"github.com/tbxark/gvim/theme"
+	"github.com/tbxark/gvim/workspace"
 )
 
 // newUIDeps wires the domain packages into the ports of the UI. The command
@@ -33,13 +33,13 @@ import (
 // and a nil files index leaves the palette's file mode on its loading row. The
 // optional ports (LSP and markdown) stay nil until their phases add adapters for
 // them here. File operations follow renames and closes in ed.
-func newUIDeps(ed *editor.Editor, km *keymap.Map, th theme.Theme, tree *explorer.Tree, files *finder.Index) ui.Deps {
-	deps := ui.Deps{
+func newUIDeps(ed *editor.Editor, km *keymap.Map, th theme.Theme, tree *explorer.Tree, files *finder.Index) tui.Deps {
+	deps := tui.Deps{
 		Editor:   editorAdapter{ed: ed, spans: &spanCache{}, others: map[*editor.Document]*spanCache{}, saves: &autoSaveGate{}},
 		Keys:     keymapAdapter{km: km},
 		Theme:    th,
 		Clock:    time.Now,
-		Commands: palmodel.Commands(km),
+		Commands: commands.Commands(km),
 		Ranker:   rankPort{r: newFileRanker()},
 		Dialogs:  dialogPort{},
 		Recents:  recentFolders(),
@@ -78,11 +78,11 @@ type rankPort struct {
 }
 
 // Rank scores files against query and returns at most limit matches, best first.
-func (p rankPort) Rank(query string, files []string, limit int) []ui.Ranked {
+func (p rankPort) Rank(query string, files []string, limit int) []tui.Ranked {
 	rows := p.r.Rank(query, files, limit)
-	out := make([]ui.Ranked, len(rows))
+	out := make([]tui.Ranked, len(rows))
 	for i, r := range rows {
-		out[i] = ui.Ranked{Path: r.Path, Indexes: r.Indexes}
+		out[i] = tui.Ranked{Path: r.Path, Indexes: r.Indexes}
 	}
 	return out
 }
@@ -92,7 +92,7 @@ func (p rankPort) Record(rel string) {
 	p.r.Record(rel)
 }
 
-// editorAdapter is the ui.EditorState view of *editor.Editor.
+// editorAdapter is the tui.EditorState view of *editor.Editor.
 type editorAdapter struct {
 	ed    *editor.Editor
 	spans *spanCache
@@ -256,7 +256,7 @@ func (a editorAdapter) editedDoc(d *editor.Document) {
 
 // Active returns the active document, or nil when no tab is open. The nil is a
 // nil interface, so the root's nil check works.
-func (a editorAdapter) Active() ui.Document {
+func (a editorAdapter) Active() tui.Document {
 	doc := a.ed.Active()
 	if doc == nil {
 		return nil
@@ -267,7 +267,7 @@ func (a editorAdapter) Active() ui.Document {
 // DocAt returns the document of tab i as a documentAdapter, or an untyped nil when
 // there is no tab i. The active tab uses the shared span cache, and every other tab
 // has its own. It implements the root's tabDocs port.
-func (a editorAdapter) DocAt(i int) ui.Document {
+func (a editorAdapter) DocAt(i int) tui.Document {
 	doc := a.ed.DocAt(i)
 	if doc == nil {
 		return nil
@@ -351,11 +351,11 @@ func (a editorAdapter) ReplaceMatches(q search.Query, repl string) (int, error) 
 
 // Tabs maps the editor's tabs to the tab strip entries. The path is carried too, so the
 // root can watch the folders of the open tabs and reload the tabs whose files change.
-func (a editorAdapter) Tabs() []ui.TabInfo {
+func (a editorAdapter) Tabs() []tui.TabInfo {
 	tabs := a.ed.Tabs()
-	out := make([]ui.TabInfo, len(tabs))
+	out := make([]tui.TabInfo, len(tabs))
 	for i, t := range tabs {
-		out[i] = ui.TabInfo{Name: t.Name, Path: t.Path, Modified: t.Modified, Preview: t.Preview, Active: t.Active}
+		out[i] = tui.TabInfo{Name: t.Name, Path: t.Path, Modified: t.Modified, Preview: t.Preview, Active: t.Active}
 	}
 	return out
 }
@@ -580,7 +580,7 @@ func documentLexer(doc *editor.Document) chroma.Lexer {
 // at least what Detect reads (its analyse limit is 16 KiB).
 const lexerHeadBytes = 16 << 10
 
-// documentAdapter is the read-only ui.Document view of one *editor.Document.
+// documentAdapter is the read-only tui.Document view of one *editor.Document.
 type documentAdapter struct {
 	doc   *editor.Document
 	spans *spanCache
@@ -721,50 +721,50 @@ func (d documentAdapter) Version() uint64 { return d.doc.Buffer.Version() }
 // Language is the document's language name, shown in the status row.
 func (d documentAdapter) Language() string { return d.doc.Language() }
 
-// keymapAdapter is the ui.Keymap view of *keymap.Map.
+// keymapAdapter is the tui.Keymap view of *keymap.Map.
 type keymapAdapter struct {
 	km *keymap.Map
 }
 
 // Resolve canonicalizes the key press and looks up its binding in the context.
 // A chord that does not canonicalize resolves to nothing.
-func (k keymapAdapter) Resolve(key ui.KeyPress, ctx ui.KeyContext) (ui.Command, bool) {
+func (k keymapAdapter) Resolve(key tui.KeyPress, ctx tui.KeyContext) (tui.Command, bool) {
 	chord, err := keymap.Canonical(key.Name, key.Mods)
 	if err != nil {
-		return ui.Command{}, false
+		return tui.Command{}, false
 	}
 	b, ok := k.km.Resolve(chord, keymapContext(ctx))
 	if !ok {
-		return ui.Command{}, false
+		return tui.Command{}, false
 	}
-	return ui.Command{Action: b.Action, Args: b.Args}, true
+	return tui.Command{Action: b.Action, Args: b.Args}, true
 }
 
 // ResolveSequence looks up the key presses typed in order among the multi-key bindings.
 // A press that does not canonicalize ends the sequence.
-func (k keymapAdapter) ResolveSequence(steps []ui.KeyPress, ctx ui.KeyContext) (cmd ui.Command, ok, prefix bool) {
+func (k keymapAdapter) ResolveSequence(steps []tui.KeyPress, ctx tui.KeyContext) (cmd tui.Command, ok, prefix bool) {
 	chords := make([]string, len(steps))
 	for i, s := range steps {
 		c, err := keymap.Canonical(s.Name, s.Mods)
 		if err != nil {
-			return ui.Command{}, false, false
+			return tui.Command{}, false, false
 		}
 		chords[i] = c
 	}
 	kctx := keymapContext(ctx)
 	if len(chords) > 1 {
 		if b, found := k.km.ResolveSequence(chords, kctx); found {
-			return ui.Command{Action: b.Action, Args: b.Args}, true, false
+			return tui.Command{Action: b.Action, Args: b.Args}, true, false
 		}
 	}
-	return ui.Command{}, false, k.km.HasSequencePrefix(chords, kctx)
+	return tui.Command{}, false, k.km.HasSequencePrefix(chords, kctx)
 }
 
 // Bindings lists every binding of the keymap, in file order, with its canonical
 // chord and when-clause. It implements the root's BindingLister port.
-func (k keymapAdapter) Bindings() []ui.KeyBinding {
+func (k keymapAdapter) Bindings() []tui.KeyBinding {
 	bs := k.km.Bindings()
-	out := make([]ui.KeyBinding, len(bs))
+	out := make([]tui.KeyBinding, len(bs))
 	for i, b := range bs {
 		out[i] = keyBinding(b)
 	}
@@ -773,10 +773,10 @@ func (k keymapAdapter) Bindings() []ui.KeyBinding {
 
 // Primary returns the binding the UI shows for action, a multi-key sequence when the action
 // has no single chord, and false when it has no binding the editor runs.
-func (k keymapAdapter) Primary(action string) (ui.KeyBinding, bool) {
+func (k keymapAdapter) Primary(action string) (tui.KeyBinding, bool) {
 	b, ok := k.km.Primary(action)
 	if !ok {
-		return ui.KeyBinding{}, false
+		return tui.KeyBinding{}, false
 	}
 	return keyBinding(b), true
 }
@@ -788,20 +788,20 @@ func (k keymapAdapter) Label(action string) string {
 	if !ok {
 		return ""
 	}
-	return palmodel.FormatChord(b.Chord)
+	return commands.FormatChord(b.Chord)
 }
 
 // keyBinding maps a keymap binding to the root's view of it.
-func keyBinding(b keymap.Binding) ui.KeyBinding {
-	return ui.KeyBinding{Action: b.Action, Chord: b.Chord, Context: string(b.When)}
+func keyBinding(b keymap.Binding) tui.KeyBinding {
+	return tui.KeyBinding{Action: b.Action, Chord: b.Chord, Context: string(b.When)}
 }
 
 // keymapContext maps a UI key context to its keymap when-clause.
-func keymapContext(ctx ui.KeyContext) keymap.Context {
-	if ctx == ui.KeyContextFileExplorer {
+func keymapContext(ctx tui.KeyContext) keymap.Context {
+	if ctx == tui.KeyContextFileExplorer {
 		return keymap.ContextFileExplorer
 	}
-	if ctx == ui.KeyContextTerminal {
+	if ctx == tui.KeyContextTerminal {
 		return keymap.ContextTerminal
 	}
 	return keymap.ContextNormal
@@ -813,18 +813,18 @@ func keymapContext(ctx ui.KeyContext) keymap.Context {
 type dialogPort struct{}
 
 // Unsaved opens the unsaved-changes dialog for the tab called name.
-func (dialogPort) Unsaved(name string, tag any, ov style.Overlay) ui.Overlay {
-	return ui.WrapDialog(dialog.NewUnsavedChanges(time.Now, name, tag, ov))
+func (dialogPort) Unsaved(name string, tag any, ov style.Overlay) tui.Overlay {
+	return tui.WrapDialog(dialog.NewUnsavedChanges(time.Now, name, tag, ov))
 }
 
 // Error shows message with one OK button.
-func (dialogPort) Error(message string, tag any, ov style.Overlay) ui.Overlay {
-	return ui.WrapDialog(dialog.NewErrorDialog(time.Now, message, tag, ov))
+func (dialogPort) Error(message string, tag any, ov style.Overlay) tui.Overlay {
+	return tui.WrapDialog(dialog.NewErrorDialog(time.Now, message, tag, ov))
 }
 
 // SaveAs opens the Save As prompt prefilled with path. A path whose parent
 // folder is missing is refused inline, and an existing file needs a confirm.
-func (dialogPort) SaveAs(path string, tag any, ov style.Overlay) ui.Overlay {
+func (dialogPort) SaveAs(path string, tag any, ov style.Overlay) tui.Overlay {
 	checks := dialog.PathChecks{
 		Exists: func(p string) bool {
 			_, err := os.Stat(p)
@@ -841,5 +841,5 @@ func (dialogPort) SaveAs(path string, tag any, ov style.Overlay) ui.Overlay {
 			return nil
 		},
 	}
-	return ui.WrapDialog(dialog.NewSaveAs(time.Now, path, tag, checks, ov))
+	return tui.WrapDialog(dialog.NewSaveAs(time.Now, path, tag, checks, ov))
 }

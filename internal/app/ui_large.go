@@ -3,10 +3,10 @@ package app
 import (
 	"context"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/search"
-	"github.com/tbxark/gvim/internal/ui/editorpane"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/search"
 )
 
 // The adapters of large file mode. The root runs the line index of a large document,

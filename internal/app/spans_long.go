@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/syntax"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // Syntax spans of a very long line. The pane lays such a line out in segments (see

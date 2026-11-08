@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/session"
+	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/session"
 )
 
 // virtualPlugin makes an outline in a read-only virtual buffer with a buffer-local mode:

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/editor"
 )
 
 func TestLiveGrepSkipsTheFilesThatOpenInLargeFileMode(t *testing.T) {

@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/theme"
 )
 
 // TestFindSelectionThroughTheRootIsCaseInsensitive drives
@@ -22,7 +22,7 @@ func TestFindSelectionThroughTheRootIsCaseInsensitive(t *testing.T) {
 	ed := editor.New(editor.Options{})
 	must(t, ed.OpenFile(path))
 	a := editorAdapter{ed: ed, spans: &spanCache{}, others: map[*editor.Document]*spanCache{}}
-	m := ui.New(ui.Deps{Editor: a, Theme: theme.Theme{}})
+	m := tui.New(tui.Deps{Editor: a, Theme: theme.Theme{}})
 
 	a.SetCursor(buffer.Pos{Line: 0, Col: 2}, false)
 	if err := m.Run("find_selection_next"); err != nil {

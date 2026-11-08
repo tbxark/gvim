@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/finder"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui/grid"
-	"github.com/tbxark/gvim/internal/ui/palette"
+	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/theme"
 )
 
 // fakeIndex is a palette.Files over a fixed list: the finished index of a large
@@ -123,11 +123,11 @@ func TestPaletteFileModeRanksAFakeIndex(t *testing.T) {
 		t.Fatalf("an unfinished index shows no loading row:\n%s", got)
 	}
 
-	idx := fakeIndex{files: []string{"cmd/main.go", "internal/app/ui.go", "README.md"}}
+	idx := fakeIndex{files: []string{"cmd/main.go", "internal/app/tui.go", "README.md"}}
 	p := open(idx)
 	p.Update(p.Init()())
 	got := screen(p)
-	if !strings.Contains(got, "internal/app/ui.go") || !strings.Contains(got, "README.md") {
+	if !strings.Contains(got, "internal/app/tui.go") || !strings.Contains(got, "README.md") {
 		t.Fatalf("the file rows do not show the fake index:\n%s", got)
 	}
 	if strings.Contains(got, "Loading files…") {

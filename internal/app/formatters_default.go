@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/syntax"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // defaultFormatter is one entry of Fresh's built-in formatter table

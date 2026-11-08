@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/editor"
 )
 
 // codeLines writes a file of at least size bytes that looks like indented code, with

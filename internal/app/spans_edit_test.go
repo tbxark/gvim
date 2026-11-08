@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
 )
 
 // TestEditedTabIsLexedAgainWhenShownInASplit checks that a tab edited while it was

@@ -1,6 +1,6 @@
 package app
 
-import "github.com/tbxark/gvim/internal/editor"
+import "github.com/tbxark/gvim/editor"
 
 // The adapter satisfies the optional ui ports of this file.
 var _ interface {

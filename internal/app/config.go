@@ -10,8 +10,8 @@ import (
 
 	"github.com/alecthomas/chroma/v2/lexers"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/keymap"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/keymap"
 )
 
 // ConfigFile is one config file location and whether a file is there.

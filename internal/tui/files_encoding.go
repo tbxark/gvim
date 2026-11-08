@@ -1,0 +1,99 @@
+package tui
+
+import (
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/editor"
+)
+
+// encodingAction opens the chooser for set_encoding, reload_with_encoding and
+// set_line_ending when the command names no value, and reports whether it did. A
+// command with its argument, which is what a choice dispatches, goes on to the
+// editor.
+func (m *Model) encodingAction(action string, args map[string]any) bool {
+	switch action {
+	case "set_encoding":
+		if _, ok := args["name"]; !ok {
+			m.openEncodings(action, "Select Encoding")
+			return true
+		}
+	case "reload_with_encoding":
+		if _, ok := args["name"]; !ok {
+			m.openEncodings(action, "Reload with Encoding")
+			return true
+		}
+	case "set_line_ending":
+		if _, ok := args["value"]; !ok {
+			m.openLineEndings()
+			return true
+		}
+	}
+	return false
+}
+
+// openEncodings lists the encodings the editor can read and write. The encoding of
+// the active document is marked, and choosing a row runs action with the encoding's
+// name.
+func (m *Model) openEncodings(action, title string) {
+	current := ""
+	if doc := m.ed.Active(); doc != nil {
+		current = doc.Encoding()
+	}
+	choices := editor.EncodingChoices()
+	rows := make([]listRow, len(choices))
+	for i, c := range choices {
+		right := ""
+		// Text with no byte above 0x7f is reported as ASCII, and is UTF-8 on disk.
+		if current == c.Label || current == "ASCII" && c.Name == "utf-8" {
+			right = "current"
+		}
+		rows[i] = listRow{left: c.Label, right: right, value: c.Name}
+	}
+	v := newListView(title, rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
+		v.active = false
+		return m.dispatch(Command{Action: action, Args: map[string]any{"name": r.value}})
+	})
+	m.pushOverlay(listOverlay{v: v})
+}
+
+// openLineEndings lists the two line endings. The ending of the active document is
+// marked, and choosing a row runs set_line_ending.
+func (m *Model) openLineEndings() {
+	current := ""
+	if doc := m.ed.Active(); doc != nil {
+		current = doc.LineEnding()
+	}
+	rows := make([]listRow, 0, 2)
+	for _, e := range []struct{ label, value string }{{"LF", "lf"}, {"CRLF", "crlf"}} {
+		right := ""
+		if e.label == current {
+			right = "current"
+		}
+		rows = append(rows, listRow{left: e.label, right: right, value: e.value})
+	}
+	v := newListView("Select Line Ending", rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
+		v.active = false
+		return m.dispatch(Command{Action: "set_line_ending", Args: map[string]any{"value": r.value}})
+	})
+	v.fit = true
+	m.pushOverlay(listOverlay{v: v})
+}
+
+// statusSegmentClick runs the command behind the status row segment i: the line
+// ending and encoding choosers, and the language prompt.
+func (m *Model) statusSegmentClick(i int) tea.Cmd {
+	m.focusEditor()
+	switch i {
+	case statusSegmentEOL:
+		return m.dispatch(Command{Action: "set_line_ending"})
+	case statusSegmentEncoding:
+		return m.dispatch(Command{Action: "set_encoding"})
+	case statusSegmentLanguage:
+		return m.dispatch(Command{Action: "set_language"})
+	case statusSegmentPosition:
+		return m.dispatch(Command{Action: "goto_line"})
+	case statusSegmentLSP:
+		return m.dispatch(Command{Action: "show_lsp_status"})
+	}
+	return nil
+}

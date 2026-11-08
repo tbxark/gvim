@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/syntax"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/syntax"
 )
 
 func openGoAdapter(t *testing.T, text string) editorAdapter {

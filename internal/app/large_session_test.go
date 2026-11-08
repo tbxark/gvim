@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/session"
+	"github.com/tbxark/gvim/theme"
 )
 
 // largeOpts are the editor options of the session tests: a 1 KiB threshold makes a
@@ -60,7 +60,7 @@ func TestLargeSessionRoundTrip(t *testing.T) {
 	want := d.Buffer.Text()
 	cursor := d.Cursor
 	sess := filepath.Join(dir, "session")
-	must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 	s, _, err := session.Load(sess)
 	must(t, err)
 	if len(s.Files) != 1 || s.Files[0].OverlayFile == "" {
@@ -101,7 +101,7 @@ func TestLargeSessionKeepsAStashForAFileThatChanged(t *testing.T) {
 	dir := t.TempDir()
 	ed, path := largeSessionFile(t, dir)
 	sess := filepath.Join(dir, "session")
-	must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 	s, _, err := session.Load(sess)
 	must(t, err)
 	stash := s.Files[0].OverlayFile
@@ -124,7 +124,7 @@ func TestLargeSessionKeepsAStashForAFileThatChanged(t *testing.T) {
 		t.Errorf("notice = %q, want the path of the stash file", n)
 	}
 	// Saving the session again keeps the stash file that could not be restored.
-	must(t, writeSession(ed2, sess, ui.ExplorerState{}, keptFiles(failed)))
+	must(t, writeSession(ed2, sess, tui.ExplorerState{}, keptFiles(failed)))
 	if _, err := os.Stat(filepath.Join(sess, stash)); err != nil {
 		t.Errorf("the stash that could not be restored was removed: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestLargeSessionKeepsAStashForAFileThatIsGoneOrSmallNow(t *testing.T) {
 			dir := t.TempDir()
 			ed, path := largeSessionFile(t, dir)
 			sess := filepath.Join(dir, "session")
-			must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+			must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 			s, _, err := session.Load(sess)
 			must(t, err)
 			tc.change(t, path)
@@ -200,7 +200,7 @@ func TestSessionWithoutEditsKeepsNoOverlay(t *testing.T) {
 	ed := editor.New(largeOpts())
 	must(t, ed.OpenFile(path))
 	sess := filepath.Join(dir, "session")
-	must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 	s, _, err := session.Load(sess)
 	must(t, err)
 	if len(s.Files) != 1 || s.Files[0].OverlayFile != "" || s.Files[0].StashFile != "" {
@@ -209,8 +209,8 @@ func TestSessionWithoutEditsKeepsNoOverlay(t *testing.T) {
 }
 
 // quitModel is a UI model over ed, which a runtime needs to save the session.
-func quitModel(ed *editor.Editor) *ui.Model {
-	return ui.New(newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil))
+func quitModel(ed *editor.Editor) *tui.Model {
+	return tui.New(newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil))
 }
 
 func TestStashForQuit(t *testing.T) {
@@ -292,7 +292,7 @@ func TestCrashRecoveryOverAnAlreadyRestoredLargeDocument(t *testing.T) {
 	dir := t.TempDir()
 	ed, _ := largeSessionFile(t, dir)
 	sess, rec := filepath.Join(dir, "session"), filepath.Join(dir, "recovery")
-	must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 	s, _, err := session.Load(sess)
 	must(t, err)
 
@@ -336,7 +336,7 @@ func TestSessionKeepsBothTheLiveEditsAndAStashThatFailedToRestore(t *testing.T) 
 	must(t, ed.OpenFile(path))
 	ed.Do("insert_char", map[string]any{"text": "edit "})
 	sess := filepath.Join(dir, "session")
-	must(t, writeSession(ed, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
 	s, _, err := session.Load(sess)
 	must(t, err)
 	st, err := session.ReadOverlay(sess, s.Files[0].OverlayFile)
@@ -359,7 +359,7 @@ func TestSessionKeepsBothTheLiveEditsAndAStashThatFailedToRestore(t *testing.T) 
 	must(t, ed2.GotoLine(1, 1))
 	ed2.Do("insert_char", map[string]any{"text": "NEWEDIT "})
 
-	must(t, writeSession(ed2, sess, ui.ExplorerState{}, nil))
+	must(t, writeSession(ed2, sess, tui.ExplorerState{}, nil))
 	s2, _, err := session.Load(sess)
 	must(t, err)
 	if len(s2.Files) != 2 || s2.Files[0].Path != path || s2.Files[1].Path != path {

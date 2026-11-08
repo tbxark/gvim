@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/config"
+	"github.com/tbxark/gvim/config"
 )
 
 // found is a lookPath that finds every program in have.

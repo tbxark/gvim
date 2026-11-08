@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // userConfigPath returns a user config file with body in a temporary folder.
@@ -48,7 +48,7 @@ func TestKeybindingStoreSavesTheDocumentedForm(t *testing.T) {
 	if got := store.Custom(); len(got) != 1 || got[0].Chord != "alt+u" || got[0].Action != "to_upper_case" || got[0].Context != "normal" {
 		t.Fatalf("Custom() = %+v", got)
 	}
-	list := []ui.CustomBinding{
+	list := []tui.CustomBinding{
 		{Chord: "alt+u", Action: "to_upper_case", Context: "normal"},
 		{Chord: "ctrl+s", Action: "unbind", Context: "normal"},
 		{Chord: "ctrl+k", Action: "save", Context: "normal"},
@@ -108,10 +108,10 @@ func TestKeybindingStoreSavesTheDocumentedForm(t *testing.T) {
 	}
 }
 
-func resolveWith(t *testing.T, km ui.Keymap, chord string) string {
+func resolveWith(t *testing.T, km tui.Keymap, chord string) string {
 	t.Helper()
 	key, mods := splitChord(chord)
-	c, ok := km.Resolve(ui.KeyPress{Name: key, Mods: mods}, ui.KeyContextNormal)
+	c, ok := km.Resolve(tui.KeyPress{Name: key, Mods: mods}, tui.KeyContextNormal)
 	if !ok {
 		return ""
 	}
@@ -130,7 +130,7 @@ func keymapMust(t *testing.T, name string) *keymap.Map {
 func TestKeybindingStoreCreatesTheFileAndEmptiesTheList(t *testing.T) {
 	path := userConfigPath(t, "")
 	store := newKeybindingStore(path, config.Config{})
-	if _, err := store.Save([]ui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}, "default"); err != nil {
+	if _, err := store.Save([]tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}, "default"); err != nil {
 		t.Fatal(err)
 	}
 	if text := readTestFile(t, path); !strings.Contains(text, `"keybindings"`) || !strings.Contains(text, `"action": "save"`) {
@@ -148,13 +148,13 @@ func TestKeybindingStoreCreatesTheFileAndEmptiesTheList(t *testing.T) {
 func TestKeybindingStoreRefusesWhatWouldNotApply(t *testing.T) {
 	tests := []struct {
 		name string
-		list []ui.CustomBinding
+		list []tui.CustomBinding
 		want string
 	}{
-		{"unknown action", []ui.CustomBinding{{Chord: "ctrl+k", Action: "no_such_action", Context: "normal"}}, "unknown action"},
-		{"unknown context", []ui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "nowhere"}}, "unknown when clause"},
-		{"unreadable chord", []ui.CustomBinding{{Chord: "ctrl+wibble", Action: "save", Context: "normal"}}, "unknown key name"},
-		{"same key twice", []ui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}, {Chord: "ctrl+k", Action: "quit", Context: "normal"}}, "already bound"},
+		{"unknown action", []tui.CustomBinding{{Chord: "ctrl+k", Action: "no_such_action", Context: "normal"}}, "unknown action"},
+		{"unknown context", []tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "nowhere"}}, "unknown when clause"},
+		{"unreadable chord", []tui.CustomBinding{{Chord: "ctrl+wibble", Action: "save", Context: "normal"}}, "unknown key name"},
+		{"same key twice", []tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}, {Chord: "ctrl+k", Action: "quit", Context: "normal"}}, "already bound"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -173,7 +173,7 @@ func TestKeybindingStoreRefusesWhatWouldNotApply(t *testing.T) {
 func TestKeybindingStoreNeverOverwritesAFileItCannotRead(t *testing.T) {
 	path := userConfigPath(t, `{"tab_size": `)
 	store := newKeybindingStore(path, config.Config{})
-	_, err := store.Save([]ui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}, "default")
+	_, err := store.Save([]tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}, "default")
 	if err == nil || !strings.Contains(err.Error(), "not changed") {
 		t.Fatalf("Save error = %v, want it to say the file was not changed", err)
 	}
@@ -220,7 +220,7 @@ func TestBuildModelWiresTheKeybindingStore(t *testing.T) {
 	if list := store.Custom(); len(list) != 1 || list[0].Chord != "alt+u" || list[0].Action != "goto_line" {
 		t.Fatalf("Custom() = %+v, want the entry of the config", list)
 	}
-	km, err := store.Save(append(store.Custom(), ui.CustomBinding{Chord: "alt+k", Action: "save", Context: "normal"}), "default")
+	km, err := store.Save(append(store.Custom(), tui.CustomBinding{Chord: "alt+k", Action: "save", Context: "normal"}), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestBuildModelWiresTheKeybindingStore(t *testing.T) {
 func TestKeybindingStorePreviewWritesNothing(t *testing.T) {
 	path := userConfigPath(t, `{"tab_size": 3}`)
 	store := newKeybindingStore(path, config.Config{})
-	km, err := store.Preview([]ui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}, "default")
+	km, err := store.Preview([]tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestKeybindingStorePreviewWritesNothing(t *testing.T) {
 	if len(store.Custom()) != 0 {
 		t.Errorf("Preview changed the store: %+v", store.Custom())
 	}
-	if _, err := store.Preview([]ui.CustomBinding{{Chord: "ctrl+k", Action: "no_such_action", Context: "normal"}}, "default"); err == nil {
+	if _, err := store.Preview([]tui.CustomBinding{{Chord: "ctrl+k", Action: "no_such_action", Context: "normal"}}, "default"); err == nil {
 		t.Error("Preview accepted an unknown action")
 	}
 }
@@ -302,7 +302,7 @@ func TestUnknownActionDoesNotBlockEditorChanges(t *testing.T) {
 	if got := store.Custom(); len(got) != 0 {
 		t.Fatalf("Custom() = %+v, want no entry: the unknown action is not an editor row", got)
 	}
-	list := []ui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}
+	list := []tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}
 	if _, err := store.Preview(list, "default"); err != nil {
 		t.Fatalf("Preview with a valid binding: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestSaveKeepsTheShapeOfTheKeybindingsValue(t *testing.T) {
 				t.Fatal(err)
 			}
 			store := newKeybindingStore(path, cfg)
-			list := append(store.Custom(), ui.CustomBinding{Chord: "ctrl+k", Action: "save", Context: "normal"})
+			list := append(store.Custom(), tui.CustomBinding{Chord: "ctrl+k", Action: "save", Context: "normal"})
 			if _, err := store.Save(list, "default"); err != nil {
 				t.Fatal(err)
 			}
@@ -369,23 +369,23 @@ func TestPreviewKeepsThePluginBindings(t *testing.T) {
 	path := userConfigPath(t, `{"tab_size": 2}`)
 	store := newKeybindingStore(path, config.Config{})
 	plugins := []pluginapi.Binding{{Plugin: "jumper", Chord: "ctrl+j", Action: "jumper.jump"}}
-	pending := []ui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}
+	pending := []tui.CustomBinding{{Chord: "ctrl+k", Action: "save", Context: "normal"}}
 
 	withPlugins, err := store.PreviewWithPlugins(pending, "default", plugins)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := withPlugins.Resolve(ui.KeyPress{Name: "j", Mods: []string{"ctrl"}}, ui.KeyContextNormal); !ok || b.Action != "jumper.jump" {
+	if b, ok := withPlugins.Resolve(tui.KeyPress{Name: "j", Mods: []string{"ctrl"}}, tui.KeyContextNormal); !ok || b.Action != "jumper.jump" {
 		t.Errorf("ctrl+j with the plugin layer = %+v, %v; want jumper.jump", b, ok)
 	}
 	plain, err := store.Preview(pending, "default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := plain.Resolve(ui.KeyPress{Name: "j", Mods: []string{"ctrl"}}, ui.KeyContextNormal); ok && b.Action == "jumper.jump" {
+	if b, ok := plain.Resolve(tui.KeyPress{Name: "j", Mods: []string{"ctrl"}}, tui.KeyContextNormal); ok && b.Action == "jumper.jump" {
 		t.Errorf("the plain Preview has the plugin binding %+v", b)
 	}
-	if b, ok := withPlugins.Resolve(ui.KeyPress{Name: "k", Mods: []string{"ctrl"}}, ui.KeyContextNormal); !ok || b.Action != "save" {
+	if b, ok := withPlugins.Resolve(tui.KeyPress{Name: "k", Mods: []string{"ctrl"}}, tui.KeyContextNormal); !ok || b.Action != "save" {
 		t.Errorf("ctrl+k in the pending list = %+v, %v; want save", b, ok)
 	}
 }

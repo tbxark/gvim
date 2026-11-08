@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/explorer"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
 )
 
 // writeTestFile writes content to path, creating the parent folders.
@@ -75,7 +75,7 @@ func buildRecorded(t *testing.T, opts Options) (built, error) {
 		got.ed = prevEditor(o)
 		return got.ed
 	}
-	newUI = func(d ui.Deps) *ui.Model {
+	newUI = func(d tui.Deps) *tui.Model {
 		got.deps = d
 		return prevUI(d)
 	}
@@ -91,12 +91,12 @@ func buildRecorded(t *testing.T, opts Options) (built, error) {
 type built struct {
 	editor editor.Options
 	root   string // the workspace root the editor was given
-	deps   ui.Deps
+	deps   tui.Deps
 	ed     *editor.Editor // the editor the session was built on
 }
 
 // keymapOf returns the keymap that the UI resolves keys with.
-func keymapOf(t *testing.T, d ui.Deps) *keymap.Map {
+func keymapOf(t *testing.T, d tui.Deps) *keymap.Map {
 	t.Helper()
 	a, ok := d.Keys.(keymapAdapter)
 	if !ok {

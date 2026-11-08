@@ -11,11 +11,11 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/lsp"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/lsp"
 )
 
 // newLSPPortFor returns the language-server port for a config: the built-in table of
@@ -23,14 +23,14 @@ import (
 // exists, so that its messages can say why a language has no server. Nothing is looked up
 // or started here: a server starts when the first document of its language opens, and the
 // PATH search happens there, in the command that opens the document.
-func newLSPPortFor(cfg config.Config) ui.LSPSession {
+func newLSPPortFor(cfg config.Config) tui.LSPSession {
 	servers, startable, info := lspTable(cfg)
 	return &lspPort{servers: servers, startable: startable, info: info, managers: make(map[string]*lsp.Manager), docs: make(map[string]lspDocRec)}
 }
 
 // lspServers builds the servers that start on their own and the description of every language
 // the table or the config knows, by the names a language is detected under. See lspTable.
-func lspServers(cfg config.Config) (map[string]lsp.ServerConfig, map[string]ui.LSPServerInfo) {
+func lspServers(cfg config.Config) (map[string]lsp.ServerConfig, map[string]tui.LSPServerInfo) {
 	servers, _, info := lspTable(cfg)
 	return servers, info
 }
@@ -42,10 +42,10 @@ func lspServers(cfg config.Config) (map[string]lsp.ServerConfig, map[string]ui.L
 // built-in server is manual (ols, Godot) and the config does not turn it on, or its entry
 // says "auto_start": false. A server that does not start on its own is still startable: as in
 // Fresh, Start/Restart LSP Server runs it, whatever the switches say.
-func lspTable(cfg config.Config) (servers, startable map[string]lsp.ServerConfig, info map[string]ui.LSPServerInfo) {
+func lspTable(cfg config.Config) (servers, startable map[string]lsp.ServerConfig, info map[string]tui.LSPServerInfo) {
 	servers = make(map[string]lsp.ServerConfig)
 	startable = make(map[string]lsp.ServerConfig)
-	info = make(map[string]ui.LSPServerInfo)
+	info = make(map[string]tui.LSPServerInfo)
 	handled := make(map[string]bool) // the config keys the table used
 	for _, spec := range lsp.Defaults() {
 		user, userKey, hasUser := userEntry(cfg, spec)
@@ -66,19 +66,19 @@ func lspTable(cfg config.Config) (servers, startable map[string]lsp.ServerConfig
 				sc.RootMarkers = slices.Clone(user.RootMarkers)
 			}
 		}
-		state := ui.LSPServerOn
+		state := tui.LSPServerOn
 		switch {
 		case !cfg.LSPEnabled:
-			state = ui.LSPServerOffAll
+			state = tui.LSPServerOffAll
 		case cfg.LSPDisabled[spec.Language] || disabledByAlias(cfg, spec):
-			state = ui.LSPServerOffLanguage
+			state = tui.LSPServerOffLanguage
 		case spec.Manual && !hasUser, hasUser && user.Dormant:
-			state = ui.LSPServerManual
+			state = tui.LSPServerManual
 		}
 		for _, name := range spec.Names() {
-			info[name] = ui.LSPServerInfo{State: state, Language: spec.Language, Command: sc.Command[0], Install: sc.Install}
+			info[name] = tui.LSPServerInfo{State: state, Language: spec.Language, Command: sc.Command[0], Install: sc.Install}
 			startable[name] = sc
-			if state == ui.LSPServerOn {
+			if state == tui.LSPServerOn {
 				servers[name] = sc
 			}
 		}
@@ -89,23 +89,23 @@ func lspTable(cfg config.Config) (servers, startable map[string]lsp.ServerConfig
 			continue
 		}
 		s := cfg.LSP[lang]
-		state := ui.LSPServerOn
+		state := tui.LSPServerOn
 		switch {
 		case !cfg.LSPEnabled:
-			state = ui.LSPServerOffAll
+			state = tui.LSPServerOffAll
 		case s.Dormant:
-			state = ui.LSPServerManual
+			state = tui.LSPServerManual
 		}
-		info[lang] = ui.LSPServerInfo{State: state, Language: lang, Command: s.Command}
+		info[lang] = tui.LSPServerInfo{State: state, Language: lang, Command: s.Command}
 		sc := lsp.ServerConfig{Command: []string{s.Command}, Args: slices.Clone(s.Args), Name: s.Command, RootMarkers: slices.Clone(s.RootMarkers)}
 		startable[lang] = sc
-		if state == ui.LSPServerOn {
+		if state == tui.LSPServerOn {
 			servers[lang] = sc
 		}
 	}
 	for lang := range cfg.LSPDisabled {
 		if _, known := info[lang]; !known {
-			info[lang] = ui.LSPServerInfo{State: ui.LSPServerOffLanguage, Language: lang}
+			info[lang] = tui.LSPServerInfo{State: tui.LSPServerOffLanguage, Language: lang}
 		}
 	}
 	return servers, startable, info
@@ -128,14 +128,14 @@ func disabledByAlias(cfg config.Config, spec lsp.Spec) bool {
 }
 
 // Server describes the server of a language from the configuration. It does no lookup.
-func (p *lspPort) Server(languageID string) ui.LSPServerInfo {
+func (p *lspPort) Server(languageID string) tui.LSPServerInfo {
 	if info, ok := p.info[languageID]; ok {
 		return info
 	}
 	if _, ok := p.servers[languageID]; ok {
-		return ui.LSPServerInfo{State: ui.LSPServerOn, Language: languageID, Command: p.servers[languageID].Command[0]}
+		return tui.LSPServerInfo{State: tui.LSPServerOn, Language: languageID, Command: p.servers[languageID].Command[0]}
 	}
-	return ui.LSPServerInfo{}
+	return tui.LSPServerInfo{}
 }
 
 // openLanguage is the language a document is opened under. TypeScript's detection gives a
@@ -185,9 +185,9 @@ func unavailable(lang string, err error) error {
 	var se *lsp.StartError
 	switch {
 	case errors.As(err, &ni):
-		return &ui.LSPUnavailableError{Language: lang, Command: ni.Command, Install: ni.Install, Missing: true, Err: err}
+		return &tui.LSPUnavailableError{Language: lang, Command: ni.Command, Install: ni.Install, Missing: true, Err: err}
 	case errors.As(err, &se):
-		return &ui.LSPUnavailableError{Language: lang, Command: se.Command, Err: err}
+		return &tui.LSPUnavailableError{Language: lang, Command: se.Command, Err: err}
 	}
 	return err
 }

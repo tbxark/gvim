@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 func pluginAdapter() editorAdapter {
@@ -52,10 +52,10 @@ func TestNewPluginRuntimeIsCreatedForNoPlugins(t *testing.T) {
 // key builder, with plugins on or off.
 func TestBuildRuntimeWiresThePluginPorts(t *testing.T) {
 	isolateConfig(t)
-	var got ui.RootPorts
+	var got tui.RootPorts
 	prev := newUI
 	t.Cleanup(func() { newUI = prev })
-	newUI = func(d ui.Deps) *ui.Model {
+	newUI = func(d tui.Deps) *tui.Model {
 		got = d.Root
 		return prev(d)
 	}
@@ -64,7 +64,7 @@ func TestBuildRuntimeWiresThePluginPorts(t *testing.T) {
 		opts Options
 	}{{"on", Options{Root: t.TempDir()}}, {"--no-plugins", Options{Root: t.TempDir(), NoPlugins: true}}} {
 		t.Run(tt.name, func(t *testing.T) {
-			got = ui.RootPorts{}
+			got = tui.RootPorts{}
 			rt, err := buildRuntime(t.Context(), tt.opts, false)
 			must(t, err)
 			defer rt.close()
@@ -227,11 +227,11 @@ func TestPluginKeysPortBuildsALayeredKeymap(t *testing.T) {
 	pw := newPluginRuntime(pluginAdapter(), config.Config{}, Options{}, keymap.Default(), func() string { return "" })
 	k, err := pw.keys("", []pluginapi.Binding{{Chord: "ctrl+alt+j", Action: "hello.hello", Plugin: "hello"}})
 	must(t, err)
-	cmd, ok := k.Resolve(ui.KeyPress{Name: "j", Mods: []string{"ctrl", "alt"}}, ui.KeyContextNormal)
+	cmd, ok := k.Resolve(tui.KeyPress{Name: "j", Mods: []string{"ctrl", "alt"}}, tui.KeyContextNormal)
 	if !ok || cmd.Action != "hello.hello" {
 		t.Fatalf("resolved %+v, %v", cmd, ok)
 	}
-	if cmd, ok := k.Resolve(ui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, ui.KeyContextNormal); !ok || cmd.Action != "save" {
+	if cmd, ok := k.Resolve(tui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, tui.KeyContextNormal); !ok || cmd.Action != "save" {
 		t.Fatalf("the preset bindings are lost: %+v, %v", cmd, ok)
 	}
 	// The error of a partial failure comes with a usable keymap; a total one with none.

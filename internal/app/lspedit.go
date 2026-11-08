@@ -1,6 +1,6 @@
 package app
 
-import "github.com/tbxark/gvim/internal/editor"
+import "github.com/tbxark/gvim/editor"
 
 // ApplyLSPEdits applies the edits of a language server to the open document at
 // path, as one undo step. Like any action that may change the text, it marks the

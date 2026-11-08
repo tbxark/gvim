@@ -8,9 +8,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/session"
 )
 
 // stashFiles lists the stash files in dir.
@@ -434,7 +434,7 @@ func TestRestoreSessionKeepsTheBaselineOfStashedText(t *testing.T) {
 	ed := newSessionEditor()
 	must(t, ed.OpenFile(a))
 	ed.Do("insert_char", map[string]any{"text": "Z"})
-	must(t, saveSession(ed, sessDir, ui.ExplorerState{}))
+	must(t, saveSession(ed, sessDir, tui.ExplorerState{}))
 	must(t, os.WriteFile(a, []byte("one\nnew\n"), 0o644))
 
 	s, ok, err := session.Load(sessDir)

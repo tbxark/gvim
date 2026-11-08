@@ -11,10 +11,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
 // TestAutoSaveAdapterWritesTheModifiedFileOnSchedule checks the editor adapter's
@@ -130,7 +130,7 @@ func TestSaveRefusedWhileAutoSaveWritesShowsInTheStatusRow(t *testing.T) {
 	if jobs := deps.Editor.(editorAdapter).PlanAutoSave(time.Now()); len(jobs) != 1 {
 		t.Fatalf("PlanAutoSave returned %d jobs, want 1", len(jobs))
 	}
-	m := ui.New(deps)
+	m := tui.New(deps)
 	// The status row cuts a long message at 80 columns, so the frame is wider here.
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
@@ -152,7 +152,7 @@ func TestEmacsCtrlXCtrlSSavesWithoutCuttingTheLine(t *testing.T) {
 	}
 	em, err := keymap.ByName("emacs")
 	must(t, err)
-	m := ui.New(newUIDeps(ed, em, theme.Theme{}, nil, nil))
+	m := tui.New(newUIDeps(ed, em, theme.Theme{}, nil, nil))
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if got := ed.Active().Buffer.Text(); got != "Xabc\nxyz\n" {

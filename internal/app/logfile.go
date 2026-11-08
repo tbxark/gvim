@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // fileLog is --log-file PATH: the notices of the status row and the plugin log, one line each,

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/search"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/search"
 )
 
 // TestReplaceThroughTheAdapterRefusesReadOnlyDocument checks the find bar's

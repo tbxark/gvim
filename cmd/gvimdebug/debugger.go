@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/tbxark/gvim/internal/term"
+	"github.com/tbxark/gvim/internal/terminal"
 )
 
 // debugger runs gvim in a pseudo-terminal and keeps the session the web page shows.
@@ -25,7 +25,7 @@ type debugger struct {
 	mu        sync.Mutex // guards sess, state, gen, cols and rows
 	cols      int        // terminal size, changed by resize
 	rows      int
-	sess      *term.Session
+	sess      *terminal.Session
 	state     string // the status line: running, exited, building, and so on
 	// gen is closed at the next change the page must see, and then set to nil. Event
 	// streams wait on it, see changed.
@@ -52,7 +52,7 @@ func (d *debugger) restart() error {
 	d.mu.Lock()
 	cols, rows := d.cols, d.rows
 	d.mu.Unlock()
-	sess, err := term.Start(d.ctx, term.Options{
+	sess, err := terminal.Start(d.ctx, terminal.Options{
 		Shell: bin,
 		Args:  d.args,
 		Dir:   d.dir,
@@ -89,7 +89,7 @@ func (d *debugger) stop() {
 
 // watch records how gvim ended. It does nothing once the session has been replaced
 // or stopped, because then the exit is expected.
-func (d *debugger) watch(sess *term.Session) {
+func (d *debugger) watch(sess *terminal.Session) {
 	<-sess.Done()
 	err := sess.Wait()
 	d.mu.Lock()
@@ -108,7 +108,7 @@ func (d *debugger) watch(sess *term.Session) {
 
 // forward wakes the event streams on each screen change of sess. The screen changes
 // happen on gvim's output, and the channel closes when that output ends.
-func (d *debugger) forward(sess *term.Session) {
+func (d *debugger) forward(sess *terminal.Session) {
 	for range sess.Updates() {
 		d.bump()
 	}
@@ -151,7 +151,7 @@ func (d *debugger) snapshot() pageState {
 }
 
 // current returns the session of the running gvim, or nil when there is none.
-func (d *debugger) current() *term.Session {
+func (d *debugger) current() *terminal.Session {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.sess
@@ -199,7 +199,7 @@ func (d *debugger) binary() (string, error) {
 // runs in the current directory, so that must be inside the module.
 func build(ctx context.Context, dir string) (string, error) {
 	out := filepath.Join(dir, "gvim")
-	b, err := exec.CommandContext(ctx, "go", "build", "-o", out, "github.com/tbxark/gvim").CombinedOutput()
+	b, err := exec.CommandContext(ctx, "go", "build", "-o", out, "github.com/tbxark/gvim/cmd/gvim").CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("go build: %w\n%s", err, b)
 	}

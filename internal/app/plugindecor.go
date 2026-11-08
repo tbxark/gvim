@@ -1,10 +1,10 @@
 package app
 
 import (
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/decor"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // Plugin decorations (stage S15, AMENDMENTS C13). The decoration store belongs to the
@@ -21,7 +21,7 @@ const decorListenerKey = "decor"
 // stays on for the life of the editor: the listener is a single map lookup for a document
 // with no decoration.
 func (p *pluginEditor) trackDecorations() {
-	p.decor = decor.New()
+	p.decor = decorations.New()
 	p.ed.AddChangeListener(decorListenerKey, func(doc editor.DocID, c buffer.Change) {
 		applyChange(p.decor, uint64(doc), c)
 	})
@@ -29,17 +29,17 @@ func (p *pluginEditor) trackDecorations() {
 }
 
 // DecorStore returns the store of the plugin decorations (ui's decorSource).
-func (p *pluginEditor) DecorStore() *decor.Store { return p.decor }
+func (p *pluginEditor) DecorStore() *decorations.Store { return p.decor }
 
 // applyChange queues one change of a document's text for the decorations: the store moves
 // them through the changes of one operation (Replace All) together, when it is next read. A
 // change whose extent is not reported (a large file, a replaced buffer) drops them.
-func applyChange(st *decor.Store, doc uint64, c buffer.Change) {
+func applyChange(st *decorations.Store, doc uint64, c buffer.Change) {
 	if c.Coarse {
 		st.Apply(doc, nil, true)
 		return
 	}
-	st.Queue(doc, decor.Edit{
+	st.Queue(doc, decorations.Edit{
 		FromLine: c.From.Line, FromCol: c.FromByte,
 		ToLine: c.To.Line, ToCol: c.ToByte,
 		Text: c.Text,

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/editor"
 )
 
 // openAdapterFile writes a file called name holding text, opens it in a new editor and returns

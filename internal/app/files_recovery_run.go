@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
 )
 
 // recoveryRootFor is the folder of the crash-recovery copies for a program run with session
@@ -30,7 +30,7 @@ func recoveryDirFor(sessionDir string, real bool) string {
 
 // recoveryPort returns the writer of the crash-recovery copy and its interval, or nil
 // when editor.recovery_enabled is off or there is no place to write it.
-func recoveryPort(ed *editor.Editor, cfg config.Config, sessionDir string, real bool) (ui.RecoveryPort, time.Duration) {
+func recoveryPort(ed *editor.Editor, cfg config.Config, sessionDir string, real bool) (tui.RecoveryPort, time.Duration) {
 	dir := recoveryDirFor(sessionDir, real)
 	every := time.Duration(cfg.AutoRecoverySaveIntervalSecs) * time.Second
 	if dir == "" || !cfg.RecoveryEnabled || every <= 0 {
@@ -43,7 +43,7 @@ func recoveryPort(ed *editor.Editor, cfg config.Config, sessionDir string, real 
 // folder of sessionDir, except the copy of a run that is still going, and returns the notice
 // for the status row, or "" when there was nothing to recover. The copies it restored from
 // are removed once port, when it is not nil, has written the copy of this run.
-func recoverFromCrash(ed *editor.Editor, sessionDir string, real bool, port ui.RecoveryPort) string {
+func recoverFromCrash(ed *editor.Editor, sessionDir string, real bool, port tui.RecoveryPort) string {
 	root := recoveryRootFor(sessionDir, real)
 	if root == "" {
 		return ""

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // TestPluginServicesGrepConvertsColumns checks the conversion of AMENDMENTS C12/C24: a hit

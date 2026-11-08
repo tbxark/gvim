@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/session"
 )
 
 // TestInterruptedListsTheStashedFilesOfTheSession checks that the review reads the
@@ -35,7 +35,7 @@ func TestInterruptedListsTheStashedFilesOfTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Interrupted: %v", err)
 	}
-	want := []ui.Interrupted{
+	want := []tui.Interrupted{
 		{Path: "/ws/a.txt", Stash: filepath.Join(dir, fileStash)},
 		{Path: "", Stash: filepath.Join(dir, untitledStash)},
 	}
@@ -81,7 +81,7 @@ func TestInterruptedListsTheOverlayStashesOfLargeFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Interrupted: %v", err)
 	}
-	want := []ui.Interrupted{{Path: "/ws/big.txt", Stash: filepath.Join(dir, "overlay-1.json")}}
+	want := []tui.Interrupted{{Path: "/ws/big.txt", Stash: filepath.Join(dir, "overlay-1.json")}}
 	if !slices.Equal(got, want) {
 		t.Fatalf("Interrupted = %v, want %v", got, want)
 	}

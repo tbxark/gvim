@@ -6,9 +6,9 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/syntax"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // stringReach is how many lines above and below a queried position the lexer reads.

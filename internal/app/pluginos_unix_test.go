@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/plugin"
-	"github.com/tbxark/gvim/internal/plugin/plugintest"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/plugintest"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // alive reports whether a process with this pid exists (the test binary reaps its own

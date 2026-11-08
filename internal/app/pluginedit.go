@@ -6,11 +6,11 @@ import (
 
 	"github.com/alecthomas/chroma/v2/lexers"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/decor"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/search"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/search"
 )
 
 // Limits of one Edit call (AMENDMENTS C18): the edits, and the bytes they insert plus
@@ -39,7 +39,7 @@ type pluginEditor struct {
 	// match the name against every lexer on each call.
 	langs map[string]string
 	// decor holds the decorations of the plugins; the editor's change listener moves them.
-	decor *decor.Store
+	decor *decorations.Store
 }
 
 var _ pluginapi.BufferEditor = (*pluginEditor)(nil)

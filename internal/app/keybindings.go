@@ -13,10 +13,10 @@ import (
 
 	"github.com/tailscale/hujson"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // builtinKeymaps are the embedded keymaps. keymap does not export the list.
@@ -26,7 +26,7 @@ var builtinKeymaps = []string{"default", "macos", "macos-gui", "emacs", "vscode"
 // editor run, and every action the built-in keymaps bind.
 var knownActions = sync.OnceValue(func() map[string]bool {
 	set := make(map[string]bool)
-	for _, a := range ui.KnownActions() {
+	for _, a := range tui.KnownActions() {
 		set[a] = true
 	}
 	for _, name := range builtinKeymaps {
@@ -94,12 +94,12 @@ func configNotice(problems []string) string {
 
 // keybindingStore is the user's custom keybindings during a session. It starts as the
 // keybindings of the user config file and is replaced when the keybinding editor saves,
-// which also writes the file. It implements ui.KeybindingStore, and gives the keymap
+// which also writes the file. It implements tui.KeybindingStore, and gives the keymap
 // builders the current list through config.
 type keybindingStore struct {
 	mu     sync.Mutex
 	path   string
-	custom []ui.CustomBinding
+	custom []tui.CustomBinding
 	// skipped are the entries of the file that cannot apply (an unknown action, a typo). They
 	// are not in custom, so the editor does not list them, but a save writes them back, so
 	// that an entry the user has yet to fix is not lost.
@@ -115,16 +115,16 @@ func newKeybindingStore(path string, cfg config.Config) *keybindingStore {
 	list, skipped, _ := keymap.ParseUserBindingsRaw(cfg.Keybindings, knownAction)
 	s.skipped = skipped
 	for _, b := range list {
-		s.custom = append(s.custom, ui.CustomBinding{Chord: b.Chord, Action: b.Action, Context: string(b.When), Args: b.Args})
+		s.custom = append(s.custom, tui.CustomBinding{Chord: b.Chord, Action: b.Action, Context: string(b.When), Args: b.Args})
 	}
 	return s
 }
 
 // Custom lists the user's bindings.
-func (s *keybindingStore) Custom() []ui.CustomBinding {
+func (s *keybindingStore) Custom() []tui.CustomBinding {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]ui.CustomBinding(nil), s.custom...)
+	return append([]tui.CustomBinding(nil), s.custom...)
 }
 
 // current is cfg with the keybindings the session has now.
@@ -137,14 +137,14 @@ func (s *keybindingStore) current(cfg config.Config) config.Config {
 
 // Preview returns the keymap of preset with list applied, without writing anything, so the
 // keybinding editor can show pending changes. A list that cannot be applied is an error.
-func (s *keybindingStore) Preview(list []ui.CustomBinding, preset string) (ui.Keymap, error) {
+func (s *keybindingStore) Preview(list []tui.CustomBinding, preset string) (tui.Keymap, error) {
 	km, _, err := s.build(list, preset)
 	return km, err
 }
 
 // build checks list and returns the keymap of preset with it applied, and the JSON entries
 // of the config file.
-func (s *keybindingStore) build(list []ui.CustomBinding, preset string) (ui.Keymap, []any, error) {
+func (s *keybindingStore) build(list []tui.CustomBinding, preset string) (tui.Keymap, []any, error) {
 	bindings, entries, err := userBindings(list)
 	if err != nil {
 		return nil, nil, err
@@ -159,7 +159,7 @@ func (s *keybindingStore) build(list []ui.CustomBinding, preset string) (ui.Keym
 // PreviewWithPlugins is Preview with the plugin bindings layered over the preset, the way the
 // keymap applies them: the preset, then the plugins, then list. A plugin binding that cannot apply
 // is left out, as the root reports it when the keymap is rebuilt.
-func (s *keybindingStore) PreviewWithPlugins(list []ui.CustomBinding, preset string, plugins []pluginapi.Binding) (ui.Keymap, error) {
+func (s *keybindingStore) PreviewWithPlugins(list []tui.CustomBinding, preset string, plugins []pluginapi.Binding) (tui.Keymap, error) {
 	bindings, _, err := userBindings(list)
 	if err != nil {
 		return nil, err
@@ -179,7 +179,7 @@ func (s *keybindingStore) PreviewWithPlugins(list []ui.CustomBinding, preset str
 // Save writes list to the keybindings of the user config file and returns the keymap of
 // preset with list applied. The file keeps its other settings and comments. An unreadable
 // file is not overwritten.
-func (s *keybindingStore) Save(list []ui.CustomBinding, preset string) (ui.Keymap, error) {
+func (s *keybindingStore) Save(list []tui.CustomBinding, preset string) (tui.Keymap, error) {
 	if s.path == "" {
 		return nil, errors.New("there is no user config file to write")
 	}
@@ -192,7 +192,7 @@ func (s *keybindingStore) Save(list []ui.CustomBinding, preset string) (ui.Keyma
 	if err := writeKeybindings(s.path, entries, s.skipped); err != nil {
 		return nil, err
 	}
-	s.custom = append([]ui.CustomBinding(nil), list...)
+	s.custom = append([]tui.CustomBinding(nil), list...)
 	raw, err := json.Marshal(append(rawEntries(s.skipped), entries...))
 	if err != nil {
 		return nil, err
@@ -204,7 +204,7 @@ func (s *keybindingStore) Save(list []ui.CustomBinding, preset string) (ui.Keyma
 // userBindings converts the editor's list into keymap bindings, and into the JSON entries of
 // the config file. It refuses an entry the keymap would skip, so what is written is what
 // applies.
-func userBindings(list []ui.CustomBinding) ([]keymap.Binding, []any, error) {
+func userBindings(list []tui.CustomBinding) ([]keymap.Binding, []any, error) {
 	bindings := make([]keymap.Binding, 0, len(list))
 	entries := make([]any, 0, len(list))
 	for i, c := range list {

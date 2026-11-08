@@ -10,8 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/tui"
 )
 
 // lspPlugin reads the language-server API of the plugin runtime against the real editor and
@@ -47,9 +47,9 @@ end }
 // requests from canned data, and ignores the rest. The embedded nil interface makes any
 // method the root should not call panic.
 type appLSP struct {
-	ui.LSPSession
+	tui.LSPSession
 	mu       sync.Mutex
-	diags    map[string]ui.DiagnosticsEvent
+	diags    map[string]tui.DiagnosticsEvent
 	requests []string
 }
 
@@ -60,7 +60,7 @@ func (f *appLSP) Change(_, _ string) error  { return nil }
 func (f *appLSP) Close(string) error        { return nil }
 func (f *appLSP) Stop() error               { return nil }
 func (f *appLSP) Restart() error            { return nil }
-func (f *appLSP) Diagnostics(path string) (ui.DiagnosticsEvent, bool) {
+func (f *appLSP) Diagnostics(path string) (tui.DiagnosticsEvent, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	ev, ok := f.diags[path]
@@ -74,18 +74,18 @@ func (f *appLSP) Request(path, method string, params any) (any, error) {
 	return map[string]any{"contents": map[string]any{"value": "int variable"}}, nil
 }
 
-func (f *appLSP) publish(path string, items ...ui.Diagnostic) {
+func (f *appLSP) publish(path string, items ...tui.Diagnostic) {
 	f.mu.Lock()
-	f.diags[path] = ui.DiagnosticsEvent{Path: path, Items: items}
+	f.diags[path] = tui.DiagnosticsEvent{Path: path, Items: items}
 	f.mu.Unlock()
 }
 
 func TestPluginLSPEndToEnd(t *testing.T) {
 	isolateConfig(t)
 	writeUserFile(t, "plugins/lsp.lua", lspPlugin)
-	port := &appLSP{diags: map[string]ui.DiagnosticsEvent{}}
+	port := &appLSP{diags: map[string]tui.DiagnosticsEvent{}}
 	prev := newUI
-	newUI = func(d ui.Deps) *ui.Model {
+	newUI = func(d tui.Deps) *tui.Model {
 		d.LSP = port
 		return prev(d)
 	}
@@ -105,7 +105,7 @@ func TestPluginLSPEndToEnd(t *testing.T) {
 	// "héllo := 1": the diagnostic covers "llo" (runes 2 to 5), which is bytes 3 to 6.
 	path := s.openFile("a.go", "héllo := 1\n")
 	s.send(tea.WindowSizeMsg{Width: 120, Height: 30}) // the root syncs its documents with the servers
-	port.publish(path, ui.Diagnostic{Start: buffer.Pos{Line: 0, Col: 2}, End: buffer.Pos{Line: 0, Col: 5}, Severity: 1, Message: "boom", Source: "gopls"})
+	port.publish(path, tui.Diagnostic{Start: buffer.Pos{Line: 0, Col: 2}, End: buffer.Pos{Line: 0, Col: 5}, Severity: 1, Message: "boom", Source: "gopls"})
 	s.until("diagnostics_updated", func() bool { return len(logLines("DIAG ")) > 0 })
 	if got := logLines("DIAG "); len(got) != 1 || got[0] != "a.go e=1 w=0 i=0 h=0" {
 		t.Fatalf("diagnostics_updated = %q, want one event with one error", got)

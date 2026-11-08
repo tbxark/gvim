@@ -11,8 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // pluginSession drives the real runtime of an app (buildRuntime: the real editor, the real plugin
@@ -22,7 +22,7 @@ import (
 type pluginSession struct {
 	t    *testing.T
 	rt   *runtime
-	m    *ui.Model
+	m    *tui.Model
 	plug pluginapi.Runtime // the plugin runtime the model holds; nil when plugins are off
 	in   chan tea.Msg
 	stop chan struct{}
@@ -52,7 +52,7 @@ func newSession(t *testing.T, opts Options) *pluginSession {
 	s := &pluginSession{t: t, in: make(chan tea.Msg, 4096), stop: make(chan struct{})}
 	prev := newUI
 	t.Cleanup(func() { newUI = prev })
-	newUI = func(d ui.Deps) *ui.Model {
+	newUI = func(d tui.Deps) *tui.Model {
 		s.plug = d.Root.Plugins
 		return prev(d)
 	}

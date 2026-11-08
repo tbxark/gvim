@@ -8,11 +8,11 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/lsp"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 func TestNewLSPPortWithoutServersIsNil(t *testing.T) {

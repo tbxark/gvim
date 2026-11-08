@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/decor"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/search"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/search"
 )
 
 // decorSpans returns the byte spans (start, end) of the highlights the store holds for the
 // line of the document.
-func decorSpans(st *decor.Store, id pluginapi.BufferID, line int) [][2]int {
+func decorSpans(st *decorations.Store, id pluginapi.BufferID, line int) [][2]int {
 	var out [][2]int
 	for _, s := range st.Line(uint64(id), line).Spans {
 		out = append(out, [2]int{s.Start, s.End})
@@ -24,17 +24,17 @@ func decorSpans(st *decor.Store, id pluginapi.BufferID, line int) [][2]int {
 	return out
 }
 
-func hlItem(fl, fc, tl, tc int) decor.Item {
-	return decor.Item{Kind: decor.Highlight, FromLine: fl, FromCol: fc, ToLine: tl, ToCol: tc}
+func hlItem(fl, fc, tl, tc int) decorations.Item {
+	return decorations.Item{Kind: decorations.Highlight, FromLine: fl, FromCol: fc, ToLine: tl, ToCol: tc}
 }
 
 func TestDecorShiftedByListenerBeforeEditReturns(t *testing.T) {
 	pe, ed, ids := pluginEditorOver(t, "hello\nworld\nthird")
 	id := ids[0]
 	st := pe.DecorStore()
-	must(t, st.Set(uint64(id), "p", "a", []decor.Item{
+	must(t, st.Set(uint64(id), "p", "a", []decorations.Item{
 		hlItem(1, 1, 1, 4), // "orl"
-		{Kind: decor.Gutter, FromLine: 2, Text: "+"},
+		{Kind: decorations.Gutter, FromLine: 2, Text: "+"},
 	}))
 
 	tests := []struct {
@@ -78,7 +78,7 @@ func TestDecorByteColumnsOfMultibyteText(t *testing.T) {
 	id := ids[0]
 	st := pe.DecorStore()
 	// "ab" is bytes 2 to 4 of the line: é is two bytes.
-	must(t, st.Set(uint64(id), "p", "a", []decor.Item{hlItem(0, 2, 0, 4)}))
+	must(t, st.Set(uint64(id), "p", "a", []decorations.Item{hlItem(0, 2, 0, 4)}))
 	ed.Active().Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "é世") // 2 + 3 bytes
 	if got := decorSpans(st, id, 0); len(got) != 1 || got[0] != [2]int{7, 9} {
 		t.Fatalf("spans = %v, want [[7 9]]", got)
@@ -102,7 +102,7 @@ func TestDecorListenerRunsBeforeLaterListeners(t *testing.T) {
 	pe, ed, ids := pluginEditorOver(t, "one\ntwo")
 	id := ids[0]
 	st := pe.DecorStore()
-	must(t, st.Set(uint64(id), "p", "a", []decor.Item{{Kind: decor.EOL, FromLine: 1, Text: "t"}}))
+	must(t, st.Set(uint64(id), "p", "a", []decorations.Item{{Kind: decorations.EOL, FromLine: 1, Text: "t"}}))
 	var sawLine = -1
 	ed.AddChangeListener("later", func(doc editor.DocID, c buffer.Change) {
 		for l := range 5 {
@@ -126,7 +126,7 @@ func TestDecorDroppedWhenTheBufferIsReplaced(t *testing.T) {
 	pe := newPluginEditor(editorAdapter{ed: ed, spans: &spanCache{}, others: map[*editor.Document]*spanCache{}})
 	id := pe.ActiveBuffer()
 	st := pe.DecorStore()
-	must(t, st.Set(uint64(id), "p", "a", []decor.Item{hlItem(0, 0, 0, 2), {Kind: decor.Gutter, FromLine: 1, Text: "+"}}))
+	must(t, st.Set(uint64(id), "p", "a", []decorations.Item{hlItem(0, 0, 0, 2), {Kind: decorations.Gutter, FromLine: 1, Text: "+"}}))
 	must(t, os.WriteFile(path, []byte("uno\ndos\n"), 0o644))
 	must(t, ed.Revert(true))
 	if got := ed.Active().Buffer.Line(0); got != "uno" {
@@ -151,7 +151,7 @@ func TestDecorOnALargeDocumentIsDroppedByAnEdit(t *testing.T) {
 	pe := newPluginEditor(editorAdapter{ed: ed, spans: &spanCache{}, others: map[*editor.Document]*spanCache{}})
 	id := pe.ActiveBuffer()
 	st := pe.DecorStore()
-	must(t, st.Set(uint64(id), "p", "a", []decor.Item{hlItem(200, 1, 200, 4), {Kind: decor.Gutter, FromLine: 100, Text: "+"}}))
+	must(t, st.Set(uint64(id), "p", "a", []decorations.Item{hlItem(200, 1, 200, 4), {Kind: decorations.Gutter, FromLine: 100, Text: "+"}}))
 	// Reading a line far down touches no decoration but its own.
 	if got := decorSpans(st, id, 200); len(got) != 1 || got[0] != [2]int{1, 4} {
 		t.Fatalf("spans on line 200 = %v", got)
@@ -262,9 +262,9 @@ func bulkReplace(t *testing.T, perNS int) (time.Duration, *pluginEditor) {
 	pe, ed, ids := pluginEditorOver(t, sb.String())
 	st := pe.DecorStore()
 	for _, ns := range []string{"a", "b", "c"} {
-		items := make([]decor.Item, perNS)
+		items := make([]decorations.Item, perNS)
 		for i := range items {
-			items[i] = decor.Item{Kind: decor.Gutter, FromLine: i * 3, Text: "+"}
+			items[i] = decorations.Item{Kind: decorations.Gutter, FromLine: i * 3, Text: "+"}
 		}
 		must(t, st.Set(uint64(ids[0]), "p", ns, items))
 	}

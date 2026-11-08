@@ -7,13 +7,13 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/explorer"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/palette"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
-	"github.com/tbxark/gvim/internal/ui/menubar"
+	"github.com/tbxark/gvim/commands"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/menubar"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
 // unhandledActions lists the actions that the embedded keymaps bind but the port
@@ -60,7 +60,7 @@ func boundActions(t *testing.T) []string {
 
 // newProbeModel returns a model with a document and the explorer open on dir.
 // Each probe gets its own model, so an action's side effects do not reach the next.
-func newProbeModel(t *testing.T, dir string) *ui.Model {
+func newProbeModel(t *testing.T, dir string) *tui.Model {
 	t.Helper()
 	path := filepath.Join(dir, "probe.txt")
 	if err := os.WriteFile(path, []byte("hello\nworld\n"), 0o644); err != nil {
@@ -76,7 +76,7 @@ func newProbeModel(t *testing.T, dir string) *ui.Model {
 	}
 	deps := newUIDeps(ed, keymap.Default(), theme.Theme{}, tree, nil)
 	deps.ShowExplorer = true
-	return ui.New(deps)
+	return tui.New(deps)
 }
 
 func TestEveryBoundActionRunsOrIsListed(t *testing.T) {
@@ -112,7 +112,7 @@ func TestEveryPaletteActionRunsOrIsListed(t *testing.T) {
 	dir := t.TempDir()
 	seen := map[string]bool{}
 	var unhandled []string
-	for _, e := range palette.Commands(keymap.Default()) {
+	for _, e := range commands.Commands(keymap.Default()) {
 		if e.Action == "" || seen[e.Action] {
 			continue
 		}

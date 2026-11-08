@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/search"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/search"
 )
 
 // pluginEditorOver returns the plugin port over a new editor with one untitled tab for each

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/pluginapi"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 func TestLogFileWritesNoticesAndPluginLines(t *testing.T) {

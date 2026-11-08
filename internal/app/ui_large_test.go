@@ -11,12 +11,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/search"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/search"
+	"github.com/tbxark/gvim/theme"
 )
 
 // bigLines writes a file of 5.5 MiB, which is over the 4 MiB that opening a large file
@@ -71,7 +71,7 @@ func TestDocumentAdapterOfALargeDocumentHoldsNoSavedTextAndNoSpans(t *testing.T)
 	ed := openBig(t, bigLines(t, t.TempDir()))
 	a := editorAdapter{ed: ed, spans: &spanCache{}, others: map[*editor.Document]*spanCache{}}
 	doc := a.Active()
-	ld, ok := doc.(ui.LargeDoc)
+	ld, ok := doc.(tui.LargeDoc)
 	if !ok || !ld.Large() {
 		t.Fatalf("the adapter's document does not report large file mode: %T", doc)
 	}
@@ -240,7 +240,7 @@ func TestStringContextOfALargeDocumentReadsNothing(t *testing.T) {
 func TestRootDrivesALargeFileFromOpenToIndexedStatus(t *testing.T) {
 	t.Parallel()
 	ed := openBig(t, bigLines(t, t.TempDir()))
-	m := ui.New(newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil))
+	m := tui.New(newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil))
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	frame := ansi.Strip(m.View().Content)
 	if !strings.Contains(frame, "LARGE Scanning... ") {

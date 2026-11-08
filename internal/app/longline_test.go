@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/buffer"
+	"github.com/tbxark/gvim/buffer"
 )
 
 // openLong opens a file with the content in a runtime of the real model, with the index of a

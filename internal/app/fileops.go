@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/tbxark/gvim/internal/fsops"
-	"github.com/tbxark/gvim/internal/ui"
-	expl "github.com/tbxark/gvim/internal/ui/explorer"
+	"github.com/tbxark/gvim/fsops"
+	"github.com/tbxark/gvim/internal/tui"
+	expl "github.com/tbxark/gvim/internal/tui/explorer"
 )
 
 // fileOps is the explorer's file-operation adapter over internal/fsops. The
@@ -41,8 +41,8 @@ func newFileOps(ed pathEditor) fileOps {
 }
 
 // The adapter satisfies the root's FileOps port. The root also asserts the
-// wider set on it (see ui.Deps.Ops), so it must keep those methods too.
-var _ ui.FileOps = fileOps{}
+// wider set on it (see tui.Deps.Ops), so it must keep those methods too.
+var _ tui.FileOps = fileOps{}
 
 // CreateFile creates an empty file name inside dir and returns its path.
 func (fileOps) CreateFile(_ context.Context, dir, name string) (string, error) {

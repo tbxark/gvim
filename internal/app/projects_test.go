@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/explorer/watch"
+	"github.com/tbxark/gvim/internal/filewatch"
 )
 
 // resolved returns dir with its symbolic links resolved, as the project opener
@@ -68,7 +68,7 @@ func TestProjectOpenMissingFolderIsAnError(t *testing.T) {
 // in the folder that was left is not reported, and a change in the new folder is.
 func TestProjectOpenMovesTheWatcher(t *testing.T) {
 	isolateConfig(t)
-	w, err := watch.New(watch.Options{Delay: 20 * time.Millisecond})
+	w, err := filewatch.New(filewatch.Options{Delay: 20 * time.Millisecond})
 	must(t, err)
 	defer func() { _ = w.Close() }()
 	first, second := t.TempDir(), t.TempDir()

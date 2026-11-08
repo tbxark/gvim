@@ -10,11 +10,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/syntax"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/syntax"
+	"github.com/tbxark/gvim/theme"
 )
 
 // TestRootPaintsALargeGoFileThroughOneWindow runs the real adapter under the real root:
@@ -23,7 +23,7 @@ import (
 func TestRootPaintsALargeGoFileThroughOneWindow(t *testing.T) {
 	t.Parallel()
 	ed := openBig(t, goFile(t, t.TempDir(), -1, 0))
-	m := ui.New(newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil))
+	m := tui.New(newUIDeps(ed, keymap.Default(), theme.Theme{}, nil, nil))
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	must(t, ed.GotoLine(15_001, 1))
 	b := ed.Active().Buffer

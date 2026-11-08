@@ -3,7 +3,7 @@ package app
 import (
 	"errors"
 
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/editor"
 )
 
 // openFile opens path in ed as OpenFile does. A large file that is not UTF-8 cannot be

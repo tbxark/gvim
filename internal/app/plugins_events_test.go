@@ -14,7 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	expanel "github.com/tbxark/gvim/internal/ui/explorer"
+	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 )
 
 // eventsPlugin logs the events of the editor as "EV <name> <fields>" lines in the plugin

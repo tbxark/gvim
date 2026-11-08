@@ -10,33 +10,33 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/explorer"
-	"github.com/tbxark/gvim/internal/finder"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/syntax"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/syntax"
+	"github.com/tbxark/gvim/theme"
 )
 
 func TestKeymapAdapterResolvesInTheContext(t *testing.T) {
 	k := keymapAdapter{km: keymap.Default()}
-	save, ok := k.Resolve(ui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, ui.KeyContextNormal)
+	save, ok := k.Resolve(tui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, tui.KeyContextNormal)
 	if !ok || save.Action != "save" {
 		t.Fatalf("ctrl+s in normal = %+v, %v", save, ok)
 	}
 	// Save is bound in the normal context only, so the explorer context does not see it.
-	if cmd, ok := k.Resolve(ui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, ui.KeyContextFileExplorer); ok {
+	if cmd, ok := k.Resolve(tui.KeyPress{Name: "s", Mods: []string{"ctrl"}}, tui.KeyContextFileExplorer); ok {
 		t.Errorf("ctrl+s in the explorer = %+v, want no binding", cmd)
 	}
-	down, ok := k.Resolve(ui.KeyPress{Name: "Down"}, ui.KeyContextFileExplorer)
+	down, ok := k.Resolve(tui.KeyPress{Name: "Down"}, tui.KeyContextFileExplorer)
 	if !ok || down.Action != "file_explorer_down" {
 		t.Errorf("Down in the explorer = %+v, %v", down, ok)
 	}
-	if editorDown, ok := k.Resolve(ui.KeyPress{Name: "Down"}, ui.KeyContextNormal); !ok || editorDown.Action == "file_explorer_down" {
+	if editorDown, ok := k.Resolve(tui.KeyPress{Name: "Down"}, tui.KeyContextNormal); !ok || editorDown.Action == "file_explorer_down" {
 		t.Errorf("Down in the normal context = %+v, %v; want the editor binding", editorDown, ok)
 	}
-	if _, ok := k.Resolve(ui.KeyPress{Name: "NoSuchKey"}, ui.KeyContextNormal); ok {
+	if _, ok := k.Resolve(tui.KeyPress{Name: "NoSuchKey"}, tui.KeyContextNormal); ok {
 		t.Error("an unknown key name resolved")
 	}
 }
@@ -47,25 +47,25 @@ func TestKeymapAdapterResolvesSequences(t *testing.T) {
 		t.Fatal(err)
 	}
 	k := keymapAdapter{km: em}
-	cx := ui.KeyPress{Name: "x", Mods: []string{"ctrl"}}
-	cs := ui.KeyPress{Name: "s", Mods: []string{"ctrl"}}
+	cx := tui.KeyPress{Name: "x", Mods: []string{"ctrl"}}
+	cs := tui.KeyPress{Name: "s", Mods: []string{"ctrl"}}
 	tests := []struct {
 		name       string
-		steps      []ui.KeyPress
+		steps      []tui.KeyPress
 		action     string
 		ok, prefix bool
 	}{
-		{"first key is a prefix, not a binding", []ui.KeyPress{cx}, "", false, true},
-		{"C-x C-s saves", []ui.KeyPress{cx, cs}, "save", true, false},
-		{"C-x k closes", []ui.KeyPress{cx, {Name: "k"}}, "close", true, false},
-		{"M-g g goes to a line", []ui.KeyPress{{Name: "g", Mods: []string{"alt"}}, {Name: "g"}}, "goto_line", true, false},
-		{"a miss", []ui.KeyPress{cx, {Name: "q"}}, "", false, false},
-		{"a single binding is no prefix", []ui.KeyPress{cs}, "", false, false},
-		{"a bad key name", []ui.KeyPress{{Name: "NoSuchKey"}}, "", false, false},
+		{"first key is a prefix, not a binding", []tui.KeyPress{cx}, "", false, true},
+		{"C-x C-s saves", []tui.KeyPress{cx, cs}, "save", true, false},
+		{"C-x k closes", []tui.KeyPress{cx, {Name: "k"}}, "close", true, false},
+		{"M-g g goes to a line", []tui.KeyPress{{Name: "g", Mods: []string{"alt"}}, {Name: "g"}}, "goto_line", true, false},
+		{"a miss", []tui.KeyPress{cx, {Name: "q"}}, "", false, false},
+		{"a single binding is no prefix", []tui.KeyPress{cs}, "", false, false},
+		{"a bad key name", []tui.KeyPress{{Name: "NoSuchKey"}}, "", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, ok, prefix := k.ResolveSequence(tt.steps, ui.KeyContextNormal)
+			cmd, ok, prefix := k.ResolveSequence(tt.steps, tui.KeyContextNormal)
 			if cmd.Action != tt.action || ok != tt.ok || prefix != tt.prefix {
 				t.Errorf("ResolveSequence = %q, %v, %v; want %q, %v, %v", cmd.Action, ok, prefix, tt.action, tt.ok, tt.prefix)
 			}
@@ -80,15 +80,15 @@ func TestKeymapAdapterResolvesSuperBindings(t *testing.T) {
 	}
 	k := keymapAdapter{km: km}
 	tests := []struct {
-		key    ui.KeyPress
+		key    tui.KeyPress
 		action string
 	}{
-		{ui.KeyPress{Name: "s", Mods: []string{"super"}}, "save"},
-		{ui.KeyPress{Name: "p", Mods: []string{"super"}}, "quick_open"},
-		{ui.KeyPress{Name: "q", Mods: []string{"super"}}, "quit"},
+		{tui.KeyPress{Name: "s", Mods: []string{"super"}}, "save"},
+		{tui.KeyPress{Name: "p", Mods: []string{"super"}}, "quick_open"},
+		{tui.KeyPress{Name: "q", Mods: []string{"super"}}, "quit"},
 	}
 	for _, tt := range tests {
-		cmd, ok := k.Resolve(tt.key, ui.KeyContextNormal)
+		cmd, ok := k.Resolve(tt.key, tui.KeyContextNormal)
 		if !ok || cmd.Action != tt.action {
 			t.Errorf("%v = %+v, %v; want %s", tt.key, cmd, ok, tt.action)
 		}
@@ -96,10 +96,10 @@ func TestKeymapAdapterResolvesSuperBindings(t *testing.T) {
 }
 
 func TestKeymapContextMapping(t *testing.T) {
-	if got := keymapContext(ui.KeyContextFileExplorer); got != keymap.ContextFileExplorer {
+	if got := keymapContext(tui.KeyContextFileExplorer); got != keymap.ContextFileExplorer {
 		t.Errorf("explorer context = %q", got)
 	}
-	if got := keymapContext(ui.KeyContextNormal); got != keymap.ContextNormal {
+	if got := keymapContext(tui.KeyContextNormal); got != keymap.ContextNormal {
 		t.Errorf("normal context = %q", got)
 	}
 }
@@ -358,4 +358,4 @@ func TestBuildModelRendersAFrame(t *testing.T) {
 }
 
 // Compile-time check that the explorer tree satisfies the UI port.
-var _ ui.ExplorerTree = (*explorer.Tree)(nil)
+var _ tui.ExplorerTree = (*explorer.Tree)(nil)

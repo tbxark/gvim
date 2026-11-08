@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/editor"
 )
 
 // TestMoveTabToReordersTheRealEditorAndKeepsTheActiveDocument checks the adapter of a tab

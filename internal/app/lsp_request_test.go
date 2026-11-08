@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/pluginapi"
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // fakeLSPEnv makes the test binary act as a language server: TestFakeLSPServerProcess
@@ -108,7 +108,7 @@ func send(id json.RawMessage, result string) {
 
 // startFakeLSPPort returns a port whose "go" server is the test binary, with one open
 // document, and its path.
-func startFakeLSPPort(t *testing.T) (ui.LSPSession, string) {
+func startFakeLSPPort(t *testing.T) (tui.LSPSession, string) {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {

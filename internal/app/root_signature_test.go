@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/lsp"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/lsp"
 )
 
 // TestLSPPortSignatureHelpForUnopenedDocumentIsNotOpen checks that the port offers

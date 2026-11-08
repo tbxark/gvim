@@ -9,11 +9,11 @@ import (
 	goruntime "runtime"
 	"unicode/utf16"
 
-	"github.com/tbxark/gvim/internal/ui"
+	"github.com/tbxark/gvim/internal/tui"
 )
 
 // The write half of the system clipboard, which copy and cut use in addition to OSC 52.
-var _ ui.ClipboardWriter = systemClipboard{}
+var _ tui.ClipboardWriter = systemClipboard{}
 
 // Write puts text on the system clipboard with the platform's own tool. It fails when no
 // tool is installed or every installed tool fails. A tool that fails (wl-copy under X11,
@@ -66,7 +66,7 @@ func runClipboardTools(tools []clipboardTool, none string) error {
 }
 
 // The rich-text half of the system clipboard, which copy with formatting uses.
-var _ ui.HTMLClipboardWriter = systemClipboard{}
+var _ tui.HTMLClipboardWriter = systemClipboard{}
 
 // WriteHTML puts html on the system clipboard, with text as its plain-text form where the
 // platform's tool can hold both. It fails when no tool that takes HTML is installed.

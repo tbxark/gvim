@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/search"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/search"
 )
 
 // A match past the first MiB of a huge line of a large file is found by the find bar's scan

@@ -10,25 +10,25 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
-	"github.com/tbxark/gvim/internal/explorer"
-	"github.com/tbxark/gvim/internal/explorer/watch"
-	"github.com/tbxark/gvim/internal/finder"
-	"github.com/tbxark/gvim/internal/keymap"
-	"github.com/tbxark/gvim/internal/session"
-	"github.com/tbxark/gvim/internal/theme"
-	"github.com/tbxark/gvim/internal/ui"
-	"github.com/tbxark/gvim/internal/ui/find"
-	"github.com/tbxark/gvim/internal/ui/icons"
-	"github.com/tbxark/gvim/internal/workspace"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
+	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/internal/filewatch"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/find"
+	"github.com/tbxark/gvim/internal/tui/icons"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/session"
+	"github.com/tbxark/gvim/theme"
+	"github.com/tbxark/gvim/workspace"
 )
 
 // Constructors that buildRuntime calls. Tests replace them to see the values the
 // config produced. In production they are the real constructors.
 var (
 	newEditor = editor.New
-	newUI     = ui.New
+	newUI     = tui.New
 )
 
 // Run validates opts, builds the terminal UI and runs it in the alternate
@@ -52,7 +52,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	defer rt.close()
-	runErr := ui.Run(ctx, rt.model)
+	runErr := tui.Run(ctx, rt.model)
 	if runErr != nil {
 		rt.log.write("error", runErr.Error())
 	}
@@ -106,12 +106,12 @@ func (r *runtime) exit() {
 // that run until the program ends. Run saves the session, stops the servers, closes
 // the dock and then closes the resources.
 type runtime struct {
-	model      *ui.Model
+	model      *tui.Model
 	ed         *editor.Editor
 	projects   *projectOpener
-	watcher    *watch.Watcher // nil when no watch was started
-	sessionDir string         // empty when the session is neither restored nor saved
-	searchDir  string         // where the find history and toggles are kept; empty for nowhere
+	watcher    *filewatch.Watcher // nil when no watch was started
+	sessionDir string             // empty when the session is neither restored nor saved
+	searchDir  string             // where the find history and toggles are kept; empty for nowhere
 	// stashDir is the session directory even when the session is not saved. A stash of
 	// the unsaved edits of a large file can be written there without a session file.
 	stashDir string
@@ -122,7 +122,7 @@ type runtime struct {
 	// when there is none.
 	recovery string
 	// recoveryWriter writes the recovery copy; it is nil when there is none.
-	recoveryWriter ui.RecoveryPort
+	recoveryWriter tui.RecoveryPort
 	// interrupted is set when the program ended by a signal and not a quit. The recovery
 	// copy then stays when no session is saved to hold the unsaved text.
 	interrupted bool
@@ -161,7 +161,7 @@ func (r *runtime) saveSearch() error {
 }
 
 // loadSearch gives the model the find state saved by an earlier run.
-func loadSearch(model *ui.Model, dir string) {
+func loadSearch(model *tui.Model, dir string) {
 	if dir == "" {
 		return
 	}
@@ -219,7 +219,7 @@ func (r *runtime) stashForQuit() error {
 // buildModel builds the UI model and returns it with the file index of the root. It
 // starts no watcher and saves nothing, so it is for the callers that only need the
 // model. The caller closes the index.
-func buildModel(ctx context.Context, opts Options) (*ui.Model, *finder.Index, error) {
+func buildModel(ctx context.Context, opts Options) (*tui.Model, *finder.Index, error) {
 	rt, err := buildRuntime(ctx, opts, false)
 	if err != nil {
 		return nil, nil, err
@@ -353,7 +353,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.TabSize = cfg.TabSize
 	deps.View = viewOptions(cfg, icon.Mode.String())
 	deps.Languages = languageSettings(cfg)
-	deps.Root = ui.RootPorts{
+	deps.Root = tui.RootPorts{
 		Projects: proj,
 		Grep:     grepFor(edOpts),
 		Git:      gitStatus{},
@@ -366,7 +366,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.Root.Recovery, deps.Root.RecoveryEvery = recPort, recEvery
 	deps.Root.FullLoadPrompts = fullLoads
 	if watcher != nil {
-		// Assign only a running watcher: a nil *watch.Watcher in the interface is not nil.
+		// Assign only a running watcher: a nil *filewatch.Watcher in the interface is not nil.
 		deps.Root.WatchDirs = watcher
 	}
 	// The plugin runtime is always wired. With --no-plugins its loader is disabled.
@@ -401,7 +401,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.Notice = strings.Join(notices, "; ")
 	model := newUI(deps)
 	loadSearch(model, opts.SessionDir)
-	model.SetDock(ui.DockPorts{Starter: termStarter{ctx: ctx}, Clipboard: systemClipboard{}})
+	model.SetDock(tui.DockPorts{Starter: termStarter{ctx: ctx}, Clipboard: systemClipboard{}})
 	if opts.Diff {
 		// The two files are in tabs 0 and 1: the tab count was checked before recovery.
 		model.OpenCompare(0, 1)
@@ -443,11 +443,11 @@ func keptFiles(failed []unrestored) []session.FileState {
 // and its event channel, and both are nil when no watcher runs. The watcher is
 // pointed at the tree root by newProjectOpener. A watcher that cannot start is a
 // warning on stderr, and the tree then reloads only on Ctrl+R.
-func startWatcher(watching bool) (*watch.Watcher, <-chan watch.Changed) {
+func startWatcher(watching bool) (*filewatch.Watcher, <-chan filewatch.Changed) {
 	if !watching {
 		return nil, nil
 	}
-	w, err := watch.New(watch.Options{})
+	w, err := filewatch.New(filewatch.Options{})
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: file watcher:", err)
 		return nil, nil
@@ -543,14 +543,14 @@ func presetKeymap(flag string, cfg config.Config) *keymap.Map {
 // switchKeymapFor returns the SwitchKeymap port of a session. It builds the named
 // built-in keymap with the config keybindings applied, as runKeymap does, so an
 // override survives a switch.
-func switchKeymapFor(cfg config.Config) func(name string) (ui.Keymap, error) {
+func switchKeymapFor(cfg config.Config) func(name string) (tui.Keymap, error) {
 	return switchKeymapWith(func() config.Config { return cfg })
 }
 
 // switchKeymapWith is switchKeymapFor over the config as it is when the switch happens:
 // the keybinding editor changes the keybindings during the session.
-func switchKeymapWith(cfgNow func() config.Config) func(name string) (ui.Keymap, error) {
-	return func(name string) (ui.Keymap, error) {
+func switchKeymapWith(cfgNow func() config.Config) func(name string) (tui.Keymap, error) {
+	return func(name string) (tui.Keymap, error) {
 		km, err := keymapFor(name)
 		if err != nil {
 			return nil, err
@@ -563,8 +563,8 @@ func switchKeymapWith(cfgNow func() config.Config) func(name string) (ui.Keymap,
 // over the config, as it does for the session. The keymap falls back to the platform
 // default when neither names one. ConfigFile is the user file the session reads: the
 // one named by --config, else the default user file, or empty when that is unknown.
-func settingsFor(opts Options, cfg config.Config) ui.Settings {
-	s := ui.Settings{
+func settingsFor(opts Options, cfg config.Config) tui.Settings {
+	s := tui.Settings{
 		Theme:               cfg.Theme,
 		Keymap:              cfg.Keymap,
 		TabSize:             cfg.TabSize,

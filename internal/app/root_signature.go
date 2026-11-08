@@ -5,8 +5,8 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/tbxark/gvim/internal/buffer"
-	"github.com/tbxark/gvim/internal/lsp"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/lsp"
 )
 
 // SignatureHelp returns the signature help text at at, as the root's optional

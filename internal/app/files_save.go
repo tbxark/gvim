@@ -3,8 +3,8 @@ package app
 import (
 	"time"
 
-	"github.com/tbxark/gvim/internal/config"
-	"github.com/tbxark/gvim/internal/editor"
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
 )
 
 // PlanSaveForce prepares the save of the active document over a file that changed on
