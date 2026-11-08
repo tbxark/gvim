@@ -304,9 +304,18 @@ former index as its identity, since labels repeat across auto-import candidates)
 the first row only when the new prefix filters that candidate out. If typing empties the filter the
 list dismisses and completion is asked once for the new prefix; if Backspace's wider filter somehow
 empties it, the list dismisses without a new request (Fresh dismisses there too). Non-word
-characters still dismiss the list (Fresh re-filters for them as well — residual). Stale replies are
-still dropped by the document version/caret guard, and a re-filtered list captures the document
-version after the edit, so accepting it can never apply an item against older text.
+characters are NOT filter characters, which matches Fresh: its completion popup sends a filter key
+only for alphanumeric or underscore characters and lets every other printable key pass through and
+dismiss the popup; the Fresh e2e cases (space, semicolon, parentheses, equals, braces, comma, plus,
+dot) all assert the popup closes and the character is inserted. gvim does the same here. A
+non-word character that a server advertises as a completion trigger still closes the old list and
+is inserted, but when the completion_popup_auto_show and suggest_on_trigger_characters options are
+both on it immediately starts a FRESH completion request for the new caret and opens the new list
+(a new request, so the old list's selected candidate identity does not carry over); with
+suggest_on_trigger_characters off it starts no request. Any other non-word character cancels a
+pending debounced auto-popup. Stale replies are still dropped by the document version/caret
+guard, and a re-filtered list captures the document version after the edit, so accepting it can
+never apply an item against older text.
 
 Multi-buffer words are ported for the popup: a bounded window from the middle of every other open
 tab (64 KiB each, at most 8, in tab order rather than Fresh's MRU order) contributes words below

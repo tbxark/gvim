@@ -9,6 +9,8 @@ import (
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/daemon"
+	"github.com/tbxark/gvim/session"
 )
 
 // TestSharedBuffersForDaemonOnly: only a daemon-hosted local launch gets a registry; a
@@ -130,5 +132,104 @@ func TestWorkspaceSharedBuffersAcrossWorkspaces(t *testing.T) {
 	}
 	if got := bSession.rt.ed.Active().Buffer.Text(); got == "" {
 		t.Fatal("the promoted buffer is empty")
+	}
+}
+
+// TestWorkspaceSharedBuffersStartupRestoreConflict: a dormant workspace restored at
+// daemon startup from a saved session that has the same file open (with different
+// unsaved stash text) does not open an independent copy: the live owner text stays
+// authoritative, the restored workspace gets a mirror and a separate untitled conflict
+// tab, and the switch then moves canonical ownership there.
+func TestWorkspaceSharedBuffersStartupRestoreConflict(t *testing.T) {
+	isolateConfig(t)
+	workspacesDir := t.TempDir()
+	t.Setenv("GVIM_WORKSPACE_DIR", workspacesDir)
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	path := filepath.Join(rootA, "shared.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A dormant workspace B whose saved session restores the same file with a stale
+	// unsaved stash text.
+	idB, dirB := precreateDormantWorkspace(t, workspacesDir, rootB, "B", nil)
+	stashName, err := session.StashContent(dirB, "stale unsaved\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := session.Session{Version: 1, Root: rootB, Files: []session.FileState{{
+		Path: path, StashFile: stashName, Line: 1,
+	}}}
+	if err := session.Save(dirB, layout); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := daemon.OpenRegistry(workspacesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.UpdateLayout(idB, &layout); err != nil {
+		t.Fatal(err)
+	}
+	m, err := newWorkspaceManager(t.Context(), Options{
+		Root:       rootA,
+		SessionDir: t.TempDir(),
+		Daemon:     &DaemonOptions{Mode: DaemonServe},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.closeAll)
+	m.mu.Lock()
+	aSession := m.sessions[m.active]
+	m.mu.Unlock()
+	if aSession == nil || aSession.rt == nil {
+		t.Fatal("no foreground workspace runtime")
+	}
+	// The foreground workspace owns the file with live unsaved text.
+	if err := aSession.rt.ed.OpenFile(path); err != nil {
+		t.Fatalf("open in the foreground workspace: %v", err)
+	}
+	aSession.rt.ed.Active().Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "owner ")
+	ownerText := aSession.rt.ed.Active().Buffer.Text()
+	// Materialize the dormant workspace: its session restore adopts the shared file.
+	selectCmd, selectErr := m.Select(idB)
+	runWorkspaceCmd(t, selectCmd, selectErr)
+	m.mu.Lock()
+	bSession := m.sessions[idB]
+	m.mu.Unlock()
+	if bSession == nil || bSession.rt == nil {
+		t.Fatal("the restored workspace did not materialize")
+	}
+	// The restored workspace is now focused and owns the canonical document; the old
+	// workspace is a read-only mirror with the same live unsaved text.
+	if bSession.rt.ed.Active().SharedMirror() || bSession.rt.ed.Active().ReadOnly() {
+		t.Fatal("the restored workspace did not take ownership")
+	}
+	if got := bSession.rt.ed.Active().Buffer.Text(); got != ownerText {
+		t.Fatalf("restored workspace text = %q, want the live owner text %q", got, ownerText)
+	}
+	if !aSession.rt.ed.Active().SharedMirror() || !aSession.rt.ed.Active().ReadOnly() {
+		t.Fatal("the original workspace is not a read-only mirror")
+	}
+	// The stale unsaved stash text is kept in an untitled conflict tab, not written
+	// into the shared buffer and not silently discarded.
+	var conflict *editor.Document
+	for i := 0; i < len(bSession.rt.ed.Tabs()); i++ {
+		if d := bSession.rt.ed.DocAt(i); d != nil && d.Path == "" {
+			conflict = d
+			break
+		}
+	}
+	if conflict == nil {
+		t.Fatal("the stale restored unsaved copy was discarded")
+	}
+	if got := conflict.Buffer.Text(); got != "stale unsaved\n" {
+		t.Fatalf("conflict tab text = %q", got)
+	}
+	if !strings.Contains(conflict.Status, "Restored unsaved copy") {
+		t.Fatalf("conflict tab status = %q", conflict.Status)
+	}
+	if raw, err := os.ReadFile(path); err != nil || string(raw) != "one\ntwo\n" {
+		t.Fatalf("the startup restore wrote the shared file: %q, %v", raw, err)
 	}
 }

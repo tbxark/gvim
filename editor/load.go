@@ -1,6 +1,10 @@
 package editor
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tbxark/gvim/document"
+)
 
 // LoadFunc returns a function that reads path into a document for OpenLoaded. The
 // new-file line ending and the large file settings are taken from the options now. The
@@ -39,6 +43,19 @@ func (e *Editor) OpenLoaded(d *Document) {
 		e.setStatus("Opened " + e.docs[i].Name())
 		return
 	}
+	var conflict *document.Document
+	if e.shared != nil {
+		open, conflictDoc, handled := e.shared.AdoptLoaded(e, d)
+		if handled {
+			if open != d {
+				if conflictDoc != d {
+					e.releaseDoc(d)
+				}
+				d = open
+			}
+			conflict = conflictDoc
+		}
+	}
 	e.pushJump()
 	if e.pristineUntitled() {
 		// The untouched startup buffer is replaced, not kept as a tab.
@@ -49,8 +66,16 @@ func (e *Editor) OpenLoaded(d *Document) {
 		e.addDoc(d)
 		e.switchTo(len(e.docs) - 1)
 	}
+	if conflict != nil {
+		// The restored unsaved copy is kept as its own untitled tab, not written over
+		// the shared file the other workspace owns.
+		conflict.SetPreview(false)
+		e.addDoc(conflict)
+		e.setStatus("Opened " + d.Name() + " shared; a restored unsaved copy is kept in " + conflict.Name())
+	} else {
+		e.setStatus(d.OpenStatus())
+	}
 	if e.shared != nil {
 		e.shared.Register(e, d)
 	}
-	e.setStatus(d.OpenStatus())
 }

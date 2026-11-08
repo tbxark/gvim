@@ -33,6 +33,11 @@ type SharedBuffers struct {
 	Label func(*Editor) string
 	// Deny is a test hook that can refuse an ownership transfer; nil grants it.
 	Deny func(owner, requester *Editor) error
+	// pending maps an editor to documents opened through OpenLoaded for a path another
+	// workspace owns. Startup restore opens the file first and applies its stash text
+	// after OpenLoaded, so adoption is deferred to the editor's focus: only then is the
+	// restored unsaved text final and a real conflict can be told from a plain mirror.
+	pending map[*Editor][]*document.Document
 }
 
 type sharedEntry struct {
@@ -50,7 +55,7 @@ type sharedEntry struct {
 
 // NewSharedBuffers returns an empty cross-workspace registry.
 func NewSharedBuffers() *SharedBuffers {
-	return &SharedBuffers{entries: make(map[string]*sharedEntry)}
+	return &SharedBuffers{entries: make(map[string]*sharedEntry), pending: make(map[*Editor][]*document.Document)}
 }
 
 // sharedCanonical canonicalizes an open path for the registry: absolute and, when it
@@ -90,6 +95,13 @@ func (s *SharedBuffers) Open(e *Editor, path string) (handled bool, err error) {
 		return false, nil
 	}
 	if entry.doc == nil || entry.owner == nil {
+		return false, nil
+	}
+	if s.active != nil && s.active != e {
+		// A workspace that is being materialized or restored (not the focused one) may
+		// have session stash text applied to the document AFTER OpenFile returns. Let it
+		// load normally; OpenLoaded records the deferred adoption and Focus resolves it
+		// when the workspace is shown, with the restored unsaved text final.
 		return false, nil
 	}
 	mirror, err := document.NewMirrorDocument(entry.doc)
@@ -132,11 +144,81 @@ func (s *SharedBuffers) openMirrorLocked(e *Editor, mirror *document.Document) {
 	e.switchTo(len(e.docs) - 1)
 }
 
+// AdoptLoaded is the OpenLoaded hook for startup restore and other pre-loaded
+// documents. With no shared entry the caller keeps d and the ordinary registration
+// follows (handled false). When another workspace owns the canonical path, an unmodified
+// restored copy is replaced by a read-only mirror of the owner (handled true, open is the
+// mirror) and a restored UNSAVED copy whose text differs is kept as an extra untitled
+// conflict tab instead of being discarded or allowed to overwrite the owner later: the
+// original document is renamed away from the file, labelled and returned as conflict.
+// When this workspace already owns the entry, its loaded copy is replaced by the
+// canonical document under the same rule.
+func (s *SharedBuffers) AdoptLoaded(e *Editor, d *document.Document) (open, conflict *document.Document, handled bool) {
+	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() {
+		return d, nil, false
+	}
+	canonical := sharedCanonical(d.Path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[canonical]
+	if entry == nil || entry.doc == nil || entry.owner == nil {
+		return d, nil, false
+	}
+	if entry.owner == e {
+		if entry.doc == d {
+			return d, nil, true
+		}
+		conflict = s.conflictCopyLocked(e, d, entry)
+		return entry.doc, conflict, true
+	}
+	// Defer the adoption to the editor's focus: the restore pipeline applies the stash
+	// text after OpenLoaded, so a decision now could miss (or wrongly keep) the restored
+	// unsaved text. The loaded document stays a normal tab until Focus adopts it.
+	s.pending[e] = append(s.pending[e], d)
+	return d, nil, false
+}
+
+// conflictCopyLocked turns a restored unsaved document whose text differs from the
+// owner's into an untitled conflict buffer. It returns nil when the restored text is not
+// unsaved or already matches the owner, and never changes the owner. s.mu is held.
+func (s *SharedBuffers) conflictCopyLocked(e *Editor, d *document.Document, entry *sharedEntry) *document.Document {
+	if !d.Modified() || d.Large() || d.Virtual() || entry.doc == nil {
+		return nil
+	}
+	restored, ok := sharedDocumentText(d)
+	if !ok {
+		return nil
+	}
+	ownerText, ok := sharedDocumentText(entry.doc)
+	if !ok || restored == ownerText {
+		return nil
+	}
+	name := filepath.Base(d.Path)
+	d.Rename("")
+	d.SetLabel("[shared conflict] " + name)
+	d.SetPreview(false)
+	d.Status = "Restored unsaved copy of " + name + " from this workspace's session; " +
+		s.label(entry.owner) + " owns the file. Save As to keep this copy."
+	return d
+}
+
+// sharedDocumentText reads a document's text for the share/conflict decisions, bounded.
+func sharedDocumentText(d *document.Document) (string, bool) {
+	if d == nil || d.Buffer == nil {
+		return "", false
+	}
+	text, err := d.Buffer.TextChecked()
+	if err != nil || len(text) > document.MaxSharedDocumentBytes {
+		return "", false
+	}
+	return text, true
+}
+
 // Register is the OpenLoaded hook: the newly loaded document becomes the owner of its
 // canonical path when no other workspace owns it. A path already owned elsewhere is
 // left to the ordinary open (sharing starts on the OpenFile path).
 func (s *SharedBuffers) Register(e *Editor, d *document.Document) {
-	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() {
+	if s == nil || e == nil || d == nil || d.Path == "" || d.SharedMirror() || d.Large() || d.Virtual() {
 		return
 	}
 	canonical := sharedCanonical(d.Path)
@@ -241,6 +323,66 @@ func (s *SharedBuffers) transferLocked(entry *sharedEntry, from, to *Editor) err
 	return nil
 }
 
+// adoptPendingLocked resolves the documents OpenLoaded deferred for e. It runs on the
+// editor's focus, after startup restore has applied the stash text. A path whose owner
+// disappeared becomes e's owner; a path still owned elsewhere becomes a read-only mirror,
+// and a modified restored copy whose text differs from the live owner is kept as an
+// untitled conflict tab instead of being discarded or overwriting the owner later.
+func (s *SharedBuffers) adoptPendingLocked(e *Editor) {
+	docs := s.pending[e]
+	if len(docs) == 0 {
+		return
+	}
+	delete(s.pending, e)
+	for _, d := range docs {
+		idx := slices.Index(e.docs, d)
+		if idx < 0 || d.Path == "" {
+			continue
+		}
+		canonical := sharedCanonical(d.Path)
+		entry := s.entries[canonical]
+		if entry == nil || entry.doc == nil || entry.owner == nil {
+			// The owner went away while this workspace was dormant: the restored
+			// document becomes the owner, with its restored unsaved text.
+			entry = &sharedEntry{canonical: canonical, owner: e, doc: d, mirrors: map[*Editor]*document.Document{}}
+			s.entries[canonical] = entry
+			s.watchLocked(entry, e)
+			d.MakeSharedOwner()
+			continue
+		}
+		if entry.owner == e {
+			if entry.doc != d {
+				// A duplicate loaded copy of a path this editor owns: keep the canonical
+				// one and keep a conflicting unsaved copy under the conflict rule.
+				conflict := s.conflictCopyLocked(e, d, entry)
+				e.docs[idx] = entry.doc
+				entry.doc.MakeSharedOwner()
+				if conflict == nil {
+					e.releaseDoc(d)
+				} else {
+					e.addDoc(conflict)
+				}
+			}
+			continue
+		}
+		mirror, err := document.NewMirrorDocument(entry.doc)
+		if err != nil {
+			// Large/virtual/over-bound: leave the restored document independent.
+			continue
+		}
+		conflict := s.conflictCopyLocked(e, d, entry)
+		mirror.SetSharedMirrorStatus("Mirror of " + s.label(entry.owner) + ": read-only until focused")
+		e.docs[idx] = mirror
+		e.adopt(mirror)
+		entry.mirrors[e] = mirror
+		if conflict == nil {
+			e.releaseDoc(d)
+		} else {
+			e.addDoc(conflict)
+		}
+	}
+}
+
 // Focus makes e the focused workspace: it requests ownership of every entry it mirrors,
 // and refreshes its owned entries' mirrors (a save updates the saved state without a
 // buffer change, so a focus syncs it). A refused transfer leaves a conflict in the
@@ -252,6 +394,7 @@ func (s *SharedBuffers) Focus(e *Editor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.active = e
+	s.adoptPendingLocked(e)
 	for _, entry := range s.entries {
 		if mirror, ok := entry.mirrors[e]; ok && entry.owner != e && entry.doc != nil {
 			if err := s.transferLocked(entry, entry.owner, e); err != nil {
@@ -354,6 +497,7 @@ func (s *SharedBuffers) DropEditor(e *Editor) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	delete(s.pending, e)
 	for canonical, entry := range s.entries {
 		delete(entry.mirrors, e)
 		if entry.owner != e {

@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -36,14 +37,27 @@ const (
 	remoteWalkDefaultEntries = 50_000
 )
 
-// RealPath stays unsupported: the authority has no remote readlink primitive, and a
-// cleaned path would be a wrong answer for a symlink. It never falls back locally.
+// RealPath resolves symbolic links on the workspace machine through the authority's
+// optional RealPather capability (local: EvalSymlinks; SSH: one realpath/readlink -f
+// helper). A backend without the capability gets a clear unsupported error; the local
+// machine's OS is never consulted and the returned path is a remote absolute path.
 func (o *authorityOS) RealPath(ctx context.Context, p string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", mapErr(err, "")
 	}
-	return "", pluginapi.Errf(pluginapi.CodeUnsupported,
-		"%s: the workspace authority has no remote realpath/readlink primitive", p)
+	rp, ok := authority.RealPathResolver(o.files())
+	if !ok {
+		return "", pluginapi.Errf(pluginapi.CodeUnsupported,
+			"%s: the workspace authority has no realpath capability", p)
+	}
+	real, err := rp.RealPath(ctx, o.resolve(p))
+	if err != nil {
+		return "", mapErr(err, p)
+	}
+	if real == "" {
+		return "", pluginapi.Errf(pluginapi.CodeIO, "%s: the remote realpath returned no path", p)
+	}
+	return real, nil
 }
 
 // Walk implements hostos.OS over the authority's ReadDir.

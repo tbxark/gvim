@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 )
 
 // writeSharedFile writes a file for the cross-workspace sharing tests.
@@ -331,5 +332,91 @@ func TestSharedBuffersCloseByPathPromotes(t *testing.T) {
 	}
 	if got := a.Active().Buffer.Text(); got != "keep bulk\n" {
 		t.Fatalf("promoted text after CloseByPath = %q", got)
+	}
+}
+
+// TestSharedBuffersAdoptLoadedStartupRestore: a workspace restored at startup with the
+// same file another workspace owns becomes a read-only mirror of the owner's live text
+// (not an independent copy), and a restored UNSAVED copy whose text differs is kept as
+// an untitled conflict tab instead of overwriting the owner.
+func TestSharedBuffersAdoptLoadedStartupRestore(t *testing.T) {
+	path := writeSharedFile(t, "base\n")
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	a.Active().Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "owner ")
+	ownerText := a.Active().Buffer.Text()
+	// A restored session of the second workspace: same path, different unsaved text.
+	restored := document.NewStdinDocument("stale unsaved\n")
+	restored.Rename(path)
+	restored.Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "stale ")
+	shared.Focus(b)
+	b.OpenLoaded(restored)
+	// The adoption is deferred until the restored workspace is focused: the restore
+	// pipeline applies the stash after OpenLoaded. Focus then adopts the owner's live
+	// text, keeps the conflicting unsaved copy in an untitled tab and moves ownership.
+	shared.Focus(b)
+	if b.Active().SharedMirror() || b.Active().ReadOnly() {
+		t.Fatal("the focused restored workspace did not take ownership")
+	}
+	var conflict *document.Document
+	for i := 0; i < len(b.Tabs()); i++ {
+		if d := b.DocAt(i); d != nil && d.Path == "" {
+			conflict = d
+			break
+		}
+	}
+	if conflict == nil {
+		t.Fatal("the restored conflicting unsaved copy was discarded")
+	}
+	if got := conflict.Buffer.Text(); got != "stale stale unsaved\n" {
+		t.Fatalf("conflict copy text = %q", got)
+	}
+	if !strings.Contains(conflict.Status, "Restored unsaved copy") {
+		t.Fatalf("conflict status = %q", conflict.Status)
+	}
+	// The switch moved the canonical document (owner text, undo, unsaved state) to the
+	// restored workspace; the old workspace keeps a mirror.
+	if got := b.Active().Buffer.Text(); got != ownerText {
+		t.Fatalf("restored workspace owner text = %q, want the live owner text %q", got, ownerText)
+	}
+	if !a.Active().SharedMirror() || !a.Active().ReadOnly() {
+		t.Fatal("the original workspace is not a read-only mirror after the switch")
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "base\n" {
+		t.Fatalf("the restored conflict overwrote the disk file: %q, %v", got, err)
+	}
+}
+
+// TestSharedBuffersAdoptLoadedUnmodified: an unmodified restored copy of a shared file is
+// simply replaced by the owner's mirror (no conflict tab, no independent copy).
+func TestSharedBuffersAdoptLoadedUnmodified(t *testing.T) {
+	path := writeSharedFile(t, "plain\n")
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	restored := document.NewStdinDocument("plain\n")
+	restored.Rename(path)
+	b.OpenLoaded(restored)
+	shared.Focus(b)
+	if len(b.Tabs()) != 1 {
+		t.Fatalf("the unmodified restore opened %d tabs, want only the shared buffer", len(b.Tabs()))
+	}
+	if b.Active().SharedMirror() || b.Active().ReadOnly() {
+		t.Fatal("the focused unmodified restore did not take ownership")
+	}
+	if got := b.Active().Buffer.Text(); got != "plain\n" {
+		t.Fatalf("restored text = %q", got)
+	}
+	if shared.OwnerLabel(shared.CanonicalPath(path)) == "" {
+		t.Fatal("the shared entry lost its owner label")
 	}
 }

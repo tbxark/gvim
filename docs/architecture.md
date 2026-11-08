@@ -611,14 +611,28 @@ still loads unchanged.
   CloseByPath path (a deleted file or folder) detaches all shared victims up front, so a
   promoted owner leaves no lost text and a refused transfer leaves the tabs untouched.
   Disabled: close prompts are skipped because the buffer survives in the other workspace,
-  not because unsaved text is discarded. Tests cover
+  not because unsaved text is discarded.
+
+  Startup restore uses the same registry: `OpenLoaded` for a path another
+  materialized workspace owns adopts the owner's live document instead of opening an
+  independent copy - an unmodified restored copy becomes a read-only mirror, and a
+  restored UNSAVED copy whose text differs from the live owner is kept as a separate
+  untitled `[shared conflict]` tab (the restored text is preserved for Save As; the file
+  path is removed from it, so it can never overwrite the owner) while the restored
+  workspace's normal tab mirrors the owner; the disk file is untouched. Adoption is
+  deferred to the workspace's focus because the restore pipeline applies the stash text
+  after opening: a workspace that is being materialized while another is focused loads
+  independently until Focus resolves it, exactly when the restored unsaved text is final.
+  The daemon tests this with a dormant workspace whose saved session restores the same
+  file with a stale stash. Tests also cover
   open in two workspaces, mirror read-only-until-ownership, edit propagation, ownership
   back-and-forth with undo/unsaved state, conflict notice, close-owner promotion, owner-tab
   close promotion, mirror-tab close without a prompt, the last-view prompt, CloseByPath
-  promotion, and a remote launch keeping independent buffers. Residuals: only the OpenFile path starts
-  sharing (OpenLoaded/startup restore of a second workspace still opens an independent
-  copy, and a daemon open-file request for an already-owned path switches to the owner
-  rather than opening a mirror), the editor-level Close() used by an exiting runtime does
+  promotion, and a remote launch keeping independent buffers. Residuals: sharing starts on
+  `OpenFile` and startup `OpenLoaded` but not on a plugin/API-created tab for a path
+  already shared (that still opens an independent copy), and a daemon open-file request
+  for an already-owned path switches to the owner rather than opening a mirror;
+  the editor-level Close() used by an exiting runtime does
   not promote (the daemon's workspace close/evict path calls DropEditor first), the two
   workspaces do not become two TUI splits or panes of one workspace in this slice, and
   they share the entry's view position only when ownership moves (each keeps its own
