@@ -12,6 +12,9 @@ checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
 - `CLAUDE.md` holds the behavior rules and an architecture summary.
 - `docs/architecture.md` is the design record for the package layout, package roles and
   import rules.
+- `docs/ui.md` is the design record for the chrome spacing and the overlay (popup)
+  components: the padding scale, the three placements (sheet, card, menu) and the
+  shared card frame.
 - `migration/ARCH-v4.md` is the earlier design record, kept for history; it is superseded.
 
 ## Layout

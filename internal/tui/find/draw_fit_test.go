@@ -5,7 +5,18 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/tbxark/gvim/internal/tui/space"
 )
+
+// optionsRow returns the first column of the options row and its labels, as Draw lays
+// them out in a frame w cells wide: one padding cell after the card's left border.
+func optionsRow(b *Bar, w int) (x0 int, labels []string, gap int) {
+	left, right := cardColumns(w)
+	x0 = left + 1 + space.PadX
+	labels, gap = b.optionRow(right - space.PadX - x0)
+	return x0, labels, gap
+}
 
 // The options row must never cut a label in the middle: at every width each option is
 // either whole, or the row ends with an ellipsis that marks the cut.
@@ -19,7 +30,7 @@ func TestOptionsRowFitsEveryWidth(t *testing.T) {
 		if ansi.StringWidth(row) > w {
 			t.Errorf("width %d: row %q is wider than the frame", w, row)
 		}
-		if strings.HasSuffix(row, "…") {
+		if strings.Contains(row, "…") {
 			continue
 		}
 		// Not cut: all four names are on the row, each whole.
@@ -60,8 +71,7 @@ func TestOptionAtFollowsTheRowLayout(t *testing.T) {
 	t.Parallel()
 	b := Open(newFake("x"), testStyles(), false)
 	for _, w := range []int{10, 20, 40, 60, 80, 120, 200} {
-		labels, gap := b.optionRow(w)
-		at := 1
+		at, labels, gap := optionsRow(b, w)
 		for i, label := range labels {
 			lw := ansi.StringWidth(label)
 			for x := at; x < at+lw; x++ {

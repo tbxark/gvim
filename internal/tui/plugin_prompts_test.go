@@ -359,12 +359,12 @@ func TestPluginPickerPaintsItsRows(t *testing.T) {
 		t.Fatalf("query row = %q, want the placeholder", plain[h-1])
 	}
 	foot := strings.TrimRight(plain[h-2], " ")
-	if !strings.Contains(foot, "enter to open") || !strings.HasSuffix(foot, "4/4") {
-		t.Fatalf("footer row = %q", foot)
+	if !strings.Contains(foot, "enter to open") || !strings.Contains(foot, "4/4") {
+		t.Fatalf("footer on the box bottom border = %q", foot)
 	}
-	// The box is 12 rows (10 of them for items) above the footer row, so the first item
-	// is on row h-2-12+1.
-	first := h - 2 - 12 + 1
+	// The box is 12 rows (10 of them for items) with its bottom border one row above the
+	// query line, so its top border is on row h-2-12+1 and the first item under it.
+	first := h - 2 - 12 + 2
 	if !strings.Contains(plain[first], "alpha") || !strings.Contains(plain[first+1], "beta") || !strings.Contains(plain[first+1], "second") {
 		t.Fatalf("rows:\n%s", strings.Join(plain[first-1:], "\n"))
 	}

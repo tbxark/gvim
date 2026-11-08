@@ -37,7 +37,7 @@ var ratioKeys = fakeKeymap{
 }
 
 func TestResizeMovesTheRatioOfTheFocusedSplit(t *testing.T) {
-	// A side-by-side split of the 80 by 21 band: the first child takes the ratio
+	// A side-by-side split of the 80 by 20 band: the first child takes the ratio
 	// percent of the 79 cells left by the line. At 50 the pane widths are 40 and 39.
 	tests := []struct {
 		name   string
@@ -51,28 +51,28 @@ func TestResizeMovesTheRatioOfTheFocusedSplit(t *testing.T) {
 			setup:  []string{"split_vertical"},
 			action: "increase_split_size",
 			ratio:  45,
-			panes:  []rect{{X: 0, Y: 2, W: 36, H: 21}, {X: 37, Y: 2, W: 43, H: 21}},
+			panes:  []rect{{X: 0, Y: 3, W: 36, H: 20}, {X: 37, Y: 3, W: 43, H: 20}},
 		},
 		{
 			name:   "the focused second pane shrinks",
 			setup:  []string{"split_vertical"},
 			action: "decrease_split_size",
 			ratio:  55,
-			panes:  []rect{{X: 0, Y: 2, W: 43, H: 21}, {X: 44, Y: 2, W: 36, H: 21}},
+			panes:  []rect{{X: 0, Y: 3, W: 43, H: 20}, {X: 44, Y: 3, W: 36, H: 20}},
 		},
 		{
 			name:   "the focused first pane grows",
 			setup:  []string{"split_vertical", "next_split"},
 			action: "increase_split_size",
 			ratio:  55,
-			panes:  []rect{{X: 0, Y: 2, W: 43, H: 21}, {X: 44, Y: 2, W: 36, H: 21}},
+			panes:  []rect{{X: 0, Y: 3, W: 43, H: 20}, {X: 44, Y: 3, W: 36, H: 20}},
 		},
 		{
 			name:   "the focused first pane shrinks",
 			setup:  []string{"split_vertical", "next_split"},
 			action: "decrease_split_size",
 			ratio:  45,
-			panes:  []rect{{X: 0, Y: 2, W: 36, H: 21}, {X: 37, Y: 2, W: 43, H: 21}},
+			panes:  []rect{{X: 0, Y: 3, W: 36, H: 20}, {X: 37, Y: 3, W: 43, H: 20}},
 		},
 	}
 	for _, tt := range tests {
@@ -107,13 +107,13 @@ func TestResizeStopsAtTheRatioBounds(t *testing.T) {
 			name:  "a focused second pane stops at 10 percent",
 			setup: []string{"split_vertical"},
 			ratio: 10,
-			panes: []rect{{X: 0, Y: 2, W: 8, H: 21}, {X: 9, Y: 2, W: 71, H: 21}},
+			panes: []rect{{X: 0, Y: 3, W: 8, H: 20}, {X: 9, Y: 3, W: 71, H: 20}},
 		},
 		{
 			name:  "a focused first pane stops at 90 percent",
 			setup: []string{"split_vertical", "next_split"},
 			ratio: 90,
-			panes: []rect{{X: 0, Y: 2, W: 71, H: 21}, {X: 72, Y: 2, W: 8, H: 21}},
+			panes: []rect{{X: 0, Y: 3, W: 71, H: 20}, {X: 72, Y: 3, W: 8, H: 20}},
 		},
 	}
 	for _, tt := range tests {
@@ -151,7 +151,7 @@ func TestResizeTouchesOnlyTheSplitThatHoldsTheFocus(t *testing.T) {
 	if inner.Dir != stacked || inner.Share() != 45 {
 		t.Errorf("inner split dir %v ratio %d, want stacked at 45", inner.Dir, inner.Share())
 	}
-	want := []rect{{X: 0, Y: 2, W: 40, H: 21}, {X: 41, Y: 2, W: 39, H: 9}, {X: 41, Y: 12, W: 39, H: 11}}
+	want := []rect{{X: 0, Y: 3, W: 40, H: 20}, {X: 41, Y: 3, W: 39, H: 9}, {X: 41, Y: 13, W: 39, H: 10}}
 	if got := paneRects(m.layout()); !slices.Equal(got, want) {
 		t.Errorf("panes = %v, want %v", got, want)
 	}
@@ -163,7 +163,7 @@ func TestResizeWithOnePaneSaysSo(t *testing.T) {
 	if m.notice != "Only one split is open" {
 		t.Errorf("notice = %q, want the one split notice", m.notice)
 	}
-	if got := paneRects(m.layout()); !slices.Equal(got, []rect{{X: 0, Y: 2, W: 80, H: 21}}) {
+	if got := paneRects(m.layout()); !slices.Equal(got, []rect{{X: 0, Y: 3, W: 80, H: 20}}) {
 		t.Errorf("panes = %v, want the whole band", got)
 	}
 }

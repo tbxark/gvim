@@ -12,7 +12,6 @@ package popup
 
 import (
 	"slices"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -20,6 +19,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/style"
 )
 
 // The popup is an overlay of the root's stack.
@@ -34,8 +34,6 @@ const (
 	borderRows  = 2
 	minBoxWidth = 8
 	detailGap   = 2
-	// marginMinFrame is the narrowest frame in which a box keeps its margin.
-	marginMinFrame = 32
 )
 
 // pageStep is the number of rows PageUp and PageDown move the highlight.
@@ -62,18 +60,10 @@ type Chosen struct {
 	Item  Item
 }
 
-// Styles are the grid styles of a popup. A zero value leaves the terminal default.
-type Styles struct {
-	Panel    grid.Style // the box and its title
-	Border   grid.Style // the border; the zero value draws it in Panel
-	Selected grid.Style // the highlighted row
-	Detail   grid.Style // the detail text after a label
-}
-
 // Popup is an anchored list. Use New to make one and Show to open it. The zero
 // value is a closed popup that draws nothing.
 type Popup struct {
-	styles Styles
+	chrome style.Overlay
 	open   bool
 	anchor Point
 	title  string
@@ -92,9 +82,10 @@ func (r rect) contains(x, y int) bool {
 	return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h
 }
 
-// New returns a closed popup that paints with st.
-func New(st Styles) *Popup {
-	return &Popup{styles: st}
+// New returns a closed popup painted with the shared overlay frame: the box, the
+// rounded border, the title, the selected row and the muted detail of a dialog.
+func New(chrome style.Overlay) *Popup {
+	return &Popup{chrome: chrome}
 }
 
 // Show opens the popup at anchor with title and items. The box goes on the row
@@ -232,9 +223,10 @@ func (p *Popup) rowAt(x, y int) (int, bool) {
 
 // Draw paints the box over g. It records the box, so that a mouse position maps
 // to a row. Draw changes no item and no highlight, except to keep the highlight in
-// the window when the frame height changed. The box has a rounded border with the
-// title on its top edge, a padding cell between the border and the text on each
-// side, and a margin from the edges of the frame when the frame has room for it.
+// the window when the frame height changed. The box is the shared overlay frame:
+// a rounded border with the title on its top edge and the plain rule after it, the item
+// rows with one padding cell beside each border, and space.Margin from the frame
+// edges. It never covers the menu bar's label row.
 func (p *Popup) Draw(g *grid.Grid) {
 	if !p.open || g.Width() < minBoxWidth || g.Height() < borderRows+1 {
 		p.box = rect{}
@@ -245,29 +237,12 @@ func (p *Popup) Draw(g *grid.Grid) {
 	p.keepVisible()
 	p.box = placeBox(p.anchor, boxWidth(p.title, p.items, w), p.rows+borderRows, w, h)
 
-	panel, border := p.styles.Panel, p.styles.Border
-	if border == (grid.Style{}) {
-		border = panel
-	}
+	chrome := p.chrome
 	b := p.box
-	right, bottom := b.x+b.w-1, b.y+b.h-1
-	for y := b.y; y <= bottom; y++ {
-		g.Fill(b.x, b.x+b.w, y, panel)
-	}
-	g.Put(b.x, b.y, b.x+b.w, "╭"+strings.Repeat("─", b.w-2)+"╮", border)
-	g.Put(b.x, bottom, b.x+b.w, "╰"+strings.Repeat("─", b.w-2)+"╯", border)
-	for y := b.y + 1; y < bottom; y++ {
-		g.Set(b.x, y, "│", border)
-		g.Set(right, y, "│", border)
-	}
-	titled := panel
-	titled.Bold = true
-	if p.title != "" {
-		g.Put(b.x+2, b.y, right, " "+p.title+" ", titled)
-	}
-	inner, end := b.x+1+space.PadX, right-space.PadX
+	chrome.PaintBox(g, b.x, b.y, b.w, b.h, p.title)
+	inner, end := b.x+1+space.PadX, b.x+b.w-1-space.PadX
 	if len(p.items) == 0 {
-		g.Put(inner, b.y+1, end, "No items", p.styles.Detail)
+		g.Put(inner, b.y+1, end, "No items", chrome.Muted)
 		return
 	}
 	for k := range p.rows {
@@ -276,14 +251,14 @@ func (p *Popup) Draw(g *grid.Grid) {
 			break
 		}
 		y := b.y + 1 + k
-		st := panel
+		st := chrome.Box
 		if i == p.sel {
-			st = p.styles.Selected
+			st = chrome.Selected
 		}
-		g.Fill(b.x+1, right, y, st)
+		g.Fill(b.x+1, b.x+b.w-1, y, st)
 		x := inner + g.Put(inner, y, end, space.End(p.items[i].Label, end-inner), st)
 		if d := p.items[i].Detail; d != "" {
-			detail := p.styles.Detail
+			detail := chrome.Muted
 			if i == p.sel {
 				detail = st
 				detail.Faint = true
@@ -301,8 +276,8 @@ func visibleRows(n, h int) int {
 
 // boxWidth is the width of a popup box with title and items in a frame fw cells
 // wide: the widest line, a padding cell and a border on each side. The title sits on
-// the top border, between one border dash and the corner on each side. A box wider
-// than the frame, less its margin, is cut to it and the long rows end with "…".
+// the top border, after one padding cell. A box wider than the frame, less the margin
+// of space.Margin, is cut to it and the long rows end with "…".
 func boxWidth(title string, items []Item, fw int) int {
 	body := 0
 	for _, it := range items {
@@ -319,32 +294,26 @@ func boxWidth(title string, items []Item, fw int) int {
 	if title != "" {
 		w = max(w, ansi.StringWidth(title)+2+4)
 	}
-	return min(max(w, minBoxWidth), max(fw-2*edgeMargin(fw, w), minBoxWidth), fw)
-}
-
-// edgeMargin is the cells a box w wide keeps from the left and right edge of a frame
-// fw wide: one when the frame has room for it on both sides, else none.
-func edgeMargin(fw, w int) int {
-	if fw >= w+2*space.PadX && fw >= marginMinFrame {
-		return space.PadX
-	}
-	return 0
+	return min(max(w, minBoxWidth), max(fw-2*space.Margin(fw), minBoxWidth), fw)
 }
 
 // placeBox places a w by h box for a popup anchored at anchor in a fw by fh frame.
 // The box goes on the row below the anchor, or above it when it does not fit there,
-// and it is moved to stay inside the frame, one cell from its left and right edges
-// and from its bottom row when there is room.
+// and it is moved to stay inside the frame, space.Margin from the left and right edges
+// and from the bottom row when there is room. It never covers the menu bar's label row.
 func placeBox(anchor Point, w, h, fw, fh int) rect {
-	m := edgeMargin(fw, w)
+	m := space.Margin(fw)
+	if fw < w+2*m {
+		m = 0
+	}
 	x := max(m, min(anchor.X, fw-w-m))
 	x = max(x, 0)
 	y := anchor.Y + 1
 	if y+h > fh-m {
 		y = anchor.Y - h
 	}
-	y = max(0, min(y, fh-h-m))
-	y = max(y, 0)
+	y = min(y, fh-h-m)
+	y = max(y, 1)
 	return rect{x: x, y: y, w: w, h: h}
 }
 
@@ -356,9 +325,6 @@ const maxTextWidth = 80
 // a popup in a frame fw cells wide: the room between the borders and padding of the widest box
 // the frame allows, and at most maxTextWidth.
 func TextWidth(fw int) int {
-	box := fw
-	if fw >= marginMinFrame {
-		box = fw - 2*space.PadX
-	}
+	box := fw - 2*space.Margin(fw)
 	return max(min(box-2*(1+space.PadX), maxTextWidth), 1)
 }

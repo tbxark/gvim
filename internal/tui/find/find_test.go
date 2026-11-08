@@ -192,11 +192,12 @@ func TestToggleCaseRefindsAndReports(t *testing.T) {
 		t.Fatalf("after case toggle and edit: status = %q, want %q", got, "Match 1 of 1")
 	}
 	rows := frame(b, 60, 6)
-	if !strings.Contains(rows[4], "[x] Case   ") {
-		t.Fatalf("options row %q does not show the checked case option", rows[4])
+	opt := rowsFor(6, false).opt
+	if !strings.Contains(rows[opt], "[x] Case   ") {
+		t.Fatalf("options row %q does not show the checked case option", rows[opt])
 	}
-	if !strings.Contains(rows[4], "[ ] Word   ") {
-		t.Fatalf("options row %q does not show the unchecked whole-word option", rows[4])
+	if !strings.Contains(rows[opt], "[ ] Word   ") {
+		t.Fatalf("options row %q does not show the unchecked whole-word option", rows[opt])
 	}
 }
 
@@ -376,27 +377,35 @@ func TestDrawRowsWithAndWithoutReplace(t *testing.T) {
 	b := Open(newFake("x"), testStyles(), false)
 	typeText(b, "x")
 	rows := frame(b, 60, 10)
+	r := rowsFor(10, false)
 	// At 60 columns the full labels with their hints do not fit, so the short names show.
-	if !strings.HasPrefix(rows[8], " [ ] Case   [ ] Word") {
-		t.Fatalf("options row = %q", rows[8])
+	if !strings.Contains(rows[r.opt], "[ ] Case") || !strings.Contains(rows[r.opt], "[ ] Word") {
+		t.Fatalf("options row = %q", rows[r.opt])
 	}
-	if !strings.HasPrefix(rows[9], " Search:  x") {
-		t.Fatalf("search row = %q", rows[9])
+	if !strings.Contains(rows[r.search], "Search:") || !strings.Contains(rows[r.search], "x") {
+		t.Fatalf("search row = %q", rows[r.search])
 	}
-	if !strings.Contains(rows[9], "Match 1 of 1") {
-		t.Fatalf("search row %q has no match status", rows[9])
+	if !strings.Contains(rows[r.search], "Match 1 of 1") {
+		t.Fatalf("search row %q has no match status", rows[r.search])
+	}
+	if !strings.Contains(rows[r.bottom], "Enter find") {
+		t.Fatalf("bottom border %q has no find hint", rows[r.bottom])
 	}
 
 	press(b, "tab")
 	rows = frame(b, 60, 10)
-	if !strings.HasPrefix(rows[7], " [ ] Case   [ ] Word") {
-		t.Fatalf("with replace: options row = %q", rows[7])
+	r = rowsFor(10, true)
+	if !strings.Contains(rows[r.opt], "[ ] Case") {
+		t.Fatalf("with replace: options row = %q", rows[r.opt])
 	}
-	if !strings.HasPrefix(rows[8], " Search:  x") {
-		t.Fatalf("with replace: search row = %q", rows[8])
+	if !strings.Contains(rows[r.search], "Search:") {
+		t.Fatalf("with replace: search row = %q", rows[r.search])
 	}
-	if !strings.HasPrefix(rows[9], " Replace:") {
-		t.Fatalf("with replace: replace row = %q", rows[9])
+	if !strings.Contains(rows[r.repl], "Replace:") {
+		t.Fatalf("with replace: replace row = %q", rows[r.repl])
+	}
+	if !strings.Contains(rows[r.bottom], "Enter replace") {
+		t.Fatalf("with replace: bottom border %q has no replace hint", rows[r.bottom])
 	}
 }
 
@@ -404,16 +413,20 @@ func TestCursorFollowsTheFocusedField(t *testing.T) {
 	t.Parallel()
 	b := Open(newFake("x"), testStyles(), false)
 	typeText(b, "fo")
+	left, right := cardColumns(60)
+	x0, end := left+1+1, right-1 // the card's left border plus its padding cell
+	start, _, _ := fieldSpan(x0, end, b.statusText())
 	x, y, ok := b.Cursor(60, 10)
-	if !ok || x != 1+len("Replace: ")+2 || y != 9 {
-		t.Fatalf("Cursor = (%d, %d, %v), want (%d, 9, true)", x, y, ok, 1+len("Replace: ")+2)
+	if !ok || x != start+2 || y != rowsFor(10, false).search {
+		t.Fatalf("Cursor = (%d, %d, %v), want (%d, %d, true)", x, y, ok, start+2, rowsFor(10, false).search)
 	}
 
 	press(b, "tab")
 	typeText(b, "r")
+	start, _, _ = fieldSpan(x0, end, "")
 	x, y, ok = b.Cursor(60, 10)
-	if !ok || x != 1+len("Replace: ")+1 || y != 9 {
-		t.Fatalf("replace Cursor = (%d, %d, %v)", x, y, ok)
+	if !ok || x != start+1 || y != rowsFor(10, true).repl {
+		t.Fatalf("replace Cursor = (%d, %d, %v), want (%d, %d, true)", x, y, ok, start+1, rowsFor(10, true).repl)
 	}
 }
 
@@ -433,9 +446,9 @@ func TestRowsForKeepsHeaderRows(t *testing.T) {
 		replace bool
 		want    rows
 	}{
-		{h: 10, want: rows{opt: 8, search: 9, repl: -1}},
-		{h: 10, replace: true, want: rows{opt: 7, search: 8, repl: 9}},
-		{h: 3, want: rows{opt: 2, search: -1, repl: -1}},
+		{h: 10, want: rows{top: 6, opt: 7, search: 8, repl: -1, bottom: 9}},
+		{h: 10, replace: true, want: rows{top: 5, opt: 6, search: 7, repl: 8, bottom: 9}},
+		{h: 3, want: rows{top: -1, opt: -1, search: -1, repl: -1, bottom: -1}},
 	}
 	for _, tt := range tests {
 		if got := rowsFor(tt.h, tt.replace); got != tt.want {
@@ -573,5 +586,29 @@ func TestReopenDropsAQueryReplaceLeftRunning(t *testing.T) {
 	b.Reopen()
 	if b.qr != nil {
 		t.Fatal("Reopen kept a query-replace run that the root left behind")
+	}
+}
+
+// TestRowsNeedsRoomForTheWholeCard checks the row count the layout reserves: the card
+// takes four or five rows where it fits, and none in a frame too short to paint it.
+func TestRowsNeedsRoomForTheWholeCard(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		h       int
+		replace bool
+		want    int
+	}{
+		{h: 20, want: 4},
+		{h: 20, replace: true, want: 5},
+		{h: 7, replace: true, want: 5}, // the top border lands on row 2
+		{h: 6, replace: true, want: 0},
+		{h: 6, want: 4}, // the top border lands on row 2
+		{h: 5, want: 0},
+		{h: 8, want: 4},
+	} {
+		b := Open(newFake("x"), testStyles(), tt.replace)
+		if got := b.Rows(tt.h); got != tt.want {
+			t.Errorf("Rows(%d) with replace %v = %d, want %d", tt.h, tt.replace, got, tt.want)
+		}
 	}
 }

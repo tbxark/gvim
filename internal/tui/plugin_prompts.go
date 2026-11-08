@@ -194,12 +194,23 @@ func (o *pluginLineOverlay) Draw(g *grid.Grid) {
 	}
 }
 func (o *pluginLineOverlay) Active() bool { return !o.closed && o.l.Active() }
+
+// UsesPromptRow marks the overlay as a prompt on the bottom row, so the root reserves
+// that row for it while it is open.
+func (o *pluginLineOverlay) UsesPromptRow() {}
 func (o *pluginLineOverlay) Dismiss() {
 	o.dismissed(prompt.Done{Tag: pluginInputTag{tok: o.tok, esc: true}})
 }
 func (o *pluginLineOverlay) Cursor(w, h int) (int, int, bool) {
 	return o.l.Cursor(w, h)
 }
+
+// The plugin prompts draw on the bottom prompt row, like the built-in ones, so the
+// root reserves the row for them while they are open.
+var (
+	_ prompt.RowOwner = (*pluginLineOverlay)(nil)
+	_ prompt.RowOwner = (*pluginConfirmOverlay)(nil)
+)
 
 // pluginConfirmOverlay is a Yes/No question of a plugin.
 type pluginConfirmOverlay struct {
@@ -224,6 +235,10 @@ func (o *pluginConfirmOverlay) Draw(g *grid.Grid) {
 	}
 }
 func (o *pluginConfirmOverlay) Active() bool { return !o.closed && o.c.Active() }
+
+// UsesPromptRow marks the overlay as a prompt on the bottom row, so the root reserves
+// that row for it while it is open.
+func (o *pluginConfirmOverlay) UsesPromptRow() {}
 func (o *pluginConfirmOverlay) Dismiss() {
 	o.dismissed(prompt.Done{Tag: pluginConfirmTag{tok: o.tok, esc: true}})
 }

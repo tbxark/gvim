@@ -15,7 +15,7 @@ const (
 	minContent = 40
 	maxContent = 64
 	boxChrome  = 4
-	boxRows    = 6 // top border with the title, blank, blank, buttons, blank, bottom border
+	boxRows    = 4 // top border with the title, the blank row above the buttons, the button row, the bottom border
 	gapButtons = 2
 )
 
@@ -69,8 +69,9 @@ func (m *modal) natural(texts ...string) int {
 }
 
 // frame paints the box for a dialog body. natural is the width the body wants.
-// body builds the rows at the content width it is given. The buttons come last,
-// under the body. Hit regions and the caret are recorded for the next event.
+// body builds the rows at the content width it is given. The body starts directly
+// under the top border, and the buttons sit under it after one blank row, on the last
+// row inside the border. Hit regions and the caret are recorded for the next event.
 func (m *modal) frame(g *grid.Grid, natural int, body func(cw int) []row) {
 	cw := fitWidth(g.Width(), natural)
 	rows := body(cw)
@@ -82,9 +83,9 @@ func (m *modal) frame(g *grid.Grid, natural int, body func(cw int) []row) {
 	m.hits = m.hits[:0]
 	m.ov.PaintBox(g, m.box.X, m.box.Y, m.box.W, m.box.H, m.title)
 	for i, r := range rows {
-		r(g, x+2, y+2+i, cw)
+		r(g, x+2, y+1+i, cw)
 	}
-	m.drawButtons(g, x+2, y+len(rows)+3, cw)
+	m.drawButtons(g, x+2, y+len(rows)+2, cw)
 }
 
 // drawText paints a dialog whose body is plain text.

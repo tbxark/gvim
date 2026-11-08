@@ -63,8 +63,8 @@ func TestWelcomeShowsWhenNoTabIsOpen(t *testing.T) {
 func TestWelcomeFitsTheEightyByTwentyFourFrame(t *testing.T) {
 	m, _ := welcomeModel(t, 80, 24, "/work/alpha", "/work/beta")
 	l := m.layout()
-	if l.BodyTop != 2 || l.BodyBottom != 22 {
-		t.Fatalf("body rows %d..%d, want 2..22 at 24 rows", l.BodyTop, l.BodyBottom)
+	if l.BodyTop != 3 || l.BodyBottom != 22 {
+		t.Fatalf("body rows %d..%d, want 3..22 at 24 rows", l.BodyTop, l.BodyBottom)
 	}
 	for _, r := range l.Welcome {
 		if r.Y < l.BodyTop || r.Y > l.BodyBottom {
@@ -109,8 +109,8 @@ func TestNewTabHidesTheWelcomeScreen(t *testing.T) {
 	if len(tf.names) != 1 || tf.names[0] != "Untitled-1" {
 		t.Fatalf("tabs = %v, want one untitled tab", tf.names)
 	}
-	if !strings.Contains(screenRow(m, 1), "Untitled-1") {
-		t.Fatalf("tab row %q does not show the new tab", screenRow(m, 1))
+	if strip := m.layout().StripY; !strings.Contains(screenRow(m, strip), "Untitled-1") {
+		t.Fatalf("tab row %q does not show the new tab", screenRow(m, strip))
 	}
 }
 
@@ -136,7 +136,7 @@ func TestClosingTheLastTabShowsTheWelcomeScreenAgain(t *testing.T) {
 	if x < 0 {
 		t.Fatal("the × of the only tab is not drawn")
 	}
-	_, cmd := m.Update(click(x, 1, tea.MouseLeft))
+	_, cmd := m.Update(click(x, m.layout().StripY, tea.MouseLeft))
 	drain(t, m, cmd)
 	if !m.welcomeVisible() {
 		t.Fatalf("the × click did not show the welcome screen; tabs %v", tf.names)

@@ -34,7 +34,7 @@ func TestSeparatorsDrawInTheSplitColour(t *testing.T) {
 		glyph  string
 	}{
 		{"a side-by-side line", "split_vertical", 40, 5, splitVLine},
-		{"a stacked line", "split_horizontal", 10, 12, splitHLine},
+		{"a stacked line", "split_horizontal", 10, 13, splitHLine},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

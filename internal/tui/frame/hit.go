@@ -45,7 +45,7 @@ const (
 // HitTarget is the result of a hit test. Index depends on Kind. Menu labels,
 // tabs, tab closes and welcome rows use their list index. Explorer rows, the editor text,
 // the gutter and the scrollbar use the row offset from the top of their pane. A pane's
-// row 0 is its top row, and explorer tree row 0 is screen row 2 (ExplorerBodyTop). The
+// row 0 is its top row, and explorer tree row 0 is screen row Layout.ExBodyTop. The
 // caller maps that offset to a line or a tree row. Pane is the index of the editor pane
 // under a press, into Layout.panes.
 type HitTarget struct {
@@ -68,16 +68,16 @@ func (l Layout) Hit(x, y int) HitTarget {
 	if l.OnNotice(x, y) {
 		return none // the notice band covers the body rows under it
 	}
-	if l.MenuOn && y == 0 {
+	if l.MenuOn && y == l.MenuLabelY {
 		return hitRuns(l.MenuRuns, x, none)
 	}
-	if l.ExplorerOpen && x < l.Ex && y == explorerTitleRow {
+	if l.ExplorerOpen && x < l.Ex && y == l.ExTitleY {
 		return l.hitExplorerTitle(x)
 	}
 	if y == l.StripY {
 		return hitRuns(l.Strip.Runs, x, none)
 	}
-	if l.ExplorerOpen && x < l.Ex && y <= l.ExBottom {
+	if l.ExplorerOpen && x < l.Ex && y >= l.ExBodyTop && y <= l.ExBottom {
 		return l.hitExplorer(x, y)
 	}
 	if y >= l.BodyTop && y <= l.BodyBottom && x >= l.EditorX {
@@ -99,8 +99,8 @@ func hitRuns(runs []Run, x int, def HitTarget) HitTarget {
 	return def
 }
 
-// hitExplorerTitle returns the title buttons. The rest of row 1 in the panel is
-// the panel body.
+// hitExplorerTitle returns the title buttons. The rest of the title row in the
+// panel is the panel body.
 func (l Layout) hitExplorerTitle(x int) HitTarget {
 	switch {
 	case l.ExReloadX >= 0 && x == l.ExReloadX:
@@ -120,7 +120,7 @@ func (l Layout) hitExplorer(x, y int) HitTarget {
 	case x == 0 || y == l.ExBottom:
 		return HitTarget{Kind: HitExplorerBody}
 	}
-	if row := y - ExplorerBodyTop; row < l.ExRows {
+	if row := y - l.ExBodyTop; row >= 0 && row < l.ExRows {
 		return HitTarget{Kind: HitExplorerRow, Index: row}
 	}
 	return HitTarget{Kind: HitExplorerBody}

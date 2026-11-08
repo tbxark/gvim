@@ -21,7 +21,7 @@ func TestLongNamesEndWithAnEllipsisAndKeepTheExtension(t *testing.T) {
 		},
 	}
 	g := grid.New(28, 8)
-	New(ft, style.Styles{}, nil).Draw(g, Geometry{Width: 28, Bottom: 7})
+	New(ft, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: 28, Bottom: 7})
 	lines := g.Plain()
 	// Width 28: the name starts at column 6 and ends at column 25, so it has 20 cells.
 	if got := lines[3]; !strings.Contains(got, "file_open_orches….rs") {
@@ -66,7 +66,7 @@ func TestDrawNeverPanicsAtAnyWidth(t *testing.T) {
 	for w := 0; w <= 40; w++ {
 		for _, focus := range []bool{true, false} {
 			g := grid.New(max(w, 1), 6)
-			New(ft, style.Styles{}, nil).Draw(g, Geometry{Width: w, Bottom: 5, Focused: focus, Marks: map[string]rune{"/r/a_long_file_name.go": 'M'}})
+			New(ft, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: w, Bottom: 5, Focused: focus, Marks: map[string]rune{"/r/a_long_file_name.go": 'M'}})
 		}
 	}
 }

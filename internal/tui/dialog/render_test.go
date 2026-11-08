@@ -110,21 +110,27 @@ func TestBoxUsesRoundedPrimaryBorder(t *testing.T) {
 	}
 }
 
-func TestTitleFillIsTheAccent(t *testing.T) {
+func TestTitleSitsOnThePlainRule(t *testing.T) {
 	t.Parallel()
 	c := newFakeClock()
 	d := NewUnsavedChanges(c.Now, "a.txt", nil, testOv)
 	g := draw(d, 80, 24)
-	x, y := mustFind(t, g, "╱")
-	end := x
-	for end < 80 && g.At(end, y).Text == "╱" {
-		if fg := g.At(end, y).Style.FG; fg != color.Color(primary) {
-			t.Fatalf("title fill cell %d is %v, want the accent %v", end, fg, primary)
-		}
-		end++
+	const title = "Unsaved Changes"
+	x, y := mustFind(t, g, title)
+	// The title is bare: one padding cell, the text, one padding cell, all in the
+	// title style; the top border around it is the plain rounded rule in the border
+	// style, with no fill after the title.
+	if cell := g.At(x-1, y); cell.Text != " " || cell.Style != testOv.Title {
+		t.Fatalf("title leading padding = %+v, want a title-styled blank", cell)
 	}
-	if end-x < 10 {
-		t.Fatalf("title fill is only %d cells", end-x)
+	if cell := g.At(x+len(title), y); cell.Text != " " || cell.Style != testOv.Title {
+		t.Fatalf("title trailing padding = %+v, want a title-styled blank", cell)
+	}
+	if cell := g.At(x+len(title)+1, y); cell.Text != "─" || cell.Style != testOv.Border {
+		t.Fatalf("border after the title = %+v, want the plain rule in the border style", cell)
+	}
+	if cell := g.At(x-2, y); cell.Text != "─" || cell.Style != testOv.Border {
+		t.Fatalf("border before the title = %+v, want the plain rule in the border style", cell)
 	}
 }
 

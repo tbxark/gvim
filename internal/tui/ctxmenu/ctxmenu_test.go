@@ -1,12 +1,15 @@
 package ctxmenu
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/style"
 )
 
 var items = []Item{
@@ -17,7 +20,7 @@ var items = []Item{
 }
 
 func newMenu() *Menu {
-	m := New(Styles{Selected: grid.Style{Bold: true}, Disabled: grid.Style{Faint: true}})
+	m := New(style.Overlay{Selected: grid.Style{Bold: true}})
 	m.Show(10, 5, 80, 24, items)
 	return m
 }
@@ -146,20 +149,29 @@ func TestClicks(t *testing.T) {
 	})
 }
 
-func TestTheMenuStaysInsideTheFrame(t *testing.T) {
+// TestTheMenuStaysInsideTheFrameWithTheSpaceMargin: the box is moved left and up so
+// that it stays inside the frame, keeping space.Margin from the edges when the frame
+// has room for it.
+func TestTheMenuStaysInsideTheFrameWithTheSpaceMargin(t *testing.T) {
 	for _, c := range []struct{ x, y, w, h, wantX, wantY int }{
-		{78, 22, 80, 24, 80 - 16, 24 - 6},
-		{0, 0, 80, 24, 0, 0},
-		{-3, -3, 80, 24, 0, 0},
+		{78, 22, 80, 24, 80 - 16 - 1, 24 - 6 - 1},
+		{0, 0, 80, 24, 1, 1},
+		{-3, -3, 80, 24, 1, 1},
+		{10, 5, 50, 24, 10, 5}, // below 60 columns there is no margin to keep
 	} {
-		m := New(Styles{})
+		m := New(style.Overlay{})
 		m.Show(c.x, c.y, c.w, c.h, items)
 		x, y, w, h := m.Box()
 		if x != c.wantX || y != c.wantY || x+w > c.w || y+h > c.h {
 			t.Errorf("menu at %d,%d in %dx%d: box %d,%d %dx%d", c.x, c.y, c.w, c.h, x, y, w, h)
 		}
+		margin := space.Margin(c.w)
+		if x < margin || x+w > c.w-margin || y < margin || y+h > c.h-margin {
+			t.Errorf("menu at %d,%d in %dx%d: box %d,%d %dx%d breaks the margin of %d cells",
+				c.x, c.y, c.w, c.h, x, y, w, h, margin)
+		}
 	}
-	m := New(Styles{})
+	m := New(style.Overlay{})
 	m.Show(0, 0, 4, 2, items)
 	if _, _, w, _ := m.Box(); w != 0 {
 		t.Errorf("a frame too small for the menu gave a box of width %d", w)
@@ -185,6 +197,91 @@ func TestDrawPaintsBorderRowsAndTheHighlight(t *testing.T) {
 	}
 }
 
+// testChrome is an overlay palette whose roles a test can tell apart: the border,
+// the box, the selected row and the faint disabled row each have their own style.
+func testChrome() style.Overlay {
+	box := color.RGBA{R: 0x10, G: 0x20, B: 0x30, A: 0xff}
+	return style.Overlay{
+		Box:      grid.Style{BG: box},
+		Border:   grid.Style{FG: color.RGBA{R: 0x30, G: 0x81, B: 0xf7, A: 0xff}, BG: box},
+		Selected: grid.Style{FG: color.RGBA{R: 0xef, G: 0xf8, B: 0xff, A: 0xff}, BG: color.RGBA{R: 0x2f, G: 0x81, B: 0xf7, A: 0xff}},
+		Muted:    grid.Style{FG: color.RGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff}, BG: box, Faint: true},
+	}
+}
+
+// checkCell fails unless the cell (x, y) holds text in style st.
+func checkCell(t *testing.T, g *grid.Grid, x, y int, text string, st grid.Style) {
+	t.Helper()
+	c := g.At(x, y)
+	if c.Text != text {
+		t.Errorf("cell (%d,%d) = %q, want %q", x, y, c.Text, text)
+	}
+	if c.Style != st {
+		t.Errorf("cell (%d,%d) %q style = %+v, want %+v", x, y, c.Text, c.Style, st)
+	}
+}
+
+// TestDrawPaintsTheSharedCardFrame: a context menu has no title, so its top border is
+// the plain rule of the shared frame between the rounded corners; the rows use the
+// overlay roles and a separator is a rule inset by PadX.
+func TestDrawPaintsTheSharedCardFrame(t *testing.T) {
+	chrome := testChrome()
+	m := New(chrome)
+	m.Show(10, 5, 80, 24, items)
+	g := grid.New(80, 24)
+	m.Draw(g)
+	b := m.box
+	right, bottom := b.x+b.w-1, b.y+b.h-1
+
+	checkCell(t, g, b.x, b.y, "╭", chrome.Border)
+	checkCell(t, g, right, b.y, "╮", chrome.Border)
+	checkCell(t, g, b.x, bottom, "╰", chrome.Border)
+	checkCell(t, g, right, bottom, "╯", chrome.Border)
+	checkCell(t, g, b.x, b.y+1, "│", chrome.Border)
+	checkCell(t, g, right, b.y+1, "│", chrome.Border)
+	// No title: the plain rule starts right after the top-left corner.
+	checkCell(t, g, b.x+2, b.y, "─", chrome.Border)
+
+	checkCell(t, g, b.x+2, b.y+1, "C", chrome.Selected) // row 0 is highlighted
+	disabled := chrome.Box
+	disabled.Faint = true
+	checkCell(t, g, b.x+2, b.y+2, "C", disabled) // row 1: Close Others, disabled
+	// The separator on row 2 is a rule inset by PadX on both sides.
+	sep := b.y + 3
+	checkCell(t, g, b.x+1, sep, " ", chrome.Box)
+	checkCell(t, g, b.x+2, sep, "─", chrome.Box)
+	checkCell(t, g, right-2, sep, "─", chrome.Box)
+	checkCell(t, g, right-1, sep, " ", chrome.Box)
+}
+
+// TestTheHitTargetOfEveryRowIsTheRowPaintedThere: painting and hit testing read the
+// same box, so a row's cells map to the row drawn on that line.
+func TestTheHitTargetOfEveryRowIsTheRowPaintedThere(t *testing.T) {
+	m := New(testChrome())
+	m.Show(3, 2, 80, 24, items)
+	g := grid.New(80, 24)
+	m.Draw(g)
+	b := m.box
+	plain := g.Plain()
+	for k := range m.visible() {
+		i := m.first + k
+		y := b.y + 1 + k
+		it := m.items[i]
+		if !it.Separator && !strings.Contains(plain[y], it.Label) {
+			t.Errorf("row %d is not painted on row %d", i, y)
+		}
+		want := i
+		if !it.selectable() {
+			want = -1
+		}
+		for _, x := range []int{b.x + 2, b.x + 3} {
+			if got := m.rowAt(x, y); got != want {
+				t.Errorf("rowAt(%d,%d) = %d, want %d", x, y, got, want)
+			}
+		}
+	}
+}
+
 func longItems(n int) []Item {
 	out := make([]Item, n)
 	for i := range out {
@@ -196,7 +293,7 @@ func longItems(n int) []Item {
 // TestKeyboardStaysOnTheRowsThatAreDrawn drives a menu that is taller than the frame:
 // the window follows the highlight, so Enter never chooses a row that is not shown.
 func TestKeyboardStaysOnTheRowsThatAreDrawn(t *testing.T) {
-	m := New(Styles{Selected: grid.Style{Bold: true}})
+	m := New(style.Overlay{Selected: grid.Style{Bold: true}})
 	m.Show(2, 2, 40, 8, longItems(12))
 	for range 9 {
 		m.update(key(tea.KeyDown))
@@ -222,7 +319,7 @@ func TestKeyboardStaysOnTheRowsThatAreDrawn(t *testing.T) {
 }
 
 func TestLongMenuScrollsAndMarksTheHiddenRows(t *testing.T) {
-	m := New(Styles{})
+	m := New(style.Overlay{})
 	m.Show(0, 0, 40, 8, longItems(12))
 	g := grid.New(40, 8)
 	m.Draw(g)
@@ -243,7 +340,7 @@ func TestLongMenuScrollsAndMarksTheHiddenRows(t *testing.T) {
 }
 
 func TestWheelScrollsALongMenu(t *testing.T) {
-	m := New(Styles{})
+	m := New(style.Overlay{})
 	m.Show(0, 0, 40, 8, longItems(12))
 	g := grid.New(40, 8)
 	m.Draw(g)

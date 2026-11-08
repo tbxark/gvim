@@ -135,12 +135,18 @@ func fakeCommands(n int) []commands.Entry {
 func TestPromptShowsQueryAndCaretCell(t *testing.T) {
 	p := New(commandOptions(">save", nil))
 	g := draw(p, 100, 30)
-	// The query starts at the name column, so it lines up with the rows above it.
-	x := layoutFor(100, 30).nameX
-	if got := rowText(g, 29); got != strings.Repeat(" ", x)+">save" {
-		t.Fatalf("prompt row = %q, want %q after %d blanks", got, ">save", x)
+	geo := layoutFor(100, 30)
+	// The query sits on the card's input row, at the name column, so it lines up with
+	// the rows above it. The row is closed by the card's side borders.
+	if got := g.At(geo.left, geo.inputY).Text; got != "│" {
+		t.Fatalf("input row left border = %q, want a bar", got)
 	}
-	if caret := g.At(x+5, 29); !caret.Style.Reverse || caret.Text != " " {
+	for i, want := range ">save" {
+		if got := g.At(geo.nameX+i, geo.inputY).Text; got != string(want) {
+			t.Errorf("query cell %d = %q, want %q", i, got, string(want))
+		}
+	}
+	if caret := g.At(geo.nameX+5, geo.inputY); !caret.Style.Reverse || caret.Text != " " {
 		t.Errorf("caret cell = %+v, want a reversed blank after the query", caret)
 	}
 }
@@ -445,13 +451,12 @@ func TestClicksOutsideTheRowsDoNotDismiss(t *testing.T) {
 	draw(p, 100, 30)
 	geo := layoutFor(100, 30)
 	misses := []tea.MouseClickMsg{
-		click(0, 0),            // the menu row, outside the box
-		click(50, 2),           // outside the box, above it
-		click(10, geo.top),     // the top border
-		click(0, geo.top+1),    // the left border of a row
-		click(10, geo.bottom),  // the bottom border
-		click(10, geo.footY),   // the hint row
-		click(10, geo.promptY), // the query line
+		click(0, 0),           // the menu row, outside the box
+		click(50, 2),          // outside the box, above it
+		click(10, geo.top),    // the top border
+		click(0, geo.top+1),   // left of the card's border
+		click(10, geo.bottom), // the bottom border, with the hints
+		click(10, geo.inputY), // the query row
 		tea.MouseClickMsg(tea.Mouse{X: 10, Y: geo.top + 1, Button: tea.MouseRight}),
 	}
 	for _, m := range misses {
@@ -566,30 +571,32 @@ func TestSmallFramesDoNotPanic(t *testing.T) {
 
 func TestLayoutRules(t *testing.T) {
 	tests := []struct {
-		w, h     int
-		top      int
-		keysX    int
-		descW    int
-		srcOK    bool
-		nameX    int
-		nameEnd  int
-		footerOK bool
+		w, h    int
+		top     int
+		bottom  int // the card is docked to the frame's last row
+		inputY  int
+		keysX   int
+		descW   int
+		srcOK   bool
+		nameX   int
+		nameEnd int
 	}{
-		{100, 30, 16, 67, 0, true, 3, 65, true},
-		{80, 24, 10, 47, 0, true, 3, 45, true},
-		{40, 15, 1, -1, 0, false, 2, 38, true},
-		{32, 15, 1, -1, 0, false, 2, 30, true},
-		{60, 3, -1, 41, 0, false, 3, 39, true},
-		{120, 40, 26, 53, 32, true, 3, 51, true},
-		{200, 50, 36, 109, 55, true, 4, 107, true},
-		{20, 10, 0, -1, 0, false, 2, 18, true},
+		{100, 30, 17, 29, 28, 67, 0, true, 3, 65},
+		{80, 24, 11, 23, 22, 47, 0, true, 3, 45},
+		{40, 15, 2, 14, 13, -1, 0, false, 2, 38},
+		{32, 15, 2, 14, 13, -1, 0, false, 2, 30},
+		{60, 3, 0, 2, 1, 41, 0, false, 3, 39},
+		{120, 40, 27, 39, 38, 53, 32, true, 3, 51},
+		{200, 50, 37, 49, 48, 109, 55, true, 4, 107},
+		{20, 10, 1, 9, 8, -1, 0, false, 2, 18},
 	}
 	for _, tt := range tests {
 		g := layoutFor(tt.w, tt.h)
-		if g.top != tt.top || g.keysX != tt.keysX || g.descW != tt.descW || g.srcOK != tt.srcOK ||
+		if g.top != tt.top || g.bottom != tt.bottom || g.inputY != tt.inputY ||
+			g.keysX != tt.keysX || g.descW != tt.descW || g.srcOK != tt.srcOK ||
 			g.nameX != tt.nameX || g.nameEnd != tt.nameEnd {
-			t.Errorf("layoutFor(%d, %d) = %+v, want top=%d keysX=%d descW=%d srcOK=%v nameX=%d nameEnd=%d",
-				tt.w, tt.h, g, tt.top, tt.keysX, tt.descW, tt.srcOK, tt.nameX, tt.nameEnd)
+			t.Errorf("layoutFor(%d, %d) = %+v, want top=%d bottom=%d inputY=%d keysX=%d descW=%d srcOK=%v nameX=%d nameEnd=%d",
+				tt.w, tt.h, g, tt.top, tt.bottom, tt.inputY, tt.keysX, tt.descW, tt.srcOK, tt.nameX, tt.nameEnd)
 		}
 	}
 }

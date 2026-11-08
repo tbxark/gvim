@@ -56,7 +56,7 @@ func opsTree(sel int) *fakeTree {
 func act(t *testing.T, tr Tree, action string) (tea.Msg, bool) {
 	t.Helper()
 	p := New(tr, style.Styles{}, nil)
-	_, cmd, ok := p.Action(action, Geometry{Width: 16, Bottom: 9, Focused: true})
+	_, cmd, ok := p.Action(action, Geometry{Top: 1, Width: 16, Bottom: 9, Focused: true})
 	return run(cmd), ok
 }
 
@@ -111,7 +111,7 @@ func TestFileOperationActionsNeedATree(t *testing.T) {
 	t.Parallel()
 	p := New(nil, style.Styles{}, nil)
 	for _, action := range []string{"file_explorer_new_file", "copy", "paste"} {
-		if _, _, ok := p.Action(action, Geometry{Width: 16, Bottom: 9}); ok {
+		if _, _, ok := p.Action(action, Geometry{Top: 1, Width: 16, Bottom: 9}); ok {
 			t.Errorf("%s handled with no tree", action)
 		}
 	}
@@ -179,7 +179,7 @@ func TestWithinMatchesTheEntryAndWhatIsUnderIt(t *testing.T) {
 func TestDeleteActsOnThePickedRows(t *testing.T) {
 	t.Parallel()
 	p := New(opsTree(1), style.Styles{}, nil)
-	g := Geometry{Width: 16, Bottom: 9, Focused: true}
+	g := Geometry{Top: 1, Width: 16, Bottom: 9, Focused: true}
 	do := func(action string) tea.Msg {
 		var cmd tea.Cmd
 		var ok bool
@@ -204,7 +204,7 @@ func TestDeleteLeavesTheRootOutOfSeveral(t *testing.T) {
 	tr.rows = append([]tree.Row{{Name: "r", Path: "/r", IsDir: true}}, tr.rows...)
 	tr.sel = 0
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 16, Bottom: 9, Focused: true}
+	g := Geometry{Top: 1, Width: 16, Bottom: 9, Focused: true}
 	_, cmd, _ := p.Action("file_explorer_delete", g)
 	if _, ok := run(cmd).(ErrorMsg); !ok {
 		t.Error("a delete of the root alone is not refused")

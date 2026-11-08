@@ -270,7 +270,7 @@ func TestDockShellStartsInTheWorkspaceRoot(t *testing.T) {
 		t.Fatalf("start directories = %q, want [/ws]", starter.dirs)
 	}
 	// The start is sized to the dock: 80 columns, and the rows under the title row.
-	if want := [2]int{80, 6}; starter.sizes[0] != want {
+	if want := [2]int{80, 5}; starter.sizes[0] != want {
 		t.Fatalf("start size = %v, want %v", starter.sizes[0], want)
 	}
 }
@@ -575,8 +575,8 @@ func TestDockResizesWithTheLayout(t *testing.T) {
 	}
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	dockSettle(t, m, cmd)
-	// At 100 by 30 the dock takes 9 rows: the title row and 8 rows of shell.
-	if want := [][2]int{{100, 8}}; !slices.Equal(starter.term.resizes, want) {
+	// At 100 by 30 the dock takes 8 rows: the title row and 7 rows of shell.
+	if want := [][2]int{{100, 7}}; !slices.Equal(starter.term.resizes, want) {
 		t.Fatalf("resizes = %v, want %v", starter.term.resizes, want)
 	}
 }
@@ -701,9 +701,9 @@ func TestDockLayoutRegion(t *testing.T) {
 		wantH      int
 		wantBodyBt int
 	}{
-		{name: "80 by 24 with the dock takes 7 rows above the status row", w: 80, h: 24, open: true, wantOn: true, wantY: 16, wantH: 7, wantBodyBt: 15},
+		{name: "80 by 24 with the dock takes 6 rows above the status row", w: 80, h: 24, open: true, wantOn: true, wantY: 17, wantH: 6, wantBodyBt: 16},
 		{name: "80 by 24 without the dock keeps the body", w: 80, h: 24, open: false, wantOn: false, wantBodyBt: 22},
-		{name: "80 by 10 takes the minimum dock", w: 80, h: 10, open: true, wantOn: true, wantY: 5, wantH: 4, wantBodyBt: 4},
+		{name: "80 by 11 takes the minimum dock", w: 80, h: 11, open: true, wantOn: true, wantY: 6, wantH: 4, wantBodyBt: 5},
 		{name: "80 by 8 leaves no room for a dock", w: 80, h: 8, open: true, wantOn: false, wantBodyBt: 6},
 	}
 	for _, tt := range tests {

@@ -1624,7 +1624,7 @@ func (m *Model) explorerAction(action string) (tea.Cmd, bool) {
 
 // explorerGeometry is the panel's place in the frame laid out as l.
 func (m *Model) explorerGeometry(l layout) expanel.Geometry {
-	return expanel.Geometry{Width: l.Ex, Bottom: l.ExBottom, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
+	return expanel.Geometry{Width: l.Ex, Top: l.ExTitleY, Bottom: l.ExBottom, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
 }
 
 // handleClick routes a left press to the part of the frame under it, and a
@@ -2008,7 +2008,8 @@ func (m *Model) bodyRows() int {
 // explorerBodyRows is the number of tree rows the explorer panel shows: the rows
 // between its title and its bottom border, as the panel counts them.
 func (m *Model) explorerBodyRows() int {
-	return max(m.layout().ExBottom-explorerBodyTop, 0)
+	l := m.layout()
+	return max(l.ExBottom-l.ExBodyTop, 0)
 }
 
 // syncViewport tells the editor how big its pane is: the focused pane's text rows, and
@@ -2042,7 +2043,7 @@ func (m *Model) layoutInput() layoutInput {
 		Maximized:        m.splits.maximized,
 	}
 	if m.findOpen() {
-		in.FindRows = m.findBar.Rows()
+		in.FindRows = m.findBar.Rows(m.height)
 	}
 	if doc := m.ed.Active(); doc != nil {
 		in.Lines = displayLines(doc)
@@ -2174,9 +2175,16 @@ func (m *Model) paint() *grid.Grid {
 	}
 	m.paintStatus(g, l)
 	// The menu bar comes last among the frame bands, so an open dropdown covers
-	// the rows under it. The overlays are drawn over the menu. A hidden bar paints
-	// nothing, so row 0 stays with the tab strip or the body.
-	if !m.hideMenuBar {
+	// the rows under it. The band is the label row and one padding row of the menu
+	// background; the bar paints its labels and dropdowns over it. The overlays
+	// are drawn over the menu. A hidden bar paints nothing, so row 0 stays with
+	// the tab strip or the body.
+	if l.MenuOn {
+		band := style.Cell(m.styles.Menu)
+		for y := l.MenuTop; y <= l.MenuBottom; y++ {
+			g.Fill(0, g.Width(), y, band)
+		}
+		m.menu = m.menu.SetRow(l.MenuLabelY)
 		m.menu.Paint(g)
 	}
 	for _, o := range m.overlays {

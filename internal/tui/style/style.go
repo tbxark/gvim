@@ -14,8 +14,10 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -284,9 +286,17 @@ func toward(from, to color.RGBA, t float64) color.RGBA {
 
 // PaintBox draws an overlay box of w by h cells at (x, y). The box is filled with
 // Box and framed by a rounded Border. Its title is written on the top border, after
-// the first cell, and a fill of ╱ in the border color runs from the title to the
-// top-right corner. The rows inside the border are the caller's.
+// the first cell; the rest of the border stays the plain rounded rule. The rows
+// inside the border are the caller's.
+//
+// The title is kept bare: any surrounding blanks are trimmed, and the cell after
+// the corner stays a padding cell. A title too wide for the box is cut with an
+// ellipsis so it never runs over the right corner. An untitled box keeps the plain
+// rule all the way across.
 func (o Overlay) PaintBox(g *grid.Grid, x, y, w, h int, title string) {
+	if w < 2 || h < 1 {
+		return
+	}
 	for row := y; row < y+h; row++ {
 		g.Fill(x, x+w, row, o.Box)
 	}
@@ -305,8 +315,28 @@ func (o Overlay) PaintBox(g *grid.Grid, x, y, w, h int, title string) {
 	g.Set(x, bottom, b.BottomLeft, o.Border)
 	g.Set(right, bottom, b.BottomRight, o.Border)
 
-	n := g.Put(x+2, y, right, " "+title+" ", o.Title)
-	for cx := x + 2 + n; cx < right; cx++ {
-		g.Set(cx, y, "╱", o.Border)
+	// The title sits on the plain rule: an untitled menu and a titled card read as the
+	// same frame, without an extra decoration on the top border.
+	title = strings.TrimSpace(title)
+	if title != "" {
+		title = ansi.Truncate(title, max(w-4, 1), "…")
+		g.Put(x+2, y, right, " "+title+" ", o.Title)
 	}
+}
+
+// PaintFooter writes hints on the bottom border row of a box x columns wide at
+// column x. The hints start after the same one-cell padding as the title and
+// stop before the right corner, in the Muted style; a hint too long for the box
+// is cut with an ellipsis.
+//
+// Cards put their key hints here instead of on a row of their own, so every
+// floating surface has the same frame: a title on the top border, the content,
+// and the hints on the bottom border.
+func (o Overlay) PaintFooter(g *grid.Grid, x, y, w int, hints string) {
+	hints = strings.TrimSpace(hints)
+	if hints == "" || w <= 4 {
+		return
+	}
+	room := w - 3 // from x+2 up to the cell before the right corner
+	g.Put(x+2, y, x+w-1, space.End(" "+hints+" ", room), o.Muted)
 }

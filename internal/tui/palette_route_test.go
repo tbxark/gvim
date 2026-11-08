@@ -66,14 +66,16 @@ func TestCtrlPOpensThePaletteThroughTheRoot(t *testing.T) {
 
 	rows := screenRows(m)
 	h := len(rows)
-	if got := strings.TrimSpace(rows[h-1]); got != ">" {
-		t.Errorf("query row = %q, want the palette prompt %q", got, ">")
+	// The sheet docks to the last row: the hints on its bottom border, the query row
+	// above them, the command rows and the card's title border on top.
+	if !strings.Contains(rows[h-1], ">command") {
+		t.Errorf("bottom border = %q, want the palette hints", rows[h-1])
 	}
-	if got := strings.TrimSpace(rows[h-2]); got != "file  |  >command  |  :line  |  #buffer" {
-		t.Errorf("hint row = %q, want the palette hint", got)
+	if !strings.Contains(rows[h-2], ">") {
+		t.Errorf("query row = %q, want the palette query", rows[h-2])
 	}
-	if got := strings.TrimLeft(rows[h-3], "~ "); !strings.HasPrefix(got, "╰") {
-		t.Errorf("row %d = %q, want the bottom border of the palette box", h-3, rows[h-3])
+	if top := h - 3 - 10; !strings.Contains(rows[top], "╭") {
+		t.Errorf("row %d = %q, want the top border of the palette card", top, rows[top])
 	}
 	if !strings.Contains(strings.Join(rows, "\n"), "Clear Warnings") {
 		t.Error("the command rows are not painted")

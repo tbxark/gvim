@@ -20,6 +20,8 @@ import (
 
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
+	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/style"
 )
 
 // The menu is an overlay of the root's stack.
@@ -51,18 +53,10 @@ type Reroute struct {
 	Press tea.MouseClickMsg
 }
 
-// Styles are the grid styles of a menu.
-type Styles struct {
-	Box      grid.Style // the fill, the rows and the separators
-	Border   grid.Style // the rounded border
-	Selected grid.Style // the highlighted row
-	Disabled grid.Style // a row that cannot be chosen
-}
-
 // Menu is a context menu. Use New to make one and Show to open it. The zero value is
 // a closed menu that draws nothing.
 type Menu struct {
-	styles Styles
+	chrome style.Overlay
 	open   bool
 	x, y   int // where the pointer opened the menu
 	items  []Item
@@ -79,8 +73,10 @@ func (r rect) contains(x, y int) bool {
 	return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h
 }
 
-// New returns a closed menu that paints with st.
-func New(st Styles) *Menu { return &Menu{styles: st, sel: -1} }
+// New returns a closed menu painted with the shared overlay frame: the box, the
+// rounded border, the selected row and the muted text of a dialog. A menu has no
+// title, so its top border is the plain rule.
+func New(chrome style.Overlay) *Menu { return &Menu{chrome: chrome, sel: -1} }
 
 // Show opens the menu in a w by h frame with its top-left corner at (x, y), or as
 // near as the frame allows. The first row that can be chosen is highlighted. A menu
@@ -267,8 +263,9 @@ func (m *Menu) width(frame int) int {
 }
 
 // place records the box in a w by h frame. The box starts at the pointer and is moved
-// left and up when it would pass the right or the bottom edge, so it is always inside
-// the frame. A frame too small for a menu leaves an empty box.
+// left and up when it would pass the right or the bottom edge, so it stays inside the
+// frame and keeps space.Margin from its edges. A frame too small for a menu leaves an
+// empty box.
 func (m *Menu) place(fw, fh int) {
 	if fw < 5 || fh < 3 {
 		m.box = rect{}
@@ -276,11 +273,22 @@ func (m *Menu) place(fw, fh int) {
 	}
 	w := m.width(fw)
 	h := min(len(m.items)+2, fh)
-	m.box = rect{x: max(min(m.x, fw-w), 0), y: max(min(m.y, fh-h), 0), w: w, h: h}
+	edgeX, edgeY := space.Margin(fw), space.Margin(fw)
+	if fw < w+2*edgeX {
+		edgeX = 0
+	}
+	if fh < h+2*edgeY {
+		edgeY = 0
+	}
+	m.box = rect{x: max(min(m.x, fw-w-edgeX), edgeX), y: max(min(m.y, fh-h-edgeY), edgeY), w: w, h: h}
 }
 
 // Draw paints the menu over g. It places the box for the size of g first, so that a
-// pointer position maps to the row that is drawn there.
+// pointer position maps to the row that is drawn there. The box is the shared overlay
+// frame: a rounded border with no title, so its top border is the plain rule, the rows
+// one padding cell beside each border, and space.Margin from the frame edges. A
+// separator is a rule inset by PadX, and a scrolled menu marks the hidden rows with
+// an up or down arrow on the border.
 func (m *Menu) Draw(g *grid.Grid) {
 	if !m.open {
 		return
@@ -291,37 +299,37 @@ func (m *Menu) Draw(g *grid.Grid) {
 		return
 	}
 	m.reveal()
+	chrome := m.chrome
+	disabled := chrome.Box
+	disabled.Faint = true
+	right := b.x + b.w - 1
+	ruleEnd := right - space.PadX
 	rows := b.h - 2
-	g.Fill(b.x, b.x+b.w, b.y, m.styles.Box)
-	g.Put(b.x, b.y, b.x+b.w, "╭"+rule(b.w-2)+"╮", m.styles.Border)
+	chrome.PaintBox(g, b.x, b.y, b.w, b.h, "")
 	for k := range rows {
 		i := m.first + k
 		it := m.items[i]
 		y := b.y + 1 + k
-		st := m.styles.Box
-		switch {
-		case it.Separator:
-		case i == m.sel:
-			st = m.styles.Selected
-		case it.Disabled:
-			st = m.styles.Disabled
-		}
-		g.Fill(b.x, b.x+b.w, y, m.styles.Box)
-		g.Set(b.x, y, "│", m.styles.Border)
-		g.Set(b.x+b.w-1, y, "│", m.styles.Border)
 		if it.Separator {
-			g.Put(b.x+1, y, b.x+b.w-1, rule(b.w-2), m.styles.Box)
+			start := b.x + 1 + space.PadX
+			g.Put(start, y, ruleEnd, rule(ruleEnd-start), chrome.Box)
 			continue
 		}
-		g.Fill(b.x+1, b.x+b.w-1, y, st)
-		g.Put(b.x+2, y, b.x+b.w-2, it.Label, st)
+		st := chrome.Box
+		switch {
+		case i == m.sel:
+			st = chrome.Selected
+		case it.Disabled:
+			st = disabled
+		}
+		g.Fill(b.x+1, right, y, st)
+		g.Put(b.x+2, y, ruleEnd, it.Label, st)
 	}
-	g.Put(b.x, b.y+b.h-1, b.x+b.w, "╰"+rule(b.w-2)+"╯", m.styles.Border)
 	if m.first > 0 {
-		g.Set(b.x+b.w/2, b.y, "▲", m.styles.Border)
+		g.Set(b.x+b.w/2, b.y, "▲", chrome.Border)
 	}
 	if m.first+rows < len(m.items) {
-		g.Set(b.x+b.w/2, b.y+b.h-1, "▼", m.styles.Border)
+		g.Set(b.x+b.w/2, b.y+b.h-1, "▼", chrome.Border)
 	}
 }
 

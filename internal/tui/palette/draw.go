@@ -2,7 +2,6 @@ package palette
 
 import (
 	"slices"
-	"strings"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -11,10 +10,10 @@ import (
 	"github.com/tbxark/gvim/internal/tui/space"
 )
 
-// maxRows is the most item rows the box shows (n = clamp(H-4, 0, 10)).
+// maxRows is the most item rows the sheet shows (n = clamp(H-4, 0, 10)).
 const maxRows = 10
 
-// Column widths of the rows, in cells. They come out of the width of the box, so a
+// Column widths of the rows, in cells. They come out of the width of the card, so a
 // wide terminal gives every column more room instead of cutting names at a fixed
 // column.
 const (
@@ -27,7 +26,10 @@ const (
 	descShare     = 3   // the description column takes descShare tenths of the text
 )
 
-// visibleRows is n, the number of item rows in a frame H rows high.
+// visibleRows is n, the number of item rows a frame H rows high gives the sheet. The
+// sheet is a card docked to the last row: the title border, the item rows, the query
+// row and the bottom border that carries the hints. One row of the frame stays above
+// it when the frame has room.
 func visibleRows(h int) int {
 	return min(max(h-4, 0), maxRows)
 }
@@ -35,14 +37,13 @@ func visibleRows(h int) int {
 // geometry is the placement of the palette in a frame of w by h cells. Rows are
 // numbered from the top, and the *End and *W fields are exclusive or sizes.
 type geometry struct {
-	w, h    int
-	rows    int // item rows in the box
-	top     int // the top border row; the box is top through bottom
-	bottom  int // the bottom border row
-	footY   int // the hint row
-	promptY int // the query line
+	w, h   int
+	rows   int // item rows in the card
+	top    int // the top border row; the card is top through bottom
+	bottom int // the bottom border row, the frame's last row
+	inputY int // the query row, between the last item row and the bottom border
 
-	left, right int // the columns of the box's left and right border
+	left, right int // the columns of the card's left and right border
 
 	nameX, nameEnd int // the name column; nameEnd is exclusive
 	keysX, keysEnd int // the shortcut column; keysX is -1 when hidden
@@ -52,22 +53,22 @@ type geometry struct {
 	textEnd        int // the end, exclusive, of every column: one padding cell before the border
 }
 
-// layoutFor places the palette in a w by h frame. It is a pure function of the
-// size, so painting and hit testing read the same numbers. The box keeps a margin
-// from the left and right edges (space.Margin), and its text keeps a padding cell
-// from the borders.
+// layoutFor places the palette in a w by h frame. It is a pure function of the size,
+// so painting and hit testing read the same numbers. The card docks to the last row of
+// the frame and keeps a margin from the left and right edges (space.Margin), and its
+// text keeps a padding cell from the borders.
 func layoutFor(w, h int) geometry {
 	n := visibleRows(h)
 	m := space.Margin(w)
 	left, right := m, w-1-m
 	g := geometry{
 		w: w, h: h, rows: n,
-		top: h - 4 - n, bottom: h - 3,
-		footY: h - 2, promptY: h - 1,
+		bottom: h - 1, inputY: h - 2,
 		left: left, right: right,
 		keysX: -1,
 	}
-	// A frame too narrow for a box with an inside gives the whole width to the name.
+	g.top = g.bottom - 2 - n
+	// A frame too narrow for a card with an inside gives the whole width to the name.
 	g.nameX = min(left+1+space.PadX, max(right-1, 0))
 	g.textEnd = max(right-space.PadX, g.nameX)
 	g.nameEnd, g.keysEnd, g.srcX = g.textEnd, g.textEnd, g.textEnd
@@ -98,7 +99,7 @@ func layoutFor(w, h int) geometry {
 // fitColumns narrows the name column of a command list to its longest name, and gives
 // the cells it frees to the description column. The shortcut column moves left with
 // the name, so names, shortcuts and descriptions read as one row on a wide terminal
-// instead of sitting at the two ends of the box. Nothing changes without a
+// instead of sitting at the two ends of the card. Nothing changes without a
 // description column, or when a name needs the whole column.
 func (g geometry) fitColumns(rows []row) geometry {
 	if g.descW == 0 || g.keysX < 0 {
@@ -122,66 +123,66 @@ func (g geometry) fitColumns(rows []row) geometry {
 	return g
 }
 
-// paint draws the palette over g. The box is drawn only when it has a top row.
-// The row above the box is blanked when the box reaches the top, as the legacy
-// palette did, so that the palette covers the menu row.
-func (p *Palette) paint(g *grid.Grid) {
-	geo := layoutFor(g.Width(), g.Height()).fitColumns(p.rows)
-	if geo.top <= 0 {
-		g.Fill(0, geo.w, 0, p.chrome.panel)
-	}
-	if geo.top >= 0 {
-		p.paintBox(g, geo)
-	}
-	g.Fill(0, geo.w, geo.footY, p.chrome.panel)
-	text := hint
+// title is the mode the query is in, on the top border of the sheet. It is what the
+// card is for, so the prefix characters of the query do not have to say it.
+func (p *Palette) title() string {
 	if p.live {
-		text = liveHint
+		return "Live Grep"
 	}
-	g.Put(geo.left, geo.footY, geo.w, truncate(text, geo.w-geo.left), p.chrome.panel)
-	g.Fill(0, geo.w, geo.promptY, p.chrome.prompt)
-	p.drawInput(g, geo.promptY, geo.nameX)
+	mode, _ := commands.ParseQuery(p.input.Value())
+	switch mode {
+	case commands.ModeCommand:
+		return "Commands"
+	case commands.ModeLine:
+		return "Go to Line"
+	case commands.ModeBuffer:
+		return "Buffers"
+	}
+	return "Files"
 }
 
-// paintBox draws the bordered box and the rows in view. Every row has a bar at
-// each side.
-func (p *Palette) paintBox(g *grid.Grid, geo geometry) {
-	panel := p.chrome.panel
-	boxW := geo.right - geo.left + 1
-	g.Fill(geo.left, geo.right+1, geo.top, panel)
-	g.Put(geo.left, geo.top, geo.right+1, "╭"+rule("─", boxW-2)+"╮", panel)
+// paint draws the palette over g. The sheet is one card docked to the last row: the
+// title border, the item rows, the query row and the hints on the bottom border. A
+// frame with no room for the card paints nothing.
+func (p *Palette) paint(g *grid.Grid) {
+	geo := layoutFor(g.Width(), g.Height()).fitColumns(p.rows)
+	if geo.top < 0 || geo.right <= geo.left {
+		return
+	}
+	boxW, boxH := geo.right-geo.left+1, geo.bottom-geo.top+1
+	p.chrome.ov.PaintBox(g, geo.left, geo.top, boxW, boxH, p.title())
+	p.paintRows(g, geo)
+	hints := hint
+	if p.live {
+		hints = liveHint
+	}
+	p.chrome.ov.PaintFooter(g, geo.left, geo.bottom, boxW, hints)
+	g.Fill(geo.left+1, geo.right, geo.inputY, p.chrome.input)
+	p.drawInput(g, geo.inputY, geo.nameX)
+}
 
+// paintRows draws the item rows in view inside the card. An empty list shows the
+// message of its mode on the first row.
+func (p *Palette) paintRows(g *grid.Grid, geo geometry) {
+	if len(p.rows) == 0 {
+		if geo.rows > 0 {
+			g.Put(geo.nameX, geo.top+1, geo.textEnd, p.emptyText(), p.chrome.muted)
+		}
+		return
+	}
 	first, count := p.nav.Window()
 	for k := range geo.rows {
-		y := geo.top + 1 + k
-		g.Fill(geo.left, geo.right+1, y, panel)
-		g.Set(geo.left, y, "│", panel)
-		if boxW > 1 {
-			g.Set(geo.right, y, "│", panel)
-		}
-		if len(p.rows) == 0 {
-			if k == 0 {
-				g.Put(geo.nameX, y, geo.textEnd, p.emptyText(), panel)
-			}
-			continue
-		}
 		if k >= count {
-			continue
+			break
 		}
 		idx := first + k
+		y := geo.top + 1 + k
 		selected := idx == p.nav.Selected()
 		if selected {
 			g.Fill(geo.left+1, geo.right, y, p.chrome.selected)
 		}
 		p.paintRow(g, geo, y, p.rows[idx], selected)
 	}
-
-	// With no item rows the bottom border has no corner, as in the legacy palette.
-	corner := "╯"
-	if geo.rows == 0 {
-		corner = " "
-	}
-	g.Put(geo.left, geo.bottom, geo.right+1, "╰"+rule("─", boxW-2)+corner, panel)
 }
 
 // paintRow draws the columns of one row: the name, the shortcut, the description
@@ -260,7 +261,7 @@ func (p *Palette) drawInput(g *grid.Grid, y, x0 int) {
 	for start < pos && ansi.StringWidth(string(runes[start:pos])) > w-x0-1 {
 		start++
 	}
-	base := p.chrome.prompt
+	base := p.chrome.input
 	x := x0
 	for i := start; i < len(runes); i++ {
 		st := base
@@ -288,11 +289,6 @@ func truncate(s string, w int) string {
 		return ""
 	}
 	return space.End(s, w)
-}
-
-// rule repeats ch n times, or nothing when n is not positive.
-func rule(ch string, n int) string {
-	return strings.Repeat(ch, max(n, 0))
 }
 
 // faint returns st with the faint attribute, for the secondary columns and the

@@ -21,7 +21,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -98,6 +97,7 @@ type Model struct {
 	styles        styles
 	explorerFocus bool
 	w, h          int    // frame size, set by SetSize; geometry for Hit
+	row           int    // frame row of the labels, set by SetRow; the dropdown hangs under it
 	title         string // label of the open dropdown, "" when closed
 	rows          []Row
 	selected      int // index of the highlighted row, -1 when none can be highlighted
@@ -130,6 +130,13 @@ var keys = struct {
 // with the chrome styles of st. A nil ports value disables every row.
 func New(ports Ports, st style.Styles) Model {
 	return Model{ports: ports, styles: newStyles(st), selected: -1}
+}
+
+// SetRow sets the frame row the labels are painted on and the dropdown hangs under.
+// The zero value is row 0, above a band that starts at the top of the frame.
+func (m Model) SetRow(y int) Model {
+	m.row = y
+	return m
 }
 
 // SetSize sets the frame size that Hit uses. Paint takes the size from its grid.
@@ -549,6 +556,9 @@ type dropBox struct {
 // visible is the number of rows the box shows.
 func (b dropBox) visible() int { return b.bottom - b.top - 1 }
 
+// h is the height of the box, its two border rows included.
+func (b dropBox) h() int { return b.bottom - b.top + 1 }
+
 // geometry is the placement of the bar and of the open dropdown in a frame.
 type geometry struct {
 	labels []labelRun
@@ -579,7 +589,7 @@ func (m Model) geometry(w, h int) geometry {
 	// The dropdown of a label the bar does not show still hangs from where it is, clamped
 	// into the frame, so the keys can open it there.
 	if r, ok := titleRun(runs, m.title, w); ok {
-		g.box = layoutBox(m.rows, m.selected, m.scroll, r.x-1, 1, w, h)
+		g.box = layoutBox(m.rows, m.selected, m.scroll, r.x-1, m.row+1, w, h)
 		g.hasBox = usable(g.box)
 	}
 	if m.sub.open && g.hasBox {
@@ -597,13 +607,14 @@ func (m Model) geometry(w, h int) geometry {
 // visible.
 func (m Model) subBox(g geometry, children []Row, w, h int) dropBox {
 	rowY := g.box.top + 1 + m.sub.parent - g.box.first
-	top := max(1, min(rowY-1, h-3-len(children)))
-	x := g.box.x + g.box.w
+	top := max(m.row+1, min(rowY-1, h-3-len(children)))
 	bw := min(w, boxWidth(children))
-	if x+bw <= w {
+	margin := boxMargin(w, bw)
+	x := g.box.x + g.box.w
+	if x+bw <= w-margin {
 		return layoutBox(children, m.sub.selected, m.sub.scroll, x, top, w, h)
 	}
-	if g.box.x-bw >= 0 {
+	if g.box.x-bw >= margin {
 		return layoutBox(children, m.sub.selected, m.sub.scroll, g.box.x-bw, top, w, h)
 	}
 	x = w - bw
@@ -621,8 +632,9 @@ func (m Model) subBox(g geometry, children []Row, w, h int) dropBox {
 func usable(b dropBox) bool { return b.w >= 4 && b.visible() >= 1 }
 
 // layoutBox places the rows in a box whose top border is row top, at column x or as
-// near as the w by h frame allows. The last row of the frame is the status row, so
-// the bottom border is at most on the row above it.
+// near as the w by h frame allows. The box keeps space.Margin(w) from the left and
+// right edges when the frame has room for it. The last row of the frame is the status
+// row, so the bottom border is at most on the row above it.
 func layoutBox(rows []Row, selected, scroll, x, top, w, h int) dropBox {
 	bw := min(w, boxWidth(rows))
 	visible := min(len(rows), max(h-3-top, 0))
@@ -630,11 +642,24 @@ func layoutBox(rows []Row, selected, scroll, x, top, w, h int) dropBox {
 	if selected >= 0 {
 		first = max(min(first, selected), selected-visible+1)
 	}
+	margin := boxMargin(w, bw)
+	x = max(min(x, w-bw-margin), margin)
 	return dropBox{
-		x: min(max(x, 0), max(w-bw, 0)), w: bw,
+		x: x, w: bw,
 		top: top, bottom: top + 1 + visible,
 		first: first, rows: rows, selected: selected,
 	}
+}
+
+// boxMargin is the cells a dropdown bw wide keeps from the left and right edge of a
+// frame w wide: space.Margin(w) when the frame has room for the box and the margin on
+// both sides, else none.
+func boxMargin(w, bw int) int {
+	m := space.Margin(w)
+	if w < bw+2*m {
+		return 0
+	}
+	return m
 }
 
 // reveal keeps the highlighted rows inside the window of the dropdown and of the
@@ -683,7 +708,7 @@ func (m Model) Hit(x, y int) Target {
 	if x < 0 || y < 0 || x >= m.w || y >= m.h {
 		return Target{Kind: TargetNone}
 	}
-	if y == 0 {
+	if y == m.row {
 		for i, r := range g.labels {
 			if x >= r.x && x < r.x+r.w {
 				if r.title == moreTitle {
@@ -724,18 +749,18 @@ func hitBox(box dropBox, x, y int, item, border TargetKind) (Target, bool) {
 	return Target{Kind: item, Index: i}, true
 }
 
-// Paint draws the bar on row 0 of g and, when a dropdown is open, the dropdown
-// below it. The open label takes the active style, and the highlighted row takes
-// the selected style. A disabled row is drawn dim. No cell is underlined.
+// Paint draws the bar on the row set by SetRow and, when a dropdown is open, the
+// dropdown below it. The open label takes the active style, and the highlighted row
+// takes the selected style. A disabled row is drawn dim. No cell is underlined.
 func (m Model) Paint(g *grid.Grid) {
 	geo := m.geometry(g.Width(), g.Height())
-	g.Fill(0, g.Width(), 0, m.styles.bar)
+	g.Fill(0, g.Width(), m.row, m.styles.bar)
 	for _, r := range geo.labels {
 		st := m.styles.bar
 		if r.title == m.title {
 			st = m.styles.activeLabel
 		}
-		g.Put(r.x, 0, g.Width(), r.title, st)
+		g.Put(r.x, m.row, g.Width(), r.title, st)
 	}
 	if geo.hasBox {
 		m.paintBox(g, geo.box)
@@ -753,36 +778,31 @@ func checkGlyph(checked bool) string {
 	return "☐ "
 }
 
-// paintBox draws the rows of box in view: the rounded border, the rows with their
-// shortcuts, and the separator rules.
+// paintBox draws the rows of box in view on the shared overlay frame: the rounded
+// border with the plain rule of an untitled box on its top border, the rows with their
+// checkboxes and right-aligned shortcuts, and the separator rules inset by PadX.
 func (m Model) paintBox(g *grid.Grid, box dropBox) {
-	b := lipgloss.RoundedBorder()
-	bg := m.styles.box
-	border := m.styles.border
+	chrome := m.styles.chrome
 	x0, right := box.x, box.x+box.w-1
-	rule := strings.Repeat(b.Top, box.w-2)
-	g.Put(x0, box.top, x0+box.w, b.TopLeft+rule+b.TopRight, border)
+	edge := right - space.PadX
+	chrome.PaintBox(g, box.x, box.top, box.w, box.h(), "")
 	for k := range box.visible() {
 		i := box.first + k
 		y := box.top + 1 + k
 		r := box.rows[i]
-		st := bg
+		if r.Separator {
+			start := x0 + 1 + space.PadX
+			g.Put(start, y, edge, strings.Repeat("─", max(edge-start, 0)), chrome.Box)
+			continue
+		}
+		st := chrome.Box
 		switch {
-		case r.Separator:
 		case i == box.selected:
-			st = m.styles.selected
+			st = chrome.Selected
 		case r.Disabled:
 			st = m.styles.disabled
 		}
-		g.Fill(x0, x0+box.w, y, bg)
-		g.Set(x0, y, b.Left, border)
-		g.Set(right, y, b.Right, border)
-		if r.Separator {
-			g.Put(x0+1+space.PadX, y, right-space.PadX, strings.Repeat("─", max(box.w-2-2*space.PadX, 0)), bg)
-			continue
-		}
 		g.Fill(x0+1, right, y, st)
-		edge := right - space.PadX
 		x := x0 + 1 + space.PadX
 		if r.Checkbox {
 			g.Put(x, y, edge, checkGlyph(r.Checked), st)
@@ -793,19 +813,19 @@ func (m Model) paintBox(g *grid.Grid, box dropBox) {
 			g.Put(edge-ansi.StringWidth(r.Keys), y, edge, r.Keys, st)
 		}
 	}
-	g.Put(x0, box.bottom, x0+box.w, b.BottomLeft+rule+b.BottomRight, border)
-	paintMore(g, box, border)
+	paintMore(g, box, chrome.Border)
 }
 
 // styles are the grid styles of the bar and the dropdown. The bar row keeps the
-// theme, and the dropdown takes the overlay palette.
+// theme, and the dropdown is the shared overlay frame of the cards.
 type styles struct {
-	bar, activeLabel, box, border, selected, disabled grid.Style
+	bar, activeLabel, disabled grid.Style
+	chrome                     style.Overlay
 }
 
-// newStyles derives the menu roles from the chrome styles and the overlay
-// palette. The open title and the highlighted row take the selected colors, and
-// the dropdown border takes the primary color. A disabled row is faint.
+// newStyles derives the menu roles from the chrome styles and the overlay palette.
+// The open title and the highlighted row take the selected colors, the dropdown is
+// the shared overlay frame, and a disabled row is the box style with faint set.
 func newStyles(st style.Styles) styles {
 	ov := st.Overlay
 	disabled := ov.Box
@@ -813,9 +833,7 @@ func newStyles(st style.Styles) styles {
 	return styles{
 		bar:         style.Cell(st.Menu),
 		activeLabel: ov.Selected,
-		box:         ov.Box,
-		border:      ov.Border,
-		selected:    ov.Selected,
+		chrome:      ov,
 		disabled:    disabled,
 	}
 }

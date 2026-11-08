@@ -4,13 +4,13 @@ import "testing"
 
 func TestHiddenTabBarGivesItsRowToTheBody(t *testing.T) {
 	tests := []struct {
-		name        string
-		in          layoutInput
-		bodyTop     int
-		menuRowHits bool // row 0 still hits the menu bar
+		name     string
+		in       layoutInput
+		bodyTop  int
+		labelRow int // -1 when the menu bar is hidden
 	}{
-		{"menu bar shown", layoutInput{HideTabBar: true, Lines: 4}, 1, true},
-		{"menu bar and tab bar hidden", layoutInput{HideTabBar: true, HideMenuBar: true, Lines: 4}, 0, false},
+		{"menu bar shown", layoutInput{HideTabBar: true, Lines: 4}, 2, 0},
+		{"menu bar and tab bar hidden", layoutInput{HideTabBar: true, HideMenuBar: true, Lines: 4}, 0, -1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -21,8 +21,13 @@ func TestHiddenTabBarGivesItsRowToTheBody(t *testing.T) {
 			if got := l.Hit(l.TextX, tt.bodyTop); got.Kind != hitEditorText {
 				t.Errorf("first body row hits %v, want the editor text", got.Kind)
 			}
-			if got := l.Hit(1, 0); (got.Kind == hitMenuLabel) != tt.menuRowHits {
-				t.Errorf("row 0 hits %v, menu label expected %v", got.Kind, tt.menuRowHits)
+			if l.MenuLabelY != tt.labelRow {
+				t.Fatalf("label row = %d, want %d", l.MenuLabelY, tt.labelRow)
+			}
+			if tt.labelRow >= 0 {
+				if got := l.Hit(1, tt.labelRow); got.Kind != hitMenuLabel {
+					t.Errorf("label row hits %v, want a menu label", got.Kind)
+				}
 			}
 		})
 	}
@@ -30,11 +35,11 @@ func TestHiddenTabBarGivesItsRowToTheBody(t *testing.T) {
 
 func TestShownTabBarKeepsItsRow(t *testing.T) {
 	l := layoutFor(80, 24, layoutInput{Lines: 4, Tabs: []TabInfo{{Name: "a.txt", Active: true}}})
-	if l.BodyTop != 2 || l.StripY != 1 {
-		t.Fatalf("bodyTop %d stripY %d, want 2 and 1 with the tab bar shown", l.BodyTop, l.StripY)
+	if l.BodyTop != 3 || l.StripY != 2 {
+		t.Fatalf("bodyTop %d stripY %d, want 3 and 2 under the menu band", l.BodyTop, l.StripY)
 	}
-	if got := l.Hit(1, 1); got.Kind != hitTab {
-		t.Errorf("row 1 at the first tab hits %v, want the tab", got.Kind)
+	if got := l.Hit(1, l.StripY); got.Kind != hitTab {
+		t.Errorf("row %d at the first tab hits %v, want the tab", l.StripY, got.Kind)
 	}
 }
 

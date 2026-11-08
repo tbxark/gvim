@@ -332,14 +332,19 @@ func newField() textinput.Model {
 // Active reports whether the bar is open.
 func (b *Bar) Active() bool { return !b.closed }
 
-// Rows is the number of frame rows the bar covers at the bottom: the options row
-// and the search row, plus the replacement row when it is shown. The root takes
-// these rows out of the editor body while the bar is on the stack.
-func (b *Bar) Rows() int {
-	if b.replaceOpen {
-		return 3
+// Rows reports the rows the bar takes at the bottom of a frame h rows high: the card
+// with its title border, the options row, the search row and, when it is shown, the
+// replacement row, plus the bottom border with the hints. It is zero when the frame has
+// no room for that card above the menu band and the tab strip, so the layout reserves
+// nothing for a bar that would not be painted.
+func (b *Bar) Rows(h int) int {
+	if rowsFor(h, b.replaceOpen).top < 0 {
+		return 0
 	}
-	return 2
+	if b.replaceOpen {
+		return 5
+	}
+	return 4
 }
 
 // ShowReplace shows the replacement row and moves the keys to it. It does
@@ -942,19 +947,25 @@ func advancePos(start buffer.Pos, text string) buffer.Pos {
 	return buffer.Pos{Line: start.Line + len(lines) - 1, Col: utf8.RuneCountInString(last)}
 }
 
-// styles are the grid styles of the bar, built from the chrome styles.
+// styles are the styles of the bar, built from the chrome styles.
 type styles struct {
-	bar, label, active, field grid.Style
+	ov     style.Overlay // the card frame: border, fill, title and hints
+	label  grid.Style    // the option labels
+	active grid.Style    // the label of the focused row
+	field  grid.Style    // the input fields
+	status grid.Style    // the match status at the right of the search row
 }
 
-// newStyles derives the bar styles: the menu colors for the bar and its labels,
-// the editor colors for the fields, and the selected overlay color for the label
-// of the focused row.
+// newStyles derives the sheet styles from the overlay palette: the card frame, the
+// muted labels, the focused label of the selected overlay, and the raised input
+// fields of the overlay.
 func newStyles(st style.Styles) styles {
+	ov := st.Overlay
 	return styles{
-		bar:    style.Cell(st.Menu),
-		label:  style.Cell(st.Menu),
-		active: st.Overlay.Selected,
-		field:  style.Cell(st.Editor),
+		ov:     ov,
+		label:  ov.Muted,
+		active: ov.Focus,
+		field:  ov.Idle,
+		status: ov.Muted,
 	}
 }

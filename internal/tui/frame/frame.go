@@ -37,10 +37,10 @@ const (
 	explorerDefaultWidth = 32 // spec section 3: the automatic width
 	explorerEditorMin    = 20 // the editor keeps this many columns when the frame allows
 
-	// The explorer panel's own rows. They do not move when the menu bar is hidden:
-	// the title is row 1 and the tree body starts at row 2 (explorer.Panel).
-	explorerTitleRow = 1
-	ExplorerBodyTop  = 2
+	// MenuRows is the height of the menu band: the row of the labels and one
+	// padding row of the menu background under them, so the labels do not sit
+	// against the tab strip. The tab strip is the row under the band.
+	MenuRows = 2
 
 	LabelGap       = 3 // blank cells between menu labels
 	NoNameLabel    = "[No Name]"
@@ -83,12 +83,12 @@ type Input struct {
 	Recents          []string
 	DoorKeys         []string // the welcome doors' shortcuts in the active keymap; nil for the defaults
 	Status           StatusView
-	HideMenuBar      bool       // the menu row is not drawn; the tab Strip takes row 0
+	HideMenuBar      bool       // the menu band is not drawn; the tab Strip takes row 0
 	HideStatus       bool       // a suggestion list or the file browser is open
 	HideLineNumbers  bool       // the gutter is not drawn
 	DockOpen         bool       // the terminal dock is shown (internal/tui/dock); it takes rows under the body
 	HideTabBar       bool       // the tab Strip row is not drawn; the body takes it
-	ShowPromptLine   bool       // the prompt row is drawn under the status row
+	ShowPromptLine   bool       // reserve the prompt row under the status row (only while a prompt is open)
 	HideVScroll      bool       // the vertical scrollbar is not drawn, so its column is text
 	IconMode         icons.Mode // the glyphs of the explorer buttons and the tab buttons
 
@@ -147,12 +147,16 @@ type Layout struct {
 	W, H  int
 	Gated bool // the minimum-size gate replaces the whole frame
 
-	// Row bands (section 4.1). The editor body is BodyTop..BodyBottom. Row 0 is
-	// the menu bar when menuOn, and the tab Strip is stripY: row 1 with the menu
-	// bar, row 0 without it, and -1 when the tab bar is hidden. statusY is the
-	// status row, drawn only when statusOn. Without it the body takes that row.
+	// Row bands (section 4.1). The editor body is BodyTop..BodyBottom. The menu
+	// band is MenuTop..MenuBottom when the menu bar is shown, and both are -1 when
+	// it is hidden; MenuLabelY is the row of the labels. The tab Strip is stripY:
+	// row 2 under the menu band, row 0 without it, and -1 when the tab bar is
+	// hidden. statusY is the status row, drawn only when statusOn. Without it the
+	// body takes that row.
 	BodyTop, BodyBottom int
 	MenuOn              bool
+	MenuTop, MenuBottom int
+	MenuLabelY          int
 	StripY              int
 	StatusY             int
 	StatusOn            bool
@@ -165,8 +169,9 @@ type Layout struct {
 	NoticeY int
 	Notice  []string
 
-	// The prompt row sits under the status row, above the find bar. It is drawn only
-	// when PromptOn is set, and it is empty except for the prompts that use it.
+	// The prompt row sits under the status row, above the find bar. It is reserved
+	// only while PromptOn is set, which the root does while a prompt overlay is
+	// open; with no prompt open the status row is the last row of the frame.
 	PromptOn bool
 	PromptY  int
 
@@ -179,9 +184,13 @@ type Layout struct {
 	DockH  int
 
 	// Explorer (sections 4.2 and 4.3). The panel covers columns 0..ex-1 and rows
-	// 1..exBottom. ex is zero when the panel is hidden.
+	// ExTitleY..exBottom: the title row, which is the tab Strip row when the menu
+	// bar is shown, and then the tree body from ExBodyTop down. ex is zero when
+	// the panel is hidden.
 	ExplorerOpen bool
 	Ex           int
+	ExTitleY     int // the title row, aligned with the tab Strip
+	ExBodyTop    int // the first row of the tree body
 	ExBottom     int // bottom border row, the last body row
 	ExRows       int
 	ExReloadX    int // column of the refresh button, -1 when the button is not drawn
@@ -195,9 +204,9 @@ type Layout struct {
 	TextX   int
 	TextW   int
 
-	// The menu labels (section 4.5, row 0, empty when the bar is hidden) and the tab
-	// Strip (section 4.6, row stripY). The Strip is placed by placeStrip, which also
-	// gives the scroll position it used.
+	// The menu labels (section 4.5, row MenuLabelY, empty when the bar is hidden) and
+	// the tab Strip (section 4.6, row stripY). The Strip is placed by placeStrip, which
+	// also gives the scroll position it used.
 	MenuRuns []Run
 	Strip    Strip
 
@@ -227,22 +236,31 @@ func ComputeLayout(w, h int, in Input) Layout {
 		return l
 	}
 
-	// The menu row is row 0 when it is shown, and the tab Strip is the row under it.
-	// The find bar takes rows under the status row, so the body and the status row
-	// move up by its height.
+	// The menu band is the top MenuRows rows when the bar is shown, and the tab
+	// Strip is the row under it: row 2 with the band, row 0 without it. The find
+	// bar takes rows under the status row, so the body and the status row move up
+	// by its height.
 	l.MenuOn = !in.HideMenuBar
-	stripRow := 0
+	l.MenuTop, l.MenuBottom, l.MenuLabelY = -1, -1, -1
+	menuRows := 0
 	if l.MenuOn {
-		stripRow = 1
+		l.MenuTop, l.MenuBottom = 0, MenuRows-1
+		l.MenuLabelY = l.MenuTop
+		menuRows = MenuRows
 	}
 	// A hidden tab Strip gives its row to the body. stripY is -1 then, so no
 	// hit or paint reads the Strip row.
-	l.StripY = stripRow
-	l.BodyTop = stripRow + 1
+	l.StripY = menuRows
+	l.BodyTop = menuRows + 1
 	if in.HideTabBar {
 		l.StripY = -1
-		l.BodyTop = stripRow
+		l.BodyTop = menuRows
 	}
+	// The explorer's title row is the tab Strip row. With the menu bar hidden the
+	// panel keeps the rows it had before the band existed: the title on row 1 and
+	// the tree body on row 2.
+	l.ExTitleY = max(menuRows, 1)
+	l.ExBodyTop = l.ExTitleY + 1
 	l.StatusY = h - 1 - in.FindRows
 	if in.ShowPromptLine {
 		l.PromptOn, l.PromptY = true, l.StatusY
@@ -424,7 +442,8 @@ func (l *Layout) setDock() {
 	l.BodyBottom -= h
 }
 
-// setExplorer fills the explorer fields. The panel spans rows 1..h-2 (section 4.1).
+// setExplorer fills the explorer fields. The panel spans ExTitleY..bodyBottom
+// (section 4.1).
 func (l *Layout) setExplorer(in Input) {
 	l.ExReloadX, l.ExCloseX = -1, -1
 	if !in.ExplorerOpen {

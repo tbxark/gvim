@@ -162,7 +162,7 @@ func TestToggleLineNumbersFlipsTheGutter(t *testing.T) {
 	if l := m.layout(); l.Gutter != 0 {
 		t.Fatalf("gutter %d after the toggle, want 0", l.Gutter)
 	}
-	if row := m.paint().Plain()[2]; !strings.HasPrefix(row, " hello") {
+	if row := m.paint().Plain()[m.layout().BodyTop]; !strings.HasPrefix(row, " hello") {
 		t.Fatalf("body row %q does not start with the text", row)
 	}
 	if err := m.Run("toggle_line_numbers"); err != nil {

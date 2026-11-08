@@ -318,7 +318,7 @@ func TestExplorerMenuForAFileFolderAndTheBlankArea(t *testing.T) {
 			if !m.explorerOpen {
 				t.Fatal("setup: the explorer is hidden")
 			}
-			rightClickAt(m, 3, explorerBodyTop+tt.row)
+			rightClickAt(m, 3, m.layout().ExBodyTop+tt.row)
 			menu := ctxTop(m)
 			if menu == nil {
 				t.Fatal("a right click in the explorer opened no menu")

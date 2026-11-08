@@ -14,7 +14,7 @@ import (
 
 // testGeometry is the explorer geometry the selection tests share: a body of
 // three rows in opsTree, with a scrollbar column that never shows.
-var testGeometry = Geometry{Width: 16, Bottom: 9, Focused: true}
+var testGeometry = Geometry{Top: 1, Width: 16, Bottom: 9, Focused: true}
 
 // doAction runs one explorer action on p. It returns the panel the action leaves
 // and the message its command sends, and fails the test when the action is not

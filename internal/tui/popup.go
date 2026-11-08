@@ -16,12 +16,9 @@ func (m *Model) ShowPopup(anchor popup.Point, title string, items []popup.Item) 
 	m.pushOverlay(p)
 }
 
-// popupStyles are the popup's styles: the overlay palette, the same as the
-// dialogs and the lists.
-func popupStyles(st style.Styles) popup.Styles {
-	ov := st.Overlay
-	return popup.Styles{Panel: ov.Box, Border: ov.Border, Selected: ov.Selected, Detail: ov.Muted}
-}
+// popupStyles is the popup's chrome: the overlay palette, the same frame and roles
+// as the dialogs and the lists.
+func popupStyles(st style.Styles) style.Overlay { return st.Overlay }
 
 // popupFocus moves the topmost popup on the overlay stack to the top, so it takes
 // the input next. It reports whether there was a popup.

@@ -53,7 +53,7 @@ func (v *TextBox) draw(g *grid.Grid) {
 	for k := range min(len(lines), box.H-2) {
 		g.Put(box.X+2, box.Y+1+k, end, space.End(lines[k], end-(box.X+2)), v.chrome.Box)
 	}
-	g.Put(box.X+2, box.Y+box.H-1, end, space.End(" "+footer+" ", end-(box.X+2)), v.chrome.Muted)
+	v.chrome.PaintFooter(g, box.X, box.Y+box.H-1, box.W, footer)
 }
 
 // Update passes a key press to OnKey. It returns the box, or nil once OnKey

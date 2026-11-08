@@ -9,11 +9,13 @@ import (
 	"github.com/tbxark/gvim/buffer"
 )
 
-// optionX is the first column of option i on the options row.
-func optionX(b *Bar, i int) int {
-	x := 1
+// optionX is the first column of option i on the options row in a frame w cells wide.
+func optionX(b *Bar, w, i int) int {
+	x, labels, gap := optionsRow(b, w)
 	for k := range i {
-		x += ansi.StringWidth(optionLabel(k, b.opts[k])) + labelGap
+		if k < len(labels) {
+			x += ansi.StringWidth(labels[k]) + gap
+		}
 	}
 	return x
 }
@@ -25,7 +27,7 @@ func TestClickOnAnOptionLabelTogglesIt(t *testing.T) {
 	const w, h = 120, 8
 	opt := rowsFor(h, false).opt
 	for i, name := range []string{"case", "word", "regex", "confirm"} {
-		x := optionX(b, i)
+		x := optionX(b, w, i)
 		if !b.Click(x+2, opt, w, h) {
 			t.Fatalf("%s: a click on the label was not taken", name)
 		}
@@ -51,7 +53,7 @@ func TestClickOnAnOptionSearchesAgain(t *testing.T) {
 	if got := b.statusText(); got != "Match 1 of 2" {
 		t.Fatalf("setup: status = %q", got)
 	}
-	b.Click(optionX(b, 0)+1, rowsFor(8, false).opt, 120, 8)
+	b.Click(optionX(b, 120, 0)+1, rowsFor(8, false).opt, 120, 8)
 	b.Update(key("backspace"))
 	typeText(b, "o")
 	if got := b.statusText(); got != "Match 1 of 1" {
@@ -63,7 +65,7 @@ func TestClickBetweenLabelsAndOutsideTheBarIsNotAToggle(t *testing.T) {
 	b := Open(newFake("foo"), testStyles(), false)
 	const w, h = 120, 8
 	opt := rowsFor(h, false).opt
-	gap := optionX(b, 1) - 2 // a blank between the first two labels
+	gap := optionX(b, w, 1) - 2 // a blank between the first two labels
 	if !b.Click(gap, opt, w, h) {
 		t.Error("a click on the options row between labels was not taken by the bar")
 	}
@@ -72,7 +74,7 @@ func TestClickBetweenLabelsAndOutsideTheBarIsNotAToggle(t *testing.T) {
 			t.Errorf("option %d turned on by a click between labels", i)
 		}
 	}
-	if b.Click(5, 0, w, h) || b.Click(5, opt-1, w, h) {
+	if b.Click(5, 0, w, h) || b.Click(5, rowsFor(h, false).top-1, w, h) {
 		t.Error("a click above the bar was taken")
 	}
 	if b.Click(w+3, opt, w, h) {
@@ -106,8 +108,8 @@ func TestCoversListsTheRowsOfTheBar(t *testing.T) {
 				covered = append(covered, y)
 			}
 		}
-		if len(covered) != b.Rows() || covered[len(covered)-1] != h-1 {
-			t.Errorf("replace %v: covers rows %v, want the last %d rows", replace, covered, b.Rows())
+		if len(covered) != b.Rows(h) || covered[len(covered)-1] != h-1 {
+			t.Errorf("replace %v: covers rows %v, want the last %d rows", replace, covered, b.Rows(h))
 		}
 	}
 }

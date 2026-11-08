@@ -71,13 +71,15 @@ func TestIconModeDrawsTheChosenSet(t *testing.T) {
 		l := m.layout()
 		g := m.paint()
 		cell := func(x, y int) string { return g.At(x, y).Text }
-		if got := cell(l.ExReloadX, 1); got != mode.Glyph(icons.Refresh) {
+		if got := cell(l.ExReloadX, l.ExTitleY); got != mode.Glyph(icons.Refresh) {
 			t.Errorf("%v: refresh cell %q", mode, got)
 		}
-		if got := cell(l.ExCloseX, 1); got != mode.Glyph(icons.Close) {
+		if got := cell(l.ExCloseX, l.ExTitleY); got != mode.Glyph(icons.Close) {
 			t.Errorf("%v: explorer close cell %q", mode, got)
 		}
-		if got := cell(l.W-1, l.StripY); got != mode.Glyph(icons.New) {
+		// The new-tab button is three cells wide, so the glyph keeps one blank on
+		// each side and sits in its middle cell.
+		if got := cell(l.W-2, l.StripY); got != mode.Glyph(icons.New) {
 			t.Errorf("%v: new-tab cell %q", mode, got)
 		}
 		closes := 0
@@ -158,7 +160,7 @@ func TestNerdModeClicksHitTheButtons(t *testing.T) {
 			t.Errorf("cell left of the close of tab %d hit as %+v", r.Index, got)
 		}
 	}
-	_, cmd := m.Update(click(l.ExCloseX, 1, tea.MouseLeft))
+	_, cmd := m.Update(click(l.ExCloseX, l.ExTitleY, tea.MouseLeft))
 	drain(t, m, cmd)
 	if m.explorerOpen {
 		t.Fatal("a press on the nerd close button left the explorer open")

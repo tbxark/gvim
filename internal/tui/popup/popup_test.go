@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/style"
 )
 
 // items returns n items labelled "i0", "i1", and so on.
@@ -31,8 +32,9 @@ func TestPlaceBox(t *testing.T) {
 		{"clamps right edge into the frame", Point{75, 5}, 10, 3, 80, 24, rect{69, 6, 10, 3}},
 		{"clamps left edge", Point{-3, 5}, 10, 3, 80, 24, rect{1, 6, 10, 3}},
 		{"a narrow frame keeps no margin", Point{-3, 5}, 10, 3, 30, 24, rect{0, 6, 10, 3}},
+		{"a wide frame keeps two cells of margin", Point{-3, 5}, 10, 3, 140, 24, rect{2, 6, 10, 3}},
 		{"stays off the last row", Point{4, 20}, 10, 3, 80, 24, rect{4, 17, 10, 3}},
-		{"clamps top when flipped does not fit", Point{1, 1}, 10, 30, 80, 24, rect{1, 0, 10, 30}},
+		{"a box too tall for the frame stays below the menu bar", Point{1, 1}, 10, 30, 80, 24, rect{1, 1, 10, 30}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -64,8 +66,26 @@ func TestBoxWidthFitsTitleAndDetail(t *testing.T) {
 	}
 }
 
+// TestTextWidthUsesTheFrameMargin checks that the wrap width of a hover text is the
+// room the widest box allowed by the frame leaves between its borders and padding.
+func TestTextWidthUsesTheFrameMargin(t *testing.T) {
+	tests := []struct{ fw, want int }{
+		{160, maxTextWidth},
+		{80, 74},
+		{70, 64},
+		{59, 55},
+		{20, 16},
+		{1, 1},
+	}
+	for _, tt := range tests {
+		if got := TextWidth(tt.fw); got != tt.want {
+			t.Errorf("TextWidth(%d) = %d, want %d", tt.fw, got, tt.want)
+		}
+	}
+}
+
 func TestShowOpensClosedPopupAndResetsHighlight(t *testing.T) {
-	p := New(Styles{})
+	p := New(style.Overlay{})
 	if p.Active() {
 		t.Fatal("a new popup is open")
 	}
@@ -94,7 +114,7 @@ func TestKeysMoveAndChoose(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := New(Styles{})
+			p := New(style.Overlay{})
 			p.Show(Point{0, 0}, "T", items(3))
 			var chosen []tea.Msg
 			for _, k := range tt.keys {
@@ -126,7 +146,7 @@ func TestKeysMoveAndChoose(t *testing.T) {
 }
 
 func TestChosenCarriesItemData(t *testing.T) {
-	p := New(Styles{})
+	p := New(style.Overlay{})
 	p.Show(Point{0, 0}, "T", []Item{{Label: "a", Detail: "d", Data: 42}})
 	cmd := p.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := cmd().(Chosen)
@@ -136,7 +156,7 @@ func TestChosenCarriesItemData(t *testing.T) {
 }
 
 func TestEnterWithNoItemsKeepsPopupOpen(t *testing.T) {
-	p := New(Styles{})
+	p := New(style.Overlay{})
 	p.Show(Point{0, 0}, "T", nil)
 	if cmd := p.update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
 		t.Fatalf("emitted a command for an empty popup")
@@ -159,7 +179,7 @@ func TestClickChoosesRowAndClickOutsideCloses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := New(Styles{})
+			p := New(style.Overlay{})
 			p.Show(Point{1, 0}, "Title", items(3))
 			g := grid.New(40, 10)
 			p.Draw(g)
@@ -184,7 +204,7 @@ func TestClickChoosesRowAndClickOutsideCloses(t *testing.T) {
 }
 
 func TestDrawPaintsTitleRowsAndDetail(t *testing.T) {
-	p := New(Styles{})
+	p := New(style.Overlay{})
 	p.Show(Point{0, 0}, "Remote", []Item{
 		{Label: "Local", Detail: "here"},
 		{Label: "Remote workspaces are not supported"},
@@ -205,7 +225,7 @@ func TestDrawPaintsTitleRowsAndDetail(t *testing.T) {
 }
 
 func TestDrawScrollsToKeepHighlightVisible(t *testing.T) {
-	p := New(Styles{})
+	p := New(style.Overlay{})
 	p.Show(Point{0, 0}, "T", items(10))
 	g := grid.New(20, 5) // three item rows fit between the borders
 	p.Draw(g)
@@ -215,7 +235,12 @@ func TestDrawScrollsToKeepHighlightVisible(t *testing.T) {
 	g = grid.New(20, 5)
 	p.Draw(g)
 	rows := g.Plain()
-	if !strings.Contains(rows[3], "i5") {
-		t.Fatalf("after moving to row 5 the last visible row = %q, want i5", rows[3])
+	if !strings.Contains(strings.Join(rows, "\n"), "i5") {
+		t.Fatalf("after moving to row 5 the highlight is not drawn:\n%s", strings.Join(rows, "\n"))
+	}
+	for k := range p.rows {
+		if got, ok := p.rowAt(p.box.x+3, p.box.y+1+k); !ok || got != p.top+k {
+			t.Fatalf("window row %d is not the click target of the row painted there", p.top+k)
+		}
 	}
 }

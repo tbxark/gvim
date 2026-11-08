@@ -503,7 +503,10 @@ func (m *Model) openLocales() {
 func (m *Model) viewLayout(in *layoutInput) {
 	in.HideTabBar = !m.view.tabBar
 	in.HideStatus = in.HideStatus || !m.view.statusBar
-	in.ShowPromptLine = m.view.promptLine
+	// The prompt row is reserved only while a prompt is open: with no prompt the
+	// status row is the last row of the frame, so the bar keeps the same air above
+	// and below it. The setting says whether an open prompt gets the row of its own.
+	in.ShowPromptLine = m.view.promptLine && m.promptOpen()
 	in.HideVScroll = !m.view.vScroll
 	in.IconMode = m.view.icons
 	if doc := m.ed.Active(); doc != nil {
@@ -511,6 +514,17 @@ func (m *Model) viewLayout(in *layoutInput) {
 		// active document.
 		in.HideLineNumbers = !editor.OverrideOr(docViewOf(doc).LineNumbers, !m.hideLineNumbers)
 	}
+}
+
+// promptOpen reports whether the top overlay is one of the bottom-row prompts: the
+// built-in one-line prompt or confirm, or a plugin prompt that draws on the same row.
+// Only then is the prompt row reserved.
+func (m *Model) promptOpen() bool {
+	if len(m.overlays) == 0 {
+		return false
+	}
+	_, ok := m.overlays[len(m.overlays)-1].(prompt.RowOwner)
+	return ok
 }
 
 // viewPane sets the display options of p from the settings of its document and the

@@ -40,11 +40,12 @@ type Tree interface {
 }
 
 // Geometry is the panel's place in the frame. The root takes it from the layout:
-// Width is the layout's explorer width, Bottom its bottom border row, and
-// Focused reports whether the panel has keyboard focus, which shows the
-// selection marker.
+// Width is the layout's explorer width, Top the title row (the tab strip row),
+// Bottom the bottom border row, and Focused reports whether the panel has
+// keyboard focus, which shows the selection marker.
 type Geometry struct {
 	Width   int
+	Top     int // the title row; the tree body starts under it
 	Bottom  int
 	Focused bool
 	// Marks gives the git status letter of each changed path, keyed by its
@@ -56,13 +57,10 @@ type Geometry struct {
 	Icons icons.Mode
 }
 
-// Rows of the panel. The title is row 1 and the tree body starts at row 2
-// (blueprint section 4.1). The body ends above Bottom.
-const (
-	titleRow  = 1
-	bodyTop   = 2
-	wheelRows = 3 // rows one wheel notch scrolls (blueprint section 3.2)
-)
+// The rows of the panel are the rows of its Geometry: the title is row Top and
+// the tree body starts at Top+1 (blueprint section 4.1). The body ends above
+// Bottom.
+const wheelRows = 3 // rows one wheel notch scrolls (blueprint section 3.2)
 
 // Messages the panel sends. The root receives them through its Update.
 type (
@@ -204,16 +202,16 @@ func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 	return p, cmd, true
 }
 
-// Draw paints the panel into dst, in the columns 0 to g.Width-1 and the rows 1
-// to g.Bottom. Cells outside the panel are not touched.
+// Draw paints the panel into dst, in the columns 0 to g.Width-1 and the rows
+// g.Top to g.Bottom. Cells outside the panel are not touched.
 func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 	if p.tree == nil || g.Width < 2 {
 		return
 	}
 	body := style.Cell(p.styles.Explorer)
 	head := style.Cell(p.styles.ExplorerTitle)
-	dst.Fill(0, g.Width, titleRow, head)
-	dst.Put(0, titleRow, g.Width, HeaderFor(g.Width, g.Icons).Text, head)
+	dst.Fill(0, g.Width, g.Top, head)
+	dst.Put(0, g.Top, g.Width, HeaderFor(g.Width, g.Icons).Text, head)
 
 	rows := p.tree.Rows()
 	off := p.tree.ScrollOffset()
@@ -228,11 +226,11 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 	thumb := grid.Style{BG: style.Cell(p.styles.ScrollbarThumb).FG}
 	accent := style.Cell(p.styles.Accent).BG
 
-	for y := bodyTop; y < g.Bottom; y++ {
+	for y := g.Top + 1; y < g.Bottom; y++ {
 		dst.Fill(0, g.Width, y, body)
 		dst.Set(0, y, "│", body)
 		dst.Set(g.Width-1, y, "│", body)
-		row := y - bodyTop
+		row := y - g.Top - 1
 		if idx := off + row; idx < len(rows) {
 			r := rows[idx]
 			st := p.rowStyle(r, body)
@@ -248,7 +246,7 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 			dst.Set(g.Width-2, y, " ", st)
 		}
 	}
-	if g.Bottom > titleRow {
+	if g.Bottom > g.Top {
 		dst.Set(0, g.Bottom, "└", body)
 		for x := 1; x < g.Width-1; x++ {
 			dst.Set(x, g.Bottom, "─", body)
@@ -306,7 +304,7 @@ func drawRow(dst *grid.Grid, r tree.Row, y, width int, over, marker bool, mark r
 
 // bodyRows is the number of tree rows the body shows.
 func (g Geometry) bodyRows() int {
-	return max(g.Bottom-bodyTop, 0)
+	return max(g.Bottom-g.Top-1, 0)
 }
 
 // overflows reports whether the rows do not fit the body, so the scrollbar shows.
@@ -339,10 +337,10 @@ type target struct {
 // are zoneNone. The grip is the right border from the body down to the bottom
 // border, and the title's buttons sit on the title row.
 func (p Panel) hitAt(g Geometry, x, y int) target {
-	if x < 0 || x >= g.Width || y < titleRow || y > g.Bottom {
+	if x < 0 || x >= g.Width || y < g.Top || y > g.Bottom {
 		return target{}
 	}
-	if y == titleRow {
+	if y == g.Top {
 		h := HeaderFor(g.Width, g.Icons)
 		switch x {
 		case h.Reload:
@@ -358,7 +356,7 @@ func (p Panel) hitAt(g Geometry, x, y int) target {
 	if x == 0 || y == g.Bottom {
 		return target{zone: zoneBody}
 	}
-	row := y - bodyTop
+	row := y - g.Top - 1
 	if overflows(g, p.tree.Rows()) && x == g.Width-2 {
 		return target{zone: zoneScroll, row: row}
 	}
@@ -434,7 +432,7 @@ func (p Panel) drag(m tea.Mouse, g Geometry) (Panel, tea.Cmd) {
 			return p, emit(ResizeMsg{Width: w})
 		}
 	case p.thumb:
-		p.scrollTo(m.Y-bodyTop, g)
+		p.scrollTo(m.Y-g.Top-1, g)
 	}
 	return p, nil
 }
@@ -449,7 +447,7 @@ func (p Panel) wheel(m tea.Mouse, g Geometry) {
 	case tea.MouseWheelDown:
 		delta = wheelRows
 	}
-	if delta == 0 || m.X < 0 || m.X >= g.Width || m.Y < bodyTop || m.Y > g.Bottom {
+	if delta == 0 || m.X < 0 || m.X >= g.Width || m.Y < g.Top+1 || m.Y > g.Bottom {
 		return
 	}
 	p.tree.ScrollBy(delta)

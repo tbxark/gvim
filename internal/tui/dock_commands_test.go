@@ -157,19 +157,19 @@ func TestTerminalCommandsStartInTheWorkspaceRoot(t *testing.T) {
 
 func TestTerminalCommandsLayOutTheDockBelowTheBody(t *testing.T) {
 	// At 80 by 24 the dock takes the layout's rows at the bottom: the title row
-	// at row 16 and 6 shell rows, as open_terminal_in_dock does. open_terminal_below
+	// at row 17 and 5 shell rows, as open_terminal_in_dock does. open_terminal_below
 	// and open_terminal_right use the same rows, so they keep the layout's split.
 	for _, action := range []string{"open_terminal_in_dock", "open_terminal", "open_terminal_below", "open_terminal_right"} {
 		t.Run(action, func(t *testing.T) {
 			m := newTerminalModel(t, newFakeTree(3), dockKeys(), &shellsStarter{})
 			dockRun(t, m, action)
 			l := m.layout()
-			if !l.DockOn || l.DockY != 16 || l.DockH != 7 || l.W != 80 {
-				t.Fatalf("dock on = %v at row %d with %d rows over %d columns; want on at row 16 with 7 rows over 80 columns",
+			if !l.DockOn || l.DockY != 17 || l.DockH != 6 || l.W != 80 {
+				t.Fatalf("dock on = %v at row %d with %d rows over %d columns; want on at row 17 with 6 rows over 80 columns",
 					l.DockOn, l.DockY, l.DockH, l.W)
 			}
-			if l.BodyBottom != 15 {
-				t.Fatalf("bodyBottom = %d, want 15: the editor body stops above the dock", l.BodyBottom)
+			if l.BodyBottom != 16 {
+				t.Fatalf("bodyBottom = %d, want 16: the editor body stops above the dock", l.BodyBottom)
 			}
 		})
 	}
@@ -324,8 +324,8 @@ func TestOpenTerminalCommandsKeepTheRunningShell(t *testing.T) {
 			if !m.dock.Open() || !m.dock.Focus() {
 				t.Fatalf("open, focus = %v, %v; want the dock shown with the focus", m.dock.Open(), m.dock.Focus())
 			}
-			if l := m.layout(); !l.DockOn || l.DockY != 16 || l.DockH != 7 || l.DockY+l.DockH != l.StatusY {
-				t.Fatalf("dock on = %v at row %d with %d rows; want on at row 16 with 7 rows, directly above the status row",
+			if l := m.layout(); !l.DockOn || l.DockY != 17 || l.DockH != 6 || l.DockY+l.DockH != l.StatusY {
+				t.Fatalf("dock on = %v at row %d with %d rows; want on at row 17 with 6 rows, directly above the status row",
 					l.DockOn, l.DockY, l.DockH)
 			}
 			if m.notice != tt.notice {

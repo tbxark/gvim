@@ -10,17 +10,18 @@
 //   - PadX: horizontal padding between a border (or the screen edge of a bar) and
 //     the text inside it. It applies to bars, menus, popups, dialogs, list rows and
 //     the explorer.
-//   - Margin(w): the gap between a floating box (palette, popup, list, browser) and
-//     the screen edge. It is 0 below 60 columns, 1 up to 139 and 2 beyond.
-//   - ListMargin(w): the same gap for the boxes that are centred: two cells from 80
-//     columns, one from 60, none below.
+//   - Margin(w): the gap between a floating box (palette, popup, list, browser)
+//     and the screen edge. It is 0 below 60 columns, 1 up to 139 and 2 beyond.
+//   - ListMargin(w): the same gap for the boxes that are centred. It is Margin, so
+//     a centred card and an anchored menu sit the same distance from the edge.
 //   - Bar items (status items, filter options) carry PadX on both sides, so two
 //     neighbours are two cells apart.
-//   - Rows of a dialog: one blank row between the border and the content.
+//   - Rows of a card: the content starts directly under the top border and the key
+//     hints sit on the bottom border (style.Overlay.PaintBox and PaintFooter).
 //
-// A frame narrower than NarrowWidth drops the optional space, never the caret
-// column: Margin is then at most 1, and PadX stays where text would otherwise
-// touch a border.
+// A narrow frame drops the optional space, never the caret column: Margin grows
+// with the width (0, 1, then 2), and PadX stays where text would otherwise touch a
+// border.
 package space
 
 import "strings"
@@ -28,8 +29,6 @@ import "strings"
 const (
 	// PadX is the horizontal padding inside a border or bar.
 	PadX = 1
-	// NarrowWidth is the frame width below which the optional space shrinks.
-	NarrowWidth = 80
 )
 
 // Margin is the gap between a floating box and the left and right screen edge in a
@@ -45,17 +44,9 @@ func Margin(w int) int {
 }
 
 // ListMargin is the gap between a centred box (a list, a text box, the file browser,
-// a dialog) and the left and right screen edge in a frame w cells wide: two cells
-// from NarrowWidth up, one down to 60 columns, none below.
-func ListMargin(w int) int {
-	switch {
-	case w >= NarrowWidth:
-		return 2
-	case w >= 60:
-		return 1
-	}
-	return 0
-}
+// a dialog) and the left and right screen edge in a frame w cells wide. It is Margin:
+// one rule for every floating surface, so the chrome does not change with the box.
+func ListMargin(w int) int { return Margin(w) }
 
 // Pad surrounds s with PadX blank cells on each side: the label of a bar item, a tab
 // or a status segment.

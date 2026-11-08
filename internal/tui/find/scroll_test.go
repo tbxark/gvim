@@ -62,7 +62,8 @@ func TestSearchAndReplaceInputsStartInTheSameColumn(t *testing.T) {
 		t.Errorf("search caret at column %d and replacement caret at %d, want the inputs aligned", sx, rx)
 	}
 	rows := frame(b, 80, 12)
-	search, repl := rows[len(rows)-2], rows[len(rows)-1]
+	r := rowsFor(12, true)
+	search, repl := rows[r.search], rows[r.repl]
 	if strings.Index(search, "q") != strings.Index(repl, "r") {
 		t.Errorf("inputs are not aligned:\n%q\n%q", search, repl)
 	}
@@ -72,12 +73,13 @@ func TestStatusIsDroppedWhenItWouldSqueezeTheInput(t *testing.T) {
 	t.Parallel()
 	b := Open(newFake("foo foo"), testStyles(), false)
 	typeText(b, "foo")
-	if !strings.Contains(frame(b, 60, 12)[11], "Match") {
-		t.Fatalf("setup: no status at 60 columns: %q", frame(b, 60, 12)[11])
+	searchRow := rowsFor(12, false).search
+	if !strings.Contains(frame(b, 60, 12)[searchRow], "Match") {
+		t.Fatalf("setup: no status at 60 columns: %q", frame(b, 60, 12)[searchRow])
 	}
 	rows := frame(b, 26, 12)
-	if strings.Contains(rows[11], "Match") {
-		t.Errorf("the status squeezes the input at 26 columns: %q", rows[11])
+	if strings.Contains(rows[searchRow], "Match") {
+		t.Errorf("the status squeezes the input at 26 columns: %q", rows[searchRow])
 	}
 	if x, _, ok := b.Cursor(26, 12); !ok || x >= 26 {
 		t.Errorf("Cursor = %d, %v, want a caret inside the row", x, ok)

@@ -21,7 +21,7 @@ func TestCoversIsTheCardAndNothingAbove(t *testing.T) {
 	}{
 		{"the box top border", w / 2, geo.top, true},
 		{"a row of the list", w / 2, geo.top + 1, true},
-		{"the query row", geo.nameX, geo.promptY, true},
+		{"the query row", geo.nameX, geo.inputY, true},
 		{"above the card", w / 2, geo.top - 1, false},
 		{"the left of the card", geo.left, geo.top + 1, false},
 		{"the right of the card", geo.right, geo.top + 1, false},

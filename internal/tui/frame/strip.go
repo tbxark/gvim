@@ -31,6 +31,10 @@ const (
 	ModifiedMark  = "●"          // before the name of a modified tab
 	// ComparePairMark is before the name of each of the two tabs of a compare view.
 	ComparePairMark = "⇄"
+
+	// plusCells is the width of the new-tab button: the glyph with one padding
+	// cell on each side, so it does not touch the tab before it or the screen edge.
+	plusCells = 3
 )
 
 // StripLabel is the name of one tab as the Strip shows it: the file icon (when the
@@ -86,8 +90,9 @@ func TabStarts(tabs []TabInfo) (starts []int, total int) {
 // the "×" (hitTabClose), and the trailing blank (hitTab). Tabs follow each other
 // with no gap.
 //
-// The "+" (hitTabNew) is pinned at the last column of the row, outside the
-// scrolled window, so it is always on screen and clickable.
+// The "+" (hitTabNew) is a three-cell button, " + ", pinned to the end of the
+// row (columns w-3..w-1), outside the scrolled window, so it is always on screen
+// and clickable.
 //
 // When the tabs are wider than the room left of the "+", the Strip scrolls. The
 // window keeps the cells between two marker columns: "<" (hitTabScrollBefore) at
@@ -97,8 +102,8 @@ func TabStarts(tabs []TabInfo) (starts []int, total int) {
 // The painter and the hit test both read the runs, so they cannot drift apart.
 func PlaceStrip(x0, w int, tabs []TabInfo, first int, ic icons.Mode) Strip {
 	s := placeTabs(x0, w, tabs, first, ic)
-	if plusX := w - 1; plusX >= x0 {
-		s.Runs = append(s.Runs, Run{X: plusX, W: 1, Text: ic.Glyph(icons.New), Kind: HitTabNew, Index: 0})
+	if plusX := w - plusCells; plusX >= x0 {
+		s.Runs = append(s.Runs, Run{X: plusX, W: plusCells, Text: space.Pad(ic.Glyph(icons.New)), Kind: HitTabNew, Index: 0})
 	}
 	return s
 }
@@ -112,7 +117,7 @@ func placeTabs(x0, w int, tabs []TabInfo, first int, ic icons.Mode) Strip {
 			s.Active = i
 		}
 	}
-	plusX := w - 1
+	plusX := w - plusCells
 	if plusX < x0 {
 		return s
 	}
@@ -195,7 +200,7 @@ func ClampFirst(starts []int, total, window, first int) int {
 // window at the current position first. When the tabs fit without scrolling, it
 // returns 0.
 func RevealedFirst(tabs []TabInfo, x0, w, first, i int) int {
-	avail := w - 1 - x0
+	avail := w - plusCells - x0
 	starts, total := TabStarts(tabs)
 	if i < 0 || i >= len(tabs) || total <= avail {
 		return 0

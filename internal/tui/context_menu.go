@@ -17,12 +17,10 @@ import (
 // has no context menu.
 const noContextMenuNotice = "No context menu here: right-click a tab, the explorer or the editor text"
 
-// showContextMenu opens a context menu with items at the pointer.
+// showContextMenu opens a context menu with items at the pointer, painted with the
+// shared overlay frame of the menus.
 func (m *Model) showContextMenu(mo tea.Mouse, items []ctxmenu.Item) {
-	ov := m.styles.Overlay
-	disabled := ov.Box
-	disabled.Faint = true
-	menu := ctxmenu.New(ctxmenu.Styles{Box: ov.Box, Border: ov.Border, Selected: ov.Selected, Disabled: disabled})
+	menu := ctxmenu.New(m.styles.Overlay)
 	menu.Show(mo.X, mo.Y, m.width, m.height, items)
 	m.pushOverlay(menu)
 }

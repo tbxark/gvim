@@ -14,7 +14,7 @@ func TestFindBarOptionLabelsAreClickable(t *testing.T) {
 	press(m, ctrl('f'))
 	m.Update(typed("f"))
 	rows := screenRows(m)
-	optRow := len(rows) - 2
+	optRow := len(rows) - 3 // the options row of the find sheet
 	x := strings.Index(rows[optRow], "[ ] Case Sensitive")
 	if x < 0 {
 		t.Fatalf("no case toggle on row %d: %q", optRow, rows[optRow])

@@ -53,7 +53,7 @@ func wheelRow(m *Model, up bool) {
 	if up {
 		btn = tea.MouseWheelUp
 	}
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 30, Y: 1, Button: btn}))
+	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 30, Y: m.layout().StripY, Button: btn}))
 }
 
 // The active tab of a twelve-tab strip at 60 columns is on screen, and the strip
@@ -64,8 +64,8 @@ func TestOverflowShowsTheActiveTab(t *testing.T) {
 	if !tabsOnScreen(m)[11] {
 		t.Fatalf("active tab 11 is not on screen; first = %d", m.tabFirst)
 	}
-	if plus := plusColumn(m); plus != 59 {
-		t.Fatalf("plus at column %d, want the last column 59", plus)
+	if plus := plusColumn(m); plus != 57 {
+		t.Fatalf("plus at column %d, want columns 57..59", plus)
 	}
 }
 
@@ -101,14 +101,15 @@ func TestClickRightMarkerScrollsAndPlusOpensItsMenu(t *testing.T) {
 	if markerX < 0 {
 		t.Fatal("no right marker drawn for a twelve-tab strip")
 	}
-	m.Update(click(markerX, 1, tea.MouseLeft))
+	m.Update(click(markerX, m.layout().StripY, tea.MouseLeft))
 	if got := m.layout().Strip.First; got != before+1 {
 		t.Fatalf("click on > moved first from %d to %d, want one tab", before, got)
 	}
-	if plus := plusColumn(m); plus != 59 {
-		t.Fatalf("plus at column %d after scrolling, want 59", plus)
+	plus := plusColumn(m)
+	if plus != 57 {
+		t.Fatalf("plus at column %d after scrolling, want 57", plus)
 	}
-	_, cmd := m.Update(click(59, 1, tea.MouseLeft))
+	_, cmd := m.Update(click(plus+1, m.layout().StripY, tea.MouseLeft))
 	drain(t, m, cmd)
 	if n := len(tf.names); n != 12 {
 		t.Fatalf("clicking + changed the tabs to %v, want the menu only", tf.names)
@@ -154,7 +155,7 @@ func TestMarkersAppearOnlyWhenOverflowing(t *testing.T) {
 // the tab.
 func TestAddingATabKeepsTheNewTabVisible(t *testing.T) {
 	m, _ := stripModel(t, 60, twelveTabs()...)
-	_, cmd := m.Update(click(59, 1, tea.MouseLeft))
+	_, cmd := m.Update(click(plusColumn(m)+1, m.layout().StripY, tea.MouseLeft))
 	drain(t, m, cmd)
 	chooseRow(t, m, "New File")
 	if !tabsOnScreen(m)[12] {

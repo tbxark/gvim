@@ -356,9 +356,9 @@ func TestClipboardActionsAreSkippedInExplorer(t *testing.T) {
 func TestWindowSizeSetsTheEditorViewport(t *testing.T) {
 	ed := newFakeEditor("hello")
 	newTestModel(t, ed, nil, 80, 24)
-	// Body rows 2..22 are 21 rows. The gutter for one line is six cells.
-	if ed.rows != 21 || ed.cols != 74 {
-		t.Fatalf("viewport = %dx%d, want 21x74", ed.rows, ed.cols)
+	// Body rows 3..22 are 20 rows. The gutter for one line is six cells.
+	if ed.rows != 20 || ed.cols != 74 {
+		t.Fatalf("viewport = %dx%d, want 20x74", ed.rows, ed.cols)
 	}
 }
 
@@ -394,11 +394,11 @@ func TestClickOnCloseButtonHidesExplorerOnlyForLeftButton(t *testing.T) {
 		t.Fatal("the close button is not drawn at 80 columns")
 	}
 
-	m.Update(click(l.ExCloseX, 1, tea.MouseRight))
+	m.Update(click(l.ExCloseX, l.ExTitleY, tea.MouseRight))
 	if !m.explorerOpen {
 		t.Fatal("a right press closed the explorer")
 	}
-	_, cmd := m.Update(click(l.ExCloseX, 1, tea.MouseLeft))
+	_, cmd := m.Update(click(l.ExCloseX, l.ExTitleY, tea.MouseLeft))
 	drain(t, m, cmd)
 	if m.explorerOpen || m.explorerFocus {
 		t.Fatalf("left press on × left the panel open %v focused %v", m.explorerOpen, m.explorerFocus)

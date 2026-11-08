@@ -12,7 +12,7 @@ func mouseAtOrigin() tea.Mouse { return tea.Mouse{X: 5, Y: 1} }
 // openExplorerMenu right-clicks the row with the index row of the explorer.
 func openExplorerMenu(t *testing.T, m *Model, row int) {
 	t.Helper()
-	rightClickAt(m, 3, explorerBodyTop+row)
+	rightClickAt(m, 3, m.layout().ExBodyTop+row)
 	if ctxTop(m) == nil {
 		t.Fatalf("a right click on explorer row %d opened no menu", row)
 	}

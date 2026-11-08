@@ -13,7 +13,7 @@ func TestSelectAtSelectsTheRowWithoutOpeningIt(t *testing.T) {
 	p := New(tr, style.Styles{}, nil)
 	// Row 0 is the folder a/. A press would toggle it, and a right press must not.
 	before := len(tr.rows)
-	got, ok := p.SelectAt(testGeometry, 3, bodyTop)
+	got, ok := p.SelectAt(testGeometry, 3, testGeometry.Top+1)
 	if !ok || !reflect.DeepEqual(got.Paths, []string{"/r/a"}) || got.Root {
 		t.Fatalf("SelectAt on a folder = %+v, %v", got, ok)
 	}
@@ -28,7 +28,7 @@ func TestSelectAtSelectsTheRowWithoutOpeningIt(t *testing.T) {
 func TestSelectAtTheBlankAreaIsTheRoot(t *testing.T) {
 	t.Parallel()
 	p := New(opsTree(1), style.Styles{}, nil)
-	got, ok := p.SelectAt(testGeometry, 3, bodyTop+5)
+	got, ok := p.SelectAt(testGeometry, 3, testGeometry.Top+1+5)
 	if !ok || !got.Root || len(got.Paths) != 0 {
 		t.Fatalf("SelectAt on the blank area = %+v, %v", got, ok)
 	}
@@ -52,12 +52,12 @@ func TestSelectAtKeepsSeveralPicksOnlyForAPickedRow(t *testing.T) {
 	p, _ = doAction(t, p, "file_explorer_down")
 	p, _ = doAction(t, p, "file_explorer_toggle_select")
 	// A press on a picked row keeps both picks, in display order.
-	got, ok := p.SelectAt(testGeometry, 3, bodyTop+2)
+	got, ok := p.SelectAt(testGeometry, 3, testGeometry.Top+1+2)
 	if !ok || !reflect.DeepEqual(got.Paths, []string{"/r/a", "/r/b.txt"}) {
 		t.Fatalf("SelectAt on a picked row = %+v, %v", got, ok)
 	}
 	// A press on a row that is not picked drops them.
-	got, ok = p.SelectAt(testGeometry, 3, bodyTop+1)
+	got, ok = p.SelectAt(testGeometry, 3, testGeometry.Top+1+1)
 	if !ok || !reflect.DeepEqual(got.Paths, []string{"/r/a/x.txt"}) {
 		t.Fatalf("SelectAt on another row = %+v, %v", got, ok)
 	}

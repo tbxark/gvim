@@ -10,49 +10,87 @@ import (
 	"github.com/tbxark/gvim/internal/tui/space"
 )
 
-// rows are the rows of the bar in a frame, or -1 for a row that is not drawn.
+// rows are the rows of the bar in a frame. top and bottom are the card's borders,
+// opt is the options row and search and repl the field rows; a row is -1 when the
+// frame has no room for the whole card.
 type rows struct {
-	opt, search, repl int
+	top, opt, search, repl, bottom int
 }
 
-// rowsFor places the bar in a frame h rows high. The options row is above the
-// search row, and the replacement row, when shown, is the bottom row. At least
-// row 2 is kept, so the bar never covers the menu bar or the tab strip.
+// rowsFor places the bar in a frame h rows high. The bar is a card docked to the last
+// row: a title border, the options row, the search row, the replacement row when it is
+// open, and the hints on the bottom border. The card never covers the menu bar or the
+// tab strip (rows 0 and 1); a frame too short for that shows no bar at all.
 func rowsFor(h int, replaceOpen bool) rows {
-	in := h - 1
+	r := rows{top: -1, opt: -1, search: -1, repl: -1, bottom: -1}
 	if replaceOpen {
-		in = h - 2
+		r.bottom, r.repl, r.search, r.opt, r.top = h-1, h-2, h-3, h-4, h-5
+	} else {
+		r.bottom, r.search, r.opt, r.top = h-1, h-2, h-3, h-4
 	}
-	opt := max(in-1, 2)
-	r := rows{opt: opt, search: in, repl: -1}
-	if in <= opt {
-		r.search = -1
-	}
-	if replaceOpen && h-1 > opt {
-		r.repl = h - 1
+	if r.top < 2 {
+		return rows{top: -1, opt: -1, search: -1, repl: -1, bottom: -1}
 	}
 	return r
 }
 
-// Draw paints the bar over the bottom rows of g. It covers only the cells it
-// draws: the options row, the search row, and the replacement row when shown.
+// cardColumns returns the first and last border column of the bar's card in a frame w
+// cells wide. The card keeps the same edge margin as every other floating surface.
+func cardColumns(w int) (left, right int) {
+	m := space.Margin(w)
+	return m, w - 1 - m
+}
+
+// title is the card's title: what the bar does at the moment.
+func (b *Bar) title() string {
+	if b.replaceOpen {
+		return "Find and Replace"
+	}
+	return "Find"
+}
+
+// hint is the text on the card's bottom border: the keys the bar answers.
+func (b *Bar) hint() string {
+	if b.replaceOpen {
+		return "Enter replace · Tab field · Esc close"
+	}
+	return "Enter find · Tab replace · Esc close"
+}
+
+// Draw paints the bar over the last rows of g. The bar is one card: the title border,
+// the options row, the search row, the replacement row when shown, and the key hints
+// on the bottom border. A frame with no room for the card paints nothing.
 func (b *Bar) Draw(g *grid.Grid) {
 	r := rowsFor(g.Height(), b.replaceOpen)
-	w := g.Width()
+	if r.top < 0 {
+		return
+	}
+	left, right := cardColumns(g.Width())
+	if right <= left+1 {
+		return
+	}
+	boxW, boxH := right-left+1, r.bottom-r.top+1
+	b.styles.ov.PaintBox(g, left, r.top, boxW, boxH, b.title())
+	x0, end := left+1+space.PadX, right-space.PadX
 	if r.opt >= 0 {
-		g.Fill(0, w, r.opt, b.styles.bar)
-		x := space.PadX
-		labels, gap := b.optionRow(w)
-		for _, label := range labels {
-			g.Put(x, r.opt, w, label, b.styles.bar)
-			x += ansi.StringWidth(label) + gap
-		}
+		b.drawOptions(g, r.opt, x0, end)
 	}
 	if r.search >= 0 {
-		b.drawField(g, r.search, searchLabel, &b.search, !b.inReplace, b.statusText())
+		b.drawField(g, r.search, searchLabel, &b.search, !b.inReplace, b.statusText(), x0, end)
 	}
 	if r.repl >= 0 {
-		b.drawField(g, r.repl, replaceLabel, &b.repl, b.inReplace, "")
+		b.drawField(g, r.repl, replaceLabel, &b.repl, b.inReplace, "", x0, end)
+	}
+	b.styles.ov.PaintFooter(g, left, r.bottom, boxW, b.hint())
+}
+
+// drawOptions writes the option checkboxes on row y between x0 and end.
+func (b *Bar) drawOptions(g *grid.Grid, y, x0, end int) {
+	labels, gap := b.optionRow(end - x0)
+	x := x0
+	for _, label := range labels {
+		g.Put(x, y, end, label, b.styles.label)
+		x += ansi.StringWidth(label) + gap
 	}
 }
 
@@ -64,41 +102,40 @@ const minFieldRoom = 12
 // search and replacement inputs start at the same column.
 var labelCols = ansi.StringWidth(replaceLabel) + 1
 
-// fieldSpan is the columns of the input on a row w cells wide: it starts after the
-// label and ends before status when status is shown. status is dropped, and the
-// input runs to the right edge, when it would leave less than minFieldRoom cells.
-func fieldSpan(w int, status string) (x, end int, showStatus bool) {
-	x = space.PadX + labelCols
+// fieldSpan is the columns of the input on a row that runs from x0 to end: it starts
+// after the label and ends before status when status is shown. status is dropped, and
+// the input runs to end, when it would leave less than minFieldRoom cells.
+func fieldSpan(x0, end int, status string) (x, fieldEnd int, showStatus bool) {
+	x = x0 + labelCols
 	if status != "" {
-		if sx := w - ansi.StringWidth(status) - 1; sx > 0 && sx-1-x >= minFieldRoom {
+		if sx := end - ansi.StringWidth(status); sx > 0 && sx-x >= minFieldRoom {
 			return x, sx - 1, true
 		}
 	}
-	return x, w, false
+	return x, end, false
 }
 
-// drawField paints one labelled field on row y. The label of the focused row
-// takes the active style. status, when not empty, is right-aligned on the row
-// and the field text stops before it. The text scrolls so that the caret stays in
-// the room (see space.Window).
-func (b *Bar) drawField(g *grid.Grid, y int, label string, f *textinput.Model, focused bool, status string) {
-	w := g.Width()
-	g.Fill(0, w, y, b.styles.bar)
-	x, end, showStatus := fieldSpan(w, status)
+// drawField paints one labelled field on row y. The label of the focused row takes the
+// active style, and the field is the raised input row of the card. status, when not
+// empty, is right-aligned on the row and the field stops before it. The text scrolls
+// so that the caret stays in the room (see space.Window).
+func (b *Bar) drawField(g *grid.Grid, y int, label string, f *textinput.Model, focused bool, status string, x0, end int) {
+	x, fieldEnd, showStatus := fieldSpan(x0, end, status)
 	if showStatus {
-		g.Put(end+1, y, w, status, b.styles.bar)
+		g.Put(fieldEnd+1, y, end, status, b.styles.status)
 	}
 	ls := b.styles.label
 	if focused {
 		ls = b.styles.active
 	}
-	g.Put(space.PadX, y, min(x, end), label, ls)
-	shown, _ := space.Window(f.Value(), f.Position(), end-x)
-	g.Put(x, y, end, shown, b.styles.field)
+	g.Put(x0, y, min(x, end), label, ls)
+	g.Fill(x, fieldEnd, y, b.styles.field)
+	shown, _ := space.Window(f.Value(), f.Position(), fieldEnd-x)
+	g.Put(x, y, fieldEnd, shown, b.styles.field)
 }
 
-// Cursor returns the caret position in a frame of w by h cells. ok is false when
-// the focused row is not drawn or the caret is off the right edge.
+// Cursor returns the caret position in a frame of w by h cells. ok is false when the
+// focused row is not drawn or the caret is off the right edge.
 func (b *Bar) Cursor(w, h int) (x, y int, ok bool) {
 	r := rowsFor(h, b.replaceOpen)
 	f, row, status := &b.search, r.search, b.statusText()
@@ -108,9 +145,11 @@ func (b *Bar) Cursor(w, h int) (x, y int, ok bool) {
 	if row < 0 {
 		return 0, 0, false
 	}
-	x0, end, _ := fieldSpan(w, status)
-	_, col := space.Window(f.Value(), f.Position(), end-x0)
-	x = x0 + col
+	left, right := cardColumns(w)
+	x0, end := left+1+space.PadX, right-space.PadX
+	start, fieldEnd, _ := fieldSpan(x0, end, status)
+	_, col := space.Window(f.Value(), f.Position(), fieldEnd-start)
+	x = start + col
 	if x >= w {
 		return 0, 0, false
 	}
@@ -150,11 +189,11 @@ func optionName(i int) string {
 var optionShort = [numOptions]string{"Case", "Word", "Regex", "Confirm"}
 
 // optionRow returns the labels of the options row and the blanks between them, for a
-// frame w cells wide. Each label is a checkbox and a name, and the row starts after the
-// left padding. The full labels with their key hints come first. A narrower frame drops
-// the hints, then closes the gaps, and the narrowest uses the short names, so all four
-// options stay on the row. Only a frame too narrow even for that gets a cut label, which
-// ends with an ellipsis; the options it leaves out are the last ones.
+// row w cells wide. Each label is a checkbox and a name. The full labels with their
+// key hints come first. A narrower frame drops the hints, then closes the gaps, and the
+// narrowest uses the short names, so all four options stay on the row. Only a frame too
+// narrow even for that gets a cut label, which ends with an ellipsis; the options it
+// leaves out are the last ones.
 func (b *Bar) optionRow(w int) (labels []string, gap int) {
 	full := func(i int) string { return optionLabel(i, b.opts[i]) }
 	named := func(i int) string { return checkbox(b.opts[i]) + optionName(i) }
@@ -168,7 +207,7 @@ func (b *Bar) optionRow(w int) (labels []string, gap int) {
 	}
 	for _, f := range forms {
 		labels = labels[:0]
-		total := space.PadX + f.gap*(numOptions-1)
+		total := f.gap * (numOptions - 1)
 		for i := range numOptions {
 			l := f.label(i)
 			labels = append(labels, l)
@@ -181,7 +220,7 @@ func (b *Bar) optionRow(w int) (labels []string, gap int) {
 	// Too narrow even for the short names: the options that fit stay, and the row ends
 	// with an ellipsis when an option is cut or left out.
 	labels = labels[:0]
-	room := w - space.PadX
+	room := w
 	for i := range numOptions {
 		l := short(i)
 		if lw := ansi.StringWidth(l); lw <= room {

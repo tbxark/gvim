@@ -21,11 +21,12 @@ func TestClickAfterWheelActsOnTheRowClicked(t *testing.T) {
 		Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock,
 	})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 5, Y: explorerBodyTop, Button: tea.MouseWheelDown}))
+	top := m.layout().ExBodyTop
+	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 5, Y: top, Button: tea.MouseWheelDown}))
 	if off := tr.ScrollOffset(); off != wheelRows {
 		t.Fatalf("setup: offset %d after one wheel notch, want %d", off, wheelRows)
 	}
-	_, cmd := m.Update(click(5, explorerBodyTop, tea.MouseLeft))
+	_, cmd := m.Update(click(5, top, tea.MouseLeft))
 	if tr.selected != wheelRows {
 		t.Fatalf("click on the top body row selected row %d, want %d (f%d)", tr.selected, wheelRows, wheelRows)
 	}

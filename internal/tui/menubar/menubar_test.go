@@ -148,18 +148,21 @@ func TestActivateOpensFileOnFirstRow(t *testing.T) {
 
 func TestDropdownFixture(t *testing.T) {
 	m := newBar(allOn(), 60, 30).Activate()
+	box := m.geometry(60, 30).box
 	rows := paintRows(m)
-	if !strings.HasPrefix(rows[1], "╭") {
-		t.Fatalf("top border row = %q", rows[1])
+	if top := rows[box.top]; !strings.Contains(top, "╭") || !strings.Contains(top, "╮") {
+		t.Fatalf("top border row = %q", top)
 	}
-	if !strings.HasPrefix(rows[2], "│ New File") || strings.Contains(rows[2], "⌃") {
-		t.Fatalf("first row = %q", rows[2])
+	if first := rows[box.top+1]; !strings.Contains(first, "│ New File") || strings.Contains(first, "⌃") {
+		t.Fatalf("first row = %q", first)
 	}
-	if !strings.HasPrefix(rows[4], "│") || strings.Contains(rows[4], "New File") {
-		t.Fatalf("row 4 should be the separator after Open File: %q", rows[4])
+	sep := firstSeparator(m.Rows())
+	sepRow := rows[rowY(box, sep)]
+	if !strings.Contains(sepRow, "│") || strings.Contains(sepRow, "New File") {
+		t.Fatalf("row %d should be the separator after Open File: %q", rowY(box, sep), sepRow)
 	}
-	if !strings.Contains(rows[4], "──") {
-		t.Fatalf("separator row has no rule: %q", rows[4])
+	if !strings.Contains(sepRow, "──") {
+		t.Fatalf("separator row has no rule: %q", sepRow)
 	}
 }
 

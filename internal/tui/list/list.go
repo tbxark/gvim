@@ -420,7 +420,7 @@ func (v *View) draw(g *grid.Grid) {
 	if len(v.shown) == 0 {
 		g.Put(box.X+2, box.Y+2, end, v.Empty, ov.Muted)
 	}
-	g.Put(box.X+2, box.Y+box.H-1, end, space.End(" "+v.footer()+" ", end-(box.X+2)), ov.Muted)
+	ov.PaintFooter(g, box.X, box.Y+box.H-1, box.W, v.footer())
 }
 
 // footer is the hint under the items: the keys this list takes.

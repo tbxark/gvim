@@ -78,17 +78,33 @@ type styles struct {
 	bar, label, field, active, warn grid.Style
 }
 
-// newStyles derives the prompt styles from the chrome styles. The active choice
-// takes the selected color of the overlays, so it matches the highlighted rows.
+// newStyles derives the prompt styles from the overlay palette, so the prompt reads
+// as the input row of the same bottom sheet as the palette and the find bar: the card
+// fill for the row, a muted label, a raised field, the focused choice in the accent,
+// and a rejection in the error color.
 func newStyles(st style.Styles) styles {
+	ov := st.Overlay
 	return styles{
-		bar:    style.Cell(st.Menu),
-		label:  style.Cell(st.Menu),
-		field:  style.Cell(st.Editor),
-		active: st.Overlay.Selected,
-		warn:   style.Cell(st.Menu),
+		bar:    ov.Box,
+		label:  ov.Muted,
+		field:  ov.Idle,
+		active: ov.Focus,
+		warn:   ov.Error,
 	}
 }
+
+// RowOwner is implemented by the overlays that paint on the bottom prompt row. The
+// root reserves that row for the top overlay only while one of them is open, so the
+// status bar keeps the last row otherwise.
+type RowOwner interface {
+	UsesPromptRow()
+}
+
+// UsesPromptRow marks Line as a bottom-row prompt.
+func (*Line) UsesPromptRow() {}
+
+// UsesPromptRow marks Confirm as a bottom-row prompt.
+func (*Confirm) UsesPromptRow() {}
 
 // promptRow is the row a prompt draws on: the bottom row of the frame. It is -1
 // for an empty frame.
@@ -269,6 +285,7 @@ func (l *Line) Draw(g *grid.Grid) {
 		g.Put(end+1, y, w, l.errText, l.styles.warn)
 	}
 	x := space.PadX + g.Put(space.PadX, y, end, l.label+" ", l.styles.label)
+	g.Fill(x, end, y, l.styles.field)
 	shown, _ := space.Window(l.field.Value(), l.field.Position(), end-x)
 	g.Put(x, y, end, shown, l.styles.field)
 }
@@ -387,7 +404,7 @@ func (c *Confirm) Draw(g *grid.Grid) {
 	w := g.Width()
 	g.Fill(0, w, y, c.styles.bar)
 	x := space.PadX + g.Put(space.PadX, y, w, c.label+" ", c.styles.label)
-	yesStyle, noStyle := c.styles.label, c.styles.label
+	yesStyle, noStyle := c.styles.field, c.styles.field
 	if c.yes {
 		yesStyle = c.styles.active
 	} else {

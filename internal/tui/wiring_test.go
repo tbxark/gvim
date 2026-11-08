@@ -32,14 +32,14 @@ func numberedLines(n int) []string {
 func TestViewPaintsTheEditorText(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello", "world"), nil, 40, 15)
 	rows := strings.Split(ansi.Strip(m.View().Content), "\n")
-	if got, want := rows[2], "  1 │ hello"; !strings.HasPrefix(got, want) {
-		t.Errorf("row 2 = %q, want the first line after the gutter %q", got, want)
+	if got, want := rows[3], "  1 │ hello"; !strings.HasPrefix(got, want) {
+		t.Errorf("row 3 = %q, want the first line after the gutter %q", got, want)
 	}
-	if got, want := rows[3], "  2 │ world"; !strings.HasPrefix(got, want) {
-		t.Errorf("row 3 = %q, want %q", got, want)
+	if got, want := rows[4], "  2 │ world"; !strings.HasPrefix(got, want) {
+		t.Errorf("row 4 = %q, want %q", got, want)
 	}
-	if got := rows[4]; !strings.HasPrefix(got, "~") {
-		t.Errorf("row 4 = %q, want a tilde row past the end", got)
+	if got := rows[5]; !strings.HasPrefix(got, "~") {
+		t.Errorf("row 5 = %q, want a tilde row past the end", got)
 	}
 }
 
@@ -51,8 +51,8 @@ func TestViewPaintsTheEditorPaneRightOfTheExplorer(t *testing.T) {
 		t.Fatal("the explorer takes no columns at 80 wide")
 	}
 	rows := strings.Split(ansi.Strip(m.View().Content), "\n")
-	if got := ansi.Cut(rows[2], l.EditorX, l.W); !strings.HasPrefix(got, "  1 │ hello") {
-		t.Errorf("row 2 from x0 %d = %q, want the text", l.EditorX, got)
+	if got := ansi.Cut(rows[3], l.EditorX, l.W); !strings.HasPrefix(got, "  1 │ hello") {
+		t.Errorf("row 3 from x0 %d = %q, want the text", l.EditorX, got)
 	}
 }
 

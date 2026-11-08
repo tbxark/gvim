@@ -1,6 +1,8 @@
-// Package palette is the command palette overlay of gvim. It is a query line on
-// the bottom row, a box of matches above it and a hint row, laid out as the
-// legacy palette was (BLUEPRINT-v2 section 4.4).
+// Package palette is the command palette overlay of gvim. It is the bottom sheet of
+// the frame: a card docked to the last row, with the mode title on its top border,
+// the item rows, the query row and the mode hints on its bottom border. Painting and
+// hit testing share one geometry function, so the sheet and its click targets cannot
+// drift apart.
 //
 // The query picks the mode with commands: no prefix searches files, ">"
 // runs commands, ":" goes to a line and "#" picks a buffer. Command matching is
@@ -46,12 +48,12 @@ const (
 	loadingText = "Loading files…"
 	// noNameText labels a buffer with no name in the buffer mode.
 	noNameText = "[No Name]"
-	// hint is the row under the box that lists the four modes.
-	hint = "  file  |  >command  |  :line  |  #buffer"
+	// hint is the text on the bottom border of the sheet, listing the four modes.
+	hint = "file · >command · :line · #buffer"
 
-	// liveHint is the hint row of Live Grep, which has no prefixes: the whole query is the
-	// text searched for.
-	liveHint = "  type text to search the files  |  Enter open  |  Esc close"
+	// liveHint is the bottom border of Live Grep, which has no prefixes: the whole
+	// query is the text searched for.
+	liveHint = "type text to search the files · Enter open · Esc close"
 )
 
 // Files is the file list the file mode searches. *finder.Index satisfies it.
@@ -187,12 +189,14 @@ type row struct {
 	mcol, qlen int
 }
 
-// chrome holds the grid styles of the palette: the overlay palette for the box, and
-// the theme's editor colors for the query line.
+// chrome holds the styles of the palette: the overlay card for the sheet frame, and
+// the overlay roles for the rows, the query row and the empty-list message.
 type chrome struct {
-	panel    grid.Style // the box, the hint row and the empty cells
-	selected grid.Style // the highlighted row
-	prompt   grid.Style // the query line
+	ov       style.Overlay // the card frame: border, fill, title and hints
+	panel    grid.Style    // the rows and their text
+	selected grid.Style    // the highlighted row
+	input    grid.Style    // the query row and its text
+	muted    grid.Style    // the empty-list message
 }
 
 // Palette is the open command palette. Use New to make one.
@@ -238,9 +242,11 @@ func New(opts Options) *Palette {
 		open:  true,
 		live:  opts.Live,
 		chrome: chrome{
+			ov:       ov,
 			panel:    ov.Box,
 			selected: ov.Selected,
-			prompt:   style.Cell(ss.Editor),
+			input:    ov.Idle,
+			muted:    ov.Muted,
 		},
 	}
 	p.input = textinput.New()
@@ -328,9 +334,10 @@ func (p *Palette) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	return p, cmd
 }
 
-// Draw paints the box, the hint row and the query line over g. It records the
-// frame size, so that a mouse position maps to a row. Draw does no ranking: the
-// file rows change only through Update.
+// Draw paints the sheet over g: the card frame, the item rows, the query row and
+// the hints on the bottom border. It records the frame size, so that a mouse
+// position maps to a row. Draw does no ranking: the file rows change only through
+// Update.
 func (p *Palette) Draw(g *grid.Grid) {
 	if !p.open {
 		return
@@ -412,14 +419,14 @@ func (p *Palette) run(i int) tea.Cmd {
 }
 
 // Covers reports whether the point (x, y) of a w by h frame is on the palette card:
-// its list, its footer and its query row, within the box. A press elsewhere is not the
-// palette's, and the frame takes it.
+// its rows, its query row and its borders, within the card columns. A press
+// elsewhere is not the palette's, and the frame takes it.
 func (p *Palette) Covers(x, y, w, h int) bool {
 	if !p.open || w <= 0 || h <= 0 {
 		return false
 	}
 	geo := layoutFor(w, h)
-	return x > geo.left && x < geo.right && y >= geo.top && y <= geo.promptY
+	return x > geo.left && x < geo.right && y >= geo.top && y <= geo.bottom
 }
 
 // rowAt maps a frame cell to the index of the row under it. The row spans the

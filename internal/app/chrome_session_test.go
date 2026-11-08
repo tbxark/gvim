@@ -61,9 +61,9 @@ func TestLineNumbersRowInTheViewMenuHidesTheGutter(t *testing.T) {
 	}
 	s.Click(x, y)
 	sc = s.WaitFor(func(sc uitest.Screen) bool { return !sc.Contains("Line Numbers") })
-	// The menu bar is row 0 and the tab strip row 1, so the first body row is row 2. With
-	// the gutter hidden the text starts one padding cell in, not at the frame edge.
-	if row := sc.Row(2); !strings.HasPrefix(row, " hello") {
-		t.Fatalf("body row 2 %q, want the text after one padding cell\n%s", row, sc)
+	// The menu band is rows 0..1 and the tab strip row 2, so the first body row is row 3.
+	// With the gutter hidden the text starts one padding cell in, not at the frame edge.
+	if row := sc.Row(3); !strings.HasPrefix(row, " hello") {
+		t.Fatalf("body row 3 %q, want the text after one padding cell\n%s", row, sc)
 	}
 }

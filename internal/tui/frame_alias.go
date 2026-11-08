@@ -43,7 +43,6 @@ const (
 	maxNoticeRows   = frame.MaxNoticeRows
 	paletteHelp     = frame.PaletteHelp
 	labelGap        = frame.LabelGap
-	explorerBodyTop = frame.ExplorerBodyTop
 	noNameLabel     = frame.NoNameLabel
 	previewSuffix   = frame.PreviewSuffix
 	modifiedMark    = frame.ModifiedMark

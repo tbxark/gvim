@@ -267,8 +267,14 @@ func TestNoQueryLineWithoutFilterOrLive(t *testing.T) {
 	}
 	g := grid.New(40, 12)
 	p.Draw(g)
-	if last := strings.TrimSpace(g.Plain()[11]); last != "" {
-		t.Fatalf("a plain picker painted a query line: %q", last)
+	if p.box.queryY != -1 {
+		t.Fatalf("a plain picker has a query line at row %d", p.box.queryY)
+	}
+	if got := p.box.top + p.box.boxH - 1; got != 11 {
+		t.Fatalf("box bottom border at row %d, want the last row", got)
+	}
+	if last := strings.TrimSpace(g.Plain()[11]); !strings.HasPrefix(last, "╰") {
+		t.Fatalf("last row = %q, want the box bottom border", last)
 	}
 }
 
@@ -391,25 +397,26 @@ func TestDrawCells(t *testing.T) {
 	g := grid.New(50, 20)
 	p.Draw(g)
 	plain := g.Plain()
-	// Layout: query row 19, footer 18, box rows 6..17 (10 item rows + borders), items from 7.
+	// Layout: query row 19, box bottom border (with the footer and the count) 18,
+	// box rows 7..18 (10 item rows + borders), items from 8.
 	if !strings.Contains(plain[19], "type") {
 		t.Fatalf("query row = %q", plain[19])
 	}
-	if !strings.Contains(plain[18], "foot") || !strings.HasSuffix(strings.TrimRight(plain[18], " "), "2/2") {
-		t.Fatalf("footer row = %q", plain[18])
+	if !strings.Contains(plain[18], "foot") || !strings.Contains(plain[18], "2/2") {
+		t.Fatalf("footer on the box bottom border = %q", plain[18])
 	}
-	if !strings.Contains(plain[6], "Pick") {
-		t.Fatalf("title row = %q", plain[6])
+	if !strings.Contains(plain[7], "Pick") {
+		t.Fatalf("title row = %q", plain[7])
 	}
-	row := plain[7]
+	row := plain[8]
 	if !strings.Contains(row, "alpha") || !strings.Contains(row, "dd") || !strings.HasSuffix(strings.TrimRight(row, " │"), "ctrl+a") {
 		t.Fatalf("first item row = %q", row)
 	}
 	ov := st.Overlay
-	if got := g.At(2, 7).Style; got.BG != ov.Selected.BG {
+	if got := g.At(2, 8).Style; got.BG != ov.Selected.BG {
 		t.Fatalf("the highlighted row has background %v, want the selected style", got.BG)
 	}
-	if got := g.At(2, 8).Style; !got.Faint {
+	if got := g.At(2, 9).Style; !got.Faint {
 		t.Fatalf("a disabled item is not faint: %+v", got)
 	}
 	// The matched runes are bold.
@@ -417,8 +424,8 @@ func TestDrawCells(t *testing.T) {
 	apply(p, p.rank())
 	g = grid.New(50, 20)
 	p.Draw(g)
-	if !g.At(2, 7).Style.Bold {
-		t.Fatalf("the first matched rune is not bold: %+v", g.At(2, 7))
+	if !g.At(2, 8).Style.Bold {
+		t.Fatalf("the first matched rune is not bold: %+v", g.At(2, 8))
 	}
 }
 

@@ -990,9 +990,11 @@ func (e *keybindEditor) Draw(g *grid.Grid) {
 		status = "Unsaved changes: Ctrl+S saves them"
 	}
 	g.Put(x0, box.Y+box.H-2, end, space.End(status, end-x0), statusStyle)
-	g.Put(x0, box.Y+box.H-1, end, space.End(" "+e.hint(end-x0-2)+" ", end-x0), ov.Muted)
 	if e.mode == kbEdit || e.mode == kbRecord {
+		// The dialog carries the keys of its mode on its own bottom border.
 		e.drawForm(g, box)
+	} else {
+		ov.PaintFooter(g, box.X, box.Y+box.H-1, box.W, e.hint(box.W-2*space.PadX-3))
 	}
 }
 
@@ -1068,8 +1070,9 @@ func (e *keybindEditor) hint(width int) string {
 	return options[len(options)-1]
 }
 
-// drawForm paints the dialog in the middle of the box. A box with room for formFullH rows
-// spaces the fields out; a shorter one packs them one to a row and leaves out the action's
+// drawForm paints the dialog in the middle of the box, its fields directly under the top
+// border and its key hints on the bottom border. A box with room for formFullH rows spaces
+// the fields out; a shorter one packs them one to a row and leaves out the action's
 // description.
 func (e *keybindEditor) drawForm(g *grid.Grid, parent rect) {
 	f := e.form
@@ -1088,6 +1091,7 @@ func (e *keybindEditor) drawForm(g *grid.Grid, parent rect) {
 		title = "Edit binding"
 	}
 	ov.PaintBox(g, box.X, box.Y, box.W, box.H, title)
+	ov.PaintFooter(g, box.X, box.Y+box.H-1, box.W, e.hint(box.W-2*space.PadX-3))
 	end := box.X + box.W - 2
 	x0 := box.X + 2
 	// The rows of the key, action and context fields, the message line, the suggestions and

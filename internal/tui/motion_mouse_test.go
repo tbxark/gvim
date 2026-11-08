@@ -260,12 +260,17 @@ func (r realEditor) ScrollMargin() int { return r.ed.ScrollMargin() }
 
 func TestScrollOffsetCountsDisplayRowsOfWrappedLines(t *testing.T) {
 	const margin = 2
+	// The viewport top is a line boundary, and a line wraps onto two rows, so the
+	// scroll margin lands on a row by line: the caret can keep one row more than the
+	// margin wants when the line boundary falls between two rows.
 	tests := []struct {
-		name   string
-		margin int
+		name      string
+		margin    int
+		belowFrom int
+		belowTo   int
 	}{
-		{"margin of two rows", margin},
-		{"no margin", 0},
+		{"margin of two rows", margin, margin, margin + 1},
+		{"no margin", 0, 0, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -297,8 +302,8 @@ func TestScrollOffsetCountsDisplayRowsOfWrappedLines(t *testing.T) {
 			if !ok {
 				t.Fatalf("caret %v is off the body (top %d)", ed.Active().Cursor, ed.Active().Top)
 			}
-			if below := body - 1 - y; below != tt.margin {
-				t.Fatalf("%d rows below the caret row (row %d of %d), want %d", below, y, body, tt.margin)
+			if below := body - 1 - y; below < tt.belowFrom || below > tt.belowTo {
+				t.Fatalf("%d rows below the caret row (row %d of %d), want %d..%d", below, y, body, tt.belowFrom, tt.belowTo)
 			}
 		})
 	}

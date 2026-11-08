@@ -17,8 +17,9 @@ func TestPressOutsideThePaletteReachesTheEditor(t *testing.T) {
 		t.Fatal("setup: the palette is not the top overlay")
 	}
 	before := ed.Active().Cursor
-	mouseDownAt(m, 12, 3)
-	mouseUpAt(m, 12, 3)
+	y := m.layout().BodyTop
+	mouseDownAt(m, 12, y)
+	mouseUpAt(m, 12, y)
 	if got := ed.Active().Cursor; got == before {
 		t.Errorf("the caret stayed at %v after a press in the editor while the palette was open", got)
 	}

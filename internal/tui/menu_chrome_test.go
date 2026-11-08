@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -101,6 +102,27 @@ func TestRunMenuOpenWithoutANameOpensNothing(t *testing.T) {
 	}
 	if m.menu.IsOpen() {
 		t.Fatalf("Run(menu_open) opened %q", m.menu.Title())
+	}
+}
+
+// TestAnOpenDropdownHangsBelowTheLabelRow keeps the dropdown off the menu bar: the
+// box's top border is on the band's padding row, so the label row keeps every label.
+func TestAnOpenDropdownHangsBelowTheLabelRow(t *testing.T) {
+	m := menuModel(t, false)
+	runAction(t, m, "menu_activate")
+	l := m.layout()
+	rows := m.paint().Plain()
+	for _, label := range menubar.Labels(false) {
+		if !strings.Contains(rows[l.MenuLabelY], label) {
+			t.Errorf("the open dropdown covers the label %q: row %d = %q", label, l.MenuLabelY, rows[l.MenuLabelY])
+		}
+	}
+	top := l.MenuLabelY + 1
+	if !strings.Contains(rows[top], "╭") {
+		t.Errorf("the dropdown top border is not on the padding row %d: %q", top, rows[top])
+	}
+	if strings.Contains(rows[l.MenuLabelY], "╭") {
+		t.Errorf("the dropdown top border is on the label row: %q", rows[l.MenuLabelY])
 	}
 }
 

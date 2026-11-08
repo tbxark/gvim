@@ -230,9 +230,10 @@ func TestSetOptionsAndConfirmLabel(t *testing.T) {
 	if q := b.Query(); !q.CaseSensitive || !q.WholeWord || !q.Regex {
 		t.Fatalf("query = %+v", q)
 	}
-	rows := frame(b, 100, 6)
-	if want := "[x] Confirm Each (Alt+I)"; !strings.Contains(rows[4], want) {
-		t.Fatalf("options row %q lacks %q", rows[4], want)
+	rows := frame(b, 120, 6)
+	opt := rowsFor(6, false).opt
+	if want := "[x] Confirm Each (Alt+I)"; !strings.Contains(rows[opt], want) {
+		t.Fatalf("options row %q lacks %q", rows[opt], want)
 	}
 }
 

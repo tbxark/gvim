@@ -29,3 +29,4 @@ skills-lock.json
 
 # Reference checkouts used for research (other projects); not part of the module.
 /refs/
+/.tmp-inspect

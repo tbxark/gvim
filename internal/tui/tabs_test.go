@@ -36,7 +36,7 @@ func TestStripLabelMarksModifiedAndPreview(t *testing.T) {
 }
 
 // The fixture at 100 columns: " a.txt × " then " b.txt × " with no gap, and the
-// plus pinned to the last column.
+// three-cell " + " button pinned to the last columns.
 func TestPlaceStripFixtureAt100Columns(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.txt", Active: true}, {Name: "b.txt"}}
 	s := frame.PlaceStrip(0, 100, tabs, 0, icons.Plain)
@@ -56,7 +56,7 @@ func TestPlaceStripFixtureAt100Columns(t *testing.T) {
 		{9, " b.txt ", hitTab, 1},
 		{16, "×", hitTabClose, 1},
 		{17, " ", hitTab, 1},
-		{99, "+", hitTabNew, 0},
+		{97, " + ", hitTabNew, 0},
 	}
 	if len(s.Runs) != len(expect) {
 		t.Fatalf("runs = %+v", s.Runs)
@@ -82,8 +82,10 @@ func TestStripHitRegions(t *testing.T) {
 		{9, hitTarget{Kind: hitTab, Index: 1}},
 		{16, hitTarget{Kind: hitTabClose, Index: 1}},
 		{18, hitTarget{Kind: hitNone}},
+		{96, hitTarget{Kind: hitNone}},
+		{97, hitTarget{Kind: hitTabNew}},
+		{98, hitTarget{Kind: hitTabNew}},
 		{99, hitTarget{Kind: hitTabNew}},
-		{98, hitTarget{Kind: hitNone}},
 	}
 	for _, c := range cases {
 		if got := frame.StripHit(s.Runs, c.x); got != c.want {
@@ -109,8 +111,8 @@ func TestPlaceStripStartsAfterTheExplorerColumns(t *testing.T) {
 	if s.Runs[0].X != 30 || s.Runs[0].Text != " a.txt " {
 		t.Fatalf("first run = %+v, want the tab at column 30", s.Runs[0])
 	}
-	if plus := s.Runs[len(s.Runs)-1]; plus.Kind != hitTabNew || plus.X != 99 {
-		t.Fatalf("plus = %+v, want it at the last column", plus)
+	if plus := s.Runs[len(s.Runs)-1]; plus.Kind != hitTabNew || plus.X != 97 || plus.W != 3 {
+		t.Fatalf("plus = %+v, want the three-cell button at columns 97..99", plus)
 	}
 }
 
@@ -132,7 +134,7 @@ func TestPlaceStripOverflowKeepsTheActiveTabVisible(t *testing.T) {
 			if r.Kind == hitTabNew || r.Kind == hitTabScrollBefore || r.Kind == hitTabScrollAfter {
 				continue
 			}
-			if r.X < 1 || r.X+r.W > 18 {
+			if r.X < 1 || r.X+r.W > 16 {
 				t.Errorf("active %d: run %+v is outside the window", active, r)
 			}
 		}
@@ -174,7 +176,7 @@ func TestPlaceStripWideActiveTabShowsItsStart(t *testing.T) {
 
 func TestPlaceStripEmptyStripHasOnlyPlus(t *testing.T) {
 	s := frame.PlaceStrip(0, 40, nil, 0, icons.Plain)
-	if s.Overflow || len(s.Runs) != 1 || s.Runs[0].Kind != hitTabNew || s.Runs[0].X != 39 {
+	if s.Overflow || len(s.Runs) != 1 || s.Runs[0].Kind != hitTabNew || s.Runs[0].X != 37 {
 		t.Fatalf("empty strip = %+v", s)
 	}
 }
@@ -182,8 +184,11 @@ func TestPlaceStripEmptyStripHasOnlyPlus(t *testing.T) {
 func TestDrawTabStripPaintsTheFixtureRow(t *testing.T) {
 	g := grid.New(40, 3)
 	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Active: true}}, 0, icons.Plain))
-	if g.At(0, 1).Text != " " || g.At(1, 1).Text != "a" || g.At(7, 1).Text != "×" || g.At(39, 1).Text != "+" {
-		t.Fatalf("tab row = %q, want the tab at column 0 and the plus at column 39", g.Plain()[1])
+	if g.At(0, 1).Text != " " || g.At(1, 1).Text != "a" || g.At(7, 1).Text != "×" {
+		t.Fatalf("tab row = %q, want the tab at columns 0..8", g.Plain()[1])
+	}
+	if g.At(37, 1).Text != " " || g.At(38, 1).Text != "+" || g.At(39, 1).Text != " " {
+		t.Fatalf("+ button = %q %q %q at columns 37..39, want \" + \"", g.At(37, 1).Text, g.At(38, 1).Text, g.At(39, 1).Text)
 	}
 }
 
@@ -203,7 +208,7 @@ func TestDrawTabStripMarksTheActiveTab(t *testing.T) {
 	if g.At(16, 1).Text != "×" || !g.At(16, 1).Style.Bold {
 		t.Fatalf("active tab close = %q, want the bold ×", g.At(16, 1).Text)
 	}
-	if g.At(39, 1).Style.Bold {
+	if g.At(38, 1).Style.Bold || g.At(37, 1).Style.Bold || g.At(39, 1).Style.Bold {
 		t.Fatal("the plus button takes the active style")
 	}
 }
@@ -231,9 +236,11 @@ func TestDrawTabStripDrawsOverflowMarkers(t *testing.T) {
 	if g.At(0, 1).Text != icons.Plain.Glyph(icons.ScrollLeft) {
 		t.Fatalf("left marker = %q in %q", g.At(0, 1).Text, row)
 	}
-	// The last tab is active, so nothing is scrolled off on the right.
-	if g.At(18, 1).Text != " " || g.At(19, 1).Text != icons.Plain.Glyph(icons.New) {
-		t.Fatalf("right marker and plus = %q %q in %q", g.At(18, 1).Text, g.At(19, 1).Text, row)
+	// The last tab is active, so nothing is scrolled off on the right: the marker
+	// cell is blank and the three-cell plus button ends the row with the glyph in
+	// its middle cell.
+	if g.At(16, 1).Text != " " || g.At(17, 1).Text != " " || g.At(18, 1).Text != icons.Plain.Glyph(icons.New) || g.At(19, 1).Text != " " {
+		t.Fatalf("right marker and plus = %q %q %q %q in %q", g.At(16, 1).Text, g.At(17, 1).Text, g.At(18, 1).Text, g.At(19, 1).Text, row)
 	}
 	if !strings.Contains(row, " four.go ×") {
 		t.Fatalf("active tab not visible in %q", row)
@@ -245,7 +252,7 @@ func TestDrawTabStripDrawsTheRightMarkerWhenTabsFollow(t *testing.T) {
 	g := grid.New(20, 3)
 	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 20, tabs, 0, icons.Plain))
 	row := g.Plain()[1]
-	if g.At(0, 1).Text != " " || g.At(18, 1).Text != icons.Plain.Glyph(icons.ScrollRight) {
+	if g.At(0, 1).Text != " " || g.At(16, 1).Text != icons.Plain.Glyph(icons.ScrollRight) {
 		t.Fatalf("markers in %q, want only the right marker", row)
 	}
 }
@@ -295,7 +302,7 @@ func TestClampFirstStopsWhenTheTailFillsTheWindow(t *testing.T) {
 		tabs[i] = TabInfo{Name: "t.go"}
 	}
 	starts, total := frame.TabStarts(tabs)
-	window := 60 - 1 - 2 - 2 // width 60, the plus and two markers
+	window := 60 - 3 - 2 // width 60, the three-cell plus and two markers
 	last := frame.ClampFirst(starts, total, window, 99)
 	if last >= len(tabs) || total-starts[last] > window {
 		t.Fatalf("frame.ClampFirst(99) = %d, the tail does not fill the window", last)

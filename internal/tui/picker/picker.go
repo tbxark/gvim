@@ -1,7 +1,8 @@
 // Package picker is the list picker overlay that plugins open: a titled box of rows
-// above a footer row and a query line on the bottom row, laid out like the command
-// palette. Rows are items the owner gave; a fuzzy picker ranks them against the query
-// and a live picker reports every query change so the owner can supply new items.
+// with the footer text on its bottom border, and a query line on the bottom row of
+// the frame, laid out like a card above a sheet input. Rows are items the owner gave;
+// a fuzzy picker ranks them against the query and a live picker reports every query
+// change so the owner can supply new items.
 //
 // A Picker acts on nothing. Every operation returns a Result: the events the owner must
 // act on (Changed, Moved, Chosen, Closed) and the command that ranks the items. The
@@ -151,7 +152,7 @@ func newStyles(st style.Styles) styles {
 	return styles{
 		box: ov.Box, selected: ov.Selected, muted: ov.Muted,
 		border: ov.Border, title: ov.Title,
-		prompt: style.Cell(st.Editor),
+		prompt: ov.Idle,
 	}
 }
 
@@ -500,29 +501,31 @@ func (p *Picker) click(m tea.Mouse) []Event {
 
 // geom is the placement of the picker in a frame; painting and hit testing share it.
 type geom struct {
-	w, h      int
 	left, bw  int // the box's left border column and its width: the frame less its margins
 	top, boxH int // the box, borders included; boxH is 0 when it does not fit
 	rows      int // item rows in the box
-	footY     int
+	bottom    int // the box's bottom border row, which carries the footer
 	queryY    int // -1 when there is no query line
 }
 
-// layoutFor places the picker in a w by h frame.
+// layoutFor places the picker in a w by h frame. The box keeps space.Margin from the
+// left and right edge and one row from the top. With a query line the query is the
+// last row of the frame and the box's bottom border sits one row above it; without
+// one the box's bottom border is the last row.
 func (p *Picker) layoutFor(w, h int) geom {
 	m := space.Margin(w)
-	g := geom{w: w, h: h, left: m, bw: w - 2*m, queryY: -1, footY: h - 1}
+	g := geom{left: m, bw: w - 2*m, queryY: -1, bottom: h - 1}
 	if p.hasInput() {
 		g.queryY = h - 1
-		g.footY = h - 2
+		g.bottom = h - 2
 	}
-	g.rows = min(boxRows, g.footY-2)
+	g.rows = min(boxRows, g.bottom-2)
 	if g.rows < 1 {
 		g.rows = 0
 		return g
 	}
 	g.boxH = g.rows + 2
-	g.top = g.footY - g.boxH
+	g.top = g.bottom - g.boxH + 1
 	return g
 }
 
@@ -543,9 +546,9 @@ func (p *Picker) rowAt(x, y int) (int, bool) {
 	return i, true
 }
 
-// Draw paints the box, the footer row and the query line over g. It records the frame
-// geometry, so that a mouse position maps to a row. It changes no row and no highlight,
-// except to keep the highlight in the window when the frame height changed.
+// Draw paints the box and the query line over g. It records the frame geometry, so
+// that a mouse position maps to a row. It changes no row and no highlight, except to
+// keep the highlight in the window when the frame height changed.
 func (p *Picker) Draw(g *grid.Grid) {
 	if !p.open || g.Width() <= 0 || g.Height() <= 0 {
 		p.box = geom{}
@@ -558,13 +561,15 @@ func (p *Picker) Draw(g *grid.Grid) {
 	geo := p.box
 
 	if geo.boxH > 0 {
-		ov := style.Overlay{Box: p.st.box, Border: p.st.border, Title: p.st.title}
+		ov := style.Overlay{Box: p.st.box, Muted: p.st.muted, Border: p.st.border, Title: p.st.title}
 		ov.PaintBox(g, geo.left, geo.top, geo.bw, geo.boxH, p.title)
 		p.paintRows(g, geo)
+		p.paintFooter(g, geo, ov)
 	}
-	p.paintFooter(g, geo)
 	if geo.queryY >= 0 {
-		p.paintQuery(g, geo.queryY, geo.left+space.PadX)
+		// The query is the sheet's input row: it starts at the card's content column,
+		// after the left border and its padding cell.
+		p.paintQuery(g, geo.queryY, geo.left+1+space.PadX)
 	}
 }
 
@@ -637,25 +642,20 @@ func (p *Picker) putMatched(g *grid.Grid, x, y, maxX int, s string, hl []int, st
 	return x - start
 }
 
-// paintFooter fills the footer row: the footer text at the left, and at the right the
-// status, or the number of rows shown out of the number of items.
-func (p *Picker) paintFooter(g *grid.Grid, geo geom) {
-	y := geo.footY
-	if y < 0 {
-		return
-	}
-	g.Fill(0, geo.w, y, p.st.muted)
+// paintFooter writes the footer on the box's bottom border: the footer text after the
+// same one-cell padding as the title, and at the right the status, or the number of
+// rows shown out of the number of items.
+func (p *Picker) paintFooter(g *grid.Grid, geo geom, ov style.Overlay) {
 	right := p.status
 	if right == "" && p.fuzzy {
 		right = fmt.Sprintf("%d/%d", len(p.rows), len(p.items))
 	}
-	rw := ansi.StringWidth(right)
-	if rw > 0 {
-		g.Put(max(geo.left+geo.bw-rw-1, 0), y, geo.w, right, p.st.muted)
+	width := geo.bw
+	if rw := ansi.StringWidth(right); rw > 0 && geo.bw-rw-3 > 4 {
+		g.Put(geo.left+geo.bw-3-rw, geo.bottom, geo.left+geo.bw-1, " "+right+" ", ov.Muted)
+		width = geo.bw - rw - 3
 	}
-	if p.footer != "" {
-		g.Put(geo.left+1, y, max(geo.left+geo.bw-rw-3, 1), truncate(p.footer, geo.bw-rw-4), p.st.muted)
-	}
+	ov.PaintFooter(g, geo.left, geo.bottom, width, p.footer)
 }
 
 // paintQuery writes the query on row y with the caret cell reversed. The row scrolls so

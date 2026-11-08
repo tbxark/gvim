@@ -9,8 +9,10 @@ import (
 // optionAt returns the option whose label covers column x of the options row of a w
 // cells wide frame, laid out as Draw lays it out.
 func (b *Bar) optionAt(x, w int) (int, bool) {
-	labels, gap := b.optionRow(w)
-	at := space.PadX
+	left, right := cardColumns(w)
+	x0 := left + 1 + space.PadX
+	labels, gap := b.optionRow(right - space.PadX - x0)
+	at := x0
 	for i, label := range labels {
 		lw := ansi.StringWidth(label)
 		if x >= at && x < at+lw {
@@ -22,11 +24,11 @@ func (b *Bar) optionAt(x, w int) (int, bool) {
 }
 
 // Covers reports whether row y of a frame h rows high is one of the rows the bar draws
-// at the bottom: the options row, the search row and, when it is shown, the
-// replacement row.
+// at the bottom: the card from its title border to its bottom border, the options row,
+// the search row and, when it is shown, the replacement row.
 func (b *Bar) Covers(y, h int) bool {
 	r := rowsFor(h, b.replaceOpen)
-	return y >= 0 && (y == r.opt || y == r.search || y == r.repl)
+	return r.top >= 0 && y >= r.top && y <= r.bottom
 }
 
 // Click handles a left press at column x, row y of a w by h frame. A press on an option

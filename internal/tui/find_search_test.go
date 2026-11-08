@@ -109,7 +109,7 @@ func TestSearchDefaultsComeFromTheConfig(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	press(m, ctrl('f'))
 	rows := screenRows(m)
-	opts := rows[len(rows)-2]
+	opts := rows[len(rows)-3] // the options row of the find sheet
 	for _, want := range []string{"[x] Case Sensitive", "[ ] Whole Word", "[x] Regex", "[x] Confirm Each"} {
 		if !strings.Contains(opts, want) {
 			t.Errorf("options row %q lacks %q", opts, want)

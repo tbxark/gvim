@@ -123,7 +123,7 @@ func sorted(listed []explorer.Entry, mode sortMode) []explorer.Entry {
 // Options are the browser's inputs.
 type Options struct {
 	Dir        string                                                                // directory to start in; empty means the working directory
-	Title      string                                                                // the box title; empty means " Open File " (" Switch Project " for folders)
+	Title      string                                                                // the box title; empty means "Open File" ("Switch Project" for folders)
 	FolderOnly bool                                                                  // Switch Project: list directories only, and Enter chooses one
 	Home       string                                                                // path of the "~/" row; empty means the user's home directory
 	Styles     style.Styles                                                          // the overlay styles of the box
@@ -655,16 +655,16 @@ func (b *Browser) Draw(g *grid.Grid) {
 	b.box = box{ok: true, x: x0, y: top, w: bw, h: vis}
 
 	ov := b.styles.Overlay
-	title := " Open File "
+	title := "Open File"
 	if b.folderOnly {
-		title = " Switch Project "
+		title = "Switch Project"
 	}
 	if b.title != "" {
-		title = " " + b.title + " "
+		title = b.title
 	}
 	ov.PaintBox(g, x0, top, bw, vis+4, title)
-	boxLine(g, x0, top+1, bw, "> "+b.input, ov.Idle, ov.Border, 0)
-	boxLine(g, x0, top+2, bw, truncateLeft(b.dir, bw-4), ov.Muted, ov.Border, 0)
+	boxLine(g, x0, top+1, bw, "> "+b.input, ov.Idle, 0)
+	boxLine(g, x0, top+2, bw, truncateLeft(b.dir, bw-4), ov.Muted, 0)
 
 	over := len(b.rows) > vis
 	thumbStart, thumbLen := 0, 0
@@ -691,7 +691,7 @@ func (b *Browser) Draw(g *grid.Grid) {
 		case len(b.rows) == 0:
 			text = "No matches"
 		}
-		boxLine(g, x0, y, bw, text, st, ov.Border, reserve)
+		boxLine(g, x0, y, bw, text, st, reserve)
 		if over {
 			s := track
 			if k >= thumbStart && k < thumbStart+thumbLen {
@@ -700,23 +700,21 @@ func (b *Browser) Draw(g *grid.Grid) {
 			g.Set(x0+bw-2, y, " ", s)
 		}
 	}
-	hint := " Enter open · Alt+. hidden "
+	hint := "Enter open · Alt+. hidden"
 	if b.folderOnly {
-		hint = " Enter choose · Right enter · Alt+. hidden "
+		hint = "Enter choose · Right enter · Alt+. hidden"
 	}
 	if b.notice != "" {
-		hint = " " + b.notice + " "
+		hint = b.notice
 	}
-	g.Put(x0+2, top+3+vis, x0+bw-2, hint, ov.Muted)
+	ov.PaintFooter(g, x0, top+3+vis, bw, hint)
 }
 
-// boxLine draws one row of the box: the side borders, the inner fill, and text
-// from the third column to one padding cell before the right border. reserve cells
-// at the right stay free for the scrollbar. Text that does not fit ends with "…".
-func boxLine(g *grid.Grid, x0, y, bw int, text string, inner, edge grid.Style, reserve int) {
+// boxLine draws one row inside the box: the fill and text from the third column to
+// one padding cell before the right border, which PaintBox drew. reserve cells at the
+// right stay free for the scrollbar. Text that does not fit ends with "…".
+func boxLine(g *grid.Grid, x0, y, bw int, text string, inner grid.Style, reserve int) {
 	g.Fill(x0+1, x0+bw-1, y, inner)
-	g.Set(x0, y, "│", edge)
-	g.Set(x0+bw-1, y, "│", edge)
 	end := x0 + bw - 1 - space.PadX - reserve
 	g.Put(x0+2, y, end, space.End(text, end-(x0+2)), inner)
 }

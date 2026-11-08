@@ -385,11 +385,11 @@ func TestTabClickActivatesAndMiddleClickCloses(t *testing.T) {
 	tf := newTabFake("a.txt", "b.txt")
 	m := shellModel(t, tf, &fakeDialogs{})
 
-	m.Update(click(tabX(m, 1), 1, tea.MouseLeft))
+	m.Update(click(tabX(m, 1), m.layout().StripY, tea.MouseLeft))
 	if tf.active != 1 {
 		t.Fatalf("active tab = %d after a click on tab 1", tf.active)
 	}
-	_, cmd := m.Update(tea.MouseClickMsg(tea.Mouse{X: tabX(m, 0), Y: 1, Button: tea.MouseMiddle}))
+	_, cmd := m.Update(tea.MouseClickMsg(tea.Mouse{X: tabX(m, 0), Y: m.layout().StripY, Button: tea.MouseMiddle}))
 	drain(t, m, cmd)
 	if len(tf.closed) != 1 || tf.closed[0] != 0 {
 		t.Fatalf("middle click closed %v, want [0]", tf.closed)
@@ -408,7 +408,7 @@ func TestClickOnTabCloseButtonClosesCleanTab(t *testing.T) {
 	if x < 0 {
 		t.Fatal("the × of tab 1 is not drawn")
 	}
-	m.Update(click(x, 1, tea.MouseLeft))
+	m.Update(click(x, m.layout().StripY, tea.MouseLeft))
 	if len(tf.closed) != 1 || tf.closed[0] != 1 {
 		t.Fatalf("× closed %v, want [1]", tf.closed)
 	}
@@ -467,7 +467,7 @@ func TestExplorerDividerDragResizesWithinBounds(t *testing.T) {
 
 func TestEightyByTwentyFourLayoutDefaultsToThirtyTwoColumns(t *testing.T) {
 	l := layoutFor(80, 24, layoutInput{ExplorerOpen: true, Lines: 10})
-	if l.Ex != 32 || l.EditorX != 32 || l.BodyTop != 2 || l.BodyBottom != 22 || l.StatusY != 23 {
+	if l.Ex != 32 || l.EditorX != 32 || l.BodyTop != 3 || l.BodyBottom != 22 || l.StatusY != 23 {
 		t.Fatalf("80x24: ex %d editorX %d body %d-%d status %d",
 			l.Ex, l.EditorX, l.BodyTop, l.BodyBottom, l.StatusY)
 	}

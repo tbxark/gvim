@@ -90,19 +90,19 @@ func TestGutterWidthWidensWithDigits(t *testing.T) {
 func TestRowBandsAtSampleHeights(t *testing.T) {
 	for _, h := range sampleHeights {
 		l := layoutFor(100, h, layoutInput{})
-		if l.BodyTop != 2 || l.BodyBottom != h-2 || l.StatusY != h-1 {
+		if l.BodyTop != 3 || l.BodyBottom != h-2 || l.StatusY != h-1 {
 			t.Errorf("H=%d: body %d..%d status %d", h, l.BodyTop, l.BodyBottom, l.StatusY)
 		}
 	}
 }
 
 func TestScrollbarShowsOnlyWhenContentOverflows(t *testing.T) {
-	const h = 15 // body rows 2..13, so 12 rows
-	if layoutFor(80, h, layoutInput{Lines: 12}).Scrollbar {
-		t.Error("12 lines in 12 rows show a scrollbar")
+	const h = 15 // body rows 3..13, so 11 rows
+	if layoutFor(80, h, layoutInput{Lines: 11}).Scrollbar {
+		t.Error("11 lines in 11 rows show a scrollbar")
 	}
-	if !layoutFor(80, h, layoutInput{Lines: 13}).Scrollbar {
-		t.Error("13 lines in 12 rows do not show a scrollbar")
+	if !layoutFor(80, h, layoutInput{Lines: 12}).Scrollbar {
+		t.Error("12 lines in 11 rows do not show a scrollbar")
 	}
 }
 
@@ -158,8 +158,8 @@ func TestTabStripOverflowsNarrowRows(t *testing.T) {
 		if r.Kind == hitTabNew || r.Kind == hitTabScrollBefore || r.Kind == hitTabScrollAfter {
 			continue
 		}
-		if r.X < 1 || r.X+r.W > 19-1 {
-			t.Errorf("run %+v is outside the overflow window", r)
+		if r.X < 1 || r.X+r.W > 19-3 {
+			t.Errorf("run %+v is outside the overflow window left of the + button", r)
 		}
 	}
 }

@@ -131,19 +131,20 @@ func viewRow(m *Model, y int) string {
 
 func TestMenuBarToggleHidesTheMenuRow(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "hello\n", 60, 12)
-	if !strings.Contains(viewRow(m, 0), "File") {
-		t.Fatalf("setup: row 0 %q has no menu label", viewRow(m, 0))
+	labelRow := m.layout().MenuLabelY
+	if !strings.Contains(viewRow(m, labelRow), "File") {
+		t.Fatalf("setup: label row %d %q has no menu label", labelRow, viewRow(m, labelRow))
 	}
 	runAction(t, m, "toggle_menu_bar")
-	if strings.Contains(viewRow(m, 0), "File") {
-		t.Fatalf("row 0 still shows the menu after toggle_menu_bar: %q", viewRow(m, 0))
+	if strings.Contains(viewRow(m, labelRow), "File") {
+		t.Fatalf("row %d still shows the menu after toggle_menu_bar: %q", labelRow, viewRow(m, labelRow))
 	}
 	if l := m.layout(); l.MenuOn || l.BodyTop != 1 {
 		t.Fatalf("menuOn %v bodyTop %d, want off and 1", l.MenuOn, l.BodyTop)
 	}
 	runAction(t, m, "toggle_menu_bar")
-	if !strings.Contains(viewRow(m, 0), "File") {
-		t.Fatalf("the second toggle did not bring the menu back: %q", viewRow(m, 0))
+	if !strings.Contains(viewRow(m, m.layout().MenuLabelY), "File") {
+		t.Fatalf("the second toggle did not bring the menu back: %q", viewRow(m, m.layout().MenuLabelY))
 	}
 }
 
@@ -184,15 +185,17 @@ func TestStatusBarToggleGivesItsRowToTheBody(t *testing.T) {
 	}
 }
 
-func TestPromptLineToggleAddsARowUnderTheStatusRow(t *testing.T) {
+// TestPromptLineToggleKeepsTheStatusRowWhileNoPromptIsOpen checks that the setting
+// alone reserves no row: the status bar is the last row until a prompt opens.
+func TestPromptLineToggleKeepsTheStatusRowWhileNoPromptIsOpen(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "hello\n", 60, 12)
 	if l := m.layout(); l.PromptOn || l.StatusY != 11 {
 		t.Fatalf("setup: promptOn %v statusY %d, want off and 11", l.PromptOn, l.StatusY)
 	}
 	runAction(t, m, "toggle_prompt_line")
-	if l := m.layout(); !l.PromptOn || l.StatusY != 10 || l.PromptY != 11 || l.BodyBottom != 9 {
-		t.Fatalf("prompt on %v at %d, status %d, body bottom %d; want on at 11, status 10, bottom 9",
-			l.PromptOn, l.PromptY, l.StatusY, l.BodyBottom)
+	if l := m.layout(); l.PromptOn || l.StatusY != 11 {
+		t.Fatalf("setting on with no prompt: promptOn %v statusY %d, want off and 11",
+			l.PromptOn, l.StatusY)
 	}
 	runAction(t, m, "toggle_prompt_line")
 	if l := m.layout(); l.PromptOn || l.StatusY != 11 {
@@ -637,8 +640,8 @@ func TestViewOptionsSetTheStartingState(t *testing.T) {
 func TestViewDefaultsKeepTheStartingLayout(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 8)
 	l := m.layout()
-	if l.StripY != 1 || l.StatusY != 7 || l.PromptOn || !l.MenuOn {
-		t.Errorf("default layout: strip %d status %d prompt %v menu %v, want 1, 7, off, on",
+	if l.StripY != 2 || l.StatusY != 7 || l.PromptOn || !l.MenuOn {
+		t.Errorf("default layout: strip %d status %d prompt %v menu %v, want 2, 7, off, on",
 			l.StripY, l.StatusY, l.PromptOn, l.MenuOn)
 	}
 }
@@ -653,7 +656,9 @@ func TestHidingTheTabBarReleasesItsKeyboardFocus(t *testing.T) {
 }
 
 func TestIndentGuidesDrawOnTheFrameRow(t *testing.T) {
-	m, _ := viewModel(t, DefaultViewOptions(), "func a() {\n\tx\n}\n", 40, 8)
+	// The height leaves room for the notice band above the status row, so the
+	// indented line is not covered while the guide toggles.
+	m, _ := viewModel(t, DefaultViewOptions(), "func a() {\n\tx\n}\n", 40, 10)
 	y := m.layout().BodyTop + 1 // the indented line
 	before := viewRow(m, y)
 	runAction(t, m, "toggle_indentation_guide_current_buffer")

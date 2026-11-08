@@ -5,12 +5,12 @@ import "testing"
 func TestHitMenuLabels(t *testing.T) {
 	l := layoutFor(100, 30, layoutInput{})
 	first := l.MenuRuns[0]
-	if got := l.Hit(first.X, 0); got.Kind != hitMenuLabel || got.Index != 0 {
+	if got := l.Hit(first.X, l.MenuLabelY); got.Kind != hitMenuLabel || got.Index != 0 {
 		t.Errorf("press on File = %+v", got)
 	}
 	// The gap between two labels belongs to no target.
 	gap := l.MenuRuns[0].X + l.MenuRuns[0].W
-	if got := l.Hit(gap, 0); got.Kind != hitNone {
+	if got := l.Hit(gap, l.MenuLabelY); got.Kind != hitNone {
 		t.Errorf("press in the gap = %+v", got)
 	}
 }
@@ -21,7 +21,7 @@ func TestHitTabsCloseAndNew(t *testing.T) {
 	var kinds []hitKind
 	for _, r := range l.Strip.Runs {
 		kinds = append(kinds, r.Kind)
-		if got := l.Hit(r.X, 1); got.Kind != r.Kind || got.Index != r.Index {
+		if got := l.Hit(r.X, l.StripY); got.Kind != r.Kind || got.Index != r.Index {
 			t.Errorf("run %+v hit as %+v", r, got)
 		}
 	}
@@ -39,13 +39,13 @@ func TestHitTabsCloseAndNew(t *testing.T) {
 func TestHitExplorerTitleButtons(t *testing.T) {
 	in := layoutInput{ExplorerOpen: true, ExplorerOverride: 30}
 	l := layoutFor(100, 30, in)
-	if got := l.Hit(l.ExReloadX, 1); got.Kind != hitExplorerTitleReload {
+	if got := l.Hit(l.ExReloadX, l.ExTitleY); got.Kind != hitExplorerTitleReload {
 		t.Errorf("reload button = %+v", got)
 	}
-	if got := l.Hit(l.ExCloseX, 1); got.Kind != hitExplorerTitleClose {
+	if got := l.Hit(l.ExCloseX, l.ExTitleY); got.Kind != hitExplorerTitleClose {
 		t.Errorf("close button = %+v", got)
 	}
-	if got := l.Hit(2, 1); got.Kind != hitExplorerBody {
+	if got := l.Hit(2, l.ExTitleY); got.Kind != hitExplorerBody {
 		t.Errorf("title body = %+v", got)
 	}
 }

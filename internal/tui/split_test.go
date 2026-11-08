@@ -300,13 +300,13 @@ func TestClickFocusesThePaneUnderThePointer(t *testing.T) {
 func TestCaretFollowsTheFocusedPane(t *testing.T) {
 	m := newSplitModel(t, newMultiFake(2, 30), 80, 24)
 	runAction(t, m, "split_vertical") // the right pane has the focus
-	if x, y, ok := m.caret(); !ok || x != 47 || y != 2 {
-		t.Errorf("caret in the right pane = (%d, %d, %v), want (47, 2, true)", x, y, ok)
+	if x, y, ok := m.caret(); !ok || x != 47 || y != 3 {
+		t.Errorf("caret in the right pane = (%d, %d, %v), want (47, 3, true)", x, y, ok)
 	}
 	runAction(t, m, "next_split") // the left pane has the focus
 	m.ed.SetCursor(buffer.Pos{Line: 3, Col: 2}, false)
-	if x, y, ok := m.caret(); !ok || x != 8 || y != 5 {
-		t.Errorf("caret in the left pane = (%d, %d, %v), want (8, 5, true)", x, y, ok)
+	if x, y, ok := m.caret(); !ok || x != 8 || y != 6 {
+		t.Errorf("caret in the left pane = (%d, %d, %v), want (8, 6, true)", x, y, ok)
 	}
 }
 
@@ -361,14 +361,14 @@ func TestPaintsEachPaneAndTheBorder(t *testing.T) {
 	g := m.paint()
 	// The text starts after the six-cell gutter. The tab index is the second
 	// character of the first line.
-	if got := g.At(7, 2).Text; got != "0" {
-		t.Errorf("left pane shows %q at (7, 2), want the t0 text", got)
+	if got := g.At(7, 3).Text; got != "0" {
+		t.Errorf("left pane shows %q at (7, 3), want the t0 text", got)
 	}
-	if got := g.At(48, 2).Text; got != "1" {
-		t.Errorf("right pane shows %q at (48, 2), want the t1 text", got)
+	if got := g.At(48, 3).Text; got != "1" {
+		t.Errorf("right pane shows %q at (48, 3), want the t1 text", got)
 	}
-	if got := g.At(40, 2).Text; got != splitVLine {
-		t.Errorf("border at (40, 2) = %q, want %q", got, splitVLine)
+	if got := g.At(40, 3).Text; got != splitVLine {
+		t.Errorf("border at (40, 3) = %q, want %q", got, splitVLine)
 	}
 	if got := g.At(40, 22).Text; got != splitVLine {
 		t.Errorf("border at (40, 22) = %q, want %q", got, splitVLine)

@@ -111,10 +111,11 @@ func (s *pluginSession) paletteHas(query string) bool {
 	s.press(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	s.typeText(query)
 	s.settle(60 * time.Millisecond)
-	// The query row is the last one; a row that shows the query elsewhere is a command.
+	// The sheet's last two rows are the query row and the bottom border with the
+	// hints; a row that shows the query elsewhere is a command.
 	rows := s.rows()
 	found := false
-	for _, r := range rows[:len(rows)-1] {
+	for _, r := range rows[:len(rows)-2] {
 		if strings.Contains(r, query) {
 			found = true
 		}

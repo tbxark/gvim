@@ -144,7 +144,7 @@ func TestDrawRows(t *testing.T) {
 	tr := openTree(t, fixture(t))
 	p := New(tr, style.Styles{}, nil)
 	g := grid.New(14, 8)
-	p.Draw(g, Geometry{Width: 14, Bottom: 7, Focused: true})
+	p.Draw(g, Geometry{Top: 1, Width: 14, Bottom: 7, Focused: true})
 	lines := g.Plain()
 
 	if lines[1] != HeaderFor(14, icons.Plain).Text {
@@ -172,7 +172,7 @@ func TestDrawNoMarkerWhenUnfocused(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
 	g := grid.New(12, 8)
-	New(tr, style.Styles{}, nil).Draw(g, Geometry{Width: 12, Bottom: 7})
+	New(tr, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: 12, Bottom: 7})
 	if got := g.Plain()[2]; strings.Contains(got, "▌") {
 		t.Errorf("unfocused panel drew the marker: %q", got)
 	}
@@ -186,7 +186,7 @@ func TestDrawScrollbar(t *testing.T) {
 		ScrollbarThumb: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 	}
 	g := grid.New(12, 6)
-	New(tr, styles, nil).Draw(g, Geometry{Width: 12, Bottom: 6, Focused: true})
+	New(tr, styles, nil).Draw(g, Geometry{Top: 1, Width: 12, Bottom: 6, Focused: true})
 
 	// Four body rows for eleven tree rows: the thumb is one row, at the top.
 	track := style.Cell(styles.Scrollbar).FG
@@ -215,7 +215,7 @@ func TestPressFileSingleThenDouble(t *testing.T) {
 	tr := openTree(t, dir)
 	clk := &clock{now: time.Unix(1000, 0)}
 	p := New(tr, style.Styles{}, clk.Now)
-	g := Geometry{Width: 12, Bottom: 7, Focused: true}
+	g := Geometry{Top: 1, Width: 12, Bottom: 7, Focused: true}
 	bPath := filepath.Join(dir, "b.txt")
 
 	var cmd tea.Cmd
@@ -243,7 +243,7 @@ func TestPressDirectoryTogglesOnce(t *testing.T) {
 	tr := openTree(t, fixture(t))
 	clk := &clock{now: time.Unix(1000, 0)}
 	p := New(tr, style.Styles{}, clk.Now)
-	g := Geometry{Width: 12, Bottom: 7}
+	g := Geometry{Top: 1, Width: 12, Bottom: 7}
 
 	var cmd tea.Cmd
 	p, cmd = p.Update(click(5, 3), g) // a/ at row 3
@@ -278,7 +278,7 @@ func TestPressTitleButtonsAndBody(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 30, Bottom: 8}
+	g := Geometry{Top: 1, Width: 30, Bottom: 8}
 	tests := []struct {
 		name string
 		x, y int
@@ -302,7 +302,7 @@ func TestPressTitleButtonsInNerdMode(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 30, Bottom: 8, Icons: icons.Nerd}
+	g := Geometry{Top: 1, Width: 30, Bottom: 8, Icons: icons.Nerd}
 	gr := grid.New(30, 9)
 	p.Draw(gr, g)
 	for _, tt := range []struct {
@@ -334,7 +334,7 @@ func TestPressTitleButtonsInNerdMode(t *testing.T) {
 func TestPressEmptyBodyFocuses(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t)) // four rows, so row 2+4 is empty in a taller body
-	g := Geometry{Width: 12, Bottom: 9}
+	g := Geometry{Top: 1, Width: 12, Bottom: 9}
 	_, cmd := New(tr, style.Styles{}, nil).Update(click(5, 7), g)
 	if got := run(cmd); got != (FocusMsg{}) {
 		t.Errorf("empty body sent %+v, want FocusMsg", got)
@@ -345,7 +345,7 @@ func TestGripDragResizes(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 29, Bottom: 8}
+	g := Geometry{Top: 1, Width: 29, Bottom: 8}
 
 	p, cmd := p.Update(click(28, 4), g) // the grip is the right border
 	if cmd != nil {
@@ -366,7 +366,7 @@ func TestWheelScrollsTree(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, manyFiles(t, 10))
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 12, Bottom: 6}
+	g := Geometry{Top: 1, Width: 12, Bottom: 6}
 
 	wheel := func(b tea.MouseButton, x, y int) {
 		_, _ = p.Update(tea.MouseWheelMsg(tea.Mouse{X: x, Y: y, Button: b}), g)
@@ -390,7 +390,7 @@ func TestScrollbarTrackPressCentersThumb(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, manyFiles(t, 10))
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 12, Bottom: 6}
+	g := Geometry{Top: 1, Width: 12, Bottom: 6}
 	// Body row 3 of four, for eleven rows: the offset centers the thumb there.
 	_, _ = p.Update(click(10, 5), g)
 	if got, want := tr.ScrollOffset(), 6; got != want {
@@ -403,7 +403,7 @@ func TestActions(t *testing.T) {
 	dir := fixture(t)
 	tr := openTree(t, dir)
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 12, Bottom: 7, Focused: true}
+	g := Geometry{Top: 1, Width: 12, Bottom: 7, Focused: true}
 
 	p, _, ok := p.Action("file_explorer_down", g)
 	if !ok {
@@ -446,7 +446,7 @@ func TestActionOpenFile(t *testing.T) {
 	dir := fixture(t)
 	tr := openTree(t, dir)
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 12, Bottom: 7, Focused: true}
+	g := Geometry{Top: 1, Width: 12, Bottom: 7, Focused: true}
 	must(t, tr.Select(filepath.Join(dir, "c.txt")))
 	_, cmd, ok := p.Action("file_explorer_open", g)
 	if !ok {
@@ -461,7 +461,7 @@ func TestActionPagesAndNilTree(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, manyFiles(t, 10))
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 12, Bottom: 6}
+	g := Geometry{Top: 1, Width: 12, Bottom: 6}
 	p, _, _ = p.Action("file_explorer_page_down", g)
 	if sel, _ := tr.Selected(); sel.Path == tr.Root() {
 		t.Errorf("page down left the selection on the root")
@@ -485,7 +485,7 @@ func TestFollowKeepsSelectionVisible(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, manyFiles(t, 10))
 	p := New(tr, style.Styles{}, nil)
-	g := Geometry{Width: 12, Bottom: 4} // two body rows
+	g := Geometry{Top: 1, Width: 12, Bottom: 4} // two body rows
 	for range 5 {
 		p, _, _ = p.Action("file_explorer_down", g)
 	}
@@ -506,7 +506,7 @@ func TestToggleErrorIsReported(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
 	p := New(failingTree{tr}, style.Styles{}, nil)
-	g := Geometry{Width: 12, Bottom: 7}
+	g := Geometry{Top: 1, Width: 12, Bottom: 7}
 	_, cmd := p.Update(click(5, 3), g) // a/ toggle fails
 	if got, ok := run(cmd).(ErrorMsg); !ok || got.Err == nil {
 		t.Errorf("failed toggle sent %+v, want ErrorMsg", run(cmd))
@@ -517,7 +517,7 @@ func TestFileToggleErrorViaAction(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
 	p := New(failingTree{tr}, style.Styles{}, nil)
-	g := Geometry{Width: 12, Bottom: 7}
+	g := Geometry{Top: 1, Width: 12, Bottom: 7}
 	must(t, tr.Select(filepath.Join(tr.Root(), "a")))
 	_, cmd, ok := p.Action("file_explorer_open", g)
 	if !ok {
@@ -532,7 +532,7 @@ func TestDrawSkipsTinyPanel(t *testing.T) {
 	t.Parallel()
 	tr := openTree(t, fixture(t))
 	g := grid.New(4, 4)
-	New(tr, style.Styles{}, nil).Draw(g, Geometry{Width: 1, Bottom: 3})
+	New(tr, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: 1, Bottom: 3})
 	if g.Plain()[0] != "    " {
 		t.Errorf("a one-column panel painted the grid: %q", g.Plain()[0])
 	}
@@ -560,14 +560,14 @@ func TestDrawFolderGlyphsCollapsedAndExpanded(t *testing.T) {
 	tr := openTree(t, dir)
 	p := New(tr, style.Styles{}, nil)
 	g := grid.New(12, 8)
-	p.Draw(g, Geometry{Width: 12, Bottom: 7})
+	p.Draw(g, Geometry{Top: 1, Width: 12, Bottom: 7})
 	lines := g.Plain()
 	if !strings.Contains(lines[3], "▶ a") {
 		t.Fatalf("collapsed folder row %q, want ▶ glyph", lines[3])
 	}
 	must(t, tr.Toggle(filepath.Join(dir, "a")))
 	g = grid.New(12, 8)
-	p.Draw(g, Geometry{Width: 12, Bottom: 7})
+	p.Draw(g, Geometry{Top: 1, Width: 12, Bottom: 7})
 	if lines := g.Plain(); !strings.Contains(lines[3], "▼ a") || strings.Contains(lines[3], "▶") {
 		t.Fatalf("expanded folder row %q, want ▼ glyph", lines[3])
 	}
@@ -580,7 +580,7 @@ func TestDrawFolderGlyphsInNerdMode(t *testing.T) {
 	p := New(tr, style.Styles{}, nil)
 	draw := func() *grid.Grid {
 		g := grid.New(14, 8)
-		p.Draw(g, Geometry{Width: 14, Bottom: 7, Icons: icons.Nerd})
+		p.Draw(g, Geometry{Top: 1, Width: 14, Bottom: 7, Icons: icons.Nerd})
 		return g
 	}
 	if got := draw().At(4, 3).Text; got != icons.Nerd.Glyph(icons.DirCollapsed) {
@@ -598,7 +598,7 @@ func TestDrawFileIconsInNerdMode(t *testing.T) {
 	tr := openTree(t, dir)
 	p := New(tr, style.Styles{}, nil)
 	g := grid.New(24, 8)
-	p.Draw(g, Geometry{Width: 24, Bottom: 7, Icons: icons.Nerd})
+	p.Draw(g, Geometry{Top: 1, Width: 24, Bottom: 7, Icons: icons.Nerd})
 	at := func(x, y int) string { return g.At(x, y).Text }
 	// Row 3 is the folder a/ and row 4 is b.txt, both one level down: the expand
 	// mark at column 4, the type icon at 6 and the name from 8.
@@ -610,7 +610,7 @@ func TestDrawFileIconsInNerdMode(t *testing.T) {
 	}
 	// The plain set keeps the name at column 6 and draws no type icon.
 	plain := grid.New(24, 8)
-	p.Draw(plain, Geometry{Width: 24, Bottom: 7})
+	p.Draw(plain, Geometry{Top: 1, Width: 24, Bottom: 7})
 	if got := plain.At(6, 4).Text; got != "b" {
 		t.Errorf("plain file row %q, want the name at column 6", plain.Plain()[4])
 	}
@@ -627,7 +627,7 @@ func TestDrawGitMarksInNerdMode(t *testing.T) {
 		want string
 	}{{icons.Plain, "M"}, {icons.Nerd, icons.Nerd.GitMark('M')}} {
 		g := grid.New(24, 8)
-		p.Draw(g, Geometry{Width: 24, Bottom: 7, Marks: marks, Icons: tt.mode})
+		p.Draw(g, Geometry{Top: 1, Width: 24, Bottom: 7, Marks: marks, Icons: tt.mode})
 		if got := g.At(21, 4).Text; got != tt.want {
 			t.Errorf("%v: git mark cell %q, want %q (%q)", tt.mode, got, tt.want, g.Plain()[4])
 		}
@@ -643,7 +643,7 @@ func TestDrawGitMarkOnTheRow(t *testing.T) {
 	tr := openTree(t, dir)
 	marks := map[string]rune{filepath.Join(dir, "b.txt"): 'M'}
 	g := grid.New(16, 8)
-	New(tr, style.Styles{}, nil).Draw(g, Geometry{Width: 16, Bottom: 7, Marks: marks})
+	New(tr, style.Styles{}, nil).Draw(g, Geometry{Top: 1, Width: 16, Bottom: 7, Marks: marks})
 
 	if got := g.At(13, 4).Text; got != "M" {
 		t.Errorf("mark cell of b.txt = %q, want %q", got, "M")
@@ -668,7 +668,7 @@ func TestDrawMarkerIsTheAccent(t *testing.T) {
 	st := style.New(th)
 	tr := openTree(t, fixture(t))
 	g := grid.New(12, 8)
-	New(tr, st, nil).Draw(g, Geometry{Width: 12, Bottom: 7, Focused: true})
+	New(tr, st, nil).Draw(g, Geometry{Top: 1, Width: 12, Bottom: 7, Focused: true})
 	// The root row is selected, so its marker is the first cell after the border.
 	want := style.Cell(st.Accent).BG
 	if c := g.At(1, 2); c.Text != "▌" || c.Style.FG != want {

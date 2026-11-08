@@ -145,17 +145,19 @@ func TestCtrlFOpensTheFindBarThroughTheRoot(t *testing.T) {
 	}
 	rows := screenRows(m)
 	h := len(rows)
-	if got := strings.TrimSpace(rows[h-1]); got != "Search:" {
-		t.Errorf("last row = %q, want the search row", got)
+	// The sheet is four rows: the title border, the options row, the search row
+	// and the hints on the bottom border. The status row sits above it.
+	if !strings.Contains(rows[h-2], "Search:") {
+		t.Errorf("row %d = %q, want the search row", h-2, rows[h-2])
 	}
-	if !strings.Contains(rows[h-2], "[ ] Case Sensitive (Alt+C)") || !strings.Contains(rows[h-2], "[ ] Regex (Alt+R)") {
-		t.Errorf("row %d = %q, want the option toggles", h-2, rows[h-2])
+	if !strings.Contains(rows[h-3], "[ ] Case Sensitive") || !strings.Contains(rows[h-3], "[ ] Regex") {
+		t.Errorf("row %d = %q, want the option toggles", h-3, rows[h-3])
 	}
-	if !strings.Contains(rows[h-3], "Local") {
-		t.Errorf("row %d = %q, want the status row above the bar", h-3, rows[h-3])
+	if !strings.Contains(rows[h-5], "Local") {
+		t.Errorf("row %d = %q, want the status row above the bar", h-5, rows[h-5])
 	}
-	if l := m.layout(); l.StatusY != h-3 || l.BodyBottom != h-4 {
-		t.Errorf("layout status %d and body bottom %d, want %d and %d", l.StatusY, l.BodyBottom, h-3, h-4)
+	if l := m.layout(); l.StatusY != h-5 || l.BodyBottom != h-6 {
+		t.Errorf("layout status %d and body bottom %d, want %d and %d", l.StatusY, l.BodyBottom, h-5, h-6)
 	}
 }
 
@@ -290,12 +292,12 @@ func TestStartSearchReplaceOpensTheFindBarWithTheReplaceRow(t *testing.T) {
 	if !m.findOpen() {
 		t.Fatalf("overlay stack has %d entries after start_search_replace, want the find bar", len(m.overlays))
 	}
-	if rows := m.findBar.Rows(); rows != 3 {
-		t.Fatalf("bar covers %d rows, want 3 with the replacement row", rows)
+	if rows := m.findBar.Rows(30); rows != 5 {
+		t.Fatalf("bar covers %d rows, want 5 with the replacement row", rows)
 	}
 	rows := screenRows(m)
-	if got := strings.TrimSpace(rows[len(rows)-1]); !strings.HasPrefix(got, "Replace:") {
-		t.Errorf("last row = %q, want the replacement row", got)
+	if got := rows[len(rows)-2]; !strings.Contains(got, "Replace:") {
+		t.Errorf("row %d = %q, want the replacement row", len(rows)-2, got)
 	}
 }
 
@@ -357,8 +359,8 @@ func TestQueryReplaceAnswersEachMatchFromTheHeldBar(t *testing.T) {
 	}
 	rows := screenRows(m)
 	h := len(rows)
-	if !strings.Contains(rows[h-2], "Replace? (y)es (n)o (a)ll (c)ancel") {
-		t.Fatalf("row %d = %q, want Fresh's query-replace question", h-2, rows[h-2])
+	if !strings.Contains(rows[h-3], "Replace? (y)es (n)o (a)ll (c)ancel") {
+		t.Fatalf("row %d = %q, want Fresh's query-replace question", h-3, rows[h-3])
 	}
 
 	press(m, typed("y")) // replace 0:0
@@ -373,8 +375,8 @@ func TestQueryReplaceAnswersEachMatchFromTheHeldBar(t *testing.T) {
 	if got := sf.text(); got != "z x x x" {
 		t.Fatalf("after q: text = %q, want no change", got)
 	}
-	if rows := screenRows(m); !strings.Contains(rows[len(rows)-2], "Replaced 1 occurrence(s)") {
-		t.Fatalf("row %d = %q, want the count after q", len(rows)-2, rows[len(rows)-2])
+	if rows := screenRows(m); !strings.Contains(rows[len(rows)-3], "Replaced 1 occurrence(s)") {
+		t.Fatalf("row %d = %q, want the count after q", len(rows)-3, rows[len(rows)-3])
 	}
 }
 
@@ -399,8 +401,8 @@ func TestQueryReplaceWithoutASearchKeepsTheBarOpenAndSaysSo(t *testing.T) {
 		t.Fatal("Ctrl+Alt+R without a search did not open the bar")
 	}
 	rows := screenRows(m)
-	if !strings.Contains(rows[len(rows)-2], "Query replace: empty search query.") {
-		t.Fatalf("row %d = %q, want the empty-query message", len(rows)-2, rows[len(rows)-2])
+	if !strings.Contains(rows[len(rows)-3], "Query replace: empty search query.") {
+		t.Fatalf("row %d = %q, want the empty-query message", len(rows)-3, rows[len(rows)-3])
 	}
 	if got := sf.text(); got != "x x" {
 		t.Fatalf("text = %q, want no change", got)

@@ -688,6 +688,62 @@ func TestEditorDialogStaysInsideTheTable(t *testing.T) {
 	}
 }
 
+// TestKeybindingEditorCardFrame: the table is a card with its bare title on the top
+// border and the key hints on the bottom border; the status keeps its own row above it.
+func TestKeybindingEditorCardFrame(t *testing.T) {
+	m, _ := newKeybindModel(t)
+	lines := frameText(m)
+	e := editorOf(m)
+	top := strings.TrimSpace(lines[e.box.Y])
+	if !strings.Contains(top, "╭─ Keybinding Editor ─") {
+		t.Fatalf("top border = %q, want the bare title on it", top)
+	}
+	bottomRow := e.box.Y + e.box.H - 1
+	bottom := strings.TrimSpace(lines[bottomRow])
+	if !strings.Contains(bottom, "╰") || !strings.Contains(bottom, "Esc close") {
+		t.Fatalf("bottom border = %q, want the key hints on it", bottom)
+	}
+	if strings.Contains(lines[bottomRow-1], "Esc close") {
+		t.Fatalf("row %d = %q, want no separate hint row", bottomRow-1, lines[bottomRow-1])
+	}
+}
+
+// TestKeybindingEditorDialogCardFrame: the Add binding dialog puts its fields right
+// under its top border and its key hints on its own bottom border.
+func TestKeybindingEditorDialogCardFrame(t *testing.T) {
+	m, _ := newKeybindModel(t)
+	press(m, typed("a"))
+	lines := frameText(m)
+	title := -1
+	for i, l := range lines {
+		if strings.Contains(l, "Add binding") {
+			title = i
+		}
+	}
+	if title < 0 {
+		t.Fatalf("the dialog is not drawn:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[title], "╭─ Add binding ─") {
+		t.Fatalf("dialog title row = %q, want the bare title on its top border", lines[title])
+	}
+	if !strings.Contains(lines[title+1], "Key:") {
+		t.Fatalf("row %d = %q, want the first field under the top border", title+1, lines[title+1])
+	}
+	foot := -1
+	for i := title + 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], "╰") {
+			foot = i
+			break
+		}
+	}
+	if foot < 0 || !strings.Contains(lines[foot], "Esc cancel") {
+		t.Fatalf("the dialog has no hints on its bottom border:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(lines[foot-1], "Esc cancel") {
+		t.Fatalf("row %d = %q, want the hints on the border, not on a row above it", foot-1, lines[foot-1])
+	}
+}
+
 // TestEditorListsOnlyContextsGvimResolves: a binding in a context gvim never resolves (a prompt
 // or a popup answers its keys in code) is not a row, so the editor does not offer a key that
 // does nothing. The rows are the ones the root can run.
