@@ -44,6 +44,7 @@ type settingsService struct {
 	cfg      config.Config // the effective config of the last load
 	userFile string        // the user config file the page writes
 	theme    *themeCatalog // user/bundled theme resolution; nil means bundled only
+	rt       settingsRuntime
 
 	// ioMu serializes the file writes and reloads. The state mutex is not held
 	// while a file is written or loaded, so a Snapshot can run during a Save.
@@ -55,7 +56,7 @@ var _ tui.SettingsPort = (*settingsService)(nil)
 // newSettingsService returns the Settings page's service. trusted reports whether
 // the workspace is trusted now; the page asks on every snapshot, so a trust
 // decision taken during the session makes the project layer writable at once.
-func newSettingsService(root string, opts Options, ed *editor.Editor, trusted func() bool, cfg config.Config, themeCat *themeCatalog) *settingsService {
+func newSettingsService(root string, opts Options, ed *editor.Editor, trusted func() bool, cfg config.Config, themeCat *themeCatalog, rt settingsRuntime) *settingsService {
 	user := opts.Config
 	if user == "" {
 		if files, err := config.Paths(); err == nil {
@@ -65,7 +66,7 @@ func newSettingsService(root string, opts Options, ed *editor.Editor, trusted fu
 	if trusted == nil {
 		trusted = func() bool { return true }
 	}
-	return &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user, theme: themeCat}
+	return &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user, theme: themeCat, rt: rt}
 }
 
 // Snapshot returns the settings the page lists.
@@ -117,6 +118,7 @@ func (s *settingsService) snapshotFor(cfg config.Config) tui.SettingsSnapshot {
 		}
 		snap.Sections[i].Items = append(snap.Sections[i].Items, item)
 	}
+	snap.Sections = append(snap.Sections, s.extraSections(cfg)...)
 	return snap
 }
 
@@ -498,6 +500,20 @@ func (s *settingsService) changedKeys(changed []string) []string {
 	return keys
 }
 
+// Act runs a structure page's live action: an LSP server start, stop or restart,
+// or a plugin enable/reload. The action names come from the page rows'
+// "act:<op>" values. It is called from a tea.Cmd, never from the update loop,
+// because starting or stopping a server waits for a process.
+func (s *settingsService) Act(action, value string) (string, error) {
+	switch {
+	case strings.HasPrefix(action, "lsp-"):
+		return s.lspAct(action, value)
+	case strings.HasPrefix(action, "plugin-"):
+		return s.pluginAct(action, value)
+	}
+	return "", fmt.Errorf("settings: the %q action is not available", action)
+}
+
 // Structure returns the sub-page of a structured setting for one layer: the
 // formatters map, the language entry list, one language's scalar overrides, the
 // status-bar element lists, or terminal.shell.args. It reads the layer's file
@@ -526,6 +542,12 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 		return tui.SettingsStructure{}, err
 	}
 	switch {
+	case structureKey == "lsp":
+		return s.structureLSP(cfg, object, project), nil
+	case strings.HasPrefix(structureKey, "lsp.universal."):
+		return s.structureLSPUniversal(cfg, object, strings.TrimPrefix(structureKey, "lsp.universal."), project), nil
+	case strings.HasPrefix(structureKey, "lsp."):
+		return s.structureLSPLanguage(cfg, object, strings.TrimPrefix(structureKey, "lsp."), project), nil
 	case structureKey == "formatters":
 		return s.structureFormatters(object), nil
 	case structureKey == "languages":

@@ -30,12 +30,11 @@ func (l presetLister) Primary(action string) (KeyBinding, bool) {
 // resolveAs looks up chord as the root does in the context a binding names: a single chord
 // through Resolve, a multi-key chord through ResolveSequence.
 func resolveAs(m *keymap.Map, chord string, when string) (keymap.Binding, bool) {
-	ctx := keymap.ContextNormal
-	switch when {
-	case string(keymap.ContextFileExplorer):
-		ctx = keymap.ContextFileExplorer
-	case string(keymap.ContextTerminal):
-		ctx = keymap.ContextTerminal
+	// The help shows bindings in every consulted context; the when-clause names the
+	// context directly for the overlay contexts too.
+	ctx := keymap.Context(when)
+	if ctx == "" {
+		ctx = keymap.ContextNormal
 	}
 	if steps := strings.Fields(chord); len(steps) > 1 {
 		return m.ResolveSequence(steps, ctx)

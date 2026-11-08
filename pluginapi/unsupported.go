@@ -154,8 +154,14 @@ func (Unsupported) DecorSet(string, string, BufferID, []Decoration, *Version) er
 func (Unsupported) DecorAdd(string, string, BufferID, Decoration, *Version) (int, error) {
 	return 0, unsupported("DecorAdd")
 }
-func (Unsupported) DecorRemove(string, string, BufferID, int) {}
-func (Unsupported) DecorClear(string, string, BufferID)       {}
+func (Unsupported) DecorRemove(string, string, BufferID, int)          {}
+func (Unsupported) DecorClear(string, string, BufferID)                {}
+func (Unsupported) DecorClearRange(string, string, BufferID, int, int) {}
+func (Unsupported) DecorSetFoldingRanges(string, string, BufferID, []FoldRange, *Version) error {
+	return unsupported("DecorSetFoldingRanges")
+}
+func (Unsupported) DecorClearFolds(string, string, BufferID) {}
+func (Unsupported) DecorRefreshLines(BufferID)               {}
 
 // WorkspaceHost.
 

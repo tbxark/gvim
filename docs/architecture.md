@@ -182,7 +182,7 @@ still large internally, so a reader can find a feature without grepping by memor
 
 | Cluster | Files | Responsibility |
 |---|---|---|
-| core / dispatch | `model.go`, `root.go`, `ports.go`, `doc.go`, `dialogs.go`, `key_hints.go`, `keybind_known.go`, `chord_keys.go`, notices, `status_expiry.go`, `cont_*` | `Model` + `Deps`, `New/Run/Close/Init/Update/View`, update pipeline, key translation/dispatch, overlay stack, painting, ports |
+| core / dispatch | `model.go`, `root.go`, `ports.go`, `doc.go`, `dialogs.go`, `key_hints.go`, `keybind_known.go`, `chord_keys.go`, `overlay_keys.go`, notices, `status_expiry.go`, `cont_*` | `Model` + `Deps`, `New/Run/Close/Init/Update/View`, update pipeline, key translation/dispatch, overlay-context keymap routing, overlay stack, painting, ports |
 | splits / tabs / compare | `split.go`, `split_resize.go`, `split_drag.go`, `split_tabs.go`, `tabs.go`, `tab_drag.go`, `tab_drop.go`, `compare*.go` | pane controllers and drag/drop over the `tui/split` tree, tab strip glue over `tui/tabstrip`, side-by-side compare |
 | terminal dock | `dock_glue.go`, `dock_commands.go`, `dock_text.go` (`shell.go` is editor shell commands) | root glue over `tui/dock`: port aliases, action routing, paint calls, selection helpers |
 | LSP UI | `lsp.go`, `lsp_detect.go`, `diag.go`, `root_signature.go` | language-server UI controller, diagnostics, goto/hover/completion/code actions/rename, signature help |
@@ -197,6 +197,16 @@ still large internally, so a reader can find a feature without grepping by memor
 | editor body | `motion_mouse.go`, `motion_rows.go`, `viewrow.go`, `occurrence.go` | click/drag/wheel, row-mapped motion, top-row memo, occurrence highlight |
 | large-file mode | `large.go` | large-file UI: index progress, full-load prompt, streamed save/search, error dialogs |
 | clipboard / popup | `clip.go`, `context_menu.go`, `popup.go` | OSC 52/HTML clipboard flows, right-click menus, popup adapter |
+
+**Overlay key routing.** `overlay_keys.go` holds the root's side of the overlay keymap contexts.
+An overlay that takes its keys in code declares one of the Fresh contexts the root resolves
+(`prompt`, `searchPrompt`, `popup`, `menu`, `settings`, `dock`) through the root's type switch;
+before the overlay's own handler, `routeOverlay` looks the key up in that context, runs the
+surface's operation or the model's normal dispatch for the bound action, and falls through to the
+built-in handler when the key is unbound. The menu bar and the dock hook into the same router from
+`routeMenu` and `dockKey`; plugin panels and the custom settings/theme dialogs are outside it
+(the plugin host owns its key layers). Text-field operations are forwarded as the widget's own
+keys, so the built-in behaviour is preserved and only the chord moves.
 
 ### 4.2 `internal/tui` sub-packages
 

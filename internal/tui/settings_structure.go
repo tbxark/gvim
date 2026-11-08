@@ -32,6 +32,7 @@ type settingsStructurePage struct {
 	left    []string          // dual kind
 	right   []string          // dual kind
 	side    string            // dual kind: the focused side
+	filter  []rune            // the typed row filter (st.Filter)
 	rows    []structureRow
 	sel     int
 	top     int
@@ -94,6 +95,8 @@ func (p *settingsStructurePage) rebuild() {
 			p.items = append(p.items, row.Name)
 		case "languages":
 			p.entries = append(p.entries, row.Name)
+		case "entries":
+			// The rows keep their raw entry JSON for remove/add; nothing to copy.
 		case "dual":
 			if row.Group == "right" {
 				p.right = append(p.right, row.Name)
@@ -129,12 +132,17 @@ func (p *settingsStructurePage) layout() {
 			rows = append(rows, structureRow{item: row})
 		}
 	case "list":
+		path := p.listPath()
 		for i, item := range p.items {
-			rows = append(rows, structureRow{item: SettingsStructureRow{Path: p.st.Rows[0].Path, Name: strconv.Itoa(i + 1), Value: item}})
+			rows = append(rows, structureRow{item: SettingsStructureRow{Path: path, Name: strconv.Itoa(i + 1), Value: item}})
 		}
 	case "languages":
 		for _, name := range p.entries {
 			rows = append(rows, structureRow{item: SettingsStructureRow{Path: []string{"languages", name}, Name: name, Value: "configured", Child: "languages." + name}})
+		}
+	case "entries":
+		for _, row := range p.st.Rows {
+			rows = append(rows, structureRow{item: row})
 		}
 	case "dual":
 		rows = append(rows, structureRow{header: true, title: "Left", group: "left"})
@@ -149,6 +157,9 @@ func (p *settingsStructurePage) layout() {
 		for _, name := range p.available() {
 			rows = append(rows, structureRow{group: "available", item: SettingsStructureRow{Name: name}})
 		}
+	}
+	if p.st.Filter && len(p.filter) > 0 {
+		rows = p.filterRows(rows)
 	}
 	if p.st.AddLabel != "" && p.st.Kind != "dual" {
 		rows = append(rows, structureRow{add: true, item: SettingsStructureRow{Name: p.st.AddLabel}})
@@ -166,6 +177,24 @@ func (p *settingsStructurePage) layout() {
 		}
 	}
 	p.keepVisible()
+}
+
+// filterRows narrows the rows to those matching the typed filter, on the name,
+// value, note and group. Headers are dropped while a filter is on: the matches are
+// what the reader asked for.
+func (p *settingsStructurePage) filterRows(rows []structureRow) []structureRow {
+	needle := strings.ToLower(string(p.filter))
+	out := make([]structureRow, 0, len(rows))
+	for _, row := range rows {
+		if row.header {
+			continue
+		}
+		text := strings.ToLower(row.item.Name + " " + row.item.Value + " " + row.item.Note + " " + row.item.Group)
+		if strings.Contains(text, needle) {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 // rowKey returns a stable identity for the selection across layouts.
@@ -270,7 +299,23 @@ func (p *settingsStructurePage) key(msg tea.KeyPressMsg) tea.Cmd {
 		p.Close()
 		return p.parent.save()
 	case "esc":
+		// A filter is cleared before the page closes, as on the main page.
+		if len(p.filter) > 0 {
+			p.filter = nil
+			p.layout()
+			return nil
+		}
 		p.Close()
+	case "backspace":
+		if n := len(p.filter); n > 0 {
+			p.filter = p.filter[:n-1]
+			p.layout()
+		}
+	default:
+		if p.st.Filter && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 && msg.Text != "" {
+			p.filter = append(p.filter, []rune(msg.Text)...)
+			p.layout()
+		}
 	}
 	return nil
 }
@@ -338,11 +383,22 @@ func (p *settingsStructurePage) edit() tea.Cmd {
 	if row.add {
 		return p.addEntry()
 	}
+	if row.item.Locked {
+		why := row.item.Note
+		if why == "" {
+			why = "this layer cannot change it"
+		}
+		p.parent.m.notice = "Settings: " + row.item.Name + " is read-only — " + why
+		return nil
+	}
+	if row.item.Action != "" {
+		return p.runAction(row.item)
+	}
 	if p.st.Kind == "dual" {
 		p.moveDual(row.group, row.item.Name)
 		return nil
 	}
-	if p.st.Kind == "languages" {
+	if p.st.Kind == "languages" || row.item.Child != "" {
 		return p.requestChild(row.item.Child)
 	}
 	switch p.st.Kind {
@@ -389,6 +445,8 @@ func (p *settingsStructurePage) footer() string {
 	case "fields":
 		return "Enter edit · Del reset · Esc back · ^S save"
 	case "languages":
+		return "Enter fields · ^N add · Del remove · Esc back · ^S save"
+	case "entries":
 		return "Enter fields · ^N add · Del remove · Esc back · ^S save"
 	case "dual":
 		return "Tab side · Enter move/add · Del remove · Alt+↑/↓ move · Esc back · ^S save"
@@ -466,6 +524,12 @@ func (p *settingsStructurePage) editField(row SettingsStructureRow) tea.Cmd {
 
 // addEntry starts the add flow of the structure.
 func (p *settingsStructurePage) addEntry() tea.Cmd {
+	if p.st.Key == "lsp" {
+		return structurePrompt(p, prompt.LineOptions{
+			Label: "Language: ",
+			Tag:   structurePromptTag{page: p, action: "add-lsp-language"},
+		})
+	}
 	switch p.st.Kind {
 	case "map":
 		return structurePrompt(p, prompt.LineOptions{
@@ -476,6 +540,11 @@ func (p *settingsStructurePage) addEntry() tea.Cmd {
 		return structurePrompt(p, prompt.LineOptions{
 			Label: "Item: ",
 			Tag:   structurePromptTag{page: p, action: "add-list", kind: "string"},
+		})
+	case "entries":
+		return structurePrompt(p, prompt.LineOptions{
+			Label: p.st.AddLabel + " ",
+			Tag:   structurePromptTag{page: p, action: "add-entry"},
 		})
 	case "languages":
 		options := p.st.Available
@@ -509,9 +578,78 @@ func (p *settingsStructurePage) requestChild(key string) tea.Cmd {
 	}
 }
 
+// runAction runs a row's action. A "ui:" action is handed to the root after the
+// Settings overlays close (a page cannot push an overlay from its own Update); an
+// "act:" action runs on the port's live parts from a command and the page then
+// refreshes itself with the result.
+func (p *settingsStructurePage) runAction(row SettingsStructureRow) tea.Cmd {
+	switch {
+	case strings.HasPrefix(row.Action, "ui:"):
+		action := strings.TrimPrefix(row.Action, "ui:")
+		return func() tea.Msg { return settingsUIActionMsg{action: action} }
+	case strings.HasPrefix(row.Action, "act:"):
+		op := strings.TrimPrefix(row.Action, "act:")
+		value := row.Value
+		if value == "" {
+			value = row.Name
+		}
+		port := p.parent.port
+		return func() tea.Msg {
+			message, err := port.Act(op, value)
+			return settingsActDoneMsg{page: p, message: message, err: err}
+		}
+	}
+	return nil
+}
+
+// requestSelf asks the port for this structure again, after an action changed the
+// live state (an LSP server started or stopped).
+func (p *settingsStructurePage) requestSelf() tea.Cmd {
+	key, layer := p.st.Key, p.parent.layer
+	p.seq++
+	seq := p.seq
+	port := p.parent.port
+	return func() tea.Msg {
+		st, err := port.Structure(key, layer)
+		return settingsStructureMsg{sub: p, seq: seq, structure: st, err: err}
+	}
+}
+
+// removeEntry takes one entry out of an "entries" structure and writes the whole
+// array back: the entries are objects, which a single config path cannot address.
+func (p *settingsStructurePage) removeEntry(item SettingsStructureRow) {
+	kept := p.st.Rows[:0]
+	for _, row := range p.st.Rows {
+		if pathID(row.Path) != pathID(item.Path) {
+			kept = append(kept, row)
+		}
+	}
+	p.st.Rows = kept
+	p.writeEntries()
+}
+
+// writeEntries records the whole entries array as one pending edit.
+func (p *settingsStructurePage) writeEntries() {
+	raws := make([]json.RawMessage, 0, len(p.st.Rows))
+	for _, row := range p.st.Rows {
+		if len(row.Raw) == 0 {
+			return
+		}
+		raws = append(raws, row.Raw)
+	}
+	raw, err := json.Marshal(raws)
+	if err != nil {
+		return
+	}
+	p.parent.setPendingRaw(p.listPath(), raw)
+}
+
 // structKey returns the config path the structure's rows share, for writing the
 // whole list: terminal.shell.args or editor.status_bar.left/right.
 func (p *settingsStructurePage) listPath() []string {
+	if len(p.st.Path) > 0 {
+		return slices.Clone(p.st.Path)
+	}
 	if len(p.st.Rows) > 0 {
 		return slices.Clone(p.st.Rows[0].Path)
 	}
@@ -550,7 +688,19 @@ func (p *settingsStructurePage) remove() {
 	if !ok || row.header || row.add {
 		return
 	}
+	if row.item.Locked {
+		p.parent.m.notice = "Settings: " + row.item.Name + " is read-only in this layer"
+		return
+	}
+	if row.item.Inherited {
+		p.parent.m.notice = "Settings: " + row.item.Name + " already inherits its value"
+		return
+	}
 	switch p.st.Kind {
+	case "entries":
+		p.removeEntry(row.item)
+		p.layout()
+		return
 	case "map":
 		p.parent.setPendingRemove(row.item.Path)
 		delete(p.values, pathID(row.item.Path))
@@ -627,6 +777,12 @@ func removeString(s []string, value string) []string {
 // encodeStructureValue turns a display value into the JSON a config path holds.
 func encodeStructureValue(kind, value string) (json.RawMessage, error) {
 	switch kind {
+	case "json":
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || !json.Valid([]byte(trimmed)) {
+			return nil, errStructureValue("valid JSON", value)
+		}
+		return json.RawMessage(trimmed), nil
 	case "bool":
 		switch strings.ToLower(strings.TrimSpace(value)) {
 		case "on", "true":
@@ -741,6 +897,31 @@ func (p *settingsStructurePage) promptDone(done prompt.Done) tea.Cmd {
 		p.items = append(p.items, done.Text)
 		p.writeList()
 		p.layout()
+	case "add-lsp-language":
+		language := strings.TrimSpace(done.Text)
+		if language == "" {
+			p.parent.m.notice = "Settings: the language must not be empty"
+			return nil
+		}
+		return p.requestChild("lsp." + language)
+	case "add-entry":
+		command := strings.TrimSpace(done.Text)
+		if command == "" {
+			p.parent.m.notice = "Settings: the command must not be empty"
+			return nil
+		}
+		entry, err := json.Marshal(map[string]any{"command": command, "enabled": true})
+		if err != nil {
+			return nil
+		}
+		index := len(p.st.Rows)
+		path := append(slices.Clone(p.st.Path), strconv.Itoa(index))
+		p.st.Rows = append(p.st.Rows, SettingsStructureRow{
+			Path: path, Name: command, Value: "on", Raw: entry,
+			Child: p.st.Key + "." + strconv.Itoa(index),
+		})
+		p.writeEntries()
+		p.layout()
 	}
 	return nil
 }
@@ -775,14 +956,22 @@ func (p *settingsStructurePage) Draw(g *grid.Grid) {
 	}
 	ov.PaintBox(g, box.X, box.Y, box.W, box.H, title)
 	end := box.X + box.W - 2
-	// A small header line: the dual list's focused side.
-	if p.st.Kind == "dual" {
-		g.Fill(box.X+1, box.X+box.W-1, box.Y+1, ov.Box)
-		g.Put(box.X+2, box.Y+1, end, "Side: "+p.side, ov.Muted)
-	}
+	// A small header line: the dual list's focused side, the page note, and the
+	// typed filter.
 	startRow := 2
+	head := func(text string) {
+		g.Fill(box.X+1, box.X+box.W-1, box.Y+startRow-1, ov.Box)
+		g.Put(box.X+2, box.Y+startRow-1, end, text, ov.Muted)
+		startRow++
+	}
 	if p.st.Kind == "dual" {
-		startRow = 3
+		head("Side: " + p.side)
+	}
+	if p.st.Note != "" {
+		head(p.st.Note)
+	}
+	if p.st.Filter && len(p.filter) > 0 {
+		head("Filter: " + string(p.filter))
 	}
 	p.page = box.H - startRow
 	p.keepVisible()
@@ -808,12 +997,28 @@ func (p *settingsStructurePage) Draw(g *grid.Grid) {
 		if pending, ok := p.pendingFor(row.item.Path); ok && pending.remove {
 			name = "* " + name
 		}
+		if row.item.Locked {
+			name += " (locked)"
+		}
 		value := row.item.Value
 		if p.st.Kind == "fields" || p.st.Kind == "map" {
 			value = p.values[pathID(row.item.Path)]
 			if value == "" && p.st.Kind == "fields" {
 				value = "(default)"
 			}
+		}
+		if row.item.Kind == "json" && !row.item.Inherited {
+			value = "JSON (" + strconv.Itoa(len(value)) + " bytes) · Enter to edit"
+		}
+		if row.item.Inherited {
+			if value == "" {
+				value = "(inherit)"
+			} else {
+				value = "(inherit: " + value + ")"
+			}
+		}
+		if row.item.Note != "" {
+			value = strings.TrimSpace(value + " · " + row.item.Note)
 		}
 		valueX := end - ansi.StringWidth(value)
 		g.Put(max(valueX, box.X+2), y, end, value, rightSt)

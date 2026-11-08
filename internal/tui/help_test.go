@@ -37,7 +37,7 @@ func helpKeys() fakeBindings {
 // TestHelpRowsGroupByContextWithPrimaryShortcuts: the rows are described in words, show the
 // shortcut as every other label does, and sit under a readable context heading. The old
 // version of this test pinned the raw action ids and chords ("save=ctrl+s"). The popup row is
-// left out: gvim resolves no keys in the popup context, so the help does not list one.
+// listed under its own heading: gvim resolves keys in the popup context too.
 func TestHelpRowsGroupByContextWithPrimaryShortcuts(t *testing.T) {
 	tests := []struct {
 		name string
@@ -61,6 +61,8 @@ func TestHelpRowsGroupByContextWithPrimaryShortcuts(t *testing.T) {
 				"Find next=F3",
 				"# Everywhere",
 				"Quit=Ctrl+Q",
+				"# popup",
+				"Popup cancel=Esc",
 			},
 		},
 	}

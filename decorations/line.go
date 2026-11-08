@@ -31,6 +31,11 @@ type lineTop struct {
 	eol            topK[VirtualText]
 	replaces       topK[Replacement]
 	gutter, scroll uint64
+	// tier-1c kinds
+	above, below topK[VirtualRow]
+	conceals     topK[ConcealSpan]
+	softBreaks   topK[SoftBreakMark]
+	cursorLines  topK[CursorLineOverlay]
 }
 
 // topK keeps the MaxPerLine entries that rank highest, by priority and then by sequence
@@ -221,6 +226,55 @@ func (w *window) add(e *entry) {
 		if i, ok := at(e.FromLine); ok && w.top[i].replaces.wants(e.Priority, e.seq) {
 			w.top[i].replaces.push(Replacement{Col: e.FromCol, Text: e.Text, Style: e.Style, Priority: e.Priority}, e.Priority, e.seq)
 		}
+	case VirtualLineAbove, VirtualLineBelow:
+		i, ok := at(e.FromLine)
+		if !ok {
+			return
+		}
+		row := VirtualRow{
+			Text: e.Text, Style: e.Style, GutterText: e.GutterText,
+			GutterStyle: e.GutterStyle, Priority: e.Priority, ComposeOnly: e.ComposeOnly,
+			Overlays: append([]TextOverlay(nil), e.TextOverlays[:min(e.TextOverlayCount, maxTextOverlays)]...),
+		}
+		target := &w.top[i].above
+		if e.Kind == VirtualLineBelow {
+			target = &w.top[i].below
+		}
+		if target.wants(e.Priority, e.seq) {
+			target.push(row, e.Priority, e.seq)
+		}
+	case Conceal:
+		for line := max(e.FromLine, w.first); line <= min(e.ToLine, w.first+windowLines-1) && line <= e.ToLine; line++ {
+			i, _ := at(line)
+			if !w.top[i].conceals.wants(e.Priority, e.seq) {
+				continue
+			}
+			sp := ConcealSpan{
+				Text: e.Text, Style: e.Style, Priority: e.Priority, Activation: e.Activation,
+				ComposeOnly: e.ComposeOnly,
+			}
+			sp.Start, sp.End = 0, -1
+			if line == e.FromLine {
+				sp.Start = e.FromCol
+			}
+			if line == e.ToLine {
+				sp.End = e.ToCol
+			}
+			sp.Scope = [2]int{e.ScopeStart, e.ScopeEnd}
+			w.top[i].conceals.push(sp, e.Priority, e.seq)
+		}
+	case SoftBreak:
+		if i, ok := at(e.FromLine); ok && w.top[i].softBreaks.wants(e.Priority, e.seq) {
+			w.top[i].softBreaks.push(SoftBreakMark{
+				Col: e.FromCol, Indent: e.Indent, PrefixText: e.PrefixText, PrefixStyle: e.PrefixStyle,
+				Priority: e.Priority, Activation: e.Activation, Scope: [2]int{e.ScopeStart, e.ScopeEnd},
+				ComposeOnly: e.ComposeOnly,
+			}, e.Priority, e.seq)
+		}
+	case CursorLine:
+		if i, ok := at(e.FromLine); ok && w.top[i].cursorLines.wants(e.Priority, e.seq) {
+			w.top[i].cursorLines.push(CursorLineOverlay{Style: e.Style, Priority: e.Priority}, e.Priority, e.seq)
+		}
 	}
 }
 
@@ -235,6 +289,9 @@ func (w *window) finish() {
 	for i := range w.lines {
 		l, t := &w.lines[i], &w.top[i]
 		l.Rows, l.Spans, l.EOL, l.Replaces = t.rows.sorted(), t.spans.sorted(), t.eol.sorted(), t.replaces.sorted()
+		l.Above, l.Below = t.above.sorted(), t.below.sorted()
+		l.Conceals, l.SoftBreaks = t.conceals.sorted(), t.softBreaks.sorted()
+		l.CursorLine = t.cursorLines.sorted()
 		*t = lineTop{}
 	}
 }

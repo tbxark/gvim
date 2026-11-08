@@ -53,6 +53,22 @@ func (h *clientHandler) PublishDiagnostics(_ context.Context, p *protocol.Publis
 	return nil
 }
 
+// WorkDoneProgressCreate acknowledges a server's request to create a progress
+// token. The editor shows progress as text from the $/progress notifications, so
+// the token only has to be accepted; a refused create would make the server skip
+// its progress reporting.
+func (h *clientHandler) WorkDoneProgressCreate(context.Context, *protocol.WorkDoneProgressCreateParams) error {
+	return nil
+}
+
+// Progress records one $/progress notification: begin adds an entry, report updates
+// it and end removes it. The entries are the bounded text list the diagnostics
+// panel shows. It runs on the read goroutine and only takes a mutex.
+func (h *clientHandler) Progress(_ context.Context, p *protocol.ProgressParams) error {
+	h.c.trackProgress(p)
+	return nil
+}
+
 // RegisterCapability records the providers the server registered dynamically.
 // Many servers advertise little or nothing in their initialize result and
 // register their providers here instead; without this the feature would stay
@@ -69,8 +85,11 @@ func (h *clientHandler) UnregisterCapability(_ context.Context, p *protocol.Unre
 	return nil
 }
 
-// WorkDoneProgressCreate accepts progress tokens. Progress is not displayed.
-func (h *clientHandler) WorkDoneProgressCreate(context.Context, *protocol.WorkDoneProgressCreateParams) error {
+// DiagnosticRefresh marks the workspace diagnostics cache stale: the server's
+// workspace/diagnostic result changed, so the next poll asks again. The refresh
+// request asks the client to re-pull; answering nil accepts it.
+func (h *clientHandler) DiagnosticRefresh(context.Context) error {
+	h.c.bumpCapabilitiesRevision()
 	return nil
 }
 

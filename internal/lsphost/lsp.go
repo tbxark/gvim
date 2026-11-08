@@ -123,6 +123,9 @@ type lspPort struct {
 	// document closes, or on a restart.
 	sem    map[string]semanticCache
 	pulled map[string]pulledDiagnostics
+	// wsPull caches the workspace/diagnostic answer: the pull is throttled and
+	// re-asked when the capabilities change or the set of open documents does.
+	wsPull workspacePull
 }
 
 // pendingEdit is one queued workspace/applyEdit request.
@@ -678,6 +681,22 @@ func (p *lspPort) Format(path, text string, tabSize int, insertSpaces bool) ([]e
 	return out, nil
 }
 
+// StartLanguage starts every configured server of language, a manual start that
+// overrides auto_start, lsp_enabled and the mute. It waits on the starts, so the
+// root and the settings service call it from a command.
+func (p *lspPort) StartLanguage(language string) error {
+	p.mu.Lock()
+	p.forced[language] = true
+	delete(p.muted, language)
+	mgrs := slices.Collect(maps.Values(p.managers))
+	p.mu.Unlock()
+	var errs []error
+	for _, mgr := range mgrs {
+		errs = append(errs, mgr.StartLanguage(language))
+	}
+	return errors.Join(errs...)
+}
+
 // Restart shuts down the servers of every root. The root reopens its documents
 // after it. A language named here counts as started by hand, so its servers start
 // at the next open whatever auto_start says.
@@ -691,6 +710,7 @@ func (p *lspPort) Restart(language string) error {
 	p.managers = make(map[string]*manager.Manager)
 	p.sem = make(map[string]semanticCache)
 	p.pulled = make(map[string]pulledDiagnostics)
+	p.wsPull = workspacePull{}
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)
 	defer cancel()
@@ -709,6 +729,7 @@ func (p *lspPort) Stop() error {
 	p.docs = make(map[string]lspDocRec)
 	p.sem = make(map[string]semanticCache)
 	p.pulled = make(map[string]pulledDiagnostics)
+	p.wsPull = workspacePull{}
 	p.pending = nil
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)

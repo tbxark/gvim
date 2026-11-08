@@ -2,8 +2,10 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -36,6 +38,9 @@ type FileEditResult struct {
 	Tabs int
 	// Opened is how many files were read and opened as unsaved tabs.
 	Opened int
+	// Operations is how many file operations (create, rename) a server's workspace
+	// edit applied.
+	Operations int
 	// Skipped names the files left alone, with the reason.
 	Skipped []string
 }
@@ -250,74 +255,176 @@ type workspaceFileOps interface {
 	DeleteFile(path string) error
 }
 
-// applyWorkspaceEdit applies a server's workspace edit: the file operations in a
-// command first, then the text edits through the shared multi-file helper. The
-// text edits of an open document whose protocol version has moved past the one the
-// edit was computed against are refused, and so is a whole edit that touches such
-// a document. report summarises the apply for the caller.
+// workspaceEditPlan is the ordered steps of one server's workspace edit. The
+// documentChanges run one at a time, in the order the server sent them, so a text
+// edit of a file a resource operation just created lands on that file, and a
+// refused operation stops the rest. A step that must read a file or touch the disk
+// pauses the plan until its command returns.
+type workspaceEditPlan struct {
+	ops    []WorkspaceOp
+	index  int
+	back   string
+	res    FileEditResult
+	report func(FileEditResult) tea.Cmd
+}
+
+// workspaceStepLoadedMsg is one closed file of a plan that was read.
+type workspaceStepLoadedMsg struct {
+	plan  *workspaceEditPlan
+	index int
+	doc   *editor.Document
+	err   error
+}
+
+// workspaceStepOpMsg is the result of one file operation of a plan. A non-empty
+// reason means the operation was refused or failed and the rest of the plan stops.
+type workspaceStepOpMsg struct {
+	plan   *workspaceEditPlan
+	index  int
+	reason string
+}
+
+// applyWorkspaceEdit applies a server's workspace edit: its documentChanges in the
+// order the server sent them, resource operations and text edits interleaved, a
+// text edit of a closed file read and opened as an unsaved tab as the rename and
+// code-action flows have always done. A refused or failed resource operation stops
+// the remaining changes of the edit and the partial state is reported; text edits
+// that fail their checks are skipped without stopping the rest. report summarises
+// the apply for the caller.
 func (m *Model) applyWorkspaceEdit(edit WorkspaceEdit, report func(FileEditResult) tea.Cmd) tea.Cmd {
-	var files []FileEdit
-	var resourceOps []WorkspaceOp
-	var stale []string
-	for _, op := range edit.Ops {
-		if op.Kind != WorkspaceOpText {
-			resourceOps = append(resourceOps, op)
-			continue
-		}
-		if op.Version != nil {
-			if tr := m.lsp.tracks[op.Path]; tr != nil && tr.lspVersionOK && tr.lspVersion != *op.Version {
-				stale = append(stale, op.Path)
+	back := ""
+	if doc := m.ed.Active(); doc != nil {
+		back = docPath(doc)
+	}
+	plan := &workspaceEditPlan{ops: slices.Clone(edit.Ops), back: back, report: report}
+	return m.runWorkspaceEdit(plan)
+}
+
+// runWorkspaceEdit runs the plan's steps until one needs a command, then returns
+// that command; the message it produces resumes the plan.
+func (m *Model) runWorkspaceEdit(plan *workspaceEditPlan) tea.Cmd {
+	for plan.index < len(plan.ops) {
+		op := plan.ops[plan.index]
+		if op.Kind == WorkspaceOpText {
+			path, open := m.openTabPath(op.Path)
+			if open {
+				m.applyWorkspaceTextStep(plan, op, path)
+				plan.index++
 				continue
 			}
-		}
-		var expect *editor.Version
-		if ve, ok := m.ed.(lspVersionedEditor); ok {
-			if v, ok := ve.DocumentVersion(op.Path); ok {
-				expect = &v
+			ge, ok := m.ed.(gotoEditor)
+			if !ok {
+				plan.res.Skipped = append(plan.res.Skipped, op.Path+": opening files is not supported in this port")
+				plan.index++
+				continue
+			}
+			index := plan.index
+			load := ge.LoadFunc(op.Path)
+			return func() tea.Msg {
+				doc, err := load()
+				return workspaceStepLoadedMsg{plan: plan, index: index, doc: doc, err: err}
 			}
 		}
-		files = append(files, FileEdit{Path: op.Path, Edits: op.Edits, Expect: expect})
-	}
-	if len(stale) > 0 {
-		m.notice = "The server's edit is for an older version of " + baseName(stale[0]) + ": not applied"
-		return nil
-	}
-	if len(resourceOps) == 0 {
-		return m.ApplyFileEdits(files, report)
-	}
-	ops, ok := m.ed.(workspaceFileOps)
-	if !ok {
-		m.notice = "This port cannot apply the file operations of a server edit"
-		return nil
-	}
-	return func() tea.Msg {
-		msg := workspaceOpsMsg{files: files, report: report}
-		for _, op := range resourceOps {
-			if reason := applyResourceOp(ops, op); reason != "" {
-				msg.skipped = append(msg.skipped, reason)
-			}
-		}
-		return msg
-	}
-}
-
-// workspaceOpsMsg is the result of the file operations of a workspace edit.
-type workspaceOpsMsg struct {
-	files   []FileEdit
-	skipped []string
-	report  func(FileEditResult) tea.Cmd
-}
-
-// workspaceOpsDone applies the text edits after the file operations.
-func (m *Model) workspaceOpsDone(msg workspaceOpsMsg) tea.Cmd {
-	m.lsp.stale = true
-	return m.ApplyFileEdits(msg.files, func(res FileEditResult) tea.Cmd {
-		res.Skipped = append(cloneStrings(msg.skipped), res.Skipped...)
-		if msg.report == nil {
+		ops, ok := m.ed.(workspaceFileOps)
+		if !ok {
+			m.notice = "This port cannot apply the file operations of a server edit"
 			return nil
 		}
-		return msg.report(res)
-	})
+		index := plan.index
+		return func() tea.Msg {
+			return workspaceStepOpMsg{plan: plan, index: index, reason: applyResourceOp(ops, op)}
+		}
+	}
+	return m.finishWorkspaceEdit(plan)
+}
+
+// applyWorkspaceTextStep applies one text operation to the open document at path.
+// The protocol version and the editor version are read now, when the step runs, so
+// several edits of one document in one server edit are each checked against the
+// text the earlier steps left, and a step computed against older text is skipped
+// without stopping the rest.
+func (m *Model) applyWorkspaceTextStep(plan *workspaceEditPlan, op WorkspaceOp, path string) {
+	if op.Version != nil {
+		if tr := m.lsp.tracks[path]; tr != nil && tr.lspVersionOK && tr.lspVersion != *op.Version {
+			plan.res.Skipped = append(plan.res.Skipped, path+": the server's edit is for an older version of the document")
+			return
+		}
+	}
+	var expect *editor.Version
+	if ve, ok := m.ed.(lspVersionedEditor); ok {
+		if v, ok := ve.DocumentVersion(path); ok {
+			expect = &v
+		}
+	}
+	if err := m.applyLSPEditsExpect(path, op.Edits, expect); err != nil {
+		plan.res.Skipped = append(plan.res.Skipped, path+": "+err.Error())
+		return
+	}
+	plan.res.Files++
+	plan.res.Tabs++
+}
+
+// workspaceStepLoaded opens the file a plan read and applies its text edits, then
+// runs the next step. The file stays unsaved, like every file an LSP edit opens.
+func (m *Model) workspaceStepLoaded(msg workspaceStepLoadedMsg) tea.Cmd {
+	plan := msg.plan
+	if plan == nil || plan.index != msg.index {
+		return nil
+	}
+	op := plan.ops[msg.index]
+	plan.index++
+	if msg.err != nil {
+		plan.res.Skipped = append(plan.res.Skipped, op.Path+": "+msg.err.Error())
+		return m.runWorkspaceEdit(plan)
+	}
+	ge, ok := m.ed.(gotoEditor)
+	if !ok {
+		plan.res.Skipped = append(plan.res.Skipped, op.Path+": opening files is not supported in this port")
+		return m.runWorkspaceEdit(plan)
+	}
+	ge.OpenLoaded(msg.doc)
+	if err := m.applyLSPEditsExpect(op.Path, op.Edits, nil); err != nil {
+		plan.res.Skipped = append(plan.res.Skipped, op.Path+": "+err.Error())
+		return m.runWorkspaceEdit(plan)
+	}
+	plan.res.Files++
+	plan.res.Tabs++
+	plan.res.Opened++
+	return m.runWorkspaceEdit(plan)
+}
+
+// workspaceStepOp records one file operation's result and runs the next step. A
+// refused operation stops the plan: the changes before it stay applied, the
+// remaining ones are reported as not applied, and the caller sees the partial
+// state rather than an edit that claims to have landed whole.
+func (m *Model) workspaceStepOp(msg workspaceStepOpMsg) tea.Cmd {
+	plan := msg.plan
+	if plan == nil || plan.index != msg.index {
+		return nil
+	}
+	plan.index++
+	if msg.reason != "" {
+		plan.res.Skipped = append(plan.res.Skipped, msg.reason)
+		if later := len(plan.ops) - plan.index; later > 0 {
+			plan.res.Skipped = append(plan.res.Skipped, fmt.Sprintf(
+				"%d later changes were not applied (the edit was only partly applied)", later))
+		}
+		plan.index = len(plan.ops)
+	} else {
+		plan.res.Operations++
+	}
+	return m.runWorkspaceEdit(plan)
+}
+
+// finishWorkspaceEdit restores the tab the edit started in, refreshes the view and
+// reports the summary.
+func (m *Model) finishWorkspaceEdit(plan *workspaceEditPlan) tea.Cmd {
+	if plan.back != "" {
+		m.activateTabPath(plan.back)
+	}
+	m.lsp.stale = true
+	m.syncViewport()
+	return finishFileEdits(plan.res, plan.report)
 }
 
 // applyResourceOp performs one file operation of a workspace edit. It returns the

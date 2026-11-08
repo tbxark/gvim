@@ -291,9 +291,9 @@ func TestBinaryBundledPluginsLoad(t *testing.T) {
 	e.opts.Bundled = nil
 	e.start()
 	// Plugins whose plugin.json says default_enabled: false stay off until the user turns them on.
-	// vi_mode ships with "default_enabled": false: found, but off until the configuration
-	// turns it on.
-	offByDefault := map[string]bool{"flash": true, "vi_mode": true}
+	// live_diff is opt-in like Fresh's; vi_mode ships with "default_enabled": false too, and
+	// git_log is off for the idle-heap gate (it pushed the default set over 8 MiB).
+	offByDefault := map[string]bool{"flash": true, "vi_mode": true, "live_diff": true, "git_log": true}
 	var names []string
 	for _, r := range e.h.RT.Plugins() {
 		switch {

@@ -203,3 +203,18 @@ func (s *FakeServer) FoldingRanges(ctx context.Context, p *protocol.FoldingRange
 	}
 	return s.Canned.FoldingRanges, nil
 }
+
+// RequestDiagnosticRefresh sends workspace/diagnostic/refresh to the client under test.
+func (s *FakeServer) RequestDiagnosticRefresh(ctx context.Context) error {
+	return s.client.DiagnosticRefresh(ctx)
+}
+
+// DiagnosticWorkspace records the params and answers with Canned.WorkspaceItems.
+func (s *FakeServer) DiagnosticWorkspace(ctx context.Context, p *protocol.WorkspaceDiagnosticParams) (*protocol.WorkspaceDiagnosticReport, error) {
+	RecordTo[any](s.Requests, p)
+	s.park(ctx)
+	if s.Canned.Fail {
+		return nil, ErrRefused
+	}
+	return &protocol.WorkspaceDiagnosticReport{Items: s.Canned.WorkspaceItems}, nil
+}

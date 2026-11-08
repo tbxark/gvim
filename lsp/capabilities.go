@@ -19,11 +19,14 @@ type Capabilities struct {
 	Diagnostics bool
 	// DiagnosticPull says the server also answers textDocument/diagnostic
 	// (server-pulled diagnostics), not only publishes them.
-	DiagnosticPull   bool
-	Completion       bool
-	CodeAction       bool
-	DocumentSymbols  bool
-	WorkspaceSymbols bool
+	DiagnosticPull bool
+	// DiagnosticWorkspace says the server answers workspace/diagnostic for the
+	// whole workspace, including files the editor never opened.
+	DiagnosticWorkspace bool
+	Completion          bool
+	CodeAction          bool
+	DocumentSymbols     bool
+	WorkspaceSymbols    bool
 
 	// Exclusive features: the first eligible server in handle order serves them.
 	Hover             bool
@@ -58,7 +61,6 @@ func summarizeCapabilities(c protocol.ServerCapabilities) Capabilities {
 	caps := Capabilities{
 		Initialized:       true,
 		Diagnostics:       true,
-		DiagnosticPull:    c.DiagnosticProvider != nil,
 		Completion:        c.CompletionProvider != nil,
 		SignatureHelp:     c.SignatureHelpProvider != nil,
 		Hover:             providerEnabled(c.HoverProvider),
@@ -72,6 +74,18 @@ func summarizeCapabilities(c protocol.ServerCapabilities) Capabilities {
 		FoldingRanges:     providerEnabled(c.FoldingRangeProvider),
 		InlayHints:        providerEnabled(c.InlayHintProvider),
 		DocumentHighlight: providerEnabled(c.DocumentHighlightProvider),
+	}
+	switch p := c.DiagnosticProvider.(type) {
+	case *protocol.DiagnosticOptions:
+		if p != nil {
+			caps.DiagnosticPull = true
+			caps.DiagnosticWorkspace = p.WorkspaceDiagnostics
+		}
+	case *protocol.DiagnosticRegistrationOptions:
+		if p != nil {
+			caps.DiagnosticPull = true
+			caps.DiagnosticWorkspace = p.WorkspaceDiagnostics
+		}
 	}
 	switch p := c.CodeActionProvider.(type) {
 	case *protocol.CodeActionOptions:
@@ -142,8 +156,10 @@ func applyRegistration(caps *Capabilities, method string, options protocol.LSPAn
 	switch method {
 	case "textDocument/publishDiagnostics":
 		caps.Diagnostics = true
-	case "textDocument/diagnostic", "workspace/diagnostic":
+	case "textDocument/diagnostic":
 		caps.Diagnostics, caps.DiagnosticPull = true, true
+	case "workspace/diagnostic":
+		caps.Diagnostics, caps.DiagnosticPull, caps.DiagnosticWorkspace = true, true, true
 	case "textDocument/completion":
 		caps.Completion = true
 	case "textDocument/codeAction":

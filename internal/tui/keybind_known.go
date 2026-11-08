@@ -28,5 +28,8 @@ func KnownActions() []string {
 	for a := range reentrantActions {
 		seen[a] = struct{}{}
 	}
+	for _, a := range overlayActionNames {
+		seen[a] = struct{}{}
+	}
 	return slices.Sorted(maps.Keys(seen))
 }

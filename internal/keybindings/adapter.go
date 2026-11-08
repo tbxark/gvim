@@ -92,11 +92,23 @@ func keyBinding(b keymap.Binding) tui.KeyBinding {
 
 // keymapContext maps a UI key context to its keymap when-clause.
 func keymapContext(ctx tui.KeyContext) keymap.Context {
-	if ctx == tui.KeyContextFileExplorer {
+	switch ctx {
+	case tui.KeyContextFileExplorer:
 		return keymap.ContextFileExplorer
-	}
-	if ctx == tui.KeyContextTerminal {
+	case tui.KeyContextTerminal:
 		return keymap.ContextTerminal
+	case tui.KeyContextPrompt:
+		return keymap.ContextPrompt
+	case tui.KeyContextSearchPrompt:
+		return keymap.ContextSearchPrompt
+	case tui.KeyContextPopup:
+		return keymap.ContextPopup
+	case tui.KeyContextMenu:
+		return keymap.ContextMenu
+	case tui.KeyContextSettings:
+		return keymap.ContextSettings
+	case tui.KeyContextDock:
+		return keymap.ContextDock
 	}
 	return keymap.ContextNormal
 }

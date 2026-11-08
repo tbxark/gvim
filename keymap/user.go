@@ -69,7 +69,10 @@ func ParseUserBindingsRaw(data []byte, known func(action string) bool) (own []Bi
 			err = fmt.Errorf("unknown action %q", b.Action)
 		}
 		if err == nil && !Consulted(b.When) {
-			err = fmt.Errorf("when %q is not used by gvim (keys run in normal, global, file_explorer and terminal)", b.When)
+			err = fmt.Errorf("when %q is not used by gvim (keys run in %s)", b.When, strings.Join(ConsultedNames(), ", "))
+		}
+		if err == nil && IsOverlayContext(b.When) && len(b.Sequence) > 0 {
+			err = fmt.Errorf("when %q takes single-key bindings only; sequences are skipped", b.When)
 		}
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("keybindings[%d]: %v; skipped", i, err))

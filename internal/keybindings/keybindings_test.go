@@ -341,3 +341,22 @@ func resolveWith(t *testing.T, km tui.Keymap, chord string) string {
 	}
 	return c.Action
 }
+
+func TestWarningsAcceptOverlayContexts(t *testing.T) {
+	cfg := config.Config{Keybindings: json.RawMessage(`[
+		{"key":"t","modifiers":["ctrl"],"action":"prompt_cancel","when":"prompt"},
+		{"key":"g","modifiers":["alt"],"action":"popup_cancel","when":"popup"},
+		{"key":"o","modifiers":["alt"],"action":"toggle_dock_focus","when":"dock"}
+	]`)}
+	if got := Warnings(cfg); len(got) != 0 {
+		t.Fatalf("warnings = %q, want the overlay contexts accepted", got)
+	}
+}
+
+func TestWarningsRejectOverlaySequences(t *testing.T) {
+	cfg := config.Config{Keybindings: json.RawMessage(`[{"keys":[{"key":"q"},{"key":"q"}],"action":"quit","when":"prompt"}]`)}
+	got := Warnings(cfg)
+	if len(got) != 1 || !strings.Contains(got[0], "takes single-key bindings only") {
+		t.Fatalf("warnings = %q, want the single-key warning", got)
+	}
+}

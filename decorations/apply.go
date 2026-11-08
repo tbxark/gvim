@@ -193,7 +193,7 @@ func (g *group) apply(sh shape) (removed int) {
 			e.id = 0 // marks the item for removal
 			drop = true
 			removed++
-		} else if e.Kind == Highlight || e.Kind == Scroll {
+		} else if e.Kind == Highlight || e.Kind == Scroll || e.Kind == Conceal {
 			g.maxSpan = max(g.maxSpan, e.ToLine-e.FromLine) // a line break inside a range widens it
 		}
 	}
@@ -215,8 +215,10 @@ func (g *group) apply(sh shape) (removed int) {
 // move moves the item through the edit and reports whether it survives.
 func (e *entry) move(sh shape) bool {
 	switch e.Kind {
-	case Highlight:
+	case Highlight, Conceal:
 		return e.moveRange(sh)
+	case CursorLine:
+		return true // the overlay is the caret's row, not a position on the text
 	case Scroll:
 		if e.ToLine != e.FromLine || e.ToCol != e.FromCol {
 			return e.moveRange(sh)

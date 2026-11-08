@@ -1,9 +1,9 @@
 # Bundled plugins
 
-gvim ships ten plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twelve plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
-`config.json` can override them). Eight are on by default; `flash` and `vi_mode` are off until you
-turn them on:
+`config.json` can override them). Eight are on by default; `flash`, `vi_mode`, `live_diff` and
+`git_log` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -18,9 +18,11 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `git_gutter` | on | Git Gutter: Refresh, Next Change, Previous Change | `debounce_ms` (300, 50 to 5000, project) |
 | `git_statusbar` | on | none (a status bar item) | none |
 | `git_find_file` | on | Git Find File, Git Find File: Reload | none |
+| `git_log` | **off** | Git Log, Git Log: Current File, Git Log: Close, Git Log: Refresh | none |
 | `git_blame` | on (idle until toggled) | Git: Toggle Blame, Git: Show Commit, Git: Copy Commit Hash | `debounce_ms` (150, 50 to 2000, project), `summary_width` (60, 10 to 200, project) |
 | `merge_conflict` | on | Merge: Start Resolution, Next Conflict, Previous Conflict, Use Ours, Take Theirs, Use Both, Resolve Conflict... | none |
 | `diagnostics_panel` | on | Show Diagnostics Panel, Toggle Diagnostics Panel | none |
+| `live_diff` | **off** | Live Diff: Toggle (Global), Live Diff: Toggle (Buffer), Live Diff: vs HEAD, Live Diff: vs Disk (unsaved changes), Live Diff: vs Branch..., Live Diff: vs Default Branch, Live Diff: Refresh, Live Diff: Set Default Mode... | `default_mode` (head), `default_branch` (main), `debounce_ms` (75, 10 to 5000, project), `max_virtual_lines` (2000), `max_overlay_lines` (20000) |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
 | `vi_mode` | **off** | Vi Mode: Toggle | `auto_start` (true), `arrow_keys`, `ctrl_keys`, `ignore_case`, `smart_case`, `shift_width`, `clipboard_yank`, `search_word_under_cursor`, `hlsearch` |
 
@@ -89,6 +91,35 @@ severity colours. The diagnostic *code* is not shown because gvim's LSP API carr
 no code. Like every bundled plugin it binds no key; bind `diagnostics_panel.toggle_diagnostics_panel`
 yourself.
 
+**git_log** (reduced to group-lite; Fresh's synthetic single-tab group is not ported): a magit-style
+history view built as a layout of three split panels -- a one-line hint strip, the commit log, and the
+selected commit's `git show --stat --patch`. The log rows carry Fresh's columns (short hash, relative
+date, author initials, subject, [refs]) and theme colours. Moving the log cursor (j/k, arrows,
+Page/Home/End) updates the detail after a 60 ms debounce; Enter on the log focuses the detail, Tab
+switches pane, Enter on a detail row opens that file at its new-side line (a read-only
+`git show <sha>:<path>` view), q/Esc closes, r refreshes and y copies the hash. The diff streams from
+`git show --stat --patch` and is killed and footer-truncated at 4 MiB / 20 000 lines; per-file diffs
+over 2000 changed lines are excluded with Fresh's footer, and every sha's diff is cached under
+`<data>/git_log/` with a completion marker, so revisiting a commit is zero-git. Reductions (also in
+init.lua and porting.md): the group is a layout of splits of the current tab and the panel buffers are
+also visible as tabs; the toolbar is a hint row, not clickable buttons; the log is a styled buffer
+whose cursor is the selection (a line decoration tints it), not a described List widget; the detail is
+raw git-show text carrying plugin decorations, not a host `.diff` background layer; there is no HEAD
+watcher (r refreshes, as Fresh's view). It is **off by default** for the idle-heap gate (see Memory).
+
+**live_diff** (with Fresh's diff_nav navigation surface): shows the open buffer against a baseline -- the
+file at git HEAD (default), the file currently on disk, or a chosen git branch/ref -- with per-buffer
+mode toggles and Fresh's eight Live Diff commands (no default keys). Added/modified new-side lines get
+a background in the theme's `editor.diff_*_bg` colours and + / ~ gutter glyphs, word-level changes are
+bold+underlined, and every hunk gets a scrollbar mark. The old side is fetched by the plugin
+(`git show` for HEAD/branch, an encoding-aware disk read for disk mode) and diffed with
+`gvim.diff`/Myers; word refinement runs in Lua under Fresh's caps. Large-file mode is refused with one
+notice, and the plugin is idle outside a repository. It watches the git directory and, in disk mode,
+the file itself, so commits and external writes refresh the diff. Deleted lines' old content and the -
+gutter glyph are tier-1c virtual rows: the store/API names landed in 1c-A, painting is the remaining
+host increment, so this round ships the reduced Fresh view (backgrounds + new-side word emphasis +
+gutter + scrollbar). It is opt-in like Fresh's live_diff.
+
 **The Markdown outline is not a plugin in gvim.** Fresh ships the Contents section as the bundled
 plugin `markdown_toc.ts`; gvim builds it into the TUI as the sidebar section under the File Explorer
 (`docs/sidebar.md`), so there is no Lua plugin to load, and the palette rows **Markdown: Show
@@ -155,15 +186,18 @@ Measured with the plugin set of this release (macOS arm64, Go 1.27, pure heap in
 
 | | Heap |
 |---|---|
-| the editor session without plugins | 1.85 MiB |
-| the same session with the 8 default-enabled plugins loaded and idle | about 8.4 MiB |
-| **cost of the default set** | **about 6.6 MiB** (gate: 8 MiB) |
+| the editor session without plugins | 1.89 MiB |
+| the same session with the 8 default-enabled plugins loaded and idle | about 8.6 MiB |
+| **cost of the default set** | **about 6.75 MiB** (gate: 8 MiB) |
 
-The gate passes, so no bundled plugin was flipped to `default_enabled: false` for memory. Per plugin, in
+The gate passes with the eight default-enabled plugins. `git_log` ships `default_enabled: false` because
+with it loaded too the same measurement read 8.68 MiB of idle heap, over the 8 MiB gate (the rule
+below); `live_diff` is opt-in like Fresh's. Per plugin, in
 a bare runtime that holds only that plugin (each figure includes about 0.3 MiB for the runtime itself, and
 the first one loaded pays for the shared prelude): `goto_with_selection` 0.6 MiB, `git_find_file` 0.7,
 `git_statusbar` 0.8, `tab_actions` 0.85, `diagnostics_panel` about 0.9 (measured as the rise of
-the default set when it joined it, not in a bare runtime), `git_gutter` 1.0, `git_blame` 1.15,
+the default set when it joined it, not in a bare runtime), `git_log` about 1.9 (the same kind of rise;
+that is why it is off), `git_gutter` 1.0, `git_blame` 1.15,
 `merge_conflict` 1.35, `flash` 1.55, and **`vi_mode` 6.9 MiB**. `vi_mode` is the one that would bust the
 budget (the default set plus vi would be about 13 MiB), which is why it is off by default; `flash` is off by
 default as well. If you do not use the git plugins, switching them off in the config saves about

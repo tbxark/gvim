@@ -111,6 +111,9 @@ type pluginState struct {
 	menus menus
 	// groups are the buffer groups and scroll-sync groups (plugin_groups.go).
 	groups pluginGroups
+	// folds are the plugin folding ranges (plugin_folds.go).
+	folds     pluginFolds
+	foldOrder int
 	// virtual records who made each virtual buffer (plugin_virtual.go).
 	virtual pluginVirtual
 

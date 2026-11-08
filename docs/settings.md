@@ -38,7 +38,27 @@ The sections are Interface, Display, Whitespace, Editing, Search, Explorer,
 Contents, Session, Mouse, Languages, Formatters, Status Bar, File Explorer and
 Terminal.
 The scalar rows cover the settings gvim reads today; the structured rows open
-the sub-pages of section 4.
+the sub-pages of section 4. The app adds the non-scalar rows the config schema
+cannot describe: the **Language Servers** page row (the LSP page: effective
+built-in/user/universal servers with their live manager state, manual
+start/stop/restart action rows, and each language's whole server array as
+validated JSON) and the read-only **Environment** rows (effective shell and its
+source, TERM/TERM_PROGRAM, the resolved icon set and why, OS/arch, the config
+files in use and the trust state). Those rows are injected by
+`internal/app/settingssvc.go`, never into `config.Settings()`, so the schema's
+reset and validation paths still describe scalar config keys only.
+
+Rows can be read-only or inherited: an `info` item is a fact that Enter/Del only
+explain; a structure row marked *locked* says why the layer cannot change it
+(Enter/Del show the reason), and a row marked *inherited* shows the value it
+inherits while Enter writes an override and Del is a no-op. Action rows run
+instead of editing: `ui:` closes the page and runs a TUI action (the Keybinding
+Editor), `act:` calls `SettingsPort.Act` from a command (LSP start/stop/restart).
+A list structure names its whole-array path so an empty list can still take its
+first item, and a JSON field validates with `json.Valid` and writes the raw JSON
+(not a quoted string). Structured pages that own arrays (on_save, an LSP server
+list) edit the whole array as JSON, because `config.PatchBytes` addresses objects
+and map keys, not array elements.
 
 `config/settings_structured.go` owns the structured knowledge: the 16 scalar
 per-language override fields (`LanguageOverrideFields`: `tab_size`,
@@ -231,6 +251,11 @@ starts). The LSP, plugin and large-file settings are not in the page at all yet
 do: setting the theme or the keymap while `--theme`/`--keymap` is given
 writes the file but does not apply the value, and the notice says the flag wins.
 
+**Live page actions.** The Language Servers page's start/stop/restart rows run
+through `SettingsPort.Act` from a command, not from a Save: they start or stop
+servers at once and then refresh the page, so the notice reports the outcome.
+They are not config edits. The Environment rows are facts, not settings.
+
 **Reload.** Save always reloads. The palette row **Reload Configuration**
 (`reload_config`, native row in `commands/settings_commands.go`; no default
 key) re-reads the config files from disk through the same path and applies the
@@ -244,10 +269,19 @@ method behind it.
 
 ## 6. What is deferred
 
-- the LSP section: it waits for the LSP config shape of the round-4 LSP work;
-- the plugins, keybindings and env-detector sections, and the per-language
-  structured values (extensions, filenames, grammar lists, `formatter`
-  args/stdin/timeout, `on_save`, `indent`): they stay Edit-raw only;
+- **R4-3 remainder (round 7 shipped a partial slice):** the Language Servers
+  page and the read-only Environment section are in. Still open: per-language
+  structured values (extensions/filenames, formatter fields, on_save, indent)
+  with the reset-vs-inherit display, the Plugins page (the plugin runtime's
+  inventory and Control are enough to list/toggle; its per-plugin settings
+  schema is not exposed yet), and the Keybindings page (editing stays in the
+  existing validated Keybinding Editor; a read-only effective list is next);
+- project-environment detection (`env.detectors`: venv/direnv/mise activation)
+  is not implemented; the Environment section says so;
+- an LSP server's fields are edited as the whole language array in JSON, not as
+  per-field dialogs (array elements cannot be patched one by one); the parsed
+  servers are shown read-only beside it, and `process_limits` is accepted,
+  shown, and not applied;
 - Fresh's two-button per-field distinction between "reset to the built-in
   default" and "inherit/unset", and a full per-change undo stack (the page has
   one reset per setting and Ctrl+R to discard everything);
@@ -273,11 +307,21 @@ opens the icon preview).
 | `internal/tui/ports.go` | `SettingsPort`, `SettingsSnapshot`, `SettingsItem`, `SettingsStructure`, `SettingEdit`, `SettingsChange` |
 | `internal/tui/settings.go` | the main page, reset, reload action, `applySettingsChange`, the settings messages |
 | `internal/tui/settings_structure.go` | the generic structured sub-page (map, list, fields, languages, dual) |
-| `internal/app/settingssvc.go` | the port implementation over the config files, the layer reader of the sub-pages, and the editor's live setters |
+| `internal/app/settingssvc.go` | the port implementation over the config files, the layer reader of the sub-pages, and the editor's live setters; `SettingsPort.Act` dispatch |
+| `internal/app/settings_runtime.go` | the page's optional live parts (LSP port, plugin runtime, effective keymap, icon resolution), the injected Language Servers/Environment rows and the Environment facts |
+| `internal/app/settings_lsp.go` | the Language Servers structures: effective servers from the built-in table + `lsp` + `universal_lsp`, live status, actions, whole-array JSON editing, project-layer locks |
+| `internal/tui/settings_actions.go` | the settings page's deferred TUI-action message and the Settings-overlay close helper |
 | `internal/app/run.go` | wires the port into the TUI |
 | `commands/settings_commands.go` | the native **Reload Configuration** palette row |
 
 ## 8. Tests
+
+`internal/tui/settings_plumbing_test.go` pins the new row/page machinery (info,
+locked, inherited, action, filter, empty-list path, JSON validation);
+`internal/app/settings_lsp_test.go` pins the Language Servers page (effective
+builtin/user/universal rows with live state, project-layer listing/locking and
+the config validation that refuses a project program but accepts a mute, and the
+start/restart/stop actions).
 
 - `config/patch_test.go` and `config/patch_remove_test.go`: comments/layout/
   trailing-comma style kept, unknown keys kept, parents created, missing file

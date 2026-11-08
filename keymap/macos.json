@@ -54,6 +54,13 @@
     {"key": "7", "modifiers": ["alt"], "action": "noop", "when": "normal"},
     {"key": "8", "modifiers": ["alt"], "action": "noop", "when": "normal"},
     {"key": "9", "modifiers": ["alt"], "action": "noop", "when": "normal"},
-    {"comment": "gvim: save as (Alt+S is the Selection menu accelerator)", "key": "s", "modifiers": ["alt","shift"], "action": "save_as", "when": "normal"}
+    {"comment": "gvim: save as (Alt+S is the Selection menu accelerator)", "key": "s", "modifiers": ["alt","shift"], "action": "save_as", "when": "normal"},
+    {"key": "a", "modifiers": ["ctrl"], "action": "prompt_move_start", "when": "prompt"},
+    {"key": "Left", "modifiers": ["alt"], "action": "prompt_move_word_left", "when": "prompt"},
+    {"key": "Right", "modifiers": ["alt"], "action": "prompt_move_word_right", "when": "prompt"},
+    {"key": "Backspace", "modifiers": ["alt"], "action": "prompt_delete_word_backward", "when": "prompt"},
+    {"key": "Delete", "modifiers": ["alt"], "action": "prompt_delete_word_forward", "when": "prompt"},
+    {"key": "g", "modifiers": ["ctrl"], "action": "find_next", "when": "searchPrompt"},
+    {"key": "g", "modifiers": ["ctrl", "alt"], "action": "find_previous", "when": "searchPrompt"}
   ]
 }

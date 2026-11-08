@@ -11,7 +11,7 @@ import (
 
 // knownTestActions is the action set the diagnostics tests validate against.
 func knownTestActions(a string) bool {
-	return slices.Contains([]string{"save", "quit", "goto_line", "to_upper_case", "quick_open"}, a)
+	return slices.Contains([]string{"save", "quit", "goto_line", "to_upper_case", "quick_open", "popup_cancel"}, a)
 }
 
 func TestWithUserBindings(t *testing.T) {
@@ -90,12 +90,24 @@ func TestWithUserBindings(t *testing.T) {
 			chord: "ctrl+s", ctx: keymap.ContextNormal, want: "save",
 		},
 		{
-			// Prompts and the other overlays answer their keys in code, so a binding there would
-			// never run. The entry is skipped with a warning and the key keeps its meaning.
+			// A context gvim does not consult: the entry is skipped with a warning and the key
+			// keeps its meaning.
 			name: "a context gvim does not consult is skipped with a warning", preset: "default",
-			data:  `[{"key":"s","modifiers":["ctrl"],"action":"quit","when":"prompt"}]`,
+			data:  `[{"key":"s","modifiers":["ctrl"],"action":"quit","when":"completion"}]`,
 			chord: "ctrl+s", ctx: keymap.ContextNormal, want: "save",
-			warnings: []string{`keybindings[0]: when "prompt" is not used by gvim (keys run in normal, global, file_explorer and terminal); skipped`},
+			warnings: []string{`keybindings[0]: when "completion" is not used by gvim (keys run in global, normal, prompt, searchPrompt, popup, menu, settings, file_explorer, terminal, dock); skipped`},
+		},
+		{
+			// The overlay contexts are consulted now: a binding there applies to the surface.
+			name: "an overlay context binding applies", preset: "default",
+			data:  `[{"key":"g","modifiers":["alt"],"action":"popup_cancel","when":"popup"}]`,
+			chord: "alt+g", ctx: keymap.ContextPopup, want: "popup_cancel",
+		},
+		{
+			// Overlay surfaces resolve one key at a time, so a sequence in their context cannot run.
+			name: "an overlay context sequence is skipped", preset: "default",
+			data:     `[{"keys":[{"key":"q"},{"key":"q"}],"action":"quit","when":"prompt"}]`,
+			warnings: []string{`keybindings[0]: when "prompt" takes single-key bindings only; sequences are skipped; skipped`},
 		},
 		{
 			name: "two entries for one chord: the later wins, with a warning", preset: "default",

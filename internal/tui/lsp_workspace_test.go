@@ -67,8 +67,10 @@ func TestWorkspaceEditAppliesTextAcrossFiles(t *testing.T) {
 	}
 }
 
-// TestWorkspaceEditRefusesStaleVersion checks the protocol version check: an edit
-// computed against an older document than the server now has is refused whole.
+// TestWorkspaceEditRefusesStaleVersion checks the protocol version check: a text
+// edit computed against an older document than the server now has is skipped (and
+// the rest of the edit still runs), as the ordered pipeline applies each step when
+// its turn comes.
 func TestWorkspaceEditRefusesStaleVersion(t *testing.T) {
 	port := newFakeLSP("go")
 	stale := int32(0)
@@ -198,3 +200,87 @@ func slicesEqual(a, b []string) bool {
 }
 
 var _ = tea.KeyPressMsg{}
+
+// TestWorkspaceEditInterleavesResourceOpsAndTextEdits checks the documentChanges
+// ordering: the steps run in the order the server sent them, so a file is created,
+// then read and edited, then renamed, and the log proves the order.
+func TestWorkspaceEditInterleavesResourceOpsAndTextEdits(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	lt.open()
+	port.workspace = []WorkspaceEdit{{Ops: []WorkspaceOp{
+		{Kind: WorkspaceOpCreate, Path: "/p/new.go"},
+		{Kind: WorkspaceOpText, Path: "/p/new.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, Text: "package new"}}},
+		{Kind: WorkspaceOpRename, Path: "/p/new.go", NewPath: "/p/moved.go"},
+	}}}
+	lt.drain(lt.m.lspPoll())
+	want := []string{
+		"create /p/new.go",
+		"load /p/new.go",
+		"open /p/new.go",
+		"edit /p/new.go",
+		"rename /p/new.go /p/moved.go",
+	}
+	if !slicesEqual(lt.ed.opLog, want) {
+		t.Fatalf("operation order = %v, want %v", lt.ed.opLog, want)
+	}
+	if got := lt.ed.applied["/p/new.go"]; len(got) != 1 || got[0].Text != "package new" {
+		t.Fatalf("created file edits = %+v, want the text edit", got)
+	}
+	if !strings.Contains(lt.m.notice, "1 files changed") && !strings.Contains(lt.m.notice, "1 file changed") {
+		t.Fatalf("notice = %q, want a changed-file count", lt.m.notice)
+	}
+}
+
+// TestWorkspaceEditStopsAfterARefusedOperation checks the failure model: a refused
+// resource operation stops the remaining documentChanges, and the notice reports
+// the partial state (what applied, how many later changes did not) instead of
+// claiming the edit landed whole.
+func TestWorkspaceEditStopsAfterARefusedOperation(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	lt.open()
+	port.workspace = []WorkspaceEdit{{Ops: []WorkspaceOp{
+		{Kind: WorkspaceOpDelete, Path: "/p/gone.go"},
+		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}}},
+		{Kind: WorkspaceOpCreate, Path: "/p/later.go"},
+	}}}
+	lt.drain(lt.m.lspPoll())
+	if len(lt.ed.applied["/p/a.go"]) != 0 {
+		t.Fatalf("text edit after a refused delete was applied: %+v", lt.ed.applied["/p/a.go"])
+	}
+	if len(lt.ed.fileOps) != 0 {
+		t.Fatalf("file operations after the refusal = %v, want none", lt.ed.fileOps)
+	}
+	for _, want := range []string{"delete /p/gone.go", "2 later changes were not applied", "only partly applied"} {
+		if !strings.Contains(lt.m.notice, want) {
+			t.Errorf("notice = %q, want it to contain %q", lt.m.notice, want)
+		}
+	}
+}
+
+// TestWorkspaceEditPartialSuccessBeforeARefusal checks the other side of the
+// partial state: the operations before the refused one stay applied, and the
+// notice counts them while saying the edit is only partial.
+func TestWorkspaceEditPartialSuccessBeforeARefusal(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	lt.open()
+	port.workspace = []WorkspaceEdit{{Ops: []WorkspaceOp{
+		{Kind: WorkspaceOpCreate, Path: "/p/first.go"},
+		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}}},
+		{Kind: WorkspaceOpDelete, Path: "/p/gone.go"},
+	}}}
+	lt.drain(lt.m.lspPoll())
+	if got := lt.ed.applied["/p/a.go"]; len(got) != 1 {
+		t.Fatalf("text edit before the refusal = %+v, want it applied", got)
+	}
+	if want := []string{"create /p/first.go"}; !slicesEqual(lt.ed.fileOps, want) {
+		t.Fatalf("file operations = %v, want %v", lt.ed.fileOps, want)
+	}
+	for _, want := range []string{"1 file changed", "1 file operation", "refused"} {
+		if !strings.Contains(lt.m.notice, want) {
+			t.Errorf("notice = %q, want it to contain %q", lt.m.notice, want)
+		}
+	}
+}

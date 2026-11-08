@@ -39,6 +39,29 @@ const (
 	Scroll
 	// Replace draws Text over the cell at (FromLine, FromCol).
 	Replace
+	// VirtualLineAbove inserts Text as a display row above line FromLine.
+	VirtualLineAbove
+	// VirtualLineBelow inserts Text as a display row below line FromLine.
+	VirtualLineBelow
+	// Conceal hides the cells of the range, optionally drawing Text in its first cells.
+	Conceal
+	// SoftBreak breaks the line at pos: the text after it continues on a new display row
+	// with Indent cells of indent and optional PrefixText.
+	SoftBreak
+	// CursorLine tints the caret's row (the item's line is not used).
+	CursorLine
+)
+
+// Activation says when a Conceal or SoftBreak is active. The zero value always is.
+type Activation uint8
+
+const (
+	// ActAlways applies the item on every line.
+	ActAlways Activation = iota
+	// ActUnlessCursorIn skips the item on the caret's line (Fresh's unless-cursor-in).
+	ActUnlessCursorIn
+	// ActIfCursorIn applies the item only on the caret's line (Fresh's if-cursor-in).
+	ActIfCursorIn
 )
 
 // Color is a theme key ("section.key"), a semantic name or a literal RGB value, as the
@@ -68,6 +91,55 @@ type Item struct {
 	Style                            Style
 	Color                            Color
 	Priority                         int
+	// Above puts a virtual line above its line (Kind VirtualLine* picks the side; Above is
+	// kept for the API shape).
+	Above bool
+	// GutterText/GutterStyle draw the virtual-line gutter cell when set.
+	GutterText  string
+	GutterStyle Style
+	// Activation and Scope apply to Conceal and SoftBreak.
+	Activation           Activation
+	ScopeStart, ScopeEnd int // display scope lines; ScopeEnd < ScopeStart means no scope
+	ComposeOnly          bool
+	// Indent/PrefixText/PrefixStyle shape a SoftBreak's continuation row.
+	Indent      int
+	PrefixText  string
+	PrefixStyle Style
+	// Collapsed/Placeholder seed a fold.
+	Collapsed   bool
+	Placeholder string
+	// TextOverlays are styled byte ranges within a virtual line's Text; only the first
+	// TextOverlayCount are used. A fixed array keeps Item comparable (the tests compare
+	// items), and a virtual line has few overlays anyway.
+	TextOverlays     [maxTextOverlays]TextOverlay
+	TextOverlayCount int
+}
+
+// maxTextOverlays bounds the styled ranges of one virtual line.
+const maxTextOverlays = 8
+
+// MaxTextOverlaysPerLine is the most styled ranges one virtual line carries.
+func MaxTextOverlaysPerLine() int { return maxTextOverlays }
+
+// TextOverlay is a styled byte range of a virtual line's text.
+type TextOverlay struct {
+	Start, End int
+	Style      Style
+}
+
+// Active reports whether the item applies on the caret line when inScope says its scope
+// holds. caret says the line is the caret's line.
+func (it Item) Active(caret, inScope bool) bool {
+	if !inScope {
+		return false
+	}
+	switch it.Activation {
+	case ActUnlessCursorIn:
+		return !caret
+	case ActIfCursorIn:
+		return caret
+	}
+	return true
 }
 
 // Edit is one change of a document, in byte columns: the text from (FromLine, FromCol) to
@@ -113,6 +185,43 @@ type VirtualText struct {
 	Priority int
 }
 
+// VirtualRow is one inserted display row (a virtual line above or below, or a folded
+// range's placeholder).
+type VirtualRow struct {
+	Text        string
+	Style       Style
+	GutterText  string
+	GutterStyle Style
+	Priority    int
+	// ComposeOnly rows show only in a composing pane (the page view).
+	ComposeOnly bool
+	// Overlays are styled byte ranges within Text.
+	Overlays []TextOverlay
+}
+
+// ConcealSpan is a concealed range of one line; Start/End are rune columns of the line.
+type ConcealSpan struct {
+	Start, End  int
+	Text        string // replacement, drawn from Start
+	Style       Style
+	Priority    int
+	Activation  Activation
+	Scope       [2]int // ScopeEnd < ScopeStart means no scope
+	ComposeOnly bool
+}
+
+// SoftBreakMark is a forced row boundary at rune column Col of a line.
+type SoftBreakMark struct {
+	Col         int
+	Indent      int
+	PrefixText  string
+	PrefixStyle Style
+	Priority    int
+	Activation  Activation
+	Scope       [2]int
+	ComposeOnly bool
+}
+
 // Mark is the cell that replaces the change bar of a line.
 type Mark struct {
 	Text     string
@@ -134,6 +243,12 @@ type Replacement struct {
 	Priority int
 }
 
+// CursorLineOverlay is the style of the caret row.
+type CursorLineOverlay struct {
+	Style    Style
+	Priority int
+}
+
 // LineDecor is everything the store holds for one line. Every slice is in painting order:
 // by priority, lowest first, and items of equal priority in the order they were added, so
 // the later one is drawn over the earlier. The slices are shared with the store: callers
@@ -145,11 +260,17 @@ type LineDecor struct {
 	Gutter   *Mark
 	Scroll   *ScrollMark
 	Replaces []Replacement
+	// The tier-1c decoration surface.
+	Above, Below []VirtualRow
+	Conceals     []ConcealSpan
+	SoftBreaks   []SoftBreakMark
+	CursorLine   []CursorLineOverlay
 }
 
 // IsZero reports whether the line has no decoration.
 func (d LineDecor) IsZero() bool {
-	return len(d.Rows) == 0 && len(d.Spans) == 0 && len(d.EOL) == 0 && d.Gutter == nil && d.Scroll == nil && len(d.Replaces) == 0
+	return len(d.Rows) == 0 && len(d.Spans) == 0 && len(d.EOL) == 0 && d.Gutter == nil && d.Scroll == nil && len(d.Replaces) == 0 &&
+		len(d.Above) == 0 && len(d.Below) == 0 && len(d.Conceals) == 0 && len(d.SoftBreaks) == 0 && len(d.CursorLine) == 0
 }
 
 // Store holds the decorations of all documents.
@@ -299,6 +420,16 @@ func normalize(it Item) (Item, bool) {
 		}
 	case Replace:
 		it.ToLine, it.ToCol = it.FromLine, it.FromCol
+	case Conceal:
+		if it.ToLine < it.FromLine || (it.ToLine == it.FromLine && it.ToCol < it.FromCol) {
+			it.FromLine, it.FromCol, it.ToLine, it.ToCol = it.ToLine, it.ToCol, it.FromLine, it.FromCol
+		}
+		if it.ToLine == it.FromLine && it.ToCol == it.FromCol {
+			return it, false
+		}
+	case SoftBreak, VirtualLineAbove, VirtualLineBelow, CursorLine:
+		it.FromLine = max(it.FromLine, 0)
+		it.ToLine, it.ToCol = it.FromLine, 0
 	default: // a line item
 		it.FromCol, it.ToLine, it.ToCol = 0, it.FromLine, 0
 	}
@@ -314,7 +445,7 @@ func (g *group) add(it Item, seq uint64) int {
 	if n := len(g.items); n > 1 && g.items[n-2].FromLine > it.FromLine {
 		g.sorted = false
 	}
-	if it.Kind == Highlight || it.Kind == Scroll {
+	if it.Kind == Highlight || it.Kind == Scroll || it.Kind == Conceal {
 		g.maxSpan = max(g.maxSpan, it.ToLine-it.FromLine)
 	}
 	return g.nextID
@@ -479,6 +610,44 @@ func (s *Store) Clear(doc uint64, owner, ns string) {
 	}
 	for id := range s.docs {
 		s.clearDoc(id, owner, func(g *group) bool { return g.ns == ns })
+	}
+}
+
+// ClearRange removes the items of (owner, ns) on the document that intersect the line range
+// [fromLine, toLine]. Document 0 means every document.
+func (s *Store) ClearRange(doc uint64, owner, ns string, fromLine, toLine int) {
+	s.flush(doc)
+	if toLine < fromLine {
+		fromLine, toLine = toLine, fromLine
+	}
+	clear := func(id uint64) {
+		d := s.docs[id]
+		if d == nil {
+			return
+		}
+		for _, g := range d.groups {
+			if g.owner != owner || g.ns != ns {
+				continue
+			}
+			before := g.size()
+			g.items = slices.DeleteFunc(g.items, func(e entry) bool {
+				last := e.lastLine()
+				return e.FromLine <= toLine && last >= fromLine
+			})
+			g.dead, g.index, g.sorted = 0, nil, false
+			if n := before - g.size(); n > 0 {
+				s.perOwner[owner] -= n
+				s.changed(d)
+			}
+		}
+		s.tidy(id)
+	}
+	if doc != 0 {
+		clear(doc)
+		return
+	}
+	for id := range s.docs {
+		clear(id)
 	}
 }
 

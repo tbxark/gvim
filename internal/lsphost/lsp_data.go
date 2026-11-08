@@ -3,8 +3,10 @@ package lsphost
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -22,6 +24,17 @@ type semanticCache struct {
 	version  int32
 	resultID string
 	data     []uint32
+}
+
+// workspacePull is the last workspace/diagnostic answer and the state it was taken
+// under: the time, the servers' capability revision and the number of open
+// documents. A change in any of them means the next poll asks again.
+type workspacePull struct {
+	files    map[string][]protocol.Diagnostic
+	at       time.Time
+	capsRev  uint64
+	docCount int
+	ok       bool
 }
 
 // pulledDiagnostics is the last server-pulled diagnostics of one document, kept so
@@ -252,9 +265,161 @@ func clampFoldRanges(ranges []protocol.FoldingRange, last int) []tui.FoldRange {
 	return out
 }
 
+// lspProgressCap is the most progress entries the editor shows at once, across all
+// servers. A server reports at most eight of its own; the workspace list is capped
+// again so the panel's header stays one line.
+const lspProgressCap = 8
+
+// Progress returns the live servers' unfinished progress entries, in server order
+// and capped. The entries are cleared when the server ends them, and stopping or
+// restarting the servers drops them with the clients.
+func (p *lspPort) Progress() []tui.LSPProgress {
+	p.mu.Lock()
+	mgrs := slices.Collect(maps.Values(p.managers))
+	p.mu.Unlock()
+	out := make([]tui.LSPProgress, 0, lspProgressCap)
+	for _, mgr := range mgrs {
+		for _, h := range mgr.AllHandles() {
+			for _, entry := range h.Client().Progress() {
+				out = append(out, tui.LSPProgress{
+					Server: h.Name(), Title: entry.Title, Message: entry.Message, Percentage: entry.Percentage,
+				})
+				if len(out) == lspProgressCap {
+					return out
+				}
+			}
+		}
+	}
+	return out
+}
+
+// lspWorkspacePullEvery is how often the port re-asks the servers for the whole
+// workspace's diagnostics. The workspace/diagnostic pull can be expensive, so it is
+// throttled; a capability change or the set of open documents changing asks sooner.
+// It is a variable so tests can shorten it.
+var lspWorkspacePullEvery = 5 * time.Second
+
+// workspaceDiagPerFileCap bounds the workspace-pulled diagnostics one file adds to
+// the store. A file with more keeps its most severe first, so a noisy server cannot
+// flood the panel or the fix list.
+const workspaceDiagPerFileCap = 50
+
+// workspacePulled returns the workspace/diagnostic answer, asking the capability
+// servers when the cached one is stale. The result is keyed by file path. A server
+// that does not advertise workspace diagnostics is not asked; a failed pull is
+// cached as empty until the next interval or capability change, so the poll does
+// not hammer it.
+func (p *lspPort) workspacePulled() map[string][]protocol.Diagnostic {
+	p.mu.Lock()
+	mgrs := make([]*manager.Manager, 0, len(p.managers))
+	for _, mgr := range p.managers {
+		mgrs = append(mgrs, mgr)
+	}
+	docCount := len(p.docs)
+	cache := p.wsPull
+	p.mu.Unlock()
+
+	rev := uint64(0)
+	for _, mgr := range mgrs {
+		for _, h := range mgr.AllHandles() {
+			if r := h.Client().CapabilitiesRevision(); r > rev {
+				rev = r
+			}
+		}
+	}
+	if cache.ok && time.Since(cache.at) < lspWorkspacePullEvery && cache.capsRev == rev && cache.docCount == docCount {
+		return cache.files
+	}
+
+	files := make(map[string][]protocol.Diagnostic)
+	for _, mgr := range mgrs {
+		for _, h := range mgr.AllHandles() {
+			if !h.Capabilities().DiagnosticWorkspace {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
+			items, err := h.Client().WorkspaceDiagnostics(ctx, nil)
+			cancel()
+			if err != nil {
+				continue
+			}
+			for _, item := range items {
+				if item.Unchanged || len(item.Items) == 0 {
+					continue
+				}
+				file := uri.URI(item.URI).FsPath()
+				files[file] = capWorkspaceDiagnostics(append(files[file], item.Items...))
+			}
+		}
+	}
+
+	p.mu.Lock()
+	p.wsPull = workspacePull{files: files, at: time.Now(), capsRev: rev, docCount: docCount, ok: true}
+	p.mu.Unlock()
+	return files
+}
+
+// capWorkspaceDiagnostics sorts the workspace-pulled diagnostics of one file most
+// severe first, removes exact duplicates and keeps the first
+// workspaceDiagPerFileCap.
+func capWorkspaceDiagnostics(items []protocol.Diagnostic) []protocol.Diagnostic {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]protocol.Diagnostic, 0, len(items))
+	for _, d := range items {
+		duplicate := false
+		for _, kept := range out {
+			if kept.Range == d.Range && kept.Severity == d.Severity &&
+				diagnosticText(kept.Message) == diagnosticText(d.Message) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			out = append(out, d)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b protocol.Diagnostic) int {
+		if a.Severity != b.Severity {
+			return int(a.Severity) - int(b.Severity)
+		}
+		if a.Range.Start.Line != b.Range.Start.Line {
+			return int(a.Range.Start.Line) - int(b.Range.Start.Line)
+		}
+		return int(a.Range.Start.Character) - int(b.Range.Start.Character)
+	})
+	if len(out) > workspaceDiagPerFileCap {
+		out = out[:workspaceDiagPerFileCap]
+	}
+	return out
+}
+
+// mergeWorkspaceDiagnostics merges the workspace-pulled files into the published
+// sets. A file the servers published for keeps its published set: the published
+// diagnostics are the live ones, and merging both would report the same problem
+// twice. The second map is the source of each file's set.
+func mergeWorkspaceDiagnostics(published, pulled map[string][]protocol.Diagnostic) (map[string][]protocol.Diagnostic, map[string]string) {
+	merged := make(map[string][]protocol.Diagnostic, len(published)+len(pulled))
+	source := make(map[string]string, len(merged))
+	for file, items := range published {
+		merged[file] = items
+		source[file] = "publish"
+	}
+	for file, items := range pulled {
+		if _, has := merged[file]; has {
+			continue
+		}
+		merged[file] = items
+		source[file] = "workspace"
+	}
+	return merged, source
+}
+
 // WorkspaceDiagnostics returns the stored diagnostics of every file a server
-// published them for, open or not, sorted by path. It is the view the diagnostics
-// panel lists.
+// reported on, open or not, sorted by path. It is the view the diagnostics panel
+// lists: the files the servers published for, plus the files a workspace/diagnostic
+// pull reported (the source says which). A file with both keeps its published set.
 func (p *lspPort) WorkspaceDiagnostics() []tui.FileDiagnostics {
 	p.mu.Lock()
 	mgrs := make([]*manager.Manager, 0, len(p.managers))
@@ -263,15 +428,16 @@ func (p *lspPort) WorkspaceDiagnostics() []tui.FileDiagnostics {
 	}
 	p.mu.Unlock()
 
-	byPath := make(map[string][]protocol.Diagnostic)
+	published := make(map[string][]protocol.Diagnostic)
 	for _, mgr := range mgrs {
 		for _, h := range mgr.AllHandles() {
 			for docURI, ev := range h.Client().DiagnosticsAll() {
 				file := uri.URI(docURI).FsPath()
-				byPath[file] = append(byPath[file], ev.Diagnostics...)
+				published[file] = append(published[file], ev.Diagnostics...)
 			}
 		}
 	}
+	byPath, source := mergeWorkspaceDiagnostics(published, p.workspacePulled())
 	files := make([]string, 0, len(byPath))
 	for file := range byPath {
 		files = append(files, file)
@@ -280,7 +446,11 @@ func (p *lspPort) WorkspaceDiagnostics() []tui.FileDiagnostics {
 	out := make([]tui.FileDiagnostics, 0, len(files))
 	for _, file := range files {
 		lines := newTextLines(p.textOf(file))
-		out = append(out, tui.FileDiagnostics{Path: file, Items: uiDiagnostics(lines, byPath[file])})
+		out = append(out, tui.FileDiagnostics{
+			Path:   file,
+			Items:  uiDiagnostics(lines, byPath[file]),
+			Source: source[file],
+		})
 	}
 	return out
 }

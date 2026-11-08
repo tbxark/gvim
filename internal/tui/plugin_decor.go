@@ -112,6 +112,17 @@ func (h *pluginHost) DecorRemove(plugin, ns string, id pluginapi.BufferID, item 
 	}
 }
 
+// DecorClearRange removes the namespace's items that intersect the line range.
+func (h *pluginHost) DecorClearRange(plugin, ns string, id pluginapi.BufferID, fromLine, toLine int) {
+	if st := h.m.plug.decor; st != nil {
+		st.ClearRange(uint64(id), plugin, ns, fromLine, toLine)
+		h.decorSweep()
+	}
+}
+
+// DecorRefreshLines is a no-op: painting reads the store every frame.
+func (h *pluginHost) DecorRefreshLines(pluginapi.BufferID) {}
+
 // DecorClear removes everything the namespace has on the buffer; buffer 0 means every
 // buffer.
 func (h *pluginHost) DecorClear(plugin, ns string, id pluginapi.BufferID) {
@@ -121,13 +132,14 @@ func (h *pluginHost) DecorClear(plugin, ns string, id pluginapi.BufferID) {
 	}
 }
 
-// plugDecorGone drops the decorations that the plugin (at generation gen) set. A reload
-// starts a new generation, and the new one sets what it needs again.
+// plugDecorGone drops the decorations and plugin folds that the plugin (at generation gen)
+// set. A reload starts a new generation, and the new one sets what it needs again.
 func (m *Model) plugDecorGone(plugin string, gen uint64) {
 	_ = gen
 	if m.plug.decor != nil {
 		m.plug.decor.DropOwner(plugin)
 	}
+	m.plug.folds.dropOwner(plugin)
 }
 
 func decorErr(err error) error {
@@ -168,9 +180,23 @@ func decorItem(h *pluginHost, id pluginapi.BufferID, info pluginapi.BufferInfo, 
 		return l, c
 	}
 	it := decorations.Item{
-		Style:    decorStyle(d.Style),
-		Color:    decorColor(d.Color),
-		Priority: d.Priority,
+		Style:       decorStyle(d.Style),
+		Color:       decorColor(d.Color),
+		Priority:    d.Priority,
+		Activation:  decorations.Activation(d.Activation),
+		ComposeOnly: d.ComposeOnly,
+		Indent:      d.Indent,
+		PrefixText:  d.PrefixText,
+		PrefixStyle: decorStyle(d.PrefixStyle),
+		GutterText:  d.GutterText,
+		GutterStyle: decorStyle(d.GutterStyle),
+		Collapsed:   d.Collapsed,
+		Placeholder: d.Placeholder,
+	}
+	if d.ScopeEnd >= d.ScopeStart {
+		it.ScopeStart, it.ScopeEnd = line(d.ScopeStart), line(d.ScopeEnd)
+	} else {
+		it.ScopeStart, it.ScopeEnd = 0, -1
 	}
 	switch d.Kind {
 	case pluginapi.DecorHighlight:
@@ -195,6 +221,33 @@ func decorItem(h *pluginHost, id pluginapi.BufferID, info pluginapi.BufferInfo, 
 	case pluginapi.DecorReplace:
 		it.Kind, it.Text = decorations.Replace, d.Text
 		it.FromLine, it.FromCol = pos(d.Pos)
+	case pluginapi.DecorVirtualLineAbove, pluginapi.DecorVirtualLineBelow:
+		it.Kind, it.FromLine, it.Text = decorations.VirtualLineAbove, line(d.Line), d.Text
+		if d.Kind == pluginapi.DecorVirtualLineBelow {
+			it.Kind = decorations.VirtualLineBelow
+		}
+		it.GutterText = d.GutterText
+		for i, ov := range d.TextOverlays {
+			if i >= decorations.MaxTextOverlaysPerLine() {
+				break
+			}
+			from, to := max(ov.Range.From.Col, 0), max(ov.Range.To.Col, 0)
+			if to < from {
+				from, to = to, from
+			}
+			it.TextOverlays[i] = decorations.TextOverlay{Start: from, End: to, Style: decorStyle(ov.Style)}
+			it.TextOverlayCount = i + 1
+		}
+	case pluginapi.DecorConceal:
+		it.Kind, it.Text = decorations.Conceal, d.Text
+		it.FromLine, it.FromCol = pos(d.Range.From)
+		it.ToLine, it.ToCol = pos(d.Range.To)
+	case pluginapi.DecorSoftBreak:
+		it.Kind = decorations.SoftBreak
+		it.FromLine, it.FromCol = pos(d.Pos)
+	case pluginapi.DecorCursorLine:
+		// The caret line is dynamic: one overlay per buffer, kept on line 0.
+		it.Kind, it.FromLine, it.FromCol = decorations.CursorLine, 0, 0
 	default:
 		return it, fmt.Errorf("unknown decoration kind %d", d.Kind)
 	}

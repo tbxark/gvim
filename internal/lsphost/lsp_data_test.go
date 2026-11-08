@@ -139,3 +139,65 @@ func TestClampFoldRanges(t *testing.T) {
 		t.Fatalf("ranges of an empty document = %+v, want none", got)
 	}
 }
+
+// TestCapWorkspaceDiagnostics checks the per-file bound: exact duplicates are
+// removed, the diagnostics are ordered most severe first, and a noisy file keeps
+// only the first workspaceDiagPerFileCap.
+func TestCapWorkspaceDiagnostics(t *testing.T) {
+	t.Parallel()
+	rng := func(line uint32) protocol.Range {
+		return protocol.Range{Start: protocol.Position{Line: line}, End: protocol.Position{Line: line, Character: 3}}
+	}
+	dup := protocol.Diagnostic{Range: rng(1), Severity: protocol.DiagnosticSeverityWarning, Message: protocol.String("same")}
+	items := []protocol.Diagnostic{
+		dup, dup,
+		{Range: rng(2), Severity: protocol.DiagnosticSeverityError, Message: protocol.String("bad")},
+		{Range: rng(0), Severity: protocol.DiagnosticSeverityInformation, Message: protocol.String("info")},
+	}
+	got := capWorkspaceDiagnostics(items)
+	if len(got) != 3 {
+		t.Fatalf("items = %+v, want the duplicate removed", got)
+	}
+	if got[0].Severity != protocol.DiagnosticSeverityError || got[1].Severity != protocol.DiagnosticSeverityWarning {
+		t.Fatalf("order = %v, want most severe first", got)
+	}
+	// The per-file cap keeps the most severe first.
+	big := make([]protocol.Diagnostic, 0, workspaceDiagPerFileCap+10)
+	for i := range workspaceDiagPerFileCap + 10 {
+		big = append(big, protocol.Diagnostic{
+			Range: rng(uint32(i)), Severity: protocol.DiagnosticSeverityHint, Message: protocol.String("hint"),
+		})
+	}
+	big[workspaceDiagPerFileCap+5].Severity = protocol.DiagnosticSeverityError
+	capped := capWorkspaceDiagnostics(big)
+	if len(capped) != workspaceDiagPerFileCap {
+		t.Fatalf("capped = %d items, want %d", len(capped), workspaceDiagPerFileCap)
+	}
+	if capped[0].Severity != protocol.DiagnosticSeverityError {
+		t.Fatal("the cap dropped the most severe diagnostic")
+	}
+}
+
+// TestMergeWorkspaceDiagnosticsPrecedence checks the store merge: a file the
+// servers published for keeps its published set (and is not reported twice), and a
+// workspace-only file is added with the workspace source.
+func TestMergeWorkspaceDiagnosticsPrecedence(t *testing.T) {
+	t.Parallel()
+	published := map[string][]protocol.Diagnostic{
+		"/p/a.go": {{Severity: protocol.DiagnosticSeverityError, Message: protocol.String("published")}},
+	}
+	pulled := map[string][]protocol.Diagnostic{
+		"/p/a.go": {{Severity: protocol.DiagnosticSeverityError, Message: protocol.String("pulled")}},
+		"/p/b.go": {{Severity: protocol.DiagnosticSeverityWarning, Message: protocol.String("pulled only")}},
+	}
+	merged, source := mergeWorkspaceDiagnostics(published, pulled)
+	if len(merged) != 2 {
+		t.Fatalf("merged = %d files, want 2", len(merged))
+	}
+	if got := diagnosticText(merged["/p/a.go"][0].Message); got != "published" {
+		t.Fatalf("a.go = %q, want the published set", got)
+	}
+	if source["/p/a.go"] != "publish" || source["/p/b.go"] != "workspace" {
+		t.Fatalf("sources = %v", source)
+	}
+}

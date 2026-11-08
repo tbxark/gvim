@@ -342,3 +342,39 @@ ns:set(buf, {
   Unloading a plugin clears all of its namespaces.
 * Large files cost nothing until painted: the editor asks per painted line.
 * `Style.strike` is accepted and stored but not drawn.
+
+### Virtual text surface (tier 1c-A)
+
+Beyond the anchored kinds above, a namespace accepts the virtual-text kinds, and convenience
+functions mirror Fresh's names (each takes a `Buffer` first and an `opts` table with
+`namespace` — default `"default"` — `priority`, `version` and the kind-specific fields):
+
+```text
+gvim.decor.add_virtual_line(buf, line, text, opts?)       -- A display row above (default) the line.
+gvim.decor.add_virtual_line_below(buf, line, text, opts?) -- A display row below the line.
+gvim.decor.add_conceal(buf, from, to, replacement?, opts?) -- Hide the range's cells, draw replacement.
+gvim.decor.add_soft_break(buf, pos, opts?)                -- Force a display row break at pos.
+gvim.decor.set_cursor_line_overlay(buf, style, opts?)     -- Tint the caret's row.
+gvim.decor.set_scrollbar_markers_in_range(buf, range, color, opts?) -- A ranged scrollbar mark.
+gvim.decor.clear_decorations(buf?, range?, opts?)         -- Clear a namespace, or its items in a line range.
+gvim.decor.refresh_lines(buf?)                            -- Kept for Fresh's shape; painting is per frame.
+gvim.decor.add_fold(buf, start_line, end_line, opts?)     -- One namespace-scoped folding range.
+gvim.decor.set_folding_ranges(buf, ranges, opts?)         -- Replace the namespace's folding ranges.
+gvim.decor.clear_folds(buf?, opts?)                       -- Remove them.
+```
+
+The matching `ns:set` item kinds are `virtual_line_above` / `virtual_line_below` (`line`,
+`text`, `style`, `gutter_glyph` one cell, `gutter_color`, `text_overlays = { {start=,
+["end"]=, style=}, ... }` styled byte ranges inside the virtual line's text), `conceal`
+(`range`, optional `replacement text`, `style`), `soft_break` (`pos`, `indent`, `prefix =
+{text=, style=}`) and `cursor_line_overlay` (`style`). `activation` is `"always"` (default),
+`"unless-cursor-in"` (skipped on the caret's line) or `"if-cursor-in"` (only there); `scope =
+{start_line=, end_line=}` bounds where it applies; `compose_only` shows the item only in a
+composing pane (the page view). Plugin folds are namespace-scoped, merged with the language
+server's and the outline's ranges, start collapsed or expanded from `collapsed` and can be
+toggled with the normal fold action; the placeholder shows on a collapsed range. Ordering:
+within the rows above or below one line, ascending priority (ties by insertion order) top to
+bottom; for the rows above, the last one is nearest the anchor line, and for the rows below the
+first one is. Caps: 64 virtual rows and 64 soft breaks per line, 256 conceal spans per line,
+2000 folding ranges per namespace, and the existing per-namespace/owner decoration quotas.
+

@@ -96,6 +96,9 @@ type CannedReplies struct {
 	// and nothing else.
 	Caps protocol.ServerCapabilities
 
+	// WorkspaceItems is what a workspace/diagnostic pull answers.
+	WorkspaceItems []protocol.WorkspaceDocumentDiagnosticReport
+
 	// PullItems and PullResultID are what a textDocument/diagnostic pull answers.
 	// PullUnchanged makes it answer "unchanged" instead of a full report.
 	PullItems     []protocol.Diagnostic
@@ -258,4 +261,15 @@ func (s *FakeServer) publish(u uri.URI, version int32, text string) error {
 		Version:     protocol.NewOptional(version),
 		Diagnostics: diags,
 	})
+}
+
+// CreateProgress sends the server's window/workDoneProgress/create request to the
+// client under test.
+func (s *FakeServer) CreateProgress(ctx context.Context, params *protocol.WorkDoneProgressCreateParams) error {
+	return s.client.WorkDoneProgressCreate(ctx, params)
+}
+
+// SendProgress sends one $/progress notification to the client under test.
+func (s *FakeServer) SendProgress(ctx context.Context, params *protocol.ProgressParams) error {
+	return s.client.Progress(ctx, params)
 }

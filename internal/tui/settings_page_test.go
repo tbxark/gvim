@@ -24,7 +24,12 @@ type fakeSettingsPort struct {
 	validErr      error
 	structures    map[string]SettingsStructure
 	structureKeys []string
+	acts          []fakeSettingsAct
+	actMessage    string
+	actErr        error
 }
+
+type fakeSettingsAct struct{ action, value string }
 
 type fakeSettingsSave struct {
 	edits []SettingEdit
@@ -52,6 +57,12 @@ func (f *fakeSettingsPort) Structure(key, layer string) (SettingsStructure, erro
 		return st, nil
 	}
 	return SettingsStructure{Key: key, Title: key}, nil
+}
+
+// Act records the structure action the page ran.
+func (f *fakeSettingsPort) Act(action, value string) (string, error) {
+	f.acts = append(f.acts, fakeSettingsAct{action: action, value: value})
+	return f.actMessage, f.actErr
 }
 
 // settingsSnapshot is the page fixture: three sections, an enum with choices, a

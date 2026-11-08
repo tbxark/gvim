@@ -58,6 +58,9 @@ type lspEd struct {
 	loadDocs map[string]*editor.Document
 	// externalFolds records the LSP folding ranges pushed into the editor.
 	externalFolds map[string][]fold.Range
+	// opLog records the file operations, loads and edits of the workspace-edit
+	// tests in order, to check the server's documentChanges order.
+	opLog []string
 }
 
 // HasFormatter reports whether the active buffer has a formatter, as the editor does.
@@ -121,6 +124,7 @@ func (e *lspEd) LoadFunc(path string) func() (*editor.Document, error) {
 		if e.loadErr != nil {
 			return nil, e.loadErr
 		}
+		e.opLog = append(e.opLog, "load "+path)
 		if d, ok := e.loadDocs[path]; ok {
 			return d, nil
 		}
@@ -131,23 +135,27 @@ func (e *lspEd) LoadFunc(path string) func() (*editor.Document, error) {
 // CreateFile records a workspace-edit file creation.
 func (e *lspEd) CreateFile(path string, _ bool) error {
 	e.fileOps = append(e.fileOps, "create "+path)
+	e.opLog = append(e.opLog, "create "+path)
 	return nil
 }
 
 // RenameFile records a workspace-edit rename.
 func (e *lspEd) RenameFile(oldPath, newPath string, _ bool) error {
 	e.fileOps = append(e.fileOps, "rename "+oldPath+" "+newPath)
+	e.opLog = append(e.opLog, "rename "+oldPath+" "+newPath)
 	return nil
 }
 
 // DeleteFile records and refuses a workspace-edit delete, as the editor port does.
 func (e *lspEd) DeleteFile(path string) error {
+	e.opLog = append(e.opLog, "delete "+path)
 	return errors.New("delete " + path + " was refused: a language server's edit does not delete files")
 }
 
 // OpenLoaded records the path of a document that LoadFunc read as opened.
 func (e *lspEd) OpenLoaded(d *editor.Document) {
 	e.opened = append(e.opened, d.Path)
+	e.opLog = append(e.opLog, "open "+d.Path)
 	for i, t := range e.tabs {
 		if t.path == d.Path {
 			e.active = i
@@ -178,6 +186,7 @@ func (e *lspEd) ApplyLSPEdits(path string, edits []editor.LSPEdit) error {
 		e.applied = map[string][]editor.LSPEdit{}
 	}
 	e.applied[path] = append(e.applied[path], edits...)
+	e.opLog = append(e.opLog, "edit "+path)
 	return nil
 }
 
@@ -253,6 +262,7 @@ type fakeLSP struct {
 	requests []string // "<path> <method> <params>" of every Request
 	reply    any      // the result of Request
 
+	progress       []LSPProgress
 	hints          []InlayHint
 	tokens         []SemanticToken
 	folds          []FoldRange
@@ -291,6 +301,10 @@ func (f *fakeLSP) Change(_, text string) (int32, error) {
 func (f *fakeLSP) Close(path string) error { f.closes = append(f.closes, path); return nil }
 func (f *fakeLSP) Restart(language string) error {
 	f.restarts++
+	f.restarted = append(f.restarted, language)
+	return nil
+}
+func (f *fakeLSP) StartLanguage(language string) error {
 	f.restarted = append(f.restarted, language)
 	return nil
 }
@@ -383,6 +397,9 @@ func (f *fakeLSP) FoldingRanges(string) ([]FoldRange, error) {
 
 // WorkspaceDiagnostics returns the canned diagnostics.
 func (f *fakeLSP) WorkspaceDiagnostics() []FileDiagnostics { return f.workspaceDiags }
+
+// Progress returns the canned progress entries.
+func (f *fakeLSP) Progress() []LSPProgress { return f.progress }
 
 // Request records the request and answers the canned result.
 func (f *fakeLSP) Request(path, method string, params any) (any, error) {

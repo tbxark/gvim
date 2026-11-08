@@ -450,3 +450,54 @@ func (c *Client) PullDiagnostics(ctx context.Context, docURI, previousResultID s
 		Unchanged: report.Kind == "unchanged",
 	}, nil
 }
+
+// WorkspaceDiagnosticItem is one file's diagnostics from a workspace/diagnostic
+// pull. Unchanged is set for a report that says the previous result still holds;
+// Items is then empty.
+type WorkspaceDiagnosticItem struct {
+	URI       string
+	Items     []protocol.Diagnostic
+	Version   *int32
+	ResultID  string
+	Unchanged bool
+}
+
+// WorkspaceDiagnostics asks for the whole workspace's diagnostics
+// (workspace/diagnostic), including files the editor has not opened. previous
+// maps a document URI to the result id of its last report; the server may answer
+// "unchanged" for those. A server that does not advertise workspace diagnostics
+// answers with an error, so the caller can fall back to the per-document sets.
+func (c *Client) WorkspaceDiagnostics(ctx context.Context, previous map[string]string) ([]WorkspaceDiagnosticItem, error) {
+	ids := make([]map[string]string, 0, len(previous))
+	for docURI, value := range previous {
+		ids = append(ids, map[string]string{"uri": docURI, "value": value})
+	}
+	params := map[string]any{"previousResultIds": ids}
+	raw, err := c.Request(ctx, "workspace/diagnostic", params)
+	if err != nil {
+		return nil, fmt.Errorf("lsp: workspace diagnostics: %w", err)
+	}
+	var report struct {
+		Items []struct {
+			URI      string                `json:"uri"`
+			Version  *int32                `json:"version"`
+			Kind     string                `json:"kind"`
+			ResultID string                `json:"resultId"`
+			Items    []protocol.Diagnostic `json:"items"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		return nil, fmt.Errorf("lsp: workspace diagnostics: bad report: %w", err)
+	}
+	out := make([]WorkspaceDiagnosticItem, 0, len(report.Items))
+	for _, item := range report.Items {
+		out = append(out, WorkspaceDiagnosticItem{
+			URI:       item.URI,
+			Items:     item.Items,
+			Version:   item.Version,
+			ResultID:  item.ResultID,
+			Unchanged: item.Kind == "unchanged",
+		})
+	}
+	return out, nil
+}

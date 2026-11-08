@@ -667,6 +667,11 @@ func (m *Model) routeMenu(msg tea.Msg) (bool, tea.Cmd) {
 		return false, nil
 	}
 	m.syncMenu()
+	if k, ok := msg.(tea.KeyPressMsg); ok && m.menu.IsOpen() {
+		if cmd, handled := m.menuKeymap(tea.Key(k)); handled {
+			return true, cmd
+		}
+	}
 	onLabel := isLabelPress(m.menu, msg)
 	if !m.menu.IsOpen() && !onLabel {
 		return false, nil
@@ -2662,6 +2667,13 @@ func (m *Model) pushOverlay(o Overlay) {
 // is no longer active is popped. Esc pops the top overlay and is not forwarded,
 // unless the overlay asks for it (see takesEscape).
 func (m *Model) routeOverlay(msg tea.Msg) tea.Cmd {
+	if k, ok := msg.(tea.KeyPressMsg); ok {
+		// The overlay contexts consult the keymap before the auto-cancel and the built-in
+		// handler; an unbound key falls through to both.
+		if cmd, handled := m.overlayKey(tea.Key(k)); handled {
+			return cmd
+		}
+	}
 	if k, ok := msg.(tea.KeyPressMsg); ok && m.overlayCancels(tea.Key(k)) {
 		if d, ok := m.overlays[len(m.overlays)-1].(interface{ Dismiss() }); ok {
 			d.Dismiss()

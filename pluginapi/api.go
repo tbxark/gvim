@@ -249,7 +249,36 @@ const (
 	DecorGutter                     // Line, Text (1 cell), Style (replaces the change-bar cell)
 	DecorScroll                     // Line or Range (lines), Color (scrollbar marker)
 	DecorReplace                    // Pos, Text, Style (draws over the full width of the cell at Pos)
+	// The tier-1c surface.
+	DecorVirtualLineAbove // Line, Text, Style; a display row above the line
+	DecorVirtualLineBelow // Line, Text, Style; a display row below the line
+	DecorConceal          // Range, Text (replacement), Style; hides the range's cells
+	DecorSoftBreak        // Pos, Indent, PrefixText/PrefixStyle; a forced display row break
+	DecorCursorLine       // Style; tints the caret's row (Line is ignored)
 )
+
+// Activation says when a conceal or soft-break item is active.
+type Activation uint8
+
+const (
+	ActAlways Activation = iota
+	ActUnlessCursorIn
+	ActIfCursorIn
+)
+
+// TextOverlay is a styled byte range inside a virtual line's text.
+type TextOverlay struct {
+	Range Range // from/to byte offsets within the virtual line's Text
+	Style Style
+}
+
+// FoldRange is one plugin folding range.
+type FoldRange struct {
+	Range       Range // zero-based lines; the end line is inclusive
+	Collapsed   bool  // the range starts collapsed (a togglable fold)
+	Placeholder string
+	Kind        string
+}
 
 // Decoration is one item of a decoration namespace. Columns are byte columns.
 type Decoration struct {
@@ -261,6 +290,21 @@ type Decoration struct {
 	Style    Style
 	Color    Color
 	Priority int
+	// The tier-1c fields.
+	Above       bool   // virtual line above (the kind already names the side)
+	GutterText  string // virtual line: the gutter cell
+	GutterStyle Style
+	Activation  Activation
+	// ScopeStart/ScopeEnd bound the lines an activation applies on; an end before the start
+	// means no scope (every line).
+	ScopeStart, ScopeEnd int
+	ComposeOnly          bool
+	Indent               int    // soft break: indent cells of the continuation row
+	PrefixText           string // soft break: text at the start of the continuation row
+	PrefixStyle          Style
+	Collapsed            bool // fold range
+	Placeholder          string
+	TextOverlays         []TextOverlay // virtual line: styled ranges within Text
 }
 
 // Key is one decoded key press.

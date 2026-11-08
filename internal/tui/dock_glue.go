@@ -135,6 +135,13 @@ func (m *Model) dockKey(k tea.Key, kp KeyPress) tea.Cmd {
 	if !m.dockRunning() {
 		return nil
 	}
+	// The dock's own keymap context resolves its UI keys (Fresh's dock context) before the
+	// terminal context and before the key goes to the shell.
+	if m.keys != nil && !m.dock.Capture() {
+		if cmd, ok := m.keys.Resolve(kp, KeyContextDock); ok {
+			return m.dispatch(cmd)
+		}
+	}
 	if m.keys != nil {
 		cmd, ok := m.keys.Resolve(kp, KeyContextTerminal)
 		if ok && (!m.dock.Capture() || cmd.Action == "toggle_keyboard_capture") {

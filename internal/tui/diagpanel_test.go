@@ -322,3 +322,116 @@ func rowTextOf(g *grid.Grid, y int) string {
 	}
 	return b.String()
 }
+
+// TestProgressInPanelHeaderAndEmptyState checks the text progress display: the
+// first $/progress entry is in the header (with a "+N more" suffix) and in the
+// panel's empty state, and it is gone when the server ends it.
+func TestProgressInPanelHeaderAndEmptyState(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"x"}})
+	lt.m.lsp.tracks = map[string]*lspTrack{}
+	lt.m.lsp.polling = false
+	lt.m.lsp.progress = []LSPProgress{
+		{Server: "gopls", Title: "Indexing", Message: "crates", Percentage: 42},
+		{Server: "gopls", Title: "Loading", Percentage: -1},
+	}
+	title := lt.m.diagHeaderTitle()
+	for _, want := range []string{"Diagnostics ·", "gopls: Indexing — crates 42%", "+1 more"} {
+		if !strings.Contains(title, want) {
+			t.Errorf("header = %q, want it to contain %q", title, want)
+		}
+	}
+	if got := lt.m.diagEmptyText(); !strings.Contains(got, "In progress:") || !strings.Contains(got, "Indexing") {
+		t.Fatalf("empty text = %q, want the progress line", got)
+	}
+
+	// The server ends its work: the next poll's empty list clears the display.
+	lt.m.lsp.progress = nil
+	if got := lt.m.diagHeaderTitle(); strings.Contains(got, "Indexing") {
+		t.Fatalf("header = %q after the progress ended", got)
+	}
+}
+
+// TestProgressComesFromThePollAndIsClearedOnStop checks the plumbing: the poll
+// carries the port's progress list, and stopping the servers empties it.
+func TestProgressComesFromThePollAndIsClearedOnStop(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"x"}})
+	lt.open()
+	port.progress = []LSPProgress{{Server: "gopls", Title: "Indexing", Percentage: 10}}
+	lt.drain(lt.m.lspPoll())
+	if len(lt.m.lsp.progress) != 1 || lt.m.lsp.progress[0].Title != "Indexing" {
+		t.Fatalf("progress = %+v, want the poll's entry", lt.m.lsp.progress)
+	}
+	lt.feed(lspServerMsg{action: "stop"})
+	if len(lt.m.lsp.progress) != 0 {
+		t.Fatalf("progress after stop = %+v, want none", lt.m.lsp.progress)
+	}
+}
+
+// TestProgressLineRendering checks the one-line format: server, title, message and
+// percentage, with the parts the server did not give left out.
+func TestProgressLineRendering(t *testing.T) {
+	tests := []struct {
+		name string
+		p    LSPProgress
+		want string
+	}{
+		{"title and message", LSPProgress{Server: "gopls", Title: "Indexing", Message: "crates", Percentage: 42}, "gopls: Indexing — crates 42%"},
+		{"title only", LSPProgress{Server: "gopls", Title: "Indexing", Percentage: -1}, "gopls: Indexing"},
+		{"message only", LSPProgress{Title: "Indexing", Message: "crates", Percentage: -1}, "Indexing — crates"},
+		{"no server", LSPProgress{Title: "Indexing", Percentage: 0}, "Indexing 0%"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := progressLine(tt.p); got != tt.want {
+				t.Fatalf("progressLine = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWorkspaceDiagnosticsRowMarksAndOpensAnUnopenedFile checks the workspace-pulled
+// rows: a file the server reported without the editor opening it is marked "(not
+// open)" in the panel and the list, and Enter opens it at the diagnostic.
+func TestWorkspaceDiagnosticsRowMarksAndOpensAnUnopenedFile(t *testing.T) {
+	port := newFakeLSP("go")
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"x"}})
+	lt.open()
+	lt.m.tree = newFakeTree(3)
+	lt.m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	lt.m.explorerOpen = true
+	diagStoreFixture(lt, FileDiagnostics{
+		Path:   "/p/unopened.go",
+		Source: "workspace",
+		Items:  []Diagnostic{{Start: buffer.Pos{Line: 2, Col: 1}, End: buffer.Pos{Line: 2, Col: 4}, Severity: 1, Message: "remote error"}},
+	})
+	lt.m.diag.open = true
+	lt.m.diag.collapsed = false
+	lt.m.diag.focus = true
+	lt.m.diag.sel = 0
+
+	l := lt.m.layout()
+	sec := findDiagSection(t, l)
+	g := grid.New(100, 30)
+	lt.m.paintDiagPanel(g, l, sec)
+	if header := lspRowText(g, sec.BodyTop); !strings.Contains(header, "unopened.go") || !strings.Contains(header, "(not open)") {
+		t.Fatalf("panel header = %q, want the file marked not open", header)
+	}
+
+	// The quickfix list marks it too.
+	lt.runMsgs(lt.act("open_diagnostics_list"))
+	v := overlayList(t, lt.m)
+	if len(v.Rows) == 0 || !v.Rows[0].Header || !strings.Contains(v.Rows[0].Left, "(not open)") {
+		t.Fatalf("list rows = %+v, want the header marked not open", v.Rows)
+	}
+	// A header row is not choosable; the diagnostic row below it jumps, opening the
+	// file through the shared goto.
+	lt.m.overlays = nil
+	lt.m.diag.sel = 0
+	cmd := lt.m.diagJump()
+	lt.settle(cmd, 4)
+	if len(lt.ed.opened) != 1 || lt.ed.opened[0] != "/p/unopened.go" {
+		t.Fatalf("opened = %v, want the unopened workspace file", lt.ed.opened)
+	}
+}

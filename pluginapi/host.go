@@ -156,6 +156,17 @@ type DecorHost interface {
 	DecorAdd(plugin, ns string, id BufferID, item Decoration, expect *Version) (int, error)
 	DecorRemove(plugin, ns string, id BufferID, item int)
 	DecorClear(plugin, ns string, id BufferID) // id 0: all buffers
+	// DecorClearRange removes the namespace's items that intersect the line range.
+	DecorClearRange(plugin, ns string, id BufferID, fromLine, toLine int)
+	// DecorSetFoldingRanges replaces the plugin's fold ranges for the buffer; the ranges are
+	// merged with the language server's and the outline's and the pane shows the folded
+	// bodies with the placeholder. Togglable ranges start collapsed/expanded from Collapsed
+	// and the user may toggle them. The plugin re-sets them after its content changes.
+	DecorSetFoldingRanges(plugin, ns string, id BufferID, ranges []FoldRange, expect *Version) error
+	DecorClearFolds(plugin, ns string, id BufferID) // id 0: all buffers
+	// DecorRefreshLines asks the editor to repaint the buffer's decorations. Painting reads
+	// the store every frame, so this is a no-op kept for Fresh's API shape.
+	DecorRefreshLines(id BufferID)
 }
 
 // WorkspaceHost is read access to the workspace and the theme.

@@ -23,10 +23,9 @@ func (k presetKeymap) Resolve(kp KeyPress, ctx KeyContext) (Command, bool) {
 	if err != nil {
 		return Command{}, false
 	}
-	kc := keymap.ContextNormal
-	if ctx == KeyContextFileExplorer {
-		kc = keymap.ContextFileExplorer
-	}
+	// The tui contexts carry the keymap when-clause values, so the cast names the
+	// context directly (file_explorer included).
+	kc := keymap.Context(ctx)
 	b, ok := k.km.Resolve(chord, kc)
 	if !ok {
 		return Command{}, false

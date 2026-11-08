@@ -29,8 +29,18 @@ import (
 // cannot record a sequence: write those in the config file.
 
 // kbContexts are the when-clauses the edit dialog cycles through: the contexts gvim resolves
-// keys in. A binding in another context would never run, so the editor does not offer one.
-var kbContexts = []string{"normal", "global", "file_explorer", "terminal"}
+// keys in. The editor keeps its own order — the editor contexts first, then the overlay
+// contexts, the file explorer and the terminal — so the first context offered stays Normal.
+// A binding in another context would never run, so the editor does not offer one.
+var kbContexts = func() []string {
+	out := []string{string(keymap.ContextNormal), string(keymap.ContextGlobal)}
+	for _, c := range keymap.ConsultedNames() {
+		if c != string(keymap.ContextNormal) && c != string(keymap.ContextGlobal) {
+			out = append(out, c)
+		}
+	}
+	return out
+}()
 
 const (
 	kbList    = iota // the table

@@ -79,6 +79,26 @@
     {"key": "g", "modifiers": ["ctrl"], "action": "focus_editor", "when": "file_explorer"},
     {"key": "Escape", "modifiers": [], "action": "focus_editor", "when": "file_explorer"},
     {"comment": "gvim: new file (Fresh's Emacs preset leaves New without a key)", "keys": [{"key": "x", "modifiers": ["ctrl"]}, {"key": "n", "modifiers": ["ctrl"]}], "action": "new", "when": "normal"},
-    {"comment": "gvim: fold or unfold at the cursor (Fresh has no fold key)", "keys": [{"key": "x", "modifiers": ["ctrl"]}, {"key": "f", "modifiers": []}], "action": "toggle_fold", "when": "normal"}
+    {"comment": "gvim: fold or unfold at the cursor (Fresh has no fold key)", "keys": [{"key": "x", "modifiers": ["ctrl"]}, {"key": "f", "modifiers": []}], "action": "toggle_fold", "when": "normal"},
+    {"comment": "Emacs Keys: prompt context", "key": "g", "modifiers": ["ctrl"], "action": "prompt_cancel", "when": "prompt"},
+    {"key": "a", "modifiers": ["ctrl"], "action": "prompt_move_start", "when": "prompt"},
+    {"key": "f", "modifiers": ["ctrl"], "action": "prompt_move_right", "when": "prompt"},
+    {"key": "b", "modifiers": ["ctrl"], "action": "prompt_move_left", "when": "prompt"},
+    {"key": "n", "modifiers": ["ctrl"], "action": "prompt_select_next", "when": "prompt"},
+    {"key": "p", "modifiers": ["ctrl"], "action": "prompt_select_prev", "when": "prompt"},
+    {"key": "d", "modifiers": ["ctrl"], "action": "prompt_delete", "when": "prompt"},
+    {"key": "d", "modifiers": ["alt"], "action": "prompt_delete_word_forward", "when": "prompt"},
+    {"key": "Backspace", "modifiers": ["alt"], "action": "prompt_delete_word_backward", "when": "prompt"},
+    {"key": "y", "modifiers": ["ctrl"], "action": "prompt_paste", "when": "prompt"},
+    {"key": "s", "modifiers": ["ctrl"], "action": "find_next", "when": "searchPrompt"},
+    {"key": "r", "modifiers": ["ctrl"], "action": "find_previous", "when": "searchPrompt"},
+    {"key": "n", "modifiers": ["ctrl"], "action": "popup_select_next", "when": "popup"},
+    {"key": "p", "modifiers": ["ctrl"], "action": "popup_select_prev", "when": "popup"},
+    {"key": "g", "modifiers": ["ctrl"], "action": "popup_cancel", "when": "popup"},
+    {"key": "n", "modifiers": ["ctrl"], "action": "menu_down", "when": "menu"},
+    {"key": "p", "modifiers": ["ctrl"], "action": "menu_up", "when": "menu"},
+    {"key": "f", "modifiers": ["ctrl"], "action": "menu_right", "when": "menu"},
+    {"key": "b", "modifiers": ["ctrl"], "action": "menu_left", "when": "menu"},
+    {"key": "g", "modifiers": ["ctrl"], "action": "menu_close", "when": "menu"}
   ]
 }

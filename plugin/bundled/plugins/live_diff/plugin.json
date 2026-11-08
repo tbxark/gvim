@@ -1,0 +1,7 @@
+{
+  "name": "live_diff",
+  "version": "1.0.0",
+  "description": "Show the buffer against a baseline (git HEAD, disk or a branch) with old lines above the edits, gutter indicators and scrollbar marks",
+  "api": 2,
+  "default_enabled": false
+}

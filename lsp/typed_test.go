@@ -402,3 +402,82 @@ func TestInitializeWithDiagnosticProvider(t *testing.T) {
 		t.Fatal("pull diagnostics off although the initialize result advertised diagnosticProvider")
 	}
 }
+
+func TestWorkspaceDiagnostics(t *testing.T) {
+	items := []protocol.Diagnostic{{
+		Range:    rng(0, 0, 0, 3),
+		Severity: protocol.DiagnosticSeverityError,
+		Message:  protocol.String("bad"),
+	}}
+	resultID := "r1"
+	version := int32(4)
+	f := newFixture(t, Config{}, nil)
+	ctx := newTestContext(t)
+	f.srv.Canned.WorkspaceItems = []protocol.WorkspaceDocumentDiagnosticReport{
+		&protocol.WorkspaceFullDocumentDiagnosticReport{
+			FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
+				Kind: string(protocol.DocumentDiagnosticReportKindFull), ResultID: &resultID, Items: items,
+			},
+			URI:     "file:///work/proj/b.go",
+			Version: &version,
+		},
+		&protocol.WorkspaceUnchangedDocumentDiagnosticReport{
+			UnchangedDocumentDiagnosticReport: protocol.UnchangedDocumentDiagnosticReport{
+				Kind: string(protocol.DocumentDiagnosticReportKindUnchanged), ResultID: "r2",
+			},
+			URI: "file:///work/proj/c.go",
+		},
+	}
+	got, err := f.client.WorkspaceDiagnostics(ctx, map[string]string{"file:///work/proj/c.go": "r1"})
+	if err != nil {
+		t.Fatalf("WorkspaceDiagnostics: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("items = %+v, want two reports", got)
+	}
+	if got[0].URI != "file:///work/proj/b.go" || got[0].Version == nil || *got[0].Version != 4 ||
+		len(got[0].Items) != 1 || got[0].Unchanged {
+		t.Fatalf("full report = %+v", got[0])
+	}
+	if !got[1].Unchanged || got[1].ResultID != "r2" {
+		t.Fatalf("unchanged report = %+v", got[1])
+	}
+	f.srv.Canned.Fail = true
+	if _, err := f.client.WorkspaceDiagnostics(ctx, nil); err == nil {
+		t.Fatal("a failing request answered without an error")
+	}
+}
+
+func TestDiagnosticWorkspaceCapability(t *testing.T) {
+	f := newFixture(t, Config{}, nil)
+	ctx := newTestContext(t)
+	f.srv.Canned.Caps = protocol.ServerCapabilities{
+		DiagnosticProvider: &protocol.DiagnosticOptions{WorkspaceDiagnostics: true},
+	}
+	if _, err := f.client.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	caps := f.client.Capabilities()
+	if !caps.DiagnosticPull || !caps.DiagnosticWorkspace {
+		t.Fatalf("caps = %+v, want pull and workspace diagnostics", caps)
+	}
+	// A dynamic registration of workspace/diagnostic also turns it on, and both a
+	// registration and a server refresh request bump the revision the workspace
+	// diagnostics cache watches.
+	before := f.client.CapabilitiesRevision()
+	if err := f.srv.RegisterCapability(ctx, &protocol.RegistrationParams{
+		Registrations: []protocol.Registration{{ID: "ws", Method: "workspace/diagnostic"}},
+	}); err != nil {
+		t.Fatalf("registerCapability: %v", err)
+	}
+	afterRegister := f.client.CapabilitiesRevision()
+	if afterRegister <= before {
+		t.Fatalf("revision = %d after the registration, want > %d", afterRegister, before)
+	}
+	if err := f.srv.RequestDiagnosticRefresh(ctx); err != nil {
+		t.Fatalf("diagnostic refresh: %v", err)
+	}
+	if got := f.client.CapabilitiesRevision(); got <= afterRegister {
+		t.Fatalf("revision = %d after workspace/diagnostic/refresh, want > %d", got, afterRegister)
+	}
+}

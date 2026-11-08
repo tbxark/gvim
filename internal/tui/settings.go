@@ -246,6 +246,14 @@ func (p *settingsPage) toggleReset() {
 		p.m.notice = "Settings: " + it.Name + " can only be set in the user config"
 		return
 	}
+	if it.Kind == "info" {
+		why := it.Note
+		if why == "" {
+			why = "read-only"
+		}
+		p.m.notice = "Settings: " + it.Name + " is read-only — " + why
+		return
+	}
 	if it.Kind == "page" {
 		p.m.notice = "Settings: open the " + it.Name + " page to reset its entries"
 		return
@@ -315,7 +323,7 @@ func (p *settingsPage) rebuild() {
 			shown := SettingsItem{
 				Key: it.Key, Path: slices.Clone(it.Path), Name: it.Name, Section: it.Section, Kind: it.Kind,
 				Value: value, Choices: it.Choices, Min: it.Min, Max: it.Max,
-				Apply: it.Apply, Layers: it.Layers,
+				Apply: it.Apply, Layers: it.Layers, Note: it.Note,
 			}
 			if needle != "" && !settingsMatches(shown, needle) {
 				continue
@@ -481,6 +489,14 @@ func (p *settingsPage) keepVisible() {
 func (p *settingsPage) edit() tea.Cmd {
 	it, ok := p.itemAt(p.sel)
 	if !ok {
+		return nil
+	}
+	if it.Kind == "info" {
+		why := it.Note
+		if why == "" {
+			why = "read-only"
+		}
+		p.m.notice = "Settings: " + it.Name + " is read-only — " + why
 		return nil
 	}
 	if !p.writable(it) {
@@ -894,6 +910,22 @@ func (m *Model) settingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		m.pushOverlay(newSettingsStructurePage(d.page, d.structure))
 		return nil, true
+	case settingsUIActionMsg:
+		m.closeSettingsOverlays()
+		cmd, _ := m.uiAction(d.action, nil)
+		return cmd, true
+	case settingsActDoneMsg:
+		if d.err != nil {
+			m.notice = "Settings: " + d.err.Error()
+			return nil, true
+		}
+		if d.message != "" {
+			m.notice = d.message
+		}
+		if d.page.Active() {
+			return d.page.requestSelf(), true
+		}
+		return nil, true
 	}
 	return nil, false
 }
@@ -1123,7 +1155,11 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 			name = "* " + name
 		}
 		value := it.Value
-		if !p.writable(it) {
+		if it.Kind == "info" {
+			if it.Note != "" {
+				value += " · " + it.Note
+			}
+		} else if !p.writable(it) {
 			name = it.Name + " (user layer)"
 		}
 		valueX := end - ansi.StringWidth(value)

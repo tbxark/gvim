@@ -830,6 +830,66 @@ gvim.ui.statusbar = {}
 ---@param spec {id: string, text?: string, align?: "left"|"right", priority?: integer, on_click?: fun()}
 ---@return StatusItem|nil, string?
 function gvim.ui.statusbar.item(spec) end
+-- tier-1c-A decoration surface: convenience wrappers over the namespace items above.
+---@param buf Buffer
+---@param line integer 0-based anchor line
+---@param text string
+---@param opts? {above?: boolean, style?: Style, gutter_glyph?: string, gutter_style?: Style, gutter_color?: Color, priority?: integer, compose_only?: boolean, activation?: "always"|"unless-cursor-in"|"if-cursor-in", scope?: {start_line?: integer, end_line?: integer}, text_overlays?: {start: integer, end: integer, style: Style}[], namespace?: string, version?: string}
+---@return integer|nil id, string?
+function gvim.decor.add_virtual_line(buf, line, text, opts) end
+---@param buf Buffer
+---@param line integer
+---@param text string
+---@param opts? table same as add_virtual_line, above is forced false
+---@return integer|nil, string?
+function gvim.decor.add_virtual_line_below(buf, line, text, opts) end
+---@param buf Buffer
+---@param from Pos
+---@param to Pos
+---@param replacement? string
+---@param opts? {style?: Style, activation?: "always"|"unless-cursor-in"|"if-cursor-in", scope?: {start_line?: integer, end_line?: integer}, compose_only?: boolean, priority?: integer, namespace?: string, version?: string}
+---@return integer|nil, string?
+function gvim.decor.add_conceal(buf, from, to, replacement, opts) end
+---@param buf Buffer
+---@param pos Pos
+---@param opts? {indent?: integer, prefix?: {text?: string, style?: Style}, activation?: string, scope?: table, compose_only?: boolean, priority?: integer, namespace?: string, version?: string}
+---@return integer|nil, string?
+function gvim.decor.add_soft_break(buf, pos, opts) end
+---@param buf Buffer
+---@param style Style|nil
+---@param opts? {namespace?: string, priority?: integer, version?: string}
+---@return integer|nil, string?
+function gvim.decor.set_cursor_line_overlay(buf, style, opts) end
+---@param buf Buffer
+---@param range Range half-open line range
+---@param color Color
+---@param opts? {namespace?: string, priority?: integer, version?: string}
+---@return integer|nil, string?
+function gvim.decor.set_scrollbar_markers_in_range(buf, range, color, opts) end
+---@param buf? Buffer
+---@param range? Range
+---@param opts? {namespace?: string}
+---@return true
+function gvim.decor.clear_decorations(buf, range, opts) end
+---@param buf? Buffer
+---@return true
+function gvim.decor.refresh_lines(buf) end
+---@param buf Buffer
+---@param start_line integer
+---@param end_line integer
+---@param opts? {placeholder?: string, collapsed?: boolean, fold_kind?: string, namespace?: string, version?: string}
+---@return true|nil, string?
+function gvim.decor.add_fold(buf, start_line, end_line, opts) end
+---@param buf Buffer
+---@param ranges {start_line: integer, end_line: integer, kind?: string, collapsed?: boolean, placeholder?: string}[]
+---@param opts? {namespace?: string, version?: string}
+---@return true|nil, string?
+function gvim.decor.set_folding_ranges(buf, ranges, opts) end
+---@param buf? Buffer
+---@param opts? {namespace?: string}
+---@return true
+function gvim.decor.clear_folds(buf, opts) end
+
 gvim.clipboard = {}
 ---@param text string
 ---@return true|nil, string?

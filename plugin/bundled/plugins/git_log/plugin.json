@@ -1,0 +1,7 @@
+{
+  "name": "git_log",
+  "version": "1.0.0",
+  "description": "Magit-style git history: a commit log, the selected commit's patch, and the files it changed",
+  "api": 2,
+  "default_enabled": false
+}

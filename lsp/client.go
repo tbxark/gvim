@@ -77,6 +77,12 @@ type Client struct {
 	diagMu    sync.Mutex
 	diagByURI map[string]DiagnosticsEvent
 
+	// progMu guards the $/progress entries the server reported and progOrder,
+	// their begin order. They are the editor's bounded progress list.
+	progMu    sync.Mutex
+	prog      map[string]progressEntry
+	progOrder []string
+
 	// applyEdit answers workspace/applyEdit; nil when the editor takes none.
 	applyEdit func(protocol.ApplyWorkspaceEditParams) bool
 	// initOptions answers workspace/configuration, and is what initialize sent.
@@ -86,7 +92,11 @@ type Client struct {
 	// result advertised, dyn holds the providers registered later by
 	// registration id, and caps is the two combined. The read goroutine writes
 	// them; request callers read them.
-	capMu     sync.Mutex
+	capMu sync.Mutex
+	// capsRev counts capability changes: a dynamic registration or unregistration,
+	// and a server's workspace/diagnostic/refresh request. A workspace-diagnostics
+	// cache compares it to know when to ask again.
+	capsRev   uint64
 	caps      Capabilities
 	capStatic Capabilities
 	dyn       map[string]dynRegistration
@@ -246,12 +256,31 @@ func (c *Client) Capabilities() Capabilities {
 	return c.caps
 }
 
+// CapabilitiesRevision returns a counter that changes whenever the server's
+// capabilities change: a dynamic registration or unregistration, or a
+// workspace/diagnostic/refresh request. A caller that caches work selected against
+// the capabilities compares it to know when the cache is stale.
+func (c *Client) CapabilitiesRevision() uint64 {
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
+	return c.capsRev
+}
+
+// bumpCapabilitiesRevision marks the capability snapshot as changed. It runs on
+// the connection's read goroutine.
+func (c *Client) bumpCapabilitiesRevision() {
+	c.capMu.Lock()
+	c.capsRev++
+	c.capMu.Unlock()
+}
+
 // registerCapabilities applies the providers the server registered with
 // client/registerCapability, so a server that advertises little statically can
 // still serve features it registers dynamically.
 func (c *Client) registerCapabilities(regs []protocol.Registration) {
 	c.capMu.Lock()
 	defer c.capMu.Unlock()
+	c.capsRev++
 	for _, reg := range regs {
 		dyn := dynRegistration{method: reg.Method, options: reg.RegisterOptions}
 		c.dyn[reg.ID] = dyn
@@ -264,6 +293,7 @@ func (c *Client) registerCapabilities(regs []protocol.Registration) {
 func (c *Client) unregisterCapabilities(regs []protocol.Unregistration) {
 	c.capMu.Lock()
 	defer c.capMu.Unlock()
+	c.capsRev++
 	for _, reg := range regs {
 		delete(c.dyn, reg.ID)
 	}

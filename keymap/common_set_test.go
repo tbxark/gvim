@@ -18,31 +18,37 @@ var presetNames = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 // (keymap.ConsultedContexts), plus the gvim-specific keys TestGvimExtensions lists; a
 // change to any count must be argued for here.
 //
-//	default     file 197  held 197  in effect 195  global 13 normal 146 explorer 30 terminal 6
-//	macos       file  53  held 250  in effect 211  global 13 normal 160 explorer 30 terminal 8
-//	macos-gui   file  50  held 300  in effect 260  global 15 normal 204 explorer 32 terminal 9
-//	emacs       file  78  held 275  in effect 242  global 13 normal 191 explorer 32 terminal 6
-//	vscode      file   9  held 206  in effect 200  global 13 normal 151 explorer 30 terminal 6
+//	default     file 245  held 245  in effect 243  global 13 normal 146 prompt 23 searchPrompt 7 popup 6 menu 6 settings 3 explorer 30 terminal 6 dock 3
+//	macos       file  60  held 305  in effect 266  global 13 normal 160 prompt 28 searchPrompt 9 popup 6 menu 6 settings 3 explorer 30 terminal 8 dock 3
+//	macos-gui   file  52  held 357  in effect 317  global 15 normal 204 prompt 28 searchPrompt 11 popup 6 menu 6 settings 3 explorer 32 terminal 9 dock 3
+//	emacs       file  98  held 343  in effect 309  global 13 normal 191 prompt 32 searchPrompt 9 popup 9 menu 11 settings 3 explorer 32 terminal 6 dock 3
+//	vscode      file   9  held 254  in effect 248  global 13 normal 151 prompt 23 searchPrompt 7 popup 6 menu 6 settings 3 explorer 30 terminal 6 dock 3
 //
 // The held count is larger than the file plus the parent's file because the parent's
 // overridden bindings are kept in file order (the last one wins), and "in effect" is
 // smaller than held because overrides and Fresh's repeated dedent aliases leave one
 // binding per context and chord.
 var presetCounts = []struct {
-	name      string
-	held      int
-	effective int
-	global    int
-	normal    int
-	explorer  int
-	terminal  int
-	file      int
+	name         string
+	held         int
+	effective    int
+	global       int
+	normal       int
+	prompt       int
+	searchPrompt int
+	popup        int
+	menu         int
+	settings     int
+	explorer     int
+	terminal     int
+	dock         int
+	file         int
 }{
-	{"default", 197, 195, 13, 146, 30, 6, 197},
-	{"macos", 250, 211, 13, 160, 30, 8, 53},
-	{"macos-gui", 300, 260, 15, 204, 32, 9, 50},
-	{"emacs", 275, 242, 13, 191, 32, 6, 78},
-	{"vscode", 206, 200, 13, 151, 30, 6, 9},
+	{"default", 245, 243, 13, 146, 23, 7, 6, 6, 3, 30, 6, 3, 245},
+	{"macos", 305, 266, 13, 160, 28, 9, 6, 6, 3, 30, 8, 3, 60},
+	{"macos-gui", 357, 317, 15, 204, 28, 11, 6, 6, 3, 32, 9, 3, 52},
+	{"emacs", 343, 309, 13, 191, 32, 9, 9, 11, 3, 32, 6, 3, 98},
+	{"vscode", 254, 248, 13, 151, 23, 7, 6, 6, 3, 30, 6, 3, 9},
 }
 
 func TestPresetBindingCounts(t *testing.T) {
@@ -72,8 +78,14 @@ func TestPresetBindingCounts(t *testing.T) {
 			}{
 				{keymap.ContextGlobal, tc.global},
 				{keymap.ContextNormal, tc.normal},
+				{keymap.ContextPrompt, tc.prompt},
+				{keymap.ContextSearchPrompt, tc.searchPrompt},
+				{keymap.ContextPopup, tc.popup},
+				{keymap.ContextMenu, tc.menu},
+				{keymap.ContextSettings, tc.settings},
 				{keymap.ContextFileExplorer, tc.explorer},
 				{keymap.ContextTerminal, tc.terminal},
+				{keymap.ContextDock, tc.dock},
 			}
 			for _, c := range contexts {
 				if got := len(seen[c.ctx]); got != c.want {
@@ -95,10 +107,10 @@ func TestPresetBindingCounts(t *testing.T) {
 	}
 }
 
-// TestEveryBindingIsInAConsultedContext: gvim resolves keys in global, normal,
-// file_explorer and terminal only. A preset that names prompt, popup, menu, settings,
-// searchPrompt, completion, compositeBuffer or dock would be skipped with a startup
-// warning and would never run, so the files must not name them.
+// TestEveryBindingIsInAConsultedContext: gvim resolves keys in the editor contexts, the
+// file explorer, the terminal, and the overlay contexts whose surfaces consult the keymap
+// (prompt, searchPrompt, popup, menu, settings, dock); completion and compositeBuffer are
+// not resolved, so the presets must not name them.
 func TestEveryBindingIsInAConsultedContext(t *testing.T) {
 	for _, name := range presetNames {
 		for _, b := range mustPreset(t, name).Bindings() {

@@ -744,9 +744,9 @@ func TestKeybindingEditorDialogCardFrame(t *testing.T) {
 	}
 }
 
-// TestEditorListsOnlyContextsGvimResolves: a binding in a context gvim never resolves (a prompt
-// or a popup answers its keys in code) is not a row, so the editor does not offer a key that
-// does nothing. The rows are the ones the root can run.
+// TestEditorListsOnlyContextsGvimResolves: only bindings in a context gvim resolves are rows,
+// so the editor never offers a key that does nothing. The overlay contexts count: the root
+// consults the keymap for the prompt and the find bar before their built-in handlers.
 func TestEditorListsOnlyContextsGvimResolves(t *testing.T) {
 	base := append(slices.Clone(editorBase),
 		KeyBinding{Action: "prompt_move_start", Chord: "ctrl+a", Context: "prompt"},
@@ -765,8 +765,8 @@ func TestEditorListsOnlyContextsGvimResolves(t *testing.T) {
 			t.Errorf("the editor lists %s in %s, a context gvim does not resolve", r.action, r.context)
 		}
 	}
-	if len(e.rows) != 5 {
-		t.Errorf("rows = %d, want the four editorBase rows and the file-explorer row", len(e.rows))
+	if len(e.rows) != 7 {
+		t.Errorf("rows = %d, want the four editorBase rows, the prompt row, the searchPrompt row and the file-explorer row", len(e.rows))
 	}
 }
 

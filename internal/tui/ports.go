@@ -183,6 +183,10 @@ type LSPSession interface {
 	// server reported them for, open or not, sorted by path. The diagnostics
 	// panel lists them.
 	WorkspaceDiagnostics() []FileDiagnostics
+	// Progress returns the live servers' unfinished $/progress entries, as text,
+	// in server order and capped across the workspace. The diagnostics panel shows
+	// them; there is no animation.
+	Progress() []LSPProgress
 	// InlayHints returns the inlay hints of the document at path.
 	InlayHints(path string) ([]InlayHint, error)
 	// SemanticTokens returns the semantic tokens of the document's lines
@@ -224,6 +228,10 @@ type LSPSession interface {
 	// what failed through pluginapi codes: a document that is not open is CodeNotFound, a
 	// request that outlived its time limit is CodeTimeout.
 	Request(path, method string, params any) (any, error)
+	// StartLanguage starts every configured server of the language, a manual start
+	// that overrides auto_start, lsp_enabled and the mute. It may wait on the
+	// servers, so call it from a command.
+	StartLanguage(language string) error
 	// Restart shuts down the servers. The root reopens its documents after it. A
 	// language named here also counts as started by hand, so its servers run
 	// whatever auto_start says.
@@ -277,11 +285,23 @@ type FoldRange struct {
 	StartLine, EndLine int
 }
 
+// LSPProgress is one unfinished progress entry a language server reported with
+// $/progress. It is shown as text; Percentage is -1 when the server gave none.
+type LSPProgress struct {
+	Server     string
+	Title      string
+	Message    string
+	Percentage int
+}
+
 // FileDiagnostics is the stored diagnostics of one file, for the diagnostics
-// panel. Items are in the order the server sent them.
+// panel. Items are in the order the server sent them. Source is "publish" for the
+// sets the servers published, and "workspace" for a file that came from a
+// workspace/diagnostic pull (usually a file that is not open).
 type FileDiagnostics struct {
-	Path  string
-	Items []Diagnostic
+	Path   string
+	Items  []Diagnostic
+	Source string
 }
 
 // Diagnostic is one problem in a document. Start and End are its rune range, and
@@ -603,9 +623,15 @@ type SettingsPort interface {
 	Apply(change SettingsChange)
 	// Structure returns the sub-page of the structured setting structureKey for
 	// the layer: the formatters map, the language entry list, the scalar fields of
-	// one language, the status-bar element lists, or terminal.shell.args. It reads
+	// one language, the status-bar element lists, terminal.shell.args, the LSP
+	// servers of a language, or the plugin/keybinding/environment pages. It reads
 	// the layer's file, so the page calls it from a tea.Cmd.
 	Structure(structureKey, layer string) (SettingsStructure, error)
+	// Act runs a structure page's action on the service's live parts: an LSP
+	// server start, stop or restart, a plugin enable or reload. It may do IO and
+	// block, so the page calls it from a tea.Cmd, never from Update. The message
+	// is the notice the page shows; err is why the action failed.
+	Act(action, value string) (message string, err error)
 }
 
 // The config layers the Settings page can write.
@@ -628,6 +654,9 @@ type SettingsItem struct {
 	Max     int
 	Apply   string   // "live" when a saved value applies at once, "restart" when it needs a restart
 	Layers  []string // the layers the setting may be written in: "user", maybe "project"
+	// Note is a short explanation of a read-only row (Kind "info"), drawn after
+	// the value: where the fact comes from, or why the row cannot be edited.
+	Note string
 }
 
 // SettingsSection is one group of the Settings page, such as Display.
@@ -669,10 +698,21 @@ type SettingEdit struct {
 type SettingsStructure struct {
 	Key       string // structure id, for example "formatters" or "languages.go"
 	Title     string
-	Kind      string // "map", "list", "dual", "languages" or "fields"
+	Kind      string // "map", "list", "dual", "languages", "fields" or "entries"
 	AddLabel  string // the label of the add row; empty when the structure cannot add
 	Rows      []SettingsStructureRow
 	Available []string
+	// Path is the whole-array config path of a "list" structure (for example
+	// ["terminal","shell","args"]), used to write the list even when it is empty.
+	// A map or fields structure derives its paths from the rows instead.
+	Path []string
+	// Note is a page-level hint drawn under the title, such as the legend of the
+	// LSP status column or why the page is read-only.
+	Note string
+	// Filter lists the page's rows through a typed filter string (the Keybindings
+	// list): printable keys narrow it, Backspace shortens it and Esc clears it
+	// before it closes the page.
+	Filter bool
 }
 
 // SettingsStructureRow is one row of a structure sub-page. Group separates the
@@ -687,6 +727,24 @@ type SettingsStructureRow struct {
 	Min     int
 	Max     int
 	Child   string // structure id this row opens, for a language entry row
+	// Locked marks a row the current layer may not change; Note says why (for
+	// example "user layer only" or "the project may only disable it"). Enter and
+	// Del show the reason.
+	Locked bool
+	// Inherited marks a row whose value is inherited rather than set in the
+	// layer: the page shows it distinctly, Enter writes an override and Del is a
+	// no-op notice.
+	Inherited bool
+	// Note is a short suffix drawn after the value: where the value comes from
+	// (builtin, user, universal) or the live state of the thing the row names.
+	Note string
+	// Action runs something instead of editing the row: "ui:<action>" runs a TUI
+	// action (the keybinding editor), "act:<op>" calls SettingsPort.Act (an LSP
+	// server start/stop or a plugin reload). The action's Result shows a notice.
+	Action string
+	// Raw is the JSON of a whole entry of an "entries" structure (one on_save
+	// action), so the page can remove or add entries by writing the array back.
+	Raw json.RawMessage
 }
 
 // SettingsChange is the result of a Save or a Reload: the page's new content and

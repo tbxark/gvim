@@ -62,6 +62,8 @@ func (f *appLSP) WorkspaceEdits() []tui.WorkspaceEdit { return nil }
 func (f *appLSP) WorkspaceDiagnostics() []tui.FileDiagnostics {
 	return nil
 }
+func (f *appLSP) Progress() []tui.LSPProgress                { return nil }
+func (f *appLSP) StartLanguage(string) error                 { return nil }
 func (f *appLSP) InlayHints(string) ([]tui.InlayHint, error) { return nil, nil }
 func (f *appLSP) SemanticTokens(string, int, int) ([]tui.SemanticToken, error) {
 	return nil, nil

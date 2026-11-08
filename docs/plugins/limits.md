@@ -90,7 +90,8 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 | live tasks | 10 000 |
 | registered `on_unload` functions | 16 |
 | a widget panel | 2000 widgets, nesting depth 8; a list 2000 items, a tree 5000 nodes, a dropdown/radio/dual list 2000 options, a text field 2000 completions and 200 editing rows; one string 4 KiB and one key 128 bytes; a title 120 bytes; a sidebar section asks for at most 100 rows |
-| decorations | 20 000 per (plugin, namespace, buffer) and 50 000 per plugin; at most 256 drawn per kind and line |
+| plugin folds | 2000 ranges per (plugin, namespace, buffer), with one placeholder and a collapsed seed per range |
+| decorations | 20 000 per (plugin, namespace, buffer) and 50 000 per plugin; at most 256 drawn per kind and line; tier-1c items: 64 virtual rows and 64 soft breaks per line, 256 conceal spans per line, 8 text overlays per virtual line |
 | virtual buffers | 64 per plugin, 256 in all; 64 MiB of text per plugin, 256 MiB in all |
 | queued `gvim.emit` events | 1000; payload 64 KiB |
 | `gvim.state` | 1 MiB of keys and encoded values per plugin |

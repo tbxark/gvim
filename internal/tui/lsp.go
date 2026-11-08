@@ -65,6 +65,10 @@ type lspState struct {
 	// last workspace poll. The poll replaces the whole list, so a publish or pull
 	// update is reflected; it is cleared on stop.
 	wsDiags []FileDiagnostics
+	// progress is the live servers' unfinished $/progress entries, as text, for the
+	// diagnostics panel. The poll refreshes it; stopping or restarting the servers
+	// empties it.
+	progress []LSPProgress
 	// off holds the documents with LSP turned off by toggle.
 	off map[string]bool
 	// muted holds the languages the user muted from the status popup: no server
@@ -222,6 +226,7 @@ type (
 		events         []DiagnosticsEvent
 		workspace      []WorkspaceEdit
 		workspaceDiags []FileDiagnostics
+		progress       []LSPProgress
 	}
 	lspReplyMsg struct {
 		ask     lspAsk
@@ -514,8 +519,10 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	case fileEditsLoadedMsg:
 		return m.fileEditsLoaded(msg), true
-	case workspaceOpsMsg:
-		return m.workspaceOpsDone(msg), true
+	case workspaceStepLoadedMsg:
+		return m.workspaceStepLoaded(msg), true
+	case workspaceStepOpMsg:
+		return m.workspaceStepOp(msg), true
 	case lspStatusMsg:
 		m.openLSPStatus(msg)
 		return nil, true
@@ -623,7 +630,11 @@ func (m *Model) lspPoll() tea.Cmd {
 		// snapshot: a server may report on files that are not open, and the panel
 		// lists them after the last document closed.
 		return func() tea.Msg {
-			return lspDiagsMsg{workspace: port.WorkspaceEdits(), workspaceDiags: port.WorkspaceDiagnostics()}
+			return lspDiagsMsg{
+				workspace:      port.WorkspaceEdits(),
+				workspaceDiags: port.WorkspaceDiagnostics(),
+				progress:       port.Progress(),
+			}
 		}
 	}
 	port := s.port
@@ -634,7 +645,12 @@ func (m *Model) lspPoll() tea.Cmd {
 				events = append(events, ev)
 			}
 		}
-		return lspDiagsMsg{events: events, workspace: port.WorkspaceEdits(), workspaceDiags: port.WorkspaceDiagnostics()}
+		return lspDiagsMsg{
+			events:         events,
+			workspace:      port.WorkspaceEdits(),
+			workspaceDiags: port.WorkspaceDiagnostics(),
+			progress:       port.Progress(),
+		}
 	}
 }
 
@@ -647,7 +663,11 @@ func (m *Model) lspWorkspacePoll() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		return lspDiagsMsg{workspace: port.WorkspaceEdits(), workspaceDiags: port.WorkspaceDiagnostics()}
+		return lspDiagsMsg{
+			workspace:      port.WorkspaceEdits(),
+			workspaceDiags: port.WorkspaceDiagnostics(),
+			progress:       port.Progress(),
+		}
 	}
 }
 
@@ -672,8 +692,10 @@ func (m *Model) lspDiags(msg lspDiagsMsg) tea.Cmd {
 		s.diagVersion[ev.Path] = diagVersion{version: ev.Version, versioned: ev.Versioned}
 	}
 	// The workspace list is authoritative for the panel: a server may drop a
-	// diagnostic, so replace it rather than merge.
+	// diagnostic, so replace it rather than merge. The progress list is replaced the
+	// same way: an entry the server ended is not reported again.
 	s.wsDiags = msg.workspaceDiags
+	s.progress = msg.progress
 	var cmds []tea.Cmd
 	for _, edit := range msg.workspace {
 		cmds = append(cmds, m.applyServerWorkspaceEdit(edit))
@@ -728,6 +750,7 @@ func (m *Model) lspServerDone(msg lspServerMsg) tea.Cmd {
 		s.stopped = true
 		s.tracks = nil
 		s.wsDiags = nil
+		s.progress = nil
 		for _, path := range slices.Sorted(maps.Keys(s.diags)) {
 			m.lspDropDiags(path)
 		}
@@ -987,27 +1010,45 @@ func (m *Model) applyServerWorkspaceEdit(edit WorkspaceEdit) tea.Cmd {
 }
 
 // workspaceEditNotice is the notice for a workspace edit: what changed, how many
-// files were opened as unsaved tabs, and what was left alone.
+// files were opened as unsaved tabs, and what the server asked that was left
+// alone. A partly applied edit (a refused operation stopped the rest) says so: the
+// first two reasons are shown, so the refusal and the count of later changes that
+// were not applied are both visible.
 func (m *Model) workspaceEditNotice(what string) func(FileEditResult) tea.Cmd {
 	return func(res FileEditResult) tea.Cmd {
 		parts := []string{what}
-		switch {
-		case res.Files == 0 && len(res.Skipped) == 0:
-			parts = append(parts, "changed nothing")
-		case res.Files == 0:
-			parts = append(parts, "changed nothing")
-		default:
-			parts = append(parts, fmt.Sprintf("%d files changed", res.Files))
+		var changed []string
+		if res.Files > 0 {
+			changed = append(changed, plural(res.Files, "file changed", "files changed"))
 		}
+		if res.Operations > 0 {
+			changed = append(changed, plural(res.Operations, "file operation", "file operations"))
+		}
+		if len(changed) == 0 && len(res.Skipped) == 0 {
+			changed = append(changed, "changed nothing")
+		}
+		parts = append(parts, changed...)
 		if res.Opened > 0 {
 			parts = append(parts, fmt.Sprintf("%d opened with unsaved changes", res.Opened))
 		}
 		if len(res.Skipped) > 0 {
-			parts = append(parts, fmt.Sprintf("%d left alone (%s)", len(res.Skipped), res.Skipped[0]))
+			reasons := res.Skipped
+			if len(reasons) > 2 {
+				reasons = reasons[:2]
+			}
+			parts = append(parts, fmt.Sprintf("%d left alone (%s)", len(res.Skipped), strings.Join(reasons, "; ")))
 		}
 		m.notice = strings.Join(parts, "; ")
 		return nil
 	}
+}
+
+// plural renders n with the singular or plural form.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // lspPopup opens a popup at the caret with title and items. It returns the popup,

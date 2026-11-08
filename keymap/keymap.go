@@ -394,16 +394,43 @@ func (rb rawBinding) binding() (Binding, error) {
 }
 
 // ConsultedContexts are the contexts gvim resolves a key in: the editor (normal, with global as
-// the fallback), the file explorer and the terminal dock. The overlays (prompts, popups, menus,
-// settings, the find bar) answer their keys in code, so a binding in any other context does
-// nothing. The keybinding editor lists these contexts only, and a user binding in another one is
-// skipped with a warning.
-var ConsultedContexts = []Context{ContextGlobal, ContextNormal, ContextFileExplorer, ContextTerminal}
+// the fallback), the file explorer, the terminal dock, and the overlay contexts whose surfaces
+// consult the keymap before their own key handlers (the prompt, the find bar, lists and popups,
+// the menu bar, the settings page, the dock). A user binding in any other context does nothing;
+// the keybinding editor lists these contexts only, and a binding in another one is skipped with
+// a warning.
+var ConsultedContexts = []Context{
+	ContextGlobal, ContextNormal,
+	ContextPrompt, ContextSearchPrompt, ContextPopup, ContextMenu, ContextSettings,
+	ContextFileExplorer, ContextTerminal, ContextDock,
+}
+
+// OverlayContexts are the contexts of surfaces that take their keys in code and consult the
+// keymap first. A binding there applies while the surface is on top. Only single-key bindings
+// apply: the overlay key router resolves one key at a time, so a sequence in one of these
+// contexts is skipped with a warning.
+var OverlayContexts = []Context{
+	ContextPrompt, ContextSearchPrompt, ContextPopup, ContextMenu, ContextSettings, ContextDock,
+}
 
 // Consulted reports whether gvim resolves keys in the context named by when, one of
 // ConsultedContexts.
 func Consulted(when Context) bool {
 	return slices.Contains(ConsultedContexts, when)
+}
+
+// IsOverlayContext reports whether when is one of OverlayContexts.
+func IsOverlayContext(when Context) bool {
+	return slices.Contains(OverlayContexts, when)
+}
+
+// ConsultedNames lists the names of ConsultedContexts in order, for a warning or a document.
+func ConsultedNames() []string {
+	out := make([]string, len(ConsultedContexts))
+	for i, c := range ConsultedContexts {
+		out[i] = string(c)
+	}
+	return out
 }
 
 // knownContexts lists every when-clause value the port accepts, in the spelling

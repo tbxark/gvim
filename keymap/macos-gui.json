@@ -51,6 +51,8 @@
     {"comment": "Cmd+Shift+- -> Navigate forward", "key": "=", "modifiers": ["super"], "action": "navigate_forward", "when": "normal"},
     {"comment": "Terminal: Cmd+V -> Paste", "key": "v", "modifiers": ["super"], "action": "terminal_paste", "when": "terminal"},
     {"comment": "gvim: duplicate line (Fresh has no duplicate key)", "key": "d", "modifiers": ["super","shift"], "action": "duplicate_line", "when": "normal"},
-    {"comment": "gvim: live grep from the files shortcut", "key": "f", "modifiers": ["super","shift"], "action": "open_live_grep", "when": "normal"}
+    {"comment": "gvim: live grep from the files shortcut", "key": "f", "modifiers": ["super","shift"], "action": "open_live_grep", "when": "normal"},
+    {"comment": "Cmd+G steps to the next match with the search bar open", "key": "g", "modifiers": ["super"], "action": "find_next", "when": "searchPrompt"},
+    {"key": "g", "modifiers": ["super", "shift"], "action": "find_previous", "when": "searchPrompt"}
   ]
 }

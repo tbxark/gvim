@@ -114,8 +114,10 @@ func TestComposeLeavesFencesLiteral(t *testing.T) {
 	doc := composeDoc("```", "**not bold**", "```", "plain end")
 	p := composePane(doc, 30)
 	g := p.Render(40, 6)
-	if got := pageRow(t, g, 4, 1); got != "**not bold**" {
-		t.Fatalf("fenced body = %q, want it literal", got)
+	// The body is framed as code and its contents stay literal (not composed).
+	body := pageRow(t, g, 4, 1)
+	if !strings.HasPrefix(body, "│ **not bold**") || !strings.HasSuffix(body, "│") {
+		t.Fatalf("fenced body = %q, want the framed literal code", body)
 	}
 }
 

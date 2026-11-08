@@ -46,6 +46,8 @@ const (
 	decorMaxName = 128
 	// decorMaxVirtualText bounds the text of a virtual-text, gutter or replace item.
 	decorMaxVirtualText = 1024
+	// maxPluginRangeCount bounds one set_folding_ranges call.
+	maxPluginRangeCount = 2000
 )
 
 var decorKinds = map[string]pluginapi.DecorKind{
@@ -55,6 +57,75 @@ var decorKinds = map[string]pluginapi.DecorKind{
 	"gutter":    pluginapi.DecorGutter,
 	"scroll":    pluginapi.DecorScroll,
 	"replace":   pluginapi.DecorReplace,
+	// tier 1c-A
+	"virtual_line_above":  pluginapi.DecorVirtualLineAbove,
+	"virtual_line_below":  pluginapi.DecorVirtualLineBelow,
+	"conceal":             pluginapi.DecorConceal,
+	"soft_break":          pluginapi.DecorSoftBreak,
+	"cursor_line_overlay": pluginapi.DecorCursorLine,
+}
+
+// activationFromLua reads an activation name.
+func activationFromLua(v lua.LValue) (pluginapi.Activation, error) {
+	if v == lua.LNil {
+		return pluginapi.ActAlways, nil
+	}
+	s, ok := v.(lua.LString)
+	if !ok {
+		return pluginapi.ActAlways, fmt.Errorf("activation must be a string")
+	}
+	switch string(s) {
+	case "", "always":
+		return pluginapi.ActAlways, nil
+	case "unless-cursor-in":
+		return pluginapi.ActUnlessCursorIn, nil
+	case "if-cursor-in":
+		return pluginapi.ActIfCursorIn, nil
+	}
+	return pluginapi.ActAlways, fmt.Errorf("unknown activation %q", string(s))
+}
+
+// scopeFromLua reads an optional scope {start_line=, end_line=}.
+func scopeFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
+	v := t.RawGetString("scope")
+	if v == lua.LNil {
+		d.ScopeStart, d.ScopeEnd = 0, -1
+		return nil
+	}
+	st, ok := v.(*lua.LTable)
+	if !ok {
+		return fmt.Errorf("scope must be a table")
+	}
+	o := bufTableOpts{t: st}
+	d.ScopeStart = o.integer("start_line", 0)
+	d.ScopeEnd = o.integer("end_line", -1)
+	if o.err != "" {
+		return errors.New(o.err)
+	}
+	return nil
+}
+
+// prefixFromLua reads an optional soft-break prefix {text=, style=}.
+func prefixFromLua(t *lua.LTable, d *pluginapi.Decoration) error {
+	v := t.RawGetString("prefix")
+	if v == lua.LNil {
+		return nil
+	}
+	pt, ok := v.(*lua.LTable)
+	if !ok {
+		return fmt.Errorf("prefix must be a table")
+	}
+	o := bufTableOpts{t: pt}
+	d.PrefixText = clipText(optString(&o, "text"), decorMaxVirtualText)
+	if o.err != "" {
+		return errors.New(o.err)
+	}
+	st, err := styleFromLua(pt.RawGetString("style"))
+	if err != nil {
+		return err
+	}
+	d.PrefixStyle = st
+	return nil
 }
 
 // namespace is the Namespace handle.
@@ -207,6 +278,92 @@ func decorationFromLua(v lua.LValue) (pluginapi.Decoration, error) {
 			return d, fmt.Errorf("replace 'pos': %w", err)
 		}
 		err = text()
+	case pluginapi.DecorVirtualLineAbove, pluginapi.DecorVirtualLineBelow:
+		if err = line(); err == nil {
+			err = text()
+		}
+		if err == nil {
+			if g, ok := t.RawGetString("gutter_glyph").(lua.LString); ok {
+				d.GutterText = clipText(string(g), 8)
+			}
+			d.GutterStyle, err = styleFromLua(t.RawGetString("gutter_style"))
+			if err == nil {
+				d.GutterStyle.FG, _ = func() (pluginapi.Color, error) { return colorFromLua(t.RawGetString("gutter_color")) }()
+			}
+			d.ComposeOnly = o.boolean("compose_only", false)
+			d.Activation, _ = activationFromLua(t.RawGetString("activation"))
+			if err = scopeFromLua(t, &d); err != nil {
+				return d, err
+			}
+			d.Above = kind == pluginapi.DecorVirtualLineAbove
+			if tv := t.RawGetString("text_overlays"); tv != lua.LNil {
+				list, ok := tv.(*lua.LTable)
+				if !ok {
+					return d, fmt.Errorf("text_overlays must be a table")
+				}
+				for i := 1; i <= min(list.Len(), 8); i++ {
+					row, ok := list.RawGetInt(i).(*lua.LTable)
+					if !ok {
+						continue
+					}
+					ro := bufTableOpts{t: row}
+					st, serr := styleFromLua(row.RawGetString("style"))
+					if serr != nil {
+						return d, serr
+					}
+					startByte := ro.integer("start", ro.integer("start_byte", 0))
+					endByte := ro.integer("end", ro.integer("end_byte", startByte))
+					ov := pluginapi.TextOverlay{
+						Range: pluginapi.Range{
+							From: pluginapi.Pos{Col: startByte},
+							To:   pluginapi.Pos{Col: endByte},
+						},
+						Style: st,
+					}
+					if ro.err != "" {
+						return d, errors.New(ro.err)
+					}
+					d.TextOverlays = append(d.TextOverlays, ov)
+				}
+			}
+		}
+	case pluginapi.DecorConceal:
+		if d.Range, err = rangeFromLua(t.RawGetString("range")); err != nil {
+			return d, fmt.Errorf("conceal 'range': %w", err)
+		}
+		if tv := t.RawGetString("text"); tv != lua.LNil {
+			err = text()
+		}
+		if err == nil {
+			d.Activation, err = activationFromLua(t.RawGetString("activation"))
+		}
+		if err == nil {
+			d.ComposeOnly = o.boolean("compose_only", false)
+			err = scopeFromLua(t, &d)
+		}
+	case pluginapi.DecorSoftBreak:
+		if d.Pos, err = posFromLua(t.RawGetString("pos")); err != nil {
+			return d, fmt.Errorf("soft_break 'pos': %w", err)
+		}
+		if err == nil {
+			d.Indent = o.integer("indent", 0)
+			d.Activation, err = activationFromLua(t.RawGetString("activation"))
+		}
+		if err == nil {
+			d.ComposeOnly = o.boolean("compose_only", false)
+			err = prefixFromLua(t, &d)
+		}
+		if err == nil {
+			err = scopeFromLua(t, &d)
+		}
+	case pluginapi.DecorCursorLine:
+		// style only
+	}
+	if err == nil && o.err != "" {
+		err = errors.New(o.err)
+	}
+	if kind != pluginapi.DecorCursorLine {
+		d.Line = max(d.Line, 0)
 	}
 	return d, err
 }
@@ -300,4 +457,241 @@ func installDecor(e *apiEnv) {
 		L.Push(lua.LTrue)
 		return 1
 	})
+
+	// ---- tier-1c-A convenience functions -------------------------------------------------
+	//
+	// They take a Buffer as their first argument and an optional opts table with at least
+	// namespace (default "default"), priority, version and the kind-specific fields the
+	// matching item kind documents. They are thin wrappers over DecorAdd/DecorSet so the
+	// item parser above stays the single validation path.
+
+	defaultNS := func(L *lua.LState, o *bufTableOpts) (string, error) {
+		name, ok := o.str("namespace")
+		if !ok || name == "" {
+			name = "default"
+		}
+		if len(name) > decorMaxName {
+			return "", pluginapi.Errf(pluginapi.CodeInvalid, "namespace must be at most %d bytes", decorMaxName)
+		}
+		if !names[name] && len(names) >= QuotaNamespaces {
+			return "", pluginapi.Errf(pluginapi.CodeLimit, "namespace quota (%d)", QuotaNamespaces)
+		}
+		names[name] = true
+		return name, nil
+	}
+	optsOf := func(L *lua.LState, n int) bufTableOpts {
+		t, _ := L.Get(n).(*lua.LTable)
+		return bufTableOpts{t: t}
+	}
+
+	addItem := func(L *lua.LState, buf int, o *bufTableOpts, item pluginapi.Decoration) int {
+		ns, err := defaultNS(L, o)
+		if err != nil {
+			return bufRet(L, err)
+		}
+		id := pluginapi.BufferID(checkID(L, buf, kindBuffer))
+		expect, verr := bufParseVersion(o.get("version"))
+		if verr != nil {
+			return bufRet(L, verr)
+		}
+		item.Priority = o.integer("priority", item.Priority)
+		if o.err != "" {
+			return bufRet(L, invalidErr("%s", o.err))
+		}
+		n, err := host().DecorAdd(p.name, ns, id, item, expect)
+		if err != nil {
+			return bufRet(L, err)
+		}
+		L.Push(lua.LNumber(n))
+		return 1
+	}
+
+	addVirtual := func(L *lua.LState, above bool) int {
+		o := optsOf(L, 4)
+		d := pluginapi.Decoration{
+			Kind: pluginapi.DecorVirtualLineAbove, Line: clampInt(float64(L.CheckNumber(2))),
+			Text: clipText(L.CheckString(3), decorMaxVirtualText), ComposeOnly: o.boolean("compose_only", false),
+		}
+		if !above {
+			d.Kind = pluginapi.DecorVirtualLineBelow
+		}
+		d.Style, _ = styleFromLua(o.get("style"))
+		if g, ok := o.get("gutter_glyph").(lua.LString); ok {
+			d.GutterText = clipText(string(g), 8)
+		}
+		d.GutterStyle, _ = styleFromLua(o.get("gutter_style"))
+		if c, err := colorFromLua(o.get("gutter_color")); err == nil {
+			d.GutterStyle.FG = c
+		}
+		d.Activation, _ = activationFromLua(o.get("activation"))
+		_ = scopeFromLua(o.t, &d)
+		if o.err != "" {
+			return bufRet(L, invalidErr("%s", o.err))
+		}
+		return addItem(L, 1, &o, d)
+	}
+	e.set(area, "add_virtual_line", func(L *lua.LState) int { return addVirtual(L, true) })
+	e.set(area, "add_virtual_line_below", func(L *lua.LState) int { return addVirtual(L, false) })
+	e.set(area, "add_conceal", func(L *lua.LState) int {
+		o := optsOf(L, 5)
+		d := pluginapi.Decoration{Kind: pluginapi.DecorConceal, ComposeOnly: o.boolean("compose_only", false)}
+		from, ferr := posFromLua(L.Get(2))
+		if ferr != nil {
+			return bufRet(L, invalidErr("conceal start: %s", ferr))
+		}
+		to, terr := posFromLua(L.Get(3))
+		if terr != nil {
+			return bufRet(L, invalidErr("conceal end: %s", terr))
+		}
+		d.Range = pluginapi.Range{From: from, To: to}
+		if d.Range.From == d.Range.To {
+			return bufRet(L, invalidErr("conceal needs a non-empty range"))
+		}
+		if tv := L.Get(4); tv != lua.LNil {
+			d.Text = clipText(L.CheckString(4), decorMaxVirtualText)
+		}
+		d.Style, _ = styleFromLua(o.get("style"))
+		d.Activation, _ = activationFromLua(o.get("activation"))
+		_ = scopeFromLua(o.t, &d)
+		if o.err != "" {
+			return bufRet(L, invalidErr("%s", o.err))
+		}
+		return addItem(L, 1, &o, d)
+	})
+	e.set(area, "add_soft_break", func(L *lua.LState) int {
+		o := optsOf(L, 3)
+		d := pluginapi.Decoration{Kind: pluginapi.DecorSoftBreak, ComposeOnly: o.boolean("compose_only", false)}
+		d.Pos, _ = posFromLua(L.Get(2))
+		d.Indent = o.integer("indent", 0)
+		_ = prefixFromLua(o.t, &d)
+		d.Activation, _ = activationFromLua(o.get("activation"))
+		_ = scopeFromLua(o.t, &d)
+		if o.err != "" {
+			return bufRet(L, invalidErr("%s", o.err))
+		}
+		return addItem(L, 1, &o, d)
+	})
+	e.set(area, "set_cursor_line_overlay", func(L *lua.LState) int {
+		o := optsOf(L, 3)
+		d := pluginapi.Decoration{Kind: pluginapi.DecorCursorLine}
+		d.Style, _ = styleFromLua(L.Get(2))
+		if o.err != "" {
+			return bufRet(L, invalidErr("%s", o.err))
+		}
+		return addItem(L, 1, &o, d)
+	})
+	e.set(area, "set_scrollbar_markers_in_range", func(L *lua.LState) int {
+		o := optsOf(L, 4)
+		d := pluginapi.Decoration{Kind: pluginapi.DecorScroll}
+		d.Range, _ = rangeFromLua(L.Get(2))
+		if c, err := colorFromLua(L.Get(3)); err == nil {
+			d.Color = c
+		}
+		if o.err != "" {
+			return bufRet(L, invalidErr("%s", o.err))
+		}
+		return addItem(L, 1, &o, d)
+	})
+	e.set(area, "clear_decorations", func(L *lua.LState) int {
+		o := optsOf(L, 3)
+		ns, err := defaultNS(L, &o)
+		if err != nil {
+			return bufRet(L, err)
+		}
+		var id pluginapi.BufferID
+		if L.Get(1) != lua.LNil {
+			id = pluginapi.BufferID(checkID(L, 1, kindBuffer))
+		}
+		if L.Get(2) != lua.LNil && L.Get(2).Type() == lua.LTTable {
+			r, rerr := rangeFromLua(L.Get(2))
+			if rerr != nil {
+				return bufRet(L, pluginapi.Errf(pluginapi.CodeInvalid, "%s", rerr))
+			}
+			host().DecorClearRange(p.name, ns, id, r.From.Line, r.To.Line)
+			L.Push(lua.LTrue)
+			return 1
+		}
+		host().DecorClear(p.name, ns, id)
+		L.Push(lua.LTrue)
+		return 1
+	})
+	e.set(area, "refresh_lines", func(L *lua.LState) int {
+		if L.Get(1) != lua.LNil {
+			host().DecorRefreshLines(pluginapi.BufferID(checkID(L, 1, kindBuffer)))
+		}
+		L.Push(lua.LTrue)
+		return 1
+	})
+	e.set(area, "add_fold", func(L *lua.LState) int {
+		o := optsOf(L, 4)
+		buf := pluginapi.BufferID(checkID(L, 1, kindBuffer))
+		start := clampInt(float64(L.CheckNumber(2)))
+		end := clampInt(float64(L.CheckNumber(3)))
+		ns, err := defaultNS(L, &o)
+		if err != nil {
+			return bufRet(L, err)
+		}
+		fr := pluginapi.FoldRange{
+			Range:       pluginapi.Range{From: pluginapi.Pos{Line: start}, To: pluginapi.Pos{Line: end}},
+			Collapsed:   o.boolean("collapsed", false),
+			Placeholder: clipText(optString(&o, "placeholder"), decorMaxVirtualText),
+			Kind:        clipText(optString(&o, "fold_kind"), 64),
+		}
+		expect, verr := bufParseVersion(o.get("version"))
+		if verr != nil {
+			return bufRet(L, verr)
+		}
+		if o.err != "" {
+			return bufRet(L, invalidErr("%s", o.err))
+		}
+		return bufTrue(L, host().DecorSetFoldingRanges(p.name, ns, buf, []pluginapi.FoldRange{fr}, expect))
+	})
+	e.set(area, "set_folding_ranges", func(L *lua.LState) int {
+		o := optsOf(L, 3)
+		buf := pluginapi.BufferID(checkID(L, 1, kindBuffer))
+		list := L.CheckTable(2)
+		n := min(list.Len(), maxPluginRangeCount)
+		ranges := make([]pluginapi.FoldRange, 0, n)
+		for i := 1; i <= n; i++ {
+			row, ok := list.RawGetInt(i).(*lua.LTable)
+			if !ok {
+				continue
+			}
+			ro := bufTableOpts{t: row}
+			fr := pluginapi.FoldRange{
+				Range: pluginapi.Range{
+					From: pluginapi.Pos{Line: ro.integer("start_line", 0)},
+					To:   pluginapi.Pos{Line: ro.integer("end_line", 0)},
+				},
+				Collapsed:   ro.boolean("collapsed", false),
+				Placeholder: clipText(optString(&ro, "placeholder"), decorMaxVirtualText),
+				Kind:        clipText(optString(&ro, "kind"), 64),
+			}
+			ranges = append(ranges, fr)
+		}
+		ns, err := defaultNS(L, &o)
+		if err != nil {
+			return bufRet(L, err)
+		}
+		expect, verr := bufParseVersion(o.get("version"))
+		if verr != nil {
+			return bufRet(L, verr)
+		}
+		return bufTrue(L, host().DecorSetFoldingRanges(p.name, ns, buf, ranges, expect))
+	})
+	e.set(area, "clear_folds", func(L *lua.LState) int {
+		o := optsOf(L, 2)
+		ns, err := defaultNS(L, &o)
+		if err != nil {
+			return bufRet(L, err)
+		}
+		var buf pluginapi.BufferID
+		if L.Get(1) != lua.LNil {
+			buf = pluginapi.BufferID(checkID(L, 1, kindBuffer))
+		}
+		host().DecorClearFolds(p.name, ns, buf)
+		L.Push(lua.LTrue)
+		return 1
+	})
+
 }

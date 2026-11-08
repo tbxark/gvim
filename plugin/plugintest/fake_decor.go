@@ -148,3 +148,76 @@ func (f *FakeHost) DecorClear(plugin, ns string, id pluginapi.BufferID) {
 		return e.Plugin == plugin && e.NS == ns && (id == 0 || e.Buf == id)
 	})
 }
+
+// DecorClearRange removes the namespace's items that intersect the line range.
+func (f *FakeHost) DecorClearRange(plugin, ns string, id pluginapi.BufferID, fromLine, toLine int) {
+	f.rec("DecorClearRange", plugin, ns, id, fromLine, toLine)
+	if toLine < fromLine {
+		fromLine, toLine = toLine, fromLine
+	}
+	d := f.Decor()
+	d.Entries = slices.DeleteFunc(d.Entries, func(e DecorEntry) bool {
+		if e.Plugin != plugin || e.NS != ns || (id != 0 && e.Buf != id) {
+			return false
+		}
+		it := e.Item
+		last := it.Line
+		switch it.Kind {
+		case pluginapi.DecorHighlight, pluginapi.DecorConceal, pluginapi.DecorScroll:
+			last = it.Range.To.Line
+		}
+		return it.Line <= toLine && last >= fromLine
+	})
+}
+
+// FakeFoldRanges is one recorded folding-range set.
+type FakeFoldRanges struct {
+	Plugin string
+	NS     string
+	Buf    pluginapi.BufferID
+	Ranges []pluginapi.FoldRange
+}
+
+// FoldRanges lists the folding-range sets recorded, in order.
+func (f *FakeHost) FoldRanges() []FakeFoldRanges {
+	v, _ := f.Ext["foldranges"].([]FakeFoldRanges)
+	return append([]FakeFoldRanges(nil), v...)
+}
+
+// DecorSetFoldingRanges records the namespace's fold ranges.
+func (f *FakeHost) DecorSetFoldingRanges(plugin, ns string, id pluginapi.BufferID, ranges []pluginapi.FoldRange, expect *pluginapi.Version) error {
+	f.rec("DecorSetFoldingRanges", plugin, ns, id, len(ranges))
+	if err := f.decorTarget(id, expect); err != nil {
+		return err
+	}
+	v, _ := f.Ext["foldranges"].([]FakeFoldRanges)
+	kept := v[:0:0]
+	for _, fr := range v {
+		if fr.Plugin == plugin && fr.NS == ns && fr.Buf == id {
+			continue
+		}
+		kept = append(kept, fr)
+	}
+	kept = append(kept, FakeFoldRanges{Plugin: plugin, NS: ns, Buf: id, Ranges: append([]pluginapi.FoldRange(nil), ranges...)})
+	f.Ext["foldranges"] = kept
+	return nil
+}
+
+// DecorClearFolds forgets the recorded fold ranges of the namespace (or the plugin).
+func (f *FakeHost) DecorClearFolds(plugin, ns string, id pluginapi.BufferID) {
+	f.rec("DecorClearFolds", plugin, ns, id)
+	v, _ := f.Ext["foldranges"].([]FakeFoldRanges)
+	kept := v[:0:0]
+	for _, fr := range v {
+		if fr.Plugin == plugin && (ns == "" || fr.NS == ns) && (id == 0 || fr.Buf == id) {
+			continue
+		}
+		kept = append(kept, fr)
+	}
+	f.Ext["foldranges"] = kept
+}
+
+// DecorRefreshLines is a no-op that records the call.
+func (f *FakeHost) DecorRefreshLines(id pluginapi.BufferID) {
+	f.rec("DecorRefreshLines", id)
+}

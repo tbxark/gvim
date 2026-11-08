@@ -64,12 +64,15 @@ type preRune struct {
 
 // composeLine composes one Markdown line.
 func (f frame) composeLine(i int) composedLine {
-	if f.markdownFences()[i] {
-		return f.rawComposed(i)
-	}
 	text := f.doc.Line(i)
 	raw := []rune(text)
 	kinds := kindsPerRune(text, f.doc.LineSpans(i))
+	if fl, ok := f.markdownFences()[i]; ok {
+		return f.composeFenceLine(i, fl, raw, kinds)
+	}
+	if tl, ok := f.tables().rows[i]; ok {
+		return f.composeTableLine(i, tl, false)
+	}
 	out := composedLine{}
 
 	// A thematic break becomes one rule across the measure, two cells short of it
@@ -213,41 +216,38 @@ func isRuleRunes(raw []rune) bool {
 	return n >= 3
 }
 
-// markdownFences returns the fenced code lines of the document, delimiters
-// included, so compose leaves them literal. The table is kept in the document's
+// markdownFences returns the fenced code classification of the document's
+// lines, so compose can frame a block. The table is kept in the document's
 // layout memo until its text changes.
-func (f frame) markdownFences() map[int]bool {
+func (f frame) markdownFences() map[int]syntax.FenceLine {
 	compute := func() any {
-		out := make(map[int]bool)
-		inFence := false
-		marker := ""
-		for i := 0; i < f.doc.LineCount(); i++ {
-			line := f.doc.Line(i)
-			trimmed := strings.TrimLeft(line, " ")
-			if !inFence {
-				if m := composeFenceOpen.FindString(trimmed); m != "" {
-					inFence = true
-					marker = m[:3]
-					out[i] = true
-				}
-				continue
-			}
-			out[i] = true
-			if strings.HasPrefix(strings.TrimSpace(line), marker) {
-				inFence = false
+		lines := make([]string, f.doc.LineCount())
+		for i := range lines {
+			lines[i] = f.doc.Line(i)
+		}
+		out := make(map[int]syntax.FenceLine)
+		for i, fl := range syntax.MarkdownFences(lines) {
+			if fl.Kind != syntax.FenceNone {
+				out[i] = fl
 			}
 		}
 		return out
 	}
 	if lm, ok := f.doc.(LayoutMemo); ok && !isLarge(f.doc) {
-		return lm.MemoValue(composeFenceKey{}, compute).(map[int]bool)
+		return lm.MemoValue(composeFenceKey{}, compute).(map[int]syntax.FenceLine)
 	}
-	return compute().(map[int]bool)
+	return compute().(map[int]syntax.FenceLine)
 }
 
-var composeFenceOpen = regexp.MustCompile("^(\x60{3,}|~{3,})")
-
 type composeFenceKey struct{}
+
+// fenceBody reports whether line i is a line of a fenced code block's body: the
+// page view frames it, so the caret does not reveal it (the caret sits inside
+// the frame, and the source/display map keeps its column exact).
+func (f frame) fenceBody(i int) bool {
+	fl, ok := f.markdownFences()[i]
+	return ok && fl.Kind == syntax.FenceBody
+}
 
 // revealed reports whether the caret reveals line i: the caret is on it, or at
 // the start of the next line (Fresh's line scope includes the line end).

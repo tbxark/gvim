@@ -52,8 +52,16 @@ func TestSettingsSnapshot(t *testing.T) {
 		}
 		items += len(sec.Items)
 	}
-	if want := len(config.Settings()); items != want {
-		t.Fatalf("snapshot has %d settings, want %d", items, want)
+	// The scalar settings, plus the page rows and the read-only Environment facts
+	// the app injects (they are not scalar config keys).
+	if want := len(config.Settings()); items <= want {
+		t.Fatalf("snapshot has %d settings, want more than the %d scalar ones", items, want)
+	}
+	if got := findItem(t, snap, "lsp"); got.Kind != "page" || got.Section != "Language Servers" {
+		t.Errorf("lsp row = %+v, want the Language Servers page row", got)
+	}
+	if got := findItem(t, snap, "env.shell"); got.Kind != "info" || got.Section != "Environment" {
+		t.Errorf("env.shell row = %+v, want a read-only Environment row", got)
 	}
 	if snap.UserFile == "" {
 		t.Error("the user config file is unknown")

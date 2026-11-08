@@ -404,7 +404,6 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		}
 		return trustCtl.State().AllowsProjectConfig()
 	}
-	deps.SettingsPort = newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat)
 	projSearch := newProjectSearch(edOpts)
 	deps.Root = tui.RootPorts{
 		Projects:       proj,
@@ -448,6 +447,17 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		}
 		return keybindings.NewKeymap(km), err
 	}
+	// The Settings page's live parts: the LSP manager for its Language Servers
+	// page statuses and actions, and the plugin runtime for its Plugins page. They
+	// are built after the page's config snapshot and before the model.
+	deps.SettingsPort = newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat, settingsRuntime{
+		lsp:        deps.LSP,
+		plugins:    pw.Runtime,
+		pluginsCfg: cfg,
+		iconsMode:  icon.Mode.String(),
+		iconsWhy:   icon.Why,
+		version:    gvimVersion(),
+	})
 	// Notice is the first config problem, then any session file whose unsaved
 	// text was kept, for the status row. Every warning still goes to stderr,
 	// before the alternate screen starts.

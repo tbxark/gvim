@@ -57,8 +57,9 @@ Widgets: Fresh's declarative widget API has a read-mostly v1 here (see
 controls.
 
 Not provided at all (and not stubbed): the editor-wide i18n (plugin texts are translated, see [api-core.md](api-core.md#gvimi18n)), project-local plugins, a trust store,
-conceal, virtual lines, plugin folds, a terminal API, Fresh's window and authority runtimes,
-the package manager, the HTTP client API and `render_line`.
+painted conceal/virtual lines/plugin folds (the tier-1c store and Lua names landed; painting is the
+remaining host increment, see the live_diff residual below), a terminal API, Fresh's window and
+authority runtimes, the package manager, the HTTP client API and `render_line`.
 
 ### What changes when you port
 
@@ -72,6 +73,63 @@ the package manager, the HTTP client API and `render_line`.
   step.
 * **Errors are values**: `nil, "<code>: <message>"`, not exceptions.
 * **Diff algorithm**: gvim diffs with Myers', not patience, so hunk boundaries can differ from Fresh's gutter.
+
+### Live diff: no host baseline (port residual)
+
+Fresh's `live_diff` diffs against a host-registered baseline (`registerDiffBaseline` plus a
+patience `diffAgainstBaseline`, with `getBaselineLines` for the old text). gvim has no baseline
+API and this port does not ask for one. Recorded differences:
+
+* The old side is fetched by the plugin: `git show <rev>:./<file>` (HEAD/branch, decoded with the
+  buffer's encoding) or `gvim.fs.read` + `gvim.text.decode` for disk mode. No repository, an
+  untracked file or a missing file leaves the buffer unmarked; large-file mode is refused with one
+  notice instead of diffed.
+* The diff is computed with `gvim.diff.buffer` (Myers). Hunk boundaries can differ from Fresh's
+  patience baseline, and the word-level refinement (char-LCS similarity, word LCS, caps) runs in Lua
+  with a DP-cell budget instead of natively.
+* gvim decorations have no `fgOnCollisionOnly` mode, so the diff line backgrounds use the theme's
+  `editor.diff_*_bg` keys only (no `editor.diff_*_collision_fg`).
+* Virtual rows with the deleted old content and their word emphasis need tier-1c virtual-line
+  *painting*. The store/API landed in 1c-A; until the host reports `gvim.has("decor_virtual_paint")`
+  the plugin shows the reduced Fresh view: line backgrounds, word emphasis on the new side, gutter
+  indicators and scrollbar marks. The old-content rows, their `-` gutter glyph and the removed-word
+  emphasis are the remainder; the full path is already written and activates when the capability
+  appears.
+* Rendering caps are Fresh's, made host-aware: full → no-vlines (more than
+  `max_virtual_lines` deleted lines) → outline (more than `max_overlay_lines` changed lines), and
+  a deletion block longer than the host's 64-virtual-rows-per-anchor cap is summarised by an
+  "`… N more deleted lines`“ row.
+
+### Streaming a process into a buffer
+
+A view that streams a command's output (a patch, a log, a diff) does not need a file-backed buffer
+and `b:revert()`; a virtual buffer the plugin owns can be appended to as the data arrives. `git_log`
+is the reference port:
+
+* Create the panel buffer with `gvim.buf.create` (read-only), put it in the layout/tab where it
+  belongs, and start the command with `gvim.proc.spawn` (not `run`, which waits for the whole
+  output). Arguments are validated argv arrays; pin the format flags and the environment as the
+  bundled `gvim.git` module does, so repository configuration cannot change the format the parser
+  reads (or run a program).
+* In `on_stdout`, append the chunk: `buf:set_read_only(false); buf:append(chunk);
+  buf:set_read_only(true)` (a read-only virtual buffer refuses the append; the flag is
+  plugin-facing). Do the incremental parse on the same chunk, carrying the partial last line across
+  chunks and capping a single line's parse cost.
+* Style rows as they arrive with one `ns:add` per run, not one per line: a `highlight` decoration
+  whose range spans N equal-kind lines costs one host call for the whole run.
+* **Ordering.** The process's exit callback may arrive before the queued `on_stdout` tasks of the
+  same process. Finish one tick after `on_exit` (`gvim.timer.after(1, finish)`), or the last chunks
+  would be dropped and a cache marked complete too early.
+* Bound it: a byte cap and a line cap, kill the process when either is passed and append a footer;
+  a generation token bumped on every new selection/refresh/close makes late callbacks from the
+  killed stream no-ops. No whole-buffer read is needed to fill the view.
+* Cache by content identity (a commit sha, a baseline id): stream into a file under
+  `gvim.dirs.data()` while appending to the buffer, and write a small `.done` marker last, only on
+  a clean exit. A cache hit becomes one bounded `gvim.fs.read` plus `buf:set_text`; an interrupted
+  stream has no marker and is regenerated.
+* `b:revert()` remains the right tool for a **file-backed** buffer (open the path, rewrite the
+  file, revert); it costs a tab and a disk round-trip, so the append pattern above is preferred for
+  a live view that is not a real file.
 
 ### Notes for porters (learned from the bundled ports)
 

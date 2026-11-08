@@ -262,15 +262,23 @@ words in the buffer and everything else do not depend on it.
   (`codeAction/resolve`), and the resolved edit and/or command is applied. An action with both an
   edit and a command applies the edit first and then runs the command.
 - **Workspace edits** (a rename, a code action, or a server's own `workspace/applyEdit`) are applied
-  by one multi-file helper. Text edits of open documents are applied as one undo step each, with a
-  version check: a text edit carries the document version the server computed it against, and gvim
-  refuses an edit whose document has moved on. Files that are not open are read, opened as tabs,
-  edited and left unsaved; the tab you were in becomes active again when the apply ends. A
-  server-requested **delete is refused** and reported: the request carries no user confirmation and
-  leaves no trash to recover from, so gvim never deletes a file for a language server (Fresh's
-  rule). A **create** or **rename** onto an existing file is refused for the same reason; the
-  refusal is reported and never counts as success. Created files may be edited afterwards in the
-  same edit, and renames move open tabs with the file.
+  by one multi-file helper, in the order the server sent the `documentChanges`: a file operation
+  and a text edit are applied in sequence, so a created file's text edit lands on the created file
+  and a rename happens before the edits of the renamed path, as the protocol requires. Text edits
+  of open documents are applied as one undo step each, with a version check read when the step
+  runs: a text edit carries the document version the server computed it against, and gvim skips an
+  edit whose document has moved on (the rest of the edit still applies). Files that are not open
+  are read, opened as tabs, edited and left unsaved; the tab you were in becomes active again when
+  the apply ends. A server-requested **delete is refused**: the request carries no user
+  confirmation and leaves no trash to recover from, so gvim never deletes a file for a language
+  server (Fresh's rule). A **create** or **rename** onto an existing file is refused for the same
+  reason, and so is a failed operation. A refused or failed file operation **stops the rest of
+  that edit**: the changes before it stay applied, the ones after it are reported as not applied,
+  and the status row says the edit was only partly applied with the count. gvim is deliberately
+  stricter here than Fresh, whose `apply_workspace_edit` continues with the remaining operations
+  after a refused one and only counts the refusal; stopping means an edit whose file operations
+  failed never applies later text edits to a state the server did not expect. Nothing is ever
+  reported as success when part of the edit was refused.
   A server may also ask for an edit on its own, usually while a command runs
   (`workspace/executeCommand` → `workspace/applyEdit`). gvim answers that request immediately —
   the edit is queued, the server is told it was applied, and the editor applies it a moment later —
@@ -309,6 +317,18 @@ words in the buffer and everything else do not depend on it.
   asked for the document's diagnostics when no server published any: a server that published is
   never also pulled from, so a problem is reported once. Pulled sets are cached for the document
   version, so the 300 ms diagnostics poll does not ask again while the text has not changed.
+- **Diagnostics, workspace.** A server that advertises `workspaceDiagnostics` in its
+  `diagnosticProvider` is asked `workspace/diagnostic` for the whole workspace, so files the
+  editor never opened get diagnostics too. The pull is throttled to once every 5 seconds; a
+  capability change (a dynamic registration or unregistration, or a server's
+  `workspace/diagnostic/refresh` request) or a change in the set of open documents asks again
+  sooner. The workspace answer merges into the diagnostics panel's store with its source marked:
+  a file the servers published for keeps its published set (merging both would report the same
+  problem twice), and a workspace-only file is added with the source `workspace` and capped at
+  50 diagnostics, most severe first, with exact duplicates removed. The panel and the fix list
+  mark those files `(not open)`, and choosing one opens the file at the diagnostic. The request
+  is bounded by the request timeout; no `$/cancelRequest` is sent, and the server-initiated
+  refresh request simply makes the next poll ask again.
 
 ## The diagnostics panel and the fix list
 
@@ -335,10 +355,17 @@ The section has no close button: the header click folds it and the palette row c
 list overlay — the quickfix view: type to filter, choose a row to jump to it, and the list stays
 open after a jump, like a fix list. Escape closes it.
 
-The panel's empty states are its progress display: "No language server is configured", "Starting
-language servers…" while a server starts, "Waiting for diagnostics…" when the servers are on but
-nothing has arrived, and "No diagnostics" otherwise. The status row keeps its own `LSP …` starting
-state; no new animation is involved.
+The panel's empty states are its progress display, and so are the servers' own `$/progress`
+reports. When a server begins a progress token (`window/workDoneProgress/create` plus a
+`$/progress` `begin`), the first unfinished entry is shown in the section header after the counts
+(`Diagnostics · gopls: Indexing — crates 42% +1 more`) and in the empty state
+(`In progress: …`); `report` updates the message and percentage and `end` removes the entry, so
+the text goes when the work finishes. At most 8 entries are kept per server and 8 across the
+workspace, oldest dropped; they are cleared when the servers stop or restart. Without progress,
+the empty states are "No language server is configured", "Starting language servers…" while a
+server starts, "Waiting for diagnostics…" when the servers are on but nothing has arrived, and
+"No diagnostics" otherwise. The status row keeps its own `LSP …` starting state; there is no new
+animation anywhere.
 - **Format Buffer.** It formats with an external formatter when there is one, and otherwise asks
   the language server (`textDocument/formatting`). The caret stays on its text when the formatter
   adds or removes lines above it. With neither a formatter nor a server, the status row says which
@@ -372,9 +399,10 @@ Servers only start for files that have a name on disk, and not for files in larg
 
 ## What is not here yet
 
-The workspace store lists the files the servers reported on, which is not every file in the
-workspace: there is no workspace-folder-wide diagnostics request for files no server has mentioned
-yet. Inlay hints use the end-of-line tier; inserting them inline at the hint's own character
-position is a later refinement. No built-in universal language server ships (Fresh's quicklsp is
-not available), so `universal_lsp` is config-only, and `process_limits` is parsed but not
-enforced. See docs/parity.md, backlog #7.
+The workspace store lists the files the servers reported on: the `workspace/diagnostic` pull is
+capability-gated, so a server that only publishes reports the files it chooses, and no
+workspace-folder-wide request is made to a server that does not advertise it. Inlay hints use the
+end-of-line tier; inserting them inline at the hint's own character position is a later
+refinement. No built-in universal language server ships (Fresh's quicklsp is not available), so
+`universal_lsp` is config-only, and `process_limits` is parsed but not enforced. See
+docs/parity.md, backlog #7.

@@ -40,8 +40,15 @@ func mapDispColumn(ln line, dispCol int) int {
 // visible cells.
 func (f frame) layoutCompose(i int, styled bool) line {
 	cp := f.composedLine(i)
-	if f.revealed(i) {
-		cp = f.rawComposed(i)
+	if f.revealed(i) && !f.fenceBody(i) {
+		// The caret's row of a table reveals its cell contents while the frame's
+		// padding stays, so the borders above and below do not jump; every other
+		// line reveals raw.
+		if tl, ok := f.tables().rows[i]; ok && tl.Kind != syntax.TableSeparator {
+			cp = f.composeTableLine(i, tl, true)
+		} else {
+			cp = f.rawComposed(i)
+		}
 	}
 	raw := cp.runes
 	plain := expandCells(raw, nil, nil, f.tab)

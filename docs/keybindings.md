@@ -8,31 +8,35 @@ current session. To keep a switch, set `"keymap"` in the config.
 ## The presets are Fresh's
 
 The five files hold Fresh's own bindings for the contexts gvim resolves: `global`, `normal`,
-the file explorer (`file_explorer`, which Fresh spells `fileExplorer`) and the terminal dock.
-They inherit the way Fresh's do: `default` is the base, `macos`, `emacs` and `vscode` inherit
-it, and `macos-gui` inherits `macos`. A preset holds every binding of its ancestors plus its
-own, so a key Fresh defines once is defined for every preset.
+the file explorer (`file_explorer`, which Fresh spells `fileExplorer`), the terminal dock, and the
+overlay contexts `prompt`, `searchPrompt`, `popup`, `menu`, `settings` and `dock` (see "How overlay
+keys work"). They inherit the way Fresh's do: `default` is the base, `macos`, `emacs` and `vscode`
+inherit it, and `macos-gui` inherits `macos`. A preset holds every binding of its ancestors
+plus its own, so a key Fresh defines once is defined for every preset.
 
 | Preset | Own bindings | In effect |
 |---|---|---|
-| `default` | 198 | 196 |
-| `macos` | 53 | 212 |
-| `macos-gui` | 50 | 261 |
-| `emacs` | 78 | 243 |
-| `vscode` | 9 | 201 |
+| `default` | 245 | 243 |
+| `macos` | 60 | 266 |
+| `macos-gui` | 52 | 317 |
+| `emacs` | 98 | 309 |
+| `vscode` | 9 | 248 |
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
-overrides, one per context and chord. The other Fresh bindings (the prompt, searchPrompt, popup,
-completion, settings, menu, compositeBuffer and dock contexts) are not emitted: gvim's overlays
-answer their keys in code, so a binding in one of those `when` contexts would never run, and the
-loader skips a user binding there with a warning.
+overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not
+emitted: gvim has no completion popup and its compare view is not a keymap surface, so a user
+binding there is skipped with a warning.
 
 So the coverage is Fresh's: file, edit, selection (block selection too), the word, line, page and
 document moves, multi-cursor (next match, above and below, line ends), marks and bookmark slots
 0 to 9, macros, search and replace (including Query Replace and find-in-selection), the language
 server (completion, hover, definition, references, implementation, rename, code actions), shell
 commands, case transforms, folding and the view, tabs and splits, the explorer, the terminal
-dock, the sidebar section cycle, code tours and compare files. Each preset keeps its own idiom:
+dock, the sidebar section cycle, code tours and compare files. The overlay contexts carry
+Fresh's rows for the keys gvim's surfaces already understand: the prompt field's moves, word
+deletion and paste; the find bar's match steps and option toggles; list navigation and cancel;
+the menu bar's walk and close; the settings page's close, activate and reset; and the dock's
+focus keys. Each preset keeps its own idiom:
 Emacs has the `C-x` chords and the `M-` keys, VS Code has `Ctrl+K Ctrl+L` and friends, macOS
 keeps its Ctrl and Option keys, `macos-gui` uses Cmd (a terminal that reports Super sends those;
 the Ctrl keys it inherits still work when it does not), and `default` is the cross-platform set.
@@ -158,13 +162,26 @@ dropped and the status row says so (`Ctrl+X Z is not bound`); it never edits the
 cancels. The held key waits without a timeout. A single key you bind yourself frees the sequences
 that start with it. This is not the plugin prefix rule, which has a one-second timeout.
 
-## Keys gvim cannot resolve
+## How overlay keys work
 
-Keys are read in the contexts gvim resolves: the editor (`normal`, with `global` as the fallback),
-the file explorer, and the terminal dock. Prompts, popups, the menus and the find bar answer their
-keys in code, so a binding in another `when` does nothing, and gvim skips it with a warning. This is
-the one place the port is narrower than Fresh: Fresh exposes those as first-class keymap contexts,
-and gvim's presets therefore consume no bindings there.
+The editor, the file explorer and the terminal dock resolve their keys through the keymap as
+before. The overlays that take their keys in code consult the keymap too, in the Fresh context
+of the surface on top: the prompt (`prompt`), the find bar (`searchPrompt`), the palette, a picker and the
+file browser (`popup`), the menu bar's dropdown and the context menu (`menu`), the Settings page
+(`settings`), and the dock (`dock`). The top overlay looks the key up before its own handler:
+a bound action runs the surface's operation (or, for a real model action, the same dispatch a
+preset or plugin binding runs), and an unbound key falls through to the built-in handler exactly
+as before. Rebind a cancel action and the surface's default chord still falls through to the same
+operation; `Esc`, `Enter`, the arrows and the page keys therefore keep their meanings.
+
+Limits, all deliberate: only single-key bindings apply in the overlay contexts (a sequence there
+is skipped with a warning, since the router resolves one key at a time); `unbind` removes the
+preset's row, but the surface's built-in handler still runs on the freed chord; a prompt's text
+field has no selection, clipboard or suggestion list in gvim, so the selection, copy/cut and
+suggestion actions are not bound; the Settings page has no search or help action; and the
+completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
+are not keymap surfaces yet (a binding there is skipped with a warning, as are bindings in
+contexts Fresh does not name).
 
 ## Differences from Fresh
 

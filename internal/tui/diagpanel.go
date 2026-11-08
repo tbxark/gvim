@@ -114,6 +114,9 @@ type diagRow struct {
 	header bool
 	path   string
 	counts diagCounts
+	// source is the diagnostic set's source: "publish" for a published set and
+	// "workspace" for a workspace/diagnostic pull (usually a file that is not open).
+	source string
 	item   Diagnostic
 }
 
@@ -135,9 +138,9 @@ func (m *Model) diagRows() []diagRow {
 			}
 			return a.Start.Col - b.Start.Col
 		})
-		rows = append(rows, diagRow{header: true, path: file.Path, counts: countDiagnostics(items)})
+		rows = append(rows, diagRow{header: true, path: file.Path, counts: countDiagnostics(items), source: file.Source})
 		for _, d := range items {
-			rows = append(rows, diagRow{path: file.Path, item: d})
+			rows = append(rows, diagRow{path: file.Path, item: d, source: file.Source})
 		}
 	}
 	return rows
@@ -199,15 +202,53 @@ func (m *Model) clampDiagSelection() {
 }
 
 // diagHeaderTitle is the section's header: "Diagnostics" and the workspace counts,
-// or an ellipsis while the servers are still starting or nothing has arrived.
+// else the first $/progress line (with " +N more"), or an ellipsis while the
+// servers are still starting or nothing has arrived.
 func (m *Model) diagHeaderTitle() string {
 	if c := m.workspaceCounts(); c.Total() > 0 {
 		return "Diagnostics " + c.Label()
+	}
+	if progress := m.progressSummary(); progress != "" {
+		return "Diagnostics · " + progress
 	}
 	if m.diagWaiting() != "" {
 		return "Diagnostics …"
 	}
 	return "Diagnostics"
+}
+
+// progressLine renders one $/progress entry as one line: the server, its title,
+// the latest message and the percentage when the server gave one.
+func progressLine(p LSPProgress) string {
+	var b strings.Builder
+	if p.Server != "" {
+		b.WriteString(p.Server + ": ")
+	}
+	switch {
+	case p.Title != "" && p.Message != "":
+		b.WriteString(p.Title + " — " + p.Message)
+	case p.Title != "":
+		b.WriteString(p.Title)
+	default:
+		b.WriteString(p.Message)
+	}
+	if p.Percentage >= 0 {
+		fmt.Fprintf(&b, " %d%%", p.Percentage)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// progressSummary is the one-line summary the header shows: the first unfinished
+// progress entry and how many more there are. Empty when nothing is in progress.
+func (m *Model) progressSummary() string {
+	if len(m.lsp.progress) == 0 {
+		return ""
+	}
+	summary := progressLine(m.lsp.progress[0])
+	if extra := len(m.lsp.progress) - 1; extra > 0 {
+		summary += fmt.Sprintf(" +%d more", extra)
+	}
+	return summary
 }
 
 // diagWaiting is what the panel says while it has no rows but diagnostics may
@@ -236,13 +277,17 @@ func (m *Model) diagWaiting() string {
 	return ""
 }
 
-// diagEmptyText is the panel's message when it has no rows.
+// diagEmptyText is the panel's message when it has no rows. While a server reports
+// progress, the first entry is the message: that is the panel's text progress
+// indicator, and it clears when the server ends it.
 func (m *Model) diagEmptyText() string {
 	switch {
 	case m.lsp.port == nil:
 		return "No language server is configured"
 	case m.lsp.stopped:
 		return "Language servers are stopped"
+	case len(m.lsp.progress) > 0:
+		return "In progress: " + m.progressSummary()
 	case m.diagWaiting() != "":
 		return m.diagWaiting()
 	}
@@ -294,7 +339,8 @@ func (m *Model) paintDiagPanel(dst *grid.Grid, l layout, sec sidebar.Section) {
 		}
 		nameX := x + 1 + space.PadX
 		if r.header {
-			dst.Put(nameX, y, end, ansi.Truncate(m.diagRel(r.path), max(end-nameX, 0), "…"), headerStyle(body))
+			name := m.diagRel(r.path) + diagOpenMarker(r.source)
+			dst.Put(nameX, y, end, ansi.Truncate(name, max(end-nameX, 0), "…"), headerStyle(body))
 			label := r.counts.Label()
 			if label != "" {
 				dst.Put(max(end-ansi.StringWidth(label), nameX), y, end, label, headerStyle(body))
@@ -310,6 +356,16 @@ func (m *Model) paintDiagPanel(dst *grid.Grid, l layout, sec sidebar.Section) {
 		}
 		dst.Put(textX, y, room, ansi.Truncate(text, max(room-textX, 0), "…"), st)
 	}
+}
+
+// diagOpenMarker marks a file whose diagnostics came from a workspace pull rather
+// than from the server publishing for an open document: it is usually a file the
+// user has not opened, and Enter opens it.
+func diagOpenMarker(source string) string {
+	if source == "workspace" {
+		return " (not open)"
+	}
+	return ""
 }
 
 // headerStyle is the style of a file header: the body style, bold.
@@ -518,7 +574,7 @@ func (m *Model) openDiagnosticsList() tea.Cmd {
 	items := make([]list.Row, 0, len(rows))
 	for _, r := range rows {
 		if r.header {
-			items = append(items, list.Row{Header: true, Left: m.diagRel(r.path), Right: r.counts.Label()})
+			items = append(items, list.Row{Header: true, Left: m.diagRel(r.path) + diagOpenMarker(r.source), Right: r.counts.Label()})
 			continue
 		}
 		items = append(items, list.Row{
