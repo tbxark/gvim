@@ -5,12 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // isolateConfig keeps the recent list out of the real user config directory.
 func isolateConfig(t *testing.T) {
 	t.Helper()
-	home := t.TempDir()
+	home := tempHome(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", home)
@@ -19,6 +20,30 @@ func isolateConfig(t *testing.T) {
 	for _, k := range []string{"KITTY_WINDOW_ID", "WEZTERM_EXECUTABLE", "GHOSTTY_RESOURCES_DIR", "TERM_PROGRAM", "TERM"} {
 		t.Setenv(k, "")
 	}
+}
+
+// tempHome creates an isolated HOME for a test. Unlike t.TempDir it tolerates the
+// cleanup race with spawned helper processes: gopls and the go toolchain it runs can
+// still be writing their build cache under HOME when the test ends, so the tree is
+// removed with a few bounded retries and a residual directory is ignored.
+func tempHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.MkdirTemp("", "gvim-home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOCACHE", filepath.Join(home, ".cache", "go-build"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Cleanup(func() {
+		for range 20 {
+			if err := os.RemoveAll(home); err == nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		_ = os.RemoveAll(home)
+	})
+	return home
 }
 
 func TestValidate(t *testing.T) {

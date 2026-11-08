@@ -87,7 +87,9 @@ owned by the dock; the session stays read-only and nothing is typed into it.
   Fresh). An unshifted press still forwards to a mouse-hungry program.
 - In scrollback, a **double click** selects the word under the cell and a
   **triple click** the whole row; on the live grid both stay inert (Fresh's rule).
-  A drag after a word/line click extends by character, not by word.
+  A drag after a word or line click extends by whole units, as Fresh does: the
+  clicked word or row stays selected and the selection snaps to whole words (or
+  whole rows) under the pointer.
 - Selected cells are painted with the selection background, including blank cells
   past a row's text. `y` and Ctrl+C copy the selection through the clipboard
   path; with no selection they keep their older meaning (the selected row and the
@@ -97,8 +99,14 @@ owned by the dock; the session stays read-only and nothing is typed into it.
   content does not change when the shell prints: history is append-only, and a
   screen row that scrolls into history keeps its absolute index, so new output
   appends below the selection instead of moving it. A selection holds the view
-  against automatic scroll; there is no drag auto-scrolling past the visible rows
-  yet (see Deferred).
+  against automatic scroll.
+- **Drag auto-scroll**: dragging a selection above or below the visible rows
+  scrolls the scrollback one row about every 80 ms (fixed, no acceleration, at
+  most the same one-row step at either end), and the selection keeps extending to
+  the edge row of the new window, so a selection can run past the window. The
+  repeat stops at the top or bottom of the combined rows, when the pointer comes
+  back inside, on release, when the selection is cleared, and when the dock loses
+  the focus; the release may land outside the dock's rows.
 
 ## Persistence and reflow
 
@@ -155,19 +163,21 @@ uses:
 | `terminal.mouse_forwarding` | `"requested"` (default) or `"alt_screen"` | when the mouse reaches the program inside the terminal. |
 | `terminal.jump_to_end_on_output` | bool, `true` | new output returns the view to the live screen unless a selection is active. |
 | `terminal.mouse_drag_selects` | bool, `true` | a live-grid drag selects text by dropping into scrollback; false makes live drags inert (scrollback drags and Shift+drags still select). |
+| `terminal.pass_ctrl_v_without_text` | bool, `true` | a Ctrl+V whose system clipboard has no text (an image, say) goes to the shell as the key itself instead of pasting the last yank; false pastes the last yank. An unreadable clipboard pastes the last yank either way. |
 
 The other Fresh `terminal` keys are accepted and ignored, so a Fresh config file
-loads without diagnostics: `resume_agents`, `pass_ctrl_v_without_text` and
-`skip_app_execution_alias`. `terminal.shell` and `terminal.close_on_exit` are
-Fresh's names; `terminal.mouse_forwarding`, `terminal.jump_to_end_on_output` and
+loads without diagnostics: `resume_agents` and `skip_app_execution_alias`.
+`terminal.shell`, `terminal.close_on_exit`, `terminal.pass_ctrl_v_without_text`,
+`terminal.mouse_forwarding`, `terminal.jump_to_end_on_output` and
 `terminal.mouse_drag_selects` are Fresh's keys with Fresh's values;
 `terminal.scrollback_lines` is the one gvim addition.
 
 **Trust.** The project config layer may set `close_on_exit`, `scrollback_lines`,
-`mouse_forwarding`, `jump_to_end_on_output` and `mouse_drag_selects` — they tune
-the dock — but it may not set `terminal.shell`: a repository must not choose the
-program gvim executes. A project `terminal.shell` is refused with a diagnostic,
-like the project `lsp` command rule (C11 in `docs/trust.md`).
+`mouse_forwarding`, `jump_to_end_on_output`, `mouse_drag_selects` and
+`pass_ctrl_v_without_text` — they tune the dock — but it may not set
+`terminal.shell`: a repository must not choose the program gvim executes. A
+project `terminal.shell` is refused with a diagnostic, like the project `lsp`
+command rule (C11 in `docs/trust.md`).
 
 ## Working directory and clickable paths
 
@@ -179,17 +189,46 @@ see above).
 **Ctrl+Click on a path in the output opens it**, in the live view and in
 scrollback. The token under the pointer is the run of non-space characters
 around the cell, with trailing sentence punctuation trimmed, and it must look
-like a path (a slash, a dot or a leading tilde). Resolution order is Fresh's:
-absolute path (with `~` expanded), then relative to the shell's OSC 7 working
-directory, then relative to the editor's working directory (the workspace root).
-The existence check and the directory read run in a `tea.Cmd`; the dock then
-asks the root to open the path through the same `openFile` path the explorer and
-LSP jumps use. A miss is a `No file at <token>` notice. Ctrl+Click is off on the
-alternate screen, where the output is a full-screen program's own drawing.
+like a path (a slash, a dot or a leading tilde). A trailing `:line` or
+`:line:col` narrows the jump: the path with the suffix stripped is tried first,
+then the whole token as a plain path, so a file whose name really holds a colon
+still opens; the line and column must be positive numbers and the root opens the
+file there. Resolution order is Fresh's: absolute path (with `~` expanded), then
+relative to the shell's OSC 7 working directory, then relative to the editor's
+working directory (the workspace root). The existence check and the directory
+read run in a `tea.Cmd`; the dock then asks the root to open the path through the
+same `openFile` path the explorer and LSP jumps use. A miss is a `No file at
+<token>` notice. Ctrl+Click is off on the alternate screen, where the output is a
+full-screen program's own drawing.
+
+**Ctrl+hover** highlights a link before the click: the dock underlines the token
+under the pointer, with no file-system access (the path is resolved only on the
+click), and the status row says `Ctrl+Click to open <token>`. The underline clears
+on any other mouse event, when the pointer leaves the dock's rows, when the view
+changes and when the dock loses the focus; the alternate screen, being a
+full-screen program's own drawing, has no hover.
 
 The token is read from the row's text, so a column maps to a rune rather than to
 a cell: a double-width character before the token shifts the hit spot by one.
-There is no hover underline yet, and a `file:line:col` suffix is not decoded.
+
+## Ctrl+V and the clipboard
+
+`Ctrl+V` in a live terminal pastes the system clipboard's text, with Fresh's
+fallbacks (`terminal.pass_ctrl_v_without_text` controls the no-text case):
+
+- a readable clipboard that holds text is pasted as a bracketed paste when the
+  child asked for that mode;
+- a readable clipboard that holds no text is a copy of something that is not
+  text (an image), so by default the Ctrl+V key itself goes to the shell and a
+  program such as an agent CLI can read the clipboard; with
+  `pass_ctrl_v_without_text = false` gvim pastes its last yank instead, and does
+  nothing when there is none;
+- a clipboard that cannot be read at all (no display, over SSH) always pastes the
+  last yank; only when there is none does the default pass the key, and with the
+  setting off nothing happens.
+
+The last yank is the last text a copy or cut in the editor (or the dock) put on
+the clipboard. Editor-side Ctrl+V pastes are unaffected.
 
 ## Mouse forwarding
 
@@ -238,8 +277,17 @@ These are known gaps, not bugs:
 - **child OSC 52 clipboard**: x/vt v0.1.0 does not expose the emulator's OSC 52
   payload, so a child's clipboard write cannot be captured without re-parsing the
   stream.
-- the **kitty keyboard protocol** and `pass_ctrl_v_without_text`.
+- **the kitty keyboard protocol**: x/vt v0.1.0 encodes child keys with legacy
+  bytes only; its `SendKey` carries an explicit `TODO: Support Kitty, CSI u, and
+  XTerm modifyOtherKeys` and the emulator exposes no keyboard-mode seam, so gvim
+  cannot offer the protocol to the program inside the dock yet. The outer
+  terminal's keyboard protocol is Bubble Tea's business, not x/vt's. Revisit when
+  x/vt lands the encoding.
+- **Windows ConPTY** (round-11 candidate): `terminal.Start` returns
+  `ErrUnsupported` on Windows. The planned slice is a build-tagged
+  (`//go:build windows`) pure-Go implementation with `x/sys/windows`
+  `CreatePseudoConsole`/`ResizePseudoConsole`/`ClosePseudoConsole`, an anonymous
+  pipe pair and a `STARTUPINFOEX` attribute list, verified with
+  `GOOS=windows go build ./...` and an acceptance document for a real Windows
+  10 1809+ host.
 - **close_on_exit for report-split terminals**: gvim only has the dock.
-- **drag auto-scrolling** past the visible rows: a selection is confined to the
-  visible window, and a drag after a word/line click extends by character.
-- hover underlines for paths and a `file:line:col` suffix in links.

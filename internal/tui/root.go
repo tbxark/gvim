@@ -147,6 +147,12 @@ type SidebarState struct {
 	DiagnosticsOpen      bool
 	DiagnosticsCollapsed bool
 	DiagnosticsRows      int
+	// PluginOrder, PluginRows and PluginCollapsed are the plugin sections' stack
+	// order, requested body rows and folded state, by plugin panel id (R9-4); they
+	// are restored when the sections mount and collected while they are mounted.
+	PluginOrder     []string
+	PluginRows      map[string]int
+	PluginCollapsed map[string]bool
 }
 
 // selectedTreePath is the tree's selected row path, or "" when nothing is
@@ -183,6 +189,8 @@ func (m *Model) SidebarState() SidebarState {
 		DiagnosticsCollapsed: m.diag.Collapsed(),
 		DiagnosticsRows:      m.diag.Rows(),
 	}
+	m.applyPluginSidebarRestore()
+	st.PluginOrder, st.PluginRows, st.PluginCollapsed = m.pluginSidebarState()
 	return st
 }
 

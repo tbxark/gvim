@@ -9,6 +9,7 @@ import (
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/lsp/manager"
 )
 
@@ -19,8 +20,14 @@ import (
 // when the first document of its language opens, and the PATH search happens
 // there, in the command that opens the document.
 func NewFor(cfg config.Config) tui.LSPSession {
+	return NewForEnv(cfg, nil)
+}
+
+// NewForEnv is NewFor with the active project environment's set-only overlay,
+// applied to every language-server process it starts. spawnEnv may be nil.
+func NewForEnv(cfg config.Config, spawnEnv func() []string) tui.LSPSession {
 	plan := lspPlanFor(cfg)
-	return newPort(plan, cfg.LSPEnabled)
+	return newPort(plan, cfg.LSPEnabled, spawnEnv)
 }
 
 // lspPlan is the effective server table of a config.
@@ -221,6 +228,19 @@ func serverConfig(entry config.LSPServer, spec manager.Spec) manager.ServerConfi
 	}
 	if entry.RootMarkers != nil {
 		cfg.RootMarkers = slices.Clone(entry.RootMarkers)
+	}
+	if entry.ProcessLimits != nil {
+		// Fresh's process_limits: enabled unless the entry says otherwise, and a limit
+		// with no cap applies nothing.
+		enabled := true
+		if entry.ProcessLimits.Enabled != nil {
+			enabled = *entry.ProcessLimits.Enabled
+		}
+		cfg.Limits = lsp.ProcessLimits{
+			Enabled:          enabled,
+			MaxMemoryPercent: entry.ProcessLimits.MaxMemoryPercent,
+			MaxCPUPercent:    entry.ProcessLimits.MaxCPUPercent,
+		}
 	}
 	return cfg
 }

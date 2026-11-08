@@ -172,6 +172,7 @@ func (m *Model) relativePath(path string) string {
 // setClipboard puts text on the system clipboard: an OSC 52 write, and a native
 // write when the app gave one. The status row says what was copied.
 func (m *Model) setClipboard(text string) tea.Cmd {
+	m.rememberYank(text)
 	m.notice = "Copied " + text
 	cmd := tea.SetClipboard(text)
 	if w, ok := m.dock.Clipboard().(ClipboardWriter); ok {

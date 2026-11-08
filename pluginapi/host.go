@@ -231,4 +231,6 @@ type Host interface {
 	WorkspaceHost
 	ViewStateHost
 	LineTargetHost
+	ExplorerHost
+	EnvHost
 }

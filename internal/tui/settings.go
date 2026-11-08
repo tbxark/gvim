@@ -326,7 +326,7 @@ func (p *settingsPage) rebuild() {
 			shown := SettingsItem{
 				Key: it.Key, Path: slices.Clone(it.Path), Name: it.Name, Section: it.Section, Kind: it.Kind,
 				Value: value, Choices: it.Choices, Min: it.Min, Max: it.Max,
-				Apply: it.Apply, Layers: it.Layers, Note: it.Note,
+				Apply: it.Apply, Layers: it.Layers, Note: it.Note, Preview: it.Preview,
 			}
 			if needle != "" && !settingsMatches(shown, needle) {
 				continue
@@ -1175,6 +1175,14 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 			name = it.Name + " (user layer)"
 		}
 		valueX := end - ansi.StringWidth(value)
+		if len(it.Preview) > 0 {
+			// The theme row's colour chips go between its name and its value; the
+			// footer names them. A narrow row drops them rather than overlapping.
+			chipX := box.X + 2 + ansi.StringWidth(name) + 2
+			if chipX+chipWidth(it.Preview) < valueX {
+				drawSettingsSwatches(g, chipX, valueX-1, y, it.Preview)
+			}
+		}
 		g.Put(max(valueX, box.X+2), y, end, value, rightSt)
 		room := max(valueX-box.X-4, 1)
 		g.Put(box.X+2, y, box.X+2+room, name, st)
@@ -1182,8 +1190,16 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 	if len(p.rows) == 0 {
 		g.Put(box.X+2, box.Y+2, end, "No matches", ov.Muted)
 	}
-	ov.PaintFooter(g, box.X, box.Y+box.H-1, box.W,
-		"Enter edit · Del reset · Tab layer · ^S save · ^R discard · ^E raw · Esc close")
+	footer := "Enter edit · Del reset · Tab layer · ^S save · ^R discard · ^E raw · Esc close"
+	for _, row := range p.rows {
+		if !row.header && len(row.item.Preview) > 0 {
+			// The legend leads so a narrow footer still names the chips (PaintFooter
+			// clips the tail).
+			footer = "swatches: bg · fg · accent · popup · " + footer
+			break
+		}
+	}
+	ov.PaintFooter(g, box.X, box.Y+box.H-1, box.W, footer)
 }
 
 // Cursor returns the caret in the filter row.
@@ -1198,6 +1214,27 @@ func (p *settingsPage) Cursor(_, _ int) (x, y int, ok bool) {
 		return 0, 0, false
 	}
 	return labelX + ansi.StringWidth(space.Tail(string(p.filter), room)), p.box.Y + 1, true
+}
+
+// chipWidth is the columns a row of colour chips takes: two cells each plus a
+// one-cell gap, without the trailing gap.
+func chipWidth(swatches []SettingsSwatch) int {
+	if len(swatches) == 0 {
+		return 0
+	}
+	return 3*len(swatches) - 1
+}
+
+// drawSettingsSwatches paints a row's colour chips from x, stopping before end.
+// A chip is two cells in its fill and text colours; the footer names the roles.
+func drawSettingsSwatches(g *grid.Grid, x, end, y int, swatches []SettingsSwatch) {
+	for _, sw := range swatches {
+		if x+2 > end {
+			return
+		}
+		g.Put(x, y, end, "██", grid.Style{FG: sw.FG, BG: sw.BG})
+		x += 3
+	}
 }
 
 // settingsLayerTitle names a layer in the page title.

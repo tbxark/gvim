@@ -1,0 +1,27 @@
+{
+  "en": {
+    "cmd.activate": "Env: Activate Detected Environment (venv / direnv / mise)",
+    "cmd.activate_desc": "Detect and activate the project environment so language servers and spawned processes inherit it",
+    "cmd.reload": "Env: Reload Environment (re-capture after .envrc/mise.toml change)",
+    "cmd.reload_desc": "Re-capture the environment and apply it to new processes",
+    "cmd.use_system": "Env: Use System (Deactivate Environment)",
+    "cmd.use_system_desc": "Deactivate the project environment and use the system environment for new processes",
+    "cmd.status": "Env: Show Environment Status",
+    "cmd.status_desc": "Show which environment manager is detected and whether it is active",
+    "status.no_env_detected": "No environment manager detected in this project",
+    "status.activating": "Activating %{name} environment...",
+    "status.reloading": "Reloading %{name} environment...",
+    "status.deactivated": "Environment deactivated - using the system environment",
+    "status.env_active": "Environment active",
+    "status.env_active_named": "Environment active (%{name})",
+    "status.env_detected": "Detected %{name} (trust: %{trust}). Run \"Env: Activate\" to use it.",
+    "status.no_env": "No environment detected (trust: %{trust})",
+    "status.untrusted": "The project environment is trusted-gated: trust this workspace first, then activate",
+    "status.reload_done": "Reloaded %{name} environment",
+    "statusbar.label": "Environment",
+    "statusbar.locked": "%{name} (locked)",
+    "statusbar.active": "%{name} ✓",
+    "statusbar.active_unknown": "active",
+    "statusbar.system": "system"
+  }
+}

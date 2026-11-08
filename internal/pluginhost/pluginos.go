@@ -28,6 +28,9 @@ import (
 // never held across an IO call.
 type pluginOS struct {
 	dirs func() hostos.Dirs // evaluated at every call: the workspace root can change
+	// spawnEnv is the active project environment's set-only overlay for child
+	// processes (nil when none is wired).
+	spawnEnv func() []string
 
 	mu      sync.Mutex
 	procs   map[*osProc]struct{}
@@ -39,7 +42,11 @@ var _ hostos.OS = (*pluginOS)(nil)
 
 // newPluginOS returns the OS for the plugin runtime. dirs reports the well-known
 // directories; a nil dirs gives the process's own home, temp and working directory.
-func newPluginOS(dirs func() hostos.Dirs) *pluginOS {
+func newPluginOS(dirs func() hostos.Dirs, spawnEnv ...func() []string) *pluginOS {
+	var overlay func() []string
+	if len(spawnEnv) > 0 {
+		overlay = spawnEnv[0]
+	}
 	if dirs == nil {
 		dirs = func() hostos.Dirs {
 			home, _ := os.UserHomeDir()
@@ -47,7 +54,7 @@ func newPluginOS(dirs func() hostos.Dirs) *pluginOS {
 			return hostos.Dirs{Home: home, Temp: os.TempDir(), Cwd: cwd, Root: cwd}
 		}
 	}
-	return &pluginOS{dirs: dirs, procs: map[*osProc]struct{}{}, watches: map[*osWatch]struct{}{}}
+	return &pluginOS{dirs: dirs, spawnEnv: overlay, procs: map[*osProc]struct{}{}, watches: map[*osWatch]struct{}{}}
 }
 
 const (

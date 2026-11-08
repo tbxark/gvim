@@ -61,14 +61,15 @@ func New(servers map[string]config.LSPServer) tui.LSPSession {
 		plan.auto[lang] = true
 		plan.startable[lang] = true
 	}
-	return newPort(plan, true)
+	return newPort(plan, true, nil)
 }
 
 // newPort builds the port for the plan. lspEnabled is the lsp_enabled master
 // switch; it is false when the workspace is untrusted, and then no server starts
 // on its own, though a manual start still runs one.
-func newPort(plan lspPlan, lspEnabled bool) *lspPort {
+func newPort(plan lspPlan, lspEnabled bool, spawnEnv func() []string) *lspPort {
 	p := &lspPort{
+		spawnEnv:  spawnEnv,
 		servers:   plan.servers,
 		universal: plan.universal,
 		info:      plan.info,
@@ -99,6 +100,9 @@ func newPort(plan lspPlan, lspEnabled bool) *lspPort {
 // protocol to rune columns. Its methods may block on a server, so the root calls
 // them only from commands.
 type lspPort struct {
+	// spawnEnv is the active project environment's set-only overlay for servers
+	// (nil when none is wired).
+	spawnEnv  func() []string
 	servers   map[string][]manager.ServerConfig // by language ID; read only after construction
 	universal []manager.ServerConfig
 	info      map[string]tui.LSPServerInfo // read only after construction
@@ -126,6 +130,10 @@ type lspPort struct {
 	// wsPull caches the workspace/diagnostic answer: the pull is throttled and
 	// re-asked when the capabilities change or the set of open documents does.
 	wsPull workspacePull
+	// wsPulls tracks the workspace/diagnostic pulls in flight so a newer pull, or a
+	// stop/restart of the servers, cancels the old ones (their $/cancelRequest goes
+	// out through the client) instead of letting them answer into the cache.
+	wsPulls pullSet
 }
 
 // pendingEdit is one queued workspace/applyEdit request.
@@ -701,6 +709,9 @@ func (p *lspPort) StartLanguage(language string) error {
 // after it. A language named here counts as started by hand, so its servers start
 // at the next open whatever auto_start says.
 func (p *lspPort) Restart(language string) error {
+	// A workspace/diagnostic pull in flight asks a server that is about to go: cancel
+	// it on the wire instead of letting it answer into a cache the restart clears.
+	p.wsPulls.cancelAll()
 	p.mu.Lock()
 	if language != "" {
 		p.forced[language] = true
@@ -723,6 +734,7 @@ func (p *lspPort) Restart(language string) error {
 
 // Stop shuts down every server of every root and forgets every document.
 func (p *lspPort) Stop() error {
+	p.wsPulls.cancelAll()
 	p.mu.Lock()
 	mgrs := slices.Collect(maps.Values(p.managers))
 	p.managers = make(map[string]*manager.Manager)
@@ -759,6 +771,7 @@ func (p *lspPort) Servers() []tui.LSPServerStatus {
 		if ok {
 			st.State = runState(cur.State)
 			st.Error = cur.Error
+			st.Limits = cur.Limits
 		} else if muted[st.Language] {
 			st.State = tui.LSPServerStopped
 		}
@@ -783,6 +796,8 @@ func runState(s manager.ServerState) tui.LSPServerRunState {
 // RestartServer stops the named server and starts it again, whatever auto_start or
 // the mute says.
 func (p *lspPort) RestartServer(language, name string) error {
+	// The pull may be asking this very server: cancel it before the restart.
+	p.wsPulls.cancelAll()
 	mgr := p.managerForServer(language, name)
 	p.mu.Lock()
 	delete(p.muted, language)
@@ -792,11 +807,14 @@ func (p *lspPort) RestartServer(language, name string) error {
 
 // StopServer stops the named server.
 func (p *lspPort) StopServer(language, name string) error {
+	p.wsPulls.cancelAll()
 	return p.managerForServer(language, name).StopServer(language, name)
 }
 
 // SetLanguageEnabled mutes or unmutes a language.
 func (p *lspPort) SetLanguageEnabled(language string, enabled bool) error {
+	// Muting a language stops its servers; a pull of theirs in flight is cancelled.
+	p.wsPulls.cancelAll()
 	p.mu.Lock()
 	if enabled {
 		delete(p.muted, language)
@@ -972,6 +990,7 @@ func (p *lspPort) managerFor(root string) *manager.Manager {
 func (p *lspPort) newManagerLocked(root string) *manager.Manager {
 	mgr := manager.NewManager(root, p.servers, p.universal)
 	mgr.SetApplyEdit(p.enqueueEdit)
+	mgr.SetSpawnEnv(p.spawnEnv)
 	for lang := range p.forced {
 		mgr.ForceLanguage(lang)
 	}
@@ -990,6 +1009,14 @@ func (p *lspPort) enqueueEdit(language string, params protocol.ApplyWorkspaceEdi
 	p.pending = append(p.pending, pendingEdit{language: language, edit: params.Edit, label: label})
 	p.mu.Unlock()
 	return true
+}
+
+// SetSpawnEnv installs the active project environment's set-only overlay for
+// servers this port starts from now on. It is read at every server launch.
+func (p *lspPort) SetSpawnEnv(overlay func() []string) {
+	p.mu.Lock()
+	p.spawnEnv = overlay
+	p.mu.Unlock()
 }
 
 // doc returns the record of the open document at path.

@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestExplorerStateReportsThePanelAndTheTree checks the state a session keeps: the
 // panel's shown flag, the tree root and the two listing settings. With no explorer
@@ -19,7 +22,7 @@ func TestExplorerStateReportsThePanelAndTheTree(t *testing.T) {
 	}
 
 	none := newTestModel(t, newFakeEditor("x"), nil, 80, 20)
-	if st := none.ExplorerState(); st != (ExplorerState{}) {
+	if st := none.ExplorerState(); !reflect.DeepEqual(st, ExplorerState{}) {
 		t.Fatalf("no explorer state = %+v, want the zero value", st)
 	}
 }

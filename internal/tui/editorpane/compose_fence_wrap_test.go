@@ -58,17 +58,46 @@ func TestFenceCaretLineKeepsTheWholeBody(t *testing.T) {
 	}
 }
 
-func TestFenceInABlockquoteStaysLiteral(t *testing.T) {
+func TestFenceInABlockquoteIsFramedAtTheContainer(t *testing.T) {
 	t.Parallel()
 	lines := []string{"> ```", "> code here", "> ```", "after", "tail"}
 	doc := newDoc(lines...)
 	doc.cursor = buffer.Pos{Line: len(lines) - 1, Col: 0}
 	p := composePane(doc, 30)
-	joined := strings.Join(p.Render(40, 10).Plain(), "\n")
-	if !strings.Contains(joined, "```") {
-		t.Fatalf("rows = %q, want the quoted fence left literal", joined)
+	rows := p.Render(40, 10).Plain()
+	trim := func(y int) string { return strings.TrimRight(rows[y][4:], " ") }
+	// The container's bar comes first, then the frame at the container indent.
+	if got := trim(0); !strings.HasPrefix(got, "│ ╭") {
+		t.Fatalf("row 0 = %q, want the quote bar and the top border", got)
 	}
-	if strings.Contains(joined, "╭") {
-		t.Fatalf("rows = %q, the quoted fence should not be framed", joined)
+	if got := trim(1); !strings.HasPrefix(got, "│ │ code here") {
+		t.Fatalf("row 1 = %q, want the framed body inside the quote", got)
+	}
+	if got := trim(2); !strings.HasPrefix(got, "│ ╰") {
+		t.Fatalf("row 2 = %q, want the quote bar and the bottom border", got)
+	}
+}
+
+func TestQuoteFenceWithAnUnquotedBodyFallsBackPerLine(t *testing.T) {
+	t.Parallel()
+	lines := []string{"> ```", "code outside the quote", "> ```", "after", "tail"}
+	doc := newDoc(lines...)
+	doc.cursor = buffer.Pos{Line: len(lines) - 1, Col: 0}
+	p := composePane(doc, 30)
+	joined := strings.Join(p.Render(40, 10).Plain(), "\n")
+	if !strings.Contains(joined, "code outside the quote") {
+		t.Fatalf("rows = %q, want the inconsistent line literal", joined)
+	}
+}
+
+func TestNestedFenceMarkerStaysLiteralCode(t *testing.T) {
+	t.Parallel()
+	lines := []string{"```", "~~~", "still code", "```", "after", "tail"}
+	doc := newDoc(lines...)
+	doc.cursor = buffer.Pos{Line: len(lines) - 1, Col: 0}
+	p := composePane(doc, 30)
+	joined := strings.Join(p.Render(40, 12).Plain(), "\n")
+	if !strings.Contains(joined, "~~~") || !strings.Contains(joined, "still code") {
+		t.Fatalf("rows = %q, want the nested marker as literal code", joined)
 	}
 }

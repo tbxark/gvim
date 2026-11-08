@@ -201,3 +201,55 @@ func TestProjectUniversalLSPIsRefused(t *testing.T) {
 		t.Fatalf("UniversalLSP = %+v, want none", cfg.UniversalLSP)
 	}
 }
+
+// TestProcessLimitsValidation checks the load-time validation of process_limits: 1..100
+// percent of memory, and 1..1000 percent CPU (100 is one core), while the fields are kept
+// for the runtime to apply or report.
+func TestProcessLimitsValidation(t *testing.T) {
+	cfg, diags := loadLSP(t, `{"lsp": {"go": {"command": "gopls",
+		"process_limits": {"max_memory_percent": 50, "max_cpu_percent": 200}}}}`)
+	if len(diags) != 0 {
+		t.Fatalf("diags = %+v, want none", diags)
+	}
+	limits := cfg.LSP["go"][0].ProcessLimits
+	if limits == nil || limits.MaxMemoryPercent == nil || *limits.MaxMemoryPercent != 50 ||
+		limits.MaxCPUPercent == nil || *limits.MaxCPUPercent != 200 || limits.Enabled != nil {
+		t.Fatalf("process_limits = %+v", limits)
+	}
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"memory zero", `{"lsp": {"go": {"command": "gopls", "process_limits": {"max_memory_percent": 0}}}}`,
+			"max_memory_percent must be between 1 and 100"},
+		{"memory over", `{"lsp": {"go": {"command": "gopls", "process_limits": {"max_memory_percent": 101}}}}`,
+			"max_memory_percent must be between 1 and 100"},
+		{"cpu zero", `{"lsp": {"go": {"command": "gopls", "process_limits": {"max_cpu_percent": 0}}}}`,
+			"max_cpu_percent must be between 1 and 1000"},
+		{"cpu over", `{"lsp": {"go": {"command": "gopls", "process_limits": {"max_cpu_percent": 1001}}}}`,
+			"max_cpu_percent must be between 1 and 1000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, diags := loadLSP(t, tt.body)
+			var messages []string
+			for _, d := range diags {
+				messages = append(messages, d.Message)
+			}
+			if len(diags) == 0 || !strings.Contains(strings.Join(messages, "\n"), tt.want) {
+				t.Fatalf("diags = %+v, want %q", diags, tt.want)
+			}
+		})
+	}
+	// The boundaries are accepted, and enabled:false is kept for the runtime.
+	cfg, diags = loadLSP(t, `{"lsp": {"go": {"command": "gopls",
+		"process_limits": {"max_memory_percent": 1, "max_cpu_percent": 1000, "enabled": false}}}}`)
+	if len(diags) != 0 {
+		t.Fatalf("boundary diags = %+v", diags)
+	}
+	limits = cfg.LSP["go"][0].ProcessLimits
+	if limits == nil || limits.Enabled == nil || *limits.Enabled {
+		t.Fatalf("process_limits = %+v, want enabled false kept", limits)
+	}
+}

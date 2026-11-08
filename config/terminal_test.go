@@ -14,8 +14,10 @@ func TestTerminalDefaults(t *testing.T) {
 	}
 	want := TerminalConfig{
 		CloseOnExit: false, ScrollbackLines: TerminalScrollbackDefault,
-		MouseForwarding:   MouseForwardRequested,
-		JumpToEndOnOutput: true, MouseDragSelects: true,
+		MouseForwarding:      MouseForwardRequested,
+		JumpToEndOnOutput:    true,
+		MouseDragSelects:     true,
+		PassCtrlVWithoutText: true,
 	}
 	if !reflect.DeepEqual(cfg.Terminal, want) {
 		t.Fatalf("Terminal = %+v, want %+v", cfg.Terminal, want)
@@ -97,7 +99,6 @@ func TestTerminalFreshKeysAccepted(t *testing.T) {
 	t.Parallel()
 	body := `{"terminal": {
   "resume_agents": false,
-  "pass_ctrl_v_without_text": false,
   "skip_app_execution_alias": false
 }}`
 	cfg, diags := loadBody(t, body)
@@ -106,6 +107,25 @@ func TestTerminalFreshKeysAccepted(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg.Terminal, DefaultTerminalOptions()) {
 		t.Fatalf("Terminal = %+v, want the defaults", cfg.Terminal)
+	}
+}
+
+// TestTerminalPassCtrlVWithoutText checks the Ctrl+V setting Fresh defaults on.
+func TestTerminalPassCtrlVWithoutText(t *testing.T) {
+	t.Parallel()
+	if !DefaultTerminalOptions().PassCtrlVWithoutText {
+		t.Fatal("pass_ctrl_v_without_text does not default to true")
+	}
+	cfg, diags := loadBody(t, `{"terminal": {"pass_ctrl_v_without_text": false}}`)
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics = %v", diags)
+	}
+	if cfg.Terminal.PassCtrlVWithoutText {
+		t.Fatal("pass_ctrl_v_without_text = false was not applied")
+	}
+	cfg, diags = loadBody(t, `{"terminal": {"pass_ctrl_v_without_text": true}}`)
+	if len(diags) != 0 || !cfg.Terminal.PassCtrlVWithoutText {
+		t.Fatalf("pass_ctrl_v_without_text = true: %v, %+v", diags, cfg.Terminal)
 	}
 }
 
@@ -126,6 +146,7 @@ func TestTerminalInvalidValues(t *testing.T) {
 		{"a null value", `{"terminal": {"close_on_exit": null}}`, "terminal.close_on_exit"},
 		{"jump on output that is not a boolean", `{"terminal": {"jump_to_end_on_output": "no"}}`, "terminal.jump_to_end_on_output"},
 		{"drag selects that is not a boolean", `{"terminal": {"mouse_drag_selects": 0}}`, "terminal.mouse_drag_selects"},
+		{"pass ctrl-v that is not a boolean", `{"terminal": {"pass_ctrl_v_without_text": "no"}}`, "terminal.pass_ctrl_v_without_text"},
 		{"an unknown key", `{"terminal": {"always_use_mouse": true}}`, "terminal.always_use_mouse"},
 	}
 	for _, tt := range tests {

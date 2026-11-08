@@ -213,6 +213,18 @@ func (s *FakeServer) RequestDiagnosticRefresh(ctx context.Context) error {
 func (s *FakeServer) DiagnosticWorkspace(ctx context.Context, p *protocol.WorkspaceDiagnosticParams) (*protocol.WorkspaceDiagnosticReport, error) {
 	RecordTo[any](s.Requests, p)
 	s.park(ctx)
+	if s.WorkspaceHold != nil {
+		// Hold the answer until the test releases it or the client cancels the
+		// request. The cancelable server dispatches the handler asynchronously, so the
+		// read loop keeps receiving the cancellation while this waits.
+		RecordTo(s.WorkspaceEntered, struct{}{})
+		select {
+		case <-ctx.Done():
+			RecordTo(s.WorkspaceCanceled, struct{}{})
+			return nil, ctx.Err()
+		case <-s.WorkspaceHold:
+		}
+	}
 	if s.Canned.Fail {
 		return nil, ErrRefused
 	}

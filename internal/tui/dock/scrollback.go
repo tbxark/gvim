@@ -116,6 +116,7 @@ func (p *Panel) enterScrollback() tea.Cmd {
 	if p.scroll.on {
 		return nil
 	}
+	p.ClearHover()
 	total := p.term.ScrollbackLen()
 	rows := p.bodyRows()
 	p.scroll = scrollState{

@@ -37,6 +37,8 @@ type Options struct {
 	Host      *FakeHost          // nil: a fresh one
 	Now       func() time.Time   // clock of the runtime (nil: the harness's manual clock)
 	Locale    string             // gvim.i18n locale ("" means "en")
+	// Settings are the plugins.<name>.settings layers of the config, per plugin name.
+	Settings map[string]plugin.PluginSettings
 }
 
 // Harness plays the ui for a runtime: it starts it, calls Run/Emit/Resolve, pumps Drain
@@ -47,9 +49,10 @@ type Harness struct {
 	RT   *plugin.Runtime
 	Host *FakeHost
 	// OS is the FakeOS of the runtime (nil when Options.OS was another implementation).
-	OS      *FakeOS
-	Files   Files
-	Sources []plugin.Source
+	OS       *FakeOS
+	Files    Files
+	Sources  []plugin.Source
+	settings map[string]plugin.PluginSettings
 
 	// CompileOnUIGoroutine reports whether compiling a plugin ever ran on the goroutine of
 	// the test (the UI goroutine). Compiling is Work: it must be false.
@@ -95,6 +98,7 @@ func New(t *testing.T, files Files, o Options) *Harness {
 		Timeout: o.Timeout, EventBudget: o.EventBudget, HeapLimit: heap, OS: osImpl, Services: svc,
 		Version: "test", Platform: "test", Locale: o.Locale, CheckGoroutine: true, Now: now,
 	})
+	h.settings = o.Settings
 	h.Sources = h.sources()
 	t.Cleanup(h.RT.Stop)
 	return h
@@ -146,6 +150,9 @@ func (h *Harness) sources() []plugin.Source {
 	for _, n := range names {
 		g := groups[n]
 		s := plugin.Source{Name: n, Kind: plugin.SourceUser, I18nJSON: g.i18n}
+		if st, ok := h.settings[n]; ok {
+			s.Settings, s.ProjectSettings = st.User, st.Project
+		}
 		if g.dir {
 			s.Dir = "/plugins/" + n
 		}

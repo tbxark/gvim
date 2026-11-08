@@ -36,13 +36,16 @@ func PageViewTableBorders(doc Document, styles Styles) func(line, width, gutter,
 			if cur := doc.Cursor(); line == cur.Line || (line+1 == cur.Line && cur.Col == 0) {
 				return ExtraRows{}
 			}
+			depth := max(fl.QuoteDepth, 0)
+			raw := []rune(doc.Line(line))
+			base := quotePrefixLen(raw, depth)
 			indent := max(fl.Indent, 0)
-			inner := frameWidth(measure, indent) - 4
-			segs := fenceBodySegments([]rune(doc.Line(line)), indent, inner)
+			inner := frameWidth(measure-2*depth, indent) - 4
+			segs := fenceBodySegments(raw, base+indent, inner)
 			var rows []ExtraRow
 			for k := 1; k < len(segs); k++ {
 				rows = append(rows, ExtraRow{
-					Text:     fenceBodyRowText(indent, inner, segs[k]),
+					Text:     fenceBodyRowText(depth, indent, inner, segs[k]),
 					Style:    text,
 					Priority: k - 1,
 				})

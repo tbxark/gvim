@@ -56,6 +56,7 @@ func (m *Model) clipboardOutArgs(action string, args map[string]any, res editor.
 	if res.Err != nil || res.Text == "" {
 		return nil
 	}
+	m.rememberYank(res.Text)
 	cmd := tea.SetClipboard(res.Text)
 	if action == "copy_with_theme" {
 		if rich := m.copyFormatted(args, res.Text); rich != nil {
@@ -63,6 +64,15 @@ func (m *Model) clipboardOutArgs(action string, args map[string]any, res editor.
 		}
 	}
 	return tea.Batch(cmd, m.nativeWrite(res.Text))
+}
+
+// rememberYank keeps the last text a copy or cut put on the clipboard. A Ctrl+V in the
+// terminal falls back to it when the system clipboard cannot provide text
+// (terminal.pass_ctrl_v_without_text).
+func (m *Model) rememberYank(text string) {
+	if text != "" {
+		m.lastYank = text
+	}
 }
 
 // nativeWrite is the command that writes text through the app's clipboard writer, or nil

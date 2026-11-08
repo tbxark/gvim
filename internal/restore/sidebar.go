@@ -26,6 +26,9 @@ func SidebarState(s session.Session) *tui.SidebarState {
 		DiagnosticsOpen:      s.Sidebar.DiagnosticsOpen,
 		DiagnosticsCollapsed: s.Sidebar.DiagnosticsCollapsed,
 		DiagnosticsRows:      s.Sidebar.DiagnosticsRows,
+		PluginOrder:          s.Sidebar.PluginOrder,
+		PluginRows:           s.Sidebar.PluginRows,
+		PluginCollapsed:      s.Sidebar.PluginCollapsed,
 	}
 	if side, ok := explorer.ParseSide(s.Sidebar.Side); ok {
 		st.Side = side
@@ -57,5 +60,8 @@ func SaveSidebarState(st tui.SidebarState) *session.SidebarState {
 		DiagnosticsOpen:      st.DiagnosticsOpen,
 		DiagnosticsCollapsed: st.DiagnosticsCollapsed,
 		DiagnosticsRows:      st.DiagnosticsRows,
+		PluginOrder:          st.PluginOrder,
+		PluginRows:           st.PluginRows,
+		PluginCollapsed:      st.PluginCollapsed,
 	}
 }

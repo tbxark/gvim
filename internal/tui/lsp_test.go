@@ -1138,7 +1138,8 @@ func TestLSPToggleForBufferClosesAndKeepsItClosed(t *testing.T) {
 func TestShowLSPStatusListsTheServers(t *testing.T) {
 	port := newFakeLSP("go")
 	port.servers = []LSPServerStatus{
-		{Language: "go", Name: "gopls", Command: "gopls", State: LSPServerRunning, AutoStart: true},
+		{Language: "go", Name: "gopls", Command: "gopls", State: LSPServerRunning, AutoStart: true,
+			Limits: "process_limits (memory 50% of system memory): applied: cgroup memory 50%"},
 		{Language: "", Name: "spell", Command: "harper-ls", Universal: true, State: LSPServerStopped},
 	}
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
@@ -1152,7 +1153,7 @@ func TestShowLSPStatusListsTheServers(t *testing.T) {
 		rows = append(rows, r.Left+" "+r.Right)
 	}
 	joined := strings.Join(rows, "\n")
-	for _, want := range []string{"Language servers: go", "gopls", "ready", "Restart gopls", "Stop gopls", "Mute LSP for go", "spell"} {
+	for _, want := range []string{"Language servers: go", "gopls", "ready", "Restart gopls", "Stop gopls", "Mute LSP for go", "spell", "process_limits (memory 50% of system memory): applied: cgroup memory 50%"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("status rows lack %q: %v", want, rows)
 		}

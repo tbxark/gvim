@@ -139,6 +139,15 @@ type FakeServer struct {
 	// StallEntered signals that a handler parked on the stall channel.
 	StallEntered chan struct{}
 
+	// WorkspaceHold, when non-nil, makes the workspace/diagnostic handler wait for it
+	// before answering, or return when the request's context is canceled.
+	// WorkspaceEntered signals that the wait began, and WorkspaceCanceled that the
+	// context was canceled while it waited. The server must be started with
+	// StartServerCancelable for a cancellation to reach a held handler.
+	WorkspaceHold     chan struct{}
+	WorkspaceEntered  chan struct{}
+	WorkspaceCanceled chan struct{}
+
 	// client sends publishDiagnostics back to the client under test.
 	client protocol.Client
 
@@ -151,18 +160,36 @@ type FakeServer struct {
 // the channel that parks handlers (nil: none). The caller closes the returned
 // connection and srvEnd.
 func StartServer(srvEnd PipeRWC, stall chan struct{}) (*FakeServer, jsonrpc2.Conn) {
+	return startServer(srvEnd, stall, false)
+}
+
+// StartServerCancelable starts the fake server with the standard LSP handler chain
+// (cancellation and asynchronous dispatch), so a $/cancelRequest reaches a running
+// handler's context. The plain StartServer keeps synchronous dispatch, which is what most
+// tests rely on.
+func StartServerCancelable(srvEnd PipeRWC, stall chan struct{}) (*FakeServer, jsonrpc2.Conn) {
+	return startServer(srvEnd, stall, true)
+}
+
+func startServer(srvEnd PipeRWC, stall chan struct{}, cancelable bool) (*FakeServer, jsonrpc2.Conn) {
 	srv := &FakeServer{
-		InitCh:       make(chan *protocol.InitializeParams, 128),
-		OpenCh:       make(chan *protocol.DidOpenTextDocumentParams, 128),
-		ChangeCh:     make(chan *protocol.DidChangeTextDocumentParams, 128),
-		CloseCh:      make(chan *protocol.DidCloseTextDocumentParams, 128),
-		Requests:     make(chan any, 128),
-		StallEntered: make(chan struct{}, 1),
-		stall:        stall,
+		InitCh:            make(chan *protocol.InitializeParams, 128),
+		OpenCh:            make(chan *protocol.DidOpenTextDocumentParams, 128),
+		ChangeCh:          make(chan *protocol.DidChangeTextDocumentParams, 128),
+		CloseCh:           make(chan *protocol.DidCloseTextDocumentParams, 128),
+		Requests:          make(chan any, 128),
+		StallEntered:      make(chan struct{}, 1),
+		WorkspaceEntered:  make(chan struct{}, 1),
+		WorkspaceCanceled: make(chan struct{}, 1),
+		stall:             stall,
 	}
 	srvConn := jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(srvEnd), jsonrpc2.WithCodec(codec{}))
 	srv.client = protocol.ClientDispatcher(srvConn)
-	srvConn.Go(context.Background(), protocol.ServerHandler(srv, jsonrpc2.MethodNotFoundHandler))
+	handler := protocol.ServerHandler(srv, jsonrpc2.MethodNotFoundHandler)
+	if cancelable {
+		handler = protocol.Handlers(handler)
+	}
+	srvConn.Go(context.Background(), handler)
 	return srv, srvConn
 }
 

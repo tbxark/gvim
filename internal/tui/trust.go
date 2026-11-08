@@ -119,6 +119,7 @@ func (m *Model) trustMessage(msg tea.Msg) (tea.Cmd, bool) {
 func (m *Model) trustDecided(msg trustDecidedMsg) tea.Cmd {
 	if msg.state.Root != "" {
 		m.trust.state = msg.state
+		m.emitTrustChanged(string(msg.state.Level))
 	}
 	if msg.err != nil {
 		m.notice = "Workspace trust was not saved: " + msg.err.Error()
@@ -140,6 +141,7 @@ func (m *Model) trustLoaded(msg trustLoadedMsg) tea.Cmd {
 		return nil
 	}
 	m.trust.state = msg.state
+	m.emitTrustChanged(string(msg.state.Level))
 	if msg.err != nil {
 		m.notice = "Workspace trust was not saved: " + msg.err.Error()
 		return nil

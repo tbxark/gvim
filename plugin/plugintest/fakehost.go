@@ -77,6 +77,17 @@ type FakeHost struct {
 	// Ext is per-area state for the fake_<area>.go files.
 	Ext map[string]any
 
+	// Env-class host state (see fakehost_env.go).
+	EnvDetected    pluginapi.EnvInfo
+	HasEnvDetected bool
+	EnvActiveInfo  pluginapi.EnvInfo
+	HasEnvActive   bool
+	EnvTrust       string
+	EnvSets        []EnvSetCall
+	EnvClears      int
+	EnvSetErr      error
+	EnvClearErr    error
+
 	calls []Call
 }
 

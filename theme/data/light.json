@@ -102,9 +102,7 @@
     "status_error_indicator_hover_fg": [255, 255, 255],
     "tab_drop_zone_bg": [173, 214, 255],
     "tab_drop_zone_border": [70, 130, 180],
-    "file_explorer_pinned_bg": [238, 240, 248],
-    "accent_bg": [70, 130, 180],
-    "accent_fg": [255, 255, 255]
+    "file_explorer_pinned_bg": [238, 240, 248]
   },
   "search": {
     "match_bg": [255, 255, 150],

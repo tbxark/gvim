@@ -40,6 +40,7 @@ func dockNewPanel(m *Model) dock.Panel {
 		ContentSize: func() (cols, rows int) { return m.dockContentSize() },
 		Focus:       func() { m.focusDock() },
 		Copy:        func(text string) tea.Cmd { return m.copyToClipboard(text) },
+		LastYank:    func() string { return m.lastYank },
 	})
 	return p
 }
@@ -188,8 +189,15 @@ func (m *Model) dockSync() tea.Cmd { return m.dock.Sync() }
 // with it, or only focuses.
 func (m *Model) dockMouse(msg tea.Msg, y, count int) (tea.Cmd, bool) {
 	l := m.layout()
-	if !l.DockOn || y < l.DockY || y >= l.DockY+l.DockH {
-		return nil, false
+	inRows := l.DockOn && y >= l.DockY && y < l.DockY+l.DockH
+	if !inRows {
+		// A drag that left the dock keeps the dock's mouse handling until the
+		// release, so the selection can auto-scroll past the edges. Anything else
+		// outside the rows ends the link hover.
+		if !m.dock.SelectionDragging() {
+			m.dock.ClearHover()
+			return nil, false
+		}
 	}
 	cmd, _ := m.dock.Mouse(msg, l, count)
 	return cmd, true
@@ -215,6 +223,7 @@ func (m *Model) copyToClipboard(text string) tea.Cmd {
 	if text == "" {
 		return nil
 	}
+	m.rememberYank(text)
 	cmd := tea.SetClipboard(text)
 	if native := m.nativeWrite(text); native != nil {
 		return tea.Batch(cmd, native)

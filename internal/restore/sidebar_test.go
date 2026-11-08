@@ -2,6 +2,7 @@ package restore
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/tbxark/gvim/explorer"
@@ -27,6 +28,9 @@ func TestSidebarStateConversion(t *testing.T) {
 		DiagnosticsOpen:      true,
 		DiagnosticsCollapsed: true,
 		DiagnosticsRows:      7,
+		PluginOrder:          []string{"3", "1"},
+		PluginRows:           map[string]int{"1": 5},
+		PluginCollapsed:      map[string]bool{"3": true},
 	}
 	saved := SaveSidebarState(ui)
 	if saved.WidthMode != int(explorer.WidthPercent) || saved.WidthValue != 30 || saved.Side != "right" {
@@ -36,7 +40,7 @@ func TestSidebarStateConversion(t *testing.T) {
 	if got == nil {
 		t.Fatal("conversion to nil")
 	}
-	if *got != ui {
+	if !reflect.DeepEqual(*got, ui) {
 		t.Fatalf("converted = %+v, want %+v", *got, ui)
 	}
 	// Missing state keeps the defaults; a bad side/mode falls back rather than
@@ -50,7 +54,7 @@ func TestSidebarStateConversion(t *testing.T) {
 	}
 	// Automatic width also round-trips.
 	automatic := tui.SidebarState{Width: explorer.Width{}, Side: explorer.SideLeft}
-	if v := SidebarState(session.Session{Sidebar: SaveSidebarState(automatic)}); v == nil || *v != automatic {
+	if v := SidebarState(session.Session{Sidebar: SaveSidebarState(automatic)}); v == nil || !reflect.DeepEqual(*v, automatic) {
 		t.Errorf("automatic width round trip = %+v", v)
 	}
 }
@@ -69,6 +73,9 @@ func TestWriteSessionKeepsSidebarState(t *testing.T) {
 		ContentsRows:      9,
 		DiagnosticsOpen:   true,
 		DiagnosticsRows:   5,
+		PluginOrder:       []string{"7"},
+		PluginRows:        map[string]int{"7": 4},
+		PluginCollapsed:   map[string]bool{"7": true},
 	}
 	ed := apptest.NewSessionEditor()
 	apptest.Must(t, SaveSession(ed, sessDir, tui.ExplorerState{Open: true, Root: dir, Sidebar: ui}))
@@ -80,7 +87,7 @@ func TestWriteSessionKeepsSidebarState(t *testing.T) {
 	if got.Sidebar == nil {
 		t.Fatal("the session file has no sidebar state")
 	}
-	if back := SidebarState(got); back == nil || *back != ui {
+	if back := SidebarState(got); back == nil || !reflect.DeepEqual(*back, ui) {
 		t.Fatalf("restored sidebar = %+v, want %+v", back, ui)
 	}
 }

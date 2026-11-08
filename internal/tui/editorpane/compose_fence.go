@@ -26,18 +26,26 @@ func frameWidth(measure, indent int) int {
 // composeFenceLine composes one line of a fenced code block.
 func (f frame) composeFenceLine(i int, fl syntax.FenceLine, raw []rune, kinds []syntax.Kind) composedLine {
 	out := composedLine{}
-	indent := min(max(fl.Indent, 0), len(raw))
-	for j := 0; j < indent; j++ {
-		out.runes = append(out.runes, raw[j])
-		out.kinds = append(out.kinds, kindAt(kinds, j))
-		out.src = append(out.src, j)
-	}
-	width := frameWidth(f.pageMeasure, indent)
-	src := min(indent, len(raw))
+	depth := max(fl.QuoteDepth, 0)
+	base := quotePrefixLen(raw, depth)
+	indent := min(max(fl.Indent, 0), max(len(raw)-base, 0))
+	width := frameWidth(f.pageMeasure-2*depth, indent)
+	src := min(base, len(raw))
 	add := func(r rune, k syntax.Kind, s int) {
 		out.runes = append(out.runes, r)
 		out.kinds = append(out.kinds, k)
 		out.src = append(out.src, s)
+	}
+	// The fence sits inside its blockquote: the container's bars come first, then
+	// the frame at the block's own indent.
+	for q := 0; q < depth; q++ {
+		add('│', syntax.KindQuote, src)
+		add(' ', syntax.KindQuote, src)
+	}
+	for j := 0; j < indent; j++ {
+		if base+j < len(raw) {
+			add(raw[base+j], kindAt(kinds, base+j), base+j)
+		}
 	}
 	switch fl.Kind {
 	case syntax.FenceOpen:
@@ -50,13 +58,14 @@ func (f frame) composeFenceLine(i int, fl syntax.FenceLine, raw []rune, kinds []
 		add('╯', syntax.KindPlain, src)
 	case syntax.FenceBody:
 		inner := width - 4
-		segments := fenceBodySegments(raw, indent, inner)
+		start := base + indent
+		segments := fenceBodySegments(raw, start, inner)
 		show := segments[0]
 		if f.caret.Line == i {
 			// The caret line keeps the whole body text (the wrapped rows without
 			// rails are the editing view); the continuation rows stand down.
 			show = nil
-			for k := indent; k < len(raw); k++ {
+			for k := start; k < len(raw); k++ {
 				r := raw[k]
 				if r == '\t' {
 					for q := 0; q < 4; q++ {
@@ -98,10 +107,10 @@ type fenceBodyRune struct {
 // blanks, and the rows break at the last space that fits (a word longer than the
 // row is cut). The primary row shows segment 0; the caller's extra-row builder
 // emits the rest as railed continuation rows.
-func fenceBodySegments(raw []rune, indent, inner int) [][]fenceBodyRune {
+func fenceBodySegments(raw []rune, start, inner int) [][]fenceBodyRune {
 	inner = max(inner, 1)
 	var content []fenceBodyRune
-	for k := indent; k < len(raw); k++ {
+	for k := max(start, 0); k < len(raw); k++ {
 		r := raw[k]
 		if r == '\t' {
 			for q := 0; q < 4; q++ {
@@ -115,27 +124,27 @@ func fenceBodySegments(raw []rune, indent, inner int) [][]fenceBodyRune {
 		content = append(content, fenceBodyRune{r, k})
 	}
 	var out [][]fenceBodyRune
-	start := 0
-	for start < len(content) {
+	rowStart := 0
+	for rowStart < len(content) {
 		used := 0
-		end := start
+		end := rowStart
 		lastSpace := -1
 		for end < len(content) {
 			w := ansi.StringWidth(string(content[end].r))
-			if used+w > inner && end > start {
+			if used+w > inner && end > rowStart {
 				switch {
 				case content[end].r == ' ':
-					out = append(out, content[start:end])
-					start = end + 1
-				case lastSpace > start:
-					out = append(out, content[start:lastSpace])
-					start = lastSpace + 1
+					out = append(out, content[rowStart:end])
+					rowStart = end + 1
+				case lastSpace > rowStart:
+					out = append(out, content[rowStart:lastSpace])
+					rowStart = lastSpace + 1
 				default:
-					out = append(out, content[start:end])
-					start = end
+					out = append(out, content[rowStart:end])
+					rowStart = end
 				}
-				for start < len(content) && content[start].r == ' ' {
-					start++
+				for rowStart < len(content) && content[rowStart].r == ' ' {
+					rowStart++
 				}
 				goto nextRow
 			}
@@ -145,7 +154,7 @@ func fenceBodySegments(raw []rune, indent, inner int) [][]fenceBodyRune {
 			}
 			end++
 		}
-		out = append(out, content[start:])
+		out = append(out, content[rowStart:])
 		break
 	nextRow:
 	}
@@ -157,8 +166,11 @@ func fenceBodySegments(raw []rune, indent, inner int) [][]fenceBodyRune {
 
 // fenceBodyRowText builds one railed row of a fence body from a segment: the
 // indent, "| ", the segment padded to inner, " |".
-func fenceBodyRowText(indent, inner int, seg []fenceBodyRune) string {
+func fenceBodyRowText(quoteDepth, indent, inner int, seg []fenceBodyRune) string {
 	var b []rune
+	for q := 0; q < quoteDepth; q++ {
+		b = append(b, '│', ' ')
+	}
 	for j := 0; j < indent; j++ {
 		b = append(b, ' ')
 	}
@@ -227,3 +239,23 @@ func fenceLabel(info string) string {
 // ansiiWidth is the display width of s, used for the label that sits in the top
 // border.
 func ansiiWidth(s string) int { return ansi.StringWidth(s) }
+
+// quotePrefixLen is the number of source runes a blockquote prefix of depth
+// levels takes: up to three blanks, then ">" with at most one blank after it per
+// level.
+func quotePrefixLen(raw []rune, depth int) int {
+	i := 0
+	for level := 0; level < depth; level++ {
+		for i < len(raw) && raw[i] == ' ' && i < 3 {
+			i++
+		}
+		if i >= len(raw) || raw[i] != '>' {
+			return i
+		}
+		i++
+		if i < len(raw) && raw[i] == ' ' {
+			i++
+		}
+	}
+	return i
+}

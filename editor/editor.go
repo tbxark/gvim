@@ -188,6 +188,9 @@ type Editor struct {
 	ephemeral []string
 	// rulers holds editor.rulers (SetRulers), the columns every new text buffer starts with.
 	rulers []int
+	// shellEnv is the active project environment's set-only overlay for shell and
+	// formatter runs (SetShellEnv). Nil means no environment overlay.
+	shellEnv func() []string
 	// extras is the state of the marks, navigation and dabbrev actions (marks.go).
 	extras extraState
 	// autoSaved is the time of the last AutoSave. It is zero before the first.

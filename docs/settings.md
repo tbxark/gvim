@@ -196,6 +196,8 @@ Main page keys:
 | Ctrl+E | close the page and open that layer's raw config file in a tab |
 | Esc | close the page; with pending changes it asks first |
 
+**Theme preview.** The `theme` row carries a four-chip preview: editor background, editor foreground, gvim's accent (`ui.accent_bg/fg`) and Fresh's popup selection (`ui.popup_selection_bg/fg`), resolved from the catalogue by the app (cached when the service is built and on every Reload, so the page never reads a theme file on the update loop). The footer names the chips (`swatches: bg · fg · accent · popup`); the preview follows the effective theme after Save/Reload. The row's value and pending/reset behaviour are unchanged, and a URL/packaged ref still fails validation with the loader's clear refusal.
+
 Changed rows carry a `*` marker and the title gets a ` *` too. Nothing is
 written until Ctrl+S; a value the port refuses keeps the prompt open with the
 reason, and a save the port refuses keeps the page dirty with a status-row
@@ -333,12 +335,13 @@ method behind it.
 - an LSP server's fields are edited as the whole language array in JSON, not as
   per-field dialogs (array elements cannot be patched one by one); the parsed
   servers are shown read-only beside it, and `process_limits` is accepted,
-  shown, and not applied;
+  validated and applied or reported per OS (see `docs/lsp.md`, "Process
+  limits");
 - Fresh's two-button per-field distinction between "reset to the built-in
   default" and "inherit/unset", and a full per-change undo stack (the page has
   one reset per setting and Ctrl+R to discard everything);
 - a config Reload keybinding (the palette row is the only entry point);
-- plugin settings editing and theme preview in the page;
+- plugin settings editing in the page (the theme row's preview is not deferred: it landed with the theme slice);
 - Fresh's generic widget runtime (dual-list drag and drop, map entry dialogs
   with nested fields).
 
@@ -379,7 +382,9 @@ inventory, the user-layer toggle and both rollback paths;
 `internal/app/settings_keybindings_test.go` pins the grouped effective list and the
 editor action; `internal/tui/settings_bindings_test.go` and
 `internal/tui/settings_plugins_test.go` pin the TUI side (bindings layout, plugin
-rows, Control from Update). `internal/app/settings_lsp_test.go` pins the Language Servers page (effective
+rows, Control from Update); `internal/app/settings_theme_preview_test.go` and
+`internal/tui/settings_theme_preview_test.go` pin the theme row's four chips and
+the URL refusal. `internal/app/settings_lsp_test.go` pins the Language Servers page (effective
 builtin/user/universal rows with live state, project-layer listing/locking and
 the config validation that refuses a project program but accepts a mute, and the
 start/restart/stop actions).
@@ -410,3 +415,13 @@ start/restart/stop actions).
   map edit/add/reset/save flow, the dual list moves and both-side writes, the
   languages list and fields pages, the list edits/reorders, per-setting reset and
   its undo, the stale-structure guard, and the Reload command's notices.
+## Environment rows
+
+Settings > Environment shows the process/workspace facts (shell, TERM, root, config
+files) and, when the app wired a project-environment provider, three project rows:
+the detected environment (detector name and kind, or "none"), the active environment
+(the applied name, or "system") and the trust level that gates activation. The
+**Detectors** page lists the resolved `env.detectors` (built-in or user list) with
+kind, markers and require evidence; it is read-only this round — edit
+`env.detectors` in the user config JSON to replace the built-in list (a project
+config cannot set it).

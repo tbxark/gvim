@@ -15,6 +15,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/lsp/manager"
 )
 
@@ -466,5 +467,39 @@ func TestLSPPlanCarriesServerSettings(t *testing.T) {
 	}
 	if len(plan.universal) != 1 || plan.universal[0].Command[0] != "harper-ls" {
 		t.Errorf("universal = %+v, want harper-ls", plan.universal)
+	}
+}
+
+// TestServerConfigCarriesProcessLimits checks the config -> manager conversion of
+// process_limits: the caps and the switch are kept, an entry without "enabled" means
+// enabled (Fresh's default), and no limits stay a zero value.
+func TestServerConfigCarriesProcessLimits(t *testing.T) {
+	mem, cpu := uint32(50), uint32(90)
+	off := false
+	entry := config.LSPServer{
+		Command: "gopls",
+		ProcessLimits: &config.ProcessLimits{
+			MaxMemoryPercent: &mem, MaxCPUPercent: &cpu, Enabled: &off,
+		},
+	}
+	cfg := serverConfig(entry, manager.Spec{})
+	if cfg.Limits.Enabled {
+		t.Fatal("enabled: false was dropped")
+	}
+	if cfg.Limits.MaxMemoryPercent == nil || *cfg.Limits.MaxMemoryPercent != 50 ||
+		cfg.Limits.MaxCPUPercent == nil || *cfg.Limits.MaxCPUPercent != 90 {
+		t.Fatalf("limits = %+v, want the caps kept", cfg.Limits)
+	}
+
+	entry.ProcessLimits.Enabled = nil
+	cfg = serverConfig(entry, manager.Spec{})
+	if !cfg.Limits.Enabled {
+		t.Fatal("an entry without enabled must mean enabled, as Fresh's default")
+	}
+
+	entry.ProcessLimits = nil
+	cfg = serverConfig(entry, manager.Spec{})
+	if cfg.Limits != (lsp.ProcessLimits{}) {
+		t.Fatalf("limits = %+v, want the zero value without process_limits", cfg.Limits)
 	}
 }

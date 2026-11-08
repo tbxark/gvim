@@ -54,6 +54,10 @@ type Config struct {
 	// off the request queue, is what keeps a server's executeCommand followed by
 	// applyEdit from deadlocking on the main thread.
 	ApplyEdit func(protocol.ApplyWorkspaceEditParams) bool
+	// Limits is the server's process_limits. Start applies what the platform can
+	// (Linux cgroup v2, or an sh ulimit memory wrapper) and records what it could
+	// not in the client's LimitsNote; the zero value applies nothing.
+	Limits ProcessLimits
 }
 
 // Client is a connection to one language server. All methods are safe for
@@ -102,9 +106,11 @@ type Client struct {
 	dyn       map[string]dynRegistration
 	initRes   *protocol.InitializeResult
 
-	// proc is set only by Start. stderr holds the tail of its error output.
-	proc   *exec.Cmd
-	stderr *tailBuffer
+	// proc is set only by Start. stderr holds the tail of its error output, and
+	// limitsNote what happened to the process limits it was started with.
+	proc       *exec.Cmd
+	stderr     *tailBuffer
+	limitsNote string
 
 	closeOnce sync.Once
 	closeErr  error
@@ -132,11 +138,25 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 	// The program is looked up here, so a server that is not installed is told apart from
 	// one that failed, and nothing is launched for it. Start runs in a command, never in
 	// the update loop, so the PATH search is off the loop.
-	path, err := exec.LookPath(cfg.Command[0])
+	program, err := exec.LookPath(cfg.Command[0])
 	if err != nil {
 		return nil, &NotInstalledError{Command: cfg.Command[0]}
 	}
-	cmd := exec.Command(path, cfg.Command[1:]...) //nolint:gosec // the caller chooses the server command
+	// A plan that needs the sh ulimit fallback wraps the resolved program; the wrapper
+	// passes it as an argument, so nothing is looked up twice and $@ keeps the arguments
+	// as they were written.
+	plan := PlanLimits(cfg.Limits)
+	command := append([]string{program}, cfg.Command[1:]...)
+	if plan.WrapMemoryKB > 0 {
+		if sh, err := exec.LookPath("sh"); err != nil {
+			plan.WrapMemoryKB = 0
+			plan.Note += " (sh not found, so the memory limit is not applied)"
+		} else {
+			script := fmt.Sprintf("ulimit -v %d 2>/dev/null; exec \"$@\"", plan.WrapMemoryKB)
+			command = append([]string{sh, "-c", script, "sh"}, command...)
+		}
+	}
+	cmd := exec.Command(command[0], command[1:]...) //nolint:gosec // the caller chooses the server command
 	stderr := &tailBuffer{max: stderrKeep}
 	cmd.Stderr = stderr
 	// A grandchild that keeps the error pipe open must not keep Close waiting.
@@ -159,11 +179,22 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("lsp: start %s: %w", cfg.Command[0], err)
 	}
 
+	if plan.AfterStart != nil {
+		if err := plan.AfterStart(cmd.Process.Pid); err != nil {
+			plan.Note += " (moving the server into its cgroup failed: " + err.Error() + ")"
+		}
+	}
 	c := NewClient(procPipes{r: stdout, w: stdin}, cfg)
 	c.proc = cmd
 	c.stderr = stderr
+	c.limitsNote = plan.Note
 	return c, nil
 }
+
+// LimitsNote returns what happened to the server's process limits when Start launched it:
+// the methods that applied, or why a configured limit could not be. It is empty when no
+// limits were configured or the client was not started by Start.
+func (c *Client) LimitsNote() string { return c.limitsNote }
 
 // stderrKeep is how much of a server's error output the client keeps.
 const stderrKeep = 8 << 10

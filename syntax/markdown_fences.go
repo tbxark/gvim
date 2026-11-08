@@ -27,6 +27,10 @@ type FenceLine struct {
 	Marker string
 	// Info is the info string of an open line, trimmed ("go", "{.python}").
 	Info string
+	// QuoteDepth is the number of blockquote levels the fence sits in: the fence
+	// lines carry that many ">" markers before the fence run, and the page view
+	// frames the block after that many quote bars. Zero is a top-level fence.
+	QuoteDepth int
 }
 
 // MarkdownFences classifies the lines of text by the fenced code blocks the
@@ -37,26 +41,70 @@ type FenceLine struct {
 func MarkdownFences(lines []string) []FenceLine {
 	out := make([]FenceLine, len(lines))
 	for i := 0; i < len(lines); {
-		s := strings.TrimRight(lines[i], "\r")
-		m := mdFence.FindStringSubmatch(s)
+		depth, content, ok := fenceQuotePrefix(strings.TrimRight(lines[i], "\r"))
+		if !ok {
+			i++
+			continue
+		}
+		m := mdFence.FindStringSubmatch(content)
 		if m == nil {
 			i++
 			continue
 		}
 		marker := m[2]
-		out[i] = FenceLine{Kind: FenceOpen, Indent: len(m[1]), Marker: marker, Info: strings.TrimSpace(m[3])}
+		out[i] = FenceLine{Kind: FenceOpen, Indent: len(m[1]), Marker: marker,
+			Info: strings.TrimSpace(m[3]), QuoteDepth: depth}
 		i++
 		for ; i < len(lines); i++ {
-			body := strings.TrimRight(lines[i], "\r")
+			line := strings.TrimRight(lines[i], "\r")
+			body, ok := stripQuotePrefix(line, depth)
+			if !ok {
+				// The container ended: the fence has no close line, and the lines
+				// outside the container are classified on their own (literal fallback).
+				break
+			}
 			if closesFence(body, marker) {
-				out[i] = FenceLine{Kind: FenceClose, Indent: leadingSpaces(body), Marker: marker}
+				out[i] = FenceLine{Kind: FenceClose, Indent: leadingSpaces(body), Marker: marker, QuoteDepth: depth}
 				i++
 				break
 			}
-			out[i] = FenceLine{Kind: FenceBody, Indent: leadingSpaces(body)}
+			out[i] = FenceLine{Kind: FenceBody, Indent: leadingSpaces(body), QuoteDepth: depth}
 		}
 	}
 	return out
+}
+
+// fenceQuotePrefix strips the blockquote markers of s: up to three blanks, then
+// repeated ">" with at most one blank after each. It returns the depth, the line
+// without the prefix, and false when the first marker is not a quote marker.
+func fenceQuotePrefix(s string) (depth int, rest string, ok bool) {
+	rest = s
+	for depth < 8 {
+		trimmed := strings.TrimLeft(rest, " ")
+		if len(rest)-len(trimmed) > 3 || !strings.HasPrefix(trimmed, ">") {
+			if depth > 0 {
+				return depth, rest, true
+			}
+			return depth, rest, true
+		}
+		rest = strings.TrimPrefix(trimmed[1:], " ")
+		depth++
+	}
+	return depth, rest, true
+}
+
+// stripQuotePrefix removes want blockquote markers from s, or reports false when
+// the line does not carry them.
+func stripQuotePrefix(s string, want int) (string, bool) {
+	rest := s
+	for i := 0; i < want; i++ {
+		trimmed := strings.TrimLeft(rest, " ")
+		if len(rest)-len(trimmed) > 3 || !strings.HasPrefix(trimmed, ">") {
+			return "", false
+		}
+		rest = strings.TrimPrefix(trimmed[1:], " ")
+	}
+	return rest, true
 }
 
 // leadingSpaces is the number of leading blank runes of s.

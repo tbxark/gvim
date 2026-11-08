@@ -97,7 +97,8 @@ type preRune struct {
 func (f frame) composeLine(i int) composedLine {
 	text := f.doc.Line(i)
 	raw := []rune(text)
-	kinds := kindsPerRune(text, f.doc.LineSpans(i))
+	spans := f.doc.LineSpans(i)
+	kinds := kindsPerRune(text, spans)
 	if fl, ok := f.markdownFences()[i]; ok {
 		return f.composeFenceLine(i, fl, raw, kinds)
 	}
@@ -105,6 +106,13 @@ func (f frame) composeLine(i int) composedLine {
 		return f.composeTableLine(i, tl, false)
 	}
 	out := composedLine{}
+
+	// A setext heading's underline is its marker: the page view conceals the whole
+	// line (the text above it keeps the heading kind), and the caret reveals it.
+	if isSetextUnderline(raw) && f.setextHeadingAbove(i, spans, raw) {
+		finishMaps(&out, len(raw))
+		return out
+	}
 
 	// An ATX heading hides its leading "#" run and the blank after it; the text
 	// keeps the heading kind (bold keyword styling) and the caret line reveals the
@@ -202,6 +210,24 @@ func composePrefix(raw []rune) (prefix []preRune, contentStart, hang int) {
 			start++
 		}
 		pos += len([]rune(m))
+		// A task-list box becomes a checkbox glyph; the raw box shows under the
+		// caret like every other compose conceal.
+		if pos+2 < len(raw) && raw[pos] == '[' && raw[pos+2] == ']' {
+			glyph := ' '
+			switch raw[pos+1] {
+			case ' ':
+				glyph = '\u2610'
+			case 'x', 'X':
+				glyph = '\u2611'
+			}
+			if glyph != ' ' {
+				prefix = append(prefix, preRune{glyph, pos}, preRune{' ', pos})
+				pos += 3
+				for pos < len(raw) && (raw[pos] == ' ' || raw[pos] == '\t') {
+					pos++
+				}
+			}
+		}
 	}
 	contentStart = pos
 	hang = len(prefix)

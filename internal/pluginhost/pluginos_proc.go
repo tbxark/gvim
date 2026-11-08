@@ -77,18 +77,24 @@ func (o *pluginOS) command(argv []string, opts hostos.ProcOptions) *exec.Cmd {
 	} else {
 		cmd.Dir = o.dirs().Cwd
 	}
-	if len(opts.Env) > 0 {
-		cmd.Env = mergeEnv(opts.Env)
+	var overlay []string
+	if o.spawnEnv != nil {
+		overlay = o.spawnEnv()
+	}
+	if len(opts.Env) > 0 || len(overlay) > 0 {
+		cmd.Env = mergeEnvFrom(overlay, opts.Env)
 	}
 	cmd.WaitDelay = waitDelay
 	setProcAttr(cmd)
 	return cmd
 }
 
-// mergeEnv is the process environment with extra added; extra wins.
-func mergeEnv(extra map[string]string) []string {
-	env := make([]string, 0, len(os.Environ())+len(extra))
-	for _, kv := range os.Environ() {
+// mergeEnvFrom is the process environment with the active project environment's
+// overlay appended and extra added; extra wins, then base order is kept.
+func mergeEnvFrom(overlay []string, extra map[string]string) []string {
+	base := append(os.Environ(), overlay...)
+	env := make([]string, 0, len(base)+len(extra))
+	for _, kv := range base {
 		k, _, _ := strings.Cut(kv, "=")
 		if _, over := extra[k]; !over {
 			env = append(env, kv)

@@ -37,6 +37,10 @@ type pluginPanels struct {
 	focus pluginapi.PanelID
 	// collapsed is the folded state of the sidebar sections, by panel.
 	collapsed map[pluginapi.PanelID]bool
+	// restore is the sidebar section state a restored session left for the
+	// sections to pick up when they mount (R9-4, sidebar_state.go). It is nil when
+	// there is nothing to restore.
+	restore *pluginSidebarRestore
 }
 
 // mountedPanel is one mounted panel.
@@ -686,6 +690,7 @@ func (m *Model) togglePluginSection(mp *mountedPanel) {
 
 // pluginSidebarSpecs returns the sidebar section specs of the mounted plugin sections.
 func (m *Model) pluginSidebarSpecs() []sidebar.Spec {
+	m.applyPluginSidebarRestore()
 	order := m.plug.panels.sidebarOrder()
 	if len(order) == 0 {
 		return nil

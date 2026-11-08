@@ -16,7 +16,11 @@ import (
 // gitGrep runs git grep in the work tree of the workspace root for the panel's Git Grep
 // sheet. It passes git its arguments directly, without a shell, so a query with spaces
 // and quotes reaches git as it is.
-type gitGrep struct{}
+type gitGrep struct {
+	// spawnEnv is the active project environment's set-only overlay for the git
+	// process; nil applies the inherited environment.
+	spawnEnv func() []string
+}
 
 // gitGrepTimeout bounds one git grep run.
 const gitGrepTimeout = 20 * time.Second
@@ -29,7 +33,7 @@ var gitGrepLine = regexp.MustCompile(`^(.+?):([0-9]+):([0-9]+):(.*)$`)
 // exit codes are honored: 0 means matches, 1 means none (a successful search), and 2 or
 // more is an error. Only the workspace root's work tree is searched; a root outside a
 // repository is an error.
-func (gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, error) {
+func (g gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, error) {
 	var out searchpanel.GitResult
 	if req.Query == "" {
 		return out, nil
@@ -53,7 +57,11 @@ func (gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, error
 		argv = append(argv, "--")
 		argv = append(argv, req.Pathspecs...)
 	}
-	text, code, err := shellcmd.RunArgs(root, argv, "", gitGrepTimeout)
+	var extraEnv []string
+	if g.spawnEnv != nil {
+		extraEnv = g.spawnEnv()
+	}
+	text, code, err := shellcmd.RunArgsEnv(root, argv, "", gitGrepTimeout, extraEnv)
 	if err != nil {
 		return out, err
 	}

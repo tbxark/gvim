@@ -20,7 +20,7 @@ Config forms (seen in `config/config.go` and validated in `theme/form.go`):
                                                   // $XDG_CONFIG_HOME expand
 ```
 
-URL themes (`https://`) are recognized and refused with a clear error (deferred). The command-line `--theme` takes the same forms; a plain name resolves against the bundled themes then the user theme dir, and a typo is one line that names the choices. The Settings page's theme row lists the catalog refs.
+URL/packaged themes (`https://...` forms) are recognized and refused with a clear error naming the value; that is the recorded decision: gvim keeps the refusal and has no network code or fetch slice until packaging and network policy are decided (remote packs stay out). The command-line `--theme` takes the same forms; a plain name resolves against the bundled themes then the user theme dir, and a typo is one line that names the choices. The Settings page's theme row lists the catalog refs, validates through the same loader (so a URL form is refused there with the same message) and shows the four-colour preview (§6).
 
 ## 2. Inheritance and fallbacks
 
@@ -29,6 +29,7 @@ The model is a port of Fresh's `theme/types.rs` (source revision `2338640274915a
 - `theme/keys_table.go` is the `theme_color_keys!` table: 143 color keys (49 required, 91 fallback, 3 optional) plus gvim's two `ui.accent_*` extension keys, the three attribute-only keys, and the `ui.popup_fg` alias. The checked-table test (`theme/keys_table_test.go`) asserts the counts, the exact required list, that every fallback chain terminates at a required or optional key without cycles, and that every bundled theme resolves all required keys.
 - `Resolve` chooses the base: an explicit `extends` must name a built-in theme (chaining user themes is not supported, as in Fresh); a complete standalone theme (all required keys named) has no base; otherwise the implicit base is `builtin://light` when `editor.bg`'s relative luminance is above 0.5 and `builtin://dark` otherwise (the terminal default and an unreadable background count as dark).
 - With a base, a key the theme does not name is the base's resolved value - the fallback chain is not re-derived (Fresh's rule: `extends` wins over fallbacks). A standalone theme fills each omitted fallback key from the first key its chain names, taking that key's color and attributes.
+- The two gvim extension keys `ui.accent_bg`/`ui.accent_fg` fall back to `ui.popup_selection_bg`/`ui.popup_selection_fg` (they are `FallbackKey`s in the table). Every gvim accent surface reads them: the `style.Accent` role (status highlights, the palette and menu selections), the `style.Overlay` highlight/border/focus, and the explorer/diagnostics marker bars. The bundled themes either leave the extension keys to the fallback or set them to exactly the popup selection colours, so every bundled theme's accents are Fresh's popup selection colours (`theme/accent_audit_test.go` and `internal/tui/style/accent_audit_test.go` pin the equality and the painted roles); a user theme may set `accent_bg`/`accent_fg` explicitly to choose a different accent (a theme with a base inherits the base's accent unless it names them, and a standalone theme fills them through the chain — the same tests pin those cases).
 - Attributes apply to the foreground AND the background of a value: an attribute on `editor.selection_bg`, for example, reaches the selected text, and the legacy `editor.selection_modifier` / `ui.semantic_highlight_modifier` keys overwrite the attributes of their color key when a theme gives both. `editor.bracket_rainbow_match_modifier` defaults to bold+underlined.
 
 ## 3. Named colors and Reset
@@ -51,18 +52,22 @@ Hot reload: the **Reload Configuration** command re-reads the config and calls `
 
 The native editor (`internal/tui/theme_editor.go`) is a list-driven overlay over the resolved theme: section headers and the color keys with a swatch, value (`#RRGGBB`, ANSI name or Default) and attributes. Enter edits the color (hex, Fresh named color, Default/Reset; validated by `theme.ParseColorText`), `Ctrl+A` edits the attributes (comma list), and every edit live-previews by rebuilding the styles from an in-memory theme layered under the plugin overrides. Esc restores the theme that was applied when the editor opened (asking first when there are unsaved edits). `Ctrl+S` on a bundled theme routes to Save As; a user theme saves to `config.Dir()/themes/<name>.json` through `atomicfile` (the catalog's `SaveTheme` writes the full resolved theme, so the file is standalone and portable), then the registry reloads and the theme is applied. `Ctrl+Shift+S` is Save As, `Ctrl+D` deletes a user theme (confirm + atomic remove). The palette rows are **Select Theme** (already generated) and the native **Edit Theme**.
 
+**Colour picker.** `p` on a colour row — or a left click on the row's swatch (a click elsewhere only selects the row, as before) — opens the swatch-grid picker (`internal/tui/theme_picker.go`). Its candidates are the working theme's distinct colours in key-table order followed by the named ANSI colours, eight chips per row, labelled with their `#RRGGBB`/name in the selected line. Arrow keys/Home/End/PageUp/PageDown move the selection; a mouse click selects a chip and a drag keeps moving the selection; moving live-previews the candidate on the edited key through the same in-memory working theme (so the whole frame and the editor rows repaint). **Enter** applies it as a normal colour edit — the editor becomes dirty and can save — while **Esc**, or a click outside the grid, restores the value the editor had and closes. Mouse selection never commits on its own, so the keyboard stays the confirm step. The existing Enter hex/name prompt and `Ctrl+A` attributes prompt are unchanged; the editor footer names `p picker`.
+
 ## 7. Plugin overrides and the API
 
 The plugin API `gvim.theme.override(colors)` / `gvim.theme.clear()` (owned by the plugin host layer) reaches the canonical layering `theme.WithOverrides(base, map[string]string)`: keys are `section.key` theme keys (aliases accepted), values are `#RRGGBB`, a Fresh color name, or `Default`; a color override keeps the base value's attributes. The TUI owns the map and applies it in `rebuildTheme`; `SetThemeOverrides`/`ClearThemeOverrides` on the root model back `pluginHost.ThemeOverrides`/`SetThemeOverrides`. Overrides are cleared on every theme change. `theme_changed` fires with `{name, dark}`; the existing `Theme()`/`ThemeColor()` host reads now use the enriched model (named colors answer with their fixed RGB). `gvim.theme.get_color` keeps working.
 
 ## 8. What is deferred
 
-- URL/packaged themes (`https://...` forms) and remote packs;
+- URL/packaged themes and remote packs: **decision recorded** — keep the clear refusal, no network code and no fetch slice until packaging/network policy exists (see §1);
 - inheriting from another *user* theme (Fresh's current limit, kept);
-- drag-and-drop or mouse editing in the theme editor, and a color picker;
+- background images in themes;
+- drag-and-drop of theme values or swatches (mouse click and drag selection exist in the colour picker, but nothing is reordered);
 - per-cell provenance (Fresh records the theme key each painter used; gvim's inspector matches rendered colors plus context facts instead);
-- accent keys beyond gvim's own extensions (a Fresh theme gets the popup selection colors as its accent);
-- theme preview in the Settings page (the Select Theme picker applies at once).
+- accent keys beyond gvim's own `ui.accent_*` extension; a Fresh theme and every bundled theme get the popup selection colors as their accent (§2).
+
+The Settings page's theme preview landed (four colour chips on the theme row; mechanics and keys in `docs/settings.md` §4), so it is no longer deferred.
 
 ## 9. Files
 
@@ -77,9 +82,11 @@ The plugin API `gvim.theme.override(colors)` / `gvim.theme.clear()` (owned by th
 | `theme/form.go` | config/CLI theme form validation |
 | `internal/tui/style` | the single theme-to-styles conversion (fg+bg attributes) |
 | `internal/tui/theme_inspect.go` | inspect popup and Ctrl+Right-Click |
-| `internal/tui/theme_editor.go` | the native theme editor |
+| `internal/tui/theme_editor.go` | the native theme editor (list, hex/attributes prompts, Save/Save As/Delete/Open) |
+| `internal/tui/theme_picker.go` | the editor's colour picker: swatch grid, arrow/mouse selection, live preview, Enter/Esc |
 | `internal/tui/plugin_host.go` | plugin theme reads and overrides |
 | `internal/app/theme_registry.go` | the ThemeCatalog over the registry, atomic saves |
+| `internal/app/settings_theme_preview.go` | the Settings theme row's cached colour previews (background/foreground/accent/popup selection) |
 | `internal/app/run.go` | wires the registry/catalog into the TUI |
 
 ## 10. Tests
@@ -88,5 +95,7 @@ The plugin API `gvim.theme.override(colors)` / `gvim.theme.clear()` (owned by th
 - `theme/theme_test.go` / `theme/model_test.go`: parsing warnings and errors, base-by-luminance, extends, standalone fallbacks, attribute bundles and the legacy modifier keys, named/Reset colors, overrides (incl. dark flag), save round-trip, registry forms `file://`/env/user dir/reload/delete, save.
 - `internal/tui/style/decor_test.go` / `editorpane/styles_test.go`: partial themes use the base's values (Fresh's rule), attributes reach cells.
 - `internal/tui/theme_tui_test.go`: inspect command and Ctrl+Right-Click, the catalog picker, apply through the catalog, overrides layering and clearing.
+- `internal/tui/theme_editor_test.go`: editor list/preview/save/attributes; `theme_picker_test.go`: both picker entry points, click/drag preview, Enter apply, Esc/outside restore, palette contents.
 - `internal/app/theme_test.go`: config theme forms, the atomic Save/Delete path, hot reload of an edited user theme; `app_test.go`: `--theme` forms.
+- `theme/accent_audit_test.go`: every bundled theme's accent equals its popup selection, a standalone theme fills the accent through the fallback chain, and the accent keys are editor rows.
 - `internal/app/settingssvc_test.go`: Reload re-applies the theme; the R4-3 lock test (Snapshot answers while a Save's file write is blocked).

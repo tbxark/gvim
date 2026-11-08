@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"image/color"
 	"time"
 
 	"github.com/tbxark/gvim/buffer"
@@ -60,6 +61,16 @@ type VirtualSpaceEditor interface {
 // SetCursor, with different parameters, so one type cannot implement both. Without it a
 // plugin's buffer calls answer unsupported.
 type PluginEditor = pluginapi.BufferEditor
+
+// EnvPort is the workspace environment the plugin API sees and controls. The app
+// implements it over its env.Provider; activation is host-gated on trust.
+type EnvPort interface {
+	DetectedEnv() (pluginapi.EnvInfo, bool)
+	ActiveEnv() (pluginapi.EnvInfo, bool)
+	TrustLevel() string
+	SetEnv(snippet, dir, kind string) error
+	ClearEnv() error
+}
 
 // ShellRunner is the optional view of the editor that lets the root run a shell
 // command off the update loop. shell_command and shell_command_replace go through it
@@ -438,6 +449,9 @@ type LSPServerStatus struct {
 	AutoStart bool
 	State     LSPServerRunState
 	Error     string // why the last start failed, when State is LSPServerFailed
+	// Limits is what happened to the server's configured process_limits: the methods
+	// that applied, or why none could on this platform. Empty when none are configured.
+	Limits string
 }
 
 // MarkdownRenderer renders a markdown preview at a fixed width. Nil until a
@@ -527,7 +541,10 @@ func DefaultMarkdownTOC() MarkdownTOC {
 // is nil when the explorer is hidden. The other optional fields are nil until
 // the phase that wires them, and a nil field disables its feature.
 type Deps struct {
-	Editor   EditorState
+	Editor EditorState
+	// Env is the workspace environment provider (detection, activation, trust
+	// level). Nil disables the gvim.env API's detection and activation.
+	Env      EnvPort
 	Explorer ExplorerTree // nil when the explorer is hidden
 	// ShowExplorer shows the explorer at startup, with the root expanded. The app
 	// sets it when a folder argument is given. It has no effect without Explorer.
@@ -671,6 +688,19 @@ type SettingsItem struct {
 	// Note is a short explanation of a read-only row (Kind "info"), drawn after
 	// the value: where the fact comes from, or why the row cannot be edited.
 	Note string
+	// Preview is a short row of colour chips drawn after the name (the theme row's
+	// background/foreground/accent/popup selection swatches). Empty means none.
+	Preview []SettingsSwatch
+}
+
+// SettingsSwatch is one colour chip of a settings row's preview (the theme row):
+// Label names the role and FG/BG are the chip's text and fill. The app builds
+// them from the catalogue's resolved themes, so the page shows colours without
+// reading a theme file.
+type SettingsSwatch struct {
+	Label string
+	FG    color.Color
+	BG    color.Color
 }
 
 // SettingsSection is one group of the Settings page, such as Display.

@@ -58,6 +58,7 @@ func TestDefaults(t *testing.T) {
 
 		Terminal:     DefaultTerminalOptions(),
 		FileExplorer: DefaultFileExplorer(),
+		Env:          DefaultEnvConfig(),
 
 		// The Fresh editor.* defaults are asserted option by option in
 		// TestEditorDefaultsAreFreshs.

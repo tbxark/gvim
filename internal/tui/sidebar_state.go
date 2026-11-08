@@ -10,6 +10,7 @@ func (m *Model) restoreSidebarState(st SidebarState) {
 	if m.tree == nil {
 		return
 	}
+	m.stashPluginSidebarRestore(st)
 	m.explorerCollapsed = st.ExplorerCollapsed
 	m.explorerWidth = st.Width
 	m.explorerSide = st.Side

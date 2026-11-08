@@ -48,11 +48,13 @@ type Panel struct {
 	effects Effects
 	scroll  scrollState
 	pressed int
-	// sel is the text selection over the scrollback view, and prior is the
-	// transcript a restarted shell keeps above its own history (see selection.go
-	// and transcript.go).
-	sel   selState
-	prior []terminal.Line
+	// sel is the text selection over the scrollback view, prior is the transcript
+	// a restarted shell keeps above its own history (see selection.go and
+	// transcript.go), and hover is the Ctrl+hover link highlight (see hover.go).
+	sel     selState
+	prior   []terminal.Line
+	hover   hoverState
+	dragSeq int // invalidates the auto-scroll ticks of older drags
 	// restored is set when the dock shows a transcript restored from the session
 	// file, with no shell behind it (see transcript.go).
 	restored bool
@@ -113,6 +115,7 @@ func (p *Panel) Focus() bool { return p.focus }
 func (p *Panel) SetFocus(v bool) {
 	p.focus = v
 	if !v {
+		p.ClearHover()
 		// A restored transcript is the whole dock until it is restarted, so it
 		// keeps its read-only view when the focus leaves.
 		if p.scroll.on && !p.restored {
@@ -282,6 +285,8 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			p.focusDock()
 		}
 		return nil, true
+	case dragScrollMsg:
+		return p.dragScrollTick(msg), true
 	case outputMsg:
 		if msg.gen == p.gen {
 			p.armed = false
@@ -365,15 +370,7 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case clipboardMsg:
-		if msg.err != nil {
-			p.noticeOf("Paste failed: " + msg.err.Error())
-			return nil, true
-		}
-		if p.term == nil || p.exited {
-			p.noticeOf(NoTerminalNotice)
-			return nil, true
-		}
-		p.SendPaste(msg.text)
+		p.applyClipboard(msg)
 		return nil, true
 	}
 	return nil, false
@@ -462,6 +459,62 @@ func (p *Panel) SendToShell(text string) bool {
 	p.queue = append(p.queue, writeBytes([]byte(text)))
 	p.open = true
 	return true
+}
+
+// applyClipboard sends a Ctrl+V to the shell following
+// terminal.pass_ctrl_v_without_text, Fresh's rule:
+//   - a read that holds text pastes it;
+//   - a read that holds no text passes the key itself to the shell when
+//     pass_ctrl_v_without_text is on (an agent CLI reads the clipboard image
+//     itself), and pastes the last yank when it is off;
+//   - a clipboard that cannot be read pastes the last yank, and passes the key
+//     only when there is no yank and the setting is on.
+func (p *Panel) applyClipboard(msg clipboardMsg) {
+	if p.term == nil || p.exited {
+		p.noticeOf(NoTerminalNotice)
+		return
+	}
+	if msg.err == nil {
+		if msg.text != "" {
+			p.SendPaste(msg.text)
+			return
+		}
+		if !p.effects.PassCtrlVWithoutText {
+			p.pasteLastYank()
+			return
+		}
+		p.sendCtrlV()
+		return
+	}
+	if p.pasteLastYank() {
+		return
+	}
+	if p.effects.PassCtrlVWithoutText {
+		p.sendCtrlV()
+	}
+}
+
+// pasteLastYank pastes the editor's last copy or cut into the shell. It reports
+// whether there was one.
+func (p *Panel) pasteLastYank() bool {
+	if p.host.LastYank == nil {
+		return false
+	}
+	text := p.host.LastYank()
+	if text == "" {
+		return false
+	}
+	p.SendPaste(text)
+	return true
+}
+
+// sendCtrlV passes a literal Ctrl+V byte to the shell, so the program can read
+// the clipboard itself.
+func (p *Panel) sendCtrlV() {
+	if p.term == nil || p.exited {
+		return
+	}
+	p.queue = append(p.queue, writeBytes([]byte{0x16}))
 }
 
 // PasteClipboard reads the clipboard in a command. The text reaches the shell when

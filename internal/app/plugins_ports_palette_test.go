@@ -90,3 +90,22 @@ func TestRound9PortsRealHost(t *testing.T) {
 		}
 	}
 }
+
+// TestGitGrepRealHost drives the round-10 default-off port on the real app: enabling git_grep
+// in config makes both of its Fresh palette commands appear.
+func TestGitGrepRealHost(t *testing.T) {
+	isolateConfig(t)
+	writeUserFile(t, "config.json", `{"plugins":{"git_grep":{"enabled":true}}}`)
+	s := newSession(t, Options{})
+	s.waitStatus("git_grep", "loaded")
+	s.openFile("a.go", "package a\n")
+	s.settle(30 * time.Millisecond)
+	for _, title := range []string{"Git Grep", "Git Grep: Toggle Case Sensitive"} {
+		if !s.paletteHas(title) {
+			t.Fatalf("the palette has no %q row for the config-enabled port:\n%s", title, strings.Join(s.rows(), "\n"))
+		}
+	}
+	// Let the session's background work (config/state writers) finish before the test's
+	// TempDir cleanup runs.
+	s.settle(200 * time.Millisecond)
+}

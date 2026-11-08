@@ -569,6 +569,72 @@ func installProc(e *apiEnv) {
 		return 1
 	})
 
+	// The project environment API (detection, trust level, activation). The host
+	// owns detection, the trust gate and spawn application; these functions are
+	// the seam. gvim.env.set never bypasses the gate: an untrusted workspace gets
+	// nil, "invalid: ..." from the host.
+	envInfo := func(L *lua.LState, info pluginapi.EnvInfo) *lua.LTable {
+		t := L.NewTable()
+		t.RawSetString("name", lua.LString(info.Name))
+		t.RawSetString("kind", lua.LString(info.Kind))
+		t.RawSetString("snippet", lua.LString(info.Snippet))
+		return t
+	}
+	e.set(env, "detected", func(L *lua.LState) int {
+		if info, ok := r.host.DetectedEnv(); ok {
+			L.Push(envInfo(L, info))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 1
+	})
+	e.set(env, "active", func(L *lua.LState) int {
+		if info, ok := r.host.ActiveEnv(); ok {
+			L.Push(envInfo(L, info))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 1
+	})
+	e.set(env, "set", func(L *lua.LState) int {
+		snippet := L.CheckString(1)
+		dir, kind := "", "shell"
+		if L.GetTop() >= 2 && L.Get(2) != lua.LNil {
+			opts, ok := L.Get(2).(*lua.LTable)
+			if !ok {
+				L.Push(lua.LNil)
+				L.Push(lua.LString("invalid: gvim.env.set options must be a table"))
+				return 2
+			}
+			if v := opts.RawGetString("dir"); v != lua.LNil {
+				text, ok := v.(lua.LString)
+				if !ok {
+					L.Push(lua.LNil)
+					L.Push(lua.LString("invalid: opts.dir must be a string"))
+					return 2
+				}
+				dir = string(text)
+			}
+			if v := opts.RawGetString("kind"); v != lua.LNil {
+				text, ok := v.(lua.LString)
+				if !ok {
+					L.Push(lua.LNil)
+					L.Push(lua.LString("invalid: opts.kind must be a string"))
+					return 2
+				}
+				kind = string(text)
+			}
+		}
+		return bufTrue(L, r.host.SetEnv(p.name, snippet, dir, kind))
+	})
+	e.set(env, "clear", func(L *lua.LState) int {
+		return bufTrue(L, r.host.ClearEnv(p.name))
+	})
+	e.set(env, "trust_level", func(L *lua.LState) int {
+		L.Push(lua.LString(r.host.EnvTrustLevel()))
+		return 1
+	})
+
 	area.RawSetString("run", e.async("proc_run"))
 	area.RawSetString("which", e.async("proc_which"))
 

@@ -1,6 +1,8 @@
 package dock
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -334,3 +336,57 @@ func TestExitIsSeenWhileOutputStaysOpen(t *testing.T) {
 		t.Fatalf("title row = %q, want it to say the shell exited", top)
 	}
 }
+
+// flushInput runs the dock's queued input against the shell.
+func flushInput(t *testing.T, p *Panel) {
+	t.Helper()
+	cmd := p.Sync()
+	if cmd == nil {
+		return
+	}
+	for _, msg := range messages(cmd) {
+		if next, taken := p.Update(msg); taken && next != nil {
+			for _, m := range messages(next) {
+				p.Update(m)
+			}
+		}
+	}
+}
+
+func TestCtrlVPasteFollowsPassCtrlVWithoutText(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		pass  bool // terminal.pass_ctrl_v_without_text
+		text  string
+		err   error
+		yank  string
+		paste []string
+		write []string
+	}{
+		{"text pastes", true, "clip", nil, "Y", []string{"clip"}, nil},
+		{"no text passes the key", true, "", nil, "Y", nil, []string{"\x16"}},
+		{"no text with the flag off pastes the yank", false, "", nil, "Y", []string{"Y"}, nil},
+		{"no text with the flag off and no yank does nothing", false, "", nil, "", nil, nil},
+		{"an unreadable clipboard pastes the yank", true, "", errors.New("no display"), "Y", []string{"Y"}, nil},
+		{"an unreadable clipboard with the flag off and no yank does nothing", false, "", errors.New("no display"), "", nil, nil},
+		{"an unreadable clipboard without a yank passes the key", true, "", errors.New("no display"), "", nil, []string{"\x16"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, term := livePanel(t, "hi")
+			p.SetEffects(Effects{PassCtrlVWithoutText: tt.pass})
+			p.host.LastYank = func() string { return tt.yank }
+			if _, ok := p.Update(clipboardMsg{text: tt.text, err: tt.err}); !ok {
+				t.Fatal("the clipboard message was not taken")
+			}
+			flushInput(t, p)
+			if !slices.Equal(pastes(term), tt.paste) || !slices.Equal(term.writes, tt.write) {
+				t.Fatalf("pastes %q writes %q, want %q %q", pastes(term), term.writes, tt.paste, tt.write)
+			}
+		})
+	}
+}
+
+// pastes returns the shell's paste texts.
+func pastes(term *fakeTerm) []string { return term.pastes }

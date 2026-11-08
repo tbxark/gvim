@@ -37,6 +37,9 @@ type TermStarterOptions struct {
 	// ScrollbackLines is terminal.scrollback_lines. Zero disables the history;
 	// a negative value leaves the terminal package's default.
 	ScrollbackLines int
+	// SpawnEnv is the active project environment's set-only overlay for the dock
+	// shell, or nil.
+	SpawnEnv func() []string
 }
 
 // TermStarter starts shells for the dock. A shell lives until the dock closes it, or
@@ -66,10 +69,14 @@ func (s TermStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
 		// default, so the switch is spelled -1 here.
 		scrollback = -1
 	}
+	var extraEnv []string
+	if s.opts.SpawnEnv != nil {
+		extraEnv = s.opts.SpawnEnv()
+	}
 	sess, err := terminal.Start(s.ctx, terminal.Options{
 		Shell: s.opts.Shell, Args: s.opts.Args,
 		Dir: dir, Cols: cols, Rows: rows,
-		ScrollbackLines: scrollback,
+		ScrollbackLines: scrollback, Env: extraEnv,
 	})
 	if err != nil {
 		return nil, err

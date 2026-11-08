@@ -192,6 +192,8 @@ func (p *themeEditorPage) key(msg tea.KeyPressMsg) tea.Cmd {
 		p.keepVisible()
 	case "enter":
 		return p.editColor()
+	case "p":
+		return p.openColorPicker()
 	case "ctrl+a":
 		return p.editAttrs()
 	case "ctrl+s":
@@ -318,6 +320,38 @@ func (p *themeEditorPage) preview() {
 	p.layout()
 }
 
+// previewValue previews a candidate colour on one key without recording it as an
+// edit: the colour picker drives this while its selection moves.
+func (p *themeEditorPage) previewValue(key theme.Key, value theme.Color) {
+	values := make(map[string]theme.Color, len(p.values)+1)
+	for name, c := range p.values {
+		values[name] = c
+	}
+	values[key.Name()] = value
+	working, err := theme.WithValues(p.base, values)
+	if err != nil {
+		p.model.notice = "Theme editor: " + err.Error()
+		return
+	}
+	p.working = working
+	p.model.theme = working
+	p.model.rebuildTheme()
+	p.layout()
+}
+
+// reapplyValues puts the frame and the editor rows back on the recorded edits,
+// dropping a picker preview that was not applied.
+func (p *themeEditorPage) reapplyValues() {
+	working, err := theme.WithValues(p.base, p.values)
+	if err != nil {
+		return
+	}
+	p.working = working
+	p.model.theme = working
+	p.model.rebuildTheme()
+	p.layout()
+}
+
 // save writes the working theme: a user theme replaces its file, a bundled theme
 // routes to Save As.
 func (p *themeEditorPage) save() tea.Cmd {
@@ -433,6 +467,11 @@ func (p *themeEditorPage) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 		if mo.Button == tea.MouseLeft {
 			if i, ok := p.rowAt(mo.X, mo.Y); ok && !p.rows[i].header {
 				p.sel = i
+				// A click on the row's own swatch opens the colour picker for it,
+				// as Fresh's editor does; clicking elsewhere only selects the row.
+				if mo.X <= p.box.X+3 {
+					cmd = p.openColorPicker()
+				}
 			}
 		}
 	case tea.MouseWheelMsg:
@@ -636,7 +675,7 @@ func (p *themeEditorPage) Draw(g *grid.Grid) {
 		g.Put(box.X+4, y, max(textX-1, box.X+5), row.key.Key, st)
 	}
 	ov.PaintFooter(g, box.X, box.Y+box.H-1, box.W,
-		"Enter color · ^A attrs · ^S save · ^⇧S save as · ^D delete · ^O open · Esc")
+		"Enter color · p picker · ^A attrs · ^S save · ^⇧S save as · ^D delete · ^O open · Esc")
 }
 
 // deleteDone applies a delete: open the fallback theme and close.

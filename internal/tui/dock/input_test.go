@@ -7,6 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/style"
 )
 
 func TestTokenAt(t *testing.T) {
@@ -289,5 +291,143 @@ func TestTitleRowPressOnlyFocuses(t *testing.T) {
 	}
 	if !p.Focus() {
 		t.Fatal("the title row press did not focus the dock")
+	}
+}
+
+func TestSplitLinkTarget(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		token     string
+		path      string
+		line, col int
+		ok        bool
+	}{
+		{"src/a.go", "", 0, 0, false},
+		{"src/a.go:12", "src/a.go", 12, 0, true},
+		{"src/a.go:12:3", "src/a.go", 12, 3, true},
+		{"a.go:0", "", 0, 0, false},
+		{"a.go:", "", 0, 0, false},
+		{":12", "", 0, 0, false},
+		{"C:\\ws\\a.go:7", "C:\\ws\\a.go", 7, 0, true},
+		{"odd:1.go", "", 0, 0, false},
+	}
+	for _, tt := range tests {
+		path, line, col, ok := splitLinkTarget(tt.token)
+		if path != tt.path || line != tt.line || col != tt.col || ok != tt.ok {
+			t.Errorf("splitLinkTarget(%q) = %q, %d, %d, %v; want %q, %d, %d, %v",
+				tt.token, path, line, col, ok, tt.path, tt.line, tt.col, tt.ok)
+		}
+	}
+}
+
+func TestCtrlClickOpensPathAtALineAndColumn(t *testing.T) {
+	t.Parallel()
+	p, term := livePanel(t, "see src/a.go:12:3 now")
+	term.cwd = "/term"
+	p.host.Stat = func(path string) bool { return path == "/term/src/a.go" }
+	cmd, ok := p.Mouse(clickAt(10, 1, tea.ModCtrl, tea.MouseLeft), scrollLayout(), 1)
+	if !ok || cmd == nil {
+		t.Fatalf("Ctrl+Click: taken %v, cmd %v", ok, cmd != nil)
+	}
+	msgs := messages(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %v", msgs)
+	}
+	open, ok := msgs[0].(OpenPathMsg)
+	if !ok || open.Path != "/term/src/a.go" || open.Line != 12 || open.Col != 3 {
+		t.Fatalf("message = %+v, want the path at 12:3", msgs[0])
+	}
+}
+
+func TestCtrlClickTriesTheWholeTokenForAColonName(t *testing.T) {
+	t.Parallel()
+	p, term := livePanel(t, "see odd:1.go:2 now")
+	term.cwd = "/term"
+	p.host.Stat = func(path string) bool { return path == "/term/odd:1.go:2" }
+	cmd, ok := p.Mouse(clickAt(6, 1, tea.ModCtrl, tea.MouseLeft), scrollLayout(), 1)
+	if !ok || cmd == nil {
+		t.Fatalf("Ctrl+Click: taken %v, cmd %v", ok, cmd != nil)
+	}
+	msgs := messages(cmd)
+	open, ok := msgs[0].(OpenPathMsg)
+	if !ok || open.Path != "/term/odd:1.go:2" || open.Line != 0 || open.Col != 0 {
+		t.Fatalf("message = %+v, want the whole colon name", msgs[0])
+	}
+}
+
+// hoverAt moves the pointer over body cell x,row with Ctrl held (the link hover).
+func hoverAt(p *Panel, x, y int) {
+	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: x, Y: y, Mod: tea.ModCtrl}), scrollLayout(), 1)
+}
+
+func TestCtrlHoverUnderlinesTheLinkAndHints(t *testing.T) {
+	t.Parallel()
+	p, _ := livePanel(t, "see src/a.go now")
+	var hinted string
+	p.host.Notice = func(text string) { hinted = text }
+	hoverAt(p, 8, 1)
+	if !p.hover.on || p.hover.token != "src/a.go" || p.hover.row != 0 {
+		t.Fatalf("hover = %+v, want the token on the live row", p.hover)
+	}
+	if !strings.Contains(hinted, "Ctrl+Click to open src/a.go") {
+		t.Fatalf("hint = %q", hinted)
+	}
+	g := grid.New(80, 5)
+	p.Draw(g, scrollLayout(), style.Styles{})
+	start := strings.Index("see src/a.go now", "src")
+	for x := start; x < start+len("src/a.go"); x++ {
+		if cell := g.At(x, 1); !cell.Style.Underline {
+			t.Fatalf("cell %d is not underlined", x)
+		}
+	}
+	if g.At(start-1, 1).Style.Underline {
+		t.Fatal("a cell before the token is underlined")
+	}
+	// A buttonless motion without Ctrl ends the hover.
+	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 8, Y: 1}), scrollLayout(), 1)
+	if p.hover.on {
+		t.Fatal("a plain motion did not clear the hover")
+	}
+}
+
+func TestHoverClearsOnAClickAndOnTheAltScreen(t *testing.T) {
+	t.Parallel()
+	p, term := livePanel(t, "see src/a.go now")
+	hoverAt(p, 8, 1)
+	if !p.hover.on {
+		t.Fatal("setup: no hover")
+	}
+	p.Mouse(clickAt(2, 2, 0, tea.MouseLeft), scrollLayout(), 1)
+	if p.hover.on {
+		t.Fatal("a press did not clear the hover")
+	}
+	// The alternate screen is a full-screen program's own drawing: no hover.
+	term.alt = true
+	hoverAt(p, 8, 1)
+	if p.hover.on {
+		t.Fatal("the alt screen underlines a link")
+	}
+}
+
+func TestHoverInTheScrollbackUsesTheAbsoluteRow(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.screen = terminal.NewScreen(4, 80, liveCells())
+	term.history = []string{"see src/a.go"}
+	p := newTestPanel(t, &fakeStarter{term: term})
+	cmd, _ := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	applyScroll(t, p, cmd)
+	// The view starts on the live screen; Home moves it to the oldest history.
+	home, _ := p.ScrollKey(tea.Key{Code: tea.KeyHome})
+	applyScroll(t, p, home)
+	hoverAt(p, 8, 1)
+	if !p.hover.on || !p.hover.scroll || p.hover.row != p.scroll.top {
+		t.Fatalf("scrollback hover = %+v, want it on the window's first combined row", p.hover)
+	}
+	g := grid.New(80, 5)
+	p.Draw(g, scrollLayout(), style.Styles{})
+	start := strings.Index("see src/a.go", "src")
+	if !g.At(start, 1).Style.Underline {
+		t.Fatal("the scrollback link is not underlined")
 	}
 }

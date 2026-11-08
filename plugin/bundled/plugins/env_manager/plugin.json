@@ -1,0 +1,7 @@
+{
+  "name": "env_manager",
+  "version": "1.0.0",
+  "api": 2,
+  "default_enabled": false,
+  "description": "Detect and activate the project environment (venv, direnv, mise, pipenv, poetry) for spawned processes"
+}

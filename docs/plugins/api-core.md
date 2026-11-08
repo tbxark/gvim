@@ -126,6 +126,13 @@ survives reloads, not an uninstall.
 gvim.dirs.config()  gvim.dirs.data()  gvim.dirs.plugin()  gvim.dirs.root()
 gvim.dirs.cwd()     gvim.dirs.home()  gvim.dirs.temp()      -- strings, no IO
 gvim.env.get(name) -> string|nil
+
+-- The project environment (config env.detectors; host-owned detection and gate).
+gvim.env.detected() -> {name, kind, snippet}|nil
+gvim.env.active() -> {name, kind, snippet}|nil
+gvim.env.trust_level() -> "trusted"|"restricted"|"blocked"
+gvim.env.set(snippet, opts?) -> true|nil, err   -- opts {dir?, kind?}; "path-only"|"shell"
+gvim.env.clear() -> true|nil, err
 ```
 
 `dirs.data()` is `<config>/plugin-data/<name>`; `dirs.plugin()` is the plugin's directory (empty

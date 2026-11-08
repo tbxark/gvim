@@ -234,3 +234,27 @@ workspace" — an editor that cannot record a decision must not restrict itself 
   markers, keyboard and mouse selection (without consenting), confirm/cancel/quit paths,
   the mandatory startup prompt and its inert Esc, the notices, the status label, and a
   project switch loading the new root's state.
+
+## Environments
+
+Trust also gates project-environment activation. Detection is passive and runs at
+workspace open: `env.detectors` (user config only, a project file cannot set it)
+lists `{name, markers, kind, snippet, require}` entries. The built-ins are Fresh's:
+`.venv`/`venv` (path-only, requiring an interpreter inside), direnv (`.envrc`),
+mise (`mise.toml`, `.mise.toml`, `.tool-versions`), pipenv (`Pipfile`) and
+poetry (`poetry.lock`) (shell). The first matching detector wins; a bare `.venv`
+without an interpreter does not activate. Detection only stats markers.
+
+Activation is host-gated on the **Trusted** level: a snippet runs project shell code
+(or sources a repo-controlled activation script for a virtualenv), so
+`gvim.env.set` refuses in Restricted/Blocked. The `env-manager` bundled plugin
+(auto-activates path-only environments when trusted, asks the core trust dialog for
+shell environments) is off by default; the detected environment and trust state are
+also visible in Settings > Environment. An active environment's captured variables
+are applied to every spawn the editor owns: shell commands and formatters, language
+servers, terminal shells, plugin processes and app git-grep runs.
+
+Reductions from Fresh: one local environment (no SSH/container authority), the
+overlay is set-only (activation unsets are not applied to spawns), no persisted
+recipe across sessions, no devcontainer deferral, and detectors are read-only in the
+Settings UI (edit `env.detectors` in the user config JSON).

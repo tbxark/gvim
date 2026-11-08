@@ -530,6 +530,18 @@ gvim.env = {}
 ---@param name string
 ---@return string|nil
 function gvim.env.get(name) end
+---@return table|nil {name: string, kind: "path-only"|"shell", snippet: string}
+function gvim.env.detected() end
+---@return table|nil
+function gvim.env.active() end
+---@return "trusted"|"restricted"|"blocked"
+function gvim.env.trust_level() end
+---@param snippet string
+---@param opts? {dir?: string, kind?: "path-only"|"shell"}
+---@return boolean|nil, string?
+function gvim.env.set(snippet, opts) end
+---@return boolean|nil, string?
+function gvim.env.clear() end
 
 -- buffers and windows
 
@@ -928,6 +940,23 @@ function gvim.decor.set_folding_ranges(buf, ranges, opts) end
 ---@param opts? {namespace?: string}
 ---@return true
 function gvim.decor.clear_folds(buf, opts) end
+
+-- file explorer decorations and slots (per plugin namespace)
+gvim.explorer = {}
+---@param namespace string 1 to 128 bytes; namespaces are isolated per plugin
+---@param decorations {path: string, symbol: string, color?: Color, priority?: integer}[]
+---@return true|nil, string?
+function gvim.explorer.set_decorations(namespace, decorations) end
+---@param namespace string
+---@return true
+function gvim.explorer.clear_decorations(namespace) end
+---@param namespace string
+---@param slots {path: string, leading?: {text?: string, color?: Color, min_width?: integer}, suppress_leading?: boolean, trailing?: {text?: string, color?: Color}, suppress_trailing?: boolean, name_color?: Color, suppress_name_color?: boolean, priority?: integer}[]
+---@return true|nil, string?
+function gvim.explorer.set_slots(namespace, slots) end
+---@param namespace string
+---@return true
+function gvim.explorer.clear_slots(namespace) end
 
 gvim.clipboard = {}
 ---@param text string

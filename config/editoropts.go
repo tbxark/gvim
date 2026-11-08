@@ -669,7 +669,7 @@ var fileOnlyKeys = []string{
 	"$schema", "version", "locale", "check_for_updates", "self_update", "auto_attach",
 	"open_last_workspace", "sidebar", "file_browser", "clipboard",
 	"universal_lsp",
-	"warnings", "packages", "env", "menu",
+	"warnings", "packages", "menu",
 }
 
 // sectionFailure is one rejected key inside a section, with its full dotted name.

@@ -1434,6 +1434,9 @@ func (m *Model) openLSPStatus(msg lspStatusMsg) {
 		} else if s.State == LSPServerStopped && s.Install != "" {
 			rows = append(rows, list.Row{Left: "    install: " + s.Install})
 		}
+		if s.Limits != "" {
+			rows = append(rows, list.Row{Left: "    " + s.Limits})
+		}
 		key := s.Language + lspStatusSep + s.Name
 		if s.State == LSPServerRunning || s.State == LSPServerStarting {
 			rows = append(rows,

@@ -2,10 +2,12 @@ package lsphost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"go.lsp.dev/protocol"
@@ -341,6 +343,51 @@ var lspWorkspacePullEvery = 5 * time.Second
 // flood the panel or the fix list.
 const workspaceDiagPerFileCap = 50
 
+// pullSet tracks the cancellable workspace/diagnostic pulls in flight. A newer pull
+// supersedes the ones already running (they are cancelled and their answers dropped), and
+// stopping or restarting the servers cancels every pull, so a pull never outlives the
+// server it asked. The zero value is ready to use.
+type pullSet struct {
+	mu      sync.Mutex
+	next    uint64
+	cancels map[uint64]context.CancelFunc
+}
+
+// begin cancels the pulls already running and registers cancel for a new pull. It returns
+// the id end needs.
+func (s *pullSet) begin(cancel context.CancelFunc) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancels == nil {
+		s.cancels = make(map[uint64]context.CancelFunc)
+	}
+	for _, c := range s.cancels {
+		c()
+	}
+	clear(s.cancels)
+	s.next++
+	s.cancels[s.next] = cancel
+	return s.next
+}
+
+// end forgets a pull that returned. The pull was already cancelled by a newer one if its
+// id is gone.
+func (s *pullSet) end(id uint64) {
+	s.mu.Lock()
+	delete(s.cancels, id)
+	s.mu.Unlock()
+}
+
+// cancelAll cancels every pull in flight and forgets them.
+func (s *pullSet) cancelAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.cancels {
+		c()
+	}
+	clear(s.cancels)
+}
+
 // workspacePulled returns the workspace/diagnostic answer, asking the capability
 // servers when the cached one is stale. The result is keyed by file path. A server
 // that does not advertise workspace diagnostics is not asked; a failed pull is
@@ -369,15 +416,26 @@ func (p *lspPort) workspacePulled() map[string][]protocol.Diagnostic {
 	}
 
 	files := make(map[string][]protocol.Diagnostic)
+	canceled := false
 	for _, mgr := range mgrs {
 		for _, h := range mgr.AllHandles() {
 			if !h.Capabilities().DiagnosticWorkspace {
 				continue
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
+			// A pull registers here before it asks: a newer pull, or a stop/restart,
+			// cancels it, the client sends the $/cancelRequest for its request id, and
+			// the timeout below is the fallback for a server that never answers.
+			parent, cancel := context.WithCancel(context.Background())
+			ctx, cancelTimeout := context.WithTimeout(parent, lspRequestTimeout)
+			id := p.wsPulls.begin(cancel)
 			items, err := h.Client().WorkspaceDiagnostics(ctx, nil)
+			p.wsPulls.end(id)
+			cancelTimeout()
 			cancel()
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					canceled = true
+				}
 				continue
 			}
 			for _, item := range items {
@@ -388,6 +446,18 @@ func (p *lspPort) workspacePulled() map[string][]protocol.Diagnostic {
 				files[file] = capWorkspaceDiagnostics(append(files[file], item.Items...))
 			}
 		}
+	}
+	if canceled {
+		// A superseded or stopped pull answered nothing to merge: keep the last good
+		// workspace answer (and its throttle state) so a cancellation never drops rows
+		// or writes a stale set. The next poll asks again.
+		p.mu.Lock()
+		last := p.wsPull
+		p.mu.Unlock()
+		if last.ok {
+			return last.files
+		}
+		return nil
 	}
 
 	p.mu.Lock()

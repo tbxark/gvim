@@ -51,6 +51,47 @@ type settingsRuntime struct {
 	version string
 }
 
+// projectEnvFacts are the Environment rows of the project environment: which
+// detector matched, whether an environment is active and the trust level that
+// gates activation. They read the env.Provider, never a subprocess.
+func (s *settingsService) projectEnvFacts() []envFact {
+	facts := make([]envFact, 0, 3)
+	if det, ok := s.env.Detected(); ok {
+		facts = append(facts, envFact{
+			name: "Project environment", value: det.Name + " (" + string(det.Kind) + ")",
+			note: "detected from env.detectors markers at the workspace root",
+		})
+	} else {
+		facts = append(facts, envFact{name: "Project environment", value: "none", note: "no detector matched"})
+	}
+	if active, ok := s.env.Active(); ok {
+		facts = append(facts, envFact{name: "Active environment", value: active.Name, note: "new processes inherit it"})
+	} else {
+		facts = append(facts, envFact{name: "Active environment", value: "system", note: "no activation applied"})
+	}
+	facts = append(facts, envFact{name: "Project environment trust", value: s.envTrust(), note: "activation needs a trusted workspace"})
+	return facts
+}
+
+// envDetectorSummary is the Detectors page row's value.
+func (s *settingsService) envDetectorSummary() string {
+	if s.env == nil {
+		return "no environment provider"
+	}
+	return strconv.Itoa(len(s.env.Detectors())) + " detectors"
+}
+
+// envTrust is the live trust level label the Environment rows show.
+func (s *settingsService) envTrust() string {
+	if s.env == nil {
+		return "restricted"
+	}
+	if s.env.Trusted() {
+		return "trusted"
+	}
+	return "restricted"
+}
+
 // envFacts are the read-only Environment rows: the detected facts of the process
 // and the workspace, not config keys. Fresh shows its own environment detection
 // in settings; gvim can only report what it knows, and project-environment
@@ -85,6 +126,9 @@ func (s *settingsService) envFacts(cfg config.Config) []envFact {
 	}
 	if s.rt.version != "" {
 		facts = append(facts, envFact{name: "Version", value: s.rt.version, note: "gvim"})
+	}
+	if s.env != nil {
+		facts = append(facts, s.projectEnvFacts()...)
 	}
 	return facts
 }
@@ -149,8 +193,44 @@ func (s *settingsService) extraSections(cfg config.Config) []tui.SettingsSection
 			Name: fact.name, Section: "Environment", Kind: "info", Value: fact.value, Note: fact.note,
 		})
 	}
+	if s.env != nil {
+		items = append(items, tui.SettingsItem{
+			Key: "env.detectors", Path: []string{"env", "detectors"}, Name: "Detectors",
+			Section: "Environment", Kind: "page", Value: s.envDetectorSummary(),
+			Layers: []string{tui.SettingsLayerUser},
+			Note:   "read-only here; edit env.detectors in the user config",
+		})
+	}
 	out = append(out, tui.SettingsSection{Name: "Environment", Items: items})
 	return out
+}
+
+// structureEnvDetectors is the read-only Detectors page: every detector that
+// detection uses, its kind, markers and require evidence, and whether it comes
+// from the built-in list or env.detectors. Editing detectors is a config-file
+// edit this round (the page says so).
+func (s *settingsService) structureEnvDetectors(cfg config.Config) tui.SettingsStructure {
+	source := "built-in"
+	if len(cfg.Env.Detectors) > 0 {
+		source = "env.detectors"
+	}
+	var rows []tui.SettingsStructureRow
+	for _, d := range cfg.EnvDetectors() {
+		value := string(d.Kind) + " · " + strings.Join(d.Markers, ", ")
+		note := source
+		if len(d.Require) > 0 {
+			note += " · requires " + strings.Join(d.Require, " or ")
+		}
+		rows = append(rows, tui.SettingsStructureRow{
+			Path: []string{"env", "detectors", d.Name}, Name: d.Name, Value: value,
+			Locked: true, Note: note,
+		})
+	}
+	return tui.SettingsStructure{
+		Key: "env.detectors", Title: "Environment detectors", Kind: "entries",
+		Rows: rows,
+		Note: "Read-only: detection is passive (markers and evidence paths only). Add or replace detectors with env.detectors in the user config; activation runs only in a trusted workspace.",
+	}
 }
 
 // pluginSummary is the Plugins page row's value: the enabled count of the runtime

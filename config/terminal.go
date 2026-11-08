@@ -36,9 +36,9 @@ type TerminalShell struct {
 
 // TerminalConfig is the terminal section of the config: Fresh's terminal keys
 // that gvim uses, plus gvim's scrollback_lines. The other Fresh terminal keys
-// (resume_agents, pass_ctrl_v_without_text, skip_app_execution_alias) are accepted
-// and ignored: the features they tune are not built yet, and a Fresh config must
-// load without diagnostics.
+// (resume_agents, skip_app_execution_alias) are accepted and ignored: the
+// features they tune are not built yet, and a Fresh config must load without
+// diagnostics.
 type TerminalConfig struct {
 	// Shell is the terminal.shell override. An empty Command keeps the behaviour
 	// of always starting $SHELL.
@@ -61,6 +61,13 @@ type TerminalConfig struct {
 	// selects text by dropping into scrollback. False makes live-grid drags
 	// inert; scrollback drags still select. Default true, as Fresh's is.
 	MouseDragSelects bool
+	// PassCtrlVWithoutText is terminal.pass_ctrl_v_without_text: when the system
+	// clipboard can be read but holds no text (an image, say), Ctrl+V goes to the
+	// shell as the key itself instead of pasting the last yank, so an agent CLI
+	// can read the clipboard itself. False pastes the last yank instead. A
+	// clipboard that cannot be read at all pastes the last yank either way.
+	// Default true, as Fresh's is.
+	PassCtrlVWithoutText bool
 }
 
 // DefaultTerminalOptions returns the terminal defaults: the user's shell, the
@@ -68,17 +75,18 @@ type TerminalConfig struct {
 // request.
 func DefaultTerminalOptions() TerminalConfig {
 	return TerminalConfig{
-		CloseOnExit:       false,
-		ScrollbackLines:   TerminalScrollbackDefault,
-		MouseForwarding:   MouseForwardRequested,
-		JumpToEndOnOutput: true,
-		MouseDragSelects:  true,
+		CloseOnExit:          false,
+		ScrollbackLines:      TerminalScrollbackDefault,
+		MouseForwarding:      MouseForwardRequested,
+		JumpToEndOnOutput:    true,
+		MouseDragSelects:     true,
+		PassCtrlVWithoutText: true,
 	}
 }
 
 // terminalKeysIgnored are Fresh's terminal keys that gvim accepts and ignores.
 var terminalKeysIgnored = []string{
-	"resume_agents", "pass_ctrl_v_without_text", "skip_app_execution_alias",
+	"resume_agents", "skip_app_execution_alias",
 }
 
 // setTerminal applies the terminal object of one config layer; path names the
@@ -154,6 +162,13 @@ func (c *Config) setTerminal(raw json.RawMessage, l layer, path string) (diags [
 				continue
 			}
 			c.Terminal.MouseDragSelects = b
+		case "pass_ctrl_v_without_text":
+			var b bool
+			if err := json.Unmarshal(v, &b); err != nil {
+				diag(k, "must be true or false")
+				continue
+			}
+			c.Terminal.PassCtrlVWithoutText = b
 		default:
 			if slices.Contains(terminalKeysIgnored, k) {
 				continue // a Fresh terminal key gvim accepts and ignores

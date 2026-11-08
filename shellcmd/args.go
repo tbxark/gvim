@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -17,6 +18,12 @@ import (
 // means (git grep, for instance, exits 1 for no matches). err is non-nil for a start
 // failure, a timeout, or output that is not UTF-8.
 func RunArgs(dir string, argv []string, input string, timeout time.Duration) (stdout string, exitCode int, err error) {
+	return RunArgsEnv(dir, argv, input, timeout, nil)
+}
+
+// RunArgsEnv is RunArgs with extra environment entries appended to the
+// inherited environment (the active project environment's set-only overlay).
+func RunArgsEnv(dir string, argv []string, input string, timeout time.Duration, extraEnv []string) (stdout string, exitCode int, err error) {
 	if len(argv) == 0 {
 		return "", 0, errors.New("shell command: empty argument list")
 	}
@@ -25,6 +32,9 @@ func RunArgs(dir string, argv []string, input string, timeout time.Duration) (st
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(input)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	cmd.WaitDelay = time.Second
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out

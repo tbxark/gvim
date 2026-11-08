@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -20,11 +21,21 @@ import (
 // background child that keeps the output open after the shell exited 0 does not
 // make a successful command fail.
 func Run(dir, command, input string, timeout time.Duration) (string, error) {
+	return RunEnv(dir, command, input, timeout, nil)
+}
+
+// RunEnv is Run with extra environment entries appended to the inherited
+// environment (the active project environment's set-only overlay). A nil or
+// empty overlay leaves the child's environment inherited.
+func RunEnv(dir, command, input string, timeout time.Duration, extraEnv []string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(input)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	cmd.WaitDelay = time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

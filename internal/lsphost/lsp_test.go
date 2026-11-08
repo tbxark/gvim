@@ -168,7 +168,7 @@ func TestDiagnosticTextTakesPlainAndMarkupMessages(t *testing.T) {
 
 func TestWorkspaceEditConvertsTextAndResourceOperations(t *testing.T) {
 	t.Parallel()
-	port := newPort(lspPlan{}, true)
+	port := newPort(lspPlan{}, true, nil)
 	text := "x := foo\n"
 	port.docs["/p/b.go"] = lspDocRec{lang: "go", text: text, lines: newTextLines(text)}
 	version := int32(3)
@@ -217,7 +217,7 @@ func TestWorkspaceEditConvertsTextAndResourceOperations(t *testing.T) {
 // the root drains it later.
 func TestServerApplyEditIsQueuedAndDrained(t *testing.T) {
 	t.Parallel()
-	port := newPort(lspPlan{}, true)
+	port := newPort(lspPlan{}, true, nil)
 	label := "organize"
 	if !port.enqueueEdit("go", protocol.ApplyWorkspaceEditParams{Label: &label, Edit: protocol.WorkspaceEdit{}}) {
 		t.Fatal("the queue refused an edit")

@@ -530,6 +530,7 @@ func (h *pluginHost) OwnerGone(plugin string, gen uint64) {
 	m.plugVirtualGone(plugin, gen)
 	m.plugViewStateDropOwner(plugin)
 	m.plugLineTargetsDropOwner(plugin)
+	m.plug.explorer.dropOwner(plugin)
 }
 
 // ---- pluginapi.WorkspaceHost.

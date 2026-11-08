@@ -37,6 +37,9 @@ type ShellJob struct {
 	Replace bool
 	// Timeout bounds the run. A zero value uses the default timeout.
 	Timeout time.Duration
+	// Env is the active project environment's set-only overlay (the env package's
+	// Provider.Overlay), stamped by BeginShell when the app wired one.
+	Env []string
 
 	// doc, from, to and selected say where Input came from, so that EndShell
 	// replaces the same text, and only when the text is still the same (see snapshot).
@@ -50,6 +53,19 @@ type ShellJob struct {
 	snapshot contentMark
 	// format is true for format_buffer, so that the status says it formatted.
 	format bool
+}
+
+// SetShellEnv wires the active project environment: the returned overlay is
+// appended to the environment of shell commands and formatters. The provider is
+// read at BeginShell time, so an activation applies to the next run.
+func (e *Editor) SetShellEnv(overlay func() []string) { e.shellEnv = overlay }
+
+// envOverlay reads the wired environment overlay, if any.
+func (e *Editor) envOverlay() []string {
+	if e.shellEnv == nil {
+		return nil
+	}
+	return e.shellEnv()
 }
 
 // registerShellHandlers registers shell_command and shell_command_replace. Each
@@ -128,6 +144,7 @@ func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error
 		Dir:      shellDir(d),
 		Replace:  replace,
 		Timeout:  shellTimeout,
+		Env:      e.envOverlay(),
 		Doc:      d,
 		From:     from,
 		To:       to,
@@ -144,7 +161,7 @@ func RunShellJob(job ShellJob) (string, error) {
 	if timeout <= 0 {
 		timeout = shellTimeout
 	}
-	return shellcmd.Run(job.Dir, job.Command, job.Input, timeout)
+	return shellcmd.RunEnv(job.Dir, job.Command, job.Input, timeout, job.Env)
 }
 
 // EndShell applies the result of a job from BeginShell and RunShellJob, with out

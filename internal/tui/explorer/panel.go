@@ -63,6 +63,29 @@ type Geometry struct {
 	// Icons picks the glyphs of the title buttons and of the expand marks. The zero
 	// value is the plain set.
 	Icons icons.Mode
+	// Decor resolves the plugin decoration of a row's path (nil: no plugin
+	// decorations). The panel keeps no plugin knowledge; the root answers.
+	Decor func(path string) RowDecor
+}
+
+// RowDecor is the plugin decoration the explorer paints for one row: optional leading
+// and trailing slot text, suppression flags, and a filename colour. The zero value is
+// "no plugin decoration", so the built-in icon and the native git mark keep working.
+type RowDecor struct {
+	// Leading replaces the built-in leading icon slot.
+	Leading      string
+	LeadingStyle grid.Style
+	// LeadingMinWidth is the least cells the leading slot reserves.
+	LeadingMinWidth int
+	// SuppressLeading removes the leading slot, built-in icon included.
+	SuppressLeading bool
+	// Trailing replaces the native trailing slot (git mark or decoration symbol).
+	Trailing      string
+	TrailingStyle grid.Style
+	// SuppressTrailing removes the trailing slot, native git mark included.
+	SuppressTrailing bool
+	// NameColor paints the filename and its compact-chain segments.
+	NameColor color.Color
 }
 
 // The rows of the panel are the rows of its Geometry: the title is row Top and
@@ -295,8 +318,15 @@ func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
 					st.Faint = true
 				}
 			}
+			var decor RowDecor
+			if g.Decor != nil {
+				decor = g.Decor(r.Path)
+				if decor.NameColor != nil {
+					st.FG = decor.NameColor
+				}
+			}
 			dst.Fill(g.X+1, right-1, y, st)
-			drawRow(dst, r, y, g.X, g.Width, over, marker, g.Marks[r.Path], g.Icons, st, sep, accent)
+			drawRow(dst, r, y, g.X, g.Width, over, marker, g.Marks[r.Path], g.Icons, st, sep, accent, decor)
 		}
 		if over {
 			st := track
@@ -317,24 +347,50 @@ func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
 // name that does not fit ends with "…". A non-zero mark is the git status
 // letter, drawn in the last column before that padding, and the name stops one
 // cell before it.
-func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, mark rune, ic icons.Mode, st, sep grid.Style, accent color.Color) {
+func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, mark rune, ic icons.Mode, st, sep grid.Style, accent color.Color, decor RowDecor) {
 	end := left + width - 1 - space.PadX
 	if over {
 		end--
 	}
 	// Column 1 is the padding cell, so the expand icon is at column 2 and the name
 	// at column 4, plus two cells per depth level. A set with file icons draws the
-	// icon at the name's place and moves the name two cells right.
+	// icon at the name's place and moves the name two cells right; a plugin's leading
+	// slot replaces that icon slot and reserves its width.
 	iconX := left + 1 + space.PadX + 2*r.Depth
 	nameX := iconX + 2
 	fileIcon := ic.FileIcon(r.Name, r.IsDir, r.Expanded)
-	if fileIcon != "" {
+	leading := decor.Leading
+	leadingStyle := decor.LeadingStyle
+	switch {
+	case decor.SuppressLeading:
+		fileIcon = ""
+	case leading != "":
+		lw := max(decor.LeadingMinWidth, 2, ansi.StringWidth(leading))
+		if x := iconX + 2; x < end {
+			dst.Put(x, y, end, leading, leadingStyle)
+		}
+		nameX = iconX + 2 + lw
+	case fileIcon != "":
 		nameX += 2
 	}
-	if mark != 0 {
-		if x := end - 1; x > nameX {
-			dst.Set(x, y, ic.GitMark(mark), st)
-			end = x - 1
+	// The trailing slot: a plugin override first, then a decoration symbol, then the
+	// native git mark. SuppressTrailing removes all three.
+	trailing := ""
+	trailingStyle := st
+	switch {
+	case decor.SuppressTrailing:
+	case decor.Trailing != "":
+		trailing, trailingStyle = decor.Trailing, decor.TrailingStyle
+	case mark != 0:
+		trailing = ic.GitMark(mark)
+	}
+	if trailing != "" {
+		tw := ansi.StringWidth(trailing)
+		if x := end - tw; x > nameX {
+			dst.Put(x, y, end, trailing, trailingStyle)
+			end = x
+		} else {
+			end = max(nameX, end-tw)
 		}
 	}
 	icon := " "
@@ -355,13 +411,17 @@ func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, 
 		bar.FG = accent
 		dst.Set(left+1, y, "▌", bar)
 	}
+	nameStyle := st
+	if decor.NameColor != nil {
+		nameStyle.FG = decor.NameColor
+	}
 	x := nameX
 	for _, part := range r.Chain {
 		if x >= end {
 			return
 		}
 		name := space.Name(part.Name, end-x)
-		dst.Put(x, y, end, name, st)
+		dst.Put(x, y, end, name, nameStyle)
 		x += ansi.StringWidth(name)
 		if x < end {
 			dst.Set(x, y, "/", sep)
@@ -369,7 +429,7 @@ func drawRow(dst *grid.Grid, r tree.Row, y, left, width int, over, marker bool, 
 		}
 	}
 	if x < end {
-		dst.Put(x, y, end, space.Name(r.Name, end-x), st)
+		dst.Put(x, y, end, space.Name(r.Name, end-x), nameStyle)
 	}
 }
 

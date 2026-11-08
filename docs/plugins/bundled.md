@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships nineteen plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-two plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
-`compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation` and `find_references`
-are off until you turn them on:
+`compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
+`git_grep`, `git_explorer` and `env_manager` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -27,6 +27,9 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `lsp_help` | on | none (event driven: an LSP server error puts an install hint on the status row, and the LSP status click opens the help popup) | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
 | `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
+| `git_grep` | **off** | Git Grep, Git Grep: Toggle Case Sensitive | none |
+| `git_explorer` | **off** | none (decorates the file explorer in place) | `color_names` (false) |
+| `env_manager` | **off** | Env: Activate Detected Environment (venv / direnv / mise), Env: Reload Environment (re-capture after .envrc/mise.toml change), Env: Use System (Deactivate Environment), Env: Show Environment Status | none (detection is the user config `env.detectors`) |
 | `dashboard` | **off** | Show Dashboard | `show_on_empty` (true), `refresh_seconds` (5) |
 | `code_tour` | **off** | Tour: Load Definition..., Tour: Open Workspace Tour..., Tour: Next Step, Tour: Previous Step, Tour: Exit, Tour: Create from Current Location... | none |
 | `compare_files` | **off** | Compare Files..., Compare Active File With..., Compare: Next Difference, Compare: Previous Difference, Compare: Switch Side, Compare: Copy Change to Other Side, Compare: Take Change from Other Side, Compare: Close | none |
@@ -221,6 +224,54 @@ VS Code-compatible starter `.tour` under `.tours/`, atomically. Load/schema/step
 notices. No default bindings (Fresh's keys live in its dock-buffer mode; here the panel owns the
 keyboard).
 
+**git_grep** (with the shared finder; reduced adaptation): Fresh's live git grep. **Git Grep** opens a
+live search over the files git tracks: each typed query runs `git grep -n --column -I [-i] -e
+<query>` in the repository of the active buffer (else the workspace's), and the first 100 matches
+are listed as repo-relative `path:line` rows with the source line as the detail; Enter opens the
+file at the match's line and column. Case starts insensitive (Fresh's effective default) and the
+choice is module-level, so it outlives one prompt, as in Fresh; git's basic regex is used (no `-E`).
+git grep's exit codes follow Fresh: 0 matches, 1 no matches (a normal search), ≥2 a real error, and
+a missing git binary or a non-repository has its own status line. The git call goes through the
+hardened `gvim.git` gateway (same argv/env safety as the other git ports) with a 15 s timeout and a
+2 MiB output cap. Reduced adaptation: Fresh's prompt toolbar (`setPromptToolbar` Case toggle +
+`toggleOverlayToolbarWidget`, clickable/Space) has no gvim prompt surface, so the case state is
+shown in the prompt's footer/hint line and flipped by Fresh's second palette command **Git Grep:
+Toggle Case Sensitive** (it refreshes an open prompt, otherwise applies to the next search); Fresh
+binds no chord, so neither does the port. No preview band: Fresh disables the Finder preview because
+its floating overlay draws its own, and gvim has no overlay preview band, so passing rows open no
+preview tabs; a superseded query's results are discarded by the picker generation guard instead of
+killing the git process.
+
+**git_explorer** (reduced Fresh port): shows each tracked file's git status in the file explorer —
+`M`/`A`/`D`/`R`/`C`/`U` badges with Fresh's priorities (with `!` for conflicts; a staged modification
+uses the added colour) and, with `color_names`, colors changed names and their ancestor directories —
+from `git status --porcelain -z` in the workspace root's repository. It refreshes on ready,
+after-file-open/save/revert, `focus_gained` and config changes plus a debounced watcher of the
+repository's git directory (so commits/checkouts elsewhere update the badges), and clears itself
+outside a repository. It drives the
+explorer through `gvim.explorer.set_decorations/clear_decorations` and `set_slots/clear_slots` (the
+host surface mirrors Fresh's setFileExplorerDecorations/Slots with per-plugin namespaces, priority
+then namespace resolution, absolute/root-relative path normalization and owner cleanup); colour keys
+reuse the theme's `ui.file_status_*_fg` keys, so a theme can recolour the badges. Reductions: only the
+workspace-root repository is decorated (no nested sub-repo discovery), no hover tooltips, symbols
+only (no arbitrary icons), and a setting change applies on the next refresh. It is opt-in: enabling
+it costs about 1.5 MiB of idle heap, which the default set cannot afford.
+
+**env_manager** (reduced Fresh port): detects and activates the project's environment — virtualenv,
+direnv, mise, pipenv, poetry — so language servers, formatters, terminals, plugin processes and
+shell commands inherit it. Detection and the activation trust gate are host features
+(`env.detectors`, `gvim.env`): Fresh's six detectors are the bundled list, first match wins, a bare
+`.venv` without an interpreter does not count, and nothing is executed until activation in a trusted
+workspace. The plugin auto-activates path-only environments silently once the workspace is trusted,
+asks the core trust dialog for others and re-runs activation on `trust_changed`; it shows an `env`
+status-bar pill (`system` / `<name>` / `<name> ✓` / `<name> (locked)`) and offers**Env: Activate
+Detected Environment**, **Env: Reload Environment**, **Env: Use System** and **Env: Show Environment
+Status**. It is opt-in (memory, and activating a repository's shell snippet is a trust decision).
+Reductions: no widget-panel UI yet, no file watcher (use Env: Reload), no devcontainer deferral or
+authority handling, no automatic shell-environment activation (explicit command), one local
+environment, and no persisted recipe. It declares no plugin settings; detection is configured
+through the user config `env.detectors`.
+
 **The Markdown outline is not a plugin in gvim.** Fresh ships the Contents section as the bundled
 plugin `markdown_toc.ts`; gvim builds it into the TUI as the sidebar section under the File Explorer
 (`docs/sidebar.md`), so there is no Lua plugin to load, and the palette rows **Markdown: Show
@@ -287,15 +338,18 @@ Measured with the plugin set of this release (macOS arm64, Go 1.27, pure heap in
 
 | | Heap |
 |---|---|
-| the editor session without plugins | 1.86 MiB |
-| the same session with the 9 default-enabled plugins loaded and idle | about 8.9 MiB |
-| **cost of the default set** | **about 7.0 MiB** (gate: 8 MiB) |
+| the editor session without plugins | 2.05 MiB |
+| the same session with the 9 default-enabled plugins loaded and idle | about 9.3 MiB |
+| **cost of the default set** | **about 7.25 MiB** (gate: 8 MiB) |
 
-The gate passes with the nine default-enabled plugins (about 1 MiB of headroom). Round 9 added host
+The gate passes with the nine default-enabled plugins (about 0.8 MiB of headroom). Round 9 added host
 API surface and four new ports; the ten-plugin set first measured 8.07–8.10 MiB, over the gate, so
-`merge_conflict` (about 1.35 MiB) ships `default_enabled: false` as well. The shared Finder library is
-not part of the idle cost: `diagnostics_panel` requires `gvim.finder` lazily on its first build
-(requiring it at load measured 8.7 MiB with the round-8 set, over the gate).
+`merge_conflict` (about 1.35 MiB) ships `default_enabled: false` as well, and the round-10 ports are
+opt-in too (the default set is unchanged; round-10 host growth moved the cost from 6.97 to about 7.25
+MiB; `env_manager` and `git_explorer` would each cost about 1.5 MiB if enabled). The shared Finder
+library is not part of the idle cost: `diagnostics_panel` requires
+`gvim.finder` lazily on its first build (requiring it at load measured 8.7 MiB with the round-8 set,
+over the gate).
 The opt-in plugins stay off for the heap budget: a trial measurement with `git_log` loaded too read
 about 8.7 MiB of idle heap (over the gate; that configuration never passed), `live_diff` is opt-in
 like Fresh's, and `compare_files` ships off as well. Per plugin, in

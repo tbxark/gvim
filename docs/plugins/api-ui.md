@@ -397,3 +397,26 @@ testing, reveal/scrolling and the scrollbar. compose_only items are filtered per
 gated by `gvim.has("decor_virtual_paint")`: the shipped TUI reports true, an older host
 false, and plugins fall back to the anchored kinds when it is false.
 
+## File explorer decorations and slots
+
+```text
+gvim.explorer.set_decorations(ns, {{path=, symbol=, color=, priority=}, ...}) -> true | nil, err
+gvim.explorer.clear_decorations(ns) -> true
+gvim.explorer.set_slots(ns, {{path=, leading={text=,color=,min_width=}?, suppress_leading=?,
+  trailing={text=,color=}?, suppress_trailing=?, name_color=?, suppress_name_color=?,
+  priority=}, ...}) -> true | nil, err
+gvim.explorer.clear_slots(ns) -> true
+```
+
+A decoration gives an explorer row a trailing symbol and colour; a slot entry overrides the
+row's leading slot, trailing slot and filename colour. Namespaces are isolated per plugin, so
+two plugins may safely reuse a label. `path` is absolute or relative to the workspace root; a
+path outside the root is ignored. `color` is an RGB value, a theme key (`"ui.file_status_added_fg"`
+and the other file-status keys match Fresh's names) or a semantic name; an unset colour keeps
+the row's own. Slots: unset fields fall back to the decoration/built-in icon and the native git
+mark; `suppress_leading`/`suppress_trailing` remove that slot explicitly (the native git mark
+included), and `name_color`/`suppress_name_color` colour or clear the filename (compact-chain
+segments included). Resolution per row: highest priority wins, ties go to the alphabetically
+earlier namespace, then to the earlier call. Caps: 10 000 entries per namespace and 64
+namespaces per plugin; a symbol is at most 8 bytes, a slot text 32 bytes, a leading slot
+reserves at most 8 cells. Unloading or reloading the plugin clears its namespaces.

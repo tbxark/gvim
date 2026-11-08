@@ -3,6 +3,7 @@ package dock
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -13,9 +14,14 @@ import (
 )
 
 // OpenPathMsg asks the root to open path, for a Ctrl+Click on a path in the
-// terminal output. The dock resolves and checks the path; the root opens it
-// through the same path the explorer and LSP jumps use.
-type OpenPathMsg struct{ Path string }
+// terminal output. Line and Col are the 1-based position a trailing :line[:col]
+// on the link asked for, zero when it had none. The dock resolves and checks the
+// path; the root opens it through the same path the explorer and LSP jumps use.
+type OpenPathMsg struct {
+	Path string
+	Line int
+	Col  int
+}
 
 // linkMissMsg reports a Ctrl+Click whose token names no existing file.
 type linkMissMsg struct{ token string }
@@ -52,22 +58,45 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 		mo = tea.Mouse(wheel)
 	}
 	// The title row is the dock's but not the shell's: a press there only takes
-	// the focus.
-	if mo.Y == l.DockY {
+	// the focus. Rows outside the dock are not ours unless a selection drag is
+	// held: then the motion still extends it and the release ends it.
+	selecting := p.sel.pending || p.sel.dragging
+	bodyTop, bodyBottom := l.DockY+1, l.DockY+l.DockH-1
+	if mo.Y == l.DockY && !selecting {
 		if isPress {
 			p.focusDock()
 		}
 		return nil, true
 	}
-	if mo.Y < l.DockY || mo.Y > l.DockY+l.DockH-1 {
+	if (mo.Y < l.DockY || mo.Y > bodyBottom) && !selecting {
 		return nil, false
 	}
-	row := mo.Y - (l.DockY + 1)
+	row := min(max(mo.Y-bodyTop, 0), max(p.bodyRows(), 1)-1)
+	// A drag that leaves the body band scrolls the view: -1 above, +1 below.
+	dir := 0
+	if mo.Y < bodyTop {
+		dir = -1
+	} else if mo.Y > bodyBottom {
+		dir = 1
+	}
 	if isPress {
 		p.focusDock()
 	}
 	if isWheel {
+		p.ClearHover()
 		return p.wheelMouse(mo, row, wheel.Button), true
+	}
+
+	// A buttonless Ctrl+motion over the output is the link hover: it underlines
+	// the token under the pointer, with no IO. Any other mouse event clears it.
+	if isMotion && mo.Button == tea.MouseNone {
+		if mo.Mod&tea.ModCtrl != 0 && !p.altScreen() && (p.scroll.on || !p.forwardsMouse(terminal.MouseMotion, mo)) {
+			p.updateHover(mo, row)
+			return nil, true
+		}
+		p.ClearHover()
+	} else if !isMotion {
+		p.ClearHover()
 	}
 
 	if p.scroll.on {
@@ -78,7 +107,7 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 		if isPress && mo.Button == tea.MouseLeft && mo.Mod&tea.ModCtrl != 0 && p.term != nil {
 			return p.linkCmd(mo.X, row), true
 		}
-		return p.scrollMouse(mo, row, count, l, isPress, isMotion, isRelease), true
+		return p.scrollMouse(mo, row, dir, count, l, isPress, isMotion, isRelease), true
 	}
 
 	// Ctrl+Click opens a path from the output; it is off on the alternate screen,
@@ -104,7 +133,7 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 		return nil, true
 	}
 	if isMotion && (p.sel.pending || p.sel.dragging) {
-		return p.extendSelection(row, mo.X, l)
+		return p.dragSelectionMove(row, mo.X, dir, l), true
 	}
 	if isRelease && mo.Button == tea.MouseLeft && (p.sel.pending || p.sel.dragging) {
 		p.endSelectionPress()
@@ -137,7 +166,7 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
 // a selection (a click without a drag leaves none), a drag extends it, a double
 // or triple click selects the word or the row, and a release ends the drag. The
 // view never forwards the mouse to the shell.
-func (p *Panel) scrollMouse(mo tea.Mouse, row, count int, l frame.Layout, isPress, isMotion, isRelease bool) tea.Cmd {
+func (p *Panel) scrollMouse(mo tea.Mouse, row, dir, count int, l frame.Layout, isPress, isMotion, isRelease bool) tea.Cmd {
 	switch {
 	case isPress && mo.Button == tea.MouseLeft:
 		if count >= 2 {
@@ -148,8 +177,7 @@ func (p *Panel) scrollMouse(mo tea.Mouse, row, count int, l frame.Layout, isPres
 		p.beginSelectionPress(row, mo.X, count, mo.Mod&tea.ModShift != 0)
 		return nil
 	case isMotion && mo.Button == tea.MouseLeft && (p.sel.pending || p.sel.dragging):
-		cmd, _ := p.extendSelection(row, mo.X, l)
-		return cmd
+		return p.dragSelectionMove(row, mo.X, dir, l)
 	case isRelease && mo.Button == tea.MouseLeft:
 		p.endSelectionPress()
 		return nil
@@ -300,8 +328,8 @@ func (p *Panel) linkCmd(x, row int) tea.Cmd {
 		if t != nil {
 			cwd = t.WorkingDirectory()
 		}
-		if path, ok := resolveLink(token, cwd, rootDir, stat); ok {
-			return OpenPathMsg{Path: path}
+		if path, line, col, ok := resolveLinkTarget(token, cwd, rootDir, stat); ok {
+			return OpenPathMsg{Path: path, Line: line, Col: col}
 		}
 		return linkMissMsg{token: token}
 	}
@@ -346,21 +374,29 @@ func linkRune(r rune) bool {
 // sentence trimmed. The token must look like a path: it holds a separator, a dot
 // or a tilde. ok is false when there is no such token under col.
 func tokenAt(text []rune, col int) (string, bool) {
+	token, _, _, ok := linkTokenAt(text, col)
+	return token, ok
+}
+
+// linkTokenAt is tokenAt that also returns the token's rune span [start, end) in
+// text, after the trailing punctuation is trimmed, for the hover underline.
+func linkTokenAt(text []rune, col int) (token string, start, end int, ok bool) {
 	if col < 0 || col >= len(text) || !linkRune(text[col]) {
-		return "", false
+		return "", 0, 0, false
 	}
-	start, end := col, col+1
+	start, end = col, col+1
 	for start > 0 && linkRune(text[start-1]) {
 		start--
 	}
 	for end < len(text) && linkRune(text[end]) {
 		end++
 	}
-	token := strings.TrimRight(string(text[start:end]), ".,;:!?")
+	token = strings.TrimRight(string(text[start:end]), ".,;:!?")
 	if token == "" || !plausibleLink(token) {
-		return "", false
+		return "", 0, 0, false
 	}
-	return token, true
+	end = start + len([]rune(token))
+	return token, start, end, true
 }
 
 // plausibleLink reports whether token looks like a path rather than a word: it
@@ -401,4 +437,39 @@ func resolveLink(token, termCwd, rootDir string, stat func(string) bool) (string
 		}
 	}
 	return "", false
+}
+
+// resolveLinkTarget resolves a token that may end in :line or :line:col. A path
+// with a suffix is tried first, with the position returned; the whole token is
+// tried as a plain path next, so a file whose name really holds a colon still
+// opens.
+func resolveLinkTarget(token, termCwd, rootDir string, stat func(string) bool) (path string, line, col int, ok bool) {
+	if stripped, ln, cl, has := splitLinkTarget(token); has {
+		if path, ok := resolveLink(stripped, termCwd, rootDir, stat); ok {
+			return path, ln, cl, true
+		}
+	}
+	path, ok = resolveLink(token, termCwd, rootDir, stat)
+	return path, 0, 0, ok
+}
+
+// splitLinkTarget splits a trailing :line or :line:col from token. The numbers
+// are 1-based and must be positive; col is 0 when the token named no column. ok
+// is false when there is no valid suffix, so the caller resolves the token whole.
+func splitLinkTarget(token string) (path string, line, col int, ok bool) {
+	idx := strings.LastIndex(token, ":")
+	if idx <= 0 || idx == len(token)-1 {
+		return "", 0, 0, false
+	}
+	n, err := strconv.Atoi(token[idx+1:])
+	if err != nil || n < 1 {
+		return "", 0, 0, false
+	}
+	head := token[:idx]
+	if idx2 := strings.LastIndex(head, ":"); idx2 > 0 && idx2 < len(head)-1 {
+		if m, err := strconv.Atoi(head[idx2+1:]); err == nil && m >= 1 {
+			return head[:idx2], m, n, true
+		}
+	}
+	return head, n, 0, true
 }

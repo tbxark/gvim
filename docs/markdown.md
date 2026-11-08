@@ -58,7 +58,15 @@ reader's delimiters rather than moving the parser:
   width;
 - **fenced code**: the block is framed (see below), and its body is never read as
   Markdown: the code keeps the syntax colours of the language the fence names;
-- **tables**: the rows are box-drawn (see below).
+- **tables**: the rows are box-drawn (see below);
+- **task-list boxes**: a list item's "[ ]" / "[x]" box becomes a checkbox glyph
+  (☐ / ☑) with one blank after it, so the item's text keeps its place; the raw box
+  shows under the caret like the other conceals;
+- **images**: an image's leading "!" is part of its opening marker, so
+  "![alt](url)" composes to its alt text (the page view has no image renderer);
+  the raw syntax shows under the caret;
+- **inline HTML** is left literal: the page view has no cell renderer for it, and
+  hiding it would lose visible text.
 
 The hiding is Fresh's `unless-cursor-in` activation scope: the caret's line is
 shown raw (delimiters visible), and so is the line above a caret at the start of
@@ -80,6 +88,13 @@ are coloured as in the source. Empty body lines still get both rails. The
 classification is syntax.MarkdownFences, a separate pass over the lines that
 reuses the tokenizer's fence rules (mdFence, closesFence); no parser is moved, and
 the table is memoized in the layout memo by text version.
+
+A fence inside a blockquote is framed at the container: the classifier records
+the quote depth of its lines, the compose and the continuation rows draw the
+container's bars first and the frame at the block's own indent, and the frame
+measure shrinks by the bars. A list-indented fence keeps its indent. A quoted
+container whose lines do not all carry the quote markers is not attributed: the
+unquoted lines fall back literal and keep their own classification.
 
 Activation follows the rest of the compose: the caret on an open or close
 delimiter line (or at the start of the line below it) reveals the raw delimiter,
@@ -181,7 +196,12 @@ see one document; and clicking the preview focuses it, so caret motion, mouse hi
 and selection in the composed pane work through the compose mapping. The scroll
 sync is line-anchored and compare-style: after every update the unfocused leaf
 takes the focused document's top line (the preview starts at that line; the source
-keeps its own wrapped row). Exact row/byte anchors across the two different
+keeps its own wrapped row). That line anchor is the documented approximation: the
+two panes wrap differently, so a byte-exact row anchor would need the compare
+anchoring machinery and is deferred; the line anchor keeps the same source line
+at the top of both panes in all but the last partial rows. One dual view exists at
+a time: asking again is a no-op, and a tab change, close_split or compare view ends
+it (the validity check). Exact row/byte anchors across the two different
 wraps, a native Markdown menu row (the menu table is generated from Fresh and its
 plugin contributions are not hand-edited), persisting the split, more than one
 dual view of a document, and the page-view width/session persistence remain
@@ -192,7 +212,12 @@ the native palette therefore lists 229 commands.
 
 ## Headings
 
-An ATX heading hides its leading hash run and the blanks after it, keeping the
+A setext heading (a paragraph over a line of "=" or "-") keeps the tokenizer's
+heading styling on the text line and conceals the underline line, which is its
+marker; the caret on the underline reveals it. The tokenizer's heading spans are
+the authority; without them the line above decides, so a thematic break after a
+blank line stays a rule and a rule above another rule is not read as an
+underline. An ATX heading hides its leading hash run and the blanks after it, keeping the
 existing heading kind (bold keyword styling) for the text; the caret line and the
 line above a column-0 caret reveal the markers like the other compose conceals.
 A line with a hash run that does not end in a blank (or the line end) is not a
@@ -258,31 +283,34 @@ buffer group either); it is documented with the other dual residuals below.
 
 ## Deferred
 
-- fence body lines whose continuation rows would need their own rails (the first
-  visual row is framed; a long body line wraps without rails on its continuation
-  rows), and fences nested inside blockquotes or lists (left literal);
-- task-list glyph conceal (the box stays visible as text), image conceal and
-  inline HTML conceal;
+- fenced blocks inside blockquotes are framed at the container bars, list-indented
+  fences at their indent, and a container whose lines disagree falls back literal
+  per line; a fence run inside a fence's body stays literal code;
+- composed plugin-overlay ordering: the compose renders first and the plugin
+  conceal/virtual-row transform runs after it (host pipeline); a mapped ordering
+  test is deferred with the plugin tier-1c remainder;
 - session persistence of a dual split (the editor view per file is persisted,
   see below; the dual view itself is session-only, as Fresh does not persist a
   buffer group);
 - per-split view mode: gvim keeps one view mode per document, Fresh per split; the
   dual view adds one derived per-pane override (source vs preview) but does not
   make the mode a free per-pane setting;
-- dual view: exact row/byte scroll anchors across the two wraps, a native Markdown
-  menu row (the generated menu table is not hand-edited), persisting the split,
-  and more than one dual view of a document; the dual view is offered for a
-  single-pane Markdown document only;
+- dual view: exact row/byte scroll anchors beyond the documented line anchor, a
+  native Markdown menu row (the generated menu table is not hand-edited),
+  persisting the split, and more than one dual view of a document (the policy is
+  one dual view at a time; the dual view is offered for a single-pane Markdown
+  document only);
 - mapped occurrences, rulers and indent guides in the page view: they stay
   deliberately off there (the page view owns its own visual language; a test
   asserts rulers and guides do not paint). Whitespace marks are per-cell and
   still show on the composed text. Composed plugin overlays order after the
   compose (plugin pipeline) and stay out of normal panes; a mapped ordering test
   is deferred with the plugin tier-1c remainder;
-- heading polish beyond the marker conceal and the scrollbar marks (setext
-  heading text styling).
-- horizontal scroll inside a page wider than the viewport (the measure clamps to
-  the text area instead).
+
+- horizontal page scrolling is not added as a feature: the measure clamps to the
+  pane's text width (Fresh's effectiveComposeWidth clamps to the viewport too), so
+  a configured width wider than the pane behaves like the automatic width and the
+  text wraps at the pane — documented decision, tested.
 
 ## Tests
 
@@ -307,7 +335,17 @@ caret, escaped pipes inside cells, and the widths keyed by measure),
 `pageview_heading_test.go` (heading scrollbar marks, memo invalidation) and
 `pageview_table_border_test.go` (borders in order around the header, separator
 and body rows of the whole frame), `compose_fence_wrap_test.go` (continuation
-rails, the caret line keeping the whole body, a quoted fence staying literal),
+rails, the caret line keeping the whole body, a quoted fence framed at the
+container and its per-line fallback, a nested fence marker staying literal code,
+`compose_conceal_test.go` (task-list glyphs + caret reveal, image alt text +
+reveal, inline HTML literal, setext underline conceal/reveal and the
+thematic-break distinction, `pageview_clamp_test.go` (a page wider than the pane
+is clamped, with no margin and no horizontal scroll), `internal/tui/dual_test.go`
+additions (one-dual-at-a-time policy, dual ends on a tab change), and the TUI
+plugin-sidebar state tests `internal/tui/plugin_sidebar_state_test.go` (order/
+rows/folds round trip, bounds, applied when sections mount) with
+`session/sidebar_test.go` and `internal/restore/sidebar_test.go` covering the
+session fields,
 `session/pageview_test.go` (old-session migration, omitted fields) and
 `internal/restore/session_pageview_test.go` (save/restore round trip of the
 page view and width, optional fields for a plain file),

@@ -94,6 +94,7 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 | decorations | 20 000 per (plugin, namespace, buffer) and 50 000 per plugin; at most 256 drawn per kind and line; tier-1c items: 64 virtual rows and 64 soft breaks per line, 256 conceal spans per line, 8 text overlays per virtual line |
 | split labels and window state | split label 64 bytes; window state 256 keys per (plugin, buffer), key 128 bytes, string value 4 KiB |
 | line targets | 10 000 per buffer; path 4096 bytes; split label 64 bytes |
+| file explorer decorations/slots | 10 000 entries per namespace, 64 namespaces per plugin; symbol 8 bytes, slot text 32 bytes, leading slot at most 8 cells |
 | virtual buffers | 64 per plugin, 256 in all; 64 MiB of text per plugin, 256 MiB in all |
 | queued `gvim.emit` events | 1000; payload 64 KiB |
 | `gvim.state` | 1 MiB of keys and encoded values per plugin |

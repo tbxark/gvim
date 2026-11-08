@@ -7,20 +7,6 @@ import (
 	"strings"
 )
 
-// envMarkers are the environment-file markers Fresh's built-in env detectors
-// use. The presence of one, as a file or as a directory (a virtualenv is a
-// directory), means a project environment may be activated in the folder.
-var envMarkers = []string{
-	".venv",
-	"venv",
-	".envrc",
-	"mise.toml",
-	".mise.toml",
-	".tool-versions",
-	"Pipfile",
-	"poetry.lock",
-}
-
 // projectMarkers are the manifests whose language servers run project code when
 // they load: analyzers, build scripts, proc-macros.
 var projectMarkers = []string{
@@ -54,9 +40,10 @@ func ExecutableContentMarkers(root string) []string {
 			found = append(found, name)
 		}
 	}
-	// Env files and directories. A virtualenv is a directory, so any entry
+	// Env files and directories, from the single built-in detector list the
+	// activation detection also uses. A virtualenv is a directory, so any entry
 	// counts here, as it does in Fresh's marker scan.
-	for _, name := range envMarkers {
+	for _, name := range EnvMarkers() {
 		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
 			add(name)
 		}

@@ -22,8 +22,13 @@ func (p *mdInline) link(i, hi int, base Kind, flush func(int), seg *int) (int, b
 			return 0, false
 		}
 		// The page view shows the link text: the opening bracket and the
-		// "](" ... ")" tail (destination included) are its delimiters.
-		p.mark(i, i+1, MarkerLink)
+		// "](" ... ")" tail (destination included) are its delimiters. An image's
+		// leading "!" is part of the opening marker, so the alt text remains.
+		if i > 0 && s[i-1] == '!' && (i < 2 || s[i-2] != '\\') {
+			p.mark(i-1, i+1, MarkerLink)
+		} else {
+			p.mark(i, i+1, MarkerLink)
+		}
 		p.mark(closeB, closeP+1, MarkerLink)
 		flush(i)
 		p.emit(i, i+1, base)

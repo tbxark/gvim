@@ -86,6 +86,9 @@ type ServerConfig struct {
 	// AutoStart says whether the server starts when a document of its language opens.
 	// A manual start (Start/Restart LSP Server) starts it anyway.
 	AutoStart bool
+	// Limits is the server's process_limits, applied as far as the platform can when
+	// it starts; the client records what happened in its limits note.
+	Limits lsp.ProcessLimits
 }
 
 // CommandLine returns the program and arguments the server runs with.
@@ -149,6 +152,9 @@ type ServerStatus struct {
 	State     ServerState
 	// Error is why the last start failed, when State is ServerError.
 	Error string
+	// Limits is what happened to the configured process_limits of the running server:
+	// the methods that applied, or why nothing could, from the client's limits note.
+	Limits string
 }
 
 // Handle is one running language server. It is safe for concurrent use: the
@@ -254,6 +260,9 @@ type Manager struct {
 	applyEdit func(language string, params protocol.ApplyWorkspaceEditParams) bool
 	// timeout bounds each step. NewManager sets it to managerTimeout.
 	timeout time.Duration
+	// spawnEnv, when set, is the active project environment's set-only overlay for
+	// server processes (see SetSpawnEnv).
+	spawnEnv func() []string
 
 	// sendMu orders the calls that change server state: Open, Change and Close. It
 	// is held only across the write of each message, so the didOpen, didChange and
@@ -309,6 +318,14 @@ func NewManager(root string, servers map[string][]ServerConfig, universal []Serv
 		stopped:   make(map[string]bool),
 		failures:  make(map[string]string),
 	}
+}
+
+// SetSpawnEnv installs the active project environment's set-only overlay. It is
+// read at every server launch, so an activation applies to the next start.
+func (m *Manager) SetSpawnEnv(overlay func() []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.spawnEnv = overlay
 }
 
 // SetApplyEdit installs the handler for a server's workspace/applyEdit request.
@@ -542,6 +559,9 @@ func (m *Manager) statusLocked(language string, cfg ServerConfig) ServerStatus {
 	switch {
 	case m.handleForKeyLocked(key) != nil:
 		st.State = ServerRunning
+		if h := m.handleForKeyLocked(key); h != nil && h.client != nil {
+			st.Limits = h.client.LimitsNote()
+		}
 	case m.starting[key] != nil:
 		st.State = ServerStarting
 	case m.failures[key] != "":
@@ -796,6 +816,36 @@ func (m *Manager) startServer(key, language string, cfg ServerConfig, universal 
 	return h, err
 }
 
+// spawnEnvList appends the active environment overlay to a server's configured
+// environment; a configured variable of the same name wins over the overlay. The
+// overlay is set-only (activation unsets are not represented), matching the
+// shell, terminal and plugin process paths.
+func (m *Manager) spawnEnvList(configured []string) []string {
+	m.mu.Lock()
+	overlay := m.spawnEnv
+	m.mu.Unlock()
+	if overlay == nil {
+		return configured
+	}
+	extra := overlay()
+	if len(extra) == 0 {
+		return configured
+	}
+	seen := make(map[string]bool, len(configured))
+	for _, entry := range configured {
+		name, _, _ := strings.Cut(entry, "=")
+		seen[name] = true
+	}
+	out := append([]string(nil), configured...)
+	for _, entry := range extra {
+		name, _, _ := strings.Cut(entry, "=")
+		if !seen[name] {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
 // launch starts the process for cfg and runs the initialize handshake. A server
 // that fails a step is closed.
 func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool) (*Handle, error) {
@@ -804,9 +854,10 @@ func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool)
 	c, err := m.start(ctx, lsp.Config{
 		Command:               command,
 		RootURI:               m.rootURI,
-		Env:                   envList(cfg.Env),
+		Env:                   m.spawnEnvList(envList(cfg.Env)),
 		InitializationOptions: cfg.InitializationOptions,
 		ApplyEdit:             m.applyEditHandler(language),
+		Limits:                cfg.Limits,
 	})
 	cancel()
 	if err != nil {

@@ -1,0 +1,7 @@
+{
+  "name": "git_grep",
+  "version": "1.0.0",
+  "description": "Live git grep search: matches of the typed query in git-tracked files, case toggle, jump to file:line",
+  "api": 2,
+  "default_enabled": false
+}

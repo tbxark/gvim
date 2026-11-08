@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -39,7 +40,26 @@ type selState struct {
 	pressShift         bool
 	// dragging is true while the press that started the selection is held.
 	dragging bool
+	// unit is 2 when a double click selected a word and 3 or more when a triple
+	// click selected a whole row; a drag then extends by words or rows instead
+	// of by characters. unitStart and unitEnd are the clicked unit's bounds, and
+	// a drag keeps the whole unit selected whichever way it goes.
+	unit               int
+	unitStart, unitEnd selPos
+	// dir is the direction a drag that left the body band scrolls: -1 above,
+	// +1 below, 0 inside. autoRunning says the repeat tick runs for dragSeq.
+	dir         int
+	autoRunning bool
 }
+
+// dragScrollInterval is how often a drag held above or below the body band
+// scrolls the scrollback one row: about 12 rows a second, bounded and without
+// acceleration.
+const dragScrollInterval = 80 * time.Millisecond
+
+// dragScrollMsg is one repeat tick of a drag's auto-scroll. seq invalidates the
+// ticks of an older drag.
+type dragScrollMsg struct{ seq int }
 
 // Selection reports whether a text selection is active.
 func (p *Panel) Selection() bool { return p.sel.active }
@@ -73,14 +93,19 @@ func (p *Panel) selectionRange(abs int) (start, end int, ok bool) {
 	}
 }
 
-// clearSelection drops the selection and any pending press.
-func (p *Panel) clearSelection() { p.sel = selState{} }
+// clearSelection drops the selection and any pending press, and stops the drag
+// auto-scroll.
+func (p *Panel) clearSelection() {
+	p.sel = selState{}
+	p.dragSeq++
+}
 
 // beginSelectionPress records a left press that may become a selection. It is
 // called for the presses the dock handles itself: the scrollback view, and the
 // live grid where no program owns the mouse, plus Shift presses (which bypass
 // forwarding).
 func (p *Panel) beginSelectionPress(row, col, count int, shift bool) {
+	p.stopAutoScroll()
 	p.sel = selState{pending: true, pressRow: row, pressCol: col, pressCount: count, pressShift: shift}
 }
 
@@ -110,19 +135,161 @@ func (p *Panel) extendSelection(row, col int, l frame.Layout) (tea.Cmd, bool) {
 		p.sel = selState{pending: true, pressRow: pressRow, pressCol: pressCol, pressCount: pressCount, pressShift: pressShift}
 	}
 	if !p.sel.dragging {
+		p.sel.dragging = true
+		p.sel.pending = false
+		if p.sel.unit >= 2 {
+			// A word or row selection keeps its clicked unit selected and extends
+			// by whole units from there.
+			abs := p.scroll.top + row
+			p.extendUnitSelection(abs, col)
+			return cmd, true
+		}
 		// The anchor is where the press was, mapped into the window that just
 		// opened at the newest rows.
 		anchorRow := p.scroll.top + p.sel.pressRow
 		anchorCol := min(max(p.sel.pressCol, 0), cols-1)
 		p.sel.anchor = selPos{row: anchorRow, col: anchorCol}
-		p.sel.dragging = true
 	}
 	abs := p.scroll.top + row
-	p.sel.focus = selPos{row: abs, col: col}
+	if p.sel.unit >= 2 {
+		p.extendUnitSelection(abs, col)
+	} else {
+		p.sel.focus = selPos{row: abs, col: col}
+	}
 	p.sel.active = true
 	p.sel.pending = false
 	return cmd, true
 }
+
+// extendUnitSelection extends a word (unit 2) or row (unit 3) selection to the
+// unit under (abs, col), keeping the clicked unit whole: the anchor and focus
+// become the range's two ends, so a drag left covers the clicked word too.
+func (p *Panel) extendUnitSelection(abs, col int) {
+	cells, ok := p.rowCells(abs)
+	if !ok {
+		p.sel.focus = selPos{row: abs, col: col}
+		return
+	}
+	text := cellsText(cells)
+	start, end := 0, len(text)
+	if p.sel.unit == 2 {
+		start, end = wordAt(text, min(max(col, 0), max(len(text)-1, 0)))
+	}
+	unitStart, unitEnd := p.sel.unitStart, p.sel.unitEnd
+	before := abs < unitStart.row || (abs == unitStart.row && start < unitStart.col)
+	after := abs > unitEnd.row || (abs == unitEnd.row && end > unitEnd.col)
+	switch {
+	case before:
+		p.sel.anchor = selPos{row: abs, col: start}
+		p.sel.focus = unitEnd
+	case after:
+		p.sel.anchor = unitStart
+		p.sel.focus = selPos{row: abs, col: end}
+	default:
+		p.sel.anchor = unitStart
+		p.sel.focus = unitEnd
+	}
+	p.sel.active = true
+}
+
+// dragSelectionMove extends a selection for a drag motion that may be outside
+// the visible body rows and manages the bounded auto-scroll repeat. dir is -1
+// above the band, +1 below it and 0 inside.
+func (p *Panel) dragSelectionMove(row, col, dir int, l frame.Layout) tea.Cmd {
+	cmd, _ := p.extendSelection(row, col, l)
+	if !p.scroll.on || !p.sel.dragging {
+		p.stopAutoScroll()
+		return cmd
+	}
+	switch {
+	case dir == 0:
+		p.stopAutoScroll()
+		return cmd
+	case p.sel.dir != dir || !p.sel.autoRunning:
+		p.sel.dir = dir
+		return tea.Batch(cmd, p.startAutoScroll())
+	}
+	return cmd
+}
+
+// startAutoScroll starts the retained auto-scroll tick for the drag.
+func (p *Panel) startAutoScroll() tea.Cmd {
+	if p.sel.autoRunning {
+		return nil
+	}
+	p.sel.autoRunning = true
+	p.dragSeq++
+	seq := p.dragSeq
+	return tea.Tick(dragScrollInterval, func(time.Time) tea.Msg { return dragScrollMsg{seq: seq} })
+}
+
+// stopAutoScroll ends the repeat, if it runs.
+func (p *Panel) stopAutoScroll() {
+	p.sel.autoRunning = false
+	p.sel.dir = 0
+	p.dragSeq++
+}
+
+// dragScrollTick scrolls the scrollback one row and extends the selection to the
+// window edge. It stops at both ends of the output, when the drag ended and for
+// ticks of an older drag.
+func (p *Panel) dragScrollTick(msg dragScrollMsg) tea.Cmd {
+	if msg.seq != p.dragSeq || !p.sel.dragging || p.sel.dir == 0 || !p.scroll.on {
+		return nil
+	}
+	rows := max(p.bodyRows(), 1)
+	combined := p.combined()
+	if combined == 0 {
+		p.stopAutoScroll()
+		return nil
+	}
+	if p.sel.dir < 0 {
+		if p.scroll.top <= 0 {
+			p.stopAutoScroll()
+			return nil
+		}
+		p.scroll.top--
+	} else {
+		if p.scroll.top >= p.maxTop() {
+			p.stopAutoScroll()
+			return nil
+		}
+		p.scroll.top++
+	}
+	edge := p.scroll.top
+	if p.sel.dir > 0 {
+		edge = min(p.scroll.top+rows-1, combined-1)
+	}
+	p.scroll.selected = edge
+	if p.sel.unit >= 2 {
+		col := 0
+		if p.sel.dir > 0 {
+			if cells, ok := p.rowCells(edge); ok {
+				col = max(len(cellsText(cells))-1, 0)
+			}
+		}
+		p.extendUnitSelection(edge, col)
+	} else {
+		p.sel.focus = selPos{row: edge, col: p.sel.focus.col}
+		p.sel.active = true
+	}
+	return tea.Batch(p.afterScroll(), p.nextAutoScroll())
+}
+
+// nextAutoScroll schedules the next repeat tick of the running drag.
+func (p *Panel) nextAutoScroll() tea.Cmd {
+	if !p.sel.autoRunning {
+		return nil
+	}
+	seq := p.dragSeq
+	return tea.Tick(dragScrollInterval, func(time.Time) tea.Msg { return dragScrollMsg{seq: seq} })
+}
+
+// SelectionDragging reports whether a press that may extend a selection is held.
+// The root keeps forwarding motion and release messages to the dock while it is
+// set, even when the pointer leaves the dock's rows, so a drag keeps extending
+// past the dock's edges (see the auto-scroll in input.go).
+func (p *Panel) SelectionDragging() bool { return p.sel.pending || p.sel.dragging }
 
 // canDragSelect reports whether a drag on the live grid starts a selection.
 func (p *Panel) canDragSelect() bool {
@@ -132,9 +299,11 @@ func (p *Panel) canDragSelect() bool {
 // endSelectionPress ends the press that may have become a selection: a click
 // that never moved leaves no selection.
 func (p *Panel) endSelectionPress() {
-	if p.sel.pending {
+	p.stopAutoScroll()
+	if p.sel.pending && p.sel.unit < 2 {
 		p.sel = selState{}
 	}
+	p.sel.pending = false
 	p.sel.dragging = false
 }
 
@@ -154,13 +323,18 @@ func (p *Panel) selectUnit(row, col, count int) {
 	}
 	text := cellsText(cells)
 	start, end := 0, len(text)
+	unit := 3
 	if count == 2 {
-		start, end = wordAt(text, min(max(col, 0), len(text)))
+		unit = 2
+		start, end = wordAt(text, min(max(col, 0), max(len(text)-1, 0)))
 	}
+	p.stopAutoScroll()
+	startPos := selPos{row: abs, col: start}
+	endPos := selPos{row: abs, col: end}
 	p.sel = selState{
-		active: true,
-		anchor: selPos{row: abs, col: start},
-		focus:  selPos{row: abs, col: end},
+		active: true, anchor: startPos, focus: endPos,
+		pending: true, pressRow: row, pressCol: col, pressCount: count,
+		unit: unit, unitStart: startPos, unitEnd: endPos,
 	}
 }
 

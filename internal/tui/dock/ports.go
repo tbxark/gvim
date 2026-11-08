@@ -98,6 +98,11 @@ type Effects struct {
 	// live grid does not select text. A drag in scrollback, and a Shift+drag that
 	// bypasses forwarding, still select.
 	NoMouseDragSelects bool
+	// PassCtrlVWithoutText is terminal.pass_ctrl_v_without_text (default true): a
+	// Ctrl+V whose system clipboard can be read but holds no text goes to the
+	// shell as the key itself instead of pasting the last yank. False pastes the
+	// last yank instead; an unreadable clipboard pastes the last yank either way.
+	PassCtrlVWithoutText bool
 }
 
 // Ports are the terminal dock's ports. A nil Starter means the dock cannot start a
@@ -131,6 +136,10 @@ type Host struct {
 	// Stat reports whether path exists, for the Ctrl+Click links of the terminal
 	// output. Nil means os.Stat; tests replace it so they need no files.
 	Stat func(path string) bool
+	// LastYank is the last text the editor copied or cut, which a Ctrl+V pastes
+	// into the terminal when the system clipboard cannot provide text. Nil means
+	// there is none.
+	LastYank func() string
 }
 
 // SetEffects sets the terminal settings the dock applies itself.

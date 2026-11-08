@@ -1,6 +1,7 @@
 package lsphost
 
 import (
+	"context"
 	"slices"
 	"testing"
 
@@ -247,5 +248,41 @@ func TestInlayHintsCarryPlacementPartsAndPadding(t *testing.T) {
 	// A column past the line clamps to its length.
 	if got[3].Line != 2 || got[3].Col != 4 {
 		t.Fatalf("end hint = %+v, want line 2 col 4 (clamped)", got[3])
+	}
+}
+
+// TestPullSetCancelsSupersededAndAllPulls checks the in-flight workspace pulls: a new pull
+// cancels the ones already running, a returned pull is forgotten, and stopping the servers
+// cancels everything.
+func TestPullSetCancelsSupersededAndAllPulls(t *testing.T) {
+	var s pullSet
+	var calls []string
+	newCancel := func(name string) context.CancelFunc {
+		return func() { calls = append(calls, name) }
+	}
+
+	first := s.begin(newCancel("first"))
+	if len(calls) != 0 {
+		t.Fatalf("begin of the first pull cancelled %v", calls)
+	}
+	second := s.begin(newCancel("second"))
+	_ = second
+	if !slices.Equal(calls, []string{"first"}) {
+		t.Fatalf("begin of a newer pull cancelled %v, want the first", calls)
+	}
+	// The superseded pull returning is a no-op: its id is already gone.
+	s.end(first)
+	if len(calls) != 1 {
+		t.Fatalf("end of a superseded pull cancelled %v", calls)
+	}
+	s.cancelAll()
+	if !slices.Equal(calls, []string{"first", "second"}) {
+		t.Fatalf("cancelAll cancelled %v", calls)
+	}
+	// The set is ready for the next pull after a cancel.
+	third := s.begin(newCancel("third"))
+	s.end(third)
+	if len(calls) != 2 {
+		t.Fatalf("a pull after cancelAll cancelled %v", calls)
 	}
 }

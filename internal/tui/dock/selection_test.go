@@ -240,3 +240,164 @@ func TestBadRegexShowsANotice(t *testing.T) {
 		t.Fatalf("notice = %q, want a bad-pattern notice", notice)
 	}
 }
+
+// enterScrollbackView switches a live panel to the scrollback view and applies the
+// snapshot commands.
+func enterScrollbackView(t *testing.T, p *Panel) {
+	t.Helper()
+	cmd, _ := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	applyScroll(t, p, cmd)
+	if !p.Scrolling() {
+		t.Fatal("the scrollback view did not open")
+	}
+}
+
+// dragMotion sends a left-button drag motion to body area point y (a screen row; it
+// may be outside the dock) and returns the command.
+func dragMotion(p *Panel, x, y int) tea.Cmd {
+	cmd, _ := p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseLeft}), scrollLayout(), 1)
+	return cmd
+}
+
+// runTicks applies the auto-scroll commands until max ticks ran or the chain stops,
+// returning how many tick messages were applied.
+func runTicks(t *testing.T, p *Panel, cmd tea.Cmd, max int) int {
+	t.Helper()
+	ran := 0
+	for cmd != nil && ran < max {
+		msgs := messages(cmd)
+		cmd = nil
+		for _, msg := range msgs {
+			if _, ok := msg.(dragScrollMsg); !ok {
+				if next, taken := p.Update(msg); taken && next != nil {
+					cmd = next
+				}
+				continue
+			}
+			next, taken := p.Update(msg)
+			if !taken {
+				t.Fatalf("the dock did not take the auto-scroll tick")
+			}
+			ran++
+			cmd = next
+		}
+	}
+	return ran
+}
+
+func TestDragAboveTheBandAutoScrollsAndStopsonRelease(t *testing.T) {
+	t.Parallel()
+	p, _ := historyPanel(t, 40)
+	enterScrollbackView(t, p)
+	startTop := p.ScrollTop()
+	if startTop == 0 {
+		t.Fatal("setup: the view starts at the top")
+	}
+	// A press on the body, then a drag up into the title row: above the band.
+	p.Mouse(clickAt(2, 2, 0, tea.MouseLeft), scrollLayout(), 1)
+	cmd := dragMotion(p, 2, 0)
+	if !p.sel.dragging || p.sel.dir != -1 || !p.sel.autoRunning {
+		t.Fatalf("drag state = %+v, want an upward auto-scroll", p.sel)
+	}
+	ran := runTicks(t, p, cmd, 3)
+	if ran < 2 {
+		t.Fatalf("applied %d auto-scroll ticks, want the repeat to keep running", ran)
+	}
+	if got := p.ScrollTop(); got != startTop-ran {
+		t.Fatalf("scroll top = %d after %d ticks, want %d", got, ran, startTop-ran)
+	}
+	if p.sel.focus.row != p.ScrollTop() {
+		t.Fatalf("the selection focus row = %d, want the window's first row %d", p.sel.focus.row, p.ScrollTop())
+	}
+	// Releasing outside the dock ends the drag and stops the repeat.
+	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 2, Y: 0, Button: tea.MouseLeft}), scrollLayout(), 1)
+	if p.sel.dragging || p.sel.autoRunning {
+		t.Fatalf("after the release: dragging %v auto %v", p.sel.dragging, p.sel.autoRunning)
+	}
+	if next, taken := p.Update(dragScrollMsg{seq: p.dragSeq}); taken && next != nil {
+		t.Fatal("a tick still runs after the release")
+	}
+}
+
+func TestDragAutoScrollStopsAtTheTop(t *testing.T) {
+	t.Parallel()
+	p, _ := historyPanel(t, 40)
+	enterScrollbackView(t, p)
+	home, _ := p.ScrollKey(tea.Key{Code: tea.KeyHome})
+	applyScroll(t, p, home)
+	if p.ScrollTop() != 0 {
+		t.Fatal("setup: the view is not at the top")
+	}
+	p.Mouse(clickAt(2, 2, 0, tea.MouseLeft), scrollLayout(), 1)
+	cmd := dragMotion(p, 2, 0)
+	runTicks(t, p, cmd, 2)
+	if p.ScrollTop() != 0 {
+		t.Fatalf("scroll top = %d, want the top to hold", p.ScrollTop())
+	}
+	if p.sel.autoRunning {
+		t.Fatal("the repeat still runs at the top")
+	}
+}
+
+func TestDragBelowTheBandScrollsDownAndStopsAtTheBottom(t *testing.T) {
+	t.Parallel()
+	p, _ := historyPanel(t, 40)
+	enterScrollbackView(t, p)
+	home, _ := p.ScrollKey(tea.Key{Code: tea.KeyHome})
+	applyScroll(t, p, home)
+	// Start one row above the newest window so the repeat reaches the bottom.
+	p.scroll.top = max(p.maxTop()-1, 0)
+	p.Mouse(clickAt(2, 2, 0, tea.MouseLeft), scrollLayout(), 1)
+	cmd := dragMotion(p, 2, 10) // below the dock, which ends at row 4
+	if p.sel.dir != 1 {
+		t.Fatalf("drag direction = %d, want down", p.sel.dir)
+	}
+	ran := runTicks(t, p, cmd, 5)
+	if p.ScrollTop() != p.maxTop() {
+		t.Fatalf("scroll top = %d after %d ticks, want the bottom %d", p.ScrollTop(), ran, p.maxTop())
+	}
+	if p.sel.autoRunning {
+		t.Fatal("the repeat still runs at the bottom")
+	}
+	if got := p.sel.focus.row; got != min(p.ScrollTop()+max(p.bodyRows(), 1)-1, p.combined()-1) {
+		t.Fatalf("the focus row = %d, want the window's last row", got)
+	}
+}
+
+func TestWordSelectionDragExtendsByWholeWords(t *testing.T) {
+	t.Parallel()
+	p, _ := livePanel(t, "hello world")
+	enterScrollbackView(t, p)
+	// A double click on "world", then a drag left over "hello".
+	p.Mouse(clickAt(8, 1, 0, tea.MouseLeft), scrollLayout(), 2)
+	if got := copySelectionText(t, p); got != "world" {
+		t.Fatalf("double click selected %q, want world", got)
+	}
+	dragMotion(p, 2, 1)
+	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 2, Y: 1, Button: tea.MouseLeft}), scrollLayout(), 1)
+	if got := copySelectionText(t, p); got != "hello world" {
+		t.Fatalf("drag left copied %q, want both whole words", got)
+	}
+	// A double click on "hello", then a drag right over "world".
+	p.Mouse(clickAt(2, 1, 0, tea.MouseLeft), scrollLayout(), 2)
+	dragMotion(p, 8, 1)
+	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 8, Y: 1, Button: tea.MouseLeft}), scrollLayout(), 1)
+	if got := copySelectionText(t, p); got != "hello world" {
+		t.Fatalf("drag right copied %q, want both whole words", got)
+	}
+}
+
+func TestTripleClickSelectionDragExtendsWholeRows(t *testing.T) {
+	t.Parallel()
+	p, _ := livePanel(t, "hello world")
+	enterScrollbackView(t, p)
+	p.Mouse(clickAt(2, 1, 0, tea.MouseLeft), scrollLayout(), 3)
+	if got := copySelectionText(t, p); got != "hello world" {
+		t.Fatalf("triple click selected %q, want the row", got)
+	}
+	dragMotion(p, 2, 2) // down a row
+	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 2, Y: 2, Button: tea.MouseLeft}), scrollLayout(), 1)
+	if got := copySelectionText(t, p); got != "hello world\nrow-2" {
+		t.Fatalf("row drag copied %q, want both whole rows", got)
+	}
+}

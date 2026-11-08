@@ -17,6 +17,7 @@ import (
 	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/env"
 	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/icons"
@@ -45,6 +46,12 @@ type settingsService struct {
 	userFile string        // the user config file the page writes
 	theme    *themeCatalog // user/bundled theme resolution; nil means bundled only
 	rt       settingsRuntime
+	// themePreviews are the Settings theme row's colour chips, resolved at build
+	// and Reload; Snapshot only reads them (no file IO on the update loop).
+	themePreviews map[string][]tui.SettingsSwatch
+	// env is the workspace environment provider for the Environment rows and the
+	// read-only detectors page; nil when the app wired none.
+	env *env.Provider
 
 	// lastDiags are the diagnostics of the last reload, so a write-then-reload
 	// path can verify that the file it wrote still loads (the plugin toggle rolls
@@ -71,18 +78,20 @@ func newSettingsService(root string, opts Options, ed *editor.Editor, trusted fu
 	if trusted == nil {
 		trusted = func() bool { return true }
 	}
-	return &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user, theme: themeCat, rt: rt}
+	s := &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user, theme: themeCat, rt: rt}
+	s.themePreviews = s.buildThemePreviews()
+	return s
 }
 
 // Snapshot returns the settings the page lists.
 func (s *settingsService) Snapshot() tui.SettingsSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.snapshotFor(s.cfg)
+	return s.snapshotFor(s.cfg, s.themePreviews)
 }
 
 // snapshotFor builds the page content for a loaded config. It reads no files.
-func (s *settingsService) snapshotFor(cfg config.Config) tui.SettingsSnapshot {
+func (s *settingsService) snapshotFor(cfg config.Config, themePreviews map[string][]tui.SettingsSwatch) tui.SettingsSnapshot {
 	projectWritable := s.trusted()
 	snap := tui.SettingsSnapshot{
 		UserFile:        s.userFile,
@@ -114,6 +123,9 @@ func (s *settingsService) snapshotFor(cfg config.Config) tui.SettingsSnapshot {
 			Max:     setting.Max,
 			Apply:   string(setting.Apply),
 			Layers:  layersOf(setting),
+		}
+		if setting.Key() == "theme" {
+			item.Preview = previewFor(themePreviews, value)
 		}
 		i, ok := sectionAt[setting.Section]
 		if !ok {
@@ -426,8 +438,9 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	if th, err := s.loadTheme(themeRef); err == nil {
 		settings.Theme = th.Name
 	}
+	previews := s.buildThemePreviews()
 	change := tui.SettingsChange{
-		Snapshot:    s.snapshotFor(cfg),
+		Snapshot:    s.snapshotFor(cfg, previews),
 		Settings:    settings,
 		View:        *viewOptions(cfg, icon.Mode.String()),
 		Theme:       themeRef,
@@ -461,6 +474,7 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	s.mu.Lock()
 	s.cfg = cfg
 	s.lastDiags = diags
+	s.themePreviews = previews
 	s.mu.Unlock()
 	return change, nil
 }
@@ -560,6 +574,9 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 	}
 	if structureKey == "keybindings" {
 		return s.structureKeybindings(cfg), nil
+	}
+	if structureKey == "env.detectors" {
+		return s.structureEnvDetectors(cfg), nil
 	}
 	if path == "" {
 		return tui.SettingsStructure{}, fmt.Errorf("no %s config file is known", layer)

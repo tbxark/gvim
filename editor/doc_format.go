@@ -107,6 +107,7 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 		Dir:      shellDir(d),
 		Replace:  true,
 		Timeout:  shellTimeout,
+		Env:      e.envOverlay(),
 		format:   true,
 		Doc:      d,
 		From:     buffer.Pos{},

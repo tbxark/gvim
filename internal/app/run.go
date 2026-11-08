@@ -12,6 +12,7 @@ import (
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/env"
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/configview"
@@ -30,6 +31,7 @@ import (
 	"github.com/tbxark/gvim/session"
 	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
+	"github.com/tbxark/gvim/trust"
 	"github.com/tbxark/gvim/workspace"
 )
 
@@ -368,6 +370,23 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		trustCtl = newTrustController(trustStore, trustState)
 		deps.Trust = trustCtl
 	}
+	// The project environment is detected once at workspace open (shallow, no
+	// execution) and its activation is applied to every process the editor spawns.
+	// Activation itself is host-gated on the live trust level.
+	trustedLive := func() bool {
+		if trustCtl != nil {
+			return trustCtl.State().Level == trust.Trusted
+		}
+		return trustState.Level == trust.Trusted
+	}
+	envProvider := env.New(root, cfg.EnvDetectors(), trustedLive)
+	levelLive := func() string {
+		if trustCtl != nil {
+			return string(trustCtl.State().Level)
+		}
+		return string(trustState.Level)
+	}
+	deps.Env = envPort{provider: envProvider, level: levelLive}
 	if logFile != nil {
 		deps.NoticeSink = logFile.Notice
 	}
@@ -378,6 +397,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// save and the recovery copy keep using the real adapter and runtime.ed.
 		deps.Editor = hotExitEditor{Editor: adapter, hot: plan.hotExit}
 	}
+	ed.SetShellEnv(envProvider.Overlay)
 	deps.Settings = settingsFor(opts, cfg)
 	deps.Settings.Theme = th.Name
 	deps.ThemeCatalog = themeCat
@@ -389,6 +409,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	liveCfg := func() config.Config { return keys.Current(cfg) }
 	deps.SwitchKeymap = switchKeymapWith(liveCfg)
 	deps.LSP = newLSP(lspConfig(cfg, trustState))
+	if setter, ok := deps.LSP.(interface{ SetSpawnEnv(func() []string) }); ok {
+		setter.SetSpawnEnv(envProvider.Overlay)
+	}
 	// A folder argument shows the explorer at startup. Without one the explorer
 	// stays hidden until Ctrl+B, unless the session had it open. --simple opens
 	// neither.
@@ -416,7 +439,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		Preview:        previewReader{},
 		ProjectSearch:  projSearch,
 		ProjectReplace: projSearch,
-		GitGrep:        gitGrep{},
+		GitGrep:        gitGrep{spawnEnv: envProvider.Overlay},
 		Git:            uiadapter.GitStatus{},
 		Watch:          events,
 		AutoSave:       interval,
@@ -442,6 +465,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		Version:  gvimVersion(),
 		Preset:   presetKeymap(opts.Keymap, cfg),
 		Root:     proj.RootDir,
+		SpawnEnv: envProvider.Overlay,
 	})
 	deps.Root.Plugins = pw.Runtime
 	deps.Root.PluginEditor = pw.Editor
@@ -455,7 +479,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// The Settings page's live parts: the LSP manager for its Language Servers
 	// page statuses and actions, and the plugin runtime for its Plugins page. They
 	// are built after the page's config snapshot and before the model.
-	deps.SettingsPort = newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat, settingsRuntime{
+	settingsSvc := newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat, settingsRuntime{
 		lsp:        deps.LSP,
 		plugins:    pw.Runtime,
 		pluginsCfg: cfg,
@@ -467,6 +491,8 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		iconsWhy:   icon.Why,
 		version:    gvimVersion(),
 	})
+	settingsSvc.env = envProvider
+	deps.SettingsPort = settingsSvc
 	// Notice is the first config problem, then any session file whose unsaved
 	// text was kept, for the status row. Every warning still goes to stderr,
 	// before the alternate screen starts.
@@ -499,13 +525,14 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	loadSearch(model, opts.SessionDir)
 	shellCommand, shellArgs := cfg.Terminal.TerminalShellOptions()
 	model.SetDock(tui.DockPorts{
-		Starter:   uiadapter.NewTermStarter(ctx, uiadapter.TermStarterOptions{Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines}),
+		Starter:   uiadapter.NewTermStarter(ctx, uiadapter.TermStarterOptions{Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines, SpawnEnv: envProvider.Overlay}),
 		Clipboard: uiadapter.SystemClipboard{},
 		Effects: tui.DockEffects{
-			CloseOnExit:        cfg.Terminal.CloseOnExit,
-			MouseForwarding:    cfg.Terminal.MouseForwarding,
-			StayInScrollback:   !cfg.Terminal.JumpToEndOnOutput,
-			NoMouseDragSelects: !cfg.Terminal.MouseDragSelects,
+			CloseOnExit:          cfg.Terminal.CloseOnExit,
+			MouseForwarding:      cfg.Terminal.MouseForwarding,
+			StayInScrollback:     !cfg.Terminal.JumpToEndOnOutput,
+			NoMouseDragSelects:   !cfg.Terminal.MouseDragSelects,
+			PassCtrlVWithoutText: cfg.Terminal.PassCtrlVWithoutText,
 		},
 	})
 	// A restored session brings the terminal transcript back, dead: nothing is

@@ -34,6 +34,11 @@ var knownEvents = map[string]bool{
 	"pre_command": true, "post_command": true, "idle": true, "mode_changed": true, "diagnostics_updated": true,
 	"widget_event": true, "lsp_status_clicked": true, "lsp_server_error": true,
 	"action_popup_result": true,
+	// The round-10 environment events: the active project environment changed,
+	// and a workspace trust decision was recorded.
+	"env_changed": true, "trust_changed": true,
+	// The tier-1c-C window events (documented in events.md).
+	"path_changed": true, "focus_gained": true, "active_window_changed": true, "buffer_group_closed": true,
 }
 
 // customEventRE is the name of a plugin event: "<plugin>:<name>".

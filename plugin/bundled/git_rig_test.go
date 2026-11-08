@@ -63,6 +63,11 @@ func startRig(t *testing.T, o rigOpts) *rig {
 			t.Fatalf("read the bundled plugin %s: %v", name, err)
 		}
 		files[name+"/init.lua"] = string(src)
+		// A port with its own i18n table gets it too (the rig also loads plugins that
+		// hard-code their messages).
+		if i18n, err := fs.ReadFile(bundled.FS, "plugins/"+name+"/"+name+".i18n.json"); err == nil {
+			files[name+"/"+name+".i18n.json"] = string(i18n)
+		}
 	}
 	if o.probe != "" {
 		files["probe/init.lua"] = o.probe

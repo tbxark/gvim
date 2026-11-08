@@ -170,8 +170,7 @@ function Finder:open(opts)
     footer = opts.footer or self.footer or "",
     initial_query = opts.initial_query or self.initial_query or "",
     on_query = function(query, picker)
-      local items = f:source_items()
-      f:fill(picker, query, items)
+      f:query(picker, query)
     end,
     on_move = function(item)
       if not f.open_ then
@@ -202,6 +201,81 @@ function Finder:open(opts)
     return nil, err
   end
   return pick
+end
+
+-- query answers one picker query: a filter source is ranked in Lua; a search source is
+-- asked for its items (it may wait in this callback task). Rows are capped in show_rows.
+function Finder:query(picker, query)
+  query = M.clip(query or "", M.MAX_QUERY)
+  if self.search then
+    if #query < (self.min_query or 1) then
+      self:show_rows(picker, {}, 0)
+      return
+    end
+    local items = self.search(query) or {}
+    self:show_rows(picker, items, #items)
+    return
+  end
+  self:fill(picker, query, self:source_items())
+end
+
+-- show_rows formats and replaces the picker rows, capped at max_results. A set_items from an
+-- older query (a stale generation) is ignored: the query changed while the search ran.
+function Finder:show_rows(picker, items, total)
+  local rows = {}
+  for i = 1, math.min(#items, self.max_results) do
+    local item = items[i]
+    local d = self.format(item, i) or {}
+    rows[#rows + 1] = {
+      text = M.cells(M.clip(d.label or "", M.MAX_LABEL), 160),
+      detail = M.cells(M.clip(d.description or d.detail or "", M.MAX_DETAIL), 120),
+      item = item,
+    }
+  end
+  local ok, err = picker:set_items(rows)
+  if not ok and err and not tostring(err):find("stale", 1, true) then
+    gvim.log.debug("finder: set_items: %s", tostring(err))
+  end
+  if self.on_rows then
+    self.on_rows(#rows, total or #items)
+  end
+end
+
+-- set_footer/set_status update the open picker (the status line stands in for Fresh's prompt
+-- toolbar text).
+function Finder:set_footer(text)
+  self.footer = text
+  if self.picker then
+    pcall(function() self.picker:set_footer(text) end)
+  end
+end
+
+function Finder:set_status(text)
+  if self.picker then
+    pcall(function() self.picker:set_status(text) end)
+  end
+end
+
+-- query_text returns what the user typed (a live picker reports it; otherwise the initial
+-- query).
+function Finder:query_text()
+  if self.picker then
+    local ok, q = pcall(function() return self.picker:query() end)
+    if ok and type(q) == "string" then
+      return q
+    end
+  end
+  return self.initial_query or ""
+end
+
+-- refresh reruns the current query (used when the source's inputs change, e.g. a case
+-- toggle while the prompt is open).
+function Finder:refresh()
+  if not self.picker or not self.open_ then
+    return nil, "closed: the finder is not open"
+  end
+  self:query(self.picker, self:query_text())
+  return true
 end
 
 -- source_items loads the source once (bounded) and returns it.
@@ -240,23 +314,7 @@ function Finder:fill(picker, query, items)
     end
     ranked = M.filter(items, query, rank_text, self.max_results)
   end
-  local rows = {}
-  for i = 1, math.min(#ranked, self.max_results) do
-    local item = ranked[i]
-    local d = self.format(item, i) or {}
-    rows[#rows + 1] = {
-      text = M.cells(M.clip(d.label or "", M.MAX_LABEL), 160),
-      detail = M.cells(M.clip(d.description or d.detail or "", M.MAX_DETAIL), 120),
-      item = item,
-    }
-  end
-  local ok, err = picker:set_items(rows)
-  if not ok and err and not tostring(err):find("stale", 1, true) then
-    gvim.log.debug("finder: set_items: %s", tostring(err))
-  end
-  if self.on_rows then
-    self.on_rows(#rows)
-  end
+  self:show_rows(picker, ranked)
 end
 
 -- selected returns the current row's source item (nil when none).
@@ -301,7 +359,10 @@ end
 
 -- new creates a finder. opts:
 --   title, placeholder, footer, initial_query
---   load            () -> items (called once, lazily)
+--   load            () -> items (called once, lazily); required unless search is given
+--   search          (query) -> items   live search source (Fresh's mode = "search"; called
+--                   from the picker's on_query callback task, so it may wait)
+--   min_query       minimum query length for a search source (default 1)
 --   format          (item, index) -> {label, description, detail, id}
 --   rank_text       (item) -> string ranked by the default filter (default: label)
 --   filter          (items, query) -> items   custom filter/ordering (overrides ranking)
@@ -309,10 +370,11 @@ end
 --   on_select       (item, index)
 --   on_move         (item)
 --   on_close        (reason)  reason: "selected" | "cancelled" | "programmatic"
+--   on_rows         (shown, total) after every result update
 function M.new(opts)
   opts = opts or {}
-  if type(opts.load) ~= "function" then
-    error("gvim.finder.new: opts.load is required", 2)
+  if type(opts.load) ~= "function" and type(opts.search) ~= "function" then
+    error("gvim.finder.new: opts.load or opts.search is required", 2)
   end
   if type(opts.format) ~= "function" then
     error("gvim.finder.new: opts.format is required", 2)
@@ -321,12 +383,14 @@ function M.new(opts)
   f.title, f.placeholder, f.footer = opts.title, opts.placeholder, opts.footer
   f.initial_query = opts.initial_query
   f.load = opts.load
+  f.search = opts.search
+  f.min_query = opts.min_query
   f.format = opts.format
   f.rank_text = opts.rank_text
   f.custom_filter = opts.filter
   f.max_results = math.min(opts.max_results or M.MAX_RESULTS, M.MAX_RESULTS)
   f.on_select, f.on_move, f.on_close = opts.on_select, opts.on_move, opts.on_close
-  f.on_rows = opts.on_rows
+  f.on_rows = opts.on_rows or opts.on_results
   return f
 end
 

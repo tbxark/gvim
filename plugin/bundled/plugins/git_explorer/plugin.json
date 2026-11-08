@@ -1,0 +1,7 @@
+{
+  "name": "git_explorer",
+  "version": "1.0.0",
+  "description": "Git status badges and optional name colours in the file explorer",
+  "api": 1,
+  "default_enabled": false
+}

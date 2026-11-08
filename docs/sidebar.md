@@ -199,12 +199,18 @@ file contents, diagnostics or plugin state:
 | the explorer section's fold, selected row path and scroll | the selection and window of the tree; the first frame does not reveal row 0 over it |
 | the Contents section's open/folded state, body rows and window scroll | the open flag applies to the first Markdown buffer of the restored session (it wins over `auto_open`), rows at once, and the scroll after that buffer's first scan |
 | the Diagnostics section's open/folded state and body rows | at once |
+| the plugin sections' stack order, requested body rows and folded state (by plugin panel id) | when the sections mount: known ids take their rows/fold/order, unknown or absent ids keep the plugin's mount order and defaults; at most 64 sections, row counts clamped to 1000, no section content is stored |
 
 Migration safety: the object is optional and every zero value is the default, so
 a session file from before this state existed decodes with no sidebar state and
 the config defaults win; the session format version does not change (an additive
 optional object), and a reader that does not know it ignores it. The plugin
-sections' order, sizes and folds are not part of this state.
+sections' order, sizes and folds are part of this state (R9-4): their ids keep
+the mount order and their requested rows/folds; restoring reorders the mounted
+sections by the saved rank, applies the rows and folds to the ids that mount, and
+leaves any section the plugin no longer mounts alone. The plugin host mounts
+sections after the model is built, so the state is stashed and applied when the
+first sections appear.
 
 **Layout limits and the right side.** The column is one width: the explorer, the
 Contents section, the Diagnostics section and the plugin sections share
@@ -215,8 +221,12 @@ the right edge, walls and close buttons mirrored; there is no separate Contents
 width. A column too short for every open section folds the lower sections first
 (the explorer keeps its header), and the Contents and Diagnostics headers can
 still be dragged within that; there is no additional minimum beyond the frame's
-explorer floor. Fresh's sidebar widget has per-section sizes and a drag-and-drop
-section order; those remain residuals (see §7).
+explorer floor: the width form clamps to [16, 60] columns and the frame keeps 20
+columns for the editor on a narrow frame, on either side. A plugin section's
+requested rows are a fixed body height inside the shared column, so the same
+clamp applies there; there is no per-section width. Fresh's sidebar widget has
+per-section widths and a drag-and-drop section order; the order is persisted now,
+the drag itself and per-section widths remain residuals (see §7).
 
 ## 5. Commands
 
@@ -276,7 +286,8 @@ Show Outline, and stays available across buffer switches once shown.
   form and side, the explorer fold/selection/scroll, the Contents section's
   open/folded state, rows and scroll, and the Diagnostics section's open/folded
   state and rows. Plugin sections, their order and their rows are plugin runtime
-  state and are not persisted; see the session-state section below.
+  state; R9-4 persists their stack order, requested rows and folded state in the
+  sidebar session state (bounded, migration-safe); see §4b.
 
 ## 7. Files and tests
 
@@ -293,7 +304,7 @@ Show Outline, and stays available across buffer switches once shown.
 | config wiring | `internal/app/markdown_toc.go` (plus `internal/app/plugins_markdown_toc_test.go`: the end-to-end tests) |
 | fold_buffer ranges and lifecycle | `document/fold.go` (outline source, text-version guard), `editor/outline_folds.go`, `internal/uiadapter/outline_folds.go`, `internal/tui/markdown_toc.go` (publish/re-apply/clear), `internal/tui/sidebar/contents.go` (`Headings`); tests `editor/outline_folds_test.go`, `internal/tui/markdown_toc_fold_test.go` |
 | native `contents.fold_buffer` | `config/contents.go` (parse, project layer ignored, effective value with the plugin-key fallback), `config/settings_schema.go` row (live), `internal/app/markdown_toc.go`; tests `config/contents_test.go` |
-| sidebar session state | `session/sidebar.go`, `session.Session.Sidebar`, `internal/restore/sidebar.go`, `internal/tui/root.go` (`SidebarState`, `ExplorerState.Sidebar`), `internal/tui/sidebar_state.go`, `internal/tui/markdown_toc.go` (pending Contents restore), `internal/app/run.go`; tests `session/sidebar_test.go`, `internal/restore/sidebar_test.go`, `internal/tui/sidebar_state_test.go` |
+| sidebar session state | `session/sidebar.go`, `session.Session.Sidebar`, `internal/restore/sidebar.go`, `internal/tui/root.go` (`SidebarState`, `ExplorerState.Sidebar`), `internal/tui/sidebar_state.go`, `internal/tui/plugin_sidebar_state.go` (plugin sections' order/rows/folds, stashed until they mount), `internal/tui/markdown_toc.go` (pending Contents restore), `internal/app/run.go`; tests `session/sidebar_test.go`, `internal/restore/sidebar_test.go`, `internal/tui/sidebar_state_test.go`, `internal/tui/plugin_sidebar_state_test.go` |
 
 No test compares whole frames: the tests assert layout rectangles, hit targets,
 widget state and a few painted cells.

@@ -120,9 +120,7 @@
     "file_status_renamed_fg": [125, 207, 255],
     "file_status_untracked_fg": [115, 122, 162],
     "file_status_conflicted_fg": [187, 154, 247],
-    "file_explorer_pinned_bg": [33, 39, 56],
-    "accent_bg": [187, 154, 247],
-    "accent_fg": [26, 27, 38]
+    "file_explorer_pinned_bg": [33, 39, 56]
   },
   "search": {
     "match_bg": [224, 175, 104],

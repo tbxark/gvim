@@ -67,9 +67,29 @@ Each server object is Fresh's `LspServerConfig`. The fields gvim reads:
 | `initialization_options` | The JSON sent as `initialize`'s `initializationOptions`, verbatim. The same object answers the server's `workspace/configuration` requests, by section. |
 | `language_id_overrides` | A file extension (without the dot) mapped to the `languageId` `didOpen` sends for it, for example `{"tsx": "typescriptreact"}`. |
 | `only_features`, `except_features` | The feature filter described above. Use one or the other. The names are Fresh's: `diagnostics`, `completion`, `code_action`, `document_symbols`, `workspace_symbols`, `hover`, `definition`, `implementation`, `references`, `format`, `rename`, `signature_help`, `inlay_hints`, `folding_range`, `semantic_tokens`, `document_highlight`. An unknown name is a load diagnostic. |
-| `process_limits` | Parsed so a Fresh config loads, and reported by nothing: **gvim does not enforce it**. Fresh sets memory and CPU rlimits on Linux; gvim is a pure-Go binary and sets no rlimits, so a server may use more than the file says. The startup of a server is otherwise unchanged. |
+| `process_limits` | Fresh's memory and CPU caps (`max_memory_percent` 1–100, `max_cpu_percent` 1–1000 where 100 is one core, `enabled` default on). Applied on Linux (cgroup v2, or an `sh ulimit -v` memory wrapper) and recorded as not applicable on macOS/Windows; see [Process limits](#process-limits). |
 
 An entry cannot name a field Fresh does not have; a load reports it instead of guessing.
+
+### Process limits
+
+`process_limits` is Fresh's per-server resource cap. gvim applies what a pure-Go editor can and
+reports the rest; a configured limit is never silently dropped.
+
+| Platform | Memory cap | CPU cap |
+|----------|-----------|---------|
+| Linux | a user-delegated cgroup v2 `memory.max` (a percent of `/proc/meminfo` MemTotal); with no delegated cgroup, a `sh -c 'ulimit -v <KB>; exec "$@"'` wrapper around the server | a delegated cgroup v2 `cpu.max` quota (100% = one core); with no cgroup a CPU *percentage* has no rlimit equivalent (an rlimit CPU limit is seconds), so it is recorded as not applied |
+| macOS, Windows | not applied | not applied |
+
+On Linux the editor creates one `gvim-lsp-<pid>` cgroup under the same user-delegated cgroup
+locations Fresh uses (`GVIM_CGROUP_BASE` overrides the base, for tests and unusual delegations),
+writes the caps before the start and moves the child into it with `cgroup.procs` right after. A
+missing `sh` with no cgroup leaves only the recorded reason. Elsewhere Go's `os/exec` has no
+pre-exec hook and `syscall.SysProcAttr` has no rlimits, and the platform has no cgroup interface;
+Fresh also applies these limits on Linux only. The server status popup shows, under a server that
+configures limits, what applied or why nothing could — "process_limits (memory 50% of system
+memory, cpu 90% (100% = one core)): applied: cgroup memory 50%, cgroup cpu 90%" on Linux, or
+"process_limits (…): not applied on darwin: the limits need Linux cgroup v2 …" elsewhere.
 
 **Settings page.** The Settings page's **Language Servers** section lists every
 language with a server (the built-in table, the user's `lsp` entries, and
@@ -83,8 +103,9 @@ enable servers: a project edit that names a command, args, env or
 initialization options is refused with the loader's diagnostic, and the project
 page shows the layer's entries with the JSON row locked. **Start/Restart/Stop**
 rows start or stop the configured servers by hand (they override `auto_start`
-and mute) and are live actions, not config edits. `process_limits` is accepted
-and shown but never applied (see the table above). The page lives in
+and mute) and are live actions, not config edits. `process_limits` is accepted,
+validated and applied or reported as described under [Process limits](#process-limits) (see the
+table above). The page lives in
 `internal/app/settings_lsp.go`; its mechanics are documented in
 `docs/settings.md`.
 
@@ -120,7 +141,9 @@ slow server cannot freeze typing.
 
 Click the `LSP` pill, or run **Show LSP Status**, for a popup of every configured server: its
 name, language (or "universal"), state, and — per server — a **Restart** or **Stop** row (a
-stopped or dormant server gets **Start**). A failed start shows the reason under its row.
+stopped or dormant server gets **Start**). A failed start shows the reason under its row, and a
+server that configures `process_limits` shows what happened to them (see
+[Process limits](#process-limits)).
 
 The footer of the popup mutes or unmutes the language of the active document: **Mute LSP for go**
 starts no server of that language, stops the ones it has, and dims the pill to `LSP (off)`
@@ -358,8 +381,14 @@ words in the buffer and everything else do not depend on it.
   a file the servers published for keeps its published set (merging both would report the same
   problem twice), and a workspace-only file is added with the source `workspace` and capped at
   50 diagnostics, most severe first, with exact duplicates removed. The panel and the fix list
-  mark those files `(not open)`, and choosing one opens the file at the diagnostic. The request
-  is bounded by the request timeout; no `$/cancelRequest` is sent, and the server-initiated
+  mark those files `(not open)`, and choosing one opens the file at the diagnostic. Each pull is
+  bounded by the request timeout, and its request is **cancelled on the wire**: the request goes
+  through a path that sends `$/cancelRequest` with the request's own id when its context is
+  cancelled, so a pull that a newer pull supersedes, or one in flight when the servers stop,
+  restart, are muted or a server is stopped/restarted, is cancelled on the server instead of
+  being left to run. A cancelled pull is never cached and never merged (the last good workspace
+  answer is kept and the next poll asks again), so a late answer cannot land in the store; the
+  request timeout still bounds a server that ignores the cancellation. The server-initiated
   refresh request simply makes the next poll ask again.
 
 ## The diagnostics panel and the fix list
@@ -436,6 +465,19 @@ capability-gated, so a server that only publishes reports the files it chooses, 
 workspace-folder-wide request is made to a server that does not advertise it. Inlay hints are
 inserted inline (tier 2); the end-of-line form remains only as the fallback listed with them (page
 view, tall lines, windowed lines, panned rows, rows without room, concealed insertion points).
-No built-in universal language server ships (Fresh's quicklsp is not available), so
-`universal_lsp` is config-only, and `process_limits` is parsed but not enforced. See
-docs/parity.md, backlog #7.
+No built-in universal language server ships: Fresh's quicklsp is a separate, user-installed Rust
+binary (its default `universal_lsp` config names `command: "quicklsp"` with `enabled: false`,
+and there is no quicklsp crate in the editor sources), so it is a new server rather than editor
+wiring. gvim supports user-configured `universal_lsp` servers fully (config merge, manager
+defaults, status listing and tests); the universal-server item is a deliberate recorded residual,
+not a missing integration. `process_limits` is applied on Linux and, on macOS and Windows, is
+explicitly recorded as unreachable in the server status (see
+[Process limits](#process-limits)). The per-OS limitation and the universal-server decision are
+the remaining R7-5 residuals. See docs/parity.md, backlog #7.
+## The project environment
+
+A language server starts with the active project environment applied: the host adds
+the activation overlay to every server process, after the server's configured
+`env` (a variable the server config names wins). Activation is trust-gated, so a
+server never inherits a snippet from an untrusted workspace; start an environment
+with the `env-manager` plugin (off by default) or the `gvim.env.set` plugin API.

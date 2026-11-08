@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -35,7 +36,7 @@ func TestSessionSidebarRoundTrip(t *testing.T) {
 	if got.Sidebar == nil {
 		t.Fatal("the saved sidebar state did not come back")
 	}
-	if *got.Sidebar != *want {
+	if !reflect.DeepEqual(*got.Sidebar, *want) {
 		t.Fatalf("sidebar = %+v, want %+v", *got.Sidebar, *want)
 	}
 }

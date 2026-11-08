@@ -118,6 +118,8 @@ type pluginState struct {
 	viewState map[pluginapi.BufferID]map[string]map[string]any
 	// lineTargets are the clickable lines of plugin buffers (plugin_linetargets.go).
 	lineTargets map[pluginapi.BufferID]*lineTargetSet
+	// explorer is the file-explorer decoration surface (plugin_explorer.go).
+	explorer pluginExplorer
 	// virtual records who made each virtual buffer (plugin_virtual.go).
 	virtual pluginVirtual
 

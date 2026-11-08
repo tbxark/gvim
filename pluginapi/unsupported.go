@@ -10,6 +10,16 @@ func unsupported(what string) error {
 	return Errf(CodeUnsupported, "%s is not supported", what)
 }
 
+// EnvHost.
+
+func (Unsupported) DetectedEnv() (EnvInfo, bool) { return EnvInfo{}, false }
+func (Unsupported) ActiveEnv() (EnvInfo, bool)   { return EnvInfo{}, false }
+func (Unsupported) EnvTrustLevel() string        { return "restricted" }
+func (Unsupported) SetEnv(plugin, snippet, dir, kind string) error {
+	return unsupported("SetEnv")
+}
+func (Unsupported) ClearEnv(plugin string) error { return unsupported("ClearEnv") }
+
 // BufferEditor.
 
 func (Unsupported) ListBuffers() []BufferInfo                       { return nil }
@@ -94,7 +104,15 @@ func (Unsupported) ClearWindowState(string, BufferID, string) {}
 func (Unsupported) SetLineTargets(string, BufferID, []LineTarget) error {
 	return unsupported("SetLineTargets")
 }
-func (Unsupported) ClearLineTargets(string, BufferID)       {}
+func (Unsupported) ClearLineTargets(string, BufferID) {}
+func (Unsupported) SetExplorerDecorations(string, string, []FileExplorerDecoration) error {
+	return unsupported("SetExplorerDecorations")
+}
+func (Unsupported) ClearExplorerDecorations(string, string) {}
+func (Unsupported) SetExplorerSlots(string, string, []FileExplorerSlot) error {
+	return unsupported("SetExplorerSlots")
+}
+func (Unsupported) ClearExplorerSlots(string, string)       {}
 func (Unsupported) VisibleRows(WinID) ([]VisibleRow, error) { return nil, unsupported("VisibleRows") }
 
 // CommandHost.

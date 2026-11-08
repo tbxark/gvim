@@ -46,6 +46,7 @@ a rewrite in idiomatic Lua. The bundled plugins are examples of the technique (s
 | `Promise.all` | `gvim.async.all` |
 | `getGlobalState`, `setGlobalState`; `defineConfig*`, `getPluginConfig` | `gvim.state`; `gvim.settings.define` |
 | `exportPluginApi`, `getPluginApi` | `gvim.plugins.export`, `gvim.plugins.get` |
+| `setFileExplorerDecorations(ns, …)`, `setFileExplorerSlots(ns, …)`, the two clears | `gvim.explorer.set_decorations(ns, items)`, `set_slots`, `clear_decorations`, `clear_slots`: snake_case items (`min_width`, `suppress_leading`, `suppress_trailing`, `name_color`, `suppress_name_color`), per-plugin namespaces as in Fresh, 10k entries/namespace and 64 namespaces/plugin; `FileExplorerTooltip` is not supported (no hover tooltips) |
 | `computeLineDiff` | `gvim.diff.lines` (or `diff.buffer`) |
 | `createVirtualBuffer*`, `setVirtualBufferContent`, `getTextPropertiesAtCursor` | `gvim.buf.create` plus `w:split` plus `b:set_content`, `b:props_at` |
 | `beginKeyCapture`, `getNextKey`, `endKeyCapture` | `gvim.input.next_key` (no begin or end) |
@@ -197,12 +198,16 @@ Fresh's `plugins/lib/finder.ts` (1862 lines) is split in three in the bundled `g
 source line survive, and `on_close` runs exactly once with `selected` / `cancelled` / `programmatic`);
 and a panel backend (`tree`) plus a locations finder (`open_locations`: relative `path:line` rows,
 snippet descriptions from open buffers or one bounded read, preview tabs on move, commit on Enter,
-cancel closes the preview). `diagnostics_panel` uses the tree backend and requires the library lazily
-on its first build, so the idle default bundle does not pay for it (the 8 MiB gate).
+cancel closes the preview). The filter source loads once and is ranked per query; a **search
+source** (`opts.search`, Fresh's `mode = "search"`) is called from the picker's `on_query` callback
+task with the debounced query (so it may wait on a process, as `git_grep` does) and its rows are
+capped, with `min_query`, an `on_rows(shown, total)` status hook and `set_footer`/`set_status`/
+`refresh` helpers. `diagnostics_panel` uses the tree backend and requires the library lazily on its
+first build, so the idle default bundle does not pay for it (the 8 MiB gate).
 
-Reduced or omitted from Fresh's Finder: asynchronous `SearchSource`s with cancellation handles and
-per-query process spawns (a source is a Lua loader; picker generations protect against stale
-`set_items`), the embedded preview pane and utility-dock routing, `syncWithEditor`,
+Reduced or omitted from Fresh's Finder: search sources have no cancellation handle (a superseded
+query's `set_items` is discarded by the picker generation guard instead of killing the process), no
+per-query process spawn management, the embedded preview pane and utility-dock routing, `syncWithEditor`,
 `navigateOnCursorMove`, `panelKeys` and the panel-mode prompt-type events; the panel backend covers
 the grouped/deduped tree use only. `lsp_navigation` and `find_references` add the LSP edges:
 `gvim.finder.lsp_locations` normalizes `Location`/`Location[]`/`LocationLink[]` and converts UTF-16
@@ -211,6 +216,33 @@ columns to bytes when the target line is open. Both are command ports because gv
 UI); `lsp_navigation` also offers definition/implementation/type-definition list commands that are
 gvim additions over Fresh's core direct-jump actions, and the picker has no initial selected index, so
 Fresh's enclosing-symbol preselection is not reproduced.
+
+### Git grep: no prompt toolbar (port residual)
+
+Fresh's `git_grep` uses a prompt **toolbar** (`setPromptToolbar` with a Case toggle widget) and drives
+the toggle from `widget_event` / `toggleOverlayToolbarWidget`; gvim's prompt is `gvim.ui.picker` and has
+no toolbar or in-prompt key surface. The port therefore keeps Fresh's module-level `case_sensitive`
+choice (insensitive by default, like Fresh's effective config preset — gvim plugins cannot read
+`editor.search.case_sensitive`), shows it in the picker footer/hint line, and flips it with Fresh's
+second palette command (`Git Grep: Toggle Case Sensitive`), which refreshes an open prompt and
+otherwise applies to the next search. Fresh binds no chord for the command, so the port registers none.
+Fresh also disables the Finder's split preview because its floating overlay draws a preview band;
+gvim has no overlay preview band, and the port opens no preview tabs either (Enter opens the hit).
+The `git grep` process runs through the hardened `gvim.git` gateway (`grep -n --column -I [-i] -e`,
+15 s timeout, 2 MiB output cap, first 100 rows, per-line caps); exit 0 and 1 are both success (git
+grep exits 1 for no matches), >= 2 is the error status, and paths with colons still parse because the
+line/column numbers anchor the match from the left.
+
+### Environment activation is host-managed (port residual)
+
+Fresh's `env_manager` plugin owns detection and activation. In gvim both are host features
+(`env.detectors` in the user config, the `gvim.env` runtime API, the trust gate in the core trust
+dialog), and the bundled plugin is the thin command/status layer: Activate a detected environment,
+Reload after a `.envrc`/`mise.toml` change, Use System, and Status (the `env` status-bar pill shows
+`system` / `<name>` / `<name> ✓` / `<name> (locked)`). Reductions: no widget-panel UI yet, no file
+watcher (Reload is explicit), no devcontainer deferral/authority handling, no automatic
+shell-environment activation (the command is explicit), one local environment, and no persisted
+recipe; a bare `.venv` without an interpreter does not count and first match wins, as in Fresh.
 
 ### Notes for porters (learned from the bundled ports)
 

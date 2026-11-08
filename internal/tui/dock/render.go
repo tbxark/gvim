@@ -40,6 +40,7 @@ func (p *Panel) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 	}
 	for r := range min(rows, sc.Rows) {
 		paintShellRow(g, top+r, l.W, sc, r, body)
+		p.paintHoverRow(g, top+r, r, l.W, false)
 	}
 }
 
@@ -76,6 +77,7 @@ func (p *Panel) paintScrollback(g *grid.Grid, top, rows, w int, sc terminal.Scre
 			tintRow(g, y, w, sel)
 		}
 		p.paintSelection(g, y, w, abs, sel)
+		p.paintHoverRow(g, y, abs, w, true)
 	}
 }
 

@@ -135,6 +135,7 @@ type Model struct {
 	explorerPanel expanel.Panel // paints the explorer and answers its key actions
 	ops           explorerOps   // file operations; nil when Deps.Ops lacks them
 	clip          *clipboard    // the explorer clipboard; nil when empty
+	lastYank      string        // the last text copied or cut, for the terminal's Ctrl+V fallback
 	quitting      bool          // set by a menu row that quit the editor
 	pending       tea.Cmd       // commands a menu row started, returned by routeMenu
 	notice        string        // replaces the editor status until the next press
@@ -162,6 +163,9 @@ type Model struct {
 	root rootState
 	// trust is the workspace-trust state (see trust_state.go).
 	trust trustState
+	// env is the workspace environment port for the gvim.env plugin API; nil when
+	// the app wired none.
+	env EnvPort
 	// notes is the log of the notices shown this session (see notice_warnings.go).
 	notes noticeLog
 	// lsp is the language-server state (see lsp.go).
@@ -233,6 +237,7 @@ func New(deps Deps) *Model {
 		root:            rootState{ports: deps.Root},
 		trust:           newTrustState(deps.Trust),
 		lsp:             lspState{port: deps.LSP},
+		env:             deps.Env,
 		view:            newViewState(viewOptionsOf(deps.View)),
 	}
 	m.view.languages = deps.Languages
@@ -608,7 +613,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dock.OpenPathMsg:
 		// The dock resolved a Ctrl+Click path; open it as the explorer would and
 		// give the keyboard back to the editor.
-		cmd = m.openFileCmd(msg.Path, false, 0, 0)
+		cmd = m.openFileCmd(msg.Path, false, msg.Line, msg.Col)
 		m.focusEditor()
 	case expanel.RenameMsg:
 		m.askRename(msg.Path)
@@ -1836,7 +1841,11 @@ func (m *Model) explorerGeometry(l layout) expanel.Geometry {
 		sec := l.Sections[0]
 		top, bottom = sec.HeaderY, sec.BodyBottom+1
 	}
-	return expanel.Geometry{X: l.ExX, Width: l.Ex, Top: top, Bottom: bottom, Right: l.ExRight, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
+	return expanel.Geometry{
+		X: l.ExX, Width: l.Ex, Top: top, Bottom: bottom, Right: l.ExRight,
+		Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons,
+		Decor: m.explorerRowDecor,
+	}
 }
 
 // sidebarSection returns the layout section at index, for the mouse routing that

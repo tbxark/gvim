@@ -240,6 +240,31 @@ func TestDualClearsOnClosedPane(t *testing.T) {
 	}
 }
 
+func TestOnlyOneDualViewAtATime(t *testing.T) {
+	t.Parallel()
+	m, _ := dualModel(t)
+	runAction(t, m, "markdown_mode_dual")
+	if len(m.layout().Panes) != 2 {
+		t.Fatalf("panes = %d, want 2", len(m.layout().Panes))
+	}
+	// Asking again is a no-op: it does not nest another split.
+	runAction(t, m, "markdown_mode_dual")
+	if len(m.layout().Panes) != 2 || m.validDual() == nil {
+		t.Fatalf("second dual command changed the view: %d panes", len(m.layout().Panes))
+	}
+}
+
+func TestDualEndsWhenTheTabChanges(t *testing.T) {
+	t.Parallel()
+	m, _ := dualModel(t)
+	runAction(t, m, "markdown_mode_dual")
+	m.editorDo(editor.Action("new"), nil)
+	m.syncDual()
+	if m.validDual() != nil || m.splits.dual != nil {
+		t.Fatal("the dual view survived a tab change")
+	}
+}
+
 func TestDualClearsWhenThePanesStopMatching(t *testing.T) {
 	t.Parallel()
 	m, _ := dualModel(t)

@@ -501,16 +501,62 @@ func TestDockPasteSendsClipboardText(t *testing.T) {
 	}
 }
 
-func TestDockPasteReportsClipboardFailure(t *testing.T) {
+func TestDockPasteWithoutReadableClipboardPassesTheKey(t *testing.T) {
+	// Fresh's rule: a clipboard that cannot be read pastes the last yank, and with
+	// no yank and pass_ctrl_v_without_text on, the Ctrl+V key reaches the shell.
 	starter := newFakeStarter()
-	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter, Clipboard: fakeClipboard{err: errors.New("no tool")}})
+	m := newDockModel(t, newFakeEditor("hello"), DockPorts{
+		Starter:   starter,
+		Clipboard: fakeClipboard{err: errors.New("no tool")},
+		Effects:   DockEffects{PassCtrlVWithoutText: true},
+	})
 	openDock(t, m)
 	dockSettle(t, m, press(m, ctrl('v')))
 	if len(starter.term.pastes) != 0 {
-		t.Fatalf("pastes = %q, want none after a clipboard failure", starter.term.pastes)
+		t.Fatalf("pastes = %q, want none without a yank", starter.term.pastes)
 	}
-	if !strings.Contains(m.notice, "no tool") {
-		t.Fatalf("notice = %q, want the clipboard error", m.notice)
+	if !slices.Contains(starter.term.writes, "\x16") {
+		t.Fatalf("writes = %q, want the Ctrl+V key passed to the shell", starter.term.writes)
+	}
+}
+
+func TestDockPasteNoTextRules(t *testing.T) {
+	tests := []struct {
+		name    string
+		pass    bool
+		text    string
+		err     error
+		yank    string
+		paste   []string
+		writeTo string
+	}{
+		{"text pastes", true, "clip", nil, "Y", []string{"clip"}, ""},
+		{"no text passes the key", true, "", nil, "Y", nil, "\x16"},
+		{"no text with the flag off pastes the yank", false, "", nil, "Y", []string{"Y"}, ""},
+		{"an unreadable clipboard pastes the yank", true, "", errors.New("no display"), "Y", []string{"Y"}, ""},
+		{"an unreadable clipboard without a yank passes the key", true, "", errors.New("no display"), "", nil, "\x16"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			starter := newFakeStarter()
+			m := newDockModel(t, newFakeEditor("hello"), DockPorts{
+				Starter:   starter,
+				Clipboard: fakeClipboard{text: tt.text, err: tt.err},
+				Effects:   DockEffects{PassCtrlVWithoutText: tt.pass},
+			})
+			m.lastYank = tt.yank
+			openDock(t, m)
+			dockSettle(t, m, press(m, ctrl('v')))
+			if !slices.Equal(starter.term.pastes, tt.paste) {
+				t.Fatalf("pastes = %q, want %q", starter.term.pastes, tt.paste)
+			}
+			if tt.writeTo == "" && len(starter.term.writes) != 0 {
+				t.Fatalf("writes = %q, want none", starter.term.writes)
+			}
+			if tt.writeTo != "" && !slices.Contains(starter.term.writes, tt.writeTo) {
+				t.Fatalf("writes = %q, want %q", starter.term.writes, tt.writeTo)
+			}
+		})
 	}
 }
 

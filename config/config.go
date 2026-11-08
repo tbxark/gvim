@@ -152,14 +152,16 @@ type LSPServer struct {
 	OnlyFeatures   []string `json:"only_features,omitempty"`
 	ExceptFeatures []string `json:"except_features,omitempty"`
 	// ProcessLimits is the memory and CPU limit Fresh writes for a server
-	// (process_limits). It is kept so a Fresh config loads, and reported by the
-	// status, but gvim is pure Go and does not apply it (docs/lsp.md).
+	// (process_limits). gvim applies it on Linux (cgroup v2, or an sh ulimit memory
+	// wrapper) and records why it cannot on other platforms in the server status; the
+	// per-OS table is in docs/lsp.md.
 	ProcessLimits *ProcessLimits `json:"process_limits,omitempty"`
 }
 
-// ProcessLimits is Fresh's process_limits object for a language server. gvim parses
-// it and does not enforce it: a pure-Go binary sets no rlimits, and the fields are
-// accepted so a Fresh config loads unchanged.
+// ProcessLimits is Fresh's process_limits object for a language server. gvim applies
+// the caps where a pure-Go binary can (Linux cgroup v2, or an sh ulimit -v memory
+// wrapper) and reports the ones it cannot apply per OS in the server status and
+// docs/lsp.md.
 type ProcessLimits struct {
 	// MaxMemoryPercent is the server's memory cap as a percent of system memory,
 	// or nil for none.
@@ -215,6 +217,10 @@ type Config struct {
 	// Terminal is the terminal section: the shell override, close_on_exit,
 	// scrollback_lines and mouse_forwarding (see terminal.go).
 	Terminal TerminalConfig
+
+	// Env is the env section: the environment detectors (see env.go). Only the
+	// user config may set it.
+	Env EnvConfig
 
 	// PluginTimeout is the longest one plugin call may run, default 500ms. The
 	// project layer may only lower it (see lowerPluginTimeout).
@@ -303,6 +309,7 @@ func Defaults() Config {
 
 		Terminal:      DefaultTerminalOptions(),
 		FileExplorer:  DefaultFileExplorer(),
+		Env:           DefaultEnvConfig(),
 		EditorOptions: defaultEditorOptions(),
 	}
 }
@@ -560,6 +567,15 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			continue
 		case key == "contents":
 			diags = append(diags, cfg.setContents(keys[key], l, path)...)
+			cfg.note(key, path)
+			continue
+		case key == "env" && l == layerProject:
+			// A repository must not decide which activation command runs in it, so the
+			// project layer cannot define detectors. Say so instead of ignoring it.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set env: it defines commands that run in the workspace, so set it in the user config"})
+			continue
+		case key == "env":
+			diags = append(diags, cfg.setEnv(keys[key])...)
 			cfg.note(key, path)
 			continue
 		case key == "universal_lsp" && l == layerProject:
@@ -876,6 +892,14 @@ func validLSPEntry(what string, e lspEntry) error {
 	for _, f := range e.ExceptFeatures {
 		if !lspFeatureNames[f] {
 			return fmt.Errorf("%s: unknown feature %q in except_features", what, f)
+		}
+	}
+	if p := e.ProcessLimits; p != nil {
+		if m := p.MaxMemoryPercent; m != nil && (*m < 1 || *m > 100) {
+			return fmt.Errorf("%s: max_memory_percent must be between 1 and 100, got %d", what, *m)
+		}
+		if c := p.MaxCPUPercent; c != nil && (*c < 1 || *c > 1000) {
+			return fmt.Errorf("%s: max_cpu_percent must be between 1 and 1000 (100 is one core), got %d", what, *c)
 		}
 	}
 	return nil

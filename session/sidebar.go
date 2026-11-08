@@ -28,4 +28,13 @@ type SidebarState struct {
 	DiagnosticsOpen      bool `json:"diagnosticsOpen,omitzero"`
 	DiagnosticsCollapsed bool `json:"diagnosticsCollapsed,omitzero"`
 	DiagnosticsRows      int  `json:"diagnosticsRows,omitzero"`
+	// PluginOrder, PluginRows and PluginCollapsed are the plugin sections' stack
+	// order, requested body rows and folded state, by the plugin panel id. They are
+	// optional and bounded (at most 64 sections, rows clamped, unknown ids ignored
+	// on load), so an older session keeps the mount order and the defaults, and a
+	// reader that does not know them ignores them. Section body contents are never
+	// stored.
+	PluginOrder     []string        `json:"pluginOrder,omitempty"`
+	PluginRows      map[string]int  `json:"pluginRows,omitempty"`
+	PluginCollapsed map[string]bool `json:"pluginCollapsed,omitempty"`
 }

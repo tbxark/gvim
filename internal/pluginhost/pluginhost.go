@@ -40,6 +40,9 @@ type Options struct {
 	Preset *keymap.Map
 	// Root reports the workspace root as it is now, since opening a project changes it.
 	Root func() string
+	// SpawnEnv is the active project environment's set-only overlay for plugin
+	// processes, or nil.
+	SpawnEnv func() []string
 }
 
 // New builds the plugin runtime of a session. It starts nothing: the model's Init starts
@@ -70,7 +73,7 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 			ld.Settings[name] = plugin.PluginSettings{User: pc.Settings, Project: pc.ProjectSettings}
 		}
 	}
-	osys := newPluginOS(pluginDirs(cfgDir, o.Root))
+	osys := newPluginOS(pluginDirs(cfgDir, o.Root), o.SpawnEnv)
 	return &Wiring{
 		Runtime: plugin.New(plugin.Options{
 			Timeout:  cfg.PluginTimeout,
