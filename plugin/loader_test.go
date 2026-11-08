@@ -133,10 +133,10 @@ func TestOrderingAndDependencies(t *testing.T) {
 		},
 		{
 			name:      "api too new",
-			plugins:   []pl{{"a", `{"api": 2}`}, {"b", `{"api": 1}`}},
+			plugins:   []pl{{"a", `{"api": 3}`}, {"b", `{"api": 1}`}},
 			wantOrder: []string{"b"},
 			wantState: map[string]string{"a": "failed"},
-			wantErr:   map[string]string{"a": "needs plugin API 2"},
+			wantErr:   map[string]string{"a": "needs plugin API 3"},
 		},
 		{
 			name:      "dependency main chunk fails",

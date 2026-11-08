@@ -48,6 +48,14 @@ type Panel struct {
 	effects Effects
 	scroll  scrollState
 	pressed int
+	// sel is the text selection over the scrollback view, and prior is the
+	// transcript a restarted shell keeps above its own history (see selection.go
+	// and transcript.go).
+	sel   selState
+	prior []terminal.Line
+	// restored is set when the dock shows a transcript restored from the session
+	// file, with no shell behind it (see transcript.go).
+	restored bool
 
 	live     bool                   // Updates is open, so screen changes still arrive
 	armed    bool                   // a wait for the next output or the exit is in flight
@@ -104,8 +112,13 @@ func (p *Panel) Focus() bool { return p.focus }
 // dock is live again when it is next focused.
 func (p *Panel) SetFocus(v bool) {
 	p.focus = v
-	if !v && p.scroll.on {
-		p.scroll = scrollState{}
+	if !v {
+		// A restored transcript is the whole dock until it is restarted, so it
+		// keeps its read-only view when the focus leaves.
+		if p.scroll.on && !p.restored {
+			p.scroll = scrollState{}
+		}
+		p.clearSelection()
 	}
 }
 
@@ -130,12 +143,12 @@ func (p *Panel) Capture() bool { return p.capture }
 // runs in it, and it is laid out. A dock the frame has no room for is not drawn, so
 // it takes no keys.
 func (p *Panel) Keyboard(l frame.Layout) bool {
-	if !p.open || !p.focus || p.term == nil || !l.DockOn {
+	if !p.open || !p.focus || !l.DockOn || (p.term == nil && !p.restored) {
 		return false
 	}
 	// A shell that exited keeps the dock for its scrollback, and that view takes
 	// the keys; a live shell always does.
-	return p.Running() || p.scroll.on
+	return true
 }
 
 // Show shows the dock and starts a shell unless one runs. It focuses the dock when
@@ -153,11 +166,12 @@ func (p *Panel) Hide() {
 	p.open = false
 	p.focus = false
 	p.scroll = scrollState{}
+	p.clearSelection()
 }
 
 // focusDock gives the dock the focus through the host.
 func (p *Panel) focusDock() {
-	if !p.Running() {
+	if p.term == nil && !p.restored {
 		return
 	}
 	if p.host.Focus != nil {
@@ -193,6 +207,15 @@ func (p *Panel) Restart() tea.Cmd {
 		dir = p.host.RootDir()
 	}
 	if p.term != nil {
+		// Keep the old transcript above the new shell, and restart in the
+		// directory the shell reported last.
+		p.capturePrior()
+		if cwd := p.term.WorkingDirectory(); cwd != "" {
+			dir = cwd
+		} else {
+			dir = p.dir
+		}
+	} else if p.dir != "" {
 		dir = p.dir
 	}
 	p.open = true
@@ -215,6 +238,7 @@ func (p *Panel) launch(dir string) tea.Cmd {
 	p.notice = ""
 	p.dir = dir
 	p.scroll = scrollState{}
+	p.restored = false
 	cols, rows := p.contentSize()
 	starter := p.starter
 	return func() tea.Msg {
@@ -268,6 +292,13 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			// starts while the reader is in scrollback hides the view.
 			if p.scroll.on && p.altScreen() {
 				p.scroll = scrollState{}
+				p.clearSelection()
+			}
+			// terminal.jump_to_end_on_output: new output returns to the live
+			// screen; a text selection holds the view instead.
+			if p.scroll.on && !p.sel.active && !p.effects.StayInScrollback {
+				p.scroll = scrollState{}
+				p.clearSelection()
 			}
 		}
 		return nil, true
@@ -278,6 +309,7 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			p.focus = false
 			p.queue = nil
 			p.scroll = scrollState{}
+			p.clearSelection()
 			if p.effects.CloseOnExit {
 				// terminal.close_on_exit: the dock goes away with its shell
 				// instead of keeping the last screen as scrollback. The release
@@ -301,6 +333,20 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	case searchMsg:
 		return p.applySearch(msg), true
+	case selectionCopyMsg:
+		if msg.gen != p.gen {
+			return nil, true
+		}
+		if msg.text == "" {
+			p.noticeOf(nothingToCopyNotice)
+			return nil, true
+		}
+		p.noticeOf(copiedSelectionNotice)
+		if p.host.Copy == nil {
+			p.noticeOf(noClipboardNotice)
+			return nil, true
+		}
+		return p.host.Copy(msg.text), true
 	case linkMissMsg:
 		p.noticeOf(linkMissNotice(msg.token))
 		return nil, true
@@ -439,6 +485,7 @@ func (p *Panel) PasteClipboard() tea.Cmd {
 // Close ends the shell. The root calls it when the program ends.
 func (p *Panel) Close() {
 	p.scroll = scrollState{}
+	p.clearSelection()
 	if p.term != nil {
 		_ = p.term.Close()
 		p.term = nil
@@ -451,6 +498,11 @@ func (p *Panel) Close() {
 // picked up without the caller knowing about the dock.
 func (p *Panel) Sync() tea.Cmd {
 	if p.term == nil {
+		// A restored transcript has no session to ask for rows; the window only
+		// needs clamping when the layout (and so the body height) changed.
+		if p.scroll.on {
+			p.clampScroll()
+		}
 		return nil
 	}
 	t, gen := p.term, p.gen

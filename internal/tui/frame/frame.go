@@ -119,6 +119,19 @@ type StatusView struct {
 	Lines    int    // line count; its digits set the message column
 	Large    string // the chip of a document in large file mode, with the index progress, or ""
 
+	// Filename is the active document's Fresh display name: its path relative to
+	// the workspace root when it is under it, its absolute path otherwise, and the
+	// document's fallback name ("[No Name]", "Untitled-N") when it has no path.
+	// FilenameModified adds Fresh's " [+]" and the ReadOnly field adds " [RO]".
+	Filename         string
+	FilenameModified bool
+	// Chord is the pending multi-key sequence as the status row shows it, such as
+	// "[Ctrl+X]", or "" when no sequence is waiting.
+	Chord string
+	// Clock is the local time as Fresh's {clock} shows it, 24-hour "HH:MM", or ""
+	// when the row has no clock.
+	Clock string
+
 	Line, Col int // the caret, one-based; the {cursor:compact} element
 	Cursors   int // carets in the active document; {cursor_count} shows it above one
 
@@ -141,8 +154,8 @@ type StatusView struct {
 
 // StatusElementKind names one element of a configured status row side, as Fresh's
 // editor.status_bar.left/right lists name them. The kinds gvim parses but does not
-// paint are kept, so a config that names them loads and renders nothing (see
-// docs/ui.md).
+// paint — {warnings}, {update} and plugin tokens — are kept, so a config that names
+// them loads and renders nothing (see docs/ui.md).
 type StatusElementKind int
 
 // The status-row elements. The names and order are Fresh's StatusBarElement enum.
@@ -305,6 +318,7 @@ type RunStyle int
 const (
 	StyleDefault RunStyle = iota // the surface's own style
 	StyleWarning                 // the theme's warning role: a warning state, such as a restricted workspace
+	StyleMuted                   // the surface's style, faint: a secondary value such as a pending chord
 )
 
 // Run is a piece of text at a fixed column, together with what a click on it
@@ -667,6 +681,8 @@ func (l *Layout) setExplorer(in Input) {
 			First:     sec.Index == 0,
 			Several:   len(l.Sections) > 1,
 			Collapsed: sec.Collapsed,
+			Title:     sec.Title,
+			NoClose:   sec.NoClose,
 		}
 		h := sidebar.HeaderFor(l.Ex, in.IconMode, spec)
 		// The buttons are frame columns: the header is measured from the
@@ -843,11 +859,35 @@ func statusPluginAnchor(k StatusElementKind, right bool) bool {
 }
 
 // statusElementSeg is the segment one element paints, or false when it has nothing to
-// show. The elements gvim does not paint — {filename}, {chord}, {clock}, {warnings},
-// {update} and plugin tokens — render nothing at all; docs/ui.md says why.
+// show. The elements gvim does not paint — {warnings}, {update} and plugin tokens —
+// render nothing at all; docs/ui.md says why.
 func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
 	pad := func(text string) string { return space.Pad(text) }
 	switch e.Kind {
+	case StatusElementFilename:
+		if s.Filename == "" {
+			return statusSeg{}, false
+		}
+		// Fresh's markers: " [+]" while the buffer is modified and " [RO]" while
+		// it is read-only, both after the display name.
+		text := s.Filename
+		if s.FilenameModified {
+			text += " [+]"
+		}
+		if s.ReadOnly {
+			text += " [RO]"
+		}
+		return statusSeg{text: pad(text)}, true
+	case StatusElementChord:
+		if s.Chord == "" {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad(s.Chord), style: StyleMuted}, true
+	case StatusElementClock:
+		if s.Clock == "" {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad(s.Clock)}, true
 	case StatusElementTrust:
 		if s.Trust == "" {
 			return statusSeg{}, false
@@ -919,8 +959,7 @@ func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
 		}
 		return statusSeg{text: pad(hint), kind: HitStatusPalette}, true
 	}
-	// {filename}, {chord}, {clock}, {warnings}, {update} and plugin tokens: parsed,
-	// not painted by gvim.
+	// {warnings}, {update} and plugin tokens: parsed, not painted by gvim.
 	return statusSeg{}, false
 }
 

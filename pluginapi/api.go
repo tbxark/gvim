@@ -332,6 +332,17 @@ type StatusItem struct {
 	Clickable        bool
 }
 
+// MenuItem is one plugin-contributed row of a menu bar dropdown. Menu matches a menu's
+// stable id ("View", "File", ...) first and its label second. Action is the action or plugin
+// command the row runs; Checkbox names a context key whose boolean state draws the row's
+// checkmark; When gates the row; After and Before name a neighbouring row (its action or its
+// label) to position this one; a neighbour that matches nothing appends the row.
+type MenuItem struct {
+	Menu, Label, Action string
+	Checkbox, When      string
+	After, Before       string
+}
+
 // ---------- ui specs ----------
 
 // Level is the severity of a notice.
@@ -387,6 +398,23 @@ type PickerUpdate struct {
 	Selected              *int
 }
 
+// ActionPopupAction is one button of an action popup.
+type ActionPopupAction struct {
+	ID, Label string
+}
+
+// ActionPopupSpec describes a message with action buttons.
+type ActionPopupSpec struct {
+	Title, Message string
+	Actions        []ActionPopupAction
+}
+
+// PromptSuggestion is one row of a prompt's suggestion list.
+type PromptSuggestion struct {
+	ID, Text, Description, Value string
+	Disabled                     bool
+}
+
 // PopupSpec describes a popup.
 type PopupSpec struct {
 	Title  string
@@ -408,6 +436,12 @@ type DiagnosticInfo struct {
 	Severity string // "error" | "warning" | "info" | "hint"
 	Message  string
 	Source   string
+}
+
+// FileDiagnostics is the diagnostics of one open document, for AllDiagnostics.
+type FileDiagnostics struct {
+	Path        string
+	Diagnostics []DiagnosticInfo
 }
 
 // ---------- windows, virtual buffers (stages S17, S18) ----------

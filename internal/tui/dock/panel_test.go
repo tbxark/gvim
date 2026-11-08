@@ -98,6 +98,13 @@ func (f *fakeTerm) SearchScrollback(query string, limit int) (matches []int, tot
 	return matches, len(f.history)
 }
 
+// SearchScrollbackMode finds the history rows that match query with the search
+// options. The fake's query is matched as plain text.
+func (f *fakeTerm) SearchScrollbackMode(query string, regex, matchCase bool, limit int) (matches []int, total int, err error) {
+	matches, total = f.SearchScrollback(query, limit)
+	return matches, total, nil
+}
+
 func (f *fakeTerm) WorkingDirectory() string { return f.cwd }
 func (f *fakeTerm) AltScreen() bool          { return f.alt }
 func (f *fakeTerm) MouseReporting() (reporting, drag, allMotion bool) {
@@ -122,9 +129,11 @@ func fakeLine(text string) terminal.Line {
 type fakeStarter struct {
 	term *fakeTerm
 	err  error
+	dirs []string
 }
 
 func (s *fakeStarter) Start(dir string, cols, rows int) (Terminal, error) {
+	s.dirs = append(s.dirs, dir)
 	if s.err != nil {
 		return nil, s.err
 	}

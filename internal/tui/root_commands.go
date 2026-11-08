@@ -45,6 +45,12 @@ func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 		return m.openScratch(dumpConfig(m.util.settings)), true
 	case "dump_ui_tree":
 		return m.openScratch(m.uiTree()), true
+	case "inspect_theme_at_cursor":
+		m.inspectThemeAtCursor()
+		return nil, true
+	case "edit_theme":
+		m.openThemeEditor()
+		return nil, true
 	default:
 		return m.notApplicableNotice(action)
 	}
@@ -58,6 +64,9 @@ func (m *Model) featureMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return cmd, true
 	}
 	if cmd, ok := m.settingsMessage(msg); ok {
+		return cmd, true
+	}
+	if cmd, ok := m.themeEditorMessage(msg); ok {
 		return cmd, true
 	}
 	if cmd, ok := m.clipMessage(msg); ok {

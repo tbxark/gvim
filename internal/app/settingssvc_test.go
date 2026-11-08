@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/apptest"
@@ -226,8 +227,13 @@ func TestSettingsReloadRereadsTheFiles(t *testing.T) {
 	if !slices.Contains(change.Live, "editor.tab_size") {
 		t.Errorf("Live = %v, want the changed tab size", change.Live)
 	}
-	if slices.Contains(change.Live, "theme") {
-		t.Errorf("Live = %v, want only the settings that changed", change.Live)
+	// The theme is always re-applied on a Reload: a user theme file edited on
+	// disk is read again by the registry reload.
+	if !slices.Contains(change.Live, "theme") {
+		t.Errorf("Live = %v, want the re-applied theme", change.Live)
+	}
+	if len(change.Live) != 2 {
+		t.Errorf("Live = %v, want the changed tab size and the theme", change.Live)
 	}
 	if !change.Reload {
 		t.Error("change.Reload is false, want a Reload change")
@@ -311,8 +317,10 @@ func TestSettingsReloadNoChanges(t *testing.T) {
 	apptest.Must(t, err)
 	change, err := settingsPort(t, got).Reload()
 	apptest.Must(t, err)
-	if len(change.Live) != 0 || len(change.Restart) != 0 {
-		t.Fatalf("Live = %v, Restart = %v, want no changes", change.Live, change.Restart)
+	// Nothing in the config changed, but the theme is always re-applied so an
+	// edited user theme file is hot-reloaded; the restart set stays quiet.
+	if !slices.Equal(change.Live, []string{"theme"}) || len(change.Restart) != 0 {
+		t.Fatalf("Live = %v, Restart = %v, want only the re-applied theme", change.Live, change.Restart)
 	}
 	if !change.Reload {
 		t.Error("change.Reload is false")
@@ -551,5 +559,55 @@ func TestSettingsStructureProjectNeedsTrust(t *testing.T) {
 	apptest.Must(t, err)
 	if _, err := settingsPort(t, got).Structure("formatters", tui.SettingsLayerProject); err == nil || !strings.Contains(err.Error(), "trusted workspace") {
 		t.Fatalf("Structure for the project layer = %v, want the trust refusal", err)
+	}
+}
+
+// TestSaveDoesNotHoldTheStateLockAcrossFileIO checks the R4-3 fix: Save holds the
+// state mutex only for validation, so a Snapshot answers while the file write is
+// blocked; ioMu serializes the writes themselves.
+func TestSaveDoesNotHoldTheStateLockAcrossFileIO(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "config.json")
+	writeTestFile(t, userFile, "{}")
+	got, err := buildCaptured(t, Options{Root: dir, Config: userFile})
+	apptest.Must(t, err)
+	port := settingsPort(t, got)
+
+	original := patchConfigFileFn
+	t.Cleanup(func() { patchConfigFileFn = original })
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	patchConfigFileFn = func(path string, edits []config.Edit) error {
+		close(entered)
+		<-release
+		return original(path, edits)
+	}
+
+	saveErr := make(chan error, 1)
+	go func() {
+		_, err := port.Save([]tui.SettingEdit{{Key: "editor.tab_size", Value: "8"}}, tui.SettingsLayerUser)
+		saveErr <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Save never reached the file write")
+	}
+
+	// While the write is blocked the state lock must be free.
+	snapped := make(chan tui.SettingsSnapshot, 1)
+	go func() { snapped <- port.Snapshot() }()
+	select {
+	case snap := <-snapped:
+		if item := findItem(t, snap, "editor.tab_size"); item.Value != "4" {
+			t.Errorf("snapshot tab_size = %q, want the pre-save 4", item.Value)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Snapshot blocked behind a Save's file IO")
+	}
+	close(release)
+	if err := <-saveErr; err != nil {
+		t.Fatalf("Save error = %v", err)
 	}
 }

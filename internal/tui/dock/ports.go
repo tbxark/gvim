@@ -44,8 +44,10 @@ type Terminal interface {
 	Scrollback(from, count int) (lines []terminal.Line, total int)
 	ScrollbackLen() int
 	// SearchScrollback looks for query in the history and returns the matching
-	// row indexes, oldest first.
+	// row indexes, oldest first. SearchScrollbackMode is the same search with a
+	// regular expression and case option.
 	SearchScrollback(query string, limit int) (matches []int, total int)
+	SearchScrollbackMode(query string, regex, matchCase bool, limit int) (matches []int, total int, err error)
 	// WorkingDirectory is the directory the shell reported with OSC 7, or "".
 	WorkingDirectory() string
 	// AltScreen reports whether the shell is on the alternate screen.
@@ -88,6 +90,14 @@ type Effects struct {
 	// mouse to the shell only when the shell asked for it; "alt_screen" sends it
 	// to every alternate-screen program.
 	MouseForwarding string
+	// StayInScrollback is terminal.jump_to_end_on_output = false: new output does
+	// not pull the reader back to the live screen. A text selection always holds
+	// the view, whatever this says.
+	StayInScrollback bool
+	// NoMouseDragSelects is terminal.mouse_drag_selects = false: a drag on the
+	// live grid does not select text. A drag in scrollback, and a Shift+drag that
+	// bypasses forwarding, still select.
+	NoMouseDragSelects bool
 }
 
 // Ports are the terminal dock's ports. A nil Starter means the dock cannot start a

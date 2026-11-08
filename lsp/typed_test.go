@@ -332,3 +332,73 @@ func TestTypedRequests(t *testing.T) {
 	}
 	nextRequest[*protocol.FoldingRangeParams](t, f.srv, "folding range params")
 }
+
+func TestPullDiagnostics(t *testing.T) {
+	items := []protocol.Diagnostic{{
+		Range:    rng(1, 0, 1, 3),
+		Severity: protocol.DiagnosticSeverityWarning,
+		Message:  protocol.String("warned"),
+	}}
+	f := newFixture(t, Config{}, nil)
+	ctx := newTestContext(t)
+	f.srv.Canned.PullItems = items
+	f.srv.Canned.PullResultID = "r1"
+
+	got, err := f.client.PullDiagnostics(ctx, reqDocURI, "")
+	if err != nil {
+		t.Fatalf("PullDiagnostics: %v", err)
+	}
+	p := nextRequest[*protocol.DocumentDiagnosticParams](t, f.srv, "diagnostic params")
+	if string(p.TextDocument.URI) != reqDocURI {
+		t.Fatalf("diagnostic params uri = %q, want %q", p.TextDocument.URI, reqDocURI)
+	}
+	if got.Unchanged || got.ResultID != "r1" || len(got.Items) != 1 {
+		t.Fatalf("pull = %+v, want one full item with result r1", got)
+	}
+}
+
+func TestPullDiagnosticsUnchanged(t *testing.T) {
+	f := newFixture(t, Config{}, nil)
+	ctx := newTestContext(t)
+	f.srv.Canned.PullUnchanged = true
+	f.srv.Canned.PullResultID = "r2"
+	got, err := f.client.PullDiagnostics(ctx, reqDocURI, "r1")
+	if err != nil {
+		t.Fatalf("PullDiagnostics: %v", err)
+	}
+	if !got.Unchanged || got.ResultID != "r2" || len(got.Items) != 0 {
+		t.Fatalf("pull = %+v, want unchanged with result r2", got)
+	}
+}
+
+func TestDiagnosticPullCapability(t *testing.T) {
+	f := newFixture(t, Config{}, nil)
+	ctx := newTestContext(t)
+	if _, err := f.client.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if f.client.Capabilities().DiagnosticPull {
+		t.Fatal("pull diagnostics on before the server advertised the provider")
+	}
+	// A server that registered textDocument/diagnostic dynamically can pull.
+	if err := f.srv.RegisterCapability(ctx, &protocol.RegistrationParams{
+		Registrations: []protocol.Registration{{ID: "diag", Method: "textDocument/diagnostic"}},
+	}); err != nil {
+		t.Fatalf("registerCapability: %v", err)
+	}
+	if !f.client.Capabilities().DiagnosticPull {
+		t.Fatal("pull diagnostics off after the dynamic registration")
+	}
+}
+
+func TestInitializeWithDiagnosticProvider(t *testing.T) {
+	f := newFixture(t, Config{}, nil)
+	ctx := newTestContext(t)
+	f.srv.Canned.Caps = protocol.ServerCapabilities{DiagnosticProvider: &protocol.DiagnosticOptions{}}
+	if _, err := f.client.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if !f.client.Capabilities().DiagnosticPull {
+		t.Fatal("pull diagnostics off although the initialize result advertised diagnosticProvider")
+	}
+}

@@ -159,7 +159,7 @@ func TestSearchRunsAfterDebounceOverThePorts(t *testing.T) {
 		t.Fatalf("stats = %d matches in %d files, truncated %v; want 3 in 2", matches, files, truncated)
 	}
 	g := draw(p, 100, 30)
-	for _, want := range []string{"3 matches in 2 files", "a.go (2)", "b.go (1)", "2:3", "foo bar"} {
+	for _, want := range []string{"3 matches in 2 files", "a.go (2/2)", "b.go (1/1)", "2:3", "foo bar"} {
 		if !hasRow(g, want) {
 			t.Errorf("the panel does not show %q:\n%s", want, g)
 		}
@@ -238,8 +238,12 @@ func TestFocusCycleFoldingAndOpening(t *testing.T) {
 	s := &fakeSearcher{result: sampleResult()}
 	p := New(searchOptions(s))
 	search(t, p, "foo")
-	// Tab walks search -> replace -> results.
+	// Tab walks search -> replace -> files -> results.
 	p.Update(specialKey(tea.KeyTab))
+	p.Update(specialKey(tea.KeyTab))
+	if p.focus != focusGlob {
+		t.Fatalf("second Tab gave focus %v, want the files field", p.focus)
+	}
 	p.Update(specialKey(tea.KeyTab))
 	if p.focus != focusResults {
 		t.Fatalf("focus = %v, want the result rows", p.focus)
@@ -266,7 +270,7 @@ func TestFocusCycleFoldingAndOpening(t *testing.T) {
 	if got := len(p.rows); got != 3 {
 		t.Fatalf("rows after folding = %d, want the two headers and b.go's match", got)
 	}
-	if !hasRow(draw(p, 100, 30), "▸ a.go (2)") {
+	if !hasRow(draw(p, 100, 30), "[x] ▸ a.go (2/2)") {
 		t.Fatal("the folded file row has no folded mark")
 	}
 }
@@ -305,7 +309,7 @@ func TestReplaceWithoutMatchesSaysSo(t *testing.T) {
 	s := &fakeSearcher{result: SearchResult{}}
 	p := New(searchOptions(s))
 	search(t, p, "foo")
-	if cmd := p.replaceCmd(); cmd != nil {
+	if cmd := p.replaceCmd(false); cmd != nil {
 		t.Fatal("Alt+Enter with no matches returned a command")
 	}
 	if p.errText != "No matches to replace" {
@@ -392,7 +396,7 @@ func TestGitModeIsReadOnly(t *testing.T) {
 			t.Fatalf("key %v started a command in Git Grep mode", k)
 		}
 	}
-	if cmd := p.replaceCmd(); cmd != nil {
+	if cmd := p.replaceCmd(false); cmd != nil {
 		t.Fatal("Git Grep offered a replacement")
 	}
 	if p.errText != "Git Grep is read-only" {
@@ -444,6 +448,10 @@ func TestCoversAndCursor(t *testing.T) {
 	if _, y, ok := p.Cursor(100, 30); !ok || y != geo.replY {
 		t.Fatalf("Cursor after Tab = %d, %v; want the replacement row", y, ok)
 	}
+	p.Update(specialKey(tea.KeyTab))
+	if _, y, ok := p.Cursor(100, 30); !ok || y != geo.globY {
+		t.Fatalf("Cursor after the second Tab = %d, %v; want the files row", y, ok)
+	}
 	p.Update(specialKey(tea.KeyTab)) // results: no caret
 	if _, _, ok := p.Cursor(100, 30); ok {
 		t.Fatal("the result rows show a caret")
@@ -469,5 +477,279 @@ func TestEscCloses(t *testing.T) {
 	next, _ := p.Update(specialKey(tea.KeyEscape))
 	if next != nil || p.Active() {
 		t.Fatal("Esc did not close the panel")
+	}
+}
+
+// resultPanel returns a panel with sampleResult searched, ready for the row keys.
+func resultPanel(t *testing.T) (*Panel, *fakeSearcher) {
+	t.Helper()
+	s := &fakeSearcher{result: sampleResult()}
+	p := New(searchOptions(s))
+	search(t, p, "foo")
+	return p, s
+}
+
+// selectResultRows moves the panel's focus to the result rows.
+func selectResultRows(p *Panel) {
+	p.Update(specialKey(tea.KeyTab))
+	p.Update(specialKey(tea.KeyTab))
+	p.Update(specialKey(tea.KeyTab))
+}
+
+func TestCheckboxesCascadeAndReplaceAllCounts(t *testing.T) {
+	t.Parallel()
+	p, _ := resultPanel(t)
+	if matches, files := p.ReplaceCount(); matches != 3 || files != 2 {
+		t.Fatalf("a fresh result has %d checked matches in %d files, want all", matches, files)
+	}
+	if !hasRow(draw(p, 100, 30), "[x] ▾ a.go (2/2)") {
+		t.Fatal("the file row does not show its checked count")
+	}
+	selectResultRows(p)
+	// Space on the a.go header unchecks its two matches together.
+	p.Update(specialKey(tea.KeySpace))
+	if matches, files := p.ReplaceCount(); matches != 1 || files != 1 {
+		t.Fatalf("after unchecking a.go: %d checked in %d files", matches, files)
+	}
+	g := draw(p, 100, 30)
+	if !hasRow(g, "[ ] ▾ a.go (0/2)") || !hasRow(g, "1 selected") {
+		t.Fatalf("the unchecked file and the selected count are not shown:\n%s", g)
+	}
+	// Space again checks the whole file.
+	p.Update(specialKey(tea.KeySpace))
+	if matches, _ := p.ReplaceCount(); matches != 3 {
+		t.Fatalf("after rechecking a.go: %d checked", matches)
+	}
+	// A match row's own box toggles alone.
+	p.Update(specialKey(tea.KeyDown))
+	p.Update(specialKey(tea.KeySpace))
+	if matches, files := p.ReplaceCount(); matches != 2 || files != 2 {
+		t.Fatalf("after unchecking one match: %d checked in %d files", matches, files)
+	}
+	if !hasRow(draw(p, 100, 30), "[ ] ▾ a.go (1/2)") {
+		t.Fatal("the partially checked file does not show 1/2")
+	}
+	// a checks all, n checks none.
+	p.Update(typedKey('a'))
+	if matches, _ := p.ReplaceCount(); matches != 3 {
+		t.Fatalf("after a: %d checked", matches)
+	}
+	p.Update(typedKey('n'))
+	if matches, _ := p.ReplaceCount(); matches != 0 {
+		t.Fatalf("after n: %d checked", matches)
+	}
+	if cmd := p.replaceCmd(false); cmd != nil || p.errText != "No matches selected" {
+		t.Fatalf("Replace All with nothing checked = %v, %q", cmd, p.errText)
+	}
+}
+
+func TestReplaceAllRequestCarriesTheCheckedMatches(t *testing.T) {
+	t.Parallel()
+	p, _ := resultPanel(t)
+	selectResultRows(p)
+	p.Update(specialKey(tea.KeyDown)) // the first match of a.go
+	p.Update(specialKey(tea.KeySpace))
+	req, ok := p.ReplaceRequest()
+	if !ok {
+		t.Fatal("ReplaceAll with checked matches returned no request")
+	}
+	if req.Matches != 2 || len(req.Files) != 2 {
+		t.Fatalf("request = %d matches in %d files, want the two still checked", req.Matches, len(req.Files))
+	}
+	if got := req.Files[0].Selected; len(got) != 1 || got[0] != (Position{Line: 4, Col: 0}) {
+		t.Fatalf("a.go selected = %+v, want only its second match", got)
+	}
+	if got := req.Files[1].Selected; len(got) != 1 || got[0] != (Position{Line: 0, Col: 0}) {
+		t.Fatalf("b.go selected = %+v, want its only match", got)
+	}
+}
+
+func TestScopedReplaceUsesTheFocusedRow(t *testing.T) {
+	t.Parallel()
+	p, _ := resultPanel(t)
+	selectResultRows(p)
+	// The a.go header replaces its checked matches.
+	if req, ok := p.ScopedReplaceRequest(); !ok || req.Matches != 2 || len(req.Files) != 1 || req.Files[0].Name != "a.go" {
+		t.Fatalf("scoped on a file row = %+v, %v", req, ok)
+	}
+	// The first match row replaces that match alone.
+	p.Update(specialKey(tea.KeyDown))
+	req, ok := p.ScopedReplaceRequest()
+	if !ok || req.Matches != 1 || len(req.Files) != 1 || len(req.Files[0].Selected) != 1 {
+		t.Fatalf("scoped on a match row = %+v, %v", req, ok)
+	}
+	if got := req.Files[0].Selected[0]; got != (Position{Line: 1, Col: 2}) {
+		t.Fatalf("scoped position = %+v, want the first match", got)
+	}
+	// An unchecked match row has nothing to replace.
+	p.Update(specialKey(tea.KeySpace))
+	if _, ok := p.ScopedReplaceRequest(); ok || p.errText != "The focused match is not checked" {
+		t.Fatalf("scoped on an unchecked match = %v, %q", ok, p.errText)
+	}
+	// A file row with every match unchecked says so.
+	p.Update(specialKey(tea.KeyUp)) // back to the a.go header
+	p.Update(typedKey('n'))         // no match checked
+	if _, ok := p.ScopedReplaceRequest(); ok || p.errText != "No checked matches in this file" {
+		t.Fatalf("scoped on an unchecked file = %v, %q", ok, p.errText)
+	}
+}
+
+func TestShiftEnterEmitsTheScopedRequest(t *testing.T) {
+	t.Parallel()
+	p, _ := resultPanel(t)
+	selectResultRows(p)
+	cmd := p.fieldKey(t, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	if cmd == nil {
+		t.Fatal("Shift+Enter returned no command")
+	}
+	msg, ok := cmd().(ReplaceRequestMsg)
+	if !ok || msg.Request.Matches != 2 {
+		t.Fatalf("Shift+Enter emitted %#v", cmd())
+	}
+	// Alt+Enter still emits all checked matches.
+	cmd = p.fieldKey(t, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
+	if msg, ok := cmd().(ReplaceRequestMsg); !ok || msg.Request.Matches != 3 {
+		t.Fatalf("Alt+Enter emitted %#v", cmd())
+	}
+}
+
+func TestGlobFiltersTheFilesSentToTheSearch(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: sampleResult()}
+	o := Options{
+		Root:     "/w",
+		Files:    fakeFiles{files: []string{"a.go", "b.txt", "sub/c.go"}},
+		Searcher: s,
+		Glob:     "*.go",
+	}
+	p := New(o)
+	search(t, p, "foo")
+	if len(s.reqs) != 1 {
+		t.Fatalf("searches = %d", len(s.reqs))
+	}
+	got := s.reqs[0].Files
+	want := []string{"a.go", "sub/c.go"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("globbed files = %v, want %v", got, want)
+	}
+	if p.Glob() != "*.go" {
+		t.Fatalf("panel glob = %q", p.Glob())
+	}
+}
+
+func TestInvalidGlobBlocksTheSearchAndSaysSo(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: sampleResult()}
+	o := Options{Root: "/w", Files: fakeFiles{files: []string{"a.go"}}, Searcher: s, Glob: "src/["}
+	p := New(o)
+	search(t, p, "foo")
+	if len(s.reqs) != 0 {
+		t.Fatalf("an invalid glob still searched: %+v", s.reqs)
+	}
+	if !strings.Contains(p.errText, "Bad glob") {
+		t.Fatalf("errText = %q", p.errText)
+	}
+	if !hasRow(draw(p, 100, 30), "Bad glob") {
+		t.Fatal("the bad glob is not shown")
+	}
+}
+
+func TestGlobFieldIsDrawnBetweenReplaceAndOptions(t *testing.T) {
+	t.Parallel()
+	p := New(searchOptions(&fakeSearcher{}))
+	g := draw(p, 100, 30)
+	if !hasRow(g, "Files:") {
+		t.Fatalf("the files field row is not drawn:\n%s", g)
+	}
+	geo := layoutFor(100, 30, false)
+	if geo.globY != geo.replY+1 || geo.globY != geo.optY-1 {
+		t.Fatalf("geometry = %+v, want the glob row between the replacement and option rows", geo)
+	}
+}
+
+func TestHistoryWalksTheSearchedPatterns(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: sampleResult()}
+	p := New(searchOptions(s))
+	search(t, p, "foo")
+	p.query.SetValue("")
+	search(t, p, "bar")
+	if got := p.History(); len(got) != 2 || got[0] != "bar" || got[1] != "foo" {
+		t.Fatalf("history = %v, want [bar foo]", got)
+	}
+	// Up walks to the newest earlier pattern and searches it.
+	cmd := p.walkHistory(true)
+	if cmd == nil {
+		t.Fatal("Up returned no command")
+	}
+	step(t, p, cmd)
+	if p.Query() != "bar" {
+		t.Fatalf("first Up gave %q, want bar", p.Query())
+	}
+	// A second Up goes one older.
+	step(t, p, p.walkHistory(true))
+	if p.Query() != "foo" {
+		t.Fatalf("second Up gave %q, want foo", p.Query())
+	}
+	// Down comes back, and past the newest restores the draft.
+	step(t, p, p.walkHistory(false))
+	if p.Query() != "bar" {
+		t.Fatalf("Down gave %q, want bar", p.Query())
+	}
+	step(t, p, p.walkHistory(false))
+	if p.Query() != "bar" {
+		t.Fatalf("Down past the newest gave %q, want the draft it started from", p.Query())
+	}
+	if got := p.History(); len(got) != 2 {
+		t.Fatalf("walking changed the history: %v", got)
+	}
+}
+
+func TestExportItemsGroupTheMatches(t *testing.T) {
+	t.Parallel()
+	p, _ := resultPanel(t)
+	items := p.ExportItems()
+	if len(items) != 5 {
+		t.Fatalf("items = %d, want two headers and three matches", len(items))
+	}
+	if !items[0].Header || items[0].Name != "a.go (2)" || items[1].Path != "/w/a.go" || items[1].Line != 2 {
+		t.Fatalf("first items = %+v", items[:2])
+	}
+	if !items[3].Header || items[3].Name != "b.go (1)" || items[4].Text != "1:1  foo" {
+		t.Fatalf("b.go items = %+v", items[3:])
+	}
+}
+
+func TestAltQEmitsTheExport(t *testing.T) {
+	t.Parallel()
+	p, _ := resultPanel(t)
+	cmd := p.fieldKey(t, tea.KeyPressMsg{Code: 'q', Mod: tea.ModAlt})
+	if cmd == nil {
+		t.Fatal("Alt+Q returned no command")
+	}
+	if _, ok := cmd().(ExportMsg); !ok {
+		t.Fatalf("Alt+Q emitted %T", cmd())
+	}
+	empty := New(searchOptions(&fakeSearcher{}))
+	empty.Update(typedKey('x')) // any key clears the notice
+	cmd = empty.fieldKey(t, tea.KeyPressMsg{Code: 'q', Mod: tea.ModAlt})
+	if cmd != nil || empty.errText != "No matches to list" {
+		t.Fatalf("Alt+Q with no results = %v, %q", cmd, empty.errText)
+	}
+}
+
+func TestGitModeCanExportItsResults(t *testing.T) {
+	t.Parallel()
+	g := &fakeGrepper{result: GitResult{Files: []FileMatches{{
+		Path: "a.go", Name: "a.go", Matches: []Match{{Line: 1, Col: 1, Len: 3, Text: "foo"}},
+	}}}}
+	p := New(Options{Root: "/r", Git: true, Grepper: g})
+	search(t, p, "foo")
+	cmd := p.exportCmd()
+	if cmd == nil {
+		t.Fatal("Git Grep results could not be listed")
+	}
+	if items := p.ExportItems(); len(items) != 2 || !items[0].Header {
+		t.Fatalf("git export items = %+v", items)
 	}
 }

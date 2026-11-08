@@ -57,6 +57,69 @@ func init() {
 	registerAwait("ui_confirm", awaitConfirm)
 	registerAwait("ui_choose", awaitChoose)
 	registerAwait("ui_pick", awaitPick)
+	registerAwait("ui_action_popup", awaitActionPopup)
+}
+
+// Caps of an action popup and of a prompt's suggestion list.
+const (
+	maxActionPopupActions = 16
+	maxActionPopupLabel   = 200
+	maxActionPopupID      = 128
+	maxActionPopupMessage = 4 << 10
+	maxPromptSuggestionN  = 100
+	maxSuggestionText     = 512
+	maxSuggestionValue    = 4096
+)
+
+// awaitActionPopup is gvim.ui.action_popup(opts): a message with action buttons. It returns
+// the id of the chosen action, or nil when the popup closed without a choice.
+func awaitActionPopup(c *awaitCall) {
+	t, ok := bufOptional(c, 0, "action_popup")
+	if !ok {
+		return
+	}
+	o := bufTableOpts{t: t}
+	spec := pluginapi.ActionPopupSpec{
+		Title:   clipText(optString(&o, "title"), maxActionPopupLabel),
+		Message: clipText(optString(&o, "message"), maxActionPopupMessage),
+	}
+	actions, ok := o.get("actions").(*lua.LTable)
+	if !ok {
+		c.Bad(1, "action_popup", "option 'actions': table expected")
+		return
+	}
+	if actions.Len() == 0 || actions.Len() > maxActionPopupActions {
+		c.Fail(pluginapi.Errf(pluginapi.CodeInvalid, "an action popup takes 1 to %d actions", maxActionPopupActions))
+		return
+	}
+	for i := 1; i <= actions.Len(); i++ {
+		at, ok := actions.RawGetInt(i).(*lua.LTable)
+		if !ok {
+			c.Bad(1, "action_popup", "option 'actions': tables expected")
+			return
+		}
+		ao := bufTableOpts{t: at}
+		action := pluginapi.ActionPopupAction{
+			ID:    clipText(optString(&ao, "id"), maxActionPopupID),
+			Label: clipText(optString(&ao, "label"), maxActionPopupLabel),
+		}
+		if ao.err != "" {
+			c.Bad(1, "action_popup", ao.err)
+			return
+		}
+		if action.ID == "" || action.Label == "" {
+			c.Fail(invalidErr("action %d needs an id and a label", i))
+			return
+		}
+		spec.Actions = append(spec.Actions, action)
+	}
+	if o.err != "" {
+		c.Bad(1, "action_popup", o.err)
+		return
+	}
+	c.openWait("action_popup", func(tok pluginapi.Token) error {
+		return c.r.guard.ShowActionPopup(tok, overlaySeq.Add(1), spec)
+	}, nil)
 }
 
 // clipText cuts s to at most n bytes on a rune boundary.
@@ -973,10 +1036,49 @@ func installUI(e *apiEnv) {
 	ui.RawSetString("select", res[0])
 	installPicker(e, ui, st)
 	installPopup(e, ui, st)
+	ui.RawSetString("action_popup", e.async("ui_action_popup"))
 
 	e.set(ui, "focus", func(L *lua.LState) int {
 		return bufTrue(L, r.guard.Focus(L.CheckString(1)))
 	})
+	// gvim.ui.set_prompt_suggestions(items, selected?) replaces the completion list of the
+	// plugin prompt on screen. It is called from the prompt's on_change callback.
+	e.set(ui, "set_prompt_suggestions", func(L *lua.LState) int {
+		list := L.CheckTable(1)
+		if list.Len() > maxPromptSuggestionN {
+			return bufRet(L, pluginapi.Errf(pluginapi.CodeLimit, "a prompt takes at most %d suggestions", maxPromptSuggestionN))
+		}
+		items := make([]pluginapi.PromptSuggestion, 0, list.Len())
+		for i := 1; i <= list.Len(); i++ {
+			v := list.RawGetInt(i)
+			it := pluginapi.PromptSuggestion{}
+			switch x := v.(type) {
+			case lua.LString:
+				it.Text = clipText(string(x), maxSuggestionText)
+			case *lua.LTable:
+				o := bufTableOpts{t: x}
+				it.Text = clipText(optString(&o, "text"), maxSuggestionText)
+				it.Description = clipText(optString(&o, "description"), maxSuggestionText)
+				it.Value = clipText(optString(&o, "value"), maxSuggestionValue)
+				it.Disabled = o.boolean("disabled", false)
+				if o.err != "" {
+					return bufRet(L, invalidErr("suggestion %d: %s", i, o.err))
+				}
+			default:
+				return bufRet(L, invalidErr("suggestion %d must be a string or a table", i))
+			}
+			if it.Text == "" && it.Value == "" {
+				return bufRet(L, invalidErr("suggestion %d is empty", i))
+			}
+			items = append(items, it)
+		}
+		selected := 0
+		if L.Get(2) != lua.LNil {
+			selected = clampInt(float64(L.CheckNumber(2))) - 1
+		}
+		return bufTrue(L, r.guard.SetPromptSuggestions(items, selected))
+	})
+
 	e.set(ui, "size", func(L *lua.LState) int {
 		w, h := r.guard.ScreenSize()
 		t := L.NewTable()

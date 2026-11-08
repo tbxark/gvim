@@ -83,7 +83,11 @@ type Source struct {
 	Dir           string // "" for single-file and buffer plugins
 	File          string // absolute path of the entry file; "" for bundled and buffer plugins
 	Main          string // entry file, relative to the plugin; "" means init.lua
-	Compiled      map[string]*Compiled
+	// I18nJSON is the plugin's <name>.i18n.json sibling: a JSON object of locale -> key ->
+	// text ("" when the plugin has none). Read by the loader in Work, before the plugin
+	// runs.
+	I18nJSON string
+	Compiled map[string]*Compiled
 	// Settings and ProjectSettings are plugins.<name>.settings of the user and of the project
 	// layer of the config; gvim.settings.define merges them over the defaults (AMENDMENTS C11).
 	Settings, ProjectSettings map[string]any
@@ -133,7 +137,12 @@ type plugin struct {
 	stormDrains int // consecutive Drains that hit the cascade cap with this plugin's events queued
 	userStorm   int // consecutive cut Drains with this plugin's tasks or commands still queued
 
-	commands   map[string]*command
+	commands map[string]*command
+	panels   map[pluginapi.PanelID]bool // the widget panels the plugin mounted (api_panel.go)
+	// i18n is the plugin's translation table by locale (api_i18n.go); nil when it has none.
+	i18n map[string]map[string]string
+	// menuItems are the rows the plugin added to the menu bar (api_menu.go).
+	menuItems  []pluginapi.MenuItem
 	bindWarned map[string]bool // key bindings of an unknown action already named (lint_bindings.go)
 	subs       map[string][]*subscription
 	nsubs      int
@@ -330,6 +339,9 @@ func (r *Runtime) LoadPlugin(s Source) error {
 		areas: map[string]*lua.LTable{}, mk: map[string]lua.LValue{}, mkv: map[string]lua.LValue{},
 		feature: map[string]bool{},
 		data:    dataState{user: s.Settings, project: s.ProjectSettings},
+	}
+	if s.I18nJSON != "" {
+		p.i18n = parseI18n(r, p.name, s.I18nJSON)
 	}
 	r.plugins[p.name] = p
 	r.order = append(r.order, p)

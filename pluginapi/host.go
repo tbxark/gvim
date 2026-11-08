@@ -99,14 +99,33 @@ type UIHost interface {
 	ClosePicker(id uint64)
 	ShowPopup(t Token, id uint64, o PopupSpec) error
 	ClosePopup(id uint64)
+	// ShowActionPopup shows a message with action buttons; the wait t resolves with the
+	// chosen action id (Values{string}), or nil when it closed without one.
+	ShowActionPopup(t Token, id uint64, o ActionPopupSpec) error
+	// SetPromptSuggestions replaces the suggestion list of the plugin's open prompt and the
+	// selected row (0-based, -1 for none). An empty list closes it. CodeNotFound when no
+	// plugin prompt is open.
+	SetPromptSuggestions(items []PromptSuggestion, selected int) error
 	WaitKey(t Token, timeoutMS int) error // async: Values{Key} or Err "timeout"/"cancelled"
 	CancelWait(t Token)
+	// Declarative widget panels and sidebar sections (tier 1a). Mount, update and
+	// command are cheap validation + state writes on the UI goroutine; the panel keeps
+	// the focus, the instance state of its widgets and its placement. OwnerGone drops
+	// every panel a plugin mounted.
+	MountWidgetPanel(plugin string, id PanelID, o WidgetMount) error
+	UpdateWidgetPanel(plugin string, id PanelID, p WidgetPanel) error
+	UnmountWidgetPanel(id PanelID)
+	WidgetCommand(id PanelID, a WidgetAction) error
+	WidgetMutate(id PanelID, m WidgetMutation) error
 	// Registrations: whole-set replace per plugin, idempotent, cheap.
 	SetCommands(plugin string, cmds []CommandInfo)
 	SetBindings(plugin string, b []Binding)
 	SetModes(plugin string, m []ModeInfo)
 	SetContext(plugin, name string, on bool)
 	SetStatusItems(plugin string, items []StatusItem)
+	// SetMenuItems replaces the plugin's menu bar rows (whole-set replace, like the other
+	// registrations). OwnerGone drops them.
+	SetMenuItems(plugin string, items []MenuItem)
 	SetInputMode(plugin, mode string) error // "" clears
 	SetClipboard(text string)
 	Focus(area string) error // "editor" | "explorer"
@@ -133,7 +152,16 @@ type WorkspaceHost interface {
 	Config(key string) (any, bool)                  // allowlisted effective settings
 	Theme() ThemeInfo
 	ThemeColor(key string) (r, g, b uint8, ok bool)
+	// ThemeNames lists the themes the editor has built in, sorted.
+	ThemeNames() []string
+	// ThemeOverrides is the current session override map ("section.key" -> text color),
+	// and whether one is set. SetThemeOverrides replaces it; an empty or nil map clears
+	// it. The editor applies overrides on top of the active theme and resets them on the
+	// next theme change; validation errors are reported to the plugin.
+	ThemeOverrides() (map[string]string, bool)
+	SetThemeOverrides(overrides map[string]string) error
 	Diagnostics(id BufferID) ([]DiagnosticInfo, error)                // stage S23
+	AllDiagnostics() ([]FileDiagnostics, error)                       // every open document, by path
 	LSPRequest(t Token, id BufferID, method string, params any) error // stage S23, async
 }
 

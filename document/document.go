@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/encoding"
+	"github.com/tbxark/gvim/fold"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -39,6 +40,12 @@ type Document struct {
 
 	// foldMemo is the fold ranges found last, see Folds.
 	FoldMemo foldMemo
+	// externalFolds are the fold ranges an external source (a language server)
+	// gave for the current text, ordered by start line, and externalRev counts the
+	// sets. Folds merges them with the indentation folds; the revision invalidates
+	// the fold memo. See SetExternalFolds.
+	externalFolds []fold.Range
+	externalRev   uint64
 	// changesMemo is the change marks computed last, see MemoChanges.
 	ChangesMemo changesMemo
 	// valueMemo holds what MemoValue kept for the current text.

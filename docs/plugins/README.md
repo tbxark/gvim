@@ -58,6 +58,10 @@ Everything the editor offers is in the `gvim` table, which you get with
 `local gvim = require "gvim"`. There are no other injected globals beyond the standard library
 (see [api-data.md](api-data.md)) and `json`, `re`, `utf8` and `bit`.
 
+## API level
+
+The runtime reports `gvim.api_version`; this gvim is **level 2**. A plugin manifest may ask for a minimum level with `"api": 2`. Level 2 adds the read-mostly plugin host surfaces: declarative widget panels and sidebar sections (`gvim.ui.mount_widget_panel` and friends), `gvim.i18n`, `gvim.menu` row hooks, `gvim.ui.action_popup`, prompt suggestions (`gvim.ui.set_prompt_suggestions`), the all-files diagnostics `gvim.lsp.all_diagnostics`, the `lsp_status_clicked`/`lsp_server_error` and `widget_event` events, and `gvim.theme.override`/`gvim.theme.clear`. Everything of level 1 keeps working.
+
 ## Where plugins live
 
 | Source | Location | Notes |

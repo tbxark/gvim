@@ -411,6 +411,8 @@ func TestDocsQuotasMatchLimits(t *testing.T) {
 		{"status items", plugin.QuotaStatusItems},
 		{"in-flight background jobs", plugin.QuotaWork},
 		{"parked tasks", plugin.QuotaParkedTasks},
+		{"panels mounted", plugin.QuotaPanels},
+		{"menu bar rows", plugin.QuotaMenuItems},
 	}
 	for _, r := range rows {
 		want := fmt.Sprintf("| %s", r.resource)

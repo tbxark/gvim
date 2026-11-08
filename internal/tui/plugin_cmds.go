@@ -61,7 +61,7 @@ var reentrantActions = map[string]bool{
 // all list. Host.Actions reports them with the editor's actions and the palette's.
 var uiActions = []string{
 	"toggle_file_explorer", "focus_file_explorer", "focus_editor", "new", "menu_activate", "menu_open",
-	"reload_config",
+	"reload_config", "edit_theme", "inspect_theme_at_cursor",
 	"toggle_line_numbers", "scroll_tabs_left", "scroll_tabs_right",
 	"file_explorer_search_clear", "file_explorer_search_backspace",
 	"markdown_toc_show", "markdown_toc_close", "markdown_toc_toggle_follow", "markdown_toc_focus",

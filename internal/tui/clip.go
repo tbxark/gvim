@@ -8,7 +8,6 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/popup"
-	"github.com/tbxark/gvim/theme"
 )
 
 // ClipboardWriter is the optional write half of the system clipboard. The ClipboardReader
@@ -91,12 +90,12 @@ func (m *Model) copyFormatted(args map[string]any, text string) tea.Cmd {
 	}
 	st, name := m.panes, ""
 	if n, _ := args["theme"].(string); n != "" {
-		th, err := theme.Load(n)
+		th, _, err := m.loadTheme(n)
 		if err != nil {
 			m.notice = fmt.Sprintf("Copied as plain text: theme %q not found", n)
 			return nil
 		}
-		st, name = editorpane.NewStyles(th), n
+		st, name = editorpane.NewStyles(th), th.Name
 	}
 	html, ok := editorpane.SelectionHTML(m.ed.Active(), st, text)
 	if !ok {

@@ -454,17 +454,75 @@ func (m *Model) openCursorStyles() {
 	m.pushOverlay(v)
 }
 
-// openThemes lists the bundled themes. The current one is marked, and choosing a row
-// applies it.
-func (m *Model) openThemes() {
+// themeInfos returns the available themes. Without a catalog only the bundled
+// themes are offered, which is the behavior tests without an app get.
+func (m *Model) themeInfos() []ThemeInfo {
+	if m.util.themeCatalog != nil {
+		return m.util.themeCatalog.Infos()
+	}
 	names := theme.Names()
-	rows := make([]list.Row, len(names))
-	for i, n := range names {
-		right := ""
-		if n == m.util.settings.Theme {
+	infos := make([]ThemeInfo, len(names))
+	for i, name := range names {
+		infos[i] = ThemeInfo{Name: name, Ref: name, Builtin: true}
+	}
+	return infos
+}
+
+// themeChoices returns the catalog's themes in menubar form, for the Copy with
+// Formatting submenu.
+func (m *Model) themeChoices() []menubar.ThemeChoice {
+	infos := m.themeInfos()
+	choices := make([]menubar.ThemeChoice, len(infos))
+	for i, info := range infos {
+		choices[i] = menubar.ThemeChoice{Name: info.Name, Ref: info.Ref}
+	}
+	return choices
+}
+
+// currentThemeRef returns the config value of the active theme.
+func (m *Model) currentThemeRef() string {
+	if m.themeRef != "" {
+		return m.themeRef
+	}
+	return m.util.settings.Theme
+}
+
+// loadTheme resolves a config theme value through the catalog. Without a
+// catalog it loads a bundled theme by name.
+func (m *Model) loadTheme(ref string) (theme.Theme, string, error) {
+	if ref == "" {
+		ref = "dark"
+	}
+	if m.util.themeCatalog == nil {
+		th, err := theme.Load(ref)
+		return th, ref, err
+	}
+	th, err := m.util.themeCatalog.Load(ref)
+	if err != nil {
+		return theme.Theme{}, "", err
+	}
+	canonical, err := m.util.themeCatalog.Canonical(ref)
+	if err != nil {
+		canonical = ref
+	}
+	return th, canonical, nil
+}
+
+// openThemes lists the available themes: the bundled ones and the user themes.
+// The current one is marked, and choosing a row applies it.
+func (m *Model) openThemes() {
+	infos := m.themeInfos()
+	rows := make([]list.Row, len(infos))
+	current := m.currentThemeRef()
+	for i, info := range infos {
+		right := "user"
+		if info.Builtin {
+			right = "builtin"
+		}
+		if info.Ref == current || info.Name == m.util.settings.Theme {
 			right = "current"
 		}
-		rows[i] = list.Row{Left: n, Right: right, Value: n}
+		rows[i] = list.Row{Left: info.Name, Right: right, Value: info.Ref}
 	}
 	v := list.New("Theme", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
 		v.Close()
@@ -474,26 +532,93 @@ func (m *Model) openThemes() {
 	m.pushOverlay(v)
 }
 
-// applyTheme makes the bundled theme called name the theme of the frame, at once. Every
-// style that the root built from the theme is built again. A theme that does not load
-// keeps the current one.
-func (m *Model) applyTheme(name string) {
-	th, err := theme.Load(name)
+// applyTheme makes the theme a config value names the theme of the frame, at
+// once: the catalog resolves it (so a theme file edited on disk is read again
+// after a Reload), every style the root built from it is rebuilt, and the
+// theme_changed event fires. A theme that does not load keeps the current one.
+func (m *Model) applyTheme(ref string) {
+	th, canonical, err := m.loadTheme(ref)
 	if err != nil {
-		m.notice = "Theme " + name + ": " + err.Error()
+		m.notice = "Theme " + ref + ": " + err.Error()
 		return
 	}
-	st := style.New(th)
 	m.theme = th
+	m.themeRef = canonical
+	// A theme change clears the plugin session overrides, as Fresh does.
+	m.themeOverrides = map[string]string{}
+	m.rebuildTheme()
+	m.util.settings.Theme = th.Name
+	m.notice = "Theme: " + th.Name
+}
+
+// effectiveTheme returns the active theme with the session color overrides
+// layered over it. It is what the plugin reads report and what the painting
+// resolves, without mutating m.theme.
+func (m *Model) effectiveTheme() theme.Theme {
+	if len(m.themeOverrides) == 0 {
+		return m.theme
+	}
+	over, err := theme.WithOverrides(m.theme, m.themeOverrides)
+	if err != nil {
+		return m.theme
+	}
+	return over
+}
+
+// rebuildTheme rebuilds every style the root keeps from the active theme,
+// layered under the session color overrides (plugin gvim.theme.override and the
+// theme editor's live preview). It is the one place theme colors become styles.
+func (m *Model) rebuildTheme() {
+	effective := m.theme
+	if len(m.themeOverrides) > 0 {
+		over, err := theme.WithOverrides(m.theme, m.themeOverrides)
+		if err != nil {
+			m.notice = "Theme override: " + err.Error()
+		} else {
+			effective = over
+		}
+	}
+	st := style.New(effective)
 	m.styles = st
-	m.panes = editorpane.NewStyles(th)
-	m.menu = menubar.New(m, st).WithMnemonics(m.view.opts.MenuBarMnemonics)
+	m.panes = editorpane.NewStyles(effective)
+	m.menu = menubar.New(m, st).WithMnemonics(m.view.opts.MenuBarMnemonics).WithThemeChoices(m.themeChoices())
 	if m.tree != nil {
 		m.explorerPanel = expanel.New(m.tree, st, m.now).CarryCut(m.explorerPanel)
 	}
-	m.util.settings.Theme = name
-	m.notice = "Theme: " + name
-	m.plugThemeChanged(name)
+	m.plugThemeChanged(m.theme.Name, m.theme.Dark())
+}
+
+// SetThemeOverrides replaces the session color overrides (the plugin
+// gvim.theme.override map) and rebuilds the theme. An empty map clears them.
+func (m *Model) SetThemeOverrides(overrides map[string]string) error {
+	copied := make(map[string]string, len(overrides))
+	for key, value := range overrides {
+		copied[key] = value
+	}
+	// Validate against the active theme before touching the frame, so a bad
+	// override is reported to the caller and the look stays as it was.
+	if _, err := theme.WithOverrides(m.theme, copied); err != nil {
+		return err
+	}
+	m.themeOverrides = copied
+	m.rebuildTheme()
+	return nil
+}
+
+// ThemeOverrides returns the current session override map.
+func (m *Model) ThemeOverrides() map[string]string {
+	out := make(map[string]string, len(m.themeOverrides))
+	for key, value := range m.themeOverrides {
+		out[key] = value
+	}
+	return out
+}
+
+// ClearThemeOverrides drops the session color overrides and rebuilds the theme.
+func (m *Model) ClearThemeOverrides() {
+	if err := m.SetThemeOverrides(nil); err != nil {
+		m.notice = "Theme override: " + err.Error()
+	}
 }
 
 // openLocales lists the locales built in. English is the only one, so the list has

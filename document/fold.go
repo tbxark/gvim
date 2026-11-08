@@ -1,7 +1,10 @@
 package document
 
 import (
+	"cmp"
 	"errors"
+	"slices"
+
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/fold"
 )
@@ -19,7 +22,7 @@ func (d *Document) Folds(tabWidth int) []fold.Range {
 	if d.large != nil {
 		return nil
 	}
-	key := foldKey{Gen: d.Gen(), Ver: d.Buffer.Version(), Tab: tabWidth}
+	key := foldKey{Gen: d.Gen(), Ver: d.Buffer.Version(), Tab: tabWidth, Rev: d.externalRev}
 	m := &d.FoldMemo
 	if m.Ok && m.Key == key {
 		return m.Ranges
@@ -44,7 +47,7 @@ func (d *Document) Folds(tabWidth int) []fold.Range {
 			}
 			m.Key, m.Serial = key, b.EditSerial()
 			if !same {
-				m.Ranges = m.findRanges()
+				m.Ranges = mergeFoldRanges(m.findRanges(), d.externalFolds)
 			}
 			return m.Ranges
 		}
@@ -54,15 +57,55 @@ func (d *Document) Folds(tabWidth int) []fold.Range {
 		m.Indents[i] = indentOf(i)
 	}
 	m.Buf, m.Key, m.Serial, m.Ok = b, key, b.EditSerial(), true
-	m.Ranges = m.findRanges()
+	m.Ranges = mergeFoldRanges(m.findRanges(), d.externalFolds)
 	return m.Ranges
 }
 
-// foldKey identifies the input of fold.Ranges: the buffer, its content version and
-// the tab width.
+// SetExternalFolds replaces the fold ranges an external source gave for the
+// current text: a language server's foldingRange, in zero-based inclusive lines.
+// rev is the source's revision: the same revision with the same ranges does
+// nothing, and a new one invalidates the fold memo, so Folds finds the merged set
+// again. The merged ranges are what the pane's fold gutter and the fold actions
+// see, so an LSP range folds exactly like an indentation fold.
+func (d *Document) SetExternalFolds(ranges []fold.Range, rev uint64) {
+	if d.externalRev == rev && slices.Equal(d.externalFolds, ranges) {
+		return
+	}
+	d.externalFolds = slices.Clone(ranges)
+	d.externalRev = rev
+	d.FoldMemo.Ok = false
+}
+
+// ExternalFolds returns a copy of the fold ranges the external source gave last,
+// for a caller that merges its own view.
+func (d *Document) ExternalFolds() []fold.Range { return slices.Clone(d.externalFolds) }
+
+// mergeFoldRanges merges the external ranges into the indentation ranges, ordered
+// by start line and with exact duplicates removed. A range nested in another keeps
+// its place after it, as fold.Ranges returns nesting: the pane and the fold actions
+// read the same ordering from both sources.
+func mergeFoldRanges(indent, external []fold.Range) []fold.Range {
+	if len(external) == 0 {
+		return indent
+	}
+	out := make([]fold.Range, 0, len(indent)+len(external))
+	out = append(out, indent...)
+	out = append(out, external...)
+	slices.SortStableFunc(out, func(a, b fold.Range) int {
+		if a.Start != b.Start {
+			return cmp.Compare(a.Start, b.Start)
+		}
+		return cmp.Compare(a.End, b.End)
+	})
+	return slices.CompactFunc(out, func(a, b fold.Range) bool { return a == b })
+}
+
+// foldKey identifies the input of fold.Ranges: the buffer, its content version, the
+// tab width and the revision of the external (language server) ranges.
 type foldKey struct {
 	Gen, Ver uint64
 	Tab      int
+	Rev      uint64
 }
 
 // foldMemo is the ranges Folds found last, and what they were found from: the indentation of

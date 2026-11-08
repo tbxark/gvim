@@ -230,6 +230,7 @@ Show Outline, and stays available across buffer switches once shown.
 | section geometry, headers, Contents widget | `internal/tui/sidebar/` (`layout_test.go`, `header_test.go`, `contents_test.go`) |
 | frame fields and hit kinds | `internal/tui/frame/frame.go`, `hit.go` |
 | body painting | `internal/tui/explorer/panel.go` (`DrawBody`; `Draw` unchanged) |
+| plugin sections (tier 1a) | `internal/tui/sidebar/sections.go` (the kind), `internal/tui/plugin_panels.go` (specs, paint, input, lifecycle), `plugin/panel_api_test.go` |
 | root wiring: lifecycle, follow, keys, mouse, paint | `internal/tui/markdown_toc.go` and `markdown_toc_test.go` |
 | focus cycle | `internal/tui/root_sidebar.go` |
 | palette rows | `commands/markdown_commands.go` |
@@ -250,6 +251,36 @@ widget state and a few painted cells.
 4. Add it to `sidebarSections`/`sectionFocused`/`focusSection` if it takes the
    keyboard, and to `stageContents`-style stages if F6 should reach it.
 5. Record it here and in `docs/ui.md`'s component map.
+
+### Plugin sections (plugin API tier 1a)
+
+A plugin can mount a declarative widget panel as a section of the column:
+`gvim.ui.mount_sidebar_section(spec, opts)` (see
+[plugins/api-ui.md](plugins/api-ui.md#widget-panels-and-sidebar-sections)). The contract:
+
+* The section kind is `sidebar.KindPlugin` (value 100, reserved in
+  `internal/tui/sidebar/sections.go`). `sidebar.Spec` and `sidebar.Section` carry two optional
+  fields the native sections leave zero: `Title` (the header text; a plugin section names
+  itself) and `NoClose` (a section mounted with `closable = false` has no ×). `sidebar.HeaderSpec`
+  gained the same two fields, and `frame.setExplorer` passes them through, so painting and the
+  hit map still agree.
+* The root appends the mounted sections to `Model.sidebarSpecs` after the explorer and the
+  Contents section, in mount order. `Rows` is the body height the plugin asked for (0 shares
+  the column); the layout's squeeze and fold rules treat it like any section.
+* Painting: `Model.paintSidebar` has one `KindPlugin` arm that fills the body cells with the
+  overlay fill and draws the panel in the section rectangle (`Model.paintPluginSection`). The
+  section's own header is painted by the shared `sidebar.PaintHeader`, so a plugin section
+  looks like the native ones.
+* Input: a click on the header folds or unfolds the section and focuses it; the × unmounts it
+  and raises a `cancel` `widget_event`; a click in the body focuses the section and goes to the
+  panel (a list row selects, a button activates, the wheel moves a list). A focused section
+  takes the keyboard before the editor keymap and swallows the keys its widgets do not use;
+  Escape gives the keyboard back.
+* Lifecycle: the panel host owns the sections. Unmounting a plugin (or reloading it) removes
+  its sections. Mounting shows the column when it was hidden.
+
+Residual (v1): plugin sections are not in the F6 focus cycle, the header does not drag-resize
+(rows come from the mount call), and sections cannot be reordered.
 
 ## 9. Explorer behaviours
 

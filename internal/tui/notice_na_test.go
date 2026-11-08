@@ -18,7 +18,6 @@ func TestNotApplicableCommandsSayWhy(t *testing.T) {
 		{"update_fresh", "does not update itself"},
 		{"open_update_log", "does not update itself"},
 		{"trigger_wave_animation", "easter egg"},
-		{"inspect_theme_at_cursor", "reverse video"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.action, func(t *testing.T) {

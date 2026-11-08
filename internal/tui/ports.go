@@ -176,9 +176,21 @@ type LSPSession interface {
 	// Close sends the close of the document at path.
 	Close(path string) error
 	// Diagnostics returns the latest diagnostics of the document at path,
-	// merged over the servers that published them. ok is false until a server
-	// publishes for it.
+	// merged over the servers that published them, or pulled from the servers
+	// that serve diagnostics that way. ok is false until a server answers.
 	Diagnostics(path string) (DiagnosticsEvent, bool)
+	// WorkspaceDiagnostics returns the stored diagnostics of every file any
+	// server reported them for, open or not, sorted by path. The diagnostics
+	// panel lists them.
+	WorkspaceDiagnostics() []FileDiagnostics
+	// InlayHints returns the inlay hints of the document at path.
+	InlayHints(path string) ([]InlayHint, error)
+	// SemanticTokens returns the semantic tokens of the document's lines
+	// [firstLine, lastLine], both zero-based and inclusive.
+	SemanticTokens(path string, firstLine, lastLine int) ([]SemanticToken, error)
+	// FoldingRanges returns the server's folding ranges for the document, in
+	// zero-based inclusive lines.
+	FoldingRanges(path string) ([]FoldRange, error)
 	// Definition, Implementation and References return the places the symbol at
 	// at refers to.
 	Definition(path string, at buffer.Pos) ([]LSPLocation, error)
@@ -239,6 +251,37 @@ type DiagnosticsEvent struct {
 	// version is older than the document's current version.
 	Version   int32
 	Versioned bool
+}
+
+// InlayHint is one inlay hint, drawn at the end of a line. Round 5 draws hints
+// end-of-line only (the placement residual vs Fresh's true inline insertion is in
+// docs/lsp.md); Text is the hint's label, rendered by the port.
+type InlayHint struct {
+	Line int
+	Text string
+	// Kind is the protocol's InlayHintKind: 1 type, 2 parameter, 0 unknown.
+	Kind int
+}
+
+// SemanticToken is one semantic token, in rune columns of its line. Type and
+// Modifiers are the names from the server's legend.
+type SemanticToken struct {
+	Line, Start, End int
+	Type             string
+	Modifiers        []string
+}
+
+// FoldRange is one foldable range from a language server, in zero-based lines,
+// both ends inclusive. The editor merges these with its indentation folds.
+type FoldRange struct {
+	StartLine, EndLine int
+}
+
+// FileDiagnostics is the stored diagnostics of one file, for the diagnostics
+// panel. Items are in the order the server sent them.
+type FileDiagnostics struct {
+	Path  string
+	Items []Diagnostic
 }
 
 // Diagnostic is one problem in a document. Start and End are its rune range, and
@@ -517,6 +560,13 @@ type Deps struct {
 	// SettingsPort is the Settings page's link to the config files. Nil leaves the
 	// Settings list read-only (it opens the config file in a tab).
 	SettingsPort SettingsPort
+	// ThemeCatalog is the available themes: bundled and user themes. Nil keeps the
+	// picker and the theme commands on the bundled themes only.
+	ThemeCatalog ThemeCatalog
+	// ThemeRef is the config theme value the session started with (a bundled name,
+	// builtin://name, a user-dir relative path or file://); empty means the theme
+	// field is already the resolved name.
+	ThemeRef string
 }
 
 // SettingsPort is the Settings UI's link to the config files. internal/app
@@ -668,4 +718,34 @@ type SettingsChange struct {
 	// diagnostic after the reload, a layer that could not be written, a command
 	// line flag that wins over the file.
 	Warnings []string
+}
+
+// ThemeCatalog is the set of themes the TUI offers: the bundled ones and the
+// user themes in config.Dir()/themes. internal/app implements it over
+// theme.Registry; a test implements it directly. Nil falls back to the bundled
+// themes only.
+type ThemeCatalog interface {
+	// Infos returns the available themes, sorted by display name.
+	Infos() []ThemeInfo
+	// Load resolves a config theme value (a bundled name, builtin://name, a path
+	// relative to the user theme dir, or file://) into a resolved theme.
+	Load(ref string) (theme.Theme, error)
+	// Canonical returns the portable ref of ref.
+	Canonical(ref string) (string, error)
+	// Reload rescans the user theme dir, so an edited theme file is read again.
+	Reload() error
+	// Warnings are registry problems worth a status-row notice.
+	Warnings() []string
+	// SaveTheme writes th to the user theme dir as name and returns its portable
+	// ref. Save As and the theme editor's Save use it.
+	SaveTheme(name string, th theme.Theme) (string, error)
+	// DeleteTheme removes a user theme file.
+	DeleteTheme(ref string) error
+}
+
+// ThemeInfo is one theme the catalog offers.
+type ThemeInfo struct {
+	Name    string // display name
+	Ref     string // portable config value
+	Builtin bool
 }

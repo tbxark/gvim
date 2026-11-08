@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/keybindings"
@@ -60,8 +59,19 @@ func (o Options) validate() error {
 			return fmt.Errorf("--keymap: unknown keymap %q (want default, macos, macos-gui, emacs or vscode)", o.Keymap)
 		}
 	}
-	if o.Theme != "" && !slices.Contains(theme.Names(), o.Theme) {
-		return fmt.Errorf("--theme: unknown theme %q (want %s)", o.Theme, strings.Join(theme.Names(), ", "))
+	if o.Theme != "" {
+		if err := theme.ValidateForm(o.Theme); err != nil {
+			return fmt.Errorf("--theme: %w", err)
+		}
+		if theme.IsNamedForm(o.Theme) && !slices.Contains(theme.Names(), o.Theme) {
+			dir, dirErr := config.Dir()
+			if dirErr == nil {
+				registry := theme.NewRegistry(filepath.Join(dir, "themes"))
+				if _, err := registry.Load(o.Theme); err != nil {
+					return fmt.Errorf("--theme: unknown theme %q (want one of the bundled themes, a theme in %s, or a theme path)", o.Theme, filepath.Join(dir, "themes"))
+				}
+			}
+		}
 	}
 	return nil
 }

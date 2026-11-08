@@ -10,7 +10,7 @@ local gvim = require "gvim"
 
 `require "gvim.buf"` and `gvim.buf` are the same table; every area is both a field and a
 module. `gvim.git` is a Lua module that ships with gvim (`require "gvim.git"`), loaded on
-first use. `gvim.api_version` is `1`.
+first use. `gvim.api_version` is `2`.
 
 `json`, `re`, `utf8` and `bit` are also globals (the same tables as `gvim.json` and so on).
 There are no other globals beyond the Lua standard library that gvim leaves in the sandbox

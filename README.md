@@ -23,11 +23,16 @@ checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
 - `docs/settings.md` is the design record for the editable Settings page: the config
   schema, the User/Project layers, the JSONC write path, and which settings apply live
   versus at restart.
+- `docs/themes.md` is the design record for the theme model and theme UI: the
+  bundled/user registry and config forms, extends and fallback chains, named colors,
+  hot reload, inspect-at-cursor, the native theme editor and plugin color overrides.
 - `docs/terminal.md` is the design record for the terminal dock: the live and
-  read-only scrollback views and their keys, the `terminal` config section (including
-  the gvim-only `scrollback_lines`), OSC 7 working-directory tracking, Ctrl+Click
-  paths, mouse forwarding, `close_on_exit`, and the deferred list (drag-select,
-  reflow/persistence, agent resume, Windows ConPTY, terminal tabs).
+  read-only scrollback views and their keys, text selection and copy, the saved
+  transcript and its no-reflow limitation, restart-into-the-transcript and the
+  deferred agent resume, the `terminal` config section (including the gvim-only
+  `scrollback_lines`), OSC 7 working-directory tracking, Ctrl+Click paths, mouse
+  forwarding, `close_on_exit`, and the deferred list (reflow, OSC 52, agent
+  re-exec, Windows ConPTY, terminal tabs).
 - `docs/parity.md` is the live parity record for the "full Fresh feature parity" goal:
   the by-area matrix with evidence, the deliberate differences, and the ranked backlog of
   the remaining rounds. It is the map for the next rounds; update the affected row when a
@@ -58,8 +63,9 @@ The module has three layers.
     `overlay`, `list` (the shared overlay contract and list/box kit), `frame`, `split`,
     `tabstrip` (layout/hit map, split tree, tab strip), `dock` (the terminal dock),
     `editorpane`, `menubar`, `explorer`, `sidebar` (the column's section stack and the
-    Contents widget), `palette`, `find`, `prompt`, `browser`, `picker`,
-    `popup`, `ctxmenu`, `dialog`, `style`, `grid`, `icons`, `space`.
+    Contents widget), `palette`, `find`, `prompt`, `browser`, `picker`, `pluginpanel`
+    (the plugin API's declarative widget panel), `popup`, `ctxmenu`, `dialog`, `style`,
+    `grid`, `icons`, `space`.
   - `internal/terminal`: runs a program in a pseudo-terminal and keeps a model of its
     screen (the dock backend).
   - `internal/filewatch`: the fsnotify watcher behind the file tree and reloads.
@@ -419,7 +425,8 @@ JavaScript system (goja, esbuild) is gone. Users and plugin authors read `docs/p
 the design record is `migration/ARCH-v4.md` (package graph and the plugin files by package).
 
 - `pluginapi`: the contract. Plain types, the `Host` and `Runtime` interfaces, error
-  codes, `Unsupported`. Stdlib only.
+  codes, `Unsupported`; `widgetapi.go` holds the declarative widget spec types of the
+  plugin API tier 1a. Stdlib only.
 - `plugin`: the runtime (sandbox, tasks and the yield protocol, budgets, strikes, the
   loader, every `gvim.*` area in `api_*.go`). It imports no ui, editor or buffer package.
   `plugin/bundled` embeds the bundled plugins (`plugins/`) and Lua modules (`lib/`);
@@ -427,7 +434,9 @@ the design record is `migration/ARCH-v4.md` (package graph and the plugin files 
 - `plugin/pattern`: the Lua pattern matcher with a step budget that replaces `string.find`,
   `match`, `gmatch` and `gsub`. `decorations`: the decoration store.
 - `internal/tui/plugin_*.go` is the host side (pump, events, prompts, keys, status, decorations,
-  windows, virtual buffers, manager, init.lua, LSP). `internal/app/plugin*.go` wires the runtime to the real editor
+  windows, virtual buffers, manager, init.lua, LSP; tier 1a adds `plugin_panels.go` widget
+  panels and sidebar sections, `plugin_menus.go` menu rows and `plugin_actionpopup.go` action
+  popups). `internal/app/plugin*.go` wires the runtime to the real editor
   (`pluginedit.go`, `pluginos*.go`, `pluginservices.go`, `plugins.go`). Update does no IO: plugin
   work runs in `tea.Cmd`s as `pluginapi.Work`.
 - All Lua runs on the Bubble Tea update goroutine. A host method runs inside a Lua call and must

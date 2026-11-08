@@ -26,13 +26,16 @@ func (p *Panel) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 	for y := range rows {
 		g.Fill(0, l.W, top+y, body)
 	}
-	if p.term == nil {
-		g.Put(1, top, l.W, p.dockText(), body)
-		return
+	var sc terminal.Screen
+	if p.term != nil {
+		sc = p.term.Screen()
 	}
-	sc := p.term.Screen()
 	if p.scroll.on {
 		p.paintScrollback(g, top, rows, l.W, sc, body, style.Cell(st.Selection).BG)
+		return
+	}
+	if p.term == nil {
+		g.Put(1, top, l.W, p.dockText(), body)
 		return
 	}
 	for r := range min(rows, sc.Rows) {
@@ -40,8 +43,9 @@ func (p *Panel) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 	}
 }
 
-// paintScrollback paints the scrollback view: the history window followed by the
-// live screen rows, with the selected row on the selection background. A row the
+// paintScrollback paints the scrollback view: a restarted shell's prior
+// transcript, then the history window, then the live screen rows, with the
+// selected row and the text selection on the selection background. A row the
 // window needs but the snapshot does not hold yet is left blank until the next
 // snapshot arrives.
 func (p *Panel) paintScrollback(g *grid.Grid, top, rows, w int, sc terminal.Screen, base grid.Style, sel color.Color) {
@@ -51,27 +55,27 @@ func (p *Panel) paintScrollback(g *grid.Grid, top, rows, w int, sc terminal.Scre
 			break
 		}
 		y := top + i
-		if abs < p.scroll.total {
-			j := abs - p.scroll.from
+		hist := abs - len(p.prior)
+		switch {
+		case abs < len(p.prior):
+			paintShellCells(g, y, w, p.prior[abs].Cells, base)
+		case hist < p.scroll.total:
+			j := hist - p.scroll.from
 			if j < 0 || j >= len(p.scroll.lines) {
 				continue
 			}
 			paintShellCells(g, y, w, p.scroll.lines[j].Cells, base)
-			if sel != nil && abs == p.scroll.selected {
-				tintRow(g, y, w, sel)
+		default:
+			r := hist - p.scroll.total
+			if r < 0 || r >= sc.Rows {
+				continue
 			}
-			continue
-		}
-		r := abs - p.scroll.total
-		if r < 0 || r >= sc.Rows {
-			continue
-		}
-		if sel != nil && abs == p.scroll.selected {
 			paintShellRow(g, y, w, sc, r, base)
-			tintRow(g, y, w, sel)
-			continue
 		}
-		paintShellRow(g, y, w, sc, r, base)
+		if sel != nil && abs == p.scroll.selected && !p.sel.active {
+			tintRow(g, y, w, sel)
+		}
+		p.paintSelection(g, y, w, abs, sel)
 	}
 }
 
@@ -124,7 +128,11 @@ func (p *Panel) scrollbackTitle() string {
 	rows := max(p.bodyRows(), 1)
 	first := min(p.scroll.top+1, combined)
 	last := min(p.scroll.top+rows, combined)
-	title := fmt.Sprintf("Scrollback — rows %d-%d of %d (Ctrl+Space returns)", first, last, combined)
+	name := "Scrollback"
+	if p.restored && p.term == nil {
+		name = "Scrollback (restored)"
+	}
+	title := fmt.Sprintf("%s — rows %d-%d of %d (Ctrl+Space returns)", name, first, last, combined)
 	if p.scroll.typing {
 		return title + " — /" + p.scroll.searchInput
 	}
@@ -135,7 +143,14 @@ func (p *Panel) scrollbackTitle() string {
 	if len(p.scroll.matches) > 0 {
 		pos = p.scroll.match + 1
 	}
-	return fmt.Sprintf("%s — /%s %d/%d", title, p.scroll.search, pos, len(p.scroll.matches))
+	opts := ""
+	if p.scroll.regex {
+		opts += " rx"
+	}
+	if p.scroll.matchCase {
+		opts += " case"
+	}
+	return fmt.Sprintf("%s — /%s%s %d/%d", title, p.scroll.search, opts, pos, len(p.scroll.matches))
 }
 
 // dockText is what the dock shows in place of a screen: the notice that says why no

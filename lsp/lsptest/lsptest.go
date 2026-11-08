@@ -96,6 +96,12 @@ type CannedReplies struct {
 	// and nothing else.
 	Caps protocol.ServerCapabilities
 
+	// PullItems and PullResultID are what a textDocument/diagnostic pull answers.
+	// PullUnchanged makes it answer "unchanged" instead of a full report.
+	PullItems     []protocol.Diagnostic
+	PullResultID  string
+	PullUnchanged bool
+
 	// The answers of the requests a code action pipeline sends.
 	ResolvedCodeAction   *protocol.CodeAction
 	ExecuteCommandResult protocol.LSPAny

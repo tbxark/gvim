@@ -34,6 +34,7 @@ const (
 // in plugWait calls and lists them here.
 var interactiveWaits = map[string]bool{
 	"key": true, "input": true, "confirm": true, "choose": true, "select": true, "picker": true, "popup": true,
+	"action_popup": true,
 }
 
 // plugOverlay marks the overlays that plugins open (pickers, prompts, popups). The panic

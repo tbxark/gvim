@@ -172,7 +172,7 @@ type ProcessLimits struct {
 
 // Config is the effective set of settings after all layers are merged.
 type Config struct {
-	Theme                  string // theme name, default "dark"
+	Theme                  string // theme value: a bundled name, builtin://name, a user-dir relative path, or file://; default "dark"
 	Keymap                 string // keymap name as written in a file; empty when no file sets one
 	TabSize                int    // columns per tab stop, default 4
 	InsertSpaces           bool   // insert spaces for Tab, default true

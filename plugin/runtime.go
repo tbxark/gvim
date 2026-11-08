@@ -48,6 +48,9 @@ type Options struct {
 	// Loader configures plugin discovery; nil discovers nothing (Start returns no Work and
 	// plugins are added with LoadPlugin).
 	Loader *LoaderOptions
+	// Locale is the editor's locale for gvim.i18n ("" means "en", the only built-in locale
+	// today). It is read when a plugin loads, so the value is stable for the plugin's life.
+	Locale string
 }
 
 // Runtime runs Lua plugins. It implements pluginapi.Runtime and is not safe for use from
@@ -59,6 +62,7 @@ type Runtime struct {
 	svc       pluginapi.Services
 	version   string
 	platform  string
+	locale    string
 	now       func() time.Time
 	heapLimit int64
 	check     bool
@@ -117,6 +121,7 @@ func New(o Options) *Runtime {
 		svc:       o.Services,
 		version:   o.Version,
 		platform:  o.Platform,
+		locale:    o.Locale,
 		now:       o.Now,
 		heapLimit: o.HeapLimit,
 		check:     o.CheckGoroutine || os.Getenv("GVIM_PLUGIN_DEBUG") == "1",
@@ -125,6 +130,9 @@ func New(o Options) *Runtime {
 		waits:     map[pluginapi.Token]*wait{},
 		log:       &logRing{sink: o.LogSink},
 		noticeAt:  map[string]time.Time{},
+	}
+	if r.locale == "" {
+		r.locale = "en"
 	}
 	switch {
 	case r.timeout <= 0:

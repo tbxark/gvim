@@ -396,7 +396,7 @@ func (m *Model) plugOverlaysCancel(why string) tea.Cmd {
 	var toks []pluginapi.Token
 	for t, kind := range p.waits {
 		switch kind {
-		case waitInput, waitConfirm, waitPicker, waitPopup:
+		case waitInput, waitConfirm, waitPicker, waitPopup, waitActionPopup:
 			toks = append(toks, t)
 		}
 	}
@@ -491,6 +491,55 @@ func (m *Model) openConfirm(t pluginapi.Token, o pluginapi.ConfirmSpec) tea.Cmd 
 		prompt.ConfirmOptions{Yes: cleanText(o.Yes), No: cleanText(o.No), DefaultYes: o.Default})
 	m.pushOverlay(&pluginConfirmOverlay{plugBase: plugBase{m: m, tok: t}, c: c})
 	return nil
+}
+
+// ---- Host: prompt suggestions
+
+// maxPromptSuggestions is the most suggestion rows a plugin can give a prompt.
+const maxPromptSuggestions = 100
+
+// SetPromptSuggestions replaces the suggestion list of the plugin prompt on screen and the
+// highlighted row (0-based, -1 for none). It is called from the prompt's on_change callback
+// while the user types. CodeNotFound when no plugin prompt is open.
+func (h *pluginHost) SetPromptSuggestions(items []pluginapi.PromptSuggestion, selected int) error {
+	m := h.m
+	if len(items) > maxPromptSuggestions {
+		return pluginapi.Errf(pluginapi.CodeLimit, "a prompt takes at most %d suggestions", maxPromptSuggestions)
+	}
+	ov := m.plugTopLine()
+	if ov == nil {
+		return pluginapi.Errf(pluginapi.CodeNotFound, "no prompt is open")
+	}
+	clean := make([]prompt.Suggestion, 0, len(items))
+	for _, it := range items {
+		clean = append(clean, prompt.Suggestion{
+			Text:        clipHostText(it.Text, 512),
+			Description: clipHostText(it.Description, 512),
+			Value:       clipHostText(it.Value, 4096),
+			Disabled:    it.Disabled,
+		})
+	}
+	ov.l.SetSuggestions(clean, selected)
+	ov.changed = true
+	return nil
+}
+
+// plugTopLine returns the topmost open plugin prompt, nil when none is open.
+func (m *Model) plugTopLine() *pluginLineOverlay {
+	for i := len(m.overlays) - 1; i >= 0; i-- {
+		if o, ok := m.overlays[i].(*pluginLineOverlay); ok && !o.closed && o.l.Active() {
+			return o
+		}
+	}
+	return nil
+}
+
+// clipHostText cuts s to at most n bytes on a rune boundary.
+func clipHostText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
 }
 
 // ---- Host: pickers
@@ -692,6 +741,9 @@ func (h *pluginHost) ClosePopup(id uint64) {
 // pluginPopupChosen resolves the wait of a plugin popup whose row was chosen. lspMessage
 // calls it for every popup.Chosen; it reports whether the row was a plugin's.
 func (m *Model) pluginPopupChosen(c popup.Chosen) (tea.Cmd, bool) {
+	if cmd, ok := m.pluginActionChosen(c); ok {
+		return cmd, true
+	}
 	d, ok := c.Item.Data.(pluginPopupData)
 	if !ok {
 		return nil, false
@@ -720,6 +772,8 @@ func (m *Model) pluginAnswer(d prompt.Done) (tea.Cmd, bool) {
 		return m.plugFinish(pluginapi.Completion{Token: tag.tok, Values: []any{yes}}), true
 	case pluginPopupTag:
 		return m.plugFinish(pluginapi.Completion{Token: tag.tok, Values: []any{nil}}), true
+	case pluginActionPopupTag:
+		return m.pluginActionPopupDone(tag.tok), true
 	case pluginPickTag:
 		return m.pickOrdered(tag), true
 	case quitDiscardTag:

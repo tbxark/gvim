@@ -24,6 +24,8 @@ type FakeOverlay struct {
 	Confirm pluginapi.ConfirmSpec
 	Picker  pluginapi.PickerSpec
 	Popup   pluginapi.PopupSpec
+	// ActionPopup is set for a Kind "action_popup" overlay.
+	ActionPopup pluginapi.ActionPopupSpec
 
 	// Updates are the UpdatePicker calls.
 	Updates []pluginapi.PickerUpdate
@@ -40,6 +42,10 @@ type FakeUI struct {
 	// Reject, when set, is returned by Input, Confirm, OpenPicker and ShowPopup (the
 	// request is not recorded).
 	Reject error
+	// Suggestions are the rows of the latest SetPromptSuggestions and Selected their
+	// highlighted row (0-based, -1 for none).
+	Suggestions []pluginapi.PromptSuggestion
+	Selected    int
 }
 
 // UI returns the prompt/picker/popup state of the fake host.
@@ -144,6 +150,37 @@ func (f *FakeHost) ClosePicker(id uint64) {
 func (f *FakeHost) ShowPopup(t pluginapi.Token, id uint64, o pluginapi.PopupSpec) error {
 	f.rec("ShowPopup", t, id, o.Title)
 	return f.addOverlay(&FakeOverlay{Kind: "popup", Token: t, ID: id, Popup: o})
+}
+
+// ShowActionPopup records the action popup.
+func (f *FakeHost) ShowActionPopup(t pluginapi.Token, id uint64, o pluginapi.ActionPopupSpec) error {
+	f.rec("ShowActionPopup", t, id, o.Title)
+	if f.UI().Reject != nil {
+		return f.UI().Reject
+	}
+	o.Actions = append([]pluginapi.ActionPopupAction(nil), o.Actions...)
+	u := f.UI()
+	u.Overlays = append(u.Overlays, &FakeOverlay{Kind: "action_popup", Token: t, ID: id, ActionPopup: o, Open: true})
+	return nil
+}
+
+// SetPromptSuggestions records the suggestion list of the open plugin prompt. Like the ui it
+// fails when no input prompt is open.
+func (f *FakeHost) SetPromptSuggestions(items []pluginapi.PromptSuggestion, selected int) error {
+	f.rec("SetPromptSuggestions", len(items), selected)
+	u := f.UI()
+	var open bool
+	for _, o := range u.Opened() {
+		if o.Kind == "input" {
+			open = true
+		}
+	}
+	if !open {
+		return pluginapi.Errf(pluginapi.CodeNotFound, "no prompt is open")
+	}
+	u.Suggestions = append([]pluginapi.PromptSuggestion(nil), items...)
+	u.Selected = selected
+	return nil
 }
 
 // ClosePopup closes the popup without resolving anything.

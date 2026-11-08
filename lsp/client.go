@@ -374,6 +374,20 @@ func (c *Client) DiagnosticsFor(docURI string) (DiagnosticsEvent, bool) {
 	return ev, ok
 }
 
+// DiagnosticsAll returns the latest publishDiagnostics event for every document
+// the server has published for, keyed by document URI. The returned slices are
+// copies. It is the workspace-wide view the diagnostics panel lists.
+func (c *Client) DiagnosticsAll() map[string]DiagnosticsEvent {
+	c.diagMu.Lock()
+	defer c.diagMu.Unlock()
+	out := make(map[string]DiagnosticsEvent, len(c.diagByURI))
+	for uri, ev := range c.diagByURI {
+		ev.Diagnostics = slices.Clone(ev.Diagnostics)
+		out[uri] = ev
+	}
+	return out
+}
+
 // publish records ev as the latest event for its document and queues it without
 // blocking. Only the read loop calls it, so a single-producer drop-oldest loop
 // always finishes after at most one drop.

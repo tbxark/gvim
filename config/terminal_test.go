@@ -12,7 +12,11 @@ func TestTerminalDefaults(t *testing.T) {
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %v", diags)
 	}
-	want := TerminalConfig{CloseOnExit: false, ScrollbackLines: TerminalScrollbackDefault, MouseForwarding: MouseForwardRequested}
+	want := TerminalConfig{
+		CloseOnExit: false, ScrollbackLines: TerminalScrollbackDefault,
+		MouseForwarding:   MouseForwardRequested,
+		JumpToEndOnOutput: true, MouseDragSelects: true,
+	}
 	if !reflect.DeepEqual(cfg.Terminal, want) {
 		t.Fatalf("Terminal = %+v, want %+v", cfg.Terminal, want)
 	}
@@ -55,6 +59,16 @@ func TestTerminalSection(t *testing.T) {
 			body: `{"terminal": {"mouse_forwarding": "alt_screen"}}`,
 			want: withTerminal(func(c *TerminalConfig) { c.MouseForwarding = MouseForwardAltScreen }),
 		},
+		{
+			name: "hold the scrollback on new output",
+			body: `{"terminal": {"jump_to_end_on_output": false}}`,
+			want: withTerminal(func(c *TerminalConfig) { c.JumpToEndOnOutput = false }),
+		},
+		{
+			name: "live drags are inert",
+			body: `{"terminal": {"mouse_drag_selects": false}}`,
+			want: withTerminal(func(c *TerminalConfig) { c.MouseDragSelects = false }),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,9 +96,7 @@ func withTerminal(change func(*TerminalConfig)) TerminalConfig {
 func TestTerminalFreshKeysAccepted(t *testing.T) {
 	t.Parallel()
 	body := `{"terminal": {
-  "jump_to_end_on_output": false,
   "resume_agents": false,
-  "mouse_drag_selects": false,
   "pass_ctrl_v_without_text": false,
   "skip_app_execution_alias": false
 }}`
@@ -112,6 +124,8 @@ func TestTerminalInvalidValues(t *testing.T) {
 		{"close on exit that is not a boolean", `{"terminal": {"close_on_exit": "yes"}}`, "terminal.close_on_exit"},
 		{"a shell that is not an object", `{"terminal": {"shell": "fish"}}`, "terminal.shell"},
 		{"a null value", `{"terminal": {"close_on_exit": null}}`, "terminal.close_on_exit"},
+		{"jump on output that is not a boolean", `{"terminal": {"jump_to_end_on_output": "no"}}`, "terminal.jump_to_end_on_output"},
+		{"drag selects that is not a boolean", `{"terminal": {"mouse_drag_selects": 0}}`, "terminal.mouse_drag_selects"},
 		{"an unknown key", `{"terminal": {"always_use_mouse": true}}`, "terminal.always_use_mouse"},
 	}
 	for _, tt := range tests {

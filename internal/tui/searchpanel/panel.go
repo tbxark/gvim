@@ -37,6 +37,7 @@ type focus int
 const (
 	focusSearch focus = iota
 	focusReplace
+	focusGlob
 	focusResults
 )
 
@@ -99,10 +100,16 @@ type Options struct {
 	Modes     MatchOptions
 	Scope     Scope
 	Query     string
-	Searcher  Searcher
-	Grepper   GitGrepper
-	Styles    style.Styles
-	Theme     theme.Theme
+	// Glob is the initial file filter: comma or space separated patterns (see
+	// parseGlob). Empty matches every file.
+	Glob string
+	// History is the previously searched patterns, most recent first, so a reopened
+	// panel can walk them with Up and Down in the search field.
+	History  []string
+	Searcher Searcher
+	Grepper  GitGrepper
+	Styles   style.Styles
+	Theme    theme.Theme
 }
 
 // Panel is the project-wide Search and Replace sheet, or the Git Grep sheet when Git is
@@ -122,10 +129,12 @@ type Panel struct {
 	openFiles []SourceFile
 	current   *SourceFile
 
-	query, replace textinput.Model
-	focus          focus
-	modes          MatchOptions
-	scope          Scope
+	query, replace, glob textinput.Model
+	// matcher is the parsed file filter of the glob field; nil matches every file.
+	matcher *globMatcher
+	focus   focus
+	modes   MatchOptions
+	scope   Scope
 
 	open    bool
 	seq     int
@@ -134,15 +143,26 @@ type Panel struct {
 	// replacement's result, say) shows while the panel covers the status row.
 	notice string
 
+	// history is the session's searched patterns, most recent first, and the walk
+	// state of Up and Down in the search field: histDraft is what the user had typed
+	// before walking, restored when Down passes the newest entry.
+	history   []string
+	histIndex int
+	histDraft string
+	histWalk  bool
+
 	fileMatches  []FileMatches
 	truncated    bool
 	skippedCount int
 	skipped      []string
 	errText      string
 	expanded     []bool
-	rows         []panelRow
-	selected     int
-	top          int
+	// checked holds the match-tree checkboxes, parallel to fileMatches: a match row's
+	// box is checked for replacement, and a file row's box is its children's.
+	checked  [][]bool
+	rows     []panelRow
+	selected int
+	top      int
 
 	width, height int
 }
@@ -185,8 +205,15 @@ func New(o Options) *Panel {
 			p.limit = gitResultLimit
 		}
 	}
+	p.history = append([]string(nil), o.History...)
 	p.query = newField(o.Query)
 	p.replace = newField("")
+	p.glob = newField(o.Glob)
+	if m, err := parseGlob(o.Glob); err != nil {
+		p.errText = "Bad glob: " + err.Error()
+	} else {
+		p.matcher = m
+	}
 	p.query.Focus()
 	return p
 }
@@ -280,7 +307,12 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 		p.modes.WholeWord = !p.modes.WholeWord
 		return p, p.requery()
 	case "alt+enter":
-		return p, p.replaceCmd()
+		return p, p.replaceCmd(false)
+	case "alt+q":
+		return p, p.exportCmd()
+	}
+	if p.focus == focusSearch && (name == "up" || name == "down") {
+		return p, p.walkHistory(name == "up")
 	}
 	if p.focus == focusResults {
 		return p, p.resultsKey(name)
@@ -291,7 +323,8 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 	before := f.Value()
 	next, cmd := f.Update(kp)
 	*f = next
-	if p.focus == focusSearch && p.query.Value() != before {
+	if (p.focus == focusSearch && p.query.Value() != before) ||
+		(p.focus == focusGlob && p.glob.Value() != before) {
 		return p, p.requery()
 	}
 	if p.focus == focusReplace && p.replace.Value() != before {
@@ -313,14 +346,123 @@ func (p *Panel) resultsKey(name string) tea.Cmd {
 		p.selectRow(len(p.rows) - 1)
 	case "enter":
 		return p.activate()
+	case "space":
+		p.toggleChecked()
+	case "a", "A":
+		p.setAllChecked(true)
+	case "n", "N":
+		p.setAllChecked(false)
+	case "shift+enter":
+		return p.replaceCmd(true)
 	}
 	return nil
 }
 
+// exportCmd asks the root to show the current result set as a navigable list.
+func (p *Panel) exportCmd() tea.Cmd {
+	if p.git {
+		if len(p.fileMatches) == 0 {
+			p.errText = "No Git Grep results to list"
+			return nil
+		}
+	} else if len(p.fileMatches) == 0 {
+		p.errText = "No matches to list"
+		return nil
+	}
+	return func() tea.Msg { return ExportMsg{} }
+}
+
+// ExportItems returns the current result set as flat list rows for the root's list
+// overlay: a file header before each file's matches, every match of every file, folded
+// or not. The panel keeps ownership of the result; the list is a read-only view that
+// jumps through the same positions.
+func (p *Panel) ExportItems() []ExportItem {
+	var out []ExportItem
+	for _, f := range p.fileMatches {
+		if len(f.Matches) == 0 {
+			continue
+		}
+		out = append(out, ExportItem{Header: true, Name: fmt.Sprintf("%s (%d)", f.Name, len(f.Matches))})
+		for _, m := range f.Matches {
+			out = append(out, ExportItem{
+				Path: f.Path,
+				Line: m.Line,
+				Col:  m.Col,
+				Text: fmt.Sprintf("%d:%d  %s", m.Line, m.Col, strings.TrimRight(m.Text, " ")),
+			})
+		}
+	}
+	return out
+}
+
+// History returns the session's searched patterns, most recent first, for the root to
+// pass to the next panel.
+func (p *Panel) History() []string { return append([]string(nil), p.history...) }
+
+// historyCap is the most patterns the panel keeps.
+const historyCap = 20
+
+// recordHistory puts a settled search pattern at the front of the history, once, and
+// drops the oldest past the cap. It does nothing while the field is walking history.
+func (p *Panel) recordHistory(pattern string) {
+	if p.histWalk || strings.TrimSpace(pattern) == "" {
+		return
+	}
+	for i, old := range p.history {
+		if old == pattern {
+			p.history = append(p.history[:i], p.history[i+1:]...)
+			break
+		}
+	}
+	p.history = append([]string{pattern}, p.history...)
+	if len(p.history) > historyCap {
+		p.history = p.history[:historyCap]
+	}
+}
+
+// walkHistory applies the next older (up) or newer (down) pattern to the search field
+// and searches for it. Down past the newest entry puts back the draft the user had
+// typed before walking.
+func (p *Panel) walkHistory(up bool) tea.Cmd {
+	if len(p.history) == 0 {
+		return nil
+	}
+	if !p.histWalk {
+		if !up {
+			return nil
+		}
+		p.histWalk = true
+		p.histIndex = 0
+		p.histDraft = p.query.Value()
+	} else if up {
+		if p.histIndex >= len(p.history)-1 {
+			return nil
+		}
+		p.histIndex++
+	} else {
+		if p.histIndex == 0 {
+			p.histWalk = false
+			p.query.SetValue(p.histDraft)
+			p.histDraft = ""
+			return p.requery()
+		}
+		p.histIndex--
+	}
+	p.query.SetValue(p.history[p.histIndex])
+	return p.requery()
+}
+
 // field returns the focused text field.
 func (p *Panel) field() *textinput.Model {
-	if p.focus == focusReplace && !p.git {
-		return &p.replace
+	switch p.focus {
+	case focusReplace:
+		if !p.git {
+			return &p.replace
+		}
+	case focusGlob:
+		if !p.git {
+			return &p.glob
+		}
 	}
 	return &p.query
 }
@@ -328,7 +470,7 @@ func (p *Panel) field() *textinput.Model {
 // cycleFocus moves the focus by delta around the areas of the panel. Git Grep has no
 // replacement field.
 func (p *Panel) cycleFocus(delta int) {
-	stops := []focus{focusSearch, focusReplace, focusResults}
+	stops := []focus{focusSearch, focusReplace, focusGlob, focusResults}
 	if p.git {
 		stops = []focus{focusSearch, focusResults}
 	}
@@ -344,12 +486,19 @@ func (p *Panel) cycleFocus(delta int) {
 	case focusSearch:
 		p.query.Focus()
 		p.replace.Blur()
+		p.glob.Blur()
 	case focusReplace:
 		p.query.Blur()
 		p.replace.Focus()
+		p.glob.Blur()
+	case focusGlob:
+		p.query.Blur()
+		p.replace.Blur()
+		p.glob.Focus()
 	default:
 		p.query.Blur()
 		p.replace.Blur()
+		p.glob.Blur()
 	}
 }
 
@@ -358,6 +507,19 @@ func (p *Panel) cycleFocus(delta int) {
 func (p *Panel) requery() tea.Cmd {
 	p.seq++
 	p.errText = ""
+	if !p.git {
+		m, err := parseGlob(p.glob.Value())
+		if err != nil {
+			p.matcher = nil
+			p.errText = "Bad glob: " + err.Error()
+			p.loading = false
+			p.fileMatches, p.rows, p.checked = nil, nil, nil
+			p.truncated, p.skippedCount, p.skipped = false, 0, nil
+			p.selected, p.top = 0, 0
+			return nil
+		}
+		p.matcher = m
+	}
 	if p.query.Value() == "" {
 		p.loading = false
 		p.fileMatches, p.rows = nil, nil
@@ -399,6 +561,7 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 	}
 	s := p.searcher
 	files := p.files
+	matcher := p.matcher
 	req := SearchRequest{
 		Root:      p.root,
 		Query:     query,
@@ -417,6 +580,7 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 		if files != nil {
 			req.Files, _ = files.Snapshot()
 		}
+		req.Files = matcher.filter(req.Files)
 		res, err := s.ProjectSearch(req)
 		return searchDoneMsg{seq: seq, result: res, err: err}
 	}
@@ -440,6 +604,7 @@ func (p *Panel) applySearch(msg searchDoneMsg) {
 	p.skippedCount = msg.result.SkippedCount
 	p.skipped = msg.result.Skipped
 	p.errText = msg.result.Err
+	p.recordHistory(p.query.Value())
 	p.resetRows()
 }
 
@@ -463,12 +628,17 @@ func (p *Panel) applyGit(msg gitDoneMsg) {
 	p.resetRows()
 }
 
-// resetRows rebuilds the rows of a new result: every file starts expanded and the first
-// row is selected.
+// resetRows rebuilds the rows of a new result: every file starts expanded, every match
+// starts checked, and the first row is selected.
 func (p *Panel) resetRows() {
 	p.expanded = make([]bool, len(p.fileMatches))
-	for i := range p.expanded {
+	p.checked = make([][]bool, len(p.fileMatches))
+	for i, f := range p.fileMatches {
 		p.expanded[i] = true
+		p.checked[i] = make([]bool, len(f.Matches))
+		for j := range p.checked[i] {
+			p.checked[i][j] = true
+		}
 	}
 	p.selected, p.top = 0, 0
 	p.rebuildRows()
@@ -548,32 +718,55 @@ func (p *Panel) activate() tea.Cmd {
 	}
 }
 
-// replaceCmd asks the root to confirm and apply the replacement, when there is one.
-func (p *Panel) replaceCmd() tea.Cmd {
-	req, ok := p.ReplaceRequest()
-	if !ok {
-		if p.git {
-			p.errText = "Git Grep is read-only"
-		} else {
-			p.errText = "No matches to replace"
+// replaceCmd asks the root to confirm and apply a replacement. Replace All (Alt+Enter)
+// replaces every checked match; the scoped form (Shift+Enter) replaces the focused row
+// alone: a file row means its checked matches, a match row means that single match.
+func (p *Panel) replaceCmd(scoped bool) tea.Cmd {
+	if p.git {
+		p.errText = "Git Grep is read-only"
+		return nil
+	}
+	var req ReplaceRequest
+	var ok bool
+	if scoped {
+		req, ok = p.ScopedReplaceRequest()
+	} else {
+		if matches, _ := p.ReplaceCount(); matches == 0 {
+			if total, _, _ := p.Stats(); total > 0 {
+				p.errText = "No matches selected"
+			} else {
+				p.errText = "No matches to replace"
+			}
+			return nil
 		}
+		req, ok = p.ReplaceRequest()
+	}
+	if !ok {
 		return nil
 	}
 	return func() tea.Msg { return ReplaceRequestMsg{Request: req} }
 }
 
-// ReplaceRequest returns the replacement of the current result set. ok is false in Git
-// Grep mode and when nothing matched.
+// ReplaceRequest returns the replacement of the checked matches. ok is false in Git Grep
+// mode, with no query, or when no match is checked.
 func (p *Panel) ReplaceRequest() (ReplaceRequest, bool) {
 	if p.git || p.query.Value() == "" {
 		return ReplaceRequest{}, false
 	}
 	var files []ReplaceFile
-	for _, f := range p.fileMatches {
-		if len(f.Matches) == 0 {
+	for i, f := range p.fileMatches {
+		var selected []Position
+		for j, m := range f.Matches {
+			if p.matchChecked(i, j) {
+				selected = append(selected, Position{Line: m.Line - 1, Col: m.Col - 1})
+			}
+		}
+		if len(selected) == 0 {
 			continue
 		}
-		files = append(files, ReplaceFile{Path: f.Path, Name: f.Name, Hash: f.Hash, Dirty: f.Dirty})
+		files = append(files, ReplaceFile{
+			Path: f.Path, Name: f.Name, Hash: f.Hash, Dirty: f.Dirty, Selected: selected,
+		})
 	}
 	if len(files) == 0 {
 		return ReplaceRequest{}, false
@@ -590,19 +783,119 @@ func (p *Panel) ReplaceRequest() (ReplaceRequest, bool) {
 	}, true
 }
 
-// ReplaceCount returns the matches and files the current replacement would touch.
+// ScopedReplaceRequest returns the replacement of the focused result row alone: for a
+// file row, its checked matches; for a match row, that match when it is checked. It sets
+// the notice that says why there is nothing to replace.
+func (p *Panel) ScopedReplaceRequest() (ReplaceRequest, bool) {
+	if p.git || p.query.Value() == "" || len(p.rows) == 0 {
+		p.errText = "No matches to replace"
+		return ReplaceRequest{}, false
+	}
+	r := p.rows[clamp(p.selected, 0, len(p.rows)-1)]
+	f := p.fileMatches[r.file]
+	var selected []Position
+	if r.kind == rowFile {
+		for j, m := range f.Matches {
+			if p.matchChecked(r.file, j) {
+				selected = append(selected, Position{Line: m.Line - 1, Col: m.Col - 1})
+			}
+		}
+		if len(selected) == 0 {
+			p.errText = "No checked matches in this file"
+			return ReplaceRequest{}, false
+		}
+	} else {
+		if !p.matchChecked(r.file, r.match) {
+			p.errText = "The focused match is not checked"
+			return ReplaceRequest{}, false
+		}
+		m := f.Matches[r.match]
+		selected = []Position{{Line: m.Line - 1, Col: m.Col - 1}}
+	}
+	return ReplaceRequest{
+		Root:        p.root,
+		Query:       p.query.Value(),
+		Replacement: p.replace.Value(),
+		Options:     p.modes,
+		Files: []ReplaceFile{{
+			Path: f.Path, Name: f.Name, Hash: f.Hash, Dirty: f.Dirty, Selected: selected,
+		}},
+		Matches: len(selected),
+		Limit:   p.limit,
+	}, true
+}
+
+// ReplaceCount returns the checked matches and the files they are in.
 func (p *Panel) ReplaceCount() (matches, files int) {
 	if p.git {
 		return 0, 0
 	}
-	for _, f := range p.fileMatches {
-		if len(f.Matches) == 0 {
-			continue
+	for i, f := range p.fileMatches {
+		n := 0
+		for j := range f.Matches {
+			if p.matchChecked(i, j) {
+				n++
+			}
 		}
-		files++
-		matches += len(f.Matches)
+		if n > 0 {
+			files++
+			matches += n
+		}
 	}
 	return matches, files
+}
+
+// matchChecked reports whether match j of file i is checked for replacement.
+func (p *Panel) matchChecked(i, j int) bool {
+	if i < 0 || i >= len(p.checked) || j < 0 || j >= len(p.checked[i]) {
+		return false
+	}
+	return p.checked[i][j]
+}
+
+// fileChecked reports whether every match of file i is checked. A file with no matches
+// is not checked.
+func (p *Panel) fileChecked(i int) bool {
+	if i < 0 || i >= len(p.checked) || len(p.checked[i]) == 0 {
+		return false
+	}
+	for _, on := range p.checked[i] {
+		if !on {
+			return false
+		}
+	}
+	return true
+}
+
+// toggleChecked flips the focused row: a match row's own box, or every match of a file
+// row (in or out together).
+func (p *Panel) toggleChecked() {
+	if p.git || len(p.rows) == 0 {
+		return
+	}
+	r := p.rows[clamp(p.selected, 0, len(p.rows)-1)]
+	if r.kind == rowFile {
+		on := !p.fileChecked(r.file)
+		for j := range p.checked[r.file] {
+			p.checked[r.file][j] = on
+		}
+		return
+	}
+	if r.file < len(p.checked) && r.match < len(p.checked[r.file]) {
+		p.checked[r.file][r.match] = !p.checked[r.file][r.match]
+	}
+}
+
+// setAllChecked checks or unchecks every match of the result.
+func (p *Panel) setAllChecked(on bool) {
+	if p.git {
+		return
+	}
+	for i := range p.checked {
+		for j := range p.checked[i] {
+			p.checked[i][j] = on
+		}
+	}
 }
 
 // NextMatch moves the selection to the next match row, wrapping around, and returns the
@@ -654,9 +947,10 @@ func (p *Panel) Stats() (matches, files int, truncated bool) {
 	return matches, files, p.truncated
 }
 
-// Query and Replacement report the two field values, for the root's tests.
+// Query, Replacement and Glob report the field values, for the root's tests.
 func (p *Panel) Query() string       { return p.query.Value() }
 func (p *Panel) Replacement() string { return p.replace.Value() }
+func (p *Panel) Glob() string        { return p.glob.Value() }
 
 // Move selects the row delta from the selection.
 func (p *Panel) Move(delta int) { p.move(delta) }

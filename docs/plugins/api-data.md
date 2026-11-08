@@ -150,3 +150,15 @@ gvim.theme.name() -> string
 gvim.theme.color(key) -> { r, g, b } | nil     -- key "section.key", for example "editor.selection_bg"
 gvim.theme.is_dark() -> boolean
 ```
+
+`gvim.theme.builtin_themes()` lists the theme names built into the editor (the same names `gvim.theme.name()` can return), for a theme chooser or the theme editor.
+
+**Session colour overrides.** `gvim.theme.override{ ["editor.bg"] = "#112233", ["ui.accent_bg"] = "Blue" }`
+layers colour overrides over the active theme for the rest of the session (at most 64 keys, key
+and value 64 bytes): the values are `#RRGGBB`, Fresh's named colours (`"Red"`, `"DarkGray"`, ...) or
+`"Default"`; attribute bundles are not accepted. `gvim.theme.clear()` drops them and
+`gvim.theme.overrides()` returns the map in force. The editor rebuilds its styles at once and raises
+`theme_changed`; a later theme change clears the overrides, as Fresh's does. A bad key or value
+returns `nil, err` and keeps the current look. For fast animation loops prefer a
+`gvim.timer.every` that calls `override` with a small map.
+

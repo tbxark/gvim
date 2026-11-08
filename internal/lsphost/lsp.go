@@ -77,6 +77,8 @@ func newPort(plan lspPlan, lspEnabled bool) *lspPort {
 		docs:      make(map[string]lspDocRec),
 		muted:     make(map[string]bool),
 		forced:    make(map[string]bool),
+		sem:       make(map[string]semanticCache),
+		pulled:    make(map[string]pulledDiagnostics),
 	}
 	for lang := range plan.auto {
 		if lspEnabled {
@@ -115,6 +117,11 @@ type lspPort struct {
 	// started by hand, which start their servers whatever auto_start says.
 	muted  map[string]bool
 	forced map[string]bool
+	// sem caches the semantic-token data of open documents, and pulled the
+	// server-pulled diagnostics. Both are keyed by path and invalidated when the
+	// document closes, or on a restart.
+	sem    map[string]semanticCache
+	pulled map[string]pulledDiagnostics
 }
 
 // pendingEdit is one queued workspace/applyEdit request.
@@ -260,7 +267,9 @@ func (p *lspPort) Diagnostics(path string) (tui.DiagnosticsEvent, bool) {
 		}
 	}
 	if !seen {
-		return tui.DiagnosticsEvent{}, false
+		// No server publishes for this document: ask the servers that serve
+		// diagnostics by pull instead (docs/lsp.md).
+		return p.pullDiagnostics(path, rec, mgr)
 	}
 	return tui.DiagnosticsEvent{Path: path, Items: items, Version: version, Versioned: versioned}, true
 }
@@ -679,6 +688,8 @@ func (p *lspPort) Restart(language string) error {
 	}
 	mgrs := slices.Collect(maps.Values(p.managers))
 	p.managers = make(map[string]*manager.Manager)
+	p.sem = make(map[string]semanticCache)
+	p.pulled = make(map[string]pulledDiagnostics)
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)
 	defer cancel()
@@ -695,6 +706,8 @@ func (p *lspPort) Stop() error {
 	mgrs := slices.Collect(maps.Values(p.managers))
 	p.managers = make(map[string]*manager.Manager)
 	p.docs = make(map[string]lspDocRec)
+	p.sem = make(map[string]semanticCache)
+	p.pulled = make(map[string]pulledDiagnostics)
 	p.pending = nil
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)
@@ -991,11 +1004,14 @@ func (p *lspPort) updateDocVersion(path string, version int32) {
 	}
 }
 
-// dropDoc forgets the document at path.
+// dropDoc forgets the document at path and the data cached for it: semantic tokens
+// and pulled diagnostics describe a text and a server connection that are gone.
 func (p *lspPort) dropDoc(path string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.docs, path)
+	delete(p.sem, path)
+	delete(p.pulled, path)
 }
 
 // textLines is the lines of a document, for the conversion between the rune columns

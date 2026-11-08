@@ -10,6 +10,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/theme"
@@ -280,5 +281,133 @@ func TestProjectReplaceConfirmationRunsThePort(t *testing.T) {
 	feed(m, cmd)
 	if len(r.reqs) != 1 || r.reqs[0].Replacement != "bar" {
 		t.Fatalf("replacement requests = %+v", r.reqs)
+	}
+}
+
+func TestProjectExportOpensAListAndJumps(t *testing.T) {
+	t.Parallel()
+	s := &fakeProjectSearcher{result: searchpanel.SearchResult{Files: []searchpanel.FileMatches{{
+		Path: "/ws/a.go", Name: "a.go", Hash: 7,
+		Matches: []searchpanel.Match{{Line: 2, Col: 1, Len: 3, Text: "foo bar"}},
+	}}}}
+	ed := newProjEd([]TabInfo{{Name: "a.go", Path: "/ws/a.go", Active: true}}, []BufferText{{Name: "a.go", Path: "/ws/a.go", Text: "foo bar"}})
+	m := newProjectPanelModel(t, ed, s, nil, nil)
+	openSearchPanel(t, m)
+	projectSearch(t, m, "foo")
+	if err := m.Run("project_search_results"); err != nil {
+		t.Fatalf("project_search_results: %v", err)
+	}
+	v, ok := m.overlays[len(m.overlays)-1].(*list.View)
+	if !ok {
+		t.Fatalf("the export opened %T, want the list overlay", m.overlays[len(m.overlays)-1])
+	}
+	if v.Title != "Project Search Results" {
+		t.Fatalf("list title = %q", v.Title)
+	}
+	// Enter on the first match row jumps to it and leaves the list open.
+	_, cmd := m.Update(projectSpecialKey(tea.KeyEnter))
+	feed(m, cmd)
+	if len(ed.opened) == 0 || ed.opened[0] != "/ws/a.go" {
+		t.Fatalf("the list Enter opened %v, want the match's file", ed.opened)
+	}
+	if _, ok := m.overlays[len(m.overlays)-1].(*list.View); !ok {
+		t.Fatal("the list closed after a jump")
+	}
+}
+
+func TestProjectExportWithoutResultsSaysSo(t *testing.T) {
+	t.Parallel()
+	m := newProjectPanelModel(t, newProjEd(nil, nil), &fakeProjectSearcher{}, nil, nil)
+	if err := m.Run("project_search_results"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.notice, "No project search results") {
+		t.Fatalf("notice = %q", m.notice)
+	}
+	// With a panel but no matches, the panel says it has nothing to list.
+	openSearchPanel(t, m)
+	if err := m.Run("project_search_results"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.notice, "No project search results to list") {
+		t.Fatalf("notice = %q", m.notice)
+	}
+}
+
+func TestGlobAndHistorySurviveReopeningThePanel(t *testing.T) {
+	t.Parallel()
+	s := &fakeProjectSearcher{result: searchpanel.SearchResult{}}
+	m := newProjectPanelModel(t, newProjEd(nil, nil), s, nil, nil)
+	p := openSearchPanel(t, m)
+	// Type a glob in the files field: two Tabs from the search field.
+	projectSearch(t, m, "foo")
+	_, _ = m.Update(projectSpecialKey(tea.KeyTab))
+	_, _ = m.Update(projectSpecialKey(tea.KeyTab))
+	for _, r := range "*.go" {
+		_, _ = m.Update(typed(string(r)))
+	}
+	if p.Glob() != "*.go" {
+		t.Fatalf("glob = %q", p.Glob())
+	}
+	_, _ = m.Update(projectSpecialKey(tea.KeyEscape))
+	if len(m.overlays) != 0 {
+		t.Fatalf("Esc left %d overlays", len(m.overlays))
+	}
+	p2 := openSearchPanel(t, m)
+	if p2.Glob() != "*.go" {
+		t.Fatalf("reopened glob = %q, want the session value", p2.Glob())
+	}
+	if len(p2.History()) == 0 || p2.History()[0] != "foo" {
+		t.Fatalf("reopened history = %v, want the searched pattern", p2.History())
+	}
+}
+
+// projectSpecialKey is a named key press for the root's project-search tests.
+func projectSpecialKey(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
+
+func TestPanelShiftEnterScopesTheConfirmation(t *testing.T) {
+	t.Parallel()
+	s := &fakeProjectSearcher{result: searchpanel.SearchResult{Files: []searchpanel.FileMatches{{
+		Path: "/ws/a.go", Name: "a.go", Hash: 7,
+		Matches: []searchpanel.Match{
+			{Line: 2, Col: 1, Len: 3, Text: "foo bar"},
+			{Line: 4, Col: 1, Len: 3, Text: "foo baz"},
+		},
+	}}}}
+	r := &fakeProjectReplacer{result: searchpanel.ReplaceResult{}}
+	ed := newProjEd([]TabInfo{{Name: "a.go", Path: "/ws/a.go", Active: true}}, []BufferText{{Name: "a.go", Path: "/ws/a.go", Text: "foo bar\nfoo baz"}})
+	m := newProjectPanelModel(t, ed, s, r, nil)
+	p := openSearchPanel(t, m)
+	projectSearch(t, m, "foo")
+	// Focus the result rows (search -> replace -> files -> results), then the a.go
+	// header, and ask for the scoped replacement.
+	for i := 0; i < 3; i++ {
+		if _, cmd := m.Update(projectSpecialKey(tea.KeyTab)); cmd != nil {
+			feed(m, cmd)
+		}
+	}
+	if _, cmd := m.Update(projectSpecialKey(tea.KeyHome)); cmd != nil {
+		feed(m, cmd)
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	if cmd == nil {
+		t.Fatal("Shift+Enter returned no command")
+	}
+	msg, ok := cmd().(searchpanel.ReplaceRequestMsg)
+	if !ok {
+		t.Fatalf("Shift+Enter emitted %T", cmd())
+	}
+	if msg.Request.Matches != 2 || len(msg.Request.Files) != 1 || len(msg.Request.Files[0].Selected) != 2 {
+		t.Fatalf("scoped request = %+v, want the file's two matches", msg.Request)
+	}
+	// The root asks for a confirmation and runs the plan when it is confirmed.
+	_, _ = m.Update(msg)
+	if len(m.overlays) == 0 || p == nil {
+		t.Fatal("the confirmation did not open")
+	}
+	_, answer := m.Update(typed("y"))
+	feed(m, answer)
+	if len(r.reqs) != 1 || r.reqs[0].Matches != 2 || len(r.reqs[0].Files) != 1 {
+		t.Fatalf("confirmed replacements = %+v", r.reqs)
 	}
 }

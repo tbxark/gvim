@@ -25,10 +25,12 @@ func linkMissNotice(token string) string { return "No file at " + token }
 
 // Mouse handles a tea mouse message inside the dock's rows. It focuses the dock,
 // forwards the event to the shell when the shell owns the mouse, opens a link on
-// Ctrl+Click, and scrolls the scrollback view. It reports whether the message was
-// the dock's, so the root takes no other action for it.
-func (p *Panel) Mouse(msg tea.Msg, l frame.Layout) (tea.Cmd, bool) {
-	if !l.DockOn || p.term == nil {
+// Ctrl+Click, makes and extends a text selection, and scrolls the scrollback
+// view. count is the click count of a press (2 selects a word, 3 a row, in
+// scrollback). It reports whether the message was the dock's, so the root takes
+// no other action for it.
+func (p *Panel) Mouse(msg tea.Msg, l frame.Layout, count int) (tea.Cmd, bool) {
+	if !l.DockOn || (p.term == nil && !p.restored) {
 		return nil, false
 	}
 	press, isPress := msg.(tea.MouseClickMsg)
@@ -67,24 +69,46 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout) (tea.Cmd, bool) {
 	if isWheel {
 		return p.wheelMouse(mo, row, wheel.Button), true
 	}
+
 	if p.scroll.on {
 		if p.altScreen() {
 			return nil, true
 		}
-		// The scrollback view takes no forwarded mouse; a click can still open a
-		// link.
-		if isPress && mo.Mod&tea.ModCtrl != 0 {
+		// Ctrl+Click still opens a link from the read-only view.
+		if isPress && mo.Button == tea.MouseLeft && mo.Mod&tea.ModCtrl != 0 && p.term != nil {
 			return p.linkCmd(mo.X, row), true
 		}
-		return nil, true
+		return p.scrollMouse(mo, row, count, l, isPress, isMotion, isRelease), true
 	}
+
 	// Ctrl+Click opens a path from the output; it is off on the alternate screen,
 	// where the output is a full-screen program's own drawing.
-	if isPress && mo.Mod&tea.ModCtrl != 0 {
+	if isPress && mo.Button == tea.MouseLeft && mo.Mod&tea.ModCtrl != 0 {
 		if p.altScreen() {
 			return nil, true
 		}
 		return p.linkCmd(mo.X, row), true
+	}
+	if isPress && mo.Button == tea.MouseLeft {
+		// Shift bypasses forwarding to select, except in the legacy alt_screen
+		// mode, which sends everything to a full-screen program. A shell that does
+		// not own the mouse leaves the press for a possible drag-selection.
+		shiftBypass := mo.Mod&tea.ModShift != 0 && p.effects.MouseForwarding != MouseForwardAltScreen
+		if shiftBypass || !p.forwardsMouse(terminal.MousePress, mo) {
+			p.clearSelection()
+			p.beginSelectionPress(row, mo.X, count, mo.Mod&tea.ModShift != 0)
+			return nil, true
+		}
+		p.pressed = terminal.MouseLeft
+		p.term.SendMouse(terminal.MouseEvent{Kind: terminal.MousePress, X: mo.X, Y: row, Button: terminal.MouseLeft, Mods: mouseMods(mo.Mod)})
+		return nil, true
+	}
+	if isMotion && (p.sel.pending || p.sel.dragging) {
+		return p.extendSelection(row, mo.X, l)
+	}
+	if isRelease && mo.Button == tea.MouseLeft && (p.sel.pending || p.sel.dragging) {
+		p.endSelectionPress()
+		return nil, true
 	}
 	kind := terminal.MousePress
 	if isMotion {
@@ -99,14 +123,38 @@ func (p *Panel) Mouse(msg tea.Msg, l frame.Layout) (tea.Cmd, bool) {
 	if isMotion && p.pressed == 0 {
 		button = terminal.MouseNone
 	}
-	if isPress && mo.Button == tea.MouseLeft {
-		p.pressed = terminal.MouseLeft
+	if isPress {
+		p.pressed = button
 	}
 	if isRelease {
 		p.pressed = 0
 	}
 	p.term.SendMouse(terminal.MouseEvent{Kind: kind, X: mo.X, Y: row, Button: button, Mods: mouseMods(mo.Mod)})
 	return nil, true
+}
+
+// scrollMouse handles the mouse in the read-only scrollback view: a press starts
+// a selection (a click without a drag leaves none), a drag extends it, a double
+// or triple click selects the word or the row, and a release ends the drag. The
+// view never forwards the mouse to the shell.
+func (p *Panel) scrollMouse(mo tea.Mouse, row, count int, l frame.Layout, isPress, isMotion, isRelease bool) tea.Cmd {
+	switch {
+	case isPress && mo.Button == tea.MouseLeft:
+		if count >= 2 {
+			p.selectUnit(row, mo.X, count)
+			return nil
+		}
+		p.clearSelection()
+		p.beginSelectionPress(row, mo.X, count, mo.Mod&tea.ModShift != 0)
+		return nil
+	case isMotion && mo.Button == tea.MouseLeft && (p.sel.pending || p.sel.dragging):
+		cmd, _ := p.extendSelection(row, mo.X, l)
+		return cmd
+	case isRelease && mo.Button == tea.MouseLeft:
+		p.endSelectionPress()
+		return nil
+	}
+	return nil
 }
 
 // wheelMouse handles a wheel notch: the scrollback view scrolls, a shell that

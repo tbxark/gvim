@@ -195,6 +195,10 @@ func (h *Handle) Command() []string { return h.cfg.CommandLine() }
 // Install is how to install the server, when it is missing.
 func (h *Handle) Install() string { return h.cfg.Install }
 
+// Capabilities returns the server's capability snapshot: the initialize result
+// plus the providers it registered dynamically.
+func (h *Handle) Capabilities() lsp.Capabilities { return h.client.Capabilities() }
+
 // live reports whether the connection has not ended.
 func (h *Handle) live() bool {
 	select {
@@ -641,6 +645,15 @@ func (m *Manager) StartLanguage(language string) error {
 // language first, then the universal servers, in handle order.
 func (m *Manager) Handles(language string) []*Handle {
 	return m.handlesForLanguage(language)
+}
+
+// AllHandles returns every live handle, whatever language it serves. It is the
+// workspace-wide view the diagnostics panel uses.
+func (m *Manager) AllHandles() []*Handle {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneLocked()
+	return slices.Clone(m.handles)
 }
 
 // findConfig returns the configured server language/name names. An empty name

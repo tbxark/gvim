@@ -3,11 +3,15 @@ package tui
 import (
 	"fmt"
 	"hash/fnv"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 )
@@ -42,6 +46,12 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		return nil
 	}
 	modes, scope := m.projectSearchSettings()
+	glob := ""
+	var history []string
+	if m.proj.panel != nil {
+		glob = m.proj.panel.Glob()
+		history = m.proj.panel.History()
+	}
 	p := searchpanel.New(searchpanel.Options{
 		Root:      m.rootDir(),
 		Files:     m.files,
@@ -49,6 +59,8 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		Current:   m.projectCurrentFile(),
 		Modes:     modes,
 		Scope:     scope,
+		Glob:      glob,
+		History:   history,
 		Git:       git,
 		Searcher:  m.root.ports.ProjectSearch,
 		Grepper:   m.root.ports.GitGrep,
@@ -105,6 +117,71 @@ func (m *Model) projectCurrentFile() *searchpanel.SourceFile {
 	}
 	f := files[i]
 	return &f
+}
+
+// openProjectResultsList opens the last project result set as the filterable list
+// overlay: gvim's mapping of a quickfix export (there is no quickfix stack; the results
+// panel stays the source of truth). The list's Enter jumps to a match and leaves the
+// list open, so the user can walk the result set row by row; Esc closes it.
+func (m *Model) openProjectResultsList() tea.Cmd {
+	p := m.proj.panel
+	if p == nil {
+		m.notice = "No project search results: run Search and Replace in Project first"
+		return nil
+	}
+	items := p.ExportItems()
+	if len(items) == 0 {
+		m.notice = "No project search results to list"
+		return nil
+	}
+	rows := make([]list.Row, 0, len(items))
+	for _, it := range items {
+		if it.Header {
+			rows = append(rows, list.Row{Header: true, Left: it.Name})
+			continue
+		}
+		rows = append(rows, list.Row{
+			Left:  it.Text,
+			Right: filepath.Base(it.Path),
+			Value: projectListValue(it),
+		})
+	}
+	v := list.New("Project Search Results", rows, m.listChrome(), func(_ *list.View, r list.Row) tea.Cmd {
+		t, ok := parseProjectListValue(r.Value)
+		if !ok {
+			return nil
+		}
+		return m.projectJump(t)
+	})
+	m.pushOverlay(v)
+	return nil
+}
+
+// projectListValue encodes a match as a list row value: path, line and column, tab
+// separated (a path cannot hold the tab after the root normalises it).
+func projectListValue(it searchpanel.ExportItem) string {
+	return it.Path + "	" + strconv.Itoa(it.Line) + "	" + strconv.Itoa(it.Col)
+}
+
+// parseProjectListValue decodes projectListValue.
+func parseProjectListValue(value string) (searchpanel.OpenMsg, bool) {
+	path, rest, ok := strings.Cut(value, "	")
+	if !ok {
+		return searchpanel.OpenMsg{}, false
+	}
+	lineText, colText, ok := strings.Cut(rest, "	")
+	if !ok {
+		return searchpanel.OpenMsg{}, false
+	}
+	line, err := strconv.Atoi(lineText)
+	if err != nil {
+		return searchpanel.OpenMsg{}, false
+	}
+	col, err := strconv.Atoi(colText)
+	if err != nil {
+		return searchpanel.OpenMsg{}, false
+	}
+	return searchpanel.OpenMsg{Path: path, Line: line, Col: col}, true
 }
 
 // projectJump opens the target of a project result: a file at a position, or the active

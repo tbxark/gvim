@@ -10,14 +10,19 @@ const CopyThemePrefix = "copy_with_theme:"
 // for the submenus that Fresh builds at run time (DynamicSubmenu), so this
 // hand-written layer fills them in: Copy with Formatting lists one row per theme,
 // as Fresh's generate_dynamic_items does. Every other submenu keeps its rows.
-func submenuItems(it legacyItem) []legacyItem {
+func submenuItems(it legacyItem, themeChoices []ThemeChoice) []legacyItem {
 	if len(it.children) > 0 || it.label != "Copy with Formatting" {
 		return it.children
 	}
+	if len(themeChoices) == 0 {
+		for _, name := range theme.Names() {
+			themeChoices = append(themeChoices, ThemeChoice{Name: name, Ref: name})
+		}
+	}
 	var items []legacyItem
-	for _, name := range theme.Names() {
+	for _, choice := range themeChoices {
 		items = append(items, legacyItem{
-			kind: itemAction, label: name, action: CopyThemePrefix + name, when: "has_selection",
+			kind: itemAction, label: choice.Name, action: CopyThemePrefix + choice.Ref, when: "has_selection",
 		})
 	}
 	return items

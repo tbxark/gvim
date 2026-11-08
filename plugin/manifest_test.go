@@ -37,7 +37,7 @@ func TestParseManifest(t *testing.T) {
 		{name: "bad requires entry", in: `{"requires": ["ok", "No Good"]}`, wantErr: `lists the invalid plugin name "No Good"`},
 		{name: "api zero", in: `{"api": 0}`, wantErr: `"api" must be a positive integer`},
 		{name: "api fraction", in: `{"api": 1.5}`, wantErr: `"api" must be a positive integer`},
-		{name: "api too new", in: `{"api": 2}`, wantErr: "needs plugin API 2, this gvim provides 1"},
+		{name: "api too new", in: `{"api": 3}`, wantErr: "needs plugin API 3, this gvim provides 2"},
 		{name: "main escapes", in: `{"main": "../x.lua"}`, wantErr: `"main" must be a .lua file inside the plugin directory`},
 		{name: "main absolute", in: `{"main": "/etc/x.lua"}`, wantErr: `"main" must be a .lua file inside`},
 		{name: "main not lua", in: `{"main": "init.txt"}`, wantErr: `"main" must be a .lua file inside`},

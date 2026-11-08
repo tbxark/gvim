@@ -8,6 +8,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/theme"
 )
 
 // pluginHost is the editor as a plugin sees it: it implements pluginapi.Host over the
@@ -509,6 +510,8 @@ func (h *pluginHost) OwnerGone(plugin string, gen uint64) {
 	m := h.m
 	m.dropCommands(plugin)
 	m.plugKeysGone(plugin, gen)
+	m.plugPanelsGone(plugin, gen)
+	m.plugMenusGone(plugin, gen)
 	m.plugPromptsGone(plugin, gen)
 	m.plugStatusGone(plugin, gen)
 	m.plugDecorGone(plugin, gen)
@@ -579,26 +582,39 @@ func (h *pluginHost) Config(key string) (any, bool) {
 
 // Theme names the active theme and says whether its editor background is dark.
 func (h *pluginHost) Theme() pluginapi.ThemeInfo {
-	t := h.m.theme
-	bg, ok := t.Value("editor", "bg")
-	dark := true
-	if ok && bg.IsRGB {
-		// Rec. 601 luma, the usual cheap test.
-		dark = 299*int(bg.RGB.R)+587*int(bg.RGB.G)+114*int(bg.RGB.B) < 128*1000
-	}
-	return pluginapi.ThemeInfo{Name: t.Name, Dark: dark}
+	th := h.m.effectiveTheme()
+	return pluginapi.ThemeInfo{Name: th.Name, Dark: th.Dark()}
 }
 
-// ThemeColor returns the RGB of the theme key "section.key". A key that names a
-// terminal color has no RGB.
+// ThemeColor returns the RGB of the theme key "section.key". A named color
+// answers with Fresh's fixed RGB for it; the terminal default has no RGB.
 func (h *pluginHost) ThemeColor(key string) (r, g, b uint8, ok bool) {
 	section, name, found := strings.Cut(key, ".")
 	if !found {
 		return 0, 0, 0, false
 	}
-	c, ok := h.m.theme.Value(section, name)
-	if !ok || !c.IsRGB {
+	c, ok := h.m.effectiveTheme().Value(section, name)
+	if !ok {
 		return 0, 0, 0, false
 	}
-	return c.RGB.R, c.RGB.G, c.RGB.B, true
+	rgb, ok := c.RGBA()
+	if !ok {
+		return 0, 0, 0, false
+	}
+	return rgb.R, rgb.G, rgb.B, true
+}
+
+// ThemeNames lists the themes built into the editor.
+func (h *pluginHost) ThemeNames() []string { return theme.Names() }
+
+// ThemeOverrides returns the session color overrides and whether any are set.
+func (h *pluginHost) ThemeOverrides() (map[string]string, bool) {
+	over := h.m.ThemeOverrides()
+	return over, len(over) > 0
+}
+
+// SetThemeOverrides replaces the session color overrides. An empty map clears
+// them. A bad key or value is an error and keeps the current look.
+func (h *pluginHost) SetThemeOverrides(overrides map[string]string) error {
+	return h.m.SetThemeOverrides(overrides)
 }

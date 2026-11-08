@@ -46,6 +46,11 @@ Grep), Emacs `C-x C-n` (New File) and `C-x f` (Toggle Fold), and the VS Code pre
 `` Ctrl+` `` (Toggle Terminal) and `Ctrl+Shift+\` (Matching Bracket). Fresh leaves Duplicate
 Line, Fold and most Save As keys to the palette; gvim keeps a key for them.
 
+One terminal key belongs to the dock, not the keymap: Ctrl+Space toggles the terminal dock between
+the live shell and its read-only scrollback, and Ctrl+] gives the keyboard back to the editor
+(Shift+PageUp also enters scrollback). The dock reads Ctrl+Space before the keymap, so no preset
+binds it.
+
 Shortcut labels (menus, palette, welcome screen, status row, help, tour) come from the active
 keymap and are written one way: `Ctrl+S`, `Ctrl+Shift+P`, `Alt+Left`, `Ctrl+X Ctrl+S` for a
 sequence. A command with no key in the active keymap shows none. The help lists only keys that
@@ -70,13 +75,19 @@ say so instead of opening a dropdown.
 The find bar (`Ctrl+F`), Find and Replace (`Ctrl+R`) and Query Replace (`Ctrl+Alt+R`) work on one
 buffer. Fresh's `Alt+A` opens the
 **project-wide Search and Replace** panel, which searches the project's files and the open buffers'
-unsaved text and replaces across files: `Alt+Enter` replaces every match of the result set after a
-confirmation, and the changed files stay as unsaved tabs ("N files changed in M tabs; Save All to
-write"). The panel's keys are answered by the panel itself, as every overlay's are: `Tab` moves
-between the search field, the replacement field and the result rows, `Alt+A` switches between all
-files and the current file, `Alt+C`/`Alt+R`/`Alt+W` toggle Case, Regex and Whole, and `Enter` on a
-match opens it. `Ctrl+Alt+Right` and `Ctrl+Alt+Left` step through the last project search's matches
-from the editor. The command palette's *Git Grep* row runs `git grep` in the work tree and shows the
+unsaved text and replaces across files. The panel's keys are answered by the panel itself, as every
+overlay's are: `Tab` moves between the search field, the replacement field, the file-glob field and
+the result rows; `Alt+A` switches between all files and the current file; `Alt+C`/`Alt+R`/`Alt+W`
+toggle Case, Regex and Whole; the file-glob field takes comma or space separated patterns (`*.go`,
+`src/**`); Up and Down in the search field walk the session's earlier patterns. In the match tree,
+`Space` checks or unchecks the focused row (a file row takes all its matches), `a` checks every
+match, `n` unchecks every match, and `Enter` on a match opens it. `Alt+Enter` replaces every
+checked match and `Shift+Enter` replaces the focused row alone (its checked matches for a file
+row), each after a confirmation; the changed files stay as unsaved tabs ("N files changed in M tabs;
+Save All to write"). `Alt+Q` lists the result set as a filterable list whose `Enter` jumps to a
+match (gvim's quickfix export; the palette's *Project Search Results in List* row runs the same
+command), and `Ctrl+Alt+Right`/`Ctrl+Alt+Left` step through the last project search's matches from
+the editor. The command palette's *Git Grep* row runs `git grep` in the work tree and shows the
 same result list read-only, with `Alt+C` for case sensitivity. Live Grep still searches the
 project's files only and cannot replace.
 

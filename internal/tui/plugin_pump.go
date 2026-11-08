@@ -104,6 +104,11 @@ type pluginState struct {
 
 	// keys is the key layer, the modes, the status items and the idle timer (plugin_keys.go).
 	keys pluginKeys
+	// panels are the declarative widget panels and sidebar sections plugins mounted
+	// (plugin_panels.go).
+	panels pluginPanels
+	// menus are the rows plugins added to the menu bar dropdowns (plugin_menus.go).
+	menus menus
 	// virtual records who made each virtual buffer (plugin_virtual.go).
 	virtual pluginVirtual
 

@@ -114,29 +114,54 @@ same card, between its borders:
 
 ### Search panel details: project-wide Search and Replace, and Git Grep
 
-Two more sheets share the card frame, one row of search plus (for Search and Replace)
-one row of replacement, an option row and a scrollable result region:
+Two more sheets share the card frame: a row of search, and for Search and Replace one
+row of replacement and one row of file globs, an option row and a scrollable result
+region:
 
 - **Project-wide Search and Replace** (started by "Search and Replace in Project"; the
   editor's Alt+A) searches the project files and the open buffers' unsaved text. The card
   is title border, result rows (up to clamp(h/2, 4, 18), shrinking only as far as the
   menu and tab rows allow; a frame with no room paints nothing), the Search row, the
-  Replace row, the options row and the hints. The result rows are grouped: a file row
-  ("▾ path (count)", Enter folds and unfolds it) and a match row per matching line
-  ("line:col  text", the matched runes bold); Enter on a match opens it. The options are
-  the All Files/Current File scope (Alt+A), Case (Alt+C), Regex (Alt+R) and Whole
-  (Alt+W) checkboxes; Tab moves the focus between the two fields and the result rows.
-  Alt+Enter asks to replace every match of the result set. The replacement is a
-  deliberate divergence from Fresh: gvim plans edits and applies them to the open tabs
-  (and opens the closed files as unsaved tabs) instead of writing to disk and bypassing
-  undo; the notice "N files changed in M tabs; Save All to write" says so, and Save All
-  does the writes through the normal save path. Search and replace never reuse the
-  offsets of an older result: every file carries a content hash from the search, and a
-  file whose text changed is skipped.
+  Replace row, the Files row, the options row and the hints. The result rows are a match
+  tree: a file row ("[x] ▾ path (checked/total)", Enter folds and unfolds it) and a match
+  row per matching line ("[x] line:col  text", the matched runes bold, Enter opens it).
+  Space toggles the focused row's checkbox (a file row takes its matches with it), a
+  checks every match and n unchecks every match; the title says how many are selected.
+  The options are the All Files/Current File scope (Alt+A), Case (Alt+C), Regex (Alt+R)
+  and Whole (Alt+W) checkboxes; Tab moves the focus between the search field, the
+  replacement field, the Files field and the result rows. The Files field is a comma or
+  space separated glob filter: a pattern without a slash matches the file's name at any
+  depth (*.go) and a pattern with a slash matches the root-relative path (src/**,
+  **/test_*.go), with * and ? staying inside one segment and ** crossing them; an invalid
+  pattern blocks the search and says why. Up and Down in the search field walk the
+  session's earlier patterns (20 deep); the searched pattern is remembered when a search
+  finishes.
+  Alt+Enter replaces every checked match, Shift+Enter replaces the focused row alone (a
+  file row: its checked matches; a match row: that match), each after a confirmation and
+  never at an offset the search did not report. The replacement is a deliberate
+  divergence from Fresh: gvim plans edits and applies them to the open tabs (and opens
+  the closed files as unsaved tabs) instead of writing to disk and bypassing undo; the
+  notice "N files changed in M tabs; Save All to write" says so, and Save All does the
+  writes through the normal save path. Search and replace never reuse the offsets of an
+  older result: every file carries a content hash from the search, and a file whose text
+  changed is skipped.
+- **Project search results as a list** (Alt+Q, or "Project Search Results in List" in
+  the palette) is gvim's quickfix export: the result set opens in the shared list
+  overlay, grouped by file, filterable, with Enter jumping to a match and the list
+  staying open so the set can be walked. gvim has no persistent quickfix stack and the
+  results panel stays the source of truth; the next and previous project-match chords
+  walk the same set from the editor.
 - **Git Grep** (command palette row only) is the same card with a single search field:
-  the All Files/Case toggles collapse to Case (Alt+C), the replacement row is absent, and
-  Enter opens the match. It runs git grep in the work tree of the workspace root; exit 0
-  and 1 both mean a finished search (1 is no matches), 2 or more is an error notice.
+  the All Files/Case toggles collapse to Case (Alt+C), the replacement, Files and scoped
+  rows are absent, and Enter opens the match; its results can be listed with Alt+Q too.
+  It runs git grep in the work tree of the workspace root; exit 0 and 1 both mean a
+  finished search (1 is no matches), 2 or more is an error notice. File globs for Git
+  Grep are not implemented (that needs git pathspecs; see the residuals below).
+- **Residuals of the search surfaces**: streaming or batched results (the port is one
+  asynchronous search and the sheet shows "searching…" until it lands), a split preview
+  pane (a match row already shows its line and Enter jumps), multi-line regex rows (a
+  multi-line match is one row at its start line), replacing in very large files (they are
+  skipped with a reason), provider scopes beyond files and the current buffer.
 
 ## 3. Component map
 
@@ -155,6 +180,7 @@ one row of replacement, an option row and a scrollable result region:
 | Context menu, "+" menu | menu | `internal/tui/ctxmenu` |
 | Anchored popup (LSP hover, ...) | menu | `internal/tui/popup` |
 | Sidebar column (File Explorer + Contents) | body, left column | `internal/tui/frame` (geometry and hit map), `internal/tui/sidebar` (section headers and the Contents body), `internal/tui/explorer` (tree body) |
+| Plugin widget panel | card (centred float), body of a virtual-buffer pane, or a sidebar section | `internal/tui/pluginpanel` (layout, paint, hit testing), `internal/tui/plugin_panels.go` (placement, focus, routing); a floating panel is a card with the shared frame, a buffer panel is painted inside the pane's text rectangle, a sidebar section's body is painted by the column |
 
 ## 4. Rules for a new component
 
@@ -167,6 +193,11 @@ one row of replacement, an option row and a scrollable result region:
    the box; `PaintBox` cuts a title that cannot fit.
 5. Keep the placement geometry in one pure function that painting and hit testing
    both call, so a box and its click targets cannot drift apart.
+6. Plugin-owned surfaces follow the same rules: a floating widget panel is a card, a plugin
+   sidebar section is a body of the column with the shared header, and a panel's focus goes to
+   the widget under the pointer or in the Tab ring inside the panel, never straight to the
+   editor. The declarative widget panel's layout, paint and hit testing live in
+   `internal/tui/pluginpanel`.
 
 ## 5. The status bar
 
@@ -196,14 +227,15 @@ Fresh's `StatusBarElement::try_from` rejects it.
 | `{diagnostics}` | Fresh's split counts `[E:1 W:2 I:3]` (only the non-zero parts), a blank seven-cell slot while a server runs and no count is known yet; not clickable |
 | `{cursor_count}` | "N cursors" when the active document has more than one caret, hidden at one |
 | `{messages}` | the status message; click opens Show Warnings, gvim's status log; when the row cuts it the message wraps on the notice band above the row |
+| `{filename}` | Fresh's display name: the file path relative to the workspace root when it is under it, its absolute path otherwise, and the document's own name ("[No Name]", "Untitled-N", "*virtual*") when it has no path. Fresh's markers follow: " [+]" while the buffer is modified, " [RO]" while it is read-only (the same flag `{read_only}` shows). Not clickable, as in Fresh. |
+| `{chord}` | the pending multi-key sequence as "[Ctrl+X]" (gvim's one label style), painted faint/muted, and shown only while a sequence waits: it appears on the first held key and is gone when the sequence resolves, misses or is cancelled. (Divergence: Fresh's reference paints the chord with the normal status foreground; the muted look is gvim's choice.) |
 | `{read_only}` | "[RO]" for a read-only document; not clickable (gvim has no read-only menu) |
 | `{line_ending}`, `{encoding}`, `{language}` | the indicator; click opens the chooser, as before |
 | `{lsp}` | the language-server pill (see `docs/lsp.md`) |
 | `{palette}` | "Palette: Ctrl+P", or the chord of the active keymap; click opens the command palette |
+| `{clock}` | the local time as 24-hour zero-padded "HH:MM", Fresh's `chrono` format ("{:02}:{:02}") read from the model's clock when the row is built. A minute tick redraws the row while the element is configured and visible, so an idle editor still shows the new minute; a config change that adds it takes effect at the next launch (the row is not live-edited this round). The checked-out Fresh reference renders a static colon although its docs mention a blinking one; gvim matches the code. |
 | `{warnings}` | nothing: gvim has no general-warning domain (Fresh's `[⚠ N]` counts its tracing warnings). gvim's equivalent list is Show Warnings, which keeps every notice, so a count of it would never reach zero. |
 | `{update}` | nothing: gvim has no update checker |
-| `{filename}` | nothing: the tab strip is gvim's filename surface |
-| `{chord}`, `{clock}` | nothing yet (parsed; rendering is a follow-up) |
 | `{plugin:token}` | nothing: gvim plugins contribute status items, not registered tokens (below) |
 
 **Plugin items.** `gvim.ui.statusbar.item` items are placed by anchor, so they survive
@@ -221,6 +253,12 @@ element that does not fit is cut and the rest drop. The `{remote}` label gives w
 before the rest of the left group. When `{messages}` is cut or does not fit the row, the
 message wraps on the notice band (section 1). The default left list starts with `{trust}`, so
 the trust pill is the last left element to give way.
+
+`{filename}`, `{chord}` and `{clock}` are ordinary configured elements at that squeeze: they
+keep no reserved slot and sit wherever the lists put them. `{chord}` only exists while a
+sequence is pending, so the elements after it move when it appears and disappears (Fresh does
+the same); `{filename}` elides at the left tail like any other element, its " [+]" / " [RO]"
+markers being part of the same run.
 
 ## 6. Menu accelerators
 

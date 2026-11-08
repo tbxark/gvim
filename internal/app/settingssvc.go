@@ -43,6 +43,11 @@ type settingsService struct {
 
 	cfg      config.Config // the effective config of the last load
 	userFile string        // the user config file the page writes
+	theme    *themeCatalog // user/bundled theme resolution; nil means bundled only
+
+	// ioMu serializes the file writes and reloads. The state mutex is not held
+	// while a file is written or loaded, so a Snapshot can run during a Save.
+	ioMu sync.Mutex
 }
 
 var _ tui.SettingsPort = (*settingsService)(nil)
@@ -50,7 +55,7 @@ var _ tui.SettingsPort = (*settingsService)(nil)
 // newSettingsService returns the Settings page's service. trusted reports whether
 // the workspace is trusted now; the page asks on every snapshot, so a trust
 // decision taken during the session makes the project layer writable at once.
-func newSettingsService(root string, opts Options, ed *editor.Editor, trusted func() bool, cfg config.Config) *settingsService {
+func newSettingsService(root string, opts Options, ed *editor.Editor, trusted func() bool, cfg config.Config, themeCat *themeCatalog) *settingsService {
 	user := opts.Config
 	if user == "" {
 		if files, err := config.Paths(); err == nil {
@@ -60,18 +65,18 @@ func newSettingsService(root string, opts Options, ed *editor.Editor, trusted fu
 	if trusted == nil {
 		trusted = func() bool { return true }
 	}
-	return &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user}
+	return &settingsService{opts: opts, root: root, ed: ed, trusted: trusted, cfg: cfg, userFile: user, theme: themeCat}
 }
 
 // Snapshot returns the settings the page lists.
 func (s *settingsService) Snapshot() tui.SettingsSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.snapshot()
+	return s.snapshotFor(s.cfg)
 }
 
-// snapshotLocked is Snapshot under the lock.
-func (s *settingsService) snapshot() tui.SettingsSnapshot {
+// snapshotFor builds the page content for a loaded config. It reads no files.
+func (s *settingsService) snapshotFor(cfg config.Config) tui.SettingsSnapshot {
 	projectWritable := s.trusted()
 	snap := tui.SettingsSnapshot{
 		UserFile:        s.userFile,
@@ -80,7 +85,7 @@ func (s *settingsService) snapshot() tui.SettingsSnapshot {
 	}
 	sectionAt := make(map[string]int)
 	for _, setting := range config.Settings() {
-		value := setting.Value(s.cfg)
+		value := setting.Value(cfg)
 		switch setting.Key() {
 		case "theme":
 			if s.opts.Theme != "" {
@@ -130,11 +135,28 @@ func layersOf(setting config.Setting) []string {
 func (s *settingsService) choicesOf(setting config.Setting) []string {
 	switch setting.ChoicesFrom {
 	case "themes":
+		if s.theme != nil {
+			infos := s.theme.Infos()
+			refs := make([]string, len(infos))
+			for i, info := range infos {
+				refs[i] = info.Ref
+			}
+			return refs
+		}
 		return theme.Names()
 	case "keymaps":
 		return slices.Clone(keymapChoices)
 	}
 	return slices.Clone(setting.Choices)
+}
+
+// loadTheme resolves a config theme value through the catalog (bundled themes
+// when the service has none).
+func (s *settingsService) loadTheme(ref string) (theme.Theme, error) {
+	if s.theme != nil {
+		return s.theme.Load(ref)
+	}
+	return theme.Load(ref)
 }
 
 // Validate reports why value cannot be used for key. It checks the schema's
@@ -155,7 +177,7 @@ func (s *settingsService) Validate(key, value string) error {
 		if err := json.Unmarshal(raw, &name); err != nil {
 			return err
 		}
-		if _, err := theme.Load(name); err != nil {
+		if _, err := s.loadTheme(name); err != nil {
 			return fmt.Errorf("theme %q: %w", name, err)
 		}
 	case "keymap":
@@ -175,25 +197,46 @@ func (s *settingsService) Validate(key, value string) error {
 
 // Save writes the edits to the layer and reloads the config, returning what the
 // running editor should apply. The page's edits are one patch, so a failure
-// leaves the file as it was.
+// leaves the file as it was. Validation takes the state lock, the file write and
+// reload happen outside it (serialized by ioMu), so a Snapshot keeps working
+// while the file is written.
 func (s *settingsService) Save(edits []tui.SettingEdit, layer string) (tui.SettingsChange, error) {
+	patch, changed, path, err := s.prepareSave(edits, layer)
+	if err != nil {
+		return tui.SettingsChange{}, err
+	}
+	s.ioMu.Lock()
+	defer s.ioMu.Unlock()
+	if len(patch) > 0 {
+		if path == "" {
+			return tui.SettingsChange{}, fmt.Errorf("no %s config file is known", layer)
+		}
+		if err := patchConfigFileFn(path, patch); err != nil {
+			return tui.SettingsChange{}, err
+		}
+		return s.reloadUnlocked(uniqueStrings(changed), layer)
+	}
+	return s.reloadUnlocked(nil, "")
+}
+
+// prepareSave validates the edits and builds the patch. It holds the state lock
+// only for the validation and the read of the current config.
+func (s *settingsService) prepareSave(edits []tui.SettingEdit, layer string) (patch []config.Edit, changed []string, path string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	project := layer == tui.SettingsLayerProject
 	if project && !s.trusted() {
-		return tui.SettingsChange{}, errors.New("the project config can be written only in a trusted workspace")
+		return nil, nil, "", errors.New("the project config can be written only in a trusted workspace")
 	}
-	var patch []config.Edit
-	var changed []string
 	for _, edit := range edits {
 		switch {
 		case edit.Key != "":
 			setting, ok := config.SettingByKey(edit.Key)
 			if !ok {
-				return tui.SettingsChange{}, fmt.Errorf("unknown setting %q", edit.Key)
+				return nil, nil, "", fmt.Errorf("unknown setting %q", edit.Key)
 			}
 			if project && !setting.Layers.Has(config.LayerProject) {
-				return tui.SettingsChange{}, fmt.Errorf("%s can only be set in the user config", edit.Key)
+				return nil, nil, "", fmt.Errorf("%s can only be set in the user config", edit.Key)
 			}
 			if edit.Remove {
 				patch = append(patch, config.Edit{Path: setting.Path, Remove: true})
@@ -201,48 +244,39 @@ func (s *settingsService) Save(edits []tui.SettingEdit, layer string) (tui.Setti
 				continue
 			}
 			if err := s.validateSetting(setting, edit.Value, project); err != nil {
-				return tui.SettingsChange{}, err
+				return nil, nil, "", err
 			}
 			raw, err := setting.Encode(edit.Value)
 			if err != nil {
-				return tui.SettingsChange{}, fmt.Errorf("%s: %w", edit.Key, err)
+				return nil, nil, "", fmt.Errorf("%s: %w", edit.Key, err)
 			}
 			patch = append(patch, config.Edit{Path: setting.Path, Raw: raw})
 			changed = append(changed, edit.Key)
 		case len(edit.Path) > 0:
 			if !config.RemovablePath(edit.Path) {
-				return tui.SettingsChange{}, fmt.Errorf("the settings page cannot write %s", strings.Join(edit.Path, "."))
+				return nil, nil, "", fmt.Errorf("the settings page cannot write %s", strings.Join(edit.Path, "."))
 			}
 			if edit.Remove {
 				patch = append(patch, config.Edit{Path: edit.Path, Remove: true})
 			} else {
 				if len(edit.Raw) == 0 {
-					return tui.SettingsChange{}, fmt.Errorf("%s: the value is empty", strings.Join(edit.Path, "."))
+					return nil, nil, "", fmt.Errorf("%s: the value is empty", strings.Join(edit.Path, "."))
 				}
 				if diags := config.ValidateEdits([]config.Edit{{Path: edit.Path, Raw: edit.Raw}}, project); len(diags) > 0 {
-					return tui.SettingsChange{}, errors.New(diags[0].String())
+					return nil, nil, "", errors.New(diags[0].String())
 				}
 				patch = append(patch, config.Edit{Path: edit.Path, Raw: edit.Raw})
 			}
 			changed = append(changed, settingKeyOfPath(edit.Path))
 		default:
-			return tui.SettingsChange{}, errors.New("an edit needs a setting key or a config path")
+			return nil, nil, "", errors.New("an edit needs a setting key or a config path")
 		}
 	}
-	if len(patch) == 0 {
-		return s.reload(nil, "")
-	}
-	path := s.userFile
+	path = s.userFile
 	if project {
 		path = s.projectFile()
 	}
-	if path == "" {
-		return tui.SettingsChange{}, fmt.Errorf("no %s config file is known", layer)
-	}
-	if err := patchConfigFile(path, patch); err != nil {
-		return tui.SettingsChange{}, err
-	}
-	return s.reload(uniqueStrings(changed), layer)
+	return patch, changed, path, nil
 }
 
 // settingKeyOfPath returns the schema key a structured edit belongs to, for the
@@ -295,7 +329,7 @@ func (s *settingsService) validateSetting(setting config.Setting, value string, 
 		if err := json.Unmarshal(raw, &name); err != nil {
 			return err
 		}
-		if _, err := theme.Load(name); err != nil {
+		if _, err := s.loadTheme(name); err != nil {
 			return fmt.Errorf("theme %q: %w", name, err)
 		}
 	case "keymap":
@@ -314,10 +348,8 @@ func (s *settingsService) validateSetting(setting config.Setting, value string, 
 }
 
 // Reload re-reads the config files and returns what the running editor should
-// apply.
+// apply. The state lock is not held while the files are read.
 func (s *settingsService) Reload() (tui.SettingsChange, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.reload(nil, "")
 }
 
@@ -338,10 +370,28 @@ func (s *settingsService) Apply(tui.SettingsChange) {
 // reload loads the config again and returns the change. changed are the setting
 // keys a Save wrote; nil means a Reload, which reapplies every live value.
 func (s *settingsService) reload(changed []string, layer string) (tui.SettingsChange, error) {
+	s.ioMu.Lock()
+	defer s.ioMu.Unlock()
+	return s.reloadUnlocked(changed, layer)
+}
+
+// reloadUnlocked is reload with ioMu held. It reads the previous state under the
+// state lock, releases it for the config and theme-registry reads, and swaps the
+// new config in under the lock at the end, so Snapshot and Structure keep
+// answering during the IO.
+func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.SettingsChange, error) {
+	s.mu.Lock()
 	previous := s.cfg
+	opts := s.opts
+	root := s.root
+	s.mu.Unlock()
+	if s.theme != nil {
+		// A Reload command is also the hot reload for a theme file edited on disk.
+		_ = s.theme.Reload()
+	}
 	cfg, diags, err := config.Load(config.Options{
-		Root:      s.root,
-		UserFile:  s.opts.Config,
+		Root:      root,
+		UserFile:  opts.Config,
 		Untrusted: !s.trusted(),
 	})
 	if err != nil {
@@ -352,21 +402,28 @@ func (s *settingsService) reload(changed []string, layer string) (tui.SettingsCh
 	if reloaded {
 		// A Reload reports only the settings whose effective value changed, so the
 		// restart notice does not list the whole restart set for an untouched file.
+		// The theme is always re-applied: a user theme file edited on disk is read
+		// again by the registry reload above.
 		keys = changedSettings(previous, cfg)
+		if !slices.Contains(keys, "theme") {
+			keys = append(keys, "theme")
+		}
 	} else {
 		keys = s.changedKeys(changed)
 	}
-	s.cfg = cfg
 	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
-	settings := settingsFor(s.opts, cfg)
+	settings := settingsFor(opts, cfg)
 	settings.IconsMode, settings.IconsWhy = icon.Mode.String(), icon.Why
-	settings.Keymap = effectiveKeymap(s.opts, cfg)
-	settings.Theme = effectiveTheme(s.opts, cfg)
+	settings.Keymap = effectiveKeymap(opts, cfg)
+	themeRef := s.themeRefFor(opts, cfg)
+	if th, err := s.loadTheme(themeRef); err == nil {
+		settings.Theme = th.Name
+	}
 	change := tui.SettingsChange{
-		Snapshot:    s.snapshot(),
+		Snapshot:    s.snapshotFor(cfg),
 		Settings:    settings,
 		View:        *viewOptions(cfg, icon.Mode.String()),
-		Theme:       settings.Theme,
+		Theme:       themeRef,
 		Keymap:      settings.Keymap,
 		UIIconsMode: icon.Mode.String(),
 		IconsWhy:    icon.Why,
@@ -383,7 +440,7 @@ func (s *settingsService) reload(changed []string, layer string) (tui.SettingsCh
 		}
 		// A command-line flag wins over the file, for the running editor and for
 		// the next start: the file gets the edit, the session keeps the flag.
-		if (key == "theme" && s.opts.Theme != "") || (key == "keymap" && s.opts.Keymap != "") {
+		if (key == "theme" && opts.Theme != "") || (key == "keymap" && opts.Keymap != "") {
 			change.Warnings = append(change.Warnings,
 				"--"+key+" wins over the config file; the edit applies to the file only")
 			continue
@@ -394,7 +451,28 @@ func (s *settingsService) reload(changed []string, layer string) (tui.SettingsCh
 			change.Live = append(change.Live, key)
 		}
 	}
+	s.mu.Lock()
+	s.cfg = cfg
+	s.mu.Unlock()
 	return change, nil
+}
+
+// themeRefFor is the portable config value of the effective theme: the --theme
+// flag wins over the config.
+func (s *settingsService) themeRefFor(opts Options, cfg config.Config) string {
+	ref := opts.Theme
+	if ref == "" {
+		ref = cfg.Theme
+	}
+	if ref == "" {
+		ref = "dark"
+	}
+	if s.theme != nil {
+		if canonical, err := s.theme.Canonical(ref); err == nil {
+			ref = canonical
+		}
+	}
+	return ref
 }
 
 // changedKeys returns the settings to report: changed, in schema order, or every
@@ -428,14 +506,17 @@ func (s *settingsService) changedKeys(changed []string) []string {
 // to the effective config. The page calls it from a tea.Cmd.
 func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStructure, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	cfg := s.cfg
+	userFile := s.userFile
+	root := s.root
+	s.mu.Unlock()
 	project := layer == tui.SettingsLayerProject
-	path := s.userFile
+	path := userFile
 	if project {
 		if !s.trusted() {
 			return tui.SettingsStructure{}, errors.New("the project config can be written only in a trusted workspace")
 		}
-		path = s.projectFile()
+		path = projectFileFor(root)
 	}
 	if path == "" {
 		return tui.SettingsStructure{}, fmt.Errorf("no %s config file is known", layer)
@@ -452,9 +533,9 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 	case strings.HasPrefix(structureKey, "languages."):
 		return s.structureLanguageFields(object, strings.TrimPrefix(structureKey, "languages.")), nil
 	case structureKey == "editor.status_bar", structureKey == "editor.status_bar.left", structureKey == "editor.status_bar.right":
-		return s.structureStatusBar(object, structureKey), nil
+		return s.structureStatusBar(cfg, object, structureKey), nil
 	case structureKey == "terminal.shell.args":
-		return s.structureShellArgs(object), nil
+		return s.structureShellArgs(cfg, object), nil
 	}
 	return tui.SettingsStructure{}, fmt.Errorf("unknown settings structure %q", structureKey)
 }
@@ -606,15 +687,15 @@ func (s *settingsService) structureLanguageFields(object map[string]json.RawMess
 
 // structureStatusBar is the dual list of the status-bar elements. The page
 // writes both sides as whole arrays, and only those two paths.
-func (s *settingsService) structureStatusBar(object map[string]json.RawMessage, key string) tui.SettingsStructure {
+func (s *settingsService) structureStatusBar(cfg config.Config, object map[string]json.RawMessage, key string) tui.SettingsStructure {
 	st := tui.SettingsStructure{Key: key, Title: "Status Bar", Kind: "dual"}
-	left := s.cfg.StatusBar.Left
+	left := cfg.StatusBar.Left
 	if raw, ok := layerRawAt(object, []string{"editor", "status_bar", "left"}); ok {
 		if list, ok := stringList(raw); ok {
 			left = list
 		}
 	}
-	right := s.cfg.StatusBar.Right
+	right := cfg.StatusBar.Right
 	if raw, ok := layerRawAt(object, []string{"editor", "status_bar", "right"}); ok {
 		if list, ok := stringList(raw); ok {
 			right = list
@@ -642,9 +723,9 @@ func (s *settingsService) structureStatusBar(object map[string]json.RawMessage, 
 }
 
 // structureShellArgs is the terminal.shell.args list sub-page.
-func (s *settingsService) structureShellArgs(object map[string]json.RawMessage) tui.SettingsStructure {
+func (s *settingsService) structureShellArgs(cfg config.Config, object map[string]json.RawMessage) tui.SettingsStructure {
 	st := tui.SettingsStructure{Key: "terminal.shell.args", Title: "Shell Arguments", Kind: "list", AddLabel: "Add argument…"}
-	args := s.cfg.Terminal.Shell.Args
+	args := cfg.Terminal.Shell.Args
 	if raw, ok := layerRawAt(object, []string{"terminal", "shell", "args"}); ok {
 		if list, ok := stringList(raw); ok {
 			args = list
@@ -696,23 +777,17 @@ func structuredSettingChanged(key string, old, next config.Config) bool {
 
 // projectFile returns the project config file the page writes: the nearest
 // existing one at or above the root, or root/.gvim/config.json to create.
-func (s *settingsService) projectFile() string {
-	if s.root == "" {
+func (s *settingsService) projectFile() string { return projectFileFor(s.root) }
+
+// projectFileFor is projectFile for a root captured outside the state lock.
+func projectFileFor(root string) string {
+	if root == "" {
 		return ""
 	}
-	if path, ok, err := config.ProjectFile(s.root); err == nil && ok {
+	if path, ok, err := config.ProjectFile(root); err == nil && ok {
 		return path
 	}
-	return filepath.Join(s.root, ".gvim", "config.json")
-}
-
-// effectiveTheme is the theme the running editor shows: the --theme flag wins
-// over the config.
-func effectiveTheme(opts Options, cfg config.Config) string {
-	if opts.Theme != "" {
-		return opts.Theme
-	}
-	return cfg.Theme
+	return filepath.Join(root, ".gvim", "config.json")
 }
 
 // effectiveKeymap is the keymap the running editor uses: the --keymap flag wins
@@ -726,6 +801,10 @@ func effectiveKeymap(opts Options, cfg config.Config) string {
 	}
 	return keymap.DefaultName()
 }
+
+// patchConfigFileFn is the Save's file write. A test replaces it to hold the
+// write open and check that Snapshot and Structure do not block behind it.
+var patchConfigFileFn = patchConfigFile
 
 // patchConfigFile applies the edits to the JSONC config file at path, replacing
 // it atomically. It is the Settings page's one write: config owns the hujson

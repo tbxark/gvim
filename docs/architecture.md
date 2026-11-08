@@ -35,7 +35,7 @@ internal/                       private executable shell (no top-level package i
     tabstrip/                   split tree, tab strip
     dock/                       terminal dock panel (the root keeps the glue)
     browser/ ctxmenu/ dialog/ editorpane/ explorer/ find/ grid/ icons/ menubar/
-    palette/ picker/ popup/ prompt/ space/ style/
+    palette/ picker/ pluginpanel/ popup/ prompt/ space/ style/
   terminal/                     PTY + screen model behind the terminal dock
   filewatch/                    fsnotify watcher (explorer reloads, project switches)
   uitest/                       test-only in-process UI harness
@@ -168,7 +168,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `lsp` | Pure-Go LSP client/protocol layer: JSON-RPC, transport, positions, requests, diagnostics, signature help. | |
 | `lsp/manager` | The multi-server manager: one client per workspace root, server catalogue (`Spec`, `Defaults`, `DefaultFor`). | imports `lsp`. |
 | `lsp/lsptest` | Test-only fake language server and pipes shared by the client and manager tests. | imports no module package. |
-| `pluginapi` | The plugin contract: plain types, `Host`/`Runtime` interfaces, error codes, `Unsupported`. | stdlib only; imported by `internal/tui`, `internal/app` and `plugin`. |
+| `pluginapi` | The plugin contract: plain types (`api.go`, the tier-1a `widgetapi.go` spec types, action popups, prompt suggestions, the all-files diagnostics shape), `Host`/`Runtime` interfaces, error codes, `Unsupported`. | stdlib only; imported by `internal/tui`, `internal/app` and `plugin`. |
 | `plugin` | Lua plugin runtime: sandbox, tasks and the yield protocol, budgets/strikes, `gvim.*` API installers, data libraries, loader/lifecycle. `doc.go` holds the file map. | `plugin/bundled` (embedded Lua), `plugin/plugintest` (fake host harness), `plugin/pattern` (Lua pattern matcher), `plugin/hostos` (OS port). |
 | `plugin/hostos` | The plugin OS port: files, processes and watchers (`OS`, `Dirs`, `Proc*`, `Watch*`, `NopOS`). | Implemented by `internal/pluginhost`, which is why it is a separate package from the runtime. |
 | `commands` | The command registry and palette model: generated Fresh command table, palette query modes, availability rules, filtering. | Feeds the command palette; keymap-aware. |
@@ -186,7 +186,7 @@ still large internally, so a reader can find a feature without grepping by memor
 | splits / tabs / compare | `split.go`, `split_resize.go`, `split_drag.go`, `split_tabs.go`, `tabs.go`, `tab_drag.go`, `tab_drop.go`, `compare*.go` | pane controllers and drag/drop over the `tui/split` tree, tab strip glue over `tui/tabstrip`, side-by-side compare |
 | terminal dock | `dock_glue.go`, `dock_commands.go`, `dock_text.go` (`shell.go` is editor shell commands) | root glue over `tui/dock`: port aliases, action routing, paint calls, selection helpers |
 | LSP UI | `lsp.go`, `lsp_detect.go`, `diag.go`, `root_signature.go` | language-server UI controller, diagnostics, goto/hover/completion/code actions/rename, signature help |
-| plugin host | `plugin_*.go` | the UI side of the plugin contract: pump, events, keys/modes, prompts, windows, virtual buffers, decorations, manager, init.lua |
+| plugin host | `plugin_*.go`, plus the tier-1a host files `plugin_panels.go` (widget panels and sidebar sections), `plugin_menus.go` (menu bar rows), `plugin_actionpopup.go` (action popups) | the UI side of the plugin contract: pump, events, keys/modes, prompts, windows, virtual buffers, decorations, manager, init.lua, the declarative panels/sections, menus, action popups and prompt suggestions |
 | overlays / utilities | `keybind_editor.go`, `help_utility.go`, `notice_warnings.go`, `help.go`, `settings.go`, `icon_preview.go`, `tour.go`, `root_stash.go`, `language_pick.go`, `files_encoding.go`, `keymapeditor.go`, `keybind_ports.go` | keybinding editor, help/settings/tour/notices/pickers; the list/box machinery lives in `tui/list` |
 | frame glue | `frame_alias.go`, `welcome.go`, `footer.go` | aliases into the `tui/frame` geometry kit, welcome screen, footer hints |
 | view / display | `view.go`, `view_render.go` | display settings and per-document view settings |
@@ -212,7 +212,9 @@ menu table), `explorer` (file-tree panel), `palette` (command palette overlay), 
 (find bar), `prompt` (bottom-row prompts), `browser` (file/folder browser), `picker`
 (plugin list picker), `popup` (anchored list popup), `ctxmenu` (right-click menu),
 `dialog` (modal dialogs), `dock` (the terminal dock panel: PTY lifecycle, input/paste,
-resize/exit, capture, paint).
+resize/exit, capture, paint), `pluginpanel` (the declarative widget panel of the plugin
+API tier 1a: layout, paint, hit-testing, focus and key/mouse state; the root owns the
+placements and routes input; docs/plugins/api-ui.md).
 
 ### 4.3 `document` and `editor`
 
@@ -255,7 +257,7 @@ considered and rejected (see `migration/ARCH-v4.md` history and `buffer/doc.go`)
 | Cluster | Files (examples) | Responsibility |
 |---|---|---|
 | runtime kernel | `runtime.go`, `plugin.go`, `task.go`, `sandbox.go`, `slice.go`, `handles.go`, `convert.go`, `limits.go`, `log.go`, `hostcall.go`, `ioruntime.go`, `require.go`, `timerpace.go`, `errfmt.go`, `bindings.go`, `lint_bindings.go` | `Runtime`/plugin state, Lua entry and yield protocol, tasks, budgets/strikes, heap guard, handle registry, Go↔Lua conversion, sandbox, `require` |
-| `gvim.*` API installers | `api_*.go` (one per area), `bindings.go`, `api_modules.go` | the Lua surface; `api_modules.go` lists the installers in order |
+| `gvim.*` API installers | `api_*.go` (one per area), `bindings.go`, `api_modules.go` | the Lua surface; `api_modules.go` lists the installers in order. Tier 1a adds `api_panel.go` (gvim.ui widget panels and sidebar sections), `api_i18n.go`, `api_menu.go`, the action popup and prompt suggestions in `api_ui.go`, the theme override in `data_time.go`, and the all-files diagnostics in `api_lsp.go` |
 | data libraries | `data_*.go`, `stdlib*.go` | `gvim.json`, `gvim.re`, `gvim.settings`, `gvim.text`, `gvim.diff`, `gvim.time`, `gvim.utf8`, and the repaired Lua 5.1 stdlib |
 | loader | `discover.go`, `manifest.go`, `order.go`, `lifecycle.go`, `control.go` | discovery, `plugin.json`, dependency order, enable/disable/reload, `plugin-state.json` |
 | OS port | `os.go`, `nopos.go` | file/process/watch interface used by `gvim.fs` and `gvim.proc`; the real implementation is in `internal/app` |

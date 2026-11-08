@@ -36,6 +36,7 @@ type Options struct {
 	OS        hostos.OS          // nil: a fresh *FakeOS
 	Host      *FakeHost          // nil: a fresh one
 	Now       func() time.Time   // clock of the runtime (nil: the harness's manual clock)
+	Locale    string             // gvim.i18n locale ("" means "en")
 }
 
 // Harness plays the ui for a runtime: it starts it, calls Run/Emit/Resolve, pumps Drain
@@ -92,7 +93,7 @@ func New(t *testing.T, files Files, o Options) *Harness {
 	}
 	h.RT = plugin.New(plugin.Options{
 		Timeout: o.Timeout, EventBudget: o.EventBudget, HeapLimit: heap, OS: osImpl, Services: svc,
-		Version: "test", Platform: "test", CheckGoroutine: true, Now: now,
+		Version: "test", Platform: "test", Locale: o.Locale, CheckGoroutine: true, Now: now,
 	})
 	h.Sources = h.sources()
 	t.Cleanup(h.RT.Stop)
@@ -104,9 +105,25 @@ func (h *Harness) sources() []plugin.Source {
 	type group struct {
 		files map[string]string
 		dir   bool
+		i18n  string
 	}
 	groups := map[string]*group{}
 	for path, src := range h.Files {
+		// "<name>.i18n.json" (single-file plugin) and "<dir>/<name>.i18n.json" (directory
+		// plugin) are the translation files of the plugin, not Lua sources.
+		if strings.HasSuffix(path, ".i18n.json") {
+			name, _, isDir := strings.Cut(path, "/")
+			if !isDir {
+				name = strings.TrimSuffix(path, ".i18n.json")
+			}
+			g := groups[name]
+			if g == nil {
+				g = &group{files: map[string]string{}}
+				groups[name] = g
+			}
+			g.i18n = src
+			continue
+		}
 		name, rest, isDir := strings.Cut(path, "/")
 		if !isDir {
 			name = strings.TrimSuffix(path, ".lua")
@@ -128,7 +145,7 @@ func (h *Harness) sources() []plugin.Source {
 	var out []plugin.Source
 	for _, n := range names {
 		g := groups[n]
-		s := plugin.Source{Name: n, Kind: plugin.SourceUser}
+		s := plugin.Source{Name: n, Kind: plugin.SourceUser, I18nJSON: g.i18n}
 		if g.dir {
 			s.Dir = "/plugins/" + n
 		}

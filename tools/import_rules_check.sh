@@ -72,7 +72,8 @@
 #       other module package.
 #   R11 editor, buffer and decorations do not import pluginapi.
 #   R12 tui sub-packages may import each other and the kits, but no package
-#       outside internal/tui and internal/app may import them.
+#       outside internal/tui and internal/app may import them. The tier-1a
+#       pluginpanel sub-package imports only grid, style, space and pluginapi.
 #
 # Bash 3.2 compatible (macOS).
 

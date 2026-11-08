@@ -27,6 +27,14 @@ gvim.ui.select(items, opts?) ⏳ -> item, index | nil
   Up to 50 000 items; the filtering runs in a background command, not in the update, and 100 rows
   are drawn.
 
+
+A **prompt suggestion list** can be attached to an open prompt while the user types:
+`gvim.ui.set_prompt_suggestions(items, selected?)` — called from the prompt's
+`on_change = fn(text)` — replaces the list (`100` rows at most; strings or
+`{id, text, description, value, disabled}`). Tab, Shift+Tab and Up/Down move the highlight and fill
+the choice's `value` (the `text` when there is none) into the field; Enter still submits. An empty
+list hides it. Without an open plugin prompt the call is `not_found`.
+
 If the panic chord clears the prompt, or the plugin unloads, the call returns
 `nil, "cancelled: ..."` instead of `nil`.
 
@@ -86,6 +94,128 @@ A popup opens at once and shows either `lines` (text) or `items` (a list to choo
 `on_close` runs when the user dismisses it. There is no in-place update in the host, so
 `set_lines` closes and shows the popup again.
 
+
+### Action popups
+
+```lua
+local id = gvim.ui.action_popup {
+  title = "Plugin update",
+  message = "A new version is available.",
+  actions = { { id = "install", label = "Install" }, { id = "later", label = "Later" } },
+}
+if id == "install" then
+  gvim.notify("installing")
+end
+```
+
+A message with up to 16 action buttons, as a centred card: the message wraps above the buttons,
+Enter or a click chooses the highlighted one, Esc (or a click outside) closes it without a choice
+and the call returns `nil`. At most 4 KiB of message and 200 bytes per label. When a choice is
+made (or the popup closes) the editor also raises the `action_popup_result` event
+(`{popup, action}`), so a plugin that opened it without waiting can still hear the outcome.
+
+## Widget panels and sidebar sections
+
+A plugin can describe a panel declaratively and let the editor lay it out, paint it and route
+its input:
+
+```text
+gvim.ui.mount_widget_panel(spec, opts?) -> id | nil, err
+gvim.ui.update_widget_panel(id, spec) -> true | nil, err
+gvim.ui.unmount_widget_panel(id) -> true
+gvim.ui.widget_command(id, action) -> true | nil, err
+gvim.ui.widget_mutate(id, mutation) -> true | nil, err
+gvim.ui.mount_sidebar_section(spec, opts?) -> id | nil, err
+```
+
+A **spec** is a widget tree: a node with a `kind` and, for a row or a col, `children`. A panel
+spec may also be `{ root = <widget>, focus_key = "<key>" }`. The v1 subset is `row`, `col`,
+`label`, `text` (a read-only text block), `raw`, `hintBar`, `spacer`, `divider`, `button`, `toggle`,
+`list` and `tree`; there is no editable text field, dropdown, radio or dual list yet.
+
+* `kind` is required on every node. `key` is the stable identity of a node across updates: the
+  host keeps focus, the selected row, the checked state, the expanded tree nodes and the
+  text a mutation replaced for matching keys. Key the widgets whose state matters.
+* `label` takes `text` (or styled `segments`/`runs`) and `style`; `button` and `toggle`
+  take `label`; `text` takes `value` (or `text`); `divider` takes a one-cell `text` glyph
+  (default `─`). The colours are the [conventions](conventions.md#types) forms.
+* A `list` takes `items` (strings or `{text, detail, key, checked, disabled}`) and a 1-based
+  `selected_index`; a `tree` takes `nodes` (`{text, detail, key, depth, checked, expanded, leaf}`)
+  with `depth` 0 for a root row and a `selected_index`. The host windows both to the panel
+  height (or `visible_rows`) and scrolls the selection into view.
+* `spacer` is `cols` blank cells in a row (default 1), or `flex = true` to take the free
+  width; in a column it is one blank row. A `hintBar` is a muted row of `runs`, entries
+  separated by two spaces.
+
+**Mount options.** `placement` is `"float"` (the default: a centred card, `width`/`height` as
+percentages of the frame) or `"buffer"` (the panel is painted over the window that shows the
+plugin's virtual buffer named by `buf`). `title` is the card title, `focus = true` gives the panel
+the keyboard at once and `closable = true` (the default) makes Escape unmount it with a `cancel`
+widget event. `gvim.ui.mount_sidebar_section` takes `title`, `rows` (body rows; 0 shares the
+column) and `closable`, and appends the panel as a section under the file explorer; clicking
+its header folds it, and `update_widget_panel`/`unmount_widget_panel` work on it like on any panel.
+
+**Actions** (`gvim.ui.widget_command`) go to the focused widget: `focusAdvance` (`delta` moves the
+focus ring, Tab), `activate` (Enter/Space) and `selectMove` (`delta` moves a list/tree selection).
+
+**Mutations** (`gvim.ui.widget_mutate`) change one keyed widget without re-sending the spec:
+`setChecked`, `setSelectedIndex` (1-based) and `setValue`.
+
+The host routes the panel's keys and mouse to the plugin as `widget_event` events (see
+[events.md](events.md)): `activate`, `toggle`, `select`, `focus`, `focus_gained`, `focus_lost`,
+`value`, `close`, `cancel` and the mouse events. A panel with the keyboard swallows the keys its
+widgets do not use, so typing in a panel never edits the buffer under it; Escape (or a click
+outside a floating card) gives the keyboard back.
+
+```lua
+local id = gvim.ui.mount_widget_panel({
+  root = { kind = "col", children = {
+    { kind = "label", text = "Files" },
+    { kind = "divider" },
+    { kind = "list", key = "files", items = files, selected_index = 1 },
+    { kind = "hintBar", runs = { { text = "Enter: open" }, { text = "Esc: close" } } },
+  } },
+}, { title = "Files", focus = true, width = 50, height = 60 })
+
+gvim.on("widget_event", function(ev)
+  if ev.panel ~= id then return end
+  if ev.event == "activate" then
+    gvim.notify("chose " .. tostring(ev.index))
+  elseif ev.event == "cancel" then
+    gvim.ui.unmount_widget_panel(id)
+  end
+end)
+
+gvim.ui.widget_mutate(id, { kind = "setSelectedIndex", widget_key = "files", index = 2 })
+```
+
+**Caps and sanitisation.** A panel tree is at most 2000 widgets, nested at most 8 deep; a
+list takes 2000 items, a tree 5000 nodes, one string 4 KiB and one key 128 bytes; a plugin
+mounts at most 8 panels (`limit`), and a plugin section asks for at most 100 body rows. A
+title is at most 120 bytes. Text that reaches the grid is sanitised: control characters
+become spaces.
+
+
+## Menu bar rows
+
+A plugin can add its own rows to any menu bar dropdown:
+
+```text
+gvim.menu.add_item{menu, label, action, checkbox?, when?, after?, before?} -> true | nil, err
+gvim.menu.remove_item{menu, action|label} -> true | nil, err
+gvim.menu.clear() -> true
+```
+
+`menu` names the target menu by its stable id (`"File"`, `"Edit"`, `"View"`, `"Selection"`,
+`"Go"`, `"LSP"`, `"Help"`) or by its label. `label` is the row text (a leading `%` makes it a
+translation key); `action` is the action the row runs — normally your own command id
+(`"<plugin>.<command>"`), which the menu bar dispatches like any palette action. `checkbox`
+names a context key whose boolean state draws a checkmark (`gvim.context.set`); `when` gates
+the row. `after`/`before` name a neighbouring row by its action or label to position the row;
+a neighbour that matches nothing appends the row.
+
+The set is whole-set replace per plugin: at most 32 rows in all, and a reload or an unload
+drops the rows of the old generation.
 ## The status bar
 
 ```lua

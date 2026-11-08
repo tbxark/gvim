@@ -155,7 +155,12 @@ func (r *runtime) save() error {
 	if r.sessionDir == "" {
 		return nil
 	}
-	return restore.WriteSession(r.ed, r.sessionDir, r.model.ExplorerState(), r.kept)
+	if err := restore.WriteSession(r.ed, r.sessionDir, r.model.ExplorerState(), r.kept); err != nil {
+		return err
+	}
+	// The terminal transcript rides next to the session file: a restored session
+	// brings it back read-only, with no process running.
+	return restore.SaveTerminal(r.sessionDir, r.model.TerminalState())
 }
 
 // saveSearch writes the find histories and toggles to the session directory. They
@@ -336,7 +341,13 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		return nil, err
 	}
 	km := choice.km
-	th, err := runTheme(opts.Theme, cfg)
+	// The theme registry owns bundled and user themes, the config theme forms,
+	// extends and fallbacks. A bad user theme is a warning, never a startup
+	// failure.
+	themeReg := theme.NewRegistry(userThemeDir())
+	_ = themeReg.Reload()
+	themeCat := newThemeCatalog(themeReg)
+	th, themeRef, err := runTheme(opts.Theme, cfg, themeReg)
 	if err != nil {
 		return nil, err
 	}
@@ -364,6 +375,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		deps.Editor = hotExitEditor{Editor: adapter, hot: plan.hotExit}
 	}
 	deps.Settings = settingsFor(opts, cfg)
+	deps.Settings.Theme = th.Name
+	deps.ThemeCatalog = themeCat
+	deps.ThemeRef = themeRef
 	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
 	deps.Settings.IconsMode, deps.Settings.IconsWhy = icon.Mode.String(), icon.Why
 	deps.Settings.Keymap = choice.name
@@ -390,7 +404,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		}
 		return trustCtl.State().AllowsProjectConfig()
 	}
-	deps.SettingsPort = newSettingsService(root, opts, ed, trustedForSettings, cfg)
+	deps.SettingsPort = newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat)
 	projSearch := newProjectSearch(edOpts)
 	deps.Root = tui.RootPorts{
 		Projects:       proj,
@@ -468,8 +482,22 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	model.SetDock(tui.DockPorts{
 		Starter:   uiadapter.NewTermStarter(ctx, uiadapter.TermStarterOptions{Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines}),
 		Clipboard: uiadapter.SystemClipboard{},
-		Effects:   tui.DockEffects{CloseOnExit: cfg.Terminal.CloseOnExit, MouseForwarding: cfg.Terminal.MouseForwarding},
+		Effects: tui.DockEffects{
+			CloseOnExit:        cfg.Terminal.CloseOnExit,
+			MouseForwarding:    cfg.Terminal.MouseForwarding,
+			StayInScrollback:   !cfg.Terminal.JumpToEndOnOutput,
+			NoMouseDragSelects: !cfg.Terminal.MouseDragSelects,
+		},
 	})
+	// A restored session brings the terminal transcript back, dead: nothing is
+	// re-run automatically, and Restart starts a shell below the transcript.
+	if plan.load && plan.tabs && opts.SessionDir != "" {
+		if st, ok, err := restore.LoadTerminal(opts.SessionDir); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: terminal:", err)
+		} else if ok {
+			model.RestoreTerminal(st)
+		}
+	}
 	if opts.Diff {
 		// The two files are in tabs 0 and 1: the tab count was checked before recovery.
 		model.OpenCompare(0, 1)
@@ -668,21 +696,34 @@ func settingsFor(opts Options, cfg config.Config) tui.Settings {
 	return s
 }
 
-// runTheme returns the bundled theme a session uses: the flag, else the config
-// theme. The config theme is "dark" unless a file sets another.
-func runTheme(flag string, cfg config.Config) (theme.Theme, error) {
-	name := flag
-	if name == "" {
-		name = cfg.Theme
+// runTheme returns the theme a session uses: the flag, else the config theme.
+// Both are config theme values (a bundled name, builtin://name, a path relative
+// to the user theme dir, or file://) and resolve through the registry. The
+// config theme is "dark" unless a file sets another. The second result is the
+// portable ref the TUI keeps so it can apply the theme again.
+func runTheme(flag string, cfg config.Config, reg *theme.Registry) (theme.Theme, string, error) {
+	ref := flag
+	if ref == "" {
+		ref = cfg.Theme
 	}
-	th, err := theme.Load(name)
+	if ref == "" {
+		ref = "dark"
+	}
+	if err := theme.ValidateForm(ref); err != nil {
+		return theme.Theme{}, "", err
+	}
+	th, err := reg.Load(ref)
 	if err != nil {
 		if flag == "" {
 			err = inConfigFile(cfg, "theme", err)
 		}
-		return theme.Theme{}, err
+		return theme.Theme{}, "", err
 	}
-	return th, nil
+	canonical, err := reg.Canonical(ref)
+	if err != nil {
+		canonical = ref
+	}
+	return th, canonical, nil
 }
 
 // configProblems lists the problems of loading the config: the diagnostics of the files, then the

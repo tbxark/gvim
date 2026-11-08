@@ -135,7 +135,8 @@ several files to see:
   plugin runtime; its sub-packages (`overlay`, `list`, `frame`, `sidebar` (the explorer
   column's section stack and Contents widget), `split`, `tabstrip`, `dock`,
   `editorpane`, `menubar`,
-  `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`, `ctxmenu`,
+  `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `pluginpanel` (the
+  plugin API's declarative widget panel), `popup`, `ctxmenu`,
   `dialog`, `style`, `grid`, `icons`, `space`) must not import the root
   `tui`.
   `internal/tui/frame` is the single geometry source for painting and the hit map;

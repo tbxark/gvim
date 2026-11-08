@@ -76,11 +76,15 @@ end, { debounce = 300 })
 | `viewport_changed` (hot) | `{buf, top_line, height, width}` | the focused pane of the active buffer scrolled or resized |
 | `language_changed` | `{buf, language}` | `Set Language`, or the path changed |
 | `config_changed` | `{}` | the keymap changed |
-| `theme_changed` | `{name}` | a theme was selected |
+| `theme_changed` | `{name, dark}` | a theme was selected or a plugin applied session color overrides |
 | `pre_command` / `post_command` (hot) | `{action, args}` / `{action, args, ok, err}` | a command the user started (palette, key, menu); not what a plugin runs with `command.run` |
 | `idle` (hot) | `{ms, period}` | the editor was idle for `opts.after_ms`; once per idle period. `period` is a number that changes with each input |
 | `mode_changed` | `{mode, plugin, previous, previous_plugin}` | the editor input mode changed; absent fields mean "none" |
 | `diagnostics_updated` | `{buf, path, counts}` | the language server's diagnostics for a buffer changed; `counts = {error, warning, info, hint}` (all zero when they cleared) |
+| `lsp_status_clicked` | `{}` | the LSP status pill in the status row was clicked (the server list popup opened) |
+| `lsp_server_error` | `{error}` | a language-server call failed; `error` is the message the status row shows |
+| `action_popup_result` | `{popup, action}` | an action popup opened with `gvim.ui.action_popup` closed; `popup` is its overlay id and `action` the chosen action id, or nil |
+| `widget_event` | `{panel, event, widget?, index?, checked?, value?, x?, y?, button?, wheel?}` | a mounted widget panel or sidebar section: `activate`, `toggle`, `select`, `focus`, `focus_gained`, `focus_lost`, `value`, `close`, `cancel` and `mouse_click`/`mouse_move`/`mouse_wheel` (see [api-ui.md](api-ui.md#widget-panels-and-sidebar-sections)) |
 | `<plugin>:<name>` | the payload of `gvim.emit` | a plugin emitted it |
 
 Details worth knowing:
@@ -100,6 +104,8 @@ Details worth knowing:
 * `config_changed` is raised for a keymap switch only; `theme_changed` for `select_theme`.
 * `diagnostics_updated` is raised from the editor's own diagnostics poll (about three times a second
   while a document is open); read the diagnostics with `gvim.lsp.diagnostics(ev.buf)`.
+
+* `widget_event` is the input of the panels the plugin mounted: `panel` is the id `mount_widget_panel`/`mount_sidebar_section` returned, `event` says what happened, `widget` is the key of the widget it is about (an item or node key for a list/tree row, "" when the event is panel-level), `index` is the 1-based row for a list/tree event, and `checked`/`value` carry a toggle or a tree expansion state. The mouse events add the frame cell `x`/`y`, the `button` and the `wheel` delta. See [api-ui.md](api-ui.md#widget-panels-and-sidebar-sections).
 
 ## before_file_save and the veto
 

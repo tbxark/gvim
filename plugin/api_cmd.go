@@ -426,12 +426,14 @@ func parseCommandSpec(L *lua.LState, p *plugin, spec *lua.LTable) (*command, []s
 	}
 	title, _ := field("title", lua.LTString).(lua.LString)
 	desc, _ := field("description", lua.LTString).(lua.LString)
-	if len(title) > maxCommandTitle || len(desc) > maxCommandDesc {
+	// A title or description that starts with % is a translation key (plugin i18n).
+	titleText, descText := p.translateString(string(title)), p.translateString(string(desc))
+	if len(titleText) > maxCommandTitle || len(descText) > maxCommandDesc {
 		return nil, nil, pluginapi.Errf(pluginapi.CodeInvalid, "title or description is too long")
 	}
 	info := pluginapi.CommandInfo{
 		ID: p.name + "." + string(name), Plugin: p.name, Record: true,
-		Title: oneLine(string(title)), Description: oneLine(string(desc)),
+		Title: oneLine(titleText), Description: oneLine(descText),
 	}
 	if info.Title == "" {
 		info.Title = string(name)

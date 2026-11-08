@@ -56,7 +56,7 @@ local ok2 = pcall(require, "bad") T.spy(ok2)`, "lua/bad.lua": `error("boom")`}, 
 			"init.lua": `local gvim = require "gvim"
 T.spy(require("gvim") == gvim, require("gvim.async") == gvim.async, gvim.async ~= nil)`}, "true true true"},
 		{"gvim cannot be overridden", map[string]string{
-			"init.lua": `T.spy(require("gvim").api_version)`, "lua/gvim.lua": `return {api_version = "fake"}`}, "1"},
+			"init.lua": `T.spy(require("gvim").api_version)`, "lua/gvim.lua": `return {api_version = "fake"}`}, "2"},
 		{"unknown gvim area", map[string]string{
 			"init.lua": `T.spy((pcall(require, "gvim.nothing")))`}, "false"},
 		{"areas of the stubs exist", map[string]string{

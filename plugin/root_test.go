@@ -13,7 +13,7 @@ func TestGvimRoot(t *testing.T) {
 	rows := []struct {
 		name, body, want string
 	}{
-		{"constants", `T.spy(gvim.api_version, gvim.version, gvim.platform)`, "1 test test"},
+		{"constants", `T.spy(gvim.api_version, gvim.version, gvim.platform)`, "2 test test"},
 		{"plugin table", `T.spy(gvim.plugin.name, gvim.plugin.dir == "", gvim.plugin.source, gvim.plugin.version == "")`, "t true user true"},
 		{"has unknown feature", `T.spy(gvim.has("nope"), gvim.has("also_nope"))`, "false false"},
 		{"has a provided feature", `T.provides("decor") T.spy(gvim.has("decor"), gvim.has("nope"))`, "true false"},

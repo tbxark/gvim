@@ -88,6 +88,22 @@ func TestCtrlSpaceEntersScrollback(t *testing.T) {
 	}
 }
 
+func TestCtrlSpaceEntersScrollbackWithoutHistory(t *testing.T) {
+	t.Parallel()
+	p, _ := livePanel(t, "hello world")
+	cmd, ok := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	if !ok || !p.Scrolling() {
+		t.Fatalf("Ctrl+Space with no history: taken %v scrolling %v, want the screen in the pager", ok, p.Scrolling())
+	}
+	applyScroll(t, p, cmd)
+	if got := p.combined(); got != 4 {
+		t.Fatalf("combined rows = %d, want the live screen's four rows", got)
+	}
+	if title := p.title(); !strings.Contains(title, "rows 1-4 of 4") {
+		t.Fatalf("title = %q, want the screen rows", title)
+	}
+}
+
 func TestScrollbackDrawsHistoryRows(t *testing.T) {
 	t.Parallel()
 	p, _ := historyPanel(t, 20)
@@ -211,8 +227,8 @@ func TestScrollbackRefusedOnAltScreen(t *testing.T) {
 	var notice string
 	p.host.Notice = func(text string) { notice = text }
 	cmd, ok := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl})
-	if ok || p.Scrolling() || cmd != nil {
-		t.Fatalf("Ctrl+Space on the alternate screen: taken %v scrolling %v, want it left to terminal_escape", ok, p.Scrolling())
+	if !ok || p.Scrolling() || cmd != nil {
+		t.Fatalf("Ctrl+Space on the alternate screen: taken %v scrolling %v, want it taken and refused", ok, p.Scrolling())
 	}
 	if notice != altScrollbackNotice {
 		t.Fatalf("notice = %q, want %q", notice, altScrollbackNotice)

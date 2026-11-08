@@ -98,3 +98,74 @@ func TestGitGrepCommandRowOpensThePanel(t *testing.T) {
 		t.Fatalf("the Git Grep panel did not open:\n%s", sc)
 	}
 }
+
+// TestProjectSearchSelectionAndExport: checkboxes drive Replace All, and Alt+Q opens
+// the result set as a list; the disk is never written.
+func TestProjectSearchSelectionAndExport(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"a.txt": "foo one\n",
+		"b.txt": "two foo\n",
+	})
+	s := startProjectSearchSession(t, root, "a.txt", 110, 32)
+	s.Key("alt+a")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Search & Replace") })
+	s.Type("foo")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("2 matches in 2 files") })
+	// Tab reaches the result rows after the replace and files fields; Space unchecks
+	// the a.txt header and its match with it.
+	s.Key("tab")
+	s.Key("tab")
+	s.Key("tab")
+	s.Key("space")
+	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("1 selected") })
+	if !sc.Contains("[ ]") {
+		t.Fatalf("the unchecked box is not shown:\n%s", sc)
+	}
+	s.Key("alt+enter")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Replace 1 match in 1 file?") })
+	s.Key("tab") // move the focus to Yes
+	s.Key("enter")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("1 file changed in 1 tab; Save All to write") })
+	for name, want := range map[string]string{"a.txt": "foo one\n", "b.txt": "two foo\n"} {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != want {
+			t.Errorf("%s on disk = %q, want it unchanged %q (the replacement stays unsaved)", name, data, want)
+		}
+	}
+	// The results can be listed: Alt+Q opens the filterable list, and Enter jumps.
+	s.Key("alt+q")
+	sc = s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Project Search Results") })
+	if !strings.Contains(sc.String(), "1:1") {
+		t.Fatalf("the exported list does not show the match row:\n%s", sc)
+	}
+	s.Key("enter")
+	s.WaitFor(func(sc uitest.Screen) bool {
+		return sc.Contains("Project Search Results") && sc.Contains("a.txt")
+	})
+	s.Key("escape")
+}
+
+// TestProjectSearchGlobFiltersResults: the Files field narrows the searched file set.
+func TestProjectSearchGlobFiltersResults(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"a.go":  "foo\n",
+		"b.txt": "foo\n",
+	})
+	s := startProjectSearchSession(t, root, "a.go", 110, 32)
+	s.Key("alt+a")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Search & Replace") })
+	s.Type("foo")
+	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("2 matches in 2 files") })
+	s.Key("tab") // replace
+	s.Key("tab") // files
+	s.Type("*.go")
+	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("1 match in 1 file") })
+	if sc.Contains("b.txt") {
+		t.Fatalf("the glob still searches b.txt:\n%s", sc)
+	}
+}

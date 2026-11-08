@@ -78,11 +78,16 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 | decoration namespaces | 64 |
 | key bindings (normal context and modes together) | 4096 |
 | status items | 8 |
+| menu bar rows a plugin adds | 32 |
 | live pickers and popups | 8 |
+| panels mounted (widget panels and sidebar sections) | 8 |
+| prompt suggestions | 100 rows; text and description 512 bytes, value 4096 |
+| action popup | 16 actions; message 4 KiB, label 200 bytes |
 | in-flight background jobs (`Work`) | 32 |
 | parked tasks | 64 (the awaiting call returns the error) |
 | live tasks | 10 000 |
 | registered `on_unload` functions | 16 |
+| a widget panel | 2000 widgets, nesting depth 8; a list 2000 items, a tree 5000 nodes, one string 4 KiB and one key 128 bytes; a title 120 bytes; a sidebar section asks for at most 100 rows |
 | decorations | 20 000 per (plugin, namespace, buffer) and 50 000 per plugin; at most 256 drawn per kind and line |
 | virtual buffers | 64 per plugin, 256 in all; 64 MiB of text per plugin, 256 MiB in all |
 | queued `gvim.emit` events | 1000; payload 64 KiB |

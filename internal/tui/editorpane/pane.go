@@ -773,16 +773,16 @@ func (f frame) style(c cell, cur bool) grid.Style {
 	case c.match == matchCurrent:
 		st = f.styles.CurrentMatch
 	case c.match == matchOther:
-		st.BG = f.styles.Match.BG
+		st = withBackground(st, f.styles.Match)
 	case c.match == matchOccurrence && f.styles.Occurrence.BG != nil:
-		st.BG = f.styles.Occurrence.BG
+		st = withBackground(st, f.styles.Occurrence)
 		// The band lands where syntax colors live, so text that would vanish on it
 		// is moved to a readable color.
 		if fg := repairedFG(st.FG, st.BG); fg != nil {
 			st.FG = fg
 		}
 	case cur && f.styles.CurrentLine.BG != nil:
-		st.BG = f.styles.CurrentLine.BG
+		st = withBackground(st, f.styles.CurrentLine)
 	}
 	if c.ws {
 		fg := f.styles.Whitespace.FG
@@ -804,7 +804,7 @@ func (f frame) style(c cell, cur bool) grid.Style {
 		st.Underline = true
 	}
 	if c.sel {
-		st.BG = f.styles.Selection.BG
+		st = withBackground(st, f.styles.Selection)
 		if st.BG == nil {
 			st.Reverse = true
 		}

@@ -3,6 +3,7 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/dock"
 )
 
@@ -101,7 +102,7 @@ func (m *Model) restartDock() tea.Cmd { return m.dock.Restart() }
 // focusDock gives keyboard focus to the dock. The explorer and the tab strip lose it.
 // The dock takes no focus while no shell runs, so the focus stays where it is then.
 func (m *Model) focusDock() {
-	if !m.dock.Running() {
+	if !m.dock.Running() && !m.dock.Exited() && !m.dock.Restored() {
 		return
 	}
 	m.explorerFocus = false
@@ -178,13 +179,26 @@ func (m *Model) dockSync() tea.Cmd { return m.dock.Sync() }
 // It reports whether the rows are the dock's, so the root takes no other action
 // for the message: the dock decides alone whether it forwards it, opens a link
 // with it, or only focuses.
-func (m *Model) dockMouse(msg tea.Msg, y int) (tea.Cmd, bool) {
+func (m *Model) dockMouse(msg tea.Msg, y, count int) (tea.Cmd, bool) {
 	l := m.layout()
 	if !l.DockOn || y < l.DockY || y >= l.DockY+l.DockH {
 		return nil, false
 	}
-	cmd, _ := m.dock.Mouse(msg, l)
+	cmd, _ := m.dock.Mouse(msg, l, count)
 	return cmd, true
+}
+
+// TerminalState is the terminal state the session file keeps, or the zero state
+// when the dock has no shell and no transcript.
+func (m *Model) TerminalState() terminal.SavedState { return m.dock.SavedState() }
+
+// RestoreTerminal shows a terminal restored from the session file: a read-only
+// transcript, dead until the user restarts it.
+func (m *Model) RestoreTerminal(st terminal.SavedState) {
+	if st.Version != terminal.SavedStateVersion {
+		return
+	}
+	m.dock.Restore(st)
 }
 
 // copyToClipboard is the dock's clipboard writer, through the same path the

@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -78,15 +79,37 @@ func (s *Session) ScrollbackLen() int {
 // limit is not positive), and the number of rows searched. A row matches when its
 // text, trailing blanks trimmed, contains query.
 func (s *Session) SearchScrollback(query string, limit int) (matches []int, total int) {
-	query = strings.ToLower(strings.TrimSpace(query))
+	matches, total, _ = s.SearchScrollbackMode(query, false, false, limit)
+	return matches, total
+}
+
+// SearchScrollbackMode is SearchScrollback with the scrollback search options: a
+// regular expression query instead of a literal one, and a match that respects
+// case. A literal query is matched as plain text; a regex query is compiled and
+// matched against each row's text (trailing blanks trimmed). An invalid regular
+// expression returns an error and no matches.
+func (s *Session) SearchScrollbackMode(query string, regex, matchCase bool, limit int) (matches []int, total int, err error) {
+	query = strings.TrimSpace(query)
+	var re *regexp.Regexp
+	if regex && query != "" {
+		if !matchCase {
+			query = "(?i)" + query
+		}
+		re, err = regexp.Compile(query)
+		if err != nil {
+			return nil, 0, err
+		}
+	} else if !matchCase {
+		query = strings.ToLower(query)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.scrollbackOff {
-		return nil, 0
+		return nil, 0, nil
 	}
 	total = s.emu.ScrollbackLen()
 	if query == "" || total == 0 {
-		return nil, total
+		return nil, total, nil
 	}
 	limit = min(max(limit, 1), maxScrollbackMatches)
 	width := s.emu.Width()
@@ -99,11 +122,18 @@ func (s *Session) SearchScrollback(query string, limit int) (matches []int, tota
 				b.WriteByte(' ')
 			}
 		}
-		if strings.Contains(strings.ToLower(strings.TrimRight(b.String(), " ")), query) {
+		text := strings.TrimRight(b.String(), " ")
+		hit := false
+		if re != nil {
+			hit = re.MatchString(text)
+		} else {
+			hit = strings.Contains(text, query)
+		}
+		if hit {
 			matches = append(matches, y)
 		}
 	}
-	return matches, total
+	return matches, total, nil
 }
 
 // WorkingDirectory returns the working directory the child reported with OSC 7,

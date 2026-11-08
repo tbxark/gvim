@@ -7,11 +7,10 @@ import tea "charm.land/bubbletea/v2"
 // and the ones that have no counterpart in a terminal editor. Each one shows the reason
 // on the status row, so the palette does not report it as unsupported.
 var notApplicable = map[string]string{
-	"detach":                  "gvim has no server to detach from. The session is saved when gvim quits, and the next start restores it.",
-	"update_fresh":            "gvim does not update itself. Install a newer build of the binary to update it.",
-	"open_update_log":         "gvim does not update itself, so it has no update output to show.",
-	"trigger_wave_animation":  "The wave is a Fresh easter egg, and gvim does not animate the screen.",
-	"inspect_theme_at_cursor": "the caret has no theme key. It is drawn in reverse video over the colors of its cell (editor.fg, editor.bg, the current line or the selection).",
+	"detach":                 "gvim has no server to detach from. The session is saved when gvim quits, and the next start restores it.",
+	"update_fresh":           "gvim does not update itself. Install a newer build of the binary to update it.",
+	"open_update_log":        "gvim does not update itself, so it has no update output to show.",
+	"trigger_wave_animation": "The wave is a Fresh easter egg, and gvim does not animate the screen.",
 }
 
 // notApplicableNotice runs a command of notApplicable: it shows the reason and starts

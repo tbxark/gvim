@@ -8,7 +8,12 @@ import (
 
 // APIVersion is the plugin API level (gvim.api_version). A plugin manifest may ask for
 // a minimum level; the loader supports 1..APIVersion.
-const APIVersion = 1
+//
+// Level 2 adds the declarative widget panel and sidebar-section API (gvim.ui.mount_widget_panel,
+// update_widget_panel, unmount_widget_panel, widget_command, widget_mutate,
+// mount_sidebar_section), plus the theme override, menu, action popup, prompt-suggestion,
+// plugin i18n and all-files diagnostics surfaces of tier 1a.
+const APIVersion = 2
 
 // Size limits (AMENDMENTS C5). Every Go function that allocates in proportion to its
 // arguments computes the final size before allocating and raises beyond these caps.
@@ -45,6 +50,8 @@ const (
 	QuotaStatusItems   = 8
 	QuotaWork          = 32 // in-flight Work items
 	QuotaParkedTasks   = 64
+	QuotaPanels        = 8      // mounted widget panels and sidebar sections
+	QuotaMenuItems     = 32     // menu bar rows a plugin adds
 	maxTasks           = 10_000 // live tasks of one plugin (parked plus queued)
 )
 

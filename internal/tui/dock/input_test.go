@@ -107,7 +107,7 @@ func TestCtrlClickOpensAPath(t *testing.T) {
 	term.cwd = "/term"
 	p.host.Stat = func(path string) bool { return path == "/term/src/a.go" }
 	colon := strings.Index("see src/a.go now", "src") + 2
-	cmd, ok := p.Mouse(clickAt(colon, 1, tea.ModCtrl, tea.MouseLeft), scrollLayout())
+	cmd, ok := p.Mouse(clickAt(colon, 1, tea.ModCtrl, tea.MouseLeft), scrollLayout(), 1)
 	if !ok || cmd == nil {
 		t.Fatalf("Ctrl+Click: taken %v, cmd %v; want a link command", ok, cmd != nil)
 	}
@@ -127,7 +127,7 @@ func TestCtrlClickWithoutAFileShowsANotice(t *testing.T) {
 	var notice string
 	p.host.Notice = func(text string) { notice = text }
 	p.host.Stat = func(string) bool { return false }
-	cmd, _ := p.Mouse(clickAt(6, 1, tea.ModCtrl, tea.MouseLeft), scrollLayout())
+	cmd, _ := p.Mouse(clickAt(6, 1, tea.ModCtrl, tea.MouseLeft), scrollLayout(), 1)
 	if cmd == nil {
 		t.Fatal("Ctrl+Click produced no command")
 	}
@@ -144,7 +144,7 @@ func TestCtrlClickIsOffOnTheAltScreen(t *testing.T) {
 	p, term := livePanel(t, "see src/a.go now")
 	term.alt = true
 	p.host.Stat = func(string) bool { return true }
-	cmd, ok := p.Mouse(clickAt(6, 1, tea.ModCtrl, tea.MouseLeft), scrollLayout())
+	cmd, ok := p.Mouse(clickAt(6, 1, tea.ModCtrl, tea.MouseLeft), scrollLayout(), 1)
 	if !ok || cmd != nil {
 		t.Fatalf("Ctrl+Click on the alt screen: taken %v, cmd %v; want it ignored", ok, cmd != nil)
 	}
@@ -155,9 +155,9 @@ func TestMouseForwardedOnRequest(t *testing.T) {
 	p, term := livePanel(t, "hello")
 	term.mouse = true
 	layout := scrollLayout()
-	p.Mouse(clickAt(3, 1, 0, tea.MouseLeft), layout)
-	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 4, Y: 1, Button: tea.MouseLeft}), layout)
-	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 4, Y: 1, Button: tea.MouseLeft}), layout)
+	p.Mouse(clickAt(3, 1, 0, tea.MouseLeft), layout, 1)
+	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 4, Y: 1, Button: tea.MouseLeft}), layout, 1)
+	p.Mouse(tea.MouseReleaseMsg(tea.Mouse{X: 4, Y: 1, Button: tea.MouseLeft}), layout, 1)
 	if len(term.mice) != 2 {
 		t.Fatalf("forwarded = %+v, want a press and a release (motion needs all-motion)", term.mice)
 	}
@@ -173,7 +173,7 @@ func TestMouseMotionForwardedUnderAllMotion(t *testing.T) {
 	t.Parallel()
 	p, term := livePanel(t, "hello")
 	term.mouse, term.allMotion = true, true
-	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 4, Y: 1, Button: tea.MouseLeft}), scrollLayout())
+	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 4, Y: 1, Button: tea.MouseLeft}), scrollLayout(), 1)
 	if len(term.mice) != 1 || term.mice[0].Kind != terminal.MouseMotion || term.mice[0].Button != terminal.MouseNone {
 		t.Fatalf("forwarded = %+v, want a buttonless motion", term.mice)
 	}
@@ -184,8 +184,8 @@ func TestDragMotionForwardedWithButtonHeld(t *testing.T) {
 	p, term := livePanel(t, "hello")
 	term.mouse, term.drag = true, true
 	layout := scrollLayout()
-	p.Mouse(clickAt(3, 1, 0, tea.MouseLeft), layout)
-	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 4, Y: 1, Button: tea.MouseLeft}), layout)
+	p.Mouse(clickAt(3, 1, 0, tea.MouseLeft), layout, 1)
+	p.Mouse(tea.MouseMotionMsg(tea.Mouse{X: 4, Y: 1, Button: tea.MouseLeft}), layout, 1)
 	if len(term.mice) != 2 {
 		t.Fatalf("forwarded = %+v, want a press and a drag", term.mice)
 	}
@@ -198,7 +198,7 @@ func TestShiftBypassesForwarding(t *testing.T) {
 	t.Parallel()
 	p, term := livePanel(t, "hello")
 	term.mouse = true
-	p.Mouse(clickAt(3, 1, tea.ModShift, tea.MouseLeft), scrollLayout())
+	p.Mouse(clickAt(3, 1, tea.ModShift, tea.MouseLeft), scrollLayout(), 1)
 	if len(term.mice) != 0 {
 		t.Fatalf("a Shift+Click was forwarded: %+v", term.mice)
 	}
@@ -207,7 +207,7 @@ func TestShiftBypassesForwarding(t *testing.T) {
 func TestMouseNotForwardedWhenTheShellDidNotAsk(t *testing.T) {
 	t.Parallel()
 	p, term := livePanel(t, "hello")
-	p.Mouse(clickAt(3, 1, 0, tea.MouseLeft), scrollLayout())
+	p.Mouse(clickAt(3, 1, 0, tea.MouseLeft), scrollLayout(), 1)
 	if len(term.mice) != 0 {
 		t.Fatalf("the mouse was forwarded without reporting: %+v", term.mice)
 	}
@@ -218,7 +218,7 @@ func TestLegacyForwardingOnTheAltScreen(t *testing.T) {
 	p, term := livePanel(t, "hello")
 	term.alt = true
 	p.SetEffects(Effects{MouseForwarding: MouseForwardAltScreen})
-	p.Mouse(clickAt(3, 1, tea.ModShift, tea.MouseLeft), scrollLayout())
+	p.Mouse(clickAt(3, 1, tea.ModShift, tea.MouseLeft), scrollLayout(), 1)
 	if len(term.mice) != 1 {
 		t.Fatalf("legacy forwarding sent %+v, want the event even with Shift", term.mice)
 	}
@@ -230,7 +230,7 @@ func TestNoMouseForwardingInScrollback(t *testing.T) {
 	term.mouse = true
 	cmd, _ := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl})
 	applyScroll(t, p, cmd)
-	if _, ok := p.Mouse(clickAt(3, 1, 0, tea.MouseLeft), scrollLayout()); !ok {
+	if _, ok := p.Mouse(clickAt(3, 1, 0, tea.MouseLeft), scrollLayout(), 1); !ok {
 		t.Fatal("the scrollback press was not taken")
 	}
 	if len(term.mice) != 0 {
@@ -242,7 +242,7 @@ func TestWheelForwardedWhenTheShellAsked(t *testing.T) {
 	t.Parallel()
 	p, term := livePanel(t, "hello")
 	term.mouse = true
-	p.Mouse(tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 1, Button: tea.MouseWheelUp}), scrollLayout())
+	p.Mouse(tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 1, Button: tea.MouseWheelUp}), scrollLayout(), 1)
 	if len(term.mice) != 1 || term.mice[0].Kind != terminal.MouseWheel || term.mice[0].Button != terminal.MouseWheelUp {
 		t.Fatalf("forwarded = %+v, want the wheel notch", term.mice)
 	}
@@ -255,7 +255,7 @@ func TestWheelOnAltScreenWithoutReportingSendsArrows(t *testing.T) {
 	t.Parallel()
 	p, term := livePanel(t, "hello")
 	term.alt = true
-	p.Mouse(tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 1, Button: tea.MouseWheelUp}), scrollLayout())
+	p.Mouse(tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 1, Button: tea.MouseWheelUp}), scrollLayout(), 1)
 	if len(term.mice) != 0 {
 		t.Fatalf("forwarded = %+v, want none", term.mice)
 	}
@@ -267,7 +267,7 @@ func TestWheelOnAltScreenWithoutReportingSendsArrows(t *testing.T) {
 func TestWheelUpOnTheLiveMainScreenEntersScrollback(t *testing.T) {
 	t.Parallel()
 	p, _ := historyPanel(t, 20)
-	cmd, ok := p.Mouse(tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 1, Button: tea.MouseWheelUp}), scrollLayout())
+	cmd, ok := p.Mouse(tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 1, Button: tea.MouseWheelUp}), scrollLayout(), 1)
 	if !ok || !p.Scrolling() {
 		t.Fatalf("wheel: taken %v scrolling %v, want the scrollback view", ok, p.Scrolling())
 	}
@@ -281,7 +281,7 @@ func TestTitleRowPressOnlyFocuses(t *testing.T) {
 	t.Parallel()
 	p, term := livePanel(t, "hello")
 	term.mouse = true
-	if _, ok := p.Mouse(clickAt(3, 0, 0, tea.MouseLeft), scrollLayout()); !ok {
+	if _, ok := p.Mouse(clickAt(3, 0, 0, tea.MouseLeft), scrollLayout(), 1); !ok {
 		t.Fatal("the title row press was not taken")
 	}
 	if len(term.mice) != 0 {

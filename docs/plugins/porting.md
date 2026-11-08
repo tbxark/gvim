@@ -30,7 +30,12 @@ a rewrite in idiomatic Lua. The bundled plugins are examples of the technique (s
 | `registerCommand`, `unregisterCommand`, `defineMode`, `setEditorMode`, `setContext` | `gvim.command.register/unregister`, `gvim.mode.define/enter`, `gvim.context.set` |
 | `on("after_file_save", handler)` | `gvim.on("after_file_save", fn)`: the names are Fresh's; `buffer_id` becomes `ev.buf`, offsets become `Pos` |
 | `setStatus`, `info`, `warn`, `error`, `debug` | `gvim.notify`, `gvim.log.*` |
-| `prompt`, `startPrompt` with `setPromptSuggestions` | `gvim.ui.input`, `gvim.ui.picker` |
+| `prompt`, `startPrompt` with `setPromptSuggestions` | `gvim.ui.input` and `gvim.ui.set_prompt_suggestions` in its `on_change`, or `gvim.ui.picker` |
+| `showActionPopup` | `gvim.ui.action_popup` (`action_popup_result` event) |
+| `addMenuItem` | `gvim.menu.add_item` / `remove_item` / `clear` |
+| `t(...)`, plugin i18n files | `gvim.i18n.t` (`t` alias) + `<name>.i18n.json`; %-prefixed command titles are translated |
+| `overrideThemeColors` | `gvim.theme.override` / `clear` / `overrides` |
+| `getAllDiagnostics` | `gvim.lsp.all_diagnostics` |
 | `addOverlay`, `clearNamespace`, `setLineIndicator(s)`, `setScrollbarMarkers`, `addVirtualText` | `ns:set` with `highlight`, `gutter`, `scroll`, `eol` items |
 | `runOnTarget`, `spawnHostProcess` | `gvim.proc.run`, `gvim.proc.spawn` |
 | `readFile`, `writeFile`, `readDir`, `fileExists`, `walkTree`, `watchPath` | `gvim.fs.*` |
@@ -41,11 +46,19 @@ a rewrite in idiomatic Lua. The bundled plugins are examples of the technique (s
 | `computeLineDiff` | `gvim.diff.lines` (or `diff.buffer`) |
 | `createVirtualBuffer*`, `setVirtualBufferContent`, `getTextPropertiesAtCursor` | `gvim.buf.create` plus `w:split` plus `b:set_content`, `b:props_at` |
 | `beginKeyCapture`, `getNextKey`, `endKeyCapture` | `gvim.input.next_key` (no begin or end) |
-| `t(...)`, windows, orchestrator, authority, widgets, themes, packages | not provided |
+| windows, orchestrator, authority, packages | not provided |
 
-Not provided at all (and not stubbed): HTTP, i18n, menus, project-local plugins, a trust store,
-conceal, virtual lines, plugin folds, a terminal API, Fresh's window, authority and widget runtimes,
-the package manager, `render_line`, and mouse and focus events.
+Widgets: Fresh's declarative widget API has a read-mostly v1 here (see
+[api-ui.md](api-ui.md#widget-panels-and-sidebar-sections)): `mountWidgetPanel`/`updateWidgetPanel`/
+`unmountWidgetPanel`, `widgetCommand`, `widgetMutate` and `mountSidebarSection` are
+`gvim.ui.mount_widget_panel`, `update_widget_panel`, `unmount_widget_panel`, `widget_command`,
+`widget_mutate` and `mount_sidebar_section`; the widget kinds are the read-only subset (no
+`textInput`, dropdown, radio or dual list yet) and there are no floating/dock placement
+controls.
+
+Not provided at all (and not stubbed): the editor-wide i18n (plugin texts are translated, see [api-core.md](api-core.md#gvimi18n)), project-local plugins, a trust store,
+conceal, virtual lines, plugin folds, a terminal API, Fresh's window and authority runtimes,
+the package manager, the HTTP client API and `render_line`.
 
 ### What changes when you port
 

@@ -124,6 +124,10 @@ type candidate struct {
 
 	raw      map[string]rawFile
 	compiled map[string]*Compiled
+	// i18n is the plugin's <name>.i18n.json content, read in the discovery Work; i18nErr
+	// is a read problem worth a log line.
+	i18n    string
+	i18nErr string
 	// problems lists every file that failed to read or compile ("chunk: first line").
 	problems []string
 	// err is why the plugin cannot load at all: bad name or manifest, API too new,
@@ -434,6 +438,10 @@ func (l *LoaderOptions) scanFile(c *candidate) {
 	}
 	defer closeFn()
 	c.raw[c.main] = readLua(fsys, c.ref.file, c.name)
+	base := strings.TrimSuffix(c.ref.file, ".lua")
+	if strings.HasSuffix(c.ref.file, ".lua") {
+		c.i18n, c.i18nErr = readI18n(fsys, base+".i18n.json")
+	}
 }
 
 func (l *LoaderOptions) scanDir(c *candidate) {
@@ -524,6 +532,29 @@ func (l *LoaderOptions) scanDir(c *candidate) {
 			c.err += fmt.Sprintf(" (the plugin directory has more than %d entries; the search stopped)", maxWalkEntries)
 		}
 	}
+	// The translation file is named after the plugin (Fresh's convention) or after the
+	// entry file, whichever exists.
+	mainBase := strings.TrimSuffix(filepath.Base(c.main), ".lua")
+	c.i18n, c.i18nErr = readI18n(fsys, c.name+".i18n.json", mainBase+".i18n.json")
+}
+
+// readI18n reads the first of the names that exists in fsys. A missing file is not a
+// problem; an oversized or unreadable one is returned as the problem string.
+func readI18n(fsys fs.FS, names ...string) (data, problem string) {
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		raw, err := readCapped(fsys, name, MaxManifest)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return "", fmt.Sprintf("%s: %v", name, err)
+		}
+		return string(raw), ""
+	}
+	return "", ""
 }
 
 // readLua reads one .lua file; a file over the cap is not read at all.
@@ -624,6 +655,9 @@ func (c *candidate) compile() {
 	} else if cc.Err != nil {
 		c.err = firstLine(cc.Err.Error())
 	}
+	if c.i18nErr != "" {
+		c.problems = append(c.problems, "i18n: "+c.i18nErr)
+	}
 }
 
 // entry is the absolute path of the file the plugin runs from, "" when it has none on disk
@@ -641,7 +675,7 @@ func (c *candidate) entry() string {
 // source returns what LoadPlugin needs.
 func (c *candidate) source() Source {
 	return Source{Name: c.name, Version: c.version, Kind: c.kind, Dir: c.dir, File: c.entry(), Main: c.main, Compiled: c.compiled,
-		Settings: c.settings.User, ProjectSettings: c.settings.Project}
+		I18nJSON: c.i18n, Settings: c.settings.User, ProjectSettings: c.settings.Project}
 }
 
 // scanOne reads one plugin again for reload and enable: scan and compile, no shadowing.

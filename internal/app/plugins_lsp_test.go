@@ -59,8 +59,16 @@ func (f *appLSP) Open(_, _, _ string) (int32, error)  { return 1, nil }
 func (f *appLSP) Change(_, _ string) (int32, error)   { return 2, nil }
 func (f *appLSP) Close(string) error                  { return nil }
 func (f *appLSP) WorkspaceEdits() []tui.WorkspaceEdit { return nil }
-func (f *appLSP) Stop() error                         { return nil }
-func (f *appLSP) Restart(string) error                { return nil }
+func (f *appLSP) WorkspaceDiagnostics() []tui.FileDiagnostics {
+	return nil
+}
+func (f *appLSP) InlayHints(string) ([]tui.InlayHint, error) { return nil, nil }
+func (f *appLSP) SemanticTokens(string, int, int) ([]tui.SemanticToken, error) {
+	return nil, nil
+}
+func (f *appLSP) FoldingRanges(string) ([]tui.FoldRange, error) { return nil, nil }
+func (f *appLSP) Stop() error                                   { return nil }
+func (f *appLSP) Restart(string) error                          { return nil }
 func (f *appLSP) Diagnostics(path string) (tui.DiagnosticsEvent, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

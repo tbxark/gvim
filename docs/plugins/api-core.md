@@ -7,7 +7,7 @@ config, persistent state, directories, the environment and calls between plugins
 ## gvim
 
 ```text
-gvim.api_version        -- 1
+gvim.api_version        -- 2
 gvim.version            -- the gvim version, or "dev" for a build from a work tree
 gvim.platform           -- "darwin" | "linux" | "windows"
 gvim.has(feature) -> boolean
@@ -166,3 +166,33 @@ end
   calls in flight with `nil, "closed: plugin reloaded"`; an error inside the exported function gives
   `nil, "plugin 'x': <message>"`.
 * `Subscription` and `Command` handles cannot cross.
+
+## gvim.i18n
+
+Plugins can ship their own translations in a `<name>.i18n.json` next to the plugin (the
+editor finds `plugins/foo.lua` + `plugins/foo.i18n.json`, or `plugins/foo/foo.i18n.json` for a
+directory plugin). The file is Fresh's plugin i18n format: a JSON object of locale → key →
+text, with `%{name}` placeholders:
+
+```json
+{
+  "en": { "cmd.do_thing": "My Plugin: Do Thing", "status.found": "Found %{count} items" },
+  "bg": { "cmd.do_thing": "Моят плъгин: Направи" }
+}
+```
+
+```text
+gvim.i18n.t(key, vars?) -> string
+gvim.i18n.translate(key, vars?) -> string    the same function
+gvim.i18n.locale() -> string
+```
+
+`t(key)` returns the text of the editor's locale, then English, then the key itself, so a
+missing translation reads as a key and an English fallback always exists. `vars` fills the
+`%{name}` placeholders (`string`, number or boolean values; an unknown placeholder is left as
+it is). `locale()` is the editor's locale — `"en"` today, the only built-in locale.
+
+A command `title` or `description` that starts with `%` is a translation key and is resolved
+when the command is registered: `title = "%cmd.do_thing"` becomes `t("cmd.do_thing")`. Menu
+labels accept the same prefix.
+

@@ -15,6 +15,7 @@ import (
 const (
 	searchLabelText  = "Search:  "
 	replaceLabelText = "Replace: "
+	globLabelText    = "Files:   "
 	// labelCols is the width of the label column: both labels and their gap, so the two
 	// inputs start in the same cell.
 	labelCols = 9
@@ -37,6 +38,7 @@ type geometry struct {
 
 	resultsTop, results int
 	searchY, replY      int
+	globY               int
 	optY                int
 
 	x0, end int // the inner text columns: from the padding to the right padding
@@ -51,7 +53,7 @@ func layoutFor(w, h int, git bool) geometry {
 		if git {
 			return r + 4
 		}
-		return r + 5
+		return r + 6
 	}
 	for rows > 1 && h-total(rows) < 2 {
 		rows--
@@ -66,10 +68,11 @@ func layoutFor(w, h int, git bool) geometry {
 	g.resultsTop = top + 1
 	g.optY = g.bottom - 1
 	if git {
-		g.replY = -1
+		g.replY, g.globY = -1, -1
 		g.searchY = g.optY - 1
 	} else {
-		g.replY = g.optY - 1
+		g.globY = g.optY - 1
+		g.replY = g.globY - 1
 		g.searchY = g.replY - 1
 	}
 	g.x0 = left + 1 + space.PadX
@@ -102,6 +105,9 @@ func (p *Panel) Draw(g *grid.Grid) {
 	if geo.replY >= 0 {
 		p.drawField(g, geo.replY, replaceLabelText, &p.replace, p.focus == focusReplace, geo)
 	}
+	if geo.globY >= 0 {
+		p.drawField(g, geo.globY, globLabelText, &p.glob, p.focus == focusGlob, geo)
+	}
 	p.paintOptions(g, geo)
 	p.styles.ov.PaintFooter(g, geo.left, geo.bottom, boxW, p.hint())
 }
@@ -126,6 +132,9 @@ func (p *Panel) title() string {
 		return base + " · no matches"
 	}
 	title := fmt.Sprintf("%s · %d %s in %d %s", base, matches, plural(matches, "match"), files, plural(files, "file"))
+	if selected, _ := p.ReplaceCount(); selected != matches {
+		title += fmt.Sprintf(" · %d selected", selected)
+	}
 	if truncated {
 		title += " · capped"
 	}
@@ -145,9 +154,9 @@ func (p *Panel) hint() string {
 		return p.notice
 	}
 	if p.git {
-		return "Alt+C case · Enter open · Esc close"
+		return "Alt+C case · Enter open · Alt+Q list · Esc close"
 	}
-	return "Tab next · Up/Down select · Enter open · Alt+Enter replace · Esc close"
+	return "Tab next · Space check · Enter open · Alt+Enter all · Shift+Enter scoped · Alt+Q list · Esc close"
 }
 
 // paintResults paints the result region: the empty and error states, or the window of
@@ -194,16 +203,26 @@ func (p *Panel) paintRow(g *grid.Grid, geo geometry, y, i int) {
 		g.Fill(geo.left+1, geo.right, y, p.styles.selected)
 		base = p.styles.selected
 	}
+	box := checkbox(p.fileChecked(r.file))
 	if r.kind == rowFile {
 		mark := fileOpenMark
 		if r.file < len(p.expanded) && !p.expanded[r.file] {
 			mark = fileClosedMark
 		}
 		base.Bold = true
-		g.Put(geo.x0, y, geo.end, fmt.Sprintf("%s%s (%d)", mark, r.path, r.count), base)
+		done := 0
+		if r.file < len(p.checked) {
+			for _, on := range p.checked[r.file] {
+				if on {
+					done++
+				}
+			}
+		}
+		g.Put(geo.x0, y, geo.end, fmt.Sprintf("%s%s%s (%d/%d)", box, mark, r.path, done, r.count), base)
 		return
 	}
-	prefix := fmt.Sprintf("%s%d:%d ", fileIndent, r.line, r.col)
+	box = checkbox(p.matchChecked(r.file, r.match))
+	prefix := fmt.Sprintf("%s%s%d:%d ", box, fileIndent, r.line, r.col)
 	x := geo.x0
 	x += g.Put(x, y, geo.end, prefix, faint(base))
 	// The text, with the matched runes bold.
@@ -260,9 +279,11 @@ func (p *Panel) paintOptions(g *grid.Grid, geo geometry) {
 		}
 	}
 	right := ""
-	if !p.git {
+	if !p.git && p.query.Value() != "" {
 		if matches, _ := p.ReplaceCount(); matches > 0 {
 			right = fmt.Sprintf("Replace All (Alt+Enter): %d", matches)
+		} else {
+			right = "Replace All (Alt+Enter)"
 		}
 	}
 	rightW := ansi.StringWidth(right)
@@ -302,6 +323,11 @@ func (p *Panel) Cursor(w, h int) (x, y int, ok bool) {
 			return 0, 0, false
 		}
 		row, f = geo.replY, &p.replace
+	case focusGlob:
+		if geo.globY < 0 {
+			return 0, 0, false
+		}
+		row, f = geo.globY, &p.glob
 	default:
 		return 0, 0, false
 	}

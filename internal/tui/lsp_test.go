@@ -14,6 +14,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/popup"
@@ -55,6 +56,8 @@ type lspEd struct {
 	fileOps []string
 	// loadDocs, when set, is what LoadFunc returns for a path.
 	loadDocs map[string]*editor.Document
+	// externalFolds records the LSP folding ranges pushed into the editor.
+	externalFolds map[string][]fold.Range
 }
 
 // HasFormatter reports whether the active buffer has a formatter, as the editor does.
@@ -155,6 +158,14 @@ func (e *lspEd) OpenLoaded(d *editor.Document) {
 	e.active = len(e.tabs) - 1
 }
 
+// SetExternalFolds records the language server's folding ranges for a path.
+func (e *lspEd) SetExternalFolds(path string, ranges []fold.Range) {
+	if e.externalFolds == nil {
+		e.externalFolds = map[string][]fold.Range{}
+	}
+	e.externalFolds[path] = ranges
+}
+
 func (e *lspEd) GotoLine(line, col int) error {
 	e.gotos = append(e.gotos, [2]int{line, col})
 	return nil
@@ -242,8 +253,15 @@ type fakeLSP struct {
 	requests []string // "<path> <method> <params>" of every Request
 	reply    any      // the result of Request
 
-	renameName string
-	lastChange int32
+	hints          []InlayHint
+	tokens         []SemanticToken
+	folds          []FoldRange
+	workspaceDiags []FileDiagnostics
+	dataErr        error
+	// dataCalls counts the LSP data requests, per kind.
+	hintCalls, tokenCalls, foldCalls int
+	renameName                       string
+	lastChange                       int32
 	// infoGo makes Server describe go as a configured server.
 	infoGo    bool
 	restarted []string
@@ -344,6 +362,27 @@ func (f *fakeLSP) ExecuteCommand(_ string, command LSPCommand) error {
 	f.executed = append(f.executed, command)
 	return f.reqErr
 }
+
+// InlayHints returns the canned hints.
+func (f *fakeLSP) InlayHints(string) ([]InlayHint, error) {
+	f.hintCalls++
+	return f.hints, f.dataErr
+}
+
+// SemanticTokens returns the canned tokens.
+func (f *fakeLSP) SemanticTokens(string, int, int) ([]SemanticToken, error) {
+	f.tokenCalls++
+	return f.tokens, f.dataErr
+}
+
+// FoldingRanges returns the canned ranges.
+func (f *fakeLSP) FoldingRanges(string) ([]FoldRange, error) {
+	f.foldCalls++
+	return f.folds, f.dataErr
+}
+
+// WorkspaceDiagnostics returns the canned diagnostics.
+func (f *fakeLSP) WorkspaceDiagnostics() []FileDiagnostics { return f.workspaceDiags }
 
 // Request records the request and answers the canned result.
 func (f *fakeLSP) Request(path, method string, params any) (any, error) {
@@ -1120,16 +1159,19 @@ func TestToggleInlayHintsIsOnlyAFlag(t *testing.T) {
 	port := newFakeLSP("go")
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
 	lt.open()
-	lt.act("toggle_inlay_hints")
 	if !lt.m.lsp.inlay {
-		t.Fatal("inlay flag is off after the toggle")
+		t.Fatal("inlay flag is off before the toggle, want it on from the defaults")
+	}
+	lt.act("toggle_inlay_hints")
+	if lt.m.lsp.inlay {
+		t.Fatal("inlay flag is still on after the toggle")
 	}
 	if len(port.opens) != 1 || port.reqErr != nil {
 		t.Fatalf("toggle changed the server traffic: opens = %v", port.opens)
 	}
 	lt.act("toggle_inlay_hints")
-	if lt.m.lsp.inlay {
-		t.Fatal("inlay flag is still on after the second toggle")
+	if !lt.m.lsp.inlay {
+		t.Fatal("inlay flag is off after the second toggle")
 	}
 }
 

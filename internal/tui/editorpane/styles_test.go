@@ -51,7 +51,9 @@ func TestSyntaxForegroundRules(t *testing.T) {
 		{name: "rgb value", kind: syntax.KindKeyword, want: color.RGBA{R: 1, G: 2, B: 3, A: 255}},
 		{name: "named value falls back to the editor foreground", kind: syntax.KindString, want: editorFG},
 		{name: "terminal default has no foreground", kind: syntax.KindComment, want: nil},
-		{name: "missing key falls back to the editor foreground", kind: syntax.KindFunction, want: editorFG},
+		// A partial theme is layered on a builtin base, so a syntax key it does
+		// not name is the base's (dark's function color), not the editor fg.
+		{name: "missing key takes the base theme", kind: syntax.KindFunction, want: color.RGBA{R: 210, G: 168, B: 255, A: 255}},
 		{name: "plain text is the editor foreground", kind: syntax.KindPlain, want: editorFG},
 	}
 	for _, tc := range cases {
@@ -165,8 +167,10 @@ func TestSyntaxStylesCarryAttributesAndFallbacks(t *testing.T) {
 			t.Errorf("%v attributes (bold, italic, underline, strike) = %v, want %v", tt.kind, got, tt.want)
 		}
 	}
-	if got, want := st.Syntax[syntax.KindBuiltin].FG, (color.RGBA{R: 4, G: 5, B: 6, A: 255}); got != want {
-		t.Errorf("builtin fg = %v, want the variable colour %v", got, want)
+	// The partial theme gets the dark base, which names variable_builtin itself,
+	// so the variable override does not reach it (Fresh's base rule).
+	if got, want := st.Syntax[syntax.KindBuiltin].FG, (color.RGBA{R: 88, G: 166, B: 255, A: 255}); got != want {
+		t.Errorf("builtin fg = %v, want the base's builtin colour %v", got, want)
 	}
 	if got, want := st.Syntax[syntax.KindAttribute].FG, (color.RGBA{R: 7, G: 8, B: 9, A: 255}); got != want {
 		t.Errorf("attribute fg = %v, want the constant colour %v", got, want)

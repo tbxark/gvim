@@ -67,10 +67,10 @@ func barLabels(explorerFocus bool) []string {
 // enabled when its context key holds. A row shows the shortcut that keyOf gives
 // for its action when keyOf is not nil and reports ok, and the shortcut of the
 // table otherwise. It returns nil when the table has no such label.
-func dropdownRows(title string, holds func(string) bool, keyOf func(string) (string, bool)) []Row {
+func dropdownRows(title string, holds func(string) bool, keyOf func(string) (string, bool), themeChoices []ThemeChoice) []Row {
 	for _, lm := range legacyMenus {
 		if lm.label == title {
-			return menuRows(lm.items, holds, keyOf)
+			return menuRows(lm.items, holds, keyOf, themeChoices)
 		}
 	}
 	return nil
@@ -78,7 +78,7 @@ func dropdownRows(title string, holds func(string) bool, keyOf func(string) (str
 
 // menuRows converts table rows into dropdown rows. An action whose when key does
 // not hold is disabled, and a checkbox row is checked when its key holds.
-func menuRows(items []legacyItem, holds func(string) bool, keyOf func(string) (string, bool)) []Row {
+func menuRows(items []legacyItem, holds func(string) bool, keyOf func(string) (string, bool), themeChoices []ThemeChoice) []Row {
 	rows := make([]Row, 0, len(items))
 	for _, it := range items {
 		// The shortcut comes from the active keymap only. The table's own keys are the macOS
@@ -90,7 +90,7 @@ func menuRows(items []legacyItem, holds func(string) bool, keyOf func(string) (s
 		case itemSubmenu:
 			row.Submenu = true
 			row.Keys = " >  "
-			row.children = menuRows(submenuItems(it), holds, keyOf)
+			row.children = menuRows(submenuItems(it, themeChoices), holds, keyOf, themeChoices)
 		case itemLabel:
 			row.Disabled = true
 		case itemAction:

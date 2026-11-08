@@ -102,8 +102,18 @@ func (o Options) Validate() error {
 			return fmt.Errorf("--keymap: unknown keymap %q (want default, macos, macos-gui, emacs or vscode)", o.Keymap)
 		}
 	}
-	if o.Theme != "" && !slices.Contains(theme.Names(), o.Theme) {
-		return fmt.Errorf("--theme: unknown theme %q (want %s)", o.Theme, strings.Join(theme.Names(), ", "))
+	if o.Theme != "" {
+		if err := theme.ValidateForm(o.Theme); err != nil {
+			return fmt.Errorf("--theme: %w", err)
+		}
+		if theme.IsNamedForm(o.Theme) && !slices.Contains(theme.Names(), o.Theme) {
+			// A plain name may also be a user theme: check the user theme dir, so
+			// a typo is one line instead of a start-time error.
+			registry := theme.NewRegistry(userThemeDir())
+			if _, err := registry.Load(o.Theme); err != nil {
+				return fmt.Errorf("--theme: unknown theme %q (want one of the bundled themes, a theme in %s, or a theme path)", o.Theme, userThemeDir())
+			}
+		}
 	}
 	if o.Diff {
 		if len(o.Files) != 2 {

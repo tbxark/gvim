@@ -320,7 +320,7 @@ func (f frame) paintRowTail(g *grid.Grid, ln line, y, end int, cur bool) {
 	}
 	base := f.styles.Text
 	if cur && f.styles.CurrentLine.BG != nil {
-		base.BG = f.styles.CurrentLine.BG
+		base = withBackground(base, f.styles.CurrentLine)
 	}
 	g.Fill(end, f.w-1, y, PatchStyle(base, ln.tail))
 }
@@ -335,7 +335,7 @@ func (f frame) paintVirtualText(g *grid.Grid, ln line, i, y, end, skip int, cur 
 	}
 	base := f.styles.Text
 	if cur && f.styles.CurrentLine.BG != nil {
-		base.BG = f.styles.CurrentLine.BG
+		base = withBackground(base, f.styles.CurrentLine)
 	}
 	x := end
 	for _, t := range f.hooks.eol(i) {

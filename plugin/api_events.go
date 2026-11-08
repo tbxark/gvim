@@ -32,6 +32,8 @@ var knownEvents = map[string]bool{
 	"buffer_modified": true, "buffer_changed": true, "cursor_moved": true, "selection_changed": true,
 	"viewport_changed": true, "language_changed": true, "config_changed": true, "theme_changed": true,
 	"pre_command": true, "post_command": true, "idle": true, "mode_changed": true, "diagnostics_updated": true,
+	"widget_event": true, "lsp_status_clicked": true, "lsp_server_error": true,
+	"action_popup_result": true,
 }
 
 // customEventRE is the name of a plugin event: "<plugin>:<name>".

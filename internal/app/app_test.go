@@ -22,6 +22,15 @@ func isolateConfig(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
+	isolateConfig(t)
+	// A user theme named neon exists, so the named form is valid.
+	userThemes := userThemeDir()
+	if err := os.MkdirAll(userThemes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userThemes, "neon.json"), []byte(`{"name":"neon","extends":"builtin://dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name    string
 		opts    Options
@@ -36,7 +45,12 @@ func TestValidate(t *testing.T) {
 		{name: "plugin options", opts: Options{NoPlugins: true, PluginPaths: []string{"a.lua", "dir"}}},
 		{name: "empty plugin path", opts: Options{PluginPaths: []string{"a.lua", " "}}, wantErr: "--plugin: path is empty"},
 		{name: "unknown keymap", opts: Options{Keymap: "vim"}, wantErr: `unknown keymap "vim"`},
-		{name: "unknown theme", opts: Options{Theme: "neon"}, wantErr: `unknown theme "neon"`},
+		// A plain name resolves against the bundled themes and the user theme dir.
+		{name: "user theme name", opts: Options{Theme: "neon"}},
+		{name: "unknown theme name", opts: Options{Theme: "not-a-theme"}, wantErr: `unknown theme "not-a-theme"`},
+		{name: "user theme path", opts: Options{Theme: "subdir/dark.json"}},
+		{name: "file theme", opts: Options{Theme: "file:///tmp/x.json"}},
+		{name: "URL theme", opts: Options{Theme: "https://example.com/t#x"}, wantErr: "URL themes are not supported"},
 		{name: "empty file path", opts: Options{Files: []FileTarget{{Path: ""}}}, wantErr: "file path is empty"},
 		{name: "negative line", opts: Options{Files: []FileTarget{{Path: "a.go", Line: -1}}}, wantErr: "must not be negative"},
 		{name: "negative column", opts: Options{Files: []FileTarget{{Path: "a.go", Line: 1, Col: -2}}}, wantErr: "must not be negative"},

@@ -1,0 +1,174 @@
+package pluginapi
+
+// Declarative widget panels (plugin API tier 1a). A plugin builds a Widget tree, the ui
+// host lays it out on the cell grid, paints it, hit-tests it, keeps the focus and reports
+// what the user did as a widget_event. The tree is plain data: pluginapi imports the
+// standard library only, and the host validates and copies everything it keeps.
+//
+// The subset is the read-mostly one of Fresh's widget API: row, col, label, text, raw,
+// hintBar, spacer, divider, button, toggle, list and tree. There is no editable text
+// field, dropdown or tree editing yet.
+
+// PanelID names one widget panel a plugin mounted. 0 means none. Ids are chosen by the
+// runtime (not reused while the plugin runs) and the host keys every panel by it.
+type PanelID uint64
+
+// WidgetKind names one node of a widget spec.
+type WidgetKind string
+
+// The widget kinds of v1.
+const (
+	WidgetRow     WidgetKind = "row"
+	WidgetCol     WidgetKind = "col"
+	WidgetLabel   WidgetKind = "label"
+	WidgetText    WidgetKind = "text"
+	WidgetRaw     WidgetKind = "raw"
+	WidgetHintBar WidgetKind = "hintBar"
+	WidgetSpacer  WidgetKind = "spacer"
+	WidgetDivider WidgetKind = "divider"
+	WidgetButton  WidgetKind = "button"
+	WidgetToggle  WidgetKind = "toggle"
+	WidgetList    WidgetKind = "list"
+	WidgetTree    WidgetKind = "tree"
+)
+
+// WidgetRun is one styled run of a label, a raw row or a hint entry.
+type WidgetRun struct {
+	Text  string
+	Style Style
+}
+
+// WidgetItem is one row of a list.
+type WidgetItem struct {
+	Key, Text, Detail string
+	Checked, Disabled bool
+}
+
+// WidgetNode is one node of a tree. Depth is the nesting level (0 for a root row); a node
+// with children is a node with a following node of a greater depth. Expanded is the seed
+// state of that node's children; the host keeps the state after the first draw.
+type WidgetNode struct {
+	Key, Text, Detail string
+	Depth             int
+	Checked, Expanded bool
+	// Leaf says the node has no children even when the next node is deeper (a column of
+	// flat rows with an indent). It is only needed for odd shapes; depth is enough
+	// otherwise.
+	Leaf bool
+}
+
+// Widget is one node of a declarative widget tree.
+type Widget struct {
+	Kind WidgetKind
+	// Key is the stable identity of a node across updates: focus, selection, checked
+	// state and scroll position are kept for matching keys.
+	Key string
+
+	// Children are the row and col layout children.
+	Children []Widget
+
+	// Text is the label text, the read-only text block's value (split on newline, no
+	// trailing empty row), the divider glyph (one cell, default "-") or a hint bar's
+	// shortcut text.
+	Text string
+	// Runs are the styled segments of a label (when non-empty it replaces Text), one
+	// row per entry of raw, and the entries of hintBar ("key: label" runs).
+	Runs []WidgetRun
+
+	// Focusable control state.
+	Checked       bool   // toggle, tree node seed via Nodes
+	Indeterminate bool   // toggle: neither on nor off
+	Focused       bool   // initial focus hint; the panel's FocusKey wins
+	Disabled      bool   // button: drawn muted and skipped by the focus ring
+	Intent        string // button: "primary", "secondary" or ""
+	Label         string // button/toggle text
+
+	// List and tree state.
+	Items       []WidgetItem
+	Nodes       []WidgetNode
+	Selected    int  // 0-based index of the selected item/node; -1 for none
+	VisibleRows int  // list/tree window; 0 shares the available height
+	Checkable   bool // tree: draw checkboxes and report toggles
+	Columns     int  // spacer: blank cells in a row (default 1)
+
+	// Style is the optional styling of a label, text, button or hint row.
+	Style Style
+
+	// Flex makes a spacer take the free width of a row.
+	Flex bool
+}
+
+// WidgetPanel is the content of a panel: the root widget and the key of the widget that
+// starts focused ("" means no focus).
+type WidgetPanel struct {
+	Root     Widget
+	FocusKey string
+}
+
+// WidgetPlacement is where a mounted panel sits.
+type WidgetPlacement string
+
+// The placements of v1.
+const (
+	// PlacementFloat is a centred floating card over the frame.
+	PlacementFloat WidgetPlacement = "float"
+	// PlacementBuffer paints the panel over the pane of the window showing the plugin's
+	// virtual buffer (Buffer names it).
+	PlacementBuffer WidgetPlacement = "buffer"
+	// PlacementSidebar is a section of the sidebar column, under the explorer.
+	PlacementSidebar WidgetPlacement = "sidebar"
+)
+
+// WidgetMount is everything a mount call passes.
+type WidgetMount struct {
+	Panel     WidgetPanel
+	Title     string
+	Placement WidgetPlacement
+	// Buffer is the virtual buffer whose window shows a buffer placement.
+	Buffer BufferID
+	// WidthPct and HeightPct size a floating card, as a percentage of the frame (0: the
+	// host default). Rows is the body height a sidebar section asks for (0 shares the
+	// column).
+	WidthPct, HeightPct int
+	Rows                int
+	// Focus gives the panel the keyboard at once; Closable puts an Escape/close path on
+	// it that unmounts the panel and raises a cancel event.
+	Focus, Closable bool
+}
+
+// WidgetAction is an action the plugin asks the host to perform on the focused widget of a
+// panel (gvim.ui.widget_command).
+type WidgetAction struct {
+	Kind  string // "focusAdvance" | "activate" | "selectMove"
+	Delta int    // focusAdvance and selectMove
+}
+
+// WidgetMutation is a targeted change of one mounted panel (gvim.ui.widget_mutate). It is
+// a faster path than re-sending the whole spec; the instance state of other widgets is
+// kept.
+type WidgetMutation struct {
+	Kind      string // "setChecked" | "setSelectedIndex" | "setValue"
+	WidgetKey string
+	Checked   bool
+	Index     int // 0-based
+	Value     string
+}
+
+// WidgetEvent is the payload the host reports to plugins as a widget_event. It is a plain
+// struct for the fake host and for tests; the runtime converts it to a Lua table. Panel is
+// the mounted panel id; Widget is the key of the widget the event is about ("" for a
+// panel-level event); Index is 0-based (-1 when the event carries none); Checked, Value
+// and Mouse carry the rest.
+type WidgetEvent struct {
+	Panel   uint64
+	Event   string // "activate" | "toggle" | "select" | "focus" | "value" | "close" | "cancel" | "mouse_click" | "mouse_move" | "mouse_wheel"
+	Widget  string
+	Index   int
+	Checked bool
+	Value   string
+	// Mouse fields for the mouse events: the frame cell, the button ("left", "right",
+	// "middle") and the wheel delta in rows (positive down).
+	X, Y   int
+	Button string
+	Wheel  int
+}

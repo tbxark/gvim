@@ -75,8 +75,29 @@ type lspState struct {
 	seq int
 	// polling is set while the diagnostics poll is running.
 	polling bool
-	// inlay is the Toggle Inlay Hints flag. Inlay hints are not requested.
+	// inlay is the Toggle Inlay Hints flag: whether the root asks the servers
+	// for inlay hints and paints them.
 	inlay bool
+	// hints holds the inlay hints of each document, by path, and hintSeq orders
+	// the refresh timers. hintErr holds the reason a language's hints cannot be
+	// requested, so the toggle can say it once.
+	hints   map[string][]InlayHint
+	hintSeq int
+	hintErr map[string]string
+	// tokens holds the semantic tokens of each document, by path, and tokenSeq
+	// orders the refresh timers. tokenErr holds the reason a language has no
+	// tokens, so the refresh stops asking.
+	tokens   map[string][]SemanticToken
+	tokenSeq int
+	tokenErr map[string]string
+	tokenTop map[string]int
+	// folds holds the folding ranges each document's server last gave, by path,
+	// and foldSeq orders the refresh timers. The ranges are pushed into the
+	// editor, which merges them with its indentation folds; the map is kept for
+	// the refresh bookkeeping and the tests.
+	folds   map[string][]FoldRange
+	foldSeq int
+	foldErr map[string]string
 	// comp is the open completion popup, or nil.
 	comp *lspCompletion
 	// popupPath is the document a code-action popup was opened for.
@@ -263,6 +284,18 @@ func (m *Model) lspUpdate(msg tea.Msg) tea.Cmd {
 	default:
 		cmds = append(cmds, m.lspWatchActive())
 	}
+	// A semantic-token request covers the viewport: a scroll asks again for the
+	// lines that came into view.
+	if doc := m.ed.Active(); doc != nil {
+		path := docPath(doc)
+		if top := doc.Top(); m.lsp.tokenTop[path] != top {
+			if m.lsp.tokenTop == nil {
+				m.lsp.tokenTop = make(map[string]int)
+			}
+			m.lsp.tokenTop[path] = top
+			cmds = append(cmds, m.lspDataArm(lspDataTokens))
+		}
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -310,6 +343,7 @@ func (m *Model) lspReconcile() tea.Cmd {
 		}
 		delete(s.tracks, path)
 		m.lspDropDiags(path)
+		m.lspDropData(path)
 	}
 	for _, path := range sortedKeys(s.tracks) {
 		cmds = append(cmds, m.lspSendFor(s.tracks[path]))
@@ -450,7 +484,19 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 		for _, path := range sortedKeys(s.tracks) {
 			cmds = append(cmds, m.lspSendFor(s.tracks[path]))
 		}
+		cmds = append(cmds, m.lspDataArm(lspDataHints), m.lspDataArm(lspDataTokens), m.lspDataArm(lspDataFolds))
 		return tea.Batch(cmds...), true
+	case lspDataMsg:
+		return m.lspDataRefresh(msg), true
+	case lspHintsDoneMsg:
+		m.lspHints(msg)
+		return nil, true
+	case lspTokensDoneMsg:
+		m.lspTokens(msg)
+		return nil, true
+	case lspFoldsDoneMsg:
+		m.lspFolds(msg)
+		return nil, true
 	case lspPollMsg:
 		return m.lspPoll(), true
 	case lspDiagsMsg:
@@ -476,6 +522,9 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.lspServerDone(msg), true
 	case lspErrMsg:
 		m.notice = msg.err.Error()
+		// Plugin API tier 1a: a server or request failed; plugins (lsp_help and friends)
+		// can surface it.
+		m.plugEmit("lsp_server_error", map[string]any{"error": msg.err.Error()})
 		return nil, true
 	case popup.Chosen:
 		if cmd, ok := m.pluginPopupChosen(msg); ok {
@@ -516,6 +565,7 @@ func (m *Model) lspOpened(msg lspOpenedMsg) tea.Cmd {
 	if tr.dirty || tr.want != tr.have {
 		cmds = append(cmds, m.lspArm())
 	}
+	cmds = append(cmds, m.lspDataArm(lspDataHints), m.lspDataArm(lspDataTokens), m.lspDataArm(lspDataFolds))
 	return tea.Batch(cmds...)
 }
 
@@ -539,7 +589,7 @@ func (m *Model) lspChanged(msg lspChangedMsg) tea.Cmd {
 	if tr.dirty || tr.want != tr.have {
 		return m.lspArm()
 	}
-	return nil
+	return tea.Batch(m.lspDataArm(lspDataHints), m.lspDataArm(lspDataTokens), m.lspDataArm(lspDataFolds))
 }
 
 // lspPollArm starts the diagnostics poll after lspPollEvery.
@@ -1064,14 +1114,16 @@ func (m *Model) lspAction(action string) (tea.Cmd, bool) {
 	case "lsp_toggle_for_buffer":
 		return m.lspToggle(), true
 	case "show_lsp_status":
+		// Plugin API tier 1a: the status pill was clicked; plugins that put their own
+		// server state in the UI can follow.
+		m.plugEmit("lsp_status_clicked", map[string]any{})
 		return m.lspStatusCmd(), true
 	case "lsp_enable_language":
 		return m.lspSetLanguageEnabled(true), true
 	case "lsp_disable_language":
 		return m.lspSetLanguageEnabled(false), true
 	case "toggle_inlay_hints":
-		m.lsp.inlay = !m.lsp.inlay
-		m.notice = "Inlay hints are not requested by this port"
+		return m.lspToggleInlayHints(), true
 	case "completion_accept":
 		if c := m.lsp.comp; c != nil {
 			m.acceptCompletion(c, c.pop.Selected())
@@ -1491,6 +1543,31 @@ func lspServerStateLabel(state LSPServerRunState) string {
 	return "not running"
 }
 
+// lspToggleInlayHints turns the inlay hints on or off. Turning them off drops the
+// hints the root holds, so the next frame paints none; turning them on asks the
+// server again.
+func (m *Model) lspToggleInlayHints() tea.Cmd {
+	s := &m.lsp
+	s.inlay = !s.inlay
+	if !s.inlay {
+		s.hints = nil
+		m.notice = "Inlay hints off"
+		return nil
+	}
+	doc := m.ed.Active()
+	if doc == nil || s.port == nil {
+		m.notice = "Inlay hints on"
+		return nil
+	}
+	lang := m.lspLanguage(doc)
+	if reason := s.hintErr[lang]; reason != "" {
+		m.notice = "Inlay hints are not available: " + reason
+		return nil
+	}
+	m.notice = "Inlay hints on"
+	return m.lspDataArm(lspDataHints)
+}
+
 // lspToggle turns LSP on or off for the active document. Turning it off closes the
 // document on its server, and turning it on opens it at the next sync.
 func (m *Model) lspToggle() tea.Cmd {
@@ -1519,6 +1596,7 @@ func (m *Model) lspToggle() tea.Cmd {
 	tr := s.tracks[path]
 	delete(s.tracks, path)
 	m.lspDropDiags(path)
+	m.lspDropData(path)
 	if tr != nil && tr.state != lspClosed {
 		return m.lspCloseCmd(path)
 	}

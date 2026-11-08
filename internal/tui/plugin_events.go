@@ -398,10 +398,11 @@ func (m *Model) plugReverted(path string) {
 	}
 }
 
-// plugThemeChanged raises theme_changed after the theme was applied.
-func (m *Model) plugThemeChanged(name string) {
+// plugThemeChanged raises theme_changed after the theme was applied. The payload
+// names the theme and says whether its editor background is dark.
+func (m *Model) plugThemeChanged(name string, dark bool) {
 	if m.plugWants("theme_changed") {
-		m.plugEmit("theme_changed", map[string]any{"name": name})
+		m.plugEmit("theme_changed", map[string]any{"name": name, "dark": dark})
 	}
 }
 

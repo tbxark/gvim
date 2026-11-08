@@ -88,6 +88,46 @@ func (h *pluginHost) Diagnostics(id pluginapi.BufferID) ([]pluginapi.DiagnosticI
 	return out, nil
 }
 
+// AllDiagnostics returns the diagnostics of every open document that a server has reported
+// on, sorted by path, for gvim.lsp.all_diagnostics. The columns are byte columns converted
+// from the server's rune columns with the document's text, like Diagnostics.
+func (h *pluginHost) AllDiagnostics() ([]pluginapi.FileDiagnostics, error) {
+	m := h.m
+	if m.lsp.port == nil {
+		return nil, pluginapi.Errf(pluginapi.CodeUnsupported, "no language server is configured")
+	}
+	paths := make([]string, 0, len(m.lsp.diags))
+	for path, items := range m.lsp.diags {
+		if len(items) > 0 {
+			paths = append(paths, path)
+		}
+	}
+	slices.Sort(paths)
+	out := make([]pluginapi.FileDiagnostics, 0, len(paths))
+	total := 0
+	for _, path := range paths {
+		id := m.plug.host.ed().FindBuffer(path)
+		if id == 0 {
+			continue // a document that closed since the publish
+		}
+		items, err := h.Diagnostics(id)
+		if err != nil {
+			continue
+		}
+		if len(items) == 0 {
+			continue
+		}
+		if total += len(items); total > maxAllDiagnostics {
+			break
+		}
+		out = append(out, pluginapi.FileDiagnostics{Path: path, Diagnostics: items})
+	}
+	return out, nil
+}
+
+// maxAllDiagnostics bounds the list gvim.lsp.all_diagnostics returns.
+const maxAllDiagnostics = 50_000
+
 // runeToByteCol converts a rune column of line to a byte column. A column past the end of
 // the line is the end of the line.
 func runeToByteCol(line string, col int) int {

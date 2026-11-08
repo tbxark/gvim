@@ -383,6 +383,7 @@ func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 	}
 	pane = m.viewPane(pane, doc)
 	pane = m.plugDecor(pane, doc)
+	pane = m.lspData(pane, doc)
 	pane = m.lspGutter(pane, doc)
 	pane = m.compareDecor(p, pane)
 	if p.Focused {

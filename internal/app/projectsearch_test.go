@@ -276,3 +276,43 @@ func TestProjectReplaceLimitsEdits(t *testing.T) {
 		t.Fatalf("edits = %+v, want the limit of one", out.Files)
 	}
 }
+
+func TestProjectReplaceOnlySelectedMatches(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"a.txt": "foo foo foo\n"})
+	s := newProjectSearch(editor.Options{})
+	searchReq := projectSearchRequest(dir, []string{"a.txt"}, "foo")
+	res, err := s.ProjectSearch(searchReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := filepath.Join(dir, "a.txt")
+	rep := searchpanel.ReplaceRequest{
+		Root: dir, Query: "foo", Replacement: "bar",
+		Files: []searchpanel.ReplaceFile{{
+			Path: line, Name: "a.txt", Hash: res.Files[0].Hash,
+			Selected: []searchpanel.Position{{Line: 0, Col: 4}},
+		}},
+	}
+	out, err := s.ProjectReplace(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Files) != 1 || len(out.Files[0].Edits) != 1 {
+		t.Fatalf("edits = %+v, want the one selected match", out.Files)
+	}
+	if got := out.Files[0].Edits[0]; got.From.Line != 0 || got.From.Col != 4 || got.Text != "bar" {
+		t.Fatalf("selected edit = %+v, want the second foo", got)
+	}
+	// A selected start that is not a hit is dropped, never applied at a guessed
+	// offset.
+	rep.Files[0].Selected = []searchpanel.Position{{Line: 0, Col: 2}}
+	out, err = s.ProjectReplace(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Files) != 0 {
+		t.Fatalf("a non-hit selection produced edits: %+v", out.Files)
+	}
+}

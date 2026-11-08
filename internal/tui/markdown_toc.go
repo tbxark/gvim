@@ -312,6 +312,8 @@ func (m *Model) sidebarSpecs() []sidebar.Spec {
 			Collapsed: m.contents.Collapsed(),
 		})
 	}
+	// The plugin sections stack under the native ones (plugin_panels.go).
+	specs = append(specs, m.pluginSidebarSpecs()...)
 	return specs
 }
 
@@ -535,6 +537,8 @@ func (m *Model) paintSidebar(g *grid.Grid, l layout) {
 			First:     sec.Index == 0,
 			Several:   len(l.Sections) > 1,
 			Collapsed: sec.Collapsed,
+			Title:     sec.Title,
+			NoClose:   sec.NoClose,
 		}
 		sidebar.PaintHeader(g, l.ExX, l.Ex, sec.HeaderY, sidebar.HeaderFor(l.Ex, m.view.icons, spec), m.styles)
 		if sec.Collapsed {
@@ -545,6 +549,10 @@ func (m *Model) paintSidebar(g *grid.Grid, l layout) {
 			m.explorerPanel.DrawBody(g, m.explorerGeometry(l))
 		case sidebar.KindContents:
 			m.contents.Draw(g, l.ExX, l.Ex, sec, m.view.icons, m.styles)
+		case sidebar.KindPlugin:
+			if mp := m.pluginSectionAt(sec.Index); mp != nil {
+				m.paintPluginSection(g, l, mp)
+			}
 		}
 	}
 	last := l.Sections[len(l.Sections)-1]

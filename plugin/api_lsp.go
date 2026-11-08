@@ -40,21 +40,43 @@ func installLSP(e *apiEnv) {
 		if err != nil {
 			return bufRet(L, err)
 		}
-		out := L.CreateTable(len(items), 0)
-		for _, d := range items {
-			row := L.CreateTable(0, 4)
-			row.RawSetString("range", p.rangeTable(d.Range))
-			row.RawSetString("severity", lua.LString(d.Severity))
-			row.RawSetString("message", lua.LString(d.Message))
-			if d.Source != "" {
-				row.RawSetString("source", lua.LString(d.Source))
-			}
+		L.Push(diagRowsTable(p, L, items))
+		return 1
+	})
+	// gvim.lsp.all_diagnostics -> { {path=, diagnostics={...}}, ... }: the diagnostics of
+	// every open document a server has reported on, sorted by path.
+	e.set(t, "all_diagnostics", func(L *lua.LState) int {
+		files, err := p.r.guard.AllDiagnostics()
+		if err != nil {
+			return bufRet(L, err)
+		}
+		out := L.CreateTable(len(files), 0)
+		for _, f := range files {
+			row := L.CreateTable(0, 2)
+			row.RawSetString("path", lua.LString(f.Path))
+			row.RawSetString("diagnostics", diagRowsTable(p, L, f.Diagnostics))
 			out.Append(row)
 		}
 		L.Push(out)
 		return 1
 	})
 	t.RawSetString("request", e.async("lsp_request"))
+}
+
+// diagRowsTable converts host diagnostics to the Lua rows of gvim.lsp.
+func diagRowsTable(p *plugin, L *lua.LState, items []pluginapi.DiagnosticInfo) *lua.LTable {
+	out := L.CreateTable(len(items), 0)
+	for _, d := range items {
+		row := L.CreateTable(0, 4)
+		row.RawSetString("range", p.rangeTable(d.Range))
+		row.RawSetString("severity", lua.LString(d.Severity))
+		row.RawSetString("message", lua.LString(d.Message))
+		if d.Source != "" {
+			row.RawSetString("source", lua.LString(d.Source))
+		}
+		out.Append(row)
+	}
+	return out
 }
 
 // lspReadMethods is the allowlist of gvim.lsp.request: the requests of the protocol that

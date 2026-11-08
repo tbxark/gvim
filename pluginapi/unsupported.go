@@ -93,13 +93,29 @@ func (Unsupported) UpdatePicker(uint64, PickerUpdate) error    { return unsuppor
 func (Unsupported) ClosePicker(uint64)                         {}
 func (Unsupported) ShowPopup(Token, uint64, PopupSpec) error   { return unsupported("ShowPopup") }
 func (Unsupported) ClosePopup(uint64)                          {}
-func (Unsupported) WaitKey(Token, int) error                   { return unsupported("WaitKey") }
+func (Unsupported) ShowActionPopup(Token, uint64, ActionPopupSpec) error {
+	return unsupported("ShowActionPopup")
+}
+func (Unsupported) SetPromptSuggestions([]PromptSuggestion, int) error {
+	return unsupported("SetPromptSuggestions")
+}
+func (Unsupported) WaitKey(Token, int) error { return unsupported("WaitKey") }
+func (Unsupported) MountWidgetPanel(string, PanelID, WidgetMount) error {
+	return unsupported("MountWidgetPanel")
+}
+func (Unsupported) UpdateWidgetPanel(string, PanelID, WidgetPanel) error {
+	return unsupported("UpdateWidgetPanel")
+}
+func (Unsupported) UnmountWidgetPanel(PanelID)                 {}
+func (Unsupported) WidgetCommand(PanelID, WidgetAction) error  { return unsupported("WidgetCommand") }
+func (Unsupported) WidgetMutate(PanelID, WidgetMutation) error { return unsupported("WidgetMutate") }
 func (Unsupported) CancelWait(Token)                           {}
 func (Unsupported) SetCommands(string, []CommandInfo)          {}
 func (Unsupported) SetBindings(string, []Binding)              {}
 func (Unsupported) SetModes(string, []ModeInfo)                {}
 func (Unsupported) SetContext(string, string, bool)            {}
 func (Unsupported) SetStatusItems(string, []StatusItem)        {}
+func (Unsupported) SetMenuItems(string, []MenuItem)            {}
 func (Unsupported) SetInputMode(string, string) error          { return unsupported("SetInputMode") }
 func (Unsupported) SetClipboard(string)                        {}
 func (Unsupported) Focus(string) error                         { return unsupported("Focus") }
@@ -124,7 +140,15 @@ func (Unsupported) Files(int) ([]string, bool)                 { return nil, fal
 func (Unsupported) Config(string) (any, bool)                  { return nil, false }
 func (Unsupported) Theme() ThemeInfo                           { return ThemeInfo{} }
 func (Unsupported) ThemeColor(string) (r, g, b uint8, ok bool) { return 0, 0, 0, false }
+func (Unsupported) ThemeNames() []string                       { return nil }
+func (Unsupported) ThemeOverrides() (map[string]string, bool)  { return nil, false }
+func (Unsupported) SetThemeOverrides(map[string]string) error {
+	return unsupported("SetThemeOverrides")
+}
 func (Unsupported) Diagnostics(BufferID) ([]DiagnosticInfo, error) {
 	return nil, unsupported("Diagnostics")
+}
+func (Unsupported) AllDiagnostics() ([]FileDiagnostics, error) {
+	return nil, unsupported("AllDiagnostics")
 }
 func (Unsupported) LSPRequest(Token, BufferID, string, any) error { return unsupported("LSPRequest") }

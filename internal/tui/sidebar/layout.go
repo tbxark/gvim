@@ -39,6 +39,11 @@ type Spec struct {
 	Kind      Kind
 	Rows      int  // body rows asked for; 0 shares the column's remainder
 	Collapsed bool // the reader collapsed the section
+	// Title is the header title of a plugin section; "" derives the title from the kind
+	// (the native sections' headers).
+	Title string
+	// NoClose hides the header's close button (a plugin section that is not closable).
+	NoClose bool
 }
 
 // Section is where one section of the column landed. HeaderY is its header row,
@@ -54,6 +59,10 @@ type Section struct {
 	BodyTop    int
 	BodyBottom int
 	Collapsed  bool
+	// Title and NoClose are the Spec's plugin-section header values; empty/false for the
+	// native sections.
+	Title   string
+	NoClose bool
 }
 
 // Rows is the height of the section's body, zero when it is collapsed.
@@ -121,7 +130,7 @@ func Layout(top, bottom int, specs []Spec) []Section {
 	out := make([]Section, n)
 	y := top
 	for i, s := range shown {
-		out[i] = Section{Kind: s.Kind, Index: i, HeaderY: y, BodyTop: y + 1, BodyBottom: y, Collapsed: squeezed[i]}
+		out[i] = Section{Kind: s.Kind, Index: i, HeaderY: y, BodyTop: y + 1, BodyBottom: y, Collapsed: squeezed[i], Title: s.Title, NoClose: s.NoClose}
 		y++
 		if r := rows[i]; r > 0 {
 			out[i].BodyTop = y

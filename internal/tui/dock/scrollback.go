@@ -1,6 +1,8 @@
 package dock
 
 import (
+	"regexp"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -10,7 +12,6 @@ import (
 
 // The notices of the read-only scrollback view.
 const (
-	noScrollbackNotice  = "No scrollback to show."
 	altScrollbackNotice = "The alternate screen has no scrollback."
 	nothingToCopyNotice = "Nothing to copy."
 	copiedLineNotice    = "Copied the line."
@@ -39,10 +40,13 @@ type scrollState struct {
 	gen int
 	// pending is a snapshot request in flight.
 	pending bool
-	// typing says the search input has the keys; search is the committed query.
+	// typing says the search input has the keys; search is the committed query,
+	// and regex/matchCase are its options.
 	typing      bool
 	searchInput string
 	search      string
+	regex       bool
+	matchCase   bool
 	// matches are the absolute combined rows that match search; match is the
 	// index into them the view is on.
 	matches []int
@@ -64,6 +68,7 @@ type searchMsg struct {
 	gen     int
 	query   string
 	matches []int
+	err     string
 }
 
 // Scrolling reports whether the dock shows the read-only scrollback view.
@@ -87,10 +92,10 @@ func (p *Panel) bodyRows() int {
 	return max(rows, 0)
 }
 
-// combined is the rows the scrollback view scrolls through: the history, then the
-// live screen rows.
+// combined is the rows the scrollback view scrolls through: a restarted shell's
+// prior transcript, then the history, then the live screen rows.
 func (p *Panel) combined() int {
-	return p.scroll.total + p.scroll.screenRows
+	return len(p.prior) + p.scroll.total + p.scroll.screenRows
 }
 
 // maxTop is the largest first visible row the view can have.
@@ -112,22 +117,20 @@ func (p *Panel) enterScrollback() tea.Cmd {
 		return nil
 	}
 	total := p.term.ScrollbackLen()
-	if total == 0 {
-		p.noticeOf(noScrollbackNotice)
-		return nil
-	}
 	rows := p.bodyRows()
 	p.scroll = scrollState{
 		on: true, total: total, screenRows: rows, gen: p.gen,
 	}
 	p.scroll.top = max(p.combined()-rows, 0)
 	p.scroll.selected = max(p.combined()-1, 0)
+	p.clearSelection()
 	return p.requestScrollback()
 }
 
 // leaveScrollback returns to the live screen.
 func (p *Panel) leaveScrollback() tea.Cmd {
 	p.scroll = scrollState{}
+	p.clearSelection()
 	return nil
 }
 
@@ -153,14 +156,16 @@ func (p *Panel) requestScrollback() tea.Cmd {
 		return nil
 	}
 	rows := max(p.bodyRows(), 1)
-	from := max(p.scroll.top-scrollMargin, 0)
-	to := min(p.scroll.top+rows+scrollMargin, p.scroll.total)
-	if from > p.scroll.total {
-		from = p.scroll.total
-	}
-	if p.covers(max(p.scroll.top, 0), min(p.scroll.top+rows, p.scroll.total)) {
+	// The window is in combined rows; the history part starts after the prior
+	// transcript.
+	prior := len(p.prior)
+	histFrom := min(max(p.scroll.top-prior, 0), p.scroll.total)
+	histTo := min(max(p.scroll.top+rows-prior, 0), p.scroll.total)
+	if histTo <= histFrom || p.covers(histFrom, histTo) {
 		return nil
 	}
+	from := max(histFrom-scrollMargin, 0)
+	to := min(histTo+scrollMargin, p.scroll.total)
 	t, gen := p.term, p.gen
 	p.scroll.pending = true
 	count := to - from
@@ -233,21 +238,33 @@ func (p *Panel) afterScroll() tea.Cmd { return p.requestScrollback() }
 // key; the caller sends anything else to the shell.
 func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 	if !p.scroll.on {
-		if !isCtrlSpace(k) {
-			return nil, false
+		switch {
+		case isCtrlSpace(k), k.Code == tea.KeyPgUp && k.Mod&tea.ModShift != 0:
+			// Ctrl+Space toggles the view on the main screen, and Shift+PageUp
+			// enters it as Fresh does.
+			return p.enterScrollback(), true
+		case k.Mod&tea.ModCtrl != 0 && k.Code == 'f':
+			cmd := p.enterScrollback()
+			if p.scroll.on {
+				p.scroll.typing, p.scroll.searchInput = true, ""
+			}
+			return cmd, true
 		}
-		// With no history (or on the alternate screen) Ctrl+Space stays the
-		// terminal_escape binding, so the key still gives the focus back.
-		cmd := p.enterScrollback()
-		return cmd, p.scroll.on
+		return nil, false
 	}
 	if p.scroll.typing {
 		return p.searchInputKey(k), true
 	}
 	switch {
 	case isCtrlSpace(k):
+		if p.restored && p.term == nil {
+			return nil, true
+		}
 		return p.leaveScrollback(), true
 	case k.Code == tea.KeyEscape:
+		if p.restored && p.term == nil {
+			return nil, true
+		}
 		return p.leaveScrollback(), true
 	case k.Mod == 0 && k.Code == '/':
 		p.scroll.typing, p.scroll.searchInput = true, ""
@@ -257,9 +274,18 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 	case k.Mod == 0 && k.Code == 'N':
 		return p.nextMatch(-1), true
 	case k.Mod == 0 && k.Code == 'y':
+		if p.sel.active {
+			return p.copySelection(), true
+		}
 		return p.copySelected(), true
 	case k.Mod&tea.ModCtrl != 0 && k.Code == 'c':
+		if p.sel.active {
+			return p.copySelection(), true
+		}
 		return p.copyScreen(), true
+	case k.Mod&tea.ModCtrl != 0 && k.Code == 'f':
+		p.scroll.typing, p.scroll.searchInput = true, ""
+		return nil, true
 	case k.Code == tea.KeyUp:
 		p.scrollBy(-1)
 		return p.afterScroll(), true
@@ -302,7 +328,13 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 			p.scroll.matches, p.scroll.match = nil, 0
 			return nil
 		}
-		return p.searchCmd(p.scroll.search)
+		return p.searchCmd(p.scroll.search, p.scroll.regex, p.scroll.matchCase)
+	case k.Mod&tea.ModCtrl != 0 && k.Code == 'r':
+		p.scroll.regex = !p.scroll.regex
+		return p.refreshSearch()
+	case k.Mod&tea.ModCtrl != 0 && k.Code == 'a':
+		p.scroll.matchCase = !p.scroll.matchCase
+		return p.refreshSearch()
 	case k.Code == tea.KeyBackspace:
 		if r := []rune(p.scroll.searchInput); len(r) > 0 {
 			p.scroll.searchInput = string(r[:len(r)-1])
@@ -315,34 +347,85 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 	return nil
 }
 
-// searchCmd searches the history and the live screen for query, in a command.
-func (p *Panel) searchCmd(query string) tea.Cmd {
-	if p.term == nil {
+// refreshSearch runs the committed search again after an option toggle, when a
+// query is committed.
+func (p *Panel) refreshSearch() tea.Cmd {
+	if p.scroll.search == "" || p.scroll.typing {
 		return nil
 	}
+	return p.searchCmd(p.scroll.search, p.scroll.regex, p.scroll.matchCase)
+}
+
+// searchCmd searches the prior transcript, the history and the live screen for
+// query, in a command. The options choose a regular expression and a match that
+// respects case.
+func (p *Panel) searchCmd(query string, regex, matchCase bool) tea.Cmd {
+	match, err := matcher(query, regex, matchCase)
+	if err != nil {
+		return func() tea.Msg { return searchMsg{gen: p.gen, query: query, err: err.Error()} }
+	}
 	t, gen := p.term, p.gen
-	history := p.scroll.total
+	prior := slices.Clone(p.prior)
+	total := p.scroll.total
 	rows := p.scroll.screenRows
 	return func() tea.Msg {
-		found, _ := t.SearchScrollback(query, 200)
-		matches := make([]int, 0, len(found))
-		matches = append(matches, found...)
-		// The live screen rows are not history, so they are searched here; their
-		// combined row is the history's row count plus the screen row.
-		sc := t.Screen()
-		for r := 0; r < min(sc.Rows, rows); r++ {
-			text := screenRowText(sc, r)
-			if strings.Contains(strings.ToLower(text), strings.ToLower(query)) {
-				matches = append(matches, history+r)
+		var matches []int
+		// The prior transcript comes first, from the dock's own copy.
+		for i, ln := range prior {
+			if match(ln.Text()) {
+				matches = append(matches, i)
+			}
+		}
+		if t != nil {
+			found, _, err := t.SearchScrollbackMode(query, regex, matchCase, 200)
+			if err != nil {
+				return searchMsg{gen: gen, query: query, err: err.Error()}
+			}
+			for _, i := range found {
+				matches = append(matches, len(prior)+i)
+			}
+			sc := t.Screen()
+			for r := 0; r < min(sc.Rows, rows); r++ {
+				if match(screenRowText(sc, r)) {
+					matches = append(matches, len(prior)+total+r)
+				}
 			}
 		}
 		return searchMsg{gen: gen, query: query, matches: matches}
 	}
 }
 
+// matcher returns the test a scrollback search applies to one row's text.
+func matcher(query string, regex, matchCase bool) (func(string) bool, error) {
+	query = strings.TrimSpace(query)
+	if regex {
+		if !matchCase {
+			query = "(?i)" + query
+		}
+		re, err := regexp.Compile(query)
+		if err != nil {
+			return nil, err
+		}
+		return re.MatchString, nil
+	}
+	if !matchCase {
+		query = strings.ToLower(query)
+	}
+	return func(text string) bool {
+		if !matchCase {
+			text = strings.ToLower(text)
+		}
+		return strings.Contains(text, query)
+	}, nil
+}
+
 // applySearch stores the matches of a search and jumps to the first one.
 func (p *Panel) applySearch(msg searchMsg) tea.Cmd {
 	if msg.gen != p.gen || !p.scroll.on || msg.query != p.scroll.search {
+		return nil
+	}
+	if msg.err != "" {
+		p.noticeOf("Bad pattern: " + msg.err)
 		return nil
 	}
 	p.scroll.matches, p.scroll.match = msg.matches, 0
@@ -378,11 +461,15 @@ func (p *Panel) jumpToMatch(i int) {
 // combinedText returns the text of a combined row: a history row from the
 // snapshot, or a live screen row. ok is false when the row is not loaded yet.
 func (p *Panel) combinedText(abs int) (string, bool) {
-	if abs < 0 {
+	if abs < 0 || abs >= p.combined() {
 		return "", false
 	}
-	if abs < p.scroll.total {
-		i := abs - p.scroll.from
+	if abs < len(p.prior) {
+		return p.prior[abs].Text(), true
+	}
+	hist := abs - len(p.prior)
+	if hist < p.scroll.total {
+		i := hist - p.scroll.from
 		if i < 0 || i >= len(p.scroll.lines) {
 			return "", false
 		}
@@ -392,7 +479,7 @@ func (p *Panel) combinedText(abs int) (string, bool) {
 		return "", false
 	}
 	sc := p.term.Screen()
-	r := abs - p.scroll.total
+	r := hist - p.scroll.total
 	if r < 0 || r >= sc.Rows {
 		return "", false
 	}

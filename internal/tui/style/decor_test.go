@@ -44,7 +44,7 @@ func TestDecorUsesAnExplicitGuideColor(t *testing.T) {
 	}
 }
 
-func TestDecorFallbackChains(t *testing.T) {
+func TestPartialThemeUsesTheBaseNotTheFallbackChain(t *testing.T) {
 	th, err := theme.Parse([]byte(`{
 		"editor": {"whitespace_indicator_fg": [1, 2, 3], "cursor": [4, 5, 6], "bracket_rainbow_match_modifier": ["italic"]},
 		"syntax": {"keyword": [10, 0, 0], "variable": [60, 0, 0]}
@@ -58,13 +58,16 @@ func TestDecorFallbackChains(t *testing.T) {
 		got  color.Color
 		want color.Color
 	}{
-		{"guide takes the whitespace color", Cell(d.IndentGuide).FG, rgba(1, 2, 3)},
-		{"rainbow takes the guide color", Cell(d.IndentRainbow[3]).FG, rgba(1, 2, 3)},
-		{"selected whitespace takes the whitespace color", Cell(d.WhitespaceSelected).FG, rgba(1, 2, 3)},
-		{"bracket match takes the cursor color", Cell(d.BracketMatch).FG, rgba(4, 5, 6)},
-		{"bracket rainbow 1 takes syntax.keyword", Cell(d.BracketRainbow[0]).FG, rgba(10, 0, 0)},
-		{"bracket rainbow 6 takes syntax.variable", Cell(d.BracketRainbow[5]).FG, rgba(60, 0, 0)},
-		{"bracket rainbow 2 has no syntax.function", Cell(d.BracketRainbow[1]).FG, nil},
+		{"the override wins", Cell(d.IndentRainbow[0]).FG, rgba(88, 166, 255)},
+		{"guide is the background base's", Cell(d.IndentGuide).FG, rgba(72, 79, 88)},
+		{"rainbow 4 is the base's", Cell(d.IndentRainbow[3]).FG, rgba(63, 185, 80)},
+		{"selected whitespace is the base's", Cell(d.WhitespaceSelected).FG, rgba(110, 118, 129)},
+		{"bracket match is the base's", Cell(d.BracketMatch).FG, rgba(121, 192, 255)},
+		// The base names the bracket rainbow colors itself, so the syntax
+		// overrides do not reach them.
+		{"bracket rainbow 1 is the base's", Cell(d.BracketRainbow[0]).FG, rgba(88, 166, 255)},
+		{"bracket rainbow 6 is the base's", Cell(d.BracketRainbow[5]).FG, rgba(188, 140, 255)},
+		{"bracket rainbow 2 is the base's function", Cell(d.BracketRainbow[1]).FG, rgba(255, 123, 114)},
 	}
 	for _, tc := range tests {
 		if tc.got != tc.want {

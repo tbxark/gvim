@@ -11,6 +11,22 @@ import (
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 )
 
+// runMsgs feeds messages and the commands they start back into the model, for a
+// few rounds: what an action produces in the tests.
+func (lt *lspTest) runMsgs(msgs []tea.Msg) {
+	lt.t.Helper()
+	for range 12 {
+		if len(msgs) == 0 {
+			return
+		}
+		var next []tea.Msg
+		for _, msg := range msgs {
+			next = append(next, lt.feed(msg)...)
+		}
+		msgs = next
+	}
+}
+
 // drain runs cmd and feeds back every message its commands produce, until no
 // command starts another.
 func (lt *lspTest) drain(cmd tea.Cmd) {
@@ -20,7 +36,6 @@ func (lt *lspTest) drain(cmd tea.Cmd) {
 		if len(msgs) == 0 {
 			return
 		}
-		lt.t.Logf("drain msgs %v", msgs)
 		var next []tea.Msg
 		for _, msg := range msgs {
 			next = append(next, lt.feed(msg)...)

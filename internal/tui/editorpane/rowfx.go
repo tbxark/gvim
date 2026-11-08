@@ -54,7 +54,7 @@ func (f frame) paintFoldPlaceholder(g *grid.Grid, i, y, end int, cur bool) int {
 	}
 	st := f.styles.Decor.FoldPlaceholder
 	if cur && f.styles.CurrentLine.BG != nil {
-		st.BG = f.styles.CurrentLine.BG
+		st = withBackground(st, f.styles.CurrentLine)
 	}
 	return end + g.Put(end, y, f.w-1, foldPlaceholder, st)
 }

@@ -16,7 +16,10 @@ type Capabilities struct {
 	Initialized bool
 
 	// Merged features: results combine across every eligible server.
-	Diagnostics      bool
+	Diagnostics bool
+	// DiagnosticPull says the server also answers textDocument/diagnostic
+	// (server-pulled diagnostics), not only publishes them.
+	DiagnosticPull   bool
 	Completion       bool
 	CodeAction       bool
 	DocumentSymbols  bool
@@ -55,6 +58,7 @@ func summarizeCapabilities(c protocol.ServerCapabilities) Capabilities {
 	caps := Capabilities{
 		Initialized:       true,
 		Diagnostics:       true,
+		DiagnosticPull:    c.DiagnosticProvider != nil,
 		Completion:        c.CompletionProvider != nil,
 		SignatureHelp:     c.SignatureHelpProvider != nil,
 		Hover:             providerEnabled(c.HoverProvider),
@@ -136,8 +140,10 @@ func semanticTokensFull(f protocol.SemanticTokensOptionsFull) (full, delta bool)
 // send the first notification for it.
 func applyRegistration(caps *Capabilities, method string, options protocol.LSPAny) {
 	switch method {
-	case "textDocument/publishDiagnostics", "textDocument/diagnostic", "workspace/diagnostic":
+	case "textDocument/publishDiagnostics":
 		caps.Diagnostics = true
+	case "textDocument/diagnostic", "workspace/diagnostic":
+		caps.Diagnostics, caps.DiagnosticPull = true, true
 	case "textDocument/completion":
 		caps.Completion = true
 	case "textDocument/codeAction":

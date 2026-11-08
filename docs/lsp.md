@@ -278,6 +278,38 @@ words in the buffer and everything else do not depend on it.
   knows the edit was accepted before it actually lands; if the edit is then refused (a stale
   version, a refused delete) the server has a success it cannot see doubted. The refusal is
   reported in the status row.
+- **Inlay hints.** A server's inlay hints — parameter names, inferred types — are shown at the
+  end of the line they belong to, as faint virtual text beside the text, so the document keeps its
+  text and nothing is inserted into it. This is the tier-1 placement: Fresh inserts the hint at
+  the hint's own character position, inside the line; gvim puts it after the line's last
+  character. Hints refresh after an edit (debounced), when a document opens, and the result is
+  cached per document version. **Toggle Inlay Hints** (the command palette; `toggle_inlay_hints`)
+  turns them on and off; they are on only when the server advertises `inlayHintProvider`. A
+  server that does not serve them says so once, and the refresh stops for that language.
+- **Semantic tokens.** A server's semantic tokens are painted as extra styling over the syntax
+  colors, through the same theme keys the syntax highlighter uses, so no theme change is needed.
+  The token type picks the color (keyword/modifier; function/method/macro/decorator;
+  type/class/struct/interface/namespace/enum; variable/parameter/property/enumMember/event/label;
+  number; string/regexp; operator; comment), and the modifiers adjust the face: `deprecated`
+  takes the warning color, `declaration` is bold, `readonly` underlined and `async` italic. The
+  client asks for the whole document, then for a delta when the server advertises
+  `semanticTokensFullDelta`; the visible lines are painted, with a 20-line padding so a small
+  scroll does not need another request. Token spans are overlays: they never change the saved
+  text, they are dropped when the
+  document closes or the server restarts, and an edit invalidates the cached token data before
+  the next request. Plugin decorations paint above them.
+- **Folding ranges.** A server's `foldingRange` results are merged into the document's fold set
+  with the indentation folds: the fold gutter marks them, and the fold actions (toggle, hidden
+  lines, the caret's skip over a collapsed fold) treat both alike. The merged set is found again
+  when the text or the server ranges change; ranges past the end of the document are cut. This
+  also gives the Contents sidebar a fold source for its `fold_buffer` setting later. The refresh
+  happens after an edit (debounced) and on open; a server that does not serve folding ranges is
+  asked once per language.
+- **Diagnostics, pull.** A server that answers `textDocument/diagnostic` instead of publishing is
+  asked for the document's diagnostics when no server published any: a server that published is
+  never also pulled from, so a problem is reported once. Pulled sets are cached for the document
+  version, so the 300 ms diagnostics poll does not ask again while the text has not changed. The
+  workspace diagnostics view (the diagnostics panel) is not drawn yet; see the last section.
 - **Format Buffer.** It formats with an external formatter when there is one, and otherwise asks
   the language server (`textDocument/formatting`). The caret stays on its text when the formatter
   adds or removes lines above it. With neither a formatter nor a server, the status row says which
@@ -311,6 +343,8 @@ Servers only start for files that have a name on disk, and not for files in larg
 
 ## What is not here yet
 
-Inlay hints, semantic tokens and folding ranges are requested by the client and have typed calls in
-`lsp/`, but the editor does not draw them yet; the same holds for a diagnostics panel or a
-quickfix list. That is Fresh-parity work for a later round (docs/parity.md, backlog #7).
+The diagnostics panel (a native sidebar section listing the workspace's diagnostics grouped by
+file, with a jump to each and a palette toggle) is not drawn yet: the data it needs is already
+collected (`WorkspaceDiagnostics` in the port, and pull diagnostics), so it is the next slice.
+The same holds for a quickfix list. Inlay hints use the end-of-line tier; inline insertion at the
+hint's character position is a later refinement (docs/parity.md, backlog #7).

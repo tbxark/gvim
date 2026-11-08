@@ -115,6 +115,15 @@ func promptRow(h int) int {
 	return h - 1
 }
 
+// Suggestion is one row of a prompt's suggestion list: the plugin's completion candidates
+// for whatever the user is typing. The value (text when empty) is what Tab fills in.
+type Suggestion struct {
+	Text        string
+	Description string
+	Value       string
+	Disabled    bool
+}
+
 // LineOptions configure a text prompt.
 type LineOptions struct {
 	Label     string                  // shown before the input, for example "Go to line:"
@@ -144,6 +153,10 @@ type Line struct {
 	history []string // earlier answers, oldest first
 	at      int      // the entry of history shown; len(history) is the text being typed
 	draft   string   // the text being typed, while an entry is shown
+	// suggestions are the plugin's completion candidates (gvim.ui.set_prompt_suggestions),
+	// shown above the prompt row. selSuggestion is the highlighted one, -1 for none.
+	suggestions   []Suggestion
+	selSuggestion int
 }
 
 // NewLine returns a text prompt with the options of o. The field is focused.
@@ -165,6 +178,8 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 		prefill:  o.SelectAll && o.Input != "",
 		history:  o.History,
 		at:       len(o.History),
+
+		selSuggestion: -1,
 	}
 }
 
@@ -190,7 +205,19 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		l.edit(msg)
 		return l, nil
 	}
-	switch tea.Key(kp).Keystroke() {
+	ks := tea.Key(kp).Keystroke()
+	// A suggestion list takes Tab, Shift+Tab and the arrows while it is shown: Tab and the
+	// arrows move the highlight and fill the choice in; the history keys come back when the
+	// list is empty.
+	if len(l.suggestions) > 0 {
+		switch ks {
+		case "tab", "down", "ctrl+n":
+			return l, l.cycleSuggestion(1)
+		case "shift+tab", "up", "ctrl+p":
+			return l, l.cycleSuggestion(-1)
+		}
+	}
+	switch ks {
 	case "esc":
 		l.closed = true
 		return l, nil
@@ -217,6 +244,49 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		cmd = nil
 	}
 	return l, cmd
+}
+
+// SetSuggestions replaces the suggestion list and the highlighted row (0-based; -1 for
+// none). An empty list hides it.
+func (l *Line) SetSuggestions(items []Suggestion, selected int) {
+	l.suggestions = append(l.suggestions[:0:0], items...)
+	l.selSuggestion = -1
+	if len(items) == 0 || selected < 0 || selected >= len(items) || items[selected].Disabled {
+		return
+	}
+	l.selSuggestion = selected
+}
+
+// cycleSuggestion moves the highlighted suggestion by delta, skipping disabled rows, and
+// fills its value into the field (the list is a completion, so the field shows the choice).
+func (l *Line) cycleSuggestion(delta int) tea.Cmd {
+	if len(l.suggestions) == 0 {
+		return nil
+	}
+	n := len(l.suggestions)
+	at := l.selSuggestion
+	for range n {
+		at = (at + delta + n) % n
+		if !l.suggestions[at].Disabled {
+			break
+		}
+	}
+	if at < 0 || at >= n || l.suggestions[at].Disabled {
+		return nil
+	}
+	l.selSuggestion = at
+	s := l.suggestions[at]
+	value := s.Value
+	if value == "" {
+		value = s.Text
+	}
+	l.field.SetValue(value)
+	l.field.CursorEnd()
+	l.prefill = false
+	if l.onChange != nil {
+		l.onChange(value)
+	}
+	return nil
 }
 
 // walk shows the previous (back) or the next entry of the history. The text being typed is kept
@@ -279,6 +349,7 @@ func (l *Line) Draw(g *grid.Grid) {
 		return
 	}
 	w := g.Width()
+	l.drawSuggestions(g, y, w)
 	g.Fill(0, w, y, l.styles.bar)
 	end := l.inputEnd(w)
 	if end < w {
@@ -288,6 +359,42 @@ func (l *Line) Draw(g *grid.Grid) {
 	g.Fill(x, end, y, l.styles.field)
 	shown, _ := space.Window(l.field.Value(), l.field.Position(), end-x)
 	g.Put(x, y, end, shown, l.styles.field)
+}
+
+// maxSuggestionRows is the most suggestion rows drawn at once; the rest scroll.
+const maxSuggestionRows = 4
+
+// drawSuggestions paints the suggestion list in the rows above the prompt row, nearest
+// first, the highlighted row on the raised field style.
+func (l *Line) drawSuggestions(g *grid.Grid, y, w int) {
+	if len(l.suggestions) == 0 {
+		return
+	}
+	rows := min(len(l.suggestions), maxSuggestionRows)
+	top := 0
+	if l.selSuggestion >= rows {
+		top = l.selSuggestion - rows + 1
+	}
+	for k := rows - 1; k >= 0; k-- {
+		i := top + k
+		if i >= len(l.suggestions) {
+			continue
+		}
+		row := y - k - 1
+		if row < 1 {
+			continue
+		}
+		s := l.suggestions[i]
+		st := l.styles.bar
+		if i == l.selSuggestion {
+			st = l.styles.field
+		}
+		g.Fill(0, w, row, st)
+		x := 1 + g.Put(1, row, w, space.End(s.Text, max(w-2, 0)), st)
+		if s.Description != "" && x+2 < w {
+			g.Put(x+2, row, w, space.End(s.Description, w-x-2), l.styles.label)
+		}
+	}
 }
 
 // inputEnd is the column where the input stops on a row w cells wide: before the

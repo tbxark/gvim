@@ -565,11 +565,12 @@ func TestStatusRowElementsShowTheirState(t *testing.T) {
 	if len(runs) != 1 || runs[0].Kind != HitStatusSegment || runs[0].Index != StatusSegmentMessages {
 		t.Errorf("messages run = %+v, want a clickable message segment", runs)
 	}
-	// The elements gvim parses but does not paint render nothing.
+	// The elements gvim parses but does not paint render nothing: {warnings},
+	// {update} and plugin tokens. ({filename}, {chord} and {clock} paint now; see
+	// TestStatusRowResidualElements.)
 	hidden := base
-	hidden.Row = row(StatusElementFilename, StatusElementChord, StatusElementClock,
-		StatusElementWarnings, StatusElementUpdate, StatusElementCustom)
-	hidden.Row.Left[5].Key = "plugin:token"
+	hidden.Row = row(StatusElementWarnings, StatusElementUpdate, StatusElementCustom)
+	hidden.Row.Left[2].Key = "plugin:token"
 	if got := text(hidden); got != "" {
 		t.Errorf("hidden elements paint %q, want nothing", got)
 	}
@@ -829,5 +830,105 @@ func TestRightSideNoticeBandStartsAtTheEditorEdge(t *testing.T) {
 	}
 	if last.X+last.W != 100 {
 		t.Errorf("status row ends at %d, want the frame edge 100", last.X+last.W)
+	}
+}
+
+// TestStatusRowResidualElements checks the three elements round 2 parsed but did not
+// paint: {filename} with Fresh's modified and read-only markers, the muted {chord}
+// of a pending sequence, and the {clock} time.
+func TestStatusRowResidualElements(t *testing.T) {
+	one := func(k StatusElementKind) StatusRow {
+		return StatusRow{Left: []StatusElement{{Kind: k}}}
+	}
+	tests := []struct {
+		name  string
+		row   StatusRow
+		state StatusView
+		want  string
+		style RunStyle
+	}{
+		{"filename", one(StatusElementFilename), StatusView{Filename: "docs/ui.md"}, " docs/ui.md ", StyleDefault},
+		{"modified filename", one(StatusElementFilename), StatusView{Filename: "docs/ui.md", FilenameModified: true}, " docs/ui.md [+] ", StyleDefault},
+		{"read-only filename", one(StatusElementFilename), StatusView{Filename: "docs/ui.md", ReadOnly: true}, " docs/ui.md [RO] ", StyleDefault},
+		{"modified read-only filename", one(StatusElementFilename), StatusView{Filename: "docs/ui.md", FilenameModified: true, ReadOnly: true}, " docs/ui.md [+] [RO] ", StyleDefault},
+		{"untitled filename", one(StatusElementFilename), StatusView{Filename: "[No Name]"}, " [No Name] ", StyleDefault},
+		{"no filename paints nothing", one(StatusElementFilename), StatusView{}, "", StyleDefault},
+		{"pending chord", one(StatusElementChord), StatusView{Chord: "[Ctrl+X]"}, " [Ctrl+X] ", StyleMuted},
+		{"no pending chord paints nothing", one(StatusElementChord), StatusView{}, "", StyleDefault},
+		{"clock", one(StatusElementClock), StatusView{Clock: "09:05"}, " 09:05 ", StyleDefault},
+		{"no clock paints nothing", one(StatusElementClock), StatusView{}, "", StyleDefault},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.state
+			s.Row = tt.row
+			runs := StatusRuns(120, s)
+			var got strings.Builder
+			for _, r := range runs {
+				got.WriteString(r.Text)
+			}
+			if got.String() != tt.want {
+				t.Fatalf("row = %q, want %q", got.String(), tt.want)
+			}
+			if tt.want != "" && runs[0].Style != tt.style {
+				t.Errorf("run style = %v, want %v", runs[0].Style, tt.style)
+			}
+		})
+	}
+	// In a configured list the three keep their order and their styles.
+	s := StatusView{
+		Filename: "src/main.go", FilenameModified: true, Chord: "[Ctrl+X]", Clock: "23:59",
+		Row: StatusRow{Left: []StatusElement{
+			{Kind: StatusElementFilename}, {Kind: StatusElementChord}, {Kind: StatusElementClock},
+		}},
+	}
+	runs := StatusRuns(120, s)
+	wantTexts := []string{" src/main.go [+] ", " [Ctrl+X] ", " 23:59 "}
+	if len(runs) != len(wantTexts) {
+		t.Fatalf("runs = %+v, want %d", runs, len(wantTexts))
+	}
+	for i, want := range wantTexts {
+		if runs[i].Text != want {
+			t.Errorf("run %d = %q, want %q", i, runs[i].Text, want)
+		}
+	}
+	if runs[1].Style != StyleMuted {
+		t.Errorf("the chord run style = %v, want muted", runs[1].Style)
+	}
+}
+
+// TestStatusRowResidualElementsElideAtTheTail checks the narrow-width behaviour: they
+// are ordinary left elements, so the left group's tail elides and drops as the row
+// narrows, and widening paints them again.
+func TestStatusRowResidualElementsElideAtTheTail(t *testing.T) {
+	s := StatusView{
+		Filename: "src/internal/tui/status_elements.go", // 38 cells with padding
+		Chord:    "[Ctrl+X]",
+		Clock:    "23:59",
+		Row: StatusRow{Left: []StatusElement{
+			{Kind: StatusElementFilename}, {Kind: StatusElementChord}, {Kind: StatusElementClock},
+		}},
+	}
+	text := func(w int) string {
+		var b strings.Builder
+		for _, r := range StatusRuns(w, s) {
+			b.WriteString(r.Text)
+		}
+		return b.String()
+	}
+	narrow := text(28)
+	if !strings.Contains(narrow, "…") {
+		t.Errorf("narrow row %q does not elide the filename", narrow)
+	}
+	for _, gone := range []string{"[Ctrl+X]", "23:59"} {
+		if strings.Contains(narrow, gone) {
+			t.Errorf("narrow row %q paints %q past the cut", narrow, gone)
+		}
+	}
+	wide := text(80)
+	for _, want := range []string{"status_elements.go", "[Ctrl+X]", "23:59"} {
+		if !strings.Contains(wide, want) {
+			t.Errorf("wide row %q has no %q", wide, want)
+		}
 	}
 }

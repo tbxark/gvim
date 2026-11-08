@@ -740,7 +740,7 @@ func TestThemeAndConfigEvents(t *testing.T) {
 	h := newEvHarness(t, "theme_changed", "config_changed")
 	wantRows(t, h.update(nil), nil)
 	h.m.dispatch(Command{Action: "select_theme", Args: map[string]any{"name": names[0]}})
-	wantRows(t, evRowsOf(h), []string{"theme_changed name=" + names[0]})
+	wantRows(t, evRowsOf(h), []string{"theme_changed dark=true name=" + names[0]})
 	h.m.dispatch(Command{Action: "select_theme", Args: map[string]any{"name": "no such theme"}})
 	wantRows(t, evRowsOf(h), nil)
 	h.m.util.switchKeymap = func(string) (Keymap, error) { return testKeys(), nil }

@@ -80,6 +80,9 @@ func NewStyles(th theme.Theme) Styles {
 		st.Syntax[k].Italic = attrs&syntax.AttrItalic != 0
 		st.Syntax[k].Underline = attrs&syntax.AttrUnderline != 0
 		st.Syntax[k].Strike = attrs&syntax.AttrStrike != 0
+		if c, ok := th.Syntax(kind.ThemeKey()); ok {
+			applyAttributeNames(&st.Syntax[k], c.Modifiers)
+		}
 	}
 	return st
 }
@@ -102,5 +105,37 @@ func syntaxFG(th theme.Theme, kind syntax.Kind, base color.Color) color.Color {
 		return style.Color(th, "syntax", key)
 	default:
 		return base
+	}
+}
+
+// withBackground returns st with role's background and text attributes: a
+// theme value's attributes apply to the text drawn over its background, so an
+// attribute on a *_bg color (or the legacy selection_modifier) reaches the cell.
+func withBackground(st, role grid.Style) grid.Style {
+	st.BG = role.BG
+	st.Bold = st.Bold || role.Bold
+	st.Faint = st.Faint || role.Faint
+	st.Italic = st.Italic || role.Italic
+	st.Underline = st.Underline || role.Underline
+	st.Strike = st.Strike || role.Strike
+	st.Reverse = st.Reverse || role.Reverse
+	return st
+}
+
+// applyAttributeNames applies theme attribute names to a grid style.
+func applyAttributeNames(st *grid.Style, names []string) {
+	for _, name := range theme.NormalizeModifiers(names) {
+		switch name {
+		case "bold":
+			st.Bold = true
+		case "italic":
+			st.Italic = true
+		case "underlined":
+			st.Underline = true
+		case "dim":
+			st.Faint = true
+		case "reversed":
+			st.Reverse = true
+		}
 	}
 }

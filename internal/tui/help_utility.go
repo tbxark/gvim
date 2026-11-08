@@ -15,6 +15,7 @@ import (
 type utilities struct {
 	settings     Settings
 	settingsPort SettingsPort
+	themeCatalog ThemeCatalog
 	switchKeymap func(name string) (Keymap, error)
 	events       eventRing
 }

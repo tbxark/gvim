@@ -41,7 +41,7 @@ func (f frame) paintInlineDiagnostics(g *grid.Grid, i, y, end int, cur bool) {
 	text := ansi.Truncate(msg, room, "…")
 	st := f.styles.Text
 	if cur && f.styles.CurrentLine.BG != nil {
-		st.BG = f.styles.CurrentLine.BG
+		st = withBackground(st, f.styles.CurrentLine)
 	}
 	if fg := f.diagnosticFG(sev); fg != nil {
 		st.FG = fg

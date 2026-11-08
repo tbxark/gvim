@@ -154,6 +154,33 @@ func TestMouseReportingClearsWhenTheChildTurnsItOff(t *testing.T) {
 	})
 }
 
+func TestSearchScrollbackMode(t *testing.T) {
+	s := startSh(t, moreLines(60))
+	total := waitScrollback(t, s, func(total int) bool { return total >= 30 })
+
+	// Case-sensitive literal search finds no uppercase history line.
+	if matches, _, err := s.SearchScrollbackMode("LINE-10", false, true, 10); err != nil || len(matches) != 0 {
+		t.Fatalf("case-sensitive literal = %v, %v; want no match", matches, err)
+	}
+	// Case-insensitive literal finds the row.
+	matches, _, err := s.SearchScrollbackMode("LINE-10", false, false, 10)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("case-insensitive literal = %v, %v; want one match", matches, err)
+	}
+	// A regex matches the line-10..line-19 block inside the history.
+	matches, searched, err := s.SearchScrollbackMode("line-1[0-9]$", true, true, 200)
+	if err != nil || searched != total || len(matches) == 0 {
+		t.Fatalf("regex = %v of %d, %v; want matches", matches, searched, err)
+	}
+	// A case-insensitive regex works too, and an invalid one is refused.
+	if m, _, err := s.SearchScrollbackMode("LINE-1[0-9]$", true, false, 10); err != nil || len(m) == 0 {
+		t.Fatalf("case-insensitive regex = %v, %v", m, err)
+	}
+	if _, _, err := s.SearchScrollbackMode("(", true, false, 10); err == nil {
+		t.Fatal("an invalid regex was accepted")
+	}
+}
+
 func TestSearchScrollback(t *testing.T) {
 	s := startSh(t, moreLines(60))
 	total := waitScrollback(t, s, func(total int) bool { return total >= 30 })

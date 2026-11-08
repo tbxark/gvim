@@ -96,6 +96,9 @@ type ReplaceFile struct {
 	Hash  uint64
 	Dirty bool
 	Text  string // the open buffer's text, for a Dirty file
+	// Selected are the 0-based start positions of the matches to replace, in the order
+	// the result showed them. An empty list means every match of the file.
+	Selected []Position
 }
 
 // Position is a 0-based position in a file.
@@ -178,6 +181,24 @@ type Files interface {
 // ReplaceRequestMsg asks the root to confirm and apply a replacement. The panel sends it
 // when the user presses Alt+Enter.
 type ReplaceRequestMsg struct{ Request ReplaceRequest }
+
+// ExportMsg asks the root to show the current result set as a navigable list: the
+// quickfix-style export of a project search. The panel sends it when the user presses
+// Alt+Q.
+type ExportMsg struct{}
+
+// ExportItem is one row of an exported result set: a file header or one match. The
+// root turns the items into its list overlay; the panel itself does not import it.
+type ExportItem struct {
+	Header bool
+	// Name is the file's display path on a header row.
+	Name string
+	// Path, Line and Col locate a match row's file and its 1-based position.
+	Path      string
+	Line, Col int
+	// Text is the match row's text: "line:col  the line".
+	Text string
+}
 
 // OpenMsg asks the root to open (or switch to) a file at a position, or to move in the
 // active buffer when Path is empty. It is what Enter on a match row sends.

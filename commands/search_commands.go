@@ -8,5 +8,6 @@ func init() {
 	pluginCommands = append([]builtinCommand{
 		{Name: "Search and Replace in Project", Description: "Search every project file and replace across files, with a grouped result list", Action: "start_search_replace", Contexts: []string{"Normal", "FileExplorer", "Terminal"}},
 		{Name: "Git Grep", Description: "Search the tracked files of the git work tree with git grep, with a result list and a case toggle", Action: "start_git_grep", Contexts: []string{"Normal", "FileExplorer", "Terminal"}},
+		{Name: "Project Search Results in List", Description: "Show the last project search's matches as a filterable list to jump through", Action: "project_search_results", Contexts: []string{"Normal", "FileExplorer", "Terminal"}},
 	}, pluginCommands...)
 }

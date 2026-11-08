@@ -201,6 +201,8 @@ func (m *Model) findAction(action string) (tea.Cmd, bool) {
 		return m.projectMatchAction(true), true
 	case "search_replace_prev_match":
 		return m.projectMatchAction(false), true
+	case "project_search_results":
+		return m.openProjectResultsList(), true
 	case "query_replace", "find_selection_next", "find_selection_previous":
 	default:
 		return nil, false

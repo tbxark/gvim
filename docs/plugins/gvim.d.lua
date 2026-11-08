@@ -1,5 +1,5 @@
 ---@meta
--- Type stubs for the gvim Lua plugin API (api_version 1), for editor completion with the
+-- Type stubs for the gvim Lua plugin API (api_version 2), for editor completion with the
 -- Lua language server (LuaLS): put this file where the server can see it, for example in
 -- the `workspace.library` setting. It is never loaded by gvim.
 --
@@ -428,7 +428,7 @@ function Regex:split(s, n) end
 ---@class gvim
 gvim = {}
 
-gvim.api_version = 1
+gvim.api_version = 2
 gvim.version = ""
 gvim.platform = ""
 
@@ -651,6 +651,53 @@ function gvim.emit(name, payload) end
 
 -- ui, clipboard, decorations
 
+---@class WidgetRun
+---@field text string
+---@field fg? Color
+---@field bg? Color
+---@field bold? boolean
+---@field italic? boolean
+---@field underline? boolean
+---@field reverse? boolean
+
+---@class WidgetItem
+---@field text string
+---@field detail? string
+---@field key? string
+---@field checked? boolean
+---@field disabled? boolean
+
+---@class WidgetNode
+---@field text string
+---@field detail? string
+---@field key? string
+---@field depth? integer 0 for a root row
+---@field checked? boolean
+---@field expanded? boolean seed of the node's children; the host owns it after the first draw
+---@field leaf? boolean the node has no children even when the next node is deeper
+
+---@class Widget
+---@field kind "row"|"col"|"label"|"text"|"raw"|"hintBar"|"spacer"|"divider"|"button"|"toggle"|"list"|"tree"
+---@field key? string stable identity across updates; required for state a mutation changes
+---@field children? Widget[] row and col
+---@field text? string label text, the read-only text block, the divider glyph
+---@field label? string button and toggle text
+---@field value? string text: the read-only text block (text is accepted too)
+---@field runs? WidgetRun[] label segments; raw rows; hintBar entries
+---@field style? Style
+---@field checked? boolean toggle
+---@field indeterminate? boolean toggle: neither on nor off
+---@field focused? boolean initial focus hint
+---@field disabled? boolean button: muted, not tabbable
+---@field intent? "primary"|"secondary" button look
+---@field items? (string|WidgetItem)[] list
+---@field nodes? WidgetNode[] tree
+---@field selected_index? integer 1-based index of the selected list/tree row; absent means none
+---@field visible_rows? integer list/tree window; 0 shares the panel height
+---@field checkable? boolean tree: draw the checked seeds
+---@field cols? integer spacer width in a row (default 1)
+---@field flex? boolean spacer: take the free width of a row
+
 gvim.ui = {}
 ---@param opts? {prompt?: string, default?: string, select_all?: boolean, history?: string[], validate?: fun(text: string): string|nil, on_change?: fun(text: string)}
 ---@return string|nil, string?
@@ -674,11 +721,41 @@ function gvim.ui.picker(spec) end
 ---@param spec {title?: string, lines?: string[], items?: (string|Item)[], anchor?: "cursor"|"center", width?: integer, on_select?: fun(item: any, index: integer), on_close?: fun()}
 ---@return Popup
 function gvim.ui.popup(spec) end
+---@param opts {title?: string, message?: string, actions: {id: string, label: string}[]}
+---@return string|nil chosen action id, string?
+function gvim.ui.action_popup(opts) end
+---@param items (string|{id?: string, text?: string, description?: string, value?: string, disabled?: boolean})[]
+---@param selected? integer 1-based highlighted row
+---@return true|nil, string?
+function gvim.ui.set_prompt_suggestions(items, selected) end
 ---@param area "editor"|"explorer"
 ---@return true|nil, string?
 function gvim.ui.focus(area) end
 ---@return {width: integer, height: integer}
 function gvim.ui.size() end
+---@param spec Widget|{root: Widget, focus_key?: string}
+---@param opts? {placement?: "float"|"buffer", buf?: Buffer, title?: string, width?: integer, height?: integer, focus?: boolean, closable?: boolean}
+---@return integer|nil panel id, string?
+function gvim.ui.mount_widget_panel(spec, opts) end
+---@param id integer
+---@param spec Widget|{root: Widget, focus_key?: string}
+---@return true|nil, string?
+function gvim.ui.update_widget_panel(id, spec) end
+---@param id integer
+---@return true
+function gvim.ui.unmount_widget_panel(id) end
+---@param id integer
+---@param action {kind: "focusAdvance"|"activate"|"selectMove", delta?: integer}
+---@return true|nil, string?
+function gvim.ui.widget_command(id, action) end
+---@param id integer
+---@param mutation {kind: "setChecked"|"setSelectedIndex"|"setValue", widget_key: string, checked?: boolean, index?: integer, value?: string}
+---@return true|nil, string?
+function gvim.ui.widget_mutate(id, mutation) end
+---@param spec Widget|{root: Widget, focus_key?: string}
+---@param opts? {title?: string, rows?: integer, focus?: boolean, closable?: boolean}
+---@return integer|nil panel id, string?
+function gvim.ui.mount_sidebar_section(spec, opts) end
 gvim.ui.statusbar = {}
 ---@param spec {id: string, text?: string, align?: "left"|"right", priority?: integer, on_click?: fun()}
 ---@return StatusItem|nil, string?
@@ -876,6 +953,8 @@ gvim.lsp = {}
 ---@param buf? Buffer
 ---@return Diagnostic[]|nil, string?
 function gvim.lsp.diagnostics(buf) end
+---@return {path: string, diagnostics: Diagnostic[]}[]|nil, string?
+function gvim.lsp.all_diagnostics() end
 ---@param method string
 ---@param params? table
 ---@param opts? {buf?: Buffer}
@@ -1064,6 +1143,27 @@ function gvim.utf8.byte_to_char(s, b) end
 ---@return integer
 function gvim.utf8.char_to_byte(s, c) end
 
+gvim.menu = {}
+---@param item {menu: string, label: string, action: string, checkbox?: string, when?: string, after?: string, before?: string}
+---@return true|nil, string?
+function gvim.menu.add_item(item) end
+---@param filter {menu: string, action?: string, label?: string}
+---@return true|nil, string?
+function gvim.menu.remove_item(filter) end
+---@return true
+function gvim.menu.clear() end
+gvim.i18n = {}
+---@param key string a key of the plugin's <name>.i18n.json ("cmd.open", "status.ready", ...)
+---@param vars? table<string, string|number|boolean> values for the %{name} placeholders
+---@return string current locale, then English, then the key itself
+function gvim.i18n.t(key, vars) end
+---@param key string
+---@param vars? table<string, string|number|boolean>
+---@return string
+function gvim.i18n.translate(key, vars) end
+---@return string the editor's locale ("en" today)
+function gvim.i18n.locale() end
+
 gvim.bit = {}
 ---@param ... integer
 ---@return integer
@@ -1104,6 +1204,15 @@ function gvim.theme.name() end
 function gvim.theme.color(key) end
 ---@return boolean
 function gvim.theme.is_dark() end
+---@return string[] the built-in theme names
+function gvim.theme.builtin_themes() end
+---@param colors table<string, string> "section.key" -> "#RRGGBB", a named color or "Default"
+---@return true|nil, string?
+function gvim.theme.override(colors) end
+---@return true|nil, string?
+function gvim.theme.clear() end
+---@return table<string, string> the session overrides in force
+function gvim.theme.overrides() end
 
 json = gvim.json
 re = gvim.re

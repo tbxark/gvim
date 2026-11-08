@@ -108,7 +108,9 @@ func New(th theme.Theme) Styles {
 }
 
 // build returns a style with the foreground from fg, the background from bg,
-// and the modifiers of the foreground value ("bold" and so on).
+// and the modifiers of both values: a theme value's attributes apply to the
+// text drawn over its color, so an attribute on a *_bg color reaches the cell
+// too.
 func build(th theme.Theme, fg, bg ref) lipgloss.Style {
 	st := lipgloss.NewStyle()
 	if fg.key != "" {
@@ -120,8 +122,11 @@ func build(th theme.Theme, fg, bg ref) lipgloss.Style {
 		}
 	}
 	if bg.key != "" {
-		if col := Color(th, bg.section, bg.key); col != nil {
-			st = st.Background(col)
+		if c, ok := th.Value(bg.section, bg.key); ok {
+			if col := toColor(c); col != nil {
+				st = st.Background(col)
+			}
+			st = modifiers(st, c.Modifiers)
 		}
 	}
 	return st
@@ -156,6 +161,20 @@ func Color(th theme.Theme, section, key string) color.Color {
 		return nil
 	}
 	return toColor(c)
+}
+
+// RenderedColor returns the color a theme value paints as: the RGB for a fixed
+// color, the ANSI palette entry for a named one, nil for the terminal default.
+func RenderedColor(c theme.Color) color.Color { return toColor(c) }
+
+// MatchesRendered reports whether c is what value paints as. The theme inspector
+// uses it to name the keys behind a frame cell.
+func MatchesRendered(c color.Color, value theme.Color) bool {
+	rendered := toColor(value)
+	if rendered == nil || c == nil {
+		return rendered == nil && c == nil
+	}
+	return rendered == c
 }
 
 // toColor converts one theme value. RGB values become opaque colors. Names

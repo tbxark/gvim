@@ -115,6 +115,13 @@ func (f *fakeTerm) SearchScrollback(query string, limit int) (matches []int, tot
 	return matches, len(f.history)
 }
 
+// SearchScrollbackMode finds the history rows that match query with the search
+// options. The fake's query is matched as plain text.
+func (f *fakeTerm) SearchScrollbackMode(query string, regex, matchCase bool, limit int) (matches []int, total int, err error) {
+	matches, total = f.SearchScrollback(query, limit)
+	return matches, total, nil
+}
+
 func (f *fakeTerm) WorkingDirectory() string { return f.cwd }
 func (f *fakeTerm) AltScreen() bool          { return f.alt }
 func (f *fakeTerm) MouseReporting() (reporting, drag, allMotion bool) {
@@ -400,10 +407,9 @@ func TestDockKeysRouteByFocus(t *testing.T) {
 			editor: []editor.Action{"insert_char"},
 		},
 		{
-			name:   "Ctrl+Space with no history falls back to terminal_escape",
-			setup:  []string{"open_terminal_in_dock"},
-			keys:   []tea.KeyPressMsg{{Code: tea.KeySpace, Mod: tea.ModCtrl}, typed("a")},
-			editor: []editor.Action{"insert_char"},
+			name:  "Ctrl+Space enters scrollback instead of the editor",
+			setup: []string{"open_terminal_in_dock"},
+			keys:  []tea.KeyPressMsg{{Code: tea.KeySpace, Mod: tea.ModCtrl}, typed("a")},
 		},
 		{
 			name:   "Alt+O gives the focus to the editor",
@@ -961,9 +967,13 @@ func TestDockKeyboardCaptureSendsBoundKeysToTheShell(t *testing.T) {
 			writes: []string{"\x00"},
 		},
 		{
-			name:   "a second F9 turns capture off, so the binding runs again",
-			keys:   []tea.KeyPressMsg{special(tea.KeyF9), special(tea.KeyF9), {Code: tea.KeySpace, Mod: tea.ModCtrl}, typed("a")},
+			name:   "a second F9 turns capture off, so the escape binding runs again",
+			keys:   []tea.KeyPressMsg{special(tea.KeyF9), special(tea.KeyF9), {Code: ']', Mod: tea.ModCtrl}, typed("a")},
 			editor: []editor.Action{"insert_char"},
+		},
+		{
+			name: "capture off, Ctrl+Space opens scrollback and the shell gets no key",
+			keys: []tea.KeyPressMsg{special(tea.KeyF9), special(tea.KeyF9), {Code: tea.KeySpace, Mod: tea.ModCtrl}, typed("a")},
 		},
 		{
 			name: "the toggle key itself is not sent to the shell",

@@ -206,6 +206,7 @@ the buffer's encoding and normalises line endings. Output is capped (8 MiB; blam
 ```text
 gvim.lsp.diagnostics(buf?) -> { {range, severity, message, source}, ... } | nil, err
 gvim.lsp.request(method, params, opts?) ⏳ -> result | nil, err      -- opts {buf = Buffer}
+gvim.lsp.all_diagnostics() -> { {path, diagnostics}, ... } | nil, err
 ```
 
 Read access to the language servers gvim runs for the user (configured in `config.json`).
@@ -217,6 +218,10 @@ Read access to the language servers gvim runs for the user (configured in `confi
   `range` has **byte columns** (the editor converts them from UTF-16); `source` is the tool
   that found it and may be absent. A buffer without a file, or one no server reported on, has none
   (an empty list). The event `diagnostics_updated` ([events.md](events.md)) says when they change.
+* `all_diagnostics()` returns the diagnostics of **every open document** a server has
+  reported on, sorted by path: an array of `{path, diagnostics}` where `diagnostics` has the
+  same rows as `diagnostics(buf)`. At most 50 000 diagnostics in all. It is the one-call form
+  for a diagnostics panel that lists every file.
 * `request(method, params, opts)` sends one request of the Language Server Protocol to the server
   that has the buffer open (`opts.buf`, default the current buffer) and returns the **decoded JSON
   result** (`nil` for `null`). `params` and the result are the protocol's own JSON, so positions are

@@ -204,9 +204,17 @@ func (s *projectSearch) ProjectReplace(req searchpanel.ReplaceRequest) (searchpa
 			out.Files = append(out.Files, fe)
 			continue
 		}
+		// The panel checks the matches it wants; a plan entry whose start is not in the
+		// checked set is left alone. No selection means the whole file.
+		selected := selectedSet(f.Selected)
 		for _, e := range plan {
 			if edits >= limit {
 				break
+			}
+			if len(selected) > 0 {
+				if _, ok := selected[[2]int{e.From.Line, e.From.Col}]; !ok {
+					continue
+				}
 			}
 			fe.Edits = append(fe.Edits, searchpanel.ReplaceEdit{
 				From: searchpanel.Position{Line: e.From.Line, Col: e.From.Col},
@@ -276,6 +284,19 @@ func readSearchableFile(path string, skipFrom int64) (string, string) {
 		return "", "non-UTF-8 file"
 	}
 	return string(data), ""
+}
+
+// selectedSet is the set of 0-based match starts a replacement is limited to; an empty
+// selection means no limiting.
+func selectedSet(positions []searchpanel.Position) map[[2]int]struct{} {
+	if len(positions) == 0 {
+		return nil
+	}
+	out := make(map[[2]int]struct{}, len(positions))
+	for _, p := range positions {
+		out[[2]int{p.Line, p.Col}] = struct{}{}
+	}
+	return out
 }
 
 // hashText is the version token a search records and a replacement verifies: an FNV-64a

@@ -12,6 +12,7 @@ package popup
 
 import (
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -63,15 +64,17 @@ type Chosen struct {
 // Popup is an anchored list. Use New to make one and Show to open it. The zero
 // value is a closed popup that draws nothing.
 type Popup struct {
-	chrome style.Overlay
-	open   bool
-	anchor Point
-	title  string
-	items  []Item
-	sel    int // the highlighted item
-	top    int // the first item shown
-	rows   int // item rows in the last draw
-	box    rect
+	chrome    style.Overlay
+	open      bool
+	anchor    Point
+	title     string
+	note      string   // a message block shown above the items (an action popup)
+	noteLines []string // the wrapped note of the last draw
+	items     []Item
+	sel       int // the highlighted item
+	top       int // the first item shown
+	rows      int // item rows in the last draw
+	box       rect
 }
 
 // rect is a block of cells: x and y are the top-left corner, w and h the size.
@@ -99,6 +102,13 @@ func (p *Popup) Show(anchor Point, title string, items []Item) {
 	p.items = slices.Clone(items)
 	p.sel, p.top, p.rows = 0, 0, 0
 	p.box = rect{}
+}
+
+// ShowNote opens the popup like Show with a message block shown above the items: the
+// message wraps to the box width and grows the box. It is the action popup's shape.
+func (p *Popup) ShowNote(anchor Point, title, note string, items []Item) {
+	p.Show(anchor, title, items)
+	p.note = note
 }
 
 // Active reports whether the popup is open.
@@ -214,7 +224,7 @@ func (p *Popup) rowAt(x, y int) (int, bool) {
 	if !b.contains(x, y) || y <= b.y || y > b.y+p.rows || x <= b.x || x >= b.x+b.w-1 {
 		return 0, false
 	}
-	i := p.top + (y - b.y - 1)
+	i := p.top + (y - b.y - 1 - len(p.noteLines))
 	if i < 0 || i >= len(p.items) {
 		return 0, false
 	}
@@ -233,16 +243,22 @@ func (p *Popup) Draw(g *grid.Grid) {
 		return
 	}
 	w, h := g.Width(), g.Height()
-	p.rows = visibleRows(len(p.items), h)
+	boxW := boxWidthNote(p.title, p.note, p.items, w)
+	p.noteLines = wrapNote(p.note, max(boxW-2*(1+space.PadX), 1))
+	p.rows = visibleRows(len(p.items), h-len(p.noteLines))
 	p.keepVisible()
-	p.box = placeBox(p.anchor, boxWidth(p.title, p.items, w), p.rows+borderRows, w, h)
+	p.box = placeBox(p.anchor, boxW, p.rows+borderRows+len(p.noteLines), w, h)
 
 	chrome := p.chrome
 	b := p.box
 	chrome.PaintBox(g, b.x, b.y, b.w, b.h, p.title)
 	inner, end := b.x+1+space.PadX, b.x+b.w-1-space.PadX
+	for i, line := range p.noteLines {
+		g.Put(inner, b.y+1+i, end, line, chrome.Box)
+	}
+	itemTop := b.y + 1 + len(p.noteLines)
 	if len(p.items) == 0 {
-		g.Put(inner, b.y+1, end, "No items", chrome.Muted)
+		g.Put(inner, itemTop, end, "No items", chrome.Muted)
 		return
 	}
 	for k := range p.rows {
@@ -250,7 +266,7 @@ func (p *Popup) Draw(g *grid.Grid) {
 		if i >= len(p.items) {
 			break
 		}
-		y := b.y + 1 + k
+		y := itemTop + k
 		st := chrome.Box
 		if i == p.sel {
 			st = chrome.Selected
@@ -274,11 +290,14 @@ func visibleRows(n, h int) int {
 	return min(max(n, 1), maxRows, max(h-borderRows, 1))
 }
 
-// boxWidth is the width of a popup box with title and items in a frame fw cells
-// wide: the widest line, a padding cell and a border on each side. The title sits on
-// the top border, after one padding cell. A box wider than the frame, less the margin
-// of space.Margin, is cut to it and the long rows end with "…".
+// boxWidth is the width of a popup box with title and items in a frame fw cells wide.
 func boxWidth(title string, items []Item, fw int) int {
+	return boxWidthNote(title, "", items, fw)
+}
+
+// boxWidthNote is boxWidth plus the width want of a note block: the note wraps, so it
+// only asks the box to be wide enough for a readable line of it (at most half the frame).
+func boxWidthNote(title, note string, items []Item, fw int) int {
 	body := 0
 	for _, it := range items {
 		n := ansi.StringWidth(it.Label)
@@ -294,7 +313,52 @@ func boxWidth(title string, items []Item, fw int) int {
 	if title != "" {
 		w = max(w, ansi.StringWidth(title)+2+4)
 	}
+	if note != "" {
+		w = max(w, min(ansi.StringWidth(note), fw/2)+2*(1+space.PadX)+2)
+	}
 	return min(max(w, minBoxWidth), max(fw-2*space.Margin(fw), minBoxWidth), fw)
+}
+
+// wrapNote word-wraps a note to width cells, one line per row. A word longer than the
+// width is broken.
+func wrapNote(note string, width int) []string {
+	note = strings.TrimSpace(note)
+	if note == "" || width <= 0 {
+		return nil
+	}
+	var lines []string
+	for _, para := range strings.Split(note, "\n") {
+		words := strings.Fields(para)
+		if len(words) == 0 {
+			lines = append(lines, "")
+			continue
+		}
+		line := ""
+		for _, word := range words {
+			for ansi.StringWidth(word) > width {
+				if line != "" {
+					lines = append(lines, line)
+					line = ""
+				}
+				head := ansi.Truncate(word, width, "")
+				lines = append(lines, head)
+				word = word[len(head):]
+			}
+			switch {
+			case line == "":
+				line = word
+			case ansi.StringWidth(line)+1+ansi.StringWidth(word) <= width:
+				line += " " + word
+			default:
+				lines = append(lines, line)
+				line = word
+			}
+		}
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }
 
 // placeBox places a w by h box for a popup anchored at anchor in a fw by fh frame.

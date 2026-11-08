@@ -113,6 +113,38 @@ type Model struct {
 	scroll        int // index of the first row shown, when the rows do not fit the frame
 	sub           subMenu
 	mnemonics     bool // underline each label's accelerator letter (editor.menu_bar_mnemonics)
+	// themeChoices are the themes the Copy with Formatting submenu lists, set by
+	// the root when the theme changes.
+	themeChoices []ThemeChoice
+	// pluginRows are the rows plugins contributed to the menus (plugin API tier 1a), set by
+	// the root from the plugin host's registrations.
+	pluginRows []PluginRow
+}
+
+// ThemeChoice is one row of the Copy with Formatting submenu.
+type ThemeChoice struct {
+	Name string // the label
+	Ref  string // the config theme value the row copies with
+}
+
+// WithThemeChoices sets the themes the dynamic submenus list.
+func (m Model) WithThemeChoices(choices []ThemeChoice) Model {
+	m.themeChoices = choices
+	return m
+}
+
+// PluginRow is one row a plugin added to a menu bar dropdown.
+type PluginRow struct {
+	Menu, Label, Action string
+	Checkbox, When      string
+	After, Before       string
+}
+
+// WithPluginRows sets the rows plugins contributed to the menus. They are inserted into the
+// dropdown when it opens, so a row added while a menu is open appears the next time it opens.
+func (m Model) WithPluginRows(rows []PluginRow) Model {
+	m.pluginRows = slices.Clone(rows)
+	return m
 }
 
 // subMenu is the open submenu of a row: the row it hangs from, its highlighted
@@ -447,7 +479,8 @@ func (m Model) openTitle(title string) Model {
 	if title == moreTitle {
 		m.rows = m.overflowRows()
 	} else {
-		m.rows = dropdownRows(title, m.holds, m.keyOf())
+		m.rows = dropdownRows(title, m.holds, m.keyOf(), m.themeChoices)
+		m.rows = insertPluginRows(m.rows, title, m.pluginRows, m.holds)
 	}
 	m.scroll, m.sub = 0, subMenu{}
 	m.selected = stepIn(m.rows, -1, 1)

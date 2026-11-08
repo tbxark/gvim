@@ -64,6 +64,10 @@ type Model struct {
 	panes  editorpane.Styles
 	now    func() time.Time
 	theme  theme.Theme
+	// themeRef is the portable config value of the active theme, and
+	// themeOverrides are the session color overrides layered over it.
+	themeRef       string
+	themeOverrides map[string]string
 
 	// The palette's sources. The commands always have a table, and files and
 	// ranker are nil when Deps leaves them out.
@@ -97,6 +101,7 @@ type Model struct {
 	toc               tocState
 	divider           dividerState
 	chord             []KeyPress // the first keys of a multi-key binding, waiting for the next
+	clockArmed        bool       // a {clock} redraw tick is in flight (see clockCmd)
 	dialogs           Dialogs    // the file dialogs; nil disables them
 	// hideMenuBar comes from Deps and stays put. hideLineNumbers starts from
 	// Deps and is flipped by toggle_line_numbers.
@@ -208,6 +213,8 @@ func New(deps Deps) *Model {
 		panes:           editorpane.NewStyles(deps.Theme),
 		now:             now,
 		theme:           deps.Theme,
+		themeRef:        deps.ThemeRef,
+		themeOverrides:  map[string]string{},
 		commands:        cmds,
 		recents:         deps.Recents,
 		hideMenuBar:     deps.HideMenuBar,
@@ -215,13 +222,16 @@ func New(deps Deps) *Model {
 		tabSize:         deps.TabSize,
 		notice:          deps.Notice,
 		splits:          newSplitSet(),
-		util:            utilities{settings: deps.Settings, settingsPort: deps.SettingsPort, switchKeymap: deps.SwitchKeymap},
+		util:            utilities{settings: deps.Settings, settingsPort: deps.SettingsPort, themeCatalog: deps.ThemeCatalog, switchKeymap: deps.SwitchKeymap},
 		root:            rootState{ports: deps.Root},
 		trust:           newTrustState(deps.Trust),
 		lsp:             lspState{port: deps.LSP},
 		view:            newViewState(viewOptionsOf(deps.View)),
 	}
 	m.view.languages = deps.Languages
+	// The inlay-hints toggle starts from the configured display option; the Toggle
+	// Inlay Hints command flips it for the rest of the session.
+	m.lsp.inlay = m.view.opts.EnableInlayHints
 	m.dock = dockNewPanel(m)
 	m.notes.sink = deps.NoticeSink
 	m.notes.record("", deps.Notice)
@@ -263,6 +273,7 @@ func New(deps Deps) *Model {
 	}
 	m.installRowMapper()
 	m.plug = newPluginState(m, deps.Root)
+	m.plug.panels = pluginPanels{}
 	// An undecided workspace that can execute code asks for the decision before
 	// the first frame, as Fresh's open-time trust prompt does.
 	m.startTrustPrompt()
@@ -330,7 +341,7 @@ func (m *Model) Close() {
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit())
+	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd())
 }
 
 // Update implements tea.Model. It runs update, then keeps the split panes on tabs
@@ -341,6 +352,11 @@ func (m *Model) Init() tea.Cmd {
 // marker changes neither, so it is not undone here. The viewport is not re-synced on
 // every message, because the editor moves it to the caret.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(clockTickMsg); ok {
+		// A {clock} tick only asks for the next frame (the clock is read while the
+		// status row is built) and arms the tick for the minute after it.
+		return m, m.clockCmd()
+	}
 	active, count, rows := m.activeTab(), len(m.ed.Tabs()), m.bodyRows()
 	activePath := m.activeFilePath()
 	at, top := m.caretNow(), m.viewTop()
@@ -400,6 +416,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if now := m.activeFilePath(); now != activePath {
 		cmd = tea.Batch(cmd, m.followActiveBuffer())
 	}
+	// A {clock} tick is re-armed whenever the row is visible and configured but no
+	// tick is in flight: the first frame, after an overlay hid the row, or after a
+	// runtime config change added the element. clockCmd is idempotent per tick.
+	if !m.clockArmed {
+		cmd = tea.Batch(cmd, m.clockCmd())
+	}
 	cmd = tea.Batch(cmd, m.pluginViewTail(snap))
 	return next, cmd
 }
@@ -434,6 +456,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if _, isKey := msg.(tea.KeyPressMsg); isKey && (barWasOpen || m.findOpen()) {
 			m.revealCaret()
 		}
+		return m, cmd
+	}
+	// A mounted widget panel with the keyboard takes the keys before the plugin key
+	// layers and the editor keymap.
+	if cmd, ok := m.pluginPanelKey(msg); ok {
 		return m, cmd
 	}
 	if cmd, ok := m.pluginMessage(msg); ok {
@@ -492,10 +519,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if onBand {
 			break
 		}
+		if panelCmd, taken := m.pluginPanelMouse(msg); taken {
+			cmd = panelCmd
+			break
+		}
 		cmd = m.handleClick(msg)
 		m.rebaseFind()
 	case tea.MouseMotionMsg:
-		if dockCmd, taken := m.dockMouse(msg, msg.Y); taken {
+		if panelCmd, taken := m.pluginPanelMouse(msg); taken {
+			cmd = panelCmd
+		} else if dockCmd, taken := m.dockMouse(msg, msg.Y, 1); taken {
 			cmd = dockCmd
 		} else {
 			cmd = tea.Batch(m.handleDrag(msg.Mouse()), m.explorerMouse(msg))
@@ -509,7 +542,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dropTab(td)
 		}
 		m.releaseDivider()
-		if dockCmd, taken := m.dockMouse(msg, msg.Y); taken {
+		if dockCmd, taken := m.dockMouse(msg, msg.Y, 1); taken {
 			cmd = dockCmd
 		} else {
 			cmd = m.explorerMouse(msg)
@@ -517,7 +550,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		// Scrolling is navigation, so a message ends with it as it does with a key or a click.
 		m.expireStatus()
-		cmd = m.handleWheel(msg)
+		if panelCmd, taken := m.pluginPanelMouse(msg); taken {
+			cmd = panelCmd
+		} else {
+			cmd = m.handleWheel(msg)
+		}
 	case dialog.Result:
 		cmd = m.dialogDone(msg)
 	case menubar.Failed:
@@ -602,6 +639,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.askProjectReplace(msg.Request)
 	case searchpanel.OpenMsg:
 		cmd = m.projectJump(msg)
+	case searchpanel.ExportMsg:
+		cmd = m.openProjectResultsList()
 	case projectReplaceDoneMsg:
 		cmd = m.projectReplaceDone(msg)
 	}
@@ -1771,9 +1810,15 @@ func (m *Model) explorerGeometry(l layout) expanel.Geometry {
 // are dropped here.
 func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	mo := tea.Mouse(msg)
+	// A left press may be a double or a triple click; the dock's word/line
+	// selection and the editor's word/line selection both read the count once.
+	count := 0
+	if mo.Button == tea.MouseLeft {
+		count = m.clicks.press(m.now(), mo.X, mo.Y)
+	}
 	// The dock's rows belong to the shell: the dock decides whether the press is
 	// forwarded, opens a link, scrolls the scrollback or only takes the focus.
-	if cmd, taken := m.dockMouse(msg, mo.Y); taken {
+	if cmd, taken := m.dockMouse(msg, mo.Y, count); taken {
 		return cmd
 	}
 	t := m.layout().Hit(mo.X, mo.Y)
@@ -1784,12 +1829,17 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		return nil
 	}
 	if mo.Button == tea.MouseRight {
+		// Ctrl+Right-click inspects the theme colors at the clicked cell; a plain
+		// right click opens the context menu.
+		if mo.Mod&tea.ModCtrl != 0 {
+			m.inspectThemeAt(mo.X, mo.Y)
+			return nil
+		}
 		return m.rightClick(msg)
 	}
 	if mo.Button != tea.MouseLeft {
 		return nil
 	}
-	count := m.clicks.press(m.now(), mo.X, mo.Y)
 	m.noteMods(mo)
 	m.drag = drag{}
 	switch t.Kind {
@@ -2000,7 +2050,7 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	mo := tea.Mouse(msg)
 	l := m.layout()
-	if cmd, taken := m.dockMouse(msg, mo.Y); taken {
+	if cmd, taken := m.dockMouse(msg, mo.Y, 1); taken {
 		return cmd
 	}
 	if mo.Y == l.StripY && mo.X >= l.EditorX {
@@ -2305,6 +2355,7 @@ func (m *Model) statusView() statusView {
 	if doc := m.ed.Active(); doc != nil {
 		line, col := virtualPosition(doc)
 		s.Position = "Ln " + strconv.Itoa(line+1) + ", Col " + strconv.Itoa(col+1)
+		s.Filename, s.FilenameModified = m.statusFilename(doc), doc.Modified()
 		s.Line, s.Col = line+1, col+1
 		s.Lines = displayLines(doc)
 		s.Large = largeLabel(doc)
@@ -2320,6 +2371,8 @@ func (m *Model) statusView() statusView {
 	}
 	m.viewStatus(&s)
 	s.PaletteHint = m.paletteHint()
+	s.Clock = m.now().Format(clockFormat)
+	s.Chord = m.statusChord()
 	s.Extra = m.plugStatusItems()
 	return s
 }
@@ -2442,9 +2495,10 @@ func (m *Model) paint() *grid.Grid {
 		for y := l.MenuTop; y <= l.MenuBottom; y++ {
 			g.Fill(0, g.Width(), y, band)
 		}
-		m.menu = m.menu.SetRow(l.MenuLabelY)
+		m.menu = m.menu.SetRow(l.MenuLabelY).WithPluginRows(m.plugMenuRows())
 		m.menu.Paint(g)
 	}
+	m.paintPluginPanels(g, l)
 	for _, o := range m.overlays {
 		o.Draw(g)
 	}
@@ -2484,6 +2538,11 @@ func (m *Model) caret() (x, y int, ok bool) {
 		return 0, 0, false
 	}
 	if m.explorerFocus || m.contentsFocus {
+		return 0, 0, false
+	}
+	// A mounted widget panel with the keyboard owns it: the editor caret under the panel
+	// must not show.
+	if m.plug.panels.focus != 0 {
 		return 0, 0, false
 	}
 	if m.dockKeyboard() {
@@ -2586,12 +2645,18 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 		warning.FG = fg
 	}
 	warning.Bold = true
+	// A muted run, such as the pending {chord} sequence, keeps the bar's colours
+	// and turns faint: a secondary value beside the rest of the row.
+	muted := bar
+	muted.Faint = true
 	g.Fill(0, g.Width(), l.StatusY, bar)
 	for _, r := range l.Status {
 		st := bar
 		switch {
 		case r.Style == frame.StyleWarning:
 			st = warning
+		case r.Style == frame.StyleMuted:
+			st = muted
 		case r.Kind == hitStatusPalette:
 			st = palette
 		}

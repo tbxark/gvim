@@ -22,6 +22,11 @@ type HeaderSpec struct {
 	Several bool
 	// Collapsed points the chevron right (▶) instead of down (▼).
 	Collapsed bool
+	// Title overrides the kind's title (a plugin section names itself). Empty = the
+	// native title of the kind.
+	Title string
+	// NoClose hides the close button: a plugin section that is not closable has none.
+	NoClose bool
 }
 
 // Header is one section's header row: its text, exactly width cells, and the
@@ -58,12 +63,17 @@ func HeaderFor(width int, m icons.Mode, spec HeaderSpec) Header {
 		head.WriteString(m.Glyph(chevron))
 		head.WriteString(" ")
 	}
-	switch spec.Kind {
-	case KindContents:
-		head.WriteString("Contents ")
-	default:
-		head.WriteString("File Explorer ")
+	title := spec.Title
+	if title == "" {
+		switch spec.Kind {
+		case KindContents:
+			title = "Contents"
+		default:
+			title = "File Explorer"
+		}
 	}
+	head.WriteString(title)
+	head.WriteString(" ")
 	headText := head.String()
 	headWidth := ansi.StringWidth(headText)
 	reload, closeGlyph := m.Glyph(icons.Refresh), m.Glyph(icons.Close)
@@ -91,6 +101,16 @@ func HeaderFor(width int, m icons.Mode, spec HeaderSpec) Header {
 		if width >= headWidth+3 {
 			h.Close = h.Reload + 2
 		}
+		return h
+	}
+
+	// A plugin section that cannot be closed has no ×: the rule runs to the corner.
+	if spec.NoClose {
+		if width <= headWidth {
+			h.Text = ansi.Truncate(headText, max(width, 0), "")
+			return h
+		}
+		h.Text = headText + strings.Repeat("─", width-headWidth-1) + string(right)
 		return h
 	}
 

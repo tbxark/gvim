@@ -123,6 +123,35 @@ func (s *FakeServer) ExecuteCommand(ctx context.Context, p *protocol.ExecuteComm
 	return s.Canned.ExecuteCommandResult, nil
 }
 
+// Diagnostic records the params and answers with the canned server-pulled
+// diagnostics: a full report, or "unchanged" when Canned.PullUnchanged is set.
+func (s *FakeServer) Diagnostic(ctx context.Context, p *protocol.DocumentDiagnosticParams) (protocol.DocumentDiagnosticReport, error) {
+	RecordTo[any](s.Requests, p)
+	s.park(ctx)
+	if s.Canned.Fail {
+		return nil, ErrRefused
+	}
+	resultID := s.Canned.PullResultID
+	if s.Canned.PullUnchanged {
+		return &protocol.RelatedUnchangedDocumentDiagnosticReport{
+			UnchangedDocumentDiagnosticReport: protocol.UnchangedDocumentDiagnosticReport{
+				Kind:     string(protocol.DocumentDiagnosticReportKindUnchanged),
+				ResultID: resultID,
+			},
+		}, nil
+	}
+	report := &protocol.RelatedFullDocumentDiagnosticReport{
+		FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
+			Kind:  string(protocol.DocumentDiagnosticReportKindFull),
+			Items: s.Canned.PullItems,
+		},
+	}
+	if resultID != "" {
+		report.ResultID = &resultID
+	}
+	return report, nil
+}
+
 // InlayHint records the params and answers with Canned.InlayHints.
 func (s *FakeServer) InlayHint(ctx context.Context, p *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
 	RecordTo[any](s.Requests, p)

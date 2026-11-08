@@ -1,6 +1,7 @@
 package plugintest
 
 import (
+	"sort"
 	"strconv"
 
 	"github.com/tbxark/gvim/pluginapi"
@@ -57,6 +58,23 @@ func (f *FakeHost) Diagnostics(id pluginapi.BufferID) ([]pluginapi.DiagnosticInf
 		return nil, bufClosedErr(id)
 	}
 	return append([]pluginapi.DiagnosticInfo(nil), l.Diags[id]...), nil
+}
+
+// AllDiagnostics returns the diagnostics of every buffer that has some, by path, sorted.
+func (f *FakeHost) AllDiagnostics() ([]pluginapi.FileDiagnostics, error) {
+	f.rec("AllDiagnostics")
+	l := f.LSP()
+	if !l.Enabled {
+		return nil, pluginapi.Errf(pluginapi.CodeUnsupported, "no language server is configured")
+	}
+	var out []pluginapi.FileDiagnostics
+	for _, b := range f.Buffers {
+		if items := l.Diags[b.Info.ID]; len(items) > 0 {
+			out = append(out, pluginapi.FileDiagnostics{Path: b.Info.Path, Diagnostics: append([]pluginapi.DiagnosticInfo(nil), items...)})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
 }
 
 // LSPRequest records the request; CompleteLSP answers it.

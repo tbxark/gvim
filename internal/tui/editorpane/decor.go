@@ -90,7 +90,7 @@ func (f frame) paintRulers(g *grid.Grid) {
 				continue
 			}
 			st := c.Style
-			st.BG = f.styles.Ruler.BG
+			st = withBackground(st, f.styles.Ruler)
 			g.Set(x, y, c.Text, st)
 		}
 	}
