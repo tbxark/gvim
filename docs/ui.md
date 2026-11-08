@@ -282,7 +282,7 @@ Fresh's `StatusBarElement::try_from` rejects it.
 | `{palette}` | "Palette: Ctrl+P", or the chord of the active keymap; click opens the command palette |
 | `{clock}` | the local time as 24-hour zero-padded "HH:MM", Fresh's `chrono` format ("{:02}:{:02}") read from the model's clock when the row is built. A minute tick redraws the row while the element is configured and visible, so an idle editor still shows the new minute; a config change that adds it takes effect at the next launch (the row is not live-edited this round). The checked-out Fresh reference renders a static colon although its docs mention a blinking one; gvim matches the code. |
 | `{warnings}` | nothing: gvim has no general-warning domain (Fresh's `[⚠ N]` counts its tracing warnings). gvim's equivalent list is Show Warnings, which keeps every notice, so a count of it would never reach zero. |
-| `{update}` | nothing: gvim has no update checker |
+| `{update}` | Fresh's "Update: vX.Y.Z" when the startup release check found a newer version (`check_for_updates`, `docs/settings.md`); hidden otherwise. Informational: gvim has no self-update, so the element is not clickable. |
 | `{plugin:token}` | nothing: gvim plugins contribute status items, not registered tokens (below) |
 
 **Plugin items.** `gvim.ui.statusbar.item` items are placed by anchor, so they survive

@@ -47,6 +47,7 @@ internal/                       private executable shell (no top-level package i
   workspace/ explorer/ finder/ fuzzy/ fsops/ gitstate/
   config/ keymap/ theme/
   trust/ (workspace trust: levels, decision store, policy, executable-content scan, the spawn gate DecideSpawn)
+  updatecheck/ (the release check behind the status row element {update})
   lsp/ (+lsp/manager, lsp/lsptest) pluginapi/ plugin/ (+hostos, bundled, plugintest,
   pattern) commands/
 ```
@@ -167,6 +168,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins, and the top-level `locale`. | `hujson`. The project layer is skipped when `Options.Untrusted` is set (workspace trust; see docs/trust.md); a project `locale` is refused (a user preference). |
 | `i18n` | Translation layer: embedded English catalogue, `T`/`TN` with `%{name}` interpolation, CLDR plurals, locale resolution (`auto` from the environment or a configured code) and the plugin runtime's locale. | Leaf, stdlib only; embedded locale JSON in `i18n/locales/` (English source of truth, Fresh import); see `docs/i18n.md`. |
 | `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy, executable-content marker scan and the spawn gate (`DecideSpawn`, docs/trust.md §3.1). | TUI-free; store at `config.Dir()/trust.json` through `atomicfile`; the app gates the config project layer on the level and wires the same live level into the authority, plugin OS and LSP manager spawn paths. |
+| `updatecheck` | The release check behind the status element `{update}`: feed fetch with a transport policy (https, or http on loopback), version comparison (semver-ish, prereleases), a 64 KiB body/8 s bound and a daily debounce stamp. | Leaf, stdlib only; the app runs it in a `tea.Cmd` at startup and the frame paints `Update: vX.Y.Z`; gvim has no self-update (docs/settings.md). |
 | `keymap` | Embedded presets, chord parsing and canonicalization, resolve, user overrides. | Data files `keymap/*.json`. |
 | `theme` | Theme data (colors, syntax keys) from embedded JSON. | Data files `theme/data/*.json`. |
 | `lsp` | Pure-Go LSP client/protocol layer: JSON-RPC, transport, positions, requests, diagnostics, signature help. | |
@@ -516,14 +518,60 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   remote workspace instead of silently searching the local project, the palette file
   preview is cleared, and the local git-status adapter is replaced by an inert one: local
   git must not look up remote paths), and the remote workspace's plugin/agent project root
-  still comes from the local process root. Project search and replace, the search-results
-  list and next/previous match, plus Git Grep, are refused with a remote-specific notice
-  and their local ports are cleared: those ports read and write local files, and a remote
-  launch must never search or replace local files for remote paths (remote wiring through
-  the authority is a follow-up). The remote ~/~user root is expanded by the
-  remote shell; authority.QuoteDir keeps the tilde word expandable and quotes only the
-  tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is not a tilde expansion in
-  sh/bash.
+  still comes from the local process root. Project Search and Git Grep now run on the
+  remote host through the same authority one-shot surface (the spawn/trust gate applies),
+  in the session's remote captured environment delta (`env.Remote`; the local overlay is
+  never forwarded, and the same delta drives the remote terminal, LSP and git grep):
+  the search probes the host for rg then grep (a missing tool is a clear "no search tool
+  on the remote host" notice, never a local fallback), runs with the remote workspace cwd
+  without a shell, streams whole-file batches (the panel's cancel channel cancels the
+  remote command and the stream closes without a Done batch), caps matches and flags
+  truncation, and validates the query locally before any remote run. Git Grep resolves the
+  repository remotely (git rev-parse --show-toplevel), then runs git grep -n --column in
+  the remote repo root and returns absolute remote paths, so a hit opens through the
+  remote document access; the local git state is never consulted. Project Replace stays
+  refused with a remote-specific notice: a safe remote replace needs verified remote
+  reads/writes and one backup/atomic strategy. Remaining remote gaps: the current-file and
+  open-buffers search scopes and the panel preview column are not wired. The remote
+  ~/~user root is expanded by the remote shell; authority.QuoteDir keeps the tilde word
+  expandable and quotes only the tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is
+  not a tilde expansion in sh/bash.
+- **Read-only remote explorer (landed).** A remote launch now shows the remote workspace tree
+  in the explorer: a lazy, read-only `tui.RemoteExplorerTree` over a `RemoteDirLoader` port
+  (app adapter `authorityDirLoader`) lists each directory through `authority.Files().ReadDir`,
+  with no local filesystem fallback. Every listing runs in a command, never on the update loop;
+  the command's message carries a generation and the root drops it when a newer reload or the
+  tree changed (stale-response protection), keeps the expansion of directories that remain and
+  prunes entries the remote side removed. The workspace trust gate (`authGate`) runs before any
+  listing; a disconnected authority is the explicit `remote workspace is disconnected; activate
+  the window to reconnect` notice and the tree keeps its cached rows until the existing
+  authority-reconnect path reloads it. Listings are bounded (5000 entries per directory, the
+  authority's own cap, over it a clear error naming the directory), hidden entries are filtered
+  by the explorer's show-hidden toggle, ordering matches the local tree (directories first,
+  natural, case-insensitive), and a trailing slash-free remote root is shown as given. Opening
+  a file uses the existing row->`OpenFileMsg` path and therefore the remote `FileAccess`
+  (save/revert already route to the authority). The tree is read-only: the local file-operation
+  adapter is cleared for a remote launch, the panel refuses new-file/new-directory/rename/
+  delete/cut/paste with one explicit notice, and the explorer context menu keeps only the path
+  copies; the local project opener, preview, project search/replace and git-status ports stay
+  refused/replaced as before. Reveal/follow and re-expansion of unloaded ancestors work by
+  reloading the waypoint directories and revealing the path in the new listing. Gaps vs
+  Fresh's remote explorer (which runs the full file tree over the authority): remote
+  rename/delete/create, drag/move and cut/copy/paste are not wired, remote .gitignore filtering
+  is not implemented (the toggle is a no-op and no entry is marked ignored), remote git marks
+  stay inert, the tree is not watched for remote directory changes (the file watch covers open
+  documents' directories only), a directory symlink is shown as a directory (its target is
+  listed through the symlink path), and the refresh/again cadence is request-driven rather than
+  backed by a remote directory watcher; Windows clients still share the root's `filepath`
+  assumptions for remote POSIX paths. Tests: `internal/tui/remote_tree_test.go` (lazy
+  expand/no-read-before-command, natural order, hidden filter, stale toggle drop,
+  prune/keep-expansion, error+retry, reveal waypoints, read-only/hidden capabilities) and
+  `remote_tree_model_test.go` (Update does no remote read; initial load and reconnect reload
+  run in commands; disconnected notice keeps rows), `internal/tui/explorer/async_test.go`
+  (async toggle is a command and the read-only refusals/notices), and
+  `internal/app/remote_explorer_test.go` (UTF-16-independent entry mapping, trust gate before
+  reads, disconnected refusal, remote-only listing with a local decoy present, 5000-entry
+  clear error).
 - **Split persistence (landed).** The workspace file's `Layout` (the embedded
   `session.Session`) also carries the editor's pane split tree as an optional
   `layout` object: inner nodes direction/ratio, leaves file index + path and per-pane
@@ -580,10 +628,34 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   Per-workspace plugin runtimes are kept materialized per workspace (memory for
   isolation): only materialized workspaces cost a runtime; the registry keeps the rest as
   descriptors.
+- **Extract tab to a new workspace (first slice, landed).** The tab context menu's
+  "Extract to New Workspace" (and the palette row "Extract tab to new workspace") moves the
+  active file tab out of the daemon's workspace. Fresh moves a tab into a *co-tenant*
+  workspace over the same project root; registry v1 keeps one workspace per canonical root,
+  so this slice roots the new workspace at the **file's folder** instead: the UI goroutine
+  captures the tab (path, cursor/top, page-view flags, virtual column, unsaved text) and
+  returns a command; the command canonicalizes the folder (disk work stays off Update),
+  refuses a folder that is already the current root or any registered workspace with a
+  clear notice while the tab stays open, then creates the workspace, writes its session
+  JSON with the tab's `FileState` and a stash of the unsaved text, sets the registry layout, and
+  marshals back to the UI goroutine to force-close the source tab and switch (the
+  materialization itself stays async). The report is "Extracted <name> into workspace
+  <label>"; a failure before that close leaves the tab and its text open and reports why.
+  The close-workspace flow asks first when the workspace still runs terminals: the
+  confirmation lists every one of them and its agent (the dock's `RunningTabs` snapshot), and
+  the close report and protocol close answer say exactly what was stopped; a dormant close
+  reports that nothing was stopped. Rename reports the new label on the status row (the
+  protocol answer stays the list only). Fresh's separate diff_nav plugin is unrelated; the
+  per-tab "Extract to New Workspace" item also appears in Fresh's tab context menu.
 - **Remainder of #19a (not shipped).** A remote workspace's `authority_spec` field (registry
   v1 has no authority), the initial terminal-launch record in a workspace descriptor (the
   discovery Import can create a workspace but not attach an argv to it yet), shared
   buffers/daemon-level open-path map beyond the switch-to-existing-workspace rule (#19b),
   a workspace switcher that shows live runtime details (the list shows label/root/state
   only), and making the capture write itself cancellable/ordered under a slow disk beyond
-  the quit wait. The round-12 daemon still hosts exactly one attached client.
+  the quit wait. The extract first slice leaves these open: co-tenant workspaces over one
+  root (Fresh's model for the extracted tab), extracting into an existing workspace,
+  terminal-tab extraction (Fresh moves the live PTY; gvim's dock tabs cannot be extracted
+  yet), large-file overlay extraction, extracting more than the active tab at once, and the
+  cross-workspace shared-buffer model (#19b). The round-12 daemon still hosts exactly one
+  attached client.

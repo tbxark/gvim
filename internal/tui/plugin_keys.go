@@ -529,6 +529,21 @@ var pluginExtraKeys = map[rune]string{
 	tea.KeyKpEnter: "enter",
 }
 
+// keyEventData is the payload of the key_release event: the same key shape as a
+// plugin key capture, as plain data. A release only exists when the terminal
+// backend reports one.
+func keyEventData(k tea.Key) map[string]any {
+	pk := pluginKeyOf(k)
+	data := map[string]any{
+		"key": pk.Key, "ctrl": pk.Ctrl, "alt": pk.Alt,
+		"shift": pk.Shift, "super": pk.Super,
+	}
+	if pk.Text != "" {
+		data["text"] = pk.Text
+	}
+	return data
+}
+
 // pluginKeyOf converts a key press to the Key a plugin sees.
 func pluginKeyOf(k tea.Key) pluginapi.Key {
 	kp, text := translateKey(k)

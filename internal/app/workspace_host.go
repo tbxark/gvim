@@ -77,6 +77,9 @@ type workspaceManager struct {
 	captureWriterGate func()
 	// lastNotice is the last failure reported to the user (test/observability).
 	lastNotice string
+	// lastReport is the last successful workspace action report (a close that stopped
+	// running terminals, an extraction), carried to the socket protocol's close answer.
+	lastReport string
 	now        func() time.Time
 }
 
@@ -484,6 +487,11 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 	var job *saveJob
 	var prepareErr error
 	var sess *workspaceSession
+	// closeLabel and running are read on the UI goroutine, before anything is closed, so
+	// the close report names exactly what its processes were.
+	var closeLabel string
+	var running []tui.WorkspaceRunningTerminal
+	var wasMaterialized bool
 	if !m.runOnUI(func() {
 		m.mu.Lock()
 		active := m.active
@@ -522,6 +530,9 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 			}
 		}
 		if materialized {
+			wasMaterialized = true
+			closeLabel = sess.ws.File.Label
+			running = sess.rt.model.RunningTerminals()
 			// Snapshot on the UI goroutine (it reads the editor state) and queue it: the
 			// write is awaited below, before rt.exit's synchronous save.
 			job = m.enqueueCapture(sess)
@@ -572,6 +583,14 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 	if err := m.reg.Remove(id); err != nil {
 		return err
 	}
+	switch {
+	case len(running) > 0:
+		m.report(fmt.Sprintf("Closed workspace %q; stopped %s", closeLabel, runningTerminalSummary(running)))
+	case !wasMaterialized:
+		// A dormant workspace has no runtime and no processes: report the cheap close
+		// so the action is not silent.
+		m.report("Closed a dormant workspace")
+	}
 	return persistErr
 }
 
@@ -595,6 +614,7 @@ func (m *workspaceManager) Rename(id, label string) error {
 			sess.rt.model.SetWorkspaceLabel(ws.File.Label)
 		})
 	}
+	m.notifyText(fmt.Sprintf("Renamed workspace to %q", ws.File.Label))
 	return nil
 }
 
@@ -668,6 +688,10 @@ func (m *workspaceManager) handleRequest(req daemon.WorkspaceRequest) daemon.Wor
 			res.Notice = err.Error()
 			return res
 		}
+		res := m.listResult()
+		// The close reports exactly what it stopped through the same protocol answer.
+		res.Notice = m.takeReport()
+		return res
 	case req.Rename != nil:
 		if err := m.Rename(req.Rename.ID, req.Rename.Label); err != nil {
 			res := m.listResult()

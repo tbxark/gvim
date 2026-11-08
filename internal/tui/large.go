@@ -672,7 +672,7 @@ func (m *Model) afterLargeFind(h findHost, match search.Match, found, scanned bo
 		m.revealCaretCentered()
 		m.notice = ""
 		if forward == match.Start.Less(from) {
-			m.notice = "Search wrapped"
+			m.notice = uiText("gvim.notice.search.wrapped", "Search wrapped")
 		}
 	}
 }

@@ -50,17 +50,7 @@ func (g gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, err
 	if limit <= 0 {
 		limit = 100
 	}
-	argv := []string{"git", "-c", "core.quotePath=false", "grep", "-n", "--column", "-I"}
-	if !req.CaseSensitive {
-		argv = append(argv, "-i")
-	}
-	argv = append(argv, "-e", req.Query)
-	if len(req.Pathspecs) > 0 {
-		// The patterns are git pathspecs, so they go after the separator and are never
-		// read as options.
-		argv = append(argv, "--")
-		argv = append(argv, req.Pathspecs...)
-	}
+	argv := gitGrepArgv(req)
 	var extraEnv []string
 	if g.spawnEnv != nil {
 		extraEnv = g.spawnEnv()
@@ -82,6 +72,31 @@ func (g gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, err
 	if code == 1 || text == "" {
 		return out, nil
 	}
+	return parseGitGrepOutput(text, limit, len([]rune(req.Query)), func(rel string) string {
+		return filepath.Join(root, filepath.FromSlash(rel))
+	}), nil
+}
+
+// gitGrepArgv builds the git grep command line for req: arguments are passed as argv (no
+// shell), pathspecs go after "--" so they are never read as options.
+func gitGrepArgv(req searchpanel.GitRequest) []string {
+	argv := []string{"git", "-c", "core.quotePath=false", "grep", "-n", "--column", "-I"}
+	if !req.CaseSensitive {
+		argv = append(argv, "-i")
+	}
+	argv = append(argv, "-e", req.Query)
+	if len(req.Pathspecs) > 0 {
+		argv = append(argv, "--")
+		argv = append(argv, req.Pathspecs...)
+	}
+	return argv
+}
+
+// parseGitGrepOutput parses git grep -n --column output into whole-file matches, at most
+// limit matches. abs maps a repo-relative path (as git prints it) to the path the editor
+// opens; Name stays the repo-relative path. Both the local and remote adapters share it.
+func parseGitGrepOutput(text string, limit, matchLen int, abs func(rel string) string) searchpanel.GitResult {
+	var out searchpanel.GitResult
 	byPath := map[string]int{}
 	total := 0
 	for _, line := range strings.Split(text, "\n") {
@@ -102,19 +117,16 @@ func (g gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, err
 		if !ok {
 			idx = len(out.Files)
 			byPath[rel] = idx
-			out.Files = append(out.Files, searchpanel.FileMatches{
-				Path: filepath.Join(root, filepath.FromSlash(rel)),
-				Name: rel,
-			})
+			out.Files = append(out.Files, searchpanel.FileMatches{Path: abs(rel), Name: rel})
 		}
 		content := strings.TrimRight(m[4], "\r")
 		out.Files[idx].Matches = append(out.Files[idx].Matches, searchpanel.Match{
 			Line: lineNo,
 			Col:  col,
-			Len:  len([]rune(req.Query)),
+			Len:  matchLen,
 			Text: content,
 		})
 		total++
 	}
-	return out, nil
+	return out
 }

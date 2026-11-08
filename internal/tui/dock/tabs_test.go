@@ -484,9 +484,10 @@ func TestTabsMoveActiveReordersKeepsSessionsAndPersistence(t *testing.T) {
 	}
 	restored, _ := newTestTabs(t, &notices)
 	restored.Restore(st)
-	// A restored tab is read-only/dead, so its label keeps the exited marker; the
-	// saved order and active index are what the reorder had to preserve.
-	if strings.Join(restored.TabNames(), ",") != "alpha (exited),gamma (exited),beta (exited)" || restored.ActiveIndex() != 1 {
+	// The saved tabs were live at the capture, so their restored labels carry no
+	// exited marker (they are dormant, not exited); the saved order and active index
+	// are what the reorder had to preserve.
+	if strings.Join(restored.TabNames(), ",") != "alpha,gamma,beta" || restored.ActiveIndex() != 1 {
 		t.Fatalf("restored order = %q active %d", restored.TabNames(), restored.ActiveIndex())
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,11 +48,39 @@ type SSHOptions struct {
 	// auth. The callback may prompt the user.
 	Password func(ctx context.Context) (string, error)
 	// Passphrase supplies the passphrase of an encrypted identity file; nil skips the file.
+	// A callback returning ErrNeedsPassphrase records the request and lets the UI prompt.
 	Passphrase func(ctx context.Context, path string) (string, error)
+	// KeyboardInteractive answers a keyboard-interactive challenge (2FA). A callback
+	// returning ErrNeedsKeyboardInteractive records the challenge for the UI prompt.
+	KeyboardInteractive func(ctx context.Context, name, instruction string, questions []string, echos []bool) ([]string, error)
 	// KnownHostsPath is the known_hosts file; empty uses ~/.ssh/known_hosts.
 	KnownHostsPath string
 	// HostKeyCallback overrides the known_hosts check (tests).
 	HostKeyCallback ssh.HostKeyCallback
+}
+
+// The interactive-auth sentinels are returned by the UI-facing callbacks when the
+// credential needs the user: the backend records the request and the app prompts on the
+// next activation/background retry. They are never dial errors.
+var (
+	ErrNeedsPassphrase          = errors.New("ssh: identity file passphrase needed")
+	ErrNeedsKeyboardInteractive = errors.New("ssh: keyboard-interactive authentication needs input")
+)
+
+// Keepalive bounds. The ping is an SSH global request; a failed or unanswered ping marks
+// the carrier down before the next user operation notices, so a silent NAT/idle drop
+// becomes the disconnected status instead of a hung file read.
+var (
+	keepaliveInterval = 30 * time.Second
+	keepaliveTimeout  = 10 * time.Second
+)
+
+// KeyboardPrompt is a keyboard-interactive challenge (2FA): the name/instruction the
+// server sent and its questions (each with whether the answer is echoed).
+type KeyboardPrompt struct {
+	Name, Instruction string
+	Questions         []string
+	Echos             []bool
 }
 
 // sshBackend is the mounted remote state, process surfaces and terminal wrapper.
@@ -68,6 +97,18 @@ type sshBackend struct {
 	// needsPassword is set when the last dial failed because no non-interactive
 	// credential was accepted, so the UI should ask for a password.
 	needsPassword bool
+	// passphrase is the secret the UI supplied for the encrypted identity, and
+	// needsPassphrase says the UI must ask for one.
+	passphrase      string
+	needsPassphrase bool
+	// keyboardChallenge is the pending keyboard-interactive challenge (2FA) and
+	// keyboardAnswers the answers the UI supplied for the next dial.
+	keyboardChallenge *KeyboardPrompt
+	keyboardAnswers   []string
+	// connecting is true while a dial runs, for the status row.
+	connecting bool
+	// keepaliveStop stops the current keepalive loop; nil when none runs.
+	keepaliveStop chan struct{}
 }
 
 // ConnectSSH dials the remote and mounts an authority slot over it.
@@ -186,25 +227,94 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 
 // connect establishes the carrier (first dial or reconnect).
 func (b *sshBackend) connect(ctx context.Context) error {
+	b.mu.Lock()
+	b.connecting = true
+	b.mu.Unlock()
 	client, err := b.dial(ctx)
 	if err != nil {
 		b.mu.Lock()
-		b.connected, b.reason = false, err.Error()
+		b.connected, b.reason, b.connecting = false, err.Error(), false
 		lower := strings.ToLower(err.Error())
 		b.needsPassword = strings.Contains(lower, "unable to authenticate") ||
 			strings.Contains(lower, "no authentication method") ||
 			strings.Contains(lower, "password")
+		if errors.Is(err, ErrNeedsPassphrase) {
+			b.needsPassphrase = true
+		}
 		b.mu.Unlock()
 		return err
 	}
 	b.mu.Lock()
 	old := b.client
-	b.client, b.connected, b.reason, b.needsPassword = client, true, "", false
+	b.client, b.connected, b.reason, b.connecting = client, true, "", false
+	b.needsPassword, b.needsPassphrase = false, false
+	b.keyboardChallenge = nil
 	b.mu.Unlock()
 	if old != nil {
 		_ = old.Close()
 	}
+	b.startKeepalive(client)
 	return nil
+}
+
+// startKeepalive starts the periodic info ping of the live carrier, replacing a previous
+// loop. The loop marks the backend disconnected when a ping fails or times out, so the
+// status row turns disconnected (and the retry loop reconnects) before the next user
+// operation hangs on a dead NAT mapping.
+func (b *sshBackend) startKeepalive(client *ssh.Client) {
+	stop := make(chan struct{})
+	b.mu.Lock()
+	old := b.keepaliveStop
+	b.keepaliveStop = stop
+	b.mu.Unlock()
+	if old != nil {
+		close(old)
+	}
+	go b.keepaliveLoop(client, stop)
+}
+
+// stopKeepalive stops the current loop, if any.
+func (b *sshBackend) stopKeepalive() {
+	b.mu.Lock()
+	stop := b.keepaliveStop
+	b.keepaliveStop = nil
+	b.mu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
+}
+
+// keepaliveLoop pings the server until stop or a failed ping.
+func (b *sshBackend) keepaliveLoop(client *ssh.Client, stop <-chan struct{}) {
+	ticker := time.NewTicker(keepaliveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+		}
+		if err := b.ping(client); err != nil {
+			b.markDown(fmt.Errorf("keepalive failed: %w", err))
+			_ = client.Close()
+			return
+		}
+	}
+}
+
+// ping sends one keepalive global request, bounded by keepaliveTimeout.
+func (b *sshBackend) ping(client *ssh.Client) error {
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(keepaliveTimeout):
+		return errors.New("keepalive timed out")
+	}
 }
 
 // hostKeyCallback resolves the host-key check: injected, known_hosts, or a clear error
@@ -233,7 +343,9 @@ func (b *sshBackend) hostKeyCallback() (ssh.HostKeyCallback, error) {
 	}, nil
 }
 
-// authMethods builds the authentication order: agent, identity files, password.
+// authMethods builds the authentication order: agent, identity files (a stored
+// passphrase first, then the UI callback), a stored/prompted password, and
+// keyboard-interactive challenges (2FA).
 func (b *sshBackend) authMethods(ctx context.Context) ([]ssh.AuthMethod, error) {
 	var methods []ssh.AuthMethod
 	if !b.opts.DisableAgent {
@@ -250,10 +362,27 @@ func (b *sshBackend) authMethods(ctx context.Context) ([]ssh.AuthMethod, error) 
 			files = existingIdentityFiles(filepath.Join(home, ".ssh"))
 		}
 	}
+	passphrase := func(ctx context.Context, path string) (string, error) {
+		b.mu.Lock()
+		stored := b.passphrase
+		b.mu.Unlock()
+		if stored != "" {
+			return stored, nil
+		}
+		if b.opts.Passphrase != nil {
+			return b.opts.Passphrase(ctx, path)
+		}
+		return "", ErrNeedsPassphrase
+	}
 	var signers []ssh.Signer
 	for _, path := range files {
-		signer, err := parseIdentity(path, b.opts.Passphrase, ctx)
+		signer, err := parseIdentity(path, passphrase, ctx)
 		if err != nil {
+			if errors.Is(err, ErrNeedsPassphrase) {
+				b.mu.Lock()
+				b.needsPassphrase = true
+				b.mu.Unlock()
+			}
 			if len(b.opts.IdentityFiles) > 0 {
 				return nil, err
 			}
@@ -266,6 +395,7 @@ func (b *sshBackend) authMethods(ctx context.Context) ([]ssh.AuthMethod, error) 
 	}
 	b.mu.Lock()
 	stored := b.password
+	hasChallenge := b.keyboardChallenge != nil
 	b.mu.Unlock()
 	if stored != "" {
 		methods = append(methods, ssh.Password(stored))
@@ -273,10 +403,92 @@ func (b *sshBackend) authMethods(ctx context.Context) ([]ssh.AuthMethod, error) 
 	if b.opts.Password != nil {
 		methods = append(methods, ssh.PasswordCallback(func() (string, error) { return b.opts.Password(ctx) }))
 	}
+	if b.opts.KeyboardInteractive != nil || hasChallenge {
+		methods = append(methods, ssh.KeyboardInteractive(b.keyboardAuth(ctx)))
+	}
 	if len(methods) == 0 {
-		return nil, errors.New("ssh: no authentication method (no agent, no usable identity file, no password callback)")
+		return nil, errors.New("ssh: no authentication method (no agent, no usable identity file, no password callback, no keyboard-interactive callback)")
 	}
 	return methods, nil
+}
+
+// keyboardAuth returns the keyboard-interactive authentication method: stored answers
+// from the UI are used once, then the app callback, and a callback that needs input
+// records the challenge so the app can prompt for it.
+func (b *sshBackend) keyboardAuth(ctx context.Context) func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+	return func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+		b.mu.Lock()
+		answers := b.keyboardAnswers
+		b.keyboardAnswers = nil
+		b.mu.Unlock()
+		if answers != nil {
+			return answers, nil
+		}
+		prompt := &KeyboardPrompt{Name: name, Instruction: instruction, Questions: append([]string(nil), questions...), Echos: append([]bool(nil), echos...)}
+		if b.opts.KeyboardInteractive != nil {
+			answers, err := b.opts.KeyboardInteractive(ctx, name, instruction, questions, echos)
+			if err == nil {
+				return answers, nil
+			}
+			if errors.Is(err, ErrNeedsKeyboardInteractive) {
+				b.mu.Lock()
+				b.keyboardChallenge = prompt
+				b.mu.Unlock()
+			}
+			return nil, err
+		}
+		b.mu.Lock()
+		b.keyboardChallenge = prompt
+		b.mu.Unlock()
+		return nil, ErrNeedsKeyboardInteractive
+	}
+}
+
+// Connecting reports whether a dial is in progress (the status row shows it).
+func (b *sshBackend) Connecting() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.connecting && !b.connected
+}
+
+// NeedsPassphrase reports whether the last dial needs an encrypted identity's passphrase.
+func (b *sshBackend) NeedsPassphrase() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.needsPassphrase && !b.connected
+}
+
+// ReconnectWithPassphrase stores the passphrase and redials (the UI prompt path).
+func (b *sshBackend) ReconnectWithPassphrase(ctx context.Context, passphrase string) error {
+	b.mu.Lock()
+	b.passphrase = passphrase
+	b.mu.Unlock()
+	return b.Reconnect(ctx)
+}
+
+// NeedsKeyboardInteractive reports whether the last dial needs a 2FA challenge answered.
+func (b *sshBackend) NeedsKeyboardInteractive() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.keyboardChallenge != nil && !b.connected
+}
+
+// KeyboardInteractiveChallenge returns the pending 2FA challenge.
+func (b *sshBackend) KeyboardInteractiveChallenge() (KeyboardPrompt, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.keyboardChallenge == nil {
+		return KeyboardPrompt{}, false
+	}
+	return *b.keyboardChallenge, true
+}
+
+// ReconnectWithAnswers stores the 2FA answers and redials (the UI prompt path).
+func (b *sshBackend) ReconnectWithAnswers(ctx context.Context, answers []string) error {
+	b.mu.Lock()
+	b.keyboardAnswers = append([]string(nil), answers...)
+	b.mu.Unlock()
+	return b.Reconnect(ctx)
 }
 
 // existingIdentityFiles lists the usual private keys that exist.
@@ -337,6 +549,7 @@ func (b *sshBackend) Reconnect(ctx context.Context) error {
 	old := b.client
 	b.client, b.connected, b.reason = nil, false, "reconnecting"
 	b.mu.Unlock()
+	b.stopKeepalive()
 	if old != nil {
 		_ = old.Close()
 	}
@@ -354,6 +567,7 @@ func (b *sshBackend) Close() error {
 	old := b.client
 	b.client = nil
 	b.mu.Unlock()
+	b.stopKeepalive()
 	if old != nil {
 		return old.Close()
 	}
@@ -489,6 +703,12 @@ func (b *sshBackend) Launch(ctx context.Context, o TerminalOptions) (TerminalLau
 		return TerminalLaunch{}, err
 	}
 	cmd := remoteLoginCommand(o.Dir)
+	if envCmd := remoteLoginCommandEnv(o.Dir, o.Env); envCmd != "" {
+		// The terminal's remote environment delta (captured on the remote host by the
+		// session's env provider) rides as data on the remote login command, so the
+		// shell starts in the project environment. No local environment is involved.
+		cmd = envCmd
+	}
 	if err := sess.Start(cmd); err != nil {
 		_ = sess.Close()
 		_ = pw.Close()
@@ -507,6 +727,42 @@ func remoteLoginCommand(dir string) string {
 		return shell
 	}
 	return "cd " + QuoteDir(dir) + " && " + shell
+}
+
+// remoteLoginCommandEnv is remoteLoginCommand with the session environment delta applied as
+// an env K=V prefix on the remote login shell (the remote host's SHELL, expanded there).
+// Keys are sorted and every entry ShellQuote'd, so values travel as data; malformed entries
+// and an empty delta return "" (the caller keeps the plain login command).
+func remoteLoginCommandEnv(dir string, env []string) string {
+	values := make(map[string]string, len(env))
+	for _, kv := range env {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			continue
+		}
+		values[k] = v
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("env")
+	for _, k := range keys {
+		b.WriteByte(' ')
+		b.WriteString(ShellQuote(k + "=" + values[k]))
+	}
+	// No exec here: env is the program; it execs the remote login shell itself.
+	b.WriteString(" \"$" + "{SHELL:-/bin/sh}\" -l")
+	cmd := b.String()
+	if dir == "" {
+		return cmd
+	}
+	return "cd " + QuoteDir(dir) + " && " + cmd
 }
 
 // sshProc is one long-running stdio child over an ssh session.

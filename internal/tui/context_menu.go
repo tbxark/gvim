@@ -72,7 +72,7 @@ func (m *Model) contextChosen(c ctxmenu.Chosen) tea.Cmd {
 func (m *Model) tabMenuItems(i int) []ctxmenu.Item {
 	tabs := m.ed.Tabs()
 	hasPath := i >= 0 && i < len(tabs) && tabs[i].Path != ""
-	return []ctxmenu.Item{
+	items := []ctxmenu.Item{
 		{Label: "Close", Action: "tab_close", Data: i},
 		{Label: "Close Others", Action: "tab_close_others", Data: i, Disabled: len(tabs) < 2},
 		{Label: "Close to the Right", Action: "tab_close_right", Data: i, Disabled: i >= len(tabs)-1},
@@ -82,6 +82,14 @@ func (m *Model) tabMenuItems(i int) []ctxmenu.Item {
 		{Label: "Copy Relative Path", Action: "tab_copy_relative_path", Data: i, Disabled: !hasPath},
 		{Label: "Copy Full Path", Action: "tab_copy_full_path", Data: i, Disabled: !hasPath},
 	}
+	if m.workspace != nil {
+		if _, ok := m.workspace.(workspaceExtractPort); ok {
+			// Fresh's tab context menu item (tab.extract_to_new_workspace).
+			items = append(items, ctxmenu.Item{Separator: true},
+				ctxmenu.Item{Label: "Extract to New Workspace", Action: "tab_extract_workspace", Data: i, Disabled: !hasPath})
+		}
+	}
+	return items
 }
 
 // plusMenuItems are the rows of the "+" button's menu, as Fresh's: a new terminal, and
@@ -125,6 +133,13 @@ func (m *Model) tabMenuAction(action string, i int) tea.Cmd {
 		return m.setClipboard(m.relativePath(tabs[i].Path))
 	case "tab_copy_full_path":
 		return m.setClipboard(tabs[i].Path)
+	case "tab_extract_workspace":
+		// The workspace layer extracts the active tab, so make this the active one first.
+		if tp := m.tabPort(); tp != nil {
+			tp.ActivateTab(i)
+			m.syncViewport()
+		}
+		return m.extractWorkspaceTab()
 	}
 	m.closeTabs(targets)
 	return nil
@@ -198,7 +213,12 @@ func (m *Model) explorerContextMenu(mo tea.Mouse, l layout) tea.Cmd {
 		return nil
 	}
 	m.takeExplorerFocus()
-	m.showContextMenu(mo, m.explorerMenuItems(target))
+	items := m.explorerMenuItems(target)
+	if len(items) == 0 {
+		m.notice = expanel.ErrReadOnlyTree.Error()
+		return nil
+	}
+	m.showContextMenu(mo, items)
 	return nil
 }
 
@@ -207,6 +227,19 @@ func (m *Model) explorerContextMenu(mo tea.Mouse, l layout) tea.Cmd {
 // trashes them all after one question.
 func (m *Model) explorerMenuItems(target expanel.ContextTarget) []ctxmenu.Item {
 	paths := target.Paths
+	if m.explorerReadOnly() {
+		// A read-only tree (the remote workspace) has no creation, rename, delete,
+		// cut, paste or duplicate entries. Copying a path is a local string operation
+		// and stays.
+		if len(paths) == 0 {
+			return nil
+		}
+		return []ctxmenu.Item{
+			{Label: "Copy", Action: explorerMenuPrefix + "copy", Data: paths},
+			{Label: "Copy Full Path", Action: explorerMenuPrefix + "copy_full_path", Data: paths},
+			{Label: "Copy Relative Path", Action: explorerMenuPrefix + "copy_relative_path", Data: paths},
+		}
+	}
 	row := func(label, action string) ctxmenu.Item {
 		return ctxmenu.Item{Label: label, Action: explorerMenuPrefix + action, Data: paths}
 	}
@@ -228,6 +261,13 @@ func (m *Model) explorerMenuItems(target expanel.ContextTarget) []ctxmenu.Item {
 		row("Delete", "file_explorer_delete"), row("Duplicate", "duplicate"), rule,
 		row("Copy Full Path", "copy_full_path"), row("Copy Relative Path", "copy_relative_path"),
 	)
+}
+
+// explorerReadOnly reports whether the explorer tree refuses file operations (the
+// read-only remote tree).
+func (m *Model) explorerReadOnly() bool {
+	ro, ok := m.tree.(interface{ ReadOnly() bool })
+	return ok && ro.ReadOnly()
 }
 
 // explorerMenuPrefix starts the action of a row of the explorer menu. The rest is an

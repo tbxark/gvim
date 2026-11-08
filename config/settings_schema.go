@@ -94,6 +94,7 @@ const (
 	SectionDisplay    = "Display"
 	SectionWhitespace = "Whitespace"
 	SectionEditing    = "Editing"
+	SectionCompletion = "Completion"
 	SectionSearch     = "Search"
 	SectionExplorer   = "Explorer"
 	SectionContents   = "Contents"
@@ -249,6 +250,20 @@ var settingsTable = []Setting{
 	{Path: []string{"editor", "auto_read_only"}, Section: SectionEditing, Kind: SettingBool,
 		Layers: LayerUser | LayerProject, Apply: ApplyRestart,
 		value: boolValue(func(c Config) bool { return c.AutoReadOnly }), encode: encodeBool},
+
+	// Completion.
+	{Path: []string{"editor", "completion_popup_auto_show"}, Section: SectionCompletion, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.CompletionPopupAutoShow }), encode: encodeBool},
+	{Path: []string{"editor", "quick_suggestions"}, Section: SectionCompletion, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.QuickSuggestions }), encode: encodeBool},
+	{Path: []string{"editor", "quick_suggestions_delay_ms"}, Section: SectionCompletion, Kind: SettingInt, Min: 0,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: intValue(func(c Config) int { return c.QuickSuggestionsDelayMS }), encode: encodeInt(0, 0)},
+	{Path: []string{"editor", "suggest_on_trigger_characters"}, Section: SectionCompletion, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.SuggestOnTriggerCharacters }), encode: encodeBool},
 
 	// Search.
 	{Path: []string{"editor", "search", "case_sensitive"}, Section: SectionSearch, Kind: SettingBool,

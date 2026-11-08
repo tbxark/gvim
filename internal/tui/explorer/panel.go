@@ -7,11 +7,13 @@
 // The panel is a pane, not an overlay. The root holds it as a value, calls
 // Update for mouse messages, Action for the explorer key actions, and Draw to
 // paint. Geometry comes from the root's layout on every call, so the hit map
-// and the paint cannot drift apart. Update does no file IO, except the directory
-// toggle, which reads one directory as the tree does on every expand.
+// and the paint cannot drift apart. Update does no file IO: a local tree reads one
+// directory synchronously when it is expanded, and an async tree (the remote one)
+// returns a command that reads it instead.
 package explorer
 
 import (
+	"errors"
 	"image/color"
 	"slices"
 	"time"
@@ -39,6 +41,43 @@ type Tree interface {
 	ShowIgnored() bool
 	SetShowIgnored(v bool)
 }
+
+// AsyncToggleTree is a Tree whose directory listing cannot run on the update loop (the
+// remote tree: every listing is remote I/O). ToggleCmd returns the command that lists
+// and opens path; the root applies its message. A tree without it toggles synchronously,
+// as the local tree does.
+type AsyncToggleTree interface {
+	ToggleCmd(path string) tea.Cmd
+}
+
+// ReadOnlyTree is a Tree whose directory cannot be changed from the editor. The panel
+// refuses the file-operation actions and their messages with one explicit notice.
+type ReadOnlyTree interface {
+	ReadOnly() bool
+}
+
+// ErrReadOnlyTree is the notice of a file operation on a read-only tree.
+var ErrReadOnlyTree = errors.New("remote file explorer is read-only: remote file operations are not available yet")
+
+// toggleCmd toggles path: in a command for an async tree, synchronously otherwise.
+func (p Panel) toggleCmd(path string) tea.Cmd {
+	if at, ok := p.tree.(AsyncToggleTree); ok {
+		return at.ToggleCmd(path)
+	}
+	if err := p.tree.Toggle(path); err != nil {
+		return emit(ErrorMsg{Err: err})
+	}
+	return nil
+}
+
+// readOnly reports whether the tree refuses file operations.
+func (p Panel) readOnly() bool {
+	ro, ok := p.tree.(ReadOnlyTree)
+	return ok && ro.ReadOnly()
+}
+
+// refuseReadOnly returns the notice command for a file operation on a read-only tree.
+func refuseReadOnly() tea.Cmd { return emit(ErrorMsg{Err: ErrReadOnlyTree}) }
 
 // Geometry is the panel's place in the frame. The root takes it from the layout:
 // X is the panel's first column, Width the layout's explorer width, Top the title
@@ -174,6 +213,12 @@ func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 	if p.tree == nil {
 		return p, nil, false
 	}
+	if p.readOnly() {
+		switch action {
+		case "file_explorer_new_file", "file_explorer_new_directory", "file_explorer_rename", "file_explorer_delete", "cut", "paste":
+			return p, refuseReadOnly(), true
+		}
+	}
 	var cmd tea.Cmd
 	switch action {
 	case "file_explorer_new_file":
@@ -210,9 +255,9 @@ func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 	case "file_explorer_open":
 		cmd = p.openSelected()
 	case "file_explorer_expand":
-		p.expand()
+		cmd = p.expand()
 	case "file_explorer_collapse":
-		p.collapse()
+		cmd = p.collapse()
 	case "file_explorer_refresh":
 		return p, emit(ReloadMsg{}), true
 	case "file_explorer_toggle_select":
@@ -553,6 +598,9 @@ func (p Panel) rowPress(row, n int) (Panel, tea.Cmd) {
 		if n != 1 {
 			return p, emit(FocusMsg{})
 		}
+		if at, ok := p.tree.(AsyncToggleTree); ok {
+			return p, tea.Batch(at.ToggleCmd(r.Path), emit(FocusMsg{}))
+		}
 		if err := p.tree.Toggle(r.Path); err != nil {
 			return p, emit(ErrorMsg{Err: err})
 		}
@@ -630,37 +678,35 @@ func (p Panel) openSelected() tea.Cmd {
 		return nil
 	}
 	if sel.IsDir {
-		if err := p.tree.Toggle(sel.Path); err != nil {
-			return emit(ErrorMsg{Err: err})
-		}
-		return nil
+		return p.toggleCmd(sel.Path)
 	}
 	return emit(OpenFileMsg{Path: sel.Path})
 }
 
 // expand opens a collapsed directory. Other rows are left alone.
-func (p Panel) expand() {
+func (p Panel) expand() tea.Cmd {
 	if sel, ok := p.tree.Selected(); ok && sel.IsDir && !sel.Expanded {
-		_ = p.tree.Toggle(sel.Path)
+		return p.toggleCmd(sel.Path)
 	}
+	return nil
 }
 
 // collapse closes an open directory. On any other row it selects the parent
 // directory, the nearest row above with one level less of depth.
-func (p Panel) collapse() {
+func (p Panel) collapse() tea.Cmd {
 	sel, ok := p.tree.Selected()
 	if !ok {
-		return
+		return nil
 	}
 	if sel.IsDir && sel.Expanded {
-		_ = p.tree.Toggle(sel.Path)
-		return
+		return p.toggleCmd(sel.Path)
 	}
 	rows := p.tree.Rows()
 	cur := slices.IndexFunc(rows, func(r tree.Row) bool { return r.Path == sel.Path })
 	if cur >= 0 && rows[cur].Parent >= 0 {
 		p.selectIndex(rows, rows[cur].Parent)
 	}
+	return nil
 }
 
 // selectIndex selects the row at idx of rows, which are the visible rows.

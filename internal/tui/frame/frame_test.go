@@ -565,12 +565,12 @@ func TestStatusRowElementsShowTheirState(t *testing.T) {
 	if len(runs) != 1 || runs[0].Kind != HitStatusSegment || runs[0].Index != StatusSegmentMessages {
 		t.Errorf("messages run = %+v, want a clickable message segment", runs)
 	}
-	// The elements gvim parses but does not paint render nothing: {warnings},
-	// {update} and plugin tokens. ({filename}, {chord} and {clock} paint now; see
-	// TestStatusRowResidualElements.)
+	// The elements gvim parses but does not paint render nothing: {warnings} and
+	// plugin tokens. ({filename}, {chord}, {clock} and {update} paint now; see
+	// TestStatusRowResidualElements and TestStatusUpdateElement.)
 	hidden := base
-	hidden.Row = row(StatusElementWarnings, StatusElementUpdate, StatusElementCustom)
-	hidden.Row.Left[2].Key = "plugin:token"
+	hidden.Row = row(StatusElementWarnings, StatusElementCustom)
+	hidden.Row.Left[1].Key = "plugin:token"
 	if got := text(hidden); got != "" {
 		t.Errorf("hidden elements paint %q, want nothing", got)
 	}

@@ -21,9 +21,9 @@ var _ Overlay = (*ConfirmTrash)(nil)
 // back in the Result.
 func NewConfirmTrash(clock Clock, name string, tag any, ov style.Overlay) *ConfirmTrash {
 	d := &ConfirmTrash{name: name}
-	d.setup(clock, "Confirm Delete", tag, ChoiceCancel, []button{
-		newButton("Move to Trash", 8, ChoiceMoveToTrash),
-		newButton("Cancel", 0, ChoiceCancel),
+	d.setup(clock, dialogText("gvim.dialog.title.confirm_delete", "Confirm Delete"), tag, ChoiceCancel, []button{
+		newButton(dialogText("gvim.dialog.button.move_to_trash", "Move to Trash"), 8, ChoiceMoveToTrash),
+		newButton(dialogText("gvim.dialog.button.cancel", "Cancel"), 0, ChoiceCancel),
 	}, ov)
 	d.focus = 1
 	return d
@@ -36,5 +36,5 @@ func (d *ConfirmTrash) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 
 // Draw paints the dialog. See Overlay.
 func (d *ConfirmTrash) Draw(g *grid.Grid) {
-	d.drawText(g, `Move "`+d.name+`" to Trash?`)
+	d.drawText(g, dialogTextVars("gvim.dialog.trash_confirm", "Move \"%{name}\" to Trash?", map[string]any{"name": d.name}))
 }

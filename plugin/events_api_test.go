@@ -65,6 +65,7 @@ gvim.on("theme_changed", function(e) T.spy("two", e.mine) end)`)
 		{"unknown event raises", `local ok, err = pcall(gvim.on, "no_such_event", function() end) T.spy(ok, tostring(err):match("unknown event") or err)`, "false unknown event"},
 		{"unknown event raises for once", `T.spy((pcall(gvim.once, "cursor_moveed", function() end)))`, "false"},
 		{"plugin events are accepted", `T.spy(gvim.on("git:status", function() end) ~= nil)`, "true"},
+		{"input-platform events are accepted", `T.spy(gvim.on("chrome_focus_changed", function() end) ~= nil, gvim.on("key_release", function() end) ~= nil)`, "true true"},
 		{"bad plugin event name raises", `T.spy((pcall(gvim.on, "Git:Status", function() end)))`, "false"},
 		{"handler must be a function", `T.spy((pcall(gvim.on, "ready", "x")))`, "false"},
 		{"opts.buf must be a Buffer", `T.spy((pcall(gvim.on, "ready", function() end, { buf = 1 })))`, "false"},

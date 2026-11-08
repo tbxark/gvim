@@ -65,9 +65,9 @@ func (m *modal) listRows() []row {
 	l := m.list
 	l.keepVisible()
 	l.rects = l.rects[:0]
-	rows := []row{textRow("Recent folders", m.ov.Muted)}
+	rows := []row{textRow(dialogText("gvim.dialog.recent_folders", "Recent folders"), m.ov.Muted)}
 	if len(l.items) == 0 {
-		return append(rows, textRow("No recent folders", m.ov.Muted))
+		return append(rows, textRow(dialogText("gvim.dialog.no_recent_folders", "No recent folders"), m.ov.Muted))
 	}
 	for k := range min(listSize, len(l.items)-l.top) {
 		idx := l.top + k

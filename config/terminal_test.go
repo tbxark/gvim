@@ -20,6 +20,7 @@ func TestTerminalDefaults(t *testing.T) {
 		MouseDragSelects:     true,
 		PassCtrlVWithoutText: true,
 		ResumeAgents:         true,
+		RestoreLive:          true,
 	}
 	if !reflect.DeepEqual(cfg.Terminal, want) {
 		t.Fatalf("Terminal = %+v, want %+v", cfg.Terminal, want)
@@ -284,5 +285,32 @@ func TestTerminalAgentsProjectLayerRefused(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("diagnostics = %v, want the project agents refusal", diags)
+	}
+}
+
+// TestTerminalRestoreLive checks terminal.restore_live, the gvim extension that
+// gates reviving a live-at-capture tab on the user's first dive after a restore.
+// It defaults to true (Fresh restores live terminals Live) and is user-layer only:
+// a repository must not make gvim start processes on restore.
+func TestTerminalRestoreLive(t *testing.T) {
+	t.Parallel()
+	if !DefaultTerminalOptions().RestoreLive {
+		t.Fatal("restore_live does not default to true")
+	}
+	cfg, diags := loadBody(t, `{"terminal": {"restore_live": false}}`)
+	if len(diags) != 0 || cfg.Terminal.RestoreLive {
+		t.Fatalf("restore_live = %v, diags %v", cfg.Terminal.RestoreLive, diags)
+	}
+	if _, diags := loadBody(t, `{"terminal": {"restore_live": "yes"}}`); len(diags) != 1 || diags[0].Key != "terminal.restore_live" {
+		t.Fatalf("invalid restore_live diagnostics = %v", diags)
+	}
+	// The project layer cannot turn process-starting on restore on, but the user
+	// layer can turn it off.
+	cfg, diags = loadLayers(t, `{"terminal": {"restore_live": false}}`, `{"terminal": {"restore_live": true}}`)
+	if len(diags) != 1 || !strings.Contains(diags[0].Key, "terminal.restore_live") || !strings.Contains(diags[0].Message, "project config cannot set terminal.restore_live") {
+		t.Fatalf("project restore_live diagnostics = %v", diags)
+	}
+	if cfg.Terminal.RestoreLive {
+		t.Fatal("the project layer's restore_live reached the config")
 	}
 }

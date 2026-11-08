@@ -198,7 +198,7 @@ Main page keys:
 | Ctrl+E | close the page and open that layer's raw config file in a tab |
 | Esc | close the page; with pending changes it asks first |
 
-**Labels.** Every scalar settings row and section label is extracted into the i18n catalogue (`gvim.settings.field.*`/`gvim.settings.section.*`); the two rows Fresh names (`editor.auto_close`, `editor.whitespace_show`) are mapped to Fresh's `settings.field.*` keys, so a non-English locale shows Fresh's translated label for them while the others keep their English schema name until a translation pass. Values, keys, pending/reset and layer behaviour are unchanged; structured sub-page labels are not extracted yet. See [i18n.md](i18n.md).
+**Labels.** Every scalar settings row and section label is extracted into the i18n catalogue (`gvim.settings.field.*`/`gvim.settings.section.*`); the two rows Fresh names (`editor.auto_close`, `editor.whitespace_show`) are mapped to Fresh's `settings.field.*` keys, so a non-English locale shows Fresh's translated label for them while the others keep their English schema name until a translation pass. Values, keys, pending/reset and layer behaviour are unchanged. Structured sub-pages (Languages/LSP/Plugins/Keybindings/Formatters/Status Bar/Shell Arguments/Environment detectors) have their page titles, add-row labels and notes extracted too (`gvim.settings.page.*`/`.add.*`/`.note.*` plus the Languages section parts); their field/row names stay schema identifiers, and there is no translation pass for the gvim-only settings keys yet, so translated locales show the English labels. See [i18n.md](i18n.md).
 
 **Theme preview.** The `theme` row carries a four-chip preview: editor background, editor foreground, gvim's accent (`ui.accent_bg/fg`) and Fresh's popup selection (`ui.popup_selection_bg/fg`), resolved from the catalogue by the app (cached when the service is built and on every Reload, so the page never reads a theme file on the update loop). The footer names the chips (`swatches: bg · fg · accent · popup`); the preview follows the effective theme after Save/Reload. The row's value and pending/reset behaviour are unchanged, and a URL/packaged ref still fails validation with the loader's clear refusal.
 
@@ -278,7 +278,10 @@ service and the root:
 - the root applies the display options (tab bar, status bar, prompt line,
   scrollbars, line numbers, line wrap, current-line/occurrence/column
   highlights, whitespace, cursor style, indent guides, rainbow brackets, smooth
-  scroll, mouse wheel/double-click/hover delays, search defaults, explorer
+  scroll, mouse wheel/double-click/hover delays, the Completion section
+  (editor.completion_popup_auto_show, editor.quick_suggestions,
+  editor.quick_suggestions_delay_ms, editor.suggest_on_trigger_characters),
+  search defaults, explorer
   hidden/ignored, menu-bar mnemonics, show menu bar), the status-bar element
   lists and separator, the file-explorer options (width, side, follow, auto-open,
   compact directories), the theme, the keymap and the icon set, rebuilding the
@@ -362,6 +365,23 @@ short list of deliberate decisions rather than unfinished paths:
   Command-line flags still win over the file for the running editor.
 - **Fresh's generic widget runtime** (dual-list drag and drop, map-entry dialogs with nested
   fields) is not ported; the page has the native widgets its settings need.
+- **The release check is config-only** (`check_for_updates`, and the gvim extension
+  `update_check_url`), with no Settings-page row: it is a network preference, not a display or
+  editing option. It is user-layer only (the project layer is refused with a diagnostic) and it
+  gates Fresh's `{update}` status element (see `docs/ui.md`). `self_update` is accepted and
+  ignored: gvim does not download or install releases, so the element only reports the version.
+
+### The release check
+
+`check_for_updates` (default `true`, Fresh's default) makes one bounded request to the release
+feed at startup and paints "Update: vX.Y.Z" in the `{update}` status element when a newer
+release is published. The feed is `update_check_url`, else the `GVIM_RELEASES_URL` environment
+override, else the built-in GitHub releases feed. The transport policy is https, or plain http
+on the loopback interface for a local mirror; any other override is refused (the check then
+simply does nothing). A successful check is remembered for a day in
+`<config dir>/update-check.json`, so launches do not poll; a failed check, or a build with no
+version, is silent and never blocks startup. gvim has no self-update: the indicator names the
+release and its release page, and upgrading stays the package manager's or the user's job.
 
 The read-only Settings list remains as the fallback when the app wires no `SettingsPort` (the
 TUI in a test, or a host without a config directory): it lists the effective settings and
@@ -439,7 +459,12 @@ start/restart/stop actions).
 Settings > Environment shows the process/workspace facts (shell, TERM, root, config
 files) and, when the app wired a project-environment provider, three project rows:
 the detected environment (detector name and kind, or "none"), the active environment
-(the applied name, or "system") and the trust level that gates activation. The
+(the applied name, or "system") and the trust level that gates activation.
+
+In a REMOTE workspace the provider is `env.Remote`: the markers are probed and the
+recipe activated on the remote host through the authority, so these rows describe the remote
+environment (after the background warm), and `Env: Activate` runs its snippet there. The
+local overlay is never forwarded to the remote host; see docs/authority.md §2/§7. The
 **Detectors** page lists the resolved `env.detectors` (built-in or user list) with
 kind, markers and require evidence; it is read-only this round — edit
 `env.detectors` in the user config JSON to replace the built-in list (a project

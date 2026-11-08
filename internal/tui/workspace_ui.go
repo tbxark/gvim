@@ -6,8 +6,11 @@ package tui
 // exist and the status row says nothing about workspaces.
 
 import (
+	"fmt"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -24,6 +27,63 @@ type WorkspaceEntry struct {
 	Root         string
 	Materialized bool
 	Active       bool
+}
+
+// WorkspaceRunningTerminal is one running terminal tab of a workspace: the tab's name and,
+// for an agent tab, the configured agent it runs (empty for a plain shell). The close
+// workspace flow lists them in its confirmation and in the close report, so killing a
+// workspace's processes is never a surprise.
+type WorkspaceRunningTerminal struct {
+	Name  string
+	Agent string
+}
+
+// workspaceExtractPort is the optional extract action of the workspace layer: move the
+// active tab into a new workspace (its own file's folder). A port without it (an older
+// app, a test fake) simply has no extract row.
+type workspaceExtractPort interface {
+	ExtractTab() (WorkspaceCmd, error)
+}
+
+// workspaceRunningPort is the optional running-terminal surface of the workspace layer:
+// which terminals closing id would stop. A port without it closes without asking, as
+// before (a direct launch has no workspace layer at all).
+type workspaceRunningPort interface {
+	RunningTerminals(id string) []WorkspaceRunningTerminal
+}
+
+// RunningTerminals lists this model's running dock terminals, in tab order, for the
+// workspace close confirmation and report. The app calls it on the UI goroutine.
+func (m *Model) RunningTerminals() []WorkspaceRunningTerminal {
+	running := m.dock.RunningTabs()
+	out := make([]WorkspaceRunningTerminal, 0, len(running))
+	for _, r := range running {
+		out = append(out, WorkspaceRunningTerminal{Name: r.Name, Agent: r.Agent})
+	}
+	return out
+}
+
+// CloseTabForWorkspaceExtract force-closes the active tab when its path is path, without
+// asking and without writing: the extract action has already carried the tab's unsaved
+// text into the target workspace's session, so closing the source tab saves nothing and
+// drops nothing. It reports false when the active tab is not that path any more (the UI
+// moved during the extraction), so the caller keeps the source state untouched.
+func (m *Model) CloseTabForWorkspaceExtract(path string) bool {
+	t := m.tabPort()
+	if t == nil {
+		return false
+	}
+	i := m.activeTab()
+	tabs := m.ed.Tabs()
+	if i < 0 || i >= len(tabs) || tabs[i].Path != path {
+		return false
+	}
+	if err := t.CloseTab(i, true); err != nil {
+		m.quietNotice(err.Error())
+		return false
+	}
+	m.syncViewport()
+	return true
 }
 
 // WorkspaceCmd is a command the workspace layer asks the program to run: the switch
@@ -138,14 +198,10 @@ func (m *Model) workspaceAction(action string) (tea.Cmd, bool) {
 		m.openNewWorkspacePrompt()
 		return nil, true
 	case "workspace_close":
-		m.openWorkspacePicker("Close Workspace", func(e WorkspaceEntry) tea.Cmd {
-			cmd, err := m.workspace.Close(e.ID)
-			if err != nil {
-				m.quietNotice(err.Error())
-			}
-			return cmd
-		})
+		m.openWorkspacePicker("Close Workspace", m.workspaceCloseEntry)
 		return nil, true
+	case "workspace_extract_tab":
+		return m.extractWorkspaceTab(), true
 	case "workspace_rename":
 		m.openWorkspacePicker("Rename Workspace", func(e WorkspaceEntry) tea.Cmd {
 			m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
@@ -158,6 +214,93 @@ func (m *Model) workspaceAction(action string) (tea.Cmd, bool) {
 		return nil, true
 	}
 	return nil, false
+}
+
+// workspaceCloseEntry runs the close flow of one workspace: when the workspace still has
+// running terminals, it asks first and names exactly what the close will stop; otherwise
+// it closes at once. The close report itself comes from the workspace layer.
+func (m *Model) workspaceCloseEntry(e WorkspaceEntry) tea.Cmd {
+	if running := workspaceRunningTerminals(m.workspace, e.ID); len(running) > 0 {
+		// Fresh's session close flushes recovery and drops the window; gvim's workspace
+		// close also stops the dock shells, so it asks first and names exactly what it
+		// will kill.
+		m.pushOverlay(prompt.NewConfirmWith(m.styles,
+			"Close workspace \""+e.Label+"\"? This stops "+workspaceRunningSummary(running),
+			workspaceCloseRunningTag{id: e.ID},
+			prompt.ConfirmOptions{Yes: "Close", No: "Cancel", DefaultYes: true}))
+		return nil
+	}
+	cmd, err := m.workspace.Close(e.ID)
+	if err != nil {
+		m.quietNotice(err.Error())
+	}
+	return cmd
+}
+
+// workspaceCloseRunningTag is the tag of the close confirmation that lists the running
+// terminals the close will stop. Yes closes the workspace; anything else leaves it open.
+type workspaceCloseRunningTag struct{ id string }
+
+// workspaceRunningTerminals asks the workspace layer which terminals closing id stops. A
+// layer without the optional running surface reports none: the close keeps its old
+// behavior for such a port.
+func workspaceRunningTerminals(p WorkspacePort, id string) []WorkspaceRunningTerminal {
+	if rp, ok := p.(workspaceRunningPort); ok {
+		return rp.RunningTerminals(id)
+	}
+	return nil
+}
+
+// workspaceRunningSummary is the "N running terminals: ..." clause of the close question
+// and the close report. It names every one and its agent, so the user knows exactly what
+// the close kills.
+func workspaceRunningSummary(running []WorkspaceRunningTerminal) string {
+	parts := make([]string, len(running))
+	for i, r := range running {
+		name := r.Name
+		if name == "" {
+			name = "terminal"
+		}
+		if r.Agent != "" {
+			parts[i] = name + " (agent " + r.Agent + ")"
+		} else {
+			parts[i] = name
+		}
+	}
+	noun := "terminal"
+	if len(running) != 1 {
+		noun = "terminals"
+	}
+	return fmt.Sprintf("%d running %s: %s", len(running), noun, strings.Join(parts, ", "))
+}
+
+// extractWorkspaceTab asks the workspace layer to move the active tab into its own
+// workspace. The layer captures the tab on this goroutine and returns a command for the
+// persistence and materialization; a tab it cannot move (no file path, a large-file
+// overlay, a folder that is already the workspace root) comes back as an error with the
+// reason and the tab stays open.
+func (m *Model) extractWorkspaceTab() tea.Cmd {
+	if m.workspace == nil {
+		m.quietNotice("Extracting a tab needs the daemon workspace layer")
+		return nil
+	}
+	p, ok := m.workspace.(workspaceExtractPort)
+	if !ok {
+		m.quietNotice("Extracting a tab is not supported by this workspace layer")
+		return nil
+	}
+	cmd, err := p.ExtractTab()
+	if err != nil {
+		// The layer's errors are lower-case (Go error style); the status row is a
+		// sentence, so it capitalizes the first letter for display.
+		msg := err.Error()
+		if r, size := utf8.DecodeRuneInString(msg); size > 0 {
+			msg = string(unicode.ToUpper(r)) + msg[size:]
+		}
+		m.quietNotice(msg)
+		return nil
+	}
+	return cmd
 }
 
 // workspaceRowText is the switcher text of one workspace: the label, the root and the
@@ -255,6 +398,15 @@ func (m *Model) workspaceActionAnswer(d prompt.Done) (tea.Cmd, bool) {
 			m.quietNotice(err.Error())
 		}
 		return cmd, true
+	case workspaceCloseRunningTag:
+		if d.Outcome == prompt.Yes && m.workspace != nil {
+			cmd, err := m.workspace.Close(tag.id)
+			if err != nil {
+				m.quietNotice(err.Error())
+			}
+			return cmd, true
+		}
+		return nil, true
 	case workspaceRenameTag:
 		if d.Outcome != prompt.Submitted || strings.TrimSpace(d.Text) == "" {
 			return nil, true
@@ -282,6 +434,10 @@ func (m *Model) AddWorkspaceCommands() {
 		{Name: "Workspace: Close", Description: "Close a workspace and keep its unsaved text", Action: "workspace_close", Source: commands.SourceBuiltin},
 		{Name: "Workspace: Rename", Description: "Rename a workspace", Action: "workspace_rename", Source: commands.SourceBuiltin},
 		{Name: "Workspace: Next", Description: "Switch to the next workspace", Action: "workspace_next", Source: commands.SourceBuiltin},
+	}
+	if _, ok := m.workspace.(workspaceExtractPort); ok {
+		// Fresh's action label for the same command; the tab menu item is the other way in.
+		rows = append(rows, commands.Entry{Name: "Extract tab to new workspace", Description: "Move the active tab into a workspace rooted at its file's folder", Action: "workspace_extract_tab", Source: commands.SourceBuiltin})
 	}
 	for _, row := range rows {
 		if slices.ContainsFunc(m.commands, func(e commands.Entry) bool { return e.Action == row.Action }) {

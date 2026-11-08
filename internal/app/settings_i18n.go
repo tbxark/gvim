@@ -38,3 +38,60 @@ func settingsLabel(setting config.Setting) string {
 func settingsSectionLabel(section string) string {
 	return i18n.TOr("", settingsSectionKey(section), section, nil)
 }
+
+// settingsPage is the title of a structured settings page.
+func settingsPage(key, english string) string {
+	return i18n.TOr("", "gvim.settings.page."+key, english, nil)
+}
+
+// settingsAdd is the add-row label of a structured settings page.
+func settingsAdd(key, english string) string {
+	return i18n.TOr("", "gvim.settings.add."+key, english, nil)
+}
+
+// settingsNote is a structured settings page's explanatory note.
+func settingsNote(key, english string) string {
+	return i18n.TOr("", "gvim.settings.note."+key, english, nil)
+}
+
+// settingsLanguageTitle is the title of one language's page: the translated Languages
+// title with the language id (an identifier, not translated).
+func settingsLanguageTitle(id string) string {
+	return settingsPage("languages", "Languages") + " · " + id
+}
+
+// settingsLanguagePart is one translated part of a language child title: a page part
+// (Extensions, ...) or a section part (Formatter, On Save, Indent).
+func settingsLanguagePart(english string) string {
+	key, ok := settingsLanguagePartKeys[english]
+	if !ok {
+		return english
+	}
+	return i18n.TOr("", key, english, nil)
+}
+
+// settingsLanguagePartKeys maps the English part to its catalogue key.
+var settingsLanguagePartKeys = map[string]string{
+	"Extensions":          "gvim.settings.page.extensions",
+	"File Names":          "gvim.settings.page.file_names",
+	"Formatter Arguments": "gvim.settings.page.formatter_arguments",
+	"Formatter":           "gvim.settings.section.languages.formatter",
+	"On Save":             "gvim.settings.section.languages.on_save",
+	"Indent":              "gvim.settings.section.languages.indent",
+}
+
+// settingsLanguageAdd is the add-row label of a language child list.
+func settingsLanguageAdd(english string) string {
+	key, ok := settingsLanguageAddKeys[english]
+	if !ok {
+		return english
+	}
+	return i18n.TOr("", key, english, nil)
+}
+
+// settingsLanguageAddKeys maps the English add-row text to its catalogue key.
+var settingsLanguageAddKeys = map[string]string{
+	"Add extension…": "gvim.settings.add.extension",
+	"Add file name…": "gvim.settings.add.file_name",
+	"Add argument…":  "gvim.settings.add.argument",
+}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -43,58 +44,81 @@ type completionReplyMsg struct {
 	wordsShown bool
 }
 
+// completionSources is the state one completion request is built from, captured
+// on the update goroutine so the command and the auto-popup timer never read the
+// document off that goroutine.
+type completionSources struct {
+	path      string
+	at        buffer.Pos
+	version   uint64
+	versioned bool
+	lang      string
+	large     bool
+	lspWanted bool
+	port      LSPSession
+	snapshot  editor.WordSnapshot
+	wordsOK   bool
+}
+
+// completionSourcesFor captures what Trigger Completion would use for doc.
+func (m *Model) completionSourcesFor(doc Document) completionSources {
+	s := completionSources{
+		path: docPath(doc), at: doc.Cursor(), lang: m.lspLanguage(doc),
+	}
+	s.version, s.versioned = docVersion(doc)
+	s.large = isLargeDoc(doc)
+	s.lspWanted = !s.large && s.path != "" && m.lsp.enabled(s.lang)
+	if s.lspWanted {
+		tr := m.lsp.tracks[s.path]
+		s.lspWanted = tr != nil && tr.state == lspOpen
+	}
+	s.port = m.lsp.port
+	s.snapshot, s.wordsOK = m.wordSnapshot(doc)
+	return s
+}
+
 // completionAsked opens the local buffer-word list at once and starts the
 // language-server request in a command. The two phases are deliberately split:
 // the words are in-memory, so they appear on this update; the server may be slow
 // and its items are merged later by completionReplied with the same identity. It is
-// the action behind Trigger Completion / lsp_completion.
+// the action behind Trigger Completion / lsp_completion, and the auto-popup timer
+// calls it too.
 func (m *Model) completionAsked() tea.Cmd {
 	doc := m.ed.Active()
 	if doc == nil {
 		m.notice = noDocumentNotice
 		return nil
 	}
-	path := docPath(doc)
-	at := doc.Cursor()
-	version, versioned := docVersion(doc)
-	lang := m.lspLanguage(doc)
-	// A large-file document is not LSP-served and must not be read here: its lines
-	// come from disk. Buffer words are deferred for it rather than blocking Update.
-	large := isLargeDoc(doc)
-	lspWanted := !large && path != "" && m.lsp.enabled(lang)
-	if lspWanted {
-		tr := m.lsp.tracks[path]
-		lspWanted = tr != nil && tr.state == lspOpen
-	}
-	port := m.lsp.port
-	snapshot, wordsOK := m.wordSnapshot(doc)
+	src := m.completionSourcesFor(doc)
 	var wordItems []CompletionItem
-	if wordsOK {
-		wordItems = mergeBufferWordItems(nil, editor.BufferWordCompletions(snapshot))
+	if src.wordsOK {
+		wordItems = mergeBufferWordItems(nil, editor.BufferWordCompletions(src.snapshot))
 	}
 	wordsShown := len(wordItems) > 0
 	if wordsShown {
 		// First phase: the local list, before any server call. m.lspReply's
 		// completion path is the shared popup opener, so accept and styling stay
 		// the same as a server-only completion.
-		_ = m.lspReply(lspReplyMsg{ask: lspAskCompletion, path: path, at: at, items: wordItems})
+		_ = m.lspReply(lspReplyMsg{ask: lspAskCompletion, path: src.path, at: src.at, items: wordItems})
 	}
-	if !lspWanted && !wordsShown {
+	if !src.lspWanted && !wordsShown {
 		switch {
-		case large && m.lsp.port != nil && m.lsp.enabled(lang):
+		case src.large && m.lsp.port != nil && m.lsp.enabled(src.lang):
 			// The guard order for a large file is the LSP guard first: it is why the
 			// server cannot serve the buffer, and the existing actions say so too.
 			m.notice = "LSP: " + lspLargeReason(doc)
-		case large:
+		case src.large:
 			m.notice = "Buffer-word completion is not available in large files yet"
 		default:
 			m.notice = "No completions"
 		}
 		return nil
 	}
-	if !lspWanted {
+	if !src.lspWanted {
 		return nil
 	}
+	path, at, version, versioned := src.path, src.at, src.version, src.versioned
+	port := src.port
 	return func() tea.Msg {
 		r := completionReplyMsg{
 			path: path, at: at, version: version, versioned: versioned, wordsShown: wordsShown,
@@ -104,6 +128,92 @@ func (m *Model) completionAsked() tea.Cmd {
 		}
 		return r
 	}
+}
+
+// completionAutoMsg is one due auto-popup timer. The identity fields make a timer
+// from an older keystroke or an older document version discardable.
+type completionAutoMsg struct {
+	seq       uint64
+	path      string
+	at        buffer.Pos
+	version   uint64
+	versioned bool
+}
+
+// completionAutoTimer is the debounce command; tests replace it to capture the
+// requested delay and fire the message deterministically.
+var completionAutoTimer = func(delay time.Duration, msg completionAutoMsg) tea.Cmd {
+	return tea.Tick(delay, func(time.Time) tea.Msg { return msg })
+}
+
+// afterTypedCompletionText schedules the auto-popup after a typed printable rune,
+// or cancels a pending one. It runs on the update goroutine after the character was
+// inserted, does no I/O, and only schedules a tea command; the popup itself opens
+// when the timer message comes back. Word characters debounce by
+// editor.quick_suggestions_delay_ms; any other character cancels.
+func (m *Model) afterTypedCompletionText(text string) tea.Cmd {
+	m.view.completionAutoSeq++
+	if !m.view.opts.CompletionPopupAutoShow {
+		return nil
+	}
+	doc := m.ed.Active()
+	if doc == nil || isLargeDoc(doc) || !m.view.opts.QuickSuggestions {
+		return nil
+	}
+	r, ok := singleRune(text)
+	if !ok {
+		return nil
+	}
+	if !editor.IsWordRune(r, m.docLanguageSettings(doc).WordCharacters) {
+		return nil
+	}
+	at := doc.Cursor()
+	prefix := editor.CompletionPrefix(doc.Line(at.Line), at.Col, m.docLanguageSettings(doc).WordCharacters)
+	if prefix == "" {
+		return nil
+	}
+	delay := m.view.opts.QuickSuggestionsDelayMS
+	if delay < 0 {
+		delay = 0
+	}
+	version, versioned := docVersion(doc)
+	msg := completionAutoMsg{
+		seq: m.view.completionAutoSeq, path: docPath(doc), at: at,
+		version: version, versioned: versioned,
+	}
+	return completionAutoTimer(time.Duration(delay)*time.Millisecond, msg)
+}
+
+// cancelAutoCompletion invalidates the pending auto-popup trigger. The completion
+// list's close path calls it, so Esc/dismiss/typing cannot reopen a list the user
+// closed.
+func (m *Model) cancelAutoCompletion() {
+	m.view.completionAutoSeq++
+}
+
+// autoCompletionDue opens the auto-popup when its timer expires and it still
+// belongs to the newest keystroke, the same document version and the same caret.
+func (m *Model) autoCompletionDue(msg completionAutoMsg) tea.Cmd {
+	if msg.seq != m.view.completionAutoSeq {
+		return nil
+	}
+	doc := m.ed.Active()
+	if doc == nil || docPath(doc) != msg.path || doc.Cursor() != msg.at {
+		m.cancelAutoCompletion()
+		return nil
+	}
+	if version, ok := docVersion(doc); msg.versioned && (!ok || version != msg.version) {
+		m.cancelAutoCompletion()
+		return nil
+	}
+	if m.lsp.comp != nil || len(m.overlays) > 0 {
+		return nil // another list or dialog is up
+	}
+	src := m.completionSourcesFor(doc)
+	if src.snapshot.Prefix == "" || (!src.wordsOK && !src.lspWanted) {
+		return nil
+	}
+	return m.completionAsked()
 }
 
 // completionReplied merges the server half into the open local list (or opens it
@@ -271,5 +381,68 @@ func (m *Model) wordSnapshot(doc Document) (editor.WordSnapshot, bool) {
 		Lines: lines, StartLine: start, CursorLine: cursorLine, CursorCol: at.Col,
 		Prefix: prefix, WordChars: wordChars, PrefixHasUpper: editor.HasUpper(prefix),
 		ViewportTop: top, ViewportBottom: bottom,
+		Other: m.otherWordBuffers(),
 	}, true
+}
+
+// otherWordBuffers captures a bounded word window from every other open tab, in tab
+// order (Fresh uses MRU order; gvim's tabs are ordered, so this is the documented
+// residual). The windows are read on the update goroutine like the active one: no
+// disk I/O, large-file documents skipped, and at most editor.OtherWordBufferLimit
+// buffers with editor.OtherWordBufferBytes each.
+func (m *Model) otherWordBuffers() []editor.WordBuffer {
+	tabs, ok := m.ed.(tabDocs)
+	if !ok {
+		return nil
+	}
+	infos := m.ed.Tabs()
+	active := m.activeTab()
+	out := make([]editor.WordBuffer, 0, editor.OtherWordBufferLimit)
+	for i := range infos {
+		if i == active {
+			continue
+		}
+		if len(out) >= editor.OtherWordBufferLimit {
+			break
+		}
+		doc := tabs.DocAt(i)
+		if doc == nil || isLargeDoc(doc) {
+			continue
+		}
+		if lines := middleLineWindow(doc, editor.OtherWordBufferBytes); len(lines) > 0 {
+			out = append(out, editor.WordBuffer{Lines: lines})
+		}
+	}
+	return out
+}
+
+// middleLineWindow reads a bounded line window from the middle of doc: Fresh's
+// other-buffer scan takes 64 KiB from the middle of the buffer rather than from its
+// caret.
+func middleLineWindow(doc Document, radius int) []string {
+	count := doc.LineCount()
+	if count <= 0 {
+		return nil
+	}
+	mid := count / 2
+	start, end := mid, mid
+	spent := len(doc.Line(mid)) + 1
+	for start > 0 || end+1 < count {
+		if end+1 < count && spent < radius {
+			end++
+			spent += len(doc.Line(end)) + 1
+		}
+		if start > 0 && spent < radius {
+			start--
+			spent += len(doc.Line(start)) + 1
+		}
+		if spent >= radius {
+			break
+		}
+	}
+	lines := make([]string, 0, end-start+1)
+	for i := start; i <= end; i++ {
+		lines = append(lines, doc.Line(i))
+	}
+	return lines
 }

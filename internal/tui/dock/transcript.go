@@ -126,6 +126,10 @@ func (p *Panel) SavedState() terminal.SavedState {
 		Cwd:     p.dir,
 		Width:   p.contentCols(),
 	}
+	// Live is whether a process was running at the capture: only such a tab may be
+	// revived on a dive after the restore. A restored tab that was not revived is
+	// dead and is saved as dead, so a later restore never starts it automatically.
+	st.Live = p.term != nil && !p.exited
 	// The launch record of the terminal that produced the transcript, so the
 	// user-initiated restart can rejoin it after an editor restart.
 	launch := p.launch.Clean()
@@ -207,6 +211,7 @@ func (p *Panel) Restore(st terminal.SavedState) {
 		p.prior = append(p.prior, lineFromText(text))
 	}
 	p.restored = true
+	p.wasLive = st.Live
 	p.reflowed = false
 	p.priorWidth = st.Width
 	p.open = st.Open || len(p.prior) > 0

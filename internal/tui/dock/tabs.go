@@ -43,6 +43,10 @@ type Tabs struct {
 	// drag is the in-flight strip drag: the Fresh tab-drag gesture reorders a tab
 	// by pressing its label, moving past the threshold and releasing over the strip.
 	drag tabDrag
+	// dive is the restored tab the user just switched to or focused: on the next
+	// Sync its live revival starts (a tea.Cmd, so Update never blocks on the spawn).
+	// A second dive before the sync replaces it with the newest target.
+	dive *Panel
 	// nextGen is the next shell-generation namespace. Messages carry only a
 	// generation, and every Panel counts its generations from 0, so each tab gets a
 	// disjoint million-wide range; otherwise an output/exit of one tab could match
@@ -194,7 +198,11 @@ func (t *Tabs) tabLabels() []string {
 				labels[i] = label + " (" + strconv.Itoa(seen[label]) + ")"
 			}
 		}
-		if t.tabs[i].Exited() {
+		// A restored tab that was live at the capture is dormant, not exited: it
+		// shows its title without the marker until a dive revives it (or the user
+		// leaves it dead). Every exited tab keeps the marker, including every tab of
+		// an old record without the live flag.
+		if t.tabs[i].Exited() && (!t.tabs[i].restored || !t.tabs[i].wasLive) {
 			labels[i] += " (exited)"
 		}
 	}
@@ -285,8 +293,13 @@ func (t *Tabs) NewTab() tea.Cmd {
 
 // SetActive makes tab i active. It reports false for an out-of-range index.
 func (t *Tabs) SetActive(i int) bool {
-	if i < 0 || i >= len(t.tabs) || i == t.active {
-		return i >= 0 && i < len(t.tabs)
+	if i < 0 || i >= len(t.tabs) {
+		return false
+	}
+	if i == t.active {
+		// A deliberate press on the tab that is already active is still a dive.
+		t.queueDive(t.tabs[i])
+		return true
 	}
 	wasFocused := t.Active() != nil && t.Active().Focus()
 	t.Active().SetFocus(false)
@@ -294,7 +307,17 @@ func (t *Tabs) SetActive(i int) bool {
 	if wasFocused {
 		t.Active().SetFocus(true)
 	}
+	t.queueDive(t.tabs[i])
 	return true
+}
+
+// queueDive arms the next Sync to revive tab p when the user dives into it (a
+// switch, a focus or a dock show). It only stores the target: the start itself is
+// a tea.Cmd run from Sync, so the Update loop never blocks on the spawn.
+func (t *Tabs) queueDive(p *Panel) {
+	if p != nil {
+		t.dive = p
+	}
 }
 
 // Next makes the next tab active, wrapping at the end.
@@ -385,6 +408,9 @@ func (t *Tabs) removeAt(i int) {
 		return
 	}
 	tab := t.tabs[i]
+	if t.dive == tab {
+		t.dive = nil
+	}
 	tab.Close()
 	t.tabs = append(t.tabs[:i:i], t.tabs[i+1:]...)
 	t.names = append(t.names[:i:i], t.names[i+1:]...)
@@ -405,6 +431,7 @@ func (t *Tabs) Show() tea.Cmd {
 	if len(t.tabs) == 0 {
 		return t.NewTab()
 	}
+	t.queueDive(t.Active())
 	return t.Active().Show()
 }
 
@@ -423,6 +450,7 @@ func (t *Tabs) Close() {
 	t.tabs = nil
 	t.names = nil
 	t.active = 0
+	t.dive = nil
 }
 
 // Restart restarts the active tab's shell, keeping its transcript. The start is
@@ -494,6 +522,9 @@ func (t *Tabs) SetFocus(v bool) {
 		if i == t.active || !v {
 			p.SetFocus(v)
 		}
+	}
+	if v {
+		t.queueDive(t.Active())
 	}
 }
 
@@ -724,6 +755,13 @@ func (t *Tabs) closeExited() {
 // scrollback stay current.
 func (t *Tabs) Sync() tea.Cmd {
 	var cmds []tea.Cmd
+	if p := t.dive; p != nil {
+		t.dive = nil
+		if cmd := p.dive(); cmd != nil {
+			tab := p
+			cmds = append(cmds, func() tea.Msg { return tabStartedMsg{tab: tab, inner: cmd()} })
+		}
+	}
 	for _, p := range t.tabs {
 		if cmd := p.Sync(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -906,6 +944,29 @@ func (t *Tabs) drawStrip(g *grid.Grid, l frame.Layout, st style.Styles) {
 	}
 }
 
+// RunningTab is one running tab as the close-workspace confirmation lists it: the
+// tab's undecorated base name (explicit rename, else the launch title) and the
+// configured agent name of its launch record, or "" for a plain shell.
+type RunningTab struct {
+	Name  string
+	Agent string
+}
+
+// RunningTabs returns the running tabs in tab order, for a close confirmation that
+// names exactly what closing the workspace would kill. It is a read-only snapshot.
+func (t *Tabs) RunningTabs() []RunningTab {
+	labels := t.tabBaseLabels()
+	out := make([]RunningTab, 0, len(t.tabs))
+	for i, p := range t.tabs {
+		if !p.Running() {
+			continue
+		}
+		name := labels[i]
+		out = append(out, RunningTab{Name: name, Agent: p.Launch().Agent})
+	}
+	return out
+}
+
 // ActiveName returns the active tab's display name.
 func (t *Tabs) ActiveName() string { return t.currentName() }
 
@@ -935,7 +996,7 @@ func (t *Tabs) SavedState() terminal.SavedState {
 			Name: t.names[i], Open: rec.Open, Cwd: rec.Cwd, Width: rec.Width,
 			Rows: rec.Rows, LaunchArgv: rec.LaunchArgv, ResumeArgv: rec.ResumeArgv,
 			Agent: rec.Agent, Ephemeral: rec.Ephemeral, LaunchDir: rec.LaunchDir,
-			Source: rec.Source,
+			Source: rec.Source, Live: rec.Live,
 		}
 	}
 	st.ActiveTab = t.active
@@ -951,13 +1012,14 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 	t.tabs = nil
 	t.names = nil
 	t.active = 0
+	t.dive = nil
 	saved := st.Tabs
 	if len(saved) == 0 {
 		saved = []terminal.SavedTab{{
 			Open: st.Open, Cwd: st.Cwd, Width: st.Width, Rows: st.Rows,
 			LaunchArgv: st.LaunchArgv, ResumeArgv: st.ResumeArgv,
 			Agent: st.Agent, Ephemeral: st.Ephemeral, LaunchDir: st.LaunchDir,
-			Source: st.Source,
+			Source: st.Source, Live: st.Live,
 		}}
 	}
 	for _, tab := range saved {
@@ -970,7 +1032,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 			Version: st.Version, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
 			Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
 			Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
-			Source: tab.Source,
+			Source: tab.Source, Live: tab.Live,
 		})
 		t.tabs = append(t.tabs, &p)
 		t.names = append(t.names, tab.Name)

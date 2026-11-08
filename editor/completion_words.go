@@ -29,6 +29,17 @@ const (
 	WordScanBytes = 512 << 10
 	// WordScanLargeBytes is the smaller window for a large file.
 	WordScanLargeBytes = 32 << 10
+	// OtherWordBufferLimit is the most other open buffers one scan reads. Fresh
+	// reads every buffer of the window; gvim bounds the list so a session with many
+	// tabs stays cheap.
+	OtherWordBufferLimit = 8
+	// OtherWordBufferBytes is the window read from the middle of another open
+	// buffer (Fresh's 64 KiB OTHER_BUFFER_SCAN_RADIUS).
+	OtherWordBufferBytes = 64 << 10
+	// otherBufferScoreBase is added per other buffer, so every word in the active
+	// buffer outranks every other buffer's words and buffer 1 outranks buffer 2
+	// (Fresh's 300_000 * (i + 1) offset).
+	otherBufferScoreBase = 300_000
 )
 
 // WordSnapshot is the completion scan input: a contiguous line window around the
@@ -43,6 +54,16 @@ type WordSnapshot struct {
 	PrefixHasUpper bool   // smart case: an uppercase prefix matches case-sensitively
 	ViewportTop    int    // first visible buffer line
 	ViewportBottom int    // last visible buffer line, inclusive
+	// Other are bounded windows of the other open buffers, most recently used
+	// first. Their words rank below every word of the active buffer and below the
+	// previous buffer in the list (Fresh's multi-buffer buffer_words behaviour).
+	Other []WordBuffer
+}
+
+// WordBuffer is another open buffer's word window: lines only, scanned with the
+// window's start as the distance origin.
+type WordBuffer struct {
+	Lines []string
 }
 
 // WordCandidate is one buffer-word completion.
@@ -115,41 +136,16 @@ func BufferWordCompletions(s WordSnapshot) []WordCandidate {
 	}
 	lowerPrefix := strings.ToLower(prefix)
 	stats := make(map[string]*wordStat)
-	for i, line := range s.Lines {
-		lineNo := s.StartLine + i
-		runes := []rune(line)
-		for col := 0; col < len(runes); {
-			if !IsWordRune(runes[col], s.WordChars) {
-				col++
-				continue
-			}
-			start := col
-			for col < len(runes) && IsWordRune(runes[col], s.WordChars) {
-				col++
-			}
-			word := string(runes[start:col])
-			if !wordMatchesPrefix(word, prefix, lowerPrefix, s.PrefixHasUpper) {
-				continue
-			}
-			key := strings.ToLower(word)
-			if key == lowerPrefix || utf8.RuneCountInString(word) < WordCompletionMinRunes {
-				continue
-			}
-			dist := lineDistance(lineNo, s.CursorLine)*1000 + absInt(start-s.CursorCol)
-			stat := stats[key]
-			if stat == nil {
-				stat = &wordStat{text: word, nearestLine: lineNo, nearestCol: start, nearestDist: dist}
-				stats[key] = stat
-			} else if dist < stat.nearestDist {
-				stat.nearestDist = dist
-				stat.nearestLine = lineNo
-				stat.nearestCol = start
-			}
-			stat.count++
-			if lineNo >= s.ViewportTop && lineNo <= s.ViewportBottom {
-				stat.inViewport = true
-			}
+	collectWordStats(s.Lines, 0, s.CursorLine, s.CursorCol, s.ViewportTop, s.ViewportBottom, s.WordChars, prefix, lowerPrefix, s.PrefixHasUpper, stats, 0, false)
+	// Multi-buffer: other buffers are scanned from the start of their window and
+	// only add words the active buffer did not already have, each buffer lower
+	// than the one before it.
+	for i, other := range s.Other {
+		if i >= OtherWordBufferLimit {
+			break
 		}
+		base := otherBufferScoreBase * (i + 1)
+		collectWordStats(other.Lines, 0, 0, 0, 0, -1, s.WordChars, prefix, lowerPrefix, s.PrefixHasUpper, stats, base, true)
 	}
 	candidates := make([]WordCandidate, 0, len(stats))
 	for _, stat := range stats {
@@ -181,6 +177,53 @@ func BufferWordCompletions(s WordSnapshot) []WordCandidate {
 		candidates = candidates[:WordCompletionLimit]
 	}
 	return candidates
+}
+
+// collectWordStats adds the words of one buffer window. baseOffset is added to a
+// word's distance (so other buffers rank lower), and onlyNew keeps a word the
+// active buffer already has from being added again.
+func collectWordStats(lines []string, startLine, cursorLine, cursorCol, viewportTop, viewportBottom int, wordChars, prefix, lowerPrefix string, prefixHasUpper bool, stats map[string]*wordStat, baseOffset int, onlyNew bool) {
+	for i, line := range lines {
+		lineNo := startLine + i
+		runes := []rune(line)
+		for col := 0; col < len(runes); {
+			if !IsWordRune(runes[col], wordChars) {
+				col++
+				continue
+			}
+			start := col
+			for col < len(runes) && IsWordRune(runes[col], wordChars) {
+				col++
+			}
+			word := string(runes[start:col])
+			if !wordMatchesPrefix(word, prefix, lowerPrefix, prefixHasUpper) {
+				continue
+			}
+			key := strings.ToLower(word)
+			if key == lowerPrefix || utf8.RuneCountInString(word) < WordCompletionMinRunes {
+				continue
+			}
+			if onlyNew {
+				if stats[key] != nil {
+					continue
+				}
+			}
+			dist := baseOffset + lineDistance(lineNo, cursorLine)*1000 + absInt(start-cursorCol)
+			stat := stats[key]
+			if stat == nil {
+				stat = &wordStat{text: word, nearestLine: lineNo, nearestCol: start, nearestDist: dist}
+				stats[key] = stat
+			} else if dist < stat.nearestDist {
+				stat.nearestDist = dist
+				stat.nearestLine = lineNo
+				stat.nearestCol = start
+			}
+			stat.count++
+			if viewportBottom >= viewportTop && lineNo >= viewportTop && lineNo <= viewportBottom {
+				stat.inViewport = true
+			}
+		}
+	}
 }
 
 // wordMatchesPrefix applies Fresh's smart case: an uppercase prefix must match

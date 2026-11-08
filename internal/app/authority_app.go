@@ -32,9 +32,18 @@ func newAuthority(opts Options, pw *pluginhost.Wiring, gate authority.Gate, gate
 			Spec:           *opts.Remote,
 			Timeout:        15 * time.Second,
 			KnownHostsPath: sshKnownHostsPath(),
-			// The UI supplies a password after an auth failure (activation prompt).
+			// The UI supplies a password, an encrypted key's passphrase or a 2FA answer
+			// after the matching failure (activation/background prompt). Returning the
+			// sentinels records the request with the backend so the next reconnect can
+			// carry the secret.
 			Password: func(context.Context) (string, error) {
 				return "", errors.New("no SSH password available yet")
+			},
+			Passphrase: func(context.Context, string) (string, error) {
+				return "", authority.ErrNeedsPassphrase
+			},
+			KeyboardInteractive: func(context.Context, string, string, []string, []bool) ([]string, error) {
+				return nil, authority.ErrNeedsKeyboardInteractive
 			},
 		})
 	}

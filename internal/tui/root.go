@@ -31,7 +31,7 @@ type rootState struct {
 // status of the tree, the file watch, the folders of the open documents and the
 // auto-save tick.
 func (m *Model) rootInit() tea.Cmd {
-	cmds := []tea.Cmd{m.gitCmd(), m.autoSaveCmd(), m.watchWait(), m.watchSync(), m.revertPollCmd(), m.recoveryCmd()}
+	cmds := []tea.Cmd{m.gitCmd(), m.autoSaveCmd(), m.watchWait(), m.watchSync(), m.revertPollCmd(), m.recoveryCmd(), m.remoteExplorerInitialCmd(), m.authorityPollCmd()}
 	for _, err := range m.root.ports.FullLoadPrompts {
 		cmds = append(cmds, func() tea.Msg { return fullLoadPromptMsg{err: err} })
 	}
@@ -59,6 +59,8 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.agentDirChosen(msg), true
 	case completionReplyMsg:
 		return m.completionReplied(msg), true
+	case completionAutoMsg:
+		return m.autoCompletionDue(msg), true
 	case gitStatusMsg:
 		m.applyGitStatus(msg)
 		return nil, true

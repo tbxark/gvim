@@ -49,6 +49,9 @@ type fakeSSH struct {
 	changes  []testSize
 	conns    []*ssh.ServerConn
 	accepted int
+	// keyboardCallback, when set, answers keyboard-interactive auth challenges; the
+	// 2FA tests use it to require a one-time code.
+	keyboardCallback func(conn ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error)
 	// execFunc, when set, answers every non-PTY exec request: it may read stdin and
 	// write stdout/stderr through the channel; the return value is the exit status.
 	// The remote file tests use it to run the composed helper command locally.
@@ -76,6 +79,12 @@ func newFakeSSH(t *testing.T) *fakeSSH {
 		},
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			return nil, nil
+		},
+		KeyboardInteractiveCallback: func(conn ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+			if s.keyboardCallback != nil {
+				return s.keyboardCallback(conn, challenge)
+			}
+			return nil, errors.New("keyboard-interactive not configured")
 		},
 	}
 	s.cfg.AddHostKey(signer)

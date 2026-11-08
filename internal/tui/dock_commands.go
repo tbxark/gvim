@@ -59,7 +59,10 @@ func (m *Model) focusTerminal() tea.Cmd {
 	if !m.dock.Open() {
 		return m.showDock()
 	}
-	if m.dock.Running() {
+	// A restored dock can take the focus too: it is a read-only transcript, and
+	// focusing it is the user's dive that may revive a tab that was live when the
+	// session was saved (terminal.restore_live).
+	if m.dock.Running() || m.dock.Restored() {
 		m.focusDock()
 	} else if !m.dock.Starting() {
 		m.notice = noTerminalNotice()

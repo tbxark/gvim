@@ -17,7 +17,6 @@ import (
 	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
-	"github.com/tbxark/gvim/env"
 	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/internal/tui"
@@ -52,7 +51,7 @@ type settingsService struct {
 	themePreviews map[string][]tui.SettingsSwatch
 	// env is the workspace environment provider for the Environment rows and the
 	// read-only detectors page; nil when the app wired none.
-	env *env.Provider
+	env workspaceEnv
 
 	// lastDiags are the diagnostics of the last reload, so a write-then-reload
 	// path can verify that the file it wrote still loads (the plugin toggle rolls
@@ -710,7 +709,7 @@ func overrideCount(fields int) string {
 
 // structureFormatters is the formatters map sub-page.
 func (s *settingsService) structureFormatters(object map[string]json.RawMessage) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: "formatters", Title: "Formatters", Kind: "map", AddLabel: "Add formatter…"}
+	st := tui.SettingsStructure{Key: "formatters", Title: settingsPage("formatters", "Formatters"), Kind: "map", AddLabel: settingsAdd("formatter", "Add formatter…")}
 	formatters, _ := layerObjectAt(object, []string{"formatters"})
 	for _, name := range slices.Sorted(maps.Keys(formatters)) {
 		var command string
@@ -726,7 +725,7 @@ func (s *settingsService) structureFormatters(object map[string]json.RawMessage)
 
 // structureLanguages is the language entry list sub-page.
 func (s *settingsService) structureLanguages(object map[string]json.RawMessage) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: "languages", Title: "Languages", Kind: "languages", AddLabel: "Add language…"}
+	st := tui.SettingsStructure{Key: "languages", Title: settingsPage("languages", "Languages"), Kind: "languages", AddLabel: settingsAdd("language", "Add language…")}
 	entries, _ := layerObjectAt(object, []string{"languages"})
 	for _, id := range slices.Sorted(maps.Keys(entries)) {
 		fields, _ := layerObjectAt(entries, []string{id})
@@ -750,7 +749,7 @@ func (s *settingsService) structureLanguages(object map[string]json.RawMessage) 
 // marked Inherited and shows the value it inherits; Enter writes an override and
 // Del removes one.
 func (s *settingsService) structureLanguageFields(object map[string]json.RawMessage, id string) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: "languages." + id, Title: "Languages · " + id, Kind: "fields"}
+	st := tui.SettingsStructure{Key: "languages." + id, Title: settingsLanguageTitle(id), Kind: "fields"}
 	st.Note = "Enter overrides a field, Del removes the override (inherit). The on_save JSON page edits the whole array; lists and the formatter are written whole."
 	entry, _ := layerObjectAt(object, []string{"languages", id})
 	for _, field := range config.LanguageOverrideFields() {
@@ -788,7 +787,7 @@ func (s *settingsService) structureLanguageFields(object map[string]json.RawMess
 // structureStatusBar is the dual list of the status-bar elements. The page
 // writes both sides as whole arrays, and only those two paths.
 func (s *settingsService) structureStatusBar(cfg config.Config, object map[string]json.RawMessage, key string) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: key, Title: "Status Bar", Kind: "dual"}
+	st := tui.SettingsStructure{Key: key, Title: settingsPage("status_bar", "Status Bar"), Kind: "dual"}
 	left := cfg.StatusBar.Left
 	if raw, ok := layerRawAt(object, []string{"editor", "status_bar", "left"}); ok {
 		if list, ok := stringList(raw); ok {
@@ -824,7 +823,7 @@ func (s *settingsService) structureStatusBar(cfg config.Config, object map[strin
 
 // structureShellArgs is the terminal.shell.args list sub-page.
 func (s *settingsService) structureShellArgs(cfg config.Config, object map[string]json.RawMessage) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: "terminal.shell.args", Title: "Shell Arguments", Kind: "list", AddLabel: "Add argument…"}
+	st := tui.SettingsStructure{Key: "terminal.shell.args", Title: settingsPage("shell_arguments", "Shell Arguments"), Kind: "list", AddLabel: settingsAdd("argument", "Add argument…")}
 	args := cfg.Terminal.Shell.Args
 	if raw, ok := layerRawAt(object, []string{"terminal", "shell", "args"}); ok {
 		if list, ok := stringList(raw); ok {

@@ -59,3 +59,29 @@ func TestEverySettingsLabelHasACatalogueKey(t *testing.T) {
 		}
 	}
 }
+
+// TestStructuredSettingsLabelsFallBackToEnglish checks the extracted sub-page labels: a
+// gvim-only page/section/note key renders its English text in another locale (never the
+// bare key) and keeps the English rendering identical.
+func TestStructuredSettingsLabelsFallBackToEnglish(t *testing.T) {
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	if got := settingsPage("language_servers", "Language Servers"); got != "Language Servers" {
+		t.Fatalf("English page label = %q", got)
+	}
+	if got := settingsLanguageTitle("go"); got != "Languages · go" {
+		t.Fatalf("English language title = %q", got)
+	}
+	i18n.SetLocale("de")
+	if got := settingsPage("language_servers", "Language Servers"); got != "Language Servers" {
+		t.Errorf("German page label = %q, want the English fallback", got)
+	}
+	if got := settingsLanguageTitle("go"); got != "Languages · go" {
+		t.Errorf("German language title = %q, want the English fallback", got)
+	}
+	if got := settingsLanguagePart("Formatter"); got != "Formatter" {
+		t.Errorf("German language part = %q, want the English fallback", got)
+	}
+	if got := settingsNote("does_not_exist", "note"); got != "note" {
+		t.Errorf("German unknown note = %q, want the English fallback", got)
+	}
+}

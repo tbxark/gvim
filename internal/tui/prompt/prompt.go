@@ -13,6 +13,8 @@
 package prompt
 
 import (
+	"github.com/tbxark/gvim/i18n"
+
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -71,7 +73,9 @@ func ValidateLineCol(text string) error {
 // message, which starts with a capital letter.
 type lineError struct{ text string }
 
-func (e lineError) Error() string { return "Not a line number: " + e.text }
+func (e lineError) Error() string {
+	return i18n.TOr("", "gvim.prompt.not_a_line", "Not a line number: "+e.text, map[string]any{"line": e.text})
+}
 
 // styles are the grid styles of the prompt rows.
 type styles struct {
@@ -454,10 +458,10 @@ type ConfirmOptions struct {
 func NewConfirmWith(st style.Styles, label string, tag any, o ConfirmOptions) *Confirm {
 	c := &Confirm{label: label, tag: tag, styles: newStyles(st), yes: o.DefaultYes, yesText: o.Yes, noText: o.No}
 	if c.yesText == "" {
-		c.yesText = "Yes"
+		c.yesText = i18n.TOr("", "gvim.prompt.yes", "Yes", nil)
 	}
 	if c.noText == "" {
-		c.noText = "No"
+		c.noText = i18n.TOr("", "gvim.prompt.no", "No", nil)
 	}
 	return c
 }

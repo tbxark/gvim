@@ -236,7 +236,7 @@ func (m *Model) openAgentDirPrompt(name, dir string) tea.Cmd {
 		dir = m.dock.LaunchDir()
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-		Label:     "Run Agent directory:",
+		Label:     uiText("gvim.prompt.run_agent_directory", "Run Agent directory:"),
 		Input:     dir,
 		SelectAll: true,
 		Tag:       agentRunDirTag{name: name},
@@ -271,7 +271,7 @@ func (m *Model) agentDirAnswer(d prompt.Done) tea.Cmd {
 // the directory cannot be used.
 func (m *Model) agentDirChosen(msg agentRunDirMsg) tea.Cmd {
 	if msg.err != nil {
-		m.notice = "Run Agent: " + msg.err.Error()
+		m.notice = uiTextVars("gvim.notice.agent.run_error", "Run Agent: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil
 	}
 	return m.openAgentActionPickerAt(msg.name, msg.dir)

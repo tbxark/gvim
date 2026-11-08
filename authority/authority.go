@@ -101,6 +101,8 @@ type State struct {
 	Remote    *RemoteSpec
 	Connected bool
 	Reason    string // why it is disconnected, "" when connected
+	// Connecting says a reconnect is dialing right now; the status row shows it.
+	Connecting bool
 }
 
 // Parts are the four surfaces and the state of one mounted slot.
@@ -177,6 +179,9 @@ func (a *Authority) State() State {
 		if r, ok := a.remote.(interface{ Reason() string }); ok {
 			st.Reason = r.Reason()
 		}
+		if c, ok := a.remote.(interface{ Connecting() bool }); ok {
+			st.Connecting = c.Connecting()
+		}
 	}
 	return st
 }
@@ -212,6 +217,60 @@ func (a *Authority) ReconnectWithPassword(ctx context.Context, password string) 
 }
 
 // Close releases the backend.
+// Connecting reports whether a reconnect is dialing right now (false for local/healthy).
+func (a *Authority) Connecting() bool {
+	if r, ok := a.remote.(interface{ Connecting() bool }); ok {
+		return r.Connecting()
+	}
+	return false
+}
+
+// NeedsPassphrase reports whether the last dial needs an encrypted identity's passphrase.
+func (a *Authority) NeedsPassphrase() bool {
+	if r, ok := a.remote.(interface{ NeedsPassphrase() bool }); ok {
+		return r.NeedsPassphrase()
+	}
+	return false
+}
+
+// ReconnectWithPassphrase reconnects a remote slot with a UI-supplied key passphrase.
+func (a *Authority) ReconnectWithPassphrase(ctx context.Context, passphrase string) error {
+	if r, ok := a.remote.(interface {
+		ReconnectWithPassphrase(context.Context, string) error
+	}); ok {
+		return r.ReconnectWithPassphrase(ctx, passphrase)
+	}
+	return a.Reconnect(ctx)
+}
+
+// NeedsKeyboardInteractive reports whether the last dial needs a 2FA challenge answered.
+func (a *Authority) NeedsKeyboardInteractive() bool {
+	if r, ok := a.remote.(interface{ NeedsKeyboardInteractive() bool }); ok {
+		return r.NeedsKeyboardInteractive()
+	}
+	return false
+}
+
+// KeyboardInteractiveChallenge returns the pending 2FA challenge of a remote slot.
+func (a *Authority) KeyboardInteractiveChallenge() (KeyboardPrompt, bool) {
+	if r, ok := a.remote.(interface {
+		KeyboardInteractiveChallenge() (KeyboardPrompt, bool)
+	}); ok {
+		return r.KeyboardInteractiveChallenge()
+	}
+	return KeyboardPrompt{}, false
+}
+
+// ReconnectWithAnswers reconnects a remote slot with the UI's 2FA answers.
+func (a *Authority) ReconnectWithAnswers(ctx context.Context, answers []string) error {
+	if r, ok := a.remote.(interface {
+		ReconnectWithAnswers(context.Context, []string) error
+	}); ok {
+		return r.ReconnectWithAnswers(ctx, answers)
+	}
+	return a.Reconnect(ctx)
+}
+
 func (a *Authority) Close() error {
 	if a.remote == nil {
 		return nil

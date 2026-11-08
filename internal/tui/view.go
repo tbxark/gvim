@@ -184,6 +184,10 @@ type viewState struct {
 	opts ViewOptions
 	// languages resolves the per-language settings of a document. Nil means none.
 	languages editor.SettingsResolver
+	// completionAutoSeq is the generation of the pending auto-popup debounce: a
+	// scheduled trigger fires only while it is still the newest one. Bumping it
+	// cancels the pending trigger (a non-word character, Esc, closing the list).
+	completionAutoSeq uint64
 }
 
 // newViewState returns the state for the starting options o.
@@ -333,16 +337,16 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 	case "toggle_mouse_capture":
 		m.view.mouseCapture = !m.view.mouseCapture
 		if m.view.mouseCapture {
-			m.notice = "Mouse capture on: gvim takes the mouse"
+			m.notice = uiText("gvim.notice.mouse.capture_on", "Mouse capture on: gvim takes the mouse")
 		} else {
-			m.notice = "Mouse capture off: the terminal keeps the mouse"
+			m.notice = uiText("gvim.notice.mouse.capture_off", "Mouse capture off: the terminal keeps the mouse")
 		}
 	case "toggle_file_explorer_side":
 		m.explorerSide = m.explorerSide.Other()
 		if m.explorerSide == explorer.SideRight {
-			m.notice = "File explorer moved to the right"
+			m.notice = uiText("gvim.notice.explorer.right", "File explorer moved to the right")
 		} else {
-			m.notice = "File explorer moved to the left"
+			m.notice = uiText("gvim.notice.explorer.left", "File explorer moved to the left")
 		}
 	case "toggle_debug_highlights":
 		m.view.debug = !m.view.debug

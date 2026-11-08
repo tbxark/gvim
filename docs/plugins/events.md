@@ -78,6 +78,8 @@ end, { debounce = 300 })
 | `viewport_changed` (hot) | `{buf, top_line, height, width}` | the focused pane of the active buffer scrolled or resized |
 | `focus_gained` | `{}` | the editor got its keyboard back after a plugin panel, dock or overlay had it |
 | `active_window_changed` | `{previous, current}` | the focused split window changed; ids are plain numbers, absent/0 when there is no focused pane |
+| `chrome_focus_changed` | `{region, plugin?, panel_id?}` | the chrome region with the keyboard changed: `editor`, `explorer`, `dock` or `section` (a plugin section names `plugin`/`panel_id`; the native Contents/Diagnostics sections carry neither); gvim's tab strip is the extension region `tabs`. Overlays and the menu are transient surfaces and do not raise it. |
+| `key_release` | `{key, text?, ctrl, alt, shift, super}` | a key release the terminal backend reported, in the same shape as a plugin key capture. Legacy terminals report no releases and gvim requests no kitty keyboard enhancement flags, so this fires only on backends that deliver release events (for example the Windows console API); a release never edits or moves anything. |
 | `language_changed` | `{buf, language}` | `Set Language`, or the path changed |
 | `config_changed` | `{}` | the keymap changed |
 | `theme_changed` | `{name, dark}` | a theme was selected or a plugin applied session color overrides |
@@ -93,6 +95,15 @@ end, { debounce = 300 })
 
 Details worth knowing:
 
+* `chrome_focus_changed` fires once per change of the stable chrome region. It does not fire for
+a menu or an overlay, and the initial editor focus raises nothing. The native Contents and
+Diagnostics sections report `region=section` with no `plugin`/`panel_id`; a mounted plugin
+section adds both. `tabs` is a gvim extension (Fresh has no tab strip region).
+* `key_release` only exists on backends that report releases through Bubble Tea's
+`tea.KeyReleaseMsg`. gvim deliberately does not request the kitty keyboard protocol's event
+types (no fake kitty support and no fallback that would change key encoding), so a legacy
+terminal never raises it; the Windows console backend can. It is independent of key capture:
+a release is not a chord step and is never typed.
 * `buffer_changed.edits` are in **sequential coordinates**: each record's `range` is expressed in the
   text *immediately before that record*; apply the records first to last to turn an old copy of the
   text into the new one. A replace is two records (a delete, then an insert at its start). `removed` is

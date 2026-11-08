@@ -1,0 +1,463 @@
+package app
+
+// Remote project search and git grep for a remote workspace (task-105). The commands run
+// on the remote host through the workspace authority's one-shot surface (which applies the
+// spawn/trust gate); nothing here reads the local file system, and there is no local
+// fallback. Results are bounded, streamed to the finder panel as whole-file batches, and
+// cancellation stops the remote process.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/tui/searchpanel"
+	"github.com/tbxark/gvim/plugin/hostos"
+	"github.com/tbxark/gvim/search"
+)
+
+const (
+	// remoteSearchTimeout bounds one remote project search run.
+	remoteSearchTimeout = 20 * time.Second
+	// remoteToolProbeTimeout bounds the remote search tool probe.
+	remoteToolProbeTimeout = 5 * time.Second
+	// remoteSearchMaxOutput is the most remote output kept per stream.
+	remoteSearchMaxOutput = 8 << 20
+)
+
+// remoteGrepSkipDirs are the directory names the grep fallback never descends into, matching
+// the finder's local skip list.
+var remoteGrepSkipDirs = []string{".git", "node_modules", "target", "__pycache__", ".hg", ".svn", ".DS_Store"}
+
+// remoteSearch is the project-wide search over a remote workspace: a searchpanel.Searcher
+// and BatchSearcher that runs ripgrep (or grep) through the authority's one-shot surface
+// with the remote workspace as cwd. The local project search is never consulted.
+type remoteSearch struct {
+	one      authority.OneShot
+	root     string        // absolute remote workspace root
+	timeout  time.Duration // bounds one search run (remoteSearchTimeout unless a test says otherwise)
+	spawnEnv func() []string
+}
+
+// newRemoteProjectSearch returns the remote project search over root.
+func newRemoteProjectSearch(one authority.OneShot, root string, spawnEnv ...func() []string) *remoteSearch {
+	s := &remoteSearch{one: one, root: root, timeout: remoteSearchTimeout}
+	if len(spawnEnv) > 0 {
+		s.spawnEnv = spawnEnv[0]
+	}
+	return s
+}
+
+// ProjectSearchBatches starts one remote search and returns the channel its whole-file
+// batches arrive on. Closing cancel asks the remote process to stop and closes the channel
+// without a Done batch (a superseded search).
+func (s *remoteSearch) ProjectSearchBatches(req searchpanel.SearchRequest, cancel <-chan struct{}) <-chan searchpanel.SearchBatch {
+	out := make(chan searchpanel.SearchBatch)
+	go s.searchBatches(req, cancel, out)
+	return out
+}
+
+// ProjectSearch runs the whole remote search and returns one result, draining the batches
+// (used when the panel does not take the streaming path).
+func (s *remoteSearch) ProjectSearch(req searchpanel.SearchRequest) (searchpanel.SearchResult, error) {
+	var out searchpanel.SearchResult
+	for batch := range s.ProjectSearchBatches(req, make(chan struct{})) {
+		out.Files = append(out.Files, batch.Files...)
+		out.Truncated = out.Truncated || batch.Truncated
+		out.SkippedCount, out.Skipped = batch.SkippedCount, batch.Skipped
+		if batch.Done && batch.Err != "" {
+			return out, errors.New(batch.Err)
+		}
+	}
+	return out, nil
+}
+
+// searchBatches probes the remote search tool, runs it and streams whole-file batches. A
+// cancelled search closes the channel without a Done batch.
+func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-chan struct{}, out chan<- searchpanel.SearchBatch) {
+	defer close(out)
+	cancelled := func() bool {
+		select {
+		case <-cancel:
+			return true
+		default:
+			return false
+		}
+	}
+	send := func(batch searchpanel.SearchBatch) bool {
+		select {
+		case <-cancel:
+			return false
+		case out <- batch:
+			return true
+		}
+	}
+	if req.Query == "" {
+		send(searchpanel.SearchBatch{Done: true})
+		return
+	}
+	q := search.Query{
+		Text:          req.Query,
+		CaseSensitive: req.Options.CaseSensitive,
+		WholeWord:     req.Options.WholeWord,
+		Regex:         req.Options.Regex,
+	}
+	if err := validateQuery(q); err != nil {
+		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
+		return
+	}
+	// Only the project-files scope maps to a remote directory walk; the open-buffer and
+	// current-file scopes are local snapshot concepts and are not wired remotely.
+	if req.Scope != searchpanel.AllFiles {
+		send(searchpanel.SearchBatch{Done: true, Err: "project search in a remote workspace searches project files; this scope is not available remotely"})
+		return
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = searchpanel.DefaultLimit
+	}
+	// The panel hands the file index snapshot (already filtered by its glob), so results
+	// outside it are skipped; an empty snapshot (index not ready) searches the whole remote
+	// tree with the tool's own ignore rules.
+	allowed := remoteAllowedFiles(req.Files)
+	ctx, stop := context.WithTimeout(context.Background(), s.timeout)
+	defer stop()
+	done := make(chan struct{})
+	defer close(done)
+	if cancel != nil {
+		go func() {
+			select {
+			case <-cancel:
+				stop()
+			case <-done:
+			}
+		}()
+	}
+	tool, err := s.probeTool(ctx)
+	if err != nil {
+		if cancelled() {
+			return
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			send(searchpanel.SearchBatch{Done: true, Err: "remote search tool probe timed out"})
+			return
+		}
+		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
+		return
+	}
+	res, err := s.run(ctx, s.root, remoteSearchArgv(tool, req))
+	if err != nil {
+		if cancelled() {
+			return
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			send(searchpanel.SearchBatch{Done: true, Err: "remote search timed out"})
+			return
+		}
+		send(searchpanel.SearchBatch{Done: true, Err: "remote search failed: " + err.Error()})
+		return
+	}
+	if cancelled() {
+		return
+	}
+	if res.Code > 1 {
+		send(searchpanel.SearchBatch{Done: true, Err: fmt.Sprintf("%s failed on the remote host (exit %d)", tool, res.Code)})
+		return
+	}
+	truncated := res.Truncated
+	pending := make([]searchpanel.FileMatches, 0, searchBatchFiles)
+	pendingMatches := 0
+	totalMatches := 0
+	flush := func(done bool) bool {
+		batch := searchpanel.SearchBatch{Files: pending, Truncated: truncated, Done: done}
+		if !send(batch) {
+			return false
+		}
+		pending, pendingMatches = nil, 0
+		return true
+	}
+	var current *searchpanel.FileMatches
+	currentRel := ""
+	flushCurrent := func() bool {
+		if current == nil {
+			return true
+		}
+		pending = append(pending, *current)
+		pendingMatches += len(current.Matches)
+		current = nil
+		if len(pending) >= searchBatchFiles || pendingMatches >= searchBatchMatches {
+			return flush(false)
+		}
+		return true
+	}
+	for _, line := range strings.Split(string(res.Stdout), "\n") {
+		if line == "" || cancelled() {
+			break
+		}
+		rel, lineNo, lineText, byteCol, ok := parseRemoteGrepLine(tool, line)
+		if !ok {
+			continue
+		}
+		if allowed != nil && !allowed[rel] {
+			continue
+		}
+		if rel != currentRel {
+			if !flushCurrent() {
+				return
+			}
+			currentRel = rel
+			current = &searchpanel.FileMatches{Name: rel, Path: joinRemotePath(s.root, rel)}
+		}
+		matches := remoteLineMatches(q, lineNo, lineText, byteCol, totalMatches+len(current.Matches), limit)
+		current.Matches = append(current.Matches, matches...)
+		totalMatches += len(matches)
+		if totalMatches >= limit {
+			truncated = true
+			break
+		}
+	}
+	if !flushCurrent() {
+		return
+	}
+	flush(true)
+}
+
+// remoteAllowedFiles turns the panel's project-relative file snapshot into a membership set
+// for filtering the remote tool's output, or nil when the snapshot is empty (the panel then
+// searches the whole remote tree).
+func remoteAllowedFiles(files []string) map[string]bool {
+	if len(files) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(files))
+	for _, f := range files {
+		out[strings.TrimPrefix(f, "./")] = true
+	}
+	return out
+}
+
+// probeTool finds which search tool the remote host has: ripgrep first, grep second. The
+// probe is one bounded POSIX sh command (constant script, no user text) so both tools and
+// their absence are distinguished reliably.
+func (s *remoteSearch) probeTool(ctx context.Context) (string, error) {
+	probeCtx, stop := context.WithTimeout(ctx, remoteToolProbeTimeout)
+	defer stop()
+	const script = "if command -v rg >/dev/null 2>&1; then printf rg; elif command -v grep >/dev/null 2>&1; then printf grep; else printf none; fi"
+	res, err := s.run(probeCtx, s.root, []string{"sh", "-c", script})
+	if err != nil {
+		return "", fmt.Errorf("remote search tool probe failed: %w", err)
+	}
+	switch strings.TrimSpace(string(res.Stdout)) {
+	case "rg":
+		return "rg", nil
+	case "grep":
+		return "grep", nil
+	default:
+		return "", errors.New("no search tool on the remote host: install ripgrep (rg) or grep")
+	}
+}
+
+// remoteSearchArgv builds the remote search command line: no shell, the query is a single
+// -e argument. rg uses its vimgrep output (file:line:byte-column:text); grep falls back to
+// -r -n -I and the column is recovered from the line text.
+func remoteSearchArgv(tool string, req searchpanel.SearchRequest) []string {
+	switch tool {
+	case "rg":
+		argv := []string{"rg", "--vimgrep", "--no-heading", "--color", "never", "--no-messages"}
+		if !req.Options.CaseSensitive {
+			argv = append(argv, "-i")
+		}
+		if req.Options.WholeWord {
+			argv = append(argv, "-w")
+		}
+		if !req.Options.Regex {
+			argv = append(argv, "-F")
+		}
+		return append(argv, "-e", req.Query, ".")
+	default:
+		argv := []string{"grep", "-r", "-n", "-I", "--color=never"}
+		for _, dir := range remoteGrepSkipDirs {
+			argv = append(argv, "--exclude-dir="+dir)
+		}
+		if !req.Options.CaseSensitive {
+			argv = append(argv, "-i")
+		}
+		if req.Options.WholeWord {
+			argv = append(argv, "-w")
+		}
+		if req.Options.Regex {
+			argv = append(argv, "-E")
+		} else {
+			argv = append(argv, "-F")
+		}
+		return append(argv, "-e", req.Query, ".")
+	}
+}
+
+// remoteGrepLine matches both rg's file:line:byte-column:text and grep's file:line:text,
+// where the path may itself hold colons.
+var (
+	remoteRGLine       = regexp.MustCompile("^(.+?):([0-9]+):([0-9]+):(.*)$")
+	remoteGrepTextLine = regexp.MustCompile("^(.+?):([0-9]+):(.*)$")
+)
+
+// parseRemoteGrepLine splits one output line. byteCol is 0 for grep (no column printed).
+func parseRemoteGrepLine(tool, line string) (rel string, lineNo int, text string, byteCol int, ok bool) {
+	if tool == "rg" {
+		m := remoteRGLine.FindStringSubmatch(line)
+		if m == nil {
+			return "", 0, "", 0, false
+		}
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			return "", 0, "", 0, false
+		}
+		col, err := strconv.Atoi(m[3])
+		if err != nil {
+			return "", 0, "", 0, false
+		}
+		return strings.TrimPrefix(m[1], "./"), n, m[4], col, true
+	}
+	m := remoteGrepTextLine.FindStringSubmatch(line)
+	if m == nil {
+		return "", 0, "", 0, false
+	}
+	n, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "", 0, "", 0, false
+	}
+	return strings.TrimPrefix(m[1], "./"), n, m[3], 0, true
+}
+
+// remoteLineMatches finds the matches on one output line with the same search engine the
+// local project search uses (no IO: the line text came from the remote process). When the
+// engine finds nothing (for example a regex the line split broke), a synthetic match at
+// the reported byte column keeps the hit visible. It returns at most limit-total matches.
+func remoteLineMatches(q search.Query, lineNo int, line string, byteCol, total, limit int) []searchpanel.Match {
+	line = strings.TrimRight(line, "\r")
+	remaining := limit - total
+	if remaining <= 0 {
+		return nil
+	}
+	b := buffer.New(line)
+	matches, err := search.Find(b, q)
+	var out []searchpanel.Match
+	if err == nil {
+		for _, m := range matches {
+			if len(out) >= remaining {
+				break
+			}
+			out = append(out, searchpanel.Match{
+				Line:    lineNo,
+				Col:     m.Start.Col + 1,
+				Len:     matchRunes(b, m),
+				Text:    line,
+				EndLine: m.End.Line + 1,
+				EndCol:  m.End.Col + 1,
+			})
+		}
+	}
+	if len(out) == 0 {
+		col := 1
+		if byteCol > 1 && byteCol-1 <= len(line) {
+			col = utf8.RuneCountInString(line[:byteCol-1]) + 1
+		}
+		out = append(out, searchpanel.Match{Line: lineNo, Col: col, Len: len([]rune(q.Text)), Text: line})
+	}
+	return out
+}
+
+// run performs one remote command bounded by the search's deadline and output cap.
+func (s *remoteSearch) run(ctx context.Context, cwd string, argv []string) (hostos.ProcResult, error) {
+	var envEntries []string
+	if s.spawnEnv != nil {
+		// The active remote environment's captured delta: PATH/tool dirs and the rest of
+		// what the recipe changed on the remote host, so project search runs in the same
+		// environment as the terminal, LSP and git grep.
+		envEntries = s.spawnEnv()
+	}
+	return s.one.Run(ctx, argv, hostos.ProcOptions{Cwd: cwd, Env: remoteEnvMap(envEntries), MaxOutput: remoteSearchMaxOutput})
+}
+
+// installRemoteSearchPorts wires the remote project search and git grep adapters into the
+// root ports, keeping project replace unwired (a safe remote replace needs verified remote
+// writes and a backup/atomic strategy) and the local preview out of the remote panel.
+func installRemoteSearchPorts(ports *tui.RootPorts, one authority.OneShot, root string, spawnEnv func() []string) {
+	ports.ProjectSearch = newRemoteProjectSearch(one, root, spawnEnv)
+	ports.GitGrep = newRemoteGitGrep(one, root, spawnEnv)
+	ports.ProjectReplace = nil
+}
+
+// remoteGitGrep runs git grep on the remote host: the repository root is resolved remotely
+// (git rev-parse --show-toplevel through the same one-shot surface), then git grep runs
+// there. Result paths are absolute remote paths, so selecting a hit opens it through the
+// document file access; the local git state is never consulted.
+type remoteGitGrep struct {
+	one      authority.OneShot
+	root     string // absolute remote workspace root
+	spawnEnv func() []string
+}
+
+// newRemoteGitGrep returns the remote git grep over root.
+func newRemoteGitGrep(one authority.OneShot, root string, spawnEnv func() []string) *remoteGitGrep {
+	return &remoteGitGrep{one: one, root: root, spawnEnv: spawnEnv}
+}
+
+// GitGrep implements searchpanel.GitGrepper.
+func (g *remoteGitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, error) {
+	var out searchpanel.GitResult
+	if req.Query == "" {
+		return out, nil
+	}
+	var extraEnv []string
+	if g.spawnEnv != nil {
+		extraEnv = g.spawnEnv()
+	}
+	top, code, err := runGitGrepOneShot(g.one, g.root,
+		[]string{"git", "-c", "core.quotePath=false", "rev-parse", "--show-toplevel"}, extraEnv, gitGrepTimeout)
+	if err != nil {
+		return out, err
+	}
+	repo := strings.TrimSpace(top)
+	if code != 0 || repo == "" {
+		return out, fmt.Errorf("not a git repository: %s", g.root)
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	text, code, err := runGitGrepOneShot(g.one, repo, gitGrepArgv(req), extraEnv, gitGrepTimeout)
+	if err != nil {
+		return out, err
+	}
+	if code > 1 {
+		return out, fmt.Errorf("git grep failed (exit %d)", code)
+	}
+	if code == 1 || text == "" {
+		return out, nil
+	}
+	return parseGitGrepOutput(text, limit, len([]rune(req.Query)), func(rel string) string {
+		return joinRemotePath(repo, rel)
+	}), nil
+}
+
+// joinRemotePath joins a slash-separated remote relative path onto a remote directory,
+// keeping remote (POSIX) separators and an absolute path absolute.
+func joinRemotePath(root, rel string) string {
+	rel = strings.TrimPrefix(rel, "./")
+	if strings.HasPrefix(rel, "/") {
+		return rel
+	}
+	if root == "" || root == "/" {
+		return "/" + rel
+	}
+	return strings.TrimSuffix(root, "/") + "/" + rel
+}

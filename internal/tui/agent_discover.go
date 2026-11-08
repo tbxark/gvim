@@ -155,7 +155,7 @@ func (o *agentDiscoverOverlay) cmdFor(r picker.Result) tea.Cmd {
 			session := *row.tmux
 			cmd, ok := o.m.dock.StartDiscovered(session.AttachArgv, discoverTabName(session))
 			if !ok {
-				o.m.notice = "Terminal: could not open the discovered session"
+				o.m.notice = uiText("gvim.notice.agent.terminal_open_failed", "Terminal: could not open the discovered session")
 				continue
 			}
 			cmds = append(cmds, cmd)
@@ -237,7 +237,7 @@ func (o *agentDiscoverOverlay) importSelected() (Overlay, tea.Cmd) {
 	if launcher, ok := o.m.workspace.(WorkspaceLauncher); ok {
 		cmd, err := launcher.CreateWithLaunch(root, label, launch)
 		if err != nil {
-			o.m.notice = "Import: " + err.Error()
+			o.m.notice = uiTextVars("gvim.notice.agent.import_error", "Import: %{error}", map[string]any{"error": err.Error()})
 			return o, nil
 		}
 		return nil, cmd
@@ -246,7 +246,7 @@ func (o *agentDiscoverOverlay) importSelected() (Overlay, tea.Cmd) {
 	// and state the reduction with the command that rejoins the session.
 	cmd, err := o.m.workspace.Create(root, label)
 	if err != nil {
-		o.m.notice = "Import: " + err.Error()
+		o.m.notice = uiTextVars("gvim.notice.agent.import_error", "Import: %{error}", map[string]any{"error": err.Error()})
 		return o, nil
 	}
 	o.m.notice = agentDiscoverNoQueuedLaunch + fallback

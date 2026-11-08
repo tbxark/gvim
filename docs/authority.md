@@ -36,6 +36,15 @@ and the injected `EnvProvider` is merged into the process options/environment. T
 single choke point: no spawner needs to remember to consult trust or the activated env. The
 local backend applies the same rule as the remote ones.
 
+An `EnvProvider` is merged into LOCAL children only. A remote launch never sends the
+local overlay: its environment is `env.Remote`, whose marker probe and activation
+recipe run on the REMOTE host through the authority's one-shot surface (a raw exec with no
+env map of its own, so capture cannot recurse). The captured delta is the environment the
+remote terminal, the shell/formatter runner, remote LSP and remote project search/git grep
+receive. That keeps a local secret (or any local variable) out of every ssh command and
+makes the remote project environment actually take effect (R13-13); Fresh's
+backend-agnostic provider re-captures through the active backend the same way.
+
 ## 3. Local backend
 
 `authority.Local(LocalOptions{OS, Gate, Env, Shell})` mounts the four surfaces over the
@@ -68,7 +77,8 @@ Rules (all covered by table tests):
   the host↔remote translation seam (identity for SSH; a container backend will map the
   project root). `RemoteCommand`/`ShellQuote`/`QuoteDir` compose the remote command line:
   `cd <dir> && env K=V ... argv...`, POSIX-quoted, with `~`/`~user` left for the remote shell
-  to expand.
+  to expand. The env entries are the session's REMOTE captured delta (`env.Remote`),
+  never the local process environment.
 
 ## 5. SSH backend
 
@@ -92,8 +102,10 @@ Rules (all covered by table tests):
   (`Output` chunks, `Wait`, `Kill`, `Terminate`). This is the future LSP route; LSP is not
   routed in this slice.
 - Terminal: exec channel with `RequestPty("xterm-256color", rows, cols)`, remote command
-  `cd <workspace> && exec "$SHELL" -l` (the remote login shell; the local
-  `terminal.shell` override deliberately does not apply), stderr merged into the output,
+  `cd <workspace> && [env K=V ...] "$SHELL" -l` (the remote login shell; the local
+  `terminal.shell` override deliberately does not apply; the optional env prefix is the
+  session's remote captured project delta, POSIX-quoted as data), stderr merged into the
+  output,
   resize through `WindowChange`, transport `Backend` wrapped by
   `terminal.StartWithBackend`.
 - Files: the remote `FileSystem` is mounted (`authority/ssh_files.go`): bounded `sh -c`
@@ -188,8 +200,10 @@ deliberately does not take.
   installs a spawner that starts the configured command verbatim on the remote host in the
   remote workspace, overrides the initialize root URI with the remote workspace path
   (`~` expanded through the remote shell's `$HOME`), clears the locally resolved Program
-  (the remote shell resolves a bare command in the remote PATH), keeps the remote login
-  environment rather than the local env overlay, and feeds the remote child's stdio through
+  (the remote shell resolves a bare command in the remote PATH), starts it in the session's
+  REMOTE captured project environment delta (`env.Remote`) on top of the remote login
+  environment - the local env overlay never applies remotely - and feeds the remote child's
+  stdio through
   a pipe adapter into the normal lsp client. The server's stderr is captured for the error
   tail, and a configured `process_limits` is recorded as not applied remotely (the limits
   would run on the local ssh client, not the remote host). The workspace spawn gate still
@@ -222,8 +236,19 @@ deliberately does not take.
 The app mounts the slot in `internal/app/authority_app.go` and keeps it on the runtime:
 
 - Local launches: `authority.Local` over the plugin host's OS instance (the same one the plugin
-  runtime uses; `pluginhost.Wiring.OS` is exposed for this), with the project env overlay
-  as the env provider and the workspace-trust check as the gate for remote launches.
+  runtime uses; `pluginhost.Wiring.OS` is exposed for this), with the local project env
+  overlay as the env provider and the workspace-trust check as the gate. The plugin host of a
+  LOCAL launch sees that overlay too; a remote launch's plugin host (which runs locally) gets
+  no project environment, so a remote-captured variable never leaks back into local children.
+- Remote launches' environment (R13-13): `env.Remote` detects the configured markers on the
+  remote host (one bounded shell probe of the marker files) and activates the recipe through
+  the authority one-shot surface, diffing the remote activated environment against the remote
+  login baseline. Its captured delta is what the remote terminal, shell/formatter runner,
+  remote LSP, remote project search and git grep receive; the local overlay is passed to no
+  remote process. Activation is trust-gated exactly like the local path. The provider is
+  warmed in the background after the authority connects (the remote root is expanded first);
+  spawn paths read the cached delta and never block the UI update loop on the remote host.
+  Detection/activation is otherwise explicit (Env: Activate/Reload), matching local.
 - Remote launches (`gvim user@host:/path`, `ssh://...`): `authority.NewSSH` mounts a
   disconnected slot; a startup attempt dials it, and a failure is a status notice
   ("activate the window to reconnect"). Activation (`tea.FocusMsg`) reconnects, asking
@@ -279,7 +304,8 @@ Residuals of this slice (documented, not bugs):
   the drop (a server the user stopped or a muted language is kept as chosen; a start that is
   already in flight when the carrier drops again is not cancelled mid-handshake — the
   context is checked between servers), each server gets one restart attempt per reconnect
-  (no background retry/backoff), a remote server's `process_limits` are recorded but cannot
+  (the carrier itself now retries in the background, but a failed restart waits for a manual
+  Start/Restart), a remote server's `process_limits` are recorded but cannot
   be applied (the local pid is the ssh client), the remote command is resolved by the remote
   login shell's PATH only (no remote install probe; a missing server surfaces the start
   error), and the remote workspace's trust decision still uses the local workspace's trust
@@ -287,6 +313,26 @@ Residuals of this slice (documented, not bugs):
   the safe version (respawn the recorded login shell or a user-approved argv, transcript
   preserved, never a silent replay of an arbitrary command) is not landed yet, so the
   terminal is restarted explicitly today.
+- Remote environment residuals: the probe/capture runs through `sh -c` on the ssh exec
+  channel with the remote login baseline, not through the user's interactive remote login
+  shell, so a detector whose activation needs interactive-shell initialization may capture a
+  different delta than a remote terminal would; changed remote env input files are not
+  watched (Env: Reload or a new activation re-captures), the detection result is cached until
+  Refresh/reconnect, the Settings Environment rows show the remote facts only after the
+  background warm, and there is no status-row indicator of the active remote environment yet
+  (Fresh shows one). Local behavior is unchanged.
+- SSH authentication/connection residuals: ssh-agent forwarding and \`ssh_config\` reading
+  (ProxyJump, Host aliases, IdentityAgent, host-key algorithms) are not implemented; the known
+  hosts file is the default \`~/.ssh/known_hosts\` only; a supplied password/passphrase/2FA
+  answer is kept in memory for the session (no keyring/agent integration); the passphrase is
+  asked for only after a dial reports it needs one (no interactive first-open prompt for a
+  key that is decrypted on demand either way); keyboard-interactive is replayed as one answer
+  per server question, with no server-specific OTP retry policy beyond re-asking the whole
+  challenge; prompt input follows the existing prompt overlay style (no new masking option
+  was added); the keepalive interval/timeout and the poll/backoff bounds are package
+  variables, not user settings; a background retry that needs credentials opens the prompt
+  once per disconnect cycle and then waits for activation if the user cancels; every test is
+  offline against in-process servers (no real host/2FA provider).
 - The remote workspace's trust decision uses the local workspace's trust in this slice
   (a remote workspace needs its own trust store in a later slice).
 - A dropped carrier does not resurrect an open remote terminal (open parity gap, see
@@ -302,6 +348,16 @@ Residuals of this slice (documented, not bugs):
 - Spec parser: both forms, defaults, ports, IPv6, percent-decoding, line/column suffixes,
   colons in paths, windows-ish/local forms, malformed `ssh://` errors.
 - Fake authority: state transitions and reconnect for the indicator/activation hooks.
+- SSH authentication and keepalive (offline): an encrypted identity reports
+  \`ErrNeedsPassphrase\` and \`ReconnectWithPassphrase\` redials with the secret; a
+  keyboard-interactive 2FA challenge is recorded with its questions/echo flags and
+  \`ReconnectWithAnswers\` completes the dial; a server that never answers keepalive pings
+  flips the slot to disconnected with a keepalive reason and a reconnect restarts the
+  carrier (\`authority/ssh_auth_test.go\`, \`authority/ssh_keepalive_test.go\`).
+- TUI authority retry/prompt behavior: key passphrase prompt reconnects with the secret,
+  2FA asks each question and replays the answers in order, the background poll retries with
+  capped backoff and one dial in flight, and the status row shows "reconnecting" while a
+  dial runs (\`internal/tui/authority_retry_test.go\`).
 - Terminal transport: `StartWithBackend` over a fake backend (paint, input, resize, close).
 - SSH backend against an in-process `x/crypto/ssh` server (unix-only build tag): one-shot
   command composition and exit codes, PTY terminal with echo/resize, long-running stdio,

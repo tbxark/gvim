@@ -30,8 +30,8 @@ import (
 // and state and an enable/disable action, the reload row, and the read-only
 // settings the user config holds.
 func (s *settingsService) structurePlugins(cfg config.Config, project bool) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: "plugins", Title: "Plugins", Kind: "fields"}
-	st.Note = "Enablement is the user config layer. Declared plugin settings are listed read-only with their effective values; edit plugins.<name>.settings in the config (docs/settings.md)."
+	st := tui.SettingsStructure{Key: "plugins", Title: settingsPage("plugins", "Plugins"), Kind: "fields"}
+	st.Note = settingsNote("plugins", "Enablement is the user config layer. Declared plugin settings are listed read-only with their effective values; edit plugins.<name>.settings in the config (docs/settings.md).")
 	if s.rt.plugins == nil {
 		st.Rows = append(st.Rows, tui.SettingsStructureRow{
 			Name: "No plugin runtime", Value: "disabled", Locked: true,

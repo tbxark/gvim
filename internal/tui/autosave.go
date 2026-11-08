@@ -81,7 +81,7 @@ func autoSaveWrite(jobs []editor.SaveJob) tea.Cmd {
 func (m *Model) autoSaveDone(msg autoSaveDoneMsg) tea.Cmd {
 	if as, ok := m.ed.(asyncAutoSaver); ok {
 		if err := as.ApplyAutoSave(msg.results); err != nil {
-			m.notice = "auto-save failed: " + err.Error()
+			m.notice = uiTextVars("gvim.notice.autosave.failed", "auto-save failed: %{error}", map[string]any{"error": err.Error()})
 		}
 		m.plugSaved(msg.results)
 	}

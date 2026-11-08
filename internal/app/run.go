@@ -525,6 +525,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		opts.pluginLog = logFile.Plugin
 	}
 	deps := uiadapter.NewDeps(ed, km, th, tree, files)
+	// The release check behind the status row element {update}: one bounded
+	// background request at startup, a daily debounce, and no error path the user
+	// must handle (docs/settings.md).
+	deps.Updates = newUpdateHooks(&cfg)
 	var trustCtl *trustController
 	if trustStore != nil {
 		trustCtl = newTrustController(trustStore, trustState)
@@ -540,7 +544,25 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		return trustState.Level
 	}
 	trustedLive := func() bool { return levelOf() == trust.Trusted }
-	envProvider := env.New(root, cfg.EnvDetectors(), trustedLive)
+	// The project environment: a local launch detects and activates locally; a remote
+	// launch uses env.Remote, whose marker probe and activation run on the REMOTE host
+	// through the authority's one-shot surface, so the local overlay (and any secret in
+	// it) never reaches the remote host (#R13-13, Fresh's backend-agnostic provider).
+	var authSlot authority.Slot
+	var envRemote *env.Remote
+	var envProvider workspaceEnv
+	if opts.Remote != nil {
+		envRemote = env.NewRemote(opts.Remote.Workspace(), cfg.EnvDetectors(), trustedLive,
+			newRemoteEnvRunner(func() authority.Slot { return authSlot }, func() string {
+				if envRemote == nil {
+					return ""
+				}
+				return envRemote.Root()
+			}))
+		envProvider = envRemote
+	} else {
+		envProvider = env.New(root, cfg.EnvDetectors(), trustedLive)
+	}
 	levelLive := func() string { return string(levelOf()) }
 	// The workspace spawn gate (docs/trust.md): Fresh's executable-path rule with the
 	// child's effective PATH resolved, read live so a decision applies to the next
@@ -663,13 +685,13 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		Version:  gvimVersion(),
 		Preset:   presetKeymap(opts.Keymap, cfg),
 		Root:     proj.RootDir,
-		SpawnEnv: envProvider.Overlay,
+		SpawnEnv: localEnvOverlay(envProvider, opts.Remote != nil),
 		Gate:     spawnGate,
 	})
 	// The workspace authority: the local backend over the plugin OS (the same
 	// instance the plugin runtime uses) or the SSH backend of a remote launch. Every
 	// launch and one-shot goes through it; nothing downstream looks at the kind.
-	authSlot := newAuthority(opts, pw, authGate, spawnGate, envProvider.Overlay)
+	authSlot = newAuthority(opts, pw, authGate, spawnGate, localEnvOverlay(envProvider, opts.Remote != nil))
 	if connectNotice, _ := attemptAuthorityConnect(ctx, authSlot); connectNotice != "" {
 		openNotices = append(openNotices, connectNotice)
 	}
@@ -687,7 +709,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			if setter, ok := deps.LSP.(interface {
 				SetSpawner(func(context.Context, lsp.Config) (*lsp.Client, error))
 			}); ok {
-				setter.SetSpawner(remoteLSPSpawner(authSlot, opts.Remote.Workspace()))
+				setter.SetSpawner(remoteLSPSpawner(authSlot, opts.Remote.Workspace(), envProvider.Overlay))
 			}
 		}
 		// The quick-open file list comes from the remote workspace through the
@@ -699,14 +721,43 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		deps.Files = remoteFiles
 		deps.FileRoot = remoteRoot
 		remoteRootPorts(&deps.Root)
+		// The remote root is now resolved (a ~ root is expanded on the remote host):
+		// point the remote environment provider at it and warm its marker probe/capture
+		// in the background, so the first remote spawn reads a captured remote delta
+		// and no UI update ever waits on the remote host.
+		if envRemote != nil {
+			envRemote.SetRoot(remoteRoot)
+			go envRemote.Warm(ctx)
+		}
+		// Project search and Git Grep run on the remote host through the authority's
+		// one-shot surface (the gate still applies); their results carry absolute remote
+		// paths, so selecting one opens through the remote document access. Project
+		// replace stays unwired (remoteProjectReplace is nil): a safe remote replace needs
+		// verified remote reads/writes and a backup/atomic strategy. The local ports stay
+		// cleared by remoteRootPorts for every other caller.
+		installRemoteSearchPorts(&deps.Root, authSlot.OneShot(), remoteRoot, envProvider.Overlay)
+		// The read-only remote explorer: the tree lists the remote directories through
+		// the authority file system, one command at a time, so the update loop never
+		// waits on the remote host. No local fallback: every listing is remote, the
+		// workspace trust gate runs before them, and a disconnected authority says so
+		// (the tree is reloaded after a reconnect). The tree is read-only, so the local
+		// file-operation adapter is cleared; file operations on the remote tree are a
+		// recorded gap (Fresh supports them over the authority).
+		deps.Explorer = tui.NewRemoteExplorerTree(remoteRoot, newAuthorityDirLoader(authSlot, authGate, remoteRoot))
+		deps.ShowExplorer = true
+		deps.Ops = nil
 	}
 	// Remote external-change watching: bridge the authority's remote watch into the root's
 	// existing watch pipeline (RootPorts.Watch/WatchDirs). A local launch gets nil here and
 	// keeps its fsnotify watcher; the remote writer never touches the local filesystem.
 	remoteFileWatch := setupRemoteWatch(ctx, &deps, authSlot, opts.Remote)
-	// The one-shots of the session go through the slot: git grep here, the shell and
-	// formatter runner below, the dock terminal through its starter.
-	deps.Root.GitGrep = gitGrep{spawnEnv: envProvider.Overlay, oneShot: authSlot.OneShot()}
+	// The one-shots of the session go through the slot: the shell and formatter runner
+	// below, the dock terminal through its starter, and the local git grep here. A remote
+	// launch already installed the authority-backed Git Grep port in its block above; do
+	// not overwrite it with the local adapter (which would resolve the local work tree).
+	if opts.Remote == nil {
+		deps.Root.GitGrep = gitGrep{spawnEnv: envProvider.Overlay, oneShot: authSlot.OneShot()}
+	}
 	deps.Root.Plugins = pw.Runtime
 	deps.Root.PluginEditor = pw.Editor
 	deps.Root.PluginKeys = func(name string, bs []pluginapi.Binding) (tui.Keymap, error) {
@@ -816,7 +867,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			NoMouseDragSelects:   !cfg.Terminal.MouseDragSelects,
 			PassCtrlVWithoutText: cfg.Terminal.PassCtrlVWithoutText,
 			ResumeAgents:         cfg.Terminal.ResumeAgents,
-			Agents:               dockAgents(cfg.Terminal),
+			// terminal.restore_live (a gvim extension, default true = Fresh's
+			// behavior): a live-at-capture tab revives with a fresh PTY on the
+			// user's first dive into it; exited tabs stay read-only.
+			RestoreLive: cfg.Terminal.RestoreLive,
+			Agents:      dockAgents(cfg.Terminal),
 		},
 	})
 	// Agent discovery scans the local machine through the same spawn gate as the
@@ -845,10 +900,46 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		model.SetAuthorityHooks(tui.AuthorityHooks{
 			Status: func() tui.AuthorityStatus {
 				st := slot.State()
-				return tui.AuthorityStatus{Text: st.Label, Connected: st.Connected, Reason: st.Reason}
+				return tui.AuthorityStatus{Text: st.Label, Connected: st.Connected, Reason: st.Reason, Connecting: st.Connecting}
 			},
 			NeedsPassword: needsPassword,
 			Reconnect:     reconnect,
+			// Encrypted identity passphrase and keyboard-interactive (2FA) prompts:
+			// the authority records the request and this hook asks for it once the
+			// terminal window is active or the background poll sees it.
+			NeedsPassphrase: func() bool {
+				p, ok := slot.(interface{ NeedsPassphrase() bool })
+				return ok && p.NeedsPassphrase()
+			},
+			ReconnectWithPassphrase: func(ctx context.Context, passphrase string) error {
+				if p, ok := slot.(interface {
+					ReconnectWithPassphrase(context.Context, string) error
+				}); ok {
+					return p.ReconnectWithPassphrase(ctx, passphrase)
+				}
+				return slot.Reconnect(ctx)
+			},
+			KeyboardPrompt: func() ([]string, []bool, bool) {
+				p, ok := slot.(interface {
+					KeyboardInteractiveChallenge() (authority.KeyboardPrompt, bool)
+				})
+				if !ok {
+					return nil, nil, false
+				}
+				challenge, pending := p.KeyboardInteractiveChallenge()
+				if !pending {
+					return nil, nil, false
+				}
+				return challenge.Questions, challenge.Echos, true
+			},
+			ReconnectWithAnswers: func(ctx context.Context, answers []string) error {
+				if p, ok := slot.(interface {
+					ReconnectWithAnswers(context.Context, []string) error
+				}); ok {
+					return p.ReconnectWithAnswers(ctx, answers)
+				}
+				return slot.Reconnect(ctx)
+			},
 			// LSP over SSH: after the connection is back, restart the remote servers
 			// that were running before the drop (never on the update goroutine; the
 			// manager honours trust and cancellation and starts no duplicate).

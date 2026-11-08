@@ -67,9 +67,14 @@ type Panel struct {
 	// saved width of a restored transcript); a content-width change reflows the
 	// rows to the new width (transcript.go reflowPrior).
 	priorWidth int
-	reflowed   bool // a restored transcript was re-wrapped to a different width
-	hover      hoverState
-	dragSeq    int // invalidates the auto-scroll ticks of older drags
+	// wasLive is a restored tab's saved liveness: it was running when the session
+	// was captured and may be revived on the user's first dive into the tab. It is
+	// cleared when the revive is attempted, so a failed start is not retried by
+	// another dive (an explicit Restart still works).
+	wasLive  bool
+	reflowed bool // a restored transcript was re-wrapped to a different width
+	hover    hoverState
+	dragSeq  int // invalidates the auto-scroll ticks of older drags
 	// restored is set when the dock shows a transcript restored from the session
 	// file, with no shell behind it (see transcript.go).
 	restored bool
@@ -368,6 +373,31 @@ func (p *Panel) contentSize() (cols, rows int) {
 		return 0, 0
 	}
 	return p.host.ContentSize()
+}
+
+// dive revives a restored tab that was live when the session was captured, the
+// first time the user switches to or focuses the tab after a restore (Fresh's
+// dive). It starts a fresh PTY with the same argv precedence an explicit Restart
+// uses — the recorded agent-resume argv when terminal.resume_agents is on, else
+// the launch argv, else the plain shell — in the recorded launch directory, and
+// keeps the saved transcript above the new shell. A tab that was exited at the
+// capture (Live false, the old-record default) and a record that terminal.restore_live
+// turned off never revive. The dive is attempted once: wasLive is cleared before
+// the start, so a failed start is not retried by another dive (an explicit Restart
+// still works). It returns nil when there is nothing to revive.
+func (p *Panel) dive() tea.Cmd {
+	if !p.restored || !p.wasLive || !p.effects.RestoreLive || p.term != nil || p.starting {
+		return nil
+	}
+	p.wasLive = false
+	p.restored = false
+	p.exited = false
+	p.open = true
+	dir := p.launchDir
+	if dir == "" {
+		dir = p.dir
+	}
+	return p.relaunch(dir)
 }
 
 // Update applies a dock message. It reports whether msg was one. Messages from an

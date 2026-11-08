@@ -222,11 +222,26 @@ background tabs' exited markers current.
   trailing blanks trimmed, control characters stripped); a corrupt file cannot
   make the loader allocate more. The order of the `tabs` array, not the tab
   names, is the saved tab order, and the active index tells which tab is shown on
-  restore, so a reorder survives an editor restart. Restored tabs are **read-only and dead** with
-  their saved names and active index, exactly like the single restored terminal:
-  no PTY is restarted automatically; Restart per tab starts a fresh shell (using
-  the saved launch record and launch directory when present: the agent
-  resume/launch argv, gated by `terminal.resume_agents`). In daemon mode the tab
+  restore, so a reorder survives an editor restart. The record also gains an
+  additive `live` flag per tab (and mirrored at the top level): whether a process
+  was running at the capture. It is optional, the format version stays 1, and an
+  older record without it is exited, so migration keeps the pre-live-restore
+  behavior. **Restore itself never starts a process**: every restored tab comes
+  back as the read-only transcript the record describes, with its saved name and
+  active index. A tab that was **exited at the capture** (`live` false, the old
+  record's meaning) stays that way — read-only/dead with its `(exited)` marker —
+  and only an explicit Restart starts anything. A tab that was **live at the
+  capture** is dormant rather than exited and shows no `(exited)` marker; the
+  first time the user *dives* into it after the restore (switches to the tab,
+  focuses the dock on it, or opens the dock on it) the dock revives it with a
+  fresh PTY: the recorded argv precedence (agent-resume when
+  `terminal.resume_agents` is on, else the launch argv, else the plain shell) in
+  its recorded `launch_dir`, with the saved transcript kept above it. This is
+  Fresh's Live restore: the PTY is ephemeral and re-spawned on the dive, and an
+  agent resume is deferred to that dive rather than done by the restore. The dive
+  is attempted once: a failed start is a notice, not a retry loop (Restart still
+  works). The gvim extension `terminal.restore_live` (default `true`) turns the
+  dive revival off, making every restored tab read-only. In daemon mode the tab
   set is scoped per workspace (see Terminal tabs in daemon workspaces below).
 ### Terminal tabs in daemon workspaces (#19a)
 
@@ -243,10 +258,13 @@ terminal record.
   active tab, transcripts and launch records are snapshotted into its session
   directory — and shows the target. A target that is still warm keeps its live
   tabs and their PTYs: switching away does not kill a shell. A dormant target is
-  materialized and its saved tabs are restored **read-only and dead**, exactly as a
-  single restored terminal; nothing starts automatically, and each tab can be
-  restarted on demand (agent resume included). The outgoing workspace stays warm,
-  so switching back returns to the same live shells and the same tab state.
+  materialized and its saved tabs are restored read-only/dead with their `live`
+  flags, exactly as a single restored terminal: nothing starts automatically, and
+  a tab that was live at the capture revives on the first dive into it in that
+  workspace's dock (same Fresh parity, `terminal.restore_live` and
+  `terminal.resume_agents` gates), while an exited tab stays dead until an
+  explicit Restart. The outgoing workspace stays warm, so switching back returns to
+  the same live shells and the same tab state.
 - **Closing.** Closing a workspace (or quitting the daemon) saves its capture and
   closes its runtime, which closes the dock and kills its shells. The registry file
   is removed but the session directory is kept, so the workspace can come back with
@@ -262,10 +280,14 @@ terminal record.
   launch records; no duplicate tabs on repeated capture), and read-only restore
   with no auto-launch (the shell's pid marker is untouched).
 
-Residuals of this pairing: Fresh restores terminal tabs **Live** and respawns the
-PTY on activation; gvim restores them read-only/dead until the user restarts (the
-same deliberate deviation as for a single terminal). A buffer shared across
-workspaces and extract-tab are the #19b policy decisions and remain open.
+Residuals of this pairing: Fresh respawns a restored live terminal on focus and
+fills it from a persisted backing file; gvim revives on the explicit dive with a
+fresh PTY above the saved transcript rows (the capture is bounded text, not the
+backing file/screen snapshot), and `terminal.restore_live = false` turns that
+off. Fresh can bring live tabs back without a dive because its layout focuses the
+tab; gvim's dock is not restored into an editor split, so the dive is the first
+user action on the dock. A buffer shared across workspaces and extract-tab are the
+#19b policy decisions and remain open.
 
 ## Persistence and reflow
 
@@ -280,11 +302,15 @@ capped at 500 rows / 256 KiB (the loader re-applies the same bounds and ignores 
 version it does not know).
 
 The state is only restored on the full session-restore path (not `--no-restore`
-or a hot-exit-only recovery). **A restored terminal is read-only and dead**:
-running processes are not persisted, nothing is re-run automatically, and the dock
-shows `Scrollback (restored)` over the saved transcript. Restart starts a shell in
-the saved directory and appends its output below the transcript; Ctrl+Space cannot
-return to a live screen that does not exist.
+or a hot-exit-only recovery). **A restored terminal is read-only until the user
+acts**: running processes are not persisted, and the dock shows
+`Scrollback (restored)` over the saved transcript. A terminal that was live at
+the capture revives with a fresh PTY on the user's first dive into the tab (see
+Terminal tabs above; Fresh's Live restore, gated by `terminal.restore_live` and
+the argv precedence under `terminal.resume_agents`); one that had exited stays
+dead, and Restart starts a shell in the saved directory and appends its output
+below the transcript. Ctrl+Space cannot return to a live screen that does not
+exist yet — the dive is what brings the live screen back.
 
 **Transcript reflow.** The live screen is x/vt's: a resize clips or pads it, and
 the history rows keep the cell widths they had when they scrolled off. The stored
@@ -369,6 +395,9 @@ re-runs the launch argv instead of the resume argv. An agent or resume program i
 a local executable in a local PTY: the workspace authority (a remote/sandboxed
 shell) applies to the dock's plain shell tabs only, because a re-parenting
 authority would launch the remote login shell and ignore the agent argv.
+Separately, a remote workspace's project search and Git Grep run through the
+authority's bounded one-shot surface (see docs/architecture.md section 8.1);
+those are commands, not PTY sessions, so they never reparent an agent.
 
 **Run Agent...** (hand-written palette row; Fresh has no command of this title
 because its agent sessions are plugin data) is a two-question dialog. The first
@@ -529,7 +558,8 @@ uses:
 | `terminal.jump_to_end_on_output` | bool, `true` | new output returns the view to the live screen unless a selection is active. |
 | `terminal.mouse_drag_selects` | bool, `true` | a live-grid drag selects text by dropping into scrollback; false makes live drags inert (scrollback drags and Shift+drags still select). |
 | `terminal.pass_ctrl_v_without_text` | bool, `true` | a Ctrl+V whose system clipboard has no text (an image, say) goes to the shell as the key itself instead of pasting the last yank; false pastes the last yank. An unreadable clipboard pastes the last yank either way. |
-| `terminal.resume_agents` | bool, `true` | a restart of an exited agent terminal runs its recorded resume argv instead of its launch argv. Turn it off to re-run the launch command. |
+| `terminal.resume_agents` | bool, `true` | a restart of an exited agent terminal runs its recorded resume argv instead of its launch argv. Turn it off to re-run the launch command. It also gates the resume argv of a live-at-capture tab revived on a dive. |
+| `terminal.restore_live` | bool, `true` | **gvim extension**, Fresh's Live-restore behavior: a tab that was live when the session was saved revives with a fresh PTY on the user's first dive into it after a restore (switch/focus/show), keeping the saved transcript above it and using the same argv precedence as a restart. Exited-at-capture tabs and old records without the `live` flag never revive. `false` restores every tab read-only. User layer only. |
 | `terminal.agents` | `[{ "name", "command", "args", "resume_args" }]`, empty | **gvim extension**: the agent presets Run Agent... offers and the resume metadata a restart uses (see Agent sessions and Run Agent). User layer only. |
 | `clipboard.use_osc52` | bool, `false` | let a program in the dock write the system clipboard with the OSC 52 escape (base64 text). Off by default: the child's output is untrusted data. When it is on, a write happens only if the workspace is trusted and only for the clipboard selection (selector `c` or empty); primary/select selections and cut-buffer numbers are ignored. The bytes still go to the emulator, which ignores the sequence. |
 | `clipboard.osc52_paste` | bool, `false` | **gvim extension**: answer a child's OSC 52 *read* request (`ESC ] 52 ; c ; ? BEL`) with the system clipboard, sent back to the child as terminal input. Off by default (a child reading the host clipboard is host data pasted into untrusted output). When on and the workspace is trusted: only selector `c`/empty is answered; text is capped at 64 KiB (larger, empty or unreadable clipboard = no reply); the response is base64 in `ESC ] 52 ; c ; … BEL` queued through the session's input inbox; restored/read-only transcripts and untrusted workspaces install no handler. |
@@ -539,15 +569,16 @@ loads without diagnostics: `skip_app_execution_alias`. `terminal.shell`,
 `terminal.close_on_exit`, `terminal.pass_ctrl_v_without_text`,
 `terminal.resume_agents`, `terminal.mouse_forwarding`,
 `terminal.jump_to_end_on_output` and `terminal.mouse_drag_selects` are Fresh's keys
-with Fresh's values; `terminal.scrollback_lines` and `terminal.agents` are gvim
-extensions.
+with Fresh's values; `terminal.scrollback_lines`, `terminal.agents` and
+`terminal.restore_live` are gvim extensions.
 
 **Trust.** The project config layer may set `close_on_exit`, `scrollback_lines`,
 `mouse_forwarding`, `jump_to_end_on_output`, `mouse_drag_selects`,
 `pass_ctrl_v_without_text` and `resume_agents` — they tune the dock — but it may
-not set `terminal.shell` or `terminal.agents`: a repository must not choose the
-programs gvim executes. Both are refused with a diagnostic, like the project
-`lsp` command rule (C11 in `docs/trust.md`).
+not set `terminal.shell`, `terminal.agents` or `terminal.restore_live`: a
+repository must not choose the programs gvim executes, and it must not make gvim
+start processes on restore. All three are refused with a diagnostic, like the
+project `lsp` command rule (C11 in `docs/trust.md`).
 
 ## Working directory and clickable paths
 
@@ -652,10 +683,16 @@ These are known gaps, not bugs:
   remote machines, live-session detection for transcripts (a row is a
   conversation, not a running process), and any agent identity beyond the
   foreground-command name match.
-- **live ephemeral PTY restore**: Fresh restarts a saved terminal tab's PTY on
-  restore and appends the saved transcript; gvim deliberately restores the tab
-  read-only and dead, so no process (and no agent conversation) is re-run unasked.
-  The restart is one user action away (see Agent sessions and Run Agent).
+- **live ephemeral PTY restore — implemented (liveness-gated, opt-out by
+  `terminal.restore_live`)**: a tab that was live at the capture is restored
+  dormant and revived with a fresh PTY on the user's first dive into it (Fresh's
+  Live restore; argv precedence resume→launch→shell under
+  `terminal.resume_agents`), with the saved transcript kept above. Exited-at-capture
+  tabs and pre-`live` records stay read-only dead, and a failed revive is one
+  notice, not a retry loop. Divergences: gvim's transcript is bounded text (not
+  Fresh's backing file), the revive needs an explicit dive (gvim's dock is not a
+  restored editor split), and `terminal.restore_live = false` restores everything
+  read-only. Remote launches still restore no layout/terminal state.
 - **live-screen reflow** — **decision:** only the stored transcript is re-wrapped; the
   live screen stays clipped or padded on a resize because x/vt has no reflow and adding it
   would mean owning the emulator's scrollback reflow (see Persistence and reflow).

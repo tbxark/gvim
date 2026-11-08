@@ -3,7 +3,6 @@ package tui
 import (
 	"image/color"
 	"slices"
-	"strconv"
 
 	"github.com/tbxark/gvim/buffer"
 	commands "github.com/tbxark/gvim/commands"
@@ -42,7 +41,7 @@ func (m *Model) openCompare(left, right int) bool {
 // difference it is. The differences come from compareHunks.
 func (m *Model) compareStep(forward bool) {
 	if !m.splits.comparing {
-		m.notice = noCompareNotice
+		m.notice = uiText("gvim.notice.compare.no_view", noCompareNotice)
 		return
 	}
 	if name := m.largeCompared(); name != "" {
@@ -51,7 +50,7 @@ func (m *Model) compareStep(forward bool) {
 	}
 	hunks, ok := m.compareHunks()
 	if !ok {
-		m.notice = "Compare: the other tab has no document"
+		m.notice = uiText("gvim.notice.compare.other_tab_no_document", "Compare: the other tab has no document")
 		return
 	}
 	if len(hunks) == 0 {
@@ -77,9 +76,9 @@ func (m *Model) compareStep(forward bool) {
 		m.setTabCursor(nodes[s].Tab, line)
 	}
 	m.compareCenter(hunkJump(h, side, last))
-	m.notice = "Difference " + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(hunks))
+	m.notice = uiTextVars("gvim.notice.compare.difference_position", "Difference %{index}/%{total}", map[string]any{"index": i + 1, "total": len(hunks)})
 	if wrapped {
-		m.notice += " [wrapped]"
+		m.notice += " " + uiText("gvim.notice.compare.wrapped", "[wrapped]")
 	}
 	m.syncCompare()
 }
@@ -88,9 +87,9 @@ func (m *Model) compareStep(forward bool) {
 // identical, or they differ only in how their lines end.
 func (m *Model) sameTextNotice() string {
 	if e := m.compareEnds(); e.differ {
-		return "Compare: the files differ only in their line endings (left " + e.name[0] + ", right " + e.name[1] + ")"
+		return uiTextVars("gvim.notice.compare.line_endings", "Compare: the files differ only in their line endings (left %{left}, right %{right})", map[string]any{"left": e.name[0], "right": e.name[1]})
 	}
-	return "Compare: the files are identical"
+	return uiText("gvim.notice.compare.identical", "Compare: the files are identical")
 }
 
 // noCompareNotice is the notice of a compare command with no compare view.
@@ -519,7 +518,7 @@ func (m *Model) largeCompared() string {
 // looking at.
 func (m *Model) compareSwitch() {
 	if !m.splits.comparing {
-		m.notice = noCompareNotice
+		m.notice = uiText("gvim.notice.compare.no_view", noCompareNotice)
 		return
 	}
 	st, ok := m.compareState()

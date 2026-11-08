@@ -774,7 +774,7 @@ func (m *Model) lspServerDone(msg lspServerMsg) tea.Cmd {
 		}
 		s.stale = true
 		if msg.err == nil {
-			m.notice = "Language server restarted"
+			m.notice = uiText("gvim.notice.lsp.restarted", "Language server restarted")
 		}
 	case "stop":
 		s.stopped = true
@@ -787,7 +787,7 @@ func (m *Model) lspServerDone(msg lspServerMsg) tea.Cmd {
 		s.diags = nil
 		s.polling = false
 		if msg.err == nil {
-			m.notice = "Language server stopped"
+			m.notice = uiText("gvim.notice.lsp.stopped", "Language server stopped")
 		}
 	}
 	return nil
@@ -915,7 +915,7 @@ func (m *Model) lspHover(path string, at buffer.Pos, text string) {
 	}
 	if strings.TrimSpace(text) == "" {
 		if len(items) == 0 {
-			m.notice = "No hover information"
+			m.notice = uiText("gvim.notice.lsp.no_hover", "No hover information")
 			return
 		}
 	} else {
@@ -933,7 +933,7 @@ func (m *Model) lspHover(path string, at buffer.Pos, text string) {
 // Enter, by Tab, or by completion_accept.
 func (m *Model) lspCompletions(r lspReplyMsg) {
 	if len(r.items) == 0 {
-		m.notice = "No completions"
+		m.notice = uiText("gvim.notice.lsp.no_completions", "No completions")
 		return
 	}
 	c := &lspCompletion{path: r.path, at: r.at, items: r.items}
@@ -1115,7 +1115,7 @@ func (m *Model) acceptCompletion(c *lspCompletion, index int) tea.Cmd {
 		resolver, ok := m.lsp.port.(CompletionResolver)
 		if !ok {
 			m.closeCompletion(c)
-			m.notice = "completion: this server item cannot be resolved"
+			m.notice = uiText("gvim.notice.completion.unresolved", "completion: this server item cannot be resolved")
 			return nil
 		}
 		m.closeCompletion(c)
@@ -1282,6 +1282,9 @@ func (m *Model) closeCompletion(c *lspCompletion) {
 	if m.lsp.comp == c {
 		m.lsp.comp = nil
 	}
+	// Closing the list (Esc, dismiss, accepting, typing) also cancels a pending
+	// auto-popup trigger, so it cannot reopen a list the user closed.
+	m.cancelAutoCompletion()
 	m.closePopup(c.pop)
 }
 
@@ -1476,7 +1479,7 @@ func (m *Model) askLSPRename() {
 	}
 	at := doc.Cursor()
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-		Label: "New name:",
+		Label: uiText("gvim.prompt.new_name", "New name:"),
 		Input: lspWordAt(doc.Line(at.Line), at.Col),
 		Tag:   lspRenameTag{path: path, at: at},
 	}))
@@ -1741,13 +1744,13 @@ func (m *Model) lspServerActionDone(msg lspServerActionMsg) tea.Cmd {
 		m.lspForgetLanguage(msg.language)
 		s.stale = true
 		if msg.err == nil {
-			m.notice = "LSP is muted for " + msg.language
+			m.notice = uiTextVars("gvim.notice.lsp.muted", "LSP is muted for %{language}", map[string]any{"language": msg.language})
 		}
 	case "unmute":
 		delete(s.muted, msg.language)
 		s.stale = true
 		if msg.err == nil {
-			m.notice = "LSP is on for " + msg.language
+			m.notice = uiTextVars("gvim.notice.lsp.on", "LSP is on for %{language}", map[string]any{"language": msg.language})
 		}
 	}
 	return nil
@@ -1839,7 +1842,7 @@ func (m *Model) lspToggle() tea.Cmd {
 	if s.off[path] {
 		delete(s.off, path)
 		s.stale = true
-		m.notice = "LSP is on for this buffer"
+		m.notice = uiText("gvim.notice.lsp.on_buffer", "LSP is on for this buffer")
 		return nil
 	}
 	if s.off == nil {

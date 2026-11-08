@@ -2,7 +2,6 @@ package tui
 
 import (
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/tbxark/gvim/internal/tui/browser"
@@ -29,7 +28,7 @@ func (m *Model) compareCommand(action string) {
 			path = m.tabPath(m.activeTab())
 		}
 		if path == "" {
-			m.notice = "Compare: the active buffer is not a file"
+			m.notice = uiText("gvim.notice.compare.not_a_file", "Compare: the active buffer is not a file")
 			return
 		}
 		m.pickCompareFile(&comparePick{left: path}, "Compare "+filepath.Base(path)+" with")
@@ -75,7 +74,7 @@ func (m *Model) compareFiles(left, right string) {
 		return
 	}
 	if filepath.Clean(left) == filepath.Clean(right) {
-		m.notice = "Compare: that is the same file twice"
+		m.notice = uiText("gvim.notice.compare.same_file", "Compare: that is the same file twice")
 		return
 	}
 	if pc, ok := m.ed.(pathClassifier); ok {
@@ -92,14 +91,14 @@ func (m *Model) compareFiles(left, right string) {
 			continue
 		}
 		if err := m.openFileErr(p, false); err != nil {
-			m.notice = "Compare: " + err.Error()
+			m.notice = uiTextVars("gvim.notice.compare.error", "Compare: %{error}", map[string]any{"error": err.Error()})
 			return
 		}
 		owned = append(owned, p)
 	}
 	l, r := m.tabOfPath(left), m.tabOfPath(right)
 	if l < 0 || r < 0 || l == r {
-		m.notice = "Compare: that is the same file twice"
+		m.notice = uiText("gvim.notice.compare.same_file", "Compare: that is the same file twice")
 		return
 	}
 	if !m.openCompare(l, r) {
@@ -130,7 +129,7 @@ func (m *Model) compareSummary(jump bool) {
 	case len(hunks) == 0:
 		m.notice = m.sameTextNotice()
 	default:
-		m.notice = "Compare: " + strconv.Itoa(len(hunks)) + " difference(s)"
+		m.notice = uiTextVars("gvim.notice.compare.differences", "Compare: %{count} difference(s)", map[string]any{"count": len(hunks)})
 		if jump {
 			m.compareStep(true)
 		}
@@ -142,7 +141,7 @@ func (m *Model) compareSummary(jump bool) {
 // that one stays open in its tab.
 func (m *Model) compareClose() {
 	if !m.splits.comparing {
-		m.notice = noCompareNotice
+		m.notice = uiText("gvim.notice.compare.no_view", noCompareNotice)
 		return
 	}
 	owned := m.splits.owned
@@ -162,13 +161,13 @@ func (m *Model) compareClose() {
 // (vimdiff's dp), and otherwise this side takes the other's (do).
 func (m *Model) compareMerge(toOther bool) {
 	if !m.splits.comparing {
-		m.notice = noCompareNotice
+		m.notice = uiText("gvim.notice.compare.no_view", noCompareNotice)
 		return
 	}
 	st, ok := m.compareState()
 	pe := m.plug.pe
 	if !ok || pe == nil {
-		m.notice = "Compare: this editor cannot merge a change"
+		m.notice = uiText("gvim.notice.compare.cannot_merge", "Compare: this editor cannot merge a change")
 		return
 	}
 	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
@@ -178,7 +177,7 @@ func (m *Model) compareMerge(toOther bool) {
 	}
 	i := hunkAt(st.hunks, side, m.ed.Active().Cursor().Line)
 	if i < 0 {
-		m.notice = "Compare: the cursor is not on a difference"
+		m.notice = uiText("gvim.notice.compare.cursor_not_on_difference", "Compare: the cursor is not on a difference")
 		return
 	}
 	from, to := 1-side, side
@@ -188,7 +187,7 @@ func (m *Model) compareMerge(toOther bool) {
 	src, dst := m.leafDoc(nodes[from]), m.leafDoc(nodes[to])
 	bufs := pe.ListBuffers()
 	if src == nil || dst == nil || nodes[to].Tab >= len(bufs) {
-		m.notice = "Compare: the other tab has no document"
+		m.notice = uiText("gvim.notice.compare.other_tab_no_document", "Compare: the other tab has no document")
 		return
 	}
 	h := st.hunks[i]
@@ -202,7 +201,7 @@ func (m *Model) compareMerge(toOther bool) {
 	}
 	edit := replaceLines(dst.LineCount(), func(l int) int { return len(dst.Line(l)) }, dStart, dStart+dN, lines)
 	if err := pe.Edit(bufs[nodes[to].Tab].ID, []pluginapi.Edit{edit}, pluginapi.EditOptions{}); err != nil {
-		m.notice = "Compare: " + filepath.Base(dst.Name()) + " was not changed: " + err.Error()
+		m.notice = uiTextVars("gvim.notice.compare.not_changed", "Compare: %{name} was not changed: %{error}", map[string]any{"name": filepath.Base(dst.Name()), "error": err.Error()})
 		return
 	}
 	m.compareSummary(false)

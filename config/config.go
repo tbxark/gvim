@@ -201,6 +201,10 @@ type Config struct {
 	// OSC 52 clipboard escape is the implemented key.
 	Clipboard ClipboardConfig
 
+	// Update is the release-check section (see config/update.go): Fresh's
+	// check_for_updates and the gvim extension that names the feed.
+	Update UpdateConfig
+
 	// The view keys set the starting state of the display toggles. The
 	// defaults keep the layout gvim had before they existed.
 	ShowTabBar              bool   // show the tab strip row, default true
@@ -316,6 +320,7 @@ func Defaults() Config {
 		FileExplorer:  DefaultFileExplorer(),
 		Env:           DefaultEnvConfig(),
 		Clipboard:     DefaultClipboard(),
+		Update:        DefaultUpdate(),
 		EditorOptions: defaultEditorOptions(),
 	}
 }
@@ -557,6 +562,11 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 				diags = append(diags, Diagnostic{Path: path, Key: f.key, Message: f.err.Error()})
 			}
 			continue
+		case (key == "check_for_updates" || key == "update_check_url") && l == layerProject:
+			// The release check contacts a host; a repository must not choose it or
+			// silence the user check. Say so instead of ignoring it.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set " + key + ": the release check is a user preference, so set it in the user config"})
+			continue
 		case key == "locale" && l == layerProject:
 			// The UI language is a user preference; a repository choosing it would be a
 			// surprise, so the project layer is refused like keymap.
@@ -756,6 +766,8 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return err
 		}
 		c.Formatters = formatters
+	case "check_for_updates", "update_check_url":
+		return c.setUpdate(key, raw)
 	case "terminal":
 		// The flat setters are the user layer: a project file never comes here,
 		// see applyFile, which checks the terminal object against its layer.

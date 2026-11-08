@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -31,7 +30,7 @@ var _ Overlay = (*SaveAs)(nil)
 func NewSaveAs(clock Clock, prefill string, tag any, checks PathChecks, ov style.Overlay) *SaveAs {
 	d := &SaveAs{input: newField(prefill), checks: checks, sizeText: prefill}
 	d.input.selectAll()
-	d.setup(clock, "Save As", tag, ChoiceCancel, saveButtons(), ov)
+	d.setup(clock, dialogText("gvim.dialog.title.save_as", "Save As"), tag, ChoiceCancel, saveButtons(), ov)
 	d.field = d.input
 	d.onPress = d.press
 	return d
@@ -40,8 +39,8 @@ func NewSaveAs(clock Clock, prefill string, tag any, checks PathChecks, ov style
 // saveButtons returns the buttons of the name step.
 func saveButtons() []button {
 	return []button{
-		newButton("Save", 0, ChoiceSave),
-		newButton("Cancel", 0, ChoiceCancel),
+		newButton(dialogText("gvim.dialog.button.save", "Save"), 0, ChoiceSave),
+		newButton(dialogText("gvim.dialog.button.cancel", "Cancel"), 0, ChoiceCancel),
 	}
 }
 
@@ -53,7 +52,7 @@ func (d *SaveAs) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 // Draw paints the dialog. See Overlay.
 func (d *SaveAs) Draw(g *grid.Grid) {
 	if d.confirming {
-		d.drawText(g, fmt.Sprintf("%s already exists. Replace it?", d.pending))
+		d.drawText(g, dialogTextVars("gvim.dialog.replace_confirm", "%{name} already exists. Replace it?", map[string]any{"name": d.pending}))
 		return
 	}
 	// The caret sits after the text, so the field needs one cell more than the text.
@@ -81,7 +80,7 @@ func (d *SaveAs) press(i int) tea.Cmd {
 	}
 	path := strings.TrimSpace(d.input.value())
 	if path == "" {
-		d.errText = "Enter a file name"
+		d.errText = dialogText("gvim.dialog.error.file_name", "Enter a file name")
 		return nil
 	}
 	if d.checks.Validate != nil {
@@ -103,10 +102,10 @@ func (d *SaveAs) beginConfirm(path string) {
 	d.confirming = true
 	d.pending = path
 	d.field = nil
-	d.title = "Replace File"
+	d.title = dialogText("gvim.dialog.title.replace_file", "Replace File")
 	d.buttons = []button{
-		newButton("Replace", 0, ChoiceReplace),
-		newButton("Cancel", 0, ChoiceCancel),
+		newButton(dialogText("gvim.dialog.button.replace", "Replace"), 0, ChoiceReplace),
+		newButton(dialogText("gvim.dialog.button.cancel", "Cancel"), 0, ChoiceCancel),
 	}
 	d.errText = ""
 	d.hover = -1

@@ -21,10 +21,10 @@ var _ Overlay = (*UnsavedChanges)(nil)
 // the Result.
 func NewUnsavedChanges(clock Clock, name string, tag any, ov style.Overlay) *UnsavedChanges {
 	d := &UnsavedChanges{name: name}
-	d.setup(clock, "Unsaved Changes", tag, ChoiceCancel, []button{
-		newButton("Save", 0, ChoiceSave),
-		newButton("Discard", 0, ChoiceDiscard),
-		newButton("Cancel", 0, ChoiceCancel),
+	d.setup(clock, dialogText("gvim.dialog.title.unsaved_changes", "Unsaved Changes"), tag, ChoiceCancel, []button{
+		newButton(dialogText("gvim.dialog.button.save", "Save"), 0, ChoiceSave),
+		newButton(dialogText("gvim.dialog.button.discard", "Discard"), 0, ChoiceDiscard),
+		newButton(dialogText("gvim.dialog.button.cancel", "Cancel"), 0, ChoiceCancel),
 	}, ov)
 	return d
 }
@@ -36,5 +36,5 @@ func (d *UnsavedChanges) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 
 // Draw paints the dialog. See Overlay.
 func (d *UnsavedChanges) Draw(g *grid.Grid) {
-	d.drawText(g, "Save changes to "+d.name+"?")
+	d.drawText(g, dialogTextVars("gvim.dialog.save_changes", "Save changes to %{name}?", map[string]any{"name": d.name}))
 }

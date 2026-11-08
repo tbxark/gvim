@@ -14,7 +14,7 @@ import (
 // detection/activation seam. The provider itself owns the trust gate and the
 // bounded capture; the port only converts types and error codes.
 type envPort struct {
-	provider *env.Provider
+	provider workspaceEnv
 	level    func() string
 }
 

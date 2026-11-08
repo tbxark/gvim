@@ -6,11 +6,17 @@ const SavedStateVersion = 1
 
 // SavedState is the terminal dock state that survives an editor restart: the
 // dock's open flag and directory, the pane width the transcript was captured at,
-// the newest transcript rows as text, and the launch record of the terminal that
-// produced them (the agent metadata). Running processes do not survive: a
-// restored terminal comes back read-only and dead until the user restarts it, and
-// the restored launch record never starts anything on its own (Fresh's rule: no
-// auto-resume on restore).
+// the newest transcript rows as text, the launch record of the terminal that
+// produced them (the agent metadata), and whether a process was running at the
+// capture (Live). Running processes do not survive the restart. A tab that was
+// live at the capture is restored read-only/dead and may be revived the first time
+// the user dives into it (switches to or focuses the tab) when
+// terminal.restore_live is on: Fresh's model starts a fresh PTY then, with the
+// recorded agent-resume/launch argv precedence gated by terminal.resume_agents. A
+// tab that was already exited at the capture (Live false — the default for an old
+// record and for every tab that was not running) is never spawned automatically:
+// it comes back read-only/dead with its exit marker, and only an explicit Restart
+// starts anything.
 type SavedState struct {
 	Version int      `json:"version"`
 	Open    bool     `json:"open,omitempty"`
@@ -35,6 +41,11 @@ type SavedState struct {
 	// "tmux:default/work"), so a repeated import can find the tab that already
 	// attaches it. Additive; empty for a configured agent or a plain shell.
 	Source string `json:"source,omitempty"`
+	// Live records whether a process was running when the state was captured. It is
+	// additive and optional (an old record has no live flag and is treated as
+	// exited, so it restores exactly as before); a live-at-capture tab may be
+	// revived on the user's first dive into it, an exited one never is.
+	Live bool `json:"live,omitempty"`
 	// Tabs holds every dock terminal tab when the dock had more than the one the
 	// top-level fields describe. The top-level fields mirror the active tab, so a
 	// reader that does not know Tabs still restores that tab; a reader that does
@@ -59,4 +70,7 @@ type SavedTab struct {
 	Ephemeral  bool     `json:"ephemeral,omitempty"`
 	LaunchDir  string   `json:"launch_dir,omitempty"`
 	Source     string   `json:"source,omitempty"`
+	// Live mirrors SavedState.Live for this tab: a process was running when the tab
+	// was captured. Absent means exited (the old-record meaning).
+	Live bool `json:"live,omitempty"`
 }

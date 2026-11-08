@@ -122,6 +122,15 @@ type Effects struct {
 	// terminal runs the agent's resume argv instead of its launch argv. Default
 	// true, as Fresh's is.
 	ResumeAgents bool
+	// RestoreLive is terminal.restore_live (a gvim extension, default true, Fresh's
+	// behavior): a restored tab that was live when the session was captured revives
+	// with a fresh PTY on the user's first dive into it (switching to or focusing
+	// the tab), using the recorded argv precedence (agent resume while
+	// ResumeAgents is on, else the launch argv, else a plain shell) in the recorded
+	// launch directory, above the saved transcript. An exited-at-capture tab (and
+	// every tab of an old record without the live flag) never revives; false
+	// restores every tab read-only/dead.
+	RestoreLive bool
 	// Agents are the terminal.agents presets the Run Agent command offers.
 	Agents []Agent
 }

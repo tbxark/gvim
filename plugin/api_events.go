@@ -39,6 +39,9 @@ var knownEvents = map[string]bool{
 	"env_changed": true, "trust_changed": true,
 	// The tier-1c-C window events (documented in events.md).
 	"path_changed": true, "focus_gained": true, "active_window_changed": true, "buffer_group_closed": true,
+	// Input-platform events: the chrome region with the keyboard changed, and a key
+	// release the terminal backend reported (legacy terminals report no releases).
+	"chrome_focus_changed": true, "key_release": true,
 }
 
 // customEventRE is the name of a plugin event: "<plugin>:<name>".

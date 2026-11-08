@@ -151,6 +151,10 @@ type Model struct {
 	startupOpen             string
 	startupLine, startupCol int
 	startupPending          bool
+	// updates is the app release check and update the release it found, painted by
+	// the status row element {update} (see update_status.go).
+	updates    UpdateHooks
+	updateInfo *UpdateInfo
 
 	clicks    clickCounter
 	lastPress int // the count of the last editor press, see pressEditor
@@ -202,6 +206,14 @@ type Model struct {
 	// zero for an ordinary local launch.
 	auth         AuthorityHooks
 	authOpenDock bool
+	// Background authority reconnect (authority_status.go): one dial in flight, the
+	// capped backoff, the one-shot credential prompt flag and the 2FA answer queue.
+	authorityBusy      bool
+	authorityBackoff   time.Duration
+	authorityPrompted  bool
+	authorityQuestions []string
+	authorityAnswers   []string
+	authorityEchos     []bool
 	// shellRun, when set, runs shell_command/format_buffer jobs on the workspace
 	// authority instead of the local editor runner (see authority_status.go).
 	shellRun func(editor.ShellJob) (string, error)
@@ -258,6 +270,7 @@ func New(deps Deps) *Model {
 		hideLineNumbers: deps.HideLineNumbers,
 		tabSize:         deps.TabSize,
 		notice:          deps.Notice,
+		updates:         deps.Updates,
 		startupOpen:     deps.StartupOpen,
 		startupLine:     deps.StartupLine,
 		startupCol:      deps.StartupCol,
@@ -434,7 +447,7 @@ func (m *Model) Close() {
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd(), m.authorityInitCmd(), m.startupOpenCmd())
+	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd(), m.authorityInitCmd(), m.startupOpenCmd(), m.updateCheckCmd())
 }
 
 // Update implements tea.Model. It runs update, then keeps the split panes on tabs
@@ -455,30 +468,49 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// remote workspace authority.
 		return m, m.beginAuthorityReconnect()
 	}
-	if done, ok := msg.(authorityReconnectedMsg); ok {
-		m.reportAuthorityReconnect(done.err)
-		if done.err == nil {
-			// A startup open that failed while the authority was disconnected is
-			// retried once the connection is back: failures stay retryable, never a
-			// silently empty local buffer. The app's post-reconnect work (restarting the
-			// remote language servers that were running) runs in a command too, never on
-			// the update goroutine.
-			cmds := []tea.Cmd{m.startupOpenCmd()}
-			if m.auth.AfterReconnect != nil {
-				after := m.auth.AfterReconnect
-				cmds = append(cmds, func() tea.Msg {
-					count, err := after()
-					return authorityRestartDoneMsg{count: count, err: err}
-				})
-			}
-			return m, tea.Batch(cmds...)
-		}
+	if checked, ok := msg.(updateCheckedMsg); ok {
+		// The release check finished: the status row paints the answer from here
+		// on (no notice: an available update is not an interruption).
+		m.updateInfo = checked.info
 		return m, nil
+	}
+	if done, ok := msg.(authorityReconnectedMsg); ok {
+		m.authorityBusy = false
+		m.reportAuthorityReconnect(done.err)
+		if done.err != nil {
+			// Keep the backoff from the poll: it schedules the next attempt.
+			return m, nil
+		}
+		m.resetAuthorityRetry()
+		// A startup open that failed while the authority was disconnected is retried
+		// once the connection is back: failures stay retryable, never a silently empty
+		// local buffer. The app's post-reconnect work (restarting the remote language
+		// servers that were running, reloading the remote tree) runs in commands too,
+		// never on the update goroutine.
+		cmds := []tea.Cmd{m.startupOpenCmd()}
+		if explorer := m.remoteExplorerReconnectCmd(); explorer != nil {
+			cmds = append(cmds, explorer)
+		}
+		if m.auth.AfterReconnect != nil {
+			after := m.auth.AfterReconnect
+			cmds = append(cmds, func() tea.Msg {
+				count, err := after()
+				return authorityRestartDoneMsg{count: count, err: err}
+			})
+		}
+		return m, tea.Batch(cmds...)
 	}
 	if done, ok := msg.(authorityRestartDoneMsg); ok {
 		m.reportAuthorityRestart(done.count, done.err)
 		return m, nil
 	}
+	if _, ok := msg.(authorityPollTickMsg); ok {
+		return m, m.authorityPollTick()
+	}
+	if _, ok := msg.(authorityRetryTickMsg); ok {
+		return m, m.authorityRetryTick()
+	}
+	prevChrome := m.chromeFocusOf()
 	active, count, rows := m.activeTab(), len(m.ed.Tabs()), m.bodyRows()
 	activePath := m.activeFilePath()
 	at, top := m.caretNow(), m.viewTop()
@@ -538,6 +570,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if now := m.activeFilePath(); now != activePath {
 		cmd = tea.Batch(cmd, m.followActiveBuffer())
+	}
+	// After the root's own focus moves of this update (F6, commands, auto-focus) report
+	// the chrome region change once; the queued event is pumped by a command, never
+	// inline.
+	if cur := m.chromeFocusOf(); cur != prevChrome {
+		m.emitChromeFocusChanged(prevChrome, cur)
+		cmd = tea.Batch(cmd, m.pumpAfter(func() {}))
 	}
 	// A {clock} tick is re-armed whenever the row is visible and configured but no
 	// tick is in flight: the first frame, after an overlay hid the row, or after a
@@ -636,6 +675,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m.expireStatus()
 		return m, m.handleKey(tea.Key(msg))
+	case tea.KeyReleaseMsg:
+		// Terminals report key release only through a keyboard-reporting backend
+		// (the Windows console API, or kitty-protocol event types the host does not
+		// request from legacy terminals). A release never edits or moves anything; it
+		// is only visible to plugins that subscribe.
+		if m.plugWants("key_release") {
+			m.plugEmit("key_release", keyEventData(tea.Key(msg)))
+		}
+		return m, nil
 	case tea.MouseClickMsg:
 		// The band is hit-tested before the message expires: once it is gone the
 		// click would land on the body cell that was under it.
@@ -711,6 +759,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.explorerWidth = m.explorerWidth.WithCols(msg.Width, m.width)
 	case expanel.ErrorMsg:
 		m.notice = msg.Err.Error()
+	case remoteTreeToggleMsg:
+		cmd = m.remoteTreeToggleDone(msg)
+	case remoteTreeLoadedMsg:
+		cmd = m.remoteTreeLoadDone(msg)
 	case expanel.NewFileMsg:
 		m.askName(msg.Dir, false)
 	case expanel.NewFolderMsg:
@@ -1123,7 +1175,7 @@ type fileRecorder interface {
 // "N" or "N:COL", and Enter moves the caret there.
 func (m *Model) openGoto(input string) {
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-		Label:    "Go to line:",
+		Label:    uiText("gvim.prompt.goto_line", "Go to line:"),
 		Input:    input,
 		Tag:      gotoTag{},
 		Validate: prompt.ValidateLineCol,
@@ -1172,7 +1224,7 @@ func (m *Model) askRename(path string) {
 		return
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-		Label:    "Rename to:",
+		Label:    uiText("gvim.prompt.rename_to", "Rename to:"),
 		Input:    filepath.Base(path),
 		Tag:      renameTag{path: path},
 		Validate: validateName,
@@ -1258,6 +1310,20 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		if d.Outcome == prompt.Submitted {
 			return m.authorityReconnectCmd(d.Text)
 		}
+		m.resetAuthorityRetry()
+	case authorityPassphraseTag:
+		if d.Outcome == prompt.Submitted {
+			return m.authorityPassphraseCmd(d.Text)
+		}
+		m.resetAuthorityRetry()
+		m.quietNotice("SSH reconnect cancelled")
+	case authorityChallengeTag:
+		if d.Outcome == prompt.Submitted {
+			m.authorityAnswers = append(m.authorityAnswers, d.Text)
+			return m.askAuthorityChallenge()
+		}
+		m.resetAuthorityRetry()
+		m.quietNotice("SSH reconnect cancelled")
 	default:
 		if cmd, ok := m.workspaceActionAnswer(d); ok {
 			return cmd
@@ -1693,7 +1759,10 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 		return nil
 	}
 	if text != "" {
-		return m.dispatch(Command{Action: "insert_char", Args: map[string]any{"text": text}})
+		insert := m.dispatch(Command{Action: "insert_char", Args: map[string]any{"text": text}})
+		// The character is in the document now; schedule the auto-popup debounce
+		// (or cancel a pending one) and keep whatever command the insert returned.
+		return tea.Batch(insert, m.afterTypedCompletionText(text))
 	}
 	return nil
 }
@@ -2581,6 +2650,7 @@ func (m *Model) statusView() statusView {
 	s.LSP = m.lspPill()
 	s.Row = m.statusRow()
 	s.Cursors = 1
+	s.Update = m.updateText()
 	if m.dock.Open() && m.dock.Exited() {
 		// Fresh's {terminal_restart} for a terminal whose process quit: gvim's
 		// terminal is the dock, so its exited shell is the affordance.
@@ -3216,6 +3286,14 @@ func translateKey(k tea.Key) (KeyPress, string) {
 			kp.Name = lowerIfLetter(k.Code)
 		}
 	}
+	// A legacy terminal folds Shift into the character (and Caps Lock produces an
+	// uppercase letter without a Shift modifier). Fresh's normalize_key infers Shift for
+	// such a letter unless CONTROL is set, so "Shift+P" matches how both kitty and
+	// legacy terminals report it; CapsLock+Ctrl+A keeps firing Ctrl+A. The lock bits
+	// themselves are keyboard state, not chord modifiers, and are ignored as before.
+	if !named && !shift && unicode.IsUpper(k.Code) && k.Mod&tea.ModCtrl == 0 {
+		shift = true
+	}
 	// Shift stays on named keys and shifted letters. A shifted symbol is bound by its own character.
 	if shift && (named || unicode.IsLetter(k.Code)) {
 		kp.Mods = append(kp.Mods, "shift")
@@ -3224,8 +3302,17 @@ func translateKey(k tea.Key) (KeyPress, string) {
 		kp.Mods = append(kp.Mods, "super")
 	}
 	var text string
-	if k.Text != "" && k.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModSuper|tea.ModMeta) == 0 {
+	switch {
+	case k.Text == "":
+	case k.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModSuper|tea.ModMeta) == 0:
 		text = k.Text
+	case isAltGr(k.Mod):
+		// Windows reports AltGr as Ctrl+Alt; a single printable rune is text input
+		// (Fresh's text-input-modifier check), so international layouts can type
+		// @ [ ] { }. A keymap binding for the chord still wins before typing.
+		if _, ok := singleRune(k.Text); ok {
+			text = k.Text
+		}
 	}
 	return kp, text
 }
@@ -3265,4 +3352,11 @@ func (c *clickCounter) press(at time.Time, x, y int) int {
 	}
 	c.at, c.x, c.y = at, x, y
 	return c.n
+}
+
+// isAltGr reports Windows AltGr, which its console reports as Ctrl+Alt. It is a
+// text-input modifier, not a chord: the caller passes only a printable single
+// rune on to the text path. Super/Meta (Command) cannot be part of AltGr.
+func isAltGr(mod tea.KeyMod) bool {
+	return mod&(tea.ModCtrl|tea.ModAlt) == tea.ModCtrl|tea.ModAlt && mod&(tea.ModSuper|tea.ModMeta) == 0
 }

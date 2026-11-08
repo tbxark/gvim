@@ -21,7 +21,7 @@ import (
 // that opens the Keybinding Editor.
 func (s *settingsService) structureKeybindings(cfg config.Config) tui.SettingsStructure {
 	st := tui.SettingsStructure{
-		Key: "keybindings", Title: "Keybindings", Kind: "bindings", Filter: true,
+		Key: "keybindings", Title: settingsPage("keybindings", "Keybindings"), Kind: "bindings", Filter: true,
 	}
 	st.Note = "Read-only: edit in the Keybinding Editor (Enter on the row below, or Ctrl+P › Open Keybinding Editor). Plugin bindings are read-only."
 	if s.rt.presetName != "" {

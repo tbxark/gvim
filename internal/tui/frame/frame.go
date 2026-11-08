@@ -142,6 +142,9 @@ type StatusView struct {
 	Diags           DiagCounts // diagnostics of the active document; shown as " [E:1 W:2 I:3] "
 	ReadOnly        bool       // the document is read-only; shown as " [RO] "
 	TerminalRestart string     // "Restart terminal" while the dock's shell has exited, or ""
+	// Update is the release the check found, as the {update} element shows it
+	// ("Update: v0.4.2"), or "" while no newer release is known.
+	Update string
 
 	Extra []StatusItem // the items of plugins (plugin_status.go)
 
@@ -154,7 +157,7 @@ type StatusView struct {
 
 // StatusElementKind names one element of a configured status row side, as Fresh's
 // editor.status_bar.left/right lists name them. The kinds gvim parses but does not
-// paint — {warnings}, {update} and plugin tokens — are kept, so a config that names
+// paint — {warnings} and plugin tokens — are kept, so a config that names
 // them loads and renders nothing (see docs/ui.md).
 type StatusElementKind int
 
@@ -958,8 +961,16 @@ func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
 			hint = s.PaletteHint
 		}
 		return statusSeg{text: pad(hint), kind: HitStatusPalette}, true
+	case StatusElementUpdate:
+		// Fresh's "Update: vX.Y.Z" indicator: shown only when the release check
+		// found a newer version.
+		if s.Update == "" {
+			return statusSeg{}, false
+		}
+		// Informational only: gvim shows the release, it does not self-update.
+		return statusSeg{text: pad(s.Update)}, true
 	}
-	// {warnings}, {update} and plugin tokens: parsed, not painted by gvim.
+	// {warnings} and plugin tokens: parsed, not painted by gvim.
 	return statusSeg{}, false
 }
 

@@ -173,3 +173,41 @@ func TestBufferWordCompletionsEmptyPrefix(t *testing.T) {
 		t.Fatalf("empty prefix returned %v", got)
 	}
 }
+
+func TestBufferWordCompletionsMultiBuffer(t *testing.T) {
+	t.Parallel()
+	snap := WordSnapshot{
+		Lines: []string{"alpine", "al"}, StartLine: 0, CursorLine: 1, CursorCol: 2,
+		Prefix: "al", ViewportTop: 0, ViewportBottom: 1,
+		Other: []WordBuffer{
+			{Lines: []string{"alphabet", "alpine"}},
+			{Lines: []string{"altitude"}},
+		},
+	}
+	got := candidateTexts(BufferWordCompletions(snap))
+	// The active buffer's word comes first; the other buffers add only the words it
+	// did not have, buffer 1 before buffer 2.
+	if len(got) != 3 || got[0] != "alpine" || got[1] != "alphabet" || got[2] != "altitude" {
+		t.Fatalf("candidates = %v, want alpine, alphabet, altitude", got)
+	}
+}
+
+func TestBufferWordCompletionsOtherBufferLimit(t *testing.T) {
+	t.Parallel()
+	snap := WordSnapshot{
+		Lines: []string{"alpha"}, StartLine: 0, CursorLine: 0, CursorCol: 5,
+		Prefix: "al", ViewportTop: 0, ViewportBottom: 0,
+	}
+	for i := 0; i < OtherWordBufferLimit+2; i++ {
+		snap.Other = append(snap.Other, WordBuffer{Lines: []string{"alphabuffer" + string(rune('a'+i))}})
+	}
+	got := candidateTexts(BufferWordCompletions(snap))
+	if len(got) != OtherWordBufferLimit+1 {
+		t.Fatalf("candidates = %d, want the active word plus %d buffers", len(got), OtherWordBufferLimit)
+	}
+	for _, c := range got[1:] {
+		if strings.HasPrefix(c, "alphabufferi") || strings.HasPrefix(c, "alphibufferj") || strings.HasPrefix(c, "alphabufferj") {
+			t.Fatalf("a buffer past the limit was scanned: %v", got)
+		}
+	}
+}

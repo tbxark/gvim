@@ -20,8 +20,8 @@ var _ Overlay = (*ErrorDialog)(nil)
 // Result.
 func NewErrorDialog(clock Clock, message string, tag any, ov style.Overlay) *ErrorDialog {
 	d := &ErrorDialog{message: message}
-	d.setup(clock, "Error", tag, ChoiceOK, []button{
-		newButton("OK", 0, ChoiceOK),
+	d.setup(clock, dialogText("gvim.dialog.title.error", "Error"), tag, ChoiceOK, []button{
+		newButton(dialogText("gvim.dialog.button.ok", "OK"), 0, ChoiceOK),
 	}, ov)
 	return d
 }

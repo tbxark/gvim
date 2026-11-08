@@ -51,8 +51,8 @@ func languageOfChild(rest string) string {
 // filenames. The list is written back as an array at the entry's path.
 func (s *settingsService) structureLanguageList(object map[string]json.RawMessage, id, key, title, addLabel string) tui.SettingsStructure {
 	path := []string{"languages", id, key}
-	st := tui.SettingsStructure{Key: "languages." + id + "." + key, Title: "Languages · " + id + " · " + title,
-		Kind: "list", Path: path, AddLabel: addLabel}
+	st := tui.SettingsStructure{Key: "languages." + id + "." + key, Title: settingsLanguageTitle(id) + " · " + settingsLanguagePart(title),
+		Kind: "list", Path: path, AddLabel: settingsLanguageAdd(addLabel)}
 	entry, _ := layerObjectAt(object, []string{"languages", id})
 	for _, value := range languageListValue(entry, key) {
 		st.Rows = append(st.Rows, tui.SettingsStructureRow{Path: path, Name: value, Value: value})
@@ -63,8 +63,8 @@ func (s *settingsService) structureLanguageList(object map[string]json.RawMessag
 // structureLanguageStringList is the same page for a list nested in an object
 // (the formatter's args); the whole array is written at path.
 func (s *settingsService) structureLanguageStringList(object map[string]json.RawMessage, id string, path []string, title, addLabel string) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: "languages." + id + ".formatter.args", Title: "Languages · " + id + " · " + title,
-		Kind: "list", Path: path, AddLabel: addLabel}
+	st := tui.SettingsStructure{Key: "languages." + id + ".formatter.args", Title: settingsLanguageTitle(id) + " · " + settingsLanguagePart(title),
+		Kind: "list", Path: path, AddLabel: settingsLanguageAdd(addLabel)}
 	entry, _ := layerObjectAt(object, []string{"languages", id, "formatter"})
 	for _, value := range languageListValue(entry, "args") {
 		st.Rows = append(st.Rows, tui.SettingsStructureRow{Path: path, Name: value, Value: value})
@@ -76,7 +76,7 @@ func (s *settingsService) structureLanguageStringList(object map[string]json.Raw
 // stdin and timeout. The formatter object is written whole, one field at a time.
 func (s *settingsService) structureLanguageFormatter(entry map[string]json.RawMessage, id string) tui.SettingsStructure {
 	path := []string{"languages", id, "formatter"}
-	st := tui.SettingsStructure{Key: "languages." + id + ".formatter", Title: "Languages · " + id + " · Formatter", Kind: "fields"}
+	st := tui.SettingsStructure{Key: "languages." + id + ".formatter", Title: settingsLanguageTitle(id) + " · " + settingsLanguagePart("Formatter"), Kind: "fields"}
 	formatter, _ := layerObjectAt(entry, []string{"formatter"})
 	rows := []struct {
 		key, kind string
@@ -114,8 +114,8 @@ func (s *settingsService) structureLanguageFormatter(entry map[string]json.RawMe
 // (an array of objects cannot be patched item by item); each action is described
 // in the page note.
 func (s *settingsService) structureLanguageOnSave(entry map[string]json.RawMessage, id string) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: "languages." + id + ".on_save", Title: "Languages · " + id + " · On Save", Kind: "fields"}
-	st.Note = "on_save is an array of actions; edit the whole array as JSON. Each action: command, args, working_dir, stdin, timeout_ms, enabled."
+	st := tui.SettingsStructure{Key: "languages." + id + ".on_save", Title: settingsLanguageTitle(id) + " · " + settingsLanguagePart("On Save"), Kind: "fields"}
+	st.Note = settingsNote("languages_on_save", "on_save is an array of actions; edit the whole array as JSON. Each action: command, args, working_dir, stdin, timeout_ms, enabled.")
 	raw := json.RawMessage("[]")
 	if r, ok := layerRawAt(entry, []string{"on_save"}); ok {
 		raw = compactJSON(r)
@@ -140,7 +140,7 @@ func onSaveEntries(raw json.RawMessage) []config.OnSaveAction {
 // global default may supply it).
 func (s *settingsService) structureLanguageIndent(entry map[string]json.RawMessage, id string) tui.SettingsStructure {
 	path := []string{"languages", id, "indent"}
-	st := tui.SettingsStructure{Key: "languages." + id + ".indent", Title: "Languages · " + id + " · Indent", Kind: "fields"}
+	st := tui.SettingsStructure{Key: "languages." + id + ".indent", Title: settingsLanguageTitle(id) + " · " + settingsLanguagePart("Indent"), Kind: "fields"}
 	indent, _ := layerObjectAt(entry, []string{"indent"})
 	for _, key := range []string{"increase_indent_pattern", "decrease_indent_pattern", "indent_next_line_pattern", "dedent_next_line_pattern", "self_close_pattern"} {
 		r := tui.SettingsStructureRow{Path: append(slices.Clone(path), key), Name: key, Kind: "string"}

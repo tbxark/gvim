@@ -221,3 +221,32 @@ keymap and lists the valid names. `gvim config show` prints the same warnings on
 
 Only the user config sets `keymap` and `keybindings`. A project's `.gvim/config.json` that names
 either is ignored with a warning, so a repository cannot rebind your keys.
+
+## Legacy terminal input edges
+
+Terminals do not agree on how they encode a few keys. gvim normalizes the
+differences Fresh's `normalize_key` normalizes, where the decoder preserves the
+information:
+
+* **Shift and CapsLock.** A legacy terminal may deliver an uppercase letter with no
+  Shift modifier (Shift folded into the character, or CapsLock on; kitty-protocol
+  terminals send the real Shift). An uppercase letter infers Shift unless CONTROL is
+  set, so `Shift+P` matches both encodings while CapsLock+Ctrl+A still fires
+  `Ctrl+A`. The CapsLock/NumLock/ScrollLock lock bits are keyboard state, not chord
+  modifiers, and are ignored: `Ctrl+Shift+P` is the palette on a terminal with
+  CapsLock on. A *named* key keeps only the reported Shift, as before.
+* **AltGr.** Windows reports AltGr as Ctrl+Alt. A Ctrl+Alt chord with one printable
+  rune is text input (Fresh's text-input-modifier rule), so international layouts can
+  type `@ [ ] { }`; an action bound to the chord still wins, and a multi-rune or
+  non-printable text is not passed through. On terminals that send AltGr as a plain
+  printable character (most Unix terminals) no normalization is needed.
+* **Key release.** No legacy terminal reports a key release, and gvim does not enable
+  the kitty keyboard protocol's event-reporting flags: it neither fakes kitty support
+  nor changes the key encoding for terminal fallback. The Windows console backend
+  reports releases, and plugins can subscribe to the `key_release` event on such a
+  backend (docs/plugins/events.md); on a legacy terminal that subscription is simply
+  silent. There is no fallback that turns a release into a press or vice versa.
+* **Focus reporting** stays where it was: terminal focus reporting is requested only
+  while a remote authority needs reconnect-on-activate. The plugin
+  `chrome_focus_changed` event is about the editor's own regions, not terminal
+  window focus.

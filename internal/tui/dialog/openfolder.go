@@ -27,9 +27,9 @@ var _ Overlay = (*OpenFolder)(nil)
 // optional. It answers why a path cannot be opened.
 func NewOpenFolder(clock Clock, recent []string, prefill string, tag any, validate func(path string) error, ov style.Overlay) *OpenFolder {
 	d := &OpenFolder{input: newField(prefill), validate: validate}
-	d.setup(clock, "Open Folder", tag, ChoiceCancel, []button{
-		newButton("Open", 0, ChoiceOpen),
-		newButton("Cancel", 0, ChoiceCancel),
+	d.setup(clock, dialogText("gvim.dialog.title.open_folder", "Open Folder"), tag, ChoiceCancel, []button{
+		newButton(dialogText("gvim.dialog.button.open", "Open"), 0, ChoiceOpen),
+		newButton(dialogText("gvim.dialog.button.cancel", "Cancel"), 0, ChoiceCancel),
 	}, ov)
 	d.field = d.input
 	d.list = newRecentList(recent)
@@ -74,7 +74,7 @@ func (d *OpenFolder) pick() tea.Cmd {
 // open closes the dialog with path, unless path is empty or rejected.
 func (d *OpenFolder) open(path string) tea.Cmd {
 	if path == "" {
-		d.errText = "Enter a folder path"
+		d.errText = dialogText("gvim.dialog.error.folder_path", "Enter a folder path")
 		return nil
 	}
 	if d.validate != nil {

@@ -74,6 +74,16 @@ type TerminalConfig struct {
 	// command offers and the metadata that turns a plain launch into a resumable
 	// agent session. It is a gvim extension: Fresh's agent data comes from plugins.
 	Agents []TerminalAgent
+	// RestoreLive is terminal.restore_live (a gvim extension, default true): a
+	// terminal tab that was live when the session was saved revives with a fresh
+	// PTY the first time the user dives into it after a restore (switches to or
+	// focuses the tab), with Fresh's argv precedence (agent resume when
+	// terminal.resume_agents is on, else the launch argv, else a plain shell) and
+	// its saved transcript kept above. An exited-at-save tab (and every tab of an
+	// older record without the live flag) stays read-only/dead and is never spawned
+	// automatically. False restores every tab read-only, even live ones; the user
+	// can still Restart explicitly.
+	RestoreLive bool
 }
 
 // TerminalAgent is one terminal.agents entry: a named agent command.
@@ -109,6 +119,7 @@ func DefaultTerminalOptions() TerminalConfig {
 		MouseDragSelects:     true,
 		PassCtrlVWithoutText: true,
 		ResumeAgents:         true,
+		RestoreLive:          true,
 	}
 }
 
@@ -204,6 +215,17 @@ func (c *Config) setTerminal(raw json.RawMessage, l layer, path string) (diags [
 				continue
 			}
 			c.Terminal.ResumeAgents = b
+		case "restore_live":
+			if l == layerProject {
+				diag("restore_live", "project config cannot set terminal.restore_live: a repository must not make gvim start processes on restore")
+				continue
+			}
+			var b bool
+			if err := json.Unmarshal(v, &b); err != nil {
+				diag("restore_live", "must be true or false")
+				continue
+			}
+			c.Terminal.RestoreLive = b
 		case "agents":
 			if l == layerProject {
 				diag("agents", "project config cannot set terminal.agents: a repository must not choose programs gvim runs")

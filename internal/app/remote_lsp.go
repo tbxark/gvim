@@ -26,7 +26,7 @@ import (
 // bare command in the remote PATH (so Program, the locally resolved absolute path, is
 // cleared), the root URI is the remote workspace path, and the local env overlay is not
 // applied (the remote login environment is).
-func remoteLSPSpawner(slot authority.Slot, workspace string) func(context.Context, lsp.Config) (*lsp.Client, error) {
+func remoteLSPSpawner(slot authority.Slot, workspace string, spawnEnv ...func() []string) func(context.Context, lsp.Config) (*lsp.Client, error) {
 	return func(ctx context.Context, cfg lsp.Config) (*lsp.Client, error) {
 		if slot == nil {
 			return nil, errors.New("lsp: no remote authority to start the server on")
@@ -38,7 +38,14 @@ func remoteLSPSpawner(slot authority.Slot, workspace string) func(context.Contex
 		if err != nil {
 			return nil, fmt.Errorf("lsp: remote workspace %q: %w", workspace, err)
 		}
-		proc, err := slot.LongRunning().Start(ctx, cfg.Command, hostos.ProcOptions{Cwd: root})
+		var envEntries []string
+		if len(spawnEnv) > 0 && spawnEnv[0] != nil {
+			// The remote environment's captured delta (env.Remote ran on the remote host;
+			// the local overlay never enters it). The server starts in the project
+			// environment, the same one the terminal and one-shot commands use.
+			envEntries = spawnEnv[0]()
+		}
+		proc, err := slot.LongRunning().Start(ctx, cfg.Command, hostos.ProcOptions{Cwd: root, Env: remoteEnvMap(envEntries)})
 		if err != nil {
 			return nil, fmt.Errorf("lsp: start %s on %s: %w", cfg.Command[0], slot.Label(), err)
 		}

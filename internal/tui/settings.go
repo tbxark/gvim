@@ -1103,6 +1103,14 @@ func copyViewOption(opts, next ViewOptions, key string) ViewOptions {
 		opts.DoubleClickTimeMS = next.DoubleClickTimeMS
 	case "editor.mouse_hover_delay_ms":
 		opts.MouseHoverDelayMS = next.MouseHoverDelayMS
+	case "editor.completion_popup_auto_show":
+		opts.CompletionPopupAutoShow = next.CompletionPopupAutoShow
+	case "editor.quick_suggestions":
+		opts.QuickSuggestions = next.QuickSuggestions
+	case "editor.quick_suggestions_delay_ms":
+		opts.QuickSuggestionsDelayMS = next.QuickSuggestionsDelayMS
+	case "editor.suggest_on_trigger_characters":
+		opts.SuggestOnTriggerCharacters = next.SuggestOnTriggerCharacters
 	case "editor.search.case_sensitive":
 		opts.Search.CaseSensitive = next.Search.CaseSensitive
 	case "editor.search.whole_word":

@@ -134,8 +134,8 @@ func lspStateText(st tui.LSPServerStatus) string {
 // built-in table, the user's lsp entries, or a manager status), plus the universal
 // servers. The project layer lists only what the layer's own file configures.
 func (s *settingsService) structureLSP(cfg config.Config, object map[string]json.RawMessage, project bool) tui.SettingsStructure {
-	st := tui.SettingsStructure{Key: "lsp", Title: "Language Servers", Kind: "map", AddLabel: "Add language server…"}
-	st.Note = "Enter a language's page for its servers, live state and whole-array JSON; the project layer may only mute or enable servers."
+	st := tui.SettingsStructure{Key: "lsp", Title: settingsPage("language_servers", "Language Servers"), Kind: "map", AddLabel: settingsAdd("language_server", "Add language server…")}
+	st.Note = settingsNote("lsp_page", "Enter a language's page for its servers, live state and whole-array JSON; the project layer may only mute or enable servers.")
 	languages := make(map[string]bool)
 	layer := map[string]json.RawMessage(nil)
 	if !project {
@@ -212,7 +212,7 @@ func (s *settingsService) structureLSP(cfg config.Config, object map[string]json
 // mute/enable changes validate there).
 func (s *settingsService) structureLSPLanguage(cfg config.Config, object map[string]json.RawMessage, language string, project bool) tui.SettingsStructure {
 	st := tui.SettingsStructure{
-		Key: "lsp." + language, Title: "Language Servers · " + language, Kind: "fields",
+		Key: "lsp." + language, Title: settingsPage("language_servers", "Language Servers") + " · " + language, Kind: "fields",
 	}
 	st.Note = "process_limits is accepted and shown, not applied (gvim does not limit servers)."
 	servers := s.effectiveLSPServers(cfg, language)
@@ -256,7 +256,7 @@ func (s *settingsService) structureLSPLanguage(cfg config.Config, object map[str
 // and whole-array JSON as a language page, under universal_lsp.
 func (s *settingsService) structureLSPUniversal(cfg config.Config, object map[string]json.RawMessage, name string, project bool) tui.SettingsStructure {
 	st := tui.SettingsStructure{
-		Key: "lsp.universal." + name, Title: "Universal Server · " + name, Kind: "fields",
+		Key: "lsp.universal." + name, Title: settingsPage("universal_server", "Universal Server") + " · " + name, Kind: "fields",
 	}
 	st.Note = "A universal server runs for every language. process_limits is accepted and shown, not applied."
 	all := cfg.UniversalLSP[name]

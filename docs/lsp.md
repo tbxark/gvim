@@ -278,10 +278,19 @@ running, its items come first and the buffer words follow in the same popup; a w
 insert text the server already offered is dropped. While a server is slow the list is
 discarded if the document version or the caret changed before the reply arrived, so typing
 never shows a list for older text. In a large-file buffer the words are not offered yet (their
-lines would have to be read from disk); that is a documented residual, and Fresh's
-`completion_popup_auto_show` auto-popup is not ported — completion is manual, as the command
-name says; and only the active buffer is scanned (Fresh also scans other open buffers and its
-dabbrev provider, which gvim does not port).
+lines would have to be read from disk); that is a documented residual.
+
+Auto-popup is ported: with `editor.completion_popup_auto_show` on, typing a word character
+schedules a debounced popup after `editor.quick_suggestions_delay_ms` (default 150 ms; needs
+`editor.quick_suggestions`). Any non-word character, Esc, accepting, or a document/caret change
+cancels it, and there is no popup when the word prefix is empty. Fresh's immediate
+trigger-character path needs the server's `completionProvider.triggerCharacters`, which gvim's
+LSP port does not expose yet (the `editor.suggest_on_trigger_characters` key is parsed but has no
+effect); completion inside strings/comments is not suppressed (Fresh triggers there too).
+Multi-buffer words are ported: a bounded window from the middle of every other open tab (64 KiB
+each, at most 8, in tab order rather than Fresh's MRU order) contributes words below the active
+buffer's, and a word the active buffer already has is not duplicated. Fresh's dabbrev cycling
+provider is not ported.
 
 **Accepting a language-server completion.** A server item is inserted with everything the
 server asked for in one edit: its snippet text is expanded, the import edits of an

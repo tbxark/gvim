@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/ctxmenu"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/theme"
@@ -17,6 +19,10 @@ type fakeWorkspacePort struct {
 	selected, created, closed, renamed, next string
 	createRoot, createLabel                  string
 	renameLabel                              string
+	extracted                                bool
+	extractErr                               error
+	running                                  []WorkspaceRunningTerminal
+	runningQueried                           string
 }
 
 func (f *fakeWorkspacePort) Entries() []WorkspaceEntry { return f.entries }
@@ -39,6 +45,14 @@ func (f *fakeWorkspacePort) Rename(id, label string) error {
 func (f *fakeWorkspacePort) Next() (WorkspaceCmd, error) {
 	f.next = "yes"
 	return nil, nil
+}
+func (f *fakeWorkspacePort) ExtractTab() (WorkspaceCmd, error) {
+	f.extracted = true
+	return nil, f.extractErr
+}
+func (f *fakeWorkspacePort) RunningTerminals(id string) []WorkspaceRunningTerminal {
+	f.runningQueried = id
+	return f.running
 }
 
 // TestWorkspaceStatusSegment checks the active workspace label on the status row.
@@ -230,5 +244,132 @@ func TestFileRootMarksThePaletteRemote(t *testing.T) {
 	local := New(Deps{Editor: newFakeEditor("hello"), Keys: testKeys(), Theme: theme.Theme{}})
 	if local.fileRoot != "" {
 		t.Fatalf("local fileRoot = %q", local.fileRoot)
+	}
+}
+
+// TestWorkspaceExtractAction checks the extract palette row and action: it exists only
+// when the workspace layer supports extracting, calls the port, and shows the layer's
+// refusal without closing anything.
+func TestWorkspaceExtractAction(t *testing.T) {
+	m := statusViewModel(t, nil)
+	// A layer without the optional extract surface gets no row and a notice.
+	m.SetWorkspacePort(&fakeWorkspaces{})
+	m.AddWorkspaceCommands()
+	for _, c := range m.commands {
+		if c.Action == "workspace_extract_tab" {
+			t.Fatal("a layer without ExtractTab got the extract row")
+		}
+	}
+	port := &fakeWorkspacePort{}
+	m = statusViewModel(t, nil)
+	m.SetWorkspacePort(port)
+	m.AddWorkspaceCommands()
+	found := false
+	for _, c := range m.commands {
+		if c.Action == "workspace_extract_tab" {
+			found = true
+			if c.Name != "Extract tab to new workspace" {
+				t.Errorf("extract row name = %q", c.Name)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the extract row is missing")
+	}
+	if cmd, ok := m.workspaceAction("workspace_extract_tab"); !ok || cmd != nil {
+		t.Fatalf("workspace_extract_tab = %v, %v", cmd, ok)
+	}
+	if !port.extracted {
+		t.Fatal("the extract action did not call the port")
+	}
+	// A refusal (no file path, large file, same root) comes back as an error the status
+	// row shows; the action closes nothing.
+	port.extractErr = errors.New("Cannot extract: buffer has no file path")
+	m.workspaceAction("workspace_extract_tab")
+	if !strings.Contains(m.notice, "no file path") {
+		t.Fatalf("notice = %q", m.notice)
+	}
+}
+
+// TestWorkspaceCloseAsksBeforeStoppingTerminals checks the close confirmation: a workspace
+// with running terminals does not close until Yes, and the question names every terminal
+// and agent. A workspace with none closes at once.
+func TestWorkspaceCloseAsksBeforeStoppingTerminals(t *testing.T) {
+	m := statusViewModel(t, nil)
+	port := &fakeWorkspacePort{
+		entries: []WorkspaceEntry{{ID: "id1", Label: "one"}},
+		running: []WorkspaceRunningTerminal{{Name: "bash"}, {Name: "claude", Agent: "claude"}},
+	}
+	m.SetWorkspacePort(port)
+	entry := WorkspaceEntry{ID: "id1", Label: "one"}
+	if cmd := m.workspaceCloseEntry(entry); cmd != nil {
+		t.Fatalf("close with running terminals returned a command instead of asking")
+	}
+	if port.closed != "" {
+		t.Fatal("the workspace closed before the question was answered")
+	}
+	if len(m.overlays) == 0 {
+		t.Fatal("no confirmation overlay")
+	}
+	if _, ok := m.overlays[len(m.overlays)-1].(*prompt.Confirm); !ok {
+		t.Fatalf("overlay = %T, want the confirmation prompt", m.overlays[len(m.overlays)-1])
+	}
+	summary := workspaceRunningSummary(port.running)
+	if summary != "2 running terminals: bash, claude (agent claude)" {
+		t.Fatalf("summary = %q", summary)
+	}
+	// No: nothing closes.
+	m.answer(prompt.Done{Tag: workspaceCloseRunningTag{id: "id1"}, Outcome: prompt.No})
+	if port.closed != "" {
+		t.Fatalf("No closed the workspace: %q", port.closed)
+	}
+	// Yes: the port closes the workspace.
+	m.answer(prompt.Done{Tag: workspaceCloseRunningTag{id: "id1"}, Outcome: prompt.Yes})
+	if port.closed != "id1" {
+		t.Fatalf("Yes did not close: %q", port.closed)
+	}
+
+	// Without running terminals the close goes straight through.
+	quiet := &fakeWorkspacePort{entries: []WorkspaceEntry{{ID: "id2", Label: "two"}}}
+	m.SetWorkspacePort(quiet)
+	if cmd := m.workspaceCloseEntry(WorkspaceEntry{ID: "id2", Label: "two"}); cmd != nil {
+		t.Fatal("the direct close returned a command")
+	}
+	if quiet.closed != "id2" {
+		t.Fatalf("the quiet workspace did not close: %q", quiet.closed)
+	}
+}
+
+// TestTabMenuExtractRow checks Fresh's tab context menu item: present only for a workspace
+// layer that extracts, disabled for a tab with no file, and activating the right-clicked
+// tab before extracting.
+func TestTabMenuExtractRow(t *testing.T) {
+	m, ed := newCtxModel(t, "a.txt", "b.txt")
+	m.SetWorkspacePort(&fakeWorkspacePort{})
+	var row *ctxmenu.Item
+	for i, it := range m.tabMenuItems(1) {
+		if it.Label == "Extract to New Workspace" {
+			row = &m.tabMenuItems(1)[i]
+		}
+	}
+	if row == nil {
+		t.Fatal("the tab menu has no extract row")
+	}
+	if row.Disabled {
+		t.Fatal("the extract row is disabled for a file tab")
+	}
+	m.showContextMenu(tea.Mouse{X: 5, Y: 1}, m.tabMenuItems(1))
+	chooseRow(t, m, "Extract to New Workspace")
+	if !ed.tabs[1].Active {
+		t.Fatal("the extracted tab was not activated")
+	}
+	// A tab with no path has the row disabled.
+	m2, ed2 := newCtxModel(t, "a.txt")
+	ed2.tabs[0].Path = ""
+	m2.SetWorkspacePort(&fakeWorkspacePort{})
+	for _, it := range m2.tabMenuItems(0) {
+		if it.Label == "Extract to New Workspace" && !it.Disabled {
+			t.Fatal("the extract row is enabled for a tab with no file")
+		}
 	}
 }

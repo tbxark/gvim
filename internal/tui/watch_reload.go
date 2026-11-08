@@ -46,6 +46,17 @@ type treeListingMsg struct {
 // the update loop. A change during a read is remembered, and it starts one more read
 // when that read is applied.
 func (m *Model) reloadTreeAsync() tea.Cmd {
+	if rt, ok := m.tree.(remoteExplorerReloader); ok {
+		// A remote tree lists its directories in a command: the read is remote I/O,
+		// never done on the update loop. The message applies the listing with the same
+		// again/reveal bookkeeping as the local background reload.
+		if m.root.reload.running {
+			m.root.reload.again = true
+			return nil
+		}
+		m.root.reload.running = true
+		return rt.ReloadCmd(m.root.reload.reveal)
+	}
 	st, ok := m.tree.(treeSnapshotter)
 	if !ok {
 		m.reloadTree()

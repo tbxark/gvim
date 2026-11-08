@@ -595,6 +595,9 @@ type Deps struct {
 	// Notice is a startup message for the status row, such as the first config
 	// warning. Empty shows nothing.
 	Notice string
+	// Updates is the app release check painted by the status row element {update};
+	// the zero value disables it.
+	Updates UpdateHooks
 	// StartupOpen is a path opened by the root's first command, off the update loop.
 	// A remote launch sets the remote file here: its load goes through the remote file
 	// access (an editor with a non-local FileAccess reports itself as needing the

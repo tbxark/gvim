@@ -231,9 +231,9 @@ func (s *settingsService) structureEnvDetectors(cfg config.Config) tui.SettingsS
 		})
 	}
 	return tui.SettingsStructure{
-		Key: "env.detectors", Title: "Environment detectors", Kind: "entries",
+		Key: "env.detectors", Title: settingsPage("environment_detectors", "Environment detectors"), Kind: "entries",
 		Rows: rows,
-		Note: "Read-only: detection is passive (markers and evidence paths only). Add or replace detectors with env.detectors in the user config; activation runs only in a trusted workspace.",
+		Note: settingsNote("environment_detectors", "Read-only: detection is passive (markers and evidence paths only). Add or replace detectors with env.detectors in the user config; activation runs only in a trusted workspace."),
 	}
 }
 

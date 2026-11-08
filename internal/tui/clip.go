@@ -95,24 +95,24 @@ func (m *Model) nativeWrite(text string) tea.Cmd {
 func (m *Model) copyFormatted(args map[string]any, text string) tea.Cmd {
 	w, ok := m.dock.Clipboard().(HTMLClipboardWriter)
 	if !ok {
-		m.notice = "Copied as plain text: this clipboard has no rich text"
+		m.notice = uiText("gvim.notice.clipboard.plain_no_rich", "Copied as plain text: this clipboard has no rich text")
 		return nil
 	}
 	st, name := m.panes, ""
 	if n, _ := args["theme"].(string); n != "" {
 		th, _, err := m.loadTheme(n)
 		if err != nil {
-			m.notice = fmt.Sprintf("Copied as plain text: theme %q not found", n)
+			m.notice = uiTextVars("gvim.notice.clipboard.theme_not_found", "Copied as plain text: theme %{theme} not found", map[string]any{"theme": fmt.Sprintf("%q", n)})
 			return nil
 		}
 		st, name = editorpane.NewStyles(th), th.Name
 	}
 	html, ok := editorpane.SelectionHTML(m.ed.Active(), st, text)
 	if !ok {
-		m.notice = "Copied as plain text: the selection is too long to format"
+		m.notice = uiText("gvim.notice.clipboard.plain_too_long", "Copied as plain text: the selection is too long to format")
 		return nil
 	}
-	m.notice = "Copied with formatting"
+	m.notice = uiText("gvim.notice.clipboard.formatted", "Copied with formatting")
 	if name != "" {
 		m.notice += " (" + name + ")"
 	}
@@ -148,7 +148,7 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case htmlCopiedMsg:
 		if msg.err != nil {
-			m.notice = "Copied as plain text: " + msg.err.Error()
+			m.notice = uiTextVars("gvim.notice.clipboard.plain_error", "Copied as plain text: %{error}", map[string]any{"error": msg.err.Error()})
 		}
 		return nil, true
 	case editorPasteMsg:
