@@ -57,6 +57,8 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.openAgentDirPrompt(msg.name, msg.dir), true
 	case agentRunDirMsg:
 		return m.agentDirChosen(msg), true
+	case completionReplyMsg:
+		return m.completionReplied(msg), true
 	case gitStatusMsg:
 		m.applyGitStatus(msg)
 		return nil, true

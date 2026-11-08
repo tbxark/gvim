@@ -216,12 +216,28 @@ func TestDaemonSingleWriterRefusal(t *testing.T) {
 	if err := refuseIfDaemonRunning(bare); err == nil {
 		t.Fatal("a bare launch did not refuse while the daemon hosts the workspace")
 	}
-	// A file launch and --simple stay direct launches.
-	if err := refuseIfDaemonRunning(Options{Root: root, Files: []FileTarget{{Path: filepath.Join(root, "a.txt")}}}); err != nil {
-		t.Fatalf("a file launch must stay direct: %v", err)
+	// Every direct editor mode now refuses: a direct editor would write files the
+	// daemon also holds unsaved buffers for. The error carries the attach instruction.
+	direct := []Options{
+		{Root: root, Files: []FileTarget{{Path: filepath.Join(root, "a.txt")}}},
+		{Root: root, Simple: true},
+		{Root: root, Diff: true, Files: []FileTarget{{Path: filepath.Join(root, "a.txt")}, {Path: filepath.Join(root, "b.txt")}}},
+		{Root: root, Stdin: []byte("piped\n")},
 	}
-	if err := refuseIfDaemonRunning(Options{Root: root, Simple: true}); err != nil {
-		t.Fatalf("--simple must stay direct: %v", err)
+	for _, opts := range direct {
+		err := refuseIfDaemonRunning(opts)
+		if err == nil {
+			t.Fatalf("a direct launch was allowed while the daemon hosts the workspace: %+v", opts)
+		}
+		if !strings.Contains(err.Error(), "gvim -a") || !strings.Contains(err.Error(), "second writer") {
+			t.Errorf("refusal lacks the attach instruction: %v", err)
+		}
+	}
+	// The daemon host and the attaching client are not direct editors.
+	for _, mode := range []DaemonMode{DaemonServe, DaemonAttach} {
+		if err := refuseIfDaemonRunning(Options{Root: root, Daemon: &DaemonOptions{Mode: mode}}); err != nil {
+			t.Errorf("daemon mode %v refused: %v", mode, err)
+		}
 	}
 }
 

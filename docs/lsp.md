@@ -267,6 +267,44 @@ start does in a restricted workspace.
 While a server is off or missing, the editor works as before: syntax colors, completion of the
 words in the buffer and everything else do not depend on it.
 
+**Buffer-word completion.** **Show Completions** (`Ctrl+Space`) works without a language
+server. It offers the words already in the buffer: the ones that start with the word before
+the caret, ranked by proximity to the caret, then by being visible on screen, then by how
+often they occur, with smart-case matching (an uppercase letter in the prefix matches
+case-sensitively; otherwise the prefix's own casing is preferred) and the language's
+`word_characters` respected. The scan is bounded (512 KiB of lines around the caret; 2-rune
+minimum, 40 candidates) and runs in a command, never on the update loop. When a server is
+running, its items come first and the buffer words follow in the same popup; a word whose
+insert text the server already offered is dropped. While a server is slow the list is
+discarded if the document version or the caret changed before the reply arrived, so typing
+never shows a list for older text. In a large-file buffer the words are not offered yet (their
+lines would have to be read from disk); that is a documented residual, and Fresh's
+`completion_popup_auto_show` auto-popup is not ported — completion is manual, as the command
+name says; and only the active buffer is scanned (Fresh also scans other open buffers and its
+dabbrev provider, which gvim does not port).
+
+**Accepting a language-server completion.** A server item is inserted with everything the
+server asked for in one edit: its snippet text is expanded, the import edits of an
+auto-import candidate (`additionalTextEdits`) are applied together with the insert, and an
+item whose server fills those in lazily is resolved first with `completionItem/resolve` in
+a command (the popup never blocks on it). Snippets are the subset Fresh expands: tabstops
+(empty or with a default), choices (the first one), the final cursor stop, and the
+`\$`, `\\`, `\}` and `\|` escapes; the caret goes to the final stop, and a later
+final stop wins. gvim advertises `snippetSupport` and tracks `insertTextFormat` (Fresh
+deliberately does neither and only heuristically detects snippets) and advertises
+`resolveSupport` for `additionalTextEdits` + `documentation` (only the edits are used;
+documentation is not rendered). The insert and every additional edit are applied as one
+atomic edit guarded by the document version captured when the completion was asked and by
+an overlap check: if the document changed, or the main edit and an additional edit overlap,
+nothing is written and the status row says why ("completion is stale…", "completion edits
+overlap…"). A resolve reply is applied the same way; if the document changed while it was in
+flight, it is refused instead of editing newer text. Not ported from Fresh: tabstop
+navigation (Fresh does not navigate either — it inserts defaults and jumps to the final
+stop), `labelDetails` rendering (Fresh shows the import path from it; gvim shows
+label/detail only), documentation rendering, multi-cursor insertion (gvim has a single
+caret), and the request-id bookkeeping Fresh keeps for a completion that is re-asked while
+open.
+
 ## What the servers add
 
 - **Diagnostics.** The `{diagnostics}` status element counts the diagnostics of the active

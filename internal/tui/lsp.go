@@ -38,6 +38,14 @@ type lspEditor interface {
 	ApplyLSPEdits(path string, edits []editor.LSPEdit) error
 }
 
+// CompletionResolver is the optional LSPSession part that fills an incomplete
+// completion item (completionItem/resolve) before it can be accepted: the server
+// supplies the additional edits of an auto-import lazily. The root calls it from a
+// command, never on the update goroutine.
+type CompletionResolver interface {
+	ResolveCompletion(path string, token int) (CompletionItem, error)
+}
+
 // gotoEditor is the optional file-opening view that a goto uses to read the file
 // off the UI goroutine. LoadFunc returns the read, and OpenLoaded opens its result
 // in Update. An editor without it opens the file in Update, as it did before.
@@ -176,6 +184,19 @@ type lspCompletion struct {
 	at    buffer.Pos
 	items []CompletionItem
 	pop   *popup.Popup
+	// version is the document version the list was asked at, and versionOK says it
+	// is set. Acceptance passes it as the expected version so a changed document is
+	// never edited with an item computed against older text.
+	version   editor.Version
+	versionOK bool
+}
+
+// completionResolvedMsg is the answer of a completionItem/resolve request started by
+// accepting an incomplete item (auto-imports arrive in the resolved item).
+type completionResolvedMsg struct {
+	comp *lspCompletion
+	item CompletionItem
+	err  error
 }
 
 // lspAsk is a request to a server that gets a reply.
@@ -239,7 +260,13 @@ type (
 		edits   WorkspaceEdit
 		actions []CodeAction
 		action  CodeAction
-		err     error
+		// version is the document version the request was asked at, captured when
+		// the request started. versionOK says it is set; a completion reply without
+		// it (one that opened the popup in Update) captures the current version when
+		// the popup opens.
+		version   editor.Version
+		versionOK bool
+		err       error
 	}
 	lspServerMsg struct {
 		action string
@@ -515,6 +542,8 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.lspDiags(msg), true
 	case lspReplyMsg:
 		return m.lspReply(msg), true
+	case completionResolvedMsg:
+		return m.completionResolved(msg), true
 	case lspLoadedMsg:
 		m.lspLoaded(msg)
 		return nil, true
@@ -908,6 +937,12 @@ func (m *Model) lspCompletions(r lspReplyMsg) {
 		return
 	}
 	c := &lspCompletion{path: r.path, at: r.at, items: r.items}
+	c.version, c.versionOK = r.version, r.versionOK
+	if !c.versionOK {
+		if ve, ok := m.ed.(lspVersionedEditor); ok {
+			c.version, c.versionOK = ve.DocumentVersion(r.path)
+		}
+	}
 	items := make([]popup.Item, len(r.items))
 	for i, it := range r.items {
 		items[i] = popup.Item{Label: it.Label, Detail: it.Detail, Data: lspPick{ask: lspAskCompletion, comp: c}}
@@ -945,7 +980,7 @@ func (m *Model) lspChosen(pick lspPick, index int) tea.Cmd {
 	case lspAskDefinition, lspAskImplementation, lspAskReferences:
 		return m.lspGoto(pick.loc)
 	case lspAskCompletion:
-		m.acceptCompletion(pick.comp, index)
+		return m.acceptCompletion(pick.comp, index)
 	case lspAskCodeActions:
 		return m.chooseCodeAction(m.lsp.popupPath, pick.action)
 	}
@@ -1065,28 +1100,180 @@ func (m *Model) lspPopup(title string, items []popup.Item) *popup.Popup {
 	return p
 }
 
-// acceptCompletion inserts the completion at index of c. The item's range is replaced
-// when the server gave one, and otherwise the text goes at the caret the completion
-// was asked at. The caret then moves to the end of the inserted text. The list
-// closes after the insert, whether or not the insert failed.
-func (m *Model) acceptCompletion(c *lspCompletion, index int) {
+// acceptCompletion accepts the completion at index of c. An item whose lazy fields
+// the server still has to fill in (an auto-import with completionItem/resolve) is
+// resolved in a command first; everything else is inserted now. The item's range is
+// replaced when the server gave one, otherwise the text goes at the caret. All edits
+// of the item are applied as one edit, guarded by the version the list was asked at,
+// so a changed document or overlapping ranges writes nothing and says why.
+func (m *Model) acceptCompletion(c *lspCompletion, index int) tea.Cmd {
 	if c == nil || index < 0 || index >= len(c.items) {
-		return
+		return nil
 	}
 	item := c.items[index]
+	if item.ResolveToken != 0 {
+		resolver, ok := m.lsp.port.(CompletionResolver)
+		if !ok {
+			m.closeCompletion(c)
+			m.notice = "completion: this server item cannot be resolved"
+			return nil
+		}
+		m.closeCompletion(c)
+		return m.resolveCompletion(resolver, c, item.ResolveToken)
+	}
+	err := m.applyCompletionItem(c, item)
+	m.closeCompletion(c)
+	if err != nil {
+		m.notice = err.Error()
+	}
+	return nil
+}
+
+// resolveCompletion asks the server for the lazy fields of an incomplete item in a
+// command. The reply applies the resolved item with the same guard and atomic edit.
+func (m *Model) resolveCompletion(resolver CompletionResolver, c *lspCompletion, token int) tea.Cmd {
+	comp, path := c, c.path
+	return func() tea.Msg {
+		item, err := resolver.ResolveCompletion(path, token)
+		return completionResolvedMsg{comp: comp, item: item, err: err}
+	}
+}
+
+// completionResolved applies the item a completionItem/resolve reply filled in. A
+// failed resolve changes nothing and says why.
+func (m *Model) completionResolved(msg completionResolvedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.notice = "completion: " + msg.err.Error()
+		return nil
+	}
+	if err := m.applyCompletionItem(msg.comp, msg.item); err != nil {
+		m.notice = err.Error()
+	}
+	return nil
+}
+
+// applyCompletionItem inserts one accepted item and its additional edits (an
+// auto-import) as a single edit. The ranges are checked for overlap first, and the
+// document version captured at the request is passed as the expected version, so
+// stale items and overlapping edits write nothing.
+func (m *Model) applyCompletionItem(c *lspCompletion, item CompletionItem) error {
 	from, to := c.at, c.at
 	if item.Range != nil {
 		from, to = item.Range.Start, item.Range.End
 	}
-	err := m.applyLSPEdits(c.path, []editor.LSPEdit{{From: from, To: to, Text: item.Insert}})
-	m.closeCompletion(c)
+	edits := make([]editor.LSPEdit, 0, len(item.Additional)+1)
+	edits = append(edits, editor.LSPEdit{From: from, To: to, Text: item.Insert})
+	for _, add := range item.Additional {
+		edits = append(edits, editor.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
+	}
+	if err := completionEditConflict(edits); err != nil {
+		return err
+	}
+	var expect *editor.Version
+	if c.versionOK {
+		expect = &c.version
+	}
+	err := m.applyLSPEditsExpect(c.path, edits, expect)
 	if err != nil {
-		m.notice = err.Error()
-		return
+		switch {
+		case errors.Is(err, editor.ErrStale):
+			return errors.New("completion is stale: the document changed, so nothing was applied")
+		case errors.Is(err, editor.ErrOverlappingEdits):
+			return errors.New("completion edits overlap, so nothing was applied")
+		}
+		return err
 	}
 	if doc := m.ed.Active(); doc != nil && docPath(doc) == c.path {
-		m.ed.SetCursor(insertEnd(from, item.Insert), false)
+		m.ed.SetCursor(completionCaret(from, item), false)
 	}
+	return nil
+}
+
+// completionEditConflict reports whether the main edit and the additional edits of
+// an item overlap (or two zero-width edits sit at the same place). An ambiguous
+// edit is refused before it touches the document.
+func completionEditConflict(edits []editor.LSPEdit) error {
+	for i := range edits {
+		if posLess(edits[i].To, edits[i].From) {
+			return errors.New("completion edit has an inverted range, so nothing was applied")
+		}
+		for j := i + 1; j < len(edits); j++ {
+			if completionRangesOverlap(edits[i].From, edits[i].To, edits[j].From, edits[j].To) {
+				return errors.New("completion edits overlap, so nothing was applied")
+			}
+		}
+	}
+	return nil
+}
+
+// completionRangesOverlap reports whether the half-open ranges [aFrom,aTo) and
+// [bFrom,bTo) intersect. Two insertions at the same point also conflict, because
+// their order is ambiguous.
+func completionRangesOverlap(aFrom, aTo, bFrom, bTo buffer.Pos) bool {
+	if aFrom == bFrom && aTo == aFrom && bTo == bFrom {
+		return true
+	}
+	return posLess(aFrom, bTo) && posLess(bFrom, aTo)
+}
+
+// posLess reports whether a is before b.
+func posLess(a, b buffer.Pos) bool {
+	if a.Line != b.Line {
+		return a.Line < b.Line
+	}
+	return a.Col < b.Col
+}
+
+// posAfterText returns the position just after text inserted at from.
+func posAfterText(from buffer.Pos, text string) buffer.Pos {
+	p := from
+	for _, r := range text {
+		if r == '\n' {
+			p.Line++
+			p.Col = 0
+			continue
+		}
+		p.Col++
+	}
+	return p
+}
+
+// completionCaret is where the caret goes after the item's edits: inside the
+// inserted text at the snippet's final stop (or its end), shifted down/right by the
+// additional edits that apply before the main position (auto-imports are whole lines
+// above it). An additional edit that does not end before the main edit never moves
+// the caret.
+func completionCaret(from buffer.Pos, item CompletionItem) buffer.Pos {
+	at := from
+	for _, add := range item.Additional {
+		if !posLess(add.Range.End, from) && add.Range.End != from {
+			continue
+		}
+		if add.Range.End.Line < at.Line {
+			at.Line += countNewlines(add.Text) - (add.Range.End.Line - add.Range.Start.Line)
+			continue
+		}
+		if add.Range.End.Line == at.Line && add.Range.Start.Line == add.Range.End.Line {
+			at.Col += len([]rune(add.Text)) - (add.Range.End.Col - add.Range.Start.Col)
+		}
+	}
+	insert := []rune(item.Insert)
+	offset := len(insert)
+	if item.Snippet && item.CursorOffset >= 0 && item.CursorOffset <= offset {
+		offset = item.CursorOffset
+	}
+	return posAfterText(at, string(insert[:offset]))
+}
+
+// countNewlines returns the number of line breaks in s.
+func countNewlines(s string) int {
+	n := 0
+	for _, r := range s {
+		if r == '\n' {
+			n++
+		}
+	}
+	return n
 }
 
 // closeCompletion closes the list c: its popup leaves the stack, and the root forgets
@@ -1096,16 +1283,6 @@ func (m *Model) closeCompletion(c *lspCompletion) {
 		m.lsp.comp = nil
 	}
 	m.closePopup(c.pop)
-}
-
-// insertEnd returns the position just after text inserted at from.
-func insertEnd(from buffer.Pos, text string) buffer.Pos {
-	parts := strings.Split(text, "\n")
-	if len(parts) == 1 {
-		return buffer.Pos{Line: from.Line, Col: from.Col + len([]rune(text))}
-	}
-	last := parts[len(parts)-1]
-	return buffer.Pos{Line: from.Line + len(parts) - 1, Col: len([]rune(last))}
 }
 
 // closePopup removes the popup overlay that holds p from the stack.
@@ -1142,8 +1319,7 @@ func (m *Model) lspKey(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	switch tea.Key(k).Code {
 	case tea.KeyTab:
-		m.acceptCompletion(c, c.pop.Selected())
-		return nil, true
+		return m.acceptCompletion(c, c.pop.Selected()), true
 	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown, tea.KeyHome, tea.KeyEnd, tea.KeyEnter, tea.KeyEscape:
 		return nil, false
 	}
@@ -1164,7 +1340,7 @@ func (m *Model) lspAction(action string) (tea.Cmd, bool) {
 	case "lsp_hover":
 		return m.lspAsked(lspAskHover), true
 	case "lsp_completion":
-		return m.lspAsked(lspAskCompletion), true
+		return m.completionAsked(), true
 	case "lsp_code_actions":
 		return m.lspAsked(lspAskCodeActions), true
 	case "lsp_signature_help":
@@ -1198,7 +1374,7 @@ func (m *Model) lspAction(action string) (tea.Cmd, bool) {
 		return m.lspToggleInlayHints(), true
 	case "completion_accept":
 		if c := m.lsp.comp; c != nil {
-			m.acceptCompletion(c, c.pop.Selected())
+			return m.acceptCompletion(c, c.pop.Selected()), true
 		}
 	case "completion_dismiss":
 		if c := m.lsp.comp; c != nil {
@@ -1267,6 +1443,9 @@ func (m *Model) lspRequest(ask lspAsk, path string, at buffer.Pos, name string) 
 		case lspAskHover:
 			r.text, r.err = port.Hover(path, at)
 		case lspAskCompletion:
+			if ve, ok := m.ed.(lspVersionedEditor); ok {
+				r.version, r.versionOK = ve.DocumentVersion(path)
+			}
 			r.items, r.err = port.Completion(path, at)
 		case lspAskRename:
 			r.edits, r.err = port.Rename(path, at, name)

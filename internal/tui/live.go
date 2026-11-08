@@ -33,6 +33,14 @@ type bufferTextsEditor interface {
 // openLiveGrep shows the palette in Live Grep mode, with query as its text, and
 // returns the command that searches it. Without a Grep port it shows a notice.
 func (m *Model) openLiveGrep(query string) tea.Cmd {
+	if m.fileRoot != "" {
+		// A remote launch: the Grep port is the local live grep and the palette root
+		// would be the local process root, so searching here would silently search the
+		// LOCAL project for remote-looking rows. Refuse explicitly until a remote
+		// search through the authority is wired (docs/architecture.md §8.1).
+		m.notice = "Live Grep searches the local workspace; it is not available in a remote workspace yet"
+		return nil
+	}
 	g := m.root.ports.Grep
 	if g == nil {
 		m.notice = "Live Grep is not supported in this port"

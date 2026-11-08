@@ -198,10 +198,19 @@ func (m *Model) findAction(action string) (tea.Cmd, bool) {
 	case "start_git_grep":
 		return m.openProjectSearch(true), true
 	case "search_replace_next_match":
+		if m.remoteSearchUnsupported("Project search results") {
+			return nil, true
+		}
 		return m.projectMatchAction(true), true
 	case "search_replace_prev_match":
+		if m.remoteSearchUnsupported("Project search results") {
+			return nil, true
+		}
 		return m.projectMatchAction(false), true
 	case "project_search_results":
+		if m.remoteSearchUnsupported("Project search results") {
+			return nil, true
+		}
 		return m.openProjectResultsList(), true
 	case "query_replace", "find_selection_next", "find_selection_previous":
 	default:

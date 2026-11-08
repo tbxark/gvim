@@ -81,16 +81,19 @@ var ErrRefused = errors.New("fake server refused")
 // sets the fields it needs before it sends the request. Unset fields reply with
 // null or an empty list.
 type CannedReplies struct {
-	Fail           bool
-	Definition     protocol.DefinitionResult
-	References     []protocol.Location
-	Hover          *protocol.Hover
-	Signature      *protocol.SignatureHelp
-	Completion     protocol.CompletionResult
-	Rename         *protocol.WorkspaceEdit
-	CodeActions    []protocol.CommandOrCodeAction
-	Implementation protocol.DefinitionResult
-	Formatting     []protocol.TextEdit
+	Fail       bool
+	Definition protocol.DefinitionResult
+	References []protocol.Location
+	Hover      *protocol.Hover
+	Signature  *protocol.SignatureHelp
+	Completion protocol.CompletionResult
+	// ResolvedCompletion is what completionItem/resolve answers; the item it
+	// receives is echoed when it is nil.
+	ResolvedCompletion *protocol.CompletionItem
+	Rename             *protocol.WorkspaceEdit
+	CodeActions        []protocol.CommandOrCodeAction
+	Implementation     protocol.DefinitionResult
+	Formatting         []protocol.TextEdit
 
 	// Caps is what Initialize answers. A zero value reports full document sync
 	// and nothing else.

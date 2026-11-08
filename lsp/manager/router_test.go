@@ -321,7 +321,11 @@ func TestServersRestartStopAndMute(t *testing.T) {
 // advertise their features.
 func TestDynamicRegistrationUnlocksRouting(t *testing.T) {
 	ctx := newTestContext(t)
-	log := &startLog{t: t}
+	// The fake server publishes diagnostics from its didOpen handler while the test
+	// sends client/registerCapability; with synchronous dispatch the two io.Pipe
+	// writes can block each other (read loop held in the handler), so this test
+	// dispatches asynchronously.
+	log := &startLog{t: t, async: true}
 	m := NewManager(mgrRoot, map[string][]ServerConfig{
 		"go": {{Command: []string{"gopls"}, AutoStart: true}},
 	}, nil)

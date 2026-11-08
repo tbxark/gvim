@@ -41,9 +41,10 @@ type rigOpts struct {
 	timeout  time.Duration      // plugin_timeout_ms; 0: 200 ms
 	buffers  []rigBuffer        // open before the plugins load (the first is active)
 	script   func(o *plugintest.FakeOS)
-	plugins  []string // bundled plugins to load
-	probe    string   // Lua source of an extra plugin "probe"
-	encoding string   // the encoding of the first buffer (default utf-8)
+	plugins  []string          // bundled plugins to load
+	probe    string            // Lua source of an extra plugin "probe"
+	extra    map[string]string // extra plugin files by path, e.g. "live_diff/init.lua"
+	encoding string            // the encoding of the first buffer (default utf-8)
 }
 
 type rig struct {
@@ -71,6 +72,9 @@ func startRig(t *testing.T, o rigOpts) *rig {
 	}
 	if o.probe != "" {
 		files["probe/init.lua"] = o.probe
+	}
+	for name, src := range o.extra {
+		files[name] = src
 	}
 	r := &rig{t: t, host: plugintest.NewFakeHost(), os: plugintest.NewFakeOS(), ids: map[string]pluginapi.BufferID{}}
 	if !o.noGit {

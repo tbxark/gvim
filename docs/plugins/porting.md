@@ -265,6 +265,20 @@ a buffer line. Three port decisions follow (round 11):
   working-tree file, which is wrong for any commit that is not HEAD. The Enter mapping and hunk
   navigation stay local.
 
+### diff_nav / R13-9: implemented as a native merged surface in git_gutter
+
+**diff_nav / R13-9 — implemented as a native merged surface in git_gutter.** git_gutter's
+Next/Previous Change now collect three sources like Fresh's diff_nav: its HEAD changed regions,
+live_diff's exported hunks (only while live_diff is loaded and exports `hunks`; a
+missing/older/erroring export degrades to the other sources), and `Buffer:diff_saved()` lines of
+unsaved changes. Targets are deduped by line, sorted ascending, and use Fresh's `Change n/total [wrapped]` messages; commands keep git_gutter ids/titles (there are no `diff_nav.*` ids and no
+separate plugin), both plugins stay off/unaffected as before, and everything runs in plugin
+tasks/await yields, so the Bubble Tea Update loop does no blocking IO. Remaining gaps: no separate
+diff_nav plugin/command namespace or its i18n keys; the side-by-side Compare view
+(compare_files/--diff) keeps its own Next/Previous Difference rather than cross-context hunk
+navigation; large-file buffers keep git_gutter's "not tracked" notice; live_diff must be loaded to
+contribute its active-diff hunks.
+
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.

@@ -34,11 +34,27 @@ type projectReplaceDoneMsg struct {
 	err    error
 }
 
+// remoteSearchUnsupported refuses a local project search/replace entry point in a remote
+// workspace: those ports read and write the LOCAL file system, and the panel's rows are
+// remote paths, so using them would search or replace the wrong files. It reports
+// whether it refused. Remote wiring through the authority is a follow-up (see
+// docs/architecture.md §8.1).
+func (m *Model) remoteSearchUnsupported(label string) bool {
+	if m.fileRoot == "" {
+		return false
+	}
+	m.notice = label + " searches the local workspace; it is not available in a remote workspace yet"
+	return true
+}
+
 // openProjectSearch opens the project-wide Search and Replace panel, or the Git Grep
 // panel when git is true. The panel gets snapshots of the open buffers, so unsaved text
 // is searched, and the file index port for the file list. Without the port it shows a
 // notice.
 func (m *Model) openProjectSearch(git bool) tea.Cmd {
+	if m.remoteSearchUnsupported(map[bool]string{true: "Git Grep", false: "Project search and replace"}[git]) {
+		return nil
+	}
 	if git && m.root.ports.GitGrep == nil {
 		m.notice = "Git Grep is not supported in this port"
 		return nil
@@ -240,6 +256,9 @@ func (m *Model) projectMatchAction(forward bool) tea.Cmd {
 // askProjectReplace fills the replacement with the open buffers' fresh text and asks
 // the user to confirm it.
 func (m *Model) askProjectReplace(req searchpanel.ReplaceRequest) tea.Cmd {
+	if m.remoteSearchUnsupported("Replacing across project files") {
+		return nil
+	}
 	if m.root.ports.ProjectReplace == nil {
 		m.notice = "Replacing across files is not supported in this port"
 		return nil

@@ -42,6 +42,11 @@ type startLog struct {
 	// caps, when set, gives the capabilities each fake server advertises in its
 	// initialize result.
 	caps func(cfg lsp.Config) protocol.ServerCapabilities
+	// async, when set, dispatches the fake server's handlers asynchronously. A
+	// synchronous handler that writes (didOpen publishes diagnostics) holds the
+	// server's read loop, so a test that then sends a request to the client (such as
+	// client/registerCapability) can deadlock both io.Pipe directions.
+	async bool
 }
 
 // pair is an lsp.Client connected to a FakeServer over in-memory pipes.
@@ -63,8 +68,23 @@ func startPair(cfg lsp.Config, stall chan struct{}) pair {
 // wrap, so a test can put a transport such as gatedRWC between the client and
 // the fake server.
 func startPairOver(cfg lsp.Config, stall chan struct{}, wrap func(lsptest.PipeRWC) io.ReadWriteCloser) pair {
+	return startPairOverMode(cfg, stall, wrap, false)
+}
+
+// startPairOverMode is startPairOver with the choice of synchronous or asynchronous
+// dispatch: asynchronous dispatch keeps the fake server's read loop reading while a
+// handler writes.
+func startPairOverMode(cfg lsp.Config, stall chan struct{}, wrap func(lsptest.PipeRWC) io.ReadWriteCloser, async bool) pair {
 	cliEnd, srvEnd := lsptest.NewPipePair()
-	srv, srvConn := lsptest.StartServer(srvEnd, stall)
+	var (
+		srv     *lsptest.FakeServer
+		srvConn jsonrpc2.Conn
+	)
+	if async {
+		srv, srvConn = lsptest.StartServerCancelable(srvEnd, stall)
+	} else {
+		srv, srvConn = lsptest.StartServer(srvEnd, stall)
+	}
 	return pair{
 		client:  lsp.NewClient(wrap(cliEnd), cfg),
 		srvConn: srvConn,
@@ -85,7 +105,12 @@ func (s *startLog) start(_ context.Context, cfg lsp.Config) (*lsp.Client, error)
 	if s.fail != nil {
 		return nil, s.fail
 	}
-	p := startPair(cfg, nil)
+	var p pair
+	if s.async {
+		p = startPairOverMode(cfg, nil, func(cli lsptest.PipeRWC) io.ReadWriteCloser { return cli }, true)
+	} else {
+		p = startPair(cfg, nil)
+	}
 	if s.caps != nil {
 		p.srv.Canned.Caps = s.caps(cfg)
 	}

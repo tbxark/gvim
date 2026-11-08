@@ -76,6 +76,10 @@ type Model struct {
 	ranker   palette.Ranker
 	recorder fileRecorder // the ranker's frecency record, when it has one
 
+	// fileRoot is the palette file-mode root when it is not the explorer's root (a
+	// remote workspace's remote path); empty means the explorer root. A non-empty
+	// value also marks the palette as remote (slash joins, no local preview).
+	fileRoot string
 	// proj is the project-search state: the last panel, kept after it closes so the
 	// next and previous match actions can walk its results, and the replacement
 	// waiting for its confirmation.
@@ -279,6 +283,7 @@ func New(deps Deps) *Model {
 	}
 	// Assign only a non-nil source: a nil concrete value in an interface would
 	// look like a file index or ranker that is present.
+	m.fileRoot = deps.FileRoot
 	if deps.Files != nil {
 		m.files = deps.Files
 	}
@@ -1482,15 +1487,25 @@ func (m *Model) openBrowser(folderOnly bool) {
 // selected file's preview when a Preview port is wired.
 func (m *Model) openPalette(query string) tea.Cmd {
 	st := m.paletteState()
+	root := m.rootDir()
+	remote := m.fileRoot != ""
+	if remote {
+		root = m.fileRoot
+	}
+	var preview palette.Previewer
+	if !remote {
+		preview = m.root.ports.Preview
+	}
 	p := palette.New(palette.Options{
 		Query:    query,
-		Root:     m.rootDir(),
+		Root:     root,
+		Remote:   remote,
 		Commands: translateCommands(m.allCommands()),
 		State:    &st,
 		Buffers:  m.paletteBuffers(),
 		Files:    m.files,
 		Ranker:   m.ranker,
-		Preview:  m.root.ports.Preview,
+		Preview:  preview,
 		Theme:    m.theme,
 	})
 	m.pushOverlay(p)

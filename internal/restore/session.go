@@ -43,11 +43,19 @@ func SaveSession(ed *editor.Editor, dir string, st tui.ExplorerState) error {
 	return WriteSession(ed, dir, st, nil)
 }
 
+// WriteSessionWithLayout is WriteSession with the pane layout of the workspace. It
+// saves the layout only when every pane still names a file of the session with the
+// same path, so a stale or hand-edited layout never attaches a pane to the wrong
+// file. A nil layout keeps the single-pane behavior.
+func WriteSessionWithLayout(ed *editor.Editor, dir string, st tui.ExplorerState, kept []session.FileState, layout *session.SplitLayout) error {
+	return WriteSession(ed, dir, st, kept, layout)
+}
+
 // WriteSession writes the session as SaveSession does, and lists the kept files after
 // the open tabs. A kept file is one whose unsaved text restoreSession could not put
 // back. Its stash file is named in the new session, so the save does not remove it,
 // and the next start tries to restore it again.
-func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []session.FileState) error {
+func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []session.FileState, layouts ...*session.SplitLayout) error {
 	tabs := ed.Tabs()
 	orig := -1
 	for i, t := range tabs {
@@ -117,6 +125,10 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 	}
 	files = append(files, failedStashes...)
 	files = append(files, kept...)
+	var layout *session.SplitLayout
+	if len(layouts) > 0 {
+		layout = SplitLayoutFor(files, layouts[0])
+	}
 	return session.Save(dir, session.Session{
 		Root:        st.Root,
 		Explorer:    st.Open,
@@ -125,6 +137,7 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 		Active:      active,
 		Files:       files,
 		Sidebar:     SaveSidebarState(st.Sidebar),
+		Layout:      layout,
 	})
 }
 

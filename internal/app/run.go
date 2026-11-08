@@ -106,21 +106,36 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	var srv *daemon.Server
 	if serveDaemon {
+		namedRoot, err := resolveRoot(opts.Root)
+		if err != nil {
+			return err
+		}
 		name := opts.Daemon.Name
 		if name == "" {
-			root, err := resolveRoot(opts.Root)
-			if err != nil {
-				return err
-			}
-			name = daemon.DefaultName(root)
+			name = daemon.DefaultName(namedRoot)
 		}
 		ln, path, err := daemon.Listen(name)
 		if err != nil {
 			return err
 		}
+		// Claim the workspace for this daemon until the checked exit save is done: a
+		// direct launch reads the mark (daemon_hosts.go) and refuses instead of becoming
+		// a second writer of the daemon's unsaved buffers. The mark covers an explicitly
+		// named daemon too. A failed registration refuses to start (and closes the
+		// listener): without the mark a direct launch could miss this daemon and race it,
+		// which is the data loss this daemon mode rule exists to prevent.
+		canonicalRoot := namedRoot
+		if resolved, cerr := daemon.CanonicalRoot(namedRoot); cerr == nil {
+			canonicalRoot = resolved
+		}
+		if err := writeHostMark(canonicalRoot, name); err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("daemon: cannot record the workspace host mark (a direct launch would miss this daemon, so it refuses to start): %w", err)
+		}
 		srv = daemon.NewServer(ln, path)
 		defer func() { _ = srv.Close() }()
 		opts.Daemon.Detach = srv.Detach
+		defer clearHostMark(canonicalRoot, name)
 		_, _ = fmt.Fprintf(os.Stderr, "gvim: daemon listening on %s\n", path)
 	}
 	if srv != nil {
@@ -230,6 +245,9 @@ type runtime struct {
 	// remoteWatch is the remote external-change bridge of a remote launch; nil for a
 	// local launch, whose filewatch.Watcher is in watcher.
 	remoteWatch *remoteWatch
+	// remoteFiles is the remote workspace's file index of a remote launch; nil for a
+	// local launch, whose index is owned by Projects.
+	remoteFiles *finder.Index
 }
 
 // close stops the file index of the current root, the watcher and the remote watch.
@@ -240,6 +258,9 @@ func (r *runtime) close() {
 	}
 	if r.remoteWatch != nil {
 		_ = r.remoteWatch.Close()
+	}
+	if r.remoteFiles != nil {
+		r.remoteFiles.Close()
 	}
 	if r.auth != nil {
 		_ = r.auth.Close()
@@ -252,7 +273,9 @@ func (r *runtime) save() error {
 	if r.sessionDir == "" || r.skipSave {
 		return nil
 	}
-	if err := restore.WriteSession(r.ed, r.sessionDir, r.model.ExplorerState(), r.kept); err != nil {
+	// The pane layout is captured with the session; SplitState reads the model
+	// without switching tabs, and a stale layout is dropped by the writer.
+	if err := restore.WriteSessionWithLayout(r.ed, r.sessionDir, r.model.ExplorerState(), r.kept, r.model.SplitState()); err != nil {
 		return err
 	}
 	// The terminal transcript rides next to the session file: a restored session
@@ -486,7 +509,15 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if err != nil {
 		return nil, err
 	}
-	files := uiadapter.StartFiles(ctx, root)
+	var files *finder.Index
+	if opts.Remote != nil {
+		// A remote launch never enumerates the local disk: the real remote index is
+		// created once the authority slot is connected, below, and this idle index is
+		// the placeholder until then.
+		files = finder.Idle()
+	} else {
+		files = uiadapter.StartFiles(ctx, root)
+	}
 	watcher, events := startWatcher(watching)
 	proj := uiadapter.NewProjects(ctx, watcher, root, files)
 	logFile, logNotice := startLogFile(opts.LogFile, diags)
@@ -642,6 +673,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if connectNotice, _ := attemptAuthorityConnect(ctx, authSlot); connectNotice != "" {
 		openNotices = append(openNotices, connectNotice)
 	}
+	var remoteFiles *finder.Index
 	if opts.Remote != nil {
 		// The slot now has the real remote FileSystem: give the editor the file access and
 		// park the remote file for the root's first command. Installing the access is
@@ -658,6 +690,15 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 				setter.SetSpawner(remoteLSPSpawner(authSlot, opts.Remote.Workspace()))
 			}
 		}
+		// The quick-open file list comes from the remote workspace through the
+		// authority file system (streaming, bounded, no local fallback); the palette
+		// root is that remote workspace and a local project switch would enumerate
+		// the local disk, so it is refused for a remote launch.
+		var remoteRoot string
+		remoteFiles, remoteRoot = newRemoteFileIndex(ctx, authSlot, opts.Remote.Workspace())
+		deps.Files = remoteFiles
+		deps.FileRoot = remoteRoot
+		remoteRootPorts(&deps.Root)
 	}
 	// Remote external-change watching: bridge the authority's remote watch into the root's
 	// existing watch pipeline (RootPorts.Watch/WatchDirs). A local launch gets nil here and
@@ -738,6 +779,13 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		deps.Commands = rows
 	}
 	model := newUI(deps)
+	// Restore the saved pane layout over the files the session just opened. A
+	// remote launch has no local session layout, and a hot-exit restore skips the
+	// layout with the clean tabs; a stale or invalid record is ignored by
+	// RestoreSplits, which keeps the one-pane start.
+	if restored && plan.tabs && opts.Remote == nil {
+		model.RestoreSplits(sess.Layout, sess.Files)
+	}
 	loadSearch(model, opts.SessionDir)
 	shellCommand, shellArgs := cfg.Terminal.TerminalShellOptions()
 	model.SetDock(tui.DockPorts{
@@ -849,6 +897,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		log:            logFile,
 		auth:           authSlot,
 		remoteWatch:    remoteFileWatch,
+		remoteFiles:    remoteFiles,
 	}
 	model.SetQuitStash(rt.stashForQuit)
 	return rt, nil

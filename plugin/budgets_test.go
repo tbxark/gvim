@@ -2,8 +2,10 @@ package plugin_test
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"runtime"
-	"runtime/metrics"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -460,13 +462,115 @@ end)`, plugintest.Options{Timeout: 5 * time.Second, HeapLimit: 64 << 20})
 	}
 }
 
-// A string that doubles in one instruction (s = s .. s) is the fastest way to allocate. The
-// instruction cannot be interrupted and stock gopher-lua does not cap it, so the heap guard
-// stops the plugin with its memory-limit error after the doubling that crossed the limit, and
-// the memory goes back to the system after it.
+// heapDoublingChildEnv selects the child process of
+// TestHeapGuardStopsADoublingString.
+const heapDoublingChildEnv = "GVIM_HEAP_DOUBLING_CHILD"
+
+// TestHeapGuardStopsADoublingString measures the heap guard in a process of its own.
+//
+// A string that doubles in one instruction (s = s .. s) is the fastest way to
+// allocate. The instruction cannot be interrupted and stock gopher-lua does not
+// cap it, so the heap guard stops the plugin with its memory-limit error after
+// the doubling that crossed the limit, and the memory goes back to the system
+// after it.
+//
+// The measurement is process-wide (`HeapSys-HeapReleased`), and the guard's own
+// baseline is the process heap when the slice begins (it deliberately takes the
+// allocated-objects count as an upper bound of live memory). In this test binary
+// other tests leave hundreds of MiB of live and garbage heap behind, and the
+// package's suites allocate concurrently with this one; a process-global peak
+// then stops describing the plugin's own growth and the bound below would be
+// noise. So the measured run happens in a fresh child, exactly like the peak-RSS
+// cases of the memory-bomb test (docs/plugins/limits.md's numbers are per
+// process). The parent keeps the contract assertions: the guard fired (notice),
+// the growth stayed near the documented bound, and the memory was returned.
 func TestHeapGuardStopsADoublingString(t *testing.T) {
 	if testing.Short() {
 		t.Skip("allocates memory")
+	}
+	const limit = 64 << 20
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHeapGuardDoublingChild$")
+	cmd.Env = append(os.Environ(), heapDoublingChildEnv+"=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the heap-guard child failed: %v\n%s", err, out)
+	}
+	// Parse the child's report strictly: every field must be present and must parse.
+	// A missing field must fail the test, not default to zero and pass the bounds.
+	var (
+		grown, left int64
+		notice      bool
+		haveGrown   bool
+		haveLeft    bool
+		haveNotice  bool
+	)
+	for _, line := range strings.Split(string(out), "\n") {
+		rest, ok := strings.CutPrefix(line, "HEAP_DOUBLING ")
+		if !ok {
+			continue
+		}
+		for _, field := range strings.Fields(rest) {
+			key, val, ok := strings.Cut(field, "=")
+			if !ok {
+				t.Fatalf("the child's report has a malformed field %q\n%s", field, out)
+			}
+			switch key {
+			case "grown":
+				n, parseErr := strconv.ParseInt(val, 10, 64)
+				if parseErr != nil {
+					t.Fatalf("the child's grown field %q does not parse: %v\n%s", val, parseErr, out)
+				}
+				grown, haveGrown = n, true
+			case "left":
+				n, parseErr := strconv.ParseInt(val, 10, 64)
+				if parseErr != nil {
+					t.Fatalf("the child's left field %q does not parse: %v\n%s", val, parseErr, out)
+				}
+				left, haveLeft = n, true
+			case "notice":
+				parsed, parseErr := strconv.ParseBool(val)
+				if parseErr != nil {
+					t.Fatalf("the child's notice field %q does not parse: %v\n%s", val, parseErr, out)
+				}
+				notice, haveNotice = parsed, true
+			}
+		}
+	}
+	if !haveGrown || !haveLeft || !haveNotice {
+		t.Fatalf("the child's report misses grown=%t left=%t notice=%t\n%s", haveGrown, haveLeft, haveNotice, out)
+	}
+	if !notice {
+		t.Fatalf("the child did not report the memory-limit notice\n%s", out)
+	}
+	t.Logf("heap grew by %d bytes (limit %d bytes), %d bytes still held afterwards", grown, limit, left)
+	// The guard cancels a slice that grew the heap by the limit, plus the live heap of the
+	// process while it confirms with a collection, and the doubling that is in flight cannot
+	// be interrupted: it allocates one more step, about the size of what was allocated so far.
+	// A promptly scheduled guard therefore peaks near twice the limit (limits.md). The guard is
+	// a 1 ms sampling goroutine, though, and when it is scheduled late the VM can finish another
+	// doubling before it looks: one late sample puts a single clean child at 4x the limit (the
+	// observed maximum is 255 MiB for a 64 MiB limit). 4x is the contract ceiling here; beyond it
+	// the doubling ran on rather than merely being sampled late (a guard that never fires keeps
+	// doubling to OOM, which kills the child and fails the run above). The child is measured
+	// once; there is no retry.
+	if grown <= 0 {
+		t.Errorf("the child measured no heap growth (%d bytes); the measurement did not run\n%s", grown, out)
+	}
+	if ceiling := 4 * int64(limit); grown > ceiling {
+		t.Errorf("heap grew by %d bytes before the plugin was stopped, want at most %d bytes (4x limit)\n%s", grown, ceiling, out)
+	}
+	// The plugin's memory is returned after the slice; a clean child holds almost none of it.
+	if left > 2*int64(limit) {
+		t.Errorf("%d bytes are still held after the plugin was stopped, want them returned\n%s", left, out)
+	}
+}
+
+// TestHeapGuardDoublingChild is the measured run of
+// TestHeapGuardStopsADoublingString: a fresh process, the doubling plugin, the
+// guard's notice, and its own process heap before and after.
+func TestHeapGuardDoublingChild(t *testing.T) {
+	if os.Getenv(heapDoublingChildEnv) == "" {
+		t.Skip("child of TestHeapGuardStopsADoublingString")
 	}
 	const limit = 64 << 20
 	h := start(t, `T.command("go", function() local s = "x" while true do s = s .. s end end)`,
@@ -474,8 +578,6 @@ func TestHeapGuardStopsADoublingString(t *testing.T) {
 	var base runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&base)
-	live := []metrics.Sample{{Name: "/gc/heap/live:bytes"}}
-	metrics.Read(live)
 	var peak atomic.Uint64
 	stop, done := make(chan struct{}), make(chan struct{})
 	go func() {
@@ -496,26 +598,14 @@ func TestHeapGuardStopsADoublingString(t *testing.T) {
 	_ = timed(t, h)
 	close(stop)
 	<-done
-	if !noticeHas(h, "memory limit") {
-		t.Fatalf("notices = %v log = %v", h.NoticeTexts(), h.LogText(""))
-	}
-	grown := int64(peak.Load()) - int64(base.HeapSys-base.HeapReleased)
-	t.Logf("heap grew by %d MiB (limit %d MiB)", grown>>20, limit>>20)
-	// The guard cancels a slice that grew the heap by the limit, plus the live heap of the
-	// process while it confirms with a collection, and the doubling that is in flight cannot be
-	// interrupted: it allocates one more step, about the size of what was allocated so far. So
-	// the worst case is a little over twice that. docs/plugins/limits.md has the measured
-	// numbers for the editor's own limit.
-	// The test process has other heap and a short run decides how far the doubling got before
-	// the guard looked, so the bound here is loose; a process of its own stays near 2x the
-	// limit (limits.md).
-	if bound := 4 * (int64(limit) + int64(live[0].Value.Uint64())); grown > bound {
-		t.Errorf("heap grew by %d MiB before the plugin was stopped, want under %d MiB", grown>>20, bound>>20)
-	}
+	notice := noticeHas(h, "memory limit")
 	var after runtime.MemStats
 	runtime.ReadMemStats(&after)
-	if left := int64(after.HeapSys-after.HeapReleased) - int64(base.HeapSys-base.HeapReleased); left > 2*limit {
-		t.Errorf("%d MiB are still held after the plugin was stopped, want them returned", left>>20)
+	grown := int64(peak.Load()) - int64(base.HeapSys-base.HeapReleased)
+	left := int64(after.HeapSys-after.HeapReleased) - int64(base.HeapSys-base.HeapReleased)
+	fmt.Printf("HEAP_DOUBLING grown=%d left=%d notice=%t\n", grown, left, notice)
+	if !notice {
+		t.Fatalf("notices = %v log = %v", h.NoticeTexts(), h.LogText(""))
 	}
 }
 

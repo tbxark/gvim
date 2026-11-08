@@ -65,6 +65,9 @@ func (m *workspaceManager) snapshotCapture(s *workspaceSession) (*captureSnapsho
 	snap.layout.ShowHidden = snap.explorer.ShowHidden
 	snap.layout.ShowIgnored = snap.explorer.ShowIgnored
 	snap.layout.Sidebar = restore.SaveSidebarState(snap.explorer.Sidebar)
+	// The pane layout is a pure model capture (no tab switching, no IO); the
+	// writer below stores it in the session JSON with the layout.
+	snap.layout.Layout = s.rt.model.SplitState()
 	if st, ok := s.rt.model.SearchState(); ok {
 		snap.search = session.Search{
 			Find: st.Find, Replace: st.Replace,

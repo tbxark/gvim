@@ -576,6 +576,24 @@ func clientCapabilities() protocol.ClientCapabilities {
 					Properties: []string{"edit"},
 				},
 			},
+			Completion: &protocol.CompletionClientCapabilities{
+				DynamicRegistration: yes,
+				CompletionItem: &protocol.ClientCompletionItemOptions{
+					// The accept path honours insertTextFormat and expands snippet text
+					// (tabstops, braced placeholders and choices, final stop), so snippets
+					// can be advertised (unlike Fresh, which detects them heuristically).
+					SnippetSupport:       yes,
+					InsertReplaceSupport: yes,
+					// Servers put an auto-import's module path in labelDetails; without
+					// this rust-analyzer folds it into the label the accept path inserts.
+					LabelDetailsSupport: yes,
+					// Resolve may fill in additionalTextEdits (auto-imports) and
+					// documentation; the popup renders label/detail only.
+					ResolveSupport: protocol.ClientCompletionItemResolveOptions{
+						Properties: []string{"additionalTextEdits", "documentation"},
+					},
+				},
+			},
 			Hover:             &protocol.HoverClientCapabilities{ContentFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText}},
 			SignatureHelp:     &protocol.SignatureHelpClientCapabilities{},
 			Definition:        &protocol.DefinitionClientCapabilities{},

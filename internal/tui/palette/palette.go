@@ -111,6 +111,10 @@ type Options struct {
 	// Ranker scores the file rows. Nil until it is wired; the file mode then shows
 	// its loading row.
 	Ranker Ranker
+	// Remote marks a remote workspace's file mode: Root is the remote workspace and
+	// the rows' relative paths are joined with slashes; the caller passes a nil
+	// Preview (no local file preview for remote rows).
+	Remote bool
 	// Theme gives the chrome colors.
 	Theme theme.Theme
 	// Live opens the palette in Live Grep mode: the whole query is searched as text
@@ -165,6 +169,12 @@ type FileRankedMsg struct {
 	// Loading is the index's state when it was read. While it is true the
 	// palette ranks again after pollInterval.
 	Loading bool
+	// ErrText is the file index's error once it finished ("" when it completed): the
+	// file rows show it instead of presenting an empty/partial list as the project.
+	ErrText string
+	// Truncated is the index's truncation state: the file rows say the list is
+	// incomplete rather than presenting it as the whole project.
+	Truncated bool
 }
 
 // fileTickMsg asks the palette to rank the file rows again. It is sent after
@@ -458,7 +468,7 @@ func (p *Palette) run(i int) tea.Cmd {
 		return nil
 	}
 	p.open = false
-	return r.command(p.opts.Root)
+	return r.command(p.opts.Root, p.opts.Remote)
 }
 
 // Covers reports whether the point (x, y) of a w by h frame is on the palette card:
@@ -542,10 +552,22 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 	return func() tea.Msg {
 		var list []string
 		loading := true
+		errText := ""
+		truncated := false
 		if files != nil {
 			list, loading = files.Snapshot()
+			if !loading {
+				if e, ok := files.(interface{ Err() error }); ok {
+					if err := e.Err(); err != nil {
+						errText = err.Error()
+					}
+				}
+				if t, ok := files.(interface{ Truncated() bool }); ok {
+					truncated = t.Truncated()
+				}
+			}
 		}
-		return FileRankedMsg{Seq: seq, Text: text, Matches: rk.Rank(text, list, fileLimit), Loading: loading}
+		return FileRankedMsg{Seq: seq, Text: text, Matches: rk.Rank(text, list, fileLimit), Loading: loading, ErrText: errText, Truncated: truncated}
 	}
 }
 
@@ -557,7 +579,7 @@ func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
 	if msg.Seq != p.seq || !p.inFile {
 		return nil
 	}
-	p.rows = fileRows(msg.Matches, msg.Loading, p.fileLine, p.fileCol)
+	p.rows = fileRows(msg.Matches, msg.Loading, p.fileLine, p.fileCol, msg.ErrText, msg.Truncated)
 	p.syncSize()
 	if msg.Text != p.shown {
 		p.nav.Select(0)
@@ -643,13 +665,18 @@ func (p *Palette) bufferRows(text string) []row {
 // fileRows turns a ranked result into rows. With no match while the index still
 // runs, the loading row shows. line and col are the position the query named, which
 // Enter opens at and the preview highlights; both are 0 when it named none.
-func fileRows(matches []Ranked, loading bool, line, col int) []row {
+func fileRows(matches []Ranked, loading bool, line, col int, errText string, truncated bool) []row {
 	if len(matches) == 0 && loading {
 		return loadingRows()
 	}
-	rows := make([]row, 0, len(matches))
+	rows := make([]row, 0, len(matches)+2)
 	for _, m := range matches {
 		rows = append(rows, row{kind: rowFile, name: m.Path, source: "file", rel: m.Path, hl: m.Indexes, line: line, col: col})
+	}
+	if errText != "" {
+		rows = append(rows, row{kind: rowMessage, name: "File search failed: " + errText, disabled: true})
+	} else if truncated {
+		rows = append(rows, row{kind: rowMessage, name: "File list truncated: too many files; the list is incomplete", disabled: true})
 	}
 	return rows
 }
@@ -660,15 +687,25 @@ func loadingRows() []row {
 	return []row{{kind: rowMessage, name: loadingText}}
 }
 
+// filePath joins a file row relative path to the file mode root: local roots use the
+// platform join, a remote root keeps slash-separated remote paths (the remote shell and
+// the remote file system never see a Windows separator).
+func filePath(root, rel string, remote bool) string {
+	if !remote {
+		return filepath.Join(root, rel)
+	}
+	return strings.TrimSuffix(root, "/") + "/" + rel
+}
+
 // command returns the message that runs the row, or nil for a row that only
 // informs.
-func (r row) command(root string) tea.Cmd {
+func (r row) command(root string, remote bool) tea.Cmd {
 	var msg tea.Msg
 	switch r.kind {
 	case rowCommand:
 		msg = RunCommandMsg{Action: r.action}
 	case rowFile:
-		msg = OpenFileMsg{Path: filepath.Join(root, r.rel), Rel: r.rel, Line: r.line, Col: r.col}
+		msg = OpenFileMsg{Path: filePath(root, r.rel, remote), Rel: r.rel, Line: r.line, Col: r.col}
 	case rowBuffer:
 		msg = ActivateBufferMsg{Index: r.index}
 	case rowLine:
@@ -677,7 +714,7 @@ func (r row) command(root string) tea.Cmd {
 		if r.grepSource == GrepBuffers {
 			msg = OpenBufferLineMsg{Index: r.index, Line: r.line, Col: r.col}
 		} else {
-			msg = OpenLineMsg{Path: filepath.Join(root, r.rel), Line: r.line, Col: r.col}
+			msg = OpenLineMsg{Path: filePath(root, r.rel, remote), Line: r.line, Col: r.col}
 		}
 	default:
 		return nil

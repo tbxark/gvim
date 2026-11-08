@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -236,4 +237,38 @@ type failingGrep struct{ err error }
 
 func (f failingGrep) Search(palette.GrepRequest) ([]palette.GrepHit, error) {
 	return nil, f.err
+}
+
+// TestRemoteLiveGrepRefusesLocalSearch checks a remote launch never opens Live Grep
+// over the local grep port: the local project must not be searched silently for
+// remote-looking rows. The notice says why.
+func TestRemoteLiveGrepRefusesLocalSearch(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{}
+	ed := &lineEditor{fakeEditor: newFakeEditor("x")}
+	m := New(Deps{
+		Editor:   ed,
+		Explorer: newFakeTree(1),
+		Keys:     testKeys(),
+		Theme:    theme.Theme{},
+		Clock:    testClock,
+		Root:     RootPorts{Grep: g},
+		FileRoot: "/remote/w",
+	})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	must(t, m.Run("open_live_grep"))
+	if len(m.overlays) != 0 {
+		t.Fatal("Live Grep opened the local palette in a remote workspace")
+	}
+	if got := m.statusView().Message; !strings.Contains(got, "remote workspace") {
+		t.Fatalf("status = %q, want the remote-not-available notice", got)
+	}
+	if len(g.queries) != 0 {
+		t.Fatalf("the local grep port was searched in a remote workspace: %v", g.queries)
+	}
+	// resume_live_grep must refuse too, not replay a local search.
+	must(t, m.Run("resume_live_grep"))
+	if len(m.overlays) != 0 || len(g.queries) != 0 {
+		t.Fatalf("resume opened/searched locally: overlays %d queries %v", len(m.overlays), g.queries)
+	}
 }

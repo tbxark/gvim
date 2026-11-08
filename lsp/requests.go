@@ -24,6 +24,27 @@ type CompletionItem struct {
 	InsertText   string
 	EditRange    *protocol.Range
 	ReplaceRange *protocol.Range
+
+	// InsertTextFormat is how InsertText must be read: plain text or an LSP
+	// snippet. A snippet's placeholders are expanded by the caller before it is
+	// inserted; Snippet reports that this item is one.
+	InsertTextFormat protocol.InsertTextFormat
+	// Snippet is set when InsertText is snippet-format text that must be expanded
+	// (insertTextFormat = 2). Plain items leave it false.
+	Snippet bool
+	// AdditionalTextEdits are the edits the server asks for together with the
+	// insert, such as the import an auto-import candidate adds. They are applied in
+	// the same edit as the insert, never one after the other.
+	AdditionalTextEdits []protocol.TextEdit
+	// Data is the server's opaque payload for completionItem/resolve, and HasData
+	// says it sent one. An item whose additional edits are filled in by resolve has
+	// Data but may have no AdditionalTextEdits yet.
+	Data    protocol.LSPAny
+	HasData bool
+
+	// raw is the item as the server sent it, sent back unchanged to
+	// completionItem/resolve.
+	raw protocol.CompletionItem
 }
 
 // CodeAction is one code action a server offers for a range. Title and Kind are
@@ -320,7 +341,19 @@ func locations(res protocol.DefinitionResult) []protocol.Location {
 // of inserting beside it.
 func completionItem(it protocol.CompletionItem) CompletionItem {
 	detail, _ := it.Detail.Get()
-	out := CompletionItem{Label: it.Label, Detail: detail, InsertText: it.Label}
+	if ld := it.LabelDetails; ld != nil {
+		parts := make([]string, 0, 2)
+		if ld.Detail != nil {
+			parts = append(parts, strings.TrimSpace(*ld.Detail))
+		}
+		if ld.Description != nil {
+			parts = append(parts, *ld.Description)
+		}
+		if text := strings.TrimSpace(strings.Join(parts, " ")); text != "" {
+			detail = text
+		}
+	}
+	out := CompletionItem{Label: it.Label, Detail: detail, InsertText: it.Label, raw: it}
 	if s, ok := it.InsertText.Get(); ok {
 		out.InsertText = s
 	}
@@ -337,7 +370,28 @@ func completionItem(it protocol.CompletionItem) CompletionItem {
 			out.ReplaceRange = &te.Replace
 		}
 	}
+	out.InsertTextFormat = it.InsertTextFormat
+	out.Snippet = it.InsertTextFormat == protocol.InsertTextFormatSnippet
+	out.AdditionalTextEdits = it.AdditionalTextEdits
+	out.Data, out.HasData = it.Data, it.Data != nil
 	return out
+}
+
+// CompletionResolve asks the server that offered item to fill in the lazy fields of
+// the item (completionItem/resolve): the additional edits of an auto-import, or a
+// lazily provided insert text. It is a request, so the caller runs it off the UI
+// goroutine.
+func (c *Client) CompletionResolve(ctx context.Context, item CompletionItem) (CompletionItem, error) {
+	raw := item.raw
+	raw.AdditionalTextEdits = nil
+	resolved, err := c.server.CompletionResolve(ctx, &raw)
+	if err != nil {
+		return CompletionItem{}, fmt.Errorf("lsp: completion resolve %q: %w", item.Label, err)
+	}
+	if resolved == nil {
+		return CompletionItem{}, fmt.Errorf("lsp: completion resolve %q: no item in the reply", item.Label)
+	}
+	return completionItem(*resolved), nil
 }
 
 // hoverText reduces hover contents to plain text. Markdown code fence lines are

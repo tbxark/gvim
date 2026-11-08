@@ -313,6 +313,11 @@ func TestCompletion(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Completion: %v", err)
 			}
+			// raw is the unexported protocol item kept for completionItem/resolve;
+			// the value tests compare the reduced form.
+			for i := range got {
+				got[i].raw = protocol.CompletionItem{}
+			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Completion = %+v, want %+v", got, tt.want)
 			}

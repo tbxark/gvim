@@ -343,6 +343,14 @@ type LSPLocation struct {
 	Start, End buffer.Pos
 }
 
+// CompletionEdit is one extra edit a completion item asks for together with its
+// insert, such as the import of an auto-import candidate. Range is in rune
+// columns of the document.
+type CompletionEdit struct {
+	Range LSPRange
+	Text  string
+}
+
 // CompletionItem is one completion candidate. Insert is the text to insert, and
 // Range is the document range it replaces, or nil when the server gave none and
 // the text goes at the caret.
@@ -350,6 +358,21 @@ type CompletionItem struct {
 	Label, Detail string
 	Insert        string
 	Range         *LSPRange
+	// Additional are the edits the server asks for with the insert (auto-import).
+	// They are applied in the same transaction as the insert, never afterwards.
+	Additional []CompletionEdit
+	// Snippet says Insert came from snippet-format text that the port already
+	// expanded; CursorOffset is then the final stop. A plain item puts the caret at
+	// the end of Insert.
+	Snippet bool
+	// CursorOffset is where the caret goes inside Insert after the edits: a rune
+	// offset from the start of Insert (a snippet's final stop). It is meaningful
+	// when Snippet is set; a plain item puts the caret after Insert.
+	CursorOffset int
+	// ResolveToken names an item whose server fills in lazy fields
+	// (completionItem/resolve) before it can be accepted. 0 means the item is
+	// complete.
+	ResolveToken int
 }
 
 // LSPRange is a rune range in a document.
@@ -593,6 +616,11 @@ type Deps struct {
 	Dialogs Dialogs    // nil: the unsaved and Save As dialogs are not offered
 	Files   FileIndex  // nil: the palette's file mode shows its loading row
 	Ranker  FileRanker // nil: the palette's file rows are not ranked
+	// FileRoot is the root the palette's file rows are relative to when it is not the
+	// explorer's root (a remote workspace: the rows are remote relative paths). Empty
+	// uses the explorer root. A non-empty FileRoot also marks the session as remote for
+	// the palette: paths are joined with slashes and the local file preview is disabled.
+	FileRoot string
 	// Commands is the palette's command table, as commands builds it. Nil
 	// means commands.Commands(nil): the builtin table with the default keymap's
 	// shortcuts.

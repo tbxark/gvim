@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/tbxark/gvim/internal/daemon"
 )
@@ -43,12 +44,19 @@ func attachDaemonName(opts Options) (string, error) {
 	return daemon.DefaultName(root), nil
 }
 
-// refuseIfDaemonRunning keeps the single-writer rule for a bare (session) launch: when
-// a daemon already hosts this workspace's editor, a second direct editor would write the
-// same session. File launches, --simple and a stdin launch are direct file launches and
-// stay allowed; the user attaches with -a for the daemon.
+// refuseIfDaemonRunning keeps the single-writer rule for a direct launch. While a daemon
+// (the per-root default or any explicitly named one, discovered through the daemon-host
+// marks) hosts this workspace, EVERY direct editor mode is refused: bare, file launches,
+// --diff, --simple and stdin. Fresh can let a direct launch through safely because it
+// enforces one buffer per file across editors (a second editor gets a read-only buffer);
+// gvim has no cross-process per-file ownership, so a direct file launch could race the
+// daemon's unsaved buffer both ways (the direct editor writes the file under the daemon's
+// buffer, then the daemon's save overwrites the direct edits). Refusing with an attach
+// instruction is the safe behavior until that ownership feature exists; this is a
+// deliberate divergence from Fresh (docs/architecture.md §8).
 func refuseIfDaemonRunning(opts Options) error {
-	if opts.Daemon != nil || opts.Simple || opts.Diff || opts.StdinLaunch() || len(opts.Files) > 0 {
+	if opts.Daemon != nil {
+		// The daemon host itself and the attaching client are not direct editors.
 		return nil
 	}
 	root, err := resolveRoot(opts.Root)
@@ -56,12 +64,49 @@ func refuseIfDaemonRunning(opts Options) error {
 		// buildRuntime reports the root error with its own wording.
 		return nil
 	}
-	path, err := daemon.SocketPath(daemon.DefaultName(root))
-	if err != nil {
+	canonical := root
+	if resolved, cerr := daemon.CanonicalRoot(root); cerr == nil {
+		canonical = resolved
+	}
+	// Any live daemon that recorded this root, named or default. The default socket probe
+	// stays as the fallback for a daemon whose mark could not be written.
+	hosts := liveHostsFor(canonical)
+	defaultName := daemon.DefaultName(root)
+	if path, perr := daemon.SocketPath(defaultName); perr == nil && daemon.IsLive(path) {
+		found := false
+		for _, h := range hosts {
+			if h.Name == defaultName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			hosts = append([]hostMark{{Name: defaultName, Root: canonical, Socket: path}}, hosts...)
+		}
+	}
+	if len(hosts) == 0 {
 		return nil
 	}
-	if daemon.IsLive(path) {
-		return fmt.Errorf("a daemon is already running for this workspace (socket %s); attach with gvim -a or quit the daemon first", path)
+	return daemonHostsRefusal(hosts, defaultName)
+}
+
+// daemonHostsRefusal is the direct launch's error while one or more daemons host the
+// workspace: which daemons, why a direct editor is refused, and the two ways out
+// (attach with the files, or quit the daemon first).
+func daemonHostsRefusal(hosts []hostMark, defaultName string) error {
+	var who []string
+	var attach []string
+	for _, h := range hosts {
+		who = append(who, fmt.Sprintf("%q (socket %s)", h.Name, h.Socket))
+		if h.Name == defaultName {
+			attach = append(attach, "\"gvim -a\" (then the files, e.g. gvim -a FILE...)")
+		} else {
+			// The optional NAME is only accepted in the = form (pflag NoOptDefVal):
+			// "gvim -a NAME" would open a file called NAME, not attach to that daemon.
+			attach = append(attach, fmt.Sprintf("\"gvim --attach=%s\" (then the files, e.g. gvim --attach=%s FILE...)", h.Name, h.Name))
+		}
 	}
-	return nil
+	return fmt.Errorf(
+		"a daemon hosts this workspace: %s. A direct editor would be a second writer of the daemon's unsaved buffers, so the launch is refused; attach with %s, or quit the daemon first (attach, then Ctrl+Q)",
+		strings.Join(who, ", "), strings.Join(attach, " or "))
 }

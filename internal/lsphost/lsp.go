@@ -69,18 +69,19 @@ func New(servers map[string]config.LSPServer) tui.LSPSession {
 // on its own, though a manual start still runs one.
 func newPort(plan lspPlan, lspEnabled bool, spawnEnv func() []string) *lspPort {
 	p := &lspPort{
-		spawnEnv:  spawnEnv,
-		servers:   plan.servers,
-		universal: plan.universal,
-		info:      plan.info,
-		auto:      make(map[string]bool, len(plan.auto)),
-		startable: make(map[string]bool, len(plan.startable)),
-		managers:  make(map[string]*manager.Manager),
-		docs:      make(map[string]lspDocRec),
-		muted:     make(map[string]bool),
-		forced:    make(map[string]bool),
-		sem:       make(map[string]semanticCache),
-		pulled:    make(map[string]pulledDiagnostics),
+		spawnEnv:         spawnEnv,
+		servers:          plan.servers,
+		universal:        plan.universal,
+		info:             plan.info,
+		auto:             make(map[string]bool, len(plan.auto)),
+		startable:        make(map[string]bool, len(plan.startable)),
+		managers:         make(map[string]*manager.Manager),
+		docs:             make(map[string]lspDocRec),
+		muted:            make(map[string]bool),
+		forced:           make(map[string]bool),
+		sem:              make(map[string]semanticCache),
+		pulled:           make(map[string]pulledDiagnostics),
+		completionTokens: make(map[int]completionResolve),
 	}
 	for lang := range plan.auto {
 		if lspEnabled {
@@ -134,6 +135,11 @@ type lspPort struct {
 	// document closes, or on a restart.
 	sem    map[string]semanticCache
 	pulled map[string]pulledDiagnostics
+	// completionTokens maps a completion item's ResolveToken to the request that
+	// fills its lazy fields (completionItem/resolve, auto-imports). A token belongs
+	// to the most recent completion request: a new request replaces the table.
+	completionTokens map[int]completionResolve
+	completionSeq    int
 	// wsPull caches the workspace/diagnostic answer: the pull is throttled and
 	// re-asked when the capabilities change or the set of open documents does.
 	wsPull workspacePull
@@ -141,6 +147,14 @@ type lspPort struct {
 	// stop/restart of the servers, cancels the old ones (their $/cancelRequest goes
 	// out through the client) instead of letting them answer into the cache.
 	wsPulls pullSet
+}
+
+// completionResolve remembers what completionItem/resolve must send back: the
+// document path, the server that offered the item and the item as it arrived.
+type completionResolve struct {
+	path   string
+	handle *manager.Handle
+	item   lsp.CompletionItem
 }
 
 // pendingEdit is one queued workspace/applyEdit request.
@@ -326,8 +340,9 @@ func (p *lspPort) Hover(path string, at buffer.Pos) (string, error) {
 }
 
 // Completion returns the completion items at at, merged over the servers that
-// serve completion for the language. A range the server gave is in the rune
-// columns of the document, as the editor needs it.
+// serve completion for the language. Every range is in the rune columns of the
+// document, snippet text is expanded with its final caret offset, and an item whose
+// additional edits arrive lazily gets a resolve token.
 func (p *lspPort) Completion(path string, at buffer.Pos) ([]tui.CompletionItem, error) {
 	hs, rec, err := p.handles(path, manager.FeatureCompletion)
 	if err != nil {
@@ -335,6 +350,10 @@ func (p *lspPort) Completion(path string, at buffer.Pos) ([]tui.CompletionItem, 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
 	defer cancel()
+	p.mu.Lock()
+	p.completionTokens = make(map[int]completionResolve)
+	p.completionSeq = 0
+	p.mu.Unlock()
 	docURI := lsp.PathURI(path)
 	pos := rec.lines.toLSP(at)
 	var out []tui.CompletionItem
@@ -345,14 +364,70 @@ func (p *lspPort) Completion(path string, at buffer.Pos) ([]tui.CompletionItem, 
 			errs = append(errs, fmt.Errorf("%s: %w", h.Name(), err))
 			continue
 		}
+		caps := h.Capabilities()
 		for _, it := range items {
-			out = append(out, tui.CompletionItem{Label: it.Label, Detail: it.Detail, Insert: it.InsertText, Range: rec.lines.rangeOf(it.EditRange)})
+			out = append(out, p.uiCompletion(path, rec, h, caps, it, true))
 		}
 	}
 	if len(out) == 0 && len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
 	return out, nil
+}
+
+// ResolveCompletion fills the lazy fields of a completion item on the server that
+// offered it (completionItem/resolve: the additional edits of an auto-import). It is
+// the optional CompletionResolver port and runs in a command.
+func (p *lspPort) ResolveCompletion(path string, token int) (tui.CompletionItem, error) {
+	p.mu.Lock()
+	entry, ok := p.completionTokens[token]
+	p.mu.Unlock()
+	if !ok || entry.path != path {
+		return tui.CompletionItem{}, errors.New("lsp: the completion item is no longer available")
+	}
+	rec, ok := p.doc(path)
+	if !ok {
+		return tui.CompletionItem{}, fmt.Errorf("%w: %s", manager.ErrNotOpen, path)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lspRequestTimeout)
+	defer cancel()
+	resolved, err := entry.handle.Client().CompletionResolve(ctx, entry.item)
+	if err != nil {
+		return tui.CompletionItem{}, err
+	}
+	out := p.uiCompletion(path, rec, entry.handle, entry.handle.Capabilities(), resolved, false)
+	out.ResolveToken = 0
+	return out, nil
+}
+
+// uiCompletion converts one server item to the root's form: rune ranges, expanded
+// snippet text and its final caret offset, the additional edits (auto-imports), and
+// a resolve token when the server fills the item in lazily.
+func (p *lspPort) uiCompletion(path string, rec lspDocRec, h *manager.Handle, caps lsp.Capabilities, it lsp.CompletionItem, allowResolve bool) tui.CompletionItem {
+	insert := it.InsertText
+	cursor := -1
+	if it.Snippet {
+		expanded := lsp.ExpandSnippet(insert)
+		insert, cursor = expanded.Text, expanded.CursorOffset
+	}
+	out := tui.CompletionItem{
+		Label: it.Label, Detail: it.Detail, Insert: insert,
+		Range: rec.lines.rangeOf(it.EditRange), CursorOffset: cursor, Snippet: it.Snippet,
+	}
+	for _, te := range it.AdditionalTextEdits {
+		if r := rec.lines.rangeOf(&te.Range); r != nil {
+			out.Additional = append(out.Additional, tui.CompletionEdit{Range: *r, Text: te.NewText})
+		}
+	}
+	if allowResolve && len(out.Additional) == 0 && it.HasData && caps.CompletionResolve {
+		p.mu.Lock()
+		p.completionSeq++
+		token := p.completionSeq
+		p.completionTokens[token] = completionResolve{path: path, handle: h, item: it}
+		p.mu.Unlock()
+		out.ResolveToken = token
+	}
+	return out
 }
 
 // Rename renames the symbol at at to name and returns the workspace edit to

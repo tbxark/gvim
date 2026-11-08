@@ -409,3 +409,118 @@ func TestGitGutterFollowsAnExternalCommit(t *testing.T) {
 		t.Errorf("problems: %v", p)
 	}
 }
+
+// TestGitGutterNavigationMergesLiveDiffAndSavedChanges: the Next/Previous
+// Change commands are Fresh's diff_nav merged surface. A tracked buffer whose
+// HEAD is unchanged still navigates to the active live_diff hunk (line 3) and
+// the unsaved saved-diff line (line 2), deduplicated and sorted, with Fresh's
+// Change n/total statuses and wrapping.
+func TestGitGutterNavigationMergesLiveDiffAndSavedChanges(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"git_gutter"},
+		buffers: []rigBuffer{{gutterFile, "a\nb\nc\nd\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\nd\n"})
+		},
+		extra: map[string]string{"live_diff/init.lua": `
+local gvim = require "gvim"
+gvim.plugins.export {
+  hunks = function(buf_id)
+    return { { kind = "added", newStart = 3, newCount = 1 } }
+  end,
+}`},
+	})
+	r.emit("after_file_open", gutterFile, nil)
+	r.edit(gutterFile, "a\nb\nC\nd\n")
+	steps := []struct {
+		cmd    string
+		from   int
+		want   int
+		notice string
+	}{
+		{"git_gutter.next_change", 0, 2, "Change 1/2"},
+		{"git_gutter.next_change", 2, 3, "Change 2/2"},
+		{"git_gutter.next_change", 3, 2, "Change 1/2 [wrapped]"},
+		{"git_gutter.prev_change", 2, 3, "Change 2/2 [wrapped]"},
+		{"git_gutter.prev_change", 3, 2, "Change 1/2"},
+	}
+	for _, step := range steps {
+		if err := r.host.SetCursor(r.ids[gutterFile], pluginapi.Pos{Line: step.from}, false, false, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.h.Run(step.cmd, nil); err != nil {
+			t.Fatal(err)
+		}
+		cs, _ := r.host.Cursors(r.ids[gutterFile])
+		if cs[0].Pos.Line != step.want {
+			t.Errorf("%s from %d: caret line %d, want %d", step.cmd, step.from, cs[0].Pos.Line, step.want)
+		}
+		notices := r.h.NoticeTexts()
+		if len(notices) == 0 || notices[len(notices)-1] != step.notice {
+			t.Errorf("%s from %d: notice %v, want %q", step.cmd, step.from, notices, step.notice)
+		}
+	}
+}
+
+// TestGitGutterNavigationDedupesMergedSources: a line present in both the live
+// diff and the saved diff is one jump target.
+func TestGitGutterNavigationDedupesMergedSources(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"git_gutter"},
+		buffers: []rigBuffer{{gutterFile, "a\nb\nc\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\n"})
+		},
+		extra: map[string]string{"live_diff/init.lua": `
+local gvim = require "gvim"
+gvim.plugins.export {
+  hunks = function(buf_id)
+    return { { kind = "modified", newStart = 1, newCount = 1 } }
+  end,
+}`},
+	})
+	r.emit("after_file_open", gutterFile, nil)
+	r.edit(gutterFile, "a\nB\nc\n")
+	if err := r.host.SetCursor(r.ids[gutterFile], pluginapi.Pos{Line: 0}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	if notices := r.h.NoticeTexts(); len(notices) == 0 || notices[len(notices)-1] != "Change 1/1" {
+		t.Fatalf("notices = %v, want one merged target (Change 1/1)", notices)
+	}
+}
+
+// TestGitGutterNavigationSurvivesABrokenLiveDiffExport: a live_diff that does
+// not export hunks, or whose export errors, must not break navigation; the
+// git/saved sources still work.
+func TestGitGutterNavigationSurvivesABrokenLiveDiffExport(t *testing.T) {
+	for _, tt := range []struct{ name, src string }{
+		{"no export", "local gvim = require \"gvim\"\ngvim.log.info(\"no hunks export\")\n"},
+		{"erroring export", `local gvim = require "gvim"
+gvim.plugins.export { hunks = function(buf_id) error("boom") end }`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := startRig(t, rigOpts{
+				plugins: []string{"git_gutter"},
+				buffers: []rigBuffer{{gutterFile, "a\nB\nc\n"}},
+				script: func(o *plugintest.FakeOS) {
+					o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\n"})
+				},
+				extra: map[string]string{"live_diff/init.lua": tt.src},
+			})
+			r.emit("after_file_open", gutterFile, nil)
+			if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+				t.Fatalf("next_change with a %s: %v", tt.name, err)
+			}
+			cs, _ := r.host.Cursors(r.ids[gutterFile])
+			if cs[0].Pos.Line != 1 {
+				t.Errorf("caret line = %d, want 1 (saved diff line)", cs[0].Pos.Line)
+			}
+			if notices := r.h.NoticeTexts(); len(notices) == 0 || notices[len(notices)-1] != "Change 1/1" {
+				t.Errorf("notices = %v, want Change 1/1", notices)
+			}
+		})
+	}
+}

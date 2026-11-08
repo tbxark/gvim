@@ -8,6 +8,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/theme"
 )
 
 // fakeWorkspacePort records the TUI calls of the workspace UI.
@@ -216,5 +217,18 @@ func TestWorkspaceHostReplaysSizeOnSwitch(t *testing.T) {
 	}
 	if two.width != 100 || two.height != 30 {
 		t.Fatalf("the shown model size = %dx%d, want 100x30", two.width, two.height)
+	}
+}
+
+// TestFileRootMarksThePaletteRemote checks the app's remote file root reaches the model
+// (the palette then uses it and skips the local preview).
+func TestFileRootMarksThePaletteRemote(t *testing.T) {
+	m := New(Deps{Editor: newFakeEditor("hello"), Keys: testKeys(), Theme: theme.Theme{}, FileRoot: "/remote/w"})
+	if m.fileRoot != "/remote/w" {
+		t.Fatalf("fileRoot = %q", m.fileRoot)
+	}
+	local := New(Deps{Editor: newFakeEditor("hello"), Keys: testKeys(), Theme: theme.Theme{}})
+	if local.fileRoot != "" {
+		t.Fatalf("local fileRoot = %q", local.fileRoot)
 	}
 }

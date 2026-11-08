@@ -49,6 +49,20 @@ func (s *FakeServer) Completion(ctx context.Context, p *protocol.CompletionParam
 	return s.Canned.Completion, nil
 }
 
+// CompletionResolve records the item and answers with Canned.ResolvedCompletion,
+// or echoes the item when no resolved item is canned.
+func (s *FakeServer) CompletionResolve(ctx context.Context, p *protocol.CompletionItem) (*protocol.CompletionItem, error) {
+	RecordTo[any](s.Requests, p)
+	s.park(ctx)
+	if s.Canned.Fail {
+		return nil, ErrRefused
+	}
+	if s.Canned.ResolvedCompletion != nil {
+		return s.Canned.ResolvedCompletion, nil
+	}
+	return p, nil
+}
+
 // Rename records the params and answers with Canned.Rename.
 func (s *FakeServer) Rename(ctx context.Context, p *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
 	RecordTo[any](s.Requests, p)

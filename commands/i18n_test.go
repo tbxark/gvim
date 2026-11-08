@@ -32,6 +32,14 @@ func TestCommandEntriesCarryCatalogueKeys(t *testing.T) {
 	if got := find("init_edit").I18nKey; got != "gvim.command.init_edit" {
 		t.Errorf("init_edit key = %q, want the gvim rename key", got)
 	}
+	// The recent native rows: both terminal-tab move rows and the discovery row carry
+	// extracted title and description keys (extraction changed no row/count).
+	for _, action := range []string{"terminal_tab_move_left", "terminal_tab_move_right", "discover_agent_sessions"} {
+		e := find(action)
+		if e.I18nKey != "gvim.command."+action || e.DescKey != "gvim.command."+action+"_desc" {
+			t.Errorf("%s keys = %q/%q, want the gvim.command.* pair", action, e.I18nKey, e.DescKey)
+		}
+	}
 	for _, e := range entries {
 		if e.I18nKey != "" && !strings.HasPrefix(e.I18nKey, "cmd.") && !strings.HasPrefix(e.I18nKey, "gvim.command.") {
 			t.Errorf("%s: unexpected i18n key %q", e.Action, e.I18nKey)

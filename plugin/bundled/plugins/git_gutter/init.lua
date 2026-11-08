@@ -336,18 +336,53 @@ end, { debounce = settings.debounce_ms })
 
 -- ---------- Next and Previous Change (Fresh's diff_nav) ----------
 
--- change_lines returns the first line of each changed region of b: against HEAD for a file
--- git tracks, else against the saved file.
+-- diff_nav_targets is Fresh's diff_nav merge: the buffer's git (HEAD) changed
+-- regions, the active live_diff hunks when that plugin is loaded, and the
+-- saved-diff ranges of unsaved changes. Lines are 0-based, unique and ascending.
+local function diff_nav_targets(b, base)
+  local seen, lines = {}, {}
+  local function add(line)
+    line = tonumber(line)
+    if line and line >= 0 and not seen[line] then
+      seen[line] = true
+      lines[#lines + 1] = line
+    end
+  end
+  for _, line in ipairs(base or {}) do
+    add(line)
+  end
+  local live = gvim.plugins.get("live_diff")
+  if live then
+    local ok, hunks = pcall(live.hunks, b.id)
+    if ok and type(hunks) == "table" then
+      for _, h in ipairs(hunks) do
+        add(h.newStart)
+      end
+    end
+  end
+  local saved = b:diff_saved()
+  if saved then
+    for _, h in ipairs(saved) do
+      add(h.new_count > 0 and h.new_start or math.max(h.new_start - 1, 0))
+    end
+  end
+  table.sort(lines)
+  return lines
+end
+
+-- change_lines returns the merged diff_nav jump targets of b: its HEAD changes
+-- when git tracks the file, live_diff's active hunks when that plugin is loaded,
+-- and the saved-diff lines of unsaved changes.
 local function change_lines(b)
+  local base = {}
   local st = states[b.id]
   if st and st.tracked then
     if st.at_version ~= tostring(b:version()) then
       request(b, false)
     end
-    return st.regions
+    base = st.regions
   end
-  local raw = b:diff_saved()
-  return raw and region_lines(raw) or {}
+  return diff_nav_targets(b, base)
 end
 
 local function jump(direction)

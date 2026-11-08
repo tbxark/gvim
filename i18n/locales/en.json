@@ -704,5 +704,9 @@
   "gvim.settings.field.file_explorer.side": "side",
   "gvim.settings.field.file_explorer.follow_active_buffer": "follow_active_buffer",
   "gvim.settings.field.file_explorer.auto_open_on_last_buffer_close": "auto_open_on_last_buffer_close",
-  "gvim.settings.field.file_explorer.compact_directories": "compact_directories"
+  "gvim.settings.field.file_explorer.compact_directories": "compact_directories",
+  "gvim.command.terminal_tab_move_left": "Move Tab To Left",
+  "gvim.command.terminal_tab_move_left_desc": "Move the active terminal tab left",
+  "gvim.command.terminal_tab_move_right": "Move Tab To Right",
+  "gvim.command.terminal_tab_move_right_desc": "Move the active terminal tab right"
 }

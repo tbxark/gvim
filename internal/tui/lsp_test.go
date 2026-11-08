@@ -46,6 +46,14 @@ type lspEd struct {
 	opened  []string
 	gotos   [][2]int
 	applied map[string][]editor.LSPEdit
+	// version is what DocumentVersion reports, when versionOK is set.
+	version   editor.Version
+	versionOK bool
+	// expect records the expected version of the last ApplyLSPEditsExpect, and
+	// expectCalls counts those calls. applyErr makes the next apply fail.
+	expect      *editor.Version
+	expectCalls int
+	applyErr    error
 	// loadErr is what the read of a goto returns, when it is set.
 	loadErr error
 	// actions records the editor actions the root ran, in order.
@@ -190,6 +198,20 @@ func (e *lspEd) ApplyLSPEdits(path string, edits []editor.LSPEdit) error {
 	return nil
 }
 
+// DocumentVersion reports the version the test set, when it set one.
+func (e *lspEd) DocumentVersion(string) (editor.Version, bool) { return e.version, e.versionOK }
+
+// ApplyLSPEditsExpect records the expected version and applies like ApplyLSPEdits,
+// or returns applyErr first so a test can simulate a stale document.
+func (e *lspEd) ApplyLSPEditsExpect(path string, edits []editor.LSPEdit, expect *editor.Version) error {
+	e.expectCalls++
+	e.expect = expect
+	if e.applyErr != nil {
+		return e.applyErr
+	}
+	return e.ApplyLSPEdits(path, edits)
+}
+
 // lspDoc is the view of one lspTab that the root reads.
 type lspDoc struct{ t *lspTab }
 
@@ -241,13 +263,18 @@ type fakeLSP struct {
 	stops    int
 	root     string
 
-	defs    []LSPLocation
-	refs    []LSPLocation
-	hover   string
-	sig     string // the signature help text, read by SignatureHelp
-	items   []CompletionItem
-	renames WorkspaceEdit
-	actions []CodeAction
+	defs  []LSPLocation
+	refs  []LSPLocation
+	hover string
+	sig   string // the signature help text, read by SignatureHelp
+	items []CompletionItem
+	// resolvedItem is what ResolveCompletion returns for a token, and resolveErr
+	// makes it fail. resolveCalls records the tokens asked for.
+	resolvedItem CompletionItem
+	resolveErr   error
+	resolveCalls []int
+	renames      WorkspaceEdit
+	actions      []CodeAction
 	// resolved and executed record the code action pipeline calls.
 	resolved  []CodeAction
 	resolveTo CodeAction

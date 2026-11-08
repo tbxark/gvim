@@ -316,8 +316,42 @@ func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'"+"\\"+"''") + "'"
 }
 
-// QuoteDir quotes a remote directory for a "cd" hop, keeping a leading ~ unquoted so the
-// remote shell expands it (~ or ~user).
+// validTildeUser reports whether name is a plausible ~user prefix: the shell expands only
+// a word consisting of the user name, so anything with spaces or metacharacters must be
+// quoted literally instead (the cd then fails safely, rather than shell-splitting).
+func validTildeUser(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == '.' || r == '+':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// quoteTildeTail quotes the part of a ~ path after its first slash. The slash itself stays
+// unquoted, so the shell still sees the tilde word and expands it; only the tail (which may
+// contain spaces, quotes or $()) is quoted. Quoting the slash too would make the whole
+// tilde word quoted, which sh/bash do NOT expand (~'/proj' is the literal word ~/proj).
+// tail always starts with "/".
+func quoteTildeTail(tail string) string {
+	rest := strings.TrimPrefix(tail, "/")
+	if rest == "" {
+		return "/"
+	}
+	return "/" + ShellQuote(rest)
+}
+
+// QuoteDir quotes a remote directory for a "cd" hop. A leading ~ (bare, ~/... or
+// ~user/...) is kept expandable by the remote shell: bare ~ becomes "$HOME" (the shell's
+// own expansion; note ~'/proj' would NOT expand, so the slash after the tilde stays
+// unquoted), ~user is left unquoted when it is a valid user word, and the tail after the
+// first slash is quoted.
 func QuoteDir(dir string) string {
 	if dir == "" {
 		return ""
@@ -326,13 +360,22 @@ func QuoteDir(dir string) string {
 		rest := dir[1:]
 		i := strings.Index(rest, "/")
 		if i < 0 {
-			return "~" + rest
+			if rest == "" {
+				return "\"$HOME\""
+			}
+			if validTildeUser(rest) {
+				return "~" + rest
+			}
+			return ShellQuote(dir)
 		}
-		user, tail := "~"+rest[:i], rest[i:]
-		if user == "~" {
-			return "~" + ShellQuote(tail)
+		user, tail := rest[:i], rest[i:]
+		if user == "" {
+			return "\"$HOME\"" + quoteTildeTail(tail)
 		}
-		return user + ShellQuote(tail)
+		if !validTildeUser(user) {
+			return ShellQuote(dir)
+		}
+		return "~" + user + quoteTildeTail(tail)
 	}
 	return ShellQuote(dir)
 }

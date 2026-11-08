@@ -1,6 +1,11 @@
 package authority_test
 
 import (
+	"errors"
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -102,8 +107,14 @@ func TestRemoteSpecHelpers(t *testing.T) {
 	if got := (authority.RemoteSpec{Path: "~"}).Workspace(); got != "~" {
 		t.Fatalf("Workspace home = %q", got)
 	}
-	if got := authority.QuoteDir("~/my project"); got != "~"+authority.ShellQuote("/my project") {
+	if got := authority.QuoteDir("~/my project"); got != "\"$HOME\"/'my project'" {
 		t.Fatalf("QuoteDir home = %q", got)
+	}
+	if got := authority.QuoteDir("~"); got != "\"$HOME\"" {
+		t.Fatalf("QuoteDir bare home = %q", got)
+	}
+	if got := authority.QuoteDir("~alice/proj"); got != "~alice/'proj'" {
+		t.Fatalf("QuoteDir user home = %q", got)
 	}
 	if got := authority.QuoteDir("/srv/a b"); got != authority.ShellQuote("/srv/a b") {
 		t.Fatalf("QuoteDir = %q", got)
@@ -119,5 +130,57 @@ func TestRemoteSpecHelpers(t *testing.T) {
 	}
 	if !strings.HasPrefix(authority.RemoteCommand([]string{"x"}, "", nil), authority.ShellQuote("x")) {
 		t.Fatal("RemoteCommand without dir/env")
+	}
+}
+
+// TestQuoteDirTildeExpandsInRealShell runs the quoting through a real sh: the leading
+// tilde (and ~user) must expand while the quoted tail keeps spaces, quotes and command
+// substitutions literal (no injection). The earlier ~'/proj' form did NOT expand.
+func TestQuoteDirTildeExpandsInRealShell(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	home := t.TempDir()
+	pwn := filepath.Join(t.TempDir(), "pwn")
+	tails := []string{"proj", "a b", "quote's file", "$(touch " + pwn + ") x", "semi;colon & pipe|"}
+	for _, tail := range tails {
+		t.Run(tail, func(t *testing.T) {
+			dir := filepath.Join(home, tail)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for _, dirArg := range []string{"~", "~/" + tail} {
+				cmd := exec.Command(sh, "-c", "printf '%s\\n' "+authority.QuoteDir(dirArg))
+				cmd.Env = append(os.Environ(), "HOME="+home)
+				out, err := cmd.Output()
+				if err != nil {
+					t.Fatalf("sh for %q: %v (%s)", dirArg, err, out)
+				}
+				want := home
+				if dirArg != "~" {
+					want = filepath.Join(home, tail)
+				}
+				if got := strings.TrimSuffix(string(out), "\n"); got != want {
+					t.Fatalf("QuoteDir(%q) expanded to %q, want %q", dirArg, got, want)
+				}
+			}
+		})
+	}
+	if _, err := os.Stat(pwn); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a quoted tail executed command substitution: %v", err)
+	}
+	// ~user + a tail with a space: the user word stays expandable and the tail literal.
+	u, err := user.Current()
+	if err != nil || u.Username == "" || u.HomeDir == "" {
+		t.Skip("no passwd entry for the current user")
+	}
+	cmd := exec.Command(sh, "-c", "printf '%s\\n' "+authority.QuoteDir("~"+u.Username+"/a b"))
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSuffix(string(out), "\n"); got != filepath.Join(u.HomeDir, "a b") {
+		t.Fatalf("~user expansion = %q", got)
 	}
 }

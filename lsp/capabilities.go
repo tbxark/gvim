@@ -24,9 +24,12 @@ type Capabilities struct {
 	// whole workspace, including files the editor never opened.
 	DiagnosticWorkspace bool
 	Completion          bool
-	CodeAction          bool
-	DocumentSymbols     bool
-	WorkspaceSymbols    bool
+	// CompletionResolve is the completion provider's resolveProvider: an incomplete
+	// item with data must be sent to completionItem/resolve before acceptance.
+	CompletionResolve bool
+	CodeAction        bool
+	DocumentSymbols   bool
+	WorkspaceSymbols  bool
 
 	// Exclusive features: the first eligible server in handle order serves them.
 	Hover             bool
@@ -62,6 +65,7 @@ func summarizeCapabilities(c protocol.ServerCapabilities) Capabilities {
 		Initialized:       true,
 		Diagnostics:       true,
 		Completion:        c.CompletionProvider != nil,
+		CompletionResolve: c.CompletionProvider != nil && c.CompletionProvider.ResolveProvider != nil && *c.CompletionProvider.ResolveProvider,
 		SignatureHelp:     c.SignatureHelpProvider != nil,
 		Hover:             providerEnabled(c.HoverProvider),
 		Definition:        providerEnabled(c.DefinitionProvider),
@@ -162,6 +166,9 @@ func applyRegistration(caps *Capabilities, method string, options protocol.LSPAn
 		caps.Diagnostics, caps.DiagnosticPull, caps.DiagnosticWorkspace = true, true, true
 	case "textDocument/completion":
 		caps.Completion = true
+		if resolveProvider(options) {
+			caps.CompletionResolve = true
+		}
 	case "textDocument/codeAction":
 		caps.CodeAction = true
 		if resolveProvider(options) {

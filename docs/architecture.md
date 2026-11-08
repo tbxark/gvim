@@ -369,9 +369,30 @@ workspace model (#19).
   cache directory, mode 0600 in a 0700 directory. The socket name defaults to a
   per-root name (`slug(basename)+8-hex hash(root)`); `NAME` overrides it. A
   live daemon for the same name refuses a second listener; a stale socket file is
-  unlinked. While a daemon hosts a workspace, a bare launch in it refuses instead
-  of opening a second editor of the same session; file launches, `--simple`,
-  `--diff` and stdin launches stay direct launches.
+  unlinked. While a daemon (the per-root default or any explicitly named one) hosts a
+  workspace, EVERY direct editor launch in it refuses — bare, FILE…, `--diff`, `--simple` and
+  stdin — because the daemon's unsaved buffers and a direct editor's writes to the same
+  files would race both ways (the direct editor writes the file under the daemon's
+  buffer, then the daemon's save overwrites the direct edits). The error names the daemon
+  and the way out: attach with `gvim -a` (then the files, e.g. `gvim -a FILE...`), or
+  `gvim --attach=NAME` (`-a=NAME` also works) for a named daemon, or quit the daemon first.
+  The optional NAME is only accepted in the = form: `gvim -a NAME` would make NAME a file
+  argument, not attach to that daemon. A named daemon is
+  discovered through a per-root host mark (`daemon_hosts.go`: one JSON file per
+  daemon name under the daemon directory, written before serving and removed only after
+  the checked exit save; stale marks are ignored and removed on read), with the default
+  socket probe as the fallback. A failed host mark write refuses the daemon start
+  (listener closed and socket removed): without the mark a named daemon would be
+  invisible to direct launches, which is exactly the race this rule prevents. Fresh can keep `fresh FILE` a direct launch because it
+  enforces one buffer per file across editors (a second editor gets a read-only buffer);
+  gvim has no cross-process per-file ownership yet, so refusing the direct launch is a
+  deliberate, documented divergence until that Fresh-style open-file/read-only
+  ownership surface exists. The refusal keys on the launch root: a direct launch from a
+  different root that opens a file the daemon's workspace holds is not covered until
+  per-file ownership exists (a named daemon hosting another root is unrelated by design).
+  Tests cover the default and named daemon, the no-lost-work
+  case (refused launch leaves the daemon's unsaved buffer and the file untouched), and
+  the host mark lifecycle.
 - **Attach.** `gvim -a [NAME]` (or `--attach`) dials the socket, sends a hello
   with the terminal size (and any named files as an open-file frame), puts the
   terminal in raw mode, and forwards input bytes, output frames, resize signals
@@ -476,6 +497,44 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   tab (the model asks the dock to find a tab by the launch's Source and focuses it instead
   of duplicating), because registry v1 has no per-session workspace identity or
   initial-launch record yet.
+- **Remote file finder (landed).** A remote launch's quick-open file mode enumerates the
+  remote workspace through `authority.Files().ReadDir` (streaming into the ordinary
+  `finder.Index`, so the palette's poll-while-loading and query-sequence staleness guards
+  are shared); the local file index is never started and a local project switch is refused
+  (it would enumerate the local disk). The walk is bounded (50k files, 20k directories,
+  depth 64), skips the walker's skip dirs/hidden entries, rejects unsafe remote entry names
+  (separators, `..`, NUL) and never traverses symlinks; ctx cancellation ends the index
+  with `context.Canceled`. A root read failure is the index error and is shown as a
+  `File search failed: ...` row; a truncated list shows an incomplete-list row instead of
+  posing as the whole project; subdirectory failures keep the rest (partial list). A `~`
+  workspace root is expanded remotely (one bounded shell command) so the palette root and
+  the walk use the remote absolute path; a failed expansion leaves the root unchanged and
+  surfaces the enumeration error, never a local fallback. Remote rows join with slashes and
+  the local file preview is disabled (nil preview) for a remote file mode. Gaps: remote
+  git `ls-files` (Fresh prefers git through the backend spawner) is not wired, remote file
+  preview and Live Grep-over-remote are follow-ups (Live Grep is refused with a notice in a
+  remote workspace instead of silently searching the local project, the palette file
+  preview is cleared, and the local git-status adapter is replaced by an inert one: local
+  git must not look up remote paths), and the remote workspace's plugin/agent project root
+  still comes from the local process root. Project search and replace, the search-results
+  list and next/previous match, plus Git Grep, are refused with a remote-specific notice
+  and their local ports are cleared: those ports read and write local files, and a remote
+  launch must never search or replace local files for remote paths (remote wiring through
+  the authority is a follow-up). The remote ~/~user root is expanded by the
+  remote shell; authority.QuoteDir keeps the tilde word expandable and quotes only the
+  tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is not a tilde expansion in
+  sh/bash.
+- **Split persistence (landed).** The workspace file's `Layout` (the embedded
+  `session.Session`) also carries the editor's pane split tree as an optional
+  `layout` object: inner nodes direction/ratio, leaves file index + path and per-pane
+  top/topRow, plus a focus index in reading order. It is additive/omitempty at session
+  version 1, bounded (16 panes, depth 16) and validated on load; a layout that no longer
+  resolves (missing/mismatched/ambiguous pane file) falls back to one pane and never a
+  wrong file. Capture is a pure model read (`m.SplitState()`) from the snapshot step,
+  restore happens right after `tui.New` in the shared build path (so daemon workspace
+  materialization and restart restore panes), legacy files load unchanged, hot-exit restore
+  skips it, and remote launches keep the empty session plan (no local/remote path mapping
+  yet, #21).
 - **Capture is snapshot-and-write (landed).** The UI goroutine takes a consistent in-memory
   snapshot (layout, unsaved buffer texts, large-file overlays, terminal record, find
   history) and a per-workspace ordered writer queue writes the stash files, session JSON,

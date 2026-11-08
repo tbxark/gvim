@@ -24,8 +24,8 @@ plus its own, so a key Fresh defines once is defined for every preset.
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
 overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not
-emitted: gvim has no completion popup and its compare view is not a keymap surface, so a user
-binding there is skipped with a warning.
+emitted: gvim's completion popup and its compare view are not keymap surfaces (the popup's
+keys are handled in code), so a user binding there is skipped with a warning.
 
 So the coverage is Fresh's: file, edit, selection (block selection too), the word, line, page and
 document moves, multi-cursor (next match, above and below, line ends), marks and bookmark slots

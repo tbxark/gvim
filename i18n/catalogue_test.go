@@ -58,7 +58,7 @@ func TestEmbeddedLocaleFiles(t *testing.T) {
 	}
 	// The size stays bounded: the catalogue is the extracted inventory (the command and
 	// menu classes are the bulk), not Fresh's full 1.9k-key file. The measured key+value
-	// text is about 517 KiB; the cap leaves room for the rest of the extraction but keeps
+	// text is about 522 KiB; the cap leaves room for the rest of the extraction but keeps
 	// a careless full import from silently bloating the binary.
 	var total int
 	for code, table := range files {

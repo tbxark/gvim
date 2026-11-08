@@ -56,14 +56,20 @@ caret and the line is selected.
 **tab_actions**: closes the other tabs, the tabs to the right or left, or all tabs; modified tabs are
 skipped and counted in the status message. Moves the active tab left or right.
 
-**git_gutter** (with Fresh's `diff_nav`): compares the open buffer with the file at `HEAD` and draws a
-bar in the gutter for added and modified lines, a triangle where lines were deleted, and marks on the
-scrollbar. **Next Change** and **Previous Change** jump between changed regions. Unlike Fresh it compares
-the *buffer*, so the marks follow unsaved typing after a short pause. The HEAD text is read once per
-file with `git show` and compared in the host (no line arrays in Lua); a file outside a repository or
-untracked is left alone, and so is a buffer in large-file mode: it gets no marks, and **Next Change** and
-**Previous Change** say that git changes are not tracked there. Exports `hunks(buf_id)` for other plugins (`{type = "added"|"modified"|"deleted",
-line, count}`).
+**git_gutter** (with Fresh's `diff_nav` merged navigation): compares the open buffer with the file at
+`HEAD` and draws a bar in the gutter for added and modified lines, a triangle where lines were deleted,
+and marks on the scrollbar. **Next Change** and **Previous Change** are Fresh's merged diff navigation:
+they collect the buffer's `HEAD` changed regions, the active hunks published by **live_diff** when that
+plugin is loaded, and the buffer's saved-diff lines of unsaved changes, then deduplicate by line, sort
+ascending, and jump with Fresh's `Change n/total [wrapped]` status. Unlike Fresh it compares the *buffer*,
+so the marks follow unsaved typing after a short pause. The HEAD text is read once per file with
+`git show` and compared in the host (no line arrays in Lua); a file outside a repository or untracked
+still navigates its saved-diff/live_diff changes, and a buffer in large-file mode keeps its own notice:
+**Next Change** and **Previous Change** say that git changes are not tracked there. Exports `hunks(buf_id)`
+for other plugins (`{type = "added"|"modified"|"deleted", line, count}`). Reduced versus Fresh's separate
+`diff_nav` plugin: the merged navigation lives in git_gutter (no `diff_nav.*` command ids or i18n keys,
+no separate plugin), and the side-by-side Compare view keeps its own **Compare: Next/Previous
+Difference**.
 
 **git_statusbar**: the current branch (the first seven digits of the commit for a detached HEAD) on
 the right of the status row. It refreshes when a file opens, a tab is activated, a file is saved and when
@@ -126,7 +132,7 @@ virtual buffer, as Fresh does, so the detail rows are not line targets: a target
 working-tree file at a line, which is wrong for any commit that is not HEAD and cannot point at a
 virtual buffer (see porting.md). It is **off by default** for the idle-heap gate (see Memory).
 
-**live_diff** (with Fresh's diff_nav navigation surface): shows the open buffer against a baseline -- the
+**live_diff** (feeds Fresh's diff_nav merged navigation; see git_gutter): shows the open buffer against a baseline -- the
 file at git HEAD (default), the file currently on disk, or a chosen git branch/ref -- with per-buffer
 mode toggles and Fresh's eight Live Diff commands (no default keys). Added/modified new-side lines get
 a background in the theme's `editor.diff_*_bg` colours and + / ~ gutter glyphs, word-level changes are

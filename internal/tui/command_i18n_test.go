@@ -45,6 +45,24 @@ func TestTranslateCommands(t *testing.T) {
 	if got := find(de, "terminal_tab_new").Description; got != "Start another shell in a new dock tab" {
 		t.Errorf("German terminal_tab_new description = %q, want the English fallback", got)
 	}
+	// The recent terminal-tab move rows are mapped to Fresh's per-plugin tab_actions
+	// catalogue: the German title and description come from there. The discovery row is
+	// gvim-only (Fresh's import-as-workspace semantics differ), so it keeps English.
+	if got := find(de, "terminal_tab_move_left").Name; got != "Tab nach links" {
+		t.Errorf("German terminal_tab_move_left = %q, want Fresh's tab_actions translation", got)
+	}
+	if got := find(de, "terminal_tab_move_left").Description; got != "Aktiven Tab im Split nach links verschieben" {
+		t.Errorf("German terminal_tab_move_left description = %q, want Fresh's tab_actions translation", got)
+	}
+	if got := find(de, "terminal_tab_move_right").Name; got != "Tab nach rechts" {
+		t.Errorf("German terminal_tab_move_right = %q, want Fresh's tab_actions translation", got)
+	}
+	if got := find(de, "discover_agent_sessions").Name; got != "Discover Agent Sessions..." {
+		t.Errorf("German discover_agent_sessions = %q, want the English fallback", got)
+	}
+	if got := find(de, "discover_agent_sessions").Description; got != "Find tmux sessions and agents running outside gvim and open one in a terminal tab" {
+		t.Errorf("German discover_agent_sessions description = %q, want the English fallback", got)
+	}
 	if got := find(de, "init_edit").Name; got != "init: Edit init.lua" {
 		t.Errorf("German init_edit = %q, want the gvim English fallback", got)
 	}
@@ -83,6 +101,26 @@ func TestPaletteSearchesAndRunsTranslatedTitles(t *testing.T) {
 	run = firstOf[palette.RunCommandMsg](t, collect(cmd))
 	if run.Action != "terminal_tab_new" {
 		t.Fatalf("Enter ran %#v, want the terminal_tab_new action", run)
+	}
+	// A recently extracted native row: its German title is searchable and still routes to
+	// the same action id; the discovery row is found by its English fallback.
+	m.openPalette(">Tab nach links")
+	if frame := strings.Join(frameText(m), "\n"); !strings.Contains(frame, "Tab nach links") {
+		t.Fatalf("the palette does not show the translated move row:\n%s", frame)
+	}
+	cmd = press(m, special(tea.KeyEnter))
+	run = firstOf[palette.RunCommandMsg](t, collect(cmd))
+	if run.Action != "terminal_tab_move_left" {
+		t.Fatalf("Enter ran %#v, want the terminal_tab_move_left action", run)
+	}
+	m.openPalette(">Discover Agent Sessions")
+	if frame := strings.Join(frameText(m), "\n"); !strings.Contains(frame, "Discover Agent Sessions...") {
+		t.Fatalf("the palette does not show the discovery fallback row:\n%s", frame)
+	}
+	cmd = press(m, special(tea.KeyEnter))
+	run = firstOf[palette.RunCommandMsg](t, collect(cmd))
+	if run.Action != "discover_agent_sessions" {
+		t.Fatalf("Enter ran %#v, want the discover_agent_sessions action", run)
 	}
 }
 

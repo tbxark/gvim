@@ -104,11 +104,14 @@ saved in the local session, and cannot be combined with --diff or --daemon.
 
 --daemon runs the editor as a daemon on a Unix socket (in the foreground; it prints the
 socket it listens on) and --attach/-a forwards this terminal to a running daemon. The
-socket name defaults to a per-workspace name; give NAME to use another. While a daemon
-hosts a workspace a bare launch in it refuses instead of opening a second editor: the
-session's unsaved buffers live in the daemon. A file launch, --simple and --diff stay
-direct launches. In the daemon the "Detach from Daemon" command drops this client and
-leaves the editor running.`,
+socket name defaults to a per-workspace name; the optional NAME is accepted only in the
+= form: --daemon=NAME / --attach=NAME (or -a=NAME), because -a NAME would make NAME a
+file argument. While a daemon hosts a workspace, every direct editor launch in it is
+refused instead of becoming a second writer: the session's unsaved buffers live in the
+daemon, and a direct editor could race the daemon's save of the same files. Attach with
+"gvim -a" (then the files, e.g. "gvim -a FILE...") or "gvim --attach=NAME", or quit the
+daemon first; this covers explicitly named daemons. In the daemon the "Detach from Daemon"
+command drops this client and leaves the editor running.`,
 		Example: `  gvim
   gvim ~/project
   gvim ~/project main.go:42:7 README.md
@@ -214,9 +217,9 @@ leaves the editor running.`,
 	root.Flags().BoolVar(&simple, "simple", false, "open just what is named: no session restored or saved and no file explorer")
 	root.Flags().BoolVar(&stdin, "stdin", false, "read a [stdin] buffer from standard input (bounded at 32 MiB); the keyboard comes from the terminal")
 	root.Flags().StringVar(&stdinName, "stdin-name", "", "name the [stdin] buffer `NAME`, for the language and the Save-As suggestion")
-	flags.StringVar(&daemonName, "daemon", "", "run the editor as a daemon on a socket (foreground); `NAME` is the socket name, empty the default for this workspace")
+	flags.StringVar(&daemonName, "daemon", "", "run the editor as a daemon on a socket (foreground); use `--daemon=NAME` for a socket name other than this workspace's default")
 	flags.Lookup("daemon").NoOptDefVal = daemonDefaultName
-	flags.StringVarP(&attachName, "attach", "a", "", "attach this terminal to a running daemon; `NAME` is the socket name, empty the default for this workspace")
+	flags.StringVarP(&attachName, "attach", "a", "", "attach this terminal to a running daemon; use `--attach=NAME` (or `-a=NAME`) for a named daemon, `-a` alone for this workspace's default")
 	flags.Lookup("attach").NoOptDefVal = daemonDefaultName
 	_ = root.RegisterFlagCompletionFunc("keymap", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return keymapNames, cobra.ShellCompDirectiveNoFileComp

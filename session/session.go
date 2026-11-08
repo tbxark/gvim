@@ -38,6 +38,11 @@ type Session struct {
 	// Sidebar is the sidebar UI state (sections, sizes, scroll, width form). It is
 	// optional: a session file without it keeps the config defaults.
 	Sidebar *SidebarState `json:"sidebar,omitempty"`
+	// Layout is the saved pane layout (split tree, focused pane and each pane's tab
+	// and scroll position; see session/split.go). It is optional and additive: a
+	// session file without it restores as one pane exactly as before, and an
+	// invalid or no-longer-resolvable layout is ignored on restore.
+	Layout *SplitLayout `json:"layout,omitempty"`
 }
 
 // FileState is the saved state of one open file.
