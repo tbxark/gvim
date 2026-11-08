@@ -67,10 +67,13 @@ func TestDefaultConfigGivesFreshViewDefaults(t *testing.T) {
 	if !slices.Equal(v.StatusBar.Left, config.Defaults().StatusBar.Left) || !slices.Equal(v.StatusBar.Right, config.Defaults().StatusBar.Right) {
 		t.Errorf("status bar = %+v, want Fresh's elements", v.StatusBar)
 	}
-	// The status bar lists are the one place where DefaultViewOptions leaves the
-	// layout to gvim, and the icon set is resolved from the terminal.
+	// The status bar lists and the explorer width are where a config default
+	// differs from DefaultViewOptions: the lists are Fresh's elements and the
+	// width is file_explorer.width (30%). The icon set is resolved from the
+	// terminal.
 	want := tui.DefaultViewOptions()
 	v.StatusBar = want.StatusBar
+	v.Explorer.Width = want.Explorer.Width
 	v.UIIcons = want.UIIcons
 	if !reflect.DeepEqual(v, want) {
 		t.Errorf("Deps.View = %+v\nwant       %+v", v, want)

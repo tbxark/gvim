@@ -1,6 +1,9 @@
 package dock
 
 import (
+	"fmt"
+	"image/color"
+
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -28,17 +31,111 @@ func (p *Panel) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 		return
 	}
 	sc := p.term.Screen()
+	if p.scroll.on {
+		p.paintScrollback(g, top, rows, l.W, sc, body, style.Cell(st.Selection).BG)
+		return
+	}
 	for r := range min(rows, sc.Rows) {
 		paintShellRow(g, top+r, l.W, sc, r, body)
 	}
 }
 
-// title is the title row of the dock.
+// paintScrollback paints the scrollback view: the history window followed by the
+// live screen rows, with the selected row on the selection background. A row the
+// window needs but the snapshot does not hold yet is left blank until the next
+// snapshot arrives.
+func (p *Panel) paintScrollback(g *grid.Grid, top, rows, w int, sc terminal.Screen, base grid.Style, sel color.Color) {
+	for i := range rows {
+		abs := p.scroll.top + i
+		if abs >= p.combined() {
+			break
+		}
+		y := top + i
+		if abs < p.scroll.total {
+			j := abs - p.scroll.from
+			if j < 0 || j >= len(p.scroll.lines) {
+				continue
+			}
+			paintShellCells(g, y, w, p.scroll.lines[j].Cells, base)
+			if sel != nil && abs == p.scroll.selected {
+				tintRow(g, y, w, sel)
+			}
+			continue
+		}
+		r := abs - p.scroll.total
+		if r < 0 || r >= sc.Rows {
+			continue
+		}
+		if sel != nil && abs == p.scroll.selected {
+			paintShellRow(g, y, w, sc, r, base)
+			tintRow(g, y, w, sel)
+			continue
+		}
+		paintShellRow(g, y, w, sc, r, base)
+	}
+}
+
+// tintRow sets the background of the first w cells of row y when they have no
+// background of their own.
+func tintRow(g *grid.Grid, y, w int, bg color.Color) {
+	if bg == nil {
+		return
+	}
+	for c := range w {
+		cell := g.At(c, y)
+		style := cell.Style
+		if style.BG == nil {
+			style.BG = bg
+		}
+		g.Set(c, y, cell.Text, style)
+	}
+}
+
+// paintShellCells paints one history row from its cells, clipped to w columns.
+func paintShellCells(g *grid.Grid, y, w int, cells []terminal.Cell, base grid.Style) {
+	for c := 0; c < min(w, len(cells)); c++ {
+		cell := cells[c]
+		text := " "
+		if cell.Rune != 0 {
+			text = string(cell.Rune)
+		}
+		if g.Put(c, y, w, text, shellStyle(cell.Style, base)) == 2 {
+			c++
+		}
+	}
+}
+
+// title is the title row of the dock: the live shell, its frozen last screen, or
+// the read-only scrollback view with its row window and search.
 func (p *Panel) title() string {
+	if p.scroll.on {
+		return p.scrollbackTitle()
+	}
 	if p.exited {
 		return "Terminal (exited)"
 	}
 	return "Terminal"
+}
+
+// scrollbackTitle is the title of the scrollback view: its visible rows of the
+// total, and the search when one is open.
+func (p *Panel) scrollbackTitle() string {
+	combined := p.combined()
+	rows := max(p.bodyRows(), 1)
+	first := min(p.scroll.top+1, combined)
+	last := min(p.scroll.top+rows, combined)
+	title := fmt.Sprintf("Scrollback — rows %d-%d of %d (Ctrl+Space returns)", first, last, combined)
+	if p.scroll.typing {
+		return title + " — /" + p.scroll.searchInput
+	}
+	if p.scroll.search == "" {
+		return title
+	}
+	pos := 0
+	if len(p.scroll.matches) > 0 {
+		pos = p.scroll.match + 1
+	}
+	return fmt.Sprintf("%s — /%s %d/%d", title, p.scroll.search, pos, len(p.scroll.matches))
 }
 
 // dockText is what the dock shows in place of a screen: the notice that says why no
@@ -82,7 +179,7 @@ func shellStyle(st terminal.Style, base grid.Style) grid.Style {
 // Caret is the terminal caret in frame cells. It is the shell's cursor when the shell
 // shows it and the cursor is inside the dock's shell rows.
 func (p *Panel) Caret(l frame.Layout) (x, y int, ok bool) {
-	if !l.DockOn || p.term == nil || p.exited {
+	if !l.DockOn || p.term == nil || p.exited || p.scroll.on {
 		return 0, 0, false
 	}
 	c := p.term.Screen().Cursor

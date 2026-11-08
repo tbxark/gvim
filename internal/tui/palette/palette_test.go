@@ -88,19 +88,31 @@ func runCmd(cmd tea.Cmd) tea.Msg {
 }
 
 // settle runs cmd and feeds each message back to p, as the root does, until the
-// palette asks for no more work. It fails the test if that takes more than limit
-// steps, so a poll that never ends does not hang the run.
+// palette asks for no more work. A batch (a rank tick and a preview read, say) is run
+// one command at a time, as the program's event loop runs it. It fails the test if that
+// takes more than limit steps, so a poll that never ends does not hang the run.
 func settle(t *testing.T, p *Palette, cmd tea.Cmd, limit int) {
 	t.Helper()
-	for range limit {
-		if cmd == nil {
+	steps := 0
+	var run func(c tea.Cmd)
+	run = func(c tea.Cmd) {
+		if c == nil {
 			return
 		}
-		cmd = p.update(cmd())
+		if steps >= limit {
+			t.Fatalf("palette still asks for work after %d steps", limit)
+		}
+		steps++
+		msg := c()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, sub := range batch {
+				run(sub)
+			}
+			return
+		}
+		run(p.update(msg))
 	}
-	if cmd != nil {
-		t.Fatalf("palette still asks for work after %d steps", limit)
-	}
+	run(cmd)
 }
 
 // countingRanker counts the Rank calls, so a test can tell where ranking runs.

@@ -34,6 +34,13 @@ func visibleRows(h int) int {
 	return min(max(h-4, 0), maxRows)
 }
 
+// layoutMode is what the palette shows beside its item rows: the Live Grep toolbar row
+// and the file preview column. The zero value is the plain sheet of the other modes.
+type layoutMode struct {
+	toolbar bool // one row above the item rows
+	preview bool // a column to the right of them
+}
+
 // geometry is the placement of the palette in a frame of w by h cells. Rows are
 // numbered from the top, and the *End and *W fields are exclusive or sizes.
 type geometry struct {
@@ -43,6 +50,11 @@ type geometry struct {
 	bottom int // the bottom border row, the frame's last row
 	inputY int // the query row, between the last item row and the bottom border
 
+	// toolbarY is the Live Grep toolbar row, between the top border and the first item
+	// row; -1 when the mode has no toolbar. rowsTop is the first item row.
+	toolbarY int
+	rowsTop  int
+
 	left, right int // the columns of the card's left and right border
 
 	nameX, nameEnd int // the name column; nameEnd is exclusive
@@ -50,30 +62,64 @@ type geometry struct {
 	descX, descW   int // the description column; descW is 0 when hidden
 	srcX           int // the source column's leftmost cell
 	srcOK          bool
-	textEnd        int // the end, exclusive, of every column: one padding cell before the border
+	textEnd        int // the end, exclusive, of the text area: one padding cell before the border
+	listEnd        int // the end, exclusive, of the list columns: textEnd, or the gap before the preview
+	// preview is true when the file preview column is painted: divX is its divider
+	// column, and prevX through prevEnd is its text.
+	preview     bool
+	divX, prevX int
+	prevEnd     int
 }
 
-// layoutFor places the palette in a w by h frame. It is a pure function of the size,
-// so painting and hit testing read the same numbers. The card docks to the last row of
-// the frame and keeps a margin from the left and right edges (space.Margin), and its
-// text keeps a padding cell from the borders.
-func layoutFor(w, h int) geometry {
+// layoutFor places the palette in a w by h frame. It is the plain mode: no toolbar and
+// no preview column.
+func layoutFor(w, h int) geometry { return layoutForMode(w, h, layoutMode{}) }
+
+// layoutForMode places the palette in a w by h frame. It is a pure function of the size
+// and the mode, so painting and hit testing read the same numbers. The card docks to the
+// last row of the frame and keeps a margin from the left and right edges (space.Margin),
+// and its text keeps a padding cell from the borders.
+func layoutForMode(w, h int, mode layoutMode) geometry {
 	n := visibleRows(h)
+	if mode.toolbar {
+		n = min(n, max(h-5, 0)) // the toolbar row comes out of the frame's spare rows
+	}
 	m := space.Margin(w)
 	left, right := m, w-1-m
 	g := geometry{
 		w: w, h: h, rows: n,
 		bottom: h - 1, inputY: h - 2,
 		left: left, right: right,
-		keysX: -1,
+		keysX: -1, toolbarY: -1,
 	}
 	g.top = g.bottom - 2 - n
+	if mode.toolbar {
+		g.top--
+		g.toolbarY = g.top + 1
+	}
+	g.rowsTop = g.top + 1
+	if mode.toolbar {
+		g.rowsTop++
+	}
 	// A frame too narrow for a card with an inside gives the whole width to the name.
 	g.nameX = min(left+1+space.PadX, max(right-1, 0))
 	g.textEnd = max(right-space.PadX, g.nameX)
-	g.nameEnd, g.keysEnd, g.srcX = g.textEnd, g.textEnd, g.textEnd
-	tw := g.textEnd - g.nameX
-	edge := g.textEnd
+	g.listEnd = g.textEnd
+	// The preview column takes the right of the card when there is room for it and a
+	// list beside it. A narrow frame keeps the full-width list.
+	if inner := g.textEnd - g.nameX; mode.preview && inner >= previewMinText {
+		previewW := min(max(inner*previewShare/5, previewMinWidth), previewMaxWidth)
+		if div := g.textEnd - previewW; div-g.nameX >= previewMinList {
+			g.preview = true
+			g.divX = div
+			g.prevX = div + 2
+			g.prevEnd = g.textEnd + 1
+			g.listEnd = div - columnGap
+		}
+	}
+	g.nameEnd, g.keysEnd, g.srcX = g.listEnd, g.listEnd, g.listEnd
+	tw := g.listEnd - g.nameX
+	edge := g.listEnd
 	if tw >= srcMinText {
 		g.srcOK = true
 		g.srcX = edge - min(srcReserveMax, tw/5)
@@ -127,7 +173,7 @@ func (g geometry) fitColumns(rows []row) geometry {
 // card is for, so the prefix characters of the query do not have to say it.
 func (p *Palette) title() string {
 	if p.live {
-		return "Live Grep"
+		return p.liveTitle()
 	}
 	mode, _ := commands.ParseQuery(p.input.Value())
 	switch mode {
@@ -141,24 +187,64 @@ func (p *Palette) title() string {
 	return "Files"
 }
 
+// layoutMode is what the palette shows beside its item rows in the current mode: the
+// Live Grep toolbar and the file mode's preview column.
+func (p *Palette) layoutMode() layoutMode {
+	return layoutMode{toolbar: p.live, preview: p.previewWanted()}
+}
+
+// layout places the palette in a w by h frame in the current mode. Painting and hit
+// testing read it, so the card and its columns cannot drift apart.
+func (p *Palette) layout(w, h int) geometry {
+	return layoutForMode(w, h, p.layoutMode())
+}
+
 // paint draws the palette over g. The sheet is one card docked to the last row: the
-// title border, the item rows, the query row and the hints on the bottom border. A
-// frame with no room for the card paints nothing.
+// title border, the Live Grep toolbar in live mode, the item rows (with the file preview
+// column beside them), the query row and the hints on the bottom border. A frame with no
+// room for the card paints nothing.
 func (p *Palette) paint(g *grid.Grid) {
-	geo := layoutFor(g.Width(), g.Height()).fitColumns(p.rows)
+	geo := p.layout(g.Width(), g.Height()).fitColumns(p.rows)
 	if geo.top < 0 || geo.right <= geo.left {
 		return
 	}
 	boxW, boxH := geo.right-geo.left+1, geo.bottom-geo.top+1
 	p.chrome.ov.PaintBox(g, geo.left, geo.top, boxW, boxH, p.title())
+	p.paintToolbar(g, geo)
 	p.paintRows(g, geo)
-	hints := hint
-	if p.live {
-		hints = liveHint
-	}
-	p.chrome.ov.PaintFooter(g, geo.left, geo.bottom, boxW, hints)
+	p.paintPreview(g, geo)
+	p.chrome.ov.PaintFooter(g, geo.left, geo.bottom, boxW, p.hint())
 	g.Fill(geo.left+1, geo.right, geo.inputY, p.chrome.input)
 	p.drawInput(g, geo.inputY, geo.nameX)
+}
+
+// hint is the text on the bottom border: the mode prefixes of the file, command, line
+// and buffer modes, or the Live Grep keys.
+func (p *Palette) hint() string {
+	if p.live {
+		return liveHint
+	}
+	return hint
+}
+
+// paintToolbar draws the Live Grep toggle row inside the card: each toggle with its key
+// and its state, from the row under the title border. A mode with no toolbar paints
+// nothing.
+func (p *Palette) paintToolbar(g *grid.Grid, geo geometry) {
+	if geo.toolbarY < 0 {
+		return
+	}
+	x := geo.nameX
+	for _, seg := range p.toolbarSegments() {
+		if x >= geo.textEnd {
+			break
+		}
+		st := p.chrome.panel
+		if !seg.on {
+			st = faint(st)
+		}
+		x += g.Put(x, geo.toolbarY, geo.textEnd, seg.text, st)
+	}
 }
 
 // paintRows draws the item rows in view inside the card. An empty list shows the
@@ -166,7 +252,7 @@ func (p *Palette) paint(g *grid.Grid) {
 func (p *Palette) paintRows(g *grid.Grid, geo geometry) {
 	if len(p.rows) == 0 {
 		if geo.rows > 0 {
-			g.Put(geo.nameX, geo.top+1, geo.textEnd, p.emptyText(), p.chrome.muted)
+			g.Put(geo.nameX, geo.rowsTop, geo.listEnd, p.emptyText(), p.chrome.muted)
 		}
 		return
 	}
@@ -176,10 +262,15 @@ func (p *Palette) paintRows(g *grid.Grid, geo geometry) {
 			break
 		}
 		idx := first + k
-		y := geo.top + 1 + k
+		y := geo.rowsTop + k
 		selected := idx == p.nav.Selected()
 		if selected {
-			g.Fill(geo.left+1, geo.right, y, p.chrome.selected)
+			// The highlight stops at the preview divider: the preview column is not a row.
+			end := geo.right
+			if geo.preview {
+				end = geo.divX
+			}
+			g.Fill(geo.left+1, end, y, p.chrome.selected)
 		}
 		p.paintRow(g, geo, y, p.rows[idx], selected)
 	}
@@ -204,24 +295,24 @@ func (p *Palette) paintRow(g *grid.Grid, geo geometry, y int, r row, selected bo
 		g.Put(geo.descX, y, geo.descX+geo.descW, truncate(r.desc, geo.descW), faint(base))
 	}
 	if geo.srcOK && r.source != "" {
-		// Right-aligned so the last character is at the end of the text area, never
+		// Right-aligned so the last character is at the end of the list columns, never
 		// left of srcX.
-		x := max(geo.textEnd-ansi.StringWidth(r.source), geo.srcX)
-		g.Put(x, y, geo.textEnd, truncate(r.source, geo.textEnd-x), faint(base))
+		x := max(geo.listEnd-ansi.StringWidth(r.source), geo.srcX)
+		g.Put(x, y, geo.listEnd, truncate(r.source, geo.listEnd-x), faint(base))
 	}
 }
 
 // nameEnd is where the name of r is cut. A command row has a shortcut and a
 // description column, so its name ends before the shortcut column. The other rows
-// have neither, so their name runs up to the source label, or to the end of the text
-// area when the frame is too narrow for the label.
+// have neither, so their name runs up to the source label, or to the end of the list
+// columns when the frame is too narrow for the label.
 func nameEnd(geo geometry, r row) int {
 	if r.kind == rowCommand || r.keys != "" || r.desc != "" {
 		return geo.nameEnd
 	}
-	end := geo.textEnd
+	end := geo.listEnd
 	if geo.srcOK && r.source != "" {
-		end = max(geo.textEnd-ansi.StringWidth(r.source), geo.srcX) - columnGap
+		end = max(geo.listEnd-ansi.StringWidth(r.source), geo.srcX) - columnGap
 	}
 	return end
 }

@@ -29,9 +29,25 @@ var ErrNotFound = errors.New("explorer: path not in tree")
 type Row struct {
 	Name     string
 	Path     string
-	Depth    int  // 0 is the root
+	Depth    int  // 0 is the root; compacted ancestors do not indent the row
 	IsDir    bool // directories can be expanded
 	Expanded bool // meaningful only when IsDir
+	// Parent is the index in Rows of the nearest ancestor that has a row, or -1
+	// for the root. Compact mode skips the ancestors it folds into this row, so
+	// a parent is the row the sticky band pins, not necessarily the node's
+	// immediate parent.
+	Parent int
+	// Chain is the directory chain compact mode folded into this row, outermost
+	// first: the ancestors whose single-child directories share this row. It is
+	// nil when compact mode is off or this row starts no chain.
+	Chain []ChainSegment
+}
+
+// ChainSegment is one folder folded into a compact row: the name it shows and
+// the directory it stands for.
+type ChainSegment struct {
+	Name string
+	Path string
 }
 
 type node struct {
@@ -55,6 +71,7 @@ type Tree struct {
 	scroll      int    // index in Rows of the first row in view
 	showHidden  bool   // rows include dot-entries
 	showIgnored bool   // rows include entries matched by .gitignore
+	compact     bool   // rows fold single-child directory chains
 }
 
 // Open returns a tree rooted at dir, expanded, with its first level loaded.
@@ -100,35 +117,120 @@ func (t *Tree) ShowIgnored() bool { return t.showIgnored }
 // false. Like SetShowHidden it needs no disk access.
 func (t *Tree) SetShowIgnored(v bool) { t.showIgnored = v }
 
+// CompactDirectories reports whether compact-directory rendering is on: a folder
+// whose expanded, visible content is exactly one folder shares its row with that
+// folder, as "src/main/java". The default is off, so a tree built directly keeps
+// the plain rows; the app turns it on from file_explorer.compact_directories.
+func (t *Tree) CompactDirectories() bool { return t.compact }
+
+// SetCompactDirectories turns compact-directory rendering on or off. It needs no
+// disk access: the chains are read off the loaded tree. A selection on a folder
+// that compact mode folds into a deeper row moves to that row's anchor.
+func (t *Tree) SetCompactDirectories(v bool) {
+	if t.compact == v {
+		return
+	}
+	t.compact = v
+	if n, ok := t.byPath[t.selected]; ok {
+		t.selected = t.anchor(n).path
+	}
+}
+
 // visible reports whether n is drawn under the current options.
 func (t *Tree) visible(n *node) bool {
 	return (t.showHidden || !n.hidden) && (t.showIgnored || !n.ignored)
 }
 
 // Rows returns the visible rows in display order. The root is row 0.
+//
+// With compact directories on, a folder that is expanded and whose only visible
+// child is another folder has no row of its own: its children are walked as its
+// own depth, and the chain of such ancestors is carried into the row of the
+// first descendant that does have one (Fresh's projection in
+// view/file_tree/view.rs). Row.Depth is the raw depth less the folded ancestors,
+// so a chain does not indent.
 func (t *Tree) Rows() []Row {
-	var rows []Row
-	var walk func(n *node, depth int)
-	walk = func(n *node, depth int) {
+	rows := make([]Row, 0, 16)
+	// depth is the row's depth on screen: a folded ancestor adds a chain segment
+	// but no indent, so an absorbed node's children are walked at its own depth.
+	var walk func(n *node, depth, parent int, chain []ChainSegment)
+	walk = func(n *node, depth, parent int, chain []ChainSegment) {
+		if t.isAbsorbed(n) {
+			inner := make([]ChainSegment, len(chain), len(chain)+1)
+			copy(inner, chain)
+			inner = append(inner, ChainSegment{Name: n.name, Path: n.path})
+			for _, c := range n.children {
+				if t.visible(c) {
+					walk(c, depth, parent, inner)
+				}
+			}
+			return
+		}
+		index := len(rows)
 		rows = append(rows, Row{
 			Name:     n.name,
 			Path:     n.path,
 			Depth:    depth,
 			IsDir:    n.isDir,
 			Expanded: n.expanded,
+			Parent:   parent,
+			Chain:    chain,
 		})
 		if !n.expanded {
 			return
 		}
 		for _, c := range n.children {
-			if !t.visible(c) {
-				continue
+			if t.visible(c) {
+				walk(c, depth+1, index, nil)
 			}
-			walk(c, depth+1)
 		}
 	}
-	walk(t.root, 0)
+	walk(t.root, 0, -1, nil)
 	return rows
+}
+
+// isAbsorbed reports whether compact mode folds n into a deeper row: n is not
+// the root, it is an expanded folder, and its only visible child is a folder.
+// Fresh's rule (FileTreeView::is_absorbed); the root is never absorbed.
+func (t *Tree) isAbsorbed(n *node) bool {
+	if !t.compact || n == nil || n == t.root {
+		return false
+	}
+	return t.singleVisibleDirChild(n) != nil
+}
+
+// singleVisibleDirChild returns n's only visible child when that child is a
+// folder, and nil when n is not an expanded folder with exactly one visible
+// folder child.
+func (t *Tree) singleVisibleDirChild(n *node) *node {
+	if n == nil || !n.isDir || !n.expanded {
+		return nil
+	}
+	var only *node
+	for _, c := range n.children {
+		if !t.visible(c) {
+			continue
+		}
+		if only != nil {
+			return nil
+		}
+		only = c
+	}
+	if only == nil || !only.isDir {
+		return nil
+	}
+	return only
+}
+
+// anchor returns the node whose row shows n's place: n itself when it has a row,
+// or, for a folder compact mode folds away, the deepest node of its chain. The
+// selection is kept on an anchor, so Selected always finds a row (Fresh's
+// promote_to_anchor).
+func (t *Tree) anchor(n *node) *node {
+	for t.isAbsorbed(n) {
+		n = t.singleVisibleDirChild(n)
+	}
+	return n
 }
 
 // Selected returns the selected row. ok is false only if the tree is empty of
@@ -166,11 +268,18 @@ func (t *Tree) Move(delta int) {
 }
 
 // Select selects the visible row for path. It returns ErrNotFound when the row
-// is not visible; use Reveal to expand the way to it first.
+// is not visible; use Reveal to expand the way to it first. A folder compact mode
+// folds into a deeper row selects that row's anchor, since it has no row of its
+// own.
 func (t *Tree) Select(path string) error {
+	n, err := t.find(path)
+	if err != nil {
+		return err
+	}
+	want := t.anchor(n).path
 	for _, r := range t.Rows() {
-		if r.Path == path {
-			t.selected = path
+		if r.Path == want {
+			t.selected = want
 			return nil
 		}
 	}
@@ -243,13 +352,19 @@ func (t *Tree) reveal(path string, load bool) error {
 		}
 		n = next
 	}
-	t.selected = n.path
+	// A folder compact mode folds into a deeper row has no row of its own: the
+	// selection follows the row that shows it.
+	t.selected = t.anchor(n).path
 	return nil
 }
 
 // Expand opens the directory at path, loading its children if needed. Expanding
 // an open directory does nothing. It returns ErrNotDir for a file and
 // ErrNotFound for a path that is not in the tree.
+//
+// With compact directories on, expanding also expands the single-child folder
+// chain below it (Fresh's expand_with_chain), so the whole chain still renders as
+// one row.
 func (t *Tree) Expand(path string) error {
 	n, err := t.find(path)
 	if err != nil {
@@ -258,7 +373,42 @@ func (t *Tree) Expand(path string) error {
 	if !n.isDir {
 		return ErrNotDir
 	}
-	return t.expand(n)
+	return t.expandWithChain(n)
+}
+
+// expandWithChain expands n and, with compact directories on, walks down the
+// single visible folder children, expanding each, so the chain reveals on one
+// row. It stops at a folder with zero or several visible children, or a visible
+// child that is not a folder.
+func (t *Tree) expandWithChain(n *node) error {
+	if err := t.expand(n); err != nil {
+		return err
+	}
+	if !t.compact {
+		return nil
+	}
+	for {
+		next := t.singleVisibleDirChild(n)
+		if next == nil {
+			t.promoteSelection()
+			return nil
+		}
+		if err := t.expand(next); err != nil {
+			return err
+		}
+		n = next
+	}
+}
+
+// promoteSelection moves the selection onto its row's anchor when compact mode
+// folded the selected folder into a deeper row, so Selected always finds a row.
+func (t *Tree) promoteSelection() {
+	if !t.compact {
+		return
+	}
+	if n, ok := t.byPath[t.selected]; ok {
+		t.selected = t.anchor(n).path
+	}
 }
 
 // Collapse closes the directory at path. Its children stay loaded. Errors are
@@ -275,7 +425,9 @@ func (t *Tree) Collapse(path string) error {
 	return nil
 }
 
-// Toggle expands a collapsed directory or collapses an expanded one.
+// Toggle expands a collapsed directory or collapses an expanded one. Expanding
+// follows the compact-directory chain like Expand; collapsing closes the row's
+// own folder only.
 func (t *Tree) Toggle(path string) error {
 	n, err := t.find(path)
 	if err != nil {
@@ -288,7 +440,7 @@ func (t *Tree) Toggle(path string) error {
 		n.expanded = false
 		return nil
 	}
-	return t.expand(n)
+	return t.expandWithChain(n)
 }
 
 // Reload re-reads every loaded directory from disk, including the .gitignore

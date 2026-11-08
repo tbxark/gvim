@@ -12,6 +12,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -612,11 +613,19 @@ func TestDebugHighlightsShowsRangesInTheStatusRow(t *testing.T) {
 	}
 }
 
-func TestFileExplorerSideSaysItIsNotBuiltYet(t *testing.T) {
-	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 8)
+func TestFileExplorerSideToggles(t *testing.T) {
+	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(3), 60, 8)
+	m.explorerOpen = true
 	runAction(t, m, "toggle_file_explorer_side")
-	if !strings.Contains(m.notice, "not built in this port") {
-		t.Errorf("notice %q does not say the explorer side is not built", m.notice)
+	if m.explorerSide != explorer.SideRight || m.notice != "File explorer moved to the right" {
+		t.Errorf("after the toggle side %v notice %q, want right and the Fresh message", m.explorerSide, m.notice)
+	}
+	if l := m.layout(); !l.ExRight || l.ExX != 60-l.Ex || l.EditorX != 0 {
+		t.Errorf("right-side layout ex %d at %d editor %d, want the column on the right", l.Ex, l.ExX, l.EditorX)
+	}
+	runAction(t, m, "toggle_file_explorer_side")
+	if m.explorerSide != explorer.SideLeft || m.notice != "File explorer moved to the left" {
+		t.Errorf("after the second toggle side %v notice %q", m.explorerSide, m.notice)
 	}
 }
 

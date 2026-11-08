@@ -141,6 +141,10 @@ type Config struct {
 	ExplorerShowHidden     bool   // list dot-files in the explorer
 	ExplorerShowIgnored    bool   // list files matched by .gitignore in the explorer
 
+	// FileExplorer is the file_explorer section: width, side and the navigation
+	// behaviour options (see config/fileexplorer.go). Fresh's defaults.
+	FileExplorer FileExplorerConfig
+
 	// The view keys set the starting state of the display toggles. The
 	// defaults keep the layout gvim had before they existed.
 	ShowTabBar              bool   // show the tab strip row, default true
@@ -158,6 +162,10 @@ type Config struct {
 	CursorStyle             string // "block", "bar" or "underline"; default "block"
 	UIIcons                 string // "auto", "plain" or "nerd" glyphs for interface controls; default "auto"
 	UIIconsFont             string // font family the terminal uses, for ui_icons "auto"; default empty
+
+	// Terminal is the terminal section: the shell override, close_on_exit,
+	// scrollback_lines and mouse_forwarding (see terminal.go).
+	Terminal TerminalConfig
 
 	// PluginTimeout is the longest one plugin call may run, default 500ms. The
 	// project layer may only lower it (see lowerPluginTimeout).
@@ -239,6 +247,8 @@ func Defaults() Config {
 
 		PluginTimeout: DefaultPluginTimeout,
 
+		Terminal:      DefaultTerminalOptions(),
+		FileExplorer:  DefaultFileExplorer(),
 		EditorOptions: defaultEditorOptions(),
 	}
 }
@@ -454,7 +464,15 @@ func applyFile(cfg *Config, path string, l layer) []Diagnostic {
 	if err := json.Unmarshal(standard, &keys); err != nil {
 		return []Diagnostic{{Path: path, Message: "top level must be a JSON object: " + err.Error()}}
 	}
+	return applyObject(cfg, keys, path, l)
+}
 
+// applyObject applies the top-level keys of one config layer to cfg. It is the
+// one place a layer's keys become settings, shared by applyFile and by
+// ValidateEdits, so the Settings UI validates a value through exactly the same
+// tables and project-layer rules as a real load. path is the file the keys came
+// from, for the source notes and the diagnostics; it may be empty.
+func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l layer) []Diagnostic {
 	var diags []Diagnostic
 	// The flat keys are applied first and the nested sections after them, so that
 	// when a file sets both spellings of an option the nested one wins.
@@ -481,6 +499,10 @@ func applyFile(cfg *Config, path string, l layer) []Diagnostic {
 			// A repository must not decide what the user's keys do, so the project layer
 			// can neither switch the keymap nor bind a key. Say so instead of ignoring it.
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set " + key + ": it changes what keys do, so set it in the user config"})
+			continue
+		case key == "terminal":
+			diags = append(diags, cfg.setTerminal(keys[key], l, path)...)
+			cfg.note(key, path)
 			continue
 		case key == "lsp" && l == layerProject:
 			// A repository must not choose the program gvim starts, so the project layer
@@ -618,6 +640,12 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return err
 		}
 		c.Formatters = formatters
+	case "terminal":
+		// The flat setters are the user layer: a project file never comes here,
+		// see applyFile, which checks the terminal object against its layer.
+		if diags := c.setTerminal(raw, layerUser, ""); len(diags) > 0 {
+			return errors.New(diags[0].Message)
+		}
 	default:
 		if slices.Contains(fileOnlyKeys, key) {
 			return nil // a Fresh key that gvim has no use for

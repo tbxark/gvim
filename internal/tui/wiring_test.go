@@ -13,6 +13,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/browser"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/grid"
@@ -417,8 +418,8 @@ func TestExplorerMessagesDriveTheRoot(t *testing.T) {
 		t.Fatal("CloseMsg did not hide the panel")
 	}
 	m.Update(expanel.ResizeMsg{Width: 30})
-	if m.explorerOverride != 30 {
-		t.Errorf("explorerOverride = %d after ResizeMsg, want 30", m.explorerOverride)
+	if m.explorerWidth.Mode != explorer.WidthColumns || m.explorerWidth.Value != 30 {
+		t.Errorf("explorer width = %+v after ResizeMsg, want 30 columns", m.explorerWidth)
 	}
 	m.Update(expanel.ErrorMsg{Err: errors.New("boom")})
 	if m.notice != "boom" {

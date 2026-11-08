@@ -162,6 +162,46 @@ func TestIndexCloseStopsEnumeration(t *testing.T) {
 	}
 }
 
+// TestEnumerateAllIncludesHiddenAndIgnored: the Ignored scope of Live Grep uses
+// EnumerateAll to see the files the plain listing leaves out, and the zero options keep
+// the plain listing.
+func TestEnumerateAllIncludesHiddenAndIgnored(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		".gitignore":     "ignored.txt\n",
+		"visible.go":     "",
+		".hidden.go":     "",
+		"ignored.txt":    "",
+		"sub/visible.md": "",
+	})
+	collectAll := func(opts Options) []string {
+		t.Helper()
+		var got []string
+		err := EnumerateAll(context.Background(), root, opts, func(rel string) bool {
+			got = append(got, rel)
+			return true
+		})
+		if err != nil {
+			t.Fatalf("EnumerateAll(%+v): %v", opts, err)
+		}
+		slices.Sort(got)
+		return got
+	}
+	plain := collectAll(Options{})
+	if slices.Contains(plain, ".hidden.go") || slices.Contains(plain, "ignored.txt") {
+		t.Fatalf("the plain listing includes hidden or ignored files: %v", plain)
+	}
+	if !slices.Contains(plain, "visible.go") || !slices.Contains(plain, "sub/visible.md") {
+		t.Fatalf("the plain listing misses a visible file: %v", plain)
+	}
+	all := collectAll(Options{ShowHidden: true, ShowIgnored: true})
+	for _, want := range []string{".hidden.go", "ignored.txt", ".gitignore", "visible.go"} {
+		if !slices.Contains(all, want) {
+			t.Errorf("the hidden-and-ignored listing misses %q: %v", want, all)
+		}
+	}
+}
+
 func TestIndexCapsAtMaxFiles(t *testing.T) {
 	var x Index
 	for i := range MaxFiles {

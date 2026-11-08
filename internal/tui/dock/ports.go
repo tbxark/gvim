@@ -14,6 +14,8 @@
 package dock
 
 import (
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/internal/terminal"
 )
 
@@ -35,6 +37,25 @@ type Terminal interface {
 	Done() <-chan struct{}
 	// Close ends the shell and releases its PTY.
 	Close() error
+
+	// Scrollback returns a bounded copy of the main screen's history, starting at
+	// row from, and the total number of rows it holds. ScrollbackLen is that
+	// total alone.
+	Scrollback(from, count int) (lines []terminal.Line, total int)
+	ScrollbackLen() int
+	// SearchScrollback looks for query in the history and returns the matching
+	// row indexes, oldest first.
+	SearchScrollback(query string, limit int) (matches []int, total int)
+	// WorkingDirectory is the directory the shell reported with OSC 7, or "".
+	WorkingDirectory() string
+	// AltScreen reports whether the shell is on the alternate screen.
+	AltScreen() bool
+	// MouseReporting reports the shell's mouse modes: reporting when it asked
+	// for mouse events, drag when it asked for motion with a button held, and
+	// allMotion when it asked for buttonless motion too.
+	MouseReporting() (reporting, drag, allMotion bool)
+	// SendMouse forwards one mouse event to the shell.
+	SendMouse(ev terminal.MouseEvent)
 }
 
 // TerminalStarter starts a shell in dir with the given size. A zero size is the
@@ -49,11 +70,34 @@ type ClipboardReader interface {
 	Read() (string, error)
 }
 
+// Values of Effects.MouseForwarding, Fresh's names for when the mouse reaches the
+// program inside a terminal.
+const (
+	MouseForwardRequested = "requested"
+	MouseForwardAltScreen = "alt_screen"
+)
+
+// Effects are the terminal section settings the dock applies itself, rather than
+// through the starter: what happens when the shell exits, when the mouse reaches
+// the shell, and how much history it keeps.
+type Effects struct {
+	// CloseOnExit hides the dock when its shell exits instead of keeping the last
+	// screen as read-only scrollback (terminal.close_on_exit).
+	CloseOnExit bool
+	// MouseForwarding is terminal.mouse_forwarding: "requested" (or "") sends the
+	// mouse to the shell only when the shell asked for it; "alt_screen" sends it
+	// to every alternate-screen program.
+	MouseForwarding string
+}
+
 // Ports are the terminal dock's ports. A nil Starter means the dock cannot start a
 // shell, and a nil Clipboard means terminal_paste does nothing.
 type Ports struct {
 	Starter   TerminalStarter
 	Clipboard ClipboardReader
+	// Effects are the terminal section settings the dock applies. The zero value
+	// keeps the dock after the shell exits and forwards the mouse on request.
+	Effects Effects
 }
 
 // Host is what the panel needs from the root model: where a shell starts, how a
@@ -70,7 +114,17 @@ type Host struct {
 	// Focus gives the dock the keyboard focus, taking it from the explorer and the
 	// tab strip. It is called only while a shell runs.
 	Focus func()
+	// Copy puts text on the system clipboard, through the same path the editor's
+	// copy uses. It returns the command that does the write. Scrollback mode's y
+	// and Ctrl+C use it. Nil leaves the copy without a clipboard.
+	Copy func(text string) tea.Cmd
+	// Stat reports whether path exists, for the Ctrl+Click links of the terminal
+	// output. Nil means os.Stat; tests replace it so they need no files.
+	Stat func(path string) bool
 }
+
+// SetEffects sets the terminal settings the dock applies itself.
+func (p *Panel) SetEffects(e Effects) { p.effects = e }
 
 // SetPorts gives the panel its ports. It is safe to call before the panel is used.
 func (p *Panel) SetPorts(ports Ports) {

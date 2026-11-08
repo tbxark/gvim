@@ -43,6 +43,15 @@ type fakeTerm struct {
 	appCursor bool // the shell's DECCKM mode, reported by AppCursorKeys
 	updates   chan struct{}
 	done      chan struct{}
+
+	// The scrollback, working directory and mouse state the dock reads.
+	history   []string              // the history rows, oldest first
+	cwd       string                // the OSC 7 working directory
+	alt       bool                  // the alternate screen
+	mouse     bool                  // the shell asked for mouse reporting
+	drag      bool                  // the shell asked for drag motion (1002)
+	allMotion bool                  // the shell asked for all motion (1003)
+	mice      []terminal.MouseEvent // the forwarded mouse events
 }
 
 func newFakeTerm() *fakeTerm {
@@ -78,6 +87,52 @@ func (f *fakeTerm) Updates() <-chan struct{} { return f.updates }
 func (f *fakeTerm) Done() <-chan struct{}    { return f.done }
 func (f *fakeTerm) AppCursorKeys() bool      { return f.appCursor }
 func (f *fakeTerm) Close() error             { f.closed = true; return nil }
+
+// Scrollback returns the history window the dock asks for.
+func (f *fakeTerm) Scrollback(from, count int) (lines []terminal.Line, total int) {
+	total = len(f.history)
+	from = min(max(from, 0), total)
+	count = min(max(count, 0), total-from)
+	for _, text := range f.history[from : from+count] {
+		lines = append(lines, fakeLine(text))
+	}
+	return lines, total
+}
+
+func (f *fakeTerm) ScrollbackLen() int { return len(f.history) }
+
+// SearchScrollback finds the history rows that hold query, case-insensitively.
+func (f *fakeTerm) SearchScrollback(query string, limit int) (matches []int, total int) {
+	query = strings.ToLower(query)
+	for i, text := range f.history {
+		if strings.Contains(strings.ToLower(text), query) {
+			matches = append(matches, i)
+			if len(matches) >= limit {
+				break
+			}
+		}
+	}
+	return matches, len(f.history)
+}
+
+func (f *fakeTerm) WorkingDirectory() string { return f.cwd }
+func (f *fakeTerm) AltScreen() bool          { return f.alt }
+func (f *fakeTerm) MouseReporting() (reporting, drag, allMotion bool) {
+	return f.mouse, f.drag, f.allMotion
+}
+func (f *fakeTerm) SendMouse(ev terminal.MouseEvent) { f.mice = append(f.mice, ev) }
+
+// fakeLine is a history row of width 80 cells.
+func fakeLine(text string) terminal.Line {
+	cells := make([]terminal.Cell, 80)
+	for i, r := range []rune(text) {
+		if i >= len(cells) {
+			break
+		}
+		cells[i] = terminal.Cell{Rune: r}
+	}
+	return terminal.Line{Cells: cells}
+}
 
 // fakeStarter implements TerminalStarter. It hands out term, or fails with err, and
 // it records the directory and size of each start.
@@ -118,6 +173,7 @@ func dockKeys() fakeKeymap {
 	k["normal|o|alt"] = Command{Action: "toggle_dock_focus"}
 	k["terminal|o|alt"] = Command{Action: "toggle_dock_focus"}
 	k["terminal| |ctrl"] = Command{Action: "terminal_escape"}
+	k["terminal|]|ctrl"] = Command{Action: "terminal_escape"}
 	k["terminal|v|ctrl"] = Command{Action: "terminal_paste"}
 	k["terminal|F9|"] = Command{Action: "toggle_keyboard_capture"}
 	k["terminal|\\|ctrl"] = Command{Action: "toggle_keyboard_capture"}
@@ -338,7 +394,13 @@ func TestDockKeysRouteByFocus(t *testing.T) {
 			writes: []string{"\x13"},
 		},
 		{
-			name:   "Ctrl+Space gives the focus to the editor",
+			name:   "Ctrl+] gives the focus to the editor",
+			setup:  []string{"open_terminal_in_dock"},
+			keys:   []tea.KeyPressMsg{{Code: ']', Mod: tea.ModCtrl}, typed("a")},
+			editor: []editor.Action{"insert_char"},
+		},
+		{
+			name:   "Ctrl+Space with no history falls back to terminal_escape",
 			setup:  []string{"open_terminal_in_dock"},
 			keys:   []tea.KeyPressMsg{{Code: tea.KeySpace, Mod: tea.ModCtrl}, typed("a")},
 			editor: []editor.Action{"insert_char"},

@@ -603,21 +603,23 @@ func (c *Contents) clampScroll() {
 	}
 }
 
-// Draw paints the section's body into its place in the column: the walls, the
-// visible rows and the selection. A section with no rows paints nothing.
-func (c *Contents) Draw(dst *grid.Grid, width int, sec Section, ic icons.Mode, st style.Styles) {
+// Draw paints the section's body into its place in the column, which starts at
+// column x and is width cells wide: the walls, the visible rows and the
+// selection. A section with no rows paints nothing.
+func (c *Contents) Draw(dst *grid.Grid, x, width int, sec Section, ic icons.Mode, st style.Styles) {
 	rows := sec.Rows()
 	c.viewRows = rows
 	if width < 2 || rows <= 0 {
 		return
 	}
+	right := x + width
 	body := style.Cell(st.Explorer)
 	sel := style.Cell(st.Selection)
 	accent := style.Cell(st.Accent).BG
 	for y := sec.BodyTop; y <= sec.BodyBottom; y++ {
-		dst.Fill(0, width, y, body)
-		dst.Set(0, y, "│", body)
-		dst.Set(width-1, y, "│", body)
+		dst.Fill(x, right, y, body)
+		dst.Set(x, y, "│", body)
+		dst.Set(right-1, y, "│", body)
 	}
 	c.clampScroll()
 	if len(c.entries) == 0 {
@@ -629,10 +631,10 @@ func (c *Contents) Draw(dst *grid.Grid, width int, sec Section, ic icons.Mode, s
 		if faint {
 			style.Faint = true
 		}
-		dst.Put(1+space.PadX, sec.BodyTop, width-space.PadX, msg, style)
+		dst.Put(x+1+space.PadX, sec.BodyTop, right-space.PadX, msg, style)
 		return
 	}
-	end := width - 1 - space.PadX
+	end := right - 1 - space.PadX
 	for off := 0; off < rows; off++ {
 		pos := c.scroll + off
 		if pos >= len(c.entries) {
@@ -644,14 +646,14 @@ func (c *Contents) Draw(dst *grid.Grid, width int, sec Section, ic icons.Mode, s
 		selected := pos == c.selected
 		if selected {
 			rowStyle = sel
-			dst.Fill(1, width-1, y, rowStyle)
+			dst.Fill(x+1, right-1, y, rowStyle)
 		}
 		if selected && c.focus {
 			bar := rowStyle
 			bar.FG = accent
-			dst.Set(1, y, "▌", bar)
+			dst.Set(x+1, y, "▌", bar)
 		}
-		glyphX := 1 + space.PadX + 2*e.depth
+		glyphX := x + 1 + space.PadX + 2*e.depth
 		nameX := glyphX + 2
 		glyph := " "
 		if e.children {

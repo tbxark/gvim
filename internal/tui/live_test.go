@@ -32,14 +32,16 @@ func (e *lineEditor) GotoLine(line, col int) error {
 }
 
 // grepPort is a fake live grep that answers every query with hits, and records the
-// queries it was asked.
+// requests it was asked.
 type grepPort struct {
 	hits    []palette.GrepHit
 	queries []string
+	reqs    []palette.GrepRequest
 }
 
-func (g *grepPort) Search(root string, files []string, query string, limit int) ([]palette.GrepHit, error) {
-	g.queries = append(g.queries, query)
+func (g *grepPort) Search(req palette.GrepRequest) ([]palette.GrepHit, error) {
+	g.queries = append(g.queries, req.Text)
+	g.reqs = append(g.reqs, req)
 	return g.hits, nil
 }
 
@@ -47,6 +49,13 @@ func (g *grepPort) Search(root string, files []string, query string, limit int) 
 func newLiveModel(t *testing.T, g palette.Grepper) (*Model, *lineEditor) {
 	t.Helper()
 	ed := &lineEditor{fakeEditor: newFakeEditor("x")}
+	return newLiveModelOver(t, g, ed), ed
+}
+
+// newLiveModelOver returns a model over ed with the live grep port g, for a test that
+// adds optional editor ports to the fake.
+func newLiveModelOver(t *testing.T, g palette.Grepper, ed EditorState) *Model {
+	t.Helper()
 	m := New(Deps{
 		Editor:   ed,
 		Explorer: newFakeTree(1),
@@ -56,7 +65,7 @@ func newLiveModel(t *testing.T, g palette.Grepper) (*Model, *lineEditor) {
 		Root:     RootPorts{Grep: g},
 	})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	return m, ed
+	return m
 }
 
 // typeInto sends the text to the top overlay, and feeds every command it starts
@@ -91,6 +100,17 @@ func TestOpenLiveGrepThenChooseMatchOpensTheLine(t *testing.T) {
 	typeInto(m, "todo")
 	if !slices.Contains(g.queries, "todo") {
 		t.Fatalf("searches = %v, want todo", g.queries)
+	}
+	// The request carries Fresh's defaults: regex on, word off, case folded, files on.
+	req := g.reqs[len(g.reqs)-1]
+	if req.Root != "/ws" || req.Text != "todo" {
+		t.Fatalf("request root %q text %q, want /ws and todo", req.Root, req.Text)
+	}
+	if !req.Query.Regex || req.Query.WholeWord || req.Query.CaseSensitive {
+		t.Fatalf("request modes = %+v, want Fresh's defaults", req.Query)
+	}
+	if !req.Sources.Files || req.Sources.Buffers || req.Sources.Ignored {
+		t.Fatalf("request scopes = %+v, want files on only", req.Sources)
 	}
 	feed(m, runKey(m, special(tea.KeyEnter)))
 	if len(ed.opened) != 1 || ed.opened[0] != "/ws/src/a.go" {
@@ -152,9 +172,68 @@ func TestLiveGrepSearchErrorIsNotAFailure(t *testing.T) {
 	}
 }
 
+// bufferEditor is a lineEditor that also snapshots its buffers, as the app adapter does
+// for Live Grep's Buffers scope.
+type bufferEditor struct {
+	*lineEditor
+	texts []BufferText
+}
+
+func (e *bufferEditor) BufferTexts() ([]BufferText, error) { return e.texts, nil }
+
+// TestLiveGrepBuffersScope: the root snapshots the open buffers when the editor offers
+// them, the Buffers toggle sends them, and Enter on a buffer hit activates its tab and
+// moves the caret instead of opening a file.
+func TestLiveGrepBuffersScope(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{hits: []palette.GrepHit{{
+		Rel: "a.go", Line: 2, Col: 1, Text: "todo", Source: palette.GrepBuffers, Index: 0,
+	}}}
+	ed := &bufferEditor{
+		lineEditor: &lineEditor{fakeEditor: newFakeEditor("x")},
+		texts:      []BufferText{{Name: "a.go", Path: "/ws/a.go", Text: "one\ntodo\n"}},
+	}
+	m := newLiveModelOver(t, g, ed)
+	must(t, m.Run("open_live_grep"))
+	typeInto(m, "todo")
+	// The snapshot is taken at open; the Buffers scope starts off, so it is not sent.
+	req := g.reqs[len(g.reqs)-1]
+	if req.Sources.Buffers || req.Buffers != nil {
+		t.Fatalf("the Buffers scope starts on: %+v, buffers %+v", req.Sources, req.Buffers)
+	}
+	// Alt+U turns the scope on and searches again with the snapshot.
+	feed(m, runKey(m, altKey('u')))
+	req = g.reqs[len(g.reqs)-1]
+	if !req.Sources.Buffers || len(req.Buffers) != 1 || req.Buffers[0].Name != "a.go" {
+		t.Fatalf("the Buffers scope did not turn on: %+v buffers %+v", req.Sources, req.Buffers)
+	}
+	// Enter on the buffer hit activates its tab and moves the caret there.
+	feed(m, runKey(m, special(tea.KeyEnter)))
+	if len(ed.opened) != 0 {
+		t.Fatalf("a buffer hit opened a file: %v", ed.opened)
+	}
+	if got := ed.gotos[len(ed.gotos)-1]; got != [2]int{2, 1} {
+		t.Fatalf("moved to %v, want line 2 column 1", ed.gotos)
+	}
+}
+
+// TestLiveGrepStartsFromTheSearchConfig: the case mode starts from
+// editor.search.case_sensitive.
+func TestLiveGrepStartsFromTheSearchConfig(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{}
+	m, _ := newLiveModel(t, g)
+	m.view.opts.Search.CaseSensitive = true
+	must(t, m.Run("open_live_grep"))
+	typeInto(m, "x")
+	if req := g.reqs[len(g.reqs)-1]; !req.Query.CaseSensitive {
+		t.Fatalf("case mode = %+v, want on from the config", req.Query)
+	}
+}
+
 // failingGrep fails every search with err.
 type failingGrep struct{ err error }
 
-func (f failingGrep) Search(string, []string, string, int) ([]palette.GrepHit, error) {
+func (f failingGrep) Search(palette.GrepRequest) ([]palette.GrepHit, error) {
 	return nil, f.err
 }

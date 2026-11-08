@@ -10,8 +10,16 @@
 // ErrUnsupported there.
 //
 // Screen exposes the rune and the basic character style of each cell, and the
-// cursor position and visibility. It does not expose scrollback, cell widths, or
-// grapheme clusters beyond their first rune.
+// cursor position and visibility. It does not expose cell widths or grapheme
+// clusters beyond their first rune.
+//
+// The session also exposes what a terminal UI needs around the screen:
+// Scrollback returns a bounded snapshot of the main screen's history, and
+// ScrollbackLen its size; WorkingDirectory is the directory the child reported
+// with OSC 7; AltScreen and MouseReporting are the modes the child turned on;
+// SendMouse forwards a mouse event in the encoding the child asked for; and
+// SearchScrollback finds a plain substring in the history. The alternate screen
+// has no history.
 //
 // Updates signals each screen change, so a UI can repaint when the child prints.
 // Paste sends text the way the child expects a paste, with bracketed-paste
@@ -50,7 +58,15 @@ type Options struct {
 	Env []string
 	// Cols and Rows are the initial size. Zero or negative means 80x24.
 	Cols, Rows int
+	// ScrollbackLines is how many lines of history the emulator keeps for the
+	// main screen. Zero means terminal.DefaultScrollbackLines; a negative value
+	// disables the scrollback.
+	ScrollbackLines int
 }
+
+// DefaultScrollbackLines is the history a session keeps when Options does not
+// say: the same 10 000 lines x/vt keeps by default.
+const DefaultScrollbackLines = 10000
 
 // Start runs opts.Shell with opts.Args in a new pseudo-terminal.
 //
@@ -87,7 +103,7 @@ func Start(ctx context.Context, opts Options) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("term: start %s: %w", shell, err)
 	}
-	s := newSession(ptmx, cmd, cols, rows)
+	s := newSession(ptmx, cmd, cols, rows, opts.ScrollbackLines)
 	go s.closeOnCancel(ctx)
 	return s, nil
 }

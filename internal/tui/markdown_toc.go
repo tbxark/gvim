@@ -536,7 +536,7 @@ func (m *Model) paintSidebar(g *grid.Grid, l layout) {
 			Several:   len(l.Sections) > 1,
 			Collapsed: sec.Collapsed,
 		}
-		sidebar.PaintHeader(g, l.Ex, sec.HeaderY, sidebar.HeaderFor(l.Ex, m.view.icons, spec), m.styles)
+		sidebar.PaintHeader(g, l.ExX, l.Ex, sec.HeaderY, sidebar.HeaderFor(l.Ex, m.view.icons, spec), m.styles)
 		if sec.Collapsed {
 			continue
 		}
@@ -544,7 +544,7 @@ func (m *Model) paintSidebar(g *grid.Grid, l layout) {
 		case sidebar.KindExplorer:
 			m.explorerPanel.DrawBody(g, m.explorerGeometry(l))
 		case sidebar.KindContents:
-			m.contents.Draw(g, l.Ex, sec, m.view.icons, m.styles)
+			m.contents.Draw(g, l.ExX, l.Ex, sec, m.view.icons, m.styles)
 		}
 	}
 	last := l.Sections[len(l.Sections)-1]
@@ -552,6 +552,6 @@ func (m *Model) paintSidebar(g *grid.Grid, l layout) {
 	if last.Rows() > 0 {
 		ground = last.BodyBottom + 1
 	}
-	sidebar.PaintGround(g, l.Ex, ground, l.ExBottom-1, m.styles)
-	sidebar.PaintBottomBorder(g, l.Ex, l.ExBottom, m.styles)
+	sidebar.PaintGround(g, l.ExX, l.Ex, ground, l.ExBottom-1, m.styles)
+	sidebar.PaintBottomBorder(g, l.ExX, l.Ex, l.ExBottom, m.styles)
 }

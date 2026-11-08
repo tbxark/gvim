@@ -274,7 +274,7 @@ func TestParseSettings(t *testing.T) {
 func drawContents(c *Contents, focus bool) *grid.Grid {
 	c.SetFocus(focus)
 	g := grid.New(20, 8)
-	c.Draw(g, 20, Section{Kind: KindContents, Index: 1, HeaderY: 1, BodyTop: 2, BodyBottom: 5}, icons.Plain, style.Styles{})
+	c.Draw(g, 0, 20, Section{Kind: KindContents, Index: 1, HeaderY: 1, BodyTop: 2, BodyBottom: 5}, icons.Plain, style.Styles{})
 	return g
 }
 
@@ -323,7 +323,7 @@ func TestContentsDrawSelectionWithoutFocus(t *testing.T) {
 	c2 := scanContents(t, DefaultSettings(), "# Root\n## Child")
 	c2.Follow(0, 0, true)
 	g2 := grid.New(20, 8)
-	c2.Draw(g2, 20, Section{Kind: KindContents, HeaderY: 1, BodyTop: 2, BodyBottom: 5}, icons.Plain, styles)
+	c2.Draw(g2, 0, 20, Section{Kind: KindContents, HeaderY: 1, BodyTop: 2, BodyBottom: 5}, icons.Plain, styles)
 	if got, want := g2.At(5, 2).Style.BG, style.Cell(styles.Selection).BG; got != want {
 		t.Errorf("selected row BG = %v, want the selection colour %v", got, want)
 	}

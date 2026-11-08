@@ -20,6 +20,14 @@ checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
   the Markdown outline's behaviour and its `plugins.markdown_toc` settings.
 - `docs/trust.md` is the design record for workspace trust: the levels, the decision
   store, Fresh's open-time policy, and which restrictions gvim enforces.
+- `docs/settings.md` is the design record for the editable Settings page: the config
+  schema, the User/Project layers, the JSONC write path, and which settings apply live
+  versus at restart.
+- `docs/terminal.md` is the design record for the terminal dock: the live and
+  read-only scrollback views and their keys, the `terminal` config section (including
+  the gvim-only `scrollback_lines`), OSC 7 working-directory tracking, Ctrl+Click
+  paths, mouse forwarding, `close_on_exit`, and the deferred list (drag-select,
+  reflow/persistence, agent resume, Windows ConPTY, terminal tabs).
 - `docs/parity.md` is the live parity record for the "full Fresh feature parity" goal:
   the by-area matrix with evidence, the deliberate differences, and the ranked backlog of
   the remaining rounds. It is the map for the next rounds; update the affected row when a

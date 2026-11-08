@@ -14,6 +14,7 @@ import (
 // views show. The zero value has no settings and no switch.
 type utilities struct {
 	settings     Settings
+	settingsPort SettingsPort
 	switchKeymap func(name string) (Keymap, error)
 	events       eventRing
 }

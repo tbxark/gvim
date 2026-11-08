@@ -250,3 +250,38 @@ widget state and a few painted cells.
 4. Add it to `sidebarSections`/`sectionFocused`/`focusSection` if it takes the
    keyboard, and to `stageContents`-style stages if F6 should reach it.
 5. Record it here and in `docs/ui.md`'s component map.
+
+## 9. Explorer behaviours
+
+The file explorer honours Fresh's `file_explorer` options (verified against
+`refs/fresh/crates/fresh-editor-core/src/config.rs` and
+`refs/fresh/docs/features/file-explorer.md`). gvim's config defaults are Fresh's.
+
+| Key | Default | gvim |
+|---|---|---|
+| `file_explorer.width` | `"30%"` | a percentage of the frame or a column count; a plain number is a percentage, a float in 0..1 is the legacy fraction. The frame clamps the result to [16, 60] and keeps 20 columns for the editor on a narrow frame. A grip drag keeps the configured form: a percentage stays a percentage (the nearest of the bracketing values), a column count is exact. |
+| `file_explorer.side` | `"left"` | "left" or "right". **Move File Explorer to Other Side** (`toggle_file_explorer_side`) flips it for the session and the status row says "File explorer moved to the left/right". Fresh persists the choice to the user config; gvim has no config writer yet, so the toggle is session-only (the config file still decides the next launch). |
+| `file_explorer.follow_active_buffer` | false | reveal and select the active file in the tree when tabs change (or a preview tab is replaced). Off by default. It does nothing while the panel is hidden, while the keyboard is in the tree, or for a file outside the project, as Fresh's `follow_path_in_explorer`. |
+| `file_explorer.auto_open_on_last_buffer_close` | true | close the last tab and the explorer opens and takes the keyboard; opening a buffer then gives the keyboard back to the editor (the panel stays visible). Fresh's behaviour: it does not close the panel when a buffer opens. |
+| `file_explorer.compact_directories` | true | a folder that is expanded and whose only visible child is a folder has no row: the chain shares the deepest folder's row, drawn as `src/main/java` at the folded ancestors' depth. Expanding a folder also expands the single-child chain below it, so the chain stays one row; collapsing closes that row's own folder only. |
+| sticky parents | always on | the run's first row's ancestors are pinned above it, up to 7 of them, never taking the whole body. The band is drawn on the gutter ground (faint when the theme has none), so it reads as pinned above the tree; a press on a pinned row selects that row. |
+| `respect_gitignore`, `custom_ignore_patterns`, `preview_tabs`, `tree_indicator_collapsed`/"expanded" | — | accepted and ignored for now (documented gaps): gvim's explorer always respects .gitignore through its own reader and has its own preview-tab click behaviour and icon glyphs. |
+
+**Reveal.** Showing the panel or focusing it (Ctrl+E) is the explicit "show me
+where I am": the tree expands to the active file and selects it, and the status row
+says why when it cannot (Fresh's strings): "File explorer focused; this buffer has
+no file to reveal", or "File explorer focused; <name> is outside the project". A
+follow is silent. Fresh has no palette "Reveal in File Explorer" command, so gvim
+does not add one; the reveal happens on the toggle, the focus and the follow.
+
+**Compact rows and clicks.** A compact row is one row: the indicator toggles the
+deepest folder the row shows, a single press on a file previews it and a double
+press opens it permanently, as any other row. Fresh also lets a press name one
+segment of the chain (so it can be collapsed separately) and opens a context menu
+per segment; gvim defers that nuance and documents it here.
+
+**Side and width geometry.** The column keeps its own width against either frame
+edge; the editor area (the tab strip, the welcome screen, the panes and the notice
+band) is the rest of the frame, and the grip is the border facing the editor. The
+zero-value `frame.Input` (no configured width, left side) is the layout gvim had
+before these options existed, so tests and callers that set nothing are unchanged.

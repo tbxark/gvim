@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tbxark/gvim/explorer"
+)
 
 func TestHitMenuLabels(t *testing.T) {
 	l := layoutFor(100, 30, layoutInput{})
@@ -37,7 +41,7 @@ func TestHitTabsCloseAndNew(t *testing.T) {
 }
 
 func TestHitExplorerTitleButtons(t *testing.T) {
-	in := layoutInput{ExplorerOpen: true, ExplorerOverride: 30}
+	in := layoutInput{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(30)}
 	l := layoutFor(100, 30, in)
 	if got := l.Hit(l.ExReloadX, l.ExTitleY); got.Kind != hitExplorerTitleReload {
 		t.Errorf("reload button = %+v", got)

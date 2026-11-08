@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/theme"
@@ -31,8 +32,8 @@ func TestIconModeKeepsEveryButtonInPlace(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}
 	for _, w := range []int{20, 30, 60, 100} {
 		for override := 15; override <= 40; override++ {
-			plain := layoutFor(w, 30, layoutInput{Tabs: tabs, ExplorerOpen: true, ExplorerOverride: override})
-			nerd := layoutFor(w, 30, layoutInput{Tabs: tabs, ExplorerOpen: true, ExplorerOverride: override, IconMode: icons.Nerd})
+			plain := layoutFor(w, 30, layoutInput{Tabs: tabs, ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(override)})
+			nerd := layoutFor(w, 30, layoutInput{Tabs: tabs, ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(override), IconMode: icons.Nerd})
 			if plain.ExReloadX != nerd.ExReloadX || plain.ExCloseX != nerd.ExCloseX {
 				t.Fatalf("w=%d ex=%d: buttons at %d,%d (nerd) and %d,%d (plain)",
 					w, plain.Ex, nerd.ExReloadX, nerd.ExCloseX, plain.ExReloadX, plain.ExCloseX)
@@ -54,7 +55,7 @@ func TestNarrowExplorerHidesButtonsInNerdMode(t *testing.T) {
 	t.Parallel()
 	// The reload button needs 17 columns and the close button 19, as in plain mode.
 	for _, tt := range []struct{ ex, reload, closeX int }{{16, -1, -1}, {17, 16, -1}, {18, 16, -1}, {19, 16, 18}, {30, 25, 27}} {
-		l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, ExplorerOverride: tt.ex, IconMode: icons.Nerd})
+		l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(tt.ex), IconMode: icons.Nerd})
 		if l.Ex != tt.ex || l.ExReloadX != tt.reload || l.ExCloseX != tt.closeX {
 			t.Errorf("E=%d: buttons at %d and %d, want %d and %d", tt.ex, l.ExReloadX, l.ExCloseX, tt.reload, tt.closeX)
 		}

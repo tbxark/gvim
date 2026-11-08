@@ -117,6 +117,7 @@ func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
 			Regex:         cfg.Search.Regex,
 			ConfirmEach:   cfg.Search.ConfirmEach,
 		},
+		Explorer: explorerOptions(cfg.FileExplorer),
 		StatusBar: tui.StatusBarOptions{
 			Left:      slices.Clone(cfg.StatusBar.Left),
 			Right:     slices.Clone(cfg.StatusBar.Right),

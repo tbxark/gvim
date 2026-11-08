@@ -51,9 +51,12 @@ type GitStatus interface {
 type RootPorts struct {
 	// Projects backs Switch Project and Open Folder. Nil shows a notice.
 	Projects Projects
-	// Grep searches the text of the workspace files for Live Grep. Nil shows a
-	// notice when Live Grep is opened.
+	// Grep searches the text of the workspace files and open buffers for Live Grep.
+	// Nil shows a notice when Live Grep is opened.
 	Grep palette.Grepper
+	// Preview reads the start of a file for the palette's file preview. Nil paints no
+	// preview column.
+	Preview palette.Previewer
 	// Git gives the explorer its status letters. Nil shows none.
 	Git GitStatus
 	// Watch delivers the changes of the tree root. Nil means no watcher, and the

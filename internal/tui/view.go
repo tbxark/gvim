@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/icons"
@@ -65,11 +66,16 @@ type ViewOptions struct {
 	RainbowBrackets            bool // editor.rainbow_brackets, default true
 	Search                     SearchOptions
 	StatusBar                  StatusBarOptions
-	MenuBarMnemonics           bool // editor.menu_bar_mnemonics, default true
-	SmoothScroll               bool // editor.smooth_scroll, default true
-	UseTerminalBG              bool // editor.use_terminal_bg, default false
-	SetWindowTitle             bool // editor.set_window_title, default true
-	TerminalAutoTitle          bool // editor.terminal_auto_title, default true
+	// Explorer is the file_explorer.* navigation and display settings (width,
+	// side, follow-active-buffer, compact directories, auto-open on the last
+	// buffer close). Zero keeps gvim's automatic width and the left side; the app
+	// fills it from the config, whose defaults are Fresh's.
+	Explorer          explorer.Options
+	MenuBarMnemonics  bool // editor.menu_bar_mnemonics, default true
+	SmoothScroll      bool // editor.smooth_scroll, default true
+	UseTerminalBG     bool // editor.use_terminal_bg, default false
+	SetWindowTitle    bool // editor.set_window_title, default true
+	TerminalAutoTitle bool // editor.terminal_auto_title, default true
 	// editor.animations, editor.cursor_jump_animation, editor.viewport_edge_fade
 	// and editor.screensaver_* are not ViewOptions: gvim's cell-grid TUI draws no
 	// animations, fades or screensaver, so the config keys are accepted and
@@ -144,6 +150,7 @@ func DefaultViewOptions() ViewOptions {
 		Whitespace:                WhitespaceOptions{InSelection: true},
 		HighlightMatchingBrackets: true,
 		RainbowBrackets:           true,
+		Explorer:                  explorer.DefaultOptions(),
 		MenuBarMnemonics:          true,
 		SmoothScroll:              true,
 		SetWindowTitle:            true,
@@ -330,7 +337,12 @@ func (m *Model) viewAction(action string, args map[string]any) (tea.Cmd, bool) {
 			m.notice = "Mouse capture off: the terminal keeps the mouse"
 		}
 	case "toggle_file_explorer_side":
-		m.notice = "Moving the file explorer to the other side is not built in this port yet"
+		m.explorerSide = m.explorerSide.Other()
+		if m.explorerSide == explorer.SideRight {
+			m.notice = "File explorer moved to the right"
+		} else {
+			m.notice = "File explorer moved to the left"
+		}
 	case "toggle_debug_highlights":
 		m.view.debug = !m.view.debug
 		m.notice = onOffNotice("Highlight debug", m.view.debug)

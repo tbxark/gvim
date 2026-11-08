@@ -667,7 +667,7 @@ func isSection(key string) bool { return slices.Contains(sections, key) }
 // None of them is stored.
 var fileOnlyKeys = []string{
 	"$schema", "version", "locale", "check_for_updates", "self_update", "auto_attach",
-	"open_last_workspace", "sidebar", "file_browser", "clipboard", "terminal",
+	"open_last_workspace", "sidebar", "file_browser", "clipboard",
 	"universal_lsp",
 	"warnings", "packages", "env", "menu",
 }
@@ -719,8 +719,17 @@ func (c *Config) setFileExplorer(key string, raw json.RawMessage) error {
 		return boolOpt(key, "", func(c *Config) *bool { return &c.ExplorerShowHidden }).set(c, raw)
 	case "show_gitignored":
 		return boolOpt(key, "", func(c *Config) *bool { return &c.ExplorerShowIgnored }).set(c, raw)
-	case "respect_gitignore", "custom_ignore_patterns", "width", "preview_tabs", "side",
-		"follow_active_buffer", "auto_open_on_last_buffer_close", "compact_directories",
+	case "width":
+		return c.setFileExplorerWidth(raw)
+	case "side":
+		return c.setFileExplorerSide(raw)
+	case "follow_active_buffer":
+		return setFileExplorerBool(raw, &c.FileExplorer.FollowActiveBuffer)
+	case "auto_open_on_last_buffer_close":
+		return setFileExplorerBool(raw, &c.FileExplorer.AutoOpenOnLastBufferClose)
+	case "compact_directories":
+		return setFileExplorerBool(raw, &c.FileExplorer.CompactDirectories)
+	case "respect_gitignore", "custom_ignore_patterns", "preview_tabs",
 		"tree_indicator_collapsed", "tree_indicator_expanded":
 		return nil
 	}

@@ -393,4 +393,112 @@ type Deps struct {
 	// trust is unavailable: the Workspace Trust… command says so, and the status
 	// row paints no trust pill.
 	Trust TrustPort
+	// SettingsPort is the Settings page's link to the config files. Nil leaves the
+	// Settings list read-only (it opens the config file in a tab).
+	SettingsPort SettingsPort
+}
+
+// SettingsPort is the Settings UI's link to the config files. internal/app
+// implements it over config.Load/config.PatchFile and the editor's live setters;
+// a test implements it directly. The page edits plain values only, so the TUI
+// never sees the config schema or a config type.
+//
+// A nil port leaves the Settings list read-only: the old list that opens the
+// config file in a tab.
+type SettingsPort interface {
+	// Snapshot returns the settings the page lists, with their current values
+	// and the layers that may be written. It reads no files: the app builds it
+	// from the config snapshot it last loaded.
+	Snapshot() SettingsSnapshot
+	// Validate reports why value cannot be used for the setting key. It is the
+	// check the page runs while the user types, before Save.
+	Validate(key, value string) error
+	// Save writes edits to the layer called layer ("user" or "project") and
+	// reloads the config, returning what the running editor should apply. It
+	// writes the config file, so the root calls it from a tea.Cmd.
+	Save(edits []SettingEdit, layer string) (SettingsChange, error)
+	// Reload re-reads the config files without writing and returns what the
+	// running editor should apply. It reads the files, so the root calls it from
+	// a tea.Cmd. Save uses the same reload internally.
+	Reload() (SettingsChange, error)
+	// Apply pushes the editor-side live values of change (the language settings,
+	// formatters, rulers and ephemeral patterns) into the editor. The root calls
+	// it on the update loop, because the editor is owned by that goroutine;
+	// Save and Reload only read and write files.
+	Apply(change SettingsChange)
+}
+
+// The config layers the Settings page can write.
+const (
+	SettingsLayerUser    = "user"
+	SettingsLayerProject = "project"
+)
+
+// SettingsItem is one row of the Settings page: a scalar setting with its
+// current value and the layers it may be written in.
+type SettingsItem struct {
+	Key     string   // dotted config path, for example "editor.tab_size"
+	Name    string   // the last path element, the row's label
+	Section string   // the group the row is listed in
+	Kind    string   // "bool", "int", "enum" or "string"
+	Value   string   // the current value, as the row shows it ("on"/"off" for a bool)
+	Choices []string // the values of an enum
+	Min     int      // the bounds of an int; Max 0 means no upper bound
+	Max     int
+	Apply   string   // "live" when a saved value applies at once, "restart" when it needs a restart
+	Layers  []string // the layers the setting may be written in: "user", maybe "project"
+}
+
+// SettingsSection is one group of the Settings page, such as Display.
+type SettingsSection struct {
+	Name  string
+	Items []SettingsItem
+}
+
+// SettingsSnapshot is the page's whole content: the settings by section and the
+// layer targets that are available.
+type SettingsSnapshot struct {
+	Sections        []SettingsSection
+	UserFile        string // the user config file, or "" when it is unknown
+	ProjectFile     string // the project config file the page would write, or "" when there is no root
+	ProjectWritable bool   // the workspace is trusted, so the project layer may be written
+}
+
+// SettingEdit is one changed row the page saves: the setting key and the value
+// the user set, in the row's display form.
+type SettingEdit struct {
+	Key   string
+	Value string
+}
+
+// SettingsChange is the result of a Save or a Reload: the page's new content and
+// what the running editor should apply now.
+type SettingsChange struct {
+	Snapshot SettingsSnapshot
+	// Settings is the effective configuration view after the change, the same
+	// data the old Settings list shows.
+	Settings Settings
+	// View is the effective display options after the change. The root applies
+	// only the keys named in Live.
+	View ViewOptions
+	// Theme is the effective theme name, when theme is in Live.
+	Theme string
+	// Keymap is the name of the keymap to switch to, when keymap is in Live.
+	Keymap string
+	// UIIconsMode is the resolved icon set after the change ("plain" or "nerd"),
+	// and IconsWhy is how it was resolved; both are empty when unchanged.
+	UIIconsMode string
+	IconsWhy    string
+	// Live are the setting keys whose new value applies to the running editor
+	// now. Restart are the changed keys read only at startup; the root shows a
+	// restart notice for them.
+	Live    []string
+	Restart []string
+	// Layer is the config layer a Save wrote ("user" or "project"), or "" for a
+	// Reload. The root uses it in the save notice.
+	Layer string
+	// Warnings are problems or limits worth a status-row notice: a config
+	// diagnostic after the reload, a layer that could not be written, a command
+	// line flag that wins over the file.
+	Warnings []string
 }

@@ -348,8 +348,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		opts.pluginLog = logFile.Plugin
 	}
 	deps := uiadapter.NewDeps(ed, km, th, tree, files)
+	var trustCtl *trustController
 	if trustStore != nil {
-		deps.Trust = newTrustController(trustStore, trustState)
+		trustCtl = newTrustController(trustStore, trustState)
+		deps.Trust = trustCtl
 	}
 	if logFile != nil {
 		deps.NoticeSink = logFile.Notice
@@ -379,9 +381,20 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.View = viewOptions(cfg, icon.Mode.String())
 	deps.Languages = languageSettings(cfg)
 	deps.MarkdownTOC = markdownTOCConfig(cfg)
+	// The Settings page writes the config files and reapplies the live values. The
+	// project layer is offered only while the workspace is trusted, so the check
+	// reads the trust controller every time.
+	trustedForSettings := func() bool {
+		if trustCtl == nil {
+			return true
+		}
+		return trustCtl.State().AllowsProjectConfig()
+	}
+	deps.SettingsPort = newSettingsService(root, opts, ed, trustedForSettings, cfg)
 	deps.Root = tui.RootPorts{
 		Projects: proj,
 		Grep:     grepFor(edOpts),
+		Preview:  previewReader{},
 		Git:      uiadapter.GitStatus{},
 		Watch:    events,
 		AutoSave: interval,
@@ -447,7 +460,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.Notice = strings.Join(notices, "; ")
 	model := newUI(deps)
 	loadSearch(model, opts.SessionDir)
-	model.SetDock(tui.DockPorts{Starter: uiadapter.NewTermStarter(ctx), Clipboard: uiadapter.SystemClipboard{}})
+	shellCommand, shellArgs := cfg.Terminal.TerminalShellOptions()
+	model.SetDock(tui.DockPorts{
+		Starter:   uiadapter.NewTermStarter(ctx, uiadapter.TermStarterOptions{Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines}),
+		Clipboard: uiadapter.SystemClipboard{},
+		Effects:   tui.DockEffects{CloseOnExit: cfg.Terminal.CloseOnExit, MouseForwarding: cfg.Terminal.MouseForwarding},
+	})
 	if opts.Diff {
 		// The two files are in tabs 0 and 1: the tab count was checked before recovery.
 		model.OpenCompare(0, 1)

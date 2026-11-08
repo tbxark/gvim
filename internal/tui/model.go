@@ -99,9 +99,15 @@ type Model struct {
 	hideLineNumbers bool
 	// tabSize is the columns per tab stop from Deps.TabSize. Zero means the pane's default.
 	tabSize int
-	// explorerOverride is the panel width set by a grip drag. Zero means the
-	// automatic width. The grip drag itself comes in the explorer phase.
-	explorerOverride int
+	// explorerWidth and explorerSide are file_explorer.width and .side as the
+	// session runs them: the config value, then the changes a grip drag and
+	// toggle_file_explorer_side make. The zero width is the frame's automatic
+	// width and the zero side is the left edge.
+	explorerWidth explorer.Width
+	explorerSide  explorer.Side
+	// explorerAutoOpened reports that auto_open_on_last_buffer_close focused the
+	// explorer; a buffer opening afterwards gives the keyboard back to the editor.
+	explorerAutoOpened bool
 
 	overlays []Overlay // the stack; the last one is on top and gets the input first
 
@@ -204,7 +210,7 @@ func New(deps Deps) *Model {
 		tabSize:         deps.TabSize,
 		notice:          deps.Notice,
 		splits:          newSplitSet(),
-		util:            utilities{settings: deps.Settings, switchKeymap: deps.SwitchKeymap},
+		util:            utilities{settings: deps.Settings, settingsPort: deps.SettingsPort, switchKeymap: deps.SwitchKeymap},
 		root:            rootState{ports: deps.Root},
 		trust:           newTrustState(deps.Trust),
 		lsp:             lspState{port: deps.LSP},
@@ -231,6 +237,13 @@ func New(deps Deps) *Model {
 	// The menu bar reads its rows and context keys through the root, so it gets
 	// the root pointer.
 	m.menu = menubar.New(m, st).WithMnemonics(m.view.opts.MenuBarMnemonics)
+	// The explorer's config: its width and side live on the model because the
+	// grip and toggle_file_explorer_side change them, and compact directories go
+	// to the tree itself.
+	m.explorerWidth, m.explorerSide = m.view.opts.Explorer.Width, m.view.opts.Explorer.Side
+	if c, ok := deps.Explorer.(interface{ SetCompactDirectories(bool) }); ok {
+		c.SetCompactDirectories(m.view.opts.Explorer.CompactDirectories)
+	}
 	if deps.Explorer != nil {
 		m.explorerPanel = expanel.New(deps.Explorer, st, now)
 	}
@@ -324,6 +337,7 @@ func (m *Model) Init() tea.Cmd {
 // every message, because the editor moves it to the caret.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	active, count, rows := m.activeTab(), len(m.ed.Tabs()), m.bodyRows()
+	activePath := m.activeFilePath()
 	at, top := m.caretNow(), m.viewTop()
 	snap := m.pluginSnapshot()
 	_, resized := msg.(tea.WindowSizeMsg)
@@ -366,6 +380,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.syncCompare()
 	if resized || m.activeTab() != active || len(m.ed.Tabs()) != count {
 		m.revealActiveTab()
+	}
+	// The explorer follows the same update: auto_open_on_last_buffer_close focuses
+	// it when the last tab closed, a buffer opening again gives the keyboard back,
+	// and follow_active_buffer takes the tree to the file just activated.
+	if count > 0 && len(m.ed.Tabs()) == 0 {
+		cmd = tea.Batch(cmd, m.autoOpenExplorerOnLastClose())
+	} else if count == 0 && len(m.ed.Tabs()) > 0 && m.explorerAutoOpened {
+		m.explorerAutoOpened = false
+		if m.explorerFocus {
+			m.focusEditor()
+		}
+	}
+	if now := m.activeFilePath(); now != activePath {
+		cmd = tea.Batch(cmd, m.followActiveBuffer())
 	}
 	cmd = tea.Batch(cmd, m.pluginViewTail(snap))
 	return next, cmd
@@ -462,7 +490,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.handleClick(msg)
 		m.rebaseFind()
 	case tea.MouseMotionMsg:
-		cmd = tea.Batch(m.handleDrag(msg.Mouse()), m.explorerMouse(msg))
+		if dockCmd, taken := m.dockMouse(msg, msg.Y); taken {
+			cmd = dockCmd
+		} else {
+			cmd = tea.Batch(m.handleDrag(msg.Mouse()), m.explorerMouse(msg))
+		}
 	case dragScrollMsg:
 		cmd = m.dragScroll(msg)
 	case tea.MouseReleaseMsg:
@@ -472,7 +504,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dropTab(td)
 		}
 		m.releaseDivider()
-		cmd = m.explorerMouse(msg)
+		if dockCmd, taken := m.dockMouse(msg, msg.Y); taken {
+			cmd = dockCmd
+		} else {
+			cmd = m.explorerMouse(msg)
+		}
 	case tea.MouseWheelMsg:
 		// Scrolling is navigation, so a message ends with it as it does with a key or a click.
 		m.expireStatus()
@@ -498,13 +534,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The panel sends it for a mouse press only, so the view stays where it is.
 		m.takeExplorerFocus()
 	case expanel.ResizeMsg:
-		m.explorerOverride = msg.Width
+		// A grip drag moves the width in the configured form: a percentage stays
+		// a percentage (Fresh's with_cols), a column count is exact.
+		m.explorerWidth = m.explorerWidth.WithCols(msg.Width, m.width)
 	case expanel.ErrorMsg:
 		m.notice = msg.Err.Error()
 	case expanel.NewFileMsg:
 		m.askName(msg.Dir, false)
 	case expanel.NewFolderMsg:
 		m.askName(msg.Dir, true)
+	case dock.OpenPathMsg:
+		// The dock resolved a Ctrl+Click path; open it as the explorer would and
+		// give the keyboard back to the editor.
+		cmd = m.openFileCmd(msg.Path, false, 0, 0)
+		m.focusEditor()
 	case expanel.RenameMsg:
 		m.askRename(msg.Path)
 	case expanel.DeleteMsg:
@@ -536,7 +579,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.recorder != nil {
 			m.recorder.Record(msg.Rel)
 		}
-		cmd = m.openFileCmd(msg.Path, false, 0, 0)
+		cmd = m.openFileCmd(msg.Path, false, msg.Line, msg.Col)
+		m.focusEditor()
+	case palette.OpenBufferLineMsg:
+		// A Live Grep hit inside an open buffer: its tab is already there, so activate
+		// it and put the caret at the match.
+		m.activateTab(msg.Index)
+		m.gotoLine(msg.Line, msg.Col)
 		m.focusEditor()
 	case palette.GotoLineMsg:
 		// The ':' mode jumps at once, as Fresh's does: one Enter reaches the line.
@@ -1235,7 +1284,8 @@ func (m *Model) openBrowser(folderOnly bool) {
 }
 
 // openPalette shows the command palette with query as its input and returns the
-// command that ranks its files, if the query is a file query.
+// command that ranks its files, if the query is a file query. The file mode paints the
+// selected file's preview when a Preview port is wired.
 func (m *Model) openPalette(query string) tea.Cmd {
 	st := m.paletteState()
 	p := palette.New(palette.Options{
@@ -1246,6 +1296,7 @@ func (m *Model) openPalette(query string) tea.Cmd {
 		Buffers:  m.paletteBuffers(),
 		Files:    m.files,
 		Ranker:   m.ranker,
+		Preview:  m.root.ports.Preview,
 		Theme:    m.theme,
 	})
 	m.pushOverlay(p)
@@ -1537,9 +1588,9 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 	}
 	switch action {
 	case "toggle_file_explorer":
-		m.toggleExplorer()
+		return m.toggleExplorer(), true
 	case "focus_file_explorer":
-		m.focusExplorer()
+		return m.focusExplorer(), true
 	case "focus_editor":
 		m.focusEditor()
 	case "new":
@@ -1695,7 +1746,7 @@ func (m *Model) explorerGeometry(l layout) expanel.Geometry {
 		sec := l.Sections[0]
 		top, bottom = sec.HeaderY, sec.BodyBottom+1
 	}
-	return expanel.Geometry{Width: l.Ex, Top: top, Bottom: bottom, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
+	return expanel.Geometry{X: l.ExX, Width: l.Ex, Top: top, Bottom: bottom, Right: l.ExRight, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
 }
 
 // handleClick routes a left press to the part of the frame under it, and a
@@ -1704,6 +1755,11 @@ func (m *Model) explorerGeometry(l layout) expanel.Geometry {
 // are dropped here.
 func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	mo := tea.Mouse(msg)
+	// The dock's rows belong to the shell: the dock decides whether the press is
+	// forwarded, opens a link, scrolls the scrollback or only takes the focus.
+	if cmd, taken := m.dockMouse(msg, mo.Y); taken {
+		return cmd
+	}
 	t := m.layout().Hit(mo.X, mo.Y)
 	if mo.Button == tea.MouseMiddle {
 		if t.Kind == hitTab || t.Kind == hitTabClose {
@@ -1720,9 +1776,6 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	count := m.clicks.press(m.now(), mo.X, mo.Y)
 	m.noteMods(mo)
 	m.drag = drag{}
-	if m.dockPress(mo.Y) {
-		return nil
-	}
 	switch t.Kind {
 	case hitTab:
 		m.focusEditor()
@@ -1911,6 +1964,9 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	mo := tea.Mouse(msg)
 	l := m.layout()
+	if cmd, taken := m.dockMouse(msg, mo.Y); taken {
+		return cmd
+	}
 	if mo.Y == l.StripY && mo.X >= l.EditorX {
 		// The tab row scrolls the strip one tab per notch.
 		switch mo.Button {
@@ -1948,31 +2004,37 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	return nil
 }
 
-// toggleExplorer hides the panel when it is open, focused or not, and shows and
-// focuses it when it is hidden. Hiding from the panel's own focus gives the focus
-// to the editor, as Fresh's Ctrl+B does. With no explorer, it does nothing.
-func (m *Model) toggleExplorer() {
+// toggleExplorer hides the panel when it is open, focused or not, and shows,
+// reveals and focuses it when it is hidden. Hiding from the panel's own focus
+// gives the focus to the editor, as Fresh's Ctrl+B does. With no explorer, it does
+// nothing. The returned command is the background folder load a reveal needed.
+func (m *Model) toggleExplorer() tea.Cmd {
 	switch {
 	case m.tree == nil:
+		return nil
 	case m.explorerFocus || m.explorerOpen:
 		m.closeExplorer()
+		return nil
 	default:
-		m.focusExplorer()
+		m.explorerAutoOpened = false
+		return m.focusExplorer()
 	}
 }
 
-// focusExplorer shows the panel when it is hidden, gives it focus and scrolls the
-// tree so the selected row is in view. The legacy TUI also reveals the active file
-// here. Reveal needs the active path, which the Document view does not carry yet.
-// A mouse press takes the focus with takeExplorerFocus instead, so the view stays.
-func (m *Model) focusExplorer() {
+// focusExplorer shows the panel when it is hidden, gives it focus, reveals the
+// active file with Fresh's feedback ("File explorer focused; ..." when there is
+// nothing to reveal) and scrolls the tree so its row is in view. A mouse press
+// takes the focus with takeExplorerFocus instead, so the view stays.
+func (m *Model) focusExplorer() tea.Cmd {
 	if m.tree == nil {
-		return
+		return nil
 	}
 	// The keyboard does not go to a folded section with no rows on screen.
 	m.explorerCollapsed = false
 	m.takeExplorerFocus()
+	cmd := m.revealActiveFile(true)
 	m.followSelection()
+	return cmd
 }
 
 // takeExplorerFocus shows the panel when it is hidden and gives it keyboard focus.
@@ -2099,6 +2161,7 @@ func (m *Model) tabKey(kp KeyPress) tea.Cmd {
 func (m *Model) closeExplorer() {
 	m.explorerOpen = false
 	m.explorerFocus = false
+	m.explorerAutoOpened = false
 	m.contentsFocus = false
 	m.contents.SetFocus(false)
 	m.divider = dividerState{}
@@ -2106,30 +2169,6 @@ func (m *Model) closeExplorer() {
 		m.explorerPanel = expanel.New(m.tree, m.styles, m.now).CarryCut(m.explorerPanel)
 	}
 	m.syncViewport()
-}
-
-// followSelection scrolls the tree so the selected row is inside the panel body.
-// The tree does not know the body height, so the model moves the offset by the
-// difference, and the tree clamps it.
-func (m *Model) followSelection() {
-	if m.tree == nil || !m.explorerOpen {
-		return
-	}
-	sel, ok := m.tree.Selected()
-	if !ok {
-		return
-	}
-	idx := slices.IndexFunc(m.tree.Rows(), func(r explorer.Row) bool { return r.Path == sel.Path })
-	if idx < 0 {
-		return
-	}
-	off, body := m.tree.ScrollOffset(), m.explorerBodyRows()
-	switch {
-	case idx < off:
-		m.tree.ScrollBy(idx - off)
-	case idx >= off+body:
-		m.tree.ScrollBy(idx - off - body + 1)
-	}
 }
 
 // bodyRows is the number of text rows of the focused editor pane in the current frame.
@@ -2158,21 +2197,22 @@ func (m *Model) syncViewport() {
 func (m *Model) layoutInput() layoutInput {
 	split, leaves := m.splitInput()
 	in := layoutInput{
-		ExplorerFocus:    m.explorerFocus,
-		ExplorerOverride: m.explorerOverride,
-		Split:            split,
-		Leaves:           leaves,
-		Tabs:             m.stripTabs(),
-		TabFirst:         m.tabFirst,
-		Welcome:          m.welcomeVisible(),
-		Recents:          m.recents,
-		DoorKeys:         m.welcomeDoorKeys(),
-		Status:           m.statusView(),
-		HideMenuBar:      m.hideMenuBar,
-		HideStatus:       m.statusHidden(),
-		HideLineNumbers:  m.hideLineNumbers,
-		DockOpen:         m.dock.Open(),
-		Maximized:        m.splits.maximized,
+		ExplorerFocus:   m.explorerFocus,
+		ExplorerWidth:   m.explorerWidth,
+		ExplorerSide:    m.explorerSide,
+		Split:           split,
+		Leaves:          leaves,
+		Tabs:            m.stripTabs(),
+		TabFirst:        m.tabFirst,
+		Welcome:         m.welcomeVisible(),
+		Recents:         m.recents,
+		DoorKeys:        m.welcomeDoorKeys(),
+		Status:          m.statusView(),
+		HideMenuBar:     m.hideMenuBar,
+		HideStatus:      m.statusHidden(),
+		HideLineNumbers: m.hideLineNumbers,
+		DockOpen:        m.dock.Open(),
+		Maximized:       m.splits.maximized,
 	}
 	if m.findOpen() {
 		in.FindRows = m.findBar.Rows(m.height)

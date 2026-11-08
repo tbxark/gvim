@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 )
@@ -40,13 +41,13 @@ func paintRow(w int, runs []run) string {
 
 func TestExplorerWidthAtSampleWidths(t *testing.T) {
 	for _, g := range sampleWidths {
-		if got := frame.ExplorerCols(g.w, 0); got != g.explorer {
+		if got := frame.ExplorerCols(g.w, explorer.Width{}); got != g.explorer {
 			t.Errorf("W=%d: E = %d, want %d", g.w, got, g.explorer)
 		}
 	}
 }
 
-func TestExplorerOverrideIsClamped(t *testing.T) {
+func TestExplorerWidthIsClamped(t *testing.T) {
 	tests := []struct{ w, override, want int }{
 		{100, 38, 38},  // the M23 drag: 29 to 38
 		{100, 2, 16},   // below the floor
@@ -55,8 +56,8 @@ func TestExplorerOverrideIsClamped(t *testing.T) {
 		{10, 8, 10},    // a frame narrower than the floor keeps its width
 	}
 	for _, tt := range tests {
-		if got := frame.ExplorerCols(tt.w, tt.override); got != tt.want {
-			t.Errorf("frame.ExplorerCols(%d, %d) = %d, want %d", tt.w, tt.override, got, tt.want)
+		if got := frame.ExplorerCols(tt.w, explorer.ColumnsWidth(tt.override)); got != tt.want {
+			t.Errorf("frame.ExplorerCols(%d, columns %d) = %d, want %d", tt.w, tt.override, got, tt.want)
 		}
 	}
 }
@@ -118,7 +119,7 @@ func TestExplorerTitleButtonsFollowTheTitle(t *testing.T) {
 		{30, 25, 27},
 	}
 	for _, tt := range tests {
-		l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, ExplorerOverride: tt.e})
+		l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, ExplorerWidth: explorer.ColumnsWidth(tt.e)})
 		if l.Ex != tt.e || l.ExReloadX != tt.reload || l.ExCloseX != tt.closeX {
 			t.Errorf("E=%d: buttons at %d and %d (E %d), want %d and %d",
 				tt.e, l.ExReloadX, l.ExCloseX, l.Ex, tt.reload, tt.closeX)

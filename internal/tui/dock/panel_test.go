@@ -26,6 +26,15 @@ type fakeTerm struct {
 	appCursor bool // the shell's DECCKM mode, reported by AppCursorKeys
 	updates   chan struct{}
 	done      chan struct{}
+
+	// The scrollback, OSC 7 and mouse state the dock reads.
+	history   []string              // the history rows, oldest first
+	cwd       string                // OSC 7 working directory
+	alt       bool                  // the alternate screen
+	mouse     bool                  // the shell asked for mouse reporting
+	drag      bool                  // the shell asked for drag motion (1002)
+	allMotion bool                  // the shell asked for all motion (1003)
+	mice      []terminal.MouseEvent // the mouse events the dock forwarded
 }
 
 func newFakeTerm() *fakeTerm {
@@ -61,6 +70,53 @@ func (f *fakeTerm) Updates() <-chan struct{} { return f.updates }
 func (f *fakeTerm) Done() <-chan struct{}    { return f.done }
 func (f *fakeTerm) AppCursorKeys() bool      { return f.appCursor }
 func (f *fakeTerm) Close() error             { f.closed = true; return nil }
+
+// Scrollback returns the history window the dock asks for.
+func (f *fakeTerm) Scrollback(from, count int) (lines []terminal.Line, total int) {
+	total = len(f.history)
+	from = min(max(from, 0), total)
+	count = min(max(count, 0), total-from)
+	for _, text := range f.history[from : from+count] {
+		lines = append(lines, fakeLine(text))
+	}
+	return lines, total
+}
+
+func (f *fakeTerm) ScrollbackLen() int { return len(f.history) }
+
+// SearchScrollback finds the history rows that hold query, case-insensitively.
+func (f *fakeTerm) SearchScrollback(query string, limit int) (matches []int, total int) {
+	query = strings.ToLower(query)
+	for i, text := range f.history {
+		if strings.Contains(strings.ToLower(text), query) {
+			matches = append(matches, i)
+			if len(matches) >= limit {
+				break
+			}
+		}
+	}
+	return matches, len(f.history)
+}
+
+func (f *fakeTerm) WorkingDirectory() string { return f.cwd }
+func (f *fakeTerm) AltScreen() bool          { return f.alt }
+func (f *fakeTerm) MouseReporting() (reporting, drag, allMotion bool) {
+	return f.mouse, f.drag, f.allMotion
+}
+
+func (f *fakeTerm) SendMouse(ev terminal.MouseEvent) { f.mice = append(f.mice, ev) }
+
+// fakeLine is a history row of width 80 cells.
+func fakeLine(text string) terminal.Line {
+	cells := make([]terminal.Cell, 80)
+	for i, r := range []rune(text) {
+		if i >= len(cells) {
+			break
+		}
+		cells[i] = terminal.Cell{Rune: r}
+	}
+	return terminal.Line{Cells: cells}
+}
 
 // fakeStarter implements TerminalStarter. It hands out term, or fails with err.
 type fakeStarter struct {

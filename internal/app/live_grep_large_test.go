@@ -30,7 +30,7 @@ func TestLiveGrepSkipsTheFilesThatOpenInLargeFileMode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hits, err := grepFor(tt.opts).Search(dir, files, "needle", 100)
+			hits, err := grepFor(tt.opts).Search(fileReq(dir, files, "needle"))
 			if err != nil {
 				t.Fatal(err)
 			}

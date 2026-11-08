@@ -57,6 +57,9 @@ func (m *Model) featureMessage(msg tea.Msg) (tea.Cmd, bool) {
 	if cmd, ok := m.trustMessage(msg); ok {
 		return cmd, true
 	}
+	if cmd, ok := m.settingsMessage(msg); ok {
+		return cmd, true
+	}
 	if cmd, ok := m.clipMessage(msg); ok {
 		return cmd, true
 	}

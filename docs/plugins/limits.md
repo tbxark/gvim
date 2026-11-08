@@ -234,9 +234,11 @@ gopher-lua's own options, or by the guard, and is measured above the same way:
 Things that are *not* implemented or work differently from what you might expect. None is a bug the
 plugin system will fix without a new stage.
 
-* **No config reload.** gvim reads `config.json` at startup. A changed `plugins.<name>.settings` or
-  `enabled` needs a restart (`Runtime.UpdateSettings` exists for a future reload but has no caller).
-  Opening another project does not reload its project config either.
+* **No plugin config reload.** gvim reads `config.json` at startup; the editable Settings page
+  (`docs/settings.md`) applies its editor-side values live, but a changed `plugins.<name>.settings` or
+  `enabled` still needs a restart (`Runtime.UpdateSettings` exists for a future reload but has no
+  caller), and opening another project does not reload its project config either (the project file and
+  the workspace-trust decision apply at the next start).
 * **Key sequences work only inside modes.** The editor resolves single keys in the normal context, so
   `keymap.set("g g", ...)` without a `mode` is `invalid`, and a sequence in a command's `keys` is dropped
   with a warning notice when the keymap is rebuilt.

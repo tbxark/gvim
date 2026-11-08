@@ -6,7 +6,9 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/icons"
+	"github.com/tbxark/gvim/internal/tui/sidebar"
 )
 
 // stripTabs are two tabs for the strip tests.
@@ -690,5 +692,142 @@ func TestNarrowStatusRowDropsTheRemoteLabelWithOneSeparator(t *testing.T) {
 	}
 	if !dropped {
 		t.Error("no width drops the Local label with a plugin item on the row")
+	}
+}
+
+// TestExplorerWidthForms checks file_explorer.width in the layout: a percentage
+// of the frame, a column count, the automatic width for the zero value, and the
+// gvim clamps (min 16, max 60, the editor keeps 20 columns on a narrow frame).
+func TestExplorerWidthForms(t *testing.T) {
+	tests := []struct {
+		name  string
+		w     int
+		width explorer.Width
+		want  int
+	}{
+		{"automatic is gvim's 32", 100, explorer.Width{}, 32},
+		{"percent of the frame", 100, explorer.PercentWidth(30), 30},
+		{"percent rounds down", 101, explorer.PercentWidth(30), 30},
+		{"percent below the floor clamps to 16", 40, explorer.PercentWidth(30), 16},
+		{"percent above the ceiling clamps to 60", 140, explorer.PercentWidth(60), 60},
+		{"columns", 100, explorer.ColumnsWidth(24), 24},
+		{"columns below the floor clamp", 100, explorer.ColumnsWidth(2), 16},
+		{"columns above the ceiling clamp", 100, explorer.ColumnsWidth(200), 60},
+		{"the editor keeps 20 columns", 40, explorer.ColumnsWidth(200), 20},
+		{"a frame narrower than the floor", 10, explorer.ColumnsWidth(8), 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExplorerCols(tt.w, tt.width); got != tt.want {
+				t.Errorf("ExplorerCols(%d, %+v) = %d, want %d", tt.w, tt.width, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRightSideExplorerGeometry checks file_explorer.side right: the column takes
+// the right edge, the editor area starts at column 0 and ends at the column, the
+// tab strip and its "+" are pinned inside the editor area, and the hit map reads
+// the same columns.
+func TestRightSideExplorerGeometry(t *testing.T) {
+	const w = 100
+	in := Input{
+		ExplorerOpen:  true,
+		ExplorerWidth: explorer.ColumnsWidth(30),
+		ExplorerSide:  explorer.SideRight,
+		Tabs:          stripTabs(),
+	}
+	l := ComputeLayout(w, 30, in)
+	if !l.ExplorerOpen || !l.ExRight || l.Ex != 30 || l.ExX != w-30 {
+		t.Fatalf("ex %d at %d right %v, want 30 at %d", l.Ex, l.ExX, l.ExRight, w-30)
+	}
+	if l.EditorX != 0 || l.EditorW != w-30 {
+		t.Fatalf("editor %d..%d, want 0..%d", l.EditorX, l.EditorX+l.EditorW, w-30)
+	}
+	// The tab strip begins at the frame's left edge and its "+" ends at the
+	// editor's right edge.
+	if len(l.Strip.Runs) == 0 {
+		t.Fatal("no tab strip runs")
+	}
+	if first := l.Strip.Runs[0]; first.X != 0 {
+		t.Errorf("first strip run at %d, want column 0", first.X)
+	}
+	last := l.Strip.Runs[len(l.Strip.Runs)-1]
+	if last.Kind != HitTabNew || last.X+last.W != l.EditorX+l.EditorW {
+		t.Errorf("plus run %+v, want it pinned to the editor's right edge %d", last, l.EditorX+l.EditorW)
+	}
+	// The explorer wins the cells past its first column; the editor keeps the rest.
+	if got := l.Hit(l.ExX+3, l.ExBodyTop); got.Kind != HitExplorerBody && got.Kind != HitExplorerRow {
+		t.Errorf("hit in the right explorer column = %+v", got)
+	}
+	if got := l.Hit(l.TextX+1, l.BodyTop+1); got.Kind != HitEditorText {
+		t.Errorf("hit in the editor column = %+v", got)
+	}
+	if got := l.Hit(l.ExX, l.BodyTop+1); got.Kind != HitExplorerGrip {
+		t.Errorf("hit on the editor-facing border = %+v, want the grip", got)
+	}
+	// The explorer's buttons are frame columns on this side.
+	if l.ExReloadX < l.ExX {
+		t.Errorf("reload button at %d, want it in the right column from %d", l.ExReloadX, l.ExX)
+	}
+	if got := l.Hit(l.ExReloadX, l.ExTitleY); got.Kind != HitExplorerTitleReload {
+		t.Errorf("hit on the reload button = %+v", got)
+	}
+}
+
+// TestRightSideExplorerSections checks the section stack on the right side: the
+// headers and bodies are in the right column, the bottom border closes it, and
+// the hit map's section bodies keep the panel's orientation.
+func TestRightSideExplorerSections(t *testing.T) {
+	const w = 90
+	in := Input{
+		ExplorerOpen:  true,
+		ExplorerWidth: explorer.ColumnsWidth(24),
+		ExplorerSide:  explorer.SideRight,
+		Sidebar:       []sidebar.Spec{{Kind: sidebar.KindExplorer}, {Kind: sidebar.KindContents}},
+		ExplorerRows:  5,
+	}
+	l := ComputeLayout(w, 24, in)
+	if len(l.Sections) != 2 || l.ExX != w-24 {
+		t.Fatalf("sections %d at %d, want two in the right column from %d", len(l.Sections), l.ExX, w-24)
+	}
+	// The Contents close button is an absolute frame column too.
+	sec := l.Sections[1]
+	if got := l.Hit(l.SectionClose[1], sec.HeaderY); got.Kind != HitSidebarClose || got.Section != 1 {
+		t.Errorf("hit on the Contents close button = %+v", got)
+	}
+	if got := l.Hit(l.ExX+1, sec.BodyTop); got.Kind != HitSidebarRow || got.Section != 1 {
+		t.Errorf("hit on the section's first row = %+v", got)
+	}
+}
+
+// TestRightSideNoticeBandStartsAtTheEditorEdge checks the notice band on the right
+// side: it spans the editor area (columns 0 to EditorW-1), never the explorer
+// column, and the status row keeps its full width.
+func TestRightSideNoticeBandStartsAtTheEditorEdge(t *testing.T) {
+	long := strings.Repeat("a long notice that cannot fit the row ", 6)
+	in := Input{
+		ExplorerOpen:  true,
+		ExplorerWidth: explorer.ColumnsWidth(30),
+		ExplorerSide:  explorer.SideRight,
+		Status:        StatusView{Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Message: long},
+	}
+	l := ComputeLayout(100, 20, in)
+	if len(l.Notice) == 0 {
+		t.Fatal("no notice band on a narrow row")
+	}
+	if l.NoticeX != 0 {
+		t.Errorf("notice band starts at %d, want the editor's left edge 0", l.NoticeX)
+	}
+	if l.NoticeX+l.EditorW > l.ExX {
+		t.Errorf("notice band ends at %d, past the explorer column at %d", l.NoticeX+l.EditorW, l.ExX)
+	}
+	// The status row still spans the frame.
+	var last Run
+	if n := len(l.Status); n > 0 {
+		last = l.Status[n-1]
+	}
+	if last.X+last.W != 100 {
+		t.Errorf("status row ends at %d, want the frame edge 100", last.X+last.W)
 	}
 }

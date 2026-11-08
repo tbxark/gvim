@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/theme"
 )
@@ -209,8 +210,13 @@ func TestExplorerFollowKeepsTheSelectedRowInsideThePanelWithoutMenuBar(t *testin
 	m := New(Deps{Editor: newFakeEditor("hello"), Explorer: tree, Keys: chromeKeys(), HideMenuBar: true, Theme: theme.Theme{}, Clock: testClock})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	press(m, ctrl('e'))
-	// The panel shows rows 2 to 21 here, which is 20 tree rows, so row 20 needs an offset of 1.
-	if tree.offset != 1 {
-		t.Fatalf("tree offset %d, want 1 so the selected row is inside the panel", tree.offset)
+	// The panel shows 20 tree rows, but scrolled down its first row is the pinned
+	// ancestor, so the run is 19 rows and row 20 needs an offset of 2.
+	if tree.offset != 2 {
+		t.Fatalf("tree offset %d, want 2 so the selected row is inside the run under the pinned row", tree.offset)
+	}
+	off, pins := explorer.Viewport(tree.Rows(), tree.offset, m.explorerBodyRows())
+	if run := m.explorerBodyRows() - len(pins); 20 < off || 20 >= off+run {
+		t.Fatalf("selected row 20 is not in the run %d..%d (offset %d, %d pinned)", off, off+run-1, off, len(pins))
 	}
 }

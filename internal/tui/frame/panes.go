@@ -34,7 +34,7 @@ func (l *Layout) placePanes(in Input) {
 		shape = &split.Node{}
 		leaves = []split.LeafInfo{{Tab: -1, Lines: in.Lines, Focused: true}}
 	}
-	band := space.Rect{X: l.EditorX, Y: l.BodyTop, W: max(l.W-l.EditorX, 0), H: max(l.BodyBottom-l.BodyTop+1, 0)}
+	band := space.Rect{X: l.EditorX, Y: l.BodyTop, W: max(l.EditorW, 0), H: max(l.BodyBottom-l.BodyTop+1, 0)}
 	var rects []space.Rect
 	l.Borders = nil
 	if in.Maximized {

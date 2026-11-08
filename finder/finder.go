@@ -49,6 +49,30 @@ func Enumerate(ctx context.Context, root string, emit func(rel string) bool) err
 	return explorer.WalkFiles(ctx, root, explorer.WalkOptions{SkipDirs: skipDirs}, emit)
 }
 
+// Options selects extra files for a listing.
+type Options struct {
+	// ShowHidden visits names starting with "." (the walk still skips the skipDirs
+	// such as .git).
+	ShowHidden bool
+	// ShowIgnored visits files matched by .gitignore.
+	ShowIgnored bool
+}
+
+// EnumerateAll calls emit with each project file under root like Enumerate, but
+// includes the hidden and .gitignore-matched files opts asks for. It always walks the
+// tree when it has to include them: git's ls-files cannot list ignored files alongside
+// the tracked ones. With the zero Options it is Enumerate.
+func EnumerateAll(ctx context.Context, root string, opts Options, emit func(rel string) bool) error {
+	if !opts.ShowHidden && !opts.ShowIgnored {
+		return Enumerate(ctx, root, emit)
+	}
+	return explorer.WalkFiles(ctx, root, explorer.WalkOptions{
+		ShowHidden:  opts.ShowHidden,
+		ShowIgnored: opts.ShowIgnored,
+		SkipDirs:    skipDirs,
+	}, emit)
+}
+
 // gitFiles runs "git ls-files" in root. done is false when git cannot list the
 // directory (no git binary, or root is outside a work tree), so the caller
 // falls back to the walk. Entries that git lists by name only, such as nested

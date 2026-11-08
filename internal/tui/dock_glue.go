@@ -13,6 +13,8 @@ type (
 	TerminalStarter = dock.TerminalStarter
 	ClipboardReader = dock.ClipboardReader
 	DockPorts       = dock.Ports
+	DockEffects     = dock.Effects
+	OpenPathMsg     = dock.OpenPathMsg
 )
 
 // KeyContextTerminal is the context a key press lands in while the terminal dock
@@ -23,7 +25,10 @@ const KeyContextTerminal KeyContext = "terminal"
 const noTerminalNotice = dock.NoTerminalNotice
 
 // SetDock gives the terminal dock its ports. The app calls it once, after New.
-func (m *Model) SetDock(p DockPorts) { m.dock.SetPorts(dock.Ports(p)) }
+func (m *Model) SetDock(p DockPorts) {
+	m.dock.SetPorts(dock.Ports(p))
+	m.dock.SetEffects(dock.Effects(p.Effects))
+}
 
 // dockNewPanel returns the dock panel with the root services it needs.
 func dockNewPanel(m *Model) dock.Panel {
@@ -33,6 +38,7 @@ func dockNewPanel(m *Model) dock.Panel {
 		Notice:      func(text string) { m.notice = text },
 		ContentSize: func() (cols, rows int) { return m.dockContentSize() },
 		Focus:       func() { m.focusDock() },
+		Copy:        func(text string) tea.Cmd { return m.copyToClipboard(text) },
 	})
 	return p
 }
@@ -116,6 +122,15 @@ func (m *Model) dockKeyboard() bool { return m.dock.Keyboard(m.layout()) }
 // that turns capture off runs as a binding. A key that none claims goes to the shell as
 // the bytes it sends.
 func (m *Model) dockKey(k tea.Key, kp KeyPress) tea.Cmd {
+	// The scrollback view has its own keys, and Ctrl+Space is the switch into it
+	// from the live screen. Keyboard capture keeps every key for the shell, so it
+	// also keeps the switch; the keys it does not take are handled below, by the
+	// terminal context bindings or the shell.
+	if m.dock.Scrolling() || !m.dock.Capture() {
+		if cmd, ok := m.dock.ScrollKey(k); ok {
+			return cmd
+		}
+	}
 	if !m.dockRunning() {
 		return nil
 	}
@@ -159,9 +174,32 @@ func (m *Model) closeDock() { m.dock.Close() }
 // input. It runs after every update.
 func (m *Model) dockSync() tea.Cmd { return m.dock.Sync() }
 
-// dockPress gives the dock the focus when a left press lands in its rows. It reports
-// whether the press was in the dock, so the caller takes no other action for it.
-func (m *Model) dockPress(y int) bool { return m.dock.Press(m.layout(), y) }
+// dockMouse gives a mouse message to the dock when it lands in the dock's rows.
+// It reports whether the rows are the dock's, so the root takes no other action
+// for the message: the dock decides alone whether it forwards it, opens a link
+// with it, or only focuses.
+func (m *Model) dockMouse(msg tea.Msg, y int) (tea.Cmd, bool) {
+	l := m.layout()
+	if !l.DockOn || y < l.DockY || y >= l.DockY+l.DockH {
+		return nil, false
+	}
+	cmd, _ := m.dock.Mouse(msg, l)
+	return cmd, true
+}
+
+// copyToClipboard is the dock's clipboard writer, through the same path the
+// editor's copy uses: the terminal clipboard command and, when the app has one,
+// the native clipboard writer. It is what scrollback's y and Ctrl+C call.
+func (m *Model) copyToClipboard(text string) tea.Cmd {
+	if text == "" {
+		return nil
+	}
+	cmd := tea.SetClipboard(text)
+	if native := m.nativeWrite(text); native != nil {
+		return tea.Batch(cmd, native)
+	}
+	return cmd
+}
 
 // dockContentSize is the size of the shell's screen in the frame as it is now. It is
 // zero when the dock is not laid out.

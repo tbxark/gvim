@@ -3,6 +3,7 @@ package uiadapter
 import (
 	"fmt"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
@@ -277,6 +278,32 @@ func (a *Editor) Tabs() []tui.TabInfo {
 		out[i] = tui.TabInfo{Name: t.Name, Path: t.Path, Modified: t.Modified, Preview: t.Preview, Active: t.Active}
 	}
 	return out
+}
+
+// BufferTexts snapshots the open buffers for Live Grep's Buffers scope: each tab's
+// text, in tab order, at most tui.BufferTextBytes of it. The sheet that searches them
+// is modal, so one snapshot serves the whole session. The port is optional: the root
+// type-asserts it on EditorState.
+func (a *Editor) BufferTexts() ([]tui.BufferText, error) {
+	tabs := a.ed.Tabs()
+	out := make([]tui.BufferText, len(tabs))
+	for i, t := range tabs {
+		var text string
+		partial := false
+		if d := a.ed.DocAt(i); d != nil {
+			text = d.Buffer.TextPrefix(tui.BufferTextBytes + 1)
+			if len(text) > tui.BufferTextBytes {
+				text, partial = text[:tui.BufferTextBytes], true
+				// The cut may fall inside a rune; the grep works on text, so drop the
+				// broken tail rather than search half a character.
+				for len(text) > 0 && !utf8.ValidString(text) {
+					text = text[:len(text)-1]
+				}
+			}
+		}
+		out[i] = tui.BufferText{Name: t.Name, Path: t.Path, Text: text, Partial: partial}
+	}
+	return out, nil
 }
 
 // SetRoot names the workspace root of the editor, which copy_relative_file_path measures

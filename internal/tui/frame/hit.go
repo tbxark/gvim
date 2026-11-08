@@ -97,7 +97,7 @@ func (l Layout) Hit(x, y int) HitTarget {
 	if l.MenuOn && y == l.MenuLabelY {
 		return hitRuns(l.MenuRuns, x, none)
 	}
-	if l.ExplorerOpen && x < l.Ex {
+	if l.InExplorer(x) {
 		for _, sec := range l.Sections {
 			if y == sec.HeaderY {
 				return l.hitSectionHeader(sec, x)
@@ -110,7 +110,7 @@ func (l Layout) Hit(x, y int) HitTarget {
 	if y == l.StripY {
 		return hitRuns(l.Strip.Runs, x, none)
 	}
-	if y >= l.BodyTop && y <= l.BodyBottom && x >= l.EditorX {
+	if y >= l.BodyTop && y <= l.BodyBottom && l.InEditor(x) {
 		if l.WelcomeOn {
 			return l.hitWelcome(x, y)
 		}
@@ -163,11 +163,17 @@ func (l Layout) hitSectionHeader(sec sidebar.Section, x int) HitTarget {
 // grip on the column's right border, one of its rows, or its blank cells.
 // Section 0 keeps the explorer's targets.
 func (l Layout) hitSectionBody(sec sidebar.Section, x, y int) HitTarget {
-	if x == l.Ex-1 {
+	// The grip is the border facing the editor: the right one on the left side,
+	// the left one on the right side.
+	grip := l.ExX + l.Ex - 1
+	if l.ExRight {
+		grip = l.ExX
+	}
+	if x == grip {
 		return HitTarget{Kind: HitExplorerGrip}
 	}
 	if sec.Index == 0 {
-		if x == 0 {
+		if x == l.ExX {
 			return HitTarget{Kind: HitExplorerBody}
 		}
 		if row := y - sec.BodyTop; row >= 0 && row < l.ExRows {
@@ -175,7 +181,7 @@ func (l Layout) hitSectionBody(sec sidebar.Section, x, y int) HitTarget {
 		}
 		return HitTarget{Kind: HitExplorerBody}
 	}
-	if x == 0 {
+	if x == l.ExX {
 		return HitTarget{Kind: HitSidebarBody, Section: sec.Index}
 	}
 	if row := y - sec.BodyTop; row >= 0 && row < sec.Rows() {

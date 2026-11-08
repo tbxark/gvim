@@ -112,35 +112,39 @@ func HeaderFor(width int, m icons.Mode, spec HeaderSpec) Header {
 	return h
 }
 
-// PaintHeader paints h into row y of the column, on the section-header style.
-func PaintHeader(dst *grid.Grid, width int, y int, h Header, st style.Styles) {
+// PaintHeader paints h into row y of the column, which starts at column x and is
+// width cells wide, on the section-header style.
+func PaintHeader(dst *grid.Grid, x, width int, y int, h Header, st style.Styles) {
 	head := style.Cell(st.ExplorerTitle)
-	dst.Fill(0, width, y, head)
-	dst.Put(0, y, width, h.Text, head)
+	dst.Fill(x, x+width, y, head)
+	dst.Put(x, y, x+width, h.Text, head)
 }
 
-// PaintBottomBorder paints the column's bottom border, └──┘, into row y.
-func PaintBottomBorder(dst *grid.Grid, width int, y int, st style.Styles) {
+// PaintBottomBorder paints the column's bottom border, └──┘, into row y. The
+// column starts at column x.
+func PaintBottomBorder(dst *grid.Grid, x, width int, y int, st style.Styles) {
 	body := style.Cell(st.Explorer)
 	if width < 2 {
 		if width == 1 {
-			dst.Set(0, y, "└", body)
+			dst.Set(x, y, "└", body)
 		}
 		return
 	}
-	dst.Set(0, y, "└", body)
-	dst.Fill(1, width-1, y, body)
-	for x := 1; x < width-1; x++ {
-		dst.Set(x, y, "─", body)
+	right := x + width
+	dst.Set(x, y, "└", body)
+	dst.Fill(x+1, right-1, y, body)
+	for i := x + 1; i < right-1; i++ {
+		dst.Set(i, y, "─", body)
 	}
-	dst.Set(width-1, y, "┘", body)
+	dst.Set(right-1, y, "┘", body)
 }
 
 // PaintGround fills the rows of an empty column (every section collapsed)
-// between first and last, inclusive, with the column's background.
-func PaintGround(dst *grid.Grid, width, first, last int, st style.Styles) {
+// between first and last, inclusive, with the column's background. The column
+// starts at column x and is width cells wide.
+func PaintGround(dst *grid.Grid, x, width, first, last int, st style.Styles) {
 	body := style.Cell(st.Explorer)
 	for y := first; y <= last; y++ {
-		dst.Fill(0, width, y, body)
+		dst.Fill(x, x+width, y, body)
 	}
 }

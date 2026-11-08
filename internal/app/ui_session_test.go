@@ -106,8 +106,6 @@ func TestCloseTabKeyOnADirtyTabAsksBeforeClosing(t *testing.T) {
 	}
 }
 
-
-
 func TestHelpMenuShowsGvimNotFresh(t *testing.T) {
 	s, _ := startApp(t, "hello\n")
 	x, y, ok := s.Screen().Find("Help")

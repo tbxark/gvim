@@ -29,7 +29,11 @@ func (p Panel) SelectAt(g Geometry, x, y int) (ContextTarget, bool) {
 		return ContextTarget{}, false
 	}
 	rows := p.tree.Rows()
-	idx := p.tree.ScrollOffset() + t.row
+	// hitAt reports the row's index in the tree's rows, pinned band included.
+	idx := t.row
+	if idx < 0 || idx >= len(rows) {
+		return ContextTarget{}, false
+	}
 	path := rows[idx].Path
 	s := p.state()
 	if len(s.picked) > 1 && s.picked[path] {

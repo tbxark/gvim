@@ -88,6 +88,30 @@ Inside a frame the roles are fixed:
   where the surface has one (find, prompt), and the caret cell reversed. A list's
   filter row stays on the box fill: it is a row of the list, not a field.
 
+### Palette details: the file preview and the Live Grep toolbar
+
+The command palette keeps the sheet placement, and two optional regions live inside the
+same card, between its borders:
+
+- **File preview column** (the file mode, when a `Preview` reader is wired and the
+  card's inner text width is at least 64 cells). The selected row's file head, read in a
+  `tea.Cmd` and cached for the palette's lifetime, is painted in a right-hand column
+  after a muted `│` divider; the list columns are recomputed from the narrower width.
+  The column has a right-aligned line-number gutter, highlights the line a
+  `path:line[:col]` query names, and shows a placeholder for a binary, empty or
+  unreadable file; a file longer than the 16 KiB head or the twelve lines kept ends with
+  `…`. A narrower frame drops the column and keeps the full-width list. The preview is
+  a plain-text head: it has no syntax colours and does not scroll (see §4.5 of
+  `docs/parity.md`).
+- **Live Grep toolbar** (one row between the title border and the item rows, in Live
+  Grep mode only). The match modes and the scopes are `Alt+<letter> Label:on|off`
+  segments: `Alt+C` case, `Alt+G` regex, `Alt+O` whole word; `Alt+L` files,
+  `Alt+U` buffers when a buffer snapshot is available, and `Alt+I` ignored and hidden
+  files. The title border shows `Live Grep · N matches` (or `no matches`, `error`,
+  `N+` at the 100-row cap), and an empty box says whether to type, turn a source on or
+  that nothing matched. Live Grep's keys are answered by the overlay, as every overlay
+  key is (parity §4.5), and its request carries the modes and scopes to the search port.
+
 ## 3. Component map
 
 | Surface | Placement | Component |

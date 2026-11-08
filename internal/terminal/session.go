@@ -27,10 +27,18 @@ type Session struct {
 	ptmx *os.File
 	cmd  *exec.Cmd
 
-	mu        sync.Mutex // guards emu, closed and appCursor
+	mu        sync.Mutex // guards emu, closed and the child's reported modes
 	emu       *vt.Emulator
 	closed    bool // set by teardown; emu is not written after it
 	appCursor bool // application cursor keys (DECCKM) is on, see noteMode
+	// The state the dock reads to decide about scrollback and mouse forwarding;
+	// all of it is reported by the child through the emulator's callbacks.
+	cwd       string             // OSC 7 working directory, or "" until the child reports one
+	altScreen bool               // the child is on the alternate screen
+	mouse     map[ansi.Mode]bool // the mouse-reporting modes the child turned on
+	// scrollbackOff disables the history: x/vt cannot remove its buffer, so the
+	// session keeps it at one line and reports no history.
+	scrollbackOff bool
 
 	in *inbox // bytes for the child: user input and emulator replies
 
@@ -43,7 +51,7 @@ type Session struct {
 	closeErr  error // written inside closeOnce
 }
 
-func newSession(ptmx *os.File, cmd *exec.Cmd, cols, rows int) *Session {
+func newSession(ptmx *os.File, cmd *exec.Cmd, cols, rows, scrollbackLines int) *Session {
 	s := &Session{
 		ptmx:      ptmx,
 		cmd:       cmd,
@@ -53,9 +61,23 @@ func newSession(ptmx *os.File, cmd *exec.Cmd, cols, rows int) *Session {
 		done:      make(chan struct{}),
 		relayDone: make(chan struct{}),
 	}
+	if scrollbackLines == 0 {
+		scrollbackLines = DefaultScrollbackLines
+	}
+	if scrollbackLines > 0 {
+		s.emu.SetScrollbackSize(scrollbackLines)
+	} else if scrollbackLines < 0 {
+		// x/vt's SetScrollbackSize cannot disable its buffer (a non-positive
+		// size is ignored), so the session caps it at one line and reports no
+		// history at all; see Scrollback.
+		s.scrollbackOff = true
+		s.emu.SetScrollbackSize(1)
+	}
 	s.emu.SetCallbacks(vt.Callbacks{
-		EnableMode:  func(mode ansi.Mode) { s.noteMode(mode, true) },
-		DisableMode: func(mode ansi.Mode) { s.noteMode(mode, false) },
+		EnableMode:       func(mode ansi.Mode) { s.noteMode(mode, true) },
+		DisableMode:      func(mode ansi.Mode) { s.noteMode(mode, false) },
+		AltScreen:        func(on bool) { s.altScreen = on },
+		WorkingDirectory: func(path string) { s.cwd = osc7Path(path) },
 	})
 	// relayReplies starts first: the emulator blocks on replies until they are read.
 	go s.relayReplies()
@@ -149,8 +171,21 @@ func (s *Session) AppCursorKeys() bool {
 // noteMode records the modes the emulator turns on and off. The emulator calls it while
 // it parses child output, which feed does under mu.
 func (s *Session) noteMode(mode ansi.Mode, on bool) {
-	if mode == ansi.ModeCursorKeys {
+	switch mode {
+	case ansi.ModeCursorKeys:
 		s.appCursor = on
+	case ansi.ModeMouseX10, ansi.ModeMouseNormal, ansi.ModeMouseHighlight,
+		ansi.ModeMouseButtonEvent, ansi.ModeMouseAnyEvent:
+		// Any of the reporting modes means the child wants the mouse. The
+		// all-motion mode (1003) is the only one that reports buttonless motion.
+		if s.mouse == nil {
+			s.mouse = make(map[ansi.Mode]bool)
+		}
+		if on {
+			s.mouse[mode] = true
+		} else {
+			delete(s.mouse, mode)
+		}
 	}
 }
 

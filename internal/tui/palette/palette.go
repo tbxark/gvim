@@ -4,6 +4,11 @@
 // hit testing share one geometry function, so the sheet and its click targets cannot
 // drift apart.
 //
+// Inside the card the file mode can paint the selected file's head in a preview column
+// on the right, and Live Grep adds a toolbar row of match-mode and scope toggles above
+// its rows. Both are regions of the same sheet; a frame too narrow for the preview
+// column keeps the full-width list.
+//
 // The query picks the mode with commands: no prefix searches files, ">"
 // runs commands, ":" goes to a line and "#" picks a buffer. Command matching is
 // the domain model's, file ranking is the Ranker's, and the list navigation
@@ -52,8 +57,9 @@ const (
 	hint = "file · >command · :line · #buffer"
 
 	// liveHint is the bottom border of Live Grep, which has no prefixes: the whole
-	// query is the text searched for.
-	liveHint = "type text to search the files · Enter open · Esc close"
+	// query is the text searched for, the toolbar row carries the toggles and their
+	// keys, and Enter opens the selected row.
+	liveHint = "type text to search · Enter open · Esc close"
 )
 
 // Files is the file list the file mode searches. *finder.Index satisfies it.
@@ -112,6 +118,15 @@ type Options struct {
 	// with a nil Grep shows no rows.
 	Live bool
 	Grep Grepper
+	// LiveSearch is the starting state of the Live Grep match modes. Nil means Fresh's
+	// defaults: regex on, whole word off, case folded.
+	LiveSearch *SearchOptions
+	// SourceBuffers are the open buffers' text, for Live Grep's Buffers scope. Nil means
+	// the scope is not available: its toggle is not painted and it stays off.
+	SourceBuffers []BufferSource
+	// Preview reads the start of a file for the file mode's preview column. Nil paints
+	// no column.
+	Preview Previewer
 }
 
 // RunCommandMsg asks the root to run a command by its Fresh action name. It is
@@ -127,9 +142,11 @@ type GotoLineMsg struct {
 }
 
 // OpenFileMsg asks the root to open a file. Rel is the path the Ranker returned
-// and Path is Rel joined with Options.Root.
+// and Path is Rel joined with Options.Root. Line and Col are the 1-based position a
+// "path:line[:col]" query named, or 0 when it named none.
 type OpenFileMsg struct {
 	Path, Rel string
+	Line, Col int
 }
 
 // ActivateBufferMsg asks the root to activate the tab at Index, which is its
@@ -187,6 +204,9 @@ type row struct {
 	// match's length in runes.
 	text       string
 	mcol, qlen int
+	// grepSource says whether a grep row is in a file or an open buffer; a buffer row
+	// also carries the tab index Enter activates.
+	grepSource GrepSource
 }
 
 // chrome holds the styles of the palette: the overlay card for the sheet frame, and
@@ -223,6 +243,14 @@ type Palette struct {
 	shown    string
 	// live is true in Live Grep mode, which has no prefixes.
 	live bool
+	// preview is the file mode's file preview: its reader, cache and shown file.
+	preview previewState
+	// fileLine and fileCol are the position a "path:line[:col]" file query names, both
+	// 1-based; 0 when the query names none.
+	fileLine, fileCol int
+	// grep is the Live Grep state: the match modes, the scope toggles and the last
+	// result's count.
+	grep grepState
 }
 
 // New returns an open palette for opts. The query is the input and its rows are
@@ -237,10 +265,12 @@ func New(opts Options) *Palette {
 	ss := style.New(opts.Theme)
 	ov := ss.Overlay
 	p := &Palette{
-		opts:  opts,
-		state: st,
-		open:  true,
-		live:  opts.Live,
+		opts:    opts,
+		state:   st,
+		open:    true,
+		live:    opts.Live,
+		preview: previewState{},
+		grep:    newGrepState(opts),
 		chrome: chrome{
 			ov:       ov,
 			panel:    ov.Box,
@@ -290,21 +320,24 @@ func (p *Palette) update(msg tea.Msg) tea.Cmd {
 	if !p.open {
 		return nil
 	}
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		return p.key(msg)
+		cmd = p.key(msg)
 	case tea.PasteMsg:
-		return p.edit(msg)
+		cmd = p.edit(msg)
 	case FileRankedMsg:
-		return p.applyFiles(msg)
+		cmd = p.applyFiles(msg)
 	case GrepResultMsg:
-		return p.applyGrep(msg)
+		cmd = p.applyGrep(msg)
+	case previewMsg:
+		p.applyPreview(msg)
 	case fileTickMsg:
 		if msg.Seq == p.seq && p.inFile {
-			return p.rankCmd(p.seq, p.fileText)
+			cmd = p.rankCmd(p.seq, p.fileText)
 		}
 	case tea.MouseClickMsg:
-		return p.click(tea.Mouse(msg))
+		cmd = p.click(tea.Mouse(msg))
 	case tea.MouseMotionMsg:
 		m := tea.Mouse(msg)
 		if i, ok := p.rowAt(m.X, m.Y); ok {
@@ -319,9 +352,14 @@ func (p *Palette) update(msg tea.Msg) tea.Cmd {
 		}
 	default:
 		// The clipboard text that Ctrl+V asked for reaches the query line here.
-		return p.edit(msg)
+		cmd = p.edit(msg)
 	}
-	return nil
+	// Every message may have moved the highlight, so the preview of the selected row is
+	// read here, after the rows and the highlight are settled.
+	if next := p.previewCmd(); next != nil {
+		return tea.Batch(cmd, next)
+	}
+	return cmd
 }
 
 // Update handles one message through the overlay contract: it runs update and
@@ -355,8 +393,8 @@ func (p *Palette) Draw(g *grid.Grid) {
 	p.paint(g)
 }
 
-// key runs the key press: a list key moves the highlight or runs the row, and any
-// other key goes to the query line.
+// key runs the key press: a list key moves the highlight or runs the row, a Live Grep
+// toggle key flips its mode or scope, and any other key goes to the query line.
 func (p *Palette) key(msg tea.KeyPressMsg) tea.Cmd {
 	switch tea.Key(msg).String() {
 	case "enter":
@@ -367,6 +405,11 @@ func (p *Palette) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "down":
 		p.nav.Select(p.nav.Selected() + 1)
 		return nil
+	}
+	if p.live {
+		if cmd, ok := p.liveKey(tea.Key(msg).Keystroke()); ok {
+			return cmd
+		}
 	}
 	return p.edit(msg)
 }
@@ -425,7 +468,7 @@ func (p *Palette) Covers(x, y, w, h int) bool {
 	if !p.open || w <= 0 || h <= 0 {
 		return false
 	}
-	geo := layoutFor(w, h)
+	geo := p.layout(w, h)
 	return x > geo.left && x < geo.right && y >= geo.top && y <= geo.bottom
 }
 
@@ -435,11 +478,14 @@ func (p *Palette) rowAt(x, y int) (int, bool) {
 	if p.height <= 0 {
 		return 0, false
 	}
-	geo := layoutFor(p.width, p.height)
+	geo := p.layout(p.width, p.height)
 	if x <= geo.left || x >= geo.right {
 		return 0, false
 	}
-	k := y - geo.top - 1
+	if geo.preview && x >= geo.divX {
+		return 0, false // the preview column is not a row
+	}
+	k := y - geo.rowsTop
 	first, count := p.nav.Window()
 	if k < 0 || k >= geo.rows || k >= count {
 		return 0, false
@@ -447,9 +493,10 @@ func (p *Palette) rowAt(x, y int) (int, bool) {
 	return first + k, true
 }
 
-// syncSize gives the list navigation the row count and the box height.
+// syncSize gives the list navigation the row count and the box height. The Live Grep
+// toolbar takes one row from the frame, so the height comes from the layout.
 func (p *Palette) syncSize() {
-	p.nav.SetSize(len(p.rows), visibleRows(p.height))
+	p.nav.SetSize(len(p.rows), layoutForMode(0, p.height, p.layoutMode()).rows)
 }
 
 // requery recomputes the rows after the query changed and returns the command
@@ -465,6 +512,7 @@ func (p *Palette) requery() tea.Cmd {
 	mode, text := commands.ParseQuery(query)
 	if mode != commands.ModeFile {
 		p.inFile = false
+		p.fileLine, p.fileCol = 0, 0
 		p.rows = p.rowsFor(query)
 		p.syncSize()
 		p.nav.Select(0)
@@ -477,8 +525,10 @@ func (p *Palette) requery() tea.Cmd {
 		p.nav.Select(0)
 	}
 	p.inFile = true
-	p.fileText = text
-	return p.rankCmd(p.seq, text)
+	// A "path:line[:col]" query ranks the path and names the position the preview
+	// highlights and Enter jumps to, as Fresh's file finder documents.
+	p.fileText, p.fileLine, p.fileCol = parseFileTarget(text)
+	return p.rankCmd(p.seq, p.fileText)
 }
 
 // rankCmd returns the command that ranks the files for text against the index as
@@ -507,7 +557,7 @@ func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
 	if msg.Seq != p.seq || !p.inFile {
 		return nil
 	}
-	p.rows = fileRows(msg.Matches, msg.Loading)
+	p.rows = fileRows(msg.Matches, msg.Loading, p.fileLine, p.fileCol)
 	p.syncSize()
 	if msg.Text != p.shown {
 		p.nav.Select(0)
@@ -591,14 +641,15 @@ func (p *Palette) bufferRows(text string) []row {
 }
 
 // fileRows turns a ranked result into rows. With no match while the index still
-// runs, the loading row shows.
-func fileRows(matches []Ranked, loading bool) []row {
+// runs, the loading row shows. line and col are the position the query named, which
+// Enter opens at and the preview highlights; both are 0 when it named none.
+func fileRows(matches []Ranked, loading bool, line, col int) []row {
 	if len(matches) == 0 && loading {
 		return loadingRows()
 	}
 	rows := make([]row, 0, len(matches))
 	for _, m := range matches {
-		rows = append(rows, row{kind: rowFile, name: m.Path, source: "file", rel: m.Path, hl: m.Indexes})
+		rows = append(rows, row{kind: rowFile, name: m.Path, source: "file", rel: m.Path, hl: m.Indexes, line: line, col: col})
 	}
 	return rows
 }
@@ -617,24 +668,35 @@ func (r row) command(root string) tea.Cmd {
 	case rowCommand:
 		msg = RunCommandMsg{Action: r.action}
 	case rowFile:
-		msg = OpenFileMsg{Path: filepath.Join(root, r.rel), Rel: r.rel}
+		msg = OpenFileMsg{Path: filepath.Join(root, r.rel), Rel: r.rel, Line: r.line, Col: r.col}
 	case rowBuffer:
 		msg = ActivateBufferMsg{Index: r.index}
 	case rowLine:
 		msg = GotoLineMsg{Line: r.line, Col: r.col}
 	case rowGrep:
-		msg = OpenLineMsg{Path: filepath.Join(root, r.rel), Line: r.line, Col: r.col}
+		if r.grepSource == GrepBuffers {
+			msg = OpenBufferLineMsg{Index: r.index, Line: r.line, Col: r.col}
+		} else {
+			msg = OpenLineMsg{Path: filepath.Join(root, r.rel), Line: r.line, Col: r.col}
+		}
 	default:
 		return nil
 	}
 	return func() tea.Msg { return msg }
 }
 
-// emptyText is what an empty box says in the mode of the query. Live Grep has
-// its own text.
+// emptyText is what an empty box says in the mode of the query. Live Grep has its own
+// text: a hint before the first search, why nothing can be searched when both sources
+// are off, and the no-results state after one.
 func (p *Palette) emptyText() string {
 	if p.live {
-		return "No matches in files"
+		switch {
+		case p.input.Value() == "":
+			return "Type to search the files"
+		case !p.grep.sources.Files && !p.grep.sources.Buffers && !p.grep.sources.Ignored:
+			return "Turn on Files or Buffers to search"
+		}
+		return "No matches"
 	}
 	return modeEmptyText(p.mode())
 }

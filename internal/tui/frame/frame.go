@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
@@ -71,26 +72,27 @@ func barLabels(explorerFocus bool) []string {
 // Input is the state the geometry depends on. It is plain data, so
 // ComputeLayout is a pure function of the terminal size and this value.
 type Input struct {
-	ExplorerOpen     bool
-	ExplorerFocus    bool // "Explorer" joins the menu bar while focus is there
-	ExplorerOverride int  // width set by a grip drag; 0 means automatic
-	ExplorerRows     int  // visible tree rows, used by hit testing
-	FindRows         int  // rows the find bar takes at the bottom; zero when it is closed
-	Lines            int  // line count of the document, which sizes the gutter
-	Tabs             []TabInfo
-	TabFirst         int  // the tab Strip's scroll position, a tab index
-	Welcome          bool // no tab is open, so the welcome screen replaces the editor
-	Recents          []string
-	DoorKeys         []string // the welcome doors' shortcuts in the active keymap; nil for the defaults
-	Status           StatusView
-	HideMenuBar      bool       // the menu band is not drawn; the tab Strip takes row 0
-	HideStatus       bool       // a suggestion list or the file browser is open
-	HideLineNumbers  bool       // the gutter is not drawn
-	DockOpen         bool       // the terminal dock is shown (internal/tui/dock); it takes rows under the body
-	HideTabBar       bool       // the tab Strip row is not drawn; the body takes it
-	ShowPromptLine   bool       // reserve the prompt row under the status row (only while a prompt is open)
-	HideVScroll      bool       // the vertical scrollbar is not drawn, so its column is text
-	IconMode         icons.Mode // the glyphs of the explorer buttons and the tab buttons
+	ExplorerOpen    bool
+	ExplorerFocus   bool           // "Explorer" joins the menu bar while focus is there
+	ExplorerWidth   explorer.Width // file_explorer.width; the zero value is gvim's automatic width
+	ExplorerSide    explorer.Side  // file_explorer.side: the frame edge the column sits on
+	ExplorerRows    int            // visible tree rows, used by hit testing
+	FindRows        int            // rows the find bar takes at the bottom; zero when it is closed
+	Lines           int            // line count of the document, which sizes the gutter
+	Tabs            []TabInfo
+	TabFirst        int  // the tab Strip's scroll position, a tab index
+	Welcome         bool // no tab is open, so the welcome screen replaces the editor
+	Recents         []string
+	DoorKeys        []string // the welcome doors' shortcuts in the active keymap; nil for the defaults
+	Status          StatusView
+	HideMenuBar     bool       // the menu band is not drawn; the tab Strip takes row 0
+	HideStatus      bool       // a suggestion list or the file browser is open
+	HideLineNumbers bool       // the gutter is not drawn
+	DockOpen        bool       // the terminal dock is shown (internal/tui/dock); it takes rows under the body
+	HideTabBar      bool       // the tab Strip row is not drawn; the body takes it
+	ShowPromptLine  bool       // reserve the prompt row under the status row (only while a prompt is open)
+	HideVScroll     bool       // the vertical scrollbar is not drawn, so its column is text
+	IconMode        icons.Mode // the glyphs of the explorer buttons and the tab buttons
 
 	// Sidebar is the section stack of the explorer column, top to bottom: the
 	// explorer and the Contents section while it is open. Nil is a column of
@@ -373,10 +375,13 @@ type Layout struct {
 	// bar is shown, and then the tree body from ExBodyTop down. ex is zero when
 	// the panel is hidden.
 	ExplorerOpen bool
-	Ex           int
-	ExTitleY     int // the title row, aligned with the tab Strip
-	ExBodyTop    int // the first row of the tree body
-	ExBottom     int // bottom border row, the last body row
+	Ex           int  // the column's width
+	ExX          int  // the column's first cell: 0 on the left, W-Ex on the right
+	ExRight      bool // the column is against the right edge
+	EditorW      int  // the editor area's width; its first cell is EditorX
+	ExTitleY     int  // the title row, aligned with the tab Strip
+	ExBodyTop    int  // the first row of the tree body
+	ExBottom     int  // bottom border row, the last body row
 	ExRows       int
 	ExReloadX    int // column of the refresh button, -1 when the button is not drawn
 	ExCloseX     int // column of the close button, -1 when the button is not drawn
@@ -461,9 +466,6 @@ func ComputeLayout(w, h int, in Input) Layout {
 		l.StatusY--
 	}
 	l.StatusOn = !in.HideStatus
-	if l.StatusOn {
-		l.setNotice(in.Status, in.explorerWidth(w))
-	}
 	l.BodyBottom = l.StatusY - 1
 	if !l.StatusOn {
 		l.BodyBottom = l.StatusY
@@ -473,8 +475,17 @@ func ComputeLayout(w, h int, in Input) Layout {
 	}
 	bodyRows := l.BodyBottom - l.BodyTop + 1
 
+	// The explorer column comes first: its side decides the editor rectangle the
+	// notice band, the panes, the tab strip and the welcome screen are measured
+	// against.
 	l.setExplorer(in)
-	l.EditorX = l.Ex
+	l.EditorX, l.EditorW = 0, w-l.Ex
+	if !l.ExRight {
+		l.EditorX = l.Ex
+	}
+	if l.StatusOn {
+		l.setNotice(in.Status, l.EditorX, l.EditorW)
+	}
 	l.placePanes(in)
 	if in.HideVScroll {
 		l.hideScrollbars()
@@ -483,10 +494,10 @@ func ComputeLayout(w, h int, in Input) Layout {
 	if l.MenuOn {
 		l.MenuRuns = MenuRuns(in.ExplorerFocus)
 	}
-	l.Strip = PlaceStrip(l.EditorX, w, in.Tabs, in.TabFirst, in.IconMode)
+	l.Strip = PlaceStrip(l.EditorX, l.EditorX+l.EditorW, in.Tabs, in.TabFirst, in.IconMode)
 	if in.Welcome {
 		l.WelcomeOn = true
-		l.Welcome = WelcomeLines(l.EditorX, max(w-l.EditorX, 0), l.BodyTop, bodyRows, in.Recents, in.DoorKeys)
+		l.Welcome = WelcomeLines(l.EditorX, l.EditorW, l.BodyTop, bodyRows, in.Recents, in.DoorKeys)
 	}
 	if l.StatusOn {
 		st := in.Status
@@ -501,39 +512,31 @@ func ComputeLayout(w, h int, in Input) Layout {
 
 // setNotice wraps a status message that does not fit the status row onto the rows
 // above it. The rows are the body's, drawn over, and the first body row stays. The band
-// starts at column x0, the editor's left edge, so an open explorer keeps its border.
-func (l *Layout) setNotice(s StatusView, x0 int) {
+// spans the editor area (x0, width), so an open explorer keeps its border.
+func (l *Layout) setNotice(s StatusView, x0, width int) {
 	room := min(l.StatusY-l.BodyTop-1, MaxNoticeRows)
 	if room <= 0 {
 		return
 	}
-	if rows := statusNotice(l.W, x0, s, room); len(rows) > 0 {
+	if rows := statusNotice(l.W, x0, width, s, room); len(rows) > 0 {
 		l.Notice = rows
 		l.NoticeX = x0
 		l.NoticeY = l.StatusY - len(rows)
 	}
 }
 
-// explorerWidth is the columns the explorer panel takes at the left of a w cells wide
-// frame, or zero when it is closed.
-func (in Input) explorerWidth(w int) int {
-	if !in.ExplorerOpen {
-		return 0
-	}
-	return ExplorerCols(w, in.ExplorerOverride)
-}
-
 // statusNotice is the message of s wrapped to the rows of the notice band, at most
-// maxRows of them, or nil when the status row shows the whole message. The band runs
-// from column x0 to the right edge. The full text is in Show Warnings.
-func statusNotice(w, x0 int, s StatusView, maxRows int) []string {
-	if s.Message == "" || w < noticeMinWidth || w-x0-2*space.PadX < noticeMinText {
+// maxRows of them, or nil when the status row shows the whole message. The band
+// spans the editor area: x0 is its first column and width its width. The status
+// row itself still spans the whole frame. The full text is in Show Warnings.
+func statusNotice(frameW, x0, width int, s StatusView, maxRows int) []string {
+	if s.Message == "" || width < noticeMinWidth || width-2*space.PadX < noticeMinText {
 		return nil
 	}
-	if _, cut := statusRunsCut(w, s); !cut {
+	if _, cut := statusRunsCut(frameW, s); !cut {
 		return nil
 	}
-	return noticeRows(s.Message, w-x0-2*space.PadX, maxRows)
+	return noticeRows(s.Message, width-2*space.PadX, maxRows)
 }
 
 // noticeRows wraps text onto at most maxRows rows of width cells. A text that needs more
@@ -644,7 +647,12 @@ func (l *Layout) setExplorer(in Input) {
 		return
 	}
 	l.ExplorerOpen = true
-	l.Ex = ExplorerCols(l.W, in.ExplorerOverride)
+	l.Ex = ExplorerCols(l.W, in.ExplorerWidth)
+	l.ExRight = in.ExplorerSide == explorer.SideRight
+	l.ExX = 0
+	if l.ExRight {
+		l.ExX = l.W - l.Ex
+	}
 	l.ExBottom = l.BodyBottom
 	specs := in.Sidebar
 	if len(specs) == 0 {
@@ -661,7 +669,9 @@ func (l *Layout) setExplorer(in Input) {
 			Collapsed: sec.Collapsed,
 		}
 		h := sidebar.HeaderFor(l.Ex, in.IconMode, spec)
-		l.SectionReload[i], l.SectionClose[i] = h.Reload, h.Close
+		// The buttons are frame columns: the header is measured from the
+		// column's first cell, which is 0 only on the left side.
+		l.SectionReload[i], l.SectionClose[i] = buttonColumn(h.Reload, l.ExX), buttonColumn(h.Close, l.ExX)
 	}
 	if len(l.Sections) == 0 {
 		l.ExBodyTop = l.ExTitleY + 1
@@ -680,17 +690,39 @@ func GutterWidth(lines int) int {
 	return editorpane.GutterWidth(lines)
 }
 
-// ExplorerCols is the explorer width E (spec section 3). The automatic width is
-// 32 columns, and a grip drag sets the override. Both are clamped to [16, 60],
-// and the upper bound drops to W-20 on a narrow frame so the editor keeps room.
-// The width never exceeds the frame.
-func ExplorerCols(w, override int) int {
-	e := explorerDefaultWidth
-	if override != 0 {
-		e = override
+// ExplorerCols is the explorer width E (spec section 3). file_explorer.width
+// gives it (a percent of the frame or a column count); the zero value keeps
+// gvim's automatic width of 32 columns. Either way the width is clamped to
+// [16, 60], and the upper bound drops to W-20 on a narrow frame so the editor
+// keeps room. The width never exceeds the frame.
+func ExplorerCols(w int, width explorer.Width) int {
+	e := width.Cols(w)
+	if width.Mode == explorer.WidthAutomatic {
+		e = explorerDefaultWidth
 	}
 	hi := min(explorerMaxWidth, max(w-explorerEditorMin, explorerMinWidth))
 	return min(max(e, explorerMinWidth), hi, w)
+}
+
+// buttonColumn is a header button's frame column: rel is measured from the
+// column's first cell x, which is 0 on the left side. -1 stays -1.
+func buttonColumn(rel, x int) int {
+	if rel < 0 {
+		return -1
+	}
+	return x + rel
+}
+
+// InExplorer reports whether column x is in the explorer column. A hidden or
+// absent column has no cells.
+func (l Layout) InExplorer(x int) bool {
+	return l.ExplorerOpen && x >= l.ExX && x < l.ExX+l.Ex
+}
+
+// InEditor reports whether column x is in the editor area: the tab strip, the
+// welcome screen, the panes and the notice band all share that width.
+func (l Layout) InEditor(x int) bool {
+	return x >= l.EditorX && x < l.EditorX+l.EditorW
 }
 
 // MenuRuns places the menu bar labels (section 4.5). A label is shown with

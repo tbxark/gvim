@@ -174,7 +174,7 @@
     {"key": "c", "modifiers": ["ctrl"], "action": "copy", "when": "file_explorer"},
     {"key": "x", "modifiers": ["ctrl"], "action": "cut", "when": "file_explorer"},
     {"key": "v", "modifiers": ["ctrl"], "action": "paste", "when": "file_explorer"},
-    {"comment": "Terminal context - Exit terminal mode (Ctrl+Space)", "key": " ", "modifiers": ["ctrl"], "action": "terminal_escape", "when": "terminal"},
+    {"comment": "Terminal context - Live/scrollback switch when the shell has history, else exit terminal mode; Ctrl+] always exits (docs/terminal.md)", "key": " ", "modifiers": ["ctrl"], "action": "terminal_escape", "when": "terminal"},
     {"comment": "Terminal context - Exit terminal mode (Ctrl+])", "key": "]", "modifiers": ["ctrl"], "action": "terminal_escape", "when": "terminal"},
     {"comment": "Terminal context - Toggle keyboard capture (F9)", "key": "F9", "modifiers": [], "action": "toggle_keyboard_capture", "when": "terminal"},
     {"comment": "Terminal context - Paste clipboard contents (Ctrl+V)", "key": "v", "modifiers": ["ctrl"], "action": "terminal_paste", "when": "terminal"},
