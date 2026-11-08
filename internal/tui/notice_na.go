@@ -8,7 +8,6 @@ import tea "charm.land/bubbletea/v2"
 // on the status row, so the palette does not report it as unsupported.
 var notApplicable = map[string]string{
 	"detach":                  "gvim has no server to detach from. The session is saved when gvim quits, and the next start restores it.",
-	"workspace_trust_prompt":  "gvim has no workspace trust model, so there is nothing to trust, restrict or block.",
 	"update_fresh":            "gvim does not update itself. Install a newer build of the binary to update it.",
 	"open_update_log":         "gvim does not update itself, so it has no update output to show.",
 	"trigger_wave_animation":  "The wave is a Fresh easter egg, and gvim does not animate the screen.",

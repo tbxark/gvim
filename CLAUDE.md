@@ -113,9 +113,10 @@ several files to see:
   `uitest`). TUI-free engine and library packages are at the
   module top level: `buffer`, `document`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,
   `session`, `decorations`, `textlayout`, `workspace`, `explorer`, `finder`, `fuzzy`,
-  `fsops`, `gitstate`, `config`, `keymap`, `theme`, `lsp`, `pluginapi`, `plugin`,
-  `commands`, the LSP manager/test support (`lsp/manager`, `lsp/lsptest`), the plugin OS
-  port (`plugin/hostos`), and the shared leaves `atomicfile` and `shellcmd`.
+  `fsops`, `gitstate`, `config`, `keymap`, `theme`, `trust`, `outline` (the Markdown
+  heading scan behind the sidebar's Contents section), `lsp`, `pluginapi`,
+  `plugin`, `commands`, the LSP manager/test support (`lsp/manager`, `lsp/lsptest`), the
+  plugin OS port (`plugin/hostos`), and the shared leaves `atomicfile` and `shellcmd`.
 - Import direction: engine → shell, never the reverse. No top-level package imports
   `internal/`. Only `internal/app` imports the host packages (`uiadapter`, `pluginhost`,
   `lsphost`, `restore`, `keybindings`, `highlight`); only `internal/app` and
@@ -131,15 +132,18 @@ several files to see:
 - `internal/tui` is one Bubble Tea v2 root model (`package tui`). It depends on
   interfaces it defines in `ports.go` (`EditorState`, `Document`, ...); `app` satisfies
   them with adapters. `tui` must not import concrete `finder`, `fsops`, `lsp` or the
-  plugin runtime; its sub-packages (`overlay`, `list`, `frame`, `split`, `tabstrip`, `dock`,
+  plugin runtime; its sub-packages (`overlay`, `list`, `frame`, `sidebar` (the explorer
+  column's section stack and Contents widget), `split`, `tabstrip`, `dock`,
   `editorpane`, `menubar`,
   `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`, `ctxmenu`,
   `dialog`, `style`, `grid`, `icons`, `space`) must not import the root
   `tui`.
   `internal/tui/frame` is the single geometry source for painting and the hit map;
   `internal/tui/split` owns the split tree and `internal/tui/tabstrip` the strip paint.
+  The sidebar column, its sections and the Markdown Contents section are recorded in
+  `docs/sidebar.md`.
 - Engine packages (`buffer`, `document`, `editor`, `search`, `syntax`, `fold`, `diff`,
-  `encoding`, `session`, `decorations`, `textlayout`) are TUI-free: no bubbletea, bubbles or
+  `encoding`, `session`, `decorations`, `textlayout`, `outline`) are TUI-free: no bubbletea, bubbles or
   lipgloss. `document` is the per-file model; `editor` is the tab/action session over it. `internal/tui/style` is the only place theme data becomes lipgloss styles.
 - Rendering is a custom cell grid (`internal/tui/grid`) on `charmbracelet/x/ansi`, not
   bubbles `viewport`/`textarea`. `Update` does no IO: file and finder work runs in

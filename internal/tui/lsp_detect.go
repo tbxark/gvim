@@ -310,11 +310,11 @@ func diagPosition(list []Diagnostic, d Diagnostic) string {
 	return strconv.Itoa(i+1) + "/" + strconv.Itoa(len(list))
 }
 
-// lspShowsWarnings reports whether the status row keeps a slot for the diagnostics counter:
+// lspShowsDiags reports whether the status row keeps a slot for the diagnostics counter:
 // the active document is open on a server, or already has diagnostics. A document with no
 // server, a language whose program is missing, a plain text file, shows no slot, so the
 // message column keeps its width.
-func (m *Model) lspShowsWarnings() bool {
+func (m *Model) lspShowsDiags() bool {
 	doc := m.ed.Active()
 	if m.lsp.port == nil || doc == nil {
 		return false
@@ -322,7 +322,7 @@ func (m *Model) lspShowsWarnings() bool {
 	if tr := m.lsp.tracks[docPath(doc)]; tr != nil && tr.state == lspOpen {
 		return true
 	}
-	return m.lspWarnings() > 0
+	return m.lspDiagCounts().Any()
 }
 
 // lspCanFormat reports whether the language server of the active document can format it now:
@@ -339,42 +339,68 @@ func (m *Model) lspCanFormat() bool {
 	return tr != nil && tr.state == lspOpen
 }
 
-// lspPill is the language-server pill of the status row for the active document, as Fresh's LSP
-// indicator: "LSP" when its server runs, "LSP (off)" when the language has a server that is
-// switched off or does not start on its own, and "LSP (missing)" or "LSP (failed)" when it could
-// not start. It is "" for a document whose language has no server. It reads the root's own
-// state and the port's table only, so it can run on every frame.
+// lspPill is the language-server pill of the status row for the active document. Its states
+// follow Fresh's LSP indicator, in Fresh's priority order, with gvim's more precise wording
+// where the program itself is the problem:
+//
+//	"LSP (n/a)"     the buffer-level skip (a large file, LSP off for the buffer) while the
+//	                language's server runs for another buffer
+//	"LSP (missing)" the program is not installed
+//	"LSP (failed)"  the program started and failed its handshake
+//	"LSP …"         the server is starting (Fresh shows a spinner here)
+//	"LSP"           the document is open on its server
+//	"LSP (off)"     a server is configured for the language but none runs: it is switched
+//	                off, does not start on its own, or was stopped
+//
+// It is "" for a document whose language has no server. It reads the root's own state and
+// the port's table only, so it can run on every frame.
 func (m *Model) lspPill() string {
 	s := &m.lsp
 	doc := m.ed.Active()
-	if s.port == nil || doc == nil || docPath(doc) == "" || isVirtualDoc(doc) || isLargeDoc(doc) {
+	if s.port == nil || doc == nil || docPath(doc) == "" || isVirtualDoc(doc) {
 		return ""
 	}
 	lang := m.lspLanguage(doc)
+	path := docPath(doc)
+	// Fresh's compose_lsp_status puts the per-buffer skip first, but only when it is a
+	// mismatch with a running language: a document whose server was stopped shows the
+	// language-level state ("off"), which is the more useful one.
+	if (isLargeDoc(doc) || s.off[path]) && s.runningFor(lang) {
+		return "LSP (n/a)"
+	}
 	if ue := s.unavailable[lang]; ue != nil {
 		if ue.Missing {
 			return "LSP (missing)"
 		}
 		return "LSP (failed)"
 	}
-	if s.enabled(lang) {
-		switch tr := s.tracks[docPath(doc)]; {
-		case s.off[docPath(doc)]:
-			return "LSP (off)"
+	if s.enabled(lang) && !isLargeDoc(doc) && !s.off[path] {
+		switch tr := s.tracks[path]; {
 		case tr != nil && tr.state == lspOpen:
 			return "LSP"
 		case tr != nil:
 			return "LSP …"
 		}
-		return ""
 	}
-	if s.stopped && m.lspStartable(lang) {
-		return "LSP (stopped)"
-	}
+	// Nothing runs for the language. A configured server — switched off, dormant,
+	// stopped, or built in but never started — is Fresh's "LSP (off)": it tells the
+	// user there is a server to start, unlike a language with no server at all.
 	if d, ok := s.port.(lspDescriber); ok {
 		if info := d.Server(lang); info.State != LSPServerNone && info.Command != "" {
 			return "LSP (off)"
 		}
 	}
 	return ""
+}
+
+// runningFor reports whether the server of language lang is running: a document of the
+// language is open on it, or its open is in flight. Fresh counts its Starting and
+// Initializing states as running for the per-buffer skip.
+func (s *lspState) runningFor(lang string) bool {
+	for _, tr := range s.tracks {
+		if tr.lang == lang && tr.state != lspClosed {
+			return true
+		}
+	}
+	return false
 }

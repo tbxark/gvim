@@ -10,10 +10,23 @@ there waits to be started from the palette, while its documentation says it is u
 gvim follows the documentation and starts a built-in server when a file opens. An entry with
 `"auto_start": false` (see below) gives the Fresh behaviour for one language.
 
-The status row has an `LSP` pill next to the language: `LSP` when the server of the file runs,
-`LSP (off)` when the language has a server that is switched off or does not start on its own,
-`LSP (missing)` when its program is not installed and `LSP (failed)` when it did not start.
-Click it, or run **Show LSP Status**, for the details. A language with no server shows no pill.
+The status row has an `LSP` pill for the active file. Its states follow Fresh's LSP
+indicator, in Fresh's priority order, with gvim's wording where Fresh's is less precise:
+
+| Pill | Meaning |
+|------|---------|
+| `LSP` | the file is open on its language server |
+| `LSP …` | the server is starting (Fresh shows a spinner in this state) |
+| `LSP (off)` | a server is configured for the language, but none runs: switched off, dormant (`auto_start: false`), started by hand and stopped, or turned off for this buffer |
+| `LSP (missing)` | the server's program is not installed (Fresh has no state for this: it reports `LSP (error)` only after a failed start) |
+| `LSP (failed)` | the program started and failed its handshake (Fresh's `LSP (error)`) |
+| `LSP (n/a)` | this buffer is skipped (a large file, or LSP off for the buffer) while the language's server runs for another open buffer (Fresh's `LSP (n/a)`) |
+
+A language with no server shows no pill. Click it, or run **Show LSP Status**, for the
+details. The states are Fresh's priority order: the per-buffer `(n/a)` first, then a failure,
+then starting and running, and last the language-level `(off)`. gvim adds no fixed-width
+padding to the pill (Fresh pads it to 11 cells so the bar does not shift): the right group is
+right-aligned, and the blank slot before the count badge keeps the badge's columns for it.
 
 Nothing is started when the program is missing. The first time a file of that language opens, the
 status row says what is missing and how to get it, once per language and session:
@@ -127,12 +140,25 @@ set it in the user config, and your own entries stay as they are. A project file
 are added to yours; they never replace them. The programs of the built-in table are found on your
 `PATH`, as Fresh does.
 
+Workspace trust adds a second gate above this rule: the whole project layer, this key included, is
+read only when the workspace is Trusted (see [workspace trust](trust.md)). An untrusted workspace
+also starts no language server on its own — `lsp_enabled` is forced off for the session, so the
+status row shows `LSP (off)`; **Start/Restart LSP Server** still starts one, as Fresh's manual
+start does in a restricted workspace.
+
 While a server is off or missing, the editor works as before: syntax colors, completion of the
 words in the buffer and everything else do not depend on it.
 
 ## What the servers add
 
-- **Diagnostics.** The status row counts the errors and warnings of the active file as `[⚠ N]`.
+- **Diagnostics.** The status row counts the diagnostics of the active file next to the pill,
+  as Fresh's diagnostics element does: `[E:1 W:2 I:3]`, errors, warnings, and info and hints
+  together, each part only when its count is above zero. The counts are the stored diagnostics
+  of the file, so they stay on the row while the pill says the server is missing, failed or off,
+  and they go when the server is stopped, as Fresh's do. While the server runs with no count
+  known yet the row keeps a blank seven-cell slot, so the right group does not jump when the
+  first diagnostic arrives; on a narrow row the palette hint and then the badge are dropped,
+  and the pill keeps its place.
   Each affected line has a dot in the gutter, in the color of its worst severity, and the
   offending text is underlined. **Jump to Next Error** and **Jump to Previous Error** move to the
   next and previous error or warning and show its message in the status row. They are `F8` and

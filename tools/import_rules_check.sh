@@ -29,7 +29,8 @@
 #   top level (no internal/):    the TUI-free engine and shared libraries
 #     buffer, document, editor, search, syntax, fold, diff, encoding, session,
 #     decorations, textlayout, config, keymap, theme, workspace, explorer,
-#     finder, fuzzy, fsops, gitstate, lsp, pluginapi, plugin, commands
+#     finder, fuzzy, fsops, gitstate, trust, lsp, pluginapi, plugin, commands,
+#     outline
 #
 # Rules:
 #   R1  no top-level (non-cmd, non-internal) package imports internal/.
@@ -40,8 +41,8 @@
 #   R3  leaf packages import no module package: buffer, textlayout, diff,
 #       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp,
 #       lsp/lsptest, atomicfile, shellcmd, config, explorer, keymap,
-#       plugin/bundled, plugin/pattern. (lsp/manager sits above lsp and may
-#       import it.)
+#       plugin/bundled, plugin/pattern, outline. (lsp/manager sits above lsp and
+#       may import it.)
 #   R4  engine direction: document (the per-file model) imports only its leaf
 #       packages (buffer, search, syntax, textlayout, fold, diff, encoding,
 #       atomicfile, shellcmd), never editor, session or internal/; editor may
@@ -50,7 +51,8 @@
 #       config; search must not import editor or document; syntax imports only
 #       theme among module packages; session imports only buffer, document and
 #       atomicfile; commands imports only fuzzy and keymap; workspace imports
-#       only config; finder imports only explorer and fuzzy.
+#       only config; trust imports only config and atomicfile; finder imports
+#       only explorer and fuzzy.
 #   R5  the TUI tree must not import internal/app, internal/cli, the plugin
 #       runtime, lsp, finder or fsops; a tui sub-package must not import its
 #       parent package (internal/tui).
@@ -156,7 +158,7 @@ while IFS=$'\t' read -r pkg imp; do
   if [ "$ours" = 1 ]; then
     # R3: leaf packages have no module dependency at all.
     case "$rel" in
-      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd | config | explorer | keymap | plugin/bundled | plugin/pattern)
+      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd | config | explorer | keymap | plugin/bundled | plugin/pattern | outline)
         add R3 "$pkg" "$imp"
         ;;
     esac
@@ -191,6 +193,9 @@ while IFS=$'\t' read -r pkg imp; do
       add R4 "$pkg" "$imp"
     fi
     if [ "$rel" = finder ] && [ "$irel" != explorer ] && [ "$irel" != fuzzy ]; then
+      add R4 "$pkg" "$imp"
+    fi
+    if [ "$rel" = trust ] && [ "$irel" != config ] && [ "$irel" != atomicfile ]; then
       add R4 "$pkg" "$imp"
     fi
 

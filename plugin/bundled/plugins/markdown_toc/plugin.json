@@ -1,6 +1,0 @@
-{
-  "name": "markdown_toc",
-  "version": "1.0.0",
-  "description": "Markdown: Show Outline lists the headings of a Markdown buffer in a split; Enter jumps to one",
-  "api": 1
-}

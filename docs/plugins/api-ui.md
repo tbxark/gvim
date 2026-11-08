@@ -96,7 +96,7 @@ item:set(text)  item:show()  item:hide()  item:remove()
 
 `id` names the item inside your plugin (a second item with the same id is `conflict`). `align` is
 `"left"` (between the position and the message) or `"right"` (between the language segment and the
-warning counter). Higher `priority` comes first and is dropped last when the row is full. At most 8
+diagnostics count). Higher `priority` comes first and is dropped last when the row is full. At most 8
 items per plugin, each text at most 80 display cells, one line. `on_click` runs as a hidden command
 with the command budget. A mode's `status` label is always the first left item.
 

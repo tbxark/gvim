@@ -32,6 +32,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/internal/tui/tabstrip"
@@ -78,11 +79,19 @@ type Model struct {
 	searchSeed *find.State
 
 	width, height int
-	explorerOpen  bool       // the panel is shown
-	explorerFocus bool       // the panel has keyboard focus
-	tabFocus      bool       // the tab strip has keyboard focus (F6 cycle)
-	chord         []KeyPress // the first keys of a multi-key binding, waiting for the next
-	dialogs       Dialogs    // the file dialogs; nil disables them
+	explorerOpen  bool // the panel is shown
+	explorerFocus bool // the panel has keyboard focus
+	tabFocus      bool // the tab strip has keyboard focus (F6 cycle)
+	// The Contents sidebar section (see markdown_toc.go): contents is its tree
+	// and settings, contentsFocus says it holds the keyboard, and
+	// explorerCollapsed folds the tree when the section is stacked under it.
+	contents          sidebar.Contents
+	contentsFocus     bool
+	explorerCollapsed bool
+	toc               tocState
+	divider           dividerState
+	chord             []KeyPress // the first keys of a multi-key binding, waiting for the next
+	dialogs           Dialogs    // the file dialogs; nil disables them
 	// hideMenuBar comes from Deps and stays put. hideLineNumbers starts from
 	// Deps and is flipped by toggle_line_numbers.
 	hideMenuBar     bool
@@ -127,6 +136,8 @@ type Model struct {
 	util utilities
 	// root is the state of the root features (see root.go).
 	root rootState
+	// trust is the workspace-trust state (see trust_state.go).
+	trust trustState
 	// notes is the log of the notices shown this session (see notice_warnings.go).
 	notes noticeLog
 	// lsp is the language-server state (see lsp.go).
@@ -194,6 +205,7 @@ func New(deps Deps) *Model {
 		splits:          newSplitSet(),
 		util:            utilities{settings: deps.Settings, switchKeymap: deps.SwitchKeymap},
 		root:            rootState{ports: deps.Root},
+		trust:           newTrustState(deps.Trust),
 		lsp:             lspState{port: deps.LSP},
 		view:            newViewState(viewOptionsOf(deps.View)),
 	}
@@ -221,6 +233,7 @@ func New(deps Deps) *Model {
 	if deps.Explorer != nil {
 		m.explorerPanel = expanel.New(deps.Explorer, st, now)
 	}
+	m.initContents(deps)
 	m.dialogs = deps.Dialogs
 	if deps.ShowExplorer && deps.Explorer != nil {
 		m.explorerOpen = true
@@ -231,6 +244,9 @@ func New(deps Deps) *Model {
 	}
 	m.installRowMapper()
 	m.plug = newPluginState(m, deps.Root)
+	// An undecided workspace that can execute code asks for the decision before
+	// the first frame, as Fresh's open-time trust prompt does.
+	m.startTrustPrompt()
 	return m
 }
 
@@ -314,6 +330,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before, beforeStatus := m.notice, m.ed.Status()
 	m.plug.ui.updates++
 	next, cmd := m.update(msg)
+	cmd = tea.Batch(cmd, m.contentsSync())
 	cmd = tea.Batch(cmd, m.lspUpdate(msg))
 	cmd = tea.Batch(cmd, m.dockSync())
 	cmd = tea.Batch(cmd, m.watchSync())
@@ -453,6 +470,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if td != nil {
 			m.dropTab(td)
 		}
+		m.releaseDivider()
 		cmd = m.explorerMouse(msg)
 	case tea.MouseWheelMsg:
 		// Scrolling is navigation, so a message ends with it as it does with a key or a click.
@@ -1338,6 +1356,11 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 	if cmd, ok := m.pluginKey(k); ok {
 		return cmd
 	}
+	// The Contents section has its own key set: it is a tree, not the editor, so
+	// its keys never type and the app-wide ones keep their Normal bindings.
+	if m.contentsFocus {
+		return m.contentsKey(kp, text)
+	}
 	ctx := KeyContextNormal
 	if m.explorerFocus {
 		ctx = KeyContextFileExplorer
@@ -1520,6 +1543,14 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 			return nil, false
 		}
 		m.explorerPanel.SearchBackspace(m.explorerGeometry(m.layout()))
+	case "markdown_toc_show":
+		m.markdownTOCShown()
+	case "markdown_toc_close":
+		m.markdownTOCClosed()
+	case "markdown_toc_toggle_follow":
+		m.markdownTOCToggleFollow()
+	case "markdown_toc_focus":
+		m.focusContents()
 	case "open":
 		m.openBrowser(false)
 	case "switch_project":
@@ -1624,7 +1655,14 @@ func (m *Model) explorerAction(action string) (tea.Cmd, bool) {
 
 // explorerGeometry is the panel's place in the frame laid out as l.
 func (m *Model) explorerGeometry(l layout) expanel.Geometry {
-	return expanel.Geometry{Width: l.Ex, Top: l.ExTitleY, Bottom: l.ExBottom, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
+	top, bottom := l.ExTitleY, l.ExBottom
+	if len(l.Sections) > 0 {
+		// The panel is the explorer's section now: its header row is the title,
+		// and the row after its body is the next section's header.
+		sec := l.Sections[0]
+		top, bottom = sec.HeaderY, sec.BodyBottom+1
+	}
+	return expanel.Geometry{Width: l.Ex, Top: top, Bottom: bottom, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
 }
 
 // handleClick routes a left press to the part of the frame under it, and a
@@ -1677,6 +1715,16 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		return cmd
 	case hitExplorerTitleClose, hitExplorerTitleReload, hitExplorerGrip:
 		return m.explorerMouse(msg)
+	case hitSidebarHeader:
+		return m.pressSidebarHeader(t.Section, mo.Y)
+	case hitSidebarClose:
+		m.closeContents()
+		return nil
+	case hitSidebarRow:
+		return m.pressContentsRow(t.Index, mo.X)
+	case hitSidebarBody:
+		m.takeContentsFocus()
+		return nil
 	case hitStatusPalette:
 		return m.openPalette(">")
 	case hitStatusSegment:
@@ -1761,6 +1809,10 @@ func (m *Model) placeCaret(pos buffer.Pos, count int) drag {
 // follows the nearest cell. It returns the command that keeps a text drag
 // scrolling while the pointer is held outside the pane.
 func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
+	if m.divider.active && mo.Button == tea.MouseLeft {
+		m.dragDivider(mo.Y)
+		return nil
+	}
 	if !m.drag.active || mo.Button != tea.MouseLeft {
 		return nil
 	}
@@ -1820,6 +1872,11 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	switch t.Kind {
 	case hitExplorerRow, hitExplorerBody, hitExplorerTitleClose, hitExplorerTitleReload, hitExplorerGrip:
 		return m.explorerMouse(msg)
+	case hitSidebarRow, hitSidebarBody, hitSidebarHeader:
+		m.wheelContents(mo.Button == tea.MouseWheelUp)
+		return nil
+	case hitSidebarClose:
+		return nil
 	case hitEditorText, hitGutter, hitScrollbarTrack:
 		if m.panWheel(t.Pane, mo) {
 			return nil
@@ -1859,6 +1916,8 @@ func (m *Model) focusExplorer() {
 	if m.tree == nil {
 		return
 	}
+	// The keyboard does not go to a folded section with no rows on screen.
+	m.explorerCollapsed = false
 	m.takeExplorerFocus()
 	m.followSelection()
 }
@@ -1876,11 +1935,15 @@ func (m *Model) takeExplorerFocus() {
 	m.tabFocus = false
 	m.dock.SetFocus(false)
 	m.explorerFocus = true
+	m.contentsFocus = false
+	m.contents.SetFocus(false)
 }
 
 // focusEditor gives keyboard focus back to the editor. The panel stays visible.
 func (m *Model) focusEditor() {
 	m.explorerFocus = false
+	m.contentsFocus = false
+	m.contents.SetFocus(false)
 	m.tabFocus = false
 	m.dock.SetFocus(false)
 }
@@ -1894,6 +1957,7 @@ const (
 	stageMenu
 	stageTabs
 	stageExplorer
+	stageContents
 )
 
 // stage reports where keyboard focus is now.
@@ -1905,6 +1969,8 @@ func (m *Model) stage() focusStage {
 		return stageTabs
 	case m.explorerFocus:
 		return stageExplorer
+	case m.contentsFocus:
+		return stageContents
 	}
 	return stageEditor
 }
@@ -1913,10 +1979,18 @@ func (m *Model) stage() focusStage {
 // editor, and back to the menu. F6 sends it. The menu is skipped while the menu
 // bar is hidden.
 func (m *Model) cycleFocus() {
-	order := []focusStage{stageMenu, stageTabs, stageExplorer, stageEditor}
-	if m.hideMenuBar {
-		order = order[1:]
+	var order []focusStage
+	if !m.hideMenuBar {
+		order = append(order, stageMenu)
 	}
+	order = append(order, stageTabs)
+	if m.tree != nil {
+		order = append(order, stageExplorer)
+	}
+	if m.contents.Open() {
+		order = append(order, stageContents)
+	}
+	order = append(order, stageEditor)
 	cur := m.stage()
 	next := stageEditor
 	for i := range order {
@@ -1944,6 +2018,8 @@ func (m *Model) setStage(s focusStage) {
 		m.tabFocus = true
 	case stageExplorer:
 		m.focusExplorer()
+	case stageContents:
+		m.focusContents()
 	default:
 		m.focusEditor()
 	}
@@ -1970,6 +2046,9 @@ func (m *Model) tabKey(kp KeyPress) tea.Cmd {
 func (m *Model) closeExplorer() {
 	m.explorerOpen = false
 	m.explorerFocus = false
+	m.contentsFocus = false
+	m.contents.SetFocus(false)
+	m.divider = dividerState{}
 	if m.tree != nil {
 		m.explorerPanel = expanel.New(m.tree, m.styles, m.now).CarryCut(m.explorerPanel)
 	}
@@ -2051,6 +2130,7 @@ func (m *Model) layoutInput() layoutInput {
 	if m.explorerOpen && m.tree != nil {
 		in.ExplorerOpen = true
 		in.ExplorerRows = len(m.tree.Rows()) - m.tree.ScrollOffset()
+		in.Sidebar = m.sidebarSpecs()
 	}
 	m.viewLayout(&in)
 	return in
@@ -2083,7 +2163,8 @@ func (m *Model) statusView() statusView {
 	if m.notice != "" {
 		s.Message = m.notice
 	}
-	s.WarnSlot, s.Warnings = m.lspShowsWarnings(), m.lspWarnings()
+	s.Trust, s.TrustWarn = m.trustStatus()
+	s.DiagSlot, s.Diags = m.lspShowsDiags(), m.lspDiagCounts()
 	s.LSP = m.lspPill()
 	if doc := m.ed.Active(); doc != nil {
 		c := doc.Cursor()
@@ -2171,7 +2252,7 @@ func (m *Model) paint() *grid.Grid {
 	m.dock.Draw(g, l, m.styles)
 	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip)
 	if l.ExplorerOpen {
-		m.explorerPanel.Draw(g, m.explorerGeometry(l))
+		m.paintSidebar(g, l)
 	}
 	m.paintStatus(g, l)
 	// The menu bar comes last among the frame bands, so an open dropdown covers
@@ -2225,7 +2306,7 @@ func (m *Model) caret() (x, y int, ok bool) {
 		}
 		return 0, 0, false
 	}
-	if m.explorerFocus {
+	if m.explorerFocus || m.contentsFocus {
 		return 0, 0, false
 	}
 	if m.dockKeyboard() {
@@ -2320,10 +2401,21 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 	}
 	bar := style.Cell(m.styles.Status)
 	palette := style.Cell(m.styles.Accent)
+	// A warning run, such as a Restricted or Blocked workspace-trust pill, keeps the
+	// bar's fill and takes the theme's warning foreground, as Fresh paints the trust
+	// pill with its WARNING role.
+	warning := bar
+	if fg := style.Cell(m.styles.DiagWarning).FG; fg != nil {
+		warning.FG = fg
+	}
+	warning.Bold = true
 	g.Fill(0, g.Width(), l.StatusY, bar)
 	for _, r := range l.Status {
 		st := bar
-		if r.Kind == hitStatusPalette {
+		switch {
+		case r.Style == frame.StyleWarning:
+			st = warning
+		case r.Kind == hitStatusPalette:
 			st = palette
 		}
 		g.Put(r.X, l.StatusY, g.Width(), r.Text, st)

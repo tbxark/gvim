@@ -14,6 +14,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/syntax"
@@ -857,8 +858,8 @@ func TestDiagnosticsReachThePaneAndTheStatusRow(t *testing.T) {
 	if got := spans(0); len(got) != 0 {
 		t.Fatalf("spans(0) = %+v, want none", got)
 	}
-	if got := lt.m.statusView().Warnings; got != 2 {
-		t.Fatalf("warnings = %d, want 2", got)
+	if got, want := lt.m.statusView().Diags, (frame.DiagCounts{Errors: 1, Warnings: 1}); got != want {
+		t.Fatalf("diagnostics badge = %+v, want %+v", got, want)
 	}
 }
 
@@ -870,8 +871,8 @@ func TestDiagnosticsAreClearedByAnEmptyEvent(t *testing.T) {
 		{Start: buffer.Pos{}, End: buffer.Pos{Col: 1}, Severity: 1},
 	}}}})
 	lt.feed(lspDiagsMsg{events: []DiagnosticsEvent{{Path: "/p/a.go"}}})
-	if got := lt.m.statusView().Warnings; got != 0 {
-		t.Fatalf("warnings = %d after an empty event, want 0", got)
+	if got := lt.m.statusView().Diags; got.Any() {
+		t.Fatalf("diagnostics badge = %+v after an empty event, want none", got)
 	}
 }
 

@@ -367,8 +367,10 @@ func TestViModeSearchOnALargeFile(t *testing.T) {
 			if keys[0] != '*' {
 				s.enter()
 			}
-			s.until("the large file message", func() bool { return strings.Contains(s.statusRow(), "large-file") })
-			row := s.statusRow()
+			// The message can be pushed onto the notice band above the status row,
+			// which the status row's own segments leave little room for.
+			s.until("the large file message", func() bool { return strings.Contains(s.noticeText(), "large-file") })
+			row := s.noticeText()
 			if strings.Contains(row, "E486") || strings.Contains(row, "too_large") {
 				t.Fatalf("status = %q: the error code leaks", row)
 			}

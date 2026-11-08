@@ -33,7 +33,11 @@ The chrome rows, from the top:
    title on row 1). The new-tab button is a three-cell button (" + ") pinned to the
    right edge, so the glyph keeps one padding cell on each side and the hit target
    covers the whole button.
-3. **Body**: the explorer panel on the left and the editor panes on the right.
+3. **Body**: the sidebar column on the left and the editor panes on the right. The
+   column is a stack of sections, each a header row over a body (the File Explorer,
+   then the Markdown Contents section); adjacent sections share one border row, so a
+   boundary costs one row. It is the explorer panel's box when there is one section.
+   The section model and its row sharing are recorded in `docs/sidebar.md`.
 4. **Status bar**, one row, on the last row of the frame. With the `show_prompt_line`
    setting on, an open prompt takes the row below the status bar: the status row moves
    up one row **only while a prompt is open**, so when nothing is open the status bar
@@ -93,11 +97,13 @@ Inside a frame the roles are fixed:
 | One-line prompt, confirm | sheet (input row) | `internal/tui/prompt` |
 | File browser, switch project | card, above the status row | `internal/tui/browser` |
 | Dialogs (confirm, error, save as, ...) | card, centred | `internal/tui/dialog` |
+| Workspace-trust prompt | card, centred, exclusive | `internal/tui/trustdialog.go` |
 | Lists (themes, cursor, ...) | card, centred | `internal/tui/list` |
 | Plugin picker | card, anchored above the last row | `internal/tui/picker` |
 | Menu-bar dropdown | menu | `internal/tui/menubar` |
 | Context menu, "+" menu | menu | `internal/tui/ctxmenu` |
 | Anchored popup (LSP hover, ...) | menu | `internal/tui/popup` |
+| Sidebar column (File Explorer + Contents) | body, left column | `internal/tui/frame` (geometry and hit map), `internal/tui/sidebar` (section headers and the Contents body), `internal/tui/explorer` (tree body) |
 
 ## 4. Rules for a new component
 

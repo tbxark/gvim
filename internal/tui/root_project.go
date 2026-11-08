@@ -67,5 +67,7 @@ func (m *Model) adoptProject(msg projectOpenedMsg) tea.Cmd {
 	m.root.watched = nil
 	m.takeExplorerFocus()
 	m.notice = "Project: " + tree.Root()
-	return m.gitCmd()
+	// Trust is per workspace: load the new root's decision, and ask when it has
+	// none, as Fresh does when another workspace is activated.
+	return tea.Batch(m.gitCmd(), m.loadTrust(tree.Root()))
 }

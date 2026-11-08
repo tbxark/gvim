@@ -14,6 +14,11 @@
 // The package does not choose the platform keymap. Keymap is empty unless a
 // file sets it, and the caller applies its own default.
 //
+// Workspace trust. A caller that knows the workspace is not trusted sets
+// Options.Untrusted, and the project file is not read at all: a repository that
+// has not been trusted must not configure the editor it is opened in. The user
+// file still applies. See package trust and docs/trust.md.
+//
 // Fresh compatibility. The files also accept the nested layout of Fresh's
 // config.json: an "editor" object holds the editing and display options under
 // Fresh's names, a "languages" object holds per-language overrides, and
@@ -300,6 +305,14 @@ type Options struct {
 	// UserFile is the user config file. An empty value means the default,
 	// Dir()/config.json (~/.config/gvim/config.json).
 	UserFile string
+
+	// Untrusted skips the project layer: the workspace has no trust decision
+	// yet, or the user restricted it, so a file that came with the repository
+	// must not configure the editor. Only the user layer applies. The zero
+	// value keeps the project layer, so the callers that have no trust
+	// decision (the config viewer, the tests) read the layers as before. See
+	// package trust and docs/trust.md.
+	Untrusted bool
 }
 
 // Files lists the config files gvim reads by default.
@@ -406,7 +419,7 @@ func Load(opts Options) (Config, []Diagnostic, error) {
 		diags = append(diags, applyFile(&cfg, userPath, layerUser)...)
 	}
 
-	if opts.Root == "" {
+	if opts.Root == "" || opts.Untrusted {
 		return cfg, diags, nil
 	}
 	projectPath, ok, err := ProjectFile(opts.Root)

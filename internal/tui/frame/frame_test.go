@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/tbxark/gvim/internal/tui/icons"
 )
 
@@ -191,5 +193,219 @@ func TestStatusRowIsTheLastRowWithoutAPrompt(t *testing.T) {
 	if !asked.PromptOn || asked.PromptY != 23 || asked.StatusY != 22 {
 		t.Fatalf("prompt row %d on=%v, status %d; want the prompt on row 23 above the status row 22",
 			asked.PromptY, asked.PromptOn, asked.StatusY)
+	}
+}
+
+// TestDiagCountsText checks the badge text against Fresh's diagnostics element:
+// errors, then warnings, then info and hints together, each part only when its
+// count is above zero.
+func TestDiagCountsText(t *testing.T) {
+	tests := []struct {
+		c    DiagCounts
+		want string
+	}{
+		{DiagCounts{}, ""},
+		{DiagCounts{Errors: 1}, "E:1"},
+		{DiagCounts{Warnings: 2}, "W:2"},
+		{DiagCounts{Info: 3}, "I:3"},
+		{DiagCounts{Errors: 1, Warnings: 2}, "E:1 W:2"},
+		{DiagCounts{Errors: 1, Warnings: 2, Info: 3}, "E:1 W:2 I:3"},
+		{DiagCounts{Warnings: 2, Info: 3}, "W:2 I:3"},
+		{DiagCounts{Errors: 12, Warnings: 7}, "E:12 W:7"},
+	}
+	for _, tt := range tests {
+		if got := tt.c.Text(); got != tt.want {
+			t.Errorf("DiagCounts%+v.Text() = %q, want %q", tt.c, got, tt.want)
+		}
+		if any := tt.c.Any(); any != (tt.want != "") {
+			t.Errorf("DiagCounts%+v.Any() = %v, want %v", tt.c, any, tt.want != "")
+		}
+	}
+}
+
+// TestStatusRowDiagnosticsBadgeSitsNextToThePill checks the badge's place: after the
+// LSP pill (and the right plugin items) and before the palette hint, in Fresh's
+// bracket style around its E:/W:/I: text.
+func TestStatusRowDiagnosticsBadgeSitsNextToThePill(t *testing.T) {
+	s := StatusView{
+		Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8", Language: "Go",
+		LSP: "LSP (off)", Diags: DiagCounts{Errors: 1, Warnings: 2},
+	}
+	runs := StatusRuns(100, s)
+	at := func(text string) *Run {
+		for i := range runs {
+			if runs[i].Text == text {
+				return &runs[i]
+			}
+		}
+		return nil
+	}
+	pill, badge, palette := at(" LSP (off) "), at(" [E:1 W:2] "), at(" "+PaletteHelp+" ")
+	switch {
+	case pill == nil || pill.Kind != HitStatusSegment || pill.Index != StatusSegmentLSP:
+		t.Fatalf("the pill run = %+v, want a clickable LSP segment", pill)
+	case badge == nil:
+		t.Fatalf("no badge run in %+v", runs)
+	case palette == nil:
+		t.Fatalf("no palette hint in %+v", runs)
+	case pill.X >= badge.X || badge.X >= palette.X:
+		t.Errorf("pill at %d, badge at %d, palette at %d: want the badge between the pill and the hint", pill.X, badge.X, palette.X)
+	}
+	if badge.Kind != HitNone {
+		t.Errorf("the badge is clickable (%v); it is a count, not a target", badge.Kind)
+	}
+}
+
+// TestStatusRowReservesTheDiagnosticsSlotUntilTheCountsAreKnown checks the blank
+// slot: while a server runs but has published nothing, the row keeps the cells a
+// one-severity badge takes, so the right group does not jump when the first
+// diagnostic arrives.
+func TestStatusRowReservesTheDiagnosticsSlotUntilTheCountsAreKnown(t *testing.T) {
+	base := StatusView{Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8", Language: "Go", LSP: "LSP", DiagSlot: true}
+	blank := func(runs []Run) *Run {
+		for i := range runs {
+			if runs[i].Kind == HitNone && runs[i].Text == strings.Repeat(" ", diagBlankWidth) {
+				return &runs[i]
+			}
+		}
+		return nil
+	}
+	slot := blank(StatusRuns(100, base))
+	if slot == nil {
+		t.Fatalf("no blank diagnostics slot in %+v", StatusRuns(100, base))
+	}
+	if want := ansi.StringWidth(" [E:1] "); slot.W != want {
+		t.Errorf("the slot is %d cells, want the %d a one-severity badge takes", slot.W, want)
+	}
+	// The counts replace the slot; the two never sit side by side.
+	withDiags := base
+	withDiags.Diags = DiagCounts{Errors: 1}
+	if blank(StatusRuns(100, withDiags)) != nil {
+		t.Error("the blank slot is still there after the counts arrived")
+	}
+	// A document with no server reserves nothing.
+	plain := base
+	plain.LSP, plain.DiagSlot = "", false
+	if blank(StatusRuns(100, plain)) != nil {
+		t.Error("a document with no server reserves a diagnostics slot")
+	}
+}
+
+// TestNarrowStatusRowDropsTheBadgeBeforeThePill checks the right group's order on a
+// narrow row: the palette hint goes first, then the diagnostics badge, and the LSP
+// pill and the language keep their place. Every run stays inside the row.
+func TestNarrowStatusRowDropsTheBadgeBeforeThePill(t *testing.T) {
+	s := StatusView{
+		Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8", Language: "Go",
+		LSP: "LSP (off)", Diags: DiagCounts{Errors: 1, Warnings: 2},
+	}
+	hasText := func(runs []Run, text string) bool {
+		for _, r := range runs {
+			if r.Text == text {
+				return true
+			}
+		}
+		return false
+	}
+	pill, badge := " LSP (off) ", " [E:1 W:2] "
+	both, dropped := 0, false
+	for w := 12; w <= 100; w++ {
+		runs := StatusRuns(w, s)
+		for _, r := range runs {
+			if r.X < 0 || r.X+r.W > w {
+				t.Fatalf("w=%d: run %+v is outside the row", w, r)
+			}
+		}
+		hasPill, hasBadge := hasText(runs, pill), hasText(runs, badge)
+		if hasBadge && !hasPill {
+			t.Fatalf("w=%d: the badge is on the row without the pill: %+v", w, runs)
+		}
+		if hasPill && !hasBadge {
+			dropped = true
+		}
+		if hasPill && hasBadge {
+			both = w
+		}
+	}
+	if !dropped {
+		t.Error("no width drops the badge while the pill stays; the right group's order changed")
+	}
+	if both == 0 {
+		t.Error("no width shows both the pill and the badge")
+	}
+}
+
+// TestTrustPillLeadsTheLeftGroup checks Fresh's bottom-left guarantee: the workspace
+// trust level is the first element of the status row, it is clickable, and Restricted
+// and Blocked take the theme's warning role (Trusted stays on the bar's own style).
+func TestTrustPillLeadsTheLeftGroup(t *testing.T) {
+	tests := []struct {
+		trust string
+		warn  bool
+		role  RunStyle
+	}{
+		{"Trusted", false, StyleDefault},
+		{"Restricted", true, StyleWarning},
+		{"Blocked", true, StyleWarning},
+	}
+	for _, tt := range tests {
+		s := StatusView{Trust: tt.trust, TrustWarn: tt.warn, Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8", Language: "Go"}
+		runs := StatusRuns(100, s)
+		first := runs[0]
+		if first.X != 0 || first.Text != " "+tt.trust+" " {
+			t.Errorf("%s: the first left run = %+v, want it at column 0", tt.trust, first)
+		}
+		if first.Kind != HitStatusSegment || first.Index != StatusSegmentTrust {
+			t.Errorf("%s: the first run kind = %v index %d, want the trust segment", tt.trust, first.Kind, first.Index)
+		}
+		if first.Style != tt.role {
+			t.Errorf("%s: style = %v, want %v", tt.trust, first.Style, tt.role)
+		}
+		l := ComputeLayout(100, 30, Input{Status: s})
+		if got := l.Hit(1, l.StatusY); got.Kind != HitStatusSegment || got.Index != StatusSegmentTrust {
+			t.Errorf("%s: hit at column 1 = %+v, want the trust segment", tt.trust, got)
+		}
+	}
+}
+
+// TestStatusRowWithoutTrustStillLeadsWithLocal checks the row a session without a trust
+// port keeps: the plain " Local " label, not clickable.
+func TestStatusRowWithoutTrustStillLeadsWithLocal(t *testing.T) {
+	s := StatusView{Position: "Ln 1, Col 1", Lines: 4, EOL: "LF"}
+	runs := StatusRuns(100, s)
+	if len(runs) == 0 || runs[0].X != 0 || runs[0].Text != " Local " || runs[0].Kind != HitNone {
+		t.Fatalf("the first left run = %+v, want the plain Local label", runs)
+	}
+}
+
+// TestNarrowStatusRowKeepsTheTrustPill checks the squeeze order of the left group: the
+// trust level is what survives, the cursor position is what is cut. A label that does
+// not fit at all is cut with Fresh's ellipsis, never moved off column 0.
+func TestNarrowStatusRowKeepsTheTrustPill(t *testing.T) {
+	const label = " Restricted "
+	s := StatusView{Trust: "Restricted", TrustWarn: true, Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8", Language: "Go"}
+	for w := 8; w <= 60; w++ {
+		runs := StatusRuns(w, s)
+		if len(runs) == 0 || runs[0].X != 0 {
+			t.Fatalf("w=%d: no run at column 0: %+v", w, runs)
+		}
+		first := runs[0]
+		if first.Kind != HitStatusSegment || first.Index != StatusSegmentTrust {
+			t.Fatalf("w=%d: the first run = %+v, want the trust segment", w, first)
+		}
+		if first.W > w {
+			t.Fatalf("w=%d: the trust run is %d cells wide", w, first.W)
+		}
+		for _, r := range runs {
+			if r.X < 0 || r.X+r.W > w {
+				t.Fatalf("w=%d: run %+v is outside the row", w, r)
+			}
+		}
+	}
+	// Wide enough for the whole pill and the right group: the pill is never padded or
+	// shortened, and the position is what gives way.
+	first := StatusRuns(100, s)[0]
+	if first.Text != label {
+		t.Errorf("the trust pill at a wide row = %q, want the whole label", first.Text)
 	}
 }

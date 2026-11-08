@@ -38,7 +38,7 @@ gvim.status(msg)            -- the same as gvim.notify(msg, "info")
   `gvim.log.info("a", 1)` it never treats the first argument as a format. A line is cut at
   4 KiB. The log keeps the last 2000 entries (**Plugin: Show Log**).
 * `warn` and `error` also go to the user's warnings list (**Show Warnings**). There is no status-bar counter
-  for them: the `[⚠ N]` counter on the status row counts language server diagnostics only.
+  for them: the `[E:N W:N I:N]` counter on the status row counts language server diagnostics only.
 * `notify` shows the text on the status row (newlines become spaces, 512 bytes at most);
   `warn` and `error` also go to the warnings log.
 * Formatting runs inside your slice, so a `__tostring` metamethod is budgeted like any Lua.

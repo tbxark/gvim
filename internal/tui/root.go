@@ -78,6 +78,8 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 	case keybindSavedMsg:
 		m.keybindSaved(msg)
 		return nil, true
+	case tocRescanMsg:
+		return m.tocRescan(msg), true
 	}
 	return nil, false
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/space"
@@ -1342,20 +1343,26 @@ func (m *Model) lspSpans(doc Document) func(line int) []editorpane.DiagnosticSpa
 	}
 }
 
-// lspWarnings counts the errors and warnings of the active document, for the status
-// row.
-func (m *Model) lspWarnings() int {
+// lspDiagCounts counts the diagnostics of the active document, for the status row's
+// badge. It splits them as Fresh's diagnostics element does: errors, warnings, and info
+// and hints together.
+func (m *Model) lspDiagCounts() frame.DiagCounts {
 	doc := m.ed.Active()
 	if doc == nil {
-		return 0
+		return frame.DiagCounts{}
 	}
-	n := 0
+	var c frame.DiagCounts
 	for _, d := range m.lsp.diags[docPath(doc)] {
-		if d.Severity <= editorpane.SeverityWarning {
-			n++
+		switch d.Severity {
+		case editorpane.SeverityError:
+			c.Errors++
+		case editorpane.SeverityWarning:
+			c.Warnings++
+		default:
+			c.Info++
 		}
 	}
-	return n
+	return c
 }
 
 // lspClose stops the servers when the program ends.

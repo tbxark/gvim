@@ -60,6 +60,10 @@ const (
 	hitExplorerTitleClose  = frame.HitExplorerTitleClose
 	hitExplorerGrip        = frame.HitExplorerGrip
 	hitExplorerBody        = frame.HitExplorerBody
+	hitSidebarHeader       = frame.HitSidebarHeader
+	hitSidebarClose        = frame.HitSidebarClose
+	hitSidebarRow          = frame.HitSidebarRow
+	hitSidebarBody         = frame.HitSidebarBody
 	hitEditorText          = frame.HitEditorText
 	hitGutter              = frame.HitGutter
 	hitScrollbarTrack      = frame.HitScrollbarTrack
@@ -74,6 +78,7 @@ const (
 	statusSegmentLanguage = frame.StatusSegmentLanguage
 	statusSegmentPosition = frame.StatusSegmentPosition
 	statusSegmentLSP      = frame.StatusSegmentLSP
+	statusSegmentTrust    = frame.StatusSegmentTrust
 
 	welcomeBlank      = frame.WelcomeBlank
 	welcomeTitleRow   = frame.WelcomeTitleRow

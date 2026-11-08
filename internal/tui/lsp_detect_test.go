@@ -94,8 +94,8 @@ func TestMissingServerIsReportedOnceAndNotStartedAgain(t *testing.T) {
 		t.Errorf("notice = %q on later updates, want the message shown once", lt.m.notice)
 	}
 	// The status row keeps no slot for a counter that no server will fill.
-	if lt.m.statusView().WarnSlot {
-		t.Error("the status row reserves the warning counter for a language with no server")
+	if lt.m.statusView().DiagSlot {
+		t.Error("the status row reserves the diagnostics counter for a language with no server")
 	}
 }
 
@@ -382,12 +382,12 @@ func TestStatusRowKeepsTheCounterSlotOnlyWhereAServerRuns(t *testing.T) {
 	lt := newDetectTest(t, port,
 		&lspTab{path: "/p/a.go", lines: []string{"package a"}},
 		&lspTab{path: "/p/notes.txt", lines: []string{"text"}})
-	if !lt.m.statusView().WarnSlot {
+	if !lt.m.statusView().DiagSlot {
 		t.Error("no counter slot for a document open on a server")
 	}
 	lt.ed.active = 1
 	lt.settle(lt.touchCmd(), 3)
-	if lt.m.statusView().WarnSlot {
+	if lt.m.statusView().DiagSlot {
 		t.Error("a counter slot for a plain text document")
 	}
 }
@@ -431,7 +431,7 @@ func TestPortIsReachedOnlyFromCommands(t *testing.T) {
 	// Asking whether the language has a server is configuration only: it opens nothing.
 	port.openLang = nil
 	m.lsp.enabled("go")
-	_ = m.lspShowsWarnings()
+	_ = m.lspShowsDiags()
 	if len(port.openLang) != 0 {
 		t.Errorf("a query opened a document: %v", port.openLang)
 	}
@@ -563,5 +563,145 @@ func TestStatusRowShowsTheServerState(t *testing.T) {
 	lt.m.statusSegmentClick(statusSegmentLSP)
 	if !strings.HasPrefix(lt.m.notice, "LSP: ") {
 		t.Errorf("notice after a click = %q, want the server status", lt.m.notice)
+	}
+}
+
+// TestLSPPillKeepsFreshStatePriority checks Fresh's compose_lsp_status order: a
+// per-buffer skip (here a large file) shows "LSP (n/a)" only while the language's
+// server runs for another buffer, and a server that is not running shows "off",
+// including after a stop (Fresh has no separate "stopped" pill).
+func TestLSPPillKeepsFreshStatePriority(t *testing.T) {
+	port := newDetectLSP("go")
+	port.info["go"] = LSPServerInfo{State: LSPServerOn, Language: "go", Command: "gopls"}
+	tab := &lspTab{path: "/p/a.go", lines: []string{"package a"}}
+	large := &lspTab{path: "/p/b.go", lines: []string{"package b"}, large: true, size: 8 << 20}
+	lt := newDetectTest(t, port, tab, large)
+	pill := func(active int) string {
+		lt.ed.active = active
+		lt.settle(lt.touchCmd(), 3)
+		return lt.m.statusView().LSP
+	}
+	if got := pill(0); got != "LSP" {
+		t.Errorf("a document open on its server: pill = %q, want LSP", got)
+	}
+	if got := pill(1); got != "LSP (n/a)" {
+		t.Errorf("a large file while the server runs elsewhere: pill = %q, want LSP (n/a)", got)
+	}
+	// No server runs any more: the language-level state is the useful one, so the
+	// large file and the normal document both show Fresh's "off".
+	lt.m.lsp.stopped = true
+	lt.m.lsp.tracks = nil
+	if got := pill(1); got != "LSP (off)" {
+		t.Errorf("a large file with no server running: pill = %q, want LSP (off)", got)
+	}
+	if got := pill(0); got != "LSP (off)" {
+		t.Errorf("a stopped server: pill = %q, want LSP (off), not a stopped state of its own", got)
+	}
+}
+
+// TestLSPPillShowsNoWhenBufferToggledOffWhileServerRuns checks the other per-buffer
+// skip Fresh folds into "LSP (n/a)": LSP is off for this buffer, but the language's
+// server runs for another open buffer.
+func TestLSPPillShowsNoWhenBufferToggledOffWhileServerRuns(t *testing.T) {
+	port := newDetectLSP("go")
+	port.info["go"] = LSPServerInfo{State: LSPServerOn, Language: "go", Command: "gopls"}
+	a := &lspTab{path: "/p/a.go", lines: []string{"package a"}}
+	b := &lspTab{path: "/p/b.go", lines: []string{"package b"}}
+	lt := newDetectTest(t, port, a, b)
+	lt.ed.active = 1
+	lt.settle(lt.touchCmd(), 3)
+	for _, msg := range lt.act("lsp_toggle_for_buffer") {
+		lt.feed(msg)
+	}
+	lt.ed.active = 0
+	lt.settle(lt.touchCmd(), 3)
+	lt.ed.active = 1
+	lt.settle(lt.touchCmd(), 3)
+	if got := lt.m.statusView().LSP; got != "LSP (n/a)" {
+		t.Errorf("a buffer with LSP off while the server runs elsewhere: pill = %q, want LSP (n/a)", got)
+	}
+}
+
+// TestDiagnosticsBadgeCountsInfoAndHintsAsFreshsI checks the badge's split, as Fresh
+// renders its diagnostics element: errors are E:, warnings W:, and info and hints
+// together are I:.
+func TestDiagnosticsBadgeCountsInfoAndHintsAsFreshsI(t *testing.T) {
+	port := newDetectLSP("go")
+	lt := newDetectTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"abc", "def", "ghi", "jkl"}})
+	lt.feed(lspDiagsMsg{events: []DiagnosticsEvent{{Path: "/p/a.go", Items: []Diagnostic{
+		{Start: buffer.Pos{Line: 0}, End: buffer.Pos{Line: 0, Col: 1}, Severity: 1, Message: "bad"},
+		{Start: buffer.Pos{Line: 1}, End: buffer.Pos{Line: 1, Col: 1}, Severity: 2, Message: "odd"},
+		{Start: buffer.Pos{Line: 2}, End: buffer.Pos{Line: 2, Col: 1}, Severity: 3, Message: "note"},
+		{Start: buffer.Pos{Line: 3}, End: buffer.Pos{Line: 3, Col: 1}, Severity: 4, Message: "hint"},
+	}}}})
+	want := frame.DiagCounts{Errors: 1, Warnings: 1, Info: 2}
+	if got := lt.m.statusView().Diags; got != want {
+		t.Fatalf("diagnostics badge = %+v, want %+v", got, want)
+	}
+	var row strings.Builder
+	for _, r := range frame.StatusRuns(100, lt.m.statusView()) {
+		row.WriteString(r.Text)
+	}
+	if !strings.Contains(row.String(), "[E:1 W:1 I:2]") {
+		t.Errorf("status row %q does not show the split counts", row.String())
+	}
+}
+
+// TestDiagnosticsBadgeSurvivesTheServerGoingAway checks Fresh's rule that the counts
+// come from the stored diagnostics, not the server: they stay on the row while the
+// pill says the server is missing, failed or off. That is the case the LSP e2e tests
+// pin (the count element is independent of the pill's state).
+func TestDiagnosticsBadgeSurvivesTheServerGoingAway(t *testing.T) {
+	port := newDetectLSP("go")
+	port.info["go"] = LSPServerInfo{State: LSPServerOn, Language: "go", Command: "gopls"}
+	lt := newDetectTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	lt.feed(lspDiagsMsg{events: []DiagnosticsEvent{{Path: "/p/a.go", Items: []Diagnostic{
+		{Start: buffer.Pos{}, End: buffer.Pos{Col: 1}, Severity: 1, Message: "bad"},
+		{Start: buffer.Pos{Line: 1}, End: buffer.Pos{Line: 1, Col: 1}, Severity: 2, Message: "odd"},
+		{Start: buffer.Pos{Line: 2}, End: buffer.Pos{Line: 2, Col: 1}, Severity: 2, Message: "worse"},
+	}}}})
+	want := frame.DiagCounts{Errors: 1, Warnings: 2}
+	check := func(pill string) {
+		t.Helper()
+		v := lt.m.statusView()
+		if v.LSP != pill {
+			t.Fatalf("pill = %q, want %q", v.LSP, pill)
+		}
+		if v.Diags != want {
+			t.Fatalf("pill %q: diagnostics badge = %+v, want the cached %+v", pill, v.Diags, want)
+		}
+		if !v.DiagSlot {
+			t.Errorf("pill %q: no slot kept for known diagnostics", pill)
+		}
+	}
+	check("LSP")
+	lt.m.lsp.unavailable = map[string]*LSPUnavailableError{"go": errGoplsMissing}
+	check("LSP (missing)")
+	lt.m.lsp.unavailable = map[string]*LSPUnavailableError{"go": {Language: "go", Command: "gopls", Err: errors.New("failed")}}
+	check("LSP (failed)")
+	lt.m.lsp.unavailable = nil
+	lt.m.lsp.stopped = true
+	lt.m.lsp.tracks = nil
+	check("LSP (off)")
+}
+
+// TestDiagnosticsBadgeIsAbsentWhenNothingWasPublished checks the other half of the
+// rule, as the global-disable e2e test does: a language server that never ran has no
+// counts, so the row shows no badge and reserves no slot.
+func TestDiagnosticsBadgeIsAbsentWhenNothingWasPublished(t *testing.T) {
+	port := newDetectLSP()
+	port.info["go"] = LSPServerInfo{State: LSPServerOffAll, Language: "go", Command: "gopls"}
+	lt := newDetectTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+	v := lt.m.statusView()
+	if v.LSP != "LSP (off)" {
+		t.Fatalf("pill = %q, want LSP (off) for a configured server that is switched off", v.LSP)
+	}
+	if v.Diags.Any() || v.DiagSlot {
+		t.Errorf("diagnostics badge = %+v slot=%v, want none before a server ran", v.Diags, v.DiagSlot)
+	}
+	for _, r := range frame.StatusRuns(100, v) {
+		if strings.Contains(r.Text, "E:") || strings.Contains(r.Text, "W:") || strings.Contains(r.Text, "I:") {
+			t.Errorf("the status row shows a count %q although no server ran", r.Text)
+		}
 	}
 }

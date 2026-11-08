@@ -31,7 +31,8 @@ internal/                       private executable shell (no top-level package i
   cli/                          cobra command tree, flags, DIR / FILE:LINE:COL
   tui/                          Bubble Tea v2 root model + widgets
     overlay/ list/              shared kit: the Overlay/Caret contract and the list/box widget
-    frame/ split/ tabstrip/     geometry kit: layout + hit map, split tree, tab strip
+    frame/ sidebar/ split/      geometry kit: layout + hit map, section stack,
+    tabstrip/                   split tree, tab strip
     dock/                       terminal dock panel (the root keeps the glue)
     browser/ ctxmenu/ dialog/ editorpane/ explorer/ find/ grid/ icons/ menubar/
     palette/ picker/ popup/ prompt/ space/ style/
@@ -41,10 +42,11 @@ internal/                       private executable shell (no top-level package i
 
 <top level>                     TUI-free engine, shared libraries and services
   buffer/ document/ editor/ search/ syntax/ fold/ diff/ encoding/ session/
-  decorations/ textlayout/
+  decorations/ textlayout/ outline/
   atomicfile/ shellcmd/
   workspace/ explorer/ finder/ fuzzy/ fsops/ gitstate/
   config/ keymap/ theme/
+  trust/ (workspace trust: levels, decision store, policy, executable-content scan)
   lsp/ (+lsp/manager, lsp/lsptest) pluginapi/ plugin/ (+hostos, bundled, plugintest,
   pattern) commands/
 ```
@@ -80,8 +82,8 @@ internal/cli → main (root package)
 |---|---|
 | R1 | No top-level package (not `internal/…`, not `cmd/…`) imports `internal/…`. |
 | R2 | `charm.land/*` (Bubble Tea, bubbles, lipgloss) is imported only by `internal/tui/…`, `internal/terminal` and `internal/uitest`. The plain `github.com/charmbracelet/x/*` helper libraries (`ansi`, `term`, `vt`) are not the UI framework and stay free. |
-| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `plugin/bundled`, `plugin/pattern`. (`lsp/manager` sits above `lsp` and may import it.) |
-| R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `finder` imports only `explorer` and `fuzzy`. |
+| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `plugin/bundled`, `plugin/pattern`, `outline`. (`lsp/manager` sits above `lsp` and may import it.) |
+| R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `trust` imports only `config` and `atomicfile`. `finder` imports only `explorer` and `fuzzy`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
 | R6 | `internal/cli` imports only `internal/app`, `internal/configview` and `syntax` (and cobra). |
 | R7 | Only the root main package and `internal/cli` import `internal/app`; only the root main package imports `internal/cli`; only `internal/app`, `internal/pluginhost` and `plugin/plugintest` import the plugin runtime; only `internal/app` and `internal/uiadapter` import TUI sub-packages. |
@@ -150,6 +152,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `session` | Session file format and stash files (open tabs, cursors, unsaved overlays). | The restore *policy* lives in `internal/restore`. Session and search JSON go through `atomicfile`; the overlay-stash payload is `document.StashOverlay`. |
 | `decorations` | Plugin decoration store: namespaced items per buffer, anchors that follow edits, per-line query. | Pure data, stdlib only. |
 | `textlayout` | Terminal text geometry: indent width, indent guides, word occurrences, match columns. | Leaf; used by `editor`/`fold` and the editor pane. |
+| `outline` | Markdown heading scan for the sidebar's Contents section: ATX and setext headings, fenced code skipped, bounded to 1 MiB. | Leaf, TUI-free; the widget and the model half are in `internal/tui/sidebar` and `internal/tui/markdown_toc.go` (docs/sidebar.md). |
 | `atomicfile` | Atomic file replacement: temp+sync+rename, mode/owner/xattr, symlink following. | Leaf; used by `editor` (saves) and `session` (session and search JSON). |
 | `shellcmd` | Runs one external program in a directory with a timeout; the exec half of `editor/shell.go`. | Leaf; `editor` wraps it for shell-command actions. |
 | `workspace` | Project root switching and the recent-folders list. | |
@@ -158,7 +161,8 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `fuzzy` | fzf-style scorer shared by the finder, the palette and the pickers. | |
 | `fsops` | Create, mkdir, rename, move, copy, trash with conflict policy. | |
 | `gitstate` | Git work-tree root, branch and per-file status with go-git. | |
-| `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins. | `hujson`. |
+| `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins. | `hujson`. The project layer is skipped when `Options.Untrusted` is set (workspace trust; see docs/trust.md). |
+| `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy and executable-content marker scan. | TUI-free; store at `config.Dir()/trust.json` through `atomicfile`; the app gates the config project layer on it (docs/trust.md). |
 | `keymap` | Embedded presets, chord parsing and canonicalization, resolve, user overrides. | Data files `keymap/*.json`. |
 | `theme` | Theme data (colors, syntax keys) from embedded JSON. | Data files `theme/data/*.json`. |
 | `lsp` | Pure-Go LSP client/protocol layer: JSON-RPC, transport, positions, requests, diagnostics, signature help. | |
@@ -188,7 +192,8 @@ still large internally, so a reader can find a feature without grepping by memor
 | view / display | `view.go`, `view_render.go` | display settings and per-document view settings |
 | find glue | `find_route.go`, `find_highlight.go`, `find_mouse.go` | controller between the find bar and the editor |
 | save / files / watch | `root_revert_fix.go`, `save.go`, `watch_reload.go`, `autosave.go`, `files_revert.go`, `files_recovery.go`, `files_overwrite.go` | save/save-as planning, auto-save tick, disk polling, reload, recovery copies |
-| root features | `macro.go`, `root_dump.go`, `root_ports.go`, `root_commands.go`, `root_project.go`, `root_watch.go`, `root_fix.go`, `root_sidebar.go`, `root_bookmarks.go`, `git.go`, `live.go`, `root_*_fix.go` | project switch/recents, watcher glue, git marks, macros, bookmarks, live grep, sidebar, root ports |
+| root features | `macro.go`, `root_dump.go`, `root_ports.go`, `root_commands.go`, `root_project.go`, `root_watch.go`, `root_fix.go`, `root_sidebar.go`, `root_bookmarks.go`, `git.go`, `live.go`, `root_*_fix.go` | project switch/recents, watcher glue, git marks, macros, bookmarks, live grep, sidebar focus cycle, root ports |
+| sidebar / Contents | `markdown_toc.go`, `root_sidebar.go` | the Contents section's buffer lifecycle, settings, follow, keys and mouse; the sidebar focus cycle |
 | editor body | `motion_mouse.go`, `motion_rows.go`, `viewrow.go`, `occurrence.go` | click/drag/wheel, row-mapped motion, top-row memo, occurrence highlight |
 | large-file mode | `large.go` | large-file UI: index progress, full-load prompt, streamed save/search, error dialogs |
 | clipboard / popup | `clip.go`, `context_menu.go`, `popup.go` | OSC 52/HTML clipboard flows, right-click menus, popup adapter |
@@ -197,7 +202,8 @@ still large internally, so a reader can find a feature without grepping by memor
 
 `overlay` (the Overlay/Caret contract every overlay implements), `list` (the list/box
 overlay kit: `View`, `TextBox`, centring and scroll helpers), `frame` (the single geometry
-source: `ComputeLayout`, hit map, tab-strip and welcome placement), `split` (the split tree
+source: `ComputeLayout`, hit map, tab-strip and welcome placement), `sidebar` (the explorer
+column's section stack: `Layout`, header rows, the Contents widget; docs/sidebar.md), `split` (the split tree
 and pure pane geometry), `tabstrip` (strip painting and pointer mapping), `grid` (cell
 surface on `x/ansi`), `space` (padding, text fitting and `Rect`), `style` (theme → lipgloss
 styles; the only place that happens), `icons` (Nerd Font glyphs), `editorpane`

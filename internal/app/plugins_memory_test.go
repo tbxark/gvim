@@ -15,7 +15,7 @@ import (
 // collector's accounting and for the race detector, which makes every allocation larger.
 const pluginIdleHeapLimit = 8 << 20
 
-// pluginIdleHeapFloor is a sanity bound on the measurement: eight loaded Lua states cost
+// pluginIdleHeapFloor is a sanity bound on the measurement: seven loaded Lua states cost
 // several MiB, so a smaller reading means the baseline was polluted (heap that other tests
 // left behind moves by more than that) and the number says nothing.
 const pluginIdleHeapFloor = 1 << 20

@@ -225,9 +225,19 @@ func (s *pluginSession) runCommand(title string) {
 	s.t.Helper()
 	s.press(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}) // macos: command palette
 	s.typeText(title)
+	// The query text is painted before the rows are ranked, and the wait below
+	// cannot tell the query line from a row: let the ranking settle first.
+	s.settle(20 * time.Millisecond)
 	s.until("the palette row "+title, func() bool { return s.screenHas(title) })
 	s.press(tea.KeyPressMsg{Code: tea.KeyEnter})
 	s.settle(20 * time.Millisecond)
+	// A command table that is still being rebuilt can leave another row first,
+	// and a fuzzy query can land on Workspace Trust...: its dialog would take
+	// the keys of every later attempt. Dismiss it and let the caller retry.
+	if s.screenHas("SECURITY WARNING") {
+		s.press(tea.KeyPressMsg{Code: tea.KeyEscape})
+		s.settle(20 * time.Millisecond)
+	}
 }
 
 // openFile opens a file with the given text in a new tab and returns its path.

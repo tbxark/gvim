@@ -63,6 +63,7 @@ var uiActions = []string{
 	"toggle_file_explorer", "focus_file_explorer", "focus_editor", "new", "menu_activate", "menu_open",
 	"toggle_line_numbers", "scroll_tabs_left", "scroll_tabs_right",
 	"file_explorer_search_clear", "file_explorer_search_backspace",
+	"markdown_toc_show", "markdown_toc_close", "markdown_toc_toggle_follow", "markdown_toc_focus",
 	"open", "switch_project", "quick_open", "command_palette", "quick_open_files", "quick_open_buffers",
 	"goto_line", "search", "find", "replace", "find_next", "find_previous", "close_tab", "save", "save_as",
 	"save_all", "quit", "split_horizontal", "split_vertical", "next_split", "prev_split", "close_split",

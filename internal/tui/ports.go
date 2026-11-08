@@ -10,6 +10,7 @@ import (
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/overlay"
+	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
@@ -298,6 +299,20 @@ type Dialogs interface {
 	SaveAs(path string, tag any, ov style.Overlay) Overlay
 }
 
+// MarkdownTOC is the Contents sidebar section's configuration: whether the
+// bundled markdown_toc feature is enabled, and its settings. The settings are
+// the plugins.markdown_toc.settings keys; sidebar.ParseSettings reads them.
+type MarkdownTOC struct {
+	Enabled  bool
+	Settings sidebar.Settings
+}
+
+// DefaultMarkdownTOC is the configuration for a config with no
+// plugins.markdown_toc entry: enabled, with Fresh's defaults.
+func DefaultMarkdownTOC() MarkdownTOC {
+	return MarkdownTOC{Enabled: true, Settings: sidebar.DefaultSettings()}
+}
+
 // Deps is the constructor input. Editor, Keys and Theme are required. Explorer
 // is nil when the explorer is hidden. The other optional fields are nil until
 // the phase that wires them, and a nil field disables its feature.
@@ -337,8 +352,12 @@ type Deps struct {
 	Ops      FileOps    // nil until P6
 	LSP      LSPSession // nil disables the language-server features
 	Markdown MarkdownRenderer
-	Keys     Keymap
-	Theme    theme.Theme
+	// MarkdownTOC configures the Contents sidebar section from the
+	// plugins.markdown_toc entry of the config. Nil enables it with the
+	// defaults, as the bundled plugin is on out of the box.
+	MarkdownTOC *MarkdownTOC
+	Keys        Keymap
+	Theme       theme.Theme
 	// Settings is the effective configuration that open_settings lists, and whose
 	// user file settings_activate opens. The zero value lists blank settings.
 	Settings Settings
@@ -357,4 +376,8 @@ type Deps struct {
 	// Root holds the optional ports of the root features: Switch Project, Live
 	// Grep, git markers, the file watcher and the auto-save interval.
 	Root RootPorts
+	// Trust is the workspace-trust state and the recorded decisions. Nil means
+	// trust is unavailable: the Workspace Trust… command says so, and the status
+	// row paints no trust pill.
+	Trust TrustPort
 }

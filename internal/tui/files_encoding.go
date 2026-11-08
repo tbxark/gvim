@@ -81,7 +81,8 @@ func (m *Model) openLineEndings() {
 }
 
 // statusSegmentClick runs the command behind the status row segment i: the line
-// ending and encoding choosers, and the language prompt.
+// ending and encoding choosers, the language prompt, the LSP status and the
+// Workspace Trust dialog.
 func (m *Model) statusSegmentClick(i int) tea.Cmd {
 	m.focusEditor()
 	switch i {
@@ -95,6 +96,8 @@ func (m *Model) statusSegmentClick(i int) tea.Cmd {
 		return m.dispatch(Command{Action: "goto_line"})
 	case statusSegmentLSP:
 		return m.dispatch(Command{Action: "show_lsp_status"})
+	case statusSegmentTrust:
+		return m.openWorkspaceTrust()
 	}
 	return nil
 }

@@ -1,19 +1,28 @@
 package tui
 
-// sidebarSection is a section of the sidebar that keyboard focus can enter. The
-// file explorer is the only one so far. A section added later goes into
-// sidebarSections, and the cycle picks it up with no other change.
+// sidebarSection is a section of the sidebar that keyboard focus can enter: the
+// file explorer, then the Contents section while it is open. A section added
+// later goes into sidebarSections, and the cycle picks it up with no other
+// change.
 type sidebarSection int
 
-const sectionExplorer sidebarSection = iota
+const (
+	sectionExplorer sidebarSection = iota
+	sectionContents
+)
 
 // sidebarSections lists the sections in cycle order. The explorer is listed while
-// there is a tree, even when its panel is hidden, because entering it shows it.
+// there is a tree, even when its panel is hidden, because entering it shows it;
+// the Contents section is listed while it is part of the column.
 func (m *Model) sidebarSections() []sidebarSection {
 	if m.tree == nil {
 		return nil
 	}
-	return []sidebarSection{sectionExplorer}
+	secs := []sidebarSection{sectionExplorer}
+	if m.contents.Open() {
+		secs = append(secs, sectionContents)
+	}
+	return secs
 }
 
 // sectionFocused reports whether keyboard focus is in section s.
@@ -21,16 +30,22 @@ func (m *Model) sectionFocused(s sidebarSection) bool {
 	switch s {
 	case sectionExplorer:
 		return m.explorerFocus
+	case sectionContents:
+		return m.contentsFocus
 	}
 	return false
 }
 
 // focusSection gives keyboard focus to section s, and shows the section first when
-// it is hidden.
+// it is hidden. Focusing a folded section unfolds it: the keyboard does not go to
+// a section with no rows on screen.
 func (m *Model) focusSection(s sidebarSection) {
 	switch s {
 	case sectionExplorer:
+		m.explorerCollapsed = false
 		m.focusExplorer()
+	case sectionContents:
+		m.focusContents()
 	}
 }
 

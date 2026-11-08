@@ -15,7 +15,6 @@ func TestNotApplicableCommandsSayWhy(t *testing.T) {
 		why    string
 	}{
 		{"detach", "no server"},
-		{"workspace_trust_prompt", "workspace trust model"},
 		{"update_fresh", "does not update itself"},
 		{"open_update_log", "does not update itself"},
 		{"trigger_wave_animation", "easter egg"},

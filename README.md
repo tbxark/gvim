@@ -15,6 +15,15 @@ checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
 - `docs/ui.md` is the design record for the chrome spacing and the overlay (popup)
   components: the padding scale, the three placements (sheet, card, menu) and the
   shared card frame.
+- `docs/sidebar.md` is the design record for the sidebar column and its Contents
+  section: the stacked sections, the row sharing, the header rows and the hit kinds,
+  the Markdown outline's behaviour and its `plugins.markdown_toc` settings.
+- `docs/trust.md` is the design record for workspace trust: the levels, the decision
+  store, Fresh's open-time policy, and which restrictions gvim enforces.
+- `docs/parity.md` is the live parity record for the "full Fresh feature parity" goal:
+  the by-area matrix with evidence, the deliberate differences, and the ranked backlog of
+  the remaining rounds. It is the map for the next rounds; update the affected row when a
+  round lands.
 - `migration/ARCH-v4.md` is the earlier design record, kept for history; it is superseded.
 
 ## Layout
@@ -40,7 +49,8 @@ The module has three layers.
     `internal/tui/frame` is the geometry source for painting and hit testing). Sub-packages:
     `overlay`, `list` (the shared overlay contract and list/box kit), `frame`, `split`,
     `tabstrip` (layout/hit map, split tree, tab strip), `dock` (the terminal dock),
-    `editorpane`, `menubar`, `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`,
+    `editorpane`, `menubar`, `explorer`, `sidebar` (the column's section stack and the
+    Contents widget), `palette`, `find`, `prompt`, `browser`, `picker`,
     `popup`, `ctxmenu`, `dialog`, `style`, `grid`, `icons`, `space`.
   - `internal/terminal`: runs a program in a pseudo-terminal and keeps a model of its
     screen (the dock backend).
@@ -54,10 +64,12 @@ The module has three layers.
 - Text: `buffer` (text model and its large-file mode), `document` (one open file: text,
   carets, motions, folds, save planning, large-file mode) and `editor` (the tab/action
   session over documents), `search`, `syntax`, `fold`, `diff`, `encoding`, `session`,
-  `decorations`, `textlayout`; `atomicfile` (atomic file replace) and `shellcmd` (run one
+  `decorations`, `textlayout`, `outline` (the Markdown heading scan behind the sidebar's
+  Contents section); `atomicfile` (atomic file replace) and `shellcmd` (run one
   program with a timeout) are the shared leaves.
 - Project and files: `workspace`, `explorer`, `finder`, `fuzzy`, `fsops`, `gitstate`.
 - Settings: `config`, `keymap`, `theme`.
+- Trust: `trust` (the per-workspace trust levels, decisions and open-time policy).
 - Services: `lsp` (+`lsp/manager`, `lsp/lsptest`), `pluginapi` (plugin contract), `plugin`
   (Lua runtime, with `plugin/hostos`, `plugin/bundled`, `plugin/plugintest`,
   `plugin/pattern`), `commands` (the command
@@ -377,7 +389,7 @@ go test -race ./plugin/... ./plugin/pattern ./internal/tui/... ./internal/app
   an API function means adding it to `gvim.d.lua` and to the right page of `docs/plugins/`.
   Every file in `docs/plugins/examples/` is loaded and run by `TestDocsExamples`.
 - The default-enabled bundled plugins may keep at most 8 MiB of heap while idle
-  (`TestBundledPluginsIdleHeap`; about 6.5 MiB today). When a new bundled plugin breaks it, set
+  (`TestBundledPluginsIdleHeap`; about 5.7 MiB today). When a new bundled plugin breaks it, set
   `default_enabled: false` in its `plugin.json` (largest first) and update `docs/plugins/bundled.md`.
 - Tests that depend on time budgets assert on step counts or budget errors, with at most one
   generous wall-clock sanity bound. Do not add a tight wall-clock threshold.

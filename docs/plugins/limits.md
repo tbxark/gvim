@@ -225,8 +225,9 @@ gopher-lua's own options, or by the guard, and is measured above the same way:
     initialisation idempotent.
 11. `FindLines` and `FindRange` are bounded by work caps and time boxes, not cancellation.
 12. Intentional divergences from Fresh: writes are synchronous (no `flush`); hunks come from Myers'
-    diff, not patience, so gutter hunk boundaries can differ; `git_blame`, `merge_conflict` and
-    `markdown_toc` are reduced ports; there is no widget runtime, no orchestrator, no `render_line`.
+    diff, not patience, so gutter hunk boundaries can differ; `git_blame` and `merge_conflict` are
+    reduced ports; there is no widget runtime, no orchestrator, no `render_line`. The Markdown
+    Contents section is built into the TUI, not a plugin (`docs/sidebar.md`).
 
 ## Known limitations
 

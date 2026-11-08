@@ -41,6 +41,9 @@ func (m *Model) rightClick(msg tea.MouseClickMsg) tea.Cmd {
 		return m.explorerContextMenu(mo, l)
 	case hitEditorText:
 		m.editorContextMenu(mo, t)
+	case hitSidebarHeader, hitSidebarClose, hitSidebarRow, hitSidebarBody:
+		// The Contents section has no context menu yet: a press there is not a
+		// press the user expects a menu from.
 	case hitNone:
 	default:
 		m.notice = noContextMenuNotice

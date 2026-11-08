@@ -35,6 +35,8 @@ func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 		return m.toggleHidden(), true
 	case "review_interrupted_saves":
 		return m.reviewInterrupted(), true
+	case "workspace_trust_prompt":
+		return m.openWorkspaceTrust(), true
 	case "redraw_screen":
 		return tea.ClearScreen, true
 	case "suspend_process":
@@ -52,6 +54,9 @@ func (m *Model) featureAction(action string) (tea.Cmd, bool) {
 // featureMessage handles the messages of the root features in this file group. It
 // reports whether it took msg, and the command the message starts.
 func (m *Model) featureMessage(msg tea.Msg) (tea.Cmd, bool) {
+	if cmd, ok := m.trustMessage(msg); ok {
+		return cmd, true
+	}
 	if cmd, ok := m.clipMessage(msg); ok {
 		return cmd, true
 	}

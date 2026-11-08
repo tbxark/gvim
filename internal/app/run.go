@@ -38,6 +38,7 @@ import (
 var (
 	newEditor = editor.New
 	newUI     = tui.New
+	newLSP    = lsphost.NewFor
 )
 
 // Run validates opts, builds the terminal UI and runs it in the alternate
@@ -253,11 +254,22 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if err != nil {
 		return nil, err
 	}
-	cfg, diags, err := config.Load(config.Options{Root: root, UserFile: opts.Config})
+	// The trust decision gates the project config layer, so it is resolved
+	// before the config is loaded: an untrusted workspace is configured by the
+	// user's own file only.
+	trustStore, trustState, trustWarning := openTrust(root)
+	cfg, diags, err := config.Load(config.Options{
+		Root:      root,
+		UserFile:  opts.Config,
+		Untrusted: !trustState.AllowsProjectConfig(),
+	})
 	if err != nil {
 		return nil, err
 	}
 	printDiagnostics(os.Stderr, diags)
+	if trustWarning != "" {
+		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: "+trustWarning)
+	}
 	tree, err := explorer.Open(root)
 	if err != nil {
 		return nil, err
@@ -339,6 +351,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		opts.pluginLog = logFile.Plugin
 	}
 	deps := uiadapter.NewDeps(ed, km, th, tree, files)
+	if trustStore != nil {
+		deps.Trust = newTrustController(trustStore, trustState)
+	}
 	if logFile != nil {
 		deps.NoticeSink = logFile.Notice
 	}
@@ -353,7 +368,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	keys := keybindings.NewStore(deps.Settings.ConfigFile, cfg)
 	liveCfg := func() config.Config { return keys.Current(cfg) }
 	deps.SwitchKeymap = switchKeymapWith(liveCfg)
-	deps.LSP = lsphost.NewFor(cfg)
+	deps.LSP = newLSP(lspConfig(cfg, trustState))
 	// A folder argument shows the explorer at startup. Without one the explorer
 	// stays hidden until Ctrl+B, unless the session had it open.
 	deps.ShowExplorer = opts.Root != "" || (restored && sess.Explorer)
@@ -362,6 +377,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.TabSize = cfg.TabSize
 	deps.View = viewOptions(cfg, icon.Mode.String())
 	deps.Languages = languageSettings(cfg)
+	deps.MarkdownTOC = markdownTOCConfig(cfg)
 	deps.Root = tui.RootPorts{
 		Projects: proj,
 		Grep:     grepFor(edOpts),
@@ -412,6 +428,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}
 	deps.Warnings = append(problems, choice.replaced...)
 	notices = append(notices, openNotices...)
+	if trustWarning != "" {
+		notices = append(notices, trustWarning)
+	}
 	if logNotice != "" {
 		notices = append(notices, logNotice)
 	}

@@ -212,7 +212,33 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 	head := style.Cell(p.styles.ExplorerTitle)
 	dst.Fill(0, g.Width, g.Top, head)
 	dst.Put(0, g.Top, g.Width, HeaderFor(g.Width, g.Icons).Text, head)
+	p.drawBody(dst, g)
+	if g.Bottom > g.Top {
+		dst.Set(0, g.Bottom, "└", body)
+		for x := 1; x < g.Width-1; x++ {
+			dst.Set(x, g.Bottom, "─", body)
+		}
+		dst.Set(g.Width-1, g.Bottom, "┘", body)
+	}
+}
 
+// DrawBody paints a sidebar section's tree body: the rows g.Top to g.Bottom-1,
+// with their walls, the scrollbar and the selection. g.Top is the section's
+// header row, which the section owns and this method does not paint, and
+// g.Bottom is the last body row plus one. It is Draw without the title row and
+// without the bottom border, so a stacked section shares its border rows with
+// its neighbours.
+func (p Panel) DrawBody(dst *grid.Grid, g Geometry) {
+	if p.tree == nil || g.Width < 2 {
+		return
+	}
+	p.drawBody(dst, g)
+}
+
+// drawBody paints the tree rows between the header row g.Top and g.Bottom: the
+// body of the panel, or of its section in the sidebar column.
+func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
+	body := style.Cell(p.styles.Explorer)
 	rows := p.tree.Rows()
 	off := p.tree.ScrollOffset()
 	n := g.bodyRows()
@@ -245,13 +271,6 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 			}
 			dst.Set(g.Width-2, y, " ", st)
 		}
-	}
-	if g.Bottom > g.Top {
-		dst.Set(0, g.Bottom, "└", body)
-		for x := 1; x < g.Width-1; x++ {
-			dst.Set(x, g.Bottom, "─", body)
-		}
-		dst.Set(g.Width-1, g.Bottom, "┘", body)
 	}
 }
 

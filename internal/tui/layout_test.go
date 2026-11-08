@@ -196,16 +196,16 @@ func statusRow(w int, s statusView) string {
 }
 
 func TestStatusRightBlockAtBlueprintWidths(t *testing.T) {
-	// Blueprint section 4.5 hand checks with a warning counter present.
-	s := statusView{Position: "Ln 1, Col 1", EOL: "LF", Encoding: "ASCII", Language: "Text", Warnings: 2, Lines: 4}
+	// Blueprint section 4.5 hand checks with a diagnostics counter present.
+	s := statusView{Position: "Ln 1, Col 1", EOL: "LF", Encoding: "ASCII", Language: "Text", Diags: frame.DiagCounts{Warnings: 2}, Lines: 4}
 	tests := []struct {
 		w     int
 		right string // the right block, from its first cell to the edge
 	}{
 		{40, "LF  ASCII  Text "},
-		{41, "LF  ASCII  Text  [⚠ 2] "},
-		{60, "LF  ASCII  Text  [⚠ 2] "},
-		{70, "LF  ASCII  Text  [⚠ 2]  Palette: Ctrl+P "},
+		{41, "LF  ASCII  Text  [W:2] "},
+		{60, "LF  ASCII  Text  [W:2] "},
+		{70, "LF  ASCII  Text  [W:2]  Palette: Ctrl+P "},
 	}
 	for _, tt := range tests {
 		row := statusRow(tt.w, s)

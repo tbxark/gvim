@@ -64,7 +64,7 @@ the package manager, `render_line`, and mouse and focus events.
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.
   Use `b:find` and `b:find_lines` (host side, chunked with `gvim.timer.sleep(0)`), and read single lines with
-  `b:line(n)` only for the candidates. `merge_conflict` and `markdown_toc` do this.
+  `b:line(n)` only for the candidates. `merge_conflict` does this.
 * **Use `w:visible()`** for "what is on screen" (soft wrap and folds make `top_line + height` wrong).
 * **Debounce** hot events (`buffer_changed`, `cursor_moved`) with `gvim.on(..., {debounce = ms})`, and keep
   handlers under 50 ms: yield to the editor with `gvim.timer.sleep(0)` every few thousand items.
