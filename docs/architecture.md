@@ -12,7 +12,8 @@ dependency may point.
 ## 1. Layers
 
 ```
-cmd/gvim/                       the executable: main → cli → app
+main.go                         the executable: main → cli → app (root package, so
+                                `go install` / `go build .` work without a path)
 cmd/gvimdebug/                  developer page: runs gvim in a PTY, serves the screen
 
 internal/                       private executable shell (no top-level package imports it)
@@ -67,7 +68,7 @@ internal/{uiadapter,keybindings,lsphost,restore,highlight}   (host adapters)
       ▼
 internal/app  (composition root: the only package that imports the host packages)
       ▼
-internal/cli → cmd/gvim
+internal/cli → main (root package)
 ```
 
 ## 2. Import rules
@@ -83,7 +84,7 @@ internal/cli → cmd/gvim
 | R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `finder` imports only `explorer` and `fuzzy`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
 | R6 | `internal/cli` imports only `internal/app`, `internal/configview` and `syntax` (and cobra). |
-| R7 | Only `cmd/gvim` and `internal/cli` import `internal/app`; only `cmd/gvim` imports `internal/cli`; only `internal/app`, `internal/pluginhost` and `plugin/plugintest` import the plugin runtime; only `internal/app` and `internal/uiadapter` import TUI sub-packages. |
+| R7 | Only the root main package and `internal/cli` import `internal/app`; only the root main package imports `internal/cli`; only `internal/app`, `internal/pluginhost` and `plugin/plugintest` import the plugin runtime; only `internal/app` and `internal/uiadapter` import TUI sub-packages. |
 | R8 | No package in the shipped binary imports test support: `buffer/buffertest`, `plugin/plugintest`, `lsp/lsptest`, `internal/uitest`, `internal/apptest`. |
 | R9 | `pluginapi` and `decorations` import no module package and no charm package. |
 | R10 | The plugin tree imports only the standard library, `gopher-lua`, `hujson`, `pluginapi`, `plugin/bundled`, `plugin/pattern`, `plugin/hostos` (plugintest may also import the runtime and other plugin sub-packages). No charm. |
@@ -111,7 +112,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 
 | Package | Role |
 |---|---|
-| `cmd/gvim` | `main`: signal context, `cli.Execute(ctx, args, stdout, stderr, app.Run)`, exit code. No logic. |
+| root `main` | `main`: signal context, `cli.Execute(ctx, args, stdout, stderr, app.Run)`, exit code. No logic. Stays at the module root so `go install` works. |
 | `cmd/gvimdebug` | Developer page: runs gvim in a PTY, forwards keys and serves the screen over HTTP for scripted screenshots. |
 
 ### 3.2 Private shell
@@ -271,7 +272,7 @@ Renamed during the reorganization (no compatibility constraints were kept):
 | `internal/palette` | `commands` | It is the command registry that feeds the palette; it collided by name with `internal/tui/palette`, the overlay. |
 | `internal/explorer/watch` | `internal/filewatch` | It is a generic fsnotify watcher used by `app` and the TUI, not by `explorer`. |
 | `internal/luapat` | `plugin/pattern` | It is the Lua pattern matcher, used only by the plugin runtime. |
-| root `main.go` | `cmd/gvim/main.go` | Standard command layout; the module root is no longer a package. |
+| root `main.go` | kept at the module root | Yes, it is the idiomatic `cmd/` layout to move it, but the module root main keeps `go install github.com/tbxark/gvim@latest` / `go build .` working without a path; only auxiliary commands (gvimdebug) live under `cmd/`. |
 | engine packages under `internal/` | top level | The engine is TUI-free and is the stable core: `buffer`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`, `session`, `decorations`, `textlayout`, `workspace`, `explorer`, `finder`, `fuzzy`, `fsops`, `gitstate`, `config`, `keymap`, `theme`, `lsp`, `pluginapi`, `plugin`, `commands`. The executable shell stays private. |
 
 Rejected renames: `buffer` → `text` (2,028 `buffer.Pos` references, no functional gain);
@@ -284,7 +285,8 @@ The reorganization is staged; each step keeps `go build ./... && go test ./...` 
 Done:
 
 1. Top-of-tree layout move and package renames (§5).
-2. `main` moved to `cmd/gvim`.
+2. `main` stays at the module root (easy `go install` / `go build .`); only auxiliary
+   commands live under `cmd/`.
 3. Import gate rewritten for the new tree (R1-R14) and generator paths updated.
 4. `internal/app` split into host packages (`uiadapter`, `pluginhost`, `lsphost`,
    `restore`, `keybindings`, `highlight`, plus test-only `apptest`); `app` is now six

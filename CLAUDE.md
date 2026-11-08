@@ -95,7 +95,7 @@ bash tools/import_rules_check.sh       # layering gate R1-R16, prints IMPORT_RUL
 go test ./...                                    # all packages pass today
 go test ./internal/tui -run TestName             # single test
 go test -race ./...                              # test-only; needs cgo
-go run ./cmd/gvim [DIR] [FILE[:LINE[:COL]]]...   # launch the TUI
+go run . [DIR] [FILE[:LINE[:COL]]]...           # launch the TUI
 ```
 
 ### Architecture
@@ -105,7 +105,8 @@ package maps, migration phases). `migration/ARCH-v4.md` is the earlier proposal-
 record; where the two disagree, `docs/architecture.md` wins. The shape that needs
 several files to see:
 
-- Three layers. `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) →
+- Three layers. `main.go` (module root, kept there so `go install` works) →
+  `internal/cli` (cobra flags and arguments) →
   `internal/app.Run`. `internal/` is the private executable shell (`app` plus the host packages
   `uiadapter`, `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`, the
   test-only `apptest`, then `configview`, `cli`, `tui`, `terminal`, `filewatch`,

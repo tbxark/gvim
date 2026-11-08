@@ -20,7 +20,9 @@ The module has three layers.
 
 **Entry and executable shell (private):**
 
-- `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) → `internal/app.Run`.
+- `main.go` (module root) → `internal/cli` (cobra flags and arguments) →
+  `internal/app.Run`. The main package stays at the root so `go install` / `go build .`
+  work without a path; only auxiliary commands live under `cmd/`.
 - `internal/` holds the executable shell. Nothing outside this module can import it, and
   no top-level package of the module imports it either.
   - `internal/app`: the composition root (`Options`, `Run`, `buildRuntime` in `run.go`);
@@ -80,9 +82,9 @@ scripted screenshots of the debug page.
 
 ```sh
 go build ./...                              # compile all packages
-go build -o /tmp/gvim ./cmd/gvim                     # build the binary outside the repo
-go run ./cmd/gvim [DIR] [FILE[:LINE[:COL]]]...       # run the TUI
-go run ./cmd/gvim --help                             # full flag list
+go build -o /tmp/gvim .                     # build the binary outside the repo
+go run . [DIR] [FILE[:LINE[:COL]]]...       # run the TUI
+go run . --help                             # full flag list
 go run ./cmd/gvimdebug -- "$PWD" main.go    # run the TUI behind the debug page
 ```
 

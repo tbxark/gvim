@@ -199,7 +199,7 @@ func (d *debugger) binary() (string, error) {
 // runs in the current directory, so that must be inside the module.
 func build(ctx context.Context, dir string) (string, error) {
 	out := filepath.Join(dir, "gvim")
-	b, err := exec.CommandContext(ctx, "go", "build", "-o", out, "github.com/tbxark/gvim/cmd/gvim").CombinedOutput()
+	b, err := exec.CommandContext(ctx, "go", "build", "-o", out, "github.com/tbxark/gvim").CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("go build: %w\n%s", err, b)
 	}

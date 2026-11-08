@@ -7,7 +7,7 @@
 #
 # Layout the rules describe:
 #
-#   cmd/gvim, cmd/gvimdebug      executables (the only packages that import internal/)
+#   main (module root), cmd/gvimdebug   executables (the only packages that import internal/)
 #   internal/                    the executable shell, private:
 #     app/                       composition root: the only package that imports the
 #                                private host packages (uiadapter, pluginhost, lsphost,
@@ -56,11 +56,11 @@
 #       parent package (internal/tui).
 #   R6  internal/cli imports only internal/app, internal/configview and syntax (plus
 #       the standard library and cobra).
-#   R7  only cmd/gvim and internal/cli import internal/app; only cmd/gvim
-#       imports internal/cli; only internal/app, internal/pluginhost and
-#       plugin/plugintest import the plugin runtime; only internal/app and
-#       internal/uiadapter import the TUI sub-packages.
-#   R8  no production package (the dependency tree of cmd/gvim) imports test
+#   R7  only the root main package and internal/cli import internal/app; only
+#       the root main package imports internal/cli; only internal/app,
+#       internal/pluginhost and plugin/plugintest import the plugin runtime;
+#       only internal/app and internal/uiadapter import the TUI sub-packages.
+#   R8  no production package (the dependency tree of the root main package) imports test
 #       support: buffer/buffertest, plugin/plugintest, lsp/lsptest,
 #       internal/uitest, internal/apptest.
 #   R9  pluginapi and decorations import no module package and no charm package.
@@ -85,7 +85,7 @@ if ! graph=$(go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./... 2>&1); th
   exit 2
 fi
 
-if ! prod=$(go list -deps -f '{{.ImportPath}}' ./cmd/gvim 2>&1); then
+if ! prod=$(go list -deps -f '{{.ImportPath}}' . 2>&1); then
   echo "import_rules_check: go list failed:" >&2
   echo "$prod" >&2
   exit 2
@@ -215,10 +215,10 @@ while IFS=$'\t' read -r pkg imp; do
     fi
 
     # R7: the composition root and the executable.
-    if [ "$rel" != cmd/gvim ] && [ "$rel" != internal/cli ] && under "$irel" internal/app; then
+    if [ -n "$rel" ] && [ "$rel" != internal/cli ] && under "$irel" internal/app; then
       add R7 "$pkg" "$imp"
     fi
-    if [ "$rel" != cmd/gvim ] && [ "$irel" = internal/cli ]; then
+    if [ -n "$rel" ] && [ "$irel" = internal/cli ]; then
       add R7 "$pkg" "$imp"
     fi
     if [ "$rel" != internal/app ] && [ "$rel" != internal/cli ] && [ "$irel" = internal/configview ]; then
@@ -337,6 +337,8 @@ if ! testgraph=$(go list -test -f '{{.ImportPath}}: {{join .TestImports " "}}' .
 fi
 while IFS=: read -r tpkg timps; do
   [ -n "$tpkg" ] || continue
+  # go list -test emits test variants as "pkg [pkg.test]"; use the package path.
+  tpkg=${tpkg%% *}
   trel=${tpkg#"$mod"}
   trel=${trel#/}
   case "$trel" in
