@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tbxark/gvim/internal/app"
+	"github.com/tbxark/gvim/syntax"
 )
 
-// grammarDeps are the functions the grammar commands call. The app package
+// grammarDeps are the functions the grammar commands call. The syntax package
 // supplies the real one, and tests pass a fake list.
 type grammarDeps struct {
 	names func() []string
@@ -16,7 +16,7 @@ type grammarDeps struct {
 
 // defaultGrammarDeps returns the dependencies that read the chroma registry.
 func defaultGrammarDeps() grammarDeps {
-	return grammarDeps{names: app.GrammarNames}
+	return grammarDeps{names: syntax.GrammarNames}
 }
 
 // newGrammarCommand returns the grammar command group, wired to the real

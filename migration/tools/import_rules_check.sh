@@ -20,7 +20,9 @@
 #     keybindings/               user keybindings, the editing store, plugin bindings
 #     highlight/                 the syntax-span cache
 #     apptest/                   test support only; never in a production tree
-#     cli/                       cobra command tree (imports app for Options only)
+#     cli/                       cobra command tree (imports app for Options/Run, configview
+#                                for config commands, syntax for the grammar list)
+#     configview/                the `gvim config show/paths` backend (config + keybindings)
 #     tui/ (+ sub-packages)      the Bubble Tea UI
 #     terminal/  filewatch/      private backends of the shell
 #     uitest/                    test-only in-process UI harness
@@ -47,7 +49,8 @@
 #   R5  the TUI tree must not import internal/app, internal/cli, the plugin
 #       runtime, lsp, finder or fsops; a tui sub-package must not import its
 #       parent package (internal/tui).
-#   R6  internal/cli imports internal/app and no other module package.
+#   R6  internal/cli imports only internal/app, internal/configview and syntax (plus
+#       the standard library and cobra).
 #   R7  only cmd/gvim and internal/cli import internal/app; only cmd/gvim
 #       imports internal/cli; only internal/app, internal/pluginhost and
 #       plugin/plugintest import the plugin runtime; only internal/app and
@@ -192,9 +195,12 @@ while IFS=$'\t' read -r pkg imp; do
       fi
     fi
 
-    # R6: cli is the flags layer; app holds everything it needs.
-    if [ "$rel" = internal/cli ] && [ "$irel" != internal/app ]; then
-      add R6 "$pkg" "$imp"
+    # R6: cli is the flags layer; app holds the run, configview the config views.
+    if [ "$rel" = internal/cli ]; then
+      case "$irel" in
+        internal/app | internal/configview | syntax) ;;
+        *) add R6 "$pkg" "$imp" ;;
+      esac
     fi
 
     # R7: the composition root and the executable.
@@ -202,6 +208,9 @@ while IFS=$'\t' read -r pkg imp; do
       add R7 "$pkg" "$imp"
     fi
     if [ "$rel" != cmd/gvim ] && [ "$irel" = internal/cli ]; then
+      add R7 "$pkg" "$imp"
+    fi
+    if [ "$rel" != internal/app ] && [ "$rel" != internal/cli ] && [ "$irel" = internal/configview ]; then
       add R7 "$pkg" "$imp"
     fi
     if [ "$rel" != internal/app ] && [ "$rel" != internal/pluginhost ] && [ "$rel" != plugin/plugintest ] && under "$irel" plugin &&
@@ -249,6 +258,14 @@ while IFS=$'\t' read -r pkg imp; do
       add R12 "$pkg" "$imp"
     fi
 
+    # R14: the config-view backend is a config/keybindings leaf.
+    if [ "$rel" = internal/configview ]; then
+      case "$irel" in
+        config | internal/keybindings | keymap | theme) ;;
+        *) add R14 "$pkg" "$imp" ;;
+      esac
+    fi
+
     # R13: the private host packages. Only the composition root imports them; the
     # only sibling edges are uiadapter -> {highlight, keybindings, restore} and
     # pluginhost -> keybindings.
@@ -269,7 +286,8 @@ while IFS=$'\t' read -r pkg imp; do
         fi
         ;;
       internal/keybindings)
-        if [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ] && [ "$rel" != internal/pluginhost ]; then
+        if [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ] && [ "$rel" != internal/pluginhost ] &&
+          [ "$rel" != internal/configview ]; then
           add R13 "$pkg" "$imp"
         fi
         ;;

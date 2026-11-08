@@ -14,6 +14,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/internal/configview"
 	"github.com/tbxark/gvim/internal/filewatch"
 	"github.com/tbxark/gvim/internal/highlight"
 	"github.com/tbxark/gvim/internal/keybindings"
@@ -245,7 +246,7 @@ func buildModel(ctx context.Context, opts Options) (*tui.Model, *finder.Index, e
 // first. With file arguments the session is neither restored nor saved, so the saved
 // session stays as it is. When watching is set, the tree root is watched for changes.
 func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime, err error) {
-	if err := checkConfigFile(opts.Config); err != nil {
+	if err := configview.CheckFile(opts.Config); err != nil {
 		return nil, err
 	}
 	root, err := resolveRoot(opts.Root)

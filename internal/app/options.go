@@ -7,7 +7,7 @@
 // (session restore and crash recovery), internal/keybindings (user keybindings)
 // and internal/highlight (the syntax-span cache). app is the only package that
 // imports them all. The command-line layer in internal/cli sees only the Options
-// type and the config-view backend declared here.
+// type and app.Run; the config-view backend lives in internal/configview.
 package app
 
 import (

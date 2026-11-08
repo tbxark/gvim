@@ -26,6 +26,7 @@ internal/                       private executable shell (no top-level package i
   keybindings/                  keymap adapter, user bindings store, plugin binding overlay
   highlight/                    syntax-span cache for the TUI
   apptest/                      test-only shared helpers; never in a production tree
+  configview/                   the `gvim config show` / `config paths` backend
   cli/                          cobra command tree, flags, DIR / FILE:LINE:COL
   tui/                          Bubble Tea v2 root model + widgets
     overlay/ list/              shared kit: the Overlay/Caret contract and the list/box widget
@@ -75,13 +76,14 @@ internal/cli → cmd/gvim
 | R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `atomicfile`, `shellcmd`. |
 | R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `finder` imports only `explorer` and `fuzzy`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
-| R6 | `internal/cli` imports `internal/app` and no other package of this module. |
+| R6 | `internal/cli` imports only `internal/app`, `internal/configview` and `syntax` (and cobra). |
 | R7 | Only `cmd/gvim` and `internal/cli` import `internal/app`; only `cmd/gvim` imports `internal/cli`; only `internal/app` (and `plugin/plugintest`) imports the plugin runtime; only `internal/app` imports TUI sub-packages. |
 | R8 | No package in the shipped binary imports test support: `buffer/buffertest`, `plugin/plugintest`, `internal/uitest` (and the app test harness `internal/apptest`, when it exists). |
 | R9 | `pluginapi` and `decorations` import no module package and no charm package. |
 | R10 | The plugin tree imports only the standard library, `gopher-lua`, `hujson`, `pluginapi`, `plugin/bundled`, `plugin/pattern` (plugintest may also import the runtime and other plugin sub-packages). No charm. |
 | R11 | `editor`, `buffer` and `decorations` do not import `pluginapi`. |
 | R12 | Only `internal/tui` (its root and its own sub-packages) and `internal/app` import TUI sub-packages. |
+| R14 | `internal/configview` imports only `config`, `internal/keybindings`, `keymap` and `theme` among module packages; it never imports `internal/app`, `internal/cli` or `internal/tui`. |
 
 Run the gates:
 
@@ -107,7 +109,8 @@ bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
 
 | Package | Role | May import |
 |---|---|---|
-| `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`), exit codes. | `internal/app` (Options only), cobra, stdlib |
+| `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`), exit codes. | `internal/app` (Options/Run), `internal/configview`, `syntax`, cobra, stdlib |
+| `internal/configview` | Backs `gvim config show`, `gvim config paths`: renders the effective config as JSON and reports config file locations. | `config`, `internal/keybindings`, `keymap`, `theme` |
 | `internal/app` | Composition root: `Options`, `Validate`, `Run`, `buildRuntime`; wires engine + host packages + TUI. | engine packages, host packages, TUI root and sub-packages, plugin runtime |
 | `internal/uiadapter` | Adapts engine to the TUI ports: editor/document views, dialogs, ranker, file ops, git status, projects, terminal/clipboard, auto-save gate. | engine packages, `tui` sub-packages, `highlight`, `keybindings`, `terminal` |
 | `internal/pluginhost` | The real `plugin.OS`, the editor as plugins see it, plugin services, virtual buffers and decorations. | engine packages, `plugin`, `pluginapi`, `keybindings` |
@@ -249,10 +252,11 @@ Done:
 
 1. Top-of-tree layout move and package renames (§5).
 2. `main` moved to `cmd/gvim`.
-3. Import gate rewritten for the new tree (R1-R13) and generator paths updated.
+3. Import gate rewritten for the new tree (R1-R14) and generator paths updated.
 4. `internal/app` split into host packages (`uiadapter`, `pluginhost`, `lsphost`,
-   `restore`, `keybindings`, `highlight`, plus test-only `apptest`); `app` is now seven
-   files (Options/Run/buildRuntime, settings, logfile, live grep, formatters, config view).
+   `restore`, `keybindings`, `highlight`, plus test-only `apptest`); `app` is now six
+   files (Options/Run/buildRuntime, settings, logfile, live grep, formatters), and the
+   `gvim config` backend moved to `internal/configview` with `syntax.GrammarNames`.
 5. TUI kits: `overlay` (contract + Caret), `list` (list/box kit), `space` (`Rect` and text
    fitting), removing ten forwarding adapters (~36 methods) and the duplicated fit helpers.
 6. Engine leaves: `atomicfile`, `shellcmd`, the `buffer` two-mode doc, and file renames.
@@ -262,8 +266,6 @@ Next (tracked as follow-up work; each keeps build + tests green):
 1. Further TUI extraction now that the kits exist: split tree/geometry (`tui/split`), frame
    geometry and hit map (`tui/frame`), keybinding editor (`tui/keybindeditor`), terminal
    dock (`tui/dock`), utility screens; the plugin host and LSP UI last.
-2. Move the CLI config-view backend out of `internal/app` into `config`/`syntax` so `cli`
-   does not import `app` for `LoadConfig`/`ConfigPaths`/`GrammarNames`.
 3. `editor` → `document` + `editor` split (the two god objects), with an alias bridge.
 4. Plugin leaf splits (`hostos`, `luastdlib`) and an `lsp/manager` split.
 5. Fold `fold` into `textlayout` (needs a small `tui/editorpane` import update).
@@ -275,7 +277,7 @@ file when each step lands.
 ## 7. What enforces the layout
 
 - The compiler: import cycles and illegal `internal/` imports fail the build.
-- `migration/tools/import_rules_check.sh`: R1-R12, run in every gate.
+- `migration/tools/import_rules_check.sh`: R1-R14, run in every gate.
 - `migration/tools/purity_check.sh`: the shipped binary stays pure Go (no cgo).
 - `go vet ./...`, `golangci-lint run ./...`, `go test ./...`.
 - Generated code stays generated: `commands/commands_gen.go`

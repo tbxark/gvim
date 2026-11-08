@@ -7,24 +7,24 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tbxark/gvim/internal/app"
+	"github.com/tbxark/gvim/internal/configview"
 )
 
 // configDeps are the functions the config commands call. The app package
 // supplies the real ones, and tests pass fakes. cwd gives the workspace root.
 // load gets the root flags that change the effective config (--config, --keymap
-// and --theme) as an app.Options, and paths gets the --config path. An unset flag
+// and --theme) as a configview.Options, and paths gets the --config path. An unset flag
 // is empty.
 type configDeps struct {
 	cwd   func() (string, error)
-	load  func(root string, opts app.Options) (app.ConfigView, error)
-	paths func(root, configPath string) ([]app.ConfigFile, error)
+	load  func(root string, opts configview.Options) (configview.ConfigView, error)
+	paths func(root, configPath string) ([]configview.ConfigFile, error)
 }
 
 // defaultConfigDeps returns the dependencies that read the real working
 // directory and the real config files.
 func defaultConfigDeps() configDeps {
-	return configDeps{cwd: os.Getwd, load: app.LoadConfig, paths: app.ConfigPaths}
+	return configDeps{cwd: os.Getwd, load: configview.Load, paths: configview.Paths}
 }
 
 // newConfigCommand returns the config command group, wired to the real
@@ -65,7 +65,7 @@ stderr as a warning.`,
 				cmd.SilenceUsage = true
 				return err
 			}
-			view, err := d.load(root, app.Options{Config: *configPath, Keymap: *keymapName, Theme: *themeName})
+			view, err := d.load(root, configview.Options{Config: *configPath, Keymap: *keymapName, Theme: *themeName})
 			if err != nil {
 				cmd.SilenceUsage = true
 				return err

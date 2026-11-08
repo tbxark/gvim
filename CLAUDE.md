@@ -91,7 +91,7 @@ go build ./... && CGO_ENABLED=0 go build ./...   # shipped binary must stay pure
 go vet ./...
 golangci-lint run ./...                          # v2; currently reports 0 issues
 bash migration/tools/purity_check.sh             # pure-Go gate, prints PURE_GO_OK
-bash migration/tools/import_rules_check.sh       # layering gate R1-R13, prints IMPORT_RULES_OK
+bash migration/tools/import_rules_check.sh       # layering gate R1-R14, prints IMPORT_RULES_OK
 go test ./...                                    # all packages pass today
 go test ./internal/tui -run TestName             # single test
 go test -race ./...                              # test-only; needs cgo
@@ -100,7 +100,7 @@ go run ./cmd/gvim [DIR] [FILE[:LINE[:COL]]]...   # launch the TUI
 
 ### Architecture
 
-The design record is `docs/architecture.md` (package table, import rules R1-R13,
+The design record is `docs/architecture.md` (package table, import rules R1-R14,
 package maps, migration phases). `migration/ARCH-v4.md` is the earlier proposal-only
 record; where the two disagree, `docs/architecture.md` wins. The shape that needs
 several files to see:
@@ -108,7 +108,8 @@ several files to see:
 - Three layers. `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) →
   `app.Run`. `internal/` is the private executable shell (`app` plus the host packages
   `uiadapter`, `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`, the
-  test-only `apptest`, then `cli`, `tui`, `terminal`, `filewatch`, `uitest`). TUI-free engine and library packages are at the
+  test-only `apptest`, then `configview`, `cli`, `tui`, `terminal`, `filewatch`,
+  `uitest`). TUI-free engine and library packages are at the
   module top level: `buffer`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,
   `session`, `decorations`, `textlayout`, `workspace`, `explorer`, `finder`, `fuzzy`,
   `fsops`, `gitstate`, `config`, `keymap`, `theme`, `lsp`, `pluginapi`, `plugin`,
@@ -117,10 +118,12 @@ several files to see:
   `internal/`. Only `internal/app` imports the host packages (`uiadapter`, `pluginhost`,
   `lsphost`, `restore`, `keybindings`, `highlight`); only `internal/app` and
   `internal/uiadapter` import the TUI sub-packages; `internal/cli` imports `internal/app`
-  for `Options` only.
+  for `Options`/`Run` and `internal/configview` + `syntax` for the config and grammar
+  commands.
   `migration/tools/import_rules_check.sh` is the enforcement.
 - `internal/app` is the thin composition root (`Options`, `Run`, `buildRuntime`, settings,
-  logfile, live grep, default formatters). The host packages implement the ports:
+  logfile, live grep, default formatters); the `gvim config` backend is
+  `internal/configview`. The host packages implement the ports:
   `uiadapter` (editor/document/dialogs/files/git/projects/terminal/clipboard),
   `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`.
 - `internal/tui` is one Bubble Tea v2 root model (`package tui`). It depends on

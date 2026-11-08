@@ -1,4 +1,8 @@
-package app
+// Package configview backs the `gvim config` and `gvim grammar` commands: it
+// renders the effective configuration for printing and reports the config file
+// locations. It is private to the executable shell: internal/cli imports it,
+// and it imports config, keybindings and keymap, never app or the TUI.
+package configview
 
 import (
 	"encoding/json"
@@ -7,12 +11,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-
-	"github.com/alecthomas/chroma/v2/lexers"
+	"slices"
+	"strings"
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
 // ConfigFile is one config file location and whether a file is there.
@@ -35,6 +40,32 @@ type ConfigView struct {
 	Warnings []string
 }
 
+// Options are the command-line flags that change the effective configuration in
+// a view. They are the config-relevant fields of app.Options; the zero value
+// uses the config files as they are.
+type Options struct {
+	// Config is the user config file path. Empty means the default location.
+	Config string
+	// Keymap and Theme override the names the config files set.
+	Keymap string
+	Theme  string
+}
+
+// validate reports the first option that cannot be used. The messages are the
+// ones app.Options.Validate gives for the same flags, so `gvim config show`
+// rejects a bad --keymap or --theme with the same text as `gvim`.
+func (o Options) validate() error {
+	if o.Keymap != "" {
+		if _, err := keymap.ByName(o.Keymap); err != nil {
+			return fmt.Errorf("--keymap: unknown keymap %q (want default, macos, macos-gui, emacs or vscode)", o.Keymap)
+		}
+	}
+	if o.Theme != "" && !slices.Contains(theme.Names(), o.Theme) {
+		return fmt.Errorf("--theme: unknown theme %q (want %s)", o.Theme, strings.Join(theme.Names(), ", "))
+	}
+	return nil
+}
+
 // effectiveSettings is the JSON shape of ConfigView.JSON. Keys follow the
 // config file names. An empty keymap in the files shows as the platform
 // default keymap.
@@ -54,19 +85,18 @@ type effectiveSettings struct {
 	Keybindings            json.RawMessage `json:"keybindings,omitempty"`
 }
 
-// LoadConfig merges the default, user and project config layers for root and
-// returns the result as printable text. A non-empty opts.Config replaces the
-// default user file, as the --config flag does. A non-empty opts.Keymap and
-// opts.Theme replace the keymap and theme the files name, as --keymap and
-// --theme do; the defaults apply when neither is set. Other fields of opts are
-// not used. A root that is not absolute is made absolute first. The error is
+// Load merges the default, user and project config layers for root and returns
+// the result as printable text. A non-empty opts.Config replaces the default
+// user file, as the --config flag does. A non-empty opts.Keymap and opts.Theme
+// replace the keymap and theme the files name; the defaults apply when neither
+// is set. A root that is not absolute is made absolute first. The error is
 // non-nil when opts is invalid, when the result cannot be built, or when
 // opts.Config is set and does not exist.
-func LoadConfig(root string, opts Options) (ConfigView, error) {
-	if err := opts.Validate(); err != nil {
+func Load(root string, opts Options) (ConfigView, error) {
+	if err := opts.validate(); err != nil {
 		return ConfigView{}, err
 	}
-	if err := checkConfigFile(opts.Config); err != nil {
+	if err := CheckFile(opts.Config); err != nil {
 		return ConfigView{}, err
 	}
 	cfg, diags, err := config.Load(config.Options{Root: root, UserFile: opts.Config})
@@ -110,13 +140,13 @@ func LoadConfig(root string, opts Options) (ConfigView, error) {
 	return view, nil
 }
 
-// ConfigPaths returns the user config file and the project config file for
-// root. A non-empty configPath stands in for the user file, as it does in
-// LoadConfig. The project entry is the nearest .gvim/config.json at or above
-// root. When none exists, its path is the one under root, and Exists is false.
-// The error is non-nil only when configPath is empty and the user config
-// directory is unknown.
-func ConfigPaths(root, configPath string) ([]ConfigFile, error) {
+// Paths returns the user config file and the project config file for root. A
+// non-empty configPath stands in for the user file, as it does in Load. The
+// project entry is the nearest .gvim/config.json at or above root. When none
+// exists, its path is the one under root, and Exists is false. The error is
+// non-nil only when configPath is empty and the user config directory is
+// unknown.
+func Paths(root, configPath string) ([]ConfigFile, error) {
 	user := configPath
 	if user == "" {
 		files, err := config.Paths()
@@ -142,11 +172,11 @@ func ConfigPaths(root, configPath string) ([]ConfigFile, error) {
 	}, nil
 }
 
-// checkConfigFile returns an error that names path when a config file was given
-// with --config and does not exist. An empty path is the default user file,
+// CheckFile returns an error that names path when a config file was given with
+// --config and does not exist. An empty path is the default user file,
 // which may be absent, so it passes. Other stat failures are left to
 // config.Load, which reports them as diagnostics.
-func checkConfigFile(path string) error {
+func CheckFile(path string) error {
 	if path == "" {
 		return nil
 	}
@@ -160,10 +190,4 @@ func checkConfigFile(path string) error {
 func isFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
-}
-
-// GrammarNames returns the names and aliases of the syntax grammars chroma
-// knows. The order is not specified, and names may repeat.
-func GrammarNames() []string {
-	return lexers.Names(true)
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tbxark/gvim/config"
-	"github.com/tbxark/gvim/internal/app"
+	"github.com/tbxark/gvim/internal/configview"
 	"github.com/tbxark/gvim/keymap"
 )
 
@@ -36,7 +36,7 @@ func TestConfigShowWithFakeLoader(t *testing.T) {
 	const settings = "{\n  \"theme\": \"light\"\n}\n"
 	tests := []struct {
 		name       string
-		view       app.ConfigView
+		view       configview.ConfigView
 		loadErr    error
 		cwdErr     error
 		wantLoaded bool
@@ -46,13 +46,13 @@ func TestConfigShowWithFakeLoader(t *testing.T) {
 	}{
 		{
 			name:       "prints the loaded settings",
-			view:       app.ConfigView{JSON: []byte(settings)},
+			view:       configview.ConfigView{JSON: []byte(settings)},
 			wantLoaded: true,
 			wantOut:    settings,
 		},
 		{
 			name: "warnings go to stderr and do not fail",
-			view: app.ConfigView{
+			view: configview.ConfigView{
 				JSON:     []byte(settings),
 				Warnings: []string{"/p/.gvim/config.json: tab_size: must be between 1 and 16, got 99", "/u/config.json: invalid JSON"},
 			},
@@ -84,7 +84,7 @@ func TestConfigShowWithFakeLoader(t *testing.T) {
 					}
 					return "/work/proj", nil
 				},
-				load: func(root string, _ app.Options) (app.ConfigView, error) {
+				load: func(root string, _ configview.Options) (configview.ConfigView, error) {
 					loaded = true
 					gotRoot = root
 					return tt.view, tt.loadErr
@@ -117,12 +117,12 @@ func TestConfigShowWithFakeLoader(t *testing.T) {
 func TestConfigPathsWithFakeFiles(t *testing.T) {
 	tests := []struct {
 		name  string
-		files []app.ConfigFile
+		files []configview.ConfigFile
 		want  string
 	}{
 		{
 			name: "both present",
-			files: []app.ConfigFile{
+			files: []configview.ConfigFile{
 				{Label: "user", Path: "/home/u/gvim/config.json", Exists: true},
 				{Label: "project", Path: "/work/.gvim/config.json", Exists: true},
 			},
@@ -130,7 +130,7 @@ func TestConfigPathsWithFakeFiles(t *testing.T) {
 		},
 		{
 			name: "both missing",
-			files: []app.ConfigFile{
+			files: []configview.ConfigFile{
 				{Label: "user", Path: "/home/u/gvim/config.json"},
 				{Label: "project", Path: "/work/.gvim/config.json"},
 			},
@@ -141,7 +141,7 @@ func TestConfigPathsWithFakeFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := configDeps{
 				cwd:   func() (string, error) { return "/work", nil },
-				paths: func(string, string) ([]app.ConfigFile, error) { return tt.files, nil },
+				paths: func(string, string) ([]configview.ConfigFile, error) { return tt.files, nil },
 			}
 			stdout, stderr, err := runTree(t, newConfigCommandWith(d, new(string), new(string), new(string)), "paths")
 			if err != nil {
@@ -160,7 +160,7 @@ func TestConfigPathsWithFakeFiles(t *testing.T) {
 func TestConfigPathsErrorFails(t *testing.T) {
 	d := configDeps{
 		cwd:   func() (string, error) { return "/work", nil },
-		paths: func(string, string) ([]app.ConfigFile, error) { return nil, errors.New("no home") },
+		paths: func(string, string) ([]configview.ConfigFile, error) { return nil, errors.New("no home") },
 	}
 	stdout, _, err := runTree(t, newConfigCommandWith(d, new(string), new(string), new(string)), "paths")
 	if err == nil || !strings.Contains(err.Error(), "no home") {
@@ -177,11 +177,11 @@ func TestConfigFlagValueReachesDeps(t *testing.T) {
 	var loadPath, pathsPath string
 	d := configDeps{
 		cwd: func() (string, error) { return "/work", nil },
-		load: func(_ string, opts app.Options) (app.ConfigView, error) {
+		load: func(_ string, opts configview.Options) (configview.ConfigView, error) {
 			loadPath = opts.Config
-			return app.ConfigView{JSON: []byte("{}\n")}, nil
+			return configview.ConfigView{JSON: []byte("{}\n")}, nil
 		},
-		paths: func(_, configPath string) ([]app.ConfigFile, error) {
+		paths: func(_, configPath string) ([]configview.ConfigFile, error) {
 			pathsPath = configPath
 			return nil, nil
 		},

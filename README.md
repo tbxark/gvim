@@ -29,6 +29,7 @@ The module has three layers.
     Lua runtime host), `internal/lsphost` (language-server port), `internal/restore`
     (session + crash recovery), `internal/keybindings` (keymap adapter and user
     bindings), `internal/highlight` (syntax-span cache); `internal/apptest` is test-only.
+  - `internal/configview`: the backend of `gvim config show` / `config paths`.
   - `internal/cli`: the cobra command tree; hands `app.Options` to a `Runner`.
   - `internal/tui`: the single Bubble Tea root model (`ports.go` defines its interfaces,
     `layout.go` is the geometry source for painting and hit testing). Sub-packages:
