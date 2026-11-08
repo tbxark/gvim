@@ -103,11 +103,11 @@ func TestRestoreOverlayWaitsForTheIndexAndRefusesEditsMeanwhile(t *testing.T) {
 	if err := fresh.RestoreOverlay(nd, st); err != nil {
 		t.Fatalf("RestoreOverlay: %v", err)
 	}
-	if !nd.restoring() || nd.Buffer.Modified() {
-		t.Fatalf("restoring %v, modified %v: want a restore that waits", nd.restoring(), nd.Buffer.Modified())
+	if !nd.Restoring() || nd.Buffer.Modified() {
+		t.Fatalf("restoring %v, modified %v: want a restore that waits", nd.Restoring(), nd.Buffer.Modified())
 	}
-	if !strings.Contains(nd.status, "Restoring unsaved changes") {
-		t.Errorf("status = %q", nd.status)
+	if !strings.Contains(nd.Status, "Restoring unsaved changes") {
+		t.Errorf("status = %q", nd.Status)
 	}
 	// The unsaved edits are still stashed if the session is saved now.
 	if again, ok := nd.OverlayStash(); !ok || again.Overlay.TailFirst != st.Overlay.TailFirst {
@@ -131,7 +131,7 @@ func TestRestoreOverlayWaitsForTheIndexAndRefusesEditsMeanwhile(t *testing.T) {
 	}
 
 	steps := 0
-	for nd.restoring() {
+	for nd.Restoring() {
 		ran, _ := indexStep(fresh)
 		if !ran || steps > 1000 {
 			t.Fatalf("the restore did not finish after %d index steps", steps)
@@ -144,8 +144,8 @@ func TestRestoreOverlayWaitsForTheIndexAndRefusesEditsMeanwhile(t *testing.T) {
 	if !nd.Buffer.Modified() {
 		t.Fatalf("the document is not modified after the restore")
 	}
-	if !strings.Contains(nd.status, "Restored unsaved changes") {
-		t.Errorf("status = %q", nd.status)
+	if !strings.Contains(nd.Status, "Restored unsaved changes") {
+		t.Errorf("status = %q", nd.Status)
 	}
 	indexAll(t, fresh)
 	if got := nd.Buffer.Text(); got != want {
@@ -166,8 +166,8 @@ func TestSaveAndRevertWaitForTheRestore(t *testing.T) {
 	st := stashOf(t, d)
 
 	fresh, nd := sameFileOpened(t, opts, d.Path)
-	if err := fresh.RestoreOverlay(nd, st); err != nil || !nd.restoring() {
-		t.Fatalf("RestoreOverlay() = %v, restoring %v: want a restore that waits", err, nd.restoring())
+	if err := fresh.RestoreOverlay(nd, st); err != nil || !nd.Restoring() {
+		t.Fatalf("RestoreOverlay() = %v, restoring %v: want a restore that waits", err, nd.Restoring())
 	}
 	plan, _ := fresh.PlanSave()
 	for _, r := range plan.Run() {
@@ -192,16 +192,16 @@ func TestAJumpAskedWhileRestoringStillLands(t *testing.T) {
 	st := stashOf(t, d)
 
 	fresh, nd := sameFileOpened(t, opts, d.Path)
-	if err := fresh.RestoreOverlay(nd, st); err != nil || !nd.restoring() {
-		t.Fatalf("RestoreOverlay() = %v, restoring %v: want a restore that waits", err, nd.restoring())
+	if err := fresh.RestoreOverlay(nd, st); err != nil || !nd.Restoring() {
+		t.Fatalf("RestoreOverlay() = %v, restoring %v: want a restore that waits", err, nd.Restoring())
 	}
 	// The session puts the caret where it was, far past the lines the index knows.
 	if err := fresh.GotoLine(140, 3); err != nil {
 		t.Fatal(err)
 	}
 	indexAll(t, fresh)
-	if nd.restoring() || !nd.Buffer.Modified() {
-		t.Fatalf("restoring %v, modified %v: want the edits back", nd.restoring(), nd.Buffer.Modified())
+	if nd.Restoring() || !nd.Buffer.Modified() {
+		t.Fatalf("restoring %v, modified %v: want the edits back", nd.Restoring(), nd.Buffer.Modified())
 	}
 	if nd.Cursor.Line != 139 || nd.Cursor.Col != 2 {
 		t.Errorf("cursor = %+v, want line 139, col 2", nd.Cursor)
@@ -219,9 +219,9 @@ func TestRestoreOverlayDoneAtOnceWhenTheIndexIsFarEnough(t *testing.T) {
 	if err := fresh.RestoreOverlay(nd, st); err != nil {
 		t.Fatalf("RestoreOverlay: %v", err)
 	}
-	if nd.restoring() || !nd.Buffer.Modified() || nd.Buffer.Line(1) != "eline 0001" {
+	if nd.Restoring() || !nd.Buffer.Modified() || nd.Buffer.Line(1) != "eline 0001" {
 		t.Errorf("restoring %v, modified %v, line 1 = %q: want the edit back at once",
-			nd.restoring(), nd.Buffer.Modified(), nd.Buffer.Line(1))
+			nd.Restoring(), nd.Buffer.Modified(), nd.Buffer.Line(1))
 	}
 	if res := fresh.Do("undo", nil); res.Err != nil || nd.Buffer.Modified() {
 		t.Errorf("undo of the restore: %v, modified %v", res.Err, nd.Buffer.Modified())
@@ -237,7 +237,7 @@ func TestRestoreOverlayRefusesAFileThatChanged(t *testing.T) {
 	st := stashOf(t, d)
 
 	tests := []struct {
-		name   string
+		Name   string
 		change func(t *testing.T, path string)
 		stash  func(st *session.OverlayStash)
 	}{
@@ -254,7 +254,7 @@ func TestRestoreOverlayRefusesAFileThatChanged(t *testing.T) {
 		{"other byte-order mark", func(*testing.T, string) {}, func(st *session.OverlayStash) { st.Skip = 3 }},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.Name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "big.txt")
 			if err := os.WriteFile(path, []byte(lineText(150)), 0o600); err != nil {
 				t.Fatal(err)
@@ -277,7 +277,7 @@ func TestRestoreOverlayRefusesAFileThatChanged(t *testing.T) {
 			if err := fresh.RestoreOverlay(nd, in); !errors.Is(err, ErrStashStale) {
 				t.Fatalf("RestoreOverlay() = %v, want ErrStashStale", err)
 			}
-			if nd.Buffer.Modified() || nd.restoring() {
+			if nd.Buffer.Modified() || nd.Restoring() {
 				t.Errorf("a refused stash changed the document")
 			}
 		})
@@ -341,11 +341,11 @@ func TestARestoreThatFailsLateKeepsTheStashAndFreesTheDocument(t *testing.T) {
 		t.Fatalf("RestoreOverlay: %v", err)
 	}
 	indexAll(t, fresh)
-	if nd.restoring() {
+	if nd.Restoring() {
 		t.Fatalf("the document still refuses edits after the index is complete")
 	}
-	if !strings.Contains(nd.status, "could not be restored") {
-		t.Errorf("status = %q, want the failure", nd.status)
+	if !strings.Contains(nd.Status, "could not be restored") {
+		t.Errorf("status = %q, want the failure", nd.Status)
 	}
 	if kept, ok := nd.OverlayStash(); !ok || kept.Overlay.TailFirst != 5000 {
 		t.Errorf("the stash that could not be restored is not kept: %+v, %v", kept, ok)
@@ -374,8 +374,8 @@ func TestSourceChangedWritesStash(t *testing.T) {
 	if len(files) != 1 {
 		t.Fatalf("%d overlay stashes were written, want 1", len(files))
 	}
-	if !strings.Contains(d.status, files[0]) || !strings.Contains(d.status, "File changed on disk") {
-		t.Errorf("status = %q, want the change and the stash path", d.status)
+	if !strings.Contains(d.Status, files[0]) || !strings.Contains(d.Status, "File changed on disk") {
+		t.Errorf("status = %q, want the change and the stash path", d.Status)
 	}
 	got, err := session.ReadOverlay(dir, filepath.Base(files[0]))
 	if err != nil {
@@ -386,7 +386,7 @@ func TestSourceChangedWritesStash(t *testing.T) {
 	}
 	// The disk poll calls CheckSource again and again: the stash is written once.
 	_ = d.CheckSource()
-	_ = d.stashUnsaved()
+	_ = d.StashUnsaved()
 	if again, _ := filepath.Glob(filepath.Join(dir, "overlay-*.json")); len(again) != 1 {
 		t.Errorf("%d overlay stashes after more checks, want 1", len(again))
 	}
@@ -407,8 +407,8 @@ func TestAGrownSourceWritesTheStashToo(t *testing.T) {
 	if files, _ := filepath.Glob(filepath.Join(dir, "overlay-*.json")); len(files) != 1 {
 		t.Fatalf("%d overlay stashes were written, want 1", len(files))
 	}
-	if !strings.Contains(d.status, "Unsaved changes stashed in") {
-		t.Errorf("status = %q", d.status)
+	if !strings.Contains(d.Status, "Unsaved changes stashed in") {
+		t.Errorf("status = %q", d.Status)
 	}
 }
 
@@ -439,12 +439,12 @@ func TestAFailedIndexWritesTheStashOnce(t *testing.T) {
 			break
 		}
 	}
-	if !strings.HasPrefix(d.status, "Index failed:") {
-		t.Fatalf("status = %q, want the index failure", d.status)
+	if !strings.HasPrefix(d.Status, "Index failed:") {
+		t.Fatalf("status = %q, want the index failure", d.Status)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, "overlay-*.json"))
-	if len(files) != 1 || !strings.Contains(d.status, files[0]) {
-		t.Errorf("stash files %v, status %q: want one stash named in the status", files, d.status)
+	if len(files) != 1 || !strings.Contains(d.Status, files[0]) {
+		t.Errorf("stash files %v, status %q: want one stash named in the status", files, d.Status)
 	}
 }
 
@@ -457,7 +457,7 @@ func TestARebaseMovesTheIdentityOfTheStashToTheSavedFile(t *testing.T) {
 	if err := e.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if d.large.rebaseFailed {
+	if d.LargeState().RebaseFailed {
 		t.Fatal("the save did not rebase")
 	}
 	typeAt(t, e, 7, 0, "y")

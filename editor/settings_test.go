@@ -43,7 +43,7 @@ func TestSettingsForPassesLanguageAndPathToTheResolver(t *testing.T) {
 func TestSettingsForViewSettingsWinOverLanguage(t *testing.T) {
 	yes, no := true, false
 	tests := []struct {
-		name  string
+		Name  string
 		view  ViewSettings
 		check func(LanguageSettings) bool
 	}{
@@ -61,13 +61,13 @@ func TestSettingsForViewSettingsWinOverLanguage(t *testing.T) {
 		}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			e := New(Options{})
 			e.SetLanguageSettings(func(string, string) LanguageSettings {
 				return LanguageSettings{TabSize: 8, UseTabs: true, LineWrap: true, PageWidth: 72}
 			})
 			d := e.Active()
-			d.view = tt.view
+			d.SetView(tt.view)
 			if s := e.SettingsFor(d); !tt.check(s) {
 				t.Errorf("settings = %+v", s)
 			}
@@ -98,8 +98,8 @@ func TestAddCursorBelowUsesTheLanguageTabSize(t *testing.T) {
 	e := widthEditor("\tx\nabcdefghi")
 	e.SetCursor(buffer.Pos{Col: 1}, false)
 	run(t, e, "add_cursor_below")
-	cs := e.Active().allCarets()
-	if len(cs) != 2 || cs[1].head != (buffer.Pos{Line: 1, Col: 8}) {
+	cs := e.Active().AllCarets()
+	if len(cs) != 2 || cs[1].Head != (buffer.Pos{Line: 1, Col: 8}) {
 		t.Fatalf("carets = %+v, want the second at 1:8, below the tab's 8 columns", cs)
 	}
 }

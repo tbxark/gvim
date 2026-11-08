@@ -122,11 +122,11 @@ func TestDocIDsThroughTheOpeningPaths(t *testing.T) {
 func TestMoveTab(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
+		Name   string
 		move   int // index of the tab to move
 		delta  int
 		active int // index of the active tab before
-		want   string
+		Want   string
 		wantAt int // index of the active tab after
 	}{
 		{"right by one", 0, 1, 0, "bacd", 1},
@@ -144,17 +144,17 @@ func TestMoveTab(t *testing.T) {
 		e.switchTo(tt.active)
 		activeDoc := e.Active()
 		if err := e.MoveTab(ids[tt.move], tt.delta); err != nil {
-			t.Fatalf("%s: %v", tt.name, err)
+			t.Fatalf("%s: %v", tt.Name, err)
 		}
 		var got strings.Builder
 		for _, d := range e.docs {
 			got.WriteString(d.Buffer.Text())
 		}
-		if got.String() != tt.want || e.active != tt.wantAt || e.Active() != activeDoc {
-			t.Errorf("%s: order %q active %d (doc kept: %v), want %q active %d", tt.name, got.String(), e.active, e.Active() == activeDoc, tt.want, tt.wantAt)
+		if got.String() != tt.Want || e.active != tt.wantAt || e.Active() != activeDoc {
+			t.Errorf("%s: order %q active %d (doc kept: %v), want %q active %d", tt.Name, got.String(), e.active, e.Active() == activeDoc, tt.Want, tt.wantAt)
 		}
 		if !slices.Equal(slices.Sorted(slices.Values(e.DocIDs())), ids) {
-			t.Errorf("%s: the set of ids changed", tt.name)
+			t.Errorf("%s: the set of ids changed", tt.Name)
 		}
 	}
 	e, _ := tabsWith("a")
@@ -174,7 +174,7 @@ func TestDocumentGenBumpedBySetBuffer(t *testing.T) {
 	if v0.IsZero() || v0.Gen != g0 || v0.Ver != d.Buffer.Version() {
 		t.Fatalf("Version = %+v", v0)
 	}
-	d.setBuffer(buffer.New("abc"))
+	d.SetBuffer(buffer.New("abc"))
 	if d.Gen() <= g0 {
 		t.Errorf("Gen after setBuffer = %d, want above %d", d.Gen(), g0)
 	}
@@ -245,7 +245,7 @@ func TestSetBufferEmitsCoarseAndReinstallsObserver(t *testing.T) {
 	d := e.Active()
 	old := d.Buffer
 	nb := buffer.New("fresh")
-	d.setBuffer(nb)
+	d.SetBuffer(nb)
 	if len(got) != 1 || !got[0].Coarse || got[0].Version != nb.Version() {
 		t.Fatalf("changes after setBuffer = %+v, want one coarse change", got)
 	}
@@ -265,7 +265,7 @@ func TestSetBufferEmitsCoarseAndReinstallsObserver(t *testing.T) {
 	// Without tracking, a replacement reports nothing.
 	e.TrackChanges("events", false)
 	got = nil
-	d.setBuffer(buffer.New("again"))
+	d.SetBuffer(buffer.New("again"))
 	if len(got) != 0 {
 		t.Errorf("untracked setBuffer reported %+v", got)
 	}
@@ -498,7 +498,7 @@ func TestTakeChangesOverflow(t *testing.T) {
 		e.TrackChanges("events", true)
 		d := e.Active()
 		d.Buffer.Insert(pos(0, 0), "x")
-		d.setBuffer(buffer.New("new"))
+		d.SetBuffer(buffer.New("new"))
 		d.Buffer.Insert(pos(0, 0), "y")
 		if got, over := e.TakeChanges(ids[0], "events"); !over || got != nil {
 			t.Fatalf("coarse: %v overflow %v", got, over)
@@ -550,9 +550,9 @@ func TestChangesPayloadCap(t *testing.T) {
 	for range 20 {
 		e.Active().Buffer.Insert(pos(0, 0), strings.Repeat("r", 200<<10))
 	}
-	ring := e.Active().seam.ring
-	if ring.bytes > changeRingBytes || len(ring.recs)-ring.start < 1 {
-		t.Errorf("ring keeps %d bytes in %d records", ring.bytes, len(ring.recs)-ring.start)
+	ring := e.Active().Seam().Ring
+	if ring.Bytes > changeRingBytes || len(ring.Recs)-ring.Start < 1 {
+		t.Errorf("ring keeps %d bytes in %d records", ring.Bytes, len(ring.Recs)-ring.Start)
 	}
 	if got, over := e.TakeChanges(ids[0], "events"); !over || got != nil {
 		t.Errorf("a consumer that fell behind got %d records, overflow %v", len(got), over)
@@ -562,10 +562,10 @@ func TestChangesPayloadCap(t *testing.T) {
 func TestApplyEditsTable(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
+		Name  string
+		Text  string
 		edits []LSPEdit
-		want  string
+		Want  string
 	}{
 		{"replace", "hello world", []LSPEdit{lspEdit(0, 6, 0, 11, "gvim")}, "hello gvim"},
 		{"unsorted edits", "a b c", []LSPEdit{lspEdit(0, 4, 0, 5, "z"), lspEdit(0, 0, 0, 1, "x")}, "x b z"},
@@ -581,17 +581,17 @@ func TestApplyEditsTable(t *testing.T) {
 		{"nothing", "abc", nil, "abc"},
 	}
 	for _, tt := range tests {
-		e, ids := tabsWith("zzz", tt.text)
+		e, ids := tabsWith("zzz", tt.Text)
 		if err := e.ApplyEdits(ids[1], tt.edits, EditOptions{}); err != nil {
-			t.Errorf("%s: %v", tt.name, err)
+			t.Errorf("%s: %v", tt.Name, err)
 			continue
 		}
 		// The second tab is not active, and the active one is untouched.
-		if got := e.docs[1].Buffer.Text(); got != tt.want {
-			t.Errorf("%s: text = %q, want %q", tt.name, got, tt.want)
+		if got := e.docs[1].Buffer.Text(); got != tt.Want {
+			t.Errorf("%s: text = %q, want %q", tt.Name, got, tt.Want)
 		}
 		if e.docs[0].Buffer.Text() != "zzz" || e.ActiveID() != ids[0] {
-			t.Errorf("%s: the active tab changed", tt.name)
+			t.Errorf("%s: the active tab changed", tt.Name)
 		}
 	}
 }
@@ -611,11 +611,11 @@ func TestApplyEditsErrors(t *testing.T) {
 		t.Fatal("test setup: the version did not change")
 	}
 	cases := []struct {
-		name  string
-		id    DocID
+		Name  string
+		Id    DocID
 		edits []LSPEdit
 		opts  EditOptions
-		want  error
+		Want  error
 	}{
 		{"unknown id", 999, good, EditOptions{}, ErrNotOpen},
 		{"overlap", ids[0], []LSPEdit{lspEdit(0, 0, 0, 5, "a"), lspEdit(0, 3, 0, 7, "b")}, EditOptions{}, ErrOverlappingEdits},
@@ -624,11 +624,11 @@ func TestApplyEditsErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		before := d.Buffer.Text()
-		if err := e.ApplyEdits(c.id, c.edits, c.opts); !errors.Is(err, c.want) {
-			t.Errorf("%s: err = %v, want %v", c.name, err, c.want)
+		if err := e.ApplyEdits(c.Id, c.edits, c.opts); !errors.Is(err, c.Want) {
+			t.Errorf("%s: err = %v, want %v", c.Name, err, c.Want)
 		}
 		if d.Buffer.Text() != before {
-			t.Errorf("%s: the text changed", c.name)
+			t.Errorf("%s: the text changed", c.Name)
 		}
 	}
 	// A current token passes, also after Undo returns an earlier state.
@@ -647,7 +647,7 @@ func TestApplyEditsErrors(t *testing.T) {
 		t.Fatalf("token after undo: %v", err)
 	}
 	// Read-only.
-	d.readOnly = true
+	d.SetReadOnly(true)
 	if err := e.ApplyEdits(ids[0], good, EditOptions{}); !errors.Is(err, ErrReadOnly) {
 		t.Errorf("read-only: %v", err)
 	}
@@ -892,11 +892,11 @@ func TestApplyEditsCursorModes(t *testing.T) {
 	// "hello world\nsecond line": edit "world" -> "gvim!" and insert "> " at (1,0).
 	edits := []LSPEdit{lspEdit(0, 6, 0, 11, "gvim!"), lspEdit(1, 0, 1, 0, "> ")}
 	tests := []struct {
-		name    string
-		mode    CursorMode
-		cursor  buffer.Pos
-		want    buffer.Pos
-		sel     *buffer.Selection
+		Name    string
+		Mode    CursorMode
+		Cursor  buffer.Pos
+		Want    buffer.Pos
+		Sel     *buffer.Selection
 		wantSel *buffer.Selection
 	}{
 		{"map: before the edit", CursorMap, pos(0, 2), pos(0, 2), nil, nil},
@@ -915,12 +915,12 @@ func TestApplyEditsCursorModes(t *testing.T) {
 	for _, tt := range tests {
 		e, ids := tabsWith("hello world\nsecond line")
 		d := e.Active()
-		d.Cursor, d.Sel = tt.cursor, tt.sel
-		if err := e.ApplyEdits(ids[0], edits, EditOptions{Cursor: tt.mode}); err != nil {
-			t.Fatalf("%s: %v", tt.name, err)
+		d.Cursor, d.Sel = tt.Cursor, tt.Sel
+		if err := e.ApplyEdits(ids[0], edits, EditOptions{Cursor: tt.Mode}); err != nil {
+			t.Fatalf("%s: %v", tt.Name, err)
 		}
-		if d.Cursor != tt.want || !sameSel(d.Sel, tt.wantSel) {
-			t.Errorf("%s: cursor %v sel %v, want %v sel %v", tt.name, d.Cursor, d.Sel, tt.want, tt.wantSel)
+		if d.Cursor != tt.Want || !sameSel(d.Sel, tt.wantSel) {
+			t.Errorf("%s: cursor %v sel %v, want %v sel %v", tt.Name, d.Cursor, d.Sel, tt.Want, tt.wantSel)
 		}
 	}
 }
@@ -937,7 +937,7 @@ func TestApplyEditsMapsExtraCaretsAndMergesThem(t *testing.T) {
 	e, ids := tabsWith("aaa bbb ccc")
 	d := e.Active()
 	d.Cursor = pos(0, 0)
-	d.extra = []Caret{{Cursor: pos(0, 4)}, {Cursor: pos(0, 8)}}
+	d.Extra = []Caret{{Cursor: pos(0, 4)}, {Cursor: pos(0, 8)}}
 	if err := e.ApplyEdits(ids[0], []LSPEdit{lspEdit(0, 0, 0, 0, ">>"), lspEdit(0, 4, 0, 7, "B")}, EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -958,7 +958,7 @@ func TestApplyEditsMapsExtraCaretsAndMergesThem(t *testing.T) {
 	e, ids = tabsWith("abcdef")
 	d = e.Active()
 	d.Cursor = pos(0, 2)
-	d.extra = []Caret{{Cursor: pos(0, 4)}}
+	d.Extra = []Caret{{Cursor: pos(0, 4)}}
 	if err := e.ApplyEdits(ids[0], []LSPEdit{lspEdit(0, 1, 0, 5, "X")}, EditOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -1037,8 +1037,8 @@ func TestIDMethods(t *testing.T) {
 	if err := e.SetCursorID(ids[1], pos(9, 9), true); err != nil || other.Cursor != pos(0, 5) {
 		t.Errorf("extending past the end: %v, cursor %v", err, other.Cursor)
 	}
-	if err := e.SetLanguageID(ids[1], "go"); err != nil || other.language != "go" {
-		t.Errorf("SetLanguageID: %v, %q", err, other.language)
+	if err := e.SetLanguageID(ids[1], "go"); err != nil || other.Language() != "go" {
+		t.Errorf("SetLanguageID: %v, %q", err, other.Language())
 	}
 	// Group makes one undo step of edits through the document.
 	err := e.Group(ids[1], func() error {

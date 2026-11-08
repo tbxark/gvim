@@ -48,7 +48,7 @@ func TestUndoIDRefusals(t *testing.T) {
 		t.Errorf("UndoID(unknown) = %v, want ErrNotOpen", err)
 	}
 	d, _, _ := e.DocByID(ids[0])
-	d.readOnly = true
+	d.SetReadOnly(true)
 	if _, err := e.UndoID(ids[0]); !errors.Is(err, ErrReadOnly) {
 		t.Errorf("UndoID on a read-only document = %v, want ErrReadOnly", err)
 	}
@@ -66,8 +66,8 @@ func TestRevealID(t *testing.T) {
 	}
 	id := d.ID()
 	tests := []struct {
-		name    string
-		line    int
+		Name    string
+		Line    int
 		center  bool
 		wantTop func(top int) bool
 	}{
@@ -77,12 +77,12 @@ func TestRevealID(t *testing.T) {
 		{"center far below", 80, true, func(top int) bool { return top == 80-5 }},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			d.Top = 0
-			d.Cursor = buffer.Pos{Line: tt.line}
-			d.seen = d.Cursor
-			if tt.line == 60 {
-				d.seen = buffer.Pos{} // the caret moved: the margin applies
+			d.Cursor = buffer.Pos{Line: tt.Line}
+			d.Seen = d.Cursor
+			if tt.Line == 60 {
+				d.Seen = buffer.Pos{} // the caret moved: the margin applies
 			}
 			if err := e.RevealID(id, tt.center); err != nil {
 				t.Fatal(err)
@@ -103,7 +103,7 @@ func TestDocumentPreview(t *testing.T) {
 	if e.Active().Preview() {
 		t.Fatal("a new tab is a preview")
 	}
-	e.Active().preview = true
+	e.Active().SetPreview(true)
 	if !e.Active().Preview() {
 		t.Fatal("Preview does not follow the flag")
 	}

@@ -26,10 +26,10 @@ var wrapText = strings.Join([]string{strings.Repeat("a", 25), "xyz", strings.Rep
 func TestWrappedVerticalMotionMovesByDisplayRow(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		start buffer.Pos
+		Name  string
+		Start buffer.Pos
 		steps []Action
-		want  buffer.Pos
+		Want  buffer.Pos
 	}{
 		{"down moves to the next row of the line", caretPos(0, 3), []Action{"move_down"}, caretPos(0, 13)},
 		{"down twice reaches the last row", caretPos(0, 3), []Action{"move_down", "move_down"}, caretPos(0, 23)},
@@ -45,13 +45,13 @@ func TestWrappedVerticalMotionMovesByDisplayRow(t *testing.T) {
 		{"down on the last line goes to the end", caretPos(3, 1), []Action{"move_down"}, caretPos(3, 3)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(wrapText, tt.start.Line, tt.start.Col)
+			e := docAt(wrapText, tt.Start.Line, tt.Start.Col)
 			e.SetRowMapper(wrapEvery(e, 10))
 			run(t, e, tt.steps...)
-			if got := e.Active().Cursor; got != tt.want {
-				t.Fatalf("caret = %+v, want %+v", got, tt.want)
+			if got := e.Active().Cursor; got != tt.Want {
+				t.Fatalf("caret = %+v, want %+v", got, tt.Want)
 			}
 		})
 	}
@@ -71,10 +71,10 @@ func TestWrappedShiftDownKeepsTheAnchor(t *testing.T) {
 func TestWrappedHomeAndEnd(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		start buffer.Pos
+		Name  string
+		Start buffer.Pos
 		steps []Action
-		want  buffer.Pos
+		Want  buffer.Pos
 	}{
 		{"home on a continuation row goes to the row start", caretPos(0, 15), []Action{"smart_home"}, caretPos(0, 10)},
 		{"home again goes to the previous row start", caretPos(0, 15), []Action{"smart_home", "smart_home"}, caretPos(0, 0)},
@@ -87,13 +87,13 @@ func TestWrappedHomeAndEnd(t *testing.T) {
 		{"shift end selects to the row end", caretPos(0, 3), []Action{"select_line_end"}, caretPos(0, 9)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(wrapText, tt.start.Line, tt.start.Col)
+			e := docAt(wrapText, tt.Start.Line, tt.Start.Col)
 			e.SetRowMapper(wrapEvery(e, 10))
 			run(t, e, tt.steps...)
-			if got := e.Active().Cursor; got != tt.want {
-				t.Fatalf("caret = %+v, want %+v", got, tt.want)
+			if got := e.Active().Cursor; got != tt.Want {
+				t.Fatalf("caret = %+v, want %+v", got, tt.Want)
 			}
 		})
 	}
@@ -118,24 +118,24 @@ func TestPageInATallWrappedLineMovesByRows(t *testing.T) {
 	t.Parallel()
 	text := strings.Repeat("a", 100) + "\nend" // ten rows of ten, in a viewport of eight
 	tests := []struct {
-		name  string
-		start buffer.Pos
+		Name  string
+		Start buffer.Pos
 		act   Action
-		want  buffer.Pos
+		Want  buffer.Pos
 	}{
 		{"page down moves one page of rows", caretPos(0, 3), "move_page_down", caretPos(0, 53)}, // 8 rows less 3 of overlap
 		{"page up moves back", caretPos(0, 83), "move_page_up", caretPos(0, 33)},
 		{"page down on the last rows leaves the line", caretPos(0, 63), "move_page_down", caretPos(1, 3)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(text, tt.start.Line, tt.start.Col)
+			e := docAt(text, tt.Start.Line, tt.Start.Col)
 			e.SetViewport(8, 20)
 			e.SetRowMapper(wrapEvery(e, 10))
 			run(t, e, tt.act)
-			if got := e.Active().Cursor; got != tt.want {
-				t.Fatalf("caret = %+v, want %+v", got, tt.want)
+			if got := e.Active().Cursor; got != tt.Want {
+				t.Fatalf("caret = %+v, want %+v", got, tt.Want)
 			}
 		})
 	}

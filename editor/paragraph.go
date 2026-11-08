@@ -24,7 +24,7 @@ func isBlankLine(b *buffer.Buffer, line int) bool {
 func paragraphUp(b *buffer.Buffer, line int) (pos buffer.Pos, limited bool) {
 	budget := newScanBudget(b)
 	for i := line - 1; i >= 0; i-- {
-		if !budget.take(b, i) {
+		if !budget.Take(b, i) {
 			return buffer.Pos{}, true
 		}
 		if isBlankLine(b, i) {
@@ -43,7 +43,7 @@ func blankLineBelow(b *buffer.Buffer, line int) (pos buffer.Pos, ok, limited boo
 	last := b.Lines() - 1
 	budget := newScanBudget(b)
 	for i := line + 1; i <= last; i++ {
-		if !budget.take(b, i) {
+		if !budget.Take(b, i) {
 			return buffer.Pos{}, false, true
 		}
 		if i == last && b.LineLen(i) == 0 {

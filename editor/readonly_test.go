@@ -26,7 +26,7 @@ func TestReadOnlyRefusesTextChanges(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		action Action
-		args   map[string]any
+		Args   map[string]any
 	}{
 		{"insert_char", map[string]any{"text": "x"}},
 		{"insert_newline", nil},
@@ -60,7 +60,7 @@ func TestReadOnlyRefusesTextChanges(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{}, "abc\ndef\n")
 			run(t, e, "select_all", "toggle_read_only")
-			r := e.Do(tt.action, tt.args)
+			r := e.Do(tt.action, tt.Args)
 			if !errors.Is(r.Err, ErrReadOnly) {
 				t.Fatalf("err = %v, want ErrReadOnly", r.Err)
 			}
@@ -81,7 +81,7 @@ func TestReadOnlyAllowsMovementSelectionAndSaveAs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		action Action
-		args   map[string]any
+		Args   map[string]any
 	}{
 		{"move_right", nil},
 		{"move_document_end", nil},
@@ -98,7 +98,7 @@ func TestReadOnlyAllowsMovementSelectionAndSaveAs(t *testing.T) {
 			t.Parallel()
 			e, _ := openFixture(t, Options{}, "abc\ndef\n")
 			run(t, e, "select_all", "toggle_read_only")
-			if r := e.Do(tt.action, tt.args); r.Err != nil {
+			if r := e.Do(tt.action, tt.Args); r.Err != nil {
 				t.Fatalf("Do(%s) on a read-only document: %v", tt.action, r.Err)
 			}
 			if got := e.Active().Buffer.Text(); got != "abc\ndef\n" {

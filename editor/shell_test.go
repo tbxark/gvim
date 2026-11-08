@@ -19,21 +19,21 @@ func shellArgs(command string) map[string]any {
 func TestShellCommandOpensOutputInANewDocument(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		text    string
+		Name    string
+		Text    string
 		command string
-		want    string // text of the new untitled document
+		Want    string // text of the new untitled document
 		wantErr string // substring of the error; "" means success
 	}{
-		{name: "output of a filter", text: "hello", command: "tr a-z A-Z", want: "HELLO"},
-		{name: "the whole buffer is the input", text: "a\nb", command: "cat", want: "a\nb"},
-		{name: "a failing command reports its exit status", text: "x", command: "exit 3", wantErr: "exit status 3"},
-		{name: "stderr is part of the failure", text: "x", command: "echo boom >&2; exit 2", wantErr: "boom"},
+		{Name: "output of a filter", Text: "hello", command: "tr a-z A-Z", Want: "HELLO"},
+		{Name: "the whole buffer is the input", Text: "a\nb", command: "cat", Want: "a\nb"},
+		{Name: "a failing command reports its exit status", Text: "x", command: "exit 3", wantErr: "exit status 3"},
+		{Name: "stderr is part of the failure", Text: "x", command: "echo boom >&2; exit 2", wantErr: "boom"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := withDoc(tt.text)
+			e := withDoc(tt.Text)
 			err := e.Do("shell_command", shellArgs(tt.command)).Err
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -53,10 +53,10 @@ func TestShellCommandOpensOutputInANewDocument(t *testing.T) {
 			if got := e.Active().Name(); got != "Untitled-1" {
 				t.Fatalf("active tab = %q, want Untitled-1", got)
 			}
-			if got := e.Active().Buffer.Text(); got != tt.want {
-				t.Fatalf("output = %q, want %q", got, tt.want)
+			if got := e.Active().Buffer.Text(); got != tt.Want {
+				t.Fatalf("output = %q, want %q", got, tt.Want)
 			}
-			if got := e.docs[0].Buffer.Text(); got != tt.text {
+			if got := e.docs[0].Buffer.Text(); got != tt.Text {
 				t.Fatalf("original text changed to %q", got)
 			}
 		})
@@ -66,26 +66,26 @@ func TestShellCommandOpensOutputInANewDocument(t *testing.T) {
 func TestShellCommandReplaceChangesTextOnlyOnSuccess(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		text    string
-		anchor  int // selection anchor column, or -1 for no selection
-		head    int // selection head column
+		Name    string
+		Text    string
+		Anchor  int // selection anchor column, or -1 for no selection
+		Head    int // selection head column
 		command string
-		want    string // text after the command
+		Want    string // text after the command
 		wantErr string // substring of the error; "" means success
 	}{
-		{name: "whole buffer without a selection", text: "abc\ndef", anchor: -1, command: "tr a-z A-Z", want: "ABC\nDEF"},
-		{name: "selection is replaced by the output", text: "one two three", anchor: 4, head: 7, command: "tr a-z A-Z", want: "one TWO three"},
-		{name: "failing command leaves the text alone", text: "keep", anchor: -1, command: "echo nope >&2; exit 1", want: "keep", wantErr: "exit status 1"},
+		{Name: "whole buffer without a selection", Text: "abc\ndef", Anchor: -1, command: "tr a-z A-Z", Want: "ABC\nDEF"},
+		{Name: "selection is replaced by the output", Text: "one two three", Anchor: 4, Head: 7, command: "tr a-z A-Z", Want: "one TWO three"},
+		{Name: "failing command leaves the text alone", Text: "keep", Anchor: -1, command: "echo nope >&2; exit 1", Want: "keep", wantErr: "exit status 1"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := withDoc(tt.text)
-			if tt.anchor >= 0 {
+			e := withDoc(tt.Text)
+			if tt.Anchor >= 0 {
 				d := e.Active()
-				d.Sel = &buffer.Selection{Anchor: buffer.Pos{Col: tt.anchor}, Head: buffer.Pos{Col: tt.head}}
-				d.Cursor = buffer.Pos{Col: tt.head}
+				d.Sel = &buffer.Selection{Anchor: buffer.Pos{Col: tt.Anchor}, Head: buffer.Pos{Col: tt.Head}}
+				d.Cursor = buffer.Pos{Col: tt.Head}
 			}
 			err := e.Do("shell_command_replace", shellArgs(tt.command)).Err
 			if tt.wantErr != "" {
@@ -95,8 +95,8 @@ func TestShellCommandReplaceChangesTextOnlyOnSuccess(t *testing.T) {
 			} else if err != nil {
 				t.Fatalf("shell_command_replace: %v", err)
 			}
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -157,7 +157,7 @@ func TestRunShellJobNeedsNoEditor(t *testing.T) {
 func TestBeginShellRefusesOnlyReplaceOnReadOnly(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		action  Action
 		wantErr error
 	}{
@@ -165,7 +165,7 @@ func TestBeginShellRefusesOnlyReplaceOnReadOnly(t *testing.T) {
 		{"a new document is allowed on a read-only document", "shell_command", nil},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withDoc("abc")
 			run(t, e, "toggle_read_only")
@@ -204,27 +204,27 @@ func TestEndShellRefusesTextThatChangedWhileTheCommandRan(t *testing.T) {
 func TestEndShellRefusesEditsAfterTheJobRange(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
-		selected bool       // whether the job replaces the selection anchor..head
-		anchor   buffer.Pos // selection start, when selected
-		head     buffer.Pos // selection end, when selected
+		Name     string
+		Text     string
+		Selected bool       // whether the job replaces the selection anchor..head
+		Anchor   buffer.Pos // selection start, when selected
+		Head     buffer.Pos // selection end, when selected
 		typeAt   buffer.Pos // where the user types while the command runs
 		typed    string
-		want     string // text after the typing; the refused replace leaves it as is
+		Want     string // text after the typing; the refused replace leaves it as is
 	}{
-		{name: "whole buffer, typed after its end", text: "abc", typeAt: buffer.Pos{Col: 3}, typed: "Z", want: "abcZ"},
-		{name: "selection, typed after it on the same line", text: "one two", selected: true,
-			anchor: buffer.Pos{Col: 0}, head: buffer.Pos{Col: 3}, typeAt: buffer.Pos{Col: 7}, typed: "!", want: "one two!"},
-		{name: "selection, typed on a later line", text: "one\ntwo", selected: true,
-			anchor: buffer.Pos{Col: 0}, head: buffer.Pos{Col: 3}, typeAt: buffer.Pos{Line: 1, Col: 3}, typed: "!", want: "one\ntwo!"},
+		{Name: "whole buffer, typed after its end", Text: "abc", typeAt: buffer.Pos{Col: 3}, typed: "Z", Want: "abcZ"},
+		{Name: "selection, typed after it on the same line", Text: "one two", Selected: true,
+			Anchor: buffer.Pos{Col: 0}, Head: buffer.Pos{Col: 3}, typeAt: buffer.Pos{Col: 7}, typed: "!", Want: "one two!"},
+		{Name: "selection, typed on a later line", Text: "one\ntwo", Selected: true,
+			Anchor: buffer.Pos{Col: 0}, Head: buffer.Pos{Col: 3}, typeAt: buffer.Pos{Line: 1, Col: 3}, typed: "!", Want: "one\ntwo!"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := withDoc(tt.text)
-			if tt.selected {
-				e.SelectRange(tt.anchor, tt.head)
+			e := withDoc(tt.Text)
+			if tt.Selected {
+				e.SelectRange(tt.Anchor, tt.Head)
 			}
 			job, err := e.BeginShell("shell_command_replace", shellArgs("tr a-z A-Z"))
 			if err != nil {
@@ -238,8 +238,8 @@ func TestEndShellRefusesEditsAfterTheJobRange(t *testing.T) {
 			if !errors.Is(r.Err, errShellStale) {
 				t.Fatalf("EndShell err = %v, want errShellStale", r.Err)
 			}
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want the user's text %q unchanged", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want the user's text %q unchanged", got, tt.Want)
 			}
 		})
 	}
@@ -248,46 +248,46 @@ func TestEndShellRefusesEditsAfterTheJobRange(t *testing.T) {
 func TestEndShellAppliesReplaceWhenTextIsUnchanged(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
-		selected bool
-		anchor   buffer.Pos
-		head     buffer.Pos
-		edit     func(t *testing.T, e *Editor) // changes the text while the command runs; nil for none
-		want     string
+		Name     string
+		Text     string
+		Selected bool
+		Anchor   buffer.Pos
+		Head     buffer.Pos
+		Edit     func(t *testing.T, e *Editor) // changes the text while the command runs; nil for none
+		Want     string
 	}{
-		{name: "whole buffer, nothing changed", text: "abc\ndef", want: "ABC\nDEF"},
-		{name: "selection, nothing changed", text: "one two three", selected: true,
-			anchor: buffer.Pos{Col: 4}, head: buffer.Pos{Col: 7}, want: "one TWO three"},
-		{name: "edit undone while the command runs", text: "one two three", selected: true,
-			anchor: buffer.Pos{Col: 4}, head: buffer.Pos{Col: 7},
-			edit: func(t *testing.T, e *Editor) {
+		{Name: "whole buffer, nothing changed", Text: "abc\ndef", Want: "ABC\nDEF"},
+		{Name: "selection, nothing changed", Text: "one two three", Selected: true,
+			Anchor: buffer.Pos{Col: 4}, Head: buffer.Pos{Col: 7}, Want: "one TWO three"},
+		{Name: "edit undone while the command runs", Text: "one two three", Selected: true,
+			Anchor: buffer.Pos{Col: 4}, Head: buffer.Pos{Col: 7},
+			Edit: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 0), false)
 				typeKey(t, e, "Z")
 				run(t, e, "undo")
 			},
-			want: "one TWO three"},
+			Want: "one TWO three"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := withDoc(tt.text)
-			if tt.selected {
-				e.SelectRange(tt.anchor, tt.head)
+			e := withDoc(tt.Text)
+			if tt.Selected {
+				e.SelectRange(tt.Anchor, tt.Head)
 			}
 			job, err := e.BeginShell("shell_command_replace", shellArgs("tr a-z A-Z"))
 			if err != nil {
 				t.Fatalf("BeginShell: %v", err)
 			}
 			out, runErr := RunShellJob(job)
-			if tt.edit != nil {
-				tt.edit(t, e)
+			if tt.Edit != nil {
+				tt.Edit(t, e)
 			}
 			if r := e.EndShell(job, out, runErr); r.Err != nil {
 				t.Fatalf("EndShell: %v", r.Err)
 			}
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}

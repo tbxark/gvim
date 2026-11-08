@@ -11,11 +11,11 @@ import (
 // viewFlagCase runs one per-document flag action with args and checks the flag
 // it names reads want.
 type viewFlagCase struct {
-	name   string
+	Name   string
 	action Action
-	args   map[string]any
+	Args   map[string]any
 	flag   func(ViewSettings) bool
-	want   bool
+	Want   bool
 }
 
 func TestViewFlagActionsSetTheirOverride(t *testing.T) {
@@ -44,14 +44,14 @@ func TestViewFlagActionsSetTheirOverride(t *testing.T) {
 			func(s ViewSettings) bool { return s.PageView }, true},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, _ := openFixture(t, Options{}, "abc\n")
-			if r := e.Do(tt.action, tt.args); r.Err != nil {
+			if r := e.Do(tt.action, tt.Args); r.Err != nil {
 				t.Fatalf("Do(%s): %v", tt.action, r.Err)
 			}
-			if got := tt.flag(e.Active().ViewSettings()); got != tt.want {
-				t.Fatalf("%s: flag = %v, want %v", tt.action, got, tt.want)
+			if got := tt.flag(e.Active().ViewSettings()); got != tt.Want {
+				t.Fatalf("%s: flag = %v, want %v", tt.action, got, tt.Want)
 			}
 		})
 	}
@@ -61,7 +61,7 @@ func TestViewFlagWithoutValueFlipsFromItsDefault(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		action Action
-		before bool // the flag as a new document reads it
+		Before bool // the flag as a new document reads it
 	}{
 		{"toggle_fold_indicators_current_buffer", true},
 		{"toggle_tab_indicators", true},
@@ -75,12 +75,12 @@ func TestViewFlagWithoutValueFlipsFromItsDefault(t *testing.T) {
 			e, _ := openFixture(t, Options{}, "abc\n")
 			run(t, e, tt.action)
 			after := e.Active().ViewSettings()
-			if got := viewFlagOf(after, tt.action); got == tt.before {
-				t.Fatalf("one toggle left the flag at %v, want %v", got, !tt.before)
+			if got := viewFlagOf(after, tt.action); got == tt.Before {
+				t.Fatalf("one toggle left the flag at %v, want %v", got, !tt.Before)
 			}
 			run(t, e, tt.action)
-			if got := viewFlagOf(e.Active().ViewSettings(), tt.action); got != tt.before {
-				t.Fatalf("two toggles gave %v, want the default %v", got, tt.before)
+			if got := viewFlagOf(e.Active().ViewSettings(), tt.action); got != tt.Before {
+				t.Fatalf("two toggles gave %v, want the default %v", got, tt.Before)
 			}
 		})
 	}
@@ -207,9 +207,9 @@ func TestConfigRulersReachTheStartingBuffer(t *testing.T) {
 func TestRulerRejectsBadColumns(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
+		Name   string
 		action Action
-		args   map[string]any
+		Args   map[string]any
 	}{
 		{"no column", "add_ruler", nil},
 		{"zero", "add_ruler", map[string]any{"column": 0}},
@@ -218,11 +218,11 @@ func TestRulerRejectsBadColumns(t *testing.T) {
 		{"remove missing", "remove_ruler", map[string]any{"column": 3}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, _ := openFixture(t, Options{}, "abc\n")
-			if r := e.Do(tt.action, tt.args); r.Err == nil {
-				t.Fatalf("Do(%s, %v) succeeded, want an error", tt.action, tt.args)
+			if r := e.Do(tt.action, tt.Args); r.Err == nil {
+				t.Fatalf("Do(%s, %v) succeeded, want an error", tt.action, tt.Args)
 			}
 			if got := e.Active().ViewSettings().Rulers; len(got) != 0 {
 				t.Fatalf("rulers = %v after a refused action, want none", got)
@@ -234,12 +234,12 @@ func TestRulerRejectsBadColumns(t *testing.T) {
 func TestTabSizeAndPageWidthAreStoredPerDocument(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		action  Action
-		args    map[string]any
+		Args    map[string]any
 		wantErr bool
 		check   func(ViewSettings) int
-		want    int
+		Want    int
 	}{
 		{"tab size 2", "set_tab_size", map[string]any{"size": 2}, false,
 			func(s ViewSettings) int { return s.TabSize }, 2},
@@ -257,15 +257,15 @@ func TestTabSizeAndPageWidthAreStoredPerDocument(t *testing.T) {
 			func(s ViewSettings) int { return s.PageWidth }, 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, _ := openFixture(t, Options{}, "abc\n")
-			r := e.Do(tt.action, tt.args)
+			r := e.Do(tt.action, tt.Args)
 			if (r.Err != nil) != tt.wantErr {
 				t.Fatalf("Do(%s) error = %v, want error %v", tt.action, r.Err, tt.wantErr)
 			}
-			if got := tt.check(e.Active().ViewSettings()); got != tt.want {
-				t.Fatalf("stored value = %d, want %d", got, tt.want)
+			if got := tt.check(e.Active().ViewSettings()); got != tt.Want {
+				t.Fatalf("stored value = %d, want %d", got, tt.Want)
 			}
 		})
 	}
@@ -307,10 +307,10 @@ func TestOverrideOrReturnsTheDefaultWithoutAnOverride(t *testing.T) {
 	t.Parallel()
 	yes, no := true, false
 	tests := []struct {
-		name string
+		Name string
 		p    *bool
 		def  bool
-		want bool
+		Want bool
 	}{
 		{"nil follows default on", nil, true, true},
 		{"nil follows default off", nil, false, false},
@@ -318,8 +318,8 @@ func TestOverrideOrReturnsTheDefaultWithoutAnOverride(t *testing.T) {
 		{"override off beats default on", &no, true, false},
 	}
 	for _, tt := range tests {
-		if got := OverrideOr(tt.p, tt.def); got != tt.want {
-			t.Errorf("%s: OverrideOr = %v, want %v", tt.name, got, tt.want)
+		if got := OverrideOr(tt.p, tt.def); got != tt.Want {
+			t.Errorf("%s: OverrideOr = %v, want %v", tt.Name, got, tt.Want)
 		}
 	}
 }

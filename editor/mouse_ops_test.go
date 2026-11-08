@@ -16,7 +16,7 @@ const dragText = "alpha beta gamma\nnext line"
 func TestExtendSelection(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
+		Name       string
 		setup      func(e *Editor)
 		p          buffer.Pos
 		u          Unit
@@ -24,7 +24,7 @@ func TestExtendSelection(t *testing.T) {
 		wantHead   buffer.Pos
 	}{
 		{
-			name:       "char drag from caret",
+			Name:       "char drag from caret",
 			setup:      func(e *Editor) { e.SetCursor(buffer.Pos{Col: 0}, false) },
 			p:          buffer.Pos{Col: 5},
 			u:          UnitChar,
@@ -32,7 +32,7 @@ func TestExtendSelection(t *testing.T) {
 			wantHead:   buffer.Pos{Col: 5},
 		},
 		{
-			name:       "word drag forward reaches end of word under pointer",
+			Name:       "word drag forward reaches end of word under pointer",
 			setup:      func(e *Editor) { e.SelectRange(buffer.Pos{Col: 6}, buffer.Pos{Col: 10}) },
 			p:          buffer.Pos{Col: 13},
 			u:          UnitWord,
@@ -40,7 +40,7 @@ func TestExtendSelection(t *testing.T) {
 			wantHead:   buffer.Pos{Col: 16},
 		},
 		{
-			name:       "word drag backward reaches start of word under pointer",
+			Name:       "word drag backward reaches start of word under pointer",
 			setup:      func(e *Editor) { e.SelectRange(buffer.Pos{Col: 6}, buffer.Pos{Col: 10}) },
 			p:          buffer.Pos{Col: 1},
 			u:          UnitWord,
@@ -48,7 +48,7 @@ func TestExtendSelection(t *testing.T) {
 			wantHead:   buffer.Pos{Col: 0},
 		},
 		{
-			name:       "word drag inside the starting word keeps it selected",
+			Name:       "word drag inside the starting word keeps it selected",
 			setup:      func(e *Editor) { e.SelectRange(buffer.Pos{Col: 6}, buffer.Pos{Col: 10}) },
 			p:          buffer.Pos{Col: 8},
 			u:          UnitWord,
@@ -56,7 +56,7 @@ func TestExtendSelection(t *testing.T) {
 			wantHead:   buffer.Pos{Col: 10},
 		},
 		{
-			name:       "word drag with no selection starts at caret",
+			Name:       "word drag with no selection starts at caret",
 			setup:      func(e *Editor) { e.SetCursor(buffer.Pos{Col: 8}, false) },
 			p:          buffer.Pos{Col: 13},
 			u:          UnitWord,
@@ -64,7 +64,7 @@ func TestExtendSelection(t *testing.T) {
 			wantHead:   buffer.Pos{Col: 16},
 		},
 		{
-			name:       "line drag forward reaches start of next line",
+			Name:       "line drag forward reaches start of next line",
 			setup:      func(e *Editor) { e.SelectRange(buffer.LineBounds(e.Active().Buffer, 0)) },
 			p:          buffer.Pos{Line: 1, Col: 3},
 			u:          UnitLine,
@@ -72,7 +72,7 @@ func TestExtendSelection(t *testing.T) {
 			wantHead:   buffer.Pos{Line: 1, Col: 9},
 		},
 		{
-			name:       "line drag backward reaches start of pointer line",
+			Name:       "line drag backward reaches start of pointer line",
 			setup:      func(e *Editor) { e.SelectRange(buffer.LineBounds(e.Active().Buffer, 1)) },
 			p:          buffer.Pos{Line: 0, Col: 3},
 			u:          UnitLine,
@@ -81,7 +81,7 @@ func TestExtendSelection(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withDoc(dragText)
 			tt.setup(e)

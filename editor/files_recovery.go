@@ -6,7 +6,7 @@ package editor
 func (e *Editor) UnsavedDocs() []*Document {
 	var out []*Document
 	for _, d := range e.docs {
-		if !d.ext.virtual && (d.Buffer.Modified() || d.restoring()) {
+		if !d.Ext().Virtual && (d.Buffer.Modified() || d.Restoring()) {
 			out = append(out, d)
 		}
 	}

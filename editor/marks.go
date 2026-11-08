@@ -22,8 +22,8 @@ type extraState struct {
 
 // markSlot is a bookmark: the tab it was set in and the caret position there.
 type markSlot struct {
-	doc *Document
-	pos buffer.Pos
+	Doc *Document
+	Pos buffer.Pos
 }
 
 // registerMarksHandlers registers the handlers of this track. It is the one
@@ -98,7 +98,7 @@ func setBookmark(e *Editor, args map[string]any) error {
 	if e.extras.slots == nil {
 		e.extras.slots = map[string]markSlot{}
 	}
-	e.extras.slots[slot] = markSlot{doc: d, pos: d.Cursor}
+	e.extras.slots[slot] = markSlot{Doc: d, Pos: d.Cursor}
 	e.setStatus(fmt.Sprintf("Bookmark '%s' set", slot))
 	return nil
 }
@@ -115,12 +115,12 @@ func jumpToBookmark(e *Editor, args map[string]any) error {
 	if !ok {
 		return fmt.Errorf("bookmark '%s' not set", slot)
 	}
-	if e.indexOfDoc(mark.doc) < 0 {
+	if e.indexOfDoc(mark.Doc) < 0 {
 		delete(e.extras.slots, slot)
 		return fmt.Errorf("bookmark '%s': buffer no longer exists", slot)
 	}
 	e.pushJump()
-	e.goToJump(jumpEntry{doc: mark.doc, pos: mark.pos})
+	e.goToJump(jumpEntry{Doc: mark.Doc, Pos: mark.Pos})
 	e.setStatus(fmt.Sprintf("Jumped to bookmark '%s'", slot))
 	return nil
 }

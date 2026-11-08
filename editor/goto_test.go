@@ -11,8 +11,8 @@ func TestParseLineCol(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		in        string
-		line, col int
-		ok        bool
+		Line, Col int
+		Ok        bool
 	}{
 		{"42", 42, 1, true},
 		{" 7 ", 7, 1, true},
@@ -36,9 +36,9 @@ func TestParseLineCol(t *testing.T) {
 	}
 	for _, tt := range tests {
 		line, col, ok := ParseLineCol(tt.in)
-		if line != tt.line || col != tt.col || ok != tt.ok {
+		if line != tt.Line || col != tt.Col || ok != tt.Ok {
 			t.Errorf("ParseLineCol(%q) = (%d, %d, %v), want (%d, %d, %v)",
-				tt.in, line, col, ok, tt.line, tt.col, tt.ok)
+				tt.in, line, col, ok, tt.Line, tt.Col, tt.Ok)
 		}
 	}
 }
@@ -123,9 +123,9 @@ func TestGotoLineScrollsCaretIntoView(t *testing.T) {
 func TestGotoLineJumpsClearTheSelectionEvenInMarkMode(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
+		Name      string
 		actions   []Action
-		selecting bool
+		Selecting bool
 		wantSel   bool
 	}{
 		{"mark mode: a jump clears the selection", []Action{"set_mark"}, false, false},
@@ -134,7 +134,7 @@ func TestGotoLineJumpsClearTheSelectionEvenInMarkMode(t *testing.T) {
 		{"after clear_mark the prompt is plain", []Action{"set_mark", "clear_mark"}, true, false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
 			typeText(t, e, "aaa\nbbb\nccc\nddd")
@@ -143,7 +143,7 @@ func TestGotoLineJumpsClearTheSelectionEvenInMarkMode(t *testing.T) {
 				run(t, e, tt.actions...)
 			}
 			goto_ := e.GotoLine
-			if tt.selecting {
+			if tt.Selecting {
 				goto_ = e.GotoLineSelecting
 			}
 			if err := goto_(4, 2); err != nil {
@@ -177,7 +177,7 @@ func TestPendingGotoKeepsItsSelectingFlag(t *testing.T) {
 		if err := goto_(300, 3); err != nil {
 			t.Fatal(err)
 		}
-		stepUntil(t, e, func() bool { return d.large.pending == nil })
+		stepUntil(t, e, func() bool { return d.LargeState().Pending == nil })
 		if want := (buffer.Pos{Line: 299, Col: 2}); d.Cursor != want {
 			t.Fatalf("selecting=%v: caret = %v, want %v", selecting, d.Cursor, want)
 		}

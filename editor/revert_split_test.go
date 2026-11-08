@@ -36,22 +36,22 @@ func TestPlanRevertReadsNothing(t *testing.T) {
 func TestPlanRevertRefusals(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		setup   func(t *testing.T) *Editor
 		wantErr error
 	}{
 		{
-			name:    "no tab is open",
+			Name:    "no tab is open",
 			setup:   func(t *testing.T) *Editor { return New(Options{Empty: true}) },
 			wantErr: ErrNoDocument,
 		},
 		{
-			name:    "an untitled buffer has no file",
+			Name:    "an untitled buffer has no file",
 			setup:   func(t *testing.T) *Editor { return New(Options{}) },
 			wantErr: ErrNoPath,
 		},
 		{
-			name: "a modified document is refused without force",
+			Name: "a modified document is refused without force",
 			setup: func(t *testing.T) *Editor {
 				e, _ := openRevertable(t, "a\n")
 				typeText(t, e, "x")
@@ -61,7 +61,7 @@ func TestPlanRevertRefusals(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := tt.setup(t)
 			if _, err := e.PlanRevert(false); !errors.Is(err, tt.wantErr) {
@@ -336,22 +336,22 @@ func TestApplyRevertKeepsTheUndoHistoryWhenTheFileHoldsTheText(t *testing.T) {
 func TestRevertTakesAForceFlag(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name         string
-		edit         bool
+		Name         string
+		Edit         bool
 		force        bool
 		wantErr      error
 		wantText     string
 		wantModified bool
 	}{
-		{name: "an unmodified document reloads", wantText: "b\n"},
-		{name: "a modified document is refused without force", edit: true, wantErr: ErrUnsaved, wantText: "xa\n", wantModified: true},
-		{name: "a modified document reloads with force", edit: true, force: true, wantText: "b\n"},
+		{Name: "an unmodified document reloads", wantText: "b\n"},
+		{Name: "a modified document is refused without force", Edit: true, wantErr: ErrUnsaved, wantText: "xa\n", wantModified: true},
+		{Name: "a modified document reloads with force", Edit: true, force: true, wantText: "b\n"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openRevertable(t, "a\n")
-			if tt.edit {
+			if tt.Edit {
 				typeText(t, e, "x")
 			}
 			putFile(t, path, "b\n")

@@ -81,9 +81,9 @@ func TestLargeSaveWritesTheEditedText(t *testing.T) {
 	t.Parallel()
 	bom := "\xef\xbb\xbf"
 	tests := []struct {
-		name    string
+		Name    string
 		content string
-		eol     string
+		Eol     string
 	}{
 		{"lf", lineText(150), "\n"},
 		{"crlf", crlfText(150), "\r\n"},
@@ -94,7 +94,7 @@ func TestLargeSaveWritesTheEditedText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		for seed := range uint64(12) {
-			t.Run(fmt.Sprintf("%s/%d", tt.name, seed), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/%d", tt.Name, seed), func(t *testing.T) {
 				t.Parallel()
 				e, d := openIndexed(t, largeOptions(), tt.content)
 				body := strings.ReplaceAll(strings.TrimPrefix(tt.content, bom), "\r\n", "\n")
@@ -106,7 +106,7 @@ func TestLargeSaveWritesTheEditedText(t *testing.T) {
 				if err := e.Save(); err != nil {
 					t.Fatalf("Save: %v", err)
 				}
-				want := strings.ReplaceAll(oracle.Text(), "\n", tt.eol)
+				want := strings.ReplaceAll(oracle.Text(), "\n", tt.Eol)
 				if strings.HasPrefix(tt.content, bom) {
 					want = bom + want
 				}
@@ -387,8 +387,8 @@ func TestLargeSaveMovesOntoTheNewFileWithoutAScan(t *testing.T) {
 	if after.HistoryGroups != 0 || after.Pieces != 0 {
 		t.Errorf("history groups %d, pieces %d: the overlay is not empty", after.HistoryGroups, after.Pieces)
 	}
-	if want := "Saved (undo history cleared)"; d.status != want {
-		t.Errorf("status = %q, want %q", d.status, want)
+	if want := "Saved (undo history cleared)"; d.Status != want {
+		t.Errorf("status = %q, want %q", d.Status, want)
 	}
 	// The undo history is gone.
 	text := docText(d)
@@ -401,7 +401,7 @@ func TestLargeSaveMovesOntoTheNewFileWithoutAScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Buffer.Insert(buffer.Pos{Line: 20}, "second ")
-	d.disk = diskState{}
+	d.Disk = diskState{}
 	if err := e.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -442,8 +442,8 @@ func TestLargeSaveOfAnUnmodifiedDocumentIsANoop(t *testing.T) {
 	if left := tempFiles(t, filepath.Dir(d.Path)); len(left) != 0 {
 		t.Errorf("temporary files: %v", left)
 	}
-	if d.status != "Nothing to save" {
-		t.Errorf("status = %q", d.status)
+	if d.Status != "Nothing to save" {
+		t.Errorf("status = %q", d.Status)
 	}
 }
 
@@ -476,8 +476,8 @@ func TestLargeSaveOfAnUnmodifiedDocumentWritesOverAChangedFileOnForce(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ModTime().After(time.Now().Add(time.Minute)) || d.status != "Saved" {
-		t.Fatalf("the file was not written, status %q", d.status)
+	if info.ModTime().After(time.Now().Add(time.Minute)) || d.Status != "Saved" {
+		t.Fatalf("the file was not written, status %q", d.Status)
 	}
 }
 
@@ -495,16 +495,16 @@ func TestPlanSaveIncompleteIndexDoesNotTidy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.jobs) != 1 || !errors.Is(plan.jobs[0].err, ErrIndexing) {
-		t.Fatalf("job error = %v, want ErrIndexing", plan.jobs[0].err)
+	if len(plan.jobs) != 1 || !errors.Is(plan.jobs[0].Err(), ErrIndexing) {
+		t.Fatalf("job error = %v, want ErrIndexing", plan.jobs[0].Err())
 	}
-	if !strings.Contains(plan.jobs[0].err.Error(), "Scanning...") {
-		t.Errorf("error = %q", plan.jobs[0].err)
+	if !strings.Contains(plan.jobs[0].Err().Error(), "Scanning...") {
+		t.Errorf("error = %q", plan.jobs[0].Err())
 	}
 	if d.Buffer.Version() != version {
 		t.Error("planning the save edited the document")
 	}
-	if plan.jobs[0].large != nil {
+	if plan.jobs[0].LargeSave() != nil {
 		t.Error("the job holds a snapshot")
 	}
 	// A save-as is the same.
@@ -522,7 +522,7 @@ func TestPlanSaveReportsAnIndexFailure(t *testing.T) {
 		t.Fatal("no index job")
 	}
 	e.ApplyIndex(job.Run(context.Background()))
-	if d.large.indexErr == nil {
+	if d.LargeState().IndexErr == nil {
 		t.Fatal("no index error")
 	}
 	_, err := e.PlanSave()
@@ -530,7 +530,7 @@ func TestPlanSaveReportsAnIndexFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan, _ := e.PlanSave()
-	got := plan.jobs[0].err
+	got := plan.jobs[0].Err()
 	if got == nil || errors.Is(got, ErrIndexing) || !strings.Contains(got.Error(), "disk on fire") {
 		t.Fatalf("error = %v, want the index failure", got)
 	}
@@ -550,8 +550,8 @@ func TestPlanSaveLargeRefusedTidyStillSaves(t *testing.T) {
 	if got := readFile(t, d.Path); got != "x"+content {
 		t.Fatal("the saved bytes differ from the text plus the edit")
 	}
-	if want := "Saved without final newline: last line not editable"; d.status != want {
-		t.Fatalf("status = %q, want %q", d.status, want)
+	if want := "Saved without final newline: last line not editable"; d.Status != want {
+		t.Fatalf("status = %q, want %q", d.Status, want)
 	}
 }
 
@@ -631,8 +631,8 @@ func TestAppendedLogStaysEditableSaveRefused(t *testing.T) {
 	if got := readFile(t, copyPath); got != "x"+lineText(150) {
 		t.Fatalf("copy = %q...", got[:30])
 	}
-	if want := fmt.Sprintf("Saved without %d appended bytes", len(appended)); d.status != want {
-		t.Fatalf("status = %q, want %q", d.status, want)
+	if want := fmt.Sprintf("Saved without %d appended bytes", len(appended)); d.Status != want {
+		t.Fatalf("status = %q, want %q", d.Status, want)
 	}
 	if d.Path != copyPath || d.Modified() {
 		t.Fatalf("path %q, modified %v", d.Path, d.Modified())
@@ -692,8 +692,8 @@ func TestSaveRebaseForeignFileEqualSize(t *testing.T) {
 	if d.Modified() {
 		t.Error("the file was written, so the document is saved")
 	}
-	if !d.large.rebaseFailed || d.status != "Saved; reload to continue editing" {
-		t.Errorf("rebaseFailed %v, status %q", d.large.rebaseFailed, d.status)
+	if !d.LargeState().RebaseFailed || d.Status != "Saved; reload to continue editing" {
+		t.Errorf("rebaseFailed %v, status %q", d.LargeState().RebaseFailed, d.Status)
 	}
 	if d.Buffer.Line(5) != "mine line 0005" || d.Buffer.Lines() != 151 {
 		t.Error("the display changed")
@@ -723,7 +723,7 @@ func TestSaveRebaseSameFileIdentity(t *testing.T) {
 	if err := e.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if d.large.rebaseFailed {
+	if d.LargeState().RebaseFailed {
 		t.Fatal("the rebase failed for the file that was just written")
 	}
 	// The default source reports the file behind its descriptor, so the identity of the
@@ -732,8 +732,8 @@ func TestSaveRebaseSameFileIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.large.size != info.Size() {
-		t.Errorf("size = %d, file has %d", d.large.size, info.Size())
+	if d.LargeState().Size != info.Size() {
+		t.Errorf("size = %d, file has %d", d.LargeState().Size, info.Size())
 	}
 }
 
@@ -774,8 +774,8 @@ func TestSaveWithTheEncodingChanged(t *testing.T) {
 	t.Run("remove the mark", func(t *testing.T) {
 		t.Parallel()
 		e, d := openIndexed(t, largeOptions(), bom+lineText(150))
-		if d.codec != "utf-8-bom" {
-			t.Fatalf("codec = %q", d.codec)
+		if d.Codec != "utf-8-bom" {
+			t.Fatalf("codec = %q", d.Codec)
 		}
 		setEncoding(t, e, "utf-8")
 		if err := e.Save(); err != nil {
@@ -827,8 +827,8 @@ func TestRedoAfterRebaseReturnsFalseCaretUnchanged(t *testing.T) {
 		t.Fatal("no undo")
 	}
 	d.Cursor = buffer.Pos{Line: 7, Col: 3}
-	d.lastMulti = &multiEditRecord{}
-	d.findRange = &buffer.Selection{}
+	d.LastMulti = &multiEditRecord{}
+	d.FindRange = &buffer.Selection{}
 	if err := e.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -838,7 +838,7 @@ func TestRedoAfterRebaseReturnsFalseCaretUnchanged(t *testing.T) {
 	if d.Cursor != (buffer.Pos{Line: 7, Col: 3}) {
 		t.Errorf("cursor = %v", d.Cursor)
 	}
-	if d.lastMulti != nil || d.findRange != nil {
+	if d.LastMulti != nil || d.FindRange != nil {
 		t.Error("the records of the old history are still there")
 	}
 }
@@ -894,14 +894,14 @@ func TestCheckSourceInTheDiskPoll(t *testing.T) {
 	_, _ = f.WriteString("more\n")
 	_ = f.Close()
 	_ = e.PlanDiskCheck()
-	if want := errFileGrew.Error(); d.status != want {
-		t.Fatalf("status = %q, want %q", d.status, want)
+	if want := errFileGrew.Error(); d.Status != want {
+		t.Fatalf("status = %q, want %q", d.Status, want)
 	}
 	// The poll says it once.
-	d.status = "other"
+	d.Status = "other"
 	_ = e.PlanDiskCheck()
-	if d.status != "other" {
-		t.Fatalf("status = %q: the poll said it again", d.status)
+	if d.Status != "other" {
+		t.Fatalf("status = %q: the poll said it again", d.Status)
 	}
 }
 
@@ -916,8 +916,8 @@ func TestLargeSaveOfAVirtualSourceWaitsForTheIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !errors.Is(plan.jobs[0].err, ErrIndexing) {
-		t.Fatalf("err = %v, want ErrIndexing", plan.jobs[0].err)
+	if !errors.Is(plan.jobs[0].Err(), ErrIndexing) {
+		t.Fatalf("err = %v, want ErrIndexing", plan.jobs[0].Err())
 	}
 	if got := src.BytesRead(); got > 16<<20 {
 		t.Fatalf("read %d bytes", got)

@@ -20,7 +20,7 @@ func restoredText(t *testing.T, opts Options, d *Document, st session.OverlaySta
 		t.Fatalf("RestoreOverlay: %v", err)
 	}
 	indexAll(t, fresh)
-	if nd.restoring() {
+	if nd.Restoring() {
 		t.Fatal("the restore did not finish")
 	}
 	return nd.Buffer.Text()
@@ -29,42 +29,42 @@ func restoredText(t *testing.T, opts Options, d *Document, st session.OverlaySta
 func TestStashAfterSaveWithEditsDuringTheWrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		// during edits the buffer between the snapshot and the apply.
 		during func(d *Document)
 		// before edits the buffer before the save is planned.
-		before func(d *Document)
+		Before func(d *Document)
 	}{
 		{
-			name:   "edit on another line",
-			before: func(d *Document) { d.Buffer.Insert(buffer.Pos{}, "A") },
+			Name:   "edit on another line",
+			Before: func(d *Document) { d.Buffer.Insert(buffer.Pos{}, "A") },
 			during: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 1}, "B") },
 		},
 		{
-			name:   "edit on the line that was saved",
-			before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 3}, "A") },
+			Name:   "edit on the line that was saved",
+			Before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 3}, "A") },
 			during: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 3}, "B") },
 		},
 		{
-			name:   "lines added and removed after the saved ones",
-			before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 10}, "x\ny\nz") },
+			Name:   "lines added and removed after the saved ones",
+			Before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 10}, "x\ny\nz") },
 			during: func(d *Document) {
 				d.Buffer.Delete(buffer.Pos{Line: 20}, buffer.Pos{Line: 25})
 				d.Buffer.Insert(buffer.Pos{Line: 140}, "tail\n")
 			},
 		},
 		{
-			name:   "line deleted after the saved edit",
-			before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 5}, "A") },
+			Name:   "line deleted after the saved edit",
+			Before: func(d *Document) { d.Buffer.Insert(buffer.Pos{Line: 5}, "A") },
 			during: func(d *Document) { d.Buffer.Delete(buffer.Pos{Line: 5}, buffer.Pos{Line: 6}) },
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			opts := largeOptions()
 			e, d := openIndexed(t, opts, lineText(150))
-			tt.before(d)
+			tt.Before(d)
 			plan, err := e.PlanSave()
 			if err != nil {
 				t.Fatal(err)
@@ -116,7 +116,7 @@ func TestStashAfterSaveWhoseRebaseFailed(t *testing.T) {
 	t.Parallel()
 	opts := largeOptions()
 	fail := false
-	opts.openSrc = &sourceOpener{open: func(path string) (buffer.Source, error) {
+	opts.openSrc = &sourceOpener{Open: func(path string) (buffer.Source, error) {
 		if fail {
 			return nil, errTestOpen
 		}
@@ -129,7 +129,7 @@ func TestStashAfterSaveWhoseRebaseFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	fail = false
-	if !d.large.rebaseFailed {
+	if !d.LargeState().RebaseFailed {
 		t.Fatal("setup: the rebase did not fail")
 	}
 	d.Buffer.Insert(buffer.Pos{Line: 7}, "B")

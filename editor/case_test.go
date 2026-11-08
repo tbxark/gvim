@@ -11,13 +11,13 @@ import (
 func TestCaseTransformUsesUnicodeSpecialCasing(t *testing.T) {
 	t.Parallel()
 	all := func(text string) placed {
-		return placed{sel: &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Col: len([]rune(text))}}}
+		return placed{Sel: &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Col: len([]rune(text))}}}
 	}
 	tests := []struct {
-		name    string
+		Name    string
 		action  Action
-		text    string
-		want    string
+		Text    string
+		Want    string
 		wantSel buffer.Selection
 	}{
 		{"sharp s becomes SS", "to_upper_case", "straße", "STRASSE",
@@ -34,14 +34,14 @@ func TestCaseTransformUsesUnicodeSpecialCasing(t *testing.T) {
 			buffer.Selection{Head: buffer.Pos{Col: 3}}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			all(tt.text).apply(e)
+			e := docWith(Options{}, tt.Text)
+			all(tt.Text).apply(e)
 			run(t, e, tt.action)
 			d := e.Active()
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if d.Sel == nil || *d.Sel != tt.wantSel {
 				t.Fatalf("selection = %+v, want %+v", d.Sel, tt.wantSel)

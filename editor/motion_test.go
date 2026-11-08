@@ -13,10 +13,10 @@ func TestWordMotions(t *testing.T) {
 	// Column positions in "foo bar.baz\n  qux" are noted in each case.
 	doc := "foo bar.baz\n  qux"
 	tests := []struct {
-		name  string
-		start buffer.Pos
+		Name  string
+		Start buffer.Pos
 		fn    func(*buffer.Buffer, buffer.Pos) buffer.Pos
-		want  buffer.Pos
+		Want  buffer.Pos
 	}{
 		{"left from end of word", buffer.Pos{Line: 0, Col: 7}, wordLeft, buffer.Pos{Line: 0, Col: 4}},
 		{"left across punctuation", buffer.Pos{Line: 0, Col: 8}, wordLeft, buffer.Pos{Line: 0, Col: 7}},
@@ -32,11 +32,11 @@ func TestWordMotions(t *testing.T) {
 		{"end at last word", buffer.Pos{Line: 1, Col: 2}, wordEnd, buffer.Pos{Line: 1, Col: 5}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			b := buffer.New(doc)
-			if got := tt.fn(b, tt.start); got != tt.want {
-				t.Fatalf("got %+v, want %+v", got, tt.want)
+			if got := tt.fn(b, tt.Start); got != tt.Want {
+				t.Fatalf("got %+v, want %+v", got, tt.Want)
 			}
 		})
 	}

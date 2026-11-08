@@ -24,8 +24,8 @@ func TestRevertOfTextTabIntoBinaryFileIsRefused(t *testing.T) {
 	if got := d.Buffer.Text(); got != "hello\n" {
 		t.Fatalf("text = %q, want it unchanged", got)
 	}
-	if d.codecName() != "utf-8" {
-		t.Fatalf("codec = %q, want utf-8", d.codecName())
+	if d.CodecName() != "utf-8" {
+		t.Fatalf("codec = %q, want utf-8", d.CodecName())
 	}
 }
 
@@ -35,7 +35,7 @@ func TestRevertOfTextTabIntoBinaryFileIsRefused(t *testing.T) {
 func TestRevertRefreshesAReadOnlyTab(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
+		Name       string
 		first      string
 		second     string
 		toggle     bool
@@ -47,7 +47,7 @@ func TestRevertRefreshesAReadOnlyTab(t *testing.T) {
 		{"binary tab, file turns to text", "a\x00b\n", "plain\n", false, "plain\n", false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{}, tt.first)
 			if tt.toggle {
@@ -94,10 +94,10 @@ func TestRevertActionStillRefusesReadOnlyTab(t *testing.T) {
 func TestEncodingAndLineEndingKeepReadOnlyTabClean(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
+		Name   string
 		binary bool
 		action Action
-		args   map[string]any
+		Args   map[string]any
 	}{
 		{"binary, line ending", true, "set_line_ending", map[string]any{"value": "crlf"}},
 		{"binary, encoding", true, "set_encoding", map[string]any{"name": "windows-1252"}},
@@ -105,7 +105,7 @@ func TestEncodingAndLineEndingKeepReadOnlyTabClean(t *testing.T) {
 		{"read-only, encoding", false, "set_encoding", map[string]any{"name": "windows-1252"}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			content := "a\n"
 			if tt.binary {
@@ -115,7 +115,7 @@ func TestEncodingAndLineEndingKeepReadOnlyTabClean(t *testing.T) {
 			if !tt.binary {
 				run(t, e, "toggle_read_only")
 			}
-			if r := e.Do(tt.action, tt.args); r.Err != nil {
+			if r := e.Do(tt.action, tt.Args); r.Err != nil {
 				t.Fatalf("%s: %v", tt.action, r.Err)
 			}
 			if e.Active().Modified() {
@@ -144,17 +144,17 @@ func TestOpenFileFallsBackWhenLaterBytesBreakTheDetectedCodec(t *testing.T) {
 	t.Parallel()
 	base := strings.Repeat("\xcf\xf0\xe8\xe2\xe5\xf2, \xcc\xe8\xf0\n", 900)
 	tests := []struct {
-		name string
-		data string
+		Name string
+		Data string
 	}{
 		{"undefined byte after the sample", base + "tail \x98\n"},
 		{"undefined byte before the cyrillic text", "x \x98\n" + base},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			p := filepath.Join(t.TempDir(), "f.txt")
-			if err := os.WriteFile(p, []byte(tt.data), 0o600); err != nil {
+			if err := os.WriteFile(p, []byte(tt.Data), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			e := New(Options{})

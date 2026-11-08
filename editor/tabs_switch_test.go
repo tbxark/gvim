@@ -64,19 +64,19 @@ func TestSwitchToTabByNameActivatesTheFirstMatch(t *testing.T) {
 func TestSwitchToTabByNameFailures(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		args map[string]any
+		Name string
+		Args map[string]any
 	}{
-		{name: "no name given", args: nil},
-		{name: "a name that is not open", args: map[string]any{"name": "zzz.txt"}},
-		{name: "a name that is not a string", args: map[string]any{"name": 3}},
+		{Name: "no name given", Args: nil},
+		{Name: "a name that is not open", Args: map[string]any{"name": "zzz.txt"}},
+		{Name: "a name that is not a string", Args: map[string]any{"name": 3}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withTabs("a.txt", "b.txt")
 			run(t, e, "next_buffer") // on b.txt
-			r := e.Do("switch_to_tab_by_name", tt.args)
+			r := e.Do("switch_to_tab_by_name", tt.Args)
 			if r.Err == nil || errors.Is(r.Err, ErrUnknownAction) {
 				t.Fatalf("err = %v, want a failure that is not ErrUnknownAction", r.Err)
 			}

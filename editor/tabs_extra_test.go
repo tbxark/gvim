@@ -11,24 +11,24 @@ import (
 func TestCloseActionClosesTheActiveTab(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		dirty   bool
-		args    map[string]any
+		Args    map[string]any
 		wantLen int
 		wantErr error
 	}{
-		{name: "a clean tab closes", wantLen: 1},
-		{name: "a modified tab is kept without force", dirty: true, wantLen: 2, wantErr: ErrUnsaved},
-		{name: "force discards a modified tab", dirty: true, args: map[string]any{"force": true}, wantLen: 1},
+		{Name: "a clean tab closes", wantLen: 1},
+		{Name: "a modified tab is kept without force", dirty: true, wantLen: 2, wantErr: ErrUnsaved},
+		{Name: "force discards a modified tab", dirty: true, Args: map[string]any{"force": true}, wantLen: 1},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withTabs("a.txt", "b.txt")
 			if tt.dirty {
 				typeText(t, e, "x")
 			}
-			r := e.Do("close", tt.args)
+			r := e.Do("close", tt.Args)
 			if !errors.Is(r.Err, tt.wantErr) {
 				t.Fatalf("close err = %v, want %v", r.Err, tt.wantErr)
 			}
@@ -50,7 +50,7 @@ func TestCloseWithNoTabIsAnError(t *testing.T) {
 func TestSaveAllSavesNamedModifiedTabs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name          string
+		Name          string
 		namedDirty    bool // a named file with unsaved edits
 		namedClean    bool // a named file without edits
 		untitledDirty bool // an Untitled-N buffer with text
@@ -60,7 +60,7 @@ func TestSaveAllSavesNamedModifiedTabs(t *testing.T) {
 		wantFile      string // content of the dirty file after save_all, if checked
 	}{
 		{
-			name:          "saves named edits and skips the untitled buffer",
+			Name:          "saves named edits and skips the untitled buffer",
 			namedDirty:    true,
 			namedClean:    true,
 			untitledDirty: true,
@@ -68,17 +68,17 @@ func TestSaveAllSavesNamedModifiedTabs(t *testing.T) {
 			wantFile:      "xone\n",
 		},
 		{
-			name:       "nothing modified",
+			Name:       "nothing modified",
 			namedClean: true,
 			wantStatus: "No modified files to save",
 		},
 		{
-			name:          "only an untitled buffer is modified",
+			Name:          "only an untitled buffer is modified",
 			untitledDirty: true,
 			wantStatus:    "No files saved; skipped 1 untitled",
 		},
 		{
-			name:          "a file changed on disk is not overwritten",
+			Name:          "a file changed on disk is not overwritten",
 			namedDirty:    true,
 			changedOnDisk: true,
 			wantErr:       true,
@@ -87,7 +87,7 @@ func TestSaveAllSavesNamedModifiedTabs(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			dirty := filepath.Join(dir, "dirty.txt")

@@ -42,66 +42,66 @@ func TestNewActionsAreRegistered(t *testing.T) {
 func TestSortLines(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
-		at       placed
+		Name     string
+		Text     string
+		At       placed
 		wantText string
 		wantSel  *buffer.Selection
 		wantErr  error
 		readOnly bool
 	}{
 		{
-			name:     "selected lines are sorted",
-			text:     "c\nb\na\nd",
-			at:       placed{sel: &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2, Col: 1}}},
+			Name:     "selected lines are sorted",
+			Text:     "c\nb\na\nd",
+			At:       placed{Sel: &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2, Col: 1}}},
 			wantText: "a\nb\nc\nd",
 			wantSel:  &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2, Col: 1}},
 		},
 		{
-			name:     "a selection ending at column 0 leaves that line out",
-			text:     "c\nb\na\nd",
-			at:       placed{sel: &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 3}}},
+			Name:     "a selection ending at column 0 leaves that line out",
+			Text:     "c\nb\na\nd",
+			At:       placed{Sel: &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 3}}},
 			wantText: "a\nb\nc\nd",
 			wantSel:  &buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2, Col: 1}},
 		},
 		{
-			name:     "without a selection the whole document is sorted and keeps its final newline",
-			text:     "c\nb\na\n",
-			at:       placed{caret: buffer.Pos{}},
+			Name:     "without a selection the whole document is sorted and keeps its final newline",
+			Text:     "c\nb\na\n",
+			At:       placed{caret: buffer.Pos{}},
 			wantText: "a\nb\nc\n",
 		},
 		{
-			name:     "sorting is case-sensitive, uppercase first",
-			text:     "b\nB\na\nA",
-			at:       placed{caret: buffer.Pos{}},
+			Name:     "sorting is case-sensitive, uppercase first",
+			Text:     "b\nB\na\nA",
+			At:       placed{caret: buffer.Pos{}},
 			wantText: "A\nB\na\nb",
 		},
 		{
-			name:     "sorted lines are left alone",
-			text:     "a\nb",
-			at:       placed{caret: buffer.Pos{}},
+			Name:     "sorted lines are left alone",
+			Text:     "a\nb",
+			At:       placed{caret: buffer.Pos{}},
 			wantText: "a\nb",
 		},
 		{
-			name:     "a single line is left alone",
-			text:     "a",
-			at:       placed{caret: buffer.Pos{}},
+			Name:     "a single line is left alone",
+			Text:     "a",
+			At:       placed{caret: buffer.Pos{}},
 			wantText: "a",
 		},
 		{
-			name:     "a read-only document is refused",
-			text:     "c\nb",
-			at:       placed{caret: buffer.Pos{}},
+			Name:     "a read-only document is refused",
+			Text:     "c\nb",
+			At:       placed{caret: buffer.Pos{}},
 			wantText: "c\nb",
 			wantErr:  ErrReadOnly,
 			readOnly: true,
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			tt.at.apply(e)
+			e := docWith(Options{}, tt.Text)
+			tt.At.apply(e)
 			if tt.readOnly {
 				run(t, e, "toggle_read_only")
 			}
@@ -116,7 +116,7 @@ func TestSortLines(t *testing.T) {
 			if !selectionEqual(d.Sel, tt.wantSel) {
 				t.Fatalf("selection = %+v, want %+v", d.Sel, tt.wantSel)
 			}
-			if tt.wantText == tt.text && d.Modified() {
+			if tt.wantText == tt.Text && d.Modified() {
 				t.Fatal("an unchanged text left the document modified")
 			}
 		})
@@ -139,36 +139,36 @@ func TestSortLinesIsOneUndoStep(t *testing.T) {
 func TestExpandSelectionGrowsWordLineThenBuffer(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
+		Name  string
+		Text  string
 		caret buffer.Pos
-		want  []string // the selected text after each press
+		Want  []string // the selected text after each press
 	}{
 		{
-			name:  "word, then line, then whole buffer, then no further change",
-			text:  "foo bar\nbaz",
+			Name:  "word, then line, then whole buffer, then no further change",
+			Text:  "foo bar\nbaz",
 			caret: buffer.Pos{Line: 0, Col: 1},
-			want:  []string{"foo", "foo bar\n", "foo bar\nbaz", "foo bar\nbaz"},
+			Want:  []string{"foo", "foo bar\n", "foo bar\nbaz", "foo bar\nbaz"},
 		},
 		{
-			name:  "a caret just after a word selects that word",
-			text:  "one two",
+			Name:  "a caret just after a word selects that word",
+			Text:  "one two",
 			caret: buffer.Pos{Line: 0, Col: 3},
-			want:  []string{"one", "one two", "one two"},
+			Want:  []string{"one", "one two", "one two"},
 		},
 		{
-			name:  "a caret on a blank with no word selects the line",
-			text:  "a  b\nx",
+			Name:  "a caret on a blank with no word selects the line",
+			Text:  "a  b\nx",
 			caret: buffer.Pos{Line: 0, Col: 2},
-			want:  []string{"a  b\n", "a  b\nx"},
+			Want:  []string{"a  b\n", "a  b\nx"},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
+			e := docWith(Options{}, tt.Text)
 			e.SetCursor(tt.caret, false)
-			for i, want := range tt.want {
+			for i, want := range tt.Want {
 				run(t, e, "expand_selection")
 				if got := selectedText(e.Active()); got != want {
 					t.Fatalf("press %d selected %q, want %q", i+1, got, want)
@@ -181,48 +181,48 @@ func TestExpandSelectionGrowsWordLineThenBuffer(t *testing.T) {
 func TestDuplicateLineAbove(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		text       string
-		at         placed
+		Name       string
+		Text       string
+		At         placed
 		wantText   string
 		wantCursor buffer.Pos
 		wantSel    *buffer.Selection
 	}{
 		{
-			name:       "the caret line is copied above and the caret stays on the copy",
-			text:       "a\nb\nc",
-			at:         placed{caret: buffer.Pos{Line: 1, Col: 1}},
+			Name:       "the caret line is copied above and the caret stays on the copy",
+			Text:       "a\nb\nc",
+			At:         placed{caret: buffer.Pos{Line: 1, Col: 1}},
 			wantText:   "a\nb\nb\nc",
 			wantCursor: buffer.Pos{Line: 1, Col: 1},
 		},
 		{
-			name:       "the first line",
-			text:       "a\nb",
-			at:         placed{caret: buffer.Pos{}},
+			Name:       "the first line",
+			Text:       "a\nb",
+			At:         placed{caret: buffer.Pos{}},
 			wantText:   "a\na\nb",
 			wantCursor: buffer.Pos{},
 		},
 		{
-			name:       "the last line without a newline",
-			text:       "a\nb",
-			at:         placed{caret: buffer.Pos{Line: 1}},
+			Name:       "the last line without a newline",
+			Text:       "a\nb",
+			At:         placed{caret: buffer.Pos{Line: 1}},
 			wantText:   "a\nb\nb",
 			wantCursor: buffer.Pos{Line: 1},
 		},
 		{
-			name:       "a selection copies its whole lines as one block",
-			text:       "a\nb\nc",
-			at:         placed{sel: &buffer.Selection{Anchor: buffer.Pos{Line: 1}, Head: buffer.Pos{Line: 2, Col: 1}}},
+			Name:       "a selection copies its whole lines as one block",
+			Text:       "a\nb\nc",
+			At:         placed{Sel: &buffer.Selection{Anchor: buffer.Pos{Line: 1}, Head: buffer.Pos{Line: 2, Col: 1}}},
 			wantText:   "a\nb\nc\nb\nc",
 			wantCursor: buffer.Pos{Line: 2, Col: 1},
 			wantSel:    &buffer.Selection{Anchor: buffer.Pos{Line: 1}, Head: buffer.Pos{Line: 2, Col: 1}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			tt.at.apply(e)
+			e := docWith(Options{}, tt.Text)
+			tt.At.apply(e)
 			run(t, e, "duplicate_line_above")
 			d := e.Active()
 			if got := d.Buffer.Text(); got != tt.wantText {
@@ -251,28 +251,28 @@ func TestDuplicateLineAboveIsOneUndoStep(t *testing.T) {
 func TestTrimTrailingWhitespace(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		text       string
+		Name       string
+		Text       string
 		caret      buffer.Pos
 		wantText   string
 		wantCursor buffer.Pos
 		wantStatus string
 	}{
 		{
-			name:       "trailing spaces and tabs go from every line",
-			text:       "a  \nb\t\n c \t",
+			Name:       "trailing spaces and tabs go from every line",
+			Text:       "a  \nb\t\n c \t",
 			wantText:   "a\nb\n c",
 			wantStatus: "Trimmed trailing whitespace",
 		},
 		{
-			name:       "text without trailing blanks is unchanged",
-			text:       "a\n b",
+			Name:       "text without trailing blanks is unchanged",
+			Text:       "a\n b",
 			wantText:   "a\n b",
 			wantStatus: "No trailing whitespace to remove",
 		},
 		{
-			name:       "a caret past the trimmed end moves back into the text",
-			text:       "a  \nb",
+			Name:       "a caret past the trimmed end moves back into the text",
+			Text:       "a  \nb",
 			caret:      buffer.Pos{Line: 0, Col: 3},
 			wantText:   "a\nb",
 			wantCursor: buffer.Pos{Line: 0, Col: 1},
@@ -280,9 +280,9 @@ func TestTrimTrailingWhitespace(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
+			e := docWith(Options{}, tt.Text)
 			e.SetCursor(tt.caret, false)
 			run(t, e, "trim_trailing_whitespace")
 			d := e.Active()
@@ -311,19 +311,19 @@ func TestTrimTrailingWhitespaceIsOneUndoStep(t *testing.T) {
 func TestEnsureFinalNewline(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		text       string
+		Name       string
+		Text       string
 		wantText   string
 		wantStatus string
 	}{
-		{name: "a missing break is added", text: "a\nb", wantText: "a\nb\n", wantStatus: "Added final newline"},
-		{name: "a text that ends with a break is unchanged", text: "a\n", wantText: "a\n", wantStatus: "File already ends with newline"},
-		{name: "an empty text stays empty", text: "", wantText: "", wantStatus: "File already ends with newline"},
+		{Name: "a missing break is added", Text: "a\nb", wantText: "a\nb\n", wantStatus: "Added final newline"},
+		{Name: "a text that ends with a break is unchanged", Text: "a\n", wantText: "a\n", wantStatus: "File already ends with newline"},
+		{Name: "an empty text stays empty", Text: "", wantText: "", wantStatus: "File already ends with newline"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
+			e := docWith(Options{}, tt.Text)
 			run(t, e, "ensure_final_newline")
 			if got := e.Active().Buffer.Text(); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)

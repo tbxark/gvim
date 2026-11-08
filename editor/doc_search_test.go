@@ -29,33 +29,33 @@ func TestFindInSelectionNeedsASelection(t *testing.T) {
 func TestFindInSelectionSetsTheSearchRange(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		from buffer.Pos // selection anchor
-		to   buffer.Pos // selection head
-		want buffer.Selection
+		Name string
+		From buffer.Pos // selection anchor
+		To   buffer.Pos // selection head
+		Want buffer.Selection
 	}{
 		{
-			name: "the range is the selection",
-			from: buffer.Pos{},
-			to:   buffer.Pos{Col: 3},
-			want: buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Col: 3}},
+			Name: "the range is the selection",
+			From: buffer.Pos{},
+			To:   buffer.Pos{Col: 3},
+			Want: buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Col: 3}},
 		},
 		{
-			name: "a backward selection gives the same range in document order",
-			from: buffer.Pos{Col: 3},
-			to:   buffer.Pos{},
-			want: buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Col: 3}},
+			Name: "a backward selection gives the same range in document order",
+			From: buffer.Pos{Col: 3},
+			To:   buffer.Pos{},
+			Want: buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Col: 3}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := docWith(Options{}, "foo bar foo bar foo")
-			e.SelectRange(tt.from, tt.to)
+			e.SelectRange(tt.From, tt.To)
 			run(t, e, "find_in_selection")
 			got, ok := e.SearchRange()
-			if !ok || got != tt.want {
-				t.Fatalf("SearchRange() = %+v, %t, want %+v, true", got, ok, tt.want)
+			if !ok || got != tt.Want {
+				t.Fatalf("SearchRange() = %+v, %t, want %+v, true", got, ok, tt.Want)
 			}
 			if want := "Search limited to the selection"; e.Status() != want {
 				t.Fatalf("status = %q, want %q", e.Status(), want)

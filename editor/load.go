@@ -31,7 +31,7 @@ func (e *Editor) OpenLoaded(d *Document) {
 		if e.docs[i] != d {
 			e.releaseDoc(d)
 		}
-		e.docs[i].preview = false
+		e.docs[i].SetPreview(false)
 		if i != e.active {
 			e.pushJump()
 		}
@@ -49,5 +49,5 @@ func (e *Editor) OpenLoaded(d *Document) {
 		e.addDoc(d)
 		e.switchTo(len(e.docs) - 1)
 	}
-	e.setStatus(d.openStatus())
+	e.setStatus(d.OpenStatus())
 }

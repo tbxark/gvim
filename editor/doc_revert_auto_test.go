@@ -7,15 +7,15 @@ import "testing"
 func TestAutoReloadStatusDoesNotSayReverted(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		auto bool
-		want string
+		Want string
 	}{
 		{"asked for", false, "Reverted a.txt"},
 		{"changed on disk", true, "Reloaded a.txt from disk"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openRevertable(t, "a\n")
 			d := e.Active()
@@ -25,8 +25,8 @@ func TestAutoReloadStatusDoesNotSayReverted(t *testing.T) {
 			if err := e.ApplyRevert(plan, RunRevert(plan)); err != nil {
 				t.Fatalf("ApplyRevert: %v", err)
 			}
-			if d.status != tt.want {
-				t.Errorf("status = %q, want %q", d.status, tt.want)
+			if d.Status != tt.Want {
+				t.Errorf("status = %q, want %q", d.Status, tt.Want)
 			}
 			if got := d.Buffer.Text(); got != "a\nb\n" {
 				t.Errorf("text = %q, want the new file", got)

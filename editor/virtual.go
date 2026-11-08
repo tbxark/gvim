@@ -3,109 +3,32 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/buffer"
 	"slices"
 	"sort"
-	"strings"
-	"unicode"
-	"unicode/utf8"
-
-	"github.com/tbxark/gvim/buffer"
 )
-
-// Virtual documents (FINAL X10, stage S18): the scratch tabs a plugin owns. A virtual
-// document is not a file. Its Path is "", its tab is named *name*, and it is never
-// modified: closing it asks nothing, and it is left out of the saved session, the
-// crash-recovery copy, the language-server sync, auto-save, Save, the disk check and the
-// dirty list of a quit. Its text is replaced whole by SetVirtualText, which swaps the
-// Buffer for a new one (the same funnel as a revert), so its undo history cannot grow
-// with every refresh. Text properties of the content (the plugin's per-range tables) live
-// in a side table that is valid for one content state only.
 
 // ErrNotVirtual is returned by an operation that exists for virtual documents only.
 var ErrNotVirtual = errors.New("not a virtual buffer")
-
-// ErrVirtual is returned by Save and Save As of a virtual document, which has no file.
-var ErrVirtual = errors.New("a virtual buffer is not a file and cannot be saved")
-
-// MaxVirtualText is the longest text of a virtual document, in bytes.
-const MaxVirtualText = buffer.MaxMaterialize
-
-// maxVirtualName bounds the name of a virtual document, in runes.
-const maxVirtualName = 64
-
-// VirtualOptions describes a new virtual document. Text uses "\n" as its line break.
-type VirtualOptions struct {
-	Name, Language, Mode, Text string
-	// Owner names who made the document (the plugin); the quotas of a plugin count the
-	// documents and the text of its owner.
-	Owner    string
-	ReadOnly bool
-}
-
-// PropSpan is the properties of one run of a virtual document's text: [From, To) in
-// lines and UTF-8 byte columns of the document, as a plugin sees them. Spans of one
-// document are sorted and do not overlap.
-type PropSpan struct {
-	FromLine, FromCol, ToLine, ToCol int
-	Props                            map[string]any
-}
-
-// docExt is the plugin-facing state of a document: whether it is virtual, its name, the
-// plugin's buffer-local input mode (any document may have one) and the text properties.
-type docExt struct {
-	virtual bool
-	name    string // the name inside the asterisks of the tab
-	owner   string // who made the virtual document
-	size    int    // bytes of the text last set by the owner (not the user's typing)
-	mode    string
-	props   []PropSpan
-	// propsAt is the content state the props describe. They answer nothing for any other
-	// state, so a document the user edited since the plugin set it has no stale props.
-	propsAt Version
-}
-
-// Virtual reports whether the document is a virtual one.
-func (d *Document) Virtual() bool { return d.ext.virtual }
-
-// Mode returns the name of the buffer-local input mode a plugin set, or "".
-func (d *Document) Mode() string { return d.ext.mode }
-
-// cleanVirtualName makes name fit a tab: control characters become blanks, the ends are
-// trimmed and the length is bounded.
-func cleanVirtualName(name string) string {
-	name = strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == utf8.RuneError {
-			return ' '
-		}
-		return r
-	}, name))
-	if r := []rune(name); len(r) > maxVirtualName {
-		name = string(r[:maxVirtualName])
-	}
-	if name == "" {
-		name = "virtual"
-	}
-	return name
-}
 
 // NewVirtual opens a virtual document as the last tab and returns its id. It does not
 // make the tab active.
 func (e *Editor) NewVirtual(o VirtualOptions) DocID {
 	text, _ := splitLineEnding(o.Text)
 	d := newDocument("", text)
-	d.eol = eolLF
-	d.language = o.Language
-	d.readOnly = o.ReadOnly
-	d.ext = docExt{virtual: true, name: cleanVirtualName(o.Name), owner: o.Owner, size: len(text), mode: o.Mode}
+	d.Eol = eolLF
+	d.SetLanguage(o.Language)
+	d.SetReadOnly(o.ReadOnly)
+	d.SetExt(docExt{Virtual: true, Name: cleanVirtualName(o.Name), Owner: o.Owner, Size: len(text), Mode: o.Mode})
 	e.addDoc(d)
-	return d.seam.id
+	return d.Seam().Id
 }
 
 // VirtualCount returns the number of open virtual documents.
 func (e *Editor) VirtualCount() int {
 	n := 0
 	for _, d := range e.docs {
-		if d.ext.virtual {
+		if d.Ext().Virtual {
 			n++
 		}
 	}
@@ -126,9 +49,9 @@ func (e *Editor) VirtualTotals() (count, bytes int) {
 
 func (e *Editor) virtualUsage(match func(owner string) bool) (count, bytes int) {
 	for _, d := range e.docs {
-		if d.ext.virtual && match(d.ext.owner) {
+		if d.Ext().Virtual && match(d.Ext().Owner) {
 			count++
-			bytes += d.ext.size
+			bytes += d.Ext().Size
 		}
 	}
 	return count, bytes
@@ -141,7 +64,7 @@ func (e *Editor) VirtualOwner(id DocID) (owner string, size int, err error) {
 	if err != nil {
 		return "", 0, err
 	}
-	return d.ext.owner, d.ext.size, nil
+	return d.Ext().Owner, d.Ext().Size, nil
 }
 
 // virtualDoc returns the virtual document with the given id.
@@ -150,7 +73,7 @@ func (e *Editor) virtualDoc(id DocID) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !d.ext.virtual {
+	if !d.Ext().Virtual {
 		return nil, fmt.Errorf("%w: id %d", ErrNotVirtual, id)
 	}
 	return d, nil
@@ -174,18 +97,18 @@ func (e *Editor) SetVirtualText(id DocID, text string) error {
 	text, _ = splitLineEnding(text)
 	cursor, top := d.Cursor, d.Top
 	old := d.Buffer
-	d.setBuffer(buffer.NewAfter(text, old))
+	d.SetBuffer(buffer.NewAfter(text, old))
 	_ = old.Close()
-	d.ext.size = len(text)
-	d.setSaved(text)
+	d.Ext().Size = len(text)
+	d.SetSaved(text)
 	d.Sel = nil
-	d.clearCarets()
-	d.folded = nil
-	d.want = -1
-	d.resetHistoryState()
+	d.ClearCarets()
+	d.SetFoldedLines(nil)
+	d.Want = -1
+	d.ResetHistoryState()
 	d.Cursor = d.Buffer.Clamp(cursor)
 	d.Top = max(min(top, d.Buffer.Lines()-1), 0)
-	d.ext.props = nil
+	d.Ext().Props = nil
 	return nil
 }
 
@@ -196,8 +119,8 @@ func (e *Editor) SetVirtualProps(id DocID, spans []PropSpan) error {
 	if err != nil {
 		return err
 	}
-	d.ext.props = slices.Clone(spans)
-	d.ext.propsAt = d.Version()
+	d.Ext().Props = slices.Clone(spans)
+	d.Ext().PropsAt = d.Version()
 	return nil
 }
 
@@ -209,7 +132,7 @@ func (e *Editor) VirtualProps(id DocID, line, col int) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(d.ext.props) == 0 || d.ext.propsAt != d.Version() {
+	if len(d.Ext().Props) == 0 || d.Ext().PropsAt != d.Version() {
 		return nil, nil
 	}
 	b := d.Buffer
@@ -218,13 +141,13 @@ func (e *Editor) VirtualProps(id DocID, line, col int) (map[string]any, error) {
 	}
 	// n is the first span that starts after the position; the one before it is the only
 	// candidate, as spans do not overlap.
-	n := sort.Search(len(d.ext.props), func(i int) bool {
-		return cmpLineCol(d.ext.props[i].FromLine, d.ext.props[i].FromCol, line, col) > 0
+	n := sort.Search(len(d.Ext().Props), func(i int) bool {
+		return cmpLineCol(d.Ext().Props[i].FromLine, d.Ext().Props[i].FromCol, line, col) > 0
 	})
 	if n == 0 {
 		return nil, nil
 	}
-	s := d.ext.props[n-1]
+	s := d.Ext().Props[n-1]
 	switch c := cmpLineCol(line, col, s.ToLine, s.ToCol); {
 	case c < 0:
 		return s.Props, nil
@@ -234,21 +157,13 @@ func (e *Editor) VirtualProps(id DocID, line, col int) (map[string]any, error) {
 	return nil, nil
 }
 
-// cmpLineCol orders two (line, byte column) positions.
-func cmpLineCol(l1, c1, l2, c2 int) int {
-	if l1 != l2 {
-		return l1 - l2
-	}
-	return c1 - c2
-}
-
 // SetReadOnlyID sets the read-only flag of a virtual document.
 func (e *Editor) SetReadOnlyID(id DocID, ro bool) error {
 	d, err := e.virtualDoc(id)
 	if err != nil {
 		return err
 	}
-	d.readOnly = ro
+	d.SetReadOnly(ro)
 	return nil
 }
 
@@ -258,7 +173,7 @@ func (e *Editor) SetModeID(id DocID, mode string) error {
 	if err != nil {
 		return err
 	}
-	d.ext.mode = mode
+	d.Ext().Mode = mode
 	return nil
 }
 
@@ -269,8 +184,6 @@ func (e *Editor) UpdateViewSettings(id DocID, fn func(*ViewSettings)) error {
 	if err != nil {
 		return err
 	}
-	v := d.view
-	fn(&v)
-	d.view = v
+	fn(d.View())
 	return nil
 }

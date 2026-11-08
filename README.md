@@ -34,7 +34,8 @@ The module has three layers.
   - `internal/tui`: the single Bubble Tea root model (`ports.go` defines its interfaces,
     `layout.go` is the geometry source for painting and hit testing). Sub-packages:
     `overlay`, `list` (the shared overlay contract and list/box kit), `frame`, `split`,
-    `tabstrip` (layout/hit map, split tree, tab strip), `editorpane`,
+    `tabstrip` (layout/hit map, split tree, tab strip), `dock` (the terminal dock),
+    `editorpane`,
     `menubar`, `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`,
     `ctxmenu`, `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`.
   - `internal/terminal`: runs a program in a pseudo-terminal and keeps a model of its
@@ -46,8 +47,9 @@ The module has three layers.
 
 **Engine and shared libraries (top level, TUI-free):**
 
-- Text: `buffer` (text model and its large-file mode), `editor` (documents, tabs, edits,
-  motions, save/revert), `search`, `syntax`, `fold`, `diff`, `encoding`, `session`,
+- Text: `buffer` (text model and its large-file mode), `document` (one open file: text,
+  carets, motions, folds, save planning, large-file mode) and `editor` (the tab/action
+  session over documents), `search`, `syntax`, `fold`, `diff`, `encoding`, `session`,
   `decorations`, `textlayout`; `atomicfile` (atomic file replace) and `shellcmd` (run one
   program with a timeout) are the shared leaves.
 - Project and files: `workspace`, `explorer`, `finder`, `fuzzy`, `fsops`, `gitstate`.

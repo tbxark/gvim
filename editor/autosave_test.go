@@ -15,7 +15,7 @@ func TestAutoSaveDueFollowsTheInjectedClock(t *testing.T) {
 	e, _ := openFixture(t, Options{AutoSaveInterval: 5 * time.Second}, "abc\n")
 	typeText(t, e, "x")
 	tests := []struct {
-		at      time.Duration
+		At      time.Duration
 		wantDue bool
 		save    bool // call AutoSave at this time when it is due
 	}{
@@ -26,13 +26,13 @@ func TestAutoSaveDueFollowsTheInjectedClock(t *testing.T) {
 		{10 * time.Second, true, false},
 	}
 	for _, tt := range tests {
-		now := base.Add(tt.at)
+		now := base.Add(tt.At)
 		if got := e.AutoSaveDue(now); got != tt.wantDue {
-			t.Fatalf("AutoSaveDue(+%v) = %v, want %v", tt.at, got, tt.wantDue)
+			t.Fatalf("AutoSaveDue(+%v) = %v, want %v", tt.At, got, tt.wantDue)
 		}
 		if tt.save {
 			if err := e.AutoSave(now); err != nil {
-				t.Fatalf("AutoSave(+%v): %v", tt.at, err)
+				t.Fatalf("AutoSave(+%v): %v", tt.At, err)
 			}
 		}
 	}

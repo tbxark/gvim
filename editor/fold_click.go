@@ -9,6 +9,6 @@ func (e *Editor) ToggleFoldAt(line int) bool {
 	if d == nil || e.toggleFoldAt(d, line) != nil {
 		return false
 	}
-	d.revealCarets(d.Cursor.Line, e.tabSizeOf(d))
+	d.RevealCarets(d.Cursor.Line, e.tabSizeOf(d))
 	return true
 }

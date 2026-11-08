@@ -29,7 +29,7 @@ func foldedStarts(d *Document, n int) []int {
 func TestToggleFoldAtCaretLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		caret   int
 		wantErr error
 		folded  []int
@@ -39,7 +39,7 @@ func TestToggleFoldAtCaretLine(t *testing.T) {
 		{"blank line starts no fold", 3, ErrNoFold, nil},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, _ := openFixture(t, Options{}, foldText)
 			e.SetCursor(buffer.Pos{Line: tt.caret}, false)
@@ -92,63 +92,63 @@ func TestFoldHidesBodyLines(t *testing.T) {
 func TestCaretLeavesFoldedLines(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		text   string
+		Name   string
+		Text   string
 		folds  []int      // folded fold starts before the action
 		caret  buffer.Pos // caret before the action
 		action Action
-		want   buffer.Pos
+		Want   buffer.Pos
 	}{
 		{
-			name: "down from the fold start skips the body",
-			text: foldText, folds: []int{0},
+			Name: "down from the fold start skips the body",
+			Text: foldText, folds: []int{0},
 			caret: buffer.Pos{Line: 0}, action: "move_down",
-			want: buffer.Pos{Line: 3},
+			Want: buffer.Pos{Line: 3},
 		},
 		{
-			name: "up from below lands on the fold start",
-			text: foldText, folds: []int{0},
+			Name: "up from below lands on the fold start",
+			Text: foldText, folds: []int{0},
 			caret: buffer.Pos{Line: 3}, action: "move_up",
-			want: buffer.Pos{Line: 0},
+			Want: buffer.Pos{Line: 0},
 		},
 		{
-			name: "down into a fold that runs to the end stays at its start",
-			text: "a\n  b\n  c", folds: []int{0},
+			Name: "down into a fold that runs to the end stays at its start",
+			Text: "a\n  b\n  c", folds: []int{0},
 			caret: buffer.Pos{Line: 0}, action: "move_down",
-			want: buffer.Pos{Line: 0},
+			Want: buffer.Pos{Line: 0},
 		},
 		{
-			name: "a caret placed inside a fold moves to its start",
-			text: foldText, folds: []int{0},
+			Name: "a caret placed inside a fold moves to its start",
+			Text: foldText, folds: []int{0},
 			caret: buffer.Pos{Line: 2, Col: 1}, action: "noop",
-			want: buffer.Pos{Line: 0, Col: 1},
+			Want: buffer.Pos{Line: 0, Col: 1},
 		},
 		{
-			name: "a caret in a nested fold moves to the outer start",
-			text: nestedFoldText, folds: []int{0, 1},
+			Name: "a caret in a nested fold moves to the outer start",
+			Text: nestedFoldText, folds: []int{0, 1},
 			caret: buffer.Pos{Line: 2}, action: "noop",
-			want: buffer.Pos{Line: 0},
+			Want: buffer.Pos{Line: 0},
 		},
 		{
-			name: "a caret in a nested fold moves to the inner start when only it is folded",
-			text: nestedFoldText, folds: []int{1},
+			Name: "a caret in a nested fold moves to the inner start when only it is folded",
+			Text: nestedFoldText, folds: []int{1},
 			caret: buffer.Pos{Line: 2}, action: "noop",
-			want: buffer.Pos{Line: 1},
+			Want: buffer.Pos{Line: 1},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
+			e := docWith(Options{}, tt.Text)
 			d := e.Active()
-			d.folded = map[int]bool{}
+			d.SetFoldedLines(map[int]bool{})
 			for _, line := range tt.folds {
-				d.folded[line] = true
+				d.FoldedLines()[line] = true
 			}
 			d.Cursor = tt.caret
 			run(t, e, tt.action)
-			if d.Cursor != tt.want {
-				t.Fatalf("caret = %+v, want %+v", d.Cursor, tt.want)
+			if d.Cursor != tt.Want {
+				t.Fatalf("caret = %+v, want %+v", d.Cursor, tt.Want)
 			}
 		})
 	}
@@ -160,7 +160,7 @@ func TestToggleFoldUnfoldsAStaleStart(t *testing.T) {
 	// fold. Toggling it must still expand it, so it cannot get stuck collapsed.
 	e := docWith(Options{}, "x\ny")
 	d := e.Active()
-	d.folded = map[int]bool{0: true}
+	d.SetFoldedLines(map[int]bool{0: true})
 	run(t, e, "toggle_fold")
 	if d.Folded(0) {
 		t.Fatal("toggle_fold did not clear a collapsed start with no fold")
@@ -173,7 +173,7 @@ func TestSelectionLeavesFoldedLinesAtBothEnds(t *testing.T) {
 	// must leave the hidden body, not only the head.
 	e := docWith(Options{}, foldText)
 	d := e.Active()
-	d.folded = map[int]bool{0: true}
+	d.SetFoldedLines(map[int]bool{0: true})
 	e.SelectRange(caretPos(2, 1), caretPos(3, 0))
 	run(t, e, "noop")
 	if d.Cursor != caretPos(3, 0) {
@@ -196,7 +196,7 @@ func TestCollapsingAFoldMovesExtraCaretsOutOfItsBody(t *testing.T) {
 		t.Fatalf("setup carets = %v, want two extra carets", got)
 	}
 	run(t, e, "toggle_fold")
-	want := carets{primary: Caret{Cursor: caretPos(0, 1)}}
+	want := carets{Primary: Caret{Cursor: caretPos(0, 1)}}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets after collapsing = %v, want %v", got, want)
 	}
@@ -208,7 +208,7 @@ func TestFoldRevealRunsOnTheTabThatBecomesActive(t *testing.T) {
 	// switches to it from the second tab, so the reveal must run on the first tab.
 	e := docWith(Options{}, foldText)
 	folded := e.Active()
-	folded.folded = map[int]bool{0: true}
+	folded.SetFoldedLines(map[int]bool{0: true})
 	folded.Cursor = caretPos(1, 0)
 	e.docs = append(e.docs, newDocument("", "x\n"))
 	e.switchTo(1)

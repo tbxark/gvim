@@ -35,12 +35,12 @@ func typedAt(t *testing.T, opts Options, text string, at buffer.Pos, s string) *
 func TestAutoClose(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		opts    Options
-		text    string
-		col     int
+		Text    string
+		Col     int
 		typed   string
-		want    string
+		Want    string
 		wantCol int
 	}{
 		{"paren", smartOpts, "", 0, "(", "()", 1},
@@ -64,11 +64,11 @@ func TestAutoClose(t *testing.T) {
 		{"nested pairs", smartOpts, "", 0, "([{", "([{}])", 3},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := typedAt(t, tt.opts, tt.text, buffer.Pos{Col: tt.col}, tt.typed)
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			e := typedAt(t, tt.opts, tt.Text, buffer.Pos{Col: tt.Col}, tt.typed)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != (buffer.Pos{Col: tt.wantCol}) {
 				t.Fatalf("cursor = %+v, want column %d", got, tt.wantCol)
@@ -82,7 +82,7 @@ func TestAutoCloseLanguageExceptions(t *testing.T) {
 	tests := []struct {
 		language string
 		typed    string
-		want     string
+		Want     string
 	}{
 		{"text", `"`, `"`},
 		{"text", "'", "'"},
@@ -101,8 +101,8 @@ func TestAutoCloseLanguageExceptions(t *testing.T) {
 				return LanguageSettings{Language: tt.language, TabSize: 4, AutoClose: true}
 			})
 			typeText(t, e, tt.typed)
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -149,12 +149,12 @@ func TestQuoteInsideAStringIsNotPaired(t *testing.T) {
 func TestAutoSurround(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
+		Name       string
 		opts       Options
-		anchor     buffer.Pos
-		head       buffer.Pos
+		Anchor     buffer.Pos
+		Head       buffer.Pos
 		typed      string
-		want       string
+		Want       string
 		wantCursor buffer.Pos
 	}{
 		{"paren", smartOpts, buffer.Pos{Col: 0}, buffer.Pos{Col: 5}, "(", "(hello) world", buffer.Pos{Col: 7}},
@@ -167,13 +167,13 @@ func TestAutoSurround(t *testing.T) {
 		{"independent of auto_close", Options{TabSize: 4, AutoSurround: true}, buffer.Pos{Col: 0}, buffer.Pos{Col: 5}, "[", "[hello] world", buffer.Pos{Col: 7}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := docWith(tt.opts, "hello world")
-			e.SelectRange(tt.anchor, tt.head)
+			e.SelectRange(tt.Anchor, tt.Head)
 			typeText(t, e, tt.typed)
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			d := e.Active()
 			if d.Cursor != tt.wantCursor || d.HasSelection() {
@@ -216,7 +216,7 @@ func TestAutoCloseAtEveryCaret(t *testing.T) {
 	if got := text(e); got != "a() b\nc() d" {
 		t.Fatalf("text = %q, want a pair at both carets", got)
 	}
-	want := carets{primary: Caret{Cursor: caretPos(1, 2)}, extras: []Caret{{Cursor: caretPos(0, 2)}}}
+	want := carets{Primary: Caret{Cursor: caretPos(1, 2)}, extras: []Caret{{Cursor: caretPos(0, 2)}}}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets = %s, want %s", got, want)
 	}
@@ -224,7 +224,7 @@ func TestAutoCloseAtEveryCaret(t *testing.T) {
 	if got := text(e); got != "a() b\nc() d" {
 		t.Fatalf("text after the closers = %q, want both stepped over", got)
 	}
-	want = carets{primary: Caret{Cursor: caretPos(1, 3)}, extras: []Caret{{Cursor: caretPos(0, 3)}}}
+	want = carets{Primary: Caret{Cursor: caretPos(1, 3)}, extras: []Caret{{Cursor: caretPos(0, 3)}}}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets = %s, want %s", got, want)
 	}
@@ -233,9 +233,9 @@ func TestAutoCloseAtEveryCaret(t *testing.T) {
 func TestAutoSurroundAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	e := docWith(smartOpts, "ab\ncd")
-	e.Active().setCarets([]caret{
-		{anchor: caretPos(0, 0), head: caretPos(0, 2), primary: true},
-		{anchor: caretPos(1, 0), head: caretPos(1, 2)},
+	e.Active().SetCarets([]caret{
+		{Anchor: caretPos(0, 0), Head: caretPos(0, 2), Primary: true},
+		{Anchor: caretPos(1, 0), Head: caretPos(1, 2)},
 	})
 	typeText(t, e, "[")
 	if got := text(e); got != "[ab]\n[cd]" {
@@ -246,12 +246,12 @@ func TestAutoSurroundAtEveryCaret(t *testing.T) {
 func TestClosingBracketReindents(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		opts    Options
-		text    string
-		at      buffer.Pos
+		Text    string
+		At      buffer.Pos
 		typed   string
-		want    string
+		Want    string
 		wantPos buffer.Pos
 	}{
 		{"dedents to the opener", smartOpts, "if x {\n    a\n    ", buffer.Pos{Line: 2, Col: 4}, "}", "if x {\n    a\n}", buffer.Pos{Line: 2, Col: 1}},
@@ -265,11 +265,11 @@ func TestClosingBracketReindents(t *testing.T) {
 		{"over a closer with the right indent just steps", smartOpts, "f {\n}", buffer.Pos{Line: 1, Col: 0}, "}", "f {\n}", buffer.Pos{Line: 1, Col: 1}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := typedAt(t, tt.opts, tt.text, tt.at, tt.typed)
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			e := typedAt(t, tt.opts, tt.Text, tt.At, tt.typed)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != tt.wantPos {
 				t.Fatalf("cursor = %+v, want %+v", got, tt.wantPos)
@@ -291,11 +291,11 @@ func TestClosingBracketReindentUsesTabsWhenSet(t *testing.T) {
 func TestEnterBetweenBrackets(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		opts    Options
-		text    string
-		at      buffer.Pos
-		want    string
+		Text    string
+		At      buffer.Pos
+		Want    string
 		wantPos buffer.Pos
 	}{
 		{"braces", smartOpts, "{}", buffer.Pos{Col: 1}, "{\n    \n}", buffer.Pos{Line: 1, Col: 4}},
@@ -309,13 +309,13 @@ func TestEnterBetweenBrackets(t *testing.T) {
 		{"needs auto_indent", Options{AutoClose: true, TabSize: 4}, "{}", buffer.Pos{Col: 1}, "{\n}", buffer.Pos{Line: 1, Col: 0}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(tt.opts, tt.text)
-			e.SetCursor(tt.at, false)
+			e := docWith(tt.opts, tt.Text)
+			e.SetCursor(tt.At, false)
 			run(t, e, "insert_newline")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != tt.wantPos {
 				t.Fatalf("cursor = %+v, want %+v", got, tt.wantPos)
@@ -348,7 +348,7 @@ func TestEnterBetweenBracketsAtEveryCaret(t *testing.T) {
 	if got := text(e); got != "{\n    \n}\n[\n    \n]" {
 		t.Fatalf("text = %q", got)
 	}
-	want := carets{primary: Caret{Cursor: caretPos(4, 4)}, extras: []Caret{{Cursor: caretPos(1, 4)}}}
+	want := carets{Primary: Caret{Cursor: caretPos(4, 4)}, extras: []Caret{{Cursor: caretPos(1, 4)}}}
 	if got := caretState(e); !sameCarets(got, want) {
 		t.Fatalf("carets = %s, want %s", got, want)
 	}
@@ -361,11 +361,11 @@ func TestEnterBetweenBracketsAtEveryCaret(t *testing.T) {
 func TestEnterIndentsAfterAnOpener(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		opts    Options
-		text    string
-		at      buffer.Pos
-		want    string
+		Text    string
+		At      buffer.Pos
+		Want    string
 		wantCol int
 	}{
 		{"brace", smartOpts, "if x {", buffer.Pos{Col: 6}, "if x {\n    ", 4},
@@ -382,13 +382,13 @@ func TestEnterIndentsAfterAnOpener(t *testing.T) {
 		{"text before the caret decides", smartOpts, "a {b", buffer.Pos{Col: 3}, "a {\n    b", 4},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(tt.opts, tt.text)
-			e.SetCursor(tt.at, false)
+			e := docWith(tt.opts, tt.Text)
+			e.SetCursor(tt.At, false)
 			run(t, e, "insert_newline")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != (buffer.Pos{Line: 1, Col: tt.wantCol}) {
 				t.Fatalf("cursor = %+v, want line 1 column %d", got, tt.wantCol)
@@ -400,11 +400,11 @@ func TestEnterIndentsAfterAnOpener(t *testing.T) {
 func TestEnterOnABlankLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		text      string
-		line      int
+		Name      string
+		Text      string
+		Line      int
 		plainText bool
-		want      string
+		Want      string
 	}{
 		{"takes the indent of the line above", "    a\n\n", 2, false, "    a\n\n\n    "},
 		{"opens a level after an opener", "f {\n\n", 2, false, "f {\n\n\n    "},
@@ -414,18 +414,18 @@ func TestEnterOnABlankLine(t *testing.T) {
 		{"plain text keeps the caret column", "    a\n\n", 2, true, "    a\n\n\n"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(smartOpts, tt.text)
+			e := docWith(smartOpts, tt.Text)
 			if tt.plainText {
 				e.SetLanguageSettings(func(string, string) LanguageSettings {
 					return LanguageSettings{Language: "text", TabSize: 4, AutoIndent: true}
 				})
 			}
-			e.SetCursor(buffer.Pos{Line: tt.line}, false)
+			e.SetCursor(buffer.Pos{Line: tt.Line}, false)
 			run(t, e, "insert_newline")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -434,11 +434,11 @@ func TestEnterOnABlankLine(t *testing.T) {
 func TestSmartBackspace(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		opts    Options
-		text    string
-		col     int
-		want    string
+		Text    string
+		Col     int
+		Want    string
 		wantCol int
 	}{
 		{"removes tab_size spaces", Options{TabSize: 4}, "        x", 8, "    x", 4},
@@ -452,13 +452,13 @@ func TestSmartBackspace(t *testing.T) {
 		{"works without auto_close", Options{TabSize: 4}, "    ", 4, "", 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(tt.opts, tt.text)
-			e.SetCursor(buffer.Pos{Col: tt.col}, false)
+			e := docWith(tt.opts, tt.Text)
+			e.SetCursor(buffer.Pos{Col: tt.Col}, false)
 			run(t, e, "delete_backward")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != (buffer.Pos{Col: tt.wantCol}) {
 				t.Fatalf("cursor = %+v, want column %d", got, tt.wantCol)
@@ -480,11 +480,11 @@ func TestBackspaceAtLineStartJoinsLines(t *testing.T) {
 func TestBackspaceBetweenAPairDeletesBoth(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		opts Options
-		text string
-		col  int
-		want string
+		Text string
+		Col  int
+		Want string
 	}{
 		{"parens", smartOpts, "f()", 2, "f"},
 		{"brackets", smartOpts, "[]", 1, ""},
@@ -498,13 +498,13 @@ func TestBackspaceBetweenAPairDeletesBoth(t *testing.T) {
 		{"needs auto_close", Options{AutoIndent: true, TabSize: 4}, "()", 1, ")"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(tt.opts, tt.text)
-			e.SetCursor(buffer.Pos{Col: tt.col}, false)
+			e := docWith(tt.opts, tt.Text)
+			e.SetCursor(buffer.Pos{Col: tt.Col}, false)
 			run(t, e, "delete_backward")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -513,10 +513,10 @@ func TestBackspaceBetweenAPairDeletesBoth(t *testing.T) {
 func TestBackspaceAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	e := docWith(smartOpts, "()\n    x\n[]")
-	e.Active().setCarets([]caret{
-		{anchor: caretPos(0, 1), head: caretPos(0, 1), primary: true},
-		{anchor: caretPos(1, 4), head: caretPos(1, 4)},
-		{anchor: caretPos(2, 1), head: caretPos(2, 1)},
+	e.Active().SetCarets([]caret{
+		{Anchor: caretPos(0, 1), Head: caretPos(0, 1), Primary: true},
+		{Anchor: caretPos(1, 4), Head: caretPos(1, 4)},
+		{Anchor: caretPos(2, 1), Head: caretPos(2, 1)},
 	})
 	run(t, e, "delete_backward")
 	if got := text(e); got != "\nx\n" {
@@ -531,10 +531,10 @@ func TestBackspaceAtEveryCaret(t *testing.T) {
 func TestBackspaceWithCaretsCloserThanATabSizeDoesNotOverlap(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
+		Name  string
+		Text  string
 		cols  []int
-		want  string
+		Want  string
 		count int
 	}{
 		{"adjacent carets in the indent", "      x", []int{2, 3}, "    x", 1},
@@ -542,24 +542,24 @@ func TestBackspaceWithCaretsCloserThanATabSizeDoesNotOverlap(t *testing.T) {
 		{"carets a tab size apart still take a unit each", "        x", []int{4, 8}, "x", 1},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(smartOpts, tt.text)
+			e := docWith(smartOpts, tt.Text)
 			var cs []caret
 			for i, col := range tt.cols {
-				cs = append(cs, caret{anchor: caretPos(0, col), head: caretPos(0, col), primary: i == 0})
+				cs = append(cs, caret{Anchor: caretPos(0, col), Head: caretPos(0, col), Primary: i == 0})
 			}
-			e.Active().setCarets(cs)
+			e.Active().SetCarets(cs)
 			run(t, e, "delete_backward")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
-			if got := len(e.Active().allCarets()); got != tt.count {
+			if got := len(e.Active().AllCarets()); got != tt.count {
 				t.Fatalf("carets = %d, want %d", got, tt.count)
 			}
 			run(t, e, "undo")
-			if got := text(e); got != tt.text {
-				t.Fatalf("text after undo = %q, want %q", got, tt.text)
+			if got := text(e); got != tt.Text {
+				t.Fatalf("text after undo = %q, want %q", got, tt.Text)
 			}
 		})
 	}
@@ -578,9 +578,9 @@ func TestTypingStillMergesIntoOneUndoStep(t *testing.T) {
 func TestTabAndTabSizeFollowTheLanguage(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		path string
-		want string
+		Name string
+		Path string
+		Want string
 	}{
 		{"go uses tabs", "main.go", "\t"},
 		{"makefile uses tabs", "Makefile", "\t"},
@@ -588,14 +588,14 @@ func TestTabAndTabSizeFollowTheLanguage(t *testing.T) {
 		{"rust uses spaces", "main.rs", "    "},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := docWith(Options{TabSize: 4}, "")
 			e.SetLanguageSettings(configResolver())
-			e.Active().Path = tt.path
+			e.Active().Path = tt.Path
 			run(t, e, "insert_tab")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}

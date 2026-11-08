@@ -83,7 +83,7 @@ func TestKeyboardMovementBreaksTypingGroup(t *testing.T) {
 func TestPointerMovementBreaksTypingGroup(t *testing.T) {
 	t.Parallel()
 	moves := []struct {
-		name string
+		Name string
 		move func(e *Editor)
 	}{
 		{"SetCursor", func(e *Editor) { e.SetCursor(buffer.Pos{}, false) }},
@@ -95,7 +95,7 @@ func TestPointerMovementBreaksTypingGroup(t *testing.T) {
 		}},
 	}
 	for _, m := range moves {
-		t.Run(m.name, func(t *testing.T) {
+		t.Run(m.Name, func(t *testing.T) {
 			t.Parallel()
 			c := newUndoClock()
 			e := clockedEditor(c)
@@ -107,7 +107,7 @@ func TestPointerMovementBreaksTypingGroup(t *testing.T) {
 			}
 			run(t, e, "undo")
 			if got := text(e); got != "ab" {
-				t.Fatalf("undo after %s = %q, want %q", m.name, got, "ab")
+				t.Fatalf("undo after %s = %q, want %q", m.Name, got, "ab")
 			}
 		})
 	}

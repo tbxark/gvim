@@ -26,10 +26,10 @@ func rulesEditor(lang string, ind *IndentRules, text string) *Editor {
 func TestEnterFollowsTheLanguageIndentRules(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		lang string
-		text string
-		want string // the indent of the new line
+		Text string
+		Want string // the indent of the new line
 	}{
 		{"python opens a block at a colon", "python", "if x:", "    "},
 		{"python return dedents the next line", "python", "if x:\n    return 1", ""},
@@ -52,13 +52,13 @@ func TestEnterFollowsTheLanguageIndentRules(t *testing.T) {
 		{"no language keeps the heuristic", "", "x:", "    "},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := rulesEditor(tt.lang, nil, tt.text)
+			e := rulesEditor(tt.lang, nil, tt.Text)
 			run(t, e, "insert_newline")
 			lines := strings.Split(text(e), "\n")
-			if got := lines[len(lines)-1]; got != tt.want {
-				t.Fatalf("new line = %q, want %q (text %q)", got, tt.want, text(e))
+			if got := lines[len(lines)-1]; got != tt.Want {
+				t.Fatalf("new line = %q, want %q (text %q)", got, tt.Want, text(e))
 			}
 		})
 	}
@@ -105,11 +105,11 @@ func TestEnterIgnoresAnOpenerInAComment(t *testing.T) {
 func TestUserIndentRulesOverrideTheFamily(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		lang string
 		ind  *IndentRules
-		text string
-		want string
+		Text string
+		Want string
 	}{
 		{"a language with no family starts blank", "foo", &IndentRules{IncreaseIndentPattern: `BEGIN$`}, "BEGIN", "    "},
 		{"no family, no match", "foo", &IndentRules{IncreaseIndentPattern: `BEGIN$`}, "x:", ""},
@@ -123,13 +123,13 @@ func TestUserIndentRulesOverrideTheFamily(t *testing.T) {
 		{"a bad pattern is dropped", "foo", &IndentRules{IncreaseIndentPattern: `(`}, "x(", ""},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := rulesEditor(tt.lang, tt.ind, tt.text)
+			e := rulesEditor(tt.lang, tt.ind, tt.Text)
 			run(t, e, "insert_newline")
 			lines := strings.Split(text(e), "\n")
-			if got := lines[len(lines)-1]; got != tt.want {
-				t.Fatalf("new line = %q, want %q", got, tt.want)
+			if got := lines[len(lines)-1]; got != tt.Want {
+				t.Fatalf("new line = %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -138,12 +138,12 @@ func TestUserIndentRulesOverrideTheFamily(t *testing.T) {
 func TestKeywordTypedLineDedents(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
+		Name  string
 		lang  string
 		ind   *IndentRules
-		text  string
+		Text  string
 		typed string
-		want  string
+		Want  string
 	}{
 		{"python else colon", "python", nil, "if x:\n    y\n    else", ":", "if x:\n    y\nelse:"},
 		{"python elif colon", "python", nil, "if x:\n    y\n    elif z", ":", "if x:\n    y\nelif z:"},
@@ -159,12 +159,12 @@ func TestKeywordTypedLineDedents(t *testing.T) {
 		{"a language without a decrease rule", "rust", nil, "if x {\n    y\n    els", "e", "if x {\n    y\n    else"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := rulesEditor(tt.lang, tt.ind, tt.text)
+			e := rulesEditor(tt.lang, tt.ind, tt.Text)
 			typeText(t, e, tt.typed)
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -233,8 +233,8 @@ func TestKeywordDedentConditions(t *testing.T) {
 	t.Run("every caret", func(t *testing.T) {
 		t.Parallel()
 		e := rulesEditor("python", nil, "if x:\n    y\n    else\nif z:\n    w\n    else")
-		e.Active().setCarets([]caret{
-			{anchor: caretPos(2, 8), head: caretPos(2, 8), primary: true},
+		e.Active().SetCarets([]caret{
+			{Anchor: caretPos(2, 8), Head: caretPos(2, 8), Primary: true},
 			at(5, 8),
 		})
 		typeText(t, e, ":")
@@ -247,26 +247,26 @@ func TestKeywordDedentConditions(t *testing.T) {
 func TestClosingBracketUsesTheRulesDedent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		lang string
-		text string
-		want string
+		Text string
+		Want string
 	}{
 		{"rust closes at the opener's level", "rust", "fn f() {\n    x\n        ", "fn f() {\n    x\n}"},
 		{"a nested block", "rust", "a {\n    b {\n        x\n        ", "a {\n    b {\n        x\n    }"},
 		{"a language with no decrease rule for it uses the scan", "ruby", "f(\n    x\n        ", "f(\n    x\n)"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := rulesEditor(tt.lang, nil, tt.text)
+			e := rulesEditor(tt.lang, nil, tt.Text)
 			closer := "}"
 			if tt.lang == "ruby" {
 				closer = ")"
 			}
 			typeText(t, e, closer)
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}

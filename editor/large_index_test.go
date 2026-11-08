@@ -57,7 +57,7 @@ func TestIndexLoopBuildsTheWholeIndex(t *testing.T) {
 	if got := d.Buffer.Text(); got != content {
 		t.Fatalf("Text() differs from the file: %d bytes, want %d", len(got), len(content))
 	}
-	if d.large.scan != nil || d.large.inFlight {
+	if d.LargeState().Scan != nil || d.LargeState().InFlight {
 		t.Fatal("the scan is not released")
 	}
 }
@@ -95,11 +95,11 @@ func TestPlanIndexChoosesDocuments(t *testing.T) {
 	t.Run("a preview tab is not scanned", func(t *testing.T) {
 		t.Parallel()
 		e, d := openLarge(t, largeOptions(), lineText(400))
-		d.preview = true
+		d.SetPreview(true)
 		if _, ok := e.PlanIndex(); ok {
 			t.Fatal("a job for a preview tab")
 		}
-		d.preview = false
+		d.SetPreview(false)
 		if _, ok := e.PlanIndex(); !ok {
 			t.Fatal("no job once the tab is permanent")
 		}
@@ -116,14 +116,14 @@ func TestPlanIndexChoosesDocuments(t *testing.T) {
 			t.Fatal("no second tab")
 		}
 		job, _ := e.PlanIndex()
-		if job.doc != b {
+		if job.Doc != b {
 			t.Fatal("the active tab is not scanned first")
 		}
 		e.ApplyIndex(job.Run(context.Background()))
 		e.switchTo(0)
 		job, ok := e.PlanIndex()
-		if !ok || job.doc != a {
-			t.Fatalf("after switching, ok = %v, doc is a: %v", ok, job.doc == a)
+		if !ok || job.Doc != a {
+			t.Fatalf("after switching, ok = %v, doc is a: %v", ok, job.Doc == a)
 		}
 		e.ApplyIndex(job.Run(context.Background()))
 		// Both documents finish, whichever is active.
@@ -165,7 +165,7 @@ func TestApplyIndexDropsStaleResults(t *testing.T) {
 		old := d.Buffer
 		before := old.Index(0).Indexed
 		d.Buffer = buffer.New("fresh")
-		d.large = nil
+		d.SetLargeState(nil)
 		if e.ApplyIndex(res) {
 			t.Fatal("ApplyIndex asked for more after the swap")
 		}
@@ -178,8 +178,8 @@ func TestApplyIndexDropsStaleResults(t *testing.T) {
 		e, d := openLarge(t, largeOptions(), lineText(400))
 		job, _ := e.PlanIndex()
 		res := job.Run(context.Background())
-		d.large.scan = nil
-		d.large.inFlight = false
+		d.LargeState().Scan = nil
+		d.LargeState().InFlight = false
 		before := d.Index().Indexed
 		if e.ApplyIndex(res) || d.Index().Indexed != before {
 			t.Fatal("a result of an old scan was applied")
@@ -234,8 +234,8 @@ func TestIndexJobHonoursCancel(t *testing.T) {
 	if e.ApplyIndex(job.Run(ctx)) {
 		t.Fatal("a cancelled job asks for more")
 	}
-	if d.large.indexErr != nil {
-		t.Fatalf("a cancel is not an index failure: %v", d.large.indexErr)
+	if d.LargeState().IndexErr != nil {
+		t.Fatalf("a cancel is not an index failure: %v", d.LargeState().IndexErr)
 	}
 	if indexAll(t, e); !d.Index().Complete {
 		t.Fatal("the scan does not resume after a cancel")
@@ -253,8 +253,8 @@ func TestIndexFailureStopsTheChainAndRetries(t *testing.T) {
 	if !ran || more {
 		t.Fatalf("ran = %v, more = %v, want a job that ends the chain", ran, more)
 	}
-	if !errors.Is(d.large.indexErr, errBoom) {
-		t.Fatalf("indexErr = %v", d.large.indexErr)
+	if !errors.Is(d.LargeState().IndexErr, errBoom) {
+		t.Fatalf("indexErr = %v", d.LargeState().IndexErr)
 	}
 	if !strings.HasPrefix(e.Status(), "Index failed: ") || !strings.Contains(e.Status(), errBoom.Error()) {
 		t.Fatalf("status = %q", e.Status())
@@ -263,8 +263,8 @@ func TestIndexFailureStopsTheChainAndRetries(t *testing.T) {
 		t.Fatal("PlanIndex returned a job after a failure, before a retry was asked for")
 	}
 	run(t, e, "scan_line_index")
-	if !strings.HasPrefix(e.Status(), "Retrying line index... Scanning...") || d.large.indexErr != nil {
-		t.Fatalf("status = %q, indexErr = %v", e.Status(), d.large.indexErr)
+	if !strings.HasPrefix(e.Status(), "Retrying line index... Scanning...") || d.LargeState().IndexErr != nil {
+		t.Fatalf("status = %q, indexErr = %v", e.Status(), d.LargeState().IndexErr)
 	}
 	indexAll(t, e)
 	if got := d.Buffer.Text(); got != content {
@@ -282,8 +282,8 @@ func TestIndexFailureOfAChangedSourceFreezesTheDocument(t *testing.T) {
 	if ran, more := indexStep(e); !ran || more {
 		t.Fatalf("ran = %v, more = %v", ran, more)
 	}
-	if !errors.Is(d.large.indexErr, buffer.ErrSourceChanged) || !d.ReadOnly() {
-		t.Fatalf("indexErr = %v, read-only = %v", d.large.indexErr, d.ReadOnly())
+	if !errors.Is(d.LargeState().IndexErr, buffer.ErrSourceChanged) || !d.ReadOnly() {
+		t.Fatalf("indexErr = %v, read-only = %v", d.LargeState().IndexErr, d.ReadOnly())
 	}
 	run(t, e, "scan_line_index")
 	if _, ok := e.PlanIndex(); ok {

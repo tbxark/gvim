@@ -38,7 +38,8 @@ internal/                       private executable shell (no top-level package i
   uitest/                       test-only in-process UI harness
 
 <top level>                     TUI-free engine, shared libraries and services
-  buffer/ editor/ search/ syntax/ fold/ diff/ encoding/ session/ decorations/ textlayout/
+  buffer/ document/ editor/ search/ syntax/ fold/ diff/ encoding/ session/
+  decorations/ textlayout/
   atomicfile/ shellcmd/
   workspace/ explorer/ finder/ fuzzy/ fsops/ gitstate/
   config/ keymap/ theme/
@@ -54,6 +55,8 @@ stdlib / third party
       ▼
 engine leaves  (buffer, textlayout, diff, encoding, fuzzy, theme, fsops, gitstate, lsp,
                 pluginapi, decorations, atomicfile, shellcmd)
+      ▼
+document          (per-file model: buffer/search/syntax/textlayout/encoding/diff/atomicfile)
       ▼
 engine (editor, search, syntax, session, commands)
       ▼
@@ -83,8 +86,9 @@ internal/cli → cmd/gvim
 | R8 | No package in the shipped binary imports test support: `buffer/buffertest`, `plugin/plugintest`, `lsp/lsptest`, `internal/uitest`, `internal/apptest`. |
 | R9 | `pluginapi` and `decorations` import no module package and no charm package. |
 | R10 | The plugin tree imports only the standard library, `gopher-lua`, `hujson`, `pluginapi`, `plugin/bundled`, `plugin/pattern`, `plugin/hostos` (plugintest may also import the runtime and other plugin sub-packages). No charm. |
-| R11 | `editor`, `buffer` and `decorations` do not import `pluginapi`. |
-| R12 | Only `internal/tui` (its root and its own sub-packages) and `internal/app` import TUI sub-packages. |
+| R11 | `editor`, `document`, `buffer` and `decorations` do not import `pluginapi`. |
+| R12 | Only `internal/tui` (its root and its own sub-packages), `internal/app` and `internal/uiadapter` import TUI sub-packages. |
+| R13 | The private host packages: only `internal/app` imports `uiadapter`, `pluginhost`, `lsphost` and `restore`; `keybindings` may also be imported by `uiadapter`/`pluginhost`/`configview`; `highlight` by `uiadapter`. |
 | R14 | `internal/configview` imports only `config`, `internal/keybindings`, `keymap` and `theme` among module packages; it never imports `internal/app`, `internal/cli` or `internal/tui`. |
 
 Run the gates:
@@ -132,7 +136,8 @@ bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
 | Package | Role | Key facts |
 |---|---|---|
 | `buffer` | The text model: lines of runes, positions, edits, undo/redo, observer, large-file mode. | Two storage modes in one package: in-memory lines, and a disk-backed `bigStore` for large files (`OpenLarge`, `Snapshot`, `IndexScan`, `Rebase`). A split was considered and rejected: the mode is part of `Buffer`, not a layer on it (see `buffer/doc.go`). |
-| `editor` | The editing session: documents, tabs, actions and their handlers, edits, cursors/motions, folds, marks, save/revert/autosave planning, shell jobs, virtual documents, the plugin edit seam. | Depends on `buffer`, `search`, `syntax` (indirectly), `textlayout`, `fold`, `diff`, `encoding`, `session`. No UI. |
+| `document` | One open file: text, cursor/carets, selection, folds, view settings, saved/on-disk/encoding/EOL state, large-file mode, text commands and motions, document-level load/save planning, and the per-document plugin seam data. | The model half of the old `editor` god package; imports `buffer`/`search`/`syntax`/`textlayout`/`fold`/`diff`/`encoding`/`atomicfile`, never `editor`, `session` or `internal/`. |
+| `editor` | The editing session: tabs, active document, action registry and `Do` dispatch, statuses, save/revert/autosave jobs, disk polling, shell jobs, settings resolution, marks/jumps, and the plugin seam's session half. | Imports `document` and the engine leaves; no UI. `editor/bridge.go` still aliases the moved names for consumers. |
 | `search` | Find, scan, replace and range search over `buffer` lines. | `large.go` is the visible-window search (renamed from a misleading name). |
 | `syntax` | Chroma lexer resolution, token spans for a visible window, markdown inline styling, style table from a theme. | |
 | `fold` | Indentation fold ranges. | Small leaf used by `editor`. |
@@ -198,17 +203,33 @@ menu table), `explorer` (file-tree panel), `palette` (command palette overlay), 
 (plugin list picker), `popup` (anchored list popup), `ctxmenu` (right-click menu),
 `dialog` (modal dialogs), `statusbar` (status row primitives).
 
-### 4.3 `editor`
+### 4.3 `document` and `editor`
+
+`document` is the model; `editor` is the session around it. The `Document` type, its
+fields and every method on it live in `document`; `editor` holds `Editor`, the action
+registry and the job/polling orchestration. A temporary `editor/bridge.go` aliases the
+moved names (`Document`, `Caret`, `ViewSettings`, ...) so the rest of the module keeps
+compiling until consumers are retargeted.
+
+`document` clusters:
 
 | Cluster | Files (examples) | Responsibility |
 |---|---|---|
-| document model | `document.go`, `doc*.go`, `edit*.go`, `changes.go`, `virtual.go`, `docid.go`, `cursors*.go` | per-document state: text, cursor/carets, selection, folds, view settings, saved/disk state, identity, change listeners |
-| editing commands | `textops.go`, `textcmd.go`, `vi_actions.go`, `comment.go`, `bracket.go`, `indent*.go`, `smart*.go`, `dabbrev.go`, `clip_ops.go`, `replace.go`, `findsel.go`, `paragraph.go`, `block.go`, `case.go` | the actions handlers over the document |
-| motions / navigation | `motion*.go`, `nav*.go`, `goto.go`, `marks.go`, `scroll.go`, `fold*.go`, `view_ops.go` | cursor moves, viewport moves, marks, folds |
-| files / save | `load.go`, `save*.go`, `savefile*.go`, `files_*.go`, `doc_revert.go`, `encoding.go`, `binary.go`, `readonly.go`, `autosave_async.go`, `interrupted.go` | load/save, atomic replace, revert, auto-save planning, encoding/EOL, crash interruption |
-| large-file mode | `large*.go`, `save_large.go`, `doc_index.go`, `scanbudget.go` | streamed load/save, index, guard rails, stash |
-| session shell | `editor.go`, `handlers.go`, `tabs*.go`, `status*.go`, `settings.go`, `shell.go`, `pending.go`, `paths.go` | `Editor`, action registry, tabs, status row text, keymap settings, shell jobs, pending prompts |
-| plugin seam | `edit_api.go`, `docops_id.go`, `changes.go`, `virtual.go`, `lspedit.go` | id-based operations, bulk edits, per-consumer change streams, virtual documents, LSP edit application |
+| document core | `document.go`, `docid.go`, `changes.go`, `diskstate.go`, `settings.go`, `accessors.go` | `Document` struct and state, identity/generation, change ring, disk stamps, the options it reads |
+| cursor & editing | `cursors*.go`, `edit.go`, `edit_api.go`, `block.go`, `smart*.go`, `indent*.go`, `indent_rules.go`, `case.go`, `comment.go`, `bracket.go`, `textcmd.go`, `textops.go`, `vi_actions.go`, `dabbrev.go`, `scanbudget.go` | carets and selections, edit primitives, typing/auto-close/auto-indent, line/selection commands, case/comment/bracket, vi, dabbrev |
+| motions & clusters | `motion*.go`, `fold.go`, `viewsettings.go` | grapheme/word/line movement helpers and row mapping inputs, folds, per-document view settings |
+| files & state | `files_*.go`, `encoding.go`, `binary.go`, `paths.go`, `readonly.go`, `pending.go`, `large*.go`, `save_large.go`, `autosave_async.go`, `stash.go` | load/decode, encoding/EOL, disk state, large mode and its index, save planning and jobs, overlay stash format |
+| plugin data | `virtual.go`, `docops_id.go`, `lspedit.go`, `save_info.go` | virtual-document state, id-based ops data, LSP edit value, save result payload |
+
+`editor` clusters:
+
+| Cluster | Files (examples) | Responsibility |
+|---|---|---|
+| session shell | `editor.go`, `handlers.go`, `doc.go`, `tabs*.go`, `settings.go` | `Editor`, action registry, tabs and active document, statuses, settings resolution |
+| jobs & polling | `save_plan.go`, `autosave.go`, `files_diskcheck.go`, `doc_revert.go`, `doc_index.go`, `load.go`, `interrupted.go`, `paths.go` | save/revert/index jobs, disk polling, load functions, crash-interruption queries, save-as/rename |
+| commands | `findsel.go`, `goto.go`, `marks.go`, `nav*.go`, `mouse_ops.go`, `view_ops.go`, `motion_carets.go`, `motion_wrap.go`, `replace.go`, `doc_format.go`, `shell.go`, `doc_search.go`, `doc_path.go` | action handlers bound to keys: find, goto, marks/jumps, viewport, replace, format, shell, search range, path copy |
+| plugin seam | `lspedit.go`, `virtual.go`, `docops_id.go`, `changes.go`, `docid.go`, `edit_api.go` | the session side of the plugin contract: doc lookup, listeners, virtual documents, LSP edit application |
+| state guards | `readonly.go`, `pending.go`, `large_stash.go`, `large.go` | read-only guards, pending-index gates, stash restore/replace, large-path policy |
 
 ### 4.4 `buffer`
 
@@ -270,6 +291,9 @@ Done:
    then `split` (tree + geometry), `frame` (layout + hit map) and `tabstrip` (strip paint),
    taking the root from ~23.9k to ~21.7k source lines with all tests green.
 6. Engine leaves: `atomicfile`, `shellcmd`, the `buffer` two-mode doc, and file renames.
+7. `editor` split into top-level `document/` (per-file model, 61 files/7.0k LOC) and a
+   slimmed `editor/` (session, 65 files/6.6k LOC), with a temporary alias bridge so no
+   consumer package changed; the import gate gained the `document` direction (R4/R11).
 
 Next (tracked as follow-up work; each keeps build + tests green):
 
@@ -282,8 +306,11 @@ Next (tracked as follow-up work; each keeps build + tests green):
 3. `editor` → `document` + `editor` split (the two god objects), with an alias bridge.
 4. `lsp` split into client + `lsp/manager` + `lsp/lsptest`; `plugin/hostos` extracted from
    the runtime, and `plugin/doc.go` now holds the file map.
-5. Fold `fold` into `textlayout` (needs a small `tui/editorpane` import update); optional
-   `plugin/luastdlib` extraction.
+5. Finish the editor split tail: move the `editor` model tests into `document`, then delete
+   the alias bridge (`editor/bridge.go` + `document/export.go`, ~413 lines) by retargeting
+   the ~165 consumer references; tighten `document`'s exported surface to accessors.
+6. Fold `fold` into `textlayout`; optional `plugin/luastdlib` extraction; optional keybinding
+   editor extraction (`tui/keybindeditor`, needs its test harness rewritten).
 
 The analysis these steps build on (file clusters, symbol-level boundaries, risk
 ordering) is in the session's analysis notes; the durable conclusions are kept in this

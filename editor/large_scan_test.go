@@ -21,29 +21,29 @@ func TestScanBudget(t *testing.T) {
 		t.Fatalf("budget of a memory buffer = %+v, want none", got)
 	}
 	var none *scanBudget
-	if !none.take(small, 0) || none.exhausted() {
+	if !none.Take(small, 0) || none.Exhausted() {
 		t.Fatal("a nil budget must allow every line")
 	}
 
 	_, d := openIndexed(t, largeOptions(), strings.Repeat("0123456789\n", 200))
 	b := newScanBudget(d.Buffer)
-	if b.lines != ScanLinesCap || b.bytes != ScanBytesBudget {
+	if b.Lines != ScanLinesCap || b.Bytes != ScanBytesBudget {
 		t.Fatalf("budget = %+v", b)
 	}
-	b = &scanBudget{lines: 3, bytes: 1 << 20}
+	b = &scanBudget{Lines: 3, Bytes: 1 << 20}
 	for i := range 3 {
-		if !b.take(d.Buffer, i) {
+		if !b.Take(d.Buffer, i) {
 			t.Fatalf("line %d refused with lines left", i)
 		}
 	}
-	if b.take(d.Buffer, 3) || !b.exhausted() {
+	if b.Take(d.Buffer, 3) || !b.Exhausted() {
 		t.Fatal("the fourth line must be refused")
 	}
-	b = &scanBudget{lines: 100, bytes: 25}
-	if !b.take(d.Buffer, 0) || !b.take(d.Buffer, 1) || b.take(d.Buffer, 2) {
+	b = &scanBudget{Lines: 100, Bytes: 25}
+	if !b.Take(d.Buffer, 0) || !b.Take(d.Buffer, 1) || b.Take(d.Buffer, 2) {
 		t.Fatal("a budget of 25 bytes holds two lines of 10")
 	}
-	if b.take(d.Buffer, 3) {
+	if b.Take(d.Buffer, 3) {
 		t.Fatal("a spent budget must stay spent")
 	}
 }
@@ -126,28 +126,28 @@ func TestParagraphMotionNeverReadsALine(t *testing.T) {
 	e, d, _ := openVirtual(t, 20_000*width, width)
 	indexAll(t, e)
 	for _, tt := range []struct {
-		name   Action
-		line   int
+		Name   Action
+		Line   int
 		target int
 	}{
-		{name: "move_to_paragraph_down", line: 100},
-		{name: "select_to_paragraph_down", line: 100},
-		{name: "move_to_paragraph_up", line: 15_000},
-		{name: "select_to_paragraph_up", line: 15_000},
+		{Name: "move_to_paragraph_down", Line: 100},
+		{Name: "select_to_paragraph_down", Line: 100},
+		{Name: "move_to_paragraph_up", Line: 15_000},
+		{Name: "select_to_paragraph_up", Line: 15_000},
 	} {
-		if err := e.GotoLine(tt.line, 1); err != nil {
+		if err := e.GotoLine(tt.Line, 1); err != nil {
 			t.Fatal(err)
 		}
 		at, before := d.Cursor, d.Buffer.Stats()
-		if r := e.Do(tt.name, nil); !errors.Is(r.Err, ErrScanLimit) {
-			t.Errorf("Do(%s) = %v, want ErrScanLimit", tt.name, r.Err)
+		if r := e.Do(tt.Name, nil); !errors.Is(r.Err, ErrScanLimit) {
+			t.Errorf("Do(%s) = %v, want ErrScanLimit", tt.Name, r.Err)
 		}
 		after := d.Buffer.Stats()
 		if d.Cursor != at || d.HasSelection() {
-			t.Errorf("%s moved the caret %v -> %v", tt.name, at, d.Cursor)
+			t.Errorf("%s moved the caret %v -> %v", tt.Name, at, d.Cursor)
 		}
 		if after.LineCalls != before.LineCalls || after.DecodedRunes != before.DecodedRunes || after.MaterializedBytes != 0 {
-			t.Errorf("%s read text: %+v -> %+v", tt.name, before, after)
+			t.Errorf("%s read text: %+v -> %+v", tt.Name, before, after)
 		}
 	}
 }
@@ -290,7 +290,7 @@ func TestEditorSmokeVirtual8GB(t *testing.T) {
 	// An action that needs the end of the document waits for the index instead of
 	// reading to it.
 	run(t, e, "move_document_end")
-	if d.large.pending == nil {
+	if d.LargeState().Pending == nil {
 		t.Error("move_document_end did not wait for the index")
 	}
 }
@@ -342,8 +342,8 @@ func TestEveryActionOnALargeDocument(t *testing.T) {
 				if err := d.Buffer.Refusal(); err != nil {
 					t.Errorf("%s (selected %t): refusal left behind: %v", a, selected, err)
 				}
-				if d.planErr != nil {
-					t.Errorf("%s (selected %t): plan error left behind: %v", a, selected, d.planErr)
+				if d.PlanErr != nil {
+					t.Errorf("%s (selected %t): plan error left behind: %v", a, selected, d.PlanErr)
 				}
 				if bound := int64(20 * d.Buffer.Lines()); st.LineCalls > bound {
 					t.Errorf("%s (selected %t): read %d lines, want at most %d", a, selected, st.LineCalls, bound)

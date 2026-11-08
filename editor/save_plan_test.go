@@ -26,64 +26,64 @@ func fileOrEmpty(path string) string {
 func TestPlanSaveStates(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		setup   func(t *testing.T) (*Editor, string)
-		disk    func(t *testing.T, path string) // changes the file before the plan, or nil
-		planErr error                           // what PlanSave returns
+		Disk    func(t *testing.T, path string) // changes the file before the plan, or nil
+		PlanErr error                           // what PlanSave returns
 		runErr  error                           // what ApplySavePlan returns for the run
 		file    string                          // the file's text after the run
 		dirty   bool                            // the document is modified after the run
-		status  string                          // the status after the plan or the run
+		Status  string                          // the status after the plan or the run
 	}{
 		{
-			name:   "clean",
+			Name:   "clean",
 			setup:  func(t *testing.T) (*Editor, string) { return openFixture(t, Options{}, "abc\n") },
 			file:   "abc\n",
-			status: "Saved",
+			Status: "Saved",
 		},
 		{
-			name: "modified",
+			Name: "modified",
 			setup: func(t *testing.T) (*Editor, string) {
 				e, path := openFixture(t, Options{}, "abc\n")
 				typeText(t, e, "x")
 				return e, path
 			},
 			file:   "xabc\n",
-			status: "Saved",
+			Status: "Saved",
 		},
 		{
-			name: "read-only",
+			Name: "read-only",
 			setup: func(t *testing.T) (*Editor, string) {
 				e, path := openFixture(t, Options{}, "abc\n")
 				typeText(t, e, "x")
 				run(t, e, "toggle_read_only")
 				return e, path
 			},
-			planErr: ErrReadOnly,
+			PlanErr: ErrReadOnly,
 			file:    "abc\n",
 			dirty:   true,
-			status:  "read-only",
+			Status:  "read-only",
 		},
 		{
-			name: "untitled",
+			Name: "untitled",
 			setup: func(t *testing.T) (*Editor, string) {
 				e := New(Options{})
 				run(t, e, "new")
 				typeText(t, e, "x")
 				return e, ""
 			},
-			planErr: ErrNoPath,
+			PlanErr: ErrNoPath,
 			dirty:   true,
-			status:  "buffer has no file name",
+			Status:  "buffer has no file name",
 		},
 		{
-			name: "changed on disk",
+			Name: "changed on disk",
 			setup: func(t *testing.T) (*Editor, string) {
 				e, path := openFixture(t, Options{}, "abc\n")
 				typeText(t, e, "x")
 				return e, path
 			},
-			disk: func(t *testing.T, path string) {
+			Disk: func(t *testing.T, path string) {
 				if err := os.WriteFile(path, []byte("other\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -91,28 +91,28 @@ func TestPlanSaveStates(t *testing.T) {
 			runErr: ErrChangedOnDisk,
 			file:   "other\n",
 			dirty:  true,
-			status: "doc.txt changed on disk since it was opened; not saved. Save As keeps your version",
+			Status: "doc.txt changed on disk since it was opened; not saved. Save As keeps your version",
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := tt.setup(t)
-			if tt.disk != nil {
-				tt.disk(t, path)
+			if tt.Disk != nil {
+				tt.Disk(t, path)
 			}
 			before := fileOrEmpty(path)
 
 			p, err := e.PlanSave()
-			if !errors.Is(err, tt.planErr) {
-				t.Fatalf("PlanSave err = %v, want %v", err, tt.planErr)
+			if !errors.Is(err, tt.PlanErr) {
+				t.Fatalf("PlanSave err = %v, want %v", err, tt.PlanErr)
 			}
 			if got := fileOrEmpty(path); got != before {
 				t.Fatalf("PlanSave changed the file to %q, want %q", got, before)
 			}
-			if tt.planErr != nil {
-				if e.Status() != tt.status {
-					t.Fatalf("status after the refused plan = %q, want %q", e.Status(), tt.status)
+			if tt.PlanErr != nil {
+				if e.Status() != tt.Status {
+					t.Fatalf("status after the refused plan = %q, want %q", e.Status(), tt.Status)
 				}
 				return
 			}
@@ -129,8 +129,8 @@ func TestPlanSaveStates(t *testing.T) {
 			if got := e.Active().Modified(); got != tt.dirty {
 				t.Fatalf("modified after the run = %v, want %v", got, tt.dirty)
 			}
-			if e.Status() != tt.status {
-				t.Fatalf("status after the run = %q, want %q", e.Status(), tt.status)
+			if e.Status() != tt.Status {
+				t.Fatalf("status after the run = %q, want %q", e.Status(), tt.Status)
 			}
 		})
 	}
@@ -142,23 +142,23 @@ func TestPlanSaveStates(t *testing.T) {
 func TestPlanSaveAsStates(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		target  func(dir string) string // the path to save to, relative to dir
 		other   bool                    // another tab holds the target path
-		exists  bool                    // the target file exists before the plan
+		Exists  bool                    // the target file exists before the plan
 		force   bool
-		planErr error
+		PlanErr error
 		runErr  error
 		renamed bool // the document takes the target path after the run
 	}{
-		{name: "new file", target: func(dir string) string { return filepath.Join(dir, "new.txt") }, renamed: true},
-		{name: "existing file without force", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, exists: true, runErr: ErrExists},
-		{name: "existing file with force", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, exists: true, force: true, renamed: true},
-		{name: "open in another tab", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, other: true, exists: true, force: true, planErr: ErrAlreadyOpen},
-		{name: "empty path", target: func(string) string { return "" }, planErr: ErrEmptyPath},
+		{Name: "new file", target: func(dir string) string { return filepath.Join(dir, "new.txt") }, renamed: true},
+		{Name: "existing file without force", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, Exists: true, runErr: ErrExists},
+		{Name: "existing file with force", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, Exists: true, force: true, renamed: true},
+		{Name: "open in another tab", target: func(dir string) string { return filepath.Join(dir, "other.txt") }, other: true, Exists: true, force: true, PlanErr: ErrAlreadyOpen},
+		{Name: "empty path", target: func(string) string { return "" }, PlanErr: ErrEmptyPath},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			src := filepath.Join(dir, "doc.txt")
@@ -166,7 +166,7 @@ func TestPlanSaveAsStates(t *testing.T) {
 				t.Fatal(err)
 			}
 			target := tt.target(dir)
-			if tt.exists {
+			if tt.Exists {
 				if err := os.WriteFile(target, []byte("keep\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -184,10 +184,10 @@ func TestPlanSaveAsStates(t *testing.T) {
 			typeText(t, e, "x")
 
 			p, err := e.PlanSaveAs(target, tt.force)
-			if !errors.Is(err, tt.planErr) {
-				t.Fatalf("PlanSaveAs err = %v, want %v", err, tt.planErr)
+			if !errors.Is(err, tt.PlanErr) {
+				t.Fatalf("PlanSaveAs err = %v, want %v", err, tt.PlanErr)
 			}
-			if tt.planErr == nil {
+			if tt.PlanErr == nil {
 				err = e.ApplySavePlan(p, p.Run())
 				if !errors.Is(err, tt.runErr) {
 					t.Fatalf("ApplySavePlan err = %v, want %v", err, tt.runErr)
@@ -196,13 +196,13 @@ func TestPlanSaveAsStates(t *testing.T) {
 			if tt.renamed != (e.Active().Path == target) {
 				t.Fatalf("document path = %q after Save As to %q, want renamed = %v", e.Active().Path, target, tt.renamed)
 			}
-			if tt.runErr == nil && tt.planErr == nil {
+			if tt.runErr == nil && tt.PlanErr == nil {
 				if got := readFile(t, target); got != "xabc\n" {
 					t.Fatalf("target after Save As = %q, want the typed text", got)
 				}
 				return
 			}
-			if tt.exists {
+			if tt.Exists {
 				if got := readFile(t, target); got != "keep\n" {
 					t.Fatalf("refused Save As changed the target to %q", got)
 				}

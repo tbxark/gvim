@@ -12,9 +12,9 @@ import (
 func TestSaveTrimsTrailingWhitespace(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		content string
-		want    string
+		Want    string
 	}{
 		{"spaces and tabs", "foo  \n\tbar\t \nbaz", "foo\n\tbar\nbaz"},
 		{"whitespace-only line becomes empty", "   \nx", "\nx"},
@@ -22,12 +22,12 @@ func TestSaveTrimsTrailingWhitespace(t *testing.T) {
 		{"CRLF file", "a  \r\nb\t\r\n", "a\r\nb\r\n"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{TrimTrailingWhitespace: true}, tt.content)
 			run(t, e, "save")
-			if got := readFile(t, path); got != tt.want {
-				t.Fatalf("saved %q, want %q", got, tt.want)
+			if got := readFile(t, path); got != tt.Want {
+				t.Fatalf("saved %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -45,9 +45,9 @@ func TestSaveWithoutTrimKeepsTrailingWhitespace(t *testing.T) {
 func TestSaveEnsuresFinalNewline(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		content string
-		want    string
+		Want    string
 	}{
 		{"adds the newline", "abc", "abc\n"},
 		{"keeps an existing newline", "abc\n", "abc\n"},
@@ -56,12 +56,12 @@ func TestSaveEnsuresFinalNewline(t *testing.T) {
 		{"CRLF file gets a CRLF", "a\r\nb", "a\r\nb\r\n"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{EnsureFinalNewline: true}, tt.content)
 			run(t, e, "save")
-			if got := readFile(t, path); got != tt.want {
-				t.Fatalf("saved %q, want %q", got, tt.want)
+			if got := readFile(t, path); got != tt.Want {
+				t.Fatalf("saved %q, want %q", got, tt.Want)
 			}
 		})
 	}

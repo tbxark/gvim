@@ -5,11 +5,11 @@ import "testing"
 func TestResolveIndentGuide(t *testing.T) {
 	yes, no := true, false
 	tests := []struct {
-		name     string
+		Name     string
 		global   string
 		override *bool
 		allows   bool
-		want     string
+		Want     string
 	}{
 		{"global none", GuidesNone, nil, true, GuidesNone},
 		{"empty reads as none", "", nil, true, GuidesNone},
@@ -23,9 +23,9 @@ func TestResolveIndentGuide(t *testing.T) {
 		{"buffer off", GuidesAll, &no, true, GuidesNone},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ResolveIndentGuide(tc.global, tc.override, tc.allows); got != tc.want {
-				t.Errorf("ResolveIndentGuide(%q, %v, %v) = %q, want %q", tc.global, tc.override, tc.allows, got, tc.want)
+		t.Run(tc.Name, func(t *testing.T) {
+			if got := ResolveIndentGuide(tc.global, tc.override, tc.allows); got != tc.Want {
+				t.Errorf("ResolveIndentGuide(%q, %v, %v) = %q, want %q", tc.global, tc.override, tc.allows, got, tc.Want)
 			}
 		})
 	}

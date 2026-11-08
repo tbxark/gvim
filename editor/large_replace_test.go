@@ -48,7 +48,7 @@ func TestLargeReplaceMatchNoMatchAndReadOnly(t *testing.T) {
 	}
 	assertUntouched(t, d, version)
 
-	d.readOnly = true
+	d.SetReadOnly(true)
 	if _, err := e.ReplaceMatch(search.Query{Text: "line"}, "x", stale); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("ReplaceMatch in a read-only document = %v, want ErrReadOnly", err)
 	}
@@ -58,28 +58,28 @@ func TestLargeReplaceMatchNoMatchAndReadOnly(t *testing.T) {
 func TestLargeReplaceMatchRefusals(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		content string
-		line    int
+		Line    int
 		wantErr error
-		want    string // part of the status
+		Want    string // part of the status
 	}{
 		{"line not valid UTF-8", withHead("ok\nfoo \xff bar\nlast\n"), headLines + 1, buffer.ErrInvalidUTF8, "not valid UTF-8"},
 		{"line too long", withHead("ok\n" + "foo " + strings.Repeat("y", 200) + "\nlast\n"), headLines + 1, buffer.ErrLineTooLong, "not editable"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, d := openIndexed(t, largeOptions(), tt.content)
 			version := d.Buffer.Version()
-			m := search.Match{Start: buffer.Pos{Line: tt.line}, End: buffer.Pos{Line: tt.line, Col: 3}}
+			m := search.Match{Start: buffer.Pos{Line: tt.Line}, End: buffer.Pos{Line: tt.Line, Col: 3}}
 			d.Cursor = m.Start
 			_, err := e.ReplaceMatch(search.Query{Text: "foo"}, "x", m)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("ReplaceMatch = %v, want %v", err, tt.wantErr)
 			}
-			if !strings.Contains(e.Status(), tt.want) {
-				t.Errorf("status = %q, want it to contain %q", e.Status(), tt.want)
+			if !strings.Contains(e.Status(), tt.Want) {
+				t.Errorf("status = %q, want it to contain %q", e.Status(), tt.Want)
 			}
 			assertUntouched(t, d, version)
 		})

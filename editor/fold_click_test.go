@@ -10,9 +10,9 @@ import (
 func TestToggleFoldAtLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
+		Name       string
 		caret      buffer.Pos
-		line       int
+		Line       int
 		toggles    int
 		wantDid    bool
 		wantFolded []int
@@ -24,13 +24,13 @@ func TestToggleFoldAtLine(t *testing.T) {
 		{"a caret inside the body moves to the fold start", caretPos(1, 2), 0, 1, true, []int{0}, caretPos(0, 1)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, _ := openFixture(t, Options{}, foldText)
 			e.SetCursor(tt.caret, false)
 			did := false
 			for range tt.toggles {
-				did = e.ToggleFoldAt(tt.line)
+				did = e.ToggleFoldAt(tt.Line)
 			}
 			if did != tt.wantDid {
 				t.Fatalf("ToggleFoldAt reported %v, want %v", did, tt.wantDid)

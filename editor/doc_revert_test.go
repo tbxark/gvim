@@ -24,45 +24,45 @@ func openRevertable(t *testing.T, disk string) (*Editor, string) {
 func TestRevertReloadsFromDisk(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name         string
-		edit         bool           // type "x" at the start after opening
+		Name         string
+		Edit         bool           // type "x" at the start after opening
 		newDisk      string         // the file content after opening, if the file changes
-		args         map[string]any // arguments of revert
+		Args         map[string]any // arguments of revert
 		wantErr      error
 		wantText     string
 		wantModified bool
 	}{
 		{
-			name:     "an unmodified buffer reloads the changed file",
+			Name:     "an unmodified buffer reloads the changed file",
 			newDisk:  "b\n",
 			wantText: "b\n",
 		},
 		{
-			name:         "a modified buffer is refused without force and keeps its edit",
-			edit:         true,
+			Name:         "a modified buffer is refused without force and keeps its edit",
+			Edit:         true,
 			newDisk:      "b\n",
 			wantErr:      ErrUnsaved,
 			wantText:     "xa\n",
 			wantModified: true,
 		},
 		{
-			name:     "a modified buffer reloads with force",
-			edit:     true,
-			args:     map[string]any{"force": true},
+			Name:     "a modified buffer reloads with force",
+			Edit:     true,
+			Args:     map[string]any{"force": true},
 			wantText: "a\n",
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openRevertable(t, "a\n")
-			if tt.edit {
+			if tt.Edit {
 				typeText(t, e, "x")
 			}
 			if tt.newDisk != "" {
 				putFile(t, path, tt.newDisk)
 			}
-			r := e.Do("revert", tt.args)
+			r := e.Do("revert", tt.Args)
 			if !errors.Is(r.Err, tt.wantErr) {
 				t.Fatalf("revert err = %v, want %v", r.Err, tt.wantErr)
 			}
@@ -138,13 +138,13 @@ func TestRevertOfTheEditorsOwnSaveKeepsTheStatus(t *testing.T) {
 	if d.Modified() {
 		t.Fatal("document is modified after the save")
 	}
-	status := d.status
+	status := d.Status
 	plan := e.PlanRevertPath(path)
 	if err := e.ApplyRevert(plan, RunRevert(plan)); err != nil {
 		t.Fatalf("ApplyRevert: %v", err)
 	}
-	if d.status != status {
-		t.Errorf("status = %q, want %q", d.status, status)
+	if d.Status != status {
+		t.Errorf("status = %q, want %q", d.Status, status)
 	}
 	if got := d.Buffer.Text(); got != "xa\n" {
 		t.Errorf("text = %q", got)
@@ -163,10 +163,10 @@ func TestRevertOfARewrittenFileWithTheSameTextSaysReverted(t *testing.T) {
 	if err := e.ApplyRevert(plan, RunRevert(plan)); err != nil {
 		t.Fatalf("ApplyRevert: %v", err)
 	}
-	if d.status != "Reverted a.txt" {
-		t.Errorf("status = %q", d.status)
+	if d.Status != "Reverted a.txt" {
+		t.Errorf("status = %q", d.Status)
 	}
-	if !d.disk.sameAs(diskStateOf(path)) {
+	if !d.Disk.SameAs(diskStateOf(path)) {
 		t.Error("the disk state was not adopted")
 	}
 }

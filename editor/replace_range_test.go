@@ -13,69 +13,69 @@ import (
 func TestReplaceMatchesRespectsTheSearchRange(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
-		sel      bool       // find_in_selection runs on the selection from anchor to head
-		anchor   buffer.Pos // selection anchor, when sel is set
-		head     buffer.Pos // selection head, when sel is set
+		Name     string
+		Text     string
+		Sel      bool       // find_in_selection runs on the selection from anchor to head
+		Anchor   buffer.Pos // selection anchor, when sel is set
+		Head     buffer.Pos // selection head, when sel is set
 		repl     string
 		wantN    int
 		wantText string
 	}{
 		{
-			name:     "no range replaces every match",
-			text:     "a\na\na\n",
+			Name:     "no range replaces every match",
+			Text:     "a\na\na\n",
 			repl:     "b",
 			wantN:    3,
 			wantText: "b\nb\nb\n",
 		},
 		{
-			name:     "find in selection replaces only the match inside it",
-			text:     "a\na\na\n",
-			sel:      true,
-			anchor:   buffer.Pos{Line: 1},
-			head:     buffer.Pos{Line: 1, Col: 1},
+			Name:     "find in selection replaces only the match inside it",
+			Text:     "a\na\na\n",
+			Sel:      true,
+			Anchor:   buffer.Pos{Line: 1},
+			Head:     buffer.Pos{Line: 1, Col: 1},
 			repl:     "b",
 			wantN:    1,
 			wantText: "a\nb\na\n",
 		},
 		{
-			name:     "every match inside the range is replaced, and the rest is kept",
-			text:     "a a\na\n",
-			sel:      true,
-			anchor:   buffer.Pos{},
-			head:     buffer.Pos{Col: 3},
+			Name:     "every match inside the range is replaced, and the rest is kept",
+			Text:     "a a\na\n",
+			Sel:      true,
+			Anchor:   buffer.Pos{},
+			Head:     buffer.Pos{Col: 3},
 			repl:     "b",
 			wantN:    2,
 			wantText: "b b\na\n",
 		},
 		{
-			name:     "a replacement that adds lines keeps the range of the other matches",
-			text:     "a a\na\n",
-			sel:      true,
-			anchor:   buffer.Pos{},
-			head:     buffer.Pos{Col: 3},
+			Name:     "a replacement that adds lines keeps the range of the other matches",
+			Text:     "a a\na\n",
+			Sel:      true,
+			Anchor:   buffer.Pos{},
+			Head:     buffer.Pos{Col: 3},
 			repl:     "x\ny",
 			wantN:    2,
 			wantText: "x\ny x\ny\na\n",
 		},
 		{
-			name:     "a range with no match changes nothing",
-			text:     "a\nb\na\n",
-			sel:      true,
-			anchor:   buffer.Pos{Line: 1},
-			head:     buffer.Pos{Line: 1, Col: 1},
+			Name:     "a range with no match changes nothing",
+			Text:     "a\nb\na\n",
+			Sel:      true,
+			Anchor:   buffer.Pos{Line: 1},
+			Head:     buffer.Pos{Line: 1, Col: 1},
 			repl:     "c",
 			wantN:    0,
 			wantText: "a\nb\na\n",
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			if tt.sel {
-				e.SelectRange(tt.anchor, tt.head)
+			e := docWith(Options{}, tt.Text)
+			if tt.Sel {
+				e.SelectRange(tt.Anchor, tt.Head)
 				run(t, e, "find_in_selection")
 			}
 			n, err := e.ReplaceMatches(search.Query{Text: "a", CaseSensitive: true}, tt.repl)

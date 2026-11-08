@@ -20,11 +20,11 @@ func TestViActionsAreListed(t *testing.T) {
 func TestViMoves(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		text   string
-		at     buffer.Pos
+		Name   string
+		Text   string
+		At     buffer.Pos
 		action Action
-		want   buffer.Pos
+		Want   buffer.Pos
 	}{
 		{"left in the line", "abc\ndef", buffer.Pos{Line: 0, Col: 2}, "move_left_in_line", buffer.Pos{Line: 0, Col: 1}},
 		{"left stops at the line start", "abc\ndef", buffer.Pos{Line: 1, Col: 0}, "move_left_in_line", buffer.Pos{Line: 1, Col: 0}},
@@ -44,13 +44,13 @@ func TestViMoves(t *testing.T) {
 		{"up on the first line stays", "abc\ndef", buffer.Pos{Line: 0, Col: 2}, "vi_move_up", buffer.Pos{Line: 0, Col: 2}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			e.SetCursor(tt.at, false)
+			e := docWith(Options{}, tt.Text)
+			e.SetCursor(tt.At, false)
 			run(t, e, tt.action)
-			if got := e.Active().Cursor; got != tt.want {
-				t.Fatalf("caret = %+v, want %+v", got, tt.want)
+			if got := e.Active().Cursor; got != tt.Want {
+				t.Fatalf("caret = %+v, want %+v", got, tt.Want)
 			}
 		})
 	}
@@ -64,7 +64,7 @@ func TestViVerticalKeepsTheWantedColumn(t *testing.T) {
 	e.SetCursor(buffer.Pos{Line: 0, Col: 4}, false)
 	steps := []struct {
 		action Action
-		want   buffer.Pos
+		Want   buffer.Pos
 	}{
 		{"vi_move_down", buffer.Pos{Line: 1, Col: 1}},
 		{"vi_move_down", buffer.Pos{Line: 2, Col: 4}},
@@ -73,8 +73,8 @@ func TestViVerticalKeepsTheWantedColumn(t *testing.T) {
 	}
 	for _, s := range steps {
 		run(t, e, s.action)
-		if got := e.Active().Cursor; got != s.want {
-			t.Fatalf("after %s the caret is %+v, want %+v", s.action, got, s.want)
+		if got := e.Active().Cursor; got != s.Want {
+			t.Fatalf("after %s the caret is %+v, want %+v", s.action, got, s.Want)
 		}
 	}
 }
@@ -82,9 +82,9 @@ func TestViVerticalKeepsTheWantedColumn(t *testing.T) {
 func TestToggleCase(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		text       string
-		at         placed
+		Name       string
+		Text       string
+		At         placed
 		wantText   string
 		wantCursor buffer.Pos
 	}{
@@ -96,15 +96,15 @@ func TestToggleCase(t *testing.T) {
 		{"an empty line", "\ncd", placed{caret: buffer.Pos{Line: 0, Col: 0}}, "\ncd", buffer.Pos{Line: 0, Col: 0}},
 		{
 			"a selection is swapped as a whole", "Hello World",
-			placed{sel: &buffer.Selection{Anchor: buffer.Pos{Col: 0}, Head: buffer.Pos{Col: 5}}},
+			placed{Sel: &buffer.Selection{Anchor: buffer.Pos{Col: 0}, Head: buffer.Pos{Col: 5}}},
 			"hELLO World", buffer.Pos{Col: 5},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			tt.at.apply(e)
+			e := docWith(Options{}, tt.Text)
+			tt.At.apply(e)
 			run(t, e, "toggle_case")
 			d := e.Active()
 			if got := text(e); got != tt.wantText {
@@ -123,29 +123,29 @@ func TestToggleCase(t *testing.T) {
 func TestToggleCaseAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		carets   []caret
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{"two lines", "ab\ncd", []caret{at(0, 0), at(1, 1)}, "Ab\ncD", wantCarets(plain(0, 1), plain(1, 2))},
 		{"a digit caret moves with the edits before it", "a1 b", []caret{at(0, 0), at(0, 1)}, "A1 b", wantCarets(plain(0, 1), plain(0, 2))},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := multiDoc(tt.text, tt.carets...)
+			e := multiDoc(tt.Text, tt.carets...)
 			run(t, e, "toggle_case")
 			if got := text(e); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %s, want %s", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %s, want %s", got, tt.Want)
 			}
 			run(t, e, "undo")
-			if got := text(e); got != tt.text {
-				t.Fatalf("text after one undo = %q, want %q", got, tt.text)
+			if got := text(e); got != tt.Text {
+				t.Fatalf("text after one undo = %q, want %q", got, tt.Text)
 			}
 		})
 	}

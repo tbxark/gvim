@@ -4,10 +4,6 @@ import (
 	"github.com/tbxark/gvim/buffer"
 )
 
-// Soft wrap. The editor does not know the pane width, so the UI tells it where a
-// wrapped line breaks (SetRowMapper). With line wrap on, Up, Down, Home and End
-// then move by display row, as Fresh does.
-
 // RowMapper returns the rune column at which each display row of a buffer line
 // starts. The first entry is 0 and the entries rise. It returns nil, or one entry,
 // for a line that is not wrapped, and always when line wrap is off.
@@ -51,31 +47,6 @@ func (e *Editor) rowStartsAt(line, col int) (starts []int, tall bool) {
 	return e.rowStarts(line), false
 }
 
-// rowOf returns the index of the row of starts that holds column col. A column at
-// the start of a row belongs to that row. Nil starts is one row.
-func rowOf(starts []int, col int) int {
-	r := 0
-	for i, s := range starts {
-		if s <= col {
-			r = i
-		}
-	}
-	return r
-}
-
-// rowBounds returns the first column of row r and the last column the caret may
-// take on it. The caret stays on a row that is not the last, so it may not take
-// the start of the next row. The last row ends at the end of the line.
-func rowBounds(starts []int, r, lineLen int) (first, last int) {
-	if starts == nil {
-		return 0, lineLen
-	}
-	if r+1 < len(starts) {
-		return starts[r], starts[r+1] - 1
-	}
-	return starts[r], lineLen
-}
-
 // visualVertical moves from p one display row up (dir -1) or down (+1). It reports
 // false when neither the row of p nor the target row is a wrapped line, or when p
 // is already on the first or last row of the text, and the buffer-line motion
@@ -104,44 +75,18 @@ func (e *Editor) visualVertical(d *Document, from buffer.Pos, dir int) (buffer.P
 		return buffer.Pos{}, false
 	}
 	tab := e.tabSizeOf(d)
-	if d.want < 0 {
+	if d.Want < 0 {
 		first, _ := rowBounds(starts, rowOf(starts, from.Col), b.LineLen(from.Line))
 		if tall {
 			// Counted from the row start: the line is not walked from its own.
-			d.want = cellsFrom(b, from.Line, first, from.Col, 0, tab)
+			d.Want = cellsFrom(b, from.Line, first, from.Col, 0, tab)
 		} else {
-			d.want = cellColumn(b, from, tab) - cellColumn(b, buffer.Pos{Line: from.Line, Col: first}, tab)
+			d.Want = cellColumn(b, from, tab) - cellColumn(b, buffer.Pos{Line: from.Line, Col: first}, tab)
 		}
 	}
 	first, last := rowBounds(target, row, b.LineLen(line))
-	col := colAtCellFrom(b, line, first, d.want, last, tab, targetTall)
+	col := colAtCellFrom(b, line, first, d.Want, last, tab, targetTall)
 	return buffer.Pos{Line: line, Col: min(col, last)}, true
-}
-
-// colAtCellFrom returns the column of the first cluster boundary at or after
-// startCol whose display column is at least want cells past startCol, stopping at
-// limit. The display column of startCol is counted from the start of the line, so a tab
-// in the row runs to its stop, unless fromRow is set, for a row of a very long line, when it
-// is counted from startCol, which is as far as a tab stop is known.
-func colAtCellFrom(b *buffer.Buffer, line, startCol, want, limit, tab int, fromRow bool) int {
-	base := 0
-	if !fromRow {
-		base = cellsFrom(b, line, 0, startCol, 0, tab)
-	}
-	cells := base
-	w := newClusterWalker(b, line, startCol)
-	for w.col < limit && cells-base < want {
-		if k := w.skipASCII(min(limit-w.col, want-(cells-base))); k > 0 {
-			cells += k
-			continue
-		}
-		cluster, _, cw, ok := w.next()
-		if !ok {
-			break
-		}
-		cells += clusterCells(cluster, cw, cells, tab)
-	}
-	return w.col
 }
 
 // visualLineStart is Home on a wrapped line: the start of the caret's row, or the
@@ -189,7 +134,7 @@ func (e *Editor) pageInTallLine(d *Document, dir int, extend bool) bool {
 		if !ok {
 			break
 		}
-		d.move(to, extend)
+		d.Move(to, extend)
 		moved = true
 	}
 	return moved

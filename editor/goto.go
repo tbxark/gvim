@@ -48,11 +48,11 @@ func (e *Editor) gotoLine(line, col int, selecting bool) error {
 		return err
 	}
 	d := e.Active()
-	if d.large != nil {
+	if d.LargeState() != nil {
 		// A new goto replaces the one that waits for the index.
-		d.large.pending = nil
+		d.LargeState().Pending = nil
 		if info := d.Index(); line > info.Lines && !info.Complete {
-			d.large.pending = &pending{kind: pendingGoto, line: line, col: col, selecting: selecting, from: jumpEntryOf(d)}
+			d.LargeState().Pending = &pending{Kind: pendingGoto, Line: line, Col: col, Selecting: selecting, From: jumpEntryOf(d)}
 			e.setStatus(scanningStatus(info))
 			return nil
 		}
@@ -67,8 +67,8 @@ func (e *Editor) gotoLine(line, col int, selecting bool) error {
 // selecting set and mark mode on, the move extends the selection from its anchor.
 func (e *Editor) gotoIn(d *Document, line, col int, selecting bool) {
 	target := buffer.Pos{Line: min(line, d.Buffer.Lines()) - 1, Col: max(col, 1) - 1}
-	d.want = -1
-	d.move(d.Buffer.Clamp(target), selecting && e.marking(d))
+	d.Want = -1
+	d.Move(d.Buffer.Clamp(target), selecting && e.marking(d))
 	e.ensureVisibleForJump(d)
 }
 

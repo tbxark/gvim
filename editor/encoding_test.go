@@ -10,10 +10,10 @@ import (
 func TestNonUTF8FilesOpenAndSaveByteForByte(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
+		Name  string
 		file  string // the bytes on disk
-		text  string // the buffer text after open
-		label string // Encoding() after open
+		Text  string // the buffer text after open
+		Label string // Encoding() after open
 	}{
 		{"windows-1252 with CRLF", "caf\xe9 \x80\r\nline\r\n", "café €\nline\n", "Windows-1252"},
 		{"windows-1252 without a break", "na\xefve", "naïve", "Windows-1252"},
@@ -23,15 +23,15 @@ func TestNonUTF8FilesOpenAndSaveByteForByte(t *testing.T) {
 		{"UTF-16BE without BOM", "\x00c\x00a\x00f\x00\xe9\x00\n", "caf\u00e9\n", "UTF-16 BE"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{}, tt.file)
 			d := e.Active()
-			if got := d.Buffer.Text(); got != tt.text {
-				t.Fatalf("text = %q, want %q", got, tt.text)
+			if got := d.Buffer.Text(); got != tt.Text {
+				t.Fatalf("text = %q, want %q", got, tt.Text)
 			}
-			if got := d.Encoding(); got != tt.label {
-				t.Fatalf("Encoding() = %q, want %q", got, tt.label)
+			if got := d.Encoding(); got != tt.Label {
+				t.Fatalf("Encoding() = %q, want %q", got, tt.Label)
 			}
 			run(t, e, "save")
 			if got := readFile(t, path); got != tt.file {
@@ -87,33 +87,33 @@ func TestSaveRefusesTextTheEncodingCannotHold(t *testing.T) {
 func TestSetEncodingChangesTheSaveEncoding(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
+		Name  string
 		file  string // the bytes on disk
-		text  string // the buffer text after open, which is the decoded file
-		codec string
-		want  string // the bytes on disk after save
-		label string // Encoding() after set_encoding
+		Text  string // the buffer text after open, which is the decoded file
+		Codec string
+		Want  string // the bytes on disk after save
+		Label string // Encoding() after set_encoding
 	}{
 		{"windows-1252 to UTF-8", "caf\xe9", "café", "utf-8", "caf\xc3\xa9", "UTF-8"},
 		{"ASCII to UTF-8 with BOM", "abc", "abc", "utf-8-bom", "\xef\xbb\xbfabc", "UTF-8 BOM"},
 		{"ASCII to UTF-16LE", "abc", "abc", "utf-16le", "\xff\xfea\x00b\x00c\x00", "UTF-16 LE"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{}, tt.file)
-			if r := e.Do("set_encoding", map[string]any{"name": tt.codec}); r.Err != nil {
+			if r := e.Do("set_encoding", map[string]any{"name": tt.Codec}); r.Err != nil {
 				t.Fatalf("set_encoding: %v", r.Err)
 			}
-			if got := e.Active().Encoding(); got != tt.label {
-				t.Fatalf("Encoding() = %q, want %q", got, tt.label)
+			if got := e.Active().Encoding(); got != tt.Label {
+				t.Fatalf("Encoding() = %q, want %q", got, tt.Label)
 			}
-			if got := e.Active().Buffer.Text(); got != tt.text {
-				t.Fatalf("set_encoding changed the text to %q, want %q", got, tt.text)
+			if got := e.Active().Buffer.Text(); got != tt.Text {
+				t.Fatalf("set_encoding changed the text to %q, want %q", got, tt.Text)
 			}
 			run(t, e, "save")
-			if got := readFile(t, path); got != tt.want {
-				t.Fatalf("saved %q, want %q", got, tt.want)
+			if got := readFile(t, path); got != tt.Want {
+				t.Fatalf("saved %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -122,9 +122,9 @@ func TestSetEncodingChangesTheSaveEncoding(t *testing.T) {
 func TestEncodingActionsRefuseBadArguments(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		action  Action
-		args    map[string]any
+		Args    map[string]any
 		wantErr error // nil means any error will do
 	}{
 		{"set_encoding unknown name", "set_encoding", map[string]any{"name": "klingon"}, ErrUnknownEncoding},
@@ -134,10 +134,10 @@ func TestEncodingActionsRefuseBadArguments(t *testing.T) {
 		{"reload_with_encoding missing name", "reload_with_encoding", nil, nil},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, _ := openFixture(t, Options{}, "abc")
-			r := e.Do(tt.action, tt.args)
+			r := e.Do(tt.action, tt.Args)
 			if r.Err == nil {
 				t.Fatal("Do succeeded, want an error")
 			}
@@ -235,9 +235,9 @@ func TestShiftJISFileWithWindows1252UndefinedBytesOpens(t *testing.T) {
 	// Each file is Shift_JIS text with one character whose lead byte is undefined
 	// in windows-1252. The detected encoding, windows-1252, cannot decode it.
 	tests := []struct {
-		name string
+		Name string
 		file string // the bytes on disk
-		text string // the buffer text after open
+		Text string // the buffer text after open
 	}{
 		{"lead byte 0x81", "\x93\xfa\x96\x7b\x81\x40", "日本　"},
 		{"lead byte 0x8d", "\x93\xfa\x96\x7b\x8d\x40", "日本后"},
@@ -246,12 +246,12 @@ func TestShiftJISFileWithWindows1252UndefinedBytesOpens(t *testing.T) {
 		{"lead byte 0x9d", "\x93\xfa\x96\x7b\x9d\x40", "日本戞"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{}, tt.file)
 			d := e.Active()
-			if got := d.Buffer.Text(); got != tt.text {
-				t.Fatalf("text = %q, want %q", got, tt.text)
+			if got := d.Buffer.Text(); got != tt.Text {
+				t.Fatalf("text = %q, want %q", got, tt.Text)
 			}
 			if got := d.Encoding(); got != "Shift-JIS" {
 				t.Fatalf("Encoding() = %q, want Shift-JIS", got)
@@ -281,33 +281,33 @@ func TestUndecodableWindows1252FileStillRefused(t *testing.T) {
 func TestUTF8BOMIsWrittenOnceWhenTheEncodingIsSet(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
+		Name  string
 		file  string // the bytes on disk
 		setup func(t *testing.T, e *Editor)
-		text  string // the buffer text before set_encoding
+		Text  string // the buffer text before set_encoding
 	}{
 		{
-			name: "a UTF-8 file that starts with a BOM",
+			Name: "a UTF-8 file that starts with a BOM",
 			file: "\xef\xbb\xbfabc\n",
-			text: "abc\n",
+			Text: "abc\n",
 		},
 		{
-			name: "a U+FEFF typed at the start of a plain UTF-8 file",
+			Name: "a U+FEFF typed at the start of a plain UTF-8 file",
 			file: "abc\n",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 0), false)
 				typeKey(t, e, "\ufeff")
 			},
-			text: "\ufeffabc\n",
+			Text: "\ufeffabc\n",
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{}, tt.file)
 			setCaretsAfter(t, e, tt.setup)
-			if got := e.Active().Buffer.Text(); got != tt.text {
-				t.Fatalf("text before set_encoding = %q, want %q", got, tt.text)
+			if got := e.Active().Buffer.Text(); got != tt.Text {
+				t.Fatalf("text before set_encoding = %q, want %q", got, tt.Text)
 			}
 			if r := e.Do("set_encoding", map[string]any{"name": "utf-8-bom"}); r.Err != nil {
 				t.Fatalf("set_encoding: %v", r.Err)

@@ -28,17 +28,17 @@ func navLine(e *Editor) int { return e.Active().Cursor.Line }
 func TestNavigateBackAndForwardFollowJumps(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		steps    func(t *testing.T, e *Editor)
 		wantLine int
 	}{
 		{
-			name:     "navigate_back returns from a go-to-line",
+			Name:     "navigate_back returns from a go-to-line",
 			steps:    func(t *testing.T, e *Editor) { navGoto(t, e, 2); navDo(t, e, "navigate_back") },
 			wantLine: 0,
 		},
 		{
-			name: "navigate_forward returns after a back",
+			Name: "navigate_forward returns after a back",
 			steps: func(t *testing.T, e *Editor) {
 				navGoto(t, e, 2)
 				navDo(t, e, "navigate_back")
@@ -47,17 +47,17 @@ func TestNavigateBackAndForwardFollowJumps(t *testing.T) {
 			wantLine: 2,
 		},
 		{
-			name:     "navigate_back with no history does nothing",
+			Name:     "navigate_back with no history does nothing",
 			steps:    func(t *testing.T, e *Editor) { navDo(t, e, "navigate_back") },
 			wantLine: 0,
 		},
 		{
-			name:     "navigate_forward at the end does nothing",
+			Name:     "navigate_forward at the end does nothing",
 			steps:    func(t *testing.T, e *Editor) { navGoto(t, e, 2); navDo(t, e, "navigate_forward") },
 			wantLine: 2,
 		},
 		{
-			name: "a new jump drops the forward history",
+			Name: "a new jump drops the forward history",
 			steps: func(t *testing.T, e *Editor) {
 				navGoto(t, e, 3)
 				navGoto(t, e, 6)
@@ -69,7 +69,7 @@ func TestNavigateBackAndForwardFollowJumps(t *testing.T) {
 			wantLine: 9,
 		},
 		{
-			name: "two backs return to the first place",
+			Name: "two backs return to the first place",
 			steps: func(t *testing.T, e *Editor) {
 				navGoto(t, e, 2)
 				navGoto(t, e, 5)
@@ -79,7 +79,7 @@ func TestNavigateBackAndForwardFollowJumps(t *testing.T) {
 			wantLine: 0,
 		},
 		{
-			name: "navigate_back undoes a bookmark jump",
+			Name: "navigate_back undoes a bookmark jump",
 			steps: func(t *testing.T, e *Editor) {
 				navGoto(t, e, 5)
 				if r := e.Do("set_bookmark", slotArgs("1")); r.Err != nil {
@@ -95,7 +95,7 @@ func TestNavigateBackAndForwardFollowJumps(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withDoc(numbered(10))
 			tt.steps(t, e)

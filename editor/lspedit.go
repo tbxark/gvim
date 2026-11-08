@@ -3,16 +3,7 @@ package editor
 import (
 	"errors"
 	"fmt"
-
-	"github.com/tbxark/gvim/buffer"
 )
-
-// LSPEdit replaces the text from From up to To with Text. Both positions are
-// rune positions, 0-based, as buffer.Pos counts them. From equal to To inserts.
-type LSPEdit struct {
-	From, To buffer.Pos
-	Text     string
-}
 
 // ErrNotOpen is returned by ApplyLSPEdits for a path that no open document has.
 var ErrNotOpen = errors.New("document is not open")
@@ -28,7 +19,7 @@ func (e *Editor) ApplyLSPEdits(path string, edits []LSPEdit) error {
 	if d == nil {
 		return fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
-	return d.applyEditList(edits, EditOptions{Cursor: CursorMap}, true)
+	return d.ApplyEditList(edits, EditOptions{Cursor: CursorMap}, true)
 }
 
 // lspDocAt returns the open document whose path is path, or nil.

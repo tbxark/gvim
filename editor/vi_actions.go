@@ -1,40 +1,8 @@
 package editor
 
 import (
-	"unicode"
-
 	"github.com/tbxark/gvim/buffer"
 )
-
-// The actions of this file are written for the vi_mode plugin (AMENDMENTS C15). They are
-// plugin-facing: they have no palette row and no menu entry, and no default key. A plugin
-// runs them with gvim.command.run, and they show in gvim.command.actions().
-//
-//	move_left_in_line   one character left; never crosses to the previous line
-//	move_right_in_line  one character right; never past the last character of the line
-//	vi_move_up          like move_up, but the caret stays on a character (vi's k)
-//	vi_move_down        like move_down, but the caret stays on a character (vi's j)
-//	toggle_case         the case of the character at the caret (or of the selection)
-//
-// toggle_case changes text, so it is in textChanging (readonly.go).
-
-// lastCharCol returns the column of the last character of line, or 0 for an empty line.
-func lastCharCol(b *buffer.Buffer, line int) int {
-	n := b.LineLen(line)
-	if n == 0 {
-		return 0
-	}
-	return prevBoundary(b, line, n)
-}
-
-// onLastChar moves p back to the last character of its line when it is past it, which
-// is where a vertical move leaves the caret on a shorter line.
-func onLastChar(b *buffer.Buffer, p buffer.Pos) buffer.Pos {
-	if last := lastCharCol(b, p.Line); p.Col > last {
-		p.Col = last
-	}
-	return p
-}
 
 var (
 	motionLeftInLine = func(_ *Editor, d *Document, _ bool) buffer.Pos {
@@ -79,16 +47,6 @@ func (e *Editor) viVertical(d *Document, dir int) buffer.Pos {
 	return onLastChar(d.Buffer, e.verticalTarget(d, from, line))
 }
 
-// viLastLine is the last line vi can be on. The empty line after the final line break of
-// the text is not a line of the file.
-func viLastLine(b *buffer.Buffer) int {
-	last := b.Lines() - 1
-	if last > 0 && b.LineLen(last) == 0 {
-		last--
-	}
-	return last
-}
-
 // registerViHandlers adds the vi_mode actions to h.
 func registerViHandlers(h map[Action]handler) {
 	h["move_left_in_line"] = moveHandler(motionLeftInLine, false, false)
@@ -96,55 +54,7 @@ func registerViHandlers(h map[Action]handler) {
 	h["vi_move_up"] = moveHandler(motionViUp, false, true)
 	h["vi_move_down"] = moveHandler(motionViDown, false, true)
 	h["toggle_case"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
-		d.toggleCase()
+		d.ToggleCase()
 		return nil
 	})
-}
-
-// toggleRunes swaps the case of every letter of s, one rune for one rune, so the text
-// keeps its length and its line breaks.
-func toggleRunes(s string) string {
-	out := []rune(s)
-	for i, r := range out {
-		if unicode.IsUpper(r) {
-			out[i] = unicode.ToLower(r)
-		} else {
-			out[i] = unicode.ToUpper(r)
-		}
-	}
-	return string(out)
-}
-
-// toggleCase swaps the case of the selection of each caret. A caret without a selection
-// swaps the character at it and moves past that character, as vi's ~ does; at the end of
-// a line there is nothing to swap and the caret stays. A selection is replaced by the
-// swapped text and the caret ends after it.
-func (d *Document) toggleCase() {
-	cs := d.allCarets()
-	plans := make([]caretPlan, len(cs))
-	for i, c := range cs {
-		if lo, hi := c.bounds(); lo != hi {
-			old := d.planRange(lo, hi)
-			if swapped := toggleRunes(old); swapped != old {
-				plans[i].edit = &edit{from: lo, to: hi, text: swapped}
-			}
-			continue
-		}
-		p := c.head
-		if p.Col >= d.Buffer.LineLen(p.Line) {
-			continue
-		}
-		next := buffer.Pos{Line: p.Line, Col: nextBoundary(d.Buffer, p.Line, p.Col)}
-		old := d.planRange(p, next)
-		if swapped := toggleRunes(old); swapped != old {
-			plans[i].edit = &edit{from: p, to: next, text: swapped}
-			continue
-		}
-		// Nothing to change (a digit, a symbol), but the caret still moves on. An empty
-		// edit at the caret carries it through the other carets' edits.
-		width := next.Col - p.Col
-		plans[i].edit = &edit{from: p, to: p}
-		plans[i].place = func(end buffer.Pos) buffer.Pos { return buffer.Pos{Line: end.Line, Col: end.Col + width} }
-	}
-	d.applyPlans(cs, plans)
 }

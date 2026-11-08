@@ -16,12 +16,12 @@ import (
 func TestInterruptedSavesListsTheStashedFiles(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		// build saves the session in dir and returns the entries the list should give.
 		build func(t *testing.T, dir string) []StashEntry
 	}{
 		{
-			name: "stashed files and an untitled buffer, in session order",
+			Name: "stashed files and an untitled buffer, in session order",
 			build: func(t *testing.T, dir string) []StashEntry {
 				fileStash := stashIn(t, dir, "unsaved edit")
 				untitledStash := stashIn(t, dir, "scratch")
@@ -37,7 +37,7 @@ func TestInterruptedSavesListsTheStashedFiles(t *testing.T) {
 			},
 		},
 		{
-			name: "a stash name with a directory part is left out",
+			Name: "a stash name with a directory part is left out",
 			build: func(t *testing.T, dir string) []StashEntry {
 				must(t, session.Save(dir, session.Session{Files: []session.FileState{
 					{Path: "/ws/x.txt", StashFile: "../outside.txt"},
@@ -47,7 +47,7 @@ func TestInterruptedSavesListsTheStashedFiles(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			want := tt.build(t, dir)
@@ -86,19 +86,19 @@ func must(t *testing.T, err error) {
 func TestInterruptedSavesWithoutASessionIsEmpty(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		dir  func(t *testing.T) string
 	}{
 		{
-			name: "no session directory",
+			Name: "no session directory",
 			dir:  func(t *testing.T) string { return "" },
 		},
 		{
-			name: "a directory with no session file",
+			Name: "a directory with no session file",
 			dir:  func(t *testing.T) string { return t.TempDir() },
 		},
 		{
-			name: "a session with no stashed file",
+			Name: "a session with no stashed file",
 			dir: func(t *testing.T) string {
 				dir := t.TempDir()
 				if err := session.Save(dir, session.Session{Files: []session.FileState{{Path: "/ws/a.txt"}}}); err != nil {
@@ -109,7 +109,7 @@ func TestInterruptedSavesWithoutASessionIsEmpty(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{SessionDir: tt.dir(t)})
 			got, err := e.InterruptedSaves()

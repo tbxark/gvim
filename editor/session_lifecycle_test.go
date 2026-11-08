@@ -22,7 +22,7 @@ func restoringDoc(t *testing.T) (*Editor, *Document) {
 	if err := e2.RestoreOverlay(d2, st); err != nil {
 		t.Fatalf("RestoreOverlay: %v", err)
 	}
-	if !d2.restoring() {
+	if !d2.Restoring() {
 		t.Fatal("the restore is not waiting for the index")
 	}
 	return e2, d2
@@ -43,7 +43,7 @@ func failedRestoreDoc(t *testing.T) (*Editor, *Document) {
 		t.Fatalf("RestoreOverlay: %v", err)
 	}
 	indexAll(t, fresh)
-	if nd.restoring() || nd.large.restore == nil {
+	if nd.Restoring() || nd.LargeState().Restore == nil {
 		t.Fatal("the restore did not fail late")
 	}
 	return fresh, nd
@@ -52,14 +52,14 @@ func failedRestoreDoc(t *testing.T) (*Editor, *Document) {
 func TestAStashThatWaitsOrFailedIsUnsavedForCloseAndQuit(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name string
+		Name string
 		make func(*testing.T) (*Editor, *Document)
 	}{
 		{"waiting", restoringDoc},
 		{"failed", failedRestoreDoc},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			e, d := tc.make(t)
 			if !d.Modified() || !e.Tabs()[0].Modified {
@@ -103,7 +103,7 @@ func TestNothingEditsADocumentWhileItsStashWaits(t *testing.T) {
 	if _, err := e.BeginShell("shell_command_replace", map[string]any{"command": "tr a-z A-Z"}); !errors.Is(err, ErrRestoring) {
 		t.Errorf("BeginShell replace = %v, want ErrRestoring", err)
 	}
-	job := ShellJob{Replace: true, doc: d, to: buffer.Pos{Col: 4}, snapshot: d.contentMark()}
+	job := ShellJob{Replace: true, Doc: d, To: buffer.Pos{Col: 4}, snapshot: d.ContentMark()}
 	if res := e.EndShell(job, "XXXX", nil); !errors.Is(res.Err, ErrRestoring) {
 		t.Errorf("EndShell replace = %v, want ErrRestoring", res.Err)
 	}
@@ -115,8 +115,8 @@ func TestNothingEditsADocumentWhileItsStashWaits(t *testing.T) {
 		t.Fatal("an edit got into the document while its stash waited")
 	}
 	indexAll(t, e)
-	if d.large.restoreErr != nil || !strings.HasPrefix(d.Buffer.Line(100), "edited ") {
-		t.Errorf("restoreErr = %v, line 100 = %q: want the stash back", d.large.restoreErr, d.Buffer.Line(100))
+	if d.LargeState().RestoreErr != nil || !strings.HasPrefix(d.Buffer.Line(100), "edited ") {
+		t.Errorf("restoreErr = %v, line 100 = %q: want the stash back", d.LargeState().RestoreErr, d.Buffer.Line(100))
 	}
 }
 
@@ -171,15 +171,15 @@ func TestReplaceOverlayTakesTheNewerStashOverRestoredEdits(t *testing.T) {
 	if err := e2.ReplaceOverlay(d2, stale); !errors.Is(err, ErrStashStale) {
 		t.Fatalf("ReplaceOverlay of a stash for another file = %v, want ErrStashStale", err)
 	}
-	if !d2.restoring() {
+	if !d2.Restoring() {
 		t.Fatal("a refused ReplaceOverlay dropped the restore that was waiting")
 	}
 	if err := e2.ReplaceOverlay(d2, newer); err != nil {
 		t.Fatalf("ReplaceOverlay: %v", err)
 	}
 	indexAll(t, e2)
-	if d2.restoring() || d2.large.restoreErr != nil {
-		t.Fatalf("restoring %v, err %v", d2.restoring(), d2.large.restoreErr)
+	if d2.Restoring() || d2.LargeState().RestoreErr != nil {
+		t.Fatalf("restoring %v, err %v", d2.Restoring(), d2.LargeState().RestoreErr)
 	}
 	if d2.Buffer.Text() != d.Buffer.Text() {
 		t.Errorf("the document does not hold the newer edits: line 50 = %q, line 100 = %q", d2.Buffer.Line(50), d2.Buffer.Line(100))

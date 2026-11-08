@@ -43,7 +43,7 @@ func (e *Editor) SetCursor(p buffer.Pos, extend bool) {
 		return
 	}
 	mark := e.markJump()
-	d.placeCursor(p, extend)
+	d.PlaceCursor(p, extend)
 	if !extend {
 		e.recordJump(mark)
 	}
@@ -58,7 +58,7 @@ func (e *Editor) SelectRange(anchor, head buffer.Pos) {
 		return
 	}
 	mark := e.markJump()
-	d.selectBetween(anchor, head)
+	d.SelectBetween(anchor, head)
 	e.recordJump(mark)
 }
 
@@ -107,7 +107,7 @@ func (e *Editor) scrollView(d *Document, dir int) {
 	}
 	line := min(max(d.Cursor.Line, lo), max(hi, lo))
 	if line != d.Cursor.Line {
-		d.move(e.verticalTarget(d, d.Cursor, line), false)
+		d.Move(e.verticalTarget(d, d.Cursor, line), false)
 	}
 }
 
@@ -194,11 +194,11 @@ func (e *Editor) closeAt(i int, force bool) error {
 // that OpenPreview can replace never holds unsaved text.
 func (e *Editor) previewIndex() int {
 	for _, d := range e.docs {
-		if d.preview && d.Modified() {
-			d.preview = false
+		if d.Preview() && d.Modified() {
+			d.SetPreview(false)
 		}
 	}
-	return slices.IndexFunc(e.docs, func(d *Document) bool { return d.preview })
+	return slices.IndexFunc(e.docs, func(d *Document) bool { return d.Preview() })
 }
 
 // pathIndex returns the index of the first tab opened from path, or -1. The
