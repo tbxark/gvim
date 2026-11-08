@@ -52,7 +52,7 @@ func (m *Model) remoteSearchUnsupported() bool {
 	if m.fileRoot == "" {
 		return false
 	}
-	m.notice = "Replacing across project files is not available in a remote workspace yet"
+	m.notice = uiText("gvim.project_search.remote_replace_unavailable", "Replacing across project files is not available in a remote workspace yet")
 	return true
 }
 
@@ -62,11 +62,11 @@ func (m *Model) remoteSearchUnsupported() bool {
 // notice.
 func (m *Model) openProjectSearch(git bool) tea.Cmd {
 	if git && m.root.ports.GitGrep == nil {
-		m.notice = "Git Grep is not supported in this port"
+		m.notice = uiText("gvim.project_search.git_grep_unsupported", "Git Grep is not supported in this port")
 		return nil
 	}
 	if !git && m.root.ports.ProjectSearch == nil {
-		m.notice = "Project-wide search is not supported in this port"
+		m.notice = uiText("gvim.project_search.project_search_unsupported", "Project-wide search is not supported in this port")
 		return nil
 	}
 	// A second open while the first panel is still on the stack would leave the first
@@ -186,12 +186,12 @@ func (m *Model) projectCurrentFile() *searchpanel.SourceFile {
 func (m *Model) openProjectResultsList() tea.Cmd {
 	p := m.proj.panel
 	if p == nil {
-		m.notice = "No project search results: run Search and Replace in Project first"
+		m.notice = uiText("gvim.project_search.no_results_run_first", "No project search results: run Search and Replace in Project first")
 		return nil
 	}
 	items := p.ExportItems()
 	if len(items) == 0 {
-		m.notice = "No project search results to list"
+		m.notice = uiText("gvim.project_search.no_results_list", "No project search results to list")
 		return nil
 	}
 	rows := make([]list.Row, 0, len(items))
@@ -206,7 +206,7 @@ func (m *Model) openProjectResultsList() tea.Cmd {
 			Value: projectListValue(it),
 		})
 	}
-	v := list.New("Project Search Results", rows, m.listChrome(), func(_ *list.View, r list.Row) tea.Cmd {
+	v := list.New(uiText("gvim.project_search.results_title", "Project Search Results"), rows, m.listChrome(), func(_ *list.View, r list.Row) tea.Cmd {
 		t, ok := parseProjectListValue(r.Value)
 		if !ok {
 			return nil
@@ -259,12 +259,12 @@ func (m *Model) projectJump(t searchpanel.OpenMsg) tea.Cmd {
 func (m *Model) projectMatchAction(forward bool) tea.Cmd {
 	p := m.proj.panel
 	if p == nil {
-		m.notice = "No project search results: run Search and Replace in Project first"
+		m.notice = uiText("gvim.project_search.no_results_run_first", "No project search results: run Search and Replace in Project first")
 		return nil
 	}
 	target, ok := p.NextMatch(forward)
 	if !ok {
-		m.notice = "No project search results to move through"
+		m.notice = uiText("gvim.project_search.no_results_move", "No project search results to move through")
 		return nil
 	}
 	return m.projectJump(target)
@@ -275,7 +275,7 @@ func (m *Model) projectMatchAction(forward bool) tea.Cmd {
 func (m *Model) askProjectReplace(req searchpanel.ReplaceRequest) tea.Cmd {
 	r := m.root.ports.ProjectReplace
 	if r == nil {
-		m.notice = "Replacing across files is not supported in this port"
+		m.notice = uiText("gvim.project_search.replace_unsupported", "Replacing across files is not supported in this port")
 		return nil
 	}
 	remote, isRemote := r.(searchpanel.RemoteReplacer)
@@ -317,12 +317,12 @@ func projectReplaceQuestion(req searchpanel.ReplaceRequest, remoteTarget string)
 // cancelled.
 func (m *Model) projectReplaceAnswer(tag projectReplaceTag, d prompt.Done) tea.Cmd {
 	if d.Outcome != prompt.Yes {
-		m.notice = "Replacement cancelled"
+		m.notice = uiText("gvim.project_search.cancelled", "Replacement cancelled")
 		return nil
 	}
 	r := m.root.ports.ProjectReplace
 	if r == nil {
-		m.notice = "Replacing across files is not supported in this port"
+		m.notice = uiText("gvim.project_search.replace_unsupported", "Replacing across files is not supported in this port")
 		return nil
 	}
 	req := tag.req
@@ -354,7 +354,7 @@ func (m *Model) projectReplaceDone(msg projectReplaceDoneMsg) tea.Cmd {
 		return m.remoteProjectReplaceDone(msg)
 	}
 	if msg.err != nil {
-		m.notice = "Replace: " + msg.err.Error()
+		m.notice = uiTextVars("gvim.project_search.error", "Replace: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil
 	}
 	// The finder and the editor can spell one file differently (a canonical
@@ -409,10 +409,10 @@ func (m *Model) remoteProjectReplaceDone(msg projectReplaceDoneMsg) tea.Cmd {
 		if msg.remoteResult.Files > 0 {
 			m.notice = fmt.Sprintf("Replace on %s: %v; %d %s already written", msg.remoteTarget, msg.err, msg.remoteResult.Files, pluralWord(msg.remoteResult.Files, "file"))
 		} else {
-			m.notice = "Replace on " + msg.remoteTarget + ": " + msg.err.Error()
+			m.notice = uiTextVars("gvim.project_search.remote_error", "Replace on %{target}: %{error}", map[string]any{"target": msg.remoteTarget, "error": msg.err.Error()})
 		}
 	case msg.remoteResult.Files == 0 && msg.remoteResult.Skipped == 0:
-		m.notice = "Replace on " + msg.remoteTarget + ": no file matched any more"
+		m.notice = uiTextVars("gvim.project_search.no_file_matched", "Replace on %{target}: no file matched any more", map[string]any{"target": msg.remoteTarget})
 	default:
 		m.notice = fmt.Sprintf("%d %s changed on %s", msg.remoteResult.Files, pluralWord(msg.remoteResult.Files, "file"), msg.remoteTarget)
 		if msg.remoteResult.Skipped > 0 {

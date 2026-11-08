@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/plugin/hostos"
@@ -56,6 +57,13 @@ type fakeSSH struct {
 	// write stdout/stderr through the channel; the return value is the exit status.
 	// The remote file tests use it to run the composed helper command locally.
 	execFunc func(cmd string, stdin io.Reader, stdout, stderr io.Writer) int
+	// directTCPIP records the "direct-tcpip" channel targets the jump server proxied.
+	directTCPIP []string
+	// agentRequests records auth-agent-req requests; agentSigners is the identity list
+	// the remote side read back through the forwarded agent channel.
+	agentRequests int
+	agentSigners  []ssh.PublicKey
+	agentErr      error
 }
 
 // newFakeSSH starts the server on a loopback port.
@@ -122,19 +130,52 @@ func (s *fakeSSH) handleConn(conn net.Conn) {
 	s.mu.Unlock()
 	go ssh.DiscardRequests(reqs)
 	for ch := range chans {
-		if ch.ChannelType() != "session" {
+		switch ch.ChannelType() {
+		case "session":
+			channel, requests, err := ch.Accept()
+			if err != nil {
+				continue
+			}
+			go s.handleSession(sc, channel, requests)
+		case "direct-tcpip":
+			// ProxyJump: accept the target tunnel and pipe it to the next server.
+			var payload struct {
+				DestAddr   string
+				DestPort   uint32
+				OriginAddr string
+				OriginPort uint32
+			}
+			_ = ssh.Unmarshal(ch.ExtraData(), &payload)
+			target := net.JoinHostPort(payload.DestAddr, strconv.Itoa(int(payload.DestPort)))
+			s.mu.Lock()
+			s.directTCPIP = append(s.directTCPIP, target)
+			s.mu.Unlock()
+			conn, err := net.DialTimeout("tcp", target, 3*time.Second)
+			if err != nil {
+				_ = ch.Reject(ssh.ConnectionFailed, err.Error())
+				continue
+			}
+			channel, requests, err := ch.Accept()
+			if err != nil {
+				_ = conn.Close()
+				continue
+			}
+			go ssh.DiscardRequests(requests)
+			go func() {
+				defer func() { _ = conn.Close() }()
+				defer func() { _ = channel.Close() }()
+				done := make(chan struct{}, 2)
+				go func() { _, _ = io.Copy(conn, channel); done <- struct{}{} }()
+				go func() { _, _ = io.Copy(channel, conn); done <- struct{}{} }()
+				<-done
+			}()
+		default:
 			_ = ch.Reject(ssh.UnknownChannelType, "session only")
-			continue
 		}
-		channel, requests, err := ch.Accept()
-		if err != nil {
-			continue
-		}
-		go s.handleSession(channel, requests)
 	}
 }
 
-func (s *fakeSSH) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
+func (s *fakeSSH) handleSession(sc *ssh.ServerConn, ch ssh.Channel, reqs <-chan *ssh.Request) {
 	defer func() { _ = ch.Close() }()
 	execMode, ptyMode := false, false
 	for req := range reqs {
@@ -178,6 +219,12 @@ func (s *fakeSSH) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
 			reply(req, false)
 		case "signal":
 			reply(req, true)
+		case "auth-agent-req@openssh.com":
+			s.mu.Lock()
+			s.agentRequests++
+			s.mu.Unlock()
+			reply(req, true)
+			go s.probeAgent(sc)
 		default:
 			reply(req, false)
 		}
@@ -574,4 +621,26 @@ func TestSSHLazyMountAndPassword(t *testing.T) {
 	if _, err := a.OneShot().Run(ctx, []string{"x"}, hostos.ProcOptions{}); err != nil {
 		t.Fatalf("run after password reconnect: %v", err)
 	}
+}
+
+// probeAgent opens the forwarded agent channel the way a remote process (e.g. ssh
+// inside the session) would, and records the identities the local agent serves.
+func (s *fakeSSH) probeAgent(sc *ssh.ServerConn) {
+	ch, reqs, err := sc.OpenChannel("auth-agent@openssh.com", nil)
+	if err != nil {
+		s.mu.Lock()
+		s.agentErr = err
+		s.mu.Unlock()
+		return
+	}
+	defer func() { _ = ch.Close() }()
+	go ssh.DiscardRequests(reqs)
+	signers, err := agent.NewClient(ch).Signers()
+	pks := make([]ssh.PublicKey, 0, len(signers))
+	for _, signer := range signers {
+		pks = append(pks, signer.PublicKey())
+	}
+	s.mu.Lock()
+	s.agentErr, s.agentSigners = err, pks
+	s.mu.Unlock()
 }

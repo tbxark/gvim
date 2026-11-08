@@ -53,6 +53,9 @@ type LoaderOptions struct {
 	InitFile string
 	// StateFile is config.Dir()/plugin-state.json, the manager's toggles ("" none).
 	StateFile string
+	// WorkspaceState is set when the runtime uses a workspace-scoped gvim.state file:
+	// the editor-wide per-plugin state files are then neither read nor written.
+	WorkspaceState bool
 	// Paths are the --plugin arguments: a .lua file or a plugin directory each.
 	Paths []string
 	// Disabled is --no-plugins: neither bundled, user plugins nor init.lua are discovered.
@@ -222,7 +225,9 @@ func (l *LoaderOptions) gather(ctx context.Context, osys hostos.OS, cfgDir strin
 		}
 		if c.enabled && c.err == "" {
 			c.compile()
-			c.readState(ctx, osys, cfgDir)
+			if !l.WorkspaceState {
+				c.readState(ctx, osys, cfgDir)
+			}
 		}
 	}
 	return d
@@ -685,7 +690,7 @@ func (l *LoaderOptions) scanOne(ctx context.Context, osys hostos.OS, cfgDir stri
 	c.settings = l.Settings[c.name]
 	if c.err == "" {
 		c.compile()
-		if c.enabled {
+		if c.enabled && !l.WorkspaceState {
 			c.readState(ctx, osys, cfgDir)
 		}
 	}

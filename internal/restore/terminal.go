@@ -77,6 +77,9 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 		return terminal.SavedState{}, false, nil
 	}
 	st.Rows = boundTerminalRows(st.Rows)
+	// The styled screen snapshot is bounded/cleaned the same way: a corrupt or
+	// hand-edited snapshot is dropped rather than painted.
+	st.Screen = st.Screen.Bounded()
 	// Tabs are bounded the same way: at most maxSavedTerminalTabs, each with the
 	// single-transcript row/byte bound. A tab with no rows and not open is dropped.
 	if len(st.Tabs) > maxSavedTerminalTabs {
@@ -85,6 +88,7 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 	kept := st.Tabs[:0]
 	for _, tab := range st.Tabs {
 		tab.Rows = boundTerminalRows(tab.Rows)
+		tab.Screen = tab.Screen.Bounded()
 		if len(tab.Rows) == 0 && !tab.Open {
 			continue
 		}

@@ -219,8 +219,9 @@ func TestParseRemoteTargets(t *testing.T) {
 		arg  string
 		want authority.RemoteSpec
 	}{
-		{"scp", "deploy@host:/etc/x", authority.RemoteSpec{User: "deploy", Host: "host", Path: "/etc/x"}},
-		{"scp line col", "u@h:/a/b.go:4:7", authority.RemoteSpec{User: "u", Host: "h", Path: "/a/b.go", Line: 4, Col: 7}},
+		// user@host spells the user: a config file cannot override it (R13-17).
+		{"scp", "deploy@host:/etc/x", authority.RemoteSpec{User: "deploy", Host: "host", Path: "/etc/x", UserExplicit: true}},
+		{"scp line col", "u@h:/a/b.go:4:7", authority.RemoteSpec{User: "u", Host: "h", Path: "/a/b.go", Line: 4, Col: 7, UserExplicit: true}},
 		{"url", "ssh://host.example/srv/x", authority.RemoteSpec{User: "envuser", Host: "host.example", Path: "/srv/x"}},
 	}
 	for _, tt := range tests {

@@ -51,10 +51,22 @@ type AsyncToggleTree interface {
 }
 
 // ReadOnlyTree is a Tree whose directory cannot be changed from the editor. The panel
-// refuses the file-operation actions and their messages with one explicit notice.
+// refuses New File, New Directory, Rename, Delete and the clipboard actions with one
+// explicit notice.
 type ReadOnlyTree interface {
 	ReadOnly() bool
 }
+
+// NoClipboardTree is a writable Tree that cannot cut, copy or paste entries (a remote
+// workspace: subtree transfer through the authority is not implemented). New File, New
+// Directory, Rename and Delete stay available.
+type NoClipboardTree interface {
+	ClipboardDisabled() bool
+}
+
+// ErrClipboardDisabled is the notice of a cut/copy/paste on a tree without clipboard
+// operations.
+var ErrClipboardDisabled = errors.New("copying or moving remote entries is not available yet")
 
 // ErrReadOnlyTree is the notice of a file operation on a read-only tree.
 var ErrReadOnlyTree = errors.New("remote file explorer is read-only: remote file operations are not available yet")
@@ -76,8 +88,17 @@ func (p Panel) readOnly() bool {
 	return ok && ro.ReadOnly()
 }
 
+// clipboardDisabled reports whether the tree refuses the clipboard actions.
+func (p Panel) clipboardDisabled() bool {
+	ro, ok := p.tree.(NoClipboardTree)
+	return ok && ro.ClipboardDisabled()
+}
+
 // refuseReadOnly returns the notice command for a file operation on a read-only tree.
 func refuseReadOnly() tea.Cmd { return emit(ErrorMsg{Err: ErrReadOnlyTree}) }
+
+// refuseClipboard returns the notice command for an unavailable clipboard action.
+func refuseClipboard() tea.Cmd { return emit(ErrorMsg{Err: ErrClipboardDisabled}) }
 
 // Geometry is the panel's place in the frame. The root takes it from the layout:
 // X is the panel's first column, Width the layout's explorer width, Top the title
@@ -217,6 +238,12 @@ func (p Panel) Action(action string, g Geometry) (Panel, tea.Cmd, bool) {
 		switch action {
 		case "file_explorer_new_file", "file_explorer_new_directory", "file_explorer_rename", "file_explorer_delete", "cut", "paste":
 			return p, refuseReadOnly(), true
+		}
+	}
+	if p.clipboardDisabled() {
+		switch action {
+		case "cut", "paste":
+			return p, refuseClipboard(), true
 		}
 	}
 	var cmd tea.Cmd

@@ -240,6 +240,28 @@ func (m *Model) explorerMenuItems(target expanel.ContextTarget) []ctxmenu.Item {
 			{Label: "Copy Relative Path", Action: explorerMenuPrefix + "copy_relative_path", Data: paths},
 		}
 	}
+	if m.explorerClipboardDisabled() {
+		// A writable remote tree has creation, rename and delete, but no subtree
+		// clipboard or duplicate operations yet (subtree transfer is a recorded gap).
+		row := func(label, action string) ctxmenu.Item {
+			return ctxmenu.Item{Label: label, Action: explorerMenuPrefix + action, Data: paths}
+		}
+		rule := ctxmenu.Item{Separator: true}
+		create := []ctxmenu.Item{row(uiText("gvim.context.new_file", "New File"), "file_explorer_new_file"), row(uiText("gvim.context.new_directory", "New Directory"), "file_explorer_new_directory")}
+		pathCopies := []ctxmenu.Item{
+			row(uiText("gvim.context.copy_full_path", "Copy Full Path"), "copy_full_path"),
+			row(uiText("gvim.context.copy_relative_path", "Copy Relative Path"), "copy_relative_path"),
+		}
+		switch {
+		case target.Root || len(paths) == 0:
+			return create
+		case len(paths) > 1:
+			return append([]ctxmenu.Item{row(uiText("gvim.context.delete", "Delete"), "file_explorer_delete"), rule}, pathCopies...)
+		}
+		return append(append(create,
+			row(uiText("gvim.context.rename", "Rename"), "file_explorer_rename"),
+			row(uiText("gvim.context.delete", "Delete"), "file_explorer_delete"), rule), pathCopies...)
+	}
 	row := func(label, action string) ctxmenu.Item {
 		return ctxmenu.Item{Label: label, Action: explorerMenuPrefix + action, Data: paths}
 	}
@@ -263,11 +285,17 @@ func (m *Model) explorerMenuItems(target expanel.ContextTarget) []ctxmenu.Item {
 	)
 }
 
-// explorerReadOnly reports whether the explorer tree refuses file operations (the
-// read-only remote tree).
+// explorerReadOnly reports whether the explorer tree refuses file operations.
 func (m *Model) explorerReadOnly() bool {
 	ro, ok := m.tree.(interface{ ReadOnly() bool })
 	return ok && ro.ReadOnly()
+}
+
+// explorerClipboardDisabled reports whether the tree cannot cut/copy/paste entries (the
+// remote tree: create/rename/delete are available, subtree transfer is not).
+func (m *Model) explorerClipboardDisabled() bool {
+	ro, ok := m.tree.(interface{ ClipboardDisabled() bool })
+	return ok && ro.ClipboardDisabled()
 }
 
 // explorerMenuPrefix starts the action of a row of the explorer menu. The rest is an

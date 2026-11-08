@@ -199,6 +199,9 @@ type Model struct {
 	fix fixState
 	// large is the state of the root for documents in large file mode (see large.go).
 	large largeState
+	// largeWindows loads windows of a remote windowed large document (see
+	// large_windows.go). Nil for a local session.
+	largeWindows LargeWindowLoader
 	// plug is the plugin host state (see plugin_pump.go). Its runtime is nil when
 	// plugins are off, and every hook is a nil check then.
 	plug pluginState
@@ -283,6 +286,7 @@ func New(deps Deps) *Model {
 		lsp:             lspState{port: deps.LSP},
 		env:             deps.Env,
 		view:            newViewState(viewOptionsOf(deps.View)),
+		largeWindows:    deps.LargeWindows,
 	}
 	m.view.languages = deps.Languages
 	// The inlay-hints toggle starts from the configured display option; the Toggle
@@ -530,7 +534,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = tea.Batch(cmd, m.lspUpdate(msg))
 	cmd = tea.Batch(cmd, m.dockSync())
 	cmd = tea.Batch(cmd, m.watchSync())
-	cmd = tea.Batch(cmd, m.indexSync(), m.searchSync())
+	cmd = tea.Batch(cmd, m.indexSync(), m.searchSync(), m.windowSync())
 	m.notes.record(before, m.notice)
 	m.noteStatus(beforeStatus)
 	m.reconcileTabs()
@@ -1208,17 +1212,62 @@ func (m *Model) needOps() bool {
 	return m.ops != nil
 }
 
+// remoteExplorerTarget returns the remote target of the file-operation adapter, or ""
+// for a local workspace. Confirmations state it so a remote write is never mistaken for
+// a local one.
+func (m *Model) remoteExplorerTarget() string {
+	if ta, ok := m.ops.(interface{ RemoteTarget() string }); ok {
+		return ta.RemoteTarget()
+	}
+	return ""
+}
+
+// newEntryLabel is the name prompt's label for a new file or folder; a remote target is
+// stated in the label.
+func newEntryLabel(folder bool, target string) string {
+	label := "New file:"
+	if folder {
+		label = "New folder:"
+	}
+	if target != "" {
+		label = strings.TrimSuffix(label, ":") + " on " + target + ":"
+	}
+	return label
+}
+
+// renamePromptLabel is the rename prompt's label; a remote target is stated in the label.
+func renamePromptLabel(target string) string {
+	if target == "" {
+		return uiText("gvim.prompt.rename_to", "Rename to:")
+	}
+	return "Rename to on " + target + ":"
+}
+
+// deleteQuestion is the delete confirmation. A remote delete is permanent (no trash on
+// the remote host) and the question states the target.
+func deleteQuestion(paths []string, target string) string {
+	q := "Delete " + filepath.Base(paths[0]) + "?"
+	if len(paths) > 1 {
+		q = fmt.Sprintf("Delete %d items?", len(paths))
+	}
+	if target != "" {
+		if len(paths) > 1 {
+			q = fmt.Sprintf("Permanently delete %d items on %s?", len(paths), target)
+		} else {
+			q = "Permanently delete " + filepath.Base(paths[0]) + " on " + target + "?"
+		}
+		q += " Remote deletes have no trash."
+	}
+	return q
+}
+
 // askName opens the name prompt for a new file or folder in dir.
 func (m *Model) askName(dir string, folder bool) {
 	if !m.needOps() {
 		return
 	}
-	label := "New file:"
-	if folder {
-		label = "New folder:"
-	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-		Label:    label,
+		Label:    newEntryLabel(folder, m.remoteExplorerTarget()),
 		Tag:      newNameTag{dir: dir, folder: folder},
 		Validate: validateName,
 	}))
@@ -1230,7 +1279,7 @@ func (m *Model) askRename(path string) {
 		return
 	}
 	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-		Label:    uiText("gvim.prompt.rename_to", "Rename to:"),
+		Label:    renamePromptLabel(m.remoteExplorerTarget()),
 		Input:    filepath.Base(path),
 		Tag:      renameTag{path: path},
 		Validate: validateName,
@@ -1243,10 +1292,7 @@ func (m *Model) askDelete(paths ...string) {
 	if !m.needOps() || len(paths) == 0 {
 		return
 	}
-	q := "Delete " + filepath.Base(paths[0]) + "?"
-	if len(paths) > 1 {
-		q = fmt.Sprintf("Delete %d items?", len(paths))
-	}
+	q := deleteQuestion(paths, m.remoteExplorerTarget())
 	m.pushOverlay(prompt.NewConfirm(m.styles, q, deleteTag{paths: paths}))
 }
 

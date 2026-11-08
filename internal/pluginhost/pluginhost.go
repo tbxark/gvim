@@ -53,6 +53,13 @@ type Options struct {
 	// name resolves through the child's PATH) and returns a refusal error. Nil
 	// allows every launch.
 	Gate SpawnGate
+	// WorkspaceStateFile is the workspace-scoped gvim.state file of a daemon workspace
+	// (sessions/<stable-id>/plugin-state.json), or "" for the editor-wide per-plugin
+	// files a direct launch uses. The app reads WorkspaceStateData off the update loop.
+	WorkspaceStateFile string
+	// WorkspaceStateData is the content of WorkspaceStateFile as read by the app (nil:
+	// absent or unreadable). New parses it here, off the update loop.
+	WorkspaceStateData []byte
 }
 
 // SpawnGate is the trust check a plugin process launch goes through. It is a
@@ -88,18 +95,38 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 			ld.Settings[name] = plugin.PluginSettings{User: pc.Settings, Project: pc.ProjectSettings}
 		}
 	}
+	var workspaceState *plugin.WorkspaceState
+	var workspaceStateReadOnly bool
+	var workspaceStateNote string
+	if o.WorkspaceStateFile != "" {
+		ld.WorkspaceState = true
+		st, readOnly, err := plugin.ParseWorkspaceState(o.WorkspaceStateData)
+		switch {
+		case err != nil:
+			workspaceStateNote = "per-workspace plugin state ignored: " + err.Error()
+		case readOnly:
+			workspaceStateReadOnly = true
+			workspaceStateNote = "per-workspace plugin state is read-only: it was written by a newer gvim"
+		default:
+			workspaceState = st
+		}
+	}
 	osys := newPluginOS(pluginDirs(cfgDir, o.Root), o.SpawnEnv)
 	osys.gate = o.Gate
 	return &Wiring{
 		OS: osys,
 		Runtime: plugin.New(plugin.Options{
-			Timeout:  cfg.PluginTimeout,
-			OS:       osys,
-			Services: pluginServices{},
-			Version:  o.Version,
-			LogSink:  o.LogSink,
-			Loader:   ld,
-			Locale:   i18n.Locale(),
+			Timeout:                cfg.PluginTimeout,
+			OS:                     osys,
+			Services:               pluginServices{},
+			Version:                o.Version,
+			LogSink:                o.LogSink,
+			Loader:                 ld,
+			Locale:                 i18n.Locale(),
+			WorkspaceStateFile:     o.WorkspaceStateFile,
+			WorkspaceState:         workspaceState,
+			WorkspaceStateReadOnly: workspaceStateReadOnly,
+			WorkspaceStateNote:     workspaceStateNote,
 		}),
 		Editor: newPluginEditor(ed, markEdited),
 		Keys: func(name string, bs []pluginapi.Binding) (*keymap.Map, error) {

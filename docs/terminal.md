@@ -243,6 +243,32 @@ background tabs' exited markers current.
   works). The gvim extension `terminal.restore_live` (default `true`) turns the
   dive revival off, making every restored tab read-only. In daemon mode the tab
   set is scoped per workspace (see Terminal tabs in daemon workspaces below).
+- **Screen snapshot.** Next to the text rows the record carries an optional
+  `screen` object: a bounded, **styled** snapshot of the visible screen (the
+  screen width, rows of cells with the rune, foreground/background as `#rrggbb`
+  and bold/underline/reverse). It is additive and omitted when there is nothing to
+  keep — the format stays version 1 and an old record restores the plain text
+  transcript exactly as before. Bounds: at most 200 rows and 512 columns; trailing
+  blank cells are trimmed, control characters become spaces and invalid colours
+  are dropped when the file is loaded, so a corrupt snapshot cannot paint
+  garbage. On restore the snapshot replaces the styled tail of the saved rows only
+  when its row texts match that tail **exactly**; a mismatched or corrupt
+  snapshot is ignored whole and the plain rows stay. A revived tab therefore
+  paints the saved screen with its colours/attributes above the new shell output
+  (visible in the read-only view; the new output appends below), and a tab that
+  was restored but not revived keeps its styled prior tail if it is saved again.
+  A save after a revive captures the new live screen as the snapshot, so styles in
+  older transcript rows beyond the visible tail are text-only from that point on
+  (bounded-fidelity residual). Tab identity, order, the active tab, the
+  revive-once rule and `terminal.restore_live` are unchanged.
+- **Modes.** Fresh's explicit Live and Scrollback modes map to the dock's two
+  views: a restored or exited tab opens read-only in the scrollback view
+  (`Scrollback (restored)` / the frozen screen); Ctrl+Space toggles between that
+  read-only pager and the live screen whenever a shell is attached; the first dive
+  into a live-at-capture tab revives the PTY into **live mode** with the saved
+  transcript (and its styled screen snapshot) above the new shell, and the pager
+  still reaches both. An exited-at-capture tab never leaves the read-only mode
+  until an explicit Restart.
 ### Terminal tabs in daemon workspaces (#19a)
 
 The daemon workspace layer owns one runtime and model per materialized workspace,
@@ -250,7 +276,9 @@ so each workspace has its own dock and its own tab set: switching workspace swap
 the model, never a tab list, and tabs cannot bleed across workspaces. A workspace's
 terminal record is `terminal.json` in its per-workspace session directory
 (`sessions/<stable-id>/`, next to `session.json`), in the same `SavedState`
-version-1 format (tabs, active index, launch records; the bounds above apply).
+version-1 format (tabs, active index, launch records and the styled screen
+snapshot; the bounds above apply), so a workspace switch/restart restores the same
+screen fidelity as a local session.
 The workspace registry file keeps identity and the editor layout, never the
 terminal record.
 
@@ -281,13 +309,16 @@ terminal record.
   with no auto-launch (the shell's pid marker is untouched).
 
 Residuals of this pairing: Fresh respawns a restored live terminal on focus and
-fills it from a persisted backing file; gvim revives on the explicit dive with a
-fresh PTY above the saved transcript rows (the capture is bounded text, not the
-backing file/screen snapshot), and `terminal.restore_live = false` turns that
-off. Fresh can bring live tabs back without a dive because its layout focuses the
-tab; gvim's dock is not restored into an editor split, so the dive is the first
-user action on the dock. A buffer shared across workspaces and extract-tab are the
-#19b policy decisions and remain open.
+fills it from a persisted **backing file** (full scrollback bytes plus a screen
+snapshot); gvim persists bounded text rows plus the bounded styled visible-screen
+snapshot described above, revives on the explicit dive with a fresh PTY, and
+`terminal.restore_live = false` turns that off. Full backing-file semantics
+remain out of scope: history beyond the visible screen is text-only (no per-cell
+styles/bytes), and cursor state, alternate-screen/OSC state and hyperlinks are not
+restored. Fresh can bring live tabs back without a dive because its layout focuses
+the tab; gvim's dock is not restored into an editor split, so the dive is the
+first user action on the dock. A buffer shared across workspaces and extract-tab
+are the #19b policy decisions and remain open.
 
 ## Persistence and reflow
 
@@ -299,7 +330,9 @@ start directory), the pane width the transcript was captured at, and the newest
 transcript rows: the prior transcript, the bounded history window and the live
 screen rows, as text with trailing blanks trimmed and control characters stripped,
 capped at 500 rows / 256 KiB (the loader re-applies the same bounds and ignores a
-version it does not know).
+version it does not know). It also carries the optional bounded, styled visible
+screen snapshot described under Terminal tabs; a restore overlays it on the
+matching text tail, and an old record without it keeps the text-only transcript.
 
 The state is only restored on the full session-restore path (not `--no-restore`
 or a hot-exit-only recovery). **A restored terminal is read-only until the user
@@ -691,12 +724,16 @@ These are known gaps, not bugs:
   `terminal.restore_live`)**: a tab that was live at the capture is restored
   dormant and revived with a fresh PTY on the user's first dive into it (Fresh's
   Live restore; argv precedence resume→launch→shell under
-  `terminal.resume_agents`), with the saved transcript kept above. Exited-at-capture
+  `terminal.resume_agents`), with the saved transcript kept above and the bounded
+  styled visible-screen snapshot preserved on the transcript tail. Exited-at-capture
   tabs and pre-`live` records stay read-only dead, and a failed revive is one
-  notice, not a retry loop. Divergences: gvim's transcript is bounded text (not
-  Fresh's backing file), the revive needs an explicit dive (gvim's dock is not a
-  restored editor split), and `terminal.restore_live = false` restores everything
-  read-only. Remote launches still restore no layout/terminal state.
+  notice, not a retry loop. Divergences from Fresh's backing file: only the visible
+  screen is styled (older history is text with trimmed blanks/control
+  characters), there are no backing-file bytes, cursor/alternate-screen/OSC state
+  is not restored, and a save after a revive captures the new live screen; the
+  revive needs an explicit dive (gvim's dock is not a restored editor split), and
+  `terminal.restore_live = false` restores everything read-only. Remote launches
+  still restore no layout/terminal state.
 - **live-screen reflow** — **decision:** only the stored transcript is re-wrapped; the
   live screen stays clipped or padded on a resize because x/vt has no reflow and adding it
   would mean owning the emulator's scrollback reflow (see Persistence and reflow).

@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/tbxark/gvim/buffer"
@@ -433,6 +434,12 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	}
 	if spec.Access == nil && disk.Exists && spec.LargeConf.IsLarge(disk.Size) {
 		return readLargeDocument(path, disk, spec.LargeConf)
+	}
+	if spec.Access != nil && disk.Exists && spec.LargeConf.IsLarge(disk.Size) {
+		if rangeAccess, ok := spec.Access.(RangeAccess); ok {
+			return readRemoteLargeDocument(context.Background(), path, disk, spec, rangeAccess)
+		}
+		return nil, fmt.Errorf("open %s: remote file is at or above the large-file threshold and the remote file access has no windowed reader", path)
 	}
 	var data []byte
 	var err error

@@ -26,8 +26,15 @@ const (
 
 // Errors reported by large file mode. Memory buffers never return them.
 var (
-	ErrOverCap             = errors.New("buffer: text too large to read in large file mode")
-	ErrSourceChanged       = errors.New("buffer: file changed on disk")
+	ErrOverCap       = errors.New("buffer: text too large to read in large file mode")
+	ErrSourceChanged = errors.New("buffer: file changed on disk")
+	// ErrSourcePending means an asynchronous window source has not loaded the
+	// window a read needs. It is not a failure: the read returns at once and the
+	// caller loads the window in a command, then repaints.
+	ErrSourcePending = errors.New("buffer: source window not loaded")
+	// ErrNotWindowed means a window operation was asked of a source that loads
+	// synchronously (a local file, a memory buffer).
+	ErrNotWindowed         = errors.New("buffer: source is not a windowed source")
 	ErrSourceGrew          = errors.New("buffer: file grew on disk")
 	ErrLineTooLong         = errors.New("buffer: line too long to edit")
 	ErrInvalidUTF8         = errors.New("buffer: line is not valid UTF-8; not edited")

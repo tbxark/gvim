@@ -310,7 +310,7 @@ func (p *themeEditorPage) setColor(key string, color theme.Color) {
 func (p *themeEditorPage) preview() {
 	working, err := theme.WithValues(p.base, p.values)
 	if err != nil {
-		p.model.notice = "Theme editor: " + err.Error()
+		p.model.notice = uiTextVars("gvim.theme_editor.error", "Theme editor: %{error}", map[string]any{"error": err.Error()})
 		return
 	}
 	p.working = working
@@ -330,7 +330,7 @@ func (p *themeEditorPage) previewValue(key theme.Key, value theme.Color) {
 	values[key.Name()] = value
 	working, err := theme.WithValues(p.base, values)
 	if err != nil {
-		p.model.notice = "Theme editor: " + err.Error()
+		p.model.notice = uiTextVars("gvim.theme_editor.error", "Theme editor: %{error}", map[string]any{"error": err.Error()})
 		return
 	}
 	p.working = working
@@ -356,11 +356,11 @@ func (p *themeEditorPage) reapplyValues() {
 // routes to Save As.
 func (p *themeEditorPage) save() tea.Cmd {
 	if p.readOnly {
-		p.model.notice = "Theme " + p.name + " is bundled: use Save As to keep a copy"
+		p.model.notice = uiTextVars("gvim.theme_editor.bundled_save", "Theme %{name} is bundled: use Save As to keep a copy", map[string]any{"name": p.name})
 		return p.saveAs()
 	}
 	if p.model.util.themeCatalog == nil {
-		p.model.notice = "Theme editor: there is no theme catalog to save to"
+		p.model.notice = uiText("gvim.theme_editor.no_catalog", "Theme editor: there is no theme catalog to save to")
 		return nil
 	}
 	catalog := p.model.util.themeCatalog
@@ -374,7 +374,7 @@ func (p *themeEditorPage) save() tea.Cmd {
 // saveAs asks for a name and writes the working theme under it.
 func (p *themeEditorPage) saveAs() tea.Cmd {
 	if p.model.util.themeCatalog == nil {
-		p.model.notice = "Theme editor: there is no theme catalog to save to"
+		p.model.notice = uiText("gvim.theme_editor.no_catalog", "Theme editor: there is no theme catalog to save to")
 		return nil
 	}
 	return p.pushOverlay(prompt.NewLine(p.model.styles, prompt.LineOptions{
@@ -388,7 +388,7 @@ func (p *themeEditorPage) saveAs() tea.Cmd {
 // delete removes a user theme, after a confirmation.
 func (p *themeEditorPage) delete() tea.Cmd {
 	if p.readOnly {
-		p.model.notice = "Theme " + p.name + " is bundled and cannot be deleted"
+		p.model.notice = uiTextVars("gvim.theme_editor.bundled_delete", "Theme %{name} is bundled and cannot be deleted", map[string]any{"name": p.name})
 		return nil
 	}
 	return p.pushOverlay(prompt.NewConfirm(p.model.styles, "Delete theme "+p.name+"?", themeEditorDeleteTag{page: p}))
@@ -505,7 +505,7 @@ func (p *themeEditorPage) promptDone(done prompt.Done) tea.Cmd {
 		}
 		color, err := theme.ParseColorText(done.Text)
 		if err != nil {
-			p.model.notice = "Theme editor: " + err.Error()
+			p.model.notice = uiTextVars("gvim.theme_editor.error", "Theme editor: %{error}", map[string]any{"error": err.Error()})
 			return nil
 		}
 		if parts := strings.SplitN(tag.key, ".", 2); len(parts) == 2 {
@@ -520,7 +520,7 @@ func (p *themeEditorPage) promptDone(done prompt.Done) tea.Cmd {
 		}
 		mods, err := theme.ParseModifiers(done.Text)
 		if err != nil {
-			p.model.notice = "Theme editor: " + err.Error()
+			p.model.notice = uiTextVars("gvim.theme_editor.error", "Theme editor: %{error}", map[string]any{"error": err.Error()})
 			return nil
 		}
 		parts := strings.SplitN(tag.key, ".", 2)
@@ -539,7 +539,7 @@ func (p *themeEditorPage) promptDone(done prompt.Done) tea.Cmd {
 		}
 		name := strings.TrimSpace(done.Text)
 		if name == "" {
-			p.model.notice = "Theme editor: the name must not be empty"
+			p.model.notice = uiText("gvim.theme_editor.name_empty", "Theme editor: the name must not be empty")
 			return nil
 		}
 		catalog := p.model.util.themeCatalog
@@ -578,7 +578,7 @@ func (p *themeEditorPage) saveDone(msg themeEditorSaveDoneMsg) tea.Cmd {
 		return nil
 	}
 	if msg.err != nil {
-		p.model.notice = "Theme editor: " + msg.err.Error()
+		p.model.notice = uiTextVars("gvim.theme_editor.error", "Theme editor: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil
 	}
 	p.dirty = false
@@ -586,7 +586,7 @@ func (p *themeEditorPage) saveDone(msg themeEditorSaveDoneMsg) tea.Cmd {
 	// The saved theme is now a file: apply it through the catalog so the ref and
 	// the registry are consistent.
 	p.model.applyTheme(msg.ref)
-	p.model.notice = "Theme saved to " + msg.ref
+	p.model.notice = uiTextVars("gvim.theme_editor.saved", "Theme saved to %{ref}", map[string]any{"ref": msg.ref})
 	return nil
 }
 
@@ -596,7 +596,7 @@ func (p *themeEditorPage) openDone(msg themeEditorOpenDoneMsg) tea.Cmd {
 		return nil
 	}
 	if msg.err != nil {
-		p.model.notice = "Theme editor: " + msg.err.Error()
+		p.model.notice = uiTextVars("gvim.theme_editor.error", "Theme editor: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil
 	}
 	p.base = msg.theme
@@ -684,13 +684,13 @@ func (p *themeEditorPage) deleteDone(msg themeEditorDeleteDoneMsg) tea.Cmd {
 		return nil
 	}
 	if msg.err != nil {
-		p.model.notice = "Theme editor: " + msg.err.Error()
+		p.model.notice = uiTextVars("gvim.theme_editor.error", "Theme editor: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil
 	}
 	p.dirty = false
 	p.Close()
 	p.model.applyTheme("dark")
-	p.model.notice = "Theme deleted"
+	p.model.notice = uiText("gvim.theme_editor.deleted", "Theme deleted")
 	return nil
 }
 

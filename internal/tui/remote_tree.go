@@ -113,9 +113,15 @@ func NewRemoteExplorerTree(root string, loader RemoteDirLoader) *RemoteExplorerT
 // Root returns the remote workspace directory.
 func (t *RemoteExplorerTree) Root() string { return t.root }
 
-// ReadOnly reports that the tree cannot change the remote directory. The panel
-// refuses the file-operation actions and context menu entries for it.
-func (t *RemoteExplorerTree) ReadOnly() bool { return true }
+// ReadOnly reports false: New File, New Directory, Rename and Delete are available on
+// the remote tree through the app's remote file-operation adapter. The clipboard
+// operations are reported separately by ClipboardDisabled.
+func (t *RemoteExplorerTree) ReadOnly() bool { return false }
+
+// ClipboardDisabled reports that remote entries cannot be cut, copied or pasted into
+// another directory yet: subtree transfer through the authority is not implemented, so
+// the panel refuses those actions while create/rename/delete stay available.
+func (t *RemoteExplorerTree) ClipboardDisabled() bool { return true }
 
 // ShowHidden reports whether dot entries are listed.
 func (t *RemoteExplorerTree) ShowHidden() bool {

@@ -285,9 +285,9 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
 - CLI: `internal/cli` parses both forms with `authority.ParseTarget` before any
   `stat` (an `ssh://` URL is always remote, malformed means a startup error), stores
   `Targets.Remote` and rejects a second remote, local files/a directory next to a
-  remote, `--diff`, stdin and `--daemon`; `app.Options.Remote` repeats the rules in
-  `Validate`.
-
+  remote, `--diff` and stdin. A remote target is allowed with a daemon start
+  (the jump box below); an attach parses it but ignores it, because the daemon owns SSH.
+  `app.Options.Remote` repeats the rules in `Validate`.
 Residuals of this slice (documented, not bugs):
 
 - Remote residuals of the landed routing: remote explorer/listing (a directory target
@@ -296,8 +296,8 @@ Residuals of this slice (documented, not bugs):
   itself is not watched because the remote explorer is not implemented, and the authority
   watch is polled at ~500 ms plus the 150 ms coalescing window, with a rename reported as
   remove+create; manual Revert/Reopen and the periodic disk check remain the fallback), remote
-  large-file mode (a document over the 64 MiB read cap fails with the too-large error
-  instead of opening lazily), remote
+  large-file editing (remote large files now open read-only over a windowed source; a
+  remote overlay save is the later slice), remote
   crash recovery and hot-exit (deliberately skipped for a remote launch so remote text is
   never copied into a local cache), `~user` expansion, special remote files (the helper's
   kind mapping only knows file/dir/symlink; a FIFO read is bounded by the context and fails
@@ -343,6 +343,52 @@ Residuals of this slice (documented, not bugs):
   session set by the user.
 - Plugin `gvim.fs`/`gvim.proc` still use the plugin OS port directly; routing them through
   the authority is the follow-up once remote file I/O exists.
+
+## 7.1 Daemon-hosted remote authority (jump box)
+
+A daemon start may combine a remote target with the daemon mode: the daemon runs on THIS
+machine and hosts that remote workspace over its SSH authority, so only this machine needs
+gvim installed. Fresh calls this the single-install jump box (docs/features/ssh.md). gvim
+implements the bounded slice:
+
+- The target is consumed only when the daemon starts. Its canonical text
+  (user@host[:port]:path, or ssh://user@host[:port]/path for a non-default port, including
+  an optional :LINE[:COL]) is persisted in the workspace registry as authority_spec; a
+  workspace is keyed by (remote root, canonical spec), so a restart with the same target
+  reuses the same stable id and session directory, and a different spec over the same path
+  is a different workspace. Old registry files load as local, and a remote root is
+  normalized as a POSIX path without any local stat.
+- Before the socket starts hosting, the daemon connects its foreground remote workspace on
+  the daemon terminal: a failed dial that reports a needed password, encrypted-key
+  passphrase or keyboard-interactive (2FA) challenge prompts on the terminal and redials
+  with the answer, with a small attempt bound. A daemon without an interactive stdin fails
+  with an actionable error (start it from a terminal or use a key/agent) rather than
+  hanging on a prompt. A dial failure that needs no input is likewise an actionable startup
+  error naming the host.
+- An attach only talks to the daemon socket (Hello and frames); it never dials SSH, so a
+  reattach after a detach reuses the daemon's live authority. A remote target in the attach
+  arguments is parsed and ignored, matching Fresh.
+- A workspace binds one backend: a local workspace switched to keeps the local authority,
+  while a dormant remote workspace materializes its own authority lazily from its stored
+  spec (the workspace build sets its Remote options; the existing trust gate and a
+  non-parseable spec keep the current workspace with a notice). Workspaces over different
+  hosts can coexist in one daemon because each runtime owns its slot.
+- Tests use an in-process fake authority (no real SSH): daemon start with a remote target
+  and an attach/reattach, restart reuse of the persisted spec and stable id, lazy dormant
+  remote materialization, an unparseable stored spec keeping the current workspace, the
+  password/passphrase/2FA prompt loop, and the non-interactive startup failure. The
+  registry side also covers spec round-trip, local discovery ignoring spec-bearing entries,
+  and old-file tolerance.
+
+Residuals of this slice: real SSH is still untested (all tests are offline fakes); a remote
+workspace's captured layout/unsaved text is written on daemon exit but the remote
+buildRuntime deliberately keeps the direct-remote no-session-restore rule, so a daemon
+RESTART reconnects the host but does not restore the remote workspace's tabs/stashes (a
+detach/reattach keeps the live daemon state; restoring remote sessions across restart is a
+follow-up); plugin gvim.fs/gvim.proc still use the local plugin OS port in a remote workspace
+(the remote explorer/terminal/search do go through the authority); the remote workspace's
+trust decision is the local workspace's trust store; and per-file ownership across a
+jump-box daemon and a direct editor on the same remote host is not covered.
 
 ## 8. Tests
 
@@ -425,20 +471,108 @@ the caller report `ErrUnsupportedFileIO` instead of a panic, and test doubles ar
 The local backend forwards to the plugin OS port; the SSH backend runs `mkdir [-p]`, `mv -f`
 and `rm [-r] -f` as bounded helpers under the same quoting, stderr cap and context
 cancellation as the read helpers, and maps a missing path/permission denial into the port's
-errors. A remote delete is permanent: there is no trash on the remote host, so the UI must
-say so. The remote explorer's write commands (new file/directory, rename, delete with that
-warning, tree refresh) are the next slice; copy/paste of subtrees, drag/move, remote
-`.gitignore` and remote directory watching stay open.
+errors. A remote delete is permanent: there is no trash on the remote host.
 
-### Windowed remote reads (large-file foundation)
+The remote explorer's write UI is wired (`internal/app/remote_explorer_ops.go`): New File,
+New Directory, Rename and Delete run through `Files()`/`authority.Mutations(fs)` with the
+workspace trust gate before every operation and the explicit "remote workspace is
+disconnected; activate the window to reconnect" error while the authority is down. Names are
+validated with the same `fsops.Validate` rules and must stay inside the remote workspace
+root; a create or rename refuses an existing target (checked before the mutation — the
+FileMutations surface has no exclusive create, so a check-to-write race is a recorded
+residual) and a remote delete asks first and says it is permanent (no remote trash). After a
+successful operation the existing explorer file-job refresh reloads the remote tree through
+its reload command, so the update loop never waits on the host. Cut/copy/paste of remote
+subtrees, drag/move and duplicate stay refused with one notice (a tree capability, not a
+hidden local operation); real-host manual acceptance and undo/history for remote writes
+remain open.
 
-The authority file port now has \`FileSystem.ReadRange(ctx, path, off, n)\`: a bounded
-window read (local \`pread\`, SSH \`tail -c +off+1 | head -c n\`), capped at 1 MiB per
-answer and returning \`io.EOF\` for a short final window. This is the transport seam remote
-large-file mode needs; opening a remote file over the editor's large-file threshold through a
-windowed \`buffer.Source\` (LRU pages, async prefetch off the ordinary paint path, read-only
-overlay/save decision) is not wired yet — the buffer's source interface is a synchronous
-\`io.ReaderAt\`, so a cache miss during a paint would block the Update loop until an async
-buffer/editor repaint seam exists. Remote files at or under the threshold still load whole
-through \`ReadFile\` (64 MiB transport cap) exactly as before; an over-cap remote file still
-fails clearly rather than opening a partial buffer. No local fallback is involved.
+### Windowed remote reads (remote large-file mode)
+
+The authority file port has \`FileSystem.ReadRange(ctx, path, off, n)\`: a bounded window
+read (local \`pread\`, SSH \`tail -c +off+1 | head -c n\`), capped at 1 MiB per answer and
+returning \`io.EOF\` for a short final window. Remote large-file mode builds on it: a remote
+file at or above the editor's large-file threshold opens through a windowed
+\`buffer.Source\` instead of being read whole.
+
+### How the windows load
+
+The document's window source keeps 1 MiB aligned windows with an LRU of 8 (about 8 MiB per
+document) and a window-arrival generation. \`ReadAt\` is **cache-only**: a miss records the
+window and returns \`buffer.ErrSourcePending\` immediately, doing no I/O, so a paint never
+waits on the carrier. The buffer treats that sentinel as retryable (it is not a source
+change: the buffer does not freeze, the document does not turn read-only for it, and the
+line paints blank for the moment). The TUI's large-file loop, which only exists while the
+active document is such a file, arms one short delayed check per update, loads the missed
+window in a \`tea.Cmd\` under the large-state context (cancelled when the model closes or
+the document goes away, which the source observes through the context passed to
+\`ReadRange\`), and the reply makes the next update repaint with the loaded text. One window
+after the requested range is prefetched when the LRU has room; farther scrolling misses
+again and loads the next window. Local large files keep the synchronous \`fileSource\` path
+unchanged and never arm the window loop.
+
+### Read-only in this slice
+
+Remote large files open **read-only**, and the status row says so: \`remote large file
+(read-only, windowed): the bytes stay on the remote host and load as you scroll\`. This is a
+deliberate divergence from Fresh: Fresh edits a large file through an overlay and saves a
+patched recipe that the host applies (unchanged parts are copied on the host), while gvim's
+remote save path is the authority's atomic whole-file write, which cannot rebuild the
+unchanged parts without reading all of them back. A remote overlay save (or a windowed
+render-and-write recipe) is a later slice; until then the read-only reason is explicit, not
+silent. Remote files at or under the threshold still load whole through \`ReadFile\` (64 MiB
+transport cap) exactly as before, and an over-cap file with no windowed reader still fails
+clearly rather than opening a partial buffer. Every byte is read through the authority: there
+is no local fallback, no temporary copy of the remote text on the local disk, and a remote
+file that is not UTF-8 fails with a clear \`too large to transcode\` error instead of loading
+whole.
+
+## SSH config, ProxyJump and agent forwarding
+
+gvim dials with x/crypto/ssh, not the `ssh(1)` binary, so it reads a **bounded subset** of
+the user's OpenSSH config itself (`authority/ssh_config.go`). The app passes the default
+path (`~/.ssh/config`); embedding/tests may disable it (`SSHOptions.ConfigPath == ""`).
+A missing file is not an error: the no-config behaviour is unchanged. Files are capped at
+256 KiB / 4096-byte lines / 256 Host blocks; a malformed or oversized file is a clear dial
+error, never a silent fallback.
+
+Supported directives: `Host` patterns (`*`, `?`, `!` negation), `HostName`, `User`,
+`Port`, `IdentityFile` (accumulates, as OpenSSH does; `~` and the `%h`/`%r`/`%p`/`%d`/
+`%u`/`%%` tokens are expanded), `ProxyJump`, `IdentityAgent` (`none` disables) and
+`ForwardAgent`. Resolution is OpenSSH's first-obtained-value rule: global options, then
+matching Host blocks in file order. A `user@host` target keeps its explicit user and an
+`ssh://host:port` target keeps its explicit port; a config `User`/`Port` fills a target
+that did not spell one (a URL's `$USER` fallback is **not** an override). A configured
+`HostName` always replaces the alias for dialing; the status label keeps the alias the
+user typed.
+
+**ProxyJump** is supported for **one hop**: the target is reached through the jump host's
+`direct-tcpip` tunnel over the same client, and the target's host key is still verified
+against the target's known_hosts entry. A comma list or a jump that itself has ProxyJump is
+a clear error. Jump-specific credentials are not read (the same agent/identity/password is
+used for both hops) — a recorded residual.
+
+**Agent forwarding** (`ForwardAgent yes` in config, or `SSHOptions.ForwardAgent`) forwards
+the local agent through `x/crypto/ssh/agent`: the backend sets up the forwarding listener on
+the client and sends `auth-agent-req@openssh.com` on every session (one-shot, long-running
+and the integrated terminal), so a remote ssh/git inside a session can use the local keys.
+Forwarding without any local agent is a clear error at dial. The forwarded agent is not
+persistent across a reconnect in a way the remote process could rely on; the session gets
+the new connection's local agent.
+
+**Host keys and algorithms** stay explicit and conservative: no `StrictHostKeyChecking`,
+`UserKnownHostsFile`, `HostKeyAlgorithms`, `Ciphers`, `MACs` or `KexAlgorithms` directive is
+read (residual); host keys always go through `knownhosts.New` (or the injected test
+callback), and an unknown host is a clear error naming known_hosts and how to add the key.
+x/crypto's default algorithm set applies. No local fallback and no `ssh(1)` subprocess are
+involved.
+
+Also ignored (recorded residual): `Include`, `Match`, `ProxyCommand`, `Canonicalize*`,
+`ForwardAgent` per-host with a local command, system-wide `/etc/ssh/ssh_config`, and
+multiple jump hops.
+
+Tests: parser/Host-pattern/first-value/token/limit and target-override tables
+(`ssh_config_test.go`); a real two-in-process-server ProxyJump run (jump proxies
+`direct-tcpip` to the target) and a fake-agent forwarding run whose server reads the local
+agent's identities through the forwarded channel (`ssh_config_remote_test.go`); the existing
+suite proves the no-config path is unchanged.

@@ -97,10 +97,16 @@ the Save-As suggestion.
 
 A FILE may be a remote target instead: user@host:/path or
 ssh://[user@]host[:port]/path, optionally ending in :LINE[:COL]. ssh:// is exclusive
-(a malformed URL is a startup error) and the path may contain colons. This slice opens
-the SSH session's terminal at the remote workspace and says that remote file editing is
-the follow-up; remote targets take no local directory or files, are not restored or
-saved in the local session, and cannot be combined with --diff or --daemon.
+(a malformed URL is a startup error) and the path may contain colons. A direct remote
+launch mounts the SSH authority (the remote editor, terminal, search and LSP) and takes
+no local directory or files, is not restored or saved in the local session, and cannot be
+combined with --diff.
+
+With --daemon a remote target makes the daemon a jump box: the daemon runs on THIS machine
+and hosts the remote workspace over SSH, so only this machine needs gvim. For example
+"gvim --daemon=webserver deploy@server:/etc/nginx" starts it, and "gvim --attach=webserver"
+reattaches after a detach; a reattach ignores the remote target (the daemon owns SSH).
+Each workspace binds one backend, so local and remote workspaces can coexist in one daemon.
 
 --daemon runs the editor as a daemon on a Unix socket (in the foreground; it prints the
 socket it listens on) and --attach/-a forwards this terminal to a running daemon. The

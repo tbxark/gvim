@@ -125,6 +125,12 @@ type largeState struct {
 	// indexBusy is set while a command runs a step of the line index. One runs at a
 	// time, whichever document it is for.
 	indexBusy bool
+	// windowBusy is set while a command loads one window of a remote large document;
+	// windowPollPending says a delayed miss check is armed, and windowSkipArm stops
+	// the check itself from arming another (an idle remote document never polls).
+	windowBusy        bool
+	windowPollPending bool
+	windowSkipArm     bool
 	// stream is the scan that counts the matches for the find bar, or nil.
 	stream *searchRun
 	// nav is where the last F3, Enter or Shift+F3 search ran out of its budget, or nil.
@@ -237,6 +243,11 @@ func (m *Model) largeMessage(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case indexMsg:
 		m.indexDone(msg)
+		return nil, true
+	case windowPollMsg:
+		return m.windowPolled(msg), true
+	case windowFetchedMsg:
+		m.windowDone(msg)
 		return nil, true
 	case searchStepMsg:
 		return m.searchStepped(msg.run), true

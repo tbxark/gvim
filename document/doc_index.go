@@ -50,6 +50,9 @@ type largeDoc struct {
 	// the file the buffer reads, with size: the identity that a stash of unsaved edits
 	// must fit (see large_stash.go).
 	Mtime, Skip int64
+	// RemoteWindowed marks a large document whose bytes are windowed over a remote
+	// authority (read-only in this slice). The status row says so.
+	RemoteWindowed bool
 	// stashDir is where a stash of the unsaved edits is written when the file changes
 	// under the document. It is empty when there is no session directory.
 	StashDir string

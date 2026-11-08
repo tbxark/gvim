@@ -25,12 +25,31 @@ type ioRuntime struct {
 	r      *Runtime
 	states map[string]*stateEntry
 	procs  map[*process]struct{}
+
+	// The workspace-scoped state target (#19b): one versioned file for every plugin's
+	// gvim.state instead of the editor-wide per-plugin files. Empty path keeps the old
+	// behavior byte-identical.
+	wsPath     string
+	wsReadOnly bool
+	wsDirty    bool
+	wsArmed    bool
+	wsBusy     bool
+	// wsSeq invalidates a queued write when a newer write (or the Stop flush) owns the
+	// file; a stale Work skips its write instead of overwriting newer content.
+	wsSeq atomic.Uint64
 }
 
 // io returns the IO state of the runtime, creating it (and the stop hook) on first use.
 func (r *Runtime) io() *ioRuntime {
 	if r.ioR == nil {
-		r.ioR = &ioRuntime{r: r, states: map[string]*stateEntry{}, procs: map[*process]struct{}{}}
+		io := &ioRuntime{r: r, states: map[string]*stateEntry{}, procs: map[*process]struct{}{}}
+		io.wsPath = r.workspaceStateFile
+		io.wsReadOnly = r.workspaceStateReadOnly
+		io.seedWorkspace(r.workspaceState)
+		if r.workspaceStateNote != "" {
+			r.logf("", levelWarn, r.workspaceStateNote)
+		}
+		r.ioR = io
 		r.onStop(r.ioR.stop)
 	}
 	return r.ioR
@@ -43,7 +62,14 @@ func (io *ioRuntime) stop() {
 			_ = pr.osp.Kill("KILL")
 		}
 	}
+	if io.wsPath != "" {
+		// Workspace-scoped state: one file, flushed before the OS is shut down.
+		io.wsFlush()
+	}
 	io.r.os.Shutdown()
+	if io.wsPath != "" {
+		return
+	}
 	names := make([]string, 0, len(io.states))
 	for n := range io.states {
 		names = append(names, n)
@@ -151,6 +177,11 @@ func (io *ioRuntime) state(name string) *stateEntry {
 // StateFile is the path of the state file of a plugin ("" when the OS knows no config
 // directory). The loader reads it in its discovery Work and passes the bytes to SeedState.
 func (r *Runtime) StateFile(name string) string {
+	if r.workspaceStateFile != "" {
+		// Workspace mode uses one file for every plugin; the per-plugin files are not
+		// read or written this way (WorkspaceStatePath names the file).
+		return ""
+	}
 	return stateFilePath(r.os.Dirs().Config, name)
 }
 
@@ -199,6 +230,9 @@ func (e *stateEntry) put(k string, v json.RawMessage) {
 // set stores the encoded value; it reports a limit error when the state would exceed
 // maxState.
 func (e *stateEntry) set(k string, v json.RawMessage) error {
+	if e.io.wsReadOnly {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "workspace plugin state %s is read-only: it was written by a newer gvim", e.io.wsPath)
+	}
 	extra := len(k) + len(v)
 	if old, ok := e.vals[k]; ok {
 		extra -= len(k) + len(old)
@@ -213,6 +247,9 @@ func (e *stateEntry) set(k string, v json.RawMessage) error {
 }
 
 func (e *stateEntry) delete(k string) {
+	if e.io.wsReadOnly {
+		return
+	}
 	if old, ok := e.vals[k]; ok {
 		e.size -= len(k) + len(old)
 		delete(e.vals, k)
@@ -223,6 +260,10 @@ func (e *stateEntry) delete(k string) {
 
 // changed marks the state dirty and starts the debounce when no write is pending.
 func (e *stateEntry) changed() {
+	if e.io.wsPath != "" {
+		e.io.wsStateChanged()
+		return
+	}
 	e.dirty = true
 	e.arm()
 }
@@ -344,5 +385,145 @@ func (e *stateEntry) flush() {
 	defer cancel()
 	if err := writeStateFile(ctx, r.os, path, e.snapshot(), merge, mine); err != nil {
 		r.logf(e.name, levelWarn, "saving state: "+errString(err))
+	}
+}
+
+// ---------- workspace-scoped state (#19b slice)
+
+// seedWorkspace loads the parsed workspace state into the plugin entries. It runs when the
+// runtime first touches its IO state (on Start/plugin load, on the UI goroutine) and does no
+// IO: the app read and parsed the file off the update loop. Values over the per-plugin quota
+// or with an invalid key are skipped, exactly like a damaged per-plugin file is.
+func (io *ioRuntime) seedWorkspace(st *WorkspaceState) {
+	if st == nil || io.wsPath == "" {
+		return
+	}
+	names := make([]string, 0, len(st.Plugins))
+	for name := range st.Plugins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		vals := st.Plugins[name]
+		if len(vals) == 0 {
+			continue
+		}
+		e := &stateEntry{io: io, name: name, vals: map[string]json.RawMessage{}, touched: map[string]struct{}{}, seeded: true}
+		keys := make([]string, 0, len(vals))
+		for k := range vals {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := vals[k]
+			if k == "" || len(k) > maxStateKey {
+				continue
+			}
+			if e.size+len(k)+len(v) > maxState {
+				continue
+			}
+			e.put(k, v)
+		}
+		io.states[name] = e
+	}
+}
+
+// wsStateChanged marks the workspace file dirty and arms the write-behind. Every plugin's
+// change coalesces into ONE write of the whole file.
+func (io *ioRuntime) wsStateChanged() {
+	if io.wsPath == "" || io.wsReadOnly {
+		return
+	}
+	io.wsDirty = true
+	io.wsArm()
+}
+
+// wsArm starts the debounce timer unless a write is pending or in flight.
+func (io *ioRuntime) wsArm() {
+	r := io.r
+	if io.wsPath == "" || io.wsReadOnly || io.wsArmed || io.wsBusy || r.stopped {
+		return
+	}
+	io.wsArmed = true
+	tok := r.newToken()
+	r.expectRuntime(tok, func(pluginapi.Completion) {
+		io.wsArmed = false
+		io.wsWrite()
+	})
+	r.work = append(r.work, pluginapi.Work{Token: tok, After: stateDebounce, Ctx: context.Background()})
+}
+
+// wsWrite queues one atomic write of the whole workspace state file. The file is bounded by
+// maxStateFile: over the bound the write is skipped with a warning (the in-memory state
+// stays, the file keeps its previous content).
+func (io *ioRuntime) wsWrite() {
+	r := io.r
+	if io.wsPath == "" || io.wsReadOnly || !io.wsDirty || io.wsBusy {
+		return
+	}
+	data := io.wsSnapshot()
+	if len(data) > maxStateFile {
+		io.wsDirty = false
+		r.logf("", levelWarn, fmt.Sprintf("workspace plugin state is larger than %d bytes; not saved", maxStateFile))
+		return
+	}
+	io.wsDirty = false
+	io.wsBusy = true
+	seq := io.wsSeq.Add(1)
+	path, osys := io.wsPath, r.os
+	tok := r.newToken()
+	r.expectRuntime(tok, func(c pluginapi.Completion) {
+		io.wsBusy = false
+		if c.Err != "" {
+			r.logf("", levelWarn, "saving workspace plugin state: "+c.Err)
+		}
+		if io.wsDirty {
+			io.wsArm()
+		}
+	})
+	r.work = append(r.work, pluginapi.Work{Token: tok, Ctx: context.Background(), Run: func(ctx context.Context) pluginapi.Completion {
+		if io.wsSeq.Load() != seq {
+			return pluginapi.Completion{Token: tok} // a newer write (flush) owns the file
+		}
+		if err := writeStateFile(ctx, osys, path, data, nil, nil); err != nil {
+			return pluginapi.Completion{Token: tok, Err: errString(err)}
+		}
+		return pluginapi.Completion{Token: tok}
+	}})
+}
+
+// wsSnapshot encodes every plugin's state as the versioned workspace file. Map keys are
+// marshalled sorted, so the file is deterministic.
+func (io *ioRuntime) wsSnapshot() []byte {
+	plugins := make(map[string]map[string]json.RawMessage, len(io.states))
+	for name, e := range io.states {
+		if len(e.vals) == 0 {
+			continue
+		}
+		plugins[name] = e.vals
+	}
+	data, err := json.Marshal(WorkspaceState{Version: WorkspaceStateVersion, Plugins: plugins})
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// wsFlush writes the workspace file synchronously on Stop. It invalidates a queued write so
+// an older snapshot cannot land after it.
+func (io *ioRuntime) wsFlush() {
+	if io.wsPath == "" || io.wsReadOnly || !io.wsDirty {
+		return
+	}
+	io.wsSeq.Add(1)
+	io.wsArmed, io.wsBusy, io.wsDirty = false, false, false
+	data := io.wsSnapshot()
+	if len(data) == 0 || len(data) > maxStateFile {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stateFlushWait)
+	defer cancel()
+	if err := writeStateFile(ctx, io.r.os, io.wsPath, data, nil, nil); err != nil {
+		io.r.logf("", levelWarn, "saving workspace plugin state: "+errString(err))
 	}
 }

@@ -68,6 +68,11 @@ type bigStore struct {
 // fail records the first source error and freezes reads that would need the
 // source. Cached data keeps being served.
 func (s *bigStore) fail(err error) {
+	if errors.Is(err, ErrSourcePending) {
+		// A window miss is retryable: it is loaded in a command and the next
+		// paint reads it. Do not freeze the buffer for it.
+		return
+	}
 	if s.err == nil {
 		s.err = err
 		s.frozen = err

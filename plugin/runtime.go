@@ -51,6 +51,20 @@ type Options struct {
 	// Locale is the editor's locale for gvim.i18n ("" means "en", the only built-in locale
 	// today). It is read when a plugin loads, so the value is stable for the plugin's life.
 	Locale string
+	// WorkspaceStateFile, when set, is the workspace-scoped gvim.state file of a daemon
+	// workspace (sessions/<stable-id>/plugin-state.json). Then every plugin's state lives
+	// in that ONE versioned file instead of the editor-wide per-plugin files; "" keeps the
+	// editor-wide behavior a direct launch has.
+	WorkspaceStateFile string
+	// WorkspaceState is the parsed content of WorkspaceStateFile, read by the app off the
+	// update loop (nil: empty or not read).
+	WorkspaceState *WorkspaceState
+	// WorkspaceStateReadOnly is set when the file was written by a newer gvim: state writes
+	// are refused and the file is never overwritten.
+	WorkspaceStateReadOnly bool
+	// WorkspaceStateNote, when not empty, is logged once the workspace state is first
+	// touched (a damaged file was ignored, or the read-only version guard explains itself).
+	WorkspaceStateNote string
 }
 
 // Runtime runs Lua plugins. It implements pluginapi.Runtime and is not safe for use from
@@ -67,6 +81,12 @@ type Runtime struct {
 	heapLimit int64
 	check     bool
 	debug     bool
+	// workspaceStateFile/workspaceState/workspaceStateReadOnly/workspaceStateNote are the
+	// per-workspace gvim.state target (empty: the editor-wide per-plugin files).
+	workspaceStateFile     string
+	workspaceState         *WorkspaceState
+	workspaceStateReadOnly bool
+	workspaceStateNote     string
 
 	// wantsMemo remembers the answer of Wants per event. Anything that can change an answer
 	// (a subscription made or dropped, a plugin loaded, unloaded, suspended or failed) calls
@@ -165,11 +185,24 @@ func New(o Options) *Runtime {
 	}
 	if o.Loader != nil {
 		opt := *o.Loader // the runtime changes Settings on a config reload
+		if o.WorkspaceStateFile != "" {
+			// Workspace mode never reads or writes the editor-wide per-plugin state
+			// files, whatever the caller's loader options said.
+			opt.WorkspaceState = true
+		}
 		r.ld.opt = &opt
 	}
+	r.workspaceStateFile = o.WorkspaceStateFile
+	r.workspaceState = o.WorkspaceState
+	r.workspaceStateReadOnly = o.WorkspaceStateReadOnly
+	r.workspaceStateNote = o.WorkspaceStateNote
 	r.setHost(pluginapi.Unsupported{})
 	return r
 }
+
+// WorkspaceStatePath is the per-workspace gvim.state file of this runtime, or "" for the
+// editor-wide per-plugin files (direct launch). It is the seam the app and tests observe.
+func (r *Runtime) WorkspaceStatePath() string { return r.workspaceStateFile }
 
 // SetLocale sets the locale plugins translate for: gvim.i18n.locale() returns it and
 // gvim.i18n.t falls back to English. The app calls it on the update loop, at startup and

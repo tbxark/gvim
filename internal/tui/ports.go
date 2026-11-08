@@ -646,6 +646,9 @@ type Deps struct {
 	SwitchKeymap func(name string) (Keymap, error)
 	// Clock supplies the press times for double-click detection. Nil means time.Now.
 	Clock func() time.Time
+	// LargeWindows loads windows of a remote windowed large document. Nil keeps such
+	// documents blank where their windows are not loaded (no polling is armed).
+	LargeWindows LargeWindowLoader
 	// View holds the starting display settings. Nil means DefaultViewOptions.
 	View *ViewOptions
 	// Languages resolves the per-language settings (config languages.<id> merged over

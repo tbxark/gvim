@@ -114,11 +114,23 @@ gvim.state.delete(key) -> true
 gvim.state.keys() -> string[]
 ```
 
-A JSON key-value store per plugin, in `plugin-data/<name>/state.json`. Values must be
-representable as JSON (strings, numbers, booleans, tables of those); the whole store is capped
-at 1 MiB (`limit`). Writes are visible to the next read at once and are flushed to disk in the
-background within 500 ms and when gvim exits; a crash can lose the last half second. State
-survives reloads, not an uninstall.
+A JSON key-value store per plugin. Values must be representable as JSON (strings,
+numbers, booleans, tables of those); the whole store is capped at 1 MiB (`limit`).
+Writes are visible to the next read at once and are flushed to disk in the background within
+500 ms and when gvim exits; a crash can lose the last half second. State survives reloads, not
+an uninstall.
+
+**Scope.** A direct launch keeps the editor-wide store in `plugin-data/<name>/state.json`,
+shared by every session of that gvim. A DAEMON workspace scopes it to the workspace: the
+state is kept in `sessions/<stable-id>/plugin-state.json` in the workspace's session
+directory, one versioned file (`{"version":1,"plugins":{name:{key:value}}}`) for
+all of its plugins, restored when the workspace is materialized and flushed when it is closed
+or the daemon exits. Switching workspaces therefore reads and writes that workspace's state;
+two workspaces (co-tenants included) never see each other's keys. The file is bounded per
+plugin (1 MiB) and in all (8 MiB; an over-bound save is skipped with a warning, never
+truncated). A file written by a newer gvim is read-only: `set` returns an invalid
+error and the file is never overwritten. Plugin enablement/settings and the plugin manager's
+toggles stay editor-wide in the daemon too.
 
 ## gvim.dirs and gvim.env
 

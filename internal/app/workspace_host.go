@@ -101,7 +101,22 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 		}
 		root = wd
 	}
-	disc, err := reg.Discover(root)
+	specText := ""
+	if opts.Remote != nil {
+		specText, err = authoritySpecText(opts.Remote)
+		if err != nil {
+			return nil, fmt.Errorf("daemon: remote authority: %w", err)
+		}
+	}
+	var disc daemon.Discovery
+	if specText != "" {
+		// The daemon was started with a remote target (jump box): the foreground
+		// workspace is bound to that authority spec, and a restart with the same target
+		// reuses the same stable id/session directory.
+		disc, err = reg.DiscoverWithAuthority(opts.Remote.Workspace(), specText)
+	} else {
+		disc, err = reg.Discover(root)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +136,31 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 	m.sessions[sess.ws.File.StableID] = sess
 	m.active = sess.ws.File.StableID
 	return m, nil
+}
+
+// ensureForegroundAuthority connects a daemon-started remote foreground workspace on the
+// daemon's own terminal before the socket starts hosting: the Fresh jump-box daemon answers
+// password/passphrase/2FA prompts there once, then attaches need no SSH setup of their own.
+// A non-interactive daemon fails with an actionable error instead of prompting on a stdin
+// nobody answers.
+func (m *workspaceManager) ensureForegroundAuthority(ctx context.Context) error {
+	m.mu.Lock()
+	sess := m.sessions[m.active]
+	m.mu.Unlock()
+	if sess == nil || sess.ws.File.AuthoritySpec == "" {
+		return nil
+	}
+	if sess.rt.auth == nil || sess.rt.auth.State().Connected {
+		return nil
+	}
+	prompter, err := daemonPrompterFactory()
+	if err != nil {
+		return err
+	}
+	if err := connectDaemonAuthority(ctx, sess.rt.auth, prompter); err != nil {
+		return err
+	}
+	return nil
 }
 
 // setHost gives the manager the workspace host that swaps program models.
@@ -180,6 +220,17 @@ func (m *workspaceManager) workspaceOptions(ws daemon.Workspace) (Options, error
 	opts.Root = ws.File.Root
 	opts.Files = nil
 	opts.Remote = nil
+	if ws.File.AuthoritySpec != "" {
+		spec, err := parseAuthoritySpec(ws.File.AuthoritySpec)
+		if err != nil {
+			return Options{}, fmt.Errorf("workspace %q: remote authority %q: %w", ws.File.Label, ws.File.AuthoritySpec, err)
+		}
+		opts.Remote = spec
+		// The remote root is not a local directory: buildRuntime resolves the local
+		// process root itself for a remote launch (remoteLocalRoot) and uses the remote
+		// workspace path from the spec.
+		opts.Root = ""
+	}
 	opts.Diff = false
 	opts.Restore = false
 	opts.NoRestore = false
@@ -935,6 +986,11 @@ func runDaemonHost(ctx context.Context, srv *daemon.Server, opts Options) (err e
 		}
 		err = errors.Join(err, saveErr)
 	}()
+	// The foreground remote workspace connects before the socket hosts, so the first
+	// attach never waits on SSH and interactive prompts happen on the daemon terminal.
+	if err := ws.ensureForegroundAuthority(ctx); err != nil {
+		return err
+	}
 	srv.OnWorkspaceRequest(ws.handleRequest)
 	srv.OnOpenFilesAt(ws.openFiles)
 	host := tui.NewWorkspaceHost(ws.ForegroundModel())

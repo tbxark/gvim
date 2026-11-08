@@ -996,7 +996,7 @@ func (t *Tabs) SavedState() terminal.SavedState {
 			Name: t.names[i], Open: rec.Open, Cwd: rec.Cwd, Width: rec.Width,
 			Rows: rec.Rows, LaunchArgv: rec.LaunchArgv, ResumeArgv: rec.ResumeArgv,
 			Agent: rec.Agent, Ephemeral: rec.Ephemeral, LaunchDir: rec.LaunchDir,
-			Source: rec.Source, Live: rec.Live,
+			Source: rec.Source, Live: rec.Live, Screen: rec.Screen,
 		}
 	}
 	st.ActiveTab = t.active
@@ -1019,7 +1019,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 			Open: st.Open, Cwd: st.Cwd, Width: st.Width, Rows: st.Rows,
 			LaunchArgv: st.LaunchArgv, ResumeArgv: st.ResumeArgv,
 			Agent: st.Agent, Ephemeral: st.Ephemeral, LaunchDir: st.LaunchDir,
-			Source: st.Source, Live: st.Live,
+			Source: st.Source, Live: st.Live, Screen: st.Screen,
 		}}
 	}
 	for _, tab := range saved {
@@ -1032,7 +1032,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 			Version: st.Version, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
 			Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
 			Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
-			Source: tab.Source, Live: tab.Live,
+			Source: tab.Source, Live: tab.Live, Screen: tab.Screen,
 		})
 		t.tabs = append(t.tabs, &p)
 		t.names = append(t.names, tab.Name)

@@ -46,6 +46,12 @@ type SavedState struct {
 	// exited, so it restores exactly as before); a live-at-capture tab may be
 	// revived on the user's first dive into it, an exited one never is.
 	Live bool `json:"live,omitempty"`
+	// Screen is the bounded styled snapshot of the visible screen at the capture.
+	// It is additive and optional (an old record has none and restores the plain
+	// text transcript exactly as before); a restored tab paints the snapshot above
+	// the new shell after a revive, giving the saved screen its styles back instead
+	// of plain rows. See SavedScreen for the bounds.
+	Screen *SavedScreen `json:"screen,omitempty"`
 	// Tabs holds every dock terminal tab when the dock had more than the one the
 	// top-level fields describe. The top-level fields mirror the active tab, so a
 	// reader that does not know Tabs still restores that tab; a reader that does
@@ -73,4 +79,6 @@ type SavedTab struct {
 	// Live mirrors SavedState.Live for this tab: a process was running when the tab
 	// was captured. Absent means exited (the old-record meaning).
 	Live bool `json:"live,omitempty"`
+	// Screen mirrors SavedState.Screen for this tab.
+	Screen *SavedScreen `json:"screen,omitempty"`
 }

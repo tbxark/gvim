@@ -130,6 +130,16 @@ func (p *Panel) SavedState() terminal.SavedState {
 	// revived on a dive after the restore. A restored tab that was not revived is
 	// dead and is saved as dead, so a later restore never starts it automatically.
 	st.Live = p.term != nil && !p.exited
+	// The styled screen snapshot preserves the visible screen's colours/attributes
+	// across the restore (Fresh's backing file keeps the screen too). A live terminal
+	// snapshots its screen; a restored tab without a shell keeps the styled tail of
+	// its prior transcript, so another save does not wash its styles out.
+	switch {
+	case p.term != nil:
+		st.Screen = terminal.SnapshotScreen(p.term.Screen())
+	case len(p.prior) > 0:
+		st.Screen = terminal.SnapshotLines(p.prior)
+	}
 	// The launch record of the terminal that produced the transcript, so the
 	// user-initiated restart can rejoin it after an editor restart.
 	launch := p.launch.Clean()
@@ -210,6 +220,10 @@ func (p *Panel) Restore(st terminal.SavedState) {
 	for _, text := range rows {
 		p.prior = append(p.prior, lineFromText(text))
 	}
+	// The styled snapshot replaces the text tail it was captured from, but only
+	// when its text matches exactly; a mismatched/corrupt snapshot is ignored whole
+	// so a restore never paints different content than the transcript rows.
+	p.applyScreenSnapshot(st.Screen)
 	p.restored = true
 	p.wasLive = st.Live
 	p.reflowed = false
@@ -256,6 +270,24 @@ func clipSavedDir(dir string) string {
 		cut = cut[:len(cut)-1]
 	}
 	return cut
+}
+
+// applyScreenSnapshot overlays the styled saved screen onto the tail of the text
+// prior. The snapshot is used only when its row count fits and every row's text
+// matches the corresponding tail row exactly; otherwise the plain rows stay
+// (migration and corruption safety).
+func (p *Panel) applyScreenSnapshot(screen *terminal.SavedScreen) {
+	lines := screen.Lines()
+	if len(lines) == 0 || len(lines) > len(p.prior) {
+		return
+	}
+	tail := p.prior[len(p.prior)-len(lines):]
+	for i := range lines {
+		if lines[i].Text() != tail[i].Text() {
+			return
+		}
+	}
+	copy(tail, lines)
 }
 
 // Restored reports whether the dock shows a restored transcript without a shell.

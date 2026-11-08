@@ -44,8 +44,25 @@ func (f *remoteFS) setErr(err error) {
 	f.err = err
 }
 
-func (f *remoteFS) ReadRange(context.Context, string, int64, int64) ([]byte, error) {
-	return nil, errors.New("not needed by the remote editor tests")
+func (f *remoteFS) ReadRange(_ context.Context, path string, off, n int64) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	data, ok := f.files[path]
+	if !ok {
+		return nil, iofs.ErrNotExist
+	}
+	if off < 0 || off > int64(len(data)) {
+		return nil, errors.New("offset outside the file")
+	}
+	end := min(off+n, int64(len(data)))
+	out := append([]byte(nil), data[off:end]...)
+	if end < off+n {
+		return out, errors.New("short read")
+	}
+	return out, nil
 }
 
 func (f *remoteFS) ReadFile(_ context.Context, path string, max int64) ([]byte, error) {

@@ -26,12 +26,21 @@ import (
 // newAuthority mounts the slot of the session. It never dials a remote: the startup
 // attempt (and the activation retry, with a password prompt when needed) call Reconnect,
 // because a password prompt needs the running UI.
+// mountAuthority builds the workspace authority slot of a launch. Tests replace it to
+// inject an in-process fake authority (a remote daemon workspace without a real SSH
+// carrier); production is newAuthority.
+var mountAuthority = newAuthority
+
 func newAuthority(opts Options, pw *pluginhost.Wiring, gate authority.Gate, gateEnv authority.GateEnv, env authority.EnvProvider) authority.Slot {
 	if opts.Remote != nil {
 		return authority.NewSSH(authority.SSHOptions{
 			Spec:           *opts.Remote,
 			Timeout:        15 * time.Second,
 			KnownHostsPath: sshKnownHostsPath(),
+			// OpenSSH user config (Host/HostName/User/Port/IdentityFile/ProxyJump/
+			// IdentityAgent/ForwardAgent) is read by the pure-Go backend; it never
+			// falls back to running ssh(1).
+			ConfigPath: authority.DefaultSSHConfigPath(),
 			// The UI supplies a password, an encrypted key's passphrase or a 2FA answer
 			// after the matching failure (activation/background prompt). Returning the
 			// sentinels records the request with the backend so the next reconnect can

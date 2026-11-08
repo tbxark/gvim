@@ -253,12 +253,16 @@ func TestRemoteTreeReveal(t *testing.T) {
 	}
 }
 
-// TestRemoteTreeReadOnlyCapability checks the tree advertises the read-only surface the
-// panel and the root consult.
-func TestRemoteTreeReadOnlyCapability(t *testing.T) {
+// TestRemoteTreeWriteCapabilities checks the tree advertises the capability shape the
+// panel and the root consult: file creation/rename/delete are available, the subtree
+// clipboard is not, and remote gitignore filtering stays unsupported.
+func TestRemoteTreeWriteCapabilities(t *testing.T) {
 	tree := NewRemoteExplorerTree("/srv/proj", remoteTreeTestLoader())
-	if !tree.ReadOnly() {
-		t.Fatal("the remote tree does not report read-only")
+	if tree.ReadOnly() {
+		t.Fatal("the remote tree reports read-only although file operations are available")
+	}
+	if !tree.ClipboardDisabled() {
+		t.Fatal("the remote tree does not report the unavailable cut/copy/paste support")
 	}
 	if tree.ShowIgnored() {
 		t.Fatal("the remote tree reports gitignore filtering, which is not implemented")

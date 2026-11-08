@@ -39,6 +39,10 @@ type Options struct {
 	Locale    string             // gvim.i18n locale ("" means "en")
 	// Settings are the plugins.<name>.settings layers of the config, per plugin name.
 	Settings map[string]plugin.PluginSettings
+	// WorkspaceStateFile/WorkspaceStateData are a daemon workspace's per-workspace
+	// gvim.state file and its content (""/nil: the editor-wide per-plugin files).
+	WorkspaceStateFile string
+	WorkspaceStateData []byte
 }
 
 // Harness plays the ui for a runtime: it starts it, calls Run/Emit/Resolve, pumps Drain
@@ -94,9 +98,25 @@ func New(t *testing.T, files Files, o Options) *Harness {
 	if heap == 0 {
 		heap = 4 << 30
 	}
+	var wsState *plugin.WorkspaceState
+	var wsReadOnly bool
+	var wsNote string
+	if o.WorkspaceStateFile != "" {
+		st, readOnly, err := plugin.ParseWorkspaceState(o.WorkspaceStateData)
+		switch {
+		case err != nil:
+			wsNote = "workspace plugin state ignored: " + err.Error()
+		case readOnly:
+			wsReadOnly, wsNote = true, "workspace plugin state is read-only: it was written by a newer gvim"
+		default:
+			wsState = st
+		}
+	}
 	h.RT = plugin.New(plugin.Options{
 		Timeout: o.Timeout, EventBudget: o.EventBudget, HeapLimit: heap, OS: osImpl, Services: svc,
 		Version: "test", Platform: "test", Locale: o.Locale, CheckGoroutine: true, Now: now,
+		WorkspaceStateFile: o.WorkspaceStateFile, WorkspaceState: wsState,
+		WorkspaceStateReadOnly: wsReadOnly, WorkspaceStateNote: wsNote,
 	})
 	h.settings = o.Settings
 	h.Sources = h.sources()

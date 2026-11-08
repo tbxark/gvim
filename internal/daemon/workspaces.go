@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -55,6 +56,11 @@ type WorkspaceFile struct {
 	// Root is the canonical workspace root (absolute, symlinks resolved). Version 2
 	// allows several workspaces to share one root; identity is the stable id.
 	Root string `json:"root"`
+	// AuthoritySpec is the canonical remote target of a workspace bound to a remote
+	// authority (the daemon jump-box mode): a user@host[:port]:path or ssh://... target
+	// text. Empty means a local workspace; registry v2 files written before this field
+	// load as local. One workspace is one backend.
+	AuthoritySpec string `json:"authority_spec,omitempty"`
 	// LastFocusedAt is when the workspace was last the active one, in Unix
 	// milliseconds. It orders the root groups and the workspaces inside a root, and
 	// breaks a duplicate-identity tie.
@@ -149,6 +155,30 @@ func CanonicalRoot(path string) (string, error) {
 	return resolved, nil
 }
 
+// canonicalRemoteRoot normalizes a remote workspace root without touching the local file
+// system: POSIX-cleaned, with "~"/"~/..." kept and "." for a relative root. A remote root
+// does not exist on this host, so it is never stat'ed or symlink-resolved.
+func canonicalRemoteRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", errors.New("workspace: empty remote root")
+	}
+	if strings.ContainsAny(root, "\x00\r\n") {
+		return "", errors.New("workspace: remote root contains a control character")
+	}
+	return path.Clean(root), nil
+}
+
+// workspaceRoot resolves the root a workspace is stored under: a remote authority's root is
+// normalized remotely (authoritySpec non-empty), a local one is canonicalized through the
+// local file system.
+func (r *Registry) workspaceRoot(root, authoritySpec string) (string, error) {
+	if strings.TrimSpace(authoritySpec) != "" {
+		return canonicalRemoteRoot(root)
+	}
+	return CanonicalRoot(root)
+}
+
 // List scans the registry and returns every workspace (registry v2: several may share one
 // canonical root), ordered by root group: roots by their freshest LastFocusedAt first, then
 // the workspaces of one root freshest first. Dedup keeps only an identical stable id's
@@ -191,15 +221,37 @@ func (r *Registry) Create(root, label string) (Workspace, bool, error) {
 	return r.createLocked(root, label)
 }
 
-// createLocked is Create without the lock.
+// CreateWithAuthority makes a workspace over a remote root bound to the canonical remote
+// target text, or returns the existing workspace for the same (root, spec). The remote root
+// is normalized without local IO. This is the daemon jump-box foreground workspace; local
+// workspaces keep using Create.
+func (r *Registry) CreateWithAuthority(root, label, authoritySpec string) (Workspace, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if strings.TrimSpace(authoritySpec) == "" {
+		return Workspace{}, false, errors.New("workspace: empty authority spec")
+	}
+	return r.createWithAuthorityLocked(root, label, authoritySpec)
+}
+
+// createLocked is Create without the lock: a local workspace (empty authority spec).
 func (r *Registry) createLocked(root, label string) (Workspace, bool, error) {
-	canonical, err := CanonicalRoot(root)
+	return r.createWithAuthorityLocked(root, label, "")
+}
+
+// createWithAuthorityLocked makes a workspace over root bound to authoritySpec, or returns
+// the existing one with the same (root, spec). An empty authoritySpec is the local path and
+// goes through CanonicalRoot; a remote one normalizes the root without local IO. Identity is
+// the stable id, so a remote workspace survives daemon restarts.
+func (r *Registry) createWithAuthorityLocked(root, label, authoritySpec string) (Workspace, bool, error) {
+	spec := strings.TrimSpace(authoritySpec)
+	canonical, err := r.workspaceRoot(root, spec)
 	if err != nil {
 		return Workspace{}, false, err
 	}
 	entries, _ := r.scan()
 	for _, w := range entries {
-		if w.File.Root == canonical {
+		if w.File.Root == canonical && w.File.AuthoritySpec == spec {
 			return w, false, nil
 		}
 	}
@@ -208,13 +260,18 @@ func (r *Registry) createLocked(root, label string) (Workspace, bool, error) {
 		return Workspace{}, false, err
 	}
 	if strings.TrimSpace(label) == "" {
-		label = filepath.Base(canonical)
+		if spec != "" {
+			label = path.Base(canonical)
+		} else {
+			label = filepath.Base(canonical)
+		}
 	}
 	w := Workspace{File: WorkspaceFile{
 		Version:       WorkspaceVersion,
 		StableID:      id,
 		Label:         label,
 		Root:          canonical,
+		AuthoritySpec: spec,
 		LastFocusedAt: r.now().UnixMilli(),
 	}}
 	saved, err := r.saveLocked(w)
@@ -328,7 +385,11 @@ func (r *Registry) saveLocked(w Workspace) (Workspace, error) {
 	// id, and therefore the session directory, is unchanged, only the format is upgraded.
 	w.File.Version = WorkspaceVersion
 	if w.File.Label == "" {
-		w.File.Label = filepath.Base(w.File.Root)
+		if w.File.AuthoritySpec != "" {
+			w.File.Label = path.Base(w.File.Root)
+		} else {
+			w.File.Label = filepath.Base(w.File.Root)
+		}
 	}
 	if w.File.LastFocusedAt == 0 {
 		w.File.LastFocusedAt = r.now().UnixMilli()
@@ -586,6 +647,10 @@ func readWorkspaceFile(path string) (WorkspaceFile, error) {
 	if file.Root == "" {
 		return WorkspaceFile{}, errors.New("workspace: root is empty")
 	}
+	file.AuthoritySpec = strings.TrimSpace(file.AuthoritySpec)
+	if strings.ContainsAny(file.AuthoritySpec, "\x00\r\n") {
+		return WorkspaceFile{}, errors.New("workspace: authority spec contains a control character")
+	}
 	if err := validateStableID(file.StableID); err != nil {
 		return WorkspaceFile{}, err
 	}
@@ -660,6 +725,30 @@ func (r *Registry) Discover(root string) (Discovery, error) {
 	if err != nil {
 		return Discovery{}, err
 	}
+	return r.discoveryLocked(foreground), nil
+}
+
+// DiscoverWithAuthority is Discover for a daemon started with a remote target: it resolves
+// a foreground workspace over the remote root bound to the canonical authority spec,
+// creating and saving it when absent, and returns every other workspace as dormant. A
+// restart with the same target reuses the workspace (and its stable id), so the session
+// directory and captured layout stay; local workspaces remain dormant entries that stay
+// local when switched to.
+func (r *Registry) DiscoverWithAuthority(root, authoritySpec string) (Discovery, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if strings.TrimSpace(authoritySpec) == "" {
+		return Discovery{}, errors.New("workspace: empty authority spec")
+	}
+	foreground, _, err := r.createWithAuthorityLocked(root, "", authoritySpec)
+	if err != nil {
+		return Discovery{}, err
+	}
+	return r.discoveryLocked(foreground), nil
+}
+
+// discoveryLocked assembles the discover result around foreground. The caller holds mu.
+func (r *Registry) discoveryLocked(foreground Workspace) Discovery {
 	list, problems := r.scan()
 	out := Discovery{Foreground: foreground, Problems: problems}
 	for _, w := range list {
@@ -668,5 +757,5 @@ func (r *Registry) Discover(root string) (Discovery, error) {
 		}
 		out.Dormant = append(out.Dormant, w)
 	}
-	return out, nil
+	return out
 }

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -217,7 +219,11 @@ type runtime struct {
 	projects   *uiadapter.Projects
 	watcher    *filewatch.Watcher // nil when no watch was started
 	sessionDir string             // empty when the session is neither restored nor saved
-	searchDir  string             // where the find history and toggles are kept; empty for nowhere
+	// pluginStateFile is the workspace-scoped gvim.state file of a daemon workspace
+	// (sessions/<stable-id>/plugin-state.json), or "" for a direct launch's editor-wide
+	// per-plugin state files. Observability/test seam; the plugin runtime owns the writes.
+	pluginStateFile string
+	searchDir       string // where the find history and toggles are kept; empty for nowhere
 	// stashDir is the session directory even when the session is not saved. A stash of
 	// the unsaved edits of a large file can be written there without a session file.
 	stashDir string
@@ -545,6 +551,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		opts.pluginLog = logFile.Plugin
 	}
 	deps := uiadapter.NewDeps(ed, km, th, tree, files)
+	// Remote large files read windows through the app's authority-backed loader in
+	// commands; a local session reports no async large document and arms no polling.
+	deps.LargeWindows = newLargeWindows(ed)
 	// The release check behind the status row element {update}: one bounded
 	// background request at startup, a daily debounce, and no error path the user
 	// must handle (docs/settings.md).
@@ -698,20 +707,37 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if adapter != nil {
 		markEdited = adapter.MarkEdited
 	}
+	// A daemon workspace scopes gvim.state to its own workspace session directory
+	// (sessions/<stable-id>/plugin-state.json); a direct launch keeps the editor-wide
+	// per-plugin state files. This read happens here, off the update loop: buildRuntime
+	// runs before the program starts, or in the workspace build goroutine. The plugin
+	// runtime seeds the parsed state when it starts and writes it back coalesced.
+	var pluginStateFile string
+	var pluginStateData []byte
+	if opts.Daemon != nil && opts.SessionDir != "" {
+		pluginStateFile = filepath.Join(opts.SessionDir, "plugin-state.json")
+		if data, err := os.ReadFile(pluginStateFile); err == nil {
+			pluginStateData = data
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			_, _ = fmt.Fprintf(os.Stderr, "gvim: warning: plugin state: %v\n", err)
+		}
+	}
 	pw := pluginhost.New(cfg, ed, markEdited, pluginhost.Options{
-		Paths:    opts.PluginPaths,
-		Disabled: opts.NoPlugins,
-		LogSink:  opts.pluginLog,
-		Version:  gvimVersion(),
-		Preset:   presetKeymap(opts.Keymap, cfg),
-		Root:     proj.RootDir,
-		SpawnEnv: localEnvOverlay(envProvider, opts.Remote != nil),
-		Gate:     spawnGate,
+		Paths:              opts.PluginPaths,
+		Disabled:           opts.NoPlugins,
+		LogSink:            opts.pluginLog,
+		Version:            gvimVersion(),
+		Preset:             presetKeymap(opts.Keymap, cfg),
+		Root:               proj.RootDir,
+		SpawnEnv:           localEnvOverlay(envProvider, opts.Remote != nil),
+		Gate:               spawnGate,
+		WorkspaceStateFile: pluginStateFile,
+		WorkspaceStateData: pluginStateData,
 	})
 	// The workspace authority: the local backend over the plugin OS (the same
 	// instance the plugin runtime uses) or the SSH backend of a remote launch. Every
 	// launch and one-shot goes through it; nothing downstream looks at the kind.
-	authSlot = newAuthority(opts, pw, authGate, spawnGate, localEnvOverlay(envProvider, opts.Remote != nil))
+	authSlot = mountAuthority(opts, pw, authGate, spawnGate, localEnvOverlay(envProvider, opts.Remote != nil))
 	if connectNotice, _ := attemptAuthorityConnect(ctx, authSlot); connectNotice != "" {
 		openNotices = append(openNotices, connectNotice)
 	}
@@ -762,12 +788,13 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// the authority file system, one command at a time, so the update loop never
 		// waits on the remote host. No local fallback: every listing is remote, the
 		// workspace trust gate runs before them, and a disconnected authority says so
-		// (the tree is reloaded after a reconnect). The tree is read-only, so the local
-		// file-operation adapter is cleared; file operations on the remote tree are a
-		// recorded gap (Fresh supports them over the authority).
+		// (the tree is reloaded after a reconnect). New File, New Directory, Rename and
+		// Delete run through the authority's FileMutations surface; the local file-operation
+		// adapter is never used for remote paths. Cut/paste of subtrees and drag/move stay
+		// unwired (recorded gaps): the explorer refuses them before the adapter.
 		deps.Explorer = tui.NewRemoteExplorerTree(remoteRoot, newAuthorityDirLoader(authSlot, authGate, remoteRoot))
 		deps.ShowExplorer = true
-		deps.Ops = nil
+		deps.Ops = newRemoteExplorerOps(authSlot, remoteRoot, authSlot.Label(), authGate, ed)
 		// Remote git marks and the quick-open file preview run through the same authority
 		// (remote cwd, remote env delta, spawn/trust gate), never through the local git or
 		// the local file system. The git read is briefly cached so save/watch/reload bursts
@@ -1015,15 +1042,16 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		sessionDir = opts.SessionDir
 	}
 	rt = &runtime{
-		model:      model,
-		ed:         ed,
-		projects:   proj,
-		watcher:    watcher,
-		sessionDir: sessionDir,
-		searchDir:  opts.SessionDir,
-		stashDir:   opts.SessionDir,
-		kept:       keptFiles(failed),
-		recovery:   restore.RecoveryDirFor(opts.SessionDir, watching),
+		model:           model,
+		ed:              ed,
+		projects:        proj,
+		watcher:         watcher,
+		sessionDir:      sessionDir,
+		pluginStateFile: pluginStateFile,
+		searchDir:       opts.SessionDir,
+		stashDir:        opts.SessionDir,
+		kept:            keptFiles(failed),
+		recovery:        restore.RecoveryDirFor(opts.SessionDir, watching),
 
 		recoveryWriter: deps.Root.Recovery,
 		log:            logFile,

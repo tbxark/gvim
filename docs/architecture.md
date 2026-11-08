@@ -144,8 +144,8 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 
 | Package | Role | Key facts |
 |---|---|---|
-| `buffer` | The text model: lines of runes, positions, edits, undo/redo, observer, large-file mode. | Two storage modes in one package: in-memory lines, and a disk-backed `bigStore` for large files (`OpenLarge`, `Snapshot`, `IndexScan`, `Rebase`). A split was considered and rejected: the mode is part of `Buffer`, not a layer on it (see `buffer/doc.go`). |
-| `document` | One open file: text, cursor/carets, selection, folds, view settings, saved/on-disk/encoding/EOL state, large-file mode, text commands and motions, document-level load/save planning, and the per-document plugin seam data. | The model half of the old `editor` god package; imports `buffer`/`search`/`syntax`/`textlayout`/`fold`/`diff`/`encoding`/`atomicfile`, never `editor`, `session` or `internal/`. |
+| `buffer` | The text model: lines of runes, positions, edits, undo/redo, observer, large-file mode. | Two storage modes in one package: in-memory lines, and a disk-backed `bigStore` for large files (`OpenLarge`, `Snapshot`, `IndexScan`, `Rebase`). A split was considered and rejected: the mode is part of `Buffer`, not a layer on it (see `buffer/doc.go`). The source can be an optional asynchronous `WindowSource` (remote large files): `ReadAt` is cache-only and a miss returns `ErrSourcePending` at once while recording the window (`TakePendingWindow`), so the paint path does not block; the root loads the window in a command (`LoadWindow`) and repaints. Local `fileSource` behavior is unchanged. |
+| `document` | One open file: text, cursor/carets, selection, folds, view settings, saved/on-disk/encoding/EOL state, large-file mode, text commands and motions, document-level load/save planning, and the per-document plugin seam data. Remote large files load through `remote_large.go`: a 1 MiB-aligned, 8-window LRU `buffer.WindowSource` over the authority's `RangeAccess`, read-only, with `TakePendingLargeWindow`/`LoadLargeWindow` for the root. | The model half of the old `editor` god package; imports `buffer`/`search`/`syntax`/`textlayout`/`fold`/`diff`/`encoding`/`atomicfile`, never `editor`, `session` or `internal/`. |
 | `editor` | The editing session: tabs, active document, action registry and `Do` dispatch, statuses, save/revert/autosave jobs, disk polling, shell jobs, settings resolution, marks/jumps, and the plugin seam's session half. | Imports `document`, `atomicfile`, `shellcmd` and the engine leaves; no UI. `editor/bridge.go` still aliases the moved names for consumers. |
 | `search` | Find, scan, replace and range search over `buffer` lines. | `visible.go` is the visible-window search (renamed from a misleading name). |
 | `syntax` | Chroma lexer resolution, token spans for a visible window, markdown inline styling, style table from a theme. | |
@@ -395,6 +395,23 @@ workspace model (#19).
   Tests cover the default and named daemon, the no-lost-work
   case (refused launch leaves the daemon's unsaved buffer and the file untouched), and
   the host mark lifecycle.
+- **Remote target / jump box (landed).** A daemon start may take a remote target:
+  gvim --daemon=NAME user@host:/path starts the daemon locally (this machine needs gvim;
+  the host needs only SSH) and hosts that remote workspace over the SSH authority, so the
+  editor, terminal, LSP, project search, remote explorer, git marks and quick-open all
+  address the remote host. The target is consumed only at daemon start and its canonical
+  text is persisted in the workspace registry (authority_spec), so a restart with the same
+  target reuses the same workspace identity and reconnects instead of minting a duplicate;
+  a reattach (gvim --attach=NAME) ignores the target in its arguments because the daemon
+  owns SSH. Before the socket hosts, the daemon connects its foreground remote workspace on
+  the daemon's own terminal and answers password, encrypted-key passphrase and 2FA prompts
+  there; a start without an interactive terminal fails with an actionable error instead of
+  prompting on a stdin nobody answers. A workspace binds one backend: local workspaces stay
+  local when switched to, and a dormant remote workspace materializes its own authority
+  lazily from its stored spec. Tests use an in-process fake authority (no real SSH): start
+  with a remote target, detach/reattach, restart reuse of the persisted spec/identity, lazy
+  dormant switch, a stored spec that no longer parses keeping the current workspace, and the
+  prompt/non-interactive paths.
 - **Attach.** `gvim -a [NAME]` (or `--attach`) dials the socket, sends a hello
   with the terminal size (and any named files as an open-file frame), puts the
   terminal in raw mode, and forwards input bytes, output frames, resize signals
@@ -444,13 +461,17 @@ still loads unchanged.
   holds the stashes and the terminal record (`terminal.SavedState`, its own versioned schema,
   owned by the terminal/dock layer: saved and loaded with `restore.SaveTerminal`/
   `restore.LoadTerminal`). The workspace file never embeds the terminal record, and old
-  workspace files load unchanged; `authority_spec` is a future additive field.
+  workspace files load unchanged. Version 2 gained the additive authority_spec field: the
+  canonical remote target text of a workspace bound to a remote authority (empty = local);
+  old files load as local, a file whose spec contains control characters is refused by the
+  scan with a diagnostic, and a remote workspace's root is normalized remotely (cleaned
+  POSIX path, never stat'ed on this host).
 - **Registry API** (`internal/daemon/workspaces.go`): `WorkspaceDir`, `OpenRegistry(dir)`,
   `CanonicalRoot`, `List` (every workspace; dedup only an identical `stable_id`, keeping
   that identity's freshest file; ordered by root group - roots by their freshest
   `last_focused_at` first, then root path, and freshest first inside a root), `Get`,
   `Create` (returns the freshest existing workspace of a known root), `CreateCoTenant`
-  (always mints a new workspace over the root - extraction's path), `Save`, `Rename`,
+  (always mints a new workspace over the root - extraction's path), `CreateWithAuthority` and `DiscoverWithAuthority` (the daemon jump-box foreground: a workspace keyed by remote root and canonical spec, reused on restart; the root is normalized without local IO), `Save`, `Rename`,
   `Touch`, `UpdateLayout`, `Remove` (deletes only the registry file — session data
   is kept), `RemoveSessionData` (explicit discard) and `SessionDir` (creates the
   per-workspace session directory). `Workspace.Materialized`/`Active` are runtime flags, never
@@ -466,7 +487,9 @@ still loads unchanged.
   and migration on save (stable id and session directory kept), discovery of a co-tenanted
   root (freshest foreground, all others dormant), future-version refusal/no-overwrite,
   corrupt-file skipping, atomicity/no temp leftovers, rename/touch/layout persistence, close
-  keeping session data, safe encoded names and the directory override.
+  keeping session data, safe encoded names and the directory override, plus authority-spec
+  round-trip/reuse-by-(root,spec), local discovery ignoring spec-bearing entries, and
+  old-file/new-field tolerance.
 - **Workspace protocol (wire + server dispatch + app handlers, landed).** The client
   frames `workspace_list`, `workspace_select`, `workspace_new`, `workspace_close` and
   `workspace_rename` carry JSON payloads; the server answers `workspaces` (the list with
@@ -477,7 +500,12 @@ still loads unchanged.
   foreground one; the round-12 attach path still ignores it). `Registry.Discover(root)` is
   the daemon-start view: the launch root's freshest workspace is the foreground one (created
   only when the root has none) and every other registry entry - including the other
-  co-tenants of the same root - is an inert descriptor. The app handlers drive the same
+  co-tenants of the same root - is an inert descriptor. Registry.DiscoverWithAuthority is
+  the same view for a daemon started with a remote target: the foreground workspace is
+  keyed by (remote root, canonical authority spec), created only when absent, so a restart
+  reconnects the same identity; local discovery never adopts a spec-bearing entry, and a
+  local daemon keeps its remote workspaces dormant until a switch materializes them. The
+  app handlers drive the same
   manager as the TUI port (list/select/new/close/rename against live runtimes; see the
   switching lifecycle below). Wire types, validation, frame round trips, the server
   dispatch and the end-to-end protocol are tested.
@@ -490,7 +518,10 @@ still loads unchanged.
   switch cancels the previous build and a stale result is closed instead of landing; build
   failures leave the editor on the current workspace and show a notice). Warm runtimes are
   kept (LSP, plugins, dock shells); switching back is a model swap and does not re-run the
-  model's Init. The TUI exposes Workspace: Switch/New/Close/Rename/Next (daemon only, added
+  model's Init. A workspace build parses its stored authority_spec and sets that
+  workspace's remote options, so a dormant remote workspace sets up its own SSH authority
+  (trust gate, failure notice) while local workspaces keep the local backend; the daemon's
+  foreground remote workspace connects on the daemon terminal before the socket hosts. The TUI exposes Workspace: Switch/New/Close/Rename/Next (daemon only, added
   to the model's command table at materialization; the static command table is unchanged),
   a switcher list, root-then-label prompts, and a hand-written `WS <label>` status item.
   The workspace protocol frames drive the same manager (workspace_list/select/new/close/
@@ -576,8 +607,8 @@ still loads unchanged.
   Residuals: palette file rows carry no git letters (the local palette rows do not either;
   marks are the explorer's), and the remote project-search panel's preview column is still
   unwired.
-- **Read-only remote explorer (landed).** A remote launch now shows the remote workspace tree
-  in the explorer: a lazy, read-only `tui.RemoteExplorerTree` over a `RemoteDirLoader` port
+- **Remote explorer (landed).** A remote launch shows the remote workspace tree in the
+  explorer: a lazy `tui.RemoteExplorerTree` over a `RemoteDirLoader` port
   (app adapter `authorityDirLoader`) lists each directory through `authority.Files().ReadDir`,
   with no local filesystem fallback. Every listing runs in a command, never on the update loop;
   the command's message carries a generation and the root drops it when a newer reload or the
@@ -590,30 +621,45 @@ still loads unchanged.
   by the explorer's show-hidden toggle, ordering matches the local tree (directories first,
   natural, case-insensitive), and a trailing slash-free remote root is shown as given. Opening
   a file uses the existing row->`OpenFileMsg` path and therefore the remote `FileAccess`
-  (save/revert already route to the authority). The tree is read-only: the local file-operation
-  adapter is cleared for a remote launch, the panel refuses new-file/new-directory/rename/
-  delete/cut/paste with one explicit notice, and the explorer context menu keeps only the path
-  copies; the local project opener, preview and git-status ports stay refused/replaced as
-  before (project search runs through the authority and project replace now writes through it
-  too: see the remote-project-replace bullet). Reveal/follow and re-expansion of unloaded
-  ancestors work by
+  (save/revert already route to the authority). Writes on the remote tree: New File, New
+  Directory, Rename and Delete are wired through `internal/app/remote_explorer_ops.go` over
+  `authority.Files()`/`authority.Mutations(fs)` — an empty file is created with an atomic
+  empty write after an existence check, mkdir/rename/delete go through the mutation helpers (a
+  target that exists is refused, a remote delete is permanent because there is no remote
+  trash), every operation runs the workspace trust gate first, a disconnected authority is the
+  explicit "activate the window to reconnect" error, names use the same `fsops.Validate` rules
+  and must stay inside the remote root, and the existing file-job refresh reloads the remote
+  tree through its reload command. Confirmations state the remote target: the new-file/folder
+  and rename prompt labels name it, and the delete confirmation says "Permanently delete ...
+  on SSH:user@host:/path? Remote deletes have no trash." Cut/paste of subtrees, drag/move and
+  duplicate stay refused with one notice (the `ClipboardDisabled` tree capability); the local
+  project opener, preview and git-status ports stay refused/replaced as before (project search
+  runs through the authority and project replace writes through it too: see the
+  remote-project-replace bullet). Reveal/follow and re-expansion of unloaded ancestors work by
   reloading the waypoint directories and revealing the path in the new listing. Gaps vs
-  Fresh's remote explorer (which runs the full file tree over the authority): remote
-  rename/delete/create, drag/move and cut/copy/paste are not wired, remote .gitignore filtering
-  is not implemented (the toggle is a no-op and no entry is marked ignored), remote git marks
-  stay inert, the tree is not watched for remote directory changes (the file watch covers open
+  Fresh's remote explorer (which runs the full file tree over the authority): drag/move,
+  cut/copy/paste of subtrees and duplicate are not wired, remote .gitignore filtering is not
+  implemented (the toggle is a no-op and no entry is marked ignored), remote git marks stay
+  inert, the tree is not watched for remote directory changes (the file watch covers open
   documents' directories only), a directory symlink is shown as a directory (its target is
-  listed through the symlink path), and the refresh/again cadence is request-driven rather than
-  backed by a remote directory watcher; Windows clients still share the root's `filepath`
-  assumptions for remote POSIX paths. Tests: `internal/tui/remote_tree_test.go` (lazy
+  listed through the symlink path), a create/rename existence check has a check-to-write race
+  (the FileMutations surface has no exclusive create/rename), and the refresh/again cadence is
+  request-driven rather than backed by a remote directory watcher; Windows clients still share
+  the root's `filepath` assumptions for remote POSIX paths. Tests: `internal/tui/remote_tree_test.go` (lazy
   expand/no-read-before-command, natural order, hidden filter, stale toggle drop,
   prune/keep-expansion, error+retry, reveal waypoints, read-only/hidden capabilities) and
   `remote_tree_model_test.go` (Update does no remote read; initial load and reconnect reload
   run in commands; disconnected notice keeps rows), `internal/tui/explorer/async_test.go`
-  (async toggle is a command and the read-only refusals/notices), and
+  (async toggle is a command and the clipboard refusals/notices), `internal/tui/remote_ops_ui_test.go`
+  (create/rename/delete available while cut/paste refused, remote context menu keeps writes +
+  path copies and drops clipboard rows, remote confirmations name the target and the permanent
+  delete, a successful write queues a remote refresh without reading in the handler),
   `internal/app/remote_explorer_test.go` (UTF-16-independent entry mapping, trust gate before
   reads, disconnected refusal, remote-only listing with a local decoy present, 5000-entry
-  clear error).
+  clear error), and `internal/app/remote_explorer_ops_test.go` (each create/mkdir/rename/delete
+  success and failure, name validation, target-exists refusal, recursive directory delete,
+  disconnected refusal touching nothing, trust gate before any mutation, unsupported
+  move/copy, outside-workspace refusal, local decoy untouched).
 - **Remote project replace (landed).** "Search and Replace in Project" now writes over a
   remote workspace through the authority instead of refusing: the root keeps the existing
   confirmation (the question names the remote target, e.g. `SSH:user@host:/path`) and runs
@@ -696,6 +742,27 @@ still loads unchanged.
   Per-workspace plugin runtimes are kept materialized per workspace (memory for
   isolation): only materialized workspaces cost a runtime; the registry keeps the rest as
   descriptors.
+- **Per-workspace plugin state (landed #19b slice; shared runtime is a follow-up).** A
+  daemon workspace's plugin runtime scopes `gvim.state` to that workspace: the state lives in
+  `sessions/<stable-id>/plugin-state.json` in its session directory, one versioned (v1)
+  JSON object `{"version":1,"plugins":{name:{key:value}}}` for all of its plugins. The app
+  reads it in `buildRuntime` (never on the update loop) and the runtime seeds it when it
+  starts; writes coalesce behind the existing 500 ms debounce into one atomic write and are
+  flushed synchronously on Stop, i.e. when the workspace is closed or the daemon exits.
+  Bounds: 1 MiB per plugin (same `maxState` as a direct launch) and 8 MiB for the whole file
+  (an over-bound save is skipped with a warning, never truncated); the key cap stays 256
+  bytes. A file whose version is newer than this binary is read-only: `gvim.state.set` returns
+  an invalid error and the file is never overwritten (the runtime logs the reason once).
+  Switching to another materialized workspace talks to that workspace's file; a fresh
+  materialization restores it; closing a workspace flushes its own file and leaks nothing
+  into another. Direct launches keep the editor-wide `plugin-data/<name>/state.json` files
+  byte-identically, and the editor-wide parts (plugin settings/enablement and the manager's
+  `plugin-state.json` toggles) stay shared for daemon workspaces. This slice namespaces the
+  state a runtime writes; it does NOT merge the per-workspace runtimes. The editor-wide
+  shared runtime plus Fresh's plugin-window-scope chrome model
+  (refs/fresh/docs/internal/plugin-window-scope-plan.md: one editor-wide runtime,
+  per-window `session_plugin_state`, chrome scope and the focus announcer that retargets the
+  active window/split/buffer) remains the recorded follow-up residual.
 - **Extract tab to a co-tenant workspace (landed with registry v2).** The tab context
   menu's "Extract to New Workspace" (and the palette row "Extract tab to new workspace")
   moves the active file tab into a NEW workspace over the SAME project root, matching
@@ -721,7 +788,9 @@ still loads unchanged.
   Fresh's separate diff_nav plugin is unrelated; the per-tab "Extract to New Workspace"
   item also appears in Fresh's tab context menu.
 - **Remainder of #19a (not shipped).** A remote workspace's `authority_spec` field (registry
-  v2 still records no authority), per-workspace plugin state, eviction/memory limits for
+  v2 still records no authority), the shared editor-wide plugin runtime + Fresh's
+  plugin-window-scope chrome model (this round scopes plugin state per workspace, it does not
+  merge the runtimes), eviction/memory limits for
   warm co-tenants, the initial terminal-launch record in a workspace descriptor (the
   discovery Import can create a workspace but not attach an argv to it yet), shared
   buffers/daemon-level open-path map beyond the switch-to-existing-workspace rule (#19b),

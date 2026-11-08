@@ -57,6 +57,16 @@ type SSHOptions struct {
 	KnownHostsPath string
 	// HostKeyCallback overrides the known_hosts check (tests).
 	HostKeyCallback ssh.HostKeyCallback
+	// ConfigPath is the OpenSSH user config to apply. Empty disables config reading
+	// (embedding/tests); the app passes DefaultSSHConfigPath(), and a missing file is
+	// not an error.
+	ConfigPath string
+	// ForwardAgent requests ssh-agent forwarding on this connection's sessions
+	// (terminal and one-shot channels), in addition to an ssh config ForwardAgent yes.
+	ForwardAgent bool
+	// Agent overrides the local ssh-agent (tests and embedding); nil uses the
+	// resolved IdentityAgent/SSH_AUTH_SOCK socket.
+	Agent agent.Agent
 }
 
 // The interactive-auth sentinels are returned by the UI-facing callbacks when the
@@ -109,6 +119,15 @@ type sshBackend struct {
 	connecting bool
 	// keepaliveStop stops the current keepalive loop; nil when none runs.
 	keepaliveStop chan struct{}
+	// resolved is the target/jump/identity resolution of the last dial.
+	resolved sshResolved
+	// jumpClient is the carrier through ProxyJump, kept alive for the target client.
+	jumpClient *ssh.Client
+	// agentConn is the local ssh-agent socket opened for forwarding, closed with the
+	// backend.
+	agentConn net.Conn
+	// forwardAgent is true when this connection forwards the local agent.
+	forwardAgent bool
 }
 
 // ConnectSSH dials the remote and mounts an authority slot over it.
@@ -175,6 +194,19 @@ func (b *sshBackend) clientSnapshot() (*ssh.Client, error) {
 	return b.client, nil
 }
 
+// requestAgentForwarding asks the server to forward this session's agent channel
+// to the local agent. It is a session request, never an error the caller must
+// handle: a server that refuses it is reported by its own failure to open the
+// agent channel, and the session still runs.
+func (b *sshBackend) requestAgentForwarding(sess *ssh.Session) {
+	b.mu.Lock()
+	on := b.forwardAgent
+	b.mu.Unlock()
+	if on {
+		_ = agent.RequestAgentForwarding(sess)
+	}
+}
+
 // markDown records a broken carrier; the next operation or the activation hook reconnects.
 func (b *sshBackend) markDown(err error) {
 	b.mu.Lock()
@@ -185,33 +217,114 @@ func (b *sshBackend) markDown(err error) {
 	}
 }
 
-// dial opens one SSH client.
+// dial opens one SSH client, applying the bounded ssh config (HostName/User/Port/
+// IdentityFile/ProxyJump/IdentityAgent/ForwardAgent) and the one supported jump hop.
 func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
-	spec := b.opts.Spec
 	timeout := b.opts.Timeout
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
-	port := spec.Port
-	if port == 0 {
-		port = DefaultSSHPort
+	res, err := b.resolveDial()
+	if err != nil {
+		return nil, err
 	}
 	hostKey, err := b.hostKeyCallback()
 	if err != nil {
 		return nil, err
 	}
-	auth, err := b.authMethods(ctx)
+	ag, agentConn, err := b.openAgent(res)
 	if err != nil {
 		return nil, err
 	}
-	cfg := &ssh.ClientConfig{User: spec.User, Auth: auth, HostKeyCallback: hostKey, Timeout: timeout}
+	success := false
+	defer func() {
+		if !success && agentConn != nil {
+			_ = agentConn.Close()
+		}
+	}()
+	auth, err := b.authMethodsResolved(ctx, res, ag)
+	if err != nil {
+		return nil, err
+	}
+	targetAddr := net.JoinHostPort(res.host, strconv.Itoa(res.port))
+	targetCfg := &ssh.ClientConfig{User: res.user, Auth: auth, HostKeyCallback: hostKey, Timeout: timeout}
+
+	var conn net.Conn
+	var jumpClient *ssh.Client
+	if res.jump != nil {
+		jumpAddr := net.JoinHostPort(res.jump.host, strconv.Itoa(res.jump.port))
+		jc, err := dialSSHConn(ctx, jumpAddr, &ssh.ClientConfig{User: res.jump.user, Auth: auth, HostKeyCallback: hostKey, Timeout: timeout}, timeout, b.spec.Display())
+		if err != nil {
+			return nil, fmt.Errorf("ssh %s: jump %s: %w", b.spec.Display(), jumpAddr, err)
+		}
+		jumpClient = jc
+		conn, err = jumpClient.Dial("tcp", targetAddr)
+		if err != nil {
+			_ = jumpClient.Close()
+			return nil, fmt.Errorf("ssh %s: jump %s: reach %s: %w", b.spec.Display(), jumpAddr, targetAddr, err)
+		}
+	} else {
+		var d net.Dialer
+		dialCtx, cancel := context.WithTimeout(ctx, timeout)
+		conn, err = d.DialContext(dialCtx, "tcp", targetAddr)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("ssh %s: %w", b.spec.Display(), err)
+		}
+	}
+
+	closeAll := func() {
+		_ = conn.Close()
+		if jumpClient != nil {
+			_ = jumpClient.Close()
+		}
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, targetAddr, targetCfg)
+	if err != nil {
+		closeAll()
+		return nil, fmt.Errorf("ssh %s: %w", b.spec.Display(), err)
+	}
+	client := ssh.NewClient(c, chans, reqs)
+
+	b.mu.Lock()
+	b.resolved = res
+	if b.jumpClient != nil {
+		_ = b.jumpClient.Close()
+	}
+	b.jumpClient = jumpClient
+	b.mu.Unlock()
+
+	if res.forwardAgent {
+		if ag == nil {
+			_ = client.Close()
+			closeAll()
+			return nil, fmt.Errorf("ssh %s: ForwardAgent is on but no ssh-agent is available (SSH_AUTH_SOCK/IdentityAgent)", b.spec.Display())
+		}
+		if ferr := agent.ForwardToAgent(client, ag); ferr != nil {
+			_ = client.Close()
+			closeAll()
+			return nil, fmt.Errorf("ssh %s: ForwardAgent: %w", b.spec.Display(), ferr)
+		}
+	}
+	b.mu.Lock()
+	b.forwardAgent = res.forwardAgent
+	if b.agentConn != nil {
+		_ = b.agentConn.Close()
+	}
+	b.agentConn = agentConn
+	b.mu.Unlock()
+	success = true
+	return client, nil
+}
+
+// dialSSHConn dials addr and completes the SSH handshake.
+func dialSSHConn(ctx context.Context, addr string, cfg *ssh.ClientConfig, timeout time.Duration, display string) (*ssh.Client, error) {
+	var d net.Dialer
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	var d net.Dialer
-	addr := net.JoinHostPort(spec.Host, strconv.Itoa(port))
 	conn, err := d.DialContext(dialCtx, "tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("ssh %s: %w", spec.Display(), err)
+		return nil, err
 	}
 	if dl, ok := dialCtx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
@@ -219,7 +332,7 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
 	if err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("ssh %s: %w", spec.Display(), err)
+		return nil, err
 	}
 	_ = conn.SetDeadline(time.Time{})
 	return ssh.NewClient(c, chans, reqs), nil
@@ -341,75 +454,6 @@ func (b *sshBackend) hostKeyCallback() (ssh.HostKeyCallback, error) {
 		}
 		return nil
 	}, nil
-}
-
-// authMethods builds the authentication order: agent, identity files (a stored
-// passphrase first, then the UI callback), a stored/prompted password, and
-// keyboard-interactive challenges (2FA).
-func (b *sshBackend) authMethods(ctx context.Context) ([]ssh.AuthMethod, error) {
-	var methods []ssh.AuthMethod
-	if !b.opts.DisableAgent {
-		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
-			if conn, err := net.Dial("unix", sock); err == nil {
-				ag := agent.NewClient(conn)
-				methods = append(methods, ssh.PublicKeysCallback(ag.Signers))
-			}
-		}
-	}
-	files := b.opts.IdentityFiles
-	if len(files) == 0 {
-		if home, err := os.UserHomeDir(); err == nil {
-			files = existingIdentityFiles(filepath.Join(home, ".ssh"))
-		}
-	}
-	passphrase := func(ctx context.Context, path string) (string, error) {
-		b.mu.Lock()
-		stored := b.passphrase
-		b.mu.Unlock()
-		if stored != "" {
-			return stored, nil
-		}
-		if b.opts.Passphrase != nil {
-			return b.opts.Passphrase(ctx, path)
-		}
-		return "", ErrNeedsPassphrase
-	}
-	var signers []ssh.Signer
-	for _, path := range files {
-		signer, err := parseIdentity(path, passphrase, ctx)
-		if err != nil {
-			if errors.Is(err, ErrNeedsPassphrase) {
-				b.mu.Lock()
-				b.needsPassphrase = true
-				b.mu.Unlock()
-			}
-			if len(b.opts.IdentityFiles) > 0 {
-				return nil, err
-			}
-			continue
-		}
-		signers = append(signers, signer)
-	}
-	if len(signers) > 0 {
-		methods = append(methods, ssh.PublicKeys(signers...))
-	}
-	b.mu.Lock()
-	stored := b.password
-	hasChallenge := b.keyboardChallenge != nil
-	b.mu.Unlock()
-	if stored != "" {
-		methods = append(methods, ssh.Password(stored))
-	}
-	if b.opts.Password != nil {
-		methods = append(methods, ssh.PasswordCallback(func() (string, error) { return b.opts.Password(ctx) }))
-	}
-	if b.opts.KeyboardInteractive != nil || hasChallenge {
-		methods = append(methods, ssh.KeyboardInteractive(b.keyboardAuth(ctx)))
-	}
-	if len(methods) == 0 {
-		return nil, errors.New("ssh: no authentication method (no agent, no usable identity file, no password callback, no keyboard-interactive callback)")
-	}
-	return methods, nil
 }
 
 // keyboardAuth returns the keyboard-interactive authentication method: stored answers
@@ -565,11 +609,19 @@ func (b *sshBackend) Close() error {
 	}
 	b.closed, b.connected = true, false
 	old := b.client
-	b.client = nil
+	oldJump := b.jumpClient
+	oldAgent := b.agentConn
+	b.client, b.jumpClient, b.agentConn = nil, nil, nil
 	b.mu.Unlock()
 	b.stopKeepalive()
+	if oldAgent != nil {
+		_ = oldAgent.Close()
+	}
 	if old != nil {
-		return old.Close()
+		_ = old.Close()
+	}
+	if oldJump != nil {
+		_ = oldJump.Close()
 	}
 	return nil
 }
@@ -596,6 +648,7 @@ func (b *sshBackend) runSessionBuffered(ctx context.Context, argv []string, o ho
 		return hostos.ProcResult{}, err
 	}
 	defer func() { _ = sess.Close() }()
+	b.requestAgentForwarding(sess)
 	cmd := RemoteCommand(argv, o.Cwd, o.Env)
 	sess.Stdout, sess.Stderr = stdout, stderr
 	if o.Stdin != nil {
@@ -645,6 +698,7 @@ func (b *sshBackend) Start(ctx context.Context, argv []string, o hostos.ProcOpti
 		b.markDown(err)
 		return nil, err
 	}
+	b.requestAgentForwarding(sess)
 	stdin, err := sess.StdinPipe()
 	if err != nil {
 		_ = sess.Close()
@@ -682,6 +736,7 @@ func (b *sshBackend) Launch(ctx context.Context, o TerminalOptions) (TerminalLau
 		b.markDown(err)
 		return TerminalLaunch{}, err
 	}
+	b.requestAgentForwarding(sess)
 	cols, rows := o.Cols, o.Rows
 	if cols <= 0 {
 		cols = 80

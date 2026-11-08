@@ -61,10 +61,12 @@ type DaemonOptions struct {
 // Options is the parsed command line. The zero value starts gvim with no
 // files in the current directory, the platform keymap and the dark theme.
 type Options struct {
-	// Remote is a parsed user@host:/path or ssh:// target. A remote launch mounts the
-	// SSH authority, opens the remote terminal at its Workspace() and does not restore
-	// or save the local session; remote file editing is not available in this slice
-	// (the terminal is). It excludes local Files, Root, Diff and stdin.
+	// Remote is a parsed user@host:/path or ssh:// target. A direct remote launch mounts
+	// the SSH authority and does not restore or save the local session. With DaemonServe
+	// it is the jump-box daemon's startup authority: the daemon runs locally and hosts the
+	// remote workspace, persisting the target in the workspace registry so a restart
+	// reconnects; with DaemonAttach it is ignored (a reattach only talks to the daemon
+	// socket, which owns SSH). It excludes local Files, Root, Diff and stdin.
 	Remote *authority.RemoteSpec
 	// Files open in order, each in its own tab. A missing file opens as an
 	// empty buffer that is created on save.
@@ -253,9 +255,6 @@ func (o Options) Validate() error {
 		}
 		if o.Restore {
 			return errors.New("a remote target does not restore the local session")
-		}
-		if o.Daemon != nil {
-			return errors.New("a remote target cannot be combined with --daemon/--attach")
 		}
 	}
 	for _, f := range o.Files {

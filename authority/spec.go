@@ -19,6 +19,13 @@ type RemoteSpec struct {
 	Line int // 0: not given; 1-based
 	Col  int // 0: not given; 1-based
 	Raw  string
+	// UserExplicit is true when the target spelled a user (user@host), so an
+	// ssh_config User must not override it. A URL without a user leaves it false:
+	// the environment default is a fallback, not an override.
+	UserExplicit bool
+	// PortExplicit is true when the target spelled the port (ssh://host:port), so an
+	// ssh_config Port must not override it.
+	PortExplicit bool
 }
 
 // Display is the user@host form the status row shows (the port is included when it is not
@@ -169,8 +176,10 @@ func parseSCP(arg string) (RemoteSpec, error) {
 	}
 	head, rest := arg[:i], arg[i+1:]
 	var user string
+	userGiven := false
 	if at := strings.LastIndex(head, "@"); at >= 0 {
 		user, head = head[:at], head[at+1:]
+		userGiven = true
 		if user == "" {
 			return RemoteSpec{}, fmt.Errorf("%s: empty user", arg)
 		}
@@ -185,7 +194,7 @@ func parseSCP(arg string) (RemoteSpec, error) {
 	if path == "" {
 		return RemoteSpec{}, fmt.Errorf("%s: missing remote path", arg)
 	}
-	return RemoteSpec{User: user, Host: head, Path: path, Line: line, Col: col, Raw: arg}, nil
+	return RemoteSpec{User: user, Host: head, Path: path, Line: line, Col: col, Raw: arg, UserExplicit: userGiven}, nil
 }
 
 // parseSSHURL parses ssh://[user@][host][:port]/path[:line[:col]]. Everything about the
@@ -204,8 +213,10 @@ func parseSSHURL(arg string) (RemoteSpec, error) {
 		return RemoteSpec{}, fmt.Errorf("%s: empty host", arg)
 	}
 	var user string
+	userFromURL := false
 	if at := strings.LastIndex(authorityPart, "@"); at >= 0 {
 		user, authorityPart = authorityPart[:at], authorityPart[at+1:]
+		userFromURL = true
 		if user == "" {
 			return RemoteSpec{}, fmt.Errorf("%s: empty user", arg)
 		}
@@ -234,7 +245,7 @@ func parseSSHURL(arg string) (RemoteSpec, error) {
 			return RemoteSpec{}, fmt.Errorf("%s: no user in the URL and neither $USER nor $USERNAME is set", arg)
 		}
 	}
-	return RemoteSpec{User: user, Host: host, Port: port, Path: path, Line: line, Col: col, Raw: arg}, nil
+	return RemoteSpec{User: user, Host: host, Port: port, Path: path, Line: line, Col: col, Raw: arg, UserExplicit: userFromURL, PortExplicit: port != 0}, nil
 }
 
 // splitHostPort parses host or host:port, including a bracketed IPv6 host.

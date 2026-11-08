@@ -56,21 +56,21 @@ type WorkspaceLauncher interface {
 // Discover Agent Sessions row's scan and shows a notice instead.
 func (m *Model) SetAgentDiscoverer(d AgentDiscoverer) { m.discover = d }
 
-const (
-	agentDiscoverTitle    = "Discover Agent Sessions"
-	agentDiscoverScanning = "Scanning for local agent sessions…"
-	agentDiscoverNone     = "No agent sessions found."
-	agentDiscoverFooter   = "Enter opens · i imports as a workspace · Ctrl+R scans again · Esc closes"
-	agentDiscoverMissing  = "Agent discovery is not available in this session"
+var (
+	agentDiscoverTitle    = uiText("gvim.agent_discover.title", "Discover Agent Sessions")
+	agentDiscoverScanning = uiText("gvim.agent_discover.scanning", "Scanning for local agent sessions…")
+	agentDiscoverNone     = uiText("gvim.agent_discover.none", "No agent sessions found.")
+	agentDiscoverFooter   = uiText("gvim.agent_discover.footer", "Enter opens · i imports as a workspace · Ctrl+R scans again · Esc closes")
+	agentDiscoverMissing  = uiText("gvim.agent_discover.missing", "Agent discovery is not available in this session")
 	// agentDiscoverNoDaemon is Import's notice outside a daemon-hosted session.
-	agentDiscoverNoDaemon = "Import needs a daemon-hosted session: the workspace layer is not available here"
+	agentDiscoverNoDaemon = uiText("gvim.agent_discover.no_daemon", "Import needs a daemon-hosted session: the workspace layer is not available here")
 	// agentDiscoverNoQueuedLaunch is Import's fallback notice when the daemon's
 	// workspace layer predates the queued launch: the workspace exists but the
 	// session's terminal was not started there.
-	agentDiscoverNoQueuedLaunch = "Import: this daemon build cannot start the session's terminal in the new workspace; the workspace was created - open its terminal and run: "
-	agentDiscoverNoTmux         = "tmux is not running and no Claude Code/Codex transcripts were found"
-	agentDiscoverResumeFailed   = "Terminal: could not resume the discovered agent session"
-	agentDiscoverNoSessionID    = "Import: the session records no directory"
+	agentDiscoverNoQueuedLaunch = uiText("gvim.agent_discover.no_queued_launch", "Import: this daemon build cannot start the session's terminal in the new workspace; the workspace was created - open its terminal and run: ")
+	agentDiscoverNoTmux         = uiText("gvim.agent_discover.no_tmux", "tmux is not running and no Claude Code/Codex transcripts were found")
+	agentDiscoverResumeFailed   = uiText("gvim.agent_discover.resume_failed", "Terminal: could not resume the discovered agent session")
+	agentDiscoverNoSessionID    = uiText("gvim.agent_discover.no_session_id", "Import: the session records no directory")
 )
 
 // agentDiscoverOverlay is the discovery picker. It owns the report, so nothing is

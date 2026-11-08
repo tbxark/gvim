@@ -278,7 +278,9 @@ func (d *Document) largeOpenStatus() string {
 		sb.WriteString("Binary file: read-only. ")
 	}
 	fmt.Fprintf(&sb, "Large file (%s)", formatSize(d.large.Size))
-	if d.readOnly && !d.binary {
+	if d.large.RemoteWindowed {
+		sb.WriteString(" remote large file (read-only, windowed): the bytes stay on the remote host and load as you scroll")
+	} else if d.readOnly && !d.binary {
 		sb.WriteString(" (read-only)")
 	}
 	if info := d.Index(); info.Complete {

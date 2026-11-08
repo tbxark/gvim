@@ -97,7 +97,7 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 | file explorer decorations/slots | 10 000 entries per namespace, 64 namespaces per plugin; symbol 8 bytes, slot text 32 bytes, leading slot at most 8 cells |
 | virtual buffers | 64 per plugin, 256 in all; 64 MiB of text per plugin, 256 MiB in all |
 | queued `gvim.emit` events | 1000; payload 64 KiB |
-| `gvim.state` | 1 MiB of keys and encoded values per plugin |
+| `gvim.state` | 1 MiB of keys and encoded values per plugin; a daemon workspace's one plugin-state.json is capped at 8 MiB (an over-bound save is skipped with a warning) |
 | log message | 4 KiB; the log keeps 2000 entries |
 | cached `Buffer` and `Window` handles | 10 000 per state (invalid ones are evicted first) |
 | files in a plugin | 64 `.lua` files, 256 KiB each (`plugin.json`: 1 MiB), 5 MiB in all; the registry of a Lua state 1 048 576 slots |

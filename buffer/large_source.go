@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,24 @@ type Source interface {
 	// Close releases the source. The buffer calls it once, when the last
 	// reference is gone.
 	Close() error
+}
+
+// WindowSource is a Source whose windows are loaded by the caller before they are
+// read. ReadAt serves only windows already loaded: a miss fills nothing, performs
+// no I/O and returns ErrSourcePending immediately, so the paint path never waits on
+// a remote read. LoadWindow does the blocking read and must only be called from a
+// command (never from ReadAt, Check or Close).
+type WindowSource interface {
+	Source
+	// LoadWindow loads the window(s) covering [off, off+n) and returns when they
+	// are cached; the context cancels the read.
+	LoadWindow(ctx context.Context, off, n int64) error
+	// Generation changes whenever a window arrives, so a caller can tell a repaint
+	// from a load it has already seen.
+	Generation() uint64
+	// TakePendingWindow returns and clears the first miss a ReadAt recorded: the
+	// window a caller should load next.
+	TakePendingWindow() (off, n int64, ok bool)
 }
 
 // srcRef shares one Source between a buffer and the index scans and snapshots
@@ -66,6 +85,11 @@ func readFull(src Source, stats *statCounters, p []byte, off int64) error {
 	stats.readBytes.Add(int64(n))
 	if n == len(p) {
 		return nil
+	}
+	if errors.Is(err, ErrSourcePending) {
+		// The window is not loaded yet: a retryable pending state, never a source
+		// change, so the buffer does not freeze and the caller can load it.
+		return ErrSourcePending
 	}
 	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return ErrSourceChanged

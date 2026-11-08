@@ -135,6 +135,18 @@ func (r *remoteFileAccess) ReadFile(path string, max int64) ([]byte, error) {
 	return r.slot.Files().ReadFile(ctx, p, max)
 }
 
+// ReadRange implements document.RangeAccess: one bounded window of the remote file,
+// used by remote large-file mode. It never falls back to the local filesystem.
+func (r *remoteFileAccess) ReadRange(ctx context.Context, path string, off, n int64) ([]byte, error) {
+	p, err := r.expand(path)
+	if err != nil {
+		return nil, err
+	}
+	readCtx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	return r.slot.Files().ReadRange(readCtx, p, off, n)
+}
+
 // Stat implements document.FileAccess. A missing path is the zero answer (as the local
 // disk state answers a failed stat); a broken symlink or another non-regular kind is
 // marked Special so the document refuses to open it instead of creating an empty buffer.
