@@ -95,7 +95,7 @@ func TestDecorPaintsTheDocumentsPane(t *testing.T) {
 	p := panesOf(t, m, 1)[0]
 	g := m.paint()
 	at := func(col, line int) (string, color.Color, color.Color) {
-		c := g.At(p.textX+col, p.Y+line)
+		c := g.At(p.TextX+col, p.Y+line)
 		return c.Text, c.Style.FG, c.Style.BG
 	}
 	// The highlight covers "wor" and nothing else.
@@ -123,7 +123,7 @@ func TestDecorPaintsTheDocumentsPane(t *testing.T) {
 	if _, _, b := at(0, 2); b != dBlue {
 		t.Errorf("row style: first cell bg = %v, want blue", b)
 	}
-	if _, _, b := at(p.textW-3, 2); b != dBlue {
+	if _, _, b := at(p.TextW-3, 2); b != dBlue {
 		t.Errorf("row style: blank cell near the edge bg = %v, want blue", b)
 	}
 	// An undecorated cell carries none of it.
@@ -145,10 +145,10 @@ func TestDecorFollowsTheTextWhenAnchorsMove(t *testing.T) {
 	// one line, and the first line is clear.
 	m.plug.decor.Apply(1, []decorations.Edit{{Text: "new\n"}}, false)
 	g := m.paint()
-	if got := g.At(p.textX+6, p.Y).Style.BG; got != nil {
+	if got := g.At(p.TextX+6, p.Y).Style.BG; got != nil {
 		t.Errorf("line 0 is still highlighted: bg %v", got)
 	}
-	if got := g.At(p.textX+6, p.Y+1).Style.BG; got != dBlue {
+	if got := g.At(p.TextX+6, p.Y+1).Style.BG; got != dBlue {
 		t.Errorf("line 1 bg = %v, want the highlight that moved down", got)
 	}
 }
@@ -165,11 +165,11 @@ func TestDecorByteColumnsBecomeRuneColumns(t *testing.T) {
 	g := m.paint()
 	// Cells: é at 0, 世 at 1 and 2 (wide), x at 3.
 	for col, want := range map[int]color.Color{0: nil, 1: dBlue, 3: nil} {
-		if got := g.At(p.textX+col, p.Y).Style.BG; got != want {
+		if got := g.At(p.TextX+col, p.Y).Style.BG; got != want {
 			t.Errorf("cell %d bg = %v, want %v", col, got, want)
 		}
 	}
-	if got := g.At(p.textX+1, p.Y).Text; got != "世" {
+	if got := g.At(p.TextX+1, p.Y).Text; got != "世" {
 		t.Errorf("cell 1 = %q, want 世", got)
 	}
 }
@@ -184,10 +184,10 @@ func TestDecorOnlyOnItsOwnDocumentAcrossSplits(t *testing.T) {
 	}
 	ps := panesOf(t, m, 2)
 	g := m.paint()
-	if got := g.At(ps[0].textX, ps[0].Y).Style.BG; got != nil {
+	if got := g.At(ps[0].TextX, ps[0].Y).Style.BG; got != nil {
 		t.Errorf("the pane of buffer 1 shows buffer 2's decoration: bg %v", got)
 	}
-	if got := g.At(ps[1].textX, ps[1].Y).Style.BG; got != dBlue {
+	if got := g.At(ps[1].TextX, ps[1].Y).Style.BG; got != dBlue {
 		t.Errorf("the pane of buffer 2 bg = %v, want blue", got)
 	}
 }

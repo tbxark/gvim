@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 )
 
@@ -23,23 +24,23 @@ var sampleWidths = []struct {
 
 var sampleHeights = []int{15, 20, 24, 30, 40}
 
-// layoutFor is computeLayout with a readable name for the tests.
+// layoutFor is frame.ComputeLayout with a readable name for the tests.
 func layoutFor(w, h int, in layoutInput) layout {
-	return computeLayout(w, h, in)
+	return frame.ComputeLayout(w, h, in)
 }
 
 // paintRow paints the runs on a w-wide row and returns the row's text.
 func paintRow(w int, runs []run) string {
 	g := grid.New(w, 1)
 	for _, r := range runs {
-		g.Put(r.x, 0, w, r.text, grid.Style{})
+		g.Put(r.X, 0, w, r.Text, grid.Style{})
 	}
 	return g.Plain()[0]
 }
 
 func TestExplorerWidthAtSampleWidths(t *testing.T) {
 	for _, g := range sampleWidths {
-		if got := explorerCols(g.w, 0); got != g.explorer {
+		if got := frame.ExplorerCols(g.w, 0); got != g.explorer {
 			t.Errorf("W=%d: E = %d, want %d", g.w, got, g.explorer)
 		}
 	}
@@ -54,24 +55,24 @@ func TestExplorerOverrideIsClamped(t *testing.T) {
 		{10, 8, 10},    // a frame narrower than the floor keeps its width
 	}
 	for _, tt := range tests {
-		if got := explorerCols(tt.w, tt.override); got != tt.want {
-			t.Errorf("explorerCols(%d, %d) = %d, want %d", tt.w, tt.override, got, tt.want)
+		if got := frame.ExplorerCols(tt.w, tt.override); got != tt.want {
+			t.Errorf("frame.ExplorerCols(%d, %d) = %d, want %d", tt.w, tt.override, got, tt.want)
 		}
 	}
 }
 
 func TestEditorColumnsAtSampleWidths(t *testing.T) {
 	for _, g := range sampleWidths {
-		l := layoutFor(g.w, 30, layoutInput{explorerOpen: true, lines: 4})
-		if l.editorX != g.explorer {
-			t.Errorf("W=%d: editorX = %d, want E = %d", g.w, l.editorX, g.explorer)
+		l := layoutFor(g.w, 30, layoutInput{ExplorerOpen: true, Lines: 4})
+		if l.EditorX != g.explorer {
+			t.Errorf("W=%d: editorX = %d, want E = %d", g.w, l.EditorX, g.explorer)
 		}
 		// The gutter is six cells at one-digit line counts: "  1 │ ".
-		if l.gutter != 6 || l.textX != g.explorer+6 {
-			t.Errorf("W=%d: gutter %d at textX %d", g.w, l.gutter, l.textX)
+		if l.Gutter != 6 || l.TextX != g.explorer+6 {
+			t.Errorf("W=%d: gutter %d at textX %d", g.w, l.Gutter, l.TextX)
 		}
-		if want := g.w - g.explorer - 6; l.textW != want {
-			t.Errorf("W=%d: textW = %d, want %d", g.w, l.textW, want)
+		if want := g.w - g.explorer - 6; l.TextW != want {
+			t.Errorf("W=%d: textW = %d, want %d", g.w, l.TextW, want)
 		}
 	}
 }
@@ -80,8 +81,8 @@ func TestGutterWidthWidensWithDigits(t *testing.T) {
 	// M09 rule: "  88 │" at 200 lines, so three digits widen the gutter to 7.
 	tests := map[int]int{1: 6, 9: 6, 10: 6, 99: 6, 100: 7, 200: 7, 1000: 8}
 	for lines, want := range tests {
-		if got := gutterWidth(lines); got != want {
-			t.Errorf("gutterWidth(%d) = %d, want %d", lines, got, want)
+		if got := frame.GutterWidth(lines); got != want {
+			t.Errorf("frame.GutterWidth(%d) = %d, want %d", lines, got, want)
 		}
 	}
 }
@@ -89,18 +90,18 @@ func TestGutterWidthWidensWithDigits(t *testing.T) {
 func TestRowBandsAtSampleHeights(t *testing.T) {
 	for _, h := range sampleHeights {
 		l := layoutFor(100, h, layoutInput{})
-		if l.bodyTop != 2 || l.bodyBottom != h-2 || l.statusY != h-1 {
-			t.Errorf("H=%d: body %d..%d status %d", h, l.bodyTop, l.bodyBottom, l.statusY)
+		if l.BodyTop != 2 || l.BodyBottom != h-2 || l.StatusY != h-1 {
+			t.Errorf("H=%d: body %d..%d status %d", h, l.BodyTop, l.BodyBottom, l.StatusY)
 		}
 	}
 }
 
 func TestScrollbarShowsOnlyWhenContentOverflows(t *testing.T) {
 	const h = 15 // body rows 2..13, so 12 rows
-	if layoutFor(80, h, layoutInput{lines: 12}).scrollbar {
+	if layoutFor(80, h, layoutInput{Lines: 12}).Scrollbar {
 		t.Error("12 lines in 12 rows show a scrollbar")
 	}
-	if !layoutFor(80, h, layoutInput{lines: 13}).scrollbar {
+	if !layoutFor(80, h, layoutInput{Lines: 13}).Scrollbar {
 		t.Error("13 lines in 12 rows do not show a scrollbar")
 	}
 }
@@ -117,58 +118,58 @@ func TestExplorerTitleButtonsFollowTheTitle(t *testing.T) {
 		{30, 25, 27},
 	}
 	for _, tt := range tests {
-		l := layoutFor(100, 30, layoutInput{explorerOpen: true, explorerOverride: tt.e})
-		if l.ex != tt.e || l.exReloadX != tt.reload || l.exCloseX != tt.closeX {
+		l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, ExplorerOverride: tt.e})
+		if l.Ex != tt.e || l.ExReloadX != tt.reload || l.ExCloseX != tt.closeX {
 			t.Errorf("E=%d: buttons at %d and %d (E %d), want %d and %d",
-				tt.e, l.exReloadX, l.exCloseX, l.ex, tt.reload, tt.closeX)
+				tt.e, l.ExReloadX, l.ExCloseX, l.Ex, tt.reload, tt.closeX)
 		}
 	}
 }
 
 func TestExplorerHiddenHasNoColumns(t *testing.T) {
 	l := layoutFor(100, 30, layoutInput{})
-	if l.explorerOpen || l.ex != 0 || l.exReloadX != -1 || l.exCloseX != -1 {
+	if l.ExplorerOpen || l.Ex != 0 || l.ExReloadX != -1 || l.ExCloseX != -1 {
 		t.Fatalf("hidden explorer: open %v ex %d buttons %d and %d",
-			l.explorerOpen, l.ex, l.exReloadX, l.exCloseX)
+			l.ExplorerOpen, l.Ex, l.ExReloadX, l.ExCloseX)
 	}
-	if l.editorX != 0 {
-		t.Fatalf("editorX = %d with the explorer hidden", l.editorX)
+	if l.EditorX != 0 {
+		t.Fatalf("editorX = %d with the explorer hidden", l.EditorX)
 	}
 }
 
 func TestTabStripStartsAfterTheExplorer(t *testing.T) {
-	l := layoutFor(100, 30, layoutInput{explorerOpen: true, tabs: []TabInfo{{Name: "a.txt"}}})
-	if got := l.strip.runs[0]; got.x != 32 || got.text != " a.txt " {
+	l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, Tabs: []TabInfo{{Name: "a.txt"}}})
+	if got := l.Strip.Runs[0]; got.X != 32 || got.Text != " a.txt " {
 		t.Fatalf("first tab run = %+v", got)
 	}
 }
 
 func TestTabStripOverflowsNarrowRows(t *testing.T) {
 	tabs := []TabInfo{{Name: "one.go"}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go"}}
-	wide := layoutFor(100, 30, layoutInput{tabs: tabs})
-	if wide.strip.overflow {
+	wide := layoutFor(100, 30, layoutInput{Tabs: tabs})
+	if wide.Strip.Overflow {
 		t.Error("four tabs at W=100 overflow")
 	}
-	narrow := layoutFor(20, 30, layoutInput{tabs: tabs})
-	if !narrow.strip.overflow {
+	narrow := layoutFor(20, 30, layoutInput{Tabs: tabs})
+	if !narrow.Strip.Overflow {
 		t.Fatal("four tabs at W=20 do not overflow")
 	}
-	for _, r := range narrow.strip.runs {
-		if r.kind == hitTabNew || r.kind == hitTabScrollBefore || r.kind == hitTabScrollAfter {
+	for _, r := range narrow.Strip.Runs {
+		if r.Kind == hitTabNew || r.Kind == hitTabScrollBefore || r.Kind == hitTabScrollAfter {
 			continue
 		}
-		if r.x < 1 || r.x+r.w > 19-1 {
+		if r.X < 1 || r.X+r.W > 19-1 {
 			t.Errorf("run %+v is outside the overflow window", r)
 		}
 	}
 }
 
 func TestMenuLabelsJoinWhileExplorerHasFocus(t *testing.T) {
-	plain := paintRow(80, menuRuns(false))
+	plain := paintRow(80, frame.MenuRuns(false))
 	if strings.Contains(plain, "Explorer") {
 		t.Errorf("menu without focus shows Explorer: %q", plain)
 	}
-	focused := paintRow(80, menuRuns(true))
+	focused := paintRow(80, frame.MenuRuns(true))
 	if !strings.Contains(focused, "Explorer") || !strings.HasPrefix(focused, " File") {
 		t.Errorf("menu with focus = %q", focused)
 	}
@@ -177,26 +178,26 @@ func TestMenuLabelsJoinWhileExplorerHasFocus(t *testing.T) {
 func TestGateReplacesTheWholeFrame(t *testing.T) {
 	gated := []struct{ w, h int }{{7, 10}, {8, 2}, {1, 1}}
 	for _, c := range gated {
-		if l := layoutFor(c.w, c.h, layoutInput{}); !l.gated {
+		if l := layoutFor(c.w, c.h, layoutInput{}); !l.Gated {
 			t.Errorf("%dx%d is not gated", c.w, c.h)
 		}
 	}
-	if l := layoutFor(8, 3, layoutInput{}); l.gated {
+	if l := layoutFor(8, 3, layoutInput{}); l.Gated {
 		t.Fatal("8x3 is gated, but it is a sample size above the gate")
 	}
-	if got := layoutFor(3, 1, layoutInput{}).hit(0, 0); got.Kind != hitNone {
+	if got := layoutFor(3, 1, layoutInput{}).Hit(0, 0); got.Kind != hitNone {
 		t.Fatalf("hit under the gate = %+v", got)
 	}
 }
 
 // statusRow paints the status row alone on a w-wide row, as the status bar does.
 func statusRow(w int, s statusView) string {
-	return paintRow(w, layoutFor(w, 3, layoutInput{status: s}).status)
+	return paintRow(w, layoutFor(w, 3, layoutInput{Status: s}).Status)
 }
 
 func TestStatusRightBlockAtBlueprintWidths(t *testing.T) {
 	// Blueprint section 4.5 hand checks with a warning counter present.
-	s := statusView{position: "Ln 1, Col 1", eol: "LF", encoding: "ASCII", language: "Text", warnings: 2, lines: 4}
+	s := statusView{Position: "Ln 1, Col 1", EOL: "LF", Encoding: "ASCII", Language: "Text", Warnings: 2, Lines: 4}
 	tests := []struct {
 		w     int
 		right string // the right block, from its first cell to the edge
@@ -215,7 +216,7 @@ func TestStatusRightBlockAtBlueprintWidths(t *testing.T) {
 }
 
 func TestStatusLeftGroupKeepsItsPosition(t *testing.T) {
-	s := statusView{position: "Ln 3, Col 7", message: "Saved", lines: 4, eol: "LF"}
+	s := statusView{Position: "Ln 3, Col 7", Message: "Saved", Lines: 4, EOL: "LF"}
 	row := statusRow(100, s)
 	if !strings.HasPrefix(row, " Local  Ln 3, Col 7") {
 		t.Errorf("status row = %q", row)
@@ -226,21 +227,21 @@ func TestStatusLeftGroupKeepsItsPosition(t *testing.T) {
 }
 
 func TestStatusPaletteSegmentIsClickable(t *testing.T) {
-	l := layoutFor(100, 30, layoutInput{status: statusView{position: "Ln 1, Col 1", lines: 1}})
-	last := l.status[len(l.status)-1]
-	if last.kind != hitStatusPalette {
-		t.Fatalf("last status run kind = %v", last.kind)
+	l := layoutFor(100, 30, layoutInput{Status: statusView{Position: "Ln 1, Col 1", Lines: 1}})
+	last := l.Status[len(l.Status)-1]
+	if last.Kind != hitStatusPalette {
+		t.Fatalf("last status run kind = %v", last.Kind)
 	}
-	if got := l.hit(last.x, l.statusY); got.Kind != hitStatusPalette {
+	if got := l.Hit(last.X, l.StatusY); got.Kind != hitStatusPalette {
 		t.Errorf("hit on palette segment = %+v", got)
 	}
 }
 
 func TestPositionWidthGrowsWithLineCount(t *testing.T) {
-	if got := positionWidth(1); got != 13 {
-		t.Errorf("positionWidth(1) = %d, want 13", got)
+	if got := frame.PositionWidth(1); got != 13 {
+		t.Errorf("frame.PositionWidth(1) = %d, want 13", got)
 	}
-	if got := positionWidth(100); got != 15 {
-		t.Errorf("positionWidth(100) = %d, want 15", got)
+	if got := frame.PositionWidth(100); got != 15 {
+		t.Errorf("frame.PositionWidth(100) = %d, want 15", got)
 	}
 }

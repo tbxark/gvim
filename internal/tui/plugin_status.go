@@ -15,14 +15,6 @@ import (
 // segments and gives each clickable one a run of kind hitStatusPlugin, so painting and hit
 // testing read the same geometry.
 
-// statusItem is one plugin item as the layout sees it.
-type statusItem struct {
-	id, plugin, text string
-	right            bool
-	prio             int
-	clickable        bool
-}
-
 // statusState holds the items plugins set, by plugin.
 type statusState struct {
 	items map[string][]pluginapi.StatusItem
@@ -84,7 +76,7 @@ func (m *Model) plugStatusItems() []statusItem {
 		}
 		if text != "" {
 			out = append(out, statusItem{
-				id: "mode:" + um.info.Name, plugin: owner, text: plainCells(text), prio: math.MaxInt,
+				ID: "mode:" + um.info.Name, Plugin: owner, Text: plainCells(text), Prio: math.MaxInt,
 			})
 		}
 	}
@@ -92,11 +84,11 @@ func (m *Model) plugStatusItems() []statusItem {
 	for _, p := range ks.status.order {
 		for _, it := range ks.status.items[p] {
 			out = append(out, statusItem{
-				id: it.ID, plugin: p, text: plainCells(it.Text), right: it.Right, prio: it.Priority, clickable: it.Clickable,
+				ID: it.ID, Plugin: p, Text: plainCells(it.Text), Right: it.Right, Prio: it.Priority, Clickable: it.Clickable,
 			})
 		}
 	}
-	slices.SortStableFunc(out[first:], func(a, b statusItem) int { return b.prio - a.prio })
+	slices.SortStableFunc(out[first:], func(a, b statusItem) int { return b.Prio - a.Prio })
 	return out
 }
 
@@ -109,9 +101,9 @@ func plainCells(s string) string {
 // plugStatusItems gave the layout.
 func (m *Model) plugStatusClick(index int) tea.Cmd {
 	items := m.plugStatusItems()
-	if index < 0 || index >= len(items) || !items[index].clickable {
+	if index < 0 || index >= len(items) || !items[index].Clickable {
 		return nil
 	}
 	it := items[index]
-	return m.pluginRun(pluginapi.StatusClickAction(it.plugin, it.id), nil, pluginapi.SrcMenu)
+	return m.pluginRun(pluginapi.StatusClickAction(it.Plugin, it.ID), nil, pluginapi.SrcMenu)
 }

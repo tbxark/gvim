@@ -167,7 +167,7 @@ func (m *Model) dockRunning() bool {
 // runs in it, and it is laid out. A dock the frame has no room for is not drawn, so it
 // takes no keys.
 func (m *Model) dockKeyboard() bool {
-	return m.dock.open && m.dock.focus && m.dockRunning() && m.layout().dockOn
+	return m.dock.open && m.dock.focus && m.dockRunning() && m.layout().DockOn
 }
 
 // toggleKeyboardCapture turns keyboard capture on or off, with Fresh's notices. It does
@@ -222,10 +222,10 @@ func (m *Model) launchDock(dir string) tea.Cmd {
 // zero when the dock is not laid out.
 func (m *Model) dockContentSize() (cols, rows int) {
 	l := m.layout()
-	if !l.dockOn {
+	if !l.DockOn {
 		return 0, 0
 	}
-	return l.w, l.dockH - 1
+	return l.W, l.DockH - 1
 }
 
 // dockUpdate applies a dock message. It reports whether msg was one. Messages from an
@@ -457,7 +457,7 @@ func waitDockEvent(t Terminal, gen int, live, watchExit bool) tea.Cmd {
 // whether the press was in the dock, so the caller takes no other action for it.
 func (m *Model) dockPress(y int) bool {
 	l := m.layout()
-	if !l.dockOn || y < l.dockY || y >= l.dockY+l.dockH {
+	if !l.DockOn || y < l.DockY || y >= l.DockY+l.DockH {
 		return false
 	}
 	m.focusDock()

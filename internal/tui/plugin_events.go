@@ -182,8 +182,8 @@ func (m *Model) plugView(id pluginapi.BufferID) snapView {
 	if doc == nil || id == 0 || m.width == 0 {
 		return snapView{}
 	}
-	fp := m.layout().focusedPane()
-	return snapView{ok: true, buf: id, top: doc.Top(), rows: m.paneGeometry(fp, doc).BodyRows(fp.W, fp.H), cols: fp.textW}
+	fp := m.layout().FocusedPane()
+	return snapView{ok: true, buf: id, top: doc.Top(), rows: m.paneGeometry(fp, doc).BodyRows(fp.W, fp.H), cols: fp.TextW}
 }
 
 // apiPos converts a rune position of doc to an API position: the column is a byte offset

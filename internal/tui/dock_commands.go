@@ -40,7 +40,7 @@ func (m *Model) openDockBelow(right bool) tea.Cmd {
 	switch {
 	case m.dock.notice != "":
 		m.notice = m.dock.notice
-	case !m.layout().dockOn:
+	case !m.layout().DockOn:
 		m.notice = noRoomNotice
 	case right:
 		m.notice = terminalRightNotice

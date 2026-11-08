@@ -373,9 +373,9 @@ func TestNilDialogsNoticesInsteadOfOpening(t *testing.T) {
 
 // tabX returns the first column of tab i in the strip, or -1.
 func tabX(m *Model, i int) int {
-	for _, r := range m.layout().strip.runs {
-		if r.kind == hitTab && r.index == i {
-			return r.x
+	for _, r := range m.layout().Strip.Runs {
+		if r.Kind == hitTab && r.Index == i {
+			return r.X
 		}
 	}
 	return -1
@@ -400,9 +400,9 @@ func TestClickOnTabCloseButtonClosesCleanTab(t *testing.T) {
 	tf := newTabFake("a.txt", "b.txt")
 	m := shellModel(t, tf, &fakeDialogs{})
 	x := -1
-	for _, r := range m.layout().strip.runs {
-		if r.kind == hitTabClose && r.index == 1 {
-			x = r.x
+	for _, r := range m.layout().Strip.Runs {
+		if r.Kind == hitTabClose && r.Index == 1 {
+			x = r.X
 		}
 	}
 	if x < 0 {
@@ -447,28 +447,28 @@ func TestExplorerDividerDragResizesWithinBounds(t *testing.T) {
 	m := shellModel(t, tf, &fakeDialogs{})
 	press(m, ctrl('b'))
 	l := m.layout()
-	grip := l.ex - 1
+	grip := l.Ex - 1
 	_, cmd := m.Update(click(grip, 5, tea.MouseLeft))
 	if cmd != nil {
 		t.Fatalf("pressing the grip started %v", cmd)
 	}
 	_, cmd = m.Update(tea.MouseMotionMsg(tea.Mouse{X: 50, Y: 5, Button: tea.MouseLeft}))
 	drain(t, m, cmd)
-	if got := m.layout().ex; got != 51 {
+	if got := m.layout().Ex; got != 51 {
 		t.Fatalf("explorer width after the drag = %d, want 51", got)
 	}
 	_, cmd = m.Update(tea.MouseMotionMsg(tea.Mouse{X: 90, Y: 5, Button: tea.MouseLeft}))
 	drain(t, m, cmd)
 	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: 90, Y: 5, Button: tea.MouseLeft}))
-	if got := m.layout().ex; got != 60 {
+	if got := m.layout().Ex; got != 60 {
 		t.Fatalf("explorer width past the maximum = %d, want 60", got)
 	}
 }
 
 func TestEightyByTwentyFourLayoutDefaultsToThirtyTwoColumns(t *testing.T) {
-	l := layoutFor(80, 24, layoutInput{explorerOpen: true, lines: 10})
-	if l.ex != 32 || l.editorX != 32 || l.bodyTop != 2 || l.bodyBottom != 22 || l.statusY != 23 {
+	l := layoutFor(80, 24, layoutInput{ExplorerOpen: true, Lines: 10})
+	if l.Ex != 32 || l.EditorX != 32 || l.BodyTop != 2 || l.BodyBottom != 22 || l.StatusY != 23 {
 		t.Fatalf("80x24: ex %d editorX %d body %d-%d status %d",
-			l.ex, l.editorX, l.bodyTop, l.bodyBottom, l.statusY)
+			l.Ex, l.EditorX, l.BodyTop, l.BodyBottom, l.StatusY)
 	}
 }

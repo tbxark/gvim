@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -28,12 +29,12 @@ func TestStatusModeLabelIsNotCut(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sv := statusView{
-				position: "Ln 1, Col 1", message: tt.message, eol: "LF", encoding: "UTF-8", language: "Text", lines: 10,
-				extra: []statusItem{{id: "vi", plugin: "vi_mode", text: tt.label}},
+				Position: "Ln 1, Col 1", Message: tt.message, EOL: "LF", Encoding: "UTF-8", Language: "Text", Lines: 10,
+				Extra: []statusItem{{ID: "vi", Plugin: "vi_mode", Text: tt.label}},
 			}
 			var row strings.Builder
-			for _, r := range statusRuns(tt.w, sv) {
-				row.WriteString(r.text)
+			for _, r := range frame.StatusRuns(tt.w, sv) {
+				row.WriteString(r.Text)
 			}
 			if !strings.Contains(row.String(), tt.label) {
 				t.Errorf("row %q lost the label %q", row.String(), tt.label)
@@ -52,9 +53,9 @@ func TestLongPluginNoticeKeepsItsHead(t *testing.T) {
 	if want := "t: " + msg; e.m.notice != want {
 		t.Fatalf("notice = %q, want the whole text with the plugin name in front", e.m.notice)
 	}
-	l := computeLayout(80, 30, noticeInput(e.m.notice))
-	if len(l.notice) == 0 || !strings.HasPrefix(l.notice[0], "t: "+head) {
-		t.Fatalf("band = %q, want it to start with the head", l.notice)
+	l := frame.ComputeLayout(80, 30, noticeInput(e.m.notice))
+	if len(l.Notice) == 0 || !strings.HasPrefix(l.Notice[0], "t: "+head) {
+		t.Fatalf("band = %q, want it to start with the head", l.Notice)
 	}
 	if !slices.Contains(e.m.notes.items, e.m.notice) {
 		t.Errorf("Show Warnings does not keep the whole notice")

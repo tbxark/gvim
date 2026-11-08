@@ -4,6 +4,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -27,9 +28,9 @@ func closedWindow(id pluginapi.WinID) error {
 
 // windowLeaves returns the leaves in reading order after giving each a window id.
 func (m *Model) windowLeaves() []*splitNode {
-	leaves := m.splits.root.leaves()
+	leaves := m.splits.Root.Leaves()
 	for _, n := range leaves {
-		m.splits.idOf(n)
+		m.splits.IDOf(n)
 	}
 	return leaves
 }
@@ -37,7 +38,7 @@ func (m *Model) windowLeaves() []*splitNode {
 // splitByID returns the leaf with window id, or nil.
 func (m *Model) splitByID(id uint64) *splitNode {
 	for _, n := range m.windowLeaves() {
-		if n.id == id {
+		if n.ID == id {
 			return n
 		}
 	}
@@ -46,10 +47,10 @@ func (m *Model) splitByID(id uint64) *splitNode {
 
 // leafTab is the tab leaf n shows; the focused leaf shows the active tab.
 func (m *Model) leafTab(n *splitNode) int {
-	if n == m.splits.focus {
+	if n == m.splits.Focus {
 		return m.activeTab()
 	}
-	return n.tab
+	return n.Tab
 }
 
 // windowInfos describes every window in reading order. The size is the text area in
@@ -61,15 +62,15 @@ func (m *Model) windowInfos() []pluginapi.WindowInfo {
 	l := m.layout()
 	out := make([]pluginapi.WindowInfo, len(leaves))
 	for i, n := range leaves {
-		info := pluginapi.WindowInfo{ID: pluginapi.WinID(n.id), Active: n == m.splits.focus}
+		info := pluginapi.WindowInfo{ID: pluginapi.WinID(n.ID), Active: n == m.splits.Focus}
 		if tab := m.leafTab(n); tab >= 0 && tab < len(bufs) {
 			info.Buffer = bufs[tab].ID
 		}
-		if i < len(l.panes) {
-			p := l.panes[i]
-			info.TopLine = p.top
-			info.X, info.Y = p.textX, p.Y
-			info.Width, info.Height = max(p.textW-1, 0), p.H
+		if i < len(l.Panes) {
+			p := l.Panes[i]
+			info.TopLine = p.Top
+			info.X, info.Y = p.TextX, p.Y
+			info.Width, info.Height = max(p.TextW-1, 0), p.H
 			if doc := m.paneDoc(p); doc != nil && p.W > 0 && p.H > 0 {
 				info.Height, info.LeftCol = m.paneGeometry(p, doc).View(p.W, p.H)
 			}
@@ -84,7 +85,7 @@ func (h *pluginHost) Windows() []pluginapi.WindowInfo { return h.m.windowInfos()
 
 // CurrentWindow is the window with the focus.
 func (h *pluginHost) CurrentWindow() pluginapi.WinID {
-	return pluginapi.WinID(h.m.splits.idOf(h.m.splits.focus))
+	return pluginapi.WinID(h.m.splits.IDOf(h.m.splits.Focus))
 }
 
 // SetWindowBuffer shows buffer b in window w. The focused window changes the active tab;
@@ -103,12 +104,12 @@ func (h *pluginHost) SetWindowBuffer(w pluginapi.WinID, b pluginapi.BufferID) er
 	if m.splits.comparing {
 		return pluginapi.Errf(pluginapi.CodeConflict, "the windows of a compare view cannot change buffer")
 	}
-	if n == m.splits.focus {
+	if n == m.splits.Focus {
 		return h.Activate(b)
 	}
-	n.tab, n.top = tab, 0
+	n.Tab, n.Top = tab, 0
 	if doc := m.docAt(tab); doc != nil {
-		n.top = doc.Top()
+		n.Top = doc.Top()
 	}
 	return nil
 }
@@ -138,14 +139,14 @@ func (m *Model) closeSplitByID(id uint64) error {
 	if n == nil {
 		return closedWindow(pluginapi.WinID(id))
 	}
-	if m.splits.root.leaf() {
+	if m.splits.Root.Leaf() {
 		return pluginapi.Errf(pluginapi.CodeConflict, "the last window cannot be closed")
 	}
-	if n == m.splits.focus {
+	if n == m.splits.Focus {
 		m.closeFocused()
 		return nil
 	}
-	m.splits.root = removeLeaf(m.splits.root, n)
+	m.splits.Root = split.RemoveLeaf(m.splits.Root, n)
 	m.splits.comparing = false
 	m.splits.maximized = false
 	m.syncViewport()
@@ -189,12 +190,12 @@ func (h *pluginHost) SplitWindow(w pluginapi.WinID, o pluginapi.SplitOptions) (p
 // not negative, is the tab the new leaf shows. The leaf that had the focus has it again at
 // the end, unless o.Focus.
 func (m *Model) splitNew(src *splitNode, dir splitDir, o pluginapi.SplitOptions, tab int) (uint64, error) {
-	prev := m.splits.focus
-	prevID := m.splits.idOf(prev)
+	prev := m.splits.Focus
+	prevID := m.splits.IDOf(prev)
 	if src != prev {
 		m.focusLeaf(src)
 	}
-	f := m.splits.focus // the leaf the split turns into an inner node
+	f := m.splits.Focus // the leaf the split turns into an inner node
 	if msg := m.trySplit(dir); msg != "" {
 		if src != prev {
 			m.focusLeaf(prev)
@@ -205,21 +206,21 @@ func (m *Model) splitNew(src *splitNode, dir splitDir, o pluginapi.SplitOptions,
 		}
 		return 0, pluginapi.Errf(code, "%s", msg)
 	}
-	created := f.b
+	created := f.B
 	if tab >= 0 {
 		m.activateTab(tab)
 	}
-	share := splitEven
+	share := split.Even
 	if o.Ratio > 0 {
 		share = min(max(int(math.Round(o.Ratio*100)), 1), 99)
 	}
 	if o.Before {
-		f.a, f.b = f.b, f.a
-		f.ratio = share
+		f.A, f.B = f.B, f.A
+		f.Ratio = share
 	} else {
-		f.ratio = 100 - share
+		f.Ratio = 100 - share
 	}
-	id := m.splits.idOf(created)
+	id := m.splits.IDOf(created)
 	if o.Focus {
 		m.focusEditor()
 	} else if old := m.splitByID(prevID); old != nil {
@@ -246,22 +247,22 @@ func (h *pluginHost) ScrollWindow(w pluginapi.WinID, line int, center bool) erro
 		top -= max(m.windowRows(n)-1, 0) / 2
 	}
 	top = min(max(top, 0), max(doc.LineCount()-1, 0))
-	if n == m.splits.focus {
+	if n == m.splits.Focus {
 		m.ed.ScrollTo(top)
 		return nil
 	}
-	n.top = top
+	n.Top = top
 	return nil
 }
 
 // windowRows is the number of text rows of leaf n.
 func (m *Model) windowRows(n *splitNode) int {
-	i := slices.Index(m.splits.root.leaves(), n)
+	i := slices.Index(m.splits.Root.Leaves(), n)
 	l := m.layout()
-	if i < 0 || i >= len(l.panes) {
+	if i < 0 || i >= len(l.Panes) {
 		return 0
 	}
-	p := l.panes[i]
+	p := l.Panes[i]
 	doc := m.paneDoc(p)
 	if doc == nil || p.W <= 0 || p.H <= 0 {
 		return p.H
@@ -276,15 +277,15 @@ func (h *pluginHost) Equalize() error {
 	m := h.m
 	var walk func(n *splitNode)
 	walk = func(n *splitNode) {
-		if n.leaf() {
+		if n.Leaf() {
 			return
 		}
-		a, b := windowsAlong(n.a, n.dir), windowsAlong(n.b, n.dir)
-		n.ratio = (100*a + (a+b)/2) / (a + b)
-		walk(n.a)
-		walk(n.b)
+		a, b := windowsAlong(n.A, n.Dir), windowsAlong(n.B, n.Dir)
+		n.Ratio = (100*a + (a+b)/2) / (a + b)
+		walk(n.A)
+		walk(n.B)
 	}
-	walk(m.splits.root)
+	walk(m.splits.Root)
 	m.splits.maximized = false
 	m.syncViewport()
 	return nil
@@ -293,11 +294,11 @@ func (h *pluginHost) Equalize() error {
 // windowsAlong counts the windows of the subtree n that sit in a row along dir: the
 // sum over a split of the same direction, the larger side over a split across it.
 func windowsAlong(n *splitNode, dir splitDir) int {
-	if n.leaf() {
+	if n.Leaf() {
 		return 1
 	}
-	a, b := windowsAlong(n.a, dir), windowsAlong(n.b, dir)
-	if n.dir == dir {
+	a, b := windowsAlong(n.A, dir), windowsAlong(n.B, dir)
+	if n.Dir == dir {
 		return a + b
 	}
 	return max(a, b)
@@ -310,12 +311,12 @@ func (h *pluginHost) VisibleRows(w pluginapi.WinID) ([]pluginapi.VisibleRow, err
 	if n == nil {
 		return nil, closedWindow(w)
 	}
-	i := slices.Index(m.splits.root.leaves(), n)
+	i := slices.Index(m.splits.Root.Leaves(), n)
 	l := m.layout()
-	if i < 0 || i >= len(l.panes) {
+	if i < 0 || i >= len(l.Panes) {
 		return nil, nil
 	}
-	p := l.panes[i]
+	p := l.Panes[i]
 	doc := m.paneDoc(p)
 	if doc == nil || p.W <= 0 || p.H <= 0 {
 		return nil, nil

@@ -39,7 +39,7 @@ func TestClickInTheEditorWhileTheFindBarIsOpenMovesTheCaret(t *testing.T) {
 	m, sf := newSearchModel(t, "hello world", "second line", "third")
 	press(m, ctrl('f'))
 	l := m.layout()
-	clickAt(m, l.textX+3, l.bodyTop+1)
+	clickAt(m, l.TextX+3, l.BodyTop+1)
 	if got := sf.doc.cursor; got != (buffer.Pos{Line: 1, Col: 3}) {
 		t.Fatalf("caret after the click = %v, want line 1 col 3", got)
 	}
@@ -60,7 +60,7 @@ func TestWheelScrollsTheEditorWhileTheFindBarIsOpen(t *testing.T) {
 	m, sf := newSearchModel(t, lines...)
 	press(m, ctrl('f'))
 	l := m.layout()
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.textX + 2, Y: l.bodyTop + 2, Button: tea.MouseWheelDown}))
+	m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.TextX + 2, Y: l.BodyTop + 2, Button: tea.MouseWheelDown}))
 	if sf.doc.top == 0 {
 		t.Error("a wheel notch over the text did not scroll while the find bar was open")
 	}

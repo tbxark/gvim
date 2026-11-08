@@ -39,7 +39,7 @@ func TestCaretAtTheEndOfATallWrappedLineIsOnScreen(t *testing.T) {
 	if !ok {
 		t.Fatal("the caret at the end of a tall wrapped line is off screen")
 	}
-	if rows := m.bodyRows(); y != m.layout().focusedPane().Y+rows-1 {
+	if rows := m.bodyRows(); y != m.layout().FocusedPane().Y+rows-1 {
 		t.Errorf("caret on frame row %d, want the last body row (pane row %d of %d), x=%d", y, rows-1, rows, x)
 	}
 	if ed.doc.top != 0 {

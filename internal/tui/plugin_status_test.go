@@ -27,7 +27,7 @@ func TestBufferModeHasAStatusLabel(t *testing.T) {
 			e.m.plug.host.SetModes("p", []pluginapi.ModeInfo{tt.info})
 			e.pe.bufs[0].Mode = "outline"
 			items := e.m.plugStatusItems()
-			if len(items) != 1 || items[0].text != tt.want || items[0].plugin != "p" {
+			if len(items) != 1 || items[0].Text != tt.want || items[0].Plugin != "p" {
 				t.Fatalf("status items = %+v, want one with %q", items, tt.want)
 			}
 			// the panic chord leaves it, and the label goes with it

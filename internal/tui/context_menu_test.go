@@ -133,13 +133,13 @@ func TestRightClickOnATabOpensTheTabMenu(t *testing.T) {
 	m, _ := newCtxModel(t, "a.txt", "b.txt", "c.txt")
 	l := m.layout()
 	var tab run
-	for _, r := range l.strip.runs {
-		if r.kind == hitTab && r.index == 1 {
+	for _, r := range l.Strip.Runs {
+		if r.Kind == hitTab && r.Index == 1 {
 			tab = r
 			break
 		}
 	}
-	rightClickAt(m, tab.x+1, l.stripY)
+	rightClickAt(m, tab.X+1, l.StripY)
 	menu := ctxTop(m)
 	if menu == nil {
 		t.Fatal("a right click on a tab opened no menu")
@@ -206,13 +206,13 @@ func TestTabMenuClosesTabs(t *testing.T) {
 			m, ed := newCtxModel(t, "a.txt", "b.txt", "c.txt", "d.txt")
 			l := m.layout()
 			var tab run
-			for _, r := range l.strip.runs {
-				if r.kind == hitTab && r.index == tt.tab {
+			for _, r := range l.Strip.Runs {
+				if r.Kind == hitTab && r.Index == tt.tab {
 					tab = r
 					break
 				}
 			}
-			rightClickAt(m, tab.x+1, l.stripY)
+			rightClickAt(m, tab.X+1, l.StripY)
 			chooseRow(t, m, tt.row)
 			if got := tabNames(ed); !slices.Equal(got, tt.want) {
 				t.Errorf("tabs after %q = %v, want %v", tt.row, got, tt.want)
@@ -248,12 +248,12 @@ func TestEscClosesAContextMenu(t *testing.T) {
 func TestRightClickOnAnotherTargetReopensTheMenuThere(t *testing.T) {
 	m, _ := newCtxModel(t, "a.txt", "b.txt")
 	l := m.layout()
-	rightClickAt(m, l.strip.runs[0].x+1, l.stripY)
+	rightClickAt(m, l.Strip.Runs[0].X+1, l.StripY)
 	if ctxTop(m) == nil {
 		t.Fatal("no menu")
 	}
 	// A right click on the editor text, outside the menu, closes it and opens the editor menu.
-	rightClickAt(m, l.textX+5, l.bodyBottom)
+	rightClickAt(m, l.TextX+5, l.BodyBottom)
 	menu := ctxTop(m)
 	if menu == nil {
 		t.Fatal("the second right click opened no menu")
@@ -269,7 +269,7 @@ func TestRightClickOnAnotherTargetReopensTheMenuThere(t *testing.T) {
 func TestEditorMenuRunsClipboardActions(t *testing.T) {
 	m, ed := newCtxModel(t, "a.txt")
 	l := m.layout()
-	rightClickAt(m, l.textX+2, l.bodyTop)
+	rightClickAt(m, l.TextX+2, l.BodyTop)
 	menu := ctxTop(m)
 	if menu == nil {
 		t.Fatal("a right click on the editor text opened no menu")
@@ -292,7 +292,7 @@ func TestEditorMenuRunsClipboardActions(t *testing.T) {
 func TestRightClickWithNoMenuSaysSo(t *testing.T) {
 	m, _ := newCtxModel(t, "a.txt")
 	l := m.layout()
-	rightClickAt(m, 90, l.statusY)
+	rightClickAt(m, 90, l.StatusY)
 	if ctxTop(m) != nil {
 		t.Fatal("the status row opened a menu")
 	}
@@ -375,7 +375,7 @@ func TestEditorMenuKeepsTheCarets(t *testing.T) {
 		t.Fatal("setup: no extra caret")
 	}
 	l := m.layout()
-	rightClickAt(m, l.textX+4, l.bodyTop+1)
+	rightClickAt(m, l.TextX+4, l.BodyTop+1)
 	if ctxTop(m) == nil {
 		t.Fatal("no context menu opened")
 	}
@@ -397,7 +397,7 @@ func TestEditorMenuCutAndCopyNeedASelectionWithSeveralCarets(t *testing.T) {
 		t.Fatal("setup: no extra caret")
 	}
 	l := m.layout()
-	rightClickAt(m, l.textX+4, l.bodyTop+1)
+	rightClickAt(m, l.TextX+4, l.BodyTop+1)
 	menu := ctxTop(m)
 	if menu == nil {
 		t.Fatal("no context menu opened")
@@ -432,7 +432,7 @@ func TestEditorMenuDisablesEditsOnAReadOnlyDocument(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "hello world\n", 60, 12)
 	m.ed = ctxROEditor{m.ed.(realEditor)}
 	l := m.layout()
-	rightClickAt(m, l.textX+2, l.bodyTop)
+	rightClickAt(m, l.TextX+2, l.BodyTop)
 	menu := ctxTop(m)
 	if menu == nil {
 		t.Fatal("no context menu opened")

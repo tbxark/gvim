@@ -13,6 +13,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/theme"
@@ -511,7 +512,7 @@ func TestDockStartFailureShowsNotice(t *testing.T) {
 			if !m.dock.open || m.dock.notice != tt.want {
 				t.Fatalf("open = %v, notice = %q; want open with notice %q", m.dock.open, m.dock.notice, tt.want)
 			}
-			top := m.layout().dockY + 1
+			top := m.layout().DockY + 1
 			if row := m.paint().Plain()[top]; !strings.Contains(row, tt.want) {
 				t.Fatalf("dock row %d = %q, want it to show %q", top, row, tt.want)
 			}
@@ -623,7 +624,7 @@ func TestDockOutputKeepsWaitingUntilTheExit(t *testing.T) {
 	if !m.dock.exited || m.dock.armed {
 		t.Fatalf("exited = %v, armed = %v; want exited and no wait", m.dock.exited, m.dock.armed)
 	}
-	if top := m.layout().dockY; !strings.Contains(m.paint().Plain()[top], "(exited)") {
+	if top := m.layout().DockY; !strings.Contains(m.paint().Plain()[top], "(exited)") {
 		t.Fatalf("title row = %q, want it to say the shell exited", m.paint().Plain()[top])
 	}
 	// Keys after the exit do not reach the dead shell.
@@ -672,7 +673,7 @@ func TestDockPaintsScreenCells(t *testing.T) {
 	})
 	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter})
 	openDock(t, m)
-	top := m.layout().dockY + 1
+	top := m.layout().DockY + 1
 
 	g := m.paint()
 	tests := []struct {
@@ -730,12 +731,12 @@ func TestDockCaretFollowsTheShellCursor(t *testing.T) {
 				t.Fatalf("caret ok = %v, want %v", ok, tt.wantOK)
 			}
 			if !ok || tt.wantRow < 0 {
-				if ok && y >= m.layout().dockY {
+				if ok && y >= m.layout().DockY {
 					t.Fatalf("caret at row %d is inside the dock, want the editor's caret", y)
 				}
 				return
 			}
-			dockTop := m.layout().dockY + 1
+			dockTop := m.layout().DockY + 1
 			if x != tt.wantCol || y != dockTop+tt.wantRow {
 				t.Fatalf("caret = (%d, %d), want (%d, %d)", x, y, tt.wantCol, dockTop+tt.wantRow)
 			}
@@ -760,15 +761,15 @@ func TestDockLayoutRegion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := computeLayout(tt.w, tt.h, layoutInput{dockOpen: tt.open})
-			if l.dockOn != tt.wantOn {
-				t.Fatalf("dockOn = %v, want %v", l.dockOn, tt.wantOn)
+			l := frame.ComputeLayout(tt.w, tt.h, layoutInput{DockOpen: tt.open})
+			if l.DockOn != tt.wantOn {
+				t.Fatalf("dockOn = %v, want %v", l.DockOn, tt.wantOn)
 			}
-			if tt.wantOn && (l.dockY != tt.wantY || l.dockH != tt.wantH) {
-				t.Fatalf("dock rows start %d with %d rows, want %d with %d", l.dockY, l.dockH, tt.wantY, tt.wantH)
+			if tt.wantOn && (l.DockY != tt.wantY || l.DockH != tt.wantH) {
+				t.Fatalf("dock rows start %d with %d rows, want %d with %d", l.DockY, l.DockH, tt.wantY, tt.wantH)
 			}
-			if l.bodyBottom != tt.wantBodyBt {
-				t.Fatalf("bodyBottom = %d, want %d", l.bodyBottom, tt.wantBodyBt)
+			if l.BodyBottom != tt.wantBodyBt {
+				t.Fatalf("bodyBottom = %d, want %d", l.BodyBottom, tt.wantBodyBt)
 			}
 		})
 	}
@@ -781,7 +782,7 @@ func TestDockTooSmallForAShellKeepsKeysInTheEditor(t *testing.T) {
 	openDock(t, m)
 	// At 80 by 8 the body has no room left for the dock, so the dock is not drawn.
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 8})
-	if m.layout().dockOn {
+	if m.layout().DockOn {
 		t.Fatal("the dock is laid out at 80 by 8, want it hidden")
 	}
 	dockSettle(t, m, press(m, typed("a")))
@@ -919,7 +920,7 @@ func TestDockExitIsSeenWhileOutputStaysOpen(t *testing.T) {
 	if !m.dock.exited {
 		t.Fatal("the dock does not show the shell as exited while its output stays open")
 	}
-	if top := m.layout().dockY; !strings.Contains(m.paint().Plain()[top], "(exited)") {
+	if top := m.layout().DockY; !strings.Contains(m.paint().Plain()[top], "(exited)") {
 		t.Fatalf("title row = %q, want it to say the shell exited", m.paint().Plain()[top])
 	}
 }
@@ -931,10 +932,10 @@ func TestDockPressFocusesTheDock(t *testing.T) {
 		row       func(l layout) int
 		wantFocus bool
 	}{
-		{name: "a press on a shell row gives the dock the focus", shell: true, row: func(l layout) int { return l.dockY + 2 }, wantFocus: true},
-		{name: "a press on the title row gives the dock the focus", shell: true, row: func(l layout) int { return l.dockY }, wantFocus: true},
-		{name: "a press above the dock leaves the focus in the editor", shell: true, row: func(l layout) int { return l.dockY - 1 }, wantFocus: false},
-		{name: "a press in the dock with no shell takes no focus", shell: false, row: func(l layout) int { return l.dockY + 2 }, wantFocus: false},
+		{name: "a press on a shell row gives the dock the focus", shell: true, row: func(l layout) int { return l.DockY + 2 }, wantFocus: true},
+		{name: "a press on the title row gives the dock the focus", shell: true, row: func(l layout) int { return l.DockY }, wantFocus: true},
+		{name: "a press above the dock leaves the focus in the editor", shell: true, row: func(l layout) int { return l.DockY - 1 }, wantFocus: false},
+		{name: "a press in the dock with no shell takes no focus", shell: false, row: func(l layout) int { return l.DockY + 2 }, wantFocus: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

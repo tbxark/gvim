@@ -14,12 +14,12 @@ import (
 // statusRun returns the status-row run of the segment kind and index.
 func statusRun(t *testing.T, m *Model, index int) run {
 	t.Helper()
-	for _, r := range m.layout().status {
-		if r.kind == hitStatusSegment && r.index == index {
+	for _, r := range m.layout().Status {
+		if r.Kind == hitStatusSegment && r.Index == index {
 			return r
 		}
 	}
-	t.Fatalf("no status segment %d in %+v", index, m.layout().status)
+	t.Fatalf("no status segment %d in %+v", index, m.layout().Status)
 	return run{}
 }
 
@@ -34,7 +34,7 @@ func TestLanguageSegmentOpensAFilterableListOfRealLanguages(t *testing.T) {
 	ed := newFakeEditor("abc")
 	m := newTestModel(t, ed, newFakeTree(3), 100, 30)
 	r := statusRun(t, m, statusSegmentLanguage)
-	clickAt(m, r.x, m.layout().statusY)
+	clickAt(m, r.X, m.layout().StatusY)
 	v := topList(m)
 	if v == nil || v.Title != "Select Language" {
 		t.Fatalf("top overlay = %+v, want the language list", v)
@@ -141,7 +141,7 @@ func TestPositionSegmentOpensGoToLine(t *testing.T) {
 	ed := newFakeEditor("abc\ndef")
 	m := newTestModel(t, ed, newFakeTree(3), 100, 30)
 	r := statusRun(t, m, statusSegmentPosition)
-	clickAt(m, r.x+1, m.layout().statusY)
+	clickAt(m, r.X+1, m.layout().StatusY)
 	if len(m.overlays) != 1 {
 		t.Fatalf("%d overlays after a click on Ln, Col, want the Go to Line prompt", len(m.overlays))
 	}

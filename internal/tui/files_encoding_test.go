@@ -123,15 +123,15 @@ func TestStatusBarSegmentsOpenTheirChoosers(t *testing.T) {
 			m := newTestModel(t, ed, newFakeTree(3), 100, 30)
 			l := m.layout()
 			var click *run
-			for i, r := range l.status {
-				if r.kind == hitStatusSegment && r.index == tt.index {
-					click = &l.status[i]
+			for i, r := range l.Status {
+				if r.Kind == hitStatusSegment && r.Index == tt.index {
+					click = &l.Status[i]
 				}
 			}
 			if click == nil {
-				t.Fatalf("no status segment %d in %+v", tt.index, l.status)
+				t.Fatalf("no status segment %d in %+v", tt.index, l.Status)
 			}
-			m.Update(tea.MouseClickMsg{X: click.x, Y: l.statusY, Button: tea.MouseLeft})
+			m.Update(tea.MouseClickMsg{X: click.X, Y: l.StatusY, Button: tea.MouseLeft})
 			if v := topList(m); v == nil || v.Title != tt.title {
 				t.Fatalf("top overlay after the click = %+v, want the %q list", v, tt.title)
 			}
@@ -163,8 +163,8 @@ func TestStatusBarShowsReadOnly(t *testing.T) {
 		m.ed = ed
 		l := m.layout()
 		var texts []string
-		for _, r := range l.status {
-			texts = append(texts, r.text)
+		for _, r := range l.Status {
+			texts = append(texts, r.Text)
 		}
 		if got := slices.Contains(texts, " [RO] "); got != ro {
 			t.Errorf("ReadOnly() = %v: status runs %q, [RO] shown = %v", ro, texts, got)

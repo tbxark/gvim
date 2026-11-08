@@ -36,7 +36,7 @@ func TestDropEdgesFollowFreshsZones(t *testing.T) {
 func dragTabTo(t *testing.T, m *Model, i, x, y int) {
 	t.Helper()
 	src := tabRun(t, m, i)
-	mouseDownAt(m, src.x+1, m.layout().stripY)
+	mouseDownAt(m, src.X+1, m.layout().StripY)
 	mouseMove(m, x, y)
 }
 
@@ -63,22 +63,22 @@ func TestDroppingATabOnAPaneEdgeSplitsIt(t *testing.T) {
 				t.Fatalf("zone = %+v, want one on pane 0", z)
 			}
 			mouseUpAt(m, x, y)
-			root := m.splits.root
-			if root.leaf() || root.dir != tt.wantDir {
-				t.Fatalf("root leaf %v dir %v, want a split in direction %v", root.leaf(), root.dir, tt.wantDir)
+			root := m.splits.Root
+			if root.Leaf() || root.Dir != tt.wantDir {
+				t.Fatalf("root leaf %v dir %v, want a split in direction %v", root.Leaf(), root.Dir, tt.wantDir)
 			}
-			withTab, other := root.a, root.b
+			withTab, other := root.A, root.B
 			if tt.newPaneLast {
-				withTab, other = root.b, root.a
+				withTab, other = root.B, root.A
 			}
-			if m.splits.focus != withTab {
+			if m.splits.Focus != withTab {
 				t.Error("the focus is not on the new pane")
 			}
 			if f.active != 1 {
 				t.Errorf("active tab %d, want the dragged tab 1", f.active)
 			}
-			if other.tab != 0 {
-				t.Errorf("the old pane shows tab %d, want 0", other.tab)
+			if other.Tab != 0 {
+				t.Errorf("the old pane shows tab %d, want 0", other.Tab)
 			}
 			if m.drag.tab != nil {
 				t.Error("the tab drag outlived the release")
@@ -96,13 +96,13 @@ func TestDroppingATabInTheCentreShowsItInThatPane(t *testing.T) {
 	x, y := left.X+left.W/2, left.Y+left.H/2
 	dragTabTo(t, m, 1, x, y)
 	mouseUpAt(m, x, y)
-	if got := m.layout().focus; got != 0 {
+	if got := m.layout().Focus; got != 0 {
 		t.Errorf("focus %d, want the left pane 0", got)
 	}
 	if f.active != 1 {
 		t.Errorf("active tab %d, want 1", f.active)
 	}
-	if n := len(m.layout().panes); n != 2 {
+	if n := len(m.layout().Panes); n != 2 {
 		t.Errorf("%d panes after a centre drop, want 2", n)
 	}
 }
@@ -111,11 +111,11 @@ func TestATabDragThatBarelyMovedDoesNotSplit(t *testing.T) {
 	m := newSplitModel(t, newMultiFake(2, 30), 80, 24)
 	p := panesOf(t, m, 1)[0]
 	src := tabRun(t, m, 1)
-	y := m.layout().stripY
-	mouseDownAt(m, src.x+1, y)
-	mouseMove(m, src.x+1, y+1) // one row down, onto the pane's top edge
-	mouseUpAt(m, src.x+1, y+1)
-	if !m.splits.root.leaf() {
+	y := m.layout().StripY
+	mouseDownAt(m, src.X+1, y)
+	mouseMove(m, src.X+1, y+1) // one row down, onto the pane's top edge
+	mouseUpAt(m, src.X+1, y+1)
+	if !m.splits.Root.Leaf() {
 		t.Errorf("a wobble of one cell split the pane %+v", p)
 	}
 }

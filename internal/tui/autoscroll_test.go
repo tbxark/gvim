@@ -35,15 +35,15 @@ func TestAutoscrollSpeedGrowsWithTheDistanceAndIsCapped(t *testing.T) {
 				ed.SetCursor(buffer.Pos{Line: start}, false)
 				m.syncViewport()
 				m.revealCaret()
-				y := l.bodyTop + 3
-				m.Update(tea.MouseClickMsg(tea.Mouse{X: l.textX + 1, Y: y, Button: tea.MouseLeft}))
+				y := l.BodyTop + 3
+				m.Update(tea.MouseClickMsg(tea.Mouse{X: l.TextX + 1, Y: y, Button: tea.MouseLeft}))
 				var out int
 				if dir.sign > 0 {
-					out = l.bodyBottom + d
+					out = l.BodyBottom + d
 				} else {
-					out = l.bodyTop - d
+					out = l.BodyTop - d
 				}
-				m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.textX + 1, Y: out, Button: tea.MouseLeft}))
+				m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.TextX + 1, Y: out, Button: tea.MouseLeft}))
 				_, before, _ := selectionOf(ed)
 				tickOnce(t, m)
 				_, after, _ := selectionOf(ed)
@@ -84,14 +84,14 @@ func TestDragToThePaneEdgePansHorizontallyWhileHeld(t *testing.T) {
 	m, ed := viewModel(t, DefaultViewOptions(), strings.Repeat("x", 400)+"\nnext\n", 60, 12)
 	runAction(t, m, "toggle_line_wrap")
 	l := m.layout()
-	fp := l.focusedPane()
+	fp := l.FocusedPane()
 	left := func() int {
-		v, _ := m.paneGeometry(m.layout().focusedPane(), m.ed.Active()).HScroll(fp.W, fp.H)
+		v, _ := m.paneGeometry(m.layout().FocusedPane(), m.ed.Active()).HScroll(fp.W, fp.H)
 		return v
 	}
-	mouseDownAt(m, l.textX+2, l.bodyTop)
+	mouseDownAt(m, l.TextX+2, l.BodyTop)
 	edge := fp.X + fp.W - 2 // the last text column
-	_, cmd := m.Update(tea.MouseMotionMsg(tea.Mouse{X: edge, Y: l.bodyTop, Button: tea.MouseLeft}))
+	_, cmd := m.Update(tea.MouseMotionMsg(tea.Mouse{X: edge, Y: l.BodyTop, Button: tea.MouseLeft}))
 	if cmd == nil {
 		t.Fatal("a drag to the right edge armed no autoscroll tick")
 	}
@@ -110,7 +110,7 @@ func TestDragToThePaneEdgePansHorizontallyWhileHeld(t *testing.T) {
 		t.Fatalf("after sixty ticks the head is at %v and the view at %d (was %d)", head2, left(), left0)
 	}
 	// On the scrollbar column the pan is faster.
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.BodyTop, Button: tea.MouseLeft}))
 	_, a, _ := selectionOf(ed)
 	tickOnce(t, m)
 	_, b, _ := selectionOf(ed)
@@ -118,7 +118,7 @@ func TestDragToThePaneEdgePansHorizontallyWhileHeld(t *testing.T) {
 		t.Errorf("a tick on the scrollbar column moved the head %d columns, want 2", b.Col-a.Col)
 	}
 	// Held at the left edge it pans back.
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.textX, Y: l.bodyTop, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.TextX, Y: l.BodyTop, Button: tea.MouseLeft}))
 	_, c, _ := selectionOf(ed)
 	viewBefore := left()
 	tickOnce(t, m)
@@ -127,7 +127,7 @@ func TestDragToThePaneEdgePansHorizontallyWhileHeld(t *testing.T) {
 		t.Errorf("a tick at the left edge: head %v to %v, view %d to %d, want both to move back", c, d, viewBefore, left())
 	}
 	// The chain ends once the head cannot move: at the end of the line.
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.BodyTop, Button: tea.MouseLeft}))
 	ended := false
 	for range 400 {
 		if _, cmd := m.Update(dragScrollMsg{seq: m.drag.tick}); cmd == nil {
@@ -146,14 +146,14 @@ func TestDragEndingOnTheScrollbarColumnKeepsTheCaretInView(t *testing.T) {
 	m, ed := viewModel(t, DefaultViewOptions(), strings.Repeat("x", 400)+"\n", 60, 12)
 	runAction(t, m, "toggle_line_wrap")
 	l := m.layout()
-	fp := l.focusedPane()
-	mouseDownAt(m, l.textX+2, l.bodyTop)
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
+	fp := l.FocusedPane()
+	mouseDownAt(m, l.TextX+2, l.BodyTop)
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.BodyTop, Button: tea.MouseLeft}))
 	for range 30 {
 		m.Update(dragScrollMsg{seq: m.drag.tick})
 	}
-	mouseUpAt(m, fp.X+fp.W-1, l.bodyTop)
-	pane := m.paneGeometry(m.layout().focusedPane(), m.ed.Active())
+	mouseUpAt(m, fp.X+fp.W-1, l.BodyTop)
+	pane := m.paneGeometry(m.layout().FocusedPane(), m.ed.Active())
 	if _, _, ok := pane.Caret(fp.W, fp.H); !ok {
 		t.Errorf("the caret %v is outside the window (left %d)", ed.Active().Cursor, func() int { v, _ := pane.HScroll(fp.W, fp.H); return v }())
 	}

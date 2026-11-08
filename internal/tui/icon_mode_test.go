@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/theme"
 )
@@ -30,18 +31,18 @@ func TestIconModeKeepsEveryButtonInPlace(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}
 	for _, w := range []int{20, 30, 60, 100} {
 		for override := 15; override <= 40; override++ {
-			plain := layoutFor(w, 30, layoutInput{tabs: tabs, explorerOpen: true, explorerOverride: override})
-			nerd := layoutFor(w, 30, layoutInput{tabs: tabs, explorerOpen: true, explorerOverride: override, iconMode: icons.Nerd})
-			if plain.exReloadX != nerd.exReloadX || plain.exCloseX != nerd.exCloseX {
+			plain := layoutFor(w, 30, layoutInput{Tabs: tabs, ExplorerOpen: true, ExplorerOverride: override})
+			nerd := layoutFor(w, 30, layoutInput{Tabs: tabs, ExplorerOpen: true, ExplorerOverride: override, IconMode: icons.Nerd})
+			if plain.ExReloadX != nerd.ExReloadX || plain.ExCloseX != nerd.ExCloseX {
 				t.Fatalf("w=%d ex=%d: buttons at %d,%d (nerd) and %d,%d (plain)",
-					w, plain.ex, nerd.exReloadX, nerd.exCloseX, plain.exReloadX, plain.exCloseX)
+					w, plain.Ex, nerd.ExReloadX, nerd.ExCloseX, plain.ExReloadX, plain.ExCloseX)
 			}
-			if len(plain.strip.runs) != len(nerd.strip.runs) {
-				t.Fatalf("w=%d: %d strip runs (nerd), %d (plain)", w, len(nerd.strip.runs), len(plain.strip.runs))
+			if len(plain.Strip.Runs) != len(nerd.Strip.Runs) {
+				t.Fatalf("w=%d: %d strip runs (nerd), %d (plain)", w, len(nerd.Strip.Runs), len(plain.Strip.Runs))
 			}
-			for i, r := range nerd.strip.runs {
-				p := plain.strip.runs[i]
-				if r.x != p.x || r.w != p.w || r.kind != p.kind || r.index != p.index {
+			for i, r := range nerd.Strip.Runs {
+				p := plain.Strip.Runs[i]
+				if r.X != p.X || r.W != p.W || r.Kind != p.Kind || r.Index != p.Index {
 					t.Fatalf("w=%d: strip run %d is %+v (nerd), %+v (plain)", w, i, r, p)
 				}
 			}
@@ -53,12 +54,12 @@ func TestNarrowExplorerHidesButtonsInNerdMode(t *testing.T) {
 	t.Parallel()
 	// The reload button needs 17 columns and the close button 19, as in plain mode.
 	for _, tt := range []struct{ ex, reload, closeX int }{{16, -1, -1}, {17, 16, -1}, {18, 16, -1}, {19, 16, 18}, {30, 25, 27}} {
-		l := layoutFor(100, 30, layoutInput{explorerOpen: true, explorerOverride: tt.ex, iconMode: icons.Nerd})
-		if l.ex != tt.ex || l.exReloadX != tt.reload || l.exCloseX != tt.closeX {
-			t.Errorf("E=%d: buttons at %d and %d, want %d and %d", tt.ex, l.exReloadX, l.exCloseX, tt.reload, tt.closeX)
+		l := layoutFor(100, 30, layoutInput{ExplorerOpen: true, ExplorerOverride: tt.ex, IconMode: icons.Nerd})
+		if l.Ex != tt.ex || l.ExReloadX != tt.reload || l.ExCloseX != tt.closeX {
+			t.Errorf("E=%d: buttons at %d and %d, want %d and %d", tt.ex, l.ExReloadX, l.ExCloseX, tt.reload, tt.closeX)
 		}
-		if l.exReloadX >= 0 && l.exCloseX >= 0 && l.exCloseX-l.exReloadX < 2 {
-			t.Errorf("E=%d: buttons at %d and %d touch", tt.ex, l.exReloadX, l.exCloseX)
+		if l.ExReloadX >= 0 && l.ExCloseX >= 0 && l.ExCloseX-l.ExReloadX < 2 {
+			t.Errorf("E=%d: buttons at %d and %d touch", tt.ex, l.ExReloadX, l.ExCloseX)
 		}
 	}
 }
@@ -70,20 +71,20 @@ func TestIconModeDrawsTheChosenSet(t *testing.T) {
 		l := m.layout()
 		g := m.paint()
 		cell := func(x, y int) string { return g.At(x, y).Text }
-		if got := cell(l.exReloadX, 1); got != mode.Glyph(icons.Refresh) {
+		if got := cell(l.ExReloadX, 1); got != mode.Glyph(icons.Refresh) {
 			t.Errorf("%v: refresh cell %q", mode, got)
 		}
-		if got := cell(l.exCloseX, 1); got != mode.Glyph(icons.Close) {
+		if got := cell(l.ExCloseX, 1); got != mode.Glyph(icons.Close) {
 			t.Errorf("%v: explorer close cell %q", mode, got)
 		}
-		if got := cell(l.w-1, l.stripY); got != mode.Glyph(icons.New) {
+		if got := cell(l.W-1, l.StripY); got != mode.Glyph(icons.New) {
 			t.Errorf("%v: new-tab cell %q", mode, got)
 		}
 		closes := 0
-		for _, r := range l.strip.runs {
-			if r.kind == hitTabClose {
+		for _, r := range l.Strip.Runs {
+			if r.Kind == hitTabClose {
 				closes++
-				if got := cell(r.x, l.stripY); got != mode.Glyph(icons.Close) {
+				if got := cell(r.X, l.StripY); got != mode.Glyph(icons.Close) {
 					t.Errorf("%v: tab close cell %q", mode, got)
 				}
 			}
@@ -102,16 +103,16 @@ func TestNerdTabsShowTheFileIcon(t *testing.T) {
 	g := nerd.paint()
 	// A tab is " name " with a blank before the name; the icon takes that place and
 	// a blank follows it, so every tab is two cells wider.
-	first := nl.strip.runs[0]
-	if got := g.At(first.x+1, nl.stripY).Text; got != want {
+	first := nl.Strip.Runs[0]
+	if got := g.At(first.X+1, nl.StripY).Text; got != want {
 		t.Errorf("first tab icon cell %q, want %q", got, want)
 	}
-	if got := nl.strip.runs[1].x - pl.strip.runs[1].x; got != 2 {
+	if got := nl.Strip.Runs[1].X - pl.Strip.Runs[1].X; got != 2 {
 		t.Errorf("close button of the first tab moved by %d cells, want 2", got)
 	}
-	for _, r := range pl.strip.runs {
-		if got := plain.paint().At(r.x, pl.stripY).Text; r.kind == hitTab && strings.Contains(got, want) {
-			t.Errorf("plain tab shows the file icon at %d", r.x)
+	for _, r := range pl.Strip.Runs {
+		if got := plain.paint().At(r.X, pl.StripY).Text; r.Kind == hitTab && strings.Contains(got, want) {
+			t.Errorf("plain tab shows the file icon at %d", r.X)
 		}
 	}
 }
@@ -122,11 +123,11 @@ func TestNerdTabScrollMarkersAndFoldMarks(t *testing.T) {
 	for _, n := range []string{"alpha.go", "bravo.go", "charlie.go", "delta.go", "echo.go"} {
 		tabs = append(tabs, TabInfo{Name: n})
 	}
-	s := placeStrip(0, 30, tabs, 1, icons.Nerd)
+	s := frame.PlaceStrip(0, 30, tabs, 1, icons.Nerd)
 	var left, right bool
-	for _, r := range s.runs {
-		left = left || (r.kind == hitTabScrollBefore && r.text == icons.Nerd.Glyph(icons.ScrollLeft))
-		right = right || (r.kind == hitTabScrollAfter && r.text == icons.Nerd.Glyph(icons.ScrollRight))
+	for _, r := range s.Runs {
+		left = left || (r.Kind == hitTabScrollBefore && r.Text == icons.Nerd.Glyph(icons.ScrollLeft))
+		right = right || (r.Kind == hitTabScrollAfter && r.Text == icons.Nerd.Glyph(icons.ScrollRight))
 	}
 	if !left || !right {
 		t.Errorf("scroll markers: left %v right %v, want both in the nerd set", left, right)
@@ -146,18 +147,18 @@ func TestNerdModeClicksHitTheButtons(t *testing.T) {
 	t.Parallel()
 	m := iconModel(t, "nerd")
 	l := m.layout()
-	for _, r := range l.strip.runs {
-		if r.kind != hitTabClose {
+	for _, r := range l.Strip.Runs {
+		if r.Kind != hitTabClose {
 			continue
 		}
-		if got := l.hit(r.x, l.stripY); got.Kind != hitTabClose || got.Index != r.index {
-			t.Errorf("close of tab %d at %d hit as %+v", r.index, r.x, got)
+		if got := l.Hit(r.X, l.StripY); got.Kind != hitTabClose || got.Index != r.Index {
+			t.Errorf("close of tab %d at %d hit as %+v", r.Index, r.X, got)
 		}
-		if got := l.hit(r.x-1, l.stripY); got.Kind != hitTab {
-			t.Errorf("cell left of the close of tab %d hit as %+v", r.index, got)
+		if got := l.Hit(r.X-1, l.StripY); got.Kind != hitTab {
+			t.Errorf("cell left of the close of tab %d hit as %+v", r.Index, got)
 		}
 	}
-	_, cmd := m.Update(click(l.exCloseX, 1, tea.MouseLeft))
+	_, cmd := m.Update(click(l.ExCloseX, 1, tea.MouseLeft))
 	drain(t, m, cmd)
 	if m.explorerOpen {
 		t.Fatal("a press on the nerd close button left the explorer open")

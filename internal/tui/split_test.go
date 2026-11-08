@@ -139,7 +139,7 @@ func newSplitModel(t *testing.T, f *multiFake, w, h int) *Model {
 // than n of them.
 func panesOf(t *testing.T, m *Model, n int) []splitPane {
 	t.Helper()
-	ps := m.layout().panes
+	ps := m.layout().Panes
 	if len(ps) < n {
 		t.Fatalf("%d panes, want at least %d", len(ps), n)
 	}
@@ -162,18 +162,18 @@ func TestSplitActionsShareTheTabInTheNewPane(t *testing.T) {
 			f.ScrollTo(5) // the caret on line 6 is inside the window, so no pane has to scroll
 			runAction(t, m, tt.action)
 			l := m.layout()
-			if len(l.panes) != 2 {
-				t.Fatalf("%d panes, want 2", len(l.panes))
+			if len(l.Panes) != 2 {
+				t.Fatalf("%d panes, want 2", len(l.Panes))
 			}
-			first, second := l.panes[0], l.panes[1]
-			if first.tab != 0 || second.tab != 0 {
-				t.Errorf("tabs %d and %d, want both 0", first.tab, second.tab)
+			first, second := l.Panes[0], l.Panes[1]
+			if first.Tab != 0 || second.Tab != 0 {
+				t.Errorf("tabs %d and %d, want both 0", first.Tab, second.Tab)
 			}
-			if first.top != 5 || second.top != 5 {
-				t.Errorf("tops %d and %d, want both 5", first.top, second.top)
+			if first.Top != 5 || second.Top != 5 {
+				t.Errorf("tops %d and %d, want both 5", first.Top, second.Top)
 			}
-			if !second.focused || first.focused || l.focus != 1 {
-				t.Errorf("focus on pane %d, want the new pane 1", l.focus)
+			if !second.Focused || first.Focused || l.Focus != 1 {
+				t.Errorf("focus on pane %d, want the new pane 1", l.Focus)
 			}
 			if stacked := second.Y > first.Y; stacked != tt.stacked {
 				t.Errorf("stacked = %v, want %v: panes %+v and %+v", stacked, tt.stacked, first, second)
@@ -198,7 +198,7 @@ func TestSplitRefusesWhenThePaneIsTooSmall(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newSplitModel(t, newMultiFake(2, 30), tt.w, tt.h)
 			runAction(t, m, tt.action)
-			if got := len(m.layout().panes); got != tt.panes {
+			if got := len(m.layout().Panes); got != tt.panes {
 				t.Errorf("%d panes, want %d", got, tt.panes)
 			}
 			if m.notice != tt.notice {
@@ -211,7 +211,7 @@ func TestSplitRefusesWhenThePaneIsTooSmall(t *testing.T) {
 func TestSplitNeedsAnOpenTab(t *testing.T) {
 	m := newSplitModel(t, newMultiFake(0, 0), 80, 24)
 	runAction(t, m, "split_vertical")
-	if n := len(m.layout().panes); n != 1 {
+	if n := len(m.layout().Panes); n != 1 {
 		t.Errorf("%d panes with no tab, want 1", n)
 	}
 	if m.notice != noDocumentNotice {
@@ -240,7 +240,7 @@ func TestNextAndPrevSplitMoveAlongTheReadingOrder(t *testing.T) {
 	}
 	for _, tt := range tests {
 		runAction(t, m, tt.action)
-		if got := m.layout().focus; got != tt.focus {
+		if got := m.layout().Focus; got != tt.focus {
 			t.Errorf("after %s: focus %d, want %d", tt.action, got, tt.focus)
 		}
 		if f.active != tt.tab {
@@ -259,21 +259,21 @@ func TestFocusChangeRestoresEachPanesTabAndTop(t *testing.T) {
 
 	runAction(t, m, "next_split") // the left pane takes the focus, at its own top 0
 	ps := panesOf(t, m, 2)
-	if m.layout().focus != 0 || f.active != 0 || f.docs[0].top != 0 {
-		t.Fatalf("left focus: focus %d active %d top %d, want 0, 0, 0", m.layout().focus, f.active, f.docs[0].top)
+	if m.layout().Focus != 0 || f.active != 0 || f.docs[0].top != 0 {
+		t.Fatalf("left focus: focus %d active %d top %d, want 0, 0, 0", m.layout().Focus, f.active, f.docs[0].top)
 	}
-	if ps[1].tab != 1 || ps[1].top != 2 {
-		t.Errorf("right pane after the focus left it: tab %d top %d, want 1, 2", ps[1].tab, ps[1].top)
+	if ps[1].Tab != 1 || ps[1].Top != 2 {
+		t.Errorf("right pane after the focus left it: tab %d top %d, want 1, 2", ps[1].Tab, ps[1].Top)
 	}
 
 	m.ed.ScrollTo(4)              // the left pane scrolls to 4
 	runAction(t, m, "next_split") // the right pane takes the focus back at its top 2
 	ps = panesOf(t, m, 2)
-	if m.layout().focus != 1 || f.active != 1 || f.docs[1].top != 2 {
-		t.Fatalf("right focus: focus %d active %d top %d, want 1, 1, 2", m.layout().focus, f.active, f.docs[1].top)
+	if m.layout().Focus != 1 || f.active != 1 || f.docs[1].top != 2 {
+		t.Fatalf("right focus: focus %d active %d top %d, want 1, 1, 2", m.layout().Focus, f.active, f.docs[1].top)
 	}
-	if ps[0].tab != 0 || ps[0].top != 4 {
-		t.Errorf("left pane after the focus left it: tab %d top %d, want 0, 4", ps[0].tab, ps[0].top)
+	if ps[0].Tab != 0 || ps[0].Top != 4 {
+		t.Errorf("left pane after the focus left it: tab %d top %d, want 0, 4", ps[0].Tab, ps[0].Top)
 	}
 }
 
@@ -291,7 +291,7 @@ func TestClickFocusesThePaneUnderThePointer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		m.Update(click(tt.x, tt.y, tea.MouseLeft))
-		if got := m.layout().focus; got != tt.focus {
+		if got := m.layout().Focus; got != tt.focus {
 			t.Errorf("press at (%d, %d): focus %d, want %d", tt.x, tt.y, got, tt.focus)
 		}
 	}
@@ -341,14 +341,14 @@ func TestWheelScrollsOnlyThePaneUnderThePointer(t *testing.T) {
 
 	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 10, Y: 5, Button: tea.MouseWheelDown})) // the unfocused left pane
 	ps := panesOf(t, m, 2)
-	if ps[0].top != wheelRows || f.docs[0].top != 0 {
-		t.Errorf("left wheel: pane top %d, document top %d, want %d and 0", ps[0].top, f.docs[0].top, wheelRows)
+	if ps[0].Top != wheelRows || f.docs[0].top != 0 {
+		t.Errorf("left wheel: pane top %d, document top %d, want %d and 0", ps[0].Top, f.docs[0].top, wheelRows)
 	}
 
 	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 60, Y: 5, Button: tea.MouseWheelDown})) // the focused right pane
 	ps = panesOf(t, m, 2)
-	if ps[1].top != wheelRows || f.docs[0].top != wheelRows || ps[0].top != wheelRows {
-		t.Errorf("right wheel: tops %d and %d, document top %d, want %d", ps[0].top, ps[1].top, f.docs[0].top, wheelRows)
+	if ps[1].Top != wheelRows || f.docs[0].top != wheelRows || ps[0].Top != wheelRows {
+		t.Errorf("right wheel: tops %d and %d, document top %d, want %d", ps[0].Top, ps[1].Top, f.docs[0].top, wheelRows)
 	}
 }
 
@@ -397,11 +397,11 @@ func TestCloseFocusedSplit(t *testing.T) {
 			}
 			runAction(t, m, "close_split")
 			l := m.layout()
-			if len(l.panes) != tt.panes || l.focus != tt.focus {
-				t.Fatalf("%d panes with focus %d, want %d with focus %d", len(l.panes), l.focus, tt.panes, tt.focus)
+			if len(l.Panes) != tt.panes || l.Focus != tt.focus {
+				t.Fatalf("%d panes with focus %d, want %d with focus %d", len(l.Panes), l.Focus, tt.panes, tt.focus)
 			}
-			if f.active != l.panes[l.focus].tab {
-				t.Errorf("active tab %d does not match the focused pane's tab %d", f.active, l.panes[l.focus].tab)
+			if f.active != l.Panes[l.Focus].Tab {
+				t.Errorf("active tab %d does not match the focused pane's tab %d", f.active, l.Panes[l.Focus].Tab)
 			}
 			if (m.notice != "") != tt.notice {
 				t.Errorf("notice = %q, want a notice: %v", m.notice, tt.notice)
@@ -434,10 +434,10 @@ func TestTabCloseMovesTheLeavesWithTheirTabs(t *testing.T) {
 
 			m.requestClose(tt.closeTab)
 			left := panesOf(t, m, 1)[0]
-			if left.tab != tt.wantTab {
-				t.Fatalf("left pane shows tab %d, want %d", left.tab, tt.wantTab)
+			if left.Tab != tt.wantTab {
+				t.Fatalf("left pane shows tab %d, want %d", left.Tab, tt.wantTab)
 			}
-			doc := m.docAt(left.tab)
+			doc := m.docAt(left.Tab)
 			if doc == nil || doc.Line(0) != tt.wantFirst {
 				t.Errorf("left pane document starts %q, want %q", docLineZero(doc), tt.wantFirst)
 			}
@@ -462,10 +462,10 @@ func TestUnexpectedTabLossCollapsesTheSplits(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if n := len(m.layout().panes); n != 1 {
+	if n := len(m.layout().Panes); n != 1 {
 		t.Errorf("%d panes after an unseen close, want 1", n)
 	}
-	if !m.splits.root.leaf() || m.splits.focus != m.splits.root {
+	if !m.splits.Root.Leaf() || m.splits.Focus != m.splits.Root {
 		t.Error("the tree is not the focused leaf after the collapse")
 	}
 }
@@ -479,8 +479,8 @@ func TestClosingEveryTabCollapsesTheSplits(t *testing.T) {
 	if n := len(f.docs); n != 0 {
 		t.Fatalf("%d tabs left, want 0", n)
 	}
-	if n := len(m.layout().panes); n != 1 || !m.splits.root.leaf() {
-		t.Errorf("%d panes and leaf %v with no tab, want one pane", n, m.splits.root.leaf())
+	if n := len(m.layout().Panes); n != 1 || !m.splits.Root.Leaf() {
+		t.Errorf("%d panes and leaf %v with no tab, want one pane", n, m.splits.Root.Leaf())
 	}
 }
 

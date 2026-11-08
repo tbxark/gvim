@@ -33,7 +33,8 @@ The module has three layers.
   - `internal/cli`: the cobra command tree; hands `app.Options` to a `Runner`.
   - `internal/tui`: the single Bubble Tea root model (`ports.go` defines its interfaces,
     `layout.go` is the geometry source for painting and hit testing). Sub-packages:
-    `overlay` and `list` (the shared overlay contract and list/box kit), `editorpane`,
+    `overlay`, `list` (the shared overlay contract and list/box kit), `frame`, `split`,
+    `tabstrip` (layout/hit map, split tree, tab strip), `editorpane`,
     `menubar`, `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`,
     `ctxmenu`, `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`.
   - `internal/terminal`: runs a program in a pseudo-terminal and keeps a model of its

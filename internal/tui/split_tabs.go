@@ -34,7 +34,7 @@ func (m *Model) noteTab() {
 // no split there is one pane, and the window is the tab strip, so the step moves the active
 // tab delta places and wraps at both ends.
 func (m *Model) windowStep(delta int) {
-	if !m.splits.root.leaf() {
+	if !m.splits.Root.Leaf() {
 		m.moveFocus(delta)
 		return
 	}

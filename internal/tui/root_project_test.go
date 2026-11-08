@@ -196,7 +196,7 @@ func TestSwitchProjectFailureIsANotice(t *testing.T) {
 	if got := m.rootDir(); got != "/ws" {
 		t.Fatalf("tree root = %q, want the old root /ws", got)
 	}
-	if got := m.statusView().message; got != "open /next: permission denied" {
+	if got := m.statusView().Message; got != "open /next: permission denied" {
 		t.Fatalf("status = %q, want the open error", got)
 	}
 }
@@ -207,7 +207,7 @@ func TestSwitchProjectWithoutPortIsANotice(t *testing.T) {
 	t.Parallel()
 	m, _ := newProjectModel(t, nil)
 	m.Update(browser.Choose{Path: "/next"})
-	if got := m.statusView().message; got != "Switch Project is not supported in this port yet" {
+	if got := m.statusView().Message; got != "Switch Project is not supported in this port yet" {
 		t.Fatalf("status = %q, want the not-supported notice", got)
 	}
 }

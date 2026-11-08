@@ -10,8 +10,8 @@ import (
 // tabRun returns the run of the name of tab i.
 func tabRun(t *testing.T, m *Model, i int) run {
 	t.Helper()
-	for _, r := range m.layout().strip.runs {
-		if r.kind == hitTab && r.index == i {
+	for _, r := range m.layout().Strip.Runs {
+		if r.Kind == hitTab && r.Index == i {
 			return r
 		}
 	}
@@ -25,9 +25,9 @@ func pastMidpoint(t *testing.T, m *Model, from, to int) int {
 	t.Helper()
 	r := tabRun(t, m, to)
 	if to > from {
-		return r.x + r.w
+		return r.X + r.W
 	}
-	return r.x
+	return r.X
 }
 
 func TestDraggingATabReordersTheStrip(t *testing.T) {
@@ -43,9 +43,9 @@ func TestDraggingATabReordersTheStrip(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, ed := newCtxModel(t, "a.txt", "b.txt", "c.txt")
-			y := m.layout().stripY
+			y := m.layout().StripY
 			src := tabRun(t, m, tt.from)
-			mouseDownAt(m, src.x+2, y)
+			mouseDownAt(m, src.X+2, y)
 			x := pastMidpoint(t, m, tt.from, tt.to)
 			mouseMove(m, x, y)
 			mouseUpAt(m, x, y)
@@ -61,9 +61,9 @@ func TestDraggingATabReordersTheStrip(t *testing.T) {
 
 func TestDraggingATabPastTheEndsStopsAtTheEnds(t *testing.T) {
 	m, ed := newCtxModel(t, "a.txt", "b.txt", "c.txt")
-	y := m.layout().stripY
+	y := m.layout().StripY
 	src := tabRun(t, m, 1)
-	mouseDownAt(m, src.x+2, y)
+	mouseDownAt(m, src.X+2, y)
 	mouseMove(m, 95, y) // far right of the last tab
 	if got := tabNames(ed); !slices.Equal(got, []string{"a.txt", "c.txt", "b.txt"}) {
 		t.Fatalf("tabs = %v after dragging past the last tab", got)
@@ -77,16 +77,16 @@ func TestDraggingATabPastTheEndsStopsAtTheEnds(t *testing.T) {
 
 func TestTabDragEndsOnReleaseAndAClickDoesNotMoveATab(t *testing.T) {
 	m, ed := newCtxModel(t, "a.txt", "b.txt", "c.txt")
-	y := m.layout().stripY
+	y := m.layout().StripY
 	src, dst := tabRun(t, m, 0), tabRun(t, m, 2)
 	// A plain click activates the tab and moves nothing.
-	mouseDownAt(m, src.x+2, y)
-	mouseUpAt(m, src.x+2, y)
+	mouseDownAt(m, src.X+2, y)
+	mouseUpAt(m, src.X+2, y)
 	if got := tabNames(ed); !slices.Equal(got, []string{"a.txt", "b.txt", "c.txt"}) {
 		t.Fatalf("a click moved tabs: %v", got)
 	}
 	// Motion after the release does not drag.
-	mouseMove(m, dst.x+2, y)
+	mouseMove(m, dst.X+2, y)
 	if got := tabNames(ed); !slices.Equal(got, []string{"a.txt", "b.txt", "c.txt"}) {
 		t.Fatalf("a move after the release reordered the tabs: %v", got)
 	}
@@ -96,8 +96,8 @@ func TestTabDragLeavingTheStripRowDoesNotReorder(t *testing.T) {
 	m, ed := newCtxModel(t, "a.txt", "b.txt", "c.txt")
 	l := m.layout()
 	src, dst := tabRun(t, m, 0), tabRun(t, m, 2)
-	mouseDownAt(m, src.x+2, l.stripY)
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: dst.x + 2, Y: l.bodyTop + 3, Button: tea.MouseLeft}))
+	mouseDownAt(m, src.X+2, l.StripY)
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: dst.X + 2, Y: l.BodyTop + 3, Button: tea.MouseLeft}))
 	if got := tabNames(ed); !slices.Equal(got, []string{"a.txt", "b.txt", "c.txt"}) {
 		t.Fatalf("a drag over the editor reordered the tabs: %v", got)
 	}
@@ -105,15 +105,15 @@ func TestTabDragLeavingTheStripRowDoesNotReorder(t *testing.T) {
 
 func TestDraggingACloseButtonDoesNotMoveTheTab(t *testing.T) {
 	m, ed := newCtxModel(t, "a.txt", "b.txt", "c.txt")
-	y := m.layout().stripY
+	y := m.layout().StripY
 	var closeRun run
-	for _, r := range m.layout().strip.runs {
-		if r.kind == hitTabClose && r.index == 0 {
+	for _, r := range m.layout().Strip.Runs {
+		if r.Kind == hitTabClose && r.Index == 0 {
 			closeRun = r
 		}
 	}
-	mouseDownAt(m, closeRun.x, y)
-	mouseMove(m, tabRun(t, m, 1).x+2, y)
+	mouseDownAt(m, closeRun.X, y)
+	mouseMove(m, tabRun(t, m, 1).X+2, y)
 	if got := tabNames(ed); len(got) != 2 {
 		// The press on × closed tab 0, and nothing else may move.
 		t.Fatalf("tabs = %v, want a.txt closed", got)
@@ -127,9 +127,9 @@ func TestTabDragWithoutEditorSupportSaysSo(t *testing.T) {
 	ed := &tabsEditor{fakeEditor: newFakeEditor("x")}
 	ed.tabs = []TabInfo{{Name: "a.txt", Active: true}, {Name: "b.txt"}}
 	m := newRevertModel(t, ed)
-	y := m.layout().stripY
+	y := m.layout().StripY
 	src := tabRun(t, m, 0)
-	mouseDownAt(m, src.x+2, y)
+	mouseDownAt(m, src.X+2, y)
 	mouseMove(m, pastMidpoint(t, m, 0, 1), y)
 	if ed.tabs[0].Name != "a.txt" {
 		t.Fatal("tabs moved with no support")
@@ -144,11 +144,11 @@ func TestTabDragWithoutEditorSupportSaysSo(t *testing.T) {
 // while the pointer is still over the neighbour, instead of flipping on every cell.
 func TestDraggingOverAWideTabSwapsOnlyOnce(t *testing.T) {
 	m, ed := newCtxModel(t, "a_very_long_file_name.txt", "b.txt")
-	y := m.layout().stripY
+	y := m.layout().StripY
 	a, b := tabRun(t, m, 0), tabRun(t, m, 1)
-	mouseDownAt(m, b.x+2, y)
+	mouseDownAt(m, b.X+2, y)
 	swaps, last := 0, tabNames(ed)
-	for x := a.x + a.w - 1; x >= a.x+2; x-- {
+	for x := a.X + a.W - 1; x >= a.X+2; x-- {
 		mouseMove(m, x, y)
 		if got := tabNames(ed); !slices.Equal(got, last) {
 			swaps++

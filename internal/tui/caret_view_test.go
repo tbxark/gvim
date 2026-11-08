@@ -128,8 +128,8 @@ func TestDepsTabSizeSetsTheTabStopOfThePane(t *testing.T) {
 	m := New(Deps{Editor: newFakeEditor("a\tb"), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock, TabSize: 8})
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
 	p := panesOf(t, m, 1)[0]
-	if got := m.paint().At(p.textX+8, p.Y).Text; got != "b" {
-		t.Errorf("cell (%d, %d) = %q, want the b at tab stop 8", p.textX+8, p.Y, got)
+	if got := m.paint().At(p.TextX+8, p.Y).Text; got != "b" {
+		t.Errorf("cell (%d, %d) = %q, want the b at tab stop 8", p.TextX+8, p.Y, got)
 	}
 }
 
@@ -149,16 +149,16 @@ func TestWheelDownIsNotUndoneWhenAWideLineChangesTheBodyHeight(t *testing.T) {
 	}
 	m, ed := viewModel(t, DefaultViewOptions(), sb.String(), 60, 14)
 	runAction(t, m, "toggle_line_wrap")
-	if m.layout().panes[0].textW >= 300 {
+	if m.layout().Panes[0].TextW >= 300 {
 		t.Fatal("setup: the wide line fits the pane")
 	}
 	if got := m.ed.Active().Top(); got != 0 {
 		t.Fatalf("setup: top = %d", got)
 	}
 	l := m.layout()
-	p := l.panes[0]
+	p := l.Panes[0]
 	for i := 1; i <= 6; i++ {
-		m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.X + p.gutter + 2, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
+		m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.X + p.Gutter + 2, Y: l.BodyTop + 1, Button: tea.MouseWheelDown}))
 		if got, want := ed.Active().Top, i*wheelRows; got != want {
 			t.Fatalf("after %d notches the view top is %d, want %d", i, got, want)
 		}

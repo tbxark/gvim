@@ -171,9 +171,9 @@ func (m *Model) compareMerge(toOther bool) {
 		m.notice = "Compare: this editor cannot merge a change"
 		return
 	}
-	nodes := [2]*splitNode{m.splits.root.a, m.splits.root.b}
+	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
 	side := 0
-	if m.splits.focus == nodes[1] {
+	if m.splits.Focus == nodes[1] {
 		side = 1
 	}
 	i := hunkAt(st.hunks, side, m.ed.Active().Cursor().Line)
@@ -187,7 +187,7 @@ func (m *Model) compareMerge(toOther bool) {
 	}
 	src, dst := m.leafDoc(nodes[from]), m.leafDoc(nodes[to])
 	bufs := pe.ListBuffers()
-	if src == nil || dst == nil || nodes[to].tab >= len(bufs) {
+	if src == nil || dst == nil || nodes[to].Tab >= len(bufs) {
 		m.notice = "Compare: the other tab has no document"
 		return
 	}
@@ -201,7 +201,7 @@ func (m *Model) compareMerge(toOther bool) {
 		lines[k] = src.Line(sStart + k)
 	}
 	edit := replaceLines(dst.LineCount(), func(l int) int { return len(dst.Line(l)) }, dStart, dStart+dN, lines)
-	if err := pe.Edit(bufs[nodes[to].tab].ID, []pluginapi.Edit{edit}, pluginapi.EditOptions{}); err != nil {
+	if err := pe.Edit(bufs[nodes[to].Tab].ID, []pluginapi.Edit{edit}, pluginapi.EditOptions{}); err != nil {
 		m.notice = "Compare: " + filepath.Base(dst.Name()) + " was not changed: " + err.Error()
 		return
 	}

@@ -106,8 +106,8 @@ func TestRunMenuOpenWithoutANameOpensNothing(t *testing.T) {
 
 func TestHiddenMenuBarIsNotDrawnAndTheBodyStartsAtRowOne(t *testing.T) {
 	m := menuModel(t, true)
-	if l := m.layout(); l.bodyTop != 1 {
-		t.Fatalf("body top %d with the menu bar hidden, want 1", l.bodyTop)
+	if l := m.layout(); l.BodyTop != 1 {
+		t.Fatalf("body top %d with the menu bar hidden, want 1", l.BodyTop)
 	}
 	rows := m.paint().Plain()
 	if strings.Contains(rows[0], "File") || strings.Contains(rows[0], "Help") {

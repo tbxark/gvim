@@ -104,7 +104,7 @@ type dragScrollMsg struct{ seq int }
 // left or right edge the head also moves along the line while Wrap is off.
 func (m *Model) dragSelect(fromTick bool) tea.Cmd {
 	doc := m.ed.Active()
-	fp := m.layout().focusedPane()
+	fp := m.layout().FocusedPane()
 	if doc == nil || fp.W <= 0 || fp.H <= 0 {
 		m.drag.tick = 0
 		return nil
@@ -119,7 +119,7 @@ func (m *Model) dragSelect(fromTick bool) tea.Cmd {
 	vs, vd := pastEdge(py, 0, last)
 	var hs, hd int
 	if p.PansSideways() {
-		hs, hd = pastEdge(m.drag.last.X-fp.X, fp.gutter, w-2)
+		hs, hd = pastEdge(m.drag.last.X-fp.X, fp.Gutter, w-2)
 	}
 	if fromTick {
 		pos = dragStepPos(doc, pos, before, vs*dragStep(vd), hs*dragStep(hd), vs != 0, hs != 0)
@@ -219,7 +219,7 @@ func (m *Model) applyPan(pane editorpane.Pane, doc Document) editorpane.Pane {
 // x, for a press or a drag on the horizontal scrollbar. The caret stays where it is.
 func (m *Model) panBar(x int) {
 	doc := m.ed.Active()
-	fp := m.layout().focusedPane()
+	fp := m.layout().FocusedPane()
 	if doc == nil || fp.W <= 0 || fp.H <= 0 {
 		return
 	}
@@ -251,10 +251,10 @@ func (m *Model) panWheel(i int, mo tea.Mouse) bool {
 	}
 	l := m.layout()
 	doc := m.ed.Active()
-	if i < 0 || i >= len(l.panes) || !l.panes[i].focused || doc == nil {
+	if i < 0 || i >= len(l.Panes) || !l.Panes[i].Focused || doc == nil {
 		return true
 	}
-	fp := l.panes[i]
+	fp := l.Panes[i]
 	left, most := m.paneGeometry(fp, doc).HScroll(fp.W, fp.H)
 	m.mx.pan = panView{
 		on: true, left: min(max(left+dx, 0), most),

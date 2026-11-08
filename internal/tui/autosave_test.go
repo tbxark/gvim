@@ -188,7 +188,7 @@ func TestAutoSaveFailureShowsInTheNoticeRow(t *testing.T) {
 		t.Fatal("write command did not return autoSaveDoneMsg")
 	}
 	_, next := m.Update(done)
-	if got := m.statusView().message; got == "" || !strings.Contains(got, "changed on disk") {
+	if got := m.statusView().Message; got == "" || !strings.Contains(got, "changed on disk") {
 		t.Fatalf("status = %q, want the auto-save error about the changed file", got)
 	}
 	if next == nil {
@@ -239,7 +239,7 @@ func TestSaveRefusedWhileAutoSaveWritesShowsInTheStatusRow(t *testing.T) {
 			})
 			m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 			tt.act(m)
-			if got := m.statusView().message; got != refusal {
+			if got := m.statusView().Message; got != refusal {
 				t.Fatalf("status = %q, want %q", got, refusal)
 			}
 		})
@@ -256,7 +256,7 @@ func TestAutoSaveTickWithoutAnEditorPortIsOnlyArmed(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("the tick was not armed again")
 	}
-	if got := m.statusView().message; got != "" {
+	if got := m.statusView().Message; got != "" {
 		t.Fatalf("status = %q, want none", got)
 	}
 }

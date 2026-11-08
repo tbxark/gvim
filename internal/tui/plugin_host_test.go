@@ -51,13 +51,13 @@ func TestMovedIndex(t *testing.T) {
 func leavesOver(m *Model, tabs ...int) []*splitNode {
 	leaves := make([]*splitNode, len(tabs))
 	for i, tab := range tabs {
-		leaves[i] = &splitNode{tab: tab}
+		leaves[i] = &splitNode{Tab: tab}
 	}
 	root := leaves[0]
 	if len(leaves) > 1 {
-		root = &splitNode{a: leaves[0], b: leaves[1]}
+		root = &splitNode{A: leaves[0], B: leaves[1]}
 	}
-	m.splits.root, m.splits.focus = root, leaves[0]
+	m.splits.Root, m.splits.Focus = root, leaves[0]
 	m.splits.tabs = len(m.ed.Tabs())
 	return leaves
 }
@@ -73,8 +73,8 @@ func TestHostCloseAndMoveKeepSplitLeaves(t *testing.T) {
 		if err := m.plug.host.Close(2, false); err != nil {
 			t.Fatal(err)
 		}
-		if leaves[1].tab != 1 {
-			t.Fatalf("the pane that showed tab 2 shows %d, want 1", leaves[1].tab)
+		if leaves[1].Tab != 1 {
+			t.Fatalf("the pane that showed tab 2 shows %d, want 1", leaves[1].Tab)
 		}
 		if len(ed.tabs) != 2 || len(pe.closed) != 1 {
 			t.Fatalf("tabs %d, closed %v", len(ed.tabs), pe.closed)
@@ -87,8 +87,8 @@ func TestHostCloseAndMoveKeepSplitLeaves(t *testing.T) {
 		if err := m.plug.host.Close(99, false); pluginapi.CodeOf(err) != pluginapi.CodeClosed {
 			t.Fatalf("Close(99) = %v, want closed", err)
 		}
-		if leaves[1].tab != 2 {
-			t.Fatalf("leaf moved to %d", leaves[1].tab)
+		if leaves[1].Tab != 2 {
+			t.Fatalf("leaf moved to %d", leaves[1].Tab)
 		}
 	})
 	t.Run("move a tab across a pane's tab", func(t *testing.T) {
@@ -100,8 +100,8 @@ func TestHostCloseAndMoveKeepSplitLeaves(t *testing.T) {
 		if err := m.plug.host.MoveTab(3, -2); err != nil {
 			t.Fatal(err)
 		}
-		if leaves[1].tab != 2 {
-			t.Fatalf("the pane that showed b.txt shows tab %d, want 2", leaves[1].tab)
+		if leaves[1].Tab != 2 {
+			t.Fatalf("the pane that showed b.txt shows tab %d, want 2", leaves[1].Tab)
 		}
 		if m.splits.seenTab != 2 || m.splits.prevTab != 0 {
 			t.Fatalf("history = (%d, %d), want (2, 0)", m.splits.seenTab, m.splits.prevTab)
@@ -117,8 +117,8 @@ func TestHostCloseAndMoveKeepSplitLeaves(t *testing.T) {
 		if err := m.plug.host.MoveTab(1, -1); err != nil {
 			t.Fatal(err)
 		}
-		if leaves[1].tab != 1 {
-			t.Fatalf("leaf = %d", leaves[1].tab)
+		if leaves[1].Tab != 1 {
+			t.Fatalf("leaf = %d", leaves[1].Tab)
 		}
 	})
 }

@@ -81,7 +81,7 @@ func (m *Model) uiTree() string {
 		}
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "panes %d\n", len(m.splits.root.leaves()))
+	fmt.Fprintf(&b, "panes %d\n", len(m.splits.Root.Leaves()))
 	fmt.Fprintf(&b, "overlays %d\n", len(m.overlays))
 	for _, o := range m.overlays {
 		fmt.Fprintf(&b, "  %T\n", o)

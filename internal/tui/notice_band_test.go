@@ -19,17 +19,17 @@ func TestAClickOnTheNoticeBandOnlyDismissesIt(t *testing.T) {
 	t.Parallel()
 	m := noticeModel(t, 100, 30, longNotice)
 	l := m.layout()
-	if len(l.notice) == 0 {
+	if len(l.Notice) == 0 {
 		t.Fatal("setup: no notice band")
 	}
 	before := m.caretNow()
-	for y := l.noticeY; y < l.statusY; y++ {
+	for y := l.NoticeY; y < l.StatusY; y++ {
 		m := noticeModel(t, 100, 30, longNotice)
 		m.Update(click(10, y, tea.MouseLeft))
 		if got := m.caretNow(); got != before {
 			t.Errorf("click on band row %d moved the caret from %v to %v", y, before, got)
 		}
-		if got := m.layout().notice; len(got) != 0 {
+		if got := m.layout().Notice; len(got) != 0 {
 			t.Errorf("click on band row %d left the band: %q", y, got)
 		}
 	}
@@ -50,18 +50,18 @@ func TestNoticeBandDoesNotHideTheCaretLine(t *testing.T) {
 			m := New(Deps{Editor: ed, Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
 			m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 			l := m.layout()
-			ed.doc.cursor = buffer.Pos{Line: l.bodyBottom - l.bodyTop}
+			ed.doc.cursor = buffer.Pos{Line: l.BodyBottom - l.BodyTop}
 			m.Update(expanel.ErrorMsg{Err: errors.New(longNotice)})
 			l = m.layout()
-			if len(l.notice) == 0 {
+			if len(l.Notice) == 0 {
 				t.Fatal("setup: no notice band")
 			}
 			_, y, ok := m.caret()
 			if !ok {
 				t.Fatal("no caret")
 			}
-			if y >= l.noticeY {
-				t.Errorf("caret row %d is under the band (rows %d..%d)", y, l.noticeY, l.statusY-1)
+			if y >= l.NoticeY {
+				t.Errorf("caret row %d is under the band (rows %d..%d)", y, l.NoticeY, l.StatusY-1)
 			}
 			if got := viewRow(m, y); !strings.Contains(got, fmt.Sprintf("line %d", ed.doc.cursor.Line)) {
 				t.Errorf("caret row %d reads %q, want the caret line", y, got)

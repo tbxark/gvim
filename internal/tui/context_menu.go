@@ -35,7 +35,7 @@ func (m *Model) rightClick(msg tea.MouseClickMsg) tea.Cmd {
 	m.menu = m.menu.Close()
 	m.drag = drag{}
 	l := m.layout()
-	t := l.hit(mo.X, mo.Y)
+	t := l.Hit(mo.X, mo.Y)
 	switch t.Kind {
 	case hitTab, hitTabClose:
 		m.showContextMenu(mo, m.tabMenuItems(t.Index))

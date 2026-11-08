@@ -23,9 +23,9 @@ func newSplitModelKeys(t *testing.T, f *multiFake, w, h int, extra fakeKeymap) *
 
 // paneRects returns the rectangle of every pane of the layout, in reading order.
 func paneRects(l layout) []rect {
-	out := make([]rect, len(l.panes))
-	for i, p := range l.panes {
-		out[i] = p.rect
+	out := make([]rect, len(l.Panes))
+	for i, p := range l.Panes {
+		out[i] = p.Rect
 	}
 	return out
 }
@@ -81,12 +81,12 @@ func TestResizeMovesTheRatioOfTheFocusedSplit(t *testing.T) {
 			for _, a := range tt.setup {
 				runAction(t, m, a)
 			}
-			focus := m.splits.focus
+			focus := m.splits.Focus
 			runAction(t, m, tt.action)
-			if got := m.splits.root.share(); got != tt.ratio {
+			if got := m.splits.Root.Share(); got != tt.ratio {
 				t.Errorf("ratio = %d, want %d", got, tt.ratio)
 			}
-			if m.splits.focus != focus {
+			if m.splits.Focus != focus {
 				t.Errorf("the resize moved the focus")
 			}
 			if got := paneRects(m.layout()); !slices.Equal(got, tt.panes) {
@@ -125,7 +125,7 @@ func TestResizeStopsAtTheRatioBounds(t *testing.T) {
 			for range 10 {
 				runAction(t, m, "increase_split_size")
 			}
-			if got := m.splits.root.share(); got != tt.ratio {
+			if got := m.splits.Root.Share(); got != tt.ratio {
 				t.Errorf("ratio = %d, want %d", got, tt.ratio)
 			}
 			if got := paneRects(m.layout()); !slices.Equal(got, tt.panes) {
@@ -144,12 +144,12 @@ func TestResizeTouchesOnlyTheSplitThatHoldsTheFocus(t *testing.T) {
 	runAction(t, m, "split_horizontal")
 	runAction(t, m, "increase_split_size")
 
-	if got := m.splits.root.share(); got != 50 {
+	if got := m.splits.Root.Share(); got != 50 {
 		t.Errorf("root ratio = %d, want 50", got)
 	}
-	inner := m.splits.root.b
-	if inner.dir != stacked || inner.share() != 45 {
-		t.Errorf("inner split dir %v ratio %d, want stacked at 45", inner.dir, inner.share())
+	inner := m.splits.Root.B
+	if inner.Dir != stacked || inner.Share() != 45 {
+		t.Errorf("inner split dir %v ratio %d, want stacked at 45", inner.Dir, inner.Share())
 	}
 	want := []rect{{X: 0, Y: 2, W: 40, H: 21}, {X: 41, Y: 2, W: 39, H: 9}, {X: 41, Y: 12, W: 39, H: 11}}
 	if got := paneRects(m.layout()); !slices.Equal(got, want) {
@@ -172,12 +172,12 @@ func TestResizeKeyReachesTheSplit(t *testing.T) {
 	m := newSplitModelKeys(t, newMultiFake(2, 30), 80, 24, ratioKeys)
 	runAction(t, m, "split_vertical")
 	press(m, ctrl('l'))
-	if got := m.splits.root.share(); got != 45 {
+	if got := m.splits.Root.Share(); got != 45 {
 		t.Errorf("ratio after ctrl+l = %d, want 45", got)
 	}
 	press(m, ctrl('k'))
 	press(m, ctrl('k'))
-	if got := m.splits.root.share(); got != 55 {
+	if got := m.splits.Root.Share(); got != 55 {
 		t.Errorf("ratio after two ctrl+k = %d, want 55", got)
 	}
 }
@@ -196,7 +196,7 @@ func TestResizeKeyFallsThroughWhenTheExplorerHasFocus(t *testing.T) {
 		t.Fatal("the explorer does not have the focus")
 	}
 	press(m, ctrl('l'))
-	if got := m.splits.root.share(); got != 45 {
+	if got := m.splits.Root.Share(); got != 45 {
 		t.Errorf("ratio with the explorer focused = %d, want 45", got)
 	}
 }

@@ -7,9 +7,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/internal/tui/tabstrip"
 )
 
 func TestStripLabelMarksModifiedAndPreview(t *testing.T) {
@@ -27,8 +29,8 @@ func TestStripLabelMarksModifiedAndPreview(t *testing.T) {
 		{"unnamed and modified", TabInfo{Modified: true}, "● " + noNameLabel},
 	}
 	for _, c := range cases {
-		if got := stripLabel(c.tab); got != c.want {
-			t.Errorf("%s: stripLabel = %q, want %q", c.name, got, c.want)
+		if got := frame.StripLabel(c.tab); got != c.want {
+			t.Errorf("%s: frame.StripLabel = %q, want %q", c.name, got, c.want)
 		}
 	}
 }
@@ -37,8 +39,8 @@ func TestStripLabelMarksModifiedAndPreview(t *testing.T) {
 // plus pinned to the last column.
 func TestPlaceStripFixtureAt100Columns(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.txt", Active: true}, {Name: "b.txt"}}
-	s := placeStrip(0, 100, tabs, 0, icons.Plain)
-	if s.overflow || s.before || s.after {
+	s := frame.PlaceStrip(0, 100, tabs, 0, icons.Plain)
+	if s.Overflow || s.Before || s.After {
 		t.Fatalf("two short tabs overflow a 100-cell row: %+v", s)
 	}
 	type want struct {
@@ -56,19 +58,19 @@ func TestPlaceStripFixtureAt100Columns(t *testing.T) {
 		{17, " ", hitTab, 1},
 		{99, "+", hitTabNew, 0},
 	}
-	if len(s.runs) != len(expect) {
-		t.Fatalf("runs = %+v", s.runs)
+	if len(s.Runs) != len(expect) {
+		t.Fatalf("runs = %+v", s.Runs)
 	}
 	for i, e := range expect {
-		r := s.runs[i]
-		if r.x != e.x || r.text != e.text || r.kind != e.kind || r.index != e.idx {
+		r := s.Runs[i]
+		if r.X != e.x || r.Text != e.text || r.Kind != e.kind || r.Index != e.idx {
 			t.Errorf("run %d = %+v, want %+v", i, r, e)
 		}
 	}
 }
 
 func TestStripHitRegions(t *testing.T) {
-	s := placeStrip(0, 100, []TabInfo{{Name: "a.txt"}, {Name: "b.txt"}}, 0, icons.Plain)
+	s := frame.PlaceStrip(0, 100, []TabInfo{{Name: "a.txt"}, {Name: "b.txt"}}, 0, icons.Plain)
 	cases := []struct {
 		x    int
 		want hitTarget
@@ -84,30 +86,30 @@ func TestStripHitRegions(t *testing.T) {
 		{98, hitTarget{Kind: hitNone}},
 	}
 	for _, c := range cases {
-		if got := stripHit(s.runs, c.x); got != c.want {
-			t.Errorf("stripHit(%d) = %+v, want %+v", c.x, got, c.want)
+		if got := frame.StripHit(s.Runs, c.x); got != c.want {
+			t.Errorf("frame.StripHit(%d) = %+v, want %+v", c.x, got, c.want)
 		}
 	}
 }
 
 // A modified tab's close glyph is still the × cell, and the marker is not a target.
 func TestStripHitWithModifiedTab(t *testing.T) {
-	s := placeStrip(0, 100, []TabInfo{{Name: "a.txt", Modified: true}}, 0, icons.Plain)
+	s := frame.PlaceStrip(0, 100, []TabInfo{{Name: "a.txt", Modified: true}}, 0, icons.Plain)
 	// " ● a.txt " is 9 cells, so the × is at column 9.
-	if got := stripHit(s.runs, 9); got != (hitTarget{Kind: hitTabClose, Index: 0}) {
+	if got := frame.StripHit(s.Runs, 9); got != (hitTarget{Kind: hitTabClose, Index: 0}) {
 		t.Errorf("close of a modified tab = %+v", got)
 	}
-	if got := stripHit(s.runs, 1); got != (hitTarget{Kind: hitTab, Index: 0}) {
+	if got := frame.StripHit(s.Runs, 1); got != (hitTarget{Kind: hitTab, Index: 0}) {
 		t.Errorf("marker cell = %+v, want the tab name", got)
 	}
 }
 
 func TestPlaceStripStartsAfterTheExplorerColumns(t *testing.T) {
-	s := placeStrip(30, 100, []TabInfo{{Name: "a.txt"}}, 0, icons.Plain)
-	if s.runs[0].x != 30 || s.runs[0].text != " a.txt " {
-		t.Fatalf("first run = %+v, want the tab at column 30", s.runs[0])
+	s := frame.PlaceStrip(30, 100, []TabInfo{{Name: "a.txt"}}, 0, icons.Plain)
+	if s.Runs[0].X != 30 || s.Runs[0].Text != " a.txt " {
+		t.Fatalf("first run = %+v, want the tab at column 30", s.Runs[0])
 	}
-	if plus := s.runs[len(s.runs)-1]; plus.kind != hitTabNew || plus.x != 99 {
+	if plus := s.Runs[len(s.Runs)-1]; plus.Kind != hitTabNew || plus.X != 99 {
 		t.Fatalf("plus = %+v, want it at the last column", plus)
 	}
 }
@@ -121,33 +123,33 @@ func TestPlaceStripOverflowKeepsTheActiveTabVisible(t *testing.T) {
 		for i, n := range names {
 			tabs[i] = TabInfo{Name: n, Active: i == active}
 		}
-		first := revealedFirst(tabs, 0, 20, 0, active)
-		s := placeStrip(0, 20, tabs, first, icons.Plain)
-		if !s.overflow {
+		first := frame.RevealedFirst(tabs, 0, 20, 0, active)
+		s := frame.PlaceStrip(0, 20, tabs, first, icons.Plain)
+		if !s.Overflow {
 			t.Fatalf("active %d: four tabs do not overflow at 20 columns", active)
 		}
-		for _, r := range s.runs {
-			if r.kind == hitTabNew || r.kind == hitTabScrollBefore || r.kind == hitTabScrollAfter {
+		for _, r := range s.Runs {
+			if r.Kind == hitTabNew || r.Kind == hitTabScrollBefore || r.Kind == hitTabScrollAfter {
 				continue
 			}
-			if r.x < 1 || r.x+r.w > 18 {
+			if r.X < 1 || r.X+r.W > 18 {
 				t.Errorf("active %d: run %+v is outside the window", active, r)
 			}
 		}
 		var activeRuns []run
-		for _, r := range s.runs {
-			if r.kind != hitTabNew && r.index == active && r.kind != hitTabScrollBefore && r.kind != hitTabScrollAfter {
+		for _, r := range s.Runs {
+			if r.Kind != hitTabNew && r.Index == active && r.Kind != hitTabScrollBefore && r.Kind != hitTabScrollAfter {
 				activeRuns = append(activeRuns, r)
 			}
 		}
 		if len(activeRuns) != 3 {
-			t.Fatalf("active %d: %d runs of the active tab are visible, want all 3: %+v", active, len(activeRuns), s.runs)
+			t.Fatalf("active %d: %d runs of the active tab are visible, want all 3: %+v", active, len(activeRuns), s.Runs)
 		}
-		if active == 0 && (s.before || !s.after) {
-			t.Errorf("first tab: before=%v after=%v, want the right marker only", s.before, s.after)
+		if active == 0 && (s.Before || !s.After) {
+			t.Errorf("first tab: before=%v after=%v, want the right marker only", s.Before, s.After)
 		}
-		if active == len(names)-1 && !s.before {
-			t.Errorf("last tab: before=%v after=%v, want the left marker", s.before, s.after)
+		if active == len(names)-1 && !s.Before {
+			t.Errorf("last tab: before=%v after=%v, want the left marker", s.Before, s.After)
 		}
 	}
 }
@@ -156,30 +158,30 @@ func TestPlaceStripOverflowKeepsTheActiveTabVisible(t *testing.T) {
 func TestPlaceStripWideActiveTabShowsItsStart(t *testing.T) {
 	long := strings.Repeat("n", 40) + ".go"
 	tabs := []TabInfo{{Name: "a.go"}, {Name: long, Active: true}}
-	first := revealedFirst(tabs, 0, 20, 0, 1)
-	s := placeStrip(0, 20, tabs, first, icons.Plain)
+	first := frame.RevealedFirst(tabs, 0, 20, 0, 1)
+	s := frame.PlaceStrip(0, 20, tabs, first, icons.Plain)
 	var start run
-	for _, r := range s.runs {
-		if r.kind == hitTab && r.index == 1 {
+	for _, r := range s.Runs {
+		if r.Kind == hitTab && r.Index == 1 {
 			start = r
 			break
 		}
 	}
-	if start.x != 1 || !strings.HasPrefix(start.text, " ") {
+	if start.X != 1 || !strings.HasPrefix(start.Text, " ") {
 		t.Fatalf("active tab first run = %+v, want its start at the window edge", start)
 	}
 }
 
 func TestPlaceStripEmptyStripHasOnlyPlus(t *testing.T) {
-	s := placeStrip(0, 40, nil, 0, icons.Plain)
-	if s.overflow || len(s.runs) != 1 || s.runs[0].kind != hitTabNew || s.runs[0].x != 39 {
+	s := frame.PlaceStrip(0, 40, nil, 0, icons.Plain)
+	if s.Overflow || len(s.Runs) != 1 || s.Runs[0].Kind != hitTabNew || s.Runs[0].X != 39 {
 		t.Fatalf("empty strip = %+v", s)
 	}
 }
 
 func TestDrawTabStripPaintsTheFixtureRow(t *testing.T) {
 	g := grid.New(40, 3)
-	drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, 40, []TabInfo{{Name: "a.txt", Active: true}}, 0, icons.Plain))
+	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Active: true}}, 0, icons.Plain))
 	if g.At(0, 1).Text != " " || g.At(1, 1).Text != "a" || g.At(7, 1).Text != "×" || g.At(39, 1).Text != "+" {
 		t.Fatalf("tab row = %q, want the tab at column 0 and the plus at column 39", g.Plain()[1])
 	}
@@ -191,7 +193,7 @@ func TestDrawTabStripMarksTheActiveTab(t *testing.T) {
 		TabActive: lipgloss.NewStyle().Bold(true),
 	}
 	g := grid.New(40, 3)
-	drawTabStrip(g, st, 0, 1, placeStrip(0, 40, []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}, 0, icons.Plain))
+	tabstrip.Draw(g, st, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt"}, {Name: "b.txt", Active: true}}, 0, icons.Plain))
 	if g.At(1, 1).Style.Bold || !g.At(1, 1).Style.Italic {
 		t.Fatalf("inactive tab cell style = %+v", g.At(1, 1).Style)
 	}
@@ -208,7 +210,7 @@ func TestDrawTabStripMarksTheActiveTab(t *testing.T) {
 
 func TestDrawTabStripShowsTheModifiedMarker(t *testing.T) {
 	g := grid.New(40, 3)
-	drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, 40, []TabInfo{{Name: "a.txt", Modified: true, Active: true}}, 0, icons.Plain))
+	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 40, []TabInfo{{Name: "a.txt", Modified: true, Active: true}}, 0, icons.Plain))
 	row := strings.TrimRight(g.Plain()[1], " ")
 	if !strings.HasPrefix(row, " ● a.txt × ") {
 		t.Fatalf("modified tab row = %q, want the dot before the name", row)
@@ -221,7 +223,7 @@ func TestDrawTabStripShowsTheModifiedMarker(t *testing.T) {
 func TestDrawTabStripDrawsOverflowMarkers(t *testing.T) {
 	tabs := []TabInfo{{Name: "one.go"}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go", Active: true}}
 	g := grid.New(20, 3)
-	drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, 20, tabs, revealedFirst(tabs, 0, 20, 0, 3), icons.Plain))
+	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 20, tabs, frame.RevealedFirst(tabs, 0, 20, 0, 3), icons.Plain))
 	row := g.Plain()[1]
 	if ansi.StringWidth(row) != 20 {
 		t.Fatalf("row is %d cells wide", ansi.StringWidth(row))
@@ -241,7 +243,7 @@ func TestDrawTabStripDrawsOverflowMarkers(t *testing.T) {
 func TestDrawTabStripDrawsTheRightMarkerWhenTabsFollow(t *testing.T) {
 	tabs := []TabInfo{{Name: "one.go", Active: true}, {Name: "two.go"}, {Name: "three.go"}, {Name: "four.go"}}
 	g := grid.New(20, 3)
-	drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, 20, tabs, 0, icons.Plain))
+	tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, 20, tabs, 0, icons.Plain))
 	row := g.Plain()[1]
 	if g.At(0, 1).Text != " " || g.At(18, 1).Text != icons.Plain.Glyph(icons.ScrollRight) {
 		t.Fatalf("markers in %q, want only the right marker", row)
@@ -250,10 +252,10 @@ func TestDrawTabStripDrawsTheRightMarkerWhenTabsFollow(t *testing.T) {
 
 func TestDrawTabStripWithNoTabsDoesNotPanic(t *testing.T) {
 	g := grid.New(10, 3)
-	s := placeStrip(0, 10, nil, 0, icons.Plain)
-	drawTabStrip(g, style.Styles{}, 0, 1, s)
-	if len(s.runs) != 1 || s.runs[0].kind != hitTabNew {
-		t.Fatalf("runs = %+v", s.runs)
+	s := frame.PlaceStrip(0, 10, nil, 0, icons.Plain)
+	tabstrip.Draw(g, style.Styles{}, 0, 1, s)
+	if len(s.Runs) != 1 || s.Runs[0].Kind != hitTabNew {
+		t.Fatalf("runs = %+v", s.Runs)
 	}
 }
 
@@ -261,24 +263,24 @@ func TestPlaceStripWithNarrowRowDoesNotPanic(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.go", Active: true}}
 	for w := 0; w <= 6; w++ {
 		g := grid.New(w, 2)
-		drawTabStrip(g, style.Styles{}, 0, 1, placeStrip(0, w, tabs, 0, icons.Plain))
+		tabstrip.Draw(g, style.Styles{}, 0, 1, frame.PlaceStrip(0, w, tabs, 0, icons.Plain))
 	}
 }
 
 // Markers are drawn only when the tabs overflow the row.
 func TestTabMarkersAppearOnlyWhenOverflowing(t *testing.T) {
 	tabs := []TabInfo{{Name: "a.go"}, {Name: "b.go"}}
-	if s := placeStrip(0, 40, tabs, 0, icons.Plain); s.overflow || hasMarker(s) {
+	if s := frame.PlaceStrip(0, 40, tabs, 0, icons.Plain); s.Overflow || hasMarker(s) {
 		t.Fatalf("two tabs at 40 columns show markers: %+v", s)
 	}
-	if s := placeStrip(0, 12, tabs, 0, icons.Plain); !s.overflow || !hasMarker(s) {
+	if s := frame.PlaceStrip(0, 12, tabs, 0, icons.Plain); !s.Overflow || !hasMarker(s) {
 		t.Fatalf("two tabs at 12 columns show no marker: %+v", s)
 	}
 }
 
 func hasMarker(s strip) bool {
-	for _, r := range s.runs {
-		if (r.kind == hitTabScrollBefore || r.kind == hitTabScrollAfter) && r.text != " " {
+	for _, r := range s.Runs {
+		if (r.Kind == hitTabScrollBefore || r.Kind == hitTabScrollAfter) && r.Text != " " {
 			return true
 		}
 	}
@@ -292,16 +294,16 @@ func TestClampFirstStopsWhenTheTailFillsTheWindow(t *testing.T) {
 	for i := range tabs {
 		tabs[i] = TabInfo{Name: "t.go"}
 	}
-	starts, total := tabStarts(tabs)
+	starts, total := frame.TabStarts(tabs)
 	window := 60 - 1 - 2 - 2 // width 60, the plus and two markers
-	last := clampFirst(starts, total, window, 99)
+	last := frame.ClampFirst(starts, total, window, 99)
 	if last >= len(tabs) || total-starts[last] > window {
-		t.Fatalf("clampFirst(99) = %d, the tail does not fill the window", last)
+		t.Fatalf("frame.ClampFirst(99) = %d, the tail does not fill the window", last)
 	}
-	if got := clampFirst(starts, total, window, -4); got != 0 {
-		t.Fatalf("clampFirst(-4) = %d, want 0", got)
+	if got := frame.ClampFirst(starts, total, window, -4); got != 0 {
+		t.Fatalf("frame.ClampFirst(-4) = %d, want 0", got)
 	}
-	if prev := clampFirst(starts, total, window, last-1); prev != last-1 {
+	if prev := frame.ClampFirst(starts, total, window, last-1); prev != last-1 {
 		t.Fatalf("one step before the end = %d, want %d", prev, last-1)
 	}
 }
@@ -315,11 +317,11 @@ func TestRevealedFirstKeepsActiveTabInWindow(t *testing.T) {
 	}
 	for active := range tabs {
 		tabs[active].Active = true
-		first := revealedFirst(tabs, 0, 60, 0, active)
-		s := placeStrip(0, 60, tabs, first, icons.Plain)
+		first := frame.RevealedFirst(tabs, 0, 60, 0, active)
+		s := frame.PlaceStrip(0, 60, tabs, first, icons.Plain)
 		found := false
-		for _, r := range s.runs {
-			if r.kind == hitTab && r.index == active {
+		for _, r := range s.Runs {
+			if r.Kind == hitTab && r.Index == active {
 				found = true
 			}
 		}
@@ -336,10 +338,10 @@ func TestRevealedFirstDoesNotScrollWhenTheTabIsVisible(t *testing.T) {
 	for i := range tabs {
 		tabs[i] = TabInfo{Name: "t.go"}
 	}
-	if got := revealedFirst(tabs, 0, 60, 3, 4); got != 3 {
-		t.Fatalf("revealedFirst(first 3, tab 4) = %d, want 3", got)
+	if got := frame.RevealedFirst(tabs, 0, 60, 3, 4); got != 3 {
+		t.Fatalf("frame.RevealedFirst(first 3, tab 4) = %d, want 3", got)
 	}
-	if got := revealedFirst(tabs, 0, 60, 3, 1); got != 1 {
-		t.Fatalf("revealedFirst(first 3, tab 1) = %d, want 1", got)
+	if got := frame.RevealedFirst(tabs, 0, 60, 3, 1); got != 1 {
+		t.Fatalf("frame.RevealedFirst(first 3, tab 1) = %d, want 1", got)
 	}
 }

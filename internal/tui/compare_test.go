@@ -45,11 +45,11 @@ func alignedTops(t *testing.T, m *Model) (left, right int) {
 	if !ok {
 		t.Fatal("compareState = not ok")
 	}
-	nodes := [2]*splitNode{m.splits.root.a, m.splits.root.b}
+	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
 	var rows [2]int
 	for side, n := range nodes {
-		top, topRow := n.top, n.topRow
-		if n == m.splits.focus {
+		top, topRow := n.Top, n.TopRow
+		if n == m.splits.Focus {
 			top, topRow = m.ed.Active().Top(), m.topRow(m.ed.Active().Top())
 		}
 		rows[side] = st.side[side].fill.BlockStart(top) + topRow
@@ -191,15 +191,15 @@ func TestCompareSwitchSideMovesTheFocusToTheOtherFile(t *testing.T) {
 	m := newCompareModel(t, compareLeft, compareRight)
 	runAction(t, m, "compare_switch_side")
 	ps := panesOf(t, m, 2)
-	if ps[0].tab != 0 || ps[1].tab != 1 {
-		t.Errorf("tabs after the switch = %d and %d, want 0 and 1: the panes stay where they are", ps[0].tab, ps[1].tab)
+	if ps[0].Tab != 0 || ps[1].Tab != 1 {
+		t.Errorf("tabs after the switch = %d and %d, want 0 and 1: the panes stay where they are", ps[0].Tab, ps[1].Tab)
 	}
-	if m.layout().focus != 1 || m.activeTab() != 1 {
-		t.Errorf("focus on pane %d with tab %d active, want pane 1 and tab 1", m.layout().focus, m.activeTab())
+	if m.layout().Focus != 1 || m.activeTab() != 1 {
+		t.Errorf("focus on pane %d with tab %d active, want pane 1 and tab 1", m.layout().Focus, m.activeTab())
 	}
 	runAction(t, m, "compare_switch_side")
-	if m.layout().focus != 0 || m.activeTab() != 0 {
-		t.Errorf("focus on pane %d with tab %d active after a second switch, want pane 0 and tab 0", m.layout().focus, m.activeTab())
+	if m.layout().Focus != 0 || m.activeTab() != 0 {
+		t.Errorf("focus on pane %d with tab %d active after a second switch, want pane 0 and tab 0", m.layout().Focus, m.activeTab())
 	}
 }
 
@@ -209,16 +209,16 @@ func TestOpenCompareShowsTwoTabsSideBySide(t *testing.T) {
 		t.Fatal("openCompare(0, 1) = false")
 	}
 	l := m.layout()
-	if len(l.panes) != 2 || l.panes[0].tab != 0 || l.panes[1].tab != 1 || l.focus != 0 {
-		t.Fatalf("panes %+v focus %d, want tabs 0 and 1 with the focus on pane 0", l.panes, l.focus)
+	if len(l.Panes) != 2 || l.Panes[0].Tab != 0 || l.Panes[1].Tab != 1 || l.Focus != 0 {
+		t.Fatalf("panes %+v focus %d, want tabs 0 and 1 with the focus on pane 0", l.Panes, l.Focus)
 	}
-	if l.panes[0].Y != l.panes[1].Y || l.panes[1].X <= l.panes[0].X {
-		t.Errorf("panes %+v are not side by side", l.panes)
+	if l.Panes[0].Y != l.Panes[1].Y || l.Panes[1].X <= l.Panes[0].X {
+		t.Errorf("panes %+v are not side by side", l.Panes)
 	}
 	if m.openCompare(0, 2) {
 		t.Error("openCompare with a missing tab = true")
 	}
-	if n := len(m.layout().panes); n != 2 {
+	if n := len(m.layout().Panes); n != 2 {
 		t.Errorf("%d panes after a refused compare, want 2", n)
 	}
 }
@@ -318,15 +318,15 @@ func TestComparePanesTintTheLinesThatDiffer(t *testing.T) {
 		t.Fatal("the dark theme has no diff colors")
 	}
 	l := m.layout()
-	left, right := l.panes[0], l.panes[1]
+	left, right := l.Panes[0], l.Panes[1]
 	st, _ := m.compareState()
 	bgAt := func(p splitPane, side, line int, tail bool) color.Color {
-		x := p.textX
+		x := p.TextX
 		if tail {
-			x = p.textX + 10 // well past the one-character text
+			x = p.TextX + 10 // well past the one-character text
 		}
 		// The row of a line counts the filler rows above it.
-		return m.paint().At(x, l.bodyTop+st.side[side].fill.TextRow(line)).Style.BG
+		return m.paint().At(x, l.BodyTop+st.side[side].fill.TextRow(line)).Style.BG
 	}
 	tests := []struct {
 		name string

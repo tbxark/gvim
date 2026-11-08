@@ -25,10 +25,10 @@ func (m *Model) openCompare(left, right int) bool {
 		m.notice = name + " is too large to compare"
 		return false
 	}
-	a, b := &splitNode{tab: left}, &splitNode{tab: right}
+	a, b := &splitNode{Tab: left}, &splitNode{Tab: right}
 	m.splits.owned = nil
-	m.splits.root = &splitNode{dir: sideBySide, a: a, b: b}
-	m.splits.focus = nil
+	m.splits.Root = &splitNode{Dir: sideBySide, A: a, B: b}
+	m.splits.Focus = nil
 	m.splits.comparing = true
 	m.focusLeaf(a)
 	return true
@@ -58,10 +58,10 @@ func (m *Model) compareStep(forward bool) {
 		m.notice = m.sameTextNotice()
 		return
 	}
-	nodes := [2]*splitNode{m.splits.root.a, m.splits.root.b}
+	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
 	docs := [2]Document{m.leafDoc(nodes[0]), m.leafDoc(nodes[1])}
 	side := 0
-	if m.splits.focus == nodes[1] {
+	if m.splits.Focus == nodes[1] {
 		side = 1
 	}
 	at := docs[side].Cursor()
@@ -74,7 +74,7 @@ func (m *Model) compareStep(forward bool) {
 			m.ed.SetCursor(buffer.Pos{Line: line}, false)
 			continue
 		}
-		m.setTabCursor(nodes[s].tab, line)
+		m.setTabCursor(nodes[s].Tab, line)
 	}
 	m.compareCenter(hunkJump(h, side, last))
 	m.notice = "Difference " + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(hunks))
@@ -106,7 +106,7 @@ func (m *Model) compareCenter(line int) {
 		return
 	}
 	side := 0
-	if m.splits.focus == m.splits.root.b {
+	if m.splits.Focus == m.splits.Root.B {
 		side = 1
 	}
 	fill := st.side[side].fill
@@ -148,7 +148,7 @@ func (m *Model) compareState() (compareDiff, bool) {
 	if !m.splits.comparing {
 		return compareDiff{}, false
 	}
-	left, right := m.leafDoc(m.splits.root.a), m.leafDoc(m.splits.root.b)
+	left, right := m.leafDoc(m.splits.Root.A), m.leafDoc(m.splits.Root.B)
 	if left == nil || right == nil || isLargeDoc(left) || isLargeDoc(right) {
 		// The diff takes all the lines of both sides, which a large document does not
 		// hold.
@@ -163,7 +163,7 @@ func (m *Model) compareState() (compareDiff, bool) {
 		return compareDiff{hunks: hunks, side: newCompareSides(hunks)}, true
 	}
 	key := compareKey{
-		left: m.splits.root.a.tab, right: m.splits.root.b.tab,
+		left: m.splits.Root.A.Tab, right: m.splits.Root.B.Tab,
 		leftName: left.Name(), rightName: right.Name(),
 		leftLines: left.LineCount(), rightLines: right.LineCount(),
 		leftVersion: lv.Version(), rightVersion: rv.Version(),
@@ -236,13 +236,13 @@ var (
 // compareSideOf returns which side of the compare view a pane with tab shows: 0 for the
 // left one, 1 for the right one, and -1 for a pane that is not a side of it.
 func (m *Model) compareSideOf(tab int) int {
-	if !m.splits.comparing || m.splits.root.leaf() {
+	if !m.splits.comparing || m.splits.Root.Leaf() {
 		return -1
 	}
 	switch tab {
-	case m.splits.root.a.tab:
+	case m.splits.Root.A.Tab:
 		return 0
-	case m.splits.root.b.tab:
+	case m.splits.Root.B.Tab:
 		return 1
 	}
 	return -1
@@ -254,7 +254,7 @@ func (m *Model) compareSideOf(tab int) int {
 // filler rows that keep the two sides level. A pane that is not a side of the compare view
 // is returned as it is.
 func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane {
-	side := m.compareSideOf(p.tab)
+	side := m.compareSideOf(p.Tab)
 	if side < 0 {
 		return pane
 	}
@@ -262,10 +262,10 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 	if !ok {
 		return pane
 	}
-	if !p.focused {
-		pane.TopRow = [2]*splitNode{m.splits.root.a, m.splits.root.b}[side].topRow
+	if !p.Focused {
+		pane.TopRow = [2]*splitNode{m.splits.Root.A, m.splits.Root.B}[side].TopRow
 		// The sides pan together: this one shows the columns the focused one shows.
-		if fp, doc := m.layout().focusedPane(), m.ed.Active(); doc != nil && fp.focused {
+		if fp, doc := m.layout().FocusedPane(), m.ed.Active(); doc != nil && fp.Focused {
 			left, _ := m.paneGeometry(fp, doc).HScroll(fp.W, fp.H)
 			pane.Left, pane.KeepLeft = left, true
 		}
@@ -381,10 +381,10 @@ type compareEnds struct {
 // compareEnds reads the line endings of the two sides. The diff works on the text of the lines,
 // which has no ending, so a difference in how they end is found here.
 func (m *Model) compareEnds() compareEnds {
-	if !m.splits.comparing || m.splits.root.leaf() {
+	if !m.splits.comparing || m.splits.Root.Leaf() {
 		return compareEnds{}
 	}
-	l, r := m.leafDoc(m.splits.root.a), m.leafDoc(m.splits.root.b)
+	l, r := m.leafDoc(m.splits.Root.A), m.leafDoc(m.splits.Root.B)
 	if l == nil || r == nil {
 		return compareEnds{}
 	}
@@ -401,7 +401,7 @@ func (m *Model) compareSpans(pane *editorpane.Pane, side int, partner map[int]in
 		key = "diff_add_highlight_bg"
 	}
 	c := style.Color(m.theme, "editor", key)
-	doc, other := pane.Doc, m.leafDoc([2]*splitNode{m.splits.root.a, m.splits.root.b}[1-side])
+	doc, other := pane.Doc, m.leafDoc([2]*splitNode{m.splits.Root.A, m.splits.Root.B}[1-side])
 	if c == nil || doc == nil || other == nil {
 		return
 	}
@@ -435,7 +435,7 @@ func (m *Model) compareSpans(pane *editorpane.Pane, side int, partner map[int]in
 // update, so a scroll, a jump, an edit that moves the fillers or a change of focus all find
 // the two sides on the same rows.
 func (m *Model) syncCompare() {
-	if !m.splits.comparing || m.splits.root.leaf() {
+	if !m.splits.comparing || m.splits.Root.Leaf() {
 		return
 	}
 	st, ok := m.compareState()
@@ -443,9 +443,9 @@ func (m *Model) syncCompare() {
 	if !ok || doc == nil {
 		return
 	}
-	nodes := [2]*splitNode{m.splits.root.a, m.splits.root.b}
+	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
 	side := 0
-	switch m.splits.focus {
+	switch m.splits.Focus {
 	case nodes[1]:
 		side = 1
 	case nodes[0]:
@@ -453,13 +453,13 @@ func (m *Model) syncCompare() {
 		return
 	}
 	other := nodes[1-side]
-	od := m.docAt(other.tab)
+	od := m.docAt(other.Tab)
 	if od == nil {
 		return
 	}
 	top := doc.Top()
 	row := st.side[side].fill.BlockStart(top) + m.topRow(top)
-	other.top, other.topRow = st.side[1-side].fill.LineAt(od.LineCount(), row)
+	other.Top, other.TopRow = st.side[1-side].fill.LineAt(od.LineCount(), row)
 }
 
 // compareCommands are the palette rows of an open compare view: the commands that step
@@ -504,7 +504,7 @@ func (m *Model) largeTabIn(i, j int) string {
 // file mode, or "" when there is none. A document can become large after the view
 // opened, by a reload of its file.
 func (m *Model) largeCompared() string {
-	for _, n := range []*splitNode{m.splits.root.a, m.splits.root.b} {
+	for _, n := range []*splitNode{m.splits.Root.A, m.splits.Root.B} {
 		if doc := m.leafDoc(n); doc != nil && isLargeDoc(doc) {
 			return doc.Name()
 		}
@@ -524,14 +524,14 @@ func (m *Model) compareSwitch() {
 	}
 	st, ok := m.compareState()
 	from := m.ed.Active()
-	nodes := [2]*splitNode{m.splits.root.a, m.splits.root.b}
+	nodes := [2]*splitNode{m.splits.Root.A, m.splits.Root.B}
 	side := 0
-	if m.splits.focus == nodes[1] {
+	if m.splits.Focus == nodes[1] {
 		side = 1
 	}
 	var at buffer.Pos
 	row, view := 0, nodes[1-side] // the view the other pane has now
-	top, topRow := view.top, view.topRow
+	top, topRow := view.Top, view.TopRow
 	if ok && from != nil {
 		at = from.Cursor()
 		first := st.side[side].fill.BlockStart(from.Top()) + m.topRow(from.Top())

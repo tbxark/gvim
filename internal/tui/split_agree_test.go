@@ -11,16 +11,16 @@ import (
 func checkFrame(t *testing.T, m *Model, f *multiFake, label string) {
 	t.Helper()
 	l := m.layout()
-	for y := l.bodyTop; y <= l.bodyBottom; y++ {
-		for x := l.editorX; x < l.w; x++ {
+	for y := l.BodyTop; y <= l.BodyBottom; y++ {
+		for x := l.EditorX; x < l.W; x++ {
 			var owners []int // the panes that contain the cell
-			for i, p := range l.panes {
+			for i, p := range l.Panes {
 				if p.Contains(x, y) {
 					owners = append(owners, i)
 				}
 			}
 			var lines []int // the lines that contain the cell
-			for j, b := range l.borders {
+			for j, b := range l.Borders {
 				if b.Contains(x, y) {
 					lines = append(lines, j)
 				}
@@ -28,7 +28,7 @@ func checkFrame(t *testing.T, m *Model, f *multiFake, label string) {
 			if len(owners)+len(lines) != 1 {
 				t.Fatalf("%s: cell (%d, %d) is in %d panes and %d lines, want exactly one", label, x, y, len(owners), len(lines))
 			}
-			got := l.hit(x, y)
+			got := l.Hit(x, y)
 			if len(lines) == 1 {
 				if got.Kind != hitSplitBorder || got.Index != lines[0] {
 					t.Fatalf("%s: hit(%d, %d) = %+v on line %d, want a split border", label, x, y, got, lines[0])
@@ -40,10 +40,10 @@ func checkFrame(t *testing.T, m *Model, f *multiFake, label string) {
 			}
 		}
 	}
-	fp := l.focusedPane()
-	if f.cols != fp.textW || f.rows != m.focusedBodyRows() {
+	fp := l.FocusedPane()
+	if f.cols != fp.TextW || f.rows != m.focusedBodyRows() {
 		t.Errorf("%s: viewport %d rows by %d cols, want the focused pane's %d by %d",
-			label, f.rows, f.cols, m.focusedBodyRows(), fp.textW)
+			label, f.rows, f.cols, m.focusedBodyRows(), fp.TextW)
 	}
 }
 
@@ -52,8 +52,8 @@ func TestLayoutAndHitMapAgreeAfterEachChange(t *testing.T) {
 	m := newSplitModel(t, f, 80, 24)
 	// dragFirstLine moves the first line of the layout by a few cells, as a drag does.
 	dragFirstLine := func(m *Model) {
-		b := m.layout().borders[0]
-		if b.vertical {
+		b := m.layout().Borders[0]
+		if b.Vertical {
 			pressDrag(m, b.X, b.Y, b.X-7, b.Y)
 			return
 		}

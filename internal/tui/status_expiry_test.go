@@ -43,11 +43,11 @@ func TestSavedDoesNotOutliveTheNextKey(t *testing.T) {
 	t.Parallel()
 	m, ed := newStatusModel(t)
 	press(m, ctrl('s'))
-	if got := m.statusView().message; got != "Saved" {
+	if got := m.statusView().Message; got != "Saved" {
 		t.Fatalf("status after Ctrl+S = %q, want Saved", got)
 	}
 	press(m, typed("x"))
-	if got := m.statusView().message; got != "" {
+	if got := m.statusView().Message; got != "" {
 		t.Errorf("status after typing = %q, want the stale Saved gone", got)
 	}
 	if ed.status != "" {
@@ -61,7 +61,7 @@ func TestAnActionKeepsTheStatusItSets(t *testing.T) {
 	press(m, typed("x"))
 	press(m, ctrl('s'))
 	press(m, ctrl('s'))
-	if got := m.statusView().message; got != "Saved" {
+	if got := m.statusView().Message; got != "Saved" {
 		t.Errorf("status after a second save = %q, want Saved shown again", got)
 	}
 }
@@ -71,8 +71,8 @@ func TestAClickClearsTheStatus(t *testing.T) {
 	m, ed := newStatusModel(t)
 	press(m, ctrl('s'))
 	m.Update(click(30, 5, tea.MouseLeft))
-	if ed.status != "" || m.statusView().message != "" {
-		t.Errorf("status after a click = %q, want none", m.statusView().message)
+	if ed.status != "" || m.statusView().Message != "" {
+		t.Errorf("status after a click = %q, want none", m.statusView().Message)
 	}
 }
 
@@ -99,7 +99,7 @@ func TestWarningsLogKeepsFailuresAndNotNotes(t *testing.T) {
 	m := New(Deps{Editor: ed, Keys: keys, Theme: theme.Theme{}, Clock: testClock})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	press(m, ctrl('s'))
-	if got := m.statusView().message; got != "Saved" {
+	if got := m.statusView().Message; got != "Saved" {
 		t.Fatalf("setup: status = %q, want Saved", got)
 	}
 	press(m, ctrl('f'))
@@ -113,11 +113,11 @@ func TestAWheelNotchClearsTheStatus(t *testing.T) {
 	t.Parallel()
 	m, ed := newStatusModel(t)
 	press(m, ctrl('s'))
-	if got := m.statusView().message; got != "Saved" {
+	if got := m.statusView().Message; got != "Saved" {
 		t.Fatalf("setup: status = %q, want Saved", got)
 	}
 	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 40, Y: 10, Button: tea.MouseWheelDown}))
-	if ed.status != "" || m.statusView().message != "" {
-		t.Errorf("status after a wheel notch = %q, want none", m.statusView().message)
+	if ed.status != "" || m.statusView().Message != "" {
+		t.Errorf("status after a wheel notch = %q, want none", m.statusView().Message)
 	}
 }

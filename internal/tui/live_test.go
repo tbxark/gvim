@@ -135,7 +135,7 @@ func TestLiveGrepWithoutPortIsANotice(t *testing.T) {
 	if len(m.overlays) != 0 {
 		t.Fatal("live grep without a port opened the palette")
 	}
-	if got := m.statusView().message; got != "Live Grep is not supported in this port" {
+	if got := m.statusView().Message; got != "Live Grep is not supported in this port" {
 		t.Fatalf("status = %q, want the not-supported notice", got)
 	}
 }
@@ -147,7 +147,7 @@ func TestLiveGrepSearchErrorIsNotAFailure(t *testing.T) {
 	m, _ := newLiveModel(t, failingGrep{errors.New("bad read")})
 	must(t, m.Run("open_live_grep"))
 	typeInto(m, "x")
-	if got := m.statusView().message; got == "bad read" {
+	if got := m.statusView().Message; got == "bad read" {
 		t.Fatal("a search error went to the notice row, want the palette")
 	}
 }

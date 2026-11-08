@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	commands "github.com/tbxark/gvim/commands"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/keymap"
 )
 
@@ -94,10 +95,10 @@ func (m *Model) welcomeDoorKeys() []string {
 	if !m.welcomeVisible() {
 		return nil
 	}
-	keys := make([]string, len(welcomeDoors))
-	for i, d := range welcomeDoors {
-		actions := []string{d.action}
-		if d.action == "command_palette" {
+	keys := make([]string, len(frame.WelcomeDoors))
+	for i, d := range frame.WelcomeDoors {
+		actions := []string{d.Action}
+		if d.Action == "command_palette" {
 			actions = paletteActions
 		}
 		chord, asked := m.primaryChord(actions...)

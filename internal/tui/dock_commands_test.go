@@ -164,12 +164,12 @@ func TestTerminalCommandsLayOutTheDockBelowTheBody(t *testing.T) {
 			m := newTerminalModel(t, newFakeTree(3), dockKeys(), &shellsStarter{})
 			dockRun(t, m, action)
 			l := m.layout()
-			if !l.dockOn || l.dockY != 16 || l.dockH != 7 || l.w != 80 {
+			if !l.DockOn || l.DockY != 16 || l.DockH != 7 || l.W != 80 {
 				t.Fatalf("dock on = %v at row %d with %d rows over %d columns; want on at row 16 with 7 rows over 80 columns",
-					l.dockOn, l.dockY, l.dockH, l.w)
+					l.DockOn, l.DockY, l.DockH, l.W)
 			}
-			if l.bodyBottom != 15 {
-				t.Fatalf("bodyBottom = %d, want 15: the editor body stops above the dock", l.bodyBottom)
+			if l.BodyBottom != 15 {
+				t.Fatalf("bodyBottom = %d, want 15: the editor body stops above the dock", l.BodyBottom)
 			}
 		})
 	}
@@ -324,9 +324,9 @@ func TestOpenTerminalCommandsKeepTheRunningShell(t *testing.T) {
 			if !m.dock.open || !m.dock.focus {
 				t.Fatalf("open, focus = %v, %v; want the dock shown with the focus", m.dock.open, m.dock.focus)
 			}
-			if l := m.layout(); !l.dockOn || l.dockY != 16 || l.dockH != 7 || l.dockY+l.dockH != l.statusY {
+			if l := m.layout(); !l.DockOn || l.DockY != 16 || l.DockH != 7 || l.DockY+l.DockH != l.StatusY {
 				t.Fatalf("dock on = %v at row %d with %d rows; want on at row 16 with 7 rows, directly above the status row",
-					l.dockOn, l.dockY, l.dockH)
+					l.DockOn, l.DockY, l.DockH)
 			}
 			if m.notice != tt.notice {
 				t.Fatalf("notice = %q, want %q", m.notice, tt.notice)
@@ -342,7 +342,7 @@ func TestOpenTerminalCommandsSayWhenTheFrameHasNoRoom(t *testing.T) {
 			// At 9 rows the editor body would keep only 2 rows under the dock, so the dock is not laid out.
 			m.Update(tea.WindowSizeMsg{Width: 80, Height: 9})
 			dockRun(t, m, action)
-			if m.layout().dockOn {
+			if m.layout().DockOn {
 				t.Fatal("the dock is laid out in a 9-row frame")
 			}
 			if m.notice != "No room for the terminal." {

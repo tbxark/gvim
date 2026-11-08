@@ -10,25 +10,25 @@ import (
 // screen, or the notice that says why no shell runs. A cell keeps the colours the
 // shell set, and a colour the shell left at its default takes the editor's.
 func (m *Model) paintDock(g *grid.Grid, l layout) {
-	if !l.dockOn {
+	if !l.DockOn {
 		return
 	}
 	bar := style.Cell(m.styles.ExplorerTitle)
 	body := style.Cell(m.styles.Editor)
-	g.Fill(0, l.w, l.dockY, bar)
-	g.Put(1, l.dockY, l.w, dockTitle(&m.dock), bar)
+	g.Fill(0, l.W, l.DockY, bar)
+	g.Put(1, l.DockY, l.W, dockTitle(&m.dock), bar)
 
-	top, rows := l.dockY+1, l.dockH-1
+	top, rows := l.DockY+1, l.DockH-1
 	for y := range rows {
-		g.Fill(0, l.w, top+y, body)
+		g.Fill(0, l.W, top+y, body)
 	}
 	if m.dock.term == nil {
-		g.Put(1, top, l.w, dockText(&m.dock), body)
+		g.Put(1, top, l.W, dockText(&m.dock), body)
 		return
 	}
 	sc := m.dock.term.Screen()
 	for r := range min(rows, sc.Rows) {
-		paintShellRow(g, top+r, l.w, sc, r, body)
+		paintShellRow(g, top+r, l.W, sc, r, body)
 	}
 }
 
@@ -82,12 +82,12 @@ func shellStyle(st terminal.Style, base grid.Style) grid.Style {
 // shell shows it and the cursor is inside the dock's shell rows.
 func (m *Model) dockCaret() (x, y int, ok bool) {
 	l := m.layout()
-	if !l.dockOn || m.dock.term == nil || m.dock.exited {
+	if !l.DockOn || m.dock.term == nil || m.dock.exited {
 		return 0, 0, false
 	}
 	c := m.dock.term.Screen().Cursor
-	if !c.Visible || c.Col < 0 || c.Col >= l.w || c.Row < 0 || c.Row >= l.dockH-1 {
+	if !c.Visible || c.Col < 0 || c.Col >= l.W || c.Row < 0 || c.Row >= l.DockH-1 {
 		return 0, 0, false
 	}
-	return c.Col, l.dockY + 1 + c.Row, true
+	return c.Col, l.DockY + 1 + c.Row, true
 }

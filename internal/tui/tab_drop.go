@@ -59,12 +59,12 @@ func (m *Model) dragTabZone(l layout, mo tea.Mouse) {
 	if abs(mo.X-td.startX) <= dropThreshold && abs(mo.Y-td.startY) <= dropThreshold {
 		return
 	}
-	for i, p := range l.panes {
+	for i, p := range l.Panes {
 		if !p.Contains(mo.X, mo.Y) {
 			continue
 		}
-		edge, area := dropEdges(p.rect, mo.X, mo.Y)
-		if edge == dropCenter && p.tab == td.index {
+		edge, area := dropEdges(p.Rect, mo.X, mo.Y)
+		if edge == dropCenter && p.Tab == td.index {
 			return // the tab is already shown in that pane
 		}
 		td.zone = &tabZone{pane: i, edge: edge, area: area}
@@ -87,8 +87,8 @@ func (m *Model) dropTab(td *tabDrag) {
 	// The press that began the drag made the tab the active one, so the pane it was
 	// pressed in shows it. A split then keeps the tab that pane showed before.
 	prev := m.splits.prevTab
-	leaves := m.splits.root.leaves()
-	pressedIn := z.pane >= 0 && z.pane < len(leaves) && leaves[z.pane] == m.splits.focus
+	leaves := m.splits.Root.Leaves()
+	pressedIn := z.pane >= 0 && z.pane < len(leaves) && leaves[z.pane] == m.splits.Focus
 	m.focusPane(z.pane)
 	if z.edge != dropCenter {
 		dir := sideBySide
@@ -100,34 +100,20 @@ func (m *Model) dropTab(td *tabDrag) {
 			return
 		}
 		if z.edge == dropLeft || z.edge == dropTop {
-			n := m.splits.root.parentOf(m.splits.focus)
-			n.a, n.b = n.b, n.a
+			n := m.splits.Root.ParentOf(m.splits.Focus)
+			n.A, n.B = n.B, n.A
 		}
-		if parent := m.splits.root.parentOf(m.splits.focus); pressedIn && parent != nil && prev >= 0 && prev != td.index && prev < len(m.ed.Tabs()) {
-			old := parent.a
-			if old == m.splits.focus {
-				old = parent.b
+		if parent := m.splits.Root.ParentOf(m.splits.Focus); pressedIn && parent != nil && prev >= 0 && prev != td.index && prev < len(m.ed.Tabs()) {
+			old := parent.A
+			if old == m.splits.Focus {
+				old = parent.B
 			}
-			old.tab, old.top = prev, 0
+			old.Tab, old.Top = prev, 0
 		}
 	}
 	m.focusEditor()
 	m.activateTab(td.index)
 	m.syncViewport()
-}
-
-// parentOf returns the inner node of the tree n whose child is leaf, or nil.
-func (n *splitNode) parentOf(leaf *splitNode) *splitNode {
-	if n.leaf() {
-		return nil
-	}
-	if n.a == leaf || n.b == leaf {
-		return n
-	}
-	if p := n.a.parentOf(leaf); p != nil {
-		return p
-	}
-	return n.b.parentOf(leaf)
 }
 
 // paintDropZone tints the part of the pane the dragged tab would land on, keeping the

@@ -130,12 +130,13 @@ several files to see:
 - `internal/tui` is one Bubble Tea v2 root model (`package tui`). It depends on
   interfaces it defines in `ports.go` (`EditorState`, `Document`, ...); `app` satisfies
   them with adapters. `tui` must not import concrete `finder`, `fsops`, `lsp` or the
-  plugin runtime; its sub-packages (`overlay`, `list`, `editorpane`, `menubar`,
+  plugin runtime; its sub-packages (`overlay`, `list`, `frame`, `split`, `tabstrip`,
+  `editorpane`, `menubar`,
   `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`, `ctxmenu`,
   `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`) must not import the root
   `tui`.
-  `layout.go` is the single geometry source for both painting and the hit map
-  (`hit.go`).
+  `internal/tui/frame` is the single geometry source for painting and the hit map;
+  `internal/tui/split` owns the split tree and `internal/tui/tabstrip` the strip paint.
 - Engine packages (`buffer`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,
   `session`, `decorations`, `textlayout`) are TUI-free: no bubbletea, bubbles or
   lipgloss. `internal/tui/style` is the only place theme data becomes lipgloss styles.

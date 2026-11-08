@@ -10,8 +10,8 @@ import (
 // modeItem returns the first status item of the mode, "" when there is none.
 func modeItem(m *Model) string {
 	for _, it := range m.plugStatusItems() {
-		if strings.HasPrefix(it.id, "mode:") {
-			return it.text
+		if strings.HasPrefix(it.ID, "mode:") {
+			return it.Text
 		}
 	}
 	return ""

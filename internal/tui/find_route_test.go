@@ -154,8 +154,8 @@ func TestCtrlFOpensTheFindBarThroughTheRoot(t *testing.T) {
 	if !strings.Contains(rows[h-3], "Local") {
 		t.Errorf("row %d = %q, want the status row above the bar", h-3, rows[h-3])
 	}
-	if l := m.layout(); l.statusY != h-3 || l.bodyBottom != h-4 {
-		t.Errorf("layout status %d and body bottom %d, want %d and %d", l.statusY, l.bodyBottom, h-3, h-4)
+	if l := m.layout(); l.StatusY != h-3 || l.BodyBottom != h-4 {
+		t.Errorf("layout status %d and body bottom %d, want %d and %d", l.StatusY, l.BodyBottom, h-3, h-4)
 	}
 }
 
@@ -166,8 +166,8 @@ func TestEscClosesTheFindBarAndGivesBackTheBody(t *testing.T) {
 	if len(m.overlays) != 0 || m.findOpen() {
 		t.Fatalf("overlay stack has %d entries after Esc, want none", len(m.overlays))
 	}
-	if l := m.layout(); l.statusY != 29 || l.bodyBottom != 28 {
-		t.Errorf("layout status %d and body bottom %d after the bar closed, want 29 and 28", l.statusY, l.bodyBottom)
+	if l := m.layout(); l.StatusY != 29 || l.BodyBottom != 28 {
+		t.Errorf("layout status %d and body bottom %d after the bar closed, want 29 and 28", l.StatusY, l.BodyBottom)
 	}
 }
 

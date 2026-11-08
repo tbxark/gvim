@@ -30,9 +30,9 @@ func stripModel(t *testing.T, w int, names ...string) (*Model, *tabFake) {
 // tabsOnScreen lists the tab indexes that have a visible tab run in the strip.
 func tabsOnScreen(m *Model) map[int]bool {
 	on := map[int]bool{}
-	for _, r := range m.layout().strip.runs {
-		if r.kind == hitTab {
-			on[r.index] = true
+	for _, r := range m.layout().Strip.Runs {
+		if r.Kind == hitTab {
+			on[r.Index] = true
 		}
 	}
 	return on
@@ -40,9 +40,9 @@ func tabsOnScreen(m *Model) map[int]bool {
 
 // plusColumn is the column of the pinned "+" run, or -1.
 func plusColumn(m *Model) int {
-	for _, r := range m.layout().strip.runs {
-		if r.kind == hitTabNew {
-			return r.x
+	for _, r := range m.layout().Strip.Runs {
+		if r.Kind == hitTabNew {
+			return r.X
 		}
 	}
 	return -1
@@ -72,14 +72,14 @@ func TestOverflowShowsTheActiveTab(t *testing.T) {
 // Each wheel notch over the tab row moves the strip by one tab, both ways.
 func TestWheelOverTabRowScrollsByOneTab(t *testing.T) {
 	m, _ := stripModel(t, 60, twelveTabs()...)
-	start := m.layout().strip.first
+	start := m.layout().Strip.First
 	wheelRow(m, false)
-	if got := m.layout().strip.first; got != start+1 {
+	if got := m.layout().Strip.First; got != start+1 {
 		t.Fatalf("wheel down: first = %d, want %d", got, start+1)
 	}
 	wheelRow(m, true)
 	wheelRow(m, true)
-	if got := m.layout().strip.first; got != max(start-1, 0) {
+	if got := m.layout().Strip.First; got != max(start-1, 0) {
 		t.Fatalf("wheel up twice: first = %d, want %d", got, max(start-1, 0))
 	}
 }
@@ -91,18 +91,18 @@ func TestClickRightMarkerScrollsAndPlusOpensItsMenu(t *testing.T) {
 	tf.active = 0
 	tf.sync()
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
-	before := m.layout().strip.first
+	before := m.layout().Strip.First
 	markerX := -1
-	for _, r := range m.layout().strip.runs {
-		if r.kind == hitTabScrollAfter {
-			markerX = r.x
+	for _, r := range m.layout().Strip.Runs {
+		if r.Kind == hitTabScrollAfter {
+			markerX = r.X
 		}
 	}
 	if markerX < 0 {
 		t.Fatal("no right marker drawn for a twelve-tab strip")
 	}
 	m.Update(click(markerX, 1, tea.MouseLeft))
-	if got := m.layout().strip.first; got != before+1 {
+	if got := m.layout().Strip.First; got != before+1 {
 		t.Fatalf("click on > moved first from %d to %d, want one tab", before, got)
 	}
 	if plus := plusColumn(m); plus != 59 {
@@ -126,14 +126,14 @@ func TestClickRightMarkerScrollsAndPlusOpensItsMenu(t *testing.T) {
 func TestActivatingFarLeftTabScrollsIntoView(t *testing.T) {
 	m, _ := stripModel(t, 60, twelveTabs()...)
 	m.Update(palette.ActivateBufferMsg{Index: 11})
-	if m.layout().strip.first == 0 {
+	if m.layout().Strip.First == 0 {
 		t.Fatal("the strip did not scroll to the last tab; the test needs an offset")
 	}
 	m.Update(palette.ActivateBufferMsg{Index: 0})
 	if !tabsOnScreen(m)[0] {
 		t.Fatalf("tab 0 is not on screen after activating it; first = %d", m.tabFirst)
 	}
-	if got := m.layout().strip.first; got != 0 {
+	if got := m.layout().Strip.First; got != 0 {
 		t.Fatalf("first = %d, want the strip at its start for tab 0", got)
 	}
 }
@@ -141,11 +141,11 @@ func TestActivatingFarLeftTabScrollsIntoView(t *testing.T) {
 // Markers show only while the tabs overflow the row.
 func TestMarkersAppearOnlyWhenOverflowing(t *testing.T) {
 	m, _ := stripModel(t, 100, "a.go", "b.go", "c.go")
-	if s := m.layout().strip; s.overflow || s.before || s.after {
+	if s := m.layout().Strip; s.Overflow || s.Before || s.After {
 		t.Fatalf("three tabs at 100 columns: %+v", s)
 	}
 	m.Update(tea.WindowSizeMsg{Width: 20, Height: 30})
-	if s := m.layout().strip; !s.overflow {
+	if s := m.layout().Strip; !s.Overflow {
 		t.Fatal("three tabs at 20 columns do not overflow")
 	}
 }
@@ -167,9 +167,9 @@ func TestWheelScrollIsNotUndoneByAnUnrelatedKey(t *testing.T) {
 	m, _ := stripModel(t, 60, twelveTabs()...)
 	wheelRow(m, false)
 	wheelRow(m, false)
-	first := m.layout().strip.first
+	first := m.layout().Strip.First
 	press(m, typed("x"))
-	if got := m.layout().strip.first; got != first {
+	if got := m.layout().Strip.First; got != first {
 		t.Fatalf("a key press moved the strip from %d to %d", first, got)
 	}
 }

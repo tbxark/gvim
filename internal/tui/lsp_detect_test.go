@@ -13,6 +13,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/theme"
 )
@@ -93,7 +94,7 @@ func TestMissingServerIsReportedOnceAndNotStartedAgain(t *testing.T) {
 		t.Errorf("notice = %q on later updates, want the message shown once", lt.m.notice)
 	}
 	// The status row keeps no slot for a counter that no server will fill.
-	if lt.m.statusView().warnSlot {
+	if lt.m.statusView().WarnSlot {
 		t.Error("the status row reserves the warning counter for a language with no server")
 	}
 }
@@ -313,7 +314,7 @@ func TestDiagnosticsMarkTheGutterAndHoverShowsThem(t *testing.T) {
 	}}}})
 
 	doc := lt.m.ed.Active()
-	pane := lt.m.lspGutter(lt.m.paneGeometry(lt.m.layout().focusedPane(), doc), doc)
+	pane := lt.m.lspGutter(lt.m.paneGeometry(lt.m.layout().FocusedPane(), doc), doc)
 	if mark, ok := pane.Gutter(0); ok {
 		t.Errorf("line 0 has a gutter mark %+v, want none", mark)
 	}
@@ -381,12 +382,12 @@ func TestStatusRowKeepsTheCounterSlotOnlyWhereAServerRuns(t *testing.T) {
 	lt := newDetectTest(t, port,
 		&lspTab{path: "/p/a.go", lines: []string{"package a"}},
 		&lspTab{path: "/p/notes.txt", lines: []string{"text"}})
-	if !lt.m.statusView().warnSlot {
+	if !lt.m.statusView().WarnSlot {
 		t.Error("no counter slot for a document open on a server")
 	}
 	lt.ed.active = 1
 	lt.settle(lt.touchCmd(), 3)
-	if lt.m.statusView().warnSlot {
+	if lt.m.statusView().WarnSlot {
 		t.Error("a counter slot for a plain text document")
 	}
 }
@@ -524,7 +525,7 @@ func TestStatusRowShowsTheServerState(t *testing.T) {
 	pill := func(tab int) string {
 		lt.ed.active = tab
 		lt.settle(lt.touchCmd(), 3)
-		return lt.m.statusView().lsp
+		return lt.m.statusView().LSP
 	}
 	if got := pill(0); got != "LSP" {
 		t.Errorf("a document open on its server: pill = %q, want LSP", got)
@@ -551,9 +552,9 @@ func TestStatusRowShowsTheServerState(t *testing.T) {
 		t.Fatalf("after the failure is forgotten: pill = %q, want LSP", got)
 	}
 	var found bool
-	for _, r := range statusRuns(100, lt.m.statusView()) {
-		if r.kind == hitStatusSegment && r.index == statusSegmentLSP {
-			found = strings.Contains(r.text, "LSP")
+	for _, r := range frame.StatusRuns(100, lt.m.statusView()) {
+		if r.Kind == hitStatusSegment && r.Index == statusSegmentLSP {
+			found = strings.Contains(r.Text, "LSP")
 		}
 	}
 	if !found {

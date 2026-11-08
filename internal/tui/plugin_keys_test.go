@@ -12,6 +12,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
@@ -1034,23 +1035,23 @@ func TestIdleEvents(t *testing.T) {
 // (S14-4).
 func TestStatusMessageSurvivesWideLeftItem(t *testing.T) {
 	const msg = "plugin input cleared"
-	wide := statusItem{id: "a", plugin: "p", text: strings.Repeat("x", 80)}
+	wide := statusItem{ID: "a", Plugin: "p", Text: strings.Repeat("x", 80)}
 	for _, w := range []int{80, 120, 200} {
-		sv := statusView{position: "1:1", message: msg, eol: "LF", encoding: "UTF-8", language: "Go", lines: 10, extra: []statusItem{wide}}
+		sv := statusView{Position: "1:1", Message: msg, EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10, Extra: []statusItem{wide}}
 		var text strings.Builder
-		for _, r := range statusRuns(w, sv) {
-			text.WriteString(r.text)
+		for _, r := range frame.StatusRuns(w, sv) {
+			text.WriteString(r.Text)
 		}
 		if !strings.Contains(text.String(), "plugin") {
 			t.Errorf("w=%d: the row %q lost the message", w, text.String())
 		}
 	}
 	t.Run("a short item keeps its place before the message", func(t *testing.T) {
-		sv := statusView{position: "1:1", message: msg, eol: "LF", encoding: "UTF-8", language: "Go", lines: 10,
-			extra: []statusItem{{id: "a", plugin: "p", text: "mode"}}}
+		sv := statusView{Position: "1:1", Message: msg, EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10,
+			Extra: []statusItem{{ID: "a", Plugin: "p", Text: "mode"}}}
 		var text strings.Builder
-		for _, r := range statusRuns(120, sv) {
-			text.WriteString(r.text)
+		for _, r := range frame.StatusRuns(120, sv) {
+			text.WriteString(r.Text)
 		}
 		if got := text.String(); !strings.Contains(got, " mode  "+msg) {
 			t.Fatalf("row %q", got)
@@ -1060,29 +1061,29 @@ func TestStatusMessageSurvivesWideLeftItem(t *testing.T) {
 
 func TestStatusItemsLayoutAndHit(t *testing.T) {
 	sv := func(items ...statusItem) statusView {
-		return statusView{position: "Ln 1, Col 1", message: "msg", eol: "LF", encoding: "UTF-8", language: "Go", lines: 10, extra: items}
+		return statusView{Position: "Ln 1, Col 1", Message: "msg", EOL: "LF", Encoding: "UTF-8", Language: "Go", Lines: 10, Extra: items}
 	}
 	find := func(l layout, text string) (run, bool) {
-		for _, r := range l.status {
-			if strings.Contains(r.text, text) {
+		for _, r := range l.Status {
+			if strings.Contains(r.Text, text) {
 				return r, true
 			}
 		}
 		return run{}, false
 	}
 	items := []statusItem{
-		{id: "mode", plugin: "p", text: "-- NORMAL --"},
-		{id: "clock", plugin: "p", text: "12:00", right: true, clickable: true},
-		{id: "note", plugin: "p", text: "note", clickable: true},
+		{ID: "mode", Plugin: "p", Text: "-- NORMAL --"},
+		{ID: "clock", Plugin: "p", Text: "12:00", Right: true, Clickable: true},
+		{ID: "note", Plugin: "p", Text: "note", Clickable: true},
 	}
-	l := computeLayout(100, 24, layoutInput{status: sv(items...)})
+	l := frame.ComputeLayout(100, 24, layoutInput{Status: sv(items...)})
 	for i, text := range []string{"-- NORMAL --", "12:00", "note"} {
 		r, ok := find(l, text)
 		if !ok {
-			t.Fatalf("run %q missing from %+v", text, l.status)
+			t.Fatalf("run %q missing from %+v", text, l.Status)
 		}
-		x := r.x + 1
-		got := l.hit(x, l.statusY)
+		x := r.X + 1
+		got := l.Hit(x, l.StatusY)
 		if (i == 0) != (got.Kind == hitNone) || (i > 0 && (got.Kind != hitStatusPlugin || got.Index != i)) {
 			t.Errorf("hit on %q = %+v", text, got)
 		}
@@ -1094,37 +1095,37 @@ func TestStatusItemsLayoutAndHit(t *testing.T) {
 	clock, _ := find(l, "12:00")
 	lang, _ := find(l, "Go")
 	hint, _ := find(l, paletteHelp)
-	if pos.x >= mode.x || mode.x >= msg.x || lang.x >= clock.x || clock.x >= hint.x {
-		t.Errorf("order wrong: pos %d mode %d msg %d | lang %d clock %d hint %d", pos.x, mode.x, msg.x, lang.x, clock.x, hint.x)
+	if pos.X >= mode.X || mode.X >= msg.X || lang.X >= clock.X || clock.X >= hint.X {
+		t.Errorf("order wrong: pos %d mode %d msg %d | lang %d clock %d hint %d", pos.X, mode.X, msg.X, lang.X, clock.X, hint.X)
 	}
 	// The built-in segments still hit as before.
-	if got := l.hit(lang.x, l.statusY); got.Kind != hitStatusSegment {
+	if got := l.Hit(lang.X, l.StatusY); got.Kind != hitStatusSegment {
 		t.Errorf("language hit = %+v", got)
 	}
-	if got := l.hit(hint.x, l.statusY); got.Kind != hitStatusPalette {
+	if got := l.Hit(hint.X, l.StatusY); got.Kind != hitStatusPalette {
 		t.Errorf("palette hit = %+v", got)
 	}
 
 	// A narrow row drops the right group from its end, the plugin items after the palette hint
 	// and before the language.
-	narrow := computeLayout(60, 24, layoutInput{status: sv(items...)})
+	narrow := frame.ComputeLayout(60, 24, layoutInput{Status: sv(items...)})
 	if _, ok := find(narrow, paletteHelp); ok {
 		if _, ok := find(narrow, "12:00"); !ok {
 			t.Error("the plugin item was dropped before the palette hint")
 		}
 	}
-	tiny := computeLayout(30, 24, layoutInput{status: sv(items...)})
+	tiny := frame.ComputeLayout(30, 24, layoutInput{Status: sv(items...)})
 	if _, ok := find(tiny, "12:00"); ok {
 		t.Error("the right item survived a row too narrow for it")
 	}
 	// Runs never overlap and stay in the row.
 	for _, lay := range []layout{l, narrow, tiny} {
 		end := 0
-		for _, r := range lay.status {
-			if r.x < end || r.x+r.w > lay.w {
-				t.Errorf("run %q at %d+%d overlaps or leaves the row (width %d)", r.text, r.x, r.w, lay.w)
+		for _, r := range lay.Status {
+			if r.X < end || r.X+r.W > lay.W {
+				t.Errorf("run %q at %d+%d overlaps or leaves the row (width %d)", r.Text, r.X, r.W, lay.W)
 			}
-			end = r.x + r.w
+			end = r.X + r.W
 		}
 	}
 }
@@ -1140,19 +1141,19 @@ func TestStatusItemsOfPlugins(t *testing.T) {
 	items := e.m.plugStatusItems()
 	var ids []string
 	for _, it := range items {
-		ids = append(ids, it.plugin+"/"+it.id)
+		ids = append(ids, it.Plugin+"/"+it.ID)
 	}
 	if want := []string{"p/high", "p/low", "q/q1"}; !slices.Equal(ids, want) {
 		t.Fatalf("items = %v, want %v (priority, then registration order)", ids, want)
 	}
-	if strings.Contains(items[0].text, "\n") || len([]rune(items[0].text)) > maxStatusItemCells {
-		t.Fatalf("text = %q (%d runes)", items[0].text, len([]rune(items[0].text)))
+	if strings.Contains(items[0].Text, "\n") || len([]rune(items[0].Text)) > maxStatusItemCells {
+		t.Fatalf("text = %q (%d runes)", items[0].Text, len([]rune(items[0].Text)))
 	}
 
 	// The active mode's label comes first.
 	e.mode(t, pluginapi.ModeInfo{Name: "normal", Status: "-- NORMAL --"})
 	items = e.m.plugStatusItems()
-	if items[0].text != "-- NORMAL --" || items[0].id != "mode:normal" {
+	if items[0].Text != "-- NORMAL --" || items[0].ID != "mode:normal" {
 		t.Fatalf("first item = %+v", items[0])
 	}
 
@@ -1165,12 +1166,12 @@ func TestStatusItemsOfPlugins(t *testing.T) {
 	h.SetStatusItems("p", []pluginapi.StatusItem{{ID: "high", Plugin: "p", Text: "go", Right: true, Clickable: true}})
 	l := e.m.layout()
 	var x int
-	for _, r := range l.status {
-		if r.kind == hitStatusPlugin {
-			x = r.x
+	for _, r := range l.Status {
+		if r.Kind == hitStatusPlugin {
+			x = r.X
 		}
 	}
-	e.m.Update(click(x, l.statusY, tea.MouseLeft))
+	e.m.Update(click(x, l.StatusY, tea.MouseLeft))
 	if !slices.Equal(e.rt.runs, []string{"p.__status_high"}) {
 		t.Fatalf("runs = %v, want the click command of the item", e.rt.runs)
 	}

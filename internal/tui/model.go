@@ -26,12 +26,14 @@ import (
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/find"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/internal/tui/tabstrip"
 	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 )
@@ -353,7 +355,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the notice band, so the caret has to be kept above it. A message the status row
 // shows whole, and the band staying while the user scrolls, do not count.
 func (m *Model) bandAppeared(notice, status string) bool {
-	return (m.notice != notice || m.ed.Status() != status) && len(m.layout().notice) > 0
+	return (m.notice != notice || m.ed.Status() != status) && len(m.layout().Notice) > 0
 }
 
 // update handles one message. While an overlay is open, key and mouse messages
@@ -431,7 +433,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		// The band is hit-tested before the message expires: once it is gone the
 		// click would land on the body cell that was under it.
-		onBand := m.layout().onNotice(msg.X, msg.Y)
+		onBand := m.layout().OnNotice(msg.X, msg.Y)
 		m.expireStatus()
 		m.chord = nil
 		if onBand {
@@ -1620,7 +1622,7 @@ func (m *Model) explorerAction(action string) (tea.Cmd, bool) {
 
 // explorerGeometry is the panel's place in the frame laid out as l.
 func (m *Model) explorerGeometry(l layout) expanel.Geometry {
-	return expanel.Geometry{Width: l.ex, Bottom: l.exBottom, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
+	return expanel.Geometry{Width: l.Ex, Bottom: l.ExBottom, Focused: m.explorerFocus, Marks: m.root.gitMarks, Icons: m.view.icons}
 }
 
 // handleClick routes a left press to the part of the frame under it, and a
@@ -1629,7 +1631,7 @@ func (m *Model) explorerGeometry(l layout) expanel.Geometry {
 // are dropped here.
 func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	mo := tea.Mouse(msg)
-	t := m.layout().hit(mo.X, mo.Y)
+	t := m.layout().Hit(mo.X, mo.Y)
 	if mo.Button == tea.MouseMiddle {
 		if t.Kind == hitTab || t.Kind == hitTabClose {
 			return m.requestClose(t.Index)
@@ -1716,11 +1718,11 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
 	case editorpane.HitScrollbarThumb:
 		m.drag = drag{active: true, thumb: true}
 	case editorpane.HitScrollbarTrack:
-		m.ed.ScrollTo(p.ScrollTopFor(m.layout().focusedPane().W, m.bodyRows(), hit.Row))
+		m.ed.ScrollTo(p.ScrollTopFor(m.layout().FocusedPane().W, m.bodyRows(), hit.Row))
 		m.drag = drag{active: true, thumb: true}
 	case editorpane.HitHScrollbar:
 		m.drag = drag{active: true, hbar: true}
-		m.panBar(hit.Col + m.layout().focusedPane().X)
+		m.panBar(hit.Col + m.layout().FocusedPane().X)
 	case editorpane.HitText, editorpane.HitGutter:
 		if hit.Fold && m.toggleFoldAt(hit.Pos.Line) {
 			return
@@ -1772,7 +1774,7 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 	if doc == nil {
 		return nil
 	}
-	fp := m.layout().focusedPane()
+	fp := m.layout().FocusedPane()
 	w, h := fp.W, fp.H
 	if h <= 0 || w <= 0 {
 		return nil
@@ -1802,7 +1804,7 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	mo := tea.Mouse(msg)
 	l := m.layout()
-	if mo.Y == l.stripY && mo.X >= l.editorX {
+	if mo.Y == l.StripY && mo.X >= l.EditorX {
 		// The tab row scrolls the strip one tab per notch.
 		switch mo.Button {
 		case tea.MouseWheelUp:
@@ -1812,7 +1814,7 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 		}
 		return nil
 	}
-	t := l.hit(mo.X, mo.Y)
+	t := l.Hit(mo.X, mo.Y)
 	switch t.Kind {
 	case hitExplorerRow, hitExplorerBody, hitExplorerTitleClose, hitExplorerTitleReload, hitExplorerGrip:
 		return m.explorerMouse(msg)
@@ -2004,7 +2006,7 @@ func (m *Model) bodyRows() int {
 // explorerBodyRows is the number of tree rows the explorer panel shows: the rows
 // between its title and its bottom border, as the panel counts them.
 func (m *Model) explorerBodyRows() int {
-	return max(m.layout().exBottom-explorerBodyTop, 0)
+	return max(m.layout().ExBottom-explorerBodyTop, 0)
 }
 
 // syncViewport tells the editor how big its pane is: the focused pane's text rows, and
@@ -2013,39 +2015,39 @@ func (m *Model) syncViewport() {
 	if m.width == 0 {
 		return
 	}
-	fp := m.layout().focusedPane()
-	m.ed.SetViewport(m.focusedBodyRows(), fp.textW)
+	fp := m.layout().FocusedPane()
+	m.ed.SetViewport(m.focusedBodyRows(), fp.TextW)
 }
 
 // layoutInput gathers the state the geometry depends on.
 func (m *Model) layoutInput() layoutInput {
 	split, leaves := m.splitInput()
 	in := layoutInput{
-		explorerFocus:    m.explorerFocus,
-		explorerOverride: m.explorerOverride,
-		split:            split,
-		leaves:           leaves,
-		tabs:             m.stripTabs(),
-		tabFirst:         m.tabFirst,
-		welcome:          m.welcomeVisible(),
-		recents:          m.recents,
-		doorKeys:         m.welcomeDoorKeys(),
-		status:           m.statusView(),
-		hideMenuBar:      m.hideMenuBar,
-		hideStatus:       m.statusHidden(),
-		hideLineNumbers:  m.hideLineNumbers,
-		dockOpen:         m.dock.open,
-		maximized:        m.splits.maximized,
+		ExplorerFocus:    m.explorerFocus,
+		ExplorerOverride: m.explorerOverride,
+		Split:            split,
+		Leaves:           leaves,
+		Tabs:             m.stripTabs(),
+		TabFirst:         m.tabFirst,
+		Welcome:          m.welcomeVisible(),
+		Recents:          m.recents,
+		DoorKeys:         m.welcomeDoorKeys(),
+		Status:           m.statusView(),
+		HideMenuBar:      m.hideMenuBar,
+		HideStatus:       m.statusHidden(),
+		HideLineNumbers:  m.hideLineNumbers,
+		DockOpen:         m.dock.open,
+		Maximized:        m.splits.maximized,
 	}
 	if m.findOpen() {
-		in.findRows = m.findBar.Rows()
+		in.FindRows = m.findBar.Rows()
 	}
 	if doc := m.ed.Active(); doc != nil {
-		in.lines = displayLines(doc)
+		in.Lines = displayLines(doc)
 	}
 	if m.explorerOpen && m.tree != nil {
-		in.explorerOpen = true
-		in.explorerRows = len(m.tree.Rows()) - m.tree.ScrollOffset()
+		in.ExplorerOpen = true
+		in.ExplorerRows = len(m.tree.Rows()) - m.tree.ScrollOffset()
 	}
 	m.viewLayout(&in)
 	return in
@@ -2054,7 +2056,7 @@ func (m *Model) layoutInput() layoutInput {
 // layout is the geometry of the current frame. Painting and mouse hit testing
 // both read it.
 func (m *Model) layout() layout {
-	return computeLayout(m.width, m.height, m.layoutInput())
+	return frame.ComputeLayout(m.width, m.height, m.layoutInput())
 }
 
 // statusHidden reports whether the status row gives way to a suggestion list or to
@@ -2074,27 +2076,27 @@ func (m *Model) statusHidden() bool {
 // on every frame, so it does no lexer or text work: the encoding comes from the
 // document and the language is memoized by file name.
 func (m *Model) statusView() statusView {
-	s := statusView{message: m.ed.Status(), eol: "LF", encoding: "UTF-8", language: "Text"}
+	s := statusView{Message: m.ed.Status(), EOL: "LF", Encoding: "UTF-8", Language: "Text"}
 	if m.notice != "" {
-		s.message = m.notice
+		s.Message = m.notice
 	}
-	s.warnSlot, s.warnings = m.lspShowsWarnings(), m.lspWarnings()
-	s.lsp = m.lspPill()
+	s.WarnSlot, s.Warnings = m.lspShowsWarnings(), m.lspWarnings()
+	s.LSP = m.lspPill()
 	if doc := m.ed.Active(); doc != nil {
 		c := doc.Cursor()
-		s.position = "Ln " + strconv.Itoa(c.Line+1) + ", Col " + strconv.Itoa(c.Col+1)
-		s.lines = displayLines(doc)
-		s.large = largeLabel(doc)
-		s.eol = doc.LineEnding()
-		s.encoding = doc.Encoding()
-		s.language = m.languageFor(doc.Name())
+		s.Position = "Ln " + strconv.Itoa(c.Line+1) + ", Col " + strconv.Itoa(c.Col+1)
+		s.Lines = displayLines(doc)
+		s.Large = largeLabel(doc)
+		s.EOL = doc.LineEnding()
+		s.Encoding = doc.Encoding()
+		s.Language = m.languageFor(doc.Name())
 		if ro, ok := doc.(interface{ ReadOnly() bool }); ok {
-			s.readOnly = ro.ReadOnly()
+			s.ReadOnly = ro.ReadOnly()
 		}
 	}
 	m.viewStatus(&s)
-	s.paletteHint = m.paletteHint()
-	s.extra = m.plugStatusItems()
+	s.PaletteHint = m.paletteHint()
+	s.Extra = m.plugStatusItems()
 	return s
 }
 
@@ -2153,7 +2155,7 @@ func (m *Model) View() tea.View {
 func (m *Model) paint() *grid.Grid {
 	g := grid.New(m.width, m.height)
 	l := m.layout()
-	if l.gated {
+	if l.Gated {
 		g.Put(0, 0, g.Width(), gateText, grid.Style{})
 		return g
 	}
@@ -2164,8 +2166,8 @@ func (m *Model) paint() *grid.Grid {
 	m.paintEditor(g, l)
 	m.paintDropZone(g)
 	m.paintDock(g, l)
-	drawTabStrip(g, m.styles, l.editorX, l.stripY, l.strip)
-	if l.explorerOpen {
+	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip)
+	if l.ExplorerOpen {
 		m.explorerPanel.Draw(g, m.explorerGeometry(l))
 	}
 	m.paintStatus(g, l)
@@ -2185,7 +2187,7 @@ func (m *Model) paint() *grid.Grid {
 // are the find bar's matches. While the bar is open it takes the input and the caret,
 // so the paint is the only caller that searches the matches, once per frame.
 func (m *Model) pane(doc Document) editorpane.Pane {
-	return m.paneFor(splitPane{focused: true, top: doc.Top()}, doc)
+	return m.paneFor(splitPane{Focused: true, Top: doc.Top()}, doc)
 }
 
 // paintEditor paints the editor panes into the body, to the right of the explorer.
@@ -2224,10 +2226,10 @@ func (m *Model) caret() (x, y int, ok bool) {
 		return 0, 0, false
 	}
 	l := m.layout()
-	if l.gated {
+	if l.Gated {
 		return 0, 0, false
 	}
-	fp := l.focusedPane()
+	fp := l.FocusedPane()
 	cx, cy, ok := m.paneFor(fp, doc).Caret(fp.W, fp.H)
 	if !ok {
 		return 0, 0, false
@@ -2303,23 +2305,23 @@ func (m *Model) popOverlay() {
 // paintStatus fills the status row and writes its segments. A hidden status row
 // paints nothing.
 func (m *Model) paintStatus(g *grid.Grid, l layout) {
-	if !l.statusOn {
+	if !l.StatusOn {
 		return
 	}
 	bar := style.Cell(m.styles.Status)
 	palette := style.Cell(m.styles.Accent)
-	g.Fill(0, g.Width(), l.statusY, bar)
-	for _, r := range l.status {
+	g.Fill(0, g.Width(), l.StatusY, bar)
+	for _, r := range l.Status {
 		st := bar
-		if r.kind == hitStatusPalette {
+		if r.Kind == hitStatusPalette {
 			st = palette
 		}
-		g.Put(r.x, l.statusY, g.Width(), r.text, st)
+		g.Put(r.X, l.StatusY, g.Width(), r.Text, st)
 	}
-	for i, text := range l.notice {
-		y := l.noticeY + i
-		g.Fill(l.noticeX, g.Width(), y, bar)
-		g.Put(l.noticeX+space.PadX, y, g.Width(), text, bar)
+	for i, text := range l.Notice {
+		y := l.NoticeY + i
+		g.Fill(l.NoticeX, g.Width(), y, bar)
+		g.Put(l.NoticeX+space.PadX, y, g.Width(), text, bar)
 	}
 }
 
@@ -2362,14 +2364,14 @@ func (m *Model) activeTab() int {
 
 // scrollTabs moves the tab strip by delta tabs: negative scrolls left.
 func (m *Model) scrollTabs(delta int) {
-	m.setTabFirst(m.layout().strip.first + delta)
+	m.setTabFirst(m.layout().Strip.First + delta)
 }
 
 // setTabFirst sets the scroll position of the tab strip. The stored value is the
 // clamped one, so a scroll back starts from the end the strip shows.
 func (m *Model) setTabFirst(first int) {
 	m.tabFirst = first
-	m.tabFirst = m.layout().strip.first
+	m.tabFirst = m.layout().Strip.First
 }
 
 // revealActiveTab scrolls the tab strip only as far as needed to show the active
@@ -2380,7 +2382,7 @@ func (m *Model) revealActiveTab() {
 		return
 	}
 	l := m.layout()
-	m.setTabFirst(revealedFirst(m.stripTabs(), l.editorX, l.w, l.strip.first, i))
+	m.setTabFirst(frame.RevealedFirst(m.stripTabs(), l.EditorX, l.W, l.Strip.First, i))
 }
 
 // next says what a file action does once a save or a discard is done. The

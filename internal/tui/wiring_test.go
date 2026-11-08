@@ -47,12 +47,12 @@ func TestViewPaintsTheEditorPaneRightOfTheExplorer(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(3), 80, 24)
 	press(m, ctrl('b'))
 	l := m.layout()
-	if l.editorX == 0 {
+	if l.EditorX == 0 {
 		t.Fatal("the explorer takes no columns at 80 wide")
 	}
 	rows := strings.Split(ansi.Strip(m.View().Content), "\n")
-	if got := ansi.Cut(rows[2], l.editorX, l.w); !strings.HasPrefix(got, "  1 │ hello") {
-		t.Errorf("row 2 from x0 %d = %q, want the text", l.editorX, got)
+	if got := ansi.Cut(rows[2], l.EditorX, l.W); !strings.HasPrefix(got, "  1 │ hello") {
+		t.Errorf("row 2 from x0 %d = %q, want the text", l.EditorX, got)
 	}
 }
 
@@ -65,8 +65,8 @@ func TestViewCursorIsTheEditorCaret(t *testing.T) {
 		t.Fatal("no terminal cursor with the editor focused")
 	}
 	l := m.layout()
-	if want := l.textX + 3; v.Cursor.X != want || v.Cursor.Y != l.bodyTop+1 {
-		t.Errorf("cursor at (%d, %d), want (%d, %d)", v.Cursor.X, v.Cursor.Y, want, l.bodyTop+1)
+	if want := l.TextX + 3; v.Cursor.X != want || v.Cursor.Y != l.BodyTop+1 {
+		t.Errorf("cursor at (%d, %d), want (%d, %d)", v.Cursor.X, v.Cursor.Y, want, l.BodyTop+1)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestClickPlacesTheCaret(t *testing.T) {
 	ed := newFakeEditor("hello", "world")
 	m := newTestModel(t, ed, nil, 40, 15)
 	l := m.layout()
-	m.Update(click(l.textX+2, l.bodyTop+1, tea.MouseLeft))
+	m.Update(click(l.TextX+2, l.BodyTop+1, tea.MouseLeft))
 	if want := (buffer.Pos{Line: 1, Col: 2}); ed.doc.cursor != want {
 		t.Fatalf("caret = %+v, want %+v", ed.doc.cursor, want)
 	}
@@ -92,7 +92,7 @@ func TestClickOnGutterPlacesTheCaretAtTheLineStart(t *testing.T) {
 	ed := newFakeEditor("hello", "world")
 	m := newTestModel(t, ed, nil, 40, 15)
 	l := m.layout()
-	m.Update(click(1, l.bodyTop+1, tea.MouseLeft))
+	m.Update(click(1, l.BodyTop+1, tea.MouseLeft))
 	if want := (buffer.Pos{Line: 1, Col: 0}); ed.doc.cursor != want {
 		t.Fatalf("caret = %+v, want %+v", ed.doc.cursor, want)
 	}
@@ -104,9 +104,9 @@ func TestDoubleClickSelectsTheWord(t *testing.T) {
 	m := New(Deps{Editor: ed, Keys: testKeys(), Clock: func() time.Time { return now }})
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 15})
 	l := m.layout()
-	m.Update(click(l.textX+1, l.bodyTop, tea.MouseLeft))
+	m.Update(click(l.TextX+1, l.BodyTop, tea.MouseLeft))
 	now = now.Add(ms(100))
-	m.Update(click(l.textX+1, l.bodyTop, tea.MouseLeft))
+	m.Update(click(l.TextX+1, l.BodyTop, tea.MouseLeft))
 	if len(ed.actions) != 1 || ed.actions[0] != "select_word" {
 		t.Fatalf("actions after the double press = %v, want select_word", ed.actions)
 	}
@@ -116,13 +116,13 @@ func TestDragExtendsTheSelectionToTheCell(t *testing.T) {
 	ed := newFakeEditor("hello", "world")
 	m := newTestModel(t, ed, nil, 40, 15)
 	l := m.layout()
-	m.Update(click(l.textX, l.bodyTop, tea.MouseLeft))
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.textX + 3, Y: l.bodyTop + 1, Button: tea.MouseLeft}))
+	m.Update(click(l.TextX, l.BodyTop, tea.MouseLeft))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.TextX + 3, Y: l.BodyTop + 1, Button: tea.MouseLeft}))
 	if len(ed.extends) != 1 || ed.extends[0] != (buffer.Pos{Line: 1, Col: 3}) {
 		t.Fatalf("drag ends = %+v, want one end at line 1 col 3", ed.extends)
 	}
-	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: l.textX + 3, Y: l.bodyTop + 1, Button: tea.MouseLeft}))
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.textX + 4, Y: l.bodyTop + 1, Button: tea.MouseLeft}))
+	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: l.TextX + 3, Y: l.BodyTop + 1, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: l.TextX + 4, Y: l.BodyTop + 1, Button: tea.MouseLeft}))
 	if len(ed.extends) != 1 {
 		t.Fatal("a motion after the release still extended the selection")
 	}
@@ -133,7 +133,7 @@ func TestWheelOverEditorScrollsTheViewportNotTheCaret(t *testing.T) {
 	ed.doc.cursor = buffer.Pos{Line: 0, Col: 0}
 	m := newTestModel(t, ed, nil, 40, 15)
 	l := m.layout()
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.textX + 1, Y: l.bodyTop, Button: tea.MouseWheelDown}))
+	m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.TextX + 1, Y: l.BodyTop, Button: tea.MouseWheelDown}))
 	if ed.doc.top != wheelRows {
 		t.Fatalf("viewport top = %d, want %d", ed.doc.top, wheelRows)
 	}
@@ -146,13 +146,13 @@ func TestScrollbarTrackPressMovesTheViewport(t *testing.T) {
 	ed := newFakeEditor(numberedLines(100)...)
 	m := newTestModel(t, ed, nil, 40, 15)
 	l := m.layout()
-	if !l.scrollbar {
+	if !l.Scrollbar {
 		t.Fatal("a 100-line document has no scrollbar at 15 rows")
 	}
 	row := 6
-	m.Update(click(l.w-1, l.bodyTop+row, tea.MouseLeft))
+	m.Update(click(l.W-1, l.BodyTop+row, tea.MouseLeft))
 	p := m.pane(m.ed.Active())
-	if want := p.ScrollTopFor(l.focusedPane().W, m.bodyRows(), row); ed.doc.top != want || want == 0 {
+	if want := p.ScrollTopFor(l.FocusedPane().W, m.bodyRows(), row); ed.doc.top != want || want == 0 {
 		t.Fatalf("viewport top = %d, want %d (non-zero)", ed.doc.top, want)
 	}
 }
@@ -347,8 +347,8 @@ func TestF10OpensTheFileMenuAndEscapeCloses(t *testing.T) {
 func TestClickEditLabelThenEnterRunsUndo(t *testing.T) {
 	ed := newFakeEditor("hello")
 	m := newTestModel(t, ed, nil, 60, 20)
-	edit := m.layout().menuRuns[1]
-	m.Update(click(edit.x, 0, tea.MouseLeft))
+	edit := m.layout().MenuRuns[1]
+	m.Update(click(edit.X, 0, tea.MouseLeft))
 	if m.menu.Title() != "Edit" {
 		t.Fatalf("menu title = %q after the Edit click, want Edit", m.menu.Title())
 	}

@@ -33,10 +33,10 @@ func (m *Model) rowWindow(line, col int) (starts []int, tall bool) {
 		return nil, false
 	}
 	l := m.layout()
-	if l.gated {
+	if l.Gated {
 		return nil, false
 	}
-	fp := l.focusedPane()
+	fp := l.FocusedPane()
 	return m.paneGeometry(fp, doc).RowWindow(fp.W, fp.H, line, col)
 }
 
@@ -48,10 +48,10 @@ func (m *Model) rowStarts(line int) []int {
 		return nil
 	}
 	l := m.layout()
-	if l.gated {
+	if l.Gated {
 		return nil
 	}
-	fp := l.focusedPane()
+	fp := l.FocusedPane()
 	return m.paneGeometry(fp, doc).RowStarts(fp.W, fp.H, line)
 }
 

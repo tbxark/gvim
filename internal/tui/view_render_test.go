@@ -17,7 +17,7 @@ func textRow(t *testing.T, m *Model, n, width int) string {
 	l := m.layout()
 	var b strings.Builder
 	for i := range width {
-		b.WriteString(viewCell(t, m, l.textX+i, l.bodyTop+n).Text)
+		b.WriteString(viewCell(t, m, l.TextX+i, l.BodyTop+n).Text)
 	}
 	return strings.TrimRight(b.String(), " ")
 }
@@ -27,8 +27,8 @@ func gutterRow(t *testing.T, m *Model, n int) string {
 	t.Helper()
 	l := m.layout()
 	var b strings.Builder
-	for x := l.panes[0].X; x < l.textX; x++ {
-		b.WriteString(viewCell(t, m, x, l.bodyTop+n).Text)
+	for x := l.Panes[0].X; x < l.TextX; x++ {
+		b.WriteString(viewCell(t, m, x, l.BodyTop+n).Text)
 	}
 	return strings.TrimRight(b.String(), " ")
 }
@@ -99,7 +99,7 @@ func TestRainbowIndentationColorsTheGuideByLevel(t *testing.T) {
 	o.IndentationGuideMode, o.RainbowIndentation = "all", true
 	m, _ := viewModel(t, o, "a {\n    b {\n        c\n", 40, 10)
 	l := m.layout()
-	at := func(col int) any { return viewCell(t, m, l.textX+col, l.bodyTop+2).Style.FG }
+	at := func(col int) any { return viewCell(t, m, l.TextX+col, l.BodyTop+2).Style.FG }
 	if a, b := at(0), at(4); a == nil || b == nil || a == b {
 		t.Errorf("guide colors = %v and %v, want two different colors", a, b)
 	}
@@ -177,7 +177,7 @@ func TestBracketHighlightOptions(t *testing.T) {
 			o.HighlightMatchingBrackets, o.RainbowBrackets = tc.highlight, tc.rainbow
 			m, ed := viewModel(t, o, "f(a)\n", 40, 10)
 			ed.SetCursor(buffer.Pos{Col: 1}, false)
-			c := viewCell(t, m, m.layout().textX+1, m.layout().bodyTop)
+			c := viewCell(t, m, m.layout().TextX+1, m.layout().BodyTop)
 			if c.Text != "(" || c.Style.FG != tc.wantFG(m) || c.Style.Underline != tc.underline {
 				t.Errorf("bracket cell = %q fg %v underline %v, want fg %v underline %v", c.Text, c.Style.FG, c.Style.Underline, tc.wantFG(m), tc.underline)
 			}
@@ -197,10 +197,10 @@ func TestHangingIndentKeepsTheFrameCaretOnTheText(t *testing.T) {
 	if got := viewCell(t, m, x, y).Text; got != "e" {
 		t.Errorf("the cell under the caret is %q, want the e of eleven", got)
 	}
-	if y <= m.layout().bodyTop {
+	if y <= m.layout().BodyTop {
 		t.Fatalf("setup: the caret is on the first row (y %d)", y)
 	}
-	if got := viewCell(t, m, m.layout().textX+5, y).Text; got != " " {
+	if got := viewCell(t, m, m.layout().TextX+5, y).Text; got != " " {
 		t.Errorf("the hanging indent holds %q, want blanks", got)
 	}
 }
@@ -238,7 +238,7 @@ func TestTabsDisplayAtTheLanguageTabSize(t *testing.T) {
 				press(m, typed(tc.prompt))
 				settle(t, m, press(m, special(tea.KeyEnter)))
 			}
-			x, y := m.layout().textX, m.layout().bodyTop
+			x, y := m.layout().TextX, m.layout().BodyTop
 			if got := viewCell(t, m, x+tc.wantX, y).Text; got != "x" {
 				t.Errorf("cell at +%d is %q, want x", tc.wantX, got)
 			}

@@ -101,7 +101,7 @@ func TestNewTabFocusesTheEditor(t *testing.T) {
 	t.Run("plus button from the explorer", func(t *testing.T) {
 		t.Parallel()
 		m, ed, _ := newExplorerModel(t, &fakeOps{}, "alpha.txt")
-		m.Update(click(plusColumn(m), m.layout().stripY, tea.MouseLeft))
+		m.Update(click(plusColumn(m), m.layout().StripY, tea.MouseLeft))
 		chooseRow(t, m, "New File")
 		if !slices.Contains(ed.actions, editor.Action("new")) {
 			t.Fatalf("the + button ran %v, want new", ed.actions)

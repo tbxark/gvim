@@ -33,7 +33,7 @@ func TestScrollbarThumbDragReachesTheEndWithTheHorizontalBarShowing(t *testing.T
 	m, ed := viewModel(t, DefaultViewOptions(), wideDoc(lines, 200), 80, 40)
 	runAction(t, m, "toggle_line_wrap")
 	l := m.layout()
-	fp := l.focusedPane()
+	fp := l.FocusedPane()
 	body := m.paneGeometry(fp, m.ed.Active()).BodyRows(fp.W, fp.H)
 	if body != fp.H-1 {
 		t.Fatalf("setup: %d text rows in a %d row pane, want the horizontal bar to take one", body, fp.H)
@@ -66,7 +66,7 @@ func TestScrollbarThumbDragToTheLastBodyRowReachesTheEnd(t *testing.T) {
 	const lines = 2695
 	m, ed := viewModel(t, DefaultViewOptions(), wideDoc(lines, 300), 80, 24)
 	runAction(t, m, "toggle_line_wrap")
-	fp := m.layout().focusedPane()
+	fp := m.layout().FocusedPane()
 	if body := m.bodyRows(); body != fp.H-1 {
 		t.Fatalf("setup: %d text rows in a %d row pane, want the horizontal bar to take one", body, fp.H)
 	}
@@ -90,7 +90,7 @@ func TestScrollbarThumbDragToTheLastBodyRowReachesTheEnd(t *testing.T) {
 func TestHorizontalScrollbarClickAndDragPanTheView(t *testing.T) {
 	m, ed := viewModel(t, DefaultViewOptions(), wideDoc(30, 300), 80, 12)
 	runAction(t, m, "toggle_line_wrap")
-	fp := m.layout().focusedPane()
+	fp := m.layout().FocusedPane()
 	pane := m.paneGeometry(fp, m.ed.Active())
 	_, most := pane.HScroll(fp.W, fp.H)
 	if most <= 0 {
@@ -98,7 +98,7 @@ func TestHorizontalScrollbarClickAndDragPanTheView(t *testing.T) {
 	}
 	barY := fp.Y + fp.H - 1
 	left := func() int {
-		l, _ := m.paneGeometry(m.layout().focusedPane(), m.ed.Active()).HScroll(fp.W, fp.H)
+		l, _ := m.paneGeometry(m.layout().FocusedPane(), m.ed.Active()).HScroll(fp.W, fp.H)
 		return l
 	}
 	caretBefore := ed.Active().Cursor

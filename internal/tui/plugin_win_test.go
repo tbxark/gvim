@@ -10,6 +10,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/fold"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
 )
@@ -210,21 +211,21 @@ func TestSplitWindowPlacement(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m, _ := newWinTabs(t, 1, 5)
-			band := m.layout().panes[0]
+			band := m.layout().Panes[0]
 			id, err := m.plug.host.SplitWindow(1, tc.opts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			root := m.splits.root
-			created := root.b
+			root := m.splits.Root
+			created := root.B
 			if tc.newFirst {
-				created = root.a
+				created = root.A
 			}
-			if root.dir != tc.dir || root.ratio != tc.wantRatio || m.splitByID(uint64(id)) != created {
-				t.Fatalf("root dir %v ratio %d new leaf id %d (want %d); want dir %v ratio %d", root.dir, root.ratio, created.id, id, tc.dir, tc.wantRatio)
+			if root.Dir != tc.dir || root.Ratio != tc.wantRatio || m.splitByID(uint64(id)) != created {
+				t.Fatalf("root dir %v ratio %d new leaf id %d (want %d); want dir %v ratio %d", root.Dir, root.Ratio, created.ID, id, tc.dir, tc.wantRatio)
 			}
 			// The share of the new window is what the geometry gives it.
-			panes := m.layout().panes
+			panes := m.layout().Panes
 			extent := func(p splitPane) int {
 				if tc.dir == stacked {
 					return p.H
@@ -235,7 +236,7 @@ func TestSplitWindowPlacement(t *testing.T) {
 			if tc.dir == stacked {
 				total = band.H
 			}
-			first, second := splitSpan(total, tc.wantRatio)
+			first, second := split.Span(total, tc.wantRatio)
 			if got := []int{extent(panes[0]), extent(panes[1])}; got[0] != first || got[1] != second {
 				t.Fatalf("pane extents = %v, want [%d %d]", got, first, second)
 			}
@@ -476,7 +477,7 @@ func TestEqualizeAndWindowsAlong(t *testing.T) {
 	if err := h.Equalize(); err != nil {
 		t.Fatal(err)
 	}
-	panes := m.layout().panes
+	panes := m.layout().Panes
 	if m.splits.maximized || len(panes) != 3 {
 		t.Fatalf("maximized = %v, %d panes", m.splits.maximized, len(panes))
 	}
@@ -487,8 +488,8 @@ func TestEqualizeAndWindowsAlong(t *testing.T) {
 	}
 
 	leaf := func() *splitNode { return &splitNode{} }
-	row := &splitNode{dir: sideBySide, a: leaf(), b: &splitNode{dir: sideBySide, a: leaf(), b: leaf()}}
-	column := &splitNode{dir: stacked, a: leaf(), b: leaf()}
+	row := &splitNode{Dir: sideBySide, A: leaf(), B: &splitNode{Dir: sideBySide, A: leaf(), B: leaf()}}
+	column := &splitNode{Dir: stacked, A: leaf(), B: leaf()}
 	tests := []struct {
 		name string
 		n    *splitNode
@@ -499,8 +500,8 @@ func TestEqualizeAndWindowsAlong(t *testing.T) {
 		{"a row along the row", row, sideBySide, 3},
 		{"a column along the row", column, sideBySide, 1},
 		{"a column along the column", column, stacked, 2},
-		{"a row inside a column along the column", &splitNode{dir: stacked, a: row, b: leaf()}, stacked, 2},
-		{"a row inside a column along the row", &splitNode{dir: stacked, a: row, b: leaf()}, sideBySide, 3},
+		{"a row inside a column along the column", &splitNode{Dir: stacked, A: row, B: leaf()}, stacked, 2},
+		{"a row inside a column along the row", &splitNode{Dir: stacked, A: row, B: leaf()}, sideBySide, 3},
 	}
 	for _, tc := range tests {
 		if got := windowsAlong(tc.n, tc.dir); got != tc.want {
@@ -550,13 +551,13 @@ func TestWindowGeometry(t *testing.T) {
 	m, f := newWinTabs(t, 1, 100)
 	h := m.plug.host
 	l := m.layout()
-	p := l.panes[0]
+	p := l.Panes[0]
 	w := winInfo(t, m, 1)
-	if w.X != p.textX || w.Y != p.Y || w.Width != p.textW-1 || w.Height != p.H || w.TopLine != 0 || w.LeftCol != 0 {
+	if w.X != p.TextX || w.Y != p.Y || w.Width != p.TextW-1 || w.Height != p.H || w.TopLine != 0 || w.LeftCol != 0 {
 		t.Fatalf("window = %+v, pane = %+v", w, p)
 	}
-	if w.Width != 80-p.gutter-1 {
-		t.Fatalf("text width %d, want the pane less its gutter %d and the scrollbar column", w.Width, p.gutter)
+	if w.Width != 80-p.Gutter-1 {
+		t.Fatalf("text width %d, want the pane less its gutter %d and the scrollbar column", w.Width, p.Gutter)
 	}
 	f.docs[0].top = 7
 	if got := winInfo(t, m, 1).TopLine; got != 7 {
@@ -571,8 +572,8 @@ func TestWindowGeometry(t *testing.T) {
 	if a.X+a.Width >= b.X || a.Y != b.Y || a.TopLine != 20 || b.TopLine != 0 || !a.Active || b.Active {
 		t.Fatalf("windows = %+v and %+v", a, b)
 	}
-	panes := m.layout().panes
-	if a.Width != panes[0].textW-1 || b.X != panes[1].textX {
+	panes := m.layout().Panes
+	if a.Width != panes[0].TextW-1 || b.X != panes[1].TextX {
 		t.Fatalf("windows %+v %+v disagree with the panes %+v %+v", a, b, panes[0], panes[1])
 	}
 }
@@ -583,7 +584,7 @@ func TestWindowLeftColFollowsTheHorizontalScroll(t *testing.T) {
 	f.docs[0].lines[0] = strings.Repeat("0123456789", 20)
 	f.docs[0].cursor = buffer.Pos{Col: 150}
 	l := m.layout()
-	p := l.panes[0]
+	p := l.Panes[0]
 	w := winInfo(t, m, 1)
 	left, _ := m.paneGeometry(p, m.ed.Active()).HScroll(p.W, p.H)
 	if left == 0 || w.LeftCol != left {
@@ -685,13 +686,13 @@ func TestVisibleRowsMatchPainterRows(t *testing.T) {
 				t.Fatalf("VisibleRows = %v, %v", rows, err)
 			}
 			l := m.layout()
-			p := l.panes[0]
+			p := l.Panes[0]
 			doc := m.paneDoc(p)
 			pane := m.paneFor(p, doc)
 			g := pane.Render(p.W, p.H)
 			for y, r := range rows {
 				var painted strings.Builder
-				for x := p.gutter; x < p.W-1; x++ {
+				for x := p.Gutter; x < p.W-1; x++ {
 					painted.WriteString(g.At(x, y).Text)
 				}
 				text := strings.TrimRight(tc.lines[r.Line][r.ColFrom:r.ColTo], " ")
@@ -699,7 +700,7 @@ func TestVisibleRowsMatchPainterRows(t *testing.T) {
 					t.Errorf("row %d (line %d [%d,%d)) is painted as %q", y, r.Line, r.ColFrom, r.ColTo, got)
 				}
 				// The hit map agrees: the first cell of the row is the start of the span.
-				if hit := pane.PosAt(p.W, p.H, p.gutter, y); hit.Line != r.Line || hit.Col != r.ColFrom {
+				if hit := pane.PosAt(p.W, p.H, p.Gutter, y); hit.Line != r.Line || hit.Col != r.ColFrom {
 					t.Errorf("row %d: the hit map says %+v, the list says line %d col %d", y, hit, r.Line, r.ColFrom)
 				}
 			}

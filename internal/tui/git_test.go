@@ -100,7 +100,7 @@ func TestGitStatusErrorIsANoticeAndClearsMarks(t *testing.T) {
 	if len(m.root.gitMarks) != 0 {
 		t.Errorf("marks kept after a failed status: %v", m.root.gitMarks)
 	}
-	if got := m.statusView().message; got != "git status: corrupt index" {
+	if got := m.statusView().Message; got != "git status: corrupt index" {
 		t.Errorf("status message = %q, want the git error", got)
 	}
 }

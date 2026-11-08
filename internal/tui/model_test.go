@@ -214,7 +214,7 @@ func TestStartupNoticeShowsInTheStatusRow(t *testing.T) {
 	})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	g := m.paint()
-	y := m.layout().statusY
+	y := m.layout().StatusY
 	var row strings.Builder
 	for x := range g.Width() {
 		row.WriteString(g.At(x, y).Text)
@@ -368,8 +368,8 @@ func TestWheelOverExplorerScrollsTheTree(t *testing.T) {
 	press(m, ctrl('b'))
 	l := m.layout()
 
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 2, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 2, Y: l.bodyTop + 1, Button: tea.MouseWheelUp}))
+	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 2, Y: l.BodyTop + 1, Button: tea.MouseWheelDown}))
+	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 2, Y: l.BodyTop + 1, Button: tea.MouseWheelUp}))
 	if len(tree.scrolls) != 2 || tree.scrolls[0] != wheelRows || tree.scrolls[1] != -wheelRows {
 		t.Fatalf("scrolls = %v, want [%d %d]", tree.scrolls, wheelRows, -wheelRows)
 	}
@@ -380,7 +380,7 @@ func TestWheelOverEditorDoesNotScrollTheTree(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello"), tree, 80, 24)
 	press(m, ctrl('b'))
 	l := m.layout()
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.textX + 1, Y: l.bodyTop, Button: tea.MouseWheelDown}))
+	m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.TextX + 1, Y: l.BodyTop, Button: tea.MouseWheelDown}))
 	if len(tree.scrolls) != 0 {
 		t.Fatalf("editor wheel scrolled the tree: %v", tree.scrolls)
 	}
@@ -390,15 +390,15 @@ func TestClickOnCloseButtonHidesExplorerOnlyForLeftButton(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(3), 80, 24)
 	press(m, ctrl('b'))
 	l := m.layout()
-	if l.exCloseX < 0 {
+	if l.ExCloseX < 0 {
 		t.Fatal("the close button is not drawn at 80 columns")
 	}
 
-	m.Update(click(l.exCloseX, 1, tea.MouseRight))
+	m.Update(click(l.ExCloseX, 1, tea.MouseRight))
 	if !m.explorerOpen {
 		t.Fatal("a right press closed the explorer")
 	}
-	_, cmd := m.Update(click(l.exCloseX, 1, tea.MouseLeft))
+	_, cmd := m.Update(click(l.ExCloseX, 1, tea.MouseLeft))
 	drain(t, m, cmd)
 	if m.explorerOpen || m.explorerFocus {
 		t.Fatalf("left press on × left the panel open %v focused %v", m.explorerOpen, m.explorerFocus)
@@ -410,7 +410,7 @@ func TestClickOnExplorerRowGivesFocusToExplorer(t *testing.T) {
 	press(m, ctrl('b'))
 	press(m, ctrl('e')) // focus the editor
 	l := m.layout()
-	m.Update(click(3, l.bodyTop+1, tea.MouseLeft))
+	m.Update(click(3, l.BodyTop+1, tea.MouseLeft))
 	if !m.explorerFocus {
 		t.Fatal("a press on a row did not focus the explorer")
 	}
@@ -420,7 +420,7 @@ func TestClickInEditorGivesFocusToEditor(t *testing.T) {
 	m := newTestModel(t, newFakeEditor("hello"), newFakeTree(5), 80, 24)
 	press(m, ctrl('b'))
 	l := m.layout()
-	m.Update(click(l.textX, l.bodyTop, tea.MouseLeft))
+	m.Update(click(l.TextX, l.BodyTop, tea.MouseLeft))
 	if m.explorerFocus {
 		t.Fatal("a press in the editor left the explorer focused")
 	}
@@ -432,7 +432,7 @@ func TestDoubleClickCountsThroughTheClock(t *testing.T) {
 	m := New(Deps{Editor: ed, Keys: testKeys(), Clock: func() time.Time { return now }})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	l := m.layout()
-	x, y := l.textX, l.bodyTop
+	x, y := l.TextX, l.BodyTop
 
 	m.Update(click(x, y, tea.MouseLeft))
 	now = now.Add(ms(100))

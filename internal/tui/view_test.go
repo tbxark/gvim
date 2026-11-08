@@ -138,8 +138,8 @@ func TestMenuBarToggleHidesTheMenuRow(t *testing.T) {
 	if strings.Contains(viewRow(m, 0), "File") {
 		t.Fatalf("row 0 still shows the menu after toggle_menu_bar: %q", viewRow(m, 0))
 	}
-	if l := m.layout(); l.menuOn || l.bodyTop != 1 {
-		t.Fatalf("menuOn %v bodyTop %d, want off and 1", l.menuOn, l.bodyTop)
+	if l := m.layout(); l.MenuOn || l.BodyTop != 1 {
+		t.Fatalf("menuOn %v bodyTop %d, want off and 1", l.MenuOn, l.BodyTop)
 	}
 	runAction(t, m, "toggle_menu_bar")
 	if !strings.Contains(viewRow(m, 0), "File") {
@@ -149,19 +149,19 @@ func TestMenuBarToggleHidesTheMenuRow(t *testing.T) {
 
 func TestTabBarToggleGivesItsRowToTheBody(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "hello\n", 60, 12)
-	row := m.layout().stripY
+	row := m.layout().StripY
 	if !strings.Contains(viewRow(m, row), "doc.txt") {
 		t.Fatalf("setup: the strip row %q has no tab name", viewRow(m, row))
 	}
 	runAction(t, m, "toggle_tab_bar")
 	l := m.layout()
-	if l.stripY != -1 || l.bodyTop != row {
-		t.Fatalf("stripY %d bodyTop %d, want -1 and %d", l.stripY, l.bodyTop, row)
+	if l.StripY != -1 || l.BodyTop != row {
+		t.Fatalf("stripY %d bodyTop %d, want -1 and %d", l.StripY, l.BodyTop, row)
 	}
 	if strings.Contains(viewRow(m, row), "doc.txt") {
 		t.Fatalf("the tab name is still drawn: %q", viewRow(m, row))
 	}
-	if got := l.hit(l.textX, row); got.Kind != hitEditorText {
+	if got := l.Hit(l.TextX, row); got.Kind != hitEditorText {
 		t.Errorf("the freed row hits %v, want the editor text", got.Kind)
 	}
 	if !strings.Contains(viewRow(m, row), "hello") {
@@ -176,8 +176,8 @@ func TestStatusBarToggleGivesItsRowToTheBody(t *testing.T) {
 		t.Fatalf("setup: the last row %q has no position", viewRow(m, last))
 	}
 	runAction(t, m, "toggle_status_bar")
-	if l := m.layout(); l.statusOn || l.bodyBottom != last {
-		t.Fatalf("statusOn %v bodyBottom %d, want off and %d", l.statusOn, l.bodyBottom, last)
+	if l := m.layout(); l.StatusOn || l.BodyBottom != last {
+		t.Fatalf("statusOn %v bodyBottom %d, want off and %d", l.StatusOn, l.BodyBottom, last)
 	}
 	if strings.Contains(viewRow(m, last), "Ln 1") {
 		t.Errorf("the status row is still drawn: %q", viewRow(m, last))
@@ -186,25 +186,25 @@ func TestStatusBarToggleGivesItsRowToTheBody(t *testing.T) {
 
 func TestPromptLineToggleAddsARowUnderTheStatusRow(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "hello\n", 60, 12)
-	if l := m.layout(); l.promptOn || l.statusY != 11 {
-		t.Fatalf("setup: promptOn %v statusY %d, want off and 11", l.promptOn, l.statusY)
+	if l := m.layout(); l.PromptOn || l.StatusY != 11 {
+		t.Fatalf("setup: promptOn %v statusY %d, want off and 11", l.PromptOn, l.StatusY)
 	}
 	runAction(t, m, "toggle_prompt_line")
-	if l := m.layout(); !l.promptOn || l.statusY != 10 || l.promptY != 11 || l.bodyBottom != 9 {
+	if l := m.layout(); !l.PromptOn || l.StatusY != 10 || l.PromptY != 11 || l.BodyBottom != 9 {
 		t.Fatalf("prompt on %v at %d, status %d, body bottom %d; want on at 11, status 10, bottom 9",
-			l.promptOn, l.promptY, l.statusY, l.bodyBottom)
+			l.PromptOn, l.PromptY, l.StatusY, l.BodyBottom)
 	}
 	runAction(t, m, "toggle_prompt_line")
-	if l := m.layout(); l.promptOn || l.statusY != 11 {
-		t.Fatalf("second toggle: promptOn %v statusY %d, want off and 11", l.promptOn, l.statusY)
+	if l := m.layout(); l.PromptOn || l.StatusY != 11 {
+		t.Fatalf("second toggle: promptOn %v statusY %d, want off and 11", l.PromptOn, l.StatusY)
 	}
 }
 
 func TestVerticalScrollbarToggleClearsTheColumn(t *testing.T) {
 	long := strings.Repeat("line\n", 60)
 	m, _ := viewModel(t, DefaultViewOptions(), long, 40, 10)
-	x := m.layout().panes[0].X + m.layout().panes[0].W - 1
-	y := m.layout().bodyTop
+	x := m.layout().Panes[0].X + m.layout().Panes[0].W - 1
+	y := m.layout().BodyTop
 	if got := viewCell(t, m, x, y).Text; got != "┃" {
 		t.Fatalf("setup: scrollbar cell %q, want the thumb", got)
 	}
@@ -212,7 +212,7 @@ func TestVerticalScrollbarToggleClearsTheColumn(t *testing.T) {
 	if got := viewCell(t, m, x, y).Text; got != " " {
 		t.Errorf("scrollbar cell %q after the toggle, want a blank", got)
 	}
-	if m.layout().scrollbar {
+	if m.layout().Scrollbar {
 		t.Error("the layout still reserves the scrollbar")
 	}
 }
@@ -223,8 +223,8 @@ func TestHorizontalScrollbarToggleGivesItsRowBack(t *testing.T) {
 	// In a 40-column frame the notice band is drawn over the last body row.
 	m.notice = ""
 	ed.ClearStatus()
-	last := m.layout().bodyBottom
-	x := m.layout().textX
+	last := m.layout().BodyBottom
+	x := m.layout().TextX
 	if got := viewCell(t, m, x, last).Text; got != "━" && got != "─" {
 		t.Fatalf("setup: the last body row %q is not the horizontal bar", got)
 	}
@@ -237,7 +237,7 @@ func TestHorizontalScrollbarToggleGivesItsRowBack(t *testing.T) {
 
 func TestLineWrapToggleChangesTheContinuationRow(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), strings.Repeat("a", 100)+"\nBBB\n", 40, 8)
-	x, y := m.layout().textX, m.layout().bodyTop+1
+	x, y := m.layout().TextX, m.layout().BodyTop+1
 	if got := viewCell(t, m, x, y).Text; got != "a" {
 		t.Fatalf("setup: wrapped row 1 starts with %q, want the continuation a", got)
 	}
@@ -256,7 +256,7 @@ func TestLineWrapCurrentBufferIsPerDocument(t *testing.T) {
 	if s := docViewOf(m.ed.Active()); s.LineWrap == nil || *s.LineWrap {
 		t.Fatalf("line wrap override = %v, want off", s.LineWrap)
 	}
-	if got := viewCell(t, m, m.layout().textX, m.layout().bodyTop+1).Text; got == "a" {
+	if got := viewCell(t, m, m.layout().TextX, m.layout().BodyTop+1).Text; got == "a" {
 		t.Error("the current buffer still wraps after its own toggle")
 	}
 	runAction(t, m, "new")
@@ -267,8 +267,8 @@ func TestLineWrapCurrentBufferIsPerDocument(t *testing.T) {
 
 func TestCurrentLineHighlightToggles(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "one\ntwo\n", 40, 8)
-	top, next := m.layout().bodyTop, m.layout().bodyTop+1
-	x := m.layout().textX + 2
+	top, next := m.layout().BodyTop, m.layout().BodyTop+1
+	x := m.layout().TextX + 2
 	if viewCell(t, m, x, top).Style.BG == viewCell(t, m, x, next).Style.BG {
 		t.Fatal("setup: the caret line has no tint")
 	}
@@ -294,8 +294,8 @@ func TestOccurrenceHighlightToggles(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := viewModel(t, DefaultViewOptions(), "foo bar foo\n", 40, 8)
-			x := m.layout().textX + 8 // the second foo
-			y := m.layout().bodyTop
+			x := m.layout().TextX + 8 // the second foo
+			y := m.layout().BodyTop
 			before := viewCell(t, m, x, y).Style.BG
 			runAction(t, m, tt.action)
 			if after := viewCell(t, m, x, y).Style.BG; after == before {
@@ -307,7 +307,7 @@ func TestOccurrenceHighlightToggles(t *testing.T) {
 
 func TestWhitespaceIndicatorsToggleOnTheCurrentBuffer(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "a b\n", 40, 8)
-	x, y := m.layout().textX+1, m.layout().bodyTop
+	x, y := m.layout().TextX+1, m.layout().BodyTop
 	if got := viewCell(t, m, x, y).Text; got == "·" {
 		t.Fatal("setup: a space shows as a dot with whitespace indicators off")
 	}
@@ -324,7 +324,7 @@ func TestWhitespaceIndicatorsToggleOnTheCurrentBuffer(t *testing.T) {
 func TestTabIndicatorsHideTheArrowOfATab(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "\tx\n", 40, 8)
 	runAction(t, m, "toggle_whitespace_indicators")
-	x, y := m.layout().textX, m.layout().bodyTop
+	x, y := m.layout().TextX, m.layout().BodyTop
 	if got := viewCell(t, m, x, y).Text; got != "→" {
 		t.Fatalf("setup: the tab shows %q, want the arrow", got)
 	}
@@ -348,7 +348,7 @@ func TestIndentGuidesAndFoldIndicatorsAreStoredPerBuffer(t *testing.T) {
 
 func TestLineNumbersCurrentBufferHidesOnlyTheCurrentBuffer(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 40, 8)
-	y := m.layout().bodyTop
+	y := m.layout().BodyTop
 	if got := viewCell(t, m, 2, y).Text; got != "1" {
 		t.Fatalf("setup: gutter cell %q, want the line number 1", got)
 	}
@@ -380,8 +380,8 @@ func TestRulerAddAndRemoveThroughThePrompt(t *testing.T) {
 		t.Fatalf("rulers = %v after the prompt, want [5]", got)
 	}
 	// The ruler shows on a plain row, so the test reads line 2, not the caret line.
-	x := m.layout().textX + 4
-	y := m.layout().bodyTop + 1
+	x := m.layout().TextX + 4
+	y := m.layout().BodyTop + 1
 	if a, b := viewCell(t, m, x, y).Style.BG, viewCell(t, m, x-1, y).Style.BG; a == b {
 		t.Error("the ruler column has the same background as the column before it")
 	}
@@ -435,7 +435,7 @@ func TestTabSizeFromThePromptSetsTheTabStop(t *testing.T) {
 	runAction(t, m, "set_tab_size")
 	press(m, typed("2"))
 	settle(t, m, press(m, special(tea.KeyEnter)))
-	x, y := m.layout().textX, m.layout().bodyTop
+	x, y := m.layout().TextX, m.layout().BodyTop
 	if got := viewCell(t, m, x+2, y).Text; got != "x" {
 		t.Errorf("cell at +2 is %q, want x for a tab size of 2", got)
 	}
@@ -473,7 +473,7 @@ func TestSetLanguageNamesTheDocumentInTheStatusRow(t *testing.T) {
 	if got := ed.Tabs()[0].Language; got != "Go" {
 		t.Fatalf("tab language = %q, want Go", got)
 	}
-	if got := m.statusView().language; got != "Go" {
+	if got := m.statusView().Language; got != "Go" {
 		t.Fatalf("status language = %q, want Go", got)
 	}
 	if row := viewRow(m, m.height-1); !strings.Contains(row, " Go ") || strings.Contains(row, " Text ") {
@@ -484,7 +484,7 @@ func TestSetLanguageNamesTheDocumentInTheStatusRow(t *testing.T) {
 func TestSelectCursorStyleChangesTheCaretAndTheTerminalCursor(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 40, 8)
 	settle(t, m, m.dispatch(Command{Action: "select_cursor_style", Args: map[string]any{"style": "bar"}}))
-	x, y := m.layout().textX, m.layout().bodyTop
+	x, y := m.layout().TextX, m.layout().BodyTop
 	if got := viewCell(t, m, x, y).Text; got != "▏" {
 		t.Errorf("caret cell %q with the bar style, want ▏", got)
 	}
@@ -582,13 +582,13 @@ func TestMouseHoverAndScrollSyncAreStored(t *testing.T) {
 func TestMaximizeSplitShowsOnlyTheFocusedPane(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 10)
 	runAction(t, m, "split_vertical")
-	if n := len(m.layout().panes); n != 2 {
+	if n := len(m.layout().Panes); n != 2 {
 		t.Fatalf("setup: %d panes after a split, want 2", n)
 	}
 	runAction(t, m, "toggle_maximize_split")
 	shown := 0
-	for _, p := range m.layout().panes {
-		if p.rect != (rect{}) {
+	for _, p := range m.layout().Panes {
+		if p.Rect != (rect{}) {
 			shown++
 		}
 	}
@@ -596,7 +596,7 @@ func TestMaximizeSplitShowsOnlyTheFocusedPane(t *testing.T) {
 		t.Errorf("%d panes with area with the split maximized, want 1", shown)
 	}
 	runAction(t, m, "toggle_maximize_split")
-	if n := len(m.layout().panes); n != 2 {
+	if n := len(m.layout().Panes); n != 2 {
 		t.Errorf("%d panes after the second toggle, want 2", n)
 	}
 }
@@ -623,7 +623,7 @@ func TestViewOptionsSetTheStartingState(t *testing.T) {
 	o.LineWrap = false
 	o.CursorStyle = "underline"
 	m, _ := viewModel(t, o, "abc\n", 60, 8)
-	if m.layout().stripY != -1 {
+	if m.layout().StripY != -1 {
 		t.Error("the tab bar is shown with ShowTabBar false")
 	}
 	if m.Holds("line_wrap") {
@@ -637,9 +637,9 @@ func TestViewOptionsSetTheStartingState(t *testing.T) {
 func TestViewDefaultsKeepTheStartingLayout(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 60, 8)
 	l := m.layout()
-	if l.stripY != 1 || l.statusY != 7 || l.promptOn || !l.menuOn {
+	if l.StripY != 1 || l.StatusY != 7 || l.PromptOn || !l.MenuOn {
 		t.Errorf("default layout: strip %d status %d prompt %v menu %v, want 1, 7, off, on",
-			l.stripY, l.statusY, l.promptOn, l.menuOn)
+			l.StripY, l.StatusY, l.PromptOn, l.MenuOn)
 	}
 }
 
@@ -654,7 +654,7 @@ func TestHidingTheTabBarReleasesItsKeyboardFocus(t *testing.T) {
 
 func TestIndentGuidesDrawOnTheFrameRow(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "func a() {\n\tx\n}\n", 40, 8)
-	y := m.layout().bodyTop + 1 // the indented line
+	y := m.layout().BodyTop + 1 // the indented line
 	before := viewRow(m, y)
 	runAction(t, m, "toggle_indentation_guide_current_buffer")
 	if after := viewRow(m, y); after == before {
@@ -668,8 +668,8 @@ func TestIndentGuidesDrawOnTheFrameRow(t *testing.T) {
 
 func TestFoldIndicatorsCurrentBufferHidesTheArrow(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "func a() {\n\tx\n}\n", 40, 8)
-	y := m.layout().bodyTop
-	x := m.layout().gutter - 1
+	y := m.layout().BodyTop
+	x := m.layout().Gutter - 1
 	if got := viewCell(t, m, x, y).Text; got != "▾" {
 		t.Fatalf("setup: the fold arrow cell %q, want ▾", got)
 	}
@@ -687,7 +687,7 @@ func TestOccurrenceHighlightGoesOffWithAnEditUntilTheCaretMoves(t *testing.T) {
 	m, _ := viewModel(t, o, "fo foo foo\n", 40, 8)
 	l := m.layout()
 	marked := func(col int) bool {
-		return viewCell(t, m, l.textX+col, l.bodyTop).Style.BG != viewCell(t, m, l.textX+3, l.bodyTop).Style.BG
+		return viewCell(t, m, l.TextX+col, l.BodyTop).Style.BG != viewCell(t, m, l.TextX+3, l.BodyTop).Style.BG
 	}
 	frame := func() { m.Update(tea.WindowSizeMsg{Width: 40, Height: 8}) }
 	move := func() {

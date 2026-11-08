@@ -12,8 +12,8 @@ func plusCell(t *testing.T, m *Model) (int, int) {
 	t.Helper()
 	l := m.layout()
 	for x := range m.width {
-		if l.hit(x, l.stripY).Kind == hitTabNew {
-			return x, l.stripY
+		if l.Hit(x, l.StripY).Kind == hitTabNew {
+			return x, l.StripY
 		}
 	}
 	t.Fatal("no + button on the tab strip")

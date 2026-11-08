@@ -61,20 +61,20 @@ func TestPressOnABorderDragsItsRatio(t *testing.T) {
 			for _, a := range tt.setup {
 				runAction(t, m, a)
 			}
-			focus := m.layout().focus
+			focus := m.layout().Focus
 			m.Update(click(tt.press[0], tt.press[1], tea.MouseLeft))
-			if m.layout().focus != focus {
-				t.Errorf("the press on the line moved the focus to %d", m.layout().focus)
+			if m.layout().Focus != focus {
+				t.Errorf("the press on the line moved the focus to %d", m.layout().Focus)
 			}
 			m.Update(tea.MouseMotionMsg(tea.Mouse{X: tt.move[0], Y: tt.move[1], Button: tea.MouseLeft}))
-			if got := m.splits.root.share(); got != tt.ratio {
+			if got := m.splits.Root.Share(); got != tt.ratio {
 				t.Errorf("ratio = %d, want %d", got, tt.ratio)
 			}
 			l := m.layout()
-			if len(l.borders) != 1 || l.borders[0].rect != tt.line || l.borders[0].vertical != tt.vertical {
-				t.Fatalf("lines = %+v, want one at %v", l.borders, tt.line)
+			if len(l.Borders) != 1 || l.Borders[0].Rect != tt.line || l.Borders[0].Vertical != tt.vertical {
+				t.Fatalf("lines = %+v, want one at %v", l.Borders, tt.line)
 			}
-			if got := l.hit(tt.line.X, tt.line.Y); got.Kind != hitSplitBorder {
+			if got := l.Hit(tt.line.X, tt.line.Y); got.Kind != hitSplitBorder {
 				t.Errorf("hit on the moved line = %+v, want a split border", got)
 			}
 			m.Update(tea.MouseReleaseMsg(tea.Mouse{X: tt.move[0], Y: tt.move[1], Button: tea.MouseLeft}))
@@ -86,12 +86,12 @@ func TestDragEndsOnRelease(t *testing.T) {
 	m := newSplitModel(t, newMultiFake(2, 30), 80, 24)
 	runAction(t, m, "split_vertical")
 	pressDrag(m, 40, 5, 20, 5)
-	if got := m.splits.root.share(); got != 25 {
+	if got := m.splits.Root.Share(); got != 25 {
 		t.Fatalf("ratio after the drag = %d, want 25", got)
 	}
 	// The release ended the drag, so a motion with no button does not move the line.
 	m.Update(tea.MouseMotionMsg(tea.Mouse{X: 60, Y: 5}))
-	if got := m.splits.root.share(); got != 25 {
+	if got := m.splits.Root.Share(); got != 25 {
 		t.Errorf("ratio after a motion past the release = %d, want 25", got)
 	}
 }
@@ -102,7 +102,7 @@ func TestDragOfAnUnrelatedPressDoesNotResize(t *testing.T) {
 	// A press in a pane is a caret press, so the motion selects text and leaves the ratio.
 	m.Update(click(10, 5, tea.MouseLeft))
 	m.Update(tea.MouseMotionMsg(tea.Mouse{X: 60, Y: 5, Button: tea.MouseLeft}))
-	if got := m.splits.root.share(); got != 50 {
+	if got := m.splits.Root.Share(); got != 50 {
 		t.Errorf("ratio = %d after a text drag, want 50", got)
 	}
 }

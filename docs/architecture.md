@@ -30,6 +30,7 @@ internal/                       private executable shell (no top-level package i
   cli/                          cobra command tree, flags, DIR / FILE:LINE:COL
   tui/                          Bubble Tea v2 root model + widgets
     overlay/ list/              shared kit: the Overlay/Caret contract and the list/box widget
+    frame/ split/ tabstrip/     geometry kit: layout + hit map, split tree, tab strip
     browser/ ctxmenu/ dialog/ editorpane/ explorer/ find/ grid/ icons/ menubar/
     palette/ picker/ popup/ prompt/ space/ statusbar/ style/
   terminal/                     PTY + screen model behind the terminal dock
@@ -169,12 +170,12 @@ still large internally, so a reader can find a feature without grepping by memor
 | Cluster | Files | Responsibility |
 |---|---|---|
 | core / dispatch | `model.go`, `root.go`, `ports.go`, `doc.go`, `dialogs.go`, `key_hints.go`, `keybind_known.go`, `chord_keys.go`, notices, `status_expiry.go`, `cont_*` | `Model` + `Deps`, `New/Run/Close/Init/Update/View`, update pipeline, key translation/dispatch, overlay stack, painting, ports |
-| splits / tabs / compare | `split.go`, `split_layout.go`, `split_resize.go`, `split_drag.go`, `split_tabs.go`, `tabs.go`, `tab_drag.go`, `tab_drop.go`, `compare*.go` | pane tree and geometry, tab strip, drag/drop, side-by-side compare |
+| splits / tabs / compare | `split.go`, `split_resize.go`, `split_drag.go`, `split_tabs.go`, `tabs.go`, `tab_drag.go`, `tab_drop.go`, `compare*.go` | pane controllers and drag/drop over the `tui/split` tree, tab strip glue over `tui/tabstrip`, side-by-side compare |
 | terminal dock | `dock*.go` (+ `shell.go` for editor shell commands) | shell dock: PTY lifecycle, key/paste routing, paint |
 | LSP UI | `lsp.go`, `lsp_detect.go`, `diag.go`, `root_signature.go` | language-server UI controller, diagnostics, goto/hover/completion/code actions/rename, signature help |
 | plugin host | `plugin_*.go` | the UI side of the plugin contract: pump, events, keys/modes, prompts, windows, virtual buffers, decorations, manager, init.lua |
 | overlays / utilities | `keybind_editor.go`, `help_utility.go`, `notice_warnings.go`, `help.go`, `settings.go`, `icon_preview.go`, `tour.go`, `root_stash.go`, `language_pick.go`, `files_encoding.go`, `keymapeditor.go`, `keybind_ports.go` | keybinding editor, help/settings/tour/notices/pickers; the list/box machinery lives in `tui/list` |
-| frame chrome | `layout.go`, `welcome.go`, `hit.go`, `footer.go` | the single geometry source, hit map, welcome screen, footer hints |
+| frame glue | `frame_alias.go`, `welcome.go`, `footer.go` | aliases into the `tui/frame` geometry kit, welcome screen, footer hints |
 | view / display | `view.go`, `view_render.go` | display settings and per-document view settings |
 | find glue | `find_route.go`, `find_highlight.go`, `find_mouse.go` | controller between the find bar and the editor |
 | save / files / watch | `root_revert_fix.go`, `save.go`, `watch_reload.go`, `autosave.go`, `files_revert.go`, `files_recovery.go`, `files_overwrite.go` | save/save-as planning, auto-save tick, disk polling, reload, recovery copies |
@@ -186,9 +187,11 @@ still large internally, so a reader can find a feature without grepping by memor
 ### 4.2 `internal/tui` sub-packages
 
 `overlay` (the Overlay/Caret contract every overlay implements), `list` (the list/box
-overlay kit: `View`, `TextBox`, centring and scroll helpers), `grid` (cell surface on
-`x/ansi`), `space` (padding, text fitting and `Rect`), `style` (theme → lipgloss styles;
-the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
+overlay kit: `View`, `TextBox`, centring and scroll helpers), `frame` (the single geometry
+source: `ComputeLayout`, hit map, tab-strip and welcome placement), `split` (the split tree
+and pure pane geometry), `tabstrip` (strip painting and pointer mapping), `grid` (cell
+surface on `x/ansi`), `space` (padding, text fitting and `Rect`), `style` (theme → lipgloss
+styles; the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
 (paints the text area; pure renderer, no tea), `menubar` (menu bar + dropdowns; generated
 menu table), `explorer` (file-tree panel), `palette` (command palette overlay), `find`
 (find bar), `prompt` (bottom-row prompts), `browser` (file/folder browser), `picker`
@@ -263,14 +266,19 @@ Done:
    files (Options/Run/buildRuntime, settings, logfile, live grep, formatters), and the
    `gvim config` backend moved to `internal/configview` with `syntax.GrammarNames`.
 5. TUI kits: `overlay` (contract + Caret), `list` (list/box kit), `space` (`Rect` and text
-   fitting), removing ten forwarding adapters (~36 methods) and the duplicated fit helpers.
+   fitting), removing ten forwarding adapters (~36 methods) and the duplicated fit helpers;
+   then `split` (tree + geometry), `frame` (layout + hit map) and `tabstrip` (strip paint),
+   taking the root from ~23.9k to ~21.7k source lines with all tests green.
 6. Engine leaves: `atomicfile`, `shellcmd`, the `buffer` two-mode doc, and file renames.
 
 Next (tracked as follow-up work; each keeps build + tests green):
 
-1. Further TUI extraction now that the kits exist: split tree/geometry (`tui/split`), frame
-   geometry and hit map (`tui/frame`), keybinding editor (`tui/keybindeditor`), terminal
-   dock (`tui/dock`), utility screens; the plugin host and LSP UI last.
+1. Remaining TUI extraction. The package moves for the keybinding editor
+   (`tui/keybindeditor`) and the terminal dock (`tui/dock`) are mechanical on top of the
+   kits, but their tests are model-driven (`keybind_editor_test.go` 743 LOC,
+   `dock_test.go` 1,090 LOC plus four dock tests) and need a dedicated harness rewrite
+   against the new types; do that in one focused pass. The plugin host and LSP UI remain
+   last.
 3. `editor` → `document` + `editor` split (the two god objects), with an alias bridge.
 4. `lsp` split into client + `lsp/manager` + `lsp/lsptest`; `plugin/hostos` extracted from
    the runtime, and `plugin/doc.go` now holds the file map.

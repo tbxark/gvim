@@ -20,14 +20,14 @@ func TestPressOnAnUnfocusedPaneLandsOnTheLineUnderThePointer(t *testing.T) {
 
 	ps := panesOf(t, m, 2)
 	m.Update(click(ps[1].X+10, ps[1].Y+2, tea.MouseLeft)) // row 2 of the right pane
-	if got := m.layout().focus; got != 1 {
+	if got := m.layout().Focus; got != 1 {
 		t.Fatalf("focus %d after the press, want 1", got)
 	}
 	// The pointer is 10 cells into the pane: a 6-cell gutter, so text column 4.
 	if got := f.docs[0].cursor; got != (buffer.Pos{Line: 12, Col: 4}) {
 		t.Errorf("caret %+v after the press, want line 12, the line under the pointer", got)
 	}
-	if got := panesOf(t, m, 2)[1].top; got != 10 {
+	if got := panesOf(t, m, 2)[1].Top; got != 10 {
 		t.Errorf("right pane top %d after the press, want 10, the view it was pressed in", got)
 	}
 }

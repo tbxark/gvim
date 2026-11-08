@@ -30,7 +30,7 @@ func TestNextAndPrevPaneMoveAlongTheLeaves(t *testing.T) {
 	}
 	for _, s := range walk {
 		runAction(t, m, s.action)
-		if got := m.layout().focus; got != s.focus {
+		if got := m.layout().Focus; got != s.focus {
 			t.Errorf("after %s: focus %d, want %d", s.action, got, s.focus)
 		}
 	}
@@ -45,7 +45,7 @@ func TestNextAndPrevWindowMoveAlongTheLeavesWhenSplit(t *testing.T) {
 	}
 	for _, s := range walk {
 		runAction(t, m, s.action)
-		if got := m.layout().focus; got != s.focus {
+		if got := m.layout().Focus; got != s.focus {
 			t.Errorf("after %s: focus %d, want %d", s.action, got, s.focus)
 		}
 	}
@@ -66,7 +66,7 @@ func TestNextAndPrevWindowCycleTabsWithoutASplit(t *testing.T) {
 		if f.active != s.tab {
 			t.Errorf("after %s: active tab %d, want %d", s.action, f.active, s.tab)
 		}
-		if n := len(m.layout().panes); n != 1 {
+		if n := len(m.layout().Panes); n != 1 {
 			t.Errorf("after %s: %d panes, want 1", s.action, n)
 		}
 	}
@@ -76,7 +76,7 @@ func TestNextWindowWithNoTabsDoesNothing(t *testing.T) {
 	m := newSplitModel(t, newMultiFake(0, 0), 80, 24)
 	runAction(t, m, "next_window")
 	runAction(t, m, "prev_window")
-	if n := len(m.layout().panes); n != 1 {
+	if n := len(m.layout().Panes); n != 1 {
 		t.Errorf("%d panes with no tab, want 1", n)
 	}
 }
@@ -132,15 +132,15 @@ func TestSwitchToPreviousTabSeesATabClick(t *testing.T) {
 	m := newSplitModelKeys(t, f, 80, 24, windowKeys)
 	l := m.layout()
 	var tab2 *run
-	for i := range l.strip.runs {
-		if r := l.strip.runs[i]; r.kind == hitTab && r.index == 2 {
+	for i := range l.Strip.Runs {
+		if r := l.Strip.Runs[i]; r.Kind == hitTab && r.Index == 2 {
 			tab2 = &r
 		}
 	}
 	if tab2 == nil {
 		t.Fatal("no run for tab 2 in the tab strip")
 	}
-	m.Update(click(tab2.x, l.stripY, tea.MouseLeft))
+	m.Update(click(tab2.X, l.StripY, tea.MouseLeft))
 	if f.active != 2 {
 		t.Fatalf("after the tab click: active tab %d, want 2", f.active)
 	}
@@ -183,11 +183,11 @@ func TestPaneAndWindowKeysReachTheSplitActions(t *testing.T) {
 	m := newSplitModelKeys(t, f, 80, 24, windowKeys)
 	runAction(t, m, "split_vertical")
 	press(m, ctrl('p')) // next_pane: the left pane takes the focus
-	if got := m.layout().focus; got != 0 {
+	if got := m.layout().Focus; got != 0 {
 		t.Errorf("after ctrl+p: focus %d, want 0", got)
 	}
 	press(m, ctrl('h')) // prev_window: wraps to the right pane
-	if got := m.layout().focus; got != 1 {
+	if got := m.layout().Focus; got != 1 {
 		t.Errorf("after ctrl+h: focus %d, want 1", got)
 	}
 }

@@ -7,15 +7,8 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"github.com/tbxark/gvim/internal/tui/style"
-)
-
-// splitDir is how an inner node of the split tree divides its area.
-type splitDir int
-
-const (
-	sideBySide splitDir = iota // split_vertical: the children are left and right
-	stacked                    // split_horizontal: the children are top and bottom
 )
 
 // The glyphs of the lines between panes. The lines take the split colour (splitCell).
@@ -29,54 +22,10 @@ const (
 // the line between them.
 const minSplitExtent = 3
 
-// splitNode is a node of the split tree. A leaf (a and b nil) is one editor pane. It
-// shows the tab tab, and top is its viewport top while another pane has the focus.
-// The focused leaf takes both from the editor, so its own fields are stale until the
-// focus leaves it (keepFocused). An inner node divides its area between a, the top
-// or left child, and b, the bottom or right child. ratio is the percentage a takes.
-// A leaf has an id, the window id of the plugin API. It is given on first use (idOf) and
-// stays with the window through splits, closes and focus changes; a split passes it to
-// the child that keeps the old pane.
-type splitNode struct {
-	dir   splitDir
-	a, b  *splitNode
-	ratio int // the percentage of the area the first child takes; zero means splitEven
-	tab   int
-	top   int
-	// topRow is how many display rows of line top are scrolled off, for a pane of a compare
-	// view: it lets the pane start inside the filler rows after a line (see syncCompare).
-	topRow int
-	id     uint64 // the window id, or zero until idOf gives one
-}
-
-// splitEven is the share of the first child in an even split, and the share a zero ratio
-// stands for.
-const splitEven = 50
-
-// share returns the percentage of the area the first child takes.
-func (n *splitNode) share() int {
-	if n.ratio == 0 {
-		return splitEven
-	}
-	return n.ratio
-}
-
-// leaf reports whether n has no children.
-func (n *splitNode) leaf() bool { return n.a == nil }
-
-// leaves returns the leaves of the tree in reading order: the first child before the
-// second, depth first.
-func (n *splitNode) leaves() []*splitNode {
-	if n.leaf() {
-		return []*splitNode{n}
-	}
-	return append(n.a.leaves(), n.b.leaves()...)
-}
-
-// splitSet is the split state of the root model.
+// splitSet is the split state of the root model: the split.Tree plus the state
+// of the compare view and the tab bookkeeping.
 type splitSet struct {
-	root      *splitNode   // the tree; one leaf when nothing is split
-	focus     *splitNode   // the focused leaf, always a leaf of root
+	split.Tree
 	tabs      int          // the tab count the leaves were last checked against
 	comparing bool         // the root is a compare view: two leaves side by side
 	diff      compareDiff  // the differences of the compare view that were last computed
@@ -85,22 +34,11 @@ type splitSet struct {
 	maximized bool         // the focused leaf fills the body and the other leaves have no area
 	seenTab   int          // the active tab noteTab last saw, or -1
 	prevTab   int          // the tab that was active before the last switch, or -1
-	lastID    uint64       // the last window id idOf gave out; ids are never reused
-}
-
-// idOf returns the window id of leaf n, giving it the next one when it has none.
-func (s *splitSet) idOf(n *splitNode) uint64 {
-	if n.id == 0 {
-		s.lastID++
-		n.id = s.lastID
-	}
-	return n.id
 }
 
 // newSplitSet returns the state with one leaf, which has the focus.
 func newSplitSet() splitSet {
-	leaf := &splitNode{}
-	return splitSet{root: leaf, focus: leaf, seenTab: -1, prevTab: -1}
+	return splitSet{Tree: split.NewTree(), seenTab: -1, prevTab: -1}
 }
 
 // tabDocs is the optional view of the documents of every tab. The split panes that
@@ -110,23 +48,6 @@ type tabDocs interface {
 	// DocAt returns the document of tab i, or nil when there is no tab i. It must
 	// return an untyped nil, not a typed nil in an interface.
 	DocAt(i int) Document
-}
-
-// removeLeaf returns the tree t without the leaf n. The parent of n is replaced by n's
-// sibling, which keeps its own state. t must have more than one leaf.
-func removeLeaf(t, n *splitNode) *splitNode {
-	if t.leaf() {
-		return t
-	}
-	switch n {
-	case t.a:
-		return t.b
-	case t.b:
-		return t.a
-	}
-	t.a = removeLeaf(t.a, n)
-	t.b = removeLeaf(t.b, n)
-	return t
 }
 
 // splitAction runs one of the split, pane, window, tab and compare actions. The actions
@@ -194,7 +115,7 @@ func (m *Model) trySplit(dir splitDir) string {
 	// The room is measured on the panes as they are laid out, so a maximized pane is
 	// restored first.
 	m.splits.maximized = false
-	fp := m.layout().focusedPane()
+	fp := m.layout().FocusedPane()
 	extent := fp.W
 	if dir == stacked {
 		extent = fp.H
@@ -203,13 +124,13 @@ func (m *Model) trySplit(dir splitDir) string {
 		return "Not enough room to split"
 	}
 	m.keepFocused()
-	f := m.splits.focus
-	f.dir = dir
+	f := m.splits.Focus
+	f.Dir = dir
 	// The first child is the pane as it was, so it keeps the window id.
-	f.a = &splitNode{tab: f.tab, top: f.top, id: f.id}
-	f.b = &splitNode{tab: f.tab, top: f.top}
-	f.id = 0
-	m.splits.focus = f.b
+	f.A = &splitNode{Tab: f.Tab, Top: f.Top, ID: f.ID}
+	f.B = &splitNode{Tab: f.Tab, Top: f.Top}
+	f.ID = 0
+	m.splits.Focus = f.B
 	m.splits.comparing = false
 	m.syncViewport()
 	m.revealCaretVisual(0)
@@ -219,9 +140,9 @@ func (m *Model) trySplit(dir splitDir) string {
 // moveFocus moves the focus delta panes along the reading order, and wraps at the
 // ends.
 func (m *Model) moveFocus(delta int) {
-	leaves := m.splits.root.leaves()
+	leaves := m.splits.Root.Leaves()
 	n := len(leaves)
-	i := slices.Index(leaves, m.splits.focus)
+	i := slices.Index(leaves, m.splits.Focus)
 	if n < 2 || i < 0 {
 		return
 	}
@@ -232,23 +153,23 @@ func (m *Model) moveFocus(delta int) {
 // goes to the pane now in the same reading position, or to the last one. The last
 // pane is kept.
 func (m *Model) closeFocused() {
-	if m.splits.root.leaf() {
+	if m.splits.Root.Leaf() {
 		m.notice = oneSplitNotice
 		return
 	}
-	i := slices.Index(m.splits.root.leaves(), m.splits.focus)
-	m.splits.root = removeLeaf(m.splits.root, m.splits.focus)
+	i := slices.Index(m.splits.Root.Leaves(), m.splits.Focus)
+	m.splits.Root = split.RemoveLeaf(m.splits.Root, m.splits.Focus)
 	m.splits.comparing = false
 	m.splits.maximized = false
-	rest := m.splits.root.leaves()
+	rest := m.splits.Root.Leaves()
 	// The closed pane's state goes with it, so there is nothing to keep.
-	m.splits.focus = nil
+	m.splits.Focus = nil
 	m.focusLeaf(rest[min(i, len(rest)-1)])
 }
 
 // focusPane gives the focus to the pane with index i in reading order.
 func (m *Model) focusPane(i int) {
-	if leaves := m.splits.root.leaves(); i >= 0 && i < len(leaves) {
+	if leaves := m.splits.Root.Leaves(); i >= 0 && i < len(leaves) {
 		m.focusLeaf(leaves[i])
 	}
 }
@@ -257,16 +178,16 @@ func (m *Model) focusPane(i int) {
 // and the top it had. The leaf that takes the focus shows its own tab, scrolled to its
 // own top.
 func (m *Model) focusLeaf(n *splitNode) {
-	if n == m.splits.focus {
+	if n == m.splits.Focus {
 		return
 	}
 	m.keepFocused()
-	m.splits.focus = n
-	m.activateTab(n.tab)
+	m.splits.Focus = n
+	m.activateTab(n.Tab)
 	if m.ed.Active() != nil {
-		m.ed.ScrollTo(n.top)
+		m.ed.ScrollTo(n.Top)
 		if m.splits.comparing {
-			m.setTopRow(n.topRow)
+			m.setTopRow(n.TopRow)
 		}
 	}
 	m.syncViewport()
@@ -276,15 +197,15 @@ func (m *Model) focusLeaf(n *splitNode) {
 // keepFocused copies the active tab and the viewport top into the focused leaf, so the
 // leaf can show them again when the focus returns to it.
 func (m *Model) keepFocused() {
-	f := m.splits.focus
+	f := m.splits.Focus
 	if f == nil {
 		return
 	}
-	f.tab = m.activeTab()
+	f.Tab = m.activeTab()
 	if doc := m.ed.Active(); doc != nil {
-		f.top = doc.Top()
+		f.Top = doc.Top()
 		if m.splits.comparing {
-			f.topRow = m.topRow(f.top)
+			f.TopRow = m.topRow(f.Top)
 		}
 	}
 }
@@ -292,23 +213,23 @@ func (m *Model) keepFocused() {
 // splitInput gives the layout the split tree and the state of each leaf in reading
 // order. The focused leaf shows the active tab at the editor's viewport top.
 func (m *Model) splitInput() (*splitNode, []leafInfo) {
-	leaves := m.splits.root.leaves()
+	leaves := m.splits.Root.Leaves()
 	infos := make([]leafInfo, len(leaves))
 	for i, n := range leaves {
-		if n != m.splits.focus {
-			infos[i] = leafInfo{tab: n.tab, top: n.top}
-			if doc := m.docAt(n.tab); doc != nil {
-				infos[i].lines = displayLines(doc)
+		if n != m.splits.Focus {
+			infos[i] = leafInfo{Tab: n.Tab, Top: n.Top}
+			if doc := m.docAt(n.Tab); doc != nil {
+				infos[i].Lines = displayLines(doc)
 			}
 			continue
 		}
-		infos[i] = leafInfo{tab: m.activeTab(), focused: true}
+		infos[i] = leafInfo{Tab: m.activeTab(), Focused: true}
 		if doc := m.ed.Active(); doc != nil {
-			infos[i].top = doc.Top()
-			infos[i].lines = displayLines(doc)
+			infos[i].Top = doc.Top()
+			infos[i].Lines = displayLines(doc)
 		}
 	}
-	return m.splits.root, infos
+	return m.splits.Root, infos
 }
 
 // docAt returns the document of tab i. It is the active document for the active tab,
@@ -328,10 +249,10 @@ func (m *Model) docAt(i int) Document {
 
 // leafDoc returns the document that leaf n shows.
 func (m *Model) leafDoc(n *splitNode) Document {
-	if n == m.splits.focus {
+	if n == m.splits.Focus {
 		return m.ed.Active()
 	}
-	return m.docAt(n.tab)
+	return m.docAt(n.Tab)
 }
 
 // closeTab closes tab i through the tab port. A tab that closes updates the leaves.
@@ -370,16 +291,16 @@ func (m *Model) tabRemoved(i int) {
 	n := len(m.ed.Tabs())
 	// A compare view is its two tabs together: with one of them gone it ends, as Fresh's
 	// closes the whole group, instead of leaving the other file shown twice, unmarked.
-	endsCompare := m.splits.comparing && !m.splits.root.leaf() && (m.splits.root.a.tab == i || m.splits.root.b.tab == i)
-	for _, leaf := range m.splits.root.leaves() {
-		if leaf == m.splits.focus {
+	endsCompare := m.splits.comparing && !m.splits.Root.Leaf() && (m.splits.Root.A.Tab == i || m.splits.Root.B.Tab == i)
+	for _, leaf := range m.splits.Root.Leaves() {
+		if leaf == m.splits.Focus {
 			continue
 		}
 		switch {
-		case leaf.tab > i:
-			leaf.tab--
-		case leaf.tab == i:
-			leaf.tab = min(i, n-1)
+		case leaf.Tab > i:
+			leaf.Tab--
+		case leaf.Tab == i:
+			leaf.Tab = min(i, n-1)
 		}
 	}
 	m.splits.seenTab = shiftTab(m.splits.seenTab, i)
@@ -406,9 +327,9 @@ func (m *Model) reconcileTabs() {
 
 // collapseSplits closes every pane but the focused one.
 func (m *Model) collapseSplits() {
-	f := m.splits.focus
-	f.a, f.b = nil, nil
-	m.splits.root = f
+	f := m.splits.Focus
+	f.A, f.B = nil, nil
+	m.splits.Root = f
 	m.splits.comparing = false
 	m.splits.owned = nil
 	m.splits.maximized = false
@@ -417,36 +338,36 @@ func (m *Model) collapseSplits() {
 // scrollPane moves the viewport of pane i by delta lines. The focused pane scrolls its
 // document. Another pane keeps its own top, and the caret stays where it is.
 func (m *Model) scrollPane(i, delta int) {
-	leaves := m.splits.root.leaves()
+	leaves := m.splits.Root.Leaves()
 	if i < 0 || i >= len(leaves) {
 		return
 	}
 	n := leaves[i]
-	if n == m.splits.focus || m.splits.comparing {
+	if n == m.splits.Focus || m.splits.comparing {
 		// The two sides of a compare view scroll together, from the focused one.
 		m.scrollFocused(delta)
 		return
 	}
-	doc := m.docAt(n.tab)
+	doc := m.docAt(n.Tab)
 	if doc == nil {
 		return
 	}
-	n.top = min(max(n.top+delta, 0), max(doc.LineCount()-1, 0))
+	n.Top = min(max(n.Top+delta, 0), max(doc.LineCount()-1, 0))
 }
 
 // paneDoc returns the document that pane p shows.
 func (m *Model) paneDoc(p splitPane) Document {
-	if p.focused {
+	if p.Focused {
 		return m.ed.Active()
 	}
-	return m.docAt(p.tab)
+	return m.docAt(p.Tab)
 }
 
 // paneFor returns the editor pane that paints p with doc. The find bar's highlights
 // go to the focused pane only, because they belong to the active document.
 func (m *Model) paneFor(p splitPane, doc Document) editorpane.Pane {
 	pane := m.paneGeometry(p, doc)
-	if p.focused {
+	if p.Focused {
 		pane.Highlights = paneHighlights(m.findLineHighlights())
 	}
 	return pane
@@ -457,16 +378,16 @@ func (m *Model) paneFor(p splitPane, doc Document) editorpane.Pane {
 // the caret, viewport and press paths use this one.
 func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 	pane := editorpane.Pane{
-		Doc: doc, Top: p.top, Styles: m.panes, TabSize: m.tabSize,
+		Doc: doc, Top: p.Top, Styles: m.panes, TabSize: m.tabSize,
 		Diagnostics: m.lspSpans(doc),
 	}
 	pane = m.viewPane(pane, doc)
 	pane = m.plugDecor(pane, doc)
 	pane = m.lspGutter(pane, doc)
 	pane = m.compareDecor(p, pane)
-	if p.focused {
+	if p.Focused {
 		pane = m.applyPan(pane, doc)
-		pane.TopRow = m.topRow(p.top)
+		pane.TopRow = m.topRow(p.Top)
 	}
 	return pane
 }
@@ -475,7 +396,7 @@ func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 // viewport the editor scrolls within. It is the pane's height less a horizontal
 // scrollbar row.
 func (m *Model) focusedBodyRows() int {
-	fp := m.layout().focusedPane()
+	fp := m.layout().FocusedPane()
 	doc := m.ed.Active()
 	if doc == nil {
 		return fp.H
@@ -496,13 +417,13 @@ func (m *Model) revealCaretVisual(margin int) {
 	}
 	// A gated frame has no panes to measure, so there is nothing to reveal.
 	l := m.layout()
-	if l.gated {
+	if l.Gated {
 		return
 	}
-	fp := l.focusedPane()
+	fp := l.FocusedPane()
 	// The notice band is painted over the bottom rows of the pane: the caret is kept
 	// above it, so the line being edited is not hidden by the message.
-	h := max(fp.H-max(fp.Y+fp.H-l.bandTop(), 0), 1)
+	h := max(fp.H-max(fp.Y+fp.H-l.BandTop(), 0), 1)
 	top, row := m.paneGeometry(fp, doc).RevealView(fp.W, h, margin)
 	if top != doc.Top() {
 		m.ed.ScrollTo(top)
@@ -557,29 +478,29 @@ func (m *Model) pressPane(i, x, y, count int) {
 // pane i, or it shows no document.
 func (m *Model) paneHitIn(i, x, y int) (p editorpane.Pane, hit editorpane.Hit, top int, ok bool) {
 	l := m.layout()
-	if i < 0 || i >= len(l.panes) {
+	if i < 0 || i >= len(l.Panes) {
 		return p, hit, 0, false
 	}
-	sp := l.panes[i]
+	sp := l.Panes[i]
 	doc := m.paneDoc(sp)
 	if doc == nil {
 		return p, hit, 0, false
 	}
 	p = m.paneGeometry(sp, doc)
-	return p, p.Hit(sp.W, sp.H, x-sp.X, y-sp.Y), sp.top, true
+	return p, p.Hit(sp.W, sp.H, x-sp.X, y-sp.Y), sp.Top, true
 }
 
 // paintPanes paints every editor pane and the lines between them. A pane with no
 // document is left blank.
 func (m *Model) paintPanes(g *grid.Grid, l layout) {
-	for _, p := range l.panes {
+	for _, p := range l.Panes {
 		doc := m.paneDoc(p)
 		if doc == nil || p.W <= 0 || p.H <= 0 {
 			continue
 		}
 		editorpane.Blit(g, p.X, p.Y, m.paneFor(p, doc).Render(p.W, p.H))
 	}
-	drawBorders(g, l.borders, m.splitCell())
+	drawBorders(g, l.Borders, m.splitCell())
 }
 
 // splitCell is the style of the lines between panes: the split colour of the theme, on
@@ -596,7 +517,7 @@ func (m *Model) splitCell() grid.Style {
 // drawBorders paints the lines between panes in cell.
 func drawBorders(g *grid.Grid, borders []splitBorder, cell grid.Style) {
 	for _, b := range borders {
-		if b.vertical {
+		if b.Vertical {
 			for y := b.Y; y < b.Y+b.H; y++ {
 				g.Put(b.X, y, g.Width(), splitVLine, cell)
 			}

@@ -172,7 +172,7 @@ func TestMacroPlayWithoutRecordingNotices(t *testing.T) {
 	if len(ed.actions) != 0 {
 		t.Fatalf("playback with no macro ran %v", actionsOf(ed))
 	}
-	if got := m.statusView().message; got != "No macro recorded" {
+	if got := m.statusView().Message; got != "No macro recorded" {
 		t.Fatalf("status = %q, want the no-macro notice", got)
 	}
 }
@@ -184,7 +184,7 @@ func TestMacroStopWithoutRecordingNotices(t *testing.T) {
 	ed := newFakeEditor("x")
 	m := newTestModel(t, ed, nil, 80, 20)
 	must(t, m.Run("stop_macro_recording"))
-	if got := m.statusView().message; got != "Not recording a macro" {
+	if got := m.statusView().Message; got != "Not recording a macro" {
 		t.Fatalf("status = %q, want the not-recording notice", got)
 	}
 }

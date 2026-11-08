@@ -11,6 +11,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	commands "github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/internal/tui/browser"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
 )
@@ -147,8 +148,8 @@ func TestCompareFilesPicksTwoFilesAndOpensTheView(t *testing.T) {
 		t.Fatalf("after the second file: pick %+v, comparing %v; want a compare view", m.splits.pick, m.splits.comparing)
 	}
 	ps := panesOf(t, m, 2)
-	if ps[0].tab != 0 || ps[1].tab != 1 || m.layout().focus != 0 {
-		t.Errorf("panes %+v focus %d, want tabs 0 and 1 and the left pane focused", ps, m.layout().focus)
+	if ps[0].Tab != 0 || ps[1].Tab != 1 || m.layout().Focus != 0 {
+		t.Errorf("panes %+v focus %d, want tabs 0 and 1 and the left pane focused", ps, m.layout().Focus)
 	}
 	if !strings.HasPrefix(m.notice, "Difference 1/") {
 		t.Errorf("notice = %q, want it to say which difference the view is on", m.notice)
@@ -221,7 +222,7 @@ func TestCompareCloseClosesTheFilesItOpened(t *testing.T) {
 				f.dirty[tt.modify] = true
 			}
 			runAction(t, m, "compare_close")
-			if m.splits.comparing || !m.splits.root.leaf() {
+			if m.splits.comparing || !m.splits.Root.Leaf() {
 				t.Error("the compare view is still open")
 			}
 			if !slices.Equal(f.paths, tt.wantTabs) {
@@ -356,8 +357,8 @@ func TestClosingASideTabEndsTheCompareView(t *testing.T) {
 				t.Fatalf("no compare view: %q", m.notice)
 			}
 			tt.close(m, f)
-			if m.splits.comparing || !m.splits.root.leaf() {
-				t.Fatalf("after closing a side: comparing %v, one pane %v; want the view gone and a single pane", m.splits.comparing, m.splits.root.leaf())
+			if m.splits.comparing || !m.splits.Root.Leaf() {
+				t.Fatalf("after closing a side: comparing %v, one pane %v; want the view gone and a single pane", m.splits.comparing, m.splits.Root.Leaf())
 			}
 			if len(f.docs) != 1 {
 				t.Errorf("tabs = %v, want the other file still open", f.paths)
@@ -381,7 +382,7 @@ func TestCompareTabsAreMarkedAsAPair(t *testing.T) {
 	f.dirty["/w/b.txt"] = true
 	var labels []string
 	for _, tab := range m.stripTabs() {
-		labels = append(labels, stripLabel(tab))
+		labels = append(labels, frame.StripLabel(tab))
 	}
 	if len(labels) != 3 || !strings.HasPrefix(labels[1], comparePairMark+" ") || !strings.HasPrefix(labels[2], modifiedMark+" "+comparePairMark+" ") {
 		t.Errorf("labels = %q, want the two compared tabs marked as a pair, the unsaved one also with its dot", labels)
@@ -391,8 +392,8 @@ func TestCompareTabsAreMarkedAsAPair(t *testing.T) {
 	}
 	runAction(t, m, "compare_close")
 	for _, tab := range m.stripTabs() {
-		if strings.Contains(stripLabel(tab), comparePairMark) {
-			t.Errorf("label %q is still marked after the view closed", stripLabel(tab))
+		if strings.Contains(frame.StripLabel(tab), comparePairMark) {
+			t.Errorf("label %q is still marked after the view closed", frame.StripLabel(tab))
 		}
 	}
 }

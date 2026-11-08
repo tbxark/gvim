@@ -501,15 +501,15 @@ func (m *Model) openLocales() {
 // viewLayout sets the chrome rows and the gutter of the frame from the view state. It
 // runs after the layout input is gathered, so the rows it sets win.
 func (m *Model) viewLayout(in *layoutInput) {
-	in.hideTabBar = !m.view.tabBar
-	in.hideStatus = in.hideStatus || !m.view.statusBar
-	in.showPromptLine = m.view.promptLine
-	in.hideVScroll = !m.view.vScroll
-	in.iconMode = m.view.icons
+	in.HideTabBar = !m.view.tabBar
+	in.HideStatus = in.HideStatus || !m.view.statusBar
+	in.ShowPromptLine = m.view.promptLine
+	in.HideVScroll = !m.view.vScroll
+	in.IconMode = m.view.icons
 	if doc := m.ed.Active(); doc != nil {
 		// The gutter of the layout is the focused pane's, so the layout follows the
 		// active document.
-		in.hideLineNumbers = !editor.OverrideOr(docViewOf(doc).LineNumbers, !m.hideLineNumbers)
+		in.HideLineNumbers = !editor.OverrideOr(docViewOf(doc).LineNumbers, !m.hideLineNumbers)
 	}
 }
 
@@ -584,10 +584,10 @@ func (m *Model) viewStatus(s *statusView) {
 	// The language a set_language command named is shown, in place of the one the
 	// file name gives.
 	if lang, ok := m.ed.Active().(interface{ Language() string }); ok && lang.Language() != "" {
-		s.language = languageLabel(lang.Language())
+		s.Language = languageLabel(lang.Language())
 	}
 	if m.view.debug {
-		s.message = m.debugText()
+		s.Message = m.debugText()
 	}
 }
 

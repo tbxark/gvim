@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
 )
@@ -23,8 +24,8 @@ func welcomeModel(t *testing.T, w, h int, recents ...string) (*Model, *tabFake) 
 
 // welcomeRowAt returns the welcome line of item i, or false when it is not drawn.
 func welcomeRowAt(m *Model, i int) (welcomeLine, bool) {
-	for _, r := range m.layout().welcome {
-		if r.item == i {
+	for _, r := range m.layout().Welcome {
+		if r.Item == i {
 			return r, true
 		}
 	}
@@ -38,12 +39,12 @@ func screenRow(m *Model, y int) string {
 
 func TestWelcomeShowsWhenNoTabIsOpen(t *testing.T) {
 	m, _ := welcomeModel(t, 80, 24)
-	if !m.welcomeVisible() || !m.layout().welcomeOn {
+	if !m.welcomeVisible() || !m.layout().WelcomeOn {
 		t.Fatal("no tab open, but the welcome screen is not shown")
 	}
 	g := m.paint()
 	all := strings.Join(g.Plain(), "\n")
-	for _, want := range []string{welcomeTitle[1], welcomeSubtitleText, "New File", "Open File", "Open Folder", "Command Palette", "Explorer"} {
+	for _, want := range []string{frame.WelcomeTitle[1], frame.WelcomeSubtitleText, "New File", "Open File", "Open Folder", "Command Palette", "Explorer"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("welcome screen lacks %q:\n%s", want, all)
 		}
@@ -62,23 +63,23 @@ func TestWelcomeShowsWhenNoTabIsOpen(t *testing.T) {
 func TestWelcomeFitsTheEightyByTwentyFourFrame(t *testing.T) {
 	m, _ := welcomeModel(t, 80, 24, "/work/alpha", "/work/beta")
 	l := m.layout()
-	if l.bodyTop != 2 || l.bodyBottom != 22 {
-		t.Fatalf("body rows %d..%d, want 2..22 at 24 rows", l.bodyTop, l.bodyBottom)
+	if l.BodyTop != 2 || l.BodyBottom != 22 {
+		t.Fatalf("body rows %d..%d, want 2..22 at 24 rows", l.BodyTop, l.BodyBottom)
 	}
-	for _, r := range l.welcome {
-		if r.y < l.bodyTop || r.y > l.bodyBottom {
-			t.Errorf("line %q at row %d is outside the body", r.text, r.y)
+	for _, r := range l.Welcome {
+		if r.Y < l.BodyTop || r.Y > l.BodyBottom {
+			t.Errorf("line %q at row %d is outside the body", r.Text, r.Y)
 		}
-		if r.x < l.editorX || r.x+r.w > l.w {
-			t.Errorf("line %q spans %d..%d, outside the pane", r.text, r.x, r.x+r.w)
+		if r.X < l.EditorX || r.X+r.W > l.W {
+			t.Errorf("line %q spans %d..%d, outside the pane", r.Text, r.X, r.X+r.W)
 		}
 	}
-	for i := range welcomeDoors {
+	for i := range frame.WelcomeDoors {
 		if _, ok := welcomeRowAt(m, i); !ok {
 			t.Errorf("door %d is not drawn at 80x24", i)
 		}
 	}
-	if _, ok := welcomeRowAt(m, len(welcomeDoors)); !ok {
+	if _, ok := welcomeRowAt(m, len(frame.WelcomeDoors)); !ok {
 		t.Error("the first recent folder is not drawn")
 	}
 }
@@ -88,12 +89,12 @@ func TestWelcomeLeavesTheExplorerColumns(t *testing.T) {
 	m := New(Deps{Editor: newTabFake(), Explorer: newFakeTree(3), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock, ShowExplorer: true})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	l := m.layout()
-	if !l.explorerOpen || l.editorX == 0 {
-		t.Fatalf("explorer open %v, editorX %d; want the explorer open", l.explorerOpen, l.editorX)
+	if !l.ExplorerOpen || l.EditorX == 0 {
+		t.Fatalf("explorer open %v, editorX %d; want the explorer open", l.ExplorerOpen, l.EditorX)
 	}
-	for _, r := range l.welcome {
-		if r.x < l.editorX {
-			t.Fatalf("welcome line %q at column %d overlaps the explorer (%d)", r.text, r.x, l.editorX)
+	for _, r := range l.Welcome {
+		if r.X < l.EditorX {
+			t.Fatalf("welcome line %q at column %d overlaps the explorer (%d)", r.Text, r.X, l.EditorX)
 		}
 	}
 }
@@ -144,9 +145,9 @@ func TestClosingTheLastTabShowsTheWelcomeScreenAgain(t *testing.T) {
 
 // tabCloseX is the column of the × of tab i in the strip, or -1.
 func tabCloseX(m *Model, i int) int {
-	for _, r := range m.layout().strip.runs {
-		if r.kind == hitTabClose && r.index == i {
-			return r.x
+	for _, r := range m.layout().Strip.Runs {
+		if r.Kind == hitTabClose && r.Index == i {
+			return r.X
 		}
 	}
 	return -1
@@ -159,7 +160,7 @@ func TestClickingNewFileRowOpensAnUntitledTab(t *testing.T) {
 	if !ok {
 		t.Fatal("New File row is not drawn")
 	}
-	_, cmd := m.Update(click(row.x+1, row.y, tea.MouseLeft))
+	_, cmd := m.Update(click(row.X+1, row.Y, tea.MouseLeft))
 	drain(t, m, cmd)
 	if len(tf.names) != 1 || tf.names[0] != "Untitled-1" {
 		t.Fatalf("tabs = %v after clicking New File", tf.names)
@@ -200,7 +201,7 @@ func TestWelcomeHighlightStopsAtTheLastRow(t *testing.T) {
 	for range 10 {
 		press(m, special(tea.KeyDown))
 	}
-	if want := len(welcomeDoors); m.welcomeSel != want {
+	if want := len(frame.WelcomeDoors); m.welcomeSel != want {
 		t.Fatalf("highlight = %d, want the last row %d", m.welcomeSel, want)
 	}
 }
@@ -245,11 +246,11 @@ func TestRecentFolderRowSwitchesTheProject(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			m := welcomeProjectModel(t, tc.projects, folder)
-			row, ok := welcomeRowAt(m, len(welcomeDoors))
+			row, ok := welcomeRowAt(m, len(frame.WelcomeDoors))
 			if !ok {
 				t.Fatal("the recent folder row is not drawn")
 			}
-			_, cmd := m.Update(click(row.x+1, row.y, tea.MouseLeft))
+			_, cmd := m.Update(click(row.X+1, row.Y, tea.MouseLeft))
 			drain(t, m, cmd)
 			if got := m.rootDir(); got != tc.wantRoot {
 				t.Fatalf("explorer root = %q, want %q", got, tc.wantRoot)
@@ -272,14 +273,14 @@ func TestRecentFolderRowSwitchesTheProject(t *testing.T) {
 func TestRecentFoldersAreCappedAndNoticeWithoutProjects(t *testing.T) {
 	recents := []string{"/w/1", "/w/2", "/w/3", "/w/4", "/w/5", "/w/6"}
 	m, tf := welcomeModel(t, 80, 24, recents...)
-	if got := welcomeItemCount(recents); got != len(welcomeDoors)+welcomeRecentMax {
-		t.Fatalf("welcome has %d rows, want the doors and %d recents", got, welcomeRecentMax)
+	if got := frame.WelcomeItemCount(recents); got != len(frame.WelcomeDoors)+frame.WelcomeRecentMax {
+		t.Fatalf("welcome has %d rows, want the doors and %d recents", got, frame.WelcomeRecentMax)
 	}
-	row, ok := welcomeRowAt(m, len(welcomeDoors))
+	row, ok := welcomeRowAt(m, len(frame.WelcomeDoors))
 	if !ok {
 		t.Fatal("the first recent folder is not drawn")
 	}
-	_, cmd := m.Update(click(row.x+1, row.y, tea.MouseLeft))
+	_, cmd := m.Update(click(row.X+1, row.Y, tea.MouseLeft))
 	drain(t, m, cmd)
 	if len(tf.names) != 0 || !strings.Contains(m.notice, "not supported") {
 		t.Fatalf("clicking a recent folder: tabs %v, notice %q", tf.names, m.notice)
@@ -293,10 +294,10 @@ func TestWelcomeHighlightUsesTheAccent(t *testing.T) {
 	press(m, special(tea.KeyDown))
 	row, _ := welcomeRowAt(m, 1)
 	g := m.paint()
-	if !g.At(row.x+1, row.y).Style.Bold {
-		t.Fatalf("selected row cell %+v is not styled as the accent", g.At(row.x+1, row.y).Style)
+	if !g.At(row.X+1, row.Y).Style.Bold {
+		t.Fatalf("selected row cell %+v is not styled as the accent", g.At(row.X+1, row.Y).Style)
 	}
-	if other, _ := welcomeRowAt(m, 0); g.At(other.x+1, other.y).Style.Bold {
+	if other, _ := welcomeRowAt(m, 0); g.At(other.X+1, other.Y).Style.Bold {
 		t.Fatal("an unselected row takes the selection style")
 	}
 }
@@ -309,12 +310,12 @@ func TestWelcomeInAShortFrameDoesNotPanic(t *testing.T) {
 	}
 }
 
-// welcomeLines places the block on the pane and keeps the title centred.
+// frame.WelcomeLines places the block on the pane and keeps the title centred.
 func TestWelcomeTitleIsCentredInTheBlock(t *testing.T) {
-	lines := welcomeLines(0, 80, 0, 30, nil, nil)
+	lines := frame.WelcomeLines(0, 80, 0, 30, nil, nil)
 	var title []welcomeLine
 	for _, r := range lines {
-		if r.role == welcomeTitleRow {
+		if r.Role == welcomeTitleRow {
 			title = append(title, r)
 		}
 	}
@@ -322,8 +323,8 @@ func TestWelcomeTitleIsCentredInTheBlock(t *testing.T) {
 		t.Fatalf("title has %d lines, want 3", len(title))
 	}
 	for _, r := range title {
-		if r.x < 0 || r.x+r.w > 80 {
-			t.Fatalf("title line %q out of the pane: %+v", r.text, r)
+		if r.X < 0 || r.X+r.W > 80 {
+			t.Fatalf("title line %q out of the pane: %+v", r.Text, r)
 		}
 	}
 }

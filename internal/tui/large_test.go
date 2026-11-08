@@ -360,19 +360,19 @@ func TestStatusRowShowsTheLargeChipAndTheScanPercent(t *testing.T) {
 	m, le := newLargeModel(t, writeLines(t, dir, "a.txt", bigFile, 40, 0))
 	cmd := start(m)
 	s := m.statusView()
-	if !strings.HasPrefix(s.large, "LARGE Scanning... ") || !strings.HasSuffix(s.large, "%") {
-		t.Fatalf("status chip while indexing = %q, want LARGE with the percent", s.large)
+	if !strings.HasPrefix(s.Large, "LARGE Scanning... ") || !strings.HasSuffix(s.Large, "%") {
+		t.Fatalf("status chip while indexing = %q, want LARGE with the percent", s.Large)
 	}
 	info := le.ed.DocAt(0).Index()
 	want := fmt.Sprintf("LARGE Scanning... %d%%", info.Indexed*100/info.Size)
-	if s.large != want {
-		t.Errorf("chip = %q, want %q", s.large, want)
+	if s.Large != want {
+		t.Errorf("chip = %q, want %q", s.Large, want)
 	}
 	if !strings.Contains(strings.Join(screenRows(m), "\n"), want) {
 		t.Errorf("the chip is not on the status row")
 	}
 	feedAll(t, m, cmd, 10)
-	if got := m.statusView().large; got != "LARGE" {
+	if got := m.statusView().Large; got != "LARGE" {
 		t.Errorf("chip after the index = %q, want LARGE", got)
 	}
 }
@@ -389,7 +389,7 @@ func TestGutterAgreesBetweenLayoutAndPaneAndStaysAcrossABatch(t *testing.T) {
 	if exact >= 100_000 || approx < 100_000 {
 		t.Fatalf("lines %d, estimate %d: the fixture must cross a digit boundary", exact, approx)
 	}
-	before := m.layout().gutter
+	before := m.layout().Gutter
 	if want := editorpane.GutterWidth(approx); before != want {
 		t.Fatalf("layout gutter = %d, want the estimate's %d", before, want)
 	}
@@ -398,12 +398,12 @@ func TestGutterAgreesBetweenLayoutAndPaneAndStaysAcrossABatch(t *testing.T) {
 	}
 	// The pane paints the separator where the layout says the gutter ends.
 	rows := screenRows(m)
-	x := strings.Index(rows[m.layout().bodyTop], "│")
-	if x < 0 || x != m.layout().textX-2 {
-		t.Errorf("separator at column %d, layout text starts at %d", x, m.layout().textX)
+	x := strings.Index(rows[m.layout().BodyTop], "│")
+	if x < 0 || x != m.layout().TextX-2 {
+		t.Errorf("separator at column %d, layout text starts at %d", x, m.layout().TextX)
 	}
 	feedAll(t, m, cmd, 10)
-	if got := m.layout().gutter; got != before {
+	if got := m.layout().Gutter; got != before {
 		t.Errorf("gutter changed from %d to %d when the index completed", before, got)
 	}
 	if exact, approx = le.Active().LineCount(), displayLines(le.Active()); exact != approx {
@@ -805,8 +805,8 @@ func TestPaneOfALargeDocumentNeverReadsTheSavedLines(t *testing.T) {
 	}
 	// The edited line shows its change bar.
 	rowsText := screenRows(m)
-	if !strings.Contains(rowsText[m.layout().bodyTop], "│") {
-		t.Errorf("no gutter on the first row: %q", rowsText[m.layout().bodyTop])
+	if !strings.Contains(rowsText[m.layout().BodyTop], "│") {
+		t.Errorf("no gutter on the first row: %q", rowsText[m.layout().BodyTop])
 	}
 }
 

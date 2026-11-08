@@ -857,7 +857,7 @@ func TestDiagnosticsReachThePaneAndTheStatusRow(t *testing.T) {
 	if got := spans(0); len(got) != 0 {
 		t.Fatalf("spans(0) = %+v, want none", got)
 	}
-	if got := lt.m.statusView().warnings; got != 2 {
+	if got := lt.m.statusView().Warnings; got != 2 {
 		t.Fatalf("warnings = %d, want 2", got)
 	}
 }
@@ -870,7 +870,7 @@ func TestDiagnosticsAreClearedByAnEmptyEvent(t *testing.T) {
 		{Start: buffer.Pos{}, End: buffer.Pos{Col: 1}, Severity: 1},
 	}}}})
 	lt.feed(lspDiagsMsg{events: []DiagnosticsEvent{{Path: "/p/a.go"}}})
-	if got := lt.m.statusView().warnings; got != 0 {
+	if got := lt.m.statusView().Warnings; got != 0 {
 		t.Fatalf("warnings = %d after an empty event, want 0", got)
 	}
 }

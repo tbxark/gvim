@@ -26,11 +26,11 @@ func (m *Model) setTopRow(row int) {
 func (m *Model) scrollFocused(delta int) {
 	doc := m.ed.Active()
 	l := m.layout()
-	if doc == nil || l.gated {
+	if doc == nil || l.Gated {
 		m.ed.ScrollBy(delta)
 		return
 	}
-	fp := l.focusedPane()
+	fp := l.FocusedPane()
 	top, row := m.paneGeometry(fp, doc).ScrollView(fp.W, fp.H, delta)
 	m.ed.ScrollTo(top)
 	m.setTopRow(row)

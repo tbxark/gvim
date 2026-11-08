@@ -1,28 +1,30 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/internal/tui/frame"
+	"github.com/tbxark/gvim/internal/tui/split"
 	"slices"
 	"testing"
 )
 
 // leafNode returns a leaf that shows tab i.
-func leafNode(i int) *splitNode { return &splitNode{tab: i} }
+func leafNode(i int) *splitNode { return &splitNode{Tab: i} }
 
 // innerNode divides its area in direction dir between a and b.
 func innerNode(dir splitDir, a, b *splitNode) *splitNode {
-	return &splitNode{dir: dir, a: a, b: b}
+	return &splitNode{Dir: dir, A: a, B: b}
 }
 
 // treeLayout lays out t in a w by h frame. The leaves take the reading order of
 // t.leaves, and lines gives each leaf's line count in that order. The leaf at reading
 // index focus has the focus.
 func treeLayout(w, h int, explorer bool, t *splitNode, focus int, lines []int) layout {
-	leaves := t.leaves()
+	leaves := t.Leaves()
 	infos := make([]leafInfo, len(leaves))
 	for i, n := range leaves {
-		infos[i] = leafInfo{tab: n.tab, top: n.top, lines: lines[i], focused: i == focus}
+		infos[i] = leafInfo{Tab: n.Tab, Top: n.Top, Lines: lines[i], Focused: i == focus}
 	}
-	return computeLayout(w, h, layoutInput{explorerOpen: explorer, split: t, leaves: infos})
+	return frame.ComputeLayout(w, h, layoutInput{ExplorerOpen: explorer, Split: t, Leaves: infos})
 }
 
 func TestSplitSpanSharesTheLineBetweenChildren(t *testing.T) {
@@ -45,9 +47,9 @@ func TestSplitSpanSharesTheLineBetweenChildren(t *testing.T) {
 		{5, 10, 1, 3},
 	}
 	for _, tt := range tests {
-		first, second := splitSpan(tt.total, tt.ratio)
+		first, second := split.Span(tt.total, tt.ratio)
 		if first != tt.first || second != tt.second {
-			t.Errorf("splitSpan(%d, %d) = %d, %d, want %d, %d", tt.total, tt.ratio, first, second, tt.first, tt.second)
+			t.Errorf("split.Span(%d, %d) = %d, %d, want %d, %d", tt.total, tt.ratio, first, second, tt.first, tt.second)
 		}
 	}
 }
@@ -57,7 +59,7 @@ func TestSplitSpanSharesTheLineBetweenChildren(t *testing.T) {
 func shapes(bs []splitBorder) []splitBorder {
 	out := make([]splitBorder, len(bs))
 	for i, b := range bs {
-		out[i] = splitBorder{rect: b.rect, vertical: b.vertical}
+		out[i] = splitBorder{Rect: b.Rect, Vertical: b.Vertical}
 	}
 	return out
 }
@@ -81,53 +83,53 @@ func TestSplitLayoutPanesAtOneTwoAndThreeLeaves(t *testing.T) {
 			name:    "two leaves side by side",
 			tree:    innerNode(sideBySide, leafNode(0), leafNode(1)),
 			panes:   []rect{{X: 0, Y: 2, W: 40, H: 21}, {X: 41, Y: 2, W: 39, H: 21}},
-			borders: []splitBorder{{rect: rect{X: 40, Y: 2, W: 1, H: 21}, vertical: true}},
+			borders: []splitBorder{{Rect: rect{X: 40, Y: 2, W: 1, H: 21}, Vertical: true}},
 		},
 		{
 			name:    "two leaves stacked",
 			tree:    innerNode(stacked, leafNode(0), leafNode(1)),
 			panes:   []rect{{X: 0, Y: 2, W: 80, H: 10}, {X: 0, Y: 13, W: 80, H: 10}},
-			borders: []splitBorder{{rect: rect{X: 0, Y: 12, W: 80, H: 1}, vertical: false}},
+			borders: []splitBorder{{Rect: rect{X: 0, Y: 12, W: 80, H: 1}, Vertical: false}},
 		},
 		{
 			name:    "three leaves, right column stacked",
 			tree:    innerNode(sideBySide, leafNode(0), innerNode(stacked, leafNode(1), leafNode(2))),
 			panes:   []rect{{X: 0, Y: 2, W: 40, H: 21}, {X: 41, Y: 2, W: 39, H: 10}, {X: 41, Y: 13, W: 39, H: 10}},
-			borders: []splitBorder{{rect: rect{X: 40, Y: 2, W: 1, H: 21}, vertical: true}, {rect: rect{X: 41, Y: 12, W: 39, H: 1}, vertical: false}},
+			borders: []splitBorder{{Rect: rect{X: 40, Y: 2, W: 1, H: 21}, Vertical: true}, {Rect: rect{X: 41, Y: 12, W: 39, H: 1}, Vertical: false}},
 		},
 		{
 			name:    "three leaves, bottom row side by side",
 			tree:    innerNode(stacked, leafNode(0), innerNode(sideBySide, leafNode(1), leafNode(2))),
 			panes:   []rect{{X: 0, Y: 2, W: 80, H: 10}, {X: 0, Y: 13, W: 40, H: 10}, {X: 41, Y: 13, W: 39, H: 10}},
-			borders: []splitBorder{{rect: rect{X: 0, Y: 12, W: 80, H: 1}, vertical: false}, {rect: rect{X: 40, Y: 13, W: 1, H: 10}, vertical: true}},
+			borders: []splitBorder{{Rect: rect{X: 0, Y: 12, W: 80, H: 1}, Vertical: false}, {Rect: rect{X: 40, Y: 13, W: 1, H: 10}, Vertical: true}},
 		},
 		{
 			name:    "three leaves, left column stacked",
 			tree:    innerNode(sideBySide, innerNode(stacked, leafNode(0), leafNode(1)), leafNode(2)),
 			panes:   []rect{{X: 0, Y: 2, W: 40, H: 10}, {X: 0, Y: 13, W: 40, H: 10}, {X: 41, Y: 2, W: 39, H: 21}},
-			borders: []splitBorder{{rect: rect{X: 40, Y: 2, W: 1, H: 21}, vertical: true}, {rect: rect{X: 0, Y: 12, W: 40, H: 1}, vertical: false}},
+			borders: []splitBorder{{Rect: rect{X: 40, Y: 2, W: 1, H: 21}, Vertical: true}, {Rect: rect{X: 0, Y: 12, W: 40, H: 1}, Vertical: false}},
 		},
 		{
 			name:     "two leaves side by side next to the explorer",
 			explorer: true,
 			tree:     innerNode(sideBySide, leafNode(0), leafNode(1)),
 			panes:    []rect{{X: 32, Y: 2, W: 24, H: 21}, {X: 57, Y: 2, W: 23, H: 21}},
-			borders:  []splitBorder{{rect: rect{X: 56, Y: 2, W: 1, H: 21}, vertical: true}},
+			borders:  []splitBorder{{Rect: rect{X: 56, Y: 2, W: 1, H: 21}, Vertical: true}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			leaves := len(tt.tree.leaves())
+			leaves := len(tt.tree.Leaves())
 			l := treeLayout(80, 24, tt.explorer, tt.tree, tt.focus, make([]int, leaves))
-			got := make([]rect, len(l.panes))
-			for i, p := range l.panes {
-				got[i] = p.rect
+			got := make([]rect, len(l.Panes))
+			for i, p := range l.Panes {
+				got[i] = p.Rect
 			}
 			if !slices.Equal(got, tt.panes) {
 				t.Errorf("panes = %v, want %v", got, tt.panes)
 			}
-			if !slices.Equal(shapes(l.borders), tt.borders) {
-				t.Errorf("borders = %v, want %v", shapes(l.borders), tt.borders)
+			if !slices.Equal(shapes(l.Borders), tt.borders) {
+				t.Errorf("borders = %v, want %v", shapes(l.Borders), tt.borders)
 			}
 		})
 	}
@@ -138,16 +140,16 @@ func TestSinglePaneIsTheCurrentBand(t *testing.T) {
 	// that pane's, so the single-leaf layout is the layout the tests above pin.
 	for _, g := range sampleWidths {
 		for _, h := range sampleHeights {
-			l := layoutFor(g.w, h, layoutInput{explorerOpen: true, lines: 40})
-			if len(l.panes) != 1 {
-				t.Fatalf("W=%d H=%d: %d panes, want 1", g.w, h, len(l.panes))
+			l := layoutFor(g.w, h, layoutInput{ExplorerOpen: true, Lines: 40})
+			if len(l.Panes) != 1 {
+				t.Fatalf("W=%d H=%d: %d panes, want 1", g.w, h, len(l.Panes))
 			}
-			p := l.panes[0]
-			want := rect{X: l.editorX, Y: l.bodyTop, W: g.w - l.editorX, H: l.bodyBottom - l.bodyTop + 1}
-			if p.rect != want || !p.focused || l.focus != 0 {
-				t.Errorf("W=%d H=%d: pane %+v focus %d, want rect %+v focused", g.w, h, p, l.focus, want)
+			p := l.Panes[0]
+			want := rect{X: l.EditorX, Y: l.BodyTop, W: g.w - l.EditorX, H: l.BodyBottom - l.BodyTop + 1}
+			if p.Rect != want || !p.Focused || l.Focus != 0 {
+				t.Errorf("W=%d H=%d: pane %+v focus %d, want rect %+v focused", g.w, h, p, l.Focus, want)
 			}
-			if p.gutter != l.gutter || p.textX != l.textX || p.textW != l.textW || p.scrollbar != l.scrollbar {
+			if p.Gutter != l.Gutter || p.TextX != l.TextX || p.TextW != l.TextW || p.Scrollbar != l.Scrollbar {
 				t.Errorf("W=%d H=%d: pane fields %+v differ from the editor fields", g.w, h, p)
 			}
 		}
@@ -159,32 +161,32 @@ func TestFocusedPaneSetsTheEditorFields(t *testing.T) {
 	// the top-level scrollbar and gutter those of the second pane.
 	tree := innerNode(sideBySide, leafNode(0), leafNode(1))
 	l := treeLayout(80, 24, false, tree, 1, []int{3, 100})
-	if len(l.panes) != 2 {
-		t.Fatalf("%d panes, want 2", len(l.panes))
+	if len(l.Panes) != 2 {
+		t.Fatalf("%d panes, want 2", len(l.Panes))
 	}
-	if l.focus != 1 {
-		t.Fatalf("focus = %d, want 1", l.focus)
+	if l.Focus != 1 {
+		t.Fatalf("focus = %d, want 1", l.Focus)
 	}
-	if l.panes[0].scrollbar || !l.panes[1].scrollbar {
-		t.Errorf("scrollbars = %v, %v; want false, true", l.panes[0].scrollbar, l.panes[1].scrollbar)
+	if l.Panes[0].Scrollbar || !l.Panes[1].Scrollbar {
+		t.Errorf("scrollbars = %v, %v; want false, true", l.Panes[0].Scrollbar, l.Panes[1].Scrollbar)
 	}
-	if !l.scrollbar || l.gutter != gutterWidth(100) || l.textX != l.panes[1].textX || l.textW != l.panes[1].textW {
-		t.Errorf("editor fields %+v do not match the focused pane %+v", l, l.panes[1])
+	if !l.Scrollbar || l.Gutter != frame.GutterWidth(100) || l.TextX != l.Panes[1].TextX || l.TextW != l.Panes[1].TextW {
+		t.Errorf("editor fields %+v do not match the focused pane %+v", l, l.Panes[1])
 	}
 }
 
 func TestEachPaneSizesItsGutterFromItsOwnDocument(t *testing.T) {
 	tree := innerNode(sideBySide, leafNode(0), leafNode(1))
 	l := treeLayout(80, 24, false, tree, 0, []int{2, 1000})
-	if len(l.panes) != 2 {
-		t.Fatalf("%d panes, want 2", len(l.panes))
+	if len(l.Panes) != 2 {
+		t.Fatalf("%d panes, want 2", len(l.Panes))
 	}
-	if g := l.panes[0].gutter; g != 6 {
+	if g := l.Panes[0].Gutter; g != 6 {
 		t.Errorf("two-line pane gutter = %d, want 6", g)
 	}
 	// 1000 lines is four digits: the gutter is 8 and the text starts after it.
-	if p := l.panes[1]; p.gutter != 8 || p.textX != 49 || p.textW != 31 {
-		t.Errorf("long pane gutter %d textX %d textW %d, want 8, 49, 31", p.gutter, p.textX, p.textW)
+	if p := l.Panes[1]; p.Gutter != 8 || p.TextX != 49 || p.TextW != 31 {
+		t.Errorf("long pane gutter %d textX %d textW %d, want 8, 49, 31", p.Gutter, p.TextX, p.TextW)
 	}
 }
 
@@ -224,7 +226,7 @@ func TestHitSplitBordersAndPanes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			l := treeLayout(80, 24, false, tt.tree, 0, tt.lines)
-			if got := l.hit(tt.x, tt.y); got != tt.want {
+			if got := l.Hit(tt.x, tt.y); got != tt.want {
 				t.Errorf("hit(%d, %d) = %+v, want %+v", tt.x, tt.y, got, tt.want)
 			}
 		})

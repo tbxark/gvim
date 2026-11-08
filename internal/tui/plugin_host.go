@@ -166,9 +166,9 @@ func (h *pluginHost) MoveTab(id pluginapi.BufferID, delta int) error {
 // tabMoved updates the leaves after the tab at index from moved to index to. The
 // focused leaf takes its tab from the editor, so it is left alone.
 func (m *Model) tabMoved(from, to int) {
-	for _, leaf := range m.splits.root.leaves() {
-		if leaf != m.splits.focus {
-			leaf.tab = movedIndex(leaf.tab, from, to)
+	for _, leaf := range m.splits.Root.Leaves() {
+		if leaf != m.splits.Focus {
+			leaf.Tab = movedIndex(leaf.Tab, from, to)
 		}
 	}
 	m.splits.seenTab = movedIndex(m.splits.seenTab, from, to)
