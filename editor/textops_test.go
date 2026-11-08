@@ -11,12 +11,12 @@ import (
 // placed sets up the caret or, when sel is set, the selection of a test case.
 type placed struct {
 	caret buffer.Pos
-	sel   *buffer.Selection
+	Sel   *buffer.Selection
 }
 
 func (p placed) apply(e *Editor) {
-	if p.sel != nil {
-		e.SelectRange(p.sel.Anchor, p.sel.Head)
+	if p.Sel != nil {
+		e.SelectRange(p.Sel.Anchor, p.Sel.Head)
 		return
 	}
 	e.SetCursor(p.caret, false)
@@ -25,45 +25,45 @@ func (p placed) apply(e *Editor) {
 func TestDuplicateLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		text       string
-		at         placed
+		Name       string
+		Text       string
+		At         placed
 		wantText   string
 		wantCursor buffer.Pos
 		wantSel    *buffer.Selection
 	}{
 		{
-			name:       "middle line keeps the caret column",
-			text:       "a\nb\nc",
-			at:         placed{caret: buffer.Pos{Line: 1, Col: 1}},
+			Name:       "middle line keeps the caret column",
+			Text:       "a\nb\nc",
+			At:         placed{caret: buffer.Pos{Line: 1, Col: 1}},
 			wantText:   "a\nb\nb\nc",
 			wantCursor: buffer.Pos{Line: 2, Col: 1},
 		},
 		{
-			name:       "first line",
-			text:       "a\nb",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 0}},
+			Name:       "first line",
+			Text:       "a\nb",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 0}},
 			wantText:   "a\na\nb",
 			wantCursor: buffer.Pos{Line: 1, Col: 0},
 		},
 		{
-			name:       "last line without a newline",
-			text:       "a\nb",
-			at:         placed{caret: buffer.Pos{Line: 1, Col: 0}},
+			Name:       "last line without a newline",
+			Text:       "a\nb",
+			At:         placed{caret: buffer.Pos{Line: 1, Col: 0}},
 			wantText:   "a\nb\nb",
 			wantCursor: buffer.Pos{Line: 2, Col: 0},
 		},
 		{
-			name:       "single line document",
-			text:       "hello world",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 3}},
+			Name:       "single line document",
+			Text:       "hello world",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 3}},
 			wantText:   "hello world\nhello world",
 			wantCursor: buffer.Pos{Line: 1, Col: 3},
 		},
 		{
-			name: "selection over two lines is duplicated and kept",
-			text: "a\nb\nc",
-			at: placed{sel: &buffer.Selection{
+			Name: "selection over two lines is duplicated and kept",
+			Text: "a\nb\nc",
+			At: placed{Sel: &buffer.Selection{
 				Anchor: buffer.Pos{Line: 0, Col: 0},
 				Head:   buffer.Pos{Line: 2, Col: 0},
 			}},
@@ -75,9 +75,9 @@ func TestDuplicateLine(t *testing.T) {
 			},
 		},
 		{
-			name: "selection ending at column 0 leaves that line out",
-			text: "a\nb\nc",
-			at: placed{sel: &buffer.Selection{
+			Name: "selection ending at column 0 leaves that line out",
+			Text: "a\nb\nc",
+			At: placed{Sel: &buffer.Selection{
 				Anchor: buffer.Pos{Line: 0, Col: 1},
 				Head:   buffer.Pos{Line: 1, Col: 0},
 			}},
@@ -90,10 +90,10 @@ func TestDuplicateLine(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			tt.at.apply(e)
+			e := docWith(Options{}, tt.Text)
+			tt.At.apply(e)
 			run(t, e, "duplicate_line")
 			d := e.Active()
 			if got := text(e); got != tt.wantText {
@@ -121,44 +121,44 @@ func TestDuplicateLineIsOneUndoStep(t *testing.T) {
 func TestDeleteLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		text       string
-		at         placed
+		Name       string
+		Text       string
+		At         placed
 		wantText   string
 		wantCursor buffer.Pos
 	}{
 		{
-			name:       "middle line",
-			text:       "a\nb\nc",
-			at:         placed{caret: buffer.Pos{Line: 1, Col: 1}},
+			Name:       "middle line",
+			Text:       "a\nb\nc",
+			At:         placed{caret: buffer.Pos{Line: 1, Col: 1}},
 			wantText:   "a\nc",
 			wantCursor: buffer.Pos{Line: 1, Col: 0},
 		},
 		{
-			name:       "first line",
-			text:       "a\nb",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 1}},
+			Name:       "first line",
+			Text:       "a\nb",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 1}},
 			wantText:   "b",
 			wantCursor: buffer.Pos{Line: 0, Col: 0},
 		},
 		{
-			name:       "last line without a newline leaves an empty line",
-			text:       "a\nb",
-			at:         placed{caret: buffer.Pos{Line: 1, Col: 0}},
+			Name:       "last line without a newline leaves an empty line",
+			Text:       "a\nb",
+			At:         placed{caret: buffer.Pos{Line: 1, Col: 0}},
 			wantText:   "a\n",
 			wantCursor: buffer.Pos{Line: 1, Col: 0},
 		},
 		{
-			name:       "only line",
-			text:       "abc",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 2}},
+			Name:       "only line",
+			Text:       "abc",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 2}},
 			wantText:   "",
 			wantCursor: buffer.Pos{Line: 0, Col: 0},
 		},
 		{
-			name: "selection is cleared and only the caret line goes",
-			text: "a\nb\nc",
-			at: placed{sel: &buffer.Selection{
+			Name: "selection is cleared and only the caret line goes",
+			Text: "a\nb\nc",
+			At: placed{Sel: &buffer.Selection{
 				Anchor: buffer.Pos{Line: 0, Col: 0},
 				Head:   buffer.Pos{Line: 1, Col: 1},
 			}},
@@ -167,10 +167,10 @@ func TestDeleteLine(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			tt.at.apply(e)
+			e := docWith(Options{}, tt.Text)
+			tt.At.apply(e)
 			run(t, e, "delete_line")
 			d := e.Active()
 			if got := text(e); got != tt.wantText {
@@ -189,8 +189,8 @@ func TestDeleteLine(t *testing.T) {
 func TestOpenLineLeavesCaretInPlace(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		caret    buffer.Pos
 		wantText string
 	}{
@@ -199,9 +199,9 @@ func TestOpenLineLeavesCaretInPlace(t *testing.T) {
 		{"at the start", "ab", buffer.Pos{Line: 0, Col: 0}, "\nab"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
+			e := docWith(Options{}, tt.Text)
 			e.SetCursor(tt.caret, false)
 			run(t, e, "open_line")
 			if got := text(e); got != tt.wantText {
@@ -231,42 +231,42 @@ func TestOpenLineClearsSelectionWithoutDeletingIt(t *testing.T) {
 func TestSelectLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		text       string
+		Name       string
+		Text       string
 		caret      buffer.Pos
 		wantSel    buffer.Selection
 		wantCursor buffer.Pos
 	}{
 		{
-			name:       "middle line takes its newline",
-			text:       "a\nb\nc",
+			Name:       "middle line takes its newline",
+			Text:       "a\nb\nc",
 			caret:      buffer.Pos{Line: 1, Col: 0},
 			wantSel:    buffer.Selection{Anchor: buffer.Pos{Line: 1, Col: 0}, Head: buffer.Pos{Line: 2, Col: 0}},
 			wantCursor: buffer.Pos{Line: 2, Col: 0},
 		},
 		{
-			name:       "last line ends at the end of the document",
-			text:       "a\nb",
+			Name:       "last line ends at the end of the document",
+			Text:       "a\nb",
 			caret:      buffer.Pos{Line: 1, Col: 0},
 			wantSel:    buffer.Selection{Anchor: buffer.Pos{Line: 1, Col: 0}, Head: buffer.Pos{Line: 1, Col: 1}},
 			wantCursor: buffer.Pos{Line: 1, Col: 1},
 		},
 		{
-			name:       "caret mid-line selects the whole line",
-			text:       "ab\ncd",
+			Name:       "caret mid-line selects the whole line",
+			Text:       "ab\ncd",
 			caret:      buffer.Pos{Line: 0, Col: 1},
 			wantSel:    buffer.Selection{Anchor: buffer.Pos{Line: 0, Col: 0}, Head: buffer.Pos{Line: 1, Col: 0}},
 			wantCursor: buffer.Pos{Line: 1, Col: 0},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
+			e := docWith(Options{}, tt.Text)
 			e.SetCursor(tt.caret, false)
 			run(t, e, "select_line")
 			d := e.Active()
-			if got := text(e); got != tt.text {
+			if got := text(e); got != tt.Text {
 				t.Fatalf("text = %q, want it unchanged", got)
 			}
 			if !selectionEqual(d.Sel, &tt.wantSel) || d.Cursor != tt.wantCursor {
@@ -280,26 +280,26 @@ func TestExpandLineSelection(t *testing.T) {
 	t.Parallel()
 	const doc = "a\nb\nc"
 	tests := []struct {
-		name    string
-		at      placed
+		Name    string
+		At      placed
 		presses int
 		wantSel *buffer.Selection
 	}{
 		{
-			name:    "no selection takes the caret line",
-			at:      placed{caret: buffer.Pos{Line: 1, Col: 0}},
+			Name:    "no selection takes the caret line",
+			At:      placed{caret: buffer.Pos{Line: 1, Col: 0}},
 			presses: 1,
 			wantSel: &buffer.Selection{Anchor: buffer.Pos{Line: 1, Col: 0}, Head: buffer.Pos{Line: 2, Col: 0}},
 		},
 		{
-			name:    "a second press grows by one line",
-			at:      placed{caret: buffer.Pos{Line: 1, Col: 0}},
+			Name:    "a second press grows by one line",
+			At:      placed{caret: buffer.Pos{Line: 1, Col: 0}},
 			presses: 2,
 			wantSel: &buffer.Selection{Anchor: buffer.Pos{Line: 1, Col: 0}, Head: buffer.Pos{Line: 2, Col: 1}},
 		},
 		{
-			name: "upward selection squares off over the lines it covers",
-			at: placed{sel: &buffer.Selection{
+			Name: "upward selection squares off over the lines it covers",
+			At: placed{Sel: &buffer.Selection{
 				Anchor: buffer.Pos{Line: 2, Col: 0},
 				Head:   buffer.Pos{Line: 1, Col: 0},
 			}},
@@ -308,10 +308,10 @@ func TestExpandLineSelection(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := docWith(Options{}, doc)
-			tt.at.apply(e)
+			tt.At.apply(e)
 			for range tt.presses {
 				run(t, e, "expand_line_selection")
 			}
@@ -332,8 +332,8 @@ func TestExpandLineSelection(t *testing.T) {
 func TestTransposeChars(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		text       string
+		Name       string
+		Text       string
 		caret      buffer.Pos
 		wantText   string
 		wantCursor buffer.Pos
@@ -346,9 +346,9 @@ func TestTransposeChars(t *testing.T) {
 		{"start of a later line does nothing", "ab\ncd", buffer.Pos{Line: 1, Col: 0}, "ab\ncd", buffer.Pos{Line: 1, Col: 0}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
+			e := docWith(Options{}, tt.Text)
 			e.SetCursor(tt.caret, false)
 			run(t, e, "transpose_chars")
 			if got := text(e); got != tt.wantText {
@@ -378,34 +378,34 @@ func TestTransposeCharsIgnoresSelection(t *testing.T) {
 func TestCaseConversion(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
+		Name       string
 		action     Action
-		text       string
-		at         placed
+		Text       string
+		At         placed
 		wantText   string
 		wantCursor buffer.Pos
 	}{
 		{
-			name:       "upper word under the caret",
+			Name:       "upper word under the caret",
 			action:     "to_upper_case",
-			text:       "hello world",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 2}},
+			Text:       "hello world",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 2}},
 			wantText:   "HELLO world",
 			wantCursor: buffer.Pos{Line: 0, Col: 5},
 		},
 		{
-			name:       "upper word when the caret is just after it",
+			Name:       "upper word when the caret is just after it",
 			action:     "to_upper_case",
-			text:       "hello world",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 5}},
+			Text:       "hello world",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 5}},
 			wantText:   "HELLO world",
 			wantCursor: buffer.Pos{Line: 0, Col: 5},
 		},
 		{
-			name:   "upper selection",
+			Name:   "upper selection",
 			action: "to_upper_case",
-			text:   "hello world",
-			at: placed{sel: &buffer.Selection{
+			Text:   "hello world",
+			At: placed{Sel: &buffer.Selection{
 				Anchor: buffer.Pos{Line: 0, Col: 6},
 				Head:   buffer.Pos{Line: 0, Col: 11},
 			}},
@@ -413,43 +413,43 @@ func TestCaseConversion(t *testing.T) {
 			wantCursor: buffer.Pos{Line: 0, Col: 11},
 		},
 		{
-			name:       "lower word at the start of a line",
+			Name:       "lower word at the start of a line",
 			action:     "to_lower_case",
-			text:       "HELLO World",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 0}},
+			Text:       "HELLO World",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 0}},
 			wantText:   "hello World",
 			wantCursor: buffer.Pos{Line: 0, Col: 5},
 		},
 		{
-			name:       "underscore and digits belong to the word",
+			Name:       "underscore and digits belong to the word",
 			action:     "to_upper_case",
-			text:       "a_1 b",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 1}},
+			Text:       "a_1 b",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 1}},
 			wantText:   "A_1 b",
 			wantCursor: buffer.Pos{Line: 0, Col: 3},
 		},
 		{
-			name:       "no word at the caret does nothing",
+			Name:       "no word at the caret does nothing",
 			action:     "to_upper_case",
-			text:       "a  b",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 2}},
+			Text:       "a  b",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 2}},
 			wantText:   "a  b",
 			wantCursor: buffer.Pos{Line: 0, Col: 2},
 		},
 		{
-			name:       "text already in the target case does nothing",
+			Name:       "text already in the target case does nothing",
 			action:     "to_upper_case",
-			text:       "HELLO",
-			at:         placed{caret: buffer.Pos{Line: 0, Col: 0}},
+			Text:       "HELLO",
+			At:         placed{caret: buffer.Pos{Line: 0, Col: 0}},
 			wantText:   "HELLO",
 			wantCursor: buffer.Pos{Line: 0, Col: 0},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{}, tt.text)
-			tt.at.apply(e)
+			e := docWith(Options{}, tt.Text)
+			tt.At.apply(e)
 			run(t, e, tt.action)
 			d := e.Active()
 			if got := text(e); got != tt.wantText {
@@ -459,10 +459,10 @@ func TestCaseConversion(t *testing.T) {
 				t.Fatalf("caret = %+v, want %+v", d.Cursor, tt.wantCursor)
 			}
 			// A conversion of a selection keeps it selected; a word has none.
-			if tt.at.sel != nil && tt.wantText != tt.text && !selectionEqual(d.Sel, tt.at.sel) {
-				t.Fatalf("selection = %+v, want %+v kept", d.Sel, tt.at.sel)
+			if tt.At.Sel != nil && tt.wantText != tt.Text && !selectionEqual(d.Sel, tt.At.Sel) {
+				t.Fatalf("selection = %+v, want %+v kept", d.Sel, tt.At.Sel)
 			}
-			if tt.at.sel == nil && d.Sel != nil {
+			if tt.At.Sel == nil && d.Sel != nil {
 				t.Fatalf("selection = %+v, want none", d.Sel)
 			}
 		})

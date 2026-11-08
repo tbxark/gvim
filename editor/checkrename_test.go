@@ -61,10 +61,10 @@ func TestCheckRenameAgreesWithRenamePath(t *testing.T) {
 	sub := filepath.Join(dir, "sub")
 	other := filepath.Join(dir, "other")
 	tests := []struct {
-		name     string
-		open     []string
-		from, to string
-		want     error
+		Name     string
+		Open     []string
+		From, To string
+		Want     error
 	}{
 		{"free name", []string{a, b}, a, c, nil},
 		{"same name", []string{a, b}, a, a, nil},
@@ -74,16 +74,16 @@ func TestCheckRenameAgreesWithRenamePath(t *testing.T) {
 		{"empty new path", []string{a}, a, "", ErrEmptyPath},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := openAll(t, tt.open...)
-			check := e.CheckRename(tt.from, tt.to)
-			rename := e.RenamePath(tt.from, tt.to)
-			if !errors.Is(check, tt.want) {
-				t.Errorf("CheckRename = %v, want %v", check, tt.want)
+			e := openAll(t, tt.Open...)
+			check := e.CheckRename(tt.From, tt.To)
+			rename := e.RenamePath(tt.From, tt.To)
+			if !errors.Is(check, tt.Want) {
+				t.Errorf("CheckRename = %v, want %v", check, tt.Want)
 			}
-			if !errors.Is(rename, tt.want) {
-				t.Errorf("RenamePath = %v, want %v", rename, tt.want)
+			if !errors.Is(rename, tt.Want) {
+				t.Errorf("RenamePath = %v, want %v", rename, tt.Want)
 			}
 		})
 	}

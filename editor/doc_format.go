@@ -42,7 +42,7 @@ func (e *Editor) SetLanguageNamer(namer func(path string) string) { e.languageNa
 // then the file extension with its dot, so a file with no language still finds the formatter
 // of its extension.
 func (e *Editor) formatterOf(d *Document) string {
-	lang := d.language
+	lang := d.Language()
 	if lang == "" && e.languageNamer != nil && d.Path != "" {
 		lang = e.languageNamer(d.Path)
 	}
@@ -86,17 +86,17 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 	if d == nil {
 		return ShellJob{}, ErrNoDocument
 	}
-	if d.readOnly {
+	if d.ReadOnly() {
 		return ShellJob{}, ErrReadOnly
 	}
 	command := e.formatterOf(d)
 	if command == "" {
-		if d.language == "" {
+		if d.Language() == "" {
 			return ShellJob{}, fmt.Errorf("format_buffer: %w for this buffer", ErrNoFormatter)
 		}
-		return ShellJob{}, fmt.Errorf("format_buffer: %w for %s", ErrNoFormatter, d.language)
+		return ShellJob{}, fmt.Errorf("format_buffer: %w for %s", ErrNoFormatter, d.Language())
 	}
-	if d.large != nil {
+	if d.LargeState() != nil {
 		// The formatter takes the whole text of the file.
 		return ShellJob{}, errLargeAction("format_buffer")
 	}
@@ -108,10 +108,10 @@ func (e *Editor) beginFormat() (ShellJob, error) {
 		Replace:  true,
 		Timeout:  shellTimeout,
 		format:   true,
-		doc:      d,
-		from:     buffer.Pos{},
-		to:       d.Buffer.End(),
-		snapshot: contentMark{text: text},
+		Doc:      d,
+		From:     buffer.Pos{},
+		To:       d.Buffer.End(),
+		snapshot: contentMark{Text: text},
 	}, nil
 }
 

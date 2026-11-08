@@ -1,55 +1,21 @@
 package editor
 
 import (
+	"github.com/tbxark/gvim/buffer"
 	"maps"
 	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/tbxark/gvim/buffer"
 )
-
-// lineEdit is one edit inside a line: the runes inserted at col, or the runes
-// removed from col on.
-type lineEdit struct {
-	line, col         int
-	inserted, removed int
-}
-
-// move returns where p ends up after the edit. A position on another line does
-// not move. After a removal, a position past the removed run moves back by its
-// length, and a position inside it moves to where the run began. After an
-// insertion, a position past col moves forward by the inserted length. A
-// position at col moves only when strict is false: a caret moves with the text
-// it sits in front of, while a selection end stays where it was.
-func (e lineEdit) move(p buffer.Pos, strict bool) buffer.Pos {
-	if p.Line != e.line {
-		return p
-	}
-	switch {
-	case e.removed > 0:
-		switch {
-		case p.Col >= e.col+e.removed:
-			p.Col -= e.removed
-		case p.Col > e.col:
-			p.Col = e.col
-		}
-	case e.inserted > 0:
-		if p.Col > e.col || (!strict && p.Col == e.col) {
-			p.Col += e.inserted
-		}
-	}
-	return p
-}
 
 // commentPrefix returns the line comment token of d, without surrounding blanks, or
 // "" when its language has none. A language chosen with Set Language decides when it
 // has a prefix. Otherwise the effective settings of the file decide, which hold the
 // languages.<id>.comment_prefix of the config and Fresh's built-in prefixes.
 func (e *Editor) commentPrefix(d *Document) string {
-	if d.language != "" && e.languages != nil {
-		if p := strings.TrimSpace(e.languages(d.language, "").CommentPrefix); p != "" {
+	if d.Language() != "" && e.languages != nil {
+		if p := strings.TrimSpace(e.languages(d.Language(), "").CommentPrefix); p != "" {
 			return p
 		}
 	}
@@ -68,7 +34,7 @@ func (e *Editor) toggleComment(d *Document) error {
 		return nil
 	}
 	width := utf8.RuneCountInString(token)
-	cs := d.allCarets()
+	cs := d.AllCarets()
 	lineSet := make(map[int]bool)
 	for _, c := range cs {
 		first, last := caretLines(c)
@@ -89,7 +55,7 @@ func (e *Editor) toggleComment(d *Document) error {
 		for _, line := range lines {
 			if !allCommented {
 				d.Buffer.Insert(buffer.Pos{Line: line}, token+" ")
-				edits = append(edits, lineEdit{line: line, inserted: width + 1})
+				edits = append(edits, lineEdit{Line: line, Inserted: width + 1})
 				continue
 			}
 			runes := []rune(d.Buffer.Line(line))
@@ -102,25 +68,25 @@ func (e *Editor) toggleComment(d *Document) error {
 				n++
 			}
 			d.Buffer.Delete(buffer.Pos{Line: line, Col: indent}, buffer.Pos{Line: line, Col: indent + n})
-			edits = append(edits, lineEdit{line: line, col: indent, removed: n})
+			edits = append(edits, lineEdit{Line: line, Col: indent, Removed: n})
 		}
 	})
 	adjust := func(p buffer.Pos, strict bool) buffer.Pos {
 		for _, e := range edits {
-			p = e.move(p, strict)
+			p = e.Move(p, strict)
 		}
 		return p
 	}
 	for i := range cs {
-		if cs[i].anchor == cs[i].head {
+		if cs[i].Anchor == cs[i].Head {
 			// An empty caret moves as one point, so it never grows a selection.
-			cs[i].head = adjust(cs[i].head, false)
-			cs[i].anchor = cs[i].head
+			cs[i].Head = adjust(cs[i].Head, false)
+			cs[i].Anchor = cs[i].Head
 			continue
 		}
-		cs[i].head = adjust(cs[i].head, true)
-		cs[i].anchor = adjust(cs[i].anchor, true)
+		cs[i].Head = adjust(cs[i].Head, true)
+		cs[i].Anchor = adjust(cs[i].Anchor, true)
 	}
-	d.setCarets(cs)
+	d.SetCarets(cs)
 	return nil
 }

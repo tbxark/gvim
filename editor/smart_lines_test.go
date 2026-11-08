@@ -10,23 +10,23 @@ import (
 // the primary caret.
 func multiDoc(text string, cs ...caret) *Editor {
 	e := docWith(Options{TabSize: 4}, text)
-	cs[0].primary = true
-	e.Active().setCarets(cs)
+	cs[0].Primary = true
+	e.Active().SetCarets(cs)
 	return e
 }
 
 // at returns an empty caret at line:col.
 func at(line, col int) caret {
 	p := caretPos(line, col)
-	return caret{anchor: p, head: p}
+	return caret{Anchor: p, Head: p}
 }
 
 // span returns a caret that selects from a to b, with its head at b.
-func span(a, b buffer.Pos) caret { return caret{anchor: a, head: b} }
+func span(a, b buffer.Pos) caret { return caret{Anchor: a, Head: b} }
 
 // wantCarets builds the expected caret state from the primary caret and the extras.
 func wantCarets(primary Caret, extras ...Caret) carets {
-	return carets{primary: primary, extras: extras}
+	return carets{Primary: primary, extras: extras}
 }
 
 func plain(line, col int) Caret { return Caret{Cursor: caretPos(line, col)} }
@@ -34,11 +34,11 @@ func plain(line, col int) Caret { return Caret{Cursor: caretPos(line, col)} }
 func TestDeleteLineAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		carets   []caret
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{"two lines", "a\nb\nc\nd", []caret{at(0, 1), at(2, 0)}, "b\nd", wantCarets(plain(0, 0), plain(1, 0))},
 		{"the last line keeps its break", "a\nb\nc\nd", []caret{at(1, 0), at(3, 0)}, "a\nc\n", wantCarets(plain(1, 0), plain(2, 0))},
@@ -47,19 +47,19 @@ func TestDeleteLineAtEveryCaret(t *testing.T) {
 		{"a selection is dropped and not deleted", "ab\ncd\nef", []caret{span(caretPos(0, 0), caretPos(0, 2)), at(2, 1)}, "cd\n", wantCarets(plain(0, 0), plain(1, 0))},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := multiDoc(tt.text, tt.carets...)
+			e := multiDoc(tt.Text, tt.carets...)
 			run(t, e, "delete_line")
 			if got := text(e); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %s, want %s", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %s, want %s", got, tt.Want)
 			}
 			run(t, e, "undo")
-			if got := text(e); got != tt.text {
-				t.Fatalf("text after one undo = %q, want %q", got, tt.text)
+			if got := text(e); got != tt.Text {
+				t.Fatalf("text after one undo = %q, want %q", got, tt.Text)
 			}
 		})
 	}
@@ -81,12 +81,12 @@ func TestDeleteLineKeepsThePrimaryCaret(t *testing.T) {
 func TestDuplicateLineAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		action   Action
-		text     string
+		Text     string
 		carets   []caret
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{"below", "duplicate_line", "a\nb\nc\nd", []caret{at(0, 1), at(2, 0)}, "a\na\nb\nc\nc\nd", wantCarets(plain(1, 1), plain(4, 0))},
 		{"above", "duplicate_line_above", "a\nb\nc\nd", []caret{at(0, 1), at(2, 0)}, "a\na\nb\nc\nc\nd", wantCarets(plain(0, 1), plain(3, 0))},
@@ -105,19 +105,19 @@ func TestDuplicateLineAtEveryCaret(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := multiDoc(tt.text, tt.carets...)
+			e := multiDoc(tt.Text, tt.carets...)
 			run(t, e, tt.action)
 			if got := text(e); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %s, want %s", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %s, want %s", got, tt.Want)
 			}
 			run(t, e, "undo")
-			if got := text(e); got != tt.text {
-				t.Fatalf("text after one undo = %q, want %q", got, tt.text)
+			if got := text(e); got != tt.Text {
+				t.Fatalf("text after one undo = %q, want %q", got, tt.Text)
 			}
 		})
 	}
@@ -126,12 +126,12 @@ func TestDuplicateLineAtEveryCaret(t *testing.T) {
 func TestMoveLines(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		action   Action
-		text     string
+		Text     string
 		carets   []caret
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{"up", "move_line_up", "a\nb\nc", []caret{at(2, 1)}, "a\nc\nb", wantCarets(plain(1, 1))},
 		{"down", "move_line_down", "a\nb\nc", []caret{at(0, 1)}, "b\na\nc", wantCarets(plain(1, 1))},
@@ -169,19 +169,19 @@ func TestMoveLines(t *testing.T) {
 		{"a stuck block does not hold back the others", "move_line_up", "a\nb\nc\nd", []caret{at(0, 0), at(2, 0)}, "a\nc\nb\nd", wantCarets(plain(0, 0), plain(1, 0))},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := multiDoc(tt.text, tt.carets...)
+			e := multiDoc(tt.Text, tt.carets...)
 			run(t, e, tt.action)
 			if got := text(e); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %s, want %s", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %s, want %s", got, tt.Want)
 			}
 			run(t, e, "undo")
-			if got := text(e); got != tt.text {
-				t.Fatalf("text after one undo = %q, want %q", got, tt.text)
+			if got := text(e); got != tt.Text {
+				t.Fatalf("text after one undo = %q, want %q", got, tt.Text)
 			}
 		})
 	}
@@ -251,12 +251,12 @@ func TestDedentWithNothingToRemoveChangesNothing(t *testing.T) {
 func TestCaseConversionAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		action   Action
-		text     string
+		Text     string
 		carets   []caret
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{"words", "to_upper_case", "foo bar", []caret{at(0, 1), at(0, 5)}, "FOO BAR", wantCarets(plain(0, 3), plain(0, 7))},
 		{"selections", "to_upper_case", "ab cd", []caret{span(caretPos(0, 0), caretPos(0, 2)), span(caretPos(0, 3), caretPos(0, 5))}, "AB CD", wantCarets(Caret{Cursor: caretPos(0, 2), Sel: &buffer.Selection{Anchor: caretPos(0, 0), Head: caretPos(0, 2)}}, Caret{Cursor: caretPos(0, 5), Sel: &buffer.Selection{Anchor: caretPos(0, 3), Head: caretPos(0, 5)}})},
@@ -266,19 +266,19 @@ func TestCaseConversionAtEveryCaret(t *testing.T) {
 		{"a caret off any word stays", "to_upper_case", "foo  bar", []caret{at(0, 1), at(0, 4)}, "FOO  bar", wantCarets(plain(0, 3), plain(0, 4))},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := multiDoc(tt.text, tt.carets...)
+			e := multiDoc(tt.Text, tt.carets...)
 			run(t, e, tt.action)
 			if got := text(e); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %s, want %s", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %s, want %s", got, tt.Want)
 			}
 			run(t, e, "undo")
-			if got := text(e); got != tt.text {
-				t.Fatalf("text after one undo = %q, want %q", got, tt.text)
+			if got := text(e); got != tt.Text {
+				t.Fatalf("text after one undo = %q, want %q", got, tt.Text)
 			}
 		})
 	}
@@ -287,11 +287,11 @@ func TestCaseConversionAtEveryCaret(t *testing.T) {
 func TestTransposeCharsAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		carets   []caret
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{"two lines", "abcd\nefgh", []caret{at(0, 1), at(1, 2)}, "bacd\negfh", wantCarets(plain(0, 2), plain(1, 3))},
 		{"a caret at the line start stays", "ab\ncd", []caret{at(0, 0), at(1, 1)}, "ab\ndc", wantCarets(plain(0, 0), plain(1, 2))},
@@ -299,15 +299,15 @@ func TestTransposeCharsAtEveryCaret(t *testing.T) {
 		{"a caret at the line end stays", "ab\ncd", []caret{at(0, 2), at(1, 1)}, "ab\ndc", wantCarets(plain(0, 2), plain(1, 2))},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := multiDoc(tt.text, tt.carets...)
+			e := multiDoc(tt.Text, tt.carets...)
 			run(t, e, "transpose_chars")
 			if got := text(e); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %s, want %s", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %s, want %s", got, tt.Want)
 			}
 		})
 	}
@@ -316,12 +316,12 @@ func TestTransposeCharsAtEveryCaret(t *testing.T) {
 func TestDeletesAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		action   Action
-		text     string
+		Text     string
 		carets   []caret
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{"word backward", "delete_word_backward", "foo bar\nbaz qux", []caret{at(0, 7), at(1, 7)}, "foo \nbaz ", wantCarets(plain(0, 4), plain(1, 4))},
 		{"word forward", "delete_word_forward", "foo bar\nbaz qux", []caret{at(0, 0), at(1, 0)}, "bar\nqux", wantCarets(plain(0, 0), plain(1, 0))},
@@ -333,19 +333,19 @@ func TestDeletesAtEveryCaret(t *testing.T) {
 		{"two words on a line", "delete_word_backward", "foo bar", []caret{at(0, 3), at(0, 7)}, " ", wantCarets(plain(0, 0), plain(0, 1))},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := multiDoc(tt.text, tt.carets...)
+			e := multiDoc(tt.Text, tt.carets...)
 			run(t, e, tt.action)
 			if got := text(e); got != tt.wantText {
 				t.Fatalf("text = %q, want %q", got, tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %s, want %s", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %s, want %s", got, tt.Want)
 			}
 			run(t, e, "undo")
-			if got := text(e); got != tt.text {
-				t.Fatalf("text after one undo = %q, want %q", got, tt.text)
+			if got := text(e); got != tt.Text {
+				t.Fatalf("text after one undo = %q, want %q", got, tt.Text)
 			}
 		})
 	}

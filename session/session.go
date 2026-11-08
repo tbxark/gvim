@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/tbxark/gvim/atomicfile"
-	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/document"
 )
 
 // Version is the only session format version this package reads and writes.
@@ -24,10 +24,6 @@ const (
 	fileName    = "session.json"
 	stashPrefix = "stash-"
 	stashSuffix = ".txt"
-	// An overlay stash holds the unsaved edits of a large file as JSON (see
-	// OverlayStash).
-	overlayPrefix = "overlay-"
-	overlaySuffix = ".json"
 )
 
 // Session is the saved state of one editor session.
@@ -59,24 +55,10 @@ type FileState struct {
 	OverlayFile string `json:"overlayFile,omitempty"`
 }
 
-// OverlayStash is the unsaved edits of a large file, kept without the file's
-// text: the edited lines and which lines of the file stay as they are. It is
-// valid only over the file it was taken from, which the identity fields name.
-type OverlayStash struct {
-	Version int `json:"version"`
-	// Path is the file the edits belong to.
-	Path string `json:"path"`
-	// Size and MTimeUnixNano are the size and modification time of the file the
-	// document read, Skip the bytes of byte-order mark before its text, and EOL the
-	// line ending of the document. The overlay is put back only onto a file that
-	// has the same values.
-	Size          int64  `json:"size"`
-	MTimeUnixNano int64  `json:"mtimeUnixNano"`
-	Skip          int64  `json:"skip,omitzero"`
-	EOL           string `json:"eol,omitempty"`
-	// Overlay is the edits.
-	Overlay buffer.OverlayState `json:"overlay"`
-}
+// OverlayStash is the unsaved edits of a large file as the document package
+// keeps them. Its format and its stash files are document's (document.OverlayStash,
+// document.StashOverlay).
+type OverlayStash = document.OverlayStash
 
 // Save writes s to dir/session.json. Save always writes the current Version,
 // whatever s.Version holds.
@@ -175,36 +157,14 @@ func StashContent(dir, text string) (string, error) {
 	return writeStash(dir, stashPrefix+"*"+stashSuffix, []byte(text))
 }
 
-// StashOverlay stores the overlay of a large file in a new stash file in dir and
-// returns the file's name. Put the name in FileState.OverlayFile so that Save keeps
-// the file. The file is JSON, so the edited lines can be read from it by hand.
+// StashOverlay stores the overlay of a large file as document.StashOverlay does.
 func StashOverlay(dir string, o OverlayStash) (string, error) {
-	o.Version = Version
-	data, err := json.Marshal(o, jsontext.Multiline(true))
-	if err != nil {
-		return "", fmt.Errorf("session: encode overlay: %w", err)
-	}
-	return writeStash(dir, overlayPrefix+"*"+overlaySuffix, data)
+	return document.StashOverlay(dir, o)
 }
 
-// ReadOverlay returns the overlay stash file name in dir. name must be an overlay
-// stash name returned by StashOverlay.
+// ReadOverlay reads an overlay stash file as document.ReadOverlay does.
 func ReadOverlay(dir, name string) (OverlayStash, error) {
-	if !isOverlayName(name) {
-		return OverlayStash{}, fmt.Errorf("session: invalid overlay stash name %q", name)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil {
-		return OverlayStash{}, err
-	}
-	var o OverlayStash
-	if err := json.Unmarshal(data, &o); err != nil {
-		return OverlayStash{}, fmt.Errorf("session: decode %s: %w", name, err)
-	}
-	if o.Version != Version {
-		return OverlayStash{}, fmt.Errorf("session: unsupported overlay version %d, want %d", o.Version, Version)
-	}
-	return o, nil
+	return document.ReadOverlay(dir, name)
 }
 
 // writeStash writes data to a new file in dir, named by pattern, and syncs it.
@@ -247,18 +207,12 @@ func ReadStash(dir, name string) (string, error) {
 // StashOverlay could have returned. A name with a directory part is rejected, so
 // no read or removal leaves dir.
 func isStashName(name string) bool {
-	return isTextName(name) || isOverlayName(name)
+	return isTextName(name) || document.IsOverlayName(name)
 }
 
 func isTextName(name string) bool {
 	return strings.HasPrefix(name, stashPrefix) &&
 		strings.HasSuffix(name, stashSuffix) &&
-		filepath.Base(name) == name
-}
-
-func isOverlayName(name string) bool {
-	return strings.HasPrefix(name, overlayPrefix) &&
-		strings.HasSuffix(name, overlaySuffix) &&
 		filepath.Base(name) == name
 }
 

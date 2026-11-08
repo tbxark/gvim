@@ -10,7 +10,7 @@ import (
 func TestOpenDetectsLineEnding(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		content  string
 		wantEOL  string
 		wantText string
@@ -25,7 +25,7 @@ func TestOpenDetectsLineEnding(t *testing.T) {
 		{"CRLF without final newline", "a\r\nb", "CRLF", "a\nb"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, _ := openFixture(t, Options{}, tt.content)
 			if got := e.Active().LineEnding(); got != tt.wantEOL {
@@ -90,9 +90,9 @@ func TestMixedEndingsKeepTheirEndingOnSave(t *testing.T) {
 func TestNewDocumentUsesDefaultLineEnding(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
+		Name       string
 		defaultEOL string
-		want       string
+		Want       string
 		wantFile   string
 	}{
 		{"empty means LF", "", "LF", "one\ntwo"},
@@ -100,15 +100,15 @@ func TestNewDocumentUsesDefaultLineEnding(t *testing.T) {
 		{"CRLF", "CRLF", "CRLF", "one\r\ntwo"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{DefaultLineEnding: tt.defaultEOL})
-			if got := e.Active().LineEnding(); got != tt.want {
-				t.Fatalf("placeholder LineEnding() = %q, want %q", got, tt.want)
+			if got := e.Active().LineEnding(); got != tt.Want {
+				t.Fatalf("placeholder LineEnding() = %q, want %q", got, tt.Want)
 			}
 			run(t, e, "new")
-			if got := e.Active().LineEnding(); got != tt.want {
-				t.Fatalf("untitled LineEnding() = %q, want %q", got, tt.want)
+			if got := e.Active().LineEnding(); got != tt.Want {
+				t.Fatalf("untitled LineEnding() = %q, want %q", got, tt.Want)
 			}
 			typeText(t, e, "one")
 			run(t, e, "insert_newline")
@@ -146,12 +146,12 @@ func TestMissingFileUsesDefaultLineEnding(t *testing.T) {
 func TestSetLineEndingChangesTheNextSave(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		file    string // the bytes on disk
-		args    map[string]any
+		Args    map[string]any
 		wantErr bool
 		wantEOL string // LineEnding() after the action
-		want    string // the bytes on disk after save
+		Want    string // the bytes on disk after save
 	}{
 		{"LF file to CRLF", "a\nb\n", map[string]any{"value": "crlf"}, false, "CRLF", "a\r\nb\r\n"},
 		{"CRLF file to LF", "a\r\nb\r\n", map[string]any{"value": "lf"}, false, "LF", "a\nb\n"},
@@ -161,10 +161,10 @@ func TestSetLineEndingChangesTheNextSave(t *testing.T) {
 		{"a missing value is refused", "a\r\n", map[string]any{}, true, "CRLF", "a\r\n"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{}, tt.file)
-			r := e.Do("set_line_ending", tt.args)
+			r := e.Do("set_line_ending", tt.Args)
 			if (r.Err != nil) != tt.wantErr {
 				t.Fatalf("set_line_ending err = %v, want error %v", r.Err, tt.wantErr)
 			}
@@ -172,8 +172,8 @@ func TestSetLineEndingChangesTheNextSave(t *testing.T) {
 				t.Fatalf("LineEnding() = %q, want %q", got, tt.wantEOL)
 			}
 			run(t, e, "save")
-			if got := readFile(t, path); got != tt.want {
-				t.Fatalf("saved %q, want %q", got, tt.want)
+			if got := readFile(t, path); got != tt.Want {
+				t.Fatalf("saved %q, want %q", got, tt.Want)
 			}
 		})
 	}

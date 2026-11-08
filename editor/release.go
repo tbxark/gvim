@@ -1,10 +1,5 @@
 package editor
 
-// A document in large file mode holds a file descriptor and caches that belong to its
-// buffer. Dropping the document from the editor does not free them: the buffer must be
-// closed. releaseDoc is the one place that does it, and every path that removes a
-// document, or replaces it, calls it.
-
 // releaseDoc ends the life of a document that leaves the editor: a closed tab, a
 // preview that another file replaces, a placeholder that a file replaces, and a document
 // that was loaded but not opened because its file is already open. It drops the work
@@ -22,12 +17,12 @@ func (e *Editor) releaseDoc(d *Document) {
 	if d == nil {
 		return
 	}
-	if l := d.large; l != nil {
-		l.pending = nil
-		if !l.inFlight {
-			l.scan.Close()
+	if l := d.LargeState(); l != nil {
+		l.Pending = nil
+		if !l.InFlight {
+			l.Scan.Close()
 		}
-		l.scan = nil
+		l.Scan = nil
 	}
 	_ = d.Buffer.Close()
 }

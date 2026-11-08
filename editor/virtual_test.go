@@ -25,7 +25,7 @@ func virtualEditor(t *testing.T, o VirtualOptions, opts ...Options) (*Editor, Do
 func TestNewVirtual(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		opts     VirtualOptions
 		wantName string
 	}{
@@ -37,7 +37,7 @@ func TestNewVirtual(t *testing.T) {
 		{"crlf text is lf", VirtualOptions{Name: "x", Text: "a\r\nb"}, "*x*"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			e, id := virtualEditor(t, tt.opts)
 			d, i, ok := e.DocByID(id)
 			if !ok {
@@ -99,7 +99,7 @@ func TestVirtualDocumentIsExcludedEverywhere(t *testing.T) {
 		return e, d, id
 	}
 	tests := []struct {
-		name  string
+		Name  string
 		check func(t *testing.T, e *Editor, d *Document, id DocID)
 	}{
 		{"Modified and the tab", func(t *testing.T, e *Editor, d *Document, _ DocID) {
@@ -180,7 +180,7 @@ func TestVirtualDocumentIsExcludedEverywhere(t *testing.T) {
 		}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			e, d, id := setup(t)
 			tt.check(t, e, d, id)
 		})
@@ -310,19 +310,19 @@ func TestSetVirtualTextRefusals(t *testing.T) {
 	regular := e.ActiveID()
 	id := e.NewVirtual(VirtualOptions{Name: "v"})
 	tests := []struct {
-		name string
-		id   DocID
-		text string
-		want error
+		Name string
+		Id   DocID
+		Text string
+		Want error
 	}{
 		{"not virtual", regular, "x", ErrNotVirtual},
 		{"not open", 999, "x", ErrNotOpen},
 		{"over the cap", id, strings.Repeat("x", MaxVirtualText+1), buffer.ErrOverCap},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := e.SetVirtualText(tt.id, tt.text); !errors.Is(err, tt.want) {
-				t.Fatalf("SetVirtualText = %v, want %v", err, tt.want)
+		t.Run(tt.Name, func(t *testing.T) {
+			if err := e.SetVirtualText(tt.Id, tt.Text); !errors.Is(err, tt.Want) {
+				t.Fatalf("SetVirtualText = %v, want %v", err, tt.Want)
 			}
 		})
 	}
@@ -356,9 +356,9 @@ func TestVirtualProps(t *testing.T) {
 		{FromLine: 3, FromCol: 0, ToLine: 3, ToCol: 4, Props: map[string]any{"n": 3}},
 	}
 	tests := []struct {
-		name      string
-		line, col int
-		want      any // the "n" prop, or nil
+		Name      string
+		Line, Col int
+		Want      any // the "n" prop, or nil
 	}{
 		{"before every span", 0, 2, nil},
 		{"end of the head line", 0, 4, nil},
@@ -373,24 +373,24 @@ func TestVirtualProps(t *testing.T) {
 		{"past the end of the document", 9, 9, 3},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			e := New(Options{})
 			id := e.NewVirtual(VirtualOptions{Name: "v", Text: text})
 			if err := e.SetVirtualProps(id, spans); err != nil {
 				t.Fatal(err)
 			}
-			got, err := e.VirtualProps(id, tt.line, tt.col)
+			got, err := e.VirtualProps(id, tt.Line, tt.Col)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tt.want == nil {
+			if tt.Want == nil {
 				if got != nil {
 					t.Fatalf("props = %v, want none", got)
 				}
 				return
 			}
-			if got["n"] != tt.want {
-				t.Fatalf("props = %v, want n=%v", got, tt.want)
+			if got["n"] != tt.Want {
+				t.Fatalf("props = %v, want n=%v", got, tt.Want)
 			}
 		})
 	}

@@ -67,34 +67,34 @@ func TestUnwritableFileOpensReadOnly(t *testing.T) {
 		t.Skip("root can write any file")
 	}
 	tests := []struct {
-		name string
+		Name string
 		opts Options
-		mode os.FileMode
-		want bool
+		Mode os.FileMode
+		Want bool
 	}{
 		{"auto read-only on, 0444", Options{AutoReadOnly: true}, 0o444, true},
 		{"auto read-only on, 0644", Options{AutoReadOnly: true}, 0o644, false},
 		{"auto read-only off, 0444", Options{}, 0o444, false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "f.txt")
-			if err := os.WriteFile(path, []byte("abc\n"), tt.mode); err != nil {
+			if err := os.WriteFile(path, []byte("abc\n"), tt.Mode); err != nil {
 				t.Fatal(err)
 			}
 			e := New(tt.opts)
 			if err := e.OpenFile(path); err != nil {
 				t.Fatal(err)
 			}
-			if got := e.Active().ReadOnly(); got != tt.want {
-				t.Fatalf("ReadOnly() = %v, want %v", got, tt.want)
+			if got := e.Active().ReadOnly(); got != tt.Want {
+				t.Fatalf("ReadOnly() = %v, want %v", got, tt.Want)
 			}
 			r := e.Do("insert_char", map[string]any{"text": "x"})
-			if tt.want != errors.Is(r.Err, ErrReadOnly) {
-				t.Fatalf("insert_char err = %v, want ErrReadOnly = %v", r.Err, tt.want)
+			if tt.Want != errors.Is(r.Err, ErrReadOnly) {
+				t.Fatalf("insert_char err = %v, want ErrReadOnly = %v", r.Err, tt.Want)
 			}
-			if tt.want && !strings.Contains(e.Status(), "read-only") {
+			if tt.Want && !strings.Contains(e.Status(), "read-only") {
 				t.Errorf("Status() = %q, want a read-only notice", e.Status())
 			}
 		})
@@ -122,8 +122,8 @@ func TestLoadFuncAppliesAutoReadOnly(t *testing.T) {
 func TestLibraryPath(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		path string
-		want bool
+		Path string
+		Want bool
 	}{
 		{"/usr/include/stdio.h", true},
 		{"/usr/local/include/x.h", true},
@@ -141,8 +141,8 @@ func TestLibraryPath(t *testing.T) {
 		{"/home/u/usr/include/a.h", false},
 	}
 	for _, tt := range tests {
-		if got := libraryPath(tt.path); got != tt.want {
-			t.Errorf("libraryPath(%q) = %v, want %v", tt.path, got, tt.want)
+		if got := libraryPath(tt.Path); got != tt.Want {
+			t.Errorf("libraryPath(%q) = %v, want %v", tt.Path, got, tt.Want)
 		}
 	}
 }

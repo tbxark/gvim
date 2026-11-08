@@ -43,10 +43,10 @@ func TestRevertSwapsTheBufferOfAnUnmodifiedLargeDocument(t *testing.T) {
 	if d.Buffer.Line(0) != "new first line" || d.Buffer.Line(1) != "line 0000" {
 		t.Errorf("lines = %q, %q", d.Buffer.Line(0), d.Buffer.Line(1))
 	}
-	if d.status != "Reverted big.txt" || d.Modified() {
-		t.Errorf("status %q, modified %v", d.status, d.Modified())
+	if d.Status != "Reverted big.txt" || d.Modified() {
+		t.Errorf("status %q, modified %v", d.Status, d.Modified())
 	}
-	if !d.disk.sameAs(diskStateOf(d.Path)) {
+	if !d.Disk.SameAs(diskStateOf(d.Path)) {
 		t.Error("the disk state is not the new file's")
 	}
 	indexAll(t, e)
@@ -77,8 +77,8 @@ func TestRevertKeepsACaretBeyondTheIndexedPart(t *testing.T) {
 	if d.Index().Complete || d.Cursor.Line >= 150 || d.Top >= d.Buffer.Lines() {
 		t.Fatalf("cursor %v top %d lines %d complete %v", d.Cursor, d.Top, d.Buffer.Lines(), d.Index().Complete)
 	}
-	if d.Sel != nil || d.large.pending == nil {
-		t.Fatalf("selection %v, pending %v", d.Sel, d.large.pending)
+	if d.Sel != nil || d.LargeState().Pending == nil {
+		t.Fatalf("selection %v, pending %v", d.Sel, d.LargeState().Pending)
 	}
 	indexAll(t, e)
 	if d.Cursor != (buffer.Pos{Line: 150, Col: 3}) {
@@ -127,7 +127,7 @@ func TestRevertOfAFrozenDocumentReloadsIt(t *testing.T) {
 		t.Fatalf("SourceErr = %v", err)
 	}
 	// A document that the user made read-only is still refused by the revert action.
-	d.readOnly = true
+	d.SetReadOnly(true)
 	if r := e.Do("revert", nil); !errors.Is(r.Err, ErrReadOnly) {
 		t.Fatalf("revert = %v, want ErrReadOnly", r.Err)
 	}
@@ -141,11 +141,11 @@ func TestRevertOfALargeDocumentThatShrankIsASmallOne(t *testing.T) {
 	if err := e.Revert(false); err != nil {
 		t.Fatal(err)
 	}
-	if d.Large() || d.large != nil || d.Buffer.Large() {
+	if d.Large() || d.LargeState() != nil || d.Buffer.Large() {
 		t.Fatal("the document is still large")
 	}
-	if d.Buffer.Text() != "small now\n" || d.saved != "small now\n" || d.Modified() {
-		t.Fatalf("text %q saved %q", d.Buffer.Text(), d.saved)
+	if d.Buffer.Text() != "small now\n" || d.Saved != "small now\n" || d.Modified() {
+		t.Fatalf("text %q saved %q", d.Buffer.Text(), d.Saved)
 	}
 	if ledger.live() != 0 {
 		t.Errorf("%d sources are open", ledger.live())
@@ -287,7 +287,7 @@ func TestRevertOfTheEditorsOwnSaveKeepsTheLargeDocument(t *testing.T) {
 	if d.Modified() || !d.Index().Complete || !d.HasSelection() {
 		t.Fatalf("modified %v, complete %v, selection %v after the save", d.Modified(), d.Index().Complete, d.HasSelection())
 	}
-	buf, status := d.Buffer, d.status
+	buf, status := d.Buffer, d.Status
 	plan := e.PlanRevertPath(d.Path)
 	if err := e.ApplyRevert(plan, RunRevert(plan)); err != nil {
 		t.Fatalf("ApplyRevert: %v", err)
@@ -296,7 +296,7 @@ func TestRevertOfTheEditorsOwnSaveKeepsTheLargeDocument(t *testing.T) {
 		t.Errorf("buffer kept %v, index complete %v, selection %v: want the document as it was",
 			d.Buffer == buf, d.Index().Complete, d.HasSelection())
 	}
-	if d.status != status {
-		t.Errorf("status = %q, want %q", d.status, status)
+	if d.Status != status {
+		t.Errorf("status = %q, want %q", d.Status, status)
 	}
 }

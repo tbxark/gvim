@@ -7,75 +7,12 @@ import (
 	"strings"
 )
 
-// ViewSettings are the display settings of one document, changed by the
-// per-buffer view actions. A flag is an override: a nil pointer means the
-// document follows the UI's global setting, or the editor's default where the
-// UI has none (see the accessors below).
-type ViewSettings struct {
-	LineNumbers    *bool // the line-number gutter
-	LineWrap       *bool
-	CurrentLine    *bool // the tint of the caret line
-	Occurrences    *bool // the highlight of the word's other occurrences
-	Whitespace     *bool // dots for spaces and arrows for tabs
-	IndentGuides   *bool // default off
-	FoldIndicators *bool // default on
-	TabIndicators  *bool // default on; arrows for tabs, under Whitespace
-	VirtualSpace   *bool // default off; stored only, the pane ignores it
-	IndentTabs     *bool // true: Tab inserts tabs; nil follows Options.UseTabs
-	// PageView is stored only: the pane does not draw the page view.
-	PageView bool
-	// PageWidth is the width of the page view in columns. Zero means the default.
-	PageWidth int
-	// Rulers are the 1-based columns that carry a ruler, in the order added.
-	Rulers []int
-	// TabSize is the columns per tab stop of this document. Zero means
-	// Options.TabSize.
-	TabSize int
-}
-
-// Bounds of the values the per-buffer view actions accept.
-const (
-	MaxViewTabSize   = 16
-	MaxViewColumn    = 1000
-	DefaultPageWidth = 80
-)
-
-// OverrideOr returns the value of an override, or def when there is none.
-func OverrideOr(p *bool, def bool) bool {
-	if p == nil {
-		return def
-	}
-	return *p
-}
-
-// The accessors below hold the editor's own defaults. The flags whose baseline
-// is a UI global (line numbers, wrap, current line, occurrences, whitespace) are
-// read with OverrideOr and that global.
-
-// IndentGuidesOn reports whether indentation guides are drawn. The default is off.
-func (s ViewSettings) IndentGuidesOn() bool { return OverrideOr(s.IndentGuides, false) }
-
-// FoldIndicatorsOn reports whether the fold arrows are drawn. The default is on.
-func (s ViewSettings) FoldIndicatorsOn() bool { return OverrideOr(s.FoldIndicators, true) }
-
-// TabIndicatorsOn reports whether tabs are drawn as arrows. The default is on.
-func (s ViewSettings) TabIndicatorsOn() bool { return OverrideOr(s.TabIndicators, true) }
-
-// VirtualSpaceOn reports the virtual space flag. The default is off.
-func (s ViewSettings) VirtualSpaceOn() bool { return OverrideOr(s.VirtualSpace, false) }
-
-// ViewSettings returns the display settings of the document. The flags are
-// shared with the document, so the caller reads them and does not change them.
-func (d *Document) ViewSettings() ViewSettings {
-	return d.view
-}
-
 // viewFlag is one per-document flag action: the field it sets, the default that
 // applies with no override and no value, and the status text it leaves.
 type viewFlag struct {
 	field func(*ViewSettings) **bool
 	def   func(*Editor) bool
-	label string
+	Label string
 }
 
 // constDefault is the default of a flag that does not depend on the options.
@@ -148,26 +85,26 @@ func toggleViewFlag(f viewFlag) handler {
 		if err != nil {
 			return err
 		}
-		p := f.field(&d.view)
+		v := d.View()
+		p := f.field(v)
 		*p = &value
-		e.setStatus(f.label + ": " + onOff(value) + " for this buffer")
+		e.setStatus(f.Label + ": " + onOff(value) + " for this buffer")
 		return nil
 	})
 }
 
 // current reads the flag as the document has it now.
 func (f viewFlag) current(e *Editor, d *Document) bool {
-	probe := d.view
-	return OverrideOr(*f.field(&probe), f.def(e))
+	return OverrideOr(*f.field(d.View()), f.def(e))
 }
 
 // togglePageView sets the page view flag. It is stored only.
 func togglePageView(e *Editor, d *Document, args map[string]any) error {
-	value, err := boolArg(args, "value", !d.view.PageView)
+	value, err := boolArg(args, "value", !d.View().PageView)
 	if err != nil {
 		return err
 	}
-	d.view.PageView = value
+	d.View().PageView = value
 	e.setStatus("Page view: " + onOff(value) + " for this buffer (not drawn in this port)")
 	return nil
 }
@@ -179,8 +116,8 @@ func addRuler(e *Editor, d *Document, args map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if !slices.Contains(d.view.Rulers, col) {
-		d.view.Rulers = append(slices.Clone(d.view.Rulers), col)
+	if !slices.Contains(d.View().Rulers, col) {
+		d.View().Rulers = append(slices.Clone(d.View().Rulers), col)
 	}
 	e.setStatus(fmt.Sprintf("Ruler added at column %d", col))
 	return nil
@@ -193,11 +130,11 @@ func removeRuler(e *Editor, d *Document, args map[string]any) error {
 	if err != nil {
 		return err
 	}
-	i := slices.Index(d.view.Rulers, col)
+	i := slices.Index(d.View().Rulers, col)
 	if i < 0 {
 		return fmt.Errorf("no ruler at column %d", col)
 	}
-	d.view.Rulers = slices.Concat(d.view.Rulers[:i], d.view.Rulers[i+1:])
+	d.View().Rulers = slices.Concat(d.View().Rulers[:i], d.View().Rulers[i+1:])
 	e.setStatus(fmt.Sprintf("Ruler removed at column %d", col))
 	return nil
 }
@@ -208,7 +145,7 @@ func setTabSize(e *Editor, d *Document, args map[string]any) error {
 	if err != nil {
 		return err
 	}
-	d.view.TabSize = size
+	d.View().TabSize = size
 	e.setStatus(fmt.Sprintf("Tab size %d for this buffer", size))
 	return nil
 }
@@ -220,7 +157,7 @@ func setPageWidth(e *Editor, d *Document, args map[string]any) error {
 	if err != nil {
 		return err
 	}
-	d.view.PageWidth = width
+	d.View().PageWidth = width
 	e.setStatus(fmt.Sprintf("Page width %d for this buffer (not drawn in this port)", width))
 	return nil
 }
@@ -232,8 +169,8 @@ func setLanguage(e *Editor, d *Document, args map[string]any) error {
 	if err != nil {
 		return err
 	}
-	d.language = strings.TrimSpace(name)
-	e.setStatus("Language: " + orString(d.language, "Text"))
+	d.SetLanguage(strings.TrimSpace(name))
+	e.setStatus("Language: " + orString(d.Language(), "Text"))
 	return nil
 }
 

@@ -1,31 +1,12 @@
 package editor
 
 import (
-	"slices"
-
 	"github.com/tbxark/gvim/buffer"
+	"slices"
 )
 
 // jumpHistoryMax is how many places the navigation history keeps, as in Fresh.
 const jumpHistoryMax = 100
-
-// jumpEntry is one place in the navigation history: a tab, a caret position and,
-// when text was selected there, the selection anchor.
-type jumpEntry struct {
-	doc      *Document
-	pos      buffer.Pos
-	anchor   buffer.Pos
-	selected bool
-}
-
-// jumpEntryOf is the place d is at now.
-func jumpEntryOf(d *Document) jumpEntry {
-	en := jumpEntry{doc: d, pos: d.Cursor}
-	if d.HasSelection() {
-		en.anchor, en.selected = d.Sel.Anchor, true
-	}
-	return en
-}
 
 // jumpHistory is the list of places that navigate_back and navigate_forward
 // walk. cur is the index of the place the user is at in the list. It is only
@@ -72,18 +53,18 @@ func (e *Editor) pushJump() {
 // goToJump switches to the tab of en and puts the caret at its position. A
 // place whose tab has been closed is skipped without an error.
 func (e *Editor) goToJump(en jumpEntry) {
-	i := e.indexOfDoc(en.doc)
+	i := e.indexOfDoc(en.Doc)
 	if i < 0 {
 		return
 	}
 	e.switchTo(i)
-	d := en.doc
-	d.Cursor = d.Buffer.Clamp(en.pos)
+	d := en.Doc
+	d.Cursor = d.Buffer.Clamp(en.Pos)
 	d.Sel = nil
-	if a := d.Buffer.Clamp(en.anchor); en.selected && a != d.Cursor {
+	if a := d.Buffer.Clamp(en.Anchor); en.Selected && a != d.Cursor {
 		d.Sel = &buffer.Selection{Anchor: a, Head: d.Cursor}
 	}
-	d.want = -1
+	d.Want = -1
 	e.ensureVisibleForJump(d)
 }
 
@@ -116,7 +97,7 @@ func navigateForward(e *Editor, _ map[string]any) error {
 func (e *Editor) stepJump(dir int) {
 	h := &e.extras.jumps
 	for i := h.cur + dir; i >= 0 && i < len(h.entries); i += dir {
-		if e.indexOfDoc(h.entries[i].doc) >= 0 {
+		if e.indexOfDoc(h.entries[i].Doc) >= 0 {
 			h.cur = i
 			e.goToJump(h.entries[i])
 			return

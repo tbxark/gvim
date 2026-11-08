@@ -47,78 +47,78 @@ func TestNewStartsWithUnnamedDocument(t *testing.T) {
 func TestTypingAndDeletion(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		opts    Options
 		script  func(t *testing.T, e *Editor)
-		want    string
+		Want    string
 		wantCur buffer.Pos
 	}{
 		{
-			name: "type then newline",
+			Name: "type then newline",
 			script: func(t *testing.T, e *Editor) {
 				typeText(t, e, "ab")
 				run(t, e, "insert_newline")
 				typeText(t, e, "c")
 			},
-			want:    "ab\nc",
+			Want:    "ab\nc",
 			wantCur: buffer.Pos{Line: 1, Col: 1},
 		},
 		{
-			name: "backspace joins lines",
+			Name: "backspace joins lines",
 			script: func(t *testing.T, e *Editor) {
 				typeText(t, e, "ab")
 				run(t, e, "insert_newline")
 				typeText(t, e, "cd")
 				run(t, e, "move_line_start", "delete_backward")
 			},
-			want:    "abcd",
+			Want:    "abcd",
 			wantCur: buffer.Pos{Line: 0, Col: 2},
 		},
 		{
-			name: "forward delete joins lines",
+			Name: "forward delete joins lines",
 			script: func(t *testing.T, e *Editor) {
 				typeText(t, e, "ab")
 				run(t, e, "insert_newline", "move_up", "move_line_end", "delete_forward")
 			},
-			want:    "ab",
+			Want:    "ab",
 			wantCur: buffer.Pos{Line: 0, Col: 2},
 		},
 		{
-			name: "tab inserts a tab rune",
+			Name: "tab inserts a tab rune",
 			opts: Options{UseTabs: true},
 			script: func(t *testing.T, e *Editor) {
 				run(t, e, "insert_tab")
 				typeText(t, e, "x")
 			},
-			want:    "\tx",
+			Want:    "\tx",
 			wantCur: buffer.Pos{Line: 0, Col: 2},
 		},
 		{
-			name: "delete word backward",
+			Name: "delete word backward",
 			script: func(t *testing.T, e *Editor) {
 				typeText(t, e, "foo bar")
 				run(t, e, "delete_word_backward")
 			},
-			want:    "foo ",
+			Want:    "foo ",
 			wantCur: buffer.Pos{Line: 0, Col: 4},
 		},
 		{
-			name: "delete to line end",
+			Name: "delete to line end",
 			script: func(t *testing.T, e *Editor) {
 				typeText(t, e, "hello")
 				run(t, e, "move_left", "move_left", "delete_to_line_end")
 			},
-			want:    "hel",
+			Want:    "hel",
 			wantCur: buffer.Pos{Line: 0, Col: 3},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(tt.opts)
 			tt.script(t, e)
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != tt.wantCur {
 				t.Fatalf("cursor = %+v, want %+v", got, tt.wantCur)

@@ -1,20 +1,12 @@
-// Package editor holds the state of an editing session: the open documents,
-// the active tab, the clipboard, and the status message. All changes go
-// through Do, which runs one named action (the same names the keymap uses).
 package editor
 
 import (
 	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/buffer"
 	"slices"
 	"time"
-
-	"github.com/tbxark/gvim/buffer"
 )
-
-// Action is the name of an editor command, such as "move_left" or "save".
-// Names match the action vocabulary in Fresh's keymaps.
-type Action string
 
 // ErrUnknownAction is returned by Do for an action name the editor does not implement.
 var ErrUnknownAction = errors.New("unknown action")
@@ -231,7 +223,7 @@ func New(opts Options) *Editor {
 	e := &Editor{rows: rows, cols: cols, opts: opts}
 	if !opts.Empty {
 		d := newDocument("", "")
-		d.eol = e.defaultEOL()
+		d.Eol = e.defaultEOL()
 		e.addDoc(d)
 	}
 	return e
@@ -281,7 +273,7 @@ func (e *Editor) OpenFile(path string) error {
 		return err
 	}
 	if i := e.pathIndex(path); i >= 0 {
-		e.docs[i].preview = false
+		e.docs[i].SetPreview(false)
 		if i != e.active {
 			e.pushJump()
 		}
@@ -321,7 +313,7 @@ func (e *Editor) Tabs() []Tab {
 	tabs := make([]Tab, len(e.docs))
 	for i, d := range e.docs {
 		name := d.Name()
-		if d.preview {
+		if d.Preview() {
 			name += previewSuffix
 		}
 		tabs[i] = Tab{
@@ -329,8 +321,8 @@ func (e *Editor) Tabs() []Tab {
 			Path:     d.Path,
 			Modified: d.Modified(),
 			Active:   i == e.active,
-			Preview:  d.preview,
-			Language: d.language,
+			Preview:  d.Preview(),
+			Language: d.Language(),
 		}
 	}
 	return tabs
@@ -341,7 +333,7 @@ func (e *Editor) Tabs() []Tab {
 // tab open it is the message of the empty editor.
 func (e *Editor) Status() string {
 	if d := e.Active(); d != nil {
-		return d.status
+		return d.Status
 	}
 	return e.emptyStatus
 }
@@ -349,7 +341,7 @@ func (e *Editor) Status() string {
 // setStatus sets the message of the active tab, or of the empty editor.
 func (e *Editor) setStatus(msg string) {
 	if d := e.Active(); d != nil {
-		d.status = msg
+		d.Status = msg
 		return
 	}
 	e.emptyStatus = msg
@@ -361,23 +353,17 @@ func (e *Editor) setError(err error) {
 	msg := err.Error()
 	e.setStatus(msg)
 	if d := e.Active(); d != nil {
-		d.statusErr = msg
+		d.StatusErr = msg
 		return
 	}
 	e.emptyErr = msg
-}
-
-// fail sets err as the status of d and marks it as an error.
-func (d *Document) fail(err error) {
-	d.status = err.Error()
-	d.statusErr = d.status
 }
 
 // StatusIsError reports whether the current status message reports a failure, as
 // opposed to a note such as "Saved" or "Copied". The warnings log keeps the failures.
 func (e *Editor) StatusIsError() bool {
 	if d := e.Active(); d != nil {
-		return d.status != "" && d.status == d.statusErr
+		return d.Status != "" && d.Status == d.StatusErr
 	}
 	return e.emptyStatus != "" && e.emptyStatus == e.emptyErr
 }
@@ -393,7 +379,7 @@ func (e *Editor) ClearStatus() { e.setStatus("") }
 // when no tab is open.
 func (e *Editor) SetLanguage(name string) {
 	if d := e.Active(); d != nil {
-		d.language = name
+		d.SetLanguage(name)
 	}
 }
 
@@ -481,14 +467,14 @@ func (e *Editor) Do(a Action, args map[string]any) Result {
 	// A refusal belongs to the action that caused it, so none from before is left over.
 	// A refused action in a large document puts the carets back (see takeRefusal).
 	var carets *cursorSnapshot
-	if d != nil && d.large != nil {
-		_ = d.takeRefusal()
-		carets = d.snapCursors()
+	if d != nil && d.LargeState() != nil {
+		_ = d.TakeRefusal()
+		carets = d.SnapCursors()
 	}
 	err := h(e, args)
 	if carets != nil && e.Active() == d {
-		if refused := d.takeRefusal(); refused != nil {
-			d.restoreCursors(carets)
+		if refused := d.TakeRefusal(); refused != nil {
+			d.RestoreCursors(carets)
 			if err == nil {
 				err = refused
 			}
@@ -504,14 +490,14 @@ func (e *Editor) Do(a Action, args map[string]any) Result {
 // permanent, err goes to the status, and the caret stays visible. Do and EndShell
 // both end this way.
 func (e *Editor) finish(err error) Result {
-	if d := e.Active(); d != nil && d.preview && d.Modified() {
+	if d := e.Active(); d != nil && d.Preview() && d.Modified() {
 		// An edit makes a preview tab permanent.
-		d.preview = false
+		d.SetPreview(false)
 	}
-	if d := e.Active(); d != nil && d.large != nil {
+	if d := e.Active(); d != nil && d.LargeState() != nil {
 		// A large document refuses an edit or a read it cannot do. The reason is the
 		// action's error unless the action has one already.
-		if refused := d.takeRefusal(); err == nil {
+		if refused := d.TakeRefusal(); err == nil {
 			err = refused
 		}
 	}
@@ -573,10 +559,10 @@ func (e *Editor) ensureVisible(d *Document) {
 	}
 	line := d.Cursor.Line
 	margin := 0
-	if d.Cursor != d.seen {
+	if d.Cursor != d.Seen {
 		margin = e.scrollMargin()
 	}
-	d.seen = d.Cursor
+	d.Seen = d.Cursor
 	if line < d.Top+margin {
 		d.Top = line - margin
 	}
@@ -597,8 +583,8 @@ func (e *Editor) ensureVisible(d *Document) {
 func (e *Editor) newUntitled() *Document {
 	e.untitledSeq++
 	d := newDocument("", "")
-	d.untitled = e.untitledSeq
-	d.eol = e.defaultEOL()
+	d.SetUntitledNumber(e.untitledSeq)
+	d.Eol = e.defaultEOL()
 	return d
 }
 
@@ -609,5 +595,5 @@ func (e *Editor) pristineUntitled() bool {
 		return false
 	}
 	d := e.docs[0]
-	return d.Path == "" && !d.ext.virtual && !d.Modified() && d.Buffer.Empty()
+	return d.Path == "" && !d.Ext().Virtual && !d.Modified() && d.Buffer.Empty()
 }

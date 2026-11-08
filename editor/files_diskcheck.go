@@ -21,12 +21,12 @@ type DiskChange struct {
 // reads only what the plan recorded, so it may run in a command.
 func (e *Editor) PlanDiskCheck() func() []DiskChange {
 	type recorded struct {
-		path string
+		Path string
 		was  diskState
 	}
 	var files []recorded
 	for _, d := range e.docs {
-		if d.ext.virtual {
+		if d.Ext().Virtual {
 			continue
 		}
 		// A large document keeps its file open. The check is an fstat of that
@@ -34,18 +34,18 @@ func (e *Editor) PlanDiskCheck() func() []DiskChange {
 		// program replaced; the latter does not touch the file the document reads.
 		// Like the stat of RenamePath, it is the one exception to "Update does no IO".
 		_ = d.CheckSource()
-		if d.Path != "" && d.disk.exists {
-			files = append(files, recorded{d.Path, d.disk})
+		if d.Path != "" && d.Disk.Exists {
+			files = append(files, recorded{d.Path, d.Disk})
 		}
 	}
 	return func() []DiskChange {
 		out := make([]DiskChange, 0, len(files))
 		for _, f := range files {
-			now := diskStateOf(f.path)
+			now := diskStateOf(f.Path)
 			out = append(out, DiskChange{
-				Path:    f.path,
-				Changed: now.exists && !now.sameAs(f.was),
-				Stamp:   fmt.Sprintf("%d/%d", now.size, now.mtime.UnixNano()),
+				Path:    f.Path,
+				Changed: now.Exists && !now.SameAs(f.was),
+				Stamp:   fmt.Sprintf("%d/%d", now.Size, now.Mtime.UnixNano()),
 			})
 		}
 		return out

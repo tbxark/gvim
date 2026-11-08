@@ -23,10 +23,10 @@ func (e *Editor) ExtendSelection(p buffer.Pos, u Unit) {
 		return
 	}
 	p = d.Buffer.Clamp(p)
-	d.want = -1
-	defer func() { d.seen = d.Cursor }()
+	d.Want = -1
+	defer func() { d.Seen = d.Cursor }()
 	if u == UnitChar {
-		d.move(p, true)
+		d.Move(p, true)
 		return
 	}
 	d.Buffer.Break()
@@ -90,7 +90,7 @@ func (e *Editor) OpenPreview(path string) error {
 		e.setError(err)
 		return err
 	}
-	d.preview = true
+	d.SetPreview(true)
 	switch i := e.previewIndex(); {
 	case i >= 0:
 		e.releaseDoc(e.docs[i])
@@ -105,6 +105,6 @@ func (e *Editor) OpenPreview(path string) error {
 		e.addDoc(d)
 		e.switchTo(len(e.docs) - 1)
 	}
-	e.setStatus(d.openStatus())
+	e.setStatus(d.OpenStatus())
 	return nil
 }

@@ -31,10 +31,10 @@ func (e *Editor) saveAllStatus(results []SaveResult, p SavePlan) error {
 	var first error
 	failed := 0
 	for _, r := range results {
-		if r.err != nil {
+		if r.Err() != nil {
 			failed++
 			if first == nil {
-				first = r.err
+				first = r.Err()
 			}
 		}
 	}

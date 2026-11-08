@@ -56,7 +56,7 @@ func openLarge(t *testing.T, opts Options, content string) (*Editor, *Document) 
 
 // withSource returns opts with the bytes of every large file read from src, not the disk.
 func withSource(opts Options, src buffer.Source) Options {
-	opts.openSrc = &sourceOpener{open: func(string) (buffer.Source, error) { return src, nil }}
+	opts.openSrc = &sourceOpener{Open: func(string) (buffer.Source, error) { return src, nil }}
 	return opts
 }
 

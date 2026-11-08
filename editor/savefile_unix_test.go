@@ -37,8 +37,8 @@ func otherGroup(t *testing.T, gid int) int {
 
 // savers are the ways a document is saved: a small one and a large one.
 var savers = []struct {
-	name string
-	open func(t *testing.T, path string) (*Editor, *Document)
+	Name string
+	Open func(t *testing.T, path string) (*Editor, *Document)
 }{
 	{"small", func(t *testing.T, path string) (*Editor, *Document) {
 		t.Helper()
@@ -62,14 +62,14 @@ var savers = []struct {
 func TestSaveKeepsTheGroupOfTheFile(t *testing.T) {
 	t.Parallel()
 	for _, sv := range savers {
-		t.Run(sv.name, func(t *testing.T) {
+		t.Run(sv.Name, func(t *testing.T) {
 			t.Parallel()
 			path := writeLargeFile(t, "shared.txt", lineText(150))
 			group := otherGroup(t, int(statOf(t, path).Gid))
 			if err := os.Chown(path, -1, group); err != nil {
 				t.Skipf("chgrp: %v", err)
 			}
-			e, d := sv.open(t, path)
+			e, d := sv.Open(t, path)
 			d.Buffer.Insert(buffer.Pos{}, "A")
 			if err := e.Save(); err != nil {
 				t.Fatal(err)
@@ -77,8 +77,8 @@ func TestSaveKeepsTheGroupOfTheFile(t *testing.T) {
 			if got := int(statOf(t, path).Gid); got != group {
 				t.Errorf("gid = %d after the save, want %d", got, group)
 			}
-			if !strings.HasPrefix(d.status, "Saved") || strings.Contains(d.status, "could not") {
-				t.Errorf("status = %q, want a plain Saved", d.status)
+			if !strings.HasPrefix(d.Status, "Saved") || strings.Contains(d.Status, "could not") {
+				t.Errorf("status = %q, want a plain Saved", d.Status)
 			}
 		})
 	}
@@ -87,7 +87,7 @@ func TestSaveKeepsTheGroupOfTheFile(t *testing.T) {
 func TestSaveKeepsTheSetGroupBit(t *testing.T) {
 	t.Parallel()
 	for _, sv := range savers {
-		t.Run(sv.name, func(t *testing.T) {
+		t.Run(sv.Name, func(t *testing.T) {
 			t.Parallel()
 			path := writeLargeFile(t, "shared.txt", lineText(150))
 			if err := os.Chmod(path, 0o640|os.ModeSetgid); err != nil {
@@ -96,7 +96,7 @@ func TestSaveKeepsTheSetGroupBit(t *testing.T) {
 			if info, _ := os.Stat(path); info.Mode()&os.ModeSetgid == 0 {
 				t.Skip("this system does not keep the set-group bit")
 			}
-			e, d := sv.open(t, path)
+			e, d := sv.Open(t, path)
 			d.Buffer.Insert(buffer.Pos{}, "A")
 			if err := e.Save(); err != nil {
 				t.Fatal(err)
@@ -115,14 +115,14 @@ func TestSaveKeepsTheSetGroupBit(t *testing.T) {
 func TestSaveSaysWhenALinkIsBroken(t *testing.T) {
 	t.Parallel()
 	for _, sv := range savers {
-		t.Run(sv.name, func(t *testing.T) {
+		t.Run(sv.Name, func(t *testing.T) {
 			t.Parallel()
 			path := writeLargeFile(t, "shared.txt", lineText(150))
 			other := filepath.Join(filepath.Dir(path), "other-name.txt")
 			if err := os.Link(path, other); err != nil {
 				t.Skipf("link: %v", err)
 			}
-			e, d := sv.open(t, path)
+			e, d := sv.Open(t, path)
 			d.Buffer.Insert(buffer.Pos{}, "A")
 			if err := e.Save(); err != nil {
 				t.Fatal(err)
@@ -133,16 +133,16 @@ func TestSaveSaysWhenALinkIsBroken(t *testing.T) {
 			if readFile(t, other) != lineText(150) {
 				t.Fatal("setup: the other name changed, so the link was not broken")
 			}
-			if !strings.Contains(d.status, "link") {
-				t.Errorf("status = %q: it does not say that the link was broken", d.status)
+			if !strings.Contains(d.Status, "link") {
+				t.Errorf("status = %q: it does not say that the link was broken", d.Status)
 			}
 			// The next save has a file with one name and says nothing.
 			d.Buffer.Insert(buffer.Pos{}, "B")
 			if err := e.Save(); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.HasPrefix(d.status, "Saved") || strings.Contains(d.status, "link") {
-				t.Errorf("status = %q after the second save, want a plain Saved", d.status)
+			if !strings.HasPrefix(d.Status, "Saved") || strings.Contains(d.Status, "link") {
+				t.Errorf("status = %q after the second save, want a plain Saved", d.Status)
 			}
 		})
 	}
@@ -159,14 +159,14 @@ func TestSaveSaysWhenTheOwnerCannotBeKept(t *testing.T) {
 		t.Skipf("chgrp: %v", err)
 	}
 	for _, sv := range savers {
-		t.Run(sv.name, func(t *testing.T) {
-			e, d := sv.open(t, path)
+		t.Run(sv.Name, func(t *testing.T) {
+			e, d := sv.Open(t, path)
 			d.Buffer.Insert(buffer.Pos{}, "A")
 			if err := e.Save(); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(d.status, "group") {
-				t.Errorf("status = %q: it does not say that the group changed", d.status)
+			if !strings.Contains(d.Status, "group") {
+				t.Errorf("status = %q: it does not say that the group changed", d.Status)
 			}
 			// The file is back in the saver's group by the first save; give it back
 			// for the next case.

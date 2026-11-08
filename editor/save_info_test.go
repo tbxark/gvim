@@ -20,10 +20,10 @@ func TestSaveResultWritten(t *testing.T) {
 	if len(ok) != 1 {
 		t.Fatalf("PlanSave ran %d jobs, want 1", len(ok))
 	}
-	failed := SaveResult{job: ok[0].job, err: errors.New("disk full")}
-	skipped := SaveResult{job: ok[0].job, skipped: true}
+	failed := SaveResult{Job: ok[0].Job}.WithErr(errors.New("disk full"))
+	skipped := SaveResult{Job: ok[0].Job, Skipped: true}
 	tests := []struct {
-		name     string
+		Name     string
 		r        SaveResult
 		wantOK   bool
 		wantPath string
@@ -35,7 +35,7 @@ func TestSaveResultWritten(t *testing.T) {
 		{"zero value", SaveResult{}, false, "", 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			p, d, gotOK := tt.r.Written()
 			if gotOK != tt.wantOK || p != tt.wantPath || d != tt.wantID {

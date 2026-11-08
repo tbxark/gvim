@@ -48,18 +48,18 @@ func (e *Editor) PlanSave() (SavePlan, error) {
 		e.setError(err)
 		return SavePlan{}, err
 	}
-	if d.ext.virtual {
+	if d.Ext().Virtual {
 		e.setError(ErrVirtual)
 		return SavePlan{}, ErrVirtual
 	}
 	// A large document whose file changed under it is read-only, but the reason is the
 	// change, not a setting.
 	_ = d.CheckSource()
-	if d.frozen() {
+	if d.Frozen() {
 		e.setError(errFileChanged)
 		return SavePlan{}, errFileChanged
 	}
-	if d.readOnly {
+	if d.ReadOnly() {
 		err := ErrReadOnly
 		e.setError(err)
 		return SavePlan{}, err
@@ -69,7 +69,7 @@ func (e *Editor) PlanSave() (SavePlan, error) {
 		e.setError(err)
 		return SavePlan{}, err
 	}
-	return SavePlan{jobs: []SaveJob{d.planSave(d.Path, e.opts)}}, nil
+	return SavePlan{jobs: []SaveJob{d.PlanSave(d.Path, e.opts.documentSettings())}}, nil
 }
 
 // PlanSaveAs prepares the write of the active document to path, as SaveAs does, and
@@ -83,7 +83,7 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 		e.setError(err)
 		return SavePlan{}, err
 	}
-	if d.ext.virtual {
+	if d.Ext().Virtual {
 		e.setError(ErrVirtual)
 		return SavePlan{}, ErrVirtual
 	}
@@ -102,10 +102,10 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 		e.setError(err)
 		return SavePlan{}, err
 	}
-	job := d.planSave(path, e.opts)
-	job.checkDisk = false
-	job.refuseExisting = !force
-	job.ownPath = d.Path
+	job := d.PlanSave(path, e.opts.documentSettings())
+	job.CheckDisk = false
+	job.RefuseExisting = !force
+	job.OwnPath = d.Path
 	return SavePlan{jobs: []SaveJob{job}, renameTo: path}, nil
 }
 
@@ -120,16 +120,16 @@ func (e *Editor) PlanSaveAll() (SavePlan, error) {
 	}
 	p := SavePlan{all: true}
 	for _, d := range e.docs {
-		if !d.dirty() {
+		if !d.Dirty() {
 			continue
 		}
 		switch {
-		case d.readOnly:
+		case d.ReadOnly():
 			p.readOnly++
 		case d.Untitled():
 			p.untitled++
 		default:
-			p.jobs = append(p.jobs, d.planSave(d.Path, e.opts))
+			p.jobs = append(p.jobs, d.PlanSave(d.Path, e.opts.documentSettings()))
 		}
 	}
 	return p, nil
@@ -145,24 +145,24 @@ func (e *Editor) ApplySavePlan(p SavePlan, results []SaveResult) error {
 	if p.all {
 		for _, r := range results {
 			// The summary replaces the note of a large document's save.
-			_ = r.job.doc.savedStatus()
+			_ = r.Job.Doc.SavedStatus()
 		}
 		return e.saveAllStatus(results, p)
 	}
 	if len(results) == 0 || err != nil {
 		return err
 	}
-	d := results[0].job.doc
+	d := results[0].Job.Doc
 	if p.renameTo != "" {
-		d.rename(p.renameTo)
-		d.preview = false
+		d.Rename(p.renameTo)
+		d.SetPreview(false)
 	}
 	// The note is taken either way. An edit that landed while the write was in flight
 	// leaves the status empty, since the buffer is no longer the text that was saved.
-	status := d.savedStatus()
-	d.status = ""
+	status := d.SavedStatus()
+	d.Status = ""
 	if !d.Modified() {
-		d.status = status
+		d.Status = status
 	}
 	return nil
 }

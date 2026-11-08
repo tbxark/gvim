@@ -16,19 +16,19 @@ func docAt(text string, line, col int) *Editor {
 // withExtras gives the active document extra carets at the given positions.
 func withExtras(e *Editor, ps ...buffer.Pos) {
 	for _, p := range ps {
-		e.Active().extra = append(e.Active().extra, Caret{Cursor: p})
+		e.Active().Extra = append(e.Active().Extra, Caret{Cursor: p})
 	}
 }
 
 func TestPlainMoveCollapsesSelectionToEdge(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
-		start buffer.Pos
+		Name  string
+		Text  string
+		Start buffer.Pos
 		steps []Action
-		want  buffer.Pos
-		sel   bool
+		Want  buffer.Pos
+		Sel   bool
 	}{
 		{"left goes to the selection start", "abcdef", caretPos(0, 1), []Action{"select_right", "select_right", "select_right", "move_left"}, caretPos(0, 1), false},
 		{"right goes to the selection end", "abcdef", caretPos(0, 1), []Action{"select_right", "select_right", "select_right", "move_right"}, caretPos(0, 4), false},
@@ -40,13 +40,13 @@ func TestPlainMoveCollapsesSelectionToEdge(t *testing.T) {
 		{"word motions do not collapse", "abc def ghi", caretPos(0, 0), []Action{"select_right", "move_word_right"}, caretPos(0, 4), false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(tt.text, tt.start.Line, tt.start.Col)
+			e := docAt(tt.Text, tt.Start.Line, tt.Start.Col)
 			run(t, e, tt.steps...)
 			d := e.Active()
-			if d.Cursor != tt.want || d.HasSelection() != tt.sel {
-				t.Fatalf("caret %+v selection %v, want %+v selection %v", d.Cursor, d.HasSelection(), tt.want, tt.sel)
+			if d.Cursor != tt.Want || d.HasSelection() != tt.Sel {
+				t.Fatalf("caret %+v selection %v, want %+v selection %v", d.Cursor, d.HasSelection(), tt.Want, tt.Sel)
 			}
 		})
 	}
@@ -55,10 +55,10 @@ func TestPlainMoveCollapsesSelectionToEdge(t *testing.T) {
 func TestVerticalMoveAtDocumentEdges(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		start    buffer.Pos
+		Name     string
+		Start    buffer.Pos
 		steps    []Action
-		want     buffer.Pos
+		Want     buffer.Pos
 		wantAnch *buffer.Pos
 	}{
 		{"up on the first line goes to the start", caretPos(0, 3), []Action{"move_up"}, caretPos(0, 0), nil},
@@ -70,13 +70,13 @@ func TestVerticalMoveAtDocumentEdges(t *testing.T) {
 		{"down in the middle is unchanged", caretPos(0, 3), []Action{"move_down"}, caretPos(1, 3), nil},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt("abcd\nefgh", tt.start.Line, tt.start.Col)
+			e := docAt("abcd\nefgh", tt.Start.Line, tt.Start.Col)
 			run(t, e, tt.steps...)
 			d := e.Active()
-			if d.Cursor != tt.want {
-				t.Fatalf("caret = %+v, want %+v", d.Cursor, tt.want)
+			if d.Cursor != tt.Want {
+				t.Fatalf("caret = %+v, want %+v", d.Cursor, tt.Want)
 			}
 			if tt.wantAnch == nil {
 				if d.HasSelection() {
@@ -94,11 +94,11 @@ func TestVerticalMoveAtDocumentEdges(t *testing.T) {
 func TestVerticalMoveKeepsDisplayColumn(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
-		start buffer.Pos
+		Name  string
+		Text  string
+		Start buffer.Pos
 		steps []Action
-		want  buffer.Pos
+		Want  buffer.Pos
 	}{
 		{"wide characters count two cells", "你好xy\nabcdef", caretPos(0, 2), []Action{"move_down"}, caretPos(1, 4)},
 		{"back up lands after the wide characters", "你好xy\nabcdef", caretPos(1, 4), []Action{"move_up"}, caretPos(0, 2)},
@@ -109,12 +109,12 @@ func TestVerticalMoveKeepsDisplayColumn(t *testing.T) {
 		{"the wanted column survives a short line", "abcdef\n你\nabcdef", caretPos(0, 4), []Action{"move_down", "move_down"}, caretPos(2, 4)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(tt.text, tt.start.Line, tt.start.Col)
+			e := docAt(tt.Text, tt.Start.Line, tt.Start.Col)
 			run(t, e, tt.steps...)
-			if got := e.Active().Cursor; got != tt.want {
-				t.Fatalf("caret = %+v, want %+v", got, tt.want)
+			if got := e.Active().Cursor; got != tt.Want {
+				t.Fatalf("caret = %+v, want %+v", got, tt.Want)
 			}
 		})
 	}
@@ -123,10 +123,10 @@ func TestVerticalMoveKeepsDisplayColumn(t *testing.T) {
 func TestSelectWordNextToAWord(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		text string
-		col  int
-		want string
+		Name string
+		Text string
+		Col  int
+		Want string
 	}{
 		{"inside a word", "foo bar", 1, "foo"},
 		{"just after a word", "foo bar", 3, "foo"},
@@ -138,12 +138,12 @@ func TestSelectWordNextToAWord(t *testing.T) {
 		{"a combining mark stays in the word", "cafe\u0301 bar", 1, "cafe\u0301"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(tt.text, 0, tt.col)
+			e := docAt(tt.Text, 0, tt.Col)
 			run(t, e, "select_word")
-			if got := marksSelected(e); got != tt.want {
-				t.Fatalf("selected %q, want %q", got, tt.want)
+			if got := marksSelected(e); got != tt.Want {
+				t.Fatalf("selected %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -152,10 +152,10 @@ func TestSelectWordNextToAWord(t *testing.T) {
 func TestMoveWordEndStopsAtPunctuation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
-		start buffer.Pos
-		want  buffer.Pos
+		Name  string
+		Text  string
+		Start buffer.Pos
+		Want  buffer.Pos
 	}{
 		{"word before punctuation", "foo(bar)", caretPos(0, 0), caretPos(0, 3)},
 		{"punctuation run stops", "foo((bar)", caretPos(0, 3), caretPos(0, 5)},
@@ -167,12 +167,12 @@ func TestMoveWordEndStopsAtPunctuation(t *testing.T) {
 		{"end of document stays", "foo", caretPos(0, 3), caretPos(0, 3)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(tt.text, tt.start.Line, tt.start.Col)
+			e := docAt(tt.Text, tt.Start.Line, tt.Start.Col)
 			run(t, e, "move_word_end")
-			if got := e.Active().Cursor; got != tt.want {
-				t.Fatalf("caret = %+v, want %+v", got, tt.want)
+			if got := e.Active().Cursor; got != tt.Want {
+				t.Fatalf("caret = %+v, want %+v", got, tt.Want)
 			}
 		})
 	}
@@ -196,10 +196,10 @@ func TestEscapeEndsMarkModeAndSelection(t *testing.T) {
 func TestGotoMatchingBracketEnclosingAndAngle(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		lang     string
-		col      int
+		Col      int
 		wantCol  int
 		wantFail bool
 	}{
@@ -212,9 +212,9 @@ func TestGotoMatchingBracketEnclosingAndAngle(t *testing.T) {
 		{"a comparison is skipped outside html", "if (a < b) {", "", 6, 9, false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(tt.text, 0, tt.col)
+			e := docAt(tt.Text, 0, tt.Col)
 			e.SetLanguage(tt.lang)
 			r := e.Do("goto_matching_bracket", nil)
 			if (r.Err != nil) != tt.wantFail {
@@ -236,9 +236,9 @@ func TestGraphemeClusterMovementAndDeletion(t *testing.T) {
 		flags  = "\U0001F1E9\U0001F1EA\U0001F1EB\U0001F1F7"
 	)
 	tests := []struct {
-		name     string
-		text     string
-		start    int
+		Name     string
+		Text     string
+		Start    int
 		action   Action
 		wantCol  int
 		wantText string
@@ -255,9 +255,9 @@ func TestGraphemeClusterMovementAndDeletion(t *testing.T) {
 		{"plain text is unchanged", "abc", 1, "move_right", 2, "abc"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(tt.text, 0, tt.start)
+			e := docAt(tt.Text, 0, tt.Start)
 			run(t, e, tt.action)
 			if got := e.Active().Cursor.Col; got != tt.wantCol {
 				t.Fatalf("caret col = %d, want %d", got, tt.wantCol)
@@ -282,58 +282,58 @@ func TestGraphemeDeletionAtEveryCaret(t *testing.T) {
 func TestMotionsRunAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
-		start buffer.Pos
-		extra buffer.Pos
+		Name  string
+		Text  string
+		Start buffer.Pos
+		Extra buffer.Pos
 		steps []Action
-		want  carets
+		Want  carets
 	}{
 		{
-			name: "right moves both", text: "abcd\nefgh", start: caretPos(0, 1), extra: caretPos(1, 1),
+			Name: "right moves both", Text: "abcd\nefgh", Start: caretPos(0, 1), Extra: caretPos(1, 1),
 			steps: []Action{"move_right"},
-			want:  carets{primary: Caret{Cursor: caretPos(0, 2)}, extras: []Caret{{Cursor: caretPos(1, 2)}}},
+			Want:  carets{Primary: Caret{Cursor: caretPos(0, 2)}, extras: []Caret{{Cursor: caretPos(1, 2)}}},
 		},
 		{
-			name: "select_right extends both", text: "abcd\nefgh", start: caretPos(0, 1), extra: caretPos(1, 1),
+			Name: "select_right extends both", Text: "abcd\nefgh", Start: caretPos(0, 1), Extra: caretPos(1, 1),
 			steps: []Action{"select_right"},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 1), caretPos(0, 2))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 1), caretPos(0, 2))},
 				extras:  []Caret{{Cursor: caretPos(1, 2), Sel: caretSel(caretPos(1, 1), caretPos(1, 2))}},
 			},
 		},
 		{
-			name: "each caret keeps its own wanted column", text: "abcd\nx\nabcdef\ny", start: caretPos(0, 3), extra: caretPos(2, 5),
+			Name: "each caret keeps its own wanted column", Text: "abcd\nx\nabcdef\ny", Start: caretPos(0, 3), Extra: caretPos(2, 5),
 			steps: []Action{"move_down", "move_up"},
-			want:  carets{primary: Caret{Cursor: caretPos(0, 3)}, extras: []Caret{{Cursor: caretPos(2, 5)}}},
+			Want:  carets{Primary: Caret{Cursor: caretPos(0, 3)}, extras: []Caret{{Cursor: caretPos(2, 5)}}},
 		},
 		{
-			name: "carets that meet merge", text: "abcd", start: caretPos(0, 1), extra: caretPos(0, 2),
+			Name: "carets that meet merge", Text: "abcd", Start: caretPos(0, 1), Extra: caretPos(0, 2),
 			steps: []Action{"move_line_start"},
-			want:  carets{primary: Caret{Cursor: caretPos(0, 0)}},
+			Want:  carets{Primary: Caret{Cursor: caretPos(0, 0)}},
 		},
 		{
-			name: "end of line moves both", text: "ab\ncdef", start: caretPos(0, 0), extra: caretPos(1, 0),
+			Name: "end of line moves both", Text: "ab\ncdef", Start: caretPos(0, 0), Extra: caretPos(1, 0),
 			steps: []Action{"move_line_end"},
-			want:  carets{primary: Caret{Cursor: caretPos(0, 2)}, extras: []Caret{{Cursor: caretPos(1, 4)}}},
+			Want:  carets{Primary: Caret{Cursor: caretPos(0, 2)}, extras: []Caret{{Cursor: caretPos(1, 4)}}},
 		},
 		{
-			name: "select_word selects at both", text: "ab cd\nef gh", start: caretPos(0, 1), extra: caretPos(1, 4),
+			Name: "select_word selects at both", Text: "ab cd\nef gh", Start: caretPos(0, 1), Extra: caretPos(1, 4),
 			steps: []Action{"select_word"},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 0), caretPos(0, 2))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 2), Sel: caretSel(caretPos(0, 0), caretPos(0, 2))},
 				extras:  []Caret{{Cursor: caretPos(1, 5), Sel: caretSel(caretPos(1, 3), caretPos(1, 5))}},
 			},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt(tt.text, tt.start.Line, tt.start.Col)
-			withExtras(e, tt.extra)
+			e := docAt(tt.Text, tt.Start.Line, tt.Start.Col)
+			withExtras(e, tt.Extra)
 			run(t, e, tt.steps...)
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -363,10 +363,10 @@ func TestPageMoveShiftsEveryCaret(t *testing.T) {
 func TestSetCursorSnapsToClusterStart(t *testing.T) {
 	t.Parallel()
 	e := docAt("ae\u0301b", 0, 0)
-	for _, tt := range []struct{ col, want int }{{0, 0}, {1, 1}, {2, 1}, {3, 3}, {4, 4}} {
-		e.SetCursor(caretPos(0, tt.col), false)
-		if got := e.Active().Cursor.Col; got != tt.want {
-			t.Errorf("SetCursor(col %d) -> col %d, want %d", tt.col, got, tt.want)
+	for _, tt := range []struct{ Col, Want int }{{0, 0}, {1, 1}, {2, 1}, {3, 3}, {4, 4}} {
+		e.SetCursor(caretPos(0, tt.Col), false)
+		if got := e.Active().Cursor.Col; got != tt.Want {
+			t.Errorf("SetCursor(col %d) -> col %d, want %d", tt.Col, got, tt.Want)
 		}
 	}
 }
@@ -376,8 +376,8 @@ func TestSetCursorExtendSelectsAcrossAPartialCluster(t *testing.T) {
 	// "cafe" with a combining acute: the cluster e+U+0301 spans columns 3 to 5.
 	const text = "cafe\u0301 x"
 	tests := []struct {
-		name         string
-		from, to     buffer.Pos
+		Name         string
+		From, To     buffer.Pos
 		wantAnchor   buffer.Pos
 		wantHead     buffer.Pos
 		wantSelected string
@@ -387,11 +387,11 @@ func TestSetCursorExtendSelectsAcrossAPartialCluster(t *testing.T) {
 		{"backward end inside the cluster snaps to its start", caretPos(0, 6), caretPos(0, 4), caretPos(0, 6), caretPos(0, 3), "e\u0301 "},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := docAt(text, 0, 0)
-			e.SetCursor(tt.from, false)
-			e.SetCursor(tt.to, true)
+			e.SetCursor(tt.From, false)
+			e.SetCursor(tt.To, true)
 			d := e.Active()
 			if !d.HasSelection() {
 				t.Fatalf("no selection, cursor %+v sel %+v", d.Cursor, d.Sel)

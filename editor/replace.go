@@ -16,7 +16,7 @@ func (e *Editor) ReplaceMatch(q search.Query, repl string, m search.Match) (stri
 	if err != nil {
 		return "", err
 	}
-	if d.large != nil {
+	if d.LargeState() != nil {
 		return replaceMatchLarge(e, d, q, repl, m)
 	}
 	return search.Replace(d.Buffer, q, repl, m)
@@ -33,10 +33,10 @@ func replaceMatchLarge(e *Editor, d *Document, q search.Query, repl string, m se
 	case err == nil:
 		return out, nil
 	case errors.Is(err, search.ErrMatchTooLarge):
-		err = &largeError{msg: "replace: match too large for large file mode", errs: []error{ErrLargeFile, err}}
+		err = &largeError{Msg: "replace: match too large for large file mode", Errs: []error{ErrLargeFile, err}}
 	case errors.Is(err, buffer.ErrLineTooLong), errors.Is(err, buffer.ErrInvalidUTF8),
 		errors.Is(err, buffer.ErrOverlayFull), errors.Is(err, buffer.ErrLineOverBudget), errors.Is(err, buffer.ErrSourceChanged):
-		err = d.refusalError(err)
+		err = d.RefusalError(err)
 	default:
 		return out, err // no match, or a pattern that does not compile: the caller reports it
 	}
@@ -54,9 +54,9 @@ func (e *Editor) ReplaceMatches(q search.Query, repl string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if d.large != nil {
+	if d.LargeState() != nil {
 		// Replace All lists every match of the document.
-		err := &largeError{msg: "Replace All is not available in large file mode", errs: []error{ErrLargeFile}}
+		err := &largeError{Msg: "Replace All is not available in large file mode", Errs: []error{ErrLargeFile}}
 		e.setError(err)
 		return 0, err
 	}
@@ -90,16 +90,16 @@ func (e *Editor) writableActive() (*Document, error) {
 	switch {
 	case d == nil:
 		err = ErrNoDocument
-	case d.readOnly:
+	case d.ReadOnly():
 		err = ErrReadOnly
 	default:
-		err = d.refuseEditWhileRestoring("replace")
+		err = d.RefuseEditWhileRestoring("replace")
 	}
 	if err != nil {
 		e.setError(err)
 		return nil, err
 	}
-	d.lastMulti = nil
-	d.findRange = nil
+	d.LastMulti = nil
+	d.FindRange = nil
 	return d, nil
 }

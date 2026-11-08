@@ -14,13 +14,13 @@ import (
 func TestSaveKeepsExtendedAttributes(t *testing.T) {
 	t.Parallel()
 	for _, sv := range savers {
-		t.Run(sv.name, func(t *testing.T) {
+		t.Run(sv.Name, func(t *testing.T) {
 			t.Parallel()
 			path := writeLargeFile(t, "labelled.txt", lineText(150))
 			if err := unix.Setxattr(path, "user.gvim-test", []byte("kept"), 0); err != nil {
 				t.Skipf("setxattr: %v", err)
 			}
-			e, d := sv.open(t, path)
+			e, d := sv.Open(t, path)
 			d.Buffer.Insert(buffer.Pos{}, "A")
 			if err := e.Save(); err != nil {
 				t.Fatal(err)

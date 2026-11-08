@@ -50,9 +50,9 @@ func tabNames(e *Editor) []string {
 func TestSetCursorClampsWithoutScrolling(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		p    buffer.Pos
-		want buffer.Pos
+		Want buffer.Pos
 	}{
 		{"inside text", buffer.Pos{Line: 30, Col: 2}, buffer.Pos{Line: 30, Col: 2}},
 		{"column past line end", buffer.Pos{Line: 30, Col: 99}, buffer.Pos{Line: 30, Col: len("line 30")}},
@@ -60,14 +60,14 @@ func TestSetCursorClampsWithoutScrolling(t *testing.T) {
 		{"negative clamps to origin", buffer.Pos{Line: -4, Col: -4}, buffer.Pos{}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withDoc(numbered(100))
 			e.ScrollTo(20)
 			e.SetCursor(tt.p, false)
 			d := e.Active()
-			if d.Cursor != tt.want {
-				t.Fatalf("Cursor = %+v, want %+v", d.Cursor, tt.want)
+			if d.Cursor != tt.Want {
+				t.Fatalf("Cursor = %+v, want %+v", d.Cursor, tt.Want)
 			}
 			if d.Top != 20 {
 				t.Fatalf("SetCursor scrolled: Top = %d, want 20", d.Top)
@@ -94,9 +94,9 @@ func TestSetCursorExtendAndClear(t *testing.T) {
 func TestSelectRange(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		anchor     buffer.Pos
-		head       buffer.Pos
+		Name       string
+		Anchor     buffer.Pos
+		Head       buffer.Pos
 		wantSel    bool
 		wantCursor buffer.Pos
 	}{
@@ -106,10 +106,10 @@ func TestSelectRange(t *testing.T) {
 		{"positions clamp into document", buffer.Pos{Col: 0}, buffer.Pos{Line: 9, Col: 9}, true, buffer.Pos{Line: 0, Col: 5}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withDoc("hello")
-			e.SelectRange(tt.anchor, tt.head)
+			e.SelectRange(tt.Anchor, tt.Head)
 			d := e.Active()
 			if d.HasSelection() != tt.wantSel {
 				t.Fatalf("HasSelection = %v, want %v", d.HasSelection(), tt.wantSel)
@@ -127,11 +127,11 @@ func TestSelectRange(t *testing.T) {
 func TestScrollByAndScrollToClamp(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
-		start int
+		Name  string
+		Text  string
+		Start int
 		call  func(e *Editor)
-		want  int
+		Want  int
 	}{
 		{"ScrollBy down", numbered(10), 0, func(e *Editor) { e.ScrollBy(3) }, 3},
 		{"ScrollBy up past top clamps to zero", numbered(10), 2, func(e *Editor) { e.ScrollBy(-5) }, 0},
@@ -143,16 +143,16 @@ func TestScrollByAndScrollToClamp(t *testing.T) {
 		{"ScrollTo on empty buffer stays at zero", "", 0, func(e *Editor) { e.ScrollTo(7) }, 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := withDoc(tt.text)
-			e.ScrollTo(tt.start)
+			e := withDoc(tt.Text)
+			e.ScrollTo(tt.Start)
 			e.SetCursor(buffer.Pos{Line: 0, Col: 1}, false)
 			before := e.Active().Cursor
 			tt.call(e)
 			d := e.Active()
-			if d.Top != tt.want {
-				t.Fatalf("Top = %d, want %d", d.Top, tt.want)
+			if d.Top != tt.Want {
+				t.Fatalf("Top = %d, want %d", d.Top, tt.Want)
 			}
 			if d.Cursor != before {
 				t.Fatalf("scrolling moved the caret from %+v to %+v", before, d.Cursor)
@@ -182,7 +182,7 @@ func TestActivateTab(t *testing.T) {
 func TestCloseTabKeepsActiveDocument(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
+		Name       string
 		tabs       []string
 		active     int
 		close      int
@@ -195,7 +195,7 @@ func TestCloseTabKeepsActiveDocument(t *testing.T) {
 		{"close the active last tab", []string{"a", "b", "c"}, 2, 2, []string{"a", "b"}, "b"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withTabs(tt.tabs...)
 			e.switchTo(tt.active)

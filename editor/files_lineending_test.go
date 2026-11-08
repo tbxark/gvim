@@ -5,11 +5,11 @@ import "testing"
 func TestMixedLineEndingsAreKeptOnSave(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		content string
 		actions []Action // run from the start of the document
 		typed   string   // typed after the actions
-		want    string
+		Want    string
 	}{
 		{"unedited", "a\r\nb\nc\r\n", nil, "", "a\r\nb\nc\r\n"},
 		{"lf majority", "a\nb\r\nc\n", nil, "", "a\nb\r\nc\n"},
@@ -22,19 +22,19 @@ func TestMixedLineEndingsAreKeptOnSave(t *testing.T) {
 		{"new line at the end takes the majority ending", "a\r\nb\nc\r\n", []Action{"move_document_end"}, "x", "a\r\nb\nc\r\nx"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, path := openFixture(t, Options{}, tt.content)
 			run(t, e, tt.actions...)
 			typeText(t, e, tt.typed)
 			run(t, e, "save")
-			if got := readFile(t, path); got != tt.want {
-				t.Fatalf("saved %q, want %q", got, tt.want)
+			if got := readFile(t, path); got != tt.Want {
+				t.Fatalf("saved %q, want %q", got, tt.Want)
 			}
 			// A second save writes the same bytes: the record follows the save.
 			run(t, e, "save")
-			if got := readFile(t, path); got != tt.want {
-				t.Fatalf("second save wrote %q, want %q", got, tt.want)
+			if got := readFile(t, path); got != tt.Want {
+				t.Fatalf("second save wrote %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -44,7 +44,7 @@ func TestSetLineEndingNormalisesAMixedFile(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		value string
-		want  string
+		Want  string
 	}{
 		{"crlf", "a\r\nb\r\nc\r\n"},
 		{"lf", "a\nb\nc\n"},
@@ -60,8 +60,8 @@ func TestSetLineEndingNormalisesAMixedFile(t *testing.T) {
 				t.Fatal("Modified() = false after normalising the line endings, want true")
 			}
 			run(t, e, "save")
-			if got := readFile(t, path); got != tt.want {
-				t.Fatalf("saved %q, want %q", got, tt.want)
+			if got := readFile(t, path); got != tt.Want {
+				t.Fatalf("saved %q, want %q", got, tt.Want)
 			}
 		})
 	}

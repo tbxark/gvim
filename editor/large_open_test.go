@@ -13,28 +13,28 @@ import (
 func TestLargeThresholdBoundary(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
+		Name      string
 		mutate    func(*Options)
-		size      int
+		Size      int
 		wantLarge bool
 	}{
-		{name: "size equal to the threshold", size: 1024, wantLarge: true},
-		{name: "size above the threshold", size: 1025, wantLarge: true},
-		{name: "size below the threshold", size: 1023, wantLarge: false},
-		{name: "mode off", mutate: func(o *Options) { o.LargeFileMode = false }, size: 4096, wantLarge: false},
-		{name: "threshold zero is off", mutate: func(o *Options) { o.LargeFileThresholdBytes = 0 }, size: 4096, wantLarge: false},
-		{name: "threshold negative is off", mutate: func(o *Options) { o.LargeFileThresholdBytes = -1 }, size: 4096, wantLarge: false},
+		{Name: "size equal to the threshold", Size: 1024, wantLarge: true},
+		{Name: "size above the threshold", Size: 1025, wantLarge: true},
+		{Name: "size below the threshold", Size: 1023, wantLarge: false},
+		{Name: "mode off", mutate: func(o *Options) { o.LargeFileMode = false }, Size: 4096, wantLarge: false},
+		{Name: "threshold zero is off", mutate: func(o *Options) { o.LargeFileThresholdBytes = 0 }, Size: 4096, wantLarge: false},
+		{Name: "threshold negative is off", mutate: func(o *Options) { o.LargeFileThresholdBytes = -1 }, Size: 4096, wantLarge: false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			opts := largeOptions()
 			if tt.mutate != nil {
 				tt.mutate(&opts)
 			}
-			content := strings.Repeat("x", tt.size-1) + "\n"
+			content := strings.Repeat("x", tt.Size-1) + "\n"
 			if tt.wantLarge {
-				content = strings.Repeat("abc def\n", tt.size/8) + strings.Repeat("x", tt.size%8)
+				content = strings.Repeat("abc def\n", tt.Size/8) + strings.Repeat("x", tt.Size%8)
 			}
 			_, d := openLarge(t, opts, content)
 			if d.Large() != tt.wantLarge {
@@ -66,8 +66,8 @@ func TestLargeOpenReadsLazily(t *testing.T) {
 	if got := d.Buffer.Line(0); got != "line 0000" {
 		t.Fatalf("Line(0) = %q", got)
 	}
-	if d.saved != "" {
-		t.Fatalf("a large document keeps no saved text, has %d bytes", len(d.saved))
+	if d.Saved != "" {
+		t.Fatalf("a large document keeps no saved text, has %d bytes", len(d.Saved))
 	}
 	if st := d.Buffer.Stats(); st.OverCap != 0 || st.MaterializedBytes != 0 {
 		t.Fatalf("open materialized text: %+v", st)
@@ -77,44 +77,44 @@ func TestLargeOpenReadsLazily(t *testing.T) {
 func TestLargeEncodingAndLineEnding(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		content  string
 		wantCode string
 		wantEnc  string
 		wantEOL  string
 		wantLine string
 	}{
-		{name: "ascii lf", content: lineText(120), wantCode: "utf-8", wantEnc: "ASCII", wantEOL: "LF", wantLine: "line 0000"},
+		{Name: "ascii lf", content: lineText(120), wantCode: "utf-8", wantEnc: "ASCII", wantEOL: "LF", wantLine: "line 0000"},
 		{
-			name:     "utf-8 with multibyte text",
+			Name:     "utf-8 with multibyte text",
 			content:  strings.Repeat("café olé\n", 100),
 			wantCode: "utf-8", wantEnc: "UTF-8", wantEOL: "LF", wantLine: "café olé",
 		},
 		{
-			name:     "utf-8 bom stays the codec and is not text",
+			Name:     "utf-8 bom stays the codec and is not text",
 			content:  "\ufeff" + lineText(120),
 			wantCode: "utf-8-bom", wantEnc: "UTF-8 BOM", wantEOL: "LF", wantLine: "line 0000",
 		},
 		{
-			name:     "crlf majority",
+			Name:     "crlf majority",
 			content:  strings.Repeat("crlf line\r\n", 100) + "bare\n",
 			wantCode: "utf-8", wantEnc: "ASCII", wantEOL: "CRLF", wantLine: "crlf line",
 		},
 		{
-			name:     "a tie is lf",
+			Name:     "a tie is lf",
 			content:  strings.Repeat("a\r\nb\n", 300),
 			wantCode: "utf-8", wantEnc: "ASCII", wantEOL: "LF", wantLine: "a",
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			_, d := openLarge(t, largeOptions(), tt.content)
 			if !d.Large() {
 				t.Fatal("not large")
 			}
-			if d.codec != tt.wantCode {
-				t.Errorf("codec = %q, want %q", d.codec, tt.wantCode)
+			if d.Codec != tt.wantCode {
+				t.Errorf("codec = %q, want %q", d.Codec, tt.wantCode)
 			}
 			if d.Encoding() != tt.wantEnc {
 				t.Errorf("Encoding() = %q, want %q", d.Encoding(), tt.wantEnc)
@@ -125,7 +125,7 @@ func TestLargeEncodingAndLineEnding(t *testing.T) {
 			if got := d.Buffer.Line(0); got != tt.wantLine {
 				t.Errorf("Line(0) = %q, want %q", got, tt.wantLine)
 			}
-			if d.ends != nil {
+			if d.Ends != nil {
 				t.Error("a large document records no per-break endings; its lines keep their own")
 			}
 		})
@@ -152,16 +152,16 @@ func TestLargeNonUTF8NeedsFullLoad(t *testing.T) {
 	t.Parallel()
 	latin1 := strings.Repeat("caf\xe9 cr\xe8me br\xfbl\xe9e\n", 100)
 	tests := []struct {
-		name    string
+		Name    string
 		content string
 	}{
-		{name: "latin-1 text", content: latin1},
-		{name: "invalid bytes at the end of the sample", content: strings.Repeat("abc\n", 16383) + "\xff\xff\xff\xff" + strings.Repeat("def\n", 200)},
-		{name: "utf-16 le with a bom", content: "\xff\xfe" + strings.Repeat("a\x00b\x00\n\x00", 400)},
-		{name: "utf-16 be with a bom", content: "\xfe\xff" + strings.Repeat("\x00a\x00b\x00\n", 400)},
+		{Name: "latin-1 text", content: latin1},
+		{Name: "invalid bytes at the end of the sample", content: strings.Repeat("abc\n", 16383) + "\xff\xff\xff\xff" + strings.Repeat("def\n", 200)},
+		{Name: "utf-16 le with a bom", content: "\xff\xfe" + strings.Repeat("a\x00b\x00\n\x00", 400)},
+		{Name: "utf-16 be with a bom", content: "\xfe\xff" + strings.Repeat("\x00a\x00b\x00\n", 400)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(largeOptions())
 			path := writeLargeFile(t, "enc.txt", tt.content)
@@ -218,8 +218,8 @@ func TestLoadFullFuncLoadsWhole(t *testing.T) {
 	if got := d.Buffer.Line(0); got != "café" {
 		t.Fatalf("Line(0) = %q", got)
 	}
-	if d.codec == "" || d.codec == "utf-8" {
-		t.Fatalf("codec = %q", d.codec)
+	if d.Codec == "" || d.Codec == "utf-8" {
+		t.Fatalf("codec = %q", d.Codec)
 	}
 	if d.Index().Complete != true {
 		t.Fatal("index of a document in memory is complete")
@@ -247,15 +247,15 @@ func TestLoadFullFuncRefusesOverTheLimit(t *testing.T) {
 func TestLargeBinarySampleIsReadOnly(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		content string
 	}{
-		{name: "nul in utf-8 text", content: strings.Repeat("text line\n", 200) + "a\x00b\n" + strings.Repeat("x\n", 50)},
-		{name: "control bytes", content: strings.Repeat("abc\x01\x02\n", 300)},
-		{name: "nul in utf-8 with a bom", content: "\ufeff" + strings.Repeat("ab\x00\n", 400)},
+		{Name: "nul in utf-8 text", content: strings.Repeat("text line\n", 200) + "a\x00b\n" + strings.Repeat("x\n", 50)},
+		{Name: "control bytes", content: strings.Repeat("abc\x01\x02\n", 300)},
+		{Name: "nul in utf-8 with a bom", content: "\ufeff" + strings.Repeat("ab\x00\n", 400)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, d := openLarge(t, largeOptions(), tt.content)
 			if !d.Large() || !d.Binary() || !d.ReadOnly() {
@@ -408,7 +408,7 @@ func TestOpenPreviewDoesNotLoadALargeFile(t *testing.T) {
 	if err := e.OpenPreview(small); err != nil {
 		t.Fatal(err)
 	}
-	if e.Active().Path != small || !e.Active().preview {
+	if e.Active().Path != small || !e.Active().Preview() {
 		t.Fatal("a small file still opens as a preview")
 	}
 	// A permanent open still works.
@@ -466,8 +466,8 @@ func TestCheckSourceHook(t *testing.T) {
 		if err := d.CheckSource(); err == nil {
 			t.Fatal("CheckSource found no change")
 		}
-		if !d.ReadOnly() || d.status != "File changed on disk: reload or Save As after reloading" {
-			t.Fatalf("read-only = %v, status = %q", d.ReadOnly(), d.status)
+		if !d.ReadOnly() || d.Status != "File changed on disk: reload or Save As after reloading" {
+			t.Fatalf("read-only = %v, status = %q", d.ReadOnly(), d.Status)
 		}
 	})
 	t.Run("grown", func(t *testing.T) {

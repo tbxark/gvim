@@ -13,10 +13,10 @@ import (
 // in document coordinates, and any change of text ends it (see guardDocument).
 func (e *Editor) SearchRange() (buffer.Selection, bool) {
 	d := e.Active()
-	if d == nil || d.findRange == nil {
+	if d == nil || d.FindRange == nil {
 		return buffer.Selection{}, false
 	}
-	return *d.findRange, true
+	return *d.FindRange, true
 }
 
 // findInSelection limits the find actions to the selection, in document order. It
@@ -26,7 +26,7 @@ func findInSelection(e *Editor, d *Document, _ map[string]any) error {
 		return fmt.Errorf("find_in_selection: %w", ErrNothingSelected)
 	}
 	from, to := d.Sel.Ordered()
-	d.findRange = &buffer.Selection{Anchor: from, Head: to}
+	d.FindRange = &buffer.Selection{Anchor: from, Head: to}
 	e.setStatus("Search limited to the selection")
 	return nil
 }
@@ -34,7 +34,7 @@ func findInSelection(e *Editor, d *Document, _ map[string]any) error {
 // clearSearch drops the search range. The search text and the highlights belong to the
 // find bar in the UI, which is not told by the editor.
 func clearSearch(e *Editor, d *Document, _ map[string]any) error {
-	d.findRange = nil
+	d.FindRange = nil
 	e.setStatus("Search cleared")
 	return nil
 }

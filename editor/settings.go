@@ -1,84 +1,10 @@
 package editor
 
-import "slices"
+import (
+	"slices"
 
-// Values of Options.VirtualSpace, as the config key editor.virtual_space writes them.
-const (
-	VirtualSpaceOff   = "off"
-	VirtualSpaceBlock = "block"
-	VirtualSpaceOn    = "on"
+	"github.com/tbxark/gvim/document"
 )
-
-// LanguageSettings are the effective editing and display settings of one document:
-// the global config options with the override of the document's language applied
-// (config.Config.EditorFor). The app builds them; the editor does not read config.
-//
-// The editor consumes TabSize, UseTabs, AutoIndent, AutoClose, AutoSurround and
-// CommentPrefix; the other fields are not consumed yet. SettingsFor says which layer
-// wins when a document also has a per-buffer override in ViewSettings.
-type LanguageSettings struct {
-	// Language is the language id the settings were resolved for, such as "go" or
-	// "text". It is lowercase and may be empty.
-	Language string
-
-	TabSize      int  // columns per tab stop
-	UseTabs      bool // Tab inserts a tab character
-	AutoIndent   bool // insert_newline indents the new line
-	AutoClose    bool // typing an opener inserts its closer
-	AutoSurround bool // typing an opener over a selection wraps the selection
-
-	LineWrap   bool
-	WrapColumn int // text column at which lines wrap; 0 means the viewport width
-	PageView   bool
-	PageWidth  int // page view width; 0 means the viewport width
-
-	// WhitespaceTabs* say whether tab marks show at the start, inside and at the end of
-	// a line once whitespace display is on. They are all false for a language that sets
-	// show_whitespace_tabs to false, such as Go.
-	WhitespaceTabsLeading  bool
-	WhitespaceTabsInner    bool
-	WhitespaceTabsTrailing bool
-
-	// IndentationGuide is false when indentation guides are suppressed for this
-	// document whatever the global mode is. Plain text defaults to false.
-	IndentationGuide bool
-
-	CommentPrefix  string // line comment prefix; empty means the editor's own table
-	WordCharacters string // extra word characters; empty means letters, digits and "_"
-
-	FormatOnSave bool
-	Formatter    *FormatterSpec
-	OnSave       []OnSaveAction
-	Indent       *IndentRules
-}
-
-// FormatterSpec is languages.<id>.formatter.
-type FormatterSpec struct {
-	Command   string
-	Args      []string
-	Stdin     bool
-	TimeoutMS int
-}
-
-// OnSaveAction is one entry of languages.<id>.on_save.
-type OnSaveAction struct {
-	Command    string
-	Args       []string
-	WorkingDir string
-	Stdin      bool
-	TimeoutMS  int
-	Enabled    bool
-}
-
-// IndentRules is languages.<id>.indent: regular expressions for the indentation of the
-// next line. An empty pattern is unset.
-type IndentRules struct {
-	IncreaseIndentPattern string
-	DecreaseIndentPattern string
-	IndentNextLinePattern string
-	DedentNextLinePattern string
-	SelfClosePattern      string
-}
 
 // SetLanguageSettings sets the resolver that gives the per-language settings of a
 // document (config languages.<id> merged over the global options). Nil means no language
@@ -109,14 +35,10 @@ func (e *Editor) SetRulers(cols []int) {
 // seedRulers gives a text buffer the configured rulers, as its own starting list. A
 // virtual buffer gets none: Fresh draws no rulers on those.
 func (e *Editor) seedRulers(d *Document) {
-	if !d.ext.virtual {
-		d.view.Rulers = slices.Clone(e.rulers)
+	if !d.Ext().Virtual {
+		d.View().Rulers = slices.Clone(e.rulers)
 	}
 }
-
-// SettingsResolver returns the settings for a document with the given language name
-// (Document.Language, which may be empty) and file path (which may be empty).
-type SettingsResolver func(language, path string) LanguageSettings
 
 // defaultLanguageSettings returns the settings of a document when SetLanguageSettings is
 // nil: the global Options with no language override.
@@ -150,25 +72,45 @@ func (e *Editor) SettingsFor(d *Document) LanguageSettings {
 	case d == nil:
 		s = e.languages("", "")
 	default:
-		s = e.languages(d.language, d.Path)
+		s = e.languages(d.Language(), d.Path)
 	}
 	if d == nil {
 		return s
 	}
-	if d.view.TabSize > 0 {
-		s.TabSize = d.view.TabSize
+	if d.View().TabSize > 0 {
+		s.TabSize = d.View().TabSize
 	}
-	if d.view.IndentTabs != nil {
-		s.UseTabs = *d.view.IndentTabs
+	if d.View().IndentTabs != nil {
+		s.UseTabs = *d.View().IndentTabs
 	}
-	if d.view.LineWrap != nil {
-		s.LineWrap = *d.view.LineWrap
+	if d.View().LineWrap != nil {
+		s.LineWrap = *d.View().LineWrap
 	}
-	if d.view.PageView {
+	if d.View().PageView {
 		s.PageView = true
 	}
-	if d.view.PageWidth > 0 {
-		s.PageWidth = d.view.PageWidth
+	if d.View().PageWidth > 0 {
+		s.PageWidth = d.View().PageWidth
 	}
 	return s
+}
+
+// documentSettings returns the document half of the options: the values a
+// Document reads while it edits and saves.
+func (o Options) documentSettings() document.Settings {
+	return document.Settings{
+		TrimTrailingWhitespace:  o.TrimTrailingWhitespace,
+		EnsureFinalNewline:      o.EnsureFinalNewline,
+		UseTabs:                 o.UseTabs,
+		TabSize:                 o.TabSize,
+		AutoIndent:              o.AutoIndent,
+		AutoClose:               o.AutoClose,
+		AutoSurround:            o.AutoSurround,
+		DefaultLineEnding:       o.DefaultLineEnding,
+		AutoReadOnly:            o.AutoReadOnly,
+		SnapshotInterval:        o.SnapshotInterval,
+		LargeFileThresholdBytes: o.LargeFileThresholdBytes,
+		EstimatedLineLength:     o.EstimatedLineLength,
+		LargeFileMode:           o.LargeFileMode,
+	}
 }

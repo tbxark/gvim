@@ -18,35 +18,35 @@ func TestCopyFilePath(t *testing.T) {
 	t.Parallel()
 	const path = "/work/proj/src/main.go"
 	tests := []struct {
-		name   string
-		path   string
+		Name   string
+		Path   string
 		root   string
 		action Action
-		want   string
+		Want   string
 	}{
-		{name: "the absolute path is copied", path: path, root: "/work/proj", action: "copy_file_path", want: path},
-		{name: "the absolute path is copied when no root is known", path: path, action: "copy_file_path", want: path},
-		{name: "the path is relative to the root", path: path, root: "/work/proj", action: "copy_relative_file_path", want: "src/main.go"},
-		{name: "a root with a trailing slash also works", path: path, root: "/work/proj/", action: "copy_relative_file_path", want: "src/main.go"},
-		{name: "a file outside the root gives its absolute path", path: path, root: "/work/other", action: "copy_relative_file_path", want: path},
-		{name: "a file with no root known gives its absolute path", path: path, action: "copy_relative_file_path", want: path},
+		{Name: "the absolute path is copied", Path: path, root: "/work/proj", action: "copy_file_path", Want: path},
+		{Name: "the absolute path is copied when no root is known", Path: path, action: "copy_file_path", Want: path},
+		{Name: "the path is relative to the root", Path: path, root: "/work/proj", action: "copy_relative_file_path", Want: "src/main.go"},
+		{Name: "a root with a trailing slash also works", Path: path, root: "/work/proj/", action: "copy_relative_file_path", Want: "src/main.go"},
+		{Name: "a file outside the root gives its absolute path", Path: path, root: "/work/other", action: "copy_relative_file_path", Want: path},
+		{Name: "a file with no root known gives its absolute path", Path: path, action: "copy_relative_file_path", Want: path},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := pathDoc(Options{Root: tt.root}, tt.path, "text")
+			e := pathDoc(Options{Root: tt.root}, tt.Path, "text")
 			e.clipboard = "before"
 			r := e.Do(tt.action, nil)
 			if r.Err != nil {
 				t.Fatalf("Do(%s): %v", tt.action, r.Err)
 			}
-			if r.Text != tt.want {
-				t.Fatalf("Result.Text = %q, want %q", r.Text, tt.want)
+			if r.Text != tt.Want {
+				t.Fatalf("Result.Text = %q, want %q", r.Text, tt.Want)
 			}
-			if e.clipboard != tt.want {
-				t.Fatalf("clipboard = %q, want %q", e.clipboard, tt.want)
+			if e.clipboard != tt.Want {
+				t.Fatalf("clipboard = %q, want %q", e.clipboard, tt.Want)
 			}
-			if want := "Copied path: " + tt.want; e.Status() != want {
+			if want := "Copied path: " + tt.Want; e.Status() != want {
 				t.Fatalf("status = %q, want %q", e.Status(), want)
 			}
 		})
@@ -96,21 +96,21 @@ func TestCopyPathThenPasteInsertsIt(t *testing.T) {
 	t.Parallel()
 	const path = "/work/proj/src/main.go"
 	tests := []struct {
-		name   string
+		Name   string
 		root   string
 		action Action
-		want   string
+		Want   string
 	}{
-		{name: "the absolute path", action: "copy_file_path", want: path},
-		{name: "the relative path", root: "/work/proj", action: "copy_relative_file_path", want: "src/main.go"},
+		{Name: "the absolute path", action: "copy_file_path", Want: path},
+		{Name: "the relative path", root: "/work/proj", action: "copy_relative_file_path", Want: "src/main.go"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := pathDoc(Options{Root: tt.root}, path, "")
 			run(t, e, tt.action, "paste")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text after paste = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text after paste = %q, want %q", got, tt.Want)
 			}
 		})
 	}

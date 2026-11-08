@@ -30,22 +30,22 @@ func slotArgs(slot string) map[string]any {
 func TestBookmarkSlotsRoundTrip(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		set      string // char argument of set_bookmark
 		jump     string // char argument of jump_to_bookmark
 		wantSet  bool   // set_bookmark must fail
 		wantJump bool   // jump_to_bookmark must fail
 		wantLine int    // caret line after the jump attempt
 	}{
-		{name: "slot 1 returns to the saved line", set: "1", jump: "1", wantLine: 2},
-		{name: "slot 0 is valid", set: "0", jump: "0", wantLine: 2},
-		{name: "slot 9 is valid", set: "9", jump: "9", wantLine: 2},
-		{name: "a letter is not a slot", set: "a", jump: "a", wantSet: true, wantJump: true, wantLine: 0},
-		{name: "an empty slot is refused", set: "", jump: "", wantSet: true, wantJump: true, wantLine: 0},
-		{name: "an unset slot cannot be jumped to", set: "1", jump: "2", wantJump: true, wantLine: 0},
+		{Name: "slot 1 returns to the saved line", set: "1", jump: "1", wantLine: 2},
+		{Name: "slot 0 is valid", set: "0", jump: "0", wantLine: 2},
+		{Name: "slot 9 is valid", set: "9", jump: "9", wantLine: 2},
+		{Name: "a letter is not a slot", set: "a", jump: "a", wantSet: true, wantJump: true, wantLine: 0},
+		{Name: "an empty slot is refused", set: "", jump: "", wantSet: true, wantJump: true, wantLine: 0},
+		{Name: "an unset slot cannot be jumped to", set: "1", jump: "2", wantJump: true, wantLine: 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withDoc(numbered(4))
 			marksCaret(e, 2, 0)
@@ -113,7 +113,7 @@ func TestBookmarkOfClosedTabCannotBeJumpedTo(t *testing.T) {
 func TestMarkModeExtendsSelectionUntilCancelled(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		steps   []Action
 		wantSel string
 		wantCol int
@@ -127,7 +127,7 @@ func TestMarkModeExtendsSelectionUntilCancelled(t *testing.T) {
 		{"clear_mark leaves mark mode off", []Action{"set_mark", "clear_mark", "move_right", "move_right"}, "", 3},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := withDoc("abcdef")
 			marksCaret(e, 0, 1)

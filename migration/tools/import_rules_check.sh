@@ -25,7 +25,7 @@
 #     terminal/  filewatch/      private backends of the shell
 #     uitest/                    test-only in-process UI harness
 #   top level (no internal/):    the TUI-free engine and shared libraries
-#     buffer, editor, search, syntax, fold, diff, encoding, session,
+#     buffer, document, editor, search, syntax, fold, diff, encoding, session,
 #     decorations, textlayout, config, keymap, theme, workspace, explorer,
 #     finder, fuzzy, fsops, gitstate, lsp, pluginapi, plugin, commands
 #
@@ -38,10 +38,13 @@
 #   R3  leaf packages import no module package: buffer, textlayout, diff,
 #       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp,
 #       atomicfile, shellcmd.
-#   R4  engine direction: editor must not import the UI, app, cli, plugin
-#       runtime/contract, lsp, finder, fsops, workspace, keymap, theme or
-#       config; search must not import editor; syntax imports only theme among
-#       module packages; session imports only buffer and atomicfile; commands
+#   R4  engine direction: document is the data model and imports only its leaf
+#       packages (buffer, search, syntax, textlayout, fold, diff, encoding,
+#       atomicfile); editor may import document but must not import the UI, app,
+#       cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap,
+#       theme or config; search must not import editor or document; syntax
+#       imports only theme among module packages; session imports only buffer,
+#       document and atomicfile; commands
 #       imports only fuzzy and keymap; workspace imports only config; finder
 #       imports only explorer and fuzzy.
 #   R5  the TUI tree must not import internal/app, internal/cli, the plugin
@@ -154,6 +157,12 @@ while IFS=$'\t' read -r pkg imp; do
     esac
 
     # R4: engine direction.
+    if [ "$rel" = document ]; then
+      case "$irel" in
+        buffer | search | syntax | textlayout | fold | diff | encoding | atomicfile | shellcmd) ;;
+        *) add R4 "$pkg" "$imp" ;;
+      esac
+    fi
     if [ "$rel" = editor ]; then
       case "$irel" in
         internal/* | pluginapi | plugin | plugin/* | lsp | finder | fsops | workspace | keymap | theme | config | commands)
@@ -161,13 +170,13 @@ while IFS=$'\t' read -r pkg imp; do
           ;;
       esac
     fi
-    if [ "$rel" = search ] && { under "$irel" editor || under "$irel" internal; }; then
+    if [ "$rel" = search ] && { under "$irel" editor || under "$irel" document || under "$irel" internal; }; then
       add R4 "$pkg" "$imp"
     fi
     if [ "$rel" = syntax ] && [ "$irel" != theme ]; then
       add R4 "$pkg" "$imp"
     fi
-    if [ "$rel" = session ] && [ "$irel" != buffer ] && [ "$irel" != atomicfile ]; then
+    if [ "$rel" = session ] && [ "$irel" != buffer ] && [ "$irel" != document ] && [ "$irel" != atomicfile ]; then
       add R4 "$pkg" "$imp"
     fi
     if [ "$rel" = commands ] && [ "$irel" != fuzzy ] && [ "$irel" != keymap ]; then
@@ -237,7 +246,7 @@ while IFS=$'\t' read -r pkg imp; do
     fi
 
     # R11: the engine does not know the plugin contract.
-    if { [ "$rel" = editor ] || [ "$rel" = buffer ] || [ "$rel" = decorations ]; } &&
+    if { [ "$rel" = editor ] || [ "$rel" = document ] || [ "$rel" = buffer ] || [ "$rel" = decorations ]; } &&
       [ "$irel" = pluginapi ]; then
       add R11 "$pkg" "$imp"
     fi

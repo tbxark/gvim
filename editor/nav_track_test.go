@@ -10,8 +10,8 @@ import (
 func TestLargeMovesEnterNavigationHistory(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		start buffer.Pos
+		Name  string
+		Start buffer.Pos
 		steps []Action
 		far   bool
 	}{
@@ -23,15 +23,15 @@ func TestLargeMovesEnterNavigationHistory(t *testing.T) {
 		{"one word is not far", caretPos(10, 0), []Action{"move_word_right"}, false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docAt("{ a\nb\nc\nd }\n"+strings.Repeat("line\n", 30)+strings.Repeat("x", 80), tt.start.Line, tt.start.Col)
+			e := docAt("{ a\nb\nc\nd }\n"+strings.Repeat("line\n", 30)+strings.Repeat("x", 80), tt.Start.Line, tt.Start.Col)
 			run(t, e, tt.steps...)
 			moved := e.Active().Cursor
 			run(t, e, "navigate_back")
 			want := moved
 			if tt.far {
-				want = tt.start
+				want = tt.Start
 			}
 			if got := e.Active().Cursor; got != want {
 				t.Fatalf("caret after back = %+v, want %+v", got, want)
@@ -54,21 +54,21 @@ func TestHistoryEntryKeepsTheSelection(t *testing.T) {
 func TestMouseJumpEntersNavigationHistory(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		to   buffer.Pos
-		want buffer.Pos // the caret after navigate_back
+		Name string
+		To   buffer.Pos
+		Want buffer.Pos // the caret after navigate_back
 	}{
 		{"a far click is a place", caretPos(20, 0), caretPos(1, 0)},
 		{"a near click is not", caretPos(2, 0), caretPos(2, 0)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := docAt(numbered(30), 1, 0)
-			e.SetCursor(tt.to, false)
+			e.SetCursor(tt.To, false)
 			run(t, e, "navigate_back")
-			if got := e.Active().Cursor; got != tt.want {
-				t.Fatalf("caret after back = %+v, want %+v", got, tt.want)
+			if got := e.Active().Cursor; got != tt.Want {
+				t.Fatalf("caret after back = %+v, want %+v", got, tt.Want)
 			}
 		})
 	}
@@ -77,9 +77,9 @@ func TestMouseJumpEntersNavigationHistory(t *testing.T) {
 func TestScrollMarginKeepsLinesAroundTheCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		margin  int
-		start   int // caret line
+		Start   int // caret line
 		top     int
 		steps   []Action
 		wantTop int
@@ -92,14 +92,14 @@ func TestScrollMarginKeepsLinesAroundTheCaret(t *testing.T) {
 		{"margin at the top of the document", 3, 1, 0, []Action{"move_up"}, 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{Rows: 10, Cols: 40, ScrollOffset: tt.margin})
 			e.docs = []*Document{newDocument("", numbered(30))}
 			e.switchTo(0)
-			marksCaret(e, tt.start, 0)
+			marksCaret(e, tt.Start, 0)
 			e.Active().Top = tt.top
-			e.Active().seen = caretPos(tt.start, 0)
+			e.Active().Seen = caretPos(tt.Start, 0)
 			run(t, e, tt.steps...)
 			d := e.Active()
 			if d.Top != tt.wantTop {
@@ -142,7 +142,7 @@ func TestScrollViewKeepsTheCaretInsideTheMargin(t *testing.T) {
 func TestJumpsRecenterTheView(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		do   func(t *testing.T, e *Editor)
 	}{
 		{"goto line", func(t *testing.T, e *Editor) {
@@ -172,7 +172,7 @@ func TestJumpsRecenterTheView(t *testing.T) {
 		}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{Rows: 11, Cols: 40})
 			e.docs = []*Document{newDocument("", numbered(60))}
@@ -209,7 +209,7 @@ func TestScrollMarginNeverScrollsUpOnMoveDown(t *testing.T) {
 	e.switchTo(0)
 	e.ScrollBy(22) // the wheel may scroll past the end
 	marksCaret(e, 28, 0)
-	e.Active().seen = e.Active().Cursor
+	e.Active().Seen = e.Active().Cursor
 	run(t, e, "move_down")
 	d := e.Active()
 	if d.Cursor.Line != 29 || d.Top != 22 {

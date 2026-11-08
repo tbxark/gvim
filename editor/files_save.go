@@ -8,6 +8,6 @@ func (e *Editor) PlanSaveForce() (SavePlan, error) {
 	if err != nil {
 		return p, err
 	}
-	p.jobs[0].checkDisk = false
+	p.jobs[0].CheckDisk = false
 	return p, nil
 }

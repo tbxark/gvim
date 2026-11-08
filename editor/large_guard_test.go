@@ -60,7 +60,7 @@ func assertUntouched(t *testing.T, d *Document, version uint64) {
 	if st := d.Buffer.Stats(); st.OverCap != 0 {
 		t.Errorf("OverCap = %d, want 0", st.OverCap)
 	}
-	if err := d.takeRefusal(); err != nil {
+	if err := d.TakeRefusal(); err != nil {
 		t.Errorf("refusal left behind: %v", err)
 	}
 }
@@ -68,25 +68,25 @@ func assertUntouched(t *testing.T, d *Document, version uint64) {
 func TestContentMark(t *testing.T) {
 	t.Parallel()
 	small := docWith(Options{}, "abc").Active()
-	before := small.contentMark()
-	if small.contentMark() != before {
+	before := small.ContentMark()
+	if small.ContentMark() != before {
 		t.Fatal("the mark of an untouched document changed")
 	}
 	small.Buffer.Insert(buffer.Pos{}, "x")
-	if small.contentMark() == before {
+	if small.ContentMark() == before {
 		t.Fatal("an edit did not change the mark of a document in memory")
 	}
-	if got := small.contentMark(); got.text != "xabc" {
+	if got := small.ContentMark(); got.Text != "xabc" {
 		t.Fatalf("mark of a document in memory = %+v, want its text", got)
 	}
 
 	_, big := openIndexed(t, largeOptions(), lineText(200))
-	before = big.contentMark()
-	if before.text != "" || before.ver != big.Buffer.Version() {
+	before = big.ContentMark()
+	if before.Text != "" || before.Ver != big.Buffer.Version() {
 		t.Fatalf("mark of a large document = %+v, want its version only", before)
 	}
 	big.Buffer.Insert(buffer.Pos{}, "x")
-	if big.contentMark() == before {
+	if big.ContentMark() == before {
 		t.Fatal("an edit did not change the mark of a large document")
 	}
 	if st := big.Buffer.Stats(); st.MaterializedBytes != 0 || st.OverCap != 0 {
@@ -97,33 +97,33 @@ func TestContentMark(t *testing.T) {
 func TestLargeActionsThatNeedTheWholeTextAreRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
+		Name   string
 		action Action
-		args   map[string]any
-		sel    bool // select two lines first
+		Args   map[string]any
+		Sel    bool // select two lines first
 	}{
-		{name: "format", action: "format_buffer"},
-		{name: "trim", action: "trim_trailing_whitespace"},
-		{name: "line ending", action: "set_line_ending", args: map[string]any{"value": "crlf"}},
-		{name: "find selection next", action: "find_selection_next", sel: true},
-		{name: "find selection previous", action: "find_selection_previous", sel: true},
-		{name: "sort without a selection", action: "sort_lines"},
-		{name: "toggle fold, which large documents do not have", action: "toggle_fold"},
-		{name: "next occurrence of a selection", action: "add_cursor_next_match", sel: true},
-		{name: "other encoding", action: "set_encoding", args: map[string]any{"name": "utf-16le"}},
-		{name: "reload with encoding", action: "reload_with_encoding", args: map[string]any{"name": "utf-8"}},
-		{name: "shell command on the whole text", action: "shell_command", args: map[string]any{"command": "cat"}},
-		{name: "shell replace on the whole text", action: "shell_command_replace", args: map[string]any{"command": "cat"}},
+		{Name: "format", action: "format_buffer"},
+		{Name: "trim", action: "trim_trailing_whitespace"},
+		{Name: "line ending", action: "set_line_ending", Args: map[string]any{"value": "crlf"}},
+		{Name: "find selection next", action: "find_selection_next", Sel: true},
+		{Name: "find selection previous", action: "find_selection_previous", Sel: true},
+		{Name: "sort without a selection", action: "sort_lines"},
+		{Name: "toggle fold, which large documents do not have", action: "toggle_fold"},
+		{Name: "next occurrence of a selection", action: "add_cursor_next_match", Sel: true},
+		{Name: "other encoding", action: "set_encoding", Args: map[string]any{"name": "utf-16le"}},
+		{Name: "reload with encoding", action: "reload_with_encoding", Args: map[string]any{"name": "utf-8"}},
+		{Name: "shell command on the whole text", action: "shell_command", Args: map[string]any{"command": "cat"}},
+		{Name: "shell replace on the whole text", action: "shell_command_replace", Args: map[string]any{"command": "cat"}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, d := openIndexed(t, largeOptions(), lineText(200))
-			if tt.sel {
+			if tt.Sel {
 				selectRange(d, buffer.Pos{Line: 1}, buffer.Pos{Line: 3, Col: 2})
 			}
 			version, tabs := d.Buffer.Version(), len(e.Tabs())
-			r := e.Do(tt.action, tt.args)
+			r := e.Do(tt.action, tt.Args)
 			if !errors.Is(r.Err, ErrLargeFile) {
 				t.Fatalf("Do(%s) = %v, want ErrLargeFile", tt.action, r.Err)
 			}
@@ -148,8 +148,8 @@ func TestLargeSetEncodingKeepsUTF8Names(t *testing.T) {
 	if r := e.Do("set_encoding", map[string]any{"name": "utf-8-bom"}); r.Err != nil {
 		t.Fatalf("set_encoding utf-8-bom: %v", r.Err)
 	}
-	if d.codec != "utf-8-bom" || !d.Modified() || d.Encoding() == "" {
-		t.Fatalf("codec %q, modified %v, label %q", d.codec, d.Modified(), d.Encoding())
+	if d.Codec != "utf-8-bom" || !d.Modified() || d.Encoding() == "" {
+		t.Fatalf("codec %q, modified %v, label %q", d.Codec, d.Modified(), d.Encoding())
 	}
 	if st := d.Buffer.Stats(); st.MaterializedBytes != 0 {
 		t.Fatalf("set_encoding read %d bytes of text", st.MaterializedBytes)
@@ -181,7 +181,7 @@ func TestTidyForSaveLeavesAnUnindexedLargeDocumentAlone(t *testing.T) {
 		t.Fatal("the index is complete")
 	}
 	version := d.Buffer.Version()
-	d.tidyForSave(opts)
+	d.TidyForSave(opts.documentSettings())
 	assertUntouched(t, d, version)
 }
 
@@ -191,7 +191,7 @@ func TestTidyForSaveOnLargeDocumentKeepsOnlyTheFinalNewline(t *testing.T) {
 	opts.EnsureFinalNewline, opts.TrimTrailingWhitespace = true, true
 	content := "keep  \n" + strings.TrimSuffix(lineText(200), "\n")
 	_, d := openIndexed(t, opts, content)
-	d.tidyForSave(opts)
+	d.TidyForSave(opts.documentSettings())
 	if got := d.Buffer.Line(0); got != "keep  " {
 		t.Errorf("line 0 = %q, trailing blanks must stay", got)
 	}
@@ -209,24 +209,24 @@ func TestTidyForSaveIgnoresARefusedFinalNewline(t *testing.T) {
 	opts.EnsureFinalNewline = true
 	_, d := openIndexed(t, opts, withHead("ok\nbad \xff"))
 	version := d.Buffer.Version()
-	d.tidyForSave(opts)
+	d.TidyForSave(opts.documentSettings())
 	assertUntouched(t, d, version)
 }
 
 func TestLargeRefusalIsTheResultOfTheAction(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
+		Name    string
 		content string
 		mod     func(*Options)
-		want    error
-		msg     string
+		Want    error
+		Msg     string
 	}{
-		{name: "invalid UTF-8", content: "ok line\nbad \xff line\nafter\n", want: buffer.ErrInvalidUTF8, msg: "line 6002 is not valid UTF-8"},
-		{name: "line too big for the overlay", content: "ok line\n" + strings.Repeat("y", 100) + "\nafter\n", mod: func(o *Options) { o.largeGeom.MaxOverlayBytes = 256 }, want: buffer.ErrLineOverBudget, msg: "too big to edit"},
+		{Name: "invalid UTF-8", content: "ok line\nbad \xff line\nafter\n", Want: buffer.ErrInvalidUTF8, Msg: "line 6002 is not valid UTF-8"},
+		{Name: "line too big for the overlay", content: "ok line\n" + strings.Repeat("y", 100) + "\nafter\n", mod: func(o *Options) { o.largeGeom.MaxOverlayBytes = 256 }, Want: buffer.ErrLineOverBudget, Msg: "too big to edit"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			opts := largeOptions()
 			if tt.mod != nil {
@@ -238,8 +238,8 @@ func TestLargeRefusalIsTheResultOfTheAction(t *testing.T) {
 			}
 			at, version := d.Cursor, d.Buffer.Version()
 			r := e.Do("insert_char", map[string]any{"text": "x"})
-			if !errors.Is(r.Err, tt.want) || !strings.Contains(r.Err.Error(), tt.msg) {
-				t.Fatalf("Do = %v, want %v (%s)", r.Err, tt.want, tt.msg)
+			if !errors.Is(r.Err, tt.Want) || !strings.Contains(r.Err.Error(), tt.Msg) {
+				t.Fatalf("Do = %v, want %v (%s)", r.Err, tt.Want, tt.Msg)
 			}
 			if e.Status() != r.Err.Error() {
 				t.Errorf("status = %q", e.Status())
@@ -300,8 +300,8 @@ func TestMultiCursorRefusalKeepsTextCaretsRedo(t *testing.T) {
 	if !errors.Is(r.Err, buffer.ErrInvalidUTF8) {
 		t.Fatalf("Do = %v, want ErrInvalidUTF8", r.Err)
 	}
-	if d.Buffer.Version() != version || d.Buffer.Line(headLines) != "ok line" || d.lastMulti != nil {
-		t.Errorf("text %q, version %d -> %d, lastMulti %v", d.Buffer.Line(headLines), version, d.Buffer.Version(), d.lastMulti)
+	if d.Buffer.Version() != version || d.Buffer.Line(headLines) != "ok line" || d.LastMulti != nil {
+		t.Errorf("text %q, version %d -> %d, lastMulti %v", d.Buffer.Line(headLines), version, d.Buffer.Version(), d.LastMulti)
 	}
 	if got := d.Cursors(); d.Cursor != at || len(got) != 1 || got[0].Cursor != extra[0].Cursor {
 		t.Errorf("carets %v %v -> %v %v", at, extra, d.Cursor, got)
@@ -423,23 +423,23 @@ func TestLargeOverCapSelectionsAreRefused(t *testing.T) {
 	t.Parallel()
 	const width = 1024
 	tests := []struct {
-		name   string
+		Name   string
 		action Action
-		args   map[string]any
+		Args   map[string]any
 		opts   func(*Options)
 	}{
-		{name: "copy", action: "copy"},
-		{name: "cut", action: "cut"},
-		{name: "copy with theme", action: "copy_with_theme"},
-		{name: "upper case", action: "to_upper_case"},
-		{name: "lower case", action: "to_lower_case"},
-		{name: "shell filter", action: "shell_command", args: map[string]any{"command": "cat"}},
-		{name: "shell replace", action: "shell_command_replace", args: map[string]any{"command": "cat"}},
-		{name: "wrap in brackets", action: "insert_char", args: map[string]any{"text": "("}, opts: func(o *Options) { o.AutoSurround = true }},
-		{name: "sort", action: "sort_lines"},
+		{Name: "copy", action: "copy"},
+		{Name: "cut", action: "cut"},
+		{Name: "copy with theme", action: "copy_with_theme"},
+		{Name: "upper case", action: "to_upper_case"},
+		{Name: "lower case", action: "to_lower_case"},
+		{Name: "shell filter", action: "shell_command", Args: map[string]any{"command": "cat"}},
+		{Name: "shell replace", action: "shell_command_replace", Args: map[string]any{"command": "cat"}},
+		{Name: "wrap in brackets", action: "insert_char", Args: map[string]any{"text": "("}, opts: func(o *Options) { o.AutoSurround = true }},
+		{Name: "sort", action: "sort_lines"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			src := buffertest.NewVirtual(buffer.MaxMaterialize+4*width, width)
 			opts := Options{LargeFileMode: true, LargeFileThresholdBytes: 1024}
@@ -455,7 +455,7 @@ func TestLargeOverCapSelectionsAreRefused(t *testing.T) {
 			selectRange(d, buffer.Pos{}, d.Buffer.End())
 			e.clipboard = "before"
 			version, at := d.Buffer.Version(), d.Cursor
-			r := e.Do(tt.action, tt.args)
+			r := e.Do(tt.action, tt.Args)
 			if !errors.Is(r.Err, ErrLargeFile) || !errors.Is(r.Err, buffer.ErrOverCap) {
 				t.Fatalf("Do(%s) = %v, want ErrLargeFile and ErrOverCap", tt.action, r.Err)
 			}
@@ -479,30 +479,30 @@ func TestLargeLineCutShortIsNotCopiedOrRewritten(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("y", 100) // MaxLine is 64 in the tests
 	tests := []struct {
-		name   string
+		Name   string
 		action Action
-		args   map[string]any
-		sel    []buffer.Pos // anchor, head; nil for a caret on line 1
+		Args   map[string]any
+		Sel    []buffer.Pos // anchor, head; nil for a caret on line 1
 	}{
-		{name: "copy the line", action: "copy"},
-		{name: "cut the line", action: "cut"},
-		{name: "duplicate the line", action: "duplicate_line"},
-		{name: "move the line up", action: "move_line_up"},
-		{name: "move the line down", action: "move_line_down"},
-		{name: "sort a selection over the line", action: "sort_lines", sel: []buffer.Pos{{Line: 0}, {Line: 2, Col: 1}}},
+		{Name: "copy the line", action: "copy"},
+		{Name: "cut the line", action: "cut"},
+		{Name: "duplicate the line", action: "duplicate_line"},
+		{Name: "move the line up", action: "move_line_up"},
+		{Name: "move the line down", action: "move_line_down"},
+		{Name: "sort a selection over the line", action: "sort_lines", Sel: []buffer.Pos{{Line: 0}, {Line: 2, Col: 1}}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e, d := openIndexed(t, largeOptions(), pad("head\n"+long+"\nlast\ntail\n"))
-			if tt.sel != nil {
-				selectRange(d, tt.sel[0], tt.sel[1])
+			if tt.Sel != nil {
+				selectRange(d, tt.Sel[0], tt.Sel[1])
 			} else {
 				d.Cursor = buffer.Pos{Line: 1}
 			}
 			e.clipboard = "before"
 			version := d.Buffer.Version()
-			r := e.Do(tt.action, tt.args)
+			r := e.Do(tt.action, tt.Args)
 			if !errors.Is(r.Err, ErrLargeFile) && !errors.Is(r.Err, buffer.ErrLineTooLong) {
 				t.Fatalf("Do(%s) = %v, want a refusal", tt.action, r.Err)
 			}
@@ -611,8 +611,8 @@ func TestLargeSelectionOrWordSaysWhyItRefuses(t *testing.T) {
 	indexAll(t, e)
 	d := e.Active()
 	tests := []struct {
-		name     string
-		from, to buffer.Pos
+		Name     string
+		From, To buffer.Pos
 		refused  bool
 	}{
 		{"one line", buffer.Pos{Line: 3, Col: 2}, buffer.Pos{Line: 3, Col: 40}, false},
@@ -623,8 +623,8 @@ func TestLargeSelectionOrWordSaysWhyItRefuses(t *testing.T) {
 		{"the end of one line and the start of the next", buffer.Pos{Line: 3, Col: 1000}, buffer.Pos{Line: 4, Col: 20}, false},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			selectRange(d, tc.from, tc.to)
+		t.Run(tc.Name, func(t *testing.T) {
+			selectRange(d, tc.From, tc.To)
 			before := d.Buffer.Stats()
 			text, _, _, ok, err := e.SelectionOrWord()
 			if tc.refused {

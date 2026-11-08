@@ -40,9 +40,9 @@ type ShellJob struct {
 
 	// doc, from, to and selected say where Input came from, so that EndShell
 	// replaces the same text, and only when the text is still the same (see snapshot).
-	doc      *Document
-	from, to buffer.Pos
-	selected bool
+	Doc      *Document
+	From, To buffer.Pos
+	Selected bool
 	// snapshot marks the whole text of doc when BeginShell ran (see contentMark).
 	// EndShell applies a replace only while the text is still the same, so an edit
 	// anywhere in the document while the command runs stops the result, not only an
@@ -96,11 +96,11 @@ func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error
 		return ShellJob{}, ErrNoDocument
 	}
 	replace := action == "shell_command_replace"
-	if replace && d.readOnly {
+	if replace && d.ReadOnly() {
 		return ShellJob{}, ErrReadOnly
 	}
 	if replace {
-		if err := d.refuseEditWhileRestoring(string(action)); err != nil {
+		if err := d.RefuseEditWhileRestoring(string(action)); err != nil {
 			return ShellJob{}, err
 		}
 	}
@@ -108,19 +108,19 @@ func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error
 	selected := d.HasSelection()
 	if selected {
 		from, to = d.Sel.Ordered()
-	} else if d.large != nil {
+	} else if d.LargeState() != nil {
 		// The input would be the whole text of the file.
 		return ShellJob{}, errLargeAction(action)
 	}
-	_ = d.takeRefusal()
-	input, err := d.readRange(from, to)
+	_ = d.TakeRefusal()
+	input, err := d.ReadRange(from, to)
 	if err != nil {
 		return ShellJob{}, fmt.Errorf("%s: %w", action, err)
 	}
 	// Without a selection the input is the whole text, so it is the snapshot too.
-	snapshot := contentMark{text: input}
+	snapshot := contentMark{Text: input}
 	if selected {
-		snapshot = d.contentMark()
+		snapshot = d.ContentMark()
 	}
 	return ShellJob{
 		Command:  command,
@@ -128,10 +128,10 @@ func (e *Editor) BeginShell(action Action, args map[string]any) (ShellJob, error
 		Dir:      shellDir(d),
 		Replace:  replace,
 		Timeout:  shellTimeout,
-		doc:      d,
-		from:     from,
-		to:       to,
-		selected: selected,
+		Doc:      d,
+		From:     from,
+		To:       to,
+		Selected: selected,
 		snapshot: snapshot,
 	}, nil
 }
@@ -170,14 +170,14 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 		e.setStatus("Shell output in " + nd.Name())
 		return nil
 	}
-	d := job.doc
-	if d.readOnly {
+	d := job.Doc
+	if d.ReadOnly() {
 		return ErrReadOnly
 	}
-	if err := d.refuseEditWhileRestoring("shell_command_replace"); err != nil {
+	if err := d.RefuseEditWhileRestoring("shell_command_replace"); err != nil {
 		return err
 	}
-	if e.indexOfDoc(d) < 0 || d.contentMark() != job.snapshot {
+	if e.indexOfDoc(d) < 0 || d.ContentMark() != job.snapshot {
 		return errShellStale
 	}
 	caret := d.Cursor
@@ -185,15 +185,15 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 	var hunks []diff.Hunk
 	if job.format {
 		// The snapshot is the text the formatter was given, which is the text now.
-		hunks = diff.Lines(strings.Split(job.snapshot.text, "\n"), strings.Split(out, "\n"))
+		hunks = diff.Lines(strings.Split(job.snapshot.Text, "\n"), strings.Split(out, "\n"))
 	}
 	d.Buffer.Group(func() {
-		d.Buffer.Delete(job.from, job.to)
-		after = d.Buffer.Insert(job.from, out)
+		d.Buffer.Delete(job.From, job.To)
+		after = d.Buffer.Insert(job.From, out)
 	})
-	d.lastMulti = nil
+	d.LastMulti = nil
 	switch {
-	case job.selected:
+	case job.Selected:
 		d.Cursor = after
 	case job.format:
 		d.Cursor = d.Buffer.Clamp(buffer.Pos{Line: formatLine(hunks, caret.Line), Col: caret.Col})
@@ -201,7 +201,7 @@ func (e *Editor) applyShell(job ShellJob, out string) error {
 		d.Cursor = d.Buffer.Clamp(caret)
 	}
 	d.Sel = nil
-	d.want = -1
+	d.Want = -1
 	if job.format {
 		e.setStatus("Formatted buffer")
 	} else {

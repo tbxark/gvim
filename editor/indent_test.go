@@ -9,10 +9,10 @@ import (
 func TestTabInsertsTabSizeSpaces(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		text    string
-		col     int
-		want    string
+		Name    string
+		Text    string
+		Col     int
+		Want    string
 		wantCol int
 	}{
 		{"empty line", "", 0, "    ", 4},
@@ -23,13 +23,13 @@ func TestTabInsertsTabSizeSpaces(t *testing.T) {
 		{"inside the text", "ab", 1, "a    b", 5},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{TabSize: 4}, tt.text)
-			e.SetCursor(buffer.Pos{Line: 0, Col: tt.col}, false)
+			e := docWith(Options{TabSize: 4}, tt.Text)
+			e.SetCursor(buffer.Pos{Line: 0, Col: tt.Col}, false)
 			run(t, e, "insert_tab")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != (buffer.Pos{Line: 0, Col: tt.wantCol}) {
 				t.Fatalf("cursor = %+v, want column %d", got, tt.wantCol)
@@ -91,10 +91,10 @@ func TestTabWithSelectionOnOneLineIndentsThatLine(t *testing.T) {
 func TestDedentRemovesOneIndentUnit(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		text    string
-		col     int
-		want    string
+		Name    string
+		Text    string
+		Col     int
+		Want    string
 		wantCol int
 	}{
 		{"four spaces", "    a", 4, "a", 0},
@@ -106,13 +106,13 @@ func TestDedentRemovesOneIndentUnit(t *testing.T) {
 		{"no indent changes nothing", "a", 1, "a", 1},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{TabSize: 4}, tt.text)
-			e.SetCursor(buffer.Pos{Line: 0, Col: tt.col}, false)
+			e := docWith(Options{TabSize: 4}, tt.Text)
+			e.SetCursor(buffer.Pos{Line: 0, Col: tt.Col}, false)
 			run(t, e, "dedent_selection")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != (buffer.Pos{Line: 0, Col: tt.wantCol}) {
 				t.Fatalf("cursor = %+v, want column %d", got, tt.wantCol)
@@ -161,10 +161,10 @@ func TestDedentTabSizeZeroMeansFour(t *testing.T) {
 func TestAutoIndentCopiesLeadingWhitespace(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
-		col      int
-		want     string
+		Name     string
+		Text     string
+		Col      int
+		Want     string
 		wantLine int
 		wantCol  int
 	}{
@@ -175,13 +175,13 @@ func TestAutoIndentCopiesLeadingWhitespace(t *testing.T) {
 		{"caret at column 0 copies nothing", "  foo", 0, "\n  foo", 1, 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := docWith(Options{AutoIndent: true, TabSize: 4}, tt.text)
-			e.SetCursor(buffer.Pos{Line: 0, Col: tt.col}, false)
+			e := docWith(Options{AutoIndent: true, TabSize: 4}, tt.Text)
+			e.SetCursor(buffer.Pos{Line: 0, Col: tt.Col}, false)
 			run(t, e, "insert_newline")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			if got := e.Active().Cursor; got != (buffer.Pos{Line: tt.wantLine, Col: tt.wantCol}) {
 				t.Fatalf("cursor = %+v, want line %d col %d", got, tt.wantLine, tt.wantCol)

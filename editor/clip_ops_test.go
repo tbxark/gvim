@@ -24,10 +24,10 @@ func clipEditor(t *testing.T, text string) *Editor {
 func caretsAt(t *testing.T, e *Editor, ps ...buffer.Pos) {
 	t.Helper()
 	d := e.Active()
-	d.setCarets(func() []caret {
+	d.SetCarets(func() []caret {
 		out := make([]caret, len(ps))
 		for i, p := range ps {
-			out[i] = caret{anchor: p, head: p, primary: i == 0}
+			out[i] = caret{Anchor: p, Head: p, Primary: i == 0}
 		}
 		return out
 	}())
@@ -37,8 +37,8 @@ func TestCopyCut(t *testing.T) {
 	t.Parallel()
 	pos := func(line, col int) buffer.Pos { return buffer.Pos{Line: line, Col: col} }
 	tests := []struct {
-		name      string
-		text      string
+		Name      string
+		Text      string
 		setup     func(t *testing.T, e *Editor)
 		action    Action
 		wantClip  string
@@ -46,40 +46,40 @@ func TestCopyCut(t *testing.T) {
 		wantState string
 	}{
 		{
-			name:     "copy without selection takes the line and its break",
-			text:     "one\ntwo\nthree",
+			Name:     "copy without selection takes the line and its break",
+			Text:     "one\ntwo\nthree",
 			setup:    func(_ *testing.T, e *Editor) { e.SetCursor(pos(1, 1), false) },
 			action:   "copy",
 			wantClip: "two\n",
 			wantText: "one\ntwo\nthree",
 		},
 		{
-			name:     "copy of the last line has no break",
-			text:     "one\ntwo",
+			Name:     "copy of the last line has no break",
+			Text:     "one\ntwo",
 			setup:    func(_ *testing.T, e *Editor) { e.SetCursor(pos(1, 0), false) },
 			action:   "copy",
 			wantClip: "two",
 			wantText: "one\ntwo",
 		},
 		{
-			name:     "cut without selection removes the line",
-			text:     "one\ntwo\nthree",
+			Name:     "cut without selection removes the line",
+			Text:     "one\ntwo\nthree",
 			setup:    func(_ *testing.T, e *Editor) { e.SetCursor(pos(1, 1), false) },
 			action:   "cut",
 			wantClip: "two\n",
 			wantText: "one\nthree",
 		},
 		{
-			name:     "cut of the last line leaves an empty line, as Fresh does",
-			text:     "one\ntwo",
+			Name:     "cut of the last line leaves an empty line, as Fresh does",
+			Text:     "one\ntwo",
 			setup:    func(_ *testing.T, e *Editor) { e.SetCursor(pos(1, 0), false) },
 			action:   "cut",
 			wantClip: "two",
 			wantText: "one\n",
 		},
 		{
-			name: "copy joins the selections of all carets with a newline",
-			text: "abcd\nefgh\nijkl",
+			Name: "copy joins the selections of all carets with a newline",
+			Text: "abcd\nefgh\nijkl",
 			setup: func(t *testing.T, e *Editor) {
 				selectCarets(t, e, [2]buffer.Pos{pos(0, 0), pos(0, 2)}, [2]buffer.Pos{pos(2, 1), pos(2, 4)})
 			},
@@ -88,8 +88,8 @@ func TestCopyCut(t *testing.T) {
 			wantText: "abcd\nefgh\nijkl",
 		},
 		{
-			name: "copy_with_theme joins the selections of all carets",
-			text: "abcd\nefgh\nijkl",
+			Name: "copy_with_theme joins the selections of all carets",
+			Text: "abcd\nefgh\nijkl",
 			setup: func(t *testing.T, e *Editor) {
 				selectCarets(t, e, [2]buffer.Pos{pos(0, 0), pos(0, 2)}, [2]buffer.Pos{pos(2, 1), pos(2, 4)})
 			},
@@ -98,8 +98,8 @@ func TestCopyCut(t *testing.T) {
 			wantText: "abcd\nefgh\nijkl",
 		},
 		{
-			name: "cut deletes the selections of all carets",
-			text: "abcd\nefgh\nijkl",
+			Name: "cut deletes the selections of all carets",
+			Text: "abcd\nefgh\nijkl",
 			setup: func(t *testing.T, e *Editor) {
 				selectCarets(t, e, [2]buffer.Pos{pos(0, 0), pos(0, 2)}, [2]buffer.Pos{pos(2, 1), pos(2, 4)})
 			},
@@ -108,24 +108,24 @@ func TestCopyCut(t *testing.T) {
 			wantText: "cd\nefgh\ni",
 		},
 		{
-			name:     "copy without selection takes each caret line once",
-			text:     "a\nb\nc\nd",
+			Name:     "copy without selection takes each caret line once",
+			Text:     "a\nb\nc\nd",
 			setup:    func(t *testing.T, e *Editor) { caretsAt(t, e, pos(0, 0), pos(2, 0), pos(2, 1)) },
 			action:   "copy",
 			wantClip: "a\nc\n",
 			wantText: "a\nb\nc\nd",
 		},
 		{
-			name:     "cut without selection removes each caret line once",
-			text:     "a\nb\nc\nd",
+			Name:     "cut without selection removes each caret line once",
+			Text:     "a\nb\nc\nd",
 			setup:    func(t *testing.T, e *Editor) { caretsAt(t, e, pos(0, 0), pos(2, 0), pos(2, 1)) },
 			action:   "cut",
 			wantClip: "a\nc\n",
 			wantText: "b\nd",
 		},
 		{
-			name: "block copy keeps a row for a line the rectangle misses",
-			text: "abcd\nx\nijkl",
+			Name: "block copy keeps a row for a line the rectangle misses",
+			Text: "abcd\nx\nijkl",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(pos(0, 1), false)
 				run(t, e, "block_select_down", "block_select_down", "block_select_right", "block_select_right")
@@ -136,9 +136,9 @@ func TestCopyCut(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := clipEditor(t, tt.text)
+			e := clipEditor(t, tt.Text)
 			tt.setup(t, e)
 			r := e.Do(tt.action, nil)
 			if r.Err != nil {
@@ -152,8 +152,8 @@ func TestCopyCut(t *testing.T) {
 			}
 			if tt.action == "cut" {
 				run(t, e, "undo")
-				if got := text(e); got != tt.text {
-					t.Fatalf("one undo gives %q, want %q", got, tt.text)
+				if got := text(e); got != tt.Text {
+					t.Fatalf("one undo gives %q, want %q", got, tt.Text)
 				}
 			}
 		})
@@ -165,9 +165,9 @@ func selectCarets(t *testing.T, e *Editor, ranges ...[2]buffer.Pos) {
 	t.Helper()
 	cs := make([]caret, len(ranges))
 	for i, r := range ranges {
-		cs[i] = caret{anchor: r[0], head: r[1], primary: i == 0}
+		cs[i] = caret{Anchor: r[0], Head: r[1], Primary: i == 0}
 	}
-	e.Active().setCarets(cs)
+	e.Active().SetCarets(cs)
 }
 
 func TestCopyOfNothingFails(t *testing.T) {
@@ -186,81 +186,81 @@ func TestPaste(t *testing.T) {
 	t.Parallel()
 	pos := func(line, col int) buffer.Pos { return buffer.Pos{Line: line, Col: col} }
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		setup    func(t *testing.T, e *Editor)
 		register string
-		args     map[string]any
-		want     string
+		Args     map[string]any
+		Want     string
 	}{
 		{
-			name:     "the private register is the default",
-			text:     "ab",
+			Name:     "the private register is the default",
+			Text:     "ab",
 			setup:    func(_ *testing.T, e *Editor) { e.SetCursor(pos(0, 1), false) },
 			register: "X",
-			want:     "aXb",
+			Want:     "aXb",
 		},
 		{
-			name:     "the text argument wins over the register",
-			text:     "ab",
+			Name:     "the text argument wins over the register",
+			Text:     "ab",
 			setup:    func(_ *testing.T, e *Editor) { e.SetCursor(pos(0, 1), false) },
 			register: "X",
-			args:     map[string]any{"text": "Y"},
-			want:     "aYb",
+			Args:     map[string]any{"text": "Y"},
+			Want:     "aYb",
 		},
 		{
-			name:  "CRLF and CR become LF",
-			text:  "ab",
-			args:  map[string]any{"text": "1\r\n2\r3\n4"},
-			want:  "1\n2\n3\n4ab",
+			Name:  "CRLF and CR become LF",
+			Text:  "ab",
+			Args:  map[string]any{"text": "1\r\n2\r3\n4"},
+			Want:  "1\n2\n3\n4ab",
 			setup: func(_ *testing.T, _ *Editor) {},
 		},
 		{
-			name:  "every caret gets the whole text",
-			text:  "ab\ncd",
+			Name:  "every caret gets the whole text",
+			Text:  "ab\ncd",
 			setup: func(t *testing.T, e *Editor) { caretsAt(t, e, pos(0, 1), pos(1, 1)) },
-			args:  map[string]any{"text": "Q"},
-			want:  "aQb\ncQd",
+			Args:  map[string]any{"text": "Q"},
+			Want:  "aQb\ncQd",
 		},
 		{
-			name:  "as many lines as carets give one line to each caret",
-			text:  "ab\ncd",
+			Name:  "as many lines as carets give one line to each caret",
+			Text:  "ab\ncd",
 			setup: func(t *testing.T, e *Editor) { caretsAt(t, e, pos(0, 1), pos(1, 1)) },
-			args:  map[string]any{"text": "X\nY\n"},
-			want:  "aXb\ncYd",
+			Args:  map[string]any{"text": "X\nY\n"},
+			Want:  "aXb\ncYd",
 		},
 		{
-			name:  "a different line count goes whole to every caret",
-			text:  "ab\ncd",
+			Name:  "a different line count goes whole to every caret",
+			Text:  "ab\ncd",
 			setup: func(t *testing.T, e *Editor) { caretsAt(t, e, pos(0, 1), pos(1, 1)) },
-			args:  map[string]any{"text": "X\nY\nZ"},
-			want:  "aX\nY\nZb\ncX\nY\nZd",
+			Args:  map[string]any{"text": "X\nY\nZ"},
+			Want:  "aX\nY\nZb\ncX\nY\nZd",
 		},
 		{
-			name: "a selection is replaced",
-			text: "abcd",
+			Name: "a selection is replaced",
+			Text: "abcd",
 			setup: func(t *testing.T, e *Editor) {
 				selectCarets(t, e, [2]buffer.Pos{pos(0, 1), pos(0, 3)})
 			},
-			args: map[string]any{"text": "-"},
-			want: "a-d",
+			Args: map[string]any{"text": "-"},
+			Want: "a-d",
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := clipEditor(t, tt.text)
+			e := clipEditor(t, tt.Text)
 			tt.setup(t, e)
 			e.clipboard = tt.register
-			if r := e.Do("paste", tt.args); r.Err != nil {
+			if r := e.Do("paste", tt.Args); r.Err != nil {
 				t.Fatal(r.Err)
 			}
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 			run(t, e, "undo")
-			if got := text(e); got != tt.text {
-				t.Fatalf("one undo gives %q, want %q", got, tt.text)
+			if got := text(e); got != tt.Text {
+				t.Fatalf("one undo gives %q, want %q", got, tt.Text)
 			}
 		})
 	}

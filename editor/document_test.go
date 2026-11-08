@@ -14,7 +14,7 @@ func TestMemoChangesComputesOncePerTextAndSavedText(t *testing.T) {
 		return map[int]bool{calls: true}, nil
 	}
 	steps := []struct {
-		name      string
+		Name      string
 		do        func()
 		wantCalls int
 	}{
@@ -33,7 +33,7 @@ func TestMemoChangesComputesOncePerTextAndSavedText(t *testing.T) {
 		s.do()
 		bar, _ := d.MemoChanges(marks)
 		if calls != s.wantCalls || !bar[calls] {
-			t.Fatalf("%s: compute ran %d times, want %d (bar %v)", s.name, calls, s.wantCalls, bar)
+			t.Fatalf("%s: compute ran %d times, want %d (bar %v)", s.Name, calls, s.wantCalls, bar)
 		}
 	}
 }

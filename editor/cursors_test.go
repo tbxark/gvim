@@ -21,12 +21,12 @@ func caretSel(anchor, head buffer.Pos) *buffer.Selection {
 // carets is the caret state a test expects: the primary caret and the extra
 // carets in document order.
 type carets struct {
-	primary Caret
+	Primary Caret
 	extras  []Caret
 }
 
 func (c carets) String() string {
-	s := fmt.Sprintf("primary %s", fmtCaret(c.primary))
+	s := fmt.Sprintf("primary %s", fmtCaret(c.Primary))
 	for _, x := range c.extras {
 		s += ", extra " + fmtCaret(x)
 	}
@@ -48,7 +48,7 @@ func caretState(e *Editor) carets {
 	if d.HasSelection() {
 		primary.Sel = d.Sel
 	}
-	return carets{primary: primary, extras: d.Cursors()}
+	return carets{Primary: primary, extras: d.Cursors()}
 }
 
 // sameCaret reports whether a and b have the same position and selection.
@@ -64,7 +64,7 @@ func sameCaret(a, b Caret) bool {
 
 // sameCarets reports whether got and want hold the same carets.
 func sameCarets(got, want carets) bool {
-	return sameCaret(got.primary, want.primary) && slices.EqualFunc(got.extras, want.extras, sameCaret)
+	return sameCaret(got.Primary, want.Primary) && slices.EqualFunc(got.extras, want.extras, sameCaret)
 }
 
 // setCaretsAfter runs the setup of a table row, if it has one.
@@ -86,77 +86,77 @@ func typeKey(t *testing.T, e *Editor, s string) {
 func TestAddCursorAboveAndBelow(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		text    string
-		start   buffer.Pos
+		Name    string
+		Text    string
+		Start   buffer.Pos
 		action  Action
 		wantErr bool
-		want    carets
+		Want    carets
 	}{
 		{
-			name:   "below clamps to a shorter line",
-			text:   "abcd\nef\nghij",
-			start:  caretPos(0, 2),
+			Name:   "below clamps to a shorter line",
+			Text:   "abcd\nef\nghij",
+			Start:  caretPos(0, 2),
 			action: "add_cursor_below",
-			want:   carets{primary: Caret{Cursor: caretPos(1, 2)}, extras: []Caret{{Cursor: caretPos(0, 2)}}},
+			Want:   carets{Primary: Caret{Cursor: caretPos(1, 2)}, extras: []Caret{{Cursor: caretPos(0, 2)}}},
 		},
 		{
-			name:   "below keeps the column on a longer line",
-			text:   "abcd\nefgh\nij",
-			start:  caretPos(0, 3),
+			Name:   "below keeps the column on a longer line",
+			Text:   "abcd\nefgh\nij",
+			Start:  caretPos(0, 3),
 			action: "add_cursor_below",
-			want:   carets{primary: Caret{Cursor: caretPos(1, 3)}, extras: []Caret{{Cursor: caretPos(0, 3)}}},
+			Want:   carets{Primary: Caret{Cursor: caretPos(1, 3)}, extras: []Caret{{Cursor: caretPos(0, 3)}}},
 		},
 		{
-			name:   "above keeps the column",
-			text:   "abcd\nefgh",
-			start:  caretPos(1, 4),
+			Name:   "above keeps the column",
+			Text:   "abcd\nefgh",
+			Start:  caretPos(1, 4),
 			action: "add_cursor_above",
-			want:   carets{primary: Caret{Cursor: caretPos(0, 4)}, extras: []Caret{{Cursor: caretPos(1, 4)}}},
+			Want:   carets{Primary: Caret{Cursor: caretPos(0, 4)}, extras: []Caret{{Cursor: caretPos(1, 4)}}},
 		},
 		{
-			name:   "above clamps to a shorter line",
-			text:   "ab\nefgh",
-			start:  caretPos(1, 3),
+			Name:   "above clamps to a shorter line",
+			Text:   "ab\nefgh",
+			Start:  caretPos(1, 3),
 			action: "add_cursor_above",
-			want:   carets{primary: Caret{Cursor: caretPos(0, 2)}, extras: []Caret{{Cursor: caretPos(1, 3)}}},
+			Want:   carets{Primary: Caret{Cursor: caretPos(0, 2)}, extras: []Caret{{Cursor: caretPos(1, 3)}}},
 		},
 		{
-			name:   "above matches the display column past a tab",
-			text:   "\tx\nabcdef",
-			start:  caretPos(1, 4),
+			Name:   "above matches the display column past a tab",
+			Text:   "\tx\nabcdef",
+			Start:  caretPos(1, 4),
 			action: "add_cursor_above",
-			want:   carets{primary: Caret{Cursor: caretPos(0, 1)}, extras: []Caret{{Cursor: caretPos(1, 4)}}},
+			Want:   carets{Primary: Caret{Cursor: caretPos(0, 1)}, extras: []Caret{{Cursor: caretPos(1, 4)}}},
 		},
 		{
-			name:    "below on the last line is refused",
-			text:    "ab\ncd",
-			start:   caretPos(1, 1),
+			Name:    "below on the last line is refused",
+			Text:    "ab\ncd",
+			Start:   caretPos(1, 1),
 			action:  "add_cursor_below",
 			wantErr: true,
-			want:    carets{primary: Caret{Cursor: caretPos(1, 1)}},
+			Want:    carets{Primary: Caret{Cursor: caretPos(1, 1)}},
 		},
 		{
-			name:    "above on the first line is refused",
-			text:    "ab\ncd",
-			start:   caretPos(0, 1),
+			Name:    "above on the first line is refused",
+			Text:    "ab\ncd",
+			Start:   caretPos(0, 1),
 			action:  "add_cursor_above",
 			wantErr: true,
-			want:    carets{primary: Caret{Cursor: caretPos(0, 1)}},
+			Want:    carets{Primary: Caret{Cursor: caretPos(0, 1)}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
-			typeText(t, e, tt.text)
-			e.SetCursor(tt.start, false)
+			typeText(t, e, tt.Text)
+			e.SetCursor(tt.Start, false)
 			r := e.Do(tt.action, nil)
 			if (r.Err != nil) != tt.wantErr {
 				t.Fatalf("Do(%s) err = %v, want error %v", tt.action, r.Err, tt.wantErr)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -169,7 +169,7 @@ func TestExtraCursorsStayInDocumentOrder(t *testing.T) {
 	e.SetCursor(caretPos(3, 0), false)
 	run(t, e, "add_cursor_above", "add_cursor_above")
 	want := carets{
-		primary: Caret{Cursor: caretPos(1, 0)},
+		Primary: Caret{Cursor: caretPos(1, 0)},
 		extras:  []Caret{{Cursor: caretPos(2, 0)}, {Cursor: caretPos(3, 0)}},
 	}
 	if got := caretState(e); !sameCarets(got, want) {
@@ -193,92 +193,92 @@ func TestCursorsReturnsACopy(t *testing.T) {
 func TestAddNextMatch(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		setup    func(t *testing.T, e *Editor)
 		wantErr  bool
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{
-			name: "selects the word at the caret and adds no caret",
-			text: "foo bar foo",
+			Name: "selects the word at the caret and adds no caret",
+			Text: "foo bar foo",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 1), false)
 			},
-			want: carets{primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
+			Want: carets{Primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
 		},
 		{
-			name: "selects the word before a caret placed just after it",
-			text: "foo bar",
+			Name: "selects the word before a caret placed just after it",
+			Text: "foo bar",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 3), false)
 			},
-			want: carets{primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
+			Want: carets{Primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
 		},
 		{
-			name: "refuses when there is no word at the caret",
-			text: "a, b",
+			Name: "refuses when there is no word at the caret",
+			Text: "a, b",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 2), false)
 			},
 			wantErr: true,
-			want:    carets{primary: Caret{Cursor: caretPos(0, 2)}},
+			Want:    carets{Primary: Caret{Cursor: caretPos(0, 2)}},
 		},
 		{
-			name: "adds the next occurrence after the selection",
-			text: "foo bar foo baz foo",
+			Name: "adds the next occurrence after the selection",
+			Text: "foo bar foo baz foo",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 0), caretPos(0, 3))
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 11), Sel: caretSel(caretPos(0, 8), caretPos(0, 11))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 11), Sel: caretSel(caretPos(0, 8), caretPos(0, 11))},
 				extras:  []Caret{{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
 			},
 		},
 		{
-			name: "keeps a backward selection backward",
-			text: "foo bar foo",
+			Name: "keeps a backward selection backward",
+			Text: "foo bar foo",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 3), caretPos(0, 0))
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 8), Sel: caretSel(caretPos(0, 11), caretPos(0, 8))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 8), Sel: caretSel(caretPos(0, 11), caretPos(0, 8))},
 				extras:  []Caret{{Cursor: caretPos(0, 0), Sel: caretSel(caretPos(0, 3), caretPos(0, 0))}},
 			},
 		},
 		{
-			name: "wraps to the start of the document",
-			text: "foo bar foo",
+			Name: "wraps to the start of the document",
+			Text: "foo bar foo",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 8), caretPos(0, 11))
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))},
 				extras:  []Caret{{Cursor: caretPos(0, 11), Sel: caretSel(caretPos(0, 8), caretPos(0, 11))}},
 			},
 		},
 		{
-			name: "matches a selection that spans lines",
-			text: "ab\ncd\nab\ncd",
+			Name: "matches a selection that spans lines",
+			Text: "ab\ncd\nab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 0), caretPos(1, 2))
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(3, 2), Sel: caretSel(caretPos(2, 0), caretPos(3, 2))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(3, 2), Sel: caretSel(caretPos(2, 0), caretPos(3, 2))},
 				extras:  []Caret{{Cursor: caretPos(1, 2), Sel: caretSel(caretPos(0, 0), caretPos(1, 2))}},
 			},
 		},
 		{
-			name: "skips an occurrence that already has a caret",
-			text: "foo foo foo",
+			Name: "skips an occurrence that already has a caret",
+			Text: "foo foo foo",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 4), caretPos(0, 7))
 				run(t, e, "add_cursor_next_match")
 				e.SelectRange(caretPos(0, 0), caretPos(0, 3))
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 11), Sel: caretSel(caretPos(0, 8), caretPos(0, 11))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 11), Sel: caretSel(caretPos(0, 8), caretPos(0, 11))},
 				extras: []Caret{
 					{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))},
 					{Cursor: caretPos(0, 7), Sel: caretSel(caretPos(0, 4), caretPos(0, 7))},
@@ -286,41 +286,41 @@ func TestAddNextMatch(t *testing.T) {
 			},
 		},
 		{
-			name: "counts columns in runes, not bytes",
-			text: "é foo é foo",
+			Name: "counts columns in runes, not bytes",
+			Text: "é foo é foo",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 2), caretPos(0, 5))
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 11), Sel: caretSel(caretPos(0, 8), caretPos(0, 11))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 11), Sel: caretSel(caretPos(0, 8), caretPos(0, 11))},
 				extras:  []Caret{{Cursor: caretPos(0, 5), Sel: caretSel(caretPos(0, 2), caretPos(0, 5))}},
 			},
 		},
 		{
-			name: "refuses when every match is already selected",
-			text: "foo",
+			Name: "refuses when every match is already selected",
+			Text: "foo",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 0), caretPos(0, 3))
 			},
 			wantErr: true,
-			want:    carets{primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
+			Want:    carets{Primary: Caret{Cursor: caretPos(0, 3), Sel: caretSel(caretPos(0, 0), caretPos(0, 3))}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
-			typeText(t, e, tt.text)
+			typeText(t, e, tt.Text)
 			setCaretsAfter(t, e, tt.setup)
 			r := e.Do("add_cursor_next_match", nil)
 			if (r.Err != nil) != tt.wantErr {
 				t.Fatalf("add_cursor_next_match err = %v, want error %v", r.Err, tt.wantErr)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
-			if text(e) != tt.text {
-				t.Fatalf("text = %q, want %q", text(e), tt.text)
+			if text(e) != tt.Text {
+				t.Fatalf("text = %q, want %q", text(e), tt.Text)
 			}
 		})
 	}
@@ -329,65 +329,65 @@ func TestAddNextMatch(t *testing.T) {
 func TestAddCursorsToLineEnds(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
+		Name  string
+		Text  string
 		setup func(t *testing.T, e *Editor)
-		want  carets
+		Want  carets
 	}{
 		{
-			name: "a selection over two lines puts a caret at each line end",
-			text: "ab\ncde\nf",
+			Name: "a selection over two lines puts a caret at each line end",
+			Text: "ab\ncde\nf",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 1), caretPos(1, 1))
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 2)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 2)},
 				extras:  []Caret{{Cursor: caretPos(1, 3)}},
 			},
 		},
 		{
-			name: "a selection ending at column 0 leaves its last line out",
-			text: "ab\ncde\nf",
+			Name: "a selection ending at column 0 leaves its last line out",
+			Text: "ab\ncde\nf",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 1), caretPos(2, 0))
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 2)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 2)},
 				extras:  []Caret{{Cursor: caretPos(1, 3)}},
 			},
 		},
 		{
-			name: "without a selection the caret moves to its line end",
-			text: "ab\ncde\nf",
+			Name: "without a selection the caret moves to its line end",
+			Text: "ab\ncde\nf",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(1, 0), false)
 			},
-			want: carets{primary: Caret{Cursor: caretPos(1, 3)}},
+			Want: carets{Primary: Caret{Cursor: caretPos(1, 3)}},
 		},
 		{
-			name: "every caret contributes its own line",
-			text: "ab\ncde",
+			Name: "every caret contributes its own line",
+			Text: "ab\ncde",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 0), false)
 				run(t, e, "add_cursor_below")
 			},
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 3)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(1, 3)},
 				extras:  []Caret{{Cursor: caretPos(0, 2)}},
 			},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
-			typeText(t, e, tt.text)
+			typeText(t, e, tt.Text)
 			setCaretsAfter(t, e, tt.setup)
 			if r := e.Do("add_cursors_to_line_ends", nil); r.Err != nil {
 				t.Fatalf("add_cursors_to_line_ends: %v", r.Err)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -396,38 +396,38 @@ func TestAddCursorsToLineEnds(t *testing.T) {
 func TestRemoveSecondaryCursors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
+		Name  string
+		Text  string
 		setup func(t *testing.T, e *Editor)
-		want  carets
+		Want  carets
 	}{
 		{
-			name: "clears the extra carets and the primary selection",
-			text: "ab\ncd",
+			Name: "clears the extra carets and the primary selection",
+			Text: "ab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 1), false)
 				run(t, e, "add_cursor_below")
 				e.SelectRange(caretPos(1, 0), caretPos(1, 1))
 			},
-			want: carets{primary: Caret{Cursor: caretPos(1, 1)}},
+			Want: carets{Primary: Caret{Cursor: caretPos(1, 1)}},
 		},
 		{
-			name: "is silent with one caret",
-			text: "ab",
-			want: carets{primary: Caret{Cursor: caretPos(0, 2)}},
+			Name: "is silent with one caret",
+			Text: "ab",
+			Want: carets{Primary: Caret{Cursor: caretPos(0, 2)}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
-			typeText(t, e, tt.text)
+			typeText(t, e, tt.Text)
 			setCaretsAfter(t, e, tt.setup)
 			if r := e.Do("remove_secondary_cursors", nil); r.Err != nil {
 				t.Fatalf("remove_secondary_cursors err = %v, want nil", r.Err)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -436,52 +436,52 @@ func TestRemoveSecondaryCursors(t *testing.T) {
 func TestTypingAppliesAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		setup    func(t *testing.T, e *Editor)
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{
-			name: "inserts at every caret",
-			text: "ab\ncd\nef",
+			Name: "inserts at every caret",
+			Text: "ab\ncd\nef",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 1), false)
 				run(t, e, "add_cursor_below", "add_cursor_below")
 			},
 			wantText: "aXb\ncXd\neXf",
-			want: carets{
-				primary: Caret{Cursor: caretPos(2, 2)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(2, 2)},
 				extras:  []Caret{{Cursor: caretPos(0, 2)}, {Cursor: caretPos(1, 2)}},
 			},
 		},
 		{
-			name: "replaces the selection at every caret",
-			text: "abc\nabc",
+			Name: "replaces the selection at every caret",
+			Text: "abc\nabc",
 			setup: func(t *testing.T, e *Editor) {
 				e.SelectRange(caretPos(0, 0), caretPos(0, 2))
 				run(t, e, "add_cursor_below")
 				e.SelectRange(caretPos(1, 0), caretPos(1, 2))
 			},
 			wantText: "Xc\nXc",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 1)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(1, 1)},
 				extras:  []Caret{{Cursor: caretPos(0, 1)}},
 			},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
-			typeText(t, e, tt.text)
+			typeText(t, e, tt.Text)
 			setCaretsAfter(t, e, tt.setup)
 			typeKey(t, e, "X")
 			if text(e) != tt.wantText {
 				t.Fatalf("text = %q, want %q", text(e), tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -490,46 +490,46 @@ func TestTypingAppliesAtEveryCaret(t *testing.T) {
 func TestNewlineAppliesAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		opts     Options
-		text     string
+		Text     string
 		setup    func(t *testing.T, e *Editor)
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{
-			name: "splits every caret's line",
-			text: "ab\ncd",
+			Name: "splits every caret's line",
+			Text: "ab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(1, 1), false)
 				run(t, e, "add_cursor_above")
 			},
 			wantText: "a\nb\nc\nd",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 0)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(1, 0)},
 				extras:  []Caret{{Cursor: caretPos(3, 0)}},
 			},
 		},
 		{
-			name: "copies the indent of each line when auto indent is on",
+			Name: "copies the indent of each line when auto indent is on",
 			opts: Options{AutoIndent: true},
-			text: "  ab\n  cd",
+			Text: "  ab\n  cd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(1, 4), false)
 				run(t, e, "add_cursor_above")
 			},
 			wantText: "  ab\n  \n  cd\n  ",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 2)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(1, 2)},
 				extras:  []Caret{{Cursor: caretPos(3, 2)}},
 			},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(tt.opts)
-			typeText(t, e, tt.text)
+			typeText(t, e, tt.Text)
 			setCaretsAfter(t, e, tt.setup)
 			if r := e.Do("insert_newline", nil); r.Err != nil {
 				t.Fatalf("insert_newline: %v", r.Err)
@@ -537,8 +537,8 @@ func TestNewlineAppliesAtEveryCaret(t *testing.T) {
 			if text(e) != tt.wantText {
 				t.Fatalf("text = %q, want %q", text(e), tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -547,42 +547,42 @@ func TestNewlineAppliesAtEveryCaret(t *testing.T) {
 func TestBackspaceAppliesAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		setup    func(t *testing.T, e *Editor)
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{
-			name: "deletes before every caret",
-			text: "abc\ndef",
+			Name: "deletes before every caret",
+			Text: "abc\ndef",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(1, 2), false)
 				run(t, e, "add_cursor_above")
 			},
 			wantText: "ac\ndf",
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 1)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 1)},
 				extras:  []Caret{{Cursor: caretPos(1, 1)}},
 			},
 		},
 		{
-			name: "joins lines and merges the carets that meet",
-			text: "ab\ncd",
+			Name: "joins lines and merges the carets that meet",
+			Text: "ab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 2), false)
 				run(t, e, "add_cursor_below")
 				e.SetCursor(caretPos(1, 0), false)
 			},
 			wantText: "acd",
-			want:     carets{primary: Caret{Cursor: caretPos(0, 1)}},
+			Want:     carets{Primary: Caret{Cursor: caretPos(0, 1)}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
-			typeText(t, e, tt.text)
+			typeText(t, e, tt.Text)
 			setCaretsAfter(t, e, tt.setup)
 			if r := e.Do("delete_backward", nil); r.Err != nil {
 				t.Fatalf("delete_backward: %v", r.Err)
@@ -590,8 +590,8 @@ func TestBackspaceAppliesAtEveryCaret(t *testing.T) {
 			if text(e) != tt.wantText {
 				t.Fatalf("text = %q, want %q", text(e), tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -600,42 +600,42 @@ func TestBackspaceAppliesAtEveryCaret(t *testing.T) {
 func TestDeleteForwardAppliesAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
+		Name     string
+		Text     string
 		setup    func(t *testing.T, e *Editor)
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{
-			name: "deletes after every caret",
-			text: "abc\ndef",
+			Name: "deletes after every caret",
+			Text: "abc\ndef",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 1), false)
 				run(t, e, "add_cursor_below")
 			},
 			wantText: "ac\ndf",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 1)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(1, 1)},
 				extras:  []Caret{{Cursor: caretPos(0, 1)}},
 			},
 		},
 		{
-			name: "joins lines and merges the carets that meet",
-			text: "ab\ncd",
+			Name: "joins lines and merges the carets that meet",
+			Text: "ab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 2), false)
 				run(t, e, "add_cursor_below")
 				e.SetCursor(caretPos(1, 0), false)
 			},
 			wantText: "abd",
-			want:     carets{primary: Caret{Cursor: caretPos(0, 2)}},
+			Want:     carets{Primary: Caret{Cursor: caretPos(0, 2)}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
-			typeText(t, e, tt.text)
+			typeText(t, e, tt.Text)
 			setCaretsAfter(t, e, tt.setup)
 			if r := e.Do("delete_forward", nil); r.Err != nil {
 				t.Fatalf("delete_forward: %v", r.Err)
@@ -643,8 +643,8 @@ func TestDeleteForwardAppliesAtEveryCaret(t *testing.T) {
 			if text(e) != tt.wantText {
 				t.Fatalf("text = %q, want %q", text(e), tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -653,75 +653,75 @@ func TestDeleteForwardAppliesAtEveryCaret(t *testing.T) {
 func TestTabAppliesAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		opts     Options
-		text     string
+		Text     string
 		setup    func(t *testing.T, e *Editor)
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{
-			name: "inserts tab_size spaces at every caret",
-			text: "ab\ncd",
+			Name: "inserts tab_size spaces at every caret",
+			Text: "ab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 1), false)
 				run(t, e, "add_cursor_below")
 			},
 			wantText: "a    b\nc    d",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 5)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(1, 5)},
 				extras:  []Caret{{Cursor: caretPos(0, 5)}},
 			},
 		},
 		{
-			name: "inserts a tab character at every caret when UseTabs is set",
+			Name: "inserts a tab character at every caret when UseTabs is set",
 			opts: Options{UseTabs: true},
-			text: "ab\ncd",
+			Text: "ab\ncd",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(0, 1), false)
 				run(t, e, "add_cursor_below")
 			},
 			wantText: "a\tb\nc\td",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 2)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(1, 2)},
 				extras:  []Caret{{Cursor: caretPos(0, 2)}},
 			},
 		},
 		{
-			name: "two carets on one line each insert a full indent",
-			text: "ab",
+			Name: "two carets on one line each insert a full indent",
+			Text: "ab",
 			setup: func(t *testing.T, e *Editor) {
-				e.Active().setCarets([]caret{
-					{anchor: caretPos(0, 1), head: caretPos(0, 1), primary: true},
-					{anchor: caretPos(0, 2), head: caretPos(0, 2)},
+				e.Active().SetCarets([]caret{
+					{Anchor: caretPos(0, 1), Head: caretPos(0, 1), Primary: true},
+					{Anchor: caretPos(0, 2), Head: caretPos(0, 2)},
 				})
 			},
 			wantText: "a    b    ",
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 5)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 5)},
 				extras:  []Caret{{Cursor: caretPos(0, 10)}},
 			},
 		},
 		{
-			name: "indents the lines covered by any selection",
-			text: "a\nb\nc",
+			Name: "indents the lines covered by any selection",
+			Text: "a\nb\nc",
 			setup: func(t *testing.T, e *Editor) {
 				e.SetCursor(caretPos(2, 0), false)
 				run(t, e, "add_cursor_above")
 				e.SelectRange(caretPos(0, 0), caretPos(1, 1))
 			},
 			wantText: "    a\n    b\nc",
-			want: carets{
-				primary: Caret{Cursor: caretPos(1, 5), Sel: caretSel(caretPos(0, 4), caretPos(1, 5))},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(1, 5), Sel: caretSel(caretPos(0, 4), caretPos(1, 5))},
 				extras:  []Caret{{Cursor: caretPos(2, 0)}},
 			},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(tt.opts)
-			typeText(t, e, tt.text)
+			typeText(t, e, tt.Text)
 			setCaretsAfter(t, e, tt.setup)
 			if r := e.Do("insert_tab", nil); r.Err != nil {
 				t.Fatalf("insert_tab: %v", r.Err)
@@ -729,8 +729,8 @@ func TestTabAppliesAtEveryCaret(t *testing.T) {
 			if text(e) != tt.wantText {
 				t.Fatalf("text = %q, want %q", text(e), tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -758,79 +758,79 @@ func TestUndoRevertsMultiCaretTypingInOneStep(t *testing.T) {
 func TestNormalizeCarets(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		in   []caret
-		want []caret
+		Want []caret
 	}{
 		{
-			name: "disjoint carets are sorted and kept apart",
+			Name: "disjoint carets are sorted and kept apart",
 			in: []caret{
-				{anchor: caretPos(1, 0), head: caretPos(1, 0)},
-				{anchor: caretPos(0, 5), head: caretPos(0, 5), primary: true},
+				{Anchor: caretPos(1, 0), Head: caretPos(1, 0)},
+				{Anchor: caretPos(0, 5), Head: caretPos(0, 5), Primary: true},
 			},
-			want: []caret{
-				{anchor: caretPos(0, 5), head: caretPos(0, 5), primary: true},
-				{anchor: caretPos(1, 0), head: caretPos(1, 0)},
+			Want: []caret{
+				{Anchor: caretPos(0, 5), Head: caretPos(0, 5), Primary: true},
+				{Anchor: caretPos(1, 0), Head: caretPos(1, 0)},
 			},
 		},
 		{
-			name: "two carets at one position merge and keep the primary flag",
+			Name: "two carets at one position merge and keep the primary flag",
 			in: []caret{
-				{anchor: caretPos(0, 2), head: caretPos(0, 2)},
-				{anchor: caretPos(0, 2), head: caretPos(0, 2), primary: true},
+				{Anchor: caretPos(0, 2), Head: caretPos(0, 2)},
+				{Anchor: caretPos(0, 2), Head: caretPos(0, 2), Primary: true},
 			},
-			want: []caret{{anchor: caretPos(0, 2), head: caretPos(0, 2), primary: true}},
+			Want: []caret{{Anchor: caretPos(0, 2), Head: caretPos(0, 2), Primary: true}},
 		},
 		{
-			name: "overlapping selections merge into their union",
+			Name: "overlapping selections merge into their union",
 			in: []caret{
-				{anchor: caretPos(0, 0), head: caretPos(0, 3)},
-				{anchor: caretPos(0, 2), head: caretPos(0, 5), primary: true},
+				{Anchor: caretPos(0, 0), Head: caretPos(0, 3)},
+				{Anchor: caretPos(0, 2), Head: caretPos(0, 5), Primary: true},
 			},
-			want: []caret{{anchor: caretPos(0, 0), head: caretPos(0, 5), primary: true}},
+			Want: []caret{{Anchor: caretPos(0, 0), Head: caretPos(0, 5), Primary: true}},
 		},
 		{
-			name: "a backward primary keeps its direction in the union",
+			Name: "a backward primary keeps its direction in the union",
 			in: []caret{
-				{anchor: caretPos(0, 0), head: caretPos(0, 3)},
-				{anchor: caretPos(0, 5), head: caretPos(0, 2), primary: true},
+				{Anchor: caretPos(0, 0), Head: caretPos(0, 3)},
+				{Anchor: caretPos(0, 5), Head: caretPos(0, 2), Primary: true},
 			},
-			want: []caret{{anchor: caretPos(0, 5), head: caretPos(0, 0), primary: true}},
+			Want: []caret{{Anchor: caretPos(0, 5), Head: caretPos(0, 0), Primary: true}},
 		},
 		{
-			name: "selections that only touch stay apart",
+			Name: "selections that only touch stay apart",
 			in: []caret{
-				{anchor: caretPos(0, 0), head: caretPos(0, 2)},
-				{anchor: caretPos(0, 2), head: caretPos(0, 4)},
+				{Anchor: caretPos(0, 0), Head: caretPos(0, 2)},
+				{Anchor: caretPos(0, 2), Head: caretPos(0, 4)},
 			},
-			want: []caret{
-				{anchor: caretPos(0, 0), head: caretPos(0, 2)},
-				{anchor: caretPos(0, 2), head: caretPos(0, 4)},
+			Want: []caret{
+				{Anchor: caretPos(0, 0), Head: caretPos(0, 2)},
+				{Anchor: caretPos(0, 2), Head: caretPos(0, 4)},
 			},
 		},
 		{
-			name: "an empty caret at the end of a selection merges with it",
+			Name: "an empty caret at the end of a selection merges with it",
 			in: []caret{
-				{anchor: caretPos(0, 0), head: caretPos(0, 2), primary: true},
-				{anchor: caretPos(0, 2), head: caretPos(0, 2)},
+				{Anchor: caretPos(0, 0), Head: caretPos(0, 2), Primary: true},
+				{Anchor: caretPos(0, 2), Head: caretPos(0, 2)},
 			},
-			want: []caret{{anchor: caretPos(0, 0), head: caretPos(0, 2), primary: true}},
+			Want: []caret{{Anchor: caretPos(0, 0), Head: caretPos(0, 2), Primary: true}},
 		},
 		{
-			name: "a primary caret inside another selection takes the union",
+			Name: "a primary caret inside another selection takes the union",
 			in: []caret{
-				{anchor: caretPos(0, 0), head: caretPos(0, 4)},
-				{anchor: caretPos(0, 2), head: caretPos(0, 2), primary: true},
+				{Anchor: caretPos(0, 0), Head: caretPos(0, 4)},
+				{Anchor: caretPos(0, 2), Head: caretPos(0, 2), Primary: true},
 			},
-			want: []caret{{anchor: caretPos(0, 0), head: caretPos(0, 4), primary: true}},
+			Want: []caret{{Anchor: caretPos(0, 0), Head: caretPos(0, 4), Primary: true}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			got := normalize(slices.Clone(tt.in))
-			if !slices.Equal(got, tt.want) {
-				t.Fatalf("normalize = %+v, want %+v", got, tt.want)
+			if !slices.Equal(got, tt.Want) {
+				t.Fatalf("normalize = %+v, want %+v", got, tt.Want)
 			}
 		})
 	}
@@ -842,43 +842,43 @@ func TestStaleExtraCaretPastTheEndIsClampedBeforeEditing(t *testing.T) {
 	// edit uses it. Backspace there removes the line break before the last line.
 	// Typing there inserts before "ef".
 	tests := []struct {
-		name     string
+		Name     string
 		action   func(t *testing.T, e *Editor)
 		wantText string
-		want     carets
+		Want     carets
 	}{
 		{
-			name:     "typing at the clamped caret",
+			Name:     "typing at the clamped caret",
 			action:   func(t *testing.T, e *Editor) { typeKey(t, e, "X") },
 			wantText: "Xab\ncd\nXef",
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 1)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 1)},
 				extras:  []Caret{{Cursor: caretPos(2, 1)}},
 			},
 		},
 		{
-			name:     "backspace at the clamped caret",
+			Name:     "backspace at the clamped caret",
 			action:   func(t *testing.T, e *Editor) { run(t, e, "delete_backward") },
 			wantText: "ab\ncdef",
-			want: carets{
-				primary: Caret{Cursor: caretPos(0, 0)},
+			Want: carets{
+				Primary: Caret{Cursor: caretPos(0, 0)},
 				extras:  []Caret{{Cursor: caretPos(1, 2)}},
 			},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := New(Options{})
 			typeText(t, e, "ab\ncd\nef")
 			e.SetCursor(caretPos(0, 0), false)
-			e.Active().extra = []Caret{{Cursor: caretPos(9, 0)}}
+			e.Active().Extra = []Caret{{Cursor: caretPos(9, 0)}}
 			tt.action(t, e)
 			if text(e) != tt.wantText {
 				t.Fatalf("text = %q, want %q", text(e), tt.wantText)
 			}
-			if got := caretState(e); !sameCarets(got, tt.want) {
-				t.Fatalf("carets = %v, want %v", got, tt.want)
+			if got := caretState(e); !sameCarets(got, tt.Want) {
+				t.Fatalf("carets = %v, want %v", got, tt.Want)
 			}
 		})
 	}
@@ -890,10 +890,10 @@ func TestUndoAndRedoPutThePrimaryCaretBackOnItsOwnEdit(t *testing.T) {
 	// caret furthest down, so the primary must come from the recorded state.
 	e := New(Options{})
 	typeText(t, e, "ab\ncd\nef")
-	e.Active().setCarets([]caret{
-		{anchor: caretPos(0, 1), head: caretPos(0, 1)},
-		{anchor: caretPos(1, 1), head: caretPos(1, 1), primary: true},
-		{anchor: caretPos(2, 1), head: caretPos(2, 1)},
+	e.Active().SetCarets([]caret{
+		{Anchor: caretPos(0, 1), Head: caretPos(0, 1)},
+		{Anchor: caretPos(1, 1), Head: caretPos(1, 1), Primary: true},
+		{Anchor: caretPos(2, 1), Head: caretPos(2, 1)},
 	})
 	typeKey(t, e, "X")
 	if text(e) != "aXb\ncXd\neXf" {
@@ -903,14 +903,14 @@ func TestUndoAndRedoPutThePrimaryCaretBackOnItsOwnEdit(t *testing.T) {
 	if text(e) != "ab\ncd\nef" {
 		t.Fatalf("undo left text %q", text(e))
 	}
-	if got := caretState(e).primary.Cursor; got != caretPos(1, 1) {
+	if got := caretState(e).Primary.Cursor; got != caretPos(1, 1) {
 		t.Fatalf("primary after undo = %v, want 1:1", got)
 	}
 	run(t, e, "redo")
 	if text(e) != "aXb\ncXd\neXf" {
 		t.Fatalf("redo left text %q", text(e))
 	}
-	if got := caretState(e).primary.Cursor; got != caretPos(1, 2) {
+	if got := caretState(e).Primary.Cursor; got != caretPos(1, 2) {
 		t.Fatalf("primary after redo = %v, want 1:2", got)
 	}
 }
@@ -922,9 +922,9 @@ func TestSingleCaretEditAfterAMultiCaretEditEndsItsUndoRecord(t *testing.T) {
 	// multi-caret edit, because the record of that edit no longer matches.
 	e := New(Options{})
 	typeText(t, e, "ab\ncd\nef")
-	e.Active().setCarets([]caret{
-		{anchor: caretPos(0, 1), head: caretPos(0, 1)},
-		{anchor: caretPos(1, 1), head: caretPos(1, 1), primary: true},
+	e.Active().SetCarets([]caret{
+		{Anchor: caretPos(0, 1), Head: caretPos(0, 1)},
+		{Anchor: caretPos(1, 1), Head: caretPos(1, 1), Primary: true},
 	})
 	typeKey(t, e, "X")
 	run(t, e, "remove_secondary_cursors")
@@ -936,7 +936,7 @@ func TestSingleCaretEditAfterAMultiCaretEditEndsItsUndoRecord(t *testing.T) {
 	if text(e) != "aXb\ncXd\nef" {
 		t.Fatalf("undo left text %q", text(e))
 	}
-	if got := caretState(e).primary.Cursor; got != caretPos(1, 2) {
+	if got := caretState(e).Primary.Cursor; got != caretPos(1, 2) {
 		t.Fatalf("primary after undo = %v, want 1:2 (where Y was typed)", got)
 	}
 }

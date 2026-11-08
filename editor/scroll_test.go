@@ -86,8 +86,8 @@ func TestScrollKeepsSelection(t *testing.T) {
 func TestRecenterPutsCaretLineInTheMiddle(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		line    int
+		Name    string
+		Line    int
 		wantTop int
 	}{
 		{"middle of the file", 10, 8},
@@ -95,15 +95,15 @@ func TestRecenterPutsCaretLineInTheMiddle(t *testing.T) {
 		{"near the end is not clamped", 19, 17},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := scrollDoc(20, 0, buffer.Pos{Line: tt.line, Col: 0})
+			e := scrollDoc(20, 0, buffer.Pos{Line: tt.Line, Col: 0})
 			run(t, e, "recenter")
 			d := e.Active()
 			if d.Top != tt.wantTop {
 				t.Fatalf("Top = %d, want %d", d.Top, tt.wantTop)
 			}
-			if d.Cursor != (buffer.Pos{Line: tt.line}) {
+			if d.Cursor != (buffer.Pos{Line: tt.Line}) {
 				t.Fatalf("caret = %+v, want it unmoved", d.Cursor)
 			}
 		})
@@ -126,8 +126,8 @@ func TestRecenterKeepsSelection(t *testing.T) {
 func TestScrollDownDoesNotScrollPastTheLastPage(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		lines   int
+		Name    string
+		Lines   int
 		top     int
 		caret   buffer.Pos
 		wantTop int
@@ -138,9 +138,9 @@ func TestScrollDownDoesNotScrollPastTheLastPage(t *testing.T) {
 		{"one line before the last page", 10, 4, buffer.Pos{Line: 6, Col: 0}, 5},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := scrollDoc(tt.lines, tt.top, tt.caret)
+			e := scrollDoc(tt.Lines, tt.top, tt.caret)
 			run(t, e, "scroll_down")
 			d := e.Active()
 			if d.Top != tt.wantTop {

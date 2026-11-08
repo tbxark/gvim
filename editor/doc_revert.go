@@ -1,19 +1,12 @@
 package editor
 
 import (
-	"errors"
 	"fmt"
+	"github.com/tbxark/gvim/buffer"
 	"io/fs"
 	"os"
 	"path/filepath"
-
-	"github.com/tbxark/gvim/buffer"
 )
-
-// ErrStaleRevert is returned by ApplyRevert when the text changed after PlanRevert. The file
-// that RunRevert read is then not the one the document was planned against, so the reload is
-// refused and the edit is kept.
-var ErrStaleRevert = errors.New("text changed since the revert was planned")
 
 // RevertPlan is a reload of one document from its file. It holds no file state, so making it
 // reads nothing. PlanRevert makes a plan for the active document and records its text, which
@@ -33,7 +26,7 @@ type RevertPlan struct {
 	Auto bool
 
 	planned bool        // PlanRevert made the plan, so mark holds the document's content
-	eol     string      // the line ending of the document, which the read keeps when it can
+	Eol     string      // the line ending of the document, which the read keeps when it can
 	mark    contentMark // the content at the plan, which ApplyRevert checks is unchanged
 	// spec is how the read opens a large file. It is set by a plan the editor made, and
 	// nil for a plan made from a path alone, which reads the file whole as a small file
@@ -75,21 +68,21 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 		return RevertPlan{}, err
 	}
 	switch {
-	case d.restoring():
+	case d.Restoring():
 		// A swap of the file would drop the stashed edits that wait for the index.
 		err := fmt.Errorf("revert %s: %w", d.Name(), ErrRestoring)
 		e.setError(err)
 		return RevertPlan{}, err
-	case d.large != nil && d.Modified():
+	case d.LargeState() != nil && d.Modified():
 		// The edits of a large document are an overlay on its file. They are not
 		// discarded by a reload, which only swaps the file under an unmodified one.
 		err := &largeError{
-			msg:  fmt.Sprintf("revert %s: a large file with unsaved changes is not reverted; save it or close it", d.Name()),
-			errs: []error{ErrLargeFile},
+			Msg:  fmt.Sprintf("revert %s: a large file with unsaved changes is not reverted; save it or close it", d.Name()),
+			Errs: []error{ErrLargeFile},
 		}
 		e.setError(err)
 		return RevertPlan{}, err
-	case d.large == nil && e.isLargePath(d.Path):
+	case d.LargeState() == nil && e.isLargePath(d.Path):
 		// A file that has grown into a large one since the document was opened is not
 		// read whole.
 		err := fmt.Errorf("revert %s: %w", d.Name(), ErrLargeFile)
@@ -101,10 +94,10 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 		Force:    force,
 		Modified: d.Modified(),
 		planned:  true,
-		eol:      d.eol,
-		mark:     d.contentMark(),
+		Eol:      d.Eol,
+		mark:     d.ContentMark(),
 	}
-	if d.large != nil {
+	if d.LargeState() != nil {
 		spec := e.loadSpec()
 		plan.spec = &spec
 	}
@@ -120,10 +113,10 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 // plan and changes no editor state, so it may run in a command, off the update loop. A file
 // that no longer exists is reported in the result as an error that wraps fs.ErrNotExist.
 func RunRevert(plan RevertPlan) RevertResult {
-	spec := loadSpec{eol: plan.eol}
+	spec := loadSpec{Eol: plan.Eol}
 	if plan.spec != nil {
 		spec = *plan.spec
-		spec.eol = plan.eol
+		spec.Eol = plan.Eol
 	} else if info, err := os.Stat(plan.Path); err == nil && info.Size() > maxFullLoad {
 		// A plan with no large settings reads the file whole, which a file this big
 		// must not be.
@@ -133,10 +126,10 @@ func RunRevert(plan RevertPlan) RevertResult {
 	if err != nil {
 		return RevertResult{Err: fmt.Errorf("revert: %w", err)}
 	}
-	if !fresh.disk.exists {
+	if !fresh.Disk.Exists {
 		return RevertResult{Err: fmt.Errorf("revert %s: %w", fresh.Name(), fs.ErrNotExist)}
 	}
-	if fresh.large != nil {
+	if fresh.LargeState() != nil {
 		return RevertResult{fresh: fresh}
 	}
 	return RevertResult{Text: fresh.Buffer.Text(), fresh: fresh}
@@ -150,7 +143,7 @@ func (e *Editor) PlanRevertPath(path string) RevertPlan {
 	spec := e.loadSpec()
 	plan := RevertPlan{Path: path, spec: &spec}
 	if d := e.docWithPath(path); d != nil {
-		plan.eol = d.eol
+		plan.Eol = d.Eol
 	}
 	return plan
 }
@@ -174,36 +167,36 @@ func (e *Editor) ApplyRevert(plan RevertPlan, res RevertResult) error {
 		e.releaseDoc(res.fresh)
 		return fmt.Errorf("revert %s: %w", filepath.Base(plan.Path), ErrNoDocument)
 	}
-	d.revertAuto = plan.Auto
-	defer func() { d.revertAuto = false }()
-	freshLarge := res.fresh != nil && res.fresh.large != nil
+	d.RevertAuto = plan.Auto
+	defer func() { d.RevertAuto = false }()
+	freshLarge := res.fresh != nil && res.fresh.LargeState() != nil
 	var err error
 	switch {
-	case d.large != nil && (plan.spec == nil || res.fresh == nil), d.large == nil && freshLarge:
+	case d.LargeState() != nil && (plan.spec == nil || res.fresh == nil), d.LargeState() == nil && freshLarge:
 		// A plan with no large settings read the file as a small one. A small document
 		// is not swapped for a large one either: that is a file that has grown, and the
 		// plan refuses it.
 		err = ErrLargeFile
-	case res.fresh != nil && res.fresh.binary && !d.binary:
+	case res.fresh != nil && res.fresh.Binary() && !d.Binary():
 		err = fmt.Errorf("file is now %w", ErrBinary)
-	case plan.planned && d.contentMark() != plan.mark:
+	case plan.planned && d.ContentMark() != plan.mark:
 		err = ErrStaleRevert
 	case !plan.planned && d.Modified():
 		// A path-only plan has no text to compare, so the tab must still be clean.
 		err = ErrStaleRevert
-	case d.restoring():
+	case d.Restoring():
 		err = ErrRestoring
-	case d.large != nil && d.Modified():
+	case d.LargeState() != nil && d.Modified():
 		err = ErrLargeFile
 	}
 	if err != nil {
 		e.releaseDoc(res.fresh)
 		err = fmt.Errorf("revert %s: %w", d.Name(), err)
-		d.fail(err)
+		d.Fail(err)
 		return err
 	}
-	if d.large != nil {
-		if res.fresh.large != nil && !d.dirty() && res.fresh.disk.sameAs(d.disk) {
+	if d.LargeState() != nil {
+		if res.fresh.LargeState() != nil && !d.Dirty() && res.fresh.Disk.SameAs(d.Disk) {
 			// The file is the one the document reads or has just written, as after a
 			// save: a swap would only restart the index and drop the selection.
 			e.releaseDoc(res.fresh)
@@ -216,51 +209,31 @@ func (e *Editor) ApplyRevert(plan RevertPlan, res RevertResult) error {
 	}
 	if res.Text == d.Buffer.Text() {
 		// The file already holds this text, as after a save, so nothing is replaced.
-		if res.fresh != nil && !d.dirty() && res.fresh.disk.sameAs(d.disk) {
+		if res.fresh != nil && !d.Dirty() && res.fresh.Disk.SameAs(d.Disk) {
 			// It is also the file the document has just read or written, so there is
 			// nothing to adopt and nothing to report: the watcher sees every own save,
 			// and "Reverted" would replace its "Saved".
 			e.releaseDoc(res.fresh)
 			return nil
 		}
-		d.adoptFile(res.Text, res.fresh)
-		d.status = d.revertedStatus()
+		d.AdoptFile(res.Text, res.fresh)
+		d.Status = d.RevertedStatus()
 		return nil
 	}
 	d.Buffer.Group(func() {
 		d.Buffer.Delete(buffer.Pos{}, d.Buffer.End())
 		d.Buffer.Insert(buffer.Pos{}, res.Text)
 	})
-	d.adoptFile(res.Text, res.fresh)
+	d.AdoptFile(res.Text, res.fresh)
 	d.Sel = nil
-	d.clearCarets()
-	d.lastMulti = nil
-	d.folded = nil
-	d.findRange = nil
-	d.clampToText()
-	d.want = -1
-	d.status = d.revertedStatus()
+	d.ClearCarets()
+	d.LastMulti = nil
+	d.SetFoldedLines(nil)
+	d.FindRange = nil
+	d.ClampToText()
+	d.Want = -1
+	d.Status = d.RevertedStatus()
 	return nil
-}
-
-// adoptFile records the file that a read found as the saved state of d: the saved text, and
-// the line ending, encoding and disk state of the read. A result with no read behind it (fresh
-// is nil) changes only the saved text.
-func (d *Document) adoptFile(text string, fresh *Document) {
-	d.Buffer.MarkSaved()
-	d.metaDirty = false
-	d.setSaved(text)
-	if fresh == nil {
-		return
-	}
-	d.eol = fresh.eol
-	d.ends = fresh.ends
-	d.disk = fresh.disk
-	d.codec = fresh.codec
-	d.encoding = fresh.encoding
-	// A binary tab whose file became text is text now. It stays read-only, since it was
-	// opened that way, and toggle_read_only can make it editable.
-	d.binary = fresh.binary
 }
 
 // docWithPath returns the open document whose file is path, or nil. An empty path matches
@@ -303,34 +276,27 @@ func revertDocument(e *Editor, _ *Document, args map[string]any) error {
 func (e *Editor) swapFile(d, fresh *Document) {
 	cursor, top := d.Cursor, d.Top
 	e.releaseDoc(d)
-	d.setBuffer(fresh.Buffer)
-	d.large = fresh.large
-	d.setSaved(fresh.saved)
-	d.eol, d.ends, d.disk = fresh.eol, fresh.ends, fresh.disk
-	d.codec, d.encoding = fresh.codec, fresh.encoding
-	d.readOnly, d.binary = fresh.readOnly, fresh.binary
-	d.metaDirty = false
+	d.SetBuffer(fresh.Buffer)
+	d.SetLargeState(fresh.LargeState())
+	d.SetSaved(fresh.Saved)
+	d.Eol, d.Ends, d.Disk = fresh.Eol, fresh.Ends, fresh.Disk
+	d.Codec = fresh.Codec
+	d.SetEncodingLabel(fresh.EncodingLabel())
+	d.SetReadOnly(fresh.ReadOnly())
+	d.SetBinary(fresh.Binary())
+	d.MetaDirty = false
 	d.Sel = nil
-	d.block = nil
-	d.clearCarets()
-	d.folded = nil
-	d.want = -1
-	d.resetHistoryState()
+	d.Block = nil
+	d.ClearCarets()
+	d.SetFoldedLines(nil)
+	d.Want = -1
+	d.ResetHistoryState()
 	d.Cursor = d.Buffer.Clamp(cursor)
 	d.Top = max(min(top, d.Buffer.Lines()-1), 0)
-	if d.large != nil && cursor != d.Cursor && !d.Index().Complete {
-		d.large.pending = &pending{
-			kind: pendingGoto, line: cursor.Line + 1, col: cursor.Col + 1, from: jumpEntryOf(d),
+	if d.LargeState() != nil && cursor != d.Cursor && !d.Index().Complete {
+		d.LargeState().Pending = &pending{
+			Kind: pendingGoto, Line: cursor.Line + 1, Col: cursor.Col + 1, From: jumpEntryOf(d),
 		}
 	}
-	d.status = d.revertedStatus()
-}
-
-// revertedStatus is the status after a reload from disk: "Reverted a.txt" for a revert the
-// user asked for, and "Reloaded a.txt from disk" for one made because the file changed.
-func (d *Document) revertedStatus() string {
-	if d.revertAuto {
-		return "Reloaded " + d.Name() + " from disk"
-	}
-	return "Reverted " + d.Name()
+	d.Status = d.RevertedStatus()
 }

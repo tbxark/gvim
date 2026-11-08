@@ -14,7 +14,7 @@ const (
 // jumpMark is the place the caret was in before an action ran.
 type jumpMark struct {
 	en jumpEntry
-	ok bool
+	Ok bool
 }
 
 // markJump records the place of the active caret, to compare after an action.
@@ -24,14 +24,14 @@ func (e *Editor) markJump() jumpMark {
 	if d == nil || e.pristineUntitled() {
 		return jumpMark{}
 	}
-	return jumpMark{en: jumpEntryOf(d), ok: true}
+	return jumpMark{en: jumpEntryOf(d), Ok: true}
 }
 
 // recordJump adds the place from markJump to the navigation history when the
 // caret of the same tab has moved far since.
 func (e *Editor) recordJump(m jumpMark) {
 	d := e.Active()
-	if !m.ok || d != m.en.doc || !farMove(m.en.pos, d.Cursor) {
+	if !m.Ok || d != m.en.Doc || !farMove(m.en.Pos, d.Cursor) {
 		return
 	}
 	e.extras.jumps.push(m.en)

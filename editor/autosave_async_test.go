@@ -66,16 +66,16 @@ func TestPlanAutoSaveWritesNothing(t *testing.T) {
 func TestSaveJobRunWritesOrRefuses(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
+		Name     string
 		outside  string // written to the file after the plan, when set
 		wantErr  error
 		wantFile string
 	}{
-		{name: "writes the planned text", wantFile: "xabc\n"},
-		{name: "refuses a file changed on disk", outside: "other\n", wantErr: ErrChangedOnDisk, wantFile: "other\n"},
+		{Name: "writes the planned text", wantFile: "xabc\n"},
+		{Name: "refuses a file changed on disk", outside: "other\n", wantErr: ErrChangedOnDisk, wantFile: "other\n"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			ed, path := openForAutoSave(t, "abc\n")
 			typeIntoDoc(t, ed, "x")
@@ -106,15 +106,15 @@ func TestSaveJobRunWritesOrRefuses(t *testing.T) {
 func TestApplySavesMarksSavedOnlyWhenTextIsUnchanged(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name         string
+		Name         string
 		editAfter    bool
 		wantModified bool
 	}{
-		{name: "no edit while writing", editAfter: false, wantModified: false},
-		{name: "an edit while writing", editAfter: true, wantModified: true},
+		{Name: "no edit while writing", editAfter: false, wantModified: false},
+		{Name: "an edit while writing", editAfter: true, wantModified: true},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			ed, path := openForAutoSave(t, "abc\n")
 			typeIntoDoc(t, ed, "x")
@@ -160,7 +160,7 @@ func TestApplySavesRecordsAFailureAndKeepsTheEdits(t *testing.T) {
 	if !doc.Modified() {
 		t.Fatal("a refused save marked the document saved")
 	}
-	if !strings.Contains(doc.status, "changed on disk") {
-		t.Fatalf("status = %q, want the changed-on-disk error", doc.status)
+	if !strings.Contains(doc.Status, "changed on disk") {
+		t.Fatalf("status = %q, want the changed-on-disk error", doc.Status)
 	}
 }

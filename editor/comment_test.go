@@ -25,7 +25,7 @@ func TestToggleCommentUsesTheLanguagePrefix(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		file string
-		want string
+		Want string
 	}{
 		{"main.go", "// x"},
 		{"main.rs", "// x"},
@@ -59,8 +59,8 @@ func TestToggleCommentUsesTheLanguagePrefix(t *testing.T) {
 			t.Parallel()
 			e := openNamed(t, tt.file, "x")
 			run(t, e, "toggle_comment")
-			if got := text(e); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := text(e); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -106,66 +106,66 @@ func TestToggleCommentWithoutAResolverHasNoPrefix(t *testing.T) {
 func TestToggleCommentCaretRules(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
+		Name       string
 		file       string
-		text       string
+		Text       string
 		caret      buffer.Pos
 		wantText   string
 		wantCursor buffer.Pos
 	}{
 		{
-			name:       "caret at column 0 moves past the new prefix",
+			Name:       "caret at column 0 moves past the new prefix",
 			file:       "main.go",
-			text:       "foo",
+			Text:       "foo",
 			caret:      buffer.Pos{Line: 0, Col: 0},
 			wantText:   "// foo",
 			wantCursor: buffer.Pos{Line: 0, Col: 3},
 		},
 		{
-			name:       "caret in the text moves with it",
+			Name:       "caret in the text moves with it",
 			file:       "main.go",
-			text:       "foo",
+			Text:       "foo",
 			caret:      buffer.Pos{Line: 0, Col: 1},
 			wantText:   "// foo",
 			wantCursor: buffer.Pos{Line: 0, Col: 4},
 		},
 		{
-			name:       "python uses hash",
+			Name:       "python uses hash",
 			file:       "script.py",
-			text:       "def main():",
+			Text:       "def main():",
 			caret:      buffer.Pos{Line: 0, Col: 0},
 			wantText:   "# def main():",
 			wantCursor: buffer.Pos{Line: 0, Col: 2},
 		},
 		{
-			name:       "uncomment removes the token and its space",
+			Name:       "uncomment removes the token and its space",
 			file:       "main.go",
-			text:       "// foo",
+			Text:       "// foo",
 			caret:      buffer.Pos{Line: 0, Col: 4},
 			wantText:   "foo",
 			wantCursor: buffer.Pos{Line: 0, Col: 1},
 		},
 		{
-			name:       "uncomment accepts a token with no space",
+			Name:       "uncomment accepts a token with no space",
 			file:       "main.go",
-			text:       "//foo",
+			Text:       "//foo",
 			caret:      buffer.Pos{Line: 0, Col: 0},
 			wantText:   "foo",
 			wantCursor: buffer.Pos{Line: 0, Col: 0},
 		},
 		{
-			name:       "uncomment after indentation keeps the indentation",
+			Name:       "uncomment after indentation keeps the indentation",
 			file:       "main.go",
-			text:       "  // foo",
+			Text:       "  // foo",
 			caret:      buffer.Pos{Line: 0, Col: 6},
 			wantText:   "  foo",
 			wantCursor: buffer.Pos{Line: 0, Col: 3},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := openNamed(t, tt.file, tt.text)
+			e := openNamed(t, tt.file, tt.Text)
 			e.SetCursor(tt.caret, false)
 			run(t, e, "toggle_comment")
 			if got := text(e); got != tt.wantText {
@@ -184,13 +184,13 @@ func TestToggleCommentCaretRules(t *testing.T) {
 func TestToggleCommentEmptyCaretsLeaveNoSelection(t *testing.T) {
 	t.Parallel()
 	e := openNamed(t, "main.go", "foo\nbar")
-	e.Active().setCarets([]caret{
-		{anchor: caretPos(0, 0), head: caretPos(0, 0), primary: true},
-		{anchor: caretPos(1, 0), head: caretPos(1, 0)},
+	e.Active().SetCarets([]caret{
+		{Anchor: caretPos(0, 0), Head: caretPos(0, 0), Primary: true},
+		{Anchor: caretPos(1, 0), Head: caretPos(1, 0)},
 	})
 	run(t, e, "toggle_comment")
 	want := carets{
-		primary: Caret{Cursor: caretPos(0, 3)},
+		Primary: Caret{Cursor: caretPos(0, 3)},
 		extras:  []Caret{{Cursor: caretPos(1, 3)}},
 	}
 	if got := caretState(e); !sameCarets(got, want) {
@@ -201,39 +201,39 @@ func TestToggleCommentEmptyCaretsLeaveNoSelection(t *testing.T) {
 func TestToggleCommentSelectionRules(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		text     string
-		sel      buffer.Selection
+		Name     string
+		Text     string
+		Sel      buffer.Selection
 		wantText string
 		wantSel  buffer.Selection
 	}{
 		{
-			name:     "comments the selected lines and keeps the selection",
-			text:     "line1\nline2\nline3\nline4",
-			sel:      buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2}},
+			Name:     "comments the selected lines and keeps the selection",
+			Text:     "line1\nline2\nline3\nline4",
+			Sel:      buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2}},
 			wantText: "// line1\n// line2\nline3\nline4",
 			wantSel:  buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2}},
 		},
 		{
-			name:     "uncomments when every selected line is commented",
-			text:     "// line1\n// line2\n// line3\nline4",
-			sel:      buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2}},
+			Name:     "uncomments when every selected line is commented",
+			Text:     "// line1\n// line2\n// line3\nline4",
+			Sel:      buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2}},
 			wantText: "line1\nline2\n// line3\nline4",
 			wantSel:  buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 2}},
 		},
 		{
-			name:     "comments every line when only some are commented",
-			text:     "// a\nb",
-			sel:      buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 1, Col: 1}},
+			Name:     "comments every line when only some are commented",
+			Text:     "// a\nb",
+			Sel:      buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 1, Col: 1}},
 			wantText: "// // a\n// b",
 			wantSel:  buffer.Selection{Anchor: buffer.Pos{}, Head: buffer.Pos{Line: 1, Col: 4}},
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e := openNamed(t, "main.go", tt.text)
-			e.SelectRange(tt.sel.Anchor, tt.sel.Head)
+			e := openNamed(t, "main.go", tt.Text)
+			e.SelectRange(tt.Sel.Anchor, tt.Sel.Head)
 			run(t, e, "toggle_comment")
 			d := e.Active()
 			if got := text(e); got != tt.wantText {
@@ -263,7 +263,7 @@ func TestToggleCommentTwiceIsIdentity(t *testing.T) {
 func TestToggleCommentWithoutACommentPrefixDoesNothing(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
+		Name string
 		file string // empty for an untitled buffer
 	}{
 		{"untitled buffer", ""},
@@ -273,7 +273,7 @@ func TestToggleCommentWithoutACommentPrefixDoesNothing(t *testing.T) {
 		{"markdown has none", "README.md"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
 			e := docWith(Options{}, "x")
 			e.SetLanguageSettings(configResolver())
@@ -293,17 +293,17 @@ func TestToggleCommentWithoutACommentPrefixDoesNothing(t *testing.T) {
 func TestToggleCommentAtEveryCaret(t *testing.T) {
 	t.Parallel()
 	e := openNamed(t, "main.go", "a\n  b\nc\nd")
-	e.Active().setCarets([]caret{
-		{anchor: caretPos(0, 1), head: caretPos(0, 1), primary: true},
-		{anchor: caretPos(1, 3), head: caretPos(1, 3)},
-		{anchor: caretPos(3, 0), head: caretPos(3, 1)},
+	e.Active().SetCarets([]caret{
+		{Anchor: caretPos(0, 1), Head: caretPos(0, 1), Primary: true},
+		{Anchor: caretPos(1, 3), Head: caretPos(1, 3)},
+		{Anchor: caretPos(3, 0), Head: caretPos(3, 1)},
 	})
 	run(t, e, "toggle_comment")
 	if got := text(e); got != "// a\n//   b\nc\n// d" {
 		t.Fatalf("text = %q", got)
 	}
 	want := carets{
-		primary: Caret{Cursor: caretPos(0, 4)},
+		Primary: Caret{Cursor: caretPos(0, 4)},
 		extras: []Caret{
 			{Cursor: caretPos(1, 6)},
 			{Cursor: caretPos(3, 4), Sel: caretSel(caretPos(3, 0), caretPos(3, 4))},
@@ -321,17 +321,17 @@ func TestToggleCommentAtEveryCaret(t *testing.T) {
 func TestToggleCommentUncommentsOnlyWhenEveryCaretLineIsCommented(t *testing.T) {
 	t.Parallel()
 	e := openNamed(t, "main.go", "// a\nb\n// c")
-	e.Active().setCarets([]caret{
-		{anchor: caretPos(0, 0), head: caretPos(0, 0), primary: true},
-		{anchor: caretPos(1, 0), head: caretPos(1, 0)},
+	e.Active().SetCarets([]caret{
+		{Anchor: caretPos(0, 0), Head: caretPos(0, 0), Primary: true},
+		{Anchor: caretPos(1, 0), Head: caretPos(1, 0)},
 	})
 	run(t, e, "toggle_comment")
 	if got := text(e); got != "// // a\n// b\n// c" {
 		t.Fatalf("text = %q, want both caret lines commented", got)
 	}
-	e.Active().setCarets([]caret{
-		{anchor: caretPos(0, 0), head: caretPos(0, 0), primary: true},
-		{anchor: caretPos(2, 0), head: caretPos(2, 0)},
+	e.Active().SetCarets([]caret{
+		{Anchor: caretPos(0, 0), Head: caretPos(0, 0), Primary: true},
+		{Anchor: caretPos(2, 0), Head: caretPos(2, 0)},
 	})
 	run(t, e, "toggle_comment")
 	if got := text(e); got != "// a\n// b\nc" {

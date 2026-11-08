@@ -48,7 +48,7 @@ func (s *trackedSource) Close() error {
 func ledgerOptions() (Options, *sourceLedger) {
 	l := &sourceLedger{}
 	opts := largeOptions()
-	opts.openSrc = &sourceOpener{open: l.open}
+	opts.openSrc = &sourceOpener{Open: l.open}
 	return opts, l
 }
 
@@ -66,9 +66,9 @@ func TestReleaseDocClosesSourceOnEverySite(t *testing.T) {
 	// Each case opens one large document next to a small one, makes the editor drop the
 	// large one in a different way, and expects its source to be closed.
 	cases := []struct {
-		name string
+		Name string
 		// scan is how far the scan of the document has got when it is dropped.
-		scan string
+		Scan string
 		drop func(t *testing.T, e *Editor, d *Document)
 	}{
 		{"close_tab force", "none", func(t *testing.T, e *Editor, d *Document) {
@@ -99,7 +99,7 @@ func TestReleaseDocClosesSourceOnEverySite(t *testing.T) {
 		}},
 		{"preview replaced", "idle", func(t *testing.T, e *Editor, d *Document) {
 			// A large document is never a preview, so the test makes one.
-			d.preview = true
+			d.SetPreview(true)
 			small := writeLargeFile(t, "small.txt", "tiny\n")
 			if err := e.OpenPreview(small); err != nil {
 				t.Fatal(err)
@@ -113,7 +113,7 @@ func TestReleaseDocClosesSourceOnEverySite(t *testing.T) {
 		}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			opts, ledger := ledgerOptions()
 			e := New(opts)
@@ -122,7 +122,7 @@ func TestReleaseDocClosesSourceOnEverySite(t *testing.T) {
 				t.Fatal(err)
 			}
 			d := openLargeNamed(t, e, "big.txt", lineText(400))
-			if tc.scan == "idle" {
+			if tc.Scan == "idle" {
 				if ran, _ := indexStep(e); !ran {
 					t.Fatal("no index step ran")
 				}
@@ -177,14 +177,14 @@ func TestReleaseDocDropsPendingWork(t *testing.T) {
 	if err := e.GotoLine(390, 1); err != nil {
 		t.Fatal(err)
 	}
-	if d.large.pending == nil {
+	if d.LargeState().Pending == nil {
 		t.Fatal("the goto did not wait")
 	}
 	e.releaseDoc(d)
 	e.releaseDoc(d) // twice is safe
 	e.releaseDoc(nil)
-	if d.large.pending != nil || d.large.scan != nil {
-		t.Fatalf("pending = %v, scan = %v after the release", d.large.pending, d.large.scan)
+	if d.LargeState().Pending != nil || d.LargeState().Scan != nil {
+		t.Fatalf("pending = %v, scan = %v after the release", d.LargeState().Pending, d.LargeState().Scan)
 	}
 	if e.docs[0] != d {
 		t.Fatal("releaseDoc removed the document from the tabs")
@@ -281,9 +281,9 @@ func TestPreviewReplacementDoesNotLeakFD(t *testing.T) {
 	for i := range 20 {
 		d := openLargeNamed(t, e, "forced-"+string(rune('a'+i))+".txt", lineText(150))
 		for _, x := range e.docs {
-			x.preview = false
+			x.SetPreview(false)
 		}
-		d.preview = true
+		d.SetPreview(true)
 		if err := e.OpenPreview(write("next-"+string(rune('a'+i))+".txt", "tiny\n")); err != nil {
 			t.Fatal(err)
 		}
@@ -392,7 +392,7 @@ func TestFollowDiskLargeNoReadFile(t *testing.T) {
 	if err := os.Rename(d.Path, old); err != nil {
 		t.Fatal(err)
 	}
-	recorded := d.disk
+	recorded := d.Disk
 	if err := e.RenamePath(d.Path, old); err != nil {
 		t.Fatal(err)
 	}
@@ -401,17 +401,17 @@ func TestFollowDiskLargeNoReadFile(t *testing.T) {
 	}
 	// The record is the one taken at open, and a move that keeps size and time still
 	// agrees with it, so the next save does not take the move for an outside change.
-	if !d.disk.sameAs(recorded) || !diskStateOf(old).sameAs(d.disk) {
-		t.Fatalf("disk record = %+v, file = %+v", d.disk, diskStateOf(old))
+	if !d.Disk.SameAs(recorded) || !diskStateOf(old).SameAs(d.Disk) {
+		t.Fatalf("disk record = %+v, file = %+v", d.Disk, diskStateOf(old))
 	}
 	// A file that changed is not adopted: the old record stays, and a save refuses it.
 	later := time.Now().Add(time.Hour)
 	if err := os.Chtimes(old, later, later); err != nil {
 		t.Fatal(err)
 	}
-	d.followDisk(old)
-	if !d.disk.sameAs(recorded) {
-		t.Fatalf("disk record = %+v after an outside change", d.disk)
+	d.FollowDisk(old)
+	if !d.Disk.SameAs(recorded) {
+		t.Fatalf("disk record = %+v after an outside change", d.Disk)
 	}
 	if st := d.Buffer.Stats(); st.OverCap != 0 || st.MaterializedBytes != 0 {
 		t.Fatalf("stats = %+v: the move read the text", st)

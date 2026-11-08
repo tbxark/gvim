@@ -36,7 +36,8 @@ internal/                       private executable shell (no top-level package i
   uitest/                       test-only in-process UI harness
 
 <top level>                     TUI-free engine, shared libraries and services
-  buffer/ editor/ search/ syntax/ fold/ diff/ encoding/ session/ decorations/ textlayout/
+  buffer/ document/ editor/ search/ syntax/ fold/ diff/ encoding/ session/ decorations/
+  textlayout/
   atomicfile/ shellcmd/
   workspace/ explorer/ finder/ fuzzy/ fsops/ gitstate/
   config/ keymap/ theme/
@@ -52,7 +53,9 @@ stdlib / third party
 engine leaves  (buffer, textlayout, diff, encoding, fuzzy, theme, fsops, gitstate, lsp,
                 pluginapi, decorations, atomicfile, shellcmd)
       ▼
-engine (editor, search, syntax, session, commands)
+engine (document, editor, search, syntax, session, commands)
+      ▼
+  (document sits under editor: buffer/search/textlayout/encoding/diff/atomicfile → document → editor)
       ▼
 internal/tui  (depends on engine value types and the plugin contract, never on the shell)
       ▼
@@ -73,14 +76,14 @@ internal/cli → cmd/gvim
 | R1 | No top-level package (not `internal/…`, not `cmd/…`) imports `internal/…`. |
 | R2 | `charm.land/*` (Bubble Tea, bubbles, lipgloss) is imported only by `internal/tui/…`, `internal/terminal` and `internal/uitest`. The plain `github.com/charmbracelet/x/*` helper libraries (`ansi`, `term`, `vt`) are not the UI framework and stay free. |
 | R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `atomicfile`, `shellcmd`. |
-| R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `finder` imports only `explorer` and `fuzzy`. |
+| R4 | Engine direction. `document` (the per-file model) imports only `buffer`, `search`, `syntax`, `textlayout`, `fold`, `diff`, `encoding`, `atomicfile` and `shellcmd` among module packages; it imports no `internal/` package and not `editor` or `session`. `editor` may import `document` but does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor` or `document`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`, `document` and `atomicfile`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `finder` imports only `explorer` and `fuzzy`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
 | R6 | `internal/cli` imports `internal/app` and no other package of this module. |
 | R7 | Only `cmd/gvim` and `internal/cli` import `internal/app`; only `cmd/gvim` imports `internal/cli`; only `internal/app` (and `plugin/plugintest`) imports the plugin runtime; only `internal/app` imports TUI sub-packages. |
 | R8 | No package in the shipped binary imports test support: `buffer/buffertest`, `plugin/plugintest`, `internal/uitest` (and the app test harness `internal/apptest`, when it exists). |
 | R9 | `pluginapi` and `decorations` import no module package and no charm package. |
 | R10 | The plugin tree imports only the standard library, `gopher-lua`, `hujson`, `pluginapi`, `plugin/bundled`, `plugin/pattern` (plugintest may also import the runtime and other plugin sub-packages). No charm. |
-| R11 | `editor`, `buffer` and `decorations` do not import `pluginapi`. |
+| R11 | `editor`, `document`, `buffer` and `decorations` do not import `pluginapi`. |
 | R12 | Only `internal/tui` (its root and its own sub-packages) and `internal/app` import TUI sub-packages. |
 
 Run the gates:
@@ -127,7 +130,8 @@ bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
 | Package | Role | Key facts |
 |---|---|---|
 | `buffer` | The text model: lines of runes, positions, edits, undo/redo, observer, large-file mode. | Two storage modes in one package: in-memory lines, and a disk-backed `bigStore` for large files (`OpenLarge`, `Snapshot`, `IndexScan`, `Rebase`). A split was considered and rejected: the mode is part of `Buffer`, not a layer on it (see `buffer/doc.go`). |
-| `editor` | The editing session: documents, tabs, actions and their handlers, edits, cursors/motions, folds, marks, save/revert/autosave planning, shell jobs, virtual documents, the plugin edit seam. | Depends on `buffer`, `search`, `syntax` (indirectly), `textlayout`, `fold`, `diff`, `encoding`, `session`. No UI. |
+| `document` | One open file: its text, cursor and carets, selection and block selection, folds, view settings, saved/on-disk/encoding/EOL state, large-file mode, text commands and motions, document-level load/save planning, and the per-document plugin seam data (id, generation, change ring, virtual-document state). | The model half of the old `editor` god package. Imports `buffer`, `search`, `syntax`, `textlayout`, `fold`, `diff`, `encoding`, `atomicfile`; never `editor`, `session` or `internal/`. Editor-wide settings reach it through `document.Settings`. |
+| `editor` | The editing session: the tab set and active document, action registry and `Do` dispatch, statuses, save/revert/autosave jobs, disk polling, shell jobs, settings resolution, marks/jumps, and the plugin seam's session half. | Imports `document` and the engine leaves; no UI. The `Document` type lives in `document` and is aliased here temporarily. |
 | `search` | Find, scan, replace and range search over `buffer` lines. | `large.go` is the visible-window search (renamed from a misleading name). |
 | `syntax` | Chroma lexer resolution, token spans for a visible window, markdown inline styling, style table from a theme. | |
 | `fold` | Indentation fold ranges. | Small leaf used by `editor`. |
@@ -188,17 +192,33 @@ menu table), `explorer` (file-tree panel), `palette` (command palette overlay), 
 (plugin list picker), `popup` (anchored list popup), `ctxmenu` (right-click menu),
 `dialog` (modal dialogs), `statusbar` (status row primitives).
 
-### 4.3 `editor`
+### 4.3 `document` and `editor`
+
+`document` is the model; `editor` is the session around it. The `Document` type, its
+fields and every method on it live in `document`; `editor` holds `Editor`, the action
+registry and the job/polling orchestration. A temporary `editor/bridge.go` aliases the
+moved names (`Document`, `Caret`, `ViewSettings`, ...) so the rest of the module keeps
+compiling until consumers are retargeted.
+
+`document` clusters:
 
 | Cluster | Files (examples) | Responsibility |
 |---|---|---|
-| document model | `document.go`, `doc*.go`, `edit*.go`, `changes.go`, `virtual.go`, `docid.go`, `cursors*.go` | per-document state: text, cursor/carets, selection, folds, view settings, saved/disk state, identity, change listeners |
-| editing commands | `textops.go`, `textcmd.go`, `vi_actions.go`, `comment.go`, `bracket.go`, `indent*.go`, `smart*.go`, `dabbrev.go`, `clip_ops.go`, `replace.go`, `findsel.go`, `paragraph.go`, `block.go`, `case.go` | the actions handlers over the document |
-| motions / navigation | `motion*.go`, `nav*.go`, `goto.go`, `marks.go`, `scroll.go`, `fold*.go`, `view_ops.go` | cursor moves, viewport moves, marks, folds |
-| files / save | `load.go`, `save*.go`, `savefile*.go`, `files_*.go`, `doc_revert.go`, `encoding.go`, `binary.go`, `readonly.go`, `autosave_async.go`, `interrupted.go` | load/save, atomic replace, revert, auto-save planning, encoding/EOL, crash interruption |
-| large-file mode | `large*.go`, `save_large.go`, `doc_index.go`, `scanbudget.go` | streamed load/save, index, guard rails, stash |
-| session shell | `editor.go`, `handlers.go`, `tabs*.go`, `status*.go`, `settings.go`, `shell.go`, `pending.go`, `paths.go` | `Editor`, action registry, tabs, status row text, keymap settings, shell jobs, pending prompts |
-| plugin seam | `edit_api.go`, `docops_id.go`, `changes.go`, `virtual.go`, `lspedit.go` | id-based operations, bulk edits, per-consumer change streams, virtual documents, LSP edit application |
+| document core | `document.go`, `docid.go`, `changes.go`, `diskstate.go`, `settings.go`, `accessors.go` | `Document` struct and state, identity/generation, change ring, disk stamps, the options it reads |
+| cursor & editing | `cursors*.go`, `edit.go`, `edit_api.go`, `block.go`, `smart*.go`, `indent*.go`, `indent_rules.go`, `case.go`, `comment.go`, `bracket.go`, `textcmd.go`, `textops.go`, `vi_actions.go`, `dabbrev.go`, `scanbudget.go` | carets and selections, edit primitives, typing/auto-close/auto-indent, line/selection commands, case/comment/bracket, vi, dabbrev |
+| motions & clusters | `motion*.go`, `fold.go`, `viewsettings.go` | grapheme/word/line movement helpers and row mapping inputs, folds, per-document view settings |
+| files & state | `files_*.go`, `encoding.go`, `binary.go`, `paths.go`, `readonly.go`, `pending.go`, `large*.go`, `save_large.go`, `autosave_async.go`, `stash.go` | load/decode, encoding/EOL, disk state, large mode and its index, save planning and jobs, overlay stash format |
+| plugin data | `virtual.go`, `docops_id.go`, `lspedit.go`, `save_info.go` | virtual-document state, id-based ops data, LSP edit value, save result payload |
+
+`editor` clusters:
+
+| Cluster | Files (examples) | Responsibility |
+|---|---|---|
+| session shell | `editor.go`, `handlers.go`, `doc.go`, `tabs*.go`, `settings.go` | `Editor`, action registry, tabs and active document, statuses, settings resolution |
+| jobs & polling | `save_plan.go`, `autosave.go`, `files_diskcheck.go`, `doc_revert.go`, `doc_index.go`, `load.go`, `interrupted.go`, `paths.go` | save/revert/index jobs, disk polling, load functions, crash-interruption queries, save-as/rename |
+| commands | `findsel.go`, `goto.go`, `marks.go`, `nav*.go`, `mouse_ops.go`, `view_ops.go`, `motion_carets.go`, `motion_wrap.go`, `replace.go`, `doc_format.go`, `shell.go`, `doc_search.go`, `doc_path.go` | action handlers bound to keys: find, goto, marks/jumps, viewport, replace, format, shell, search range, path copy |
+| plugin seam | `lspedit.go`, `virtual.go`, `docops_id.go`, `changes.go`, `docid.go`, `edit_api.go` | the session side of the plugin contract: doc lookup, listeners, virtual documents, LSP edit application |
+| state guards | `readonly.go`, `pending.go`, `large_stash.go`, `large.go` | read-only guards, pending-index gates, stash restore/replace, large-path policy |
 
 ### 4.4 `buffer`
 
@@ -256,6 +276,10 @@ Done:
 5. TUI kits: `overlay` (contract + Caret), `list` (list/box kit), `space` (`Rect` and text
    fitting), removing ten forwarding adapters (~36 methods) and the duplicated fit helpers.
 6. Engine leaves: `atomicfile`, `shellcmd`, the `buffer` two-mode doc, and file renames.
+7. `editor` split into `document` (the per-file model and all `Document` methods) and
+   `editor` (the session: tabs, action registry, jobs, shell, settings, plugin seam),
+   with a temporary alias bridge in `editor/bridge.go`. The `document` package is
+   TUI-free and session-free; its imports are gated by R4.
 
 Next (tracked as follow-up work; each keeps build + tests green):
 
@@ -264,7 +288,9 @@ Next (tracked as follow-up work; each keeps build + tests green):
    dock (`tui/dock`), utility screens; the plugin host and LSP UI last.
 2. Move the CLI config-view backend out of `internal/app` into `config`/`syntax` so `cli`
    does not import `app` for `LoadConfig`/`ConfigPaths`/`GrammarNames`.
-3. `editor` → `document` + `editor` split (the two god objects), with an alias bridge.
+3. Delete the `editor` alias bridge and retarget consumers to `document` once every
+   caller of `editor.Document`/`editor.Caret`/... has moved; move the model-only tests
+   into `document` with a `documenttest` helper if needed.
 4. Plugin leaf splits (`hostos`, `luastdlib`) and an `lsp/manager` split.
 5. Fold `fold` into `textlayout` (needs a small `tui/editorpane` import update).
 
@@ -275,7 +301,7 @@ file when each step lands.
 ## 7. What enforces the layout
 
 - The compiler: import cycles and illegal `internal/` imports fail the build.
-- `migration/tools/import_rules_check.sh`: R1-R12, run in every gate.
+- `migration/tools/import_rules_check.sh`: R1-R13, run in every gate.
 - `migration/tools/purity_check.sh`: the shipped binary stays pure Go (no cgo).
 - `go vet ./...`, `golangci-lint run ./...`, `go test ./...`.
 - Generated code stays generated: `commands/commands_gen.go`

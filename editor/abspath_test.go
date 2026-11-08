@@ -25,9 +25,9 @@ func TestRelativePathsAreStoredAbsolute(t *testing.T) {
 	dir := chdirTemp(t)
 	putFile(t, filepath.Join(dir, "a.txt"), "a")
 	tests := []struct {
-		name string
+		Name string
 		run  func(e *Editor) error
-		want string
+		Want string
 	}{
 		{"OpenFile", func(e *Editor) error { return e.OpenFile("a.txt") }, filepath.Join(dir, "a.txt")},
 		{"OpenFile new file", func(e *Editor) error { return e.OpenFile("new.txt") }, filepath.Join(dir, "new.txt")},
@@ -35,13 +35,13 @@ func TestRelativePathsAreStoredAbsolute(t *testing.T) {
 		{"SaveAs", func(e *Editor) error { return e.SaveAs("b.txt") }, filepath.Join(dir, "b.txt")},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			e := New(Options{})
 			if err := tt.run(e); err != nil {
 				t.Fatal(err)
 			}
-			if got := e.Active().Path; got != tt.want {
-				t.Errorf("Path = %q, want %q", got, tt.want)
+			if got := e.Active().Path; got != tt.Want {
+				t.Errorf("Path = %q, want %q", got, tt.Want)
 			}
 		})
 	}

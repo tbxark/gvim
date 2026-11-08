@@ -11,54 +11,54 @@ import (
 func TestApplyLSPEdits(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
+		Name  string
+		Text  string
 		edits []LSPEdit
-		want  string
+		Want  string
 	}{
 		{
-			name:  "replace one word",
-			text:  "hello world\n",
+			Name:  "replace one word",
+			Text:  "hello world\n",
 			edits: []LSPEdit{{From: buffer.Pos{Line: 0, Col: 6}, To: buffer.Pos{Line: 0, Col: 11}, Text: "gvim"}},
-			want:  "hello gvim\n",
+			Want:  "hello gvim\n",
 		},
 		{
-			name: "several edits apply in any order",
-			text: "a b c\n",
+			Name: "several edits apply in any order",
+			Text: "a b c\n",
 			edits: []LSPEdit{
 				{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 1}, Text: "x"},
 				{From: buffer.Pos{Line: 0, Col: 4}, To: buffer.Pos{Line: 0, Col: 5}, Text: "z"},
 			},
-			want: "x b z\n",
+			Want: "x b z\n",
 		},
 		{
-			name:  "insertion at a point",
-			text:  "ab\n",
+			Name:  "insertion at a point",
+			Text:  "ab\n",
 			edits: []LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 0, Col: 1}, Text: "-"}},
-			want:  "a-b\n",
+			Want:  "a-b\n",
 		},
 		{
-			name:  "range across lines",
-			text:  "one\ntwo\nthree\n",
+			Name:  "range across lines",
+			Text:  "one\ntwo\nthree\n",
 			edits: []LSPEdit{{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 2, Col: 5}, Text: "X"}},
-			want:  "X\n",
+			Want:  "X\n",
 		},
 		{
-			name:  "position past the end is clamped",
-			text:  "abc\n",
+			Name:  "position past the end is clamped",
+			Text:  "abc\n",
 			edits: []LSPEdit{{From: buffer.Pos{Line: 0, Col: 1}, To: buffer.Pos{Line: 9, Col: 0}, Text: "!"}},
-			want:  "a!",
+			Want:  "a!",
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e, path := openFixture(t, Options{}, tt.text)
+			e, path := openFixture(t, Options{}, tt.Text)
 			if err := e.ApplyLSPEdits(path, tt.edits); err != nil {
 				t.Fatalf("ApplyLSPEdits: %v", err)
 			}
-			if got := e.Active().Buffer.Text(); got != tt.want {
-				t.Fatalf("text = %q, want %q", got, tt.want)
+			if got := e.Active().Buffer.Text(); got != tt.Want {
+				t.Fatalf("text = %q, want %q", got, tt.Want)
 			}
 		})
 	}
@@ -123,11 +123,11 @@ func TestApplyLSPEditsClampsTheCaret(t *testing.T) {
 func TestApplyLSPEditsKeepsTheCaretOnItsText(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		text  string
+		Name  string
+		Text  string
 		caret buffer.Pos
 		edits []LSPEdit
-		want  buffer.Pos
+		Want  buffer.Pos
 	}{
 		{"a line inserted above", "a\nb\nc\n", buffer.Pos{Line: 2, Col: 1},
 			[]LSPEdit{{From: buffer.Pos{Line: 0}, To: buffer.Pos{Line: 0}, Text: "new\n"}}, buffer.Pos{Line: 3, Col: 1}},
@@ -139,16 +139,16 @@ func TestApplyLSPEditsKeepsTheCaretOnItsText(t *testing.T) {
 			[]LSPEdit{{From: buffer.Pos{Line: 1}, To: buffer.Pos{Line: 1, Col: 1}, Text: "zzz"}}, buffer.Pos{Line: 0, Col: 1}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.Name, func(t *testing.T) {
 			t.Parallel()
-			e, path := openFixture(t, Options{}, tt.text)
+			e, path := openFixture(t, Options{}, tt.Text)
 			d := e.Active()
 			d.Cursor = tt.caret
 			if err := e.ApplyLSPEdits(path, tt.edits); err != nil {
 				t.Fatal(err)
 			}
-			if d.Cursor != tt.want {
-				t.Fatalf("caret = %+v, want %+v in %q", d.Cursor, tt.want, d.Buffer.Text())
+			if d.Cursor != tt.Want {
+				t.Fatalf("caret = %+v, want %+v in %q", d.Cursor, tt.Want, d.Buffer.Text())
 			}
 		})
 	}
