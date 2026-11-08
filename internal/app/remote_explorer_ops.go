@@ -4,9 +4,9 @@ package app
 // over the workspace authority. The adapter satisfies the root's explorerOps port, but every
 // disk change goes through authority.Files()/authority.Mutations(fs) on the remote host:
 // nothing here touches the local file system, and there is no local fallback. The
-// clipboard operations (move/copy of entries) are not wired for a remote workspace: they
-// return a clear error and the explorer's cut/paste actions are refused before they reach
-// the adapter (subtree transfer through the authority is a recorded gap).
+// clipboard operations (copy/move of a file or directory subtree, cut, paste and
+// duplicate) live in remote_explorer_copy.go and go through the same authority surface
+// with bounds, symlink refusal, cancellation and no-overwrite collision rules.
 //
 // Safety: the workspace trust gate runs before every mutation, a disconnected authority is
 // the explicit "activate the window to reconnect" error, names are validated with the same
@@ -26,7 +26,6 @@ import (
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fsops"
-	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/plugin/hostos"
 )
 
@@ -241,16 +240,6 @@ func (o *remoteExplorerOps) Trash(ctx context.Context, p string) error {
 		return fmt.Errorf("remote file operation: delete %s: %w", p, err)
 	}
 	return nil
-}
-
-// Move and Copy are not wired remotely: subtree transfer through the authority is a
-// recorded gap, and the explorer refuses cut/paste before calling them.
-func (o *remoteExplorerOps) Move(context.Context, string, string) (string, error) {
-	return "", errors.New("moving remote entries is not available yet")
-}
-
-func (o *remoteExplorerOps) Copy(context.Context, string, string, expanel.Conflict) (string, error) {
-	return "", errors.New("copying remote entries is not available yet")
 }
 
 // CheckRename is the editor's dry run for a rename: it reads the open tabs and changes

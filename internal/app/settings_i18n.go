@@ -95,3 +95,9 @@ var settingsLanguageAddKeys = map[string]string{
 	"Add file name…": "gvim.settings.add.file_name",
 	"Add argument…":  "gvim.settings.add.argument",
 }
+
+// settingsValue is one structured-settings value label: translated when the catalogue
+// has it, else the English text the page has always shown.
+func settingsValue(key, english string) string {
+	return i18n.TOr("", "gvim.settings.value."+key, english, nil)
+}

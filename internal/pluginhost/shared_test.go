@@ -58,3 +58,31 @@ func TestDaemonEnsureBuildsOneRuntime(t *testing.T) {
 	}
 	d.Stop()
 }
+
+// TestDaemonAppliesWorkspacePluginConfigOnActivate: a switch to a workspace whose project
+// plugin config differs applies it (and asks for one pump); an unchanged config is a no-op.
+func TestDaemonAppliesWorkspacePluginConfigOnActivate(t *testing.T) {
+	off, on := false, true
+	cfgA := config.Config{Plugins: map[string]config.PluginConfig{"p": {Enabled: &off}}}
+	cfgB := config.Config{Plugins: map[string]config.PluginConfig{"p": {
+		Enabled: &on, ProjectSettings: map[string]any{"x": float64(1)},
+	}}}
+	d := NewDaemon()
+	d.Ensure(cfgA, Options{Version: "test", Root: func() string { return "/w" }})
+	defer d.Stop()
+	wsA := &Workspace{PluginConfigKey: pluginConfigKey(cfgA)}
+	wsB := &Workspace{PluginConfigKey: pluginConfigKey(cfgB)}
+	wsB.PluginEnabled, wsB.PluginSettings, _ = workspacePluginConfig(cfgB)
+	if wsA.PluginConfigKey == wsB.PluginConfigKey {
+		t.Fatal("the two workspace plugin configs have the same key")
+	}
+	if d.Activate(wsA) {
+		t.Fatal("the first activation asked for a config reload")
+	}
+	if !d.Activate(wsB) {
+		t.Fatal("a workspace with a different project plugin config did not ask for a reload pump")
+	}
+	if d.Activate(wsB) {
+		t.Fatal("reactivating the same config asked for another reload")
+	}
+}

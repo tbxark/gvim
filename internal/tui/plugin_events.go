@@ -279,6 +279,7 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 	for _, b := range before.bufs {
 		if !has(cur.bufs, b.ID) {
 			m.plugEmit("buffer_closed", map[string]any{"id": b.ID, "path": b.Path})
+			m.plugPanelsBufferClosed(pluginapi.BufferID(b.ID))
 			m.plugViewStateDrop(b.ID)
 			m.plugLineTargetsDrop(pluginapi.BufferID(b.ID))
 			m.plug.folds.dropBuffer(pluginapi.BufferID(b.ID))
@@ -317,6 +318,11 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 			m.plugEmit("buffer_activated", d)
 		}
 	}
+	// The buffer diff is the same focus transition the announcer tracks: seed its state from
+	// the snapshot it emitted, so a later window/split announcement does not repeat the
+	// buffer pair. A workspace switch (seeded from the leaving model) forces the first
+	// announcement instead.
+	m.syncFocusAnnouncement()
 	if before.want&wantLanguage == 0 {
 		return
 	}

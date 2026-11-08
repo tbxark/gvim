@@ -216,6 +216,18 @@ func panelMountFromLua(L *lua.LState, specIdx, optsIdx int, sidebar bool) (plugi
 	}
 	o := bufTableOpts{t: t}
 	m := pluginapi.WidgetMount{Panel: spec, Closable: o.boolean("closable", true)}
+	switch scope, _ := o.str("scope"); scope {
+	case "":
+		m.Scope = pluginapi.ScopeWindow
+	case "window":
+		m.Scope = pluginapi.ScopeWindow
+	case "editor":
+		m.Scope = pluginapi.ScopeEditor
+	case "buffer":
+		m.Scope = pluginapi.ScopeBuffer
+	default:
+		return m, invalidErr("option 'scope' must be \"window\", \"editor\" or \"buffer\"")
+	}
 	m.Title = clipText(optString(&o, "title"), maxPanelTitle)
 	m.Focus = o.boolean("focus", false)
 	m.WidthPct, m.HeightPct = o.integer("width", 0), o.integer("height", 0)
@@ -227,6 +239,13 @@ func panelMountFromLua(L *lua.LState, specIdx, optsIdx int, sidebar bool) (plugi
 	if sidebar {
 		m.Placement = pluginapi.PlacementSidebar
 		m.Rows = o.integer("rows", 0)
+		if m.Scope == pluginapi.ScopeBuffer {
+			if id, ok := bufferIDFromLua(o.get("buf")); ok {
+				m.Buffer = id
+			} else if o.get("buf") != lua.LNil {
+				return m, invalidErr("option 'buf' must be a Buffer")
+			}
+		}
 		if o.err != "" {
 			return m, invalidErr("%s", o.err)
 		}

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -18,22 +19,28 @@ import (
 // remoteOpsFake is an in-memory authority.FileSystem + FileMutations for the remote
 // explorer write tests. A real local decoy tree must never be touched.
 type remoteOpsFake struct {
-	mu      sync.Mutex
-	files   map[string][]byte
-	dirs    map[string]bool
-	mtime   map[string]int64
-	reads   []string
-	writes  []string
-	mkdirs  []string
-	renames [][2]string
-	removes []string
+	mu        sync.Mutex
+	files     map[string][]byte
+	dirs      map[string]bool
+	mtime     map[string]int64
+	reads     []string
+	writes    []string
+	writeOpts []hostos.WriteOptions
+	mkdirs    []string
+	dirReads  []string
+	renames   [][2]string
+	removes   []string
+	symlinks  map[string]string
+	// onWrite runs after a successful write, outside the lock (a test can cancel a
+	// context to exercise mid-copy cancellation).
+	onWrite func()
 	// makeErr makes the next mutation of that kind fail.
 	writeErr, mkdirErr, renameErr, removeErr error
 	statErr                                  error
 }
 
 func newRemoteOpsFake() *remoteOpsFake {
-	return &remoteOpsFake{files: map[string][]byte{}, dirs: map[string]bool{}, mtime: map[string]int64{}}
+	return &remoteOpsFake{files: map[string][]byte{}, dirs: map[string]bool{}, mtime: map[string]int64{}, symlinks: map[string]string{}}
 }
 
 func (f *remoteOpsFake) put(path, text string) *remoteOpsFake {
@@ -45,6 +52,13 @@ func (f *remoteOpsFake) put(path, text string) *remoteOpsFake {
 	}
 	f.files[path] = []byte(text)
 	f.mtime[path] = 1
+	return f
+}
+
+func (f *remoteOpsFake) putSymlink(p, target string) *remoteOpsFake {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.symlinks[p] = target
 	return f
 }
 
@@ -70,7 +84,14 @@ func (f *remoteOpsFake) WriteFile(ctx context.Context, p string, data []byte, o 
 		return f.writeErr
 	}
 	f.writes = append(f.writes, p)
+	f.writeOpts = append(f.writeOpts, o)
 	f.files[p] = append([]byte(nil), data...)
+	hook := f.onWrite
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	f.mu.Lock()
 	return nil
 }
 
@@ -79,6 +100,15 @@ func (f *remoteOpsFake) Stat(_ context.Context, p string) (hostos.FileStat, erro
 	defer f.mu.Unlock()
 	if f.statErr != nil {
 		return hostos.FileStat{}, f.statErr
+	}
+	if _, ok := f.symlinks[p]; ok {
+		if data, ok := f.files[f.symlinks[p]]; ok {
+			return hostos.FileStat{Kind: "file", Size: int64(len(data))}, nil
+		}
+		if f.dirs[f.symlinks[p]] {
+			return hostos.FileStat{Kind: "dir"}, nil
+		}
+		return hostos.FileStat{Kind: "symlink"}, nil
 	}
 	if f.dirs[p] {
 		return hostos.FileStat{Kind: "dir"}, nil
@@ -89,8 +119,40 @@ func (f *remoteOpsFake) Stat(_ context.Context, p string) (hostos.FileStat, erro
 	return hostos.FileStat{}, &os.PathError{Op: "stat", Path: p, Err: fs.ErrNotExist}
 }
 
-func (f *remoteOpsFake) ReadDir(context.Context, string, bool) ([]hostos.DirEntry, error) {
-	return nil, errors.New("not used by the explorer ops")
+func (f *remoteOpsFake) ReadDir(_ context.Context, p string, _ bool) ([]hostos.DirEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dirReads = append(f.dirReads, p)
+	prefix := strings.TrimSuffix(p, "/") + "/"
+	seen := map[string]hostos.DirEntry{}
+	add := func(full, kind string, size int64) {
+		name := strings.TrimPrefix(full, prefix)
+		if name == full || strings.Contains(name, "/") || name == "" {
+			return
+		}
+		seen[name] = hostos.DirEntry{Name: name, Kind: kind, Size: size}
+	}
+	for full, data := range f.files {
+		add(full, "file", int64(len(data)))
+	}
+	for full := range f.dirs {
+		add(full, "dir", 0)
+	}
+	for full := range f.symlinks {
+		add(full, "symlink", 0)
+	}
+	if len(seen) == 0 {
+		if !f.dirs[p] {
+			return nil, &os.PathError{Op: "readdir", Path: p, Err: fs.ErrNotExist}
+		}
+		return nil, nil
+	}
+	out := make([]hostos.DirEntry, 0, len(seen))
+	for _, e := range seen {
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 func (f *remoteOpsFake) Watch(context.Context, string, hostos.WatchOptions) (hostos.Watch, error) {
@@ -294,16 +356,17 @@ func TestRemoteExplorerOpsTrustGate(t *testing.T) {
 	}
 }
 
-// TestRemoteExplorerOpsRefuseClipboardAndOutside checks move/copy are explicitly
-// unsupported and paths outside the remote workspace are refused.
-func TestRemoteExplorerOpsRefuseClipboardAndOutside(t *testing.T) {
+// TestRemoteExplorerOpsRefuseOutside checks paths outside the remote workspace are
+// refused by every operation (the clipboard transfer itself is covered by the copy
+// tests).
+func TestRemoteExplorerOpsRefuseOutside(t *testing.T) {
 	fake := newRemoteOpsFake()
 	ops, _ := fake.ops(true)
-	if _, err := ops.Move(context.Background(), "/remote/w/a", "/remote/w/b"); err == nil {
-		t.Fatal("remote Move was accepted")
+	if _, err := ops.Move(context.Background(), "/other/a", "/other/b"); err == nil {
+		t.Fatal("a move outside the remote workspace was accepted")
 	}
-	if _, err := ops.Copy(context.Background(), "/remote/w/a", "/remote/w/b", 0); err == nil {
-		t.Fatal("remote Copy was accepted")
+	if _, err := ops.Copy(context.Background(), "/other/a", "/other/b", 0); err == nil {
+		t.Fatal("a copy outside the remote workspace was accepted")
 	}
 	if _, err := ops.CreateFile(context.Background(), "/other", "a"); err == nil {
 		t.Fatal("a create outside the remote workspace was accepted")

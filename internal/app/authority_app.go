@@ -68,6 +68,11 @@ func newAuthority(opts Options, pw *pluginhost.Wiring, gate authority.Gate, gate
 	})
 }
 
+// remotePluginAuthorityNotice is the startup degradation notice of a remote launch with
+// plugins: their file and process APIs follow the workspace, but the local-only APIs and
+// the polled remote watch do not behave like the local ones. Tests assert its content.
+const remotePluginAuthorityNotice = "Plugins: gvim.fs/gvim.proc use the remote SSH workspace; gvim.dirs, getenv, lookpath and now stay local; remote file watching is polled (~500 ms)."
+
 // attemptAuthorityConnect tries the startup dial of a remote authority and returns the
 // notice to show when it fails. The slot then waits for activation to reconnect.
 func attemptAuthorityConnect(ctx context.Context, slot authority.Slot) (string, error) {

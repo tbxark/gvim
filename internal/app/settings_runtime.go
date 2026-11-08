@@ -241,7 +241,7 @@ func (s *settingsService) structureEnvDetectors(cfg config.Config) tui.SettingsS
 // inventory.
 func (s *settingsService) pluginSummary() string {
 	if s.rt.plugins == nil {
-		return "no plugin runtime"
+		return settingsValue("no_plugin_runtime", "no plugin runtime")
 	}
 	infos := s.rt.plugins.Plugins()
 	enabled := 0

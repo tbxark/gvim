@@ -167,13 +167,35 @@ const (
 	PlacementSidebar WidgetPlacement = "sidebar"
 )
 
+// WidgetScope is how far a mounted panel/section reaches (Fresh's chrome scope).
+type WidgetScope string
+
+const (
+	// ScopeWindow is the default: the mount belongs to the workspace window that mounted
+	// it. It is shown while that workspace is active and is not carried to other
+	// workspaces.
+	ScopeWindow WidgetScope = "window"
+	// ScopeEditor belongs to the whole editor: the host carries the registration across
+	// daemon workspace switches, so it is visible in every workspace.
+	ScopeEditor WidgetScope = "editor"
+	// ScopeBuffer belongs to one buffer (the mount's Buffer, or the active buffer at mount
+	// time). It is shown only while that buffer is active in its workspace and is dropped
+	// with the buffer.
+	ScopeBuffer WidgetScope = "buffer"
+)
+
 // WidgetMount is everything a mount call passes.
 type WidgetMount struct {
 	Panel     WidgetPanel
 	Title     string
 	Placement WidgetPlacement
-	// Buffer is the virtual buffer whose window shows a buffer placement.
+	// Buffer is the virtual buffer whose window shows a buffer placement, or the buffer a
+	// buffer-scoped sidebar section belongs to (0 = the active buffer at mount time).
 	Buffer BufferID
+	// Scope is the chrome scope of the mount ("" = ScopeWindow). A daemon's shared
+	// plugin runtime carries editor-scoped mounts across workspace switches; window
+	// mounts stay with the workspace and buffer mounts follow their buffer.
+	Scope WidgetScope
 	// WidthPct and HeightPct size a floating card, as a percentage of the frame (0: the
 	// host default). Rows is the body height a sidebar section asks for (0 shares the
 	// column).

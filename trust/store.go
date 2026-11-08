@@ -104,6 +104,62 @@ func (s *Store) Set(root string, level Level) error {
 	}
 	decisions := s.read()
 	decisions[key] = level
+	return s.write(decisions)
+}
+
+// RecordKey returns the store key of a workspace that has no local filesystem root: a
+// remote workspace target (spec + remote root). It is explicit and prefixed so it can
+// never collide with a canonical local path.
+func RecordKey(target string) string { return "remote:" + target }
+
+// LevelForRecord returns the recorded level for an explicit record key, and decided
+// false when the store has no valid decision for it.
+func (s *Store) LevelForRecord(key string) (level Level, decided bool) {
+	entry, ok := s.read()[key]
+	if !ok {
+		return Undecided, false
+	}
+	parsed, ok := ParseLevel(string(entry))
+	if !ok {
+		return Undecided, false
+	}
+	return parsed, true
+}
+
+// SetRecord records level under an explicit record key and writes the store atomically.
+func (s *Store) SetRecord(key string, level Level) error {
+	if !level.Valid() {
+		return fmt.Errorf("trust: invalid level %q", string(level))
+	}
+	if key == "" {
+		return fmt.Errorf("trust: empty workspace record key")
+	}
+	decisions := s.read()
+	decisions[key] = level
+	return s.write(decisions)
+}
+
+// OpenRecord applies Fresh's startup policy to an explicit record key. markers are the
+// executable-content markers the caller discovered for that workspace (a remote caller
+// may not be able to scan them; nil means "no markers found"). A recorded decision is
+// honored; an undecided workspace with no markers is trusted silently and the decision
+// is recorded; an undecided workspace with markers stays Restricted with NeedsPrompt.
+// The state's Root is the target text the caller can show.
+func (s *Store) OpenRecord(key string, markers []string) (State, error) {
+	if level, decided := s.LevelForRecord(key); decided {
+		return State{Root: key, Level: level, Decided: true, Markers: markers}, nil
+	}
+	if len(markers) == 0 {
+		if err := s.SetRecord(key, Trusted); err != nil {
+			return State{Root: key, Level: Trusted, Decided: true}, err
+		}
+		return State{Root: key, Level: Trusted, Decided: true}, nil
+	}
+	return State{Root: key, Level: Restricted, Decided: false, Markers: markers}, nil
+}
+
+// write encodes and atomically writes the decisions map.
+func (s *Store) write(decisions map[string]Level) error {
 	data, err := json.MarshalIndent(trustFile{Version: storeVersion, Workspaces: decisions}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("trust: encode: %w", err)

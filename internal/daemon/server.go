@@ -1,9 +1,12 @@
 package daemon
 
 // Server hosts one editor program over the daemon socket: tui.RunWithIO reads the
-// attached client's input and writes frames through this type, and an attach or a
-// resize becomes a window-size message on the program. Detaching ends only the client;
-// the program keeps running and the next attach repaints it.
+// attached clients' input and writes frames through this type. Several clients may be
+// attached at once (Fresh's shared-view model): every frame goes to every client, input
+// from any client reaches the program, and the program is told the SMALLEST attached
+// client's size, so a larger terminal letterboxes instead of cropping the shared view.
+// Detaching (or a dropped connection) removes only that client; the program keeps
+// running, and the next attach repaints it.
 //
 // Every write to a client goes through that client's FrameWriter, so frames from the
 // program output goroutine, the pong answers, a detach and the exit frame never
@@ -42,19 +45,25 @@ func (d deadlineWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// Server is the daemon side of the attach protocol. It implements io.Reader (the
-// client's terminal input) and io.Writer (the frame output) for the hosted program.
+// clientConn is one attached client: its connection, the serialized frame writer and
+// its last known terminal size (0,0 before a valid hello).
+type clientConn struct {
+	conn net.Conn
+	fw   *FrameWriter
+	cols int
+	rows int
+}
+
+// Server is the daemon side of the attach protocol. It implements io.Reader (all
+// clients' terminal input) and io.Writer (the shared frame output) for the hosted
+// program.
 type Server struct {
 	ln   net.Listener
 	path string
 
-	mu   sync.Mutex
-	conn net.Conn
-	fw   *FrameWriter
-	prog *tea.Program
-	// helloCols/helloRows are the attached client's last known terminal size, so a
-	// program that starts after the hello still gets a window-size message.
-	helloCols, helloRows int
+	mu      sync.Mutex
+	clients map[*clientConn]struct{}
+	prog    *tea.Program
 	// openFiles, when set, opens the paths of a client's open_file frame (the legacy
 	// callback: bare paths only).
 	openFiles func(paths []string)
@@ -78,7 +87,7 @@ type Server struct {
 // NewServer wraps a bound listener. path is the socket path it was bound at (for the
 // startup line and the client names).
 func NewServer(ln net.Listener, path string) *Server {
-	return &Server{ln: ln, path: path, input: make(chan []byte), stop: make(chan struct{})}
+	return &Server{ln: ln, path: path, clients: map[*clientConn]struct{}{}, input: make(chan []byte), stop: make(chan struct{})}
 }
 
 // Path is the socket path of the server.
@@ -131,13 +140,54 @@ func (s *Server) Serve(ctx context.Context) {
 	}
 }
 
-// OnProgram receives the hosted program, so an attach can resize and repaint it. When a
-// client already attached (and sent its hello) before the program existed, the recorded
-// size is sent now: the daemon would otherwise start painting at no size.
+// negotiatedSize is the size the program is told: the smallest attached client's size
+// (0,0 when no client has sent a valid hello). Tests read it directly.
+func (s *Server) negotiatedSize() (cols, rows int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sizeLocked()
+}
+
+// sizeLocked is the negotiated size: the smallest size among the attached clients. A
+// client that has not sent a valid hello yet does not constrain the shared view.
+func (s *Server) sizeLocked() (cols, rows int) {
+	first := true
+	for c := range s.clients {
+		if c.cols <= 0 || c.rows <= 0 {
+			continue
+		}
+		if first || c.cols < cols {
+			cols = c.cols
+		}
+		if first || c.rows < rows {
+			rows = c.rows
+		}
+		first = false
+	}
+	return cols, rows
+}
+
+// sendSizeLocked tells the program the smallest attached size. It must be called with
+// s.mu held; it never sends two messages for a no-size state.
+func (s *Server) sendSizeLocked() {
+	p := s.prog
+	if p == nil {
+		return
+	}
+	cols, rows := s.sizeLocked()
+	if cols <= 0 || rows <= 0 {
+		return
+	}
+	p.Send(tea.WindowSizeMsg{Width: cols, Height: rows})
+}
+
+// OnProgram receives the hosted program, so an attach can resize and repaint it. When
+// clients already attached before the program existed, the negotiated size is sent now:
+// the daemon would otherwise start painting at no size.
 func (s *Server) OnProgram(p *tea.Program) {
 	s.mu.Lock()
 	s.prog = p
-	cols, rows := s.helloCols, s.helloRows
+	cols, rows := s.sizeLocked()
 	s.mu.Unlock()
 	if p != nil && cols > 0 && rows > 0 {
 		// Send from a goroutine: Program.Send before Run blocks until the program's
@@ -156,35 +206,34 @@ func (s *Server) Program() *tea.Program {
 	return s.prog
 }
 
-// Detach sends the detached frame to the attached client (if any) and drops the
-// connection. The hosted program is untouched.
+// Detach sends the detached frame to every attached client and drops them. The hosted
+// program is untouched; with no clients it keeps running and discards output.
 func (s *Server) Detach() {
 	s.mu.Lock()
-	conn, fw := s.conn, s.fw
-	s.conn, s.fw = nil, nil
+	clients := s.clients
+	s.clients = map[*clientConn]struct{}{}
 	s.mu.Unlock()
-	if conn == nil || fw == nil {
-		return
+	for c := range clients {
+		_ = c.fw.WriteFrame(TypeDetached, nil)
+		_ = c.conn.Close()
 	}
-	_ = fw.WriteFrame(TypeDetached, nil)
-	_ = conn.Close()
 }
 
-// Close sends the exit frame to the attached client, stops the listener and the
-// input reader, and closes the connection. The frame write is bounded by the
+// Close sends the exit frame to every attached client, stops the listener and the
+// input reader, and closes the connections. The frame writes are bounded by each
 // client's deadline writer, so a stalled client cannot hold shutdown.
 func (s *Server) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.closed = true
-		conn, fw := s.conn, s.fw
-		s.conn, s.fw = nil, nil
+		clients := s.clients
+		s.clients = map[*clientConn]struct{}{}
 		s.mu.Unlock()
 		close(s.stop)
-		if conn != nil && fw != nil {
-			_ = fw.WriteFrame(TypeExit, nil)
-			_ = conn.Close()
+		for c := range clients {
+			_ = c.fw.WriteFrame(TypeExit, nil)
+			_ = c.conn.Close()
 		}
 		err = s.ln.Close()
 	})
@@ -194,8 +243,24 @@ func (s *Server) Close() error {
 	return err
 }
 
-// handleConn runs one attached client: it reads the hello, then input/resize/detach
-// frames until the connection closes.
+// removeClient drops c (if still attached), renegotiates the size and tells the program
+// about the remaining clients' smaller/larger size. It is safe to call twice.
+func (s *Server) removeClient(c *clientConn) {
+	s.mu.Lock()
+	_, ok := s.clients[c]
+	if ok {
+		delete(s.clients, c)
+	}
+	s.mu.Unlock()
+	if ok {
+		s.mu.Lock()
+		s.sendSizeLocked()
+		s.mu.Unlock()
+	}
+}
+
+// handleConn runs one attached client: it reads the hello (including the protocol
+// version), then input/resize/detach frames until the connection closes.
 func (s *Server) handleConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	// One writer for this connection: every server frame to it goes through it.
@@ -208,31 +273,31 @@ func (s *Server) handleConn(conn net.Conn) {
 	if err := DecodeJSON(f, &hello); err != nil {
 		return
 	}
+	// Version handshake before any state changes: an incompatible client is told clearly
+	// and dropped; the session and other clients are untouched.
+	if hello.Version != ProtocolVersion {
+		_ = fw.WriteJSON(TypeVersionRejected, VersionMismatch{Client: hello.Version, Daemon: ProtocolVersion})
+		return
+	}
+	c := &clientConn{conn: conn, fw: fw, cols: hello.Cols, rows: hello.Rows}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return
 	}
-	if s.conn != nil && s.conn != conn {
-		s.mu.Unlock()
-		_ = fw.WriteNotice("another client is attached to this daemon")
-		return
-	}
-	s.conn, s.fw = conn, fw
-	s.helloCols, s.helloRows = hello.Cols, hello.Rows
+	s.clients[c] = struct{}{}
+	s.sendSizeLocked()
 	prog := s.prog
 	s.mu.Unlock()
 	if prog != nil {
-		if hello.Cols > 0 && hello.Rows > 0 {
-			prog.Send(tea.WindowSizeMsg{Width: hello.Cols, Height: hello.Rows})
-		}
-		// A fresh frame: the program repaints at the client's size.
+		// A fresh frame for the new client (and a shared repaint at the negotiated size).
 		prog.Send(tea.RequestWindowSize())
 	}
+	defer s.removeClient(c)
 	for {
 		f, err := ReadFrame(conn)
 		if err != nil {
-			break
+			return
 		}
 		if req, ok, derr := decodeWorkspaceRequest(f); ok {
 			if derr != nil {
@@ -252,7 +317,6 @@ func (s *Server) handleConn(conn net.Conn) {
 			}
 			if res.List != nil {
 				if err := fw.WriteJSON(TypeWorkspaces, *res.List); err != nil {
-					s.detachConn(conn)
 					return
 				}
 			}
@@ -274,11 +338,9 @@ func (s *Server) handleConn(conn net.Conn) {
 				continue
 			}
 			s.mu.Lock()
-			p := s.prog
+			c.cols, c.rows = r.Cols, r.Rows
+			s.sendSizeLocked()
 			s.mu.Unlock()
-			if p != nil {
-				p.Send(tea.WindowSizeMsg{Width: r.Cols, Height: r.Rows})
-			}
 		case TypeOpenFile:
 			var req OpenFile
 			if DecodeJSON(f, &req) != nil || (len(req.Paths) == 0 && len(req.Files) == 0) {
@@ -295,29 +357,17 @@ func (s *Server) handleConn(conn net.Conn) {
 			}
 		case TypeDetach:
 			_ = fw.WriteFrame(TypeDetached, nil)
-			s.detachConn(conn)
 			return
 		case TypePing:
 			_ = fw.WriteFrame(TypePong, nil)
 		default:
-			// An unknown client frame: drop the connection and keep hosting.
-			s.detachConn(conn)
+			// An unknown client frame: drop this client and keep hosting the others.
 			return
 		}
 	}
-	s.detachConn(conn)
 }
 
-// detachConn clears the attached client when it is conn.
-func (s *Server) detachConn(conn net.Conn) {
-	s.mu.Lock()
-	if s.conn == conn {
-		s.conn, s.fw = nil, nil
-	}
-	s.mu.Unlock()
-}
-
-// Read is the hosted program's keyboard: it blocks until the attached client sends
+// Read is the hosted program's keyboard: it blocks until any attached client sends
 // input. While no client is attached it keeps blocking, so the program stays alive.
 func (s *Server) Read(p []byte) (int, error) {
 	s.readMu.Lock()
@@ -347,19 +397,22 @@ func (s *Server) Read(p []byte) (int, error) {
 	}
 }
 
-// Write is the hosted program's frame output: only an attached client receives it.
-// A write error (or the deadline on a stalled client) detaches that client instead of
+// Write is the hosted program's frame output: every attached client receives it. A
+// write error (or the deadline on a stalled client) drops that client instead of
 // ending the program.
 func (s *Server) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	conn, fw := s.conn, s.fw
-	s.mu.Unlock()
-	if fw == nil || len(p) == 0 {
-		return len(p), nil
+	if len(p) == 0 {
+		return 0, nil
 	}
-	if err := fw.WriteFrame(TypeOutput, p); err != nil {
-		if conn != nil {
-			s.detachConn(conn)
+	s.mu.Lock()
+	clients := make([]*clientConn, 0, len(s.clients))
+	for c := range s.clients {
+		clients = append(clients, c)
+	}
+	s.mu.Unlock()
+	for _, c := range clients {
+		if err := c.fw.WriteFrame(TypeOutput, p); err != nil {
+			s.removeClient(c)
 		}
 	}
 	return len(p), nil

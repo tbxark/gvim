@@ -90,7 +90,7 @@ func (m *Model) openAgentPicker() tea.Cmd {
 	}
 	p := picker.New(m.styles, picker.Options{
 		Title:       "Run Agent",
-		Footer:      "Terminal: Run Agent — Enter starts the agent · Esc closes",
+		Footer:      uiText("gvim.picker.run_agent_footer", "Terminal: Run Agent — Enter starts the agent · Esc closes"),
 		Placeholder: "agent",
 		Items:       items,
 		Fuzzy:       true,

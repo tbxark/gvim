@@ -56,6 +56,12 @@ watcher:stop()  watcher:active() -> boolean
   directory is far below.
 * Paths are used as given; relative paths are relative to the editor's current directory.
 
+### Remote workspaces
+
+In a remote SSH workspace (a direct ssh:// launch or a daemon-hosted one) `gvim.fs` and `gvim.proc` follow the workspace: reads, writes, stats, listings, mkdir/remove/rename, watches, one-shot runs and stdio processes go through the workspace authority, so a plugin edits and spawns on the remote host and never on the local machine. Relative paths are resolved against the remote workspace root; the workspace trust gate is consulted
+before every remote process launch (an untrusted workspace refuses plugin processes), and the
+authority's own trust gate, working directory and environment apply to every process launch. If the authority backend has no file-mutation surface, mkdir/remove/rename return a clear `unsupported` error rather than falling back locally; copy, realpath and walk have no remote primitive in this slice and also return `unsupported` (recorded residual). `gvim.dirs`, `gvim.env.get`, lookpath inside `gvim.proc` and the clock stay **local-machine** APIs: they describe the machine gvim itself runs on, as documented for `gvim.dirs` and `gvim.env`. Remote `gvim.fs.watch` is the authority's polling watch (~500 ms per poll), not the local fsnotify watcher; a remote workspace with plugins shows a startup notice saying so. A local workspace is unchanged: the plugin OS is the same implementation as before.
+
 ## gvim.proc and gvim.env
 
 ```text

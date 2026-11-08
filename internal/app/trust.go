@@ -22,6 +22,9 @@ type trustController struct {
 	mu    sync.Mutex
 	store *trust.Store
 	state trust.State
+	// recordKey, when set, is the explicit store key of a non-filesystem workspace (a
+	// remote target). Decide writes the record key instead of canonicalizing a root.
+	recordKey string
 }
 
 var _ tui.TrustPort = (*trustController)(nil)
@@ -70,7 +73,12 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 	if !level.Valid() {
 		return c.state, fmt.Errorf("trust: invalid level %q", string(level))
 	}
-	err := c.store.Set(c.state.Root, level)
+	var err error
+	if c.recordKey != "" {
+		err = c.store.SetRecord(c.recordKey, level)
+	} else {
+		err = c.store.Set(c.state.Root, level)
+	}
 	c.state.Level = level
 	c.state.Decided = true
 	return c.state, err

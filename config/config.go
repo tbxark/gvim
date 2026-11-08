@@ -231,6 +231,12 @@ type Config struct {
 	// user config may set it.
 	Env EnvConfig
 
+	// AutoAttach makes a bare launch (no files, no direct-mode flags, a terminal on
+	// stdin) attach to a daemon that already hosts this workspace instead of refusing
+	// as a second writer. Default false (Fresh defaults true); an explicit --attach or
+	// --daemon is unchanged, and no daemon is started when none is running.
+	AutoAttach bool
+
 	// PluginTimeout is the longest one plugin call may run, default 500ms. The
 	// project layer may only lower it (see lowerPluginTimeout).
 	PluginTimeout time.Duration
@@ -588,6 +594,20 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			continue
 		case key == "contents":
 			diags = append(diags, cfg.setContents(keys[key], l, path)...)
+			cfg.note(key, path)
+			continue
+		case key == "auto_attach" && l == layerProject:
+			// Attaching to a running daemon is the user's choice; a repository cannot
+			// redirect launches into a daemon.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set auto_attach: it changes what a launch does, so set it in the user config"})
+			continue
+		case key == "auto_attach":
+			var autoAttach bool
+			if err := json.Unmarshal(keys[key], &autoAttach); err != nil {
+				diags = append(diags, Diagnostic{Path: path, Key: key, Message: "must be true or false"})
+				continue
+			}
+			cfg.AutoAttach = autoAttach
 			cfg.note(key, path)
 			continue
 		case key == "env" && l == layerProject:

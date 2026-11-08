@@ -380,7 +380,7 @@ func (m *Model) plugDismissed() tea.Cmd {
 // plugCancelWait forgets the wait t and closes the overlay that shows it. It is
 // Host.CancelWait.
 func (m *Model) plugCancelWait(t pluginapi.Token) {
-	delete(m.plug.waits, t)
+	m.plugForgetWait(t)
 	for id, pp := range m.plug.ui.opening {
 		if pp.tok == t {
 			delete(m.plug.ui.opening, id)
@@ -656,10 +656,10 @@ func (h *pluginHost) ClosePicker(id uint64) {
 	m := h.model()
 	if pp := m.plug.ui.opening[id]; pp != nil {
 		delete(m.plug.ui.opening, id)
-		delete(m.plug.waits, pp.tok)
+		m.plugForgetWait(pp.tok)
 	}
 	if ov := m.plugPicker(id); ov != nil {
-		delete(m.plug.waits, ov.tok)
+		m.plugForgetWait(ov.tok)
 		m.plugRemove(ov)
 	}
 }
@@ -732,7 +732,7 @@ func (h *pluginHost) ClosePopup(id uint64) {
 	m := h.model()
 	for _, o := range slices.Clone(m.overlays) {
 		if po, ok := o.(*pluginPopupOverlay); ok && po.id == id && !po.closed {
-			delete(m.plug.waits, po.tok)
+			m.plugForgetWait(po.tok)
 			m.plugRemove(po)
 		}
 	}

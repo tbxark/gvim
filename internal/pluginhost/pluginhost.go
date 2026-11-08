@@ -60,6 +60,10 @@ type Options struct {
 	// WorkspaceStateData is the content of WorkspaceStateFile as read by the app (nil:
 	// absent or unreadable). New parses it here, off the update loop.
 	WorkspaceStateData []byte
+	// WrapOS, when set, wraps the local plugin OS New builds. The app uses it to route a
+	// remote workspace's gvim.fs/gvim.proc through the workspace authority
+	// (NewAuthorityOS); a local session leaves it nil and keeps the plain plugin OS.
+	WrapOS func(hostos.OS) hostos.OS
 }
 
 // SpawnGate is the trust check a plugin process launch goes through. It is a
@@ -91,8 +95,13 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 			workspaceState = st
 		}
 	}
-	osys := newPluginOS(pluginDirs(configDir(), o.Root), o.SpawnEnv)
-	osys.gate = o.Gate
+	var osys hostos.OS = newPluginOS(pluginDirs(configDir(), o.Root), o.SpawnEnv)
+	osys.(*pluginOS).gate = o.Gate
+	if o.WrapOS != nil {
+		if wrapped := o.WrapOS(osys); wrapped != nil {
+			osys = wrapped
+		}
+	}
 	return &Wiring{
 		OS: osys,
 		Runtime: plugin.New(plugin.Options{

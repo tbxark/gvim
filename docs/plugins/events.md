@@ -150,3 +150,27 @@ gated like any other save. See [trim_on_save.lua](examples/trim_on_save.lua).
 events, return `nil, "invalid: ..."`, so a plugin cannot speak for another. The payload is plain data
 (at most 64 KiB) and at most 1000 of your events may be waiting at once (`limit`). Names are
 `<plugin>:<name>` with `[a-z][a-z0-9_]*` parts.
+
+
+## Focus announcer
+
+The active window announcements are emitted by one announcer, and the buffer pair by the
+buffer diff, which seeds the announcer from the same transition so the two paths never
+report one change twice. The announcer diffs the focused (workspace, split window id, active
+buffer id) and fires exactly one transition:
+
+- active_window_changed with the previous and current split window ids (0 when there is no
+  focused pane), and focus_gained on the no-window -> window transition.
+- buffer_deactivated (only when the previous buffer still exists) and buffer_activated with
+  the new buffer; a closed buffer is reported by buffer_closed and the following
+  buffer_activated omits "previous". These are emitted by the buffer diff, which then seeds
+  the announcer (so a split/window change does not repeat the pair).
+- A workspace switch forces the entering workspace's announcement even when its numeric ids
+  happen to equal the leaving workspace's. The window payload carries the workspace label in
+  addition to its documented fields; the buffer pair carries it on that forced switch
+  announcement (the ordinary buffer diff announces only the buffer fields).
+
+Window and buffer ids are per-workspace in this slice (a daemon workspace model has its own
+editor and split ids), so a plugin caching a numeric id across a workspace switch must
+re-read it from the announcement rather than assume it names the same thing. Widget focus is
+a separate widget_event and is not part of this announcement.

@@ -11,6 +11,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/ctxmenu"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
 // noContextMenuNotice is the status text of a right press on a part of the frame that
@@ -307,11 +308,15 @@ const explorerMenuPrefix = "explorer:"
 func (m *Model) explorerMenuAction(action string, paths []string) tea.Cmd {
 	switch action {
 	case "duplicate":
-		jobs := make([]fileJob, 0, len(paths))
-		for _, p := range paths {
-			jobs = append(jobs, fileJob{kind: jobCopy, path: p, dir: filepath.Dir(p), policy: expanel.ConflictCancel})
+		if target := m.remoteExplorerTarget(); target != "" {
+			q := remoteClipboardQuestion(remoteClipboardDuplicate, paths, "", target)
+			if len(paths) == 1 {
+				q = fmt.Sprintf("Duplicate %s on %s?", filepath.Base(paths[0]), target)
+			}
+			m.pushOverlay(prompt.NewConfirm(m.styles, q, remoteClipboardTag{kind: remoteClipboardDuplicate, paths: paths}))
+			return nil
 		}
-		return m.runJobs(jobs)
+		return m.duplicatePaths(paths)
 	case "copy_full_path":
 		return m.setClipboard(strings.Join(paths, "\n"))
 	case "copy_relative_path":

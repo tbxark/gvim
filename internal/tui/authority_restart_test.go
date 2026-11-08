@@ -72,8 +72,15 @@ func TestReconnectRunsAfterReconnectWorkOnSuccessOnly(t *testing.T) {
 		t.Fatalf("hook calls = %d, result = %+v; want one call reporting 2 servers", calls, done)
 	}
 	m.Update(*done)
-	if !strings.Contains(m.notice, "2") {
-		t.Fatalf("notice after the restart = %q, want the server count", m.notice)
+	// One notice reports the refreshed workspace and the restarted servers.
+	if !strings.Contains(m.notice, "refreshed") || !strings.Contains(m.notice, "2") {
+		t.Fatalf("notice after the restart = %q, want one refreshed-workspace notice with the server count", m.notice)
+	}
+	// A reconnect without post-reconnect work still reports itself once.
+	m.SetAuthorityHooks(AuthorityHooks{})
+	_, _ = m.Update(authorityReconnectedMsg{})
+	if !strings.Contains(m.notice, "SSH reconnected") {
+		t.Fatalf("notice without post-reconnect work = %q", m.notice)
 	}
 }
 
@@ -97,7 +104,7 @@ func TestReconnectRestartFailureIsANotice(t *testing.T) {
 		t.Fatal("no restart result was scheduled")
 	}
 	m.Update(*done)
-	if !strings.Contains(m.notice, "gate denied") {
-		t.Fatalf("notice after a failed restart = %q", m.notice)
+	if !strings.Contains(m.notice, "refresh failed") || !strings.Contains(m.notice, "gate denied") {
+		t.Fatalf("notice after a failed restart = %q, want one refreshed-workspace notice naming the failure", m.notice)
 	}
 }

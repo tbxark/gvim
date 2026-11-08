@@ -8,6 +8,7 @@ package pluginhost
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -126,6 +127,12 @@ type Workspace struct {
 	ReadOnly  bool
 	// StateNote explains a damaged or newer state file ("" when it parsed cleanly).
 	StateNote string
+	// PluginEnabled and PluginSettings are the workspace config's plugins.<name>.enabled and
+	// plugins.<name>.settings layer (the project layer included). PluginConfigKey is their
+	// canonical serialization, so a switch can compare layouts without deep equality work.
+	PluginEnabled   map[string]bool
+	PluginSettings  map[string]plugin.PluginSettings
+	PluginConfigKey string
 }
 
 // Daemon is one daemon's shared plugin runtime. Ensure builds it on the first workspace
@@ -133,10 +140,11 @@ type Workspace struct {
 // residual), Activate rebinds the shared runtime to a workspace, and Stop ends it once at
 // daemon exit.
 type Daemon struct {
-	mu      sync.Mutex
-	mux     *MuxOS
-	runtime *plugin.Runtime
-	keys    func(name string, bs []pluginapi.Binding) (*keymap.Map, error)
+	mu        sync.Mutex
+	mux       *MuxOS
+	runtime   *plugin.Runtime
+	keys      func(string, []pluginapi.Binding) (*keymap.Map, error)
+	configKey string // the plugin config layer the runtime currently has
 }
 
 // NewDaemon returns a daemon with no runtime yet.
@@ -173,6 +181,7 @@ func (d *Daemon) Ensure(cfg config.Config, o Options) (*plugin.Runtime, func(str
 			WorkspaceStateFile: o.WorkspaceStateFile,
 		})
 		d.keys = pluginKeysFor(cfg, o)
+		d.configKey = pluginConfigKey(cfg)
 	}
 	return d.runtime, d.keys
 }
@@ -189,6 +198,7 @@ func NewWorkspace(cfg config.Config, ed *editor.Editor, markEdited func(*editor.
 		Editor: newPluginEditor(ed, markEdited),
 		Keys:   pluginKeysFor(cfg, o),
 	}
+	ws.PluginEnabled, ws.PluginSettings, ws.PluginConfigKey = workspacePluginConfig(cfg)
 	if o.WorkspaceStateFile != "" {
 		ws.StatePath = o.WorkspaceStateFile
 		st, readOnly, err := parsedWorkspaceState(o)
@@ -205,21 +215,65 @@ func NewWorkspace(cfg config.Config, ed *editor.Editor, markEdited func(*editor.
 	return ws
 }
 
-// Activate rebinds the shared runtime to ws: its OS becomes the mux target and its
+// Activate rebinds the shared runtime to ws: its OS becomes the mux target, its
 // gvim.state namespace becomes the runtime's store (the previous namespace is flushed as
-// Work, not IO on the update loop).
-func (d *Daemon) Activate(ws *Workspace) {
+// Work, not IO on the update loop), and its project plugin config is applied if it differs
+// from the runtime's current one. It reports whether plugin reload Work was queued: the
+// caller must let the active model's plugin pump run it.
+func (d *Daemon) Activate(ws *Workspace) (needsPump bool) {
 	if ws == nil {
-		return
+		return false
 	}
 	d.mux.SetActive(ws.OS)
 	d.mux.Register(ws.OS)
 	d.mu.Lock()
 	rt := d.runtime
+	curKey := d.configKey
+	if rt != nil && ws.PluginConfigKey != "" && ws.PluginConfigKey != curKey {
+		d.configKey = ws.PluginConfigKey
+		needsPump = true
+	}
 	d.mu.Unlock()
 	if rt != nil && ws.StatePath != "" {
 		rt.SwitchWorkspaceState(ws.StatePath, ws.State, ws.ReadOnly)
 	}
+	if needsPump && rt != nil {
+		rt.ApplyWorkspacePluginConfig(ws.PluginEnabled, ws.PluginSettings)
+	}
+	return needsPump
+}
+
+// workspacePluginConfig extracts the plugin config layer of a workspace config (project
+// layer included) and a canonical key for it.
+func workspacePluginConfig(cfg config.Config) (enabled map[string]bool, settings map[string]plugin.PluginSettings, key string) {
+	enabled = map[string]bool{}
+	settings = map[string]plugin.PluginSettings{}
+	for name, pc := range cfg.Plugins {
+		if pc.Enabled != nil {
+			enabled[name] = *pc.Enabled
+		}
+		if pc.Settings != nil || pc.ProjectSettings != nil {
+			settings[name] = plugin.PluginSettings{User: pc.Settings, Project: pc.ProjectSettings}
+		}
+	}
+	return enabled, settings, pluginConfigKeyOf(enabled, settings)
+}
+
+// pluginConfigKey is the canonical key of cfg's plugin config layer.
+func pluginConfigKey(cfg config.Config) string {
+	_, _, key := workspacePluginConfig(cfg)
+	return key
+}
+
+func pluginConfigKeyOf(enabled map[string]bool, settings map[string]plugin.PluginSettings) string {
+	data, err := json.Marshal(struct {
+		Enabled  map[string]bool                  `json:"enabled"`
+		Settings map[string]plugin.PluginSettings `json:"settings"`
+	}{enabled, settings})
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // Stop ends the shared runtime (shutdown handlers, plugin processes, state flush) once.

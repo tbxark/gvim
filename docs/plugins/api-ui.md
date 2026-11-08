@@ -180,6 +180,27 @@ without `focus_key` starts on its first tabbable widget. `gvim.ui.mount_sidebar_
 `title`, `rows` (body rows; 0 shares the column) and `closable`, and appends the panel as a
 section under the file explorer.
 
+Scope says how far the mounted chrome reaches (Fresh's chrome scope; default "window"):
+- "window" (the default): the panel/section belongs to the workspace window that mounted it.
+  It is shown while that workspace is active and is not carried to other workspaces; a daemon
+  workspace switch parks it with its model.
+- "editor": the registration belongs to the whole editor. In a daemon whose local workspaces
+  share one plugin runtime, the host carries the mount spec across workspace switches, so the
+  section/panel appears in every workspace. Widget instance state (a text field's in-progress
+  text, a list's scroll) is not cloned into inactive workspaces: copies are rebuilt from the
+  mount spec when entered and live changes reach them through an update/mutation after the
+  switch (documented residual).
+- "buffer": the chrome belongs to one buffer. mount_sidebar_section takes the buffer as the
+  optional buf option (default: the active buffer at mount time); the section is shown only
+  while that buffer is the active one in its workspace (parked, not unmounted, when another
+  buffer is focused) and is removed when the buffer closes. A buffer-scoped float panel
+  behaves the same and is never painted while its buffer is not active.
+
+Mounting a buffer-scoped panel without any active buffer is a CodeInvalid error. A daemon
+without a shared runtime (a direct launch, or a remote/authority workspace) treats "editor"
+and "window" the same, because there is only one workspace model.
+
+
 **Actions** (`gvim.ui.widget_command`) go to the focused widget: `focusAdvance` (`delta` moves the
 focus ring, Tab), `activate` (Enter/Space), `selectMove` (`delta` moves a list/tree/dropdown/radio/
 dual-list selection), `textInputChar` (`text`), `textInputKey` (`key`: `backspace`, `delete`,

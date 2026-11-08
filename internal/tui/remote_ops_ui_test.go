@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"path"
 	"strings"
 	"testing"
 
@@ -12,26 +13,25 @@ import (
 	"github.com/tbxark/gvim/theme"
 )
 
-// remoteCapTree is a writable tree without clipboard operations, the remote explorer's
-// capability shape.
+// remoteCapTree is a writable tree with the clipboard, the remote explorer's capability
+// shape after task-148.
 type remoteCapTree struct {
 	rows     []tree.Row
 	selected int
 }
 
-func (t *remoteCapTree) Root() string            { return "/r" }
-func (t *remoteCapTree) Rows() []tree.Row        { return t.rows }
-func (t *remoteCapTree) Move(d int)              { t.selected = min(max(t.selected+d, 0), len(t.rows)-1) }
-func (t *remoteCapTree) Toggle(string) error     { return nil }
-func (t *remoteCapTree) Reload() error           { return nil }
-func (t *remoteCapTree) Reveal(string) error     { return nil }
-func (t *remoteCapTree) ShowHidden() bool        { return false }
-func (t *remoteCapTree) SetShowHidden(bool)      {}
-func (t *remoteCapTree) ScrollBy(int)            {}
-func (t *remoteCapTree) ScrollOffset() int       { return 0 }
-func (t *remoteCapTree) ShowIgnored() bool       { return false }
-func (t *remoteCapTree) SetShowIgnored(bool)     {}
-func (t *remoteCapTree) ClipboardDisabled() bool { return true }
+func (t *remoteCapTree) Root() string        { return "/r" }
+func (t *remoteCapTree) Rows() []tree.Row    { return t.rows }
+func (t *remoteCapTree) Move(d int)          { t.selected = min(max(t.selected+d, 0), len(t.rows)-1) }
+func (t *remoteCapTree) Toggle(string) error { return nil }
+func (t *remoteCapTree) Reload() error       { return nil }
+func (t *remoteCapTree) Reveal(string) error { return nil }
+func (t *remoteCapTree) ShowHidden() bool    { return false }
+func (t *remoteCapTree) SetShowHidden(bool)  {}
+func (t *remoteCapTree) ScrollBy(int)        {}
+func (t *remoteCapTree) ScrollOffset() int   { return 0 }
+func (t *remoteCapTree) ShowIgnored() bool   { return false }
+func (t *remoteCapTree) SetShowIgnored(bool) {}
 func (t *remoteCapTree) Selected() (tree.Row, bool) {
 	if len(t.rows) == 0 {
 		return tree.Row{}, false
@@ -39,33 +39,39 @@ func (t *remoteCapTree) Selected() (tree.Row, bool) {
 	return t.rows[min(t.selected, len(t.rows)-1)], true
 }
 
-// fakeRemoteOps is a remote explorerOps: only RemoteTarget is read by the UI tests; the
-// disk methods are never called.
-type fakeRemoteOps struct{ target string }
+// fakeRemoteOps is a remote explorerOps: RemoteTarget drives the confirmations and the
+// clipboard methods record what the UI runs.
+type fakeRemoteOps struct {
+	target string
+	copies []string
+	moves  []string
+}
 
-func (f fakeRemoteOps) RemoteTarget() string { return f.target }
-func (f fakeRemoteOps) CreateFile(context.Context, string, string) (string, error) {
+func (f *fakeRemoteOps) RemoteTarget() string { return f.target }
+func (f *fakeRemoteOps) CreateFile(context.Context, string, string) (string, error) {
 	return "", errors.New("not called")
 }
-func (f fakeRemoteOps) Mkdir(context.Context, string, string) (string, error) {
+func (f *fakeRemoteOps) Mkdir(context.Context, string, string) (string, error) {
 	return "", errors.New("not called")
 }
-func (f fakeRemoteOps) Move(context.Context, string, string) (string, error) {
+func (f *fakeRemoteOps) Move(_ context.Context, src, dstDir string) (string, error) {
+	f.moves = append(f.moves, src+" -> "+dstDir)
+	return dstDir + "/" + path.Base(src), nil
+}
+func (f *fakeRemoteOps) Copy(_ context.Context, src, dstDir string, _ explorer.Conflict) (string, error) {
+	f.copies = append(f.copies, src+" -> "+dstDir)
+	return dstDir + "/" + path.Base(src), nil
+}
+func (f *fakeRemoteOps) Rename(context.Context, string, string) (string, error) {
 	return "", errors.New("not called")
 }
-func (f fakeRemoteOps) Copy(context.Context, string, string, explorer.Conflict) (string, error) {
-	return "", errors.New("not called")
-}
-func (f fakeRemoteOps) Rename(context.Context, string, string) (string, error) {
-	return "", errors.New("not called")
-}
-func (f fakeRemoteOps) Trash(context.Context, string) error { return errors.New("not called") }
-func (f fakeRemoteOps) FollowRename(string, string) error   { return nil }
-func (f fakeRemoteOps) CloseDeleted(string) error           { return nil }
-func (f fakeRemoteOps) CheckRename(string, string) error    { return nil }
+func (f *fakeRemoteOps) Trash(context.Context, string) error { return errors.New("not called") }
+func (f *fakeRemoteOps) FollowRename(string, string) error   { return nil }
+func (f *fakeRemoteOps) CloseDeleted(string) error           { return nil }
+func (f *fakeRemoteOps) CheckRename(string, string) error    { return nil }
 
 // TestRemoteExplorerPanelCapabilities checks the writable remote tree allows create,
-// rename and delete but refuses cut/paste before any adapter call.
+// rename, delete and the clipboard actions.
 func TestRemoteExplorerPanelCapabilities(t *testing.T) {
 	tr := &remoteCapTree{rows: []tree.Row{{Name: "a.go", Path: "/r/a.go"}, {Name: "sub", Path: "/r/sub", IsDir: true}}}
 	p := explorer.New(tr, style.Styles{}, nil)
@@ -102,24 +108,42 @@ func TestRemoteExplorerPanelCapabilities(t *testing.T) {
 			}
 		}
 	}
-	for _, action := range []string{"cut", "paste"} {
+	for action, want := range map[string]any{
+		"cut":   explorer.CutMsg{},
+		"copy":  explorer.CopyMsg{},
+		"paste": explorer.PasteMsg{},
+	} {
 		_, cmd, ok := p.Action(action, explorer.Geometry{Top: 1, Width: 16, Bottom: 9})
 		if !ok || cmd == nil {
 			t.Fatalf("%s not handled", action)
 		}
-		msg, ok := cmd().(explorer.ErrorMsg)
-		if !ok || !errors.Is(msg.Err, explorer.ErrClipboardDisabled) {
-			t.Fatalf("%s = %#v, want the clipboard-disabled error", action, cmd())
+		msg := cmd()
+		if _, isErr := msg.(explorer.ErrorMsg); isErr {
+			t.Fatalf("%s still refused: %#v", action, msg)
+		}
+		switch want.(type) {
+		case explorer.CutMsg:
+			if _, ok := msg.(explorer.CutMsg); !ok {
+				t.Fatalf("cut = %T", msg)
+			}
+		case explorer.CopyMsg:
+			if _, ok := msg.(explorer.CopyMsg); !ok {
+				t.Fatalf("copy = %T", msg)
+			}
+		case explorer.PasteMsg:
+			if _, ok := msg.(explorer.PasteMsg); !ok {
+				t.Fatalf("paste = %T", msg)
+			}
 		}
 	}
 }
 
-// TestRemoteExplorerMenuHasWritesWithoutClipboard checks the remote context menu keeps
-// New/Rename/Delete and the path copies, and drops Cut/Copy/Paste/Duplicate.
-func TestRemoteExplorerMenuHasWritesWithoutClipboard(t *testing.T) {
+// TestRemoteExplorerMenuHasClipboard checks the remote context menu has New/Rename/
+// Delete, Cut/Copy/Paste/Duplicate and the path copies.
+func TestRemoteExplorerMenuHasClipboard(t *testing.T) {
 	tr := &remoteCapTree{rows: []tree.Row{{Name: "a.go", Path: "/r/a.go"}}}
 	m := New(Deps{Editor: newFakeEditor("x"), Keys: fakeKeymap{}, Theme: theme.Theme{}, Clock: testClock, Explorer: tr})
-	m.ops = fakeRemoteOps{target: "SSH:u@h:/r"}
+	m.ops = &fakeRemoteOps{target: "SSH:u@h:/r"}
 	actions := func(target explorer.ContextTarget) []string {
 		var out []string
 		for _, it := range m.explorerMenuItems(target) {
@@ -136,18 +160,13 @@ func TestRemoteExplorerMenuHasWritesWithoutClipboard(t *testing.T) {
 			t.Fatalf("root menu = %v, missing %s", root, want)
 		}
 	}
-	if containsAction(root, "paste") {
-		t.Fatalf("root menu = %v, has paste on a clipboard-disabled tree", root)
+	if containsAction(root, "paste") == false {
+		t.Fatalf("root menu = %v, missing paste", root)
 	}
 	single := actions(explorer.ContextTarget{Paths: []string{"/r/a.go"}})
-	for _, want := range []string{"file_explorer_new_file", "file_explorer_rename", "file_explorer_delete", "copy_full_path", "copy_relative_path"} {
+	for _, want := range []string{"file_explorer_new_file", "file_explorer_rename", "file_explorer_delete", "cut", "copy", "paste", "duplicate", "copy_full_path", "copy_relative_path"} {
 		if !containsAction(single, want) {
 			t.Fatalf("single menu = %v, missing %s", single, want)
-		}
-	}
-	for _, bad := range []string{"cut", "copy", "paste", "duplicate"} {
-		if containsAction(single, bad) {
-			t.Fatalf("single menu = %v, has %s on a clipboard-disabled tree", single, bad)
 		}
 	}
 }
@@ -195,6 +214,25 @@ func TestRemoteConfirmationsNameTheTarget(t *testing.T) {
 	}
 }
 
+// TestRemoteExplorerClipboardRefreshesWithoutBlocking checks a successful remote copy/cut
+// queues the same remote tree reload without reading during the handler.
+func TestRemoteExplorerClipboardRefreshesWithoutBlocking(t *testing.T) {
+	for _, kind := range []jobKind{jobCopy, jobMove} {
+		loader := (&fakeRemoteLoader{}).set("/srv/proj", RemoteDirEntry{Name: "a.go"}, RemoteDirEntry{Name: "a copy.go"})
+		tr := NewRemoteExplorerTree("/srv/proj", loader)
+		m := New(Deps{Editor: newFakeEditor("x"), Keys: fakeKeymap{}, Theme: theme.Theme{}, Clock: testClock, Explorer: tr, ShowExplorer: true})
+		m.ops = &fakeRemoteOps{target: "SSH:u@h:/srv/proj"}
+		cmd := m.fileDone(fileResultMsg{job: fileJob{kind: kind, path: "/srv/proj/a.go", dir: "/srv/proj"}, out: "/srv/proj/a copy.go"})
+		if cmd == nil {
+			t.Fatalf("a successful remote %v queued no refresh", kind)
+		}
+		if loader.callCount() != 0 {
+			t.Fatalf("the %v handler read remote directories instead of queueing a command", kind)
+		}
+		_ = cmd()
+	}
+}
+
 // TestRemoteExplorerWriteRefreshesWithoutBlocking checks a successful remote create queues a
 // remote tree reload in a command: no loader call happens during the handler, only when the
 // command runs.
@@ -202,7 +240,7 @@ func TestRemoteExplorerWriteRefreshesWithoutBlocking(t *testing.T) {
 	loader := (&fakeRemoteLoader{}).set("/srv/proj", RemoteDirEntry{Name: "x"})
 	tr := NewRemoteExplorerTree("/srv/proj", loader)
 	m := New(Deps{Editor: newFakeEditor("x"), Keys: fakeKeymap{}, Theme: theme.Theme{}, Clock: testClock, Explorer: tr, ShowExplorer: true})
-	m.ops = fakeRemoteOps{target: "SSH:u@h:/srv/proj"}
+	m.ops = &fakeRemoteOps{target: "SSH:u@h:/srv/proj"}
 	cmd := m.fileDone(fileResultMsg{job: fileJob{kind: jobCreate, dir: "/srv/proj", name: "x"}, out: "/srv/proj/x"})
 	if cmd == nil {
 		t.Fatal("a successful remote create queued no refresh")

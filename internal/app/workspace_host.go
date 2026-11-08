@@ -346,7 +346,12 @@ func (m *workspaceManager) activatePlugins(sess *workspaceSession) {
 		return
 	}
 	if m.opts.PluginDaemon != nil && sess.rt.pluginWS != nil {
-		m.opts.PluginDaemon.Activate(sess.rt.pluginWS)
+		if m.opts.PluginDaemon.Activate(sess.rt.pluginWS) && sess.rt.model != nil {
+			// The switch changed the workspace's project plugin config and its reload Work
+			// is queued on the shared runtime; the entering model drains it on its next
+			// Update (the reads/compiles are commands, never blocking IO in Update).
+			sess.rt.model.RequestPluginPump()
+		}
 	}
 	if m.opts.PluginShared != nil && sess.rt.pluginWS != nil {
 		m.opts.PluginShared.Bind(sess.rt.model)

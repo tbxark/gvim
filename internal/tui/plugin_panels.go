@@ -41,6 +41,8 @@ type pluginPanels struct {
 	// sections to pick up when they mount (R9-4, sidebar_state.go). It is nil when
 	// there is nothing to restore.
 	restore *pluginSidebarRestore
+	// announced is the last (window, buffer) focus the announcer emitted.
+	announced announceState
 }
 
 // mountedPanel is one mounted panel.
@@ -48,7 +50,9 @@ type mountedPanel struct {
 	id    pluginapi.PanelID
 	owner string
 	mount pluginapi.WidgetMount
-	panel *pluginpanel.Panel
+	// scopeBuffer is the buffer a ScopeBuffer mount belongs to (0 for other scopes).
+	scopeBuffer pluginapi.BufferID
+	panel       *pluginpanel.Panel
 	// rect is the block of the last paint: the float card, the pane of the buffer panel
 	// or the body of the sidebar section.
 	rect pluginpanel.Rect
@@ -86,15 +90,85 @@ func (ps *pluginPanels) remove(id pluginapi.PanelID) bool {
 }
 
 // sidebarOrder returns the sidebar panels in mount order: the order their sections stack in.
-func (ps *pluginPanels) sidebarOrder() []*mountedPanel {
+// A panel only belongs on screen when its chrome scope matches the active buffer; window
+// and editor scopes always belong to their owning model (editor-scoped copies are carried
+// to every workspace model by PluginShared).
+func (ps *pluginPanels) sidebarOrder(m *Model) []*mountedPanel {
 	var out []*mountedPanel
 	for _, id := range ps.order {
 		mp := ps.byID[id]
-		if mp != nil && mp.mount.Placement == pluginapi.PlacementSidebar {
+		if mp != nil && mp.mount.Placement == pluginapi.PlacementSidebar && m.panelVisible(mp) {
 			out = append(out, mp)
 		}
 	}
 	return out
+}
+
+// panelVisible reports whether a mounted panel belongs on screen in m: buffer-scoped mounts
+// only while their buffer is the active one, everything else in its owning model.
+func (m *Model) panelVisible(mp *mountedPanel) bool {
+	if mp == nil {
+		return false
+	}
+	if mp.mount.Scope == pluginapi.ScopeBuffer {
+		return mp.scopeBuffer != 0 && m.pluginActiveBuffer() == mp.scopeBuffer
+	}
+	return true
+}
+
+// pluginActiveBuffer is the active editor buffer the plugin host addresses.
+func (m *Model) pluginActiveBuffer() pluginapi.BufferID {
+	if m.plug.pe != nil {
+		return m.plug.pe.ActiveBuffer()
+	}
+	return 0
+}
+
+// plugPanelsScopeSync takes the keyboard from a panel that no longer belongs on screen
+// (its buffer moved away) and refreshes the editor-wide chrome snapshot when a panel of
+// editor scope changed. It is cheap and runs on the update loop.
+func (m *Model) plugPanelsScopeSync() {
+	ps := &m.plug.panels
+	if ps.focus != 0 {
+		if mp := ps.get(ps.focus); mp != nil && !m.panelVisible(mp) {
+			m.blurPluginPanels()
+		}
+	}
+}
+
+// plugPanelsBufferClosed drops the buffer-scoped panels of a buffer that closed: their
+// owner buffer is gone, so they cannot belong to anything on screen any more.
+func (m *Model) plugPanelsBufferClosed(id pluginapi.BufferID) {
+	ps := &m.plug.panels
+	removed := false
+	for _, pid := range append([]pluginapi.PanelID(nil), ps.order...) {
+		mp := ps.get(pid)
+		if mp != nil && mp.mount.Scope == pluginapi.ScopeBuffer && mp.scopeBuffer == id {
+			if ps.focus == pid {
+				ps.focus = 0
+			}
+			ps.remove(pid)
+			removed = true
+		}
+	}
+	if removed {
+		m.syncViewport()
+	}
+}
+
+// newMountedPanel builds a mounted panel from a mount spec (the shared-runtime editor-chrome
+// install reuses it, so a carried section is built exactly like a mounted one).
+func newMountedPanel(m *Model, id pluginapi.PanelID, owner string, o pluginapi.WidgetMount) *mountedPanel {
+	opts := pluginpanel.Options{
+		Chrome:         m.styles.Overlay,
+		Resolve:        m.widgetColor,
+		Title:          o.Title,
+		Framed:         o.Placement == pluginapi.PlacementFloat,
+		Closable:       o.Closable,
+		Page:           o.Page,
+		AutoFocusFirst: o.AutoFocusFirst,
+	}
+	return &mountedPanel{id: id, owner: owner, mount: o, panel: pluginpanel.New(o.Panel, opts)}
 }
 
 // ---- Host: mount, update, unmount, commands, mutations
@@ -136,24 +210,39 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 		return err
 	}
 	o.Title = cleanText(o.Title)
-	opts := pluginpanel.Options{
-		Chrome:         m.styles.Overlay,
-		Resolve:        m.widgetColor,
-		Title:          o.Title,
-		Framed:         o.Placement == pluginapi.PlacementFloat,
-		Closable:       o.Closable,
-		Page:           o.Page,
-		AutoFocusFirst: o.AutoFocusFirst,
+	scopeBuffer := pluginapi.BufferID(0)
+	if o.Scope == "" {
+		o.Scope = pluginapi.ScopeWindow
+	}
+	switch o.Scope {
+	case pluginapi.ScopeWindow, pluginapi.ScopeEditor:
+	case pluginapi.ScopeBuffer:
+		scopeBuffer = o.Buffer
+		if scopeBuffer == 0 {
+			scopeBuffer = m.pluginActiveBuffer()
+		}
+		if scopeBuffer == 0 {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "a buffer-scoped panel needs the buffer it belongs to")
+		}
+	default:
+		return pluginapi.Errf(pluginapi.CodeInvalid, "scope must be \"window\", \"editor\" or \"buffer\", not %q", string(o.Scope))
 	}
 	if old := m.plug.panels.get(id); old != nil {
-		old.owner, old.mount = plugin, o
+		editorChrome := old.mount.Scope == pluginapi.ScopeEditor || o.Scope == pluginapi.ScopeEditor
+		_ = editorChrome
+		old.owner, old.mount, old.scopeBuffer = plugin, o, scopeBuffer
 		old.panel.Update(o.Panel)
+		if old.mount.Scope == pluginapi.ScopeEditor {
+			m.noteEditorChromeChanged()
+		}
+		m.plugPanelsScopeSync()
 		if o.Focus {
 			m.focusPluginPanel(id)
 		}
 		return nil
 	}
-	mp := &mountedPanel{id: id, owner: plugin, mount: o, panel: pluginpanel.New(o.Panel, opts)}
+	mp := newMountedPanel(m, id, plugin, o)
+	mp.scopeBuffer = scopeBuffer
 	m.plug.panels.add(mp)
 	if o.Placement == pluginapi.PlacementSidebar {
 		if !m.explorerOpen && m.tree != nil {
@@ -161,6 +250,9 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 			m.syncViewport()
 		}
 		m.syncViewport()
+	}
+	if o.Scope == pluginapi.ScopeEditor {
+		m.noteEditorChromeChanged()
 	}
 	if o.Focus {
 		m.focusPluginPanel(id)
@@ -199,7 +291,11 @@ func (h *pluginHost) UnmountWidgetPanel(id pluginapi.PanelID) {
 		m.plug.panels.focus = 0
 		m.plugEmitWidget(pluginapi.WidgetEvent{Panel: uint64(id), Event: "focus_lost", Index: -1})
 	}
+	scopeEditor := mp.mount.Scope == pluginapi.ScopeEditor
 	m.plug.panels.remove(id)
+	if scopeEditor {
+		m.noteEditorChromeChanged()
+	}
 	m.syncViewport()
 }
 
@@ -244,11 +340,18 @@ func (h *pluginHost) WidgetMutate(id pluginapi.PanelID, mu pluginapi.WidgetMutat
 // plugPanelsGone is OwnerGone for the panels: every panel the plugin mounted goes.
 func (m *Model) plugPanelsGone(plugin string, gen uint64) {
 	_ = gen
+	hadEditor := false
 	for _, id := range append([]pluginapi.PanelID(nil), m.plug.panels.order...) {
 		mp := m.plug.panels.get(id)
 		if mp != nil && mp.owner == plugin {
+			if mp.mount.Scope == pluginapi.ScopeEditor {
+				hadEditor = true
+			}
 			m.plug.panels.remove(id)
 		}
+	}
+	if hadEditor {
+		m.noteEditorChromeChanged()
 	}
 	if m.plug.panels.focus != 0 && m.plug.panels.get(m.plug.panels.focus) == nil {
 		m.plug.panels.focus = 0
@@ -383,6 +486,9 @@ func (m *Model) plugEmitWidget(ev pluginapi.WidgetEvent) {
 // widgetPanelRect is the block a panel is painted in for the current frame, zero when it has
 // no place (a hidden sidebar, a closed buffer window).
 func (m *Model) widgetPanelRect(mp *mountedPanel) pluginpanel.Rect {
+	if mp == nil || !m.panelVisible(mp) {
+		return pluginpanel.Rect{}
+	}
 	switch mp.mount.Placement {
 	case pluginapi.PlacementFloat:
 		return m.floatPanelRect(mp.mount)
@@ -452,7 +558,10 @@ func (m *Model) windowOfBuffer(id pluginapi.BufferID) int {
 func (m *Model) paintPluginPanels(g *grid.Grid, l layout) {
 	for _, id := range m.plug.panels.order {
 		mp := m.plug.panels.get(id)
-		if mp == nil {
+		if mp == nil || !m.panelVisible(mp) {
+			if mp != nil {
+				mp.rect = pluginpanel.Rect{}
+			}
 			continue
 		}
 		switch mp.mount.Placement {
@@ -493,7 +602,7 @@ func (m *Model) paintPluginSection(g *grid.Grid, l layout, mp *mountedPanel) {
 
 // pluginSidebarSection returns the section a sidebar panel landed in.
 func (m *Model) pluginSidebarSection(mp *mountedPanel) (sidebar.Section, bool) {
-	order := m.plug.panels.sidebarOrder()
+	order := m.plug.panels.sidebarOrder(m)
 	k := -1
 	for i, got := range order {
 		if got.id == mp.id {
@@ -528,7 +637,7 @@ func (m *Model) pluginPanelKey(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	mp := m.plug.panels.get(m.plug.panels.focus)
-	if mp == nil || !mp.panel.Focused() {
+	if mp == nil || !mp.panel.Focused() || !m.panelVisible(mp) {
 		m.plug.panels.focus = 0
 		return nil, false
 	}
@@ -672,7 +781,7 @@ func (m *Model) pluginSectionAt(index int) *mountedPanel {
 			k++
 		}
 	}
-	order := m.plug.panels.sidebarOrder()
+	order := m.plug.panels.sidebarOrder(m)
 	if k < 0 || k >= len(order) {
 		return nil
 	}
@@ -691,7 +800,7 @@ func (m *Model) togglePluginSection(mp *mountedPanel) {
 // pluginSidebarSpecs returns the sidebar section specs of the mounted plugin sections.
 func (m *Model) pluginSidebarSpecs() []sidebar.Spec {
 	m.applyPluginSidebarRestore()
-	order := m.plug.panels.sidebarOrder()
+	order := m.plug.panels.sidebarOrder(m)
 	if len(order) == 0 {
 		return nil
 	}

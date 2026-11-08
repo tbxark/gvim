@@ -43,7 +43,7 @@ func TestPluginSidebarStateRoundTrip(t *testing.T) {
 	mountTestSection(restored, 1, 4)
 	mountTestSection(restored, 2, 6)
 	restored.applyPluginSidebarRestore()
-	if got := restored.plug.panels.sidebarOrder(); len(got) != 2 || got[0].id != 2 || got[1].id != 1 {
+	if got := restored.plug.panels.sidebarOrder(restored); len(got) != 2 || got[0].id != 2 || got[1].id != 1 {
 		t.Fatalf("restored order = %v, want section 2 then 1", got)
 	}
 	if restored.plug.panels.byID[1].mount.Rows != 9 || restored.plug.panels.byID[2].mount.Rows != 3 {

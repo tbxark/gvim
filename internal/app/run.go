@@ -35,6 +35,7 @@ import (
 	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/session"
 	"github.com/tbxark/gvim/syntax"
@@ -63,6 +64,14 @@ func Run(ctx context.Context, opts Options) error {
 	// An attach is a terminal proxy: it builds no editor and touches no session.
 	if opts.Daemon != nil && opts.Daemon.Mode == DaemonAttach {
 		return attachToDaemon(ctx, opts)
+	}
+	// A bare launch may join a daemon that already hosts this workspace when the user
+	// config turns on auto_attach (default off). It never starts a daemon, and it runs
+	// before the terminal check because the attach proxy owns the terminal.
+	if opts.Daemon == nil {
+		if attached, err := maybeAutoAttach(ctx, opts); attached {
+			return err
+		}
 	}
 	serveDaemon := opts.Daemon != nil && opts.Daemon.Mode == DaemonServe
 	if !serveDaemon {
@@ -417,7 +426,16 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// The trust decision gates the project config layer, so it is resolved
 	// before the config is loaded: an untrusted workspace is configured by the
 	// user's own file only.
-	trustStore, trustState, trustWarning := openTrust(root)
+	var trustStore *trust.Store
+	var trustState trust.State
+	var trustWarning string
+	if opts.Remote != nil {
+		// A remote workspace's decision is keyed by the remote target, not by the local
+		// process root: the same target keeps its level across restarts and reconnects.
+		trustStore, trustState, trustWarning = openRemoteTrust(opts.Remote)
+	} else {
+		trustStore, trustState, trustWarning = openTrust(root)
+	}
 	cfg, diags, err := config.Load(config.Options{
 		Root:      root,
 		UserFile:  opts.Config,
@@ -512,9 +530,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if opts.Diff && len(ed.Tabs()) != 2 {
 		return nil, errors.New("--diff needs two different files")
 	}
-	// Crash recovery is local-only and deliberately scoped off for a remote launch: it
-	// would write a copy of remote buffer text into the local recovery cache, which is a
-	// local fallback for remote data. Every local launch keeps it unchanged.
+	// Local crash recovery runs here as always. A remote launch gets its own staged
+	// recovery copy after the remote file access is installed (see the remote block):
+	// remote buffer text is staged under the remote workspace's local session directory
+	// with the remote paths recorded, never as a local file the workspace names.
 	var recPort tui.RecoveryPort
 	var recEvery time.Duration
 	var recNotice string
@@ -583,6 +602,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	var trustCtl *trustController
 	if trustStore != nil {
 		trustCtl = newTrustController(trustStore, trustState)
+		if opts.Remote != nil {
+			trustCtl.recordKey = remoteTrustKey(opts.Remote)
+		}
 		deps.Trust = trustCtl
 	}
 	// The project environment is detected once at workspace open (shallow, no
@@ -637,6 +659,14 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// backend prefers the environment-aware form below.
 	authGate := func(ctx context.Context, argv []string, cwd string) error {
 		return spawnGate(ctx, argv, cwd, nil)
+	}
+	// A remote launch mounts its authority before the plugin runtime is built: the
+	// runtime's OS is the authority-backed one (see po.WrapOS below), so gvim.fs and
+	// gvim.proc from the first plugin Work go to the remote workspace and never to the
+	// local machine. A local launch keeps the plugin OS and mounts after the runtime,
+	// exactly as before.
+	if opts.Remote != nil {
+		authSlot = mountAuthority(opts, nil, authGate, spawnGate, localEnvOverlay(envProvider, true))
 	}
 	// The language-server gate has the manager's shape (it computes the child PATH).
 	lspGate := func(_ context.Context, argv []string, cwd, pathValue string) error {
@@ -756,6 +786,13 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		WorkspaceStateFile: pluginStateFile,
 		WorkspaceStateData: pluginStateData,
 	}
+	if opts.Remote != nil {
+		// The plugin runtime receives the authority-backed OS: gvim.fs and gvim.proc
+		// follow the workspace to the remote host (the authority applies its trust gate
+		// and environment), while the documented local-only APIs stay local. A local
+		// launch leaves this nil.
+		po.WrapOS = func(local hostos.OS) hostos.OS { return pluginhost.NewAuthorityOS(authSlot, local, spawnGate) }
+	}
 	var pw *pluginhost.Wiring
 	var pluginWS *pluginhost.Workspace
 	if opts.Daemon != nil && opts.PluginDaemon != nil && opts.Remote == nil {
@@ -773,14 +810,25 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}
 	// The workspace authority: the local backend over the plugin OS (the same
 	// instance the plugin runtime uses) or the SSH backend of a remote launch. Every
-	// launch and one-shot goes through it; nothing downstream looks at the kind.
-	authSlot = mountAuthority(opts, pw, authGate, spawnGate, localEnvOverlay(envProvider, opts.Remote != nil))
+	// launch and one-shot goes through it; nothing downstream looks at the kind. A
+	// remote launch mounted it before the plugin runtime, so its plugin OS can point at
+	// it; this call is for the local session.
+	if authSlot == nil {
+		authSlot = mountAuthority(opts, pw, authGate, spawnGate, localEnvOverlay(envProvider, opts.Remote != nil))
+	}
 	if connectNotice, _ := attemptAuthorityConnect(ctx, authSlot); connectNotice != "" {
 		openNotices = append(openNotices, connectNotice)
+	}
+	if opts.Remote != nil && !opts.NoPlugins {
+		// Honest startup note for plugin authors and users: the plugin OS follows the
+		// workspace for files and processes, but these are local-only and remote file
+		// watching is the authority's polling watch, not the local fsnotify.
+		openNotices = append(openNotices, remotePluginAuthorityNotice)
 	}
 	var remoteFiles *finder.Index
 	var remoteGit *remoteGitStatus
 	var remoteExplorerLoader *authorityDirLoader
+	var remoteRecoveryPath string
 	if opts.Remote != nil {
 		// The slot now has the real remote FileSystem: give the editor the file access and
 		// park the remote file for the root's first command. Installing the access is
@@ -788,6 +836,21 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// retryable notice, never an empty local buffer.
 		deps.StartupOpen = setupRemoteEditing(ed, authSlot, opts.Remote)
 		deps.StartupLine, deps.StartupCol = opts.Remote.Line, opts.Remote.Col
+		// Remote hot-exit/recovery: stage the unsaved text of remote documents under the
+		// remote workspace's local session directory (never named by a local file) and
+		// recover abandoned copies now that the remote file access is installed, so the
+		// recorded remote paths reopen through the authority. It is a deliberate local
+		// staging divergence from Fresh, whose recovery routes through the authority.
+		recoverySession := remoteRecoverySessionDir(opts.Remote)
+		if deferRemoteRestore {
+			recoverySession = opts.SessionDir
+		}
+		recPort, recEvery, recNotice = setupRemoteRecovery(ed, cfg, recoverySession, "SSH:"+remoteTrustTarget(opts.Remote))
+		if recNotice != "" {
+			openNotices = append(openNotices, recNotice)
+		}
+		deps.Root.Recovery, deps.Root.RecoveryEvery = recPort, recEvery
+		remoteRecoveryPath = restore.RecoveryDirFor(recoverySession, true)
 		// LSP over SSH: the servers run on the remote host through the slot's
 		// LongRunning surface; a local server must never start for a remote buffer.
 		if deps.LSP != nil {
@@ -1127,7 +1190,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		searchDir:       opts.SessionDir,
 		stashDir:        opts.SessionDir,
 		kept:            keptFiles(failed),
-		recovery:        restore.RecoveryDirFor(opts.SessionDir, watching),
+		recovery:        recoveryDirForRun(opts.SessionDir, watching, remoteRecoveryPath),
 
 		recoveryWriter:   deps.Root.Recovery,
 		log:              logFile,
@@ -1138,6 +1201,15 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}
 	model.SetQuitStash(rt.stashForQuit)
 	return rt, nil
+}
+
+// recoveryDirForRun is the recovery directory this run clears on a clean exit: the
+// remote staging copy for a remote launch, otherwise the local session's own copy.
+func recoveryDirForRun(sessionDir string, watching bool, remoteRecoveryPath string) string {
+	if remoteRecoveryPath != "" {
+		return remoteRecoveryPath
+	}
+	return restore.RecoveryDirFor(sessionDir, watching)
 }
 
 // keptFiles returns the files of failed, in order, for the session save to list.

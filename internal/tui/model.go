@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -210,12 +211,16 @@ type Model struct {
 	authOpenDock bool
 	// Background authority reconnect (authority_status.go): one dial in flight, the
 	// capped backoff, the one-shot credential prompt flag and the 2FA answer queue.
-	authorityBusy      bool
-	authorityBackoff   time.Duration
-	authorityPrompted  bool
-	authorityQuestions []string
-	authorityAnswers   []string
-	authorityEchos     []bool
+	authorityBusy bool
+	// authorityRefreshNotice defers a successful reconnect's status notice until the
+	// app's post-reconnect work (cache refresh/server restart) reports its outcome, so
+	// one notice describes the refreshed workspace instead of two.
+	authorityRefreshNotice bool
+	authorityBackoff       time.Duration
+	authorityPrompted      bool
+	authorityQuestions     []string
+	authorityAnswers       []string
+	authorityEchos         []bool
 	// shellRun, when set, runs shell_command/format_buffer jobs on the workspace
 	// authority instead of the local editor runner (see authority_status.go).
 	shellRun func(editor.ShellJob) (string, error)
@@ -433,6 +438,9 @@ func (m *Model) Close() {
 	m.waitSaves()
 	m.cancelStream()
 	m.lspClose()
+	// A shared-runtime workspace that closes cannot show its plugin prompts again: resolve
+	// their waits with a cancellation (and a notice) so plugin tasks do not wait forever.
+	m.cancelSharedPluginWaits()
 	m.pluginStop()
 	done := make(chan struct{})
 	go func() {
@@ -483,12 +491,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if done, ok := msg.(authorityReconnectedMsg); ok {
 		m.authorityBusy = false
-		m.reportAuthorityReconnect(done.err)
 		if done.err != nil {
+			m.reportAuthorityReconnect(done.err)
 			// Keep the backoff from the poll: it schedules the next attempt.
 			return m, nil
 		}
 		m.resetAuthorityRetry()
+		// One notice reports the refreshed workspace. When the app's post-reconnect work
+		// runs it finishes the sentence (and any restart count/failure); without that hook
+		// the reconnect outcome itself is the notice.
+		m.authorityRefreshNotice = m.auth.AfterReconnect != nil
+		if !m.authorityRefreshNotice {
+			m.reportAuthorityReconnect(nil)
+		}
 		// A startup open that failed while the authority was disconnected is retried
 		// once the connection is back: failures stay retryable, never a silently empty
 		// local buffer. The app's post-reconnect work (restarting the remote language
@@ -596,6 +611,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = tea.Batch(cmd, m.pluginViewTail(snap))
 	m.syncScrollGroups()
 	m.applyGroupFixedHeights()
+	// A workspace switch queued shared-runtime plugin Work (a per-workspace project
+	// plugin config reload): pump it here, so the switch itself did no IO on this loop.
+	if m.plug.pumpPending {
+		m.plug.pumpPending = false
+		cmd = tea.Batch(cmd, m.pumpAfter(func() {}))
+	}
 	return next, cmd
 }
 
@@ -790,11 +811,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.askDelete(msg.Path)
 		}
 	case expanel.CopyMsg:
-		m.clip = newClipboard(msg.Path, msg.Paths, false)
+		cmd = m.askRemoteClipboard(remoteClipboardCopy, msg.Path, msg.Paths, "")
 	case expanel.CutMsg:
-		m.clip = newClipboard(msg.Path, msg.Paths, true)
+		cmd = m.askRemoteClipboard(remoteClipboardCut, msg.Path, msg.Paths, "")
 	case expanel.PasteMsg:
-		cmd = m.paste(msg.Dir)
+		cmd = m.askRemoteClipboard(remoteClipboardPaste, "", nil, msg.Dir)
 	case prompt.Done:
 		cmd = m.answer(msg)
 	case fileResultMsg:
@@ -1202,6 +1223,103 @@ func (m *Model) gotoText(text string) {
 	m.gotoLine(line, col)
 }
 
+// The remote explorer clipboard's confirmation kinds. A local workspace acts directly
+// (no confirmation, as before); a remote one confirms and names the target, because the
+// entries live on another host and a cut/paste permanently changes that tree.
+const (
+	remoteClipboardCopy      = "copy"
+	remoteClipboardCut       = "cut"
+	remoteClipboardPaste     = "paste"
+	remoteClipboardDuplicate = "duplicate"
+)
+
+// remoteClipboardTag is the pending clipboard action of a remote confirmation.
+type remoteClipboardTag struct {
+	kind  string
+	paths []string
+	dir   string
+}
+
+// remoteClipboardQuestion is the confirmation text; it always names the remote target.
+func remoteClipboardQuestion(kind string, paths []string, dir, target string) string {
+	what := ""
+	switch {
+	case len(paths) == 1:
+		what = filepath.Base(paths[0])
+	case len(paths) > 1:
+		what = fmt.Sprintf("%d entries", len(paths))
+	}
+	switch kind {
+	case remoteClipboardCopy:
+		return fmt.Sprintf("Copy %s on %s?", what, target)
+	case remoteClipboardCut:
+		return fmt.Sprintf("Cut %s on %s? Remote entries are removed only after a successful paste.", what, target)
+	case remoteClipboardDuplicate:
+		return fmt.Sprintf("Duplicate %s on %s?", what, target)
+	}
+	return ""
+}
+
+// pasteQuestion is the remote paste confirmation, naming the destination and target.
+func pasteQuestion(count int, dir, target string) string {
+	noun := "entry"
+	if count != 1 {
+		noun = "entries"
+	}
+	return fmt.Sprintf("Paste %d %s into %s on %s?", count, noun, dir, target)
+}
+
+// askRemoteClipboard runs a local clipboard action directly, or asks first on a remote
+// workspace and then runs it. The confirmation names the remote target.
+func (m *Model) askRemoteClipboard(kind, path string, paths []string, dir string) tea.Cmd {
+	if len(paths) == 0 && path != "" {
+		paths = []string{path}
+	}
+	target := m.remoteExplorerTarget()
+	if target == "" {
+		return m.runRemoteClipboard(remoteClipboardTag{kind: kind, paths: paths, dir: dir})
+	}
+	q := remoteClipboardQuestion(kind, paths, dir, target)
+	if kind == remoteClipboardPaste {
+		count := 0
+		if m.clip != nil {
+			count = len(m.clip.paths)
+		}
+		q = pasteQuestion(count, dir, target)
+	}
+	m.pushOverlay(prompt.NewConfirm(m.styles, q, remoteClipboardTag{kind: kind, paths: paths, dir: dir}))
+	return nil
+}
+
+// runRemoteClipboard applies a confirmed clipboard action: a copy/cut fills the
+// explorer clipboard (nothing is written until paste), a paste starts the jobs, and a
+// duplicate starts one same-directory copy per selected entry (Fresh's naming rule).
+func (m *Model) runRemoteClipboard(tag remoteClipboardTag) tea.Cmd {
+	switch tag.kind {
+	case remoteClipboardCopy:
+		m.clip = newClipboard("", tag.paths, false)
+		return nil
+	case remoteClipboardCut:
+		m.clip = newClipboard("", tag.paths, true)
+		return nil
+	case remoteClipboardPaste:
+		return m.paste(tag.dir)
+	case remoteClipboardDuplicate:
+		return m.duplicatePaths(tag.paths)
+	}
+	return nil
+}
+
+// duplicatePaths starts a same-directory copy of every path: the adapter gives each a
+// free "name copy[.ext]" name (Fresh's Duplicate).
+func (m *Model) duplicatePaths(paths []string) tea.Cmd {
+	jobs := make([]fileJob, 0, len(paths))
+	for _, p := range paths {
+		jobs = append(jobs, fileJob{kind: jobCopy, path: p, dir: filepath.Dir(p), policy: expanel.ConflictCancel})
+	}
+	return m.runJobs(jobs)
+}
+
 // needOps reports whether the file operations are wired. When they are not, the
 // notice row says so and the operation does nothing.
 func (m *Model) needOps() bool {
@@ -1346,6 +1464,8 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 			}
 			return m.runJobs(jobs)
 		}
+	case remoteClipboardTag:
+		return m.runRemoteClipboard(tag)
 	case overwriteTag:
 		job := tag.job
 		job.policy = expanel.ConflictSkip

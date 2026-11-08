@@ -55,7 +55,7 @@ func dialTestDaemon(t *testing.T, srv *Server, cols, rows int) *client {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	c := &client{t: t, conn: conn}
-	if err := WriteJSON(conn, TypeHello, Hello{Cols: cols, Rows: rows}); err != nil {
+	if err := WriteJSON(conn, TypeHello, Hello{Version: ProtocolVersion, Cols: cols, Rows: rows}); err != nil {
 		t.Fatal(err)
 	}
 	waitAttached(t, conn)
@@ -128,24 +128,125 @@ func TestServerForwardsInputAndOutput(t *testing.T) {
 	}
 }
 
-func TestServerRefusesASecondClient(t *testing.T) {
+// TestServerMultipleClientsShareTheSession: two clients attach to one session; both
+// receive every output frame, input from either reaches the program, and the negotiated
+// size is the smallest attached client's size.
+func TestServerMultipleClientsShareTheSession(t *testing.T) {
 	srv, _ := startTestServer(t)
-	first := dialTestDaemon(t, srv, 80, 24)
-	_ = first
-	second, err := Attach(srv.Name())
+	first := dialTestDaemon(t, srv, 100, 30)
+	second := dialTestDaemon(t, srv, 80, 24)
+	if cols, rows := srv.negotiatedSize(); cols != 80 || rows != 24 {
+		t.Fatalf("negotiated size = %dx%d, want the smallest 80x24", cols, rows)
+	}
+	// Both see the same frame.
+	go func() { _, _ = srv.Write([]byte("shared")) }()
+	for i, c := range []*client{first, second} {
+		f, err := ReadFrame(c.conn)
+		if err != nil || f.Type != TypeOutput || string(f.Payload) != "shared" {
+			t.Fatalf("client %d frame = %#v, %v", i, f, err)
+		}
+	}
+	// Input from the second client reaches the program.
+	if err := WriteFrame(second.conn, TypeInput, []byte("from-second")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 16)
+	done := make(chan int, 1)
+	go func() {
+		n, _ := srv.Read(buf)
+		done <- n
+	}()
+	select {
+	case n := <-done:
+		if got := string(buf[:n]); got != "from-second" {
+			t.Fatalf("input = %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the second client's input did not arrive")
+	}
+	// A resize of either client renegotiates; the smallest still wins.
+	if err := WriteJSON(first.conn, TypeResize, Resize{Cols: 60, Rows: 20}); err != nil {
+		t.Fatal(err)
+	}
+	waitNegotiated(t, srv, 60, 20)
+	if err := WriteJSON(first.conn, TypeResize, Resize{Cols: 140, Rows: 50}); err != nil {
+		t.Fatal(err)
+	}
+	waitNegotiated(t, srv, 80, 24)
+}
+
+// TestServerDetachOneClientKeepsTheSession: detaching one client acks it, keeps the
+// others and the hosted program; the remaining client keeps receiving frames and the
+// size is renegotiated without the detached client.
+func TestServerDetachOneClientKeepsTheSession(t *testing.T) {
+	srv, _ := startTestServer(t)
+	first := dialTestDaemon(t, srv, 100, 30)
+	second := dialTestDaemon(t, srv, 80, 24)
+	if err := WriteFrame(second.conn, TypeDetach, nil); err != nil {
+		t.Fatal(err)
+	}
+	f, err := ReadFrame(second.conn)
+	if err != nil || f.Type != TypeDetached {
+		t.Fatalf("detach ack = %#v, %v", f, err)
+	}
+	waitNegotiated(t, srv, 100, 30)
+	go func() { _, _ = srv.Write([]byte("still-here")) }()
+	f, err = ReadFrame(first.conn)
+	if err != nil || f.Type != TypeOutput || string(f.Payload) != "still-here" {
+		t.Fatalf("remaining client frame = %#v, %v", f, err)
+	}
+	// A third client can attach to the same living session.
+	third := dialTestDaemon(t, srv, 70, 20)
+	waitNegotiated(t, srv, 70, 20)
+	_ = third
+}
+
+// TestServerRefusesAnIncompatibleProtocolVersion: a client speaking another protocol
+// version gets a clear notice and is dropped before it can change the shared session;
+// an existing client's size and stream are untouched, and a correct client still attaches.
+func TestServerRefusesAnIncompatibleProtocolVersion(t *testing.T) {
+	srv, _ := startTestServer(t)
+	first := dialTestDaemon(t, srv, 100, 30)
+	conn, err := Attach(srv.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = second.Close() }()
-	if err := WriteJSON(second, TypeHello, Hello{Cols: 80, Rows: 24}); err != nil {
+	defer func() { _ = conn.Close() }()
+	if err := WriteJSON(conn, TypeHello, Hello{Version: ProtocolVersion + 1, Cols: 40, Rows: 10}); err != nil {
 		t.Fatal(err)
 	}
-	f, err := ReadFrame(second)
-	if err != nil {
-		t.Fatal(err)
+	f, err := ReadFrame(conn)
+	if err != nil || f.Type != TypeVersionRejected {
+		t.Fatalf("incompatible hello answer = %#v, %v", f, err)
 	}
-	if f.Type != TypeNotice || len(f.Payload) == 0 {
-		t.Fatalf("second attach got %#v, want a notice", f)
+	var mismatch VersionMismatch
+	if err := DecodeJSON(f, &mismatch); err != nil || mismatch.Client != ProtocolVersion+1 || mismatch.Daemon != ProtocolVersion {
+		t.Fatalf("version-rejected payload = %+v, %v", mismatch, err)
+	}
+	// No state change: the old client's size is still the negotiated one.
+	if cols, rows := srv.negotiatedSize(); cols != 100 || rows != 30 {
+		t.Fatalf("size after incompatible hello = %dx%d", cols, rows)
+	}
+	// The existing client still gets frames; a compatible client can attach.
+	go func() { _, _ = srv.Write([]byte("ok")) }()
+	if f, err := ReadFrame(first.conn); err != nil || f.Type != TypeOutput || string(f.Payload) != "ok" {
+		t.Fatalf("first client frame = %#v, %v", f, err)
+	}
+	_ = dialTestDaemon(t, srv, 90, 25)
+}
+
+func waitNegotiated(t *testing.T, srv *Server, cols, rows int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if c, r := srv.negotiatedSize(); c == cols && r == rows {
+			return
+		}
+		if time.Now().After(deadline) {
+			c, r := srv.negotiatedSize()
+			t.Fatalf("negotiated size = %dx%d, want %dx%d", c, r, cols, rows)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -195,7 +296,7 @@ func TestServerCloseSendsExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	if err := WriteJSON(c, TypeHello, Hello{Cols: 80, Rows: 24}); err != nil {
+	if err := WriteJSON(c, TypeHello, Hello{Version: ProtocolVersion, Cols: 80, Rows: 24}); err != nil {
 		t.Fatal(err)
 	}
 	waitAttached(t, c)

@@ -21,16 +21,15 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `03bdf29` plus the merged round-18 work (133–139; 132
-was merged into 133; round 17's read-only remote large-file statement is superseded by 134's
-editable overlay + bounded save). Static gates are ALL GREEN (Lead, clean GOCACHE: build,
-CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n with
-catalogue heap en 105 KiB / de 82 KiB / both 187 KiB). The Lead's full
-`go test ./... -p 1 -count=1 -timeout 1800s` exited 0 on this tree: 76 packages, log
-`/tmp/gvim-r18-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-18 tests and
-diff review (all green); no full-suite run by the audit. Real-host SSH/jump-box/agent forwarding/
-search/explorer/replace/remote large-file save, real-tmux, Windows ConPTY, real-host OSC52 and
-multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh` same date.
+Last verified: 2026-11-09, tree commit `f691d44` plus the merged round-19 work (141–146, 148).
+Static gates are ALL GREEN (clean GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0,
+gofmt, purity, import rules, menus, i18n_check with catalogue heap en 112 KiB / de 82 KiB / both
+195 KiB). The Lead's full `go test ./... -p 1 -count=1 -timeout 1800s` exited 0 on this tree: 76
+packages, log `/tmp/gvim-r19-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-19
+tests and diff review (all green); no full-suite run by the audit. Real-host SSH/jump-box/agent-
+forwarding/search/explorer/replace/clipboard/large-file save, real-tmux, Windows ConPTY, real-host
+OSC52 and multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh` same
+date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
 config-layer + LSP-autostart gating/status pill), native sidebar sections with the Markdown
@@ -400,7 +399,7 @@ of 8 PASS, palette 229, plugin API 242 functions/1478 lines, API level 2.
 
 **Round 12 outcome (2026-11-09).** Six tracks landed; the daemon MVP and architected slices are in:
 **Daemon #18a MVP (complete).** `internal/daemon/{server,attach}.go` + platform resize shim: the
-server owns the attach lifecycle (one client at a time, hello/resize/input/open_file/detach/ping,
+server owns the round-12 attach lifecycle (single-client at r12; r19 multi-client landed: broadcast/any input/smallest size), hello/resize/input/open_file/detach/ping,
 a detached client's input blocks without ending the editor, output goes only to the attached
 client with write-error detach, `OnProgram` repaint/resize hooks, `OnOpenFiles` forwarding,
 `Close` sends exit) and the attach client (hello with the terminal size, optional open-file
@@ -416,7 +415,7 @@ docs/architecture.md package rows + §8 daemon flow + the #19a outline; import r
 internal/daemon to host the TUI program. Tests: daemon server forwarding/refusal/detach-reattach/
 exit, CLI flag table, app start/attach/first-frame/detach/reattach/quit/session-save, single-
 writer refusal + direct exceptions. Recorded MVP reductions: foreground daemon (no fork),
-auto_attach start-if-absent NOT implemented (documented refusal policy instead), one client,
+r12: no daemon auto-start on launch (refusal policy) and single-client; r19 auto_attach default-off + multi-client landed; remaining reductions:
 single workspace until #19, Windows named pipes later. **Terminal tabs.** `internal/tui/dock/
 tabs.go`: a container of up to 16 single-session terminals (each with screen/scrollback/prior
 transcript/selection/links/launch record), a tab strip with active/exited/click-select,
@@ -785,7 +784,7 @@ Rename reports the new label. Tests: workspace_extract_test (unsaved, refusals),
 workspace_close_terminals_unix_test, TUI workspace action/close/tab-menu tests. Remaining #19b:
 co-tenant workspaces over one root, extract into an existing workspace, terminal-tab
 extraction, large-file overlay extraction, extracting multiple tabs, shared buffers/per-workspace
-plugin state/eviction/multi-client/auto_attach/registry additions.
+plugin state/eviction/registry additions (multi-client/auto_attach/plugin-state landed r17–r19; eviction/registry still open).
 **Completion auto-popup + multi-buffer words (108).** With `editor.completion_popup_auto_show` on
 and `quick_suggestions` enabled, typing a word character schedules a debounced popup after
 `quick_suggestions_delay_ms` (default 150 ms); the timer carries path/caret/document version/
@@ -1106,6 +1105,92 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2. Final full suite + static gates recorded in §6/§7;
 real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-19 outcome (2026-11-09, merged working tree on `f691d44`).** Seven tasks (141–146, 148)
+landed; the audit read the diff and ran targeted tests (Lead ran the full suite and re-runs after
+this update).
+**Full plugin window-scope chrome + focus announcer (141).** Chrome now has Fresh's per-mount scope
+(editor/window/buffer) instead of the round-18 editor-wide-vs-model-local split: a widget panel/
+sidebar mount declares its scope, editor-scoped editor-wide, window-scoped chrome stays with its
+window/model, buffer-scoped per buffer. One focus announcer owns `active_window_changed` and
+`focus_gained`; the paths that change focus call it and it diffs (workspace label, focused split
+window id, active buffer id) so a split change reports exactly one transition; the buffer diff
+emits `buffer_activated/deactivated` and seeds the announcer, and `PluginShared.Bind` seeds the
+leaving model's announcement so a workspace switch forces the entering workspace's window/buffer
+announcement. Widget focus remains `widget_event`. Tests plugin_shared. Residual: window/buffer ids
+are per-workspace and not globally stable across a switch; a plugin caching an id must re-read it,
+cross-workspace id namespacing is a follow-up (R13-24).
+**Plugin gvim.fs/gvim.proc through the workspace authority (142).** In a remote or daemon-hosted
+remote workspace the plugin OS is wrapped with `pluginhost.NewAuthorityOS`: file reads/writes/
+stat/readdir/mkdir/remove/rename/watch and one-shot/stdio processes go through the workspace slot;
+the authority trust gate, cwd and captured remote env apply, and gvim never falls back to the local
+OS. LookPath/Dirs/Getenv/Now stay documented local-machine APIs; copy/realpath/walk and mutations
+the backend lacks return clear unsupported errors; remote fs watch is the polling watch with a
+startup degradation notice. Local workspaces keep the current OS byte-identically. Tests use a
+fake authority with a local decoy. Residual: real SSH untested; local-only API semantics are a
+deliberate boundary (R13-19/R13-3).
+**Remote hot-exit/recovery, trust record and reconnect resilience (143).** A direct remote launch
+stages unsaved remote-document text locally under `<cache>/gvim/remote-sessions/<hash>/session`
+keyed by remote target (a daemon-hosted remote workspace uses its workspace session dir), with
+remote paths recorded; recovery installs after the remote FileAccess exists, reopens those paths
+through the authority and reports the remote target; clean exit clears staging. Remote trust is
+recorded in the atomic `trust.json` via `trust.RecordKey` (`user@host[:port]:workspace root`) with
+LevelForRecord/SetRecord/OpenRecord, so a decision survives restart and reconnect does not
+re-prompt; local keys unchanged. Successful reconnect refreshes caches/work (watch Reconnected,
+finder Restart, git cache Invalidate, explorer reload/open retry, LSP restart in a command) and
+shows one notice with restart count/failure appended. Residual: local-staging is a deliberate
+divergence from Fresh's authority-routed recovery; remote executable-content marker scanning
+needs an early connection and is not wired (undecided remote opens markerless and records that
+level); real SSH UNTESTED (R13-3).
+**Per-workspace project plugin config + cross-workspace plugin UI waits (144).** On workspace
+activate the runtime compares the workspace PROJECT `plugins.<name>.enabled/settings` layer with
+its current layer and calls `Runtime.ApplyWorkspacePluginConfig`: only plugins whose enablement or
+settings changed are unloaded/loaded/reloaded (with dependants), reads/compiles are Work, the
+entering model gets one plugin pump, and a project layer never writes the editor-wide
+`plugin-state.json` toggles. Cross-workspace waits: `PluginShared` keeps token→owning-model
+registry; a wait opened in workspace A stays registered to A across a switch to B, B cannot reuse
+the token, it resumes/answers in A when shown again, and closing A resolves every owned wait as
+`cancelled` with a notice. Remote/authority workspaces keep their own runtime; queued work resumes
+when a local workspace is active. Residual: hard kill immediately after a switch can lose the last
+debounce window; remote/authority runtimes not shared; real-host untested.
+**i18n remainder 4 (145).** Settings action notices keys wired; round-18 boundary items (remote
+large-file status, prompt validation, settings value labels, leftover palette chrome/picker
+footers, deliberately-English constants and gvim-only keys) reviewed/extracted where keyed; docs
+i18n inventory/budgets refreshed (cap 640 KiB). Metrics: en 972 keys, every non-English locale
+569; all-locale key+value 565,760 B (553 KiB), embedded JSON 655,193 B (≈640 KiB), catalogue heap
+en 112 KiB / de 82 KiB / both 195 KiB; i18n_check green. Remaining English boundary is documented
+in docs/i18n.md (rows without Fresh keys, schema names, some keybinding help/plugin-manager edges);
+restore_live is config-only; self-update commands absent (R13-5).
+**Daemon multi-client + auto-attach (146).** Several attach clients share one session: server
+frames broadcast to all, input from any client reaches the program, the smallest attached client's
+size wins (repaint on attach/resize), detach/drop removes only that client and the session keeps
+running, a slow client is detached after one bounded write, and an unknown frame drops only that
+client. Hello carries ProtocolVersion=1; an incompatible client gets a dedicated rejection frame
+and exits nonzero before any state change. Auto-attach: user-level `auto_attach` (top-level bool,
+default OFF; Fresh defaults on) makes a bare launch with no files/direct flags join a daemon that
+already hosts the same workspace, prints a notice naming it, never starts a daemon, never applies
+to remote-target launches (explicit -a required), and keeps the per-root named-daemon ambiguity
+refusal. Tests daemon protocol/decision. Residual: gvim keeps per-root named daemons vs Fresh's
+one-shared-daemon/"any flag is direct" nuances; auto_attach default differs Fresh by design; no
+fork/daemonize; Windows named pipes later; eviction/workspace CLI remain open (R13-1).
+**Remote explorer clipboard (148).** Cut, copy, paste and duplicate now run over the authority:
+copy walks the subtree through ReadDir/ReadFile (hidden included) and writes directories with
+Mutations.Mkdir and files with `WriteFile(Atomic: true)`, binary-safe; bounds 10 000 entries,
+256 MiB, 64 directory levels, 2-minute context; cut is copy-then-remove with source removal only
+after full copy success; paste into another directory refuses an existing name (no overwrite
+prompt), same-directory duplicate uses Fresh's free-name rule; symlinks, the workspace root,
+outside-root paths, destination-inside-source and over-bound cases are refused before creating
+anything. Every action confirms first on a remote workspace naming the remote target, runs the
+trust gate, returns the disconnected error, and refreshes the tree after success. Cancellation/
+failure in the write phase keeps the partial destination and reports how many files/wrote where
+(no rollback, no remote deletion). Tests fake authority + local decoy. Residual: no drag/move
+between directories, no undo/history, no whole-subtree transaction/cleanup UI for a partial copy,
+FileEntry/Mode/mtimes not restored (DirEntry has no mode), hardlinks/xattrs not preserved,
+copy/rename existence check still races the write (no exclusive create), no overwrite prompt,
+real-host manual acceptance unautomated (R13-13/R13-21).
+Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle heap ~7.27 MiB,
+plugin API 242 functions/1478 lines level 2. Final full suite + static gates recorded in §6/§7;
+real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
 The reference editor is the checkout in `refs/fresh` (read-only). The allowed differences are
 listed in §4; everything else that Fresh has and gvim lacks is a gap, ranked in §5.
 
@@ -1315,7 +1400,7 @@ for parity status.
 | LSP server entries | built-in + plugin helpers + universal servers | 62 built-in entries; universal_lsp is config-only | `lsp/manager/defaults.go`; gvim routes lists/universal entries and draws hints/tokens/folds/diagnostics, but no built-in universal server ships (Fresh's quicklsp is a separate user-installed Rust binary — decision recorded; user-configured universal_lsp works fully). `process_limits` is enforced on Linux (cgroup v2/ulimit fallback) and recorded as unreachable on macOS/Windows. |
 | Bundled plugin idle heap | n/a | about 7.27 MiB of the 8 MiB gate (9 default-enabled; ~9.3 MiB session baseline) | `TestBundledPluginsIdleHeap` measures the gate in a fresh process (a test budget, not a production cap); the production per-slice heap guard is a separate sampled circuit breaker (128 MiB limit, 1 ms samples after the first 2 ms, forced-GC confirmation; process-wide) and is not a strict hard limit. The heap-guard test now runs a single fresh child with strict parsing and keeps its 4× test ceiling; a late 1 ms sample can miss one doubling near that boundary (observed max 255 MiB for a 64 MiB test limit), so 4× carries a scheduling-tail risk and is a test contract, not a memory guarantee. Evidence: `plugin/budgets_test.go`, `docs/plugins/limits.md`, `docs/plugins/bundled.md`. |
 | Plugin API surface | ~372 methods | 242 functions | `docs/plugins/gvim.d.lua` is 1478 lines, API level 2; the phase-2 wave adds no API method (tab reordering, open-file routing, remote watch and OSC 52 read are native/OS paths, not plugin API). Remaining gaps: R9-5 (composite substitution/dock/per-panel/windowEmbed/markdown-in-text), package manager/HTTP, project-local plugins. |
-| Settings page | schema-driven page (~14k LOC in refs/fresh) over every setting | 69 settings in 14 sections + injected Languages entries/Language Servers/Plugins/Keybindings/Environment/Detectors pages | Rounds 3–11 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment, Plugins/Keybindings, declared-settings rows, theme preview and the Interface locale row. Phase 2/round 15 extracted scalar labels and Completion rows; round 16 adds URL-theme selection (a URL already fetched at this start; uncached reported, no Update-loop fetch), clickable update config rows (`check_for_updates`/`update_check_url` remain config-only), and picker/help chrome extraction. Values/keys/pending/reset/layer behaviour unchanged; structured field/row names stay schema identifiers. Residuals R8-3 remain open TUI gaps (declared plugin settings read-only, no gallery/install page, whole-array LSP JSON instead of per-field dialogs, no in-page key capture/second writer, no env activation, no per-field reset-vs-inherit/full undo, Reload palette-row only, generic Fresh widget runtime not ported). |
+| Settings page | schema-driven page (~14k LOC in refs/fresh) over every setting | 69 settings in 14 sections + injected Languages entries/Language Servers/Plugins/Keybindings/Environment/Detectors pages; auto_attach remains a top-level user config knob (no Settings row) | Rounds 3–11 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment, Plugins/Keybindings, declared-settings rows, theme preview and the Interface locale row. Phase 2/round 15 extracted scalar labels and Completion rows; rounds 16–19 added URL-theme selection, update config-only rows, picker/help chrome and settings action notices. Values/keys/pending/reset/layer behaviour unchanged; structured field/row names stay schema identifiers. Residuals R8-3 remain open TUI gaps (declared plugin settings read-only, no gallery/install page, whole-array LSP JSON instead of per-field dialogs, no in-page key capture/second writer, no env activation, no per-field reset-vs-inherit/full undo, Reload palette-row only, generic Fresh widget runtime not ported). |
 | Terminal | PTY terminal panes and utility dock, tabs (≤16, per-workspace in a daemon) with strip/rename/click/quick-switch/per-tab close_on_exit, tab reordering (palette rows, Ctrl+Shift+PgUp/PgDn where modified keys arrive, mouse drag; persisted order), live/scrollback modes, OSC 7 paths, launch/agent/resume records + Run Agent picker, restart, shell override, selection/copy, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover file:line:col links, pass_ctrl_v_without_text, ConPTY on Windows, SSH terminal, opt-in OSC 52 clipboard read/paste, Live restore with styled screen snapshot and dock modes | **partial** — rounds 10–17 built slice A/tabs/agents/remote terminal, per-workspace scoping, reorder, OSC 52 read and Live restore; round 17 adds a bounded styled visible-screen snapshot in the version-1 record (≤200×512 cells, rune/fg/bg/bold/underline/reverse, exact-tail match on restore, corrupt ignored), read-only Scrollback (restored)/frozen modes with Ctrl+Space pager/live toggle, and revive into live mode with snapshot above new output; tab identity/order/revive-once/restore_live unchanged. Evidence: `internal/terminal/*`, `internal/tui/dock/*`, `internal/restore/terminal.go`, `docs/terminal.md`. | Open: Fresh's full backing-file semantics (bytes/cursor/alternate-screen/OSC/hyperlinks), only visible screen styled (older history text-only), revive via explicit dive (dock not restored into editor split), remote launches restore no layout/terminal state, per-tab splits/kitty/reflow/report-split; R13-15/R13-6. |
 | Explorer options | `file_explorer.width/side/follow_active_buffer/auto_open_on_last_buffer_close/compact_directories/preview_tabs/…` + sticky parents | 5 options + sticky parents implemented | width percent/columns with grip, left/right side geometry, follow + reveal, auto-open on last close, compact chains, sticky band; side toggle session-only and 4 keys accepted-ignored (R3-3). |
 | Finder / Live Grep | file preview, Live Grep toolbar (case/word/regex, files/buffers/ignored/terminals/workspaces), quickfix, streaming | preview column + 6 Live Grep toggles | `internal/tui/palette/{preview,grep}.go`; deferred quickfix, terminals/workspaces providers, streaming, Live Grep row preview, Resume cache (R3-4). |
@@ -1343,7 +1428,7 @@ for parity status.
 
 | Area | Fresh features (evidence) | gvim status | gvim evidence | Notable sub-gaps |
 |---|---|---|---|---|
-| File explorer and sidebar | tree, file create/delete/rename/copy/cut/paste, hidden/gitignored toggles, git status marks, natural sorting, plugin rows/decorations/slots, context menu, async reload, width/side, follow active buffer, compact chains, sticky parents, sidebar sections, session state, Contents fold_buffer, remote workspace tree with remote git letters, refresh, local-style ignore filtering, directory watching and write operations | **partial** (R3; R1; R6; R9; R10; r15 remote explorer; r16 git/preview/refresh; r17 writes; r18 remote ignore/watch gvim extension) | `explorer/{options,sticky,gitignore}.go`, `internal/tui/explorer/`, `internal/tui/{root_explorer,remote_tree,markdown_toc}.go`, `internal/tui/sidebar/`, `internal/tui/palette/preview.go`, `internal/app/{remote_explorer,remote_explorer_ops,remote_git,remote_preview,remote_ignore}.go`, `finder/index.go`, `docs/sidebar.md`/`docs/architecture.md` §8.1 | Local tree/local R10-2/R3 residual. Remote launch: authority-ReadDir lazy tree (commands only, stale/generation, keep/prune, hidden/natural, 5000/20 s bounds, trust gate, reconnect reload), remote git letters (porcelain one-shot/2 s cache), palette head preview, finder in-place Restart/reconnect/Refresh, round-17 New File/New Directory/Rename/Delete (filesystem mutations, fsops names inside root, existence/target-exists checks, trust gate, disconnected error, permanent-delete confirmation naming target, queued reload; cut/copy/paste/drag/duplicate refused), and round-18 remote .gitignore filtering + directory watching (gvim extension: bounded root/nested ignore reader 64 levels/64 KiB/4096 rules through authority, ignored hidden by default/show-gitignored; finder same batch per index lifetime; polled authority Watch adds listed dirs, debounce/off-Update, reconnect/cancel; unsupported→manual-refresh notice). OPEN: remote copy/paste/subtree drag/duplicate, no remote undo/history, check-to-write race (no exclusive create/rename), watch latency/rename-as-remove+create, ignore edits reach explorer next reload/finder next index restart, symlink-to-dir, palette rows no git letters (local too), Windows paths; local residuals. |
+| File explorer and sidebar | tree, file create/delete/rename/copy/cut/paste, hidden/gitignored toggles, git status marks, natural sorting, plugin rows/decorations/slots, context menu, async reload, width/side, follow active buffer, compact chains, sticky parents, sidebar sections, session state, Contents fold_buffer, remote tree with remote git letters, preview, refresh, local-style ignore filtering, directory watching, write operations and clipboard | **partial** (R3; R1; R6; R9; R10; r15 remote explorer; r16 git/preview/refresh; r17 writes; r18 ignore/watch gvim extension; r19 clipboard) | `explorer/{options,sticky,gitignore}.go`, `internal/tui/explorer/`, `internal/tui/{root_explorer,remote_tree,markdown_toc}.go`, `internal/tui/sidebar/`, `internal/tui/palette/preview.go`, `internal/app/{remote_explorer,remote_explorer_ops,remote_explorer_copy,remote_git,remote_preview,remote_ignore}.go`, `finder/index.go`, `docs/sidebar.md`/`docs/architecture.md` §8.1 | Local tree/local residuals. Remote: authority-ReadDir lazy tree, git letters, palette head preview, finder Restart/reconnect/Refresh, r17 New File/New Directory/Rename/Delete, r18 remote .gitignore + polled directory watch (gvim extensions), r19 cut/copy/paste/duplicate over authority (bounds 10k entries/256 MiB/64 levels/2 min; atomic per-file writes, binary-safe; cut copy-then-remove; paste refuses existing name; duplicate Fresh free-name; symlink/root/outside/inside-source refusals; confirmations naming target; trust gate/disconnected/refresh; partial destination reported on cancel/failure). OPEN: no drag/move between directories, no undo/history, no whole-subtree transaction/cleanup UI, mode/mtime/hardlink/xattr not preserved, copy/rename existence-check race, no remote overwrite prompt, watch latency/rename approximation, palette rows no git letters (local too), project-search preview? now wired, Windows paths; real-host acceptance. |
 | Finder, quick open, live grep | Ctrl+P modes (file/command/line/buffer), fuzzy ranking, streaming enumeration (local + remote authority), finder preview (local only), live grep with provider toggles (case/regex/word/files/buffers/ignored/terminals/workspaces), quickfix export, resume | **partial** (R3 landed the preview and toggles; phase 2 adds remote finder) | `finder/finder.go`, `finder/remote.go`, `internal/app/{remote_finder,remote_watch}.go`, `internal/tui/palette/{preview,grep,palette,draw}.go`, `internal/app/{preview,live_grep}.go`, `docs/ui.md`; Fresh `docs/features/command-palette.md` | Remote launch uses the authority file system only (idle placeholder → real remote index; no local fallback), ~/… roots expand in a real shell, errors/truncation surface as rows, and all remote project-search/Git Grep/replace/Live Grep entry points are refused before touching local ports. Still open: **remote Live Grep/project search/Git Grep** (authority-backed search), **remote git marks/preview/refresh** (remote file finder rows are plain; palette preview nil; index is built once and not rebuilt on reconnect/watch), quickfix export, terminals/workspaces providers, syntax colours/scrolling in the local preview, and Resume re-runs the search instead of restoring cached matches (R3-4/R13-3). |
 
 | Project-wide search, replace and Git Grep | plugin Search & Replace panel: match tree, scoped replace, globs, current-file/all-files/open-buffers, 10k cap, unsaved buffers, quickfix export, search history, selected-match preview with scrolling/syntax/soft wrap, multi-line matches, streaming results; git grep finder with case toggle and pathspec field; bundled git_grep plugin | **implemented** core; **partial** against the plugins (R4–R11) | `search/plan.go`, `internal/app/{projectsearch,gitgrep}.go`, `internal/tui/searchpanel/{glob,types,panel,draw,preview}.go` + `internal/tui/project_search.go`, `internal/tui/workspace_edit.go`, `plugin/bundled/plugins/git_grep/`, `commands/search_commands.go`, `docs/keybindings.md`, `docs/ui.md`; Fresh `plugins/search_replace.ts`, `plugins/git_grep.ts` | Round 9 previews/large-file distinction/Open Buffers; round 10 ported git_grep; round 11 added preview soft wrap/toggle (`Options.PreviewWrap`, `Alt+P` in panel and editor, wrapped rows with syntax-span/match remap, 8-row cap + ellipsis, display-row window, session-persisted) and recorded the recent-files provider decision (no app-level opened-file history; needs a history snapshot + streaming/replace semantics). Residuals R9-2: closed-oversize streamed writer, provider sources beyond files/open/current (diagnostics/terminal need provider-specific snapshots); R10-1 git_grep reductions. |
@@ -1359,18 +1444,18 @@ for parity status.
 | Area | Fresh features (evidence) | gvim status | gvim evidence | Notable sub-gaps |
 |---|---|---|---|---|
 | LSP | diagnostics, hover, definition/implementation/references, completion (server + no-LSP buffer words; snippets/auto-import/resolve; auto-popup; multi-buffer words; trigger characters/live re-filter), rename, code actions/file ops, signature help, format, folds, inlay hints, semantic tokens, diagnostics panel/quickfix/inline/staleness, multi-server only/except, universal servers, status/mute, pull/workspace diagnostics, progress, process limits (Linux), env/init options, root markers, C header routing, remote LSP over SSH with remote env | **partial** (#7 A–E; rounds 7–14; round-15 auto-popup/multi-buffer; round-16 trigger/live-filter) | `lsp/{client,handler,requests,capabilities,snippet,progress,raw,limits}.go`, `lsp/manager/{manager,router}.go`, `internal/lsphost/{lsp,lsp_data}.go`, `internal/tui/{lsp,lsp_data,workspace_edit,diagpanel}.go` + inline hints, `editor/completion_words.go` + `internal/tui/completion_words.go`, `internal/app/{remote_lsp,remote_watch}.go`, `authority` LongRunning, `commands/lsp_commands.go`, `docs/lsp.md`/`docs/authority.md` | Rounds 4–15 as before (router/edits/status/staleness, hints/tokens/folds/pull diagnostics, panel/quickfix/progress, workspace edits, inline tier 2, cancel/process limits, remote LSP, completion safety/local-first/snippet/UTF-16/resolve/version+overlap guard/auto-popup/multi-buffer words). Round 16: advertised `completionProvider.triggerCharacters` (static+dynamic, union over eligible servers) open immediately with no debounce when `suggest_on_trigger_characters` is on; open list live-filters further word chars locally without a new request (case-insensitive label/insert prefix, synthetic range, dismiss+one re-ask when empty) with version/caret guards; active-buffer dabbrev cycling already existed (M-/). Open (R13-7/R7-5/R13-3): non-word/Backspace still dismiss instead of Fresh re-filtering, highlighted row resets to first after re-filter (Fresh keeps row identity), Fresh multi-buffer dabbrev not ported, large-file deferral, labelDetails/documentation not rendered, multi-cursor insertion, request-id bookkeeping; LSP trigger chars landed but no server-side live-list refresh beyond local filter; no built-in universal server, per-OS limits Linux-only, remote retry only one restart, no remote install probe, remote trust uses local store; stricter stop-on-refused workspace-edit model (§4 item 18). |
-| Plugins runtime and host API | TypeScript on QuickJS, sandbox-lite with per-plugin contexts, ~372-method API, overlays/virtual text/conceals/soft breaks/folds/line targets, explorer decorations/slots, project environment, prompts/toolbars, modes/contexts, windows/splits, virtual+composite buffers, buffer groups, terminals, authority/remote, LSP requests, HTTP, widgets/floating/dock panels/sidebar sections, i18n, package manager, menus, events | **partial, runtime different; API level 2 (tiers 1a+1b+1c + round-10 edge APIs + r17 per-workspace state + r18 shared daemon runtime)** | `plugin/`, `pluginapi/`, `internal/pluginhost/` (`Daemon`, `Workspace`, `MuxOS`), `internal/tui/plugin*.go` + `plugin_shared.go` + `pluginpanel/`, `decorations/`, `env/`, `docs/plugins/` (6 API pages + events + 1478-line gvim.d.lua) | Lua 5.1 runtime difference; API level 2. Rounds 5–10 as before. Round 17: daemon workspace `gvim.state` namespaced to `sessions/<id>/plugin-state.json` (v1, caps, restore/flush, newer-version read-only). Round 18: ONE runtime for every LOCAL daemon workspace, shared host/OS mux routes plugin calls to the active workspace (root/env/trust), workspace switch rebinds host/OS + state namespace, editor-wide registrations (commands/menus/keys/modes/contexts/status items) carried into entering model with keymap rebuild, workspace-scoped chrome stays with its model, close does not stop runtime (daemon stops once after closeAll), direct launches byte-identical. OPEN: remote/authority-spec workspaces keep their own runtime (not shared); full Fresh window-scope chrome/focus announcer and cross-workspace plugin-UI wait retargeting; per-workspace project plugin config; R9-5 composite/dock/windowEmbed/package manager/project-local plugins (R13-24). |
+| Plugins runtime and host API | TypeScript on QuickJS, sandbox-lite with per-plugin contexts, ~372-method API, overlays/virtual text/conceals/soft breaks/folds/line targets, explorer decorations/slots, project environment, prompts/toolbars, modes/contexts, windows/splits, virtual+composite buffers, buffer groups, terminals, authority/remote, LSP requests, HTTP, widgets/floating/dock panels/sidebar sections, i18n, package manager, menus, events | **partial, runtime different; API level 2 (tiers 1a+1b+1c + r10 edge APIs + r17 per-workspace state + r18 shared daemon runtime + r19 full window scope/authority OS/project config/waits)** | `plugin/`, `pluginapi/`, `internal/pluginhost/` (`Daemon`, `Workspace`, `MuxOS`, `NewAuthorityOS`), `internal/tui/plugin*.go` + `plugin_shared.go` + `pluginpanel/`, `decorations/`, `env/`, `docs/plugins/` (6 API pages + events + 1478-line gvim.d.lua) | Lua 5.1 runtime difference; API level 2. Rounds 5–18 as before (per-workspace state, shared runtime). Round 19: per-mount chrome scope editor/window/buffer + focus announcer (workspace label/focused split window id/active buffer id; buffer activated/deactivated; switch seeded); plugin fs/proc authority for remote workspaces; per-workspace project plugin config applied on activate (only changed plugins unload/load/reload, project layer never writes editor-wide toggles); cross-workspace plugin waits stay/resume in owning workspace, close cancels with notice. OPEN: window/buffer ids per-workspace/not globally stable (cross-workspace id namespacing follow-up), remote/authority workspaces own runtime, hard kill may lose last debounce, editor-scoped overlays/widget instance state model-local, R9-5 composite/dock/windowEmbed/package manager/project-local plugins (R13-24). |
 | Bundled plugin feature set | 50 plugins (git, search, diagnostics, markdown, diff, agents, devcontainers, k8s, pkg, audit, helpers) | **partial: 22 ported (+ native equivalents where genuine); all remaining plugins are open work** | `plugin/bundled/plugins/` (22; 9 default-enabled), `plugin/bundled/lib/{finder.lua,git.lua}`, `docs/plugins/bundled.md`; Fresh `plugins/*.ts` + `docs/features/git.md` §Diff Chunk Navigation | Ported through round 10: diagnostics_panel, git_log/live_diff (full paths), compare_files (opt-in), path_complete/lsp_help, lsp_navigation/find_references/dashboard/code_tour + Finder lib, git_grep/git_explorer/env_manager (opt-in). Remaining ports are OPEN work, not substitutions: orchestrator (19389 lines), live_sessions (524), agent_* family (~1847), devcontainer (2826), k8s-workspace (535), pkg (3642), audit_mode (8917), welcome/welcome_screen (3028), language helpers (~1630), and **diff_nav residuals** (merged git/HEAD + live_diff + saved-diff navigation landed in gvim's git_gutter, but large-file mode is refused, Compare-view hunks are not a source, and commands/notices lack Fresh's diff_nav i18n/standalone plugin — R13-9). Native equivalents accepted only where they genuinely provide the user-facing behaviour: compare_files (native Compare; composite API capability remains open), native theme editor (fresh-only editor features open), native project search (remaining provider/large-file gaps open), native markdown compose (remaining markdown gaps open); dashboard/live_grep/welcome are partial equivalents whose missing user features stay open. `docs/plugins/bundled.md`. |
 | Terminal | PTY terminal panes and utility dock, terminal tabs (≤16) with strip/rename/per-tab close_on_exit/persistence/reordering, live/scrollback modes, keyboard capture, OSC 7 paths, launch records + agent resume + Run Agent picker, restart, shell override, selection/copy, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover file:line:col links, pass_ctrl_v_without_text, ConPTY, remote SSH terminal, opt-in OSC 52 read/paste, Live restore with styled screen snapshot/dock modes | **partial** (slices A+B; per-workspace tabs; remote terminal; phase-2 reorder+OSC52; r15 Live restore; r17 styled snapshot/modes) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved,launch,session_backend,osc52}.go`, `internal/tui/dock/{tabs,discover,live_restore,screen_snapshot}.go`, `internal/app/{workspace_capture,clipboard_osc52,agent_discover}.go`, `internal/restore/{terminal,session}.go`, `authority/`, `docs/terminal.md` | R15 Live restore (live flag, revive-on-first-dive, transcript). Round 17: version-1 terminal record additive bounded styled visible-screen snapshot (≤200×512 cells; rune/fg/bg/bold/underline/reverse; exact-tail match; corrupt ignored; old records unaffected), restored/exited tabs read-only Scrollback (restored)/frozen modes, Ctrl+Space pager/live toggle, revived tab paints snapshot above new shell output, snapshot updates after revive; tab identity/order/active/revive-once/restore_live unchanged. Tests dock screen_snapshot/live_restore. OPEN: Fresh full backing-file bytes/cursor/alternate-screen/OSC/hyperlinks, only visible screen styled (older history text-only), revive needs explicit dive, remote restores no terminal/layout state, per-tab splits/kitty/reflow/report-split; R13-15/R13-6. |
 | Git surfaces | review diff (stage/unstage/discard/comments/export), range/stash reviews, git log with live diff, git blame panel with history, live diff baselines, diff chunk nav, git grep, git explorer, git find file, statusbar branch, gutter marks | **partial** | `gitstate/`, `plugin/bundled/plugins/git_gutter`, `git_statusbar`, `git_find_file`, `git_blame`, `merge_conflict`, `internal/tui/git.go`; Fresh `docs/features/git.md` | Missing: Review Diff (/range/stash), Git Log, Live Diff, Git Grep, Git Explorer, blame panel/history stepping (gvim has a reduced inline blame), merge view (reduced to in-buffer resolution), diff hunk sources beyond the HEAD gutter, review comments/export. Implemented: gutter hunk marks + next/prev change, branch statusbar, git find file, merge-conflict resolution, compare-as-difftool. |
-| Session, restore, daemon | session restore/save, hot exit, crash recovery, ephemeral-file patterns, split-layout persistence, --restore/--no-restore/--simple, daemon mode with attach/detach/open-file forwarding, workspace registry v2 with authority_spec, daemon-hosted remote authority/jump box, remote daemon-workspace session restore, checked exit durability, daemon host marks, extract/close confirmation | **partial** (R2; daemon r12; #19a r13; phase-2; split persistence; registry v2 r16; jump box r17; remote session restore r18) | `internal/app/{session_plan,session_open,hotexit,daemon_runtime,daemon_hosts,daemon_authority,workspace_host,workspace_capture,workspace_exit,remote_watch,remote_session}.go`, `internal/daemon/{workspaces,workspace_protocol}.go`, `internal/cli/{root,args}.go`, `internal/tui/{model,workspace_host,split_state,split/persist}.go`, `session/{session,split}.go`, `internal/restore/{session,split}.go`, `docs/architecture.md` §8/§8.1 | R12–17 as before (daemon MVP/registry/lifecycle/positional/dormant open/exit durability/split marks/co-tenant/jump box). Round 18: daemon-hosted remote workspaces capture+restore their session across daemon restart (tabs/open files/unsaved stashes/cursor/pane layout/explorer-sidebar state; authority reconnect before reopen; vanished file keeps stash+notice; failed reconnect restores nothing and `keepSavedSession` skips capture so saved session survives; detach/reattach live state; co-tenant isolation; direct remote no session). Tests remote_session_restore. OPEN: remote conflict detection beyond normal stash/mtime, restored terminal transcript dead/no process re-run, plugin fs/proc local OS, remote trust local store, per-file ownership jump-box vs direct, remote tabs across restart now landed; one attached client/no auto_attach/eviction/workspace CLI; real SSH UNTESTED (R13-19). |
-| Workspaces, windows, orchestrator, agents | orchestration dock, multiple workspaces per daemon, switcher, New Workspace, Run Agent, agent discovery/resume, live sessions, extract tab to workspace, close confirmation, co-tenant workspaces, jump-box remote workspaces, shared daemon plugin runtime, extract variants | **partial** (r13 #19a/#20b; phase-2; split persistence; registry v2 r16; jump box r17; shared runtime/session restore/extract variants r18) | `internal/daemon/{workspaces,workspace_protocol}.go`, `internal/app/{workspace_host,workspace_capture,workspace_exit,workspace_extract,daemon_authority,remote_session,agent_discover,terminal_agents}.go`, `internal/tui/{workspace_host,workspace_ui,workspace_tags,agent_discover,agent_picker}.go`, `internal/tui/dock/{tabs,discover}.go`, `internal/agentdiscover/`, `docs/architecture.md` §8.1 | R13–17 as before. Round 18: one editor-wide plugin runtime for all LOCAL daemon workspaces with OS/host mux and state-namespace switch, editor-wide registration carry, workspace-scoped chrome (remote/authority-spec excluded); remote daemon session restore across restart; extract variants — into existing same-root workspace (target acceptance before source close), terminal tab saved-state migration (no PTY hand-off, target revives on first dive), multi-select file tabs to one co-tenant (gvim extensions: Fresh only has extract-to-new-workspace); switch-before-close data safety. OPEN: #19b shared buffers/daemon open-path map, per-workspace project plugin config for shared runtime, full Fresh window-scope chrome/focus announcer/UI-wait retargeting, remote workspaces not shared, eviction/multi-client/auto_attach/workspace CLI, terminal tabs in multi-select/mixed selection, no drag/drop/cross-workspace undo, large-file overlay extract refused, all-tabs-of-file (no Fresh action; multi-select substitute), orchestrator/live_sessions/agent_* ports (R13-1/R13-14/R13-24). |
-| Remote authority | SSH editing (scp/URL forms), remote file system, processes/terminals, remote LSP, watch, quick-open finder, project search/Git Grep/Replace with scopes+preview, git marks, explorer with writes/ignore/watch, remote env, SSH keepalive/auth/config/ProxyJump/agent forwarding, jump box, editable windowed remote large files with bounded save, FileMutations/ReadRange, reconnect/trust | **partial** (r12 slot/SSH; r13 I/O+LSP; phase-2 watch; r14 finder/search; r15 explorer/env/auth; r16 replace/git/preview; r17 jump-box/writes/read-only large-file/SSH config; r18 saved large-file, ignore/watch, search scopes/preview, remote session restore) | `authority/{authority,local,ssh,ssh_files,ssh_config,spec}.go` + auth/keepalive/config/mutations/filerange tests, `finder/{finder,remote}.go`, `internal/app/{authority_app,remote_editor,remote_lsp,remote_watch,remote_finder,remote_explorer,remote_explorer_ops,remote_search,remote_replace,remote_git,remote_preview,remote_env,remote_daemon,remote_ignore,remote_session}.go`, `document/{remote_large,large_save}.go`, `buffer/large_window.go`, `internal/tui/{authority_status,remote_tree,authority_retry,palette/preview}.go`, `docs/authority.md`/`docs/architecture.md` §8.1 | R12–17 as before. Round 18: remote large files are EDITABLE via overlay; save merges overlay + untouched head/tail through ReadRange into a bounded (64 MiB) buffer then one atomic whole-file write (remote stat/CheckDisk changed error; fresh windowed source rebased after save; Fresh host-patched recipe for >memory is later); remote .gitignore + polled directory watching (gvim extension) filter explorer/finder and refresh listings off Update; remote search current-file/open-buffers scopes + preview column (authority snapshot/head ≤256 KiB, truncated/stale/disconnected); daemon-hosted remote session restore. OPEN: >64 MiB save/Fresh host recipe, preview plain-text/head-only >256 KiB, ignore/candidate filtering out of search list, explorer copy/paste/drag/undo/check-to-write race/watch latency/rename approximation/Windows paths, remote hot-exit, ~user/special/sudo, reconnect/terminal respawn, per-remote trust store, devcontainer/k8s, known_hosts accept-new/OTP/keyring, saved-session conflict detection, restored terminal dead/plugin fs-proc local/ownership, real SSH UNTESTED (R13-3/R13-17/R13-19/R13-21/R13-22/R13-23). |
+| Session, restore, daemon | session restore/save, hot exit, crash recovery, remote hot-exit staging/recovery, split-layout persistence, --restore/--no-restore/--simple, daemon mode with attach/detach/open-file forwarding, multi-client attach + auto-attach, workspace registry v2 with authority_spec, daemon-hosted remote authority/jump box, remote daemon-workspace session restore, remote trust record/reconnect resilience, checked exit durability, daemon host marks, extract/close confirmation | **partial** (R2; daemon r12; #19a r13; phase-2; split persistence; registry v2 r16; jump box r17; remote session restore r18; r19 remote hot-exit/trust/reconnect + multi-client/auto-attach) | `internal/app/{session_plan,session_open,hotexit,daemon_runtime,daemon_hosts,daemon_authority,workspace_host,workspace_capture,workspace_exit,remote_watch,remote_session,remote_recovery}.go`, `internal/daemon/{workspaces,workspace_protocol,server,client}.go`, `internal/cli/{root,args}.go`, `internal/tui/{model,workspace_host,split_state,split/persist}.go`, `session/{session,split}.go`, `internal/restore/{session,split}.go`, `trust/`, `docs/architecture.md` §8/§8.1 | R12–18 as before (MVP/registry/open-file/durability/split/host marks/co-tenant/jump box/remote session restore). Round 19: remote hot-exit/recovery staged locally by remote target (clean exit clears; recovery through authority after FileAccess; local staging divergence), remote trust record keyed user@host[:port]:workspace root (survives restart/reconnect), reconnect refreshes caches/work + one notice; multi-client attach (broadcast frames, any-client input, smallest size wins, detach one keeps session, slow client bounded detach, incompatible version rejected before state change), auto_attach user knob default OFF (Fresh on; bare same-root join notice, no daemon start/remote auto-attach). OPEN: no fork/daemonize, Windows named pipes, eviction/workspace CLI, auto_attach default/named-daemon nuances differ Fresh, remote marker scan not wired, real SSH UNTESTED (R12-1/R13-1/R13-3/R13-19). |
+| Workspaces, windows, orchestrator, agents | orchestration dock, multiple workspaces per daemon, multi-client attach + auto-attach, switcher, New Workspace, Run Agent, agent discovery/resume, live sessions, extract tab/terminal/multi-select variants, close confirmation, co-tenant workspaces, jump-box remote workspaces, shared daemon plugin runtime + full window-scope chrome/focus announcer, per-workspace project plugin config/waits | **partial** (r13 #19a/#20b; phase-2; split persistence; registry v2 r16; jump box r17; shared runtime/session restore/extract variants r18; r19 full window scope/config/waits/multi-client/auto-attach) | `internal/daemon/{workspaces,workspace_protocol}.go`, `internal/app/{workspace_host,workspace_capture,workspace_exit,workspace_extract,daemon_authority,remote_session,agent_discover,terminal_agents}.go`, `internal/tui/{workspace_host,workspace_ui,workspace_tags,plugin_shared,agent_discover,agent_picker}.go`, `internal/tui/dock/{tabs,discover}.go`, `internal/pluginhost/`, `internal/agentdiscover/`, `docs/architecture.md` §8.1 | R13–18 as before. Round 19: per-mount chrome scope editor/window/buffer + focus announcer (active_window_changed/focus_gained, split/buffer ids; per-workspace ids not globally stable residual); per-workspace project plugin config on activate (only changed plugins reload, project layer never writes user toggles); cross-workspace plugin waits stay/resume/cancel in owning workspace; multi-client + auto_attach. OPEN: cross-workspace plugin id namespacing, remote/authority workspaces own runtime, hard-kill after switch can lose last debounce window, #19b shared buffers/open-path map, per-workspace project config edge cases, eviction/workspace CLI, auto_attach per-root/named-daemon differences, extract terminal-in-multi/mixed selection, drag/drop/cross-workspace undo, large-file overlay extract, all-tabs-of-file substitute, orchestrator/live_sessions/agent_* ports (R13-1/R13-14/R13-24). |
+| Remote authority | SSH editing (scp/URL forms), remote file system, processes/terminals, plugin fs/proc via authority, remote LSP, watch, finder/search, replace, explorer writes/ignore/watch/clipboard, env, SSH auth/config/ProxyJump/agent forwarding, jump box, editable windowed remote large-file with bounded save, remote hot-exit/trust/reconnect, remote saved-session restore, FileMutations/ReadRange | **partial** (r12 slot/SSH; r13 I/O+LSP; r14 finder/search; r15 explorer/env/auth; r16 replace/git/preview; r17 jump-box/writes/read-only large-file/SSH config; r18 editable save/ignore/watch/search scopes/session restore; r19 plugin OS authority/hot-exit/trust/reconnect/clipboard) | `authority/{authority,local,ssh,ssh_files,ssh_config,spec}.go`, `finder/{finder,remote}.go`, `internal/app/{authority_app,remote_editor,remote_lsp,remote_watch,remote_finder,remote_explorer,remote_explorer_ops,remote_explorer_copy,remote_search,remote_replace,remote_git,remote_preview,remote_env,remote_daemon,remote_ignore,remote_session,remote_recovery}.go`, `internal/pluginhost/` (authority OS), `document/{remote_large,large_save}.go`, `buffer/large_window.go`, `internal/tui/{authority_status,remote_tree,authority_retry,palette/preview}.go`, `trust/`, `docs/authority.md`/`docs/architecture.md` §8.1 | R12–18 as before. Round 19: plugin fs/proc routed through workspace authority (files/mutations/watch/processes, trust gate/env/cwd; LookPath/Dirs/Getenv/Now documented local; copy/realpath/walk unsupported; watch degrade notice), remote hot-exit staging + authority recovery, remote trust record keyed remote target, reconnect cache refresh/one notice, explorer clipboard cut/copy/paste/duplicate. OPEN: >64 MiB save/Fresh host recipe, search preview plain/head-only/ignore filtering, explorer drag/move/undo/whole-subtree transaction/mode-mtime-hardlink-xattr/existence race/overwrite prompt/watch latency, remote marker scan, hot-exit local-staging divergence, real SSH UNTESTED (R13-3/R13-17/R13-19/R13-21/R13-22/R13-23). |
 | Workspace trust | per-folder Restricted/Trusted/Blocked, marker detection, open-time prompt, status pill, per-spawn executable gate, config-layer gating, env activation gating | **implemented** (r1–r3 model/prompt/markers; r12 env gate; r13 spawn gate) | `trust/{trust,markers,env,gate}.go`, `internal/app/{trust,config_trust}.go`, `internal/tui/trust*.go`, `authority/local.go` gate hook + authoritytest, `internal/pluginhost/pluginos*.go`, `lsp/manager` gate, `internal/agentdiscover` runner gate, `docs/trust.md` | R13 closed the process-spawn gap: `trust.DecideSpawn` runs before every launch in the local authority (Run/Start/dock Launch: git/find/shell/formatter/terminal), the plugin OS (gvim.proc.run/spawn), the LSP manager (auto/manual/universal) and discovery; it resolves bare names through the child's effective PATH, executes the resolved absolute path, checks explicit paths lexically+symlinks, checks the shell `-c` first token, and refuses with a typed error naming level/spelling/help; Blocked refuses all, Restricted/Undecided refuse project-internal executables; the gate decides and does not kill running processes. Open (R13-4): only the shell first token is inspected (compound/quoted/variable-built commands not parsed), Windows PATHEXT/drive-case gaps, environment injected below the three seams unresolved, no kill on demote, and the remote path keeps the coarse app rule pending a remote trust store. |
 | Markdown | syntax highlighting, markdown_source smart list editing, page view/compose, tables (wrapped cells), code-fence frames (continuation rails, container framing), dual view, heading conceal/scrollbar marks, page-view persistence, Contents section | **partial** (R1 Contents; R4 smart editing; R6 core; R7 fences/tables; R8 dual/borders; R9–11 residual slices) | `syntax/{markdown,markdown_inline,markdown_markers,markdown_fences,markdown_tables}.go`, `editor/markdown.go`, `internal/tui/editorpane/{compose,compose_layout,compose_fence,compose_table,compose_setext,pageview}.go` + `internal/tui/{pageview,dual}.go`, `internal/tui/sidebar/contents.go`, `session/pageview.go`, `docs/markdown.md`; Fresh `plugins/markdown_{toc,source,compose}.ts` | Round 9–10 landed wrapped cells, escaped pipes, container fallback, fence continuation rails, heading marks, page-view persistence, quote-container fences, setext conceal, task/image conceal, inline-HTML literal decision, mapped-decor no-paint, horizontal clamp, dual line-anchor/one-dual policy; round 11 verified composed plugin-overlay pipeline ordering and recorded the wrapped-cell selection decision (hook rows have no source line/row-source map) and tightened the dual/per-split wording. Remaining R10-2: free per-split view mode, dual split persistence, native Markdown menu row, exact byte dual anchors (approximation recorded), sidebar per-section widths/drag order. |
 | Diagnostics surfaces | gutter marks, underline, inline end-of-line text, diagnostics panel, quickfix list, error navigation, hover fusion, pull/workspace diagnostics, progress | **partial** (rounds 4–10) | `internal/tui/{diag,diagpanel,lsp}.go`, `internal/tui/editorpane/{decor,inline_diag,inline_hints}.go`, `commands/lsp_commands.go`, `docs/lsp.md`; Fresh `docs/features/lsp.md` | Gutter dots, underline, inline end-of-line text with staleness, status counts, F8 jumps and hover diagnostics exist. Round 6 added the native Diagnostics panel (file→severity grouping, counts, jump/scroll/focus, progress/empty) and the Diagnostics List quickfix; round 7 workspace diagnostics for unopened files (`(not open)` rows) and `$/progress`; round 9 inline-hint tier 2; round 10 cancellation (pullSet/`$/cancelRequest`) and Linux process limits. Remaining: no built-in universal server (deliberate), per-OS process limits caveat, capability-gated workspace diagnostics (publish-only servers report their own set), plugin `DiagnosticInfo` carries no code (native ones do). |
 | Scripting and CLI automation | `--cmd script`, `--cmd daemon open-file --wait`, stdin programs, `init.ts` startup script, agent channels, watch mode, CLI help for the API | **partial** (r11 stdin; r12 daemon flags+remote; r13 workspace CLI/remote) | `internal/cli/{root,args}.go`, `internal/app/{stdin,daemon_runtime,workspace_host,remote_editor,remote_lsp}.go`, `authority/spec.go`, `internal/tui.RunWithInput/RunWithIO`, `plugin_init.go`; Fresh `docs/features/scripting.md` | gvim has `init.lua`/Lua API, stdin-as-a-buffer, trust-gated `gvim config show/paths`, `gvim grammar`, foreground daemon/attach flags, workspace frames (workspace_list/select/new/close/rename; `Hello.Workspace` parsed but ignored), and remote `user@host:path`/`ssh://` launches with remote editor/LSP routing. Missing (open): Fresh's external `--cmd` script channel, `open-file --wait`, watch/agent capability, forked daemon/auto_attach, multiple clients, workspace CLI management. |
-| Internationalization | 15 locales, locale detection/config, plugin i18n, translated command/menu/settings/status/dialog/prompt/picker/chrome strings, translation workflow | **partial** (r11 foundation; r12 catalogues/import/validation; r13 extraction 2; phase 2/r14/r15; r16 picker chrome; r17 remainder 2; r18 remainder 3 + boundary refresh) | `i18n/` (`catalogue.go`, `locales/*.json` embedded, `fresh_map.json`), `tools/{i18n_import.py,i18n_check.sh}`, `commands/gen` + `tools/gen_menus.py` key emission, `internal/tui/*i18n*`, `internal/app/settings_i18n.go`, `docs/i18n.md` | Round-18 extraction: settings action notices wired, agent-discovery constants locale-live/restart boundary documented, LSP picker details, remaining palette chrome/footers, prompt validation, settings value labels, remote explorer write strings, remote large-file status; docs/i18n.md boundary inventory refreshed. Metrics: en 944 keys, every non-English locale 569; all-locale key+value 563,791 B (551 KiB), embedded JSON 652,944 B (638 KiB; cap 640 KiB), catalogue heap en 105 KiB / de 82 KiB / both 187 KiB; i18n_check green. OPEN (R13-5): rows without Fresh keys, structured field/row schema names, some keybinding help/plugin-manager edges; `terminal.restore_live` config-only; self-update commands absent. |
+| Internationalization | 15 locales, locale detection/config, plugin i18n, translated command/menu/settings/status/dialog/prompt/picker/chrome strings, translation workflow | **partial** (r11 foundation; r12 catalogues/import/validation; r13 extraction 2; phase 2/r14/r15; r16 picker chrome; r17 remainder 2; r18 remainder 3; r19 remainder 4) | `i18n/` (`catalogue.go`, `locales/*.json` embedded, `fresh_map.json`), `tools/{i18n_import.py,i18n_check.sh}`, `commands/gen` + `tools/gen_menus.py` key emission, `internal/tui/*i18n*`, `internal/app/settings_i18n.go`, `docs/i18n.md` | Round 19: settings action notice keys wired; remote large-file status, remaining prompt validation, settings value labels, palette chrome/picker footers, deliberately-English constants and gvim-only keys reviewed/extracted; docs inventory/budgets refreshed (cap 640 KiB). Metrics: en 972 keys, every non-English 569; all-locale key+value 565,760 B (553 KiB), embedded JSON 655,193 B (≈640 KiB), heap en 112 KiB / de 82 KiB / both 195 KiB; i18n_check green. OPEN (R13-5): rows without Fresh keys, structured field/row schema names, some keybinding help/plugin-manager edges; `terminal.restore_live` config-only; self-update commands absent. |
 | Update, packaging, telemetry | update check + status-bar `{update}` element, in-editor self-update prompt, Update fresh/Show update output commands, update terminal buffer, telemetry toggle, packaging/installers, GUI/desktop, browser --web, WASM | **partial — update check + clickable indicator + Check for Updates/Show Update Output landed; self-update/install/prompt and update terminal buffer open (R13-12)** | `updatecheck/updatecheck.go`, `config/update.go`, `internal/app/update_check.go`, `internal/tui/{update_status,update_commands}.go`, `commands/update_commands.go`, `internal/tui/frame/frame.go`, `docs/settings.md`/`docs/ui.md`; Fresh `docs/features/update.md` | Landed (r15/r16): config `check_for_updates` default true (user layer; project layer refused), gvim extension `update_check_url`/`GVIM_RELEASES_URL`, https or loopback-http validation, 8 s/64 KiB, daily stamp, no-version skip, silent failure, tea-command check; `{update}` paints `Update: vX.Y.Z` and is clickable to Update details (feed/current/latest/last-run/release page); palette 240 gains Check for Updates (forced check ignoring debounce) and Show Update Output (details list). Open: self-update download/install/prompt, Fresh's "Update fresh" self-update command (gvim's rows only check/show), update terminal buffer (gvim shows a details list, not Fresh's terminal buffer), release-page click starts no install. Telemetry/GUI/browser --web/WASM/packaging remain objective boundaries (§8). |
 | Platform input and OS integration | CSI-u/modifier disambiguation, AltGr/CapsLock/Shift quirks, key release, GPM mouse on Linux console, suspend, stdin streaming, ConPTY, OSC 52 clipboard (write + opt-in read), window title, chrome/plugin focus events | **partial** (stdin, ConPTY compile-verified, OSC52 write+read, reflow; round-15 input edges) | `internal/terminal/`, Bubble Tea v2 input, `internal/tui/{clip,input_edges,plugin_keys}.go`, `internal/app/{stdin,clipboard_osc52}.go`, `config/clipboard.go`, `internal/tui.RunWithInput/RunWithIO`, `docs/keybindings.md`/`docs/plugins/events.md` | Legacy normalization landed: uppercase-without-Shift infers Shift (Ctrl unaffected), CapsLock/lock bits ignored, named keys keep reported Shift; AltGr-as-Ctrl+Alt with one printable rune is text input (bound chord still wins); plugin events `chrome_focus_changed` (editor/explorer/dock/section; tabs gvim extension; no menu/overlay/initial) and `key_release` (same shape as capture; only backends reporting `tea.KeyReleaseMsg`, e.g. Windows console; legacy silent, no kitty flags requested/faked) — tests input_edges_test. Open TUI gaps: GPM console mouse, kitty keyboard, live-screen reflow, legacy key-release unavailable, terminal-window focus only for remote reconnect, ConPTY/real-host OSC52 unverified. |
 
@@ -1900,7 +1985,7 @@ for parity status.
     nothing); the palette gains Detach under --daemon; a live per-root daemon makes a bare/
     session launch refuse with an attach hint (file/--simple/--diff/stdin launches stay direct);
     unencrypted open-file frames are forwarded. Recorded MVP reductions: no fork (foreground
-    daemon), no `auto_attach` start-if-absent (refusal policy instead), one attached client, a
+    daemon), no daemon auto-start on launch (refusal policy), r12 single-client attach (r19 multi-client/auto_attach landed), a
     single workspace until #19, Windows named pipes later. `docs/architecture.md` §8; R12-1.
 72. **i18n is a foundation, not a translation.** Round 11 landed the package/resolution/
     catalogues/plurals/Settings row/live locale switching and a first extraction slice; only
@@ -1973,21 +2058,22 @@ for parity status.
     Daemon mode itself is TUI and in scope; daemon packaging is a distribution target. §8 records
     the boundary and the genuine-equivalence policy; nothing else is closed by it.
 82. **The daemon/workspace MVP has open reductions (no closure).** Round-12 daemon: foreground
-    (no fork/daemonize), no `auto_attach` start-if-absent, one attached client, Windows named pipes
-    later. Phase 2 added positional/dormant open-file routing, checked exit durability/late-writer
-    isolation (limits below), daemon host marks that refuse every direct launch while a daemon
-    hosts the workspace (R13-10 closed; deliberate divergence from Fresh's shared-buffer
-    ownership), split persistence and (round 15) extract-tab/close confirmation: extract captures
-    the tab incl. unsaved text, roots the workspace at the file's folder (registry v1 = one
-    workspace per root), refuses current/registered roots without losing the tab, and a close
-    with running terminals lists them/agents and reports what was stopped. Still OPEN #19b:
-    Fresh co-tenant workspaces over one root, extract into an existing workspace, terminal-tab/
-    large-file/multiple extraction, shared buffers, per-workspace plugin state, eviction/memory,
-    multi-client, auto_attach, workspace CLI, registry v1 `authority_spec`/initial-launch fields.
-    Exit limits: an in-flight newest capture at the deadline is left to finish and the process
-    does not wait after the deadline, so the session file may keep the previous snapshot; the
-    crash-recovery copy is the durable last resort and the error names it; kill between snapshot
-    and write loses that last capture (previous file intact). `docs/architecture.md` §8/§8.1.
+    (no fork/daemonize), positional/dormant open-file routing, checked exit durability/late-writer
+    limits, daemon host marks that refuse every direct launch while a daemon hosts the workspace
+    (R13-10 closed; deliberate divergence from Fresh's shared-buffer ownership), split persistence,
+    extract/close confirmation, registry v2/co-tenants, jump box, remote session restore, and round-19
+    multi-client attach + auto_attach. Multi-client: several attach clients share one session,
+    server frames broadcast to all, input from any client reaches the program, the smallest attached
+    client size wins, detach/drop removes only that client, slow client detached after one bounded
+    write, unknown frame drops only that client, incompatible protocol version rejected before any
+    state change. auto_attach is a top-level user knob default OFF (Fresh defaults on): a bare
+    same-root launch joins a running daemon with a notice, never starts a daemon, never applies to
+    remote-target launches (explicit -a required), and per-root named-daemon ambiguity still refuses.
+    Still OPEN: no fork/daemonize, Windows named pipes later, eviction/workspace CLI, auto_attach
+    default/named-daemon nuances differ Fresh, remote marker scan, remote hot-exit local-staging
+    divergence, plugin id namespacing, shared buffers; exit limits unchanged (deadline leaves newest
+    in-flight capture to finish; kill between snapshot/write loses that capture, previous file
+    intact). `docs/architecture.md` §8/§8.1.
 83. **Terminal tabs are per-workspace and reorderable; Live restore is landed partially.** The dock
     runs at most 16 single-session tabs (strip/active/exited/click-select, Ctrl+PgUp/PgDn,
     palette rows, per-tab close_on_exit), Fresh titles; `terminal.json` has additive tabs/
@@ -2018,42 +2104,44 @@ for parity status.
     workspace-integrated session management (orchestrator), live_sessions, remote agent launches,
     git-worktree creation in the dialog, screen/zellij/remote scanning, and any identity beyond
     process-name matching. `docs/terminal.md`; R12-3/R13-2.
-85. **Remote authority has landed I/O, LSP, watch, search/replace/explorer writes, jump box,**
-    **large-file editing, ignore/watch and saved-session restore; residual remote work is open.**
-    R12–17 landed the slot/SSH/helper FS/editor/LSP/watch/finder/search/replace/git/preview/env/
-    auth/jump-box/explorer writes/read-only windowed large-file/SSH config. Round 18 adds: remote
-    large files editable via overlay with a bounded (64 MiB) merged atomic save, remote .gitignore
-    filtering + polled directory watching (gvim extension), current-file/open-buffers search scopes
-    + remote preview column, and daemon-hosted remote session restore across restart. OPEN: >64 MiB
-    save/Fresh host-patched recipe, preview plain text/head-only >256 KiB, ignore/candidate filtering
-    out of the search list, explorer copy/paste/drag/undo/check-to-write race/watch latency/rename
-    approximation/Windows paths, remote hot-exit, ~user/special/sudo, reconnect/terminal respawn,
-    per-remote trust store, devcontainer/k8s, known_hosts accept-new/OTP/keyring, saved-session
-    conflict detection, restored terminal dead/plugin fs-proc local/ownership, real SSH UNTESTED
-    (R13-3/R13-17/R13-19/R13-21/R13-22/R13-23).
-86. **i18n extraction is landed through round 18; a smaller English boundary stays open.** en is
-    944 keys, every non-English locale 569; all-locale key+value 563,791 B (551 KiB), embedded JSON
-    652,944 B (638 KiB; cap 640 KiB), catalogue heap en 105 KiB / de 82 KiB / both 187 KiB;
-    i18n_check green. Round 18 extracted settings action notices (wired), agent-discovery locale/
-    restart boundary, LSP picker details, remaining palette chrome/footers, prompt validation,
-    settings values, remote explorer write strings and remote large-file status; docs/i18n.md
-    boundary inventory refreshed. OPEN: rows without Fresh keys, structured field/row schema names,
-    some keybinding help/plugin-manager edges; `terminal.restore_live` config-only; self-update
-    commands absent. R13-5.
-87. **Workspace/lifecycle: registry v2 + shared daemon runtime + remote session restore + extract**
-    **variants; #19b still open.** Rounds 16–17 landed registry v2 co-tenants/authority_spec, per-
-    workspace plugin state and jump box. Round 18 adds: one editor-wide plugin runtime for all LOCAL
-    daemon workspaces with OS/host mux, switch state-namespace rebind and editor-wide registration
-    carry (workspace chrome stays per model; remote workspaces excluded); daemon-hosted remote
-    session restore across restart with `keepSavedSession` protection; and extract variants (into an
-    existing same-root workspace, terminal saved-state migration, multi-select file tabs) as gvim
-    extensions (Fresh only has extract-to-new-workspace). OPEN #19b: shared buffers/daemon open-path
-    map, per-workspace project plugin config for the shared runtime, full Fresh window-scope chrome/
-    focus announcer and cross-workspace plugin-UI wait retargeting, remote workspaces not shared,
-    eviction/multi-client/auto_attach/workspace CLI, terminal tabs in multi-select/mixed selection,
-    no drag/drop/cross-workspace undo, large-file overlay extraction refused, all-tabs-of-file (no
-    Fresh action; multi-select substitute), orchestrator/live_sessions/agent_* ports (R13-1/R13-14/
-    R13-24).
+85. **Remote authority has landed I/O, LSP, watch, search/replace, explorer writes/clipboard,**
+    **plugin authority OS, jump box, large-file editing, hot-exit/trust/reconnect and saved-session**
+    **restore; residual remote work is open.** R12–18 landed slot/SSH/helper FS/editor/LSP/watch/
+    finder/search/replace/git/preview/env/auth/jump-box/explorer writes/ignore/watch/large-file
+    editing/session restore. Round 19 adds: plugin gvim.fs/gvim.proc through the workspace authority
+    (trust gate/env/cwd; local-only LookPath/Dirs/Getenv/Now), remote hot-exit staged locally +
+    authority recovery, remote trust record keyed user@host[:port]:workspace root, reconnect cache
+    refresh/one notice, and explorer clipboard cut/copy/paste/duplicate (bounds/atomic/refusals/
+    partial-copy reporting). OPEN: >64 MiB save/Fresh host recipe, search preview plain/head-only/
+    ignore filtering, explorer drag/move/undo/whole-subtree transaction/mode-mtime-hardlink-xattr/
+    existence race/overwrite prompt/watch latency, remote marker scan, hot-exit local-staging
+    divergence, remote hot-exit status, ~user/special/sudo, reconnect/terminal respawn, per-remote
+    trust store edge cases, devcontainer/k8s, SSH known_hosts accept-new/OTP/keyring, saved-session
+    conflict detection, restored terminal dead/plugin FS local? now authority, ownership, real SSH
+    UNTESTED (R13-3/R13-17/R13-19/R13-21/R13-22/R13-23).
+86. **i18n extraction is landed through round 19; a remaining English boundary stays open.** en is
+    972 keys, every non-English locale 569; all-locale key+value 565,760 B (553 KiB), embedded JSON
+    655,193 B (≈640 KiB; cap 640 KiB), catalogue heap en 112 KiB / de 82 KiB / both 195 KiB;
+    i18n_check green. Round 19 wired settings action notice keys and reviewed/extracted remote large-
+    file status, remaining prompt validation, settings values, palette chrome/picker footers,
+    deliberately-English constants and gvim-only keys; docs inventory/budgets refreshed. OPEN: rows
+    without Fresh keys, structured field/row schema names, some keybinding help/plugin-manager
+    edges; `terminal.restore_live` config-only; self-update commands absent. R13-5.
+87. **Workspace/lifecycle: registry v2 + shared runtime/window scope + remote session restore +**
+    **extract variants + multi-client/auto-attach; #19b still open.** Rounds 16–18 landed registry v2
+    co-tenants/authority_spec, per-workspace plugin state, jump box, shared runtime for LOCAL daemon
+    workspaces, remote session restore and extract variants. Round 19 adds: full per-mount chrome
+    scope editor/window/buffer + focus announcer (active_window_changed/focus_gained, split/buffer
+    ids), per-workspace project plugin config applied on activate (only changed plugins reload;
+    project layer never writes editor-wide toggles), cross-workspace plugin waits stay/resume in
+    owning workspace and cancel on close, daemon multi-client attach + auto_attach (default off;
+    smallest-client size; incompatible version rejected). OPEN #19b: cross-workspace plugin id
+    namespacing (ids per workspace), remote/authority workspaces own runtime, hard kill after switch
+    may lose last debounce, shared buffers/daemon open-path map, eviction/multi-client? landed but
+    eviction/workspace CLI open, per-workspace project config edge cases, auto_attach default/named-
+    daemon nuances differ Fresh, extract terminal-in-multi/mixed selection, drag/drop/cross-
+    workspace undo, large-file overlay extract, all-tabs-of-file substitute, orchestrator/live_
+    sessions/agent_* ports (R13-1/R13-14/R13-24).
 88. **Reference and workspace state are separate; the round-15 extract slice does not add sharing**
     **(Fresh's shared-buffer/co-tenant model stays open).** Registry stores identity + editor
     layout per workspace and the per-workspace session directory stores stashes/terminal record;
@@ -2106,21 +2194,21 @@ for parity status.
 94. **TUI scope boundary and genuine-equivalence policy.** Fresh's TUI functionality is the goal;
     non-TUI surfaces (GUI/desktop, browser --web, WASM, packaging, telemetry, self-update install)
     are objective boundaries in §8, not backlog gaps. Explicit gvim extensions beyond Fresh are
-    allowed and listed in §8: round-18 remote `.gitignore`/directory watching and extract variants
-    (existing workspace/terminal saved-state/multi-select) are extensions, not Fresh gaps. After
-    round 18 OPEN TUI work includes: full Fresh window-scope chrome/focus announcer + remote/
-    authority-spec runtime sharing and cross-workspace UI wait retargeting (R13-24); remote large-
-    file >64 MiB save/Fresh host-patched recipe (R13-22); remote explorer copy/paste/drag/undo/
-    check-to-write race/watch latency/rename approximation/Windows paths (R13-13/R13-21); remote
-    data-surface residuals (R13-23); remote search preview plain-text/head-only and ignore filtering
-    (R13-11); remote replace no rollback/undo (R13-11); remote authority/session/plugin FS/trust/
-    ownership residuals (R13-3/R13-19); SSH known_hosts accept-new/host-key algorithms/OTP/keyring/
-    real host (R13-17); remote env (R13-18); completion residuals (R13-7); shared buffers/extract
+    allowed and listed in §8: remote .gitignore/watch and extract variants are extensions, not Fresh
+    gaps. After round 19 OPEN TUI work includes: cross-workspace plugin id namespacing and remote/
+    authority workspace runtime sharing (R13-24); remote large-file >64 MiB save/Fresh host-patched
+    recipe (R13-22); remote explorer drag/move/undo/whole-subtree transaction/mode-mtime-hardlink-
+    xattr/existence race/overwrite prompt/watch latency/Windows paths (R13-13/R13-21); remote
+    search preview plain-text/head-only/ignore filtering (R13-11/R13-23); remote replace no
+    rollback/undo (R13-11); remote authority/session conflict detection/plugin marker scan/
+    ownership (R13-3/R13-19); SSH known_hosts accept-new/host-key algorithms/OTP/keyring/real host
+    (R13-17); remote env (R13-18); completion residual UX (R13-7); shared buffers and extract
     terminal-in-multi/mixed selection (R13-14/R13-1); live-restore full backing file/remote state
-    (R13-15); input edges (R13-16); diff_nav (R13-9); update self-update/terminal buffer (R13-12);
-    URL packaged repo/marketplace (R13-20); plugin ports/composite/gallery; theme background/drag;
-    multi-client/eviction/auto_attach; universal server; Windows ConPTY. Native equivalents only
-    where genuinely user-facing with residual gaps; every other incomplete TUI feature stays open.
+    (R13-15); input GPM/kitty/legacy release/reflow (R13-16/R13-6); diff_nav (R13-9); update self-
+    update/terminal buffer (R13-12); URL packaged repo/marketplace (R13-20); plugin ports/composite/
+    gallery; theme background/drag; auto_attach default/named-daemon differences; universal server;
+    Windows ConPTY. Native equivalents only where genuinely user-facing with residual gaps; every
+    other incomplete TUI feature stays open.
 95. **LSP completion safety/auto-popup/multi-buffer/trigger/live-filter are landed; residual UX**
     **gaps open (R13-7).** Landed: no-LSP buffer-word provider + local-first merge; snippet
     expansion (tabstops/defaults/first choice/final stop/escapes); UTF-16 additional edits;
@@ -2185,18 +2273,21 @@ for parity status.
     stale/disconnect guards. OPEN: preview is plain text (no remote syntax spans) and head-only over
     256 KiB; remote .gitignore/candidate filtering is not applied to the search list; remote replace
     no rollback/undo; dirty buffers skipped. Tests remote_search/replace/project_search.
-100. **Remote explorer has git letters, preview, refresh, writes AND ignore/watch; copy/paste/drag/**
-    **undo open (R13-13/R13-21).** Lazy authority-ReadDir tree (commands only, stale/generation,
-    keep/prune, hidden/natural, bounds, trust gate, reconnect reload), remote git letters, palette
-    preview, finder Restart/reconnect/Refresh, New File/New Directory/Rename/Delete (filesystem
-    mutations, fsops names inside root, existence/target-exists checks, trust gate, disconnected
-    error, permanent-delete confirmation naming the target, queued reload), and round-18 target-
-    style .gitignore filtering + polled directory watching as gvim extensions (bounded root/nested
-    reader, ignored hidden default/show toggle, finder same batch per index lifetime; watch adds
-    listed dirs, debounce/off-Update, cancel/reconnect, unsupported→manual refresh notice). OPEN:
-    copy/paste/subtree drag/duplicate, no remote undo/history, check-to-write race (no exclusive
-    create/rename), watch latency/rename-as-remove+create approximation, ignore edits next reload/
-    finder next index restart, symlink-to-dir, Windows paths, real-host acceptance.
+100. **Remote explorer has git letters, preview, refresh, writes, ignore/watch AND clipboard;**
+     **drag/move/undo open (R13-13/R13-21).** Lazy authority-ReadDir tree (commands only, stale/
+     generation, keep/prune, hidden/natural, bounds, trust gate, reconnect reload), remote git
+     letters, palette preview, finder Restart/reconnect/Refresh, New File/New Directory/Rename/
+     Delete (filesystem mutations, fsops names inside root, existence/target-exists checks, trust
+     gate, disconnected error, permanent-delete confirmation naming target, queued reload), remote
+     .gitignore + polled directory watch as gvim extensions. Round 19 clipboard: cut/copy/paste/
+     duplicate through authority ReadDir/ReadFile/Mkdir/WriteFile(Atomic), binary-safe, bounds
+     10k entries/256 MiB/64 levels/2 min, cut copy-then-remove, paste refuses existing name,
+     duplicate Fresh free-name rule, symlink/root/outside/inside-source refusals before creation,
+     target-naming confirmations, trust gate/disconnected/refresh, cancellation/failure keeps and
+     reports the partial destination. OPEN: no drag/move between directories, no undo/history, no
+     whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes not restored, hardlinks/xattrs not
+     preserved, copy/rename existence-check race, no overwrite prompt, watch latency/rename
+     approximation, palette rows no git letters (local too), Windows paths, real-host acceptance.
 101. **Extract variants: co-tenant + existing workspace + terminal saved-state + multi-select**
      **(R13-14/R13-1; the last three are gvim extensions — Fresh only has extract-to-new-workspace).**
      Co-tenant same-root extract (round 16, switch-before-close safety) plus round 18: (a) extract
@@ -2289,13 +2380,15 @@ for parity status.
     preview column unwired, refresh is full re-walk not incremental, open palette keeps old rows
     until re-rank/reopen, preview cached before disconnect may linger, no full fake-slot
     buildRuntime reconnect test; finder walk still per-directory round trips.
-110. **Authority FileMutations + remote explorer write UI are landed; remote write residuals**
-     **(R13-21).** FileMutations (Mkdir/Rename/Remove; local + SSH helpers) plus New File/New
-     Directory/Rename/Delete with fsops names inside root, existence/target-exists checks, trust
-     gate, disconnected error, permanent-delete confirmation naming the target, queued reload.
-     Round 18 remote .gitignore/watch are separate (gvim extension, item 122). OPEN: copy/paste
-     subtrees, drag/move/duplicate refused, no undo/history, check-to-write race (no exclusive
-     create/rename), Windows paths, real-host acceptance.
+110. **Authority FileMutations + remote explorer write UI/clipboard are landed; write residuals**
+     **(R13-21).** FileMutations (Mkdir/Rename/Remove; local + SSH helpers), New File/New Directory/
+     Rename/Delete UI (fsops names inside root, existence/target-exists checks, trust gate,
+     disconnected error, permanent-delete confirmation naming target, queued reload), and round-19
+     cut/copy/paste/duplicate over authority (see item 131). OPEN: drag/move between directories,
+     no undo/history, no whole-subtree transaction/cleanup UI for partial copies, FileEntry/Mode/
+     mtimes not restored, hardlinks/xattrs not preserved, copy/rename existence-check race (no
+     exclusive create), no overwrite prompt (collision refused), watch latency, Windows paths,
+     real-host acceptance.
 111. **Remote large-file mode is now EDITABLE and saves via a bounded whole-file atomic write**
      **(R13-22; supersedes the round-17 read-only wording).** Remote large files use the existing
      large-file overlay over the untouched windowed base (4 KiB head at open, large-index loop);
@@ -2359,33 +2452,36 @@ for parity status.
     corrupt ignored, read-only Scrollback (restored)/frozen modes with Ctrl+Space toggle, revived
     tab paints snapshot above new output. OPEN: no backing bytes, visible-screen styles only,
     cursor/alt-screen/OSC/hyperlinks missing, explicit dive, remote no state.
-120. **Shared editor-wide plugin runtime + host/OS mux is landed for LOCAL daemon workspaces;**
-     **full Fresh window scope remains partial (133/R13-24).** One plugin.Runtime serves every LOCAL
-     daemon workspace; later workspaces contribute only OS/editor-adapter/keymap/state namespace;
-     MuxOS routes file/process/watch to the active workspace root/env/trust; PluginShared host mux
-     routes plugin UI/buffer calls to the bound active model; switch rebinds host+OS and
-     SwitchWorkspaceState (flush leaving namespace, enter `sessions/<id>/plugin-state.json`);
-     editor-wide registrations snapshotted/carried with keymap rebuild; workspace-scoped chrome
-     stays with its model; close does not stop runtime (daemon stops once after closeAll); direct
-     launches unchanged. OPEN: remote/authority-spec workspaces excluded (own runtime); full Fresh
-     window-scope chrome/focus announcer per registration and cross-workspace plugin-UI wait
-     retargeting; per-workspace project plugin config; tests only local fake daemon.
+120. **Full plugin window-scope chrome + focus announcer landed; cross-workspace id namespacing**
+     **open (141/R13-24).** Chrome has per-mount scope editor/window/buffer (editor-wide, window
+     with its model, buffer per buffer); one focus announcer owns active_window_changed/focus_gained
+     and diffs workspace label, focused split window id and active buffer id so a split change is one
+     transition; buffer diff emits buffer_activated/deactivated and seeds the announcer;
+     PluginShared.Bind seeds the leaving model's announcement so a workspace switch forces the
+     entering announcement; widget focus remains widget_event. Per-workspace project plugin config
+     applied on activate (only changed plugins unload/load/reload; project layer never writes user
+     toggles; bounded Work/one pump); cross-workspace waits token→owning-model registry (A's wait
+     stays in A across switches, B cannot reuse token, closing A cancels with notice). OPEN:
+     window/buffer ids are per-workspace and not globally stable across switches (plugins caching
+     ids must re-read; cross-workspace id namespacing follow-up); remote/authority workspaces keep
+     own runtime; hard kill immediately after switch can lose the last debounce; editor-scoped
+     overlays/widget instance state remain model-local.
 121. **Remote daemon-workspace session restore across restart is landed (135; R13-19 partial).**
      Daemon-hosted remote workspaces capture tabs/open files/unsaved stashes/cursor/layout on exit
-     and restore them on restart after the stored authority spec reconnects (remote document access;
-     tabs/active/cursor/pane layout/explorer-sidebar state/unsaved text); vanished file keeps stash +
-     normal notice; failed reconnect restores nothing and `keepSavedSession` skips capture so the
-     saved session survives; detach/reattach keeps live state; co-tenants isolated; direct remote
-     launches still no session. OPEN: no remote conflict detection beyond stash/mtime, restored
-     terminal transcript dead/no process re-run, plugin fs/proc local OS, local trust store,
-     ownership; real SSH UNTESTED.
-122. **Remote .gitignore filtering + directory watching are landed (136; gvim extension, NOT a**
-     **Fresh parity gap).** Same go-git ignore parser as local: remote root+ancestors/nested
-     .gitignore through authority Files (64 levels, 64 KiB/file, 4096 rules); ignored hidden by
-     default/revealed by show-gitignored; finder filters through same batch per index lifetime.
-     Remote watching reuses polled authority Watch: loader adds listed dirs, refresh via normal
-     debounce/coalescing off Update, cancel on disconnect/restart on reconnect; unsupported backend
-     gets one manual-refresh notice. OPEN: poll latency (~500 ms+debounce), rename-as-remove+create
+     and restore them on restart after the stored authority spec reconnects (tabs/active/cursor/
+     pane layout/explorer-sidebar state/unsaved text); vanished file keeps stash + normal notice;
+     failed reconnect restores nothing and `keepSavedSession` skips capture so the saved session
+     survives; detach/reattach keeps live state; co-tenants isolated; direct remote no session.
+     OPEN: no remote conflict detection beyond stash/mtime, restored terminal transcript dead/no
+     process re-run, plugin authority OS closes the FS-local residual (r19); local trust store/
+     ownership, real SSH UNTESTED.
+122. **Remote .gitignore filtering + directory watching are landed (136; gvim EXTENSION, NOT a**
+     **Fresh parity gap).** Same go-git parser as local: remote root+ancestors/nested .gitignore
+     through authority Files (64 levels, 64 KiB/file, 4096 rules); ignored hidden by default/
+     revealed by show-gitignored; finder filters through same batch per index lifetime. Remote
+     watching reuses polled authority Watch: loader adds listed dirs, refresh via normal debounce/
+     coalescing off Update, cancel on disconnect/restart on reconnect; unsupported backend gets one
+     manual-refresh notice. OPEN: poll latency (~500 ms+debounce), rename-as-remove+create
      approximation, ignore edits reach explorer next reload/finder next index restart, Windows
      client paths. Fresh's remote explorer does not expose this local-style behavior.
 123. **Extract variants are landed as gvim extensions (137; R13-14).** (a) extract into an existing
@@ -2395,19 +2491,68 @@ for parity status.
      not Fresh gaps. OPEN: terminal tabs not in multi-select/mixed selection, no drag/drop/cross-
      workspace undo, large-file overlay extraction refused, all-tabs-of-file has no Fresh action
      (multi-select substitute).
-124. **i18n remainder 3 + docs boundary refresh are landed (138; R13-5 partial).** Settings action
-     notices wired, agent-discovery locale/restart boundary, LSP picker details, palette chrome/
-     footers, prompt validation, settings values, remote explorer write strings, remote large-file
-     status; docs/i18n.md what-stays-English refreshed. Metrics: en 944 / 569 per locale / 551 KiB
-     text / 638 KiB JSON / heap 105-82-187 KiB (cap 640 KiB). OPEN: rows without Fresh keys,
-     structured schema names, some keybinding/plugin-manager edges; restore_live config-only.
+124. **i18n remainder 3 + docs boundary refresh (138; R13-5 partial).** Extracted settings/action
+     notices, agent-discovery chrome, LSP picker details, palette chrome/footers, prompt validation,
+     settings values, remote write strings/large-file status. OPEN: remaining rows without Fresh keys,
+     structured schema names, keybinding help/
+     plugin-manager edges.
 125. **Remote search current-file/open-buffers scopes + preview column are landed (139; R13-11).**
      Remote current-file/open-buffers search the editor's remote document snapshots (unsaved edits
      included) with local caps/validation, no remote process/local disk; panel preview column uses
      open-buffer text or head ≤256 KiB via authority ReadRange/whole-file, honest truncation + stale/
      disconnect guard. OPEN: preview plain text (no remote syntax spans)/head-only >256 KiB; remote
      .gitignore/candidate filtering not applied to search list; replace no cross-file rollback/undo.
-
+126. **Plugin gvim.fs/gvim.proc through the workspace authority (142; R13-19/R13-3).** Remote or
+     daemon-hosted remote workspaces wrap the plugin OS with pluginhost.NewAuthorityOS: file
+     reads/writes/stat/readdir/mkdir/remove/rename/watch and one-shot/stdio processes go through
+     the workspace slot with authority trust gate/env/cwd and remote captured env; local unchanged.
+     LookPath/Dirs/Getenv/Now documented local-machine APIs; copy/realpath/walk and mutations the
+     backend lacks return clear unsupported errors; remote fs watch is polling with startup
+     degradation notice. Tests fake authority + local decoy. OPEN: real SSH untested; local-only
+     APIs deliberate boundary; authority watch support per backend.
+127. **Remote hot-exit/recovery, trust record and reconnect resilience (143; R13-3).** Direct remote
+     launch stages unsaved remote-document text under <cache>/gvim/remote-sessions/<hash>/session
+     keyed by remote target (daemon remote uses workspace session dir), remote paths recorded;
+     recovery installs after FileAccess, reopens through authority, clean exit clears staging.
+     Remote trust recorded in trust.json via trust.RecordKey user@host[:port]:workspace root with
+     LevelForRecord/SetRecord/OpenRecord, survives restart/reconnect without re-prompt; local keys
+     unchanged. Reconnect refreshes watch/finder/git/explorer/LSP and shows one notice with restart
+     count/failure. OPEN: local-staging divergence from Fresh authority-routed recovery; remote
+     executable marker scan not wired (undecided remote opened markerless, records level); real
+     host untested.
+128. **Per-workspace project plugin config + cross-workspace plugin UI waits (144; R13-1/R13-24).**
+     On activate project plugins.enabled/settings layer compared; only changed plugins unload/
+     load/reload with dependants; reads/compiles Work, one entering pump; project layer never writes
+     editor-wide plugin-state toggles. Waits token→owning model: A's wait stays in A across switch,
+     B cannot reuse, resumes in A, close A resolves cancelled+notice. OPEN: hard kill after switch
+     can lose last debounce window; remote/authority runtimes not shared; real host untested.
+129. **i18n remainder 4 (145; R13-5 partial).** Settings action notice keys wired; remote large-file
+     status, prompt validation, settings value labels, palette chrome/picker footers, deliberately-
+     English constants and gvim-only keys reviewed/extracted; docs inventory/budgets refreshed.
+     Metrics en 972/569 per locale/553 KiB text/≈640 KiB JSON/heap 112-82-195 KiB. OPEN: rows
+     without Fresh keys, structured schema names, some keybinding help/plugin-manager edges;
+     restore_live config-only; self-update commands absent.
+130. **Daemon multi-client + auto-attach (146; R13-1 partial).** Several attach clients share one
+     session: frames broadcast to all, input from any, smallest attached client size wins, detach
+     removes only that client, slow client bounded-write detached, unknown frame drops only that
+     client; incompatible protocol version rejected before state change. Auto_attach top-level
+     user knob default OFF (Fresh on): bare same-root launch joins daemon with notice, never starts
+     a daemon, never remote (explicit -a required), named-daemon ambiguity refusal kept. OPEN:
+     gvim per-root named daemons vs Fresh shared-daemon nuances, default difference by design, no
+     fork/daemonize, Windows pipes, eviction/workspace CLI.
+131. **Remote explorer clipboard (148; R13-13/R13-21).** Cut/copy/paste/duplicate over authority:
+     copy walks ReadDir/ReadFile, writes Mkdir + WriteFile(Atomic), binary-safe; bounds 10k
+     entries/256 MiB/64 levels/2 min; cut copy-then-remove after full success; paste refuses
+     existing name; duplicate Fresh free-name rule; symlink/root/outside/inside-source refusals
+     before creation; confirmations name remote target; trust gate/disconnected/refresh; partial
+     destination kept and reported on cancel/failure (no rollback/deletion). OPEN: no drag/move,
+     no undo/history, no whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes/hardlinks/
+     xattrs not preserved, copy/rename existence-check race, no overwrite prompt, real host.
+132. **Full plugin window-scope chrome + focus announcer (141; see item 120/R13-24).** Per-mount
+     editor/window/buffer chrome scope, active_window_changed/focus_gained announcer with split/
+     buffer ids, buffer activated/deactivated, switch seeding; OPEN per-workspace id namespacing
+     (ids not globally stable across switches), remote/authority runtime exclusion, hard-kill
+     debounce window, editor-scoped overlays/widget instance state model-local.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -2730,8 +2875,10 @@ Round 11 recorded four gaps:
   (attach before requireTerminal; serve builds the listener before the runtime, default per-root
   name, session restore/save, detach row, open-file forwarding), CLI --daemon/-a/--attach,
   single-writer refusal for bare/session launches, docs/architecture §8 and the #19a outline.
-  Reductions are R12-1 (foreground, no auto_attach start-if-absent/refusal policy, one client,
-  single workspace, Windows pipes later). Tests: daemon server suite, CLI flags, app daemon
+  Reductions were R12-1 (foreground, no daemon auto-start on launch/refusal policy, single-client,
+  single workspace, Windows pipes later); r17–r19 landed jump box/remote session restore and
+  multi-client/auto_attach, so the remaining reductions are no fork/daemonize, Windows pipes,
+  eviction/workspace CLI, auto_attach default/named-daemon nuances. Tests: daemon server suite, CLI flags, app daemon
   start/attach/detach/reattach/quit/session-save and single-writer refusal.
 - **R11-2 (P1, L/XL; catalogues/extraction 2/3 landed; remainder R13-5)** — the i18n foundation,
   catalogues/import/validation, extraction 2 and extraction 3 are in: palette titles and
@@ -2756,53 +2903,57 @@ Round 11 recorded four gaps:
   plugin painters still fall back to "matched by colour". `docs/themes.md`.
 Round 13 recorded five open gaps:
 
-- **R13-1 (P1, L; #19b remainder open; round-18 shared runtime/session restore/extract variants landed)**
-  — registry v2 co-tenants/authority_spec, per-workspace plugin state, jump box (r16–17); r18
-  shared editor-wide plugin runtime for LOCAL daemon workspaces (OS/host mux, state namespace switch,
-  editor-wide registration carry), remote daemon session restore across restart, and extract variants
-  (existing workspace/terminal saved-state/multi-select) as gvim extensions. Remaining: full Fresh
-  window-scope chrome/focus announcer/UI-wait retargeting (R13-24), remote/authority-spec workspaces
-  not shared, per-workspace project plugin config, shared buffers/daemon open-path map, eviction/
-  multi-client/auto_attach/workspace CLI, terminal tabs in multi-select/mixed selection, no drag/drop
-  or cross-workspace undo, large-file overlay extract refused, all-tabs-of-file (no Fresh action;
-  multi-select substitute), registry initial-launch, capture cancellation; remote conflict detection/
-  plugin fs-proc local/ownership (R13-19).
+- **R13-1 (P1, L; #19b remainder open; r19 multi-client/auto-attach/project config/UI waits landed)**
+  — registry v2 co-tenants/authority_spec, per-workspace plugin state, jump box, shared runtime for
+  LOCAL daemon workspaces, remote session restore and extract variants landed r16–18. R19: full
+  per-mount chrome scope (editor/window/buffer) + focus announcer; per-workspace project plugin
+  config applied on activate (only changed plugins reload; project layer never writes editor-wide
+  toggles); cross-workspace plugin waits token→owning-model, stay/resume in A, close cancels with
+  notice; daemon multi-client attach (broadcast/any-input/smallest size/detach one/slow-client
+  bounded detach/incompatible version rejected) and auto_attach user knob default OFF (Fresh on;
+  bare same-root join notice, no daemon start/remote apply). Remaining: cross-workspace plugin id
+  namespacing (window/buffer ids per workspace), remote/authority workspaces keep own runtime,
+  hard-kill after switch can lose last debounce, shared buffers/open-path map, eviction/workspace
+  CLI, auto_attach named-daemon/default nuances, extract terminal-in-multi/mixed selection, drag/
+  drop/cross-workspace undo, large-file overlay extract, all-tabs-of-file substitute, orchestrator/
+  live_sessions/agent_*; no fork/daemonize, Windows pipes.
 - **R13-2 (P2, M; open discovery completion)** — dock/agent rows outside the picker,
   blocked/done/working heuristics (output/OSC data-driven, display-only), remaining agent_*
   family plugins (phase 2 landed the native external Claude/Codex transcript-history scanner and
   merged it with tmux findings), other multiplexer/remote scanning, per-session workspace
   identity/initial attach launch in the registry (same-root sessions still share a workspace with
   extra attach tabs), git-worktree creation in Run Agent, tmux level 1/2. `docs/terminal.md`.
-- **R13-3 (P2, L; remote remainder after round 18)** — landed: watch, finder, search/replace, git,
-  explorer read/write/ignore/watch (ignore/watch gvim extension), remote env, SSH keepalive/auth/
-  config/ProxyJump/agent forwarding, jump box, remote session restore, editable windowed remote
-  large-file with bounded save. OPEN: >64 MiB save/Fresh host-patched recipe, preview plain-text/
-  head-only >256 KiB, ignore/candidate filtering out of search list, explorer copy/paste/drag/undo/
-  check-to-write race/watch latency/rename approximation/Windows paths, remote hot-exit, ~user/
-  special/sudo, reconnect/terminal respawn, per-remote trust store, devcontainer/k8s, known_hosts
-  accept-new/OTP/keyring, saved-session conflict detection, restored terminal dead/plugin FS local/
-  ownership, real SSH UNTESTED (R13-17/R13-19/R13-21/R13-22/R13-23).
+- **R13-3 (P2, L; remote remainder after round 19)** — landed: watch, finder, search/replace, git,
+  explorer read/write/ignore/watch/clipboard, remote env, SSH keepalive/auth/config/ProxyJump/agent
+  forwarding, jump box, remote session restore, editable windowed remote large-file bounded save,
+  r19 plugin fs/proc authority, remote hot-exit staged/recovered, remote trust record keyed target,
+  reconnect refresh/one notice. OPEN: >64 MiB save/Fresh host patched recipe, search preview
+  plain/head-only/ignore filtering, explorer drag/move/undo/whole-subtree transaction/mode-mtime-
+  hardlink-xattr/existence race/overwrite prompt/watch latency, remote marker scan, hot-exit local-
+  staging divergence, remote hot-exit status, ~user/special/sudo, reconnect/terminal respawn, per-
+  remote trust store edge cases, devcontainer/k8s, SSH known_hosts accept-new/OTP/keyring, saved-
+  session conflict detection, restored terminal dead, ownership, real SSH UNTESTED
+  (R13-17/R13-19/R13-21/R13-22/R13-23).
 - **R13-4 (P2, S/M)** — spawn-gate residuals: only the shell `-c` first token is inspected
   (compound/quoted/variable-built commands not parsed), Windows PATHEXT and drive-letter-case
   normalisation missing, an environment injected below the authority/plugin-OS/LSP seams would not
   be resolved, no kill of a running process when the level drops, and the remote path keeps the
   coarse app rule pending a remote trust store. `docs/trust.md` §3.1.
-- **R13-5 (P2, M; open i18n remainder)** — round-18 extraction: settings action notices wired,
-  agent-discovery locale/restart boundary, LSP picker details, palette chrome/footers, prompt
-  validation, settings values, remote explorer write strings, remote large-file status; docs/i18n
-  what-stays-English refreshed. Metrics: en 944 keys, every non-English 569; key+value 563,791 B
-  (551 KiB), embedded JSON 652,944 B (638 KiB; cap 640 KiB), heap en 105 KiB/de 82 KiB/both 187 KiB;
-  i18n_check green. OPEN: rows without Fresh keys, structured field/row schema names, some keybinding
-  help/plugin-manager edges; `terminal.restore_live` config-only; self-update commands absent.
-- **R13-6 (P2, L/XL; open TUI backlog after round 18; large-file/explorer write/ignore-watch/SSH**
-  **config/extract variants sliced to their own ids)** — GPM console mouse, kitty keyboard, legacy
+- **R13-5 (P2, M; open i18n remainder)** — round-19 extraction: settings action notice keys wired;
+  remote large-file status, prompt validation, settings value labels, palette chrome/picker footers,
+  deliberately-English constants and gvim-only keys reviewed/extracted; docs inventory/budgets
+  refreshed (cap 640 KiB). Metrics: en 972 keys, every non-English 569; key+value 565,760 B (553 KiB),
+  embedded JSON 655,193 B (≈640 KiB), heap en 112 KiB / de 82 KiB / both 195 KiB; i18n_check green.
+  OPEN: rows without Fresh keys, structured field/row schema names, some keybinding help/plugin-
+  manager edges; restore_live config-only; self-update commands absent.
+- **R13-6 (P2, L/XL; open TUI backlog after round 19)** — GPM console mouse, kitty keyboard, legacy
   key-release, live-screen reflow, per-tab splits/report-split, universal language server, Windows
   ConPTY real-host, update self-update/terminal buffer (R13-12), completion residual (R13-7), remote
-  residuals (R13-3/R13-8/R13-11/R13-13/R13-23), shared plugin runtime full window scope (R13-24),
+  residuals (R13-3/R13-8/R13-11/R13-13/R13-23), shared plugin runtime remote/id-scope (R13-24),
   extract/shared buffers (R13-14/R13-1), live-restore full backing file/remote state (R13-15), input
-  edges (R13-16), theme background/drag, plugin gallery/env activation/in-page capture, composite
-  API, orchestrator/live_sessions/agent_*/devcontainer/k8s/pkg/audit_mode/welcome/language helpers,
-  multi-client/auto_attach/eviction, Windows ConPTY.
+  edges (R13-16), theme background/drag, plugin gallery/env activation/in-page capture, composite API,
+  orchestrator/live_sessions/agent_*/devcontainer/k8s/pkg/audit_mode/welcome/language helpers,
+  auto_attach default/named-daemon nuances, Windows ConPTY.
 - **R13-7 (P1, M; trigger chars/live re-filter landed; residual UX gaps open)** — completion.
   Landed: buffer words/local-first; snippets/UTF-16/resolve/version+overlap guard; round-15
   auto-popup + multi-buffer words; round-16 advertised `completionProvider.triggerCharacters`
@@ -2870,18 +3021,17 @@ Round 13 recorded five open gaps:
   debounce) and Show Update Output (details list). OPEN: self-update download/install/prompt,
   Fresh "Update fresh" self-update command, Fresh update terminal buffer (details list instead),
   release-page click starts no install; telemetry/GUI/browser/WASM/packaging are boundaries.
-- **R13-13 (P2, M; remote explorer read-only+git+preview+refresh+write ops+ignore/watch; residual**
-  **open)** — lazy authority-ReadDir tree, remote git letters, palette preview, finder refresh,
-  New File/New Directory/Rename/Delete via Files/Mutations (names inside root, existence/target-
-  exists checks, trust gate, disconnected error, permanent-delete confirmation naming target,
-  queued reload; cut/copy/paste/drag/duplicate refused), and r18 remote .gitignore filtering +
-  polled directory watching as gvim extensions (bounded root/nested reader 64 levels/64 KiB/4096
-  rules; ignored hidden default/show toggle; finder same batch per index lifetime; loader adds
-  listed dirs to WatchDirs, refresh via debounce/coalescing off Update, cancel on disconnect/
-  restart on reconnect; unsupported→one manual-refresh notice). OPEN: copy/paste/drag/duplicate,
-  no undo/history, check-to-write race (no exclusive create/rename), watch latency/rename-as-
-  remove+create, ignore edits next reload/index restart, symlink-to-dir, palette rows no git
-  letters (local too), Windows paths, real-host acceptance.
+- **R13-13 (P2, M; remote explorer read-only+git+preview+refresh+writes+ignore/watch+clipboard;**
+  **residual open)** — lazy authority-ReadDir tree, remote git letters, palette preview, finder
+  refresh, New File/New Directory/Rename/Delete via Files/Mutations, r18 remote .gitignore + polled
+  directory watch (gvim extension), r19 cut/copy/paste/duplicate over authority (bounds 10k/256
+  MiB/64 levels/2 min; atomic per-file, binary-safe; cut copy-then-remove; paste refuses existing
+  name; duplicate Fresh free-name; symlink/root/outside/inside-source refusals; target-naming
+  confirmations; trust gate/disconnected/refresh; partial destination kept/reported). OPEN: no
+  drag/move, no undo/history, no whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes not
+  restored, hardlinks/xattrs not preserved, copy/rename existence-check race, no overwrite prompt,
+  watch latency/rename approximation, palette rows no git letters (local too), Windows paths, real
+  host.
 - **R13-14 (P2, M; co-tenant/session restore/extract variants landed; #19b residual)** — co-tenant
   registry v2/same-root extract (r16) and r18 extract variants: into an existing same-root workspace
   (target acceptance before source close), terminal tab saved-record migration (no PTY hand-off;
@@ -2925,15 +3075,16 @@ Round 13 recorded five open gaps:
   reconnect; Settings Environment rows only after warm; no status-row indicator of active
   remote env (Fresh has one).
 
-- **R13-19 (P2, L; daemon-hosted remote authority/jump box + remote session restore LANDED —**
-  **residuals open)** — remote target daemon start hosts it locally; registry authority_spec,
+- **R13-19 (P2, L; daemon-hosted remote authority/jump box + session restore + plugin FS authority**
+  **LANDED — residuals open)** — remote target daemon start hosts locally; registry authority_spec,
   start prompts, attach ignores target, restart identity, lazy dormant remote, one backend per
-  workspace, r18 remote workspace session capture/restore across restart (tabs/files/stashes/
-  layout, reconnect before reopen, vanished-file stash notice, failed reconnect keepSavedSession
-  protection, detach/reattach live state, co-tenant isolation). OPEN: remote conflict detection
-  beyond stash/mtime, restored terminal transcript dead/no process re-run, plugin gvim.fs/gvim.proc
-  still local OS, remote trust uses local store, per-file ownership jump-box vs direct, real SSH
-  UNTESTED.
+  workspace, remote workspace session capture/restore across restart (keepSavedSession protects
+  failed reconnect), r19 plugin gvim.fs/gvim.proc authority OS (trust gate/env/cwd, local-only
+  LookPath/Dirs/Getenv/Now, unsupported copy/realpath/walk errors, polling watch notice), r19 remote
+  hot-exit staging/recovery + remote trust record/reconnect refresh. OPEN: remote marker scan not
+  wired (undecided remote markerless records level), hot-exit local-staging divergence, remote
+  conflict detection beyond stash/mtime, restored terminal transcript dead/no process re-run,
+  plugin local-only API semantics, per-file ownership jump-box vs direct, real SSH UNTESTED.
 - **R13-20 (P3, M; URL themes landed; packaged repo/marketplace open)** — URL theme forms fetch
   https/loopback http under the update transport policy (256 KiB/8 s), validate with the existing
   parser, cache under the user config dir keyed by URL hash with last-known-good fallback, clear
@@ -2941,11 +3092,12 @@ Round 13 recorded five open gaps:
   at this start (uncached reported, no Update-loop fetch); `repo#fragment` packaged-repository
   form refused with the explicit message. OPEN: packaged repository install/marketplace/browser,
   startup-only fetch/cache refresh, remote packs/local archives, theme background/drag edges.
-- **R13-21 (P2, M; remote explorer writes LANDED; residual open)** — authority FileMutations +
-  New File/New Directory/Rename/Delete UI (fsops names inside root, existence/target-exists checks,
-  trust gate, disconnected error, permanent-delete confirmation naming target, queued reload);
-  copy/paste/drag/duplicate refused; r18 ignore/watch live in R13-13 as gvim extensions. OPEN: no
-  undo/history, check-to-write race (no exclusive create/rename), Windows paths, real host.
+- **R13-21 (P2, M; remote explorer writes/clipboard LANDED; residual open)** — authority
+  FileMutations + New File/New Directory/Rename/Delete UI; r19 cut/copy/paste/duplicate over
+  authority (bounds/atomic/binary/cut copy-then-remove/collision refusal/duplicate free-name/
+  refusals/partial reporting/confirmations/trust gate/disconnected/refresh). OPEN: no drag/move,
+  no undo/history, no whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes/hardlinks/xattrs
+  not preserved, copy/rename existence-check race, no overwrite prompt, Windows paths, real host.
 - **R13-22 (P2, L; remote large-file EDITABLE + bounded save landed; residual open)** — r17
   windowed read-only superseded: remote large files use the large-file overlay over the untouched
   windowed base; normal edits/undo/dirty; save runs in a tea.Cmd, remote stat/CheckDisk first,
@@ -2961,16 +3113,17 @@ Round 13 recorded five open gaps:
   preview cached before disconnect may linger, no full fake-slot buildRuntime reconnect test, finder
   walk still one authority ReadDir round trip per directory (not Fresh's server-side streaming
   walk), remote .gitignore/candidate filtering not applied to search list.
-- **R13-24 (P2, L; shared daemon plugin runtime LANDED for LOCAL workspaces; full Fresh window**
-  **scope remains partial; task 133)** — one plugin.Runtime serves every LOCAL daemon workspace;
-  later workspaces contribute OS/editor-adapter/keymap/state namespace; MuxOS routes file/process/
-  watch to active workspace root/env/trust; PluginShared host mux routes plugin UI/buffer calls to
-  the bound active model; switch rebinds host+OS and SwitchWorkspaceState (flush leaving namespace,
-  enter sessions/<id>/plugin-state.json); editor-wide registrations snapshotted/carried with keymap
-  rebuild; workspace-scoped chrome stays per model; close does not stop runtime (daemon stops once
-  after closeAll); direct launches unchanged. OPEN: remote/authority-spec workspaces excluded (own
-  runtime); full Fresh window-scope chrome/focus announcer per registration and cross-workspace
-  plugin-UI wait retargeting; per-workspace project plugin config; tests use a local fake daemon.
+- **R13-24 (P2, L; full plugin window-scope chrome + focus announcer LANDED; residual open; task**
+  **141)** — per-mount chrome scope editor/window/buffer (Fresh model); one focus announcer owns
+  active_window_changed/focus_gained and diffs workspace label + focused split window id + active
+  buffer id so a split change is one transition; buffer diff emits buffer_activated/deactivated
+  and seeds it; PluginShared.Bind seeds leaving model so a workspace switch forces the entering
+  announcement; widget focus remains widget_event. Per-workspace project plugin config on activate
+  (only changed plugins reload; project layer never writes user toggles), cross-workspace waits
+  token→owning-model stay/resume/cancel. OPEN: window/buffer ids per-workspace, not globally stable
+  across switches (plugins caching ids must re-read; cross-workspace id namespacing follow-up);
+  remote/authority workspaces keep own runtime; hard kill after switch can lose last debounce;
+  editor-scoped overlays/widget instance state model-local.
 ### 5.1 User-visible TUI and editing gaps (do first)
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
@@ -2993,18 +3146,21 @@ Round 13 recorded five open gaps:
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 18 | Daemon mode: client/server split, attach/detach, open-file forwarding, workspace registry v2 (co-tenants + authority_spec), daemon-hosted remote authority/jump box, checked exit durability, daemon host marks, extract/close confirmation — **landed (MVP) rounds 12–17; OPEN reductions** (R12-1/R13-1/R13-14/R13-19): no fork/daemonize, no auto_attach, one attached client, Windows pipes later, no eviction/workspace CLI; phase-2 positional/dormant open + delay limits; round 14 host marks; round 16 registry v2; round 17 remote target with --daemon hosts a remote workspace locally (foreground connects/prompts on daemon terminal before hosting, attach ignores target, restart reuses spec/identity, lazy dormant remote; invalid spec safe) but remote tabs/stashes are NOT restored across daemon restart, plugin fs/proc remain local OS in remote workspaces, remote trust is local, ownership across jump-box/direct is open, real SSH UNTESTED | P1 | XL | `internal/daemon`, `internal/app`, `internal/cli`, `internal/tui`, `session`, `internal/restore` | R12-1/R13-1/R13-14/R13-19; docs/architecture §8/§8.1 |
+| 18 | Daemon mode: client/server split, attach/detach, multi-client attach, auto-attach, open-file forwarding, registry v2 (co-tenants+authority_spec), jump box, remote session restore, remote hot-exit/trust/reconnect, checked exit durability, host marks, extract/close — **landed (MVP) rounds 12–19; OPEN reductions** (R12-1/R13-1/R13-3/R13-14/R13-19): no fork/daemonize, Windows pipes later, eviction/workspace CLI; phase-2 positional/dormant open + delay limits; r14 host marks; r16 registry v2; r17 remote target --daemon hosts remote workspace; r18 remote session restore; r19 multi-client (broadcast frames, any input, smallest size wins, detach keeps session, slow-client bounded detach, incompatible protocol version rejected) + auto_attach top-level user knob default OFF (Fresh on; bare same-root join notice, no daemon start/remote apply, named-daemon ambiguity refusal) + remote hot-exit staging/trust record/reconnect refresh. Still open: auto_attach default/named-daemon nuances differ Fresh, remote marker scan, hot-exit local-staging divergence, plugin id namespacing, shared buffers; remote tabs/stashes restore landed r18; real SSH UNTESTED | P1 | XL | `internal/daemon`, `internal/app`, `internal/cli`, `internal/tui`, `session`, `internal/restore`, `trust` | R12-1/R13-1/R13-3/R13-14/R13-19; docs/architecture §8/§8.1 |
 
 
 
 
-| 19 | Workspaces/windows: registry v2 (#19a r13 + r16 co-tenants/same-root extract + r17 `authority_spec`/DaemonHosted remote workspace), per-workspace plugin `gvim.state` (r17), plus OPEN #19b: remote tabs/stashes across daemon restart, shared editor-wide plugin runtime/chrome/focus announcer (R13-24/task 132), eviction/memory, multi-client, auto_attach, workspace CLI, extract into existing/terminal-tab/large-file/multiple, shared buffer model, per-file ownership jump-box vs direct, registry initial-launch, capture cancellation | P1 | L | `internal/daemon/workspaces.go`, `internal/app/workspace_*` + `daemon_authority`, `internal/tui/{workspace_*,split_state,split/persist}`, `session`, `internal/restore` | R13-1/R13-14/R13-19/R13-24; docs/architecture §8.1 |
+
+| 19 | Workspaces/windows: registry v2 (co-tenants + authority_spec), per-workspace plugin state, shared daemon plugin runtime + full per-mount window scope/focus announcer, per-workspace project plugin config + cross-workspace waits, remote session restore, extract variants, multi-client/auto-attach; OPEN #19b: cross-workspace plugin id namespacing (window/buffer ids per workspace), remote/authority workspaces own runtime, hard-kill last debounce, shared buffers/open-path map, eviction/workspace CLI, auto_attach per-root/named-daemon differences, extract terminal-in-multi/mixed selection/drag-drop/cross-workspace undo/all-tabs substitute, orchestrator/live_sessions/agent_* | P1 | L | `internal/daemon`, `internal/app/workspace_* + daemon_authority/remote_session`, `internal/tui/{workspace_*,plugin_shared,split_state}`, `internal/pluginhost`, `session`, `internal/restore` | R13-1/R13-3/R13-14/R13-19/R13-24; docs/architecture §8.1 |
+
 
 
 
 
 | 20 | Agent sessions: tracked launch argv/agent metadata/resume, Run Agent picker, tmux discovery/Import (r13) and phase-2 external Claude Code/Codex transcript-history scanning **landed**, with these OPEN: dock/agent rows outside the picker, blocked/done heuristics, remaining agent_* family plugins, other multiplexers/remote scanning, per-session workspace identity/first attach launch, worktree creation, tmux level 1/2 | P1 | L | `internal/terminal`, `internal/tui/dock`, `internal/agentdiscover` (+`history.go`), `config/terminal.go`, plugin packages | R12-3/R13-2 |
-| 21 | Remote authority: slot/local/SSH terminal+exec+file system, scp/ssh parsing, status/reconnect, editor I/O+LSP, watch, finder/search, replace, explorer writes/ignore/watch, env, SSH auth/config/ProxyJump/agent forwarding, jump box, editable windowed remote large-file with bounded save, remote saved-session restore, FileMutations/ReadRange **landed**, OPEN: >64 MiB/Fresh host recipe, search preview plain/head-only, ignore filtering in search, explorer copy/paste/drag/undo/check-to-write race/watch latency/rename approximation/Windows paths, remote hot-exit, ~user/special/sudo, reconnect/terminal respawn, per-remote trust store, devcontainer/k8s, known_hosts accept-new/OTP/keyring, conflict detection, plugin FS local/ownership, real SSH UNTESTED | P1 | XL | `authority`, `internal/app/remote_*` + `remote_daemon/remote_session/remote_ignore`, `finder/{finder,remote}.go`, `document/{remote_large,large_save}.go`, `buffer/large_window.go`, `internal/tui/{palette,remote_tree,authority_retry}` | R13-3/R13-17/R13-19/R13-21/R13-22/R13-23 |
+| 21 | Remote authority: slot/local/SSH terminal+exec+file system, scp/ssh parsing, status/reconnect, editor I/O+LSP, plugin fs/proc authority OS, watch, finder/search, replace, explorer writes/ignore/watch/clipboard, env, SSH auth/config/ProxyJump/agent forwarding, jump box, editable windowed remote large-file bounded save, remote hot-exit/trust record/reconnect, saved-session restore, FileMutations/ReadRange **landed**, OPEN: >64 MiB/Fresh host recipe, search preview plain/head-only/ignore, explorer drag/move/undo/whole-subtree transaction/mode-mtime-hardlinks-xattrs/existence race/overwrite prompt/watch latency, remote marker scan, hot-exit local-staging divergence, ~user/special/sudo, reconnect/terminal respawn, devcontainer/k8s, SSH known_hosts accept-new/OTP/keyring, saved-session conflict detection, restored terminal dead/ownership, real SSH UNTESTED | P1 | XL | `authority`, `internal/app/remote_* + remote_copy/remote_recovery`, `internal/pluginhost` (authority OS), `finder`, `document`, `internal/tui`, `trust` | R13-3/R13-17/R13-19/R13-21/R13-22/R13-23 |
+
 
 
 
@@ -3014,7 +3170,8 @@ Round 13 recorded five open gaps:
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 22 | i18n: foundation/catalogues/import/validation + extraction 2/3 + r14 palette + r15 remainder + r16 picker chrome + r17 remainder 2 + r18 remainder 3/boundary refresh (15 locales; en 944 keys, every non-English 569; key+value 563,791 B/551 KiB, JSON 652,944 B/638 KiB; heap en 105 KiB/de 82 KiB/both 187 KiB; cap 640 KiB; Fresh-key imports/fresh_map, deterministic CI, lazy load, Settings locale row, plugin i18n). OPEN: rows without Fresh keys, structured field/row schema names, some keybinding help/plugin-manager edges; `terminal.restore_live` config-only; self-update commands absent (R13-5) | P1 | L infra; XL translation | `i18n/`, `internal/tui`, `commands/gen`, `tools`, `docs/i18n.md` | R13-5 |
+| 22 | i18n: foundation/catalogues/import/validation + extraction 2/3 + r14 palette + r15 remainder + r16 picker chrome + r17 remainder 2 + r18 remainder 3 + r19 remainder 4 (15 locales; en 972 keys, every non-English 569; key+value 565,760 B/553 KiB, JSON 655,193 B/≈640 KiB cap; heap en 112 KiB/de 82 KiB/both 195 KiB; Fresh-key imports/fresh_map, deterministic CI, lazy load, Settings locale row, plugin i18n). OPEN: rows without Fresh keys, structured schema names, some keybinding help/plugin-manager edges; restore_live config-only; self-update commands absent (R13-5) | P1 | L infra; XL translation | `i18n/`, `internal/tui`, `commands/gen`, `tools`, `docs/i18n.md` | R13-5 |
+
 
 
 
@@ -3030,7 +3187,8 @@ Round 13 recorded five open gaps:
 
 
 | 26 | Fresh GUI/desktop, browser `--web` UI, WASM build, packaging/installer matrix, daemon packaging: **outside the TUI objective** (objective boundary in §8 — the user asked for Fresh TUI functionality; Lua and visual style are the only flexible parts). Daemon mode itself is in scope; these are not backlog gaps unless a TUI feature needs one (none does). Not closed by size/effort — closed by not being TUI | objective boundary | — | n/a | §4 item 81; §8 |
-| 27 | Remote explorer write/watch parity: r17 New File/New Directory/Rename/Delete via FileMutations (fsops names inside root, existence/target-exists checks, trust gate, disconnected, permanent-delete confirmation naming target, queued reload; cut/copy/paste/drag/duplicate refused); r18 remote .gitignore filtering + polled directory watching as gvim extensions (same go-git parser, 64 levels/64 KiB/4096 rules; ignored hidden default/show toggle; finder same batch per index lifetime; WatchDirs refresh debounce/off-Update, reconnect/cancel, unsupported manual notice). OPEN: copy/paste/drag/duplicate, no undo/history, check-to-write race, watch latency/rename-as-remove+create, ignore edits next reload/index restart, Windows paths, real host | P2 | M | `authority/{authority,local,ssh_files}.go`, `internal/app/{remote_explorer,remote_explorer_ops,remote_ignore}.go`, `internal/tui/{remote_tree,remote_ops_ui_test}.go`, `internal/tui/explorer`, `explorer/gitignore.go` | R13-13/R13-21 |
+| 27 | Remote explorer write/watch/clipboard: r17 New File/New Directory/Rename/Delete; r18 remote .gitignore + polled directory watch (gvim extensions); r19 cut/copy/paste/duplicate over authority (10k entries/256 MiB/64 levels/2 min, atomic per-file binary-safe, cut copy-then-remove, paste refuses existing name, duplicate Fresh free-name, symlink/root/outside/inside-source refusals before creation, confirmations naming target, trust gate/disconnected/refresh, partial destination kept/reported). OPEN: no drag/move, no undo/history, no whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes/hardlinks/xattrs not preserved, copy/rename existence-check race, no overwrite prompt, watch latency/rename approximation, Windows paths, real host | P2 | M | `authority`, `internal/app/{remote_explorer,remote_explorer_ops,remote_explorer_copy,remote_ignore}`, `internal/tui/remote_tree`/`explorer`, `explorer/gitignore.go` | R13-13/R13-21 |
+
 
 
 
@@ -3050,17 +3208,30 @@ Round 13 recorded five open gaps:
 
 
 | 36 | Update command/self-update residual: self-update download/install/prompt, Fresh Update fresh command, Fresh update terminal buffer (gvim details list), clickable release page starts no install; telemetry/GUI/browser/WASM/packaging boundaries | P3 | S/M | `updatecheck`, `internal/app/update_check`, `internal/tui/{update_status,update_commands}`, `commands/update_commands.go` | R13-12 |
-| 37 | Per-workspace plugin state + shared daemon runtime: state in sessions/<id>/plugin-state.json v1 (1 MiB/plugin + 8 MiB/file caps, atomic flush, newer-version read-only, co-tenant isolation, restore on materialize) landed r17; r18 one editor-wide runtime serves every LOCAL daemon workspace with MuxOS active-OS routing, PluginShared host mux, switch host/OS + state-namespace rebind, editor-wide registration carry, workspace-scoped chrome per model, close keeps runtime/daemon stops once. OPEN: remote/authority-spec workspaces excluded (own runtime), full Fresh window-scope chrome/focus announcer/UI-wait retargeting, per-workspace project plugin config | P2 | M | `internal/pluginhost/{pluginhost,shared}.go`, `internal/tui/plugin_shared.go`, `internal/app/{run,workspace_plugin_state_test}.go`, docs/plugins | R13-1/R13-24 |
+| 37 | Per-workspace plugin state + shared daemon runtime + full scope: sessions/<id>/plugin-state.json v1 (caps/atomic/newer-version read-only/co-tenant isolation); one shared runtime for LOCAL daemon workspaces (MuxOS active OS, PluginShared host mux, switch host/OS+state namespace, editor-wide registration carry); r19 per-mount chrome scope editor/window/buffer + focus announcer (active_window_changed/focus_gained, workspace label/split window id/active buffer id, buffer activated/deactivated, switch seeding), per-workspace project plugin config on activate, cross-workspace waits token→owning-model, remote plugin OS authority. OPEN: window/buffer ids per-workspace not globally stable (cross-workspace id namespacing follow-up), remote/authority workspaces own runtime, hard-kill last debounce, editor-scoped overlays/widget state model-local | P2 | M | `internal/pluginhost`, `internal/tui/plugin_shared.go`, `internal/app/{run,workspace_plugin_state_test}`, docs/plugins | R13-1/R13-24 |
 
 
-| 38 | Daemon jump-box residual: r18 remote session restore across restart landed (tabs/open files/stashes/layout; reconnect before reopen, missing-file stash notice, keepSavedSession protects failed reconnect, detach/reattach live state). OPEN: remote conflict detection beyond stash/mtime, restored terminal transcript dead/no process re-run, plugin gvim.fs/gvim.proc still local OS, remote trust uses local store, per-file ownership jump-box vs direct, real SSH UNTESTED | P2 | L | `internal/app/{daemon_authority,remote_session,workspace_capture}.go`, `internal/daemon/workspaces.go`, `plugin/hostos`, `trust` | R13-19 |
+
+| 38 | Daemon jump-box residual: r18 remote session restore across restart landed; r19 plugin fs/proc authority OS, remote hot-exit staging/recovery, remote trust record keyed user@host[:port]:workspace root, reconnect cache refresh/one notice. OPEN: remote executable marker scan not wired (undecided remote markerless records level), hot-exit local-staging divergence from Fresh, conflict detection only stash/mtime, restored terminal transcript dead, plugin local-only API boundary, per-file ownership jump-box vs direct, real SSH UNTESTED | P2 | L | `internal/app/{daemon_authority,remote_session,remote_recovery,workspace_capture}`, `internal/pluginhost`, `trust`, `internal/daemon` | R13-19 |
+
 
 
 | 39 | Live-restore full backing-file fidelity: only visible screen styled (≤200×512), no backing-file bytes, cursor/alternate-screen/OSC/hyperlinks not restored, revive needs explicit dive, remote launches restore no state | P3 | M | `internal/terminal/saved.go`, `internal/tui/dock`, `internal/restore/terminal.go` | R13-15 |
 
 | 40 | SSH config/connection residuals: known_hosts default only/no accept-new, no host-key algorithm config, ProxyJump one hop, no keyring/agent secret storage, keyboard-interactive OTP retry policy unchanged, keepalive/backoff package vars not settings, real SSH/agent/2FA UNTESTED | P2 | M | `authority/ssh.go`, `authority/ssh_config.go`, `internal/tui/authority_retry.go` | R13-17 |
 
-| 41 | Shared plugin runtime/window scope/chrome: LOCAL daemon workspaces share one runtime with OS/host mux, switch rebind, editor-wide registration carry, workspace chrome per model (r18). OPEN: remote/authority-spec workspaces keep own runtime; full Fresh window-scope chrome/focus announcer per registration and cross-workspace plugin-UI wait retargeting; per-workspace project plugin config | P2 | L | `internal/pluginhost/{shared,mux}`, `internal/tui/plugin_shared.go`, `internal/app/workspace_host.go`, docs/plugins | R13-24 |
+| 41 | Shared plugin runtime/window scope/chrome: LOCAL daemon workspaces share one runtime with OS/host mux, switch rebind, editor-wide registration carry; r19 per-mount chrome scope editor/window/buffer + focus announcer (workspace label/split window id/active buffer id; buffer events; switch seeding), per-workspace project config on activate (only changed plugins reload), cross-workspace waits owned by originating model/cancel on close. OPEN: window/buffer ids per-workspace not globally stable across switches (cross-workspace id namespacing follow-up), remote/authority workspaces keep own runtime, hard-kill last debounce, editor-scoped overlays/widget instance state model-local | P2 | L | `internal/pluginhost`, `internal/tui/plugin_shared.go`, `internal/app/workspace_host.go`, docs/plugins | R13-24 |
+
+| 46 | Plugin authority OS: remote/daemon-hosted remote workspaces wrap the plugin OS with pluginhost.NewAuthorityOS; files/mutations/watches/processes via workspace slot, trust gate/env/cwd, remote captured env; LookPath/Dirs/Getenv/Now local-only; copy/realpath/walk/unsupported mutations clear errors; remote watch polling with degradation notice; local unchanged. Residual: real SSH untested/local-only API boundary/watch backend support | P2 | M | `internal/pluginhost/`, `internal/app/run.go`, `plugin/hostos`, docs/plugins | R13-19/R13-3 |
+
+| 47 | Remote hot-exit/trust/reconnect: direct remote launch stages unsaved remote docs under remote-target session dir (daemon uses workspace session dir); recovery after FileAccess; clean exit clears; remote trust record keyed user@host[:port]:workspace root in trust.json; reconnect refreshes watch/finder/git/explorer/LSP + one notice. Residual: local-staging divergence from Fresh authority-routed recovery; marker scan not wired; real host | P2 | M | `internal/app/{remote_recovery,remote_session}.go`, `trust`, `internal/app/run.go` | R13-3 |
+
+| 48 | Daemon multi-client + auto-attach: multiple attach clients broadcast frames/any input/smallest size wins/detach one keeps session/slow-client bounded detach/incompatible version rejected; auto_attach user knob default OFF (Fresh on), bare same-root join notice, no daemon start/remote apply, named-daemon ambiguity refusal. Residual: per-root named daemons vs Fresh shared-daemon nuances, default difference by design, no fork/daemonize, Windows pipes, eviction/workspace CLI | P2 | M | `internal/daemon`, `internal/app`, `internal/cli`, docs/architecture §8.1 | R13-1 |
+
+| 49 | Full plugin window-scope chrome + focus announcer: per-mount editor/window/buffer scope; active_window_changed/focus_gained with workspace label/focused split window id/active buffer id; buffer activated/deactivated; switch seeding; widget focus widget_event. Residual: window/buffer ids per-workspace not globally stable across switches (cross-workspace id namespacing follow-up), editor-scoped overlays/widget instance state model-local | P2 | M | `internal/tui/plugin_shared.go`, `internal/pluginhost`, docs/plugins | R13-24 |
+
+| 50 | Remote explorer clipboard: r19 cut/copy/paste/duplicate over authority (10k entries/256 MiB/64 levels/2 min, atomic per-file binary-safe, cut copy-then-remove, paste collision refuse, duplicate Fresh free-name, symlink/root/outside/inside-source refusals, confirmations naming target, trust gate/disconnected/refresh, partial destination reported). Residual: no drag/move, no undo/history, no whole-subtree transaction/cleanup UI, mode/mtime/hardlinks/xattrs not preserved, existence-check race, no overwrite prompt, real host | P2 | M | `internal/app/remote_explorer_copy.go`, `authority`, `internal/tui/remote_tree` | R13-13/R13-21 |
+
 
 | 42 | Remote search scopes/preview: current-file/open-buffers scopes over remote document snapshots (unsaved edits, no remote process/local disk) and remote preview column (open-buffer text or head ≤256 KiB via authority windowed/whole-file, honest truncation/stale/disconnect) landed r18. OPEN: plain text/no remote syntax spans, head-only >256 KiB, remote .gitignore/candidate filtering not applied to search list | P2 | M | `internal/app/remote_search.go`, `internal/tui/project_search.go`/`searchpanel` | R13-11/R13-23 |
 
@@ -3076,25 +3247,23 @@ Round 13 recorded five open gaps:
 
 ### 5.5 Suggested round order for the remaining goal
 
-1. **Round 19 — close the residual TUI gaps left by round 18.** Full Fresh window-scope chrome/
-   focus announcer + cross-workspace plugin-UI wait retargeting, remote/authority-spec workspaces
-   sharing the runtime, per-workspace project plugin config (R13-24); remote large-file >64 MiB/
-   Fresh host patched recipe; remote explorer copy/paste/drag/undo/check-to-write race/watch
-   latency/rename approximation/Windows paths; remote search preview plain-text/head-only and
-   ignore/candidate filtering; remote authority/session conflict detection/plugin FS local/trust/
-   ownership; SSH known_hosts accept-new/host-key algorithms/OTP/keyring/real host; remote env;
-   shared buffers/extract terminal-in-multi/mixed selection; live-restore full backing file; input
-   GPM/kitty/legacy release/reflow; update self-update/terminal buffer; URL packaged/marketplace;
-   theme background/drag; plugin ports/composite/gallery; universal server; Windows ConPTY;
-   multi-client/eviction/auto_attach; i18n remaining boundary and any docs refresh.
-2. **Round 20 — final verification and honest endgame.** Freeze the Fresh reference (commit/date),
-   re-read refs/fresh docs/features + internal, re-run the §2 counts (palette 240, menus/keymaps/
-   themes, bundled 22 vs 50 + ports, plugin API 242 vs ~372, settings 69/14, e2e index) and refresh
-   every §3 row; walk every §4 divergence and §5 residual/closed id under the TUI-only policy; run
-   full gates (build×2, vet, lint, gofmt, purity/import, menus, i18n_check + heap, GOOS=windows, full
-   go test, real-host SSH/tmux/ConPTY where reachable); docs-vs-code audit. Report explicit open
-   items/residuals and objective boundaries, not substitutions; full parity only if open TUI list is
-   empty.
+1. **Round 20 — close the residual TUI gaps left by round 19.** Cross-workspace plugin id namespacing
+   and remote/authority runtime sharing (R13-24); remote large-file >64 MiB/Fresh host recipe;
+   remote explorer drag/move/undo/whole-subtree cleanup/mode-mtime-hardlink-xattr/existence race/
+   overwrite prompt/watch latency/Windows paths; remote search preview plain-text/head-only and
+   ignore/candidate filtering; remote authority marker scan/hot-exit local-staging/conflict
+   detection/ownership; SSH known_hosts accept-new/host-key algorithms/OTP/keyring/real host;
+   remote env; shared buffers; extract terminal-in-multi/mixed selection/drag-drop; live-restore
+   full backing file; input GPM/kitty/legacy release/reflow; update self-update/terminal buffer;
+   URL packaged repo/marketplace; theme background/drag; plugin ports/composite/gallery; auto_attach
+   named-daemon/default nuances; universal server; Windows ConPTY; i18n remaining boundary.
+2. **Round 21 — final verification and honest endgame.** Freeze the Fresh reference (commit/date),
+   re-read refs/fresh docs/features + internal, re-run §2 counts (palette 240, menus/keymaps/themes,
+   bundled 22 vs 50 + ports, plugin API 242 vs ~372, settings 69/14, e2e index) and refresh every §3
+   row; walk every §4 divergence/§5 residual/closed id under TUI-only policy; run full gates
+   (build×2, vet, lint, gofmt, purity/import, menus, i18n_check + heap, GOOS=windows, full go test,
+   real-host SSH/tmux/ConPTY where reachable); docs-vs-code audit. Report explicit open items and
+   objective boundaries, not substitutions; full parity only if open TUI list empty.
 
 ## 6. Tracking notes
 
@@ -3562,7 +3731,7 @@ Round 13 recorded five open gaps:
   sessions, #21a authority + SSH, #22b i18n catalogues, LSP residual sweep); this audit ran
   the gates and reviewed the diff (no scope creep; §7):
   - **Daemon #18a MVP** (`internal/daemon/{server,attach,attach_resize_*}.go`, app/CLI/TUI wiring,
-    docs/architecture §8): server attach lifecycle (one client, hello/resize/input/open_file/
+    docs/architecture §8): server attach lifecycle (r12 single-client; r19 multi-client landed: broadcast/any input/smallest size, hello/resize/input/open_file/
     detach/ping; detached input blocks without ending the editor; output only to the attached
     client with write-error detach; `OnProgram` repaint/resize; `OnOpenFiles`; Close sends exit)
     and the attach proxy (hello+size, optional open-file frame, raw mode/restore, stdin→input,
@@ -3916,39 +4085,68 @@ Round 13 recorded five open gaps:
   SSH/jump-box/agent-forwarding/search/explorer/replace/large-file save, real-tmux, Windows
   ConPTY, real-host OSC52 and multi-head/PTY workspace switching remain UNTESTED. No full-parity
   claim.
+- **Round-19 final verification (2026-11-09, merged tree on `f691d44`; 141–146, 148).** The
+  Lead's final gates: static ALL GREEN (clean GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet,
+  golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en 112 KiB /
+  de 82 KiB / both 195 KiB); full `go test ./... -p 1 -count=1 -timeout 1800s` EXIT 0, 76 packages,
+  log `/tmp/gvim-r19-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-19 tests
+  and diff review only (no full suite), all green: plugin window-scope/focus announcer, plugin
+  authority OS, remote hot-exit/trust/reconnect, per-workspace project plugin config/waits, i18n
+  check, multi-client/auto-attach, remote explorer clipboard
+  (packages internal/tui, internal/pluginhost, internal/app, internal/daemon, internal/cli, trust,
+  authority).
+  Tracks: 141 full per-mount chrome scope editor/window/buffer + focus announcer (window/buffer
+  ids per-workspace not globally stable residual), 142 plugin fs/proc through workspace authority
+  (local-only LookPath/Dirs/Getenv/Now, unsupported/errors, polling watch notice, real SSH
+  untested), 143 remote hot-exit staged locally + authority recovery, remote trust record keyed
+  target, reconnect cache refresh/one notice (local-staging divergence/marker scan/real host
+  residuals), 144 per-workspace project plugin config (only changed plugins reload; project layer
+  never writes user toggles) + cross-workspace waits stay/resume/cancel (hard-kill debounce
+  residual), 145 i18n remainder 4 (en 972/569 / 553 KiB / ≈640 KiB / heap 112-82-195), 146 daemon
+  multi-client + auto-attach (multi-client broadcast/any input/smallest size/detach one/slow-
+  client bounded detach/incompatible version rejected; auto_attach default OFF vs Fresh on, named-
+  daemon nuances residual), 148 remote explorer clipboard (cut/copy/paste/duplicate over authority,
+  bounds/atomic/binary/collision refusal/partial reporting; no drag/undo/transaction/mode-
+  preservation/existence race residual).
+  Heap-guard test diagnosis remains: shared-process HeapSys/garbage contamination, test-only fresh-
+  child/strict/4× fix, production sampled circuit breaker; 4× scheduling-tail risk and "peak cannot
+  prove never fired" retained. LSP manager fake-server async dispatch fix 40/40 remains. Real-host
+  SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/large-file save, real-tmux,
+  Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching remain UNTESTED. No full-
+  parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
-  R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 are partially landed with residual lists
-  (round-18 landed shared daemon plugin runtime, remote large-file editing/bounded save, remote
-  session restore, remote ignore/watch gvim extension, extract-variant gvim extensions, i18n
-  remainder 3, remote search scopes/preview; task 132/133 resolved; §5.5 is round-19/20 plan;
-  TUI-only scope and genuine-equivalence policy are §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–18 had their gate sets
-  run. The final merged round-18 tree has ALL STATIC GATES GREEN (Lead, clean GOCACHE: build,
+  R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
+  (round-19 landed full plugin window-scope/focus, plugin authority OS, remote hot-exit/trust/
+  reconnect, per-workspace project plugin config/waits, i18n remainder 4, multi-client/auto-attach,
+  remote explorer clipboard; §5.5 is round-20/21 plan; TUI-only scope/genuine-equivalence policy §4
+  item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–19 had their gate sets
+  run. The final merged round-19 tree has ALL STATIC GATES GREEN (Lead, clean GOCACHE: build,
   CGO_ENABLED=0 build, GOOS=windows build, vet, golangci-lint 0, gofmt, purity, import rules,
-  menus, i18n_check with catalogue heap en 105 KiB / de 82 KiB / both 187 KiB). The Lead's final
+  menus, i18n_check with catalogue heap en 112 KiB / de 82 KiB / both 195 KiB). The Lead's final
   full `go test ./... -p 1 -count=1 -timeout 1800s` exited 0: 76 packages, log
-  `/tmp/gvim-r18-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-18 tests and
-  diff review only (no full suite) — plugin_shared/shared runtime, remote large-file editable
-  overlay/save, remote session restore, remote ignore/watch, extract variants, remote search scopes/
-  preview, i18n — all green. Heap-guard test: the earlier `TestHeapGuardStopsADoublingString` failure
-  was shared-process `HeapSys`/garbage baseline contamination, not the product; only the test changed
-  (single fresh child, strict field parsing, 4× ceiling retained); production guard unchanged. The
-  production per-slice heap guard remains a sampled circuit breaker (128 MiB limit, 1 ms samples
-  after 2 ms, forced-GC confirmation, cancellation between VM instructions, process-wide), not a
-  strict hard limit/accountant; a doubling string typically peaks near twice the guard. The 4×
-  ceiling is a test contract with scheduling-tail risk (a late 1 ms sample can miss one doubling;
-  observed max 255 MiB for the 64 MiB test limit); beyond 4× violates the test ceiling and may be
-  sampling delay or a guard fault, not proof the guard never fired. `TestDynamicRegistrationUnlocks
-  Routing` was a fake-server synchronous-scheduling deadlock in test infrastructure; it dispatches
-  asynchronously now and passed 40/40 stress runs, no production change. Real-host verification
-  remains UNTESTED rather than passed: real-SSH editing/search/explorer/replace/large-file save,
-  keepalive/2FA/agent-forwarding/jump-box against a real host, real-tmux discovery/Import, real-
-  Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching; the ~/… expansion is verified
-  against a local real `sh` (fake remote transport), not a live host. Phase-2 exit-path limits are in
-  §4 item 82/§6. Treat statuses as pointers, not proof.
+  `/tmp/gvim-r19-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-19 tests and
+  diff review only (no full suite) — plugin window scope/focus, plugin authority OS, remote hot-
+  exit/trust/reconnect, per-workspace project config/waits, multi-client/auto-attach, explorer
+  clipboard, i18n — all green. Heap-guard test: the earlier `TestHeapGuardStopsADoublingString`
+  failure was shared-process `HeapSys`/garbage baseline contamination, not the product; only the
+  test changed (single fresh child, strict field parsing, 4× ceiling retained); production guard
+  unchanged. The production per-slice heap guard remains a sampled circuit breaker (128 MiB limit,
+  1 ms samples after 2 ms, forced-GC confirmation, cancellation between VM instructions, process-
+  wide), not a strict hard limit/accountant; a doubling string typically peaks near twice the
+  guard. The 4× ceiling is a test contract with scheduling-tail risk (a late 1 ms sample can miss
+  one doubling; observed max 255 MiB for the 64 MiB test limit); beyond 4× violates the test
+  ceiling and may be sampling delay or a guard fault, not proof the guard never fired.
+  `TestDynamicRegistrationUnlocksRouting` was a fake-server synchronous-scheduling deadlock in test
+  infrastructure; it dispatches asynchronously now and passed 40/40 stress runs, no production
+  change. Real-host verification remains UNTESTED rather than passed: real-SSH editing/search/
+  explorer/replace/clipboard/large-file save, keepalive/2FA/agent-forwarding/jump-box, real-tmux
+  discovery/Import, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching; the
+  ~/… expansion is verified against a local real `sh` (fake remote transport), not a live host.
+  Phase-2 exit-path limits are in §4 item 82/§6. Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.
@@ -4028,31 +4226,31 @@ remain open), project search's user feature (native panel; provider/large-file c
 open), and markdown compose/source's user feature (native page view/dual; remaining markdown gaps
 stay open). dashboard/live_grep/welcome_screen are partial equivalents at best — their missing
 user features stay open; gvim's merged diff-navigation landed in git_gutter but R13-9's large-file/Compare/command-i18n residuals stay open, not equivalent to the standalone diff_nav plugin.
-No other missing Fresh TUI functionality is recorded as a substitution: full Fresh window-scope
-chrome/focus announcer and cross-workspace plugin-UI wait retargeting, remote/authority-spec
-workspaces sharing the daemon runtime, per-workspace project plugin config (R13-24); remote large-
-file >64 MiB/Fresh host-patched recipe (R13-22); remote explorer copy/paste/drag/undo/check-to-
-write race/watch latency/rename-as-remove+create/Windows paths (R13-13/R13-21); remote search
-preview plain-text/head-only >256 KiB and ignore/candidate filtering (R13-11/R13-23); remote
-authority/session conflict detection, plugin FS local OS, remote trust store, ownership (R13-3/
-R13-19); SSH known_hosts accept-new/host-key algorithms/OTP/keyring/real host (R13-17); remote env
-interactive-shell/watch/cache/status (R13-18); completion residual UX (R13-7); shared buffers and
-extract terminal-tabs-in-multi-select/mixed selection (R13-14/R13-1); live-restore full backing
-file/cursor/alt-screen/OSC/hyperlinks and remote state (R13-15); input GPM/kitty/legacy release/
-reflow (R13-16/R13-6); diff_nav residuals (R13-9); update self-update/terminal buffer (R13-12);
-URL packaged repo/marketplace (R13-20); composite API, orchestrator, live_sessions/agent_*,
-devcontainer, k8s-workspace, pkg, audit_mode, welcome/language helpers, theme background images/
-drag, plugin gallery/env activation/in-page capture, multi-client/auto_attach/eviction, universal
-server, Windows ConPTY verification, and i18n remaining boundary docs refresh are OPEN (R13-1…
-R13-24). Landed/no longer open: r18 shared daemon plugin runtime for LOCAL workspaces, remote
-large-file editable overlay + bounded save, remote daemon session restore, remote .gitignore/watch
-(gvim extension), extract variants (gvim extensions), i18n remainder 3/docs boundary refresh,
-remote search current-file/open-buffers scopes + preview; plus prior remote explorer writes/jump
-box/per-workspace plugin state/SSH config/agent forwarding/live-restore screen, remote search/
-replace/git/preview/refresh, registry v2 co-tenant/same-root extract, completion trigger/live-
-filter, URL themes, update commands, terminal Live restore dive, input edges, SSH keepalive/
-retry/passphrase/2FA, remote env provider, remote finder, daemon host marks, split persistence,
-OSC52 read, tab reorder, remote watch. Real hosts remain UNTESTED.
+No other missing Fresh TUI functionality is recorded as a substitution: cross-workspace plugin id
+namespacing (window/buffer ids per workspace; plugins caching ids must re-read), remote/authority
+runtime sharing (R13-24); remote large-file >64 MiB/Fresh host-patched recipe (R13-22); remote
+explorer drag/move/undo/whole-subtree transaction/cleanup UI/mode-mtime-hardlink-xattr/existence
+race/overwrite prompt/watch latency/Windows paths (R13-13/R13-21); remote search preview plain/
+head-only >256 KiB + ignore/candidate filtering (R13-11/R13-23); remote authority marker scan/hot-
+exit local-staging divergence/conflict detection/ownership (R13-3/R13-19); SSH known_hosts accept-
+new/host-key algorithms/OTP/keyring/real host (R13-17); remote env (R13-18); completion residual
+(R13-7); shared buffers/extract terminal-in-multi/mixed selection/drag-drop (R13-14/R13-1); live-
+restore full backing file/cursor/alt-screen/OSC/hyperlinks/remote state (R13-15); input GPM/kitty/
+legacy release/reflow (R13-16/R13-6); diff_nav (R13-9); update self-update/terminal buffer
+(R13-12); URL packaged repo/marketplace (R13-20); auto_attach default/named-daemon nuances differ
+Fresh (R13-1); plugin ports/composite/gallery; theme background/drag; universal server; Windows
+ConPTY; i18n remaining boundary are OPEN (R13-1…R13-24). Landed/no longer open: r19 full per-mount
+plugin window-scope chrome + focus announcer (id namespacing residual), plugin fs/proc through
+workspace authority, remote hot-exit/trust record/reconnect resilience, per-workspace project plugin
+config + cross-workspace UI waits, i18n remainder 4, daemon multi-client + auto-attach (top-level
+user knob default OFF; multi-client broadcast/any input/smallest size/detach one/slow-client
+bounded detach/incompatible version rejected), remote explorer clipboard cut/copy/paste/duplicate;
+plus prior r18 shared daemon runtime, remote large-file editable save/session restore, remote
+ignore/watch gvim extension, extract-variant gvim extensions, i18n remainder 3, remote search
+scopes/preview; r17 jump box/explorer writes/read-only-then-r18-editable remote large file/SSH
+config/agent forwarding; r16 registry v2/co-tenant/same-root extract, remote replace/git/preview/
+refresh, completion trigger/live-filter, URL themes, update commands; and all earlier landed items.
+Real hosts remain UNTESTED.
 
 **gvim-only additions (not parity requirements).** Round-18 remote `.gitignore` filtering + polled directory watching and extract variants (into an existing workspace, terminal saved-state migration, multi-select tabs) are gvim extensions, not Fresh gaps; they are documented in §4 items 122/123 and must keep working but do not count toward Fresh parity. `gvim config show`/`config paths` (show is
 trust-gated), `gvim grammar`, the in-process `uitest` harness, `cmd/gvimdebug`, the screenshot sweep,

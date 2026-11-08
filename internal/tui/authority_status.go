@@ -156,6 +156,18 @@ type authorityRestartDoneMsg struct {
 // reportAuthorityRestart puts the post-reconnect work's outcome on the status row: a
 // failure is a notice, and a successful restart says how many servers came back.
 func (m *Model) reportAuthorityRestart(count int, err error) {
+	if m.authorityRefreshNotice {
+		m.authorityRefreshNotice = false
+		notice := "SSH reconnected: remote workspace refreshed"
+		switch {
+		case err != nil:
+			notice += "; post-reconnect refresh failed: " + err.Error()
+		case count > 0:
+			notice += fmt.Sprintf("; %d language server(s) restarted", count)
+		}
+		m.quietNotice(notice)
+		return
+	}
 	if err != nil {
 		m.quietNotice("LSP restart after reconnect failed: " + err.Error())
 		return

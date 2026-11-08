@@ -43,7 +43,7 @@ func AttachClientTargets(ctx context.Context, name, cwd string, files []OpenFile
 	// One writer for this connection: the input goroutine and the SIGWINCH goroutine
 	// both write frames, and they must never interleave.
 	fw := NewFrameWriter(deadlineWriter{conn: conn, timeout: frameWriteTimeout})
-	if err := fw.WriteJSON(TypeHello, Hello{Cols: cols, Rows: rows}); err != nil {
+	if err := fw.WriteJSON(TypeHello, Hello{Version: ProtocolVersion, Cols: cols, Rows: rows}); err != nil {
 		return err
 	}
 	if len(files) > 0 {
@@ -101,6 +101,11 @@ func AttachClientTargets(ctx context.Context, name, cwd string, files []OpenFile
 				}
 			case TypeNotice:
 				_, _ = fmt.Fprintln(os.Stderr, "gvim:", string(f.Payload))
+			case TypeVersionRejected:
+				var m VersionMismatch
+				_ = DecodeJSON(f, &m)
+				done <- fmt.Errorf("daemon protocol version %d is incompatible with this client (version %d); update gvim on both sides", m.Daemon, m.Client)
+				return
 			case TypeDetached, TypeExit:
 				done <- nil
 				return

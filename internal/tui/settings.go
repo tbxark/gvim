@@ -127,7 +127,7 @@ func (m *Model) openReadOnlySettings() {
 func (m *Model) openConfigFile() {
 	path := m.util.settings.ConfigFile
 	if path == "" {
-		m.notice = "No user config file to open"
+		m.notice = uiText("gvim.settings.notice.no_user_config", "No user config file to open")
 		return
 	}
 	m.openFile(path, false)
@@ -246,7 +246,7 @@ func (p *settingsPage) toggleReset() {
 		return
 	}
 	if !p.writable(it) {
-		p.m.notice = "Settings: " + it.Name + " can only be set in the user config"
+		p.m.notice = uiTextVars("gvim.settings.notice.user_config", "Settings: %{name} can only be set in the user config", map[string]any{"name": it.Name})
 		return
 	}
 	if it.Kind == "info" {
@@ -254,22 +254,22 @@ func (p *settingsPage) toggleReset() {
 		if why == "" {
 			why = "read-only"
 		}
-		p.m.notice = "Settings: " + it.Name + " is read-only — " + why
+		p.m.notice = uiTextVars("gvim.settings.notice.read_only", "Settings: %{name} is read-only — %{why}", map[string]any{"name": it.Name, "why": why})
 		return
 	}
 	if it.Kind == "page" {
-		p.m.notice = "Settings: open the " + it.Name + " page to reset its entries"
+		p.m.notice = uiTextVars("gvim.settings.notice.reset_entries", "Settings: open the %{name} page to reset its entries", map[string]any{"name": it.Name})
 		return
 	}
 	if pending, ok := p.pending[it.Key]; ok && pending.remove {
 		delete(p.pending, it.Key)
 		p.rebuild()
-		p.m.notice = "Settings: reset of " + it.Name + " undone"
+		p.m.notice = uiTextVars("gvim.settings.notice.reset_undone", "Settings: reset of %{name} undone", map[string]any{"name": it.Name})
 		return
 	}
 	p.setScalarRemove(it)
 	p.rebuild()
-	p.m.notice = "Settings: " + it.Name + " will be reset when saved"
+	p.m.notice = uiTextVars("gvim.settings.notice.reset_pending", "Settings: %{name} will be reset when saved", map[string]any{"name": it.Name})
 }
 
 // settingsRow is one line of the page: a section header or an editable item.
@@ -499,11 +499,11 @@ func (p *settingsPage) edit() tea.Cmd {
 		if why == "" {
 			why = "read-only"
 		}
-		p.m.notice = "Settings: " + it.Name + " is read-only — " + why
+		p.m.notice = uiTextVars("gvim.settings.notice.read_only", "Settings: %{name} is read-only — %{why}", map[string]any{"name": it.Name, "why": why})
 		return nil
 	}
 	if !p.writable(it) {
-		p.m.notice = "Settings: " + it.Name + " can only be set in the user config"
+		p.m.notice = uiTextVars("gvim.settings.notice.user_config", "Settings: %{name} can only be set in the user config", map[string]any{"name": it.Name})
 		return nil
 	}
 	switch it.Kind {
@@ -534,7 +534,7 @@ func (p *settingsPage) openEdit(key string) tea.Cmd {
 				continue
 			}
 			if !p.writable(it) {
-				p.m.notice = "Settings: " + it.Name + " can only be set in the user config"
+				p.m.notice = uiTextVars("gvim.settings.notice.user_config", "Settings: %{name} can only be set in the user config", map[string]any{"name": it.Name})
 				return nil
 			}
 			switch it.Kind {
@@ -606,26 +606,26 @@ func (p *settingsPage) prompt(it SettingsItem) tea.Cmd {
 func (p *settingsPage) toggleLayer() {
 	if p.layer == SettingsLayerUser {
 		if !p.snap.ProjectWritable {
-			p.m.notice = "Settings: the project layer can be written only in a trusted workspace"
+			p.m.notice = uiText("gvim.settings.notice.project_trusted", "Settings: the project layer can be written only in a trusted workspace")
 			return
 		}
 		p.layer = SettingsLayerProject
-		p.m.notice = "Settings: writing the project config"
+		p.m.notice = uiText("gvim.settings.notice.writing_project", "Settings: writing the project config")
 		return
 	}
 	p.layer = SettingsLayerUser
-	p.m.notice = "Settings: writing the user config"
+	p.m.notice = uiText("gvim.settings.notice.writing_user", "Settings: writing the user config")
 }
 
 // reset drops the pending values.
 func (p *settingsPage) reset() {
 	if !p.dirty() {
-		p.m.notice = "Settings: no changes to reset"
+		p.m.notice = uiText("gvim.settings.notice.no_changes_reset", "Settings: no changes to reset")
 		return
 	}
 	p.pending = make(map[string]settingsPending)
 	p.rebuild()
-	p.m.notice = "Settings: pending changes discarded"
+	p.m.notice = uiText("gvim.settings.notice.pending_discarded", "Settings: pending changes discarded")
 }
 
 // save writes the pending values to the current layer, through a command: the
@@ -633,7 +633,7 @@ func (p *settingsPage) reset() {
 // loop.
 func (p *settingsPage) save() tea.Cmd {
 	if !p.dirty() {
-		p.m.notice = "Settings: no changes to save"
+		p.m.notice = uiText("gvim.settings.notice.no_changes_save", "Settings: no changes to save")
 		return nil
 	}
 	var edits []SettingEdit
@@ -687,7 +687,7 @@ func (p *settingsPage) editRaw() tea.Cmd {
 	layer := p.layer
 	p.Close()
 	if path == "" {
-		p.m.notice = "Settings: no " + layer + " config file is known"
+		p.m.notice = uiTextVars("gvim.settings.notice.no_layer_config", "Settings: no %{layer} config file is known", map[string]any{"layer": layer})
 		return nil
 	}
 	p.m.openFile(path, false)
@@ -720,7 +720,7 @@ func (p *settingsPage) confirmCancel() {
 // says why.
 func (p *settingsPage) applied(change SettingsChange, err error) {
 	if err != nil {
-		p.m.notice = "Settings: " + err.Error()
+		p.m.notice = uiTextVars("gvim.settings.notice.error", "Settings: %{error}", map[string]any{"error": err.Error()})
 		return
 	}
 	if change.Reload && p.dirty() {
@@ -839,7 +839,7 @@ func (m *Model) settingsAction(action string, args map[string]any) (tea.Cmd, boo
 		return nil, false
 	}
 	if m.util.settingsPort == nil {
-		m.notice = "Config reload is unavailable: the Settings page has no config port"
+		m.notice = uiText("gvim.settings.notice.reload_unavailable", "Config reload is unavailable: the Settings page has no config port")
 		return nil, true
 	}
 	port := m.util.settingsPort

@@ -51,7 +51,7 @@ func attachDaemonTest(t *testing.T, name string) net.Conn {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := daemon.WriteJSON(conn, daemon.TypeHello, daemon.Hello{Cols: 100, Rows: 30}); err != nil {
+	if err := daemon.WriteJSON(conn, daemon.TypeHello, daemon.Hello{Version: daemon.ProtocolVersion, Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 	if err := daemon.WriteFrame(conn, daemon.TypePing, nil); err != nil {

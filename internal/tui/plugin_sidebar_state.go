@@ -31,7 +31,7 @@ type pluginSidebarRestore struct {
 func (m *Model) pluginSidebarState() (order []string, rows map[string]int, collapsed map[string]bool) {
 	rows = map[string]int{}
 	collapsed = map[string]bool{}
-	for _, mp := range m.plug.panels.sidebarOrder() {
+	for _, mp := range m.plug.panels.sidebarOrder(m) {
 		if len(order) >= maxSessionPluginSections {
 			break
 		}
@@ -75,7 +75,7 @@ func (m *Model) applyPluginSidebarRestore() {
 	if r == nil {
 		return
 	}
-	sections := ps.sidebarOrder()
+	sections := ps.sidebarOrder(m)
 	if len(sections) == 0 {
 		return
 	}

@@ -13,7 +13,7 @@ import (
 
 func TestFrameRoundTripAndBounds(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteJSON(&buf, TypeHello, Hello{Cols: 120, Rows: 40, Args: []string{"a.go"}}); err != nil {
+	if err := WriteJSON(&buf, TypeHello, Hello{Version: ProtocolVersion, Cols: 120, Rows: 40, Args: []string{"a.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteFrame(&buf, TypeInput, []byte("jk")); err != nil {

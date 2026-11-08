@@ -211,6 +211,28 @@ deliberately does not take.
   with filtering incomplete and one notice. The remote finder index uses the same reader
   (its ignore batch lives for one index lifetime, so an edited ignore file reaches the
   palette on the next index restart/reconnect); there is no local filesystem fallback.
+- Remote workspace hot-exit/recovery, trust and reconnect (landed): a direct remote launch
+  stages the unsaved text of its open remote documents locally under a session directory
+  keyed by the remote target (`<cache>/gvim/remote-sessions/<hash>/session`; a
+  daemon-hosted remote workspace uses its workspace session directory), with the remote
+  paths recorded in the staged session. Recovery is installed after the remote
+  `FileAccess` exists, so the next launch reopens those remote paths through the authority
+  with the staged text and reports the remote target; a clean exit clears the staging
+  directory. The writer is the ordinary bounded `RecoveryWriter` driven from the root's
+  recovery command, and it is a deliberate local-staging divergence from Fresh (which
+  routes recovery through the authority): no local file named by the workspace is read or
+  written, and a local disk never becomes a remote fallback. Workspace trust for a remote
+  target is recorded in the same atomic `trust.json` store through explicit record keys
+  (`trust.RecordKey`: user@host[:port]:workspace root) with `LevelForRecord`/`SetRecord`/
+  `OpenRecord`; a trusted/restricted decision therefore survives a restart and a reconnect
+  does not re-prompt, while local workspaces keep their canonical-root keys. Remote
+  executable-content marker scanning needs an early remote connection and is not wired: an
+  undecided remote target is opened markerless and records that level (residual). After a
+  successful reconnect the existing cache/work refreshes run (authority watch Reconnected,
+  finder Restart, git cache Invalidate, explorer reload and startup-open retry, LSP restart
+  in a command) and the UI reports one notice, `SSH reconnected: remote workspace
+  refreshed`, with a restarted-server count or refresh failure appended instead of
+  separate reconnect/restart notices.
 - LSP over SSH (landed): the language servers of a remote workspace start on the remote
   host through the authority's `LongRunning` surface (a separate ssh exec channel with
   piped stdio), not as local `exec.Command`s. The manager gained a `SetSpawner` seam (nil =
@@ -256,8 +278,11 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
 - Local launches: `authority.Local` over the plugin host's OS instance (the same one the plugin
   runtime uses; `pluginhost.Wiring.OS` is exposed for this), with the local project env
   overlay as the env provider and the workspace-trust check as the gate. The plugin host of a
-  LOCAL launch sees that overlay too; a remote launch's plugin host (which runs locally) gets
-  no project environment, so a remote-captured variable never leaks back into local children.
+  LOCAL launch sees that overlay too. A REMOTE launch mounts its authority before the plugin
+  runtime and gives it an authority-backed plugin OS (`pluginhost.NewAuthorityOS` via the
+  `pluginhost.Options.WrapOS` seam): plugin processes receive the remote captured environment
+  from the authority, never the local overlay, so a remote-captured variable cannot leak back
+  into local children.
 - Remote launches' environment (R13-13): `env.Remote` detects the configured markers on the
   remote host (one bounded shell probe of the marker files) and activates the recipe through
   the authority one-shot surface, diffing the remote activated environment against the remote
@@ -357,8 +382,13 @@ Residuals of this slice (documented, not bugs):
 - A dropped carrier does not resurrect an open remote terminal (open parity gap, see
   above): activation reconnects the carrier, and opening the terminal again starts a fresh
   session set by the user.
-- Plugin `gvim.fs`/`gvim.proc` still use the plugin OS port directly; routing them through
-  the authority is the follow-up once remote file I/O exists.
+- Plugin `gvim.fs`/`gvim.proc` route through the workspace authority in a remote or
+  daemon-hosted remote workspace (the app wraps the local plugin OS with
+  `pluginhost.NewAuthorityOS`: files, mutations, watches and processes go to the slot, the
+  authority trust gate/env/cwd apply, and LookPath/Dirs/Getenv/Now stay documented local-only APIs;
+  copy/realpath/walk and a backend without mutations return clear unsupported errors; remote
+  fs.watch is the polling watch with a startup degradation notice). This closes the earlier
+  residual that plugin file/process APIs always used the local OS.
 
 ## 7.1 Daemon-hosted remote authority (jump box)
 
@@ -415,8 +445,9 @@ Residuals of this slice: real SSH is still untested (all tests are offline fakes
 workspace whose remote files changed while the daemon was down restores the saved text and
 reports the usual per-file open failures (no remote conflict detection beyond the normal
 stash/mtime baseline); the restored terminal transcript comes back dead (the normal restored
-session behavior, no process re-run); plugin gvim.fs/gvim.proc still use the local plugin OS
-port in a remote workspace (the remote explorer/terminal/search do go through the authority);
+session behavior, no process re-run); plugin gvim.fs/gvim.proc follow the workspace
+authority (files, mutations, watches and processes, see the plugin OS paragraph above; the
+remote explorer/terminal/search also go through the authority);
 the remote workspace's trust decision is the local workspace's trust store; and per-file
 ownership across a jump-box daemon and a direct editor on the same remote host is not
 covered.
@@ -513,10 +544,34 @@ root; a create or rename refuses an existing target (checked before the mutation
 FileMutations surface has no exclusive create, so a check-to-write race is a recorded
 residual) and a remote delete asks first and says it is permanent (no remote trash). After a
 successful operation the existing explorer file-job refresh reloads the remote tree through
-its reload command, so the update loop never waits on the host. Cut/copy/paste of remote
-subtrees, drag/move and duplicate stay refused with one notice (a tree capability, not a
-hidden local operation); real-host manual acceptance and undo/history for remote writes
-remain open.
+its reload command, so the update loop never waits on the host.
+
+The clipboard is wired on the same surface (`internal/app/remote_explorer_copy.go`, task
+148). Copy walks the source subtree with `Files().ReadDir` (hidden entries included) and
+writes destination directories with `Mutations.Mkdir` and files with
+`WriteFile(Atomic: true)`, so every file lands atomically and binary data is carried
+byte-for-byte. Cut (`Move`) is copy-then-remove: the source is removed with
+`Mutations.Remove` only after the whole copy succeeded. Bounds: 10000 entries, 256 MiB,
+64 directory levels, and a 2-minute context (the caller's context still cancels). Refusals
+are explicit and happen before the destination is created: symbolic links anywhere in the
+subtree (the port follows links on Stat, so the no-follow answer comes from the parent
+listing), the workspace root itself as source, paths outside the remote root, a destination
+inside the source, and a copy/move onto an existing name in another directory (remote paste
+never overwrites; the overwrite conflict choice is ignored). A same-directory copy
+(Duplicate) gets Fresh's rule — "name copy.ext", then "name copy 2.ext", ... checked against
+the remote directory (1000 attempts). A cancellation or I/O failure in the write phase keeps
+the partial destination and the error says how many files were written and where the
+partial copy is; gvim never deletes remote data on a failed copy. Every clipboard action
+confirms first on a remote workspace and names the target (copy/cut/duplicate name the
+entry or count, paste names the destination and count); a local workspace keeps the old
+no-confirmation behavior. The tree refresh after success is the existing file-job refresh.
+
+Remaining gaps: no drag/move between directories, no undo/history for remote writes, no
+whole-subtree transaction or cleanup UI for a partial copy, FileEntry/Mode and mtimes are not
+restored (the port's DirEntry has no mode), hard links/xattrs are not preserved, and a
+copy/rename's existence check still races the write (the FileMutations surface has no
+exclusive create). Real-host manual acceptance remains unautomated (the copy tests use a fake
+authority file system, with a local decoy tree proving no local fallback).
 
 ### Windowed remote reads (remote large-file mode)
 

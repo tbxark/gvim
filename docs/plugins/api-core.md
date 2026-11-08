@@ -151,6 +151,11 @@ gvim.env.clear() -> true|nil, err
 for single files); `dirs.root()` is the workspace root *now* (it changes when the user opens
 another project). Plugins never change the environment; pass `env` to `gvim.proc.run` instead.
 
+**Remote workspaces.** In a remote SSH workspace these directory and environment reads are
+still **local-machine** APIs: they describe the machine gvim itself runs on. The workspace-backed
+file and process APIs (`gvim.fs`, `gvim.proc`) follow the remote host instead; see
+[api-system.md](api-system.md#remote-workspaces).
+
 ## gvim.plugins
 
 ```text

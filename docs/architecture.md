@@ -374,7 +374,8 @@ workspace model (#19).
   unlinked. While a daemon (the per-root default or any explicitly named one) hosts a
   workspace, EVERY direct editor launch in it refuses — bare, FILE…, `--diff`, `--simple` and
   stdin — because the daemon's unsaved buffers and a direct editor's writes to the same
-  files would race both ways (the direct editor writes the file under the daemon's
+  files would race both ways (one exception: a bare launch with `auto_attach` on joins the
+  running daemon instead of refusing; see Auto attach below) (the direct editor writes the file under the daemon's
   buffer, then the daemon's save overwrites the direct edits). The error names the daemon
   and the way out: attach with `gvim -a` (then the files, e.g. `gvim -a FILE...`), or
   `gvim --attach=NAME` (`-a=NAME` also works) for a named daemon, or quit the daemon first.
@@ -420,21 +421,45 @@ workspace model (#19).
   and skips its capture so the saved session survives for the next start. Direct remote
   launches still keep no local session.
 - **Attach.** `gvim -a [NAME]` (or `--attach`) dials the socket, sends a hello
-  with the terminal size (and any named files as an open-file frame), puts the
-  terminal in raw mode, and forwards input bytes, output frames, resize signals
-  and SIGWINCH. A detached/exit frame restores the terminal. Only one client is
-  attached at a time: a second attach gets a notice and is dropped, never a silent
-  takeover.
+  with the protocol version, the terminal size and any named files as an open-file
+  frame, puts the terminal in raw mode, and forwards input bytes, output frames,
+  resize signals and SIGWINCH. A detached/exit frame restores the terminal. Several
+  clients may be attached to one session (Fresh's shared-view model): every server frame
+  is broadcast to all of them, input from any client reaches the program, and the
+  program is told the **smallest attached client's size**, so a larger terminal
+  letterboxes instead of cropping the shared view (a resize or an attach renegotiates
+  it). Detach or a dropped connection removes only that client; the others keep
+  receiving frames and the session keeps running. A slow client is detached after one
+  bounded write; an unknown frame drops only that client.
+- **Protocol version.** The hello carries `version` (`ProtocolVersion = 1`). A client
+  speaking another version is sent a dedicated version-rejected frame naming both
+  versions (the client prints that as an error and exits nonzero) and dropped before any
+  state change: it cannot resize, type into, or disturb a session hosted by an
+  incompatible daemon. The server never guesses compatibility.
 - **Hosting.** The daemon runs the normal Bubble Tea program through `tui.RunWithIO`
-  with the server as its input and output: input frames block the program's reader
-  while no client is attached (the editor stays alive), output frames are written
-  only to the attached client (discarded otherwise), and an attach or resize sends
-  a window-size message so the frame is repainted at the client's size. The hosted
-  editor restores the session on daemon start and saves it on daemon exit; a
-  detach saves nothing and does not stop any process.
+  with the server as its input and output: input from any attached client feeds the
+  program's reader (which blocks while none is attached, so the editor stays alive),
+  output frames are broadcast to every attached client (and discarded when none is),
+  and an attach or resize sends a window-size message with the smallest attached size so
+  every client's frame is repainted for the shared view. The hosted editor restores the
+  session on daemon start and saves it on daemon exit; a detach saves nothing and does
+  not stop any process.
 - **Detach.** The hosted editor lists one extra palette row, "Detach from Daemon"
-  (only under `--daemon`). It sends the detached frame to the client and drops
-  the connection; the editor keeps running and the next attach repaints it.
+  (only under `--daemon`). It sends the detached frame to every currently attached
+  client and drops them; the editor keeps running and the next attach repaints it.
+- **Auto attach.** With the user-config knob `auto_attach` on (top-level boolean,
+  default **off**; Fresh defaults it on), a bare launch — no files, no direct-mode flags
+  (`--diff`/`--simple`/`--stdin`/`--restore`/`--no-restore`), a terminal on stdin, and no
+  explicit `--daemon`/`--attach` — joins a daemon that already hosts the same workspace
+  instead of being refused as a second writer. It prints a one-line notice naming the
+  daemon before proxying the terminal. It never starts a daemon, never applies to a
+  remote-target launch (explicit `-a` is required there), never applies to an explicitly
+  named ambiguous set (several named daemons for one root and no default daemon keep the
+  refusal), and the preference is read from the user layer only. Fresh's
+  one-shared-daemon/"any flag is direct" nuances are not copied; gvim keeps its per-root
+  named daemons. Tests cover the decision (off, no daemon, direct modes, notice) and the
+  multi-client protocol.
+
 - **Protocol.** Length-prefixed frames: a 4-byte big-endian length (at most 1 MiB),
   a type byte and the payload. Client frames: hello (JSON cols/rows/args), input
   (raw terminal bytes), resize (JSON cols/rows), detach, open-file (JSON paths),
@@ -667,14 +692,30 @@ still loads unchanged.
   and must stay inside the remote root, and the existing file-job refresh reloads the remote
   tree through its reload command. Confirmations state the remote target: the new-file/folder
   and rename prompt labels name it, and the delete confirmation says "Permanently delete ...
-  on SSH:user@host:/path? Remote deletes have no trash." Cut/paste of subtrees, drag/move and
-  duplicate stay refused with one notice (the `ClipboardDisabled` tree capability); the local
-  project opener, preview and git-status ports stay refused/replaced as before (project search
-  runs through the authority and project replace writes through it too: see the
-  remote-project-replace bullet). Reveal/follow and re-expansion of unloaded ancestors work by
-  reloading the waypoint directories and revealing the path in the new listing. Gaps vs
-  Fresh's remote explorer (which runs the full file tree over the authority): drag/move,
-  cut/copy/paste of subtrees and duplicate are not wired, remote git marks stay inert, a
+  on SSH:user@host:/path? Remote deletes have no trash." The clipboard is wired over the same
+  authority surface (`internal/app/remote_explorer_copy.go`): cut (`Move`) and copy
+  (`Copy`) walk the subtree through `Files().ReadDir`/`ReadFile` and write it through
+  `WriteFile(Atomic: true)` with `Mutations.Mkdir`, bounded to 10000 entries, 256 MiB,
+  64 directory levels and a 2-minute timeout; symbolic links, invalid names, paths outside
+  the remote root, the workspace root as source and a destination inside the source are
+  refused before anything is created. Copies are binary-safe; a cancellation or failure in
+  the write phase keeps the partial destination and the notice says where it is (no
+  rollback, no remote data deletion). Cut is copy-then-remove: the source is removed only
+  after the copy fully succeeded (a failed removal keeps both and says so). A same-directory
+  copy/duplicate gets Fresh's free name ("name copy.ext", "name copy 2.ext", the exact
+  `fsops.CopyName` rule); a paste into another directory is REFUSED when the name exists
+  (remote paste never overwrites, and the overwrite prompt is not offered). Every clipboard
+  action asks first on a remote workspace and names the target ("Cut a.go on
+  SSH:user@host:/path?"; paste names the destination and count); a local workspace keeps the
+  old no-confirmation behavior. Every operation runs the workspace trust gate first, a
+  disconnected authority is the explicit reconnect error, and the existing file-job refresh
+  reloads the tree. The local project opener, preview and git-status ports stay
+  refused/replaced as before (project search runs through the authority and project replace
+  writes through it too: see the remote-project-replace bullet). Reveal/follow and
+  re-expansion of unloaded ancestors work by reloading the waypoint directories and
+  revealing the path in the new listing. Gaps vs Fresh's remote explorer (which runs the
+  full file tree over the authority): drag/move (a drag between directories) is not wired,
+  the clipboard has no undo/partial-cleanup UI, remote git marks stay inert, a
   directory symlink is shown as a directory (its target is listed through the symlink path),
   and a create/rename existence check has a check-to-write race (the FileMutations surface
   has no exclusive create/rename). Remote .gitignore files are read once per listing (the
@@ -703,6 +744,35 @@ still loads unchanged.
   success and failure, name validation, target-exists refusal, recursive directory delete,
   disconnected refusal touching nothing, trust gate before any mutation, unsupported
   move/copy, outside-workspace refusal, local decoy untouched).
+- **Remote workspace recovery, trust and reconnect (landed).** Direct remote launches now
+  have bounded hot-exit/crash recovery: the ordinary `restore.RecoveryWriter` stages the
+  unsaved text of remote documents under a local staging session directory keyed by the
+  remote target (`<cache>/gvim/remote-sessions/<hash>/session`, or the workspace session
+  directory of a daemon-hosted remote workspace), and the staged session records the
+  REMOTE paths. It is installed after `setupRemoteEditing`, so the next launch detects
+  the copy and reopens those remote paths through the authority's `FileAccess` with the
+  staged text; the notice names the remote target and a clean exit clears the staging
+  directory. This is a deliberate local-staging divergence from Fresh, whose recovery
+  routes through the active authority; no local file named by the workspace is ever read
+  or written as remote content, and the writer is driven from the root's recovery command
+  (no update-loop I/O). Remote workspace trust is a record in the same atomic trust store
+  keyed by the remote target (user@host[:port]:workspace root) through the explicit
+  record-key API, so a decision persists across restarts and a reconnect does not prompt
+  again; local root keying is unchanged. Reconnect resilience reuses the existing
+  invalidations/refreshes (authority watch Reconnected, remote finder Restart, git cache
+  Invalidate, explorer reload and startup-open retry, LSP restart in a command) and now
+  reports them as ONE notice: `SSH reconnected: remote workspace refreshed`, with the
+  restarted-server count or the refresh failure appended. Tests:
+  `internal/app/remote_recovery_test.go` (target-keyed dir, staged copy records the remote
+  path, restart restores the remote tab/text through a fake authority, no local file, clean
+  path), `internal/app/remote_trust_test.go` + `trust/record_test.go` (record keyed by
+  target, restart/reconnect reads the decision, other target separate, local root keys
+  unchanged, markerless/marked policy), `internal/tui/authority_restart_test.go` (one
+  refreshed-workspace notice, no-hook fallback, failure named). Residuals: remote
+  executable-content marker probing needs an early remote connection (not wired, so an
+  undecided remote target starts markerless-trusted and records that), recovery copies are
+  bounded by the existing per-document writer (a large document's unstaged overlay follows
+  the existing cap), and a remote recovery copy is local text (the documented divergence).
 - **Remote project replace (landed).** "Search and Replace in Project" now writes over a
   remote workspace through the authority instead of refusing: the root keeps the existing
   confirmation (the question names the remote target, e.g. `SSH:user@host:/path`) and runs
@@ -785,7 +855,7 @@ still loads unchanged.
   Per-workspace plugin runtimes are kept materialized per workspace (memory for
   isolation): only materialized workspaces cost a runtime; the registry keeps the rest as
   descriptors.
-- **Per-workspace plugin state (landed #19b slice; shared runtime is a follow-up).** A
+- **Per-workspace plugin state (landed #19b slice; the shared runtime landed in the next bullet).** A
   daemon workspace's plugin runtime scopes `gvim.state` to that workspace: the state lives in
   `sessions/<stable-id>/plugin-state.json` in its session directory, one versioned (v1)
   JSON object `{"version":1,"plugins":{name:{key:value}}}` for all of its plugins. The app
@@ -819,26 +889,65 @@ still loads unchanged.
   Editor-wide registrations - plugin commands, menus, key bindings/modes/contexts and status
   items - are snapshotted from the leaving model and installed into the entering one (with a
   keymap rebuild), so a plugin loaded once keeps its commands/keys/menus across workspaces.
-  Workspace-scoped chrome - widget panels and sidebar sections, the prompt/picker/popup
-  overlays, per-buffer decorations/folds/groups/view state - stays with the model where it
-  was registered, matching Fresh's default window scope for chrome. A workspace close does
-  not stop the shared runtime (models skip `pluginStop` when bound to it); the daemon stops it
-  once after `closeAll`, which flushes the active state namespace and shuts down every
-  registered workspace OS. Direct launches keep one runtime per session byte-identically.
-  Remote/authority-spec workspaces are excluded from sharing this slice (they keep their own
-  runtime). Tests: `internal/tui/plugin_shared_test.go` (editor-wide registrations carried, chrome
+  Chrome now has a per-mount scope (Fresh's model): a widget panel/sidebar mount declares
+  "window" (the default - the workspace model that mounted it), "editor" (carried in the
+  same leaving-model snapshot and installed into every entering model, where its pane is a
+  fresh instance rebuilt from the mount spec) or "buffer" (the optional buf or the active
+  buffer at mount time; parked while another buffer is focused and dropped when the buffer
+  closes). The column, hit-test and panel focus only see mounts whose scope belongs on
+  screen. The prompt/picker/popup overlays, per-buffer decorations/folds/groups/view state
+  stay with the model they were created in. One focus announcer now owns
+  active_window_changed and focus_gained: the paths that change focus call it, and it diffs
+  (workspace label, focused split window id, active buffer id) so a split change reports
+  exactly one transition. The buffer diff emits buffer_activated/deactivated and seeds the
+  announcer from the same transition, so a window change never repeats the buffer pair.
+  PluginShared.Bind seeds the leaving model's announcement so a workspace switch forces the
+  entering workspace's window/buffer announcement. Widget focus remains widget_event. A
+  workspace close does not stop the shared runtime (models skip pluginStop when bound to it);
+  the daemon stops it once after closeAll, which flushes the active state namespace and shuts
+  down every registered workspace OS. Direct launches keep one runtime per session
+  byte-identically. Remote/authority-spec workspaces are excluded from sharing this slice
+  (they keep their own runtime).
+  Tests: `internal/tui/plugin_shared_test.go` (editor-wide registrations carried, chrome
   not, host retarget, no workspace stop), `internal/pluginhost/shared_test.go` (OS mux
   follows the active workspace, one runtime per daemon), `internal/app/workspace_plugin_shared_test.go`
   (one runtime for two daemon workspaces, host/state rebind on switch/back).
-  Residuals: full Fresh per-registration window-scope chrome and the focus announcer; a
-  workspace's project plugin config/enablement is not applied to the shared runtime (daemon
-  launch config owns it); plugin UI waits/prompts opened in one workspace stay with it and are
-  not retargeted; reload/enable runs once editor-wide and re-registers workspace-scoped chrome
-  into the workspace active at that moment; remote/authority workspaces still run their own
-  runtime (while one is active the shared daemon runtime has no pump and is paused - queued
-  plugin events/tasks resume when a local workspace is active again); the old namespace's
-  pending state is flushed as Work on a switch, so a hard kill immediately after a switch can
-  lose the last debounce window exactly like the direct-launch state file.
+  Residuals: window/buffer ids are per-workspace rather than editor-global (payloads carry
+  the workspace label; a plugin caching an id across a switch must re-read it, cross-workspace
+  id namespacing is a follow-up), editor-scoped overlays (prompts/pickers/popups) remain
+  model-local (only widget panels/sidebar sections are carried), and editor-scoped widget
+  instance state is not cloned into inactive workspaces (the copy is rebuilt from the mount
+  spec when entered, live changes reach it through an update after the switch).
+  The per-workspace PROJECT plugin config is
+  applied on a switch: `pluginhost.NewWorkspace` snapshots the workspace config's
+  `plugins.<name>.enabled`/`plugins.<name>.settings` layer (project layer included) with a
+  canonical key; `Daemon.Activate` compares it with the runtime's current layer and, when it
+  differs, calls `plugin.Runtime.ApplyWorkspacePluginConfig`, which re-decides only the known
+  bundled/user candidates and schedules rescan Work only for the plugins whose enabled state
+  or settings changed: a plugin the workspace's project config disables is unloaded (with its
+  dependants), one it stops disabling loads again, and a loaded plugin with changed settings
+  is reloaded; every other plugin keeps running. The reads/compiles are Work, the switch
+  asks the entering model for one plugin pump (`RequestPluginPump` runs at the end of
+  Update), and a project config NEVER writes the editor-wide `plugin-state.json` toggles
+  (the project layer is a view, not a user choice). Bounded: one reload per changed plugin,
+  no reload-all; the unload itself runs the plugin's shutdown handlers on the UI goroutine
+  (the runtime's existing bounded unload path, <=200 ms total for all plugins).
+  Cross-workspace plugin UI waits: `tui.PluginShared` keeps a token -> owning-model registry
+  for shared-runtime daemons. A wait/prompt opened in workspace A stays registered to A
+  across a switch to B (its overlay and wait table live in A's model); B does not see it and
+  cannot reuse the runtime-global token (a duplicate is an invalid error), and the wait
+  resumes/answers in A when A is shown again. Closing A explicitly resolves every wait it
+  still owns with a `cancelled` completion and a warning notice, so a plugin task cannot
+  wait forever on a prompt whose workspace is gone; direct launches have no registry (one
+  model owns everything). Remote/authority workspaces still run their own runtime (while one
+  is active the shared daemon runtime has no pump and is paused - queued plugin events/tasks
+  resume when a local workspace is active again); the old namespace's pending state is flushed
+  as Work on a switch, so a hard kill immediately after a switch can lose the last debounce
+  window exactly like the direct-launch state file. Tests: `plugin/workspace_config_test.go`
+  (only affected plugin reloads/unloads/loads, no global toggle writes),
+  `internal/pluginhost/shared_test.go` (config-key diff asks for exactly one pump),
+  `internal/tui/plugin_waits_shared_test.go` (wait stays with A across a switch, duplicate
+  token refused, close cancels with a notice, B's waits untouched).
 - **Extract tab to a co-tenant workspace (landed with registry v2).** The tab context
   menu's "Extract to New Workspace" (and the palette row "Extract tab to new workspace")
   moves the active file tab into a NEW workspace over the SAME project root, matching
@@ -900,9 +1009,9 @@ still loads unchanged.
   Fresh's separate diff_nav plugin is unrelated; the per-tab "Extract to New Workspace"
   item also appears in Fresh's tab context menu.
 - **Remainder of #19a (not shipped).** A remote workspace's `authority_spec` field (registry
-  v2 still records no authority), per-workspace project plugin configuration for the shared
-  daemon runtime, full Fresh window-scope chrome/focus announcer per registration and
-  retargeting plugin UI waits across workspaces, eviction/memory limits for
+  v2 still records no authority), full Fresh window-scope chrome/focus announcer per
+  registration (task-141), sharing the runtime with remote/authority workspaces, eviction/memory
+  limits for
   warm co-tenants, the initial terminal-launch record in a workspace descriptor (the
   discovery Import can create a workspace but not attach an argv to it yet), shared
   buffers/daemon-level open-path map beyond the switch-to-existing-workspace rule (#19b),

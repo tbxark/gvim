@@ -37,6 +37,19 @@ type pluginWide struct {
 	order    []string
 	menus    menus
 	keys     pluginKeysWide
+	// chrome is the editor-scoped widget chrome (panels and sidebar sections) every
+	// workspace shows. Window-scoped chrome stays model-local; a buffer-scoped mount is
+	// never carried, because it belongs to one buffer of one workspace.
+	chrome []editorChromeSpec
+}
+
+// editorChromeSpec is one editor-scoped mount carried across a workspace switch. The mount
+// spec is shared read-only; each entering model builds its own panel instance (the widget
+// instance state is not cloned, see the residual in docs/architecture.md).
+type editorChromeSpec struct {
+	id    pluginapi.PanelID
+	owner string
+	mount pluginapi.WidgetMount
 }
 
 // pluginKeysWide is the editor-wide half of pluginKeys: the registrations and contexts, not
@@ -90,6 +103,10 @@ func (s *PluginShared) Bind(m *Model) {
 		wide.install(m)
 		return
 	}
+	m.seedFocusAnnouncement(prev)
+	// Announce the entering workspace's window/buffer now (queued, no IO): the previous
+	// workspace's focus is already known, so this is the switch transition.
+	m.announceFocus()
 	wide.install(m)
 }
 
@@ -116,6 +133,7 @@ func (w *pluginWide) capture(m *Model) {
 			order: append([]string(nil), ks.status.order...),
 		},
 	}
+	w.chrome = captureEditorChrome(m)
 }
 
 // install puts the snapshot into m (after a switch) and rebuilds the plugin keymap.
@@ -142,6 +160,10 @@ func (w *pluginWide) install(m *Model) {
 	// The keymap was built from the leaving workspace's bindings; rebuild it over this
 	// model's preset. Direct call: no Lua is on the stack during a switch.
 	m.plugRebuildKeymap()
+	// Editor-scoped chrome belongs to every workspace: replace whatever this model carried
+	// with the snapshot's specs (window/buffer chrome is untouched).
+	m.clearEditorChrome()
+	m.installEditorChrome(w.chrome)
 }
 
 func (w *pluginWide) clone() pluginWide {
@@ -153,6 +175,7 @@ func (w *pluginWide) clone() pluginWide {
 			order:    append([]string(nil), w.menus.order...),
 		},
 	}
+	out.chrome = cloneEditorChrome(w.chrome)
 	out.keys = pluginKeysWide{
 		bindings: cloneBindings(w.keys.bindings),
 		border:   append([]string(nil), w.keys.border...),
@@ -168,6 +191,83 @@ func (w *pluginWide) clone() pluginWide {
 		},
 	}
 	return out
+}
+
+// captureEditorChrome reads the editor-scoped panels of m in mount order.
+func captureEditorChrome(m *Model) []editorChromeSpec {
+	if m == nil {
+		return nil
+	}
+	var out []editorChromeSpec
+	for _, id := range m.plug.panels.order {
+		mp := m.plug.panels.get(id)
+		if mp == nil || mp.mount.Scope != pluginapi.ScopeEditor {
+			continue
+		}
+		out = append(out, editorChromeSpec{id: id, owner: mp.owner, mount: mp.mount})
+	}
+	return out
+}
+
+// cloneEditorChrome copies the snapshot slice (the widget specs stay read-only shared).
+func cloneEditorChrome(in []editorChromeSpec) []editorChromeSpec {
+	if in == nil {
+		return nil
+	}
+	return append([]editorChromeSpec(nil), in...)
+}
+
+// noteEditorChromeChanged refreshes the shared snapshot after an editor-scoped mount,
+// update, unmount or owner-gone on the active model. It is a no-op for a direct launch.
+func (m *Model) noteEditorChromeChanged() {
+	s := m.root.ports.PluginShared
+	if s == nil {
+		return
+	}
+	s.captureEditorChrome(m)
+}
+
+// captureEditorChrome replaces the shared editor-scoped chrome snapshot with m's, if m is
+// the active host target.
+func (s *PluginShared) captureEditorChrome(m *Model) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active != m {
+		return
+	}
+	s.wide.chrome = captureEditorChrome(m)
+}
+
+// clearEditorChrome drops the editor-scoped panels of m. The entering model is rebuilt from
+// the snapshot, so no stale carried section survives a switch.
+func (m *Model) clearEditorChrome() {
+	ps := &m.plug.panels
+	for _, id := range append([]pluginapi.PanelID(nil), ps.order...) {
+		mp := ps.get(id)
+		if mp == nil || mp.mount.Scope != pluginapi.ScopeEditor {
+			continue
+		}
+		if ps.focus == id {
+			ps.focus = 0
+		}
+		ps.remove(id)
+	}
+}
+
+// installEditorChrome builds this model's copies of the editor-scoped mounts. They are not
+// given the keyboard on install: a switch keeps the entering model's own focus.
+func (m *Model) installEditorChrome(specs []editorChromeSpec) {
+	for _, spec := range specs {
+		if old := m.plug.panels.get(spec.id); old != nil {
+			m.plug.panels.remove(spec.id)
+		}
+		mp := newMountedPanel(m, spec.id, spec.owner, spec.mount)
+		m.plug.panels.add(mp)
+		if spec.mount.Placement == pluginapi.PlacementSidebar && !m.explorerOpen && m.tree != nil {
+			m.explorerOpen = true
+		}
+	}
+	m.syncViewport()
 }
 
 func cloneCommands(in map[string][]pluginapi.CommandInfo) map[string][]pluginapi.CommandInfo {

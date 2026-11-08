@@ -855,7 +855,7 @@ function gvim.ui.focus(area) end
 ---@return {width: integer, height: integer}
 function gvim.ui.size() end
 ---@param spec Widget|{root: Widget, focus_key?: string}
----@param opts? {placement?: "float"|"buffer", buf?: Buffer, title?: string, width?: integer, height?: integer, focus?: boolean, closable?: boolean, page?: boolean, auto_focus_first?: boolean}
+---@param opts? {placement?: "float"|"buffer", buf?: Buffer, scope?: "window"|"editor"|"buffer", title?: string, width?: integer, height?: integer, focus?: boolean, closable?: boolean, page?: boolean, auto_focus_first?: boolean}
 ---@return integer|nil panel id, string?
 function gvim.ui.mount_widget_panel(spec, opts) end
 ---@param id integer
@@ -874,7 +874,7 @@ function gvim.ui.widget_command(id, action) end
 ---@return true|nil, string?
 function gvim.ui.widget_mutate(id, mutation) end
 ---@param spec Widget|{root: Widget, focus_key?: string}
----@param opts? {title?: string, rows?: integer, focus?: boolean, closable?: boolean}
+---@param opts? {title?: string, rows?: integer, focus?: boolean, closable?: boolean, scope?: "window"|"editor"|"buffer", buf?: Buffer}
 ---@return integer|nil panel id, string?
 function gvim.ui.mount_sidebar_section(spec, opts) end
 gvim.ui.statusbar = {}

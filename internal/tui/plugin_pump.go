@@ -95,6 +95,10 @@ type pluginState struct {
 	// shared, when non-nil, is the daemon-wide host mux this model is bound into: the
 	// runtime is shared with every workspace, so this model must not Stop it.
 	shared *PluginShared
+	// pumpPending asks Update's tail to run one plugin pump: the workspace manager sets it
+	// when a switch queued shared-runtime Work (a per-workspace plugin config reload). The
+	// pump drains it; the reads/compiles are commands, so Update does no blocking IO.
+	pumpPending bool
 
 	// tracking is set while the editor's change tracking is on for buffer_changed.
 	tracking bool
@@ -144,6 +148,15 @@ func newPluginState(m *Model, ports RootPorts) pluginState {
 		p.decor = decorStoreOf(ports.PluginEditor)
 	}
 	return p
+}
+
+// RequestPluginPump asks the root to run one plugin pump at the end of the next Update.
+// The workspace manager calls it after a switch queued shared-runtime Work (the runtime's
+// Work is drained by the active model's pump); it never blocks the update loop.
+func (m *Model) RequestPluginPump() {
+	if m.plug.rt != nil {
+		m.plug.pumpPending = true
+	}
 }
 
 // collect runs fn and returns the commands that Host.Do collected into m.pending
@@ -484,6 +497,9 @@ func (m *Model) plugWait(t pluginapi.Token, kind string) error {
 	if p.waits == nil {
 		p.waits = make(map[pluginapi.Token]string)
 	}
+	if err := m.plugWaitRegister(t); err != nil {
+		return err
+	}
 	p.waits[t] = kind
 	return nil
 }
@@ -496,5 +512,6 @@ func (m *Model) plugFinish(c pluginapi.Completion) tea.Cmd {
 		return nil
 	}
 	delete(p.waits, c.Token)
+	m.plugWaitForget(c.Token)
 	return m.pumpAfter(func() { p.rt.Resolve(c) })
 }

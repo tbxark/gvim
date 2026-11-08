@@ -173,10 +173,10 @@ func (m *Model) setWindowFocus(n *splitNode) {
 		curID = m.splits.IDOf(n)
 	}
 	m.splits.Focus = n
-	if prevID != curID {
-		m.plugEmit("active_window_changed", map[string]any{"previous": prevID, "current": curID})
-	}
-	if prev == nil && n != nil {
-		m.plugEmit("focus_gained", map[string]any{})
-	}
+	_ = prevID
+	_ = curID
+	// The focus announcer owns the window/buffer hooks; it diffs the announced focus so a
+	// split change fires exactly one active_window_changed/focus_gained, and a switch forces
+	// the announcement.
+	m.announceFocus()
 }

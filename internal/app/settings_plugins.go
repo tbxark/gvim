@@ -34,7 +34,7 @@ func (s *settingsService) structurePlugins(cfg config.Config, project bool) tui.
 	st.Note = settingsNote("plugins", "Enablement is the user config layer. Declared plugin settings are listed read-only with their effective values; edit plugins.<name>.settings in the config (docs/settings.md).")
 	if s.rt.plugins == nil {
 		st.Rows = append(st.Rows, tui.SettingsStructureRow{
-			Name: "No plugin runtime", Value: "disabled", Locked: true,
+			Name: settingsValue("no_plugin_runtime", "No plugin runtime"), Value: settingsValue("disabled", "disabled"), Locked: true,
 			Note: "--no-plugins, or a host without the plugin runtime",
 		})
 		return st

@@ -142,7 +142,7 @@ func (p *settingsStructurePage) layout() {
 		}
 	case "languages":
 		for _, name := range p.entries {
-			rows = append(rows, structureRow{item: SettingsStructureRow{Path: []string{"languages", name}, Name: name, Value: "configured", Child: "languages." + name}})
+			rows = append(rows, structureRow{item: SettingsStructureRow{Path: []string{"languages", name}, Name: name, Value: uiText("gvim.settings.value.configured", "configured"), Child: "languages." + name}})
 		}
 	case "entries":
 		for _, row := range p.st.Rows {
@@ -302,7 +302,7 @@ func (p *settingsStructurePage) key(msg tea.KeyPressMsg) tea.Cmd {
 			} else {
 				p.side = "left"
 			}
-			p.parent.m.notice = "Settings: adding to the " + p.side + " side"
+			p.parent.m.notice = uiTextVars("gvim.settings.notice.add_side", "Settings: adding to the %{side} side", map[string]any{"side": p.side})
 		}
 	case "alt+up":
 		p.reorder(-1)
@@ -402,7 +402,7 @@ func (p *settingsStructurePage) edit() tea.Cmd {
 		if why == "" {
 			why = "this layer cannot change it"
 		}
-		p.parent.m.notice = "Settings: " + row.item.Name + " is read-only — " + why
+		p.parent.m.notice = uiTextVars("gvim.settings.notice.read_only", "Settings: %{name} is read-only — %{why}", map[string]any{"name": row.item.Name, "why": why})
 		return nil
 	}
 	if row.item.Action != "" {
@@ -565,7 +565,7 @@ func (p *settingsStructurePage) addEntry() tea.Cmd {
 	case "languages":
 		options := p.st.Available
 		if len(options) == 0 {
-			p.parent.m.notice = "Settings: every known language is already configured"
+			p.parent.m.notice = uiText("gvim.settings.notice.every_language", "Settings: every known language is already configured")
 			return nil
 		}
 		rows := make([]list.Row, len(options))
@@ -678,7 +678,7 @@ func (p *settingsStructurePage) setField(path []string, value, kind string) {
 	if raw, err := encodeStructureValue(kind, value); err == nil {
 		p.parent.setPendingRaw(path, raw)
 	} else {
-		p.parent.m.notice = "Settings: " + err.Error()
+		p.parent.m.notice = uiTextVars("gvim.settings.notice.error", "Settings: %{error}", map[string]any{"error": err.Error()})
 	}
 	p.layout()
 }
@@ -705,11 +705,11 @@ func (p *settingsStructurePage) remove() {
 		return
 	}
 	if row.item.Locked {
-		p.parent.m.notice = "Settings: " + row.item.Name + " is read-only in this layer"
+		p.parent.m.notice = uiTextVars("gvim.settings.notice.read_only_layer", "Settings: %{name} is read-only in this layer", map[string]any{"name": row.item.Name})
 		return
 	}
 	if row.item.Inherited {
-		p.parent.m.notice = "Settings: " + row.item.Name + " already inherits its value"
+		p.parent.m.notice = uiTextVars("gvim.settings.notice.inherits", "Settings: %{name} already inherits its value", map[string]any{"name": row.item.Name})
 		return
 	}
 	switch p.st.Kind {
@@ -891,7 +891,7 @@ func (p *settingsStructurePage) promptDone(done prompt.Done) tea.Cmd {
 	case "add-name":
 		name := strings.TrimSpace(done.Text)
 		if name == "" {
-			p.parent.m.notice = "Settings: the key must not be empty"
+			p.parent.m.notice = uiText("gvim.settings.notice.key_empty", "Settings: the key must not be empty")
 			return nil
 		}
 		return structurePrompt(p, prompt.LineOptions{
@@ -916,14 +916,14 @@ func (p *settingsStructurePage) promptDone(done prompt.Done) tea.Cmd {
 	case "add-lsp-language":
 		language := strings.TrimSpace(done.Text)
 		if language == "" {
-			p.parent.m.notice = "Settings: the language must not be empty"
+			p.parent.m.notice = uiText("gvim.settings.notice.language_empty", "Settings: the language must not be empty")
 			return nil
 		}
 		return p.requestChild("lsp." + language)
 	case "add-entry":
 		command := strings.TrimSpace(done.Text)
 		if command == "" {
-			p.parent.m.notice = "Settings: the command must not be empty"
+			p.parent.m.notice = uiText("gvim.settings.notice.command_empty", "Settings: the command must not be empty")
 			return nil
 		}
 		entry, err := json.Marshal(map[string]any{"command": command, "enabled": true})

@@ -94,7 +94,14 @@ Plugins load in dependency order (`requires`, `after`), then by source, then by 
 ```
 
 A daemon host runs ONE editor-wide plugin runtime for all of its local workspaces; a
-workspace switch rebinds the runtime's host and OS and swaps the state namespace below. A
+workspace switch rebinds the runtime's host and OS and swaps the state namespace below. The
+workspace's PROJECT config is applied on the switch: `plugins.<name>.enabled` and
+`plugins.<name>.settings` from that workspace's config layer are compared with the
+runtime's current layer, and only the plugins whose enablement or settings changed are
+unloaded/loaded/reloaded (never all of them, and never through the editor-wide
+`plugin-state.json` toggles). A plugin prompt opened in one workspace belongs to that
+workspace: it waits there across switches and resumes there; closing the workspace cancels
+it with a notice. A
 daemon workspace keeps `gvim.state` in its own
 `sessions/<stable-id>/plugin-state.json` in the workspace session directory instead (see
 `api-core.md`); the file lives outside the config tree and is never deleted with a

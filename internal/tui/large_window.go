@@ -132,6 +132,6 @@ func (m *Model) windowDone(msg windowFetchedMsg) {
 		// read-only and the next paint can retry the same window (e.g. after a
 		// reconnect), so no error dialog and no read-only flip. A cancellation, or a
 		// reply after the user left the document, stays silent.
-		m.notice = "Remote large file: " + msg.err.Error()
+		m.notice = uiTextVars("gvim.remote.large_file_error", "Remote large file: %{error}", map[string]any{"error": msg.err.Error()})
 	}
 }

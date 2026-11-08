@@ -26,6 +26,10 @@ const (
 	TypeOpenFile byte = 5
 	TypePing     byte = 6
 
+	// TypeVersionRejected is the daemon's answer to an incompatible hello: the payload
+	// names both versions and the connection is closed without any attach.
+	TypeVersionRejected byte = 106
+
 	TypeOutput   byte = 101
 	TypeNotice   byte = 102
 	TypeDetached byte = 103
@@ -45,12 +49,24 @@ type Frame struct {
 	Payload []byte
 }
 
-// Hello is the first client frame: the client's terminal size and the launch
-// arguments the daemon should apply (open files and the like).
+// ProtocolVersion is the attach-protocol version. The daemon refuses a client that
+// speaks another version with a notice before changing any state; the workspace frame
+// shapes are internal to the same binary.
+const ProtocolVersion = 1
+
+// VersionMismatch is the payload of a version-rejected frame.
+type VersionMismatch struct {
+	Client int `json:"client"`
+	Daemon int `json:"daemon"`
+}
+
+// Hello is the first client frame: the client's terminal size, the protocol version and
+// the launch arguments the daemon should apply (open files and the like).
 type Hello struct {
-	Cols int      `json:"cols"`
-	Rows int      `json:"rows"`
-	Args []string `json:"args,omitempty"`
+	Version int      `json:"version"`
+	Cols    int      `json:"cols"`
+	Rows    int      `json:"rows"`
+	Args    []string `json:"args,omitempty"`
 	// Workspace names the workspace to attach to (its stable id or label); empty
 	// means the daemon's current foreground workspace.
 	Workspace string `json:"workspace,omitempty"`
