@@ -87,9 +87,18 @@ func (e *lspEd) Do(a editor.Action, args map[string]any) editor.Result {
 		t := e.tabs[e.active]
 		text, _ := args["text"].(string)
 		line := []rune(t.lines[t.cursor.Line])
-		col := t.cursor.Col
+		col := min(t.cursor.Col, len(line))
 		t.lines[t.cursor.Line] = string(line[:col]) + text + string(line[col:])
-		t.cursor.Col += len([]rune(text))
+		t.cursor.Col = col + len([]rune(text))
+	}
+	if a == "delete_backward" && len(e.tabs) > 0 {
+		t := e.tabs[e.active]
+		line := []rune(t.lines[t.cursor.Line])
+		col := min(t.cursor.Col, len(line))
+		if col > 0 {
+			t.lines[t.cursor.Line] = string(line[:col-1]) + string(line[col:])
+			t.cursor.Col = col - 1
+		}
 	}
 	return editor.Result{}
 }

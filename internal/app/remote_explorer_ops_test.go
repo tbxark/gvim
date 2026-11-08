@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/authority/authoritytest"
 	"github.com/tbxark/gvim/plugin/hostos"
 )
@@ -31,6 +32,12 @@ type remoteOpsFake struct {
 	renames   [][2]string
 	removes   []string
 	symlinks  map[string]string
+	// Exclusive create (authority.FileCreator): creates records successful creates,
+	// createModes their options, and the flags force the backend failures.
+	creates           []string
+	createModes       []hostos.WriteOptions
+	createErr         error
+	createUnsupported bool
 	// onWrite runs after a successful write, outside the lock (a test can cancel a
 	// context to exercise mid-copy cancellation).
 	onWrite func()
@@ -92,6 +99,36 @@ func (f *remoteOpsFake) WriteFile(ctx context.Context, p string, data []byte, o 
 		hook()
 	}
 	f.mu.Lock()
+	return nil
+}
+
+// CreateNew implements authority.FileCreator: an O_EXCL-like in-memory create. The mutex
+// is the atomicity point a concurrent-creator test relies on.
+func (f *remoteOpsFake) CreateNew(ctx context.Context, p string, o hostos.WriteOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.createUnsupported {
+		return authority.ErrUnsupportedFileIO
+	}
+	if f.createErr != nil {
+		return f.createErr
+	}
+	if _, ok := f.files[p]; ok {
+		return &os.PathError{Op: "create", Path: p, Err: fs.ErrExist}
+	}
+	if _, ok := f.symlinks[p]; ok {
+		return &os.PathError{Op: "create", Path: p, Err: fs.ErrExist}
+	}
+	if f.dirs[p] {
+		return &os.PathError{Op: "create", Path: p, Err: fs.ErrExist}
+	}
+	f.files[p] = []byte{}
+	f.mtime[p] = 1
+	f.creates = append(f.creates, p)
+	f.createModes = append(f.createModes, o)
 	return nil
 }
 
@@ -249,8 +286,15 @@ func TestRemoteExplorerCreateFile(t *testing.T) {
 	if p != "/remote/w/a.go" || string(fake.files["/remote/w/a.go"]) != "" {
 		t.Fatalf("created = %q, remote file %q", p, fake.files["/remote/w/a.go"])
 	}
-	if _, err := ops.CreateFile(context.Background(), "/remote/w", "a.go"); err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("existing create error = %v, want already exists", err)
+	if len(fake.creates) != 1 || fake.creates[0] != "/remote/w/a.go" {
+		t.Fatalf("exclusive creates = %v, want one create-new call", fake.creates)
+	}
+	if len(fake.writes) != 0 {
+		t.Fatalf("CreateFile fell back to a whole-file write: %v", fake.writes)
+	}
+	_, err = ops.CreateFile(context.Background(), "/remote/w", "a.go")
+	if err == nil || !strings.Contains(err.Error(), "already exists") || !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("existing create error = %v, want already exists and fs.ErrExist", err)
 	}
 	after, err := os.ReadDir(decoy)
 	if err != nil || len(after) != len(before) {
@@ -379,5 +423,145 @@ func TestRemoteExplorerOpsRefuseOutside(t *testing.T) {
 	}
 	if got := ops.RemoteTarget(); got != "SSH:u@h:/remote/w" {
 		t.Fatalf("RemoteTarget = %q", got)
+	}
+}
+
+// TestRemoteExplorerCreateFileConcurrentExactlyOne checks the exclusive-create path under
+// concurrent creators: exactly one call wins, the rest get the clear already-exists
+// refusal, the target stays the empty file the winner created, and no whole-file write
+// (which would replace a target) happens.
+func TestRemoteExplorerCreateFileConcurrentExactlyOne(t *testing.T) {
+	fake := newRemoteOpsFake()
+	ops, _ := fake.ops(true)
+	const n = 32
+	var wg sync.WaitGroup
+	results := make(chan error, n)
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := ops.CreateFile(context.Background(), "/remote/w", "race.go")
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	wins, exists := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			wins++
+		case errors.Is(err, fs.ErrExist) && strings.Contains(err.Error(), "already exists"):
+			exists++
+		default:
+			t.Fatalf("unexpected concurrent create error: %v", err)
+		}
+	}
+	if wins != 1 || exists != n-1 {
+		t.Fatalf("wins = %d, already-exists = %d; want 1 and %d", wins, exists, n-1)
+	}
+	if got := string(fake.files["/remote/w/race.go"]); got != "" {
+		t.Fatalf("raced target content = %q, want the empty created file", got)
+	}
+	if len(fake.writes) != 0 {
+		t.Fatalf("concurrent creates used whole-file writes: %v", fake.writes)
+	}
+}
+
+// TestRemoteExplorerCreateFileKeepsDanglingSymlink checks a dangling symbolic link is an
+// existing entry to the exclusive create (never followed, never replaced or truncated).
+func TestRemoteExplorerCreateFileKeepsDanglingSymlink(t *testing.T) {
+	fake := newRemoteOpsFake()
+	fake.putSymlink("/remote/w/dangling", "/remote/w/missing")
+	ops, _ := fake.ops(true)
+	if _, err := ops.CreateFile(context.Background(), "/remote/w", "dangling"); err == nil || !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("create over a dangling symlink = %v, want fs.ErrExist", err)
+	}
+	if fake.symlinks["/remote/w/dangling"] != "/remote/w/missing" {
+		t.Fatal("the dangling symlink was changed by the refused create")
+	}
+	if _, ok := fake.files["/remote/w/dangling"]; ok {
+		t.Fatal("a regular file replaced the dangling symlink")
+	}
+	if len(fake.writes) != 0 {
+		t.Fatalf("the refused create wrote: %v", fake.writes)
+	}
+}
+
+// remoteOpsFilesNoCreate is the fake authority filesystem without the FileCreator surface,
+// for the explicit-refusal branch when promise.Creators is nil.
+type remoteOpsFilesNoCreate struct{ files *remoteOpsFake }
+
+func (f remoteOpsFilesNoCreate) ReadFile(ctx context.Context, p string, max int64) ([]byte, error) {
+	return f.files.ReadFile(ctx, p, max)
+}
+func (f remoteOpsFilesNoCreate) ReadRange(ctx context.Context, p string, off, n int64) ([]byte, error) {
+	return f.files.ReadRange(ctx, p, off, n)
+}
+func (f remoteOpsFilesNoCreate) WriteFile(ctx context.Context, p string, data []byte, o hostos.WriteOptions) error {
+	return f.files.WriteFile(ctx, p, data, o)
+}
+func (f remoteOpsFilesNoCreate) Stat(ctx context.Context, p string) (hostos.FileStat, error) {
+	return f.files.Stat(ctx, p)
+}
+func (f remoteOpsFilesNoCreate) ReadDir(ctx context.Context, p string, hidden bool) ([]hostos.DirEntry, error) {
+	return f.files.ReadDir(ctx, p, hidden)
+}
+func (f remoteOpsFilesNoCreate) Watch(ctx context.Context, p string, o hostos.WatchOptions) (hostos.Watch, error) {
+	return f.files.Watch(ctx, p, o)
+}
+
+// TestRemoteExplorerCreateFileRefusesWhenNoCreator checks a filesystem without the
+// FileCreator interface at all is refused explicitly, with an existing target preserved and
+// no Stat + WriteFile fallback.
+func TestRemoteExplorerCreateFileRefusesWhenNoCreator(t *testing.T) {
+	fake := newRemoteOpsFake().put("/remote/w/a.go", "precious")
+	slot := authoritytest.New()
+	slot.FileSystem = remoteOpsFilesNoCreate{files: fake}
+	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
+	_, err := ops.CreateFile(context.Background(), "/remote/w", "a.go")
+	if err == nil || !strings.Contains(err.Error(), "cannot create a file exclusively") {
+		t.Fatalf("create without a creator = %v, want the explicit exclusive-create refusal", err)
+	}
+	if got := string(fake.files["/remote/w/a.go"]); got != "precious" {
+		t.Fatalf("existing target changed to %q", got)
+	}
+	if len(fake.writes) != 0 {
+		t.Fatalf("a fallback whole-file write ran: %v", fake.writes)
+	}
+}
+
+// TestRemoteExplorerCreateFileRefusesWithoutExclusiveCreate checks a backend that cannot
+// guarantee an exclusive create is refused explicitly, with any existing target preserved
+// and no check-then-write fallback.
+func TestRemoteExplorerCreateFileRefusesWithoutExclusiveCreate(t *testing.T) {
+	for name, fake := range map[string]*remoteOpsFake{
+		"unsupported backend": func() *remoteOpsFake {
+			f := newRemoteOpsFake().put("/remote/w/a.go", "precious")
+			f.createUnsupported = true
+			return f
+		}(),
+		"helper failure": func() *remoteOpsFake {
+			f := newRemoteOpsFake().put("/remote/w/a.go", "precious")
+			f.createErr = errors.New("carrier dropped")
+			return f
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			ops, _ := fake.ops(true)
+			_, err := ops.CreateFile(context.Background(), "/remote/w", "a.go")
+			if err == nil {
+				t.Fatal("the create succeeded on a backend that cannot guarantee exclusivity")
+			}
+			if strings.Contains(name, "unsupported") && !strings.Contains(err.Error(), "cannot create a file exclusively") {
+				t.Fatalf("error = %v, want the explicit exclusive-create refusal", err)
+			}
+			if got := string(fake.files["/remote/w/a.go"]); got != "precious" {
+				t.Fatalf("existing target changed to %q", got)
+			}
+			if len(fake.writes) != 0 {
+				t.Fatalf("a fallback whole-file write ran: %v", fake.writes)
+			}
+		})
 	}
 }

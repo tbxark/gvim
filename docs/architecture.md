@@ -602,17 +602,28 @@ still loads unchanged.
   a stale version). A focus also syncs the mirrors' saved/disk state, so a save updates
   the other workspace's dirty markers. Closing or evicting a workspace calls
   `DropEditor`: an owner hands the canonical document to a mirror, a mirror is dropped, and a
-  close therefore keeps the file and its unsaved state in the other workspace. Tests cover
+  close therefore keeps the file and its unsaved state in the other workspace. A TAB close
+  follows Fresh's view-vs-buffer rule: closing a mirror tab never asks the unsaved question
+  (the owner keeps the text) and simply detaches the mirror; closing an owner tab while a
+  mirror exists also asks nothing and promotes the canonical document to that mirror first;
+  only the final view of a buffer (no mirror left) keeps the ordinary modified
+  save/discard/cancel prompt, and a forced close then removes the registry entry. The bulk
+  CloseByPath path (a deleted file or folder) detaches all shared victims up front, so a
+  promoted owner leaves no lost text and a refused transfer leaves the tabs untouched.
+  Disabled: close prompts are skipped because the buffer survives in the other workspace,
+  not because unsaved text is discarded. Tests cover
   open in two workspaces, mirror read-only-until-ownership, edit propagation, ownership
-  back-and-forth with undo/unsaved state, conflict notice, close-owner promotion, and a
-  remote launch keeping independent buffers. Residuals: only the OpenFile path starts
+  back-and-forth with undo/unsaved state, conflict notice, close-owner promotion, owner-tab
+  close promotion, mirror-tab close without a prompt, the last-view prompt, CloseByPath
+  promotion, and a remote launch keeping independent buffers. Residuals: only the OpenFile path starts
   sharing (OpenLoaded/startup restore of a second workspace still opens an independent
   copy, and a daemon open-file request for an already-owned path switches to the owner
-  rather than opening a mirror),
-  copy), a tab closed inside a workspace does not promote a mirror in another workspace,
-  large/virtual buffers and remote workspaces are independent, the two workspaces share
-  the entry's view position only when ownership moves (each keeps its own cursor while
-  mirrored), and the mirror's plugin seams see a new document id after a handoff.
+  rather than opening a mirror), the editor-level Close() used by an exiting runtime does
+  not promote (the daemon's workspace close/evict path calls DropEditor first), the two
+  workspaces do not become two TUI splits or panes of one workspace in this slice, and
+  they share the entry's view position only when ownership moves (each keeps its own
+  cursor while mirrored); large/virtual buffers and remote workspaces are independent,
+  and the mirror's plugin seams see a new document id after a handoff.
 - **Remote file finder (landed).** A remote launch's quick-open file mode enumerates the
   remote workspace through `authority.Files().ReadDir` (streaming into the ordinary
   `finder.Index`, so the palette's poll-while-loading and query-sequence staleness guards

@@ -81,37 +81,97 @@ func (m *Model) completionTyped(c *lspCompletion, text string) (tea.Cmd, bool) {
 		return insert, true
 	}
 	wordStart := buffer.Pos{Line: at.Line, Col: max(at.Col-len([]rune(prefix)), 0)}
-	filtered := filterCompletionItems(c.items, prefix, wordStart, at)
-	if len(filtered) == 0 {
+	if !m.refilterCompletion(c, prefix, wordStart, at) {
 		// Nothing left to show: dismiss and ask once, which may fill the list again
 		// (local words first, then the server) for the new prefix.
 		m.closeCompletion(c)
 		return tea.Batch(insert, m.completionAsked()), true
 	}
-	// Replace the open list's rows with the filtered ones. The list is rebuilt the
-	// same way a server merge rebuilds it, so accept and its edit guards are shared.
-	m.closeCompletion(c)
-	reopen := m.lspReply(lspReplyMsg{ask: lspAskCompletion, path: c.path, at: at, items: filtered})
-	return tea.Batch(insert, reopen), true
+	return insert, true
 }
 
-// filterCompletionItems keeps the items whose label or insert text starts with
-// prefix (case-insensitively, as Fresh filters label/filterText), and gives an
-// item without a server edit range one that covers the text typed since the list
-// was asked, so accepting it replaces that text instead of duplicating the prefix.
-func filterCompletionItems(items []CompletionItem, prefix string, start, at buffer.Pos) []CompletionItem {
+// completionBackspace deletes one character behind the caret, as the normal key path
+// would, and re-filters the open completion list by the shorter word prefix. Fresh
+// does exactly that (handle_popup_backspace + refilter_completion_popup); a filter
+// that empties dismisses the list without asking the server again. It reports false
+// when the document moved on, so the caller falls back to the normal dismissal.
+func (m *Model) completionBackspace(c *lspCompletion) (tea.Cmd, bool) {
+	doc := m.ed.Active()
+	if doc == nil || c == nil || docPath(doc) != c.path {
+		return nil, false
+	}
+	del := m.dispatch(Command{Action: "delete_backward"})
+	at := doc.Cursor()
+	if at == c.at || at.Line != c.at.Line || at.Col > c.at.Col {
+		// The edit did not leave the caret in the word the list was asked at (first
+		// column, another line): the list is stale, dismiss as before.
+		m.closeCompletion(c)
+		return del, true
+	}
+	wordChars := m.docLanguageSettings(doc).WordCharacters
+	prefix := editor.CompletionPrefix(doc.Line(at.Line), at.Col, wordChars)
+	wordStart := buffer.Pos{Line: at.Line, Col: max(at.Col-len([]rune(prefix)), 0)}
+	if !m.refilterCompletion(c, prefix, wordStart, at) {
+		m.closeCompletion(c)
+		return del, true
+	}
+	return del, true
+}
+
+// refilterCompletion rebuilds c's shown rows from the COMPLETE candidate pool
+// (c.all), not from the rows on screen, so a candidate that a longer prefix hid
+// comes back when Backspace shortens the word (Fresh always rebuilds from its stored
+// completion_items). It keeps the highlighted candidate by its index in all, and
+// captures the document version after the edit for the acceptance guard. It reports
+// whether any row is left; the caller closes the list when none is.
+func (m *Model) refilterCompletion(c *lspCompletion, prefix string, wordStart, at buffer.Pos) bool {
+	shown, origins := filterCompletionItemsOrigins(c.all, prefix, wordStart, at)
+	if len(shown) == 0 {
+		return false
+	}
+	selected := 0
+	if c.pop != nil {
+		oldRow := c.pop.Selected()
+		if oldRow >= 0 && oldRow < len(c.origins) {
+			oldAll := c.origins[oldRow]
+			for i, origin := range origins {
+				if origin == oldAll {
+					selected = i
+					break
+				}
+			}
+		}
+	}
+	m.closeCompletion(c)
+	m.openCompletionList(c.path, at, c.all, shown, origins, editor.Version{}, false, selected)
+	return true
+}
+
+// filterCompletionItemsOrigins keeps the items whose label or insert text starts
+// with prefix (case-insensitively, as Fresh filters label/filterText), gives an item
+// without a server edit range one that covers the text typed since the list was
+// asked (so accepting replaces that text instead of duplicating the prefix) and
+// returns the index every kept item had in items. A synthetic range is recomputed on
+// every re-filter: after Backspace it must cover the shorter word, not text the user
+// has already deleted. The list keeps the highlighted row on the same candidate by
+// that former index: labels can repeat (auto-import candidates), so the row's index
+// is the stable identity across a re-filter.
+func filterCompletionItemsOrigins(items []CompletionItem, prefix string, start, at buffer.Pos) ([]CompletionItem, []int) {
 	lowerPrefix := strings.ToLower(prefix)
 	out := make([]CompletionItem, 0, len(items))
-	for _, item := range items {
+	origins := make([]int, 0, len(items))
+	for i, item := range items {
 		label := strings.ToLower(item.Label)
 		insert := strings.ToLower(item.Insert)
 		if !strings.HasPrefix(label, lowerPrefix) && (insert == "" || !strings.HasPrefix(insert, lowerPrefix)) {
 			continue
 		}
-		if item.Range == nil {
+		if item.Range == nil || item.rangeSynth {
 			item.Range = &LSPRange{Start: start, End: at}
+			item.rangeSynth = true
 		}
 		out = append(out, item)
+		origins = append(origins, i)
 	}
-	return out
+	return out, origins
 }

@@ -37,6 +37,11 @@ const remoteExplorerOpTimeout = 20 * time.Second
 // can simply be retried once the connection is back.
 var errRemoteExplorerDisconnected = errors.New("remote workspace is disconnected; activate the window to reconnect")
 
+// errRemoteExplorerNoExclusiveCreate refuses New File when the backend has no atomic
+// create-new surface: a check-then-write would race a concurrent creator, so refusing is
+// the honest answer (the local explorer already creates with O_EXCL).
+var errRemoteExplorerNoExclusiveCreate = errors.New("this backend cannot create a file exclusively; refusing to race an existing target")
+
 // remoteExplorerOps implements the TUI's explorerOps over the remote authority.
 type remoteExplorerOps struct {
 	slot  authority.Slot
@@ -81,6 +86,15 @@ func (o *remoteExplorerOps) check() error {
 	}
 	if o.files == nil {
 		return errors.New("remote file operations: the workspace authority mounts no file system")
+	}
+	return nil
+}
+
+// checkMutations also requires the tree-changing surface. New File does not need it (it
+// uses the exclusive-create part), so its check is the plain one.
+func (o *remoteExplorerOps) checkMutations() error {
+	if err := o.check(); err != nil {
+		return err
 	}
 	if o.muts == nil {
 		return errors.New("remote file operations: the backend does not support changing the tree")
@@ -132,7 +146,11 @@ func (o *remoteExplorerOps) exists(ctx context.Context, p string) (bool, hostos.
 	return true, st, nil
 }
 
-// CreateFile creates an empty remote file and returns its path.
+// CreateFile creates one empty remote file and returns its path. It uses the authority's
+// exclusive-create surface so a target created concurrently can never be overwritten: the
+// backend either creates the file atomically or reports fs.ErrExist. A backend without that
+// surface is refused explicitly — falling back to a Stat + atomic WriteFile would reopen
+// the check-to-write race this path exists to close.
 func (o *remoteExplorerOps) CreateFile(ctx context.Context, dir, name string) (string, error) {
 	if err := o.check(); err != nil {
 		return "", err
@@ -146,12 +164,17 @@ func (o *remoteExplorerOps) CreateFile(ctx context.Context, dir, name string) (s
 	if err := o.gateOp(opCtx, "create", p); err != nil {
 		return "", err
 	}
-	if ok, _, err := o.exists(opCtx, p); err != nil {
-		return "", fmt.Errorf("remote file operation: stat %s: %w", p, err)
-	} else if ok {
-		return "", fmt.Errorf("remote file operation: %s already exists", p)
+	creator := authority.Creators(o.files)
+	if creator == nil {
+		return "", fmt.Errorf("remote file operation: %w: %s", errRemoteExplorerNoExclusiveCreate, p)
 	}
-	if err := o.files.WriteFile(opCtx, p, []byte{}, hostos.WriteOptions{Atomic: true}); err != nil {
+	if err := creator.CreateNew(opCtx, p, hostos.WriteOptions{}); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return "", fmt.Errorf("remote file operation: %s: %w", p, fs.ErrExist)
+		}
+		if errors.Is(err, authority.ErrUnsupportedFileIO) {
+			return "", fmt.Errorf("remote file operation: %w: %s", errRemoteExplorerNoExclusiveCreate, p)
+		}
 		return "", fmt.Errorf("remote file operation: create %s: %w", p, err)
 	}
 	return p, nil
@@ -159,7 +182,7 @@ func (o *remoteExplorerOps) CreateFile(ctx context.Context, dir, name string) (s
 
 // Mkdir creates one remote directory and returns its path.
 func (o *remoteExplorerOps) Mkdir(ctx context.Context, dir, name string) (string, error) {
-	if err := o.check(); err != nil {
+	if err := o.checkMutations(); err != nil {
 		return "", err
 	}
 	p, err := o.child(dir, name)
@@ -185,7 +208,7 @@ func (o *remoteExplorerOps) Mkdir(ctx context.Context, dir, name string) (string
 // Rename renames one remote entry inside its directory and returns the new path. A target
 // that already exists is refused (no overwrite), matching the local explorer.
 func (o *remoteExplorerOps) Rename(ctx context.Context, p, newName string) (string, error) {
-	if err := o.check(); err != nil {
+	if err := o.checkMutations(); err != nil {
 		return "", err
 	}
 	if !o.inside(p) {
@@ -218,7 +241,7 @@ func (o *remoteExplorerOps) Rename(ctx context.Context, p, newName string) (stri
 // Trash deletes one remote entry permanently (there is no remote trash): a directory is
 // removed recursively after the confirmation. It returns no path.
 func (o *remoteExplorerOps) Trash(ctx context.Context, p string) error {
-	if err := o.check(); err != nil {
+	if err := o.checkMutations(); err != nil {
 		return err
 	}
 	if !o.inside(p) {

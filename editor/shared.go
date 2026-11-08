@@ -269,6 +269,82 @@ func (s *SharedBuffers) Focus(e *Editor) {
 	}
 }
 
+// closeEntryLocked finds the shared entry of d in e, or nil.
+func (s *SharedBuffers) closeEntryLocked(e *Editor, d *document.Document) *sharedEntry {
+	if s == nil || e == nil || d == nil || d.Path == "" {
+		return nil
+	}
+	canonical := sharedCanonical(d.Path)
+	entry := s.entries[canonical]
+	if entry == nil {
+		return nil
+	}
+	if entry.mirrors[e] == d || (entry.owner == e && entry.doc == d) {
+		return entry
+	}
+	return nil
+}
+
+// ClosePrompt reports whether closing d in e must ask about unsaved text. A mirror
+// never does (the owner keeps the text), and neither does an owner whose buffer a
+// mirror in another workspace keeps alive: the close promotes that mirror instead of
+// dropping the text. The final view of an unshared or sole owner keeps the ordinary
+// modified prompt.
+func (s *SharedBuffers) ClosePrompt(e *Editor, d *document.Document) bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.closeEntryLocked(e, d)
+	if entry == nil {
+		return true
+	}
+	if entry.mirrors[e] == d {
+		return false
+	}
+	return len(entry.mirrors) == 0
+}
+
+// BeforeClose detaches d from its shared entry before its tab is removed. A mirror is
+// dropped from the registry (its text belongs to the owner). An owner with a mirror
+// promotes the canonical document to that mirror editor, so a tab close keeps the text,
+// undo history and unsaved state alive in the other workspace; the closing editor gets a
+// throw-away snapshot in the same tab slot, which the close then releases. A sole owner
+// simply leaves the registry. The error is a refused ownership transfer: the caller must
+// keep the tab open then, never close over unsaved text.
+func (s *SharedBuffers) BeforeClose(e *Editor, d *document.Document) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.closeEntryLocked(e, d)
+	if entry == nil {
+		return nil
+	}
+	if entry.mirrors[e] == d {
+		delete(entry.mirrors, e)
+		return nil
+	}
+	var target *Editor
+	for ed := range entry.mirrors {
+		target = ed
+		break
+	}
+	if target == nil {
+		s.unwatchLocked(entry)
+		delete(s.entries, entry.canonical)
+		return nil
+	}
+	if err := s.transferLocked(entry, e, target); err != nil {
+		return err
+	}
+	// The closing editor's slot now holds a snapshot; it is released with the tab.
+	delete(entry.mirrors, e)
+	return nil
+}
+
 // DropEditor removes an editor that is being closed or evicted. When it owned a buffer,
 // ownership moves to a mirror in another workspace, so closing one workspace keeps the
 // file and its unsaved state in the other; with no mirror the entry is dropped.

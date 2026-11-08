@@ -186,3 +186,150 @@ func TestSharedBuffersMirrorReloadsOnOutOfBandChange(t *testing.T) {
 		t.Fatalf("mirror status = %q, want the reload notice", a.Active().Status)
 	}
 }
+
+// TestSharedBuffersCloseOwnerPromotesMirror: closing the owner's tab while another
+// workspace mirrors the buffer does not ask the unsaved question; it promotes the mirror
+// and leaves the text, undo history and unsaved state in the surviving workspace.
+func TestSharedBuffersCloseOwnerPromotesMirror(t *testing.T) {
+	path := writeSharedFile(t, "one\n")
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(b)
+	if err := b.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	// b owns; a mirrors. Make an unsaved edit and an undoable history in the owner.
+	b.Active().Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "unsaved ")
+	if index, ok := b.DocumentIndexByPath(path); !ok {
+		t.Fatal("the owner has no tab for the shared path")
+	} else {
+		confirm, err := b.CloseNeedsConfirm(index)
+		if err != nil || confirm {
+			t.Fatalf("closing the owner tab with a mirror asks for confirmation: %v %v", confirm, err)
+		}
+		if err := b.CloseTab(index, false); err != nil {
+			t.Fatalf("closing the owner tab with a mirror: %v", err)
+		}
+	}
+	if index, ok := b.DocumentIndexByPath(path); ok {
+		t.Fatalf("the owner tab is still open at %d", index)
+	}
+	if a.Active().SharedMirror() || a.Active().ReadOnly() {
+		t.Fatal("the mirror was not promoted to owner")
+	}
+	if got := a.Active().Buffer.Text(); got != "unsaved one\n" {
+		t.Fatalf("promoted text = %q, want the owner's unsaved text", got)
+	}
+	if !a.Active().Modified() {
+		t.Fatal("the promoted buffer lost its unsaved state")
+	}
+	if _, ok := a.Active().Buffer.Undo(); !ok {
+		t.Fatal("the promoted buffer lost its undo history")
+	}
+	if got := a.Active().Buffer.Text(); got != "one\n" {
+		t.Fatalf("undo on the promoted buffer = %q", got)
+	}
+}
+
+// TestSharedBuffersCloseMirrorNeedsNoPrompt: a read-only mirror closes without a save
+// question and without disturbing the owner.
+func TestSharedBuffersCloseMirrorNeedsNoPrompt(t *testing.T) {
+	path := writeSharedFile(t, "alpha\n")
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(b)
+	if err := b.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	b.Active().Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "owner ")
+	// a mirrors b and is modified too, but closing it loses nothing.
+	if index, ok := a.DocumentIndexByPath(path); !ok {
+		t.Fatal("the mirror has no tab")
+	} else if confirm, err := a.CloseNeedsConfirm(index); err != nil || confirm {
+		t.Fatalf("closing the mirror asks for confirmation: %v %v", confirm, err)
+	} else if err := a.CloseTab(index, false); err != nil {
+		t.Fatalf("closing the mirror: %v", err)
+	}
+	if !shared.Has(shared.CanonicalPath(path)) {
+		t.Fatal("closing the mirror dropped the shared entry")
+	}
+	if b.Active().SharedMirror() || b.Active().ReadOnly() {
+		t.Fatal("closing the mirror disturbed the owner")
+	}
+	if got := b.Active().Buffer.Text(); got != "owner alpha\n" {
+		t.Fatalf("owner text = %q", got)
+	}
+}
+
+// TestSharedBuffersCloseLastViewPrompts: with no other view left, the owner tab keeps the
+// ordinary unsaved prompt; forcing the close is the only way to drop it, and it removes
+// the registry entry.
+func TestSharedBuffersCloseLastViewPrompts(t *testing.T) {
+	path := writeSharedFile(t, "last\n")
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	a.Active().Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "edit ")
+	index, ok := a.DocumentIndexByPath(path)
+	if !ok {
+		t.Fatal("no tab")
+	}
+	if confirm, err := a.CloseNeedsConfirm(index); err != nil || !confirm {
+		t.Fatalf("the last view did not ask for confirmation: %v %v", confirm, err)
+	}
+	if err := a.CloseTab(index, false); err == nil {
+		t.Fatal("closing the last modified view without force succeeded")
+	}
+	if _, ok := a.DocumentIndexByPath(path); !ok {
+		t.Fatal("the refused close dropped the tab")
+	}
+	if err := a.CloseTab(index, true); err != nil {
+		t.Fatalf("forcing the last view closed: %v", err)
+	}
+	if shared.Has(shared.CanonicalPath(path)) {
+		t.Fatal("closing the last view left a shared entry")
+	}
+}
+
+// TestSharedBuffersCloseByPathPromotes: a bulk path close (a deleted file/folder) takes
+// the same close path: the owner promotes a mirror instead of dropping unsaved text.
+func TestSharedBuffersCloseByPathPromotes(t *testing.T) {
+	path := writeSharedFile(t, "bulk\n")
+	shared := NewSharedBuffers()
+	a := New(Options{Empty: true, Shared: shared})
+	b := New(Options{Empty: true, Shared: shared})
+	shared.Focus(a)
+	if err := a.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	shared.Focus(b)
+	if err := b.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	b.Active().Buffer.Insert(buffer.Pos{Line: 0, Col: 0}, "keep ")
+	if err := b.CloseByPath(path, false); err != nil {
+		t.Fatalf("CloseByPath on a shared owner: %v", err)
+	}
+	if _, ok := b.DocumentIndexByPath(path); ok {
+		t.Fatal("the closed path is still open in the owner workspace")
+	}
+	if a.Active().SharedMirror() || a.Active().ReadOnly() {
+		t.Fatal("CloseByPath did not promote the mirror")
+	}
+	if got := a.Active().Buffer.Text(); got != "keep bulk\n" {
+		t.Fatalf("promoted text after CloseByPath = %q", got)
+	}
+}

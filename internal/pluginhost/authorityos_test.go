@@ -24,6 +24,13 @@ type fakeRemoteFiles struct {
 	files map[string]string
 	dirs  map[string][]hostos.DirEntry
 	reads []string
+	// sizes overrides Stat's Size (a test can claim a huge file without allocating it).
+	sizes map[string]int64
+	// links records symlink paths and their (display) targets; Stat reports them as
+	// symlinks and ReadDir never descends them.
+	links map[string]string
+	// beforeReadDir, when set, runs at the start of every ReadDir (cancellation hooks).
+	beforeReadDir func(string)
 }
 
 func newFakeRemoteFiles() *fakeRemoteFiles {
@@ -65,7 +72,14 @@ func (f *fakeRemoteFiles) Stat(_ context.Context, p string) (hostos.FileStat, er
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if data, ok := f.files[p]; ok {
-		return hostos.FileStat{Kind: "file", Size: int64(len(data))}, nil
+		size := int64(len(data))
+		if override, ok := f.sizes[p]; ok {
+			size = override
+		}
+		return hostos.FileStat{Kind: "file", Size: size}, nil
+	}
+	if target, ok := f.links[p]; ok {
+		return hostos.FileStat{Kind: "symlink", Size: int64(len(target))}, nil
 	}
 	if _, ok := f.dirs[p]; ok {
 		return hostos.FileStat{Kind: "dir"}, nil
@@ -73,6 +87,9 @@ func (f *fakeRemoteFiles) Stat(_ context.Context, p string) (hostos.FileStat, er
 	return hostos.FileStat{}, pluginapi.Errf(pluginapi.CodeNotFound, "%s: no such file", p)
 }
 func (f *fakeRemoteFiles) ReadDir(_ context.Context, p string, _ bool) ([]hostos.DirEntry, error) {
+	if f.beforeReadDir != nil {
+		f.beforeReadDir(p)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	entries, ok := f.dirs[p]
@@ -263,8 +280,9 @@ func TestAuthorityOSRoutesFilesProcessesAndWatch(t *testing.T) {
 }
 
 // TestAuthorityOSUnsupportedSurfacesAreClear: a backend without FileMutations refuses
-// mkdir/remove/rename with CodeUnsupported, and copy/realpath/walk have no remote
-// primitive, so they say so instead of touching the local machine.
+// mkdir/remove/rename with CodeUnsupported, and RealPath has no remote readlink
+// primitive, so it says so instead of touching the local machine (copy/walk are covered
+// by their own tests and use the remote file surface).
 func TestAuthorityOSUnsupportedSurfacesAreClear(t *testing.T) {
 	slot, _, _ := authorityTestSlot(newFakeRemoteFiles())
 	local := plugintest.NewFakeOS()
@@ -277,11 +295,6 @@ func TestAuthorityOSUnsupportedSurfacesAreClear(t *testing.T) {
 		{"mkdir", func() error { return osys.Mkdir(ctx, "d", false) }},
 		{"remove", func() error { return osys.Remove(ctx, "d", false) }},
 		{"rename", func() error { return osys.Rename(ctx, "a", "b") }},
-		{"copy", func() error { return osys.Copy(ctx, "a", "b") }},
-		{"walk", func() error {
-			_, err := osys.Walk(ctx, ".", hostos.WalkOptions{})
-			return err
-		}},
 		{"realpath", func() error {
 			_, err := osys.RealPath(ctx, "a")
 			return err

@@ -244,7 +244,7 @@ func (m *Model) completionReplied(r completionReplyMsg) tea.Cmd {
 		if current.path != r.path || current.at != r.at {
 			return nil
 		}
-		merged := mergeServerIntoBufferItems(r.server, current.items)
+		merged := mergeServerIntoBufferItems(r.server, current.all)
 		if r.err != nil {
 			m.notice = r.err.Error()
 			if len(merged) == 0 {
@@ -252,13 +252,28 @@ func (m *Model) completionReplied(r completionReplyMsg) tea.Cmd {
 				return nil
 			}
 		}
-		if len(merged) == len(current.items) && len(r.server) == 0 {
+		if len(merged) == len(current.all) && len(r.server) == 0 {
 			return nil // nothing new: leave the open local list as it is
 		}
-		// Replace the open list with the merged one: the popup is still shown, only
-		// its rows change, so the user sees the remote items appear in place.
+		// Replace the open list with the merged candidate pool: the popup is still
+		// shown, only its rows change, so the user sees the remote items appear in
+		// place. A re-filtered list keeps only the rows matching its current word,
+		// but the pool stays complete so Backspace can bring hidden candidates back.
+		filtered := len(current.items) != len(current.all)
 		m.closeCompletion(current)
-		return m.lspReply(lspReplyMsg{ask: lspAskCompletion, path: r.path, at: r.at, items: merged})
+		reopened := m.lspReply(lspReplyMsg{ask: lspAskCompletion, path: r.path, at: r.at, items: merged})
+		if filtered {
+			if nc := m.lsp.comp; nc != nil {
+				wordChars := m.docLanguageSettings(doc).WordCharacters
+				at := doc.Cursor()
+				prefix := editor.CompletionPrefix(doc.Line(at.Line), at.Col, wordChars)
+				wordStart := buffer.Pos{Line: at.Line, Col: max(at.Col-len([]rune(prefix)), 0)}
+				if !m.refilterCompletion(nc, prefix, wordStart, at) {
+					m.closeCompletion(nc)
+				}
+			}
+		}
+		return reopened
 	}
 	if r.wordsShown {
 		return nil // the local list was closed while the server worked: do not reopen

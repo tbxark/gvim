@@ -161,6 +161,21 @@ deliberately does not take.
   answer, never the whole file; every chunk and the commit are bounded by their contexts
   (a cancelled chunk is an error, and the abort still removes the temporary file with its
   own short bounded context).
+- Exclusive create: `CreateNew` is the optional `FileCreator` surface (reached with
+  `authority.Creators(fs)`) for callers that must not replace an existing entry. The SSH
+  backend creates the empty file with one POSIX noclobber redirection (`set -C; : > "$p"`,
+  O_EXCL-like and atomic): anything already at the path — file, directory or dangling
+  symbolic link — reports `fs.ErrExist` and is never followed, truncated or replaced; the
+  local backend uses `O_WRONLY|O_CREATE|O_EXCL`. An explicit `Mode` is chmod'ed after the
+  create (the explorer passes none, so the remote umask decides), and a chmod failure
+  reports an error but never removes the path: between the exclusive create and the chmod
+  another process could have replaced it, so a helper that deletes on its own failure could
+  delete that process's file. Append/Parents are refused with `ErrUnsupportedFileIO`; a
+  missing parent is an ordinary error; a backend without the surface makes the caller
+  refuse explicitly instead of racing a check-then-write. Fresh comparison: Fresh's
+  `create_new_file` is O_EXCL locally but its remote authority returns Unsupported (the
+  agent protocol has no exclusive create); gvim's helper channel can run the noclobber
+  create, so the remote explorer gets the guarantee too.
 - Bounds and errors: collection is bounded during the transfer, not after it. The session
   pump writes into a bounded buffer that keeps draining after its limit (so the remote
   process never blocks) and records the overflow; an over-cap answer is an explicit error,
@@ -553,15 +568,19 @@ cancellation as the read helpers, and maps a missing path/permission denial into
 errors. A remote delete is permanent: there is no trash on the remote host.
 
 The remote explorer's write UI is wired (`internal/app/remote_explorer_ops.go`): New File,
-New Directory, Rename and Delete run through `Files()`/`authority.Mutations(fs)` with the
-workspace trust gate before every operation and the explicit "remote workspace is
-disconnected; activate the window to reconnect" error while the authority is down. Names are
-validated with the same `fsops.Validate` rules and must stay inside the remote workspace
-root; a create or rename refuses an existing target (checked before the mutation — the
-FileMutations surface has no exclusive create, so a check-to-write race is a recorded
-residual) and a remote delete asks first and says it is permanent (no remote trash). After a
-successful operation the existing explorer file-job refresh reloads the remote tree through
-its reload command, so the update loop never waits on the host.
+New Directory, Rename and Delete run through `Files()`/`authority.Creators(fs)`/
+`authority.Mutations(fs)` with the workspace trust gate before every operation and the
+explicit "remote workspace is disconnected; activate the window to reconnect" error while
+the authority is down. Names are validated with the same `fsops.Validate` rules and must
+stay inside the remote workspace root. New File uses the **exclusive-create** surface, so a
+target created concurrently by another process is never overwritten: the backend either
+creates the empty file atomically or reports `fs.ErrExist`; a backend without the surface is
+refused explicitly (no Stat + WriteFile fallback). A rename still refuses an existing target
+with a pre-mutation check, and that check-to-write race remains a recorded residual (the
+mutation surface has no exclusive rename). A remote delete asks first and says it is
+permanent (no remote trash). After a successful operation the existing explorer file-job
+refresh reloads the remote tree through its reload command, so the update loop never waits
+on the host.
 
 The clipboard is wired on the same surface (`internal/app/remote_explorer_copy.go`, task
 148). Copy walks the source subtree with `Files().ReadDir` (hidden entries included) and
@@ -587,7 +606,8 @@ Remaining gaps: no drag/move between directories, no undo/history for remote wri
 whole-subtree transaction or cleanup UI for a partial copy, FileEntry/Mode and mtimes are not
 restored (the port's DirEntry has no mode), hard links/xattrs are not preserved, and a
 copy/rename's existence check still races the write (the FileMutations surface has no
-exclusive create). Real-host manual acceptance remains unautomated (the copy tests use a fake
+exclusive rename/copy; New File's create race is closed by the exclusive-create surface).
+Real-host manual acceptance remains unautomated (the copy tests use a fake
 authority file system, with a local decoy tree proving no local fallback).
 
 ### Windowed remote reads (remote large-file mode)

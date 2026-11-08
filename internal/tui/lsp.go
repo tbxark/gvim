@@ -180,10 +180,18 @@ type lspTrack struct {
 // lspCompletion is the open completion popup, with the items it lists and the
 // caret it was asked at.
 type lspCompletion struct {
-	path  string
-	at    buffer.Pos
-	items []CompletionItem
-	pop   *popup.Popup
+	path string
+	at   buffer.Pos
+	// all is the complete candidate pool the re-filter works from (server items
+	// plus buffer words); items is the subset currently shown. Keeping all separate
+	// is what makes a candidate filtered out by a longer word reappear after
+	// Backspace, as Fresh's completion_items does.
+	all []CompletionItem
+	// origins[i] is the index in all of the item shown at row i; acceptance and
+	// highlight retention use that identity across a re-filter.
+	origins []int
+	items   []CompletionItem
+	pop     *popup.Popup
 	// version is the document version the list was asked at, and versionOK says it
 	// is set. Acceptance passes it as the expected version so a changed document is
 	// never edited with an item computed against older text.
@@ -221,6 +229,10 @@ type lspPick struct {
 	loc    LSPLocation
 	action CodeAction
 	comp   *lspCompletion
+	// item is the row's index in comp.items. A re-filtered list has different rows
+	// for the same candidates, so acceptance goes by this index, not the row number
+	// (labels repeat across auto-import candidates).
+	item int
 }
 
 // lspRenameTag is the tag of the rename prompt. It names the document and the
@@ -932,23 +944,51 @@ func (m *Model) lspHover(path string, at buffer.Pos, text string) {
 // lspCompletions lists the completion items in a popup. The choice is accepted by
 // Enter, by Tab, or by completion_accept.
 func (m *Model) lspCompletions(r lspReplyMsg) {
-	if len(r.items) == 0 {
-		m.notice = uiText("gvim.notice.lsp.no_completions", "No completions")
-		return
+	m.openCompletionItems(r.path, r.at, r.items, r.version, r.versionOK, 0)
+}
+
+// openCompletionItems is the one completion-list renderer: the server list, the
+// buffer-word list and a re-filtered list all come through it, so row data and the
+// acceptance guard stay the same. selected is the row to highlight; a re-filter
+// passes the row the candidate had before so Backspace/typing keep the user's choice.
+// versionOK false means the caller has no request version (a local list or a
+// re-filter), so the current document version is captured as the guard.
+func (m *Model) openCompletionItems(path string, at buffer.Pos, items []CompletionItem, version editor.Version, versionOK bool, selected int) *lspCompletion {
+	return m.openCompletionList(path, at, items, items, identityOrigins(len(items)), version, versionOK, selected)
+}
+
+// identityOrigins is the origins slice for a list shown exactly as it is stored.
+func identityOrigins(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
 	}
-	c := &lspCompletion{path: r.path, at: r.at, items: r.items}
-	c.version, c.versionOK = r.version, r.versionOK
+	return out
+}
+
+// openCompletionList renders all (the complete candidate pool) with shown (the
+// rows that match the current prefix) and origins (each shown row's index in all).
+// The server list, the local buffer-word list, a merge reply and a re-filter all use
+// it, so identity, acceptance and the version guard stay in one place.
+func (m *Model) openCompletionList(path string, at buffer.Pos, all, shown []CompletionItem, origins []int, version editor.Version, versionOK bool, selected int) *lspCompletion {
+	if len(shown) == 0 {
+		m.notice = uiText("gvim.notice.lsp.no_completions", "No completions")
+		return nil
+	}
+	c := &lspCompletion{path: path, at: at, all: all, items: shown, origins: origins}
+	c.version, c.versionOK = version, versionOK
 	if !c.versionOK {
 		if ve, ok := m.ed.(lspVersionedEditor); ok {
-			c.version, c.versionOK = ve.DocumentVersion(r.path)
+			c.version, c.versionOK = ve.DocumentVersion(path)
 		}
 	}
-	items := make([]popup.Item, len(r.items))
-	for i, it := range r.items {
-		items[i] = popup.Item{Label: it.Label, Detail: it.Detail, Data: lspPick{ask: lspAskCompletion, comp: c}}
+	rows := make([]popup.Item, len(shown))
+	for i, it := range shown {
+		rows[i] = popup.Item{Label: it.Label, Detail: it.Detail, Data: lspPick{ask: lspAskCompletion, comp: c, item: i}}
 	}
-	c.pop = m.lspPopup("Completions", items)
+	c.pop = m.lspPopupSelected("Completions", rows, selected)
 	m.lsp.comp = c
+	return c
 }
 
 // lspCodeActions lists the code actions in a popup: the title, and the server and
@@ -980,7 +1020,7 @@ func (m *Model) lspChosen(pick lspPick, index int) tea.Cmd {
 	case lspAskDefinition, lspAskImplementation, lspAskReferences:
 		return m.lspGoto(pick.loc)
 	case lspAskCompletion:
-		return m.acceptCompletion(pick.comp, index)
+		return m.acceptCompletion(pick.comp, pick.item)
 	case lspAskCodeActions:
 		return m.chooseCodeAction(m.lsp.popupPath, pick.action)
 	}
@@ -1090,12 +1130,19 @@ func plural(n int, one, many string) string {
 // lspPopup opens a popup at the caret with title and items. It returns the popup,
 // so the completion list can read its highlight later.
 func (m *Model) lspPopup(title string, items []popup.Item) *popup.Popup {
+	return m.lspPopupSelected(title, items, 0)
+}
+
+// lspPopupSelected is lspPopup with the highlight on row selected: a rebuilt
+// completion list keeps the candidate the user had highlighted.
+func (m *Model) lspPopupSelected(title string, items []popup.Item, selected int) *popup.Popup {
 	var anchor popup.Point
 	if x, y, ok := m.caret(); ok {
 		anchor = popup.Point{X: x, Y: y}
 	}
 	p := popup.New(popupStyles(m.styles))
 	p.Show(anchor, title, items)
+	p.Select(selected)
 	m.pushOverlay(p)
 	return p
 }
@@ -1323,6 +1370,14 @@ func (m *Model) lspKey(msg tea.Msg) (tea.Cmd, bool) {
 	switch tea.Key(k).Code {
 	case tea.KeyTab:
 		return m.acceptCompletion(c, c.pop.Selected()), true
+	case tea.KeyBackspace:
+		if cmd, handled := m.completionBackspace(c); handled {
+			return cmd, true
+		}
+		// The list belongs to an older caret/document: dismiss and let the normal
+		// key path delete.
+		m.closeCompletion(c)
+		return nil, false
 	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown, tea.KeyHome, tea.KeyEnd, tea.KeyEnter, tea.KeyEscape:
 		return nil, false
 	}

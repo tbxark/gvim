@@ -138,7 +138,7 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 	}
 	if !force {
 		for _, d := range e.docs {
-			if victim(d) && d.Modified() {
+			if victim(d) && d.Modified() && (e.shared == nil || e.shared.ClosePrompt(e, d)) {
 				err := fmt.Errorf("close %s: %w", d.Name(), ErrUnsaved)
 				e.setError(err)
 				return err
@@ -146,6 +146,21 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 		}
 	}
 
+	// Detach every shared victim first: a promotion can move the canonical document to
+	// another workspace and leave a throw-away snapshot in the slot. Doing it up front
+	// means a refused transfer leaves the tabs and their text untouched (nothing has been
+	// released yet).
+	if e.shared != nil {
+		for _, d := range e.docs {
+			if !victim(d) {
+				continue
+			}
+			if err := e.shared.BeforeClose(e, d); err != nil {
+				e.setError(err)
+				return err
+			}
+		}
+	}
 	kept := make([]*Document, 0, len(e.docs))
 	removed := 0
 	newActive := -1   // index of the active document in kept, if it survives
@@ -154,7 +169,9 @@ func (e *Editor) CloseByPath(path string, force bool) error {
 		switch {
 		case victim(d):
 			removed++
-			e.releaseDoc(d)
+			// A shared victim was detached above; for a promoted owner this slot now holds
+			// a throw-away snapshot.
+			e.releaseDoc(e.docs[i])
 			if i < e.active {
 				beforeActive++
 			}

@@ -373,6 +373,10 @@ type CompletionItem struct {
 	// (completionItem/resolve) before it can be accepted. 0 means the item is
 	// complete.
 	ResolveToken int
+	// rangeSynth says Range was made by the live filter (the server gave none), so a
+	// later re-filter/backspace recomputes it for the new word prefix instead of
+	// keeping a range that covers text the user has since deleted.
+	rangeSynth bool
 }
 
 // LSPRange is a rune range in a document.

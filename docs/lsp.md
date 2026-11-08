@@ -293,11 +293,20 @@ suppressed (Fresh triggers there too).
 An open completion list is live-filtered: typing further word characters inserts them and
 narrows the rows that label or insert text starts with the longer word prefix, case-insensitively,
 without asking the server again, and a row without a server edit range gets one covering the typed
-prefix so accepting it replaces that prefix instead of duplicating it. If the filter empties, the
-list dismisses and completion is asked once for the new prefix. Non-word characters and Backspace
-still dismiss the list (Fresh re-filters for both too — residual), and the highlighted row returns
-to the first after a re-filter (Fresh keeps it by row identity — residual). Stale replies are still
-dropped by the document version/caret guard.
+prefix so accepting it replaces that prefix instead of duplicating it. Backspace while the list is
+open deletes one character through the normal editor action and re-filters the complete stored
+candidate pool (the server items plus buffer words, not just the rows currently visible) by the
+shorter word prefix, again without asking the server, so a candidate a longer prefix hid reappears
+when Backspace widens the word; the synthetic edit range is recomputed for the shorter word, so
+accepting replaces only the text still in the buffer. The highlighted row
+stays on the same candidate across typing and Backspace (a list re-filter keeps the candidate's
+former index as its identity, since labels repeat across auto-import candidates), and falls back to
+the first row only when the new prefix filters that candidate out. If typing empties the filter the
+list dismisses and completion is asked once for the new prefix; if Backspace's wider filter somehow
+empties it, the list dismisses without a new request (Fresh dismisses there too). Non-word
+characters still dismiss the list (Fresh re-filters for them as well — residual). Stale replies are
+still dropped by the document version/caret guard, and a re-filtered list captures the document
+version after the edit, so accepting it can never apply an item against older text.
 
 Multi-buffer words are ported for the popup: a bounded window from the middle of every other open
 tab (64 KiB each, at most 8, in tab order rather than Fresh's MRU order) contributes words below

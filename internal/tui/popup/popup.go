@@ -117,6 +117,18 @@ func (p *Popup) Active() bool { return p.open }
 // Selected is the index of the highlighted item.
 func (p *Popup) Selected() int { return p.sel }
 
+// Select highlights item i, clamped to the list (0 for an empty list). It is for a
+// caller that rebuilds a list and keeps the user's prior choice; Show starts on the
+// first row, so a rebuilt popup calls this after Show.
+func (p *Popup) Select(i int) {
+	if len(p.items) == 0 {
+		p.sel, p.top = 0, 0
+		return
+	}
+	p.sel = min(max(i, 0), len(p.items)-1)
+	p.keepVisible()
+}
+
 // Items returns a copy of the items the popup lists.
 func (p *Popup) Items() []Item { return slices.Clone(p.items) }
 

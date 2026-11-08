@@ -148,7 +148,14 @@ func (e *Editor) CloseNeedsConfirm(i int) (bool, error) {
 	if i < 0 || i >= len(e.docs) {
 		return false, fmt.Errorf("%w: %d", ErrNoTab, i)
 	}
-	return e.docs[i].Modified(), nil
+	d := e.docs[i]
+	if !d.Modified() {
+		return false, nil
+	}
+	if e.shared != nil && !e.shared.ClosePrompt(e, d) {
+		return false, nil
+	}
+	return true, nil
 }
 
 // DocumentIndexByPath returns the index of the first open tab whose path is
@@ -168,11 +175,18 @@ func (e *Editor) closeAt(i int, force bool) error {
 		return fmt.Errorf("%w: %d", ErrNoTab, i)
 	}
 	d := e.docs[i]
-	if d.Modified() && !force {
+	if d.Modified() && !force && (e.shared == nil || e.shared.ClosePrompt(e, d)) {
 		return fmt.Errorf("close %s: %w", d.Name(), ErrUnsaved)
 	}
+	if e.shared != nil {
+		if err := e.shared.BeforeClose(e, d); err != nil {
+			return fmt.Errorf("close %s: %w", d.Name(), err)
+		}
+	}
+	// BeforeClose can replace the entry with a throw-away snapshot after promoting the
+	// canonical document to another workspace, so release what is in the slot now.
+	e.releaseDoc(e.docs[i])
 	e.docs = slices.Delete(e.docs, i, i+1)
-	e.releaseDoc(d)
 	if len(e.docs) == 0 {
 		e.active = 0
 		e.lastKind = ""

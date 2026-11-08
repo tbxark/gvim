@@ -98,6 +98,30 @@ func (l *local) WriteFile(ctx context.Context, path string, data []byte, o hosto
 	return l.os.WriteFile(ctx, path, data, o)
 }
 
+// CreateNew implements FileCreator: an exclusive create (O_WRONLY|O_CREATE|O_EXCL), so
+// nothing that already exists at path (file, directory or symbolic link) is replaced. The
+// default permission is 0644 through the process umask, like fsops.CreateFile.
+func (l *local) CreateNew(ctx context.Context, path string, o hostos.WriteOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateCreateOptions(o); err != nil {
+		return err
+	}
+	perm := fs.FileMode(0o644)
+	if o.Mode != 0 {
+		perm = o.Mode.Perm()
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // WriteStream implements WriteStreamer: a temporary file in the target's directory,
 // chunked writes into it, then the mode and one rename over the target. The target is
 // untouched until Commit; Abort removes the temporary file. It follows a symbolic link to

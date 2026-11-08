@@ -19,10 +19,11 @@ import (
 // The authority's own choke point applies the trust gate and the remote working
 // directory/environment to every process launch, so this type does not duplicate the
 // gate. File mutations are the authority's optional FileMutations surface: a backend
-// without it gets a clear unsupported error instead of a local fallback. Copy, RealPath
-// and Walk have no authority primitive; they fail with a clear unsupported error and
-// are recorded residuals. LookPath, Getenv, Dirs and Now are local-machine APIs (this
-// process), as documented in docs/plugins/api-core.md.
+// without it gets a clear unsupported error instead of a local fallback. Walk and Copy
+// are bounded re-implementations over the authority's ReadDir/ReadFile/WriteFile (see
+// authorityos_walk.go); RealPath has no remote readlink primitive and stays unsupported.
+// LookPath, Getenv, Dirs and Now are local-machine APIs (this process), as documented in
+// docs/plugins/api-core.md.
 type authorityOS struct {
 	slot  authority.Slot
 	local hostos.OS
@@ -167,26 +168,6 @@ func (o *authorityOS) Rename(ctx context.Context, from, to string) error {
 		return err
 	}
 	return mapErr(m.Rename(ctx, o.resolve(from), o.resolve(to)), from)
-}
-
-// Copy has no authority primitive (a streaming remote-to-remote copy is a later
-// slice); it must not fall back to the local filesystem.
-func (o *authorityOS) Copy(ctx context.Context, from, to string) error {
-	return pluginapi.Errf(pluginapi.CodeUnsupported,
-		"fs.copy from %s to %s: the workspace authority has no remote copy primitive", from, to)
-}
-
-// RealPath needs the remote readlink; the authority surface the plugin host uses does
-// not expose it, so a guess (a cleaned path) would be wrong for symlinks.
-func (o *authorityOS) RealPath(ctx context.Context, p string) (string, error) {
-	return "", pluginapi.Errf(pluginapi.CodeUnsupported,
-		"%s: the workspace authority has no remote realpath primitive", p)
-}
-
-// Walk is not implemented over the authority's bounded directory reads in this slice.
-func (o *authorityOS) Walk(ctx context.Context, root string, opts hostos.WalkOptions) (hostos.WalkResult, error) {
-	return hostos.WalkResult{}, pluginapi.Errf(pluginapi.CodeUnsupported,
-		"%s: the workspace authority has no remote walk primitive", root)
 }
 
 func (o *authorityOS) Watch(ctx context.Context, p string, opts hostos.WatchOptions) (hostos.Watch, error) {
