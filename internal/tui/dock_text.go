@@ -6,20 +6,6 @@ import (
 	"github.com/tbxark/gvim/buffer"
 )
 
-// lineBreakReplacer turns CRLF and CR into LF, the line break a shell takes as Enter.
-var lineBreakReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
-
-// lineBreaks returns s with every line break as LF.
-func lineBreaks(s string) string {
-	return lineBreakReplacer.Replace(s)
-}
-
-// pasteText is the text a paste or a send writes to the shell: line breaks as LF, and
-// no ESC, so the text cannot carry a control sequence or end a bracketed paste early.
-func pasteText(s string) string {
-	return strings.ReplaceAll(lineBreaks(s), "\x1b", "")
-}
-
 // textBetween returns the text from a to b, in document order, with a line break
 // between lines. Columns count runes, and a column past the end of its line is the end
 // of the line.
@@ -78,4 +64,17 @@ func sentText(doc Document) (text string, ok bool) {
 		return textBetweenWithin(doc, anchor, head, maxSendBytes, maxSendLines)
 	}
 	return selectedText(doc), true
+}
+
+// selectedText is the text the send sends: the primary selection, or the cursor line
+// when nothing is selected.
+func selectedText(doc Document) string {
+	if anchor, head, ok := doc.Selection(); ok && anchor != head {
+		return textBetween(doc, anchor, head)
+	}
+	line := doc.Cursor().Line
+	if line < 0 || line >= doc.LineCount() {
+		return ""
+	}
+	return doc.Line(line)
 }

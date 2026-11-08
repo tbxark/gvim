@@ -95,8 +95,8 @@ func TestTerminalCommandsRunFromThePalette(t *testing.T) {
 			if tt.noticeHas != "" && !strings.Contains(m.notice, tt.noticeHas) {
 				t.Fatalf("notice = %q, want it to contain %q", m.notice, tt.noticeHas)
 			}
-			if m.dock.open != tt.open || m.dock.focus != tt.focus {
-				t.Fatalf("open, focus = %v, %v; want %v, %v", m.dock.open, m.dock.focus, tt.open, tt.focus)
+			if m.dock.Open() != tt.open || m.dock.Focus() != tt.focus {
+				t.Fatalf("open, focus = %v, %v; want %v, %v", m.dock.Open(), m.dock.Focus(), tt.open, tt.focus)
 			}
 			if len(starter.dirs) != tt.starts {
 				t.Fatalf("shell starts = %d, want %d", len(starter.dirs), tt.starts)
@@ -132,8 +132,8 @@ func TestTerminalCommandsRunFromTheKeymap(t *testing.T) {
 				dockRun(t, m, a)
 			}
 			dockSettle(t, m, press(m, tt.key))
-			if m.dock.open != tt.open || m.dock.focus != tt.focus {
-				t.Fatalf("open, focus = %v, %v; want %v, %v", m.dock.open, m.dock.focus, tt.open, tt.focus)
+			if m.dock.Open() != tt.open || m.dock.Focus() != tt.focus {
+				t.Fatalf("open, focus = %v, %v; want %v, %v", m.dock.Open(), m.dock.Focus(), tt.open, tt.focus)
 			}
 			if len(starter.dirs) != tt.starts {
 				t.Fatalf("shell starts = %d, want %d", len(starter.dirs), tt.starts)
@@ -191,7 +191,7 @@ func TestFocusTerminalWithNoRunningShellNotifies(t *testing.T) {
 			setup: func(t *testing.T, m *Model, s *shellsStarter) {
 				openDock(t, m)
 				close(s.terms[0].done)
-				m.Update(dockExitMsg{gen: m.dock.gen})
+				dockSettle(t, m, nil)
 			},
 		},
 	}
@@ -205,7 +205,7 @@ func TestFocusTerminalWithNoRunningShellNotifies(t *testing.T) {
 			tt.setup(t, m, starter)
 			starts := len(starter.dirs)
 			dockRun(t, m, "focus_terminal")
-			if m.dock.focus {
+			if m.dock.Focus() {
 				t.Fatal("the dock took the focus with no shell running")
 			}
 			if len(starter.dirs) != starts {
@@ -240,11 +240,11 @@ func TestRestartTerminalClosesTheShellAndStartsAnotherInItsDirectory(t *testing.
 	if starter.terms[1].closed {
 		t.Fatal("the new shell was closed")
 	}
-	if m.dock.term != Terminal(starter.terms[1]) {
-		t.Fatal("the dock does not hold the new shell")
+	if m.dock.Exited() || !m.dock.Running() {
+		t.Fatal("the dock does not run the new shell")
 	}
-	if !m.dock.open || !m.dock.focus {
-		t.Fatalf("open, focus = %v, %v; want the dock shown with the focus", m.dock.open, m.dock.focus)
+	if !m.dock.Open() || !m.dock.Focus() {
+		t.Fatalf("open, focus = %v, %v; want the dock shown with the focus", m.dock.Open(), m.dock.Focus())
 	}
 }
 
@@ -253,15 +253,15 @@ func TestRestartTerminalReplacesAnExitedShell(t *testing.T) {
 	m := newTerminalModel(t, newFakeTree(3), dockKeys(), starter)
 	openDock(t, m)
 	close(starter.terms[0].done)
-	m.Update(dockExitMsg{gen: m.dock.gen})
-	if !m.dock.exited {
+	dockSettle(t, m, nil)
+	if !m.dock.Exited() {
 		t.Fatal("precondition: the shell has exited")
 	}
 
 	dockRun(t, m, "restart_terminal")
-	if len(starter.terms) != 2 || m.dock.exited || m.dock.term != Terminal(starter.terms[1]) {
+	if len(starter.terms) != 2 || m.dock.Exited() || !m.dock.Running() {
 		t.Fatalf("shells = %d, exited = %v; want a new shell running in place of the exited one",
-			len(starter.terms), m.dock.exited)
+			len(starter.terms), m.dock.Exited())
 	}
 }
 
@@ -279,11 +279,11 @@ func TestRestartTerminalWhileAStartIsInFlightStartsNothingElse(t *testing.T) {
 func TestRestartTerminalWithoutAStarterShowsTheNotice(t *testing.T) {
 	m := newTerminalModel(t, newFakeTree(3), dockKeys(), nil)
 	dockRun(t, m, "restart_terminal")
-	if m.dock.term != nil {
+	if m.dock.Running() {
 		t.Fatal("a shell runs in a build with no starter")
 	}
-	if m.dock.notice != noTerminalsNotice {
-		t.Fatalf("dock notice = %q, want %q", m.dock.notice, noTerminalsNotice)
+	if m.dock.Notice() != noTerminalsNotice {
+		t.Fatalf("dock notice = %q, want %q", m.dock.Notice(), noTerminalsNotice)
 	}
 }
 
@@ -306,7 +306,7 @@ func TestOpenTerminalCommandsKeepTheRunningShell(t *testing.T) {
 			starter := &shellsStarter{}
 			m := newTerminalModel(t, newFakeTree(3), dockKeys(), starter)
 			openDock(t, m)
-			shell := m.dock.term
+			shell := m.dock.Running()
 			if tt.hide {
 				dockRun(t, m, "toggle_utility_dock")
 			} else {
@@ -315,14 +315,14 @@ func TestOpenTerminalCommandsKeepTheRunningShell(t *testing.T) {
 
 			dockRun(t, m, tt.action)
 
-			if m.dock.term != shell {
+			if m.dock.Running() != shell {
 				t.Fatal("the command replaced the running shell")
 			}
 			if len(starter.dirs) != 1 {
 				t.Fatalf("shell starts = %d, want 1", len(starter.dirs))
 			}
-			if !m.dock.open || !m.dock.focus {
-				t.Fatalf("open, focus = %v, %v; want the dock shown with the focus", m.dock.open, m.dock.focus)
+			if !m.dock.Open() || !m.dock.Focus() {
+				t.Fatalf("open, focus = %v, %v; want the dock shown with the focus", m.dock.Open(), m.dock.Focus())
 			}
 			if l := m.layout(); !l.DockOn || l.DockY != 16 || l.DockH != 7 || l.DockY+l.DockH != l.StatusY {
 				t.Fatalf("dock on = %v at row %d with %d rows; want on at row 16 with 7 rows, directly above the status row",

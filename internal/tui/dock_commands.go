@@ -2,7 +2,7 @@ package tui
 
 import tea "charm.land/bubbletea/v2"
 
-// The palette's terminal commands that dock.go's dockAction runs: focus_terminal,
+// The palette's terminal commands that dock_glue.go's dockAction runs: focus_terminal,
 // restart_terminal, open_terminal, open_terminal_below and open_terminal_right. The dock
 // has one place, below the editor, so the open commands show it there and set the status
 // notice to what happened. Each of them keeps a shell that runs.
@@ -35,11 +35,11 @@ func (m *Model) openTerminalRight() tea.Cmd {
 // shows that in place of a screen), a frame with no rows for the dock, the right column,
 // a kept shell, and otherwise a new shell.
 func (m *Model) openDockBelow(right bool) tea.Cmd {
-	kept := m.dockRunning()
+	kept := m.dock.Running()
 	cmd := m.showDock()
 	switch {
-	case m.dock.notice != "":
-		m.notice = m.dock.notice
+	case m.dock.Notice() != "":
+		m.notice = m.dock.Notice()
 	case !m.layout().DockOn:
 		m.notice = noRoomNotice
 	case right:
@@ -56,34 +56,13 @@ func (m *Model) openDockBelow(right bool) tea.Cmd {
 // starts a shell as open_terminal does. A dock whose shell is not running keeps the
 // focus where it is, and the status row says why.
 func (m *Model) focusTerminal() tea.Cmd {
-	if !m.dock.open {
+	if !m.dock.Open() {
 		return m.showDock()
 	}
-	if m.dockRunning() {
+	if m.dock.Running() {
 		m.focusDock()
-	} else if !m.dock.starting {
+	} else if !m.dock.Starting() {
 		m.notice = noTerminalNotice
 	}
 	return nil
-}
-
-// restartDock closes the shell the dock shows and starts another in the directory the
-// shell was started in. The dock is shown, and it takes the focus once the new shell is
-// up. A dock that holds no shell, before any start or after a failed one, starts its
-// shell in the workspace root. A restart while a start is in flight does nothing, so two
-// shells never start at once.
-func (m *Model) restartDock() tea.Cmd {
-	d := &m.dock
-	if d.starting {
-		return nil
-	}
-	dir := m.rootDir()
-	if d.term != nil {
-		dir = d.dir
-	}
-	d.open = true
-	// The focus leaves the shell that is closing. dockStarted gives it back, because
-	// the dock is shown.
-	d.focus = false
-	return m.launchDock(dir)
 }

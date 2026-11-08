@@ -1,0 +1,271 @@
+package dock
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui/frame"
+	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/style"
+)
+
+// fakeTerm implements Terminal. It records what it is asked to write, paste and
+// resize. Its Updates channel starts with one pending signal, so a wait for output
+// returns at once. Its Done channel stays open until a test closes it.
+type fakeTerm struct {
+	writes    []string
+	pastes    []string
+	resizes   [][2]int
+	closed    bool
+	writeErr  error
+	screen    terminal.Screen
+	appCursor bool // the shell's DECCKM mode, reported by AppCursorKeys
+	updates   chan struct{}
+	done      chan struct{}
+}
+
+func newFakeTerm() *fakeTerm {
+	f := &fakeTerm{
+		screen:  terminal.NewScreen(0, 0, nil),
+		updates: make(chan struct{}, 1),
+		done:    make(chan struct{}),
+	}
+	f.updates <- struct{}{}
+	return f
+}
+
+func (f *fakeTerm) Write(p []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	f.writes = append(f.writes, string(p))
+	return len(p), nil
+}
+
+func (f *fakeTerm) Paste(text string) error {
+	f.pastes = append(f.pastes, text)
+	return nil
+}
+
+func (f *fakeTerm) Resize(cols, rows int) error {
+	f.resizes = append(f.resizes, [2]int{cols, rows})
+	return nil
+}
+
+func (f *fakeTerm) Screen() terminal.Screen  { return f.screen }
+func (f *fakeTerm) Updates() <-chan struct{} { return f.updates }
+func (f *fakeTerm) Done() <-chan struct{}    { return f.done }
+func (f *fakeTerm) AppCursorKeys() bool      { return f.appCursor }
+func (f *fakeTerm) Close() error             { f.closed = true; return nil }
+
+// fakeStarter implements TerminalStarter. It hands out term, or fails with err.
+type fakeStarter struct {
+	term *fakeTerm
+	err  error
+}
+
+func (s *fakeStarter) Start(dir string, cols, rows int) (Terminal, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.term, nil
+}
+
+// newTestPanel returns a shown panel whose starter started a shell, sized 80 by 4.
+func newTestPanel(t *testing.T, starter *fakeStarter) *Panel {
+	t.Helper()
+	var p Panel
+	p.SetHost(Host{
+		RootDir:     func() string { return "/ws" },
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return 80, 4 },
+		Focus:       func() {},
+	})
+	p.SetPorts(Ports{Starter: starter})
+	cmd := p.Show()
+	if cmd == nil {
+		t.Fatal("Show did not start a shell")
+	}
+	if _, ok := p.Update(cmd()); !ok {
+		t.Fatal("the start message was not taken")
+	}
+	if !p.Running() {
+		t.Fatal("the shell did not start")
+	}
+	return &p
+}
+
+// messages runs cmd and returns the messages it produces, looking into batches.
+func messages(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if msg == nil {
+		return nil
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var out []tea.Msg
+		for _, c := range batch {
+			out = append(out, messages(c)...)
+		}
+		return out
+	}
+	return []tea.Msg{msg}
+}
+
+// runWithin runs cmd and fails the test if it does not return within d.
+func runWithin(t *testing.T, cmd tea.Cmd, d time.Duration) []tea.Msg {
+	t.Helper()
+	done := make(chan []tea.Msg, 1)
+	go func() { done <- messages(cmd) }()
+	select {
+	case msgs := <-done:
+		return msgs
+	case <-time.After(d):
+		t.Fatalf("command did not return within %v", d)
+		return nil
+	}
+}
+
+func TestWaitEventReportsWhatHappened(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(f *fakeTerm)
+		live      bool
+		watchExit bool
+		want      tea.Msg
+	}{
+		{
+			name:      "a pending signal is output",
+			setup:     func(f *fakeTerm) {},
+			live:      true,
+			watchExit: true,
+			want:      outputMsg{gen: 3, ended: false},
+		},
+		{
+			name: "a closed Updates channel ends the output",
+			setup: func(f *fakeTerm) {
+				<-f.updates
+				close(f.updates)
+			},
+			live:      true,
+			watchExit: true,
+			want:      outputMsg{gen: 3, ended: true},
+		},
+		{
+			name: "once the output has ended the wait is for the exit",
+			setup: func(f *fakeTerm) {
+				close(f.done)
+			},
+			live:      false,
+			watchExit: true,
+			want:      exitMsg{gen: 3},
+		},
+		{
+			name: "a background job keeps the output open, and the exit is still seen",
+			setup: func(f *fakeTerm) {
+				<-f.updates
+				close(f.done)
+			},
+			live:      true,
+			watchExit: true,
+			want:      exitMsg{gen: 3},
+		},
+		{
+			name: "after the exit only the output is waited for",
+			setup: func(f *fakeTerm) {
+				close(f.done)
+			},
+			live:      true,
+			watchExit: false,
+			want:      outputMsg{gen: 3, ended: false},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeTerm()
+			tt.setup(f)
+			msgs := runWithin(t, waitEvent(f, 3, tt.live, tt.watchExit), 2*time.Second)
+			if len(msgs) != 1 || msgs[0] != tt.want {
+				t.Fatalf("messages = %#v, want [%#v]", msgs, tt.want)
+			}
+		})
+	}
+}
+
+func TestOutputKeepsWaitingUntilTheExit(t *testing.T) {
+	starter := &fakeStarter{term: newFakeTerm()}
+	p := newTestPanel(t, starter)
+	gen := p.gen
+
+	// Output arrives: the wait is armed again.
+	p.Update(outputMsg{gen: gen})
+	if cmd := p.Sync(); cmd == nil || !p.armed {
+		t.Fatal("the output wait was not armed again after output")
+	}
+
+	// The output ends with the PTY: the wait for the exit is armed.
+	p.Update(outputMsg{gen: gen, ended: true})
+	cmd := p.Sync()
+	if cmd == nil || p.live {
+		t.Fatal("the exit wait was not armed after the output ended")
+	}
+	close(starter.term.done)
+	for _, msg := range messages(cmd) {
+		p.Update(msg)
+	}
+
+	if !p.Exited() || p.armed {
+		t.Fatalf("exited = %v, armed = %v; want exited and no wait", p.Exited(), p.armed)
+	}
+	g := grid.New(80, 6)
+	p.Draw(g, frame.Layout{DockOn: true, W: 80, DockY: 0, DockH: 6}, style.Styles{})
+	if top := g.Plain()[0]; !strings.Contains(top, "(exited)") {
+		t.Fatalf("title row = %q, want it to say the shell exited", top)
+	}
+	// Keys after the exit do not reach the dead shell.
+	p.SendKey(tea.Key{Code: 'a', Text: "a"})
+	if len(p.queue) != 0 || len(starter.term.writes) != 0 {
+		t.Fatalf("queue = %d, writes = %q; want the dead shell to get nothing", len(p.queue), starter.term.writes)
+	}
+}
+
+func TestExitIsSeenWhileOutputStaysOpen(t *testing.T) {
+	starter := &fakeStarter{term: newFakeTerm()}
+	p := newTestPanel(t, starter)
+	gen := p.gen
+
+	// A background job still holds the PTY, so the output does not end. The shell
+	// itself has exited, and the dock must show that.
+	close(starter.term.done)
+	p.Update(outputMsg{gen: gen})
+	cmd := p.Sync()
+	for range 8 {
+		if p.Exited() {
+			break
+		}
+		var next []tea.Cmd
+		for _, msg := range runWithin(t, cmd, 2*time.Second) {
+			if c, ok := p.Update(msg); ok {
+				next = append(next, c)
+			}
+		}
+		cmd = tea.Batch(next...)
+		if cmd == nil {
+			cmd = p.Sync()
+		}
+	}
+	if !p.Exited() {
+		t.Fatal("the dock does not show the shell as exited while its output stays open")
+	}
+	g := grid.New(80, 6)
+	p.Draw(g, frame.Layout{DockOn: true, W: 80, DockY: 0, DockH: 6}, style.Styles{})
+	if top := g.Plain()[0]; !strings.Contains(top, "(exited)") {
+		t.Fatalf("title row = %q, want it to say the shell exited", top)
+	}
+}

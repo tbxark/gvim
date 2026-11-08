@@ -23,6 +23,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/browser"
 	"github.com/tbxark/gvim/internal/tui/ctxmenu"
 	"github.com/tbxark/gvim/internal/tui/dialog"
+	"github.com/tbxark/gvim/internal/tui/dock"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/find"
@@ -130,8 +131,8 @@ type Model struct {
 	notes noticeLog
 	// lsp is the language-server state (see lsp.go).
 	lsp lspState
-	// dock is the terminal dock under the body (see dock.go).
-	dock dockState
+	// dock is the terminal dock under the body (see dock_glue.go and the dock package).
+	dock dock.Panel
 	// view is the display state the view commands change (see view.go).
 	view viewState
 	// occ pauses the occurrence highlight after an edit (see occurrence.go).
@@ -197,6 +198,7 @@ func New(deps Deps) *Model {
 		view:            newViewState(viewOptionsOf(deps.View)),
 	}
 	m.view.languages = deps.Languages
+	m.dock = dockNewPanel(m)
 	m.notes.sink = deps.NoticeSink
 	m.notes.record("", deps.Notice)
 	for _, w := range deps.Warnings {
@@ -401,7 +403,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if taken, cmd := m.routeMenu(msg); taken {
 		return m, tea.Batch(overlayCmd, cmd)
 	}
-	if cmd, ok := m.dockUpdate(msg); ok {
+	if cmd, ok := m.dock.Update(msg); ok {
 		return m, tea.Batch(overlayCmd, cmd)
 	}
 	if done, ok := msg.(saveDoneMsg); ok {
@@ -1872,7 +1874,7 @@ func (m *Model) takeExplorerFocus() {
 		m.syncViewport()
 	}
 	m.tabFocus = false
-	m.dock.focus = false
+	m.dock.SetFocus(false)
 	m.explorerFocus = true
 }
 
@@ -1880,7 +1882,7 @@ func (m *Model) takeExplorerFocus() {
 func (m *Model) focusEditor() {
 	m.explorerFocus = false
 	m.tabFocus = false
-	m.dock.focus = false
+	m.dock.SetFocus(false)
 }
 
 // The places keyboard focus can be, in F6 order. The menu is open while it has
@@ -2036,7 +2038,7 @@ func (m *Model) layoutInput() layoutInput {
 		HideMenuBar:      m.hideMenuBar,
 		HideStatus:       m.statusHidden(),
 		HideLineNumbers:  m.hideLineNumbers,
-		DockOpen:         m.dock.open,
+		DockOpen:         m.dock.Open(),
 		Maximized:        m.splits.maximized,
 	}
 	if m.findOpen() {
@@ -2165,7 +2167,7 @@ func (m *Model) paint() *grid.Grid {
 	}
 	m.paintEditor(g, l)
 	m.paintDropZone(g)
-	m.paintDock(g, l)
+	m.dock.Draw(g, l, m.styles)
 	tabstrip.Draw(g, m.styles, l.EditorX, l.StripY, l.Strip)
 	if l.ExplorerOpen {
 		m.explorerPanel.Draw(g, m.explorerGeometry(l))
@@ -2219,7 +2221,7 @@ func (m *Model) caret() (x, y int, ok bool) {
 		return 0, 0, false
 	}
 	if m.dockKeyboard() {
-		return m.dockCaret()
+		return m.dock.Caret(m.layout())
 	}
 	doc := m.ed.Active()
 	if doc == nil || m.tabFocus {

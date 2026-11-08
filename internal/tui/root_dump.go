@@ -87,7 +87,7 @@ func (m *Model) uiTree() string {
 		fmt.Fprintf(&b, "  %T\n", o)
 	}
 	fmt.Fprintf(&b, "menu %s\n", openWord(m.menu.IsOpen()))
-	fmt.Fprintf(&b, "dock %s\n", openWord(m.dock.open))
+	fmt.Fprintf(&b, "dock %s\n", openWord(m.dock.Open()))
 	return b.String()
 }
 
@@ -100,7 +100,7 @@ func (m *Model) focusName() string {
 		return "explorer"
 	case m.tabFocus:
 		return "tabs"
-	case m.dock.focus:
+	case m.dock.Focus():
 		return "dock"
 	case m.menu.IsOpen():
 		return "menu"

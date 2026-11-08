@@ -173,7 +173,7 @@ func (m *Model) relativePath(path string) string {
 func (m *Model) setClipboard(text string) tea.Cmd {
 	m.notice = "Copied " + text
 	cmd := tea.SetClipboard(text)
-	if w, ok := m.dock.clipboard.(ClipboardWriter); ok {
+	if w, ok := m.dock.Clipboard().(ClipboardWriter); ok {
 		cmd = tea.Batch(cmd, func() tea.Msg {
 			_ = w.Write(text)
 			return nil

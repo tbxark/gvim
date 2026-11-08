@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,16 @@ import (
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/theme"
+)
+
+// The dock's notices, for the tests that assert what the status row says.
+const (
+	noTerminalsNotice   = "Terminals are not available in this build."
+	noClipboardNotice   = "The clipboard is not available in this build."
+	unsupportedNotice   = "Terminals are not supported on this platform yet."
+	startingShellNotice = "Starting a shell..."
+	captureOnNotice     = "Keyboard capture ON - all keys go to terminal (F9 to toggle)"
+	captureOffNotice    = "Keyboard capture OFF - UI bindings active (F9 to toggle)"
 )
 
 // fakeTerm implements Terminal. It records what it is asked to write, paste and
@@ -124,28 +135,63 @@ func newDockModel(t *testing.T, ed EditorState, ports DockPorts) *Model {
 	return m
 }
 
-// dockSettle runs cmd and feeds the messages it returns back into m, until no command
-// is left. Output messages are dropped: the fake terminal's output wait is armed
-// once and would otherwise be armed again forever, and the tests that need output
-// messages send them directly. Exit messages are fed back.
-func dockSettle(t *testing.T, m *Model, cmd tea.Cmd) {
-	t.Helper()
-	for range 20 {
-		msgs := runCmd(cmd)
-		if len(msgs) == 0 {
+// dockPumps keeps the shell traffic of each model the tests settle. The dock's
+// commands run concurrently, the way Bubble Tea runs them, and a wait for output or
+// the exit parks until the test closes a shell channel; the pump carries that message
+// into the next settle instead of losing it.
+type dockPump struct {
+	events chan tea.Msg
+}
+
+var dockPumps sync.Map // *Model -> *dockPump
+
+// dockPumpFor returns the model's pump, making it the first time.
+func dockPumpFor(m *Model) *dockPump {
+	if p, ok := dockPumps.Load(m); ok {
+		return p.(*dockPump)
+	}
+	p := &dockPump{events: make(chan tea.Msg, 512)}
+	actual, _ := dockPumps.LoadOrStore(m, p)
+	return actual.(*dockPump)
+}
+
+// start runs cmd in the background and sends what it reports to the pump.
+func (p *dockPump) start(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	go func() {
+		msg := cmd()
+		if msg == nil {
 			return
 		}
-		var next []tea.Cmd
-		for _, msg := range msgs {
-			if _, ok := msg.(dockOutputMsg); ok {
-				continue
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				p.start(c)
 			}
-			_, c := m.Update(msg)
-			next = append(next, c)
+			return
 		}
-		cmd = tea.Batch(next...)
+		p.events <- msg
+	}()
+}
+
+// dockSettle runs cmd and feeds the messages that come back into m, and it keeps going
+// until the dock is quiet: nothing arrived for quiet. A wait for output or the exit is
+// left running, so a test that closes a shell channel has its message delivered by the
+// next settle.
+func dockSettle(t *testing.T, m *Model, cmd tea.Cmd) {
+	t.Helper()
+	p := dockPumpFor(m)
+	p.start(cmd)
+	for {
+		select {
+		case msg := <-p.events:
+			_, next := m.Update(msg)
+			p.start(next)
+		case <-time.After(40 * time.Millisecond):
+			return
+		}
 	}
-	t.Fatal("dock commands did not settle")
 }
 
 // dockRun runs an action the way the palette and the menu do: as a message that
@@ -206,8 +252,8 @@ func TestDockActionsShowAndHide(t *testing.T) {
 			for _, a := range tt.actions {
 				dockSettle(t, m, m.runCommand(a))
 			}
-			if m.dock.open != tt.open || m.dock.focus != tt.focus {
-				t.Fatalf("open, focus = %v, %v; want %v, %v", m.dock.open, m.dock.focus, tt.open, tt.focus)
+			if m.dock.Open() != tt.open || m.dock.Focus() != tt.focus {
+				t.Fatalf("open, focus = %v, %v; want %v, %v", m.dock.Open(), m.dock.Focus(), tt.open, tt.focus)
 			}
 			if len(starter.dirs) != tt.starts {
 				t.Fatalf("shell starts = %d, want %d", len(starter.dirs), tt.starts)
@@ -245,9 +291,9 @@ func TestDockFocusIsExclusiveWithTheExplorer(t *testing.T) {
 			for _, a := range tt.actions {
 				dockSettle(t, m, m.runCommand(a))
 			}
-			if m.dock.focus != tt.dockFocus || m.explorerFocus != tt.explorerFocus {
+			if m.dock.Focus() != tt.dockFocus || m.explorerFocus != tt.explorerFocus {
 				t.Fatalf("dock focus, explorer focus = %v, %v; want %v, %v",
-					m.dock.focus, m.explorerFocus, tt.dockFocus, tt.explorerFocus)
+					m.dock.Focus(), m.explorerFocus, tt.dockFocus, tt.explorerFocus)
 			}
 		})
 	}
@@ -461,7 +507,7 @@ func TestSendSelectionToTerminal(t *testing.T) {
 			if !slices.Equal(starter.term.writes, []string{tt.want}) {
 				t.Fatalf("shell writes = %q, want [%q]", starter.term.writes, tt.want)
 			}
-			if !m.dock.focus {
+			if !m.dock.Focus() {
 				t.Fatal("the dock did not take the focus after the send")
 			}
 		})
@@ -506,11 +552,11 @@ func TestDockStartFailureShowsNotice(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newDockModel(t, newFakeEditor("hello"), tt.ports())
 			openDock(t, m)
-			if m.dock.term != nil {
+			if m.dock.Running() {
 				t.Fatal("a shell is running after a failed start")
 			}
-			if !m.dock.open || m.dock.notice != tt.want {
-				t.Fatalf("open = %v, notice = %q; want open with notice %q", m.dock.open, m.dock.notice, tt.want)
+			if !m.dock.Open() || m.dock.Notice() != tt.want {
+				t.Fatalf("open = %v, notice = %q; want open with notice %q", m.dock.Open(), m.dock.Notice(), tt.want)
 			}
 			top := m.layout().DockY + 1
 			if row := m.paint().Plain()[top]; !strings.Contains(row, tt.want) {
@@ -535,112 +581,13 @@ func TestDockResizesWithTheLayout(t *testing.T) {
 	}
 }
 
-func TestWaitDockEventReportsWhatHappened(t *testing.T) {
-	tests := []struct {
-		name      string
-		setup     func(f *fakeTerm)
-		live      bool
-		watchExit bool
-		want      tea.Msg
-	}{
-		{
-			name:      "a pending signal is output",
-			setup:     func(f *fakeTerm) {},
-			live:      true,
-			watchExit: true,
-			want:      dockOutputMsg{gen: 3, ended: false},
-		},
-		{
-			name: "a closed Updates channel ends the output",
-			setup: func(f *fakeTerm) {
-				<-f.updates
-				close(f.updates)
-			},
-			live:      true,
-			watchExit: true,
-			want:      dockOutputMsg{gen: 3, ended: true},
-		},
-		{
-			name: "once the output has ended the wait is for the exit",
-			setup: func(f *fakeTerm) {
-				close(f.done)
-			},
-			live:      false,
-			watchExit: true,
-			want:      dockExitMsg{gen: 3},
-		},
-		{
-			name: "a background job keeps the output open, and the exit is still seen",
-			setup: func(f *fakeTerm) {
-				<-f.updates
-				close(f.done)
-			},
-			live:      true,
-			watchExit: true,
-			want:      dockExitMsg{gen: 3},
-		},
-		{
-			name: "after the exit only the output is waited for",
-			setup: func(f *fakeTerm) {
-				close(f.done)
-			},
-			live:      true,
-			watchExit: false,
-			want:      dockOutputMsg{gen: 3, ended: false},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newFakeTerm()
-			tt.setup(f)
-			msgs := runCmdWithin(t, waitDockEvent(f, 3, tt.live, tt.watchExit), 2*time.Second)
-			if len(msgs) != 1 || msgs[0] != tt.want {
-				t.Fatalf("messages = %#v, want [%#v]", msgs, tt.want)
-			}
-		})
-	}
-}
-
-func TestDockOutputKeepsWaitingUntilTheExit(t *testing.T) {
-	starter := newFakeStarter()
-	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter})
-	openDock(t, m)
-	gen := m.dock.gen
-
-	// Output arrives: the wait is armed again.
-	_, cmd := m.Update(dockOutputMsg{gen: gen})
-	if cmd == nil || !m.dock.armed {
-		t.Fatal("the output wait was not armed again after output")
-	}
-
-	// The output ends with the PTY: the wait for the exit is armed.
-	_, cmd = m.Update(dockOutputMsg{gen: gen, ended: true})
-	if cmd == nil || m.dock.live {
-		t.Fatal("the exit wait was not armed after the output ended")
-	}
-	close(starter.term.done)
-	dockSettle(t, m, cmd)
-
-	if !m.dock.exited || m.dock.armed {
-		t.Fatalf("exited = %v, armed = %v; want exited and no wait", m.dock.exited, m.dock.armed)
-	}
-	if top := m.layout().DockY; !strings.Contains(m.paint().Plain()[top], "(exited)") {
-		t.Fatalf("title row = %q, want it to say the shell exited", m.paint().Plain()[top])
-	}
-	// Keys after the exit do not reach the dead shell.
-	dockSettle(t, m, press(m, typed("a")))
-	if len(starter.term.writes) != 0 {
-		t.Fatalf("writes after exit = %q, want none", starter.term.writes)
-	}
-}
-
 func TestDockHideKeepsTheShellRunning(t *testing.T) {
 	starter := newFakeStarter()
 	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter})
 	openDock(t, m)
 	dockSettle(t, m, m.runCommand("toggle_utility_dock"))
-	if m.dock.open || starter.term.closed {
-		t.Fatalf("open = %v, closed = %v; want hidden and still running", m.dock.open, starter.term.closed)
+	if m.dock.Open() || starter.term.closed {
+		t.Fatalf("open = %v, closed = %v; want hidden and still running", m.dock.Open(), starter.term.closed)
 	}
 	dockSettle(t, m, m.runCommand("toggle_utility_dock"))
 	if len(starter.dirs) != 1 {
@@ -653,8 +600,8 @@ func TestCloseDockEndsTheShell(t *testing.T) {
 	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter})
 	openDock(t, m)
 	m.closeDock()
-	if !starter.term.closed || m.dock.term != nil {
-		t.Fatalf("closed = %v, term = %v; want the shell closed and dropped", starter.term.closed, m.dock.term)
+	if !starter.term.closed || m.dock.Running() {
+		t.Fatalf("closed = %v, running = %v; want the shell closed and dropped", starter.term.closed, m.dock.Running())
 	}
 }
 
@@ -835,8 +782,8 @@ func TestDockTakesFocusOnlyWhileAShellRuns(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newDockModel(t, newFakeEditor("hello"), tt.ports())
 			openDock(t, m)
-			if m.dock.focus != tt.wantFocus {
-				t.Fatalf("dock focus = %v, want %v", m.dock.focus, tt.wantFocus)
+			if m.dock.Focus() != tt.wantFocus {
+				t.Fatalf("dock focus = %v, want %v", m.dock.Focus(), tt.wantFocus)
 			}
 		})
 	}
@@ -845,11 +792,11 @@ func TestDockTakesFocusOnlyWhileAShellRuns(t *testing.T) {
 func TestDockTakesFocusWhenItsShellStarts(t *testing.T) {
 	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: newFakeStarter()})
 	cmd := m.runCommand("open_terminal_in_dock")
-	if m.dock.focus {
+	if m.dock.Focus() {
 		t.Fatal("the dock took the focus before a shell ran")
 	}
 	dockSettle(t, m, cmd)
-	if !m.dock.focus {
+	if !m.dock.Focus() {
 		t.Fatal("the dock did not take the focus when its shell started")
 	}
 }
@@ -876,7 +823,7 @@ func TestDockKeysWithoutAShellGoToTheEditor(t *testing.T) {
 			if !slices.Equal(ed.actions, tt.editor) {
 				t.Fatalf("editor actions = %v, want %v", ed.actions, tt.editor)
 			}
-			if m.dock.focus {
+			if m.dock.Focus() {
 				t.Fatal("the dock holds the focus with no shell running")
 			}
 		})
@@ -888,11 +835,12 @@ func TestDockExitGivesTheFocusToTheEditor(t *testing.T) {
 	starter := newFakeStarter()
 	m := newDockModel(t, ed, DockPorts{Starter: starter})
 	openDock(t, m)
-	if !m.dock.focus {
+	if !m.dock.Focus() {
 		t.Fatal("precondition: the dock has the focus with its shell running")
 	}
-	m.Update(dockExitMsg{gen: m.dock.gen})
-	if m.dock.focus {
+	close(starter.term.done)
+	dockSettle(t, m, nil)
+	if m.dock.Focus() {
 		t.Fatal("the dock keeps the focus after its shell exited")
 	}
 	dockSettle(t, m, press(m, typed("a")))
@@ -901,27 +849,6 @@ func TestDockExitGivesTheFocusToTheEditor(t *testing.T) {
 	}
 	if len(starter.term.writes) != 0 {
 		t.Fatalf("shell writes after exit = %q, want none", starter.term.writes)
-	}
-}
-
-func TestDockExitIsSeenWhileOutputStaysOpen(t *testing.T) {
-	starter := newFakeStarter()
-	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter})
-	openDock(t, m)
-	gen := m.dock.gen
-
-	// A background job still holds the PTY, so the output does not end. The shell
-	// itself has exited, and the dock must show that.
-	close(starter.term.done)
-	_, cmd := m.Update(dockOutputMsg{gen: gen})
-	for _, msg := range runCmdWithin(t, cmd, 2*time.Second) {
-		m.Update(msg)
-	}
-	if !m.dock.exited {
-		t.Fatal("the dock does not show the shell as exited while its output stays open")
-	}
-	if top := m.layout().DockY; !strings.Contains(m.paint().Plain()[top], "(exited)") {
-		t.Fatalf("title row = %q, want it to say the shell exited", m.paint().Plain()[top])
 	}
 }
 
@@ -947,8 +874,8 @@ func TestDockPressFocusesTheDock(t *testing.T) {
 			openDock(t, m)
 			m.focusEditor()
 			m.Update(click(10, tt.row(m.layout()), tea.MouseLeft))
-			if m.dock.focus != tt.wantFocus {
-				t.Fatalf("dock focus = %v, want %v", m.dock.focus, tt.wantFocus)
+			if m.dock.Focus() != tt.wantFocus {
+				t.Fatalf("dock focus = %v, want %v", m.dock.Focus(), tt.wantFocus)
 			}
 		})
 	}
@@ -1083,7 +1010,7 @@ func TestDockKeyWithNoSequenceStaysInTheDock(t *testing.T) {
 			if len(ed.actions) != 0 {
 				t.Fatalf("editor actions = %v, want none: the dock has the focus", ed.actions)
 			}
-			if !m.dock.focus {
+			if !m.dock.Focus() {
 				t.Fatal("the dock lost the focus to a key the shell cannot receive")
 			}
 		})

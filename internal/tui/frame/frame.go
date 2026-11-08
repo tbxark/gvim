@@ -86,7 +86,7 @@ type Input struct {
 	HideMenuBar      bool       // the menu row is not drawn; the tab Strip takes row 0
 	HideStatus       bool       // a suggestion list or the file browser is open
 	HideLineNumbers  bool       // the gutter is not drawn
-	DockOpen         bool       // the terminal dock is shown (dock.go); it takes rows under the body
+	DockOpen         bool       // the terminal dock is shown (internal/tui/dock); it takes rows under the body
 	HideTabBar       bool       // the tab Strip row is not drawn; the body takes it
 	ShowPromptLine   bool       // the prompt row is drawn under the status row
 	HideVScroll      bool       // the vertical scrollbar is not drawn, so its column is text
@@ -170,7 +170,7 @@ type Layout struct {
 	PromptOn bool
 	PromptY  int
 
-	// The terminal dock (dock.go) sits under the body, over the full width. Its rows
+	// The terminal dock (internal/tui/dock) sits under the body, over the full width. Its rows
 	// dockY..dockY+dockH-1 are the title row and then the shell's rows. The body ends
 	// above it, so bodyBottom is already past the dock. DockOn is false while the dock
 	// is hidden or does not fit.

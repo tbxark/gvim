@@ -1,40 +1,41 @@
-package tui
+package dock
 
 import (
 	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
-// paintDock draws the dock under the editor body: a title row, then the shell's
+// Draw paints the dock under the editor body: a title row, then the shell's
 // screen, or the notice that says why no shell runs. A cell keeps the colours the
 // shell set, and a colour the shell left at its default takes the editor's.
-func (m *Model) paintDock(g *grid.Grid, l layout) {
+func (p *Panel) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 	if !l.DockOn {
 		return
 	}
-	bar := style.Cell(m.styles.ExplorerTitle)
-	body := style.Cell(m.styles.Editor)
+	bar := style.Cell(st.ExplorerTitle)
+	body := style.Cell(st.Editor)
 	g.Fill(0, l.W, l.DockY, bar)
-	g.Put(1, l.DockY, l.W, dockTitle(&m.dock), bar)
+	g.Put(1, l.DockY, l.W, p.title(), bar)
 
 	top, rows := l.DockY+1, l.DockH-1
 	for y := range rows {
 		g.Fill(0, l.W, top+y, body)
 	}
-	if m.dock.term == nil {
-		g.Put(1, top, l.W, dockText(&m.dock), body)
+	if p.term == nil {
+		g.Put(1, top, l.W, p.dockText(), body)
 		return
 	}
-	sc := m.dock.term.Screen()
+	sc := p.term.Screen()
 	for r := range min(rows, sc.Rows) {
 		paintShellRow(g, top+r, l.W, sc, r, body)
 	}
 }
 
-// dockTitle is the title row of the dock.
-func dockTitle(d *dockState) string {
-	if d.exited {
+// title is the title row of the dock.
+func (p *Panel) title() string {
+	if p.exited {
 		return "Terminal (exited)"
 	}
 	return "Terminal"
@@ -42,9 +43,9 @@ func dockTitle(d *dockState) string {
 
 // dockText is what the dock shows in place of a screen: the notice that says why no
 // shell runs, or that one is starting.
-func dockText(d *dockState) string {
-	if d.notice != "" {
-		return d.notice
+func (p *Panel) dockText() string {
+	if p.notice != "" {
+		return p.notice
 	}
 	return startingShellNotice
 }
@@ -78,14 +79,13 @@ func shellStyle(st terminal.Style, base grid.Style) grid.Style {
 	return out
 }
 
-// dockCaret is the terminal caret in frame cells. It is the shell's cursor when the
-// shell shows it and the cursor is inside the dock's shell rows.
-func (m *Model) dockCaret() (x, y int, ok bool) {
-	l := m.layout()
-	if !l.DockOn || m.dock.term == nil || m.dock.exited {
+// Caret is the terminal caret in frame cells. It is the shell's cursor when the shell
+// shows it and the cursor is inside the dock's shell rows.
+func (p *Panel) Caret(l frame.Layout) (x, y int, ok bool) {
+	if !l.DockOn || p.term == nil || p.exited {
 		return 0, 0, false
 	}
-	c := m.dock.term.Screen().Cursor
+	c := p.term.Screen().Cursor
 	if !c.Visible || c.Col < 0 || c.Col >= l.W || c.Row < 0 || c.Row >= l.DockH-1 {
 		return 0, 0, false
 	}

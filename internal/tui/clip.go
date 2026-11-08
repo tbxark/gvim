@@ -69,7 +69,7 @@ func (m *Model) clipboardOutArgs(action string, args map[string]any, res editor.
 // nativeWrite is the command that writes text through the app's clipboard writer, or nil
 // when there is none.
 func (m *Model) nativeWrite(text string) tea.Cmd {
-	w, ok := m.dock.clipboard.(ClipboardWriter)
+	w, ok := m.dock.Clipboard().(ClipboardWriter)
 	if !ok {
 		return nil
 	}
@@ -84,7 +84,7 @@ func (m *Model) nativeWrite(text string) tea.Cmd {
 // nil when the clipboard cannot hold rich text, and the status row then says that the copy
 // is plain text. The row says what was copied at once, and says so again if the write fails.
 func (m *Model) copyFormatted(args map[string]any, text string) tea.Cmd {
-	w, ok := m.dock.clipboard.(HTMLClipboardWriter)
+	w, ok := m.dock.Clipboard().(HTMLClipboardWriter)
 	if !ok {
 		m.notice = "Copied as plain text: this clipboard has no rich text"
 		return nil
@@ -123,10 +123,10 @@ func (m *Model) copyFormatted(args map[string]any, text string) tea.Cmd {
 // macro replay does not read it either: the read arrives after the steps that follow the
 // paste, so the paste runs now, from the editor's register.
 func (m *Model) editorPaste(action string, args map[string]any) (tea.Cmd, bool) {
-	if action != "paste" || args["text"] != nil || m.dock.clipboard == nil || m.ed.Active() == nil || m.root.macro.playing {
+	if action != "paste" || args["text"] != nil || m.dock.Clipboard() == nil || m.ed.Active() == nil || m.root.macro.playing {
 		return nil, false
 	}
-	cb := m.dock.clipboard
+	cb := m.dock.Clipboard()
 	return func() tea.Msg {
 		text, err := cb.Read()
 		return editorPasteMsg{text: text, err: err}
@@ -161,8 +161,7 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if m.dockKeyboard() {
-			text := pasteText(msg.Content)
-			m.dock.queue = append(m.dock.queue, func(t Terminal) error { return t.Paste(text) })
+			m.dock.SendPaste(msg.Content)
 			return nil, true
 		}
 		if m.ed.Active() == nil {

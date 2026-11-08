@@ -158,7 +158,7 @@ func TestPluginClipboardSetIsCoalesced(t *testing.T) {
 	t.Parallel()
 	m, rt := newPromptModel(t)
 	var writes []string
-	m.dock.clipboard = clipRecorder{writes: &writes}
+	m.SetDock(DockPorts{Clipboard: clipRecorder{writes: &writes}})
 	openVia(t, m, rt, func(h pluginapi.Host) {
 		for i := range 1000 {
 			h.SetClipboard(strings.Repeat("x", i+1))
