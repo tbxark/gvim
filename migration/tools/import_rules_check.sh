@@ -28,13 +28,14 @@
 #       UI harness (internal/uitest). The plain github.com/charmbracelet/x/*
 #       utility libraries (ansi, term) are not the UI framework and stay free.
 #   R3  leaf packages import no module package: buffer, textlayout, diff,
-#       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp.
+#       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp,
+#       atomicfile, shellcmd.
 #   R4  engine direction: editor must not import the UI, app, cli, plugin
 #       runtime/contract, lsp, finder, fsops, workspace, keymap, theme or
 #       config; search must not import editor; syntax imports only theme among
-#       module packages; session imports only buffer; commands imports only
-#       fuzzy and keymap; workspace imports only config; finder imports only
-#       explorer and fuzzy.
+#       module packages; session imports only buffer and atomicfile; commands
+#       imports only fuzzy and keymap; workspace imports only config; finder
+#       imports only explorer and fuzzy.
 #   R5  the TUI tree must not import internal/app, internal/cli, the plugin
 #       runtime, lsp, finder or fsops; a tui sub-package must not import its
 #       parent package (internal/tui).
@@ -156,7 +157,7 @@ while IFS=$'\t' read -r pkg imp; do
     if [ "$rel" = syntax ] && [ "$irel" != theme ]; then
       add R4 "$pkg" "$imp"
     fi
-    if [ "$rel" = session ] && [ "$irel" != buffer ]; then
+    if [ "$rel" = session ] && [ "$irel" != buffer ] && [ "$irel" != atomicfile ]; then
       add R4 "$pkg" "$imp"
     fi
     if [ "$rel" = commands ] && [ "$irel" != fuzzy ] && [ "$irel" != keymap ]; then

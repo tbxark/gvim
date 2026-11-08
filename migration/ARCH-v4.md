@@ -1,5 +1,9 @@
 # ARCH-v4: gvim architecture after the v4 owner directives
 
+> Superseded by `docs/architecture.md`, which records the package layout as built.
+> This file is kept for history: it was a proposal written before the migration and
+> its package list, import rules and phase plan do not describe the current tree.
+
 Status: proposal, synthesized from three analyst reports (bubbles, cli, libs) and one new scratch check. Not implemented. The repo was not modified except this file. Where this file and BLUEPRINT*.md disagree on TUI or CLI structure, this file wins; BLUEPRINT*.md was not re-read in this pass.
 
 Evidence labels: [V] = verified by a command in this pass, [A] = taken from an analyst report and not re-run, [P] = proposal.

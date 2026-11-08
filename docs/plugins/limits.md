@@ -97,7 +97,7 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 Every Go function that allocates in proportion to its arguments computes the final size *before*
 allocating and raises `resulting string too large` (or the stated error) beyond the cap. Sizes use
 64-bit arithmetic and division, never an unchecked multiplication. Constants live in
-`internal/plugin/limits.go`; each row has a test (`TestStdlibCaps`).
+`plugin/limits.go`; each row has a test (`TestStdlibCaps`).
 
 | Function | Rule |
 |---|---|
@@ -155,7 +155,7 @@ the heap guard can cancel a slice only *between* instructions, so the peak is th
 what the instruction that crossed it allocated. `runtime/metrics` is read between instructions (every
 millisecond, from the heap as it was when the slice began), and the limit is 128 MiB, so that the usual
 overshoot stays near twice the guard. Measured peak resident size, one process per case, on the
-default guard (128 MiB; the process itself is about 10 MiB; `internal/plugin/membomb_unix_test.go`
+default guard (128 MiB; the process itself is about 10 MiB; `plugin/membomb_unix_test.go`
 repeats these and fails when one grows past its bound):
 
 | Plugin code | Peak | Times the guard |

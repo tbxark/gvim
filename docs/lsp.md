@@ -56,7 +56,7 @@ example `C++` for `cpp`) uses the same entry.
 The rest of Fresh's table is there too: ruby, php, dart, nushell, solidity, terraform, cmake,
 protobuf, graphql, sql, vue, svelte, astro, tailwindcss, nix, swift, scala, elixir, erlang,
 haskell, ocaml, clojure, r, julia, perl, nim, gleam, racket, fsharp, templ, typst, c3 and slang.
-`internal/lsp/defaults.go` is the whole table, with the install hint of each.
+`lsp/defaults.go` is the whole table, with the install hint of each.
 
 Verilog and SystemVerilog use `svls` (`cargo install svls`), and the assembly languages (asm, gas,
 NASM) use `asm-lsp` (`cargo install asm-lsp`).

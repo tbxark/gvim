@@ -1,7 +1,7 @@
 # Bundled plugins
 
 gvim ships ten plugins inside the binary, written in Lua like any other (their sources are under
-`internal/plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
+`plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Eight are on by default; `flash` and `vi_mode` are off until you
 turn them on:
 
@@ -98,7 +98,7 @@ The `:` and `/` prompts keep a history (Up and Down), the matches of a search ar
 window (`:noh` hides them, `:set nohls` or the `hlsearch` setting turns it off), a search that wraps says
 so, and `:set` changes `hls`, `et`, `ts` and `sw` for real and refuses what the editor decides (`ai`, `is`).
 Exports `toggle`, `enable`, `disable` and `is_enabled`. Its README
-(`internal/plugin/bundled/plugins/vi_mode/README.md`) lists the keys; the differences from Vim are:
+(`plugin/bundled/plugins/vi_mode/README.md`) lists the keys; the differences from Vim are:
 
 * Vim's insert-mode ctrl keys (`ctrl+w`, `ctrl+u`, `ctrl+o`, `ctrl+r`, `ctrl+d`, ...) and the `ctrl+w`
   window prefix are not provided: they run the keymap's own binding (`ctrl+o` opens the file picker,

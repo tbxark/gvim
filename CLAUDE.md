@@ -91,46 +91,59 @@ go build ./... && CGO_ENABLED=0 go build ./...   # shipped binary must stay pure
 go vet ./...
 golangci-lint run ./...                          # v2; currently reports 0 issues
 bash migration/tools/purity_check.sh             # pure-Go gate, prints PURE_GO_OK
-bash migration/tools/import_rules_check.sh       # ARCH-v4 import graph, prints IMPORT_RULES_OK
+bash migration/tools/import_rules_check.sh       # layering gate R1-R12, prints IMPORT_RULES_OK
 go test ./...                                    # all packages pass today
-go test ./internal/ui -run TestName              # single test
+go test ./internal/tui -run TestName             # single test
 go test -race ./...                              # test-only; needs cgo
-go run . [DIR] [FILE[:LINE[:COL]]]...            # launch the TUI
+go run ./cmd/gvim [DIR] [FILE[:LINE[:COL]]]...   # launch the TUI
 ```
-
-`master` has no commits yet and everything is untracked, so `git diff` shows nothing useful.
 
 ### Architecture
 
-The design record is `migration/ARCH-v4.md` (package table, allowed imports, phases P0–P10,
-acceptance gates). Where it conflicts with `BLUEPRINT*.md`, ARCH-v4 wins. It was written as a
-proposal, so check names against the source. The shape that needs several files to see:
+The design record is `docs/architecture.md` (package table, import rules R1-R12,
+package maps, migration phases). `migration/ARCH-v4.md` is the earlier proposal-only
+record; where the two disagree, `docs/architecture.md` wins. The shape that needs
+several files to see:
 
-- `main.go` → `cli.Execute(ctx, args, stdout, stderr, app.Run)`. `internal/cli` is cobra only
-  (flags, `DIR`/`FILE:LINE:COL` classification via an injected `stat`) and hands `app.Options`
-  to a `Runner`. A file named `config`, `grammar`, `completion` or `help` must be written `./name`.
-- `internal/app` is the composition root and the only package that imports concrete adapters
-  (`buildModel` in `run.go`: explorer tree, editor, finder index, keymap, theme → `ui.Model`).
-- `internal/ui` is one Bubble Tea v2 root model. It depends on interfaces it defines in
-  `ports.go` (`EditorState`, `Document`, …); `app` satisfies them with adapters. `ui` must not
-  import concrete `finder`, `fsops`, `lsp`; its sub-packages (`editorpane`, `menubar`, `palette`,
-  `find`, `prompt`, `browser`, `explorer`, `statusbar`, `style`, `grid`) must not import `ui`.
-  `layout.go` is the single geometry source for both painting and the hit map (`hit.go`).
-- Domain packages (`buffer`, `editor`, `search`, `explorer`, `finder`, `fuzzy`, `palette`,
-  `keymap`, `theme`, `syntax`, `fsops`, `workspace`, `config`, `lsp`) must not import bubbletea,
-  bubbles or lipgloss. `ui/style` is the only place theme data becomes lipgloss styles.
-- Rendering is a custom cell grid (`ui/grid`) on `charmbracelet/x/ansi`, not bubbles
-  `viewport`/`textarea`. `Update` does no IO: file and finder work runs in `tea.Cmd`s. The palette
-  and finder must not filter synchronously in `Update` (cap of 100 items fed to the list).
-- Keymap presets (`internal/keymap/*.json`) and themes (`internal/theme/data/*.json`) are data
-  files; config is JSONC (`hujson`).
+- Three layers. `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) →
+  `app.Run`. `internal/` is the private executable shell (`app`, `cli`, `tui`,
+  `terminal`, `filewatch`, `uitest`). TUI-free engine and library packages are at the
+  module top level: `buffer`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,
+  `session`, `decorations`, `textlayout`, `workspace`, `explorer`, `finder`, `fuzzy`,
+  `fsops`, `gitstate`, `config`, `keymap`, `theme`, `lsp`, `pluginapi`, `plugin`,
+  `commands`.
+- Import direction: engine → shell, never the reverse. No top-level package imports
+  `internal/`; only `internal/app` imports the concrete adapters and the TUI
+  sub-packages; `internal/cli` imports `internal/app` for `Options` only.
+  `migration/tools/import_rules_check.sh` is the enforcement.
+- `internal/app` is the composition root: `Options`, `Run`, `buildRuntime`.
+- `internal/tui` is one Bubble Tea v2 root model (`package tui`). It depends on
+  interfaces it defines in `ports.go` (`EditorState`, `Document`, ...); `app` satisfies
+  them with adapters. `tui` must not import concrete `finder`, `fsops`, `lsp` or the
+  plugin runtime; its sub-packages (`editorpane`, `menubar`, `explorer`, `palette`,
+  `find`, `prompt`, `browser`, `picker`, `popup`, `ctxmenu`, `dialog`, `statusbar`,
+  `style`, `grid`, `icons`, `space`) must not import the root `tui`.
+  `layout.go` is the single geometry source for both painting and the hit map
+  (`hit.go`).
+- Engine packages (`buffer`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,
+  `session`, `decorations`, `textlayout`) are TUI-free: no bubbletea, bubbles or
+  lipgloss. `internal/tui/style` is the only place theme data becomes lipgloss styles.
+- Rendering is a custom cell grid (`internal/tui/grid`) on `charmbracelet/x/ansi`, not
+  bubbles `viewport`/`textarea`. `Update` does no IO: file and finder work runs in
+  `tea.Cmd`s. The palette and finder must not filter synchronously in `Update` (cap of
+  100 items fed to the list).
+- Keymap presets (`keymap/*.json`) and themes (`theme/data/*.json`) are data files;
+  config is JSONC (`hujson`).
+- Big packages keep their internals findable: `docs/architecture.md` has a file map for
+  the TUI root, `editor`, `buffer` (two storage modes), `plugin` (runtime/API/loader)
+  and the app host packages.
 
 ### Testing
 
 - Write plain Go unit tests: table-driven, asserting on values and behaviour. Do **not** add
   golden-file or snapshot tests for the TUI (no `testdata` screen dumps, no full-frame string
   comparisons, no new `migration/parity` scenarios). They are too costly to maintain.
-- For `ui` code, drive `Update` with messages and assert on model state, emitted `tea.Cmd`s,
+- For `internal/tui` code, drive `Update` with messages and assert on model state, emitted `tea.Cmd`s,
   layout rectangles and hit-map results. To check rendering, assert on a few specific cells or
   rows of the `grid`, not on the whole frame.
 - Test domain packages (`buffer`, `editor`, `search`, `fuzzy`, ...) directly, without Bubble Tea.
@@ -141,9 +154,9 @@ proposal, so check names against the source. The shape that needs several files 
 
 ### Generated and reference code
 
-- `internal/palette/commands_gen.go`: regenerate with
-  `python3 internal/palette/gen/generate.py refs/fresh`. Do not edit by hand.
-- `internal/ui/menubar/menu_table_gen.go`: regenerate with `python3 migration/tools/gen_menus.py`
+- `commands/commands_gen.go`: regenerate with
+  `python3 commands/gen/generate.py refs/fresh`. Do not edit by hand.
+- `internal/tui/menubar/menu_table_gen.go`: regenerate with `python3 migration/tools/gen_menus.py`
   (`--check` reports drift). It reads `refs/fresh`. Do not edit by hand.
 - `refs/` (crush, fresh, lazygit, micro, orbiton, toast) are read-only reference checkouts, and
   `_attic/tui` is the retired legacy TUI. Neither is part of the build (`_attic` is ignored by

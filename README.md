@@ -7,29 +7,55 @@
 
 gvim is a terminal editor written in Go. It is a port of the Fresh TUI (Rust, reference
 checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
-(`internal/ui/grid`), not bubbles components.
+(`internal/tui/grid`), not bubbles components.
 
 - `CLAUDE.md` holds the behavior rules and an architecture summary.
-- `migration/ARCH-v4.md` is the design record: package table, allowed imports, phases,
-  acceptance gates. Where it conflicts with `migration/BLUEPRINT*.md`, ARCH-v4 wins.
+- `docs/architecture.md` is the design record for the package layout, package roles and
+  import rules.
+- `migration/ARCH-v4.md` is the earlier design record, kept for history; it is superseded.
 
 ## Layout
 
-- `main.go` → `internal/cli` (cobra flags and arguments) → `app.Run`.
-- `internal/app`: the composition root, and the only package that imports concrete
-  adapters. `buildModel` and `buildRuntime` are in `run.go`.
-- `internal/ui`: the single Bubble Tea root model. `ports.go` defines its interfaces,
-  and `layout.go` is the geometry source for painting and hit testing.
-- Domain packages (`buffer`, `editor`, `search`, `explorer`, `finder`, `fuzzy`, `palette`,
-  `keymap`, `theme`, `syntax`, `fsops`, `workspace`, `config`, `lsp`) must not import
-  bubbletea, bubbles or lipgloss.
-- `internal/pluginapi`, `internal/plugin`, `internal/luapat`, `internal/decor`: the Lua plugin
-  system (see Lua plugins below).
-- `docs/plugins/`: the plugin author documentation and the `gvim.d.lua` type stubs.
-- `internal/uitest`: an in-process test harness for the real UI (see Debugging).
-- `internal/term`: runs a program in a pseudo-terminal and keeps a model of its screen.
+The module has three layers.
+
+**Entry and executable shell (private):**
+
+- `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) → `app.Run`.
+- `internal/` holds the executable shell. Nothing outside this module can import it, and
+  no top-level package of the module imports it either.
+  - `internal/app`: the composition root (`Options`, `Run`, `buildRuntime` in `run.go`);
+    the only package that imports the concrete adapters, the TUI sub-packages and the
+    plugin runtime.
+  - `internal/cli`: the cobra command tree; hands `app.Options` to a `Runner`.
+  - `internal/tui`: the single Bubble Tea root model (`ports.go` defines its interfaces,
+    `layout.go` is the geometry source for painting and hit testing). Sub-packages:
+    `editorpane`, `menubar`, `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`,
+    `popup`, `ctxmenu`, `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`.
+  - `internal/terminal`: runs a program in a pseudo-terminal and keeps a model of its
+    screen (the dock backend).
+  - `internal/filewatch`: the fsnotify watcher behind the file tree and reloads.
+  - `internal/uitest`: an in-process test harness for the real UI (see Debugging).
 - `cmd/gvimdebug`: the debug page. It runs gvim in a pseudo-terminal and serves its
   screen over HTTP (see Debugging).
+
+**Engine and shared libraries (top level, TUI-free):**
+
+- Text: `buffer` (text model and its large-file mode), `editor` (documents, tabs, edits,
+  motions, save/revert), `search`, `syntax`, `fold`, `diff`, `encoding`, `session`,
+  `decorations`, `textlayout`.
+- Project and files: `workspace`, `explorer`, `finder`, `fuzzy`, `fsops`, `gitstate`.
+- Settings: `config`, `keymap`, `theme`.
+- Services: `lsp`, `pluginapi` (plugin contract), `plugin` (Lua runtime, with
+  `plugin/bundled`, `plugin/plugintest`, `plugin/pattern`), `commands` (the command
+  registry that feeds the command palette).
+- They must not import `internal/` and must not import bubbletea, bubbles or lipgloss.
+  Engine packages do not import the UI, the app or the plugin runtime.
+- `migration/tools/import_rules_check.sh` (R1–R12) enforces the direction; see
+  `docs/architecture.md`.
+
+**Data and tools:**
+
+- `docs/plugins/`: the plugin author documentation and the `gvim.d.lua` type stubs.
 - `refs/`: read-only reference checkouts. Do not edit or import them. `_attic/` is the
   retired TUI and is ignored by `./...`.
 - No Makefile, no `.sphere/`, no proto or ent generation.
@@ -42,9 +68,9 @@ scripted screenshots of the debug page.
 
 ```sh
 go build ./...                              # compile all packages
-go build -o /tmp/gvim .                     # build the binary outside the repo
-go run . [DIR] [FILE[:LINE[:COL]]]...       # run the TUI
-go run . --help                             # full flag list
+go build -o /tmp/gvim ./cmd/gvim                     # build the binary outside the repo
+go run ./cmd/gvim [DIR] [FILE[:LINE[:COL]]]...       # run the TUI
+go run ./cmd/gvim --help                             # full flag list
 go run ./cmd/gvimdebug -- "$PWD" main.go    # run the TUI behind the debug page
 ```
 
@@ -64,14 +90,14 @@ Gates to pass before calling work done:
 go vet ./...
 golangci-lint run ./...                     # 0 issues at the time of writing
 go test ./...                               # all pass at the time of writing
-go test ./internal/ui -run TestName         # one test while iterating
+go test ./internal/tui -run TestName         # one test while iterating
 go test -race ./...                         # test-only; needs cgo
 ```
 
 Generated files. Do not edit them by hand:
 
-- `internal/palette/commands_gen.go`: `python3 internal/palette/gen/generate.py refs/fresh`
-- `internal/ui/menubar/menu_table_gen.go`: `python3 migration/tools/gen_menus.py`
+- `commands/commands_gen.go`: `python3 commands/gen/generate.py refs/fresh`
+- `internal/tui/menubar/menu_table_gen.go`: `python3 migration/tools/gen_menus.py`
   (`--check` reports drift)
 
 `CLAUDE.md` mentions `migration/tui_parity.py` and `migration/parity/`. Neither is in the
@@ -85,7 +111,7 @@ Use the lowest layer that shows the bug.
 
 Most UI logic can be tested without a terminal. Build the model, send messages, and
 assert on the model state, the emitted `tea.Cmd`s, layout rectangles and hit-map results.
-Examples: `internal/ui/footer_test.go`, `internal/ui/hit_test.go`. To check rendering,
+Examples: `internal/tui/footer_test.go`, `internal/tui/hit_test.go`. To check rendering,
 assert a few specific cells of the grid, not the whole frame.
 
 ### 2. `uitest`: the real program in memory
@@ -123,7 +149,7 @@ The test skips without `GVIM_SHOTS`.
 
 ### 4. Debug page: `cmd/gvimdebug`
 
-This command runs gvim in a pseudo-terminal, using `internal/term`, and serves its screen
+This command runs gvim in a pseudo-terminal, using `internal/terminal`, and serves its screen
 on a local web page. It is a debug view, not a copy of your terminal (see Fidelity below).
 The arguments after the flags go to gvim unchanged, so `--` ends the
 debug flags:
@@ -242,7 +268,7 @@ The key and mouse encodings are in `cmd/gvimdebug/keys.go`, with table-driven te
 ### Fidelity: what the page is and is not
 
 The page is a debug view, not a copy of the terminal you use. gvim's output goes through a
-terminal emulator (`charmbracelet/x/vt`, via `internal/term`), and each cell is drawn as
+terminal emulator (`charmbracelet/x/vt`, via `internal/terminal`), and each cell is drawn as
 text in the browser. Use the page to check layout, colours and input behaviour. Check the
 final look in a real terminal.
 
@@ -308,15 +334,15 @@ gvim runs plugins written in Lua 5.1 on `github.com/yuin/gopher-lua` (pure Go). 
 JavaScript system (goja, esbuild) is gone. Users and plugin authors read `docs/plugins/README.md`;
 the design record is `migration/ARCH-v4.md` (package graph and the plugin files by package).
 
-- `internal/pluginapi`: the contract. Plain types, the `Host` and `Runtime` interfaces, error
+- `pluginapi`: the contract. Plain types, the `Host` and `Runtime` interfaces, error
   codes, `Unsupported`. Stdlib only.
-- `internal/plugin`: the runtime (sandbox, tasks and the yield protocol, budgets, strikes, the
+- `plugin`: the runtime (sandbox, tasks and the yield protocol, budgets, strikes, the
   loader, every `gvim.*` area in `api_*.go`). It imports no ui, editor or buffer package.
   `plugin/bundled` embeds the bundled plugins (`plugins/`) and Lua modules (`lib/`);
   `plugin/plugintest` is the fake host, fake OS, manual clock and `Harness` that plugin tests use.
-- `internal/luapat`: the Lua pattern matcher with a step budget that replaces `string.find`,
-  `match`, `gmatch` and `gsub`. `internal/decor`: the decoration store.
-- `internal/ui/plugin_*.go` is the host side (pump, events, prompts, keys, status, decorations,
+- `plugin/pattern`: the Lua pattern matcher with a step budget that replaces `string.find`,
+  `match`, `gmatch` and `gsub`. `decorations`: the decoration store.
+- `internal/tui/plugin_*.go` is the host side (pump, events, prompts, keys, status, decorations,
   windows, virtual buffers, manager, init.lua, LSP). `internal/app/plugin*.go` wires the runtime to the real editor
   (`pluginedit.go`, `pluginos*.go`, `pluginservices.go`, `plugins.go`). Update does no IO: plugin
   work runs in `tea.Cmd`s as `pluginapi.Work`.
@@ -326,10 +352,10 @@ the design record is `migration/ARCH-v4.md` (package graph and the plugin files 
 Plugin gates, besides the usual ones:
 
 ```sh
-go test ./internal/plugin/... ./internal/luapat ./internal/pluginapi ./internal/decor
-go test -run 'TestStubsMatchRuntime|TestDocs' ./internal/plugin   # docs/plugins vs the runtime
+go test ./plugin/... ./plugin/pattern ./pluginapi ./decorations
+go test -run 'TestStubsMatchRuntime|TestDocs' ./plugin   # docs/plugins vs the runtime
 go test -run TestBundledPluginsIdleHeap -v ./internal/app          # memory gate, prints the numbers
-go test -race ./internal/plugin/... ./internal/luapat ./internal/ui/... ./internal/app
+go test -race ./plugin/... ./plugin/pattern ./internal/tui/... ./internal/app
 ```
 
 - `docs/plugins/gvim.d.lua` must declare exactly the functions a live plugin state has, and every
