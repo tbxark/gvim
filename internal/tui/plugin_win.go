@@ -81,11 +81,18 @@ func (m *Model) windowInfos() []pluginapi.WindowInfo {
 }
 
 // Windows lists the windows in reading order.
-func (h *pluginHost) Windows() []pluginapi.WindowInfo { return h.model().windowInfos() }
+func (h *pluginHost) Windows() []pluginapi.WindowInfo {
+	out := h.model().windowInfos()
+	for i := range out {
+		out[i].ID = h.globalWindow(uint64(out[i].ID))
+	}
+	return out
+}
 
 // CurrentWindow is the window with the focus.
 func (h *pluginHost) CurrentWindow() pluginapi.WinID {
-	return pluginapi.WinID(h.model().splits.IDOf(h.model().splits.Focus))
+	m := h.model()
+	return h.globalWindow(m.splits.IDOf(m.splits.Focus))
 }
 
 // SetWindowBuffer shows buffer b in window w. The focused window changes the active tab;
@@ -93,7 +100,11 @@ func (h *pluginHost) CurrentWindow() pluginapi.WinID {
 // it is refused.
 func (h *pluginHost) SetWindowBuffer(w pluginapi.WinID, b pluginapi.BufferID) error {
 	m := h.model()
-	n := m.splitByID(uint64(w))
+	wl, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return err
+	}
+	n := m.splitByID(wl)
 	if n == nil {
 		return closedWindow(w)
 	}
@@ -117,7 +128,11 @@ func (h *pluginHost) SetWindowBuffer(w pluginapi.WinID, b pluginapi.BufferID) er
 // FocusWindow gives the keyboard to window w in the editor.
 func (h *pluginHost) FocusWindow(w pluginapi.WinID) error {
 	m := h.model()
-	n := m.splitByID(uint64(w))
+	wl, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return err
+	}
+	n := m.splitByID(wl)
 	if n == nil {
 		return closedWindow(w)
 	}
@@ -128,7 +143,15 @@ func (h *pluginHost) FocusWindow(w pluginapi.WinID) error {
 
 // CloseWindow closes window w. Its buffer stays open. The last window cannot be closed.
 func (h *pluginHost) CloseWindow(w pluginapi.WinID) error {
-	return h.model().closeSplitByID(uint64(w))
+	m := h.model()
+	wl, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return err
+	}
+	if m.splitByID(wl) == nil {
+		return closedWindow(w)
+	}
+	return m.closeSplitByID(wl)
 }
 
 // closeSplitByID removes the leaf with window id. Closing the focused one is the
@@ -157,7 +180,11 @@ func (m *Model) closeSplitByID(id uint64) error {
 // window's own buffer when zero). The focus stays where it was unless o.Focus.
 func (h *pluginHost) SplitWindow(w pluginapi.WinID, o pluginapi.SplitOptions) (pluginapi.WinID, error) {
 	m := h.model()
-	src := m.splitByID(uint64(w))
+	wl, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return 0, err
+	}
+	src := m.splitByID(wl)
 	if src == nil {
 		return 0, closedWindow(w)
 	}
@@ -183,7 +210,7 @@ func (h *pluginHost) SplitWindow(w pluginapi.WinID, o pluginapi.SplitOptions) (p
 	if err != nil {
 		return 0, err
 	}
-	return pluginapi.WinID(id), nil
+	return h.globalWindow(id), nil
 }
 
 // splitNew splits leaf src in direction dir and returns the id of the new leaf. tab, when
@@ -234,7 +261,11 @@ func (m *Model) splitNew(src *splitNode, dir splitDir, o pluginapi.SplitOptions,
 // rows with center. The caret stays where it is. A line outside the buffer is clamped.
 func (h *pluginHost) ScrollWindow(w pluginapi.WinID, line int, center bool) error {
 	m := h.model()
-	n := m.splitByID(uint64(w))
+	wl, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return err
+	}
+	n := m.splitByID(wl)
 	if n == nil {
 		return closedWindow(w)
 	}
@@ -307,7 +338,11 @@ func windowsAlong(n *splitNode, dir splitDir) int {
 // VisibleRows lists the rows window w paints, from the pane geometry the painter uses.
 func (h *pluginHost) VisibleRows(w pluginapi.WinID) ([]pluginapi.VisibleRow, error) {
 	m := h.model()
-	n := m.splitByID(uint64(w))
+	wl, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return nil, err
+	}
+	n := m.splitByID(wl)
 	if n == nil {
 		return nil, closedWindow(w)
 	}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/keymap"
@@ -51,6 +52,16 @@ const (
 
 // DaemonOptions carries a daemon launch. The CLI sets the mode and the socket name
 // (empty means the per-root default name); Run fills Detach for the hosted program.
+// SSHSecurity is the config-derived SSH policy of a remote launch: the known_hosts
+// policy, ordered host-key algorithm preference and whether the OS keyring may be used
+// (lookup and, after a notice, storing an accepted password). Zero values mean strict,
+// the safe default order and no keyring use.
+type SSHSecurity struct {
+	KnownHostsPolicy  string
+	HostKeyAlgorithms []string
+	Keyring           bool
+}
+
 type DaemonOptions struct {
 	Mode DaemonMode
 	// Name is the socket name. Empty means DefaultName(root).
@@ -63,6 +74,15 @@ type DaemonOptions struct {
 // Options is the parsed command line. The zero value starts gvim with no
 // files in the current directory, the platform keymap and the dark theme.
 type Options struct {
+	// SSHSecurity carries the ssh config section into the remote authority. It is set by
+	// buildRuntime from the loaded config; the zero value keeps strict/or the safe
+	// algorithm order and leaves the keyring off.
+	SSHSecurity SSHSecurity
+	// sharedBuffers is the cross-workspace buffer registry of a daemon-hosted local
+	// launch (#19b bounded slice). newWorkspaceManager creates it once and every
+	// workspace build copies the pointer into its editor options; nil for a direct or
+	// remote launch, which keeps independent buffers.
+	sharedBuffers *editor.SharedBuffers
 	// Remote is a parsed user@host:/path or ssh:// target. A direct remote launch mounts
 	// the SSH authority and does not restore or save the local session. With DaemonServe
 	// it is the jump-box daemon's startup authority: the daemon runs locally and hosts the

@@ -11,7 +11,7 @@ func (e *Editor) adopt(d *Document) {
 		e.seam.nextID++
 		d.Seam().Id = DocID(e.seam.nextID)
 	}
-	if e.seam.tracked > 0 && d.Seam().Obs == nil {
+	if e.seam.tracked > 0 && d.Seam().Obs == nil && !d.SharedMirror() {
 		e.observe(d)
 	}
 }

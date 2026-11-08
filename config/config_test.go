@@ -57,8 +57,10 @@ func TestDefaults(t *testing.T) {
 		PluginTimeout: 500 * time.Millisecond,
 
 		Terminal:     DefaultTerminalOptions(),
+		Daemon:       DefaultDaemonConfig(),
 		FileExplorer: DefaultFileExplorer(),
 		Env:          DefaultEnvConfig(),
+		SSH:          DefaultSSHConfig(),
 		Update:       DefaultUpdate(),
 
 		// The Fresh editor.* defaults are asserted option by option in

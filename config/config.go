@@ -227,9 +227,17 @@ type Config struct {
 	// scrollback_lines and mouse_forwarding (see terminal.go).
 	Terminal TerminalConfig
 
+	// Daemon is the daemon section (see daemon.go): the memory bound for the
+	// materialized workspaces of a daemon host. Only the user config may set it.
+	Daemon DaemonConfig
+
 	// Env is the env section: the environment detectors (see env.go). Only the
 	// user config may set it.
 	Env EnvConfig
+
+	// SSH is the ssh section (see ssh.go): host-key policy, host-key algorithm
+	// preferences and keyring consent. User-layer only.
+	SSH SSHConfig
 
 	// AutoAttach makes a bare launch (no files, no direct-mode flags, a terminal on
 	// stdin) attach to a daemon that already hosts this workspace instead of refusing
@@ -323,8 +331,10 @@ func Defaults() Config {
 		PluginTimeout: DefaultPluginTimeout,
 
 		Terminal:      DefaultTerminalOptions(),
+		Daemon:        DefaultDaemonConfig(),
 		FileExplorer:  DefaultFileExplorer(),
 		Env:           DefaultEnvConfig(),
+		SSH:           DefaultSSHConfig(),
 		Clipboard:     DefaultClipboard(),
 		Update:        DefaultUpdate(),
 		EditorOptions: defaultEditorOptions(),
@@ -610,6 +620,23 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			cfg.AutoAttach = autoAttach
 			cfg.note(key, path)
 			continue
+		case key == "ssh" && l == layerProject:
+			// Host-key verification and keyring consent are security choices of the user;
+			// a repository must not weaken them for its own host.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set ssh: host-key verification and keyring consent are user preferences, so set them in the user config"})
+			continue
+		case key == "ssh":
+			diags = append(diags, cfg.setSSH(keys[key], path)...)
+			continue
+		case key == "daemon" && l == layerProject:
+			// The daemon's memory bound is a user preference: a repository cannot spend
+			// the daemon's memory on warm workspaces of its choosing.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set daemon: it bounds the daemon's memory, so set it in the user config"})
+			continue
+		case key == "daemon":
+			diags = append(diags, cfg.setDaemon(keys[key])...)
+			cfg.note(key, path)
+			continue
 		case key == "env" && l == layerProject:
 			// A repository must not decide which activation command runs in it, so the
 			// project layer cannot define detectors. Say so instead of ignoring it.
@@ -727,6 +754,10 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 		// Fresh's custom keymap files. gvim has none: its own bindings go in keybindings.
 		if trimmed := bytes.TrimSpace(raw); string(trimmed) != "{}" {
 			return fmt.Errorf("custom keybinding maps are not supported; put the keys in keybindings")
+		}
+	case "daemon":
+		if diags := c.setDaemon(raw); len(diags) > 0 {
+			return errors.New(diags[0].Message)
 		}
 	case "plugin_timeout_ms":
 		var n int

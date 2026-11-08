@@ -82,6 +82,32 @@ func (p *Panel) paintScrollback(g *grid.Grid, top, rows, w int, sc terminal.Scre
 		p.paintSelection(g, y, w, abs, sel)
 		p.paintHoverRow(g, y, abs, w, true)
 	}
+	p.paintSavedCursor(g, top, rows, w)
+}
+
+// paintSavedCursor paints the restored snapshot's saved cursor as a reversed cell
+// while the tab has no shell (the read-only restored view). On a dive the live
+// shell owns the cursor, so the saved position stops being painted.
+func (p *Panel) paintSavedCursor(g *grid.Grid, top, rows, w int) {
+	if !p.restored || p.term != nil || p.savedVisibleRows <= 0 || !p.savedCursor.Visible {
+		return
+	}
+	abs := len(p.prior) - p.savedVisibleRows + p.savedCursor.Row
+	if abs < p.scroll.top || abs >= p.scroll.top+rows {
+		return
+	}
+	x := p.savedCursor.Col
+	if x < 0 || x >= w {
+		return
+	}
+	cell := g.At(x, top+abs-p.scroll.top)
+	st := cell.Style
+	st.Reverse = !st.Reverse
+	text := cell.Text
+	if text == "" {
+		text = " "
+	}
+	g.Set(x, top+abs-p.scroll.top, text, st)
 }
 
 // tintRow sets the background of the first w cells of row y when they have no

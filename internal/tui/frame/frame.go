@@ -901,7 +901,7 @@ func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
 		}
 		return seg, true
 	case StatusElementRemote:
-		return statusSeg{text: pad("Local"), remote: true}, true
+		return statusSeg{text: pad(frameText("gvim.status.remote_local", "Local")), remote: true}, true
 	case StatusElementTerminalRestart:
 		if s.TerminalRestart == "" {
 			return statusSeg{}, false

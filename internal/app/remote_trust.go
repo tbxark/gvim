@@ -43,15 +43,15 @@ func remoteTrustKey(spec *authority.RemoteSpec) string {
 // It uses the same store file as local decisions and the explicit record key, so a
 // reconnect with the same target finds the recorded level and does not prompt again.
 func openRemoteTrust(spec *authority.RemoteSpec) (*trust.Store, trust.State, string) {
-	target := "SSH:" + remoteTrustTarget(spec)
+	target := appTextVars("gvim.status.remote_ssh", "SSH:%{userhost}", map[string]any{"userhost": remoteTrustTarget(spec)})
 	store, err := newTrustStore()
 	if err != nil {
-		return nil, trust.State{Root: target, Level: trust.Trusted, Decided: true}, "workspace trust: " + err.Error()
+		return nil, trust.State{Root: target, Level: trust.Trusted, Decided: true}, appTextVars("gvim.notice.workspace_trust", "workspace trust: %{error}", map[string]any{"error": err.Error()})
 	}
 	state, err := store.OpenRecord(remoteTrustKey(spec), nil)
 	state.Root = target
 	if err != nil {
-		return store, state, "workspace trust: " + err.Error()
+		return store, state, appTextVars("gvim.notice.workspace_trust", "workspace trust: %{error}", map[string]any{"error": err.Error()})
 	}
 	return store, state, ""
 }

@@ -48,6 +48,10 @@ type exitCapture struct {
 // intact; a workspace whose runtime has no session directory writes nothing (the registry
 // always gives daemon workspaces one, so this is a guard, not a normal path).
 func (m *workspaceManager) closeAllChecked(timeout time.Duration) error {
+	// An eviction pass tears down a runtime (capture write, model close): finish it before
+	// the exit save collects the same sessions, or two saves would race one workspace.
+	m.evictMu.Lock()
+	defer m.evictMu.Unlock()
 	m.mu.Lock()
 	if m.cancel != nil {
 		m.cancel()
@@ -122,9 +126,11 @@ func (m *workspaceManager) closeAllChecked(timeout time.Duration) error {
 	// Nothing here may keep a runtime alive: close after the durability attempts.
 	if active != nil {
 		active.rt.exit()
+		m.releasePluginWorkspace(active)
 	}
 	for _, s := range rest {
 		s.rt.exit()
+		m.releasePluginWorkspace(s)
 	}
 	// The manager is done: drop the sessions so a second close (the test cleanup, a
 	// deferred wrapper) is a no-op instead of capturing a closed runtime.

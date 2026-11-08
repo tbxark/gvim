@@ -63,6 +63,11 @@ type Options struct {
 	// SessionDir is the directory of the saved session, which InterruptedSaves reads.
 	// Empty means there is no session, and InterruptedSaves lists nothing.
 	SessionDir string
+	// Shared is the process-wide cross-workspace buffer registry of a daemon-hosted
+	// session (see shared.go), or nil for a direct launch. With it, opening a file that
+	// another materialized workspace already owns yields a read-only mirror that
+	// requests ownership when its workspace is focused.
+	Shared *SharedBuffers
 
 	// The options below come from the Fresh editor.* config options. The zero value of
 	// each is "off" or 0, so a plain Options{} switches them off; the app sets them from
@@ -217,6 +222,8 @@ type Editor struct {
 	resultText string
 	// seam is the state of the plugin seams: ids, change tracking (docid.go, changes.go).
 	seam seamState
+	// shared is the cross-workspace buffer registry, nil for a direct launch (shared.go).
+	shared *SharedBuffers
 }
 
 // New returns an Editor. Unless opts.Empty is set, it holds one empty
@@ -233,7 +240,7 @@ func New(opts Options) *Editor {
 	if opts.TabSize <= 0 {
 		opts.TabSize = 4
 	}
-	e := &Editor{rows: rows, cols: cols, opts: opts}
+	e := &Editor{rows: rows, cols: cols, opts: opts, shared: opts.Shared}
 	if !opts.Empty {
 		d := newDocument("", "")
 		d.Eol = e.defaultEOL()
@@ -311,6 +318,14 @@ func (e *Editor) OpenFile(path string) error {
 	if err != nil {
 		e.setError(err)
 		return err
+	}
+	if e.shared != nil {
+		if handled, err := e.shared.Open(e, path); handled {
+			if err != nil {
+				e.setError(err)
+			}
+			return err
+		}
 	}
 	if i := e.pathIndex(path); i >= 0 {
 		e.docs[i].SetPreview(false)

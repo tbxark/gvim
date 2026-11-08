@@ -66,6 +66,10 @@ func (h *pluginHost) DecorSetFoldingRanges(plugin, ns string, id pluginapi.Buffe
 	if _, err := h.decorTarget(id, expect); err != nil {
 		return err
 	}
+	local, err := h.localBuffer(id)
+	if err != nil {
+		return err
+	}
 	if len(ranges) > maxPluginFolds {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a namespace takes at most %d folding ranges", maxPluginFolds)
 	}
@@ -93,11 +97,11 @@ func (h *pluginHost) DecorSetFoldingRanges(plugin, ns string, id pluginapi.Buffe
 	if pf.byBuffer == nil {
 		pf.byBuffer = map[pluginapi.BufferID][]*foldNamespace{}
 	}
-	fns := pf.namespace(id, plugin, ns)
+	fns := pf.namespace(local, plugin, ns)
 	if fns == nil {
 		m.plug.foldOrder++
 		fns = &foldNamespace{owner: plugin, ns: ns, order: m.plug.foldOrder}
-		pf.byBuffer[id] = append(pf.byBuffer[id], fns)
+		pf.byBuffer[local] = append(pf.byBuffer[local], fns)
 	}
 	fns.ranges = clean
 	if fns.collapsed == nil {
@@ -124,7 +128,11 @@ func (h *pluginHost) DecorClearFolds(plugin, ns string, id pluginapi.BufferID) {
 		}
 	}
 	if id != 0 {
-		clear(id)
+		local, err := h.localBuffer(id)
+		if err != nil {
+			return
+		}
+		clear(local)
 		return
 	}
 	for buf := range pf.byBuffer {

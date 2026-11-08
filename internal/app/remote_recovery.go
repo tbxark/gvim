@@ -67,7 +67,7 @@ func setupRemoteRecovery(ed *editor.Editor, cfg config.Config, sessionDir, targe
 	port, every := restore.RecoveryPort(ed, cfg, sessionDir, true)
 	notice := restore.RecoverFromCrash(ed, sessionDir, true, port)
 	if notice != "" {
-		notice = "remote workspace " + target + ": " + notice
+		notice = appTextVars("gvim.notice.remote_workspace_restore", "remote workspace %{target}: %{notice}", map[string]any{"target": target, "notice": notice})
 	}
 	return port, every, notice
 }

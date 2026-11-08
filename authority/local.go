@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tbxark/gvim/plugin/hostos"
@@ -95,6 +97,96 @@ func (l *local) Remove(ctx context.Context, path string, recursive bool) error {
 func (l *local) WriteFile(ctx context.Context, path string, data []byte, o hostos.WriteOptions) error {
 	return l.os.WriteFile(ctx, path, data, o)
 }
+
+// WriteStream implements WriteStreamer: a temporary file in the target's directory,
+// chunked writes into it, then the mode and one rename over the target. The target is
+// untouched until Commit; Abort removes the temporary file. It follows a symbolic link to
+// its target like the local atomic WriteFile path, and preserves an existing target's
+// permission when WriteOptions.Mode is zero.
+func (l *local) WriteStream(ctx context.Context, path string, o hostos.WriteOptions) (WriteStream, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateStreamOptions(o); err != nil {
+		return nil, err
+	}
+	target := path
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		resolved, rerr := filepath.EvalSymlinks(path)
+		if rerr != nil {
+			return nil, rerr
+		}
+		target = resolved
+	}
+	mode := fs.FileMode(0o644)
+	if o.Mode != 0 {
+		mode = o.Mode.Perm()
+	} else if fi, err := os.Stat(target); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	f, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".gvim-*")
+	if err != nil {
+		return nil, err
+	}
+	return &localWriteStream{file: f, tmp: f.Name(), target: target, mode: mode}, nil
+}
+
+// localWriteStream is a local file being streamed into a temporary file and renamed at
+// Commit. Every method is called from the save command.
+type localWriteStream struct {
+	file   *os.File
+	tmp    string
+	target string
+	mode   fs.FileMode
+	done   bool
+}
+
+func (s *localWriteStream) Write(ctx context.Context, p []byte) error {
+	if s.done {
+		return fs.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := s.file.Write(p)
+	return err
+}
+
+func (s *localWriteStream) Commit(ctx context.Context) error {
+	if s.done {
+		return fs.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		s.abort()
+		return err
+	}
+	if err := s.file.Chmod(s.mode); err != nil {
+		s.abort()
+		return err
+	}
+	if err := s.file.Close(); err != nil {
+		s.abort()
+		return err
+	}
+	if err := os.Rename(s.tmp, s.target); err != nil {
+		s.abort()
+		return err
+	}
+	s.done = true
+	return nil
+}
+
+func (s *localWriteStream) Abort(context.Context) { s.abort() }
+
+func (s *localWriteStream) abort() {
+	if s.done {
+		return
+	}
+	s.done = true
+	_ = s.file.Close()
+	_ = os.Remove(s.tmp)
+}
+
 func (l *local) Stat(ctx context.Context, path string) (hostos.FileStat, error) {
 	return l.os.Stat(ctx, path)
 }

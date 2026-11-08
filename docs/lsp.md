@@ -517,7 +517,7 @@ gopls (language server for go) failed to start: lsp: initialize: EOF [command: g
 gvim does not start it again for that language until **Start/Restart LSP Server**, and the status
 popup shows it in the error state with the same reason.
 
-Servers only start for files that have a name on disk, and not for files in large file mode (local, or a remote large file in windowed mode).
+Servers only start for files that have a name on disk, and not for files in large file mode (local, or a remote large file in windowed mode). A remote large file's save is independent of any language server: the overlay is merged and streamed through the authority's atomic write stream (or the bounded whole-file fallback), so a large file with no server still saves with bounded memory.
 
 ## What is not here yet
 

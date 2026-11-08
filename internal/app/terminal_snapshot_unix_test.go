@@ -13,12 +13,20 @@ import (
 	"github.com/tbxark/gvim/session"
 )
 
-// styledOldScreen is a styled screen snapshot of the row "OLD".
+// styledOldScreen is a styled snapshot with one history row ("HIST"), the visible
+// row "OLD", a visible bar cursor and the alt flag off.
 func styledOldScreen() *terminal.SavedScreen {
-	return &terminal.SavedScreen{Cols: 3, Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{
-		{Rune: 'O', Fg: "#ff0000", Bold: true},
-		{Rune: 'L'}, {Rune: 'D'},
-	}}}}
+	return &terminal.SavedScreen{
+		Cols: 4,
+		History: []terminal.SavedRow{{Cells: []terminal.SavedCell{
+			{Rune: 'H', Bold: true}, {Rune: 'I'}, {Rune: 'S'}, {Rune: 'T'},
+		}}},
+		Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{
+			{Rune: 'O', Fg: "#ff0000", Bold: true},
+			{Rune: 'L'}, {Rune: 'D'},
+		}}},
+		Cursor: terminal.SavedCursor{Row: 0, Col: 1, Visible: true, Shape: "bar"},
+	}
 }
 
 // seedStyledWorkspace creates the registry workspace for root and writes a session
@@ -43,10 +51,10 @@ func seedStyledWorkspace(t *testing.T, root string) (string, string) {
 	}
 	st := terminal.SavedState{
 		Version: terminal.SavedStateVersion, Open: true, Live: true,
-		Cwd: root, LaunchDir: root, Rows: []string{"OLD"}, Screen: styledOldScreen(),
+		Cwd: root, LaunchDir: root, Width: 4, Rows: []string{"HIST", "OLD"}, Screen: styledOldScreen(),
 		Tabs: []terminal.SavedTab{{
-			Name: "shell", Open: true, Cwd: root, LaunchDir: root,
-			Rows: []string{"OLD"}, Screen: styledOldScreen(), Live: true,
+			Name: "shell", Open: true, Cwd: root, LaunchDir: root, Width: 4,
+			Rows: []string{"HIST", "OLD"}, Screen: styledOldScreen(), Live: true,
 		}},
 		ActiveTab: 0,
 	}
@@ -94,6 +102,14 @@ func TestWorkspaceDaemonScreenSnapshot(t *testing.T) {
 	}
 	if st.Screen == nil || st.Screen.Rows[0].Cells[0].Fg != "#ff0000" {
 		t.Fatalf("restored styled snapshot = %+v", st.Screen)
+	}
+	// The daemon path carries the rest of the backing-file remainder too: the
+	// styled history row and the saved cursor survive materialization.
+	if len(st.Screen.History) != 1 || !st.Screen.History[0].Cells[0].Bold {
+		t.Fatalf("restored history snapshot = %+v", st.Screen.History)
+	}
+	if st.Screen.Cursor != (terminal.SavedCursor{Row: 0, Col: 1, Visible: true, Shape: "bar"}) {
+		t.Fatalf("restored cursor = %+v", st.Screen.Cursor)
 	}
 
 	// The dive starts the shell; the snapshot transcript stays above the new output.

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"os"
@@ -45,12 +46,58 @@ func startDaemonTest(t *testing.T, opts Options, name string) chan error {
 }
 
 // attachDaemonTest attaches a raw protocol client and completes the hello exchange.
+// daemonTestConn is a daemon connection wrapper whose Read first replays the output
+// frames that readDaemonUntil consumed while it was waiting for a marker frame. A daemon
+// paints whenever the program renders, so an output frame can legitimately arrive before
+// the pong a test waits for; dropping it (as the raw reader did) can leave a subsequent
+// drain with nothing to read when the following resize happens to produce no new bytes.
+type daemonTestConn struct {
+	net.Conn
+	// pending is output the next Reads must deliver (filled when a marker frame ends a
+	// readDaemonUntil wait).
+	pending []byte
+	// stashed collects output frames consumed while waiting for the marker; they move to
+	// pending when the marker arrives.
+	stashed []byte
+}
+
+func (c *daemonTestConn) Read(p []byte) (int, error) {
+	if len(c.pending) > 0 {
+		n := copy(p, c.pending)
+		c.pending = c.pending[n:]
+		return n, nil
+	}
+	return c.Conn.Read(p)
+}
+
+// stashDaemonOutput records an output frame consumed while a test waits for another
+// frame type. It is a no-op for a connection that is not the test wrapper.
+func stashDaemonOutput(conn net.Conn, f daemon.Frame) {
+	c, ok := conn.(*daemonTestConn)
+	if !ok || f.Type != daemon.TypeOutput {
+		return
+	}
+	var buf bytes.Buffer
+	_ = daemon.NewFrameWriter(&buf).WriteFrame(f.Type, f.Payload)
+	c.stashed = append(c.stashed, buf.Bytes()...)
+}
+
+// mergeDaemonStash moves the output frames consumed while waiting for a marker into the
+// wrapper's replay buffer, so the drain that follows reads them in order.
+func mergeDaemonStash(conn net.Conn) {
+	if c, ok := conn.(*daemonTestConn); ok && len(c.stashed) > 0 {
+		c.pending = append(c.pending, c.stashed...)
+		c.stashed = nil
+	}
+}
+
 func attachDaemonTest(t *testing.T, name string) net.Conn {
 	t.Helper()
-	conn, err := daemon.Attach(name)
+	raw, err := daemon.Attach(name)
 	if err != nil {
 		t.Fatal(err)
 	}
+	conn := &daemonTestConn{Conn: raw}
 	if err := daemon.WriteJSON(conn, daemon.TypeHello, daemon.Hello{Version: daemon.ProtocolVersion, Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +110,9 @@ func attachDaemonTest(t *testing.T, name string) net.Conn {
 	return conn
 }
 
-// readDaemonUntil reads frames until one of typ arrives, dropping output frames.
+// readDaemonUntil reads frames until one of typ arrives. Output frames that arrive
+// before the marker are kept (encoded again into the wrapper's pending buffer), so a later
+// drain still sees the paint the program produced during the handshake.
 func readDaemonUntil(t *testing.T, conn net.Conn, typ byte) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -80,8 +129,30 @@ func readDaemonUntil(t *testing.T, conn net.Conn, typ byte) {
 			t.Fatalf("read frame type %d: %v", typ, err)
 		}
 		if f.Type == typ {
+			mergeDaemonStash(conn)
 			return
 		}
+		stashDaemonOutput(conn, f)
+	}
+}
+
+// TestDaemonTestConnPreservesOutputBeforePong is the regression for a daemon that paints
+// before the attach handshake's pong: the frame must not be dropped, or the following
+// drain has nothing to read (this was the intermittent "output did not contain ...
+// <empty>" failure in the dormant-workspace open-file tests).
+func TestDaemonTestConnPreservesOutputBeforePong(t *testing.T) {
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	conn := &daemonTestConn{Conn: client}
+	go func() {
+		fw := daemon.NewFrameWriter(server)
+		_ = fw.WriteFrame(daemon.TypeOutput, []byte("UNSAVED-STASH-TEXT"))
+		_ = fw.WriteFrame(daemon.TypePong, nil)
+		_ = server.Close()
+	}()
+	readDaemonUntil(t, conn, daemon.TypePong)
+	if got := drainDaemonForText(t, conn, "UNSAVED-STASH-TEXT"); !strings.Contains(got, "UNSAVED-STASH-TEXT") {
+		t.Fatalf("output before the pong was dropped: %q", got)
 	}
 }
 
@@ -272,9 +343,12 @@ func daemonWorkspaceCall(t *testing.T, conn net.Conn, typ byte, payload any) dae
 			if err := daemon.DecodeJSON(f, &list); err != nil {
 				t.Fatal(err)
 			}
+			mergeDaemonStash(conn)
 			return list
 		case daemon.TypeNotice:
 			t.Fatalf("daemon notice: %s", f.Payload)
+		default:
+			stashDaemonOutput(conn, f)
 		}
 	}
 }

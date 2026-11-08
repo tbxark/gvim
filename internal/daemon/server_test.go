@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // daemonTestName returns a short unique socket name for a test and isolates the cache
@@ -416,4 +418,75 @@ func TestWorkspaceProtocolServer(t *testing.T) {
 		t.Fatalf("malformed request answer = %#v, %v", f, err)
 	}
 	waitAttached(t, c.conn)
+}
+
+// blockedUpdateModel blocks the program's event loop in Update until release is closed.
+type blockedUpdateModel struct{ release chan struct{} }
+
+func (blockedUpdateModel) Init() tea.Cmd { return nil }
+func (m blockedUpdateModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
+	<-m.release
+	return m, nil
+}
+func (blockedUpdateModel) View() tea.View { return tea.NewView("") }
+
+// TestServerHelloSendsSizeOutsideLock is the regression for a daemon deadlock: the hello
+// and resize handlers used to call Program.Send while holding s.mu. When the program's
+// event loop was busy (for example rendering), Send blocked while s.mu stayed held; the
+// renderer's flush then blocked in Server.Write on that same mutex, and the event loop
+// waited for the renderer - a three-way deadlock that stalled the daemon. The handler must
+// release s.mu before Send, so Server.Write (the renderer's output path) keeps working.
+func TestServerHelloSendsSizeOutsideLock(t *testing.T) {
+	srv, _ := startTestServer(t)
+	release := make(chan struct{})
+	prog := tea.NewProgram(blockedUpdateModel{release: release}, tea.WithoutRenderer(), tea.WithInput(nil), tea.WithOutput(io.Discard))
+	runDone := make(chan struct{})
+	go func() {
+		_, _ = prog.Run()
+		close(runDone)
+	}()
+	t.Cleanup(func() {
+		close(release)
+		prog.Quit()
+		select {
+		case <-runDone:
+		case <-time.After(2 * time.Second):
+		}
+	})
+	srv.mu.Lock()
+	srv.prog = prog
+	srv.mu.Unlock()
+
+	conn, err := Attach(srv.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := WriteJSON(conn, TypeHello, Hello{Version: ProtocolVersion, Cols: 100, Rows: 30}); err != nil {
+		t.Fatal(err)
+	}
+	// The hello handler added the client and is now blocked in Program.Send (the event
+	// loop is inside the blocked Update). The server lock must be free meanwhile.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if srv.mu.TryLock() {
+			attached := len(srv.clients) > 0
+			srv.mu.Unlock()
+			if attached {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hello handler held s.mu while Program.Send blocked")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// The renderer's output path must not be blocked by the pending Send.
+	done := make(chan struct{})
+	go func() { _, _ = srv.Write([]byte("frame")); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Server.Write blocked while Program.Send was pending")
+	}
 }

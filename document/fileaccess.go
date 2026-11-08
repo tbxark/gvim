@@ -1,6 +1,7 @@
 package document
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -38,6 +39,34 @@ type AccessStat struct {
 // diskState converts the access answer to the document's disk state.
 func (a AccessStat) diskState() diskState {
 	return diskState{Exists: a.Exists, Special: a.Special, Size: a.Size, Mtime: a.Mtime}
+}
+
+// WriteStream is one open streamed write of a file that is larger than memory. The
+// document walks its windowed source in bounded chunks and calls Write for each; Commit
+// applies the mode and renames the temporary file over the path, Abort removes it. The
+// original file is untouched until Commit, so a failed or cancelled save changes nothing.
+type WriteStream interface {
+	// Write sends one bounded chunk (the backend accepted all of it when it returns).
+	Write(ctx context.Context, p []byte) error
+	// Commit completes the atomic replacement. The temporary file is gone afterwards.
+	Commit(ctx context.Context) error
+	// Abort removes the temporary file; safe after Commit/Abort. It must not touch the
+	// target and should run even when the save context was cancelled.
+	Abort(ctx context.Context)
+}
+
+// ErrStreamUnsupported means the file access has the StreamAccess method but its backend
+// cannot stream this write: the save keeps the bounded whole-file fallback instead of
+// failing. It is the only StreamAccess error a save falls back on; a real open failure
+// (permission, carrier) still fails the save.
+var ErrStreamUnsupported = errors.New("streamed atomic write is not supported by this file access")
+
+// StreamAccess is the optional FileAccess part for streamed atomic writes. A save of a
+// windowed large remote file uses it to stream the merged file with bounded memory; an
+// access without it keeps the bounded whole-file fallback.
+type StreamAccess interface {
+	// WriteStream opens a streamed atomic write to path.
+	WriteStream(ctx context.Context, path string) (WriteStream, error)
 }
 
 // SetFileAccess installs (or clears, with nil) the document's I/O seam. The app uses it

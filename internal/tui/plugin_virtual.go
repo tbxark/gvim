@@ -32,16 +32,20 @@ func (h *pluginHost) CreateBuffer(o pluginapi.CreateBuffer) (pluginapi.BufferID,
 	if err != nil {
 		return id, err
 	}
+	local, err := m.pluginResolveBuffer(id)
+	if err != nil {
+		return id, err
+	}
 	pv := &m.plug.virtual
 	for old := range pv.owner {
-		if _, ok := h.ed().Buffer(old); !ok {
+		if _, ok := h.ed().Buffer(m.pluginGlobalBuffer(old)); !ok {
 			delete(pv.owner, old) // the user closed it; ids are never reused
 		}
 	}
 	if pv.owner == nil {
 		pv.owner = make(map[pluginapi.BufferID]string)
 	}
-	pv.owner[id] = o.Plugin
+	pv.owner[local] = o.Plugin
 	if o.Focus {
 		m.focusEditor()
 	}
@@ -62,8 +66,9 @@ func (m *Model) plugVirtualGone(plugin string, gen uint64) {
 	}
 	for _, id := range ids {
 		delete(m.plug.virtual.owner, id)
-		if _, ok := m.plug.host.ed().Buffer(id); ok {
-			_ = m.plug.host.Close(id, true)
+		global := m.pluginGlobalBuffer(id)
+		if _, ok := m.plug.host.ed().Buffer(global); ok {
+			_ = m.plug.host.Close(global, true)
 		}
 	}
 }

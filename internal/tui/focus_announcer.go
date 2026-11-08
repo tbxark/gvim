@@ -39,8 +39,8 @@ func (m *Model) announceFocus() {
 	ps := &m.plug.panels
 	cur := announceState{
 		valid:     true,
-		window:    m.focusWindowID(),
-		buffer:    m.pluginActiveBuffer(),
+		window:    uint64(m.pluginGlobalWindow(m.focusWindowID())),
+		buffer:    m.pluginGlobalBuffer(m.pluginActiveBuffer()),
 		workspace: m.workspaceLabel,
 	}
 	prev := ps.announced
@@ -69,8 +69,8 @@ func (m *Model) syncFocusAnnouncement() {
 	}
 	m.plug.panels.announced = announceState{
 		valid:     true,
-		window:    m.focusWindowID(),
-		buffer:    m.pluginActiveBuffer(),
+		window:    uint64(m.pluginGlobalWindow(m.focusWindowID())),
+		buffer:    m.pluginGlobalBuffer(m.pluginActiveBuffer()),
 		workspace: m.workspaceLabel,
 	}
 }
@@ -85,8 +85,8 @@ func (m *Model) seedFocusAnnouncement(prev *Model) {
 	}
 	m.plug.panels.announced = announceState{
 		valid:     true,
-		window:    prev.focusWindowID(),
-		buffer:    prev.pluginActiveBuffer(),
+		window:    uint64(prev.pluginGlobalWindow(prev.focusWindowID())),
+		buffer:    prev.pluginGlobalBuffer(prev.pluginActiveBuffer()),
 		workspace: prev.workspaceLabel,
 		fromOther: true,
 	}
@@ -107,26 +107,12 @@ func (m *Model) emitFocusWindow(previous, current uint64, workspace string) {
 	}
 }
 
-// pluginBufferExists reports whether id is still one of the editor's buffers.
-func (m *Model) pluginBufferExists(id pluginapi.BufferID) bool {
-	if id == 0 || m.plug.pe == nil {
-		return true
-	}
-	for _, b := range m.plug.pe.ListBuffers() {
-		if b.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
 // emitFocusBuffer queues buffer_deactivated and buffer_activated in the shape the event
 // layer always used, extended with the workspace label and the current window id.
 func (m *Model) emitFocusBuffer(previous, current pluginapi.BufferID, workspace string) {
-	// A buffer that closed is announced by buffer_closed and the next buffer_activated
-	// without a "previous"; buffer_deactivated is for a buffer that still exists but lost
-	// the focus (the event layer's long-standing shape).
-	prevExists := previous != 0 && m.pluginBufferExists(previous)
+	// This path only runs for a forced workspace switch, where both ids are already global
+	// and the previous one belongs to the leaving workspace: emit the pair unconditionally.
+	prevExists := previous != 0
 	if prevExists {
 		data := map[string]any{"buf": previous}
 		if current != 0 {

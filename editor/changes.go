@@ -76,7 +76,7 @@ func (e *Editor) TrackChanges(key string, on bool) {
 			}
 		}
 		for _, d := range e.docs {
-			if d.Seam().Obs == nil {
+			if d.Seam().Obs == nil && !d.SharedMirror() {
 				e.observe(d)
 			}
 		}

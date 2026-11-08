@@ -309,6 +309,18 @@ sequence is pending, so the elements after it move when it appears and disappear
 the same); `{filename}` elides at the left tail like any other element, its " [+]" / " [RO]"
 markers being part of the same run.
 
+### Cross-workspace buffer mirrors
+
+When a daemon-hosted file is open in two workspaces, the non-owning workspace shows a
+read-only mirror. The status message starts as "Mirror of <workspace>: read-only until
+focused", the `[RO]` read-only chip and the `[+]` modified marker follow the shared
+buffer's state, and focusing the mirror's workspace moves ownership there (the old
+workspace becomes the mirror). A refused ownership request keeps the mirror read-only and
+puts "Cross-workspace share conflict: <reason>; the mirror stays read-only" in the status
+message; the message is visible on the status row/notice band like any other document
+status. No new overlay or dialog is used for this: it is the existing tab status message
+plus the existing read-only chip.
+
 ## 6. Menu accelerators
 
 `editor.menu_bar_mnemonics` (default on) controls the menu-bar accelerators, as in Fresh:

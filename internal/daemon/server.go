@@ -167,15 +167,13 @@ func (s *Server) sizeLocked() (cols, rows int) {
 	return cols, rows
 }
 
-// sendSizeLocked tells the program the smallest attached size. It must be called with
-// s.mu held; it never sends two messages for a no-size state.
-func (s *Server) sendSizeLocked() {
-	p := s.prog
-	if p == nil {
-		return
-	}
-	cols, rows := s.sizeLocked()
-	if cols <= 0 || rows <= 0 {
+// sendSize tells the program the given attached size. The caller must NOT hold s.mu:
+// Program.Send blocks until the program's loop receives the message, and the program's
+// renderer takes s.mu through Server.Write while flushing. Sending under s.mu deadlocked
+// the daemon (hello/resize handlers held s.mu waiting for the event loop, the renderer
+// flush waited for s.mu, and the event loop waited for the renderer).
+func sendSize(p *tea.Program, cols, rows int) {
+	if p == nil || cols <= 0 || rows <= 0 {
 		return
 	}
 	p.Send(tea.WindowSizeMsg{Width: cols, Height: rows})
@@ -251,11 +249,11 @@ func (s *Server) removeClient(c *clientConn) {
 	if ok {
 		delete(s.clients, c)
 	}
+	prog := s.prog
+	cols, rows := s.sizeLocked()
 	s.mu.Unlock()
 	if ok {
-		s.mu.Lock()
-		s.sendSizeLocked()
-		s.mu.Unlock()
+		sendSize(prog, cols, rows)
 	}
 }
 
@@ -286,10 +284,12 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 	s.clients[c] = struct{}{}
-	s.sendSizeLocked()
+	cols, rows := s.sizeLocked()
 	prog := s.prog
 	s.mu.Unlock()
 	if prog != nil {
+		// Sends must happen without s.mu: see sendSize.
+		sendSize(prog, cols, rows)
 		// A fresh frame for the new client (and a shared repaint at the negotiated size).
 		prog.Send(tea.RequestWindowSize())
 	}
@@ -339,8 +339,10 @@ func (s *Server) handleConn(conn net.Conn) {
 			}
 			s.mu.Lock()
 			c.cols, c.rows = r.Cols, r.Rows
-			s.sendSizeLocked()
+			cols, rows := s.sizeLocked()
+			prog := s.prog
 			s.mu.Unlock()
+			sendSize(prog, cols, rows)
 		case TypeOpenFile:
 			var req OpenFile
 			if DecodeJSON(f, &req) != nil || (len(req.Paths) == 0 && len(req.Files) == 0) {

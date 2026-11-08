@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -114,7 +113,7 @@ func (m *Model) beginAuthorityReconnect() tea.Cmd {
 	if m.auth.NeedsPassphrase != nil && m.auth.NeedsPassphrase() {
 		m.authorityBusy = true
 		m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-			Label: "SSH key passphrase:",
+			Label: uiText("gvim.prompt.ssh_key_passphrase", "SSH key passphrase:"),
 			Tag:   authorityPassphraseTag{},
 		}))
 		return nil
@@ -158,22 +157,22 @@ type authorityRestartDoneMsg struct {
 func (m *Model) reportAuthorityRestart(count int, err error) {
 	if m.authorityRefreshNotice {
 		m.authorityRefreshNotice = false
-		notice := "SSH reconnected: remote workspace refreshed"
+		notice := uiText("gvim.notice.ssh_reconnected", "SSH reconnected: remote workspace refreshed")
 		switch {
 		case err != nil:
-			notice += "; post-reconnect refresh failed: " + err.Error()
+			notice += uiTextVars("gvim.notice.post_reconnect_refresh_failed", "; post-reconnect refresh failed: %{error}", map[string]any{"error": err.Error()})
 		case count > 0:
-			notice += fmt.Sprintf("; %d language server(s) restarted", count)
+			notice += i18n.TN("", "gvim.notice.language_servers_restarted", count, nil)
 		}
 		m.quietNotice(notice)
 		return
 	}
 	if err != nil {
-		m.quietNotice("LSP restart after reconnect failed: " + err.Error())
+		m.quietNotice(uiTextVars("gvim.notice.lsp_restart_failed", "LSP restart after reconnect failed: %{error}", map[string]any{"error": err.Error()}))
 		return
 	}
 	if count > 0 {
-		m.quietNotice(fmt.Sprintf("LSP restarted after reconnect: %d server(s)", count))
+		m.quietNotice(i18n.TN("", "gvim.notice.lsp_restarted_after_reconnect", count, nil))
 	}
 }
 
@@ -340,10 +339,10 @@ func (m *Model) authorityAnswersCmd(answers []string) tea.Cmd {
 // segment itself is read while the row is built, so no further state is kept here.
 func (m *Model) reportAuthorityReconnect(err error) {
 	if err != nil {
-		m.quietNotice("SSH reconnect failed: " + err.Error())
+		m.quietNotice(uiTextVars("gvim.notice.ssh_reconnect_failed", "SSH reconnect failed: %{error}", map[string]any{"error": err.Error()}))
 		return
 	}
-	m.quietNotice("SSH reconnected")
+	m.quietNotice(uiText("gvim.notice.ssh_reconnected_bare", "SSH reconnected"))
 }
 
 // SetShellRunner routes shell_command and format_buffer through fn instead of

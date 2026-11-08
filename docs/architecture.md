@@ -566,8 +566,9 @@ still loads unchanged.
   saved position is kept when the request has none, a stale layout entry whose file is
   gone and has no stash is ignored, and stash text restores the file). A detected owner
   that fails to materialize is an error with the current workspace kept - it is never
-  re-opened in another workspace (single-writer v1; shared buffers are #19b). A path open
-  nowhere opens in the active workspace. Discovery Import uses the additive
+  re-opened in another workspace. A path open nowhere opens in the active workspace.
+  A path already open in another MATERIALIZED local workspace is shared instead of
+  switching away: see the cross-workspace shared buffers bullet below. Discovery Import uses the additive
   `WorkspaceLauncher.CreateWithLaunch(root, label, launch)` port: the manager creates or
   reuses the workspace, remembers the discovered session's attach argv keyed by stable id,
   and starts it in that workspace's dock once materialization + Show install the model
@@ -577,6 +578,41 @@ still loads unchanged.
   tab (the model asks the dock to find a tab by the launch's Source and focuses it instead
   of duplicating), because registry v1 has no per-session workspace identity or
   initial-launch record yet.
+- **Cross-workspace shared buffers (landed #19b bounded slice).** A daemon's local
+  workspaces share one `editor.SharedBuffers` registry (`internal/app/workspace_shared.go`, created once by
+  the workspace manager and copied into every workspace build's editor options; a direct
+  launch and a remote/authority workspace get nil and keep independent buffers - remote
+  files live on another host). A file is owned by one workspace at a time. Opening a path
+  already open in another materialized workspace in the focused workspace gives that
+  workspace a read-only mirror (`document.NewMirrorDocument`: text, saved state and encoding copied;
+  large, virtual and over-8 MiB documents fall back to the ordinary independent open) and
+  immediately requests ownership; opening it while a non-focused workspace holds it leaves
+  the mirror read-only until that workspace is focused, and the daemon open-file routing
+  keeps the request in the focused workspace instead of switching to the owner when the
+  path is shared. A daemon open-file REQUEST for the path still switches to the owning
+  workspace (the established #19a routing and its parity floor); sharing starts on an
+  OpenFile inside another workspace (finder/explorer). Ownership moves the CANONICAL document (text, undo history, unsaved
+  state, disk baseline) to the entering workspace's editor and leaves a fresh read-only
+  snapshot in the old one, so a workspace switch is the ownership request; a refused
+  request (the manager's switch path can refuse, tested with a hook) leaves the mirror
+  read-only with a conflict in its status row. Owner edits reach every mirror through an
+  explicit change path (`editor.SharedBuffers.onOwnerChange`): the mirror applies the `buffer.Change`
+  only when its recorded owner version is exactly the version before it, and reloads the
+  whole text under the document stale-version guard otherwise (coarse edits, undo/redo,
+  a stale version). A focus also syncs the mirrors' saved/disk state, so a save updates
+  the other workspace's dirty markers. Closing or evicting a workspace calls
+  `DropEditor`: an owner hands the canonical document to a mirror, a mirror is dropped, and a
+  close therefore keeps the file and its unsaved state in the other workspace. Tests cover
+  open in two workspaces, mirror read-only-until-ownership, edit propagation, ownership
+  back-and-forth with undo/unsaved state, conflict notice, close-owner promotion, and a
+  remote launch keeping independent buffers. Residuals: only the OpenFile path starts
+  sharing (OpenLoaded/startup restore of a second workspace still opens an independent
+  copy, and a daemon open-file request for an already-owned path switches to the owner
+  rather than opening a mirror),
+  copy), a tab closed inside a workspace does not promote a mirror in another workspace,
+  large/virtual buffers and remote workspaces are independent, the two workspaces share
+  the entry's view position only when ownership moves (each keeps its own cursor while
+  mirrored), and the mirror's plugin seams see a new document id after a handoff.
 - **Remote file finder (landed).** A remote launch's quick-open file mode enumerates the
   remote workspace through `authority.Files().ReadDir` (streaming into the ordinary
   `finder.Index`, so the palette's poll-while-loading and query-sequence staleness guards
@@ -876,6 +912,31 @@ still loads unchanged.
   (refs/fresh/docs/internal/plugin-window-scope-plan.md: one editor-wide runtime,
   per-window `session_plugin_state`, chrome scope and the focus announcer that retargets the
   active window/split/buffer) remains the recorded follow-up residual.
+- **Materialized-workspace bound and eviction (landed #19b follow-up).** A daemon keeps at
+  most `daemon.materialized_workspaces` LOCAL workspaces warm (user-config only, default 8,
+  accepted range 1..64; a project config that sets it is refused with a diagnostic because a
+  repository must not decide the daemon's memory). The cap lives in `config.DaemonConfig`,
+  reaches the manager through the runtime built for the foreground workspace (`buildRuntime`
+  copies the config's value), and is enforced after a switch materializes a workspace: an
+  eviction pass, scheduled as a command (never on the UI goroutine), picks the
+  least-recently-focused non-active local workspace. It captures the workspace session first
+  (the existing ordered capture writer; the snapshot runs on the UI goroutine), and if that
+  write fails it confirms durability with the synchronous fallback save. Only then does it
+  tear the runtime down (plugin wait cancellation via `Model.Close`, terminal/scrollback
+  state, document handles, LSP/dock resources) and drop it from the materialized set - the
+  registry entry, session directory and `sessions/<stable-id>/plugin-state.json` stay, so the
+  next select materializes it from the saved session. The active workspace is never evicted
+  (rechecked after the capture), and a workspace whose capture AND fallback save both fail is
+  kept materialized, over the cap, and the failure is reported; the eviction pass then tries
+  the next candidate. A successful eviction posts a status-row notice naming the workspace and
+  the cap. A workspace being evicted refuses concurrent select/close instead of racing the
+  teardown, and the exit save serializes with an eviction pass. Remote/authority workspaces are
+  excluded from this slice: they own an SSH runtime, a rematerialize would have to reconnect,
+  so they neither count toward nor are chosen by the local cap (documented residual). Tests:
+  `internal/app/workspace_evict_test.go` (LRU order, active never evicted, unsaved workspace
+  protected when capture and fallback fail, fallback rescue, reopen restores the unsaved tab,
+  remote exclusions, plugin-state file preserved across eviction/reopen, cap from config);
+  `config/daemon_test.go` (default, user layer values/bounds, project refusal).
 - **Shared daemon plugin runtime and host mux (landed #19b follow-up).** One
   `plugin.Runtime` serves every LOCAL daemon workspace (`pluginhost.Daemon`): the first workspace
   build creates it from that build's config; every later workspace contributes only its
@@ -912,12 +973,19 @@ still loads unchanged.
   not, host retarget, no workspace stop), `internal/pluginhost/shared_test.go` (OS mux
   follows the active workspace, one runtime per daemon), `internal/app/workspace_plugin_shared_test.go`
   (one runtime for two daemon workspaces, host/state rebind on switch/back).
-  Residuals: window/buffer ids are per-workspace rather than editor-global (payloads carry
-  the workspace label; a plugin caching an id across a switch must re-read it, cross-workspace
-  id namespacing is a follow-up), editor-scoped overlays (prompts/pickers/popups) remain
-  model-local (only widget panels/sidebar sections are carried), and editor-scoped widget
-  instance state is not cloned into inactive workspaces (the copy is rebuilt from the mount
-  spec when entered, live changes reach it through an update after the switch).
+  Plugin window and buffer ids are editor-global across the shared runtime: on Bind a model
+  gets a sequence in the shared namespace (direct launches stay sequence 0), the API exposes
+  seq<<40|local, every host entry point decodes and refuses a foreign or released id with
+  CodeClosed, returns/events use global ids, and PluginShared.ReleaseWorkspace frees an
+  evicted/closed model's sequence so a rematerialized workspace gets a fresh one (plugins
+  re-read ids after a remount; payloads still carry the workspace label). Residuals: the
+  global namespace keeps 40 low bits for a workspace-local id and a per-mux sequence (far
+  beyond the editor's/manager's real bounds, but a hard cap), editor-scoped overlays
+  (prompts/pickers/popups) remain model-local (only widget panels/sidebar sections are
+  carried), editor-scoped widget instance state is not cloned into inactive workspaces (the
+  copy is rebuilt from the mount spec when entered, live changes reach it through an update
+  after the switch), and a buffer-bearing mount cannot be editor-scoped across workspaces
+  (its buffer id is workspace-local, so the carry skips it).
   The per-workspace PROJECT plugin config is
   applied on a switch: `pluginhost.NewWorkspace` snapshots the workspace config's
   `plugins.<name>.enabled`/`plugins.<name>.settings` layer (project layer included) with a
@@ -1010,15 +1078,16 @@ still loads unchanged.
   item also appears in Fresh's tab context menu.
 - **Remainder of #19a (not shipped).** A remote workspace's `authority_spec` field (registry
   v2 still records no authority), full Fresh window-scope chrome/focus announcer per
-  registration (task-141), sharing the runtime with remote/authority workspaces, eviction/memory
-  limits for
+  registration (task-141), sharing the runtime with remote/authority workspaces, byte-budget
+  and per-runtime instance-state bounds beyond the workspace count for
   warm co-tenants, the initial terminal-launch record in a workspace descriptor (the
   discovery Import can create a workspace but not attach an argv to it yet), shared
-  buffers/daemon-level open-path map beyond the switch-to-existing-workspace rule (#19b),
+  shared-buffer follow-ups beyond the bounded slice above (startup-restore sharing, tab-close
+  promotion, large/remote sharing; #19b),
   a workspace switcher that shows live runtime details (the list shows label/root/state
   only), and making the capture write itself cancellable/ordered under a slow disk beyond
   the quit wait. The extract flow still leaves these open: the cross-workspace
-  shared-buffer model (#19b) and a live PTY/process hand-off (gvim moves terminal state and
+  full shared-buffer view independence (#19b; bounded slice landed) and a live PTY/process hand-off (gvim moves terminal state and
   restarts in the target, Fresh moves the PTY in-process), large-file overlay extraction,
   extracting to a workspace over a DIFFERENT root (refused: extraction is co-tenant only,
   matching Fresh's root-preserving extract), terminal tabs in the multi-select picker

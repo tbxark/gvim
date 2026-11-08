@@ -55,6 +55,12 @@ func (p *Panel) reflowPrior(cols int) {
 		p.prior = terminal.ReflowLines(p.prior, p.priorWidth, cols)
 		p.trimPrior()
 		p.clearSelection()
+		// The saved snapshot's row mapping (history + visible tail + cursor) no
+		// longer holds after a re-wrap: drop the metadata rather than paint a cursor
+		// on a different row.
+		p.savedCursor = terminal.SavedCursor{}
+		p.savedVisibleRows = 0
+		p.savedAlt = false
 		if p.restored {
 			p.reflowed = true
 		}
@@ -140,9 +146,27 @@ func (p *Panel) SavedState() terminal.SavedState {
 	// its prior transcript, so another save does not wash its styles out.
 	switch {
 	case p.term != nil:
-		st.Screen = terminal.SnapshotScreen(p.term.Screen())
+		sc := p.term.Screen()
+		if sc.Alt {
+			st.Screen = terminal.SnapshotScreen(sc)
+			break
+		}
+		total := p.term.ScrollbackLen()
+		keep := min(total, terminal.MaxSavedHistoryRows)
+		var history []terminal.Line
+		if keep > 0 {
+			history, _ = p.term.Scrollback(total-keep, keep)
+		}
+		st.Screen = terminal.SnapshotScreenWithHistory(sc, history)
 	case len(p.prior) > 0:
-		st.Screen = terminal.SnapshotLines(p.prior)
+		// A restored tab keeps its full snapshot (styles history + cursor + alt)
+		// across another save: SnapshotPriorScreen rebuilds it from the styled prior
+		// rows captured when the record was applied.
+		if snap := terminal.SnapshotPriorScreen(p.prior, p.savedVisibleRows, p.savedCursor, p.savedAlt); snap != nil {
+			st.Screen = snap
+		} else {
+			st.Screen = terminal.SnapshotLines(p.prior)
+		}
 	}
 	// The launch record of the terminal that produced the transcript, so the
 	// user-initiated restart can rejoin it after an editor restart.
@@ -224,10 +248,11 @@ func (p *Panel) Restore(st terminal.SavedState) {
 	for _, text := range rows {
 		p.prior = append(p.prior, lineFromText(text))
 	}
-	// The styled snapshot replaces the text tail it was captured from, but only
-	// when its text matches exactly; a mismatched/corrupt snapshot is ignored whole
-	// so a restore never paints different content than the transcript rows.
-	p.applyScreenSnapshot(st.Screen)
+	// The styled snapshot (history + visible screen + cursor + alt) replaces the
+	// text tail it was captured from, but only when every row matches exactly; a
+	// mismatched/corrupt snapshot is ignored whole so a restore never paints
+	// different content than the transcript rows.
+	p.applySavedScreen(st.Screen)
 	p.restored = true
 	p.wasLive = st.Live
 	p.reflowed = false
@@ -276,22 +301,46 @@ func clipSavedDir(dir string) string {
 	return cut
 }
 
-// applyScreenSnapshot overlays the styled saved screen onto the tail of the text
-// prior. The snapshot is used only when its row count fits and every row's text
-// matches the corresponding tail row exactly; otherwise the plain rows stay
-// (migration and corruption safety).
-func (p *Panel) applyScreenSnapshot(screen *terminal.SavedScreen) {
+// applySavedScreen overlays the styled saved screen and its styled history onto
+// the text prior, and records the saved cursor/alt/visible-row count. The
+// snapshot is used only when it is structurally valid, its rows fit the prior and
+// every visible AND history row's text matches the corresponding transcript row
+// exactly; otherwise the plain rows stay and the saved metadata is cleared
+// (migration and corruption safety: a corrupt record is ignored whole).
+func (p *Panel) applySavedScreen(screen *terminal.SavedScreen) {
+	p.savedCursor = terminal.SavedCursor{}
+	p.savedAlt = false
+	p.savedVisibleRows = 0
+	if screen == nil || !screen.Valid() {
+		return
+	}
 	lines := screen.Lines()
+	history := screen.HistoryLines()
 	if len(lines) == 0 || len(lines) > len(p.prior) {
 		return
 	}
-	tail := p.prior[len(p.prior)-len(lines):]
+	if len(history) > len(p.prior)-len(lines) {
+		return
+	}
+	visTail := p.prior[len(p.prior)-len(lines):]
 	for i := range lines {
-		if lines[i].Text() != tail[i].Text() {
+		if lines[i].Text() != visTail[i].Text() {
 			return
 		}
 	}
-	copy(tail, lines)
+	histStart := len(p.prior) - len(lines) - len(history)
+	for i := range history {
+		if history[i].Text() != p.prior[histStart+i].Text() {
+			return
+		}
+	}
+	copy(visTail, lines)
+	if len(history) > 0 {
+		copy(p.prior[histStart:], history)
+	}
+	p.savedCursor = screen.Cursor
+	p.savedAlt = screen.Alt
+	p.savedVisibleRows = len(lines)
 }
 
 // Restored reports whether the dock shows a restored transcript without a shell.

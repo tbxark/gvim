@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/plugin/hostos"
@@ -33,10 +34,23 @@ var mountAuthority = newAuthority
 
 func newAuthority(opts Options, pw *pluginhost.Wiring, gate authority.Gate, gateEnv authority.GateEnv, env authority.EnvProvider) authority.Slot {
 	if opts.Remote != nil {
+		security := opts.SSHSecurity
+		policy := security.KnownHostsPolicy
+		if policy == "" {
+			policy = string(authority.KnownHostsStrict)
+		}
+		var store authority.PasswordStore
+		if security.Keyring {
+			store = authority.SystemPasswordStore()
+		}
 		return authority.NewSSH(authority.SSHOptions{
-			Spec:           *opts.Remote,
-			Timeout:        15 * time.Second,
-			KnownHostsPath: sshKnownHostsPath(),
+			Spec:              *opts.Remote,
+			Timeout:           15 * time.Second,
+			KnownHostsPath:    sshKnownHostsPath(),
+			KnownHostsPolicy:  policy,
+			HostKeyAlgorithms: append([]string(nil), security.HostKeyAlgorithms...),
+			PasswordStore:     store,
+			StorePassword:     security.Keyring,
 			// OpenSSH user config (Host/HostName/User/Port/IdentityFile/ProxyJump/
 			// IdentityAgent/ForwardAgent) is read by the pure-Go backend; it never
 			// falls back to running ssh(1).
@@ -82,9 +96,32 @@ func attemptAuthorityConnect(ctx context.Context, slot authority.Slot) (string, 
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	if err := slot.Reconnect(ctx); err != nil {
-		return fmt.Sprintf("SSH %s: %v; activate the window to reconnect", slot.Label(), err), err
+		msg := fmt.Sprintf("SSH %s: %v; activate the window to reconnect", slot.Label(), err)
+		if extra := drainAuthorityNotices(slot); extra != "" {
+			msg += "; " + extra
+		}
+		return msg, err
 	}
-	return "", nil
+	return drainAuthorityNotices(slot), nil
+}
+
+// drainAuthorityNotices collects the transport notices (accept-new recorded a host key,
+// accepted password stored) the authority queued while connecting.
+func drainAuthorityNotices(slot authority.Slot) string {
+	n, ok := slot.(interface{ TakeNotices() []string })
+	if !ok {
+		return ""
+	}
+	return strings.Join(n.TakeNotices(), "; ")
+}
+
+// sshSecurityFromConfig maps the config ssh section to the launch option.
+func sshSecurityFromConfig(c config.SSHConfig) SSHSecurity {
+	return SSHSecurity{
+		KnownHostsPolicy:  c.KnownHostsPolicy,
+		HostKeyAlgorithms: append([]string(nil), c.HostKeyAlgorithms...),
+		Keyring:           c.Keyring,
+	}
 }
 
 // remoteLocalRoot is the local process root of a remote launch: a remote launch opens no

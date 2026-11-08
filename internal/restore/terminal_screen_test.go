@@ -115,3 +115,82 @@ func TestLoadTerminalBoundsScreenSnapshot(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadTerminalRemainderBounds checks the cursor/alt/history remainder of the
+// screen snapshot is bounded and sanitized on load: history rows capped, control
+// characters stripped, invalid colours dropped, the cursor clamped and an unknown
+// shape cleared (a corrupt record cannot paint garbage).
+func TestLoadTerminalRemainderBounds(t *testing.T) {
+	t.Parallel()
+	history := make([]terminal.SavedRow, terminal.MaxSavedHistoryRows+30)
+	for i := range history {
+		history[i] = terminal.SavedRow{Cells: []terminal.SavedCell{
+			{Rune: '\t', Fg: "bogus"},
+			{Rune: 'h'},
+		}}
+	}
+	screen := &terminal.SavedScreen{
+		Cols:    4,
+		History: history,
+		Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{
+			{Rune: '\n', Bg: "#00ff00"},
+		}}},
+		Cursor: terminal.SavedCursor{Row: 99, Col: -1, Visible: true, Shape: "star"},
+		Alt:    true,
+	}
+	dir := t.TempDir()
+	st := terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"x"},
+		Screen: screen,
+		Tabs:   []terminal.SavedTab{{Name: "t", Open: true, Rows: []string{"x"}, Screen: screen}},
+	}
+	if err := SaveTerminal(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadTerminal(dir)
+	if err != nil || !ok {
+		t.Fatalf("LoadTerminal = %v, %v", ok, err)
+	}
+	for name, snap := range map[string]*terminal.SavedScreen{"top": got.Screen, "tab": got.Tabs[0].Screen} {
+		if snap == nil {
+			t.Fatalf("%s snapshot missing", name)
+		}
+		if !snap.Alt || len(snap.History) > terminal.MaxSavedHistoryRows {
+			t.Fatalf("%s history/alt = %d/%v", name, len(snap.History), snap.Alt)
+		}
+		if snap.Cursor.Row < 0 || snap.Cursor.Row >= len(snap.Rows) || snap.Cursor.Col != 0 || snap.Cursor.Shape != "" {
+			t.Fatalf("%s cursor = %+v", name, snap.Cursor)
+		}
+		for _, row := range append(append([]terminal.SavedRow{}, snap.Rows...), snap.History...) {
+			for _, cell := range row.Cells {
+				if cell.Rune == '\t' || cell.Rune == '\n' {
+					t.Fatalf("%s control character survived: %q", name, cell.Rune)
+				}
+				if cell.Fg == "bogus" {
+					t.Fatalf("%s invalid colour survived", name)
+				}
+			}
+		}
+	}
+}
+
+// TestLoadTerminalOldRecordNoRemainder checks an old record (no cursor/alt/history)
+// loads with the zero remainder and does not invent state.
+func TestLoadTerminalOldRecordNoRemainder(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"old"},
+		Screen: &terminal.SavedScreen{Cols: 3, Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'o'}}}}},
+	}
+	if err := SaveTerminal(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadTerminal(dir)
+	if err != nil || !ok || got.Screen == nil {
+		t.Fatalf("LoadTerminal = %+v, %v, %v", got, ok, err)
+	}
+	if got.Screen.Cursor != (terminal.SavedCursor{}) || got.Screen.Alt || len(got.Screen.History) != 0 {
+		t.Fatalf("old record gained remainder: %+v", got.Screen)
+	}
+}

@@ -15,11 +15,14 @@ import (
 
 // ---------- ids, positions ----------
 
-// BufferID names one document for the life of the process. 0 means none. Ids are
-// never reused.
+// BufferID names one document for the life of the process. In a daemon whose local
+// workspaces share one plugin runtime the host exposes editor-global ids (a workspace
+// sequence packed above a 40-bit local id); direct launches use local ids. 0 means none.
+// Ids are never reused.
 type BufferID uint64
 
-// WinID names one split. 0 means none.
+// WinID names one split. In a daemon whose local workspaces share one plugin runtime the
+// host exposes editor-global ids; direct launches keep the local split ids. 0 means none.
 type WinID uint64
 
 // Token is the handle of one async wait.

@@ -16,9 +16,12 @@ const (
 	trustUnavailableNotice = "Workspace trust is unavailable in this workspace"
 	// trustTrustedNotice, trustRestrictedNotice and trustBlockedNotice are
 	// Fresh's trust.now_* messages, shown when a decision is recorded.
-	trustTrustedNotice    = "Workspace trusted — project tooling may run processes"
-	trustRestrictedNotice = "Workspace restricted — repo-controlled execution is blocked"
-	trustBlockedNotice    = "Workspace blocked — no processes will run"
+)
+
+var (
+	trustTrustedNotice    = uiText("gvim.notice.trusted", "Workspace trusted — project tooling may run processes")
+	trustRestrictedNotice = uiText("gvim.notice.restricted", "Workspace restricted — repo-controlled execution is blocked")
+	trustBlockedNotice    = uiText("gvim.notice.blocked", "Workspace blocked — no processes will run")
 )
 
 // trustDecidedMsg is the result of the command that records a trust decision:

@@ -8,8 +8,8 @@ import (
 // local and that remote workspaces are not supported. The menu is anchored at the
 // bottom row, so it opens above that row.
 func (m *Model) showRemoteMenu() {
-	m.ShowPopup(popup.Point{X: 0, Y: m.height - 1}, "Remote", []popup.Item{
-		{Label: "Workspace: Local", Detail: "on this machine"},
-		{Label: "Remote workspaces are not supported"},
+	m.ShowPopup(popup.Point{X: 0, Y: m.height - 1}, uiText("gvim.remote.title", "Remote"), []popup.Item{
+		{Label: uiText("gvim.remote.workspace_local", "Workspace: Local"), Detail: uiText("gvim.remote.on_this_machine", "on this machine")},
+		{Label: uiText("gvim.remote.not_supported", "Remote workspaces are not supported")},
 	})
 }

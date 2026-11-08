@@ -131,6 +131,14 @@ type Document struct {
 	Codec string
 	// readOnly refuses every change to the text and to the file. See readonly.go.
 	readOnly bool
+	// sharedMirror marks a cross-workspace mirror: read-only, kept in step with the
+	// document another workspace owns. sharedVersion is the owner buffer version the
+	// mirror last applied, for the stale-version guard. See shared.go.
+	sharedMirror  bool
+	sharedVersion uint64
+	// sharedSelfVersion is the mirror buffer's own version at the last successful sync,
+	// so an out-of-band change to the mirror text is detected as stale.
+	sharedSelfVersion uint64
 	// binary marks a file that is not text. It is read-only and cannot be saved. See
 	// binary.go.
 	binary bool

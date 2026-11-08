@@ -148,6 +148,19 @@ deliberately does not take.
   matching the local atomic path. A non-atomic write follows symlinks like `cat` and keeps
   an existing file's permission. These exact behaviours are asserted in
   `authority/ssh_files_test.go`, not assumed.
+
+- Streamed atomic writes: `WriteStreamer` is the optional file-port surface for saving a
+  file larger than memory. `WriteStream` creates one `mktemp` in the resolved target's
+  directory (symlinks resolved, bounded 16 levels), each `Write` appends its bounded chunk
+  with one `cat >> temp` helper, and `Commit` applies the mode and does one `mv -f` over
+  the target; `Abort` removes the temporary file. The target is untouched until the commit,
+  so a failed or cancelled write leaves it exactly as it was, and the local backend has the
+  same temp+rename implementation. Only atomic, non-appending, no-parents writes are
+  accepted (`Append`/`Parents`/`!Atomic` report `ErrUnsupportedFileIO` instead of
+  silently differing from `WriteFile`). Memory is one caller chunk plus the small helper
+  answer, never the whole file; every chunk and the commit are bounded by their contexts
+  (a cancelled chunk is an error, and the abort still removes the temporary file with its
+  own short bounded context).
 - Bounds and errors: collection is bounded during the transfer, not after it. The session
   pump writes into a bounded buffer that keeps draining after its limit (so the remote
   process never blocks) and records the overflow; an over-cap answer is an explicit error,
@@ -155,7 +168,9 @@ deliberately does not take.
   first capped to it; `head -c effective+1` detects oversize without transferring it),
   directory listing transfer 4 MiB on top of the 5000-entry cap, stat/write helper stdout
   64 KiB, and helper stderr 64 KiB (a failing helper's message is never parsed beyond the
-  cap — the error says the error output was over the cap). Every call is bounded by its
+  cap — the error says the error output was over the cap). A streamed write buffers only
+  the caller's chunk (a save window, 1 MiB) and each helper's bounded answer; the
+  temporary file is on the backend, never in client memory. Every call is bounded by its
   context (the authority kills the remote process when it ends) and the SSH layer's connect
   timeout; a failed helper is an error, never an empty successful answer. Not-found and
   permission failures wrap `fs.ErrNotExist`/`fs.ErrPermission` so callers can distinguish
@@ -336,9 +351,11 @@ Residuals of this slice (documented, not bugs):
   itself is not watched because the remote explorer is not implemented, and the authority
   watch is polled at ~500 ms plus the 150 ms coalescing window, with a rename reported as
   remove+create; manual Revert/Reopen and the periodic disk check remain the fallback), remote
-  large-file saves larger than the bounded merge (remote large files edit as an overlay
-  and save by merging into one atomic whole-file write, up to remoteLargeSaveMax; Fresh's
-  host-side patched recipe is the later slice), remote
+  large-file saves (remote large files edit as an overlay and save by streaming the merged
+  file through the authority's atomic write stream: chunks into a remote temporary file,
+  then one rename; an access without the stream surface keeps the old bounded
+  merge-and-whole-file write up to remoteLargeSaveMax, and Fresh's host-side patched recipe
+  remains the later slice; documented above), remote
   crash recovery and hot-exit (deliberately skipped for a remote launch so remote text is
   never copied into a local cache), `~user` expansion, special remote files (the helper's
   kind mapping only knows file/dir/symlink; a FIFO read is bounded by the context and fails
@@ -603,25 +620,34 @@ the synchronous `fileSource` path unchanged and never arm the window loop.
 Remote large files are **editable** with Fresh's large-file model: edits become an in-memory
 overlay over the untouched windowed base (buffer's large-file overlay, already bounded by its
 overlay budget). The status row says `remote large file (windowed): the bytes stay on the
-remote host and load as you scroll; a save writes the merged file in one atomic write, up to
-<bound>`.
+remote host and load as you scroll; a save streams the merged file into one atomic write`
+(an access without the stream surface says the old bounded wording instead).
 
 A save merges the overlay with the unchanged head/tail read back through
-`FileSystem.ReadRange` in bounded chunks, then writes the whole merged file with the
-authority's atomic whole-file write. Because that write takes the file as one byte slice, the
-merge is bounded (`remoteLargeSaveMax`, 64 MiB): a larger merged file refuses the save with a
-clear notice instead of risking the machine. The save is prepared on the editor goroutine and
-runs in a `tea.Cmd` like every other save, so the update loop never waits on the carrier. A
-remote file that changed after the plan refuses the save with the ordinary changed-on-disk
-error; the plan's remote stat and the post-write stat both go through the authority. After a
-successful write the save command opens a fresh windowed source for the new file and carries
-it in the result, so `ApplySavePlan` rebases the buffer without any remote read on the update
+`FileSystem.ReadRange` in bounded chunks, and (when the access implements the optional
+`StreamAccess` part) streams the merged file into the authority's **streamed atomic write**:
+the merged bytes go a chunk at a time into a remote temporary file, then one `mv -f`
+replaces the target. Nothing materialises the merged file in client memory, so a remote
+large file of arbitrary size saves with bounded memory; a failed chunk or a cancellation
+aborts the stream (the temporary file is removed and the target is untouched), and the save
+is prepared on the editor goroutine and runs in a `tea.Cmd` like every other save, so the
+update loop never waits on the carrier. A remote file that changed after the plan refuses
+the save with the ordinary changed-on-disk error (the stream is never opened); the plan's
+remote stat and the post-write stat both go through the authority. After a successful write
+the save command opens a fresh windowed source for the new file and carries it in the
+result, so `ApplySavePlan` rebases the buffer without any remote read on the update
 goroutine. Undo, dirty state and rebase behave like a local large file.
 
+An access without the streaming part keeps the old fallback exactly as before: merge into
+one byte slice, bounded by `remoteLargeSaveMax` (64 MiB), and write it whole; a larger
+merged file refuses with a clear notice. The status row says so in that case (the normal
+authority-backed access advertises the streamed save).
+
 This is still a deliberate divergence from Fresh: Fresh writes a **patched recipe** that the
-host applies (unchanged parts copied on the host), so it can save files larger than memory;
-gvim's bounded merge-and-atomic-write is the slice that fits the existing remote write port. A
-server-side patched recipe and an unbounded (spooled) save are later work. Remote files at or
+host applies (unchanged parts copied on the host), while gvim streams the already-merged
+bytes from the client into a remote temporary file and renames it. The outcome is the same
+for files larger than memory; a server-side patched recipe remains later work, and the
+whole-file transport cap for files loaded without windowing is unchanged. Remote files at or
 under the threshold still load whole through `ReadFile` (64 MiB transport cap) exactly as
 before, and an over-cap file with no windowed reader still fails clearly rather than opening a
 partial buffer. Every byte is read and written through the authority: there is no local
@@ -662,10 +688,10 @@ the new connection's local agent.
 
 **Host keys and algorithms** stay explicit and conservative: no `StrictHostKeyChecking`,
 `UserKnownHostsFile`, `HostKeyAlgorithms`, `Ciphers`, `MACs` or `KexAlgorithms` directive is
-read (residual); host keys always go through `knownhosts.New` (or the injected test
-callback), and an unknown host is a clear error naming known_hosts and how to add the key.
-x/crypto's default algorithm set applies. No local fallback and no `ssh(1)` subprocess are
-involved.
+read from the OpenSSH config (residual); the transport's own `ssh` config section below sets
+the policy. Host keys always go through `knownhosts.New` (or the injected test callback),
+and an unknown host is a clear error naming known_hosts and how to add the key. No local
+fallback and no `ssh(1)` subprocess are involved.
 
 Also ignored (recorded residual): `Include`, `Match`, `ProxyCommand`, `Canonicalize*`,
 `ForwardAgent` per-host with a local command, system-wide `/etc/ssh/ssh_config`, and
@@ -676,3 +702,55 @@ Tests: parser/Host-pattern/first-value/token/limit and target-override tables
 `direct-tcpip` to the target) and a fake-agent forwarding run whose server reads the local
 agent's identities through the forwarded channel (`ssh_config_remote_test.go`); the existing
 suite proves the no-config path is unchanged.
+
+## SSH host-key policy, host-key algorithms and password keyring (gvim extensions)
+
+These are top-level `ssh` keys in the user config (a project file cannot set them: host-key
+verification is a user security choice). Fresh delegates SSH to `ssh(1)` and gets OpenSSH's
+`StrictHostKeyChecking=accept-new` for free; the pure-Go backend makes the choice explicit.
+
+- **`ssh.known_hosts_policy`** — `"strict"` (default), `"accept-new"` or `"off"`.
+  - **strict** refuses a host whose key is missing from known_hosts and says how to add it
+    (`ssh-keyscan`); the known_hosts file itself is never created or written.
+  - **accept-new** writes a **first-seen** host's normalized `[host]:port` line to the
+    known_hosts file (mode 0600; the parent directory is created 0700, the same convention as
+    OpenSSH's default paths) and returns a notice through the transport's notice queue
+    (`Authority.TakeNotices`), which the app shows in its startup/reconnect notice row: the
+    user learns the host was trusted on first use. Subsequent connections are known.
+  - **A changed host key is always refused**, under every policy, with a "HOST KEY CHANGED …
+    possible man-in-the-middle" error; accept-new never overwrites an existing line.
+  - **off** is accepted by the config parser only so the transport can refuse it with one
+    clear error; there is no mode that disables host-key verification.
+- **`ssh.host_key_algorithms`** — ordered server host-key algorithm preference. The default
+  is `ssh-ed25519, ecdsa-sha2-nistp256, ecdsa-sha2-nistp384, ecdsa-sha2-nistp521,
+  rsa-sha2-512, rsa-sha2-256` (SHA-1 `ssh-rsa` and DSA are never preferred by default);
+  certificate variants and the legacy names are accepted when explicitly configured. An
+  unknown or empty name is a clear error **before** the dial, naming the supported set;
+  duplicates keep their first position. The list is applied to both the ProxyJump hop and the
+  target. The verified host key's type is reported in the connection detail
+  (`Authority.State().Detail`), e.g. `host key ssh-ed25519 · known_hosts strict ·
+  algorithms ssh-ed25519, …`; the residual is that x/crypto/ssh does not expose the
+  negotiated signature algorithm separately from the presented key type, so an RSA host key
+  is reported by its key type rather than which RSA-SHA2 variant signed the handshake.
+- **`ssh.keyring`** — default **false**: no OS keyring is consulted and no password is
+  stored. When true, the transport asks the `authority.PasswordStore` for the host password
+  before the UI password prompt, and, after the server accepts a password the user supplied,
+  stores it and queues an honest notice. Storage happens only with this explicit consent and
+  only for an accepted password; a lookup error falls through to the prompt, and a store
+  error is reported as "accepted but not stored", never as success. The interface and a
+  no-op default (`SystemPasswordStore`) ship in this slice; the macOS-keychain and Linux
+  secret-service backends are recorded follow-ups, so with the knob on today the app reports
+  that the password was not stored. Password storage for 2FA/keyboard-interactive answers is
+  not covered.
+- The app maps `config.SSHConfig` to `Options.SSHSecurity` and the transport notices into the
+  startup/reconnect notice text; the config parser validates the document shape
+  (unknown keys/values are diagnostics) while the transport still validates the policy and
+  algorithm names at connect time with clear errors.
+
+Tests: policy transitions with an in-process server (strict unknown refuses and writes
+nothing; accept-new records once with a notice and is trusted next time; a changed key is
+refused and the file is untouched; off refuses), algorithm parsing/order/duplication/unknown
+names and the negotiated detail (Ed25519 success, RSA-only list fails as "no common
+algorithm"), and a fake password store (retrieve before the prompt, no store with the knob
+off, store + notice with it on, unavailable store reported honestly, lookup error falls
+through to the prompt).

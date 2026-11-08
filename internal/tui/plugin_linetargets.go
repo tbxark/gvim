@@ -31,6 +31,10 @@ func (h *pluginHost) SetLineTargets(plugin string, id pluginapi.BufferID, target
 	if !ok {
 		return pluginapi.Errf(pluginapi.CodeClosed, "buffer %d is closed", id)
 	}
+	local, err := h.localBuffer(id)
+	if err != nil {
+		return err
+	}
 	if len(targets) > pluginapi.MaxLineTargets {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a buffer takes at most %d line targets", pluginapi.MaxLineTargets)
 	}
@@ -60,20 +64,24 @@ func (h *pluginHost) SetLineTargets(plugin string, id pluginapi.BufferID, target
 		m.plug.lineTargets = map[pluginapi.BufferID]*lineTargetSet{}
 	}
 	if len(set.byLine) == 0 {
-		delete(m.plug.lineTargets, id)
+		delete(m.plug.lineTargets, local)
 		return nil
 	}
-	m.plug.lineTargets[id] = set
+	m.plug.lineTargets[local] = set
 	return nil
 }
 
 // ClearLineTargets removes the buffer's targets when the caller owns them.
 func (h *pluginHost) ClearLineTargets(plugin string, id pluginapi.BufferID) {
-	set := h.model().plug.lineTargets[id]
+	local, err := h.localBuffer(id)
+	if err != nil {
+		return
+	}
+	set := h.model().plug.lineTargets[local]
 	if set == nil || set.owner != plugin {
 		return
 	}
-	delete(h.model().plug.lineTargets, id)
+	delete(h.model().plug.lineTargets, local)
 }
 
 // lineTargetAt returns the target on a line of the document, when it is a plugin buffer

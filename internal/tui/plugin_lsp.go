@@ -203,7 +203,7 @@ func (m *Model) plugDiagnosticsChanged(path string, old, items []Diagnostic) {
 		k := plugSeverity(d.Severity)
 		counts[k] = counts[k].(int) + 1
 	}
-	m.plugEmit("diagnostics_updated", map[string]any{"buf": id, "path": path, "counts": counts})
+	m.plugEmit("diagnostics_updated", map[string]any{"buf": m.gb(id), "path": path, "counts": counts})
 }
 
 // pluginLSPDone delivers the answer of a request to the plugin that is waiting for it.

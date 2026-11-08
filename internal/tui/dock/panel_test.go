@@ -30,13 +30,14 @@ type fakeTerm struct {
 	done      chan struct{}
 
 	// The scrollback, OSC 7 and mouse state the dock reads.
-	history   []string              // the history rows, oldest first
-	cwd       string                // OSC 7 working directory
-	alt       bool                  // the alternate screen
-	mouse     bool                  // the shell asked for mouse reporting
-	drag      bool                  // the shell asked for drag motion (1002)
-	allMotion bool                  // the shell asked for all motion (1003)
-	mice      []terminal.MouseEvent // the mouse events the dock forwarded
+	history       []string              // the history rows, oldest first
+	styledHistory []terminal.Line       // styled history rows, when set
+	cwd           string                // OSC 7 working directory
+	alt           bool                  // the alternate screen
+	mouse         bool                  // the shell asked for mouse reporting
+	drag          bool                  // the shell asked for drag motion (1002)
+	allMotion     bool                  // the shell asked for all motion (1003)
+	mice          []terminal.MouseEvent // the mouse events the dock forwarded
 }
 
 func newFakeTerm() *fakeTerm {
@@ -75,6 +76,12 @@ func (f *fakeTerm) Close() error             { f.closed = true; return nil }
 
 // Scrollback returns the history window the dock asks for.
 func (f *fakeTerm) Scrollback(from, count int) (lines []terminal.Line, total int) {
+	if len(f.styledHistory) > 0 {
+		total = len(f.styledHistory)
+		from = min(max(from, 0), total)
+		count = min(max(count, 0), total-from)
+		return append([]terminal.Line(nil), f.styledHistory[from:from+count]...), total
+	}
 	total = len(f.history)
 	from = min(max(from, 0), total)
 	count = min(max(count, 0), total-from)
@@ -84,7 +91,12 @@ func (f *fakeTerm) Scrollback(from, count int) (lines []terminal.Line, total int
 	return lines, total
 }
 
-func (f *fakeTerm) ScrollbackLen() int { return len(f.history) }
+func (f *fakeTerm) ScrollbackLen() int {
+	if len(f.styledHistory) > 0 {
+		return len(f.styledHistory)
+	}
+	return len(f.history)
+}
 
 // SearchScrollback finds the history rows that hold query, case-insensitively.
 func (f *fakeTerm) SearchScrollback(query string, limit int) (matches []int, total int) {

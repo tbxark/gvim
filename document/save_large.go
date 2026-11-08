@@ -197,6 +197,19 @@ func (j SaveJob) writeLargeRemote(ctx context.Context, access FileAccess) SaveRe
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, errNoRemoteLarge)}
 	}
 	opts := buffer.WriteOptions{EOL: lg.Eol, Prefix: lg.Prefix, AllowGrown: lg.AllowGrown}
+	if streamer, ok := access.(StreamAccess); ok {
+		stream, serr := streamer.WriteStream(ctx, j.Path)
+		switch {
+		case serr == nil:
+			// The streamed path: the snapshot streams the merged file through a temporary
+			// file on the backend, so the merged size is not limited by memory.
+			return j.writeLargeRemoteStreamed(ctx, access, accessRange, stream, opts)
+		case !errors.Is(serr, ErrStreamUnsupported):
+			return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, serr)}
+		}
+		// The access advertises streaming but this backend has none: keep the bounded
+		// whole-file fallback below.
+	}
 	lw := &limitedSaveWriter{max: remoteLargeSaveMax}
 	res, werr := lg.Snap.WriteTo(ctx, lw, opts)
 	switch {
@@ -221,6 +234,56 @@ func (j SaveJob) writeLargeRemote(ctx context.Context, access FileAccess) SaveRe
 		src = fresh
 	}
 	return SaveResult{Job: j, Disk: after.diskState(), Res: res, Source: src, Note: lg.Note}
+}
+
+// writeLargeRemoteStreamed saves a remote large document through a streamed atomic
+// write: Snapshot.WriteTo walks the windowed source and the overlay in bounded chunks, so
+// the merged file is never materialised in memory. The stream's temporary file stays until
+// Commit; an error or cancellation aborts it, leaving the original untouched. The disk
+// state was checked before this call, so a changed remote file still refuses the save.
+func (j SaveJob) writeLargeRemoteStreamed(ctx context.Context, access FileAccess, accessRange RangeAccess, stream WriteStream, opts buffer.WriteOptions) SaveResult {
+	lg := j.large
+	cleanup := func() { stream.Abort(context.WithoutCancel(ctx)) }
+	res, werr := lg.Snap.WriteTo(ctx, streamChunkWriter{ctx: ctx, stream: stream}, opts)
+	switch {
+	case errors.Is(werr, buffer.ErrSourceChanged):
+		cleanup()
+		return SaveResult{Job: j, err: errFileChanged}
+	case errors.Is(werr, buffer.ErrSourceGrew):
+		cleanup()
+		return SaveResult{Job: j, err: errFileGrew}
+	case werr != nil:
+		cleanup()
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, werr)}
+	}
+	if err := stream.Commit(ctx); err != nil {
+		cleanup()
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
+	}
+	after, err := access.Stat(j.Path)
+	if err != nil {
+		return SaveResult{Job: j, Disk: diskState{Exists: true, Size: res.Bytes}, Res: res, Note: lg.Note}
+	}
+	var src buffer.Source
+	if fresh, openErr := newRemoteWindowSource(ctx, accessRange, j.Path, res.Bytes); openErr == nil {
+		src = fresh
+	}
+	return SaveResult{Job: j, Disk: after.diskState(), Res: res, Source: src, Note: lg.Note}
+}
+
+// streamChunkWriter adapts a document WriteStream to the io.Writer Snapshot.WriteTo
+// expects: every chunk is remote work, so it runs in the save command with the save's
+// context.
+type streamChunkWriter struct {
+	ctx    context.Context
+	stream WriteStream
+}
+
+func (w streamChunkWriter) Write(p []byte) (int, error) {
+	if err := w.stream.Write(w.ctx, p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // saveNote is the status after a save whose note is note and which could not keep

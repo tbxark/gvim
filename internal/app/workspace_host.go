@@ -27,6 +27,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/daemon"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/session"
@@ -83,7 +85,23 @@ type workspaceManager struct {
 	// lastReport is the last successful workspace action report (a close that stopped
 	// running terminals, an extraction), carried to the socket protocol's close answer.
 	lastReport string
-	now        func() time.Time
+	// materializedCap is daemon.materialized_workspaces: the most LOCAL workspaces kept
+	// materialized at once. Remote/authority workspaces are not evicted and do not count.
+	materializedCap int
+	// lastFocus is when each materialized workspace last became active, the LRU order of
+	// eviction. Updated on the UI goroutine only.
+	lastFocus map[string]time.Time
+	// evicting marks workspaces whose runtime is being torn down by the eviction pass: a
+	// select/close of one is refused instead of racing the teardown.
+	evicting map[string]bool
+	// evictMu serializes eviction passes with the exit save and close.
+	evictMu sync.Mutex
+	// lastEviction is the last successful eviction report (test/observability).
+	lastEviction string
+	// shared is the daemon's cross-workspace buffer registry, nil for remote/authority
+	// workspaces (they keep independent buffers).
+	shared *editor.SharedBuffers
+	now    func() time.Time
 }
 
 // newWorkspaceManager opens the registry, discovers the launch root as the foreground
@@ -120,11 +138,17 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 	if err != nil {
 		return nil, err
 	}
+	if opts.Daemon != nil && opts.Remote == nil && opts.sharedBuffers == nil {
+		opts.sharedBuffers = editor.NewSharedBuffers()
+	}
 	m := &workspaceManager{
 		ctx: ctx, opts: opts, reg: reg, now: time.Now,
-		sessions: map[string]*workspaceSession{},
-		launches: map[string]tui.WorkspaceLaunch{},
-		writers:  map[string]*captureWriter{},
+		shared:    sharedBuffersFor(opts),
+		sessions:  map[string]*workspaceSession{},
+		launches:  map[string]tui.WorkspaceLaunch{},
+		writers:   map[string]*captureWriter{},
+		lastFocus: map[string]time.Time{},
+		evicting:  map[string]bool{},
 		build: func(ctx context.Context, opts Options) (*runtime, error) {
 			return buildRuntime(ctx, opts, true)
 		},
@@ -135,6 +159,22 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 	}
 	m.sessions[sess.ws.File.StableID] = sess
 	m.active = sess.ws.File.StableID
+	if m.shared != nil {
+		m.shared.Label = func(ed *editor.Editor) string {
+			for _, s := range m.sessions {
+				if s.rt != nil && s.rt.ed == ed {
+					return s.ws.File.Label
+				}
+			}
+			return ""
+		}
+		m.shared.Focus(sess.rt.ed)
+	}
+	m.materializedCap = sess.rt.daemonMaterializedCap
+	if m.materializedCap <= 0 {
+		m.materializedCap = config.DefaultMaterializedWorkspaces
+	}
+	m.lastFocus[m.active] = m.now()
 	// Bind the daemon's shared plugin runtime/host to the eagerly materialized foreground
 	// workspace before anything can start it (runDaemonHost's explicit call is idempotent).
 	m.activateForegroundPlugins()
@@ -309,6 +349,12 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 	sess := m.sessions[m.active]
 	_ = sess
 	targetID := m.pendingID
+	if m.evicting[targetID] {
+		m.pendingID = ""
+		m.mu.Unlock()
+		m.notify(fmt.Errorf("workspace: workspace %q is being evicted from memory; try again", targetID))
+		return
+	}
 	target := m.sessions[targetID]
 	if target == nil {
 		m.mu.Unlock()
@@ -319,10 +365,16 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 		delete(m.launches, targetID)
 	}
 	m.active = targetID
+	m.lastFocus[targetID] = m.now()
 	host := m.host
 	m.mu.Unlock()
 	target.rt.model.SetWorkspaceLabel(target.ws.File.Label)
 	_, _ = m.reg.Touch(targetID, m.now())
+	if m.shared != nil {
+		// The entering workspace is the focused one: it takes ownership of every buffer
+		// it mirrors, and its owned buffers' mirrors pick up saved-state changes.
+		m.shared.Focus(target.rt.ed)
+	}
 	// The daemon's one plugin runtime is rebound to the entering workspace before its
 	// model is shown: OS/gate/env and the gvim.state namespace follow the active
 	// workspace, and the editor-wide registrations are installed into its model.
@@ -333,6 +385,10 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 			host.Queue(target.rt.model.StartWorkspaceLaunch(launch))
 		}
 	}
+	// The switch may have pushed the daemon over daemon.materialized_workspaces: evict the
+	// least-recently-focused non-active workspace. The capture+teardown runs as a command,
+	// never on this UI goroutine.
+	m.scheduleEviction()
 }
 
 // activatePlugins rebinds the daemon's shared plugin runtime and host to sess: its
@@ -376,6 +432,10 @@ func (m *workspaceManager) beginSelect(id string) (func() error, error) {
 	if id == m.active {
 		m.mu.Unlock()
 		return nil, nil
+	}
+	if m.evicting[id] {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("workspace: workspace %q is being evicted from memory; try again", id)
 	}
 	_, warm := m.sessions[id]
 	cur := m.sessions[m.active]
@@ -576,6 +636,12 @@ func (m *workspaceManager) Close(id string) (tui.WorkspaceCmd, error) {
 // error is reported and the synchronous save in rt.exit is still attempted; the unsaved
 // text is never silently dropped without a report.
 func (m *workspaceManager) closeWorkspace(id string) error {
+	m.mu.Lock()
+	if m.evicting[id] {
+		m.mu.Unlock()
+		return fmt.Errorf("workspace: workspace %q is being evicted from memory; try again", id)
+	}
+	m.mu.Unlock()
 	var wait func() error
 	var job *saveJob
 	var prepareErr error
@@ -668,7 +734,13 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 		}
 	}
 	if sess != nil {
+		if m.shared != nil {
+			// Closing the workspace must not lose a buffer another workspace mirrors:
+			// ownership moves to a mirror before the runtime is torn down.
+			m.runOnUI(func() { m.shared.DropEditor(sess.rt.ed) })
+		}
 		sess.rt.exit()
+		m.releasePluginWorkspace(sess)
 	}
 	m.mu.Lock()
 	delete(m.sessions, id)
@@ -901,6 +973,10 @@ func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
 		}
 	}
 	if ownerID != "" && ownerID != active {
+		// A daemon open-file request always switches to the workspace that already owns
+		// the path (the established #19a routing and its parity floor). Cross-workspace
+		// sharing starts when a file is opened INSIDE another workspace (OpenFile from the
+		// finder/explorer); see editor.SharedBuffers and the architecture bullet.
 		if _, err := m.selectSync(ownerID); err != nil {
 			// The owner was detected but could not be materialized. Report and keep
 			// the current workspace: opening the path in another workspace would

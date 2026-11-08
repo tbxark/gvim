@@ -124,6 +124,9 @@ type State struct {
 	Remote    *RemoteSpec
 	Connected bool
 	Reason    string // why it is disconnected, "" when connected
+	// Detail describes the established connection (SSH: verified host key algorithm and
+	// known_hosts policy); "" when not connected or not a remote backend.
+	Detail string
 	// Connecting says a reconnect is dialing right now; the status row shows it.
 	Connecting bool
 }
@@ -205,8 +208,20 @@ func (a *Authority) State() State {
 		if c, ok := a.remote.(interface{ Connecting() bool }); ok {
 			st.Connecting = c.Connecting()
 		}
+		if d, ok := a.remote.(interface{ ConnectionDetail() string }); ok {
+			st.Detail = d.ConnectionDetail()
+		}
 	}
 	return st
+}
+
+// TakeNotices drains user-facing transport notices (a first-seen host key recorded by
+// accept-new, an accepted password stored in the keyring). A local slot has none.
+func (a *Authority) TakeNotices() []string {
+	if n, ok := a.remote.(interface{ TakeNotices() []string }); ok {
+		return n.TakeNotices()
+	}
+	return nil
 }
 
 // Connected reports whether the backend is usable.

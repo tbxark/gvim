@@ -67,6 +67,14 @@ type Panel struct {
 	// saved width of a restored transcript); a content-width change reflows the
 	// rows to the new width (transcript.go reflowPrior).
 	priorWidth int
+	// savedCursor/savedAlt/savedVisibleRows describe a restored styled snapshot:
+	// the saved cursor, alternate-screen flag and how many trailing prior rows were
+	// the visible screen. They let a restored-but-not-revived tab re-save the full
+	// snapshot and let the read-only view paint the saved cursor. A reflow clears
+	// them (the row mapping no longer holds).
+	savedCursor      terminal.SavedCursor
+	savedAlt         bool
+	savedVisibleRows int
 	// wasLive is a restored tab's saved liveness: it was running when the session
 	// was captured and may be revived on the user's first dive into the tab. It is
 	// cleared when the revive is attempted, so a failed start is not retried by

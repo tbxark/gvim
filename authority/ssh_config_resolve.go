@@ -218,10 +218,16 @@ func (b *sshBackend) authMethodsResolved(ctx context.Context, res sshResolved, a
 	hasChallenge := b.keyboardChallenge != nil
 	b.mu.Unlock()
 	if stored != "" {
-		methods = append(methods, ssh.Password(stored))
+		methods = append(methods, b.passwordAuth("ui", func() (string, error) { return stored, nil }))
+	} else if b.opts.PasswordStore != nil {
+		// The OS keyring is tried before the UI prompt: a stored password is not a new
+		// secret and does not need the interactive callback.
+		if pw, ok, err := b.opts.PasswordStore.Lookup(res.host, res.user); err == nil && ok && pw != "" {
+			methods = append(methods, b.passwordAuth("keyring", func() (string, error) { return pw, nil }))
+		}
 	}
 	if b.opts.Password != nil {
-		methods = append(methods, ssh.PasswordCallback(func() (string, error) { return b.opts.Password(ctx) }))
+		methods = append(methods, b.passwordAuth("prompt", func() (string, error) { return b.opts.Password(ctx) }))
 	}
 	if b.opts.KeyboardInteractive != nil || hasChallenge {
 		methods = append(methods, ssh.KeyboardInteractive(b.keyboardAuth(ctx)))
@@ -230,4 +236,18 @@ func (b *sshBackend) authMethodsResolved(ctx context.Context, res sshResolved, a
 		return nil, errors.New("ssh: no authentication method (no agent, no usable identity file, no password callback, no keyboard-interactive callback)")
 	}
 	return methods, nil
+}
+
+// passwordAuth wraps a password credential so the backend knows one was used (and which
+// value/source) for the consent-gated keyring store after a successful handshake.
+func (b *sshBackend) passwordAuth(source string, fn func() (string, error)) ssh.AuthMethod {
+	return ssh.PasswordCallback(func() (string, error) {
+		pw, err := fn()
+		if err == nil && pw != "" {
+			b.mu.Lock()
+			b.usedPassword, b.usedPasswordSource = pw, source
+			b.mu.Unlock()
+		}
+		return pw, err
+	})
 }

@@ -170,7 +170,24 @@ buffer id) and fires exactly one transition:
   addition to its documented fields; the buffer pair carries it on that forced switch
   announcement (the ordinary buffer diff announces only the buffer fields).
 
-Window and buffer ids are per-workspace in this slice (a daemon workspace model has its own
-editor and split ids), so a plugin caching a numeric id across a workspace switch must
-re-read it from the announcement rather than assume it names the same thing. Widget focus is
-a separate widget_event and is not part of this announcement.
+Window and buffer ids are editor-global when local daemon workspaces share one plugin
+runtime: the host packs a workspace sequence into the high bits, so a workspace that has
+buffer 1 and split window 1 and another workspace with the same local numbers still expose
+different ids, and an id from another (possibly closed/evicted) workspace is refused with a
+CodeClosed error rather than resolving to the active workspace's colliding local id. Direct
+launches have no shared namespace and keep their local ids. Widget focus is a separate
+widget_event and is not part of this announcement.
+
+
+## Editor-global ids
+
+In a daemon whose local workspaces share one plugin runtime, every buffer and window id in
+the plugin API and in event payloads is editor-global: the host packs the workspace's
+sequence in the high bits and the workspace-local id in the low 40 bits. Two workspaces may
+use the same local split/buffer numbers; their global ids differ. Passing an id that belongs
+to another workspace (or to a workspace that was closed or evicted) returns CodeClosed
+instead of silently acting on the active workspace's local id with the same number, and a
+buffer that closed stops resolving even if the local editor later reuses the number. The
+same applies to a mount's optional buf option, window labels/window state and the group,
+decorations, line-target and language-server calls. Direct launches never share a runtime:
+their ids stay the workspace-local numbers they always were.

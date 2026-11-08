@@ -16,7 +16,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/tbxark/gvim/plugin/hostos"
 )
@@ -55,6 +54,18 @@ type SSHOptions struct {
 	KeyboardInteractive func(ctx context.Context, name, instruction string, questions []string, echos []bool) ([]string, error)
 	// KnownHostsPath is the known_hosts file; empty uses ~/.ssh/known_hosts.
 	KnownHostsPath string
+	// KnownHostsPolicy is "strict" (default), "accept-new" (record a first-seen host key
+	// with a notice) or "off" (refused at connect: host keys are always verified).
+	KnownHostsPolicy string
+	// HostKeyAlgorithms is the ordered server host-key algorithm preference; empty uses
+	// DefaultHostKeyAlgorithms. An unknown name fails the dial clearly.
+	HostKeyAlgorithms []string
+	// PasswordStore, when set, is tried for a host password before the UI prompt; with
+	// StorePassword an accepted password is stored after a notice (user consent).
+	PasswordStore PasswordStore
+	// StorePassword lets an accepted password be stored in PasswordStore. Default false:
+	// nothing is stored without the config knob.
+	StorePassword bool
 	// HostKeyCallback overrides the known_hosts check (tests).
 	HostKeyCallback ssh.HostKeyCallback
 	// ConfigPath is the OpenSSH user config to apply. Empty disables config reading
@@ -128,6 +139,17 @@ type sshBackend struct {
 	agentConn net.Conn
 	// forwardAgent is true when this connection forwards the local agent.
 	forwardAgent bool
+	// notices are user-facing transport notices (accept-new host key recorded, password
+	// stored) collected for the app to show once it has a UI; TakeNotices drains them.
+	notices []string
+	// hostKeyAlg is the verified host key's type from the last handshake, and detail is
+	// the connection description including it.
+	hostKeyAlg string
+	detail     string
+	// usedPassword is the password credential the last handshake actually used, and its
+	// source ("ui", "prompt" or "keyring") for the consent-gated store.
+	usedPassword       string
+	usedPasswordSource string
 }
 
 // ConnectSSH dials the remote and mounts an authority slot over it.
@@ -228,10 +250,15 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	algorithms, err := ParseHostKeyAlgorithms(b.opts.HostKeyAlgorithms)
+	if err != nil {
+		return nil, err
+	}
 	hostKey, err := b.hostKeyCallback()
 	if err != nil {
 		return nil, err
 	}
+	hostKey = b.captureHostKey(hostKey)
 	ag, agentConn, err := b.openAgent(res)
 	if err != nil {
 		return nil, err
@@ -247,13 +274,13 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 		return nil, err
 	}
 	targetAddr := net.JoinHostPort(res.host, strconv.Itoa(res.port))
-	targetCfg := &ssh.ClientConfig{User: res.user, Auth: auth, HostKeyCallback: hostKey, Timeout: timeout}
+	targetCfg := &ssh.ClientConfig{User: res.user, Auth: auth, HostKeyCallback: hostKey, HostKeyAlgorithms: algorithms, Timeout: timeout}
 
 	var conn net.Conn
 	var jumpClient *ssh.Client
 	if res.jump != nil {
 		jumpAddr := net.JoinHostPort(res.jump.host, strconv.Itoa(res.jump.port))
-		jc, err := dialSSHConn(ctx, jumpAddr, &ssh.ClientConfig{User: res.jump.user, Auth: auth, HostKeyCallback: hostKey, Timeout: timeout}, timeout, b.spec.Display())
+		jc, err := dialSSHConn(ctx, jumpAddr, &ssh.ClientConfig{User: res.jump.user, Auth: auth, HostKeyCallback: hostKey, HostKeyAlgorithms: algorithms, Timeout: timeout}, timeout, b.spec.Display())
 		if err != nil {
 			return nil, fmt.Errorf("ssh %s: jump %s: %w", b.spec.Display(), jumpAddr, err)
 		}
@@ -279,6 +306,7 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 			_ = jumpClient.Close()
 		}
 	}
+	b.clearUsedPassword()
 	c, chans, reqs, err := ssh.NewClientConn(conn, targetAddr, targetCfg)
 	if err != nil {
 		closeAll()
@@ -306,13 +334,20 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 			return nil, fmt.Errorf("ssh %s: ForwardAgent: %w", b.spec.Display(), ferr)
 		}
 	}
+	policy, _ := ParseKnownHostsPolicy(b.opts.KnownHostsPolicy)
 	b.mu.Lock()
 	b.forwardAgent = res.forwardAgent
 	if b.agentConn != nil {
 		_ = b.agentConn.Close()
 	}
 	b.agentConn = agentConn
+	alg := b.hostKeyAlg
+	if alg == "" {
+		alg = "unknown"
+	}
+	b.detail = fmt.Sprintf("host key %s · known_hosts %s · algorithms %s", alg, policy, strings.Join(algorithms, ", "))
 	b.mu.Unlock()
+	b.storeAcceptedPassword(res)
 	success = true
 	return client, nil
 }
@@ -430,11 +465,15 @@ func (b *sshBackend) ping(client *ssh.Client) error {
 	}
 }
 
-// hostKeyCallback resolves the host-key check: injected, known_hosts, or a clear error
-// saying how to make the host known.
+// hostKeyCallback resolves the host-key check: injected, or known_hosts under the
+// configured policy (strict default; accept-new records a first-seen key; off refused).
 func (b *sshBackend) hostKeyCallback() (ssh.HostKeyCallback, error) {
 	if b.opts.HostKeyCallback != nil {
 		return b.opts.HostKeyCallback, nil
+	}
+	policy, err := ParseKnownHostsPolicy(b.opts.KnownHostsPolicy)
+	if err != nil {
+		return nil, err
 	}
 	path := b.opts.KnownHostsPath
 	if path == "" {
@@ -444,16 +483,71 @@ func (b *sshBackend) hostKeyCallback() (ssh.HostKeyCallback, error) {
 		}
 		path = filepath.Join(home, ".ssh", "known_hosts")
 	}
-	cb, err := knownhosts.New(path)
-	if err != nil {
-		return nil, fmt.Errorf("ssh: read %s: %w (add the host key with ssh(1), or inject a test host-key callback)", path, err)
-	}
+	return newKnownHostsCallback(path, policy, b.addNotice)
+}
+
+// captureHostKey records the verified host key's type: the transport does not expose the
+// negotiated host-key algorithm directly, so the key the server presented (as verified by
+// the callback) is the reported algorithm (see docs/authority.md for the residual).
+func (b *sshBackend) captureHostKey(cb ssh.HostKeyCallback) ssh.HostKeyCallback {
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		if err := cb(hostname, remote, key); err != nil {
-			return fmt.Errorf("ssh: host key of %s rejected by %s: %w (add it with ssh-keyscan)", hostname, path, err)
+			return err
 		}
+		b.mu.Lock()
+		b.hostKeyAlg = key.Type()
+		b.mu.Unlock()
 		return nil
-	}, nil
+	}
+}
+
+// addNotice queues a user-facing transport notice for the app to show once it can.
+func (b *sshBackend) addNotice(msg string) {
+	b.mu.Lock()
+	b.notices = append(b.notices, msg)
+	b.mu.Unlock()
+}
+
+// TakeNotices drains the user-facing notices of the transport.
+func (b *sshBackend) TakeNotices() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := b.notices
+	b.notices = nil
+	return out
+}
+
+// ConnectionDetail describes the established connection, including the verified host key
+// algorithm and the known_hosts policy.
+func (b *sshBackend) ConnectionDetail() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.detail
+}
+
+func (b *sshBackend) clearUsedPassword() {
+	b.mu.Lock()
+	b.usedPassword, b.usedPasswordSource = "", ""
+	b.mu.Unlock()
+}
+
+// storeAcceptedPassword stores a password the server accepted when the user config
+// opted in, and queues an honest notice (never when the store is unavailable).
+func (b *sshBackend) storeAcceptedPassword(res sshResolved) {
+	if !b.opts.StorePassword || b.opts.PasswordStore == nil {
+		return
+	}
+	b.mu.Lock()
+	pw, source := b.usedPassword, b.usedPasswordSource
+	b.mu.Unlock()
+	if pw == "" || source == "keyring" {
+		return
+	}
+	if err := b.opts.PasswordStore.Store(res.host, res.user, pw); err != nil {
+		b.addNotice(fmt.Sprintf("SSH: the password for %s was accepted but not stored in the OS keyring: %v", res.host, err))
+		return
+	}
+	b.addNotice(fmt.Sprintf("SSH: stored the accepted password for %s@%s in the OS keyring (ssh.keyring is on)", res.user, res.host))
 }
 
 // keyboardAuth returns the keyboard-interactive authentication method: stored answers

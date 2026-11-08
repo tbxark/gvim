@@ -196,7 +196,9 @@ func (h *pluginHost) mountGroupLeaf(g *mountedGroup, leaf pluginapi.BufferGroupL
 		if h.model().plug.virtual.owner == nil {
 			h.model().plug.virtual.owner = map[pluginapi.BufferID]string{}
 		}
-		h.model().plug.virtual.owner[id] = g.owner
+		if local, err := h.model().pluginResolveBuffer(id); err == nil {
+			h.model().plug.virtual.owner[local] = g.owner
+		}
 	}
 	if err := h.SetWindowBuffer(win, buf); err != nil {
 		if created {
@@ -269,8 +271,10 @@ func (h *pluginHost) SetBufferGroupPanelVisible(id pluginapi.BufferGroupID, pane
 	}
 	if !visible {
 		if p.window != 0 {
-			if err := m.closeSplitByID(uint64(p.window)); err != nil && pluginapi.CodeOf(err) != pluginapi.CodeConflict {
-				return err
+			if local, err := m.pluginResolveWindow(p.window); err == nil {
+				if err := m.closeSplitByID(local); err != nil && pluginapi.CodeOf(err) != pluginapi.CodeConflict {
+					return err
+				}
 			}
 		}
 		p.window, p.visible = 0, false
@@ -291,7 +295,9 @@ func (h *pluginHost) SetBufferGroupPanelVisible(id pluginapi.BufferGroupID, pane
 		return err
 	}
 	if err := h.SetWindowBuffer(newWin, p.buffer); err != nil {
-		_ = m.closeSplitByID(uint64(newWin))
+		if local, cerr := m.pluginResolveWindow(newWin); cerr == nil {
+			_ = m.closeSplitByID(local)
+		}
 		return err
 	}
 	p.window, p.visible = newWin, true
@@ -322,10 +328,14 @@ func (h *pluginHost) CloseBufferGroup(id pluginapi.BufferGroupID) {
 	m.plugEmit("buffer_group_closed", map[string]any{"group": uint64(id), "name": g.name})
 	for _, p := range g.panels {
 		if p.window != 0 {
-			_ = m.closeSplitByID(uint64(p.window))
+			if local, err := m.pluginResolveWindow(p.window); err == nil {
+				_ = m.closeSplitByID(local)
+			}
 		}
 		if p.created {
-			delete(m.plug.virtual.owner, p.buffer)
+			if local, err := m.pluginResolveBuffer(p.buffer); err == nil {
+				delete(m.plug.virtual.owner, local)
+			}
 			if _, ok := h.ed().Buffer(p.buffer); ok {
 				_ = h.Close(p.buffer, true)
 			}
@@ -385,10 +395,18 @@ func (h *pluginHost) CreateScrollSyncGroup(plugin string, id uint64, left, right
 	if left == 0 || right == 0 || left == right {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a scroll sync group needs two different windows")
 	}
-	if m.splitByID(uint64(left)) == nil {
+	ll, err := m.pluginResolveWindow(left)
+	if err != nil {
+		return err
+	}
+	if m.splitByID(ll) == nil {
 		return closedWindow(left)
 	}
-	if m.splitByID(uint64(right)) == nil {
+	rl, err := m.pluginResolveWindow(right)
+	if err != nil {
+		return err
+	}
+	if m.splitByID(rl) == nil {
 		return closedWindow(right)
 	}
 	ps := &m.plug.groups
@@ -456,7 +474,11 @@ func (m *Model) syncScrollGroups() {
 
 // leafTopLine is the first line window w paints.
 func (m *Model) leafTopLine(w pluginapi.WinID) int {
-	n := m.splitByID(uint64(w))
+	local, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return 0
+	}
+	n := m.splitByID(local)
 	if n == nil {
 		return 0
 	}
@@ -469,7 +491,11 @@ func (m *Model) leafTopLine(w pluginapi.WinID) int {
 
 // setLeafTopLine scrolls window w to line top.
 func (m *Model) setLeafTopLine(w pluginapi.WinID, top int) {
-	n := m.splitByID(uint64(w))
+	local, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return
+	}
+	n := m.splitByID(local)
 	if n == nil {
 		return
 	}
@@ -541,7 +567,11 @@ func (m *Model) applyGroupFixedHeights() {
 	for _, g := range m.plug.groups.byID {
 		for _, p := range g.panels {
 			if p.fixedHeight > 0 && p.window != 0 {
-				if n := m.splitByID(uint64(p.window)); n != nil {
+				local, err := m.pluginResolveWindow(p.window)
+				if err != nil {
+					continue
+				}
+				if n := m.splitByID(local); n != nil {
 					fixed = append(fixed, fixedPanel{leaf: n, height: p.fixedHeight})
 				}
 			}

@@ -186,3 +186,193 @@ func TestRestoredLiveTabKeepsLiveFlagOnResave(t *testing.T) {
 		t.Fatalf("a dormant live tab was re-saved as dead: %+v", st)
 	}
 }
+
+// remainderRecord builds a saved state with a styled history row, a styled
+// visible row, a visible bar cursor and no alt screen.
+func remainderRecord() terminal.SavedState {
+	red := "#ff0000"
+	screen := &terminal.SavedScreen{
+		Cols: 6,
+		History: []terminal.SavedRow{{Cells: []terminal.SavedCell{
+			{Rune: 'h', Bold: true}, {Rune: 'i'},
+		}}},
+		Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{
+			{Rune: 'o', Fg: red}, {Rune: 'l'}, {Rune: 'd'},
+		}}},
+		Cursor: terminal.SavedCursor{Row: 0, Col: 1, Visible: true, Shape: "bar"},
+	}
+	return terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Width: 6, Rows: []string{"hi", "old"},
+		Screen: screen,
+		Tabs: []terminal.SavedTab{{
+			Name: "t", Open: true, Rows: []string{"hi", "old"}, Screen: screen, Live: true,
+		}},
+		ActiveTab: 0,
+	}
+}
+
+// TestPanelCapturesHistoryCursorAndAlt checks the live capture writes the styled
+// history window, the cursor and the alt flag.
+func TestPanelCapturesHistoryCursorAndAlt(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.styledHistory = []terminal.Line{{Cells: []terminal.Cell{{Rune: 'h', Style: terminal.Style{Bold: true}}}}}
+	cell := terminal.Cell{Rune: 'x', Style: terminal.Style{Fg: color.RGBA{R: 255, A: 255}}}
+	term.screen = terminal.NewScreen(1, 4, []terminal.Cell{cell})
+	term.screen.Cursor = terminal.Cursor{Row: 0, Col: 1, Visible: true, Shape: "underline"}
+	p := newTestPanel(t, &fakeStarter{term: term})
+	st := p.SavedState()
+	if st.Screen == nil || len(st.Screen.History) != 1 || len(st.Screen.Rows) != 1 {
+		t.Fatalf("captured history/rows = %+v", st.Screen)
+	}
+	if st.Screen.Cursor != (terminal.SavedCursor{Row: 0, Col: 1, Visible: true, Shape: "underline"}) {
+		t.Fatalf("captured cursor = %+v", st.Screen.Cursor)
+	}
+	// An alt screen has no history window and records the flag.
+	term.screen.Alt = true
+	st = p.SavedState()
+	if st.Screen == nil || !st.Screen.Alt || len(st.Screen.History) != 0 {
+		t.Fatalf("alt capture = %+v", st.Screen)
+	}
+}
+
+// TestTabsRestoreHistoryAndCursor checks the styled history window and the saved
+// cursor are applied to the restored transcript, painted in the read-only view,
+// and re-saved intact.
+func TestTabsRestoreHistoryAndCursor(t *testing.T) {
+	t.Parallel()
+	var tabs Tabs
+	tabs.SetHost(Host{
+		RootDir:     func() string { return "/ws" },
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return 80, 24 },
+		Focus:       func() {},
+	})
+	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	tabs.Restore(remainderRecord())
+	p := tabs.tabs[0]
+	if len(p.prior) != 2 {
+		t.Fatalf("prior = %d", len(p.prior))
+	}
+	if !p.prior[0].Cells[0].Style.Bold {
+		t.Fatalf("history row lost its style: %+v", p.prior[0].Cells)
+	}
+	if p.prior[1].Cells[0].Style.Fg == nil {
+		t.Fatalf("visible row lost its style: %+v", p.prior[1].Cells)
+	}
+	if p.savedVisibleRows != 1 || p.savedCursor != (terminal.SavedCursor{Row: 0, Col: 1, Visible: true, Shape: "bar"}) {
+		t.Fatalf("saved metadata = %d %+v", p.savedVisibleRows, p.savedCursor)
+	}
+	// The read-only view paints the history styles and the saved cursor block.
+	l := frame.Layout{DockOn: true, W: 80, H: 6, DockY: 0, DockH: 6}
+	g := grid.New(80, 6)
+	p.Draw(g, l, style.Styles{})
+	if !g.At(0, 1).Style.Bold {
+		t.Fatalf("history row not painted styled: %+v", g.At(0, 1))
+	}
+	if !g.At(1, 2).Style.Reverse {
+		t.Fatalf("saved cursor not painted at (1,2): %+v", g.At(1, 2))
+	}
+	// A re-save keeps the full snapshot.
+	st := tabs.SavedState()
+	if st.Screen == nil || len(st.Screen.History) != 1 || len(st.Screen.Rows) != 1 || st.Screen.Cursor != p.savedCursor {
+		t.Fatalf("re-saved snapshot = %+v", st.Screen)
+	}
+}
+
+// TestRestoreIgnoresCorruptRemainder checks a mismatched history text, an invalid
+// cursor or an impossible history length ignores the whole snapshot, leaving the
+// old plain transcript behavior.
+func TestRestoreIgnoresCorruptRemainder(t *testing.T) {
+	t.Parallel()
+	corrupt := func(mutate func(*terminal.SavedScreen)) terminal.SavedState {
+		st := remainderRecord()
+		mutate(st.Screen)
+		return st
+	}
+	cases := map[string]terminal.SavedState{
+		"history text mismatch": corrupt(func(s *terminal.SavedScreen) {
+			s.History[0].Cells = []terminal.SavedCell{{Rune: 'z'}}
+		}),
+		"cursor out of range": corrupt(func(s *terminal.SavedScreen) {
+			s.Cursor = terminal.SavedCursor{Row: 9, Col: 0, Visible: true}
+		}),
+		"unknown cursor shape": corrupt(func(s *terminal.SavedScreen) {
+			s.Cursor.Shape = "star"
+		}),
+		"history too long": corrupt(func(s *terminal.SavedScreen) {
+			s.History = make([]terminal.SavedRow, terminal.MaxSavedHistoryRows+1)
+		}),
+	}
+	for name, state := range cases {
+		var tabs Tabs
+		tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
+		tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+		tabs.Restore(state)
+		p := tabs.tabs[0]
+		if p.savedVisibleRows != 0 || p.savedCursor != (terminal.SavedCursor{}) || p.savedAlt {
+			t.Fatalf("%s: corrupt snapshot metadata survived: %d %+v", name, p.savedVisibleRows, p.savedCursor)
+		}
+		if p.prior[0].Cells[0].Style.Bold || p.prior[1].Cells[0].Style.Fg != nil {
+			t.Fatalf("%s: corrupt snapshot painted styles: %+v", name, p.prior)
+		}
+	}
+}
+
+// TestRestoreAltAndReflowInvalidates checks the alt flag round-trips and that a
+// reflow drops the snapshot row metadata (the mapping no longer holds).
+func TestRestoreAltAndReflowInvalidates(t *testing.T) {
+	t.Parallel()
+	st := remainderRecord()
+	st.Screen.Alt = true
+	st.Screen.History = nil
+	st.Screen.Rows = []terminal.SavedRow{{Cells: []terminal.SavedCell{{Rune: 'o'}}}}
+	st.Width = 6
+	st.Rows = []string{"o"}
+	st.Tabs[0].Screen = st.Screen
+	st.Tabs[0].Rows = []string{"o"}
+	st.Tabs[0].Width = 6
+	var tabs Tabs
+	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
+	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	tabs.Restore(st)
+	p := tabs.tabs[0]
+	if !p.savedAlt {
+		t.Fatal("alt flag was not restored")
+	}
+	p.reflowPrior(40)
+	if p.savedVisibleRows != 0 || p.savedAlt || p.savedCursor != (terminal.SavedCursor{}) {
+		t.Fatalf("reflow kept stale snapshot metadata: %+v", p.savedCursor)
+	}
+}
+
+// TestRevivedTabStopsPaintingTheSavedCursor checks the saved cursor belongs to the
+// read-only restored view: once the shell is revived, the live cursor is the only
+// cursor (the old block is not painted anymore).
+func TestRevivedTabStopsPaintingTheSavedCursor(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	starter.term.screen = newScreen(20, "NEW")
+	tabs := liveTestTabs(t, Effects{RestoreLive: true}, starter)
+	tabs.Restore(remainderRecord())
+	tabs.SetActive(0)
+	cmd := tabs.Sync()
+	if cmd == nil {
+		t.Fatal("the dive did not start")
+	}
+	finishStart(t, tabs, cmd())
+	p := tabs.Active()
+	applyScroll(t, p, p.ToggleScrollback())
+	p.scroll.top = 0
+	l := frame.Layout{DockOn: true, W: 80, H: 6, DockY: 0, DockH: 6}
+	g := grid.New(80, 6)
+	p.Draw(g, l, style.Styles{})
+	if g.At(1, 2).Style.Reverse {
+		t.Fatal("the saved cursor is still painted after the revive")
+	}
+	// The styled history row of the prior transcript is still painted after the
+	// revive (only the cursor belongs to the read-only view).
+	if !g.At(0, 1).Style.Bold {
+		t.Fatalf("the revived tab lost its styled history row: %+v", g.At(0, 1))
+	}
+}

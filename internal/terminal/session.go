@@ -145,11 +145,22 @@ func (s *Session) Screen() Screen {
 	defer s.mu.Unlock()
 	rows, cols := s.emu.Height(), s.emu.Width()
 	pos := s.emu.CursorPosition()
+	style, _ := s.emu.CursorStyle()
+	shape := "block"
+	switch style {
+	case vt.CursorUnderline:
+		shape = "underline"
+	case vt.CursorBar:
+		shape = "bar"
+	}
 	sc := Screen{
-		Rows:   rows,
-		Cols:   cols,
-		Cursor: Cursor{Row: pos.Y, Col: pos.X, Visible: !s.emu.CursorHidden()},
-		cells:  make([]Cell, rows*cols),
+		Rows: rows,
+		Cols: cols,
+		Cursor: Cursor{
+			Row: pos.Y, Col: pos.X, Visible: !s.emu.CursorHidden(), Shape: shape,
+		},
+		Alt:   s.altScreen,
+		cells: make([]Cell, rows*cols),
 	}
 	for r := range rows {
 		for c := range cols {

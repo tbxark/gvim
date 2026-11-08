@@ -55,6 +55,11 @@ const (
 	decorColEnd = 1 << 30
 )
 
+// localBuffer resolves a plugin API buffer id to the active workspace's local id.
+func (h *pluginHost) localBuffer(id pluginapi.BufferID) (pluginapi.BufferID, error) {
+	return h.model().pluginResolveBuffer(id)
+}
+
 // ---- pluginapi.DecorHost
 
 // decorTarget checks that buffer id is open and, when expect is set, that its text is the
@@ -75,48 +80,64 @@ func (h *pluginHost) decorTarget(id pluginapi.BufferID, expect *pluginapi.Versio
 
 // DecorSet replaces everything the namespace has on the buffer.
 func (h *pluginHost) DecorSet(plugin, ns string, id pluginapi.BufferID, items []pluginapi.Decoration, expect *pluginapi.Version) error {
+	local, err := h.localBuffer(id)
+	if err != nil {
+		return err
+	}
 	info, err := h.decorTarget(id, expect)
 	if err != nil {
 		return err
 	}
 	conv := make([]decorations.Item, len(items))
 	for i, it := range items {
-		if conv[i], err = decorItem(h, id, info, it); err != nil {
+		if conv[i], err = decorItem(h, local, info, it); err != nil {
 			return pluginapi.Errf(pluginapi.CodeInvalid, "item %d: %v", i+1, err)
 		}
 	}
-	err = h.model().plug.decor.Set(uint64(id), plugin, ns, conv)
+	err = h.model().plug.decor.Set(uint64(local), plugin, ns, conv)
 	h.decorSweep()
 	return decorErr(err)
 }
 
 // DecorAdd adds one item to the namespace and returns its id.
 func (h *pluginHost) DecorAdd(plugin, ns string, id pluginapi.BufferID, item pluginapi.Decoration, expect *pluginapi.Version) (int, error) {
+	local, err := h.localBuffer(id)
+	if err != nil {
+		return 0, err
+	}
 	info, err := h.decorTarget(id, expect)
 	if err != nil {
 		return 0, err
 	}
-	it, err := decorItem(h, id, info, item)
+	it, err := decorItem(h, local, info, item)
 	if err != nil {
 		return 0, pluginapi.Errf(pluginapi.CodeInvalid, "%v", err)
 	}
-	n, err := h.model().plug.decor.Add(uint64(id), plugin, ns, it)
+	n, err := h.model().plug.decor.Add(uint64(local), plugin, ns, it)
 	h.decorSweep()
 	return n, decorErr(err)
 }
 
 // DecorRemove removes one item.
 func (h *pluginHost) DecorRemove(plugin, ns string, id pluginapi.BufferID, item int) {
+	local, err := h.localBuffer(id)
+	if err != nil {
+		return
+	}
 	if st := h.model().plug.decor; st != nil {
-		st.Remove(uint64(id), plugin, ns, item)
+		st.Remove(uint64(local), plugin, ns, item)
 		h.decorSweep()
 	}
 }
 
 // DecorClearRange removes the namespace's items that intersect the line range.
 func (h *pluginHost) DecorClearRange(plugin, ns string, id pluginapi.BufferID, fromLine, toLine int) {
+	local, err := h.localBuffer(id)
+	if err != nil {
+		return
+	}
 	if st := h.model().plug.decor; st != nil {
-		st.ClearRange(uint64(id), plugin, ns, fromLine, toLine)
+		st.ClearRange(uint64(local), plugin, ns, fromLine, toLine)
 		h.decorSweep()
 	}
 }
@@ -127,8 +148,15 @@ func (h *pluginHost) DecorRefreshLines(pluginapi.BufferID) {}
 // DecorClear removes everything the namespace has on the buffer; buffer 0 means every
 // buffer.
 func (h *pluginHost) DecorClear(plugin, ns string, id pluginapi.BufferID) {
+	local := pluginapi.BufferID(0)
+	if id != 0 {
+		var err error
+		if local, err = h.localBuffer(id); err != nil {
+			return
+		}
+	}
 	if st := h.model().plug.decor; st != nil {
-		st.Clear(uint64(id), plugin, ns)
+		st.Clear(uint64(local), plugin, ns)
 		h.decorSweep()
 	}
 }

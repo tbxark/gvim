@@ -246,21 +246,32 @@ background tabs' exited markers current.
   dive revival off, making every restored tab read-only. In daemon mode the tab
   set is scoped per workspace (see Terminal tabs in daemon workspaces below).
 - **Screen snapshot.** Next to the text rows the record carries an optional
-  `screen` object: a bounded, **styled** snapshot of the visible screen (the
-  screen width, rows of cells with the rune, foreground/background as `#rrggbb`
-  and bold/underline/reverse). It is additive and omitted when there is nothing to
-  keep — the format stays version 1 and an old record restores the plain text
-  transcript exactly as before. Bounds: at most 200 rows and 512 columns; trailing
-  blank cells are trimmed, control characters become spaces and invalid colours
-  are dropped when the file is loaded, so a corrupt snapshot cannot paint
-  garbage. On restore the snapshot replaces the styled tail of the saved rows only
-  when its row texts match that tail **exactly**; a mismatched or corrupt
-  snapshot is ignored whole and the plain rows stay. A revived tab therefore
-  paints the saved screen with its colours/attributes above the new shell output
-  (visible in the read-only view; the new output appends below), and a tab that
-  was restored but not revived keeps its styled prior tail if it is saved again.
-  A save after a revive captures the new live screen as the snapshot, so styles in
-  older transcript rows beyond the visible tail are text-only from that point on
+  `screen` object: a bounded, **styled** snapshot of the backing-file remainder —
+  the visible screen, a styled history window above it, the cursor and the
+  alternate-screen flag. Cells keep the rune, foreground/background as
+  `#rrggbb` and bold/underline/reverse; the cursor keeps its zero-based
+  row/column, visibility and shape (`block`/`underline`/`bar`, read from the
+  emulator's DECSCUSR state), and `alt` records that the saved visible screen was
+  the alternate screen (which has no history). It is additive and omitted when
+  there is nothing to keep — the format stays version 1 and an old record
+  restores the plain text transcript exactly as before (absent fields mean no
+  styles/cursor/history/alt). Bounds: at most 200 visible rows and 512 columns,
+  at most 200 history rows, and 512 KiB for the serialized snapshot; trailing
+  blank cells are trimmed, control characters become spaces, invalid colours are
+  dropped and the history window is trimmed oldest-first on load/capture, so a
+  corrupt or oversized snapshot cannot paint garbage or grow the record. On
+  restore the snapshot replaces the styled history segment and the styled tail of
+  the saved rows only when **every** visible and history row's text matches the
+  corresponding transcript row **exactly**; a mismatched, out-of-range or corrupt
+  snapshot (including a bad cursor/shape) is ignored whole and the plain rows
+  stay. The restored read-only view paints the saved history/visible styles and
+  the saved cursor as a reversed cell; the first dive hands the live cursor (and
+  the new shell's own screen) over, so the saved block is not painted after the
+  revive. A tab that was restored but not revived keeps the full snapshot
+  (history, cursor, alt) if it is saved again — a re-wrap invalidates that row
+  mapping and drops the metadata rather than paint a cursor on the wrong row. A
+  save after a revive captures the new live screen/history as the snapshot, so
+  styles in older transcript rows beyond that window are text-only from then on
   (bounded-fidelity residual). Tab identity, order, the active tab, the
   revive-once rule and `terminal.restore_live` are unchanged.
 - **Modes.** Fresh's explicit Live and Scrollback modes map to the dock's two
@@ -311,13 +322,19 @@ terminal record.
   with no auto-launch (the shell's pid marker is untouched).
 
 Residuals of this pairing: Fresh respawns a restored live terminal on focus and
-fills it from a persisted **backing file** (full scrollback bytes plus a screen
-snapshot); gvim persists bounded text rows plus the bounded styled visible-screen
-snapshot described above, revives on the explicit dive with a fresh PTY, and
+fills it from a persisted **backing file** (raw scrollback bytes plus a screen
+snapshot); gvim persists bounded text rows plus the bounded styled snapshot
+(visible screen, 200-row history window, cursor, alt flag) described above,
+revives on the explicit dive with a fresh PTY, and
 `terminal.restore_live = false` turns that off. Full backing-file semantics
-remain out of scope: history beyond the visible screen is text-only (no per-cell
-styles/bytes), and cursor state, alternate-screen/OSC state and hyperlinks are not
-restored. Fresh can bring live tabs back without a dive because its layout focuses
+still do not round-trip: the scrollback is a bounded styled window, not
+byte-exact (deep history beyond 200 rows is text-only), OSC sequences (title,
+cwd, clipboard, hyperlinks) are not replayed, per-cell hyperlinks are not
+representable in the snapshot (the cell encoding has no link field), the cursor
+shape is recorded but the read-only view paints it as a block (the restored shell
+does not inherit the old DECSCUSR mode), and alternate-screen content is recorded
+as a flag/marker rather than replayed (a revived shell starts on the main
+screen). Fresh can bring live tabs back without a dive because its layout focuses
 the tab; gvim's dock is not restored into an editor split, so the dive is the
 first user action on the dock. A buffer shared across workspaces and extract-tab
 are the #19b policy decisions and remain open.

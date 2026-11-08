@@ -52,10 +52,20 @@ func (h *pluginHost) Feature(name string) bool {
 }
 
 func (h *pluginHost) ed() pluginapi.BufferEditor {
-	if pe := h.model().plug.pe; pe != nil {
-		return pe
+	m := h.model()
+	if m == nil {
+		return pluginapi.Unsupported{}
 	}
-	return pluginapi.Unsupported{}
+	pe := m.plug.pe
+	if pe == nil {
+		return pluginapi.Unsupported{}
+	}
+	if h.shared != nil {
+		// The plugin API sees editor-global ids; the wrapper encodes/decodes around the
+		// active workspace's local port (plugin_global_ids.go).
+		return &globalPluginEditor{BufferEditor: pe, m: m}
+	}
+	return pe
 }
 
 // SetKeymap replaces the keymap the root resolves keys with. The app calls it when the

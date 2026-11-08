@@ -247,7 +247,7 @@ func (m *Model) pluginViewTail(before pluginSnap) tea.Cmd {
 		return nil
 	}
 	m.plugEmit("viewport_changed", map[string]any{
-		"buf": cur.buf, "top_line": cur.top, "height": cur.rows, "width": cur.cols,
+		"buf": m.gb(cur.buf), "top_line": cur.top, "height": cur.rows, "width": cur.cols,
 	})
 	return m.pumpAfter(func() {})
 }
@@ -278,7 +278,7 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 	}
 	for _, b := range before.bufs {
 		if !has(cur.bufs, b.ID) {
-			m.plugEmit("buffer_closed", map[string]any{"id": b.ID, "path": b.Path})
+			m.plugEmit("buffer_closed", map[string]any{"id": m.gb(b.ID), "path": b.Path})
 			m.plugPanelsBufferClosed(pluginapi.BufferID(b.ID))
 			m.plugViewStateDrop(b.ID)
 			m.plugLineTargetsDrop(pluginapi.BufferID(b.ID))
@@ -288,14 +288,14 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 	for _, b := range cur.bufs {
 		for _, old := range before.bufs {
 			if old.ID == b.ID && old.Path != b.Path && b.Path != "" {
-				m.plugEmit("path_changed", map[string]any{"buf": b.ID, "path": b.Path, "old_path": old.Path})
+				m.plugEmit("path_changed", map[string]any{"buf": m.gb(b.ID), "path": b.Path, "old_path": old.Path})
 				break
 			}
 		}
 	}
 	for _, b := range cur.bufs {
 		if !has(before.bufs, b.ID) && b.Path != "" {
-			m.plugEmit("after_file_open", map[string]any{"buf": b.ID, "path": b.Path})
+			m.plugEmit("after_file_open", map[string]any{"buf": m.gb(b.ID), "path": b.Path})
 		}
 	}
 	if before.active != cur.active {
@@ -304,16 +304,16 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 			prev = 0
 		}
 		if prev != 0 {
-			d := map[string]any{"buf": prev}
+			d := map[string]any{"buf": m.gb(prev)}
 			if cur.active != 0 {
-				d["next"] = cur.active
+				d["next"] = m.gb(cur.active)
 			}
 			m.plugEmit("buffer_deactivated", d)
 		}
 		if cur.active != 0 {
-			d := map[string]any{"buf": cur.active}
+			d := map[string]any{"buf": m.gb(cur.active)}
 			if prev != 0 {
-				d["previous"] = prev
+				d["previous"] = m.gb(prev)
 			}
 			m.plugEmit("buffer_activated", d)
 		}
@@ -328,10 +328,13 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 	}
 	for _, b := range cur.bufs {
 		if old, ok := infoOf(before.bufs, b.ID); ok && old.Language != b.Language {
-			m.plugEmit("language_changed", map[string]any{"buf": b.ID, "language": b.Language})
+			m.plugEmit("language_changed", map[string]any{"buf": m.gb(b.ID), "language": b.Language})
 		}
 	}
 }
+
+// gb maps a local buffer id to the global plugin id carried by event payloads.
+func (m *Model) gb(id pluginapi.BufferID) pluginapi.BufferID { return m.pluginGlobalBuffer(id) }
 
 // infoOf finds the buffer id in bufs.
 func infoOf(bufs []pluginapi.BufferInfo, id pluginapi.BufferID) (pluginapi.BufferInfo, bool) {
@@ -351,7 +354,7 @@ func (m *Model) plugDiffText(before, cur *pluginSnap) {
 	for _, b := range cur.bufs {
 		if before.want&wantModified != 0 {
 			if old, ok := infoOf(before.bufs, b.ID); ok && (old.Version != b.Version || old.Modified != b.Modified) {
-				m.plugEmit("buffer_modified", map[string]any{"buf": b.ID, "version": b.Version, "modified": b.Modified})
+				m.plugEmit("buffer_modified", map[string]any{"buf": m.gb(b.ID), "version": b.Version, "modified": b.Modified})
 			}
 		}
 		if before.want&wantChanged == 0 {
@@ -361,7 +364,7 @@ func (m *Model) plugDiffText(before, cur *pluginSnap) {
 		if len(c.Edits) == 0 && !c.Overflow {
 			continue
 		}
-		d := map[string]any{"buf": b.ID, "version": c.Version, "undo": c.Undo, "overflow": c.Overflow}
+		d := map[string]any{"buf": m.gb(b.ID), "version": c.Version, "undo": c.Undo, "overflow": c.Overflow}
 		if len(c.Edits) > maxChangedEdits {
 			d["overflow"] = true
 		} else if !c.Overflow {
@@ -379,10 +382,10 @@ func (m *Model) plugDiffCaret(before, cur *pluginSnap) {
 		return
 	}
 	if before.want&wantCursor != 0 && b.pos != c.pos {
-		m.plugEmit("cursor_moved", map[string]any{"buf": c.buf, "pos": c.api, "previous": b.api})
+		m.plugEmit("cursor_moved", map[string]any{"buf": m.gb(c.buf), "pos": c.api, "previous": b.api})
 	}
 	if before.want&wantSelection != 0 && (b.hasSel != c.hasSel || (c.hasSel && (b.anchor != c.anchor || b.head != c.head))) {
-		d := map[string]any{"buf": c.buf}
+		d := map[string]any{"buf": m.gb(c.buf)}
 		if c.hasSel {
 			d["range"] = c.sel
 		}
@@ -400,7 +403,7 @@ func (m *Model) plugSaved(results []editor.SaveResult) {
 	}
 	for _, r := range results {
 		if path, id, ok := r.Written(); ok {
-			m.plugEmit("after_file_save", map[string]any{"buf": pluginapi.BufferID(id), "path": path})
+			m.plugEmit("after_file_save", map[string]any{"buf": m.gb(pluginapi.BufferID(id)), "path": path})
 		}
 	}
 }
@@ -410,7 +413,7 @@ func (m *Model) plugSaved(results []editor.SaveResult) {
 func (m *Model) plugReverted(path string) {
 	if pe := m.plug.pe; pe != nil && m.plugWants("after_file_revert") {
 		if id := pe.FindBuffer(path); id != 0 {
-			m.plugEmit("after_file_revert", map[string]any{"buf": id, "path": path})
+			m.plugEmit("after_file_revert", map[string]any{"buf": m.gb(id), "path": path})
 		}
 	}
 }

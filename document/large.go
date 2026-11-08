@@ -279,7 +279,12 @@ func (d *Document) largeOpenStatus() string {
 	}
 	fmt.Fprintf(&sb, "Large file (%s)", formatSize(d.large.Size))
 	if d.large.RemoteWindowed {
-		sb.WriteString(" remote large file (windowed): the bytes stay on the remote host and load as you scroll; a save writes the merged file in one atomic write, up to " + formatSize(remoteLargeSaveMax))
+		save := "a save streams the merged file into one atomic write"
+		if _, ok := d.access.(StreamAccess); !ok {
+			// Only an access without the streaming surface keeps the bounded merge.
+			save = "a save writes the merged file in one atomic write, up to " + formatSize(remoteLargeSaveMax)
+		}
+		sb.WriteString(" remote large file (windowed): the bytes stay on the remote host and load as you scroll; " + save)
 	} else if d.readOnly && !d.binary {
 		sb.WriteString(" (read-only)")
 	}

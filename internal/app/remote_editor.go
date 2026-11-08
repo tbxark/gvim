@@ -182,3 +182,47 @@ func (r *remoteFileAccess) WriteFileAtomic(path string, data []byte) error {
 	defer cancel()
 	return r.slot.Files().WriteFile(ctx, p, data, hostos.WriteOptions{Atomic: true})
 }
+
+// WriteStream implements document.StreamAccess: the authority's streamed atomic write
+// (temporary remote file, bounded chunk appends, mode + rename at commit). A backend
+// without the stream surface returns ErrUnsupportedFileIO, and the save keeps the bounded
+// whole-file fallback. Every chunk/helper is bounded by the remote operation timeout.
+func (r *remoteFileAccess) WriteStream(ctx context.Context, path string) (document.WriteStream, error) {
+	p, err := r.expand(path)
+	if err != nil {
+		return nil, err
+	}
+	streamer := authority.WriteStreams(r.slot.Files())
+	if streamer == nil {
+		// The document keeps its bounded whole-file fallback for such a backend.
+		return nil, document.ErrStreamUnsupported
+	}
+	stream, err := streamer.WriteStream(ctx, p, hostos.WriteOptions{Atomic: true})
+	if err != nil {
+		return nil, err
+	}
+	return authorityWriteStream{stream: stream, timeout: r.timeout}, nil
+}
+
+// authorityWriteStream adapts the authority stream to the document's stream seam and
+// bounds every remote step like the other remote file operations.
+type authorityWriteStream struct {
+	stream  authority.WriteStream
+	timeout time.Duration
+}
+
+func (w authorityWriteStream) Write(ctx context.Context, p []byte) error {
+	op, cancel := context.WithTimeout(ctx, w.timeout)
+	defer cancel()
+	return w.stream.Write(op, p)
+}
+
+func (w authorityWriteStream) Commit(ctx context.Context) error {
+	op, cancel := context.WithTimeout(ctx, w.timeout)
+	defer cancel()
+	return w.stream.Commit(op)
+}
+
+func (w authorityWriteStream) Abort(ctx context.Context) { w.stream.Abort(ctx) }
+
+var _ document.StreamAccess = (*remoteFileAccess)(nil)

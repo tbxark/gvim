@@ -49,5 +49,8 @@ func (e *Editor) OpenLoaded(d *Document) {
 		e.addDoc(d)
 		e.switchTo(len(e.docs) - 1)
 	}
+	if e.shared != nil {
+		e.shared.Register(e, d)
+	}
 	e.setStatus(d.OpenStatus())
 }

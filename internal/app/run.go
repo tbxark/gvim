@@ -240,6 +240,10 @@ type runtime struct {
 	// (sessions/<stable-id>/plugin-state.json), or "" for a direct launch's editor-wide
 	// per-plugin state files. Observability/test seam; the plugin runtime owns the writes.
 	pluginStateFile string
+	// daemonMaterializedCap is daemon.materialized_workspaces of this session's config:
+	// the daemon's cap on warm local workspaces, read by the workspace manager. It is
+	// only meaningful for a daemon host.
+	daemonMaterializedCap int
 	// pluginWS is this LOCAL daemon workspace's plugin parts (its OS/root/env/gate, editor
 	// adapter, keymap builder and state namespace) bound to the daemon's one shared plugin
 	// runtime (#19b shared-runtime slice). Nil for a direct launch and for remote/authority
@@ -445,6 +449,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		return nil, err
 	}
 	printDiagnostics(os.Stderr, diags)
+	// The SSH policy is config-derived: strict known_hosts, the safe host-key algorithm
+	// order and no keyring use unless the user opted in (authority_app.go).
+	opts.SSHSecurity = sshSecurityFromConfig(cfg.SSH)
 	// Resolve the UI language before anything builds strings or the plugin runtime: the
 	// config locale wins, then LC_ALL/LC_MESSAGES/LANG, then English. The Settings row
 	// applies later changes live through settingsService.Apply.
@@ -473,6 +480,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	tree.SetShowIgnored(cfg.ExplorerShowIgnored)
 	// Without files the editor starts empty, and the welcome screen shows.
 	edOpts := editorOptions(cfg, len(opts.Files) == 0 && !opts.StdinLaunch())
+	// Daemon-hosted local workspaces share one cross-workspace buffer registry (#19b
+	// bounded slice). A direct launch and a remote workspace get nil, so their editors
+	// never share (remote files live on another host).
+	edOpts.Shared = sharedBuffersFor(opts)
 	interval := autoSaveInterval(opts.AutoSaveInterval, cfg)
 	edOpts.AutoSaveInterval = interval
 	edOpts.Root = root
@@ -1180,17 +1191,18 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		sessionDir = opts.SessionDir
 	}
 	rt = &runtime{
-		model:           model,
-		ed:              ed,
-		projects:        proj,
-		watcher:         watcher,
-		sessionDir:      sessionDir,
-		pluginStateFile: pluginStateFile,
-		pluginWS:        pluginWS,
-		searchDir:       opts.SessionDir,
-		stashDir:        opts.SessionDir,
-		kept:            keptFiles(failed),
-		recovery:        recoveryDirForRun(opts.SessionDir, watching, remoteRecoveryPath),
+		model:                 model,
+		ed:                    ed,
+		projects:              proj,
+		watcher:               watcher,
+		sessionDir:            sessionDir,
+		pluginStateFile:       pluginStateFile,
+		daemonMaterializedCap: cfg.Daemon.MaterializedWorkspaces,
+		pluginWS:              pluginWS,
+		searchDir:             opts.SessionDir,
+		stashDir:              opts.SessionDir,
+		kept:                  keptFiles(failed),
+		recovery:              recoveryDirForRun(opts.SessionDir, watching, remoteRecoveryPath),
 
 		recoveryWriter:   deps.Root.Recovery,
 		log:              logFile,

@@ -27,6 +27,39 @@ type PluginShared struct {
 	active *Model
 	host   *pluginHost
 	wide   pluginWide
+
+	// idMu guards the editor-global plugin id namespace (plugin_global_ids.go): every model
+	// bound into this mux gets a stable workspace sequence, so its window and buffer ids can
+	// be exposed as seq<<40|local and a stale/foreign id is rejected instead of resolving in
+	// whichever workspace is active.
+	idMu       sync.Mutex
+	workspaces map[*Model]uint64
+	nextWS     uint64
+}
+
+// workspaceSeq returns m's sequence in the shared plugin id namespace, assigning the next
+// one on first use. The zero value is reserved for direct launches (no shared mux).
+func (s *PluginShared) workspaceSeq(m *Model) uint64 {
+	s.idMu.Lock()
+	defer s.idMu.Unlock()
+	if s.workspaces == nil {
+		s.workspaces = map[*Model]uint64{}
+	}
+	if id, ok := s.workspaces[m]; ok {
+		return id
+	}
+	s.nextWS++
+	id := s.nextWS
+	s.workspaces[m] = id
+	return id
+}
+
+// ReleaseWorkspace forgets m's sequence: a workspace eviction calls this so the model's
+// window/buffer ids stop resolving even if the number is later handed to a new workspace.
+func (s *PluginShared) ReleaseWorkspace(m *Model) {
+	s.idMu.Lock()
+	defer s.idMu.Unlock()
+	delete(s.workspaces, m)
 }
 
 // pluginWide is the editor-wide registration snapshot carried across a workspace switch:
@@ -201,7 +234,9 @@ func captureEditorChrome(m *Model) []editorChromeSpec {
 	var out []editorChromeSpec
 	for _, id := range m.plug.panels.order {
 		mp := m.plug.panels.get(id)
-		if mp == nil || mp.mount.Scope != pluginapi.ScopeEditor {
+		if mp == nil || mp.mount.Scope != pluginapi.ScopeEditor || mp.mount.Buffer != 0 || mp.mount.Placement == pluginapi.PlacementBuffer {
+			// A buffer-bearing mount names a workspace-local buffer, so it cannot be carried
+			// into another workspace even when it asks for editor scope.
 			continue
 		}
 		out = append(out, editorChromeSpec{id: id, owner: mp.owner, mount: mp.mount})
@@ -244,7 +279,9 @@ func (m *Model) clearEditorChrome() {
 	ps := &m.plug.panels
 	for _, id := range append([]pluginapi.PanelID(nil), ps.order...) {
 		mp := ps.get(id)
-		if mp == nil || mp.mount.Scope != pluginapi.ScopeEditor {
+		if mp == nil || mp.mount.Scope != pluginapi.ScopeEditor || mp.mount.Buffer != 0 || mp.mount.Placement == pluginapi.PlacementBuffer {
+			// A buffer-bearing mount names a workspace-local buffer, so it cannot be carried
+			// into another workspace even when it asks for editor scope.
 			continue
 		}
 		if ps.focus == id {

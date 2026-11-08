@@ -196,6 +196,10 @@ Scope says how far the mounted chrome reaches (Fresh's chrome scope; default "wi
   buffer is focused) and is removed when the buffer closes. A buffer-scoped float panel
   behaves the same and is never painted while its buffer is not active.
 
+Buffer and window ids returned by the host (and accepted by mount buf options) are
+editor-global in a daemon whose local workspaces share one plugin runtime; an id belonging to
+another or closed workspace is refused with CodeClosed rather than resolving to a colliding
+local id. Direct launches keep local ids (see events.md, Editor-global ids).
 Mounting a buffer-scoped panel without any active buffer is a CodeInvalid error. A daemon
 without a shared runtime (a direct launch, or a remote/authority workspace) treats "editor"
 and "window" the same, because there is only one workspace model.

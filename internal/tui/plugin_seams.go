@@ -20,7 +20,12 @@ const (
 
 // SetSplitLabel names a split window so a plugin can find it again.
 func (h *pluginHost) SetSplitLabel(w pluginapi.WinID, label string) error {
-	n := h.model().splitByID(uint64(w))
+	m := h.model()
+	wl, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return err
+	}
+	n := m.splitByID(wl)
 	if n == nil {
 		return closedWindow(w)
 	}
@@ -34,7 +39,12 @@ func (h *pluginHost) SetSplitLabel(w pluginapi.WinID, label string) error {
 
 // ClearSplitLabel removes a split window's label.
 func (h *pluginHost) ClearSplitLabel(w pluginapi.WinID) error {
-	n := h.model().splitByID(uint64(w))
+	m := h.model()
+	wl, err := m.pluginResolveWindow(w)
+	if err != nil {
+		return err
+	}
+	n := m.splitByID(wl)
 	if n == nil {
 		return closedWindow(w)
 	}
@@ -46,7 +56,7 @@ func (h *pluginHost) ClearSplitLabel(w pluginapi.WinID) error {
 func (h *pluginHost) SplitByLabel(label string) (pluginapi.WinID, bool) {
 	for _, n := range h.model().windowLeaves() {
 		if n.Label == label {
-			return pluginapi.WinID(n.ID), true
+			return h.globalWindow(n.ID), true
 		}
 	}
 	return 0, false
@@ -79,10 +89,14 @@ func (m *Model) windowState(plugin string, id pluginapi.BufferID, create bool) m
 
 // GetWindowState reads one plugin window-state key.
 func (h *pluginHost) GetWindowState(plugin string, id pluginapi.BufferID, key string) (any, bool) {
+	local, err := h.model().pluginResolveBuffer(id)
+	if err != nil {
+		return nil, false
+	}
 	if _, ok := h.ed().Buffer(id); !ok {
 		return nil, false
 	}
-	keys := h.model().windowState(plugin, id, false)
+	keys := h.model().windowState(plugin, local, false)
 	if keys == nil {
 		return nil, false
 	}
@@ -92,6 +106,10 @@ func (h *pluginHost) GetWindowState(plugin string, id pluginapi.BufferID, key st
 
 // SetWindowState writes one plugin window-state key; a nil value removes it.
 func (h *pluginHost) SetWindowState(plugin string, id pluginapi.BufferID, key string, value any) error {
+	local, err := h.model().pluginResolveBuffer(id)
+	if err != nil {
+		return err
+	}
 	if _, ok := h.ed().Buffer(id); !ok {
 		return pluginapi.Errf(pluginapi.CodeClosed, "buffer %d is closed", id)
 	}
@@ -117,7 +135,7 @@ func (h *pluginHost) SetWindowState(plugin string, id pluginapi.BufferID, key st
 	default:
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a window state value is a string, number or boolean")
 	}
-	keys := h.model().windowState(plugin, id, true)
+	keys := h.model().windowState(plugin, local, true)
 	if _, exists := keys[key]; !exists && len(keys) >= maxViewStateKeys {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a plugin keeps at most %d window state keys per buffer", maxViewStateKeys)
 	}
@@ -127,12 +145,16 @@ func (h *pluginHost) SetWindowState(plugin string, id pluginapi.BufferID, key st
 
 // ClearWindowState removes one key, or every key of the plugin when key is empty.
 func (h *pluginHost) ClearWindowState(plugin string, id pluginapi.BufferID, key string) {
-	keys := h.model().windowState(plugin, id, false)
+	local, err := h.model().pluginResolveBuffer(id)
+	if err != nil {
+		return
+	}
+	keys := h.model().windowState(plugin, local, false)
 	if keys == nil {
 		return
 	}
 	if key == "" {
-		delete(h.model().plug.viewState[id], plugin)
+		delete(h.model().plug.viewState[local], plugin)
 		return
 	}
 	delete(keys, key)

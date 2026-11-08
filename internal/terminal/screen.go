@@ -13,7 +13,10 @@ type Screen struct {
 	Rows, Cols int
 	// Cursor is the cursor position when the snapshot was taken.
 	Cursor Cursor
-	cells  []Cell
+	// Alt reports whether the alternate screen was active: its history is empty
+	// and the saved screen is a full-screen program's frame.
+	Alt   bool
+	cells []Cell
 }
 
 // Cursor is a cursor position on a screen. Row and Col are zero-based.
@@ -21,6 +24,9 @@ type Cursor struct {
 	Row, Col int
 	// Visible is false while the child has hidden the cursor.
 	Visible bool
+	// Shape is the saved cursor shape: "block", "underline" or "bar" ("" is the
+	// default/unreadable shape, treated as block).
+	Shape string
 }
 
 // Cell is one screen cell.

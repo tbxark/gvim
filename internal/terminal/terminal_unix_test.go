@@ -59,19 +59,19 @@ func TestScreenCursor(t *testing.T) {
 			name:   "after printed text",
 			script: "printf 'ab'; sleep 30",
 			text:   "ab",
-			want:   Cursor{Row: 0, Col: 2, Visible: true},
+			want:   Cursor{Row: 0, Col: 2, Visible: true, Shape: "block"},
 		},
 		{
 			name:   "on the next row after a newline",
 			script: "printf 'ab\\r\\n'; sleep 30",
 			text:   "ab",
-			want:   Cursor{Row: 1, Col: 0, Visible: true},
+			want:   Cursor{Row: 1, Col: 0, Visible: true, Shape: "block"},
 		},
 		{
 			name:   "hidden by DECTCEM",
 			script: "printf 'x\\033[?25l'; sleep 30",
 			text:   "x",
-			want:   Cursor{Row: 0, Col: 1, Visible: false},
+			want:   Cursor{Row: 0, Col: 1, Visible: false, Shape: "block"},
 		},
 	}
 	for _, tt := range tests {

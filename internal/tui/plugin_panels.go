@@ -184,6 +184,13 @@ func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o plu
 	if o.Placement == "" {
 		o.Placement = pluginapi.PlacementFloat
 	}
+	if o.Buffer != 0 {
+		local, err := m.pluginResolveBuffer(o.Buffer)
+		if err != nil {
+			return err
+		}
+		o.Buffer = local
+	}
 	switch o.Placement {
 	case pluginapi.PlacementFloat:
 	case pluginapi.PlacementBuffer:

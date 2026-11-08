@@ -278,8 +278,11 @@ func TestDaemonRemoteInvalidSpecFailsSafely(t *testing.T) {
 			t.Fatal(err)
 		}
 		if f.Type == daemon.TypeNotice {
+			mergeDaemonStash(conn)
 			notice = string(f.Payload)
+			continue
 		}
+		stashDaemonOutput(conn, f)
 	}
 	if !strings.Contains(notice, "remote authority") {
 		t.Fatalf("notice = %q, want the remote authority error", notice)
