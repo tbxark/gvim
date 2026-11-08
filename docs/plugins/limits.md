@@ -92,6 +92,7 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 | a widget panel | 2000 widgets, nesting depth 8; a list 2000 items, a tree 5000 nodes, a dropdown/radio/dual list 2000 options, a text field 2000 completions and 200 editing rows; one string 4 KiB and one key 128 bytes; a title 120 bytes; a sidebar section asks for at most 100 rows |
 | plugin folds | 2000 ranges per (plugin, namespace, buffer), with one placeholder and a collapsed seed per range |
 | decorations | 20 000 per (plugin, namespace, buffer) and 50 000 per plugin; at most 256 drawn per kind and line; tier-1c items: 64 virtual rows and 64 soft breaks per line, 256 conceal spans per line, 8 text overlays per virtual line |
+| split labels and window state | split label 64 bytes; window state 256 keys per (plugin, buffer), key 128 bytes, string value 4 KiB |
 | virtual buffers | 64 per plugin, 256 in all; 64 MiB of text per plugin, 256 MiB in all |
 | queued `gvim.emit` events | 1000; payload 64 KiB |
 | `gvim.state` | 1 MiB of keys and encoded values per plugin |
@@ -127,6 +128,8 @@ allocating and raises `resulting string too large` (or the stated error) beyond 
 | `unpack`, `string.byte`, `select('#')` | at most 100 000 / 64 K results |
 | buffer reads | 200 000 lines and 16 MiB per call |
 | `b:edit` | 50 000 edits and 8 MiB inserted per call |
+| `gvim.diff.compare_buffers` | 1 000 000 lines and 16 MiB per side; a binary buffer is `invalid`, a large-file mode buffer or one over the caps is `too_large` |
+| `gvim.diff.replace_range` | one edit per call (the `b:edit` edit and inserted-byte caps apply); a read-only, binary, out-of-range or stale-version call returns `false` and changes nothing |
 | `fs.read` | 16 MiB (option `max`); `fs.list` 100 000 entries; `fs.walk` 100 000 entries |
 | `proc` | argv 1024 entries and 1 MiB, env 256 entries, output 8 MiB per stream, stdin queue 8 MiB |
 | `s .. s` (concatenation) | **cannot be capped** (it is a VM instruction); the heap guard is the net |

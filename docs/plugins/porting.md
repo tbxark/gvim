@@ -24,6 +24,8 @@ a rewrite in idiomatic Lua. The bundled plugins are examples of the technique (s
 |---|---|
 | `getActiveBufferId`, `getBufferInfo`, `listBuffers`, `findBufferByPath` | `gvim.buf.current()`, `b:info()`, `gvim.buf.list()`, `gvim.buf.find(path)` |
 | `getBufferText(id, start, end)`, `getBufferLength`, `getLineStartPosition(n)` | `b:text(range)`, `b:byte_length()`, `b:offset_of({line = n, col = 0})` |
+| `compareBuffers(left, right)` | `gvim.diff.compare_buffers(left, right)`: same CompareResult fields in snake_case (`left_lines`, `left_len`, `left_version` = version token, `eol_only` always false) |
+| `replaceRange(buf, start, end, text, expectedVersion)` | `gvim.diff.replace_range(buf, start, end, text, expected_version?)`: one edit and one undo step; `false` for the read-only/binary/out-of-range/stale refusals, exactly as Fresh |
 | `getCursorPosition`, `getPrimaryCursor`, `getAllCursors`, `setBufferCursor` | `b:offset_of(b:cursor())`, `b:cursors()`, `b:set_cursor(pos)` |
 | `insertText`, `deleteRange`, `replaceRange`, `insertAtCursor` | `b:insert`, `b:delete`, `b:replace`; typing semantics: `gvim.command.run("insert_char", {text = ...})` |
 | `executeAction`, `executeActions` | `gvim.command.run`, `gvim.command.run_all` |
@@ -57,9 +59,12 @@ Widgets: Fresh's declarative widget API has a read-mostly v1 here (see
 controls.
 
 Not provided at all (and not stubbed): the editor-wide i18n (plugin texts are translated, see [api-core.md](api-core.md#gvimi18n)), project-local plugins, a trust store,
-painted conceal/virtual lines/plugin folds (the tier-1c store and Lua names landed; painting is the
-remaining host increment, see the live_diff residual below), a terminal API, Fresh's window and
-authority runtimes, the package manager, the HTTP client API and `render_line`.
+synthetic buffer-group tabs and per-panel views of one buffer, a terminal API, Fresh's window and
+authority runtimes, the package manager, the HTTP client API and `render_line`. The tier-1c
+decoration surface is provided and painted (virtual lines, conceal, soft breaks, cursor-line
+overlay, ranged scrollbar marks and plugin folds), gated by `gvim.has("decor_virtual_paint")`;
+the 1c-C seams are provided too (split labels, per-plugin window state, open/focus/close split
+wrappers and the path/focus/window/group events).
 
 ### What changes when you port
 
@@ -90,11 +95,12 @@ API and this port does not ask for one. Recorded differences:
 * gvim decorations have no `fgOnCollisionOnly` mode, so the diff line backgrounds use the theme's
   `editor.diff_*_bg` keys only (no `editor.diff_*_collision_fg`).
 * Virtual rows with the deleted old content and their word emphasis need tier-1c virtual-line
-  *painting*. The store/API landed in 1c-A; until the host reports `gvim.has("decor_virtual_paint")`
-  the plugin shows the reduced Fresh view: line backgrounds, word emphasis on the new side, gutter
-  indicators and scrollbar marks. The old-content rows, their `-` gutter glyph and the removed-word
-  emphasis are the remainder; the full path is already written and activates when the capability
-  appears.
+  painting. The shipped TUI reports `gvim.has("decor_virtual_paint")`, so the full Fresh view is
+  what users get: one `virtual_line_above` row per deleted line with the `-` gutter glyph and
+  bold+underlined removed-word `text_overlays`, in Fresh's priority order and cut to the host's
+  64-rows-per-anchor cap plus an "… N more deleted lines" summary row. On a host without the
+  capability (an older host or the reduced test path) it falls back to line backgrounds,
+  new-side word emphasis, gutter indicators and scrollbar marks.
 * Rendering caps are Fresh's, made host-aware: full → no-vlines (more than
   `max_virtual_lines` deleted lines) → outline (more than `max_overlay_lines` changed lines), and
   a deletion block longer than the host's 64-virtual-rows-per-anchor cap is summarised by an
@@ -130,6 +136,52 @@ is the reference port:
 * `b:revert()` remains the right tool for a **file-backed** buffer (open the path, rewrite the
   file, revert); it costs a tab and a disk round-trip, so the append pattern above is preferred for
   a live view that is not a real file.
+
+### Verifying a default-off bundled port in the real app
+
+A bundled plugin with `default_enabled: false` is exercised by the fake host in its own
+package tests, but its real-host path is worth one check because the enable path is config
+driven. The procedure (and why it matters):
+
+1. Isolate the config, then enable the plugin in the **user** config:
+   `{"plugins": {"<name>": {"enabled": true}}}`.
+2. Start the app session and wait for the plugin manager to report the plugin `loaded`; then
+   let the session settle.
+3. Open a buffer, then open the palette and query the plugin's command titles. The palette
+   table is built from the loaded-plugin command table **when the palette opens**, so a
+   palette opened before the load settles has no plugin rows and does not gain them while it
+   stays open. The plugin's init log can appear while the command table is still settling,
+   which makes "init log present, palette row missing" the signature of querying too early,
+   not of a config-locked enable defect.
+4. Run one of the rows and assert its real effect (the flash, git_log and live_diff ports
+   each have such a smoke test; `internal/app/plugins_ports_palette_test.go` covers the
+   config-locked enable → palette → command-run chain end to end).
+
+### Path completion needs a built-in-prompt seam (port residual)
+
+Fresh's `path_complete` is passive: it answers the editor's `prompt_changed` event for the
+built-in Open File and Save File As prompts with directory suggestions. gvim has neither a
+`prompt_changed`-style event nor a way to attach `gvim.ui.set_prompt_suggestions` to a prompt the
+plugin did not open: Open File/Switch Project use the native file-browser overlay and Save As uses
+the Save-As dialog. The bundled port keeps the completion engine (the exported `complete(input)`
+plus a Path Completion prompt command that exercises it) and documents the gap; a future host seam
+would emit a prompt-changed event for the browser/dialog inputs, and route the plugin's suggestion
+list into those overlays, after which the port can drop its command and match Fresh exactly.
+
+### Compare files: group-lite splits (port residual)
+
+`compare_files` (port of Fresh's `compare_files.ts`) compares through group-lite splits of the
+current tab showing the two existing file buffers — there is no synthetic group tab, so the title
+segments are stored but not painted. The two files are opened as ordinary tabs when they were not
+open (gvim has no tabless view of a real file buffer); **Compare: Close** closes the ones it opened
+when they are unmodified, while a file that was already open keeps its tab. Line-ending-only hunks
+do not exist because gvim normalises a buffer's line endings (`eol_only` is always false, so there
+are no CRLF/missing-newline notes). Filler rows need the host's virtual-line painting
+(`gvim.has("decor_virtual_paint")`); without it the panes are level only where both sides have lines.
+Lines are paired positionally inside a hunk (Fresh's documented fallback), the command bodies ask
+for paths with `gvim.ui.input` instead of Fresh's file picker, and there is no `fresh --diff` launch
+hook or script-facing export (the native Compare view handles `--diff`). Enabling the plugin adds
+palette rows that duplicate the native Compare commands, which is why it is off by default.
 
 ### Notes for porters (learned from the bundled ports)
 

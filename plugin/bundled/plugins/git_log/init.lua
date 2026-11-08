@@ -33,6 +33,15 @@
 --     for this view either).
 --   * A historical file view takes its language from a small extension map: Lua has no
 --     "detect the language from this file name" call.
+--   * Layout: gvim's plugin group layout has ratio-only leaves (no fixed height), so the
+--     toolbar's Fresh "fixed height 1" is accepted and ignored and it gets its ratio share
+--     (about two rows). The file/hunk fold ranges are published with
+--     gvim.decor.set_folding_ranges when the host has it: the pane paints the fold marker,
+--     hides a collapsed body, shows the placeholder, and the normal fold action toggles it.
+--   * View state: the detail's scroll line per commit is saved with
+--     gvim.buf.get/set_window_state and restored when the commit is revisited (the seam is
+--     in the shipped TUI; a host without it starts the commit at the top). State is
+--     in-session only and cleared with the buffer.
 --
 -- Everything is bounded: at most 200 commits in the log, a 4 MiB/20,000-line diff stream
 -- (killed with a footer when it would pass), at most 4000 decorations and 2000 fold ranges,

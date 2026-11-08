@@ -105,8 +105,9 @@ type Result struct {
 // Ranked is the result of one ranking command. Update applies it when it answers the
 // current generation.
 type Ranked struct {
-	gen  int
-	rows []row
+	gen   int
+	query string
+	rows  []row
 }
 
 // row is one visible item, copied from the item list, and the matched rune offsets of
@@ -126,6 +127,9 @@ type Picker struct {
 
 	input textinput.Model
 	query string // the query the rows answer, or are being ranked for
+	// rowsQuery is the query the rows in rows were ranked for; it differs from query
+	// while a ranking is in flight, and Enter must rank synchronously then.
+	rowsQuery string
 
 	items []Item
 	rows  []row
@@ -177,6 +181,7 @@ func New(st style.Styles, o Options) *Picker {
 	p.input.Focus() // Draw paints the caret cell
 	p.query = p.input.Value()
 	p.rows = p.plainRows()
+	p.rowsQuery = p.query
 	return p
 }
 
@@ -296,7 +301,7 @@ func (p *Picker) plainRows() []row {
 func (p *Picker) rank() tea.Cmd {
 	p.gen++
 	gen, query, items := p.gen, p.query, p.items
-	return func() tea.Msg { return Ranked{gen: gen, rows: rankItems(query, items)} }
+	return func() tea.Msg { return Ranked{gen: gen, query: query, rows: rankItems(query, items)} }
 }
 
 // rankItems scores the item texts against query and keeps the best MaxRows, best
@@ -406,6 +411,7 @@ func (p *Picker) edit(msg tea.Msg) Result {
 		// ranking in flight is dropped.
 		p.gen++
 		p.rows = p.plainRows()
+		p.rowsQuery = ""
 		p.sel, p.top = 0, 0
 		r.Events = p.reportMoved(r.Events)
 		return r
@@ -421,6 +427,7 @@ func (p *Picker) applyRanked(r Ranked) []Event {
 		return nil
 	}
 	p.rows = r.rows
+	p.rowsQuery = r.query
 	p.sel, p.top = 0, 0
 	return p.reportMoved(nil)
 }
@@ -475,6 +482,18 @@ func (p *Picker) reportMoved(ev []Event) []Event {
 // choose closes the picker on row i. A disabled item cannot be chosen, and with no row
 // there is nothing to choose.
 func (p *Picker) choose(i int) []Event {
+	if p.rowsQuery != p.query {
+		// Enter arrived while a ranking was still in flight: rank the typed query now, so
+		// the choice is the filtered first row and not a stale row of the old query.
+		if p.fuzzy && p.query != "" {
+			p.rows = rankItems(p.query, p.items)
+		} else {
+			p.rows = p.plainRows()
+		}
+		p.rowsQuery = p.query
+		p.sel, p.top = 0, 0
+		i = p.sel
+	}
 	if i < 0 || i >= len(p.rows) {
 		return nil
 	}

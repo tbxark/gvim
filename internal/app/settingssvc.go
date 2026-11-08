@@ -46,6 +46,11 @@ type settingsService struct {
 	theme    *themeCatalog // user/bundled theme resolution; nil means bundled only
 	rt       settingsRuntime
 
+	// lastDiags are the diagnostics of the last reload, so a write-then-reload
+	// path can verify that the file it wrote still loads (the plugin toggle rolls
+	// back when it does not).
+	lastDiags []config.Diagnostic
+
 	// ioMu serializes the file writes and reloads. The state mutex is not held
 	// while a file is written or loaded, so a Snapshot can run during a Save.
 	ioMu sync.Mutex
@@ -455,8 +460,22 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	}
 	s.mu.Lock()
 	s.cfg = cfg
+	s.lastDiags = diags
 	s.mu.Unlock()
 	return change, nil
+}
+
+// diagnosticsOf returns the diagnostics of the last reload whose path is file.
+func (s *settingsService) diagnosticsOf(file string) []config.Diagnostic {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []config.Diagnostic
+	for _, d := range s.lastDiags {
+		if d.Path == file {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // themeRefFor is the portable config value of the effective theme: the --theme
@@ -534,6 +553,14 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 		}
 		path = projectFileFor(root)
 	}
+	// The Plugins page's project view is the same inventory shown locked: it needs
+	// no project file to exist (the user layer owns plugin enablement).
+	if structureKey == "plugins" {
+		return s.structurePlugins(cfg, project), nil
+	}
+	if structureKey == "keybindings" {
+		return s.structureKeybindings(cfg), nil
+	}
 	if path == "" {
 		return tui.SettingsStructure{}, fmt.Errorf("no %s config file is known", layer)
 	}
@@ -553,7 +580,11 @@ func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStr
 	case structureKey == "languages":
 		return s.structureLanguages(object), nil
 	case strings.HasPrefix(structureKey, "languages."):
-		return s.structureLanguageFields(object, strings.TrimPrefix(structureKey, "languages.")), nil
+		rest := strings.TrimPrefix(structureKey, "languages.")
+		if st, ok := s.structureLanguageChild(object, rest); ok {
+			return st, nil
+		}
+		return s.structureLanguageFields(object, rest), nil
 	case structureKey == "editor.status_bar", structureKey == "editor.status_bar.left", structureKey == "editor.status_bar.right":
 		return s.structureStatusBar(cfg, object, structureKey), nil
 	case structureKey == "terminal.shell.args":
@@ -688,10 +719,14 @@ func (s *settingsService) structureLanguages(object map[string]json.RawMessage) 
 	return st
 }
 
-// structureLanguageFields is one language's scalar override sub-page. A field
-// the layer does not set shows as unset; the page resets it by removing it.
+// structureLanguageFields is one language's sub-page: the scalar overrides with
+// their inherited value shown, and the structured children (extensions,
+// filenames, formatter, on_save, indent). A field the layer does not set is
+// marked Inherited and shows the value it inherits; Enter writes an override and
+// Del removes one.
 func (s *settingsService) structureLanguageFields(object map[string]json.RawMessage, id string) tui.SettingsStructure {
 	st := tui.SettingsStructure{Key: "languages." + id, Title: "Languages · " + id, Kind: "fields"}
+	st.Note = "Enter overrides a field, Del removes the override (inherit). The on_save JSON page edits the whole array; lists and the formatter are written whole."
 	entry, _ := layerObjectAt(object, []string{"languages", id})
 	for _, field := range config.LanguageOverrideFields() {
 		row := tui.SettingsStructureRow{
@@ -701,9 +736,27 @@ func (s *settingsService) structureLanguageFields(object map[string]json.RawMess
 		}
 		if raw, ok := layerRawAt(entry, []string{field.Key}); ok {
 			row.Value = displayJSON(raw, field.Kind)
+		} else {
+			row.Inherited = true
+			row.Note = "inherit"
+			if v, ok := s.cfg.LanguageInheritedValue(id, field.Key); ok {
+				row.Value = v
+			}
 		}
 		st.Rows = append(st.Rows, row)
 	}
+	st.Rows = append(st.Rows,
+		tui.SettingsStructureRow{Name: "extensions", Child: "languages." + id + ".extensions",
+			Value: languageListSummary(entry, "extensions"), Note: "file extensions"},
+		tui.SettingsStructureRow{Name: "filenames", Child: "languages." + id + ".filenames",
+			Value: languageListSummary(entry, "filenames"), Note: "file names"},
+		tui.SettingsStructureRow{Name: "formatter", Child: "languages." + id + ".formatter",
+			Value: languageObjectSummary(entry, "formatter"), Note: "format on save"},
+		tui.SettingsStructureRow{Name: "on_save", Child: "languages." + id + ".on_save",
+			Value: languageOnSaveSummary(entry), Note: "commands run on save"},
+		tui.SettingsStructureRow{Name: "indent", Child: "languages." + id + ".indent",
+			Value: languageObjectSummary(entry, "indent"), Note: "indent patterns"},
+	)
 	return st
 }
 

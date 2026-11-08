@@ -1,0 +1,7 @@
+{
+  "name": "lsp_help",
+  "version": "1.0.0",
+  "description": "Install hints and quick actions when a language server fails: a status line, an action popup and copyable install commands",
+  "api": 2,
+  "default_enabled": true
+}

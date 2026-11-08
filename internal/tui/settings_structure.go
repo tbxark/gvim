@@ -90,7 +90,9 @@ func (p *settingsStructurePage) rebuild() {
 		case "map":
 			p.values[pathID(row.Path)] = row.Value
 		case "fields":
-			p.values[pathID(row.Path)] = row.Value
+			if row.Kind != "" {
+				p.values[pathID(row.Path)] = row.Value
+			}
 		case "list":
 			p.items = append(p.items, row.Name)
 		case "languages":
@@ -124,11 +126,13 @@ func (p *settingsStructurePage) layout() {
 		}
 	case "fields":
 		for _, row := range p.st.Rows {
-			value := p.values[pathID(row.Path)]
-			if pending, ok := p.pendingFor(row.Path); ok && pending.remove {
-				value = "(default)"
+			if row.Kind != "" {
+				value := p.values[pathID(row.Path)]
+				if pending, ok := p.pendingFor(row.Path); ok && pending.remove {
+					value = "(default)"
+				}
+				row.Value = value
 			}
-			row.Value = value
 			rows = append(rows, structureRow{item: row})
 		}
 	case "list":
@@ -142,6 +146,16 @@ func (p *settingsStructurePage) layout() {
 		}
 	case "entries":
 		for _, row := range p.st.Rows {
+			rows = append(rows, structureRow{item: row})
+		}
+	case "bindings":
+		// Group the read-only binding rows under their context header.
+		group := ""
+		for _, row := range p.st.Rows {
+			if row.Group != "" && row.Group != group {
+				group = row.Group
+				rows = append(rows, structureRow{header: true, title: group})
+			}
 			rows = append(rows, structureRow{item: row})
 		}
 	case "dual":
@@ -448,6 +462,8 @@ func (p *settingsStructurePage) footer() string {
 		return "Enter fields · ^N add · Del remove · Esc back · ^S save"
 	case "entries":
 		return "Enter fields · ^N add · Del remove · Esc back · ^S save"
+	case "bindings":
+		return "Type to filter · Enter on the action row opens the editor · Esc back"
 	case "dual":
 		return "Tab side · Enter move/add · Del remove · Alt+↑/↓ move · Esc back · ^S save"
 	}
@@ -596,7 +612,7 @@ func (p *settingsStructurePage) runAction(row SettingsStructureRow) tea.Cmd {
 		port := p.parent.port
 		return func() tea.Msg {
 			message, err := port.Act(op, value)
-			return settingsActDoneMsg{page: p, message: message, err: err}
+			return settingsActDoneMsg{page: p, action: op, value: value, message: message, err: err}
 		}
 	}
 	return nil

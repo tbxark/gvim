@@ -40,6 +40,7 @@ func installDiff(e *apiEnv) {
 	t.RawSetString("saved", e.async("diff_saved"))
 	e.set(t, "next_hunk", func(L *lua.LState) int { return pickHunk(L, true) })
 	e.set(t, "prev_hunk", func(L *lua.LState) int { return pickHunk(L, false) })
+	installCompareDiff(e, t)
 }
 
 // pickHunk returns the hunk with the smallest new_start after line (next) or the largest

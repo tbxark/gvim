@@ -264,7 +264,10 @@ keeping its buffer and content) and shows it again by splitting a visible panel.
 `set_group_title` stores Fresh's title segments (a segment may name a panel); gvim keeps them
 for the port APIs and does not paint a group tab. Closing the group closes the split windows it
 created and the panel buffers it made; unloading the plugin does the same. Limits: at most 8
-panels, a layout 4 deep, 64 KiB of layout JSON and 16 title segments.
+panels, a layout 4 deep, 64 KiB of layout JSON and 16 title segments. A leaf's
+§ratio§ is the FIRST child's share of its split. Fresh's fixed-height leaves (§{type="fixed",
+height=n}§) are not expressible: the height is accepted and ignored, so a fixed toolbar degrades
+to the ratio its layout gives it (git_log's height-1 toolbar renders as a short ratio row).
 
 ### Scroll-sync groups
 
@@ -281,3 +284,25 @@ and moves the other, so a plugin only sets the anchors — for a side-by-side di
 line pairs. A group is removed automatically when the plugin unloads; windows that close stop
 syncing. `id` is the plugin's own positive id (per plugin namespace).
 
+## Split labels, window state and split wrappers (tier 1c-C)
+
+```text
+gvim.win.set_split_label(win, label) -> true | nil, err   -- label a split; "" clears
+gvim.win.get_split_by_label(label) -> Window | nil
+gvim.win.clear_split_label(win) -> true | nil, err
+gvim.buf.get_window_state(buf, key[, default]) -> value | default
+gvim.buf.set_window_state(buf, key, value) -> true | nil, err   -- nil clears
+gvim.buf.open_file_in_split(path, opts?) ⏳ -> true, Buffer | nil, err
+gvim.buf.focus_split(win) -> true | nil, err
+gvim.buf.close_split(win) -> true | nil, err
+```
+
+A split label names a window so a plugin can find it again after focus moves or splits; it
+lives on the split (the window keeps it until it closes) and $gvim.win.get_split_by_label$
+returns the window handle. Window state is a small JSON-scalar map per plugin and buffer
+(`string`, `number`, `boolean`): it survives a plugin reload in-session, is cleared when the
+buffer closes, and a `nil` value removes one key. `gvim.buf.open_file_in_split` splits the
+focused window (`direction = "right"` by default, or `"below"`) and opens the file there,
+completing asynchronously like `gvim.buf.open`; `focus_split`/`close_split` are the plain
+wrappers over the window operations. Limits: a split label is at most 64 bytes; window state
+keeps at most 256 keys per plugin and buffer, keys up to 128 bytes and strings up to 4 KiB.

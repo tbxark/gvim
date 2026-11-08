@@ -25,10 +25,16 @@ type globPattern struct {
 	path bool
 }
 
+// globPatterns splits a glob value into its comma or space separated patterns. An empty
+// value gives no patterns.
+func globPatterns(glob string) []string {
+	return strings.FieldsFunc(glob, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' })
+}
+
 // parseGlob compiles a glob filter. It returns a nil matcher for an empty glob, which
 // matches every file.
 func parseGlob(glob string) (*globMatcher, error) {
-	fields := strings.FieldsFunc(glob, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' })
+	fields := globPatterns(glob)
 	if len(fields) == 0 {
 		return nil, nil
 	}

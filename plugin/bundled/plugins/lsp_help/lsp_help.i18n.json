@@ -1,0 +1,18 @@
+{
+  "en": {
+    "status.server_error": "%{name} LSP error: %{error} — click the LSP status for install help",
+    "status.server_not_found": "%{name} LSP server not found — click the LSP status for install help",
+    "status.copied": "Copied: %{value}",
+    "status.disabled": "%{name} LSP disabled",
+    "status.loaded": "LSP help loaded",
+    "popup.title": "%{name} Language Server Help",
+    "popup.copy": "Copy: %{value}",
+    "actions.restart": "Start/Restart LSP Server",
+    "actions.stop": "Stop LSP Server",
+    "actions.toggle_buffer": "Toggle LSP for This Buffer",
+    "actions.disable": "Disable %{name} LSP",
+    "actions.definition": "Go to Definition",
+    "actions.references": "Find References",
+    "actions.dismiss": "Dismiss (Esc)"
+  }
+}

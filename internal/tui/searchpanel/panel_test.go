@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -992,5 +993,250 @@ func TestPreviewMultiLineHighlightsTheWholeRange(t *testing.T) {
 		if got, want := g.At(geo.prevX, geo.resultsTop+1+k).Style.BG, p.styles.selected.BG; got != want {
 			t.Fatalf("line %d background = %v, want %v", k+1, got, want)
 		}
+	}
+}
+
+// fakeBatchSearcher streams fixed batches and records each request and cancel channel.
+type fakeBatchSearcher struct {
+	batches []SearchBatch
+	reqs    []SearchRequest
+	cancels []<-chan struct{}
+}
+
+func (f *fakeBatchSearcher) ProjectSearch(req SearchRequest) (SearchResult, error) {
+	return SearchResult{}, nil
+}
+
+func (f *fakeBatchSearcher) ProjectSearchBatches(req SearchRequest, cancel <-chan struct{}) <-chan SearchBatch {
+	f.reqs = append(f.reqs, req)
+	f.cancels = append(f.cancels, cancel)
+	ch := make(chan SearchBatch)
+	batches := f.batches
+	go func() {
+		defer close(ch)
+		for _, batch := range batches {
+			select {
+			case <-cancel:
+				return
+			case ch <- batch:
+			}
+		}
+	}()
+	return ch
+}
+
+// streamingPanel returns a panel over a fake batch searcher and starts a search for text,
+// returning the command that reads the first batch. It does not drain the stream: each
+// batch is read by the test, so the panel can be inspected between batches.
+func streamingPanel(t *testing.T, bs *fakeBatchSearcher, text string) (*Panel, tea.Cmd) {
+	t.Helper()
+	o := searchOptions(nil)
+	o.Searcher = bs
+	p := New(o)
+	tick := typeText(p, text)
+	if tick == nil {
+		t.Fatal("typing started no debounce")
+	}
+	_, first := p.Update(tick())
+	if first == nil {
+		t.Fatal("the debounce started no streaming read")
+	}
+	return p, first
+}
+
+// readBatch runs cmd and gives its message to the panel, returning the next read command.
+func readBatch(t *testing.T, p *Panel, cmd tea.Cmd) tea.Cmd {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("the streaming search ended without another command")
+	}
+	msg := cmd()
+	next, nextCmd := p.Update(msg)
+	if next == nil {
+		t.Fatal("the panel closed while reading a batch")
+	}
+	return nextCmd
+}
+
+// fileBatch is one batch of one file with a single match.
+func fileBatch(name string, scanned, total int, done bool) SearchBatch {
+	return SearchBatch{
+		Files:   []FileMatches{{Path: "/w/" + name, Name: name, Hash: uint64(len(name)), Matches: []Match{{Line: 1, Col: 1, Len: 1, Text: name}}}},
+		Scanned: scanned, Total: total, Done: done,
+	}
+}
+
+func TestStreamingBatchesAppendAndShowProgress(t *testing.T) {
+	t.Parallel()
+	bs := &fakeBatchSearcher{batches: []SearchBatch{
+		fileBatch("a.go", 1, 3, false),
+		fileBatch("b.go", 2, 3, false),
+		fileBatch("c.go", 3, 3, true),
+	}}
+	p, cmd := streamingPanel(t, bs, "x")
+	if p.loading == false {
+		t.Fatal("the panel is not loading at the start of the stream")
+	}
+	if got := draw(p, 100, 30); !hasRow(got, "Searching…") {
+		t.Fatalf("the empty state does not say it is searching:\n%s", got)
+	}
+	cmd = readBatch(t, p, cmd)
+	if matches, files, _ := p.Stats(); matches != 1 || files != 1 {
+		t.Fatalf("after one batch: %d matches in %d files", matches, files)
+	}
+	if got := draw(p, 100, 30); !hasRow(got, "searching 1/3 files") || !hasRow(got, "a.go") {
+		t.Fatalf("the first batch is not shown with progress:\n%s", got)
+	}
+	// The selection stays on the row the user had while more files arrive.
+	p.selected = 0
+	before := p.rows[0]
+	cmd = readBatch(t, p, cmd)
+	if p.selected != 0 || p.rows[0] != before {
+		t.Fatalf("the selection moved when a batch arrived: row %d %+v", p.selected, p.rows[0])
+	}
+	if got := draw(p, 100, 30); !hasRow(got, "searching 2/3 files") || !hasRow(got, "b.go") {
+		t.Fatalf("the second batch is not shown:\n%s", got)
+	}
+	cmd = readBatch(t, p, cmd)
+	if cmd != nil {
+		t.Fatal("the done batch asked for another read")
+	}
+	if p.loading {
+		t.Fatal("the panel is still loading after the done batch")
+	}
+	if matches, files, _ := p.Stats(); matches != 3 || files != 3 {
+		t.Fatalf("after the done batch: %d matches in %d files", matches, files)
+	}
+	if got := draw(p, 100, 30); !hasRow(got, "3 matches in 3 files") {
+		t.Fatalf("the done batch does not show the final counts:\n%s", got)
+	}
+	if len(bs.reqs) != 1 || bs.reqs[0].Query != "x" || len(bs.reqs[0].Files) != 2 || bs.reqs[0].Files[0] != "a.go" {
+		t.Fatalf("requests = %+v", bs.reqs)
+	}
+	if hist := p.History(); len(hist) == 0 || hist[0] != "x" {
+		t.Fatalf("the completed search is not in the history: %v", hist)
+	}
+}
+
+func TestStreamingBatchForAnOlderSearchIsDropped(t *testing.T) {
+	t.Parallel()
+	bs := &fakeBatchSearcher{batches: []SearchBatch{fileBatch("a.go", 1, 1, false)}}
+	p, cmd := streamingPanel(t, bs, "x")
+	msg := cmd()
+	// A new search starts before the batch is applied: the old message is stale.
+	if p.requery() == nil {
+		t.Fatal("the new query did not start a search")
+	}
+	oldCancel := bs.cancels[0]
+	p.Update(msg)
+	if matches, _, _ := p.Stats(); matches != 0 {
+		t.Fatalf("a stale batch was applied: %d matches", matches)
+	}
+	select {
+	case <-oldCancel:
+	case <-time.After(time.Second):
+		t.Fatal("the old stream was not cancelled")
+	}
+}
+
+func TestStreamingCancelsOnDismiss(t *testing.T) {
+	t.Parallel()
+	bs := &fakeBatchSearcher{batches: []SearchBatch{fileBatch("a.go", 1, 2, false), fileBatch("b.go", 2, 2, true)}}
+	p, cmd := streamingPanel(t, bs, "x")
+	readBatch(t, p, cmd)
+	if p.Active() != true {
+		t.Fatal("the panel closed early")
+	}
+	cancel := bs.cancels[0]
+	p.Dismiss()
+	if p.Active() {
+		t.Fatal("Dismiss left the panel open")
+	}
+	select {
+	case <-cancel:
+	case <-time.After(time.Second):
+		t.Fatal("Dismiss did not cancel the stream")
+	}
+}
+
+func TestStreamingReplaceUsesTheShownSet(t *testing.T) {
+	t.Parallel()
+	bs := &fakeBatchSearcher{batches: []SearchBatch{
+		fileBatch("a.go", 1, 2, false),
+		fileBatch("b.go", 2, 2, true),
+	}}
+	p, cmd := streamingPanel(t, bs, "x")
+	cmd = readBatch(t, p, cmd)
+	req, ok := p.ReplaceRequest()
+	if !ok || len(req.Files) != 1 || req.Files[0].Name != "a.go" {
+		t.Fatalf("partial replace request = %+v, %v", req, ok)
+	}
+	cmd = readBatch(t, p, cmd)
+	if cmd != nil {
+		t.Fatal("the done batch asked for another read")
+	}
+	req, ok = p.ReplaceRequest()
+	if !ok || len(req.Files) != 2 {
+		t.Fatalf("final replace request = %+v, %v", req, ok)
+	}
+}
+
+func TestStreamingDoneErrorIsShown(t *testing.T) {
+	t.Parallel()
+	bs := &fakeBatchSearcher{batches: []SearchBatch{{Scanned: 1, Total: 1, Done: true, Err: "read failed"}}}
+	p, cmd := streamingPanel(t, bs, "x")
+	readBatch(t, p, cmd)
+	if p.loading || p.errText != "read failed" {
+		t.Fatalf("loading %v errText %q, want the done error", p.loading, p.errText)
+	}
+}
+
+func TestGitModeHasAValidatedFilesField(t *testing.T) {
+	t.Parallel()
+	g := &fakeGrepper{result: GitResult{Files: []FileMatches{{
+		Path: "a.go", Name: "a.go", Matches: []Match{{Line: 1, Col: 1, Len: 3, Text: "foo"}},
+	}}}}
+	p := New(Options{Root: "/r", Git: true, Grepper: g})
+	search(t, p, "foo")
+	if len(g.reqs) != 1 || len(g.reqs[0].Pathspecs) != 0 {
+		t.Fatalf("first request = %+v", g.reqs)
+	}
+	if !hasRow(draw(p, 100, 30), "Files:") {
+		t.Fatal("the Git Grep card has no Files row")
+	}
+	// Tab walks search -> files -> results -> search in Git Grep mode.
+	p.Update(specialKey(tea.KeyTab))
+	if p.focus != focusGlob {
+		t.Fatalf("first Tab gave focus %v, want the files field", p.focus)
+	}
+	step(t, p, typeText(p, "*.go"))
+	if len(g.reqs) != 2 || len(g.reqs[1].Pathspecs) != 1 || g.reqs[1].Pathspecs[0] != "*.go" {
+		t.Fatalf("globbed request = %+v", g.reqs)
+	}
+	p.Update(specialKey(tea.KeyTab))
+	if p.focus != focusResults {
+		t.Fatalf("second Tab gave focus %v, want the result rows", p.focus)
+	}
+	p.Update(specialKey(tea.KeyTab))
+	if p.focus != focusSearch {
+		t.Fatalf("third Tab gave focus %v, want the search field", p.focus)
+	}
+	// An invalid pattern blocks the search and says why.
+	p.Update(specialKey(tea.KeyTab)) // files
+	p.glob.SetValue("src/[")
+	step(t, p, p.requery())
+	if len(g.reqs) != 2 {
+		t.Fatalf("an invalid glob still searched: %d requests", len(g.reqs))
+	}
+	if !strings.Contains(p.errText, "Bad glob") || !hasRow(draw(p, 100, 30), "Bad glob") {
+		t.Fatalf("errText = %q, want the invalid glob state", p.errText)
+	}
+}
+
+func TestGitModeLayoutCarriesTheFilesRow(t *testing.T) {
+	t.Parallel()
+	geo := layoutFor(100, 30, true)
+	if geo.globY != geo.optY-1 || geo.searchY != geo.globY-1 || geo.replY != -1 {
+		t.Fatalf("git geometry = %+v, want search and files rows above the options", geo)
 	}
 }

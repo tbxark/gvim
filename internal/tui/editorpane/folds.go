@@ -1,6 +1,8 @@
 package editorpane
 
 import (
+	"slices"
+
 	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/icons"
@@ -21,26 +23,48 @@ type Folder interface {
 // A document that is not a Folder, that has no folds, or that is in large file mode,
 // leaves both nil.
 func (f *frame) setFolds(doc Document) {
-	fl, ok := doc.(Folder)
-	if !ok || isLarge(doc) || f.fill != nil {
+	if isLarge(doc) || f.fill != nil {
 		// The folds of a large document would be found by reading all of it. A pane with
 		// fillers shows every line, so that the rows of two panes keep matching.
 		return
 	}
-	ranges := fl.Folds(f.tab)
+	var ranges []fold.Range
+	collapsed := map[int]bool{}
+	if fl, ok := doc.(Folder); ok {
+		ranges = fl.Folds(f.tab)
+		for _, r := range ranges {
+			if fl.Folded(r.Start) {
+				collapsed[r.Start] = true
+			}
+		}
+	}
+	// Plugin folding ranges merge with the document's (ids tie: the document's win).
+	if f.pluginFolds != nil {
+		extra, extraCollapsed, placeholder := f.pluginFolds()
+		ranges = append(ranges, extra...)
+		for start, c := range extraCollapsed {
+			if _, ok := collapsed[start]; !ok {
+				collapsed[start] = c
+			}
+		}
+		f.foldPlaceholder = placeholder
+	}
 	if len(ranges) == 0 {
 		return
 	}
-	f.folds = make(map[int]bool, len(ranges))
-	collapsed := make(map[int]bool)
-	for _, r := range ranges {
-		c := fl.Folded(r.Start)
-		f.folds[r.Start] = c
-		if c {
-			collapsed[r.Start] = true
+	slices.SortStableFunc(ranges, func(a, b fold.Range) int {
+		if a.Start != b.Start {
+			return a.Start - b.Start
 		}
+		return a.End - b.End
+	})
+	f.folds = make(map[int]bool, len(ranges))
+	for _, r := range ranges {
+		f.folds[r.Start] = collapsed[r.Start]
 	}
-	f.hidden = fold.Visible(f.lines, ranges, collapsed)
+	if len(collapsed) > 0 {
+		f.hidden = fold.Visible(f.lines, ranges, collapsed)
+	}
 }
 
 // foldable reports whether a click may toggle the fold that starts at line i: it is

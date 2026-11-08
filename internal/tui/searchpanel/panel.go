@@ -146,6 +146,15 @@ type Panel struct {
 	open    bool
 	seq     int
 	loading bool
+	// searchCancel cancels the in-flight batched search; nil when nothing streams. batchCh
+	// is the live batch channel, read one batch at a time from commands.
+	searchCancel chan struct{}
+	batchCh      <-chan SearchBatch
+	// scanned and totalFiles are the streaming progress the title shows.
+	scanned, totalFiles int
+	// pendingReset is set when a new stream starts over rows of an older result: the first
+	// batch replaces those rows instead of appending to them.
+	pendingReset bool
 	// notice, when set, replaces the hints on the bottom border, so a summary (a
 	// replacement's result, say) shows while the panel covers the status row.
 	notice string
@@ -187,6 +196,14 @@ type gitDoneMsg struct {
 	seq    int
 	result GitResult
 	err    error
+}
+
+// searchBatchMsg carries one batch of a streaming project search.
+type searchBatchMsg struct {
+	seq   int
+	ch    <-chan SearchBatch
+	batch SearchBatch
+	ok    bool
 }
 
 // previewState is the preview column's last target and its fetched context.
@@ -288,6 +305,10 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	case gitDoneMsg:
 		p.applyGit(msg)
 		return p, p.previewCmd()
+	case searchBatchMsg:
+		// A batch can fill an empty result while the rows already have the focus; the
+		// preview follows the new selected row. The target dedupe keeps this cheap.
+		return p, tea.Batch(p.applyBatch(msg), p.previewCmd())
 	case previewDoneMsg:
 		if msg.seq == p.preview.seq {
 			p.preview.loading = false
@@ -310,6 +331,7 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 	p.notice = ""
 	switch name {
 	case "esc":
+		p.cancelBatches()
 		p.open = false
 		return nil, nil
 	case "tab":
@@ -609,9 +631,7 @@ func (p *Panel) field() *textinput.Model {
 			return &p.replace
 		}
 	case focusGlob:
-		if !p.git {
-			return &p.glob
-		}
+		return &p.glob
 	}
 	return &p.query
 }
@@ -621,7 +641,7 @@ func (p *Panel) field() *textinput.Model {
 func (p *Panel) cycleFocus(delta int) {
 	stops := []focus{focusSearch, focusReplace, focusGlob, focusResults}
 	if p.git {
-		stops = []focus{focusSearch, focusResults}
+		stops = []focus{focusSearch, focusGlob, focusResults}
 	}
 	at := 0
 	for i, f := range stops {
@@ -654,21 +674,25 @@ func (p *Panel) cycleFocus(delta int) {
 // requery starts the debounce of a new search. An empty query clears the result and
 // searches nothing.
 func (p *Panel) requery() tea.Cmd {
+	p.cancelBatches()
+	p.loading = false
+	p.scanned, p.totalFiles = 0, 0
+	p.pendingReset = len(p.fileMatches) > 0
 	p.seq++
 	p.errText = ""
-	if !p.git {
-		m, err := parseGlob(p.glob.Value())
-		if err != nil {
-			p.matcher = nil
-			p.errText = "Bad glob: " + err.Error()
-			p.loading = false
-			p.fileMatches, p.rows, p.checked = nil, nil, nil
-			p.truncated, p.skippedCount, p.skipped = false, 0, nil
-			p.selected, p.top = 0, 0
-			return nil
-		}
-		p.matcher = m
+	// The glob field is validated in both modes: project search uses the compiled matcher
+	// on its file snapshot, Git Grep passes the raw patterns as pathspecs.
+	m, err := parseGlob(p.glob.Value())
+	if err != nil {
+		p.matcher = nil
+		p.errText = "Bad glob: " + err.Error()
+		p.loading = false
+		p.fileMatches, p.rows, p.checked = nil, nil, nil
+		p.truncated, p.skippedCount, p.skipped = false, 0, nil
+		p.selected, p.top = 0, 0
+		return nil
 	}
+	p.matcher = m
 	if p.query.Value() == "" {
 		p.loading = false
 		p.fileMatches, p.rows = nil, nil
@@ -687,6 +711,10 @@ func (p *Panel) ReSearch() tea.Cmd {
 	if p.query.Value() == "" {
 		return nil
 	}
+	p.cancelBatches()
+	p.loading = false
+	p.scanned, p.totalFiles = 0, 0
+	p.pendingReset = len(p.fileMatches) > 0
 	p.seq++
 	p.errText = ""
 	p.loading = true
@@ -699,7 +727,10 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 	query := p.query.Value()
 	if p.git {
 		g := p.grepper
-		req := GitRequest{Root: p.root, Query: query, CaseSensitive: p.modes.CaseSensitive, Limit: p.limit}
+		req := GitRequest{
+			Root: p.root, Query: query, CaseSensitive: p.modes.CaseSensitive,
+			Pathspecs: globPatterns(p.glob.Value()), Limit: p.limit,
+		}
 		if g == nil {
 			return func() tea.Msg { return gitDoneMsg{seq: seq, err: fmt.Errorf("git grep is not supported in this port")} }
 		}
@@ -725,6 +756,23 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 			return searchDoneMsg{seq: seq, err: fmt.Errorf("project search is not supported in this port")}
 		}
 	}
+	if bs, ok := s.(BatchSearcher); ok {
+		// The streaming path: one goroutine walks the files and the panel reads its
+		// batches one command at a time. The cancel channel stops it when the search is
+		// superseded or the panel closes.
+		p.cancelBatches()
+		cancel := make(chan struct{})
+		p.searchCancel = cancel
+		return func() tea.Msg {
+			if files != nil {
+				req.Files, _ = files.Snapshot()
+			}
+			req.Files = matcher.filter(req.Files)
+			ch := bs.ProjectSearchBatches(req, cancel)
+			batch, ok := <-ch
+			return searchBatchMsg{seq: seq, ch: ch, batch: batch, ok: ok}
+		}
+	}
 	return func() tea.Msg {
 		if files != nil {
 			req.Files, _ = files.Snapshot()
@@ -733,6 +781,93 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 		res, err := s.ProjectSearch(req)
 		return searchDoneMsg{seq: seq, result: res, err: err}
 	}
+}
+
+// waitBatch returns the command that reads the next batch of the live stream.
+func waitBatch(seq int, ch <-chan SearchBatch) tea.Cmd {
+	return func() tea.Msg {
+		batch, ok := <-ch
+		return searchBatchMsg{seq: seq, ch: ch, batch: batch, ok: ok}
+	}
+}
+
+// applyBatch appends one streaming batch and keeps reading, or finishes the search on the
+// done batch. A batch for an older search is dropped (its stream was cancelled).
+func (p *Panel) applyBatch(msg searchBatchMsg) tea.Cmd {
+	if msg.seq != p.seq {
+		return nil
+	}
+	if !msg.ok {
+		// The stream closed without a done batch: it was cancelled.
+		p.loading = false
+		p.batchCh = nil
+		p.searchCancel = nil
+		return nil
+	}
+	p.batchCh = msg.ch
+	p.scanned, p.totalFiles = msg.batch.Scanned, msg.batch.Total
+	if p.pendingReset && msg.seq == p.seq {
+		// The first batch of a new search replaces the rows of the older result, so the
+		// stale rows never mix with the streamed ones.
+		p.fileMatches, p.rows, p.checked, p.expanded = nil, nil, nil, nil
+		p.selected, p.top = 0, 0
+		p.pendingReset = false
+	}
+	if len(msg.batch.Files) > 0 {
+		p.appendBatchFiles(msg.batch.Files)
+	}
+	p.truncated = p.truncated || msg.batch.Truncated
+	if msg.batch.SkippedCount > 0 || len(msg.batch.Skipped) > 0 {
+		p.skippedCount, p.skipped = msg.batch.SkippedCount, msg.batch.Skipped
+	}
+	if msg.batch.Done {
+		p.loading = false
+		p.batchCh = nil
+		p.searchCancel = nil
+		if msg.batch.Err != "" {
+			p.errText = msg.batch.Err
+		}
+		p.recordHistory(p.query.Value())
+		return nil
+	}
+	return waitBatch(msg.seq, msg.ch)
+}
+
+// appendBatchFiles adds whole files from a streaming batch. Existing rows do not move, so
+// the highlighted row and the window stay where the user left them.
+func (p *Panel) appendBatchFiles(files []FileMatches) {
+	wasEmpty := len(p.fileMatches) == 0
+	for _, f := range files {
+		p.fileMatches = append(p.fileMatches, f)
+		p.expanded = append(p.expanded, true)
+		checked := make([]bool, len(f.Matches))
+		for i := range checked {
+			checked[i] = true
+		}
+		p.checked = append(p.checked, checked)
+	}
+	if wasEmpty {
+		p.selected, p.top = 0, 0
+	}
+	p.rebuildRows()
+}
+
+// cancelBatches stops the live stream, if any, and forgets it. The search goroutine sees
+// the closed channel and stops sending.
+func (p *Panel) cancelBatches() {
+	if p.searchCancel != nil {
+		close(p.searchCancel)
+		p.searchCancel = nil
+	}
+	p.batchCh = nil
+}
+
+// Dismiss closes the panel and cancels its stream; the root calls it when Esc closes the
+// overlay.
+func (p *Panel) Dismiss() {
+	p.cancelBatches()
+	p.loading = false
+	p.open = false
 }
 
 // applySearch shows a project search result when it answers the current search.
@@ -753,6 +888,7 @@ func (p *Panel) applySearch(msg searchDoneMsg) {
 	p.skippedCount = msg.result.SkippedCount
 	p.skipped = msg.result.Skipped
 	p.errText = msg.result.Err
+	p.pendingReset = false
 	p.recordHistory(p.query.Value())
 	p.resetRows()
 }
@@ -774,6 +910,7 @@ func (p *Panel) applyGit(msg gitDoneMsg) {
 	p.truncated = false
 	p.skippedCount, p.skipped = 0, nil
 	p.errText = msg.result.Err
+	p.pendingReset = false
 	p.resetRows()
 }
 

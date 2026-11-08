@@ -116,15 +116,63 @@ source bytes; the source-display map keeps the caret, the mouse hit and the
 selection exact inside the rewritten cells (pipes and padding map to their source
 boundaries).
 
-Top and bottom border rows are display rows that no source line owns. The shared
-page-view extra-row hook and the plugin decoration row transform that would own
-the only row-insertion model did not land in round 7 (deferred to round 8 with
-plugin tier 1c-B/C; the agreed shape is ExtraRow/ExtraRows plus a Pane-level
-extra-row builder that can see the frame's measure), so the top and bottom
-borders are a documented residual until that hook exists; the mid border is a
-source row and is already drawn. Cells that need
-more than one visual row (a wrapped cell) are also residual: the
-single-visual-row cells are the tested contract.
+Top and bottom border rows are display rows that no source line owns. They are
+drawn through the shared page-view extra-row hook (`Pane.PageExtraRows`,
+`editorpane/rows_extra.go`): the top border is inserted above the header line and
+the bottom border below the table's last line, as width-dependent rows built from
+the same table model and column widths the rows use. The hook owns every row
+calculation, so the caret, the mouse hit (an above row maps to the line start, a
+below row to its end), selection, scroll and the scrollbar treat the borders as
+ordinary display rows; a page too narrow for the table draws no borders (its
+rows wrap). The mid border stays the source separator row. Cells that need more
+than one visual row (a wrapped cell) are still residual: the single-visual-row
+cells are the tested contract.
+
+## Dual view: source and page side by side
+
+Besides the per-document page view there is a dual view of the same Markdown
+document: a native 50/50 side-by-side split with the source on the left and the
+composed page on the right, the focus on the source (Fresh's dual mode, minus its
+buffer-group tab). It needs one Markdown document, a single editor pane, and a
+document that is not in large-file mode; a compare view must be closed first, and
+each refusal has its own notice.
+
+The document's own view settings stay the default for single panes: the dual view
+is a derived per-pane override, not document state. `panePageView` gives the
+preview leaf the composed page (the same page width resolution as the single-pane
+page view) and the source leaf no page view; every other pane keeps the
+document's settings. Because the override is derived, closing the dual view gives
+the document's own mode back untouched, and the unfocused preview never reveals
+the caret's line (the document caret belongs to the focused pane).
+
+Opening uses the ordinary split: the focused leaf becomes a 50/50 side-by-side
+inner node, the first child is the old pane (it keeps its window id) and the
+second shows the same tab, then the focus goes to the source. Closing removes the
+preview leaf, focuses the source and clears the state; `close_split` on either
+pane, a tab change or opening a compare view end the dual view too — one validity
+check in the per-update sync clears it, and the document is never touched. The
+commands are hand-written palette rows: Markdown: Source, Rendered, Dual, Toggle
+Dual and Cycle Mode ([^cmd]). Source turns the document's page view off (and
+closes a dual view), Rendered turns it on (and closes one), Dual opens the dual
+view, Toggle Dual opens it or returns to source, and Cycle Mode goes source ->
+rendered -> dual -> source. Each says the mode in the status line; the mode is
+derived (dual while a valid dual view, rendered while the document's page view is
+on, source otherwise).
+
+Both leaves show the same tab, so there is one document and one caret: editing in
+the source pane updates the composed pane in the same frame; undo, save and LSP
+see one document; and clicking the preview focuses it, so caret motion, mouse hit
+and selection in the composed pane work through the compose mapping. The scroll
+sync is line-anchored and compare-style: after every update the unfocused leaf
+takes the focused document's top line (the preview starts at that line; the source
+keeps its own wrapped row). Exact row/byte anchors across the two different
+wraps, a native Markdown menu row (the menu table is generated from Fresh and its
+plugin contributions are not hand-edited), persisting the split, more than one
+dual view of a document, and the page-view width/session persistence remain
+residuals.
+
+[^cmd]: The palette rows are the same five actions in `commands/markdown_commands.go`;
+the native palette therefore lists 229 commands.
 
 ## Mapping through concealed bytes and soft rows
 
@@ -172,22 +220,23 @@ document that is not Markdown gets the page geometry only.
 
 ## Deferred
 
-- table top/bottom border rows: they are display rows no source line owns and
-  wait for the shared page-view extra-row hook (internal/tui/editorpane/rows_extra.go,
-  deferred to round 8 with plugin tier 1c-B/C); the mid border is drawn from the
-  source separator row;
 - table cells that wrap over several visual rows (single-visual-row cells are
   drawn), cells with escaped pipes, and tables in nested containers;
 - fence body lines whose continuation rows would need their own rails (the first
   visual row is framed), and fences nested inside blockquotes or lists;
-- heading scrollbar markers and the dual/rendered view (the latter needs buffer
-  groups from plugin tier 1b);
+- heading scrollbar markers and the heading marker conceal;
 - task-list glyph conceal (the box stays visible as text), image conceal and
   inline HTML conceal;
 - heading marker conceal and the rest of Fresh's heading polish;
 - session persistence of the page-view mode and the per-buffer page width
   (session.FileState carries no view fields yet);
-- per-split view mode: gvim keeps one view mode per document, Fresh per split;
+- per-split view mode: gvim keeps one view mode per document, Fresh per split; the
+  dual view adds one derived per-pane override (source vs preview) but does not
+  make the mode a free per-pane setting;
+- dual view: exact row/byte scroll anchors across the two wraps, a native Markdown
+  menu row (the generated menu table is not hand-edited), persisting the split,
+  and more than one dual view of a document; the dual view is offered for a
+  single-pane Markdown document only;
 - mapped occurrences, rulers, indent guides and whitespace marks in the page view,
   and composed plugin overlays;
 - horizontal scroll inside a page wider than the viewport (the measure clamps to
@@ -206,8 +255,18 @@ rails, caret reveal open/close against body, indentation),
 `compose_table_test.go` (box-drawing rows, alignment, wide CJK cells, per-row
 reveal with the frame width kept, hit into cells, selection over cells, widths
 recomputed when the text version changes, tables inside fences left literal),
+`pageview_table_borders_test.go` (top and bottom border cells, presses on a
+border mapping to the line start/end, the caret row shifted by the inserted rows,
+no borders for a wrapped table or a normal pane) and the TUI-level
+`pageview_table_border_test.go` (borders in order around the header, separator
+and body rows of the whole frame),
 `internal/tui/pageview_test.go` (Markdown detection, buffer override resolution,
 large-file fallback, pane wiring), `editor/markdown_pageview_test.go` (per-buffer
-toggle and width, status text, copy uses source markers, virtual space off), and
-the existing `syntax` markdown tests for the marker iterator plus
-`TestMarkdownFencesClassifies` and the table classifier tests.
+toggle and width, status text, copy uses source markers, virtual space off),
+`internal/tui/dual_test.go` (per-pane page-view resolution with the document
+untouched, 50/50 geometry and source focus, source edit showing in the compose
+pane, compose-pane caret/hit/selection, line-anchored scroll sync both ways,
+close_split closing/clearing the dual view, stale dual clearing, the five mode
+commands and their notices, and the not-Markdown/compare-conflict/single-pane/
+large-file refusals), and the existing `syntax` markdown tests for the marker
+iterator plus `TestMarkdownFencesClassifies` and the table classifier tests.

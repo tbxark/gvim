@@ -291,6 +291,8 @@ func (m *Model) blurPluginPanels() {
 		m.plugEmitWidget(pluginapi.WidgetEvent{Panel: uint64(ps.focus), Event: "focus_lost", Index: -1})
 	}
 	ps.focus = 0
+	// The editor has the keyboard again.
+	m.plugEmit("focus_gained", map[string]any{})
 }
 
 // focusPluginSection gives a sidebar section the keyboard.

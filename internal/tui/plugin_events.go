@@ -279,6 +279,16 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 	for _, b := range before.bufs {
 		if !has(cur.bufs, b.ID) {
 			m.plugEmit("buffer_closed", map[string]any{"id": b.ID, "path": b.Path})
+			m.plugViewStateDrop(b.ID)
+			m.plug.folds.dropBuffer(pluginapi.BufferID(b.ID))
+		}
+	}
+	for _, b := range cur.bufs {
+		for _, old := range before.bufs {
+			if old.ID == b.ID && old.Path != b.Path && b.Path != "" {
+				m.plugEmit("path_changed", map[string]any{"buf": b.ID, "path": b.Path, "old_path": old.Path})
+				break
+			}
 		}
 	}
 	for _, b := range cur.bufs {

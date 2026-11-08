@@ -898,6 +898,9 @@ func (m *Model) settingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 				m.notice = "Settings: " + d.err.Error()
 				return nil, true
 			}
+			if d.structure.Key == "keybindings" {
+				d.structure.Rows = d.sub.parent.m.settingsKeybindingRows(d.structure.Rows)
+			}
 			m.pushOverlay(newSettingsStructurePage(d.sub.parent, d.structure))
 			return nil, true
 		}
@@ -922,10 +925,14 @@ func (m *Model) settingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 		if d.message != "" {
 			m.notice = d.message
 		}
-		if d.page.Active() {
-			return d.page.requestSelf(), true
+		// A plugin action's runtime half runs here, on the update goroutine: the
+		// plugin runtime's Control is documented single-goroutine, while Act only
+		// wrote and reloaded the config file (IO, in the command).
+		pluginCmd := m.settingsPluginControl(d.action, d.value)
+		if d.page != nil && d.page.Active() {
+			return tea.Batch(pluginCmd, d.page.requestSelf()), true
 		}
-		return nil, true
+		return pluginCmd, true
 	}
 	return nil, false
 }

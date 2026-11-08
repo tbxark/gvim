@@ -39,7 +39,9 @@ func (f frame) rowCells(rd rowDesc) []cell {
 		hi = len(ln.cells)
 	}
 	cells := ln.cells[rd.sp.from:hi]
-	if rd.cont() && ln.indent > 0 {
+	if lead := f.rowLead(ln, rd.k); lead > 0 {
+		cells = slices.Concat(f.leadCells(ln, rd.k), cells)
+	} else if rd.cont() && ln.indent > 0 {
 		cells = slices.Concat(ln.pad, cells)
 	}
 	return cells
@@ -56,5 +58,9 @@ func (f frame) paintFoldPlaceholder(g *grid.Grid, i, y, end int, cur bool) int {
 	if cur && f.styles.CurrentLine.BG != nil {
 		st = withBackground(st, f.styles.CurrentLine)
 	}
-	return end + g.Put(end, y, f.w-1, foldPlaceholder, st)
+	text := foldPlaceholder
+	if p, ok := f.foldPlaceholder[i]; ok {
+		text = p
+	}
+	return end + g.Put(end, y, f.w-1, text, st)
 }

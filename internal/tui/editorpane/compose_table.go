@@ -32,6 +32,7 @@ type tableColumnWidths struct {
 type tableModel struct {
 	rows  map[int]syntax.TableLine
 	width map[int]tableColumnWidths // by table id
+	lines map[int][]int             // the line indexes of each table, by id
 }
 
 // tables returns the document's table classification and widths, kept in the
@@ -43,7 +44,8 @@ func (f frame) tables() *tableModel {
 			lines[i] = f.doc.Line(i)
 		}
 		class, tables := syntax.MarkdownTables(lines)
-		m := &tableModel{rows: map[int]syntax.TableLine{}, width: map[int]tableColumnWidths{}}
+		m := &tableModel{rows: map[int]syntax.TableLine{}, width: map[int]tableColumnWidths{},
+			lines: map[int][]int{}}
 		for i, tl := range class {
 			if tl.Kind != syntax.TableNone {
 				m.rows[i] = tl
@@ -51,6 +53,7 @@ func (f frame) tables() *tableModel {
 		}
 		for id, t := range tables {
 			m.width[id] = f.tableWidths(t, class)
+			m.lines[id] = append([]int(nil), t.Lines...)
 		}
 		return m
 	}

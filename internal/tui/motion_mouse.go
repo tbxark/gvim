@@ -78,6 +78,9 @@ func (m *Model) collapseCarets() {
 // toggleFoldAt toggles the fold that starts at line. It reports whether the editor
 // did, and a false answer leaves the click to place the caret.
 func (m *Model) toggleFoldAt(line int) bool {
+	if doc := m.ed.Active(); doc != nil && m.togglePluginFold(doc, line) {
+		return true
+	}
 	t, ok := m.ed.(foldToggler)
 	return ok && t.ToggleFoldAt(line)
 }

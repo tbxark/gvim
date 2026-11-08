@@ -343,7 +343,7 @@ ns:set(buf, {
 * Large files cost nothing until painted: the editor asks per painted line.
 * `Style.strike` is accepted and stored but not drawn.
 
-### Virtual text surface (tier 1c-A)
+### Virtual text surface (tier 1c-A/B, painted)
 
 Beyond the anchored kinds above, a namespace accepts the virtual-text kinds, and convenience
 functions mirror Fresh's names (each takes a `Buffer` first and an `opts` table with
@@ -377,4 +377,19 @@ within the rows above or below one line, ascending priority (ties by insertion o
 bottom; for the rows above, the last one is nearest the anchor line, and for the rows below the
 first one is. Caps: 64 virtual rows and 64 soft breaks per line, 256 conceal spans per line,
 2000 folding ranges per namespace, and the existing per-namespace/owner decoration quotas.
+
+The pane paints the surface: conceal hides cells without changing the line's columns (the
+replacement is drawn in the first hidden cells, activation/scope decides per line, and the
+caret/hit/selection/search mappings stay source-based); soft breaks insert display rows inside
+a line (indent blanks and optional prefix before the continuation text, which keeps its
+columns); virtual lines insert rows above/below the anchor line (gutter glyph one cell,
+text_overlays styled inside the row, the highest 64 priorities kept); the cursor-line overlay
+tints the caret row after the other row paints. The composition order is wrap+folds ->
+markdown compose -> conceal -> soft breaks -> virtual lines -> cursor-line overlay ->
+selection/tail, through one source<->display row mapping shared by painting, caret, hit
+testing, reveal/scrolling and the scrollbar. compose_only items are filtered per painted pane
+(the page view sees them, a normal pane does not). Plugin folds paint like document folds
+(marker, hidden body, placeholder) and toggle with the normal fold action. The surface is
+gated by `gvim.has("decor_virtual_paint")`: the shipped TUI reports true, an older host
+false, and plugins fall back to the anchored kinds when it is false.
 

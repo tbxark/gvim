@@ -39,11 +39,20 @@ func (Unsupported) FullText(BufferID) (string, Version, error) {
 }
 func (Unsupported) SetLanguage(BufferID, string) error    { return unsupported("SetLanguage") }
 func (Unsupported) SavedLines(BufferID) ([]string, error) { return nil, unsupported("SavedLines") }
-func (Unsupported) Activate(BufferID) error               { return unsupported("Activate") }
-func (Unsupported) Close(BufferID, bool) error            { return unsupported("Close") }
-func (Unsupported) MoveTab(BufferID, int) error           { return unsupported("MoveTab") }
-func (Unsupported) TrackChanges(string, bool)             {}
-func (Unsupported) TakeChanges(BufferID, string) Changes  { return Changes{} }
+
+// DiffHost.
+
+func (Unsupported) DiffSource(BufferID) (DiffSource, error) {
+	return DiffSource{}, unsupported("DiffSource")
+}
+func (Unsupported) ReplaceRange(BufferID, int, int, string, *Version) (bool, error) {
+	return false, unsupported("ReplaceRange")
+}
+func (Unsupported) Activate(BufferID) error              { return unsupported("Activate") }
+func (Unsupported) Close(BufferID, bool) error           { return unsupported("Close") }
+func (Unsupported) MoveTab(BufferID, int) error          { return unsupported("MoveTab") }
+func (Unsupported) TrackChanges(string, bool)            {}
+func (Unsupported) TakeChanges(BufferID, string) Changes { return Changes{} }
 func (Unsupported) CreateBuffer(CreateBuffer) (BufferID, error) {
 	return 0, unsupported("CreateBuffer")
 }
@@ -70,9 +79,19 @@ func (Unsupported) CloseWindow(WinID) error               { return unsupported("
 func (Unsupported) SplitWindow(WinID, SplitOptions) (WinID, error) {
 	return 0, unsupported("SplitWindow")
 }
-func (Unsupported) ScrollWindow(WinID, int, bool) error     { return unsupported("ScrollWindow") }
-func (Unsupported) Equalize() error                         { return unsupported("Equalize") }
-func (Unsupported) VisibleRows(WinID) ([]VisibleRow, error) { return nil, unsupported("VisibleRows") }
+func (Unsupported) ScrollWindow(WinID, int, bool) error { return unsupported("ScrollWindow") }
+func (Unsupported) Equalize() error                     { return unsupported("Equalize") }
+func (Unsupported) SetSplitLabel(WinID, string) error   { return unsupported("SetSplitLabel") }
+func (Unsupported) ClearSplitLabel(WinID) error         { return unsupported("ClearSplitLabel") }
+func (Unsupported) SplitByLabel(string) (WinID, bool)   { return 0, false }
+func (Unsupported) GetWindowState(string, BufferID, string) (any, bool) {
+	return nil, false
+}
+func (Unsupported) SetWindowState(string, BufferID, string, any) error {
+	return unsupported("SetWindowState")
+}
+func (Unsupported) ClearWindowState(string, BufferID, string) {}
+func (Unsupported) VisibleRows(WinID) ([]VisibleRow, error)   { return nil, unsupported("VisibleRows") }
 
 // CommandHost.
 

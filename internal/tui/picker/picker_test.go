@@ -477,3 +477,22 @@ func TestMovedReportsNoSelectionWhenNoRowIsShown(t *testing.T) {
 		t.Fatalf("SetItems(nil) of a plain picker reported %+v", got)
 	}
 }
+
+// TestEnterBeforeRankUsesTheTypedQuery checks the Enter path when a ranking is still in
+// flight: the choice is the filtered first row, not the first row of the old query.
+func TestEnterBeforeRankUsesTheTypedQuery(t *testing.T) {
+	p := New(style.New(theme.Theme{}), Options{Items: items("alpha", "beta", "gamma"), Fuzzy: true})
+	p.Init()
+	// Type "beta" but do not apply the ranking command.
+	for _, c := range "beta" {
+		p.Update(key(string(c)))
+	}
+	res := p.Update(key("enter"))
+	if len(res.Events) != 1 {
+		t.Fatalf("events = %v", res.Events)
+	}
+	ch, ok := res.Events[0].(Chosen)
+	if !ok || ch.ID != 101 {
+		t.Fatalf("chosen = %v, want the beta row (101)", res.Events[0])
+	}
+}

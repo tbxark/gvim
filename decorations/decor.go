@@ -245,8 +245,9 @@ type Replacement struct {
 
 // CursorLineOverlay is the style of the caret row.
 type CursorLineOverlay struct {
-	Style    Style
-	Priority int
+	Style       Style
+	Priority    int
+	ComposeOnly bool
 }
 
 // LineDecor is everything the store holds for one line. Every slice is in painting order:

@@ -60,6 +60,33 @@ first item, and a JSON field validates with `json.Valid` and writes the raw JSON
 list) edit the whole array as JSON, because `config.PatchBytes` addresses objects
 and map keys, not array elements.
 
+Three more app-injected pages follow the same rule (their rows are not scalar
+config keys):
+
+- **Languages · one entry** shows the 16 scalar overrides with the value the
+  layer inherits when it does not set one (`(inherit: 8)`, note "inherit"):
+  Enter writes an override, Del removes it and the row goes back to inheriting.
+  After the scalars come the structured children — `extensions` and `filenames`
+  (whole string lists), `formatter` (command, stdin, timeout_ms and an args
+  list; the object is written whole), `on_save` (a JSON array page: actions are
+  objects, so the whole array is edited and validated as JSON) and `indent`
+  (the five pattern strings).
+- **Plugins** lists the runtime inventory (`pluginapi.Runtime.Plugins`: name,
+  source, status, enabled, locked, and the settings keys the user config sets,
+  read-only). Enter on a plugin writes `plugins.<name>.enabled` to the user
+  config and reloads it — with the previous file bytes restored if the write or
+  reload fails — and the root then calls the runtime's `Control` from the update
+  goroutine (the plugin runtime is single-goroutine; Act only does the file IO in
+  its command). The project layer shows the same rows locked: plugin enablement
+  is the user config's. **Reload plugins** calls `Control{Op:"reload_all"}`.
+- **Keybindings** is a read-only effective list: the preset's bindings with the
+  user's own entries marked, grouped by `keymap.ConsultedContexts` order and
+  filterable; the plugin bindings the root's keymap layers are appended
+  read-only by the TUI side (`settingsKeybindingRows`, note "plugin: <name>").
+  There is no in-page capture: Enter on the action row closes Settings and opens
+  the existing validated Keybinding Editor, which writes the keybindings file
+  through the loader. That split is deliberate (docs §6).
+
 `config/settings_structured.go` owns the structured knowledge: the 16 scalar
 per-language override fields (`LanguageOverrideFields`: `tab_size`,
 `use_tabs`, `auto_indent`, `auto_close`, `auto_surround`, `line_wrap`,
@@ -69,7 +96,11 @@ per-language override fields (`LanguageOverrideFields`: `tab_size`,
 known language ids (`KnownLanguageIDs`), the status-bar element names
 (`StatusBarElementNames`), the list of paths the page may reset
 (`RemovablePath`: the schema keys plus `formatters.<key>`,
-`languages.<id>[.<field>]`, `terminal.shell.command|args`), the page
+`languages.<id>[.<field>]`, the per-language structured values
+`extensions`, `filenames`, `formatter[.<field>]`, `on_save` and
+`indent[.<pattern>]`, and `terminal.shell.command|args`), the inherited display
+of a per-language scalar (`LanguageInheritedValue`: the built-in language entry
+applied over the global editor option, e.g. go `tab_size` 8), the page
 summaries, and the `file_explorer.width` display/encode rules ("30%" for a
 percentage, "24 cols" for a column count, a bare number 0-100 is a percentage as
 the config file reads it). `DecodeLayer` decodes one layer file for the app's
@@ -179,7 +210,7 @@ from this layer", not a second "set the built-in default explicitly" button.
 Ctrl+R discards every pending change instead (there is no per-change undo stack).
 
 **Structured sub-pages.** A page row (Languages, Formatters, Status Bar left and
-right, Terminal shell arguments) opens a sub-page
+right, Terminal shell arguments, Language Servers, Plugins, Keybindings) opens a sub-page
 (`internal/tui/settings_structure.go`) built from the port's
 `SettingsStructure`. The sub-page edits the parent page's pending changes as
 they are made; the main page's Ctrl+S writes them all, and Ctrl+S in a sub-page
@@ -191,11 +222,21 @@ loop and a fast back-and-forth cannot show a stale page.
   command, Ctrl+N adds an entry (key, then command), Del resets the entry.
 - **list** (Terminal shell arguments): one row per argument; Enter edits, Ctrl+N
   adds, Del removes, Alt+Up/Down reorders; the whole array is written.
-- **fields** (one language's overrides): the 16 scalar override rows, showing the
-  layer's value or `(default)`; Enter edits by kind, Del resets the override.
+- **fields** (one language's overrides, the formatter, the indent patterns): the
+  scalar rows show the layer's value or the inherited one marked `(inherit: …)`
+  with the "inherit" note; Enter edits by kind, Del resets the override/pattern.
+  Rows that open a child page (the structured language values, the formatter's
+  args) keep their own summary value and open that page on Enter.
 - **languages**: one row per language entry with its override count; Enter opens
   that language's fields sub-page, Ctrl+N adds a language from the known ids,
   Del resets the whole entry.
+- **entries** and **JSON** rows: an entries page (added for future object lists)
+  opens a fields child per entry and writes the whole array; a JSON row (the LSP
+  server arrays, `languages.<id>.on_save`) validates the text with `json.Valid`
+  and writes it as raw JSON at the parent path.
+- **bindings** (Keybindings): context headers and read-only binding rows (chord,
+  action, source note), the typed filter, and the action row that opens the
+  Keybinding Editor; rows are locked, so Enter explains instead of editing.
 - **dual** (Status Bar): Left, Right and Available groups. Tab chooses the side a
   new element joins; Enter on a Left/Right entry moves it to the other side (the
   sibling cross-exclusion: an element is on one side at most), Enter on an
@@ -254,7 +295,11 @@ writes the file but does not apply the value, and the notice says the flag wins.
 **Live page actions.** The Language Servers page's start/stop/restart rows run
 through `SettingsPort.Act` from a command, not from a Save: they start or stop
 servers at once and then refresh the page, so the notice reports the outcome.
-They are not config edits. The Environment rows are facts, not settings.
+They are not config edits. The Plugins page splits differently: Act writes and
+reloads the user config in its command (with rollback to the previous bytes on a
+failed write or reload), and the root runs the runtime's `Control` from the
+update goroutine when the Act result arrives, because the plugin runtime is
+documented single-goroutine. The Environment rows are facts, not settings.
 
 **Reload.** Save always reloads. The palette row **Reload Configuration**
 (`reload_config`, native row in `commands/settings_commands.go`; no default
@@ -269,13 +314,15 @@ method behind it.
 
 ## 6. What is deferred
 
-- **R4-3 remainder (round 7 shipped a partial slice):** the Language Servers
-  page and the read-only Environment section are in. Still open: per-language
-  structured values (extensions/filenames, formatter fields, on_save, indent)
-  with the reset-vs-inherit display, the Plugins page (the plugin runtime's
-  inventory and Control are enough to list/toggle; its per-plugin settings
-  schema is not exposed yet), and the Keybindings page (editing stays in the
-  existing validated Keybinding Editor; a read-only effective list is next);
+- **R7-3 coverage is closed for the page surface:** the Language Servers page,
+  the read-only Environment section, the per-language structured values with the
+  reset-vs-inherit display, the Plugins page and the read-only Keybindings page
+  all ship. The exact residuals are: the plugin runtime exposes no
+  declared-settings schema/values API yet, so a plugin's settings are listed
+  read-only (keys only) and edited in the raw config file; there is no plugin
+  gallery/install page; keybinding editing deliberately stays in the existing
+  Keybinding Editor (no in-page capture, no second writer of the keybindings
+  file);
 - project-environment detection (`env.detectors`: venv/direnv/mise activation)
   is not implemented; the Environment section says so;
 - an LSP server's fields are edited as the whole language array in JSON, not as
@@ -286,7 +333,7 @@ method behind it.
   default" and "inherit/unset", and a full per-change undo stack (the page has
   one reset per setting and Ctrl+R to discard everything);
 - a config Reload keybinding (the palette row is the only entry point);
-- plugin settings and theme preview in the page;
+- plugin settings editing and theme preview in the page;
 - Fresh's generic widget runtime (dual-list drag and drop, map entry dialogs
   with nested fields).
 
@@ -310,6 +357,9 @@ opens the icon preview).
 | `internal/app/settingssvc.go` | the port implementation over the config files, the layer reader of the sub-pages, and the editor's live setters; `SettingsPort.Act` dispatch |
 | `internal/app/settings_runtime.go` | the page's optional live parts (LSP port, plugin runtime, effective keymap, icon resolution), the injected Language Servers/Environment rows and the Environment facts |
 | `internal/app/settings_lsp.go` | the Language Servers structures: effective servers from the built-in table + `lsp` + `universal_lsp`, live status, actions, whole-array JSON editing, project-layer locks |
+| `internal/app/settings_languages.go` | the per-language page: inherited scalar rows and the extensions/filenames/formatter/on_save/indent child structures |
+| `internal/app/settings_plugins.go` | the Plugins page: runtime inventory, user-layer enable/disable with file rollback, reload; declared settings read-only |
+| `internal/app/settings_keybindings.go` | the read-only Keybindings list: effective preset+user bindings grouped by consulted context, and the editor action row |
 | `internal/tui/settings_actions.go` | the settings page's deferred TUI-action message and the Settings-overlay close helper |
 | `internal/app/run.go` | wires the port into the TUI |
 | `commands/settings_commands.go` | the native **Reload Configuration** palette row |
@@ -318,7 +368,13 @@ opens the icon preview).
 
 `internal/tui/settings_plumbing_test.go` pins the new row/page machinery (info,
 locked, inherited, action, filter, empty-list path, JSON validation);
-`internal/app/settings_lsp_test.go` pins the Language Servers page (effective
+`internal/app/settings_languages_test.go` pins the inherited rows and the
+structured child pages; `internal/app/settings_plugins_test.go` pins the plugin
+inventory, the user-layer toggle and both rollback paths;
+`internal/app/settings_keybindings_test.go` pins the grouped effective list and the
+editor action; `internal/tui/settings_bindings_test.go` and
+`internal/tui/settings_plugins_test.go` pin the TUI side (bindings layout, plugin
+rows, Control from Update). `internal/app/settings_lsp_test.go` pins the Language Servers page (effective
 builtin/user/universal rows with live state, project-layer listing/locking and
 the config validation that refuses a project program but accepts a mute, and the
 start/restart/stop actions).

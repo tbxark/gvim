@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -42,16 +43,66 @@ func newProjectSearch(o editor.Options) *projectSearch {
 // classified as binary, the same probe live grep uses.
 const searchBinaryProbe = 8000
 
-// ProjectSearch searches the project's files for req.Query. A file is read once, at
-// most GrepMaxFileBytes, and skipped with a reason when it is too large, binary, not
-// UTF-8 or unreadable. The result carries at most req.Limit matches; Files is the file
-// index snapshot and OpenFiles the unsaved text that replaces their files. It returns an
-// error only for a query that cannot be run at all, such as an invalid regex; a file
-// that cannot be read is a skip, not a failure.
+// searchBatchFiles is the most files one batch carries, and searchBatchMatches the most
+// matches: a batch is sent when either is reached, plus one final batch.
+const (
+	searchBatchFiles   = 128
+	searchBatchMatches = 1000
+)
+
+// ProjectSearchBatches starts the streaming project search over req and returns the
+// channel the batches arrive on. It starts one goroutine for the walk; closing cancel asks
+// that goroutine to stop, and the channel is closed after a final Done batch (always for a
+// completed search) or right after the walk notices the cancellation. Files are reported
+// whole, in finder order, at most searchBatchFiles or searchBatchMatches at a time.
+func (s *projectSearch) ProjectSearchBatches(req searchpanel.SearchRequest, cancel <-chan struct{}) <-chan searchpanel.SearchBatch {
+	out := make(chan searchpanel.SearchBatch)
+	go s.searchBatches(req, cancel, out)
+	return out
+}
+
+// ProjectSearch runs the whole search and returns one result. It drains
+// ProjectSearchBatches, so the streaming and the one-shot callers walk the files the same
+// way.
 func (s *projectSearch) ProjectSearch(req searchpanel.SearchRequest) (searchpanel.SearchResult, error) {
 	var out searchpanel.SearchResult
+	// The drain never cancels: it wants every batch.
+	for batch := range s.ProjectSearchBatches(req, make(chan struct{})) {
+		out.Files = append(out.Files, batch.Files...)
+		out.Truncated = out.Truncated || batch.Truncated
+		out.SkippedCount, out.Skipped = batch.SkippedCount, batch.Skipped
+		if batch.Done && batch.Err != "" {
+			return out, errors.New(batch.Err)
+		}
+	}
+	return out, nil
+}
+
+// searchBatches walks the files of req and sends its batches on out, closing out when it is
+// done. It checks cancel between files and before every send, and never sends after the
+// close.
+func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-chan struct{}, out chan<- searchpanel.SearchBatch) {
+	defer close(out)
+	send := func(batch searchpanel.SearchBatch) bool {
+		select {
+		case <-cancel:
+			return false
+		case out <- batch:
+			return true
+		}
+	}
+	// next reports that the walk may go on, and does not when the search was cancelled.
+	next := func() bool {
+		select {
+		case <-cancel:
+			return false
+		default:
+			return true
+		}
+	}
 	if req.Query == "" {
-		return out, nil
+		send(searchpanel.SearchBatch{Done: true})
+		return
 	}
 	q := search.Query{
 		Text:          req.Query,
@@ -60,23 +111,54 @@ func (s *projectSearch) ProjectSearch(req searchpanel.SearchRequest) (searchpane
 		Regex:         req.Options.Regex,
 	}
 	if err := validateQuery(q); err != nil {
-		return out, err
+		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
+		return
 	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = searchpanel.DefaultLimit
 	}
-	total := 0
-	capped := false
-	skips := newSkipCounts()
 	open := openSourcesByPath(req.OpenFiles)
 
-	// add searches one file's text and appends its matches. It reports whether the
-	// match cap was reached.
-	add := func(path, name string, dirty bool, text string) (bool, error) {
-		if total >= limit {
-			return true, nil
+	// The files to walk, in result order. The current-file scope has one; the file list is
+	// the request's snapshot, capped like live grep.
+	var files []string
+	if req.Scope == searchpanel.CurrentFile {
+		files = []string{""}
+	} else {
+		files = req.Files
+	}
+	if len(files) > pluginhost.GrepMaxFiles {
+		files = files[:pluginhost.GrepMaxFiles]
+	}
+	truncated := req.Scope != searchpanel.CurrentFile && len(req.Files) > pluginhost.GrepMaxFiles
+	total := len(files)
+	if total == 0 {
+		send(searchpanel.SearchBatch{Done: true, Truncated: truncated, Total: 0})
+		return
+	}
+	skips := newSkipCounts()
+	var pending []searchpanel.FileMatches
+	pendingMatches := 0
+	totalMatches := 0
+	scanned := 0
+	flush := func(done bool, errText string) bool {
+		skippedCount, skipped := skips.summary()
+		batch := searchpanel.SearchBatch{
+			Files: pending, Scanned: scanned, Total: total,
+			Truncated: truncated, SkippedCount: skippedCount, Skipped: skipped,
+			Done: done, Err: errText,
 		}
+		if !send(batch) {
+			return false
+		}
+		pending, pendingMatches = nil, 0
+		return true
+	}
+	// addFile searches one file's text and queues its matches. It reports whether the match
+	// cap stopped the walk, and an error only for a query the search cannot run (already
+	// pre-validated).
+	addFile := func(path, name string, dirty bool, text string) (bool, error) {
 		b := buffer.New(text)
 		matches, err := search.Find(b, q)
 		if err != nil {
@@ -95,64 +177,62 @@ func (s *projectSearch) ProjectSearch(req searchpanel.SearchRequest) (searchpane
 				EndLine: m.End.Line + 1,
 				EndCol:  m.End.Col + 1,
 			})
-			if total+len(fm.Matches) >= limit {
-				capped = true
+			if totalMatches+len(fm.Matches) >= limit {
+				truncated = true
 				break
 			}
 		}
-		total += len(fm.Matches)
-		out.Files = append(out.Files, fm)
-		return capped, nil
+		totalMatches += len(fm.Matches)
+		pending = append(pending, fm)
+		pendingMatches += len(fm.Matches)
+		return totalMatches >= limit, nil
+	}
+	// walk searches one candidate file (the current buffer included).
+	walk := func(rel string) (bool, error) {
+		if req.Scope == searchpanel.CurrentFile {
+			if req.Current == nil {
+				return false, nil
+			}
+			name := req.Current.Name
+			if name == "" {
+				name = "[No Name]"
+			}
+			scanned++
+			return addFile(req.Current.Path, name, true, req.Current.Text)
+		}
+		abs := filepath.Join(req.Root, filepath.FromSlash(rel))
+		if src, ok := open[abs]; ok {
+			scanned++
+			return addFile(abs, rel, src.Dirty, src.Text)
+		}
+		text, reason := readSearchableFile(abs, s.skipFrom)
+		scanned++
+		if reason != "" {
+			skips.add(reason)
+			return false, nil
+		}
+		return addFile(abs, rel, false, text)
 	}
 
-	switch req.Scope {
-	case searchpanel.CurrentFile:
-		if req.Current == nil {
-			return out, nil
+	for _, rel := range files {
+		if !next() {
+			return
 		}
-		name := req.Current.Name
-		if name == "" {
-			name = "[No Name]"
+		reached, err := walk(rel)
+		if err != nil {
+			flush(true, err.Error())
+			return
 		}
-		if _, err := add(req.Current.Path, name, true, req.Current.Text); err != nil {
-			return out, err
+		if reached {
+			break
 		}
-	default:
-		files := req.Files
-		if len(files) > pluginhost.GrepMaxFiles {
-			files = files[:pluginhost.GrepMaxFiles]
-			capped = true
-		}
-		for _, rel := range files {
-			abs := filepath.Join(req.Root, filepath.FromSlash(rel))
-			if src, ok := open[abs]; ok {
-				// An open buffer is searched as it is, so unsaved edits are seen.
-				reached, err := add(abs, rel, src.Dirty, src.Text)
-				if err != nil {
-					return out, err
-				}
-				if reached {
-					break
-				}
-				continue
-			}
-			text, reason := readSearchableFile(abs, s.skipFrom)
-			if reason != "" {
-				skips.add(reason)
-				continue
-			}
-			reached, err := add(abs, rel, false, text)
-			if err != nil {
-				return out, err
-			}
-			if reached {
-				break
+		if len(pending) >= searchBatchFiles || pendingMatches >= searchBatchMatches {
+			if !flush(false, "") {
+				return
 			}
 		}
 	}
-	out.Truncated = capped
-	out.SkippedCount, out.Skipped = skips.summary()
-	return out, nil
+	flush(true, "")
 }
 
 // ProjectReplace plans the replacement of req.Query with req.Replacement in each file.
@@ -272,7 +352,7 @@ func (s *projectSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.Pre
 	first = clampInt(first, 0, max(len(lines)-req.Lines, 0))
 	out.Start = first
 	for k := first; k < len(lines) && k < first+req.Lines; k++ {
-		out.Lines = append(out.Lines, strings.TrimRight(lines[k], ""))
+		out.Lines = append(out.Lines, strings.TrimRight(lines[k], "\r"))
 	}
 	return out, nil
 }

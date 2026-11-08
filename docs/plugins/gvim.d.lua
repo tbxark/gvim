@@ -582,6 +582,27 @@ function gvim.buf.close_group(id) end
 ---@param id integer
 ---@return {name: string, buf: Buffer, window?: Window, visible: boolean}[]|nil, string?
 function gvim.buf.group_panels(id) end
+---@param buf Buffer
+---@param key string
+---@param default? any
+---@return any|nil value, or default when the key is not set
+function gvim.buf.get_window_state(buf, key, default) end
+---@param buf Buffer
+---@param key string
+---@param value string|number|boolean|nil (nil clears the key)
+---@return true|nil, string?
+function gvim.buf.set_window_state(buf, key, value) end
+---@param path string
+---@param opts? {direction?: "right"|"below", focus?: boolean, preview?: boolean, background?: boolean, pos?: Pos}
+---@return true, Buffer|nil, string?
+function gvim.buf.open_file_in_split(path, opts) end
+---@param win Window
+---@return true|nil, string?
+function gvim.buf.focus_split(win) end
+---@param win Window
+---@return true|nil, string?
+function gvim.buf.close_split(win) end
+
 
 
 gvim.win = {}
@@ -594,6 +615,16 @@ function gvim.win.list() end
 function gvim.win.get(id) end
 ---@return true
 function gvim.win.equalize() end
+---@param win Window
+---@param label string at most 64 bytes; "" clears it
+---@return true|nil, string?
+function gvim.win.set_split_label(win, label) end
+---@param label string
+---@return Window|nil
+function gvim.win.get_split_by_label(label) end
+---@param win Window
+---@return true|nil, string?
+function gvim.win.clear_split_label(win) end
 ---@param id integer a plugin-chosen id
 ---@param left Window the leader window
 ---@param right Window the follower window
@@ -1120,6 +1151,40 @@ function gvim.diff.next_hunk(hunks, line) end
 ---@param line integer
 ---@return Hunk|nil
 function gvim.diff.prev_hunk(hunks, line) end
+---@class CompareSpan
+---@field start integer
+---@field end integer
+---@class CompareSide
+---@field start integer
+---@field count integer
+---@field from integer
+---@field to integer
+---@field jump integer
+---@field lines [integer, integer][]
+---@field spans (CompareSpan|false)[]
+---@class CompareHunk
+---@field left CompareSide
+---@field right CompareSide
+---@field eol_only boolean
+---@class CompareResult
+---@field hunks CompareHunk[]
+---@field left_lines integer
+---@field right_lines integer
+---@field left_len integer
+---@field right_len integer
+---@field left_version string
+---@field right_version string
+---@param left Buffer
+---@param right Buffer
+---@return CompareResult|nil, string?
+function gvim.diff.compare_buffers(left, right) end
+---@param buf Buffer
+---@param start integer
+---@param end integer
+---@param text string
+---@param expected_version? string
+---@return boolean|nil, string?
+function gvim.diff.replace_range(buf, start, end, text, expected_version) end
 
 gvim.plugins = {}
 ---@return {name: string, status: string, version: string, source: string}[]

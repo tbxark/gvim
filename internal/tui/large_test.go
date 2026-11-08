@@ -817,11 +817,11 @@ func TestLargeDocumentWrapsWhenTheSettingSaysSo(t *testing.T) {
 	dir := t.TempDir()
 	m, le := newLargeModel(t, writeLines(t, dir, "a.txt", bigFile, 400, 0))
 	start(m)
-	if p := m.viewPane(editorpane.Pane{}, le.Active()); !p.Wrap {
+	if p := m.viewPane(splitPane{}, editorpane.Pane{}, le.Active()); !p.Wrap {
 		t.Errorf("a large document is painted unwrapped while line wrap is on")
 	}
 	m.view.lineWrap = false
-	if p := m.viewPane(editorpane.Pane{}, le.Active()); p.Wrap {
+	if p := m.viewPane(splitPane{}, editorpane.Pane{}, le.Active()); p.Wrap {
 		t.Errorf("a large document is painted wrapped while line wrap is off")
 	}
 }

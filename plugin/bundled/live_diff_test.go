@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func liveDiffFiles(t *testing.T) plugintest.Files {
 
 // startLiveDiff is the rig for live_diff: it loads the i18n file too, so the
 // test sees the translated Fresh strings.
-func startLiveDiff(t *testing.T, o rigOpts) *rig {
+func startLiveDiffMode(t *testing.T, o rigOpts, full bool) *rig {
 	t.Helper()
 	r := &rig{t: t, host: plugintest.NewFakeHost(), os: plugintest.NewFakeOS(), ids: map[string]pluginapi.BufferID{}}
 	if !o.noGit {
@@ -44,6 +45,9 @@ func startLiveDiff(t *testing.T, o rigOpts) *rig {
 		o.script(r.os)
 	}
 	r.os.Script(filtersArgv, plugintest.ProcScript{Code: 1})
+	// The fake host advertises tier-1c painting by default; the reduced-path tests
+	// force it off and the full-path tests leave it on.
+	r.host.SetFeature("decor_virtual_paint", full)
 	for _, b := range o.buffers {
 		r.ids[b.path] = r.host.AddBuffer(b.path, b.text)
 	}
@@ -60,6 +64,12 @@ func startLiveDiff(t *testing.T, o rigOpts) *rig {
 
 // liveDiffRig opens liveDiffFile with text, scripts HEAD to be head, and loads
 // live_diff. The plugin is opt-in and starts disabled.
+// startLiveDiff is startLiveDiffMode with the reduced (pre-tier-1c) rendering.
+func startLiveDiff(t *testing.T, o rigOpts) *rig {
+	t.Helper()
+	return startLiveDiffMode(t, o, false)
+}
+
 func liveDiffRig(t *testing.T, head, text string) *rig {
 	t.Helper()
 	return startLiveDiff(t, rigOpts{
@@ -378,5 +388,107 @@ func TestLiveDiffRefusesLargeFiles(t *testing.T) {
 	}
 	if got := r.host.Decor().Entries; len(got) != 0 {
 		t.Errorf("decorations for a large file: %v", got)
+	}
+}
+
+// liveDiffFullRig is liveDiffRig for a host that paints tier-1c virtual rows.
+func liveDiffFullRig(t *testing.T, head, text string) *rig {
+	t.Helper()
+	return startLiveDiffMode(t, rigOpts{
+		buffers: []rigBuffer{{liveDiffFile, text}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: head})
+			o.SetFile(liveDiffFile, text)
+		},
+	}, true)
+}
+
+// virtualLines returns the virtual-line items of the plugin for the fixture buffer.
+func virtualLines(r *rig) []pluginapi.Decoration {
+	var out []pluginapi.Decoration
+	for _, it := range r.decor("live_diff", "live_diff_vlines", liveDiffFile) {
+		if it.Kind == pluginapi.DecorVirtualLineAbove || it.Kind == pluginapi.DecorVirtualLineBelow {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// TestLiveDiffFullRenderingShowsTheDeletedOldLine: with decor_virtual_paint the removed
+// word's old line is drawn above the seam, with its '-' gutter glyph and word overrides.
+func TestLiveDiffFullRenderingShowsTheDeletedOldLine(t *testing.T) {
+	const head = "alpha beta gamma\nkeep\n"
+	r := liveDiffFullRig(t, head, "alpha gamma\nkeep\n")
+	liveDiffEnable(t, r)
+	if n := r.runs("show"); n != 1 {
+		t.Fatalf("git show ran %d times, want 1", n)
+	}
+	lines := virtualLines(r)
+	if len(lines) != 1 {
+		t.Fatalf("virtual lines = %d, want the one deleted old line (log %v)", len(lines), r.h.LogText("live_diff"))
+	}
+	v := lines[0]
+	if v.Kind != pluginapi.DecorVirtualLineAbove || !v.Above || v.Line != 0 || v.Text != "alpha beta gamma" {
+		t.Errorf("virtual line = %+v, want the old line above line 0", v)
+	}
+	if v.GutterText != "-" || v.Style.BG.Key != "editor.diff_remove_bg" || v.Style.FG.Key != "editor.diff_remove_collision_fg" {
+		t.Errorf("virtual line style/gutter = %q/%q/%q", v.GutterText, v.Style.BG.Key, v.Style.FG.Key)
+	}
+	if len(v.TextOverlays) != 1 {
+		t.Fatalf("text overlays = %+v, want the removed word range", v.TextOverlays)
+	}
+	overlay := v.TextOverlays[0]
+	if overlay.Range.From.Col != 6 || overlay.Range.To.Col != 10 || !overlay.Style.Bold || !overlay.Style.Underline {
+		t.Errorf("text overlay = %+v, want bytes 6..10 bold+underline (the removed word beta)", overlay)
+	}
+	// The new side keeps its background but has no unmatched words to underline here.
+	if got := liveDiffBgLines(r); !slices.Equal(got, []int{0}) {
+		t.Errorf("line backgrounds = %v, want line 0", got)
+	}
+	if p := r.problems(); len(p) != 0 {
+		t.Errorf("problems: %v", p)
+	}
+}
+
+// TestLiveDiffFullRenderingCapsRowsPerAnchor: a deletion block longer than the host's
+// 64-rows-per-anchor cap is cut to 63 old lines plus one summary row.
+func TestLiveDiffFullRenderingCapsRowsPerAnchor(t *testing.T) {
+	var head strings.Builder
+	for i := 1; i <= 70; i++ {
+		head.WriteString("l" + strconv.Itoa(i) + "\n")
+	}
+	head.WriteString("last\n")
+	r := liveDiffFullRig(t, head.String(), "last\n")
+	liveDiffEnable(t, r)
+	lines := virtualLines(r)
+	if len(lines) != 64 {
+		t.Fatalf("virtual lines = %d, want the 64 rows the host keeps (log %v)", len(lines), r.h.LogText("live_diff"))
+	}
+	if lines[0].Text != "l1" || lines[62].Text != "l63" {
+		t.Errorf("first/last shown = %q/%q, want l1..l63", lines[0].Text, lines[62].Text)
+	}
+	if got := lines[63].Text; !strings.Contains(got, "7 more deleted lines") {
+		t.Errorf("summary row = %q, want the 7 remaining lines", got)
+	}
+	for i := 0; i < len(lines)-1; i++ {
+		if lines[i].Priority != i {
+			t.Errorf("row %d priority = %d, want ascending order %d", i, lines[i].Priority, i)
+		}
+	}
+	// A host without tier-1c painting renders the same deletion as a scrollbar mark
+	// only. The capability is read when the plugin loads, so this is a second rig.
+	reduced := startLiveDiff(t, rigOpts{
+		buffers: []rigBuffer{{liveDiffFile, "last\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: head.String()})
+			o.SetFile(liveDiffFile, "last\n")
+		},
+	})
+	liveDiffEnable(t, reduced)
+	if got := virtualLines(reduced); len(got) != 0 {
+		t.Errorf("reduced mode emitted %d virtual rows", len(got))
+	}
+	if got := liveDiffScroll(reduced); len(got) != 1 {
+		t.Errorf("reduced scrollbar marks = %v, want the deletion mark", got)
 	}
 }

@@ -9,6 +9,10 @@ type PageView struct {
 	On       bool
 	Measure  int  // the page measure in cells; 0 or too wide means the text area
 	Markdown bool // compose the inline Markdown marks
+	// NoCaretReveal is set on a page view whose caret line must stay concealed:
+	// the unfocused pane of a dual view, where the document caret is not the
+	// pane's own. The zero value reveals the caret line as usual.
+	NoCaretReveal bool
 }
 
 // minPageViewWidth is the narrowest page the pane lays out; a narrower measure

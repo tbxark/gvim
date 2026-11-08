@@ -3,8 +3,10 @@ package app
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
@@ -401,5 +403,137 @@ func TestProjectPreviewContext(t *testing.T) {
 	res, err = s.Preview(searchpanel.PreviewRequest{Path: filepath.Join(dir, "gone.txt"), Line: 1, Col: 1, EndLine: 1, EndCol: 2, Lines: 4})
 	if err != nil || res.Err != "unreadable file" {
 		t.Fatalf("missing file preview = %+v, %v", res, err)
+	}
+}
+
+// batchFiles makes n files of one line each, named so the finder order is clear.
+func batchFiles(n int) ([]string, map[string]string) {
+	files := make([]string, n)
+	content := make(map[string]string, n)
+	for i := range files {
+		files[i] = fmt.Sprintf("f%03d.txt", i)
+		content[files[i]] = "needle here\n"
+	}
+	return files, content
+}
+
+func TestProjectSearchBatchesStreamInFinderOrder(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	files, content := batchFiles(300)
+	writeTree(t, dir, content)
+	s := newProjectSearch(editor.Options{})
+	ch := s.ProjectSearchBatches(projectSearchRequest(dir, files, "needle"), make(chan struct{}))
+	var got []string
+	batches := 0
+	last := -1
+	for batch := range ch {
+		batches++
+		if batch.Total != len(files) {
+			t.Fatalf("batch total = %d, want %d", batch.Total, len(files))
+		}
+		if batch.Scanned < last {
+			t.Fatalf("batch scanned went backwards: %d after %d", batch.Scanned, last)
+		}
+		last = batch.Scanned
+		if len(batch.Files) > searchBatchFiles {
+			t.Fatalf("batch carries %d files, want at most %d", len(batch.Files), searchBatchFiles)
+		}
+		for _, f := range batch.Files {
+			got = append(got, f.Name)
+		}
+		if batch.Done && got[len(got)-1] != files[len(files)-1] {
+			t.Fatalf("the done batch came before the last file: %q", got[len(got)-1])
+		}
+	}
+	if batches < 3 {
+		t.Fatalf("batches = %d, want the 300 files split", batches)
+	}
+	if !slices.Equal(got, files) {
+		t.Fatalf("files = %v, want the finder order", got)
+	}
+	// The one-shot call drains the same stream to the same result.
+	res, err := s.ProjectSearch(projectSearchRequest(dir, files, "needle"))
+	if err != nil || len(res.Files) != len(files) {
+		t.Fatalf("one-shot result = %d files, %v", len(res.Files), err)
+	}
+}
+
+func TestProjectSearchBatchesAreBoundedByMatches(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	content := map[string]string{}
+	files := make([]string, 20)
+	for i := range files {
+		files[i] = fmt.Sprintf("f%03d.txt", i)
+		content[files[i]] = strings.Repeat("needle\n", 100)
+	}
+	writeTree(t, dir, content)
+	s := newProjectSearch(editor.Options{})
+	ch := s.ProjectSearchBatches(projectSearchRequest(dir, files, "needle"), make(chan struct{}))
+	batches := 0
+	for batch := range ch {
+		batches++
+		matches := 0
+		for _, f := range batch.Files {
+			matches += len(f.Matches)
+		}
+		if matches > searchBatchMatches {
+			t.Fatalf("batch carries %d matches, want at most %d", matches, searchBatchMatches)
+		}
+	}
+	if batches < 2 {
+		t.Fatalf("batches = %d, want the match cap to split the stream", batches)
+	}
+}
+
+func TestProjectSearchBatchesStopOnCancel(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	files, content := batchFiles(300)
+	writeTree(t, dir, content)
+	s := newProjectSearch(editor.Options{})
+	cancel := make(chan struct{})
+	ch := s.ProjectSearchBatches(projectSearchRequest(dir, files, "needle"), cancel)
+	first := <-ch
+	if first.Done {
+		t.Fatal("the first batch was already the done batch")
+	}
+	close(cancel)
+	got := len(first.Files)
+	closed := make(chan struct{})
+	go func() {
+		for batch := range ch {
+			got += len(batch.Files)
+		}
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream did not close after the cancellation")
+	}
+	if got >= len(files) {
+		t.Fatalf("a cancelled search still walked every file (%d)", got)
+	}
+}
+
+func TestProjectSearchBatchesReportAQueryErrorInTheDoneBatch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	files, content := batchFiles(3)
+	writeTree(t, dir, content)
+	s := newProjectSearch(editor.Options{})
+	req := projectSearchRequest(dir, files, "(")
+	req.Options = searchpanel.MatchOptions{Regex: true}
+	var batches []searchpanel.SearchBatch
+	for batch := range s.ProjectSearchBatches(req, make(chan struct{})) {
+		batches = append(batches, batch)
+	}
+	if len(batches) != 1 || !batches[0].Done || batches[0].Err == "" || len(batches[0].Files) != 0 {
+		t.Fatalf("batches = %+v, want one done batch with the error", batches)
+	}
+	if _, err := s.ProjectSearch(req); err == nil {
+		t.Fatal("the one-shot search did not return the query error")
 	}
 }

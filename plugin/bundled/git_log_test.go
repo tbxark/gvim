@@ -2,6 +2,7 @@ package bundled_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"slices"
 	"strings"
@@ -590,6 +591,48 @@ func TestGitLogEnterOpensFileAtLine(t *testing.T) {
 	}
 }
 
+// TestGitLogRemembersDetailScroll: the now-active tier-1c-C seam. Leaving a commit saves the
+// detail scroll line for it (gvim.buf.set_window_state), and coming back through the cached
+// path restores it (get_window_state) instead of landing at the top.
+func TestGitLogRemembersDetailScroll(t *testing.T) {
+	t.Parallel()
+	h, host, _ := openGitLog(t,
+		commitRecord("aaaa1111", "aaaa111", "Ann", "1 hour ago", "", "first"),
+		commitRecord("bbbb2222", "bbbb222", "Bob", "2 hours ago", "", "second"),
+	)
+	logBuf := groupPanel(t, h, "log")
+	detailBuf := groupPanel(t, h, "detail")
+	// Scroll the first commit's detail, then select the second: load_detail saves the
+	// first commit's line under scroll:<sha> before it retargets the buffer.
+	if err := host.SetCursor(detailBuf, pluginapi.Pos{Line: 2}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.SetCursor(logBuf, pluginapi.Pos{Line: 1}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	h.Emit(pluginapi.Event{Name: "cursor_moved", Data: map[string]any{
+		"buf": logBuf, "pos": pluginapi.Pos{Line: 1},
+	}})
+	h.Advance(60 * time.Millisecond)
+	if got, ok := host.WindowStateValue("git_log", detailBuf, "scroll:aaaa1111"); !ok || fmt.Sprint(got) != "2" {
+		t.Fatalf("saved scroll state = %v, %v; want the line 2 for the first commit", got, ok)
+	}
+	// Selecting the cached first commit again restores that scroll line.
+	if err := host.SetCursor(logBuf, pluginapi.Pos{Line: 0}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	h.Emit(pluginapi.Event{Name: "cursor_moved", Data: map[string]any{
+		"buf": logBuf, "pos": pluginapi.Pos{Line: 0},
+	}})
+	h.Advance(60 * time.Millisecond)
+	cursors, err := host.Cursors(detailBuf)
+	if err != nil || len(cursors) == 0 {
+		t.Fatalf("detail cursors: %v, %v", cursors, err)
+	}
+	if got := cursors[0].Pos.Line; got != 2 {
+		t.Errorf("restored detail scroll = line %d, want 2", got)
+	}
+}
 func TestGitLogBoundedAndErrors(t *testing.T) {
 	t.Parallel()
 	t.Run("commit cap", func(t *testing.T) {
@@ -738,4 +781,51 @@ func gitLogItoa(n int) string {
 		n /= 10
 	}
 	return string(digits)
+}
+
+// TestGitLogViewStateRestoresTheDetailScroll: the tier-1c-C window state seam is used to
+// remember how far the reader scrolled into each commit's diff, and to restore it when the
+// commit is revisited (the second visit comes from the disk cache).
+func TestGitLogViewStateRestoresTheDetailScroll(t *testing.T) {
+	t.Parallel()
+	h, host, _ := openGitLog(t,
+		commitRecord("aaaa1111", "aaaa111", "Ann", "2 days ago", "", "first commit"),
+		commitRecord("bbbb2222", "bbbb222", "Bob", "3 days ago", "", "second commit"),
+	)
+	detailBuf := groupPanel(t, h, "detail")
+	if err := host.SetCursor(detailBuf, pluginapi.Pos{Line: 4}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	// Switching away saves the scroll line of the commit being left.
+	if err := h.Run(gitLogPlugin+".git_log_next", nil); err != nil {
+		t.Fatal(err)
+	}
+	finishStreams(h)
+	h.Advance(80 * time.Millisecond) // the selection debounce (60 ms)
+	finishStreams(h)
+	value, ok := host.WindowStateValue(gitLogPlugin, detailBuf, "scroll:aaaa1111")
+	if !ok || fmt.Sprint(value) != "4" {
+		t.Fatalf("saved scroll for aaaa1111 = %v (%T), %v; want 4 (notices %v)", value, value, ok, h.NoticeTexts())
+	}
+	// Coming back restores the caret from the saved line.
+	if err := h.Run(gitLogPlugin+".git_log_prev", nil); err != nil {
+		t.Fatal(err)
+	}
+	finishStreams(h)
+	h.Advance(80 * time.Millisecond)
+	finishStreams(h)
+	cursors, err := host.Cursors(detailBuf)
+	if err != nil || len(cursors) == 0 {
+		t.Fatalf("detail cursors = %v, %v", cursors, err)
+	}
+	if got := cursors[0].Pos.Line; got != 4 {
+		t.Errorf("restored detail caret line = %d, want 4", got)
+	}
+	// Closing the view saves the current commit's line too.
+	if err := h.Run(gitLogPlugin+".git_log_close", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := host.WindowStateValue(gitLogPlugin, detailBuf, "scroll:aaaa1111"); !ok {
+		t.Error("closing the view dropped the saved scroll state")
+	}
 }

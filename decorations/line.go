@@ -273,7 +273,7 @@ func (w *window) add(e *entry) {
 		}
 	case CursorLine:
 		if i, ok := at(e.FromLine); ok && w.top[i].cursorLines.wants(e.Priority, e.seq) {
-			w.top[i].cursorLines.push(CursorLineOverlay{Style: e.Style, Priority: e.Priority}, e.Priority, e.seq)
+			w.top[i].cursorLines.push(CursorLineOverlay{Style: e.Style, Priority: e.Priority, ComposeOnly: e.ComposeOnly}, e.Priority, e.seq)
 		}
 	}
 }

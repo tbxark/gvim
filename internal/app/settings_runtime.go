@@ -39,6 +39,11 @@ type settingsRuntime struct {
 	lsp        settingsLSP
 	plugins    settingsPlugins
 	pluginsCfg config.Config // the config the plugin runtime was built from
+	// keymapOf returns the effective keymap of cfg: the preset with the user's
+	// config keybindings applied. Nil leaves the Keybindings page without a list.
+	keymapOf func(cfg config.Config) tui.Keymap
+	// presetName names the keymap preset the session runs, for the page note.
+	presetName string
 	// iconsMode and iconsWhy are the resolved icon set and its reason, for the
 	// read-only Environment rows.
 	iconsMode, iconsWhy string
@@ -129,6 +134,14 @@ func (s *settingsService) extraSections(cfg config.Config) []tui.SettingsSection
 		Kind: "page", Value: strconv.Itoa(len(languages)) + " languages",
 		Layers: []string{tui.SettingsLayerUser, tui.SettingsLayerProject},
 	}}}}
+	out = append(out, tui.SettingsSection{Name: "Plugins", Items: []tui.SettingsItem{{
+		Key: "plugins", Path: []string{"plugins"}, Name: "Plugins", Section: "Plugins",
+		Kind: "page", Value: s.pluginSummary(), Layers: []string{tui.SettingsLayerUser},
+	}}})
+	out = append(out, tui.SettingsSection{Name: "Keybindings", Items: []tui.SettingsItem{{
+		Key: "keybindings", Path: []string{"keybindings"}, Name: "Keybindings", Section: "Keybindings",
+		Kind: "page", Value: s.keybindingsSummary(), Layers: []string{tui.SettingsLayerUser},
+	}}})
 	items := make([]tui.SettingsItem, 0, 8)
 	for _, fact := range s.envFacts(cfg) {
 		items = append(items, tui.SettingsItem{
@@ -138,4 +151,36 @@ func (s *settingsService) extraSections(cfg config.Config) []tui.SettingsSection
 	}
 	out = append(out, tui.SettingsSection{Name: "Environment", Items: items})
 	return out
+}
+
+// pluginSummary is the Plugins page row's value: the enabled count of the runtime
+// inventory.
+func (s *settingsService) pluginSummary() string {
+	if s.rt.plugins == nil {
+		return "no plugin runtime"
+	}
+	infos := s.rt.plugins.Plugins()
+	enabled := 0
+	for _, info := range infos {
+		if info.Enabled {
+			enabled++
+		}
+	}
+	return strconv.Itoa(enabled) + " of " + strconv.Itoa(len(infos)) + " enabled"
+}
+
+// keybindingsSummary is the Keybindings page row's value: the effective binding
+// count and the preset.
+func (s *settingsService) keybindingsSummary() string {
+	count := 0
+	if s.rt.keymapOf != nil && s.cfg.Keybindings != nil {
+		if lister, ok := s.rt.keymapOf(s.cfg).(tui.BindingLister); ok {
+			count = len(lister.Bindings())
+		}
+	}
+	summary := strconv.Itoa(count) + " bindings"
+	if s.rt.presetName != "" {
+		summary += " · " + s.rt.presetName
+	}
+	return summary
 }

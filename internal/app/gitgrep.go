@@ -47,6 +47,12 @@ func (gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, error
 		argv = append(argv, "-i")
 	}
 	argv = append(argv, "-e", req.Query)
+	if len(req.Pathspecs) > 0 {
+		// The patterns are git pathspecs, so they go after the separator and are never
+		// read as options.
+		argv = append(argv, "--")
+		argv = append(argv, req.Pathspecs...)
+	}
 	text, code, err := shellcmd.RunArgs(root, argv, "", gitGrepTimeout)
 	if err != nil {
 		return out, err
@@ -82,7 +88,7 @@ func (gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, error
 				Name: rel,
 			})
 		}
-		content := strings.TrimRight(m[4], "")
+		content := strings.TrimRight(m[4], "\r")
 		out.Files[idx].Matches = append(out.Files[idx].Matches, searchpanel.Match{
 			Line: lineNo,
 			Col:  col,

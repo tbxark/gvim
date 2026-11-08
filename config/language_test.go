@@ -372,3 +372,57 @@ func TestMatchesName(t *testing.T) {
 		}
 	}
 }
+
+// TestLanguageInheritedValue checks the inherited display the Settings page shows
+// for a per-language scalar: the built-in language entry applied over the global
+// option (Fresh's built-in defaults), and the fields with no single display form.
+func TestLanguageInheritedValue(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	tests := []struct {
+		language, field, want string
+		ok                    bool
+	}{
+		{"go", "tab_size", "8", true},            // built-in languages.go
+		{"go", "use_tabs", "on", true},           // built-in use_tabs
+		{"go", "auto_indent", "on", true},        // global default
+		{"markdown", "auto_indent", "off", true}, // built-in markdown
+		{"markdown", "auto_close", "off", true},  // built-in markdown
+		{"text", "tab_size", "4", true},          // global default
+		{"custom", "line_wrap", "on", true},      // no entry: global
+		{"go", "wrap_column", "0", true},         // 0 reads as the viewport
+		{"go", "indentation_guide", "on", true},  // guides are on by default
+		{"plaintext-ish", "grammar", "", false},  // no single display form
+	}
+	for _, tt := range tests {
+		got, ok := cfg.LanguageInheritedValue(tt.language, tt.field)
+		if ok != tt.ok || got != tt.want {
+			t.Errorf("LanguageInheritedValue(%q, %q) = %q, %v; want %q, %v", tt.language, tt.field, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+// TestRemovablePathLanguageStructured checks the reset paths of the new
+// per-language structured values: the page may remove a whole list/object or one
+// of its fields.
+func TestRemovablePathLanguageStructured(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		path []string
+		want bool
+	}{
+		{[]string{"languages", "go", "extensions"}, true},
+		{[]string{"languages", "go", "filenames"}, true},
+		{[]string{"languages", "go", "formatter"}, true},
+		{[]string{"languages", "go", "formatter", "args"}, true},
+		{[]string{"languages", "go", "on_save"}, true},
+		{[]string{"languages", "go", "indent"}, true},
+		{[]string{"languages", "go", "indent", "increase_indent_pattern"}, true},
+		{[]string{"languages", "go", "nonsense"}, false},
+		{[]string{"languages", "go", "nonsense", "deeper"}, false},
+	} {
+		if got := RemovablePath(tt.path); got != tt.want {
+			t.Errorf("RemovablePath(%v) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}

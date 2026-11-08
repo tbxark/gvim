@@ -13,6 +13,19 @@ The same view opens from the command palette with **Compare Files...** (it asks 
 files in turn) and **Compare Active File With...** (the active file and one more). Both sides are
 the files themselves: edit either one, undo, save, search. The marks follow your edits.
 
+## The bundled plugin port
+
+The view above is gvim's built-in implementation of what Fresh ships as the `compare_files` plugin.
+The same plugin is also bundled, ported to the Lua plugin API, as
+`plugin/bundled/plugins/compare_files`: it draws the comparison as a group-lite of two splits of
+the current tab showing the two file buffers, gets every hunk and byte range from
+`gvim.diff.compare_buffers`, and applies a copy or take through `gvim.diff.replace_range` (one
+edit, one undo step). It registers the same eight commands and no default keys, as Fresh does, and
+it is **off by default** for the bundled idle-heap budget; enabling it adds those commands to the
+palette next to the built-in view's. The host API it uses is documented in
+[api-system.md](plugins/api-system.md#gvimdiff); the port and its reduced differences are listed in
+[porting.md](plugins/porting.md) and [bundled.md](plugins/bundled.md).
+
 ## Reading a view
 
 - A line changed on both sides has a `~` in the gutter and a background on both sides, with the

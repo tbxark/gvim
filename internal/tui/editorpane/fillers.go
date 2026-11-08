@@ -128,7 +128,7 @@ func (f frame) fillAfter(i int) int { return f.fill.after(i) }
 
 // rowsIn is the display rows of the block of line i: its filler rows and its text rows.
 func (f frame) rowsIn(i int, ln line) int {
-	return f.fillAbove(i) + len(ln.spans) + f.fillAfter(i)
+	return f.fillAbove(i) + f.aboveCount(i) + len(ln.spans) + f.belowCount(i) + f.fillAfter(i)
 }
 
 // fillRows is the number of filler rows of the frame's text.

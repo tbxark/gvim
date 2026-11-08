@@ -28,6 +28,16 @@ var _ pluginapi.Host = (*pluginHost)(nil)
 
 // ed returns the editor's plugin port (RootPorts.PluginEditor), or a port that refuses
 // everything when there is none.
+// Feature reports the host capabilities gvim.has may ask about (the optional host feature
+// seam; see installDecor).
+func (h *pluginHost) Feature(name string) bool {
+	switch name {
+	case "decor_virtual_paint":
+		return true // the tier-1c paint surface (B1+B2)
+	}
+	return false
+}
+
 func (h *pluginHost) ed() pluginapi.BufferEditor {
 	if pe := h.m.plug.pe; pe != nil {
 		return pe
@@ -518,6 +528,7 @@ func (h *pluginHost) OwnerGone(plugin string, gen uint64) {
 	m.plugDecorGone(plugin, gen)
 	m.plugWinGone(plugin, gen)
 	m.plugVirtualGone(plugin, gen)
+	m.plugViewStateDropOwner(plugin)
 }
 
 // ---- pluginapi.WorkspaceHost.

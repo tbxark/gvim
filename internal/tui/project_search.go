@@ -45,6 +45,12 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		m.notice = "Project-wide search is not supported in this port"
 		return nil
 	}
+	// A second open while the first panel is still on the stack would leave the first
+	// panel's stream running behind the new one: cancel it first.
+	if m.proj.panel != nil && m.proj.panel.Active() {
+		m.proj.panel.Dismiss()
+		m.popOverlay()
+	}
 	modes, scope := m.projectSearchSettings()
 	glob := ""
 	var history []string

@@ -69,6 +69,18 @@ func (g hostGuard) FullText(id pluginapi.BufferID) (string, pluginapi.Version, e
 	return g.Host.FullText(id)
 }
 
+// DiffSource reads a whole buffer's lines and byte geometry: heavy like FullText.
+func (g hostGuard) DiffSource(id pluginapi.BufferID) (pluginapi.DiffSource, error) {
+	defer g.r.pauseSlice()()
+	return g.Host.DiffSource(id)
+}
+
+// ReplaceRange is one atomic edit through the version-guarded path: heavy like Edit.
+func (g hostGuard) ReplaceRange(id pluginapi.BufferID, start, end int, text string, expect *pluginapi.Version) (bool, error) {
+	defer g.r.pauseSlice()()
+	return g.Host.ReplaceRange(id, start, end, text, expect)
+}
+
 func (g hostGuard) SetContent(id pluginapi.BufferID, entries []pluginapi.ContentEntry) error {
 	defer g.r.pauseSlice()()
 	return g.Host.SetContent(id, entries)

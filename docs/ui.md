@@ -114,9 +114,9 @@ same card, between its borders:
 
 ### Search panel details: project-wide Search and Replace, and Git Grep
 
-Two more sheets share the card frame: a row of search, and for Search and Replace one
-row of replacement and one row of file globs, an option row and a scrollable result
-region:
+Two more sheets share the card frame: a row of search, a row of file globs (both
+sheets), and for Search and Replace one row of replacement, an option row and a scrollable
+result region:
 
 - **Project-wide Search and Replace** (started by "Search and Replace in Project"; the
   editor's Alt+A) searches the project files and the open buffers' unsaved text. The card
@@ -135,7 +135,11 @@ region:
   **/test_*.go), with * and ? staying inside one segment and ** crossing them; an invalid
   pattern blocks the search and says why. Up and Down in the search field walk the
   session's earlier patterns (20 deep); the searched pattern is remembered when a search
-  finishes.
+  finishes. The search streams: the app reports whole files as it walks them (one batch of
+  at most 128 files or 1000 matches at a time), the panel appends them in the finder's
+  order without moving the selected row, and the title and the empty result area say
+  "searching N/M files" until the final batch. A provider that does not stream falls back
+  to one asynchronous search that shows its result when it lands.
   Alt+Enter replaces every checked match, Shift+Enter replaces the focused row alone (a
   file row: its checked matches; a match row: that match), each after a confirmation and
   never at an offset the search did not report. The replacement is a deliberate
@@ -144,7 +148,9 @@ region:
   notice "N files changed in M tabs; Save All to write" says so, and Save All does the
   writes through the normal save path. Search and replace never reuse the offsets of an
   older result: every file carries a content hash from the search, and a file whose text
-  changed is skipped.
+  changed is skipped. Because the results stream, a replacement started before the search
+  finishes plans from the rows that have arrived (the confirmation counts them); the fresh
+  search that follows the replacement shows the rest.
 - **Selected-match preview column** (while the result rows have the focus) follows the
   palette's file-preview conventions: a muted `│` divider at the right of the result
   region, a right-aligned line-number gutter, and a column only when the card's inner text
@@ -166,18 +172,20 @@ region:
   staying open so the set can be walked. gvim has no persistent quickfix stack and the
   results panel stays the source of truth; the next and previous project-match chords
   walk the same set from the editor.
-- **Git Grep** (command palette row only) is the same card with a single search field:
-  the All Files/Case toggles collapse to Case (Alt+C), the replacement, Files and scoped
-  rows are absent, and Enter opens the match; its results can be listed with Alt+Q too.
-  It runs git grep in the work tree of the workspace root; exit 0 and 1 both mean a
-  finished search (1 is no matches), 2 or more is an error notice. File globs for Git
-  Grep are not implemented (that needs git pathspecs; see the residuals below).
-- **Residuals of the search surfaces**: streaming or batched results (the port is one
-  asynchronous search and the sheet shows "searching…" until it lands), a preview window
-  that scrolls or syntax-colours its lines (it is a bounded plain-text window), a
-  multi-line match longer than the preview column (it shows its first lines), replacing
-  in very large files (they are skipped with a reason), provider scopes beyond files and
-  the current buffer.
+- **Git Grep** (command palette row only) is the same card with a single search field and
+  the Files row: the All Files/Case toggles collapse to Case (Alt+C), the replacement and
+  scoped rows are absent, and Enter opens the match; its results can be listed with Alt+Q
+  too. Tab walks the search field, the Files field and the result rows. The Files patterns
+  are git pathspecs (git's own wildcard matching, so *.go matches at any depth and sub/**
+  keeps a subtree), passed to git after "--"; the same validation as the project globs
+  catches a bad bracket first, and an invalid pattern blocks the search. git grep runs in
+  the work tree of the workspace root in one call (its 100-row cap makes a stream
+  unnecessary); exit 0 and 1 both mean a finished search (1 is no matches), 2 or more is
+  an error notice.
+- **Residuals of the search surfaces**: a preview window that scrolls or syntax-colours
+  its lines (it is a bounded plain-text window), a multi-line match longer than the
+  preview column (it shows its first lines), replacing in very large files (they are
+  skipped with a reason), provider scopes beyond files and the current buffer.
 
 ## 3. Component map
 

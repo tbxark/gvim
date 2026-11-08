@@ -662,11 +662,23 @@ func (m *Model) promptOpen() bool {
 	return ok
 }
 
-// viewPane sets the display options of p from the settings of its document and the
-// view state. Nothing else of the pane changes.
-func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
+// viewPane sets the display options of p, the editor pane of the split pane sp, from
+// the settings of its document and the view state. Nothing else of the pane changes.
+// The page view comes from the document, unless the dual view gives the pane a side
+// of its own (panePageView).
+func (m *Model) viewPane(sp splitPane, p editorpane.Pane, doc Document) editorpane.Pane {
 	s := docViewOf(doc)
-	p.PageView = m.pageViewFor(doc)
+	p.PageView = m.panePageView(sp, doc)
+	if !sp.Focused && m.validDual() != nil {
+		// The unfocused side of a dual view does not own the document caret, so
+		// its composed rows stay concealed.
+		p.PageView.NoCaretReveal = true
+	}
+	if p.PageView.On && p.PageView.Markdown {
+		// The Markdown table's top and bottom borders are display rows no source
+		// line owns; the shared inserted-row hook adds them above/below the rows.
+		p.PageExtraRows = editorpane.PageViewTableBorders(doc, p.Styles)
+	}
 	// A large document wraps as the setting says: a line of more than editorpane.LongLineRunes
 	// is laid out in segments, a few of them at a time, so its length costs nothing.
 	p.Wrap = editor.OverrideOr(s.LineWrap, m.view.lineWrap)
@@ -724,12 +736,16 @@ func (m *Model) pageViewFor(doc Document) editorpane.PageView {
 	return editorpane.PageView{On: true, Measure: measure, Markdown: m.markdownDoc(doc)}
 }
 
-// pageViewActive reports whether the active document is in the page view. The
+// pageViewActive reports whether the focused pane is showing the page view. The
 // virtual space and the virtual lines are off there: the page wraps its text, so
-// there is no empty region past a line.
+// there is no empty region past a line. In the dual view this follows the focused
+// side, not the document.
 func (m *Model) pageViewActive() bool {
 	doc := m.ed.Active()
-	return doc != nil && m.pageViewFor(doc).On
+	if doc == nil {
+		return false
+	}
+	return m.panePageView(m.layout().FocusedPane(), doc).On
 }
 
 // markdownDoc reports whether doc gets the Markdown compose: its path has a

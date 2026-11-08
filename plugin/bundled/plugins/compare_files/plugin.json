@@ -1,0 +1,7 @@
+{
+  "name": "compare_files",
+  "version": "1.0.0",
+  "description": "Compare two files side by side: aligned and highlighted differences, synchronized scrolling, and take or copy a change into the other file",
+  "api": 2,
+  "default_enabled": false
+}

@@ -33,13 +33,14 @@ checkout at `refs/fresh`) on Bubble Tea v2. Rendering is a custom cell grid
   `scrollback_lines`), OSC 7 working-directory tracking, Ctrl+Click paths, mouse
   forwarding, `close_on_exit`, and the deferred list (reflow, OSC 52, agent
   re-exec, Windows ConPTY, terminal tabs).
-- `docs/markdown.md` is the design record for the Markdown page view (compose):
-  the per-buffer page width resolution and centered margin, the inline compose
-  (concealed emphasis/strong/inline-code/link/strike markers, caret-line reveal,
-  rules and quote bars, list/quote hanging indents), and the source↔composed
-  mapping for the caret, mouse, selection, search highlights, folds and soft rows,
-  with the large-file fallback and the deferred list (tables, fence frames, dual
-  view).
+- `docs/markdown.md` is the design record for the Markdown page view (compose)
+  and its dual view: the per-buffer page width resolution and centered margin, the
+  inline compose (concealed emphasis/strong/inline-code/link/strike markers,
+  caret-line reveal, rules and quote bars, list/quote hanging indents, code-fence
+  frames, table box-drawing), the source↔composed mapping for the caret, mouse,
+  selection, search highlights, folds and soft rows, the native source+compose
+  dual split with its derived per-pane override and line-anchored scroll sync,
+  and the large-file fallback and the deferred list.
 - `docs/parity.md` is the live parity record for the "full Fresh feature parity" goal:
   the by-area matrix with evidence, the deliberate differences, and the ranked backlog of
   the remaining rounds. It is the map for the next rounds; update the affected row when a

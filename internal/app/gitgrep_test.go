@@ -3,6 +3,7 @@ package app
 import (
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
@@ -91,5 +92,41 @@ func TestGitGrepOutsideARepositoryIsAnError(t *testing.T) {
 	t.Parallel()
 	if _, err := (gitGrep{}).GitGrep(searchpanel.GitRequest{Root: t.TempDir(), Query: "foo", Limit: 100}); err == nil {
 		t.Fatal("a workspace outside a git repository gave no error")
+	}
+}
+
+func TestGitGrepPathspecs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"a.go":      "needle\n",
+		"sub/b.go":  "needle\n",
+		"sub/c.txt": "needle\n",
+		"d.txt":     "needle\n",
+	})
+	gitRepo(t, dir)
+	tests := []struct {
+		name      string
+		pathspecs []string
+		want      []string
+	}{
+		{"no pathspecs search every tracked file", nil, []string{"a.go", "d.txt", "sub/b.go", "sub/c.txt"}},
+		{"a basename glob matches at any depth", []string{"*.go"}, []string{"a.go", "sub/b.go"}},
+		{"a directory pathspec keeps its subtree", []string{"sub/**"}, []string{"sub/b.go", "sub/c.txt"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := gitGrep{}.GitGrep(searchpanel.GitRequest{Root: dir, Query: "needle", Pathspecs: tt.pathspecs, Limit: 100})
+			if err != nil {
+				t.Fatalf("GitGrep: %v", err)
+			}
+			var got []string
+			for _, f := range res.Files {
+				got = append(got, f.Name)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("files = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

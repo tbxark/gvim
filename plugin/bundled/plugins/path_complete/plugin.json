@@ -1,0 +1,7 @@
+{
+  "name": "path_complete",
+  "version": "1.0.0",
+  "description": "Filesystem path completion suggestions (directories first, hidden-file rules, new-file rows) for a path prompt",
+  "api": 2,
+  "default_enabled": true
+}

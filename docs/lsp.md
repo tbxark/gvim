@@ -71,6 +71,23 @@ Each server object is Fresh's `LspServerConfig`. The fields gvim reads:
 
 An entry cannot name a field Fresh does not have; a load reports it instead of guessing.
 
+**Settings page.** The Settings page's **Language Servers** section lists every
+language with a server (the built-in table, the user's `lsp` entries, and
+`universal_lsp`), with each language's effective servers and their live manager
+state (running/starting/stopped/failed). Each language page shows the parsed
+servers read-only and edits the language's whole server array as validated
+JSON: `config.PatchBytes` cannot address one element of an array, so the page
+writes the array at `lsp.<language>` (or `universal_lsp.<name>`) through the
+same `config.ValidateEdits` a load uses. The project layer may only mute or
+enable servers: a project edit that names a command, args, env or
+initialization options is refused with the loader's diagnostic, and the project
+page shows the layer's entries with the JSON row locked. **Start/Restart/Stop**
+rows start or stop the configured servers by hand (they override `auto_start`
+and mute) and are live actions, not config edits. `process_limits` is accepted
+and shown but never applied (see the table above). The page lives in
+`internal/app/settings_lsp.go`; its mechanics are documented in
+`docs/settings.md`.
+
 The status row has an `LSP` pill for the active file. Its states follow Fresh's LSP
 indicator, in Fresh's priority order, with gvim's wording where Fresh's is less precise:
 

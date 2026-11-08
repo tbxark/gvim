@@ -66,8 +66,10 @@ type geometry struct {
 func layoutFor(w, h int, git bool) geometry {
 	rows := clamp(h/2, 4, 18)
 	total := func(r int) int {
+		// Search and Replace has search, replace, files and options rows; Git Grep has
+		// search, files and options.
 		if git {
-			return r + 4
+			return r + 5
 		}
 		return r + 6
 	}
@@ -84,8 +86,9 @@ func layoutFor(w, h int, git bool) geometry {
 	g.resultsTop = top + 1
 	g.optY = g.bottom - 1
 	if git {
-		g.replY, g.globY = -1, -1
-		g.searchY = g.optY - 1
+		g.replY = -1
+		g.globY = g.optY - 1
+		g.searchY = g.globY - 1
 	} else {
 		g.globY = g.optY - 1
 		g.replY = g.globY - 1
@@ -131,6 +134,23 @@ func (p *Panel) Draw(g *grid.Grid) {
 	p.styles.ov.PaintFooter(g, geo.left, geo.bottom, boxW, p.hint())
 }
 
+// progressText is the streaming progress the title shows: the files walked so far out of
+// the files the search will walk, when the port reports them.
+func (p *Panel) progressText() string {
+	if p.totalFiles > 0 {
+		return fmt.Sprintf("searching %d/%d files", p.scanned, p.totalFiles)
+	}
+	return "searching…"
+}
+
+// searchingText is the empty results state while a stream is still arriving.
+func (p *Panel) searchingText() string {
+	if p.totalFiles > 0 {
+		return fmt.Sprintf("Searching… %d/%d files", p.scanned, p.totalFiles)
+	}
+	return searchingText
+}
+
 // title is the card's title: the panel's name and, after a search, the count.
 func (p *Panel) title() string {
 	base := "Search & Replace"
@@ -141,7 +161,7 @@ func (p *Panel) title() string {
 		return base
 	}
 	if p.loading {
-		return base + " · searching…"
+		return base + " · " + p.progressText()
 	}
 	if p.errText != "" {
 		return base + " · error"
@@ -173,7 +193,7 @@ func (p *Panel) hint() string {
 		return p.notice
 	}
 	if p.git {
-		return "Alt+C case · Enter open · Alt+Q list · Esc close"
+		return "Tab next · Alt+C case · Enter open · Alt+Q list · Esc close"
 	}
 	return "Tab next · Space check · Enter open · Alt+Enter all · Shift+Enter scoped · Alt+Q list · Esc close"
 }
@@ -192,7 +212,7 @@ func (p *Panel) paintResults(g *grid.Grid, geo geometry) {
 		write("Error: "+p.errText, p.styles.label)
 		return
 	case p.loading && len(p.rows) == 0:
-		write(searchingText, p.styles.label)
+		write(p.searchingText(), p.styles.label)
 		return
 	case p.query.Value() == "":
 		write(emptyText, p.styles.label)

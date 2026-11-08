@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"sort"
+
+	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -53,6 +56,9 @@ func (p *pluginFolds) dropOwner(owner string) {
 		}
 	}
 }
+
+// dropBuffer forgets a closed buffer's ranges.
+func (p *pluginFolds) dropBuffer(id pluginapi.BufferID) { delete(p.byBuffer, id) }
 
 // DecorSetFoldingRanges replaces one plugin namespace's folding ranges for a buffer.
 func (h *pluginHost) DecorSetFoldingRanges(plugin, ns string, id pluginapi.BufferID, ranges []pluginapi.FoldRange, expect *pluginapi.Version) error {
@@ -124,4 +130,74 @@ func (h *pluginHost) DecorClearFolds(plugin, ns string, id pluginapi.BufferID) {
 	for buf := range pf.byBuffer {
 		clear(buf)
 	}
+}
+
+// plugFolds gives the pane the plugin folding ranges of the document: the merged ranges and
+// their collapsed state (the seed, or the user's toggle), and the placeholder texts. A
+// document with no plugin folds gets nil.
+func (m *Model) plugFolds(doc Document) ([]fold.Range, map[int]bool, map[int]string) {
+	if len(m.plug.folds.byBuffer) == 0 {
+		return nil, nil, nil
+	}
+	bd, ok := doc.(bufferIdentified)
+	if !ok {
+		return nil, nil, nil
+	}
+	id := pluginapi.BufferID(bd.BufferID())
+	if len(m.plug.folds.byBuffer[id]) == 0 {
+		return nil, nil, nil
+	}
+	var ranges []fold.Range
+	folded := map[int]bool{}
+	placeholder := map[int]string{}
+	for _, f := range m.plug.folds.byBuffer[id] {
+		for _, r := range f.ranges {
+			fr := fold.Range{Start: r.Range.From.Line, End: r.Range.To.Line}
+			collapsed := r.Collapsed
+			if v, ok := f.collapsed[fr.Start]; ok {
+				collapsed = v
+			}
+			ranges = append(ranges, fr)
+			if collapsed {
+				folded[fr.Start] = true
+			}
+			if r.Placeholder != "" {
+				placeholder[fr.Start] = r.Placeholder
+			}
+		}
+	}
+	if len(ranges) == 0 {
+		return nil, nil, nil
+	}
+	sort.SliceStable(ranges, func(i, j int) bool {
+		if ranges[i].Start != ranges[j].Start {
+			return ranges[i].Start < ranges[j].Start
+		}
+		return ranges[i].End < ranges[j].End
+	})
+	return ranges, folded, placeholder
+}
+
+// togglePluginFold toggles the plugin fold that starts at line, reporting whether one did.
+// The root's fold action tries it before the document's own folds.
+func (m *Model) togglePluginFold(doc Document, line int) bool {
+	bd, ok := doc.(bufferIdentified)
+	if !ok {
+		return false
+	}
+	id := pluginapi.BufferID(bd.BufferID())
+	for _, f := range m.plug.folds.byBuffer[id] {
+		for _, r := range f.ranges {
+			if r.Range.From.Line != line {
+				continue
+			}
+			cur := r.Collapsed
+			if v, ok := f.collapsed[line]; ok {
+				cur = v
+			}
+			f.collapsed[line] = !cur
+			return true
+		}
+	}
+	return false
 }

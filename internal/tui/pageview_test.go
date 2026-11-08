@@ -77,7 +77,7 @@ func TestPageViewReachesThePaneThroughTheView(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "abc\n", 80, 8)
 	doc := pageDoc{fakeDoc: &fakeDoc{lines: []string{"Some **bold** text"}}, path: "/w/a.md",
 		view: editor.ViewSettings{PageView: boolPtrPage(true), PageWidth: 30}}
-	p := m.viewPane(editorpane.Pane{}, doc)
+	p := m.viewPane(splitPane{}, editorpane.Pane{}, doc)
 	if p.PageView != (editorpane.PageView{On: true, Measure: 30, Markdown: true}) {
 		t.Fatalf("pane page view = %+v", p.PageView)
 	}

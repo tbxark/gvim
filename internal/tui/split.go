@@ -32,6 +32,7 @@ type splitSet struct {
 	owned     []string     // the files the compare view opened itself, which closing it closes too
 	pick      *comparePick // a compare command that waits for the file browser, or nil
 	maximized bool         // the focused leaf fills the body and the other leaves have no area
+	dual      *dualView    // the open Markdown dual view, or nil (dual.go)
 	seenTab   int          // the active tab noteTab last saw, or -1
 	prevTab   int          // the tab that was active before the last switch, or -1
 }
@@ -130,7 +131,7 @@ func (m *Model) trySplit(dir splitDir) string {
 	f.A = &splitNode{Tab: f.Tab, Top: f.Top, ID: f.ID}
 	f.B = &splitNode{Tab: f.Tab, Top: f.Top}
 	f.ID = 0
-	m.splits.Focus = f.B
+	m.setWindowFocus(f.B)
 	m.splits.comparing = false
 	m.syncViewport()
 	m.revealCaretVisual(0)
@@ -182,7 +183,7 @@ func (m *Model) focusLeaf(n *splitNode) {
 		return
 	}
 	m.keepFocused()
-	m.splits.Focus = n
+	m.setWindowFocus(n)
 	m.activateTab(n.Tab)
 	if m.ed.Active() != nil {
 		m.ed.ScrollTo(n.Top)
@@ -381,7 +382,7 @@ func (m *Model) paneGeometry(p splitPane, doc Document) editorpane.Pane {
 		Doc: doc, Top: p.Top, Styles: m.panes, TabSize: m.tabSize,
 		Diagnostics: m.lspSpans(doc),
 	}
-	pane = m.viewPane(pane, doc)
+	pane = m.viewPane(p, pane, doc)
 	pane = m.plugDecor(pane, doc)
 	pane = m.lspData(pane, doc)
 	pane = m.lspGutter(pane, doc)

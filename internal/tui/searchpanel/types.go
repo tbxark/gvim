@@ -152,7 +152,12 @@ type GitRequest struct {
 	Root          string
 	Query         string
 	CaseSensitive bool
-	Limit         int
+	// Pathspecs narrow the search to the tracked paths they name. They are git pathspecs
+	// (git's wildcard matching: '*' and '?' cross directories), passed to git after "--",
+	// not the project-search glob syntax; the panel validates their brackets before it
+	// sends them. Empty searches every tracked file.
+	Pathspecs []string
+	Limit     int
 }
 
 // GitResult is one git grep's matches, in the repository-root-relative paths that git
@@ -166,6 +171,35 @@ type GitResult struct {
 // from a tea.Cmd.
 type Searcher interface {
 	ProjectSearch(SearchRequest) (SearchResult, error)
+}
+
+// SearchBatch is one incremental piece of a project search, reported by a BatchSearcher.
+// A batch holds whole files in result order, so appending batches to the result keeps the
+// finder's order: a file's matches are never split across two batches.
+type SearchBatch struct {
+	Files []FileMatches // the files this batch found, in result order
+	// Scanned is how many files the search has examined so far, and Total how many it
+	// will examine (0 when the port cannot say).
+	Scanned, Total int
+	Truncated      bool     // the match or file cap was hit
+	SkippedCount   int      // files left out so far
+	Skipped        []string // the skip summaries so far
+	// Done marks the last batch of a completed search. Err, when set, says why the
+	// search stopped instead of returning a result.
+	Done bool
+	Err  string
+}
+
+// BatchSearcher is the optional streaming half of Searcher. The app implements it by
+// starting one goroutine per request that sends whole-file batches on the returned channel,
+// in result order, and closes the channel after the final batch (or when cancel closes): a
+// completed search always ends with a Done batch, while a cancelled one just closes the
+// channel. The caller must read the channel and owns the cancel channel: closing cancel
+// asks the search to stop, and the search never sends once it has observed the close. The
+// batches are bounded (a file count or a match count), so a reader sees progress instead
+// of one large result.
+type BatchSearcher interface {
+	ProjectSearchBatches(SearchRequest, <-chan struct{}) <-chan SearchBatch
 }
 
 // Replacer plans a project-wide replacement. The app implements it, and the root calls

@@ -341,11 +341,11 @@ func TestTabIndicatorsHideTheArrowOfATab(t *testing.T) {
 func TestIndentGuidesAndFoldIndicatorsAreStoredPerBuffer(t *testing.T) {
 	m, _ := viewModel(t, DefaultViewOptions(), "func a() {\n\tx\n}\n", 40, 8)
 	runAction(t, m, "toggle_indentation_guide_current_buffer")
-	if p := m.viewPane(editorpane.Pane{}, m.ed.Active()); !p.IndentGuides {
+	if p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active()); !p.IndentGuides {
 		t.Error("indentation guides are not on in the pane after the toggle")
 	}
 	runAction(t, m, "toggle_fold_indicators_current_buffer")
-	if p := m.viewPane(editorpane.Pane{}, m.ed.Active()); !p.HideFoldMarkers {
+	if p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active()); !p.HideFoldMarkers {
 		t.Error("fold indicators are still drawn after the toggle")
 	}
 }
@@ -426,7 +426,7 @@ func TestConfigRulersReachThePane(t *testing.T) {
 				press(m, typed(tc.remove))
 				settle(t, m, press(m, special(tea.KeyEnter)))
 			}
-			p := m.viewPane(editorpane.Pane{}, m.ed.Active())
+			p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active())
 			if !slices.Equal(p.Rulers, tc.want) {
 				t.Errorf("pane rulers = %v, want %v", p.Rulers, tc.want)
 			}
@@ -454,7 +454,7 @@ func TestSetPageWidthStoresTheWidthAndReachesThePane(t *testing.T) {
 	if got := docViewOf(m.ed.Active()).PageWidth; got != 40 {
 		t.Fatalf("page width = %d, want 40", got)
 	}
-	p := m.viewPane(editorpane.Pane{}, m.ed.Active())
+	p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active())
 	if !p.PageView.On || p.PageView.Measure != 40 {
 		t.Fatalf("pane page view = %+v, want it on at measure 40", p.PageView)
 	}
@@ -469,7 +469,7 @@ func TestPageViewToggleDrawsAndSaysSo(t *testing.T) {
 	if v := docViewOf(m.ed.Active()).PageView; v == nil || !*v {
 		t.Fatal("page view was not stored")
 	}
-	if p := m.viewPane(editorpane.Pane{}, m.ed.Active()); !p.PageView.On {
+	if p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active()); !p.PageView.On {
 		t.Fatal("the page view did not reach the pane")
 	}
 	if !frameHas(m, "Page view: on for this buffer") {
@@ -480,7 +480,7 @@ func TestPageViewToggleDrawsAndSaysSo(t *testing.T) {
 	if v := docViewOf(m.ed.Active()).PageView; v == nil || *v {
 		t.Fatal("the second toggle did not turn the page view off")
 	}
-	if p := m.viewPane(editorpane.Pane{}, m.ed.Active()); p.PageView.On {
+	if p := m.viewPane(splitPane{}, editorpane.Pane{}, m.ed.Active()); p.PageView.On {
 		t.Fatal("the pane kept the page view after it was turned off")
 	}
 	if !frameHas(m, "Page view: off for this buffer") {

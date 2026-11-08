@@ -400,8 +400,13 @@ func TestSettingsStructureLanguagesAndFields(t *testing.T) {
 	if row := byName["use_tabs"]; row.Value != "on" || row.Kind != "bool" {
 		t.Errorf("use_tabs row = %+v, want on", row)
 	}
-	if row := byName["auto_indent"]; row.Value != "" {
-		t.Errorf("auto_indent row = %+v, want the unset override", row)
+	if row := byName["auto_indent"]; !row.Inherited || row.Value == "" || row.Note != "inherit" {
+		t.Errorf("auto_indent row = %+v, want the inherited effective value", row)
+	}
+	for _, name := range []string{"extensions", "filenames", "formatter", "on_save", "indent"} {
+		if row, ok := byName[name]; !ok || row.Child != "languages.go."+name {
+			t.Errorf("%s row = %+v (ok %v), want its structured child page", name, row, ok)
+		}
 	}
 }
 

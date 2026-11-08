@@ -41,6 +41,8 @@ type Node struct {
 	// a compare view: it lets the pane start inside the filler rows after a line.
 	TopRow int
 	ID     uint64 // the window id, or zero until Tree.IDOf gives one
+	// Label is the plugin split label (tier 1c-C), or "" for none.
+	Label string
 }
 
 // Share returns the percentage of the area the first child takes.

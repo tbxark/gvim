@@ -25,7 +25,8 @@ type BufferGroupLeaf struct {
 type BufferGroupLayout struct {
 	Leaf *BufferGroupLeaf
 	Dir  string
-	// Ratio is the share of the first child (0 means an even split).
+	// Ratio is the share of the first child (0 means an even split). The host maps it to
+	// the split option, whose ratio is the share of the second window.
 	Ratio         float64
 	First, Second *BufferGroupLayout
 }

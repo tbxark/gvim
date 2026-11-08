@@ -24,6 +24,7 @@ package editorpane
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/fold"
 	"strconv"
 	"strings"
 
@@ -148,6 +149,21 @@ type Pane struct {
 	Replaces    func(line int) []Replacement      // text over single cells
 	Gutter      func(line int) (GutterMark, bool) // replaces the change bar
 	ScrollMarks func(line int) (ScrollMark, bool) // colors the last column
+	// Conceals hides the cells of rune-column ranges of a line without changing its
+	// columns, drawing replacement text in them (tier 1c-B, conceal.go).
+	Conceals func(line int) []ConcealSpan
+	// CursorLineOverlay tints the caret's row after the other row paints (tier 1c-B).
+	CursorLineOverlay func() (grid.Style, bool)
+	// ExtraRows adds display rows above and below a line (tier 1c-B, rows_extra.go).
+	ExtraRows func(line int) ExtraRows
+	// PageExtraRows adds width-dependent rows from the page-view builder (markdown table
+	// borders): width and gutter are the pane's, measure the page measure.
+	PageExtraRows func(line, width, gutter, measure int) ExtraRows
+	// SoftBreaks forces display row boundaries inside a line (tier 1c-B).
+	SoftBreaks func(line int) []SoftBreak
+	// PluginFolds merges plugin folding ranges with the document's: the ranges, the
+	// collapsed starts and the placeholder text by start line (tier 1c-B).
+	PluginFolds func() (ranges []fold.Range, collapsed map[int]bool, placeholder map[int]string)
 
 	// Fillers puts blank rows between the lines (see fillers.go). A pane with fillers
 	// never wraps, and never shows folds. Nil has none.
@@ -332,6 +348,17 @@ type frame struct {
 	curLine bool
 	rulers  []int
 	diags   func(line int) []DiagnosticSpan
+	// The tier-1c decoration hooks (conceal.go / rows_extra.go).
+	conceals   func(line int) []ConcealSpan
+	cursorLine func() (grid.Style, bool)
+	// The inserted-row hooks (rows_extra.go).
+	extras          func(line int) ExtraRows
+	pageExtras      func(line, width, gutter, measure int) ExtraRows
+	soft            func(line int) []SoftBreak
+	pluginFolds     func() ([]fold.Range, map[int]bool, map[int]string)
+	foldPlaceholder map[int]string
+	extraCache      map[int]ExtraRows
+	softCache       map[int][]SoftBreak
 	// The hidden parts of the pane (see Pane), and the caret shape.
 	noTabArrows bool
 	noFolds     bool
@@ -341,14 +368,15 @@ type frame struct {
 	caretShape  CaretShape
 	keepLeft    bool
 	// pageOn is the page view: the gutter is the left margin and the wrap width is
-	// the page measure. pageMarkdown makes the inline marks composed.
-	pageOn, pageMarkdown bool
-	pageMeasure          int
-	opts                 Options
-	fx                   *frameFX // the state of the options, set by initFX
-	hooks                overlayHooks
-	dx                   *overlayFX // the looks of the overlays; nil when the pane has no overlay hook
-	marks                []TrackMark
+	// the page measure. pageMarkdown makes the inline marks composed, and
+	// noPageReveal keeps the caret line concealed (an unfocused dual pane).
+	pageOn, pageMarkdown, noPageReveal bool
+	pageMeasure                        int
+	opts                               Options
+	fx                                 *frameFX // the state of the options, set by initFX
+	hooks                              overlayHooks
+	dx                                 *overlayFX // the looks of the overlays; nil when the pane has no overlay hook
+	marks                              []TrackMark
 }
 
 // newFrame builds the frame for a w by h pane. It reports false when there is
@@ -386,6 +414,7 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		wrap:         wrapped,
 		pageOn:       p.PageView.On,
 		pageMarkdown: p.PageView.On && p.PageView.Markdown,
+		noPageReveal: p.PageView.On && p.PageView.NoCaretReveal,
 		pageMeasure:  measure,
 		tab:          p.tabSize(),
 		caret:        p.Doc.Cursor(),
@@ -403,8 +432,20 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		keepLeft:    p.KeepLeft,
 		hooks:       p.overlayHooks(),
 		marks:       p.TrackMarks,
+		conceals:    p.Conceals,
+		cursorLine:  p.CursorLineOverlay,
+		extras:      p.ExtraRows,
+		pageExtras:  p.PageExtraRows,
+		soft:        p.SoftBreaks,
+		pluginFolds: p.PluginFolds,
 	}
-	if f.hooks.any() {
+	if f.extras != nil || f.pageExtras != nil {
+		f.extraCache = make(map[int]ExtraRows)
+	}
+	if f.soft != nil {
+		f.softCache = make(map[int][]SoftBreak)
+	}
+	if f.hooks.any() || p.Conceals != nil {
 		f.dx = &overlayFX{}
 	}
 	f.inlineDiag = p.InlineDiagnostics
@@ -665,6 +706,7 @@ func (p Pane) Render(w, h int) *grid.Grid {
 	f.paintRulers(g)
 	f.paintMarks(g, rows)
 	f.paintHorizontalBar(g)
+	f.paintCursorLineOverlay(g)
 	f.paintSecondaryCarets(g)
 	f.paintCaret(g)
 	return g
@@ -707,54 +749,43 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 	rows := make([]rowInfo, 0, f.h)
 	y, i := 0, f.top
 	for ; i < f.lines && y < f.h; i = f.next(i) {
+		ex := f.extrasFor(i)
+		cur := f.curLine && i == f.caret.Line
 		anchor := 0
 		if i == f.top && f.fill == nil {
 			// The rows of the top line that are scrolled off, or the column its view starts at.
 			anchor = f.topRow
 		}
-		cur := f.curLine && i == f.caret.Line
 		above := f.fillAbove(i)
 		rows, y = f.paintFillers(g, rows, i, 0, above, y)
-		for _, rd := range f.lineRows(i, true, anchor, f.h-y) {
+		// The extra rows above the line, in slice order: the last one is nearest the line.
+		skip := anchor
+		for _, er := range ex.Above {
+			if skip > 0 {
+				skip--
+				continue
+			}
+			if y >= f.h {
+				break
+			}
+			f.paintExtraRow(g, i, er, y, cur)
+			rows = append(rows, rowInfo{y: y, line: i})
+			y++
+		}
+		textAnchor := skip
+		for _, rd := range f.lineRows(i, true, textAnchor, f.h-y) {
 			if f.fill != nil && i == f.top && above+rd.k < f.topRow {
 				continue // a pane with fillers counts the rows of the top block in topRow
 			}
-			ln := rd.ln
-			if f.gutter > 0 && !f.pageOn {
-				label := fmt.Sprintf("%*s │ ", f.gutter-gutterSeparator, "")
-				if rd.first {
-					label = fmt.Sprintf("%*d │ ", f.gutter-gutterSeparator, f.lineNumber(i))
-				}
-				g.Put(0, y, f.w-1, label, f.numberStyle(i))
+			rows = f.paintLineRow(g, rows, i, rd, y, cur)
+			y++
+		}
+		// The extra rows below the line, in slice order: the first one is nearest the line.
+		for _, er := range ex.Below {
+			if y >= f.h {
+				break
 			}
-			cells := f.rowCells(rd)
-			// widthAll is the width of the whole row before horizontal scrolling
-			// drops columns; the block rectangle places its virtual span from it.
-			widthAll := cellsWidth(cells)
-			// skip is how far left of the window the line ended: its virtual text starts
-			// that many columns left of the first text column.
-			skip := 0
-			if drop := f.dropFor(ln); drop > 0 {
-				skip = droppedBeyond(cells, drop)
-				cells = dropColumns(cells, drop)
-			}
-			end := f.paintCells(g, y, cells, cur)
-			if rd.last {
-				end = f.paintFoldPlaceholder(g, i, y, end, cur)
-			}
-			if cur && f.styles.CurrentLine.BG != nil {
-				g.Fill(end, f.textRight(), y, grid.Style{FG: f.styles.Text.FG, BG: f.styles.CurrentLine.BG})
-			}
-			f.paintRowTail(g, ln, y, end, cur)
-			f.paintBlockVirtual(g, i, y, end, widthAll)
-			if rd.last {
-				f.paintVirtualText(g, ln, i, y, end, skip, cur)
-				f.paintInlineDiagnostics(g, i, y, end, cur)
-			}
-			if rd.first {
-				// The marker is drawn after the text, so it never covers a text cell.
-				f.paintFoldMarker(g, i, y, end)
-			}
+			f.paintExtraRow(g, i, er, y, cur)
 			rows = append(rows, rowInfo{y: y, line: i})
 			y++
 		}
@@ -766,6 +797,47 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 		rows = append(rows, rowInfo{y: y, line: i})
 	}
 	return rows
+}
+
+// paintLineRow paints one text row of line i at body row y.
+func (f frame) paintLineRow(g *grid.Grid, rows []rowInfo, i int, rd rowDesc, y int, cur bool) []rowInfo {
+	ln := rd.ln
+	if f.gutter > 0 && !f.pageOn {
+		label := fmt.Sprintf("%*s │ ", f.gutter-gutterSeparator, "")
+		if rd.first {
+			label = fmt.Sprintf("%*d │ ", f.gutter-gutterSeparator, f.lineNumber(i))
+		}
+		g.Put(0, y, f.w-1, label, f.numberStyle(i))
+	}
+	cells := f.rowCells(rd)
+	// widthAll is the width of the whole row before horizontal scrolling
+	// drops columns; the block rectangle places its virtual span from it.
+	widthAll := cellsWidth(cells)
+	// skip is how far left of the window the line ended: its virtual text starts
+	// that many columns left of the first text column.
+	skip := 0
+	if drop := f.dropFor(ln); drop > 0 {
+		skip = droppedBeyond(cells, drop)
+		cells = dropColumns(cells, drop)
+	}
+	end := f.paintCells(g, y, cells, cur)
+	if rd.last {
+		end = f.paintFoldPlaceholder(g, i, y, end, cur)
+	}
+	if cur && f.styles.CurrentLine.BG != nil {
+		g.Fill(end, f.textRight(), y, grid.Style{FG: f.styles.Text.FG, BG: f.styles.CurrentLine.BG})
+	}
+	f.paintRowTail(g, ln, y, end, cur)
+	f.paintBlockVirtual(g, i, y, end, widthAll)
+	if rd.last {
+		f.paintVirtualText(g, ln, i, y, end, skip, cur)
+		f.paintInlineDiagnostics(g, i, y, end, cur)
+	}
+	if rd.first {
+		// The marker is drawn after the text, so it never covers a text cell.
+		f.paintFoldMarker(g, i, y, end)
+	}
+	return append(rows, rowInfo{y: y, line: i})
 }
 
 // paintCells writes one display row of cells from the gutter edge and returns
@@ -1037,7 +1109,7 @@ func (f frame) caretRowIn() int {
 	} else {
 		ln := f.layoutLine(f.caret.Line, false)
 		k, _ = caretInSpans(ln.geom, ln.spans, expandedIndex(ln.raw, f.caret.Col-ln.off, f.tab))
-		k += f.fillAbove(f.caret.Line)
+		k += f.fillAbove(f.caret.Line) + f.aboveCount(f.caret.Line)
 	}
 	f.fx.caretRow, f.fx.caretRowOK = k, true
 	return k
@@ -1181,8 +1253,10 @@ func (f frame) cellOf(p buffer.Pos) (x, y int, ok bool) {
 				// column goes on past the window's edge as if the cells did.
 				cells += p.Col - ln.off - rel
 			}
-			y += f.fillAbove(i) + k
-			if k > 0 {
+			y += f.fillAbove(i) + f.aboveCount(i) + k
+			if lead := f.rowLead(ln, k); lead > 0 {
+				cells += lead
+			} else if k > 0 {
 				cells += ln.indent
 			}
 			x := f.gutter + cells - f.dropFor(ln)
@@ -1248,7 +1322,7 @@ func (f frame) virtualAt(x, y int) int {
 	if r.filler != notFiller || !r.valid || !r.last {
 		return 0
 	}
-	cells := r.startCells() + x - f.gutter + f.dropFor(r.ln)
+	cells := r.startCells() + f.rowLead(r.ln, r.k) + x - f.gutter + f.dropFor(r.ln)
 	return max(cells-r.endCells(), 0)
 }
 
@@ -1376,12 +1450,19 @@ func (f frame) posAt(x, row int) buffer.Pos {
 	if r.filler != notFiller {
 		return f.fillerPos(r)
 	}
+	if r.extra > 0 {
+		return buffer.Pos{Line: r.line}
+	}
+	if r.extra < 0 {
+		return buffer.Pos{Line: r.line, Col: f.blockRuneLen(r.line)}
+	}
 	cells := r.startCells()
 	if x >= f.gutter {
 		cells += x - f.gutter + f.dropFor(r.ln)
 		if !r.first {
-			// The hanging indent of a continuation row is not text: a press in it is the row's start.
-			cells = max(cells-r.ln.indent, r.startCells())
+			// The hanging indent (or a soft break's lead) of a continuation row is not
+			// text: a press in it is the row's start.
+			cells = max(cells-r.ln.indent-f.rowLead(r.ln, r.k), r.startCells())
 		}
 		if !r.last && cells >= r.endCells() {
 			// A click past the end of a row that is not the last one lands on its

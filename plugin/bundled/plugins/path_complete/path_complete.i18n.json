@@ -1,0 +1,14 @@
+{
+  "en": {
+    "cmd.complete_path": "Path Completion: Complete Path",
+    "cmd.complete_path_desc": "Complete a filesystem path from directory suggestions",
+    "prompt.path": "Path:",
+    "suggestion.directory": "directory",
+    "suggestion.new_file": "New file: %{filename}",
+    "suggestion.new_file_desc": "This path does not exist yet",
+    "status.opened": "Opened %{path}",
+    "status.not_found": "No such path: %{path}",
+    "status.cancelled": "Path completion cancelled",
+    "status.loaded": "Path completion plugin loaded"
+  }
+}

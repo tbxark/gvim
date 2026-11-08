@@ -66,6 +66,8 @@ end, { debounce = 300 })
 | `buffer_activated` | `{buf, previous}` | the active tab changes; `previous` is absent when the old tab closed |
 | `buffer_deactivated` | `{buf, next}` | the previous active tab; not raised for a closed one |
 | `buffer_closed` | `{id, path}` | a tab closed. `id` is the old id as a plain **number**: the handle is dead. `path` is `""` for an untitled buffer (`b:path()` is `nil` for it) |
+| `path_changed` | `{buf, path, old_path}` | a buffer's path changed (save-as or a rename applied to it) |
+| `buffer_group_closed` | `{group, name}` | a plugin buffer group closed (closed by the plugin or by unloading it); `group` is the group id |
 | `before_file_save` | `{buf, path, source}` | before a save is planned; **vetoable** (below) |
 | `after_file_save` | `{buf, path}` | a file was written, after the result is applied |
 | `after_file_revert` | `{buf, path}` | a revert was applied |
@@ -74,6 +76,8 @@ end, { debounce = 300 })
 | `cursor_moved` (hot) | `{buf, pos, previous}` | the primary caret of the active buffer moved |
 | `selection_changed` (hot) | `{buf, range}` | the selection changed; `range` is absent when it was cleared |
 | `viewport_changed` (hot) | `{buf, top_line, height, width}` | the focused pane of the active buffer scrolled or resized |
+| `focus_gained` | `{}` | the editor got its keyboard back after a plugin panel, dock or overlay had it |
+| `active_window_changed` | `{previous, current}` | the focused split window changed; ids are plain numbers, absent/0 when there is no focused pane |
 | `language_changed` | `{buf, language}` | `Set Language`, or the path changed |
 | `config_changed` | `{}` | the keymap changed |
 | `theme_changed` | `{name, dark}` | a theme was selected or a plugin applied session color overrides |

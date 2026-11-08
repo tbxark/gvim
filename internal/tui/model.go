@@ -403,6 +403,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.revealCaretVisual(margin)
 	}
 	m.syncCompare()
+	m.syncDual()
 	if resized || m.activeTab() != active || len(m.ed.Tabs()) != count {
 		m.revealActiveTab()
 	}
@@ -1710,6 +1711,8 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		m.markdownTOCToggleFollow()
 	case "markdown_toc_focus":
 		m.focusContents()
+	case "markdown_mode_source", "markdown_mode_rendered", "markdown_mode_dual", "markdown_toggle_dual", "markdown_cycle_mode":
+		m.markdownModeAction(action)
 	case "open":
 		m.openBrowser(false)
 	case "switch_project":

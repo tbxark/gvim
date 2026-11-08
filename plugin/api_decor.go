@@ -377,7 +377,13 @@ func installDecor(e *apiEnv) {
 
 	names := map[string]bool{}
 	p.decorNS = names
-	p.decorNS = names
+	// The host may report that it paints the tier-1c surface (virtual lines, conceal, soft
+	// breaks); gvim.has("decor_virtual_paint") is true exactly then. A host without the
+	// optional Feature seam is treated as not painting it, so plugins keep working with an
+	// older host.
+	if f, ok := p.r.host.(interface{ Feature(string) bool }); ok && f.Feature("decor_virtual_paint") {
+		e.provides("decor_virtual_paint")
+	}
 	e.set(area, "namespace", func(L *lua.LState) int {
 		name := L.CheckString(1)
 		switch {

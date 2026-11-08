@@ -90,6 +90,11 @@ type line struct {
 	// column, and dispToSrc the reverse. They are nil outside the composed page view.
 	srcToDisp []int
 	dispToSrc []int
+	// Soft breaks (rows_extra.go): lead[k] is the added cells at the start of row k, and
+	// prefix[k]/prefixStyle[k] are its prefix text and style.
+	lead        []int
+	prefix      []string
+	prefixStyle []grid.Style
 }
 
 // layoutKey is what the layout of a line without paint attributes depends on besides
@@ -115,7 +120,7 @@ type LayoutMemo interface {
 // caret, the rows and the hit map ask for the same lines again and again.
 func (f frame) layoutLine(i int, styled bool) line {
 	if styled || f.isLong(i) {
-		return f.layout(i, styled)
+		return f.withSoftBreaks(i, f.layout(i, styled))
 	}
 	if ln, ok := f.fx.plain[i]; ok {
 		return ln
@@ -127,6 +132,7 @@ func (f frame) layoutLine(i int, styled bool) line {
 	} else {
 		ln = f.layout(i, false)
 	}
+	ln = f.withSoftBreaks(i, ln)
 	if f.fx.plain == nil {
 		f.fx.plain = make(map[int]line)
 	}
@@ -192,6 +198,7 @@ func (f frame) layoutText(i int, text string, off int, long bool, seg *segInfo, 
 		f.markDiagnostics(i, raw, ln.cells)
 		f.markOverlays(i, raw, &ln)
 		f.decorate(i, raw, kinds, &ln)
+		f.markConceals(i, raw, &ln)
 	}
 	return ln
 }
@@ -402,6 +409,8 @@ type displayRow struct {
 	line  int
 	ln    line
 	span  span
+	k     int  // the row's index among its line's layout rows
+	extra int  // +1 above the line, -1 below, 0 a text row
 	first bool // the row is the first row of its line
 	last  bool // the row is the last row of its line
 	valid bool // the row is inside the document
@@ -423,7 +432,7 @@ func (r displayRow) endCells() int {
 
 // displayOf is the display row of rd, a row of line i.
 func displayOf(i int, rd rowDesc, valid bool) displayRow {
-	return displayRow{line: i, ln: rd.ln, span: rd.sp, first: rd.first, last: rd.last, valid: valid}
+	return displayRow{line: i, ln: rd.ln, span: rd.sp, k: rd.k, first: rd.first, last: rd.last, valid: valid}
 }
 
 // lastRowOf is the last display row of line i.
@@ -457,16 +466,38 @@ func (f frame) rowAt(row int) displayRow {
 	}
 	k := row
 	for i := f.top; i < f.lines; i = f.next(i) {
+		if f.isTall(i) {
+			anchor := 0
+			if i == f.top {
+				anchor = f.topRow
+			}
+			rows := f.lineRows(i, false, anchor, k+1)
+			if k < len(rows) {
+				return displayOf(i, rows[k], true)
+			}
+			k -= len(rows)
+			continue
+		}
+		ln := f.layoutLine(i, false)
+		n := f.rowsIn(i, ln)
+		above := f.aboveCount(i)
+		if k < above {
+			return displayRow{line: i, ln: ln, span: ln.spans[0], extra: 1, first: true, valid: true}
+		}
 		anchor := 0
 		if i == f.top {
-			// The rows of the top line that are scrolled off, or the column its view starts at.
-			anchor = f.topRow
+			// The layout rows of the top line that are scrolled off.
+			anchor = max(f.topRow-above, 0)
 		}
-		rows := f.lineRows(i, false, anchor, k+1)
-		if k < len(rows) {
-			return displayOf(i, rows[k], true)
+		rows := f.lineRows(i, false, anchor, max(k-above+1, 1))
+		if k-above < len(rows) {
+			return displayOf(i, rows[k-above], true)
 		}
-		k -= len(rows)
+		if k < n {
+			// One of the rows below the line.
+			return displayRow{line: i, ln: ln, span: ln.spans[len(ln.spans)-1], k: len(ln.spans) - 1, extra: -1, last: true, valid: true}
+		}
+		k -= n
 	}
 	return displayOf(last, f.lastRowOf(last), false)
 }

@@ -454,6 +454,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		lsp:        deps.LSP,
 		plugins:    pw.Runtime,
 		pluginsCfg: cfg,
+		keymapOf: func(cfg config.Config) tui.Keymap {
+			return keybindings.NewKeymap(keybindings.ApplyOverrides(presetKeymap(opts.Keymap, cfg), cfg))
+		},
+		presetName: choice.name,
 		iconsMode:  icon.Mode.String(),
 		iconsWhy:   icon.Why,
 		version:    gvimVersion(),

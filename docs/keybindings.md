@@ -81,7 +81,7 @@ buffer. Fresh's `Alt+A` opens the
 **project-wide Search and Replace** panel, which searches the project's files and the open buffers'
 unsaved text and replaces across files. The panel's keys are answered by the panel itself, as every
 overlay's are: `Tab` moves between the search field, the replacement field, the file-glob field and
-the result rows; `Alt+A` switches between all files and the current file; `Alt+C`/`Alt+R`/`Alt+W`
+the result rows (Git Grep has no replacement row: its `Tab` walks search, files and rows); `Alt+A` switches between all files and the current file; `Alt+C`/`Alt+R`/`Alt+W`
 toggle Case, Regex and Whole; the file-glob field takes comma or space separated patterns (`*.go`,
 `src/**`); Up and Down in the search field walk the session's earlier patterns. In the match tree,
 `Space` checks or unchecks the focused row (a file row takes all its matches), `a` checks every
@@ -94,7 +94,8 @@ Save All to write"). `Alt+Q` lists the result set as a filterable list whose `En
 match (gvim's quickfix export; the palette's *Project Search Results in List* row runs the same
 command), and `Ctrl+Alt+Right`/`Ctrl+Alt+Left` step through the last project search's matches from
 the editor. The command palette's *Git Grep* row runs `git grep` in the work tree and shows the
-same result list read-only, with `Alt+C` for case sensitivity. Live Grep still searches the
+same result list read-only, with `Alt+C` for case sensitivity and a Files field whose
+patterns are git pathspecs (validated like the project globs, then passed to git). Live Grep still searches the
 project's files only and cannot replace.
 
 ## Changing a key

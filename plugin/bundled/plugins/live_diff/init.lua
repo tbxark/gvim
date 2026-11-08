@@ -21,11 +21,13 @@
 --   * gvim decorations have no "paint a foreground only where it collides with
 --     the background" mode, so diff backgrounds use the theme background keys
 --     only (no editor.diff_*_collision_fg).
---   * The old content of deleted lines is drawn as tier-1c virtual rows, which
---     need the host's virtual-line painting. Until the host reports
---     gvim.has("decor_virtual_paint") the plugin renders the reduced Fresh
---     view (backgrounds, new-side word emphasis, gutter, scrollbar); the row
---     building is already compiled in and switches on with the capability.
+--   * The old content of deleted lines is drawn as tier-1c virtual rows when the
+--     host paints them (gvim.has("decor_virtual_paint"), true on the shipped
+--     TUI): one virtual_line_above row per deleted line, with the "-" gutter
+--     glyph and bold+underlined removed-word text_overlays, in Fresh's priority
+--     order and cut to the host's 64-rows-per-anchor cap plus a summary row. A
+--     host without the capability falls back to the reduced Fresh view
+--     (backgrounds, new-side word emphasis, gutter, scrollbar).
 --
 -- Opt-in: the plugin is off by default (plugin.json default_enabled = false),
 -- and once loaded its global toggle also starts off, as Fresh's does. A vs-*
@@ -439,9 +441,10 @@ local function compute_word_diff(old_s, new_s)
       matched_new[j] = true
       i, j = i - 1, j - 1
     elseif dp[i * stride + j] >= dp[(i + 1) * stride + j - 1] then
-      j = j - 1
-    else
+      -- The LCS above is as long as the one to the left: skip this old token.
       i = i - 1
+    else
+      j = j - 1
     end
   end
   local function unmatched(tokens, matched)
@@ -743,14 +746,14 @@ local function paint_hunks(st, b, hunks, new_lines, detail, version)
           anchor_line = math.max(#new_lines - 1, 0)
           above = false
         end
-        -- The host draws at most 64 virtual rows at one anchor; a longer
-        -- deletion block is cut with a summary line that says how many rows
-        -- are not shown.
+        -- The host keeps the 64 highest-priority virtual rows at one anchor; a
+        -- longer deletion block leaves one of those slots for the summary row,
+        -- so 63 old lines plus the summary are exactly the host cap.
         local shown = #h.oldLines
         local truncated = 0
         if shown > MAX_VIRTUAL_ROWS_PER_LINE then
-          truncated = shown - MAX_VIRTUAL_ROWS_PER_LINE
-          shown = MAX_VIRTUAL_ROWS_PER_LINE
+          truncated = shown - (MAX_VIRTUAL_ROWS_PER_LINE - 1)
+          shown = MAX_VIRTUAL_ROWS_PER_LINE - 1
         end
         for i = 1, shown do
           local old_line = h.oldLines[i]
@@ -778,7 +781,7 @@ local function paint_hunks(st, b, hunks, new_lines, detail, version)
             kind = above and "virtual_line_above" or "virtual_line_below",
             line = anchor_line, text = t("vline.more_deleted", { count = truncated }),
             style = { fg = THEME.removedFg, bg = THEME.removedBg },
-            priority = MAX_VIRTUAL_ROWS_PER_LINE,
+            priority = shown,
           }
         end
       end

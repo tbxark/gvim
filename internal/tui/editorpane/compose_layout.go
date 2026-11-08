@@ -40,7 +40,7 @@ func mapDispColumn(ln line, dispCol int) int {
 // visible cells.
 func (f frame) layoutCompose(i int, styled bool) line {
 	cp := f.composedLine(i)
-	if f.revealed(i) && !f.fenceBody(i) {
+	if f.revealed(i) && !f.fenceBody(i) && !f.noPageReveal {
 		// The caret's row of a table reveals its cell contents while the frame's
 		// padding stays, so the borders above and below do not jump; every other
 		// line reveals raw.
@@ -74,6 +74,7 @@ func (f frame) layoutCompose(i int, styled bool) line {
 		f.markMatchesComposed(i, raw, cp, ln.cells)
 		f.markDiagnosticsComposed(i, raw, cp, ln.cells)
 		f.decorateComposed(i, raw, cp.kinds, &ln)
+		f.markConceals(i, raw, &ln)
 	}
 	return ln
 }

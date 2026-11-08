@@ -149,11 +149,17 @@ func (h *pluginHost) CreateBufferGroup(plugin string, id pluginapi.BufferGroupID
 		if node.Dir != "" && node.Dir != "h" && node.Dir != "v" {
 			return pluginapi.Errf(pluginapi.CodeInvalid, "layout direction must be \"h\" or \"v\", not %q", node.Dir)
 		}
+		// BufferGroupLayout.Ratio is the share of the FIRST child; SplitOptions.Ratio is
+		// the share of the new (second) window.
 		ratio := node.Ratio
 		if ratio < 0 || ratio > 1 {
 			ratio = 0
 		}
-		newWin, err := h.SplitWindow(win, pluginapi.SplitOptions{Dir: dir, Ratio: ratio})
+		newShare := 0.0
+		if ratio > 0 {
+			newShare = 1 - ratio
+		}
+		newWin, err := h.SplitWindow(win, pluginapi.SplitOptions{Dir: dir, Ratio: newShare})
 		if err != nil {
 			return err
 		}
@@ -305,6 +311,7 @@ func (h *pluginHost) CloseBufferGroup(id pluginapi.BufferGroupID) {
 	if g == nil {
 		return
 	}
+	m.plugEmit("buffer_group_closed", map[string]any{"group": uint64(id), "name": g.name})
 	for _, p := range g.panels {
 		if p.window != 0 {
 			_ = m.closeSplitByID(uint64(p.window))

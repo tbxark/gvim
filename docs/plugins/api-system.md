@@ -275,6 +275,8 @@ gvim.diff.buffer(buf, text, opts?) ⏳ -> Hunk[] | nil, err  -- `text` is the OL
 gvim.diff.saved(buf) ⏳ -> Hunk[] | nil, err                -- the saved text (old) against the current text
 gvim.diff.next_hunk(hunks, line) -> Hunk | nil
 gvim.diff.prev_hunk(hunks, line) -> Hunk | nil
+gvim.diff.compare_buffers(left, right) ⏳ -> CompareResult | nil, err
+gvim.diff.replace_range(buf, start, end, text, expected_version?) -> boolean | nil, err
 ```
 
 `Hunk` is `{ kind = "insert"|"delete"|"change", old_start, old_count, new_start, new_count }` with
@@ -284,3 +286,42 @@ side; the buffer is snapshotted synchronously and the result carries `version`, 
 snapshot, so you can pass it as `{version = ...}` to a decoration call.
 `next_hunk(hunks, line)` is the first hunk that starts after `line` (new side), `prev_hunk` the last that
 starts before it.
+
+`compare_buffers` is Fresh's `compareBuffers`: the line diff of two live buffers **in their own
+bytes**, for a side-by-side view that paints and edits from host offsets without copying text into
+Lua. It rejects a binary buffer (`invalid`) and one in large-file mode, or over 1 000 000 lines or
+16 MiB per side (`too_large`). The result is:
+
+```text
+CompareResult = {
+  hunks = { CompareHunk, ... },      -- increasing order; empty when equal
+  left_lines, right_lines,           -- lines in each buffer
+  left_len, right_len,               -- each buffer's length in bytes
+  left_version, right_version,       -- content version tokens, for expected_version
+}
+CompareHunk = { left = CompareSide, right = CompareSide, eol_only = false }
+CompareSide = { start, count,       -- 0-based first line and line count (0 on an empty side)
+                from, to,           -- byte range the hunk replaces, terminator included
+                jump,               -- cursor byte for a jump: from, or the line before a gap
+                lines = { {start, end}, ... },       -- each line's text, without the break
+                spans = { {start, end} | false, ... } }  -- the differing part of a paired line
+```
+
+Offsets are absolute bytes of the corresponding buffer in the editor's model: the document is
+LF-normalised, so a line break counts one byte (the same model as `b:offset_of` and
+`b:byte_length`), and every offset can be handed straight to `replace_range`. A paired line with no
+differing text has `false` in `spans` (not `nil`: a nil hole would leave the array without a length
+for `#`); a painted span never cuts a UTF-8 character. `eol_only` is always `false` here: gvim
+normalises a buffer's line endings when it reads the file, so a pair that differs only by its
+terminator is equal lines and produces no hunk (Fresh reports it as an eol-only hunk). The lines
+are paired positionally within a hunk, which is the fallback pairing Fresh documents when it has no
+per-line ops.
+
+`replace_range` is Fresh's `replaceRange`: it replaces the bytes `start..end` of the buffer with
+`text` as **one edit and one undo step**, through the same version-guarded atomic path as
+`b:edit`. `expected_version` is a version token from `compare_buffers`; when the buffer has
+changed since, nothing is done. It returns `false`, changing nothing, when the buffer is read-only
+or binary, when the range is outside the buffer, or when `expected_version` is stale; a closed
+buffer or another real failure is an error (`nil, err`). The text's line endings are normalised to
+the document's before insertion. Deleting and then inserting is two edits (two undo steps), so
+prefer this one call.

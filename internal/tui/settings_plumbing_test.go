@@ -46,6 +46,7 @@ func plumbingStructures() map[string]SettingsStructure {
 		"languages.go": {Key: "languages.go", Title: "Languages · go", Kind: "fields", Rows: []SettingsStructureRow{
 			{Path: []string{"languages", "go", "tab_size"}, Name: "tab_size", Kind: "int", Value: "8", Inherited: true, Note: "builtin"},
 			{Path: []string{"languages", "go", "use_tabs"}, Name: "use_tabs", Kind: "bool", Value: "on", Locked: true, Note: "user layer only"},
+			{Name: "extensions", Child: "languages.go.extensions", Value: "1 entry set", Note: "file extensions"},
 		}},
 		"lsp.go": {Key: "lsp.go", Title: "Servers · go", Kind: "fields", Rows: []SettingsStructureRow{
 			{Path: []string{"lsp", "go"}, Name: "servers (JSON)", Kind: "json", Value: "[]"},
@@ -120,6 +121,10 @@ func TestStructureInheritedAndLockedRows(t *testing.T) {
 	}
 	if _, ok := p.pending[pathID([]string{"languages", "go", "use_tabs"})]; ok {
 		t.Error("the locked row recorded a pending change")
+	}
+	// A child row (no inline kind) keeps the value the port gave it.
+	if row, ok := sub.itemAt(2); !ok || row.item.Child != "languages.go.extensions" || row.item.Value != "1 entry set" {
+		t.Errorf("child row = %+v (ok %v), want its own summary value", row, ok)
 	}
 }
 

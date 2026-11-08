@@ -114,6 +114,8 @@ type pluginState struct {
 	// folds are the plugin folding ranges (plugin_folds.go).
 	folds     pluginFolds
 	foldOrder int
+	// viewState is the tier-1c-C window state: buffer -> plugin -> key (plugin_seams.go).
+	viewState map[pluginapi.BufferID]map[string]map[string]any
 	// virtual records who made each virtual buffer (plugin_virtual.go).
 	virtual pluginVirtual
 

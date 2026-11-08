@@ -74,6 +74,19 @@ type WindowHost interface {
 	Equalize() error
 	// VisibleRows lists the painted rows of w top to bottom, fold-hidden lines never listed, <= 500 rows.
 	VisibleRows(w WinID) ([]VisibleRow, error)
+	// SetSplitLabel names a split window so a plugin can find it again (tier 1c-C).
+	SetSplitLabel(w WinID, label string) error
+	ClearSplitLabel(w WinID) error
+	SplitByLabel(label string) (WinID, bool)
+}
+
+// ViewStateHost is the tier-1c-C window state: per plugin, buffer and key scalars that a
+// plugin saves and restores across reloads in-session; the host clears them when the buffer
+// closes.
+type ViewStateHost interface {
+	GetWindowState(plugin string, id BufferID, key string) (any, bool)
+	SetWindowState(plugin string, id BufferID, key string, value any) error
+	ClearWindowState(plugin string, id BufferID, key string)
 }
 
 // CommandHost runs editor and ui actions.
@@ -210,9 +223,11 @@ type WorkspaceHost interface {
 // Host is everything a plugin can reach in the editor.
 type Host interface {
 	BufferHost
+	DiffHost
 	WindowHost
 	CommandHost
 	UIHost
 	DecorHost
 	WorkspaceHost
+	ViewStateHost
 }

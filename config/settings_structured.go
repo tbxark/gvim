@@ -79,6 +79,54 @@ func LanguageOverrideFieldByKey(key string) (LanguageOverrideField, bool) {
 	return f, ok
 }
 
+// LanguageInheritedValue returns the display form of the value a
+// languages.<id> entry inherits for one scalar field: the built-in language entry
+// applied over the global editor option (go tab_size inherits 8, auto_indent
+// inherits editor.auto_indent, ...). ok is false for a field whose inherited value
+// has no single display form (the grammar names).
+func (c Config) LanguageInheritedValue(language, field string) (string, bool) {
+	eff := c.EditorFor(language, "")
+	switch field {
+	case "tab_size":
+		return strconv.Itoa(eff.TabSize), true
+	case "use_tabs":
+		return onOff(eff.UseTabs), true
+	case "auto_indent":
+		return onOff(eff.AutoIndent), true
+	case "auto_close":
+		return onOff(eff.AutoClose), true
+	case "auto_surround":
+		return onOff(eff.AutoSurround), true
+	case "line_wrap":
+		return onOff(eff.LineWrap), true
+	case "wrap_column":
+		return strconv.Itoa(eff.WrapColumn), true
+	case "page_view":
+		return onOff(eff.PageView), true
+	case "page_width":
+		return strconv.Itoa(eff.PageWidth), true
+	case "show_whitespace_tabs":
+		return onOff(eff.Whitespace.TabsLeading), true
+	case "format_on_save":
+		return onOff(eff.FormatOnSave), true
+	case "comment_prefix":
+		return eff.CommentPrefix, true
+	case "word_characters":
+		return eff.WordCharacters, true
+	case "indentation_guide":
+		return onOff(eff.IndentationGuide), true
+	case "textmate_grammar":
+		return eff.TextmateGrammar, true
+	}
+	return "", false
+}
+
+// LanguageStructuredValues are the structured per-language value names the
+// Settings page edits besides the scalar overrides, in page order.
+func LanguageStructuredValues() []string {
+	return []string{"extensions", "filenames", "formatter", "on_save", "indent"}
+}
+
 // KnownLanguageIDs returns the language ids gvim knows by default, plus "text",
 // sorted. The Settings page offers them when a language entry is added.
 func KnownLanguageIDs() []string {
@@ -122,8 +170,17 @@ func RemovablePath(path []string) bool {
 			return true
 		}
 		if len(path) == 3 {
-			_, ok := languageOverrideFieldKeys[path[2]]
-			return ok
+			if _, ok := languageOverrideFieldKeys[path[2]]; ok {
+				return true
+			}
+			switch path[2] {
+			case "extensions", "filenames", "formatter", "on_save", "indent":
+				return true
+			}
+			return false
+		}
+		if len(path) == 4 && (path[2] == "formatter" || path[2] == "indent") {
+			return true
 		}
 		return false
 	case "terminal":

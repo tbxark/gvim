@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/decorations"
+	"github.com/tbxark/gvim/fold"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -283,6 +284,15 @@ func decorStyle(s pluginapi.Style) decorations.Style {
 // decorations, and a root with no plugins, get the pane back untouched. Building the hooks
 // only captures the store, so the geometry paths that build a pane per call pay nothing.
 func (m *Model) plugDecor(p editorpane.Pane, doc Document) editorpane.Pane {
+	// Plugin folds are independent of the decoration store: wire them even when no
+	// decorations are set.
+	if len(m.plug.folds.byBuffer) > 0 {
+		if bd, ok := doc.(bufferIdentified); ok {
+			if len(m.plug.folds.byBuffer[pluginapi.BufferID(bd.BufferID())]) > 0 {
+				p.PluginFolds = func() ([]fold.Range, map[int]bool, map[int]string) { return m.plugFolds(doc) }
+			}
+		}
+	}
 	st := m.plug.decor
 	if st == nil || st.Empty() {
 		return p
@@ -295,9 +305,14 @@ func (m *Model) plugDecor(p editorpane.Pane, doc Document) editorpane.Pane {
 	if st.Count(id) == 0 {
 		return p
 	}
-	v := &decorView{st: st, id: id, doc: doc, th: m.theme}
+	v := &decorView{st: st, id: id, doc: doc, th: m.theme, compose: p.PageView.On}
 	p.Overlays, p.RowStyle, p.EOL = v.spans, v.rowStyle, v.eol
 	p.Replaces, p.Gutter, p.ScrollMarks = v.replaces, v.gutter, v.scrollMark
+	p.Conceals, p.CursorLineOverlay = v.conceals, v.cursorLine
+	p.ExtraRows, p.SoftBreaks = v.extraRows, v.softBreaks
+	if len(m.plug.folds.byBuffer) > 0 {
+		p.PluginFolds = func() ([]fold.Range, map[int]bool, map[int]string) { return m.plugFolds(doc) }
+	}
 	return p
 }
 
@@ -308,6 +323,9 @@ type decorView struct {
 	id  uint64
 	doc Document
 	th  theme.Theme
+	// compose is the pane's composing state: tier-1c items marked compose_only show only
+	// there (the page view).
+	compose bool
 
 	text     string
 	textLine int
@@ -443,4 +461,102 @@ func (v *decorView) scrollMark(line int) (editorpane.ScrollMark, bool) {
 		return editorpane.ScrollMark{}, false
 	}
 	return editorpane.ScrollMark{Style: grid.Style{FG: style.ResolveColor(v.th, s.Color)}}, true
+}
+
+// conceals gives the pane the line's conceal spans (tier 1c-B).
+func (v *decorView) conceals(line int) []editorpane.ConcealSpan {
+	ld := v.st.Line(v.id, line)
+	if len(ld.Conceals) == 0 {
+		return nil
+	}
+	out := make([]editorpane.ConcealSpan, 0, len(ld.Conceals))
+	for _, c := range ld.Conceals {
+		if c.ComposeOnly && !v.compose {
+			continue
+		}
+		end := -1
+		if c.End >= 0 {
+			end = v.col(line, c.End)
+		}
+		scopeStart, scopeEnd := c.Scope[0], c.Scope[1]
+		out = append(out, editorpane.ConcealSpan{
+			Start: v.col(line, c.Start), End: end,
+			Text: c.Text, Style: style.DecorStyle(v.th, c.Style),
+			Activation: editorpane.ConcealActivation(c.Activation),
+			Scoped:     scopeEnd >= scopeStart,
+			ScopeStart: scopeStart, ScopeEnd: scopeEnd,
+		})
+	}
+	return out
+}
+
+// cursorLine gives the pane the caret row's overlay: the highest priority item wins.
+func (v *decorView) cursorLine() (grid.Style, bool) {
+	// The caret line is dynamic, so the host keeps the item on line 0.
+	ld := v.st.Line(v.id, 0)
+	if len(ld.CursorLine) == 0 {
+		return grid.Style{}, false
+	}
+	var st grid.Style
+	found := false
+	for _, c := range ld.CursorLine {
+		if c.ComposeOnly && !v.compose {
+			continue
+		}
+		st = editorpane.PatchStyle(st, style.DecorStyle(v.th, c.Style))
+		found = true
+	}
+	return st, found
+}
+
+// extraRows gives the pane the line's virtual rows above and below (tier 1c-B). Items
+// marked compose_only show only in a composing pane.
+func (v *decorView) extraRows(line int) editorpane.ExtraRows {
+	ld := v.st.Line(v.id, line)
+	if len(ld.Above) == 0 && len(ld.Below) == 0 {
+		return editorpane.ExtraRows{}
+	}
+	conv := func(rows []decorations.VirtualRow) []editorpane.ExtraRow {
+		out := make([]editorpane.ExtraRow, 0, len(rows))
+		for _, r := range rows {
+			if r.ComposeOnly && !v.compose {
+				continue
+			}
+			gutterStyle := style.DecorStyle(v.th, r.GutterStyle)
+			row := editorpane.ExtraRow{
+				Text: r.Text, Style: style.DecorStyle(v.th, r.Style),
+				GutterText: r.GutterText, GutterStyle: gutterStyle, Priority: r.Priority,
+			}
+			for _, ov := range r.Overlays {
+				row.Overlays = append(row.Overlays, editorpane.ExtraTextOverlay{
+					Start: ov.Start, End: ov.End, Style: style.DecorStyle(v.th, ov.Style),
+				})
+			}
+			out = append(out, row)
+		}
+		return out
+	}
+	return editorpane.ExtraRows{Above: conv(ld.Above), Below: conv(ld.Below)}
+}
+
+// softBreaks gives the pane the line's soft breaks (tier 1c-B).
+func (v *decorView) softBreaks(line int) []editorpane.SoftBreak {
+	ld := v.st.Line(v.id, line)
+	if len(ld.SoftBreaks) == 0 {
+		return nil
+	}
+	out := make([]editorpane.SoftBreak, 0, len(ld.SoftBreaks))
+	for _, b := range ld.SoftBreaks {
+		if b.ComposeOnly && !v.compose {
+			continue
+		}
+		scopeStart, scopeEnd := b.Scope[0], b.Scope[1]
+		out = append(out, editorpane.SoftBreak{
+			Col: v.col(line, b.Col), Indent: b.Indent, PrefixText: b.PrefixText,
+			PrefixStyle: style.DecorStyle(v.th, b.PrefixStyle), Priority: b.Priority,
+			Activation: editorpane.ConcealActivation(b.Activation),
+			Scoped:     scopeEnd >= scopeStart, ScopeStart: scopeStart, ScopeEnd: scopeEnd,
+		})
+	}
+	return out
 }
