@@ -10,7 +10,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -36,7 +36,7 @@ type osWatch struct {
 
 	mu       sync.Mutex
 	pending  map[string]*pendingEvent
-	queue    []plugin.WatchEvent
+	queue    []hostos.WatchEvent
 	overflow bool
 	stopped  bool
 	wake     chan struct{} // 1-buffered: something is in the queue or the watcher stopped
@@ -47,10 +47,10 @@ type pendingEvent struct {
 	timer *time.Timer
 }
 
-var _ plugin.Watch = (*osWatch)(nil)
+var _ hostos.Watch = (*osWatch)(nil)
 
-// Watch implements plugin.OS.
-func (o *pluginOS) Watch(ctx context.Context, path string, wo plugin.WatchOptions) (plugin.Watch, error) {
+// Watch implements hostos.OS.
+func (o *pluginOS) Watch(ctx context.Context, path string, wo hostos.WatchOptions) (hostos.Watch, error) {
 	if err := ctxErr(ctx); err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (w *osWatch) run() {
 			if !ok {
 				return
 			}
-			w.push(plugin.WatchEvent{Path: w.path, Kind: "error", Err: mapErr(err, w.path).Error()})
+			w.push(hostos.WatchEvent{Path: w.path, Kind: "error", Err: mapErr(err, w.path).Error()})
 		}
 	}
 }
@@ -175,7 +175,7 @@ func (w *osWatch) overKqueueLimit(ev fsnotify.Event) bool {
 	}
 	w.mu.Lock()
 	if !w.stopped {
-		w.queue = append(w.queue, plugin.WatchEvent{Path: w.path, Kind: "error", Err: fmt.Sprintf("limit: the directory has more than %d entries; the watch was stopped", kqueueDirLimit)})
+		w.queue = append(w.queue, hostos.WatchEvent{Path: w.path, Kind: "error", Err: fmt.Sprintf("limit: the directory has more than %d entries; the watch was stopped", kqueueDirLimit)})
 		w.signal()
 	}
 	w.mu.Unlock()
@@ -205,12 +205,12 @@ func (w *osWatch) event(ev fsnotify.Event) {
 		w.mu.Lock()
 		delete(w.pending, path)
 		w.mu.Unlock()
-		w.push(plugin.WatchEvent{Path: path, Kind: pe.kind})
+		w.push(hostos.WatchEvent{Path: path, Kind: pe.kind})
 	})
 }
 
 // push queues an event for Next.
-func (w *osWatch) push(e plugin.WatchEvent) {
+func (w *osWatch) push(e hostos.WatchEvent) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.stopped {
@@ -231,15 +231,15 @@ func (w *osWatch) signal() {
 	}
 }
 
-// Next implements plugin.Watch.
-func (w *osWatch) Next(ctx context.Context) (plugin.WatchEvent, bool) {
+// Next implements hostos.Watch.
+func (w *osWatch) Next(ctx context.Context) (hostos.WatchEvent, bool) {
 	for {
 		w.mu.Lock()
 		switch {
 		case w.overflow:
 			w.overflow = false
 			w.mu.Unlock()
-			return plugin.WatchEvent{Path: w.path, Kind: "error", Err: "limit: file events were dropped"}, true
+			return hostos.WatchEvent{Path: w.path, Kind: "error", Err: "limit: file events were dropped"}, true
 		case len(w.queue) > 0:
 			e := w.queue[0]
 			w.queue = w.queue[1:]
@@ -250,18 +250,18 @@ func (w *osWatch) Next(ctx context.Context) (plugin.WatchEvent, bool) {
 			return e, true
 		case w.stopped:
 			w.mu.Unlock()
-			return plugin.WatchEvent{}, false
+			return hostos.WatchEvent{}, false
 		}
 		w.mu.Unlock()
 		select {
 		case <-w.wake:
 		case <-ctx.Done():
-			return plugin.WatchEvent{}, false
+			return hostos.WatchEvent{}, false
 		}
 	}
 }
 
-// Stop implements plugin.Watch.
+// Stop implements hostos.Watch.
 func (w *osWatch) Stop() {
 	w.mu.Lock()
 	if w.stopped {

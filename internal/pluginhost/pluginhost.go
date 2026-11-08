@@ -9,6 +9,7 @@ import (
 	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -97,10 +98,10 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 
 // pluginDirs reports the directories gvim.dirs gives the plugins. It is evaluated at every
 // call, because the workspace root changes when a project is opened.
-func pluginDirs(cfgDir string, root func() string) func() plugin.Dirs {
+func pluginDirs(cfgDir string, root func() string) func() hostos.Dirs {
 	home, _ := os.UserHomeDir()
-	return func() plugin.Dirs {
+	return func() hostos.Dirs {
 		cwd, _ := os.Getwd()
-		return plugin.Dirs{Config: cfgDir, Home: home, Temp: os.TempDir(), Cwd: cwd, Root: root()}
+		return hostos.Dirs{Config: cfgDir, Home: home, Temp: os.TempDir(), Cwd: cwd, Root: root()}
 	}
 }

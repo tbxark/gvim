@@ -9,6 +9,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -89,14 +90,14 @@ func installState(e *apiEnv) {
 	})
 
 	d := e.area("dirs")
-	dir := func(name string, f func(Dirs) string) {
+	dir := func(name string, f func(hostos.Dirs) string) {
 		e.set(d, name, func(L *lua.LState) int {
 			L.Push(lua.LString(f(r.os.Dirs())))
 			return 1
 		})
 	}
-	dir("config", func(d Dirs) string { return d.Config })
-	dir("data", func(d Dirs) string {
+	dir("config", func(d hostos.Dirs) string { return d.Config })
+	dir("data", func(d hostos.Dirs) string {
 		if d.Config == "" {
 			return ""
 		}
@@ -106,10 +107,10 @@ func installState(e *apiEnv) {
 		L.Push(lua.LString(p.dir))
 		return 1
 	})
-	dir("root", func(d Dirs) string { return d.Root })
-	dir("cwd", func(d Dirs) string { return d.Cwd })
-	dir("home", func(d Dirs) string { return d.Home })
-	dir("temp", func(d Dirs) string { return d.Temp })
+	dir("root", func(d hostos.Dirs) string { return d.Root })
+	dir("cwd", func(d hostos.Dirs) string { return d.Cwd })
+	dir("home", func(d hostos.Dirs) string { return d.Home })
+	dir("temp", func(d hostos.Dirs) string { return d.Temp })
 }
 
 // checkJSON verifies that a value from fromLua survives a JSON round trip: only strings

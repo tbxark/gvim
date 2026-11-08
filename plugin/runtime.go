@@ -1,13 +1,3 @@
-// Package plugin is the Lua plugin runtime: one gopher-lua state per plugin, a task
-// scheduler with time and memory budgets, the sandbox, require, handles, and the gvim API
-// modules. It implements pluginapi.Runtime for internal/ui and talks to the editor
-// through pluginapi.Host.
-//
-// Everything here runs on the Bubble Tea Update goroutine. The only exceptions are the Work
-// closures it hands out (plain Go data in, plain Go data out), the slice timers and the heap
-// guard. The package never touches the filesystem or starts a process itself: that is OS
-// behind Work (the one exception is discovery, which reads plugin directories inside its
-// Work through LoaderOptions.Open).
 package plugin
 
 import (
@@ -20,6 +10,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -34,8 +25,8 @@ type Options struct {
 	// alone. Tests that run real Lua raise it, so that a machine that is busy with other
 	// work does not turn a slow slice into a timeout.
 	EventBudget time.Duration
-	// OS provides files, processes and watchers (nil: NopOS, everything unsupported).
-	OS OS
+	// OS provides files, processes and watchers (nil: hostos.NopOS, everything unsupported).
+	OS hostos.OS
 	// Services provides display width, diff, fuzzy, grep, decode, git root (nil:
 	// every call that needs one returns CodeUnsupported).
 	Services pluginapi.Services
@@ -64,7 +55,7 @@ type Options struct {
 type Runtime struct {
 	timeout   time.Duration
 	eventCap  time.Duration
-	os        OS
+	os        hostos.OS
 	svc       pluginapi.Services
 	version   string
 	platform  string
@@ -147,7 +138,7 @@ func New(o Options) *Runtime {
 		r.eventCap = eventBudget
 	}
 	if r.os == nil {
-		r.os = NopOS{}
+		r.os = hostos.NopOS{}
 	}
 	if r.svc == nil {
 		r.svc = noServices{}

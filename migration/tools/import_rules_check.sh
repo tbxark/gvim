@@ -39,7 +39,8 @@
 #       utility libraries (ansi, term) are not the UI framework and stay free.
 #   R3  leaf packages import no module package: buffer, textlayout, diff,
 #       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp,
-#       atomicfile, shellcmd.
+#       lsp/lsptest, atomicfile, shellcmd. (lsp/manager sits above lsp and may
+#       import it.)
 #   R4  engine direction: editor must not import the UI, app, cli, plugin
 #       runtime/contract, lsp, finder, fsops, workspace, keymap, theme or
 #       config; search must not import editor; syntax imports only theme among
@@ -56,13 +57,13 @@
 #       plugin/plugintest import the plugin runtime; only internal/app and
 #       internal/uiadapter import the TUI sub-packages.
 #   R8  no production package (the dependency tree of cmd/gvim) imports test
-#       support: buffer/buffertest, plugin/plugintest, internal/uitest,
-#       internal/apptest.
+#       support: buffer/buffertest, plugin/plugintest, lsp/lsptest,
+#       internal/uitest, internal/apptest.
 #   R9  pluginapi and decorations import no module package and no charm package.
 #   R10 the plugin tree imports only the standard library, gopher-lua, hujson,
-#       pluginapi, plugin/bundled and plugin/pattern (plugintest may also import
-#       the plugin runtime and other plugin sub-packages). No charm. No other
-#       module package.
+#       pluginapi, plugin/bundled, plugin/pattern and plugin/hostos (plugintest may
+#       also import the plugin runtime and other plugin sub-packages). No charm. No
+#       other module package.
 #   R11 editor, buffer and decorations do not import pluginapi.
 #   R12 tui sub-packages may import each other and the kits, but no package
 #       outside internal/tui and internal/app may import them.
@@ -151,7 +152,7 @@ while IFS=$'\t' read -r pkg imp; do
   if [ "$ours" = 1 ]; then
     # R3: leaf packages have no module dependency at all.
     case "$rel" in
-      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/*)
+      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd)
         add R3 "$pkg" "$imp"
         ;;
     esac
@@ -214,7 +215,8 @@ while IFS=$'\t' read -r pkg imp; do
       add R7 "$pkg" "$imp"
     fi
     if [ "$rel" != internal/app ] && [ "$rel" != internal/pluginhost ] && [ "$rel" != plugin/plugintest ] && under "$irel" plugin &&
-      [ "$irel" != pluginapi ] && [ "$irel" != plugin/pattern ] && [ "$irel" != plugin/bundled ]; then
+      [ "$irel" != pluginapi ] && [ "$irel" != plugin/pattern ] && [ "$irel" != plugin/bundled ] &&
+      [ "$irel" != plugin/hostos ]; then
       add R7 "$pkg" "$imp"
     fi
     if [ "$rel" != internal/tui ] && [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ] && under "$irel" internal/tui &&
@@ -228,7 +230,7 @@ while IFS=$'\t' read -r pkg imp; do
     # R10: the plugin tree.
     if under "$rel" plugin; then
       case "$irel" in
-        pluginapi | plugin/bundled | plugin/pattern | plugin)
+        pluginapi | plugin/bundled | plugin/pattern | plugin/hostos | plugin)
           if [ "$irel" = plugin ] && [ "$rel" != plugin/plugintest ] &&
             [ "$rel" != internal/app ]; then
             add R10 "$pkg" "$imp"
@@ -296,7 +298,7 @@ while IFS=$'\t' read -r pkg imp; do
 
   # R8: test support never reaches a shipped binary.
   case "$imp" in
-    "$mod/buffer/buffertest" | "$mod/plugin/plugintest" | "$mod/internal/uitest" | "$mod/internal/apptest")
+    "$mod/buffer/buffertest" | "$mod/plugin/plugintest" | "$mod/lsp/lsptest" | "$mod/internal/uitest" | "$mod/internal/apptest")
       if printf '%s\n' "$prod" | grep -qxF "$pkg"; then
         add R8 "$pkg" "$imp"
       fi

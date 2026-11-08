@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -25,13 +25,13 @@ func TestFakeOSFiles(t *testing.T) {
 	if _, err := f.ReadFile(ctx, "nope", 3); pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
 		t.Fatalf("missing: %v", err)
 	}
-	if err := f.WriteFile(ctx, "/work/x/y", []byte("1"), plugin.WriteOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
+	if err := f.WriteFile(ctx, "/work/x/y", []byte("1"), hostos.WriteOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
 		t.Fatalf("write without parents: %v", err)
 	}
-	if err := f.WriteFile(ctx, "/work/x/y", []byte("1"), plugin.WriteOptions{Parents: true}); err != nil {
+	if err := f.WriteFile(ctx, "/work/x/y", []byte("1"), hostos.WriteOptions{Parents: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.WriteFile(ctx, "/work/x/y", []byte("2"), plugin.WriteOptions{Append: true}); err != nil {
+	if err := f.WriteFile(ctx, "/work/x/y", []byte("2"), hostos.WriteOptions{Append: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := f.File("/work/x/y"); got != "12" {
@@ -56,7 +56,7 @@ func TestFakeOSFiles(t *testing.T) {
 	if err := f.Remove(ctx, "/work/z", true); err != nil || f.Exists("/work/z") {
 		t.Fatalf("recursive remove: %v", err)
 	}
-	res, err := f.Walk(ctx, "/work", plugin.WalkOptions{})
+	res, err := f.Walk(ctx, "/work", hostos.WalkOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,19 +74,19 @@ func TestFakeOSProcesses(t *testing.T) {
 	f := plugintest.NewFakeOS()
 	f.Script([]string{"git", "show"}, plugintest.ProcScript{Stdout: "blob", Code: 0})
 	f.Script([]string{"git"}, plugintest.ProcScript{Stderr: "usage", Code: 129})
-	res, err := f.Run(ctx, []string{"git", "show", "HEAD:x"}, plugin.ProcOptions{})
+	res, err := f.Run(ctx, []string{"git", "show", "HEAD:x"}, hostos.ProcOptions{})
 	if err != nil || string(res.Stdout) != "blob" {
 		t.Fatalf("Run = %+v, %v", res, err)
 	}
-	if res, _ := f.Run(ctx, []string{"git", "status"}, plugin.ProcOptions{}); res.Code != 129 || string(res.Stderr) != "usage" {
+	if res, _ := f.Run(ctx, []string{"git", "status"}, hostos.ProcOptions{}); res.Code != 129 || string(res.Stderr) != "usage" {
 		t.Fatalf("the first matching script must win by order: %+v", res)
 	}
-	if _, err := f.Run(ctx, []string{"other"}, plugin.ProcOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeExec {
+	if _, err := f.Run(ctx, []string{"other"}, hostos.ProcOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeExec {
 		t.Fatalf("unscripted: %v", err)
 	}
 
-	f.Script([]string{"srv"}, plugintest.ProcScript{Hold: true, Chunks: []plugin.ProcChunk{{Data: []byte("up")}}})
-	p, err := f.Start(ctx, []string{"srv"}, plugin.ProcOptions{OpenStdin: true})
+	f.Script([]string{"srv"}, plugintest.ProcScript{Hold: true, Chunks: []hostos.ProcChunk{{Data: []byte("up")}}})
+	p, err := f.Start(ctx, []string{"srv"}, hostos.ProcOptions{OpenStdin: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestFakeOSProcesses(t *testing.T) {
 func TestFakeOSWatch(t *testing.T) {
 	f := plugintest.NewFakeOS()
 	f.SetFile("/work/a.txt", "1")
-	w, err := f.Watch(context.Background(), "/work", plugin.WatchOptions{Debounce: 7 * time.Millisecond})
+	w, err := f.Watch(context.Background(), "/work", hostos.WatchOptions{Debounce: 7 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,11 +141,11 @@ func TestFakeOSWatch(t *testing.T) {
 	if _, ok := w.Next(context.Background()); ok {
 		t.Fatal("Next after Stop")
 	}
-	if _, err := f.Watch(context.Background(), "/missing", plugin.WatchOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
+	if _, err := f.Watch(context.Background(), "/missing", hostos.WatchOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
 		t.Fatalf("watch of a missing path: %v", err)
 	}
 	f.FailWatch("/work", pluginapi.Errf(pluginapi.CodeLimit, "too big"))
-	if _, err := f.Watch(context.Background(), "/work", plugin.WatchOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeLimit {
+	if _, err := f.Watch(context.Background(), "/work", hostos.WatchOptions{}); pluginapi.CodeOf(err) != pluginapi.CodeLimit {
 		t.Fatalf("scripted failure: %v", err)
 	}
 }

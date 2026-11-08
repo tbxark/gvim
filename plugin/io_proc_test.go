@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -88,16 +89,16 @@ func TestProcRunOptionsReachTheOS(t *testing.T) {
 	rows := []struct {
 		name string
 		opts string
-		want plugin.ProcOptions
+		want hostos.ProcOptions
 	}{
-		{"defaults", ``, plugin.ProcOptions{Timeout: 60 * time.Second, MaxOutput: 8 << 20}},
+		{"defaults", ``, hostos.ProcOptions{Timeout: 60 * time.Second, MaxOutput: 8 << 20}},
 		{"all of them", `{cwd = "/x", env = {A = "1"}, stdin = "in", timeout_ms = 1500, max_output = 100, merge_stderr = true}`,
-			plugin.ProcOptions{Cwd: "/x", Env: map[string]string{"A": "1"}, Stdin: []byte("in"), Timeout: 1500 * time.Millisecond, MaxOutput: 100, MergeStderr: true}},
-		{"timeout is capped at ten minutes", `{timeout_ms = 99999999}`, plugin.ProcOptions{Timeout: 600 * time.Second, MaxOutput: 8 << 20}},
-		{"timeout zero is the default, not unlimited", `{timeout_ms = 0}`, plugin.ProcOptions{Timeout: 60 * time.Second, MaxOutput: 8 << 20}},
-		{"negative timeout is the default", `{timeout_ms = -1}`, plugin.ProcOptions{Timeout: 60 * time.Second, MaxOutput: 8 << 20}},
-		{"a fraction of a millisecond is one millisecond", `{timeout_ms = 0.4}`, plugin.ProcOptions{Timeout: time.Millisecond, MaxOutput: 8 << 20}},
-		{"output is capped at 8 MiB", `{max_output = 1e12}`, plugin.ProcOptions{Timeout: 60 * time.Second, MaxOutput: 8 << 20}},
+			hostos.ProcOptions{Cwd: "/x", Env: map[string]string{"A": "1"}, Stdin: []byte("in"), Timeout: 1500 * time.Millisecond, MaxOutput: 100, MergeStderr: true}},
+		{"timeout is capped at ten minutes", `{timeout_ms = 99999999}`, hostos.ProcOptions{Timeout: 600 * time.Second, MaxOutput: 8 << 20}},
+		{"timeout zero is the default, not unlimited", `{timeout_ms = 0}`, hostos.ProcOptions{Timeout: 60 * time.Second, MaxOutput: 8 << 20}},
+		{"negative timeout is the default", `{timeout_ms = -1}`, hostos.ProcOptions{Timeout: 60 * time.Second, MaxOutput: 8 << 20}},
+		{"a fraction of a millisecond is one millisecond", `{timeout_ms = 0.4}`, hostos.ProcOptions{Timeout: time.Millisecond, MaxOutput: 8 << 20}},
+		{"output is capped at 8 MiB", `{max_output = 1e12}`, hostos.ProcOptions{Timeout: 60 * time.Second, MaxOutput: 8 << 20}},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
@@ -176,7 +177,7 @@ end)`)
 }
 
 func TestSpawnCallbacks(t *testing.T) {
-	chunks := []plugin.ProcChunk{{Data: []byte("a\nb\r\npa")}, {Stderr: true, Data: []byte("e1")}, {Data: []byte("rt\n")}}
+	chunks := []hostos.ProcChunk{{Data: []byte("a\nb\r\npa")}, {Stderr: true, Data: []byte("e1")}, {Data: []byte("rt\n")}}
 	rows := []struct {
 		name string
 		opts string

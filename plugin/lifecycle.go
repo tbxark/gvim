@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -156,7 +157,7 @@ func (s pluginState) marshal() []byte {
 
 // readPluginState reads the state file; a missing file is an empty state, a damaged one
 // is ignored with a note.
-func readPluginState(ctx context.Context, osys OS, path string, notes *[]note) pluginState {
+func readPluginState(ctx context.Context, osys hostos.OS, path string, notes *[]note) pluginState {
 	st := pluginState{enabled: map[string]bool{}, disabled: map[string]bool{}}
 	if path == "" {
 		return st
@@ -215,7 +216,7 @@ func (r *Runtime) writeState() {
 	l.stateDirty, l.stateBusy = false, true
 	data, path, osys := l.state.marshal(), l.opt.StateFile, r.os
 	r.work = append(r.work, r.newWork(func(ctx context.Context) (any, string) {
-		if err := osys.WriteFile(ctx, path, data, WriteOptions{Atomic: true, Parents: true}); err != nil {
+		if err := osys.WriteFile(ctx, path, data, hostos.WriteOptions{Atomic: true, Parents: true}); err != nil {
 			return nil, errString(err)
 		}
 		return nil, ""
@@ -237,7 +238,7 @@ func (r *Runtime) flushState() {
 		return
 	}
 	l.stateDirty, l.stateBusy = false, false
-	if err := r.os.WriteFile(context.Background(), l.opt.StateFile, l.state.marshal(), WriteOptions{Atomic: true, Parents: true}); err != nil {
+	if err := r.os.WriteFile(context.Background(), l.opt.StateFile, l.state.marshal(), hostos.WriteOptions{Atomic: true, Parents: true}); err != nil {
 		r.logf("", levelWarn, "cannot save plugin-state.json: "+errString(err))
 	}
 }

@@ -76,8 +76,8 @@ func TestSignatureHelp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.signature = tt.answer
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.Signature = tt.answer
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.SignatureHelp(ctx, reqDocURI, reqPos)
 			wantDocPosition(t, nextRequest[*protocol.SignatureHelpParams](t, f.srv, "signature help params").TextDocumentPositionParams)

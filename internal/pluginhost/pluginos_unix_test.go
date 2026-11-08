@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -36,7 +36,7 @@ func requireProgram(t *testing.T, name string) {
 }
 
 // collect drains a started process: all chunks, then the result.
-func collect(t *testing.T, p plugin.Proc) (stdout, stderr string, res plugin.ProcResult) {
+func collect(t *testing.T, p hostos.Proc) (stdout, stderr string, res hostos.ProcResult) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -63,37 +63,37 @@ func TestPluginOSRun(t *testing.T) {
 	requireProgram(t, "sh")
 	o, dir := newTestOS(t)
 	ctx := context.Background()
-	sh := func(script string, opts plugin.ProcOptions) (plugin.ProcResult, error) {
+	sh := func(script string, opts hostos.ProcOptions) (hostos.ProcResult, error) {
 		return o.Run(ctx, []string{"sh", "-c", script}, opts)
 	}
 	t.Run("output and exit code", func(t *testing.T) {
-		res, err := sh("echo out; echo err >&2; exit 3", plugin.ProcOptions{})
+		res, err := sh("echo out; echo err >&2; exit 3", hostos.ProcOptions{})
 		if err != nil || res.Code != 3 || string(res.Stdout) != "out\n" || string(res.Stderr) != "err\n" || res.Signal != "" || res.TimedOut {
 			t.Fatalf("res = %+v, err = %v", res, err)
 		}
 	})
 	t.Run("merged stderr", func(t *testing.T) {
-		res, err := sh("echo out; echo err >&2", plugin.ProcOptions{MergeStderr: true})
+		res, err := sh("echo out; echo err >&2", hostos.ProcOptions{MergeStderr: true})
 		if err != nil || string(res.Stdout) != "out\nerr\n" || len(res.Stderr) != 0 {
 			t.Fatalf("res = %+v, err = %v", res, err)
 		}
 	})
 	t.Run("environment cwd and stdin", func(t *testing.T) {
-		res, err := sh(`pwd; echo "$GVIM_X"; cat`, plugin.ProcOptions{Env: map[string]string{"GVIM_X": "added"}, Stdin: []byte("from stdin"), Cwd: "."})
+		res, err := sh(`pwd; echo "$GVIM_X"; cat`, hostos.ProcOptions{Env: map[string]string{"GVIM_X": "added"}, Stdin: []byte("from stdin"), Cwd: "."})
 		want := dir + "\nadded\nfrom stdin"
 		if err != nil || string(res.Stdout) != want {
 			t.Fatalf("stdout = %q, err = %v; want %q", res.Stdout, err, want)
 		}
 	})
 	t.Run("output limit", func(t *testing.T) {
-		res, err := sh("head -c 100000 /dev/zero", plugin.ProcOptions{MaxOutput: 1000})
+		res, err := sh("head -c 100000 /dev/zero", hostos.ProcOptions{MaxOutput: 1000})
 		if err != nil || len(res.Stdout) != 1000 || !res.Truncated || res.Code != 0 {
 			t.Fatalf("len = %d truncated = %v code = %d err = %v signal=%q timedout=%v", len(res.Stdout), res.Truncated, res.Code, err, res.Signal, res.TimedOut)
 		}
 	})
 	t.Run("timeout kills the whole group", func(t *testing.T) {
 		begin := time.Now()
-		res, err := sh("sleep 30 & echo $!; wait", plugin.ProcOptions{Timeout: 200 * time.Millisecond})
+		res, err := sh("sleep 30 & echo $!; wait", hostos.ProcOptions{Timeout: 200 * time.Millisecond})
 		if err != nil || !res.TimedOut || res.Signal != "KILL" {
 			t.Fatalf("res = %+v, err = %v", res, err)
 		}
@@ -107,7 +107,7 @@ func TestPluginOSRun(t *testing.T) {
 		eventually(t, "the grandchild to die", func() bool { return !alive(pid) })
 	})
 	t.Run("could not start", func(t *testing.T) {
-		if _, err := o.Run(ctx, []string{"gvim-no-such-program"}, plugin.ProcOptions{}); codeOf(err) != pluginapi.CodeExec {
+		if _, err := o.Run(ctx, []string{"gvim-no-such-program"}, hostos.ProcOptions{}); codeOf(err) != pluginapi.CodeExec {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -115,7 +115,7 @@ func TestPluginOSRun(t *testing.T) {
 		c, cancel := context.WithCancel(ctx)
 		go func() { time.Sleep(100 * time.Millisecond); cancel() }()
 		begin := time.Now()
-		_, err := o.Run(c, []string{"sleep", "30"}, plugin.ProcOptions{})
+		_, err := o.Run(c, []string{"sleep", "30"}, hostos.ProcOptions{})
 		if codeOf(err) != pluginapi.CodeCancelled || time.Since(begin) > 5*time.Second {
 			t.Fatalf("err = %v after %v", err, time.Since(begin))
 		}
@@ -128,7 +128,7 @@ func TestPluginOSStart(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("streams both pipes", func(t *testing.T) {
-		p, err := o.Start(ctx, []string{"sh", "-c", "echo out; echo err >&2; exit 4"}, plugin.ProcOptions{})
+		p, err := o.Start(ctx, []string{"sh", "-c", "echo out; echo err >&2; exit 4"}, hostos.ProcOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +141,7 @@ func TestPluginOSStart(t *testing.T) {
 		}
 	})
 	t.Run("batches output", func(t *testing.T) {
-		p, err := o.Start(ctx, []string{"sh", "-c", "i=0; while [ $i -lt 200 ]; do echo line$i; i=$((i+1)); done"}, plugin.ProcOptions{})
+		p, err := o.Start(ctx, []string{"sh", "-c", "i=0; while [ $i -lt 200 ]; do echo line$i; i=$((i+1)); done"}, hostos.ProcOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,7 +160,7 @@ func TestPluginOSStart(t *testing.T) {
 	})
 	t.Run("stdin through the queue", func(t *testing.T) {
 		requireProgram(t, "cat")
-		p, err := o.Start(ctx, []string{"cat"}, plugin.ProcOptions{OpenStdin: true})
+		p, err := o.Start(ctx, []string{"cat"}, hostos.ProcOptions{OpenStdin: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,7 +180,7 @@ func TestPluginOSStart(t *testing.T) {
 		}
 	})
 	t.Run("write without a pipe", func(t *testing.T) {
-		p, err := o.Start(ctx, []string{"sleep", "30"}, plugin.ProcOptions{})
+		p, err := o.Start(ctx, []string{"sleep", "30"}, hostos.ProcOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +190,7 @@ func TestPluginOSStart(t *testing.T) {
 		}
 	})
 	t.Run("a child that never reads makes Write busy, never block", func(t *testing.T) {
-		p, err := o.Start(ctx, []string{"sleep", "30"}, plugin.ProcOptions{OpenStdin: true})
+		p, err := o.Start(ctx, []string{"sleep", "30"}, hostos.ProcOptions{OpenStdin: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +216,7 @@ func TestPluginOSStart(t *testing.T) {
 		}
 	})
 	t.Run("kill reaches the group", func(t *testing.T) {
-		p, err := o.Start(ctx, []string{"sh", "-c", "sleep 30 & echo $!; wait"}, plugin.ProcOptions{})
+		p, err := o.Start(ctx, []string{"sh", "-c", "sleep 30 & echo $!; wait"}, hostos.ProcOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +239,7 @@ func TestPluginOSStart(t *testing.T) {
 	})
 	t.Run("terminate sends TERM, then KILL after the grace period", func(t *testing.T) {
 		// the shell ignores TERM, so only the second signal can end it
-		p, err := o.Start(ctx, []string{"sh", "-c", "trap '' TERM; echo ready; while :; do sleep 0.05; done"}, plugin.ProcOptions{})
+		p, err := o.Start(ctx, []string{"sh", "-c", "trap '' TERM; echo ready; while :; do sleep 0.05; done"}, hostos.ProcOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -258,7 +258,7 @@ func TestPluginOSStart(t *testing.T) {
 		}
 	})
 	t.Run("timeout", func(t *testing.T) {
-		p, err := o.Start(ctx, []string{"sleep", "30"}, plugin.ProcOptions{Timeout: 150 * time.Millisecond})
+		p, err := o.Start(ctx, []string{"sleep", "30"}, hostos.ProcOptions{Timeout: 150 * time.Millisecond})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +268,7 @@ func TestPluginOSStart(t *testing.T) {
 		}
 	})
 	t.Run("could not start", func(t *testing.T) {
-		if _, err := o.Start(ctx, []string{"gvim-no-such-program"}, plugin.ProcOptions{OpenStdin: true}); codeOf(err) != pluginapi.CodeExec {
+		if _, err := o.Start(ctx, []string{"gvim-no-such-program"}, hostos.ProcOptions{OpenStdin: true}); codeOf(err) != pluginapi.CodeExec {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -279,17 +279,17 @@ func TestOSShutdownKillsEverythingAtOnce(t *testing.T) {
 	o := newPluginOS(nil)
 	ctx := context.Background()
 	trap := []string{"sh", "-c", "trap '' TERM; while :; do sleep 0.05; done"}
-	p1, err := o.Start(ctx, trap, plugin.ProcOptions{})
+	p1, err := o.Start(ctx, trap, hostos.ProcOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2, err := o.Start(ctx, []string{"sleep", "30"}, plugin.ProcOptions{})
+	p2, err := o.Start(ctx, []string{"sleep", "30"}, hostos.ProcOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	begin := time.Now()
 	o.Shutdown()
-	for _, p := range []plugin.Proc{p1, p2} {
+	for _, p := range []hostos.Proc{p1, p2} {
 		_, _, res := collect(t, p)
 		if res.Signal != "KILL" {
 			t.Fatalf("res = %+v", res)
@@ -298,10 +298,10 @@ func TestOSShutdownKillsEverythingAtOnce(t *testing.T) {
 	if d := time.Since(begin); d > time.Second {
 		t.Fatalf("Shutdown took %v to kill", d)
 	}
-	if _, err := o.Start(ctx, []string{"sleep", "1"}, plugin.ProcOptions{}); codeOf(err) != pluginapi.CodeClosed {
+	if _, err := o.Start(ctx, []string{"sleep", "1"}, hostos.ProcOptions{}); codeOf(err) != pluginapi.CodeClosed {
 		t.Fatalf("Start after Shutdown: %v", err)
 	}
-	if _, err := o.Run(ctx, []string{"true"}, plugin.ProcOptions{}); codeOf(err) != pluginapi.CodeClosed {
+	if _, err := o.Run(ctx, []string{"true"}, hostos.ProcOptions{}); codeOf(err) != pluginapi.CodeClosed {
 		t.Fatalf("Run after Shutdown: %v", err)
 	}
 	o.Shutdown() // idempotent
@@ -380,9 +380,9 @@ func TestOSTablesRaceFree(t *testing.T) {
 			defer wg.Done()
 			switch i % 3 {
 			case 0:
-				_, _ = o.Run(ctx, []string{"sh", "-c", "echo hi"}, plugin.ProcOptions{})
+				_, _ = o.Run(ctx, []string{"sh", "-c", "echo hi"}, hostos.ProcOptions{})
 			case 1:
-				if p, err := o.Start(ctx, []string{"sh", "-c", "echo hi; sleep 0.1"}, plugin.ProcOptions{OpenStdin: true}); err == nil {
+				if p, err := o.Start(ctx, []string{"sh", "-c", "echo hi; sleep 0.1"}, hostos.ProcOptions{OpenStdin: true}); err == nil {
 					_ = p.Write([]byte("x"))
 					p.CloseStdin()
 					for {
@@ -393,7 +393,7 @@ func TestOSTablesRaceFree(t *testing.T) {
 					_, _ = p.Wait(ctx)
 				}
 			case 2:
-				if w, err := o.Watch(ctx, dir, plugin.WatchOptions{Debounce: 10 * time.Millisecond}); err == nil {
+				if w, err := o.Watch(ctx, dir, hostos.WatchOptions{Debounce: 10 * time.Millisecond}); err == nil {
 					go func() { _ = writePluginFile(dir, "w"+strconv.Itoa(i)) }()
 					c, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 					_, _ = w.Next(c)
@@ -415,7 +415,7 @@ func TestTerminateKillsGroupAfterLeaderExit(t *testing.T) {
 	o, dir := newTestOS(t)
 	pidfile := filepath.Join(dir, "grandchild.pid")
 	script := "sh -c 'trap \"\" TERM; echo $$ > " + pidfile + "; sleep 30' >/dev/null 2>&1 & wait"
-	p, err := o.Start(context.Background(), []string{"sh", "-c", script}, plugin.ProcOptions{})
+	p, err := o.Start(context.Background(), []string{"sh", "-c", script}, hostos.ProcOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,8 +519,8 @@ func TestRemoveRefusesProtectedByIdentity(t *testing.T) {
 		if err := os.Symlink(work, filepath.Join(dir, "wlink")); err != nil {
 			t.Fatal(err)
 		}
-		o = newPluginOS(func() plugin.Dirs {
-			return plugin.Dirs{Config: cfg, Home: home, Temp: dir, Cwd: dir, Root: filepath.Join(dir, "wlink")}
+		o = newPluginOS(func() hostos.Dirs {
+			return hostos.Dirs{Config: cfg, Home: home, Temp: dir, Cwd: dir, Root: filepath.Join(dir, "wlink")}
 		})
 		t.Cleanup(o.Shutdown)
 		return o, dir

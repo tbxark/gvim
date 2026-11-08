@@ -8,7 +8,8 @@
 //
 // Only Start launches a process (with os/exec, and only when Config.Command is
 // set). NewClient wraps an existing io.ReadWriteCloser, which is how tests
-// connect the client to a fake server over io.Pipe.
+// connect the client to a fake server over io.Pipe. The multi-server Manager and
+// the built-in server table live in package lsp/manager.
 package lsp
 
 import (

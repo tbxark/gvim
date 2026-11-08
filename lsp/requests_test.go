@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/lsp/lsptest"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -28,9 +29,9 @@ func rng(sl, sc, el, ec uint32) protocol.Range {
 
 // nextRequest waits for the next request the fake server recorded and returns
 // its params, failing the test when they have another type.
-func nextRequest[P any](t *testing.T, s *fakeServer, what string) P {
+func nextRequest[P any](t *testing.T, s *lsptest.FakeServer, what string) P {
 	t.Helper()
-	got := recv(t, s.requests, what)
+	got := lsptest.Recv(t, s.Requests, what)
 	p, ok := got.(P)
 	if !ok {
 		t.Fatalf("%s: server recorded %T", what, got)
@@ -49,8 +50,8 @@ func wantDocPosition(t *testing.T, got protocol.TextDocumentPositionParams) {
 // wantRefused checks that err carries the fake server's refusal.
 func wantRefused(t *testing.T, err error) {
 	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), errRefused.Error()) {
-		t.Fatalf("error = %v, want one carrying %q", err, errRefused)
+	if err == nil || !strings.Contains(err.Error(), lsptest.ErrRefused.Error()) {
+		t.Fatalf("error = %v, want one carrying %q", err, lsptest.ErrRefused)
 	}
 }
 
@@ -82,8 +83,8 @@ func TestDefinition(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.definition = tt.answer
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.Definition = tt.answer
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.Definition(ctx, reqDocURI, reqPos)
 			wantDocPosition(t, nextRequest[*protocol.DefinitionParams](t, f.srv, "definition params").TextDocumentPositionParams)
@@ -118,8 +119,8 @@ func TestImplementation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.implementation = tt.answer
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.Implementation = tt.answer
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.Implementation(ctx, reqDocURI, reqPos)
 			wantDocPosition(t, nextRequest[*protocol.ImplementationParams](t, f.srv, "implementation params").TextDocumentPositionParams)
@@ -156,8 +157,8 @@ func TestReferences(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.references = tt.answer
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.References = tt.answer
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.References(ctx, reqDocURI, reqPos, tt.includeDeclaration)
 			p := nextRequest[*protocol.ReferenceParams](t, f.srv, "reference params")
@@ -222,8 +223,8 @@ func TestHover(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.hover = tt.answer
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.Hover = tt.answer
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.Hover(ctx, reqDocURI, reqPos)
 			wantDocPosition(t, nextRequest[*protocol.HoverParams](t, f.srv, "hover params").TextDocumentPositionParams)
@@ -301,8 +302,8 @@ func TestCompletion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.completion = tt.answer
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.Completion = tt.answer
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.Completion(ctx, reqDocURI, reqPos)
 			wantDocPosition(t, nextRequest[*protocol.CompletionParams](t, f.srv, "completion params").TextDocumentPositionParams)
@@ -403,8 +404,8 @@ func TestRename(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.rename = tt.edit
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.Rename = tt.edit
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.Rename(ctx, reqDocURI, reqPos, "Total")
 			p := nextRequest[*protocol.RenameParams](t, f.srv, "rename params")
@@ -461,8 +462,8 @@ func TestCodeActions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.codeActions = tt.answer
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.CodeActions = tt.answer
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.CodeActions(ctx, reqDocURI, reqRange)
 			p := nextRequest[*protocol.CodeActionParams](t, f.srv, "code action params")
@@ -534,7 +535,7 @@ func TestRequestsReturnWhenContextEnds(t *testing.T) {
 			errCh := make(chan error, 1)
 			go func() { errCh <- tt.run(ctx, f.client) }()
 
-			recv(t, f.srv.stallEntered, "server entered the request")
+			lsptest.Recv(t, f.srv.StallEntered, "server entered the request")
 			cancel()
 
 			select {
@@ -542,7 +543,7 @@ func TestRequestsReturnWhenContextEnds(t *testing.T) {
 				if !errors.Is(err, context.Canceled) {
 					t.Fatalf("error = %v, want context.Canceled", err)
 				}
-			case <-time.After(testTimeout):
+			case <-time.After(lsptest.Timeout):
 				t.Fatal("request did not return after its context was canceled")
 			}
 		})
@@ -561,15 +562,15 @@ func TestRequestRaw(t *testing.T) {
 	}{
 		{name: "hover result is the raw json", hover: hover, method: "textDocument/hover", wantJSON: `"value":"doc text"`},
 		{name: "null result", method: "textDocument/hover", wantJSON: "null"},
-		{name: "server error", fail: true, method: "textDocument/hover", wantErr: errRefused.Error()},
+		{name: "server error", fail: true, method: "textDocument/hover", wantErr: lsptest.ErrRefused.Error()},
 		{name: "unknown method", method: "foo/bar", wantErr: "foo/bar"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.hover = tt.hover
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.Hover = tt.hover
+			f.srv.Canned.Fail = tt.fail
 			params := map[string]any{
 				"textDocument": map[string]any{"uri": reqDocURI},
 				"position":     map[string]any{"line": 7.0, "character": 12.0},
@@ -613,8 +614,8 @@ func TestFormatting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFixture(t, Config{}, nil)
 			ctx := newTestContext(t)
-			f.srv.canned.formatting = tt.answer
-			f.srv.canned.fail = tt.fail
+			f.srv.Canned.Formatting = tt.answer
+			f.srv.Canned.Fail = tt.fail
 
 			got, err := f.client.Formatting(ctx, reqDocURI, tt.tabSize, tt.spaces)
 			p := nextRequest[*protocol.DocumentFormattingParams](t, f.srv, "formatting params")

@@ -11,6 +11,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -302,7 +303,7 @@ func (e *stateEntry) mergeSet() (map[string]struct{}, map[string]json.RawMessage
 
 // writeStateFile writes data atomically. With merge set (an unseeded state) the file is
 // read first and the keys the plugin never touched are kept.
-func writeStateFile(ctx context.Context, o OS, path string, data []byte, merge map[string]struct{}, mine map[string]json.RawMessage) error {
+func writeStateFile(ctx context.Context, o hostos.OS, path string, data []byte, merge map[string]struct{}, mine map[string]json.RawMessage) error {
 	if merge != nil {
 		if old, err := o.ReadFile(ctx, path, maxStateFile); err == nil {
 			var disk map[string]json.RawMessage
@@ -316,7 +317,7 @@ func writeStateFile(ctx context.Context, o OS, path string, data []byte, merge m
 			}
 		}
 	}
-	return o.WriteFile(ctx, path, data, WriteOptions{Atomic: true, Parents: true, Mode: 0o600})
+	return o.WriteFile(ctx, path, data, hostos.WriteOptions{Atomic: true, Parents: true, Mode: 0o600})
 }
 
 // flush writes pending changes synchronously, after a write in flight finished. Stop calls it.

@@ -11,6 +11,7 @@ import (
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/lsp/manager"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -75,13 +76,13 @@ func TestLSPPortRequestsForUnopenedDocumentsAreNotOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.go")
 	at := buffer.Pos{}
 
-	if err := port.Change(path, "x"); !errors.Is(err, lsp.ErrNotOpen) {
+	if err := port.Change(path, "x"); !errors.Is(err, manager.ErrNotOpen) {
 		t.Errorf("Change: err = %v, want ErrNotOpen", err)
 	}
-	if _, err := port.Definition(path, at); !errors.Is(err, lsp.ErrNotOpen) {
+	if _, err := port.Definition(path, at); !errors.Is(err, manager.ErrNotOpen) {
 		t.Errorf("Definition: err = %v, want ErrNotOpen", err)
 	}
-	if _, err := port.Rename(path, at, "y"); !errors.Is(err, lsp.ErrNotOpen) {
+	if _, err := port.Rename(path, at, "y"); !errors.Is(err, manager.ErrNotOpen) {
 		t.Errorf("Rename: err = %v, want ErrNotOpen", err)
 	}
 	if _, ok := port.Diagnostics(path); ok {
@@ -102,7 +103,7 @@ func TestLSPPortOpenForUnconfiguredLanguageStartsNothing(t *testing.T) {
 	t.Parallel()
 	port := New(map[string]config.LSPServer{"go": {Command: "gopls"}})
 	err := port.Open(filepath.Join(t.TempDir(), "a.rs"), "rust", "fn main() {}")
-	if !errors.Is(err, lsp.ErrNoServer) {
+	if !errors.Is(err, manager.ErrNoServer) {
 		t.Fatalf("Open: err = %v, want ErrNoServer", err)
 	}
 }

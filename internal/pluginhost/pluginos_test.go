@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -21,8 +21,8 @@ func newTestOS(t *testing.T) (*pluginOS, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := newPluginOS(func() plugin.Dirs {
-		return plugin.Dirs{Config: filepath.Join(dir, "cfg"), Home: filepath.Join(dir, "home"), Temp: dir, Cwd: dir, Root: dir}
+	o := newPluginOS(func() hostos.Dirs {
+		return hostos.Dirs{Config: filepath.Join(dir, "cfg"), Home: filepath.Join(dir, "home"), Temp: dir, Cwd: dir, Root: dir}
 	})
 	t.Cleanup(o.Shutdown)
 	return o, dir
@@ -116,10 +116,10 @@ func TestPluginOSWriteFile(t *testing.T) {
 	}
 
 	t.Run("atomic leaves no temporary file", func(t *testing.T) {
-		if err := o.WriteFile(ctx, "a.txt", []byte("one"), plugin.WriteOptions{Atomic: true}); err != nil {
+		if err := o.WriteFile(ctx, "a.txt", []byte("one"), hostos.WriteOptions{Atomic: true}); err != nil {
 			t.Fatal(err)
 		}
-		if err := o.WriteFile(ctx, "a.txt", []byte("two"), plugin.WriteOptions{Atomic: true}); err != nil {
+		if err := o.WriteFile(ctx, "a.txt", []byte("two"), hostos.WriteOptions{Atomic: true}); err != nil {
 			t.Fatal(err)
 		}
 		if read("a.txt") != "two" || len(leftovers()) != 0 {
@@ -130,7 +130,7 @@ func TestPluginOSWriteFile(t *testing.T) {
 		if goruntime.GOOS == "windows" {
 			t.Skip("no unix modes")
 		}
-		if err := o.WriteFile(ctx, "m.txt", []byte("1"), plugin.WriteOptions{Atomic: true}); err != nil {
+		if err := o.WriteFile(ctx, "m.txt", []byte("1"), hostos.WriteOptions{Atomic: true}); err != nil {
 			t.Fatal(err)
 		}
 		if st, _ := os.Stat(filepath.Join(dir, "m.txt")); st.Mode().Perm() != 0o644 {
@@ -139,13 +139,13 @@ func TestPluginOSWriteFile(t *testing.T) {
 		if err := os.Chmod(filepath.Join(dir, "m.txt"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := o.WriteFile(ctx, "m.txt", []byte("2"), plugin.WriteOptions{Atomic: true}); err != nil {
+		if err := o.WriteFile(ctx, "m.txt", []byte("2"), hostos.WriteOptions{Atomic: true}); err != nil {
 			t.Fatal(err)
 		}
 		if st, _ := os.Stat(filepath.Join(dir, "m.txt")); st.Mode().Perm() != 0o755 {
 			t.Fatalf("mode after replace = %v", st.Mode())
 		}
-		if err := o.WriteFile(ctx, "m.txt", []byte("3"), plugin.WriteOptions{Atomic: true, Mode: 0o600}); err != nil {
+		if err := o.WriteFile(ctx, "m.txt", []byte("3"), hostos.WriteOptions{Atomic: true, Mode: 0o600}); err != nil {
 			t.Fatal(err)
 		}
 		if st, _ := os.Stat(filepath.Join(dir, "m.txt")); st.Mode().Perm() != 0o600 {
@@ -160,7 +160,7 @@ func TestPluginOSWriteFile(t *testing.T) {
 		if err := os.Symlink("real.txt", filepath.Join(dir, "link.txt")); err != nil {
 			t.Fatal(err)
 		}
-		if err := o.WriteFile(ctx, "link.txt", []byte("new"), plugin.WriteOptions{Atomic: true}); err != nil {
+		if err := o.WriteFile(ctx, "link.txt", []byte("new"), hostos.WriteOptions{Atomic: true}); err != nil {
 			t.Fatal(err)
 		}
 		if fi, _ := os.Lstat(filepath.Join(dir, "link.txt")); fi.Mode()&os.ModeSymlink == 0 {
@@ -171,10 +171,10 @@ func TestPluginOSWriteFile(t *testing.T) {
 		}
 	})
 	t.Run("plain and append", func(t *testing.T) {
-		if err := o.WriteFile(ctx, "p.txt", []byte("ab"), plugin.WriteOptions{}); err != nil {
+		if err := o.WriteFile(ctx, "p.txt", []byte("ab"), hostos.WriteOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		if err := o.WriteFile(ctx, "p.txt", []byte("cd"), plugin.WriteOptions{Append: true}); err != nil {
+		if err := o.WriteFile(ctx, "p.txt", []byte("cd"), hostos.WriteOptions{Append: true}); err != nil {
 			t.Fatal(err)
 		}
 		if read("p.txt") != "abcd" {
@@ -182,11 +182,11 @@ func TestPluginOSWriteFile(t *testing.T) {
 		}
 	})
 	t.Run("parents", func(t *testing.T) {
-		err := o.WriteFile(ctx, "x/y/z.txt", []byte("1"), plugin.WriteOptions{})
+		err := o.WriteFile(ctx, "x/y/z.txt", []byte("1"), hostos.WriteOptions{})
 		if codeOf(err) != pluginapi.CodeNotFound {
 			t.Fatalf("err = %v", err)
 		}
-		if err := o.WriteFile(ctx, "x/y/z.txt", []byte("1"), plugin.WriteOptions{Parents: true, Atomic: true}); err != nil {
+		if err := o.WriteFile(ctx, "x/y/z.txt", []byte("1"), hostos.WriteOptions{Parents: true, Atomic: true}); err != nil {
 			t.Fatal(err)
 		}
 		if read("x/y/z.txt") != "1" {
@@ -194,7 +194,7 @@ func TestPluginOSWriteFile(t *testing.T) {
 		}
 	})
 	t.Run("a directory is refused", func(t *testing.T) {
-		if err := o.WriteFile(ctx, "x", []byte("1"), plugin.WriteOptions{Atomic: true}); codeOf(err) != pluginapi.CodeIO {
+		if err := o.WriteFile(ctx, "x", []byte("1"), hostos.WriteOptions{Atomic: true}); codeOf(err) != pluginapi.CodeIO {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -387,7 +387,7 @@ func TestPluginOSWalk(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rels := func(res plugin.WalkResult) []string {
+	rels := func(res hostos.WalkResult) []string {
 		var out []string
 		for _, e := range res.Entries {
 			out = append(out, e.Rel+":"+e.Kind)
@@ -396,16 +396,16 @@ func TestPluginOSWalk(t *testing.T) {
 	}
 	rows := []struct {
 		name  string
-		opts  plugin.WalkOptions
+		opts  hostos.WalkOptions
 		want  []string
 		trunc bool
 	}{
-		{"skips and hides", plugin.WalkOptions{SkipDirs: []string{"node_modules"}},
+		{"skips and hides", hostos.WalkOptions{SkipDirs: []string{"node_modules"}},
 			[]string{"README.md:file", "src:dir", "src/a.go:file", "src/deep:dir", "src/deep/b.go:file"}, false},
-		{"hidden", plugin.WalkOptions{SkipDirs: []string{"node_modules"}, Hidden: true},
+		{"hidden", hostos.WalkOptions{SkipDirs: []string{"node_modules"}, Hidden: true},
 			[]string{".dot:file", ".git:dir", ".git/config:file", "README.md:file", "src:dir", "src/a.go:file", "src/deep:dir", "src/deep/b.go:file"}, false},
-		{"depth", plugin.WalkOptions{SkipDirs: []string{"node_modules"}, MaxDepth: 1}, []string{"README.md:file", "src:dir"}, false},
-		{"entry limit", plugin.WalkOptions{SkipDirs: []string{"node_modules"}, MaxEntries: 2}, []string{"README.md:file", "src:dir"}, true},
+		{"depth", hostos.WalkOptions{SkipDirs: []string{"node_modules"}, MaxDepth: 1}, []string{"README.md:file", "src:dir"}, false},
+		{"entry limit", hostos.WalkOptions{SkipDirs: []string{"node_modules"}, MaxEntries: 2}, []string{"README.md:file", "src:dir"}, true},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
@@ -431,7 +431,7 @@ func TestPluginOSWalk(t *testing.T) {
 		})
 	}
 	t.Run("never enters a symbolic link", func(t *testing.T) {
-		res, err := o.Walk(ctx, ".", plugin.WalkOptions{SkipDirs: []string{"node_modules"}})
+		res, err := o.Walk(ctx, ".", hostos.WalkOptions{SkipDirs: []string{"node_modules"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -445,7 +445,7 @@ func TestPluginOSWalk(t *testing.T) {
 		}
 	})
 	t.Run("missing root", func(t *testing.T) {
-		if _, err := o.Walk(ctx, "nope", plugin.WalkOptions{}); codeOf(err) != pluginapi.CodeNotFound {
+		if _, err := o.Walk(ctx, "nope", hostos.WalkOptions{}); codeOf(err) != pluginapi.CodeNotFound {
 			t.Fatalf("err = %v", err)
 		}
 	})

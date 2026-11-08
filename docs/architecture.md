@@ -41,7 +41,8 @@ internal/                       private executable shell (no top-level package i
   atomicfile/ shellcmd/
   workspace/ explorer/ finder/ fuzzy/ fsops/ gitstate/
   config/ keymap/ theme/
-  lsp/ pluginapi/ plugin/ commands/
+  lsp/ (+lsp/manager, lsp/lsptest) pluginapi/ plugin/ (+hostos, bundled, plugintest,
+  pattern) commands/
 ```
 
 Dependency direction:
@@ -73,14 +74,14 @@ internal/cli → cmd/gvim
 |---|---|
 | R1 | No top-level package (not `internal/…`, not `cmd/…`) imports `internal/…`. |
 | R2 | `charm.land/*` (Bubble Tea, bubbles, lipgloss) is imported only by `internal/tui/…`, `internal/terminal` and `internal/uitest`. The plain `github.com/charmbracelet/x/*` helper libraries (`ansi`, `term`, `vt`) are not the UI framework and stay free. |
-| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `atomicfile`, `shellcmd`. |
+| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`. (`lsp/manager` sits above `lsp` and may import it.) |
 | R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `finder` imports only `explorer` and `fuzzy`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
 | R6 | `internal/cli` imports only `internal/app`, `internal/configview` and `syntax` (and cobra). |
-| R7 | Only `cmd/gvim` and `internal/cli` import `internal/app`; only `cmd/gvim` imports `internal/cli`; only `internal/app` (and `plugin/plugintest`) imports the plugin runtime; only `internal/app` imports TUI sub-packages. |
-| R8 | No package in the shipped binary imports test support: `buffer/buffertest`, `plugin/plugintest`, `internal/uitest` (and the app test harness `internal/apptest`, when it exists). |
+| R7 | Only `cmd/gvim` and `internal/cli` import `internal/app`; only `cmd/gvim` imports `internal/cli`; only `internal/app`, `internal/pluginhost` and `plugin/plugintest` import the plugin runtime; only `internal/app` and `internal/uiadapter` import TUI sub-packages. |
+| R8 | No package in the shipped binary imports test support: `buffer/buffertest`, `plugin/plugintest`, `lsp/lsptest`, `internal/uitest`, `internal/apptest`. |
 | R9 | `pluginapi` and `decorations` import no module package and no charm package. |
-| R10 | The plugin tree imports only the standard library, `gopher-lua`, `hujson`, `pluginapi`, `plugin/bundled`, `plugin/pattern` (plugintest may also import the runtime and other plugin sub-packages). No charm. |
+| R10 | The plugin tree imports only the standard library, `gopher-lua`, `hujson`, `pluginapi`, `plugin/bundled`, `plugin/pattern`, `plugin/hostos` (plugintest may also import the runtime and other plugin sub-packages). No charm. |
 | R11 | `editor`, `buffer` and `decorations` do not import `pluginapi`. |
 | R12 | Only `internal/tui` (its root and its own sub-packages) and `internal/app` import TUI sub-packages. |
 | R14 | `internal/configview` imports only `config`, `internal/keybindings`, `keymap` and `theme` among module packages; it never imports `internal/app`, `internal/cli` or `internal/tui`. |
@@ -150,9 +151,12 @@ bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins. | `hujson`. |
 | `keymap` | Embedded presets, chord parsing and canonicalization, resolve, user overrides. | Data files `keymap/*.json`. |
 | `theme` | Theme data (colors, syntax keys) from embedded JSON. | Data files `theme/data/*.json`. |
-| `lsp` | Pure-Go LSP client and multi-server manager (JSON-RPC, transport, positions, diagnostics, requests). | |
+| `lsp` | Pure-Go LSP client/protocol layer: JSON-RPC, transport, positions, requests, diagnostics, signature help. | |
+| `lsp/manager` | The multi-server manager: one client per workspace root, server catalogue (`Spec`, `Defaults`, `DefaultFor`). | imports `lsp`. |
+| `lsp/lsptest` | Test-only fake language server and pipes shared by the client and manager tests. | imports no module package. |
 | `pluginapi` | The plugin contract: plain types, `Host`/`Runtime` interfaces, error codes, `Unsupported`. | stdlib only; imported by `internal/tui`, `internal/app` and `plugin`. |
-| `plugin` | Lua plugin runtime: sandbox, tasks and the yield protocol, budgets/strikes, `gvim.*` API installers, data libraries, loader/lifecycle, OS port. | `plugin/bundled` (embedded Lua), `plugin/plugintest` (fake host harness), `plugin/pattern` (Lua pattern matcher). |
+| `plugin` | Lua plugin runtime: sandbox, tasks and the yield protocol, budgets/strikes, `gvim.*` API installers, data libraries, loader/lifecycle. `doc.go` holds the file map. | `plugin/bundled` (embedded Lua), `plugin/plugintest` (fake host harness), `plugin/pattern` (Lua pattern matcher), `plugin/hostos` (OS port). |
+| `plugin/hostos` | The plugin OS port: files, processes and watchers (`OS`, `Dirs`, `Proc*`, `Watch*`, `NopOS`). | Implemented by `internal/pluginhost`, which is why it is a separate package from the runtime. |
 | `commands` | The command registry and palette model: generated Fresh command table, palette query modes, availability rules, filtering. | Feeds the command palette; keymap-aware. |
 
 ## 4. Inside the big packages
@@ -222,7 +226,8 @@ considered and rejected (see `migration/ARCH-v4.md` history and `buffer/doc.go`)
 | OS port | `os.go`, `nopos.go` | file/process/watch interface used by `gvim.fs` and `gvim.proc`; the real implementation is in `internal/app` |
 
 The `gvim.*` installers intentionally stay in the runtime package: they call 120 kernel
-symbols directly, so a separate package would only fake a boundary.
+symbols directly, so a separate package would only fake a boundary. The OS port is the
+exception: it is an interface the shell implements, so it lives in `plugin/hostos`.
 
 ## 5. Naming decisions
 
@@ -267,8 +272,10 @@ Next (tracked as follow-up work; each keeps build + tests green):
    geometry and hit map (`tui/frame`), keybinding editor (`tui/keybindeditor`), terminal
    dock (`tui/dock`), utility screens; the plugin host and LSP UI last.
 3. `editor` → `document` + `editor` split (the two god objects), with an alias bridge.
-4. Plugin leaf splits (`hostos`, `luastdlib`) and an `lsp/manager` split.
-5. Fold `fold` into `textlayout` (needs a small `tui/editorpane` import update).
+4. `lsp` split into client + `lsp/manager` + `lsp/lsptest`; `plugin/hostos` extracted from
+   the runtime, and `plugin/doc.go` now holds the file map.
+5. Fold `fold` into `textlayout` (needs a small `tui/editorpane` import update); optional
+   `plugin/luastdlib` extraction.
 
 The analysis these steps build on (file clusters, symbol-level boundaries, risk
 ordering) is in the session's analysis notes; the durable conclusions are kept in this

@@ -7,7 +7,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/config"
-	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/lsp/manager"
 )
 
 // TestLSPPortSignatureHelpForUnopenedDocumentIsNotOpen checks that the port offers
@@ -23,7 +23,7 @@ func TestLSPPortSignatureHelpForUnopenedDocumentIsNotOpen(t *testing.T) {
 		t.Fatalf("the LSP port %T has no SignatureHelp", port)
 	}
 	_, err := sig.SignatureHelp(filepath.Join(t.TempDir(), "a.go"), buffer.Pos{})
-	if !errors.Is(err, lsp.ErrNotOpen) {
+	if !errors.Is(err, manager.ErrNotOpen) {
 		t.Fatalf("SignatureHelp: err = %v, want ErrNotOpen", err)
 	}
 }

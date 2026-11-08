@@ -51,8 +51,9 @@ The module has three layers.
   program with a timeout) are the shared leaves.
 - Project and files: `workspace`, `explorer`, `finder`, `fuzzy`, `fsops`, `gitstate`.
 - Settings: `config`, `keymap`, `theme`.
-- Services: `lsp`, `pluginapi` (plugin contract), `plugin` (Lua runtime, with
-  `plugin/bundled`, `plugin/plugintest`, `plugin/pattern`), `commands` (the command
+- Services: `lsp` (+`lsp/manager`, `lsp/lsptest`), `pluginapi` (plugin contract), `plugin`
+  (Lua runtime, with `plugin/hostos`, `plugin/bundled`, `plugin/plugintest`,
+  `plugin/pattern`), `commands` (the command
   registry that feeds the command palette).
 - They must not import `internal/` and must not import bubbletea, bubbles or lipgloss.
   Engine packages do not import the UI, the app or the plugin runtime.

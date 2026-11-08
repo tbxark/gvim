@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// FakeOS is a plugin.OS for tests: an in-memory filesystem, scripted processes and
+// FakeOS is a hostos.OS for tests: an in-memory filesystem, scripted processes and
 // scripted watchers. It is safe for concurrent use, like every OS. A process or watcher
 // that would block waits on the fake's own wake-up channel; BlockedWaiters tells the
 // harness how many goroutines are parked there, so it can tell "idle" from "still
@@ -24,7 +24,7 @@ type FakeOS struct {
 
 	// Dir is what Dirs returns; Env is what Getenv reads; Bin maps program names to the
 	// path LookPath finds.
-	Dir plugin.Dirs
+	Dir hostos.Dirs
 	Env map[string]string
 	Bin map[string]string
 
@@ -55,14 +55,14 @@ type fakeNode struct {
 // Run is one recorded Run or Start call.
 type Run struct {
 	Argv    []string
-	Opts    plugin.ProcOptions
+	Opts    hostos.ProcOptions
 	Started bool // Start rather than Run
 }
 
 // ProcScript scripts the processes whose argv begins with a prefix.
 type ProcScript struct {
 	Stdout, Stderr string // Run: the result; Start: delivered as output unless Chunks is set
-	Chunks         []plugin.ProcChunk
+	Chunks         []hostos.ProcChunk
 	Code           int
 	Signal         string
 	TimedOut       bool
@@ -80,13 +80,13 @@ type procScript struct {
 	s      ProcScript
 }
 
-var _ plugin.OS = (*FakeOS)(nil)
+var _ hostos.OS = (*FakeOS)(nil)
 
 // NewFakeOS returns a fake with the directories /home/u (home), /home/u/.config/gvim,
 // /tmp and /work (cwd and root) present.
 func NewFakeOS() *FakeOS {
 	f := &FakeOS{
-		Dir:       plugin.Dirs{Config: "/home/u/.config/gvim", Home: "/home/u", Temp: "/tmp", Cwd: "/work", Root: "/work"},
+		Dir:       hostos.Dirs{Config: "/home/u/.config/gvim", Home: "/home/u", Temp: "/tmp", Cwd: "/work", Root: "/work"},
 		Env:       map[string]string{},
 		Bin:       map[string]string{},
 		nodes:     map[string]*fakeNode{},
@@ -201,7 +201,7 @@ func (f *FakeOS) Emit(path, kind string) {
 	p := f.abs(path)
 	for _, w := range f.watches {
 		if !w.stopped && (w.path == p || w.path == filepath.Dir(p)) {
-			w.queue = append(w.queue, plugin.WatchEvent{Path: p, Kind: kind})
+			w.queue = append(w.queue, hostos.WatchEvent{Path: p, Kind: kind})
 		}
 	}
 	f.broadcast()
@@ -298,7 +298,7 @@ func (f *FakeOS) UICalls() int {
 	return f.uiCalls
 }
 
-// ReadFile implements plugin.OS.
+// ReadFile implements hostos.OS.
 func (f *FakeOS) ReadFile(_ context.Context, path string, max int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -316,8 +316,8 @@ func (f *FakeOS) ReadFile(_ context.Context, path string, max int64) ([]byte, er
 	return append([]byte(nil), n.data...), nil
 }
 
-// WriteFile implements plugin.OS.
-func (f *FakeOS) WriteFile(_ context.Context, path string, data []byte, o plugin.WriteOptions) error {
+// WriteFile implements hostos.OS.
+func (f *FakeOS) WriteFile(_ context.Context, path string, data []byte, o hostos.WriteOptions) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p := f.abs(path)
@@ -354,8 +354,8 @@ func kindOf(n *fakeNode) string {
 	return "file"
 }
 
-// ReadDir implements plugin.OS.
-func (f *FakeOS) ReadDir(_ context.Context, path string, hidden bool) ([]plugin.DirEntry, error) {
+// ReadDir implements hostos.OS.
+func (f *FakeOS) ReadDir(_ context.Context, path string, hidden bool) ([]hostos.DirEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p := f.abs(path)
@@ -365,32 +365,32 @@ func (f *FakeOS) ReadDir(_ context.Context, path string, hidden bool) ([]plugin.
 	} else if !n.dir {
 		return nil, pluginapi.Errf(pluginapi.CodeIO, "%s: not a directory", p)
 	}
-	var out []plugin.DirEntry
+	var out []hostos.DirEntry
 	for q, n := range f.nodes {
 		name := filepath.Base(q)
 		if q == p || filepath.Dir(q) != p || (!hidden && strings.HasPrefix(name, ".")) {
 			continue
 		}
-		out = append(out, plugin.DirEntry{Name: name, Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime})
+		out = append(out, hostos.DirEntry{Name: name, Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 
-// Stat implements plugin.OS.
-func (f *FakeOS) Stat(_ context.Context, path string) (plugin.FileStat, error) {
+// Stat implements hostos.OS.
+func (f *FakeOS) Stat(_ context.Context, path string) (hostos.FileStat, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p := f.abs(path)
 	f.rec("Stat", p)
 	n := f.nodes[p]
 	if n == nil {
-		return plugin.FileStat{}, notFound(p)
+		return hostos.FileStat{}, notFound(p)
 	}
-	return plugin.FileStat{Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime, Mode: n.mode}, nil
+	return hostos.FileStat{Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime, Mode: n.mode}, nil
 }
 
-// Mkdir implements plugin.OS.
+// Mkdir implements hostos.OS.
 func (f *FakeOS) Mkdir(_ context.Context, path string, parents bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -420,7 +420,7 @@ func (f *FakeOS) below(p string) []string {
 	return out
 }
 
-// Remove implements plugin.OS.
+// Remove implements hostos.OS.
 func (f *FakeOS) Remove(_ context.Context, path string, recursive bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -441,7 +441,7 @@ func (f *FakeOS) Remove(_ context.Context, path string, recursive bool) error {
 	return nil
 }
 
-// Rename implements plugin.OS.
+// Rename implements hostos.OS.
 func (f *FakeOS) Rename(_ context.Context, from, to string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -461,7 +461,7 @@ func (f *FakeOS) Rename(_ context.Context, from, to string) error {
 	return nil
 }
 
-// Copy implements plugin.OS.
+// Copy implements hostos.OS.
 func (f *FakeOS) Copy(_ context.Context, from, to string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -481,7 +481,7 @@ func (f *FakeOS) Copy(_ context.Context, from, to string) error {
 	return nil
 }
 
-// RealPath implements plugin.OS.
+// RealPath implements hostos.OS.
 func (f *FakeOS) RealPath(_ context.Context, path string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -493,16 +493,16 @@ func (f *FakeOS) RealPath(_ context.Context, path string) (string, error) {
 	return p, nil
 }
 
-// Walk implements plugin.OS.
-func (f *FakeOS) Walk(_ context.Context, root string, o plugin.WalkOptions) (plugin.WalkResult, error) {
+// Walk implements hostos.OS.
+func (f *FakeOS) Walk(_ context.Context, root string, o hostos.WalkOptions) (hostos.WalkResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r := f.abs(root)
 	f.rec("Walk", r)
 	if n := f.nodes[r]; n == nil {
-		return plugin.WalkResult{}, notFound(r)
+		return hostos.WalkResult{}, notFound(r)
 	} else if !n.dir {
-		return plugin.WalkResult{}, pluginapi.Errf(pluginapi.CodeIO, "%s: not a directory", r)
+		return hostos.WalkResult{}, pluginapi.Errf(pluginapi.CodeIO, "%s: not a directory", r)
 	}
 	limit := o.MaxEntries
 	if limit <= 0 {
@@ -512,7 +512,7 @@ func (f *FakeOS) Walk(_ context.Context, root string, o plugin.WalkOptions) (plu
 	for _, s := range o.SkipDirs {
 		skip[s] = true
 	}
-	var res plugin.WalkResult
+	var res hostos.WalkResult
 	for _, q := range f.below(r) {
 		rel := strings.TrimPrefix(q, r+string(filepath.Separator))
 		parts := strings.Split(rel, string(filepath.Separator))
@@ -530,14 +530,14 @@ func (f *FakeOS) Walk(_ context.Context, root string, o plugin.WalkOptions) (plu
 			break
 		}
 		n := f.nodes[q]
-		res.Entries = append(res.Entries, plugin.WalkEntry{Path: q, Rel: rel, Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime})
+		res.Entries = append(res.Entries, hostos.WalkEntry{Path: q, Rel: rel, Kind: kindOf(n), Size: int64(len(n.data)), MTime: n.mtime})
 	}
 	return res, nil
 }
 
 // ---------- environment ----------
 
-// LookPath implements plugin.OS.
+// LookPath implements hostos.OS.
 func (f *FakeOS) LookPath(name string) (string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -545,7 +545,7 @@ func (f *FakeOS) LookPath(name string) (string, bool) {
 	return p, ok
 }
 
-// Getenv implements plugin.OS.
+// Getenv implements hostos.OS.
 func (f *FakeOS) Getenv(name string) (string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -553,23 +553,23 @@ func (f *FakeOS) Getenv(name string) (string, bool) {
 	return v, ok
 }
 
-// Dirs implements plugin.OS.
-func (f *FakeOS) Dirs() plugin.Dirs {
+// Dirs implements hostos.OS.
+func (f *FakeOS) Dirs() hostos.Dirs {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.Dir
 }
 
-// Now implements plugin.OS.
+// Now implements hostos.OS.
 func (f *FakeOS) Now() time.Time { return time.Unix(1_700_000_000, 0) }
 
-// Shutdown implements plugin.OS: it kills every process and stops every watcher.
+// Shutdown implements hostos.OS: it kills every process and stops every watcher.
 func (f *FakeOS) Shutdown() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.shutdown = true
 	for _, p := range f.procs {
-		p.exit(plugin.ProcResult{Code: -1, Signal: "KILL"})
+		p.exit(hostos.ProcResult{Code: -1, Signal: "KILL"})
 	}
 	for _, w := range f.watches {
 		w.stopped = true
@@ -601,23 +601,23 @@ func noScript(argv []string) error {
 	return pluginapi.Errf(pluginapi.CodeExec, "%s: executable file not found", argv[0])
 }
 
-// Run implements plugin.OS.
-func (f *FakeOS) Run(ctx context.Context, argv []string, o plugin.ProcOptions) (plugin.ProcResult, error) {
+// Run implements hostos.OS.
+func (f *FakeOS) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
 	f.mu.Lock()
 	f.runs = append(f.runs, Run{Argv: append([]string(nil), argv...), Opts: o})
 	f.rec("Run", argv[0])
 	s, ok := f.script(argv)
 	f.mu.Unlock()
 	if !ok {
-		return plugin.ProcResult{}, noScript(argv)
+		return hostos.ProcResult{}, noScript(argv)
 	}
 	if s.Err != nil {
-		return plugin.ProcResult{}, s.Err
+		return hostos.ProcResult{}, s.Err
 	}
 	if ctx.Err() != nil {
-		return plugin.ProcResult{}, pluginapi.Errf(pluginapi.CodeCancelled, "cancelled")
+		return hostos.ProcResult{}, pluginapi.Errf(pluginapi.CodeCancelled, "cancelled")
 	}
-	r := plugin.ProcResult{Code: s.Code, Signal: s.Signal, TimedOut: s.TimedOut, Truncated: s.Truncated,
+	r := hostos.ProcResult{Code: s.Code, Signal: s.Signal, TimedOut: s.TimedOut, Truncated: s.Truncated,
 		Stdout: []byte(s.Stdout), Stderr: []byte(s.Stderr)}
 	if o.MergeStderr {
 		r.Stdout, r.Stderr = append(r.Stdout, r.Stderr...), nil
@@ -625,8 +625,8 @@ func (f *FakeOS) Run(ctx context.Context, argv []string, o plugin.ProcOptions) (
 	return r, nil
 }
 
-// Start implements plugin.OS.
-func (f *FakeOS) Start(_ context.Context, argv []string, o plugin.ProcOptions) (plugin.Proc, error) {
+// Start implements hostos.OS.
+func (f *FakeOS) Start(_ context.Context, argv []string, o hostos.ProcOptions) (hostos.Proc, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.runs = append(f.runs, Run{Argv: append([]string(nil), argv...), Opts: o, Started: true})
@@ -642,14 +642,14 @@ func (f *FakeOS) Start(_ context.Context, argv []string, o plugin.ProcOptions) (
 	p.chunks = s.Chunks
 	if p.chunks == nil {
 		if s.Stdout != "" {
-			p.chunks = append(p.chunks, plugin.ProcChunk{Data: []byte(s.Stdout)})
+			p.chunks = append(p.chunks, hostos.ProcChunk{Data: []byte(s.Stdout)})
 		}
 		if s.Stderr != "" {
-			p.chunks = append(p.chunks, plugin.ProcChunk{Stderr: true, Data: []byte(s.Stderr)})
+			p.chunks = append(p.chunks, hostos.ProcChunk{Stderr: true, Data: []byte(s.Stderr)})
 		}
 	}
 	if !s.Hold && !s.Echo {
-		p.done, p.res = true, plugin.ProcResult{Code: s.Code, Signal: s.Signal, TimedOut: s.TimedOut}
+		p.done, p.res = true, hostos.ProcResult{Code: s.Code, Signal: s.Signal, TimedOut: s.TimedOut}
 	}
 	f.procs = append(f.procs, p)
 	return p, nil
@@ -661,9 +661,9 @@ type FakeProc struct {
 	pid    int
 	script ProcScript
 
-	chunks    []plugin.ProcChunk
+	chunks    []hostos.ProcChunk
 	done      bool
-	res       plugin.ProcResult
+	res       hostos.ProcResult
 	stdinOpen bool
 	stdin     []byte // bytes written and not drained
 	written   []byte // everything written
@@ -672,9 +672,9 @@ type FakeProc struct {
 	terminate time.Duration
 }
 
-var _ plugin.Proc = (*FakeProc)(nil)
+var _ hostos.Proc = (*FakeProc)(nil)
 
-// PID implements plugin.Proc.
+// PID implements hostos.Proc.
 func (p *FakeProc) PID() int { return p.pid }
 
 // Written is everything written to stdin so far.
@@ -706,7 +706,7 @@ func (p *FakeProc) Terminated() time.Duration {
 }
 
 // exit ends the process with r unless it ended already. mu must be held.
-func (p *FakeProc) exit(r plugin.ProcResult) {
+func (p *FakeProc) exit(r hostos.ProcResult) {
 	if !p.done {
 		p.done, p.res = true, r
 		p.f.broadcast()
@@ -717,10 +717,10 @@ func (p *FakeProc) exit(r plugin.ProcResult) {
 func (p *FakeProc) Exit(code int) {
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
-	p.exit(plugin.ProcResult{Code: code})
+	p.exit(hostos.ProcResult{Code: code})
 }
 
-// Write implements plugin.Proc: a bounded queue (8 MiB) that only an Echo script drains.
+// Write implements hostos.Proc: a bounded queue (8 MiB) that only an Echo script drains.
 func (p *FakeProc) Write(data []byte) error {
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
@@ -734,7 +734,7 @@ func (p *FakeProc) Write(data []byte) error {
 	}
 	p.written = append(p.written, data...)
 	if p.script.Echo {
-		p.chunks = append(p.chunks, plugin.ProcChunk{Data: append([]byte(nil), data...)})
+		p.chunks = append(p.chunks, hostos.ProcChunk{Data: append([]byte(nil), data...)})
 		p.f.broadcast()
 	} else {
 		p.stdin = append(p.stdin, data...)
@@ -742,17 +742,17 @@ func (p *FakeProc) Write(data []byte) error {
 	return nil
 }
 
-// CloseStdin implements plugin.Proc. An Echo process ends when its stdin is closed.
+// CloseStdin implements hostos.Proc. An Echo process ends when its stdin is closed.
 func (p *FakeProc) CloseStdin() {
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
 	p.closed = true
 	if p.script.Echo {
-		p.exit(plugin.ProcResult{Code: p.script.Code})
+		p.exit(hostos.ProcResult{Code: p.script.Code})
 	}
 }
 
-// Kill implements plugin.Proc.
+// Kill implements hostos.Proc.
 func (p *FakeProc) Kill(signal string) error {
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
@@ -763,39 +763,39 @@ func (p *FakeProc) Kill(signal string) error {
 		signal = "TERM"
 	}
 	p.signals = append(p.signals, signal)
-	p.exit(plugin.ProcResult{Code: -1, Signal: signal})
+	p.exit(hostos.ProcResult{Code: -1, Signal: signal})
 	return nil
 }
 
-// Terminate implements plugin.Proc.
+// Terminate implements hostos.Proc.
 func (p *FakeProc) Terminate(grace time.Duration) {
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
 	p.terminate = grace
-	p.exit(plugin.ProcResult{Code: -1, Signal: "TERM"})
+	p.exit(hostos.ProcResult{Code: -1, Signal: "TERM"})
 }
 
-// Output implements plugin.Proc.
-func (p *FakeProc) Output(ctx context.Context) (plugin.ProcChunk, bool) {
+// Output implements hostos.Proc.
+func (p *FakeProc) Output(ctx context.Context) (hostos.ProcChunk, bool) {
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
 	if !p.f.await(ctx, func() bool { return len(p.chunks) > 0 || p.done }) {
-		return plugin.ProcChunk{}, false
+		return hostos.ProcChunk{}, false
 	}
 	if len(p.chunks) == 0 {
-		return plugin.ProcChunk{}, false
+		return hostos.ProcChunk{}, false
 	}
 	c := p.chunks[0]
 	p.chunks = p.chunks[1:]
 	return c, true
 }
 
-// Wait implements plugin.Proc.
-func (p *FakeProc) Wait(ctx context.Context) (plugin.ProcResult, error) {
+// Wait implements hostos.Proc.
+func (p *FakeProc) Wait(ctx context.Context) (hostos.ProcResult, error) {
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
 	if !p.f.await(ctx, func() bool { return p.done }) {
-		return plugin.ProcResult{}, pluginapi.Errf(pluginapi.CodeCancelled, "cancelled")
+		return hostos.ProcResult{}, pluginapi.Errf(pluginapi.CodeCancelled, "cancelled")
 	}
 	return p.res, nil
 }
@@ -806,18 +806,18 @@ func (p *FakeProc) Wait(ctx context.Context) (plugin.ProcResult, error) {
 type FakeWatch struct {
 	f       *FakeOS
 	path    string
-	opts    plugin.WatchOptions
-	queue   []plugin.WatchEvent
+	opts    hostos.WatchOptions
+	queue   []hostos.WatchEvent
 	stopped bool
 }
 
-var _ plugin.Watch = (*FakeWatch)(nil)
+var _ hostos.Watch = (*FakeWatch)(nil)
 
 // Path is the absolute path being watched.
 func (w *FakeWatch) Path() string { return w.path }
 
 // Options are the options the watch was started with.
-func (w *FakeWatch) Options() plugin.WatchOptions { return w.opts }
+func (w *FakeWatch) Options() hostos.WatchOptions { return w.opts }
 
 // Stopped reports whether Stop was called.
 func (w *FakeWatch) Stopped() bool {
@@ -826,8 +826,8 @@ func (w *FakeWatch) Stopped() bool {
 	return w.stopped
 }
 
-// Watch implements plugin.OS.
-func (f *FakeOS) Watch(_ context.Context, path string, o plugin.WatchOptions) (plugin.Watch, error) {
+// Watch implements hostos.OS.
+func (f *FakeOS) Watch(_ context.Context, path string, o hostos.WatchOptions) (hostos.Watch, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p := f.abs(path)
@@ -843,19 +843,19 @@ func (f *FakeOS) Watch(_ context.Context, path string, o plugin.WatchOptions) (p
 	return w, nil
 }
 
-// Next implements plugin.Watch.
-func (w *FakeWatch) Next(ctx context.Context) (plugin.WatchEvent, bool) {
+// Next implements hostos.Watch.
+func (w *FakeWatch) Next(ctx context.Context) (hostos.WatchEvent, bool) {
 	w.f.mu.Lock()
 	defer w.f.mu.Unlock()
 	if !w.f.await(ctx, func() bool { return len(w.queue) > 0 || w.stopped }) || (len(w.queue) == 0) {
-		return plugin.WatchEvent{}, false
+		return hostos.WatchEvent{}, false
 	}
 	e := w.queue[0]
 	w.queue = w.queue[1:]
 	return e, true
 }
 
-// Stop implements plugin.Watch.
+// Stop implements hostos.Watch.
 func (w *FakeWatch) Stop() {
 	w.f.mu.Lock()
 	defer w.f.mu.Unlock()

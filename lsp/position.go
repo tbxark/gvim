@@ -1,6 +1,16 @@
 package lsp
 
-import "unicode/utf16"
+import (
+	"unicode/utf16"
+
+	"go.lsp.dev/uri"
+)
+
+// PathURI returns the file URI for an absolute path. Pass the same URI to the
+// Client request methods that take a document.
+func PathURI(path string) string {
+	return string(uri.File(path))
+}
 
 // RuneColToUTF16 converts a rune column in line to the UTF-16 code unit offset
 // that LSP uses for Position.Character. A column past the end of line clamps to

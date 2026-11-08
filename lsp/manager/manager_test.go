@@ -1,4 +1,4 @@
-package lsp
+package manager
 
 import (
 	"context"
@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/lsp/lsptest"
+	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
 
@@ -26,11 +29,11 @@ const (
 var errStartFailed = errors.New("start refused")
 
 // startLog is a Manager start hook that records each server it starts. Each
-// server is a fakeServer on in-memory pipes, so a test can inspect what the
+// server is a lsptest.FakeServer on in-memory pipes, so a test can inspect what the
 // Manager sent. No process is launched.
 type startLog struct {
 	t     *testing.T
-	cfgs  []Config
+	cfgs  []lsp.Config
 	pairs []pair
 	// fail, when set, makes start return it and start nothing.
 	fail error
@@ -38,7 +41,43 @@ type startLog struct {
 	dead bool
 }
 
-func (s *startLog) start(_ context.Context, cfg Config) (*Client, error) {
+// pair is an lsp.Client connected to a FakeServer over in-memory pipes.
+type pair struct {
+	client  *lsp.Client
+	srvConn jsonrpc2.Conn
+	srv     *lsptest.FakeServer
+	srvEnd  lsptest.PipeRWC
+}
+
+// startPair builds the fake server and the client, and starts both read loops.
+// It registers no cleanup, so callers that check goroutine counts can control
+// teardown.
+func startPair(cfg lsp.Config, stall chan struct{}) pair {
+	return startPairOver(cfg, stall, func(cli lsptest.PipeRWC) io.ReadWriteCloser { return cli })
+}
+
+// startPairOver is startPair with the client end of the pipes passed through
+// wrap, so a test can put a transport such as gatedRWC between the client and
+// the fake server.
+func startPairOver(cfg lsp.Config, stall chan struct{}, wrap func(lsptest.PipeRWC) io.ReadWriteCloser) pair {
+	cliEnd, srvEnd := lsptest.NewPipePair()
+	srv, srvConn := lsptest.StartServer(srvEnd, stall)
+	return pair{
+		client:  lsp.NewClient(wrap(cliEnd), cfg),
+		srvConn: srvConn,
+		srv:     srv,
+		srvEnd:  srvEnd,
+	}
+}
+
+func newTestContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), lsptest.Timeout)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+func (s *startLog) start(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
 	s.cfgs = append(s.cfgs, cfg)
 	if s.fail != nil {
 		return nil, s.fail
@@ -86,13 +125,13 @@ func TestManagerStartsOneServerPerLanguage(t *testing.T) {
 	}
 
 	goSrv := onlyPair(t, log)
-	init := recv(t, goSrv.srv.initCh, "initialize params")
+	init := lsptest.Recv(t, goSrv.srv.InitCh, "initialize params")
 	folders, _ := init.WorkspaceFolders.Get()
 	if len(folders) != 1 || folders[0].URI != mgrRootURI {
 		t.Fatalf("initialize workspace folders = %+v, want one folder at %q", folders, mgrRootURI)
 	}
 
-	open := recv(t, goSrv.srv.openCh, "didOpen a.go")
+	open := lsptest.Recv(t, goSrv.srv.OpenCh, "didOpen a.go")
 	if open.TextDocument.URI != mgrAURI || open.TextDocument.LanguageID != "go" ||
 		open.TextDocument.Version != 1 || open.TextDocument.Text != "ERR\n" {
 		t.Fatalf("didOpen = %+v, want go document a.go version 1", open.TextDocument)
@@ -102,7 +141,7 @@ func TestManagerStartsOneServerPerLanguage(t *testing.T) {
 	if !ok || c != goSrv.client {
 		t.Fatal("ClientFor did not return the client that opened a.go")
 	}
-	recv(t, c.Diagnostics(), "diagnostics for a.go")
+	lsptest.Recv(t, c.Diagnostics(), "diagnostics for a.go")
 	if ev, ok := c.DiagnosticsFor(mgrAURI); !ok || len(ev.Diagnostics) != 1 {
 		t.Fatalf("snapshot for a.go = %+v, %v; want one diagnostic", ev, ok)
 	}
@@ -113,7 +152,7 @@ func TestManagerStartsOneServerPerLanguage(t *testing.T) {
 	if len(log.cfgs) != 1 {
 		t.Fatalf("second go document started another server: %d starts", len(log.cfgs))
 	}
-	recv(t, goSrv.srv.openCh, "didOpen b.go")
+	lsptest.Recv(t, goSrv.srv.OpenCh, "didOpen b.go")
 	if cb, ok := m.ClientFor(mgrBPath); !ok || cb != c {
 		t.Fatal("documents of one language do not share a client")
 	}
@@ -136,8 +175,8 @@ func TestManagerChangeAndClose(t *testing.T) {
 		t.Fatalf("Open b.go: %v", err)
 	}
 	srv := onlyPair(t, log).srv
-	recv(t, srv.openCh, "didOpen a.go")
-	recv(t, srv.openCh, "didOpen b.go")
+	lsptest.Recv(t, srv.OpenCh, "didOpen a.go")
+	lsptest.Recv(t, srv.OpenCh, "didOpen b.go")
 
 	for _, want := range []struct {
 		text    string
@@ -146,7 +185,7 @@ func TestManagerChangeAndClose(t *testing.T) {
 		if err := m.Change(mgrAPath, want.text); err != nil {
 			t.Fatalf("Change a.go: %v", err)
 		}
-		got := recv(t, srv.changeCh, "didChange a.go")
+		got := lsptest.Recv(t, srv.ChangeCh, "didChange a.go")
 		if got.TextDocument.URI != mgrAURI || got.TextDocument.Version != want.version {
 			t.Fatalf("didChange = %q version %d, want %q version %d", got.TextDocument.URI, got.TextDocument.Version, mgrAURI, want.version)
 		}
@@ -159,7 +198,7 @@ func TestManagerChangeAndClose(t *testing.T) {
 	if err := m.Close(mgrAPath); err != nil {
 		t.Fatalf("Close a.go: %v", err)
 	}
-	if got := recv(t, srv.closeCh, "didClose a.go"); got.TextDocument.URI != mgrAURI {
+	if got := lsptest.Recv(t, srv.CloseCh, "didClose a.go"); got.TextDocument.URI != mgrAURI {
 		t.Fatalf("didClose for %q, want %q", got.TextDocument.URI, mgrAURI)
 	}
 	if _, ok := m.ClientFor(mgrAPath); ok {
@@ -183,13 +222,13 @@ func TestManagerReopenReplacesDocument(t *testing.T) {
 		t.Fatalf("first Open: %v", err)
 	}
 	srv := onlyPair(t, log).srv
-	recv(t, srv.openCh, "first didOpen")
+	lsptest.Recv(t, srv.OpenCh, "first didOpen")
 
 	if err := m.Open(mgrAPath, "go", "two\n"); err != nil {
 		t.Fatalf("second Open: %v", err)
 	}
-	recv(t, srv.closeCh, "didClose before reopen")
-	open := recv(t, srv.openCh, "second didOpen")
+	lsptest.Recv(t, srv.CloseCh, "didClose before reopen")
+	open := lsptest.Recv(t, srv.OpenCh, "second didOpen")
 	if open.TextDocument.Version != 1 || open.TextDocument.Text != "two\n" {
 		t.Fatalf("reopened document = version %d text %q, want version 1 text %q", open.TextDocument.Version, open.TextDocument.Text, "two\n")
 	}
@@ -262,11 +301,11 @@ func TestManagerOpenErrors(t *testing.T) {
 }
 
 func TestManagerRealStartNeedsCommand(t *testing.T) {
-	// NewManager uses the real Start. An empty Command fails before any process
+	// NewManager uses the real lsp.Start. An empty Command fails before any process
 	// is launched.
 	m := NewManager(mgrRoot, map[string]ServerConfig{"go": {}})
-	if err := m.Open(mgrAPath, "go", "x\n"); !errors.Is(err, ErrNoCommand) {
-		t.Fatalf("Open with empty command = %v, want ErrNoCommand", err)
+	if err := m.Open(mgrAPath, "go", "x\n"); !errors.Is(err, lsp.ErrNoCommand) {
+		t.Fatalf("Open with empty command = %v, want lsp.ErrNoCommand", err)
 	}
 }
 
@@ -324,9 +363,9 @@ func onlyPair(t *testing.T, log *startLog) pair {
 // expectClientClosed checks that c has closed its connection, which closes the
 // Diagnostics channel. Events still queued from earlier publishes are drained
 // first.
-func expectClientClosed(t *testing.T, c *Client) {
+func expectClientClosed(t *testing.T, c *lsp.Client) {
 	t.Helper()
-	deadline := time.After(testTimeout)
+	deadline := time.After(lsptest.Timeout)
 	for {
 		select {
 		case _, ok := <-c.Diagnostics():
@@ -384,8 +423,8 @@ type gatedServers struct {
 	gates []*gatedRWC
 }
 
-func (s *gatedServers) start(_ context.Context, cfg Config) (*Client, error) {
-	p := startPairOver(cfg, nil, func(cli pipeRWC) io.ReadWriteCloser {
+func (s *gatedServers) start(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
+	p := startPairOver(cfg, nil, func(cli lsptest.PipeRWC) io.ReadWriteCloser {
 		g := newGatedRWC(cli, s.delay)
 		s.gates = append(s.gates, g)
 		return g
@@ -404,13 +443,13 @@ func TestManagerReplacesServerThatExited(t *testing.T) {
 		t.Fatalf("Open a.go: %v", err)
 	}
 	first := log.pairs[0]
-	recv(t, first.srv.openCh, "didOpen a.go")
+	lsptest.Recv(t, first.srv.OpenCh, "didOpen a.go")
 
 	// The server exits. Its end of the pipes closes, and the client's read loop ends.
 	_ = first.srvEnd.Close()
 	select {
 	case <-first.client.Done():
-	case <-time.After(testTimeout):
+	case <-time.After(lsptest.Timeout):
 		t.Fatal("client did not notice that the server exited")
 	}
 
@@ -421,7 +460,7 @@ func TestManagerReplacesServerThatExited(t *testing.T) {
 		t.Fatalf("servers started = %d, want 2", len(log.pairs))
 	}
 	second := log.pairs[1]
-	recv(t, second.srv.openCh, "didOpen b.go on the new server")
+	lsptest.Recv(t, second.srv.OpenCh, "didOpen b.go on the new server")
 	if c, ok := m.ClientFor(mgrBPath); !ok || c != second.client {
 		t.Fatal("ClientFor(b.go) is not the new server's client")
 	}
@@ -455,7 +494,7 @@ func TestStalledWriteDoesNotBlockShutdown(t *testing.T) {
 	// Opening b.go writes didOpen to the server, and that write now blocks.
 	openErr := make(chan error, 1)
 	go func() { openErr <- m.Open(mgrBPath, "go", "ok\n") }()
-	recv(t, stalled.stuck, "didOpen write stalled")
+	lsptest.Recv(t, stalled.stuck, "didOpen write stalled")
 
 	// Shutdown runs while the write is still blocked, so it must return without
 	// waiting for the write.
@@ -466,7 +505,7 @@ func TestStalledWriteDoesNotBlockShutdown(t *testing.T) {
 		if err == nil {
 			t.Fatal("Shutdown returned nil although the server's writes were stalled")
 		}
-	case <-time.After(testTimeout):
+	case <-time.After(lsptest.Timeout):
 		t.Fatal("Shutdown blocked behind a stalled write")
 	}
 	select {
@@ -474,7 +513,7 @@ func TestStalledWriteDoesNotBlockShutdown(t *testing.T) {
 		if err == nil {
 			t.Fatal("Open(b.go) returned nil although its write stalled")
 		}
-	case <-time.After(testTimeout):
+	case <-time.After(lsptest.Timeout):
 		t.Fatal("Open(b.go) did not return after its write stalled")
 	}
 	expectClientClosed(t, first)
@@ -513,10 +552,10 @@ func TestShutdownDuringStartClosesTheNewServer(t *testing.T) {
 	release := make(chan struct{})
 	releaseOnce := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releaseOnce)
-	started := make(chan *Client, 1)
+	started := make(chan *lsp.Client, 1)
 
 	m := NewManager(mgrRoot, goAndMarkdown)
-	m.start = func(_ context.Context, cfg Config) (*Client, error) {
+	m.start = func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
 		p := startPair(cfg, nil)
 		t.Cleanup(func() {
 			_ = p.client.Close()
@@ -529,7 +568,7 @@ func TestShutdownDuringStartClosesTheNewServer(t *testing.T) {
 
 	openErr := make(chan error, 1)
 	go func() { openErr <- m.Open(mgrAPath, "go", "x\n") }()
-	server := recv(t, started, "server start")
+	server := lsptest.Recv(t, started, "server start")
 
 	// Shutdown must not wait for the start, and must not see the server, which
 	// has not been recorded yet.
@@ -540,7 +579,7 @@ func TestShutdownDuringStartClosesTheNewServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Shutdown: %v", err)
 		}
-	case <-time.After(testTimeout):
+	case <-time.After(lsptest.Timeout):
 		t.Fatal("Shutdown blocked while a server was starting")
 	}
 
@@ -550,7 +589,7 @@ func TestShutdownDuringStartClosesTheNewServer(t *testing.T) {
 		if err == nil {
 			t.Fatal("Open returned nil although Shutdown ran while its server was starting")
 		}
-	case <-time.After(testTimeout):
+	case <-time.After(lsptest.Timeout):
 		t.Fatal("Open did not return after the start finished")
 	}
 	expectClientClosed(t, server)
@@ -578,7 +617,7 @@ func TestSlowServerStartDoesNotBlockChangeOrClose(t *testing.T) {
 			t.Cleanup(releaseOnce)
 
 			m := NewManager(mgrRoot, goAndMarkdown)
-			m.start = func(_ context.Context, cfg Config) (*Client, error) {
+			m.start = func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
 				if slices.Equal(cfg.Command, []string{"marksman"}) {
 					entered <- struct{}{}
 					<-release
@@ -596,7 +635,7 @@ func TestSlowServerStartDoesNotBlockChangeOrClose(t *testing.T) {
 
 			openErr := make(chan error, 1)
 			go func() { openErr <- m.Open("/work/proj/README.md", "markdown", "# hi\n") }()
-			recv(t, entered, "markdown server start")
+			lsptest.Recv(t, entered, "markdown server start")
 
 			opErr := make(chan error, 1)
 			go func() { opErr <- tt.op(m) }()
@@ -605,7 +644,7 @@ func TestSlowServerStartDoesNotBlockChangeOrClose(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s of a.go during another server's start: %v", tt.name, err)
 				}
-			case <-time.After(testTimeout):
+			case <-time.After(lsptest.Timeout):
 				t.Fatalf("%s of a.go blocked behind another server's start", tt.name)
 			}
 
@@ -615,7 +654,7 @@ func TestSlowServerStartDoesNotBlockChangeOrClose(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Open README.md after its start: %v", err)
 				}
-			case <-time.After(testTimeout):
+			case <-time.After(lsptest.Timeout):
 				t.Fatal("Open README.md did not return after its start finished")
 			}
 		})
@@ -631,7 +670,7 @@ func TestConcurrentOpensShareOneServerStart(t *testing.T) {
 	t.Cleanup(releaseOnce)
 
 	m := NewManager(mgrRoot, goAndMarkdown)
-	m.start = func(_ context.Context, cfg Config) (*Client, error) {
+	m.start = func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
 		starts.Add(1)
 		<-release
 		p := startPair(cfg, nil)
@@ -659,7 +698,7 @@ func TestConcurrentOpensShareOneServerStart(t *testing.T) {
 			if err != nil {
 				t.Fatalf("concurrent Open: %v", err)
 			}
-		case <-time.After(testTimeout):
+		case <-time.After(lsptest.Timeout):
 			t.Fatal("concurrent Open did not return")
 		}
 	}

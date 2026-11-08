@@ -1,4 +1,9 @@
-package lsp
+// Package manager runs one language server per language and tracks the documents
+// open on each. It is the session layer over the client in package lsp: it starts
+// the process, runs the initialize handshake, numbers document versions, and
+// replaces a server whose connection has ended. It also holds the built-in
+// server catalogue (Spec, Defaults, DefaultFor).
+package manager
 
 import (
 	"context"
@@ -10,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"go.lsp.dev/uri"
+	"github.com/tbxark/gvim/lsp"
 )
 
 // ErrNoServer is returned by Manager.Open for a language with no ServerConfig.
@@ -57,7 +62,7 @@ type ServerConfig struct {
 type Manager struct {
 	rootURI string
 	servers map[string]ServerConfig
-	start   func(context.Context, Config) (*Client, error)
+	start   func(context.Context, lsp.Config) (*lsp.Client, error)
 	// timeout bounds each step. NewManager sets it to managerTimeout.
 	timeout time.Duration
 
@@ -71,7 +76,7 @@ type Manager struct {
 	// mu guards the fields below. It is held only to read or update them, never
 	// across a write or a server start.
 	mu      sync.Mutex
-	clients map[string]*Client      // by language ID
+	clients map[string]*lsp.Client  // by language ID
 	starts  map[string]*serverStart // by language ID, while a server is starting
 	docs    map[string]openDoc      // by file path
 	// epoch counts Shutdown calls, so that a server started across one is not kept.
@@ -89,7 +94,7 @@ type openDoc struct {
 // caller that needs that server while it starts waits on done and shares the result.
 type serverStart struct {
 	done chan struct{}
-	c    *Client
+	c    *lsp.Client
 	err  error
 }
 
@@ -99,23 +104,17 @@ type serverStart struct {
 func NewManager(root string, servers map[string]ServerConfig) *Manager {
 	rootURI := ""
 	if root != "" {
-		rootURI = PathURI(root)
+		rootURI = lsp.PathURI(root)
 	}
 	return &Manager{
 		rootURI: rootURI,
 		servers: servers,
-		start:   Start,
+		start:   lsp.Start,
 		timeout: managerTimeout,
-		clients: make(map[string]*Client),
+		clients: make(map[string]*lsp.Client),
 		starts:  make(map[string]*serverStart),
 		docs:    make(map[string]openDoc),
 	}
-}
-
-// PathURI returns the file URI for an absolute path. Pass the same URI to the
-// Client request methods that take a document.
-func PathURI(path string) string {
-	return string(uri.File(path))
 }
 
 // Open sends didOpen for the document at path with its full text, starting and
@@ -136,7 +135,7 @@ func (m *Manager) Open(path, languageID, text string) error {
 	if err := m.closeDoc(path); err != nil {
 		return err
 	}
-	docURI := PathURI(path)
+	docURI := lsp.PathURI(path)
 	err = m.step(context.Background(), c, func(ctx context.Context) error {
 		return c.DidOpen(ctx, docURI, languageID, 1, text)
 	})
@@ -180,7 +179,7 @@ func (m *Manager) Close(path string) error {
 
 // ClientFor returns the client whose server holds the open document at path. It
 // returns false when path is not open, or when that server has exited.
-func (m *Manager) ClientFor(path string) (*Client, bool) {
+func (m *Manager) ClientFor(path string) (*lsp.Client, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -199,7 +198,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	m.mu.Lock()
 	m.epoch++
 	clients := m.clients
-	m.clients = make(map[string]*Client)
+	m.clients = make(map[string]*lsp.Client)
 	m.starts = make(map[string]*serverStart)
 	m.docs = make(map[string]openDoc)
 	m.mu.Unlock()
@@ -212,7 +211,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 }
 
 // shutDown sends shutdown and exit to c, then closes it.
-func (m *Manager) shutDown(ctx context.Context, c *Client) error {
+func (m *Manager) shutDown(ctx context.Context, c *lsp.Client) error {
 	err := m.step(ctx, c, c.Shutdown)
 	exitErr := m.step(ctx, c, c.Exit)
 	return errors.Join(err, exitErr, c.Close())
@@ -222,7 +221,7 @@ func (m *Manager) shutDown(ctx context.Context, c *Client) error {
 // and initializes one, unless a start for languageID is already running: then it
 // waits for that start and shares its result. No lock is held across the start, so
 // ClientFor, Change, Close and Shutdown are not blocked by it.
-func (m *Manager) serverFor(languageID string) (*Client, error) {
+func (m *Manager) serverFor(languageID string) (*lsp.Client, error) {
 	m.mu.Lock()
 	if c, live := m.liveClientLocked(languageID); live {
 		m.mu.Unlock()
@@ -270,19 +269,19 @@ func (m *Manager) serverFor(languageID string) (*Client, error) {
 
 // startServer launches the server for sc and runs the initialize handshake. Each
 // step has its own deadline. A server that fails a step is closed. A failure names the
-// language and the server: a program that is not installed is a *NotInstalledError that
-// carries the install hint, and a handshake that fails is a *StartError with the command
+// language and the server: a program that is not installed is a *lsp.NotInstalledError that
+// carries the install hint, and a handshake that fails is a *lsp.StartError with the command
 // line and what the server wrote to its error output.
-func (m *Manager) startServer(lang string, sc ServerConfig) (*Client, error) {
+func (m *Manager) startServer(lang string, sc ServerConfig) (*lsp.Client, error) {
 	command := append(slices.Clone(sc.Command), sc.Args...)
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
-	c, err := m.start(ctx, Config{
+	c, err := m.start(ctx, lsp.Config{
 		Command: command,
 		RootURI: m.rootURI,
 	})
 	cancel()
 	if err != nil {
-		var ni *NotInstalledError
+		var ni *lsp.NotInstalledError
 		if errors.As(err, &ni) {
 			ni.Language, ni.Install = lang, sc.Install
 		}
@@ -302,14 +301,14 @@ func (m *Manager) startServer(lang string, sc ServerConfig) (*Client, error) {
 		if name == "" && len(sc.Command) > 0 {
 			name = sc.Command[0]
 		}
-		return nil, &StartError{Language: lang, Name: name, Command: strings.Join(command, " "), Stderr: c.StderrTail(), Err: err}
+		return nil, &lsp.StartError{Language: lang, Name: name, Command: strings.Join(command, " "), Stderr: c.StderrTail(), Err: err}
 	}
 	return c, nil
 }
 
 // advance records the next version of the open document at path. It returns the
 // document's server and the document with that version. m.sendMu must be held.
-func (m *Manager) advance(path string) (*Client, openDoc, error) {
+func (m *Manager) advance(path string) (*lsp.Client, openDoc, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -342,7 +341,7 @@ func (m *Manager) closeDoc(path string) error {
 // forget removes the document at path from the open set and returns the document
 // and its server. It reports false when the document was not open or its server
 // has exited.
-func (m *Manager) forget(path string) (*Client, openDoc, bool) {
+func (m *Manager) forget(path string) (*lsp.Client, openDoc, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -359,7 +358,7 @@ func (m *Manager) forget(path string) (*Client, openDoc, bool) {
 // connection has ended is closed in the background and forgotten, together with
 // the documents it held, so that the next request starts a new server. m.mu must
 // be held.
-func (m *Manager) liveClientLocked(languageID string) (*Client, bool) {
+func (m *Manager) liveClientLocked(languageID string) (*lsp.Client, bool) {
 	c, ok := m.clients[languageID]
 	if !ok {
 		return nil, false
@@ -377,7 +376,7 @@ func (m *Manager) liveClientLocked(languageID string) (*Client, bool) {
 
 // step runs fn, one request or notification to c, under a deadline of m.timeout
 // that also ends with parent. See call.
-func (m *Manager) step(parent context.Context, c *Client, fn func(ctx context.Context) error) error {
+func (m *Manager) step(parent context.Context, c *lsp.Client, fn func(ctx context.Context) error) error {
 	ctx, cancel := context.WithTimeout(parent, m.timeout)
 	defer cancel()
 	return call(ctx, c, func() error { return fn(ctx) })
@@ -388,7 +387,7 @@ func (m *Manager) step(parent context.Context, c *Client, fn func(ctx context.Co
 // returns when ctx ends even if fn is still blocked in that write. Giving up
 // closes c, which unblocks the write. A frame cut off in the middle cannot be
 // resumed, so c is unusable after that.
-func call(ctx context.Context, c *Client, fn func() error) error {
+func call(ctx context.Context, c *lsp.Client, fn func() error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

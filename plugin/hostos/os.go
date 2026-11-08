@@ -1,4 +1,8 @@
-package plugin
+// Package hostos is the operating-system port of the plugin runtime: the OS
+// interface that gvim.fs and gvim.proc call, its value types, and NopOS. The
+// editor's implementation is internal/pluginhost; plugin/plugintest has scripted
+// fakes.
+package hostos
 
 import (
 	"context"
@@ -7,8 +11,8 @@ import (
 )
 
 // OS is everything a plugin can do to the machine outside the editor: files, processes,
-// watchers, environment. internal/app provides the real implementation (process groups,
-// fsnotify, os.OpenRoot); plugintest provides scripted fakes.
+// watchers, environment. internal/pluginhost provides the real implementation (process groups,
+// fsnotify, os.OpenRoot); plugin/plugintest provides scripted fakes.
 //
 // Contract: every method is safe for concurrent use. The IO methods run on Work
 // goroutines, never on the UI goroutine; Getenv, LookPath, Dirs and Now are cheap and may

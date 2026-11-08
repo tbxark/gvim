@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -19,10 +19,10 @@ func writePluginFile(dir, name string) error {
 // eventLog collects the events of a watcher on a goroutine.
 type eventLog struct {
 	mu     sync.Mutex
-	events []plugin.WatchEvent
+	events []hostos.WatchEvent
 }
 
-func collectEvents(w plugin.Watch) *eventLog {
+func collectEvents(w hostos.Watch) *eventLog {
 	l := &eventLog{}
 	go func() {
 		for {
@@ -38,10 +38,10 @@ func collectEvents(w plugin.Watch) *eventLog {
 	return l
 }
 
-func (l *eventLog) snapshot() []plugin.WatchEvent {
+func (l *eventLog) snapshot() []hostos.WatchEvent {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return append([]plugin.WatchEvent(nil), l.events...)
+	return append([]hostos.WatchEvent(nil), l.events...)
 }
 
 func (l *eventLog) count(path, kind string) int {
@@ -58,7 +58,7 @@ func (l *eventLog) count(path, kind string) int {
 // file that was created and then written is reported as created.
 func TestWatchDebounceCoalesces(t *testing.T) {
 	o, dir := newTestOS(t)
-	w, err := o.Watch(context.Background(), dir, plugin.WatchOptions{Debounce: 150 * time.Millisecond})
+	w, err := o.Watch(context.Background(), dir, hostos.WatchOptions{Debounce: 150 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestWatchDebounceCoalesces(t *testing.T) {
 
 func TestWatchKinds(t *testing.T) {
 	o, dir := newTestOS(t)
-	w, err := o.Watch(context.Background(), dir, plugin.WatchOptions{Debounce: 20 * time.Millisecond})
+	w, err := o.Watch(context.Background(), dir, hostos.WatchOptions{Debounce: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestWatchAFileSurvivesReplacement(t *testing.T) {
 	if err := os.WriteFile(path, []byte("1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	w, err := o.Watch(context.Background(), path, plugin.WatchOptions{Debounce: 20 * time.Millisecond})
+	w, err := o.Watch(context.Background(), path, hostos.WatchOptions{Debounce: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestWatchAFileSurvivesReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range 3 {
-		if err := o.WriteFile(context.Background(), path, []byte("v"+string(rune('2'+i))), plugin.WriteOptions{Atomic: true}); err != nil {
+		if err := o.WriteFile(context.Background(), path, []byte("v"+string(rune('2'+i))), hostos.WriteOptions{Atomic: true}); err != nil {
 			t.Fatal(err)
 		}
 		n := log.count(path, "")
@@ -144,11 +144,11 @@ func TestWatchAFileSurvivesReplacement(t *testing.T) {
 
 func TestWatchErrors(t *testing.T) {
 	o, dir := newTestOS(t)
-	if _, err := o.Watch(context.Background(), filepath.Join(dir, "missing"), plugin.WatchOptions{}); codeOf(err) != pluginapi.CodeNotFound {
+	if _, err := o.Watch(context.Background(), filepath.Join(dir, "missing"), hostos.WatchOptions{}); codeOf(err) != pluginapi.CodeNotFound {
 		t.Fatalf("err = %v", err)
 	}
 	t.Run("Shutdown stops watchers", func(t *testing.T) {
-		w, err := o.Watch(context.Background(), dir, plugin.WatchOptions{})
+		w, err := o.Watch(context.Background(), dir, hostos.WatchOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,13 +156,13 @@ func TestWatchErrors(t *testing.T) {
 		if _, ok := w.Next(context.Background()); ok {
 			t.Fatal("Next returned an event after Shutdown")
 		}
-		if _, err := o.Watch(context.Background(), dir, plugin.WatchOptions{}); codeOf(err) != pluginapi.CodeClosed {
+		if _, err := o.Watch(context.Background(), dir, hostos.WatchOptions{}); codeOf(err) != pluginapi.CodeClosed {
 			t.Fatalf("Watch after Shutdown: %v", err)
 		}
 	})
 	t.Run("Next honours its context", func(t *testing.T) {
 		o2 := newPluginOS(nil)
-		w, err := o2.Watch(context.Background(), dir, plugin.WatchOptions{})
+		w, err := o2.Watch(context.Background(), dir, hostos.WatchOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

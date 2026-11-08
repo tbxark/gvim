@@ -113,7 +113,8 @@ several files to see:
   module top level: `buffer`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,
   `session`, `decorations`, `textlayout`, `workspace`, `explorer`, `finder`, `fuzzy`,
   `fsops`, `gitstate`, `config`, `keymap`, `theme`, `lsp`, `pluginapi`, `plugin`,
-  `commands`, and the shared leaves `atomicfile` and `shellcmd`.
+  `commands`, the LSP manager/test support (`lsp/manager`, `lsp/lsptest`), the plugin OS
+  port (`plugin/hostos`), and the shared leaves `atomicfile` and `shellcmd`.
 - Import direction: engine → shell, never the reverse. No top-level package imports
   `internal/`. Only `internal/app` imports the host packages (`uiadapter`, `pluginhost`,
   `lsphost`, `restore`, `keybindings`, `highlight`); only `internal/app` and

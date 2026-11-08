@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -28,7 +28,7 @@ func TestKqueueDirLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err := o.Watch(context.Background(), big, plugin.WatchOptions{})
+	_, err := o.Watch(context.Background(), big, hostos.WatchOptions{})
 	if codeOf(err) != pluginapi.CodeLimit {
 		t.Fatalf("err = %v, want a limit error", err)
 	}
@@ -39,12 +39,12 @@ func TestKqueueDirLimit(t *testing.T) {
 	if err := os.Remove(filepath.Join(big, "f0")); err != nil {
 		t.Fatal(err)
 	}
-	w, err := o.Watch(context.Background(), big, plugin.WatchOptions{})
+	w, err := o.Watch(context.Background(), big, hostos.WatchOptions{})
 	if err != nil {
 		t.Fatalf("a directory at the limit: %v", err)
 	}
 	w.Stop()
-	w, err = o.Watch(context.Background(), filepath.Join(big, "f1"), plugin.WatchOptions{})
+	w, err = o.Watch(context.Background(), filepath.Join(big, "f1"), hostos.WatchOptions{})
 	if err != nil {
 		t.Fatalf("a file in a big directory: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestKqueueDirGrowingPastTheLimit(t *testing.T) {
 		return len(ents)
 	}
 	base := openFDs()
-	w, err := o.Watch(context.Background(), grow, plugin.WatchOptions{Debounce: 10 * time.Millisecond})
+	w, err := o.Watch(context.Background(), grow, hostos.WatchOptions{Debounce: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -39,7 +40,7 @@ func init() {
 // procSpec is a validated proc.run / proc.spawn argument list.
 type procSpec struct {
 	argv     []string
-	po       ProcOptions
+	po       hostos.ProcOptions
 	onStart  *lua.LFunction
 	onStdout *lua.LFunction
 	onStderr *lua.LFunction
@@ -186,7 +187,7 @@ func awaitProcRun(c *awaitCall) {
 }
 
 // runResult is the Result table of proc.run.
-func runResult(r ProcResult) map[string]any {
+func runResult(r hostos.ProcResult) map[string]any {
 	m := exitResult(r)
 	m["stdout"], m["stderr"] = string(r.Stdout), string(r.Stderr)
 	m["truncated"] = r.Truncated
@@ -194,7 +195,7 @@ func runResult(r ProcResult) map[string]any {
 }
 
 // exitResult is the part of a result a spawned process has too.
-func exitResult(r ProcResult) map[string]any {
+func exitResult(r hostos.ProcResult) map[string]any {
 	m := map[string]any{"code": int64(r.Code), "ok": r.Code == 0 && r.Signal == "" && !r.TimedOut, "timed_out": r.TimedOut}
 	if r.Signal != "" {
 		m["signal"] = r.Signal
@@ -208,7 +209,7 @@ func prepProcWhich(c *awaitCall) ioJob {
 		c.Bad(1, "which", "program name expected")
 		return nil
 	}
-	return func(_ context.Context, o OS) ([]any, error) {
+	return func(_ context.Context, o hostos.OS) ([]any, error) {
 		p, found := o.LookPath(name)
 		if !found {
 			return []any{nil}, nil
@@ -226,7 +227,7 @@ type process struct {
 	spec procSpec
 	live *int
 
-	osp     Proc // set by the "start" item
+	osp     hostos.Proc // set by the "start" item
 	pid     int
 	started bool
 	exited  bool
@@ -355,7 +356,7 @@ func (pr *process) onItem(c pluginapi.Completion) {
 	p := pr.p
 	switch c.Kind {
 	case "start":
-		osp, _ := c.Values[1].(Proc)
+		osp, _ := c.Values[1].(hostos.Proc)
 		pid, _ := wholeNumber(c.Values[0])
 		pr.osp, pr.pid, pr.started = osp, int(pid), true
 		for _, d := range pr.queued {
@@ -431,8 +432,8 @@ func (pr *process) startedValues() []lua.LValue {
 // procStream is the Work of a spawned process: start it, hand out its output, then its
 // exit. Every item is returned with ok = true; the exit item has More unset. A cancelled
 // ctx (unload, Process handle gone) terminates the child.
-func procStream(o OS, spec procSpec) func(context.Context) (pluginapi.Completion, bool) {
-	var proc Proc
+func procStream(o hostos.OS, spec procSpec) func(context.Context) (pluginapi.Completion, bool) {
+	var proc hostos.Proc
 	state := 0
 	exit := func(m map[string]any) (pluginapi.Completion, bool) {
 		state = 2

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/plugin/bundled"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -186,7 +187,7 @@ func (r *Runtime) discover(st *pluginState, then func(*discovery)) pluginapi.Wor
 
 // gather scans every source, resolves name collisions, decides which plugins are enabled
 // and compiles those.
-func (l *LoaderOptions) gather(ctx context.Context, osys OS, cfgDir string, st *pluginState) *discovery {
+func (l *LoaderOptions) gather(ctx context.Context, osys hostos.OS, cfgDir string, st *pluginState) *discovery {
 	d := &discovery{}
 	if st != nil {
 		d.state = *st
@@ -644,7 +645,7 @@ func (c *candidate) source() Source {
 }
 
 // scanOne reads one plugin again for reload and enable: scan and compile, no shadowing.
-func (l *LoaderOptions) scanOne(ctx context.Context, osys OS, cfgDir string, ref pluginRef, cfg map[string]bool, st *pluginState) *candidate {
+func (l *LoaderOptions) scanOne(ctx context.Context, osys hostos.OS, cfgDir string, ref pluginRef, cfg map[string]bool, st *pluginState) *candidate {
 	c := l.scanRef(ref)
 	c.decide(cfg, st)
 	c.settings = l.Settings[c.name]
@@ -659,7 +660,7 @@ func (l *LoaderOptions) scanOne(ctx context.Context, osys OS, cfgDir string, ref
 
 // readState reads the plugin's state file (see Runtime.StateFile). A missing or unreadable
 // file is no state; one over the cap is ignored.
-func (c *candidate) readState(ctx context.Context, osys OS, cfgDir string) {
+func (c *candidate) readState(ctx context.Context, osys hostos.OS, cfgDir string) {
 	path := stateFilePath(cfgDir, c.name)
 	if path == "" {
 		return

@@ -1,4 +1,4 @@
-package lsp
+package manager
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/tbxark/gvim/lsp"
 )
 
 // TestHelperProcess is the "language server" that the start tests launch: the test binary
@@ -111,22 +113,14 @@ func TestLanguageKeyResolvesTheNamesOfGvimsDetection(t *testing.T) {
 	}
 }
 
-func TestStartReportsAServerThatIsNotInstalled(t *testing.T) {
-	_, err := Start(t.Context(), Config{Command: []string{"gvim-no-such-language-server"}})
-	var ni *NotInstalledError
-	if !errors.As(err, &ni) || ni.Command != "gvim-no-such-language-server" {
-		t.Fatalf("Start error = %v, want a *NotInstalledError for the command", err)
-	}
-}
-
 func TestManagerNamesTheServerThatIsNotInstalled(t *testing.T) {
 	m := NewManager(mgrRoot, map[string]ServerConfig{
 		"go": {Command: []string{"gvim-no-such-gopls"}, Install: "go install golang.org/x/tools/gopls@latest"},
 	})
 	err := m.Open(mgrAPath, "go", "package a")
-	var ni *NotInstalledError
+	var ni *lsp.NotInstalledError
 	if !errors.As(err, &ni) {
-		t.Fatalf("Open error = %v, want a *NotInstalledError", err)
+		t.Fatalf("Open error = %v, want a *lsp.NotInstalledError", err)
 	}
 	if ni.Language != "go" || ni.Install != "go install golang.org/x/tools/gopls@latest" {
 		t.Errorf("error = %+v, want the language and the install hint", ni)
@@ -136,18 +130,8 @@ func TestManagerNamesTheServerThatIsNotInstalled(t *testing.T) {
 			t.Errorf("message %q lacks %q", err.Error(), want)
 		}
 	}
-	if !IsNotInstalled(err) || IsNotInstalled(errors.New("other")) {
+	if !lsp.IsNotInstalled(err) || lsp.IsNotInstalled(errors.New("other")) {
 		t.Error("IsNotInstalled does not tell the two apart")
-	}
-}
-
-func TestNotInstalledMessageWithoutAHintNamesTheConfigKey(t *testing.T) {
-	err := &NotInstalledError{Language: "nim", Command: "nimlangserver"}
-	if got := err.Error(); !strings.Contains(got, "lsp.nim.command") {
-		t.Errorf("message %q does not name the config key", got)
-	}
-	if cmd, install := err.MissingServer(); cmd != "nimlangserver" || install != "" {
-		t.Errorf("MissingServer = %q, %q", cmd, install)
 	}
 }
 
@@ -157,9 +141,9 @@ func TestManagerExplainsAServerThatDiesDuringTheHandshake(t *testing.T) {
 		"go": {Command: []string{os.Args[0], "-test.run=^TestHelperProcess$"}, Name: "gopls"},
 	})
 	err := m.Open(mgrAPath, "go", "package a")
-	var se *StartError
+	var se *lsp.StartError
 	if !errors.As(err, &se) {
-		t.Fatalf("Open error = %v, want a *StartError", err)
+		t.Fatalf("Open error = %v, want a *lsp.StartError", err)
 	}
 	for _, want := range []string{"gopls", "language server for go", "initialize", "-test.run", "bad flag: --serve"} {
 		if !strings.Contains(err.Error(), want) {
@@ -168,32 +152,6 @@ func TestManagerExplainsAServerThatDiesDuringTheHandshake(t *testing.T) {
 	}
 	if se.Stderr == "" || strings.Contains(se.Stderr, "\n") {
 		t.Errorf("stderr tail = %q, want the lines of the output on one line", se.Stderr)
-	}
-}
-
-func TestTailBufferKeepsTheLastLines(t *testing.T) {
-	b := &tailBuffer{max: 40}
-	_, _ = b.Write([]byte("one\ntwo\n\nthree\nfour\nfive\n"))
-	if got := b.tail(2, 100); got != "four | five" {
-		t.Errorf("tail(2) = %q, want %q", got, "four | five")
-	}
-	if got := b.tail(10, 100); got != "one | two | three | four | five" {
-		t.Errorf("tail(10) = %q", got)
-	}
-	if got := b.tail(10, 8); got != "...r | five" {
-		t.Errorf("tail cut to 8 = %q", got)
-	}
-	// The buffer is bounded.
-	_, _ = b.Write([]byte(strings.Repeat("x", 100) + "\nlast line\n"))
-	if len(b.data) > 40 {
-		t.Errorf("buffer holds %d bytes, want at most 40", len(b.data))
-	}
-	if got := b.tail(1, 100); got != "last line" {
-		t.Errorf("tail(1) = %q, want %q", got, "last line")
-	}
-	var none *tailBuffer
-	if none.tail(1, 10) != "" {
-		t.Error("a nil buffer has a tail")
 	}
 }
 

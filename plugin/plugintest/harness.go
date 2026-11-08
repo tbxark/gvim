@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -32,7 +33,7 @@ type Options struct {
 	// of the guard itself set their own limit.
 	HeapLimit int64
 	Services  pluginapi.Services // nil: a *FakeServices
-	OS        plugin.OS          // nil: a fresh *FakeOS
+	OS        hostos.OS          // nil: a fresh *FakeOS
 	Host      *FakeHost          // nil: a fresh one
 	Now       func() time.Time   // clock of the runtime (nil: the harness's manual clock)
 }

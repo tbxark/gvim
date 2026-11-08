@@ -6,179 +6,35 @@ import (
 	"io"
 	"runtime"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/lsp/lsptest"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
-// testTimeout bounds every wait in these tests, so a hang fails instead of
-// blocking the run.
-const testTimeout = 5 * time.Second
-
-// pipeRWC joins an io.PipeReader and an io.PipeWriter into one
-// io.ReadWriteCloser.
-type pipeRWC struct {
-	r *io.PipeReader
-	w *io.PipeWriter
-}
-
-func (p pipeRWC) Read(b []byte) (int, error)  { return p.r.Read(b) }
-func (p pipeRWC) Write(b []byte) (int, error) { return p.w.Write(b) }
-
-// Close closes both directions. Closing the writer makes the peer's reads return
-// io.EOF, and closing the reader makes the peer's writes fail.
-func (p pipeRWC) Close() error {
-	_ = p.r.Close()
-	return p.w.Close()
-}
-
-// newPipePair returns the client and server ends of two in-memory pipes.
-func newPipePair() (client, server pipeRWC) {
-	cr, sw := io.Pipe() // server -> client
-	sr, cw := io.Pipe() // client -> server
-	return pipeRWC{r: cr, w: cw}, pipeRWC{r: sr, w: sw}
-}
-
-// fakeServer answers the requests the client under test sends, and records each
-// notification it receives. It does not emit log output.
-type fakeServer struct {
-	protocol.UnimplementedServer
-
-	// client sends publishDiagnostics back to the client under test.
-	client protocol.Client
-
-	// stall, when non-nil, makes Shutdown and the request handlers that call park
-	// block until it is closed. Each one signals stallEntered first.
-	stall        chan struct{}
-	stallEntered chan struct{}
-
-	initCh   chan *protocol.InitializeParams
-	openCh   chan *protocol.DidOpenTextDocumentParams
-	changeCh chan *protocol.DidChangeTextDocumentParams
-	closeCh  chan *protocol.DidCloseTextDocumentParams
-
-	// requests receives the params of each request method in
-	// requests_fake_test.go, in arrival order. canned holds their replies.
-	requests chan any
-	canned   cannedReplies
-}
-
-// park blocks the calling handler until stall is closed. It does nothing when
-// stall is nil. The handler is made asynchronous first, so the read loop keeps
-// running and the client's $/cancelRequest write does not block behind it.
-func (s *fakeServer) park(ctx context.Context) {
-	if s.stall == nil {
-		return
-	}
-	jsonrpc2.Async(ctx)
-	recordTo(s.stallEntered, struct{}{})
-	<-s.stall
-}
-
-// recordTo sends v without blocking. A full channel drops the value instead of
-// blocking the server's read loop.
-func recordTo[T any](ch chan T, v T) {
-	select {
-	case ch <- v:
-	default:
-	}
-}
-
-func (s *fakeServer) Initialize(_ context.Context, p *protocol.InitializeParams) (*protocol.InitializeResult, error) {
-	recordTo(s.initCh, p)
-	return &protocol.InitializeResult{
-		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: protocol.TextDocumentSyncKindFull,
-		},
-	}, nil
-}
-
-func (s *fakeServer) Shutdown(ctx context.Context) error {
-	s.park(ctx)
-	return nil
-}
-
-func (s *fakeServer) DidOpen(_ context.Context, p *protocol.DidOpenTextDocumentParams) error {
-	recordTo(s.openCh, p)
-	return s.publish(p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.Text)
-}
-
-func (s *fakeServer) DidChange(_ context.Context, p *protocol.DidChangeTextDocumentParams) error {
-	recordTo(s.changeCh, p)
-	text := ""
-	for _, ch := range p.ContentChanges {
-		if whole, ok := ch.(*protocol.TextDocumentContentChangeWholeDocument); ok {
-			text = whole.Text
-		}
-	}
-	return s.publish(p.TextDocument.URI, p.TextDocument.Version, text)
-}
-
-func (s *fakeServer) DidClose(_ context.Context, p *protocol.DidCloseTextDocumentParams) error {
-	recordTo(s.closeCh, p)
-	return nil
-}
-
-// publish reports one diagnostic per line that contains "ERR".
-func (s *fakeServer) publish(u uri.URI, version int32, text string) error {
-	diags := make([]protocol.Diagnostic, 0)
-	for i, line := range strings.Split(text, "\n") {
-		if idx := strings.Index(line, "ERR"); idx >= 0 {
-			diags = append(diags, protocol.Diagnostic{
-				Range: protocol.Range{
-					Start: protocol.Position{Line: uint32(i), Character: uint32(idx)},
-					End:   protocol.Position{Line: uint32(i), Character: uint32(idx + 3)},
-				},
-				Severity: protocol.DiagnosticSeverityError,
-				Message:  protocol.String("found ERR"),
-			})
-		}
-	}
-	return s.client.PublishDiagnostics(context.Background(), &protocol.PublishDiagnosticsParams{
-		URI:         u,
-		Version:     protocol.NewOptional(version),
-		Diagnostics: diags,
-	})
-}
-
-// pair is a Client connected to a fakeServer over in-memory pipes.
+// pair is a Client connected to a FakeServer over in-memory pipes.
 type pair struct {
 	client  *Client
 	srvConn jsonrpc2.Conn
-	srv     *fakeServer
-	srvEnd  pipeRWC
+	srv     *lsptest.FakeServer
+	srvEnd  lsptest.PipeRWC
 }
 
 // startPair builds the fake server and the client, and starts both read loops.
 // It registers no cleanup, so callers that check goroutine counts can control
 // teardown.
 func startPair(cfg Config, stall chan struct{}) pair {
-	return startPairOver(cfg, stall, func(cli pipeRWC) io.ReadWriteCloser { return cli })
+	return startPairOver(cfg, stall, func(cli lsptest.PipeRWC) io.ReadWriteCloser { return cli })
 }
 
 // startPairOver is startPair with the client end of the pipes passed through
 // wrap, so a test can put a transport such as gatedRWC between the client and
 // the fake server.
-func startPairOver(cfg Config, stall chan struct{}, wrap func(pipeRWC) io.ReadWriteCloser) pair {
-	cliEnd, srvEnd := newPipePair()
-
-	srv := &fakeServer{
-		stall:        stall,
-		stallEntered: make(chan struct{}, 1),
-		initCh:       make(chan *protocol.InitializeParams, 128),
-		openCh:       make(chan *protocol.DidOpenTextDocumentParams, 128),
-		changeCh:     make(chan *protocol.DidChangeTextDocumentParams, 128),
-		closeCh:      make(chan *protocol.DidCloseTextDocumentParams, 128),
-		requests:     make(chan any, 128),
-	}
-	srvConn := jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(srvEnd), jsonrpc2.WithCodec(lspCodec{}))
-	srv.client = protocol.ClientDispatcher(srvConn)
-	srvConn.Go(context.Background(), protocol.ServerHandler(srv, jsonrpc2.MethodNotFoundHandler))
-
+func startPairOver(cfg Config, stall chan struct{}, wrap func(lsptest.PipeRWC) io.ReadWriteCloser) pair {
+	cliEnd, srvEnd := lsptest.NewPipePair()
+	srv, srvConn := lsptest.StartServer(srvEnd, stall)
 	return pair{
 		client:  NewClient(wrap(cliEnd), cfg),
 		srvConn: srvConn,
@@ -201,25 +57,9 @@ func newFixture(t *testing.T, cfg Config, stall chan struct{}) pair {
 
 func newTestContext(t *testing.T) context.Context {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), lsptest.Timeout)
 	t.Cleanup(cancel)
 	return ctx
-}
-
-// recv waits for one value on ch or fails the test after testTimeout.
-func recv[T any](t *testing.T, ch <-chan T, what string) T {
-	t.Helper()
-	select {
-	case v, ok := <-ch:
-		if !ok {
-			t.Fatalf("%s: channel closed", what)
-		}
-		return v
-	case <-time.After(testTimeout):
-		t.Fatalf("%s: timed out after %v", what, testTimeout)
-	}
-	var zero T
-	return zero
 }
 
 func TestStartRequiresCommandAndDoesNotLaunch(t *testing.T) {
@@ -281,7 +121,7 @@ func TestInitializeRoundTrip(t *testing.T) {
 				t.Fatalf("Initialized: %v", err)
 			}
 
-			got := recv(t, f.srv.initCh, "initialize params")
+			got := lsptest.Recv(t, f.srv.InitCh, "initialize params")
 			folders, hasFolders := got.WorkspaceFolders.Get()
 			if hasFolders != tt.wantRoot {
 				t.Fatalf("server saw workspace folders = %v, want %v", hasFolders, tt.wantRoot)
@@ -312,7 +152,7 @@ func TestInitializeSendsCodeActionLiteralSupport(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 
-	got := recv(t, f.srv.initCh, "initialize params")
+	got := lsptest.Recv(t, f.srv.InitCh, "initialize params")
 	td := got.Capabilities.TextDocument
 	if td == nil || td.CodeAction == nil {
 		t.Fatalf("client capabilities have no codeAction: %+v", td)
@@ -336,7 +176,7 @@ func TestDoneClosesWhenServerClosesPipe(t *testing.T) {
 	_ = f.srvEnd.Close()
 	select {
 	case <-f.client.Done():
-	case <-time.After(testTimeout):
+	case <-time.After(lsptest.Timeout):
 		t.Fatal("Done was not closed after the server closed the pipe")
 	}
 }
@@ -360,7 +200,7 @@ func TestDiagnosticsDelivery(t *testing.T) {
 			if err := f.client.DidOpen(ctx, docURI, "go", 1, tt.openText); err != nil {
 				t.Fatalf("DidOpen: %v", err)
 			}
-			open := recv(t, f.client.Diagnostics(), "diagnostics after didOpen")
+			open := lsptest.Recv(t, f.client.Diagnostics(), "diagnostics after didOpen")
 			if open.URI != docURI || open.Version != 1 {
 				t.Fatalf("event = {URI:%q Version:%d}, want {%q 1}", open.URI, open.Version, docURI)
 			}
@@ -377,21 +217,21 @@ func TestDiagnosticsDelivery(t *testing.T) {
 			if err := f.client.DidChange(ctx, docURI, 2, "ERR only\n"); err != nil {
 				t.Fatalf("DidChange: %v", err)
 			}
-			change := recv(t, f.client.Diagnostics(), "diagnostics after didChange")
+			change := lsptest.Recv(t, f.client.Diagnostics(), "diagnostics after didChange")
 			if change.Version != 2 || len(change.Diagnostics) != 1 {
 				t.Fatalf("didChange event = version %d with %d diagnostics, want version 2 with 1", change.Version, len(change.Diagnostics))
 			}
-			if got := recv(t, f.srv.changeCh, "server didChange"); got.TextDocument.URI != docURI {
+			if got := lsptest.Recv(t, f.srv.ChangeCh, "server didChange"); got.TextDocument.URI != docURI {
 				t.Fatalf("server saw didChange for %q", got.TextDocument.URI)
 			}
 
 			if err := f.client.DidClose(ctx, docURI); err != nil {
 				t.Fatalf("DidClose: %v", err)
 			}
-			if got := recv(t, f.srv.closeCh, "server didClose"); got.TextDocument.URI != docURI {
+			if got := lsptest.Recv(t, f.srv.CloseCh, "server didClose"); got.TextDocument.URI != docURI {
 				t.Fatalf("server saw didClose for %q", got.TextDocument.URI)
 			}
-			if got := recv(t, f.srv.openCh, "server didOpen"); got.TextDocument.Text != tt.openText {
+			if got := lsptest.Recv(t, f.srv.OpenCh, "server didOpen"); got.TextDocument.Text != tt.openText {
 				t.Fatalf("server saw didOpen text %q, want %q", got.TextDocument.Text, tt.openText)
 			}
 		})
@@ -417,7 +257,7 @@ func TestDiagnosticsDropOldestWhenFull(t *testing.T) {
 
 	var versions []int32
 	for len(f.client.Diagnostics()) > 0 {
-		ev := recv(t, f.client.Diagnostics(), "queued diagnostics")
+		ev := lsptest.Recv(t, f.client.Diagnostics(), "queued diagnostics")
 		versions = append(versions, ev.Version)
 	}
 	if len(versions) != diagnosticsBuffer {
@@ -459,7 +299,7 @@ func TestContextCancelOfPendingRequest(t *testing.T) {
 			go func() { errCh <- f.client.Shutdown(ctx) }()
 
 			// The server has the request and is blocked in its handler.
-			recv(t, f.srv.stallEntered, "server entered Shutdown")
+			lsptest.Recv(t, f.srv.StallEntered, "server entered Shutdown")
 			if tt.cancelNow {
 				cancel()
 			}
@@ -467,7 +307,7 @@ func TestContextCancelOfPendingRequest(t *testing.T) {
 			var err error
 			select {
 			case err = <-errCh:
-			case <-time.After(testTimeout):
+			case <-time.After(lsptest.Timeout):
 				t.Fatal("pending request did not return after its context ended")
 			}
 			if !errors.Is(err, tt.wantErr) {
@@ -486,7 +326,7 @@ func TestServerClosesPipe(t *testing.T) {
 	// A request that is still pending when the server goes away.
 	pendingErr := make(chan error, 1)
 	go func() { pendingErr <- f.client.Shutdown(ctx) }()
-	recv(t, f.srv.stallEntered, "server entered Shutdown")
+	lsptest.Recv(t, f.srv.StallEntered, "server entered Shutdown")
 
 	_ = f.srvEnd.Close()
 
@@ -495,7 +335,7 @@ func TestServerClosesPipe(t *testing.T) {
 		if err == nil {
 			t.Fatal("pending Shutdown returned nil after the server closed the pipe")
 		}
-	case <-time.After(testTimeout):
+	case <-time.After(lsptest.Timeout):
 		t.Fatal("pending Shutdown hung after the server closed the pipe")
 	}
 
@@ -522,7 +362,7 @@ func TestServerClosesPipe(t *testing.T) {
 		if ok {
 			t.Fatal("Diagnostics delivered an event after the server closed the pipe")
 		}
-	case <-time.After(testTimeout):
+	case <-time.After(lsptest.Timeout):
 		t.Fatal("Diagnostics channel was not closed after the server closed the pipe")
 	}
 }
@@ -547,7 +387,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 			pendingErr := make(chan error, 1)
 			if tt.pending {
 				go func() { pendingErr <- f.client.Shutdown(ctx) }()
-				recv(t, f.srv.stallEntered, "server entered Shutdown")
+				lsptest.Recv(t, f.srv.StallEntered, "server entered Shutdown")
 			}
 
 			errs := make(chan error, tt.closeCount)
@@ -560,7 +400,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 				var err error
 				select {
 				case err = <-errs:
-				case <-time.After(testTimeout):
+				case <-time.After(lsptest.Timeout):
 					t.Fatalf("Close call %d did not return", i+1)
 				}
 				if err != nil {
@@ -574,7 +414,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 					if err == nil {
 						t.Fatal("pending Shutdown returned nil after Close")
 					}
-				case <-time.After(testTimeout):
+				case <-time.After(lsptest.Timeout):
 					t.Fatal("pending Shutdown did not return after Close")
 				}
 			}
@@ -587,7 +427,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 				if ok {
 					t.Fatal("Diagnostics delivered an event after Close")
 				}
-			case <-time.After(testTimeout):
+			case <-time.After(lsptest.Timeout):
 				t.Fatal("Diagnostics channel was not closed by Close")
 			}
 		})
@@ -609,14 +449,14 @@ func TestCloseReleasesGoroutines(t *testing.T) {
 	if err := p.client.DidOpen(ctx, "file:///work/proj/a.go", "go", 1, "ERR\n"); err != nil {
 		t.Fatalf("DidOpen: %v", err)
 	}
-	recv(t, p.client.Diagnostics(), "diagnostics")
+	lsptest.Recv(t, p.client.Diagnostics(), "diagnostics")
 
 	if err := p.client.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 	_ = p.srvConn.Close()
 
-	deadline := time.Now().Add(testTimeout)
+	deadline := time.Now().Add(lsptest.Timeout)
 	for runtime.NumGoroutine() > baseline {
 		if time.Now().After(deadline) {
 			t.Fatalf("goroutines after Close = %d, baseline = %d", runtime.NumGoroutine(), baseline)

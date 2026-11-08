@@ -13,7 +13,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/tui"
-	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/lsp/manager"
 )
 
 // lspConfig is the default config with the lsp parts of a user file laid on it.
@@ -345,7 +345,7 @@ func TestOpenRunsTheServerInTheProjectRootOfTheFile(t *testing.T) {
 	apptest.Must(t, err)
 	t.Setenv(fakeLSPEnv, "1")
 	port := NewFor(config.Defaults()).(*lspPort)
-	port.servers = map[string]lsp.ServerConfig{"go": {
+	port.servers = map[string]manager.ServerConfig{"go": {
 		Command: []string{exe}, Args: []string{"-test.run=^TestFakeLSPServerProcess$"}, RootMarkers: []string{"go.mod"},
 	}}
 	port.startable = nil

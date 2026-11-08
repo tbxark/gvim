@@ -10,6 +10,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -37,8 +38,8 @@ func init() {
 	registerIO("fs_exists", prepFSExists)
 	registerIO("fs_mkdir", prepFSMkdir)
 	registerIO("fs_remove", prepFSRemove)
-	registerIO("fs_rename", prepFSTwoPaths("rename", func(ctx context.Context, o OS, a, b string) error { return o.Rename(ctx, a, b) }))
-	registerIO("fs_copy", prepFSTwoPaths("copy", func(ctx context.Context, o OS, a, b string) error { return o.Copy(ctx, a, b) }))
+	registerIO("fs_rename", prepFSTwoPaths("rename", func(ctx context.Context, o hostos.OS, a, b string) error { return o.Rename(ctx, a, b) }))
+	registerIO("fs_copy", prepFSTwoPaths("copy", func(ctx context.Context, o hostos.OS, a, b string) error { return o.Copy(ctx, a, b) }))
 	registerIO("fs_realpath", prepFSRealpath)
 	registerIO("fs_walk", prepFSWalk)
 }
@@ -47,7 +48,7 @@ func init() {
 
 // ioJob is the body of an IO Work: plain Go in, plain Go out, on a Work goroutine. The
 // returned values are what the awaiting Lua call returns.
-type ioJob func(ctx context.Context, o OS) ([]any, error)
+type ioJob func(ctx context.Context, o hostos.OS) ([]any, error)
 
 // registerIO registers an await kind whose handler validates the arguments (prep calls
 // c.Bad or c.Fail and returns nil on a bad call) and runs the returned job in a Work.
@@ -256,7 +257,7 @@ func prepFSRead(c *awaitCall) ioJob {
 	if !c.optionsDone(1, "read", o) {
 		return nil
 	}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		data, err := os.ReadFile(ctx, path, limit)
 		if err != nil {
 			return nil, err
@@ -283,7 +284,7 @@ func prepFSWrite(c *awaitCall) ioJob {
 	if !ok {
 		return nil
 	}
-	wo := WriteOptions{
+	wo := hostos.WriteOptions{
 		Atomic:  o.boolean("atomic", true),
 		Append:  o.boolean("append", false),
 		Mode:    fs.FileMode(o.number("mode", 0, 0, 0o7777)),
@@ -295,7 +296,7 @@ func prepFSWrite(c *awaitCall) ioJob {
 	if wo.Append {
 		wo.Atomic = false // appending to a copy and renaming would lose concurrent appends
 	}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		if err := os.WriteFile(ctx, path, []byte(data), wo); err != nil {
 			return nil, err
 		}
@@ -316,7 +317,7 @@ func prepFSList(c *awaitCall) ioJob {
 	if !c.optionsDone(1, "list", o) {
 		return nil
 	}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		ents, err := os.ReadDir(ctx, path, hidden)
 		if err != nil {
 			return nil, err
@@ -341,7 +342,7 @@ func prepFSStat(c *awaitCall) ioJob {
 	if !ok {
 		return nil
 	}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		st, err := os.Stat(ctx, path)
 		if err != nil {
 			return nil, err
@@ -355,7 +356,7 @@ func prepFSExists(c *awaitCall) ioJob {
 	if !ok {
 		return nil
 	}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		if _, err := os.Stat(ctx, path); err != nil {
 			if pluginapi.CodeOf(err) == pluginapi.CodeNotFound {
 				return []any{false}, nil
@@ -379,7 +380,7 @@ func prepFSMkdir(c *awaitCall) ioJob {
 	if !c.optionsDone(1, "mkdir", o) {
 		return nil
 	}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		if err := os.Mkdir(ctx, path, parents); err != nil {
 			return nil, err
 		}
@@ -387,7 +388,7 @@ func prepFSMkdir(c *awaitCall) ioJob {
 	}
 }
 
-func prepFSTwoPaths(fname string, do func(ctx context.Context, o OS, a, b string) error) func(c *awaitCall) ioJob {
+func prepFSTwoPaths(fname string, do func(ctx context.Context, o hostos.OS, a, b string) error) func(c *awaitCall) ioJob {
 	return func(c *awaitCall) ioJob {
 		a, ok := c.pathArg(0, fname)
 		if !ok {
@@ -397,7 +398,7 @@ func prepFSTwoPaths(fname string, do func(ctx context.Context, o OS, a, b string
 		if !ok {
 			return nil
 		}
-		return func(ctx context.Context, os OS) ([]any, error) {
+		return func(ctx context.Context, os hostos.OS) ([]any, error) {
 			if err := do(ctx, os, a, b); err != nil {
 				return nil, err
 			}
@@ -411,7 +412,7 @@ func prepFSRealpath(c *awaitCall) ioJob {
 	if !ok {
 		return nil
 	}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		p, err := os.RealPath(ctx, path)
 		if err != nil {
 			return nil, err
@@ -429,7 +430,7 @@ func prepFSWalk(c *awaitCall) ioJob {
 	if !ok {
 		return nil
 	}
-	wo := WalkOptions{
+	wo := hostos.WalkOptions{
 		SkipDirs:   o.strings("skip_dirs", 1000),
 		Hidden:     o.boolean("hidden", false),
 		MaxDepth:   int(o.number("max_depth", 0, 0, 1<<20)),
@@ -438,7 +439,7 @@ func prepFSWalk(c *awaitCall) ioJob {
 	if !c.optionsDone(1, "walk", o) {
 		return nil
 	}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		res, err := os.Walk(ctx, root, wo)
 		if err != nil {
 			return nil, err
@@ -469,7 +470,7 @@ func prepFSRemove(c *awaitCall) ioJob {
 	dirs := c.r.os.Dirs()
 	abs := absPath(dirs.Cwd, path)
 	protected := []string{dirs.Home, dirs.Root, dirs.Config, dirs.Cwd}
-	return func(ctx context.Context, os OS) ([]any, error) {
+	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		// What is checked is what is removed: the OS gets the cleaned absolute path.
 		if err := refuseProtected(ctx, os, abs, protected); err != nil {
 			return nil, err
@@ -496,7 +497,7 @@ func absPath(cwd, p string) string {
 // workspace root, the working directory, the config directory and every directory that
 // contains one of them are never removed, even recursively. Symbolic links in the parent
 // of the target are resolved first, so a link cannot name a protected directory.
-func refuseProtected(ctx context.Context, o OS, abs string, protected []string) error {
+func refuseProtected(ctx context.Context, o hostos.OS, abs string, protected []string) error {
 	targets := []string{abs}
 	if parent, err := o.RealPath(ctx, filepath.Dir(abs)); err == nil {
 		if real := filepath.Join(parent, filepath.Base(abs)); real != abs {
@@ -630,7 +631,7 @@ func installFS(e *apiEnv) {
 			cancel()
 		})
 		w.w = wt
-		p.queueWork(tok, pluginapi.Work{Ctx: wctx, Stream: watchStream(r.os, path, WatchOptions{Debounce: debounce})})
+		p.queueWork(tok, pluginapi.Work{Ctx: wctx, Stream: watchStream(r.os, path, hostos.WatchOptions{Debounce: debounce})})
 		L.Push(p.newObject(kindWatcher, w))
 		return 1
 	})
@@ -639,8 +640,8 @@ func installFS(e *apiEnv) {
 // watchStream is the Work of a watcher: it adds the OS watch (a failure is the final item,
 // delivered once), then hands out events until the watch ends or ctx is cancelled. Every
 // item, final ones included, is returned with ok = true; the final one has More unset.
-func watchStream(o OS, path string, wo WatchOptions) func(context.Context) (pluginapi.Completion, bool) {
-	var w Watch
+func watchStream(o hostos.OS, path string, wo hostos.WatchOptions) func(context.Context) (pluginapi.Completion, bool) {
+	var w hostos.Watch
 	started := false
 	end := func() (pluginapi.Completion, bool) {
 		if w != nil {

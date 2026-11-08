@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -15,7 +15,7 @@ import (
 func TestAtomicWriteErrorNamesTheTarget(t *testing.T) {
 	o, dir := newTestOS(t)
 	target := filepath.Join(dir, "out", "sub", "file.txt")
-	err := o.WriteFile(context.Background(), target, []byte("hi"), plugin.WriteOptions{Atomic: true})
+	err := o.WriteFile(context.Background(), target, []byte("hi"), hostos.WriteOptions{Atomic: true})
 	if err == nil {
 		t.Fatal("no error for a missing directory")
 	}
@@ -32,7 +32,7 @@ func TestPluginOSWriteErrorNamesTheTarget(t *testing.T) {
 	t.Parallel()
 	o, dir := newTestOS(t)
 	target := filepath.Join(dir, "out", "sub", "file.txt") // out/sub does not exist
-	err := o.WriteFile(context.Background(), target, []byte("hi"), plugin.WriteOptions{Atomic: true})
+	err := o.WriteFile(context.Background(), target, []byte("hi"), hostos.WriteOptions{Atomic: true})
 	if err == nil {
 		t.Fatal("writing into a missing directory succeeded")
 	}

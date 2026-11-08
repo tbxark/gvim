@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
-// pluginOS is the real plugin.OS: files through the os package (os.OpenRoot for every
+// pluginOS is the real hostos.OS: files through the os package (os.OpenRoot for every
 // traversal, so a symbolic link swapped in mid-walk cannot lead out of the tree), processes
 // in their own process groups, fsnotify watchers (pluginos_proc.go, pluginos_watch.go).
 //
@@ -27,7 +27,7 @@ import (
 // methods from Work goroutines, so the process and watcher tables sit behind mu, which is
 // never held across an IO call.
 type pluginOS struct {
-	dirs func() plugin.Dirs // evaluated at every call: the workspace root can change
+	dirs func() hostos.Dirs // evaluated at every call: the workspace root can change
 
 	mu      sync.Mutex
 	procs   map[*osProc]struct{}
@@ -35,16 +35,16 @@ type pluginOS struct {
 	closed  bool
 }
 
-var _ plugin.OS = (*pluginOS)(nil)
+var _ hostos.OS = (*pluginOS)(nil)
 
 // newPluginOS returns the OS for the plugin runtime. dirs reports the well-known
 // directories; a nil dirs gives the process's own home, temp and working directory.
-func newPluginOS(dirs func() plugin.Dirs) *pluginOS {
+func newPluginOS(dirs func() hostos.Dirs) *pluginOS {
 	if dirs == nil {
-		dirs = func() plugin.Dirs {
+		dirs = func() hostos.Dirs {
 			home, _ := os.UserHomeDir()
 			cwd, _ := os.Getwd()
-			return plugin.Dirs{Home: home, Temp: os.TempDir(), Cwd: cwd, Root: cwd}
+			return hostos.Dirs{Home: home, Temp: os.TempDir(), Cwd: cwd, Root: cwd}
 		}
 	}
 	return &pluginOS{dirs: dirs, procs: map[*osProc]struct{}{}, watches: map[*osWatch]struct{}{}}
@@ -123,7 +123,7 @@ func kindOfMode(m fs.FileMode) string {
 
 // ---------- files ----------
 
-// ReadFile implements plugin.OS.
+// ReadFile implements hostos.OS.
 func (o *pluginOS) ReadFile(ctx context.Context, path string, max int64) ([]byte, error) {
 	if err := ctxErr(ctx); err != nil {
 		return nil, err
@@ -171,8 +171,8 @@ func (c *ctxReader) Read(b []byte) (int, error) {
 	return c.r.Read(b)
 }
 
-// WriteFile implements plugin.OS.
-func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo plugin.WriteOptions) error {
+// WriteFile implements hostos.OS.
+func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo hostos.WriteOptions) error {
 	if err := ctxErr(ctx); err != nil {
 		return err
 	}
@@ -259,8 +259,8 @@ func ontarget(err error, target string) error {
 	return err
 }
 
-// ReadDir implements plugin.OS.
-func (o *pluginOS) ReadDir(ctx context.Context, path string, hidden bool) ([]plugin.DirEntry, error) {
+// ReadDir implements hostos.OS.
+func (o *pluginOS) ReadDir(ctx context.Context, path string, hidden bool) ([]hostos.DirEntry, error) {
 	if err := ctxErr(ctx); err != nil {
 		return nil, err
 	}
@@ -269,7 +269,7 @@ func (o *pluginOS) ReadDir(ctx context.Context, path string, hidden bool) ([]plu
 	if err != nil {
 		return nil, mapErr(err, p)
 	}
-	out := make([]plugin.DirEntry, 0, len(ents))
+	out := make([]hostos.DirEntry, 0, len(ents))
 	for _, e := range ents {
 		if !hidden && strings.HasPrefix(e.Name(), ".") {
 			continue
@@ -278,7 +278,7 @@ func (o *pluginOS) ReadDir(ctx context.Context, path string, hidden bool) ([]plu
 		if err != nil {
 			continue // removed meanwhile
 		}
-		de := plugin.DirEntry{Name: e.Name(), Kind: kindOfMode(info.Mode()), Size: info.Size(), MTime: info.ModTime()}
+		de := hostos.DirEntry{Name: e.Name(), Kind: kindOfMode(info.Mode()), Size: info.Size(), MTime: info.ModTime()}
 		if info.Mode()&fs.ModeSymlink != 0 {
 			if st, err := os.Stat(filepath.Join(p, e.Name())); err == nil {
 				de.TargetKind = kindOfMode(st.Mode())
@@ -289,11 +289,11 @@ func (o *pluginOS) ReadDir(ctx context.Context, path string, hidden bool) ([]plu
 	return out, nil
 }
 
-// Stat implements plugin.OS. It follows symbolic links; a link whose target is gone is
+// Stat implements hostos.OS. It follows symbolic links; a link whose target is gone is
 // reported as a "symlink".
-func (o *pluginOS) Stat(ctx context.Context, path string) (plugin.FileStat, error) {
+func (o *pluginOS) Stat(ctx context.Context, path string) (hostos.FileStat, error) {
 	if err := ctxErr(ctx); err != nil {
-		return plugin.FileStat{}, err
+		return hostos.FileStat{}, err
 	}
 	p := o.abs(path)
 	st, err := os.Stat(p)
@@ -301,13 +301,13 @@ func (o *pluginOS) Stat(ctx context.Context, path string) (plugin.FileStat, erro
 		if l, lerr := os.Lstat(p); lerr == nil {
 			st = l
 		} else {
-			return plugin.FileStat{}, mapErr(err, p)
+			return hostos.FileStat{}, mapErr(err, p)
 		}
 	}
-	return plugin.FileStat{Kind: kindOfMode(st.Mode()), Size: st.Size(), MTime: st.ModTime(), Mode: st.Mode()}, nil
+	return hostos.FileStat{Kind: kindOfMode(st.Mode()), Size: st.Size(), MTime: st.ModTime(), Mode: st.Mode()}, nil
 }
 
-// Mkdir implements plugin.OS.
+// Mkdir implements hostos.OS.
 func (o *pluginOS) Mkdir(ctx context.Context, path string, parents bool) error {
 	if err := ctxErr(ctx); err != nil {
 		return err
@@ -319,7 +319,7 @@ func (o *pluginOS) Mkdir(ctx context.Context, path string, parents bool) error {
 	return mapErr(os.Mkdir(p, 0o755), p)
 }
 
-// Remove implements plugin.OS. A recursive removal goes through os.Root, so it cannot
+// Remove implements hostos.OS. A recursive removal goes through os.Root, so it cannot
 // follow a link out of the directory being removed. Removing a filesystem root is refused
 // here as well, whatever the caller checked.
 func (o *pluginOS) Remove(ctx context.Context, path string, recursive bool) error {
@@ -375,7 +375,7 @@ func (o *pluginOS) refuseProtected(p string) error {
 	return nil
 }
 
-// Rename implements plugin.OS. Across file systems it copies and removes.
+// Rename implements hostos.OS. Across file systems it copies and removes.
 func (o *pluginOS) Rename(ctx context.Context, from, to string) error {
 	if err := ctxErr(ctx); err != nil {
 		return err
@@ -391,7 +391,7 @@ func (o *pluginOS) Rename(ctx context.Context, from, to string) error {
 	return o.Remove(ctx, a, true)
 }
 
-// RealPath implements plugin.OS.
+// RealPath implements hostos.OS.
 func (o *pluginOS) RealPath(ctx context.Context, path string) (string, error) {
 	if err := ctxErr(ctx); err != nil {
 		return "", err
@@ -404,7 +404,7 @@ func (o *pluginOS) RealPath(ctx context.Context, path string) (string, error) {
 	return filepath.Clean(real), nil
 }
 
-// Copy implements plugin.OS: a file, or a directory tree (symbolic links are copied as
+// Copy implements hostos.OS: a file, or a directory tree (symbolic links are copied as
 // links, never followed). The destination must not be an existing directory.
 func (o *pluginOS) Copy(ctx context.Context, from, to string) error {
 	if err := ctxErr(ctx); err != nil {
@@ -511,17 +511,17 @@ func writeStream(ctx context.Context, src io.Reader, to string, mode fs.FileMode
 	return errors.Join(err, dst.Close())
 }
 
-// Walk implements plugin.OS: a depth-first listing in lexical order below root, not
+// Walk implements hostos.OS: a depth-first listing in lexical order below root, not
 // following symbolic links, skipping the named directories and (unless Hidden) dotfiles.
 // Unreadable subdirectories are skipped.
-func (o *pluginOS) Walk(ctx context.Context, root string, wo plugin.WalkOptions) (plugin.WalkResult, error) {
+func (o *pluginOS) Walk(ctx context.Context, root string, wo hostos.WalkOptions) (hostos.WalkResult, error) {
 	if err := ctxErr(ctx); err != nil {
-		return plugin.WalkResult{}, err
+		return hostos.WalkResult{}, err
 	}
 	base := o.abs(root)
 	r, err := os.OpenRoot(base)
 	if err != nil {
-		return plugin.WalkResult{}, mapErr(err, base)
+		return hostos.WalkResult{}, mapErr(err, base)
 	}
 	defer func() { _ = r.Close() }()
 	limit := wo.MaxEntries
@@ -532,7 +532,7 @@ func (o *pluginOS) Walk(ctx context.Context, root string, wo plugin.WalkOptions)
 	for _, s := range wo.SkipDirs {
 		skip[s] = true
 	}
-	var res plugin.WalkResult
+	var res hostos.WalkResult
 	n := 0
 	err = fs.WalkDir(r.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if n++; n%walkCtxEvery == 0 {
@@ -571,36 +571,36 @@ func (o *pluginOS) Walk(ctx context.Context, root string, wo plugin.WalkOptions)
 		if err != nil {
 			return nil
 		}
-		res.Entries = append(res.Entries, plugin.WalkEntry{
+		res.Entries = append(res.Entries, hostos.WalkEntry{
 			Path: filepath.Join(base, filepath.FromSlash(rel)), Rel: rel,
 			Kind: kindOfMode(info.Mode()), Size: info.Size(), MTime: info.ModTime(),
 		})
 		return nil
 	})
 	if err != nil {
-		return plugin.WalkResult{}, mapErr(err, base)
+		return hostos.WalkResult{}, mapErr(err, base)
 	}
 	return res, nil
 }
 
 // ---------- environment ----------
 
-// LookPath implements plugin.OS.
+// LookPath implements hostos.OS.
 func (o *pluginOS) LookPath(name string) (string, bool) {
 	p, err := exec.LookPath(name)
 	return p, err == nil
 }
 
-// Getenv implements plugin.OS.
+// Getenv implements hostos.OS.
 func (o *pluginOS) Getenv(name string) (string, bool) { return os.LookupEnv(name) }
 
-// Dirs implements plugin.OS.
-func (o *pluginOS) Dirs() plugin.Dirs { return o.dirs() }
+// Dirs implements hostos.OS.
+func (o *pluginOS) Dirs() hostos.Dirs { return o.dirs() }
 
-// Now implements plugin.OS.
+// Now implements hostos.OS.
 func (o *pluginOS) Now() time.Time { return time.Now() }
 
-// Shutdown implements plugin.OS: it kills every live process group with SIGKILL at once and
+// Shutdown implements hostos.OS: it kills every live process group with SIGKILL at once and
 // stops every watcher; later Run, Start and Watch calls fail.
 func (o *pluginOS) Shutdown() {
 	o.mu.Lock()

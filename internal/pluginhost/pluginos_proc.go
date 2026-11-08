@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -36,7 +36,7 @@ const (
 type osProc struct {
 	os   *pluginOS
 	cmd  *exec.Cmd
-	opts plugin.ProcOptions
+	opts hostos.ProcOptions
 
 	smu      sync.Mutex // guards started and cmd.Process against a Shutdown that races launch
 	started  bool       // cmd.Start succeeded
@@ -45,7 +45,7 @@ type osProc struct {
 	termOnce sync.Once
 	quit     chan struct{} // closed by Terminate: output is discarded from then on
 	done     chan struct{} // closed when the child is reaped and its output was read
-	res      plugin.ProcResult
+	res      hostos.ProcResult
 
 	// Start only.
 	out     chan osChunk
@@ -66,11 +66,11 @@ type osChunk struct {
 	data   []byte
 }
 
-var _ plugin.Proc = (*osProc)(nil)
+var _ hostos.Proc = (*osProc)(nil)
 
 // command builds the exec.Cmd for argv: no shell, its own process group, the environment
 // of the editor plus opts.Env.
-func (o *pluginOS) command(argv []string, opts plugin.ProcOptions) *exec.Cmd {
+func (o *pluginOS) command(argv []string, opts hostos.ProcOptions) *exec.Cmd {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	if opts.Cwd != "" {
 		cmd.Dir = o.abs(opts.Cwd)
@@ -152,7 +152,7 @@ func (l *limitBuffer) Write(p []byte) (int, error) {
 }
 
 // launch starts cmd and registers the process.
-func (o *pluginOS) launch(argv []string, opts plugin.ProcOptions, cmd *exec.Cmd) (*osProc, error) {
+func (o *pluginOS) launch(argv []string, opts hostos.ProcOptions, cmd *exec.Cmd) (*osProc, error) {
 	p := &osProc{os: o, cmd: cmd, opts: opts, quit: make(chan struct{}), done: make(chan struct{})}
 	p.wcond = sync.NewCond(&p.wmu)
 	if err := o.register(p); err != nil {
@@ -201,13 +201,13 @@ func (p *osProc) finish(waitErr error) {
 	p.wmu.Unlock()
 }
 
-// Run implements plugin.OS.
-func (o *pluginOS) Run(ctx context.Context, argv []string, opts plugin.ProcOptions) (plugin.ProcResult, error) {
+// Run implements hostos.OS.
+func (o *pluginOS) Run(ctx context.Context, argv []string, opts hostos.ProcOptions) (hostos.ProcResult, error) {
 	if len(argv) == 0 {
-		return plugin.ProcResult{}, pluginapi.Errf(pluginapi.CodeInvalid, "empty argv")
+		return hostos.ProcResult{}, pluginapi.Errf(pluginapi.CodeInvalid, "empty argv")
 	}
 	if err := ctxErr(ctx); err != nil {
-		return plugin.ProcResult{}, err
+		return hostos.ProcResult{}, err
 	}
 	cmd := o.command(argv, opts)
 	limit := opts.MaxOutput
@@ -226,7 +226,7 @@ func (o *pluginOS) Run(ctx context.Context, argv []string, opts plugin.ProcOptio
 	}
 	p, err := o.launch(argv, opts, cmd)
 	if err != nil {
-		return plugin.ProcResult{}, err
+		return hostos.ProcResult{}, err
 	}
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
@@ -242,7 +242,7 @@ func (o *pluginOS) Run(ctx context.Context, argv []string, opts plugin.ProcOptio
 	p.finish(werr)
 	close(p.done)
 	if cancelled {
-		return plugin.ProcResult{}, mapErr(ctx.Err(), argv[0])
+		return hostos.ProcResult{}, mapErr(ctx.Err(), argv[0])
 	}
 	res := p.res
 	res.Stdout, res.Stderr = stdout.buf.Bytes(), stderr.buf.Bytes()
@@ -250,8 +250,8 @@ func (o *pluginOS) Run(ctx context.Context, argv []string, opts plugin.ProcOptio
 	return res, nil
 }
 
-// Start implements plugin.OS.
-func (o *pluginOS) Start(ctx context.Context, argv []string, opts plugin.ProcOptions) (plugin.Proc, error) {
+// Start implements hostos.OS.
+func (o *pluginOS) Start(ctx context.Context, argv []string, opts hostos.ProcOptions) (hostos.Proc, error) {
 	if len(argv) == 0 {
 		return nil, pluginapi.Errf(pluginapi.CodeInvalid, "empty argv")
 	}
@@ -356,11 +356,11 @@ func (p *osProc) readLoop(r io.Reader, stderr bool) {
 	}
 }
 
-// PID implements plugin.Proc.
+// PID implements hostos.Proc.
 func (p *osProc) PID() int { return p.cmd.Process.Pid }
 
-// Output implements plugin.Proc.
-func (p *osProc) Output(ctx context.Context) (plugin.ProcChunk, bool) {
+// Output implements hostos.Proc.
+func (p *osProc) Output(ctx context.Context) (hostos.ProcChunk, bool) {
 	p.omu.Lock()
 	defer p.omu.Unlock()
 	var first osChunk
@@ -370,11 +370,11 @@ func (p *osProc) Output(ctx context.Context) (plugin.ProcChunk, bool) {
 		select {
 		case c, ok := <-p.out:
 			if !ok {
-				return plugin.ProcChunk{}, false
+				return hostos.ProcChunk{}, false
 			}
 			first = c
 		case <-ctx.Done():
-			return plugin.ProcChunk{}, false
+			return hostos.ProcChunk{}, false
 		}
 	}
 	data := first.data
@@ -400,20 +400,20 @@ func (p *osProc) Output(ctx context.Context) (plugin.ProcChunk, bool) {
 			}
 		}
 	}
-	return plugin.ProcChunk{Stderr: first.stderr, Data: data}, true
+	return hostos.ProcChunk{Stderr: first.stderr, Data: data}, true
 }
 
-// Wait implements plugin.Proc.
-func (p *osProc) Wait(ctx context.Context) (plugin.ProcResult, error) {
+// Wait implements hostos.Proc.
+func (p *osProc) Wait(ctx context.Context) (hostos.ProcResult, error) {
 	select {
 	case <-p.done:
 		return p.res, nil
 	case <-ctx.Done():
-		return plugin.ProcResult{}, mapErr(ctx.Err(), "")
+		return hostos.ProcResult{}, mapErr(ctx.Err(), "")
 	}
 }
 
-// Write implements plugin.Proc: it queues data for the writer goroutine and never blocks.
+// Write implements hostos.Proc: it queues data for the writer goroutine and never blocks.
 func (p *osProc) Write(data []byte) error {
 	p.wmu.Lock()
 	defer p.wmu.Unlock()
@@ -431,7 +431,7 @@ func (p *osProc) Write(data []byte) error {
 	return nil
 }
 
-// CloseStdin implements plugin.Proc: the queue is written, then the pipe closes.
+// CloseStdin implements hostos.Proc: the queue is written, then the pipe closes.
 func (p *osProc) CloseStdin() {
 	p.wmu.Lock()
 	p.wclosing = true
@@ -464,7 +464,7 @@ func (p *osProc) writeLoop() {
 	_ = p.stdin.Close()
 }
 
-// Kill implements plugin.Proc.
+// Kill implements hostos.Proc.
 func (p *osProc) Kill(signal string) error {
 	if p.exited.Load() {
 		return pluginapi.Errf(pluginapi.CodeClosed, "process has exited")
@@ -496,7 +496,7 @@ func (p *osProc) killGroupAfterGrace() {
 	_ = signalProc(p.cmd.Process, "KILL")
 }
 
-// Terminate implements plugin.Proc.
+// Terminate implements hostos.Proc.
 func (p *osProc) Terminate(grace time.Duration) {
 	p.termOnce.Do(func() {
 		close(p.quit)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/plugin"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -45,7 +46,7 @@ func (d disk) open(dir string) (fs.FS, func(), error) {
 
 // memOS is an OS that keeps files in memory (plugin-state.json) and counts writes.
 type memOS struct {
-	plugin.NopOS
+	hostos.NopOS
 	mu       sync.Mutex
 	files    map[string][]byte
 	writes   int
@@ -56,7 +57,7 @@ type memOS struct {
 	config   string // Dirs().Config: where plugin-data/<name>/state.json lives ("" none)
 }
 
-func (m *memOS) Dirs() plugin.Dirs { return plugin.Dirs{Config: m.config} }
+func (m *memOS) Dirs() hostos.Dirs { return hostos.Dirs{Config: m.config} }
 
 func newMemOS() *memOS { return &memOS{files: map[string][]byte{}} }
 
@@ -73,7 +74,7 @@ func (m *memOS) ReadFile(_ context.Context, path string, max int64) ([]byte, err
 	return append([]byte(nil), data...), nil
 }
 
-func (m *memOS) WriteFile(_ context.Context, path string, data []byte, o plugin.WriteOptions) error {
+func (m *memOS) WriteFile(_ context.Context, path string, data []byte, o hostos.WriteOptions) error {
 	m.mu.Lock()
 	m.inflight++
 	m.maxIn = max(m.maxIn, m.inflight)

@@ -20,6 +20,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/lsp/manager"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -38,29 +39,29 @@ func New(servers map[string]config.LSPServer) tui.LSPSession {
 	if len(servers) == 0 {
 		return nil
 	}
-	cfg := make(map[string]lsp.ServerConfig, len(servers))
+	cfg := make(map[string]manager.ServerConfig, len(servers))
 	for lang, s := range servers {
-		cfg[lang] = lsp.ServerConfig{Command: []string{s.Command}, Args: slices.Clone(s.Args)}
+		cfg[lang] = manager.ServerConfig{Command: []string{s.Command}, Args: slices.Clone(s.Args)}
 	}
-	return &lspPort{servers: cfg, managers: make(map[string]*lsp.Manager), docs: make(map[string]lspDocRec)}
+	return &lspPort{servers: cfg, managers: make(map[string]*manager.Manager), docs: make(map[string]lspDocRec)}
 }
 
-// lspPort is the tui.LSPSession over the language servers. It keeps one lsp.Manager
+// lspPort is the tui.LSPSession over the language servers. It keeps one manager.Manager
 // per workspace root, created on the first use of the root. It also keeps the
 // text of each open document, which converts the positions of the protocol to rune
 // columns. Its methods may block on a server, so the root calls them only from
 // commands.
 type lspPort struct {
-	servers map[string]lsp.ServerConfig // by language ID: the servers that start on their own; read only after construction
+	servers map[string]manager.ServerConfig // by language ID: the servers that start on their own; read only after construction
 	// startable is every server that can run, the ones in servers and the ones that only
 	// start by hand. Nil in a port built from servers alone.
-	startable map[string]lsp.ServerConfig
+	startable map[string]manager.ServerConfig
 	info      map[string]tui.LSPServerInfo // what the config does with each language; read only too
 
 	mu       sync.Mutex
 	root     string
-	managers map[string]*lsp.Manager // by root
-	docs     map[string]lspDocRec    // by path: the documents the port has open
+	managers map[string]*manager.Manager // by root
+	docs     map[string]lspDocRec        // by path: the documents the port has open
 }
 
 // lspDocRec is one open document: the root whose manager holds it, its language
@@ -87,7 +88,7 @@ func (p *lspPort) Supports(lang string) bool {
 
 // runnable is the servers the managers can start: all of startable, or the servers that start
 // on their own when the port has no other.
-func (p *lspPort) runnable() map[string]lsp.ServerConfig {
+func (p *lspPort) runnable() map[string]manager.ServerConfig {
 	if p.startable != nil {
 		return p.startable
 	}
@@ -116,7 +117,7 @@ func (p *lspPort) Open(path, lang, text string) error {
 func (p *lspPort) Change(path, text string) error {
 	rec, mgr, ok := p.lookup(path)
 	if !ok || mgr == nil {
-		return fmt.Errorf("%w: %s", lsp.ErrNotOpen, path)
+		return fmt.Errorf("%w: %s", manager.ErrNotOpen, path)
 	}
 	p.setDoc(path, lspDocRec{root: rec.root, lang: rec.lang, text: text, lines: newTextLines(text)})
 	return mgr.Change(path, text)
@@ -245,7 +246,7 @@ const maxRequestResult = 4 << 20
 func (p *lspPort) Request(path, method string, params any) (any, error) {
 	c, _, err := p.client(path)
 	if err != nil {
-		if errors.Is(err, lsp.ErrNotOpen) {
+		if errors.Is(err, manager.ErrNotOpen) {
 			return nil, pluginapi.Errf(pluginapi.CodeNotFound, "%v", err)
 		}
 		return nil, err
@@ -273,7 +274,7 @@ func (p *lspPort) Request(path, method string, params any) (any, error) {
 func (p *lspPort) Restart() error {
 	p.mu.Lock()
 	mgrs := slices.Collect(maps.Values(p.managers))
-	p.managers = make(map[string]*lsp.Manager)
+	p.managers = make(map[string]*manager.Manager)
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)
 	defer cancel()
@@ -288,7 +289,7 @@ func (p *lspPort) Restart() error {
 func (p *lspPort) Stop() error {
 	p.mu.Lock()
 	mgrs := slices.Collect(maps.Values(p.managers))
-	p.managers = make(map[string]*lsp.Manager)
+	p.managers = make(map[string]*manager.Manager)
 	p.docs = make(map[string]lspDocRec)
 	p.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), lspStopTimeout)
@@ -343,7 +344,7 @@ func (p *lspPort) call(path string, at buffer.Pos, fn func(context.Context, *lsp
 func (p *lspPort) client(path string) (*lsp.Client, lspDocRec, error) {
 	rec, ok := p.doc(path)
 	if !ok {
-		return nil, lspDocRec{}, fmt.Errorf("%w: %s", lsp.ErrNotOpen, path)
+		return nil, lspDocRec{}, fmt.Errorf("%w: %s", manager.ErrNotOpen, path)
 	}
 	mgr := p.managerFor(rec.root)
 	if c, ok := mgr.ClientFor(path); ok {
@@ -373,12 +374,12 @@ func (p *lspPort) textOf(path string) string {
 }
 
 // managerFor returns the manager of root, creating it on first use.
-func (p *lspPort) managerFor(root string) *lsp.Manager {
+func (p *lspPort) managerFor(root string) *manager.Manager {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	mgr, ok := p.managers[root]
 	if !ok {
-		mgr = lsp.NewManager(root, p.runnable())
+		mgr = manager.NewManager(root, p.runnable())
 		p.managers[root] = mgr
 	}
 	return mgr
@@ -394,7 +395,7 @@ func (p *lspPort) doc(path string) (lspDocRec, bool) {
 
 // lookup returns the record of the open document at path and the manager of its
 // root. mgr is nil when the root has no manager, which happens after a restart.
-func (p *lspPort) lookup(path string) (rec lspDocRec, mgr *lsp.Manager, ok bool) {
+func (p *lspPort) lookup(path string) (rec lspDocRec, mgr *manager.Manager, ok bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	rec, ok = p.docs[path]
