@@ -1,9 +1,11 @@
 package lsphost
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -17,14 +19,22 @@ import (
 )
 
 // lspConfig is the default config with the lsp parts of a user file laid on it.
+// Each language gets one server; a test that needs several builds cfg.LSP itself.
 func lspConfig(servers map[string]config.LSPServer, disabled map[string]bool) config.Config {
 	cfg := config.Defaults()
-	cfg.LSP, cfg.LSPDisabled = servers, disabled
+	if servers != nil {
+		cfg.LSP = make(map[string][]config.LSPServer, len(servers))
+		for lang, s := range servers {
+			cfg.LSP[lang] = []config.LSPServer{s}
+		}
+	}
+	cfg.LSPDisabled = disabled
 	return cfg
 }
 
 func TestBuiltInServersNeedNoConfig(t *testing.T) {
-	servers, info := lspServers(config.Defaults())
+	plan := lspPlanFor(config.Defaults())
+	servers, info := plan.servers, plan.info
 	tests := []struct {
 		lang, command string
 		args          []string
@@ -42,10 +52,11 @@ func TestBuiltInServersNeedNoConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.lang, func(t *testing.T) {
-			sc, ok := servers[tt.lang]
-			if !ok {
+			list, ok := servers[tt.lang]
+			if !ok || len(list) == 0 {
 				t.Fatalf("no server for %q", tt.lang)
 			}
+			sc := list[0]
 			if sc.Command[0] != tt.command || !slices.Equal(sc.Args, tt.args) {
 				t.Errorf("server = %v %v, want %s %v", sc.Command, sc.Args, tt.command, tt.args)
 			}
@@ -54,36 +65,41 @@ func TestBuiltInServersNeedNoConfig(t *testing.T) {
 			}
 		})
 	}
-	if sc := servers["c++"]; sc.LanguageID != "cpp" {
+	if sc := servers["c++"][0]; sc.LanguageID != "cpp" {
 		t.Errorf("c++ languageId = %q, want cpp", sc.LanguageID)
 	}
 }
 
 func TestManualServersWaitForTheConfig(t *testing.T) {
-	servers, info := lspServers(config.Defaults())
+	plan := lspPlanFor(config.Defaults())
+	servers, info := plan.servers, plan.info
 	for _, lang := range []string{"odin", "gdscript"} {
-		if _, ok := servers[lang]; ok {
+		if plan.auto[lang] {
 			t.Errorf("%s runs without being turned on", lang)
+		}
+		if len(servers[lang]) == 0 {
+			t.Errorf("%s cannot be started by hand", lang)
 		}
 		if info[lang].State != tui.LSPServerManual {
 			t.Errorf("%s state = %v, want manual", lang, info[lang].State)
 		}
 	}
 	// "enabled": true without a command runs the built-in program.
-	servers, info = lspServers(lspConfig(map[string]config.LSPServer{"odin": {}}, nil))
-	if sc, ok := servers["odin"]; !ok || sc.Command[0] != "ols" || info["odin"].State != tui.LSPServerOn {
-		t.Errorf("odin turned on: server %v ok %v info %+v, want ols running", sc, ok, info["odin"])
+	plan = lspPlanFor(lspConfig(map[string]config.LSPServer{"odin": {}}, nil))
+	servers, info = plan.servers, plan.info
+	if list, ok := servers["odin"]; !ok || len(list) == 0 || list[0].Command[0] != "ols" || info["odin"].State != tui.LSPServerOn {
+		t.Errorf("odin turned on: server %v ok %v info %+v, want ols running", list, ok, info["odin"])
 	}
 }
 
 func TestUserEntriesOverrideTheTable(t *testing.T) {
-	servers, _ := lspServers(lspConfig(map[string]config.LSPServer{
+	servers := lspPlanFor(lspConfig(map[string]config.LSPServer{
 		"go":      {Command: "my-gopls", Args: []string{"-remote=auto"}},
 		"python":  {Command: "pyright-langserver", Args: []string{"--stdio"}},
 		"cpp":     {Command: "ccls"},
 		"nim":     {Args: []string{"--x"}}, // args only: keep the built-in program
 		"newlang": {Command: "newls"},
-	}, nil))
+	}, nil)).servers
 	tests := []struct {
 		lang    string
 		command string
@@ -99,40 +115,45 @@ func TestUserEntriesOverrideTheTable(t *testing.T) {
 		{"rust", "rust-analyzer", nil, true}, // untouched
 	}
 	for _, tt := range tests {
-		sc, ok := servers[tt.lang]
-		if !ok || sc.Command[0] != tt.command || !slices.Equal(sc.Args, tt.args) || (sc.Install != "") != tt.install {
-			t.Errorf("%s: server %+v ok %v, want %s %v install hint %v", tt.lang, sc, ok, tt.command, tt.args, tt.install)
+		list, ok := servers[tt.lang]
+		if !ok || len(list) == 0 {
+			t.Errorf("%s: no server", tt.lang)
+			continue
+		}
+		sc := list[0]
+		if sc.Command[0] != tt.command || !slices.Equal(sc.Args, tt.args) || (sc.Install != "") != tt.install {
+			t.Errorf("%s: server %+v, want %s %v install hint %v", tt.lang, sc, tt.command, tt.args, tt.install)
 		}
 	}
 }
 
 func TestUserCanSwitchServersOff(t *testing.T) {
 	// One language off by its entry.
-	servers, info := lspServers(lspConfig(nil, map[string]bool{"go": true}))
-	if _, ok := servers["go"]; ok {
-		t.Error("go still runs after its entry was disabled")
+	plan := lspPlanFor(lspConfig(nil, map[string]bool{"go": true}))
+	if plan.auto["go"] {
+		t.Error("go still starts after its entry was disabled")
 	}
-	if info["go"].State != tui.LSPServerOffLanguage {
-		t.Errorf("go state = %v, want off for the language", info["go"].State)
+	if plan.info["go"].State != tui.LSPServerOffLanguage {
+		t.Errorf("go state = %v, want off for the language", plan.info["go"].State)
 	}
-	if _, ok := servers["rust"]; !ok {
+	if !plan.auto["rust"] {
 		t.Error("disabling go turned rust off")
 	}
 	// A language off under its alias.
-	servers, _ = lspServers(lspConfig(nil, map[string]bool{"c++": true}))
-	if _, ok := servers["cpp"]; ok {
-		t.Error("cpp still runs after c++ was disabled")
+	plan = lspPlanFor(lspConfig(nil, map[string]bool{"c++": true}))
+	if plan.auto["cpp"] {
+		t.Error("cpp still starts after c++ was disabled")
 	}
 	// All off by the master switch, even with an entry.
 	cfg := lspConfig(map[string]config.LSPServer{"go": {Command: "gopls"}, "newlang": {Command: "x"}}, nil)
 	cfg.LSPEnabled = false
-	servers, info = lspServers(cfg)
-	if len(servers) != 0 {
-		t.Errorf("%d servers run with lsp_enabled false", len(servers))
+	plan = lspPlanFor(cfg)
+	if len(plan.auto) != 0 {
+		t.Errorf("%d servers start with lsp_enabled false", len(plan.auto))
 	}
 	for _, lang := range []string{"go", "rust", "newlang"} {
-		if info[lang].State != tui.LSPServerOffAll {
-			t.Errorf("%s state = %v, want off for all", lang, info[lang].State)
+		if plan.info[lang].State != tui.LSPServerOffAll {
+			t.Errorf("%s state = %v, want off for all", lang, plan.info[lang].State)
 		}
 	}
 }
@@ -144,7 +165,7 @@ func TestOpeningWithAMissingProgramGivesTheInstallHint(t *testing.T) {
 	port := NewFor(cfg)
 	dir := t.TempDir()
 	port.SetRoot(dir)
-	err := port.Open(filepath.Join(dir, "a.go"), "go", "package a")
+	_, err := port.Open(filepath.Join(dir, "a.go"), "go", "package a")
 	var ue *tui.LSPUnavailableError
 	if !errors.As(err, &ue) {
 		t.Fatalf("Open error = %v, want a *tui.LSPUnavailableError", err)
@@ -168,7 +189,7 @@ func TestOpeningWithAServerThatDiesNamesTheCommandAndItsOutput(t *testing.T) {
 	port := New(map[string]config.LSPServer{"go": {Command: exe, Args: []string{"-test.run=^TestFakeLSPServerProcess$"}}})
 	dir := t.TempDir()
 	port.SetRoot(dir)
-	err = port.Open(filepath.Join(dir, "a.go"), "go", "package a")
+	_, err = port.Open(filepath.Join(dir, "a.go"), "go", "package a")
 	var ue *tui.LSPUnavailableError
 	if !errors.As(err, &ue) || ue.Missing {
 		t.Fatalf("Open error = %v, want an unavailable server that is not missing", err)
@@ -214,8 +235,8 @@ func TestOpenLanguageTellsTsxFromTypeScript(t *testing.T) {
 			t.Errorf("openLanguage(%q, %q) = %q, want %q", tt.path, tt.lang, got, tt.want)
 		}
 	}
-	servers, _ := lspServers(config.Defaults())
-	if got := servers["tsx"].LanguageID; got != "typescriptreact" {
+	plan := lspPlanFor(config.Defaults())
+	if got := plan.servers["tsx"][0].LanguageID; got != "typescriptreact" {
 		t.Errorf("tsx languageId = %q, want typescriptreact", got)
 	}
 }
@@ -257,11 +278,11 @@ func TestProjectConfigCannotChooseTheProgram(t *testing.T) {
 	if len(diags) != 2 {
 		t.Fatalf("diagnostics = %v, want one for each refused entry", diags)
 	}
-	servers, _ := lspServers(cfg)
-	if sc := servers["go"]; sc.Command[0] != "gopls" || len(sc.Args) != 0 {
+	plan := lspPlanFor(cfg)
+	if sc := plan.servers["go"][0]; sc.Command[0] != "gopls" || len(sc.Args) != 0 {
 		t.Errorf("go server = %v %v, want the built-in gopls", sc.Command, sc.Args)
 	}
-	if _, ok := servers["newlang"]; ok {
+	if list, ok := plan.servers["newlang"]; ok && len(list) > 0 {
 		t.Error("a language that only the project names runs its program")
 	}
 }
@@ -284,24 +305,24 @@ func TestDormantAndSwitchedOffServersCanBeStartedByHand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := tt.cfg()
-			servers, info := lspServers(cfg)
-			if _, ok := servers[tt.lang]; ok {
+			plan := lspPlanFor(cfg)
+			if plan.auto[tt.lang] {
 				t.Fatalf("%s starts on its own", tt.lang)
 			}
-			if info[tt.lang].State != tt.state || info[tt.lang].Command == "" {
-				t.Fatalf("info = %+v, want state %v and the program named", info[tt.lang], tt.state)
+			if plan.info[tt.lang].State != tt.state || plan.info[tt.lang].Command == "" {
+				t.Fatalf("info = %+v, want state %v and the program named", plan.info[tt.lang], tt.state)
 			}
 			port := NewFor(cfg).(*lspPort)
 			if port.Supports(tt.lang) {
 				t.Errorf("Supports(%s) is true, but the server does not start on its own", tt.lang)
 			}
-			if _, ok := port.runnable()[tt.lang]; !ok {
+			if list := port.servers[tt.lang]; len(list) == 0 {
 				t.Errorf("the manager cannot start %s by hand", tt.lang)
 			}
 		})
 	}
 	// A language with no server at all cannot be started.
-	if _, ok := NewFor(config.Defaults()).(*lspPort).runnable()["text"]; ok {
+	if list := NewFor(config.Defaults()).(*lspPort).servers["text"]; len(list) > 0 {
 		t.Error("plain text can be started")
 	}
 }
@@ -345,14 +366,15 @@ func TestOpenRunsTheServerInTheProjectRootOfTheFile(t *testing.T) {
 	apptest.Must(t, err)
 	t.Setenv(fakeLSPEnv, "1")
 	port := NewFor(config.Defaults()).(*lspPort)
-	port.servers = map[string]manager.ServerConfig{"go": {
-		Command: []string{exe}, Args: []string{"-test.run=^TestFakeLSPServerProcess$"}, RootMarkers: []string{"go.mod"},
-	}}
-	port.startable = nil
+	port.servers = map[string][]manager.ServerConfig{"go": {{
+		Command: []string{exe}, Args: []string{"-test.run=^TestFakeLSPServerProcess$"}, RootMarkers: []string{"go.mod"}, AutoStart: true,
+	}}}
+	port.auto = map[string]bool{"go": true}
+	port.startable = map[string]bool{"go": true}
 	port.SetRoot(ws)
 	t.Cleanup(func() { _ = port.Stop() })
 	path := filepath.Join(svc, "a.go")
-	if err := port.Open(path, "go", "package a\n"); err != nil {
+	if _, err := port.Open(path, "go", "package a\n"); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	if rec, _ := port.doc(path); rec.root != svc {
@@ -360,7 +382,7 @@ func TestOpenRunsTheServerInTheProjectRootOfTheFile(t *testing.T) {
 	}
 	// A file without a go.mod above it uses the workspace root.
 	other := filepath.Join(ws, "b.go")
-	if err := port.Open(other, "go", "package b\n"); err != nil {
+	if _, err := port.Open(other, "go", "package b\n"); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	if rec, _ := port.doc(other); rec.root != ws {
@@ -404,5 +426,45 @@ func TestOpenLanguageRoutesAHeaderWithACppSibling(t *testing.T) {
 				t.Errorf("openLanguage(%s, %q) = %q, want %q", tt.file, tt.lang, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestLSPPlanCarriesServerSettings checks the config-to-manager plumbing: a user
+// entry's env, initialization options and feature filter reach the manager's
+// server, and universal_lsp becomes the universal list.
+func TestLSPPlanCarriesServerSettings(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.LSP = map[string][]config.LSPServer{
+		"go": {{
+			Command:               "my-gopls",
+			Env:                   map[string]string{"GOFLAGS": "-mod=mod"},
+			InitializationOptions: json.RawMessage(`{"usePlaceholders":true}`),
+			OnlyFeatures:          []string{"diagnostics", "hover"},
+			LanguageIDOverrides:   map[string]string{"go": "golang"},
+			RootMarkers:           []string{"go.mod"},
+		}},
+	}
+	cfg.UniversalLSP = map[string][]config.LSPServer{
+		"spell": {{Command: "harper-ls", Args: []string{"--stdio"}}},
+	}
+	plan := lspPlanFor(cfg)
+	server := plan.servers["go"][0]
+	if server.Command[0] != "my-gopls" || !server.AutoStart {
+		t.Errorf("go server = %+v, want the user program, auto-starting", server)
+	}
+	if !reflect.DeepEqual(server.Env, map[string]string{"GOFLAGS": "-mod=mod"}) {
+		t.Errorf("env = %v", server.Env)
+	}
+	if string(server.InitializationOptions) != `{"usePlaceholders":true}` {
+		t.Errorf("initialization options = %s", server.InitializationOptions)
+	}
+	if !reflect.DeepEqual(server.OnlyFeatures, []string{"diagnostics", "hover"}) {
+		t.Errorf("only features = %v", server.OnlyFeatures)
+	}
+	if !reflect.DeepEqual(server.LanguageIDOverrides, map[string]string{"go": "golang"}) {
+		t.Errorf("language id overrides = %v", server.LanguageIDOverrides)
+	}
+	if len(plan.universal) != 1 || plan.universal[0].Command[0] != "harper-ls" {
+		t.Errorf("universal = %+v, want harper-ls", plan.universal)
 	}
 }

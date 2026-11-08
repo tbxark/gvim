@@ -528,23 +528,23 @@ func TestLoadLSPServers(t *testing.T) {
 	tests := []struct {
 		name     string
 		body     string
-		want     map[string]LSPServer
+		want     map[string][]LSPServer
 		wantDiag string // part of the diagnostic message for key lsp; empty when none
 	}{
 		{
 			name: "command and args",
 			body: `{"lsp": {"go": {"command": "gopls", "args": ["-remote=auto"]}}}`,
-			want: map[string]LSPServer{"go": {Command: "gopls", Args: []string{"-remote=auto"}}},
+			want: map[string][]LSPServer{"go": {{Command: "gopls", Args: []string{"-remote=auto"}}}},
 		},
 		{
 			name: "args are optional",
 			body: `{"lsp": {"rust": {"command": "rust-analyzer"}}}`,
-			want: map[string]LSPServer{"rust": {Command: "rust-analyzer"}},
+			want: map[string][]LSPServer{"rust": {{Command: "rust-analyzer"}}},
 		},
 		{
 			name: "empty map starts no server",
 			body: `{"lsp": {}}`,
-			want: map[string]LSPServer{},
+			want: map[string][]LSPServer{},
 		},
 		{
 			name:     "missing command",
@@ -608,20 +608,20 @@ func TestLoadLSPProjectLayerCannotRunAProgram(t *testing.T) {
 	tests := []struct {
 		name         string
 		project      string
-		want         map[string]LSPServer
+		want         map[string][]LSPServer
 		wantDisabled map[string]bool
 		wantDiags    int
 	}{
 		{"a command is refused", `{"lsp": {"python": {"command": "touch", "args": ["/tmp/pwned"]}}}`,
-			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}}, nil, 1},
+			map[string][]LSPServer{"go": {{Command: "my-gopls"}}, "rust": {{Command: "ra", Args: []string{"-x"}}}}, nil, 1},
 		{"a command cannot replace the user's", `{"lsp": {"go": {"command": "touch"}}}`,
-			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}}, nil, 1},
+			map[string][]LSPServer{"go": {{Command: "my-gopls"}}, "rust": {{Command: "ra", Args: []string{"-x"}}}}, nil, 1},
 		{"args alone are refused too", `{"lsp": {"rust": {"args": ["-c", "x"], "enabled": true}}}`,
-			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}}, nil, 1},
+			map[string][]LSPServer{"go": {{Command: "my-gopls"}}, "rust": {{Command: "ra", Args: []string{"-x"}}}}, nil, 1},
 		{"a project can switch a language off", `{"lsp": {"go": {"enabled": false}}}`,
-			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}}, map[string]bool{"go": true}, 0},
+			map[string][]LSPServer{"go": {{Command: "my-gopls"}}, "rust": {{Command: "ra", Args: []string{"-x"}}}}, map[string]bool{"go": true}, 0},
 		{"a project can turn a built-in server on", `{"lsp": {"odin": {"enabled": true}}}`,
-			map[string]LSPServer{"go": {Command: "my-gopls"}, "rust": {Command: "ra", Args: []string{"-x"}}, "odin": {}}, nil, 0},
+			map[string][]LSPServer{"go": {{Command: "my-gopls"}}, "rust": {{Command: "ra", Args: []string{"-x"}}}, "odin": {{}}}, nil, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -656,9 +656,9 @@ func TestLoadLSPAutoStartAndRootMarkers(t *testing.T) {
 	if len(diags) != 0 {
 		t.Fatalf("diags = %v", diags)
 	}
-	want := map[string]LSPServer{
-		"go":   {Dormant: true},
-		"rust": {Command: "ra", RootMarkers: []string{"Cargo.toml", ".git"}},
+	want := map[string][]LSPServer{
+		"go":   {{Dormant: true}},
+		"rust": {{Command: "ra", RootMarkers: []string{"Cargo.toml", ".git"}}},
 	}
 	if !reflect.DeepEqual(cfg.LSP, want) {
 		t.Fatalf("LSP = %+v, want %+v", cfg.LSP, want)

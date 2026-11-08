@@ -1,8 +1,23 @@
-// Package manager runs one language server per language and tracks the documents
-// open on each. It is the session layer over the client in package lsp: it starts
-// the process, runs the initialize handshake, numbers document versions, and
-// replaces a server whose connection has ended. It also holds the built-in
-// server catalogue (Spec, Defaults, DefaultFor).
+// Package manager runs the language servers of a workspace. It is the session
+// layer over the clients in package lsp: it starts processes, runs the initialize
+// handshake, keeps the servers of one language and the universal servers, routes
+// a feature request to the servers that can serve it, and tracks the documents
+// open on each. It also holds the built-in server catalogue (Spec, Defaults,
+// DefaultFor).
+//
+// # Multi-server routing
+//
+// A language may have several servers, and universal servers serve every
+// language. A running server is a *Handle carrying its name, its feature filter
+// (from only_features/except_features) and the capabilities its initialize result
+// advertised; a universal handle serves every language. Merged features
+// (diagnostics, completion, code actions, symbols) fan out to every eligible
+// handle; exclusive features (hover, definition, implementation, references,
+// format, rename, signature help, inlay hints, folding ranges, semantic tokens,
+// document highlights) go to the first eligible handle in config order, and an
+// empty answer from it is final. A handle whose initialize has not finished
+// advertises nothing, so no request is routed to a server of unknown
+// capabilities.
 package manager
 
 import (
@@ -10,19 +25,28 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"go.lsp.dev/protocol"
+
 	"github.com/tbxark/gvim/lsp"
 )
 
-// ErrNoServer is returned by Manager.Open for a language with no ServerConfig.
+// ErrNoServer is returned by Manager.Open for a language that has no server, and
+// by the restart and stop calls for a server that is not configured.
 var ErrNoServer = errors.New("lsp: no server configured for language")
 
 // ErrNotOpen is returned by Manager.Change for a path that is not open.
 var ErrNotOpen = errors.New("lsp: document is not open")
+
+// ErrStopped is returned by Manager.Open for a language whose servers the user
+// stopped or muted: the document is not opened until a manual restart. It is not
+// a start failure, so the editor reports it as a notice and keeps its state.
+var ErrStopped = errors.New("lsp: language server stopped")
 
 // errServerGone is returned when the server a request was using was shut down,
 // or replaced, while the request was running.
@@ -33,8 +57,8 @@ var errServerGone = errors.New("lsp: server stopped during the request")
 // Every step gets its own deadline of this length.
 const managerTimeout = 10 * time.Second
 
-// ServerConfig says how to launch the language server for one language. The
-// process is Command[0] and its arguments are Command[1:] followed by Args.
+// ServerConfig says how to launch one language server. The process is Command[0]
+// and its arguments are Command[1:] followed by Args.
 type ServerConfig struct {
 	Command []string
 	Args    []string
@@ -45,24 +69,185 @@ type ServerConfig struct {
 	// LanguageID is the languageId that didOpen carries, when it differs from the language
 	// the server is keyed by (the "tsx" server of TypeScript says "typescriptreact").
 	LanguageID string
+	// LanguageIDOverrides maps a file extension, without the dot, to the languageId
+	// didOpen sends for it (Fresh's language_id_overrides).
+	LanguageIDOverrides map[string]string
 	// RootMarkers are the names (or globs) of the files that mark a project root. They are
 	// for the caller that picks the workspace root of a file; the Manager does not read them.
 	RootMarkers []string
+	// Env holds extra environment variables for the process, laid over the parent's.
+	Env map[string]string
+	// InitializationOptions is the JSON handed to initialize as initializationOptions.
+	InitializationOptions protocol.LSPAny
+	// OnlyFeatures and ExceptFeatures build the server's feature filter. OnlyFeatures
+	// wins when both are set. The names are Fresh's LspFeature names.
+	OnlyFeatures   []string
+	ExceptFeatures []string
+	// AutoStart says whether the server starts when a document of its language opens.
+	// A manual start (Start/Restart LSP Server) starts it anyway.
+	AutoStart bool
 }
 
-// Manager runs one language server per language ID and tracks the documents
-// open on each. A server starts on the first Open for its language and keeps
-// running until Shutdown. Methods are safe for concurrent use. They can block on
-// server I/O, so call them from a command, not from a UI update.
+// CommandLine returns the program and arguments the server runs with.
+func (c ServerConfig) CommandLine() []string {
+	out := make([]string, 0, len(c.Command)+len(c.Args))
+	out = append(out, c.Command...)
+	out = append(out, c.Args...)
+	return out
+}
+
+// DisplayName is what messages and the status popup call the server.
+func (c ServerConfig) DisplayName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	if len(c.Command) > 0 {
+		return path.Base(c.Command[0])
+	}
+	return "language server"
+}
+
+// LanguageIDFor returns the languageId didOpen sends for the file at path: a
+// language_id_overrides entry for its extension wins, then the server's own
+// languageId, then the detected language.
+func (c ServerConfig) LanguageIDFor(file, language string) string {
+	if c.LanguageIDOverrides != nil {
+		if ext := strings.TrimPrefix(path.Ext(file), "."); ext != "" {
+			if id, ok := c.LanguageIDOverrides[ext]; ok && id != "" {
+				return id
+			}
+		}
+	}
+	if c.LanguageID != "" {
+		return c.LanguageID
+	}
+	return language
+}
+
+// ServerState is where a configured server stands.
+type ServerState int
+
+// The states of a configured server.
+const (
+	ServerStopped  ServerState = iota // not running: never started, stopped, or turned off
+	ServerStarting                    // a start is in flight
+	ServerRunning                     // the handshake finished and the server is live
+	ServerError                       // the last start failed; nothing runs
+)
+
+// ServerStatus is one configured server as the editor shows it: the status popup
+// lists these to offer a restart or a stop.
+type ServerStatus struct {
+	// Language is the language key the server is configured under, or "" for a
+	// universal server.
+	Language  string
+	Name      string
+	Command   []string
+	Install   string
+	Universal bool
+	AutoStart bool
+	State     ServerState
+	// Error is why the last start failed, when State is ServerError.
+	Error string
+}
+
+// Handle is one running language server. It is safe for concurrent use: the
+// manager guards the document set and the client is safe by itself.
+type Handle struct {
+	// key names the configured server: its language (empty for universal) and name.
+	key       string
+	id        uint64
+	language  string
+	universal bool
+	cfg       ServerConfig
+	client    *lsp.Client
+	filter    FeatureFilter
+	// docs holds the paths this server has been sent didOpen for.
+	docs map[string]bool
+}
+
+// Name is the server's display name.
+func (h *Handle) Name() string { return h.cfg.DisplayName() }
+
+// Client returns the connection to the server.
+func (h *Handle) Client() *lsp.Client { return h.client }
+
+// Universal reports whether the server serves every language.
+func (h *Handle) Universal() bool { return h.universal }
+
+// Language returns the language key the server is configured under; empty for a
+// universal server.
+func (h *Handle) Language() string { return h.language }
+
+// Can reports whether the server takes feature: its filter allows it and its
+// initialize result advertises it. A server whose initialize has not finished
+// takes nothing.
+func (h *Handle) Can(feature Feature) bool {
+	return h.filter.Allows(feature) && Capability(h.client.Capabilities(), feature)
+}
+
+// Allows reports whether the server's only/except filter lets feature through.
+func (h *Handle) Allows(feature Feature) bool { return h.filter.Allows(feature) }
+
+// Command is the program and arguments the server runs with.
+func (h *Handle) Command() []string { return h.cfg.CommandLine() }
+
+// Install is how to install the server, when it is missing.
+func (h *Handle) Install() string { return h.cfg.Install }
+
+// live reports whether the connection has not ended.
+func (h *Handle) live() bool {
+	select {
+	case <-h.client.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+// configured reports whether a language has any configured server, running or not.
+func (m *Manager) configured(language string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.servers[language]) > 0
+}
+
+// serverKey names one configured server.
+func serverKey(language, name string) string { return language + "\x00" + name }
+
+// openDoc is a document the Manager has sent didOpen for.
+type openDoc struct {
+	language string
+	uri      string
+	version  int32
+}
+
+// serverStart is a start of one server that is still running. A caller that needs
+// that server while it starts waits on done and shares the result.
+type serverStart struct {
+	done chan struct{}
+	h    *Handle
+	err  error
+}
+
+// Manager runs the language servers of one workspace root. A server starts on the
+// first Open of a document of its language (or the first document at all, for a
+// universal server) and keeps running until Shutdown. Methods are safe for
+// concurrent use. They can block on server I/O, so call them from a command, not
+// from a UI update.
 //
 // Every step with a server has a deadline. A write still blocked at its deadline
-// closes that server. A server whose connection has ended, because it exited or
-// its pipe broke, is replaced by the next request for its language. The
-// documents that server held are forgotten, so the caller must Open them again.
+// closes that server. A server whose connection has ended is replaced the next
+// time its language opens a document.
 type Manager struct {
-	rootURI string
-	servers map[string]ServerConfig
-	start   func(context.Context, lsp.Config) (*lsp.Client, error)
+	rootURI   string
+	servers   map[string][]ServerConfig // by language ID
+	universal []ServerConfig
+	start     func(context.Context, lsp.Config) (*lsp.Client, error)
+	// applyEdit answers a server's workspace/applyEdit request. It gets the
+	// language of the requesting server ("" for a universal one). It is read and
+	// set under mu.
+	applyEdit func(language string, params protocol.ApplyWorkspaceEditParams) bool
 	// timeout bounds each step. NewManager sets it to managerTimeout.
 	timeout time.Duration
 
@@ -75,59 +260,96 @@ type Manager struct {
 
 	// mu guards the fields below. It is held only to read or update them, never
 	// across a write or a server start.
-	mu      sync.Mutex
-	clients map[string]*lsp.Client  // by language ID
-	starts  map[string]*serverStart // by language ID, while a server is starting
-	docs    map[string]openDoc      // by file path
+	mu       sync.Mutex
+	handles  []*Handle
+	starting map[string]*serverStart
+	docs     map[string]*openDoc
+	// disabled holds the languages muted with SetLanguageEnabled: no server of
+	// theirs starts on its own.
+	disabled map[string]bool
+	// forced holds the languages started by hand: every configured server starts,
+	// whatever auto_start says.
+	forced map[string]bool
+	// stopped holds the servers the user stopped by hand, so an Open does not start
+	// them again until a manual restart.
+	stopped map[string]bool
+	// failures holds the message of the last failed start, by server key.
+	failures map[string]string
 	// epoch counts Shutdown calls, so that a server started across one is not kept.
-	epoch uint64
-}
-
-// openDoc is a document the Manager has sent didOpen for.
-type openDoc struct {
-	languageID string
-	uri        string
-	version    int32
-}
-
-// serverStart is a start of the server for one language that is still running. A
-// caller that needs that server while it starts waits on done and shares the result.
-type serverStart struct {
-	done chan struct{}
-	c    *lsp.Client
-	err  error
+	epoch  uint64
+	nextID uint64
 }
 
 // NewManager returns a Manager for the workspace at root, an absolute directory
-// path, or "" for none. It starts servers from servers. Nothing is started until
-// Open.
-func NewManager(root string, servers map[string]ServerConfig) *Manager {
+// path, or "" for none. It starts servers from servers, which maps a language ID
+// to its servers in config order, and universal to the servers that serve every
+// language. Nothing is started until Open or a manual start.
+func NewManager(root string, servers map[string][]ServerConfig, universal []ServerConfig) *Manager {
 	rootURI := ""
 	if root != "" {
 		rootURI = lsp.PathURI(root)
 	}
+	if servers == nil {
+		servers = make(map[string][]ServerConfig)
+	}
 	return &Manager{
-		rootURI: rootURI,
-		servers: servers,
-		start:   lsp.Start,
-		timeout: managerTimeout,
-		clients: make(map[string]*lsp.Client),
-		starts:  make(map[string]*serverStart),
-		docs:    make(map[string]openDoc),
+		rootURI:   rootURI,
+		servers:   servers,
+		universal: slices.Clone(universal),
+		start:     lsp.Start,
+		timeout:   managerTimeout,
+		starting:  make(map[string]*serverStart),
+		docs:      make(map[string]*openDoc),
+		disabled:  make(map[string]bool),
+		forced:    make(map[string]bool),
+		stopped:   make(map[string]bool),
+		failures:  make(map[string]string),
 	}
 }
 
-// Open sends didOpen for the document at path with its full text, starting and
-// initializing the server for languageID first if it is not running. It returns
-// ErrNoServer when languageID has no ServerConfig. Opening a path that is already
-// open closes the old document first.
-func (m *Manager) Open(path, languageID, text string) error {
-	c, err := m.serverFor(languageID)
-	if err != nil {
-		return err
+// SetApplyEdit installs the handler for a server's workspace/applyEdit request.
+// The manager hands it to every client it starts; the handler answers on the
+// client's read goroutine and must only enqueue the edit. Set it before the first
+// Open.
+func (m *Manager) SetApplyEdit(apply func(language string, params protocol.ApplyWorkspaceEditParams) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.applyEdit = apply
+}
+
+// applyEditHandler returns the handler for a server of language. m.mu must not be
+// held.
+func (m *Manager) applyEditHandler(language string) func(protocol.ApplyWorkspaceEditParams) bool {
+	m.mu.Lock()
+	apply := m.applyEdit
+	m.mu.Unlock()
+	if apply == nil {
+		return nil
 	}
-	if id := m.servers[languageID].LanguageID; id != "" {
-		languageID = id
+	return func(params protocol.ApplyWorkspaceEditParams) bool { return apply(language, params) }
+}
+
+// Open sends didOpen for the document at path with its full text, starting the
+// servers of languageID that should run first. It returns ErrNoServer when
+// languageID has no ServerConfig and no universal server serves it. Opening a path
+// that is already open closes the old document first.
+//
+// When several servers serve the language, every one of them is sent didOpen.
+// A server that fails to start is reported in the Manager's Servers state and
+// left out; Open fails only when no server could open the document.
+func (m *Manager) Open(path, languageID, text string) error {
+	// The starts run without the send lock: a start can take seconds, and a change
+	// or close of a document on another, running server must not wait for it.
+	hs, errs := m.ensureServers(languageID)
+	hs = append(hs, m.ensureUniversal()...)
+	if len(hs) == 0 {
+		if len(errs) > 0 {
+			return errors.Join(errs...)
+		}
+		if m.configured(languageID) {
+			return fmt.Errorf("%w: %s (run Start/Restart LSP Server)", ErrStopped, languageID)
+		}
+		return fmt.Errorf("%w: %q", ErrNoServer, languageID)
 	}
 
 	m.sendMu.Lock()
@@ -135,155 +357,449 @@ func (m *Manager) Open(path, languageID, text string) error {
 	if err := m.closeDoc(path); err != nil {
 		return err
 	}
+
 	docURI := lsp.PathURI(path)
-	err = m.step(context.Background(), c, func(ctx context.Context) error {
-		return c.DidOpen(ctx, docURI, languageID, 1, text)
-	})
-	if err != nil {
-		return err
+	var openErrs []error
+	opened := 0
+	for _, h := range hs {
+		id := h.cfg.LanguageIDFor(path, languageID)
+		err := m.step(context.Background(), h.client, func(ctx context.Context) error {
+			return h.client.DidOpen(ctx, docURI, id, 1, text)
+		})
+		if err != nil {
+			openErrs = append(openErrs, fmt.Errorf("%s: %w", h.Name(), err))
+			continue
+		}
+		m.mu.Lock()
+		if h.docs == nil {
+			h.docs = make(map[string]bool)
+		}
+		h.docs[path] = true
+		m.mu.Unlock()
+		opened++
+	}
+	if opened == 0 {
+		return errors.Join(append(errs, openErrs...)...)
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.clients[languageID] != c {
-		return errServerGone
-	}
-	m.docs[path] = openDoc{languageID: languageID, uri: docURI, version: 1}
+	m.docs[path] = &openDoc{language: languageID, uri: docURI, version: 1}
+	m.mu.Unlock()
 	return nil
 }
 
-// Change sends didChange with the full new text of the open document at path. It
-// returns ErrNotOpen when path is not open, which includes a path whose server
-// has exited.
+// Change sends didChange with the full new text of the open document at path to
+// every server that has it open. It returns ErrNotOpen when path is not open,
+// which includes a path whose servers have all exited.
 func (m *Manager) Change(path, text string) error {
 	m.sendMu.Lock()
 	defer m.sendMu.Unlock()
 
-	c, doc, err := m.advance(path)
-	if err != nil {
-		return err
-	}
-	return m.step(context.Background(), c, func(ctx context.Context) error {
-		return c.DidChange(ctx, doc.uri, doc.version, text)
-	})
-}
-
-// Close sends didClose for the document at path and forgets it. Closing a path
-// that is not open does nothing. The server keeps running; see Shutdown.
-func (m *Manager) Close(path string) error {
-	m.sendMu.Lock()
-	defer m.sendMu.Unlock()
-
-	return m.closeDoc(path)
-}
-
-// ClientFor returns the client whose server holds the open document at path. It
-// returns false when path is not open, or when that server has exited.
-func (m *Manager) ClientFor(path string) (*lsp.Client, bool) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	doc, ok := m.docs[path]
 	if !ok {
-		return nil, false
+		m.mu.Unlock()
+		return fmt.Errorf("%w: %s", ErrNotOpen, path)
 	}
-	return m.liveClientLocked(doc.languageID)
-}
-
-// Shutdown shuts down, exits and closes every running server, and forgets all
-// open documents. A later Open starts a server again. The returned error joins
-// the errors from all of the servers. Each request is bounded by ctx and by the
-// Manager's timeout, so Shutdown returns even when a server has stopped reading.
-func (m *Manager) Shutdown(ctx context.Context) error {
-	m.mu.Lock()
-	m.epoch++
-	clients := m.clients
-	m.clients = make(map[string]*lsp.Client)
-	m.starts = make(map[string]*serverStart)
-	m.docs = make(map[string]openDoc)
+	hs := m.openHandlesLocked(path)
+	if len(hs) == 0 {
+		delete(m.docs, path)
+		m.mu.Unlock()
+		return fmt.Errorf("%w: %s: its servers exited", ErrNotOpen, path)
+	}
+	doc.version++
+	version := doc.version
 	m.mu.Unlock()
 
 	var errs []error
-	for _, c := range clients {
-		errs = append(errs, m.shutDown(ctx, c))
+	for _, h := range hs {
+		err := m.step(context.Background(), h.client, func(ctx context.Context) error {
+			return h.client.DidChange(ctx, doc.uri, version, text)
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", h.Name(), err))
+		}
 	}
 	return errors.Join(errs...)
 }
 
-// shutDown sends shutdown and exit to c, then closes it.
-func (m *Manager) shutDown(ctx context.Context, c *lsp.Client) error {
-	err := m.step(ctx, c, c.Shutdown)
-	exitErr := m.step(ctx, c, c.Exit)
-	return errors.Join(err, exitErr, c.Close())
+// Close sends didClose for the document at path to every server that has it open,
+// and forgets it. Closing a path that is not open does nothing. The servers keep
+// running; see Shutdown.
+func (m *Manager) Close(path string) error {
+	m.sendMu.Lock()
+	defer m.sendMu.Unlock()
+	return m.closeDoc(path)
 }
 
-// serverFor returns the running server for languageID. If there is none, it starts
-// and initializes one, unless a start for languageID is already running: then it
-// waits for that start and shares its result. No lock is held across the start, so
-// ClientFor, Change, Close and Shutdown are not blocked by it.
-func (m *Manager) serverFor(languageID string) (*lsp.Client, error) {
+// closeDoc is Close without the send lock: Close and Open call it with sendMu
+// already held.
+func (m *Manager) closeDoc(path string) error {
 	m.mu.Lock()
-	if c, live := m.liveClientLocked(languageID); live {
-		m.mu.Unlock()
-		return c, nil
-	}
-	if s, ok := m.starts[languageID]; ok {
-		m.mu.Unlock()
-		<-s.done
-		return s.c, s.err
-	}
-	sc, ok := m.servers[languageID]
+	doc, ok := m.docs[path]
 	if !ok {
 		m.mu.Unlock()
-		return nil, fmt.Errorf("%w: %q", ErrNoServer, languageID)
+		return nil
 	}
-	s := &serverStart{done: make(chan struct{})}
-	m.starts[languageID] = s
+	delete(m.docs, path)
+	hs := m.openHandlesLocked(path)
+	m.mu.Unlock()
+
+	var errs []error
+	for _, h := range hs {
+		err := m.step(context.Background(), h.client, func(ctx context.Context) error {
+			return h.client.DidClose(ctx, doc.uri)
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", h.Name(), err))
+		}
+		m.mu.Lock()
+		delete(h.docs, path)
+		m.mu.Unlock()
+	}
+	return errors.Join(errs...)
+}
+
+// ClientFor returns a client whose server holds the open document at path. It
+// returns false when path is not open, or when no server for it is running.
+// It is the single-server view the plugin request uses; the request reaches the
+// first server of the document's language, then a universal server.
+func (m *Manager) ClientFor(path string) (*lsp.Client, bool) {
+	h, ok := m.HandleForPath(path)
+	if !ok {
+		return nil, false
+	}
+	return h.client, true
+}
+
+// HandleForPath returns the first live handle that has the document at path open:
+// a server of its language first, then a universal server.
+func (m *Manager) HandleForPath(path string) (*Handle, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc, ok := m.docs[path]
+	if !ok {
+		return nil, false
+	}
+	if h := m.firstOpenHandleLocked(path, doc.language, false); h != nil {
+		return h, true
+	}
+	if h := m.firstOpenHandleLocked(path, doc.language, true); h != nil {
+		return h, true
+	}
+	return nil, false
+}
+
+// DocumentVersion returns the version the Manager last sent for the open document
+// at path, and whether the document is open. A TextDocumentEdit carries a version
+// the server computed the edit against; the editor compares it with this one to
+// reject a stale edit.
+func (m *Manager) DocumentVersion(path string) (int32, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc, ok := m.docs[path]
+	if !ok {
+		return 0, false
+	}
+	return doc.version, true
+}
+
+// Servers returns every configured server, language-specific ones in language
+// order and universal ones last, with the state it is in. It starts nothing and
+// reads no file system, so the status popup can call it from a command cheaply.
+func (m *Manager) Servers() []ServerStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneLocked()
+
+	var out []ServerStatus
+	for _, language := range slices.Sorted(maps.Keys(m.servers)) {
+		for _, cfg := range m.servers[language] {
+			out = append(out, m.statusLocked(language, cfg))
+		}
+	}
+	for _, cfg := range m.universal {
+		out = append(out, m.statusLocked("", cfg))
+	}
+	return out
+}
+
+// statusLocked describes one configured server. m.mu must be held.
+func (m *Manager) statusLocked(language string, cfg ServerConfig) ServerStatus {
+	key := serverKey(language, cfg.DisplayName())
+	st := ServerStatus{
+		Language:  language,
+		Name:      cfg.DisplayName(),
+		Command:   cfg.CommandLine(),
+		Install:   cfg.Install,
+		Universal: language == "",
+		AutoStart: cfg.AutoStart,
+	}
+	switch {
+	case m.handleForKeyLocked(key) != nil:
+		st.State = ServerRunning
+	case m.starting[key] != nil:
+		st.State = ServerStarting
+	case m.failures[key] != "":
+		st.State, st.Error = ServerError, m.failures[key]
+	case m.disabled[language] || m.stopped[key]:
+		st.State = ServerStopped
+	}
+	return st
+}
+
+// RestartServer stops the named server and starts it again, whatever auto_start
+// or the mute says: a manual start overrides the switches, as in Fresh. An empty
+// name means the first configured server of the language. A universal server is
+// named with an empty language.
+func (m *Manager) RestartServer(language, name string) error {
+	language = strings.TrimSpace(language)
+	cfg, universal, ok := m.findConfig(language, name)
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrNoServer, language)
+	}
+	key := serverKey(language, cfg.DisplayName())
+	m.stopKey(key)
+
+	m.mu.Lock()
+	delete(m.stopped, key)
+	delete(m.failures, key)
+	if !universal {
+		m.forced[language] = true
+		delete(m.disabled, language)
+	}
 	epoch := m.epoch
 	m.mu.Unlock()
 
-	c, err := m.startServer(languageID, sc)
+	_, err := m.startServer(key, language, cfg, universal, epoch)
+	return err
+}
+
+// StopServer stops the named running server. It is not started again on the next
+// Open until a manual restart. An empty name means the first configured server of
+// the language.
+func (m *Manager) StopServer(language, name string) error {
+	language = strings.TrimSpace(language)
+	cfg, _, ok := m.findConfig(language, name)
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrNoServer, language)
+	}
+	key := serverKey(language, cfg.DisplayName())
+	m.stopKey(key)
+	m.mu.Lock()
+	m.stopped[key] = true
+	m.mu.Unlock()
+	return nil
+}
+
+// SetLanguageEnabled mutes or unmutes a language. A muted language starts no
+// server of its own, and the servers it has are stopped; a manual restart still
+// starts one. Universal servers are not affected. Muting is per workspace root
+// and lasts until the Manager is shut down.
+func (m *Manager) SetLanguageEnabled(language string, enabled bool) {
+	m.mu.Lock()
+	if enabled {
+		delete(m.disabled, language)
+		m.mu.Unlock()
+		return
+	}
+	m.disabled[language] = true
+	// Muting overrides an earlier manual start, which would otherwise keep
+	// starting the language's servers.
+	delete(m.forced, language)
+	var keys []string
+	for _, h := range m.handles {
+		if h.language == language && !h.universal {
+			keys = append(keys, h.key)
+		}
+	}
+	m.mu.Unlock()
+	for _, key := range keys {
+		m.stopKey(key)
+	}
+}
+
+// ForceLanguage marks language as started by hand: every configured server of it
+// starts at the next Open, whatever auto_start or the mute says. It starts nothing
+// now.
+func (m *Manager) ForceLanguage(language string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.forced[language] = true
+	delete(m.disabled, language)
+}
+
+// StartLanguage starts every configured server for language, whatever auto_start
+// or the mute says. It is the manual start of a whole language.
+func (m *Manager) StartLanguage(language string) error {
+	m.ForceLanguage(language)
+	_, errs := m.ensureServers(language)
+	return errors.Join(errs...)
+}
+
+// Handles returns the live handles that serve language: the servers of the
+// language first, then the universal servers, in handle order.
+func (m *Manager) Handles(language string) []*Handle {
+	return m.handlesForLanguage(language)
+}
+
+// findConfig returns the configured server language/name names. An empty name
+// takes the first configured server of the language.
+func (m *Manager) findConfig(language, name string) (cfg ServerConfig, universal bool, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	configs := m.servers[language]
+	found := false
+	for _, c := range configs {
+		if name == "" || c.DisplayName() == name {
+			cfg, found = c, true
+			break
+		}
+	}
+	if found {
+		return cfg, false, true
+	}
+	if language == "" {
+		for _, c := range m.universal {
+			if name == "" || c.DisplayName() == name {
+				return c, true, true
+			}
+		}
+	}
+	return ServerConfig{}, false, false
+}
+
+// ensureServers returns the running handles of language, starting the servers
+// that should start now. The second result holds the failures of the starts.
+func (m *Manager) ensureServers(language string) ([]*Handle, []error) {
+	m.mu.Lock()
+	configs := slices.Clone(m.servers[language])
+	disabled := m.disabled[language]
+	forced := m.forced[language]
+	m.mu.Unlock()
+
+	var hs []*Handle
+	var errs []error
+	for _, cfg := range configs {
+		key := serverKey(language, cfg.DisplayName())
+		m.mu.Lock()
+		if h := m.handleForKeyLocked(key); h != nil {
+			m.mu.Unlock()
+			hs = append(hs, h)
+			continue
+		}
+		stopped := m.stopped[key]
+		epoch := m.epoch
+		m.mu.Unlock()
+		if stopped || (!forced && (disabled || !cfg.AutoStart)) {
+			continue
+		}
+		h, err := m.startServer(key, language, cfg, false, epoch)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		hs = append(hs, h)
+	}
+	return hs, errs
+}
+
+// ensureUniversal returns the running universal handles, starting the servers
+// that should start now. A universal start failure is reported in the Servers
+// state; it does not keep a document of a language with its own server from
+// opening.
+func (m *Manager) ensureUniversal() []*Handle {
+	m.mu.Lock()
+	configs := slices.Clone(m.universal)
+	epoch := m.epoch
+	m.mu.Unlock()
+
+	var hs []*Handle
+	for _, cfg := range configs {
+		key := serverKey("", cfg.DisplayName())
+		m.mu.Lock()
+		if h := m.handleForKeyLocked(key); h != nil {
+			m.mu.Unlock()
+			hs = append(hs, h)
+			continue
+		}
+		stopped := m.stopped[key]
+		m.mu.Unlock()
+		if stopped || !cfg.AutoStart {
+			continue
+		}
+		h, err := m.startServer(key, "", cfg, true, epoch)
+		if err != nil {
+			continue
+		}
+		hs = append(hs, h)
+	}
+	return hs
+}
+
+// startServer starts one configured server, or returns the running one. A start
+// already in flight for the same key is waited for and its result shared.
+func (m *Manager) startServer(key, language string, cfg ServerConfig, universal bool, epoch uint64) (*Handle, error) {
+	m.mu.Lock()
+	if h := m.handleForKeyLocked(key); h != nil {
+		m.mu.Unlock()
+		return h, nil
+	}
+	if s, ok := m.starting[key]; ok {
+		m.mu.Unlock()
+		<-s.done
+		return s.h, s.err
+	}
+	s := &serverStart{done: make(chan struct{})}
+	m.starting[key] = s
+	m.mu.Unlock()
+
+	h, err := m.launch(key, language, cfg, universal)
 
 	m.mu.Lock()
-	if m.starts[languageID] == s {
-		delete(m.starts, languageID)
+	if m.starting[key] == s {
+		delete(m.starting, key)
 	}
 	if err == nil && m.epoch != epoch {
-		// Shutdown ran during the start, so the new server is not kept.
 		err = errServerGone
 	}
 	if err == nil {
-		m.clients[languageID] = c
+		m.nextID++
+		h.id = m.nextID
+		m.handles = append(m.handles, h)
+		delete(m.failures, key)
+	} else if m.epoch == epoch {
+		m.failures[key] = err.Error()
 	}
 	m.mu.Unlock()
 	if err != nil {
-		if c != nil {
-			_ = c.Close()
+		if h != nil && h.client != nil {
+			_ = h.client.Close()
 		}
-		c = nil
+		h = nil
 	}
-	s.c, s.err = c, err
+	s.h, s.err = h, err
 	close(s.done)
-	return c, err
+	return h, err
 }
 
-// startServer launches the server for sc and runs the initialize handshake. Each
-// step has its own deadline. A server that fails a step is closed. A failure names the
-// language and the server: a program that is not installed is a *lsp.NotInstalledError that
-// carries the install hint, and a handshake that fails is a *lsp.StartError with the command
-// line and what the server wrote to its error output.
-func (m *Manager) startServer(lang string, sc ServerConfig) (*lsp.Client, error) {
-	command := append(slices.Clone(sc.Command), sc.Args...)
+// launch starts the process for cfg and runs the initialize handshake. A server
+// that fails a step is closed.
+func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool) (*Handle, error) {
+	command := cfg.CommandLine()
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
 	c, err := m.start(ctx, lsp.Config{
-		Command: command,
-		RootURI: m.rootURI,
+		Command:               command,
+		RootURI:               m.rootURI,
+		Env:                   envList(cfg.Env),
+		InitializationOptions: cfg.InitializationOptions,
+		ApplyEdit:             m.applyEditHandler(language),
 	})
 	cancel()
 	if err != nil {
 		var ni *lsp.NotInstalledError
 		if errors.As(err, &ni) {
-			ni.Language, ni.Install = lang, sc.Install
+			ni.Language, ni.Install = language, cfg.Install
 		}
 		return nil, err
 	}
@@ -297,81 +813,217 @@ func (m *Manager) startServer(lang string, sc ServerConfig) (*lsp.Client, error)
 	if err != nil {
 		// The process is gone or stopped once it is closed, so what it wrote is all there.
 		_ = c.Close()
-		name := sc.Name
-		if name == "" && len(sc.Command) > 0 {
-			name = sc.Command[0]
-		}
-		return nil, &lsp.StartError{Language: lang, Name: name, Command: strings.Join(command, " "), Stderr: c.StderrTail(), Err: err}
+		name := cfg.DisplayName()
+		return nil, &lsp.StartError{Language: language, Name: name, Command: strings.Join(command, " "), Stderr: c.StderrTail(), Err: err}
 	}
-	return c, nil
+	return &Handle{
+		key:       key,
+		language:  language,
+		universal: universal,
+		cfg:       cfg,
+		client:    c,
+		filter:    ParseFeatureFilter(cfg.OnlyFeatures, cfg.ExceptFeatures),
+		docs:      make(map[string]bool),
+	}, nil
 }
 
-// advance records the next version of the open document at path. It returns the
-// document's server and the document with that version. m.sendMu must be held.
-func (m *Manager) advance(path string) (*lsp.Client, openDoc, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	doc, ok := m.docs[path]
-	if !ok {
-		return nil, openDoc{}, fmt.Errorf("%w: %s", ErrNotOpen, path)
-	}
-	c, live := m.liveClientLocked(doc.languageID)
-	if !live {
-		return nil, openDoc{}, fmt.Errorf("%w: %s: its server exited", ErrNotOpen, path)
-	}
-	doc.version++
-	m.docs[path] = doc
-	return c, doc, nil
-}
-
-// closeDoc forgets the document at path and sends didClose if it was open. A
-// server that has exited holds nothing to close, so none is sent. m.sendMu must
-// be held.
-func (m *Manager) closeDoc(path string) error {
-	c, doc, live := m.forget(path)
-	if !live {
+// envList turns the extra environment of a server into the KEY=VALUE list a
+// process gets. The keys are sorted, so a start is deterministic.
+func envList(env map[string]string) []string {
+	if len(env) == 0 {
 		return nil
 	}
-	return m.step(context.Background(), c, func(ctx context.Context) error {
-		return c.DidClose(ctx, doc.uri)
-	})
-}
-
-// forget removes the document at path from the open set and returns the document
-// and its server. It reports false when the document was not open or its server
-// has exited.
-func (m *Manager) forget(path string) (*lsp.Client, openDoc, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	doc, ok := m.docs[path]
-	if !ok {
-		return nil, openDoc{}, false
+	out := make([]string, 0, len(env))
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		out = append(out, k+"="+env[k])
 	}
-	delete(m.docs, path)
-	c, live := m.liveClientLocked(doc.languageID)
-	return c, doc, live
+	return out
 }
 
-// liveClientLocked returns the running client for languageID. A client whose
-// connection has ended is closed in the background and forgotten, together with
-// the documents it held, so that the next request starts a new server. m.mu must
-// be held.
-func (m *Manager) liveClientLocked(languageID string) (*lsp.Client, bool) {
-	c, ok := m.clients[languageID]
+// stopKey stops the running server named key, if any, and removes it from the
+// handle list. The documents it had open are forgotten, so the caller must open
+// them again.
+func (m *Manager) stopKey(key string) {
+	m.mu.Lock()
+	idx := slices.IndexFunc(m.handles, func(h *Handle) bool { return h.key == key })
+	var h *Handle
+	if idx >= 0 {
+		h = m.handles[idx]
+		m.handles = slices.Delete(m.handles, idx, idx+1)
+	}
+	m.mu.Unlock()
+	if h == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+	defer cancel()
+	_ = m.shutDown(ctx, h.client)
+}
+
+// pruneLocked removes the handles whose connection has ended and the documents
+// they held. m.mu must be held.
+func (m *Manager) pruneLocked() {
+	kept := m.handles[:0]
+	for _, h := range m.handles {
+		if h.live() {
+			kept = append(kept, h)
+			continue
+		}
+		_ = h.client.Close()
+		for file := range h.docs {
+			delete(h.docs, file)
+		}
+	}
+	m.handles = kept
+}
+
+// handleForKeyLocked returns the live handle named key. m.mu must be held.
+func (m *Manager) handleForKeyLocked(key string) *Handle {
+	m.pruneLocked()
+	for _, h := range m.handles {
+		if h.key == key {
+			return h
+		}
+	}
+	return nil
+}
+
+// openHandlesLocked returns the live handles that have the document at path open.
+// m.mu must be held.
+func (m *Manager) openHandlesLocked(file string) []*Handle {
+	m.pruneLocked()
+	out := make([]*Handle, 0, len(m.handles))
+	for _, h := range m.handles {
+		if h.docs[file] {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// firstOpenHandleLocked returns the first live handle that has the document at
+// path open, universal ones only when universal is set. m.mu must be held.
+func (m *Manager) firstOpenHandleLocked(file, language string, universal bool) *Handle {
+	m.pruneLocked()
+	for _, h := range m.handles {
+		if !h.docs[file] {
+			continue
+		}
+		if universal != h.universal {
+			continue
+		}
+		if !universal && h.language != language {
+			continue
+		}
+		return h
+	}
+	return nil
+}
+
+// FirstFor returns the first live handle that serves feature for the open
+// document at path: a server of the document's language first, then a universal
+// server. An exclusive feature goes to this server, and an empty answer from it is
+// final.
+func (m *Manager) FirstFor(file string, feature Feature) (*Handle, bool) {
+	m.mu.Lock()
+	doc, ok := m.docs[file]
 	if !ok {
+		m.mu.Unlock()
 		return nil, false
 	}
-	select {
-	case <-c.Done():
-	default:
-		return c, true
+	language := doc.language
+	m.mu.Unlock()
+	hs := m.handlesForLanguage(language)
+	for _, h := range hs {
+		if !h.universal && h.Can(feature) {
+			return h, true
+		}
 	}
-	delete(m.clients, languageID)
-	maps.DeleteFunc(m.docs, func(_ string, d openDoc) bool { return d.languageID == languageID })
-	go func() { _ = c.Close() }()
+	for _, h := range hs {
+		if h.universal && h.Can(feature) {
+			return h, true
+		}
+	}
 	return nil, false
+}
+
+// AllFor returns every live handle that serves feature for the open document at
+// path, language-specific servers first and universal ones after. A merged feature
+// asks each of them and combines the answers.
+func (m *Manager) AllFor(file string, feature Feature) []*Handle {
+	m.mu.Lock()
+	doc, ok := m.docs[file]
+	if !ok {
+		m.mu.Unlock()
+		return nil
+	}
+	language := doc.language
+	m.mu.Unlock()
+	hs := m.handlesForLanguage(language)
+	out := make([]*Handle, 0, len(hs))
+	for _, h := range hs {
+		if !h.universal && h.Can(feature) {
+			out = append(out, h)
+		}
+	}
+	for _, h := range hs {
+		if h.universal && h.Can(feature) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// handlesForLanguage returns the live handles that serve language, in handle
+// order. A universal handle serves every language.
+func (m *Manager) handlesForLanguage(language string) []*Handle {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneLocked()
+	out := make([]*Handle, 0, len(m.handles))
+	for _, h := range m.handles {
+		if h.universal || h.language == language {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// Running reports whether any live server serves language.
+func (m *Manager) Running(language string) bool {
+	return len(m.handlesForLanguage(language)) > 0
+}
+
+// Shutdown shuts down, exits and closes every running server, and forgets all
+// open documents, the mutes and the manual starts. A later Open starts a server
+// again. The returned error joins the errors from all of the servers. Each
+// request is bounded by ctx and by the Manager's timeout, so Shutdown returns even
+// when a server has stopped reading.
+func (m *Manager) Shutdown(ctx context.Context) error {
+	m.mu.Lock()
+	m.epoch++
+	handles := m.handles
+	m.handles = nil
+	m.starting = make(map[string]*serverStart)
+	m.docs = make(map[string]*openDoc)
+	m.disabled = make(map[string]bool)
+	m.forced = make(map[string]bool)
+	m.stopped = make(map[string]bool)
+	m.failures = make(map[string]string)
+	m.mu.Unlock()
+
+	var errs []error
+	for _, h := range handles {
+		errs = append(errs, m.shutDown(ctx, h.client))
+	}
+	return errors.Join(errs...)
+}
+
+// shutDown sends shutdown and exit to c, then closes it.
+func (m *Manager) shutDown(ctx context.Context, c *lsp.Client) error {
+	err := m.step(ctx, c, c.Shutdown)
+	exitErr := m.step(ctx, c, c.Exit)
+	return errors.Join(err, exitErr, c.Close())
 }
 
 // step runs fn, one request or notification to c, under a deadline of m.timeout

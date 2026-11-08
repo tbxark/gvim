@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/lsp/manager"
 	"github.com/tbxark/gvim/pluginapi"
@@ -76,7 +78,7 @@ func TestLSPPortRequestsForUnopenedDocumentsAreNotOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.go")
 	at := buffer.Pos{}
 
-	if err := port.Change(path, "x"); !errors.Is(err, manager.ErrNotOpen) {
+	if _, err := port.Change(path, "x"); !errors.Is(err, manager.ErrNotOpen) {
 		t.Errorf("Change: err = %v, want ErrNotOpen", err)
 	}
 	if _, err := port.Definition(path, at); !errors.Is(err, manager.ErrNotOpen) {
@@ -102,7 +104,7 @@ func TestLSPPortRequestForAnUnopenedDocumentIsNotFound(t *testing.T) {
 func TestLSPPortOpenForUnconfiguredLanguageStartsNothing(t *testing.T) {
 	t.Parallel()
 	port := New(map[string]config.LSPServer{"go": {Command: "gopls"}})
-	err := port.Open(filepath.Join(t.TempDir(), "a.rs"), "rust", "fn main() {}")
+	_, err := port.Open(filepath.Join(t.TempDir(), "a.rs"), "rust", "fn main() {}")
 	if !errors.Is(err, manager.ErrNoServer) {
 		t.Fatalf("Open: err = %v, want ErrNoServer", err)
 	}
@@ -111,7 +113,7 @@ func TestLSPPortOpenForUnconfiguredLanguageStartsNothing(t *testing.T) {
 func TestLSPPortStopAndRestartWithNoServerAreNoOps(t *testing.T) {
 	t.Parallel()
 	port := New(map[string]config.LSPServer{"go": {Command: "gopls"}})
-	if err := port.Restart(); err != nil {
+	if err := port.Restart(""); err != nil {
 		t.Errorf("Restart with no server: %v", err)
 	}
 	if err := port.Stop(); err != nil {
@@ -164,36 +166,95 @@ func TestDiagnosticTextTakesPlainAndMarkupMessages(t *testing.T) {
 	}
 }
 
-func TestFileEditsGroupByPathAndConvertRanges(t *testing.T) {
+func TestWorkspaceEditConvertsTextAndResourceOperations(t *testing.T) {
 	t.Parallel()
-	texts := map[string]string{
-		"/p/a.go": "foo()\n",
-		"/p/b.go": "x := foo\n",
+	port := newPort(lspPlan{}, true)
+	text := "x := foo\n"
+	port.docs["/p/b.go"] = lspDocRec{lang: "go", text: text, lines: newTextLines(text)}
+	version := int32(3)
+	uriOf := func(p string) uri.URI { return uri.URI(lsp.PathURI(p)) }
+	edit := &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
+		&protocol.CreateFile{Kind: "create", URI: uriOf("/p/new.go")},
+		&protocol.TextDocumentEdit{
+			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uriOf("/p/b.go")},
+				Version:                &version,
+			},
+			Edits: []protocol.TextDocumentEditElement{&protocol.TextEdit{
+				Range:   protocol.Range{Start: protocol.Position{Line: 0, Character: 5}, End: protocol.Position{Line: 0, Character: 8}},
+				NewText: "bar",
+			}},
+		},
+		&protocol.RenameFile{Kind: "rename", OldURI: uriOf("/p/a.go"), NewURI: uriOf("/p/c.go")},
+		&protocol.DeleteFile{Kind: "delete", URI: uriOf("/p/d.go")},
+	}}
+	got, err := port.workspaceEdit(edit, "fix")
+	if err != nil {
+		t.Fatalf("workspaceEdit: %v", err)
 	}
-	edits := map[string][]protocol.TextEdit{
-		lsp.PathURI("/p/b.go"): {{
-			Range:   protocol.Range{Start: protocol.Position{Line: 0, Character: 5}, End: protocol.Position{Line: 0, Character: 8}},
-			NewText: "bar",
-		}},
-		lsp.PathURI("/p/a.go"): {{
-			Range:   protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 3}},
-			NewText: "bar",
-		}},
+	if got.Label != "fix" || len(got.Ops) != 4 {
+		t.Fatalf("edit = %+v, want label fix and four operations", got)
 	}
-	got := fileEdits(edits, func(path string) string { return texts[path] })
-	want := []struct {
-		path string
-		edit editor.LSPEdit
+	if op := got.Ops[0]; op.Kind != tui.WorkspaceOpCreate || op.Path != "/p/new.go" {
+		t.Errorf("op 0 = %+v, want a create of /p/new.go", op)
+	}
+	op := got.Ops[1]
+	want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 5}, To: buffer.Pos{Line: 0, Col: 8}, Text: "bar"}
+	if op.Kind != tui.WorkspaceOpText || op.Path != "/p/b.go" || op.Version == nil || *op.Version != version ||
+		len(op.Edits) != 1 || op.Edits[0] != want {
+		t.Errorf("op 1 = %+v, want the text edit with its version", op)
+	}
+	if op := got.Ops[2]; op.Kind != tui.WorkspaceOpRename || op.Path != "/p/a.go" || op.NewPath != "/p/c.go" {
+		t.Errorf("op 2 = %+v, want a rename of /p/a.go to /p/c.go", op)
+	}
+	if op := got.Ops[3]; op.Kind != tui.WorkspaceOpDelete || op.Path != "/p/d.go" {
+		t.Errorf("op 3 = %+v, want a delete of /p/d.go", op)
+	}
+}
+
+// TestServerApplyEditIsQueuedAndDrained checks the server-initiated flow: the
+// workspace/applyEdit handler queues the edit without waiting for the editor, and
+// the root drains it later.
+func TestServerApplyEditIsQueuedAndDrained(t *testing.T) {
+	t.Parallel()
+	port := newPort(lspPlan{}, true)
+	label := "organize"
+	if !port.enqueueEdit("go", protocol.ApplyWorkspaceEditParams{Label: &label, Edit: protocol.WorkspaceEdit{}}) {
+		t.Fatal("the queue refused an edit")
+	}
+	edits := port.WorkspaceEdits()
+	if len(edits) != 1 || edits[0].Label != "organize" {
+		t.Fatalf("drained = %+v, want the labeled edit", edits)
+	}
+	if again := port.WorkspaceEdits(); len(again) != 0 {
+		t.Fatalf("the queue kept %d edits after a drain", len(again))
+	}
+}
+
+// TestRangesOverlapForCodeActionContext checks the diagnostic context filter: a
+// code action at the caret gets the diagnostics whose ranges cover it, which is
+// what servers that gate quick fixes on the diagnostic need.
+func TestRangesOverlapForCodeActionContext(t *testing.T) {
+	t.Parallel()
+	rng := func(sl, sc, el, ec uint32) protocol.Range {
+		return protocol.Range{Start: protocol.Position{Line: sl, Character: sc}, End: protocol.Position{Line: el, Character: ec}}
+	}
+	tests := []struct {
+		name string
+		a, b protocol.Range
+		want bool
 	}{
-		{"/p/a.go", editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 0}, To: buffer.Pos{Line: 0, Col: 3}, Text: "bar"}},
-		{"/p/b.go", editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 5}, To: buffer.Pos{Line: 0, Col: 8}, Text: "bar"}},
+		{"a diagnostic covering the caret", rng(1, 0, 1, 5), rng(1, 3, 1, 3), true},
+		{"a diagnostic before the caret", rng(0, 0, 0, 5), rng(1, 0, 1, 0), false},
+		{"a diagnostic after the caret", rng(2, 0, 2, 5), rng(1, 0, 1, 0), false},
+		{"a diagnostic ending at the caret", rng(1, 0, 1, 3), rng(1, 3, 1, 5), true},
+		{"a diagnostic on the same line after the caret", rng(1, 4, 1, 9), rng(1, 3, 1, 3), false},
 	}
-	if len(got) != len(want) {
-		t.Fatalf("file edits = %+v, want %d files", got, len(want))
-	}
-	for i, w := range want {
-		if got[i].Path != w.path || len(got[i].Edits) != 1 || got[i].Edits[0] != w.edit {
-			t.Fatalf("file edit %d = %+v, want path %s with %+v", i, got[i], w.path, w.edit)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rangesOverlap(tt.a, tt.b); got != tt.want {
+				t.Fatalf("rangesOverlap = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

@@ -68,6 +68,11 @@ func buildHandlers() map[Action]handler {
 		return nil
 	})
 	h["dedent_selection"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		// A blank Markdown list item de-indents and cycles its bullet, as Fresh's
+		// markdown-source mode does; every other line keeps the usual dedent.
+		if e.markdownDedent(d) {
+			return nil
+		}
 		d.Dedent(e.tabSizeOf(d))
 		return nil
 	})

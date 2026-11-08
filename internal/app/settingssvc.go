@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/tbxark/gvim/atomicfile"
@@ -89,6 +93,7 @@ func (s *settingsService) snapshot() tui.SettingsSnapshot {
 		}
 		item := tui.SettingsItem{
 			Key:     setting.Key(),
+			Path:    slices.Clone(setting.Path),
 			Name:    setting.Name(),
 			Section: setting.Section,
 			Kind:    string(setting.Kind),
@@ -181,28 +186,51 @@ func (s *settingsService) Save(edits []tui.SettingEdit, layer string) (tui.Setti
 	var patch []config.Edit
 	var changed []string
 	for _, edit := range edits {
-		setting, ok := config.SettingByKey(edit.Key)
-		if !ok {
-			return tui.SettingsChange{}, fmt.Errorf("unknown setting %q", edit.Key)
+		switch {
+		case edit.Key != "":
+			setting, ok := config.SettingByKey(edit.Key)
+			if !ok {
+				return tui.SettingsChange{}, fmt.Errorf("unknown setting %q", edit.Key)
+			}
+			if project && !setting.Layers.Has(config.LayerProject) {
+				return tui.SettingsChange{}, fmt.Errorf("%s can only be set in the user config", edit.Key)
+			}
+			if edit.Remove {
+				patch = append(patch, config.Edit{Path: setting.Path, Remove: true})
+				changed = append(changed, edit.Key)
+				continue
+			}
+			if err := s.validateSetting(setting, edit.Value, project); err != nil {
+				return tui.SettingsChange{}, err
+			}
+			raw, err := setting.Encode(edit.Value)
+			if err != nil {
+				return tui.SettingsChange{}, fmt.Errorf("%s: %w", edit.Key, err)
+			}
+			patch = append(patch, config.Edit{Path: setting.Path, Raw: raw})
+			changed = append(changed, edit.Key)
+		case len(edit.Path) > 0:
+			if !config.RemovablePath(edit.Path) {
+				return tui.SettingsChange{}, fmt.Errorf("the settings page cannot write %s", strings.Join(edit.Path, "."))
+			}
+			if edit.Remove {
+				patch = append(patch, config.Edit{Path: edit.Path, Remove: true})
+			} else {
+				if len(edit.Raw) == 0 {
+					return tui.SettingsChange{}, fmt.Errorf("%s: the value is empty", strings.Join(edit.Path, "."))
+				}
+				if diags := config.ValidateEdits([]config.Edit{{Path: edit.Path, Raw: edit.Raw}}, project); len(diags) > 0 {
+					return tui.SettingsChange{}, errors.New(diags[0].String())
+				}
+				patch = append(patch, config.Edit{Path: edit.Path, Raw: edit.Raw})
+			}
+			changed = append(changed, settingKeyOfPath(edit.Path))
+		default:
+			return tui.SettingsChange{}, errors.New("an edit needs a setting key or a config path")
 		}
-		if project && !setting.Layers.Has(config.LayerProject) {
-			return tui.SettingsChange{}, fmt.Errorf("%s can only be set in the user config", edit.Key)
-		}
-		if err := s.validateSetting(setting, edit.Value, project); err != nil {
-			return tui.SettingsChange{}, err
-		}
-		raw, err := setting.Encode(edit.Value)
-		if err != nil {
-			return tui.SettingsChange{}, fmt.Errorf("%s: %w", edit.Key, err)
-		}
-		patch = append(patch, config.Edit{Path: setting.Path, Raw: raw})
-		changed = append(changed, edit.Key)
 	}
 	if len(patch) == 0 {
 		return s.reload(nil, "")
-	}
-	if diags := config.ValidateEdits(patch, project); len(diags) > 0 {
-		return tui.SettingsChange{}, errors.New(diags[0].String())
 	}
 	path := s.userFile
 	if project {
@@ -214,7 +242,44 @@ func (s *settingsService) Save(edits []tui.SettingEdit, layer string) (tui.Setti
 	if err := patchConfigFile(path, patch); err != nil {
 		return tui.SettingsChange{}, err
 	}
-	return s.reload(changed, layer)
+	return s.reload(uniqueStrings(changed), layer)
+}
+
+// settingKeyOfPath returns the schema key a structured edit belongs to, for the
+// live/restart split: a formatters entry belongs to the Formatters page, a
+// language override to Languages, and so on.
+func settingKeyOfPath(path []string) string {
+	if len(path) == 0 {
+		return ""
+	}
+	switch path[0] {
+	case "formatters":
+		return "formatters"
+	case "languages":
+		return "languages"
+	case "terminal":
+		if len(path) >= 2 && path[1] == "shell" {
+			if len(path) == 3 && path[2] == "command" {
+				return "terminal.shell.command"
+			}
+			return "terminal.shell.args"
+		}
+	}
+	return strings.Join(path, ".")
+}
+
+// uniqueStrings returns s without duplicates, keeping the first order.
+func uniqueStrings(s []string) []string {
+	seen := make(map[string]bool, len(s))
+	out := make([]string, 0, len(s))
+	for _, item := range s {
+		if seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 // validateSetting is Validate for a setting already looked up, with the layer the
@@ -273,6 +338,7 @@ func (s *settingsService) Apply(tui.SettingsChange) {
 // reload loads the config again and returns the change. changed are the setting
 // keys a Save wrote; nil means a Reload, which reapplies every live value.
 func (s *settingsService) reload(changed []string, layer string) (tui.SettingsChange, error) {
+	previous := s.cfg
 	cfg, diags, err := config.Load(config.Options{
 		Root:      s.root,
 		UserFile:  s.opts.Config,
@@ -280,6 +346,15 @@ func (s *settingsService) reload(changed []string, layer string) (tui.SettingsCh
 	})
 	if err != nil {
 		return tui.SettingsChange{}, err
+	}
+	reloaded := changed == nil
+	var keys []string
+	if reloaded {
+		// A Reload reports only the settings whose effective value changed, so the
+		// restart notice does not list the whole restart set for an untouched file.
+		keys = changedSettings(previous, cfg)
+	} else {
+		keys = s.changedKeys(changed)
 	}
 	s.cfg = cfg
 	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
@@ -296,11 +371,11 @@ func (s *settingsService) reload(changed []string, layer string) (tui.SettingsCh
 		UIIconsMode: icon.Mode.String(),
 		IconsWhy:    icon.Why,
 		Layer:       layer,
+		Reload:      reloaded,
 	}
 	for _, d := range diags {
 		change.Warnings = append(change.Warnings, d.String())
 	}
-	keys := s.changedKeys(changed)
 	for _, key := range keys {
 		setting, ok := config.SettingByKey(key)
 		if !ok {
@@ -343,6 +418,280 @@ func (s *settingsService) changedKeys(changed []string) []string {
 		}
 	}
 	return keys
+}
+
+// Structure returns the sub-page of a structured setting for one layer: the
+// formatters map, the language entry list, one language's scalar overrides, the
+// status-bar element lists, or terminal.shell.args. It reads the layer's file
+// (the keys that layer sets, not the merged config), so the page can show what
+// the file itself holds; the values of a list the layer leaves alone fall back
+// to the effective config. The page calls it from a tea.Cmd.
+func (s *settingsService) Structure(structureKey, layer string) (tui.SettingsStructure, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	project := layer == tui.SettingsLayerProject
+	path := s.userFile
+	if project {
+		if !s.trusted() {
+			return tui.SettingsStructure{}, errors.New("the project config can be written only in a trusted workspace")
+		}
+		path = s.projectFile()
+	}
+	if path == "" {
+		return tui.SettingsStructure{}, fmt.Errorf("no %s config file is known", layer)
+	}
+	object, err := readLayerFile(path)
+	if err != nil {
+		return tui.SettingsStructure{}, err
+	}
+	switch {
+	case structureKey == "formatters":
+		return s.structureFormatters(object), nil
+	case structureKey == "languages":
+		return s.structureLanguages(object), nil
+	case strings.HasPrefix(structureKey, "languages."):
+		return s.structureLanguageFields(object, strings.TrimPrefix(structureKey, "languages.")), nil
+	case structureKey == "editor.status_bar", structureKey == "editor.status_bar.left", structureKey == "editor.status_bar.right":
+		return s.structureStatusBar(object, structureKey), nil
+	case structureKey == "terminal.shell.args":
+		return s.structureShellArgs(object), nil
+	}
+	return tui.SettingsStructure{}, fmt.Errorf("unknown settings structure %q", structureKey)
+}
+
+// readLayerFile reads and decodes one config layer. A missing file is an empty
+// layer.
+func readLayerFile(path string) (map[string]json.RawMessage, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]json.RawMessage{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("config: read %s: %w", path, err)
+	}
+	object, err := config.DecodeLayer(data)
+	if err != nil {
+		return nil, fmt.Errorf("config: %s: %w", path, err)
+	}
+	return object, nil
+}
+
+// rawAt returns the JSON at path inside object.
+func layerRawAt(object map[string]json.RawMessage, path []string) (json.RawMessage, bool) {
+	if len(path) == 0 {
+		return nil, false
+	}
+	raw := object[path[0]]
+	if raw == nil {
+		return nil, false
+	}
+	if len(path) == 1 {
+		return raw, true
+	}
+	var next map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &next); err != nil {
+		return nil, false
+	}
+	return layerRawAt(next, path[1:])
+}
+
+// objectAt returns the JSON object at path inside object.
+func layerObjectAt(object map[string]json.RawMessage, path []string) (map[string]json.RawMessage, bool) {
+	raw, ok := layerRawAt(object, path)
+	if !ok {
+		return nil, false
+	}
+	var next map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &next); err != nil {
+		return nil, false
+	}
+	return next, true
+}
+
+// stringList decodes a JSON array of strings.
+func stringList(raw json.RawMessage) ([]string, bool) {
+	var list []string
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, false
+	}
+	return list, true
+}
+
+// displayJSON is the display form of a config value of the given kind.
+func displayJSON(raw json.RawMessage, kind config.SettingKind) string {
+	switch kind {
+	case config.SettingBool:
+		var b bool
+		if err := json.Unmarshal(raw, &b); err == nil {
+			if b {
+				return "on"
+			}
+			return "off"
+		}
+	case config.SettingInt:
+		var n int
+		if err := json.Unmarshal(raw, &n); err == nil {
+			return strconv.Itoa(n)
+		}
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	return string(raw)
+}
+
+// overrideCount is the summary of a languages entry: how many fields it sets.
+func overrideCount(fields int) string {
+	if fields == 1 {
+		return "1 override"
+	}
+	return strconv.Itoa(fields) + " overrides"
+}
+
+// structureFormatters is the formatters map sub-page.
+func (s *settingsService) structureFormatters(object map[string]json.RawMessage) tui.SettingsStructure {
+	st := tui.SettingsStructure{Key: "formatters", Title: "Formatters", Kind: "map", AddLabel: "Add formatter…"}
+	formatters, _ := layerObjectAt(object, []string{"formatters"})
+	for _, name := range slices.Sorted(maps.Keys(formatters)) {
+		var command string
+		if err := json.Unmarshal(formatters[name], &command); err != nil {
+			continue
+		}
+		st.Rows = append(st.Rows, tui.SettingsStructureRow{
+			Path: []string{"formatters", name}, Name: name, Value: command,
+		})
+	}
+	return st
+}
+
+// structureLanguages is the language entry list sub-page.
+func (s *settingsService) structureLanguages(object map[string]json.RawMessage) tui.SettingsStructure {
+	st := tui.SettingsStructure{Key: "languages", Title: "Languages", Kind: "languages", AddLabel: "Add language…"}
+	entries, _ := layerObjectAt(object, []string{"languages"})
+	for _, id := range slices.Sorted(maps.Keys(entries)) {
+		fields, _ := layerObjectAt(entries, []string{id})
+		st.Rows = append(st.Rows, tui.SettingsStructureRow{
+			Path: []string{"languages", id}, Name: id, Value: overrideCount(len(fields)),
+			Child: "languages." + id,
+		})
+	}
+	known := config.KnownLanguageIDs()
+	for _, id := range known {
+		if _, ok := entries[id]; !ok {
+			st.Available = append(st.Available, id)
+		}
+	}
+	return st
+}
+
+// structureLanguageFields is one language's scalar override sub-page. A field
+// the layer does not set shows as unset; the page resets it by removing it.
+func (s *settingsService) structureLanguageFields(object map[string]json.RawMessage, id string) tui.SettingsStructure {
+	st := tui.SettingsStructure{Key: "languages." + id, Title: "Languages · " + id, Kind: "fields"}
+	entry, _ := layerObjectAt(object, []string{"languages", id})
+	for _, field := range config.LanguageOverrideFields() {
+		row := tui.SettingsStructureRow{
+			Path: []string{"languages", id, field.Key}, Name: field.Key,
+			Kind: string(field.Kind), Choices: slices.Clone(field.Choices),
+			Min: field.Min, Max: field.Max,
+		}
+		if raw, ok := layerRawAt(entry, []string{field.Key}); ok {
+			row.Value = displayJSON(raw, field.Kind)
+		}
+		st.Rows = append(st.Rows, row)
+	}
+	return st
+}
+
+// structureStatusBar is the dual list of the status-bar elements. The page
+// writes both sides as whole arrays, and only those two paths.
+func (s *settingsService) structureStatusBar(object map[string]json.RawMessage, key string) tui.SettingsStructure {
+	st := tui.SettingsStructure{Key: key, Title: "Status Bar", Kind: "dual"}
+	left := s.cfg.StatusBar.Left
+	if raw, ok := layerRawAt(object, []string{"editor", "status_bar", "left"}); ok {
+		if list, ok := stringList(raw); ok {
+			left = list
+		}
+	}
+	right := s.cfg.StatusBar.Right
+	if raw, ok := layerRawAt(object, []string{"editor", "status_bar", "right"}); ok {
+		if list, ok := stringList(raw); ok {
+			right = list
+		}
+	}
+	for _, name := range left {
+		st.Rows = append(st.Rows, tui.SettingsStructureRow{Path: []string{"editor", "status_bar", "left"}, Group: "left", Name: name})
+	}
+	for _, name := range right {
+		st.Rows = append(st.Rows, tui.SettingsStructureRow{Path: []string{"editor", "status_bar", "right"}, Group: "right", Name: name})
+	}
+	// Available lists the elements neither side has, in their config spelling
+	// with braces ("{filename}"); an entry already on a side may be written with
+	// or without them.
+	present := make(map[string]bool, len(left)+len(right))
+	for _, name := range append(slices.Clone(left), right...) {
+		present[strings.Trim(name, "{}")] = true
+	}
+	for _, name := range config.StatusBarElementNames() {
+		if !present[name] {
+			st.Available = append(st.Available, "{"+name+"}")
+		}
+	}
+	return st
+}
+
+// structureShellArgs is the terminal.shell.args list sub-page.
+func (s *settingsService) structureShellArgs(object map[string]json.RawMessage) tui.SettingsStructure {
+	st := tui.SettingsStructure{Key: "terminal.shell.args", Title: "Shell Arguments", Kind: "list", AddLabel: "Add argument…"}
+	args := s.cfg.Terminal.Shell.Args
+	if raw, ok := layerRawAt(object, []string{"terminal", "shell", "args"}); ok {
+		if list, ok := stringList(raw); ok {
+			args = list
+		}
+	}
+	for _, arg := range args {
+		st.Rows = append(st.Rows, tui.SettingsStructureRow{
+			Path: []string{"terminal", "shell", "args"}, Name: arg, Value: arg,
+		})
+	}
+	return st
+}
+
+// changedSettings returns the schema keys whose effective value differs between
+// two loaded configs. Scalars compare by the value the page shows; the
+// structured sections compare their config fields.
+func changedSettings(old, next config.Config) []string {
+	var keys []string
+	for _, setting := range config.Settings() {
+		if setting.Kind == config.SettingPage {
+			if structuredSettingChanged(setting.Key(), old, next) {
+				keys = append(keys, setting.Key())
+			}
+			continue
+		}
+		if setting.Value(old) != setting.Value(next) {
+			keys = append(keys, setting.Key())
+		}
+	}
+	return keys
+}
+
+// structuredSettingChanged compares the config fields behind one page row.
+func structuredSettingChanged(key string, old, next config.Config) bool {
+	switch key {
+	case "languages":
+		return !reflect.DeepEqual(old.Languages, next.Languages)
+	case "formatters":
+		return !maps.Equal(old.Formatters, next.Formatters)
+	case "editor.status_bar.left":
+		return !slices.Equal(old.StatusBar.Left, next.StatusBar.Left)
+	case "editor.status_bar.right":
+		return !slices.Equal(old.StatusBar.Right, next.StatusBar.Right)
+	case "terminal.shell.args":
+		return !slices.Equal(old.Terminal.Shell.Args, next.Terminal.Shell.Args)
+	}
+	return false
 }
 
 // projectFile returns the project config file the page writes: the nearest

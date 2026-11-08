@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
@@ -148,11 +149,116 @@ type settingsPage struct {
 	sel    int
 	top    int
 	page   int
-	// pending holds the values the user changed but did not save yet, by setting
-	// key. The page shows them in place of the snapshot's values.
-	pending map[string]string
-	active  bool
-	box     space.Rect
+	// pending holds the changes the user made but did not save yet, by setting
+	// key (scalar rows) or path id (structured entries). The page shows them in
+	// place of the snapshot's values.
+	pending map[string]settingsPending
+	// structureSeq is the generation of the sub-page request in flight: a
+	// structure that comes back for an older request is dropped.
+	structureSeq int
+	active       bool
+	box          space.Rect
+}
+
+// settingsPending is one unsaved change: a scalar row's display value, a
+// structured entry's JSON value, or a removal that resets the key.
+type settingsPending struct {
+	key    string // the schema key of a scalar row; empty for a structured entry
+	path   []string
+	value  string
+	raw    json.RawMessage
+	remove bool
+}
+
+// pathID is the pending-map key of a config path.
+func pathID(path []string) string { return strings.Join(path, "\x00") }
+
+// setScalarPending records a new display value for the scalar row item.
+func (p *settingsPage) setScalarPending(item SettingsItem, value string) {
+	p.pending[item.Key] = settingsPending{key: item.Key, path: settingPath(item), value: value}
+}
+
+// settingPath returns the item's config path. A snapshot from an older port may
+// not carry it, so the dotted key is the fallback (safe for scalar rows, whose
+// path parts have no dots).
+func settingPath(item SettingsItem) []string {
+	if len(item.Path) > 0 {
+		return slices.Clone(item.Path)
+	}
+	return strings.Split(item.Key, ".")
+}
+
+// setPendingRaw records a structured entry's new JSON value at path.
+func (p *settingsPage) setPendingRaw(path []string, raw json.RawMessage) {
+	p.pending[pathID(path)] = settingsPending{path: slices.Clone(path), raw: raw}
+}
+
+// setPendingRemove records that path is reset in the chosen layer.
+func (p *settingsPage) setPendingRemove(path []string) {
+	p.pending[pathID(path)] = settingsPending{path: slices.Clone(path), remove: true}
+}
+
+// pendingUnder reports whether any unsaved change is at or under path.
+func (p *settingsPage) pendingUnder(path []string) bool {
+	for _, pending := range p.pending {
+		if hasPathPrefix(pending.path, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasPathPrefix reports whether path starts with prefix.
+func hasPathPrefix(path, prefix []string) bool {
+	if len(path) < len(prefix) {
+		return false
+	}
+	return slices.Equal(path[:len(prefix)], prefix)
+}
+
+// setScalarRemove records that the scalar row is reset when the page is saved.
+func (p *settingsPage) setScalarRemove(item SettingsItem) {
+	p.pending[item.Key] = settingsPending{key: item.Key, path: settingPath(item), remove: true}
+}
+
+// itemByKey returns the snapshot item with the setting key.
+func (p *settingsPage) itemByKey(key string) (SettingsItem, bool) {
+	for _, sec := range p.snap.Sections {
+		for _, it := range sec.Items {
+			if it.Key == key {
+				return it, true
+			}
+		}
+	}
+	return SettingsItem{}, false
+}
+
+// toggleReset marks the highlighted setting for reset in the chosen layer: the
+// save removes its key, so the value falls back to a lower layer or the built-in
+// default. Pressing Del again drops the reset. A page row is reset from its
+// sub-page, one entry at a time.
+func (p *settingsPage) toggleReset() {
+	it, ok := p.itemAt(p.sel)
+	if !ok {
+		return
+	}
+	if !p.writable(it) {
+		p.m.notice = "Settings: " + it.Name + " can only be set in the user config"
+		return
+	}
+	if it.Kind == "page" {
+		p.m.notice = "Settings: open the " + it.Name + " page to reset its entries"
+		return
+	}
+	if pending, ok := p.pending[it.Key]; ok && pending.remove {
+		delete(p.pending, it.Key)
+		p.rebuild()
+		p.m.notice = "Settings: reset of " + it.Name + " undone"
+		return
+	}
+	p.setScalarRemove(it)
+	p.rebuild()
+	p.m.notice = "Settings: " + it.Name + " will be reset when saved"
 }
 
 // settingsRow is one line of the page: a section header or an editable item.
@@ -171,7 +277,7 @@ func newSettingsPage(m *Model, port SettingsPort) *settingsPage {
 		port:    port,
 		snap:    port.Snapshot(),
 		layer:   SettingsLayerUser,
-		pending: make(map[string]string),
+		pending: make(map[string]settingsPending),
 		active:  true,
 	}
 	p.rebuild()
@@ -200,10 +306,14 @@ func (p *settingsPage) rebuild() {
 		for _, it := range sec.Items {
 			value := it.Value
 			if pending, ok := p.pending[it.Key]; ok {
-				value = pending
+				if pending.remove {
+					value = "(default)"
+				} else {
+					value = pending.value
+				}
 			}
 			shown := SettingsItem{
-				Key: it.Key, Name: it.Name, Section: it.Section, Kind: it.Kind,
+				Key: it.Key, Path: slices.Clone(it.Path), Name: it.Name, Section: it.Section, Kind: it.Kind,
 				Value: value, Choices: it.Choices, Min: it.Min, Max: it.Max,
 				Apply: it.Apply, Layers: it.Layers,
 			}
@@ -296,6 +406,8 @@ func (p *settingsPage) key(msg tea.KeyPressMsg) tea.Cmd {
 		p.reset()
 	case "ctrl+e":
 		return p.editRaw()
+	case "delete":
+		p.toggleReset()
 	case "esc":
 		return p.cancel()
 	case "backspace":
@@ -378,24 +490,25 @@ func (p *settingsPage) edit() tea.Cmd {
 	switch it.Kind {
 	case "bool":
 		if it.Value == "on" {
-			p.pending[it.Key] = "off"
+			p.setScalarPending(it, "off")
 		} else {
-			p.pending[it.Key] = "on"
+			p.setScalarPending(it, "on")
 		}
 		p.rebuild()
 	default:
-		// The picker and the prompt are overlays: they are opened from a message,
-		// after the overlay stack has finished routing this key. Opening them here
-		// would race the stack's own update of the top overlay.
+		// The picker, the prompt and the sub-page are overlays: they are opened
+		// from a message, after the overlay stack has finished routing this key.
+		// Opening them here would race the stack's own update of the top overlay.
 		key := it.Key
 		return func() tea.Msg { return settingsEditMsg{page: p, key: key} }
 	}
 	return nil
 }
 
-// openEdit opens the editor a settingsEditMsg asked for: the enum picker or the
-// one-line value prompt.
-func (p *settingsPage) openEdit(key string) {
+// openEdit opens the editor a settingsEditMsg asked for: the sub-page of a page
+// row, the enum picker, or the one-line value prompt. A sub-page is read from
+// the layer's file, so its request is a command.
+func (p *settingsPage) openEdit(key string) tea.Cmd {
 	for _, sec := range p.snap.Sections {
 		for _, it := range sec.Items {
 			if it.Key != key {
@@ -403,15 +516,32 @@ func (p *settingsPage) openEdit(key string) {
 			}
 			if !p.writable(it) {
 				p.m.notice = "Settings: " + it.Name + " can only be set in the user config"
-				return
+				return nil
 			}
-			if it.Kind == "enum" {
+			switch it.Kind {
+			case "page":
+				return p.requestStructure(it.Key)
+			case "enum":
 				p.pick(it)
-			} else {
+			default:
 				p.prompt(it)
 			}
-			return
+			return nil
 		}
+	}
+	return nil
+}
+
+// requestStructure asks the port for the sub-page of structure key on the
+// current layer. The request carries the page's generation, so a structure that
+// arrives after the user moved on is dropped.
+func (p *settingsPage) requestStructure(key string) tea.Cmd {
+	port, layer := p.port, p.layer
+	p.structureSeq++
+	seq := p.structureSeq
+	return func() tea.Msg {
+		structure, err := port.Structure(key, layer)
+		return settingsStructureMsg{page: p, seq: seq, structure: structure, err: err}
 	}
 }
 
@@ -428,7 +558,7 @@ func (p *settingsPage) pick(it SettingsItem) tea.Cmd {
 	}
 	v := list.New("Set "+it.Name, rows, p.m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
 		v.Close()
-		p.pending[it.Key] = r.Value
+		p.setScalarPending(it, r.Value)
 		p.rebuild()
 		return nil
 	})
@@ -474,9 +604,9 @@ func (p *settingsPage) reset() {
 		p.m.notice = "Settings: no changes to reset"
 		return
 	}
-	p.pending = make(map[string]string)
+	p.pending = make(map[string]settingsPending)
 	p.rebuild()
-	p.m.notice = "Settings: changes reset"
+	p.m.notice = "Settings: pending changes discarded"
 }
 
 // save writes the pending values to the current layer, through a command: the
@@ -488,12 +618,37 @@ func (p *settingsPage) save() tea.Cmd {
 		return nil
 	}
 	var edits []SettingEdit
+	scalars := make(map[string]bool, len(p.pending))
 	for _, sec := range p.snap.Sections {
 		for _, it := range sec.Items {
-			if value, ok := p.pending[it.Key]; ok {
-				edits = append(edits, SettingEdit{Key: it.Key, Value: value})
+			pending, ok := p.pending[it.Key]
+			if !ok {
+				continue
 			}
+			scalars[it.Key] = true
+			if pending.remove {
+				edits = append(edits, SettingEdit{Path: settingPath(it), Remove: true})
+				continue
+			}
+			edits = append(edits, SettingEdit{Key: it.Key, Value: pending.value})
 		}
+	}
+	// The structured entries: a config path and its JSON value, or a removal.
+	// Sorted, so the status row and the file write are stable.
+	ids := make([]string, 0, len(p.pending))
+	for id := range p.pending {
+		if !scalars[id] {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		pending := p.pending[id]
+		if pending.remove {
+			edits = append(edits, SettingEdit{Path: slices.Clone(pending.path), Remove: true})
+			continue
+		}
+		edits = append(edits, SettingEdit{Path: slices.Clone(pending.path), Raw: pending.raw})
 	}
 	port, layer := p.port, p.layer
 	return func() tea.Msg {
@@ -549,7 +704,15 @@ func (p *settingsPage) applied(change SettingsChange, err error) {
 		p.m.notice = "Settings: " + err.Error()
 		return
 	}
-	p.pending = make(map[string]string)
+	if change.Reload && p.dirty() {
+		// A Reload reaches the open page too (the palette command works while it
+		// is up): keep the unsaved changes over the new snapshot instead of
+		// dropping them.
+		p.snap = change.Snapshot
+		p.rebuild()
+		return
+	}
+	p.pending = make(map[string]settingsPending)
 	p.snap = change.Snapshot
 	p.rebuild()
 }
@@ -590,8 +753,10 @@ func (p *settingsPage) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case prompt.Done:
 		if tag, ok := msg.Tag.(settingsEditTag); ok && tag.page == p {
 			if msg.Outcome == prompt.Submitted {
-				p.pending[tag.key] = msg.Text
-				p.rebuild()
+				if item, ok := p.itemByKey(tag.key); ok {
+					p.setScalarPending(item, msg.Text)
+					p.rebuild()
+				}
 			}
 		}
 		if tag, ok := msg.Tag.(settingsDiscardTag); ok && tag.page == p {
@@ -636,6 +801,38 @@ type settingsCancelMsg struct {
 	page *settingsPage
 }
 
+// settingsStructureMsg is the result of a sub-page request. Exactly one of page
+// and sub is set: page for the main page's request, sub for a child structure
+// opened from a structure page. seq is the requester's generation, so a stale
+// answer is dropped.
+type settingsStructureMsg struct {
+	page      *settingsPage
+	sub       *settingsStructurePage
+	seq       int
+	structure SettingsStructure
+	err       error
+}
+
+// settingsAction runs the settings actions the root handles. It reports whether
+// the action was one of them.
+func (m *Model) settingsAction(action string, args map[string]any) (tea.Cmd, bool) {
+	if action != "reload_config" {
+		return nil, false
+	}
+	if m.util.settingsPort == nil {
+		m.notice = "Config reload is unavailable: the Settings page has no config port"
+		return nil, true
+	}
+	port := m.util.settingsPort
+	return func() tea.Msg {
+		change, err := port.Reload()
+		if err == nil {
+			change.Reload = true
+		}
+		return settingsChangeMsg{change: change, err: err}
+	}, true
+}
+
 // topSettingsPage returns the Settings page on the overlay stack, or nil.
 func (m *Model) topSettingsPage() *settingsPage {
 	for i := len(m.overlays) - 1; i >= 0; i-- {
@@ -663,13 +860,39 @@ func (m *Model) settingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	case settingsEditMsg:
 		if d.page.Active() {
-			d.page.openEdit(d.key)
+			return d.page.openEdit(d.key), true
 		}
 		return nil, true
 	case settingsCancelMsg:
 		if d.page.Active() {
 			d.page.confirmCancel()
 		}
+		return nil, true
+	case structureOverlayMsg:
+		if d.page.Active() {
+			m.pushOverlay(d.overlay)
+		}
+		return nil, true
+	case settingsStructureMsg:
+		if d.sub != nil {
+			if !d.sub.Active() || d.sub.seq != d.seq {
+				return nil, true
+			}
+			if d.err != nil {
+				m.notice = "Settings: " + d.err.Error()
+				return nil, true
+			}
+			m.pushOverlay(newSettingsStructurePage(d.sub.parent, d.structure))
+			return nil, true
+		}
+		if !d.page.Active() || d.page.structureSeq != d.seq {
+			return nil, true
+		}
+		if d.err != nil {
+			m.notice = "Settings: " + d.err.Error()
+			return nil, true
+		}
+		m.pushOverlay(newSettingsStructurePage(d.page, d.structure))
 		return nil, true
 	}
 	return nil, false
@@ -694,6 +917,10 @@ func (m *Model) applySettingsChange(change SettingsChange) {
 	switch {
 	case change.Layer != "":
 		notices = append(notices, "Settings saved to the "+change.Layer+" config")
+	case change.Reload && len(change.Live) == 0 && len(change.Restart) == 0 && len(change.Warnings) == 0:
+		notices = append(notices, "Config reloaded: no changes")
+	case change.Reload:
+		notices = append(notices, "Config reloaded")
 	case len(change.Live) > 0:
 		notices = append(notices, "Settings reloaded")
 	}
@@ -774,6 +1001,23 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) {
 	case "explorer_show_ignored":
 		if m.tree != nil {
 			m.tree.SetShowIgnored(change.Settings.ExplorerShowIgnored)
+		}
+	case "editor.status_bar.left", "editor.status_bar.right", "editor.status_bar.separator":
+		m.view.opts.StatusBar = v.StatusBar
+	case "file_explorer.width":
+		m.explorerWidth = v.Explorer.Width
+		m.view.opts.Explorer.Width = v.Explorer.Width
+	case "file_explorer.side":
+		m.explorerSide = v.Explorer.Side
+		m.view.opts.Explorer.Side = v.Explorer.Side
+	case "file_explorer.follow_active_buffer":
+		m.view.opts.Explorer.FollowActiveBuffer = v.Explorer.FollowActiveBuffer
+	case "file_explorer.auto_open_on_last_buffer_close":
+		m.view.opts.Explorer.AutoOpenOnLastBufferClose = v.Explorer.AutoOpenOnLastBufferClose
+	case "file_explorer.compact_directories":
+		m.view.opts.Explorer.CompactDirectories = v.Explorer.CompactDirectories
+		if c, ok := m.tree.(interface{ SetCompactDirectories(bool) }); ok {
+			c.SetCompactDirectories(v.Explorer.CompactDirectories)
 		}
 	}
 	// The rest of the display options are read from the view options by the
@@ -869,7 +1113,13 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 		}
 		it := r.item
 		name := it.Name
+		dirty := false
 		if _, ok := p.pending[it.Key]; ok {
+			dirty = true
+		} else if it.Kind == "page" && p.pendingUnder(it.Path) {
+			dirty = true
+		}
+		if dirty {
 			name = "* " + name
 		}
 		value := it.Value
@@ -885,7 +1135,7 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 		g.Put(box.X+2, box.Y+2, end, "No matches", ov.Muted)
 	}
 	ov.PaintFooter(g, box.X, box.Y+box.H-1, box.W,
-		"Enter edit · Tab layer · ^S save · ^R reset · ^E raw · Esc close")
+		"Enter edit · Del reset · Tab layer · ^S save · ^R discard · ^E raw · Esc close")
 }
 
 // Cursor returns the caret in the filter row.

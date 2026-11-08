@@ -21,15 +21,14 @@ const inlineDiagMin = 8
 // severity colour is the message's, so a warning and an error read apart; a
 // severity without a colour falls back to the muted text style.
 //
-// The port carries no diagnostic version, so the message is never dimmed for
-// staleness: gvim's diagnostics are the language server's latest reply, not a
-// snapshot of the text at a version (docs/lsp.md records the difference from
-// Fresh).
+// A diagnostic published for an older version of the document than the server
+// has now is drawn faint: the message describes text that has since moved on. The
+// port reports the version each set was published for (docs/lsp.md).
 func (f frame) paintInlineDiagnostics(g *grid.Grid, i, y, end int, cur bool) {
 	if !f.inlineDiag || f.diags == nil || f.win != nil {
 		return
 	}
-	sev, msg := mostSevereDiagnostic(f.diags(i))
+	sev, stale, msg := mostSevereDiagnostic(f.diags(i))
 	if msg == "" {
 		return
 	}
@@ -46,7 +45,8 @@ func (f frame) paintInlineDiagnostics(g *grid.Grid, i, y, end int, cur bool) {
 	}
 	if fg := f.diagnosticFG(sev); fg != nil {
 		st.FG = fg
-	} else {
+	}
+	if stale {
 		st.Faint = true
 	}
 	x := right - ansi.StringWidth(text) + 1
@@ -56,11 +56,11 @@ func (f frame) paintInlineDiagnostics(g *grid.Grid, i, y, end int, cur bool) {
 	g.Put(x, y, right+1, text, st)
 }
 
-// mostSevereDiagnostic returns the severity and message of the most severe
-// diagnostic of one line. A message is a single row: control characters and line
-// breaks become spaces, and the ends are trimmed. A diagnostic with no message is
-// skipped, as is a severity outside the LSP range.
-func mostSevereDiagnostic(spans []DiagnosticSpan) (severity int, message string) {
+// mostSevereDiagnostic returns the severity, staleness and message of the most
+// severe diagnostic of one line. A message is a single row: control characters and
+// line breaks become spaces, and the ends are trimmed. A diagnostic with no message
+// is skipped, as is a severity outside the LSP range.
+func mostSevereDiagnostic(spans []DiagnosticSpan) (severity int, stale bool, message string) {
 	severity = -1
 	for _, s := range spans {
 		if s.Severity < SeverityError || s.Severity > SeverityHint {
@@ -71,13 +71,13 @@ func mostSevereDiagnostic(spans []DiagnosticSpan) (severity int, message string)
 			continue
 		}
 		if severity < 0 || s.Severity < severity {
-			severity, message = s.Severity, msg
+			severity, message, stale = s.Severity, msg, s.Stale
 		}
 	}
 	if severity < 0 {
-		return 0, ""
+		return 0, false, ""
 	}
-	return severity, message
+	return severity, stale, message
 }
 
 // cleanDiagnosticMessage makes a diagnostic message fit one pane row.

@@ -32,9 +32,26 @@ func (e *Editor) virtualSpace(d *Document) bool {
 }
 
 // VirtualSpaceOn is the global switch as the editor reads it: only "on" puts the
-// caret past the end of lines. "block" is accepted by the config and still to be
-// implemented for block selections; it keeps the caret on the text for now.
+// caret past the end of lines. "block" extends only block selections (see
+// virtualBlock), keeping the caret itself on the text.
 func (e *Editor) VirtualSpaceOn() bool { return e.opts.VirtualSpace == document.VirtualSpaceOn }
+
+// virtualBlock reports whether a block selection in d may extend past the end of
+// lines: editor.virtual_space "block" or "on", the per-buffer switch when the
+// document set one, and unwrapped lines of a document in memory. The per-buffer
+// switch is a boolean, so its "on" also enables block rectangles.
+func (e *Editor) virtualBlock(d *Document) bool {
+	if e == nil || d == nil || d.LargeState() != nil {
+		return false
+	}
+	if e.SettingsFor(d).LineWrap {
+		return false
+	}
+	if v := d.View().VirtualSpace; v != nil {
+		return *v
+	}
+	return e.opts.VirtualSpace == document.VirtualSpaceBlock || e.opts.VirtualSpace == document.VirtualSpaceOn
+}
 
 // virtualSpaceActions keep the caret's virtual column through Do: the moves and
 // edits virtual space teaches, the clipboard actions that do not move the caret,
@@ -43,6 +60,8 @@ func (e *Editor) VirtualSpaceOn() bool { return e.opts.VirtualSpace == document.
 var virtualSpaceActions = map[Action]bool{
 	"move_left": true, "move_right": true, "move_up": true, "move_down": true,
 	"select_left": true, "select_right": true, "select_up": true, "select_down": true,
+	"block_select_left": true, "block_select_right": true,
+	"block_select_up": true, "block_select_down": true,
 	"insert_char": true, "insert_tab": true, "insert_newline": true,
 	"delete_backward": true, "paste": true,
 	"copy":                                true,
@@ -114,14 +133,32 @@ func (e *Editor) virtualMove(d *Document, kind virtualMoveKind, extend bool) boo
 		d.ClearVirtual()
 		return false
 	case virtualMoveUp, virtualMoveDown:
+		if kind == virtualMoveDown {
+			// ArrowDown below the last line parks the caret on a virtual line
+			// there, at its on-screen column; further presses go deeper.
+			if n := d.VirtualLines(); n > 0 {
+				goal := d.VirtualLineColumn()
+				d.SetVirtualLines(n+1, goal)
+				return true
+			}
+			if d.Cursor == d.Buffer.End() {
+				d.SetVirtualLines(1, cellColumn(d.Buffer, d.Cursor, tab)+d.VirtualColumns())
+				return true
+			}
+		} else if n := d.VirtualLines(); n > 0 {
+			// ArrowUp steps back through the virtual lines; from the first one
+			// the caret returns to the buffer end with its horizontal virtual
+			// column, as it had before.
+			e.stepVirtualLineUp(d, n, tab)
+			return true
+		}
 		dir := -1
 		if kind == virtualMoveDown {
 			dir = 1
 		}
 		line := d.Cursor.Line + dir
 		if line < 0 || line >= d.Buffer.Lines() {
-			// Vertical virtual lines past the top and bottom of the buffer are
-			// not implemented; the caret stays where it is.
+			// The caret stays where it is past the top and bottom of the buffer.
 			return true
 		}
 		goal := cellColumn(d.Buffer, d.Cursor, tab) + d.VirtualColumns()
@@ -137,4 +174,36 @@ func (e *Editor) virtualMove(d *Document, kind virtualMoveKind, extend bool) boo
 		return true
 	}
 	return false
+}
+
+// stepVirtualLineUp moves the caret one virtual line up: it stays at the buffer
+// end, and from the first virtual line it takes the horizontal virtual column the
+// wanted column implies, so the round-2 caret appears again.
+func (e *Editor) stepVirtualLineUp(d *Document, lines, tab int) {
+	if lines > 1 {
+		d.SetVirtualLines(lines-1, d.VirtualLineColumn())
+		return
+	}
+	goal := d.VirtualLineColumn()
+	d.ClearVirtualLines()
+	width := cellColumn(d.Buffer, d.Buffer.End(), tab)
+	if goal > width {
+		d.SetVirtualColumns(goal - width)
+	}
+	d.Want = -1
+}
+
+// SetVirtualLines parks the caret on virtual line lines below the last line, at
+// display column col, and reports whether it did. It is the click path; it needs
+// the same mode as the vertical moves and no selection. Zero clears the virtual
+// lines.
+func (e *Editor) SetVirtualLines(lines, col int) bool {
+	d := e.Active()
+	if d == nil || !e.virtualSpace(d) {
+		return false
+	}
+	if lines > 0 && d.HasSelection() {
+		return false
+	}
+	return d.SetVirtualLines(lines, col) > 0
 }

@@ -44,6 +44,16 @@ type Config struct {
 	// Env, when non-nil, is appended to the parent environment of the server
 	// process.
 	Env []string
+	// InitializationOptions is the JSON sent as initialize's
+	// initializationOptions, or nil for none. It is passed through verbatim, so
+	// a server reads it in the form the user wrote.
+	InitializationOptions protocol.LSPAny
+	// ApplyEdit, when non-nil, answers a server's workspace/applyEdit request.
+	// It runs on the connection's read goroutine, so it must not wait on the
+	// UI: enqueue the edit and return whether it was accepted. Answering here,
+	// off the request queue, is what keeps a server's executeCommand followed by
+	// applyEdit from deadlocking on the main thread.
+	ApplyEdit func(protocol.ApplyWorkspaceEditParams) bool
 }
 
 // Client is a connection to one language server. All methods are safe for
@@ -67,12 +77,35 @@ type Client struct {
 	diagMu    sync.Mutex
 	diagByURI map[string]DiagnosticsEvent
 
+	// applyEdit answers workspace/applyEdit; nil when the editor takes none.
+	applyEdit func(protocol.ApplyWorkspaceEditParams) bool
+	// initOptions answers workspace/configuration, and is what initialize sent.
+	initOptions protocol.LSPAny
+
+	// capMu guards the capability snapshot: capStatic is what the initialize
+	// result advertised, dyn holds the providers registered later by
+	// registration id, and caps is the two combined. The read goroutine writes
+	// them; request callers read them.
+	capMu     sync.Mutex
+	caps      Capabilities
+	capStatic Capabilities
+	dyn       map[string]dynRegistration
+	initRes   *protocol.InitializeResult
+
 	// proc is set only by Start. stderr holds the tail of its error output.
 	proc   *exec.Cmd
 	stderr *tailBuffer
 
 	closeOnce sync.Once
 	closeErr  error
+}
+
+// dynRegistration is one provider a server registered with
+// client/registerCapability, kept so an unregistration can recompute the
+// capability snapshot from the static capabilities.
+type dynRegistration struct {
+	method  string
+	options protocol.LSPAny
 }
 
 // Start launches the server in cfg.Command with os/exec and connects to its
@@ -139,12 +172,15 @@ func NewClient(rwc io.ReadWriteCloser, cfg Config) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := &Client{
-		rwc:       &guardedRWC{rwc: rwc},
-		rootURI:   cfg.RootURI,
-		ctx:       ctx,
-		cancel:    cancel,
-		diags:     make(chan DiagnosticsEvent, diagnosticsBuffer),
-		diagByURI: make(map[string]DiagnosticsEvent),
+		rwc:         &guardedRWC{rwc: rwc},
+		rootURI:     cfg.RootURI,
+		ctx:         ctx,
+		cancel:      cancel,
+		diags:       make(chan DiagnosticsEvent, diagnosticsBuffer),
+		diagByURI:   make(map[string]DiagnosticsEvent),
+		applyEdit:   cfg.ApplyEdit,
+		initOptions: cfg.InitializationOptions,
+		dyn:         make(map[string]dynRegistration),
 	}
 	c.conn = jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(c.rwc), jsonrpc2.WithCodec(lspCodec{}))
 	c.server = protocol.ServerDispatcher(c.conn)
@@ -167,7 +203,8 @@ func NewClient(rwc io.ReadWriteCloser, cfg Config) *Client {
 // Call Initialized after it.
 func (c *Client) Initialize(ctx context.Context) (*protocol.InitializeResult, error) {
 	params := &protocol.InitializeParams{
-		Capabilities: clientCapabilities(),
+		Capabilities:          clientCapabilities(),
+		InitializationOptions: c.initOptions,
 	}
 	if c.rootURI != "" {
 		root := uri.URI(c.rootURI)
@@ -180,7 +217,60 @@ func (c *Client) Initialize(ctx context.Context) (*protocol.InitializeResult, er
 	if err != nil {
 		return nil, fmt.Errorf("lsp: initialize: %w", err)
 	}
+	c.capMu.Lock()
+	c.initRes = res
+	c.capStatic = summarizeCapabilities(res.Capabilities)
+	c.caps = c.capStatic
+	for _, reg := range c.dyn {
+		applyRegistration(&c.caps, reg.method, reg.options)
+	}
+	c.capMu.Unlock()
 	return res, nil
+}
+
+// InitializeResult returns the server's initialize result. ok is false before
+// Initialize returns.
+func (c *Client) InitializeResult() (*protocol.InitializeResult, bool) {
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
+	return c.initRes, c.initRes != nil
+}
+
+// Capabilities returns what the server can serve: the providers it advertised in
+// its initialize result, plus the ones it registered later. Initialized is false
+// until Initialize returns, and the manager routes no request to a server whose
+// capabilities it does not know.
+func (c *Client) Capabilities() Capabilities {
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
+	return c.caps
+}
+
+// registerCapabilities applies the providers the server registered with
+// client/registerCapability, so a server that advertises little statically can
+// still serve features it registers dynamically.
+func (c *Client) registerCapabilities(regs []protocol.Registration) {
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
+	for _, reg := range regs {
+		dyn := dynRegistration{method: reg.Method, options: reg.RegisterOptions}
+		c.dyn[reg.ID] = dyn
+		applyRegistration(&c.caps, dyn.method, dyn.options)
+	}
+}
+
+// unregisterCapabilities removes the providers the server unregistered and
+// recomputes the snapshot from the static capabilities plus what is left.
+func (c *Client) unregisterCapabilities(regs []protocol.Unregistration) {
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
+	for _, reg := range regs {
+		delete(c.dyn, reg.ID)
+	}
+	c.caps = c.capStatic
+	for _, dyn := range c.dyn {
+		applyRegistration(&c.caps, dyn.method, dyn.options)
+	}
 }
 
 // Initialized sends the initialized notification, which ends the handshake.
@@ -329,16 +419,35 @@ func (c *Client) Close() error {
 	return c.closeErr
 }
 
-// clientCapabilities lists what this client supports: publishDiagnostics with
-// versions, text document synchronization (full sync only), and code action
-// literals, so a server may answer CodeActions with full actions, not only bare
-// commands.
+// clientCapabilities lists what this client supports. It advertises the whole
+// surface the editor asks for: workspace edits (with document changes and file
+// operations), server-pulled configuration, publishDiagnostics with versions,
+// full text synchronization, code action literals with resolve, rename, format,
+// inlay hints, folding ranges, semantic tokens and workspace symbols. A server
+// gates some of its own providers on these flags.
 func clientCapabilities() protocol.ClientCapabilities {
+	yes := new(true)
 	return protocol.ClientCapabilities{
+		Workspace: &protocol.WorkspaceClientCapabilities{
+			ApplyEdit: yes,
+			WorkspaceEdit: &protocol.WorkspaceEditClientCapabilities{
+				DocumentChanges: yes,
+				ResourceOperations: []protocol.ResourceOperationKind{
+					protocol.ResourceOperationKindCreate,
+					protocol.ResourceOperationKindRename,
+					protocol.ResourceOperationKindDelete,
+				},
+				FailureHandling: protocol.FailureHandlingKindTextOnlyTransactional,
+			},
+			Configuration:    yes,
+			WorkspaceFolders: yes,
+			ExecuteCommand:   &protocol.ExecuteCommandClientCapabilities{},
+			Symbol:           &protocol.WorkspaceSymbolClientCapabilities{},
+		},
 		TextDocument: &protocol.TextDocumentClientCapabilities{
 			Synchronization: &protocol.TextDocumentSyncClientCapabilities{},
 			PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{
-				VersionSupport: new(true),
+				VersionSupport: yes,
 			},
 			CodeAction: &protocol.CodeActionClientCapabilities{
 				CodeActionLiteralSupport: protocol.ClientCodeActionLiteralOptions{
@@ -347,14 +456,58 @@ func clientCapabilities() protocol.ClientCapabilities {
 							protocol.CodeActionKindQuickFix,
 							protocol.CodeActionKindRefactor,
 							protocol.CodeActionKindRefactorExtract,
+							protocol.CodeActionKindRefactorInline,
+							protocol.CodeActionKindRefactorRewrite,
 							protocol.CodeActionKindSource,
 							protocol.CodeActionKindSourceOrganizeImports,
+							protocol.CodeActionKindSourceFixAll,
 						},
 					},
 				},
+				IsPreferredSupport: yes,
+				DataSupport:        yes,
+				ResolveSupport: protocol.ClientCodeActionResolveOptions{
+					Properties: []string{"edit"},
+				},
+			},
+			Hover:             &protocol.HoverClientCapabilities{ContentFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText}},
+			SignatureHelp:     &protocol.SignatureHelpClientCapabilities{},
+			Definition:        &protocol.DefinitionClientCapabilities{},
+			Implementation:    &protocol.ImplementationClientCapabilities{},
+			References:        &protocol.ReferenceClientCapabilities{},
+			DocumentSymbol:    &protocol.DocumentSymbolClientCapabilities{},
+			Formatting:        &protocol.DocumentFormattingClientCapabilities{},
+			Rename:            &protocol.RenameClientCapabilities{},
+			FoldingRange:      &protocol.FoldingRangeClientCapabilities{},
+			InlayHint:         &protocol.InlayHintClientCapabilities{},
+			DocumentHighlight: &protocol.DocumentHighlightClientCapabilities{},
+			SemanticTokens: protocol.SemanticTokensClientCapabilities{
+				Requests: protocol.ClientSemanticTokensRequestOptions{
+					Full:  &protocol.ClientSemanticTokensRequestFullDelta{Delta: yes},
+					Range: protocol.Boolean(true),
+				},
+				TokenTypes:     semanticTokenTypes,
+				TokenModifiers: semanticTokenModifiers,
+				Formats:        []protocol.TokenFormat{protocol.TokenFormatRelative},
 			},
 		},
+		Window: &protocol.WindowClientCapabilities{WorkDoneProgress: yes},
 	}
+}
+
+// semanticTokenTypes are the standard LSP token types, the subset this client
+// understands. A server's legend names them.
+var semanticTokenTypes = []string{
+	"namespace", "type", "class", "enum", "interface", "struct", "typeParameter",
+	"parameter", "variable", "property", "enumMember", "event", "function", "method",
+	"macro", "keyword", "modifier", "comment", "string", "number", "regexp",
+	"operator", "decorator",
+}
+
+// semanticTokenModifiers are the standard LSP token modifiers.
+var semanticTokenModifiers = []string{
+	"declaration", "definition", "readonly", "static", "deprecated", "abstract",
+	"async", "modification", "documentation", "defaultLibrary",
 }
 
 //go:fix inline

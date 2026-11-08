@@ -3,10 +3,12 @@ package document
 import (
 	"cmp"
 	"errors"
-	"github.com/tbxark/gvim/buffer"
 	"maps"
 	"slices"
+	"strings"
 	"unicode/utf8"
+
+	"github.com/tbxark/gvim/buffer"
 )
 
 // errFirstLine and errLastLine are returned when a caret cannot be added above
@@ -53,6 +55,11 @@ type caret struct {
 	Primary      bool
 	// want is the wanted column of vertical moves, plus one. Zero is unset.
 	Want int
+	// Pad is how many spaces the caret's line needs before an edit at the caret,
+	// for the lines of a virtual block selection whose left edge is past their
+	// end. Edits that insert text materialize it (see replaceEdit); deletions
+	// ignore it.
+	Pad int
 }
 
 // bounds returns the caret's selection in document order. An empty caret has
@@ -151,7 +158,15 @@ func (d *Document) AllCarets() []caret {
 		}
 		cs = append(cs, d.clampCaret(c))
 	}
-	return normalize(cs)
+	cs = normalize(cs)
+	// A virtual block selection edits every line of the rectangle: a line whose
+	// end is left of the rectangle's left edge gets the gap as spaces first.
+	if rect, ok := d.BlockSelection(); ok && rect.Virtual {
+		for i := range cs {
+			cs[i].Pad = d.blockPad(rect, cs[i].Head.Line)
+		}
+	}
+	return cs
 }
 
 // clampCaret returns c with its anchor and head clamped into the text.
@@ -169,6 +184,7 @@ func (d *Document) SetCarets(cs []caret) {
 	cs = normalize(cs)
 	d.Want = -1
 	d.virtual = 0
+	d.virtualLines = 0
 	d.Block = nil
 	d.Extra = nil
 	for _, c := range cs {
@@ -304,10 +320,25 @@ func (d *Document) EditAtCarets(plan func(c caret) edit) {
 }
 
 // replaceEdit returns the edit that replaces a caret's selection with text. An
-// empty caret inserts text at its position.
+// empty caret inserts text at its position. A caret of a virtual block selection
+// with a pad inserts the pad as spaces before the text, so the rectangle's left
+// edge materializes in the same undo step.
 func replaceEdit(c caret, text string) edit {
+	if c.Pad > 0 {
+		return edit{From: c.Head, To: c.Head, Text: strings.Repeat(" ", c.Pad) + text}
+	}
 	lo, hi := c.Bounds()
 	return edit{From: lo, To: hi, Text: text}
+}
+
+// DeleteAtCarets removes each caret's selection, and inserts nothing, as one undo
+// step. Unlike replaceEdit it never materializes a virtual block's padding: the
+// gap holds no text to delete.
+func (d *Document) DeleteAtCarets() {
+	d.EditAtCarets(func(c caret) edit {
+		lo, hi := c.Bounds()
+		return edit{From: lo, To: hi}
+	})
 }
 
 // caretLines returns the first and last line a caret covers: its own line, or

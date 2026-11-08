@@ -23,10 +23,12 @@ func find(t *testing.T, entries []commands.Entry, name string) commands.Entry {
 func TestCommandsFromBuiltinTable(t *testing.T) {
 	entries := commands.Commands(nil)
 	// 206 generated rows, then the hand-written rows: the Open Menu Bar and Live Grep rows
-	// of keys_commands.go, the 2 Compare rows of compare_commands.go, the 3 Markdown
-	// Contents rows of markdown_commands.go and the 4 Plugin: rows of plugin_commands.go.
-	if len(entries) != 217 {
-		t.Fatalf("Commands() = %d entries, want 217", len(entries))
+	// of keys_commands.go, the Reload Configuration row of settings_commands.go, the
+	// Search and Replace in Project and Git Grep rows of search_commands.go, the 2 Compare
+	// rows of compare_commands.go, the 3 Markdown Contents rows of markdown_commands.go
+	// and the 4 Plugin: rows of plugin_commands.go.
+	if len(entries) != 220 {
+		t.Fatalf("Commands() = %d entries, want 220", len(entries))
 	}
 	if entries[0].Name != "Add Cursor Above" || entries[1].Name != "Add Cursor Below" {
 		t.Fatalf("first entries = %q, %q; want byte order", entries[0].Name, entries[1].Name)

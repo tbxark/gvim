@@ -91,6 +91,23 @@ type CannedReplies struct {
 	CodeActions    []protocol.CommandOrCodeAction
 	Implementation protocol.DefinitionResult
 	Formatting     []protocol.TextEdit
+
+	// Caps is what Initialize answers. A zero value reports full document sync
+	// and nothing else.
+	Caps protocol.ServerCapabilities
+
+	// The answers of the requests a code action pipeline sends.
+	ResolvedCodeAction   *protocol.CodeAction
+	ExecuteCommandResult protocol.LSPAny
+	InlayHints           []protocol.InlayHint
+	SemanticTokens       *protocol.SemanticTokens
+	SemanticTokensDelta  protocol.SemanticTokensDeltaResult
+	SemanticTokensRange  *protocol.SemanticTokens
+	FoldingRanges        []protocol.FoldingRange
+	// OnExecuteCommand, when set, runs inside the executeCommand handler before
+	// it answers. It may send a request back to the client (after jsonrpc2.Async)
+	// to test the nested applyEdit flow.
+	OnExecuteCommand func(context.Context, *protocol.ExecuteCommandParams)
 }
 
 // FakeServer answers the requests the client under test sends, and records each
@@ -152,14 +169,37 @@ func (s *FakeServer) park(ctx context.Context) {
 	<-s.stall
 }
 
-// Initialize records the params and reports full document sync.
+// Initialize records the params and reports the canned capabilities, or full
+// document sync and nothing else when none are set.
 func (s *FakeServer) Initialize(_ context.Context, p *protocol.InitializeParams) (*protocol.InitializeResult, error) {
 	RecordTo(s.InitCh, p)
-	return &protocol.InitializeResult{
-		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: protocol.TextDocumentSyncKindFull,
-		},
-	}, nil
+	caps := s.Canned.Caps
+	if caps.TextDocumentSync == nil {
+		caps.TextDocumentSync = protocol.TextDocumentSyncKindFull
+	}
+	return &protocol.InitializeResult{Capabilities: caps}, nil
+}
+
+// ApplyEdit sends a workspace/applyEdit request to the client under test and
+// returns its answer. The caller must run on a goroutine that may block, such as
+// inside an OnExecuteCommand hook started with jsonrpc2.Async.
+func (s *FakeServer) ApplyEdit(ctx context.Context, params *protocol.ApplyWorkspaceEditParams) (*protocol.ApplyWorkspaceEditResult, error) {
+	return s.client.ApplyEdit(ctx, params)
+}
+
+// RegisterCapability sends client/registerCapability to the client under test.
+func (s *FakeServer) RegisterCapability(ctx context.Context, params *protocol.RegistrationParams) error {
+	return s.client.RegisterCapability(ctx, params)
+}
+
+// UnregisterCapability sends client/unregisterCapability to the client under test.
+func (s *FakeServer) UnregisterCapability(ctx context.Context, params *protocol.UnregistrationParams) error {
+	return s.client.UnregisterCapability(ctx, params)
+}
+
+// Configuration sends workspace/configuration to the client under test.
+func (s *FakeServer) Configuration(ctx context.Context, params *protocol.ConfigurationParams) ([]protocol.LSPAny, error) {
+	return s.client.Configuration(ctx, params)
 }
 
 // Shutdown parks when the test asked for it, then succeeds.

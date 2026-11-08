@@ -131,6 +131,17 @@ func (d documentAdapter) Cursors() []editor.Caret { return d.doc.Cursors() }
 // line (virtual space), which the pane draws the caret at.
 func (d documentAdapter) VirtualColumns() int { return d.doc.VirtualColumns() }
 
+// BlockSelection is the active block selection's rectangle, which the pane paints
+// as a rectangle, including its virtual columns past the end of short lines.
+func (d documentAdapter) BlockSelection() (editor.BlockRect, bool) { return d.doc.BlockSelection() }
+
+// VirtualLines is how many empty rows below the last line the caret sits on, and
+// VirtualLineColumn its display column there (vertical virtual space).
+func (d documentAdapter) VirtualLines() int { return d.doc.VirtualLines() }
+func (d documentAdapter) VirtualLineColumn() int {
+	return d.doc.VirtualLineColumn()
+}
+
 // Folds returns the indentation fold ranges, for a tab of tabWidth columns.
 func (d documentAdapter) Folds(tabWidth int) []fold.Range { return d.doc.Folds(tabWidth) }
 

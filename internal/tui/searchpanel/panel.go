@@ -1,0 +1,713 @@
+package searchpanel
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
+	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/theme"
+)
+
+// The panel is an overlay of the root's stack.
+var (
+	_ overlay.Overlay = (*Panel)(nil)
+	_ overlay.Caret   = (*Panel)(nil)
+)
+
+const (
+	// searchDebounce is how long the panel waits after a keystroke before it searches,
+	// so typing does not start one search per key.
+	searchDebounce = 150 * time.Millisecond
+	// gitResultLimit caps git grep, as Fresh's git grep plugin does.
+	gitResultLimit = 100
+	// fileOpenMark and fileClosedMark head a file row of the expanded and folded states.
+	fileOpenMark   = "▾ "
+	fileClosedMark = "▸ "
+)
+
+// focus is the part of the panel that takes the typed keys.
+type focus int
+
+const (
+	focusSearch focus = iota
+	focusReplace
+	focusResults
+)
+
+// rowKind is the kind of one result row.
+type rowKind int
+
+const (
+	rowFile rowKind = iota
+	rowMatch
+)
+
+// panelRow is one painted row of the results region: a file header or a match.
+type panelRow struct {
+	kind  rowKind
+	file  int // index in fileMatches
+	match int // index in the file's Matches, for a match row
+	path  string
+	count int
+	line  int
+	col   int
+	text  string
+	// hlStart and hlEnd are the matched runes of text, for the bold span.
+	hlStart, hlEnd int
+}
+
+// styles are the panel's grid styles, derived from the overlay palette.
+type styles struct {
+	ov       style.Overlay
+	label    grid.Style
+	active   grid.Style
+	field    grid.Style
+	selected grid.Style
+	stat     grid.Style
+	file     grid.Style
+	hint     grid.Style
+}
+
+func newStyles(st style.Styles) styles {
+	ov := st.Overlay
+	return styles{
+		ov:       ov,
+		label:    ov.Muted,
+		active:   ov.Focus,
+		field:    ov.Idle,
+		selected: ov.Selected,
+		stat:     ov.Muted,
+		file:     ov.Box,
+		hint:     ov.Muted,
+	}
+}
+
+// Options are the input of New.
+type Options struct {
+	Root      string
+	Files     Files
+	OpenFiles []SourceFile
+	Current   *SourceFile
+	Limit     int
+	Git       bool
+	Modes     MatchOptions
+	Scope     Scope
+	Query     string
+	Searcher  Searcher
+	Grepper   GitGrepper
+	Styles    style.Styles
+	Theme     theme.Theme
+}
+
+// Panel is the project-wide Search and Replace sheet, or the Git Grep sheet when Git is
+// set. The zero value is not usable; call New.
+type Panel struct {
+	styles styles
+	root   string
+	files  Files
+	limit  int
+	git    bool
+
+	searcher Searcher
+	grepper  GitGrepper
+
+	// openFiles and current are the snapshots the searches see for unsaved text. Their
+	// source is the root, which refreshes them after a replacement.
+	openFiles []SourceFile
+	current   *SourceFile
+
+	query, replace textinput.Model
+	focus          focus
+	modes          MatchOptions
+	scope          Scope
+
+	open    bool
+	seq     int
+	loading bool
+	// notice, when set, replaces the hints on the bottom border, so a summary (a
+	// replacement's result, say) shows while the panel covers the status row.
+	notice string
+
+	fileMatches  []FileMatches
+	truncated    bool
+	skippedCount int
+	skipped      []string
+	errText      string
+	expanded     []bool
+	rows         []panelRow
+	selected     int
+	top          int
+
+	width, height int
+}
+
+// tickMsg and doneMsg bring a search back to the update loop.
+type tickMsg struct{ seq int }
+
+type searchDoneMsg struct {
+	seq    int
+	result SearchResult
+	err    error
+}
+
+type gitDoneMsg struct {
+	seq    int
+	result GitResult
+	err    error
+}
+
+// New returns the panel.
+func New(o Options) *Panel {
+	p := &Panel{
+		styles:    newStyles(o.Styles),
+		root:      o.Root,
+		files:     o.Files,
+		limit:     o.Limit,
+		git:       o.Git,
+		searcher:  o.Searcher,
+		grepper:   o.Grepper,
+		openFiles: o.OpenFiles,
+		current:   o.Current,
+		modes:     o.Modes,
+		scope:     o.Scope,
+		open:      true,
+		top:       0,
+	}
+	if p.limit <= 0 {
+		p.limit = DefaultLimit
+		if p.git {
+			p.limit = gitResultLimit
+		}
+	}
+	p.query = newField(o.Query)
+	p.replace = newField("")
+	p.query.Focus()
+	return p
+}
+
+// newField returns a text field with no prompt and no width limit, so the panel can
+// scroll it to keep the caret in the room it paints.
+func newField(value string) textinput.Model {
+	m := textinput.New()
+	m.Prompt = ""
+	m.SetVirtualCursor(false)
+	m.SetWidth(0)
+	m.SetValue(value)
+	return m
+}
+
+// Active reports whether the panel is open.
+func (p *Panel) Active() bool { return p.open }
+
+// SetNotice shows text on the bottom border in place of the key hints, until the next
+// key. The root uses it for a summary that would otherwise be covered by the panel.
+func (p *Panel) SetNotice(text string) { p.notice = text }
+
+// Git reports whether the panel is the read-only Git Grep sheet.
+func (p *Panel) Git() bool { return p.git }
+
+// Init returns the command of the initial query, if any.
+func (p *Panel) Init() tea.Cmd {
+	if p.query.Value() == "" {
+		return nil
+	}
+	return p.requery()
+}
+
+// Update handles one message: a key, or a search result coming back.
+func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		return p.key(msg)
+	case tickMsg:
+		if msg.seq != p.seq || p.query.Value() == "" {
+			return p, nil
+		}
+		return p, p.searchCmd(msg.seq)
+	case searchDoneMsg:
+		p.applySearch(msg)
+		return p, nil
+	case gitDoneMsg:
+		p.applyGit(msg)
+		return p, nil
+	}
+	return p, nil
+}
+
+// key runs one key press.
+func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
+	name := tea.Key(kp).Keystroke()
+	p.notice = ""
+	switch name {
+	case "esc":
+		p.open = false
+		return nil, nil
+	case "tab":
+		p.cycleFocus(1)
+		return p, nil
+	case "shift+tab":
+		p.cycleFocus(-1)
+		return p, nil
+	case "alt+c":
+		p.modes.CaseSensitive = !p.modes.CaseSensitive
+		return p, p.requery()
+	case "alt+a":
+		if p.git {
+			return p, nil
+		}
+		if p.scope == AllFiles {
+			p.scope = CurrentFile
+		} else {
+			p.scope = AllFiles
+		}
+		return p, p.requery()
+	case "alt+r":
+		if p.git {
+			return p, nil
+		}
+		p.modes.Regex = !p.modes.Regex
+		return p, p.requery()
+	case "alt+w":
+		if p.git {
+			return p, nil
+		}
+		p.modes.WholeWord = !p.modes.WholeWord
+		return p, p.requery()
+	case "alt+enter":
+		return p, p.replaceCmd()
+	}
+	if p.focus == focusResults {
+		return p, p.resultsKey(name)
+	}
+	// A field takes the key. A change of the search text starts a new search after the
+	// debounce; a change of the replacement text changes nothing until it is applied.
+	f := p.field()
+	before := f.Value()
+	next, cmd := f.Update(kp)
+	*f = next
+	if p.focus == focusSearch && p.query.Value() != before {
+		return p, p.requery()
+	}
+	if p.focus == focusReplace && p.replace.Value() != before {
+		p.errText = ""
+	}
+	return p, cmd
+}
+
+// resultsKey runs a key while the result rows have the focus.
+func (p *Panel) resultsKey(name string) tea.Cmd {
+	switch name {
+	case "up", "ctrl+p":
+		p.move(-1)
+	case "down", "ctrl+n":
+		p.move(1)
+	case "home":
+		p.selectRow(0)
+	case "end":
+		p.selectRow(len(p.rows) - 1)
+	case "enter":
+		return p.activate()
+	}
+	return nil
+}
+
+// field returns the focused text field.
+func (p *Panel) field() *textinput.Model {
+	if p.focus == focusReplace && !p.git {
+		return &p.replace
+	}
+	return &p.query
+}
+
+// cycleFocus moves the focus by delta around the areas of the panel. Git Grep has no
+// replacement field.
+func (p *Panel) cycleFocus(delta int) {
+	stops := []focus{focusSearch, focusReplace, focusResults}
+	if p.git {
+		stops = []focus{focusSearch, focusResults}
+	}
+	at := 0
+	for i, f := range stops {
+		if f == p.focus {
+			at = i
+		}
+	}
+	at = (at + delta + len(stops)) % len(stops)
+	p.focus = stops[at]
+	switch p.focus {
+	case focusSearch:
+		p.query.Focus()
+		p.replace.Blur()
+	case focusReplace:
+		p.query.Blur()
+		p.replace.Focus()
+	default:
+		p.query.Blur()
+		p.replace.Blur()
+	}
+}
+
+// requery starts the debounce of a new search. An empty query clears the result and
+// searches nothing.
+func (p *Panel) requery() tea.Cmd {
+	p.seq++
+	p.errText = ""
+	if p.query.Value() == "" {
+		p.loading = false
+		p.fileMatches, p.rows = nil, nil
+		p.truncated, p.skippedCount, p.skipped = false, 0, nil
+		p.selected, p.top = 0, 0
+		return nil
+	}
+	p.loading = true
+	seq := p.seq
+	return tea.Tick(searchDebounce, func(time.Time) tea.Msg { return tickMsg{seq: seq} })
+}
+
+// ReSearch re-runs the current search immediately, without the debounce. The root uses
+// it after a replacement, so the shown results are planned from the new text.
+func (p *Panel) ReSearch() tea.Cmd {
+	if p.query.Value() == "" {
+		return nil
+	}
+	p.seq++
+	p.errText = ""
+	p.loading = true
+	return p.searchCmd(p.seq)
+}
+
+// searchCmd returns the command that runs the current search. The file index snapshot is
+// read in the command, so the update loop does no IO.
+func (p *Panel) searchCmd(seq int) tea.Cmd {
+	query := p.query.Value()
+	if p.git {
+		g := p.grepper
+		req := GitRequest{Root: p.root, Query: query, CaseSensitive: p.modes.CaseSensitive, Limit: p.limit}
+		if g == nil {
+			return func() tea.Msg { return gitDoneMsg{seq: seq, err: fmt.Errorf("git grep is not supported in this port")} }
+		}
+		return func() tea.Msg {
+			res, err := g.GitGrep(req)
+			return gitDoneMsg{seq: seq, result: res, err: err}
+		}
+	}
+	s := p.searcher
+	files := p.files
+	req := SearchRequest{
+		Root:      p.root,
+		Query:     query,
+		Options:   p.modes,
+		Scope:     p.scope,
+		Current:   p.current,
+		OpenFiles: p.openFiles,
+		Limit:     p.limit,
+	}
+	if s == nil {
+		return func() tea.Msg {
+			return searchDoneMsg{seq: seq, err: fmt.Errorf("project search is not supported in this port")}
+		}
+	}
+	return func() tea.Msg {
+		if files != nil {
+			req.Files, _ = files.Snapshot()
+		}
+		res, err := s.ProjectSearch(req)
+		return searchDoneMsg{seq: seq, result: res, err: err}
+	}
+}
+
+// applySearch shows a project search result when it answers the current search.
+func (p *Panel) applySearch(msg searchDoneMsg) {
+	if msg.seq != p.seq {
+		return
+	}
+	p.loading = false
+	if msg.err != nil {
+		p.errText = msg.err.Error()
+		p.fileMatches, p.rows = nil, nil
+		p.truncated, p.skippedCount, p.skipped = false, 0, nil
+		p.selected, p.top = 0, 0
+		return
+	}
+	p.fileMatches = msg.result.Files
+	p.truncated = msg.result.Truncated
+	p.skippedCount = msg.result.SkippedCount
+	p.skipped = msg.result.Skipped
+	p.errText = msg.result.Err
+	p.resetRows()
+}
+
+// applyGit shows a git grep result when it answers the current search.
+func (p *Panel) applyGit(msg gitDoneMsg) {
+	if msg.seq != p.seq {
+		return
+	}
+	p.loading = false
+	if msg.err != nil {
+		p.errText = msg.err.Error()
+		p.fileMatches, p.rows = nil, nil
+		p.truncated, p.skippedCount, p.skipped = false, 0, nil
+		p.selected, p.top = 0, 0
+		return
+	}
+	p.fileMatches = msg.result.Files
+	p.truncated = false
+	p.skippedCount, p.skipped = 0, nil
+	p.errText = msg.result.Err
+	p.resetRows()
+}
+
+// resetRows rebuilds the rows of a new result: every file starts expanded and the first
+// row is selected.
+func (p *Panel) resetRows() {
+	p.expanded = make([]bool, len(p.fileMatches))
+	for i := range p.expanded {
+		p.expanded[i] = true
+	}
+	p.selected, p.top = 0, 0
+	p.rebuildRows()
+}
+
+// rebuildRows flattens the file and match rows, honoring the folded files, and keeps the
+// selection in range.
+func (p *Panel) rebuildRows() {
+	p.rows = p.rows[:0]
+	for i, f := range p.fileMatches {
+		p.rows = append(p.rows, panelRow{kind: rowFile, file: i, path: f.Name, count: len(f.Matches)})
+		if i < len(p.expanded) && !p.expanded[i] {
+			continue
+		}
+		for j, m := range f.Matches {
+			text, start, end := matchText(m)
+			p.rows = append(p.rows, panelRow{
+				kind: rowMatch, file: i, match: j,
+				line: m.Line, col: m.Col, text: text, hlStart: start, hlEnd: end,
+			})
+		}
+	}
+	p.selected = clamp(p.selected, 0, max(len(p.rows)-1, 0))
+	p.clampTop()
+}
+
+// matchText makes one match's line paintable: tabs become four spaces and the matched
+// runes are returned as the span to bold.
+func matchText(m Match) (text string, hlStart, hlEnd int) {
+	line := strings.TrimRight(m.Text, " ")
+	start := max(m.Col-1, 0)
+	end := start + max(m.Len, 1)
+	var b strings.Builder
+	disp := 0
+	hlStart, hlEnd = -1, -1
+	for i, r := range []rune(line) {
+		if i == start {
+			hlStart = disp
+		}
+		if i == end {
+			hlEnd = disp
+		}
+		if r == '\t' {
+			b.WriteString("    ")
+			disp += 4
+			continue
+		}
+		b.WriteRune(r)
+		disp++
+	}
+	if hlStart < 0 {
+		hlStart = disp
+	}
+	if hlEnd < 0 {
+		hlEnd = disp
+	}
+	return b.String(), hlStart, hlEnd
+}
+
+// activate runs the selected row: a file row folds or unfolds its matches, and a match
+// row sends the position it names to the root.
+func (p *Panel) activate() tea.Cmd {
+	if p.selected < 0 || p.selected >= len(p.rows) {
+		return nil
+	}
+	r := p.rows[p.selected]
+	if r.kind == rowFile {
+		if r.file < len(p.expanded) {
+			p.expanded[r.file] = !p.expanded[r.file]
+		}
+		p.rebuildRows()
+		return nil
+	}
+	f := p.fileMatches[r.file]
+	return func() tea.Msg {
+		return OpenMsg{Path: f.Path, Line: r.line, Col: r.col}
+	}
+}
+
+// replaceCmd asks the root to confirm and apply the replacement, when there is one.
+func (p *Panel) replaceCmd() tea.Cmd {
+	req, ok := p.ReplaceRequest()
+	if !ok {
+		if p.git {
+			p.errText = "Git Grep is read-only"
+		} else {
+			p.errText = "No matches to replace"
+		}
+		return nil
+	}
+	return func() tea.Msg { return ReplaceRequestMsg{Request: req} }
+}
+
+// ReplaceRequest returns the replacement of the current result set. ok is false in Git
+// Grep mode and when nothing matched.
+func (p *Panel) ReplaceRequest() (ReplaceRequest, bool) {
+	if p.git || p.query.Value() == "" {
+		return ReplaceRequest{}, false
+	}
+	var files []ReplaceFile
+	for _, f := range p.fileMatches {
+		if len(f.Matches) == 0 {
+			continue
+		}
+		files = append(files, ReplaceFile{Path: f.Path, Name: f.Name, Hash: f.Hash, Dirty: f.Dirty})
+	}
+	if len(files) == 0 {
+		return ReplaceRequest{}, false
+	}
+	matches, _ := p.ReplaceCount()
+	return ReplaceRequest{
+		Root:        p.root,
+		Query:       p.query.Value(),
+		Replacement: p.replace.Value(),
+		Options:     p.modes,
+		Files:       files,
+		Matches:     matches,
+		Limit:       p.limit,
+	}, true
+}
+
+// ReplaceCount returns the matches and files the current replacement would touch.
+func (p *Panel) ReplaceCount() (matches, files int) {
+	if p.git {
+		return 0, 0
+	}
+	for _, f := range p.fileMatches {
+		if len(f.Matches) == 0 {
+			continue
+		}
+		files++
+		matches += len(f.Matches)
+	}
+	return matches, files
+}
+
+// NextMatch moves the selection to the next match row, wrapping around, and returns the
+// position it names. It is the next and previous match action of the editor, and it
+// works while the panel is closed: the root keeps the panel for it.
+func (p *Panel) NextMatch(forward bool) (OpenMsg, bool) {
+	if len(p.rows) == 0 {
+		return OpenMsg{}, false
+	}
+	start, step := p.selected, 1
+	if !forward {
+		step = -1
+	}
+	for n := 1; n <= len(p.rows); n++ {
+		i := (start + step*n) % len(p.rows)
+		if i < 0 {
+			i += len(p.rows)
+		}
+		if p.rows[i].kind != rowMatch {
+			continue
+		}
+		p.selectRow(i)
+		r := p.rows[i]
+		f := p.fileMatches[r.file]
+		return OpenMsg{Path: f.Path, Line: r.line, Col: r.col}, true
+	}
+	return OpenMsg{}, false
+}
+
+// Settings returns the session match options and scope, so the root can open the next
+// panel with them.
+func (p *Panel) Settings() (MatchOptions, Scope) { return p.modes, p.scope }
+
+// SetSources replaces the unsaved-text snapshots of the searches, after the root applied
+// a replacement and re-reads the open buffers.
+func (p *Panel) SetSources(openFiles []SourceFile, current *SourceFile) {
+	p.openFiles, p.current = openFiles, current
+}
+
+// Stats returns the match count, the file count and whether the result was capped, for
+// the title and the tests.
+func (p *Panel) Stats() (matches, files int, truncated bool) {
+	for _, f := range p.fileMatches {
+		matches += len(f.Matches)
+		if len(f.Matches) > 0 {
+			files++
+		}
+	}
+	return matches, files, p.truncated
+}
+
+// Query and Replacement report the two field values, for the root's tests.
+func (p *Panel) Query() string       { return p.query.Value() }
+func (p *Panel) Replacement() string { return p.replace.Value() }
+
+// Move selects the row delta from the selection.
+func (p *Panel) Move(delta int) { p.move(delta) }
+
+// Select opens the selected row, as Enter does.
+func (p *Panel) Select() tea.Cmd { return p.activate() }
+
+// move selects the row delta away and keeps it in view.
+func (p *Panel) move(delta int) { p.selectRow(p.selected + delta) }
+
+// selectRow selects row i, clamped into the result, and keeps it in view.
+func (p *Panel) selectRow(i int) {
+	if len(p.rows) == 0 {
+		p.selected = 0
+		return
+	}
+	p.selected = clamp(i, 0, len(p.rows)-1)
+	p.clampTop()
+}
+
+// clampTop keeps the selected row inside the visible result rows.
+func (p *Panel) clampTop() {
+	h := p.resultsHeight()
+	if h <= 0 {
+		p.top = 0
+		return
+	}
+	if p.selected < p.top {
+		p.top = p.selected
+	}
+	if p.selected >= p.top+h {
+		p.top = p.selected - h + 1
+	}
+	p.top = clamp(p.top, 0, max(len(p.rows)-h, 0))
+}
+
+// resultsHeight is the number of result rows the current frame gives the panel. It is
+// the layout of the last Draw, so the top clamp works from the first frame on.
+func (p *Panel) resultsHeight() int {
+	if p.width <= 0 || p.height <= 0 {
+		return 0
+	}
+	return layoutFor(p.width, p.height, p.git).results
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}

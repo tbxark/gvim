@@ -391,14 +391,18 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		return trustCtl.State().AllowsProjectConfig()
 	}
 	deps.SettingsPort = newSettingsService(root, opts, ed, trustedForSettings, cfg)
+	projSearch := newProjectSearch(edOpts)
 	deps.Root = tui.RootPorts{
-		Projects: proj,
-		Grep:     grepFor(edOpts),
-		Preview:  previewReader{},
-		Git:      uiadapter.GitStatus{},
-		Watch:    events,
-		AutoSave: interval,
-		Stashes:  uiadapter.StashesFor(opts.SessionDir),
+		Projects:       proj,
+		Grep:           grepFor(edOpts),
+		Preview:        previewReader{},
+		ProjectSearch:  projSearch,
+		ProjectReplace: projSearch,
+		GitGrep:        gitGrep{},
+		Git:            uiadapter.GitStatus{},
+		Watch:          events,
+		AutoSave:       interval,
+		Stashes:        uiadapter.StashesFor(opts.SessionDir),
 	}
 	deps.Root.Keybindings = keys
 	deps.Root.AutoRevertPoll = autoRevertPoll(cfg)

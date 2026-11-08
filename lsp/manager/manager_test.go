@@ -39,6 +39,9 @@ type startLog struct {
 	fail error
 	// dead, when set, closes the server end before the handshake.
 	dead bool
+	// caps, when set, gives the capabilities each fake server advertises in its
+	// initialize result.
+	caps func(cfg lsp.Config) protocol.ServerCapabilities
 }
 
 // pair is an lsp.Client connected to a FakeServer over in-memory pipes.
@@ -83,6 +86,9 @@ func (s *startLog) start(_ context.Context, cfg lsp.Config) (*lsp.Client, error)
 		return nil, s.fail
 	}
 	p := startPair(cfg, nil)
+	if s.caps != nil {
+		p.srv.Canned.Caps = s.caps(cfg)
+	}
 	s.t.Cleanup(func() {
 		_ = p.client.Close()
 		_ = p.srvConn.Close()
@@ -95,10 +101,34 @@ func (s *startLog) start(_ context.Context, cfg lsp.Config) (*lsp.Client, error)
 }
 
 // newLoggedManager returns a Manager for mgrRoot whose servers come from log.
+// Each configured server auto-starts, so an Open starts it like the single-server
+// Manager always did.
 func newLoggedManager(log *startLog, servers map[string]ServerConfig) *Manager {
-	m := NewManager(mgrRoot, servers)
+	return newLoggedManagerFor(log, servers, nil)
+}
+
+// newLoggedManagerFor is newLoggedManager with universal servers.
+func newLoggedManagerFor(log *startLog, servers map[string]ServerConfig, universal []ServerConfig) *Manager {
+	lists := make(map[string][]ServerConfig, len(servers))
+	for lang, cfg := range servers {
+		cfg.AutoStart = true
+		lists[lang] = []ServerConfig{cfg}
+	}
+	m := NewManager(mgrRoot, lists, universal)
 	m.start = log.start
 	return m
+}
+
+// newManager returns a Manager over the servers, each set to auto-start, with the
+// real start hook. Tests that plug their own start hook or timeout replace it
+// after the call.
+func newManager(servers map[string]ServerConfig) *Manager {
+	lists := make(map[string][]ServerConfig, len(servers))
+	for lang, cfg := range servers {
+		cfg.AutoStart = true
+		lists[lang] = []ServerConfig{cfg}
+	}
+	return NewManager(mgrRoot, lists, nil)
 }
 
 var goAndMarkdown = map[string]ServerConfig{
@@ -303,7 +333,7 @@ func TestManagerOpenErrors(t *testing.T) {
 func TestManagerRealStartNeedsCommand(t *testing.T) {
 	// NewManager uses the real lsp.Start. An empty Command fails before any process
 	// is launched.
-	m := NewManager(mgrRoot, map[string]ServerConfig{"go": {}})
+	m := NewManager(mgrRoot, map[string][]ServerConfig{"go": {{AutoStart: true}}}, nil)
 	if err := m.Open(mgrAPath, "go", "x\n"); !errors.Is(err, lsp.ErrNoCommand) {
 		t.Fatalf("Open with empty command = %v, want lsp.ErrNoCommand", err)
 	}
@@ -477,7 +507,7 @@ func TestManagerReplacesServerThatExited(t *testing.T) {
 
 func TestStalledWriteDoesNotBlockShutdown(t *testing.T) {
 	servers := &gatedServers{t: t}
-	m := NewManager(mgrRoot, goAndMarkdown)
+	m := newManager(goAndMarkdown)
 	m.start = servers.start
 	m.timeout = 100 * time.Millisecond
 
@@ -536,7 +566,7 @@ func TestEachManagerStepGetsItsOwnDeadline(t *testing.T) {
 	// runs didClose and didOpen, about 240ms in all. Each step is inside its own
 	// timeout, so both calls succeed even though the totals exceed the timeout.
 	servers := &gatedServers{t: t, delay: 120 * time.Millisecond}
-	m := NewManager(mgrRoot, goAndMarkdown)
+	m := newManager(goAndMarkdown)
 	m.start = servers.start
 	m.timeout = 200 * time.Millisecond
 
@@ -554,7 +584,7 @@ func TestShutdownDuringStartClosesTheNewServer(t *testing.T) {
 	t.Cleanup(releaseOnce)
 	started := make(chan *lsp.Client, 1)
 
-	m := NewManager(mgrRoot, goAndMarkdown)
+	m := newManager(goAndMarkdown)
 	m.start = func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
 		p := startPair(cfg, nil)
 		t.Cleanup(func() {
@@ -616,7 +646,7 @@ func TestSlowServerStartDoesNotBlockChangeOrClose(t *testing.T) {
 			releaseOnce := sync.OnceFunc(func() { close(release) })
 			t.Cleanup(releaseOnce)
 
-			m := NewManager(mgrRoot, goAndMarkdown)
+			m := newManager(goAndMarkdown)
 			m.start = func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
 				if slices.Equal(cfg.Command, []string{"marksman"}) {
 					entered <- struct{}{}
@@ -669,7 +699,7 @@ func TestConcurrentOpensShareOneServerStart(t *testing.T) {
 	releaseOnce := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releaseOnce)
 
-	m := NewManager(mgrRoot, goAndMarkdown)
+	m := newManager(goAndMarkdown)
 	m.start = func(_ context.Context, cfg lsp.Config) (*lsp.Client, error) {
 		starts.Add(1)
 		<-release

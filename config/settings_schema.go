@@ -77,8 +77,16 @@ func (s Setting) Value(c Config) string { return s.value(c) }
 
 // Encode parses a value the page produced into the JSON to write. It checks the
 // bounds and the choices; ValidateEdits checks the result again through the
-// config option tables.
-func (s Setting) Encode(text string) (json.RawMessage, error) { return s.encode(text) }
+// config option tables. A page row has no single value, so it refuses.
+func (s Setting) Encode(text string) (json.RawMessage, error) {
+	if s.Kind == SettingPage {
+		return nil, fmt.Errorf("%s opens a sub-page and has no single value", s.Key())
+	}
+	if s.encode == nil {
+		return nil, fmt.Errorf("%s cannot be edited as text", s.Key())
+	}
+	return s.encode(text)
+}
 
 // The sections, in the order the page lists them.
 const (
@@ -281,6 +289,66 @@ var settingsTable = []Setting{
 	{Path: []string{"editor", "double_click_time_ms"}, Section: SectionMouse, Kind: SettingInt, Min: 0,
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: intValue(func(c Config) int { return c.DoubleClickTimeMS }), encode: encodeInt(0, 0)},
+
+	// Languages: a sub-page of the per-language scalar overrides.
+	{Path: []string{"languages"}, Section: SectionLanguages, Kind: SettingPage,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: languagesSummary},
+
+	// Formatters: a sub-page of the language/extension -> command map.
+	{Path: []string{"formatters"}, Section: SectionFormatters, Kind: SettingPage,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: formattersSummary},
+
+	// Status Bar: the two element lists (dual-list sub-pages) and the separator.
+	{Path: []string{"editor", "status_bar", "left"}, Section: SectionStatusBar, Kind: SettingPage,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: func(c Config) string { return statusBarSummary(c.StatusBar.Left) }},
+	{Path: []string{"editor", "status_bar", "right"}, Section: SectionStatusBar, Kind: SettingPage,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: func(c Config) string { return statusBarSummary(c.StatusBar.Right) }},
+	{Path: []string{"editor", "status_bar", "separator"}, Section: SectionStatusBar, Kind: SettingString,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: func(c Config) string { return c.StatusBar.Separator }, encode: encodeString(true)},
+
+	// File Explorer.
+	{Path: []string{"file_explorer", "width"}, Section: SectionFileExplorer, Kind: SettingString,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: explorerWidthText, encode: encodeExplorerWidth},
+	{Path: []string{"file_explorer", "side"}, Section: SectionFileExplorer, Kind: SettingEnum,
+		Choices: []string{"left", "right"},
+		Layers:  LayerUser | LayerProject, Apply: ApplyLive,
+		value: func(c Config) string { return c.FileExplorer.Side }, encode: encodeEnum([]string{"left", "right"})},
+	{Path: []string{"file_explorer", "follow_active_buffer"}, Section: SectionFileExplorer, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.FileExplorer.FollowActiveBuffer }), encode: encodeBool},
+	{Path: []string{"file_explorer", "auto_open_on_last_buffer_close"}, Section: SectionFileExplorer, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.FileExplorer.AutoOpenOnLastBufferClose }), encode: encodeBool},
+	{Path: []string{"file_explorer", "compact_directories"}, Section: SectionFileExplorer, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyLive,
+		value: boolValue(func(c Config) bool { return c.FileExplorer.CompactDirectories }), encode: encodeBool},
+
+	// Terminal. The terminal reads these while the dock is built, so they are
+	// restart settings. A project config cannot choose the shell program (C11),
+	// so the shell rows are user-only.
+	{Path: []string{"terminal", "shell", "command"}, Section: SectionTerminal, Kind: SettingString,
+		Layers: LayerUser, Apply: ApplyRestart,
+		value: func(c Config) string { return c.Terminal.Shell.Command }, encode: encodeString(true)},
+	{Path: []string{"terminal", "shell", "args"}, Section: SectionTerminal, Kind: SettingPage,
+		Layers: LayerUser, Apply: ApplyRestart,
+		value: shellArgsSummary},
+	{Path: []string{"terminal", "close_on_exit"}, Section: SectionTerminal, Kind: SettingBool,
+		Layers: LayerUser | LayerProject, Apply: ApplyRestart,
+		value: boolValue(func(c Config) bool { return c.Terminal.CloseOnExit }), encode: encodeBool},
+	{Path: []string{"terminal", "mouse_forwarding"}, Section: SectionTerminal, Kind: SettingEnum,
+		Choices: []string{MouseForwardRequested, MouseForwardAltScreen},
+		Layers:  LayerUser | LayerProject, Apply: ApplyRestart,
+		value:  func(c Config) string { return c.Terminal.MouseForwarding },
+		encode: encodeEnum([]string{MouseForwardRequested, MouseForwardAltScreen})},
+	{Path: []string{"terminal", "scrollback_lines"}, Section: SectionTerminal, Kind: SettingInt, Min: 0, Max: TerminalScrollbackMax,
+		Layers: LayerUser | LayerProject, Apply: ApplyRestart,
+		value: intValue(func(c Config) int { return c.Terminal.ScrollbackLines }), encode: encodeInt(0, TerminalScrollbackMax)},
 }
 
 // settingsByKey indexes settingsTable by dotted key.

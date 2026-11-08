@@ -38,8 +38,13 @@ func (f *frame) placeHorizontal(want, rows int) {
 		ln := f.layoutLine(i, false)
 		content = max(content, ansi.StringWidth(string(ln.geom)))
 		if i == f.caret.Line {
-			raw := []rune(f.doc.Line(i))
-			caretCol = ansi.StringWidth(string(ln.geom[:expandedIndex(raw, f.caret.Col, f.tab)])) + f.virtual
+			if f.vlines > 0 {
+				// The caret is on an empty row below this line, at its own column.
+				caretCol = f.vlineCol
+			} else {
+				raw := []rune(f.doc.Line(i))
+				caretCol = ansi.StringWidth(string(ln.geom[:expandedIndex(raw, f.caret.Col, f.tab)])) + f.virtual + f.virtualHead
+			}
 			// The window reaches the virtual caret, so it stays visible past the
 			// end of the text.
 			content = max(content, caretCol)

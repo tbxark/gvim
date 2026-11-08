@@ -6,6 +6,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/filewatch"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -57,6 +58,15 @@ type RootPorts struct {
 	// Preview reads the start of a file for the palette's file preview. Nil paints no
 	// preview column.
 	Preview palette.Previewer
+	// ProjectSearch runs the project-wide search panel's searches. Nil shows a notice
+	// when the panel is opened.
+	ProjectSearch searchpanel.Searcher
+	// ProjectReplace plans the panel's replacement, which the root applies after the
+	// confirmation. Nil shows a notice before anything is replaced.
+	ProjectReplace searchpanel.Replacer
+	// GitGrep runs the Git Grep panel's git grep. Nil shows a notice when Git Grep is
+	// opened.
+	GitGrep searchpanel.GitGrepper
 	// Git gives the explorer its status letters. Nil shows none.
 	Git GitStatus
 	// Watch delivers the changes of the tree root. Nil means no watcher, and the

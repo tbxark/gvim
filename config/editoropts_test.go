@@ -580,9 +580,9 @@ func TestFreshExampleConfigLoads(t *testing.T) {
 		{"auto_save_enabled", cfg.AutoSaveEnabled && cfg.AutoSaveIntervalSecs == 30},
 		{"large file threshold", cfg.LargeFileThresholdBytes == 1048576},
 		{"default_language", cfg.DefaultLanguage == "bash"},
-		{"lsp rust", cfg.LSP["rust"].Command == "rust-analyzer"},
-		{"lsp go", cfg.LSP["go"].Command == "gopls"},
-		{"lsp disabled gdscript", cfg.LSP["gdscript"].Command == ""},
+		{"lsp rust", len(cfg.LSP["rust"]) == 1 && cfg.LSP["rust"][0].Command == "rust-analyzer"},
+		{"lsp go", len(cfg.LSP["go"]) == 1 && cfg.LSP["go"][0].Command == "gopls"},
+		{"lsp disabled gdscript", len(cfg.LSP["gdscript"]) == 0 && cfg.LSPDisabled["gdscript"]},
 		{"go language", cfg.Editor("go").UseTabs && !cfg.Editor("go").Whitespace.TabsInner},
 		{"markdown language", cfg.Editor("markdown").AutoClose == false},
 		{"toml language", cfg.Editor("toml").CommentPrefix == "#"},
@@ -595,16 +595,24 @@ func TestFreshExampleConfigLoads(t *testing.T) {
 }
 
 func TestLSPFreshShapes(t *testing.T) {
+	limits := &ProcessLimits{Enabled: new(bool)}
+	*limits.Enabled = true
 	tests := []struct {
 		name string
 		body string
-		want map[string]LSPServer
+		want map[string][]LSPServer
 	}{
-		{"list takes first enabled", `{"lsp": {"py": [{"command": "a", "enabled": false}, {"command": "b", "args": ["x"]}, {"command": "c"}]}}`,
-			map[string]LSPServer{"py": {Command: "b", Args: []string{"x"}}}},
-		{"disabled without command", `{"lsp": {"py": {"enabled": false}}}`, map[string]LSPServer{}},
+		{"a list keeps the enabled servers in order", `{"lsp": {"py": [{"command": "a", "enabled": false}, {"command": "b", "args": ["x"]}, {"command": "c"}]}}`,
+			map[string][]LSPServer{"py": {{Command: "b", Args: []string{"x"}}, {Command: "c"}}}},
+		{"disabled without command", `{"lsp": {"py": {"enabled": false}}}`, map[string][]LSPServer{}},
 		{"fresh fields", `{"lsp": {"go": {"command": "gopls", "auto_start": true, "env": {"A": "b"}, "root_markers": ["go.mod"], "only_features": null, "initialization_options": {"x": 1}, "process_limits": {"enabled": true}}}}`,
-			map[string]LSPServer{"go": {Command: "gopls", RootMarkers: []string{"go.mod"}}}},
+			map[string][]LSPServer{"go": {{
+				Command:               "gopls",
+				RootMarkers:           []string{"go.mod"},
+				Env:                   map[string]string{"A": "b"},
+				InitializationOptions: json.RawMessage(`{"x": 1}`),
+				ProcessLimits:         limits,
+			}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -643,20 +651,20 @@ func TestLSPDisabledAndTurnedOnEntries(t *testing.T) {
 	tests := []struct {
 		name         string
 		body         string
-		want         map[string]LSPServer
+		want         map[string][]LSPServer
 		wantDisabled map[string]bool
 	}{
-		{"disabled without command", `{"lsp": {"go": {"enabled": false}}}`, map[string]LSPServer{}, map[string]bool{"go": true}},
-		{"disabled with command", `{"lsp": {"go": {"command": "gopls", "enabled": false}}}`, map[string]LSPServer{}, map[string]bool{"go": true}},
+		{"disabled without command", `{"lsp": {"go": {"enabled": false}}}`, map[string][]LSPServer{}, map[string]bool{"go": true}},
+		{"disabled with command", `{"lsp": {"go": {"command": "gopls", "enabled": false}}}`, map[string][]LSPServer{}, map[string]bool{"go": true}},
 		{"a later enabled entry keeps the language on",
 			`{"lsp": {"py": [{"command": "a", "enabled": false}, {"command": "b"}]}}`,
-			map[string]LSPServer{"py": {Command: "b"}}, nil},
+			map[string][]LSPServer{"py": {{Command: "b"}}}, nil},
 		{"enabled without a command turns the built-in on", `{"lsp": {"odin": {"enabled": true}}}`,
-			map[string]LSPServer{"odin": {}}, nil},
+			map[string][]LSPServer{"odin": {{}}}, nil},
 		{"auto_start without a command turns the built-in on", `{"lsp": {"odin": {"auto_start": true, "args": ["-x"]}}}`,
-			map[string]LSPServer{"odin": {Args: []string{"-x"}}}, nil},
+			map[string][]LSPServer{"odin": {{Args: []string{"-x"}}}}, nil},
 		{"other languages are not disabled", `{"lsp": {"go": {"enabled": false}, "rust": {"command": "ra"}}}`,
-			map[string]LSPServer{"rust": {Command: "ra"}}, map[string]bool{"go": true}},
+			map[string][]LSPServer{"rust": {{Command: "ra"}}}, map[string]bool{"go": true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

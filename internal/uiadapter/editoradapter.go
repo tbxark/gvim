@@ -341,6 +341,10 @@ func (a *Editor) VirtualSpaceEnabled() bool { return a.ed.VirtualSpaceEnabled() 
 // SetVirtualColumns parks the caret n display columns past the end of its line.
 func (a *Editor) SetVirtualColumns(n int) { a.ed.SetVirtualColumns(n) }
 
+// SetVirtualLines parks the caret on a virtual line below the last line, at
+// display column col, and reports whether the editor allowed it.
+func (a *Editor) SetVirtualLines(lines, col int) bool { return a.ed.SetVirtualLines(lines, col) }
+
 // ExtendSelection grows the selection to p by the unit of a drag.
 func (a *Editor) ExtendSelection(p buffer.Pos, u editor.Unit) {
 	a.ed.ExtendSelection(p, u)

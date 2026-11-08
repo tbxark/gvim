@@ -12,6 +12,11 @@ func (e *Editor) insertTab(d *Document) {
 		d.IndentLines(e.indentUnit(d))
 		return
 	}
+	// Markdown Tab follows Fresh's markdown_source plugin: blank list items indent
+	// and cycle the bullet, everything else takes four spaces.
+	if e.markdownTab(d) {
+		return
+	}
 	d.InsertText(e.indentUnit(d))
 }
 

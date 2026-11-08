@@ -37,7 +37,9 @@ func cutAction(e *Editor, d *Document, _ map[string]any) error {
 		e.setStatus("Cut line")
 		return nil
 	}
-	d.EditAtCarets(func(c caret) edit { return replaceEdit(c, "") })
+	// The deletion never materializes a virtual block's padding: the gap holds
+	// no text to delete.
+	d.DeleteAtCarets()
 	e.setStatus("Cut")
 	return nil
 }

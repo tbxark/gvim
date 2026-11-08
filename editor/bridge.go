@@ -186,6 +186,7 @@ const maxSearchSelection = document.MaxSearchSelection
 var errSearchTextTooLarge = document.ErrSearchTextTooLarge
 
 // Types and values consumers still name through package editor.
+type BlockRect = document.BlockRect
 type Caret = document.Caret
 
 const CursorEnd = document.CursorEnd

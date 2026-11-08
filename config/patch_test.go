@@ -227,11 +227,11 @@ func TestSettingsTableIsCoherent(t *testing.T) {
 	if len(Settings()) < 40 {
 		t.Errorf("the schema has %d settings, want the ~40 scalar settings of the slice", len(Settings()))
 	}
-	// Every setting's encoded current value is one the table accepts. keymap has
-	// no default in the file (empty means the platform preset), so it has no
-	// value to round-trip.
+	// Every scalar setting's encoded current value is one the table accepts. A
+	// page row has no single value, and keymap has no default in the file (empty
+	// means the platform preset), so neither has a value to round-trip.
 	for _, s := range Settings() {
-		if s.Value(Defaults()) == "" {
+		if s.Kind == SettingPage || s.Value(Defaults()) == "" {
 			continue
 		}
 		raw, err := s.Encode(s.Value(Defaults()))

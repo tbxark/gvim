@@ -114,9 +114,9 @@ func TestLanguageKeyResolvesTheNamesOfGvimsDetection(t *testing.T) {
 }
 
 func TestManagerNamesTheServerThatIsNotInstalled(t *testing.T) {
-	m := NewManager(mgrRoot, map[string]ServerConfig{
-		"go": {Command: []string{"gvim-no-such-gopls"}, Install: "go install golang.org/x/tools/gopls@latest"},
-	})
+	m := NewManager(mgrRoot, map[string][]ServerConfig{
+		"go": {{Command: []string{"gvim-no-such-gopls"}, Install: "go install golang.org/x/tools/gopls@latest", AutoStart: true}},
+	}, nil)
 	err := m.Open(mgrAPath, "go", "package a")
 	var ni *lsp.NotInstalledError
 	if !errors.As(err, &ni) {
@@ -137,9 +137,9 @@ func TestManagerNamesTheServerThatIsNotInstalled(t *testing.T) {
 
 func TestManagerExplainsAServerThatDiesDuringTheHandshake(t *testing.T) {
 	t.Setenv("GVIM_LSP_HELPER", "die-with-stderr")
-	m := NewManager(mgrRoot, map[string]ServerConfig{
-		"go": {Command: []string{os.Args[0], "-test.run=^TestHelperProcess$"}, Name: "gopls"},
-	})
+	m := NewManager(mgrRoot, map[string][]ServerConfig{
+		"go": {{Command: []string{os.Args[0], "-test.run=^TestHelperProcess$"}, Name: "gopls", AutoStart: true}},
+	}, nil)
 	err := m.Open(mgrAPath, "go", "package a")
 	var se *lsp.StartError
 	if !errors.As(err, &se) {

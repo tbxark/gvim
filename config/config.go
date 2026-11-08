@@ -41,12 +41,21 @@
 // keybindings replace the user's). keybindings is Fresh's list of {key, modifiers, action,
 // when} entries; an object {"bindings": [...]} is accepted too.
 //
-// The lsp key maps a language ID to the language server that runs for it:
-// {"lsp": {"go": {"command": "gopls", "args": []}}}. It overrides the built-in table of
-// servers (lsp), which starts a server for a language when its program is on
-// PATH. An entry with "enabled": false turns the server of its language off, and the
-// top-level lsp_enabled key turns all of them off. A later layer that sets lsp replaces
-// the whole map.
+// The lsp key maps a language ID to one or more language servers, as Fresh's does:
+// {"lsp": {"go": {"command": "gopls", "args": []}}}. A language may also give a list
+// of servers, which is how Fresh configures several servers for one language. The
+// key overrides the built-in table of servers (lsp), which starts a server for a
+// language when its program is on PATH. An entry with "enabled": false turns that
+// entry off, and a language whose entries are all off gets no server, the built-in
+// one included. The top-level lsp_enabled key turns all of them off. A later layer
+// that sets lsp replaces the whole map. The universal_lsp key maps a name to
+// servers that run alongside those of every language (Fresh's universal servers).
+// The other fields Fresh writes for a server (name, env, language_id_overrides,
+// initialization_options, only_features, except_features, process_limits) are kept
+// and handed to the server; process_limits is parsed but not enforced, because
+// gvim is pure Go and sets no rlimits (docs/lsp.md). The project layer's lsp key
+// may only turn servers on or off and name their root markers and feature filters:
+// a field that chooses or shapes the program is refused with a diagnostic.
 //
 // The formatters key maps a language name, or a file extension with its dot, to the
 // command that formats a buffer: {"formatters": {"go": "gofmt", ".go": "gofmt"}}. Keys
@@ -110,10 +119,10 @@ const (
 	MaxPluginTimeoutMS = 60000
 )
 
-// LSPServer is the language server for one language, as the lsp key writes it.
+// LSPServer is one language server, as the lsp and universal_lsp keys write it.
 // Command is the program, and Args are passed to it in order. An entry that turns a
-// built-in server on ("enabled": true or "auto_start": true) may leave Command empty: the
-// built-in program runs, with Args when they are given.
+// built-in server on ("enabled": true or "auto_start": true) may leave Command empty:
+// the built-in program runs, with Args when they are given.
 type LSPServer struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args,omitempty"`
@@ -124,6 +133,41 @@ type LSPServer struct {
 	// server of a file runs in the nearest directory above the file that holds one of them,
 	// and in the workspace root when none does.
 	RootMarkers []string `json:"root_markers,omitempty"`
+
+	// Name is the server's display name (name). Empty means its program.
+	Name string `json:"name,omitempty"`
+	// Env holds extra environment variables for the server (env), laid over the
+	// inherited environment.
+	Env map[string]string `json:"env,omitempty"`
+	// LanguageIDOverrides maps a file extension, without the dot, to the languageId
+	// didOpen sends for it (language_id_overrides).
+	LanguageIDOverrides map[string]string `json:"language_id_overrides,omitempty"`
+	// InitializationOptions is the JSON sent as initialize's initializationOptions,
+	// verbatim, or nil for none.
+	InitializationOptions json.RawMessage `json:"initialization_options,omitempty"`
+	// OnlyFeatures and ExceptFeatures are the feature filters (only_features,
+	// except_features): a server handles only these features, or all but these. Both
+	// set is not a Fresh config; OnlyFeatures wins. The names are Fresh's LspFeature
+	// names, such as "diagnostics" and "code_action".
+	OnlyFeatures   []string `json:"only_features,omitempty"`
+	ExceptFeatures []string `json:"except_features,omitempty"`
+	// ProcessLimits is the memory and CPU limit Fresh writes for a server
+	// (process_limits). It is kept so a Fresh config loads, and reported by the
+	// status, but gvim is pure Go and does not apply it (docs/lsp.md).
+	ProcessLimits *ProcessLimits `json:"process_limits,omitempty"`
+}
+
+// ProcessLimits is Fresh's process_limits object for a language server. gvim parses
+// it and does not enforce it: a pure-Go binary sets no rlimits, and the fields are
+// accepted so a Fresh config loads unchanged.
+type ProcessLimits struct {
+	// MaxMemoryPercent is the server's memory cap as a percent of system memory,
+	// or nil for none.
+	MaxMemoryPercent *uint32 `json:"max_memory_percent,omitempty"`
+	// MaxCPUPercent is the server's CPU cap, where 100 is one core.
+	MaxCPUPercent *uint32 `json:"max_cpu_percent,omitempty"`
+	// Enabled says whether Fresh would apply the limits.
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // Config is the effective set of settings after all layers are merged.
@@ -200,10 +244,15 @@ type Config struct {
 	// is refused with a diagnostic.
 	Keybindings json.RawMessage
 
-	// LSP maps a language ID to its language server, or is nil when no file sets
-	// the lsp key. A language that is not in the map runs the built-in server for it,
-	// if there is one and its program is on PATH.
-	LSP map[string]LSPServer
+	// LSP maps a language ID to its language servers, in the order the config lists
+	// them, or is nil when no file sets the lsp key. A language that is not in the map
+	// runs the built-in server for it, if there is one and its program is on PATH.
+	LSP map[string][]LSPServer
+
+	// UniversalLSP maps a server name to language servers that run alongside those of
+	// every language (universal_lsp), or is nil. The name identifies the server; a
+	// name may hold several servers, as in Fresh.
+	UniversalLSP map[string][]LSPServer
 
 	// LSPDisabled holds the languages whose lsp entries are all "enabled": false, so
 	// their built-in server does not run either. It is nil when there are none.
@@ -504,6 +553,11 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			diags = append(diags, cfg.setTerminal(keys[key], l, path)...)
 			cfg.note(key, path)
 			continue
+		case key == "universal_lsp" && l == layerProject:
+			// A universal server runs for every buffer, so a repository naming one would
+			// run a program of its choosing in a workspace the user only opened.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set universal_lsp: it chooses a program to run, so set it in the user config"})
+			continue
 		case key == "lsp" && l == layerProject:
 			// A repository must not choose the program gvim starts, so the project layer
 			// can only switch servers off or on, never name a command.
@@ -634,6 +688,12 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return err
 		}
 		c.LSP, c.LSPDisabled = servers, disabled
+	case "universal_lsp":
+		servers, err := decodeUniversalLSP(raw)
+		if err != nil {
+			return err
+		}
+		c.UniversalLSP = servers
 	case "formatters":
 		formatters, err := decodeFormatters(raw)
 		if err != nil {
@@ -677,63 +737,58 @@ var boolKeys = map[string]func(*Config) *bool{
 	"lsp_enabled":           func(c *Config) *bool { return &c.LSPEnabled },
 }
 
-// lspEntry is one language server entry. Command, Args, RootMarkers, auto_start and
-// "enabled" are what gvim uses. The other fields are the ones Fresh's config writes; they
-// are accepted and ignored.
+// lspEntry is one language server entry, as Fresh writes it. gvim keeps every field:
+// the program, its environment and initialization options, the feature filters and the
+// process limits (parsed but not enforced). auto_start and "enabled" are pointers so the
+// code can tell "set" from "unset".
 type lspEntry struct {
-	Command     string   `json:"command"`
-	Args        []string `json:"args"`
-	Enabled     *bool    `json:"enabled"`
-	RootMarkers []string `json:"root_markers"`
+	Command     string           `json:"command"`
+	Args        []string         `json:"args"`
+	Enabled     *bool            `json:"enabled"`
+	AutoStart   *json.RawMessage `json:"auto_start"`
+	RootMarkers []string         `json:"root_markers"`
 
-	Name                *json.RawMessage `json:"name"`
-	AutoStart           *json.RawMessage `json:"auto_start"`
-	Env                 *json.RawMessage `json:"env"`
-	LanguageIDOverrides *json.RawMessage `json:"language_id_overrides"`
-	InitOptions         *json.RawMessage `json:"initialization_options"`
-	OnlyFeatures        *json.RawMessage `json:"only_features"`
-	ExceptFeatures      *json.RawMessage `json:"except_features"`
-	ProcessLimits       *json.RawMessage `json:"process_limits"`
+	Name                  *string           `json:"name"`
+	Env                   map[string]string `json:"env"`
+	LanguageIDOverrides   map[string]string `json:"language_id_overrides"`
+	InitializationOptions json.RawMessage   `json:"initialization_options"`
+	OnlyFeatures          []string          `json:"only_features"`
+	ExceptFeatures        []string          `json:"except_features"`
+	ProcessLimits         *ProcessLimits    `json:"process_limits"`
 }
 
-// decodeLSP reads the lsp key: an object from language ID to LSPServer. Each
-// server must name a command, unless it turns a built-in server on, and it may not have
-// other fields than gvim's and Fresh's. A language may also give a list of servers, as
-// Fresh allows; the first enabled one is used. A server with "enabled": false starts
-// nothing, and a language whose servers are all disabled is returned in disabled, so its
-// built-in server stays off too.
-func decodeLSP(raw json.RawMessage) (servers map[string]LSPServer, disabled map[string]bool, err error) {
+// lspFeatureNames are the feature names only_features and except_features accept:
+// Fresh's LspFeature variants in snake_case.
+var lspFeatureNames = map[string]bool{
+	"diagnostics": true, "completion": true, "code_action": true,
+	"document_symbols": true, "workspace_symbols": true,
+	"hover": true, "definition": true, "implementation": true, "references": true,
+	"format": true, "rename": true, "signature_help": true, "inlay_hints": true,
+	"folding_range": true, "semantic_tokens": true, "document_highlight": true,
+}
+
+// decodeLSP reads the lsp key: an object from language ID to a server or a list of
+// servers (Fresh accepts both forms). Each server must name a command, unless it turns a
+// built-in server on. A server with "enabled": false starts nothing; a language whose
+// servers are all disabled is returned in disabled, so its built-in server stays off too.
+// The servers of a language keep the order the config lists them in.
+func decodeLSP(raw json.RawMessage) (servers map[string][]LSPServer, disabled map[string]bool, err error) {
 	trimmed := bytes.TrimSpace(raw)
 	var entries map[string]json.RawMessage
 	if len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &entries) != nil {
 		return nil, nil, fmt.Errorf("must be a JSON object")
 	}
-	servers = make(map[string]LSPServer, len(entries))
+	servers = make(map[string][]LSPServer, len(entries))
 	for _, lang := range sortedKeys(entries) {
-		list := []json.RawMessage{entries[lang]}
-		if t := bytes.TrimSpace(entries[lang]); len(t) > 0 && t[0] == '[' {
-			if err := json.Unmarshal(t, &list); err != nil {
-				return nil, nil, fmt.Errorf("%s: %w", lang, err)
-			}
+		list, off, err := decodeServerList(lang, entries[lang])
+		if err != nil {
+			return nil, nil, err
 		}
-		off := false
-		for _, item := range list {
-			var e lspEntry
-			if err := decodeStrict(item, &e); err != nil {
-				return nil, nil, fmt.Errorf("%s: %w", lang, err)
-			}
-			if e.Enabled != nil && !*e.Enabled {
-				off = true
-				continue
-			}
-			if e.Command == "" && !turnsOn(e) && !setsAutoStart(e) {
-				return nil, nil, fmt.Errorf("%s: command must not be empty", lang)
-			}
-			if _, taken := servers[lang]; !taken {
-				servers[lang] = LSPServer{Command: e.Command, Args: e.Args, Dormant: autoStartOff(e), RootMarkers: e.RootMarkers}
-			}
+		if len(list) > 0 {
+			servers[lang] = list
+			continue
 		}
-		if _, on := servers[lang]; off && !on {
+		if off {
 			if disabled == nil {
 				disabled = make(map[string]bool)
 			}
@@ -743,13 +798,113 @@ func decodeLSP(raw json.RawMessage) (servers map[string]LSPServer, disabled map[
 	return servers, disabled, nil
 }
 
+// decodeUniversalLSP reads the universal_lsp key: an object from server name to a
+// server or a list of servers that run for every language. Entries with
+// "enabled": false are dropped; the key replaces the whole map when a later layer sets
+// it.
+func decodeUniversalLSP(raw json.RawMessage) (map[string][]LSPServer, error) {
+	trimmed := bytes.TrimSpace(raw)
+	var entries map[string]json.RawMessage
+	if len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &entries) != nil {
+		return nil, fmt.Errorf("must be a JSON object")
+	}
+	servers := make(map[string][]LSPServer, len(entries))
+	for _, name := range sortedKeys(entries) {
+		if name == "" {
+			return nil, fmt.Errorf("server name must not be empty")
+		}
+		list, _, err := decodeServerList("universal_lsp."+name, entries[name])
+		if err != nil {
+			return nil, err
+		}
+		if len(list) > 0 {
+			servers[name] = list
+		}
+	}
+	if len(servers) == 0 {
+		return nil, nil
+	}
+	return servers, nil
+}
+
+// decodeServerList reads one lsp or universal_lsp entry: a server object, or an array
+// of server objects. It returns the enabled servers in order, and whether an entry was
+// explicitly turned off. what names the entry in a diagnostic.
+func decodeServerList(what string, raw json.RawMessage) (servers []LSPServer, anyDisabled bool, err error) {
+	list := []json.RawMessage{raw}
+	if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '[' {
+		if err := json.Unmarshal(t, &list); err != nil {
+			return nil, false, fmt.Errorf("%s: %w", what, err)
+		}
+	}
+	for _, item := range list {
+		var e lspEntry
+		if err := decodeStrict(item, &e); err != nil {
+			return nil, false, fmt.Errorf("%s: %w", what, err)
+		}
+		if e.Enabled != nil && !*e.Enabled {
+			anyDisabled = true
+			continue
+		}
+		if e.Command == "" && !turnsOn(e) && !setsAutoStart(e) {
+			return nil, false, fmt.Errorf("%s: command must not be empty", what)
+		}
+		if err := validLSPEntry(what, e); err != nil {
+			return nil, false, err
+		}
+		servers = append(servers, lspServer(e))
+	}
+	return servers, anyDisabled, nil
+}
+
+// validLSPEntry checks the fields of one entry that gvim reads.
+func validLSPEntry(what string, e lspEntry) error {
+	for _, f := range e.OnlyFeatures {
+		if !lspFeatureNames[f] {
+			return fmt.Errorf("%s: unknown feature %q in only_features", what, f)
+		}
+	}
+	for _, f := range e.ExceptFeatures {
+		if !lspFeatureNames[f] {
+			return fmt.Errorf("%s: unknown feature %q in except_features", what, f)
+		}
+	}
+	return nil
+}
+
+// lspServer converts one decoded entry to the effective server. Slices and maps are
+// copied so a later edit of the raw config cannot change a running server.
+func lspServer(e lspEntry) LSPServer {
+	initOptions := slices.Clone(e.InitializationOptions)
+	if isNull(initOptions) {
+		initOptions = nil
+	}
+	s := LSPServer{
+		Command:               e.Command,
+		Args:                  slices.Clone(e.Args),
+		Dormant:               autoStartOff(e),
+		RootMarkers:           slices.Clone(e.RootMarkers),
+		Env:                   maps.Clone(e.Env),
+		LanguageIDOverrides:   maps.Clone(e.LanguageIDOverrides),
+		InitializationOptions: initOptions,
+		OnlyFeatures:          slices.Clone(e.OnlyFeatures),
+		ExceptFeatures:        slices.Clone(e.ExceptFeatures),
+		ProcessLimits:         e.ProcessLimits,
+	}
+	if e.Name != nil {
+		s.Name = *e.Name
+	}
+	return s
+}
+
 // setProjectLSP applies the lsp key of the project file. Unlike the user's, it adds to the
-// entries below it instead of replacing them, and it cannot run a program: an entry with a
-// command is dropped, and the args of one without are removed, each with a diagnostic that
-// says to set it in the user config. What is left switches languages off ("enabled": false),
-// turns a built-in server on, keeps it dormant (auto_start) or names the root markers. An
-// entry cannot replace the user's entry for the language. ok is false when the key is not
-// valid, and the diagnostic says why.
+// entries below it instead of replacing them, and it cannot run a program of the
+// repository's choosing: an entry with a command is dropped, and the fields that shape the
+// program (args, name, env, initialization_options, process_limits) are removed, each with
+// a diagnostic that says to set it in the user config. What is left switches languages off
+// ("enabled": false), turns a built-in server on, keeps it dormant (auto_start), names the
+// root markers or routes its features. An entry cannot replace the user's entry for the
+// language. ok is false when the key is not valid, and the diagnostic says why.
 func (c *Config) setProjectLSP(path string, raw json.RawMessage) (diags []Diagnostic, ok bool) {
 	servers, disabled, err := decodeLSP(raw)
 	if err != nil {
@@ -757,25 +912,55 @@ func (c *Config) setProjectLSP(path string, raw json.RawMessage) (diags []Diagno
 	}
 	refuse := func(lang, what string) {
 		diags = append(diags, Diagnostic{Path: path, Key: "lsp", Message: fmt.Sprintf(
-			"project config cannot set lsp.%s.%s: it chooses a program to run, so set it in the user config", lang, what)})
+			"project config cannot set lsp.%s.%s: it chooses or shapes a program to run, so set it in the user config", lang, what)})
 	}
 	for _, lang := range slices.Sorted(maps.Keys(servers)) {
-		s := servers[lang]
-		switch {
-		case s.Command != "":
-			refuse(lang, "command")
-			continue
-		case len(s.Args) > 0:
-			refuse(lang, "args")
-			s.Args = nil
+		var kept []LSPServer
+		for _, s := range servers[lang] {
+			if s.Command != "" {
+				// The entry would run the repository's own program: drop it whole, and
+				// do not report its other fields one by one.
+				refuse(lang, "command")
+				continue
+			}
+			keep := true
+			if len(s.Args) > 0 {
+				refuse(lang, "args")
+				s.Args = nil
+			}
+			if s.Name != "" {
+				refuse(lang, "name")
+				s.Name = ""
+			}
+			if len(s.Env) > 0 {
+				refuse(lang, "env")
+				s.Env = nil
+			}
+			if len(s.InitializationOptions) > 0 {
+				refuse(lang, "initialization_options")
+				s.InitializationOptions = nil
+			}
+			if s.ProcessLimits != nil {
+				refuse(lang, "process_limits")
+				s.ProcessLimits = nil
+			}
+			if keep {
+				kept = append(kept, s)
+			}
 		}
+		// An entry cannot replace the user's entry for the language: the user's
+		// program is what runs. The project may still add one for a language the
+		// user has none for, to turn a built-in server on.
 		if _, has := c.LSP[lang]; has {
 			continue
 		}
-		if c.LSP == nil {
-			c.LSP = make(map[string]LSPServer)
+		if len(kept) == 0 {
+			continue
 		}
-		c.LSP[lang] = s
+		if c.LSP == nil {
+			c.LSP = make(map[string][]LSPServer)
+		}
+		c.LSP[lang] = kept
 	}
 	for lang := range disabled {
 		if c.LSPDisabled == nil {

@@ -224,6 +224,7 @@ func advancePos(p buffer.Pos, text string) buffer.Pos {
 func (d *Document) PlaceCursor(p buffer.Pos, extend bool) {
 	d.Want = -1
 	d.virtual = 0
+	d.virtualLines = 0
 	p = d.Buffer.Clamp(p)
 	snapped := snapToCluster(d.Buffer, p)
 	if extend && snapped != p {

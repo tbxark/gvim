@@ -1,71 +1,58 @@
 package lsphost
 
 import (
-	"context"
-	"errors"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"go.lsp.dev/protocol"
-
-	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/config"
-	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui"
-	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/lsp/manager"
 )
 
 // NewFor returns the language-server port for a config: the built-in table of
-// servers (manager.Defaults, which mirrors Fresh's) with the lsp key laid over it. The port always
-// exists, so that its messages can say why a language has no server. Nothing is looked up
-// or started here: a server starts when the first document of its language opens, and the
-// PATH search happens there, in the command that opens the document.
+// servers (manager.Defaults, which mirrors Fresh's) with the lsp and universal_lsp
+// keys laid over it. The port always exists, so that its messages can say why a
+// language has no server. Nothing is looked up or started here: a server starts
+// when the first document of its language opens, and the PATH search happens
+// there, in the command that opens the document.
 func NewFor(cfg config.Config) tui.LSPSession {
-	servers, startable, info := lspTable(cfg)
-	return &lspPort{servers: servers, startable: startable, info: info, managers: make(map[string]*manager.Manager), docs: make(map[string]lspDocRec)}
+	plan := lspPlanFor(cfg)
+	return newPort(plan, cfg.LSPEnabled)
 }
 
-// lspServers builds the servers that start on their own and the description of every language
-// the table or the config knows, by the names a language is detected under. See lspTable.
-func lspServers(cfg config.Config) (map[string]manager.ServerConfig, map[string]tui.LSPServerInfo) {
-	servers, _, info := lspTable(cfg)
-	return servers, info
+// lspPlan is the effective server table of a config.
+type lspPlan struct {
+	// servers holds the configured servers by the names a language is detected
+	// under, in config order. Built-in languages get their default entry, laid
+	// over with the user's lsp entries.
+	servers map[string][]manager.ServerConfig
+	// universal holds the universal_lsp servers, which serve every language.
+	universal []manager.ServerConfig
+	// info describes each language for the messages: whether it has a server, and
+	// what the configuration does with it.
+	info map[string]tui.LSPServerInfo
+	// auto holds the languages with a server that starts on its own.
+	auto map[string]bool
+	// startable holds the languages with any configured server, auto or manual.
+	startable map[string]bool
 }
 
-// lspTable builds, by the names a language is detected under, the servers that start when a
-// file of the language opens (servers), the servers that can run at all (startable), and the
-// description of every language the table or the config knows (info). A language starts on
-// its own unless the master switch is off (lsp_enabled), its entries are all disabled, its
-// built-in server is manual (ols, Godot) and the config does not turn it on, or its entry
-// says "auto_start": false. A server that does not start on its own is still startable: as in
-// Fresh, Start/Restart LSP Server runs it, whatever the switches say.
-func lspTable(cfg config.Config) (servers, startable map[string]manager.ServerConfig, info map[string]tui.LSPServerInfo) {
-	servers = make(map[string]manager.ServerConfig)
-	startable = make(map[string]manager.ServerConfig)
-	info = make(map[string]tui.LSPServerInfo)
-	handled := make(map[string]bool) // the config keys the table used
+// lspPlanFor builds the effective server table of cfg.
+func lspPlanFor(cfg config.Config) lspPlan {
+	plan := lspPlan{
+		servers:   make(map[string][]manager.ServerConfig),
+		info:      make(map[string]tui.LSPServerInfo),
+		auto:      make(map[string]bool),
+		startable: make(map[string]bool),
+	}
+	handled := make(map[string]bool) // the config keys the built-in table used
 	for _, spec := range manager.Defaults() {
-		user, userKey, hasUser := userEntry(cfg, spec)
+		user, userKey, hasUser := userEntries(cfg, spec)
 		if hasUser {
 			handled[userKey] = true
-		}
-		sc := manager.ServerConfig{Command: []string{spec.Command}, Args: slices.Clone(spec.Args), Name: spec.Command, Install: spec.Install,
-			LanguageID: spec.LanguageID, RootMarkers: spec.RootMarkers}
-		if hasUser {
-			// The entry replaces the program, or only the arguments of the built-in one.
-			if user.Command != "" {
-				sc = manager.ServerConfig{Command: []string{user.Command}, Args: slices.Clone(user.Args), Name: user.Command,
-					LanguageID: spec.LanguageID, RootMarkers: spec.RootMarkers}
-			} else if user.Args != nil {
-				sc.Args = slices.Clone(user.Args)
-			}
-			if user.RootMarkers != nil {
-				sc.RootMarkers = slices.Clone(user.RootMarkers)
-			}
 		}
 		state := tui.LSPServerOn
 		switch {
@@ -73,54 +60,109 @@ func lspTable(cfg config.Config) (servers, startable map[string]manager.ServerCo
 			state = tui.LSPServerOffAll
 		case cfg.LSPDisabled[spec.Language] || disabledByAlias(cfg, spec):
 			state = tui.LSPServerOffLanguage
-		case spec.Manual && !hasUser, hasUser && user.Dormant:
+		case spec.Manual && !hasUser:
 			state = tui.LSPServerManual
 		}
-		for _, name := range spec.Names() {
-			info[name] = tui.LSPServerInfo{State: state, Language: spec.Language, Command: sc.Command[0], Install: sc.Install}
-			startable[name] = sc
-			if state == tui.LSPServerOn {
-				servers[name] = sc
-			}
+		configs := mergeUserEntries(spec, user, hasUser, state)
+		if hasUser && state == tui.LSPServerOn && !anyAutoStart(configs) {
+			// Every entry says auto_start: false, so the language has a manual
+			// server: the status row says so, and Start/Restart runs it.
+			state = tui.LSPServerManual
+		}
+		if len(configs) > 0 {
+			plan.put(spec, configs, state, configs[0].Command[0], spec.Install)
+		} else {
+			plan.put(spec, nil, state, "", spec.Install)
 		}
 	}
 	// A language the table does not know runs the program the config names.
 	for _, lang := range slices.Sorted(maps.Keys(cfg.LSP)) {
-		if handled[lang] || cfg.LSP[lang].Command == "" {
+		if handled[lang] {
 			continue
 		}
-		s := cfg.LSP[lang]
+		entries := cfg.LSP[lang]
+		var configs []manager.ServerConfig
+		for _, entry := range entries {
+			if entry.Command == "" {
+				continue
+			}
+			configs = append(configs, serverConfig(entry, manager.Spec{}))
+		}
 		state := tui.LSPServerOn
 		switch {
 		case !cfg.LSPEnabled:
 			state = tui.LSPServerOffAll
-		case s.Dormant:
+		case len(configs) == 0 || entries[0].Dormant:
 			state = tui.LSPServerManual
 		}
-		info[lang] = tui.LSPServerInfo{State: state, Language: lang, Command: s.Command}
-		sc := manager.ServerConfig{Command: []string{s.Command}, Args: slices.Clone(s.Args), Name: s.Command, RootMarkers: slices.Clone(s.RootMarkers)}
-		startable[lang] = sc
-		if state == tui.LSPServerOn {
-			servers[lang] = sc
+		command := ""
+		if len(configs) > 0 {
+			command = configs[0].Command[0]
+		}
+		plan.servers[lang] = configs
+		plan.info[lang] = tui.LSPServerInfo{State: state, Language: lang, Command: command}
+		if len(configs) > 0 {
+			plan.startable[lang] = true
+			if state == tui.LSPServerOn {
+				plan.auto[lang] = true
+			}
 		}
 	}
 	for lang := range cfg.LSPDisabled {
-		if _, known := info[lang]; !known {
-			info[lang] = tui.LSPServerInfo{State: tui.LSPServerOffLanguage, Language: lang}
+		if _, known := plan.info[lang]; !known {
+			plan.info[lang] = tui.LSPServerInfo{State: tui.LSPServerOffLanguage, Language: lang}
 		}
 	}
-	return servers, startable, info
+	// Universal servers serve every language.
+	for _, name := range slices.Sorted(maps.Keys(cfg.UniversalLSP)) {
+		for _, entry := range cfg.UniversalLSP[name] {
+			if entry.Command == "" {
+				continue
+			}
+			plan.universal = append(plan.universal, serverConfig(entry, manager.Spec{}))
+		}
+	}
+	return plan
 }
 
-// userEntry finds the lsp entry that applies to a built-in language: the one under its own
-// name, or under one of its aliases. It returns the key it was found under.
-func userEntry(cfg config.Config, spec manager.Spec) (config.LSPServer, string, bool) {
+// put records the servers of one built-in language under every name it is detected
+// by, so a document detected as "c++" finds the servers of "cpp".
+func (p *lspPlan) put(spec manager.Spec, configs []manager.ServerConfig, state tui.LSPServerState, command, install string) {
 	for _, name := range spec.Names() {
-		if s, ok := cfg.LSP[name]; ok {
-			return s, name, true
+		p.servers[name] = configs
+		p.info[name] = tui.LSPServerInfo{State: state, Language: spec.Language, Command: command, Install: install}
+		if len(configs) > 0 {
+			p.startable[name] = true
+			if state == tui.LSPServerOn && anyAutoStart(configs) {
+				p.auto[name] = true
+			}
 		}
 	}
-	return config.LSPServer{}, "", false
+	for _, cfg := range configs {
+		if cfg.AutoStart {
+			for _, name := range spec.Names() {
+				p.info[name] = tui.LSPServerInfo{State: state, Language: spec.Language, Command: command, Install: install}
+			}
+			break
+		}
+	}
+}
+
+// anyAutoStart reports whether one of the servers starts on its own.
+func anyAutoStart(configs []manager.ServerConfig) bool {
+	return slices.ContainsFunc(configs, func(c manager.ServerConfig) bool { return c.AutoStart })
+}
+
+// userEntries finds the lsp entries that apply to a built-in language: the ones
+// under its own name, or under one of its aliases. It returns the key they were
+// found under.
+func userEntries(cfg config.Config, spec manager.Spec) ([]config.LSPServer, string, bool) {
+	for _, name := range spec.Names() {
+		if list, ok := cfg.LSP[name]; ok && len(list) > 0 {
+			return list, name, true
+		}
+	}
+	return nil, "", false
 }
 
 // disabledByAlias reports whether the config disabled the language under one of its aliases.
@@ -128,15 +170,59 @@ func disabledByAlias(cfg config.Config, spec manager.Spec) bool {
 	return slices.ContainsFunc(spec.Aliases, func(a string) bool { return cfg.LSPDisabled[a] })
 }
 
-// Server describes the server of a language from the configuration. It does no lookup.
-func (p *lspPort) Server(languageID string) tui.LSPServerInfo {
-	if info, ok := p.info[languageID]; ok {
-		return info
+// mergeUserEntries builds the effective servers of a built-in language: the
+// built-in entry when the user gives none, else one server per user entry, each
+// laid over the built-in default (a command and args may be replaced, an entry
+// that only turns the server on keeps the built-in program).
+func mergeUserEntries(spec manager.Spec, user []config.LSPServer, hasUser bool, state tui.LSPServerState) []manager.ServerConfig {
+	if !hasUser {
+		cfg := serverConfig(config.LSPServer{}, spec)
+		cfg.AutoStart = state == tui.LSPServerOn
+		return []manager.ServerConfig{cfg}
 	}
-	if _, ok := p.servers[languageID]; ok {
-		return tui.LSPServerInfo{State: tui.LSPServerOn, Language: languageID, Command: p.servers[languageID].Command[0]}
+	out := make([]manager.ServerConfig, 0, len(user))
+	for _, entry := range user {
+		cfg := serverConfig(entry, spec)
+		cfg.AutoStart = state == tui.LSPServerOn && !entry.Dormant
+		out = append(out, cfg)
 	}
-	return tui.LSPServerInfo{}
+	return out
+}
+
+// serverConfig converts one config entry (or none, for a built-in default) to the
+// server the Manager runs.
+func serverConfig(entry config.LSPServer, spec manager.Spec) manager.ServerConfig {
+	cfg := manager.ServerConfig{
+		Command:               []string{spec.Command},
+		Args:                  slices.Clone(spec.Args),
+		Install:               spec.Install,
+		LanguageID:            spec.LanguageID,
+		LanguageIDOverrides:   maps.Clone(entry.LanguageIDOverrides),
+		RootMarkers:           slices.Clone(spec.RootMarkers),
+		Env:                   maps.Clone(entry.Env),
+		InitializationOptions: entry.InitializationOptions,
+		OnlyFeatures:          slices.Clone(entry.OnlyFeatures),
+		ExceptFeatures:        slices.Clone(entry.ExceptFeatures),
+	}
+	if spec.Command == "" && spec.Install == "" && len(entry.RootMarkers) > 0 {
+		cfg.RootMarkers = nil
+	}
+	if entry.Name != "" {
+		cfg.Name = entry.Name
+	}
+	if entry.Command != "" {
+		cfg.Command = []string{entry.Command}
+		cfg.Args = slices.Clone(entry.Args)
+		// The install hint belongs to the program it names; a replaced program has
+		// none.
+		cfg.Install = ""
+	} else if entry.Args != nil {
+		cfg.Args = slices.Clone(entry.Args)
+	}
+	if entry.RootMarkers != nil {
+		cfg.RootMarkers = slices.Clone(entry.RootMarkers)
+	}
+	return cfg
 }
 
 // openLanguage is the language a document is opened under. TypeScript's detection gives a
@@ -178,49 +264,16 @@ func cppSibling(dir string) bool {
 	return false
 }
 
-// unavailable turns the failure to start the server of lang into the error the root model
-// remembers for the language: a program that is not installed, or a server that failed its
-// handshake. Any other error is returned as it is.
-func unavailable(lang string, err error) error {
-	var ni *lsp.NotInstalledError
-	var se *lsp.StartError
-	switch {
-	case errors.As(err, &ni):
-		return &tui.LSPUnavailableError{Language: lang, Command: ni.Command, Install: ni.Install, Missing: true, Err: err}
-	case errors.As(err, &se):
-		return &tui.LSPUnavailableError{Language: lang, Command: se.Command, Err: err}
+// Server describes the server of a language from the configuration. It does no
+// lookup, so the messages can say why a language has no running server.
+func (p *lspPort) Server(languageID string) tui.LSPServerInfo {
+	if info, ok := p.info[languageID]; ok {
+		return info
 	}
-	return err
-}
-
-// Format asks the server of the document at path to format it and returns the edits in rune
-// columns of text. When the server holds older text than text, it is sent first, so the
-// positions fit. A server with no formatting answers with no edits.
-func (p *lspPort) Format(path, text string, tabSize int, insertSpaces bool) ([]editor.LSPEdit, error) {
-	rec, ok := p.doc(path)
-	if !ok {
-		return nil, errors.New("the document is not open on a language server")
+	if list, ok := p.servers[languageID]; ok && len(list) > 0 {
+		return tui.LSPServerInfo{State: tui.LSPServerOn, Language: languageID, Command: list[0].Command[0]}
 	}
-	if rec.text != text {
-		if err := p.Change(path, text); err != nil {
-			return nil, err
-		}
-	}
-	var edits []protocol.TextEdit
-	err := p.call(path, buffer.Pos{}, func(ctx context.Context, c *lsp.Client, u string, _ protocol.Position) error {
-		var err error
-		edits, err = c.Formatting(ctx, u, tabSize, insertSpaces)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	lines := newTextLines(text)
-	out := make([]editor.LSPEdit, 0, len(edits))
-	for _, e := range edits {
-		out = append(out, editor.LSPEdit{From: lines.fromLSP(e.Range.Start), To: lines.fromLSP(e.Range.End), Text: e.NewText})
-	}
-	return out, nil
+	return tui.LSPServerInfo{}
 }
 
 // serverRoot returns the root a server runs in for the file at path. With markers, as in

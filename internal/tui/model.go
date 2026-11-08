@@ -33,6 +33,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/prompt"
+	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -71,6 +72,10 @@ type Model struct {
 	ranker   palette.Ranker
 	recorder fileRecorder // the ranker's frecency record, when it has one
 
+	// proj is the project-search state: the last panel, kept after it closes so the
+	// next and previous match actions can walk its results, and the replacement
+	// waiting for its confirmation.
+	proj projectSearchState
 	// findBar is the last find bar. It stays after the bar closes, so find_next and
 	// find_previous can run on its search text. The bar is on the overlay stack
 	// only while findOpen reports it.
@@ -593,6 +598,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusEditor()
 	case palette.ActivateBufferMsg:
 		m.activateTab(msg.Index)
+	case searchpanel.ReplaceRequestMsg:
+		cmd = m.askProjectReplace(msg.Request)
+	case searchpanel.OpenMsg:
+		cmd = m.projectJump(msg)
+	case projectReplaceDoneMsg:
+		cmd = m.projectReplaceDone(msg)
 	}
 	return m, tea.Batch(overlayCmd, cmd)
 }
@@ -1071,6 +1082,8 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		}
 	case bookmarkTag:
 		return m.bookmarkAnswer(tag, d)
+	case projectReplaceTag:
+		return m.projectReplaceAnswer(tag, d)
 	}
 	return nil
 }
@@ -1574,6 +1587,9 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 	if cmd, ok := m.fixAction(action, args); ok {
 		return cmd, true
 	}
+	if cmd, ok := m.settingsAction(action, args); ok {
+		return cmd, true
+	}
 	if m.utilityAction(action) {
 		return nil, true
 	}
@@ -1870,6 +1886,9 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
 		if hit.Fold && m.toggleFoldAt(hit.Pos.Line) {
 			return
 		}
+		if hit.Below > 0 && count == 1 && !m.mx.extend && m.placeVirtualLine(hit) {
+			return
+		}
 		m.drag = m.placeCaret(hit.Pos, count, hit.Virtual)
 	}
 }
@@ -1896,6 +1915,23 @@ func (m *Model) placeCaret(pos buffer.Pos, count int, virtual int) drag {
 	m.ed.SetCursor(pos, false)
 	m.parkVirtualCaret(virtual)
 	return drag{active: true, unit: editor.UnitChar}
+}
+
+// placeVirtualLine parks the caret on the virtual line below the buffer end that a
+// press asked for, when the editor has vertical virtual space on. It reports
+// whether it took the press; false falls back to the clamped caret.
+func (m *Model) placeVirtualLine(hit editorpane.Hit) bool {
+	vl, ok := m.ed.(virtualLinesEditor)
+	if !ok {
+		return false
+	}
+	m.collapseCarets()
+	m.ed.SetCursor(hit.Pos, false)
+	if !vl.SetVirtualLines(hit.Below, hit.LineCol) {
+		return false
+	}
+	m.drag = drag{active: true, unit: editor.UnitChar}
+	return true
 }
 
 // parkVirtualCaret puts the caret n display columns past the end of its line when
@@ -2267,9 +2303,9 @@ func (m *Model) statusView() statusView {
 		s.TerminalRestart = "Restart terminal"
 	}
 	if doc := m.ed.Active(); doc != nil {
-		c := doc.Cursor()
-		s.Position = "Ln " + strconv.Itoa(c.Line+1) + ", Col " + strconv.Itoa(c.Col+1)
-		s.Line, s.Col = c.Line+1, c.Col+1
+		line, col := virtualPosition(doc)
+		s.Position = "Ln " + strconv.Itoa(line+1) + ", Col " + strconv.Itoa(col+1)
+		s.Line, s.Col = line+1, col+1
 		s.Lines = displayLines(doc)
 		s.Large = largeLabel(doc)
 		s.EOL = doc.LineEnding()
@@ -2286,6 +2322,26 @@ func (m *Model) statusView() statusView {
 	s.PaletteHint = m.paletteHint()
 	s.Extra = m.plugStatusItems()
 	return s
+}
+
+// virtualPosition returns the line and column the status row shows for the
+// document caret: the byte position adjusted for virtual space, as Fresh's
+// virtual_space_adjusted_position does. A caret on a virtual line advances the
+// line by that many rows and takes the row's column; a horizontal virtual caret
+// reads the line's column plus its virtual columns, which read as spaces. A
+// document without virtual space (or a caret on text) is unchanged.
+func virtualPosition(doc Document) (line, col int) {
+	c := doc.Cursor()
+	line, col = c.Line, c.Col
+	if vld, ok := doc.(editorpane.VirtualLinesDocument); ok {
+		if n := vld.VirtualLines(); n > 0 {
+			return line + n, vld.VirtualLineColumn()
+		}
+	}
+	if vd, ok := doc.(editorpane.VirtualDocument); ok {
+		col += vd.VirtualColumns()
+	}
+	return line, col
 }
 
 // statusRow is the configured editor.status_bar of the session: Fresh's default

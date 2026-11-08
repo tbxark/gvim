@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/tbxark/gvim/buffer"
@@ -163,17 +164,20 @@ type FileOps interface {
 type LSPSession interface {
 	// SetRoot names the workspace root. Servers are kept per root.
 	SetRoot(root string)
-	// Supports reports whether a server is configured for languageID.
+	// Supports reports whether a server starts on its own for languageID.
 	Supports(languageID string) bool
-	// Open sends the full text of the document at path, starting the server for
-	// languageID when it is not running.
-	Open(path, languageID, text string) error
-	// Change sends the full new text of an open document.
-	Change(path, text string) error
+	// Open sends the full text of the document at path, starting the servers
+	// that should run for languageID, and returns the protocol version the
+	// document was opened at.
+	Open(path, languageID, text string) (int32, error)
+	// Change sends the full new text of an open document and returns the new
+	// protocol version.
+	Change(path, text string) (int32, error)
 	// Close sends the close of the document at path.
 	Close(path string) error
-	// Diagnostics returns the latest diagnostics of the document at path. ok is
-	// false until the server has published for it.
+	// Diagnostics returns the latest diagnostics of the document at path,
+	// merged over the servers that published them. ok is false until a server
+	// publishes for it.
 	Diagnostics(path string) (DiagnosticsEvent, bool)
 	// Definition, Implementation and References return the places the symbol at
 	// at refers to.
@@ -182,23 +186,47 @@ type LSPSession interface {
 	References(path string, at buffer.Pos) ([]LSPLocation, error)
 	// Hover returns the hover text at at, or "" when there is none.
 	Hover(path string, at buffer.Pos) (string, error)
-	// Completion returns the completion items at at.
+	// Completion returns the completion items at at, merged over the servers
+	// that serve completion for the language.
 	Completion(path string, at buffer.Pos) ([]CompletionItem, error)
-	// Rename renames the symbol at at to name and returns the edits per file.
-	Rename(path string, at buffer.Pos, name string) ([]FileEdit, error)
-	// CodeActions returns the titles of the code actions at at.
-	CodeActions(path string, at buffer.Pos) ([]string, error)
-	// Request sends the request method with params to the server that has the document at
+	// Rename renames the symbol at at to name and returns the workspace edit to
+	// apply: the text edits per file and any file create, rename or delete.
+	Rename(path string, at buffer.Pos, name string) (WorkspaceEdit, error)
+	// CodeActions returns the code actions at at, merged over the servers that
+	// serve them for the language. The stored diagnostics that overlap the
+	// position are sent as context, as servers that offer quick fixes need them.
+	CodeActions(path string, at buffer.Pos) ([]CodeAction, error)
+	// ResolveCodeAction completes an action that was offered with only its data:
+	// the server fills in the edit and/or the command.
+	ResolveCodeAction(path string, action CodeAction) (CodeAction, error)
+	// ExecuteCommand runs a command of the server that offered it. Some commands
+	// make the server ask for an edit, which arrives through WorkspaceEdits.
+	ExecuteCommand(path string, command LSPCommand) error
+	// WorkspaceEdits drains the edits servers asked to apply with
+	// workspace/applyEdit, in arrival order. The root applies them through its
+	// multi-file edit helper.
+	WorkspaceEdits() []WorkspaceEdit
+	// Request sends the request method with params to a server that has the document at
 	// path open, and returns its decoded JSON result (nil for a null result). Params and
 	// the result are in the protocol's own form, UTF-16 columns included. The error says
 	// what failed through pluginapi codes: a document that is not open is CodeNotFound, a
 	// request that outlived its time limit is CodeTimeout.
 	Request(path, method string, params any) (any, error)
-	// Restart shuts down the servers of the current root. The root reopens its
-	// documents after it.
-	Restart() error
+	// Restart shuts down the servers. The root reopens its documents after it. A
+	// language named here also counts as started by hand, so its servers run
+	// whatever auto_start says.
+	Restart(language string) error
 	// Stop shuts down every server.
 	Stop() error
+	// Servers lists every configured server with its state, for the status popup.
+	Servers() []LSPServerStatus
+	// RestartServer stops the named server and starts it again.
+	RestartServer(language, name string) error
+	// StopServer stops the named server.
+	StopServer(language, name string) error
+	// SetLanguageEnabled mutes or unmutes a language: a muted language starts no
+	// server of its own and its running servers are stopped.
+	SetLanguageEnabled(language string, enabled bool) error
 }
 
 // DiagnosticsEvent is the diagnostics of one document. An empty Items list clears
@@ -206,6 +234,11 @@ type LSPSession interface {
 type DiagnosticsEvent struct {
 	Path  string
 	Items []Diagnostic
+	// Version is the document version the server published the diagnostics for,
+	// and Versioned says whether it gave one. The root dims inline messages whose
+	// version is older than the document's current version.
+	Version   int32
+	Versioned bool
 }
 
 // Diagnostic is one problem in a document. Start and End are its rune range, and
@@ -237,10 +270,98 @@ type LSPRange struct {
 	Start, End buffer.Pos
 }
 
-// FileEdit is the text edits a rename makes in one document.
-type FileEdit struct {
-	Path  string
+// CodeAction is one action a language server offers for a position. The root
+// applies it three ways: an Edit is applied, a Command is executed, and an action
+// with neither but with data is resolved first (ResolveCodeAction) and then the
+// edit and/or command of the resolved action is applied.
+type CodeAction struct {
+	Title  string
+	Kind   string // "" for a bare command
+	Source string // the server that offered it, for a merged list
+	// Preferred marks the action its server recommends.
+	Preferred bool
+	// Edit is the workspace edit the action applies, when it has one.
+	Edit *WorkspaceEdit
+	// Command is the server command the action runs, when it has one. An action
+	// applies its edit first and then runs its command.
+	Command *LSPCommand
+	// NeedsResolve says the action has neither edit nor command yet: it must be
+	// resolved before it can be applied.
+	NeedsResolve bool
+	// Data is the port's opaque handle on the action as the server sent it. The
+	// root passes it back unchanged to ResolveCodeAction.
+	Data any
+}
+
+// LSPCommand is a command a language server executes. Source names the server
+// that offered it, so the command runs on that server; Data is the port's opaque
+// payload and is passed back unchanged.
+type LSPCommand struct {
+	Title     string
+	Command   string
+	Source    string
+	Arguments any // the server's argument list, in the protocol's JSON form; opaque to the root
+	Data      any // the port's opaque payload, passed back unchanged
+}
+
+// WorkspaceEdit is the set of changes a server asks the editor to apply: text
+// edits across files and file create, rename and delete operations. The
+// operations are in the order the server sent them.
+type WorkspaceEdit struct {
+	// Label is what the server calls the edit, for the notice that reports it.
+	Label string
+	Ops   []WorkspaceOp
+}
+
+// WorkspaceOpKind is the kind of one workspace operation.
+type WorkspaceOpKind int
+
+// The kinds of workspace operation.
+const (
+	WorkspaceOpText   WorkspaceOpKind = iota // text edits of one document
+	WorkspaceOpCreate                        // create a file
+	WorkspaceOpRename                        // rename a file: Path to NewPath
+	WorkspaceOpDelete                        // delete a file
+)
+
+// WorkspaceOp is one change of a WorkspaceEdit.
+type WorkspaceOp struct {
+	Kind    WorkspaceOpKind
+	Path    string
+	NewPath string // the target of a rename
+	// Edits are the text edits of a text operation, in rune positions.
 	Edits []editor.LSPEdit
+	// Version is the document version the edits were computed against, when the
+	// server gave one. The root rejects the edits when the open document has
+	// moved past it.
+	Version *int32
+	// Overwrite and IgnoreIfExists are the file-operation options of the server.
+	// gvim refuses to overwrite (and refuses deletes), as Fresh does.
+	Overwrite      bool
+	IgnoreIfExists bool
+}
+
+// LSPServerRunState is where a configured server stands, for the status popup.
+type LSPServerRunState int
+
+// The states of a configured server.
+const (
+	LSPServerStopped  LSPServerRunState = iota // not running
+	LSPServerStarting                          // a start is in flight
+	LSPServerRunning                           // live
+	LSPServerFailed                            // the last start failed
+)
+
+// LSPServerStatus is one configured server as the status popup shows it.
+type LSPServerStatus struct {
+	Language  string // "" for a universal server
+	Name      string
+	Command   string
+	Install   string
+	Universal bool
+	AutoStart bool
+	State     LSPServerRunState
+	Error     string // why the last start failed, when State is LSPServerFailed
 }
 
 // MarkdownRenderer renders a markdown preview at a fixed width. Nil until a
@@ -426,6 +547,11 @@ type SettingsPort interface {
 	// it on the update loop, because the editor is owned by that goroutine;
 	// Save and Reload only read and write files.
 	Apply(change SettingsChange)
+	// Structure returns the sub-page of the structured setting structureKey for
+	// the layer: the formatters map, the language entry list, the scalar fields of
+	// one language, the status-bar element lists, or terminal.shell.args. It reads
+	// the layer's file, so the page calls it from a tea.Cmd.
+	Structure(structureKey, layer string) (SettingsStructure, error)
 }
 
 // The config layers the Settings page can write.
@@ -438,9 +564,10 @@ const (
 // current value and the layers it may be written in.
 type SettingsItem struct {
 	Key     string   // dotted config path, for example "editor.tab_size"
+	Path    []string // the config path components, for Reset and structured edits
 	Name    string   // the last path element, the row's label
 	Section string   // the group the row is listed in
-	Kind    string   // "bool", "int", "enum" or "string"
+	Kind    string   // "bool", "int", "enum", "string" or "page" (a structured sub-page)
 	Value   string   // the current value, as the row shows it ("on"/"off" for a bool)
 	Choices []string // the values of an enum
 	Min     int      // the bounds of an int; Max 0 means no upper bound
@@ -464,11 +591,48 @@ type SettingsSnapshot struct {
 	ProjectWritable bool   // the workspace is trusted, so the project layer may be written
 }
 
-// SettingEdit is one changed row the page saves: the setting key and the value
-// the user set, in the row's display form.
+// SettingEdit is one changed row the page saves. A scalar row names its setting
+// Key and the display-form Value the user set. A structured row (a formatters
+// entry, a language override, a status-bar element list) carries the explicit
+// config Path and the JSON Raw to write, because dotted keys are ambiguous for
+// names like formatter extensions (".go"). A reset removes the key from the
+// layer instead: the value then falls back to a lower layer or the built-in
+// default.
 type SettingEdit struct {
-	Key   string
-	Value string
+	Key    string
+	Path   []string
+	Value  string
+	Raw    json.RawMessage
+	Remove bool
+}
+
+// SettingsStructure is one structured setting's sub-page: a map (formatters), a
+// list (terminal.shell.args), a dual list (the status-bar element lists), the
+// language entry list, or the scalar fields of one language. Rows carry their
+// explicit config paths so the page can edit one entry without knowing the
+// schema; Available is the set of values that can be added (language ids, or the
+// status-bar elements not on a side).
+type SettingsStructure struct {
+	Key       string // structure id, for example "formatters" or "languages.go"
+	Title     string
+	Kind      string // "map", "list", "dual", "languages" or "fields"
+	AddLabel  string // the label of the add row; empty when the structure cannot add
+	Rows      []SettingsStructureRow
+	Available []string
+}
+
+// SettingsStructureRow is one row of a structure sub-page. Group separates the
+// dual list's sides ("left", "right"); the other kinds leave it empty.
+type SettingsStructureRow struct {
+	Path    []string
+	Group   string
+	Name    string
+	Value   string
+	Kind    string // "bool", "int", "enum" or "string" for an inline-editable row
+	Choices []string
+	Min     int
+	Max     int
+	Child   string // structure id this row opens, for a language entry row
 }
 
 // SettingsChange is the result of a Save or a Reload: the page's new content and
@@ -497,6 +661,9 @@ type SettingsChange struct {
 	// Layer is the config layer a Save wrote ("user" or "project"), or "" for a
 	// Reload. The root uses it in the save notice.
 	Layer string
+	// Reload is set for a SettingsPort.Reload result: the config files were read
+	// again without a write, so the page says "reloaded" instead of "saved".
+	Reload bool
 	// Warnings are problems or limits worth a status-row notice: a config
 	// diagnostic after the reload, a layer that could not be written, a command
 	// line flag that wins over the file.

@@ -10,6 +10,67 @@ there waits to be started from the palette, while its documentation says it is u
 gvim follows the documentation and starts a built-in server when a file opens. An entry with
 `"auto_start": false` (see below) gives the Fresh behaviour for one language.
 
+## Several servers per language
+
+A language may have more than one server, as in Fresh: an `lsp` entry is one server object or a
+list of them.
+
+```json
+{
+  "lsp": {
+    "python": [
+      { "command": "pyright-langserver", "args": ["--stdio"] },
+      { "command": "ruff", "args": ["server"], "only_features": ["format", "diagnostics"] }
+    ]
+  }
+}
+```
+
+A `universal_lsp` entry is a server that attaches to every buffer whatever its language, keyed by
+a name of its choosing (Fresh's universal servers):
+
+```json
+{ "universal_lsp": { "spell": { "command": "harper-ls", "args": ["--stdio"] } } }
+```
+
+Every configured server that serves a document is sent its `didOpen`, and features are routed
+between them:
+
+- **Merged** features combine the answers of every eligible server: diagnostics, completion, code
+  actions, document symbols and workspace symbols.
+- **Exclusive** features go to the *first* eligible server, in config order: hover, definition,
+  implementation, references, format, rename, signature help, inlay hints, folding ranges,
+  semantic tokens and document highlights. An empty answer from that server is final; gvim does
+  not fall back to the next one (Fresh's deliberate rule).
+
+A server is eligible for a feature when its `only_features`/`except_features` filter allows it
+*and* its initialize result advertises the capability. A server whose initialize has not finished
+advertises nothing, so no request is routed to a server of unknown capabilities. A provider the
+server registers later with `client/registerCapability` counts too: many servers advertise their
+features dynamically, and gvim learns them without a restart.
+
+The first server of the list is the one the status row names and the one the plugin request
+(`gvim.lsp.request`) asks when it does not name a server.
+
+## Server settings
+
+Each server object is Fresh's `LspServerConfig`. The fields gvim reads:
+
+| Field | Meaning |
+|-------|---------|
+| `command`, `args` | The program and its arguments. `args` without `command` keeps the built-in program. |
+| `enabled` | `false` turns the server off. A language whose servers are all off gets no server, the built-in one included. |
+| `auto_start` | `false` keeps the server dormant: it does not start when a file opens, but **Start/Restart LSP Server** runs it. |
+| `name` | The display name, in messages and the status popup. Default is the program's name. |
+| `root_markers` | The files (or globs) that mark a project root, as described below. |
+| `env` | Extra environment variables for the process, laid over the inherited ones. |
+| `initialization_options` | The JSON sent as `initialize`'s `initializationOptions`, verbatim. The same object answers the server's `workspace/configuration` requests, by section. |
+| `language_id_overrides` | A file extension (without the dot) mapped to the `languageId` `didOpen` sends for it, for example `{"tsx": "typescriptreact"}`. |
+| `only_features`, `except_features` | The feature filter described above. Use one or the other. The names are Fresh's: `diagnostics`, `completion`, `code_action`, `document_symbols`, `workspace_symbols`, `hover`, `definition`, `implementation`, `references`, `format`, `rename`, `signature_help`, `inlay_hints`, `folding_range`, `semantic_tokens`, `document_highlight`. An unknown name is a load diagnostic. |
+| `process_limits` | Parsed so a Fresh config loads, and reported by nothing: **gvim does not enforce it**. Fresh sets memory and CPU rlimits on Linux; gvim is a pure-Go binary and sets no rlimits, so a server may use more than the file says. The startup of a server is otherwise unchanged. |
+
+An entry cannot name a field Fresh does not have; a load reports it instead of guessing.
+
 The status row has an `LSP` pill for the active file. Its states follow Fresh's LSP
 indicator, in Fresh's priority order, with gvim's wording where Fresh's is less precise:
 
@@ -17,17 +78,12 @@ indicator, in Fresh's priority order, with gvim's wording where Fresh's is less 
 |------|---------|
 | `LSP` | the file is open on its language server |
 | `LSP …` | the server is starting (Fresh shows a spinner in this state) |
-| `LSP (off)` | a server is configured for the language, but none runs: switched off, dormant (`auto_start: false`), started by hand and stopped, or turned off for this buffer |
+| `LSP (off)` | a server is configured for the language, but none runs: switched off, muted, dormant (`auto_start: false`), started by hand and stopped, or turned off for this buffer |
 | `LSP (missing)` | the server's program is not installed (Fresh has no state for this: it reports `LSP (error)` only after a failed start) |
 | `LSP (failed)` | the program started and failed its handshake (Fresh's `LSP (error)`) |
 | `LSP (n/a)` | this buffer is skipped (a large file, or LSP off for the buffer) while the language's server runs for another open buffer (Fresh's `LSP (n/a)`) |
 
-A language with no server shows no pill. Click it, or run **Show LSP Status**, for the
-details. The states are Fresh's priority order: the per-buffer `(n/a)` first, then a failure,
-then starting and running, and last the language-level `(off)`. gvim adds no fixed-width
-padding to the pill (Fresh pads it to 11 cells so the bar does not shift): the pill is the
-`{lsp}` element of `editor.status_bar`, so the configured lists and the row's squeeze rule
-place it, and the blank slot of the `{diagnostics}` element keeps that element's columns.
+A language with no server shows no pill.
 
 Nothing is started when the program is missing. The first time a file of that language opens, the
 status row says what is missing and how to get it, once per language and session:
@@ -42,6 +98,21 @@ looks again.
 
 The `PATH` search and every start run in a command, never in the update loop, so a slow disk or a
 slow server cannot freeze typing.
+
+## The server status popup
+
+Click the `LSP` pill, or run **Show LSP Status**, for a popup of every configured server: its
+name, language (or "universal"), state, and — per server — a **Restart** or **Stop** row (a
+stopped or dormant server gets **Start**). A failed start shows the reason under its row.
+
+The footer of the popup mutes or unmutes the language of the active document: **Mute LSP for go**
+starts no server of that language, stops the ones it has, and dims the pill to `LSP (off)`
+until the mute is lifted from the same popup, or **Start/Restart LSP Server** runs one by hand. A
+mute lasts for the session.
+
+The rows of the popup say what the configuration says: a server the user has not started is
+"not running", a server that failed is "error", a live one is "ready". A server started by hand
+counts as the user having opted in: it overrides `lsp_enabled`, `enabled` and the mute.
 
 ## Built-in servers
 
@@ -95,7 +166,8 @@ Each built-in entry has Fresh's `root_markers`: the files that mark a project, s
 nearest directory above the file that has one of them (the name, or a glob such as `*.csproj`), so
 a crate in a subdirectory of the folder you opened gets its own server root. The walk stops at the
 folder you opened, and a file with no marker above it uses that folder, as does a language with
-no markers. An `lsp` entry may set `root_markers` for its language.
+no markers. An `lsp` entry may set `root_markers` for its language. With several servers for one
+language the first server's markers pick the root.
 
 ## Changing or turning servers off
 
@@ -114,16 +186,18 @@ language ID shown in the status row.
 
 - A `command` replaces the program of the language, and `args` its arguments. `args` without a
   `command` keeps the built-in program.
-- `"enabled": false` turns the server of one language off. gvim never looks for it.
+- A list gives the language several servers (see above); giving the key once replaces the
+  built-in entry, and each server object is laid over the built-in default, so an entry that only
+  says `"enabled": true` runs the built-in program.
+- `"enabled": false` turns a server off. A language whose servers are all off gets no server.
 - `"auto_start": false` keeps the server dormant: it does not start when a file opens, but
   **Start/Restart LSP Server** runs it. `"auto_start": true` (or `"enabled": true`) on a manual
   server such as `ols` starts it on open.
 - A language that is not in the table needs a `command`, and then runs like the others.
-- The other fields that Fresh's config writes for a server (`env`, `initialization_options`,
-  `only_features`, `except_features`, `language_id_overrides`, `process_limits` and `name`) are
-  accepted, so a Fresh config still loads, and then ignored: gvim does not pass them to the server.
 - `"lsp_enabled": false` at the top level turns every language server off, the entries of `lsp`
   included. The LSP commands then say so.
+- `universal_lsp` runs a server alongside those of every language; it is a separate key so a
+  config never has to repeat a server per language.
 
 A server that is off for any of these reasons can still be started by hand, as in Fresh: with the
 active file of that language, run **Start/Restart LSP Server** from the palette, or **Restart Server** in the LSP menu. That
@@ -136,10 +210,13 @@ Only your own config file, `~/.config/gvim/config.json`, can name a program to r
 `.gvim/config.json` comes with the code you opened, and opening a cloned repository must not run
 whatever it names. Fresh gates language servers behind a workspace-trust prompt; gvim takes the
 simpler rule: in a project file the `lsp` key can switch a language off or turn a built-in server on
-(`enabled`, `auto_start`), but a `command` or `args` there is refused with a message that says to
-set it in the user config, and your own entries stay as they are. A project file's `lsp` entries
-are added to yours; they never replace them. The programs of the built-in table are found on your
-`PATH`, as Fresh does.
+(`enabled`, `auto_start`), name its `root_markers` and route its features (`only_features`,
+`except_features`, `language_id_overrides`), but a field that chooses or shapes the program
+(`command`, `args`, `name`, `env`, `initialization_options`, `process_limits`) is refused with a
+message that says to set it in the user config, and your own entries stay as they are. A project
+file's `lsp` entries are added to yours; they never replace them. The project layer cannot set
+`universal_lsp` at all: a universal server would run for every buffer. The programs of the
+built-in table are found on your `PATH`, as Fresh does.
 
 Workspace trust adds a second gate above this rule: the whole project layer, this key included, is
 read only when the workspace is Trusted (see [workspace trust](trust.md)). An untrusted workspace
@@ -154,25 +231,53 @@ words in the buffer and everything else do not depend on it.
 
 - **Diagnostics.** The `{diagnostics}` status element counts the diagnostics of the active
   file, as Fresh's element does: `[E:1 W:2 I:3]`, errors, warnings, and info and hints
-  together, each part only when its count is above zero. Fresh's default element lists put the
-  badge on the left after `{cursor}` (see [the status bar](ui.md)); `editor.status_bar` can
-  move it to any side or position. The counts are the stored diagnostics of the file, so they
-  stay on the row while the pill says the server is missing, failed or off, and they go when
-  the server is stopped, as Fresh's do. While the server runs with no count known yet the
-  element keeps a blank seven-cell slot, so its neighbours do not jump when the first
-  diagnostic arrives; when the row is too narrow the element is elided with the rest of the
-  left group's tail.
+  together, each part only when its count is above zero. The counts merge the diagnostics of every
+  server that published for the file. Fresh's default element lists put the badge on the left after
+  `{cursor}` (see [the status bar](ui.md)); `editor.status_bar` can move it to any side or
+  position. The counts are the stored diagnostics of the file, so they stay on the row while the
+  pill says the server is missing, failed or off, and they go when the server is stopped, as
+  Fresh's do. While the server runs with no count known yet the element keeps a blank seven-cell
+  slot, so its neighbours do not jump when the first diagnostic arrives; when the row is too narrow
+  the element is elided with the rest of the left group's tail.
   Each affected line has a dot in the gutter, in the color of its worst severity, and the
-  offending text is underlined. **Jump to Next Error** and **Jump to Previous Error** move to the
-  next and previous error or warning and show its message in the status row. They are `F8` and
-  `Shift+F8`, as in Fresh; the macOS keymap uses `Ctrl+'` for the next error, and the emacs keymap
-  has no key for them. The command palette runs them in every keymap, and **Keybinding Editor**
-  changes the keys.
+  offending text is underlined. The end-of-line message (`editor.diagnostics_inline_text`) shows
+  the line's most severe diagnostic at the right end of the line. A message whose server published
+  it for an older version of the document than the server now has is drawn **dimmed**: the text has
+  moved on since the server found it, so the message is out of date until the next publish.
+  **Jump to Next Error** and **Jump to Previous Error** move to the next and previous error or
+  warning and show its message in the status row. They are `F8` and `Shift+F8`, as in Fresh; the
+  macOS keymap uses `Ctrl+'` for the next error, and the emacs keymap has no key for them. The
+  command palette runs them in every keymap, and **Keybinding Editor** changes the keys.
 - **Hover** shows the diagnostics under the caret, with their source, above what the server says
   about the symbol. A line wider than the popup is wrapped over several rows, never cut.
 - **Go to definition, implementation, references, completion, rename, code actions, signature
   help.** Rename edits every file the server returns. A file that is not open opens in a new tab,
   edited and left unsaved, like Fresh. Save it with Save All.
+- **Code actions.** The popup lists every action of every server that serves code actions for the
+  language, with the server that offered it and its kind (`quickfix`, `refactor.extract`, …), and
+  marks the action the server recommends. The diagnostics overlapping the caret are sent as
+  context, which servers such as clangd and eslint need before they offer a quick fix. Choosing an
+  action applies it one of three ways: an action with an edit applies the edit; an action with a
+  command runs the command on the server; an action that has neither is resolved first
+  (`codeAction/resolve`), and the resolved edit and/or command is applied. An action with both an
+  edit and a command applies the edit first and then runs the command.
+- **Workspace edits** (a rename, a code action, or a server's own `workspace/applyEdit`) are applied
+  by one multi-file helper. Text edits of open documents are applied as one undo step each, with a
+  version check: a text edit carries the document version the server computed it against, and gvim
+  refuses an edit whose document has moved on. Files that are not open are read, opened as tabs,
+  edited and left unsaved; the tab you were in becomes active again when the apply ends. A
+  server-requested **delete is refused** and reported: the request carries no user confirmation and
+  leaves no trash to recover from, so gvim never deletes a file for a language server (Fresh's
+  rule). A **create** or **rename** onto an existing file is refused for the same reason; the
+  refusal is reported and never counts as success. Created files may be edited afterwards in the
+  same edit, and renames move open tabs with the file.
+  A server may also ask for an edit on its own, usually while a command runs
+  (`workspace/executeCommand` → `workspace/applyEdit`). gvim answers that request immediately —
+  the edit is queued, the server is told it was applied, and the editor applies it a moment later —
+  so the command's own answer cannot deadlock behind the UI. The side effect is that the server
+  knows the edit was accepted before it actually lands; if the edit is then refused (a stale
+  version, a refused delete) the server has a success it cannot see doubted. The refusal is
+  reported in the status row.
 - **Format Buffer.** It formats with an external formatter when there is one, and otherwise asks
   the language server (`textDocument/formatting`). The caret stays on its text when the formatter
   adds or removes lines above it. With neither a formatter nor a server, the status row says which
@@ -199,6 +304,13 @@ last lines it wrote to its error output, instead of a bare `initialize: EOF`:
 gopls (language server for go) failed to start: lsp: initialize: EOF [command: gopls serve] [it said: flag provided but not defined: -serve]
 ```
 
-gvim does not start it again for that language until **Start/Restart LSP Server**.
+gvim does not start it again for that language until **Start/Restart LSP Server**, and the status
+popup shows it in the error state with the same reason.
 
 Servers only start for files that have a name on disk, and not for files in large file mode.
+
+## What is not here yet
+
+Inlay hints, semantic tokens and folding ranges are requested by the client and have typed calls in
+`lsp/`, but the editor does not draw them yet; the same holds for a diagnostics panel or a
+quickfix list. That is Fresh-parity work for a later round (docs/parity.md, backlog #7).

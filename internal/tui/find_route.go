@@ -186,14 +186,22 @@ func (h findHost) ReplaceAll(q search.Query, repl string) (int, error) {
 }
 
 // findAction runs the search and replace actions: start_search_replace opens the
-// find bar with its replacement row, search_replace_next_match and
-// search_replace_prev_match step through the matches, and query_replace asks
-// about each match. It reports whether it handled the action. The uiAction
-// switch falls through to it.
+// project-wide Search and Replace panel, start_git_grep opens the Git Grep panel,
+// search_replace_next_match and search_replace_prev_match walk the last project
+// search's matches, query_replace asks about each match of the buffer, and the
+// find_selection actions search the selection. It reports whether it handled the
+// action. The uiAction switch falls through to it.
 func (m *Model) findAction(action string) (tea.Cmd, bool) {
 	switch action {
-	case "start_search_replace", "search_replace_next_match", "search_replace_prev_match", "query_replace",
-		"find_selection_next", "find_selection_previous":
+	case "start_search_replace":
+		return m.openProjectSearch(false), true
+	case "start_git_grep":
+		return m.openProjectSearch(true), true
+	case "search_replace_next_match":
+		return m.projectMatchAction(true), true
+	case "search_replace_prev_match":
+		return m.projectMatchAction(false), true
+	case "query_replace", "find_selection_next", "find_selection_previous":
 	default:
 		return nil, false
 	}
@@ -205,12 +213,6 @@ func (m *Model) findAction(action string) (tea.Cmd, bool) {
 		return nil, true
 	}
 	switch action {
-	case "start_search_replace":
-		m.openFind(true)
-	case "search_replace_next_match":
-		m.findNavigate(true)
-	case "search_replace_prev_match":
-		m.findNavigate(false)
 	case "query_replace":
 		m.queryReplace()
 	case "find_selection_next":

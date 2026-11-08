@@ -53,13 +53,14 @@ type appLSP struct {
 	requests []string
 }
 
-func (f *appLSP) SetRoot(string)            {}
-func (f *appLSP) Supports(lang string) bool { return lang == "go" }
-func (f *appLSP) Open(_, _, _ string) error { return nil }
-func (f *appLSP) Change(_, _ string) error  { return nil }
-func (f *appLSP) Close(string) error        { return nil }
-func (f *appLSP) Stop() error               { return nil }
-func (f *appLSP) Restart() error            { return nil }
+func (f *appLSP) SetRoot(string)                      {}
+func (f *appLSP) Supports(lang string) bool           { return lang == "go" }
+func (f *appLSP) Open(_, _, _ string) (int32, error)  { return 1, nil }
+func (f *appLSP) Change(_, _ string) (int32, error)   { return 2, nil }
+func (f *appLSP) Close(string) error                  { return nil }
+func (f *appLSP) WorkspaceEdits() []tui.WorkspaceEdit { return nil }
+func (f *appLSP) Stop() error                         { return nil }
+func (f *appLSP) Restart(string) error                { return nil }
 func (f *appLSP) Diagnostics(path string) (tui.DiagnosticsEvent, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

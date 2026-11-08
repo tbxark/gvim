@@ -67,10 +67,18 @@ say so instead of opening a dropdown.
 
 ## Search and replace
 
-Search and replace work on one buffer. Live Grep searches the project's files and cannot replace
-in them, and gvim has no project-wide Search and Replace (Fresh has one). Fresh's `Alt+A`
-(project-wide replace) opens gvim's Replace bar instead, and `Ctrl+Alt+R` runs Query Replace.
-To change several files, use Replace or Query Replace in each file.
+The find bar (`Ctrl+F`), Find and Replace (`Ctrl+R`) and Query Replace (`Ctrl+Alt+R`) work on one
+buffer. Fresh's `Alt+A` opens the
+**project-wide Search and Replace** panel, which searches the project's files and the open buffers'
+unsaved text and replaces across files: `Alt+Enter` replaces every match of the result set after a
+confirmation, and the changed files stay as unsaved tabs ("N files changed in M tabs; Save All to
+write"). The panel's keys are answered by the panel itself, as every overlay's are: `Tab` moves
+between the search field, the replacement field and the result rows, `Alt+A` switches between all
+files and the current file, `Alt+C`/`Alt+R`/`Alt+W` toggle Case, Regex and Whole, and `Enter` on a
+match opens it. `Ctrl+Alt+Right` and `Ctrl+Alt+Left` step through the last project search's matches
+from the editor. The command palette's *Git Grep* row runs `git grep` in the work tree and shows the
+same result list read-only, with `Alt+C` for case sensitivity. Live Grep still searches the
+project's files only and cannot replace.
 
 ## Changing a key
 
@@ -148,7 +156,9 @@ and gvim's presets therefore consume no bindings there.
 ## Differences from Fresh
 
 - Remote workspaces are not implemented, so Fresh's `F6` (the Remote Indicator menu) is not bound.
-- gvim has no project-wide Search and Replace; Fresh's `Alt+A` opens the in-buffer Replace bar.
+- The project-wide Search and Replace panel applies replacements to tabs and leaves them unsaved
+  (Fresh writes hidden buffers to disk); the notice asks for Save All. Match-tree checkboxes,
+  Replace Scoped, the file-glob field and streaming results are not implemented.
 - Fresh's macOS `Ctrl+T` and `macos-gui` `Cmd+Shift+O` open a Go to Symbol mode. gvim's palette has
   no symbol mode, so those bindings open the command palette and ignore the recorded `filter` argument.
 - The gvim-only keys are the ones listed above under "The presets are Fresh's".

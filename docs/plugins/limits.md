@@ -235,10 +235,10 @@ Things that are *not* implemented or work differently from what you might expect
 plugin system will fix without a new stage.
 
 * **No plugin config reload.** gvim reads `config.json` at startup; the editable Settings page
-  (`docs/settings.md`) applies its editor-side values live, but a changed `plugins.<name>.settings` or
-  `enabled` still needs a restart (`Runtime.UpdateSettings` exists for a future reload but has no
-  caller), and opening another project does not reload its project config either (the project file and
-  the workspace-trust decision apply at the next start).
+  and the **Reload Configuration** command (`docs/settings.md`) apply its editor-side values live, but a
+  changed `plugins.<name>.settings` or `enabled` still needs a restart (`Runtime.UpdateSettings`
+  exists for a future reload but has no caller), and opening another project does not reload its
+  project config either (the project file and the workspace-trust decision apply at the next start).
 * **Key sequences work only inside modes.** The editor resolves single keys in the normal context, so
   `keymap.set("g g", ...)` without a `mode` is `invalid`, and a sequence in a command's `keys` is dropped
   with a warning notice when the keymap is rebuilt.

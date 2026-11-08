@@ -27,6 +27,14 @@ func (e *Editor) typeText(d *Document, text string) {
 	// undo step as the text (the buffer keeps one group until the next Break).
 	d.MaterializeVirtual()
 	plain := func(c caret) edit { return replaceEdit(c, text) }
+	if d.HasVirtualBlock() {
+		// Every line of a virtual rectangle takes the text; a line whose end is
+		// left of the rectangle's left edge gets the gap as spaces first, in the
+		// same undo step. The smart rules are per real selection and do not apply
+		// to the materialized gap.
+		d.EditAtCarets(plain)
+		return
+	}
 	r, size := utf8.DecodeRuneInString(text)
 	s := e.SettingsFor(d)
 	rules := indentRulesOf(s)
@@ -107,6 +115,11 @@ func (e *Editor) newline(d *Document) {
 	// Enter at a virtual caret is a line break at the real end of the line: the
 	// gap is not typed out (Fresh does the same).
 	d.ClearVirtual()
+	// Markdown owns Enter in source view through its markdown-source mode (Fresh's
+	// markdown_source plugin), so the list rules run before the indent rules.
+	if e.markdownEnter(d) {
+		return
+	}
 	s := e.SettingsFor(d)
 	tab := e.tabSizeOf(d)
 	plain := func(c caret) edit { return replaceEdit(c, "\n") }
@@ -150,6 +163,12 @@ func (e *Editor) newline(d *Document) {
 // spaces), both characters of an empty pair that auto_close inserted, or else the
 // character before the caret, which may be a line break.
 func (e *Editor) backspace(d *Document) {
+	// Backspace on a virtual line walks the caret back one line with no buffer
+	// change, as ArrowUp does.
+	if n := d.VirtualLines(); n > 0 {
+		e.stepVirtualLineUp(d, n, e.tabSizeOf(d))
+		return
+	}
 	// Backspace in virtual space walks the caret back with no buffer change
 	// until it reaches the line's text.
 	if n := d.VirtualColumns(); n > 0 {

@@ -15,6 +15,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/frame"
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/syntax"
@@ -50,6 +51,10 @@ type lspEd struct {
 	actions []string
 	// formatter is what HasFormatter reports.
 	formatter bool
+	// fileOps records the workspace file operations the root ran.
+	fileOps []string
+	// loadDocs, when set, is what LoadFunc returns for a path.
+	loadDocs map[string]*editor.Document
 }
 
 // HasFormatter reports whether the active buffer has a formatter, as the editor does.
@@ -113,8 +118,28 @@ func (e *lspEd) LoadFunc(path string) func() (*editor.Document, error) {
 		if e.loadErr != nil {
 			return nil, e.loadErr
 		}
+		if d, ok := e.loadDocs[path]; ok {
+			return d, nil
+		}
 		return &editor.Document{Path: path}, nil
 	}
+}
+
+// CreateFile records a workspace-edit file creation.
+func (e *lspEd) CreateFile(path string, _ bool) error {
+	e.fileOps = append(e.fileOps, "create "+path)
+	return nil
+}
+
+// RenameFile records a workspace-edit rename.
+func (e *lspEd) RenameFile(oldPath, newPath string, _ bool) error {
+	e.fileOps = append(e.fileOps, "rename "+oldPath+" "+newPath)
+	return nil
+}
+
+// DeleteFile records and refuses a workspace-edit delete, as the editor port does.
+func (e *lspEd) DeleteFile(path string) error {
+	return errors.New("delete " + path + " was refused: a language server's edit does not delete files")
 }
 
 // OpenLoaded records the path of a document that LoadFunc read as opened.
@@ -201,15 +226,29 @@ type fakeLSP struct {
 	hover   string
 	sig     string // the signature help text, read by SignatureHelp
 	items   []CompletionItem
-	renames []FileEdit
-	titles  []string
-	reqErr  error
-	diags   map[string]DiagnosticsEvent
+	renames WorkspaceEdit
+	actions []CodeAction
+	// resolved and executed record the code action pipeline calls.
+	resolved  []CodeAction
+	resolveTo CodeAction
+	executed  []LSPCommand
+	// servers is what Servers reports.
+	servers []LSPServerStatus
+	// workspace is what WorkspaceEdits drains.
+	workspace []WorkspaceEdit
+	reqErr    error
+	diags     map[string]DiagnosticsEvent
 
 	requests []string // "<path> <method> <params>" of every Request
 	reply    any      // the result of Request
 
 	renameName string
+	lastChange int32
+	// infoGo makes Server describe go as a configured server.
+	infoGo    bool
+	restarted []string
+	stopped   []string
+	muted     map[string]bool
 }
 
 func newFakeLSP(langs ...string) *fakeLSP {
@@ -220,13 +259,56 @@ func newFakeLSP(langs ...string) *fakeLSP {
 	return f
 }
 
-func (f *fakeLSP) SetRoot(root string)          { f.root = root }
-func (f *fakeLSP) Supports(lang string) bool    { return f.langs[lang] }
-func (f *fakeLSP) Open(path, _, _ string) error { f.opens = append(f.opens, path); return nil }
-func (f *fakeLSP) Change(_, text string) error  { f.changes = append(f.changes, text); return nil }
-func (f *fakeLSP) Close(path string) error      { f.closes = append(f.closes, path); return nil }
-func (f *fakeLSP) Restart() error               { f.restarts++; return nil }
-func (f *fakeLSP) Stop() error                  { f.stops++; return nil }
+func (f *fakeLSP) SetRoot(root string)       { f.root = root }
+func (f *fakeLSP) Supports(lang string) bool { return f.langs[lang] }
+func (f *fakeLSP) Open(path, _, _ string) (int32, error) {
+	f.opens = append(f.opens, path)
+	return 1, nil
+}
+func (f *fakeLSP) Change(_, text string) (int32, error) {
+	f.changes = append(f.changes, text)
+	f.lastChange++
+	return 1 + f.lastChange, nil
+}
+func (f *fakeLSP) Close(path string) error { f.closes = append(f.closes, path); return nil }
+func (f *fakeLSP) Restart(language string) error {
+	f.restarts++
+	f.restarted = append(f.restarted, language)
+	return nil
+}
+func (f *fakeLSP) Stop() error { f.stops++; return nil }
+func (f *fakeLSP) Servers() []LSPServerStatus {
+	return f.servers
+}
+func (f *fakeLSP) RestartServer(language, name string) error {
+	f.restarted = append(f.restarted, language+"/"+name)
+	return nil
+}
+func (f *fakeLSP) StopServer(language, name string) error {
+	f.stopped = append(f.stopped, language+"/"+name)
+	return nil
+}
+func (f *fakeLSP) SetLanguageEnabled(language string, enabled bool) error {
+	if f.muted == nil {
+		f.muted = map[string]bool{}
+	}
+	f.muted[language] = !enabled
+	return nil
+}
+
+// Server describes a configured server, as the app port does.
+func (f *fakeLSP) Server(lang string) LSPServerInfo {
+	if f.infoGo && lang == "go" {
+		return LSPServerInfo{State: LSPServerOn, Language: "go", Command: "gopls"}
+	}
+	return LSPServerInfo{}
+}
+
+func (f *fakeLSP) WorkspaceEdits() []WorkspaceEdit {
+	out := f.workspace
+	f.workspace = nil
+	return out
+}
 func (f *fakeLSP) Diagnostics(path string) (DiagnosticsEvent, bool) {
 	ev, ok := f.diags[path]
 	return ev, ok
@@ -244,12 +326,23 @@ func (f *fakeLSP) Hover(string, buffer.Pos) (string, error) { return f.hover, f.
 func (f *fakeLSP) Completion(string, buffer.Pos) ([]CompletionItem, error) {
 	return f.items, f.reqErr
 }
-func (f *fakeLSP) Rename(_ string, _ buffer.Pos, name string) ([]FileEdit, error) {
+func (f *fakeLSP) Rename(_ string, _ buffer.Pos, name string) (WorkspaceEdit, error) {
 	f.renameName = name
 	return f.renames, f.reqErr
 }
-func (f *fakeLSP) CodeActions(string, buffer.Pos) ([]string, error) {
-	return f.titles, f.reqErr
+func (f *fakeLSP) CodeActions(string, buffer.Pos) ([]CodeAction, error) {
+	return f.actions, f.reqErr
+}
+func (f *fakeLSP) ResolveCodeAction(_ string, action CodeAction) (CodeAction, error) {
+	f.resolved = append(f.resolved, action)
+	if f.resolveTo.Title != "" {
+		return f.resolveTo, f.reqErr
+	}
+	return action, f.reqErr
+}
+func (f *fakeLSP) ExecuteCommand(_ string, command LSPCommand) error {
+	f.executed = append(f.executed, command)
+	return f.reqErr
 }
 
 // Request records the request and answers the canned result.
@@ -710,7 +803,8 @@ func TestLSPCompletionDismissClosesThePopup(t *testing.T) {
 
 func TestLSPRenameAppliesTheEditsToTheDocument(t *testing.T) {
 	port := newFakeLSP("go")
-	port.renames = []FileEdit{{Path: "/p/a.go", Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: "New"}}}}
+	port.renames = WorkspaceEdit{Ops: []WorkspaceOp{{Kind: WorkspaceOpText, Path: "/p/a.go",
+		Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: "New"}}}}}
 	tab := &lspTab{path: "/p/a.go", lines: []string{"   "}}
 	lt := newLSPTest(t, port, tab)
 	lt.open()
@@ -738,10 +832,10 @@ func TestLSPRenameOpensAndEditsFilesThatAreNotOpen(t *testing.T) {
 		return []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 3}, Text: text}}
 	}
 	port := newFakeLSP("go")
-	port.renames = []FileEdit{
-		{Path: "/p/a.go", Edits: edit("New")},
-		{Path: "/p/a_test.go", Edits: edit("New")},
-	}
+	port.renames = WorkspaceEdit{Ops: []WorkspaceOp{
+		{Kind: WorkspaceOpText, Path: "/p/a.go", Edits: edit("New")},
+		{Kind: WorkspaceOpText, Path: "/p/a_test.go", Edits: edit("New")},
+	}}
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"   "}})
 	lt.open()
 
@@ -766,7 +860,8 @@ func TestLSPRenameOpensAndEditsFilesThatAreNotOpen(t *testing.T) {
 
 func TestLSPRenameReadFailureOfAnUnopenedFileIsShown(t *testing.T) {
 	port := newFakeLSP("go")
-	port.renames = []FileEdit{{Path: "/p/b.go", Edits: []editor.LSPEdit{{Text: "New"}}}}
+	port.renames = WorkspaceEdit{Ops: []WorkspaceOp{{Kind: WorkspaceOpText, Path: "/p/b.go",
+		Edits: []editor.LSPEdit{{Text: "New"}}}}}
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"   "}})
 	lt.ed.loadErr = errors.New("read failed")
 	lt.open()
@@ -776,7 +871,7 @@ func TestLSPRenameReadFailureOfAnUnopenedFileIsShown(t *testing.T) {
 	_, cmd := lt.m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	lt.settle(cmd, 6)
 
-	if got := lt.m.notice; got != "read failed" {
+	if got := lt.m.notice; !strings.Contains(got, "read failed") {
 		t.Fatalf("notice = %q, want the read error", got)
 	}
 	if len(lt.ed.opened) != 0 {
@@ -797,20 +892,68 @@ func TestLSPRenameEmptyNameDoesNothing(t *testing.T) {
 	}
 }
 
-func TestLSPCodeActionsChoiceShowsANotice(t *testing.T) {
-	port := newFakeLSP("go")
-	port.titles = []string{"Add import"}
-	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
-	lt.open()
+// TestLSPCodeActionAppliesThroughTheThreeWays drives the code-action pipeline:
+// an action with an edit applies the edit, an action with a command executes the
+// command, and an action with neither is resolved first and the resolved action is
+// applied.
+func TestLSPCodeActionAppliesThroughTheThreeWays(t *testing.T) {
+	edit := &WorkspaceEdit{Ops: []WorkspaceOp{{
+		Kind:  WorkspaceOpText,
+		Path:  "/p/a.go",
+		Edits: []editor.LSPEdit{{From: buffer.Pos{}, To: buffer.Pos{Col: 9}, Text: "package b"}},
+	}}}
+	tests := []struct {
+		name      string
+		action    CodeAction
+		resolveTo CodeAction
+		wantEdit  bool
+		wantCmd   string
+		wantResol bool
+	}{
+		{
+			name:     "an edit is applied",
+			action:   CodeAction{Title: "Fix", Kind: "quickfix", Source: "gopls", Edit: edit},
+			wantEdit: true,
+		},
+		{
+			name:    "a command is executed",
+			action:  CodeAction{Title: "Run", Kind: "source", Source: "gopls", Command: &LSPCommand{Title: "Run", Command: "run"}},
+			wantCmd: "run",
+		},
+		{
+			name:      "an action with data is resolved first",
+			action:    CodeAction{Title: "Extract", Kind: "refactor", Source: "gopls", NeedsResolve: true},
+			resolveTo: CodeAction{Title: "Extract", Kind: "refactor", Source: "gopls", Edit: edit},
+			wantEdit:  true,
+			wantResol: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			port := newFakeLSP("go")
+			port.actions = []CodeAction{tt.action}
+			port.resolveTo = tt.resolveTo
+			lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
+			lt.open()
 
-	for _, msg := range lt.act("lsp_code_actions") {
-		lt.feed(msg)
-	}
-	for _, msg := range deliver(popupCmd(lt.popup(), tea.KeyPressMsg{Code: tea.KeyEnter})) {
-		lt.feed(msg)
-	}
-	if !strings.Contains(lt.m.notice, "not supported yet") {
-		t.Fatalf("notice = %q, want the unsupported notice", lt.m.notice)
+			for _, msg := range lt.act("lsp_code_actions") {
+				lt.feed(msg)
+			}
+			_, cmd := lt.m.Update(deliver(popupCmd(lt.popup(), tea.KeyPressMsg{Code: tea.KeyEnter}))[0])
+			lt.settle(cmd, 6)
+			if got := len(port.resolved); (got > 0) != tt.wantResol {
+				t.Fatalf("resolved %d actions, want resolve %v", got, tt.wantResol)
+			}
+			applied := lt.ed.applied["/p/a.go"]
+			if (len(applied) > 0) != tt.wantEdit {
+				t.Fatalf("applied = %+v, want an edit %v", applied, tt.wantEdit)
+			}
+			if tt.wantCmd != "" {
+				if len(port.executed) != 1 || port.executed[0].Command != tt.wantCmd {
+					t.Fatalf("executed = %+v, want %q", port.executed, tt.wantCmd)
+				}
+			}
+		})
 	}
 }
 
@@ -933,13 +1076,43 @@ func TestLSPToggleForBufferClosesAndKeepsItClosed(t *testing.T) {
 	}
 }
 
-func TestShowLSPStatusNamesTheDocumentState(t *testing.T) {
+// TestShowLSPStatusListsTheServers opens the status popup: one row per configured
+// server with its state, a restart and stop row, and the mute row of the active
+// language.
+func TestShowLSPStatusListsTheServers(t *testing.T) {
 	port := newFakeLSP("go")
+	port.servers = []LSPServerStatus{
+		{Language: "go", Name: "gopls", Command: "gopls", State: LSPServerRunning, AutoStart: true},
+		{Language: "", Name: "spell", Command: "harper-ls", Universal: true, State: LSPServerStopped},
+	}
 	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"package a"}})
 	lt.open()
-	lt.act("show_lsp_status")
-	if !strings.Contains(lt.m.notice, "go") || !strings.Contains(lt.m.notice, "open") {
-		t.Fatalf("notice = %q, want the language and the open state", lt.m.notice)
+	for _, msg := range lt.act("show_lsp_status") {
+		lt.feed(msg)
+	}
+	v := overlayList(t, lt.m)
+	var rows []string
+	for _, r := range v.Rows {
+		rows = append(rows, r.Left+" "+r.Right)
+	}
+	joined := strings.Join(rows, "\n")
+	for _, want := range []string{"Language servers: go", "gopls", "ready", "Restart gopls", "Stop gopls", "Mute LSP for go", "spell"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("status rows lack %q: %v", want, rows)
+		}
+	}
+
+	// Choosing the mute row mutes the language.
+	mute := slices.IndexFunc(v.Rows, func(r list.Row) bool { return strings.HasPrefix(r.Value, "mute") })
+	if mute < 0 {
+		t.Fatal("the mute row carries no action")
+	}
+	lt.settle(lt.m.lspStatusRowChosen(v.Rows[mute].Value), 3)
+	if !lt.m.lsp.muted["go"] {
+		t.Fatalf("muted = %v, want go muted", lt.m.lsp.muted)
+	}
+	if !strings.Contains(lt.m.notice, "muted for go") {
+		t.Errorf("notice = %q, want the mute notice", lt.m.notice)
 	}
 }
 

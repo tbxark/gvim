@@ -112,11 +112,38 @@ same card, between its borders:
   that nothing matched. Live Grep's keys are answered by the overlay, as every overlay
   key is (parity §4.5), and its request carries the modes and scopes to the search port.
 
+### Search panel details: project-wide Search and Replace, and Git Grep
+
+Two more sheets share the card frame, one row of search plus (for Search and Replace)
+one row of replacement, an option row and a scrollable result region:
+
+- **Project-wide Search and Replace** (started by "Search and Replace in Project"; the
+  editor's Alt+A) searches the project files and the open buffers' unsaved text. The card
+  is title border, result rows (up to clamp(h/2, 4, 18), shrinking only as far as the
+  menu and tab rows allow; a frame with no room paints nothing), the Search row, the
+  Replace row, the options row and the hints. The result rows are grouped: a file row
+  ("▾ path (count)", Enter folds and unfolds it) and a match row per matching line
+  ("line:col  text", the matched runes bold); Enter on a match opens it. The options are
+  the All Files/Current File scope (Alt+A), Case (Alt+C), Regex (Alt+R) and Whole
+  (Alt+W) checkboxes; Tab moves the focus between the two fields and the result rows.
+  Alt+Enter asks to replace every match of the result set. The replacement is a
+  deliberate divergence from Fresh: gvim plans edits and applies them to the open tabs
+  (and opens the closed files as unsaved tabs) instead of writing to disk and bypassing
+  undo; the notice "N files changed in M tabs; Save All to write" says so, and Save All
+  does the writes through the normal save path. Search and replace never reuse the
+  offsets of an older result: every file carries a content hash from the search, and a
+  file whose text changed is skipped.
+- **Git Grep** (command palette row only) is the same card with a single search field:
+  the All Files/Case toggles collapse to Case (Alt+C), the replacement row is absent, and
+  Enter opens the match. It runs git grep in the work tree of the workspace root; exit 0
+  and 1 both mean a finished search (1 is no matches), 2 or more is an error notice.
+
 ## 3. Component map
 
 | Surface | Placement | Component |
 |---|---|---|
 | Command palette (Ctrl+P) | sheet | `internal/tui/palette` |
+| Project search & replace, Git Grep | sheet | `internal/tui/searchpanel` |
 | Find / replace bar | sheet | `internal/tui/find` |
 | One-line prompt, confirm | sheet (input row) | `internal/tui/prompt` |
 | File browser, switch project | card, above the status row | `internal/tui/browser` |

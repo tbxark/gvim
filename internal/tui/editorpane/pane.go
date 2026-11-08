@@ -179,6 +179,10 @@ type DiagnosticSpan struct {
 	// Message is the diagnostic's text, drawn at the end of the line under
 	// editor.diagnostics_inline_text. Empty draws nothing.
 	Message string
+	// Stale marks a diagnostic published for an older version of the document
+	// than the server has now: its inline message is drawn faint, because the
+	// text has moved on since the server found it.
+	Stale bool
 }
 
 // The LSP severities of a diagnostic.
@@ -225,6 +229,12 @@ type Hit struct {
 	// that a click may toggle: any collapsed fold, and an open one while the
 	// fold markers show.
 	Fold bool
+	// Below is how many rows below the last buffer line's last row a text press
+	// landed, and LineCol the display column it maps to on the virtual line there.
+	// The root parks the caret on that virtual line when the editor allows it.
+	// Both are zero for a press on text.
+	Below   int
+	LineCol int
 }
 
 // Gutter sizes. The number field is at least three digits wide, and it widens
@@ -289,6 +299,16 @@ type frame struct {
 	// virtual is how many display columns the caret is past the end of its line
 	// (virtual space); 0 when it is on the text.
 	virtual int
+	// block is the rectangle of a block selection in progress, if any, and
+	// virtualHead how many display columns the block's head sits past its line
+	// (virtual rectangles); see virtual_block.go.
+	block       blockRect
+	hasBlock    bool
+	virtualHead int
+	// vlines and vlineCol are the caret's virtual line below the last buffer line
+	// and its display column there, or zero when the caret is on text; see
+	// virtual_lines.go.
+	vlines, vlineCol int
 	// inlineDiag draws the end-of-line diagnostic messages.
 	inlineDiag bool
 	sels       []buffer.Selection // the primary selection and the extra ones
@@ -375,6 +395,8 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 	f.setFolds(p.Doc)
 	f.top = f.visibleAtOrAbove(min(max(p.Top, 0), lines-1))
 	f.setSelections(p.Doc)
+	f.setBlock(p.Doc)
+	f.setVirtualLines(p.Doc)
 	f.initFX(p)
 	switch {
 	case f.fill != nil && p.TopRow > 0 && f.top == p.Top:
@@ -614,7 +636,7 @@ func (p Pane) Render(w, h int) *grid.Grid {
 // paintCaret draws the caret cell in the frame's caret shape, so the caret shows even
 // when the terminal cursor is hidden. The caret never takes the scrollbar column.
 func (f frame) paintCaret(g *grid.Grid) {
-	x, y, ok := f.cellOf(f.caret)
+	x, y, ok := f.caretCell()
 	if !ok || x < f.gutter || x >= f.w-1 {
 		return
 	}
@@ -669,6 +691,9 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 				g.Put(0, y, f.w-1, label, f.numberStyle(i))
 			}
 			cells := f.rowCells(rd)
+			// widthAll is the width of the whole row before horizontal scrolling
+			// drops columns; the block rectangle places its virtual span from it.
+			widthAll := cellsWidth(cells)
 			// skip is how far left of the window the line ended: its virtual text starts
 			// that many columns left of the first text column.
 			skip := 0
@@ -684,6 +709,7 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 				g.Fill(end, f.w-1, y, grid.Style{FG: f.styles.Text.FG, BG: f.styles.CurrentLine.BG})
 			}
 			f.paintRowTail(g, ln, y, end, cur)
+			f.paintBlockVirtual(g, i, y, end, widthAll)
 			if rd.last {
 				f.paintVirtualText(g, ln, i, y, end, skip, cur)
 				f.paintInlineDiagnostics(g, i, y, end, cur)
@@ -841,7 +867,7 @@ func (p Pane) Caret(w, h int) (x, y int, ok bool) {
 	if !ok {
 		return 0, 0, false
 	}
-	return f.cellOf(f.caret)
+	return f.caretCell()
 }
 
 // BodyRows is the number of text rows of a w by h pane, which is h less the row the
@@ -1153,6 +1179,17 @@ func (p Pane) Hit(w, h, x, y int) Hit {
 			return Hit{Kind: HitScrollbarThumb, Row: y}
 		}
 		return Hit{Kind: HitScrollbarTrack, Row: y}
+	}
+	// A press below the last line of an unwrapped document whose end is on screen
+	// targets a virtual line there, at the pressed display column.
+	if !f.wrap && f.fill == nil && f.win == nil && x >= f.gutter {
+		end := buffer.Pos{Line: f.lines - 1, Col: f.blockRuneLen(f.lines - 1)}
+		if _, ey, ok := f.cellOf(end); ok && y > ey {
+			return Hit{
+				Kind: HitText, Pos: end, Row: y,
+				Below: y - ey, LineCol: f.left + (x - f.gutter),
+			}
+		}
 	}
 	return Hit{Kind: HitText, Pos: f.posAt(x, y), Row: y, Virtual: f.virtualAt(x, y)}
 }

@@ -122,21 +122,6 @@ func (m *Model) lspNoServer(lang string) string {
 	return noServerNotice(lang)
 }
 
-// lspServerNote describes the server of the active document's language for the status
-// command: the program, and whether it runs, is missing or failed.
-func (m *Model) lspServerNote(lang string) string {
-	s := &m.lsp
-	if ue := s.unavailable[lang]; ue != nil {
-		return ue.Error()
-	}
-	if d, ok := s.port.(lspDescriber); ok {
-		if info := d.Server(lang); info.State == LSPServerOn && info.Command != "" {
-			return "server " + info.Command
-		}
-	}
-	return ""
-}
-
 // lspFormat runs Format Buffer through the language server when the editor has no formatter
 // for the buffer, as Fresh does: it formats with the formatter of the config and falls back
 // to LSP formatting when none is set. It reports false when the editor has a formatter, or

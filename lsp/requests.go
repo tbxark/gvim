@@ -25,11 +25,50 @@ type CompletionItem struct {
 	ReplaceRange *protocol.Range
 }
 
-// CodeAction is one code action offered for a range. Kind is empty for a bare
-// command, which carries no kind.
+// CodeAction is one code action a server offers for a range. Title and Kind are
+// what a menu shows. Edit and Command are what applies the action: an edit is a
+// workspace edit (text edits across files, plus file create/rename/delete), and a
+// command is executed by the server. A code action with neither, but with Data,
+// needs ResolveCodeAction first: the server fills the edit or the command in.
+// IsCommand marks an action the server sent as a bare protocol.Command, which has
+// no kind, no edit and no data.
 type CodeAction struct {
-	Title string
-	Kind  string
+	Title     string
+	Kind      string
+	Preferred bool
+	Edit      *protocol.WorkspaceEdit
+	Command   *protocol.Command
+	// Data is the server's opaque payload for codeAction/resolve; HasData says
+	// the server sent one.
+	Data    protocol.LSPAny
+	HasData bool
+	// IsCommand marks a bare command, which can only be executed.
+	IsCommand bool
+
+	// raw is the action as the server sent it, which ResolveCodeAction sends
+	// back. It is empty for a bare command.
+	raw protocol.CodeAction
+}
+
+// resolve picks the fields of one server answer.
+func (c CodeAction) resolve(raw protocol.CodeAction) CodeAction {
+	c.raw = raw
+	c.Title = raw.Title
+	if raw.Kind != nil {
+		c.Kind = string(*raw.Kind)
+	}
+	if raw.IsPreferred != nil {
+		c.Preferred = *raw.IsPreferred
+	}
+	c.Edit = raw.Edit
+	if raw.Command.Command != "" {
+		cmd := raw.Command
+		c.Command = &cmd
+	}
+	if len(raw.Data) > 0 && string(raw.Data) != "null" {
+		c.Data, c.HasData = raw.Data, true
+	}
+	return c
 }
 
 // Definition asks for the definition of the symbol at pos in docURI. A
@@ -109,10 +148,9 @@ func (c *Client) Completion(ctx context.Context, docURI string, pos protocol.Pos
 }
 
 // Rename asks the server to rename the symbol at pos in docURI to newName, and
-// returns the text edits it wants, keyed by document URI. A workspace edit that
-// creates, renames or deletes files is an error, because those cannot be
-// expressed as text edits.
-func (c *Client) Rename(ctx context.Context, docURI string, pos protocol.Position, newName string) (map[string][]protocol.TextEdit, error) {
+// returns the workspace edit it answers with, which may touch several files and
+// may create, rename or delete files.
+func (c *Client) Rename(ctx context.Context, docURI string, pos protocol.Position, newName string) (*protocol.WorkspaceEdit, error) {
 	res, err := c.server.Rename(ctx, &protocol.RenameParams{
 		TextDocumentPositionParams: positionParams(docURI, pos),
 		NewName:                    newName,
@@ -120,43 +158,21 @@ func (c *Client) Rename(ctx context.Context, docURI string, pos protocol.Positio
 	if err != nil {
 		return nil, fmt.Errorf("lsp: rename %s: %w", docURI, err)
 	}
-	if res == nil {
-		return nil, nil
-	}
-	edits := make(map[string][]protocol.TextEdit)
-	if len(res.DocumentChanges) > 0 {
-		// The LSP spec says documentChanges takes precedence over changes.
-		for _, dc := range res.DocumentChanges {
-			tde, ok := dc.(*protocol.TextDocumentEdit)
-			if !ok {
-				return nil, fmt.Errorf("lsp: rename %s: unsupported document change %T", docURI, dc)
-			}
-			u := string(tde.TextDocument.URI)
-			for _, el := range tde.Edits {
-				te, err := plainTextEdit(el)
-				if err != nil {
-					return nil, fmt.Errorf("lsp: rename %s: %w", docURI, err)
-				}
-				edits[u] = append(edits[u], te)
-			}
-		}
-		return edits, nil
-	}
-	for u, es := range res.Changes {
-		edits[string(u)] = append(edits[string(u)], es...)
-	}
-	return edits, nil
+	return res, nil
 }
 
-// CodeActions asks for the code actions available for rng in docURI. The
-// request sends no diagnostics as context, so a server that offers fixes only
-// for a diagnostic returns fewer actions.
-func (c *Client) CodeActions(ctx context.Context, docURI string, rng protocol.Range) ([]CodeAction, error) {
+// CodeActions asks for the code actions available for rng in docURI.
+// diagnostics is the stored diagnostics whose ranges overlap rng, which many
+// servers (clangd, eslint) require as context before they offer a quick fix; it
+// may be nil, and is sent as an empty list because some servers reject null.
+func (c *Client) CodeActions(ctx context.Context, docURI string, rng protocol.Range, diagnostics []protocol.Diagnostic) ([]CodeAction, error) {
+	if diagnostics == nil {
+		diagnostics = []protocol.Diagnostic{}
+	}
 	res, err := c.server.CodeAction(ctx, &protocol.CodeActionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
 		Range:        rng,
-		// An empty list, not null: some servers reject a null diagnostics array.
-		Context: protocol.CodeActionContext{Diagnostics: []protocol.Diagnostic{}},
+		Context:      protocol.CodeActionContext{Diagnostics: diagnostics},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("lsp: code action %s: %w", docURI, err)
@@ -165,16 +181,107 @@ func (c *Client) CodeActions(ctx context.Context, docURI string, rng protocol.Ra
 	for _, r := range res {
 		switch a := r.(type) {
 		case *protocol.CodeAction:
-			ca := CodeAction{Title: a.Title}
-			if a.Kind != nil {
-				ca.Kind = string(*a.Kind)
+			if a != nil {
+				out = append(out, CodeAction{}.resolve(*a))
 			}
-			out = append(out, ca)
 		case *protocol.Command:
-			out = append(out, CodeAction{Title: a.Title})
+			if a != nil {
+				out = append(out, CodeAction{Title: a.Title, Command: a, IsCommand: true})
+			}
 		}
 	}
 	return out, nil
+}
+
+// ResolveCodeAction completes a code action that needs a resolve request: one
+// with data but no edit and no command. An action that does not need resolving is
+// returned as it is. The server answers with the edit and/or the command filled
+// in, and an action that is a bare command cannot be resolved.
+func (c *Client) ResolveCodeAction(ctx context.Context, action CodeAction) (CodeAction, error) {
+	if !action.HasData || action.IsCommand {
+		return action, nil
+	}
+	res, err := c.server.CodeActionResolve(ctx, &action.raw)
+	if err != nil {
+		return CodeAction{}, fmt.Errorf("lsp: code action resolve %q: %w", action.Title, err)
+	}
+	if res == nil {
+		return action, nil
+	}
+	return CodeAction{}.resolve(*res), nil
+}
+
+// ExecuteCommand runs a server command, such as the command of a code action.
+// Some commands ask the client to apply an edit while they run, which is answered
+// on the read goroutine and queued for the editor; see Config.ApplyEdit.
+func (c *Client) ExecuteCommand(ctx context.Context, cmd protocol.Command) error {
+	_, err := c.server.ExecuteCommand(ctx, &protocol.ExecuteCommandParams{
+		Command:   cmd.Command,
+		Arguments: cmd.Arguments,
+	})
+	if err != nil {
+		return fmt.Errorf("lsp: executeCommand %q: %w", cmd.Command, err)
+	}
+	return nil
+}
+
+// InlayHints asks for the inlay hints of rng in docURI.
+func (c *Client) InlayHints(ctx context.Context, docURI string, rng protocol.Range) ([]protocol.InlayHint, error) {
+	hints, err := c.server.InlayHint(ctx, &protocol.InlayHintParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
+		Range:        rng,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lsp: inlay hints %s: %w", docURI, err)
+	}
+	return hints, nil
+}
+
+// FoldingRanges asks for the folding ranges of docURI.
+func (c *Client) FoldingRanges(ctx context.Context, docURI string) ([]protocol.FoldingRange, error) {
+	ranges, err := c.server.FoldingRanges(ctx, &protocol.FoldingRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lsp: folding ranges %s: %w", docURI, err)
+	}
+	return ranges, nil
+}
+
+// SemanticTokensFull asks for the semantic tokens of the whole document.
+func (c *Client) SemanticTokensFull(ctx context.Context, docURI string) (*protocol.SemanticTokens, error) {
+	tokens, err := c.server.SemanticTokensFull(ctx, &protocol.SemanticTokensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lsp: semantic tokens %s: %w", docURI, err)
+	}
+	return tokens, nil
+}
+
+// SemanticTokensDelta asks for the edit that turns the tokens of
+// previousResultID into the document's current tokens.
+func (c *Client) SemanticTokensDelta(ctx context.Context, docURI, previousResultID string) (protocol.SemanticTokensDeltaResult, error) {
+	res, err := c.server.SemanticTokensFullDelta(ctx, &protocol.SemanticTokensDeltaParams{
+		TextDocument:     protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
+		PreviousResultID: previousResultID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lsp: semantic tokens delta %s: %w", docURI, err)
+	}
+	return res, nil
+}
+
+// SemanticTokensRange asks for the semantic tokens of rng in docURI.
+func (c *Client) SemanticTokensRange(ctx context.Context, docURI string, rng protocol.Range) (*protocol.SemanticTokens, error) {
+	tokens, err := c.server.SemanticTokensRange(ctx, &protocol.SemanticTokensRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.URI(docURI)},
+		Range:        rng,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("lsp: semantic tokens range %s: %w", docURI, err)
+	}
+	return tokens, nil
 }
 
 // positionParams builds the document and position part shared by most requests.
@@ -230,23 +337,6 @@ func completionItem(it protocol.CompletionItem) CompletionItem {
 		}
 	}
 	return out
-}
-
-// plainTextEdit returns the text edit inside a document change element. A
-// snippet edit is an error: inserting its text raw would leave the $ placeholders
-// in the document.
-func plainTextEdit(el protocol.TextDocumentEditElement) (protocol.TextEdit, error) {
-	switch e := el.(type) {
-	case *protocol.TextEdit:
-		if e != nil {
-			return *e, nil
-		}
-	case *protocol.AnnotatedTextEdit:
-		if e != nil {
-			return e.TextEdit, nil
-		}
-	}
-	return protocol.TextEdit{}, fmt.Errorf("unsupported text edit %T", el)
 }
 
 // hoverText reduces hover contents to plain text. Markdown code fence lines are

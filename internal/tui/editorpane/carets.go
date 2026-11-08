@@ -45,6 +45,11 @@ func (f frame) paintSecondaryCarets(g *grid.Grid) {
 			continue
 		}
 		x, y, ok := f.cellOf(p)
+		if f.hasBlock && f.block.Virtual && p.Line >= f.block.Top && p.Line <= f.block.Bottom {
+			// A virtual rectangle's caret column is past the line's end; draw the
+			// block's carets out there.
+			x += max(f.block.HeadCol-f.blockRuneLen(p.Line), 0)
+		}
 		if !ok || x < f.gutter || x >= f.w-1 {
 			continue
 		}

@@ -285,53 +285,25 @@ func (selDoc) Encoding() string { return "ASCII" }
 // LineEnding satisfies Document for the selection fake.
 func (selDoc) LineEnding() string { return "LF" }
 
-func TestStartSearchReplaceOpensTheFindBarWithTheReplaceRow(t *testing.T) {
+// TestProjectSearchActionsWithoutAPortSaySo: the project-wide actions are handled by
+// the port; without it they say so instead of falling back to the in-buffer find bar.
+func TestProjectSearchActionsWithoutAPortSaySo(t *testing.T) {
 	m, _ := newDefaultSearchModel(t, "hello world")
 	doAction(m, "start_search_replace")
-
-	if !m.findOpen() {
-		t.Fatalf("overlay stack has %d entries after start_search_replace, want the find bar", len(m.overlays))
+	if m.notice != "Project-wide search is not supported in this port" {
+		t.Fatalf("notice = %q, want the unsupported notice", m.notice)
 	}
-	if rows := m.findBar.Rows(30); rows != 5 {
-		t.Fatalf("bar covers %d rows, want 5 with the replacement row", rows)
+	if m.findOpen() || len(m.overlays) != 0 {
+		t.Fatalf("an overlay opened: find bar %v, overlays %d", m.findOpen(), len(m.overlays))
 	}
-	rows := screenRows(m)
-	if got := rows[len(rows)-2]; !strings.Contains(got, "Replace:") {
-		t.Errorf("row %d = %q, want the replacement row", len(rows)-2, got)
+	doAction(m, "start_git_grep")
+	if m.notice != "Git Grep is not supported in this port" {
+		t.Fatalf("notice = %q, want the Git Grep notice", m.notice)
 	}
-}
-
-func TestSearchReplaceNextAndPrevStepThroughMatches(t *testing.T) {
-	m, sf := newDefaultSearchModel(t, "foo bar foo", "x foo")
-	press(m, ctrl('f'))
-	for _, r := range "foo" {
-		press(m, typed(string(r)))
-	}
-	press(m, special(tea.KeyEnter))
-	// The bar is closed and its search text is held. The selection is 0:0 to 0:3.
-
+	m.notice = ""
 	doAction(m, "search_replace_next_match")
-	if sf.anchor != (buffer.Pos{Line: 0, Col: 8}) || m.notice != "Match 2 of 3" {
-		t.Fatalf("next selected from %+v with notice %q, want the match at 0:8 and %q", sf.anchor, m.notice, "Match 2 of 3")
-	}
-	doAction(m, "search_replace_next_match")
-	if sf.anchor != (buffer.Pos{Line: 1, Col: 2}) {
-		t.Fatalf("second next selected from %+v, want the match at 1:2", sf.anchor)
-	}
-	doAction(m, "search_replace_prev_match")
-	if sf.anchor != (buffer.Pos{Line: 0, Col: 8}) || m.notice != "Match 2 of 3" {
-		t.Fatalf("prev selected from %+v with notice %q, want the match at 0:8", sf.anchor, m.notice)
-	}
-}
-
-func TestSearchReplaceNavigationWithoutASearchSaysHowToStart(t *testing.T) {
-	m, _ := newDefaultSearchModel(t, "foo")
-	doAction(m, "search_replace_next_match")
-	if m.notice != noActiveSearch {
-		t.Fatalf("notice = %q, want %q", m.notice, noActiveSearch)
-	}
-	if len(m.overlays) != 0 {
-		t.Errorf("the key opened %d overlays, want none", len(m.overlays))
+	if !strings.Contains(m.notice, "No project search results") {
+		t.Fatalf("notice = %q, want the no-results notice", m.notice)
 	}
 }
 
@@ -409,21 +381,20 @@ func TestQueryReplaceWithoutASearchKeepsTheBarOpenAndSaysSo(t *testing.T) {
 	}
 }
 
-func TestSearchReplaceActionsNeedADocument(t *testing.T) {
-	for _, action := range []string{"start_search_replace", "search_replace_next_match", "search_replace_prev_match", "query_replace"} {
-		t.Run(action, func(t *testing.T) {
-			sf := &searchFake{fileEditorFake: &fileEditorFake{fakeEditor: newFakeEditor("x")}}
-			m := newRouteModel(t, noDocSearchFake{sf})
-			if err := m.Run(action); err != nil {
-				t.Fatalf("Run(%q) = %v, want it handled", action, err)
-			}
-			if m.notice != noDocumentNotice {
-				t.Errorf("notice = %q, want %q", m.notice, noDocumentNotice)
-			}
-			if m.findOpen() {
-				t.Error("the find bar opened with no document")
-			}
-		})
+// TestQueryReplaceNeedsADocument: query replace still works on the buffer, so with no
+// document it keeps the no-document notice. The project-wide actions are handled before
+// that check, because a project search does not need an open document.
+func TestQueryReplaceNeedsADocument(t *testing.T) {
+	sf := &searchFake{fileEditorFake: &fileEditorFake{fakeEditor: newFakeEditor("x")}}
+	m := newRouteModel(t, noDocSearchFake{sf})
+	if err := m.Run("query_replace"); err != nil {
+		t.Fatalf("Run(query_replace) = %v, want it handled", err)
+	}
+	if m.notice != noDocumentNotice {
+		t.Errorf("notice = %q, want %q", m.notice, noDocumentNotice)
+	}
+	if m.findOpen() {
+		t.Error("the find bar opened with no document")
 	}
 }
 

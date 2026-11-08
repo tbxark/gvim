@@ -72,7 +72,7 @@ func TestFakeLSPServerProcess(t *testing.T) {
 		var result string
 		switch msg.Method {
 		case "initialize":
-			result = `{"capabilities":{}}`
+			result = `{"capabilities":{"hoverProvider":true,"definitionProvider":true,"referencesProvider":true,"documentFormattingProvider":true}}`
 		case "textDocument/hover":
 			result = `{"contents":"doc","list":[1,null,3],"none":[]}`
 		case "textDocument/references":
@@ -119,7 +119,7 @@ func startFakeLSPPort(t *testing.T) (tui.LSPSession, string) {
 	dir := t.TempDir()
 	port.SetRoot(dir)
 	path := filepath.Join(dir, "a.go")
-	if err := port.Open(path, "go", "package a\n"); err != nil {
+	if _, err := port.Open(path, "go", "package a\n"); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = port.Stop() })

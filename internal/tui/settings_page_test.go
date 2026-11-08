@@ -2,11 +2,13 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/theme"
@@ -14,12 +16,14 @@ import (
 
 // fakeSettingsPort is an in-memory SettingsPort for the page tests.
 type fakeSettingsPort struct {
-	snap       SettingsSnapshot
-	saveChange SettingsChange
-	reload     SettingsChange
-	saves      []fakeSettingsSave
-	applied    []SettingsChange
-	validErr   error
+	snap          SettingsSnapshot
+	saveChange    SettingsChange
+	reload        SettingsChange
+	saves         []fakeSettingsSave
+	applied       []SettingsChange
+	validErr      error
+	structures    map[string]SettingsStructure
+	structureKeys []string
 }
 
 type fakeSettingsSave struct {
@@ -40,6 +44,15 @@ func (f *fakeSettingsPort) Reload() (SettingsChange, error) { return f.reload, n
 
 // Apply records the changes the root pushed into the editor.
 func (f *fakeSettingsPort) Apply(change SettingsChange) { f.applied = append(f.applied, change) }
+
+// Structure returns a fixture structure by key.
+func (f *fakeSettingsPort) Structure(key, layer string) (SettingsStructure, error) {
+	f.structureKeys = append(f.structureKeys, key+"@"+layer)
+	if st, ok := f.structures[key]; ok {
+		return st, nil
+	}
+	return SettingsStructure{Key: key, Title: key}, nil
+}
 
 // settingsSnapshot is the page fixture: three sections, an enum with choices, a
 // bool, an int and a restart bool, one user-only setting.
@@ -134,7 +147,7 @@ func TestSettingsPageTogglesABoolAndSaves(t *testing.T) {
 
 	p.sel = settingsRowIndex(t, p, "editor.show_tab_bar")
 	press(m, special(tea.KeyEnter))
-	if got := p.pending["editor.show_tab_bar"]; got != "off" {
+	if got := p.pending["editor.show_tab_bar"].value; got != "off" {
 		t.Fatalf("pending value = %q, want off", got)
 	}
 	if !p.dirty() {
@@ -216,8 +229,8 @@ func TestSettingsPageFilterAndReset(t *testing.T) {
 	cmd = press(m, special(tea.KeyEnter)) // submits the prompt
 	done := firstOf[prompt.Done](t, collect(cmd))
 	m.Update(done)
-	if p.pending["editor.tab_size"] != "8" {
-		t.Fatalf("pending tab_size = %q, want 8", p.pending["editor.tab_size"])
+	if got := p.pending["editor.tab_size"].value; got != "8" {
+		t.Fatalf("pending tab_size = %q, want 8", got)
 	}
 	// Ctrl+R drops the pending value.
 	press(m, ctrl('r'))
@@ -231,8 +244,8 @@ func TestSettingsPageFilterAndReset(t *testing.T) {
 	if got := len(p.rows); got != 8 { // 3 headers + 5 items
 		t.Fatalf("rows after clearing the filter = %d, want 8", got)
 	}
-	if !strings.Contains(m.notice, "reset") {
-		t.Errorf("notice = %q, want the reset notice", m.notice)
+	if !strings.Contains(m.notice, "discarded") {
+		t.Errorf("notice = %q, want the discard notice", m.notice)
 	}
 }
 
@@ -290,7 +303,7 @@ func TestSettingsPagePromptValidation(t *testing.T) {
 	press(m, special(tea.KeyEnter))
 	done := prompt.Done{Tag: settingsEditTag{page: p, key: "editor.tab_size"}, Outcome: prompt.Submitted, Text: "8"}
 	m.Update(done)
-	if got := p.pending["editor.tab_size"]; got != "8" {
+	if got := p.pending["editor.tab_size"].value; got != "8" {
 		t.Fatalf("pending = %q, want 8", got)
 	}
 }
@@ -314,7 +327,7 @@ func TestSettingsPageEscAsksBeforeDiscarding(t *testing.T) {
 	// No keeps it open.
 	port2 := &fakeSettingsPort{snap: settingsSnapshot()}
 	m2, p2 := openSettingsPage(t, port2)
-	p2.pending["theme"] = "light"
+	p2.pending["theme"] = settingsPending{key: "theme", value: "light"}
 	cmd2 := press(m2, special(tea.KeyEscape))
 	m2.Update(firstOf[settingsCancelMsg](t, collect(cmd2)))
 	p2.Update(prompt.Done{Tag: settingsDiscardTag{page: p2}, Outcome: prompt.No})
@@ -369,5 +382,66 @@ func TestSettingsPageEditRawWithoutAFile(t *testing.T) {
 	}
 	if !strings.Contains(m.notice, "no user config file") {
 		t.Errorf("notice = %q, want the missing-file notice", m.notice)
+	}
+}
+
+// TestSettingsApplyStructuredLiveValues checks the live apply of the new scalar
+// sections: the status-bar lists and the file-explorer options.
+func TestSettingsApplyStructuredLiveValues(t *testing.T) {
+	t.Parallel()
+	m := New(Deps{Editor: newFakeEditor("hello"), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	view := DefaultViewOptions()
+	view.StatusBar = StatusBarOptions{Left: []string{"{filename}"}, Right: []string{"{trust}"}, Separator: "|"}
+	view.Explorer = explorer.Options{
+		Width:                     explorer.Width{Mode: explorer.WidthAutomatic, Value: 30},
+		Side:                      explorer.SideRight,
+		FollowActiveBuffer:        true,
+		CompactDirectories:        false,
+		AutoOpenOnLastBufferClose: false,
+	}
+	m.applySettingsChange(SettingsChange{
+		View:     view,
+		Settings: Settings{},
+		Live: []string{
+			"editor.status_bar.left", "editor.status_bar.right",
+			"file_explorer.width", "file_explorer.side",
+			"file_explorer.follow_active_buffer", "file_explorer.auto_open_on_last_buffer_close",
+			"file_explorer.compact_directories",
+		},
+	})
+	if !slices.Equal(m.view.opts.StatusBar.Left, []string{"{filename}"}) || m.view.opts.StatusBar.Separator != "|" {
+		t.Errorf("status bar = %+v, want the applied lists", m.view.opts.StatusBar)
+	}
+	if m.explorerSide != explorer.SideRight {
+		t.Errorf("explorer side = %v, want right", m.explorerSide)
+	}
+	if !m.view.opts.Explorer.FollowActiveBuffer {
+		t.Error("follow_active_buffer was not applied")
+	}
+	if m.view.opts.Explorer.CompactDirectories || m.view.opts.Explorer.AutoOpenOnLastBufferClose {
+		t.Errorf("explorer options = %+v, want the applied off values", m.view.opts.Explorer)
+	}
+}
+
+// TestReloadKeepsUnsavedChanges checks that a Reload reaching the open page does
+// not drop its pending changes.
+func TestReloadKeepsUnsavedChanges(t *testing.T) {
+	t.Parallel()
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	m, p := openSettingsPage(t, port)
+	p.sel = settingsRowIndex(t, p, "editor.show_tab_bar")
+	press(m, special(tea.KeyEnter))
+	if !p.dirty() {
+		t.Fatal("the page is not dirty")
+	}
+	updated := settingsSnapshot()
+	updated.Sections[1].Items[0].Value = "on"
+	m.Update(settingsChangeMsg{change: SettingsChange{Snapshot: updated, Reload: true}})
+	if !p.dirty() {
+		t.Error("the Reload dropped the unsaved changes")
+	}
+	if !strings.Contains(m.notice, "Config reloaded") {
+		t.Errorf("notice = %q, want the reload notice", m.notice)
 	}
 }

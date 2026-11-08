@@ -22,9 +22,19 @@ func normalizePaste(s string) string {
 // short, with an error and no text, so the clipboard never holds less than was
 // selected.
 func (d *Document) CopyText() (text string, lines bool, err error) {
+	// A virtual block selection copies a true rectangle: the part of each line
+	// inside the rectangle, padded with spaces when the line ends before the
+	// rectangle's right edge. A zero-width rectangle selects no text (a bare
+	// vertical column of carets), as Fresh's does.
+	if rect, ok := d.BlockSelection(); ok && rect.Virtual {
+		if rect.Width() == 0 {
+			return "", false, nil
+		}
+		return d.copyVirtualBlockText(rect)
+	}
 	cs := d.AllCarets()
 	if slices.ContainsFunc(cs, func(c caret) bool { lo, hi := c.Bounds(); return lo != hi }) {
-		block := d.Block != nil && d.Block.At == d.Cursor
+		block := d.blockInProgress()
 		parts := make([]string, 0, len(cs))
 		total := 0
 		for _, c := range cs {
@@ -58,6 +68,31 @@ func (d *Document) CopyText() (text string, lines bool, err error) {
 		text += "\n"
 	}
 	return text, true, nil
+}
+
+// copyVirtualBlockText returns the text of the rectangle rect: for each line, its
+// runes in the rectangle's columns, padded with spaces to the rectangle's width
+// when the line is shorter. A line that ends left of the rectangle contributes
+// only spaces.
+func (d *Document) copyVirtualBlockText(rect BlockRect) (string, bool, error) {
+	parts := make([]string, 0, rect.Lines())
+	total, width := 0, rect.Width()
+	for line := rect.Top; line <= rect.Bottom; line++ {
+		if err := d.checkLines(line, line, "copied"); err != nil {
+			return "", false, err
+		}
+		runes := []rune(d.Buffer.Line(line))
+		from, to := min(rect.Left, len(runes)), min(rect.Right, len(runes))
+		part := string(runes[from:to])
+		if have := to - from; have < width {
+			part += strings.Repeat(" ", width-have)
+		}
+		if total += len(part); d.large != nil && total > buffer.MaxMaterialize {
+			return "", false, errSelectionTooLarge()
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "\n"), false, nil
 }
 
 // cutLines deletes the line of each caret, with its break, as one undo step. The

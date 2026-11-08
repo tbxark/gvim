@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"errors"
-	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -320,140 +319,99 @@ func TestCompletion(t *testing.T) {
 		})
 	}
 }
-
 func TestRename(t *testing.T) {
-	const (
-		mainURI = reqDocURI
-		libURI  = "file:///work/proj/lib.go"
-	)
+	const libURI = "file:///work/proj/lib.go"
+	version := int32(3)
 	mainEdit := protocol.TextEdit{Range: rng(7, 12, 7, 15), NewText: "Total"}
 	libEdit := protocol.TextEdit{Range: rng(2, 5, 2, 8), NewText: "Total"}
-	libEdit2 := protocol.TextEdit{Range: rng(9, 1, 9, 4), NewText: "Total"}
-	annotated := protocol.AnnotatedTextEdit{TextEdit: libEdit2, AnnotationID: "rename"}
-	tests := []struct {
-		name    string
-		edit    *protocol.WorkspaceEdit
-		fail    bool
-		wantErr bool
-		want    map[string][]protocol.TextEdit
-	}{
-		{
-			name: "changes map",
-			edit: &protocol.WorkspaceEdit{Changes: map[uri.URI][]protocol.TextEdit{
-				mainURI: {mainEdit},
-				libURI:  {libEdit, libEdit2},
-			}},
-			want: map[string][]protocol.TextEdit{
-				mainURI: {mainEdit},
-				libURI:  {libEdit, libEdit2},
+	annotated := protocol.AnnotatedTextEdit{TextEdit: libEdit, AnnotationID: "rename"}
+	want := &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
+		&protocol.TextDocumentEdit{
+			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: reqDocURI},
+				Version:                &version,
 			},
+			Edits: []protocol.TextDocumentEditElement{&mainEdit, &annotated},
 		},
-		{
-			name: "document changes with plain and annotated edits",
-			edit: &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
-				&protocol.TextDocumentEdit{
-					TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
-						TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: libURI},
-					},
-					Edits: []protocol.TextDocumentEditElement{&libEdit, &annotated},
-				},
-			}},
-			want: map[string][]protocol.TextEdit{libURI: {libEdit, libEdit2}},
-		},
-		{
-			name: "document changes take precedence over changes",
-			edit: &protocol.WorkspaceEdit{
-				Changes: map[uri.URI][]protocol.TextEdit{mainURI: {mainEdit}},
-				DocumentChanges: []protocol.DocumentChange{
-					&protocol.TextDocumentEdit{
-						TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
-							TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: mainURI},
-						},
-						Edits: []protocol.TextDocumentEditElement{&libEdit},
-					},
-				},
-			},
-			want: map[string][]protocol.TextEdit{mainURI: {libEdit}},
-		},
-		{
-			name: "file creation cannot be flattened",
-			edit: &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
-				&protocol.CreateFile{Kind: "create", URI: "file:///work/proj/new.go"},
-			}},
-			wantErr: true,
-		},
-		{
-			name: "snippet edit is refused",
-			edit: &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{
-				&protocol.TextDocumentEdit{
-					TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
-						TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: mainURI},
-					},
-					Edits: []protocol.TextDocumentEditElement{&protocol.SnippetTextEdit{
-						Range:   mainEdit.Range,
-						Snippet: protocol.StringValue{Kind: "snippet", Value: "fmt.Println($0)"},
-					}},
-				},
-			}},
-			wantErr: true,
-		},
-		{name: "null result", edit: nil, want: nil},
-		{name: "server error", fail: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newFixture(t, Config{}, nil)
-			ctx := newTestContext(t)
-			f.srv.Canned.Rename = tt.edit
-			f.srv.Canned.Fail = tt.fail
+		&protocol.CreateFile{Kind: "create", URI: libURI},
+	}}
+	t.Run("answers with the workspace edit, resource operations included", func(t *testing.T) {
+		f := newFixture(t, Config{}, nil)
+		ctx := newTestContext(t)
+		f.srv.Canned.Rename = want
 
-			got, err := f.client.Rename(ctx, reqDocURI, reqPos, "Total")
-			p := nextRequest[*protocol.RenameParams](t, f.srv, "rename params")
-			wantDocPosition(t, p.TextDocumentPositionParams)
-			if p.NewName != "Total" {
-				t.Fatalf("server got newName %q, want %q", p.NewName, "Total")
-			}
-			if tt.fail {
-				wantRefused(t, err)
-				return
-			}
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("Rename = %+v, want an error", got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Rename: %v", err)
-			}
-			if !maps.EqualFunc(got, tt.want, func(a, b []protocol.TextEdit) bool { return slices.Equal(a, b) }) {
-				t.Fatalf("Rename = %+v, want %+v", got, tt.want)
-			}
-		})
-	}
+		got, err := f.client.Rename(ctx, reqDocURI, reqPos, "Total")
+		p := nextRequest[*protocol.RenameParams](t, f.srv, "rename params")
+		wantDocPosition(t, p.TextDocumentPositionParams)
+		if p.NewName != "Total" {
+			t.Fatalf("server got newName %q, want %q", p.NewName, "Total")
+		}
+		if err != nil {
+			t.Fatalf("Rename: %v", err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Rename = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("null result", func(t *testing.T) {
+		f := newFixture(t, Config{}, nil)
+		ctx := newTestContext(t)
+		got, err := f.client.Rename(ctx, reqDocURI, reqPos, "Total")
+		nextRequest[*protocol.RenameParams](t, f.srv, "rename params")
+		if err != nil || got != nil {
+			t.Fatalf("Rename = %+v, %v; want nil, nil", got, err)
+		}
+	})
+	t.Run("server error", func(t *testing.T) {
+		f := newFixture(t, Config{}, nil)
+		ctx := newTestContext(t)
+		f.srv.Canned.Fail = true
+		_, err := f.client.Rename(ctx, reqDocURI, reqPos, "Total")
+		nextRequest[*protocol.RenameParams](t, f.srv, "rename params")
+		wantRefused(t, err)
+	})
 }
 
 func TestCodeActions(t *testing.T) {
 	quickfix := protocol.CodeActionKindQuickFix
 	reqRange := rng(7, 0, 7, 20)
+	diagnostic := protocol.Diagnostic{Range: rng(7, 0, 7, 3), Message: protocol.String("ERR")}
+	edit := &protocol.WorkspaceEdit{Changes: map[uri.URI][]protocol.TextEdit{
+		reqDocURI: {{Range: reqRange, NewText: "fixed"}},
+	}}
+	command := protocol.Command{Title: "Run tests", Command: "go.test"}
+	preferred := true
+	data := protocol.LSPAny(`{"id":1}`)
 	tests := []struct {
-		name   string
-		answer []protocol.CommandOrCodeAction
-		fail   bool
-		want   []CodeAction
+		name        string
+		answer      []protocol.CommandOrCodeAction
+		diagnostics []protocol.Diagnostic
+		fail        bool
+		want        []CodeAction
 	}{
 		{
-			name: "code action and bare command",
+			name: "resolved action, preferred action and bare command",
 			answer: []protocol.CommandOrCodeAction{
-				&protocol.CodeAction{Title: "Add import", Kind: &quickfix},
+				&protocol.CodeAction{Title: "Add import", Kind: &quickfix, Edit: edit},
+				&protocol.CodeAction{Title: "Quick fix", Kind: &quickfix, IsPreferred: &preferred, Command: command},
 				&protocol.Command{Title: "Run tests", Command: "go.test"},
 			},
-			want: []CodeAction{{Title: "Add import", Kind: "quickfix"}, {Title: "Run tests"}},
+			want: []CodeAction{
+				{Title: "Add import", Kind: "quickfix", Edit: edit},
+				{Title: "Quick fix", Kind: "quickfix", Preferred: true, Command: &command},
+				{Title: "Run tests", Command: &command, IsCommand: true},
+			},
 		},
 		{
-			name:   "action without kind",
-			answer: []protocol.CommandOrCodeAction{&protocol.CodeAction{Title: "Organize imports"}},
-			want:   []CodeAction{{Title: "Organize imports"}},
+			name:   "action with data needs resolve",
+			answer: []protocol.CommandOrCodeAction{&protocol.CodeAction{Title: "Extract", Data: data}},
+			want:   []CodeAction{{Title: "Extract", Data: data, HasData: true}},
+		},
+		{
+			name:        "the overlapping diagnostics are sent as context",
+			diagnostics: []protocol.Diagnostic{diagnostic},
+			answer:      []protocol.CommandOrCodeAction{&protocol.CodeAction{Title: "Fix", Kind: &quickfix}},
+			want:        []CodeAction{{Title: "Fix", Kind: "quickfix"}},
 		},
 		{name: "null result", want: nil},
 		{name: "server error", fail: true},
@@ -465,13 +423,16 @@ func TestCodeActions(t *testing.T) {
 			f.srv.Canned.CodeActions = tt.answer
 			f.srv.Canned.Fail = tt.fail
 
-			got, err := f.client.CodeActions(ctx, reqDocURI, reqRange)
+			got, err := f.client.CodeActions(ctx, reqDocURI, reqRange, tt.diagnostics)
 			p := nextRequest[*protocol.CodeActionParams](t, f.srv, "code action params")
 			if string(p.TextDocument.URI) != reqDocURI || p.Range != reqRange {
 				t.Fatalf("server got %q range %+v, want %q range %+v", p.TextDocument.URI, p.Range, reqDocURI, reqRange)
 			}
 			if p.Context.Diagnostics == nil {
-				t.Fatal("server got context diagnostics as null, want an empty list")
+				t.Fatal("server got context diagnostics as null, want a list")
+			}
+			if tt.diagnostics != nil && !reflect.DeepEqual(p.Context.Diagnostics, tt.diagnostics) {
+				t.Fatalf("server got diagnostics %+v, want %+v", p.Context.Diagnostics, tt.diagnostics)
 			}
 			if tt.fail {
 				wantRefused(t, err)
@@ -480,8 +441,14 @@ func TestCodeActions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CodeActions: %v", err)
 			}
-			if !slices.Equal(got, tt.want) {
+			if len(got) != len(tt.want) {
 				t.Fatalf("CodeActions = %+v, want %+v", got, tt.want)
+			}
+			for i := range got {
+				got[i].raw = protocol.CodeAction{}
+				if !reflect.DeepEqual(got[i], tt.want[i]) {
+					t.Fatalf("CodeActions[%d] = %+v, want %+v", i, got[i], tt.want[i])
+				}
 			}
 		})
 	}
@@ -520,7 +487,34 @@ func TestRequestsReturnWhenContextEnds(t *testing.T) {
 			return err
 		}},
 		{"code actions", func(ctx context.Context, c *Client) error {
-			_, err := c.CodeActions(ctx, reqDocURI, rng(7, 0, 7, 20))
+			_, err := c.CodeActions(ctx, reqDocURI, rng(7, 0, 7, 20), nil)
+			return err
+		}},
+		{"code action resolve", func(ctx context.Context, c *Client) error {
+			_, err := c.ResolveCodeAction(ctx, CodeAction{HasData: true})
+			return err
+		}},
+		{"execute command", func(ctx context.Context, c *Client) error {
+			return c.ExecuteCommand(ctx, protocol.Command{Command: "go.test"})
+		}},
+		{"inlay hints", func(ctx context.Context, c *Client) error {
+			_, err := c.InlayHints(ctx, reqDocURI, rng(0, 0, 1, 0))
+			return err
+		}},
+		{"semantic tokens", func(ctx context.Context, c *Client) error {
+			_, err := c.SemanticTokensFull(ctx, reqDocURI)
+			return err
+		}},
+		{"semantic tokens delta", func(ctx context.Context, c *Client) error {
+			_, err := c.SemanticTokensDelta(ctx, reqDocURI, "prev")
+			return err
+		}},
+		{"semantic tokens range", func(ctx context.Context, c *Client) error {
+			_, err := c.SemanticTokensRange(ctx, reqDocURI, rng(0, 0, 1, 0))
+			return err
+		}},
+		{"folding ranges", func(ctx context.Context, c *Client) error {
+			_, err := c.FoldingRanges(ctx, reqDocURI)
 			return err
 		}},
 	}

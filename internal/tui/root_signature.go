@@ -10,7 +10,7 @@ import (
 
 // lspAskSignature is the request for signature help. It follows the asks of lsp.go,
 // and lspAsked, lspRequest and lspReply route it like the others.
-const lspAskSignature = lspAskCodeActions + 1
+const lspAskSignature = lspAskResolveCodeAction + 1
 
 // signatureHelper is the optional part of the language-server port that answers
 // signature help. The app's port has it. A port without it reports that the feature

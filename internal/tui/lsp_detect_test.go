@@ -35,10 +35,10 @@ func newDetectLSP(langs ...string) *detectLSP {
 	return &detectLSP{fakeLSP: newFakeLSP(langs...), openErrs: map[string]error{}, info: map[string]LSPServerInfo{}}
 }
 
-func (f *detectLSP) Open(path, lang, text string) error {
+func (f *detectLSP) Open(path, lang, text string) (int32, error) {
 	f.openLang = append(f.openLang, lang+":"+path)
 	if err := f.openErrs[lang]; err != nil {
-		return err
+		return 0, err
 	}
 	return f.fakeLSP.Open(path, lang, text)
 }
@@ -560,9 +560,10 @@ func TestStatusRowShowsTheServerState(t *testing.T) {
 	if !found {
 		t.Error("the pill is not a clickable run of the status row")
 	}
-	lt.m.statusSegmentClick(statusSegmentLSP)
-	if !strings.HasPrefix(lt.m.notice, "LSP: ") {
-		t.Errorf("notice after a click = %q, want the server status", lt.m.notice)
+	port.servers = []LSPServerStatus{{Language: "go", Name: "gopls", State: LSPServerRunning}}
+	lt.settle(lt.m.statusSegmentClick(statusSegmentLSP), 3)
+	if v := overlayList(t, lt.m); len(v.Rows) == 0 {
+		t.Errorf("the LSP status popup has no rows")
 	}
 }
 

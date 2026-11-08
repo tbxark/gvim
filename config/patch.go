@@ -10,11 +10,14 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-// Edit is one setting the Settings UI writes: its path in the config file and
-// the JSON value to put there.
+// Edit is one change the Settings UI writes: its path in the config file and,
+// for a set, the JSON value to put there. A Reset is an edit with Remove: it
+// deletes the key from the layer, so the value falls back to a lower layer or
+// the built-in default.
 type Edit struct {
-	Path []string
-	Raw  json.RawMessage
+	Path   []string
+	Raw    json.RawMessage
+	Remove bool // delete the key at Path instead of setting it
 }
 
 // PatchBytes applies edits to config file data and returns the new file, so the
@@ -44,6 +47,15 @@ func PatchBytes(data []byte, edits []Edit) ([]byte, error) {
 		if len(e.Path) == 0 {
 			return nil, errors.New("an edit needs a non-empty path")
 		}
+		if e.Remove {
+			if len(e.Raw) > 0 {
+				return nil, fmt.Errorf("%s: a reset cannot also set a value", strings.Join(e.Path, "."))
+			}
+			if _, err := removeSetting(&root, e.Path); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if len(e.Raw) == 0 {
 			return nil, fmt.Errorf("%s: the value is empty", strings.Join(e.Path, "."))
 		}
@@ -52,6 +64,41 @@ func PatchBytes(data []byte, edits []Edit) ([]byte, error) {
 		}
 	}
 	return root.Pack(), nil
+}
+
+// removeSetting deletes path from the object v and reports whether it found
+// anything. A key that is not there is not an error, so Reset is idempotent.
+// An object that becomes empty because of this removal is removed from its
+// parent too, up to (not including) the root: resetting the only override under
+// languages.go removes the empty languages.go and then the empty languages, so
+// the file does not keep hollow objects. A parent that still has a member is
+// never touched.
+func removeSetting(v *hujson.Value, path []string) (bool, error) {
+	obj, ok := v.Value.(*hujson.Object)
+	if !ok {
+		return false, nil
+	}
+	idx := objectIndex(obj, path[0])
+	if idx < 0 {
+		return false, nil
+	}
+	if len(path) == 1 {
+		hadComma := hasTrailingComma(obj)
+		obj.Members = append(obj.Members[:idx], obj.Members[idx+1:]...)
+		restoreTrailingComma(obj, hadComma)
+		return true, nil
+	}
+	child := &obj.Members[idx].Value
+	removed, err := removeSetting(child, path[1:])
+	if err != nil || !removed {
+		return removed, err
+	}
+	if childObject, ok := child.Value.(*hujson.Object); ok && len(childObject.Members) == 0 {
+		hadComma := hasTrailingComma(obj)
+		obj.Members = append(obj.Members[:idx], obj.Members[idx+1:]...)
+		restoreTrailingComma(obj, hadComma)
+	}
+	return true, nil
 }
 
 // setSetting sets path to raw inside the object v. depth is the number of path
@@ -64,13 +111,7 @@ func setSetting(v *hujson.Value, path []string, raw json.RawMessage, indent stri
 		return fmt.Errorf("%s: must be a JSON object", path[0])
 	}
 	name := path[0]
-	idx := -1
-	for i, m := range obj.Members {
-		if literalString(m.Name.Value) == name {
-			idx = i
-			break
-		}
-	}
+	idx := objectIndex(obj, name)
 	if len(path) > 1 {
 		if idx < 0 {
 			// Create the parent object the edit needs. The line break belongs to
@@ -157,6 +198,16 @@ func restoreTrailingComma(obj *hujson.Object, had bool) {
 	if last.AfterExtra == nil {
 		last.AfterExtra = []byte{}
 	}
+}
+
+// objectIndex returns the index of the member named name, or -1.
+func objectIndex(obj *hujson.Object, name string) int {
+	for i, m := range obj.Members {
+		if literalString(m.Name.Value) == name {
+			return i
+		}
+	}
+	return -1
 }
 
 // literalString returns the string a JSON string literal holds, or "" for any
