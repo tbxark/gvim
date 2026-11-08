@@ -40,6 +40,11 @@ type TermStarterOptions struct {
 	// SpawnEnv is the active project environment's set-only overlay for the dock
 	// shell, or nil.
 	SpawnEnv func() []string
+	// OSC52, when not nil, is installed on every new session as its clipboard
+	// hook: a child OSC 52 sequence calls it with the selection and the decoded
+	// text. The host decides whether the feature is on (clipboard.use_osc52 and a
+	// trusted workspace); a nil hook leaves the feature inert.
+	OSC52 func(selection, text string) bool
 }
 
 // TermStarter starts shells for the dock. A shell lives until the dock closes it, or
@@ -80,6 +85,9 @@ func (s TermStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if s.opts.OSC52 != nil {
+		sess.SetOSC52Handler(s.opts.OSC52)
 	}
 	return sess, nil
 }

@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/frame"
 )
@@ -27,7 +28,9 @@ type OpenPathMsg struct {
 type linkMissMsg struct{ token string }
 
 // linkMissNotice is the status text of a Ctrl+Click that names no file.
-func linkMissNotice(token string) string { return "No file at " + token }
+func linkMissNotice(token string) string {
+	return i18n.T("", "gvim.terminal.no_file_at", map[string]any{"token": token})
+}
 
 // Mouse handles a tea mouse message inside the dock's rows. It focuses the dock,
 // forwards the event to the shell when the shell owns the mouse, opens a link on

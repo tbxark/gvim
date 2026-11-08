@@ -15,6 +15,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/list"
@@ -1625,12 +1626,12 @@ func (m *Model) lspToggleInlayHints() tea.Cmd {
 	s.inlay = !s.inlay
 	if !s.inlay {
 		s.hints = nil
-		m.notice = "Inlay hints off"
+		m.notice = i18n.T("", "gvim.lsp.inlay_hints_off", nil)
 		return nil
 	}
 	doc := m.ed.Active()
 	if doc == nil || s.port == nil {
-		m.notice = "Inlay hints on"
+		m.notice = i18n.T("", "gvim.lsp.inlay_hints_on", nil)
 		return nil
 	}
 	lang := m.lspLanguage(doc)
@@ -1638,7 +1639,7 @@ func (m *Model) lspToggleInlayHints() tea.Cmd {
 		m.notice = "Inlay hints are not available: " + reason
 		return nil
 	}
-	m.notice = "Inlay hints on"
+	m.notice = i18n.T("", "gvim.lsp.inlay_hints_on", nil)
 	return m.lspDataArm(lspDataHints)
 }
 

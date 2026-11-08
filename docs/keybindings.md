@@ -84,8 +84,11 @@ overlay's are: `Tab` moves between the search field, the replacement field, the 
 the result rows (Git Grep has no replacement row: its `Tab` walks search, files and rows);
 `Alt+A` cycles the scope chip through all files, open buffers and the current file (Open Buffers
 searches only the open buffers' unsaved text; the file-glob field narrows the All Files walk);
-`Alt+C`/`Alt+R`/`Alt+W` toggle Case, Regex and Whole; the file-glob field takes comma or space separated patterns (`*.go`,
-`src/**`); Up and Down in the search field walk the session's earlier patterns. In the match tree,
+`Alt+C`/`Alt+R`/`Alt+W` toggle Case, Regex and Whole; `Alt+P` toggles soft wrap in the
+preview column (a long line continues on the next display row instead of being cut, and
+the session remembers the setting for the next panel); the file-glob field takes comma or
+space separated patterns (`*.go`, `src/**`); Up and Down in the search field walk the
+session's earlier patterns. In the match tree,
 `Space` checks or unchecks the focused row (a file row takes all its matches), `a` checks every
 match, `n` unchecks every match, and `Enter` on a match opens it. While the result rows have
 the focus the selected match's context shows in a syntax-coloured preview column at the right
@@ -144,7 +147,14 @@ bindings gets the list:
 ```
 
 `when` defaults to `normal`. Your bindings win over the keymap's, and a key you rebind replaces the
-keymap's binding, as in Fresh (the editor's dialog does warn about a key already in use). Show Warnings
+keymap's binding, as in Fresh (the editor's dialog does warn about a key already in use). An `unbind`
+entry removes the binding and, in an overlay context (`prompt`, `searchPrompt`, `popup`, `menu`,
+`settings`, `dock`), also suppresses the overlay's built-in fallback: the key does nothing there
+instead of falling back to the built-in operation the user meant to disable. That is tested for the
+overlay router; two keymap limits remain documented residuals: multi-key bindings are not consulted in
+overlay contexts (the overlay router handles one press at a time; the pending-chord state lives in the
+root for the normal context), and the `completion`, `compositeBuffer` and text-field contexts are
+outside the router (Fresh's own editors implement them per surface). Show Warnings
 lists each keymap binding that one of your entries replaces, and the status row does not, because a
 deliberate rebinding would show a problem on every start. `unbind` removes a keymap binding, `noop`
 disables a key. A single key you bind frees the sequences that start with it.

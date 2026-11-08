@@ -114,6 +114,10 @@ type Map struct {
 	bindings []Binding
 	index    map[lookupKey]int // single-key bindings; last binding wins
 	seq      map[lookupKey]int // multi-key bindings, keyed by the space-joined chord
+	// unbound remembers the user's explicit "unbind" entries: they removed the keymap
+	// binding, and a surface that consults the keymap before its own built-in handler
+	// (the overlays) must swallow the key instead of falling back to that handler.
+	unbound map[lookupKey]bool
 }
 
 type lookupKey struct {
@@ -520,6 +524,26 @@ func (m *Map) ResolveSequence(steps []string, ctx Context) (Binding, bool) {
 		return m.lookup(m.index, append([]string{canon[0]}, terminalEquivalents(canon[0])...), ctx)
 	}
 	return m.lookup(m.seq, []string{strings.Join(canon, " ")}, ctx)
+}
+
+// Unbound reports whether the user's keybindings explicitly unbound chord in ctx (or in
+// the global context), so a surface that consults the keymap before its built-in handler
+// must swallow the key: the chord does nothing there, rather than falling back to the
+// built-in handling the user meant to disable.
+func (m *Map) Unbound(chord string, ctx Context) bool {
+	if m == nil || len(m.unbound) == 0 {
+		return false
+	}
+	c, err := Normalize(chord)
+	if err != nil {
+		return false
+	}
+	for _, q := range append([]string{c}, terminalEquivalents(c)...) {
+		if m.unbound[lookupKey{when: ctx, chord: q}] || m.unbound[lookupKey{when: ContextGlobal, chord: q}] {
+			return true
+		}
+	}
+	return false
 }
 
 // HasSequencePrefix reports whether steps are the leading chords of a multi-key

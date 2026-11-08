@@ -141,3 +141,26 @@ func TestI18nStubsMatchRuntime(t *testing.T) {
 		}
 	}
 }
+
+func TestSetLocaleSwitchesTheRuntimeLocale(t *testing.T) {
+	h := i18nHarness(t, "en", i18nJSON)
+	h.RT.SetLocale("bg")
+	if err := h.Run("p.report", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := h.NoticeTexts()
+	want := []string{"Готово", "Found 3 items", "nope.missing", "bg", "true"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("notices after SetLocale(bg) = %q, want %q", got, want)
+	}
+	// Back to English: the same keys resolve through the English fallback.
+	h.RT.SetLocale("en")
+	if err := h.Run("p.report", nil); err != nil {
+		t.Fatal(err)
+	}
+	got = h.NoticeTexts()[len(got):]
+	want = []string{"Ready", "Found 3 items", "nope.missing", "en", "true"}
+	if got, want := got, want; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("notices after SetLocale(en) = %q, want %q", got, want)
+	}
+}

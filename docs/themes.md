@@ -46,7 +46,11 @@ Hot reload: the **Reload Configuration** command re-reads the config and calls `
 
 ## 5. Inspect at cursor
 
-**Inspect Theme at Cursor** (palette) and **Ctrl+Right-Click** on a cell open the theme inspector (`internal/tui/theme_inspect.go`). The cell is read from a repaint of the frame, so its foreground, background and attributes are the ones actually drawn; the popup lists the theme keys whose rendered color equals the cell's foreground (and background), with a swatch, `#RRGGBB`/ANSI name and the attribute list, capped at eight keys per side plus a summary. Context facts pick the role among keys that share a color: the screen and buffer position, the current line, the selection, the active find text, the diagnostic covering the position (severity and message), and the syntax category of the character with its theme key. The popup dismisses on any key or a click outside; the click or key then goes on to the editor, as Fresh's popup does. A plain right click keeps the context menu.
+**Inspect Theme at Cursor** (palette) and **Ctrl+Right-Click** on a cell open the theme inspector (`internal/tui/theme_inspect.go`). The cell is read from a repaint of the frame, so its foreground, background and attributes are the ones actually drawn.
+
+**Per-cell painted-key provenance (round 11).** The paint path records which theme key each cell's colours came from, Fresh's `setFg`/`setBg`-style attribution: `grid.Style` carries two compact ids (`FGKey`/`BGKey`, 0 = unknown) and `grid.Grid` has an opt-in per-cell capture buffer. The ids are dense 1..N indices into a role table built from `theme.Keys()` in `internal/tui/style/roles.go` (canonical name and aliases resolve through `theme.KeyByName`); the table is the only place `section.key` becomes an id. Tagging happens where styles are constructed, not in the paint loops: `style.TaggedCell`/`TaggedStyle` are used by `editorpane.NewStyles` (text, selection, gutter, scrollbar, tab/current-line/ruler/whitespace/occurrence/diagnostic roles and every syntax kind with `editor.bg` as its background), by `style.NewOverlay` (box/title/muted/idle/hover, accent selection and focus, border, error), by the status bar and menu band, and by the explorer/sidebar/diagnostics chrome. That covers the first-surface subset: editor text and syntax, gutter/line numbers, selection and current line, status bar (including the accent palette segment and the warning run), popup/list/palette/Settings rows and the menu bar.
+
+The inspector repaints once through `Model.paintInto` with capture enabled (`paintCaptured`), reads the captured ids for the inspected cell and prints the exact keys first: `Painted by (fg): syntax.keyword #C586C0`, `Painted by (bg): editor.bg #0D1117`, plus the pair line `Painted by: syntax.keyword on editor.bg` when both sides are attributed. Where a surface did not attribute a side (styles built ad hoc, compose/page-view/plugin painters), the popup falls back to the previous behaviour and says so explicitly: `Foreground (matched by colour): …` lists the resolved keys whose rendered colour equals the cell's, capped at eight plus a summary, and the context facts pick the role among them: the screen and buffer position, the current line, the selection, the active find text, the diagnostic covering the position (severity and message), and the syntax category of the character with its theme key. Capture is off everywhere else: a normal frame allocates no buffer, records nothing and paints the same cells (tests pin both). The popup dismisses on any key or a click outside; the click or key then goes on to the editor, as Fresh's popup does. A plain right click keeps the context menu.
 
 ## 6. Theme editor
 
@@ -63,8 +67,8 @@ The plugin API `gvim.theme.override(colors)` / `gvim.theme.clear()` (owned by th
 - URL/packaged themes and remote packs: **decision recorded** — keep the clear refusal, no network code and no fetch slice until packaging/network policy exists (see §1);
 - inheriting from another *user* theme (Fresh's current limit, kept);
 - background images in themes;
-- drag-and-drop of theme values or swatches (mouse click and drag selection exist in the colour picker, but nothing is reordered);
-- per-cell provenance (Fresh records the theme key each painter used; gvim's inspector matches rendered colors plus context facts instead);
+- drag-and-drop of theme values or swatches (mouse click and drag selection exist in the colour picker, but nothing is reordered); no colour-picker entry is bolted onto the Settings theme row: the picker edits theme values and belongs to the theme editor, while the Settings row's Enter/click opens Select Theme;
+- untagged painters remain a fallback: compose/page-view/plugin/custom-overlay cells report `matched by colour` instead of provenance (the first-surface subset — editor text/syntax, gutter, selection/current line, status bar, popup/palette/Settings rows, menu — is attributed);
 - accent keys beyond gvim's own `ui.accent_*` extension; a Fresh theme and every bundled theme get the popup selection colors as their accent (§2).
 
 The Settings page's theme preview landed (four colour chips on the theme row; mechanics and keys in `docs/settings.md` §4), so it is no longer deferred.
@@ -80,7 +84,8 @@ The Settings page's theme preview landed (four colour chips on the theme row; me
 | `theme/registry.go` | builtin+user discovery, config forms, reload, save/delete paths |
 | `theme/overrides.go` | `WithOverrides` and the theme editor's save format |
 | `theme/form.go` | config/CLI theme form validation |
-| `internal/tui/style` | the single theme-to-styles conversion (fg+bg attributes) |
+| `internal/tui/style` | the single theme-to-styles conversion (fg+bg attributes); `style/roles.go` is the theme-key id role table and the tagging helpers |
+| `internal/tui/grid` | the cell grid; `grid.Style.FGKey/BGKey` and the opt-in `CaptureKeys`/`KeysAt` buffer are the provenance capture |
 | `internal/tui/theme_inspect.go` | inspect popup and Ctrl+Right-Click |
 | `internal/tui/theme_editor.go` | the native theme editor (list, hex/attributes prompts, Save/Save As/Delete/Open) |
 | `internal/tui/theme_picker.go` | the editor's colour picker: swatch grid, arrow/mouse selection, live preview, Enter/Esc |
@@ -95,6 +100,8 @@ The Settings page's theme preview landed (four colour chips on the theme row; me
 - `theme/theme_test.go` / `theme/model_test.go`: parsing warnings and errors, base-by-luminance, extends, standalone fallbacks, attribute bundles and the legacy modifier keys, named/Reset colors, overrides (incl. dark flag), save round-trip, registry forms `file://`/env/user dir/reload/delete, save.
 - `internal/tui/style/decor_test.go` / `editorpane/styles_test.go`: partial themes use the base's values (Fresh's rule), attributes reach cells.
 - `internal/tui/theme_tui_test.go`: inspect command and Ctrl+Right-Click, the catalog picker, apply through the catalog, overrides layering and clearing.
+- `internal/tui/theme_inspect_provenance_test.go`: exact `Painted by` output for editor text, syntax, gutter, status bar, menu bar and a palette/Settings selection; the colour+context fallback for an unattributed theme-editor swatch; a normal paint with no capture and an identical captured repaint.
+- `internal/tui/style/roles_test.go`: role ids dense/unique/round-trip/aliases, `TaggedCell` colour equality, overlay role ids. `internal/tui/editorpane/styles_role_test.go`: pane roles and syntax kinds carry their keys. `internal/tui/grid/keys_test.go`: capture off/on, all write paths, release, and rendering unchanged.
 - `internal/tui/theme_editor_test.go`: editor list/preview/save/attributes; `theme_picker_test.go`: both picker entry points, click/drag preview, Enter apply, Esc/outside restore, palette contents.
 - `internal/app/theme_test.go`: config theme forms, the atomic Save/Delete path, hot reload of an edited user theme; `app_test.go`: `--theme` forms.
 - `theme/accent_audit_test.go`: every bundled theme's accent equals its popup selection, a standalone theme fills the accent through the fallback chain, and the accent keys are editor rows.

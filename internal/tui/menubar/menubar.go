@@ -933,7 +933,7 @@ func newStyles(st style.Styles) styles {
 	disabled := ov.Box
 	disabled.Faint = true
 	return styles{
-		bar:         style.Cell(st.Menu),
+		bar:         style.TaggedCell(st.Menu, "ui", "menu_fg", "ui", "menu_bg"),
 		activeLabel: ov.Selected,
 		chrome:      ov,
 		disabled:    disabled,

@@ -62,7 +62,7 @@ func (m *Model) focusTerminal() tea.Cmd {
 	if m.dock.Running() {
 		m.focusDock()
 	} else if !m.dock.Starting() {
-		m.notice = noTerminalNotice
+		m.notice = noTerminalNotice()
 	}
 	return nil
 }

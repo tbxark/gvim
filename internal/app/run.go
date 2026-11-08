@@ -15,6 +15,7 @@ import (
 	"github.com/tbxark/gvim/env"
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/finder"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/configview"
 	"github.com/tbxark/gvim/internal/filewatch"
 	"github.com/tbxark/gvim/internal/highlight"
@@ -55,6 +56,32 @@ func Run(ctx context.Context, opts Options) error {
 	if err := requireTerminal(os.Stdout); err != nil {
 		return err
 	}
+	// A pipe on standard input with no files named is buffer content, as in Fresh
+	// ("git show | gvim"): consume it even without --stdin. A launch that asks for
+	// stdin explicitly must have a pipe: a terminal would block forever on a read.
+	if !opts.StdinLaunch() && len(opts.Files) == 0 && !term.IsTerminal(os.Stdin.Fd()) {
+		opts.ReadStdin = true
+	}
+	var stdinInput *os.File
+	if opts.ReadStdin {
+		if term.IsTerminal(os.Stdin.Fd()) {
+			return errors.New("stdin: no data piped to standard input (--stdin or - needs a pipe)")
+		}
+		data, err := readStdin(os.Stdin, MaxStdinBytes)
+		if err != nil {
+			return err
+		}
+		opts.Stdin = data
+		if stdinHasNUL(data) {
+			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: stdin input contains NUL bytes; opened as text")
+		}
+		in, err := stdinInputTTY()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = in.Close() }()
+		stdinInput = in
+	}
 	if opts.SessionDir == "" {
 		if dir, err := restore.DefaultSessionDir(); err == nil {
 			opts.SessionDir = dir
@@ -65,7 +92,12 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	defer rt.close()
-	runErr := tui.Run(ctx, rt.model)
+	var runErr error
+	if stdinInput != nil {
+		runErr = tui.RunWithInput(ctx, rt.model, stdinInput)
+	} else {
+		runErr = tui.Run(ctx, rt.model)
+	}
 	if runErr != nil {
 		rt.log.write("error", runErr.Error())
 	}
@@ -279,6 +311,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		return nil, err
 	}
 	printDiagnostics(os.Stderr, diags)
+	// Resolve the UI language before anything builds strings or the plugin runtime: the
+	// config locale wins, then LC_ALL/LC_MESSAGES/LANG, then English. The Settings row
+	// applies later changes live through settingsService.Apply.
+	i18n.SetLocale(i18n.Resolve(cfg.Locale, os.Getenv))
 	if trustWarning != "" {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: "+trustWarning)
 	}
@@ -293,7 +329,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	tree.SetShowHidden(cfg.ExplorerShowHidden)
 	tree.SetShowIgnored(cfg.ExplorerShowIgnored)
 	// Without files the editor starts empty, and the welcome screen shows.
-	edOpts := editorOptions(cfg, len(opts.Files) == 0)
+	edOpts := editorOptions(cfg, len(opts.Files) == 0 && !opts.StdinLaunch())
 	interval := autoSaveInterval(opts.AutoSaveInterval, cfg)
 	edOpts.AutoSaveInterval = interval
 	edOpts.Root = root
@@ -331,6 +367,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 				failed = restore.RestoreHotExit(ed, opts.SessionDir, s)
 			}
 		}
+	}
+	// The piped content is a [stdin] buffer, opened first like Fresh's file-born stdin
+	// buffer. It has no path (Save goes through Save As) and is unmodified on open.
+	if opts.StdinLaunch() {
+		ed.OpenStdinText(string(opts.Stdin), editor.StdinOptions{Label: "[stdin]", Language: stdinLanguage(opts)})
 	}
 	openNotices, fullLoads, err := openTargets(ed, opts.Files, plan.tabs)
 	if err != nil {
@@ -480,9 +521,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// page statuses and actions, and the plugin runtime for its Plugins page. They
 	// are built after the page's config snapshot and before the model.
 	settingsSvc := newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat, settingsRuntime{
-		lsp:        deps.LSP,
-		plugins:    pw.Runtime,
-		pluginsCfg: cfg,
+		lsp:         deps.LSP,
+		localeApply: func(locale string) { pw.Runtime.SetLocale(locale) },
+		plugins:     pw.Runtime,
+		pluginsCfg:  cfg,
 		keymapOf: func(cfg config.Config) tui.Keymap {
 			return keybindings.NewKeymap(keybindings.ApplyOverrides(presetKeymap(opts.Keymap, cfg), cfg))
 		},
@@ -525,7 +567,19 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	loadSearch(model, opts.SessionDir)
 	shellCommand, shellArgs := cfg.Terminal.TerminalShellOptions()
 	model.SetDock(tui.DockPorts{
-		Starter:   uiadapter.NewTermStarter(ctx, uiadapter.TermStarterOptions{Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines, SpawnEnv: envProvider.Overlay}),
+		Starter: uiadapter.NewTermStarter(ctx, uiadapter.TermStarterOptions{
+			Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines,
+			SpawnEnv: envProvider.Overlay,
+			// A child OSC 52 writes the system clipboard only when the config asks
+			// for it and the workspace is trusted (output is untrusted data, and
+			// the default is off); the session parser is inert otherwise.
+			OSC52: func(selection, text string) bool {
+				if !cfg.Clipboard.UseOSC52 || !trustedLive() {
+					return false
+				}
+				return uiadapter.SystemClipboard{}.Write(text) == nil
+			},
+		}),
 		Clipboard: uiadapter.SystemClipboard{},
 		Effects: tui.DockEffects{
 			CloseOnExit:          cfg.Terminal.CloseOnExit,

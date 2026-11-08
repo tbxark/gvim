@@ -116,7 +116,8 @@ func TestInspectThemeAtCursor(t *testing.T) {
 			t.Errorf("inspect lines miss %q:\n%s", want, body)
 		}
 	}
-	if !strings.Contains(body, "Foreground:") && !strings.Contains(body, "Background:") {
+	if !strings.Contains(body, "Painted by (fg):") && !strings.Contains(body, "Painted by (bg):") &&
+		!strings.Contains(body, "matched by colour") {
 		t.Errorf("inspect lines name no theme keys:\n%s", body)
 	}
 	// Any key dismisses it.

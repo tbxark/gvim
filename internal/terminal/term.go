@@ -2,12 +2,14 @@
 // screen, so that a UI pane can show it.
 //
 // On Unix the PTY comes from github.com/creack/pty. The child runs in a new
-// session with the PTY as its controlling terminal. Its output is parsed by the
-// terminal emulator in github.com/charmbracelet/x/vt, and Screen returns a copy
-// of the emulated grid.
+// session with the PTY as its controlling terminal. On Windows the terminal is a
+// ConPTY pseudo console (pty_windows.go), created with x/sys/windows. The child's
+// output is parsed by the terminal emulator in github.com/charmbracelet/x/vt, and
+// Screen returns a copy of the emulated grid.
 //
-// Windows is not supported: ConPTY is not implemented, so Start returns
-// ErrUnsupported there.
+// The ConPTY path is compile-verified (GOOS=windows build, vet and test compile)
+// but has no real-Windows pass yet: docs/terminal.md has the manual acceptance
+// checklist, and parity is unverified until it passes.
 //
 // Screen exposes the rune and the basic character style of each cell, and the
 // cursor position and visibility. It does not expose cell widths or grapheme
@@ -99,11 +101,11 @@ func Start(ctx context.Context, opts Options) (*Session, error) {
 	cmd.Dir = opts.Dir
 	cmd.Env = append(append(os.Environ(), "TERM=xterm-256color"), opts.Env...)
 
-	ptmx, err := spawn(cmd, cols, rows)
+	pty, err := spawn(cmd, cols, rows)
 	if err != nil {
 		return nil, fmt.Errorf("term: start %s: %w", shell, err)
 	}
-	s := newSession(ptmx, cmd, cols, rows, opts.ScrollbackLines)
+	s := newSession(pty, cols, rows, opts.ScrollbackLines)
 	go s.closeOnCancel(ctx)
 	return s, nil
 }

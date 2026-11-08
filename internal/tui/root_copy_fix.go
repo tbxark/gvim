@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/i18n"
 )
 
 // copyPath runs the copy action of the file path, the absolute one or the one relative to
@@ -20,6 +21,6 @@ func (m *Model) copyPath(a editor.Action) tea.Cmd {
 		m.notice = res.Err.Error()
 		return nil
 	}
-	m.notice = "Copied path: " + res.Text
+	m.notice = i18n.T("", "clipboard.copied_path", map[string]any{"path": res.Text})
 	return tea.SetClipboard(res.Text)
 }

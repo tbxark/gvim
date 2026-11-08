@@ -149,8 +149,11 @@ the bottom border (rows with rails on both sides, ordered nearest first). While
 the caret is on that source row the continuation rows stand down and the raw row
 is revealed, so the caret never sits on a non-source row; pressing a continuation
 row maps to the line end, which reveals the row and collapses the continuations
-(Fresh's row-level reveal semantics). Selection paints the primary row (the hook's
-rows take no selection), which is a documented limitation of wrapped cells.
+(Fresh's row-level reveal semantics). Selection paints the primary row only: the
+continuation rows are inserted by the hook and carry no source line (they are
+shared with the pure table borders and the page-view row math), so painting a
+selection across them would need a row-source map the hook API does not carry.
+That is the documented decision for wrapped cells, not a missing paint path.
 
 The column widths are keyed by (text version, page measure): the two panes of
 the dual view have different measures and must not share one width set. A pipe
@@ -287,19 +290,25 @@ buffer group either); it is documented with the other dual residuals below.
   fences at their indent, and a container whose lines disagree falls back literal
   per line; a fence run inside a fence's body stays literal code;
 - composed plugin-overlay ordering: the compose renders first and the plugin
-  conceal/virtual-row transform runs after it (host pipeline); a mapped ordering
-  test is deferred with the plugin tier-1c remainder;
+  conceal/virtual-row transform runs after it (host pipeline). That order is now
+  a regression test (TestPlugDecorComposeOrdering: compose-only conceal and
+  virtual rows sandwich the composed rows in order, ordinary line/highlight
+  overlays paint on normal panes only, and no compose-only item reaches a normal
+  pane); a mapped painting of overlay spans onto composed cells stays the
+  documented no-paint decision (the page view owns its visual language);
 - session persistence of a dual split (the editor view per file is persisted,
   see below; the dual view itself is session-only, as Fresh does not persist a
   buffer group);
 - per-split view mode: gvim keeps one view mode per document, Fresh per split; the
   dual view adds one derived per-pane override (source vs preview) but does not
   make the mode a free per-pane setting;
-- dual view: exact row/byte scroll anchors beyond the documented line anchor, a
-  native Markdown menu row (the generated menu table is not hand-edited),
-  persisting the split, and more than one dual view of a document (the policy is
-  one dual view at a time; the dual view is offered for a single-pane Markdown
-  document only);
+- dual view: exact row/byte scroll anchors beyond the documented line anchor
+  (deliberate: the two panes wrap differently, so a byte-exact anchor needs the
+  compare anchoring machinery and the line anchor keeps the same source line at
+  the top in all but the last partial rows), a native Markdown menu row (the
+  generated menu table is not hand-edited), persisting the split, and more than
+  one dual view of a document (the policy is one dual view at a time; the dual
+  view is offered for a single-pane Markdown document only);
 - mapped occurrences, rulers and indent guides in the page view: they stay
   deliberately off there (the page view owns its own visual language; a test
   asserts rulers and guides do not paint). Whitespace marks are per-cell and

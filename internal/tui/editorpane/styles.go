@@ -47,26 +47,29 @@ type Styles struct {
 // foreground, as the legacy painter does.
 func NewStyles(th theme.Theme) Styles {
 	chrome := style.New(th)
-	text := style.Cell(chrome.Editor)
+	// Every pane role records the theme keys it is painted from, for the theme
+	// inspector's per-cell provenance (the grid records them only in inspect mode).
+	tagged := style.TaggedCell
+	text := tagged(chrome.Editor, "editor", "fg", "editor", "bg")
 	st := Styles{
 		Text:         text,
-		Selection:    style.Cell(chrome.Selection),
-		Gutter:       style.Cell(chrome.Gutter),
-		Scrollbar:    style.Cell(chrome.Scrollbar),
-		Thumb:        style.Cell(chrome.ScrollbarThumb),
-		Match:        style.Cell(chrome.Match),
-		CurrentMatch: style.Cell(chrome.CurrentMatch),
+		Selection:    tagged(chrome.Selection, "editor", "fg", "editor", "selection_bg"),
+		Gutter:       tagged(chrome.Gutter, "editor", "line_number_fg", "editor", "line_number_bg"),
+		Scrollbar:    tagged(chrome.Scrollbar, "ui", "scrollbar_track_fg", "editor", "bg"),
+		Thumb:        tagged(chrome.ScrollbarThumb, "ui", "scrollbar_thumb_fg", "editor", "bg"),
+		Match:        tagged(chrome.Match, "", "", "search", "match_bg"),
+		CurrentMatch: tagged(chrome.CurrentMatch, "search", "current_match_fg", "search", "current_match_bg"),
 
-		SecondaryCaret: style.Cell(chrome.SecondaryCaret),
-		CurrentLine:    style.Cell(chrome.CurrentLine),
-		Ruler:          style.Cell(chrome.Ruler),
-		Whitespace:     style.Cell(chrome.Whitespace),
-		Occurrence:     style.Cell(chrome.Occurrence),
-		DiagError:      style.Cell(chrome.DiagError),
-		DiagWarning:    style.Cell(chrome.DiagWarning),
-		DiagInfo:       style.Cell(chrome.DiagInfo),
-		DiagHint:       style.Cell(chrome.DiagHint),
-		Decor:          newDecorStyles(chrome.Decor, text, style.Cell(chrome.Gutter)),
+		SecondaryCaret: tagged(chrome.SecondaryCaret, "editor", "fg", "editor", "inactive_cursor"),
+		CurrentLine:    tagged(chrome.CurrentLine, "", "", "editor", "current_line_bg"),
+		Ruler:          tagged(chrome.Ruler, "", "", "editor", "ruler_bg"),
+		Whitespace:     tagged(chrome.Whitespace, "editor", "whitespace_indicator_fg", "editor", "bg"),
+		Occurrence:     tagged(chrome.Occurrence, "", "", "ui", "semantic_highlight_bg"),
+		DiagError:      tagged(chrome.DiagError, "diagnostic", "error_fg", "", ""),
+		DiagWarning:    tagged(chrome.DiagWarning, "diagnostic", "warning_fg", "", ""),
+		DiagInfo:       tagged(chrome.DiagInfo, "diagnostic", "info_fg", "", ""),
+		DiagHint:       tagged(chrome.DiagHint, "diagnostic", "hint_fg", "", ""),
+		Decor:          newDecorStyles(chrome.Decor, text, tagged(chrome.Gutter, "editor", "line_number_fg", "editor", "line_number_bg")),
 	}
 	for k := range st.Syntax {
 		kind := syntax.Kind(k)
@@ -75,6 +78,14 @@ func NewStyles(th theme.Theme) Styles {
 			continue
 		}
 		st.Syntax[k].FG = syntaxFG(th, kind, text.FG)
+		// The syntax kind's theme key is the provenance even when its colour is
+		// named/terminal (the painter falls back to the editor foreground).
+		if section, key, ok := syntaxThemeKey(th, kind); ok {
+			st.Syntax[k].FGKey = style.KeyIDFor(section, key)
+		} else {
+			st.Syntax[k].FGKey = style.KeyIDFor("editor", "fg")
+		}
+		st.Syntax[k].BGKey = style.KeyIDFor("editor", "bg")
 		attrs := kind.Attrs()
 		st.Syntax[k].Bold = attrs&syntax.AttrBold != 0
 		st.Syntax[k].Italic = attrs&syntax.AttrItalic != 0
@@ -85,6 +96,21 @@ func NewStyles(th theme.Theme) Styles {
 		}
 	}
 	return st
+}
+
+// syntaxThemeKey resolves the theme key that names a syntax kind, following the
+// kind's fallback key when the theme has no value for its own key.
+func syntaxThemeKey(th theme.Theme, kind syntax.Kind) (section, key string, ok bool) {
+	name := kind.ThemeKey()
+	if _, ok := th.Syntax(name); !ok {
+		if fb := kind.ThemeFallbackKey(); fb != "" {
+			name = fb
+		}
+	}
+	if _, ok := th.Syntax(name); !ok {
+		return "", "", false
+	}
+	return "syntax", name, true
 }
 
 // syntaxFG resolves the foreground of one syntax kind. base is the editor

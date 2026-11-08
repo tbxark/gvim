@@ -20,6 +20,12 @@ import (
 type Style struct {
 	FG, BG                                          color.Color
 	Bold, Faint, Italic, Underline, Strike, Reverse bool
+	// FGKey and BGKey are the theme-key ids Style's colours came from, for the
+	// theme inspector's per-cell provenance. Zero means unknown (a style built
+	// without a theme role, or a modified style whose colour no key names). They
+	// are only recorded when the grid's key capture is on, so normal painting
+	// writes no attribution.
+	FGKey, BGKey uint16
 }
 
 // Cell is one terminal cell. A wide grapheme occupies its own cell followed by
@@ -34,7 +40,13 @@ type Cell struct {
 type Grid struct {
 	w, h  int
 	cells [][]Cell
+	// keys is the per-cell theme-key capture: allocated only by CaptureKeys, so a
+	// normal frame pays nothing beyond a nil check on each write.
+	keys [][]cellKeys
 }
+
+// cellKeys is one cell's captured theme-key ids, FGKey then BGKey.
+type cellKeys struct{ fg, bg uint16 }
 
 // New returns a w by h grid of blank cells in the default style. A negative
 // size is treated as zero.
@@ -48,6 +60,40 @@ func New(w, h int) *Grid {
 		}
 	}
 	return g
+}
+
+// CaptureKeys allocates the per-cell theme-key buffer and makes the grid record
+// Style.FGKey/BGKey on every write. The theme inspector calls it on the one
+// repaint it attributes; everything else paints without it.
+func (g *Grid) CaptureKeys() {
+	g.keys = make([][]cellKeys, g.h)
+	for y := range g.keys {
+		g.keys[y] = make([]cellKeys, g.w)
+	}
+}
+
+// ReleaseKeys stops recording and frees the capture buffer.
+func (g *Grid) ReleaseKeys() { g.keys = nil }
+
+// CapturingKeys reports whether the grid records theme-key ids.
+func (g *Grid) CapturingKeys() bool { return g.keys != nil }
+
+// KeysAt returns the theme-key ids recorded for the cell under the last style
+// written there. (0, 0) means unknown, outside the grid, or capture off.
+func (g *Grid) KeysAt(x, y int) (fg, bg uint16) {
+	if x < 0 || y < 0 || y >= len(g.keys) || x >= len(g.keys[y]) {
+		return 0, 0
+	}
+	k := g.keys[y][x]
+	return k.fg, k.bg
+}
+
+// recordKeys copies st's theme-key ids into the capture buffer for the cell.
+func (g *Grid) recordKeys(x, y int, st Style) {
+	if g.keys == nil || x < 0 || y < 0 || y >= g.h || x >= g.w {
+		return
+	}
+	g.keys[y][x] = cellKeys{fg: st.FGKey, bg: st.BGKey}
 }
 
 // Width is the number of columns.
@@ -74,13 +120,16 @@ func (g *Grid) Set(x, y int, text string, st Style) {
 	}
 	if c := &g.cells[y][x]; c.Text == text && text != "" {
 		c.Style = st
+		g.recordKeys(x, y, st)
 		if x+1 < g.w && g.cells[y][x+1].Text == "" {
 			g.cells[y][x+1].Style = st
+			g.recordKeys(x+1, y, st)
 		}
 		return
 	}
 	g.breakPairs(x, y)
 	g.cells[y][x] = Cell{Text: text, Style: st}
+	g.recordKeys(x, y, st)
 }
 
 // Fill sets the cells in [x0, x1) of row y to blanks in style st.
@@ -92,6 +141,7 @@ func (g *Grid) Fill(x0, x1, y int, st Style) {
 	for x := x0; x < x1; x++ {
 		g.breakPairs(x, y)
 		g.cells[y][x] = Cell{Text: " ", Style: st}
+		g.recordKeys(x, y, st)
 	}
 }
 
@@ -137,8 +187,10 @@ func (g *Grid) Put(x, y, maxX int, s string, st Style) int {
 		}
 		g.breakPairs(x, y)
 		g.cells[y][x] = Cell{Text: gr, Style: st}
+		g.recordKeys(x, y, st)
 		if w == 2 {
 			g.cells[y][x+1] = Cell{Text: "", Style: st}
+			g.recordKeys(x+1, y, st)
 		}
 		x += w
 	}

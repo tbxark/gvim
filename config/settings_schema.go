@@ -101,12 +101,27 @@ const (
 	SectionMouse      = "Mouse"
 )
 
+// localeChoices are the Settings page's UI language choices: Fresh's 15 locales and
+// "auto" (detect from the environment, the default).
+var localeChoices = []string{
+	"auto", "bg", "cs", "de", "en", "es", "fr", "it", "ja", "ko",
+	"pt-BR", "ru", "th", "uk", "vi", "zh-CN",
+}
+
 // settingsTable is the Settings UI's schema, in section order. It covers the
 // scalar settings gvim reads today except the ones with no live effect yet (the
 // tool entries such as the editors listed in docs/settings.md). The page shows
 // the effective value and writes the edited keys to the chosen layer.
 var settingsTable = []Setting{
 	// Interface.
+	{Path: []string{"locale"}, Section: SectionInterface, Kind: SettingEnum, Choices: localeChoices,
+		Layers: LayerUser, Apply: ApplyLive, // the UI language is a user preference
+		value: func(c Config) string {
+			if c.Locale == "" {
+				return "auto"
+			}
+			return c.Locale
+		}, encode: encodeLocale},
 	{Path: []string{"theme"}, Section: SectionInterface, Kind: SettingEnum, ChoicesFrom: "themes",
 		Layers: LayerUser | LayerProject, Apply: ApplyLive,
 		value: func(c Config) string { return c.Theme }, encode: encodeText},
@@ -391,6 +406,20 @@ func onOff(b bool) string {
 // intValue returns a Value func for an integer setting.
 func intValue(get func(Config) int) func(Config) string {
 	return func(c Config) string { return strconv.Itoa(get(c)) }
+}
+
+// encodeLocale writes "auto" as Fresh's null and otherwise one of the locale codes.
+func encodeLocale(text string) (json.RawMessage, error) {
+	text = strings.TrimSpace(text)
+	if text == "auto" {
+		return json.RawMessage("null"), nil
+	}
+	for _, code := range localeChoices {
+		if code == text {
+			return json.Marshal(code)
+		}
+	}
+	return nil, fmt.Errorf("must be auto or a locale code, got %q", text)
 }
 
 // encodeBool parses the page's "on"/"off" (or true/false) into a JSON bool.

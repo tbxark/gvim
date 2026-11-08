@@ -55,7 +55,9 @@ func planSession(opts Options, cfg config.Config) sessionPlan {
 	// launch whatever is named. A compare launch is always a file launch: the
 	// compare view is its two named files.
 	fileLaunch := files && cfg.SkipSessionRestoreWhenFilesPassed && !opts.Restore
-	if opts.Simple || opts.Diff {
+	// --simple and --diff are file launches whatever is named; a stdin launch is one
+	// too, because the piped content is not session state and must never be saved.
+	if opts.Simple || opts.Diff || opts.StdinLaunch() {
 		fileLaunch = true
 	}
 	sessionLaunch := !fileLaunch

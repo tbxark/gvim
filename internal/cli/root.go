@@ -58,6 +58,8 @@ func NewRootCommand(run Runner) *cobra.Command {
 		restore    bool
 		noRestore  bool
 		simple     bool
+		stdin      bool
+		stdinName  string
 	)
 	root := &cobra.Command{
 		Use:   "gvim [DIR] [FILE[:LINE[:COL]]]...",
@@ -78,18 +80,47 @@ key to false to be asked to save or discard each one instead. A launch with
 files opens only those files by default (editor.skip_session_restore_when_files_passed),
 restoring and saving no session. --restore forces the session for this run,
 --no-restore skips it (still bringing the session's unsaved text back), and
---simple opens just what is named with no session at all.`,
+--simple opens just what is named with no session at all.
+
+Standard input becomes a scratch [stdin] buffer (no path: Save runs Save As), and the
+keyboard then comes from the terminal. Use --stdin, or a - FILE argument anywhere among
+the files; when no files are named, piped stdin is read even without the flag, so
+"git show | gvim" works. The read is bounded at 32 MiB. A stdin launch never restores or
+saves the session. --stdin-name NAME names the buffer for the language (by extension) and
+the Save-As suggestion.`,
 		Example: `  gvim
   gvim ~/project
   gvim ~/project main.go:42:7 README.md
   gvim --diff old.go new.go
   gvim --no-restore
-  gvim --simple`,
+  gvim --simple
+  git show HEAD | gvim -
+  cat notes.txt | gvim --stdin-name notes.md`,
 		Args:          cobra.ArbitraryArgs,
 		Version:       versionString(),
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			targets, err := ParseTargets(args, os.Stat)
+			// "-" is standard input among the file arguments (Fresh's alternative to
+			// --stdin); it is not a path to stat. At most one may be given.
+			files := make([]string, 0, len(args))
+			dashes := 0
+			for _, arg := range args {
+				if arg == "-" {
+					dashes++
+					continue
+				}
+				files = append(files, arg)
+			}
+			if dashes > 1 {
+				return errors.New("only one - (standard input) may be given")
+			}
+			if dashes == 1 && stdin {
+				return errors.New("--stdin and - name the same standard input")
+			}
+			if dashes == 1 {
+				stdin = true
+			}
+			targets, err := ParseTargets(files, os.Stat)
 			if err != nil {
 				return err
 			}
@@ -108,6 +139,9 @@ restoring and saving no session. --restore forces the session for this run,
 				Restore:   restore,
 				NoRestore: noRestore,
 				Simple:    simple,
+
+				ReadStdin: stdin,
+				StdinName: stdinName,
 			}
 			if err := opts.Validate(); err != nil {
 				// The message names the flag and the valid values: the whole usage text
@@ -136,6 +170,8 @@ restoring and saving no session. --restore forces the session for this run,
 	root.Flags().BoolVar(&noRestore, "no-restore", false, "do not restore the previous session for this run; its unsaved text still comes back")
 	root.Flags().BoolVar(&noRestore, "no-session", false, "alias for --no-restore")
 	root.Flags().BoolVar(&simple, "simple", false, "open just what is named: no session restored or saved and no file explorer")
+	root.Flags().BoolVar(&stdin, "stdin", false, "read a [stdin] buffer from standard input (bounded at 32 MiB); the keyboard comes from the terminal")
+	root.Flags().StringVar(&stdinName, "stdin-name", "", "name the [stdin] buffer `NAME`, for the language and the Save-As suggestion")
 	_ = root.RegisterFlagCompletionFunc("keymap", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return keymapNames, cobra.ShellCompDirectiveNoFileComp
 	})

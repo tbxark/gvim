@@ -11,10 +11,11 @@
 --     fetches from a bundled plugin); the public third-party section API is not
 --     ported either (gvim cannot pass Lua closures between plugin runtimes).
 --   * the disk section shells out to df for the workspace mount and $HOME only.
---   * there is no raw mouse event on an ordinary buffer, so clickable rows are
---     keyboard-only: the buffer's mode binds Tab/Down/j, Shift-Tab/Up/k and
---     Enter, like Fresh's dashboard mode. Fresh's click routing is documented
---     as a reduction rather than avoided.
+--   * the recent-file rows are line targets (gvim.buf.set_line_targets): a
+--     single click opens the file. The command rows cannot be targets because a
+--     target opens a file, not an action, so those stay keyboard-only (the
+--     buffer's mode binds Tab/Down/j, Shift-Tab/Up/k and Enter, like Fresh's
+--     dashboard mode).
 --   * sessions are not shown (gvim has no plugin-facing session list); the
 --     recent-files section covers the same "get back to work" role.
 local gvim = require "gvim"
@@ -328,6 +329,7 @@ local function build_rows(inner)
       segments[#segments + 1] = { text = "  " .. clip(detail, detail_room), style = STYLE.muted }
     end
     lines[#lines + 1] = { segments = segments }
+    row.line_index = #lines
   end
   local recent = recent_files()
   if state.git and not state.git.missing then
@@ -384,6 +386,28 @@ end
 
 local function clock()
   return os.date("%H:%M")
+end
+
+-- publish_targets makes the recent-file rows clickable. A line target opens its path at
+-- the row's line, which is refreshing the dashboard already does on Enter; the command
+-- rows cannot be targets because a target points at a file, not an action. Targets are
+-- replaced on every paint (a row moving with the frame keeps its own line) and cleared
+-- when the dashboard closes or the plugin unloads.
+local function publish_targets(buf, top_pad)
+  local set = gvim.buf.set_line_targets
+  if type(set) ~= "function" then
+    return
+  end
+  local targets = {}
+  for _, row in ipairs(state.rows) do
+    if row.kind == "recent" and row.path and row.line_index then
+      targets[#targets + 1] = { line = top_pad + row.line_index + 1, path = row.path }
+    end
+  end
+  local ok, err = pcall(set, buf, targets)
+  if not ok then
+    gvim.log.debug("dashboard: line targets: " .. tostring(err))
+  end
 end
 
 local function paint()
@@ -505,6 +529,7 @@ local function paint()
     end
     state.frame = text_key
   end
+  publish_targets(buf, topPad)
   return true
 end
 
@@ -547,6 +572,10 @@ local function close_dashboard(quiet)
   state.buf, state.auto, state.rows, state.frame = nil, false, {}, ""
   state.focus = 0
   if buf then
+    local clear = gvim.buf.clear_line_targets
+    if type(clear) == "function" then
+      pcall(clear, buf)
+    end
     pcall(buf.close, buf, { force = true })
   end
   if not quiet then
@@ -741,6 +770,11 @@ end)
 
 gvim.plugin.on_unload(function()
   stop_timer()
+  local buf = valid_buf()
+  local clear = gvim.buf.clear_line_targets
+  if buf and type(clear) == "function" then
+    pcall(clear, buf)
+  end
 end)
 
 gvim.log.debug("dashboard plugin loaded")

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/i18n"
 )
 
 // clipboardWrites returns the text of every clipboard write that cmd makes. A write is a
@@ -97,5 +98,22 @@ func TestCopyPathShowsTheEditorsRefusal(t *testing.T) {
 				t.Fatalf("notice = %q, want %q", m.notice, tt.notice)
 			}
 		})
+	}
+}
+
+// TestCopyPathStatusUsesTheActiveLocale checks that the extracted copied-path notice goes
+// through the translator. It is not parallel: it changes the process locale and restores it.
+func TestCopyPathStatusUsesTheActiveLocale(t *testing.T) {
+	i18n.Register("xx", map[string]string{"clipboard.copied_path": "kopierad %{path}"})
+	i18n.SetLocale("xx")
+	t.Cleanup(func() {
+		i18n.SetLocale("en")
+		i18n.Register("xx", nil)
+	})
+	ed := &copyEditor{docEditor: newDocEditor("/ws/src/main.go", false), text: "/ws/a.go"}
+	m := newRevertModel(t, ed)
+	m.copyPath("copy_file_path")
+	if got, want := m.notice, "kopierad /ws/a.go"; got != want {
+		t.Fatalf("notice = %q, want %q", got, want)
 	}
 }

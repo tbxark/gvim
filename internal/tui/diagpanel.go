@@ -302,8 +302,8 @@ func (m *Model) paintDiagPanel(dst *grid.Grid, l layout, sec sidebar.Section) {
 	if l.Ex < 2 || rows <= 0 {
 		return
 	}
-	body := style.Cell(m.styles.Explorer)
-	sel := style.Cell(m.styles.Selection)
+	body := style.TaggedCell(m.styles.Explorer, "editor", "fg", "editor", "bg")
+	sel := style.TaggedCell(m.styles.Selection, "editor", "fg", "editor", "selection_bg")
 	accent := style.Cell(m.styles.Accent).BG
 	for y := sec.BodyTop; y <= sec.BodyBottom; y++ {
 		dst.Fill(x, right, y, body)
@@ -394,13 +394,13 @@ func diagSeverityStyle(body grid.Style, severity int, styles style.Styles) grid.
 	var mark grid.Style
 	switch severity {
 	case 1:
-		mark = style.Cell(styles.DiagError)
+		mark = style.TaggedCell(styles.DiagError, "diagnostic", "error_fg", "", "")
 	case 2:
-		mark = style.Cell(styles.DiagWarning)
+		mark = style.TaggedCell(styles.DiagWarning, "diagnostic", "warning_fg", "", "")
 	case 3:
-		mark = style.Cell(styles.DiagInfo)
+		mark = style.TaggedCell(styles.DiagInfo, "diagnostic", "info_fg", "", "")
 	default:
-		mark = style.Cell(styles.DiagHint)
+		mark = style.TaggedCell(styles.DiagHint, "diagnostic", "hint_fg", "", "")
 	}
 	if mark.FG != nil {
 		body.FG = mark.FG

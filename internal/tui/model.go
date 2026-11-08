@@ -304,6 +304,14 @@ func Run(ctx context.Context, m *Model) error {
 	return runProgram(ctx, m, os.Stdout)
 }
 
+// RunWithInput runs m with in as the keyboard, when the process's standard input was
+// consumed as buffer content (gvim -/--stdin): the caller has reopened the controlling
+// terminal and passes it here. The normal Run path is unchanged, and both share the same
+// runProgram so the cursor-shape reset and the window-size handshake behave alike.
+func RunWithInput(ctx context.Context, m *Model, in io.Reader) error {
+	return runProgram(ctx, m, os.Stdout, tea.WithInput(in))
+}
+
 // resetCursorStyle is the terminal's own caret shape. The frame sets a blinking block
 // as its caret shape, and the renderer restores only the shapes it did not start with,
 // so the shape is reset here after the program ends, as it is after a signal.
@@ -2565,12 +2573,20 @@ func (m *Model) View() tea.View {
 // hit map and the paint cannot drift apart. The open overlays are drawn last.
 func (m *Model) paint() *grid.Grid {
 	g := grid.New(m.width, m.height)
+	m.paintInto(g)
+	return g
+}
+
+// paintInto draws the frame into g. The theme inspector calls it once with key
+// capture enabled on a fresh grid, so the paint path itself is the same in both
+// cases; normal frames capture nothing.
+func (m *Model) paintInto(g *grid.Grid) {
 	l := m.layout()
 	if l.Gated {
 		g.Put(0, 0, g.Width(), gateText, grid.Style{})
-		return g
+		return
 	}
-	body := style.Cell(m.styles.Editor)
+	body := style.TaggedCell(m.styles.Editor, "editor", "fg", "editor", "bg")
 	for y := range g.Height() {
 		g.Fill(0, g.Width(), y, body)
 	}
@@ -2588,7 +2604,7 @@ func (m *Model) paint() *grid.Grid {
 	// are drawn over the menu. A hidden bar paints nothing, so row 0 stays with
 	// the tab strip or the body.
 	if l.MenuOn {
-		band := style.Cell(m.styles.Menu)
+		band := style.TaggedCell(m.styles.Menu, "ui", "menu_fg", "ui", "menu_bg")
 		for y := l.MenuTop; y <= l.MenuBottom; y++ {
 			g.Fill(0, g.Width(), y, band)
 		}
@@ -2599,7 +2615,6 @@ func (m *Model) paint() *grid.Grid {
 	for _, o := range m.overlays {
 		o.Draw(g)
 	}
-	return g
 }
 
 // pane is the editor pane for doc that fills the focused pane's place. Its highlights
@@ -2739,14 +2754,15 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 	if !l.StatusOn {
 		return
 	}
-	bar := style.Cell(m.styles.Status)
-	palette := style.Cell(m.styles.Accent)
+	bar := style.TaggedCell(m.styles.Status, "ui", "status_bar_fg", "ui", "status_bar_bg")
+	palette := style.TaggedCell(m.styles.Accent, "ui", "accent_fg", "ui", "accent_bg")
 	// A warning run, such as a Restricted or Blocked workspace-trust pill, keeps the
 	// bar's fill and takes the theme's warning foreground, as Fresh paints the trust
 	// pill with its WARNING role.
 	warning := bar
 	if fg := style.Cell(m.styles.DiagWarning).FG; fg != nil {
 		warning.FG = fg
+		warning.FGKey = style.KeyIDFor("diagnostic", "warning_fg")
 	}
 	warning.Bold = true
 	// A muted run, such as the pending {chord} sequence, keeps the bar's colours

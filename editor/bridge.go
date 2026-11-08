@@ -139,6 +139,7 @@ const maxIndentScan = document.MaxIndentScan
 
 var mtimeNano = document.MtimeNano
 var newDocument = document.NewDocument
+var newStdinDocument = document.NewStdinDocument
 var newLineIndent = document.NewLineIndent
 var newScanBudget = document.NewScanBudget
 var nextBoundary = document.NextBoundary

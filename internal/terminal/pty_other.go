@@ -1,18 +1,11 @@
-//go:build !unix
+//go:build !unix && !windows
 
 package terminal
 
-import (
-	"os"
-	"os/exec"
-)
+import "os/exec"
 
-// spawn reports ErrUnsupported: PTY sessions are only implemented on Unix.
-func spawn(cmd *exec.Cmd, cols, rows int) (*os.File, error) {
+// spawn reports ErrUnsupported: PTY sessions are implemented on Unix and, on
+// Windows, through ConPTY (pty_windows.go).
+func spawn(cmd *exec.Cmd, cols, rows int) (ptyProc, error) {
 	return nil, ErrUnsupported
-}
-
-// setSize reports ErrUnsupported: PTY sessions are only implemented on Unix.
-func setSize(ptmx *os.File, cols, rows int) error {
-	return ErrUnsupported
 }

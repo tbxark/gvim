@@ -1,7 +1,7 @@
 # Fresh parity record
 
 Status: live working record for the "full Fresh feature parity" goal, first written 2026-11-08 and
-refreshed after rounds 1–10 landed (round 1: workspace trust, sidebar Contents, status pills;
+refreshed after rounds 1–11 landed (round 1: workspace trust, sidebar Contents, status pills;
 round 2: virtual space, keymaps, status bar/menus, sessions; round 3: settings page, terminal
 scrollback/links/mouse, explorer options, palette preview/toggles; round 4: LSP router/edits,
 project-wide search/replace + Git Grep, settings coverage, virtual-space block/vertical, markdown
@@ -10,24 +10,27 @@ slice B, project-search residuals, status-bar elements; round 6: LSP 4b E diagno
 quickfix/progress, plugin tier 1b, the diagnostics_panel port, the Markdown compose core,
 Contents fold_buffer, search preview/multi-line; round 7: LSP R6-5, plugin tier 1c-A store half,
 git_log/live_diff ports, markdown fences/tables, overlay keymap contexts, a settings R4-3 slice;
-round 8: plugin tier 1c-B/C rendering+seams, #15 compare API + compare_files port, markdown dual
-+ table borders, settings R7-3, path_complete/lsp_help ports, live_diff/git_log full paths,
-streaming project search + Git Grep globs; round 9: Finder port wave (lsp_navigation,
-find_references, dashboard, code_tour), Markdown residual slice, search R8-5, inline-hint tier 2,
-Contents R6-6/sidebar state, tier-1c remainder + declared-settings API; round 10: git_grep,
-git_explorer + explorer decoration/slot host API, env-manager + env detection/activation,
-markdown/sidebar residuals, terminal slice A, theme slice A, LSP leftovers). Every status below
-was checked in this tree or in `refs/fresh`, not inferred from the old migration notes. Update the
-affected row when a round lands instead of rewriting it.
+round 8: plugin tier 1c-B/C, #15 compare API + compare_files, markdown dual + table borders,
+settings R7-3, path_complete/lsp_help, live_diff/git_log full paths, streaming search + Git Grep
+globs; round 9: Finder port wave (lsp_navigation, find_references, dashboard, code_tour), Markdown
+residual slice, search R8-5, inline-hint tier 2, Contents R6-6/sidebar state, tier-1c remainder +
+declared-settings API; round 10: git_grep, git_explorer + explorer host API, env-manager + env
+detection/activation, markdown/sidebar residuals, terminal slice A, theme slice A, LSP leftovers;
+round 11: daemon protocol/socket core (partial #18a), i18n foundation #22a, terminal completion
+(ConPTY/OSC52 write/transcript reflow), theme provenance, stdin-as-a-buffer #25, line-target
+migration, and the LSP small residuals). Every status below was checked in this tree or in
+`refs/fresh`, not inferred from the old migration notes. Update the affected row when a round
+lands instead of rewriting it.
 
-Last verified: 2026-11-08, tree commit `b716376` plus the uncommitted round-10 work. Round 10's
+Last verified: 2026-11-09, tree commit `bdfb627` plus the uncommitted round-11 work. Round 11's
 gate set was run by this audit: go build ./..., CGO_ENABLED=0 go build ./..., go vet,
-golangci-lint 0 issues, gofmt clean, purity and import rules green, and the generated menu table
-check clean (`tools/gen_menus.py --check`). go test ./... -count=1 had three internal/app
-real-host failures whose only failure was a TempDir RemoveAll cleanup race ("directory not
-empty" under Library/Caches/go-build) plus the load-sensitive plugin heat-timer flake; all four
-pass repeatedly when re-run isolated. Fresh reference: the `refs/fresh` checkout as read on the
-same date.
+golangci-lint 0 issues, gofmt clean, purity and import rules green, the generated menu check
+clean, and the Windows cross-gates GOOS=windows go build ./... and GOOS=windows go vet ./...
+green (the ConPTY slice). go test ./... -count=1 had four load-timing failures —
+internal/tui TestPumpSharesOneDrainBudget, plugin TestHeatBusyTimerIsThrottled,
+plugin/bundled TestMergeConflictRecoversFromAKilledScan and TestViBigRangesFitTheBudget — all
+of which pass repeatedly in isolation (2x); no other failures. Fresh reference: the
+`refs/fresh` checkout as read on the same date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
 config-layer + LSP-autostart gating/status pill), native sidebar sections with the Markdown
@@ -336,6 +339,65 @@ the universal-server decision is recorded (no built-in quicklsp — a separate u
 binary — configured universal_lsp is supported). R7-5 is now only that universal-server
 residual plus the per-OS limits caveat.
 
+**Round 11 outcome (2026-11-09).** Six tracks landed; the daemon MVP is partial by design
+(task-68 stays in progress for round 12):
+**Daemon #18a (partial).** `internal/daemon` has the protocol and socket core: a frame stream
+(4-byte big-endian length + type byte + payload, MaxPayload 1 MiB; client hello/input/resize/
+detach/open_file/ping; server output/notice/detached/pong/exit; oversized frames fail the
+connection), and the Unix socket (user cache dir 0700, per-root default name = slug + 8 hex of
+the absolute root, `IsLive` probe, stale unlink, live-daemon refusal, 0600, `Attach`). Unit
+tests cover round-trips/bounds, the live refusal, socket perms and the name/path helpers. NOT
+landed (R11-1): app.Options Reader/Writer + `tui.RunWithIO` socketIO hosting/repaint, CLI
+`--daemon`/`-a`/`--attach`, the Detach hook/palette row/ack, single-writer refusal,
+`auto_attach`, session/PTY integration, docs/architecture and the #19 design outline. The
+round-12 continuation is the Phase-1 #18a plan + #19a workspaces. **i18n #22a foundation.** New
+TUI-free `i18n` leaf package (15 locales with code/English/native name, `Normalize`/`Resolve` from
+config + LC_ALL/LC_MESSAGES/LANG, `T` with %{name}, `TN` with Fresh's CLDR plurals incl.
+ru/uk/cs/fr, `Register`, an embedded English catalogue, locale→shorter-tag→en→key fallback);
+config `locale` (null/auto/15 codes, user-layer only, project config refused with a diagnostic);
+Settings Interface locale row (null encodes auto, ApplyLive pushes `i18n.SetLocale` +
+`plugin.Runtime.SetLocale` live); startup resolves the locale before the UI/plugins; the
+plugin host and Lua `gvim.i18n.locale` use it; the first extraction slice moved editor clipboard
+statuses, root copied-path/formatted/inlay notices and dock user-visible notices to keys with
+English-identical behaviour, and the remaining inventory is documented; `docs/i18n.md` +
+settings/architecture/plugins docs. Generated command/palette/menu titles stay English by
+design (R11-2). **Terminal completion R10-3.** A `ptyProc` seam with the Unix adapter; the
+Windows ConPTY implementation is pure-Go x/sys/windows under `//go:build windows` (pipes,
+CreatePseudoConsole, STARTUPINFOEX attribute list, CreateProcess, Resize/Close; GOOS=windows
+build + vet + test-compile verified, with a real-Windows acceptance checklist — parity is
+unverified until that pass); the child OSC 52 write parser (bounded, chunk-safe, selectors
+c/empty, recovery) with `Session.SetOSC52Handler` gated by the new `clipboard.use_osc52`
+(default off) AND Trusted workspaces, restored transcripts never hooked, bytes still passed to
+x/vt; transcript-only reflow (`ReflowLines/ReflowRows`: styled cells/wide pairs kept, hard rows
+stay, text re-wrap not semantic reflow, dock reflows on width change, restored mismatch
+notice; live screen still clipped). Kitty keyboard stays a precise residual (x/vt TODO/no
+seam); `pass_ctrl_v_without_text` was already complete. **Theme provenance R10-4 (partial).**
+`grid.Style` carries `FGKey/BGKey` uint16 ids and `grid.Grid` an opt-in capture buffer
+(`CaptureKeys`/`ReleaseKeys`/`KeysAt`; no allocation or render change when off); a dense role
+table over `theme.Keys()` with alias canonicalization (`style/roles.go`, `TaggedCell/
+TaggedStyle`); tagging at construction covers overlays, editorpane text/selection/gutter/
+current-line/all syntax kinds, the status bar and menu band, plus cheap explorer/sidebar/
+diagnostics chrome; the inspector prints exact `Painted by (fg/bg): section.key` with an
+explicit "matched by colour" fallback for untagged sides; tests. The colour picker/drag was
+deliberately not extended; residual drag-and-drop/background images/user-theme inheritance.
+**Port follow-ups + #25 partial.** Dashboard recent-file rows are now line targets (single
+click; cleared on close/unload; command rows cannot be targets), with code_tour (widget card)
+and git_log (historical blob view) evaluated and documented as non-migrations in a new
+porting section. stdin-as-a-buffer: `--stdin`/`-` plus an implicit pipe when no files, bounded
+32 MiB, CRLF/EOL handling, empty valid, conflicts validated, an untitled `[stdin]` buffer with
+label override/language sniff/unmodified-on-open/binary warning, file-launch session
+semantics (never restored/saved/hot-exit), `tui.RunWithInput` + `tui.OpenInputTTY` additive (Run
+untouched), a PTY piping e2e test, README/docs; differences recorded (no streaming
+spool/daemon stdin; gvim-only `--stdin-name`). **LSP small residuals.** Preview soft wrap/toggle
+(`Alt+P`, bounded 8-row cap + ellipsis, span/match remap, session default; recent-files source
+recorded as a decision needing a new history snapshot); the composed plugin-overlay ordering
+regression test (pipeline order verified); wrapped-cell selection recorded (hook rows have no
+source line/row-source map) and dual/per-split wording tightened; R7-4's explicit unbind
+tombstones now suppress the built-in overlay fallback (keymap `Unbound` + TUI `UnbindKeymap`
+port + adapter, tests), with multi-key overlay chords and the completion/compositeBuffer/
+text-field contexts remaining. Counts unchanged: 22 bundled/9 on/13 off, idle heap ~7.25 MiB
+of 8 PASS, palette 229, plugin API 242 functions/1478 lines, API level 2.
+
 The reference editor is the checkout in `refs/fresh` (read-only). The allowed differences are
 listed in §4; everything else that Fresh has and gvim lacks is a gap, ranked in §5.
 
@@ -457,6 +519,15 @@ and the new code: `env/{provider.go,...}`, `config/env.go`, `trust/env.go`,
 `internal/tui/dock/hover.go`, `lsp/limits{,_linux,_other}.go`, `editor/compose_setext.go`,
 the env_manager/git_explorer/git_grep port dirs, and the round-10 tests named below.
 
+Round-11 evidence adds the new docs (i18n.md, terminal ConPTY/OSC52/reflow, themes provenance,
+plugins/porting line-target section, settings locale, README/CLI stdin, ui/keybindings preview
+wrap/unbind, markdown decisions, lsp wording) and the new code: `i18n/` (package +
+catalogues/en.json), `internal/daemon/{protocol,socket}.go`, `config/{locale,clipboard}.go`,
+`internal/app/{stdin,settings_locale,theme preview?}`, `internal/tui/{tty.go,RunWithInput,
+paintInto/theme_inspect provenance,style/roles.go,theme_picker}`, `internal/tui/grid`
+key-capture, `internal/terminal/{pty,pty_windows,osc52,reflow}.go`, `editor/{stdin,i18n}
+statuses`, plus the round-11 tests named in the tracking block.
+
 ### 1.3 Status vocabulary
 
 | Status | Meaning |
@@ -510,14 +581,14 @@ for parity status.
 | Documented "not applicable" commands | n/a | 4 | `internal/tui/notice_na.go` (detach, update, update log, wave). Inspect Theme now runs (round 5), and the round-1 trust command runs. |
 | Menus / menu actions | 8 / 103 static actions, 31 separators, 2 static submenus + 1 dynamic | 8 / 103 static actions, 31 separators, 2 static submenus + the dynamic theme submenu | Static parity is exact against Fresh's `translated_menus()` (103 actions / 31 separators / 2 static submenus); the dynamic "Copy with Formatting" submenu is filled at run time from the theme catalog (`internal/tui/menubar/dynamic.go`). Round 5 adds plugin-contributed rows (`gvim.menu.add_item`, `internal/tui/menubar/plugins.go`, at most 32 rows, owner-cleaned). Help's label row says "gvim" where Fresh writes its version. |
 | Keymap presets | 5 | 5 | Same names and inheritance graph. Round 7 closed R2-4: the overlay contexts (`prompt`, `searchPrompt`, `popup`, `menu`, `settings`, `dock`) consult the keymap before built-ins with fall-through; own/in-effect counts are now default 245/243, macos 60/266, macos-gui 52/317, emacs 98/309, vscode 9/248 (`keymap/common_set_test.go`, `docs/keybindings.md`). `completion`/`compositeBuffer` are not emitted; residual R7-4. |
-| Bundled plugins | 50 | 22 (9 on by default) | Round 10 added `git_grep`, `git_explorer` and `env_manager` (all opt-in); 13 are off: flash, vi_mode, live_diff, git_log, compare_files, merge_conflict, dashboard, code_tour, lsp_navigation, find_references, git_grep, git_explorer, env_manager. `docs/plugins/bundled.md` documents the twenty-two; `markdown_toc` was retired in round 1. |
-| Bundled plugin commands | ~180 | 47 registration sites | from `gvim.command.register` call sites across the twenty-two plugins: round 10 adds git_grep 2, env_manager 4 (Fresh's four i18n keys); git_explorer registers none (decorates in place); compare_files registers its 8 through one table, lsp_help 0 (event-driven). |
+| Bundled plugins | 50 | 22 (9 on by default) | Round 10 added git_grep/git_explorer/env_manager (all opt-in); round 11 added no port (dashboard got line targets). 13 off: flash, vi_mode, live_diff, git_log, compare_files, merge_conflict, dashboard, code_tour, lsp_navigation, find_references, git_grep, git_explorer, env_manager. `docs/plugins/bundled.md`. |
+| Bundled plugin commands | ~180 | 47 registration sites | unchanged in round 11 (dashboard's line-target migration adds no command; git_grep 2, env_manager 4, compare_files registers 8 through one table, lsp_help 0). |
 | Themes | 10 built-in themes, theme files by name/path/URL/`builtin://`, `extends` inheritance, attributes on every color, theme editor, colour picker/mouse editing, inspect-at-cursor, plugin theme overrides, per-cell provenance, background images | 10 built-ins + user themes (round 5); plugin theme-file APIs (round 6); accent audit/picker/preview (round 10) | Round 5 registry/forms/extends/fallbacks/named colours/inspect/native editor/overrides; round 6 plugin theme-file APIs. Round 10: the six bundled themes no longer hand-pick accents (`ui.accent_*` falls back to popup selection; theme+style audit tests), the Settings theme row gains four-chip previews, and the colour picker/mouse editing overlay lands. URL/packaged themes: decision recorded, keep the clear refusal (no network code/fetch until packaging/network policy). Residuals R10-4: per-cell painted-key provenance, background images, drag-and-drop theme values. |
 | LSP server entries | built-in + plugin helpers + universal servers | 62 built-in entries; universal_lsp is config-only | `lsp/manager/defaults.go`; gvim routes lists/universal entries and draws hints/tokens/folds/diagnostics, but no built-in universal server ships (Fresh's quicklsp is a separate user-installed Rust binary — decision recorded; user-configured universal_lsp works fully). `process_limits` is enforced on Linux (cgroup v2/ulimit fallback) and recorded as unreachable on macOS/Windows. |
-| Bundled plugin idle heap | n/a | about 7.25 MiB of the 8 MiB gate (9 default-enabled; ~9.3 MiB session baseline) | `TestBundledPluginsIdleHeap`, `docs/plugins/bundled.md` memory table/attribution; round-10 host growth moved the cost from 6.97 to 7.22–7.27 MiB. The new opt-ins (git_explorer/env_manager ~1.5 each, git_grep) would not fit, as with the earlier opt-ins. |
-| Plugin API surface | ~372 methods | 242 functions | `docs/plugins/gvim.d.lua` is 1478 lines, API level 2; round 10 added the explorer decoration/slot surface (`gvim.explorer`) and the project-environment API (`gvim.env` + `env_changed`/`trust_changed` events) plus their host seams. Remaining gaps: R9-5 (composite substitution/dock/per-panel/windowEmbed/markdown-in-text), package manager/HTTP, project-local plugins. |
-| Settings page | schema-driven page (~14k LOC in refs/fresh) over every setting | 69 settings in 14 sections + injected Languages entries/Language Servers/Plugins/Keybindings/Environment/Detectors pages | Rounds 3–9 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment and Plugins/Keybindings. Round 10 adds the Environment page's project rows (detected/active env + gating trust level) and a read-only Detectors page listing the resolved `env.detectors`, plus the theme row's four-chip preview. Residuals R8-3 (plugin settings editing in raw config, no gallery/in-page capture, per-field LSP dialogs); `env.detectors` itself is editable only in the user config JSON by design. |
-| Terminal | PTY terminal panes and utility dock, live/scrollback modes per split, keyboard capture, clickable paths (OSC 7), restart exited process + agent resume, shell override, send selection, mouse forwarding/drag-select, drag auto-scroll, word/line drag selection, Ctrl+hover links with file:line:col, pass_ctrl_v_without_text, close_on_exit, terminal tabs, ConPTY on Windows | **partial** (slices A+B; R3-2 closed; round-10 slice A) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved}.go`, `internal/tui/dock/{selection,transcript,scrollback,input,panel,render,ports,hover}.go` + `dock_glue.go`, `internal/restore/terminal.go`, `internal/uiadapter/terminal.go`, `docs/terminal.md` | Round 10 slice A: drag auto-scroll past the visible rows (fixed 80 ms seq-guarded tick, direction from the drag, forwarding while dragging, stops at ends/release/clear/focus-loss), word/line-wise drag extension after double/triple click, Ctrl+hover underline + `file:line:col` parsing/resolution/open, and the `pass_ctrl_v_without_text` matrix with LastYank. Residuals R10-3: kitty keyboard (x/vt legacy-only; explicit TODO), ConPTY (deferred plan), OSC 52, reflow, terminal tabs, agent re-exec, report-split close_on_exit. |
+| Bundled plugin idle heap | n/a | about 7.25 MiB of the 8 MiB gate (9 default-enabled; ~9.3 MiB session baseline) | `TestBundledPluginsIdleHeap`, `docs/plugins/bundled.md`; round 11 measured ~7.25 MiB PASS (host growth from the round-10 wave), no new enabled plugin. |
+| Plugin API surface | ~372 methods | 242 functions | `docs/plugins/gvim.d.lua` is 1478 lines, API level 2; round 11 added no new API method (i18n/locale wiring feeds the existing `gvim.i18n`; line targets are the round-9 API). Remaining gaps: R9-5 (composite substitution/dock/per-panel/windowEmbed/markdown-in-text), package manager/HTTP, project-local plugins. |
+| Settings page | schema-driven page (~14k LOC in refs/fresh) over every setting | 69 settings in 14 sections + injected Languages entries/Language Servers/Plugins/Keybindings/Environment/Detectors pages | Rounds 3–10 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment and Plugins/Keybindings, Environment/Detectors, theme preview. Round 11 adds the Interface locale row (null encodes auto; ApplyLive pushes the locale into i18n + the plugin runtime live) and the config `locale` key. Residuals R8-3: plugin settings editing in raw config, no gallery/in-page capture, per-field LSP dialogs. |
+| Terminal | PTY terminal panes and utility dock, live/scrollback modes per split, keyboard capture, clickable paths (OSC 7), restart exited process + agent resume, shell override, send selection, mouse forwarding/drag-select, drag auto-scroll, word/line drag selection, Ctrl+hover links with file:line:col, pass_ctrl_v_without_text, close_on_exit, terminal tabs, ConPTY on Windows | **partial** (slices A+B; R3-2 closed; round-10 slice A) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved}.go`, `internal/tui/dock/{selection,transcript,scrollback,input,panel,render,ports,hover}.go` + `dock_glue.go`, `internal/restore/terminal.go`, `internal/uiadapter/terminal.go`, `docs/terminal.md` | Round 10 slice A: drag auto-scroll past the visible rows (fixed 80 ms seq-guarded tick, direction from the drag, forwarding while dragging, stops at ends/release/clear/focus-loss), word/line-wise drag extension after double/triple click, Ctrl+hover underline + `file:line:col` parsing/resolution/open, and the `pass_ctrl_v_without_text` matrix with LastYank. Round 11 completed R10-3: ConPTY on Windows (pure-Go x/sys/windows, compile-verified with GOOS=windows build/vet/test-compile; unverified until the real-Windows acceptance pass in docs/terminal.md), the child OSC 52 clipboard write (bounded streaming re-parse, clipboard.use_osc52 off by default + trusted workspace, selectors c/empty only), and stored-transcript reflow (styled cells/wide glyphs/hard rows preserved, text re-wrap not semantic; live screen still clipped). Residuals: kitty keyboard (x/vt legacy-only, explicit TODO), OSC 52 read/paste, live-screen reflow, terminal tabs, agent re-exec, report-split close_on_exit. |
 | Explorer options | `file_explorer.width/side/follow_active_buffer/auto_open_on_last_buffer_close/compact_directories/preview_tabs/…` + sticky parents | 5 options + sticky parents implemented | width percent/columns with grip, left/right side geometry, follow + reveal, auto-open on last close, compact chains, sticky band; side toggle session-only and 4 keys accepted-ignored (R3-3). |
 | Finder / Live Grep | file preview, Live Grep toolbar (case/word/regex, files/buffers/ignored/terminals/workspaces), quickfix, streaming | preview column + 6 Live Grep toggles | `internal/tui/palette/{preview,grep}.go`; deferred quickfix, terminals/workspaces providers, streaming, Live Grep row preview, Resume cache (R3-4). |
 | Project search / replace | plugin Search & Replace panel (match tree, scoped replace, globs, quickfix) + Git Grep | native panel + Git Grep (rounds 4–6) | Rounds 4–5 landed the panel/ports/checkboxes/scoped replace/globs/list export/history; round 6 added the selected-match preview column and multi-line match rows (exact ranges kept in replace): `internal/tui/searchpanel/{draw,panel,types}.go`, `docs/ui.md`. Residuals R6-3. |
@@ -546,33 +617,33 @@ for parity status.
 |---|---|---|---|---|
 | File explorer and sidebar | tree, file create/delete/rename/copy/cut/paste, hidden/gitignored toggles, git status marks, plugin rows/decorations/slots, context menu, async reload, width/side, follow active buffer, compact chains, sticky parents, sidebar sections, session state, Contents fold_buffer | **partial** (R3 options; R1 Contents; R6 fold_buffer; R9 session state + live fold; R10 explorer host API + plugin-section state) | `explorer/{options,sticky}.go`, `internal/tui/explorer/` (`RowDecor` painter), `internal/tui/{root_explorer,markdown_toc}.go`, `internal/tui/sidebar/`, `internal/tui/{sidebar_state,plugin_sidebar_state}.go` + `session/sidebar.go` + `internal/restore/sidebar.go`, `pluginapi/explorer.go` + `plugin/api_explorer.go`, `config/contents.go`, `outline/`, `docs/sidebar.md` | Round 9 persisted sidebar UI state (width form/side, explorer fold/path/scroll, Contents after first scan, Diagnostics); round 10 closed R9-4's plugin-section persistence (stack order/requested rows/folds bounded and migration-safe, applied when sections mount) and added the plugin explorer decoration/slot host API with the panel painter (leading/trailing slots, suppress flags, filename colour, priority/namespace resolution, owner cleanup, theme-key/RGB colours) — the git_explorer port consumes it. Residuals R10-2: per-section widths and drag-and-drop section order (shared-column model + right-side floor documented), exact R9-4 leftovers; `respect_gitignore`/`custom_ignore_patterns`/`preview_tabs`/glyph keys accepted-ignored; side toggle session-only. |
 | Finder, quick open, live grep | Ctrl+P modes (file/command/line/buffer), fuzzy ranking, streaming enumeration, finder preview, live grep with provider toggles (case/regex/word/files/buffers/ignored/terminals/workspaces), quickfix export, resume | **partial** (R3 landed the preview and toggles) | `finder/finder.go` (`EnumerateAll`, hidden/ignored walk), `internal/tui/palette/{preview,grep,palette,draw}.go`, `internal/app/{preview,live_grep}.go`, `docs/ui.md` palette details, tests `palette/{preview,grep,palette}_test.go`, `internal/app/live_grep_test.go`; Fresh `docs/features/command-palette.md`, `search-replace.md` | Round 3 landed: the file-mode preview column (head of the selected file, 16 KiB / 12 lines, `path:line:col` parsing, target line highlighted, binary/empty/unreadable placeholders, dropped under 64 inner cells) and Live Grep's toolbar — case (seeded by `editor.search.case_sensitive`), regex (on by default as Fresh's), whole word, files, buffers (1 MiB snapshot per buffer) and ignored/hidden sources, with match counts and error rows. Still open: quickfix export, terminals/workspaces providers (need the plugin/results-panel work), streaming provider model, preview for Live Grep rows (file mode only), syntax colours/scrolling in the preview, and Resume re-runs the search instead of restoring cached matches (R3-4). |
-| Project-wide search, replace and Git Grep | plugin Search & Replace panel: match tree, scoped replace, globs, current-file/all-files/open-buffers, 10k cap, unsaved buffers, quickfix export, search history, selected-match preview with scrolling/syntax, multi-line matches, streaming results; git grep finder with case toggle and pathspec field; bundled git_grep plugin | **implemented** core; **partial** against the plugins (R4–R10) | `search/plan.go`, `internal/app/{projectsearch,gitgrep}.go`, `internal/tui/searchpanel/{glob,types,panel,draw,preview}.go` + `internal/tui/project_search.go`, shared apply helper `internal/tui/workspace_edit.go`, `plugin/bundled/plugins/git_grep/` (round-10 port over the shared Finder), `commands/search_commands.go`, `docs/keybindings.md`, `docs/ui.md`; Fresh `plugins/search_replace.ts`, `plugins/git_grep.ts` | Round 9 previews/large-file distinction/Open Buffers; round 10 ported git_grep (Finder search source, hardened git gateway, 100-row cap, case palette command + footer state, no preview band/toolbar) while the native panel/Git Grep keep their own paths. Residuals R9-2: closed oversize streamed writer, provider sources beyond files/open/current, preview wrap/toggle; git_grep reductions in R10-1. |
+| Project-wide search, replace and Git Grep | plugin Search & Replace panel: match tree, scoped replace, globs, current-file/all-files/open-buffers, 10k cap, unsaved buffers, quickfix export, search history, selected-match preview with scrolling/syntax/soft wrap, multi-line matches, streaming results; git grep finder with case toggle and pathspec field; bundled git_grep plugin | **implemented** core; **partial** against the plugins (R4–R11) | `search/plan.go`, `internal/app/{projectsearch,gitgrep}.go`, `internal/tui/searchpanel/{glob,types,panel,draw,preview}.go` + `internal/tui/project_search.go`, `internal/tui/workspace_edit.go`, `plugin/bundled/plugins/git_grep/`, `commands/search_commands.go`, `docs/keybindings.md`, `docs/ui.md`; Fresh `plugins/search_replace.ts`, `plugins/git_grep.ts` | Round 9 previews/large-file distinction/Open Buffers; round 10 ported git_grep; round 11 added preview soft wrap/toggle (`Options.PreviewWrap`, `Alt+P` in panel and editor, wrapped rows with syntax-span/match remap, 8-row cap + ellipsis, display-row window, session-persisted) and recorded the recent-files provider decision (no app-level opened-file history; needs a history snapshot + streaming/replace semantics). Residuals R9-2: closed-oversize streamed writer, provider sources beyond files/open/current (diagnostics/terminal need provider-specific snapshots); R10-1 git_grep reductions. |
 | Command palette and command table | 206 core commands + plugin commands, contexts/availability, prefix modes, key hints | **implemented** core / **partial** plugin commands | `commands/` (206 generated + native rows), `internal/tui/palette/`; Fresh `docs/features/command-palette.md` | The generated core table is exact (206/206). The runtime palette has 229 rows (unchanged in rounds 9–10): 206 generated + 23 non-generated (7 native + 4 plugin-management + 3 r4 + 2 r5 + 2 r6 + 5 Markdown mode rows) — `commands/palette_test.go`. Bundled plugin commands add rows only while their plugin is enabled (47 registration sites across twenty-two). |
 | Menu bar, context menus, help, welcome | 8 menus, 103 static actions, dynamic theme submenu, mnemonics/underlined accelerators, context menus, help overlay, welcome screen, dashboard | **implemented** menus/help/welcome; dashboard **missing** (plugin) | `internal/tui/menubar/{menu_table_gen,menubar,dynamic}.go`, `keymap/menu.go` (`Map.MenuMnemonic`), `internal/tui/menu_mnemonic_test.go`, `internal/tui/menubar/mnemonic_test.go`, `internal/tui/context_menu.go`, `internal/tui/help.go`, `internal/tui/welcome.go`, `docs/ui.md` §6; Fresh `docs/internal/editor-ux-features.md`, `docs/features/dashboard.md` | Menus match Fresh's static table exactly (103 actions, 31 separators, 2 static submenus), and the dynamic "Copy with Formatting" submenu lists the 10 bundled themes (`menubar/dynamic.go`). Round 2 added the accelerators: underlined keymap-assigned letters and Alt+letter through ordinary keymap resolution, F10 for the bar, `editor.menu_bar_mnemonics` off removes both; dropdown rows carry no mnemonics (as in Fresh). Help's label says "gvim" instead of Fresh's version string. Residual: the dashboard plugin (backlog #14), not the menu system. |
 | Status bar | configurable element lists (Fresh's defaults: left `{trust} {remote} {terminal_restart} {cursor} {diagnostics} {cursor_count} {messages}`; right `{read_only} {line_ending} {encoding} {language} {lsp} {warnings} {update} {palette}`), separator, per-element click actions, squeeze rule, `{filename}`/`{chord}`/`{clock}` | **implemented** (R2; parsed-but-unpainted elements documented) | `internal/tui/frame/frame.go` `StatusRuns`/`DefaultStatusLeft/Right`, `internal/tui/model.go` `statusView`/`statusRow`, `internal/tui/status_elements.go` (filename/chord/clock/tick), tests `statusbar_elements_test.go` + `statusbar_residual_test.go`, `docs/ui.md` §5; Fresh `config.rs` `StatusBarConfig`, `view/ui/status_bar.rs` | R2-3 closed in round 5: `{filename}` (workspace-relative or absolute path, document name when pathless, Fresh's " [+]" / " [RO]" markers), `{chord}` (shown only while a multi-key sequence waits, gvim's label style, muted — §4 item 22) and `{clock}` (24-hour `HH:MM`, static colon as Fresh's code — §4 item 23; a minute tick redraws while configured, a config change takes effect next launch). The filename resolves the root and the document through canonicalFilePath (the /private/var vs /var class) and falls back to the opened spelling outside the root (integration fix, statusbar_residual_test + status_filename_app_test). Still unpainted: plugin tokens `{plugin:token}`; `{warnings}`/`{update}` are deliberately empty (no warning-count domain/updater). Plugin status items keep their anchors. |
-| Config layers and Settings UI | 4 layers (system/user/project/session), per-buffer overrides, config write from toggles, Settings UI (tree, widgets, layer switch, save), `init.ts`, config reload, LSP/plugin/keybinding/env sections | **partial** (R3/R4 page; R6 Contents; R7 Language Servers/Environment; R8 closed R7-3; R9 plugin declared settings; R10 env rows/Detectors + theme preview) | `config/settings_schema.go` (69 scalar rows, 14 sections), `config/{settings_structured,contents,patch,env}.go`, `internal/app/settingssvc.go`, `internal/app/settings_{lsp,runtime,plugins,languages,keybindings,theme_preview}.go`, `internal/tui/{settings,settings_structure,settings_actions,settings_theme_preview}.go`, `pluginapi/{settings_api,env}.go` + `plugin/settings_api.go`, `docs/settings.md` | Rounds 3–9 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment, Plugins/Keybindings pages and declared-settings read-only rows. Round 10 adds the Environment page's detected/active environment + gating trust rows and a read-only Detectors page (resolved `env.detectors` with kind/markers/require), plus the theme row's four-chip preview (cached app-side, URL refs still refused). Residuals R8-3: plugin settings editing in raw config, no gallery/install page, no in-page key capture (deliberate), per-field LSP dialogs; `env.detectors` is user-config JSON only. |
-| Keymaps and keybinding editor | 5 presets, user keybindings, unbind/noop, chords, custom keybinding maps, keybinding editor, overlay contexts | **partial** (R2 landed the data; R7 closed the overlay contexts) | `keymap/*.json` (inheritance graph), `keymap/common_set_test.go` (own/in-effect counts), `keymap/menu.go`, `internal/keybindings/`, `internal/tui/overlay_keys.go` (overlay router), `internal/tui/keybind_editor.go`, `docs/keybindings.md`, `docs/architecture.md` | Round 2 rebuilt the presets; round 7 closed R2-4: the prompt/searchPrompt/popup/menu/settings/dock overlays consult the keymap before built-ins with fall-through; presets own/in-effect are now default 245/243, macos 60/266, macos-gui 52/317, emacs 98/309, vscode 9/248; the loader accepts the overlay contexts and warns+skips multi-key bindings there. Residuals R7-4: single-key overlay bindings only, unbind cannot disable a built-in handler, text-field selection/clipboard/suggestion actions are not surfaces, and completion/compositeBuffer contexts, custom settings/theme dialogs and plugin panels are outside the router. Custom `keybinding_maps` are still refused with a warning. |
-| Themes and appearance | 10 built-in themes, theme files by name/path/URL/`builtin://`, `extends` inheritance, attributes on every color, theme editor, colour picker/mouse editing, inspect-at-cursor, plugin theme overrides, per-cell provenance, background images | 10 built-ins + user themes; plugin theme-file APIs; accent audit/picker/preview (round 10) | `theme/` (keys_table/registry/resolve/themefile/overrides), `internal/tui/{theme_editor,theme_picker}.go`, `internal/app/{settings_theme_preview,theme_registry}.go`, `docs/themes.md` | Round 10 removed the six bundled themes' hand-picked accent overrides (`ui.accent_*` falls back to popup selection; `theme/accent_audit_test.go` + `internal/tui/style/accent_audit_test.go`), added Settings theme previews and the colour picker/mouse editor (working-theme palette + ANSI, live preview, Enter applies dirty, Esc/outside restore), and recorded the URL/packaged decision (keep refusal, no network/fetch until packaging policy). Residuals R10-4: per-cell painted-key provenance (inspect still colour+context), background images, drag-and-drop theme values. |
+| Config layers and Settings UI | 4 layers (system/user/project/session), per-buffer overrides, config write from toggles, Settings UI (tree, widgets, layer switch, save), `init.ts`, config reload, LSP/plugin/keybinding/env/locale sections | **partial** (R3/R4 page; R6 Contents; R7 Language Servers/Environment; R8 closed R7-3; R9 plugin declared settings; R10 env rows/Detectors + theme preview; R11 interface locale) | `config/settings_schema.go` (69 scalar rows, 14 sections), `config/{settings_structured,contents,patch,env,locale,clipboard}.go`, `internal/app/settingssvc.go`, `internal/app/settings_{lsp,runtime,plugins,languages,keybindings,theme_preview}.go`, `internal/tui/{settings,settings_structure,settings_actions,settings_theme_preview}.go`, `pluginapi/{settings_api,env}.go`, `i18n/`, `docs/settings.md` | Rounds 3–10 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment, Plugins/Keybindings pages, declared-settings read-only rows, Environment/Detectors and theme preview. Round 11 adds the `locale` config key (null/auto/15 codes, user-layer only; project refused) and the Interface locale row with live ApplyLive into i18n and the plugin runtime. Residuals R8-3: plugin settings editing in raw config, no gallery/in-page capture, per-field LSP dialogs. |
+| Keymaps and keybinding editor | 5 presets, user keybindings, unbind/noop, chords, custom keybinding maps, keybinding editor, overlay contexts | **partial** (R2 data; R7 overlay contexts; R11 unbind tombstones) | `keymap/*.json`, `keymap/common_set_test.go`, `keymap/menu.go`, `internal/keybindings/` (`Unbound` adapter), `internal/tui/overlay_keys.go`, `internal/tui/keybind_editor.go`, `docs/keybindings.md` | Round 7 closed R2-4 (overlay contexts with fall-through; own/in-effect default 245/243, macos 60/266, macos-gui 52/317, emacs 98/309, vscode 9/248; loader warns/skips multi-key overlay bindings). Round 11's explicit unbind tombstones (`keymap.Map.Unbound`, TUI `UnbindKeymap` port) let an overlay's built-in fallback be suppressed for an unbound chord. Residuals R7-4: multi-key bindings are not consulted in overlay contexts (one-press router; pending-chord state is root-only), and the completion/compositeBuffer/text-field contexts stay outside the router (Fresh implements them per surface). |
+| Themes and appearance | 10 built-in themes, theme files by name/path/URL/`builtin://`, `extends` inheritance, attributes on every color, theme editor, colour picker/mouse editing, inspect-at-cursor with per-cell provenance, plugin theme overrides, background images | 10 built-ins + user themes; plugin theme-file APIs; accent audit/picker/preview (r10); painted-key provenance (r11) | `theme/` (keys_table/registry/resolve/themefile/overrides), `internal/tui/{theme_editor,theme_picker,theme_inspect}.go`, `internal/tui/style/{style,roles}.go`, `internal/tui/grid/grid.go` (FGKey/BGKey + capture), `internal/app/{settings_theme_preview,theme_registry}.go`, `docs/themes.md` | Round 10: accent audit, Settings preview, colour picker/mouse editor, URL/packaged decision. Round 11: per-cell painted-key provenance for the first-surface subset (editor text/syntax/gutter/selection/current-line, status bar, menu, popup/palette/Settings rows, explorer/sidebar/diagnostics chrome) through an opt-in capture repaint; the inspector prints exact `Painted by (fg/bg)` keys and falls back to "matched by colour" for untagged painters. Residuals R10-4: untagged painters (compose/page-view/plugin/custom overlays) report the fallback, drag-and-drop of theme values, background images, user-theme inheritance (Fresh's own limit). |
 
 ### 3.3 Services
 
 | Area | Fresh features (evidence) | gvim status | gvim evidence | Notable sub-gaps |
 |---|---|---|---|---|
-| LSP | diagnostics, hover, definition/implementation/references, completion, rename, code actions + server-initiated file ops, signature help, format, folding ranges, inlay hints (inline tier 2), semantic tokens, diagnostics panel, quickfix list, inline diagnostics + staleness, multi-server with only/except, universal servers, per-server status popup/mute, pull diagnostics (cancelable), workspace diagnostics for unopened files, progress, process limits (Linux), env/init options, root markers, C header routing | **partial** (#7 A–E complete; rounds 7–10 landed workspace edits/diagnostics/progress, inline tier 2, cancellation and process limits) | `lsp/{client,handler,requests,capabilities,progress,raw,limits}.go`, `lsp/manager/{manager,router}.go`, `internal/lsphost/{lsp,lsp_data}.go`, `internal/tui/{lsp,lsp_data,workspace_edit,diagpanel}.go` + `internal/tui/editorpane/inline_hints.go`, `editor/{lsp,outline}_folds.go`, `commands/lsp_commands.go`, `docs/lsp.md` | Rounds 4–9 landed the router/edits/status/staleness, hints/tokens/folds/pull diagnostics, the diagnostics panel/quickfix/progress, workspace edits/diagnostics, inline tier 2. Round 10: workspace-diagnostic pulls via `protocol.Call` send `$/cancelRequest` with the correct per-client id (pullSet supersedes/stop/restart cancel; cancelled pulls never cached/merged; last good answer kept; 10 s timeout fallback) and `process_limits` applies on Linux (cgroup v2 memory/cpu with `sh ulimit -v` fallback; CPU percent without a cgroup recorded not applied) and is recorded unreachable on macOS/Windows in the status popup + docs table. R7-5 residual is now only the deliberate universal-server decision (no built-in quicklsp; user-configured universal_lsp supported) + the per-OS limits caveat; the stricter-than-Fresh stop-on-refused workspace-edit model stays (§4 item 18). |
+| LSP | diagnostics, hover, definition/implementation/references, completion, rename, code actions + server-initiated file ops, signature help, format, folding ranges, inlay hints (inline tier 2), semantic tokens, diagnostics panel, quickfix list, inline diagnostics + staleness, multi-server with only/except, universal servers, per-server status popup/mute, pull diagnostics (cancelable), workspace diagnostics for unopened files, progress, process limits (Linux), env/init options, root markers, C header routing | **partial** (#7 A–E complete; rounds 7–11 landed workspace edits/diagnostics/progress, inline tier 2, cancellation, process limits and the small residuals) | `lsp/{client,handler,requests,capabilities,progress,raw,limits}.go`, `lsp/manager/{manager,router}.go`, `internal/lsphost/{lsp,lsp_data}.go`, `internal/tui/{lsp,lsp_data,workspace_edit,diagpanel}.go` + `internal/tui/editorpane/inline_hints.go`, `editor/{lsp,outline}_folds.go`, `commands/lsp_commands.go`, `docs/lsp.md` | Rounds 4–10 landed the router/edits/status/staleness, hints/tokens/folds/pull diagnostics, panel/quickfix/progress, workspace edits/diagnostics, inline tier 2, cancel and process limits. Round 11 closed the small LSP residuals: preview soft wrap/toggle (`Alt+P`, 8-row cap + ellipsis, span/match remap, session default; recent-files provider recorded as needing a new history snapshot), the composed plugin-overlay ordering regression test, wrapped-cell/dual wording decisions, and explicit unbind tombstones for the overlay fallback. R7-5 residual is only the deliberate universal-server decision (no built-in quicklsp; user-configured universal_lsp supported) + the per-OS process_limits caveat; the stricter-than-Fresh stop-on-refused workspace-edit model stays (§4 item 18). |
 | Plugins runtime and host API | TypeScript on QuickJS, sandbox-lite with per-plugin contexts, ~372-method API, overlays/virtual text/conceals/soft breaks/folds/line targets, explorer decorations/slots, project environment, prompts/toolbars, modes/contexts, windows/splits (fixed heights), virtual+composite buffers, buffer groups, terminals, authority/remote, LSP requests, HTTP, widgets/floating/dock panels/sidebar sections, i18n, package manager, menus, events | **partial, runtime different; API level 2 (tiers 1a+1b+1c + round-10 edge APIs)** | `plugin/`, `pluginapi/` (incl. `widgetapi.go`, `buffergroup.go`, `compare.go`, `linetargets.go`, `settings_api.go`, `explorer.go`, `env.go`), `internal/pluginhost/`, `internal/tui/plugin*.go` + `pluginpanel/`, `plugin_groups.go`, `plugin_themes.go`, `plugin_folds.go`, `plugin_seams.go`, `plugin_linetargets.go`, `plugin_{explorer,env}.go`, `decorations/`, `env/`, `docs/plugins/` (6 API pages + `events.md`, 1478-line `gvim.d.lua`) | Lua 5.1 is the permitted runtime difference; API level 2. Rounds 5–9 added tiers 1a/1b/1c; round 10 added `gvim.explorer` decorations/slots (namespaced, caps, priority resolution, owner cleanup, host painter) and `gvim.env` + the host detection/activation gate (`env.detectors`, trust-gated overlay, spawn injection) with `env_changed`/`trust_changed` events. Remaining (R9-5/R10-1): composite API native substitution, dock/fullscreen placement, independent per-panel views, windowEmbed live panes, markdown-in-text, package manager/HTTP/project-local plugins, render_line; port reductions are R10-1. |
 | Bundled plugin feature set | 50 plugins: git_log, live_diff, git_grep, git_explorer, git_blame, git_gutter, git_statusbar, git_find_file, search_replace, diff_nav, diagnostics_panel, code-tour, dashboard, welcome*, theme_editor, markdown_toc, markdown_compose, markdown_source, path_complete, lsp_help, lsp_navigation, find_references, compare_files, flash, vi_mode, merge_conflict, tab_actions, goto_with_selection, env-manager, devcontainer, k8s-workspace, agent_*/orchestrator/live_sessions, pkg, audit_mode, language helpers | **partial** | `plugin/bundled/plugins/` (22; 9 default-enabled), `plugin/bundled/lib/{finder.lua,git.lua}`, `docs/plugins/bundled.md`; Fresh `plugins/*.ts` | Ported: diagnostics_panel (r6), git_log/live_diff (r7; full paths r8), compare_files (r8, opt-in), path_complete/lsp_help (r8), lsp_navigation/find_references/dashboard/code_tour + Finder lib (r9), git_grep/git_explorer/env_manager (r10, all opt-in). Missing: devcontainer, k8s-workspace, orchestrator/agent sessions/live_sessions, pkg, audit_mode, language helpers; native substitutions recorded: markdown_compose/source, theme_editor, search_replace, composite buffers, dashboard start tab, live_grep/diff_nav/welcome candidates. Remaining ports are daemon-era (gated on #18–#21) or packaging-dependent (pkg on #16). |
-| Terminal | PTY terminal panes and utility dock, live/scrollback modes per split, keyboard capture, clickable paths (OSC 7), restart exited process + agent resume, shell override, send selection, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover links with file:line:col, pass_ctrl_v_without_text, close_on_exit, terminal tabs, ConPTY on Windows | **partial** (slices A+B; R3-2 closed; round-10 slice A) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved}.go`, `internal/tui/dock/{selection,transcript,scrollback,input,panel,render,ports,hover}.go` + `dock_glue.go`, `internal/restore/terminal.go`, `internal/uiadapter/terminal.go`, `docs/terminal.md` | Round 10 slice A: drag auto-scroll past the visible rows (fixed 80 ms seq-guarded tick, direction from the drag, mouse forwarding while dragging, stops at ends/back-inside/release/clear/focus-loss), word/line-wise drag extension after double/triple click, Ctrl+hover underline + `file:line:col` link parsing/resolution/open (OSC 7 dir then workspace root, ambiguous-colon fallback), the `pass_ctrl_v_without_text` matrix with LastYank. Residuals R10-3: kitty keyboard (x/vt legacy-only, explicit TODO), ConPTY (deferred plan), OSC 52, reflow, terminal tabs, agent re-exec, report-split close_on_exit. |
+| Terminal | PTY terminal panes and utility dock, live/scrollback modes per split, keyboard capture, clickable paths (OSC 7), restart exited process + agent resume, shell override, send selection, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover links with file:line:col, pass_ctrl_v_without_text, close_on_exit, terminal tabs, ConPTY on Windows | **partial** (slices A+B; R3-2 closed; round-10 slice A) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved}.go`, `internal/tui/dock/{selection,transcript,scrollback,input,panel,render,ports,hover}.go` + `dock_glue.go`, `internal/restore/terminal.go`, `internal/uiadapter/terminal.go`, `docs/terminal.md` | Round 10 slice A: drag auto-scroll past the visible rows (fixed 80 ms seq-guarded tick, direction from the drag, mouse forwarding while dragging, stops at ends/back-inside/release/clear/focus-loss), word/line-wise drag extension after double/triple click, Ctrl+hover underline + `file:line:col` link parsing/resolution/open (OSC 7 dir then workspace root, ambiguous-colon fallback), the `pass_ctrl_v_without_text` matrix with LastYank. Round 11 completed R10-3: ConPTY on Windows (pure-Go x/sys/windows, compile-verified with GOOS=windows build/vet/test-compile; unverified until the real-Windows acceptance pass in docs/terminal.md), the child OSC 52 clipboard write (bounded streaming re-parse, clipboard.use_osc52 off by default + trusted workspace, selectors c/empty only), and stored-transcript reflow (styled cells/wide glyphs/hard rows preserved, text re-wrap not semantic; live screen still clipped). Residuals: kitty keyboard (x/vt legacy-only, explicit TODO), OSC 52 read/paste, live-screen reflow, terminal tabs, agent re-exec, report-split close_on_exit. |
 | Git surfaces | review diff (stage/unstage/discard/comments/export), range/stash reviews, git log with live diff, git blame panel with history, live diff baselines, diff chunk nav, git grep, git explorer, git find file, statusbar branch, gutter marks | **partial** | `gitstate/`, `plugin/bundled/plugins/git_gutter`, `git_statusbar`, `git_find_file`, `git_blame`, `merge_conflict`, `internal/tui/git.go`; Fresh `docs/features/git.md` | Missing: Review Diff (/range/stash), Git Log, Live Diff, Git Grep, Git Explorer, blame panel/history stepping (gvim has a reduced inline blame), merge view (reduced to in-buffer resolution), diff hunk sources beyond the HEAD gutter, review comments/export. Implemented: gutter hunk marks + next/prev change, branch statusbar, git find file, merge-conflict resolution, compare-as-difftool. |
-| Session, restore, daemon | session restore/save, hot exit of unsaved buffers, crash recovery, ephemeral-file patterns, per-file pins, `--restore`/`--no-restore`/`--simple`, daemon mode with attach/detach and `--cmd daemon open-file --wait`, direct-vs-daemon launch modes | **partial** (R2 landed hot exit, the restore settings and the CLI flags) | `internal/app/{session_plan,session_open,hotexit}.go`, `internal/app/run.go`, `internal/restore/session.go` (`RestoreHotExit`), `internal/cli/root.go`, session/ files, tests `session_plan_test.go`, `session_launch_test.go`, `restore/session_hot_test.go`, `internal/cli/root_test.go`, README sessions/flags; Fresh `docs/features/session-persistence.md` | Round 2 landed: `hot_exit` (quit without asking, the session save stashes the text; off asks per dirty tab), `restore_previous_session` (tabs/layout vs the unsaved text only), `skip_session_restore_when_files_passed` (file launch, or restore then append the given files), and the one-shot `--restore`/`--no-restore` (alias `--no-session`)/`--simple` with mutual-exclusion errors. Still open: daemon mode and its CLI, no per-buffer hot-exit store (a file launch cannot keep/restore its files' unsaved text), `--no-restore` still saves the session (deliberate; §4 item 10, R2-5), and `--simple`'s "no dock" is vacuous. |
-| Workspaces, windows, orchestrator, agents | orchestration dock, multiple workspaces per daemon (one per git worktree), workspace switcher, New Workspace dialog, Run Agent (claude/codex/opencode/aider), agent session discovery/resume, live sessions, extract tab to workspace | **missing** | `grep -ri orchestrator --include=*.go` finds only command-table/capability strings; `internal/tui/remote.go` says remote workspaces unsupported; `extract_tab_to_new_workspace` is a notice; Fresh `docs/features/session-persistence.md`, `docs/features/scripting.md` | Whole area absent; gvim is one editor per process. Depends on daemon/workspace model. |
+| Session, restore, daemon | session restore/save, hot exit of unsaved buffers, crash recovery, ephemeral-file patterns, per-file pins, `--restore`/`--no-restore`/`--simple`, daemon mode with attach/detach and `--cmd daemon open-file --wait`, direct-vs-daemon launch modes | **partial** (R2 landed hot exit/restore/CLI; round 11 daemon protocol/socket core only) | `internal/app/{session_plan,session_open,hotexit}.go`, `internal/app/run.go`, `internal/restore/session.go`, `internal/cli/root.go`, `internal/daemon/{protocol,socket}.go`, `session/`, `docs/i18n? no`; Fresh `docs/features/session-persistence.md` | Round 2: hot_exit, restore_previous_session, skip_session_restore_when_files_passed, --restore/--no-restore/--simple. Round 11 added the daemon protocol/socket core (frames, server frames, socket lifecycle/naming/perms/Attach) but not the app/CLI/TUI integration, Detach, single-writer refusal, auto_attach, session/PTY hosting or #19 outline (R11-1); task-68 continues in round 12. Still open: daemon attach/detach end-to-end, no per-buffer hot-exit store (R2-5), --no-restore still saves the session (deliberate, §4 item 10). |
+| Workspaces, windows, orchestrator, agents | orchestration dock, multiple workspaces per daemon (one per git worktree), workspace switcher, New Workspace dialog, Run Agent (claude/codex/opencode/aider), agent session discovery/resume, live sessions, extract tab to workspace | **missing** (daemon protocol core is the first step) | `internal/daemon/{protocol,socket}.go` (protocol/socket only), `internal/tui/remote.go` (remote unsupported), dashboard/code_tour ports (r9); Fresh `docs/features/session-persistence.md`, `internal/orchestrator-sessions.md` | Whole area still absent: gvim is one editor per process and has no workspace model, switcher, New Workspace, Run Agent or agent discovery. Round 11 laid the daemon protocol/socket foundation; #19 workspaces / #20 agents / #21 remote are the round-12+ plan (§5.5). |
 | Remote authority | SSH editing (scp/URL forms), devcontainers (CLI attach/rebuild/ports/logs), Kubernetes workspaces, remote-aware LSP/terminal/processes, reconnect, remote indicator popup | **missing** | No `ssh`/`authority` implementation in the tree; `internal/tui/remote.go:10` popup says "Remote workspaces are not supported"; `docs/plugins/porting.md:46` "authority ... not provided"; Fresh `docs/features/ssh.md`, `docs/features/devcontainer.md` | Entire area absent. Requires an authority abstraction under fs/proc/terminal/LSP first. |
 | Workspace trust | per-folder Restricted/Trusted/Blocked, executable-marker detection, one-time prompt, status pill, dialog command, persisted per folder, gates LSP/build/env activation, env detectors | **partial** (R1 landed) | `trust/` (levels + Undecided, store at `config.Dir()/trust.json`, atomic writes, marker scan, Fresh startup policy), `internal/app/trust.go` and `internal/app/run.go` (`Options.Untrusted`, `lsp_enabled` forced off), `internal/tui/trust*.go` (dialog, port, notices, pill), `config/trust_test.go`, `docs/trust.md`; Fresh `docs/features/workspace-trust.md` | Implemented in round 1: the three levels plus Undecided, per-folder persistence, executable-marker scan and prompt (silent trust for plain folders, Fresh's policy), the open-time prompt, the `Workspace Trust…` palette command and dialog, the trust status pill with click routing, the project config layer skipped unless Trusted, and LSP auto-start forced off unless Trusted (manual Start/Restart still works). Still open: no process gate — terminal/shell/formatter/LSP/plugin spawns are not consulted against the level, and Blocked enforces the same as Restricted (`docs/trust.md` §3); env detection/activation and devcontainer/tasks are absent; the config gate is a startup decision (a mid-session trust change applies project tooling at the next start, documented divergence). Tracked as backlog #17. |
-| Markdown | syntax highlighting, markdown_source smart list editing, page view/compose, tables (wrapped cells), code-fence frames (continuation rails), dual view, heading conceal/scrollbar marks, page-view persistence, Contents section | **partial** (R1 Contents; R4 smart editing; R6 core; R7 fences/tables; R8 dual/borders; R9 residual slice) | `syntax/{markdown,markdown_inline,markdown_markers,markdown_fences,markdown_tables}.go`, `editor/markdown.go`, `internal/tui/editorpane/{compose,compose_layout,compose_fence,compose_table,pageview}.go` + `internal/tui/{pageview,dual}.go`, `internal/tui/sidebar/contents.go`, `session/pageview.go`, `docs/markdown.md`; Fresh `plugins/markdown_{toc,source,compose}.ts` | Round 9 closed: table widths keyed by (version, measure) (dual-pane bug), escaped pipes, container fallback, multi-visual-row cells via `PageExtraRows` continuations (rails, caret reveal, mapped presses; selection paints the primary row only), fence continuation rails, heading-marker conceal + heading marks on the scrollbar track, page-view mode/width session persistence (migration-safe, restore after open). Residuals R9-3/R8-2: nested fences, task/image/HTML conceal, setext heading polish, exact row/byte dual anchors + native menu row + split persistence + multiple duals, per-split mode, mapped occurrences/rulers/indent guides (deliberately off in page view), composed overlay ordering test, horizontal page scroll. |
-| Diagnostics surfaces | gutter marks, underline, inline end-of-line text, diagnostics panel, quickfix list, error navigation, hover fusion, pull/workspace diagnostics, progress | **partial** (rounds 4–7) | `internal/tui/{diag,diagpanel,lsp}.go`, `internal/tui/editorpane/{decor,inline_diag}.go`, `commands/lsp_commands.go`, `docs/lsp.md`; Fresh `docs/features/lsp.md` | Gutter dots, underline, inline end-of-line diagnostics text with version staleness (rounds 2/5), status count, F8 jumps and hover diagnostics exist. Round 6 added the native sidebar Diagnostics panel (file→severity grouping, counts header, jump/scroll/focus, progress/empty states) and the quickfix Diagnostics List; round 7 added workspace diagnostics for unopened files (`(not open)` rows that open on jump) and `$/progress` text in the panel. Residuals R7-5: inline-hint placement tier 2, no built-in universal server, `process_limits` unenforced, capability-gated workspace diagnostics/no cancel, plugin `DiagnosticInfo` carries no code (native ones do). |
-| Scripting and CLI automation | `--cmd script`, `--cmd daemon open-file --wait`, stdin programs, `init.ts` startup script, agent channels, watch mode, CLI help for the API | **partial** | `internal/cli/` (flags: config/keymap/theme/log-file/diff/no-plugins/plugin), `plugin_init.go` (`init.lua`); Fresh `docs/features/scripting.md` | gvim has `init.lua` and the Lua API, plus gvim-only `gvim config show/paths` and `gvim grammar` subcommands. Missing: Fresh's external `--cmd` script channel, `open-file --wait`, daemon modes, stdin piping, `--restore/--no-restore/--simple/--web`, watch/agent capability. |
-| Internationalization | 15 locales, locale detection, config locale, plugin i18n (`t()`, locale JSON, translated menus/commands/prompts) | **missing** | English only: `internal/tui/view.go` select_locale notice; no locale data in tree; Fresh `docs/i18n.md`, locales dir 15 files | Whole area missing; menus/labels are hardcoded English. |
+| Markdown | syntax highlighting, markdown_source smart list editing, page view/compose, tables (wrapped cells), code-fence frames (continuation rails, container framing), dual view, heading conceal/scrollbar marks, page-view persistence, Contents section | **partial** (R1 Contents; R4 smart editing; R6 core; R7 fences/tables; R8 dual/borders; R9–11 residual slices) | `syntax/{markdown,markdown_inline,markdown_markers,markdown_fences,markdown_tables}.go`, `editor/markdown.go`, `internal/tui/editorpane/{compose,compose_layout,compose_fence,compose_table,compose_setext,pageview}.go` + `internal/tui/{pageview,dual}.go`, `internal/tui/sidebar/contents.go`, `session/pageview.go`, `docs/markdown.md`; Fresh `plugins/markdown_{toc,source,compose}.ts` | Round 9–10 landed wrapped cells, escaped pipes, container fallback, fence continuation rails, heading marks, page-view persistence, quote-container fences, setext conceal, task/image conceal, inline-HTML literal decision, mapped-decor no-paint, horizontal clamp, dual line-anchor/one-dual policy; round 11 verified composed plugin-overlay pipeline ordering and recorded the wrapped-cell selection decision (hook rows have no source line/row-source map) and tightened the dual/per-split wording. Remaining R10-2: free per-split view mode, dual split persistence, native Markdown menu row, exact byte dual anchors (approximation recorded), sidebar per-section widths/drag order. |
+| Diagnostics surfaces | gutter marks, underline, inline end-of-line text, diagnostics panel, quickfix list, error navigation, hover fusion, pull/workspace diagnostics, progress | **partial** (rounds 4–10) | `internal/tui/{diag,diagpanel,lsp}.go`, `internal/tui/editorpane/{decor,inline_diag,inline_hints}.go`, `commands/lsp_commands.go`, `docs/lsp.md`; Fresh `docs/features/lsp.md` | Gutter dots, underline, inline end-of-line text with staleness, status counts, F8 jumps and hover diagnostics exist. Round 6 added the native Diagnostics panel (file→severity grouping, counts, jump/scroll/focus, progress/empty) and the Diagnostics List quickfix; round 7 workspace diagnostics for unopened files (`(not open)` rows) and `$/progress`; round 9 inline-hint tier 2; round 10 cancellation (pullSet/`$/cancelRequest`) and Linux process limits. Remaining: no built-in universal server (deliberate), per-OS process limits caveat, capability-gated workspace diagnostics (publish-only servers report their own set), plugin `DiagnosticInfo` carries no code (native ones do). |
+| Scripting and CLI automation | `--cmd script`, `--cmd daemon open-file --wait`, stdin programs, `init.ts` startup script, agent channels, watch mode, CLI help for the API | **partial** (round 11 landed stdin-as-a-buffer) | `internal/cli/` (flags: config/keymap/theme/log-file/diff/no-plugins/plugin/stdin/stdin-name), `internal/app/stdin.go`, `internal/tui.RunWithInput`/`tty.go`, `plugin_init.go`; Fresh `docs/features/scripting.md` | gvim has `init.lua` and the Lua API plus gvim-only `gvim config show/paths` and `gvim grammar`. Round 11: stdin-as-a-buffer (`gvim -`/`--stdin` and piped stdin with no files, bounded 32 MiB, `[stdin]` untitled tab, `--stdin-name`, file-launch session semantics, keys from the controlling terminal). Missing: Fresh's external `--cmd` script channel, `open-file --wait`, daemon modes/CLI (round-11 protocol only), watch/agent capability. |
+| Internationalization | 15 locales, locale detection/config, plugin i18n (`t()`, locale JSON, translated menus/commands/prompts) | **partial** (round 11 foundation #22a) | `i18n/` (package + `catalogues/en.json`, 15 locale metadata, `Normalize`/`Resolve`, `T`/`TN`/`Register`, CLDR plurals), `config` `locale`, `internal/app` startup resolution + Settings Interface row (live ApplyLive), `internal/pluginhost` locale + Lua `gvim.i18n.locale`, `docs/i18n.md`, `docs/settings.md`; Fresh `docs/i18n.md` + 15 locale JSONs | Round 11 landed the foundation: locale resolution (config then LC_ALL/LC_MESSAGES/LANG then en), lookup with shorter-tag/en/key fallback, %{name} interpolation, CLDR plural forms (ru/uk/cs/fr etc.), an embedded English catalogue, the Settings locale row switching live into the UI + plugin runtime, and a first extraction slice (editor clipboard statuses, root copied-path/formatted/inlay notices, dock notices). Only English is embedded; generated command/palette/menu titles stay English by design. Remaining (R11-2/#22b): translated catalogues (reuse Fresh JSON where keys match), the extraction inventory completion (commands/menus), translation workflow/CI and the 14 locales. |
 | Update, packaging, telemetry | update check, in-editor self-update prompt, `--no-upgrade-check`, telemetry toggle, packaging matrix (deb/rpm/aur/nix/npm/brew/appimage/flatpak/winget), daemon packaging | **missing / deliberately not planned?** | `internal/tui/notice_na.go:12-13` (update/update log not applicable); `internal/cli/` has no update flags; Fresh `README.md` | Decide with the Lead: these are distribution features rather than editor features for a pure-Go terminal binary. If in scope, the in-editor update indicator belongs to the status bar (`{update}`). |
-| Platform input and OS integration | CSI-u/modifier disambiguation, AltGr/CapsLock quirks, key release, GPM mouse on Linux console, suspend, stdin streaming, ConPTY, OSC 52 clipboard, Window title | **partial** | `internal/terminal/` (x/vt), Bubble Tea v2 input, `internal/tui/clip.go` (OSC 52/HTML), `internal/tui/root_terminal.go` suspend; Fresh `docs/internal/terminal.md` | Keyboard protocol settings are parsed but the code uses Bubble Tea's input as-is; no GPM, no stdin streaming/piping, no Windows PTY, no focus/mouse events for plugins, no terminal mouse forwarding. Suspend and OSC 52 clipboard exist. |
+| Platform input and OS integration | CSI-u/modifier disambiguation, AltGr/CapsLock quirks, key release, GPM mouse on Linux console, suspend, stdin streaming, ConPTY, OSC 52 clipboard, Window title | **partial** (stdin-as-buffer and ConPTY/OSC52/reflow round 11) | `internal/terminal/` (x/vt, `pty{,_windows}.go`, `osc52.go`, `reflow.go`), Bubble Tea v2 input, `internal/tui/clip.go`, `internal/tui/root_terminal.go`, `internal/app/stdin.go`, `internal/tui.RunWithInput`, `docs/terminal.md` | Round 11: stdin-as-a-buffer (bounded snapshot, not streaming; keys from the controlling terminal); Windows ConPTY pure-Go (GOOS=windows build/vet/test-compile verified — parity unverified until the real-Windows checklist pass); child OSC 52 clipboard write (parser bounded/chunk-safe; `clipboard.use_osc52` default off AND trusted workspace only; selectors c/empty; restored transcripts never hooked; write only, no read/paste reply); stored-transcript text re-wrap (styled cells/wide glyphs hard rows; live screen still clipped). Residuals: kitty keyboard (x/vt TODO/no seam), live-screen reflow, OSC 52 read, GPM/AltGr/CapsLock/key-release, stdin streaming, plugin focus/mouse events beyond focus_gained/active_window. |
 
 ## 4. Deliberately different (allowed)
 
@@ -704,12 +775,17 @@ for parity status.
     toggle live/read-only scrollback (Shift+PageUp also enters it), and Ctrl+] is the only chord
     that returns the keyboard to the editor (gvim addition). A user keymap cannot rebind it.
     `docs/terminal.md`, `docs/keybindings.md`.
-26. **Terminal persistence is a read-only transcript, not a live session.** `terminal.json` keeps a
-    bounded transcript of the newest rows (500 rows / 256 KiB, control-stripped); restore brings
-    it back read-only and dead, re-runs nothing, and there is no reflow (x/vt keeps the widths
-    rows had when they scrolled off; the pane clips, the saved width is recorded only). Fresh
-    keeps live terminals and can resume tracked agents; gvim's `resume_agents` stays
-    accepted-ignored and restart starts a shell in the last OSC 7 directory. `docs/terminal.md`.
+26. **Terminal persistence is a read-only transcript, not a live session; stored rows re-wrap.**
+    `terminal.json` keeps a bounded transcript (500 rows / 256 KiB, control-stripped); restore
+    brings it back read-only and dead, re-runs nothing. Round 11 adds a transcript-only
+    re-wrap: rows are stored as display rows, so on a content-width change gvim re-wraps the
+    stored rows (styles/wide glyph pairs preserved, hard rows stay hard, trailing blanks
+    trimmed) and a restored transcript whose width differed says `Scrollback (restored,
+    rewrapped)`. This is a text re-wrap, not a semantic reflow: a soft-wrapped continuation row
+    is not rejoined with the row above when the pane widens, and the live x/vt screen is still
+    clipped/padded (never reflowed). Fresh keeps live terminals and can resume tracked agents;
+    gvim's `resume_agents` stays accepted-ignored and restart starts a shell in the last OSC 7
+    directory. `docs/terminal.md`.
 27. **Inlay hints use tier-2 inline placement, with a documented fallback set.** A server's hints
     are display-only faint cells spliced before the protocol position (UTF-16→rune column,
     parts/padding, wrap-aware, wide-safe truncation) through the additive `Pane.InlineHints`
@@ -730,11 +806,18 @@ for parity status.
     editor becomes dirty and can save), Esc or a click outside restores and closes; mouse
     selection never commits on its own. Drag-and-drop of values and per-cell provenance remain
     (R10-4/R5-3). `docs/themes.md`.
-30. **Inspect-at-cursor matches rendered colours plus context, not cell provenance.** Fresh
-    records the theme key each painter used; gvim repaints the frame, compares the cell's
-    rendered fg/bg against the resolved theme (listing every matching key, capped) and uses
-    context facts (current line, selection, find, diagnostic, syntax kind) to pick the role.
-    Ambiguous cells can list several keys. `docs/themes.md` §5.
+30. **Inspect-at-cursor reports exact painted-key provenance for the first-surface subset, with a
+    colour-match fallback.** Round 11 gives `grid.Style` compact `FGKey/BGKey` theme-key ids and
+    `grid.Grid` an opt-in per-cell capture buffer that is allocated only by the inspector's
+    captured repaint (no allocation/recording and identical cells otherwise); style builders
+    tag the first-surface roles (editor text/syntax/gutter/selection/current line, status bar,
+    menu band, popup/list/palette/Settings rows, explorer/sidebar/diagnostics chrome) and the
+    inspector prints exact `Painted by (fg/bg): section.key` lines plus the pair line. Where a
+    painter is untagged (compose/page-view/plugin/custom overlay styles), the popup says
+    explicitly `Foreground/Background (matched by colour)`, listing the resolved keys whose
+    rendered colour equals the cell, and the context facts pick the role. Fresh records the
+    key on every painter; gvim's coverage is the first-surface subset by design (R10-4).
+    `docs/themes.md`.
 31. **Project-search "quickfix" is a transient list.** Alt+Q opens the result set in the shared
     list overlay (filterable, Enter jumps, list stays open); gvim has no persistent quickfix
     stack and the results panel remains the source of truth. `docs/ui.md`.
@@ -779,13 +862,16 @@ for parity status.
     surface, group-lite buffer groups + scroll-sync, theme-file APIs and
     `text_properties_at_cursor` without a level bump; a manifest may still require `"api": 2` and
     level-1 plugins keep working. `docs/plugins/README.md`.
-38. **Search previews are bounded but scroll and colour.** The selected-match column is a
-    plain-text window (24..60 cells, palette conventions, hidden below 64 inner cells, long
-    lines truncate) whose window scrolls while the result rows have focus (PgUp/PgDn,
-    Ctrl+Home/End, wheel over the column, three-line notch for a scrolled window) and whose
-    lines are syntax-coloured when the port can highlight the file (bounded LRU cache,
-    256 KiB/4000 lines) with a mapped header `Lfirst–last/total` indicator; a long multi-line
-    match pages without changing the replace range. `docs/ui.md`; R9-2.
+38. **Search previews are bounded, scroll, colour and soft wrap.** The selected-match column is
+    a window (24..60 cells, palette conventions, hidden below 64 inner cells, long lines
+    truncate by default) whose window scrolls while the result rows have focus (PgUp/PgDn,
+    Ctrl+Home/End, wheel over the column, three-line notch), whose lines are syntax-coloured
+    when the port can highlight the file (bounded LRU cache 256 KiB/4000 lines), with a mapped
+    header `Lfirst–last/total` indicator; a long multi-line match pages without changing the
+    replace range. Round 11 adds soft wrap (`Alt+P` in the panel and editor, session default):
+    wrapped rows remap the syntax spans and match highlight, cap at eight display rows per line
+    plus an ellipsis, and the window is counted in display rows. `docs/ui.md`,
+    `docs/keybindings.md`; R9-2.
 39. **The first plugin port is reduced, and its host surfaces are honest about it.**
     `diagnostics_panel` ports the Fresh plugin's live-panel behavior with the Finder subset (no
     prompt mode, preview pane, utility-dock placement or severity colours; the `[E]/[W]/[I]/[H]`
@@ -1017,43 +1103,42 @@ for parity status.
     would be a new server project. gvim fully supports user-configured `universal_lsp` servers
     (config merge, manager defaults, status listing, tests). The residual stays open
     deliberately as documentation, not a missing-integration gap. `docs/lsp.md`; R7-5.
-67. **Terminal slice A is a fixed-step adaptation.** Drag auto-scroll past the visible rows
-    runs one fixed ~80 ms, sequence-guarded tick (no acceleration; the same one-row step at
-    either end), forwards the mouse while dragging, keeps extending to the edge row of the new
-    window, and stops at the combined top/bottom, back inside the band, on release, on
-    selection-clear and on focus loss (the release may land outside the dock rows). A drag after
-    a double/triple click extends by whole words/lines. Ctrl+hover underlines a link token with
-    no file access and resolves on click (absolute/~, then the shell's OSC 7 directory, then the
-    editor's workspace root; trailing :line[:col] stripped-first-then-whole-token ordering); a
-    miss is a notice and Ctrl+Click is off on the alternate screen. `pass_ctrl_v_without_text`
-    (default true) sends Ctrl+V to the shell when a readable clipboard has no text, pastes the
-    LastYank when the clipboard is unreadable (or when the setting is false), and falls back to
-    the key when there is no last yank. Kitty keyboard, ConPTY, OSC 52, reflow, terminal tabs
-    and agent re-exec remain R10-3. `docs/terminal.md`.
-68. **Theme accents, URL refs and the picker are recorded decisions.** The six bundled themes no
+67. **Terminal slice A is a fixed-step adaptation, and R10-3's remaining pieces landed round 11.**
+    Drag auto-scroll past the visible rows runs one fixed ~80 ms sequence-guarded tick (no
+    acceleration; one row at either end), forwards the mouse while dragging, keeps extending to
+    the edge row, and stops at the combined top/bottom/back-inside/release/selection-clear/focus
+    loss. Word/line drag extension after double/triple click; Ctrl+hover underlines a token with
+    no file access and resolves on click (absolute/~, then OSC 7 dir, then workspace root;
+    trailing :line[:col]); `pass_ctrl_v_without_text` matrix with LastYank. Round 11 completed
+    the rest of R10-3: Windows ConPTY (pure-Go x/sys/windows, compile-verified; real-Windows
+    acceptance pending — parity unverified), child OSC 52 write (opt-in `clipboard.use_osc52` off
+    by default, Trusted workspaces only, selectors c/empty, write-only, restored transcripts
+    never hooked, bytes still to x/vt) and transcript-only reflow (text re-wrap; live screen
+    clipped). Residuals: kitty keyboard, OSC 52 read/paste, live-screen reflow, tabs, agent
+    re-exec, report-split close_on_exit. `docs/terminal.md`; R11-3.
+68. **Theme accents, URL refs and provenance are recorded decisions.** The six bundled themes no
     longer hand-pick accents: `ui.accent_bg/fg` fall back to `ui.popup_selection_bg/fg` and the
-    audit pins that equality across the bundled themes (a user theme may still set accents
-    explicitly, inheriting through the fallback chain otherwise). URL/packaged theme refs stay
-    recognised and refused with a clear error — recorded decision: no network code or fetch
-    slice until packaging/network policy exists; remote packs stay out. The Settings theme row
-    shows four cached colour chips (bg/fg/accent/popup selection) that follow Save/Reload; the
-    colour picker's mouse selection only previews, Enter is the only commit, Esc/outside
-    restores. Per-cell painted-key provenance, background images and drag-and-drop of theme
-    values remain (R10-4). `docs/themes.md`.
-69. **Markdown round-10 decisions are recorded.** Inline HTML stays literal (the page view has
-    no cell renderer and hiding it would lose text); an image's leading `!` opens its marker so
-    the alt text composes; task-list boxes become ☐/☑ glyphs with one blank after (raw under
-    the caret); setext headings keep tokenizer heading styling on the text line and conceal the
-    underline as its marker, with thematic-break distinction from tokenizer spans (not
-    heuristics); a fence inside a blockquote is framed at the container (bars first, frame at
-    the block indent, measure shrunk by bars) with a per-line literal fallback when the
-    container's lines disagree, list-indented fences keep their indent and nested fence markers
-    inside a body stay literal code; mapped occurrences/rulers/indent guides stay deliberately
-    off in page view (no-paint tests) and composed plugin overlays order after the compose; a
-    page wider than the pane is clamped (no horizontal scroll, Fresh's effective width also
-    clamps); the dual view uses a line anchor (byte-exact row anchoring deferred) and one dual
-    view at a time (asking again is a no-op; tab change/close_split/compare ends it).
-    `docs/markdown.md`; R10-2.
+    audit pins that equality; a user theme may set accents explicitly. URL/packaged theme refs
+    stay recognised and refused with a clear error — no network code/fetch until
+    packaging/network policy. The Settings theme row shows four cached chips; the colour
+    picker's mouse selection only previews, Enter is the only commit, Esc/outside restores.
+    Round 11 adds first-surface painted-key provenance (see item 30): capture is opt-in and
+    allocation-free when off, exact where tagged, colour-match fallback elsewhere; the picker
+    and drag were not extended to provenance. Remaining (R10-4): drag-and-drop of theme values,
+    background images, user-theme inheritance (Fresh's own limit), and the untagged-painter
+    fallback. `docs/themes.md`.
+69. **Markdown round-10/11 decisions are recorded.** Inline HTML stays literal (no cell
+    renderer; hiding it would lose text); an image's leading `!` opens its marker so the alt
+    text composes; task-list boxes become ☐/☑ glyphs (raw under the caret); setext headings
+    keep tokenizer heading styling on the text line and conceal the underline, with
+    thematic-break distinction from tokenizer spans; a fence inside a blockquote is framed at
+    the container with a per-line literal fallback, list-indented fences keep their indent and
+    nested fence markers stay literal; mapped occurrences/rulers/guides stay deliberately off
+    in page view (no-paint tests) and composed plugin overlays paint after the compose (round
+    11 regression test pins pipeline order); a page wider than the pane clamps; the dual view
+    uses a line anchor (exact byte/row anchoring a recorded approximation) and one dual per
+    document; wrapped-cell selection paints the primary row only (hook rows have no source
+    line/row-source map — recorded decision). `docs/markdown.md`; R10-2.
 70. **The bundled set is now 22 plugins, memory-bound.** 9 default-enabled; 13 off. Round-10
     host growth moved the default set from 6.97 to 7.22–7.27 MiB of the 8 MiB gate, so the three
     new ports all ship off (git_explorer/env_manager would each add ~1.5 MiB; git_grep likewise
@@ -1061,6 +1146,76 @@ for parity status.
     merge_conflict, dashboard, code_tour, lsp_navigation, find_references, git_grep,
     git_explorer, env_manager. The gate and per-plugin attribution are documented in
     `docs/plugins/bundled.md`.
+
+71. **Daemon #18a is a protocol/socket foundation only (partial by design).** Round 11 landed
+    `internal/daemon`: a frame stream (4-byte length + type + payload, ≤1 MiB; client
+    hello/input/resize/detach/open_file/ping; server output/notice/detached/pong/exit) and the
+    Unix socket (cache dir 0700, per-root default name slug+8-hex, liveness probe, stale unlink,
+    live refusal, 0600, Attach) with unit tests. Not landed: app.Options Reader/Writer +
+    `tui.RunWithIO` socketIO hosting/repaint, CLI `--daemon`/`-a`/`--attach`, Detach hook/palette
+    row/ack, single-writer refusal, `auto_attach`, session/PTY integration, docs/architecture and
+    the #19 design outline. Recorded as R11-1; task-68 continues in round 12 with the Phase-1
+    #18a/#19a plan.
+72. **i18n is a foundation, not a translation.** Round 11 landed the package/resolution/
+    catalogues/plurals/Settings row/live locale switching and a first extraction slice; only
+    English is embedded, so the UI reads English today. Generated command/palette/menu titles
+    stay English by design until the #22b command-key mapping; plugin translations retain the
+    existing .i18n.json workflow but now follow the live locale. Remaining: #22b catalogue import
+    from Fresh where keys match, the full extraction inventory, the 15 locales and the
+    translation/CI workflow. `docs/i18n.md`; R11-2.
+73. **Windows ConPTY is implemented but parity-unverified.** The pure-Go x/sys/windows path is
+    build- and vet-verified with GOOS=windows (plus a Windows test-compile) but cannot be run
+    here; docs/terminal.md carries the real-Windows acceptance checklist (cmd/pwsh paint, pipe/
+    redirection, resize, exit/restart transcript, scrollback selection/links, Ctrl+V/Ctrl+C,
+    restored transcript reflow) and says the Windows row reads unverified until that pass is
+    recorded. `docs/terminal.md`; R11-3.
+74. **Child OSC 52 clipboard writes are opt-in, trust-gated and write-only.** `clipboard.use_osc52`
+    defaults false (the child's output is untrusted data); when enabled, a write happens only in
+    a Trusted workspace and only for the clipboard selection (selector c or empty; primary/
+    select/cut-buffer ignored), the parser is bounded and chunk-safe, restored transcripts never
+    hook the handler, and the bytes still go to x/vt unchanged. A child asking to READ the
+    clipboard (OSC 52 paste request) gets no reply — gvim's paste path is the editor's. This is
+    a recorded deviation from Fresh's terminal clipboard surface. `docs/terminal.md`; R11-3.
+75. **Transcript reflow is a text re-wrap, not a semantic reflow.** On a content-width change
+    gvim re-wraps the stored transcript rows (cell styles and wide glyph pairs preserved, hard
+    rows kept hard, trailing blanks trimmed) and marks a restored mismatched transcript
+    `Scrollback (restored, rewrapped)`; a previously soft-wrapped continuation is not rejoined
+    when the pane widens, and the live x/vt screen is still clipped/padded. `docs/terminal.md`;
+    R11-3.
+76. **stdin-as-a-buffer is a bounded snapshot, not a stream.** `gvim -`/`--stdin` (and piped
+    stdin with no files named) reads up to 32 MiB before the TUI into an untitled `[stdin]` tab,
+    then reads keys from the controlling terminal; CRLF is normalized with the ending
+    remembered, the buffer is unmodified on open (Save runs Save As), NUL bytes are kept with a
+    warning, and the launch never restores or saves the session/hot-exit. `--stdin-name` is
+    gvim-only; there is no streaming spool/lazy chunking and no daemon/attach stdin.
+    `README.md`, `internal/cli/`; #25 decision.
+77. **Theme provenance covers the first-surface subset only.** Tagging happens at style
+    construction for editor text/syntax/gutter/selection/current-line, the status bar, menu band,
+    popup/list/palette/Settings rows and cheap explorer/sidebar/diagnostics chrome;
+    compose/page-view/plugin/custom-overlay painters stay untagged and the inspector falls back
+    to "matched by colour" with context facts. The capture buffer is allocated only for the
+    inspector's repaint, so normal frames record/render identically. `docs/themes.md`; R10-4.
+78. **Line targets cannot express three port needs, recorded.** Dashboard recent-file rows are
+    line targets now (single left click; cleared on close/unload; command rows stay
+    keyboard-only). code_tour is a widget-panel card (not buffer lines; its highlight is
+    decoration anchoring) and git_log's Enter opens a historical blob (`git show <sha>:<file>`
+    in a virtual buffer), so a target would wrongly open the working-tree file — neither
+    migrated. The new porting section "Line targets: what they can and cannot express" records
+    it. `docs/plugins/porting.md`.
+79. **Update check, self-update and telemetry are out of scope (final, Lead-signed).**
+    gvim implements no update check, self-update or telemetry; no network code is added for
+    upgrades or anonymous usage; the status bar's `{update}` element is not implemented;
+    `--no-upgrade-check`, if given, is a documented no-op for Fresh compatibility. This is a
+    deliberate scope decision: Fresh's install/update infrastructure is not part of gvim's
+    parity surface (§5.4 #24, §8).
+80. **Platform edges are partial (final, Lead-signed).** stdin-as-a-buffer is implemented
+    (item 76); GPM mouse on the Linux console, AltGr/CapsLock/key-release edge cases and plugin
+    focus events beyond the landed focus_gained/active_window stay deferred/out of scope, and no
+    further cross-platform input matrix is promised beyond the shipped terminals (§5.4 #25,
+    §8).
+81. **Fresh's GUI/desktop, browser --web UI, WASM build and packaging matrices are out of scope
+    (final, Lead-signed).** gvim ships as one pure-Go terminal binary; daemon mode itself (#18)
+    is in scope, daemon packaging is not (§5.4 #26, §8).
 
 ## 5. Ranked backlog for the remaining rounds
 
@@ -1173,23 +1328,21 @@ Round 5 recorded six gaps (R5-1 closed in round 6):
   substitution, dock/fullscreen placement, independent per-panel views, windowEmbed live panes,
   markdown-in-text, plugin explorer rows/decorations/slots with the git_explorer wave, package
   manager/HTTP/project-local plugins).
-- **R5-3 (P2, M, slice A landed round 10; remainder R10-4)** — theming is now: registry/forms/
-  extends/fallbacks/named colours/inspect/native editor/plugin overrides (rounds 5–6), accent
-  audit (bundled themes' accents equal the popup selection colours; user themes may override),
-  the Settings four-chip theme preview, and the colour picker/mouse editing overlay (round 10).
-  URL/packaged themes are a recorded decision: keep the clear refusal, no network/fetch code
-  until packaging/network policy. Remaining (R10-4): per-cell painted-key provenance,
-  background images, drag-and-drop of theme values; user-theme inheritance stays Fresh's own
-  limit. `docs/themes.md`.
-- **R5-4 (P2, M/L, slice A landed round 10; remainder R10-3)** — round 10 landed drag
-  auto-scroll past the visible rows (fixed ~80 ms seq-guarded tick, mouse forwarding while
-  dragging), word/line-wise drag extension after double/triple click, Ctrl+hover link
-  underline + `file:line:col` parsing/resolution/open, and the `pass_ctrl_v_without_text`
-  matrix with LastYank. Remaining is R10-3: kitty keyboard (x/vt v0.1.0 encodes legacy keys
-  only; its SendKey carries a TODO/no seam), Windows ConPTY (precise deferred plan), child
-  OSC 52, reflow (x/vt has none; transcript-only partial is the plan), terminal tabs,
-  automatic agent re-exec (`resume_agents` accepted-ignored), report-split close_on_exit.
-  `docs/terminal.md`.
+- **R5-3 (P2, M, slices A+B landed rounds 10–11; remaining R10-4/R11-4)** — theming is now:
+  registry/forms/extends/fallbacks/named colours/inspect/native editor/plugin overrides (rounds
+  5–6), accent audit + Settings four-chip preview + colour picker/mouse editing (round 10), and
+  first-surface painted-key provenance through an opt-in capture repaint (round 11). URL/
+  packaged themes stay a recorded refusal (no network/fetch until packaging policy). Remaining:
+  drag-and-drop of theme values, background images, user-theme inheritance (Fresh's own limit),
+  and untagged painters (compose/page-view/plugin) report the colour-match fallback.
+  `docs/themes.md`.
+- **R5-4 (P2, M/L, slices A+B landed rounds 10–11; remaining R11-3)** — round 10 landed drag
+  auto-scroll, word/line-wise drag extension, Ctrl+hover file:line:col links and the
+  pass_ctrl_v matrix; round 11 completed R10-3: Windows ConPTY (pure-Go, compile-verified,
+  real-Windows pass pending), the child OSC 52 write (opt-in/trust-gated/write-only) and
+  transcript-only reflow. Remaining is R11-3: kitty keyboard (x/vt legacy-only/TODO), OSC 52
+  read/paste, live-screen reflow, terminal tabs, automatic agent re-exec and report-split
+  close_on_exit. `docs/terminal.md`.
 - **R5-5 (CLOSED round 9)** — preview column and multi-line rows (round 6), streaming/batched
   results and Git Grep pathspecs (round 8), then the round-9 preview protocol with scrolling/
   syntax colours, window indicator, long-match paging, the large-file replace distinction and
@@ -1235,10 +1388,13 @@ Round 6 recorded six gaps:
   restart. Residuals moved to R9-4; round 10 closed the plugin-section persistence (order/
   rows/folds), so only per-section widths and the drag-and-drop order remain (plugin explorer
   rows wait on R9-5).
-- **R7-4 (P2, S)** — keymap residual limits: overlay contexts accept only single-key bindings;
-  `unbind` cannot disable a built-in fallback handler; text-field selection/clipboard/suggestion
-  actions are not surfaces; `completion`/`compositeBuffer` contexts, custom settings/theme dialogs
-  and plugin panels are outside the router. `docs/keybindings.md`.
+- **R7-4 (P2, S, unbind landed round 11)** — explicit unbind tombstones are recorded by the
+  keymap (context + global) and exposed through `keymap.Map.Unbound` + the TUI `UnbindKeymap`
+  port/adapter; the overlay router swallows an explicitly unbound chord instead of running the
+  surface's built-in fallback (tests pin popup/prompt/no-unbind cases). Remaining: multi-key
+  bindings are not consulted in overlay contexts (one-press router; pending-chord state is
+  root-only), and the completion/compositeBuffer/text-field contexts stay outside the router
+  (Fresh implements them per surface). `docs/keybindings.md`.
 - **R7-5 (P3, S/M; only two items remain)** — inline-hint tier 2 and workspace-diagnostic
   cancellation landed (rounds 9–10): hints render inline with the documented end-of-line
   fallbacks, and workspace/diagnostic pulls go through `protocol.Call` so supersede/Stop/
@@ -1296,10 +1452,13 @@ Round 9 recorded five gaps:
   panelKeys/panel-mode events). Optional follow-ups: move code_tour/dashboard/git_log onto
   `set_line_targets` where clickable rows help; the rest waits on R9-5 (dock/per-panel) or
   the daemon-era rounds. `docs/plugins/porting.md`.
-- **R9-2 (P2, S/M)** — search residual: a streamed writer for replacing closed files above the
-  search read cap (open buffers already covered), provider sources beyond files/open buffers/
-  current buffer (recent files, diagnostics, terminals), and a preview wrap/toggle for the
-  syntax colours. `docs/ui.md`.
+- **R9-2 (P2, S/M, preview wrap/toggle closed round 11)** — search residual: a streamed writer
+  for replacing closed files above the search read cap (open buffers already covered), and
+  provider sources beyond files/open buffers/current buffer — the recent-files source is a
+  recorded decision (no app-level opened-file history exists; it needs a history snapshot +
+  streaming/replace semantics) and diagnostics/terminal sources need provider-specific snapshot
+  protocols. Preview soft wrap/toggle landed (`Options.PreviewWrap`, `Alt+P`, bounded rows/cap,
+  remapped spans, session default), so that item is gone. `docs/ui.md`.
 - **R9-3 (CLOSED round 10, residual R10-2)** — round 10 landed quote-container fences
   (framed at the container, prefix on continuation rows, per-line literal fallback), setext
   heading styling/conceal with the thematic-break distinction, task-list glyph conceal, image
@@ -1330,34 +1489,62 @@ Round 10 recorded four gaps:
   activation, no persisted recipe, opt-in), and the earlier ports' items in R9-1. Optional
   line-target migration for code_tour/dashboard/git_log (S/M) and dashboard/code_tour polish
   blocked on R9-5 dock/per-panel views. `docs/plugins/porting.md`.
-- **R10-2 (P2, S)** — residual UI polish: exact byte dual scroll anchors, a native Markdown
-  menu row (generated menu table), free per-split view mode, wrapped-cell selection painting
-  only the primary row, the composed plugin-overlay ordering test; sidebar per-section widths
-  and drag-and-drop section order (shared-column model documented). `docs/markdown.md`,
+- **R10-2 (P2, S, overlay ordering/decisions closed round 11)** — residual UI polish: free
+  per-split view mode, dual split persistence and the native Markdown menu row; exact byte dual
+  anchors stay the recorded line-anchor approximation and wrapped-cell selection the recorded
+  primary-row-only decision (hook rows have no source line/row-source map); sidebar per-section
+  widths and drag-and-drop section order (shared-column model documented). The composed plugin-
+  overlay ordering regression test landed in round 11, so that item is gone. `docs/markdown.md`,
   `docs/sidebar.md`.
-- **R10-3 (P2, M)** — terminal completion: kitty keyboard (x/vt v0.1.0 is legacy-only; its
-  SendKey carries a TODO/no seam), Windows ConPTY (precise deferred plan; pure-Go via x/sys
-  v0.49's kernel32 ConPTY wrappers, needs a real-Windows acceptance pass), child OSC 52
-  (x/vt exposes no payload; re-parse vs defer decision), reflow (transcript-only partial
-  plan; x/vt has none), terminal tabs and automatic agent re-exec (depend on #19/#20),
+- **R10-3 (P2, M, completed except R11-3)** — terminal completion landed in round 11: ConPTY
+  (pure-Go x/sys/windows, GOOS=windows build/vet/test-compile verified; real-Windows acceptance
+  checklist pending — parity unverified), child OSC 52 clipboard write (opt-in
+  `clipboard.use_osc52` default off + Trusted only, selectors c/empty, restored transcripts never
+  hooked, bytes still to x/vt; write-only) and transcript-only reflow (stored rows re-wrapped
+  with styles/wide pairs/hard rows; text re-wrap, live screen clipped). What remains moved to
+  R11-3: kitty keyboard, OSC 52 read/paste, live-screen reflow, terminal tabs, agent re-exec,
   report-split close_on_exit. `docs/terminal.md`.
-- **R10-4 (P2, M/L)** — theme completion: per-cell painted-key provenance (paint-time
-  attribution behind inspect mode, first-surface subset design), background images,
-  drag-and-drop of theme values. URL/packaged themes stay recorded (keep the refusal, no
-  network/fetch until packaging policy). `docs/themes.md`.
+- **R10-4 (P2, M/L, provenance first surface landed round 11)** — theme completion landed the
+  first-surface painted-key provenance (`grid.Style.FGKey/BGKey` + opt-in capture; role table
+  over `theme.Keys()` with aliases; tagging at construction for editor text/syntax/gutter/
+  selection/current-line, status bar, menu, popup/palette/Settings rows and cheap chrome; the
+  inspector prints exact keys and falls back to "matched by colour" for untagged painters).
+  What remains (R11-4): drag-and-drop of theme values, background images, user-theme
+  inheritance, and the untagged composition/plugin painters. `docs/themes.md`.
+Round 11 recorded four gaps:
+
+- **R11-1 (P1, L)** — daemon #18a remainder: app.Options Reader/Writer + `tui.RunWithIO`
+  socketIO hosting/repaint, CLI `--daemon`/`-a`/`--attach`, the Detach hook/palette row/ack,
+  single-writer refusal, `auto_attach` config, session/PTY integration, docs/architecture and the
+  #19 design outline; then #19a workspaces (Phase-1 spec in the round-12 plan). Task-68 stays in
+  progress. `internal/daemon/`.
+- **R11-2 (P1, L/XL)** — i18n remainder (#22b): import Fresh locale JSON where keys match (15
+  locales; en 1895 keys vs non-en 2403–2430 -> intersection + explicit mapping), complete the
+  extraction inventory (generated command/palette/menu titles stay English by design until a
+  key-based command pass), a placeholder/plural coverage validator + CI check, translation
+  workflow/docs and the 14 translated catalogues. `docs/i18n.md`.
+- **R11-3 (P2, M)** — terminal remainder: kitty keyboard (x/vt v0.1.0 legacy-only, TODO/no
+  seam), OSC 52 read/paste request (write-side only today), live-screen reflow (x/vt has none;
+  stored transcript re-wraps), terminal tabs (pair with #19's workspace-scoped dock), automatic
+  agent re-exec (`resume_agents` accepted-ignored), report-split close_on_exit.
+  `docs/terminal.md`.
+- **R11-4 (P2, S/M)** — theme remainder: drag-and-drop of theme values, background images,
+  user-theme inheritance (Fresh's own limit), and extending painted-key capture to the untagged
+  compose/page-view/plugin painters (today the inspector falls back to colour-matching there).
+  `docs/themes.md`.
 
 ### 5.1 User-visible TUI and editing gaps (do first)
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 12 | Markdown residual: exact byte dual scroll anchors, a native Markdown menu row (generated menu table), free per-split view mode, wrapped-cell selection painting only the primary row, composed plugin-overlay ordering test. Round 9–10 landed the renderer core/fences/tables/wrapped cells/borders/dual/heading marks/container fences/setext/task-image conceal/page-view persistence/mapped-decisions | P1 | L | `editor`, `syntax`, `internal/tui/editorpane`, `internal/tui`, `session` | R10-2 |
+| 12 | Markdown residual: free per-split view mode, dual split persistence, native Markdown menu row; exact byte dual anchors stay the recorded line-anchor approximation and wrapped-cell selection the recorded primary-row-only decision. Round 9–11 landed the renderer core/fences/tables/wrapped cells/borders/dual/heading marks/container fences/setext/task-image conceal/page-view persistence/mapped-decisions/overlay ordering | P1 | L | `editor`, `syntax`, `internal/tui/editorpane`, `internal/tui`, `session` | R10-2 |
 
 ### 5.2 Plugin-API breadth (unblocks Fresh's plugin-era features)
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
 | 13 | Plugin host remainder (tiers 1a–1c landed rounds 5–9; explorer/env edges round 10): composite API recorded as a native substitution, dock/fullscreen placement, independent per-panel views, windowEmbed live panes, markdown-in-text, package manager/HTTP/project-local plugins, render_line | P2 | L | `pluginapi`, `plugin`, `decorations`, `internal/tui/pluginpanel`, `internal/tui/plugin_*.go` | R9-5; explorer rows closed by round 10's git_explorer host API |
-| 14 | Port the remaining bundled plugins. Landed: diagnostics_panel (r6), git_log/live_diff (r7; full paths r8), compare_files (r8), path_complete/lsp_help (r8), Finder/lsp_navigation/find_references/dashboard/code_tour (r9), git_grep/git_explorer/env_manager + explorer/env host APIs (r10). Remaining: devcontainer, k8s-workspace, orchestrator/agent sessions, live_sessions, pkg, audit_mode, language helpers — all daemon/remote/packaging-era (gated on #18–#21/#16), plus optional set_line_targets migrations for code_tour/dashboard/git_log. Native substitutions confirmed: markdown_compose/source, theme_editor, search_replace, composite buffers, dashboard start tab; candidates to confirm: live_grep, diff_nav, welcome/welcome_screen | P1 | L each; XL total | `plugin/bundled/plugins`, `plugin/bundled/lib` | R9-5/R10-1; §5.5 round 11 |
+| 14 | Port the remaining bundled plugins. Landed through round 10 (diagnostics_panel, git_log/live_diff with full paths, compare_files, path_complete/lsp_help, Finder/lsp_navigation/find_references/dashboard/code_tour, git_grep/git_explorer/env_manager + explorer/env host APIs); round 11 evaluated the line-target migration (dashboard landed; code_tour widget-card and git_log historical-blob documented non-migrations). Remaining ports are daemon/remote/packaging-era: devcontainer, k8s-workspace, orchestrator/agent sessions, live_sessions, pkg (after #16), audit_mode (native substitution), language helpers. Native substitutions confirmed: markdown_compose/source, theme_editor, search_replace, composite buffers, dashboard start tab; candidates to confirm: live_grep, diff_nav, welcome/welcome_screen | P1 | L each; XL total | `plugin/bundled/plugins`, `plugin/bundled/lib` | R9-5/R10-1; §5.5 round 12 |
 | 16 | Plugin package manager/registry (Fresh `pkg`: install/update/remove from git, registry sync, consent dialog) | P2 | L | `plugin/`, `shellcmd` | #13 |
 | 17 | Workspace-trust enforcement + env: per-spawn executable-path gate and Blocked spawn denial for in-workspace executables (terminal/shell/formatter/LSP/plugin processes) remains (R1-4); env detection/activation landed round 10 (`env.detectors` host detection, shared trust markers, Trusted-only bounded-activation overlay injected into every spawn, Environment/Detectors pages, `gvim.env` + events) | P1 | L | `trust/`, `env/`, spawn sites | R1-4; round-10 env slice closed the env half |
 
@@ -1374,45 +1561,40 @@ Round 10 recorded four gaps:
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 22 | i18n: message catalogue, locale detection/config, the 15 Fresh locales, plugin `t()` and translated menus/commands/prompts | P1 | L infra; XL translation | new i18n package, `internal/tui`, `commands/gen` | needed for full parity but costly; can follow the first rounds |
-| 23 | Terminal Windows support (ConPTY): precise deferred plan — pure-Go via x/sys v0.49's kernel32 ConPTY wrappers, windows build tag, real-Windows acceptance checklist; residual R10-3 | P2 | M | `internal/terminal` | — |
-| 24 | Update check/self-update/telemetry: recommended out of scope (no telemetry; no update check/self-update; the status-bar update element stays unsupported; `--no-upgrade-check`, if accepted, is a documented no-op) — Lead sign-off to record as a deliberate scope decision | P2 | S/M | `internal/app`, `internal/cli`, status bar | decision wording in §6/§4 |
-| 25 | Platform edges: recommended partial scope — stdin-as-a-buffer (`gvim -`/`--stdin`, Fresh supports stdin) as the only near-term item (S/M); GPM console mouse, AltGr/CapsLock/key-release edges and plugin focus events deferred (focus_gained/active_window landed in 1c-C) — Lead sign-off | P2 | M | `internal/terminal`, input layer, `internal/cli` | R7-4; decision wording in §6/§4 |
-| 26 | Fresh GUI/desktop, browser `--web` UI, WASM build, packaging/installer matrix, daemon packaging: recommended confirmed out of scope, recorded as deliberate non-parity (daemon mode itself is #18) — Lead sign-off | P2 (out of scope) | XL | n/a | decision wording in §6/§4 |
+| 22 | i18n: foundation #22a landed round 11 (package/catalogues/en, 15 locale metadata, resolution config+LC_ALL/LC_MESSAGES/LANG, T/TN/plurals, Settings locale row live, plugin locale, first extraction slice, docs); remaining #22b is the translation workflow: Fresh-JSON import where keys match, full extraction inventory (commands/menus by design later), coverage validation/CI, the 15 locales. | P1 | L infra; XL translation | `i18n/`, `internal/tui`, `commands/gen` | R11-2 |
+| 23 | Terminal Windows support (ConPTY): **implemented round 11** pure-Go x/sys/windows (windows build tag, GOOS=windows build/vet/test-compile verified, pure-helper Windows tests) with a real-Windows acceptance checklist in docs/terminal.md; parity unverified until that pass is recorded, and the Windows row reads unverified | P2 | M | `internal/terminal` | R11-3 |
+| 24 | Update check/self-update/telemetry: **DECIDED OUT OF SCOPE (Lead-signed, final)** — no telemetry, no update check/self-update, no network upgrade code; the status-bar `{update}` element stays unimplemented and `--no-upgrade-check` is a documented no-op. Recorded in §4 item 79 and §8 | out of scope | — | n/a | Lead sign-off 2026-11-08 |
+| 25 | Platform edges: **DECIDED PARTIAL (Lead-signed, final)** — stdin-as-a-buffer landed round 11 (bounded snapshot, `--stdin-name` gvim-only, file-launch semantics); GPM console mouse, AltGr/CapsLock/key-release edges and plugin focus events beyond focus_gained/active_window are deferred/out of scope. Recorded in §4 item 80 and §8 | partial | — | `internal/cli`, `internal/app/stdin.go`, `internal/tui.RunWithInput` | Lead sign-off 2026-11-08 |
+| 26 | Fresh GUI/desktop, browser `--web` UI, WASM build, packaging/installer matrix, daemon packaging: **DECIDED OUT OF SCOPE (Lead-signed, final)** — gvim ships as one pure-Go terminal binary; daemon mode itself (#18) stays in scope, daemon packaging does not. Recorded in §4 item 81 and §8 | out of scope | — | n/a | Lead sign-off 2026-11-08 |
 
 ### 5.5 Suggested round order for the remaining goal
 
-1. **Round 11 — daemon MVP, i18n groundwork and completion slices.** #18a daemon attach/
-   detach MVP: Unix-socket daemon (`--daemon [--name]`, `-a [NAME]`), one editor instance hosted
-   through the existing tea program with socket-backed input/output, one attached client,
-   open-file/`--wait` forwarding, Detach palette row, `auto_attach`, single-writer policy, session
-   save on daemon exit (detach saves nothing), direct modes unchanged, unit + uitest-PTY tests;
-   #19 workspace model outline/design only. i18n groundwork (#22a: embedded Fresh-keyed
-   catalogue, LANG/LC_ALL + config locale, T()/plurals, plugin locale wiring, Settings row,
-   docs/tests). Terminal completion: ConPTY (cross-compiled pure-Go Windows slice + real-Windows
-   acceptance), OSC 52 re-parse decision/implementation, transcript-only reflow, kitty/pass_ctrl_v
-   remainder. Theme provenance slice (first-surface paint attribution behind inspect) as capacity
-   allows. Record the #24–#26 decision wording (out of scope / stdin partial / out of scope) and
-   optional set_line_targets migrations for code_tour/dashboard/git_log.
-2. **Round 12 — workspaces and agents.** #19 workspaces/windows on the daemon ownership model
-   (durable workspace identity, N workspaces per daemon with lazy materialization, dock/session
-   switcher, New Workspace, extract tab, one buffer across workspaces, per-workspace
-   persistence); #20 agent sessions starts (launch argv/resume metadata, discovery/rejoin v1,
-   Run Agent dialog, dock integration, terminal re-exec); #21 remote authority begins with the
-   SSH authority interface and remote indicator. Remaining terminal tabs/agent re-exec pair here.
-3. **Round 13 — remote/devcontainer, i18n and the daemon-era ports.** #21 remote files/process/
-   terminal/LSP + devcontainer/k8s workspaces; #22 i18n catalogue/translation workflow (15
-   locales, reuse Fresh translations where keys match); daemon-era plugin ports (orchestrator,
-   live_sessions, agent_* family, devcontainer, k8s-workspace) as the architecture allows;
-   language-helper micro-ports (optional); pkg after #16.
-4. **Round 14 — completion and polish.** R10-1/R10-2/R10-3/R10-4 residuals (kitty/ConPTY/OSC52/
-   reflow, provenance, per-section widths, dual byte anchors), R9-2 search, R7-4 keymap, R8-3
-   settings leftovers, R1-2/R1-3/R1-4/R2-5/R4-4; stdin-as-buffer (#25 partial); daemon-era
-   audits (audit_mode remains a native substitution unless composite buffers are kept).
-5. **Round 15 — final parity pass.** Re-read `refs/fresh`, re-run the §2 counts and the e2e
-   feature index, refresh every partial row, record the deliberate endgame gaps (composite API,
-   native substitutions, GUI/web/WASM/packaging scope, universal server), and close the book on
-   the goal or report the documented endgame.
+1. **Round 12 — workspaces, terminal tabs and the first architecture slices.** #19a workspaces on
+   the round-11 daemon ownership model: durable workspace identity, per-workspace files under the
+   data dir, protocol workspace-list/select/new/close, inert lazy placeholders, dock/session
+   switcher, New Workspace, switch = stop the tea program but keep the runtime warm, per-workspace
+   save/restore, single-writer policy, tests; terminal tabs pair with the workspace-scoped dock
+   (N dock sessions, tab strip, names/exited markers, per-tab close_on_exit, persisted terminal
+   records). #20a can run in parallel: tracked terminal launch argv/agent metadata + exited-
+   terminal persistence + resume-capable restart (S/M). #21a: authority interface + local
+   implementation + scp/ssh:// spec parsing + status-bar remote indicator + reconnect-on-activate
+   + SSH terminal/exec via pure-Go x/crypto/ssh (L); SFTP files next. #22b i18n catalogue/
+   translation workflow (Fresh-JSON import, extraction inventory, coverage validator/CI) and
+   residual sweeps (R10-2/R11-3/R11-4/R9-2/R8-3/R1-2/R1-3/R2-5/R4-4).
+2. **Round 13 — remote file/LSP, workspaces follow-ups and daemon-era ports.** #21b remote file
+   I/O over SFTP + LSP over the long-running spawner + reconnect hardening; #19b extract tab,
+   one-buffer-across-workspaces policy, per-session plugin state, dormant/rename; #20b tmux
+   discovery/rejoin v1, Run Agent dialog and dock integration; i18n translations and the 15
+   locales; daemon-era plugin ports begin (orchestrator/live_sessions/agent_* family,
+   devcontainer/k8s after the authority slices; pkg after #16).
+3. **Round 14 — completion and polish.** R11-1/R11-3/R11-4/R10-2 remainders (daemon attach end-
+   to-end, kitty/live-screen reflow/OSC52 read, theme drag/background, per-section widths, dual
+   byte anchors), R11-2 catalogues, #17 trust spawn gate/R1-4, language helpers, any leftover
+   daemon-era ports; devcontainer/k8s workspace authorities if #21 landed.
+4. **Round 15 — final parity pass.** Re-read `refs/fresh`, re-run the §2 counts and the e2e feature
+   index, refresh every partial row, record the deliberate endgame gaps (composite API, native
+   substitutions, GUI/web/WASM/packaging scope, universal server, platform edges), and close the
+   book on the goal or report the documented endgame.
 
 ## 6. Tracking notes
 
@@ -1794,29 +1976,109 @@ Round 10 recorded four gaps:
   (7.22–7.27, ~9.3 baseline); palette 229 (unchanged); `gvim.d.lua` 242 functions/1478 lines;
   API level 2; settings 69/14 + Environment/Detectors; no leftover temp harnesses (the new
   `internal/app/plugins_round10_test.go` is a permanent real-host test).
+- **Round 11 landed (2026-11-09).** Six tracks landed, the daemon MVP is partial by design
+  (task-68 stays in progress); this audit ran the gates and reviewed the diff (no scope creep;
+  §7):
+  - **Daemon #18a (partial)** (`internal/daemon/{protocol,socket}.go` + tests): the protocol
+    frame stream (4-byte big-endian length + type byte + payload, `MaxPayload` 1 MiB; client
+    hello/input/resize/detach/open_file/ping, server output/notice/detached/pong/exit; an
+    oversized frame fails the connection) and the Unix socket (user cache dir 0700, per-root
+    default name slug+8-hex of the absolute root, liveness probe, stale unlink, live-daemon
+    refusal, socket 0600, `Attach`). Unit tests: frame round-trip/bounds, refused live daemon,
+    socket perms, name/path. NOT landed (R11-1): app.Options Reader/Writer + `tui.RunWithIO`
+    socketIO hosting/repaint, CLI `--daemon`/`-a`/`--attach`, Detach hook/palette row/ack,
+    single-writer refusal, `auto_attach`, session/PTY integration, docs/architecture and the #19
+    design outline; round 12 continues with the Phase-1 #18a/#19a plan.
+  - **i18n #22a foundation** (`i18n/` + `catalogues/en.json`, `docs/i18n.md`, config/settings):
+    the TUI-free leaf package (15 locales metadata, `Normalize`/`Resolve` from config then
+    LC_ALL/LC_MESSAGES/LANG then en, `T` with %{name}, `TN` with Fresh's CLDR plural rules incl.
+    ru/uk/cs/fr, `Register`, embedded English catalogue, locale→shorter-tag→en→key fallback);
+    config `locale` (null/auto/15 codes, user-layer only; project config refused with a
+    diagnostic); Settings Interface locale row (null encodes auto; ApplyLive pushes
+    `i18n.SetLocale` + `plugin.Runtime.SetLocale` live); startup resolves before the UI/plugins;
+    pluginhost locale + Lua `gvim.i18n.locale`; first extraction slice (editor clipboard
+    statuses, root copied-path/formatted/inlay notices, dock notices) with English-identical
+    behaviour and the remaining inventory documented. Generated command/palette/menu titles stay
+    English by design (R11-2). Tests incl. `i18n/i18n_test.go`, `config/locale_test.go`,
+    settings-locale, pluginhost/i18n tests.
+  - **Terminal completion R10-3** (`docs/terminal.md`, `internal/terminal/`): `ptyProc` seam +
+    Unix adapter; the Windows ConPTY path is pure-Go x/sys/windows under a windows build tag
+    (pipes, `CreatePseudoConsole`, STARTUPINFOEX attribute list, `CreateProcess`,
+    `ResizePseudoConsole`/`ClosePseudoConsole`; pure helpers tested Windows-only; GOOS=windows
+    build/vet/test-compile verified; real-Windows acceptance checklist written, parity
+    unverified); the child OSC 52 write parser (bounded/chunk-safe ES]52, selectors c/empty,
+    recovery) with `Session.SetOSC52Handler` gated by new `clipboard.use_osc52` (default off)
+    AND Trusted workspaces, restored transcripts never hooked, bytes still to x/vt; transcript-
+    only reflow (`ReflowLines/ReflowRows`: styled cells/wide pairs kept, hard rows stay, text
+    re-wrap not semantic reflow, dock reflows on content-width change, restored mismatch
+    notice; live screen clipped). Kitty keyboard remains a precise residual (x/vt TODO/no seam);
+    pass_ctrl_v was complete. Tests: pty/windows helpers, osc52 parser/unix, reflow, dock
+    integration.
+  - **Theme R10-4 provenance (partial)** (`docs/themes.md`, `internal/tui/{grid,style,
+    theme_inspect}.go`): `grid.Style.FGKey/BGKey` uint16 theme-key ids + an opt-in per-cell
+    capture buffer (`CaptureKeys`/`ReleaseKeys`/`KeysAt`; no allocation/size/render change when
+    off); the dense role table over `theme.Keys()` with canonical alias resolution
+    (`style/roles.go`, `TaggedCell/TaggedStyle`); tagging at construction for overlays,
+    editorpane text/selection/gutter/current-line/all syntax kinds, the status bar and menu band
+    plus cheap explorer/sidebar/diagnostics chrome; the inspector prints exact
+    `Painted by (fg/bg): section.key` lines and the pair line, with an explicit "matched by
+    colour" fallback for untagged sides. The picker/drag was deliberately not extended; residual
+    drag-and-drop/background images/user-theme inheritance. Tests: grid keys capture, style
+    roles, editorpane roles, inspector provenance.
+  - **Port follow-ups + stdin-as-a-buffer (#25 partial)** (`README.md`, CLI help,
+    `docs/plugins/porting.md`): dashboard recent-file rows are line targets now (per-paint
+    {line,path}, cleared on close/unload; the mode keeps Enter so the win is a mouse click;
+    command rows cannot be targets), while code_tour (widget-panel rows/decoration anchoring)
+    and git_log (historical blob Enter vs working-tree target) were evaluated and recorded as
+    non-migrations in the new porting section. stdin-as-a-buffer: `--stdin`/`-` (and piped stdin
+    with no files), bounded 32 MiB, CRLF/EOL handling, empty valid, conflicts validated, an
+    untitled `[stdin]` buffer with label override/language sniff/unmodified-on-open/binary
+    warning, file-launch session semantics (never restored/saved/hot-exit), `tui.RunWithInput` +
+    `tui.OpenInputTTY` additive (`Run` untouched), a PTY piping e2e test, README/docs; recorded
+    differences (no streaming spool/daemon stdin; gvim-only `--stdin-name`). Tests: `internal/
+    cli/stdin_test.go`, `internal/app/stdin{,_ui,_pty_unix}_test.go`.
+  - **LSP small residuals** (`docs/ui.md`, `docs/keybindings.md`, `docs/markdown.md`): preview
+    soft wrap/toggle (`Options.PreviewWrap`, `Alt+P` in panel and editor, wrapped rows with
+    syntax-span/match remap, 8-row cap + ellipsis, display-row window, session default; the
+    recent-files provider source recorded as a decision needing a new history snapshot); the
+    composed plugin-overlay ordering regression test (pipeline order verified); wrapped-cell
+    selection decision recorded (hook rows have no source line/row-source map) and the dual/per-
+    split wording tightened (line-anchor approximation, one dual per document); R7-4 explicit
+    unbind tombstones (keymap `Unbound` + TUI `UnbindKeymap` port/adapter; the overlay router
+    swallows an unbound chord instead of the built-in fallback; tests).
+- **Round 11 integration notes.** No Lead code fixes this round; the audit verified the shared-
+  file hunks: `internal/tui/model.go` (`RunWithInput` + `paint`/`paintInto` split; `Run`
+  unchanged), `internal/app/{run,options,session_plan}.go` (stdin read/buffer wiring, locale
+  resolution before UI/plugins, file-launch session semantics), `internal/cli/root.go`
+  (--stdin/--stdin-name validation), `internal/tui/ports.go`/`editorpane/styles.go` (tagging
+  hooks) and `internal/keybindings/adapter.go` (Unbound); no lost/duplicated hunks, no duplicate
+  top-level functions and `git diff --check` is clean. The statusbar paint is drawn through the
+  same `paintInto` refactor (no separate painter file); the theme inspector's captured repaint is
+  additive. Metrics unchanged: 22 bundled/9 on/13 off; 47 registration sites; idle heap
+  ~7.25 MiB of 8 PASS; palette 229; `gvim.d.lua` 242 functions/1478 lines; API level 2;
+  settings 69/14 + Interface locale. No leftover temp harnesses.
+
 - The gaps the rounds opened are at the top of §5 (R1-2…R1-4, R2-5, R3-3…R3-4,
-  R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5, R10-1…R10-4;
-  #7/#8/#11/#15, R1-1, R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5 and
-  R9-3/R9-4 are closed, and the slice closures of earlier rounds are in); §5.5 is the
-  round-11..15 plan built from the ranked backlog minus the closed items.
-- The command palette table is generated from Fresh; keep `commands/gen/generate.py` and
-  `tools/gen_menus.py` in the parity loop. Regenerating after a Fresh update is the cheapest way
-  to find newly added commands/menus; `tools/gen_menus.py --check` reports drift.
-- When a Fresh release lands, re-run the counts in §2 (commands, keymaps, themes, plugins,
-  plugin API) and update the matrix rows for the areas that changed.
+  R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5, R10-1…R10-4,
+  R11-1…R11-4; #7/#8/#11/#15, R1-1, R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3,
+  R8-5 and R9-3/R9-4 are closed; R10-3 completed except R11-3 and R10-4's first surface landed);
+  §5.5 is the round-12..15 plan built from the ranked backlog minus the closed items. The #24/
+  #25/#26 decisions are final (Lead-signed) and recorded in §4 items 79–81, §5.4 and §8.
 
 ## 7. Verification limits and risks
 
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–10 had their full
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–11 had their full
   gate sets run by this audit on their trees: build ×2, vet, golangci-lint 0 issues, gofmt clean,
-  purity and import rules green, and (from round 10) the generated-menu check clean. Round 10's
-  go test ./... -count=1 had three internal/app real-host failures (TestPathCompleteRealHost,
-  TestRound9PortsRealHost, TestGitGrepRealHost) whose only failure was a TempDir RemoveAll
-  cleanup race ("directory not empty" under Library/Caches/go-build) plus the load-sensitive
-  plugin `TestHeatBusyTimerIsThrottled` flake; all four pass repeatedly when re-run isolated,
-  so they are recorded as test/environment cleanup races and a load flake, not regressions.
-  Round-1 statuses were read-code only (no gates were run by this audit then). A feature that
-  exists but is broken would still read "implemented": treat a status as a pointer, not proof.
+  purity and import rules green, and (from round 10) the generated-menu check clean; from round
+  11 also the Windows cross-gates GOOS=windows go build ./... and GOOS=windows go vet ./...
+  (the ConPTY slice), both green. Round 11's go test ./... -count=1 had four load-timing
+  failures — internal/tui `TestPumpSharesOneDrainBudget` (completed too fast for the share
+  assertion under load), plugin `TestHeatBusyTimerIsThrottled` (heat timer not found under
+  load), plugin/bundled `TestMergeConflictRecoversFromAKilledScan` and
+  `TestViBigRangesFitTheBudget` — all four pass repeatedly in isolation (2×), so they are
+  recorded as load flakes, not regressions; the other 67 packages pass. Round-1 statuses were
+  read-code only (no gates were run by this audit then). A feature that exists but is broken
+  would still read "implemented": treat a status as a pointer, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.
@@ -1836,26 +2098,25 @@ Round 10 recorded four gaps:
   display/keymap/status/session code, and the round-3 refresh the settings/terminal/explorer/
   palette code; each ran the gates. The design records carry the detail and name the tests;
   this file points rather than proves.
-- Round-2/3/4/5/6/7/8/9/10 diff reviews (this audit): no scope creep outside the declared
-  tracks. Shared files stayed in scope (round 10: `internal/tui/model.go`, `internal/app/run.go`,
-  `config/` (env/terminal/lsp limits), the `pluginapi/` host stubs + `plugin/` host methods
-  sequenced between plugin/trust/lsp, `internal/tui/explorer/panel.go` + the sidebar/picker/
-  theme files, `env/`/`trust/`/`shellcmd/` env plumbing, the three new port dirs, and docs),
+- Round-2/3/4/5/6/7/8/9/10/11 diff reviews (this audit): no scope creep outside the declared
+  tracks. Shared files stayed in scope (round 11: `internal/app/{run,options,session_plan}.go`,
+  `internal/cli/root.go`, `internal/tui/model.go` (RunWithInput + paint/paintInto split),
+  `internal/tui/ports.go`, `internal/tui/editorpane/styles.go`, `internal/keybindings/adapter.go`,
+  `internal/tui/theme_inspect.go` + `style/roles.go` + `grid`, `internal/terminal/` pty/osc52/
+  reflow, `internal/daemon/`, `i18n/`, `config/{locale,clipboard}.go`, the stdin path and docs),
   and the generated tables, `refs/` and `_attic/` were not touched; no golden tests were added.
-  The Lead's explorer-painter fix was verified in the final diff (trailing slot at `end-tw`,
-  filename end set to that column; leading-slot/RowDecor handling included) and by the native
-  git-mark, plugin-decor and git_explorer tests; `git diff --check` is clean and no duplicate
-  top-level functions appear in the shared files. Round-10 findings (recorded, not fixed):
-  (a) the three real-host TempDir cleanup races are a test-harness issue (a spawned helper still
-  writes under the temp dir's go-build cache when RemoveAll runs) — recommend making those
-  tests wait/close before cleanup or tolerate the leftover; not a product bug;
-  (b) no code bugs found in spot checks: env detector/trust gating/spawn overlay, explorer
-  store priority/suppression/painter, git_grep gateway/case/exit codes, terminal drag/hover/
-  pass_ctrl_v, theme picker/accent audit/preview, LSP cancel/limits/universal wording, markdown
-  container fences/setext/task-image conceal, sidebar plugin-section state — all match docs/
-  tests; (c) counts verified from the tree (22/9/13, 47 registration sites, ~7.25 MiB, 242
-  functions/1478 lines, palette 229, API level 2); (d) deliberate divergences are §4 items 18
-  and 40–70, including the recorded native substitutions and the round-10 decisions.
+  No lost/duplicated hunks were found: no duplicate top-level functions in the shared files,
+  `git diff --check` clean, and the `Run`/`paintInto` paths keep their callers. The daemon is a
+  protocol/socket foundation only (R11-1) — partial by design, not a defect. Round-11 findings
+  (recorded, not fixed): (a) no code bugs found in spot checks — i18n resolution/plural/fallback
+  and live locale switching, stdin bounded read/label/language/session semantics, daemon frame/
+  socket lifecycle and perms, ConPTY Windows compile/helpers and OSC52 parser/gating,
+  transcript reflow, provenance capture/tagging/inspector, LSP preview wrap/ordering/unbind,
+  dashboard line targets all match docs/tests; (b) the four round-11 test failures above are
+  load flakes (isolated green), not product regressions; (c) counts verified unchanged
+  (22/9/13, 47 registration sites, ~7.25 MiB, 242 functions/1478 lines, palette 229, API level
+  2); (d) deliberate divergences are §4 items 18, 40–81, including the final #24/#25/#26 scope
+  decisions and the recorded native substitutions.
 - The round-2 formatting nit (an ATX heading appended directly after a list item without a
   blank line) no longer reproduces in `docs/ui.md`, `docs/sidebar.md`, `docs/lsp.md`,
   `docs/settings.md` or `docs/keybindings.md` as checked for this refresh.
@@ -1868,3 +2129,17 @@ Round 10 recorded four gaps:
 `cmd/gvimdebug` PTY-served debug page, the screenshot sweep, and the config/UI-tree dump commands
 are gvim tooling. They do not count toward Fresh parity, but they are the fastest way to verify
 new feature work; keep them working.
+
+Scope decisions with Lead sign-off (final; full wording in §4 items 79–81):
+
+- **#24 update/self-update/telemetry: out of scope.** gvim adds no update check, self-update,
+  telemetry or network upgrade code; the status-bar `{update}` element stays unimplemented and
+  `--no-upgrade-check` is a documented no-op.
+- **#25 platform edges: partial.** stdin-as-a-buffer is implemented (gvim's bounded-snapshot
+  form, with the gvim-only `--stdin-name`); GPM console mouse, AltGr/CapsLock/key-release
+  edges and plugin focus events beyond focus_gained/active_window stay deferred/out of scope.
+- **#26 GUI/web/WASM/packaging: out of scope.** gvim ships as one pure-Go terminal binary;
+  daemon mode itself (#18) is in scope, daemon packaging is not.
+- gvim-only additions from round 11 kept deliberately: the `i18n` locale row/choice semantics
+  (null = auto), the provenance capture repaint (inspect-only), the opt-in/trusted-only OSC 52
+  write, and the transcript text re-wrap.

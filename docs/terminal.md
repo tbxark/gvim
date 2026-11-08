@@ -8,9 +8,10 @@ keys, painting, scrollback, selection, mouse, links), `internal/tui/dock_glue.go
 (the root glue), `internal/restore` (the saved transcript) and
 `internal/uiadapter/terminal.go` (the shell starter and clipboard).
 
-`internal/terminal` runs the shell in a PTY (`creack/pty`) and models its screen
-with `charmbracelet/x/vt`. The dock paints that screen into the frame's bottom
-band. The parity row and the remaining rounds live in `docs/parity.md`.
+`internal/terminal` runs the shell in a PTY on Unix (`creack/pty`) or in a ConPTY
+pseudo console on Windows (`x/sys/windows`), and models its screen with
+`charmbracelet/x/vt`. The dock paints that screen into the frame's bottom band.
+The parity row and the remaining rounds live in `docs/parity.md`.
 
 ## Two views: live and scrollback
 
@@ -108,6 +109,50 @@ owned by the dock; the session stays read-only and nothing is typed into it.
   back inside, on release, when the selection is cleared, and when the dock loses
   the focus; the release may land outside the dock's rows.
 
+## ConPTY on Windows
+
+Windows has no Unix PTY: the Windows path is a **ConPTY** pseudo console
+(`internal/terminal/pty_windows.go`, `//go:build windows`, pure Go through
+`golang.org/x/sys/windows`). It creates two anonymous pipe pairs (child input,
+child output), calls `CreatePseudoConsole` with the child-side handles, puts the
+console handle in a `STARTUPINFOEX` attribute list (`PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`),
+and starts the shell with `CreateProcess` (`EXTENDED_STARTUPINFO_PRESENT |
+CREATE_UNICODE_ENVIRONMENT`, a composed command line and a UTF-16 environment
+block). A resize calls `ResizePseudoConsole`; closing kills the child, closes the
+console and the pipes (`ClosePseudoConsole`). A failure to create the console is
+reported with the Windows requirement: Windows 10 version 1809 (build 17763) or
+later, or Windows Server 2019.
+
+**Verification gates** (all run by CI-style checks on any host):
+
+    GOOS=windows go build ./...
+    GOOS=windows go vet ./internal/terminal
+    GOOS=windows go test -c -o /tmp/terminal.windows.test.exe ./internal/terminal
+
+The Windows-tagged unit test covers the pure helpers (the environment block and
+the exit-status error); the console and process calls cannot run off Windows.
+
+**Real-Windows acceptance checklist.** Parity is **unverified** until this pass is
+done on a Windows 10 1809+ / Windows 11 host:
+
+1. start gvim, open the dock, and check `cmd.exe` starts and paints its banner
+   and prompt;
+2. run `pwsh` (or PowerShell) from the dock and check its prompt, colours and a
+   full-screen command (`cls`);
+3. type a command with a pipe and redirection, run `dir`, and check the output
+   and the exit code;
+4. resize the window several times: the child sees the new size
+   (`mode con`/`$Host.UI.RawUI.WindowSize`), and the live screen clips/pads;
+5. exit the shell: the last screen stays read-only, the status row offers the
+   restart, and restart keeps the transcript above the new shell;
+6. scrollback: produce more than one screen of output, Ctrl+Space, select text,
+   copy it; links in the scrollback still open;
+7. Ctrl+V paste and Ctrl+C forwarding behave as on Unix;
+8. close and reopen gvim with session restore on: the saved transcript returns
+   `Scrollback (restored)`, read-only, and its transcript reflow behaves as on
+   Unix.
+Record the pass in `docs/parity.md`; until then the Windows row reads unverified.
+
 ## Persistence and reflow
 
 The dock's transcript survives an editor restart through the session directory:
@@ -127,12 +172,24 @@ shows `Scrollback (restored)` over the saved transcript. Restart starts a shell 
 the saved directory and appends its output below the transcript; Ctrl+Space cannot
 return to a live screen that does not exist.
 
-**Reflow limitation.** x/vt has no reflow: `Emulator.Resize` clips or pads the live
-screen, and history rows keep the cell widths they had when they scrolled off.
-gvim does not re-wrap anything. A resize changes the live screen per x/vt; the
-pager paints each stored row clipped to the pane (no re-wrap, no wide-character
-rejoin), and the saved width is recorded only so a future reflow pass could detect
-a mismatched transcript. Nothing re-wraps today.
+**Transcript reflow.** The live screen is x/vt's: a resize clips or pads it, and
+the history rows keep the cell widths they had when they scrolled off. The stored
+transcript (the prior rows a restarted shell keeps and the restored transcript) is
+re-wrapped, through `terminal.ReflowLines`:
+
+- the dock records the width the rows were captured at (the live shell's screen
+  width) or the saved width of a restored transcript; when the pane's content width
+  changes, the stored rows are re-wrapped to the new width once, and a saved
+  transcript whose width differed says `Scrollback (restored, rewrapped)`;
+- each row keeps its cell styles and wide glyphs (a double-width cell and its
+  continuation stay together; a wide glyph is never split), trailing blanks are
+  dropped, and every stored row stays a hard row;
+- this is a **text re-wrap, not a semantic reflow**: the transcript stores display
+  rows, not the soft/hard newline structure that produced them, so a row that was
+  itself a soft-wrapped continuation is not rejoined with the row above it when
+  the pane widens (running text re-wraps approximately). The live screen is still
+  clipped and never reflowed (x/vt has no reflow), which stays a documented
+  residual.
 
 ## Restart and agent resume
 
@@ -164,6 +221,7 @@ uses:
 | `terminal.jump_to_end_on_output` | bool, `true` | new output returns the view to the live screen unless a selection is active. |
 | `terminal.mouse_drag_selects` | bool, `true` | a live-grid drag selects text by dropping into scrollback; false makes live drags inert (scrollback drags and Shift+drags still select). |
 | `terminal.pass_ctrl_v_without_text` | bool, `true` | a Ctrl+V whose system clipboard has no text (an image, say) goes to the shell as the key itself instead of pasting the last yank; false pastes the last yank. An unreadable clipboard pastes the last yank either way. |
+| `clipboard.use_osc52` | bool, `false` | let a program in the dock write the system clipboard with the OSC 52 escape (base64 text). Off by default: the child's output is untrusted data. When it is on, a write happens only if the workspace is trusted and only for the clipboard selection (selector `c` or empty); primary/select selections and cut-buffer numbers are ignored. The bytes still go to the emulator, which ignores the sequence. |
 
 The other Fresh `terminal` keys are accepted and ignored, so a Fresh config file
 loads without diagnostics: `resume_agents` and `skip_app_execution_alias`.
@@ -273,21 +331,16 @@ These are known gaps, not bugs:
 - **automatic agent re-exec** (`terminal.resume_agents`): gvim starts only an
   interactive shell, so there is no tracked launch or agent argv to replay. The
   manual restart keeps the transcript instead (see Restart and agent resume).
-- **Windows ConPTY**: `terminal.Start` returns `ErrUnsupported` on Windows.
-- **child OSC 52 clipboard**: x/vt v0.1.0 does not expose the emulator's OSC 52
-  payload, so a child's clipboard write cannot be captured without re-parsing the
-  stream.
+- **live-screen reflow**: x/vt has no reflow, so a resize clips or pads the live
+  screen; only the stored transcript is re-wrapped (see Persistence and reflow).
+- **OSC 52 read (paste)**: the dock parses a child's OSC 52 *write*; a child
+  *reading* the clipboard through OSC 52 (a paste request) is not answered, so a
+  program that asks the terminal for the clipboard gets no reply. gvim's Ctrl+V
+  paste path is the editor's, not the child's.
 - **the kitty keyboard protocol**: x/vt v0.1.0 encodes child keys with legacy
   bytes only; its `SendKey` carries an explicit `TODO: Support Kitty, CSI u, and
   XTerm modifyOtherKeys` and the emulator exposes no keyboard-mode seam, so gvim
   cannot offer the protocol to the program inside the dock yet. The outer
   terminal's keyboard protocol is Bubble Tea's business, not x/vt's. Revisit when
   x/vt lands the encoding.
-- **Windows ConPTY** (round-11 candidate): `terminal.Start` returns
-  `ErrUnsupported` on Windows. The planned slice is a build-tagged
-  (`//go:build windows`) pure-Go implementation with `x/sys/windows`
-  `CreatePseudoConsole`/`ResizePseudoConsole`/`ClosePseudoConsole`, an anonymous
-  pipe pair and a `STARTUPINFOEX` attribute list, verified with
-  `GOOS=windows go build ./...` and an acceptance document for a real Windows
-  10 1809+ host.
 - **close_on_exit for report-split terminals**: gvim only has the dock.

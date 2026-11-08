@@ -288,3 +288,38 @@ func TestReplacementsNamesTheSequencesAPrefixFrees(t *testing.T) {
 		}
 	}
 }
+
+// TestUnboundTombstones checks that an explicit unbind removes the binding from the
+// keymap and is also remembered, so a surface that consults the keymap before its built-in
+// handler swallows the key instead of falling back to that handler.
+func TestUnboundTombstones(t *testing.T) {
+	base := mustPreset(t, "default")
+	data := `[{"key":"Escape","action":"unbind","when":"popup"},
+		{"key":"s","modifiers":["ctrl"],"action":"unbind","when":"normal"},
+		{"key":"q","modifiers":["ctrl"],"action":"unbind","when":"global"}]`
+	m, warnings := base.WithUserBindings([]byte(data), knownTestActions)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if !m.Unbound("Escape", keymap.ContextPopup) {
+		t.Fatal("popup Escape unbind was not remembered")
+	}
+	if m.Unbound("Escape", keymap.ContextPrompt) {
+		t.Fatal("the popup unbind leaked to the prompt context")
+	}
+	// A normal-context unbind is remembered there and removed from the keymap.
+	if !m.Unbound("ctrl+s", keymap.ContextNormal) {
+		t.Fatal("the normal-context unbind was not remembered")
+	}
+	if _, ok := m.Resolve("ctrl+s", keymap.ContextNormal); ok {
+		t.Fatal("the unbound chord still resolves")
+	}
+	// A global unbind is remembered in every context.
+	if !m.Unbound("ctrl+q", keymap.ContextNormal) || !m.Unbound("ctrl+q", keymap.ContextPopup) {
+		t.Fatal("global unbind was not remembered in every context")
+	}
+	// The popup's own binding is gone too, so the unbind is not a no-op.
+	if _, ok := m.Resolve("Escape", keymap.ContextPopup); ok {
+		t.Fatal("the popup Escape binding still resolves")
+	}
+}

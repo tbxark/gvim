@@ -7,17 +7,18 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/terminal"
 )
 
 // The notices of the read-only scrollback view.
-const (
-	altScrollbackNotice = "The alternate screen has no scrollback."
-	nothingToCopyNotice = "Nothing to copy."
-	copiedLineNotice    = "Copied the line."
-	copiedScreenNotice  = "Copied the screen."
-	searchNoMatchNotice = "No match."
-)
+// The read-only view's notices, translated at display time.
+
+func altScrollbackNotice() string { return i18n.T("", "gvim.scrollback.alt_screen", nil) }
+func nothingToCopyNotice() string { return i18n.T("", "gvim.scrollback.nothing_to_copy", nil) }
+func copiedLineNotice() string    { return i18n.T("", "gvim.scrollback.copied_line", nil) }
+func copiedScreenNotice() string  { return i18n.T("", "gvim.scrollback.copied_screen", nil) }
+func searchNoMatchNotice() string { return i18n.T("", "gvim.scrollback.no_match", nil) }
 
 // scrollMargin is the extra rows a snapshot asks for around the window, so a
 // small scroll does not need another fetch.
@@ -106,11 +107,11 @@ func (p *Panel) maxTop() int { return max(p.combined()-p.bodyRows(), 0) }
 // at the newest rows.
 func (p *Panel) enterScrollback() tea.Cmd {
 	if p.term == nil {
-		p.noticeOf(NoTerminalNotice)
+		p.noticeOf(NoTerminalNotice())
 		return nil
 	}
 	if p.term.AltScreen() {
-		p.noticeOf(altScrollbackNotice)
+		p.noticeOf(altScrollbackNotice())
 		return nil
 	}
 	if p.scroll.on {
@@ -431,7 +432,7 @@ func (p *Panel) applySearch(msg searchMsg) tea.Cmd {
 	}
 	p.scroll.matches, p.scroll.match = msg.matches, 0
 	if len(msg.matches) == 0 {
-		p.noticeOf(searchNoMatchNotice)
+		p.noticeOf(searchNoMatchNotice())
 		return nil
 	}
 	p.jumpToMatch(0)
@@ -491,25 +492,25 @@ func (p *Panel) combinedText(abs int) (string, bool) {
 func (p *Panel) copySelected() tea.Cmd {
 	text, ok := p.combinedText(p.scroll.selected)
 	if !ok || text == "" {
-		p.noticeOf(nothingToCopyNotice)
+		p.noticeOf(nothingToCopyNotice())
 		return nil
 	}
 	if p.host.Copy == nil {
-		p.noticeOf(noClipboardNotice)
+		p.noticeOf(noClipboardNotice())
 		return nil
 	}
-	p.noticeOf(copiedLineNotice)
+	p.noticeOf(copiedLineNotice())
 	return p.host.Copy(text)
 }
 
 // copyScreen copies the visible rows of the scrollback view.
 func (p *Panel) copyScreen() tea.Cmd {
 	if p.term == nil {
-		p.noticeOf(NoTerminalNotice)
+		p.noticeOf(NoTerminalNotice())
 		return nil
 	}
 	if p.host.Copy == nil {
-		p.noticeOf(noClipboardNotice)
+		p.noticeOf(noClipboardNotice())
 		return nil
 	}
 	rows := max(p.bodyRows(), 1)
@@ -528,10 +529,10 @@ func (p *Panel) copyScreen() tea.Cmd {
 		lines = lines[:len(lines)-1]
 	}
 	if len(lines) == 0 {
-		p.noticeOf(nothingToCopyNotice)
+		p.noticeOf(nothingToCopyNotice())
 		return nil
 	}
-	p.noticeOf(copiedScreenNotice)
+	p.noticeOf(copiedScreenNotice())
 	return p.host.Copy(strings.Join(lines, "\n"))
 }
 

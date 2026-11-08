@@ -176,6 +176,7 @@ type ProcessLimits struct {
 type Config struct {
 	Theme                  string // theme value: a bundled name, builtin://name, a user-dir relative path, or file://; default "dark"
 	Keymap                 string // keymap name as written in a file; empty when no file sets one
+	Locale                 string // UI locale code ("pt-BR"); empty means automatic (LC_ALL/LC_MESSAGES/LANG, then en)
 	TabSize                int    // columns per tab stop, default 4
 	InsertSpaces           bool   // insert spaces for Tab, default true
 	LineEnding             string // "auto", "lf", "crlf" or "cr"; default "auto"
@@ -195,6 +196,10 @@ type Config struct {
 	// outline) sidebar section, formerly Fresh's bundled markdown_toc plugin (see
 	// config/contents.go).
 	Contents ContentsConfig
+
+	// Clipboard is the clipboard section (see config/clipboard.go): the child
+	// OSC 52 clipboard escape is the implemented key.
+	Clipboard ClipboardConfig
 
 	// The view keys set the starting state of the display toggles. The
 	// defaults keep the layout gvim had before they existed.
@@ -310,6 +315,7 @@ func Defaults() Config {
 		Terminal:      DefaultTerminalOptions(),
 		FileExplorer:  DefaultFileExplorer(),
 		Env:           DefaultEnvConfig(),
+		Clipboard:     DefaultClipboard(),
 		EditorOptions: defaultEditorOptions(),
 	}
 }
@@ -551,6 +557,11 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 				diags = append(diags, Diagnostic{Path: path, Key: f.key, Message: f.err.Error()})
 			}
 			continue
+		case key == "locale" && l == layerProject:
+			// The UI language is a user preference; a repository choosing it would be a
+			// surprise, so the project layer is refused like keymap.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set locale: the UI language is a user preference, so set it in the user config"})
+			continue
 		case key == "plugin_timeout_ms" && l == layerProject:
 			if err := cfg.lowerPluginTimeout(keys[key]); err != nil {
 				diags = append(diags, Diagnostic{Path: path, Key: key, Message: err.Error()})
@@ -641,9 +652,29 @@ func sortedKeys(m map[string]json.RawMessage) []string {
 // set applies one setting. On error the field is left unchanged.
 func (c *Config) set(key string, raw json.RawMessage) error {
 	if isNull(raw) {
+		if key == "locale" {
+			// Fresh writes null for the automatic locale.
+			c.Locale = ""
+			return nil
+		}
 		return fmt.Errorf("null is not a valid value")
 	}
 	switch key {
+	case "locale":
+		s, err := decodeString(raw)
+		if err != nil {
+			return err
+		}
+		if s == "" {
+			return fmt.Errorf("must be a locale code or auto")
+		}
+		if strings.EqualFold(s, "auto") {
+			c.Locale = ""
+			return nil
+		}
+		// The i18n package normalises and falls back; the config only has to reject a
+		// value that is not a string.
+		c.Locale = s
 	case "theme":
 		s, err := decodeString(raw)
 		if err != nil {

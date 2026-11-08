@@ -60,7 +60,9 @@ Widgets: Fresh's declarative widget API has a read-mostly v1 here (see
 (text, number, dropdown, radio, dual list and wrappers) and there are no floating/dock
 placement controls.
 
-Not provided at all (and not stubbed): the editor-wide i18n (plugin texts are translated, see [api-core.md](api-core.md#gvimi18n)), project-local plugins, a trust store,
+Not provided at all (and not stubbed): the translated editor catalogues (the `locale`
+setting, resolution and the English catalogue landed; plugin texts are translated; see
+[api-core.md](api-core.md#gvimi18n) and [i18n.md](../i18n.md)), project-local plugins, a trust store,
 synthetic buffer-group tabs and per-panel views of one buffer, a terminal API, Fresh's window and
 authority runtimes, the package manager, the HTTP client API and `render_line`. The tier-1c
 decoration surface is provided and painted (virtual lines, conceal, soft breaks, cursor-line
@@ -243,6 +245,25 @@ Reload after a `.envrc`/`mise.toml` change, Use System, and Status (the `env` st
 watcher (Reload is explicit), no devcontainer deferral/authority handling, no automatic
 shell-environment activation (the command is explicit), one local environment, and no persisted
 recipe; a bare `.venv` without an interpreter does not count and first match wins, as in Fresh.
+
+### Line targets: what they can and cannot express
+
+`gvim.buf.set_line_targets` maps a *buffer line* to a file path and 0-based line: pressing plain
+Enter there (normal mode, count 1, no selection or extra carets) or a single left click opens that
+location, in the split labelled `into` when one is live, else beside the pane holding the targets.
+Targets cannot open commands, virtual buffers or a historical revision, and a widget-panel row is not
+a buffer line. Three port decisions follow (round 11):
+
+* `dashboard` uses targets: its recent-file rows are painted buffer lines, so each paint publishes
+  `{line, path}` targets for them and `clear_line_targets` runs on close/unload. The rows remain
+  keyboard-navigable through the buffer-local mode (its Enter binding runs first), so the visible win
+  is a mouse click on a recent file. Command rows cannot be targets and stay keyboard-only.
+* `code_tour` cannot use targets: its steps are a widget-panel card, not lines of a buffer, and its
+  step highlight is decoration anchoring in the source file. It keeps local line anchors.
+* `git_log` should not use targets: its detail rows' Enter opens the commit's historical blob
+  (`git show <sha>:<file>`) as a read-only virtual buffer, exactly like Fresh; a target opens the
+  working-tree file, which is wrong for any commit that is not HEAD. The Enter mapping and hunk
+  navigation stay local.
 
 ### Notes for porters (learned from the bundled ports)
 

@@ -38,7 +38,9 @@ The sections are Interface, Display, Whitespace, Editing, Search, Explorer,
 Contents, Session, Mouse, Languages, Formatters, Status Bar, File Explorer and
 Terminal.
 The scalar rows cover the settings gvim reads today; the structured rows open
-the sub-pages of section 4. The app adds the non-scalar rows the config schema
+the sub-pages of section 4. The Interface section's `locale` row picks the UI
+language (`auto` plus Fresh's 15 locales); it is a user-layer setting and applies
+live through the i18n package and the plugin runtime (see [i18n.md](i18n.md)). The app adds the non-scalar rows the config schema
 cannot describe: the **Language Servers** page row (the LSP page: effective
 built-in/user/universal servers with their live manager state, manual
 start/stop/restart action rows, and each language's whole server array as
@@ -110,8 +112,8 @@ structured reads.
 config through the existing option tables and returns the diagnostics, using the
 same `applyObject` path a real config file goes through, so a value the editor
 could not read is refused before it reaches the file and the project-layer rules
-(the C11 rules: no keymap, no plugin enablement, no LSP command, no terminal
-shell) still hold. A structured set edit (an entry of `formatters`, a
+(the C11 rules: no keymap, no locale, no plugin enablement, no LSP command, no
+terminal shell) still hold. A structured set edit (an entry of `formatters`, a
 `languages` field, a status-bar list, `terminal.shell.args`) is validated the
 same way; a reset needs no validation.
 
@@ -126,7 +128,7 @@ switches it.
   **Trusted** (see `docs/trust.md`). The page writes the nearest existing
   `.gvim/config.json` at or above the workspace root; when there is none it
   writes `<root>/.gvim/config.json`. A row whose setting is user-only (the
-  keymap, the terminal shell and its arguments) is shown as
+  keymap, the locale, the terminal shell and its arguments) is shown as
   "`<name> (user layer)`" and cannot be edited there.
 
 There is no session layer: gvim's runtime toggles are session state, but they are
@@ -279,6 +281,12 @@ service and the root:
   lists and separator, the file-explorer options (width, side, follow, auto-open,
   compact directories), the theme, the keymap and the icon set, rebuilding the
   styles and the menu bar as those need;
+- the `locale` row applies live through the i18n package: the service resolves the
+  saved value (the config locale, then `LC_ALL`/`LC_MESSAGES`/`LANG`, then
+  English), calls `i18n.SetLocale` and `plugin.Runtime.SetLocale`, so
+  `T()`-rendered strings and plugin `t()`/`gvim.i18n.locale()` change at once.
+  Generated command/palette/menu titles come from Fresh's command names and stay
+  English (see [i18n.md](i18n.md));
 - `contents.fold_buffer` applies live through the same path: switching it on
   publishes the active Markdown buffer's heading ranges at once (the Contents
   section rescans, also while hidden), and switching it off clears the outline
@@ -358,6 +366,7 @@ opens the icon preview).
 | `config/settings_structured.go` | the structured knowledge: language override fields, language ids, status-bar element names, removable paths, page summaries, explorer width, `DecodeLayer` |
 | `config/patch.go` | `Edit` (set or remove), `PatchBytes` (surgical hujson patch with the reset cascade), `ValidateEdits` |
 | `config/config.go` | `applyObject`, the shared key-application path |
+| `i18n/i18n.go`, `i18n/catalogues/en.json` | the translation package and its embedded English catalogue: locale resolution, `T`/`TN`, plurals and `Register` for the `locale` row (see [i18n.md](i18n.md)) |
 | `config/contents.go` | the native `contents.fold_buffer` key, its project-layer rule (ignored: the retired markdown_toc plugin's settings are the user's) and `ContentsFoldBuffer`, the effective value with the plugin-key fallback |
 | `internal/tui/ports.go` | `SettingsPort`, `SettingsSnapshot`, `SettingsItem`, `SettingsStructure`, `SettingEdit`, `SettingsChange` |
 | `internal/tui/settings.go` | the main page, reset, reload action, `applySettingsChange`, the settings messages |
@@ -384,7 +393,9 @@ editor action; `internal/tui/settings_bindings_test.go` and
 `internal/tui/settings_plugins_test.go` pin the TUI side (bindings layout, plugin
 rows, Control from Update); `internal/app/settings_theme_preview_test.go` and
 `internal/tui/settings_theme_preview_test.go` pin the theme row's four chips and
-the URL refusal. `internal/app/settings_lsp_test.go` pins the Language Servers page (effective
+the URL refusal; `internal/app/settings_locale_test.go` pins the `locale` row's
+live apply (resolved locale to the i18n package and the plugin runtime, `auto`
+from the environment). `internal/app/settings_lsp_test.go` pins the Language Servers page (effective
 builtin/user/universal rows with live state, project-layer listing/locking and
 the config validation that refuses a project program but accepts a mute, and the
 start/restart/stop actions).

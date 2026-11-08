@@ -177,3 +177,40 @@ func TestSavedStateOfAClosedDockIsNotOpen(t *testing.T) {
 		t.Fatalf("a dock with no shell and no transcript saved state: %+v", st)
 	}
 }
+
+// TestRestoredTranscriptReflowsToTheContentWidth checks the saved-transcript
+// reflow: a transcript saved at one width is re-wrapped when the pane shows it at
+// another, the dock says it rewrapped, and widening it again keeps the rows.
+func TestRestoredTranscriptReflowsToTheContentWidth(t *testing.T) {
+	t.Parallel()
+	cols := 12
+	var p Panel
+	p.SetHost(Host{
+		RootDir:     func() string { return "/ws" },
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return cols, 4 },
+		Focus:       func() {},
+	})
+	p.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	p.Restore(terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Width: 20,
+		Rows: []string{"abcdefghijklmnopqrst"},
+	})
+	p.Sync()
+	if !p.reflowed {
+		t.Fatal("the restored transcript was not marked rewrapped")
+	}
+	if got := p.combined(); got != 2 {
+		t.Fatalf("combined rows = %d, want the 20-column row re-wrapped at 12", got)
+	}
+	if title := p.title(); !strings.Contains(title, "rewrapped") {
+		t.Fatalf("title = %q, want it to say rewrapped", title)
+	}
+	// Widening again keeps the two stored rows: this is a text re-wrap, so rows
+	// that became two are not rejoined (documented limitation); the flag stays set.
+	cols = 24
+	p.Sync()
+	if got := p.combined(); got != 2 {
+		t.Fatalf("combined rows after widening = %d, want the two stored rows", got)
+	}
+}

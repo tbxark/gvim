@@ -9,16 +9,17 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/frame"
 	"github.com/tbxark/gvim/internal/tui/grid"
 )
 
 // The notices of a terminal text selection.
-const (
-	copiedSelectionNotice = "Copied the selection."
-	noSelectionNotice     = "No selection."
-)
+// The copy notices, translated at display time.
+
+func copiedSelectionNotice() string { return i18n.T("", "gvim.terminal.copied_selection", nil) }
+func noSelectionNotice() string     { return i18n.T("", "gvim.scrollback.no_selection", nil) }
 
 // selPos is a selection position: an absolute combined row (prior transcript,
 // then the shell's history, then the live screen rows) and a cell column.
@@ -417,11 +418,11 @@ type selectionCopyMsg struct {
 // does not hold yet.
 func (p *Panel) copySelection() tea.Cmd {
 	if !p.sel.active {
-		p.noticeOf(noSelectionNotice)
+		p.noticeOf(noSelectionNotice())
 		return nil
 	}
 	if p.host.Copy == nil {
-		p.noticeOf(noClipboardNotice)
+		p.noticeOf(noClipboardNotice())
 		return nil
 	}
 	a, f := p.sel.anchor, p.sel.focus

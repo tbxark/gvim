@@ -199,10 +199,16 @@ result region:
   an error notice. The selected-match preview column, with its scrolling and syntax
   colours, works the same way while its result rows have the focus.
 - **Residuals of the search surfaces**: replacing closed files above the search read cap
-  (a streamed writer; open buffers are covered by the unsaved-tab path), a soft-wrapped
-  preview (long lines truncate at the column), provider sources beyond files, open buffers
-  and the current buffer (recent files, diagnostics, terminals), and a toggle for the
-  preview's syntax colours (they are automatic and fall back to plain).
+  (a streamed writer; open buffers are covered by the unsaved-tab path) and provider
+  sources beyond files, open buffers and the current buffer. Recent files is a recorded
+  decision rather than a half-landed source: gvim keeps recent folders for the welcome
+  screen and the restored tabs, but no opened-file history to scope a search to, so a
+  faithful source needs a new app-level history snapshot and its own streaming/replace
+  semantics — deliberately out of this slice (diagnostics and terminals sources remain
+  out of scope for the same reason: they need provider-specific snapshot protocols). The preview soft-wraps long lines (Alt+P, in the editor: on Linux the
+  setting is per session; the session value is remembered while gvim runs) and its syntax
+  colours are automatic — a colour toggle is a deliberate non-goal because the preview
+  falls back to plain when the port cannot highlight.
 
 ## 3. Component map
 

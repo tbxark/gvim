@@ -171,6 +171,17 @@ func New(o Options) *Runtime {
 	return r
 }
 
+// SetLocale sets the locale plugins translate for: gvim.i18n.locale() returns it and
+// gvim.i18n.t falls back to English. The app calls it on the update loop, at startup and
+// when the Settings locale row is saved.
+func (r *Runtime) SetLocale(locale string) {
+	r.locale = locale
+}
+
+// Locale is the locale plugins translate for ("" means English, for a runtime built
+// outside the app).
+func (r *Runtime) Locale() string { return r.locale }
+
 func (r *Runtime) setHost(h pluginapi.Host) {
 	r.host = h
 	r.guard = hostGuard{Host: h, r: r}

@@ -204,3 +204,50 @@ func TestDashboardRecentFilesOpenAndClose(t *testing.T) {
 		t.Errorf("auto dashboard %d stayed open after a file opened", id)
 	}
 }
+
+// TestDashboardRecentRowsAreLineTargets: the recent-file rows are clickable through
+// gvim.buf.set_line_targets (a single click opens the file), while the command rows cannot
+// be targets because a target opens a file, not an action. The keyboard mode is unchanged.
+func TestDashboardRecentRowsAreLineTargets(t *testing.T) {
+	t.Parallel()
+	r := dashboardRig(t, []rigBuffer{{"/w/a.txt", "a\n"}})
+	if err := r.host.Activate(r.ids["/w/a.txt"]); err != nil {
+		t.Fatal(err)
+	}
+	r.emit("after_file_open", "/w/a.txt", nil)
+	r.h.Advance(50 * 1000000)
+	r.h.Settle()
+	if err := r.h.Run("dashboard.show", nil); err != nil {
+		t.Fatal(err)
+	}
+	id := dashboardBuffer(r.host)
+	if id == 0 {
+		t.Fatal("no dashboard")
+	}
+	entries, _ := r.host.VirtualContent(id)
+	lines := strings.Split(contentText(entries), "\n")
+	rowLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "a.txt") {
+			rowLine = i
+			break
+		}
+	}
+	if rowLine < 0 {
+		t.Fatalf("no a.txt row:\n%s", dashboardText(t, r.host))
+	}
+	targets := r.host.LineTargets(id)
+	if len(targets) != 1 {
+		t.Fatalf("line targets = %+v, want one for the recent file", targets)
+	}
+	if targets[0].Path != "/w/a.txt" || targets[0].Line != rowLine {
+		t.Errorf("target = %+v (row line %d, want path /w/a.txt)", targets[0], rowLine)
+	}
+	// Closing the dashboard clears its targets.
+	if err := r.h.Run("dashboard.close", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.host.LineTargets(id); len(got) != 0 {
+		t.Errorf("targets after close = %+v", got)
+	}
+}

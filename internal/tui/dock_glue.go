@@ -23,7 +23,7 @@ type (
 const KeyContextTerminal KeyContext = "terminal"
 
 // noTerminalNotice is the dock's status text for an action that needs a shell.
-const noTerminalNotice = dock.NoTerminalNotice
+func noTerminalNotice() string { return dock.NoTerminalNotice() }
 
 // SetDock gives the terminal dock its ports. The app calls it once, after New.
 func (m *Model) SetDock(p DockPorts) {
@@ -158,7 +158,7 @@ func (m *Model) dockKey(k tea.Key, kp KeyPress) tea.Cmd {
 // shell runs it. The dock takes the focus, as Fresh's send does.
 func (m *Model) sendSelection() tea.Cmd {
 	if !m.dockRunning() {
-		m.notice = noTerminalNotice
+		m.notice = noTerminalNotice()
 		return nil
 	}
 	doc := m.ed.Active()

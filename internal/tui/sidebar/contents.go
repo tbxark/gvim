@@ -627,8 +627,8 @@ func (c *Contents) Draw(dst *grid.Grid, x, width int, sec Section, ic icons.Mode
 		return
 	}
 	right := x + width
-	body := style.Cell(st.Explorer)
-	sel := style.Cell(st.Selection)
+	body := style.TaggedCell(st.Explorer, "editor", "fg", "editor", "bg")
+	sel := style.TaggedCell(st.Selection, "editor", "fg", "editor", "selection_bg")
 	accent := style.Cell(st.Accent).BG
 	for y := sec.BodyTop; y <= sec.BodyBottom; y++ {
 		dst.Fill(x, right, y, body)

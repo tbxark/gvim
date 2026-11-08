@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"sync"
 
 	"github.com/charmbracelet/x/ansi"
@@ -24,8 +22,11 @@ var errClosed = errors.New("term: session closed")
 //   - reap waits for the child.
 //   - closeOnCancel closes the session when the Start context is cancelled.
 type Session struct {
-	ptmx *os.File
-	cmd  *exec.Cmd
+	pty ptyProc
+	// osc52 re-parses the child stream for OSC 52 clipboard sequences; the bytes
+	// still go to the emulator (session.go feed).
+	osc52p osc52Parser
+	osc52  osc52Handler
 
 	mu        sync.Mutex // guards emu, closed and the child's reported modes
 	emu       *vt.Emulator
@@ -51,10 +52,9 @@ type Session struct {
 	closeErr  error // written inside closeOnce
 }
 
-func newSession(ptmx *os.File, cmd *exec.Cmd, cols, rows, scrollbackLines int) *Session {
+func newSession(pty ptyProc, cols, rows, scrollbackLines int) *Session {
 	s := &Session{
-		ptmx:      ptmx,
-		cmd:       cmd,
+		pty:       pty,
 		emu:       vt.NewEmulator(cols, rows),
 		in:        newInbox(),
 		updates:   make(chan struct{}, 1),
@@ -131,7 +131,7 @@ func (s *Session) Resize(cols, rows int) error {
 	if s.closed {
 		return errClosed
 	}
-	if err := setSize(s.ptmx, cols, rows); err != nil {
+	if err := s.pty.Resize(cols, rows); err != nil {
 		return fmt.Errorf("term: resize: %w", err)
 	}
 	s.emu.Resize(cols, rows)
@@ -221,8 +221,10 @@ func (s *Session) teardown() {
 	s.mu.Unlock()
 
 	s.in.close()
-	s.closeErr = s.ptmx.Close()
-	_ = s.cmd.Process.Kill()
+	// Kill first: a child that still holds the terminal must not keep the close
+	// from returning on Windows, where closing the console waits for it.
+	_ = s.pty.Kill()
+	s.closeErr = s.pty.Close()
 
 	// relayReplies is blocked in emu.Read. An empty write gives it a zero-byte
 	// read, which no emulator reply can produce, and that is its stop signal.
@@ -246,7 +248,7 @@ func (s *Session) readOutput() {
 	defer close(s.updates)
 	buf := make([]byte, 32<<10)
 	for {
-		n, err := s.ptmx.Read(buf)
+		n, err := s.pty.Read(buf)
 		if n > 0 && s.feed(buf[:n]) {
 			s.signal()
 		}
@@ -259,6 +261,9 @@ func (s *Session) readOutput() {
 // feed gives child output to the emulator. It reports false, and writes nothing,
 // once the session is closed.
 func (s *Session) feed(p []byte) bool {
+	// The OSC 52 scan happens before the emulator write and outside the lock: the
+	// hook may touch the clipboard (IO), and x/vt ignores the sequence anyway.
+	s.osc52p.scan(p, s.osc52.emit)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -301,7 +306,7 @@ func (s *Session) writeInput() {
 		if !ok {
 			return
 		}
-		if _, err := s.ptmx.Write(b); err != nil {
+		if _, err := s.pty.Write(b); err != nil {
 			s.in.close()
 			return
 		}
@@ -310,7 +315,7 @@ func (s *Session) writeInput() {
 
 // reap waits for the child and then announces that it has exited.
 func (s *Session) reap() {
-	s.waitErr = s.cmd.Wait()
+	s.waitErr = s.pty.Wait()
 	close(s.done)
 }
 

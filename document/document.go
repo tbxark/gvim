@@ -102,6 +102,10 @@ type Document struct {
 	// untitled is N for a buffer created by New as Untitled-N. It is 0 for the
 	// placeholder buffer and for any buffer that has a path.
 	untitled int
+	// label is a display-name override for an unnamed buffer. The stdin buffer is the
+	// one user: its path stays empty (Save goes through Save As) but the tab shows
+	// "[stdin]" instead of Untitled-N.
+	label string
 	// language is the lexer name the UI set with SetLanguage. It is cleared
 	// when the path changes, because the lexer depends on the file name.
 	language string
@@ -162,6 +166,18 @@ const (
 // an unnamed buffer. Its line ending is LF until the caller sets another.
 func newDocument(path, text string) *Document {
 	return &Document{Path: path, Buffer: buffer.New(text), Saved: text, encoding: encodingOf(path, text), Want: -1, Eol: eolLF}
+}
+
+// NewStdinDocument returns an untitled document holding text read from standard input.
+// Carriage-return endings are normalized to the buffer's LF and remembered as the
+// document's ending, as a file load does, so Save As writes the ending the input had.
+// The document is unmodified: its saved state is the piped text. The caller names it
+// with SetLabel (the stdin buffer uses "[stdin]").
+func NewStdinDocument(text string) *Document {
+	normalized, eol := splitLineEnding(text)
+	d := newDocument("", normalized)
+	d.Eol = eol
+	return d
 }
 
 // splitLineEnding turns the CRLF breaks of data into LF, the form the buffer
@@ -322,13 +338,16 @@ func (d *Document) LinesChangedSinceSave() []int {
 }
 
 // Name returns the file's base name. A buffer with no path is named Untitled-N
-// when New created it, and "[No Name]" for the placeholder buffer.
+// when New created it (or by its label override, as the stdin buffer is), and
+// "[No Name]" for the placeholder buffer.
 func (d *Document) Name() string {
 	switch {
 	case d.Path != "":
 		return filepath.Base(d.Path)
 	case d.ext.Virtual:
 		return "*" + d.ext.Name + "*"
+	case d.label != "":
+		return d.label
 	case d.untitled > 0:
 		return fmt.Sprintf("Untitled-%d", d.untitled)
 	default:

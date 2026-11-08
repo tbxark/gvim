@@ -81,6 +81,7 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		History:      history,
 		Previewer:    previewer,
 		SyntaxStyles: syntaxStyles,
+		PreviewWrap:  m.projectPreviewWrap(),
 		Git:          git,
 		Searcher:     m.root.ports.ProjectSearch,
 		Grepper:      m.root.ports.GitGrep,
@@ -90,6 +91,12 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 	m.proj.panel = p
 	m.pushOverlay(p)
 	return p.Init()
+}
+
+// projectPreviewWrap returns the last panel's preview wrap setting, so the next panel
+// opens with the same: the setting lives while the session does.
+func (m *Model) projectPreviewWrap() bool {
+	return m.proj.panel != nil && m.proj.panel.PreviewWrap()
 }
 
 // projectSearchSettings returns the match options and scope the next project panel opens

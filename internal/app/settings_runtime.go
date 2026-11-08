@@ -49,6 +49,10 @@ type settingsRuntime struct {
 	iconsMode, iconsWhy string
 	// version is the gvim version, for the Environment rows.
 	version string
+	// localeApply pushes a newly resolved locale into the plugin runtime, so the
+	// plugins' t() and gvim.i18n.locale() follow a Settings save at once. Nil leaves
+	// the plugins on the startup locale (the app still sets the i18n package).
+	localeApply func(locale string)
 }
 
 // projectEnvFacts are the Environment rows of the project environment: which

@@ -196,7 +196,7 @@ func (p *Panel) hint() string {
 	if p.git {
 		return "Tab next · Alt+C case · Enter open · Alt+Q list · Esc close"
 	}
-	return "Tab next · Space check · Enter open · Alt+Enter all · Shift+Enter scoped · Alt+Q list · Esc close"
+	return "Tab next · Space check · Enter open · Alt+Enter all · Shift+Enter scoped · Alt+P wrap · Alt+Q list · Esc close"
 }
 
 // paintResults paints the result region: the empty and error states, or the window of
@@ -304,9 +304,15 @@ func (p *Panel) previewColumns(geo *geometry) {
 	geo.listEnd = div - previewColumnGap
 }
 
+// paintPreviewMaxRows bounds how many display rows one preview line may take with soft
+// wrap on: a longer line is cut at that row with an ellipsis, so a huge line never makes
+// the preview paint unbounded work.
+const paintPreviewMaxRows = 8
+
 // paintPreview paints the preview column: the divider, the path:line header, and the
 // selected match's context lines with the match lines selected and the matched runes
-// bold.
+// bold. With PreviewWrap on, a line wider than the column continues on the next display
+// rows (bounded per line) instead of being cut at its edge.
 func (p *Panel) paintPreview(g *grid.Grid, geo geometry) {
 	if !geo.preview {
 		p.previewBox = previewBox{}
@@ -325,6 +331,14 @@ func (p *Panel) paintPreview(g *grid.Grid, geo geometry) {
 	}
 	s := p.preview
 	height := geo.results - 1
+	spansByLine := make(map[int][]PreviewSpan, len(s.result.Spans))
+	for _, span := range s.result.Spans {
+		spansByLine[span.Line] = append(spansByLine[span.Line], span)
+	}
+	if p.previewWrap {
+		p.paintPreviewWrapped(g, geo, height, req, s, spansByLine)
+		return
+	}
 	first, count := p.previewWindow(height)
 	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading), p.styles.label)
 	switch {
@@ -339,79 +353,209 @@ func (p *Panel) paintPreview(g *grid.Grid, geo geometry) {
 		return
 	}
 	m, _, _ := p.selectedMatch()
-	spansByLine := make(map[int][]PreviewSpan, len(s.result.Spans))
-	for _, span := range s.result.Spans {
-		spansByLine[span.Line] = append(spansByLine[span.Line], span)
-	}
 	offset := first - s.result.Start
-	gutter := len(strconv.Itoa(max(s.result.Start+len(s.result.Lines), first+count, 1)))
+	gutter := p.previewGutter(first, count, s.result)
 	for k := 0; k < count && k < height; k++ {
 		idx := offset + k
 		if idx < 0 || idx >= len(s.result.Lines) {
 			break
 		}
 		fileLine := s.result.Start + idx
-		y := geo.resultsTop + 1 + k
-		p.paintPreviewLine(g, geo, y, fileLine, s.result.Lines[idx], spansByLine[fileLine], m, gutter)
+		view := p.buildPreviewLine(fileLine, s.result.Lines[idx], spansByLine[fileLine], m)
+		p.paintPreviewSegment(g, geo, geo.resultsTop+1+k, fileLine, gutter, view, 0, len(view.expanded), true, false)
 	}
 }
 
-// paintPreviewLine paints one preview line: the gutter, then the line split into its
-// syntax runs, with the match lines on the selected background and the matched runes bold.
-func (p *Panel) paintPreviewLine(g *grid.Grid, geo geometry, y, fileLine int, lineText string, spans []PreviewSpan, m Match, gutter int) {
+// paintPreviewWrapped paints the preview with soft wrap: each file line takes as many
+// display rows as its width needs (capped at paintPreviewMaxRows, the last one ending in
+// an ellipsis), and the header names the first and count of the file lines shown. The
+// window is measured in display rows: a wrapped line uses more of the column's rows.
+func (p *Panel) paintPreviewWrapped(g *grid.Grid, geo geometry, height int, req PreviewRequest, s previewState, spansByLine map[int][]PreviewSpan) {
+	first, count := p.previewWindow(height)
+	gutter := p.previewGutter(first, count, s.result)
+	width := geo.prevEnd - (geo.prevX + gutter + 3)
+	if width < 1 {
+		width = 1
+	}
+	switch {
+	case s.loading && len(s.result.Lines) == 0:
+		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading), p.styles.label)
+		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "…", p.styles.label)
+		return
+	case s.err != "":
+		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading), p.styles.label)
+		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "Preview unavailable: "+s.err, p.styles.label)
+		return
+	case len(s.result.Lines) == 0 || count == 0:
+		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading), p.styles.label)
+		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "No lines", p.styles.label)
+		return
+	}
+	m, _, _ := p.selectedMatch()
+	offset := max(first-s.result.Start, 0)
+	firstLine, linesShown, rows := first, 0, 0
+	var views []previewWrappedRow
+	for idx := offset; idx < len(s.result.Lines) && rows < height; idx++ {
+		fileLine := s.result.Start + idx
+		view := p.buildPreviewLine(fileLine, s.result.Lines[idx], spansByLine[fileLine], m)
+		segs, truncated := previewWrapSegments(len(view.expanded), width, paintPreviewMaxRows)
+		if len(segs) == 0 {
+			segs = [][2]int{{0, 0}}
+		}
+		if linesShown == 0 {
+			firstLine = fileLine
+		}
+		for k, seg := range segs {
+			if rows >= height {
+				break
+			}
+			views = append(views, previewWrappedRow{
+				fileLine: fileLine, view: view, seg: seg,
+				first: k == 0, truncate: truncated && k == len(segs)-1,
+			})
+			rows++
+			if k == 0 {
+				linesShown++
+			}
+		}
+	}
+	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, firstLine, linesShown, s.result.Total, s.loading), p.styles.label)
+	for k, row := range views {
+		p.paintPreviewSegment(g, geo, geo.resultsTop+1+k, row.fileLine, gutter, row.view,
+			row.seg[0], row.seg[1], row.first, row.truncate)
+	}
+}
+
+// previewWrappedRow is one display row of the wrapped preview: a segment of a file line.
+type previewWrappedRow struct {
+	fileLine int
+	view     previewLineView
+	seg      [2]int
+	first    bool // the line's first row: it paints the line number
+	truncate bool // the line goes past the row cap: the row ends with an ellipsis
+}
+
+// previewGutter is the width of the line-number gutter the preview needs for the shown
+// file lines.
+func (p *Panel) previewGutter(first, count int, r PreviewResult) int {
+	return len(strconv.Itoa(max(r.Start+len(r.Lines), first+count, 1)))
+}
+
+// previewWrapSegments splits n display runes into rows of width, capping the row count at
+// maxRows; truncated says the line continues past the last row.
+func previewWrapSegments(n, width, maxRows int) (segs [][2]int, truncated bool) {
+	if n <= 0 || width <= 0 {
+		return nil, false
+	}
+	if maxRows <= 0 {
+		maxRows = 1
+	}
+	for a := 0; a < n; a += width {
+		if len(segs) == maxRows {
+			return segs, true
+		}
+		segs = append(segs, [2]int{a, min(a+width, n)})
+	}
+	return segs, false
+}
+
+// previewLineView is one preview line prepared for painting: the expanded runes, the
+// syntax runs in display columns, the bold match range and the row look.
+type previewLineView struct {
+	expanded []rune
+	runs     []previewRun
+	hlStart  int
+	hlEnd    int
+	base     grid.Style
+	inMatch  bool
+}
+
+// previewRun is one syntax run of a preview line, in display columns of the expanded text.
+type previewRun struct {
+	from, to int
+	st       grid.Style
+}
+
+// buildPreviewLine expands a preview line, maps its syntax spans to display columns and
+// finds the match range.
+func (p *Panel) buildPreviewLine(fileLine int, lineText string, spans []PreviewSpan, m Match) previewLineView {
 	from, to, inMatch := previewSpan(m, fileLine, lineText)
 	text, hlStart, hlEnd := expandPreviewLine(lineText, from, to)
-	runes := []rune(text)
-	base := p.styles.field
+	view := previewLineView{expanded: []rune(text), hlStart: hlStart, hlEnd: hlEnd, inMatch: inMatch}
+	view.base = p.styles.field
 	if inMatch {
-		g.Fill(geo.prevX, geo.prevEnd, y, p.styles.selected)
-		base = p.styles.selected
+		view.base = p.styles.selected
 	}
-	x := geo.prevX
-	x += g.Put(x, y, geo.prevEnd, fmt.Sprintf("%*d │ ", gutter, fileLine+1), p.styles.label)
 	// The syntax spans carry rune columns of the raw line; the painted text has tabs
 	// expanded, so map through the display offsets.
 	raw := []rune(lineText)
 	dispAt := displayOffsets(raw)
-	type spanRun struct {
-		from, to int
-		st       grid.Style
-	}
-	var runs []spanRun
 	for _, span := range spans {
 		st, ok := p.styles.syntax[span.Kind]
 		if !ok {
 			continue
 		}
-		st.BG = base.BG
+		st.BG = view.base.BG
 		lo := clamp(span.Start, 0, len(raw))
 		hi := clamp(span.End, 0, len(raw))
 		if hi <= lo {
 			continue
 		}
-		runs = append(runs, spanRun{from: dispAt[lo], to: dispAt[hi], st: st})
+		view.runs = append(view.runs, previewRun{from: dispAt[lo], to: dispAt[hi], st: st})
 	}
-	points := []int{0, len(runes), clamp(hlStart, 0, len(runes)), clamp(hlEnd, 0, len(runes))}
-	for _, r := range runs {
-		points = append(points, r.from, r.to)
+	return view
+}
+
+// paintPreviewSegment paints display runes [a,b) of view on row y: the gutter (the line
+// number on the line's first row, blanks on a continuation row), the syntax runs, the
+// bold match, and the ellipsis of a row-capped line.
+func (p *Panel) paintPreviewSegment(g *grid.Grid, geo geometry, y, fileLine, gutter int, view previewLineView, a, b int, first, truncate bool) {
+	if view.inMatch {
+		g.Fill(geo.prevX, geo.prevEnd, y, view.base)
 	}
-	sort.Ints(points)
-	for i := 0; i+1 < len(points); i++ {
-		a, b := points[i], points[i+1]
-		if a >= b {
-			continue
-		}
-		st := base
-		for _, r := range runs {
-			if r.from <= a && a < r.to {
-				st = r.st
-				break
+	x := geo.prevX
+	if first {
+		x += g.Put(x, y, geo.prevEnd, fmt.Sprintf("%*d │ ", gutter, fileLine+1), p.styles.label)
+	} else {
+		x += g.Put(x, y, geo.prevEnd, strings.Repeat(" ", gutter+3), p.styles.label)
+	}
+	if a < b {
+		points := []int{max(a, 0), min(b, len(view.expanded))}
+		for _, at := range []int{view.hlStart, view.hlEnd} {
+			if at > a && at < b {
+				points = append(points, at)
 			}
 		}
-		if a >= hlStart && a < hlEnd {
-			st.Bold = true
+		for _, r := range view.runs {
+			if r.from > a && r.from < b {
+				points = append(points, r.from)
+			}
+			if r.to > a && r.to < b {
+				points = append(points, r.to)
+			}
 		}
-		x += g.Put(x, y, geo.prevEnd, string(runes[a:b]), st)
+		sort.Ints(points)
+		for i := 0; i+1 < len(points); i++ {
+			lo, hi := points[i], points[i+1]
+			if lo >= hi {
+				continue
+			}
+			st := view.base
+			for _, r := range view.runs {
+				if r.from <= lo && lo < r.to {
+					st = r.st
+					break
+				}
+			}
+			if lo >= view.hlStart && lo < view.hlEnd {
+				st.Bold = true
+			}
+			x += g.Put(x, y, geo.prevEnd, string(view.expanded[lo:hi]), st)
+		}
+	}
+	if truncate {
+		// The row is full: the ellipsis takes its last column rather than a new one.
+		g.Set(geo.prevEnd-1, y, "…", view.base)
 	}
 }
 

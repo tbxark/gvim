@@ -123,9 +123,19 @@ func (m *Model) inspectThemeAtCursor() {
 	m.inspectThemeAt(x, y)
 }
 
+// paintCaptured repaints the frame once with per-cell theme-key capture, for the
+// inspector. Every other paint (View and the hit map) runs without the capture
+// buffer, so the normal path allocates nothing extra and records nothing.
+func (m *Model) paintCaptured() *grid.Grid {
+	g := grid.New(m.width, m.height)
+	g.CaptureKeys()
+	m.paintInto(g)
+	return g
+}
+
 // inspectThemeAt opens the inspector for the frame cell (x, y).
 func (m *Model) inspectThemeAt(x, y int) {
-	g := m.paint()
+	g := m.paintCaptured()
 	if x < 0 || y < 0 || x >= g.Width() || y >= g.Height() {
 		return
 	}
@@ -166,9 +176,25 @@ func (m *Model) inspectThemeAt(x, y int) {
 	if names := gridAttributeNames(cell.Style); names != "" {
 		add("Attributes: "+names, nil, false)
 	}
-	// Foreground and background keys whose rendered color is the cell's.
-	addedFg := sectionKeys(m, "Foreground", cell.Style.FG, add)
-	addedBg := sectionKeys(m, "Background", cell.Style.BG, add)
+	// The exact painted keys, when the surface recorded them during the capture
+	// repaint. This is provenance, not a colour match: a style can be a mix (the
+	// muted overlay roles) and a colour can name many keys.
+	fgID, bgID := g.KeysAt(x, y)
+	fgName, fgExact := m.inspectKeyLine("Painted by (fg)", fgID, add)
+	bgName, bgExact := m.inspectKeyLine("Painted by (bg)", bgID, add)
+	if fgExact && bgExact {
+		add("Painted by: "+fgName+" on "+bgName, nil, true)
+	}
+	// Anything the surface did not attribute falls back to the rendered colour and
+	// the context facts above; the labels say which is which.
+	addedFg := fgExact
+	addedBg := bgExact
+	if !fgExact && cell.Style.FG != nil {
+		addedFg = sectionKeys(m, "Foreground (matched by colour)", cell.Style.FG, add)
+	}
+	if !bgExact && cell.Style.BG != nil {
+		addedBg = sectionKeys(m, "Background (matched by colour)", cell.Style.BG, add)
+	}
 	if !addedFg && !addedBg {
 		add("No theme key resolves to this cell's colors", nil, false)
 	}
@@ -176,6 +202,27 @@ func (m *Model) inspectThemeAt(x, y int) {
 		add("Theme: "+m.theme.Name, nil, false)
 	}
 	m.pushOverlay(page)
+}
+
+// inspectKeyLine adds the exact provenance line for one side of a cell and reports
+// the key's display name and whether attribution existed. A missing theme value
+// (a theme that leaves the key to a fallback) still names the key.
+func (m *Model) inspectKeyLine(title string, id uint16, add func(string, *theme.Color, bool)) (string, bool) {
+	if id == 0 {
+		return "", false
+	}
+	section, key, ok := style.KeyName(id)
+	if !ok {
+		return "", false
+	}
+	name := section + "." + key
+	if value, ok := m.theme.Value(section, key); ok {
+		swatch := value
+		add(title+": "+name+" "+value.Hex(), &swatch, true)
+	} else {
+		add(title+": "+name, nil, true)
+	}
+	return name, true
 }
 
 // sectionKeys lists the theme keys whose rendered color is c, with a swatch;

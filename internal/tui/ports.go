@@ -499,6 +499,13 @@ type Keymap interface {
 	Resolve(key KeyPress, ctx KeyContext) (Command, bool)
 }
 
+// UnbindKeymap is the optional part of a Keymap that remembers a user's explicit unbind:
+// a key the user disabled in a context must do nothing there, including the built-in
+// fallback an overlay would otherwise run, rather than being a free key again.
+type UnbindKeymap interface {
+	Unbound(key KeyPress, ctx KeyContext) bool
+}
+
 // SequenceKeymap is the optional part of a Keymap that holds multi-key bindings, such
 // as Emacs's C-x C-s. A Keymap without it has single-key bindings only.
 type SequenceKeymap interface {

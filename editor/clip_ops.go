@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/i18n"
 )
 
 // copyAction copies the selections, or the lines of the carets.
@@ -15,9 +16,9 @@ func copyAction(e *Editor, d *Document, _ map[string]any) error {
 	}
 	e.clipboard, e.resultText = text, text
 	if lines {
-		e.setStatus("Copied line")
+		e.setStatus(i18n.T("", "clipboard.copied_line", nil))
 	} else {
-		e.setStatus("Copied")
+		e.setStatus(i18n.T("", "clipboard.copied", nil))
 	}
 	return nil
 }
@@ -34,13 +35,13 @@ func cutAction(e *Editor, d *Document, _ map[string]any) error {
 	e.clipboard, e.resultText = text, text
 	if lines {
 		d.CutLines()
-		e.setStatus("Cut line")
+		e.setStatus(i18n.T("", "clipboard.cut_line", nil))
 		return nil
 	}
 	// The deletion never materializes a virtual block's padding: the gap holds
 	// no text to delete.
 	d.DeleteAtCarets()
-	e.setStatus("Cut")
+	e.setStatus(i18n.T("", "clipboard.cut", nil))
 	return nil
 }
 
@@ -56,7 +57,7 @@ func pasteAction(e *Editor, d *Document, args map[string]any) error {
 	}
 	if text = normalizePaste(text); text != "" {
 		d.PasteText(text)
-		e.setStatus("Pasted")
+		e.setStatus(i18n.T("", "clipboard.pasted", nil))
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -28,24 +29,31 @@ func TestBundledThemesPaintThePopupSelectionAccent(t *testing.T) {
 		}
 		want := Cell(build(th, refPopupSelectionFG, refPopupSelectionBG))
 		st := New(th)
-		if !reflect.DeepEqual(Cell(st.Accent), want) {
+		if !samePaint(Cell(st.Accent), want) {
 			t.Errorf("%s: Accent = %+v, want the popup selection %+v", name, Cell(st.Accent), want)
 		}
 		ov := NewOverlay(th)
-		if !reflect.DeepEqual(ov.Selected, want) {
+		if !samePaint(ov.Selected, want) {
 			t.Errorf("%s: overlay Selected = %+v, want the accent %+v", name, ov.Selected, want)
 		}
 		focused := want
 		focused.Bold = true
-		if !reflect.DeepEqual(ov.Focus, focused) {
+		if !samePaint(ov.Focus, focused) {
 			t.Errorf("%s: overlay Focus = %+v, want the bold accent %+v", name, ov.Focus, focused)
 		}
 		// The overlay border takes the accent as its foreground.
 		wantBorder := Cell(build(th, refAccentBG, refPopupBG))
-		if !reflect.DeepEqual(ov.Border, wantBorder) {
+		if !samePaint(ov.Border, wantBorder) {
 			t.Errorf("%s: overlay Border = %+v, want %+v", name, ov.Border, wantBorder)
 		}
 	}
+}
+
+// samePaint compares the colours and attributes of two grid styles, ignoring the
+// per-cell provenance ids the overlay roles now carry.
+func samePaint(a, b grid.Style) bool {
+	a.FGKey, a.BGKey, b.FGKey, b.BGKey = 0, 0, 0, 0
+	return reflect.DeepEqual(a, b)
 }
 
 // TestStandaloneThemePaintsThePopupSelectionAccent checks the fallback path a user
@@ -63,7 +71,7 @@ func TestStandaloneThemePaintsThePopupSelectionAccent(t *testing.T) {
 	}
 	st := New(th)
 	accent := Cell(st.Accent)
-	if accent.BG == nil || !reflect.DeepEqual(Cell(build(th, refPopupSelectionFG, refPopupSelectionBG)), accent) {
+	if accent.BG == nil || !samePaint(Cell(build(th, refPopupSelectionFG, refPopupSelectionBG)), accent) {
 		t.Fatalf("Accent = %+v, want the popup selection colors", accent)
 	}
 }

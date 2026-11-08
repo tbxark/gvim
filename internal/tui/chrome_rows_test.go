@@ -24,7 +24,7 @@ func TestMenuBandPaddingRowTakesTheMenuStyle(t *testing.T) {
 			l.MenuTop, l.MenuBottom, l.MenuLabelY, l.StripY, l.BodyTop)
 	}
 	g := m.paint()
-	want := style.Cell(m.styles.Menu)
+	want := style.TaggedCell(m.styles.Menu, "ui", "menu_fg", "ui", "menu_bg")
 	for x := range g.Width() {
 		if got := g.At(x, l.MenuBottom).Style; got != want {
 			t.Fatalf("padding cell (%d, %d) style %+v, want the menu background %+v", x, l.MenuBottom, got, want)

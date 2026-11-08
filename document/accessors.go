@@ -55,6 +55,13 @@ func (d *Document) SetPreview(preview bool) { d.preview = preview }
 // SetBinary sets whether d is a file that is not text.
 func (d *Document) SetBinary(binary bool) { d.binary = binary }
 
+// Label returns the display-name override for an unnamed buffer, or "".
+func (d *Document) Label() string { return d.label }
+
+// SetLabel sets the display-name override of an unnamed buffer (the stdin buffer uses
+// "[stdin]"). A document with a path keeps showing its file name.
+func (d *Document) SetLabel(label string) { d.label = label }
+
 // UntitledNumber returns N when d is the Untitled-N buffer, else 0.
 func (d *Document) UntitledNumber() int { return d.untitled }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/env"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/icons"
@@ -380,6 +381,13 @@ func (s *settingsService) Apply(tui.SettingsChange) {
 	s.mu.Lock()
 	cfg := s.cfg
 	s.mu.Unlock()
+	// The UI language applies live: T() lookups and the plugin runtime read the new
+	// locale at their next call. Generated command/palette/menu titles stay English.
+	locale := i18n.Resolve(cfg.Locale, os.Getenv)
+	i18n.SetLocale(locale)
+	if s.rt.localeApply != nil {
+		s.rt.localeApply(locale)
+	}
 	s.ed.SetLanguageSettings(languageSettings(cfg))
 	s.ed.SetFormatters(formattersFor(cfg, lookPath))
 	s.ed.SetEphemeralFilePatterns(cfg.EphemeralFilePatterns)

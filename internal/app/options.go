@@ -88,6 +88,20 @@ type Options struct {
 	// restored or saved and no file explorer: gvim's file-launch behavior
 	// without needing a file. It is --simple.
 	Simple bool
+	// ReadStdin makes Run read standard input (bounded) into the [stdin] buffer
+	// before the TUI starts, then read keys from the terminal. It is --stdin or a
+	// "-" argument. A launch with no files and piped stdin sets it too, as Fresh
+	// does, so "git show | gvim" works without the flag.
+	ReadStdin bool
+	// Stdin is the piped content. Run fills it; a caller (or a test) may set it
+	// directly to build a [stdin] launch without a pipe. It is normalized like a
+	// file on open (CRLF to the buffer's LF, the ending remembered for Save As).
+	Stdin []byte
+	// StdinName is the file name --stdin-name gives the [stdin] buffer: its
+	// extension names the language and Save As suggests it. Fresh has no such
+	// flag. Empty means the language is sniffed from the content and Save As is
+	// unnamed.
+	StdinName string
 
 	// pluginLog receives the plugin log for LogFile; set by buildRuntime.
 	pluginLog func(pluginapi.LogEntry)
@@ -96,6 +110,14 @@ type Options struct {
 // Validate reports the first option that cannot be used. It does not touch
 // the file system: a missing file is valid, and a root is checked when Run
 // opens it.
+// StdinLaunch reports whether the launch carries standard-input content: the explicit
+// --stdin/- flag, a directly-set Stdin, or a --stdin-name. Such a launch is treated as a
+// file launch (no session restore or save), because the piped content is not session
+// state.
+func (o Options) StdinLaunch() bool {
+	return o.ReadStdin || len(o.Stdin) > 0 || o.StdinName != ""
+}
+
 func (o Options) Validate() error {
 	if o.Keymap != "" {
 		if _, err := keymap.ByName(o.Keymap); err != nil {
@@ -133,6 +155,15 @@ func (o Options) Validate() error {
 	// no-op there; refuse it rather than silently ignoring it.
 	if o.Restore && o.Diff {
 		return errors.New("--restore cannot be combined with --diff")
+	}
+	if o.StdinLaunch() && o.Diff {
+		return errors.New("--stdin cannot be combined with --diff")
+	}
+	if o.Restore && o.StdinLaunch() {
+		return errors.New("--restore cannot be combined with --stdin")
+	}
+	if o.StdinName != "" && !o.ReadStdin && len(o.Stdin) == 0 {
+		return errors.New("--stdin-name needs --stdin or a - argument")
 	}
 	for _, p := range o.PluginPaths {
 		if strings.TrimSpace(p) == "" {

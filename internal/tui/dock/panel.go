@@ -5,22 +5,24 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/frame"
 )
 
 // The notices the dock shows in the status row.
-const (
-	// NoTerminalNotice is shown when a dock action needs a shell and none runs.
-	NoTerminalNotice = "No terminal is open."
+// The dock's notices, translated at display time: the Settings locale can change while
+// the editor runs, so they are functions rather than constants.
 
-	noClipboardNotice   = "The clipboard is not available in this build."
-	noTerminalsNotice   = "Terminals are not available in this build."
-	unsupportedNotice   = "Terminals are not supported on this platform yet."
-	startingShellNotice = "Starting a shell..."
-	captureOnNotice     = "Keyboard capture ON - all keys go to terminal (F9 to toggle)"
-	captureOffNotice    = "Keyboard capture OFF - UI bindings active (F9 to toggle)"
-)
+// NoTerminalNotice() is shown when a dock action needs a shell and none runs.
+func NoTerminalNotice() string { return i18n.T("", "terminal.no_terminal_open", nil) }
+
+func noClipboardNotice() string   { return i18n.T("", "gvim.terminal.no_clipboard", nil) }
+func noTerminalsNotice() string   { return i18n.T("", "gvim.terminal.no_terminals", nil) }
+func unsupportedNotice() string   { return i18n.T("", "gvim.terminal.unsupported", nil) }
+func startingShellNotice() string { return i18n.T("", "gvim.terminal.starting", nil) }
+func captureOnNotice() string     { return i18n.T("", "gvim.terminal.capture_on", nil) }
+func captureOffNotice() string    { return i18n.T("", "gvim.terminal.capture_off", nil) }
 
 // shellSize is a screen size in cells.
 type shellSize struct{ cols, rows int }
@@ -51,10 +53,15 @@ type Panel struct {
 	// sel is the text selection over the scrollback view, prior is the transcript
 	// a restarted shell keeps above its own history (see selection.go and
 	// transcript.go), and hover is the Ctrl+hover link highlight (see hover.go).
-	sel     selState
-	prior   []terminal.Line
-	hover   hoverState
-	dragSeq int // invalidates the auto-scroll ticks of older drags
+	sel   selState
+	prior []terminal.Line
+	// priorWidth is the pane width the prior transcript was captured at (or the
+	// saved width of a restored transcript); a content-width change reflows the
+	// rows to the new width (transcript.go reflowPrior).
+	priorWidth int
+	reflowed   bool // a restored transcript was re-wrapped to a different width
+	hover      hoverState
+	dragSeq    int // invalidates the auto-scroll ticks of older drags
 	// restored is set when the dock shows a transcript restored from the session
 	// file, with no shell behind it (see transcript.go).
 	restored bool
@@ -232,7 +239,7 @@ func (p *Panel) Restart() tea.Cmd {
 // close and the start run in a tea.Cmd, and the result comes back as a startedMsg.
 func (p *Panel) launch(dir string) tea.Cmd {
 	if p.starter == nil {
-		p.notice = noTerminalsNotice
+		p.notice = noTerminalsNotice()
 		return nil
 	}
 	old := p.term
@@ -343,12 +350,12 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		if msg.text == "" {
-			p.noticeOf(nothingToCopyNotice)
+			p.noticeOf(nothingToCopyNotice())
 			return nil, true
 		}
-		p.noticeOf(copiedSelectionNotice)
+		p.noticeOf(copiedSelectionNotice())
 		if p.host.Copy == nil {
-			p.noticeOf(noClipboardNotice)
+			p.noticeOf(noClipboardNotice())
 			return nil, true
 		}
 		return p.host.Copy(msg.text), true
@@ -386,7 +393,7 @@ func (p *Panel) noticeOf(text string) {
 // startNotice is the notice for a start that failed.
 func startNotice(err error) string {
 	if errors.Is(err, terminal.ErrUnsupported) {
-		return unsupportedNotice
+		return unsupportedNotice()
 	}
 	return "Could not start a shell: " + err.Error()
 }
@@ -399,10 +406,10 @@ func (p *Panel) ToggleCapture() {
 	}
 	p.capture = !p.capture
 	if p.capture {
-		p.noticeOf(captureOnNotice)
+		p.noticeOf(captureOnNotice())
 		return
 	}
-	p.noticeOf(captureOffNotice)
+	p.noticeOf(captureOffNotice())
 }
 
 // SendBytes queues raw bytes for the shell's input. It does nothing when no shell
@@ -449,7 +456,7 @@ func (p *Panel) SendPaste(text string) {
 // it. ok is false, and the status row says why, when no shell runs.
 func (p *Panel) SendToShell(text string) bool {
 	if p.term == nil || p.exited {
-		p.noticeOf(NoTerminalNotice)
+		p.noticeOf(NoTerminalNotice())
 		return false
 	}
 	text = pasteText(text)
@@ -471,7 +478,7 @@ func (p *Panel) SendToShell(text string) bool {
 //     only when there is no yank and the setting is on.
 func (p *Panel) applyClipboard(msg clipboardMsg) {
 	if p.term == nil || p.exited {
-		p.noticeOf(NoTerminalNotice)
+		p.noticeOf(NoTerminalNotice())
 		return
 	}
 	if msg.err == nil {
@@ -522,10 +529,10 @@ func (p *Panel) sendCtrlV() {
 func (p *Panel) PasteClipboard() tea.Cmd {
 	switch {
 	case p.term == nil || p.exited:
-		p.noticeOf(NoTerminalNotice)
+		p.noticeOf(NoTerminalNotice())
 		return nil
 	case p.clipboard == nil:
-		p.noticeOf(noClipboardNotice)
+		p.noticeOf(noClipboardNotice())
 		return nil
 	}
 	cb := p.clipboard
@@ -550,6 +557,9 @@ func (p *Panel) Close() {
 // input. The root runs it after every update, so a layout change or a key press is
 // picked up without the caller knowing about the dock.
 func (p *Panel) Sync() tea.Cmd {
+	if cols, _ := p.contentSize(); cols > 0 {
+		p.reflowPrior(cols)
+	}
 	if p.term == nil {
 		// A restored transcript has no session to ask for rows; the window only
 		// needs clamping when the layout (and so the body height) changed.

@@ -157,14 +157,23 @@ gvim has two launch kinds, following Fresh. A **session launch** — a bare `gvi
 `gvim DIR` — restores the session saved by an earlier run (the open tabs, their cursors
 and their unsaved text) and saves it again when the editor quits. A **file launch** —
 `gvim FILE…` — opens only the named files and neither restores nor saves the project's
-session; it is what `git commit` and `gvim --diff` use. Crash recovery and the find
-history work in every launch.
+session; it is what `git commit` and `gvim --diff` use, and a stdin launch (`gvim -` /
+`--stdin`) is one too. Crash recovery and the find history work in every launch.
 
 | Flag | Effect |
 |---|---|
 | `--restore` | Force the session restore for this run, even when `editor.restore_previous_session` is off. It also makes a launch with files a session launch. Cannot be combined with `--no-restore`, `--simple` or `--diff` (a compare launch is always a file launch). |
 | `--no-restore` (alias `--no-session`) | Skip the saved tabs for this run, as `editor.restore_previous_session = false` does. The session's unsaved text still comes back, and the session is still saved at quit. |
 | `--simple` | Open just what is named (the welcome screen when nothing is): no session restored or saved, no file explorer, and unsaved buffers are not kept across the quit. |
+| `--stdin` (or a `-` argument) | Read standard input into a scratch `[stdin]` buffer (bounded at 32 MiB), then read keys from the terminal. A launch with no files reads piped stdin even without the flag, as Fresh does; the buffer has no path (Save runs Save As), is unmodified on open, and the session is neither restored nor saved. Cannot be combined with `--diff` or `--restore`. |
+| `--stdin-name NAME` | Name the `[stdin]` buffer: the extension picks the language and Save As suggests it. gvim-only (Fresh has no such flag). |
+
+`echo X | gvim -` (or `gvim --stdin`) is Fresh's stdin-as-a-buffer: the pipe fills an untitled
+`[stdin]` tab before the TUI starts and the keyboard then comes from the terminal (/dev/tty, or
+CONIN$ on Windows through bubbletea's OpenTTY). Unlike Fresh's streaming spool the read is a
+bounded 32 MiB snapshot, so very large pipes are refused instead of paged; `--stdin-name` (a gvim
+addition) names the buffer for language detection and Save As. With files named as well, the stdin
+buffer opens first and the files follow.
 
 The three `editor.*` keys behind them:
 

@@ -259,23 +259,23 @@ type Overlay struct {
 // the popup text and fill when both are RGB. Otherwise they are drawn with
 // attributes, so a theme in terminal colors still shows them.
 func NewOverlay(th theme.Theme) Overlay {
-	box := Cell(build(th, refPopupText, refPopupBG))
-	accent := build(th, refAccentFG, refAccentBG)
+	box := TaggedStyle(Cell(build(th, refPopupText, refPopupBG)), "ui", "popup_text_fg", "ui", "popup_bg")
+	accent := TaggedStyle(Cell(build(th, refAccentFG, refAccentBG)), "ui", "accent_fg", "ui", "accent_bg")
 	ov := Overlay{
 		Box:      box,
-		Error:    Cell(build(th, refDiagError, refPopupBG)),
-		Border:   Cell(build(th, refAccentBG, refPopupBG)),
+		Error:    TaggedStyle(Cell(build(th, refDiagError, refPopupBG)), "diagnostic", "error_fg", "ui", "popup_bg"),
+		Border:   TaggedStyle(Cell(build(th, refAccentBG, refPopupBG)), "ui", "accent_bg", "ui", "popup_bg"),
 		Title:    box,
-		Selected: Cell(accent),
-		Focus:    Cell(accent.Bold(true)),
+		Selected: gridStyleWithKeys(accent, KeyIDFor("ui", "accent_fg"), KeyIDFor("ui", "accent_bg")),
+		Focus:    gridStyleWithKeys(focusAccent(accent), KeyIDFor("ui", "accent_fg"), KeyIDFor("ui", "accent_bg")),
 	}
 	ov.Title.Bold = true
 	fill, okFill := rgbOf(Color(th, "ui", "popup_bg"))
 	text, okText := rgbOf(Color(th, "ui", "popup_text_fg"))
 	if okFill && okText {
-		ov.Muted = grid.Style{FG: toward(text, fill, 0.45), BG: fill}
-		ov.Idle = grid.Style{FG: text, BG: toward(fill, text, 0.25)}
-		ov.Hover = grid.Style{FG: text, BG: toward(fill, text, 0.4)}
+		ov.Muted = gridStyleWithKeys(grid.Style{FG: toward(text, fill, 0.45), BG: fill}, KeyIDFor("ui", "popup_text_fg"), KeyIDFor("ui", "popup_bg"))
+		ov.Idle = gridStyleWithKeys(grid.Style{FG: text, BG: toward(fill, text, 0.25)}, KeyIDFor("ui", "popup_text_fg"), KeyIDFor("ui", "popup_bg"))
+		ov.Hover = gridStyleWithKeys(grid.Style{FG: text, BG: toward(fill, text, 0.4)}, KeyIDFor("ui", "popup_text_fg"), KeyIDFor("ui", "popup_bg"))
 	} else {
 		ov.Muted = box
 		ov.Muted.Faint = true

@@ -1,5 +1,7 @@
 package editor
 
+import "github.com/tbxark/gvim/i18n"
+
 // registerTextCmdHandlers registers the text commands: sort, select by level,
 // duplicate above, trim, final newline, and copy as plain text.
 func registerTextCmdHandlers(h map[Action]handler) {
@@ -49,7 +51,7 @@ func registerTextCmdHandlers(h map[Action]handler) {
 			return ErrNothingSelected
 		}
 		e.clipboard, e.resultText = text, text
-		e.setStatus("Copied as plain text")
+		e.setStatus(i18n.T("", "clipboard.copied_plain", nil))
 		return nil
 	})
 }

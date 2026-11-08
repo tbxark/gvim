@@ -30,7 +30,7 @@
 #     buffer, document, editor, search, syntax, fold, diff, encoding, session,
 #     decorations, textlayout, config, keymap, theme, workspace, explorer,
 #     finder, fuzzy, fsops, gitstate, trust, lsp, pluginapi, plugin, commands,
-#     outline
+#     outline, i18n
 #
 # Rules:
 #   R1  no top-level (non-cmd, non-internal) package imports internal/.
@@ -40,7 +40,7 @@
 #       utility libraries (ansi, term) are not the UI framework and stay free.
 #   R3  leaf packages import no module package: buffer, textlayout, diff,
 #       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp,
-#       lsp/lsptest, atomicfile, shellcmd, config, explorer, keymap,
+#       lsp/lsptest, atomicfile, shellcmd, config, explorer, keymap, i18n,
 #       plugin/bundled, plugin/pattern, outline. (lsp/manager sits above lsp and
 #       may import it.)
 #   R4  engine direction: document (the per-file model) imports only its leaf
@@ -159,7 +159,7 @@ while IFS=$'\t' read -r pkg imp; do
   if [ "$ours" = 1 ]; then
     # R3: leaf packages have no module dependency at all.
     case "$rel" in
-      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd | config | explorer | keymap | plugin/bundled | plugin/pattern | outline)
+      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd | config | explorer | keymap | i18n | plugin/bundled | plugin/pattern | outline)
         add R3 "$pkg" "$imp"
         ;;
     esac

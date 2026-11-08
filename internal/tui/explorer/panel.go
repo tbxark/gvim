@@ -239,8 +239,8 @@ func (p Panel) Draw(dst *grid.Grid, g Geometry) {
 	if p.tree == nil || g.Width < 2 {
 		return
 	}
-	body := style.Cell(p.styles.Explorer)
-	head := style.Cell(p.styles.ExplorerTitle)
+	body := style.TaggedCell(p.styles.Explorer, "editor", "fg", "editor", "bg")
+	head := style.TaggedCell(p.styles.ExplorerTitle, "ui", "menu_fg", "ui", "menu_bg")
 	right := g.X + g.Width
 	dst.Fill(g.X, right, g.Top, head)
 	dst.Put(g.X, g.Top, right, HeaderFor(g.Width, g.Icons).Text, head)
@@ -273,7 +273,7 @@ func (p Panel) DrawBody(dst *grid.Grid, g Geometry) {
 // gutter ground (or faint when the theme has none), then the run itself. The band
 // never takes the whole body; the run keeps at least one row (see tree.Viewport).
 func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
-	body := style.Cell(p.styles.Explorer)
+	body := style.TaggedCell(p.styles.Explorer, "editor", "fg", "editor", "bg")
 	rows := p.tree.Rows()
 	n := g.bodyRows()
 	off, pins := tree.Viewport(rows, p.tree.ScrollOffset(), n)
@@ -283,10 +283,10 @@ func (p Panel) drawBody(dst *grid.Grid, g Geometry) {
 	if over {
 		thumbStart, thumbLen = thumbOf(len(rows), n, off)
 	}
-	track := grid.Style{BG: style.Cell(p.styles.Scrollbar).FG}
-	thumb := grid.Style{BG: style.Cell(p.styles.ScrollbarThumb).FG}
+	track := grid.Style{BG: style.Cell(p.styles.Scrollbar).FG, BGKey: style.KeyIDFor("ui", "scrollbar_track_fg")}
+	thumb := grid.Style{BG: style.Cell(p.styles.ScrollbarThumb).FG, BGKey: style.KeyIDFor("ui", "scrollbar_thumb_fg")}
 	accent := style.Cell(p.styles.Accent).BG
-	pinned := style.Cell(p.styles.Gutter)
+	pinned := style.TaggedCell(p.styles.Gutter, "editor", "line_number_fg", "editor", "line_number_bg")
 	sep := body
 	if pinned.FG != nil {
 		sep.FG = pinned.FG

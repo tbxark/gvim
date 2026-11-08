@@ -120,8 +120,11 @@ porting.md): the group is a layout of splits of the current tab and the panel bu
 as tabs; the layout supports fixed-height leaves (`{type="fixed",height=1}`), so Fresh's one-row
 toolbar renders as one row (the split border can leave it a row off); the log is a styled buffer
 whose cursor is the selection (a line decoration tints it), not a described List widget; the detail is raw git-show text carrying plugin decorations,
-not a host `.diff` background layer; there is no HEAD watcher (r refreshes, as Fresh's view). It is
-**off by default** for the idle-heap gate (see Memory).
+not a host `.diff` background layer; there is no HEAD watcher (r refreshes, as Fresh's view).
+Enter on a detail row opens the commit's historical blob (`git show <sha>:<file>`) as a read-only
+virtual buffer, as Fresh does, so the detail rows are not line targets: a target opens the
+working-tree file at a line, which is wrong for any commit that is not HEAD and cannot point at a
+virtual buffer (see porting.md). It is **off by default** for the idle-heap gate (see Memory).
 
 **live_diff** (with Fresh's diff_nav navigation surface): shows the open buffer against a baseline -- the
 file at git HEAD (default), the file currently on disk, or a chosen git branch/ref -- with per-buffer
@@ -210,15 +213,19 @@ working-tree counts, origin), recently visited files, keyboard-navigable quick a
 explorer, live grep, theme, Git Log, diagnostics) and best-effort `df` disk rows. Tab/Down/j and
 Shift-Tab/Up/k move, Enter activates (a buffer-local mode); **Show Dashboard** reopens it. It
 auto-opens on an empty editor and after the last file closes (`show_on_empty`) and closes when a file
-opens; a timer refreshes it (`refresh_seconds`). Reductions: no weather/GitHub/network sections, no
-third-party section API or Utility Dock placement, no mouse clicks on rows and no sessions section.
+opens; a timer refreshes it (`refresh_seconds`). The recent-file rows are line targets
+(`gvim.buf.set_line_targets`): a single click opens the file, while the command rows stay
+keyboard-only because a target opens a file, not an action. Reductions: no weather/GitHub/network
+sections, no third-party section API or Utility Dock placement, no clicks on command rows and no
+sessions section.
 
 **code_tour** (reduced Fresh port): loads a Fresh `.fresh-tour.json` or a VS Code Edit CodeTour
 `.tour` (auto-detected; bounded at 1 MiB / 200 steps), shows the steps in a floating widget card (list,
 step counter and location, prose as styled plain text, Previous/Next/Jump/Exit buttons, hint bar) and
 walks them: each step opens its file at the line range with `gvim.buf.open` and highlights it with
-anchored decorations (the plugin keeps local line anchors; `gvim.buf.set_line_targets` is now
-available for a future version). One tour at a time; the last tour and step are
+anchored decorations. The plugin keeps local line anchors because its step rows are a widget-panel
+card, not buffer lines: `gvim.buf.set_line_targets` maps a *buffer* line to a file:line, so it cannot
+express a widget row (see porting.md). One tour at a time; the last tour and step are
 restored from `gvim.state` on the next load. **Tour: Create from Current Location...** writes a
 VS Code-compatible starter `.tour` under `.tours/`, atomically. Load/schema/step errors stay in
 notices. No default bindings (Fresh's keys live in its dock-buffer mode; here the panel owns the

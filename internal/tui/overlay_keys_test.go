@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -234,5 +235,64 @@ func TestSearchPromptContextBindingStepsTheMatch(t *testing.T) {
 	press(m, ctrl('z'))
 	if sf.anchor.Col != 8 {
 		t.Fatalf("the bound find_next chord left the anchor at %+v, want the second match", sf.anchor)
+	}
+}
+
+// fakeUnbindKeymap is a fakeKeymap that also answers the optional UnbindKeymap port: keys
+// in unbound are explicitly unbound in their context.
+type fakeUnbindKeymap struct {
+	fakeKeymap
+	unbound map[string]bool
+}
+
+func (k fakeUnbindKeymap) Unbound(key KeyPress, ctx KeyContext) bool {
+	return k.unbound[string(ctx)+"|"+key.Name+"|"+strings.Join(key.Mods, "+")]
+}
+
+// TestOverlayExplicitUnbindSwallowsTheBuiltinFallback checks that unbinding a chord in an
+// overlay context makes the key do nothing there instead of falling back to the surface's
+// built-in handling, while other contexts keep their fallback.
+func TestOverlayExplicitUnbindSwallowsTheBuiltinFallback(t *testing.T) {
+	t.Parallel()
+	popupUnbind := func() fakeUnbindKeymap {
+		return fakeUnbindKeymap{
+			fakeKeymap: fakeKeymap{},
+			unbound: map[string]bool{
+				string(KeyContextPopup) + "|Escape|": true,
+			},
+		}
+	}
+	unbindModel := func(k fakeUnbindKeymap) *Model {
+		m := New(Deps{
+			Editor: newFakeEditor("hello"), Explorer: newFakeTree(1), Keys: k,
+			Theme: theme.Theme{}, Clock: testClock,
+		})
+		m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		return m
+	}
+	pushList := func(m *Model) {
+		v := list.New("Pick", []list.Row{{Left: "a", Value: "a"}}, m.styles.Overlay, nil)
+		m.pushOverlay(v)
+	}
+	// With the popup Esc unbound, the popup stays open: the key was swallowed.
+	m := unbindModel(popupUnbind())
+	pushList(m)
+	press(m, special(tea.KeyEscape))
+	if len(m.overlays) != 1 {
+		t.Fatalf("the explicitly unbound Esc ran the popup's built-in close: overlays = %d", len(m.overlays))
+	}
+	// Without the unbind the same Esc closes the popup: the fallback is unchanged.
+	m2 := overlayModel(t, fakeKeymap{})
+	pushList(m2)
+	press(m2, special(tea.KeyEscape))
+	if len(m2.overlays) != 0 {
+		t.Fatalf("an unbound Esc did not close the popup: overlays = %d", len(m2.overlays))
+	}
+	// The unbind is per context: a prompt still closes with Esc.
+	m3 := unbindModel(popupUnbind())
+	pushPrompt(m3, "x")
+	press(m3, special(tea.KeyEscape))
+	if len(m3.overlays) != 0 {
+		t.Fatalf("the popup unbind leaked to the prompt: overlays = %d", len(m3.overlays))
 	}
 }

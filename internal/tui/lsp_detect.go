@@ -11,6 +11,7 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/grid"
 )
@@ -200,7 +201,7 @@ func (m *Model) lspFormatted(msg lspFormatMsg) {
 		return
 	}
 	m.syncViewport()
-	m.notice = "Formatted with the language server"
+	m.notice = i18n.T("", "format.formatted_with", map[string]any{"formatter": "the language server"})
 }
 
 // diagLine is the worst severity of the diagnostics that start on each line of a

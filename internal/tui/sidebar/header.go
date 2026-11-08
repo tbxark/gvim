@@ -135,7 +135,7 @@ func HeaderFor(width int, m icons.Mode, spec HeaderSpec) Header {
 // PaintHeader paints h into row y of the column, which starts at column x and is
 // width cells wide, on the section-header style.
 func PaintHeader(dst *grid.Grid, x, width int, y int, h Header, st style.Styles) {
-	head := style.Cell(st.ExplorerTitle)
+	head := style.TaggedCell(st.ExplorerTitle, "ui", "menu_fg", "ui", "menu_bg")
 	dst.Fill(x, x+width, y, head)
 	dst.Put(x, y, x+width, h.Text, head)
 }
@@ -143,7 +143,7 @@ func PaintHeader(dst *grid.Grid, x, width int, y int, h Header, st style.Styles)
 // PaintBottomBorder paints the column's bottom border, └──┘, into row y. The
 // column starts at column x.
 func PaintBottomBorder(dst *grid.Grid, x, width int, y int, st style.Styles) {
-	body := style.Cell(st.Explorer)
+	body := style.TaggedCell(st.Explorer, "editor", "fg", "editor", "bg")
 	if width < 2 {
 		if width == 1 {
 			dst.Set(x, y, "└", body)
@@ -163,7 +163,7 @@ func PaintBottomBorder(dst *grid.Grid, x, width int, y int, st style.Styles) {
 // between first and last, inclusive, with the column's background. The column
 // starts at column x and is width cells wide.
 func PaintGround(dst *grid.Grid, x, width, first, last int, st style.Styles) {
-	body := style.Cell(st.Explorer)
+	body := style.TaggedCell(st.Explorer, "editor", "fg", "editor", "bg")
 	for y := first; y <= last; y++ {
 		dst.Fill(x, x+width, y, body)
 	}

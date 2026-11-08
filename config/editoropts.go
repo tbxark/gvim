@@ -658,7 +658,7 @@ func decodeStrict(raw json.RawMessage, dst any) error {
 
 // sections are the top-level keys whose value is an object of settings. They are
 // applied after the flat keys, in this order.
-var sections = []string{"file_explorer", "editor", "languages"}
+var sections = []string{"file_explorer", "editor", "languages", "clipboard"}
 
 func isSection(key string) bool { return slices.Contains(sections, key) }
 
@@ -666,7 +666,7 @@ func isSection(key string) bool { return slices.Contains(sections, key) }
 // are accepted and ignored, so that a Fresh config file loads without diagnostics.
 // None of them is stored.
 var fileOnlyKeys = []string{
-	"$schema", "version", "locale", "check_for_updates", "self_update", "auto_attach",
+	"$schema", "version", "check_for_updates", "self_update", "auto_attach",
 	"open_last_workspace", "sidebar", "file_browser", "clipboard",
 	"universal_lsp",
 	"warnings", "packages", "menu",
@@ -703,6 +703,9 @@ func (c *Config) setSection(section string, raw json.RawMessage) (applied []stri
 func (c *Config) setSectionKey(section, key string, raw json.RawMessage) error {
 	if section == "file_explorer" {
 		return c.setFileExplorer(key, raw)
+	}
+	if section == "clipboard" {
+		return c.setClipboard(key, raw)
 	}
 	opt, ok := editorByKey[key]
 	if !ok {

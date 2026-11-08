@@ -23,12 +23,46 @@ func (p *Panel) capturePrior() {
 	if p.term == nil {
 		return
 	}
-	prior := captureTranscript(p.term)
+	prior, width := captureTranscript(p.term)
 	if len(prior) == 0 {
 		return
 	}
+	if width > 0 {
+		p.priorWidth = width
+	}
 	p.prior = append(p.prior, prior...)
 	p.trimPrior()
+}
+
+// reflowPrior re-wraps the stored transcript when the pane's content width
+// changed. The live screen is never reflowed (x/vt clips it); this is the text
+// re-wrap of stored rows only, see terminal.ReflowLines.
+func (p *Panel) reflowPrior(cols int) {
+	if cols <= 0 {
+		return
+	}
+	if p.priorWidth <= 0 {
+		// A transcript saved before the width was recorded: adopt the current width
+		// and leave the rows as they are.
+		p.priorWidth = cols
+		return
+	}
+	if p.priorWidth == cols {
+		return
+	}
+	if len(p.prior) > 0 {
+		p.prior = terminal.ReflowLines(p.prior, p.priorWidth, cols)
+		p.trimPrior()
+		p.clearSelection()
+		if p.restored {
+			p.reflowed = true
+		}
+		if p.scroll.on {
+			p.scroll.top = max(p.combined()-max(p.bodyRows(), 1), 0)
+			p.scroll.selected = max(p.combined()-1, 0)
+		}
+	}
+	p.priorWidth = cols
 }
 
 // trimPrior keeps the newest maxPriorRows prior rows.
@@ -41,9 +75,9 @@ func (p *Panel) trimPrior() {
 // captureTranscript returns the bounded transcript of t: the newest history rows
 // followed by the live screen rows, as cells. It runs on the update loop, so the
 // copy is bounded to MaxScrollbackSnapshot rows and one screen.
-func captureTranscript(t Terminal) []terminal.Line {
+func captureTranscript(t Terminal) ([]terminal.Line, int) {
 	if t == nil {
-		return nil
+		return nil, 0
 	}
 	sc := t.Screen()
 	total := t.ScrollbackLen()
@@ -65,7 +99,7 @@ func captureTranscript(t Terminal) []terminal.Line {
 	if len(out) > maxPriorRows {
 		out = out[len(out)-maxPriorRows:]
 	}
-	return out
+	return out, sc.Cols
 }
 
 // lineFromText turns a saved transcript line into cells, one rune per cell.
@@ -163,6 +197,8 @@ func (p *Panel) Restore(st terminal.SavedState) {
 		p.prior = append(p.prior, lineFromText(text))
 	}
 	p.restored = true
+	p.reflowed = false
+	p.priorWidth = st.Width
 	p.open = st.Open || len(p.prior) > 0
 	p.focus = false
 	p.dir = st.Cwd

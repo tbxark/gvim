@@ -211,8 +211,8 @@ func TestFocusTerminalWithNoRunningShellNotifies(t *testing.T) {
 			if len(starter.dirs) != starts {
 				t.Fatalf("shell starts = %d, want %d: focus_terminal must not start a shell", len(starter.dirs), starts)
 			}
-			if m.notice != noTerminalNotice {
-				t.Fatalf("notice = %q, want %q", m.notice, noTerminalNotice)
+			if m.notice != noTerminalNotice() {
+				t.Fatalf("notice = %q, want %q", m.notice, noTerminalNotice())
 			}
 		})
 	}

@@ -230,8 +230,8 @@ func TestScrollbackRefusedOnAltScreen(t *testing.T) {
 	if !ok || p.Scrolling() || cmd != nil {
 		t.Fatalf("Ctrl+Space on the alternate screen: taken %v scrolling %v, want it taken and refused", ok, p.Scrolling())
 	}
-	if notice != altScrollbackNotice {
-		t.Fatalf("notice = %q, want %q", notice, altScrollbackNotice)
+	if notice != altScrollbackNotice() {
+		t.Fatalf("notice = %q, want %q", notice, altScrollbackNotice())
 	}
 }
 

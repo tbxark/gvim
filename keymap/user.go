@@ -221,7 +221,26 @@ func (m *Map) layer(own []Binding) *Map {
 	list = append(list, base...)
 	list = append(list, (&Map{bindings: base}).expandGlobal(bindings)...)
 	list = append(list, bindings...)
-	return newMap(list)
+	layered := newMap(list)
+	// Keep the unbind entries as tombstones: they are out of the keymap, but a surface that
+	// consults the keymap before its built-in handler has to know the key was deliberately
+	// disabled rather than unbound and free to fall back.
+	for _, b := range own {
+		if b.Action != ActionUnbind {
+			continue
+		}
+		if layered.unbound == nil {
+			layered.unbound = make(map[lookupKey]bool)
+		}
+		chord := b.Chord
+		if chord == "" && len(b.Sequence) > 0 {
+			chord = strings.Join(b.Sequence, " ")
+		}
+		if chord != "" {
+			layered.unbound[lookupKey{when: b.When, chord: chord}] = true
+		}
+	}
+	return layered
 }
 
 // userRemoves reports whether a user entry takes b out of the keymap: an unbind of the

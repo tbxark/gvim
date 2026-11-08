@@ -79,6 +79,9 @@ func (m *Model) menuKeymap(k tea.Key) (tea.Cmd, bool) {
 	kp, _ := translateKey(k)
 	cmd, found := m.keys.Resolve(kp, KeyContextMenu)
 	if !found {
+		if ub, ok := m.keys.(UnbindKeymap); ok && ub.Unbound(kp, KeyContextMenu) {
+			return nil, true
+		}
 		return nil, false
 	}
 	if cmd.Action == "noop" {
@@ -135,6 +138,11 @@ func (m *Model) overlayKey(k tea.Key) (tea.Cmd, bool) {
 	kp, _ := translateKey(k)
 	cmd, found := m.keys.Resolve(kp, ctx)
 	if !found {
+		if ub, ok := m.keys.(UnbindKeymap); ok && ub.Unbound(kp, ctx) {
+			// The user explicitly unbound the key in this context: swallow it instead of
+			// falling back to the surface's built-in handling.
+			return nil, true
+		}
 		return nil, false
 	}
 	return m.runOverlayAction(ctx, cmd)

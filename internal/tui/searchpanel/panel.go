@@ -118,8 +118,12 @@ type Options struct {
 	// coloured runs without importing the editor pane or the syntax package. Empty means
 	// a plain preview.
 	SyntaxStyles map[string]grid.Style
-	Styles       style.Styles
-	Theme        theme.Theme
+	// PreviewWrap starts the preview column with soft wrap on: a line wider than the
+	// column continues on the next display row instead of being cut at its edge. Alt+P
+	// toggles it in the panel.
+	PreviewWrap bool
+	Styles      style.Styles
+	Theme       theme.Theme
 }
 
 // previewWheelRows is how many preview lines one wheel notch scrolls.
@@ -147,9 +151,10 @@ type Panel struct {
 
 	// previewer reads the selected match's context; preview is the column's state, and
 	// previewBox is where the column was last drawn.
-	previewer  Previewer
-	preview    previewState
-	previewBox previewBox
+	previewer   Previewer
+	preview     previewState
+	previewBox  previewBox
+	previewWrap bool
 
 	// openFiles and current are the snapshots the searches see for unsaved text. Their
 	// source is the root, which refreshes them after a replacement.
@@ -251,20 +256,21 @@ type previewDoneMsg struct {
 // New returns the panel.
 func New(o Options) *Panel {
 	p := &Panel{
-		styles:    newStyles(o.Styles),
-		root:      o.Root,
-		files:     o.Files,
-		limit:     o.Limit,
-		git:       o.Git,
-		searcher:  o.Searcher,
-		grepper:   o.Grepper,
-		previewer: o.Previewer,
-		openFiles: o.OpenFiles,
-		current:   o.Current,
-		modes:     o.Modes,
-		scope:     o.Scope,
-		open:      true,
-		top:       0,
+		styles:      newStyles(o.Styles),
+		root:        o.Root,
+		files:       o.Files,
+		limit:       o.Limit,
+		git:         o.Git,
+		searcher:    o.Searcher,
+		grepper:     o.Grepper,
+		previewer:   o.Previewer,
+		previewWrap: o.PreviewWrap,
+		openFiles:   o.OpenFiles,
+		current:     o.Current,
+		modes:       o.Modes,
+		scope:       o.Scope,
+		open:        true,
+		top:         0,
 	}
 	if p.limit <= 0 {
 		p.limit = DefaultLimit
@@ -390,6 +396,11 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 		}
 		p.modes.WholeWord = !p.modes.WholeWord
 		return p, p.requery()
+	case "alt+p":
+		// Toggle soft wrap in the preview column: the same preview, one row per file
+		// line or as many display rows as the line needs.
+		p.previewWrap = !p.previewWrap
+		return p, nil
 	case "alt+enter":
 		return p, p.replaceCmd(false)
 	case "alt+q":
@@ -1381,6 +1392,10 @@ func (p *Panel) NextMatch(forward bool) (OpenMsg, bool) {
 // Settings returns the session match options and scope, so the root can open the next
 // panel with them.
 func (p *Panel) Settings() (MatchOptions, Scope) { return p.modes, p.scope }
+
+// PreviewWrap reports whether the preview column soft-wraps, so the root can open the next
+// panel with the same setting.
+func (p *Panel) PreviewWrap() bool { return p.previewWrap }
 
 // SetSources replaces the unsaved-text snapshots of the searches, after the root applied
 // a replacement and re-reads the open buffers.

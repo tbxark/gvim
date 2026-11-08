@@ -474,7 +474,7 @@ func TestDockPasteSendsClipboardText(t *testing.T) {
 			name:      "no shell means nothing is pasted",
 			shell:     false,
 			clipboard: fakeClipboard{text: "a"},
-			notice:    noTerminalNotice,
+			notice:    noTerminalNotice(),
 		},
 	}
 	for _, tt := range tests {
@@ -632,8 +632,8 @@ func TestSendSelectionWithoutShellNotifies(t *testing.T) {
 	starter := newFakeStarter()
 	m := newDockModel(t, newFakeEditor("hello"), DockPorts{Starter: starter})
 	dockRun(t, m, "send_selection_to_terminal")
-	if m.notice != noTerminalNotice {
-		t.Fatalf("notice = %q, want %q", m.notice, noTerminalNotice)
+	if m.notice != noTerminalNotice() {
+		t.Fatalf("notice = %q, want %q", m.notice, noTerminalNotice())
 	}
 	if len(starter.dirs) != 0 {
 		t.Fatalf("send started %d shells, want none", len(starter.dirs))

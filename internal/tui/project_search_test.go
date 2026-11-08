@@ -426,3 +426,20 @@ func TestProjectLSPEditsKeepMultiLineRanges(t *testing.T) {
 		t.Fatalf("converted edit = %+v, want the exact multi-line range", edits[0])
 	}
 }
+
+// TestProjectPreviewWrapPersists checks the session default of the preview wrap: the next
+// project panel opens with the last panel's setting, and off when there is no panel yet.
+func TestProjectPreviewWrapPersists(t *testing.T) {
+	lt := newLSPTest(t, newFakeLSP("go"), &lspTab{path: "/p/a.go", lines: []string{"x"}})
+	if lt.m.projectPreviewWrap() {
+		t.Fatal("wrap is on with no project panel")
+	}
+	lt.m.proj.panel = searchpanel.New(searchpanel.Options{Root: "/ws", PreviewWrap: true})
+	if !lt.m.projectPreviewWrap() {
+		t.Fatal("the last panel's wrap setting did not persist")
+	}
+	lt.m.proj.panel = searchpanel.New(searchpanel.Options{Root: "/ws"})
+	if lt.m.projectPreviewWrap() {
+		t.Fatal("wrap did not stay off")
+	}
+}

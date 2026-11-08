@@ -48,6 +48,17 @@ func (k adapter) ResolveSequence(steps []tui.KeyPress, ctx tui.KeyContext) (cmd 
 	return tui.Command{}, false, k.km.HasSequencePrefix(chords, kctx)
 }
 
+// Unbound reports whether the user's keybindings explicitly unbound the chord in the
+// context. A surface that consults the keymap before its built-in handler swallows such a
+// key instead of falling back to that handler.
+func (k adapter) Unbound(key tui.KeyPress, ctx tui.KeyContext) bool {
+	chord, err := keymap.Canonical(key.Name, key.Mods)
+	if err != nil {
+		return false
+	}
+	return k.km.Unbound(chord, keymapContext(ctx))
+}
+
 // Bindings lists every binding of the keymap, in file order, with its canonical
 // chord and when-clause. It implements the root's BindingLister port.
 func (k adapter) Bindings() []tui.KeyBinding {

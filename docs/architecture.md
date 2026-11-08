@@ -58,7 +58,7 @@ stdlib / third party
       │
       ▼
 engine leaves  (buffer, textlayout, diff, encoding, fuzzy, theme, fsops, gitstate, lsp,
-                pluginapi, decorations, atomicfile, shellcmd)
+                pluginapi, decorations, atomicfile, shellcmd, i18n)
       ▼
 document          (per-file model: buffer/search/syntax/textlayout/encoding/diff/atomicfile)
       ▼
@@ -82,7 +82,7 @@ internal/cli → main (root package)
 |---|---|
 | R1 | No top-level package (not `internal/…`, not `cmd/…`) imports `internal/…`. |
 | R2 | `charm.land/*` (Bubble Tea, bubbles, lipgloss) is imported only by `internal/tui/…`, `internal/terminal` and `internal/uitest`. The plain `github.com/charmbracelet/x/*` helper libraries (`ansi`, `term`, `vt`) are not the UI framework and stay free. |
-| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `plugin/bundled`, `plugin/pattern`, `outline`. (`lsp/manager` sits above `lsp` and may import it.) |
+| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `i18n`, `plugin/bundled`, `plugin/pattern`, `outline`. (`lsp/manager` sits above `lsp` and may import it.) |
 | R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `trust` imports only `config` and `atomicfile`. `finder` imports only `explorer` and `fuzzy`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
 | R6 | `internal/cli` imports only `internal/app`, `internal/configview` and `syntax` (and cobra). |
@@ -161,7 +161,8 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `fuzzy` | fzf-style scorer shared by the finder, the palette and the pickers. | |
 | `fsops` | Create, mkdir, rename, move, copy, trash with conflict policy. | |
 | `gitstate` | Git work-tree root, branch and per-file status with go-git. | |
-| `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins. | `hujson`. The project layer is skipped when `Options.Untrusted` is set (workspace trust; see docs/trust.md). |
+| `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins, and the top-level `locale`. | `hujson`. The project layer is skipped when `Options.Untrusted` is set (workspace trust; see docs/trust.md); a project `locale` is refused (a user preference). |
+| `i18n` | Translation layer: embedded English catalogue, `T`/`TN` with `%{name}` interpolation, CLDR plurals, locale resolution (`auto` from the environment or a configured code) and the plugin runtime's locale. | Leaf, stdlib only; catalogue JSON in `i18n/catalogues/`; see `docs/i18n.md`. |
 | `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy and executable-content marker scan. | TUI-free; store at `config.Dir()/trust.json` through `atomicfile`; the app gates the config project layer on it (docs/trust.md). |
 | `keymap` | Embedded presets, chord parsing and canonicalization, resolve, user overrides. | Data files `keymap/*.json`. |
 | `theme` | Theme data (colors, syntax keys) from embedded JSON. | Data files `theme/data/*.json`. |

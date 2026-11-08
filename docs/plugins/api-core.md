@@ -197,7 +197,12 @@ gvim.i18n.locale() -> string
 `t(key)` returns the text of the editor's locale, then English, then the key itself, so a
 missing translation reads as a key and an English fallback always exists. `vars` fills the
 `%{name}` placeholders (`string`, number or boolean values; an unknown placeholder is left as
-it is). `locale()` is the editor's locale — `"en"` today, the only built-in locale.
+it is). `locale()` is the editor's resolved locale: the config `locale` (Settings →
+Interface → locale, or the top-level `locale` key) when set, otherwise
+`LC_ALL`/`LC_MESSAGES`/`LANG`, otherwise `"en"`; a live Settings change reaches the
+plugin at its next call. The editor's own strings use the same resolution through the
+TUI-free `i18n` package (see [i18n.md](../i18n.md)); the translated catalogues are
+still to land.
 
 A command `title` or `description` that starts with `%` is a translation key and is resolved
 when the command is registered: `title = "%cmd.do_thing"` becomes `t("cmd.do_thing")`. Menu

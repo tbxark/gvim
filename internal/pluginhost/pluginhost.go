@@ -6,6 +6,7 @@ import (
 
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/plugin"
@@ -82,6 +83,7 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 			Version:  o.Version,
 			LogSink:  o.LogSink,
 			Loader:   ld,
+			Locale:   i18n.Locale(),
 		}),
 		Editor: newPluginEditor(ed, markEdited),
 		Keys: func(name string, bs []pluginapi.Binding) (*keymap.Map, error) {

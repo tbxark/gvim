@@ -17,6 +17,9 @@ func (p *Panel) Draw(g *grid.Grid, l frame.Layout, st style.Styles) {
 	if !l.DockOn {
 		return
 	}
+	if cols, _ := p.contentSize(); cols > 0 {
+		p.reflowPrior(cols)
+	}
 	bar := style.Cell(st.ExplorerTitle)
 	body := style.Cell(st.Editor)
 	g.Fill(0, l.W, l.DockY, bar)
@@ -133,6 +136,9 @@ func (p *Panel) scrollbackTitle() string {
 	name := "Scrollback"
 	if p.restored && p.term == nil {
 		name = "Scrollback (restored)"
+		if p.reflowed {
+			name = "Scrollback (restored, rewrapped)"
+		}
 	}
 	title := fmt.Sprintf("%s — rows %d-%d of %d (Ctrl+Space returns)", name, first, last, combined)
 	if p.scroll.typing {
@@ -161,7 +167,7 @@ func (p *Panel) dockText() string {
 	if p.notice != "" {
 		return p.notice
 	}
-	return startingShellNotice
+	return startingShellNotice()
 }
 
 // paintShellRow draws row r of the shell screen sc at grid row y, from column 0 to w.
