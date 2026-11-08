@@ -44,6 +44,10 @@ func (f *remoteFS) setErr(err error) {
 	f.err = err
 }
 
+func (f *remoteFS) ReadRange(context.Context, string, int64, int64) ([]byte, error) {
+	return nil, errors.New("not needed by the remote editor tests")
+}
+
 func (f *remoteFS) ReadFile(_ context.Context, path string, max int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -20,10 +20,33 @@ import (
 // port already uses, so the local adapter is a forwarding layer.
 type FileSystem interface {
 	ReadFile(ctx context.Context, path string, max int64) ([]byte, error)
+	// ReadRange reads at most n bytes at off; the portable windowed primitive for
+	// large files. A short answer is io.EOF. n is capped by the backend.
+	ReadRange(ctx context.Context, path string, off, n int64) ([]byte, error)
 	WriteFile(ctx context.Context, path string, data []byte, o hostos.WriteOptions) error
 	Stat(ctx context.Context, path string) (hostos.FileStat, error)
 	ReadDir(ctx context.Context, path string, hidden bool) ([]hostos.DirEntry, error)
 	Watch(ctx context.Context, path string, o hostos.WatchOptions) (hostos.Watch, error)
+}
+
+// FileMutations is the optional part of a FileSystem that changes the tree. It is a
+// separate interface so a read-only backend can mount a FileSystem without them; a
+// caller that needs them asks with a type assertion (see Mutations) and reports
+// ErrUnsupportedFileIO when the backend has none.
+type FileMutations interface {
+	// Mkdir creates a directory; parents creates the missing ancestors.
+	Mkdir(ctx context.Context, path string, parents bool) error
+	// Rename moves from to to, replacing an existing target.
+	Rename(ctx context.Context, from, to string) error
+	// Remove deletes path; recursive removes a directory tree.
+	Remove(ctx context.Context, path string, recursive bool) error
+}
+
+// Mutations returns the file-mutation surface of fs, or nil when the backend does not
+// implement one.
+func Mutations(fs FileSystem) FileMutations {
+	m, _ := fs.(FileMutations)
+	return m
 }
 
 // OneShot runs an argv to completion and collects its result.
@@ -286,6 +309,9 @@ var ErrUnsupportedFileIO = fmt.Errorf("authority: this authority mounts no file 
 // UnsupportedFiles refuses every file operation with ErrUnsupportedFileIO.
 type UnsupportedFiles struct{}
 
+func (UnsupportedFiles) ReadRange(context.Context, string, int64, int64) ([]byte, error) {
+	return nil, ErrUnsupportedFileIO
+}
 func (UnsupportedFiles) ReadFile(context.Context, string, int64) ([]byte, error) {
 	return nil, ErrUnsupportedFileIO
 }

@@ -49,9 +49,11 @@ func TestUpdateHooksReportANewerRelease(t *testing.T) {
 	if *count != 1 {
 		t.Fatalf("requests = %d, want 1", *count)
 	}
-	// The daily debounce: a second call within the interval asks nothing.
-	if info := hooks.Check(context.Background()); info != nil {
-		t.Fatalf("second check = %+v, want none within the interval", info)
+	// The daily debounce: a second call within the interval asks nothing and reports
+	// the release the first call already found (the answer is remembered, not just the
+	// timestamp).
+	if info := hooks.Check(context.Background()); info == nil || info.Version != "0.4.2" {
+		t.Fatalf("second check = %+v, want the remembered release", info)
 	}
 	if *count != 1 {
 		t.Fatalf("requests after the debounce = %d, want 1", *count)

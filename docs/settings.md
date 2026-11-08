@@ -383,6 +383,15 @@ simply does nothing). A successful check is remembered for a day in
 version, is silent and never blocks startup. gvim has no self-update: the indicator names the
 release and its release page, and upgrading stays the package manager's or the user's job.
 
+The status element `{update}` paints the release the check found (clicking it opens the Update
+details: the feed, the current and latest versions, when the check last ran and the release
+page). Two palette rows expose the same state: **Check for Updates** asks the feed right now
+(ignoring the daily debounce) and reports the answer in the status row, and **Show Update
+Output** opens the details list. A check that does not run because the build has no version, or
+because `check_for_updates` is off, says so instead of doing nothing. The debounce stamp also
+remembers the release it found, so a launch later the same day paints the indicator without a
+request.
+
 The read-only Settings list remains as the fallback when the app wires no `SettingsPort` (the
 TUI in a test, or a host without a config directory): it lists the effective settings and
 opens the config file on Enter (the ui_icons row opens the icon preview).

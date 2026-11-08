@@ -420,39 +420,53 @@ workspace model (#19).
 ### 8.1 Workspace registry (#19a, landed round 13)
 
 The registry is the workspace store on top of the round-12 daemon ownership model. It
-mirrors Fresh's workspace cache: one durable file per workspace, no central list.
+mirrors Fresh's workspace cache: one durable file per workspace, no central list. Registry
+v2 allows several CO-TENANT workspaces over one canonical root (Fresh's extracted-tab
+windows, labels "proj", "proj (2)", ...); a registry v1 file (one workspace per root)
+still loads unchanged.
 
 - **Location and name.** `<user data dir>/gvim/workspaces/<encoded-canonical-root>.<stable-id>.json`
   (`GVIM_WORKSPACE_DIR` overrides the directory for tests). The canonical root is
   absolute, cleaned and symlink-resolved, so `./x`, `x/` and a symlinked spelling are one
-  workspace; one workspace exists per canonical root. The encoded root is one percent-encoded
+  workspace; a workspace is keyed by (canonical root, stable id), so v2 allows several to
+  share one root. The encoded root is one percent-encoded
   file-name component (a deterministic sha256 name when it would exceed one filename); the
   `root` recorded inside the file stays authoritative.
-- **Schema v1** (`daemon.WorkspaceFile`): `version`, `stable_id` (minted once with crypto/rand
+- **Schema v1/v2** (`daemon.WorkspaceFile`): `version`, `stable_id` (minted once with crypto/rand
   at creation, adopted from the file on restore, used as the per-workspace session directory
-  name), `label` (defaults to the root basename and survives renames), `root`,
-  `last_focused_at` (unix milliseconds) and `layout` (the existing `session.Session` layout;
-  nil until captured). The per-workspace session directory `workspaces/sessions/<stable-id>/`
+  name - so a v1 -> v2 migration never moves or loses the session directory), `label`,
+  `root`, `last_focused_at` (unix milliseconds) and `layout` (the existing
+  `session.Session` layout; nil until captured). Version 2 is the current format (co-tenant
+  workspaces); version 1 files load as before and a later save rewrites them as version 2.
+  A co-tenant's empty label gets Fresh's precedence - the root basename, then "basename (2)",
+  "basename (3)", ... counted from the workspaces already at the root, skipping a numbered
+  label a rename took. The per-workspace session directory `workspaces/sessions/<stable-id>/`
   holds the stashes and the terminal record (`terminal.SavedState`, its own versioned schema,
   owned by the terminal/dock layer: saved and loaded with `restore.SaveTerminal`/
   `restore.LoadTerminal`). The workspace file never embeds the terminal record, and old
   workspace files load unchanged; `authority_spec` is a future additive field.
 - **Registry API** (`internal/daemon/workspaces.go`): `WorkspaceDir`, `OpenRegistry(dir)`,
-  `CanonicalRoot`, `List` (deduped per canonical root, freshest `last_focused_at` first; a
-  stable-id-bearing file wins a tie, then the lexicographically first path), `Get`, `Create`
-  (returns the existing workspace for a known root), `Save`, `Rename`, `Touch`,
-  `UpdateLayout`, `Remove` (deletes only the registry file — session data is kept),
-  `RemoveSessionData` (explicit discard) and `SessionDir` (creates the per-workspace session
-  directory). `Workspace.Materialized`/`Active` are runtime flags, never persisted.
+  `CanonicalRoot`, `List` (every workspace; dedup only an identical `stable_id`, keeping
+  that identity's freshest file; ordered by root group - roots by their freshest
+  `last_focused_at` first, then root path, and freshest first inside a root), `Get`,
+  `Create` (returns the freshest existing workspace of a known root), `CreateCoTenant`
+  (always mints a new workspace over the root - extraction's path), `Save`, `Rename`,
+  `Touch`, `UpdateLayout`, `Remove` (deletes only the registry file — session data
+  is kept), `RemoveSessionData` (explicit discard) and `SessionDir` (creates the
+  per-workspace session directory). `Workspace.Materialized`/`Active` are runtime flags, never
+  persisted.
 - **Durability.** Saves are atomic: temp file in the same directory (0600), write, fsync,
   close, rename over the target, then a directory fsync; a failed save leaves the previous
   file intact and no temp file behind. A file whose `version` is newer than the binary is
   refused on read and on overwrite (`ErrWorkspaceVersionTooNew`), skipped by scans with a
   diagnostic and never modified or deleted; corrupt files are likewise skipped, not deleted.
   The registry tests cover CRUD, stable-id durability across reopen, canonical-root and
-  symlink dedup, freshest-wins arbitration, future-version refusal/no-overwrite, corrupt-file
-  skipping, atomicity/no temp leftovers, rename/touch/layout persistence, close keeping
-  session data, safe encoded names and the directory override.
+  symlink keys, co-tenants sharing a root with independent layouts and session directories,
+  Fresh label precedence, root-grouped ordering, duplicate-stable-id dedup, v1-file loading
+  and migration on save (stable id and session directory kept), discovery of a co-tenanted
+  root (freshest foreground, all others dormant), future-version refusal/no-overwrite,
+  corrupt-file skipping, atomicity/no temp leftovers, rename/touch/layout persistence, close
+  keeping session data, safe encoded names and the directory override.
 - **Workspace protocol (wire + server dispatch + app handlers, landed).** The client
   frames `workspace_list`, `workspace_select`, `workspace_new`, `workspace_close` and
   `workspace_rename` carry JSON payloads; the server answers `workspaces` (the list with
@@ -461,8 +475,9 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   with a notice, a malformed request is a notice too, and the connection survives either.
   `Hello.Workspace` names the workspace to attach to (empty means the current
   foreground one; the round-12 attach path still ignores it). `Registry.Discover(root)` is
-  the daemon-start view: the launch root is the foreground workspace (created/reused) and
-  every other registry entry is an inert descriptor. The app handlers drive the same
+  the daemon-start view: the launch root's freshest workspace is the foreground one (created
+  only when the root has none) and every other registry entry - including the other
+  co-tenants of the same root - is an inert descriptor. The app handlers drive the same
   manager as the TUI port (list/select/new/close/rename against live runtimes; see the
   switching lifecycle below). Wire types, validation, frame round trips, the server
   dispatch and the end-to-end protocol are tested.
@@ -512,7 +527,7 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   workspace root is expanded remotely (one bounded shell command) so the palette root and
   the walk use the remote absolute path; a failed expansion leaves the root unchanged and
   surfaces the enumeration error, never a local fallback. Remote rows join with slashes and
-  the local file preview is disabled (nil preview) for a remote file mode. Gaps: remote
+  the local file preview is never used for a remote file mode (the remote data bullet below wires an authority-backed previewer). Gaps: remote
   git `ls-files` (Fresh prefers git through the backend spawner) is not wired, remote file
   preview and Live Grep-over-remote are follow-ups (Live Grep is refused with a notice in a
   remote workspace instead of silently searching the local project, the palette file
@@ -529,13 +544,38 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   truncation, and validates the query locally before any remote run. Git Grep resolves the
   repository remotely (git rev-parse --show-toplevel), then runs git grep -n --column in
   the remote repo root and returns absolute remote paths, so a hit opens through the
-  remote document access; the local git state is never consulted. Project Replace stays
-  refused with a remote-specific notice: a safe remote replace needs verified remote
-  reads/writes and one backup/atomic strategy. Remaining remote gaps: the current-file and
+  remote document access; the local git state is never consulted. Project Replace now runs
+  on the remote host through the authority file system (see the remote-project-replace
+  bullet below). Remaining remote gaps: the current-file and
   open-buffers search scopes and the panel preview column are not wired. The remote
   ~/~user root is expanded by the remote shell; authority.QuoteDir keeps the tilde word
   expandable and quotes only the tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is
   not a tilde expansion in sh/bash.
+- **Remote data surfaces: git marks, quick-open preview, finder refresh (landed).**
+  The remote explorer's git letters come from a porcelain-v1 NUL-separated git status run
+  through the authority one-shot with the remote workspace cwd and the remote captured
+  environment delta (8 s and 8 MiB bounds, a 2 s cache coalescing save/watch/reload bursts,
+  invalidated on reconnect and re-read by the TUI reconnect command); the local git state
+  is never consulted. The letters match the local port (A/M/D/U/R/C); the parser records
+  the approximations: a rename/copy marks its new path R and its original path is not
+  marked, an unmerged pair shows C, a typechange shows M, and ignored entries are not
+  shown. The quick-open palette reads the selected remote file's head through the
+  authority's windowed read (offset 0, at most min(requested, 64 KiB) plus one byte): a
+  short answer is the whole file, the extra byte is trimmed and reported as truncated, so
+  a large file shows a real head with an honest truncation flag. A backend without the
+  windowed read falls back to the bounded whole-file read (a complete small file, an error
+  for a larger one, never a partial head presented as complete); a disconnected authority
+  is an error and never a local read. The finder index Restart cancels and waits for the
+  old run and re-enumerates in place with a generation guard (a stale run cannot inject
+  files, the old done channel is always closed, and Snapshot reports loading from the
+  restart on so the palette loading poll stays coherent); the remote adapter resolves the
+  slot's current file system per read, so the same palette pointer follows a reconnected
+  carrier. The reconnect hook restarts the remote index, and the existing File Explorer:
+  Refresh action re-enumerates it on demand (a full re-walk, not incremental; a palette
+  already open during the refresh keeps its previous rows until it re-ranks or reopens).
+  Residuals: palette file rows carry no git letters (the local palette rows do not either;
+  marks are the explorer's), and the remote project-search panel's preview column is still
+  unwired.
 - **Read-only remote explorer (landed).** A remote launch now shows the remote workspace tree
   in the explorer: a lazy, read-only `tui.RemoteExplorerTree` over a `RemoteDirLoader` port
   (app adapter `authorityDirLoader`) lists each directory through `authority.Files().ReadDir`,
@@ -553,8 +593,10 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   (save/revert already route to the authority). The tree is read-only: the local file-operation
   adapter is cleared for a remote launch, the panel refuses new-file/new-directory/rename/
   delete/cut/paste with one explicit notice, and the explorer context menu keeps only the path
-  copies; the local project opener, preview, project search/replace and git-status ports stay
-  refused/replaced as before. Reveal/follow and re-expansion of unloaded ancestors work by
+  copies; the local project opener, preview and git-status ports stay refused/replaced as
+  before (project search runs through the authority and project replace now writes through it
+  too: see the remote-project-replace bullet). Reveal/follow and re-expansion of unloaded
+  ancestors work by
   reloading the waypoint directories and revealing the path in the new listing. Gaps vs
   Fresh's remote explorer (which runs the full file tree over the authority): remote
   rename/delete/create, drag/move and cut/copy/paste are not wired, remote .gitignore filtering
@@ -572,6 +614,32 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   `internal/app/remote_explorer_test.go` (UTF-16-independent entry mapping, trust gate before
   reads, disconnected refusal, remote-only listing with a local decoy present, 5000-entry
   clear error).
+- **Remote project replace (landed).** "Search and Replace in Project" now writes over a
+  remote workspace through the authority instead of refusing: the root keeps the existing
+  confirmation (the question names the remote target, e.g. `SSH:user@host:/path`) and runs
+  the replacement in a command. `internal/app/remote_replace.go` reads each candidate file
+  with `authority.Files()` (never the local disk), applies the same `search.Query`/
+  `search.PlanReplace` semantics as the local replacer (case/whole-word/regex/capture
+  groups, the panel's checked matches, `req.Limit`), and writes the result back through
+  `FileSystem.WriteFile` with `Atomic` (temporary file in the same remote directory +
+  rename, mode preserved). Safety: the workspace trust gate runs before the first remote
+  operation; a file whose search-time hash no longer matches is skipped as stale, and a
+  file whose size/mtime changed between the read and the write is skipped as changed
+  (never written at a stale snapshot); per-file 4 MiB, per-run 32 MiB, 512-file and 20 s
+  budgets bound the run, with context cancellation checked between files and passed into
+  every authority call. Any read/write error aborts with a precise file-naming error and
+  the count of files already atomically written; there is no cross-file rollback and no
+  undo history for the direct writes (undo across a remote run is a recorded residual).
+  Files open in the editor (dirty buffers) are skipped: their buffer text is not the remote
+  file's text and writing under a live buffer is never safe; remote .gitignore/large-file
+  filtering stays out of the candidate list (the remote search caps it first). The local
+  project-search preview and the local git-status adapter stay cleared for a remote launch.
+  Tests: `internal/app/remote_replace_test.go` (remote multi-file write with a local decoy
+  untouched, stale-hash skip, changed-mtime skip from the pre-write stat, write failure
+  abort with the partial count, cancellation mid-run, trust refusal before any I/O, size
+  and out-of-workspace bounds) and `internal/tui/project_replace_remote_test.go` (the
+  remote confirmation names the target, the remote result applies no local edits, the
+  notice carries written/skipped counts and a failure keeps the partial count).
 - **Split persistence (landed).** The workspace file's `Layout` (the embedded
   `session.Session`) also carries the editor's pane split tree as an optional
   `layout` object: inner nodes direction/ratio, leaves file index + path and per-pane
@@ -628,34 +696,39 @@ mirrors Fresh's workspace cache: one durable file per workspace, no central list
   Per-workspace plugin runtimes are kept materialized per workspace (memory for
   isolation): only materialized workspaces cost a runtime; the registry keeps the rest as
   descriptors.
-- **Extract tab to a new workspace (first slice, landed).** The tab context menu's
-  "Extract to New Workspace" (and the palette row "Extract tab to new workspace") moves the
-  active file tab out of the daemon's workspace. Fresh moves a tab into a *co-tenant*
-  workspace over the same project root; registry v1 keeps one workspace per canonical root,
-  so this slice roots the new workspace at the **file's folder** instead: the UI goroutine
-  captures the tab (path, cursor/top, page-view flags, virtual column, unsaved text) and
-  returns a command; the command canonicalizes the folder (disk work stays off Update),
-  refuses a folder that is already the current root or any registered workspace with a
-  clear notice while the tab stays open, then creates the workspace, writes its session
-  JSON with the tab's `FileState` and a stash of the unsaved text, sets the registry layout, and
-  marshals back to the UI goroutine to force-close the source tab and switch (the
-  materialization itself stays async). The report is "Extracted <name> into workspace
-  <label>"; a failure before that close leaves the tab and its text open and reports why.
-  The close-workspace flow asks first when the workspace still runs terminals: the
-  confirmation lists every one of them and its agent (the dock's `RunningTabs` snapshot), and
-  the close report and protocol close answer say exactly what was stopped; a dormant close
-  reports that nothing was stopped. Rename reports the new label on the status row (the
-  protocol answer stays the list only). Fresh's separate diff_nav plugin is unrelated; the
-  per-tab "Extract to New Workspace" item also appears in Fresh's tab context menu.
+- **Extract tab to a co-tenant workspace (landed with registry v2).** The tab context
+  menu's "Extract to New Workspace" (and the palette row "Extract tab to new workspace")
+  moves the active file tab into a NEW workspace over the SAME project root, matching
+  Fresh's `extract_tab_to_new_workspace`: registry v2's `CreateCoTenant` mints a fresh stable id
+  and Fresh's numbered label (`proj`, `proj (2)`, ...), so the source and the extracted
+  workspace are independent runtimes and session directories over one root. The UI
+  goroutine captures the tab (path, cursor/top, page-view flags, virtual column, unsaved
+  text) and returns a command; the command canonicalizes the root, creates the co-tenant,
+  writes its session JSON with the tab's `FileState` and a stash of the unsaved text, and
+  sets the registry layout. Back on the UI goroutine the switch is queued FIRST and the
+  source tab is closed only after the switch was accepted: a refused switch leaves the
+  tab (and its unsaved text) in place and drops the added co-tenant, while a failure after
+  the queue keeps the new workspace (its session holds the text) and reports exactly that -
+  the tab is never closed and then discarded. A second source capture after the close
+  records the source workspace without the extracted tab, so switching back never
+  resurrects a duplicate. The report is "Extracted <name> into workspace <label>".
+  Only the large-file overlay and the no-file-path (welcome screen) cases are still refused;
+  the tab is left untouched on every refusal. The close-workspace flow asks first when the
+  workspace still runs terminals: the confirmation lists every one of them and its agent
+  (the dock's `RunningTabs` snapshot), and the close report and protocol close answer say
+  exactly what was stopped; a dormant close reports that nothing was stopped. Rename
+  reports the new label on the status row (the protocol answer stays the list only).
+  Fresh's separate diff_nav plugin is unrelated; the per-tab "Extract to New Workspace"
+  item also appears in Fresh's tab context menu.
 - **Remainder of #19a (not shipped).** A remote workspace's `authority_spec` field (registry
-  v1 has no authority), the initial terminal-launch record in a workspace descriptor (the
+  v2 still records no authority), per-workspace plugin state, eviction/memory limits for
+  warm co-tenants, the initial terminal-launch record in a workspace descriptor (the
   discovery Import can create a workspace but not attach an argv to it yet), shared
   buffers/daemon-level open-path map beyond the switch-to-existing-workspace rule (#19b),
   a workspace switcher that shows live runtime details (the list shows label/root/state
   only), and making the capture write itself cancellable/ordered under a slow disk beyond
-  the quit wait. The extract first slice leaves these open: co-tenant workspaces over one
-  root (Fresh's model for the extracted tab), extracting into an existing workspace,
-  terminal-tab extraction (Fresh moves the live PTY; gvim's dock tabs cannot be extracted
-  yet), large-file overlay extraction, extracting more than the active tab at once, and the
-  cross-workspace shared-buffer model (#19b). The round-12 daemon still hosts exactly one
-  attached client.
+  the quit wait. The extract flow still leaves these open: terminal-tab extraction (Fresh
+  moves the live PTY; gvim's dock tabs cannot be extracted yet), large-file overlay
+  extraction, extracting more than the active tab at once, and the cross-workspace
+  shared-buffer model (#19b). Multi-client dispatch (the round-12 daemon hosts exactly one
+  attached client) stays open.

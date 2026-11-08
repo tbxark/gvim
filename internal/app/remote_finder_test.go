@@ -61,6 +61,10 @@ func (f *remoteFinderFake) ReadDir(_ context.Context, path string, hidden bool) 
 func (f *remoteFinderFake) ReadFile(context.Context, string, int64) ([]byte, error) {
 	return nil, errors.New("not used")
 }
+
+func (f *remoteFinderFake) ReadRange(context.Context, string, int64, int64) ([]byte, error) {
+	return nil, errors.New("not used")
+}
 func (f *remoteFinderFake) WriteFile(context.Context, string, []byte, hostos.WriteOptions) error {
 	return errors.New("not used")
 }

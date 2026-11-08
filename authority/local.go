@@ -2,6 +2,9 @@ package authority
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -46,6 +49,49 @@ func Local(o LocalOptions) *Authority {
 func (l *local) ReadFile(ctx context.Context, path string, max int64) ([]byte, error) {
 	return l.os.ReadFile(ctx, path, max)
 }
+
+// localReadRangeCap bounds one local windowed read, matching the SSH transport cap.
+const localReadRangeCap = 1 << 20
+
+func (l *local) ReadRange(ctx context.Context, path string, off, n int64) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if off < 0 || n < 0 {
+		return nil, fmt.Errorf("read range %s: negative offset or length", path)
+	}
+	n = min(n, localReadRangeCap)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	buf := make([]byte, n)
+	got, err := f.ReadAt(buf, off)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if got < len(buf) {
+		return buf[:got], io.EOF
+	}
+	return buf, nil
+}
+
+// Mkdir implements FileMutations: the local tree through the OS port.
+func (l *local) Mkdir(ctx context.Context, path string, parents bool) error {
+	return l.os.Mkdir(ctx, path, parents)
+}
+
+// Rename implements FileMutations.
+func (l *local) Rename(ctx context.Context, from, to string) error {
+	return l.os.Rename(ctx, from, to)
+}
+
+// Remove implements FileMutations.
+func (l *local) Remove(ctx context.Context, path string, recursive bool) error {
+	return l.os.Remove(ctx, path, recursive)
+}
+
 func (l *local) WriteFile(ctx context.Context, path string, data []byte, o hostos.WriteOptions) error {
 	return l.os.WriteFile(ctx, path, data, o)
 }

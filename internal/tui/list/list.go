@@ -9,6 +9,8 @@
 package list
 
 import (
+	"github.com/tbxark/gvim/i18n"
+
 	"slices"
 	"strings"
 	"unicode"
@@ -38,9 +40,9 @@ const DefaultPage = 8
 
 // Hint is the footer of a list that runs a row. It names the keys the list
 // takes. A list that runs nothing shows ReadOnlyHint, and a list can set its own.
-const (
-	Hint         = "Type to filter, Up/Down move, Enter run, Esc close"
-	ReadOnlyHint = "Type to filter, Up/Down move, Esc close"
+var (
+	Hint         = i18nHint("gvim.list.hint", "Type to filter, Up/Down move, Enter run, Esc close")
+	ReadOnlyHint = i18nHint("gvim.list.read_only_hint", "Type to filter, Up/Down move, Esc close")
 )
 
 // Row is one row of a View. A header row names a group and cannot be chosen.
@@ -102,7 +104,7 @@ var (
 func New(title string, rows []Row, chrome style.Overlay, run func(*View, Row) tea.Cmd) *View {
 	v := &View{
 		Title:  title,
-		Empty:  "No matches",
+		Empty:  listText("gvim.list.empty", "No matches"),
 		Rows:   rows,
 		active: true,
 		chrome: chrome,
@@ -364,7 +366,7 @@ func (v *View) cursor(int, int) (int, int, bool) {
 }
 
 // filterLabel is the text before the filter on the filter row.
-const filterLabel = "Filter: "
+var filterLabel = listText("gvim.list.filter_label", "Filter: ")
 
 // draw paints the box over g. It records the box and the page size, so the keys
 // and the mouse use what is on screen. The box has the border and title of the
@@ -464,3 +466,9 @@ func (v *View) Close() { v.active = false }
 
 // Cursor returns the caret in the filter text.
 func (v *View) Cursor(w, h int) (int, int, bool) { return v.cursor(w, h) }
+
+// i18nHint keeps the exported hint constants English and lets callers... no: the hint
+// text is user-visible chrome, so resolve it through the catalogue with the English
+// fallback at package init. A locale change needs a restart for these two hints (they
+// are constants of the shared list chrome); the row strings resolve per open.
+func i18nHint(key, english string) string { return i18n.TOr("", key, english, nil) }

@@ -75,6 +75,9 @@ type workspaceManager struct {
 	// write lock; it lets a test hold a writer BEFORE it commits (the delayed-writer
 	// regression for the exit commit token). Nil in production.
 	captureWriterGate func()
+	// beginSelectFn is a test hook replacing beginSelect for the extract path, so a
+	// regression can inject a synchronous refusal and a queued-switch failure.
+	beginSelectFn func(string) (func() error, error)
 	// lastNotice is the last failure reported to the user (test/observability).
 	lastNotice string
 	// lastReport is the last successful workspace action report (a close that stopped

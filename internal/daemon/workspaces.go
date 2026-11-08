@@ -5,12 +5,16 @@ package daemon
 //
 // It mirrors Fresh's workspace store (docs/internal/orchestrator-sessions.md): a file named
 // <encoded-canonical-root>.<stable-id>.json, a stable_id minted once and adopted from the
-// file on restore, one workspace per canonical root (dedup keeps the freshest snapshot and
-// the recorded root inside the file is authoritative), and atomic writes. The file carries
-// identity and the session layout; the per-workspace session directory (sessions/<stable-id>/)
-// keeps the stashes and the terminal record, which is terminal.SavedState and stays its own
-// schema. Closing a workspace removes only its registry file: the session directory is
-// data, never deleted by the registry.
+// file on restore, and atomic writes. Registry v2 keys a workspace by (canonical root,
+// stable id), so several co-tenant workspaces may share one root (Fresh's extracted tabs
+// model); a v1 file (one workspace per root) still loads unchanged and is rewritten as v2
+// only by a later save - its stable id, and therefore its session directory, is kept.
+// Dedup is by identical stable id only (a stale duplicate file with the same identity keeps
+// the freshest copy); different identities under one root are distinct workspaces. The
+// file carries identity and the session layout; the per-workspace session directory
+// (sessions/<stable-id>/) keeps the stashes and the terminal record, which is
+// terminal.SavedState and stays its own schema. Closing a workspace removes only its
+// registry file: the session directory is data, never deleted by the registry.
 
 import (
 	"crypto/rand"
@@ -30,9 +34,11 @@ import (
 	"github.com/tbxark/gvim/session"
 )
 
-// WorkspaceVersion is the registry file format version. A file with a newer version is
-// refused, never read as this version and never rewritten.
-const WorkspaceVersion = 1
+// WorkspaceVersion is the registry file format version. Version 2 allows several workspaces
+// per canonical root (co-tenant workspaces); a version-1 file (one workspace per root)
+// still loads unchanged. A file with a newer version is refused, never read as this
+// version and never rewritten.
+const WorkspaceVersion = 2
 
 // ErrWorkspaceVersionTooNew reports a registry file written by a newer gvim.
 var ErrWorkspaceVersionTooNew = errors.New("workspace: file version is newer than this gvim")
@@ -46,11 +52,12 @@ type WorkspaceFile struct {
 	// Label is the display name; it defaults to the basename of Root and survives a
 	// rename without changing the identity.
 	Label string `json:"label"`
-	// Root is the canonical workspace root (absolute, symlinks resolved). One
-	// workspace exists per canonical root.
+	// Root is the canonical workspace root (absolute, symlinks resolved). Version 2
+	// allows several workspaces to share one root; identity is the stable id.
 	Root string `json:"root"`
 	// LastFocusedAt is when the workspace was last the active one, in Unix
-	// milliseconds. Dedup keeps the freshest file per root.
+	// milliseconds. It orders the root groups and the workspaces inside a root, and
+	// breaks a duplicate-identity tie.
 	LastFocusedAt int64 `json:"last_focused_at"`
 	// Layout is the saved editor layout in the existing session format; nil for a
 	// workspace that has never been captured. The terminal record is not here: it
@@ -142,9 +149,11 @@ func CanonicalRoot(path string) (string, error) {
 	return resolved, nil
 }
 
-// List scans the registry and returns one workspace per canonical root, freshest first.
-// Files from a newer gvim and unreadable files are skipped and reported in problems; they
-// are never modified or deleted. Runtime fields are false.
+// List scans the registry and returns every workspace (registry v2: several may share one
+// canonical root), ordered by root group: roots by their freshest LastFocusedAt first, then
+// the workspaces of one root freshest first. Dedup keeps only an identical stable id's
+// freshest file. Files from a newer gvim and unreadable files are skipped and reported in
+// problems; they are never modified or deleted. Runtime fields are false.
 func (r *Registry) List() ([]Workspace, []error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -172,8 +181,10 @@ func (r *Registry) getLocked(id string) (Workspace, bool, error) {
 	return Workspace{}, false, nil
 }
 
-// Create makes a workspace for root, or returns the existing one for the same canonical
-// root. The label defaults to the root's basename. The stable id is minted here once.
+// Create makes a workspace for root, or returns an existing one for the same canonical
+// root (registry v2: the freshest workspace of that root, so a known root reopens its most
+// recently used workspace). The label defaults to the root's basename. The stable id is
+// minted here once. Use CreateCoTenant to add another workspace over the same root.
 func (r *Registry) Create(root, label string) (Workspace, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -213,6 +224,85 @@ func (r *Registry) createLocked(root, label string) (Workspace, bool, error) {
 	return saved, true, nil
 }
 
+// CreateCoTenant makes a NEW workspace over root: unlike Create it never reuses an
+// existing one at the root. This is Fresh's extracted-tab model (several workspaces over
+// the same project root), so the workspace is keyed by a fresh stable id and gets its own
+// session directory. An empty label gets Fresh's precedence: the root basename, then
+// "basename (2)", "basename (3)", ... counted from the workspaces already at the root; an
+// explicitly given label is used as given unless it would collide at the root, in which
+// case the same numbered precedence applies. Creation is repeatable: the same registry
+// state always yields the same next label.
+func (r *Registry) CreateCoTenant(root, label string) (Workspace, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.createCoTenantLocked(root, label)
+}
+
+// createCoTenantLocked is CreateCoTenant without the lock.
+func (r *Registry) createCoTenantLocked(root, label string) (Workspace, bool, error) {
+	canonical, err := CanonicalRoot(root)
+	if err != nil {
+		return Workspace{}, false, err
+	}
+	entries, _ := r.scan()
+	label = strings.TrimSpace(label)
+	if label == "" || coTenantLabelTaken(label, entries, canonical) {
+		label = coTenantLabel(filepath.Base(canonical), entries, canonical)
+	}
+	id, err := newStableID()
+	if err != nil {
+		return Workspace{}, false, err
+	}
+	w := Workspace{File: WorkspaceFile{
+		Version:       WorkspaceVersion,
+		StableID:      id,
+		Label:         label,
+		Root:          canonical,
+		LastFocusedAt: r.now().UnixMilli(),
+	}}
+	saved, err := r.saveLocked(w)
+	if err != nil {
+		return Workspace{}, false, err
+	}
+	return saved, true, nil
+}
+
+// coTenantLabel picks the label of a new co-tenant over root: Fresh's precedence counts the
+// workspaces already at the root, so the first co-tenant of an existing root is
+// "basename (2)", the second "basename (3)", ...; a counted label taken by a rename is
+// skipped (the count moves on) so labels stay distinguishable and the result is repeatable.
+func coTenantLabel(base string, entries []Workspace, root string) string {
+	labels := make(map[string]bool)
+	n := 0
+	for _, w := range entries {
+		if w.File.Root != root {
+			continue
+		}
+		n++
+		labels[w.File.Label] = true
+	}
+	for {
+		candidate := base
+		if n > 0 {
+			candidate = fmt.Sprintf("%s (%d)", base, n+1)
+		}
+		if !labels[candidate] {
+			return candidate
+		}
+		n++
+	}
+}
+
+// coTenantLabelTaken reports whether label is already used by a workspace at root.
+func coTenantLabelTaken(label string, entries []Workspace, root string) bool {
+	for _, w := range entries {
+		if w.File.Root == root && w.File.Label == label {
+			return true
+		}
+	}
+	return false
+}
+
 // Save writes the workspace file atomically and returns the stored entry. A workspace
 // without a stable id is refused: identity is never minted by a save (Create does that).
 // Save never rewrites a file it did not read as this version; specifically it refuses to
@@ -231,12 +321,12 @@ func (r *Registry) saveLocked(w Workspace) (Workspace, error) {
 	if w.File.Root == "" {
 		return Workspace{}, errors.New("workspace: root is empty")
 	}
-	if w.File.Version == 0 {
-		w.File.Version = WorkspaceVersion
-	}
 	if w.File.Version > WorkspaceVersion {
 		return Workspace{}, fmt.Errorf("%w: %d", ErrWorkspaceVersionTooNew, w.File.Version)
 	}
+	// A load of an older file (registry v1) is saved as the current version: the stable
+	// id, and therefore the session directory, is unchanged, only the format is upgraded.
+	w.File.Version = WorkspaceVersion
 	if w.File.Label == "" {
 		w.File.Label = filepath.Base(w.File.Root)
 	}
@@ -352,9 +442,12 @@ func (r *Registry) SessionDir(id string) (string, error) {
 	return dir, nil
 }
 
-// scan reads every registry file. One workspace per root: the freshest LastFocusedAt wins;
-// a stable-id-bearing file breaks a tie (Fresh's arbitration); a remaining tie picks the
-// lexicographically first path so the result is deterministic.
+// scan reads every registry file. Version 2 allows several workspaces per canonical root,
+// so dedup is by identical stable id: of two files with the same identity, the fresher
+// LastFocusedAt wins and a remaining tie picks the lexicographically first path. Distinct
+// identities under one root are distinct workspaces (co-tenants). The result is ordered
+// root group first (roots by their freshest LastFocusedAt, then root path) and freshest
+// first inside a root, so the ordering is deterministic.
 func (r *Registry) scan() ([]Workspace, []error) {
 	dirEntries, err := os.ReadDir(r.dir)
 	if err != nil {
@@ -376,28 +469,39 @@ func (r *Registry) scan() ([]Workspace, []error) {
 			problems = append(problems, fmt.Errorf("workspace: %s: %w", path, err))
 			continue
 		}
-		old, ok := best[file.Root]
+		old, ok := best[file.StableID]
 		if !ok || fresher(file, path, old.file, old.path) {
-			best[file.Root] = candidate{path: path, file: file}
+			best[file.StableID] = candidate{path: path, file: file}
 		}
 	}
 	out := make([]Workspace, 0, len(best))
+	rootFresh := make(map[string]int64, len(best))
 	for _, c := range best {
 		out = append(out, Workspace{File: c.file, Path: c.path})
+		if c.file.LastFocusedAt > rootFresh[c.file.Root] {
+			rootFresh[c.file.Root] = c.file.LastFocusedAt
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].File.LastFocusedAt != out[j].File.LastFocusedAt {
-			return out[i].File.LastFocusedAt > out[j].File.LastFocusedAt
+		a, b := out[i].File, out[j].File
+		if rootFresh[a.Root] != rootFresh[b.Root] {
+			return rootFresh[a.Root] > rootFresh[b.Root]
 		}
-		if out[i].File.Label != out[j].File.Label {
-			return out[i].File.Label < out[j].File.Label
+		if a.Root != b.Root {
+			return a.Root < b.Root
 		}
-		return out[i].File.Root < out[j].File.Root
+		if a.LastFocusedAt != b.LastFocusedAt {
+			return a.LastFocusedAt > b.LastFocusedAt
+		}
+		if a.Label != b.Label {
+			return a.Label < b.Label
+		}
+		return a.StableID < b.StableID
 	})
 	return out, problems
 }
 
-// fresher reports whether a beats b in the per-root arbitration.
+// fresher reports whether a beats b in the duplicate-identity arbitration.
 func fresher(a WorkspaceFile, aPath string, b WorkspaceFile, bPath string) bool {
 	if a.LastFocusedAt != b.LastFocusedAt {
 		return a.LastFocusedAt > b.LastFocusedAt
@@ -458,8 +562,9 @@ func validateStableID(id string) error {
 	return nil
 }
 
-// readWorkspaceFile reads and validates one registry file. A newer version is an error;
-// the file is not modified.
+// readWorkspaceFile reads and validates one registry file. Version 1 (one workspace per
+// root) and version 2 (co-tenant workspaces) load; a newer version is an error and the file
+// is never modified. The version is upgraded only when the workspace is saved again.
 func readWorkspaceFile(path string) (WorkspaceFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -475,6 +580,9 @@ func readWorkspaceFile(path string) (WorkspaceFile, error) {
 	if file.Version < 1 {
 		return WorkspaceFile{}, fmt.Errorf("workspace: invalid version %d", file.Version)
 	}
+	// Version 1 files (one workspace per canonical root) are registry v1; they keep
+	// loading unchanged and are rewritten as version 2 by the next save, keeping the
+	// stable id and therefore the workspace's session directory.
 	if file.Root == "" {
 		return WorkspaceFile{}, errors.New("workspace: root is empty")
 	}

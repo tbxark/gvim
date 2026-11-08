@@ -218,3 +218,50 @@ func TestCheckReadsAMirrorFeedVersionKey(t *testing.T) {
 }
 
 var _ = json.Marshal
+
+func TestLastSurvivesTheStamp(t *testing.T) {
+	srv, count := feedServer(t, 200, `{"tag_name":"v0.4.2","html_url":"https://example.com/releases/0.4.2"}`)
+	stampPath := filepath.Join(t.TempDir(), "update-check.json")
+	now := time.Date(2026, 2, 2, 9, 0, 0, 0, time.UTC)
+	c := &Checker{Current: "0.4.1", URL: srv.URL, StampPath: stampPath, Now: func() time.Time { return now }}
+	if _, err := c.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// A second launch inside the interval learns the release from the stamp without
+	// asking the feed.
+	next := &Checker{Current: "0.4.1", URL: srv.URL, StampPath: stampPath, Now: func() time.Time { return now.Add(time.Hour) }}
+	if next.Due() {
+		t.Fatal("a launch inside the interval is due")
+	}
+	rel, at, ok := next.Last()
+	if !ok || rel.Version != "0.4.2" || rel.URL != "https://example.com/releases/0.4.2" {
+		t.Fatalf("Last = %+v, %v, %v; want the stored release", rel, at, ok)
+	}
+	if !at.Equal(now) {
+		t.Fatalf("Last checked at %v, want %v", at, now)
+	}
+	if *count != 1 {
+		t.Fatalf("requests = %d, want 1", *count)
+	}
+	// A check that finds nothing current stores no release, so a later launch does not
+	// paint a stale one.
+	current := &Checker{Current: "0.4.2", URL: srv.URL, StampPath: stampPath}
+	if _, err := current.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if rel, _, ok := current.Last(); !ok || rel.Version != "" {
+		t.Fatalf("Last after an up-to-date check = %+v, %v; want a stamp without a release", rel, ok)
+	}
+	// An old timestamp-only stamp still debounces and has no release.
+	legacy := filepath.Join(t.TempDir(), "legacy.json")
+	if err := os.WriteFile(legacy, []byte(`{"checked": 1700000000}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := &Checker{Current: "0.4.1", URL: srv.URL, StampPath: legacy, Now: func() time.Time { return time.Unix(1700000100, 0) }}
+	if old.Due() {
+		t.Fatal("a timestamp-only stamp inside the interval is due")
+	}
+	if _, _, ok := old.Last(); !ok {
+		t.Fatal("a timestamp-only stamp should still be readable")
+	}
+}

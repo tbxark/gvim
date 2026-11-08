@@ -504,10 +504,30 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// failure.
 	themeReg := theme.NewRegistry(userThemeDir())
 	_ = themeReg.Reload()
+	// URL themes are fetched at startup only (the bounded request runs before the
+	// program exists, never in Update): the registry reads the app-written cache for
+	// runtime theme switches, so the Settings path never waits on the network.
+	if dir, err := config.Dir(); err == nil {
+		themeReg.SetURLCacheDir(theme.URLCacheDir(dir))
+	}
 	themeCat := newThemeCatalog(themeReg)
-	th, themeRef, err := runTheme(opts.Theme, cfg, themeReg)
+	th, themeRef, themeWarn, err := runTheme(ctx, opts.Theme, cfg, themeReg)
 	if err != nil {
-		return nil, err
+		// A URL theme that cannot be fetched or read from its cache falls back to the
+		// default theme with a clear notice instead of failing the start (an offline
+		// first run must still open the editor); other theme errors stay fatal as
+		// before.
+		if theme.IsURLForm(effectiveThemeRef(opts.Theme, cfg)) {
+			themeWarn = fmt.Sprintf("%v; using %q", err, "dark")
+			th, err = themeReg.Load("dark")
+			themeRef = "dark"
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if themeWarn != "" {
+		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: "+themeWarn)
 	}
 	var files *finder.Index
 	if opts.Remote != nil {
@@ -696,6 +716,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		openNotices = append(openNotices, connectNotice)
 	}
 	var remoteFiles *finder.Index
+	var remoteGit *remoteGitStatus
 	if opts.Remote != nil {
 		// The slot now has the real remote FileSystem: give the editor the file access and
 		// park the remote file for the root's first command. Installing the access is
@@ -732,10 +753,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// Project search and Git Grep run on the remote host through the authority's
 		// one-shot surface (the gate still applies); their results carry absolute remote
 		// paths, so selecting one opens through the remote document access. Project
-		// replace stays unwired (remoteProjectReplace is nil): a safe remote replace needs
-		// verified remote reads/writes and a backup/atomic strategy. The local ports stay
+		// replacement reads and writes each candidate through the authority file system
+		// with the same trust gate: bounded reads, atomic remote writes, stale/changed
+		// files skipped, cancellation and a partial-write report. The local ports stay
 		// cleared by remoteRootPorts for every other caller.
-		installRemoteSearchPorts(&deps.Root, authSlot.OneShot(), remoteRoot, envProvider.Overlay)
+		installRemoteSearchPorts(&deps.Root, authSlot.OneShot(), authSlot.Files(), authGate, remoteRoot, authSlot.Label(), envProvider.Overlay)
 		// The read-only remote explorer: the tree lists the remote directories through
 		// the authority file system, one command at a time, so the update loop never
 		// waits on the remote host. No local fallback: every listing is remote, the
@@ -746,6 +768,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		deps.Explorer = tui.NewRemoteExplorerTree(remoteRoot, newAuthorityDirLoader(authSlot, authGate, remoteRoot))
 		deps.ShowExplorer = true
 		deps.Ops = nil
+		// Remote git marks and the quick-open file preview run through the same authority
+		// (remote cwd, remote env delta, spawn/trust gate), never through the local git or
+		// the local file system. The git read is briefly cached so save/watch/reload bursts
+		// share one remote command; the reconnect hook invalidates it and restarts the
+		// remote file index.
+		remoteGit = installRemoteDataPorts(&deps.Root, authSlot, remoteRoot, envProvider.Overlay)
 	}
 	// Remote external-change watching: bridge the authority's remote watch into the root's
 	// existing watch pipeline (RootPorts.Watch/WatchDirs). A local launch gets nil here and
@@ -814,6 +842,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}
 	if opts.Remote != nil {
 		notices = append(notices, remoteEditingNotice(opts.Remote, deps.StartupOpen))
+	}
+	if themeWarn != "" {
+		notices = append(notices, themeWarn)
 	}
 	deps.Notice = strings.Join(notices, "; ")
 	if opts.Daemon != nil && opts.Daemon.Mode == DaemonServe {
@@ -947,6 +978,16 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			// bump there drops events from the dead one before they can reach the UI.
 			AfterReconnect: func() (int, error) {
 				remoteFileWatch.Reconnected()
+				// The remote git markers and the file list were read from the carrier
+				// that just dropped: invalidate the cached status (the TUI re-reads the
+				// marks in its reconnect command) and re-enumerate the remote files on
+				// the restored carrier (the palette's loading poll picks the new list up).
+				if remoteGit != nil {
+					remoteGit.Invalidate()
+				}
+				if remoteFiles != nil {
+					remoteFiles.Restart()
+				}
 				return restartLSPAfterReconnect(authSlot, deps.LSP)
 			},
 		})
@@ -1166,32 +1207,35 @@ func settingsFor(opts Options, cfg config.Config) tui.Settings {
 
 // runTheme returns the theme a session uses: the flag, else the config theme.
 // Both are config theme values (a bundled name, builtin://name, a path relative
-// to the user theme dir, or file://) and resolve through the registry. The
-// config theme is "dark" unless a file sets another. The second result is the
-// portable ref the TUI keeps so it can apply the theme again.
-func runTheme(flag string, cfg config.Config, reg *theme.Registry) (theme.Theme, string, error) {
-	ref := flag
-	if ref == "" {
-		ref = cfg.Theme
-	}
-	if ref == "" {
-		ref = "dark"
-	}
+// to the user theme dir, file://, or an http(s) URL to a theme JSON file) and
+// resolve through the registry/URL fetcher. The config theme is "dark" unless a
+// file sets another. The second result is the portable ref the TUI keeps so it
+// can apply the theme again; the third is a non-fatal warning (a URL theme served
+// from the last-known-good cache, or a cache that could not be written).
+func runTheme(ctx context.Context, flag string, cfg config.Config, reg *theme.Registry) (theme.Theme, string, string, error) {
+	ref := effectiveThemeRef(flag, cfg)
 	if err := theme.ValidateForm(ref); err != nil {
-		return theme.Theme{}, "", err
+		return theme.Theme{}, "", "", err
+	}
+	if theme.IsURLForm(ref) {
+		th, warning, err := fetchURLTheme(ctx, ref, reg)
+		if err != nil {
+			return theme.Theme{}, "", "", err
+		}
+		return th, strings.TrimSpace(ref), warning, nil
 	}
 	th, err := reg.Load(ref)
 	if err != nil {
 		if flag == "" {
 			err = inConfigFile(cfg, "theme", err)
 		}
-		return theme.Theme{}, "", err
+		return theme.Theme{}, "", "", err
 	}
 	canonical, err := reg.Canonical(ref)
 	if err != nil {
 		canonical = ref
 	}
-	return th, canonical, nil
+	return th, canonical, "", nil
 }
 
 // configProblems lists the problems of loading the config: the diagnostics of the files, then the

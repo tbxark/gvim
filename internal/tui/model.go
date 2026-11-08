@@ -468,6 +468,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// remote workspace authority.
 		return m, m.beginAuthorityReconnect()
 	}
+	if forced, ok := msg.(updateForcedMsg); ok {
+		m.applyUpdateStatus(forced.status)
+		return m, nil
+	}
 	if checked, ok := msg.(updateCheckedMsg); ok {
 		// The release check finished: the status row paints the answer from here
 		// on (no notice: an available update is not an interruption).
@@ -487,7 +491,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// local buffer. The app's post-reconnect work (restarting the remote language
 		// servers that were running, reloading the remote tree) runs in commands too,
 		// never on the update goroutine.
-		cmds := []tea.Cmd{m.startupOpenCmd()}
+		// The git marks are re-read with the same reconnect (a remote read through the
+		// authority; a local read stays the ordinary one).
+		cmds := []tea.Cmd{m.startupOpenCmd(), m.gitCmd()}
 		if explorer := m.remoteExplorerReconnectCmd(); explorer != nil {
 			cmds = append(cmds, explorer)
 		}
@@ -747,7 +753,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusEditor()
 		}
 	case expanel.ReloadMsg:
-		cmd = m.reloadTreeAsync()
+		cmd = m.refreshExplorerCmd()
 	case expanel.CloseMsg:
 		m.closeExplorer()
 	case expanel.FocusMsg:
@@ -1558,10 +1564,9 @@ func (m *Model) openPalette(query string) tea.Cmd {
 	if remote {
 		root = m.fileRoot
 	}
-	var preview palette.Previewer
-	if !remote {
-		preview = m.root.ports.Preview
-	}
+	// The port is the launch's previewer: the local reader for a local launch, the
+	// authority-backed remote reader for a remote one (run.go installs it).
+	preview := m.root.ports.Preview
 	p := palette.New(palette.Options{
 		Query:    query,
 		Root:     root,
@@ -1870,6 +1875,9 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		return cmd, true
 	}
 	if cmd, ok := m.viewAction(action, args); ok {
+		return cmd, true
+	}
+	if cmd, ok := m.updateAction(action); ok {
 		return cmd, true
 	}
 	if m.encodingAction(action, args) {

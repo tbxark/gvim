@@ -124,24 +124,53 @@ type Checker struct {
 	StampPath string
 }
 
-// Due reports whether a check is allowed now: the stamp is missing, unreadable,
-// or older than the interval.
-func (c *Checker) Due() bool {
+// stamp is the file that remembers the last successful check, so a launch inside
+// the interval neither asks the feed again nor forgets a release it already knows.
+// A version 1 file carried only the timestamp; the extra fields are optional, so
+// such a file still debounces (and reports no known release).
+type stamp struct {
+	Checked int64  `json:"checked"`
+	Latest  string `json:"latest,omitempty"`
+	URL     string `json:"url,omitempty"`
+}
+
+// readStamp returns the stored stamp, or false when there is none or it is
+// unreadable.
+func (c *Checker) readStamp() (stamp, bool) {
 	if c.StampPath == "" {
-		return true
+		return stamp{}, false
 	}
 	data, err := os.ReadFile(c.StampPath)
 	if err != nil {
+		return stamp{}, false
+	}
+	var st stamp
+	if err := json.Unmarshal(data, &st); err != nil || st.Checked <= 0 {
+		return stamp{}, false
+	}
+	return st, true
+}
+
+// Due reports whether a check is allowed now: the stamp is missing, unreadable,
+// or older than the interval.
+func (c *Checker) Due() bool {
+	st, ok := c.readStamp()
+	if !ok {
 		return true
 	}
-	var stamp struct {
-		Checked int64 `json:"checked"`
-	}
-	if err := json.Unmarshal(data, &stamp); err != nil || stamp.Checked <= 0 {
-		return true
-	}
-	then := time.Unix(stamp.Checked, 0)
+	then := time.Unix(st.Checked, 0)
 	return c.now().Sub(then) >= c.interval()
+}
+
+// Last returns the release the last successful check recorded, and when that
+// check ran. It reports false when no check has succeeded. This is what lets a
+// launch inside the interval paint the indicator without asking the feed.
+func (c *Checker) Last() (Release, time.Time, bool) {
+	st, ok := c.readStamp()
+	if !ok {
+		return Release{}, time.Time{}, false
+	}
+	return Release{Version: st.Latest, URL: st.URL}, time.Unix(st.Checked, 0), true
 }
 
 // CheckIfDue runs Check when Due says it may, and reports nil (no error) when the
@@ -177,10 +206,10 @@ func (c *Checker) Check(ctx context.Context) (*Release, error) {
 		return nil, err
 	}
 	if Compare(latest, c.Current) <= 0 {
-		c.stamp()
+		c.stamp("", "")
 		return nil, nil
 	}
-	c.stamp()
+	c.stamp(latest, page)
 	return &Release{Version: latest, URL: page}, nil
 }
 
@@ -246,18 +275,17 @@ func parseFeed(body []byte) (version, page string, err error) {
 	return strings.TrimPrefix(strings.TrimPrefix(version, "v"), "V"), page, nil
 }
 
-// stamp remembers a successful check. Best effort: a stamp that cannot be
-// written only means the next launch asks the feed again.
-func (c *Checker) stamp() {
+// stamp remembers a successful check and, when there is one, the release it
+// found. Best effort: a stamp that cannot be written only means the next launch
+// asks the feed again.
+func (c *Checker) stamp(latest, page string) {
 	if c.StampPath == "" {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(c.StampPath), 0o700); err != nil {
 		return
 	}
-	data, err := json.Marshal(struct {
-		Checked int64 `json:"checked"`
-	}{c.now().Unix()})
+	data, err := json.Marshal(stamp{Checked: c.now().Unix(), Latest: latest, URL: page})
 	if err != nil {
 		return
 	}

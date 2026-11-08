@@ -63,6 +63,7 @@ const (
 	StatusSegmentTrust           // the workspace-trust level: opens the Workspace Trust dialog
 	StatusSegmentMessages        // the status message: opens the warnings list (the status log)
 	StatusSegmentTerminalRestart // the dock's shell has exited: restarts the terminal
+	StatusSegmentUpdate          // a newer release is known: shows the update details
 )
 
 // HitTarget is the result of a hit test. Index depends on Kind. Menu labels,

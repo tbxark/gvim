@@ -21,6 +21,7 @@ import (
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
+	"github.com/tbxark/gvim/updatecheck"
 )
 
 // FileTarget is one file argument. Line and Col are 1-based. Zero means the
@@ -163,6 +164,13 @@ func (o Options) Validate() error {
 	if o.Theme != "" {
 		if err := theme.ValidateForm(o.Theme); err != nil {
 			return fmt.Errorf("--theme: %w", err)
+		}
+		if theme.IsURLForm(o.Theme) {
+			// The same transport policy as the update check, applied before any
+			// request: https, or http only on the loopback interface.
+			if _, err := updatecheck.ValidateURL(o.Theme); err != nil {
+				return fmt.Errorf("--theme: %w", err)
+			}
 		}
 		if theme.IsNamedForm(o.Theme) && !slices.Contains(theme.Names(), o.Theme) {
 			// A plain name may also be a user theme: check the user theme dir, so

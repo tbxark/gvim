@@ -967,8 +967,9 @@ func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
 		if s.Update == "" {
 			return statusSeg{}, false
 		}
-		// Informational only: gvim shows the release, it does not self-update.
-		return statusSeg{text: pad(s.Update)}, true
+		// gvim shows the release and does not self-update: the click opens the
+		// update details instead of starting an install.
+		return statusSeg{text: pad(s.Update), kind: HitStatusSegment, id: StatusSegmentUpdate}, true
 	}
 	// {warnings} and plugin tokens: parsed, not painted by gvim.
 	return statusSeg{}, false

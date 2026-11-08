@@ -63,6 +63,19 @@ func (m *Model) RunningTerminals() []WorkspaceRunningTerminal {
 	return out
 }
 
+// CanCloseTabForWorkspaceExtract reports whether the extract action could close the active
+// tab right now: the tab surface exists and the active tab is path. The workspace layer
+// checks this BEFORE it queues the switch, so a tab that changed during the extraction is
+// refused while it is still open (nothing is closed, nothing moves).
+func (m *Model) CanCloseTabForWorkspaceExtract(path string) bool {
+	if m.tabPort() == nil {
+		return false
+	}
+	i := m.activeTab()
+	tabs := m.ed.Tabs()
+	return i >= 0 && i < len(tabs) && tabs[i].Path == path
+}
+
 // CloseTabForWorkspaceExtract force-closes the active tab when its path is path, without
 // asking and without writing: the extract action has already carried the tab's unsaved
 // text into the target workspace's session, so closing the source tab saves nothing and

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"path/filepath"
@@ -23,6 +24,9 @@ import (
 // replacement waiting for its confirmation.
 type projectSearchState struct {
 	panel *searchpanel.Panel
+	// replaceCancel cancels an in-flight remote replacement when a new project search
+	// opens (the remote replacer checks its context between files).
+	replaceCancel context.CancelFunc
 }
 
 // projectReplaceTag marks the confirmation of a project-wide replacement.
@@ -31,7 +35,12 @@ type projectReplaceTag struct{ req searchpanel.ReplaceRequest }
 // projectReplaceDoneMsg carries the plan of a project-wide replacement.
 type projectReplaceDoneMsg struct {
 	result searchpanel.ReplaceResult
-	err    error
+	// remote marks a replacement the remote replacer already wrote on the host: the root
+	// applies no local edits and claims no pending Save All.
+	remote       bool
+	remoteResult searchpanel.RemoteReplaceResult
+	remoteTarget string
+	err          error
 }
 
 // remoteSearchUnsupported refuses the project replacement confirmation in a remote
@@ -61,7 +70,12 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 		return nil
 	}
 	// A second open while the first panel is still on the stack would leave the first
-	// panel's stream running behind the new one: cancel it first.
+	// panel's stream running behind the new one: cancel it first. An in-flight remote
+	// replacement is cancelled too (it checks its context between remote files).
+	if m.proj.replaceCancel != nil {
+		m.proj.replaceCancel()
+		m.proj.replaceCancel = nil
+	}
 	if m.proj.panel != nil && m.proj.panel.Active() {
 		m.proj.panel.Dismiss()
 		m.popOverlay()
@@ -259,11 +273,13 @@ func (m *Model) projectMatchAction(forward bool) tea.Cmd {
 // askProjectReplace fills the replacement with the open buffers' fresh text and asks
 // the user to confirm it.
 func (m *Model) askProjectReplace(req searchpanel.ReplaceRequest) tea.Cmd {
-	if m.remoteSearchUnsupported() {
+	r := m.root.ports.ProjectReplace
+	if r == nil {
+		m.notice = "Replacing across files is not supported in this port"
 		return nil
 	}
-	if m.root.ports.ProjectReplace == nil {
-		m.notice = "Replacing across files is not supported in this port"
+	remote, isRemote := r.(searchpanel.RemoteReplacer)
+	if !isRemote && m.remoteSearchUnsupported() {
 		return nil
 	}
 	sources := make(map[string]searchpanel.SourceFile)
@@ -278,10 +294,23 @@ func (m *Model) askProjectReplace(req searchpanel.ReplaceRequest) tea.Cmd {
 			req.Files[i].Text = src.Text
 		}
 	}
+	target := ""
+	if isRemote {
+		target = remote.RemoteTarget()
+	}
+	m.pushOverlay(prompt.NewConfirm(m.styles, projectReplaceQuestion(req, target), projectReplaceTag{req: req}))
+	return nil
+}
+
+// projectReplaceQuestion is the confirmation text. A remote target is stated in the
+// question, so a remote replacement is never mistaken for a local one.
+func projectReplaceQuestion(req searchpanel.ReplaceRequest, remoteTarget string) string {
 	files := len(req.Files)
 	q := fmt.Sprintf("Replace %d %s in %d %s?", req.Matches, pluralWord(req.Matches, "match"), files, pluralWord(files, "file"))
-	m.pushOverlay(prompt.NewConfirm(m.styles, q, projectReplaceTag{req: req}))
-	return nil
+	if remoteTarget != "" {
+		q = fmt.Sprintf("Replace %d %s in %d %s on %s?", req.Matches, pluralWord(req.Matches, "match"), files, pluralWord(files, "file"), remoteTarget)
+	}
+	return q
 }
 
 // projectReplaceAnswer runs the confirmed replacement, or reports that it was
@@ -297,6 +326,18 @@ func (m *Model) projectReplaceAnswer(tag projectReplaceTag, d prompt.Done) tea.C
 		return nil
 	}
 	req := tag.req
+	if rr, ok := r.(searchpanel.RemoteReplacer); ok {
+		if m.proj.replaceCancel != nil {
+			m.proj.replaceCancel()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		m.proj.replaceCancel = cancel
+		target := rr.RemoteTarget()
+		return func() tea.Msg {
+			res, err := rr.ProjectReplaceRemote(ctx, req)
+			return projectReplaceDoneMsg{remote: true, remoteResult: res, remoteTarget: target, err: err}
+		}
+	}
 	return func() tea.Msg {
 		res, err := r.ProjectReplace(req)
 		return projectReplaceDoneMsg{result: res, err: err}
@@ -309,6 +350,9 @@ func (m *Model) projectReplaceAnswer(tag projectReplaceTag, d prompt.Done) tea.C
 // Files whose text changed since the search are skipped, never written at a stale
 // offset.
 func (m *Model) projectReplaceDone(msg projectReplaceDoneMsg) tea.Cmd {
+	if msg.remote {
+		return m.remoteProjectReplaceDone(msg)
+	}
 	if msg.err != nil {
 		m.notice = "Replace: " + msg.err.Error()
 		return nil
@@ -352,6 +396,37 @@ func (m *Model) projectReplaceDone(msg projectReplaceDoneMsg) tea.Cmd {
 	return m.ApplyFileEdits(edits, func(res FileEditResult) tea.Cmd {
 		return m.finishProjectReplace(files+res.Files, tabs+res.Tabs, skipped+len(res.Skipped))
 	})
+}
+
+// remoteProjectReplaceDone reports a replacement the remote replacer already wrote on the
+// host. No local edits are applied and no Save All is claimed: the files are changed on
+// the remote disk. A failure keeps the partial count visible (earlier files were
+// atomically written; there is no cross-file rollback).
+func (m *Model) remoteProjectReplaceDone(msg projectReplaceDoneMsg) tea.Cmd {
+	m.proj.replaceCancel = nil
+	switch {
+	case msg.err != nil:
+		if msg.remoteResult.Files > 0 {
+			m.notice = fmt.Sprintf("Replace on %s: %v; %d %s already written", msg.remoteTarget, msg.err, msg.remoteResult.Files, pluralWord(msg.remoteResult.Files, "file"))
+		} else {
+			m.notice = "Replace on " + msg.remoteTarget + ": " + msg.err.Error()
+		}
+	case msg.remoteResult.Files == 0 && msg.remoteResult.Skipped == 0:
+		m.notice = "Replace on " + msg.remoteTarget + ": no file matched any more"
+	default:
+		m.notice = fmt.Sprintf("%d %s changed on %s", msg.remoteResult.Files, pluralWord(msg.remoteResult.Files, "file"), msg.remoteTarget)
+		if msg.remoteResult.Skipped > 0 {
+			m.notice += fmt.Sprintf("; %d skipped", msg.remoteResult.Skipped)
+		}
+	}
+	m.lsp.stale = true
+	p := m.proj.panel
+	if p == nil {
+		return nil
+	}
+	p.SetNotice(m.notice)
+	p.SetSources(m.projectOpenFiles(), m.projectCurrentFile())
+	return p.ReSearch()
 }
 
 // finishProjectReplace says how many files and tabs a replacement changed, and refreshes

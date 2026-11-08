@@ -595,7 +595,7 @@ func (p *Picker) Draw(g *grid.Grid) {
 // paintRows draws the rows in view inside the box.
 func (p *Picker) paintRows(g *grid.Grid, geo geom) {
 	if len(p.rows) == 0 {
-		g.Put(geo.left+2, geo.top+1, geo.left+geo.bw-2, "No items", p.st.muted)
+		g.Put(geo.left+2, geo.top+1, geo.left+geo.bw-2, pickerText("gvim.picker.no_items", "No items"), p.st.muted)
 		return
 	}
 	for k := range geo.rows {

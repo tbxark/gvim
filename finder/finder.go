@@ -139,11 +139,23 @@ func splitNUL(data []byte, atEOF bool) (advance int, token []byte, err error) {
 
 // Index is the file list of one root, filled in the background. It is safe for
 // concurrent use by the picker and the goroutine that fills it.
+//
+// Restart re-enumerates in place: the same *Index stays the palette's Files port, the old
+// run is cancelled and waited for, the collected list is cleared, and a new run starts.
+// Snapshot reports loading from the moment Restart begins, so a palette polling while the
+// index loads sees a coherent (empty or partial) new list instead of a stale complete one.
 type Index struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	parent context.Context
+	enum   func(context.Context, func(string) bool) error
+
+	// lifecycle serializes Start/Close/Restart; mu guards the state readers use.
+	lifecycle sync.Mutex
+	cancel    context.CancelFunc
+	closed    bool
 
 	mu        sync.Mutex
+	done      chan struct{}
+	gen       uint64
 	files     []string
 	truncated bool
 	err       error
@@ -161,22 +173,91 @@ func Start(ctx context.Context, root string) *Index {
 // startWith is Start over any enumeration. Tests use it to feed a fake list.
 // enum must return when ctx is done and must stop when emit returns false.
 func startWith(ctx context.Context, enum func(context.Context, func(string) bool) error) *Index {
-	ctx, cancel := context.WithCancel(ctx)
-	x := &Index{cancel: cancel, done: make(chan struct{})}
-	go func() {
-		defer close(x.done)
-		err := enum(ctx, x.add)
-		x.mu.Lock()
-		x.err = err
-		x.mu.Unlock()
-	}()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	x := &Index{parent: ctx, enum: enum}
+	x.lifecycle.Lock()
+	x.startLocked()
+	x.lifecycle.Unlock()
 	return x
 }
 
-// add appends one file. It returns false once MaxFiles files are held.
+// startLocked starts one enumeration run: a fresh done channel and generation, then the
+// goroutine. The caller holds lifecycle.
+func (x *Index) startLocked() {
+	x.mu.Lock()
+	x.gen++
+	gen := x.gen
+	done := make(chan struct{})
+	x.done = done
+	x.mu.Unlock()
+	ctx, cancel := context.WithCancel(x.parent)
+	x.cancel = cancel
+	go x.run(ctx, gen, done)
+}
+
+// run enumerates once. Its result is stored only when it is still the current run, so a
+// run superseded by Restart cannot overwrite the fresh state; its own done channel is
+// always closed.
+func (x *Index) run(ctx context.Context, gen uint64, done chan struct{}) {
+	err := x.enum(ctx, func(rel string) bool { return x.addFor(gen, rel) })
+	x.mu.Lock()
+	if x.gen == gen {
+		x.err = err
+	}
+	close(done)
+	x.mu.Unlock()
+}
+
+// Restart cancels the current run, waits for it to stop, discards the list and starts a new
+// enumeration with the same function and parent context. A closed or enum-less index
+// (Idle) ignores it. It is safe to call while Snapshot is read: Snapshot reports loading
+// from the restart on.
+func (x *Index) Restart() {
+	x.lifecycle.Lock()
+	defer x.lifecycle.Unlock()
+	if x.enum == nil || x.closed {
+		return
+	}
+	x.mu.Lock()
+	oldDone := x.done
+	old := x.cancel
+	x.gen++
+	gen := x.gen
+	done := make(chan struct{})
+	x.done = done
+	x.files = nil
+	x.truncated = false
+	x.err = nil
+	x.mu.Unlock()
+	if old != nil {
+		old()
+	}
+	<-oldDone
+	ctx, cancel := context.WithCancel(x.parent)
+	x.cancel = cancel
+	go x.run(ctx, gen, done)
+}
+
+// add appends one file to the current run. It is the one-file form the older tests use;
+// the running enumeration uses addFor with its own generation so a superseded run cannot
+// inject files after a Restart.
 func (x *Index) add(rel string) bool {
 	x.mu.Lock()
+	gen := x.gen
+	x.mu.Unlock()
+	return x.addFor(gen, rel)
+}
+
+// addFor appends one file of run gen. It returns false when the run was superseded or
+// MaxFiles files are held.
+func (x *Index) addFor(gen uint64, rel string) bool {
+	x.mu.Lock()
 	defer x.mu.Unlock()
+	if x.gen != gen {
+		return false
+	}
 	if len(x.files) >= MaxFiles {
 		x.truncated = true
 		return false
@@ -187,18 +268,20 @@ func (x *Index) add(rel string) bool {
 
 // Snapshot returns the files found so far and whether enumeration is still
 // running. The slice is never modified after it is returned, so the caller may
-// read it while enumeration continues. The state is read before the list: a
-// false loading then means the list holds every file, as add ran before done.
+// read it while enumeration continues. The state is read with the list: a false
+// loading then means the list holds every file of that run.
 func (x *Index) Snapshot() (files []string, loading bool) {
-	loading = !x.finished()
 	x.mu.Lock()
-	files = x.files
-	x.mu.Unlock()
-	return files, loading
+	defer x.mu.Unlock()
+	return x.files, !closedDone(x.done)
 }
 
 // Loading reports whether enumeration is still running.
-func (x *Index) Loading() bool { return !x.finished() }
+func (x *Index) Loading() bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return !closedDone(x.done)
+}
 
 // Truncated reports whether enumeration stopped at MaxFiles.
 func (x *Index) Truncated() bool {
@@ -215,18 +298,40 @@ func (x *Index) Err() error {
 	return x.err
 }
 
-// Done returns a channel that is closed when enumeration has finished.
-func (x *Index) Done() <-chan struct{} { return x.done }
-
-// Close stops enumeration and waits for the goroutine to exit.
-func (x *Index) Close() {
-	x.cancel()
-	<-x.done
+// Done returns a channel that is closed when the current enumeration finished. A Restart
+// replaces the channel; a caller that must see every run should call Done again after a
+// restart.
+func (x *Index) Done() <-chan struct{} {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.done
 }
 
-func (x *Index) finished() bool {
+// Close stops enumeration and waits for the goroutine to exit, then makes Restart a
+// no-op.
+func (x *Index) Close() {
+	x.lifecycle.Lock()
+	defer x.lifecycle.Unlock()
+	if x.closed {
+		return
+	}
+	x.closed = true
+	x.mu.Lock()
+	oldDone := x.done
+	x.mu.Unlock()
+	if x.cancel != nil {
+		x.cancel()
+	}
+	<-oldDone
+}
+
+// closedDone reports whether done is closed; done is never nil for an index built here.
+func closedDone(done chan struct{}) bool {
+	if done == nil {
+		return true
+	}
 	select {
-	case <-x.done:
+	case <-done:
 		return true
 	default:
 		return false

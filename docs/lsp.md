@@ -283,14 +283,28 @@ lines would have to be read from disk); that is a documented residual.
 Auto-popup is ported: with `editor.completion_popup_auto_show` on, typing a word character
 schedules a debounced popup after `editor.quick_suggestions_delay_ms` (default 150 ms; needs
 `editor.quick_suggestions`). Any non-word character, Esc, accepting, or a document/caret change
-cancels it, and there is no popup when the word prefix is empty. Fresh's immediate
-trigger-character path needs the server's `completionProvider.triggerCharacters`, which gvim's
-LSP port does not expose yet (the `editor.suggest_on_trigger_characters` key is parsed but has no
-effect); completion inside strings/comments is not suppressed (Fresh triggers there too).
-Multi-buffer words are ported: a bounded window from the middle of every other open tab (64 KiB
-each, at most 8, in tab order rather than Fresh's MRU order) contributes words below the active
-buffer's, and a word the active buffer already has is not duplicated. Fresh's dabbrev cycling
-provider is not ported.
+cancels it, and there is no popup when the word prefix is empty. A character the running server
+advertises through `completionProvider.triggerCharacters` (the static capability and dynamic
+`client/registerCapability` registrations are both read) opens the list immediately with no
+debounce when `editor.suggest_on_trigger_characters` is on; the trigger set is the union over the
+servers that serve completion for the document. Completion inside strings/comments is not
+suppressed (Fresh triggers there too).
+
+An open completion list is live-filtered: typing further word characters inserts them and
+narrows the rows that label or insert text starts with the longer word prefix, case-insensitively,
+without asking the server again, and a row without a server edit range gets one covering the typed
+prefix so accepting it replaces that prefix instead of duplicating it. If the filter empties, the
+list dismisses and completion is asked once for the new prefix. Non-word characters and Backspace
+still dismiss the list (Fresh re-filters for both too — residual), and the highlighted row returns
+to the first after a re-filter (Fresh keeps it by row identity — residual). Stale replies are still
+dropped by the document version/caret guard.
+
+Multi-buffer words are ported for the popup: a bounded window from the middle of every other open
+tab (64 KiB each, at most 8, in tab order rather than Fresh's MRU order) contributes words below
+the active buffer's, and a word the active buffer already has is not duplicated. Dabbrev cycling
+(`dabbrev_expand`, emacs M-/) already existed in gvim: it completes from earlier words of the
+active buffer, cycles on repeated presses with smart case and a bounded scan; Fresh's multi-buffer
+dabbrev (other buffers after the active one) is not ported, a documented residual.
 
 **Accepting a language-server completion.** A server item is inserted with everything the
 server asked for in one edit: its snippet text is expanded, the import edits of an

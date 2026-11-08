@@ -1,14 +1,13 @@
 package app
 
-// Extract tab to new workspace (#19b first slice) and the close-workspace running-terminal
-// report. Fresh's extract_tab_to_new_workspace moves a file tab into a new workspace
-// co-tenanting the same project root, carrying the live buffer's unsaved text and activating
-// the new workspace. gvim's registry v1 still keeps one workspace per canonical root, so
-// this slice roots the extracted tab at the FILE'S FOLDER: a new workspace for that folder,
-// its session written with the tab's cursor/top/page view and a stash of its unsaved text
-// before the source tab is force-closed. A folder that already is a workspace root (the
-// current one, or any other) is refused with a clear notice - the co-tenant model over one
-// root stays #19b - so the tab and its text are never silently dropped.
+// Extract tab to new workspace and the close-workspace running-terminal report. Fresh's
+// extract_tab_to_new_workspace moves a file tab into a new CO-TENANT workspace over the same
+// project root (labels "proj", "proj (2)", ...), carrying the live buffer's unsaved text and
+// activating the new workspace. Registry v2 allows several workspaces per canonical root, so
+// this now matches Fresh: the new workspace shares the current workspace's root, its session
+// is written with the tab's cursor/top/page view and a stash of the unsaved text before the
+// source tab is force-closed, and both workspaces keep independent sessions. The
+// large-file-overlay and no-file-path cases stay refused (the tab is left untouched).
 //
 // Update does no blocking I/O here: ExtractTab only reads the in-memory editor state and
 // returns a tea command; the registry, stash, session and materialization work runs in that
@@ -32,8 +31,7 @@ type extractTab struct {
 	sourceID string // the workspace the tab comes from
 	path     string
 	name     string
-	destRoot string // the file's folder, as a path (the command canonicalizes it)
-	label    string
+	destRoot string // the workspace root shared with the source workspace (the co-tenant)
 	file     session.FileState
 	unsaved  string
 }
@@ -58,11 +56,13 @@ func (m *workspaceManager) ExtractTab() (tui.WorkspaceCmd, error) {
 		return nil, errors.New("cannot extract: a large-file buffer's unsaved overlay is not carried yet")
 	}
 	ext := &extractTab{
+		// Fresh's extract keeps the source project root; the registry v2 co-tenant is
+		// another workspace over the same root, distinguished by its durable id and its
+		// numbered label.
 		sourceID: sess.ws.File.StableID,
 		path:     doc.Path,
 		name:     filepath.Base(doc.Path),
-		destRoot: filepath.Dir(doc.Path),
-		label:    filepath.Base(filepath.Clean(filepath.Dir(doc.Path))),
+		destRoot: sess.ws.File.Root,
 		file: session.FileState{
 			Path: doc.Path,
 			Line: doc.Cursor.Line + 1,
@@ -90,17 +90,7 @@ func (m *workspaceManager) ExtractTab() (tui.WorkspaceCmd, error) {
 			ext.file.Size, ext.file.MTimeUnixNano = size, mtime
 		}
 	}
-	// The same-root and existing-workspace decisions need canonical paths, i.e. disk
-	// metadata, so the command makes them (Update does no blocking I/O). A refusal then
-	// arrives as a notice and leaves the tab open, exactly as if it had been immediate.
 	return tui.WorkspaceCmdOf(func() { m.runExtractTab(ext) }), nil
-}
-
-// sameRootExtractError is the refusal of an extraction whose file folder already is the
-// workspace root: the tab would have to move into a co-tenant workspace over that root,
-// which the registry v1 (one workspace per root) does not have yet.
-func sameRootExtractError(root string) error {
-	return fmt.Errorf("cannot extract: %s is already the workspace root; a second workspace over the same root is not supported yet (the tab stays open)", root)
 }
 
 // runExtractTab is the command body: canonicalize and validate the destination, create the
@@ -121,25 +111,11 @@ func (m *workspaceManager) runExtractTab(ext *extractTab) {
 		m.notify(fmt.Errorf("cannot extract: %w", err))
 		return
 	}
-	if canonical == sess.ws.File.Root {
-		m.notify(sameRootExtractError(canonical))
-		return
-	}
-	if list, _ := m.reg.List(); len(list) > 0 {
-		for _, w := range list {
-			if w.File.Root == canonical {
-				m.notify(fmt.Errorf("cannot extract: a workspace already exists for %s (%q); extracting into an existing workspace is not supported yet; the tab stays open", canonical, w.File.Label))
-				return
-			}
-		}
-	}
-	ws, created, err := m.reg.Create(canonical, ext.label)
+	// Registry v2 co-tenant: a new workspace over the SAME root, never a reuse (Create
+	// would return the root's freshest workspace). The label gets Fresh's precedence.
+	ws, _, err := m.reg.CreateCoTenant(canonical, "")
 	if err != nil {
-		m.notify(fmt.Errorf("cannot extract: create the workspace: %w", err))
-		return
-	}
-	if !created {
-		m.notify(fmt.Errorf("cannot extract: a workspace already exists for %s (%q); the tab stays open", canonical, ws.File.Label))
+		m.notify(fmt.Errorf("cannot extract: create the co-tenant workspace: %w", err))
 		return
 	}
 	id := ws.File.StableID
@@ -176,6 +152,7 @@ func (m *workspaceManager) runExtractTab(ext *extractTab) {
 
 	var wait func() error
 	var serr error
+	var closed bool
 	if !m.runOnUI(func() {
 		m.mu.Lock()
 		active := m.active
@@ -185,40 +162,76 @@ func (m *workspaceManager) runExtractTab(ext *extractTab) {
 			serr = errors.New("cannot extract: the active workspace changed while extracting; the tab stays open")
 			return
 		}
-		if !cur.rt.model.CloseTabForWorkspaceExtract(ext.path) {
+		if !cur.rt.model.CanCloseTabForWorkspaceExtract(ext.path) {
 			serr = errors.New("cannot extract: the active tab changed while extracting; the tab stays open")
 			return
 		}
-		wait, serr = m.beginSelect(id)
+		// Safety order: the switch is queued FIRST and the source tab is closed only
+		// after it was accepted. A refused switch therefore leaves the tab (and its
+		// unsaved text) exactly where it was; no scenario closes the tab and then loses
+		// the workspace it was moving to.
+		wait, serr = m.beginExtractSelect(id)
 		if serr != nil {
-			// The switch could not start: put the tab back is not available here, so
-			// report and keep the new workspace (its session has the text) for a retry.
 			return
 		}
+		if !cur.rt.model.CloseTabForWorkspaceExtract(ext.path) {
+			// The tab changed between the check above and the close; the switch is
+			// already queued, so the extracted copy is kept in the new workspace and the
+			// source tab stays open (reported below, nothing is dropped).
+			return
+		}
+		closed = true
+		// The switch's own capture was taken before this close and still shows the
+		// extracted tab; a second snapshot now records the source workspace without it,
+		// so switching back never resurrects a duplicate tab.
+		m.enqueueCapture(cur)
 	}) {
 		discard()
 		m.notify(errors.New("cannot extract: the daemon is not ready; the tab stays open"))
 		return
 	}
 	if serr != nil {
-		err := serr
-		if errors.Is(err, errWorkspaceStale) {
-			// Another request won the switch: the tab was already closed and the new
-			// workspace holds its text; report the switch instead of a loss.
-			m.notify(errors.New("cannot extract: another workspace request superseded the switch; the text is kept in the new workspace"))
-			return
-		}
+		// The switch was refused synchronously, before the tab was closed: the tab is
+		// untouched, so dropping the just-created co-tenant loses nothing (its session
+		// data is kept like any closed workspace's).
 		discard()
-		m.notify(fmt.Errorf("cannot extract: %w; the tab stays open", err))
+		m.notify(fmt.Errorf("cannot extract: %w; the tab stays open", serr))
+		return
+	}
+	if !closed {
+		// The switch is queued but the source tab changed before it could be closed: the
+		// text is in the new workspace's session and the source tab is still open. Keep
+		// both and report exactly that state.
+		if wait != nil {
+			if err := wait(); err != nil {
+				m.notify(fmt.Errorf("cannot extract: the switch failed (%v); the source tab is still open and the text is kept in workspace %q", err, ws.File.Label))
+				return
+			}
+		}
+		m.report(fmt.Sprintf("Extracted %s into workspace %q; the source tab changed and is still open", ext.name, ws.File.Label))
 		return
 	}
 	if wait != nil {
 		if err := wait(); err != nil {
-			m.notify(fmt.Errorf("cannot extract: switch to the new workspace: %w", err))
+			// The tab was closed and its unsaved text lives in the new workspace's
+			// session: never discard it, and say where it was kept.
+			m.notify(fmt.Errorf("cannot extract: open the new workspace %q: %w; the tab's text is kept there", ws.File.Label, err))
 			return
 		}
 	}
 	m.report(fmt.Sprintf("Extracted %s into workspace %q", ext.name, ws.File.Label))
+}
+
+// beginExtractSelect starts the switch of an extraction. beginSelectFn is a test hook so
+// the data-safety regressions can inject a synchronous refusal and a queued-switch failure.
+func (m *workspaceManager) beginExtractSelect(id string) (func() error, error) {
+	m.mu.Lock()
+	hook := m.beginSelectFn
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(id)
+	}
+	return m.beginSelect(id)
 }
 
 // RunningTerminals implements the TUI's optional close surface: the running dock terminals

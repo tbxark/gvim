@@ -69,6 +69,10 @@ func (f *fakeWatchFS) Watch(ctx context.Context, dir string, _ hostos.WatchOptio
 	return w, nil
 }
 
+func (f *fakeWatchFS) ReadRange(context.Context, string, int64, int64) ([]byte, error) {
+	return nil, errors.New("not needed by the watch tests")
+}
+
 func (f *fakeWatchFS) ReadFile(context.Context, string, int64) ([]byte, error) {
 	return nil, errors.New("not needed by the watch tests")
 }

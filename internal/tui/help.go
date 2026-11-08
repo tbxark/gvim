@@ -10,7 +10,7 @@ import (
 
 // noBindingsText is the text the keymap lists show when the keymap cannot list its
 // bindings.
-const noBindingsText = "No keymap bindings are available"
+var noBindingsText = uiText("gvim.help.no_bindings", "No keymap bindings are available")
 
 // KeyBinding is one keymap binding as the help and keybinding views show it.
 // Chord is the canonical chord, such as "ctrl+s"; the steps of a multi-key
@@ -45,10 +45,16 @@ var contextTitles = map[string]string{
 	"terminal": "Terminal",
 }
 
+// contextTitleKeys names the catalogue keys of the context headings.
+var contextTitleKeys = map[string]string{
+	"normal": "gvim.help.context_editor", "global": "gvim.help.context_everywhere",
+	"file_explorer": "gvim.help.context_file_explorer", "terminal": "gvim.help.context_terminal",
+}
+
 // contextTitle is the heading of a context in the help.
 func contextTitle(ctx string) string {
 	if t, ok := contextTitles[ctx]; ok {
-		return t
+		return uiText(contextTitleKeys[ctx], t)
 	}
 	return ctx
 }

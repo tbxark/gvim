@@ -153,11 +153,8 @@ func TestRemoteRootPortsDisableLocalAdapters(t *testing.T) {
 	if _, err := ports.Projects.Open("/tmp/local"); err == nil {
 		t.Fatal("the remote project opener allowed a local switch")
 	}
-	marks, err := ports.Git.Marks("/remote/w")
-	if err != nil || len(marks) != 0 {
-		t.Fatalf("remote git marks = %v, %v (the local repository must not be read)", marks, err)
-	}
-	if _, ok := ports.Git.(remoteGitStatus); !ok {
+	// The helper clears Git; the remote branch installs the authority-backed port after it.
+	if ports.Git != nil {
 		t.Fatalf("the local git adapter is still wired in a remote workspace: %T", ports.Git)
 	}
 }

@@ -339,6 +339,35 @@ func (p *lspPort) Hover(path string, at buffer.Pos) (string, error) {
 	return text, err
 }
 
+// CompletionTriggerCharacters returns the union of the completion trigger
+// characters the running servers that serve completion for path advertise (static
+// initialize capabilities plus dynamic registrations). It reads the manager's
+// handles without opening the document or starting a server, so the root can call
+// it on the update loop; nil means nothing advertises a trigger character.
+func (p *lspPort) CompletionTriggerCharacters(path string) []string {
+	rec, ok := p.doc(path)
+	if !ok {
+		return nil
+	}
+	mgr := p.managerFor(rec.root)
+	handles := mgr.AllFor(path, manager.FeatureCompletion)
+	if len(handles) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, 4)
+	var out []string
+	for _, h := range handles {
+		for _, ch := range h.Capabilities().CompletionTriggerCharacters {
+			if ch == "" || seen[ch] {
+				continue
+			}
+			seen[ch] = true
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
 // Completion returns the completion items at at, merged over the servers that
 // serve completion for the language. Every range is in the rune columns of the
 // document, snippet text is expanded with its final caret offset, and an item whose

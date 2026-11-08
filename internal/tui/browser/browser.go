@@ -95,7 +95,11 @@ const (
 
 // label is the name of the mode, as the border notice says it.
 func (m sortMode) label() string {
-	return [...]string{"Name", "Size", "Modified"}[m]
+	return [...]string{
+		browserText("gvim.browser.column_name", "Name"),
+		browserText("gvim.browser.column_size", "Size"),
+		browserText("gvim.browser.column_modified", "Modified"),
+	}[m]
 }
 
 // sorted returns a copy of listed in the order of mode. Ties keep the order of
@@ -422,14 +426,14 @@ func (b *Browser) setInput(s string) {
 // toggleHidden flips Show Hidden and says so on the border.
 func (b *Browser) toggleHidden() {
 	b.showHidden = !b.showHidden
-	b.notice = onOff("Show Hidden", b.showHidden)
+	b.notice = onOff(browserText("gvim.browser.show_hidden", "Show Hidden"), b.showHidden)
 	b.refresh()
 }
 
 // cycleSort moves to the next sort order and says so on the border.
 func (b *Browser) cycleSort() {
 	b.sort = (b.sort + 1) % sortModes
-	b.notice = "Sort by " + b.sort.label()
+	b.notice = browserTextVars("gvim.browser.sort_by", "Sort by %{mode}", map[string]any{"mode": b.sort.label()})
 	b.entries = sorted(b.listed, b.sort)
 	b.refresh()
 }
@@ -655,9 +659,9 @@ func (b *Browser) Draw(g *grid.Grid) {
 	b.box = box{ok: true, x: x0, y: top, w: bw, h: vis}
 
 	ov := b.styles.Overlay
-	title := "Open File"
+	title := browserText("gvim.browser.title_open_file", "Open File")
 	if b.folderOnly {
-		title = "Switch Project"
+		title = browserText("gvim.browser.title_switch_project", "Switch Project")
 	}
 	if b.title != "" {
 		title = b.title
@@ -689,7 +693,7 @@ func (b *Browser) Draw(g *grid.Grid) {
 				st = ov.Selected
 			}
 		case len(b.rows) == 0:
-			text = "No matches"
+			text = browserText("gvim.browser.no_matches", "No matches")
 		}
 		boxLine(g, x0, y, bw, text, st, reserve)
 		if over {
@@ -700,9 +704,9 @@ func (b *Browser) Draw(g *grid.Grid) {
 			g.Set(x0+bw-2, y, " ", s)
 		}
 	}
-	hint := "Enter open · Alt+. hidden"
+	hint := browserText("gvim.browser.hint_open", "Enter open · Alt+. hidden")
 	if b.folderOnly {
-		hint = "Enter choose · Right enter · Alt+. hidden"
+		hint = browserText("gvim.browser.hint_choose", "Enter choose · Right enter · Alt+. hidden")
 	}
 	if b.notice != "" {
 		hint = b.notice

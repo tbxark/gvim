@@ -3,7 +3,6 @@ package palette
 import (
 	"bytes"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -242,7 +241,9 @@ func (p *Palette) previewCmd() tea.Cmd {
 	s.rel, s.data, s.ready, s.loading = rel, Preview{}, false, true
 	s.seq++
 	seq, read, root := s.seq, p.opts.Preview, p.opts.Root
-	path := filepath.Join(root, rel)
+	// A remote workspace's rows are remote paths: join with slashes, the way the row's
+	// OpenFileMsg path is built (never the client's filepath separator).
+	path := filePath(root, rel, p.opts.Remote)
 	return func() tea.Msg {
 		data, truncated, err := read.ReadHead(path, previewMaxBytes)
 		if err != nil {

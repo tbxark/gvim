@@ -76,3 +76,23 @@ func TestRankCmdSurfacesIndexErrorAndTruncation(t *testing.T) {
 		t.Fatalf("file ranked message = %+v", msg)
 	}
 }
+
+// recordingPreview records the paths the palette preview reads.
+type recordingPreview struct{ paths []string }
+
+func (r *recordingPreview) ReadHead(path string, _ int) ([]byte, bool, error) {
+	r.paths = append(r.paths, path)
+	return []byte("package a\n"), false, nil
+}
+
+// TestRemotePreviewReadsTheRemotePath checks a remote palette's preview reader receives the
+// remote absolute path (slash-joined), not a local filepath.Join of the client.
+func TestRemotePreviewReadsTheRemotePath(t *testing.T) {
+	t.Parallel()
+	pv := &recordingPreview{}
+	p := New(Options{Query: "", Root: "/remote/w", Remote: true, Files: &fakeFiles{files: []string{"src/a.go"}}, Ranker: &fakeRanker{}, Preview: pv})
+	settle(t, p, p.Init(), 8)
+	if len(pv.paths) == 0 || pv.paths[0] != "/remote/w/src/a.go" {
+		t.Fatalf("preview paths = %v, want the remote path", pv.paths)
+	}
+}

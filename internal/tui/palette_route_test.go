@@ -76,7 +76,10 @@ func TestCtrlPOpensThePaletteThroughTheRoot(t *testing.T) {
 	if top := h - 3 - 10; !strings.Contains(rows[top], "╭") {
 		t.Errorf("row %d = %q, want the top border of the palette card", top, rows[top])
 	}
-	if !strings.Contains(strings.Join(rows, "\n"), "Clear Warnings") {
+	// Any command row proves the sheet paints the rows: the first page is the alphabet
+	// start of the command list, so assert a row that is always on it rather than one
+	// whose position depends on how many rows exist (docs/ui.md).
+	if !strings.Contains(strings.Join(rows, "\n"), "Add Cursor Above") {
 		t.Error("the command rows are not painted")
 	}
 }

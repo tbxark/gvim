@@ -395,9 +395,13 @@ re-runs the launch argv instead of the resume argv. An agent or resume program i
 a local executable in a local PTY: the workspace authority (a remote/sandboxed
 shell) applies to the dock's plain shell tabs only, because a re-parenting
 authority would launch the remote login shell and ignore the agent argv.
-Separately, a remote workspace's project search and Git Grep run through the
-authority's bounded one-shot surface (see docs/architecture.md section 8.1);
-those are commands, not PTY sessions, so they never reparent an agent.
+Separately, a remote workspace's project search, Git Grep and project replace run
+through the authority: the searches are bounded one-shot commands, and a replacement
+reads and atomically rewrites each matched remote file through the authority file
+system (same match semantics as locally, stale/changed files skipped, bounded
+size/file/time budgets, cancellation, and a partial-write report with no cross-file
+rollback or undo). Those are commands and file operations, not PTY sessions, so they
+never reparent an agent.
 
 **Run Agent...** (hand-written palette row; Fresh has no command of this title
 because its agent sessions are plugin data) is a two-question dialog. The first

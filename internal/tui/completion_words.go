@@ -157,11 +157,19 @@ func (m *Model) afterTypedCompletionText(text string) tea.Cmd {
 		return nil
 	}
 	doc := m.ed.Active()
-	if doc == nil || isLargeDoc(doc) || !m.view.opts.QuickSuggestions {
+	if doc == nil || isLargeDoc(doc) {
 		return nil
 	}
 	r, ok := singleRune(text)
 	if !ok {
+		return nil
+	}
+	// A character the running server advertises as a completion trigger opens the
+	// list immediately, with no debounce (Fresh's suggest_on_trigger_characters).
+	if m.view.opts.SuggestOnTriggerCharacters && m.completionTriggeredLocally(doc, r) {
+		return m.completionAsked()
+	}
+	if !m.view.opts.QuickSuggestions {
 		return nil
 	}
 	if !editor.IsWordRune(r, m.docLanguageSettings(doc).WordCharacters) {

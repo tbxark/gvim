@@ -98,6 +98,8 @@ func (m *Model) statusSegmentClick(i int) tea.Cmd {
 		return m.dispatch(Command{Action: "show_lsp_status"})
 	case statusSegmentTrust:
 		return m.openWorkspaceTrust()
+	case statusSegmentUpdate:
+		return m.dispatch(Command{Action: "show_update_output"})
 	}
 	return nil
 }

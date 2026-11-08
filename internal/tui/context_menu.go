@@ -73,20 +73,20 @@ func (m *Model) tabMenuItems(i int) []ctxmenu.Item {
 	tabs := m.ed.Tabs()
 	hasPath := i >= 0 && i < len(tabs) && tabs[i].Path != ""
 	items := []ctxmenu.Item{
-		{Label: "Close", Action: "tab_close", Data: i},
-		{Label: "Close Others", Action: "tab_close_others", Data: i, Disabled: len(tabs) < 2},
-		{Label: "Close to the Right", Action: "tab_close_right", Data: i, Disabled: i >= len(tabs)-1},
-		{Label: "Close to the Left", Action: "tab_close_left", Data: i, Disabled: i <= 0},
-		{Label: "Close All", Action: "tab_close_all", Data: i},
+		{Label: uiText("gvim.context.close", "Close"), Action: "tab_close", Data: i},
+		{Label: uiText("gvim.context.close_others", "Close Others"), Action: "tab_close_others", Data: i, Disabled: len(tabs) < 2},
+		{Label: uiText("gvim.context.close_right", "Close to the Right"), Action: "tab_close_right", Data: i, Disabled: i >= len(tabs)-1},
+		{Label: uiText("gvim.context.close_left", "Close to the Left"), Action: "tab_close_left", Data: i, Disabled: i <= 0},
+		{Label: uiText("gvim.context.close_all", "Close All"), Action: "tab_close_all", Data: i},
 		{Separator: true},
-		{Label: "Copy Relative Path", Action: "tab_copy_relative_path", Data: i, Disabled: !hasPath},
-		{Label: "Copy Full Path", Action: "tab_copy_full_path", Data: i, Disabled: !hasPath},
+		{Label: uiText("gvim.context.copy_relative_path", "Copy Relative Path"), Action: "tab_copy_relative_path", Data: i, Disabled: !hasPath},
+		{Label: uiText("gvim.context.copy_full_path", "Copy Full Path"), Action: "tab_copy_full_path", Data: i, Disabled: !hasPath},
 	}
 	if m.workspace != nil {
 		if _, ok := m.workspace.(workspaceExtractPort); ok {
 			// Fresh's tab context menu item (tab.extract_to_new_workspace).
 			items = append(items, ctxmenu.Item{Separator: true},
-				ctxmenu.Item{Label: "Extract to New Workspace", Action: "tab_extract_workspace", Data: i, Disabled: !hasPath})
+				ctxmenu.Item{Label: uiText("gvim.context.extract_workspace", "Extract to New Workspace"), Action: "tab_extract_workspace", Data: i, Disabled: !hasPath})
 		}
 	}
 	return items
@@ -96,8 +96,8 @@ func (m *Model) tabMenuItems(i int) []ctxmenu.Item {
 // a new file.
 func plusMenuItems() []ctxmenu.Item {
 	return []ctxmenu.Item{
-		{Label: "New Terminal", Action: "open_terminal"},
-		{Label: "New File", Action: "new"},
+		{Label: uiText("gvim.context.new_terminal", "New Terminal"), Action: "open_terminal"},
+		{Label: uiText("gvim.context.new_file", "New File"), Action: "new"},
 	}
 }
 
@@ -244,22 +244,22 @@ func (m *Model) explorerMenuItems(target expanel.ContextTarget) []ctxmenu.Item {
 		return ctxmenu.Item{Label: label, Action: explorerMenuPrefix + action, Data: paths}
 	}
 	rule := ctxmenu.Item{Separator: true}
-	paste := row("Paste", "paste")
+	paste := row(uiText("gvim.context.paste", "Paste"), "paste")
 	paste.Disabled = m.clip == nil
-	create := []ctxmenu.Item{row("New File", "file_explorer_new_file"), row("New Directory", "file_explorer_new_directory")}
+	create := []ctxmenu.Item{row(uiText("gvim.context.new_file", "New File"), "file_explorer_new_file"), row(uiText("gvim.context.new_directory", "New Directory"), "file_explorer_new_directory")}
 	switch {
 	case target.Root || len(paths) == 0:
 		return append(create, paste)
 	case len(paths) > 1:
 		return []ctxmenu.Item{
-			row("Cut", "cut"), row("Copy", "copy"), paste, row("Delete", "file_explorer_delete"), row("Duplicate", "duplicate"), rule,
-			row("Copy Full Path", "copy_full_path"), row("Copy Relative Path", "copy_relative_path"),
+			row(uiText("gvim.context.cut", "Cut"), "cut"), row(uiText("gvim.context.copy", "Copy"), "copy"), paste, row(uiText("gvim.context.delete", "Delete"), "file_explorer_delete"), row(uiText("gvim.context.duplicate", "Duplicate"), "duplicate"), rule,
+			row(uiText("gvim.context.copy_full_path", "Copy Full Path"), "copy_full_path"), row(uiText("gvim.context.copy_relative_path", "Copy Relative Path"), "copy_relative_path"),
 		}
 	}
 	return append(create,
-		row("Rename", "file_explorer_rename"), row("Cut", "cut"), row("Copy", "copy"), paste,
-		row("Delete", "file_explorer_delete"), row("Duplicate", "duplicate"), rule,
-		row("Copy Full Path", "copy_full_path"), row("Copy Relative Path", "copy_relative_path"),
+		row(uiText("gvim.context.rename", "Rename"), "file_explorer_rename"), row(uiText("gvim.context.cut", "Cut"), "cut"), row(uiText("gvim.context.copy", "Copy"), "copy"), paste,
+		row(uiText("gvim.context.delete", "Delete"), "file_explorer_delete"), row(uiText("gvim.context.duplicate", "Duplicate"), "duplicate"), rule,
+		row(uiText("gvim.context.copy_full_path", "Copy Full Path"), "copy_full_path"), row(uiText("gvim.context.copy_relative_path", "Copy Relative Path"), "copy_relative_path"),
 	)
 }
 
@@ -320,10 +320,10 @@ func (m *Model) editorContextMenu(mo tea.Mouse, t hitTarget) {
 	readOnly := m.Holds("read_only")
 	m.focusEditor()
 	m.showContextMenu(mo, []ctxmenu.Item{
-		{Label: "Cut", Action: "cut", Disabled: !selected || readOnly},
-		{Label: "Copy", Action: "copy", Disabled: !selected},
-		{Label: "Paste", Action: "paste", Disabled: readOnly},
+		{Label: uiText("gvim.context.cut", "Cut"), Action: "cut", Disabled: !selected || readOnly},
+		{Label: uiText("gvim.context.copy", "Copy"), Action: "copy", Disabled: !selected},
+		{Label: uiText("gvim.context.paste", "Paste"), Action: "paste", Disabled: readOnly},
 		{Separator: true},
-		{Label: "Select All", Action: "select_all"},
+		{Label: uiText("gvim.context.select_all", "Select All"), Action: "select_all"},
 	})
 }

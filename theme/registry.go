@@ -1,8 +1,12 @@
 package theme
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -26,6 +30,9 @@ type Info struct {
 type Registry struct {
 	mu      sync.Mutex
 	userDir string
+	// urlCacheDir is where fetched URL themes are cached (one file per URL hash);
+	// empty means URL themes cannot be loaded.
+	urlCacheDir string
 
 	loaded    bool
 	builtins  map[string]Theme // resolved cache, by name
@@ -42,6 +49,47 @@ func NewRegistry(userDir string) *Registry {
 
 // UserDir returns the user theme dir the registry reads.
 func (r *Registry) UserDir() string { return r.userDir }
+
+// SetURLCacheDir sets the directory the URL-theme cache lives in (see URLCacheDir
+// and URLCachePath). The app sets it once after NewRegistry; without it URL theme
+// values cannot be loaded (the fetch happens in the app, never in this package).
+func (r *Registry) SetURLCacheDir(dir string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.urlCacheDir = dir
+}
+
+// URLCacheDir is the URL-theme cache directory under a user config dir: a
+// subdirectory next to the user theme dir, so fetched themes are not listed as
+// user themes and are easy to clear.
+func URLCacheDir(configDir string) string { return filepath.Join(configDir, "theme-cache") }
+
+// URLCachePath is the cache file of a URL theme: the hex sha256 of the trimmed
+// URL plus .json, so any URL maps to a stable, safe file name.
+func URLCachePath(cacheDir, ref string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(ref)))
+	return filepath.Join(cacheDir, hex.EncodeToString(sum[:])+".json")
+}
+
+// URLThemeName is the default display name of a URL theme: the JSON file's base
+// name without its extension, else the host (a URL ending in a slash names no
+// file, so it uses the host too).
+func URLThemeName(ref string) string {
+	u, err := url.Parse(strings.TrimSpace(ref))
+	if err != nil {
+		return "url-theme"
+	}
+	if p := u.Path; p != "" && !strings.HasSuffix(p, "/") {
+		base := path.Base(p)
+		if name := strings.TrimSuffix(base, path.Ext(base)); name != "" && name != "." && name != "/" {
+			return name
+		}
+	}
+	if u.Host != "" {
+		return u.Host
+	}
+	return "url-theme"
+}
 
 // Reload rescans the bundled names and the user theme dir and forgets the
 // resolved cache, so a theme file edited on disk is read again. A broken user
@@ -184,8 +232,10 @@ func (r *Registry) resolveRef(ref string) (builtin, path string, err error) {
 	if ref == "" {
 		return "", "", fmt.Errorf("theme: the theme value is empty")
 	}
-	if strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "http://") {
-		return "", "", fmt.Errorf("theme: %q: URL themes are not supported yet; save the theme file locally and use a name, a path relative to %s, or file://", ref, r.UserDir())
+	if IsURLForm(ref) {
+		// Load/Canonical handle URL values before this runs. The other callers
+		// (saving/deleting a theme) cannot operate on a fetched theme.
+		return "", "", fmt.Errorf("theme: %q: a URL theme is fetched into the cache and cannot be saved or deleted from %s", ref, r.UserDir())
 	}
 	if name, ok := strings.CutPrefix(ref, "builtin://"); ok {
 		if !isEmbedded(name) {
@@ -225,6 +275,9 @@ func (r *Registry) resolveRef(ref string) (builtin, path string, err error) {
 // Load resolves ref (a bundled name, builtin://name, a path relative to the
 // user theme dir, or file:// with environment expansion) into a resolved theme.
 func (r *Registry) Load(ref string) (Theme, error) {
+	if IsURLForm(ref) {
+		return r.loadURLCached(ref)
+	}
 	builtin, path, err := r.resolveRef(ref)
 	if err != nil {
 		return Theme{}, err
@@ -250,9 +303,56 @@ func (r *Registry) Load(ref string) (Theme, error) {
 	return theme, nil
 }
 
+// LoadURLBody validates and resolves a fetched URL theme body with the same parser
+// and resolver user themes use (extends/fallbacks against the bundled themes). It
+// does not touch the cache; the app writes the body to URLCachePath when it
+// accepts it, so runtime loads (and offline restarts) use the cached copy.
+func (r *Registry) LoadURLBody(ref string, data []byte) (Theme, error) {
+	return r.loadURLData(ref, data, "URL")
+}
+
+// loadURLCached loads a URL theme from the app-written cache. The app is the only
+// fetcher: a missing cache (the URL was never fetched, e.g. it was chosen in the
+// Settings page during this session, or offline on the first run) is reported as
+// a clear not-cached error, never a network wait.
+func (r *Registry) loadURLCached(ref string) (Theme, error) {
+	ref = strings.TrimSpace(ref)
+	r.mu.Lock()
+	dir := r.urlCacheDir
+	r.mu.Unlock()
+	if dir == "" {
+		return Theme{}, fmt.Errorf("theme: %q: URL themes are not available (no cache directory configured)", ref)
+	}
+	path := URLCachePath(dir, ref)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Theme{}, fmt.Errorf("theme: %q: the URL theme is not cached yet (it is fetched at startup; a theme chosen during the session uses the cache)", ref)
+	}
+	return r.loadURLData(ref, data, filepath.Base(path))
+}
+
+// loadURLData parses and resolves a URL theme body; source names the body in errors.
+func (r *Registry) loadURLData(ref string, data []byte, source string) (Theme, error) {
+	file, err := ParseFile(data)
+	if err != nil {
+		return Theme{}, fmt.Errorf("theme: %s: %w", source, err)
+	}
+	if file.Name == "" {
+		file.Name = URLThemeName(ref)
+	}
+	theme, err := resolveWith(file, func(name string) (Theme, error) { return r.EmbeddedOnly(name) })
+	if err != nil {
+		return Theme{}, fmt.Errorf("theme: %s: %w", source, err)
+	}
+	return theme, nil
+}
+
 // Canonical returns the portable ref of ref: the builtin name for a bundled
 // theme, the user-dir relative slash path for a user theme.
 func (r *Registry) Canonical(ref string) (string, error) {
+	if IsURLForm(ref) {
+		return strings.TrimSpace(ref), nil
+	}
 	builtin, path, err := r.resolveRef(ref)
 	if err != nil {
 		return "", err

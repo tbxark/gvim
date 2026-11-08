@@ -1326,6 +1326,14 @@ func (m *Model) lspKey(msg tea.Msg) (tea.Cmd, bool) {
 	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown, tea.KeyHome, tea.KeyEnd, tea.KeyEnter, tea.KeyEscape:
 		return nil, false
 	}
+	// A printable word character narrows the open list instead of closing it
+	// (Fresh's live re-filter): the character is typed and the rows are filtered by
+	// the longer prefix. Anything else keeps the old dismissal.
+	if _, text := translateKey(tea.Key(k)); text != "" {
+		if cmd, handled := m.completionTyped(c, text); handled {
+			return cmd, true
+		}
+	}
 	m.closeCompletion(c)
 	return nil, false
 }

@@ -417,7 +417,7 @@ func (p *settingsStructurePage) edit() tea.Cmd {
 	}
 	switch p.st.Kind {
 	case "map":
-		return p.promptValue(row.item.Path, "Value: ", p.values[pathID(row.item.Path)], "string")
+		return p.promptValue(row.item.Path, uiText("gvim.prompt.value", "Value: "), p.values[pathID(row.item.Path)], "string")
 	case "list":
 		return p.promptList(row.item.Path, row.item.Value)
 	case "fields":
@@ -498,7 +498,7 @@ type structureOverlayMsg struct {
 // promptList opens the item prompt of a list row.
 func (p *settingsStructurePage) promptList(path []string, item string) tea.Cmd {
 	return structurePrompt(p, prompt.LineOptions{
-		Label:     "Item: ",
+		Label:     uiText("gvim.prompt.item", "Item: "),
 		Input:     item,
 		SelectAll: true,
 		Tag:       structurePromptTag{page: p, action: "edit-item", path: []string{item}, kind: "string"},
@@ -542,14 +542,14 @@ func (p *settingsStructurePage) editField(row SettingsStructureRow) tea.Cmd {
 func (p *settingsStructurePage) addEntry() tea.Cmd {
 	if p.st.Key == "lsp" {
 		return structurePrompt(p, prompt.LineOptions{
-			Label: "Language: ",
+			Label: uiText("gvim.prompt.language", "Language: "),
 			Tag:   structurePromptTag{page: p, action: "add-lsp-language"},
 		})
 	}
 	switch p.st.Kind {
 	case "map":
 		return structurePrompt(p, prompt.LineOptions{
-			Label: "Key: ",
+			Label: uiText("gvim.prompt.key", "Key: "),
 			Tag:   structurePromptTag{page: p, action: "add-name"},
 		})
 	case "list":
@@ -895,7 +895,7 @@ func (p *settingsStructurePage) promptDone(done prompt.Done) tea.Cmd {
 			return nil
 		}
 		return structurePrompt(p, prompt.LineOptions{
-			Label: "Value for " + name + ": ",
+			Label: uiTextVars("gvim.prompt.value_for", "Value for %{name}: ", map[string]any{"name": name}),
 			Tag:   structurePromptTag{page: p, action: "add-value", path: []string{name}},
 		})
 	case "add-value":

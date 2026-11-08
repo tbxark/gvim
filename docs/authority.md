@@ -14,8 +14,11 @@ files, reconnect retry/backoff, remote trust store, terminal respawn as an open 
 `authority.Authority` is the single answer to "where does this primitive run?". Consumers ask the
 slot; they never branch on the backend kind. Four routing surfaces:
 
-- `FileSystem` — `ReadFile`, `WriteFile`, `Stat`, `ReadDir`, `Watch`. The value
-  types are the plugin OS port's (`plugin/hostos`), so the local adapter is forwarding.
+- `FileSystem` — `ReadFile`, `ReadRange`, `WriteFile`, `Stat`, `ReadDir`, `Watch`. The value
+  types are the plugin OS port's (`plugin/hostos`), so the local adapter is forwarding. The
+  tree-changing operations are a separate optional surface, `FileMutations`
+  (`Mkdir`/`Rename`/`Remove`, reached through `authority.Mutations(fs)`), so a read-only
+  backend can mount a `FileSystem` without them; the local and SSH backends implement both.
 - `OneShot` — `Run(ctx, argv, ProcOptions)`: run to completion and collect stdin/stdout/
   stderr/exit status (git, formatters, git grep, plugin `spawnProcess`).
 - `LongRunning` — `Start(ctx, argv, ProcOptions)`: long-lived stdio children. The surface
@@ -412,3 +415,30 @@ Residuals of this slice (documented, not bugs):
   `gvim user@host:/tmp/proj` with an agent key opens the remote shell in /tmp/proj,
   shows `SSH:user@host`, survives a network drop with `· disconnected` until the window is
   activated, and asks for the password through the prompt when no agent/key is set.
+
+### File mutations (remote explorer write foundation)
+
+The tree-changing operations are their own optional surface, `FileMutations`
+(`Mkdir(ctx, path, parents)`, `Rename(ctx, from, to)`, `Remove(ctx, path, recursive)`),
+reached through `authority.Mutations(fs)`; a `FileSystem` that does not implement it makes
+the caller report `ErrUnsupportedFileIO` instead of a panic, and test doubles are unaffected.
+The local backend forwards to the plugin OS port; the SSH backend runs `mkdir [-p]`, `mv -f`
+and `rm [-r] -f` as bounded helpers under the same quoting, stderr cap and context
+cancellation as the read helpers, and maps a missing path/permission denial into the port's
+errors. A remote delete is permanent: there is no trash on the remote host, so the UI must
+say so. The remote explorer's write commands (new file/directory, rename, delete with that
+warning, tree refresh) are the next slice; copy/paste of subtrees, drag/move, remote
+`.gitignore` and remote directory watching stay open.
+
+### Windowed remote reads (large-file foundation)
+
+The authority file port now has \`FileSystem.ReadRange(ctx, path, off, n)\`: a bounded
+window read (local \`pread\`, SSH \`tail -c +off+1 | head -c n\`), capped at 1 MiB per
+answer and returning \`io.EOF\` for a short final window. This is the transport seam remote
+large-file mode needs; opening a remote file over the editor's large-file threshold through a
+windowed \`buffer.Source\` (LRU pages, async prefetch off the ordinary paint path, read-only
+overlay/save decision) is not wired yet — the buffer's source interface is a synchronous
+\`io.ReaderAt\`, so a cache miss during a paint would block the Update loop until an async
+buffer/editor repaint seam exists. Remote files at or under the threshold still load whole
+through \`ReadFile\` (64 MiB transport cap) exactly as before; an over-cap remote file still
+fails clearly rather than opening a partial buffer. No local fallback is involved.

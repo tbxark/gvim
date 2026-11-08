@@ -319,12 +319,15 @@ func TestRemoteGitGrepNotARepository(t *testing.T) {
 func TestInstallRemoteSearchPorts(t *testing.T) {
 	one := &fakeOneShot{}
 	ports := tui.RootPorts{}
-	installRemoteSearchPorts(&ports, one, "/remote/w", nil)
+	installRemoteSearchPorts(&ports, one, nil, nil, "/remote/w", "SSH:u@h", nil)
 	if ports.ProjectSearch == nil || ports.GitGrep == nil {
 		t.Fatalf("remote search ports not installed: %+v", ports)
 	}
-	if ports.ProjectReplace != nil {
-		t.Fatal("project replace is wired in a remote workspace")
+	if ports.ProjectReplace == nil {
+		t.Fatal("remote project replace is not wired")
+	}
+	if _, ok := ports.ProjectReplace.(*remoteReplacer); !ok {
+		t.Fatalf("ProjectReplace = %T, want the remote replacer", ports.ProjectReplace)
 	}
 	if _, ok := ports.ProjectSearch.(*remoteSearch); !ok {
 		t.Fatalf("ProjectSearch = %T, want the remote adapter", ports.ProjectSearch)

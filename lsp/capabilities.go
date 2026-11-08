@@ -24,6 +24,10 @@ type Capabilities struct {
 	// whole workspace, including files the editor never opened.
 	DiagnosticWorkspace bool
 	Completion          bool
+	// CompletionTriggerCharacters are the characters the server asks completion to
+	// open on immediately (completionProvider.triggerCharacters, static or through
+	// client/registerCapability). The root unions them across the running servers.
+	CompletionTriggerCharacters []string
 	// CompletionResolve is the completion provider's resolveProvider: an incomplete
 	// item with data must be sent to completionItem/resolve before acceptance.
 	CompletionResolve bool
@@ -78,6 +82,9 @@ func summarizeCapabilities(c protocol.ServerCapabilities) Capabilities {
 		FoldingRanges:     providerEnabled(c.FoldingRangeProvider),
 		InlayHints:        providerEnabled(c.InlayHintProvider),
 		DocumentHighlight: providerEnabled(c.DocumentHighlightProvider),
+	}
+	if c.CompletionProvider != nil {
+		caps.CompletionTriggerCharacters = append([]string(nil), c.CompletionProvider.TriggerCharacters...)
 	}
 	switch p := c.DiagnosticProvider.(type) {
 	case *protocol.DiagnosticOptions:
@@ -169,6 +176,11 @@ func applyRegistration(caps *Capabilities, method string, options protocol.LSPAn
 		if resolveProvider(options) {
 			caps.CompletionResolve = true
 		}
+		// A registration may advertise trigger characters; when it does not, the
+		// static ones (if any) stay, as Fresh's dynamic registration does.
+		if chars, ok := registrationTriggerCharacters(options); ok {
+			caps.CompletionTriggerCharacters = chars
+		}
 	case "textDocument/codeAction":
 		caps.CodeAction = true
 		if resolveProvider(options) {
@@ -209,6 +221,22 @@ func applyRegistration(caps *Capabilities, method string, options protocol.LSPAn
 
 // resolveProvider reports whether a registration's options say the provider
 // resolves in a second request (the codeAction resolveProvider).
+// registrationTriggerCharacters reads a completion registration's
+// triggerCharacters option. ok is false when the option is absent, so a
+// registration without it keeps the static trigger characters.
+func registrationTriggerCharacters(options protocol.LSPAny) (chars []string, ok bool) {
+	if len(options) == 0 {
+		return nil, false
+	}
+	var opts struct {
+		TriggerCharacters *[]string `json:"triggerCharacters"`
+	}
+	if json.Unmarshal(options, &opts) != nil || opts.TriggerCharacters == nil {
+		return nil, false
+	}
+	return append([]string(nil), (*opts.TriggerCharacters)...), true
+}
+
 func resolveProvider(options protocol.LSPAny) bool {
 	if len(options) == 0 {
 		return false

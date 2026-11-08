@@ -83,9 +83,9 @@ func (m *Model) paletteHint() string {
 	case !asked:
 		return ""
 	case chord == "":
-		return "Palette"
+		return uiText("gvim.key_hints.palette", "Palette")
 	}
-	return "Palette: " + commands.FormatChord(chord)
+	return uiTextVars("gvim.key_hints.palette_shortcut", "Palette: %{shortcut}", map[string]any{"shortcut": commands.FormatChord(chord)})
 }
 
 // welcomeDoorKeys are the shortcuts of the welcome doors in the active keymap, as

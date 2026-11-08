@@ -387,13 +387,14 @@ func (s *remoteSearch) run(ctx context.Context, cwd string, argv []string) (host
 	return s.one.Run(ctx, argv, hostos.ProcOptions{Cwd: cwd, Env: remoteEnvMap(envEntries), MaxOutput: remoteSearchMaxOutput})
 }
 
-// installRemoteSearchPorts wires the remote project search and git grep adapters into the
-// root ports, keeping project replace unwired (a safe remote replace needs verified remote
-// writes and a backup/atomic strategy) and the local preview out of the remote panel.
-func installRemoteSearchPorts(ports *tui.RootPorts, one authority.OneShot, root string, spawnEnv func() []string) {
+// installRemoteSearchPorts wires the remote project search, git grep and project-replace
+// adapters into the root ports and keeps the local preview out of the remote panel. The
+// replace adapter reads and write each file through the authority file system (atomic
+// remote writes), never through the local disk; gate is the workspace trust gate.
+func installRemoteSearchPorts(ports *tui.RootPorts, one authority.OneShot, files authority.FileSystem, gate func(ctx context.Context, argv []string, cwd string) error, root, label string, spawnEnv func() []string) {
 	ports.ProjectSearch = newRemoteProjectSearch(one, root, spawnEnv)
 	ports.GitGrep = newRemoteGitGrep(one, root, spawnEnv)
-	ports.ProjectReplace = nil
+	ports.ProjectReplace = newRemoteProjectReplacer(files, gate, root, label)
 }
 
 // remoteGitGrep runs git grep on the remote host: the repository root is resolved remotely

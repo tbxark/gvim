@@ -56,6 +56,10 @@ func (f *remoteExplorerFake) ReadDir(_ context.Context, path string, hidden bool
 	return append([]hostos.DirEntry(nil), out...), nil
 }
 
+func (f *remoteExplorerFake) ReadRange(context.Context, string, int64, int64) ([]byte, error) {
+	return nil, errors.New("not used by the explorer")
+}
+
 func (f *remoteExplorerFake) ReadFile(context.Context, string, int64) ([]byte, error) {
 	return nil, errors.New("not used by the explorer")
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"sort"
@@ -102,6 +103,52 @@ func helperFailure(op, path string, hr helperResult) error {
 	return remoteFileErr(op, path, hr.res)
 }
 
+// Mkdir implements FileMutations with mkdir, optionally creating ancestors.
+func (f *sshFiles) Mkdir(ctx context.Context, path string, parents bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	hr, err := f.execScript(ctx, sshMkdirScript, []string{path, boolArg(parents)}, nil, sshFilesMaxHelperBytes, sshFilesMaxStderrBytes)
+	if err != nil {
+		return err
+	}
+	if hr.res.Code != 0 {
+		return helperFailure("mkdir", path, hr)
+	}
+	return nil
+}
+
+// Rename implements FileMutations with mv -f (a same-filesystem rename).
+func (f *sshFiles) Rename(ctx context.Context, from, to string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	hr, err := f.execScript(ctx, sshRenameScript, []string{from, to}, nil, sshFilesMaxHelperBytes, sshFilesMaxStderrBytes)
+	if err != nil {
+		return err
+	}
+	if hr.res.Code != 0 {
+		return helperFailure("rename", from, hr)
+	}
+	return nil
+}
+
+// Remove implements FileMutations with rm (recursive when asked). A remote delete is
+// permanent: there is no trash on the other side of the carrier.
+func (f *sshFiles) Remove(ctx context.Context, path string, recursive bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	hr, err := f.execScript(ctx, sshRemoveScript, []string{path, boolArg(recursive)}, nil, sshFilesMaxHelperBytes, sshFilesMaxStderrBytes)
+	if err != nil {
+		return err
+	}
+	if hr.res.Code != 0 {
+		return helperFailure("remove", path, hr)
+	}
+	return nil
+}
+
 // ReadFile reads at most max bytes through `head -c max+1`, so a larger file is
 // detected from the answer size and reported in the port's too-large shape without
 // pulling the whole file.
@@ -127,6 +174,44 @@ func (f *sshFiles) ReadFile(ctx context.Context, path string, max int64) ([]byte
 	}
 	return hr.res.Stdout, nil
 }
+
+// sshFilesMaxRangeBytes bounds one windowed remote read: the transport cap of a
+// line-range fetch, so a scroll can never pull an arbitrary amount over the wire.
+const sshFilesMaxRangeBytes = 1 << 20
+
+// ReadRange reads at most n bytes at off with one tail/head helper.
+func (f *sshFiles) ReadRange(ctx context.Context, path string, off, n int64) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if off < 0 || n < 0 {
+		return nil, fmt.Errorf("remote range %s: negative offset or length", path)
+	}
+	n = min(n, int64(sshFilesMaxRangeBytes))
+	hr, err := f.execScript(ctx, sshReadRangeScript, []string{path, strconv.FormatInt(off, 10), strconv.FormatInt(n, 10)}, nil, n, sshFilesMaxStderrBytes)
+	if err != nil {
+		return nil, err
+	}
+	if hr.res.Code != 0 {
+		return nil, helperFailure("read range", path, hr)
+	}
+	if hr.stdoutOver {
+		return nil, fmt.Errorf("remote read range %s: answer exceeded %d bytes", path, n)
+	}
+	if int64(len(hr.res.Stdout)) < n {
+		return hr.res.Stdout, io.EOF
+	}
+	return hr.res.Stdout, nil
+}
+
+// sshReadRangeScript reads bytes [$2, $2+$3) of $1.
+const sshReadRangeScript = `p=$1
+off=$2
+n=$3
+if [ ! -e "$p" ] && [ ! -L "$p" ]; then echo "$p: no such file" >&2; exit 1; fi
+if [ -d "$p" ]; then echo "$p: is a directory" >&2; exit 2; fi
+tail -c +$((off + 1)) "$p" | head -c "$n"
+`
 
 // WriteFile writes through the helper. Atomic means a temporary file in the target's
 // directory (or its resolved symlink target's directory), the mode applied to the
@@ -471,6 +556,19 @@ func boolArg(b bool) string {
 	}
 	return "0"
 }
+
+// sshMkdirScript creates $1, with ancestors when $2 is 1.
+const sshMkdirScript = `p=$1
+if [ "$2" = 1 ]; then mkdir -p "$p"; else mkdir "$p"; fi`
+
+// sshRenameScript moves $1 to $2, replacing the target.
+const sshRenameScript = `from=$1
+to=$2
+mv -f "$from" "$to"`
+
+// sshRemoveScript deletes $1, recursively when $2 is 1.
+const sshRemoveScript = `p=$1
+if [ "$2" = 1 ]; then rm -rf "$p"; else rm -f "$p"; fi`
 
 // sshReadScript reads at most $2 bytes of $1.
 const sshReadScript = `p=$1

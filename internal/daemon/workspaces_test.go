@@ -108,26 +108,247 @@ func TestRegistrySymlinkRootIsOneWorkspace(t *testing.T) {
 	}
 }
 
-func TestRegistryDedupKeepsFreshest(t *testing.T) {
+// TestRegistryCoTenantsShareARoot checks the registry v2 model: several workspaces over one
+// canonical root are distinct by stable id, listed freshest first, and keep independent
+// layouts and session directories; Create keeps reopening the root's freshest workspace.
+func TestRegistryCoTenantsShareARoot(t *testing.T) {
 	root := t.TempDir()
 	canonical, err := CanonicalRoot(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	reg := newRegistry(t)
-	older := WorkspaceFile{StableID: strings.Repeat("a", 32), Root: canonical, Label: "old", LastFocusedAt: 100}
-	newer := WorkspaceFile{StableID: strings.Repeat("b", 32), Root: canonical, Label: "new", LastFocusedAt: 200}
-	workspaceFileAt(t, reg, older)
-	workspaceFileAt(t, reg, newer)
+	first, created, err := reg.Create(canonical, "")
+	if err != nil || !created {
+		t.Fatalf("Create = %+v, created %v, %v", first, created, err)
+	}
+	second, created, err := reg.CreateCoTenant(canonical, "")
+	if err != nil || !created {
+		t.Fatalf("CreateCoTenant = %+v, created %v, %v", second, created, err)
+	}
+	if second.File.StableID == first.File.StableID {
+		t.Fatal("CreateCoTenant reused the stable id")
+	}
+	if second.File.Root != first.File.Root || second.File.Label == first.File.Label {
+		t.Fatalf("co-tenants = %+v and %+v, want same root, distinct labels", first, second)
+	}
+	// Their layouts and session directories are independent.
+	layout := session.Session{Version: session.Version, Root: canonical, Files: []session.FileState{{Path: filepath.Join(canonical, "a.txt"), Line: 3}}}
+	if _, err := reg.UpdateLayout(second.File.StableID, &layout); err != nil {
+		t.Fatal(err)
+	}
+	gotSecond, ok, err := reg.Get(second.File.StableID)
+	if err != nil || !ok || gotSecond.File.Layout == nil || gotSecond.File.Layout.Files[0].Line != 3 {
+		t.Fatalf("second layout = %+v, %v, %v", gotSecond, ok, err)
+	}
+	gotFirst, ok, err := reg.Get(first.File.StableID)
+	if err != nil || !ok || gotFirst.File.Layout != nil {
+		t.Fatalf("first layout changed: %+v, %v, %v", gotFirst, ok, err)
+	}
+	dirFirst, err := reg.SessionDir(first.File.StableID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirSecond, err := reg.SessionDir(second.File.StableID)
+	if err != nil || dirFirst == dirSecond {
+		t.Fatalf("session dirs = %q, %q", dirFirst, dirSecond)
+	}
+	// Create reopens the freshest workspace of the root, never a third one.
+	again, created, err := reg.Create(canonical, "")
+	if err != nil || created || again.File.StableID != second.File.StableID {
+		t.Fatalf("Create on a co-tenanted root = %+v, created %v, %v", again, created, err)
+	}
+	// Closing one keeps the other's registry file and session data.
+	extra, _ := os.ReadFile(filepath.Join(dirFirst, "keep.txt"))
+	_ = extra
+	if err := reg.Remove(second.File.StableID); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := reg.List()
+	if len(list) != 1 || list[0].File.StableID != first.File.StableID {
+		t.Fatalf("list after closing one co-tenant = %+v", list)
+	}
+	if _, err := os.Stat(dirSecond); err != nil {
+		t.Fatalf("closing one co-tenant removed the other's session dir: %v", err)
+	}
+}
+
+// TestRegistryDedupIsByStableID checks the v2 dedup rule: only a file with an identical
+// stable id is a duplicate (the freshest copy wins); distinct ids are co-tenants.
+func TestRegistryDedupIsByStableID(t *testing.T) {
+	rootA, err := CanonicalRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := CanonicalRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := newRegistry(t)
+	id := strings.Repeat("d", 32)
+	workspaceFileAt(t, reg, WorkspaceFile{StableID: id, Root: rootA, Label: "old", LastFocusedAt: 10})
+	workspaceFileAt(t, reg, WorkspaceFile{StableID: id, Root: rootB, Label: "new", LastFocusedAt: 20})
 	list, problems := reg.List()
 	if len(problems) != 0 {
 		t.Fatalf("problems: %v", problems)
 	}
-	if len(list) != 1 || list[0].File.StableID != newer.StableID || list[0].File.Label != "new" {
-		t.Fatalf("dedup = %+v, want the freshest workspace", list)
+	if len(list) != 1 || list[0].File.Root != rootB || list[0].File.Label != "new" {
+		t.Fatalf("dedup by stable id = %+v, want the freshest copy only", list)
 	}
 }
 
+// TestRegistryCoTenantLabels checks Fresh's label precedence: the root basename, then
+// "basename (2)", "basename (3)", ... counted from the workspaces at the root, repeatably,
+// skipping a numbered label a rename took.
+func TestRegistryCoTenantLabels(t *testing.T) {
+	root := t.TempDir()
+	canonical, err := CanonicalRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Base(canonical)
+	reg := newRegistry(t)
+	first, _, err := reg.Create(canonical, "")
+	if err != nil || first.File.Label != base {
+		t.Fatalf("first label = %q (%v), want %q", first.File.Label, err, base)
+	}
+	second, _, err := reg.CreateCoTenant(canonical, "")
+	if err != nil || second.File.Label != base+" (2)" {
+		t.Fatalf("second label = %q (%v), want %q", second.File.Label, err, base+" (2)")
+	}
+	third, _, err := reg.CreateCoTenant(canonical, "")
+	if err != nil || third.File.Label != base+" (3)" {
+		t.Fatalf("third label = %q (%v), want %q", third.File.Label, err, base+" (3)")
+	}
+	// A rename frees the old label; the count still follows the number of workspaces, so
+	// the next co-tenant is "(4)" (Fresh's windows-at-root count), not the freed name.
+	if _, err := reg.Rename(second.File.StableID, "renamed"); err != nil {
+		t.Fatal(err)
+	}
+	fourth, _, err := reg.CreateCoTenant(canonical, "")
+	if err != nil || fourth.File.Label != base+" (4)" {
+		t.Fatalf("fourth label = %q (%v), want %q", fourth.File.Label, err, base+" (4)")
+	}
+	// A numbered label taken by a rename is skipped: the count moves on.
+	if _, err := reg.Rename(fourth.File.StableID, base+" (5)"); err != nil {
+		t.Fatal(err)
+	}
+	fifth, _, err := reg.CreateCoTenant(canonical, "")
+	if err != nil || fifth.File.Label != base+" (6)" {
+		t.Fatalf("fifth label = %q (%v), want %q", fifth.File.Label, err, base+" (6)")
+	}
+	// An explicit colliding label falls back to the numbered precedence.
+	sixth, _, err := reg.CreateCoTenant(canonical, "renamed")
+	if err != nil || sixth.File.Label == "renamed" {
+		t.Fatalf("colliding explicit label = %q (%v)", sixth.File.Label, err)
+	}
+}
+
+// TestRegistryRootBasedOrder checks the root-grouped listing order: roots by their freshest
+// workspace, then the workspaces of one root freshest first.
+func TestRegistryRootBasedOrder(t *testing.T) {
+	rootA, err := CanonicalRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := CanonicalRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := newRegistry(t)
+	workspaceFileAt(t, reg, WorkspaceFile{StableID: strings.Repeat("1", 32), Root: rootA, Label: "a-old", LastFocusedAt: 100})
+	workspaceFileAt(t, reg, WorkspaceFile{StableID: strings.Repeat("2", 32), Root: rootA, Label: "a-new", LastFocusedAt: 300})
+	workspaceFileAt(t, reg, WorkspaceFile{StableID: strings.Repeat("3", 32), Root: rootB, Label: "b", LastFocusedAt: 200})
+	list, _ := reg.List()
+	if len(list) != 3 {
+		t.Fatalf("list = %+v", list)
+	}
+	want := []string{"a-new", "a-old", "b"}
+	for i, label := range want {
+		if list[i].File.Label != label {
+			t.Fatalf("order = %v, want %v", []string{list[0].File.Label, list[1].File.Label, list[2].File.Label}, want)
+		}
+	}
+}
+
+// TestRegistryV1FileMigratesOnSave: a registry v1 file (one workspace per root) loads
+// unchanged with its stable id and session directory, and only a later save rewrites it as
+// version 2 - the session directory is never lost.
+func TestRegistryV1FileMigratesOnSave(t *testing.T) {
+	root := t.TempDir()
+	canonical, err := CanonicalRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := newRegistry(t)
+	id := strings.Repeat("e", 32)
+	v1 := WorkspaceFile{Version: 1, StableID: id, Root: canonical, Label: "legacy", LastFocusedAt: 7}
+	path := workspaceFileAt(t, reg, v1)
+	dir, err := reg.SessionDir(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	list, problems := reg.List()
+	if len(problems) != 0 || len(list) != 1 || list[0].File.StableID != id || list[0].File.Label != "legacy" {
+		t.Fatalf("v1 load = %+v, problems %v", list, problems)
+	}
+	// Discover reuses the legacy workspace instead of minting a second one at the root.
+	d, err := reg.Discover(canonical)
+	if err != nil || d.Foreground.File.StableID != id || len(d.Dormant) != 0 {
+		t.Fatalf("Discover over a v1 file = %+v, %v", d, err)
+	}
+	// A later save migrates the file to version 2, keeping identity and session data.
+	if _, err := reg.Rename(id, "migrated"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "\"version\": 2") {
+		t.Fatalf("the v1 file was not rewritten as v2: %s", raw)
+	}
+	dirAfter, err := reg.SessionDir(id)
+	if err != nil || dirAfter != dir {
+		t.Fatalf("session dir changed after migration: %q, %q, %v", dir, dirAfter, err)
+	}
+	if rawKeep, err := os.ReadFile(filepath.Join(dir, "keep.txt")); err != nil || string(rawKeep) != "kept" {
+		t.Fatalf("session data lost in migration: %q, %v", rawKeep, err)
+	}
+}
+
+// TestDiscoverReturnsCoTenants: discovery of a co-tenanted root returns the freshest
+// workspace as foreground and EVERY other workspace (including the root's co-tenants) as
+// dormant.
+func TestDiscoverReturnsCoTenants(t *testing.T) {
+	root := t.TempDir()
+	canonical, err := CanonicalRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := newRegistry(t)
+	first, _, err := reg.Create(canonical, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := reg.CreateCoTenant(canonical, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := reg.Discover(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Foreground.File.StableID != second.File.StableID {
+		t.Fatalf("foreground = %q, want the freshest co-tenant %q", d.Foreground.File.StableID, second.File.StableID)
+	}
+	if len(d.Dormant) != 1 || d.Dormant[0].File.StableID != first.File.StableID {
+		t.Fatalf("dormant = %+v, want the other co-tenant", d.Dormant)
+	}
+}
 func TestRegistryFutureVersionNeverRewritten(t *testing.T) {
 	root := t.TempDir()
 	canonical, err := CanonicalRoot(root)

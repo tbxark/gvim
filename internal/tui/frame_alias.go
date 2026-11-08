@@ -78,6 +78,7 @@ const (
 	statusSegmentLanguage = frame.StatusSegmentLanguage
 	statusSegmentPosition = frame.StatusSegmentPosition
 	statusSegmentLSP      = frame.StatusSegmentLSP
+	statusSegmentUpdate   = frame.StatusSegmentUpdate
 	statusSegmentTrust    = frame.StatusSegmentTrust
 
 	welcomeBlank      = frame.WelcomeBlank

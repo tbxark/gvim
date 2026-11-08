@@ -20,7 +20,37 @@ Config forms (seen in `config/config.go` and validated in `theme/form.go`):
                                                   // $XDG_CONFIG_HOME expand
 ```
 
-URL/packaged themes (`https://...` forms) are recognized and refused with a clear error naming the value; that is the recorded decision: gvim keeps the refusal and has no network code or fetch slice until packaging and network policy are decided (remote packs stay out). The command-line `--theme` takes the same forms; a plain name resolves against the bundled themes then the user theme dir, and a typo is one line that names the choices. The Settings page's theme row lists the catalog refs, validates through the same loader (so a URL form is refused there with the same message) and shows the four-colour preview (§6).
+URL themes are supported as a value pointing at a theme JSON file:
+
+```jsonc
+{ "theme": "https://example.com/themes/nord.json" }  // fetched at startup
+```
+
+The fetch reuses the update check's transport policy exactly
+(`updatecheck.ValidateURL`: an absolute https URL, or an http URL only on the
+loopback interface, so a local mirror or a test server works), is one bounded
+request (8 s timeout, 256 KiB body cap), and is validated through the same JSON
+parser and resolver as a user theme (including `extends` and fallbacks). The
+body is cached atomically under `<user config dir>/gvim/theme-cache/<sha256(url)>.json`;
+a cache younger than 24 hours is used without a request, and when a fetch or its
+validation fails the cached copy is the last-known-good fallback ("using the
+cached copy" warning). A URL theme that cannot be fetched and has no cache falls
+back to the default `dark` theme with a clear stderr/status-row notice instead of
+failing the start. A `https://...` builtin is never fetched (only URL forms are).
+The fetch happens during start-up, before the program: the Update loop never
+waits on the network, and the runtime Settings theme path only reads the cache, so
+a URL chosen during a session reports "not cached yet" until the next start.
+Fresh's URL form `https://github.com/foo/themes#dark` names a package/repository
+and the fragment picks a theme from it, which needs Fresh's package manager; gvim
+rejects a URL with a fragment with a clear "packaged repository themes" message
+(§8 residual). A plain local name/path never touches the network.
+
+The command-line `--theme` takes the same forms (the transport policy is checked
+there too), and a plain name resolves against the bundled themes then the user
+theme dir; a typo is one line that names the choices. The Settings page's theme
+row lists the catalog refs and shows the four-colour preview (§6); it can select a
+URL theme already fetched at this start, and an uncached URL is reported as such
+rather than fetched in the Update loop.
 
 ## 2. Inheritance and fallbacks
 
@@ -64,7 +94,15 @@ The plugin API `gvim.theme.override(colors)` / `gvim.theme.clear()` (owned by th
 
 ## 8. What is deferred
 
-- URL/packaged themes and remote packs: **decision recorded** — keep the clear refusal, no network code and no fetch slice until packaging/network policy exists (see §1);
+- **URL-packaged repository themes** (Fresh's `https://github.com/foo/themes#dark`
+  form): a repository/package is not a theme JSON; supporting it needs a package
+  manager (fetch/extract a tree, pick the fragment, track updates) and a
+  marketplace/browser UI. gvim implements the direct URL-to-theme-JSON slice (see
+  §1) and rejects the fragment form; the package manager, remote packs and local
+  archives remain out of scope.
+- **URL theme fetch is start-up only**: the runtime Settings path reads the cache
+  and reports an uncached URL; an in-session fetch would need an async theme
+  loader, deferred with the Settings-page work;
 - inheriting from another *user* theme: **decision** — one level of `extends` to a built-in
   theme is the model (a user theme extends a built-in theme; Fresh's own limit, kept).
 - background images in themes: **decision** — out of the colour theme model (theme keys are
@@ -89,7 +127,8 @@ The Settings page's theme preview landed (four colour chips on the theme row; me
 | `theme/resolve.go` | base choice, extends, fallback filling, modifier-only keys |
 | `theme/registry.go` | builtin+user discovery, config forms, reload, save/delete paths |
 | `theme/overrides.go` | `WithOverrides` and the theme editor's save format |
-| `theme/form.go` | config/CLI theme form validation |
+| `theme/form.go` | config/CLI theme form validation (bundled, builtin://, user path, file://, http(s) URL) |
+| `internal/app/theme_url.go` | URL theme fetch at start-up: update-check transport policy, bounded request, theme-parser validation, atomic cache under the user config dir, fresh-cache skip and last-known-good fallback; the registry itself never fetches |
 | `internal/tui/style` | the single theme-to-styles conversion (fg+bg attributes); `style/roles.go` is the theme-key id role table and the tagging helpers |
 | `internal/tui/grid` | the cell grid; `grid.Style.FGKey/BGKey` and the opt-in `CaptureKeys`/`KeysAt` buffer are the provenance capture |
 | `internal/tui/theme_inspect.go` | inspect popup and Ctrl+Right-Click |
@@ -104,6 +143,8 @@ The Settings page's theme preview landed (four colour chips on the theme row; me
 
 - `theme/keys_table_test.go`: counts, required list, chain invariants, bundled themes; the accent extension keys.
 - `theme/theme_test.go` / `theme/model_test.go`: parsing warnings and errors, base-by-luminance, extends, standalone fallbacks, attribute bundles and the legacy modifier keys, named/Reset colors, overrides (incl. dark flag), save round-trip, registry forms `file://`/env/user dir/reload/delete, save.
+- `theme/url_test.go`: URL form validation (https, loopback http, fragment and unknown-scheme refusal), cache path hash stability, cached URL loading, fetched-body validation, URL themes not deletable/listable as user files.
+- `internal/app/theme_url_test.go`: httptest round-trip under the loopback policy, fresh cache avoids a second request, offline last-known-good fallback, invalid/oversized body rejection (nothing cached), transport-policy refusal before any request, and start-up fallback to dark when a configured URL theme cannot be fetched.
 - `internal/tui/style/decor_test.go` / `editorpane/styles_test.go`: partial themes use the base's values (Fresh's rule), attributes reach cells.
 - `internal/tui/theme_tui_test.go`: inspect command and Ctrl+Right-Click, the catalog picker, apply through the catalog, overrides layering and clearing.
 - `internal/tui/theme_inspect_provenance_test.go`: exact `Painted by` output for editor text, syntax, gutter, status bar, menu bar and a palette/Settings selection; the colour+context fallback for an unattributed theme-editor swatch; a normal paint with no capture and an identical captured repaint.
