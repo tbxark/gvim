@@ -21,6 +21,9 @@ type fakeWorkspacePort struct {
 	renameLabel                              string
 	extracted                                bool
 	extractErr                               error
+	targets                                  []WorkspaceEntry
+	extractTo, extractTerminalTo             string
+	extractMany                              []string
 	running                                  []WorkspaceRunningTerminal
 	runningQueried                           string
 }

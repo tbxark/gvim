@@ -90,6 +90,14 @@ func (e *Editor) ApplyIndex(r IndexResult) (more bool) {
 	switch {
 	case errors.Is(r.err, context.Canceled), errors.Is(r.err, context.DeadlineExceeded):
 		return false
+	case errors.Is(r.err, buffer.ErrSourcePending):
+		// A window source had not loaded a window the scan needed. This is the
+		// windowed large-file path's normal temporary state, not an index error: the
+		// root's window loop loads the window the scan recorded, and the next PlanIndex
+		// starts the scan again. Nothing is reported.
+		l.Scan.Close()
+		l.Scan = nil
+		return true
 	case r.err != nil:
 		l.IndexErr = r.err
 		l.Scan.Close()

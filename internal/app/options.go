@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/internal/pluginhost"
+	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
@@ -141,6 +143,15 @@ type Options struct {
 	// Daemon hosts the editor as a daemon (DaemonServe) or attaches this terminal
 	// to one (DaemonAttach). Nil is the direct launch, the default.
 	Daemon *DaemonOptions
+
+	// PluginDaemon is the daemon's shared plugin runtime holder: one plugin.Runtime for
+	// every local daemon workspace, rebound on a switch (#19b shared-runtime slice). Nil
+	// for a direct launch (which keeps its one runtime per session).
+	PluginDaemon *pluginhost.Daemon
+	// PluginShared is the daemon's shared plugin host mux, the same pointer passed to
+	// every workspace model; the manager binds the active model into it on every switch.
+	// Nil for a direct launch.
+	PluginShared *tui.PluginShared
 
 	// pluginLog receives the plugin log for LogFile; set by buildRuntime.
 	pluginLog func(pluginapi.LogEntry)

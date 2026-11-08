@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1225,12 +1224,12 @@ func (m *Model) remoteExplorerTarget() string {
 // newEntryLabel is the name prompt's label for a new file or folder; a remote target is
 // stated in the label.
 func newEntryLabel(folder bool, target string) string {
-	label := "New file:"
+	label := uiText("gvim.remote.new_file_label", "New file:")
 	if folder {
-		label = "New folder:"
+		label = uiText("gvim.remote.new_folder_label", "New folder:")
 	}
 	if target != "" {
-		label = strings.TrimSuffix(label, ":") + " on " + target + ":"
+		label = uiTextVars("gvim.remote.label_on_target", "%{label} on %{target}:", map[string]any{"label": strings.TrimSuffix(label, ":"), "target": target})
 	}
 	return label
 }
@@ -1240,23 +1239,23 @@ func renamePromptLabel(target string) string {
 	if target == "" {
 		return uiText("gvim.prompt.rename_to", "Rename to:")
 	}
-	return "Rename to on " + target + ":"
+	return uiTextVars("gvim.remote.rename_on_target", "Rename to on %{target}:", map[string]any{"target": target})
 }
 
 // deleteQuestion is the delete confirmation. A remote delete is permanent (no trash on
 // the remote host) and the question states the target.
 func deleteQuestion(paths []string, target string) string {
-	q := "Delete " + filepath.Base(paths[0]) + "?"
+	q := uiTextVars("gvim.remote.delete_file", "Delete %{name}?", map[string]any{"name": filepath.Base(paths[0])})
 	if len(paths) > 1 {
-		q = fmt.Sprintf("Delete %d items?", len(paths))
+		q = uiTextVars("gvim.remote.delete_items", "Delete %{count} items?", map[string]any{"count": len(paths)})
 	}
 	if target != "" {
 		if len(paths) > 1 {
-			q = fmt.Sprintf("Permanently delete %d items on %s?", len(paths), target)
+			q = uiTextVars("gvim.remote.permanent_delete_items", "Permanently delete %{count} items on %{target}?", map[string]any{"count": len(paths), "target": target})
 		} else {
-			q = "Permanently delete " + filepath.Base(paths[0]) + " on " + target + "?"
+			q = uiTextVars("gvim.remote.permanent_delete_file", "Permanently delete %{name} on %{target}?", map[string]any{"name": filepath.Base(paths[0]), "target": target})
 		}
-		q += " Remote deletes have no trash."
+		q += uiText("gvim.remote.no_trash_suffix", " Remote deletes have no trash.")
 	}
 	return q
 }
@@ -1309,11 +1308,11 @@ func (m *Model) askOverwrite(job fileJob) {
 func validateName(text string) error {
 	switch {
 	case strings.TrimSpace(text) == "":
-		return errors.New("name is empty")
+		return errors.New(uiText("gvim.prompt.name_empty", "name is empty"))
 	case text == "." || text == "..":
-		return errors.New("reserved name")
+		return errors.New(uiText("gvim.prompt.name_reserved", "reserved name"))
 	case strings.ContainsAny(text, "/\x00"):
-		return errors.New("name cannot contain / or NUL")
+		return errors.New(uiText("gvim.prompt.name_invalid", "name cannot contain / or NUL"))
 	}
 	return nil
 }

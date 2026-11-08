@@ -18,7 +18,7 @@ type menus struct {
 
 // SetMenuItems replaces the menu rows of plugin.
 func (h *pluginHost) SetMenuItems(plugin string, items []pluginapi.MenuItem) {
-	m := h.m
+	m := h.model()
 	ms := &m.plug.menus
 	if len(items) == 0 {
 		delete(ms.byPlugin, plugin)

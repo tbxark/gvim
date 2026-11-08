@@ -42,10 +42,15 @@ type SaveResult struct {
 	err  error
 
 	// The rest is set for a large document only.
-	Res     buffer.WriteResult // what the snapshot wrote, for the rebase
-	Tmp     os.FileInfo        // the state of the temporary file before it was renamed
-	Skipped bool               // nothing was written, because there was nothing to save
-	Note    string             // what the status says after the save, or empty
+	Res buffer.WriteResult // what the snapshot wrote, for the rebase
+	Tmp os.FileInfo        // the state of the temporary file before it was renamed
+	// Source, when set, is a fresh source of the file that a remote windowed large
+	// save wrote. The save command opened it while it still had the remote access;
+	// ApplySaves adopts it on the editor goroutine, so the rebase reads no remote
+	// window there. A nil source means the caller must reload instead.
+	Source  buffer.Source
+	Skipped bool   // nothing was written, because there was nothing to save
+	Note    string // what the status says after the save, or empty
 }
 
 // Err returns the error of the save, or nil when the file was written.
@@ -101,7 +106,7 @@ func (j SaveJob) RunContext(ctx context.Context) SaveResult {
 		return SaveResult{Job: j, err: j.err}
 	}
 	if j.Doc != nil && j.Doc.access != nil {
-		return j.runWithAccess(j.Doc.access)
+		return j.runWithAccess(ctx, j.Doc.access)
 	}
 	if j.RefuseExisting && !sameFile(j.OwnPath, j.Path) && diskStateOf(j.Path).Exists {
 		return SaveResult{Job: j, err: fmt.Errorf("save as %s: %w", j.Path, ErrExists)}
@@ -129,9 +134,9 @@ func (j SaveJob) RunContext(ctx context.Context) SaveResult {
 // access, so no local filesystem path is ever consulted or written. A failed remote
 // write is an error, and ApplySaves only marks a save that ran without error, so user
 // data is never reported saved when it was not.
-func (j SaveJob) runWithAccess(access FileAccess) SaveResult {
+func (j SaveJob) runWithAccess(ctx context.Context, access FileAccess) SaveResult {
 	if j.large != nil {
-		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, errNoRemoteLarge)}
+		return j.writeLargeRemote(ctx, access)
 	}
 	now, err := access.Stat(j.Path)
 	if err != nil {

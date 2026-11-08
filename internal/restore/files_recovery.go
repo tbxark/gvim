@@ -165,7 +165,7 @@ func restoreCrash(ed *editor.Editor, dir string) (failed []Unrestored, n int, sp
 		return nil, 0, false
 	}
 	prev := activeIndex(ed)
-	failed = restoreFiles(ed, dir, s, true)
+	failed = restoreFiles(ed, dir, s, true, nil)
 	if prev >= 0 {
 		ed.ActivateTab(prev)
 	}

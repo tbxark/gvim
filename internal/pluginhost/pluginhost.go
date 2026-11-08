@@ -75,7 +75,48 @@ type SpawnGate func(ctx context.Context, argv []string, cwd string, env map[stri
 // With --no-plugins the runtime is still created, with the loader disabled: it discovers
 // and loads nothing but the --plugin paths, and the plugin manager can say why.
 func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document), o Options) *Wiring {
-	cfgDir, _ := config.Dir()
+	ld := loaderOptions(cfg, o)
+	var workspaceState *plugin.WorkspaceState
+	var workspaceStateReadOnly bool
+	var workspaceStateNote string
+	if o.WorkspaceStateFile != "" {
+		st, readOnly, err := parsedWorkspaceState(o)
+		switch {
+		case err != nil:
+			workspaceStateNote = "per-workspace plugin state ignored: " + err.Error()
+		case readOnly:
+			workspaceStateReadOnly = true
+			workspaceStateNote = "per-workspace plugin state is read-only: it was written by a newer gvim"
+		default:
+			workspaceState = st
+		}
+	}
+	osys := newPluginOS(pluginDirs(configDir(), o.Root), o.SpawnEnv)
+	osys.gate = o.Gate
+	return &Wiring{
+		OS: osys,
+		Runtime: plugin.New(plugin.Options{
+			Timeout:                cfg.PluginTimeout,
+			OS:                     osys,
+			Services:               pluginServices{},
+			Version:                o.Version,
+			LogSink:                o.LogSink,
+			Loader:                 ld,
+			Locale:                 i18n.Locale(),
+			WorkspaceStateFile:     o.WorkspaceStateFile,
+			WorkspaceState:         workspaceState,
+			WorkspaceStateReadOnly: workspaceStateReadOnly,
+			WorkspaceStateNote:     workspaceStateNote,
+		}),
+		Editor: newPluginEditor(ed, markEdited),
+		Keys:   pluginKeysFor(cfg, o),
+	}
+}
+
+// loaderOptions builds the discovery options of a session (or of the daemon's shared
+// runtime): sources, toggles and the per-plugin settings of cfg.
+func loaderOptions(cfg config.Config, o Options) *plugin.LoaderOptions {
+	cfgDir := configDir()
 	ld := &plugin.LoaderOptions{
 		Paths:    o.Paths,
 		Disabled: o.Disabled,
@@ -95,52 +136,29 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 			ld.Settings[name] = plugin.PluginSettings{User: pc.Settings, Project: pc.ProjectSettings}
 		}
 	}
-	var workspaceState *plugin.WorkspaceState
-	var workspaceStateReadOnly bool
-	var workspaceStateNote string
-	if o.WorkspaceStateFile != "" {
-		ld.WorkspaceState = true
-		st, readOnly, err := plugin.ParseWorkspaceState(o.WorkspaceStateData)
-		switch {
-		case err != nil:
-			workspaceStateNote = "per-workspace plugin state ignored: " + err.Error()
-		case readOnly:
-			workspaceStateReadOnly = true
-			workspaceStateNote = "per-workspace plugin state is read-only: it was written by a newer gvim"
-		default:
-			workspaceState = st
-		}
-	}
-	osys := newPluginOS(pluginDirs(cfgDir, o.Root), o.SpawnEnv)
-	osys.gate = o.Gate
-	return &Wiring{
-		OS: osys,
-		Runtime: plugin.New(plugin.Options{
-			Timeout:                cfg.PluginTimeout,
-			OS:                     osys,
-			Services:               pluginServices{},
-			Version:                o.Version,
-			LogSink:                o.LogSink,
-			Loader:                 ld,
-			Locale:                 i18n.Locale(),
-			WorkspaceStateFile:     o.WorkspaceStateFile,
-			WorkspaceState:         workspaceState,
-			WorkspaceStateReadOnly: workspaceStateReadOnly,
-			WorkspaceStateNote:     workspaceStateNote,
-		}),
-		Editor: newPluginEditor(ed, markEdited),
-		Keys: func(name string, bs []pluginapi.Binding) (*keymap.Map, error) {
-			base := o.Preset
-			if name != "" {
-				// A keymap switch: the plugin bindings go over the preset it chose.
-				b, err := keybindings.Keymap(name)
-				if err != nil {
-					return nil, err
-				}
-				base = b
+	return ld
+}
+
+// parsedWorkspaceState parses Options.WorkspaceStateData. A version newer than this binary
+// reports readOnly: the caller refuses writes and never overwrites the file.
+func parsedWorkspaceState(o Options) (*plugin.WorkspaceState, bool, error) {
+	return plugin.ParseWorkspaceState(o.WorkspaceStateData)
+}
+
+// pluginKeysFor builds the keymap builder of a session: the preset, then the plugin
+// bindings, then the user's own.
+func pluginKeysFor(cfg config.Config, o Options) func(name string, bs []pluginapi.Binding) (*keymap.Map, error) {
+	return func(name string, bs []pluginapi.Binding) (*keymap.Map, error) {
+		base := o.Preset
+		if name != "" {
+			// A keymap switch: the plugin bindings go over the preset it chose.
+			b, err := keybindings.Keymap(name)
+			if err != nil {
+				return nil, err
 			}
-			return keybindings.PluginKeymap(base, cfg, bs)
-		},
+			base = b
+		}
+		return keybindings.PluginKeymap(base, cfg, bs)
 	}
 }
 

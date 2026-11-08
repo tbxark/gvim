@@ -411,7 +411,14 @@ workspace model (#19).
   lazily from its stored spec. Tests use an in-process fake authority (no real SSH): start
   with a remote target, detach/reattach, restart reuse of the persisted spec/identity, lazy
   dormant switch, a stored spec that no longer parses keeping the current workspace, and the
-  prompt/non-interactive paths.
+  prompt/non-interactive paths. Daemon-hosted remote workspaces also capture and restore
+  their workspace session across a restart: the existing capture writes the layout, file
+  states and stashes into the session directory keyed by stable id, and the next start
+  (after the authority connects) reopens the files through the remote document access and
+  restores tabs, active tab, cursor, pane layout and unsaved text; a vanished file keeps its
+  stash and is reported by the session notice, while a disconnected start restores nothing
+  and skips its capture so the saved session survives for the next start. Direct remote
+  launches still keep no local session.
 - **Attach.** `gvim -a [NAME]` (or `--attach`) dials the socket, sends a hello
   with the terminal size (and any named files as an open-file frame), puts the
   terminal in raw mode, and forwards input bytes, output frames, resize signals
@@ -552,7 +559,10 @@ still loads unchanged.
   (it would enumerate the local disk). The walk is bounded (50k files, 20k directories,
   depth 64), skips the walker's skip dirs/hidden entries, rejects unsafe remote entry names
   (separators, `..`, NUL) and never traverses symlinks; ctx cancellation ends the index
-  with `context.Canceled`. A root read failure is the index error and is shown as a
+  with `context.Canceled`. Ignored entries are dropped through the same bounded remote
+  .gitignore reader as the explorer (root/nested patterns, 64 KiB/file, 64 levels, 4096
+  rules; the batch lives for one index lifetime, so an edited ignore file reaches the
+  palette when the index restarts after a reconnect or the File Explorer: Refresh action). A root read failure is the index error and is shown as a
   `File search failed: ...` row; a truncated list shows an incomplete-list row instead of
   posing as the whole project; subdirectory failures keep the rest (partial list). A `~`
   workspace root is expanded remotely (one bounded shell command) so the palette root and
@@ -577,8 +587,16 @@ still loads unchanged.
   the remote repo root and returns absolute remote paths, so a hit opens through the
   remote document access; the local git state is never consulted. Project Replace now runs
   on the remote host through the authority file system (see the remote-project-replace
-  bullet below). Remaining remote gaps: the current-file and
-  open-buffers search scopes and the panel preview column are not wired. The remote
+  bullet below). The current-file and open-buffers scopes now search the editor's remote
+  document snapshots (the authority loaded that text; unsaved edits included) with the same
+  match caps, batching and query validation as locally, and start no remote process; no local
+  disk is read. The panel preview column is wired for remote results: an open buffer's text is
+  used as the panel already has it, otherwise the file's head (at most 256 KiB) is read through
+  the authority's bounded windowed read with an honest truncated marker and stale-request guard
+  (the panel's sequence drops superseded answers; a disconnected authority is an error, never a
+  local read). Remaining remote gaps: the preview is plain text (no remote syntax spans) and
+  head-only for files over 256 KiB, and remote .gitignore/candidate filtering stays out of the
+  search list. The remote
   ~/~user root is expanded by the remote shell; authority.QuoteDir keeps the tilde word
   expandable and quotes only the tail ("$HOME"/'proj', ~user/'proj'), because ~'/proj' is
   not a tilde expansion in sh/bash.
@@ -605,8 +623,8 @@ still loads unchanged.
   Refresh action re-enumerates it on demand (a full re-walk, not incremental; a palette
   already open during the refresh keeps its previous rows until it re-ranks or reopens).
   Residuals: palette file rows carry no git letters (the local palette rows do not either;
-  marks are the explorer's), and the remote project-search panel's preview column is still
-  unwired.
+  marks are the explorer's), and the remote project-search panel's preview column now reads
+  through this same authority windowed/whole-file path (head-only, plain text).
 - **Remote explorer (landed).** A remote launch shows the remote workspace tree in the
   explorer: a lazy `tui.RemoteExplorerTree` over a `RemoteDirLoader` port
   (app adapter `authorityDirLoader`) lists each directory through `authority.Files().ReadDir`,
@@ -619,7 +637,25 @@ still loads unchanged.
   authority-reconnect path reloads it. Listings are bounded (5000 entries per directory, the
   authority's own cap, over it a clear error naming the directory), hidden entries are filtered
   by the explorer's show-hidden toggle, ordering matches the local tree (directories first,
-  natural, case-insensitive), and a trailing slash-free remote root is shown as given. Opening
+  natural, case-insensitive), and a trailing slash-free remote root is shown as given.
+  Remote .gitignore filtering uses the same parser and go-git matcher as the local
+  explorer: the workspace root's and every ancestor/nested .gitignore are read through
+  `authority.Files()` (never the local disk), bounded to 64 directory levels, 64 KiB per
+  file and 4096 accumulated rules; a missing file is normal, while an oversized or
+  unreadable one (or a depth/rule overflow) keeps the listing working with ignore
+  filtering incomplete and one explicit notice. Ignored entries are hidden by default
+  and revealed by the existing show-gitignored toggle (rows carry the loader's Ignored
+  flag); the remote finder index filters through the same ignore batch, so the palette
+  stops listing ignored files and directories. Remote directory watching reuses the
+  existing authority-backed `remoteWatch` bridge: the explorer loader adds each listed
+  directory to `RootPorts.WatchDirs`, so the polled authority Watch refreshes the listing
+  through the normal watchWait -> reloadTreeAsync path with its debounce/coalescing, off
+  the update loop, and its existing cancellation/reconnect behavior (Reconnected restarts
+  the watches, Close cancels them). The loader probes watch support once: a backend that
+  refuses Watch (or a launch without the bridge) gets one 'remote directory watching is
+  not supported; refresh manually (Ctrl+R)' notice and degrades to manual refresh
+  without failing the listing.
+  Opening
   a file uses the existing row->`OpenFileMsg` path and therefore the remote `FileAccess`
   (save/revert already route to the authority). Writes on the remote tree: New File, New
   Directory, Rename and Delete are wired through `internal/app/remote_explorer_ops.go` over
@@ -638,14 +674,21 @@ still loads unchanged.
   remote-project-replace bullet). Reveal/follow and re-expansion of unloaded ancestors work by
   reloading the waypoint directories and revealing the path in the new listing. Gaps vs
   Fresh's remote explorer (which runs the full file tree over the authority): drag/move,
-  cut/copy/paste of subtrees and duplicate are not wired, remote .gitignore filtering is not
-  implemented (the toggle is a no-op and no entry is marked ignored), remote git marks stay
-  inert, the tree is not watched for remote directory changes (the file watch covers open
-  documents' directories only), a directory symlink is shown as a directory (its target is
-  listed through the symlink path), a create/rename existence check has a check-to-write race
-  (the FileMutations surface has no exclusive create/rename), and the refresh/again cadence is
-  request-driven rather than backed by a remote directory watcher; Windows clients still share
-  the root's `filepath` assumptions for remote POSIX paths. Tests: `internal/tui/remote_tree_test.go` (lazy
+  cut/copy/paste of subtrees and duplicate are not wired, remote git marks stay inert, a
+  directory symlink is shown as a directory (its target is listed through the symlink path),
+  and a create/rename existence check has a check-to-write race (the FileMutations surface
+  has no exclusive create/rename). Remote .gitignore files are read once per listing (the
+  explorer applies an edit on the next reload triggered by the watch/refresh; the finder
+  keeps its ignore batch for one index lifetime, so an edited .gitignore reaches the palette
+  on the next index restart/reconnect). The directory watch is the polled authority watch
+  (~500 ms plus debounce), so latency and the rename-as-remove+create approximation remain,
+  and a watch the backend cannot provide degrades to manual refresh with one notice.
+  Windows clients still share the root's `filepath` assumptions for remote POSIX paths.
+  Tests: `internal/app/remote_ignore_test.go` (root/nested/negation/anchored rules mark
+  explorer entries, the finder drops ignored entries, size/depth bounds degrade with one
+  notice, a supported watch adds the loaded directories, an unsupported watch notices and
+  adds none, a disconnected authority touches nothing, local decoy untouched),
+  `internal/tui/remote_tree_test.go` (lazy
   expand/no-read-before-command, natural order, hidden filter, stale toggle drop,
   prune/keep-expansion, error+retry, reveal waypoints, read-only/hidden capabilities) and
   `remote_tree_model_test.go` (Update does no remote read; initial load and reconnect reload
@@ -763,6 +806,39 @@ still loads unchanged.
   (refs/fresh/docs/internal/plugin-window-scope-plan.md: one editor-wide runtime,
   per-window `session_plugin_state`, chrome scope and the focus announcer that retargets the
   active window/split/buffer) remains the recorded follow-up residual.
+- **Shared daemon plugin runtime and host mux (landed #19b follow-up).** One
+  `plugin.Runtime` serves every LOCAL daemon workspace (`pluginhost.Daemon`): the first workspace
+  build creates it from that build's config; every later workspace contributes only its
+  plugin OS, editor adapter, keymap builder and state namespace (`pluginhost.Workspace`). A
+  `pluginhost.MuxOS` routes the runtime's file/process/watch calls to the ACTIVE workspace's OS,
+  so plugin spawns use that workspace's root, env and trust gate. The runtime's host is a
+  daemon-wide mux (`tui.PluginShared`): one `pluginHost` whose `model()` reads the bound active
+  model, so plugin UI/buffer calls route to the active workspace. On a switch the manager
+  rebinds host and OS and calls `Runtime.SwitchWorkspaceState` (the leaving namespace is flushed
+  as Work, the entering workspace's `sessions/<stable-id>/plugin-state.json` becomes the store).
+  Editor-wide registrations - plugin commands, menus, key bindings/modes/contexts and status
+  items - are snapshotted from the leaving model and installed into the entering one (with a
+  keymap rebuild), so a plugin loaded once keeps its commands/keys/menus across workspaces.
+  Workspace-scoped chrome - widget panels and sidebar sections, the prompt/picker/popup
+  overlays, per-buffer decorations/folds/groups/view state - stays with the model where it
+  was registered, matching Fresh's default window scope for chrome. A workspace close does
+  not stop the shared runtime (models skip `pluginStop` when bound to it); the daemon stops it
+  once after `closeAll`, which flushes the active state namespace and shuts down every
+  registered workspace OS. Direct launches keep one runtime per session byte-identically.
+  Remote/authority-spec workspaces are excluded from sharing this slice (they keep their own
+  runtime). Tests: `internal/tui/plugin_shared_test.go` (editor-wide registrations carried, chrome
+  not, host retarget, no workspace stop), `internal/pluginhost/shared_test.go` (OS mux
+  follows the active workspace, one runtime per daemon), `internal/app/workspace_plugin_shared_test.go`
+  (one runtime for two daemon workspaces, host/state rebind on switch/back).
+  Residuals: full Fresh per-registration window-scope chrome and the focus announcer; a
+  workspace's project plugin config/enablement is not applied to the shared runtime (daemon
+  launch config owns it); plugin UI waits/prompts opened in one workspace stay with it and are
+  not retargeted; reload/enable runs once editor-wide and re-registers workspace-scoped chrome
+  into the workspace active at that moment; remote/authority workspaces still run their own
+  runtime (while one is active the shared daemon runtime has no pump and is paused - queued
+  plugin events/tasks resume when a local workspace is active again); the old namespace's
+  pending state is flushed as Work on a switch, so a hard kill immediately after a switch can
+  lose the last debounce window exactly like the direct-launch state file.
 - **Extract tab to a co-tenant workspace (landed with registry v2).** The tab context
   menu's "Extract to New Workspace" (and the palette row "Extract tab to new workspace")
   moves the active file tab into a NEW workspace over the SAME project root, matching
@@ -780,7 +856,43 @@ still loads unchanged.
   records the source workspace without the extracted tab, so switching back never
   resurrects a duplicate. The report is "Extracted <name> into workspace <label>".
   Only the large-file overlay and the no-file-path (welcome screen) cases are still refused;
-  the tab is left untouched on every refusal. The close-workspace flow asks first when the
+  the tab is left untouched on every refusal. Round 16 (this slice) adds three variants on
+  top of that path, with the same transfer-first, switch-second, close-last ordering and
+  the same exact notices:
+  - **Extract into an EXISTING workspace over the same root** (palette "Extract tab to
+    workspace…" + target picker): a gvim extension — Fresh only creates new co-tenants.
+    The picker lists the other materialized/dormant workspaces whose canonical root equals
+    the source's (a different root is refused, nothing moves). A dormant target gets the
+    tab's FileState merged into its saved session (stash written in that workspace's
+    session dir, same path replaced/updated in place); a materialized target opens the
+    file in its live editor through restore.RestoreSession (cursor/stash applied) and is
+    re-captured, so the target's own session keeps it. Only after that acceptance is the
+    switch queued and the source tab closed; a refused switch keeps the source tab (the
+    accepted copy stays in the target and the notice says the tab is still open), and a
+    failed post-close materialization says the text is kept in the target.
+  - **Extract a terminal tab into an existing workspace over the same root** (palette
+    "Extract terminal tab to workspace…"): a gvim bounded slice of Fresh's terminal
+    extraction. Fresh moves the PTY machinery and the running process between windows
+    in-process; gvim has no cross-runtime PTY hand-off, so it moves the dock tab's SAVED
+    record instead (transcript, styled screen snapshot, launch/resume argv, launch dir,
+    live flag) and closes the source dock tab (which stops the source shell) only after
+    the target accepted. A materialized target appends a dormant restored panel to its
+    dock (no process starts, the current tabs/active tab are unchanged); a dormant target
+    merges the record into its terminal.json. The target revives the terminal with a new
+    PTY on the user's first dive (the normal live-restore rule), so the running session
+    itself does not continue — reported as "it revives on the first dive".
+  - **Extract several selected file tabs at once** (palette "Extract tabs to new
+    workspace…", multi-select picker): Fresh has no multi-tab extract; this is gvim's
+    bounded extension, limited to the open FILE tabs (a terminal tab has the action
+    above, an untitled/welcome tab has no file state, and a large-file overlay is
+    refused). Space marks tabs in a centred multi-select list, Enter extracts the marked
+    set (or the highlighted tab alone when none is marked). One new co-tenant over the
+    same root is written with all FileStates and stashes first; then the switch is queued
+    and every source tab closes through CloseTabForWorkspaceExtractAt (by path, not only
+    the active tab) after acceptance. A tab that changed mid-action is skipped (its text
+    is still in the target; the report says how many closed), a refused switch discards
+    the just-created co-tenant and moves nothing.
+  The close-workspace flow asks first when the
   workspace still runs terminals: the confirmation lists every one of them and its agent
   (the dock's `RunningTabs` snapshot), and the close report and protocol close answer say
   exactly what was stopped; a dormant close reports that nothing was stopped. Rename
@@ -788,16 +900,22 @@ still loads unchanged.
   Fresh's separate diff_nav plugin is unrelated; the per-tab "Extract to New Workspace"
   item also appears in Fresh's tab context menu.
 - **Remainder of #19a (not shipped).** A remote workspace's `authority_spec` field (registry
-  v2 still records no authority), the shared editor-wide plugin runtime + Fresh's
-  plugin-window-scope chrome model (this round scopes plugin state per workspace, it does not
-  merge the runtimes), eviction/memory limits for
+  v2 still records no authority), per-workspace project plugin configuration for the shared
+  daemon runtime, full Fresh window-scope chrome/focus announcer per registration and
+  retargeting plugin UI waits across workspaces, eviction/memory limits for
   warm co-tenants, the initial terminal-launch record in a workspace descriptor (the
   discovery Import can create a workspace but not attach an argv to it yet), shared
   buffers/daemon-level open-path map beyond the switch-to-existing-workspace rule (#19b),
   a workspace switcher that shows live runtime details (the list shows label/root/state
   only), and making the capture write itself cancellable/ordered under a slow disk beyond
-  the quit wait. The extract flow still leaves these open: terminal-tab extraction (Fresh
-  moves the live PTY; gvim's dock tabs cannot be extracted yet), large-file overlay
-  extraction, extracting more than the active tab at once, and the cross-workspace
-  shared-buffer model (#19b). Multi-client dispatch (the round-12 daemon hosts exactly one
-  attached client) stays open.
+  the quit wait. The extract flow still leaves these open: the cross-workspace
+  shared-buffer model (#19b) and a live PTY/process hand-off (gvim moves terminal state and
+  restarts in the target, Fresh moves the PTY in-process), large-file overlay extraction,
+  extracting to a workspace over a DIFFERENT root (refused: extraction is co-tenant only,
+  matching Fresh's root-preserving extract), terminal tabs in the multi-select picker
+  (they use the terminal action; a mixed selection cannot be expressed yet), and all-tabs-
+  of-a-file semantics (there is no such Fresh action; the multi-select picker is the
+  bounded substitute). The target picker is a plain list: no drag-and-drop between
+  workspaces and no cross-workspace undo, same as the rest of the workspace UI.
+  Multi-client dispatch (the round-12 daemon hosts exactly one attached client) stays
+  open.

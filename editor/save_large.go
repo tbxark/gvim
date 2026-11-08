@@ -58,6 +58,22 @@ func (e *Editor) applyLargeSave(r SaveResult) {
 // false nothing has changed.
 func (e *Editor) rebaseOnSaved(d *Document, r SaveResult) bool {
 	lg := r.Job.LargeSave()
+	if r.Source != nil {
+		// A remote windowed large save opened the new source in its command. Adopt it
+		// here; no remote read happens on the update goroutine.
+		if r.Source.Size() != r.Res.Bytes {
+			_ = r.Source.Close()
+			return false
+		}
+		if err := d.Buffer.Rebase(r.Source, r.Res, lg.Ver, int64(len(lg.Prefix))); err != nil {
+			_ = r.Source.Close()
+			return false
+		}
+		d.LargeState().Size = r.Source.Size()
+		d.LargeState().Mtime = mtimeNano(r.Disk)
+		d.LargeState().Skip = int64(len(lg.Prefix))
+		return true
+	}
 	open := openSavedSource
 	if e.opts.openSrc != nil {
 		open = func(path string) (buffer.Source, os.FileInfo, error) {

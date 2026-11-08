@@ -2,6 +2,7 @@ package explorer
 
 import (
 	"bufio"
+	"bytes"
 	"slices"
 	"strings"
 
@@ -26,9 +27,23 @@ func readIgnore(fsys billy.Filesystem, dir []string) []gitignore.Pattern {
 		return nil
 	}
 	defer func() { _ = f.Close() }()
-
-	var ps []gitignore.Pattern
+	var data []byte
 	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		data = append(data, sc.Bytes()...)
+		data = append(data, '\n')
+	}
+	return ParseIgnore(data, dir)
+}
+
+// ParseIgnore parses .gitignore text for the directory dir, given as path segments
+// relative to the tree root (nil for the root itself), into go-git patterns scoped to
+// dir. Empty lines and #-comments are skipped. The remote explorer reads a remote
+// .gitignore through the authority and calls this, so local and remote filtering share
+// one parser (root, nested, negation and anchored patterns included).
+func ParseIgnore(data []byte, dir []string) []gitignore.Pattern {
+	var ps []gitignore.Pattern
+	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
 		line := strings.TrimRight(sc.Text(), "\r")
 		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {

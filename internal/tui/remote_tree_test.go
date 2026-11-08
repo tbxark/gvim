@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -12,10 +13,11 @@ import (
 // fakeRemoteLoader is an in-memory RemoteDirLoader: the map is the remote host, every
 // call is recorded, and a configured error fails the batch.
 type fakeRemoteLoader struct {
-	mu    sync.Mutex
-	dirs  map[string][]RemoteDirEntry
-	calls [][]string
-	err   error
+	mu     sync.Mutex
+	dirs   map[string][]RemoteDirEntry
+	calls  [][]string
+	err    error
+	notice string
 }
 
 func (l *fakeRemoteLoader) set(dir string, entries ...RemoteDirEntry) *fakeRemoteLoader {
@@ -42,6 +44,15 @@ func (l *fakeRemoteLoader) ReadDirs(_ context.Context, dirs []string) (map[strin
 		}
 	}
 	return out, nil
+}
+
+// TakeNotice implements the optional load-notice surface the tree forwards to the root.
+func (l *fakeRemoteLoader) TakeNotice() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	notice := l.notice
+	l.notice = ""
+	return notice
 }
 
 func (l *fakeRemoteLoader) callCount() int {
@@ -265,11 +276,47 @@ func TestRemoteTreeWriteCapabilities(t *testing.T) {
 		t.Fatal("the remote tree does not report the unavailable cut/copy/paste support")
 	}
 	if tree.ShowIgnored() {
-		t.Fatal("the remote tree reports gitignore filtering, which is not implemented")
+		t.Fatal("the remote tree lists ignored entries by default")
 	}
 	tree.SetShowIgnored(true)
+	if !tree.ShowIgnored() {
+		t.Fatal("SetShowIgnored did not include the ignored entries")
+	}
+	tree.SetShowIgnored(false)
 	if tree.ShowIgnored() {
-		t.Fatal("SetShowIgnored changed the unsupported remote gitignore filtering")
+		t.Fatal("SetShowIgnored did not hide the ignored entries again")
+	}
+}
+
+// TestRemoteTreeHidesIgnoredRows checks the loader's Ignored flag hides rows by default
+// and the show-ignored toggle shows them, as the local tree does.
+func TestRemoteTreeHidesIgnoredRows(t *testing.T) {
+	loader := (&fakeRemoteLoader{}).set("/srv/proj",
+		RemoteDirEntry{Name: "a.go"},
+		RemoteDirEntry{Name: "b.log", Ignored: true},
+	)
+	tree := NewRemoteExplorerTree("/srv/proj", loader)
+	applyRemoteInitial(t, tree)
+	wantRemoteRows(t, tree, "proj", "a.go")
+	tree.SetShowIgnored(true)
+	wantRemoteRows(t, tree, "proj", "a.go", "b.log")
+	tree.SetShowIgnored(false)
+	wantRemoteRows(t, tree, "proj", "a.go")
+}
+
+// TestRemoteTreeTakeLoadNotice checks a degraded load/watch notice is handed to the root
+// once.
+func TestRemoteTreeTakeLoadNotice(t *testing.T) {
+	loader := remoteTreeTestLoader()
+	tree := NewRemoteExplorerTree("/srv/proj", loader)
+	loader.mu.Lock()
+	loader.notice = "remote directory watching is not supported by this backend; refresh manually (Ctrl+R)"
+	loader.mu.Unlock()
+	if got := tree.TakeLoadNotice(); !strings.Contains(got, "not supported by this backend") {
+		t.Fatalf("notice = %q", got)
+	}
+	if got := tree.TakeLoadNotice(); got != "" {
+		t.Fatalf("the notice repeated: %q", got)
 	}
 }
 

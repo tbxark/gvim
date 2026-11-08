@@ -251,7 +251,11 @@ type PreviewResult struct {
 	// Spans are the syntax runs of the returned lines; empty means plain text (the port
 	// cannot highlight, or the file is too large or has no grammar).
 	Spans []PreviewSpan
-	Err   string // why the file could not be read or previewed
+	// Truncated says the preview is an honest head of a larger file: the port read a
+	// bounded window and Lines/Total describe only what it could read (a remote preview
+	// shows complete head lines). The header marks it.
+	Truncated bool
+	Err       string // why the file could not be read or previewed
 }
 
 // Previewer reads a match's context for the panel's preview column. The app

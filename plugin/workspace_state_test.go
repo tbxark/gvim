@@ -190,3 +190,41 @@ T.command("set", function() gvim.state.set("k", "direct") end)`, plugintest.Opti
 		t.Fatalf("direct runtime reports a workspace state file")
 	}
 }
+
+// TestWorkspaceStateSwitchFlushesAndSeeds: switching namespaces on one runtime writes the
+// left namespace to its own file and makes the next namespace's seed the active store.
+func TestWorkspaceStateSwitchFlushesAndSeeds(t *testing.T) {
+	fos := plugintest.NewFakeOS()
+	pathA := "/sessions/aaaa/plugin-state.json"
+	pathB := "/sessions/bbbb/plugin-state.json"
+	h := startWorkspace(t, fos, pathA, nil, `
+T.command("set", function() gvim.state.set("k", "A") end)
+T.command("setB", function() gvim.state.set("k", "B") end)
+T.command("get", function() T.spy(tostring(gvim.state.get("k"))) end)`)
+	if err := h.Run("t.set", nil); err != nil {
+		t.Fatal(err)
+	}
+	// Seed B's namespace with a different value and switch to it.
+	stB, _, err := plugin.ParseWorkspaceState([]byte(`{"version":1,"plugins":{"t":{"k":"from-B"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.RT.SwitchWorkspaceState(pathB, stB, false)
+	if err := h.Run("t.get", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := spyText(h); !strings.HasSuffix(got, "from-B") {
+		t.Fatalf("after switch get = %q, want the B namespace value", got)
+	}
+	if err := h.Run("t.setB", nil); err != nil {
+		t.Fatal(err)
+	}
+	h.RT.Stop()
+	// A was flushed to A's file and keeps its value; B holds what was written there.
+	if v, ok := workspaceValue(t, fos, pathA, "t", "k"); !ok || v != "A" {
+		t.Fatalf("A namespace after switch = %v, %v", v, ok)
+	}
+	if v, ok := workspaceValue(t, fos, pathB, "t", "k"); !ok || v != "B" {
+		t.Fatalf("B namespace after switch = %v, %v", v, ok)
+	}
+}

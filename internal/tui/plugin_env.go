@@ -7,45 +7,45 @@ import "github.com/tbxark/gvim/pluginapi"
 // methods here only report and forward, then raise env_changed for listeners.
 
 func (h *pluginHost) DetectedEnv() (pluginapi.EnvInfo, bool) {
-	if h.m.env == nil {
+	if h.model().env == nil {
 		return pluginapi.EnvInfo{}, false
 	}
-	return h.m.env.DetectedEnv()
+	return h.model().env.DetectedEnv()
 }
 
 func (h *pluginHost) ActiveEnv() (pluginapi.EnvInfo, bool) {
-	if h.m.env == nil {
+	if h.model().env == nil {
 		return pluginapi.EnvInfo{}, false
 	}
-	return h.m.env.ActiveEnv()
+	return h.model().env.ActiveEnv()
 }
 
 func (h *pluginHost) EnvTrustLevel() string {
-	if h.m.env == nil {
+	if h.model().env == nil {
 		return "restricted"
 	}
-	return h.m.env.TrustLevel()
+	return h.model().env.TrustLevel()
 }
 
 func (h *pluginHost) SetEnv(plugin, snippet, dir, kind string) error {
-	if h.m.env == nil {
+	if h.model().env == nil {
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "env activation is not supported here")
 	}
-	if err := h.m.env.SetEnv(snippet, dir, kind); err != nil {
+	if err := h.model().env.SetEnv(snippet, dir, kind); err != nil {
 		return err
 	}
-	h.m.emitEnvChanged()
+	h.model().emitEnvChanged()
 	return nil
 }
 
 func (h *pluginHost) ClearEnv(plugin string) error {
-	if h.m.env == nil {
+	if h.model().env == nil {
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "env activation is not supported here")
 	}
-	if err := h.m.env.ClearEnv(); err != nil {
+	if err := h.model().env.ClearEnv(); err != nil {
 		return err
 	}
-	h.m.emitEnvChanged()
+	h.model().emitEnvChanged()
 	return nil
 }
 

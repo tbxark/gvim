@@ -55,7 +55,7 @@ func (h *pluginHost) SetLineTargets(plugin string, id pluginapi.BufferID, target
 		t.Into = cleanText(t.Into)
 		set.byLine[t.Line] = t
 	}
-	m := h.m
+	m := h.model()
 	if m.plug.lineTargets == nil {
 		m.plug.lineTargets = map[pluginapi.BufferID]*lineTargetSet{}
 	}
@@ -69,11 +69,11 @@ func (h *pluginHost) SetLineTargets(plugin string, id pluginapi.BufferID, target
 
 // ClearLineTargets removes the buffer's targets when the caller owns them.
 func (h *pluginHost) ClearLineTargets(plugin string, id pluginapi.BufferID) {
-	set := h.m.plug.lineTargets[id]
+	set := h.model().plug.lineTargets[id]
 	if set == nil || set.owner != plugin {
 		return
 	}
-	delete(h.m.plug.lineTargets, id)
+	delete(h.model().plug.lineTargets, id)
 }
 
 // lineTargetAt returns the target on a line of the document, when it is a plugin buffer

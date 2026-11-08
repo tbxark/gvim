@@ -275,7 +275,24 @@ func (wr *snapWriter) run(ctx context.Context, first, count int) error {
 		}
 		buf := wr.cp[:n]
 		if err := readFull(r.src.src, r.stats, buf, off); err != nil {
-			return err
+			if !errors.Is(err, ErrSourcePending) {
+				return err
+			}
+			// An asynchronous window source may not have this range yet. The write
+			// runs in a command (never on the update loop), so loading the window
+			// here is allowed; the read is then retried at the same offset.
+			ws, ok := r.src.src.(WindowSource)
+			if !ok {
+				return err
+			}
+			poff, pn, pending := ws.TakePendingWindow()
+			if !pending || pn <= 0 {
+				return err
+			}
+			if loadErr := ws.LoadWindow(ctx, poff, pn); loadErr != nil {
+				return loadErr
+			}
+			continue
 		}
 		if _, err := wr.tee.Write(buf); err != nil {
 			return err

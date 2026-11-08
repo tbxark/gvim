@@ -204,6 +204,19 @@ func New(o Options) *Runtime {
 // editor-wide per-plugin files (direct launch). It is the seam the app and tests observe.
 func (r *Runtime) WorkspaceStatePath() string { return r.workspaceStateFile }
 
+// SwitchWorkspaceState makes path/st the active per-workspace gvim.state namespace. It is
+// called on the UI goroutine when a daemon workspace becomes active: the current namespace
+// is flushed as a Work (no blocking IO here), the in-memory store is replaced by the new
+// namespace's seed, and later state reads/writes go to the new file. readOnly marks a file
+// written by a newer gvim (writes refused, never overwritten).
+func (r *Runtime) SwitchWorkspaceState(path string, st *WorkspaceState, readOnly bool) {
+	io := r.io()
+	io.wsSwitch(path, st, readOnly)
+	r.workspaceStateFile = path
+	r.workspaceState = st
+	r.workspaceStateReadOnly = readOnly
+}
+
 // SetLocale sets the locale plugins translate for: gvim.i18n.locale() returns it and
 // gvim.i18n.t falls back to English. The app calls it on the update loop, at startup and
 // when the Settings locale row is saved.

@@ -62,7 +62,7 @@ func (p *pluginFolds) dropBuffer(id pluginapi.BufferID) { delete(p.byBuffer, id)
 
 // DecorSetFoldingRanges replaces one plugin namespace's folding ranges for a buffer.
 func (h *pluginHost) DecorSetFoldingRanges(plugin, ns string, id pluginapi.BufferID, ranges []pluginapi.FoldRange, expect *pluginapi.Version) error {
-	m := h.m
+	m := h.model()
 	if _, err := h.decorTarget(id, expect); err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (h *pluginHost) DecorSetFoldingRanges(plugin, ns string, id pluginapi.Buffe
 // DecorClearFolds removes the plugin's folding ranges: for one namespace and buffer id, or
 // everything the plugin set when ns is empty, or (id 0) on every buffer.
 func (h *pluginHost) DecorClearFolds(plugin, ns string, id pluginapi.BufferID) {
-	pf := &h.m.plug.folds
+	pf := &h.model().plug.folds
 	clear := func(buf pluginapi.BufferID) {
 		kept := pf.byBuffer[buf][:0:0]
 		for _, f := range pf.byBuffer[buf] {

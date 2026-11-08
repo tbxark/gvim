@@ -43,6 +43,9 @@ type RemoteDirEntry struct {
 	Name   string
 	IsDir  bool
 	Hidden bool
+	// Ignored is set when a remote .gitignore matches the entry; Rows hides it unless
+	// the tree's show-ignored setting is on.
+	Ignored bool
 }
 
 // RemoteDirLoader lists remote directories. The app implements it over
@@ -68,6 +71,7 @@ type remoteNode struct {
 	name     string
 	isDir    bool
 	hidden   bool
+	ignored  bool
 	parent   string
 	children []string
 	loaded   bool
@@ -85,13 +89,14 @@ type RemoteExplorerTree struct {
 	loader  RemoteDirLoader
 	timeout time.Duration
 
-	mu         sync.Mutex
-	nodes      map[string]*remoteNode
-	selected   string
-	scroll     int
-	showHidden bool
-	gen        uint64
-	pending    map[string]uint64
+	mu          sync.Mutex
+	nodes       map[string]*remoteNode
+	selected    string
+	scroll      int
+	showHidden  bool
+	showIgnored bool
+	gen         uint64
+	pending     map[string]uint64
 }
 
 // NewRemoteExplorerTree returns the tree of root, whose directories come from
@@ -123,6 +128,15 @@ func (t *RemoteExplorerTree) ReadOnly() bool { return false }
 // the panel refuses those actions while create/rename/delete stay available.
 func (t *RemoteExplorerTree) ClipboardDisabled() bool { return true }
 
+// TakeLoadNotice returns and clears a one-shot notice from the loader: degraded remote
+// .gitignore filtering or a backend without directory watching (manual refresh remains).
+func (t *RemoteExplorerTree) TakeLoadNotice() string {
+	if noticer, ok := t.loader.(interface{ TakeNotice() string }); ok {
+		return noticer.TakeNotice()
+	}
+	return ""
+}
+
 // ShowHidden reports whether dot entries are listed.
 func (t *RemoteExplorerTree) ShowHidden() bool {
 	t.mu.Lock()
@@ -138,12 +152,20 @@ func (t *RemoteExplorerTree) SetShowHidden(v bool) {
 	t.mu.Unlock()
 }
 
-// ShowIgnored reports false: remote .gitignore filtering is not implemented, so no
-// entry is marked ignored (a recorded gap).
-func (t *RemoteExplorerTree) ShowIgnored() bool { return false }
+// ShowIgnored reports whether entries matched by a remote .gitignore are listed.
+func (t *RemoteExplorerTree) ShowIgnored() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.showIgnored
+}
 
-// SetShowIgnored does nothing: remote ignore rules are a recorded gap.
-func (t *RemoteExplorerTree) SetShowIgnored(bool) {}
+// SetShowIgnored includes or hides remote entries matched by a .gitignore. It reads
+// nothing: the loader always returns the ignore flag, and rows filter them.
+func (t *RemoteExplorerTree) SetShowIgnored(v bool) {
+	t.mu.Lock()
+	t.showIgnored = v
+	t.mu.Unlock()
+}
 
 // Rows returns the visible rows: the expanded directories' entries, directories
 // first in natural order, as the local tree shows them. It reads only the cache.
@@ -176,6 +198,9 @@ func (t *RemoteExplorerTree) rowsLocked() []explorer.Row {
 		}
 		for _, child := range t.sortedChildrenLocked(n) {
 			if !t.showHidden && strings.HasPrefix(child.name, ".") {
+				continue
+			}
+			if !t.showIgnored && child.ignored {
 				continue
 			}
 			parents[child.path] = len(rows) - 1
@@ -538,6 +563,7 @@ func (t *RemoteExplorerTree) mergeLocked(dir string, entries []RemoteDirEntry) {
 			t.nodes[cp] = child
 		}
 		child.hidden = strings.HasPrefix(e.Name, ".")
+		child.ignored = e.Ignored
 		fresh = append(fresh, cp)
 	}
 	for _, old := range n.children {
@@ -649,6 +675,11 @@ func (m *Model) remoteTreeLoadDone(msg remoteTreeLoadedMsg) tea.Cmd {
 	if msg.tree != nil && m.tree == ExplorerTree(msg.tree) {
 		if err := msg.tree.ApplyReload(msg); err != nil {
 			m.notice = noticeRemoteExplorerError(err)
+		}
+		if noticer, ok := m.tree.(interface{ TakeLoadNotice() string }); ok {
+			if notice := noticer.TakeLoadNotice(); notice != "" {
+				m.notice = notice
+			}
 		}
 	}
 	if m.root.reload.again {

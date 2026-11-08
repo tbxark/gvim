@@ -99,6 +99,10 @@ type RootPorts struct {
 	// PluginEditor is the editor as the plugins see it. Nil makes the buffer calls of a
 	// plugin answer unsupported.
 	PluginEditor PluginEditor
+	// PluginShared, when non-nil, is the daemon-wide plugin host mux shared by every
+	// workspace model (#19b shared-runtime slice): the app creates one per daemon and binds
+	// the active model on every switch. Nil gives this model its own host (direct launch).
+	PluginShared *PluginShared
 	// PluginKeys builds the keymap that holds the plugins' key bindings: the preset, then
 	// the bindings, then the user's own. preset names the built-in keymap to start from, or
 	// is "" for the one the session started with. The root uses it when the bindings

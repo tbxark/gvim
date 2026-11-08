@@ -60,7 +60,7 @@ const (
 // decorTarget checks that buffer id is open and, when expect is set, that its text is the
 // one the plugin computed its positions against.
 func (h *pluginHost) decorTarget(id pluginapi.BufferID, expect *pluginapi.Version) (pluginapi.BufferInfo, error) {
-	if h.m.plug.decor == nil {
+	if h.model().plug.decor == nil {
 		return pluginapi.BufferInfo{}, pluginapi.Errf(pluginapi.CodeUnsupported, "decorations are not available")
 	}
 	info, ok := h.ed().Buffer(id)
@@ -85,7 +85,7 @@ func (h *pluginHost) DecorSet(plugin, ns string, id pluginapi.BufferID, items []
 			return pluginapi.Errf(pluginapi.CodeInvalid, "item %d: %v", i+1, err)
 		}
 	}
-	err = h.m.plug.decor.Set(uint64(id), plugin, ns, conv)
+	err = h.model().plug.decor.Set(uint64(id), plugin, ns, conv)
 	h.decorSweep()
 	return decorErr(err)
 }
@@ -100,14 +100,14 @@ func (h *pluginHost) DecorAdd(plugin, ns string, id pluginapi.BufferID, item plu
 	if err != nil {
 		return 0, pluginapi.Errf(pluginapi.CodeInvalid, "%v", err)
 	}
-	n, err := h.m.plug.decor.Add(uint64(id), plugin, ns, it)
+	n, err := h.model().plug.decor.Add(uint64(id), plugin, ns, it)
 	h.decorSweep()
 	return n, decorErr(err)
 }
 
 // DecorRemove removes one item.
 func (h *pluginHost) DecorRemove(plugin, ns string, id pluginapi.BufferID, item int) {
-	if st := h.m.plug.decor; st != nil {
+	if st := h.model().plug.decor; st != nil {
 		st.Remove(uint64(id), plugin, ns, item)
 		h.decorSweep()
 	}
@@ -115,7 +115,7 @@ func (h *pluginHost) DecorRemove(plugin, ns string, id pluginapi.BufferID, item 
 
 // DecorClearRange removes the namespace's items that intersect the line range.
 func (h *pluginHost) DecorClearRange(plugin, ns string, id pluginapi.BufferID, fromLine, toLine int) {
-	if st := h.m.plug.decor; st != nil {
+	if st := h.model().plug.decor; st != nil {
 		st.ClearRange(uint64(id), plugin, ns, fromLine, toLine)
 		h.decorSweep()
 	}
@@ -127,7 +127,7 @@ func (h *pluginHost) DecorRefreshLines(pluginapi.BufferID) {}
 // DecorClear removes everything the namespace has on the buffer; buffer 0 means every
 // buffer.
 func (h *pluginHost) DecorClear(plugin, ns string, id pluginapi.BufferID) {
-	if st := h.m.plug.decor; st != nil {
+	if st := h.model().plug.decor; st != nil {
 		st.Clear(uint64(id), plugin, ns)
 		h.decorSweep()
 	}
@@ -153,7 +153,7 @@ func decorErr(err error) error {
 // decorSweep forgets the decorations of buffers that are closed. Buffer ids are never
 // reused, so nothing else would ever free them.
 func (h *pluginHost) decorSweep() {
-	st := h.m.plug.decor
+	st := h.model().plug.decor
 	for _, doc := range st.Docs() {
 		if _, ok := h.ed().Buffer(pluginapi.BufferID(doc)); !ok {
 			st.DropDoc(doc)

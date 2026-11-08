@@ -21,7 +21,12 @@ import (
 // remoteFinderFS adapts the authority's remote file system to finder.RemoteFS. The file
 // system is resolved per call, so after a reconnect (a new carrier behind the same slot)
 // a finder index restart enumerates the restored host, never the dead one.
-type remoteFinderFS struct{ files func() authority.FileSystem }
+type remoteFinderFS struct {
+	files func() authority.FileSystem
+	// ignore filters entries matched by the remote workspace's .gitignore files; the
+	// batch lives for one index lifetime (an index restart picks up edited ignore files).
+	ignore *ignoreBatch
+}
 
 // ReadDir implements finder.RemoteFS.
 func (r remoteFinderFS) ReadDir(ctx context.Context, path string, hidden bool) ([]finder.RemoteEntry, error) {
@@ -35,6 +40,10 @@ func (r remoteFinderFS) ReadDir(ctx context.Context, path string, hidden bool) (
 	}
 	out := make([]finder.RemoteEntry, 0, len(entries))
 	for _, e := range entries {
+		isDir := e.Kind == "dir" || (e.Kind == "symlink" && e.TargetKind == "dir")
+		if r.ignore != nil && r.ignore.ignored(ctx, path, e.Name, isDir) {
+			continue
+		}
 		out = append(out, finder.RemoteEntry{Name: e.Name, Kind: e.Kind})
 	}
 	return out, nil
@@ -47,7 +56,8 @@ func (r remoteFinderFS) ReadDir(ctx context.Context, path string, hidden bool) (
 // never by falling back to local files.
 func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (*finder.Index, string) {
 	expanded := expandRemoteRoot(ctx, slot, root)
-	return finder.StartRemote(ctx, remoteFinderFS{files: func() authority.FileSystem { return slot.Files() }}, expanded), expanded
+	files := func() authority.FileSystem { return slot.Files() }
+	return finder.StartRemote(ctx, remoteFinderFS{files: files, ignore: newIgnoreBatch(files, expanded)}, expanded), expanded
 }
 
 // expandRemoteRoot turns a remote ~/... or ~user/... workspace root into the remote

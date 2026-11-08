@@ -279,7 +279,7 @@ func (d *Document) largeOpenStatus() string {
 	}
 	fmt.Fprintf(&sb, "Large file (%s)", formatSize(d.large.Size))
 	if d.large.RemoteWindowed {
-		sb.WriteString(" remote large file (read-only, windowed): the bytes stay on the remote host and load as you scroll")
+		sb.WriteString(" remote large file (windowed): the bytes stay on the remote host and load as you scroll; a save writes the merged file in one atomic write, up to " + formatSize(remoteLargeSaveMax))
 	} else if d.readOnly && !d.binary {
 		sb.WriteString(" (read-only)")
 	}

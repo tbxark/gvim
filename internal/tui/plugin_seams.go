@@ -20,7 +20,7 @@ const (
 
 // SetSplitLabel names a split window so a plugin can find it again.
 func (h *pluginHost) SetSplitLabel(w pluginapi.WinID, label string) error {
-	n := h.m.splitByID(uint64(w))
+	n := h.model().splitByID(uint64(w))
 	if n == nil {
 		return closedWindow(w)
 	}
@@ -34,7 +34,7 @@ func (h *pluginHost) SetSplitLabel(w pluginapi.WinID, label string) error {
 
 // ClearSplitLabel removes a split window's label.
 func (h *pluginHost) ClearSplitLabel(w pluginapi.WinID) error {
-	n := h.m.splitByID(uint64(w))
+	n := h.model().splitByID(uint64(w))
 	if n == nil {
 		return closedWindow(w)
 	}
@@ -44,7 +44,7 @@ func (h *pluginHost) ClearSplitLabel(w pluginapi.WinID) error {
 
 // SplitByLabel returns the window with a label.
 func (h *pluginHost) SplitByLabel(label string) (pluginapi.WinID, bool) {
-	for _, n := range h.m.windowLeaves() {
+	for _, n := range h.model().windowLeaves() {
 		if n.Label == label {
 			return pluginapi.WinID(n.ID), true
 		}
@@ -82,7 +82,7 @@ func (h *pluginHost) GetWindowState(plugin string, id pluginapi.BufferID, key st
 	if _, ok := h.ed().Buffer(id); !ok {
 		return nil, false
 	}
-	keys := h.m.windowState(plugin, id, false)
+	keys := h.model().windowState(plugin, id, false)
 	if keys == nil {
 		return nil, false
 	}
@@ -117,7 +117,7 @@ func (h *pluginHost) SetWindowState(plugin string, id pluginapi.BufferID, key st
 	default:
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a window state value is a string, number or boolean")
 	}
-	keys := h.m.windowState(plugin, id, true)
+	keys := h.model().windowState(plugin, id, true)
 	if _, exists := keys[key]; !exists && len(keys) >= maxViewStateKeys {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a plugin keeps at most %d window state keys per buffer", maxViewStateKeys)
 	}
@@ -127,12 +127,12 @@ func (h *pluginHost) SetWindowState(plugin string, id pluginapi.BufferID, key st
 
 // ClearWindowState removes one key, or every key of the plugin when key is empty.
 func (h *pluginHost) ClearWindowState(plugin string, id pluginapi.BufferID, key string) {
-	keys := h.m.windowState(plugin, id, false)
+	keys := h.model().windowState(plugin, id, false)
 	if keys == nil {
 		return
 	}
 	if key == "" {
-		delete(h.m.plug.viewState[id], plugin)
+		delete(h.model().plug.viewState[id], plugin)
 		return
 	}
 	delete(keys, key)

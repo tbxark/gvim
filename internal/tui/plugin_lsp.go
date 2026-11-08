@@ -40,7 +40,7 @@ func plugSeverity(n int) string {
 // Diagnostics returns the diagnostics the servers published for buffer id, with byte
 // columns. A buffer without a file, or one no server has reported on, has none.
 func (h *pluginHost) Diagnostics(id pluginapi.BufferID) ([]pluginapi.DiagnosticInfo, error) {
-	m := h.m
+	m := h.model()
 	if m.lsp.port == nil {
 		return nil, pluginapi.Errf(pluginapi.CodeUnsupported, "no language server is configured")
 	}
@@ -92,7 +92,7 @@ func (h *pluginHost) Diagnostics(id pluginapi.BufferID) ([]pluginapi.DiagnosticI
 // on, sorted by path, for gvim.lsp.all_diagnostics. The columns are byte columns converted
 // from the server's rune columns with the document's text, like Diagnostics.
 func (h *pluginHost) AllDiagnostics() ([]pluginapi.FileDiagnostics, error) {
-	m := h.m
+	m := h.model()
 	if m.lsp.port == nil {
 		return nil, pluginapi.Errf(pluginapi.CodeUnsupported, "no language server is configured")
 	}
@@ -149,7 +149,7 @@ func runeToByteCol(line string, col int) int {
 // buffer must be a file that a server has open, since the server answers about the text it
 // holds.
 func (h *pluginHost) LSPRequest(t pluginapi.Token, id pluginapi.BufferID, method string, params any) error {
-	m := h.m
+	m := h.model()
 	port := m.lsp.port
 	if port == nil {
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "no language server is configured")

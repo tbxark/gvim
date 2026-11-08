@@ -136,7 +136,7 @@ func (m *Model) explorerPath(p string) (string, bool) {
 
 // SetExplorerDecorations replaces one namespace's decorated rows.
 func (h *pluginHost) SetExplorerDecorations(plugin, ns string, list []pluginapi.FileExplorerDecoration) error {
-	m := h.m
+	m := h.model()
 	if ns == "" || len(ns) > 128 {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a namespace name is 1 to 128 bytes")
 	}
@@ -184,12 +184,12 @@ func (h *pluginHost) SetExplorerDecorations(plugin, ns string, list []pluginapi.
 
 // ClearExplorerDecorations removes a namespace's decorations (its slots stay).
 func (h *pluginHost) ClearExplorerDecorations(plugin, ns string) {
-	h.m.plug.explorer.drop(plugin, ns)
+	h.model().plug.explorer.drop(plugin, ns)
 }
 
 // SetExplorerSlots replaces one namespace's slot overrides.
 func (h *pluginHost) SetExplorerSlots(plugin, ns string, list []pluginapi.FileExplorerSlot) error {
-	m := h.m
+	m := h.model()
 	if ns == "" || len(ns) > 128 {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a namespace name is 1 to 128 bytes")
 	}
@@ -237,7 +237,7 @@ func (h *pluginHost) SetExplorerSlots(plugin, ns string, list []pluginapi.FileEx
 
 // ClearExplorerSlots removes a namespace's slot overrides (its decorations stay).
 func (h *pluginHost) ClearExplorerSlots(plugin, ns string) {
-	h.m.plug.explorer.drop(plugin, ns)
+	h.model().plug.explorer.drop(plugin, ns)
 }
 
 // cleanSlotText sanitizes a slot text and reserves its caps.

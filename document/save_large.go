@@ -2,6 +2,7 @@ package document
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -148,6 +149,78 @@ func (j SaveJob) writeLarge(ctx context.Context) SaveResult {
 	}
 	r.Note = saveNote(r.Note, owner)
 	return r
+}
+
+// errRemoteLargeSaveTooBig is the refusal of a windowed large-file save whose merged
+// content is over remoteLargeSaveMax.
+var errRemoteLargeSaveTooBig = errors.New("remote large-file save: merged content is over the windowed-save bound")
+
+// limitedSaveWriter collects the merged bytes of a remote large save under a bound.
+type limitedSaveWriter struct {
+	buf bytes.Buffer
+	max int64
+}
+
+func (w *limitedSaveWriter) Write(p []byte) (int, error) {
+	if int64(w.buf.Len())+int64(len(p)) > w.max {
+		return 0, errRemoteLargeSaveTooBig
+	}
+	return w.buf.Write(p)
+}
+
+// writeLargeRemote saves a remote large document: the snapshot merges the overlay
+// with the unchanged ranges, which are read through the window source in bounded
+// chunks (Snapshot.WriteTo loads a missed window while it runs), and the whole merged
+// file is written with the authority's atomic write. The merge is bounded because the
+// atomic write takes the file in memory. The disk state is checked through the access
+// first, so a remote file that changed underneath refuses the save. A fresh source for
+// the written file is opened here, in the command, and carried in the result so the
+// editor rebase touches no remote I/O on the update goroutine.
+func (j SaveJob) writeLargeRemote(ctx context.Context, access FileAccess) SaveResult {
+	lg := j.large
+	now, err := access.Stat(j.Path)
+	if err != nil {
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
+	}
+	disk := now.diskState()
+	if j.RefuseExisting && !sameFile(j.OwnPath, j.Path) && disk.Exists {
+		return SaveResult{Job: j, err: fmt.Errorf("save as %s: %w", j.Path, ErrExists)}
+	}
+	if j.CheckDisk && disk.Exists && !disk.SameAs(j.Expect) {
+		return SaveResult{Job: j, err: fmt.Errorf("%s %w", j.Name, ErrChangedOnDisk)}
+	}
+	if lg.Noop && disk.Exists && disk.SameAs(j.Expect) {
+		return SaveResult{Job: j, Disk: disk, Skipped: true}
+	}
+	accessRange, ok := access.(RangeAccess)
+	if !ok {
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, errNoRemoteLarge)}
+	}
+	opts := buffer.WriteOptions{EOL: lg.Eol, Prefix: lg.Prefix, AllowGrown: lg.AllowGrown}
+	lw := &limitedSaveWriter{max: remoteLargeSaveMax}
+	res, werr := lg.Snap.WriteTo(ctx, lw, opts)
+	switch {
+	case errors.Is(werr, errRemoteLargeSaveTooBig):
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %s; the merged file is over the remote windowed-save bound", j.Path, errRemoteLargeSaveTooBig.Error())}
+	case errors.Is(werr, buffer.ErrSourceChanged):
+		return SaveResult{Job: j, err: errFileChanged}
+	case errors.Is(werr, buffer.ErrSourceGrew):
+		return SaveResult{Job: j, err: errFileGrew}
+	case werr != nil:
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, werr)}
+	}
+	if err := access.WriteFileAtomic(j.Path, lw.buf.Bytes()); err != nil {
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
+	}
+	after, err := access.Stat(j.Path)
+	if err != nil {
+		return SaveResult{Job: j, Disk: diskState{Exists: true, Size: res.Bytes}, Res: res}
+	}
+	var src buffer.Source
+	if fresh, openErr := newRemoteWindowSource(ctx, accessRange, j.Path, int64(lw.buf.Len())); openErr == nil {
+		src = fresh
+	}
+	return SaveResult{Job: j, Disk: after.diskState(), Res: res, Source: src, Note: lg.Note}
 }
 
 // saveNote is the status after a save whose note is note and which could not keep

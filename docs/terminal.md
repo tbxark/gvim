@@ -226,7 +226,9 @@ background tabs' exited markers current.
   additive `live` flag per tab (and mirrored at the top level): whether a process
   was running at the capture. It is optional, the format version stays 1, and an
   older record without it is exited, so migration keeps the pre-live-restore
-  behavior. **Restore itself never starts a process**: every restored tab comes
+  behavior. A dormant live-restored tab that is saved again keeps its live flag
+  (saving never turns a pending revive into a dead tab), so a restore/extract
+  cycle can still revive it on the first dive. **Restore itself never starts a process**: every restored tab comes
   back as the read-only transcript the record describes, with its saved name and
   active index. A tab that was **exited at the capture** (`live` false, the old
   record's meaning) stays that way — read-only/dead with its `(exited)` marker —

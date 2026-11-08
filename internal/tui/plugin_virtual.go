@@ -27,7 +27,7 @@ func isVirtualDoc(doc Document) bool {
 // CreateBuffer makes a virtual buffer for o.Plugin, and gives the keyboard to the editor
 // when it takes the focus.
 func (h *pluginHost) CreateBuffer(o pluginapi.CreateBuffer) (pluginapi.BufferID, error) {
-	m := h.m
+	m := h.model()
 	id, err := h.ed().CreateBuffer(o)
 	if err != nil {
 		return id, err

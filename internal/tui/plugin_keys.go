@@ -131,7 +131,7 @@ func (m *Model) pluginKeysMessage(msg tea.Msg) (tea.Cmd, bool) {
 // SetBindings replaces the normal-context bindings of plugin. The keymap is rebuilt once
 // after the slice (plugKeymapDirty), not for each call.
 func (h *pluginHost) SetBindings(plugin string, b []pluginapi.Binding) {
-	m := h.m
+	m := h.model()
 	ks := &m.plug.keys
 	if len(b) == 0 {
 		delete(ks.bindings, plugin)
@@ -301,7 +301,7 @@ func (m *Model) pluginGate(kp KeyPress, ctx KeyContext, cmd Command) bool {
 // SetModes replaces the modes of plugin. A chord that is not a key is left out, with a
 // notice.
 func (h *pluginHost) SetModes(plugin string, infos []pluginapi.ModeInfo) {
-	m := h.m
+	m := h.model()
 	ks := &m.plug.keys
 	var bad []string
 	modes := make([]*uiMode, 0, len(infos))
@@ -388,7 +388,7 @@ func (m *Model) findModeByName(name string) *uiMode {
 // SetInputMode makes the mode of plugin the editor's input mode, or with "" ends it when
 // plugin owns it. The editor has one input mode: entering one replaces the other.
 func (h *pluginHost) SetInputMode(plugin, mode string) error {
-	m := h.m
+	m := h.model()
 	if mode == "" {
 		if m.plug.keys.editor.plugin == plugin {
 			m.setEditorMode(modeRef{})
@@ -424,7 +424,7 @@ func (m *Model) setEditorMode(ref modeRef) {
 
 // SetContext sets or clears a plugin context.
 func (h *pluginHost) SetContext(plugin, name string, on bool) {
-	ks := &h.m.plug.keys
+	ks := &h.model().plug.keys
 	if ks.ctxSeen == nil {
 		ks.ctxSeen = make(map[string]bool)
 	}
@@ -484,7 +484,7 @@ func (m *Model) plugKeysGone(plugin string, gen uint64) {
 
 // WaitKey captures the next key press for the wait t. Only one capture is pending.
 func (h *pluginHost) WaitKey(t pluginapi.Token, timeoutMS int) error {
-	m := h.m
+	m := h.model()
 	ks := &m.plug.keys
 	if ks.wait != 0 {
 		if _, live := m.plug.waits[ks.wait]; live {

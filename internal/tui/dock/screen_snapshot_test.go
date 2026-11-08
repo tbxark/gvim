@@ -161,3 +161,28 @@ func TestRevivedTabPaintsSnapshotAboveNewOutput(t *testing.T) {
 		t.Fatalf("second body row = %q, want the new shell output below the snapshot", row)
 	}
 }
+
+// TestRestoredLiveTabKeepsLiveFlagOnResave: a dormant live-restored tab saved again
+// (or extracted) keeps its live flag, so the next restore can still revive it on the
+// first dive; the dock must not turn a dormant live tab into a dead one.
+func TestRestoredLiveTabKeepsLiveFlagOnResave(t *testing.T) {
+	t.Parallel()
+	var tabs Tabs
+	tabs.SetHost(Host{
+		RootDir:     func() string { return "/ws" },
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return 80, 24 },
+		Focus:       func() {},
+	})
+	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	tabs.Restore(terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Live: true, Rows: []string{"still here"},
+		Tabs: []terminal.SavedTab{{
+			Name: "t", Open: true, Cwd: "/ws", Rows: []string{"still here"}, Live: true,
+		}},
+	})
+	st := tabs.SavedState()
+	if !st.Live || !st.Tabs[0].Live {
+		t.Fatalf("a dormant live tab was re-saved as dead: %+v", st)
+	}
+}

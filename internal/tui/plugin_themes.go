@@ -16,7 +16,7 @@ func (m *Model) pluginThemeCatalog() ThemeCatalog { return m.util.themeCatalog }
 
 // ThemeFiles lists every theme the editor offers.
 func (h *pluginHost) ThemeFiles() []pluginapi.ThemeFileInfo {
-	cat := h.m.pluginThemeCatalog()
+	cat := h.model().pluginThemeCatalog()
 	if cat == nil {
 		return nil
 	}
@@ -52,7 +52,7 @@ func (h *pluginHost) ThemeSchema() pluginapi.ThemeSchema {
 
 // ThemeUserDir is the user theme directory.
 func (h *pluginHost) ThemeUserDir() string {
-	if cat := h.m.pluginThemeCatalog(); cat != nil {
+	if cat := h.model().pluginThemeCatalog(); cat != nil {
 		return cat.UserDir()
 	}
 	return ""
@@ -60,7 +60,7 @@ func (h *pluginHost) ThemeUserDir() string {
 
 // ThemeFileExists reports whether ref names a user theme file on disk.
 func (h *pluginHost) ThemeFileExists(ref string) bool {
-	cat := h.m.pluginThemeCatalog()
+	cat := h.model().pluginThemeCatalog()
 	if cat == nil || ref == "" {
 		return false
 	}
@@ -74,7 +74,7 @@ func (h *pluginHost) ThemeFileExists(ref string) bool {
 
 // ThemeData returns the resolved theme ref as theme-file JSON.
 func (h *pluginHost) ThemeData(ref string) (string, error) {
-	cat := h.m.pluginThemeCatalog()
+	cat := h.model().pluginThemeCatalog()
 	if cat == nil {
 		return "", pluginapi.Errf(pluginapi.CodeUnsupported, "no theme catalog")
 	}
@@ -83,7 +83,7 @@ func (h *pluginHost) ThemeData(ref string) (string, error) {
 
 // SaveThemeFile validates data as a theme file, saves it as name and returns its ref.
 func (h *pluginHost) SaveThemeFile(name, data string) (string, error) {
-	cat := h.m.pluginThemeCatalog()
+	cat := h.model().pluginThemeCatalog()
 	if cat == nil {
 		return "", pluginapi.Errf(pluginapi.CodeUnsupported, "no theme catalog")
 	}
@@ -107,7 +107,7 @@ func (h *pluginHost) SaveThemeFile(name, data string) (string, error) {
 
 // DeleteThemeFile removes a user theme file.
 func (h *pluginHost) DeleteThemeFile(ref string) error {
-	cat := h.m.pluginThemeCatalog()
+	cat := h.model().pluginThemeCatalog()
 	if cat == nil {
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "no theme catalog")
 	}
@@ -119,7 +119,7 @@ func (h *pluginHost) DeleteThemeFile(ref string) error {
 
 // ReloadThemes rescans the user theme directory; a non-empty ref is applied afterwards.
 func (h *pluginHost) ReloadThemes(ref string) error {
-	cat := h.m.pluginThemeCatalog()
+	cat := h.model().pluginThemeCatalog()
 	if cat == nil {
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "no theme catalog")
 	}
@@ -127,7 +127,7 @@ func (h *pluginHost) ReloadThemes(ref string) error {
 		return pluginapi.Errf(pluginapi.CodeIO, "%s", err.Error())
 	}
 	if ref != "" {
-		h.m.applyTheme(ref)
+		h.model().applyTheme(ref)
 	}
 	return nil
 }

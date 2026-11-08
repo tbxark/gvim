@@ -95,7 +95,7 @@ func flattenLeaves(node *pluginapi.BufferGroupLayout, out *[]pluginapi.BufferGro
 // CreateBufferGroup mounts a group: one split per panel, a panel buffer for each leaf without
 // an existing buffer. On a failure it closes what it already created.
 func (h *pluginHost) CreateBufferGroup(plugin string, id pluginapi.BufferGroupID, o pluginapi.BufferGroupSpec) error {
-	m := h.m
+	m := h.model()
 	if id == 0 {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a group id is not 0")
 	}
@@ -193,10 +193,10 @@ func (h *pluginHost) mountGroupLeaf(g *mountedGroup, leaf pluginapi.BufferGroupL
 			return err
 		}
 		buf, created = id, true
-		if h.m.plug.virtual.owner == nil {
-			h.m.plug.virtual.owner = map[pluginapi.BufferID]string{}
+		if h.model().plug.virtual.owner == nil {
+			h.model().plug.virtual.owner = map[pluginapi.BufferID]string{}
 		}
-		h.m.plug.virtual.owner[id] = g.owner
+		h.model().plug.virtual.owner[id] = g.owner
 	}
 	if err := h.SetWindowBuffer(win, buf); err != nil {
 		if created {
@@ -214,7 +214,7 @@ func (h *pluginHost) mountGroupLeaf(g *mountedGroup, leaf pluginapi.BufferGroupL
 
 // SetPanelContent replaces the styled content of one panel buffer.
 func (h *pluginHost) SetPanelContent(plugin string, id pluginapi.BufferGroupID, panel string, entries []pluginapi.ContentEntry) error {
-	g := h.m.plug.groups.group(id)
+	g := h.model().plug.groups.group(id)
 	if g == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "group %d is not mounted", id)
 	}
@@ -234,7 +234,7 @@ func (h *pluginHost) SetPanelContent(plugin string, id pluginapi.BufferGroupID, 
 // SetBufferGroupTitle replaces the group's title segments (kept for the panel listing; gvim
 // has no group tab to paint them in yet).
 func (h *pluginHost) SetBufferGroupTitle(id pluginapi.BufferGroupID, segments []pluginapi.BufferGroupTitleSegment) error {
-	g := h.m.plug.groups.group(id)
+	g := h.model().plug.groups.group(id)
 	if g == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "group %d is not mounted", id)
 	}
@@ -255,7 +255,7 @@ func (h *pluginHost) SetBufferGroupTitle(id pluginapi.BufferGroupID, segments []
 // SetBufferGroupPanelVisible hides (closing its window) or re-shows (splitting a visible
 // panel's window) one panel, keeping the panel buffer and its content.
 func (h *pluginHost) SetBufferGroupPanelVisible(id pluginapi.BufferGroupID, panel string, visible bool) error {
-	m := h.m
+	m := h.model()
 	g := m.plug.groups.group(id)
 	if g == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "group %d is not mounted", id)
@@ -300,7 +300,7 @@ func (h *pluginHost) SetBufferGroupPanelVisible(id pluginapi.BufferGroupID, pane
 
 // FocusBufferGroupPanel gives the keyboard to a visible panel's window.
 func (h *pluginHost) FocusBufferGroupPanel(id pluginapi.BufferGroupID, panel string) error {
-	g := h.m.plug.groups.group(id)
+	g := h.model().plug.groups.group(id)
 	if g == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "group %d is not mounted", id)
 	}
@@ -313,7 +313,7 @@ func (h *pluginHost) FocusBufferGroupPanel(id pluginapi.BufferGroupID, panel str
 
 // CloseBufferGroup closes the group's windows and the panel buffers it created.
 func (h *pluginHost) CloseBufferGroup(id pluginapi.BufferGroupID) {
-	m := h.m
+	m := h.model()
 	ps := &m.plug.groups
 	g := ps.group(id)
 	if g == nil {
@@ -342,7 +342,7 @@ func (h *pluginHost) CloseBufferGroup(id pluginapi.BufferGroupID) {
 
 // BufferGroupPanels lists the panels of a group.
 func (h *pluginHost) BufferGroupPanels(id pluginapi.BufferGroupID) []pluginapi.BufferGroupPanel {
-	g := h.m.plug.groups.group(id)
+	g := h.model().plug.groups.group(id)
 	if g == nil {
 		return nil
 	}
@@ -378,7 +378,7 @@ func (m *Model) plugGroupsGone(plugin string, gen uint64) {
 
 // CreateScrollSyncGroup ties two split windows together.
 func (h *pluginHost) CreateScrollSyncGroup(plugin string, id uint64, left, right pluginapi.WinID) error {
-	m := h.m
+	m := h.model()
 	if id == 0 {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a scroll sync id is not 0")
 	}
@@ -404,7 +404,7 @@ func (h *pluginHost) CreateScrollSyncGroup(plugin string, id uint64, left, right
 
 // SetScrollSyncAnchors replaces a scroll-sync group's anchors.
 func (h *pluginHost) SetScrollSyncAnchors(id uint64, anchors []pluginapi.ScrollAnchor) error {
-	sg := h.m.plug.groups.scroll[id]
+	sg := h.model().plug.groups.scroll[id]
 	if sg == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "scroll sync group %d is not mounted", id)
 	}
@@ -425,7 +425,7 @@ func (h *pluginHost) SetScrollSyncAnchors(id uint64, anchors []pluginapi.ScrollA
 
 // RemoveScrollSyncGroup drops a scroll-sync group.
 func (h *pluginHost) RemoveScrollSyncGroup(id uint64) {
-	delete(h.m.plug.groups.scroll, id)
+	delete(h.model().plug.groups.scroll, id)
 }
 
 // syncScrollGroups runs after every update: it follows a changed leader top in the follower.

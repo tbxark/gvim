@@ -431,7 +431,7 @@ func (m *Model) plugItem(c pluginapi.Completion) tea.Cmd {
 // Input asks for a line of text. The result is Values{string}, or Values{nil} when the user
 // pressed Esc.
 func (h *pluginHost) Input(t pluginapi.Token, o pluginapi.InputSpec) error {
-	m := h.m
+	m := h.model()
 	if err := m.plugWait(t, waitInput); err != nil {
 		return err
 	}
@@ -475,7 +475,7 @@ func (m *Model) openInput(t pluginapi.Token, o pluginapi.InputSpec) tea.Cmd {
 
 // Confirm asks a yes/no question. The result is Values{bool}; Esc answers false.
 func (h *pluginHost) Confirm(t pluginapi.Token, o pluginapi.ConfirmSpec) error {
-	m := h.m
+	m := h.model()
 	if err := m.plugWait(t, waitConfirm); err != nil {
 		return err
 	}
@@ -502,7 +502,7 @@ const maxPromptSuggestions = 100
 // highlighted row (0-based, -1 for none). It is called from the prompt's on_change callback
 // while the user types. CodeNotFound when no plugin prompt is open.
 func (h *pluginHost) SetPromptSuggestions(items []pluginapi.PromptSuggestion, selected int) error {
-	m := h.m
+	m := h.model()
 	if len(items) > maxPromptSuggestions {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a prompt takes at most %d suggestions", maxPromptSuggestions)
 	}
@@ -557,7 +557,7 @@ func pickerItems(in []pluginapi.PickItem) []picker.Item {
 // when the user closed it. A Live picker also reports each query change (Kind "query",
 // More) and a Preview picker each highlight (Kind "move", More).
 func (h *pluginHost) OpenPicker(t pluginapi.Token, id uint64, o pluginapi.PickerSpec) error {
-	m := h.m
+	m := h.model()
 	if len(o.Items) > picker.MaxItems {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a picker takes at most %d items", picker.MaxItems)
 	}
@@ -606,7 +606,7 @@ func (m *Model) openPicker(id uint64, pp *pendingPicker) tea.Cmd {
 // collected like those of Host.Do. A picker that is still waiting for the pump to open it
 // takes the change into its spec.
 func (h *pluginHost) UpdatePicker(id uint64, u pluginapi.PickerUpdate) error {
-	m := h.m
+	m := h.model()
 	if u.Items != nil && len(*u.Items) > picker.MaxItems {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a picker takes at most %d items", picker.MaxItems)
 	}
@@ -653,7 +653,7 @@ func (h *pluginHost) UpdatePicker(id uint64, u pluginapi.PickerUpdate) error {
 // ClosePicker closes the picker the plugin asked to close. Its wait is forgotten, not
 // resolved: the runtime knows it closed it.
 func (h *pluginHost) ClosePicker(id uint64) {
-	m := h.m
+	m := h.model()
 	if pp := m.plug.ui.opening[id]; pp != nil {
 		delete(m.plug.ui.opening, id)
 		delete(m.plug.waits, pp.tok)
@@ -669,7 +669,7 @@ func (h *pluginHost) ClosePicker(id uint64) {
 // ShowPopup shows a popup. The result is Values{item ID} of the chosen row, or Values{nil}
 // when it closed without one.
 func (h *pluginHost) ShowPopup(t pluginapi.Token, id uint64, o pluginapi.PopupSpec) error {
-	m := h.m
+	m := h.model()
 	if len(o.Items) > picker.MaxItems {
 		return pluginapi.Errf(pluginapi.CodeLimit, "a popup takes at most %d items", picker.MaxItems)
 	}
@@ -729,7 +729,7 @@ func (m *Model) popupAnchor(anchor, title string, items []popup.Item, width int)
 
 // ClosePopup closes the popup the plugin asked to close; its wait is forgotten.
 func (h *pluginHost) ClosePopup(id uint64) {
-	m := h.m
+	m := h.model()
 	for _, o := range slices.Clone(m.overlays) {
 		if po, ok := o.(*pluginPopupOverlay); ok && po.id == id && !po.closed {
 			delete(m.plug.waits, po.tok)

@@ -616,11 +616,11 @@ func notLineText(text string) string {
 	text = strings.TrimSpace(text)
 	switch {
 	case text == "":
-		return "Type a line number, for example 120 or 120:5"
+		return paletteText("gvim.palette.line_number_example", "Type a line number, for example 120 or 120:5")
 	case strings.Trim(text, "0") == "":
-		return "Line numbers start at 1"
+		return paletteText("gvim.palette.line_numbers_start", "Line numbers start at 1")
 	}
-	return "Not a line number: " + text
+	return paletteTextVars("gvim.prompt.not_a_line", "Not a line number: %{line}", map[string]any{"line": text})
 }
 
 // commandRows turns the matched command entries into rows.
@@ -674,9 +674,9 @@ func fileRows(matches []Ranked, loading bool, line, col int, errText string, tru
 		rows = append(rows, row{kind: rowFile, name: m.Path, source: "file", rel: m.Path, hl: m.Indexes, line: line, col: col})
 	}
 	if errText != "" {
-		rows = append(rows, row{kind: rowMessage, name: "File search failed: " + errText, disabled: true})
+		rows = append(rows, row{kind: rowMessage, name: paletteTextVars("gvim.palette.file_search_failed", "File search failed: %{error}", map[string]any{"error": errText}), disabled: true})
 	} else if truncated {
-		rows = append(rows, row{kind: rowMessage, name: "File list truncated: too many files; the list is incomplete", disabled: true})
+		rows = append(rows, row{kind: rowMessage, name: paletteText("gvim.palette.file_list_truncated", "File list truncated: too many files; the list is incomplete"), disabled: true})
 	}
 	return rows
 }
@@ -729,11 +729,11 @@ func (p *Palette) emptyText() string {
 	if p.live {
 		switch {
 		case p.input.Value() == "":
-			return "Type to search the files"
+			return paletteText("gvim.palette.type_to_search", "Type to search the files")
 		case !p.grep.sources.Files && !p.grep.sources.Buffers && !p.grep.sources.Ignored:
-			return "Turn on Files or Buffers to search"
+			return paletteText("gvim.palette.turn_on_sources", "Turn on Files or Buffers to search")
 		}
-		return "No matches"
+		return paletteText("gvim.palette.no_matches", "No matches")
 	}
 	return modeEmptyText(p.mode())
 }
@@ -742,11 +742,11 @@ func (p *Palette) emptyText() string {
 func modeEmptyText(mode commands.Mode) string {
 	switch mode {
 	case commands.ModeCommand:
-		return "No matching commands"
+		return paletteText("gvim.palette.no_commands", "No matching commands")
 	case commands.ModeLine:
-		return "No matching lines"
+		return paletteText("gvim.palette.no_lines", "No matching lines")
 	case commands.ModeBuffer:
-		return "No matching buffers"
+		return paletteText("gvim.palette.no_buffers", "No matching buffers")
 	}
-	return "No matching files"
+	return paletteText("gvim.palette.no_files", "No matching files")
 }

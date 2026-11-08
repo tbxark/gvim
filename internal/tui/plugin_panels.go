@@ -103,7 +103,7 @@ func (ps *pluginPanels) sidebarOrder() []*mountedPanel {
 // host caps and the placement rules, and stores the panel; the paint happens on the next
 // frame. Mounting an id that is already mounted replaces its content and placement.
 func (h *pluginHost) MountWidgetPanel(plugin string, id pluginapi.PanelID, o pluginapi.WidgetMount) error {
-	m := h.m
+	m := h.model()
 	if id == 0 {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "a panel id is not 0")
 	}
@@ -174,7 +174,7 @@ const sidebarMaxPluginRows = 100
 // UpdateWidgetPanel replaces the content of a mounted panel, keeping the instance state of
 // its keyed widgets and where the user was.
 func (h *pluginHost) UpdateWidgetPanel(plugin string, id pluginapi.PanelID, p pluginapi.WidgetPanel) error {
-	mp := h.m.plug.panels.get(id)
+	mp := h.model().plug.panels.get(id)
 	if mp == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "panel %d is not mounted", id)
 	}
@@ -190,7 +190,7 @@ func (h *pluginHost) UpdateWidgetPanel(plugin string, id pluginapi.PanelID, p pl
 
 // UnmountWidgetPanel removes a mounted panel. It is idempotent.
 func (h *pluginHost) UnmountWidgetPanel(id pluginapi.PanelID) {
-	m := h.m
+	m := h.model()
 	mp := m.plug.panels.get(id)
 	if mp == nil {
 		return
@@ -205,7 +205,7 @@ func (h *pluginHost) UnmountWidgetPanel(id pluginapi.PanelID) {
 
 // WidgetCommand performs an action on the focused widget of a panel.
 func (h *pluginHost) WidgetCommand(id pluginapi.PanelID, a pluginapi.WidgetAction) error {
-	m := h.m
+	m := h.model()
 	mp := m.plug.panels.get(id)
 	if mp == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "panel %d is not mounted", id)
@@ -223,7 +223,7 @@ func (h *pluginHost) WidgetCommand(id pluginapi.PanelID, a pluginapi.WidgetActio
 
 // WidgetMutate applies a targeted mutation to a mounted panel.
 func (h *pluginHost) WidgetMutate(id pluginapi.PanelID, mu pluginapi.WidgetMutation) error {
-	m := h.m
+	m := h.model()
 	mp := m.plug.panels.get(id)
 	if mp == nil {
 		return pluginapi.Errf(pluginapi.CodeClosed, "panel %d is not mounted", id)

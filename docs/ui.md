@@ -222,6 +222,8 @@ result region:
 | Dialogs (confirm, error, save as, ...) | card, centred | `internal/tui/dialog` |
 | Workspace-trust prompt | card, centred, exclusive | `internal/tui/trustdialog.go` |
 | Lists (themes, cursor, ...) | card, centred | `internal/tui/list` |
+| Workspace extract target picker | card, centred | `internal/tui/list` (a plain list) opened by `internal/tui/workspace_ui.go` |
+| Extract-tabs multi-select picker | card, centred | `internal/tui/list` with its opt-in `Multi` mode (Space marks, Enter extracts the marked file tabs); the callbacks stay in `internal/tui/workspace_ui.go` |
 | Plugin picker | card, anchored above the last row | `internal/tui/picker` |
 | Menu-bar dropdown | menu | `internal/tui/menubar` |
 | Context menu, "+" menu | menu | `internal/tui/ctxmenu` |

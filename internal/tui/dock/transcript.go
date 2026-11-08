@@ -129,7 +129,11 @@ func (p *Panel) SavedState() terminal.SavedState {
 	// Live is whether a process was running at the capture: only such a tab may be
 	// revived on a dive after the restore. A restored tab that was not revived is
 	// dead and is saved as dead, so a later restore never starts it automatically.
-	st.Live = p.term != nil && !p.exited
+	// A restored-but-not-yet-revived tab keeps its saved liveness: saving it again (or
+	// extracting its record into another workspace) must not turn a dormant live tab
+	// into a dead one. A dive clears wasLive, so an attempted revive is recorded as the
+	// resulting state.
+	st.Live = (p.term != nil && !p.exited) || p.wasLive
 	// The styled screen snapshot preserves the visible screen's colours/attributes
 	// across the restore (Fresh's backing file keeps the screen too). A live terminal
 	// snapshots its screen; a restored tab without a shell keeps the styled tail of

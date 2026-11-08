@@ -26,9 +26,9 @@ const maxStatusItemCells = 80
 
 // SetStatusItems replaces the status items of plugin.
 func (h *pluginHost) SetStatusItems(plugin string, items []pluginapi.StatusItem) {
-	st := &h.m.plug.keys.status
+	st := &h.model().plug.keys.status
 	if len(items) == 0 {
-		h.m.plugStatusGone(plugin, 0)
+		h.model().plugStatusGone(plugin, 0)
 		return
 	}
 	if st.items == nil {

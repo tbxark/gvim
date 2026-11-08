@@ -108,6 +108,10 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	var srv *daemon.Server
 	if serveDaemon {
+		// The daemon's one shared plugin runtime and host mux: every local workspace model
+		// is built against it and binds itself on a switch (#19b shared-runtime slice).
+		opts.PluginDaemon = pluginhost.NewDaemon()
+		opts.PluginShared = tui.NewPluginShared()
 		namedRoot, err := resolveRoot(opts.Root)
 		if err != nil {
 			return err
@@ -219,11 +223,20 @@ type runtime struct {
 	projects   *uiadapter.Projects
 	watcher    *filewatch.Watcher // nil when no watch was started
 	sessionDir string             // empty when the session is neither restored nor saved
+	// keepSavedSession marks a daemon-hosted remote workspace whose authority was
+	// disconnected at start: its saved session (on disk) must survive this runtime, so
+	// the capture/exit path writes nothing for it.
+	keepSavedSession bool
 	// pluginStateFile is the workspace-scoped gvim.state file of a daemon workspace
 	// (sessions/<stable-id>/plugin-state.json), or "" for a direct launch's editor-wide
 	// per-plugin state files. Observability/test seam; the plugin runtime owns the writes.
 	pluginStateFile string
-	searchDir       string // where the find history and toggles are kept; empty for nowhere
+	// pluginWS is this LOCAL daemon workspace's plugin parts (its OS/root/env/gate, editor
+	// adapter, keymap builder and state namespace) bound to the daemon's one shared plugin
+	// runtime (#19b shared-runtime slice). Nil for a direct launch and for remote/authority
+	// workspaces (which keep their own runtime this slice).
+	pluginWS  *pluginhost.Workspace
+	searchDir string // where the find history and toggles are kept; empty for nowhere
 	// stashDir is the session directory even when the session is not saved. A stash of
 	// the unsaved edits of a large file can be written there without a session file.
 	stashDir string
@@ -425,10 +438,13 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// its layout (the unsaved text only), or not at all, and whether it is saved
 	// and hot-exited when the program ends.
 	plan := planSession(opts, cfg)
-	if opts.Remote != nil {
-		// No local session restore or save for a remote launch: the files of the
-		// remote workspace are the SFTP follow-up, and the local session must not
-		// come back under an SSH workspace.
+	// A direct remote launch keeps no local session (the local session must not come back
+	// under an SSH workspace). A daemon-hosted remote workspace is different: its session
+	// lives in the workspace session directory and is restored after the authority
+	// connects (the files open through the remote document access), then captured back on
+	// exit through the workspace capture path.
+	deferRemoteRestore := opts.Remote != nil && opts.Daemon != nil
+	if opts.Remote != nil && !deferRemoteRestore {
 		plan = sessionPlan{}
 	}
 	tree, err := explorer.Open(root)
@@ -453,6 +469,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	ed.SetRulers(cfg.Rulers)
 	var sess session.Session
 	restored := false
+	remoteRestoreSkipped := false
 	var failed []restore.Unrestored
 	var sidebarState *tui.SidebarState
 	if plan.load {
@@ -463,6 +480,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		case ok:
 			sess, restored = s, true
 			switch {
+			case deferRemoteRestore:
+				// The files are remote: restore them after the authority connects and
+				// the remote file access is installed, below. The pure layout/sidebar
+				// state is available now for the model options.
+				sidebarState = restore.SidebarState(s)
 			case plan.tabs:
 				failed = restore.RestoreSession(ed, opts.SessionDir, s)
 				tree.SetShowHidden(s.ShowHidden)
@@ -722,7 +744,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			_, _ = fmt.Fprintf(os.Stderr, "gvim: warning: plugin state: %v\n", err)
 		}
 	}
-	pw := pluginhost.New(cfg, ed, markEdited, pluginhost.Options{
+	po := pluginhost.Options{
 		Paths:              opts.PluginPaths,
 		Disabled:           opts.NoPlugins,
 		LogSink:            opts.pluginLog,
@@ -733,7 +755,22 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		Gate:               spawnGate,
 		WorkspaceStateFile: pluginStateFile,
 		WorkspaceStateData: pluginStateData,
-	})
+	}
+	var pw *pluginhost.Wiring
+	var pluginWS *pluginhost.Workspace
+	if opts.Daemon != nil && opts.PluginDaemon != nil && opts.Remote == nil {
+		// One plugin runtime for the whole daemon: this workspace contributes its own OS
+		// (root/env/gate forwarded through the runtime's OS mux), editor adapter, keymap
+		// builder and gvim.state namespace, and the switch rebinds them.
+		pluginWS = pluginhost.NewWorkspace(cfg, ed, markEdited, po)
+		if pluginWS.StateNote != "" {
+			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: "+pluginWS.StateNote)
+		}
+		sharedRuntime, sharedKeys := opts.PluginDaemon.Ensure(cfg, po)
+		pw = &pluginhost.Wiring{OS: pluginWS.OS, Runtime: sharedRuntime, Editor: pluginWS.Editor, Keys: sharedKeys}
+	} else {
+		pw = pluginhost.New(cfg, ed, markEdited, po)
+	}
 	// The workspace authority: the local backend over the plugin OS (the same
 	// instance the plugin runtime uses) or the SSH backend of a remote launch. Every
 	// launch and one-shot goes through it; nothing downstream looks at the kind.
@@ -743,6 +780,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}
 	var remoteFiles *finder.Index
 	var remoteGit *remoteGitStatus
+	var remoteExplorerLoader *authorityDirLoader
 	if opts.Remote != nil {
 		// The slot now has the real remote FileSystem: give the editor the file access and
 		// park the remote file for the root's first command. Installing the access is
@@ -792,9 +830,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// Delete run through the authority's FileMutations surface; the local file-operation
 		// adapter is never used for remote paths. Cut/paste of subtrees and drag/move stay
 		// unwired (recorded gaps): the explorer refuses them before the adapter.
-		deps.Explorer = tui.NewRemoteExplorerTree(remoteRoot, newAuthorityDirLoader(authSlot, authGate, remoteRoot))
-		deps.ShowExplorer = true
-		deps.Ops = newRemoteExplorerOps(authSlot, remoteRoot, authSlot.Label(), authGate, ed)
+		remoteExplorerLoader = installRemoteExplorer(&deps, authSlot, remoteRoot, authGate, ed)
 		// Remote git marks and the quick-open file preview run through the same authority
 		// (remote cwd, remote env delta, spawn/trust gate), never through the local git or
 		// the local file system. The git read is briefly cached so save/watch/reload bursts
@@ -802,10 +838,44 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// remote file index.
 		remoteGit = installRemoteDataPorts(&deps.Root, authSlot, remoteRoot, envProvider.Overlay)
 	}
+	// A daemon-hosted remote workspace restores its saved session only after the authority
+	// connects and the remote document access is installed (the files open through the
+	// remote file access, never the local disk). A failed reconnect leaves the session file
+	// and stashes untouched for the next start: this runtime restores nothing and the
+	// capture path skips it, so an empty editor can never overwrite the saved session.
+	if deferRemoteRestore && restored {
+		if authSlot == nil || !authSlot.Connected() {
+			remoteRestoreSkipped = true
+			deps.ShowExplorer = false
+			deps.StartupOpen, deps.StartupLine, deps.StartupCol = "", 0, 0
+			openNotices = append(openNotices, "SSH workspace disconnected: the saved remote session is kept for the next start")
+		} else {
+			// The saved paths are remote: probe their existence through the authority,
+			// then let the editor open them through its installed remote file access.
+			exists := remoteRestoreExists(authSlot)
+			switch {
+			case plan.tabs:
+				failed = restore.RestoreSessionAccess(ed, opts.SessionDir, sess, exists)
+				tree.SetShowHidden(sess.ShowHidden)
+				tree.SetShowIgnored(sess.ShowIgnored)
+				if deps.Explorer != nil {
+					deps.Explorer.SetShowHidden(sess.ShowHidden)
+					deps.Explorer.SetShowIgnored(sess.ShowIgnored)
+				}
+			case plan.hot:
+				failed = restore.RestoreHotExitAccess(ed, opts.SessionDir, sess, exists)
+			}
+			// The restored tabs own the start: do not reopen the startup target file.
+			deps.StartupOpen, deps.StartupLine, deps.StartupCol = "", 0, 0
+		}
+	}
 	// Remote external-change watching: bridge the authority's remote watch into the root's
 	// existing watch pipeline (RootPorts.Watch/WatchDirs). A local launch gets nil here and
 	// keeps its fsnotify watcher; the remote writer never touches the local filesystem.
 	remoteFileWatch := setupRemoteWatch(ctx, &deps, authSlot, opts.Remote)
+	if remoteExplorerLoader != nil {
+		remoteExplorerLoader.setWatcher(remoteFileWatch)
+	}
 	// The one-shots of the session go through the slot: the shell and formatter runner
 	// below, the dock terminal through its starter, and the local git grep here. A remote
 	// launch already installed the authority-backed Git Grep port in its block above; do
@@ -815,6 +885,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}
 	deps.Root.Plugins = pw.Runtime
 	deps.Root.PluginEditor = pw.Editor
+	if pluginWS != nil {
+		// The daemon-wide host mux: the model's host calls route to whichever workspace is
+		// active, and editor-wide registrations follow a switch.
+		deps.Root.PluginShared = opts.PluginShared
+	}
 	deps.Root.PluginKeys = func(name string, bs []pluginapi.Binding) (tui.Keymap, error) {
 		km, err := pw.Keys(name, bs)
 		if km == nil {
@@ -892,7 +967,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// remote launch has no local session layout, and a hot-exit restore skips the
 	// layout with the clean tabs; a stale or invalid record is ignored by
 	// RestoreSplits, which keeps the one-pane start.
-	if restored && plan.tabs && opts.Remote == nil {
+	if restored && plan.tabs && (opts.Remote == nil || (deferRemoteRestore && !remoteRestoreSkipped)) {
 		model.RestoreSplits(sess.Layout, sess.Files)
 	}
 	loadSearch(model, opts.SessionDir)
@@ -1023,7 +1098,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 
 	// A restored session brings the terminal transcript back, dead: nothing is
 	// re-run automatically, and Restart starts a shell below the transcript.
-	if plan.load && plan.tabs && opts.SessionDir != "" {
+	if plan.load && plan.tabs && opts.SessionDir != "" && !remoteRestoreSkipped {
 		if st, ok, err := restore.LoadTerminal(opts.SessionDir); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: terminal:", err)
 		} else if ok {
@@ -1038,7 +1113,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// would replace the saved session and remove the stash files that it names.
 	// A file launch and --simple are those launches.
 	sessionDir := ""
-	if plan.save {
+	if plan.save && !remoteRestoreSkipped {
 		sessionDir = opts.SessionDir
 	}
 	rt = &runtime{
@@ -1048,16 +1123,18 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		watcher:         watcher,
 		sessionDir:      sessionDir,
 		pluginStateFile: pluginStateFile,
+		pluginWS:        pluginWS,
 		searchDir:       opts.SessionDir,
 		stashDir:        opts.SessionDir,
 		kept:            keptFiles(failed),
 		recovery:        restore.RecoveryDirFor(opts.SessionDir, watching),
 
-		recoveryWriter: deps.Root.Recovery,
-		log:            logFile,
-		auth:           authSlot,
-		remoteWatch:    remoteFileWatch,
-		remoteFiles:    remoteFiles,
+		recoveryWriter:   deps.Root.Recovery,
+		log:              logFile,
+		auth:             authSlot,
+		remoteWatch:      remoteFileWatch,
+		remoteFiles:      remoteFiles,
+		keepSavedSession: remoteRestoreSkipped,
 	}
 	model.SetQuitStash(rt.stashForQuit)
 	return rt, nil

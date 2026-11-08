@@ -80,6 +80,14 @@ type View struct {
 	MaxW int
 	// Cut fits a row to room cells; nil cuts at the end.
 	Cut func(s string, room int) string
+	// Multi turns the list into a checkbox picker: Space marks/unmarks the
+	// highlighted row, Enter runs ChooseMany over the marked rows (or the
+	// highlighted row when none is marked). It is additive: single-choice lists
+	// leave it false.
+	Multi bool
+	// ChooseMany runs the marked rows of a Multi list. A list without it falls
+	// back to running the highlighted row through run.
+	ChooseMany func(v *View, rows []Row) tea.Cmd
 	// Box is the box at the last draw; the zero value before the first draw.
 	Box space.Rect
 
@@ -91,6 +99,7 @@ type View struct {
 	active bool
 	chrome style.Overlay
 	run    func(v *View, r Row) tea.Cmd // nil: choosing a row does nothing
+	marked map[int]bool                 // Multi: shown indexes marked with Space
 }
 
 // The kit's two views are overlays of the root's stack.
@@ -263,7 +272,19 @@ func (v *View) key(k tea.Key) tea.Cmd {
 		v.move(-len(v.shown))
 	case tea.KeyEnd:
 		v.move(len(v.shown))
+	case tea.KeySpace:
+		if v.Multi {
+			v.toggleMark()
+		}
 	case tea.KeyEnter:
+		if v.Multi {
+			if rows := v.markedRows(); len(rows) > 0 {
+				if v.ChooseMany != nil {
+					return v.ChooseMany(v, rows)
+				}
+				return nil
+			}
+		}
 		return v.chooseSelected()
 	case tea.KeyBackspace:
 		if n := len(v.filter); n > 0 {
@@ -326,6 +347,28 @@ func (v *View) keepVisible() {
 		v.top = v.sel - page + 1
 	}
 	v.top = max(0, min(v.top, len(v.shown)-page))
+}
+
+// toggleMark flips the checkbox of the highlighted item in a Multi list.
+func (v *View) toggleMark() {
+	if _, ok := v.selected(); !ok {
+		return
+	}
+	if v.marked == nil {
+		v.marked = make(map[int]bool)
+	}
+	v.marked[v.sel] = !v.marked[v.sel]
+}
+
+// markedRows returns the marked items in display order, for ChooseMany.
+func (v *View) markedRows() []Row {
+	var out []Row
+	for i, idx := range v.shown {
+		if v.marked[i] && !v.Rows[idx].Header {
+			out = append(out, v.Rows[idx])
+		}
+	}
+	return out
 }
 
 // chooseSelected runs the highlighted row. A header, or a list without run, does
@@ -408,6 +451,24 @@ func (v *View) draw(g *grid.Grid) {
 			g.Fill(box.X+1, box.X+box.W-1, y, st)
 		}
 		left, room := r.Left, end-box.X-2
+		if v.Multi && !r.Header {
+			mark := "[ ] "
+			if v.marked[idx] {
+				mark = "[x] "
+			}
+			g.Put(box.X+2, y, end, mark, st)
+			leftX := box.X + 2 + len(mark)
+			room -= len(mark)
+			if room > 0 {
+				g.Put(leftX, y, end, v.fitText(left, room), st)
+			}
+			if r.Right != "" {
+				value := space.Tail(r.Right, end-(box.X+2)-len(mark)-ansi.StringWidth(left)-2)
+				rightX := end - ansi.StringWidth(value)
+				g.Put(rightX, y, end, value, right)
+			}
+			continue
+		}
 		if r.Right != "" {
 			// A long value keeps its end, and the label keeps its own width.
 			value := space.Tail(r.Right, end-(box.X+2)-ansi.StringWidth(left)-2)

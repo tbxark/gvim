@@ -310,7 +310,7 @@ func plugActionErr(action string, err error) error {
 // runtime is deferred: Do validates and queues it, and the pump runs it after the Lua
 // slice has returned. The command an action starts is collected, never dropped.
 func (h *pluginHost) Do(action string, args map[string]any, count int) error {
-	m := h.m
+	m := h.model()
 	if action == "" {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "empty action name")
 	}
@@ -362,7 +362,7 @@ func withCount(args map[string]any, count int) map[string]any {
 // list with a step that must be deferred is deferred as a whole, so the steps keep their
 // order.
 func (h *pluginHost) DoAll(steps []pluginapi.Step) error {
-	m := h.m
+	m := h.model()
 	for _, s := range steps {
 		if s.Action == "" {
 			return pluginapi.Errf(pluginapi.CodeInvalid, "empty action name")
@@ -422,11 +422,11 @@ func (m *Model) doSteps(steps []pluginapi.Step, hook bool) (tea.Cmd, error) {
 }
 
 // Holds evaluates a when-clause name against the current state.
-func (h *pluginHost) Holds(name string) bool { return h.m.Holds(name) }
+func (h *pluginHost) Holds(name string) bool { return h.model().Holds(name) }
 
 // KeyLabel formats the primary binding of action, or "" when there is none.
 func (h *pluginHost) KeyLabel(action string) string {
-	if kl, ok := h.m.keys.(keyLabeler); ok {
+	if kl, ok := h.model().keys.(keyLabeler); ok {
 		return kl.Label(action)
 	}
 	return ""
@@ -435,7 +435,7 @@ func (h *pluginHost) KeyLabel(action string) string {
 // OpenPalette opens the command palette with query. The palette is deferred with the
 // other things that open ui, so it opens after the slice.
 func (h *pluginHost) OpenPalette(query string) {
-	m := h.m
+	m := h.model()
 	m.plug.later = append(m.plug.later, func() tea.Cmd { return m.openPalette(query) })
 }
 
@@ -446,7 +446,7 @@ func (h *pluginHost) Actions() []string {
 	for _, a := range editor.Actions() {
 		seen[string(a)] = struct{}{}
 	}
-	for _, e := range h.m.commands {
+	for _, e := range h.model().commands {
 		if e.Source == commands.SourceBuiltin {
 			seen[e.Action] = struct{}{}
 		}
@@ -465,9 +465,9 @@ func (h *pluginHost) Actions() []string {
 // SetCommands replaces the commands of plugin; an empty list removes them. The palette
 // reads them when it opens.
 func (h *pluginHost) SetCommands(plugin string, cmds []pluginapi.CommandInfo) {
-	p := &h.m.plug
+	p := &h.model().plug
 	if len(cmds) == 0 {
-		h.m.dropCommands(plugin)
+		h.model().dropCommands(plugin)
 		return
 	}
 	if p.commands == nil {

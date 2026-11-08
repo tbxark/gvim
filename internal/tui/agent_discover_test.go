@@ -61,8 +61,8 @@ func TestDiscoverWithoutAScannerShowsANotice(t *testing.T) {
 	if len(m.overlays) != 0 {
 		t.Fatalf("overlays = %d, want none", len(m.overlays))
 	}
-	if m.notice != agentDiscoverMissing {
-		t.Fatalf("notice = %q, want %q", m.notice, agentDiscoverMissing)
+	if m.notice != agentDiscoverMissing() {
+		t.Fatalf("notice = %q, want %q", m.notice, agentDiscoverMissing())
 	}
 }
 

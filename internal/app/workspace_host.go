@@ -135,6 +135,9 @@ func newWorkspaceManager(ctx context.Context, opts Options) (*workspaceManager, 
 	}
 	m.sessions[sess.ws.File.StableID] = sess
 	m.active = sess.ws.File.StableID
+	// Bind the daemon's shared plugin runtime/host to the eagerly materialized foreground
+	// workspace before anything can start it (runDaemonHost's explicit call is idempotent).
+	m.activateForegroundPlugins()
 	return m, nil
 }
 
@@ -320,12 +323,43 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 	m.mu.Unlock()
 	target.rt.model.SetWorkspaceLabel(target.ws.File.Label)
 	_, _ = m.reg.Touch(targetID, m.now())
+	// The daemon's one plugin runtime is rebound to the entering workspace before its
+	// model is shown: OS/gate/env and the gvim.state namespace follow the active
+	// workspace, and the editor-wide registrations are installed into its model.
+	m.activatePlugins(target)
 	if host != nil {
 		host.Show(target.rt.model)
 		if hasLaunch {
 			host.Queue(target.rt.model.StartWorkspaceLaunch(launch))
 		}
 	}
+}
+
+// activatePlugins rebinds the daemon's shared plugin runtime and host to sess: its
+// per-workspace OS/gate/env become the active plugin OS, its gvim.state namespace becomes
+// the runtime's store, and the shared host mux points at the model (with the editor-wide
+// registrations installed). Remote/authority workspaces keep their own runtime and are
+// skipped (pluginWS nil) - sharing them is a recorded residual. It must run on the UI
+// goroutine, before the model is shown.
+func (m *workspaceManager) activatePlugins(sess *workspaceSession) {
+	if sess == nil || sess.rt == nil {
+		return
+	}
+	if m.opts.PluginDaemon != nil && sess.rt.pluginWS != nil {
+		m.opts.PluginDaemon.Activate(sess.rt.pluginWS)
+	}
+	if m.opts.PluginShared != nil && sess.rt.pluginWS != nil {
+		m.opts.PluginShared.Bind(sess.rt.model)
+	}
+}
+
+// activateForegroundPlugins binds the eagerly materialized foreground workspace before the
+// program starts (no UI goroutine yet; the call runs inline).
+func (m *workspaceManager) activateForegroundPlugins() {
+	m.mu.Lock()
+	sess := m.sessions[m.active]
+	m.mu.Unlock()
+	m.activatePlugins(sess)
 }
 
 // beginSelect starts one switch. It runs on the UI goroutine: the current workspace is
@@ -976,6 +1010,12 @@ func runDaemonHost(ctx context.Context, srv *daemon.Server, opts Options) (err e
 	if err != nil {
 		return err
 	}
+	if opts.PluginDaemon != nil {
+		// Registered before the closeAll defer, so it runs AFTER the workspaces are closed:
+		// the one shared plugin runtime is stopped once, at daemon exit (workspace models
+		// skip pluginStop in shared mode).
+		defer opts.PluginDaemon.Stop()
+	}
 	defer func() {
 		// The exit save is part of the outcome: a capture write that failed, timed out or
 		// could not be rescued makes the daemon exit non-zero instead of reporting a clean
@@ -993,6 +1033,10 @@ func runDaemonHost(ctx context.Context, srv *daemon.Server, opts Options) (err e
 	}
 	srv.OnWorkspaceRequest(ws.handleRequest)
 	srv.OnOpenFilesAt(ws.openFiles)
+	// Bind the shared plugin host/runtime to the eagerly materialized foreground workspace
+	// before the program starts (the runtime's loader reads its plugin sources through the
+	// active workspace's OS on the first Init).
+	ws.activateForegroundPlugins()
 	host := tui.NewWorkspaceHost(ws.ForegroundModel())
 	ws.setHost(host)
 	go srv.Serve(ctx)

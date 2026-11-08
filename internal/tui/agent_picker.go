@@ -218,7 +218,7 @@ func (m *Model) openAgentActionPickerAt(name, dir string) tea.Cmd {
 	choices = append(choices, agentActionChoice{changeDir: true})
 	p := picker.New(m.styles, picker.Options{
 		Title:  "Run Agent · " + name,
-		Footer: "Enter chooses · Esc closes",
+		Footer: uiText("gvim.picker.agent_footer", "Enter chooses · Esc closes"),
 		Items:  items,
 	})
 	p.SetStatus("Starts in " + dir)

@@ -1003,6 +1003,42 @@ func (t *Tabs) SavedState() terminal.SavedState {
 	return st
 }
 
+// ActiveSavedTab returns the active tab's saved record (the same per-tab record
+// SavedState writes), for the extract-terminal-tab action that moves a tab to
+// another workspace. A dock with no tabs reports false.
+func (t *Tabs) ActiveSavedTab() (terminal.SavedTab, bool) {
+	st := t.SavedState()
+	if len(st.Tabs) == 0 || t.active < 0 || t.active >= len(st.Tabs) {
+		return terminal.SavedTab{}, false
+	}
+	return st.Tabs[t.active], true
+}
+
+// AppendRestoredTab appends a saved tab as a read-only/dormant panel with its
+// transcript, launch record and styled screen snapshot, and returns its index.
+// It does not run anything: a tab that was live at the capture keeps its live
+// flag, so the target revives it on the first dive (the dock's normal dive rule),
+// never at append time. The existing tabs and the active index stay as they were.
+func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
+	var p Panel
+	p.SetHost(t.host)
+	p.SetPorts(t.ports)
+	p.SetEffects(t.effects)
+	p.gen = t.genBase()
+	p.Restore(terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
+		Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
+		Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
+		Source: tab.Source, Live: tab.Live, Screen: tab.Screen,
+	})
+	t.tabs = append(t.tabs, &p)
+	t.names = append(t.names, tab.Name)
+	if len(t.tabs) == 1 {
+		t.active = 0
+	}
+	return len(t.tabs) - 1
+}
+
 // Restore puts a saved terminal state back. A record with tabs restores every tab
 // as a read-only transcript with its saved name and launch record; a record
 // without tabs restores the single terminal exactly as before. The active tab is

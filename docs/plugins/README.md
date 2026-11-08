@@ -93,7 +93,9 @@ Plugins load in dependency order (`requires`, `after`), then by source, then by 
   plugin-state.json           the manager's enable/disable switches
 ```
 
-A daemon workspace keeps `gvim.state` in its own
+A daemon host runs ONE editor-wide plugin runtime for all of its local workspaces; a
+workspace switch rebinds the runtime's host and OS and swaps the state namespace below. A
+daemon workspace keeps `gvim.state` in its own
 `sessions/<stable-id>/plugin-state.json` in the workspace session directory instead (see
 `api-core.md`); the file lives outside the config tree and is never deleted with a
 plugin uninstall.

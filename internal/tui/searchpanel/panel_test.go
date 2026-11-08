@@ -1446,3 +1446,22 @@ func TestScopeChipFollowsTheThreeWayCycle(t *testing.T) {
 		t.Fatal("the Current File chip is missing")
 	}
 }
+
+// TestStalePreviewResultIsDropped: a preview answer that arrives after a newer request
+// (its sequence is old) is ignored, so the remote preview column can never show a stale
+// file's context.
+func TestStalePreviewResultIsDropped(t *testing.T) {
+	pv := &fakePreviewer{result: PreviewResult{Start: 0, Lines: []string{"new"}}}
+	p, _ := previewPanel(t, pv)
+	focusResultsFeeding(t, p)
+	if p.preview.seq == 0 {
+		t.Fatal("no preview request was made")
+	}
+	stale := p.preview.seq - 1
+	p.Update(previewDoneMsg{seq: stale, result: PreviewResult{Start: 0, Lines: []string{"stale"}}})
+	for _, line := range p.preview.result.Lines {
+		if line == "stale" {
+			t.Fatal("a stale preview result was applied")
+		}
+	}
+}

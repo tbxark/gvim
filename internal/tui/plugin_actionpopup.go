@@ -37,7 +37,7 @@ type pluginActionPopupTag struct{ tok pluginapi.Token }
 // ShowActionPopup shows a message with action buttons. The result is Values{action id} of
 // the chosen button, or Values{nil} when the popup closed without one.
 func (h *pluginHost) ShowActionPopup(t pluginapi.Token, id uint64, o pluginapi.ActionPopupSpec) error {
-	m := h.m
+	m := h.model()
 	if len(o.Actions) == 0 || len(o.Actions) > maxActionActions {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "an action popup takes 1 to %d actions", maxActionActions)
 	}

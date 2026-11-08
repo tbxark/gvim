@@ -178,6 +178,13 @@ func (m *workspaceManager) enqueueCapture(s *workspaceSession) *saveJob {
 	if s == nil || s.rt == nil {
 		return nil
 	}
+	if s.rt.keepSavedSession {
+		// The authority was disconnected when this remote workspace started, so its
+		// session was not restored and must not be overwritten by this empty runtime.
+		job := &saveJob{done: make(chan struct{})}
+		close(job.done)
+		return job
+	}
 	job := &saveJob{done: make(chan struct{})}
 	snap, snapErr := m.snapshotCapture(s)
 	if snapErr != nil {

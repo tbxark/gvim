@@ -21,11 +21,13 @@ import (
 // waits on the remote host. The root loads the missed window in a command and
 // repaints when it arrives.
 //
-// Read-only by design in this slice: Fresh edits large files through an overlay and
-// saves a patched recipe written on the host; gvim's remote save path is the atomic
-// whole-file write, which cannot rebuild the unchanged parts without reading them
-// all back. Opening read-only is stated in the status row and in the docs; a remote
-// overlay save is a later slice.
+// Editing follows Fresh's large-file model: edits are an in-memory overlay over the
+// untouched base lines (buffer's large-file mode, bounded by its overlay budget). A
+// save merges the overlay into the unchanged ranges read back through the windowed
+// source and writes the whole merged file with the authority's atomic write; the
+// merged size is bounded (remoteLargeSaveMax) because that write takes the bytes in
+// memory. A file that changed underneath refuses the save clearly instead of writing
+// over it.
 
 // RangeAccess is the optional FileAccess part for a windowed source: it reads at
 // most n bytes at off, returns a short answer with io.EOF, and performs the read where
@@ -47,6 +49,12 @@ const (
 	// returns; larger prefixes would need windows the source has not loaded.
 	remoteInitialIndexBytes = 4096
 )
+
+// remoteLargeSaveMax bounds the merged file a remote large-file save writes. The
+// authority's atomic write takes the whole file as one byte slice, so the merge reads
+// the untouched ranges through the window source into memory; a larger file refuses
+// the save with a clear notice instead of risking the machine. Tests lower it.
+var remoteLargeSaveMax int64 = 64 << 20
 
 // LargeWindow is one pending window of an asynchronous large document.
 type LargeWindow struct {
@@ -223,8 +231,8 @@ func (s *remoteWindowSource) TakePendingWindow() (off, n int64, ok bool) {
 // Size implements buffer.Source.
 func (s *remoteWindowSource) Size() int64 { return s.size }
 
-// Check implements buffer.Source. The remote file is read-only here and the remote
-// change watcher already reports changes; a window source does not stat on a paint.
+// Check implements buffer.Source. A window source does not stat on a paint: the
+// remote change watcher reports changes, and a save compares the stat itself.
 func (s *remoteWindowSource) Check() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -247,8 +255,8 @@ func (s *remoteWindowSource) Close() error {
 }
 
 // readRemoteLargeDocument opens path in large-file mode over a windowed remote
-// source. It is read-only; a non-UTF-8 file fails with ErrTooLargeToTranscode
-// instead of loading whole.
+// source. Edits are an in-memory overlay over the windowed base; a non-UTF-8 file
+// fails with ErrTooLargeToTranscode instead of loading whole.
 func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, spec loadSpec, access RangeAccess) (*Document, error) {
 	src, err := newRemoteWindowSource(ctx, access, path, disk.Size)
 	if err != nil {
@@ -278,16 +286,16 @@ func readRemoteLargeDocument(ctx context.Context, path string, disk diskState, s
 	}
 	d := &Document{Path: path, Buffer: buf, Want: -1, Eol: info.Eol}
 	d.Disk = disk
+	d.access = spec.Access
 	d.Codec = info.Codec
 	d.encoding = info.Label
-	d.readOnly = true
 	d.large = &largeDoc{
 		Size: src.Size(), EstLine: spec.LargeConf.EstLine, Batch: spec.LargeConf.Batch,
 		Mtime: mtimeNano(disk), Skip: info.Skip, StashDir: spec.LargeConf.StashDir,
 		RemoteWindowed: true,
 	}
 	if info.binary {
-		d.binary = true
+		d.readOnly, d.binary = true, true
 	}
 	return d, nil
 }

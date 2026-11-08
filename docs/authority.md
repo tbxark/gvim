@@ -196,6 +196,21 @@ deliberately does not take.
   the channel. Fresh parity: Fresh's remote external-change detection is the metadata poll
   (`watch_file` records the authority mtime); gvim keeps that poll (`PlanDiskCheck` over
   `document.FileAccess`) and adds this authority watch bridge on top.
+  The remote explorer's directories now ride the same bridge (landed): the app loader
+  (`internal/app/remote_explorer.go`) adds every listed directory to
+  `RootPorts.WatchDirs`, so an external change refreshes the remote listing through the
+  normal debounce/coalescing path off the update loop, and the bridge's existing
+  cancellation/reconnect handling (Reconnected restarts, Close cancels) applies unchanged.
+  The loader probes directory watching once; when the backend refuses `Watch` (or no
+  bridge is wired) the tree gets one 'remote directory watching is not supported;
+  refresh manually (Ctrl+R)' notice and continues without watching, so a manual refresh
+  always works. The same loader filters remote directories through the remote
+  `.gitignore` files read via `authority.Files().ReadFile` (root/nested, go-git parser
+  shared with the local explorer, at most 64 levels / 64 KiB per file / 4096 rules); an
+  oversized or unreadable ignore file, or a depth/rule overflow, keeps the listing working
+  with filtering incomplete and one notice. The remote finder index uses the same reader
+  (its ignore batch lives for one index lifetime, so an edited ignore file reaches the
+  palette on the next index restart/reconnect); there is no local filesystem fallback.
 - LSP over SSH (landed): the language servers of a remote workspace start on the remote
   host through the authority's `LongRunning` surface (a separate ssh exec channel with
   piped stdio), not as local `exec.Command`s. The manager gained a `SetSpawner` seam (nil =
@@ -296,8 +311,9 @@ Residuals of this slice (documented, not bugs):
   itself is not watched because the remote explorer is not implemented, and the authority
   watch is polled at ~500 ms plus the 150 ms coalescing window, with a rename reported as
   remove+create; manual Revert/Reopen and the periodic disk check remain the fallback), remote
-  large-file editing (remote large files now open read-only over a windowed source; a
-  remote overlay save is the later slice), remote
+  large-file saves larger than the bounded merge (remote large files edit as an overlay
+  and save by merging into one atomic whole-file write, up to remoteLargeSaveMax; Fresh's
+  host-side patched recipe is the later slice), remote
   crash recovery and hot-exit (deliberately skipped for a remote launch so remote text is
   never copied into a local cache), `~user` expansion, special remote files (the helper's
   kind mapping only knows file/dir/symlink; a FIFO read is bounded by the context and fails
@@ -380,15 +396,30 @@ implements the bounded slice:
   registry side also covers spec round-trip, local discovery ignoring spec-bearing entries,
   and old-file tolerance.
 
+Daemon-hosted remote workspaces also restore their session across a daemon restart. The
+existing workspace capture writes the session layout, file states and stashes into the
+workspace session directory (keyed by stable id) on exit; on the next start the remote
+workspace is built with its stored authority spec, waits for the authority connection, then
+reopens the saved files through the remote document access (the existence probe goes through
+the authority file system, never a local stat), restoring tabs, active tab, cursor, pane
+layout, explorer/sidebar state and unsaved stash text. A saved file that no longer exists on
+the remote host keeps its unsaved stash and is reported by the normal session notice. A
+daemon start whose reconnect fails restores nothing and leaves the session file and stashes
+untouched for the next start (the runtime's capture is skipped, so an empty editor cannot
+overwrite them). Direct remote launches still keep no local session, and a reattach after a
+detach keeps the live daemon state (no restore runs then). The restore itself is a bounded
+build-time step after the connect, never on the update loop; a failed individual file open is
+a kept-stash notice like a local restore.
+
 Residuals of this slice: real SSH is still untested (all tests are offline fakes); a remote
-workspace's captured layout/unsaved text is written on daemon exit but the remote
-buildRuntime deliberately keeps the direct-remote no-session-restore rule, so a daemon
-RESTART reconnects the host but does not restore the remote workspace's tabs/stashes (a
-detach/reattach keeps the live daemon state; restoring remote sessions across restart is a
-follow-up); plugin gvim.fs/gvim.proc still use the local plugin OS port in a remote workspace
-(the remote explorer/terminal/search do go through the authority); the remote workspace's
-trust decision is the local workspace's trust store; and per-file ownership across a
-jump-box daemon and a direct editor on the same remote host is not covered.
+workspace whose remote files changed while the daemon was down restores the saved text and
+reports the usual per-file open failures (no remote conflict detection beyond the normal
+stash/mtime baseline); the restored terminal transcript comes back dead (the normal restored
+session behavior, no process re-run); plugin gvim.fs/gvim.proc still use the local plugin OS
+port in a remote workspace (the remote explorer/terminal/search do go through the authority);
+the remote workspace's trust decision is the local workspace's trust store; and per-file
+ownership across a jump-box daemon and a direct editor on the same remote host is not
+covered.
 
 ## 8. Tests
 
@@ -489,44 +520,58 @@ remain open.
 
 ### Windowed remote reads (remote large-file mode)
 
-The authority file port has \`FileSystem.ReadRange(ctx, path, off, n)\`: a bounded window
-read (local \`pread\`, SSH \`tail -c +off+1 | head -c n\`), capped at 1 MiB per answer and
-returning \`io.EOF\` for a short final window. Remote large-file mode builds on it: a remote
+The authority file port has `FileSystem.ReadRange(ctx, path, off, n)`: a bounded window
+read (local `pread`, SSH `tail -c +off+1 | head -c n`), capped at 1 MiB per answer and
+returning `io.EOF` for a short final window. Remote large-file mode builds on it: a remote
 file at or above the editor's large-file threshold opens through a windowed
-\`buffer.Source\` instead of being read whole.
+`buffer.Source` instead of being read whole.
 
 ### How the windows load
 
 The document's window source keeps 1 MiB aligned windows with an LRU of 8 (about 8 MiB per
-document) and a window-arrival generation. \`ReadAt\` is **cache-only**: a miss records the
-window and returns \`buffer.ErrSourcePending\` immediately, doing no I/O, so a paint never
+document) and a window-arrival generation. `ReadAt` is **cache-only**: a miss records the
+window and returns `buffer.ErrSourcePending` immediately, doing no I/O, so a paint never
 waits on the carrier. The buffer treats that sentinel as retryable (it is not a source
 change: the buffer does not freeze, the document does not turn read-only for it, and the
-line paints blank for the moment). The TUI's large-file loop, which only exists while the
-active document is such a file, arms one short delayed check per update, loads the missed
-window in a \`tea.Cmd\` under the large-state context (cancelled when the model closes or
-the document goes away, which the source observes through the context passed to
-\`ReadRange\`), and the reply makes the next update repaint with the loaded text. One window
-after the requested range is prefetched when the LRU has room; farther scrolling misses
-again and loads the next window. Local large files keep the synchronous \`fileSource\` path
-unchanged and never arm the window loop.
+line paints blank for the moment). A save also loads a window when its merge runs into a
+missed one: that work happens in the save command, never on the update loop. The TUI's
+large-file loop, which only exists while the active document is such a file, arms one short
+delayed check per update, loads the missed window in a `tea.Cmd` under the large-state
+context (cancelled when the model closes or the document goes away, which the source
+observes through the context passed to `ReadRange`), and the reply makes the next update
+repaint with the loaded text. One window after the requested range is prefetched when the LRU
+has room; farther scrolling misses again and loads the next window. Local large files keep
+the synchronous `fileSource` path unchanged and never arm the window loop.
 
-### Read-only in this slice
+### Editing and saving
 
-Remote large files open **read-only**, and the status row says so: \`remote large file
-(read-only, windowed): the bytes stay on the remote host and load as you scroll\`. This is a
-deliberate divergence from Fresh: Fresh edits a large file through an overlay and saves a
-patched recipe that the host applies (unchanged parts are copied on the host), while gvim's
-remote save path is the authority's atomic whole-file write, which cannot rebuild the
-unchanged parts without reading all of them back. A remote overlay save (or a windowed
-render-and-write recipe) is a later slice; until then the read-only reason is explicit, not
-silent. Remote files at or under the threshold still load whole through \`ReadFile\` (64 MiB
-transport cap) exactly as before, and an over-cap file with no windowed reader still fails
-clearly rather than opening a partial buffer. Every byte is read through the authority: there
-is no local fallback, no temporary copy of the remote text on the local disk, and a remote
-file that is not UTF-8 fails with a clear \`too large to transcode\` error instead of loading
-whole.
+Remote large files are **editable** with Fresh's large-file model: edits become an in-memory
+overlay over the untouched windowed base (buffer's large-file overlay, already bounded by its
+overlay budget). The status row says `remote large file (windowed): the bytes stay on the
+remote host and load as you scroll; a save writes the merged file in one atomic write, up to
+<bound>`.
 
+A save merges the overlay with the unchanged head/tail read back through
+`FileSystem.ReadRange` in bounded chunks, then writes the whole merged file with the
+authority's atomic whole-file write. Because that write takes the file as one byte slice, the
+merge is bounded (`remoteLargeSaveMax`, 64 MiB): a larger merged file refuses the save with a
+clear notice instead of risking the machine. The save is prepared on the editor goroutine and
+runs in a `tea.Cmd` like every other save, so the update loop never waits on the carrier. A
+remote file that changed after the plan refuses the save with the ordinary changed-on-disk
+error; the plan's remote stat and the post-write stat both go through the authority. After a
+successful write the save command opens a fresh windowed source for the new file and carries
+it in the result, so `ApplySavePlan` rebases the buffer without any remote read on the update
+goroutine. Undo, dirty state and rebase behave like a local large file.
+
+This is still a deliberate divergence from Fresh: Fresh writes a **patched recipe** that the
+host applies (unchanged parts copied on the host), so it can save files larger than memory;
+gvim's bounded merge-and-atomic-write is the slice that fits the existing remote write port. A
+server-side patched recipe and an unbounded (spooled) save are later work. Remote files at or
+under the threshold still load whole through `ReadFile` (64 MiB transport cap) exactly as
+before, and an over-cap file with no windowed reader still fails clearly rather than opening a
+partial buffer. Every byte is read and written through the authority: there is no local
+fallback, no temporary copy of the remote text on the local disk, and a remote file that is not
+UTF-8 fails with a clear `too large to transcode` error instead of loading whole.
 ## SSH config, ProxyJump and agent forwarding
 
 gvim dials with x/crypto/ssh, not the `ssh(1)` binary, so it reads a **bounded subset** of

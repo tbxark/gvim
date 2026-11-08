@@ -57,21 +57,31 @@ type WorkspaceLauncher interface {
 func (m *Model) SetAgentDiscoverer(d AgentDiscoverer) { m.discover = d }
 
 var (
-	agentDiscoverTitle    = uiText("gvim.agent_discover.title", "Discover Agent Sessions")
-	agentDiscoverScanning = uiText("gvim.agent_discover.scanning", "Scanning for local agent sessions…")
-	agentDiscoverNone     = uiText("gvim.agent_discover.none", "No agent sessions found.")
-	agentDiscoverFooter   = uiText("gvim.agent_discover.footer", "Enter opens · i imports as a workspace · Ctrl+R scans again · Esc closes")
-	agentDiscoverMissing  = uiText("gvim.agent_discover.missing", "Agent discovery is not available in this session")
-	// agentDiscoverNoDaemon is Import's notice outside a daemon-hosted session.
-	agentDiscoverNoDaemon = uiText("gvim.agent_discover.no_daemon", "Import needs a daemon-hosted session: the workspace layer is not available here")
-	// agentDiscoverNoQueuedLaunch is Import's fallback notice when the daemon's
-	// workspace layer predates the queued launch: the workspace exists but the
-	// session's terminal was not started there.
+	agentDiscoverNoDaemon       = uiText("gvim.agent_discover.no_daemon", "Import needs a daemon-hosted session: the workspace layer is not available here")
 	agentDiscoverNoQueuedLaunch = uiText("gvim.agent_discover.no_queued_launch", "Import: this daemon build cannot start the session's terminal in the new workspace; the workspace was created - open its terminal and run: ")
 	agentDiscoverNoTmux         = uiText("gvim.agent_discover.no_tmux", "tmux is not running and no Claude Code/Codex transcripts were found")
 	agentDiscoverResumeFailed   = uiText("gvim.agent_discover.resume_failed", "Terminal: could not resume the discovered agent session")
 	agentDiscoverNoSessionID    = uiText("gvim.agent_discover.no_session_id", "Import: the session records no directory")
 )
+
+// The agent-discovery picker chrome is resolved on each use so a live locale change is
+// seen without a restart (the dynamic Import notes above are notices resolved at first
+// use; a restart boundary there is documented in docs/i18n.md).
+func agentDiscoverTitle() string {
+	return uiText("gvim.agent_discover.title", "Discover Agent Sessions")
+}
+func agentDiscoverScanning() string {
+	return uiText("gvim.agent_discover.scanning", "Scanning for local agent sessions…")
+}
+func agentDiscoverNone() string {
+	return uiText("gvim.agent_discover.none", "No agent sessions found.")
+}
+func agentDiscoverFooter() string {
+	return uiText("gvim.agent_discover.footer", "Enter opens · i imports as a workspace · Ctrl+R scans again · Esc closes")
+}
+func agentDiscoverMissing() string {
+	return uiText("gvim.agent_discover.missing", "Agent discovery is not available in this session")
+}
 
 // agentDiscoverOverlay is the discovery picker. It owns the report, so nothing is
 // stored on the root model and a closed picker leaves nothing behind.
@@ -123,7 +133,7 @@ func (o *agentDiscoverOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 		}
 		// Ctrl+R scans again without leaving the picker.
 		if k.Code == 'r' && k.Mod&tea.ModCtrl != 0 {
-			o.p.SetStatus(agentDiscoverScanning)
+			o.p.SetStatus(agentDiscoverScanning())
 			return o, o.scan()
 		}
 	}
@@ -385,7 +395,7 @@ func discoverStatus(report agentdiscover.Report) string {
 		if !report.Installed && !report.External.Installed {
 			return agentDiscoverNoTmux
 		}
-		return agentDiscoverNone
+		return agentDiscoverNone()
 	}
 	if report.Truncated || report.External.Truncated {
 		return "Some sessions were left out: the scan hit its bound"
@@ -476,16 +486,16 @@ func utf8Valid(s string) bool {
 // picker shows at once in the scanning state; the report arrives as a message.
 func (m *Model) openAgentDiscover() tea.Cmd {
 	if m.discover == nil {
-		m.notice = agentDiscoverMissing
+		m.notice = agentDiscoverMissing()
 		return nil
 	}
 	p := picker.New(m.styles, picker.Options{
-		Title:       agentDiscoverTitle,
-		Footer:      agentDiscoverFooter,
+		Title:       agentDiscoverTitle(),
+		Footer:      agentDiscoverFooter(),
 		Placeholder: "filter sessions",
 		Fuzzy:       true,
 	})
-	p.SetStatus(agentDiscoverScanning)
+	p.SetStatus(agentDiscoverScanning())
 	ov := &agentDiscoverOverlay{m: m, p: p}
 	m.pushOverlay(ov)
 	return ov.scan()

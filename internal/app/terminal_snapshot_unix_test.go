@@ -3,6 +3,7 @@
 package app
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -114,14 +115,22 @@ func TestWorkspaceDaemonScreenSnapshot(t *testing.T) {
 	// The daemon capture/restart keeps the transcript: close and materialize again
 	// from the same registry, and the restored tab still has OLD above.
 	m.closeAll()
+	// The dead shell's marker is stale after the close; remove it so a spawn before
+	// the dive would be observable.
+	_ = os.Remove(tabTestPidPath(root))
 	m2 := tabTestManager(t, root, cfg)
 	t.Cleanup(m2.closeAll)
 	restored := tabTestRuntime(t, m2, id).model.TerminalState()
 	if len(restored.Tabs) != 1 || !strings.Contains(rowsText(restored.Tabs[0].Rows), "OLD") {
 		t.Fatalf("daemon restart lost the transcript: %+v", restored)
 	}
-	if restored.Tabs[0].Live {
-		t.Fatalf("a captured running tab should restore dead until its dive: %+v", restored.Tabs[0])
+	// The record keeps the tab's liveness (dormant-live) so the first dive revives it,
+	// but the daemon restart itself must not start a process.
+	if pid := tabTestPid(tabTestPidPath(root)); pid != 0 {
+		t.Fatalf("the daemon restart started a shell before the dive (pid %d)", pid)
+	}
+	if !strings.Contains(rowsText(restored.Tabs[0].Rows), "READY") {
+		t.Fatalf("the restored transcript lost the live screen text: %+v", restored.Tabs[0].Rows)
 	}
 	_ = dir
 }

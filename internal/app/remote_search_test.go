@@ -253,22 +253,6 @@ func TestRemoteProjectSearchCancellation(t *testing.T) {
 	}
 }
 
-// TestRemoteProjectSearchScopeUnsupported checks a non-project scope is refused with a
-// clear error and never runs a remote command.
-func TestRemoteProjectSearchScopeUnsupported(t *testing.T) {
-	one := &fakeOneShot{script: func(context.Context, []string, hostos.ProcOptions) (hostos.ProcResult, error) {
-		t.Fatal("a remote command ran for an unsupported scope")
-		return hostos.ProcResult{}, nil
-	}}
-	s := newRemoteProjectSearch(one, "/remote/w")
-	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
-		Root: "/remote/w", Query: "todo", Scope: searchpanel.CurrentFile,
-	}, nil))
-	if len(batches) != 1 || !strings.Contains(batches[0].Err, "not available remotely") {
-		t.Fatalf("batches = %+v", batches)
-	}
-}
-
 // TestRemoteGitGrepRunsOnTheHost checks git grep resolves the repository remotely and maps
 // its relative paths to absolute remote paths, with the local git state never consulted.
 func TestRemoteGitGrepRunsOnTheHost(t *testing.T) {
@@ -358,5 +342,95 @@ func TestRemoteProjectSearchTimeout(t *testing.T) {
 	}
 	if len(batches) != 1 || !batches[0].Done || !strings.Contains(batches[0].Err, "timed out") {
 		t.Fatalf("batches = %+v", batches)
+	}
+}
+
+// TestRemoteSearchCurrentFileAndOpenBuffersScopes: both editor-snapshot scopes return
+// matches without invoking the remote search tool and without reading any file system.
+func TestRemoteSearchCurrentFileAndOpenBuffersScopes(t *testing.T) {
+	one := &fakeOneShot{} // a remote command would fail the test through "unexpected remote command"
+	s := newRemoteProjectSearch(one, "/remote/w")
+	current := &searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "one\ntodo two\n", Dirty: true}
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Query: "todo", Scope: searchpanel.CurrentFile, Current: current, Limit: 10,
+	}, nil))
+	files := remoteBatchFiles(batches)
+	if len(files) != 1 || files[0].Path != "/remote/w/a.go" || len(files[0].Matches) != 1 {
+		t.Fatalf("current-file files = %+v", files)
+	}
+	if m := files[0].Matches[0]; m.Line != 2 || m.Text != "todo two" {
+		t.Fatalf("current-file match = %+v", m)
+	}
+	if files[0].Dirty != true {
+		t.Errorf("current-file match is not marked dirty")
+	}
+	open := []searchpanel.SourceFile{
+		{Path: "/remote/w/a.go", Name: "a.go", Text: "todo a"},
+		{Path: "", Name: "*scratch*", Text: "todo b"},
+		{Path: "/remote/w/a.go", Name: "a.go", Text: "todo duplicate"},
+	}
+	batches = collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Query: "todo", Scope: searchpanel.OpenBuffers, OpenFiles: open, Limit: 10,
+	}, nil))
+	files = remoteBatchFiles(batches)
+	if len(files) != 2 {
+		t.Fatalf("open-buffers files = %+v, want the two deduplicated buffers", files)
+	}
+	if files[1].Name != "*scratch*" || !files[1].Dirty {
+		t.Fatalf("open-buffers second file = %+v", files[1])
+	}
+	if calls := one.recorded(); len(calls) != 0 {
+		t.Fatalf("the snapshot scopes ran remote commands: %+v", calls)
+	}
+}
+
+func remoteBatchFiles(batches []searchpanel.SearchBatch) []searchpanel.FileMatches {
+	var files []searchpanel.FileMatches
+	for _, b := range batches {
+		files = append(files, b.Files...)
+	}
+	return files
+}
+
+// TestRemoteSearchPreviewHeadAndErrors: the remote preview reads a bounded head through
+// the authority with an honest truncated flag, uses the open buffer's text without a
+// remote read, and reports a disconnected authority as an error (never a local read).
+func TestRemoteSearchPreviewHeadAndErrors(t *testing.T) {
+	fs := newRemoteFS()
+	big := strings.Repeat("line\n", remoteSearchPreviewHeadBytes/5+2000)
+	fs.put("/remote/w/big.txt", big)
+	fs.put("/remote/w/small.txt", "a\nb\nc\n")
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	res, err := s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/big.txt", Name: "big.txt", Line: 3, EndLine: 3, EndCol: 8, Start: -1, Lines: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Truncated || len(res.Lines) != 5 || res.Total <= 0 {
+		t.Fatalf("big preview = truncated %v lines %d total %d", res.Truncated, len(res.Lines), res.Total)
+	}
+	if strings.Contains(res.Lines[0], "line") == false {
+		t.Fatalf("big preview line = %q", res.Lines[0])
+	}
+	res, err = s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/small.txt", Name: "small.txt", Line: 2, EndLine: 2, EndCol: 2, Start: -1, Lines: 2,
+	})
+	if err != nil || res.Truncated || strings.Join(res.Lines, "|") != "b|c" {
+		t.Fatalf("small preview = %+v, %v", res, err)
+	}
+	// An open buffer's text (already in the panel) is used as is, even with the authority down.
+	fs.setErr(errors.New("remote workspace is disconnected"))
+	res, _ = s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/big.txt", Name: "big.txt", Text: "x\ntodo\n", Line: 2, EndLine: 2, EndCol: 6, Start: -1, Lines: 2,
+	})
+	if res.Err != "" || strings.Join(res.Lines, "|") != "x|todo" {
+		t.Fatalf("open-buffer preview = %+v", res)
+	}
+	res, _ = s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/big.txt", Name: "big.txt", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 2,
+	})
+	if !strings.Contains(res.Err, "disconnected") {
+		t.Fatalf("disconnected preview err = %q", res.Err)
 	}
 }

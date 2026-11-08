@@ -92,6 +92,9 @@ type pluginState struct {
 	// started is set once the runtime has been started (Init), and readySent once `ready`
 	// has been queued.
 	started, readySent bool
+	// shared, when non-nil, is the daemon-wide host mux this model is bound into: the
+	// runtime is shared with every workspace, so this model must not Stop it.
+	shared *PluginShared
 
 	// tracking is set while the editor's change tracking is on for buffer_changed.
 	tracking bool
@@ -131,9 +134,13 @@ type pluginState struct {
 
 // newPluginState returns the plugin state for the ports; Plugins may be nil.
 func newPluginState(m *Model, ports RootPorts) pluginState {
-	p := pluginState{rt: ports.Plugins, pe: ports.PluginEditor}
-	if p.rt != nil {
+	p := pluginState{rt: ports.Plugins, pe: ports.PluginEditor, shared: ports.PluginShared}
+	if ports.PluginShared != nil {
+		p.host = ports.PluginShared.host
+	} else if p.rt != nil {
 		p.host = &pluginHost{m: m}
+	}
+	if p.rt != nil {
 		p.decor = decorStoreOf(ports.PluginEditor)
 	}
 	return p
@@ -283,6 +290,10 @@ func (m *Model) pluginInit() tea.Cmd {
 // pluginStop stops the runtime: it runs the shutdown handlers, kills the processes the
 // plugins started and flushes their state. Close calls it before the dock closes.
 func (m *Model) pluginStop() {
+	if m.plug.shared != nil {
+		// One runtime for the daemon: its lifecycle is the daemon's, not a workspace's.
+		return
+	}
 	if rt := m.plug.rt; rt != nil {
 		rt.Stop()
 	}

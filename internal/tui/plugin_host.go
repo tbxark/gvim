@@ -22,6 +22,19 @@ import (
 type pluginHost struct {
 	pluginapi.Unsupported
 	m *Model
+	// shared, when set, is the daemon-wide host mux: m is nil and the active model is
+	// looked up on every call, so one runtime's host calls route to whichever workspace
+	// model is active (#19b shared-runtime slice).
+	shared *PluginShared
+}
+
+// model is the model a host call routes to: the shared mux's active model, or the owning
+// model of a direct launch.
+func (h *pluginHost) model() *Model {
+	if h.shared != nil {
+		return h.shared.Active()
+	}
+	return h.m
 }
 
 var _ pluginapi.Host = (*pluginHost)(nil)
@@ -39,7 +52,7 @@ func (h *pluginHost) Feature(name string) bool {
 }
 
 func (h *pluginHost) ed() pluginapi.BufferEditor {
-	if pe := h.m.plug.pe; pe != nil {
+	if pe := h.model().plug.pe; pe != nil {
 		return pe
 	}
 	return pluginapi.Unsupported{}
@@ -141,14 +154,14 @@ func (h *pluginHost) tabIndex(id pluginapi.BufferID) int {
 // Activate makes buffer id the active tab.
 func (h *pluginHost) Activate(id pluginapi.BufferID) error {
 	err := h.ed().Activate(id)
-	h.m.syncViewport()
+	h.model().syncViewport()
 	return err
 }
 
 // Close closes the tab of buffer id. A tab that closes updates the split leaves and
 // stops its saves, as close_tab does.
 func (h *pluginHost) Close(id pluginapi.BufferID, force bool) error {
-	m := h.m
+	m := h.model()
 	i := h.tabIndex(id)
 	path := m.tabPath(i)
 	before := len(m.ed.Tabs())
@@ -169,7 +182,7 @@ func (h *pluginHost) MoveTab(id pluginapi.BufferID, delta int) error {
 		return err
 	}
 	if to := h.tabIndex(id); from >= 0 && to >= 0 && to != from {
-		h.m.tabMoved(from, to)
+		h.model().tabMoved(from, to)
 	}
 	return nil
 }
@@ -228,7 +241,7 @@ type pluginRevertedMsg struct {
 // Open opens a file. It validates and defers; the open happens after the slice, and the
 // result is the BufferID.
 func (h *pluginHost) Open(t pluginapi.Token, r pluginapi.OpenRequest) error {
-	m := h.m
+	m := h.model()
 	if r.Path == "" {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "open: empty path")
 	}
@@ -291,7 +304,7 @@ func (m *Model) openFinished(t pluginapi.Token, r pluginapi.OpenRequest, prev pl
 // Save saves buffer id, to path when it is not empty. It validates and defers, so
 // Model.save and the before_file_save veto run with no Lua on the stack.
 func (h *pluginHost) Save(t pluginapi.Token, id pluginapi.BufferID, path string) error {
-	m := h.m
+	m := h.model()
 	info, ok := h.ed().Buffer(id)
 	if !ok {
 		return pluginapi.Errf(pluginapi.CodeClosed, "buffer %d is closed", id)
@@ -385,7 +398,7 @@ func (m *Model) pluginSaved(msg pluginSavedMsg) tea.Cmd {
 // Revert reloads buffer id from its file, discarding its changes. It validates and
 // defers.
 func (h *pluginHost) Revert(t pluginapi.Token, id pluginapi.BufferID) error {
-	m := h.m
+	m := h.model()
 	info, ok := h.ed().Buffer(id)
 	if !ok {
 		return pluginapi.Errf(pluginapi.CodeClosed, "buffer %d is closed", id)
@@ -431,7 +444,7 @@ func (m *Model) pluginReverted(msg pluginRevertedMsg) tea.Cmd {
 }
 
 // CancelWait forgets the wait t: its result is dropped when it arrives.
-func (h *pluginHost) CancelWait(t pluginapi.Token) { h.m.plugCancelWait(t) }
+func (h *pluginHost) CancelWait(t pluginapi.Token) { h.model().plugCancelWait(t) }
 
 // ---- pluginapi.UIHost: what the root owns.
 
@@ -440,7 +453,7 @@ func (h *pluginHost) CancelWait(t pluginapi.Token) { h.m.plugCancelWait(t) }
 // one update (the loader reports every plugin that failed to load): the loader's are joined
 // on the status row, a plugin's own replaces it, and each is kept in the log as it comes.
 func (h *pluginHost) Notify(plugin string, level pluginapi.Level, msg string) {
-	m := h.m
+	m := h.model()
 	msg = cleanText(msg)
 	switch {
 	case msg == "":
@@ -478,7 +491,7 @@ func (h *pluginHost) Notify(plugin string, level pluginapi.Level, msg string) {
 // SetClipboard puts text on the clipboard the way a copy does. Calls in one slice are
 // coalesced: only the last text is written, once, by the pump (S13-3).
 func (h *pluginHost) SetClipboard(text string) {
-	m := h.m
+	m := h.model()
 	ui := &m.plug.ui
 	ui.clip = text
 	if ui.clipQueued {
@@ -494,7 +507,7 @@ func (h *pluginHost) SetClipboard(text string) {
 
 // Focus gives the keyboard to the editor or the explorer.
 func (h *pluginHost) Focus(area string) error {
-	m := h.m
+	m := h.model()
 	switch area {
 	case "editor":
 		m.focusEditor()
@@ -510,14 +523,14 @@ func (h *pluginHost) Focus(area string) error {
 }
 
 // ScreenSize is the size of the frame in cells.
-func (h *pluginHost) ScreenSize() (w, ht int) { return h.m.width, h.m.height }
+func (h *pluginHost) ScreenSize() (w, ht int) { return h.model().width, h.model().height }
 
 // OwnerGone removes what plugin registered in the root. Each area drops its own state:
 // the commands here, the others in plugin_<area>.go. The Host calls carry no plugin, so
 // a wait cannot be matched to its owner here; the runtime drops the completions of a
 // dead generation instead.
 func (h *pluginHost) OwnerGone(plugin string, gen uint64) {
-	m := h.m
+	m := h.model()
 	m.dropCommands(plugin)
 	m.plugKeysGone(plugin, gen)
 	m.plugPanelsGone(plugin, gen)
@@ -536,14 +549,14 @@ func (h *pluginHost) OwnerGone(plugin string, gen uint64) {
 // ---- pluginapi.WorkspaceHost.
 
 // Root is the workspace root, or "" when there is no explorer.
-func (h *pluginHost) Root() string { return h.m.rootDir() }
+func (h *pluginHost) Root() string { return h.model().rootDir() }
 
 // Files is the file index snapshot, at most limit entries (all when limit <= 0).
 func (h *pluginHost) Files(limit int) (files []string, loading bool) {
-	if h.m.files == nil {
+	if h.model().files == nil {
 		return nil, false
 	}
-	files, loading = h.m.files.Snapshot()
+	files, loading = h.model().files.Snapshot()
 	if limit > 0 && len(files) > limit {
 		files = files[:limit]
 	}
@@ -552,7 +565,7 @@ func (h *pluginHost) Files(limit int) (files []string, loading bool) {
 
 // Config returns one of the effective settings a plugin may read, by its config name.
 func (h *pluginHost) Config(key string) (any, bool) {
-	m := h.m
+	m := h.model()
 	s := m.util.settings
 	switch key {
 	case "theme":
@@ -596,7 +609,7 @@ func (h *pluginHost) Config(key string) (any, bool) {
 
 // Theme names the active theme and says whether its editor background is dark.
 func (h *pluginHost) Theme() pluginapi.ThemeInfo {
-	th := h.m.effectiveTheme()
+	th := h.model().effectiveTheme()
 	return pluginapi.ThemeInfo{Name: th.Name, Dark: th.Dark()}
 }
 
@@ -607,7 +620,7 @@ func (h *pluginHost) ThemeColor(key string) (r, g, b uint8, ok bool) {
 	if !found {
 		return 0, 0, 0, false
 	}
-	c, ok := h.m.effectiveTheme().Value(section, name)
+	c, ok := h.model().effectiveTheme().Value(section, name)
 	if !ok {
 		return 0, 0, 0, false
 	}
@@ -623,12 +636,12 @@ func (h *pluginHost) ThemeNames() []string { return theme.Names() }
 
 // ThemeOverrides returns the session color overrides and whether any are set.
 func (h *pluginHost) ThemeOverrides() (map[string]string, bool) {
-	over := h.m.ThemeOverrides()
+	over := h.model().ThemeOverrides()
 	return over, len(over) > 0
 }
 
 // SetThemeOverrides replaces the session color overrides. An empty map clears
 // them. A bad key or value is an error and keeps the current look.
 func (h *pluginHost) SetThemeOverrides(overrides map[string]string) error {
-	return h.m.SetThemeOverrides(overrides)
+	return h.model().SetThemeOverrides(overrides)
 }

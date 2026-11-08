@@ -42,8 +42,9 @@ var remoteGrepSkipDirs = []string{".git", "node_modules", "target", "__pycache__
 // with the remote workspace as cwd. The local project search is never consulted.
 type remoteSearch struct {
 	one      authority.OneShot
-	root     string        // absolute remote workspace root
-	timeout  time.Duration // bounds one search run (remoteSearchTimeout unless a test says otherwise)
+	files    authority.FileSystem // for the preview head; nil in tests that do not preview
+	root     string               // absolute remote workspace root
+	timeout  time.Duration        // bounds one search run (remoteSearchTimeout unless a test says otherwise)
 	spawnEnv func() []string
 }
 
@@ -53,6 +54,12 @@ func newRemoteProjectSearch(one authority.OneShot, root string, spawnEnv ...func
 	if len(spawnEnv) > 0 {
 		s.spawnEnv = spawnEnv[0]
 	}
+	return s
+}
+
+// withFiles installs the authority file system the preview column reads through.
+func (s *remoteSearch) withFiles(files authority.FileSystem) *remoteSearch {
+	s.files = files
 	return s
 }
 
@@ -114,15 +121,16 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
 		return
 	}
-	// Only the project-files scope maps to a remote directory walk; the open-buffer and
-	// current-file scopes are local snapshot concepts and are not wired remotely.
-	if req.Scope != searchpanel.AllFiles {
-		send(searchpanel.SearchBatch{Done: true, Err: "project search in a remote workspace searches project files; this scope is not available remotely"})
-		return
-	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = searchpanel.DefaultLimit
+	}
+	// The current-file and open-buffers scopes search the editor's remote document
+	// snapshots (the authority loaded them; unsaved text included): no local disk is read
+	// and no remote process is started.
+	if req.Scope == searchpanel.CurrentFile || req.Scope == searchpanel.OpenBuffers {
+		s.searchSnapshots(req, q, limit, cancelled, send)
+		return
 	}
 	// The panel hands the file index snapshot (already filtered by its glob), so results
 	// outside it are skipped; an empty snapshot (index not ready) searches the whole remote
@@ -392,7 +400,7 @@ func (s *remoteSearch) run(ctx context.Context, cwd string, argv []string) (host
 // replace adapter reads and write each file through the authority file system (atomic
 // remote writes), never through the local disk; gate is the workspace trust gate.
 func installRemoteSearchPorts(ports *tui.RootPorts, one authority.OneShot, files authority.FileSystem, gate func(ctx context.Context, argv []string, cwd string) error, root, label string, spawnEnv func() []string) {
-	ports.ProjectSearch = newRemoteProjectSearch(one, root, spawnEnv)
+	ports.ProjectSearch = newRemoteProjectSearch(one, root, spawnEnv).withFiles(files)
 	ports.GitGrep = newRemoteGitGrep(one, root, spawnEnv)
 	ports.ProjectReplace = newRemoteProjectReplacer(files, gate, root, label)
 }

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,7 +151,17 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 // the user. A saved file with no unsaved text that fails is left out silently, as
 // before.
 func RestoreSession(ed *editor.Editor, dir string, s session.Session) []Unrestored {
-	return restoreFiles(ed, dir, s, false)
+	return restoreFiles(ed, dir, s, false, nil)
+}
+
+// RestoreSessionAccess is RestoreSession with an existence probe for the saved files. A
+// daemon-hosted remote workspace passes a probe over the authority file system, because
+// the saved paths live on the remote host and must not be stat'ed locally; nil keeps the
+// local os.Stat behavior. Everything after the probe (opening, stash, cursor, view) goes
+// through the editor and its installed file access, so the restore is remote when the
+// editor's is.
+func RestoreSessionAccess(ed *editor.Editor, dir string, s session.Session, exists func(path string) bool) []Unrestored {
+	return restoreFiles(ed, dir, s, false, exists)
 }
 
 // RestoreHotExit opens only the tabs of s that carry unsaved text: the stashed
@@ -159,23 +170,34 @@ func RestoreSession(ed *editor.Editor, dir string, s session.Session) []Unrestor
 // explorer state are skipped, but in-progress work comes back. The saved active
 // tab is not applied, because most of the saved tabs are not opened.
 func RestoreHotExit(ed *editor.Editor, dir string, s session.Session) []Unrestored {
+	return restoreHotExitFiles(ed, dir, s, nil)
+}
+
+// RestoreHotExitAccess is RestoreHotExit with a remote existence probe (see
+// RestoreSessionAccess).
+func RestoreHotExitAccess(ed *editor.Editor, dir string, s session.Session, exists func(path string) bool) []Unrestored {
+	return restoreHotExitFiles(ed, dir, s, exists)
+}
+
+// restoreHotExitFiles opens only the tabs that carry unsaved text.
+func restoreHotExitFiles(ed *editor.Editor, dir string, s session.Session, exists func(path string) bool) []Unrestored {
 	var hot session.Session
 	for _, f := range s.Files {
 		if f.StashFile != "" || f.OverlayFile != "" {
 			hot.Files = append(hot.Files, f)
 		}
 	}
-	return restoreFiles(ed, dir, hot, false)
+	return restoreFiles(ed, dir, hot, false, exists)
 }
 
 // restoreFiles is RestoreSession. With replace set, the stashed edits of a large file
 // replace the ones that the document holds already: the copy is newer than what the
 // editor restored before (see editor.ReplaceOverlay).
-func restoreFiles(ed *editor.Editor, dir string, s session.Session, replace bool) []Unrestored {
+func restoreFiles(ed *editor.Editor, dir string, s session.Session, replace bool, exists func(path string) bool) []Unrestored {
 	var failed []Unrestored
 	active := -1
 	for i, f := range s.Files {
-		opened, err := restoreFile(ed, dir, f, replace)
+		opened, err := restoreFile(ed, dir, f, replace, exists)
 		if err != nil {
 			if f.StashFile != "" || f.OverlayFile != "" {
 				failed = append(failed, Unrestored{File: f, Err: err, Stash: filepath.Join(dir, cmp.Or(f.OverlayFile, f.StashFile))})
@@ -204,7 +226,7 @@ func restoreFiles(ed *editor.Editor, dir string, s session.Session, replace bool
 // stash and is reported. The edits wait for the line index when it has not reached the
 // lines they refer to (see editor.RestoreOverlay). With replace set, the stash replaces
 // the edits the document holds already (see restoreFiles).
-func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace bool) (bool, error) {
+func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace bool, exists func(path string) bool) (bool, error) {
 	text := ""
 	if f.StashFile != "" {
 		t, err := session.ReadStash(dir, f.StashFile)
@@ -224,7 +246,14 @@ func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace boo
 	if f.Path == "" {
 		ed.Do("new", nil)
 	} else {
-		_, statErr := os.Stat(f.Path)
+		var statErr error
+		if exists != nil {
+			if !exists(f.Path) {
+				statErr = fs.ErrNotExist
+			}
+		} else {
+			_, statErr = os.Stat(f.Path)
+		}
 		if statErr != nil && overlay != nil {
 			return false, fmt.Errorf("%s no longer exists; its stashed changes were kept", filepath.Base(f.Path))
 		}

@@ -390,6 +390,52 @@ func (e *stateEntry) flush() {
 
 // ---------- workspace-scoped state (#19b slice)
 
+// queueWorkspaceWrite writes one snapshot of a workspace state namespace to path. Used when
+// a namespace is left: the content captured at the switch is written to ITS file, whereas
+// writes of the new namespace go to the new path.
+func (io *ioRuntime) queueWorkspaceWrite(path string, data []byte) {
+	r := io.r
+	if path == "" || len(data) == 0 {
+		return
+	}
+	if len(data) > maxStateFile {
+		r.logf("", levelWarn, fmt.Sprintf("workspace plugin state is larger than %d bytes; not saved", maxStateFile))
+		return
+	}
+	tok := r.newToken()
+	r.expectRuntime(tok, func(c pluginapi.Completion) {
+		if c.Err != "" {
+			r.logf("", levelWarn, "saving workspace plugin state: "+c.Err)
+		}
+	})
+	osys := r.os
+	r.work = append(r.work, pluginapi.Work{Token: tok, Ctx: context.Background(), Run: func(ctx context.Context) pluginapi.Completion {
+		if err := writeStateFile(ctx, osys, path, data, nil, nil); err != nil {
+			return pluginapi.Completion{Token: tok, Err: errString(err)}
+		}
+		return pluginapi.Completion{Token: tok}
+	}})
+}
+
+// wsSwitch leaves the current workspace state namespace and enters the next one. The old
+// namespace's pending content is queued to its file (as Work, never blocking the caller);
+// its in-memory entries are dropped and the new namespace's seed becomes the store. A
+// pending debounce of the old namespace is disarmed (its completion finds no dirty state of
+// the new namespace and writes nothing).
+func (io *ioRuntime) wsSwitch(path string, st *WorkspaceState, readOnly bool) {
+	if io.wsPath != "" && io.wsDirty {
+		data := io.wsSnapshot()
+		io.wsDirty = false
+		io.wsArmed = false
+		io.queueWorkspaceWrite(io.wsPath, data)
+	}
+	io.wsPath, io.wsReadOnly = path, readOnly
+	io.wsDirty, io.wsArmed, io.wsBusy = false, false, false
+	io.wsSeq.Add(1)
+	io.states = map[string]*stateEntry{}
+	io.seedWorkspace(st)
+}
+
 // seedWorkspace loads the parsed workspace state into the plugin entries. It runs when the
 // runtime first touches its IO state (on Start/plugin load, on the UI goroutine) and does no
 // IO: the app read and parsed the file off the update loop. Values over the per-plugin quota

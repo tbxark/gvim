@@ -2,6 +2,8 @@ package tui
 
 import (
 	"strings"
+
+	tea "charm.land/bubbletea/v2"
 	"testing"
 
 	"github.com/tbxark/gvim/theme"
@@ -93,4 +95,46 @@ func TestRemoteExplorerDisconnectedNotice(t *testing.T) {
 	}
 	// The cached rows stay visible, so the reconnect can refresh them.
 	wantRemoteRows(t, tree, "proj", "cmd", "main.go")
+}
+
+// TestRemoteExplorerLoadNoticeSurfaced checks a degraded loader notice (unsupported
+// directory watching or incomplete ignore filtering) reaches the status row through the
+// remote tree load handler.
+func TestRemoteExplorerLoadNoticeSurfaced(t *testing.T) {
+	loader := remoteTreeTestLoader()
+	loader.mu.Lock()
+	loader.notice = "remote directory watching is not supported by this backend; refresh manually (Ctrl+R)"
+	loader.mu.Unlock()
+	m, tree := remoteExplorerModel(t, loader)
+	_, _ = m.Update(remoteTreeLoadedMsg{tree: tree})
+	if !strings.Contains(m.notice, "not supported by this backend") {
+		t.Fatalf("notice = %q, want the loader degradation notice", m.notice)
+	}
+	if got := tree.TakeLoadNotice(); got != "" {
+		t.Fatalf("the notice was not consumed once: %q", got)
+	}
+}
+
+// TestRemoteWatchEventRefreshesTheTree checks a directory-watch event schedules the remote
+// tree reload in a command (the event itself reads nothing on the update loop), completing
+// the watch -> refresh path for the remote explorer.
+func TestRemoteWatchEventRefreshesTheTree(t *testing.T) {
+	loader := remoteTreeTestLoader()
+	m, tree := remoteExplorerModel(t, loader)
+	applyRemoteInitial(t, tree)
+	before := loader.callCount()
+	cmd := func() tea.Cmd {
+		_, c := m.Update(watchMsg{dirs: []string{"/srv/proj"}})
+		return c
+	}()
+	if cmd == nil {
+		t.Fatal("a watch event scheduled no tree refresh")
+	}
+	if loader.callCount() != before {
+		t.Fatalf("the watch handler read remote directories (%d -> %d)", before, loader.callCount())
+	}
+	_ = cmd()
+	if loader.callCount() <= before {
+		t.Fatal("the scheduled refresh did not list the remote tree")
+	}
 }
