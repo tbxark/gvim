@@ -70,7 +70,7 @@ func TestShowOpensClosedPopupAndResetsHighlight(t *testing.T) {
 		t.Fatal("a new popup is open")
 	}
 	p.Show(Point{1, 1}, "T", items(3))
-	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	p.Show(Point{1, 1}, "T", items(3))
 	if !p.Active() || p.Selected() != 0 {
 		t.Fatalf("after Show: active=%v selected=%d, want true and 0", p.Active(), p.Selected())
@@ -98,7 +98,7 @@ func TestKeysMoveAndChoose(t *testing.T) {
 			p.Show(Point{0, 0}, "T", items(3))
 			var chosen []tea.Msg
 			for _, k := range tt.keys {
-				if cmd := p.Update(k); cmd != nil {
+				if cmd := p.update(k); cmd != nil {
 					chosen = append(chosen, cmd())
 				}
 			}
@@ -128,7 +128,7 @@ func TestKeysMoveAndChoose(t *testing.T) {
 func TestChosenCarriesItemData(t *testing.T) {
 	p := New(Styles{})
 	p.Show(Point{0, 0}, "T", []Item{{Label: "a", Detail: "d", Data: 42}})
-	cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cmd := p.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := cmd().(Chosen)
 	if got.Item.Data != 42 || got.Item.Detail != "d" {
 		t.Fatalf("chosen item = %+v, want the data and detail passed to Show", got.Item)
@@ -138,7 +138,7 @@ func TestChosenCarriesItemData(t *testing.T) {
 func TestEnterWithNoItemsKeepsPopupOpen(t *testing.T) {
 	p := New(Styles{})
 	p.Show(Point{0, 0}, "T", nil)
-	if cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
+	if cmd := p.update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
 		t.Fatalf("emitted a command for an empty popup")
 	}
 	if !p.Active() {
@@ -164,7 +164,7 @@ func TestClickChoosesRowAndClickOutsideCloses(t *testing.T) {
 			g := grid.New(40, 10)
 			p.Draw(g)
 			var chosen tea.Msg
-			if cmd := p.Update(tea.MouseClickMsg(tea.Mouse{X: tt.x, Y: tt.y, Button: tea.MouseLeft})); cmd != nil {
+			if cmd := p.update(tea.MouseClickMsg(tea.Mouse{X: tt.x, Y: tt.y, Button: tea.MouseLeft})); cmd != nil {
 				chosen = cmd()
 			}
 			if p.Active() != tt.wantOpen {
@@ -210,7 +210,7 @@ func TestDrawScrollsToKeepHighlightVisible(t *testing.T) {
 	g := grid.New(20, 5) // three item rows fit between the borders
 	p.Draw(g)
 	for range 5 {
-		p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		p.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	g = grid.New(20, 5)
 	p.Draw(g)

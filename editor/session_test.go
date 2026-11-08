@@ -147,8 +147,8 @@ func TestAtomicSaveNewFileGetsDefaultMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != newFileMode {
-		t.Fatalf("mode of new file = %o, want %o", got, newFileMode)
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("mode of new file = %o, want 644", got)
 	}
 	assertNoTempFiles(t, dir)
 }

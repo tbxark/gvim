@@ -96,7 +96,7 @@ func settle(t *testing.T, p *Palette, cmd tea.Cmd, limit int) {
 		if cmd == nil {
 			return
 		}
-		cmd = p.Update(cmd())
+		cmd = p.update(cmd())
 	}
 	if cmd != nil {
 		t.Fatalf("palette still asks for work after %d steps", limit)
@@ -207,14 +207,14 @@ func TestLineModeExplainsAQueryThatIsNotALine(t *testing.T) {
 			if !hasRow(draw(p, 100, 30), tt.message) {
 				t.Errorf("box does not show %q", tt.message)
 			}
-			if cmd := p.Update(key(tea.KeyEnter)); cmd != nil || !p.Active() {
+			if cmd := p.update(key(tea.KeyEnter)); cmd != nil || !p.Active() {
 				t.Errorf("Enter on the message: cmd=%v active=%v, want nil and still open", cmd, p.Active())
 			}
 		})
 	}
 	p := New(Options{Query: ":12"})
 	settle(t, p, p.Init(), 4)
-	if cmd := p.Update(key(tea.KeyEnter)); cmd == nil || p.Active() {
+	if cmd := p.update(key(tea.KeyEnter)); cmd == nil || p.Active() {
 		t.Error("a valid line no longer jumps and closes")
 	}
 }
@@ -225,7 +225,7 @@ func TestFileModeWithoutRankerShowsLoading(t *testing.T) {
 	if !hasRow(g, "Loading files…") {
 		t.Fatal("file mode without a Ranker does not show the loading row")
 	}
-	if cmd := p.Update(key(tea.KeyEnter)); cmd != nil || p.Active() {
+	if cmd := p.update(key(tea.KeyEnter)); cmd != nil || p.Active() {
 		t.Errorf("Enter on the loading row: cmd=%v active=%v, want nil and closed", cmd, p.Active())
 	}
 }
@@ -237,7 +237,7 @@ func TestFileModeRanksAndOpensUnderRoot(t *testing.T) {
 	draw(p, 100, 30)
 	settle(t, p, p.Init(), 4)
 	for _, c := range "b" {
-		settle(t, p, p.Update(typed(string(c))), 4)
+		settle(t, p, p.update(typed(string(c))), 4)
 	}
 	if r.limit != fileLimit {
 		t.Errorf("ranker limit = %d, want %d", r.limit, fileLimit)
@@ -246,7 +246,7 @@ func TestFileModeRanksAndOpensUnderRoot(t *testing.T) {
 	if !hasRow(g, "b.txt") || !hasRow(g, "src/bb.go") {
 		t.Fatalf("matches not shown:\n%s", g)
 	}
-	cmd := p.Update(key(tea.KeyEnter))
+	cmd := p.update(key(tea.KeyEnter))
 	want := OpenFileMsg{Path: "/work/b.txt", Rel: "b.txt"}
 	if got := runCmd(cmd); got != want {
 		t.Errorf("Enter emitted %#v, want %#v", got, want)
@@ -260,7 +260,7 @@ func TestFileRowsUpdateWhenTheIndexFinishes(t *testing.T) {
 	files := &fakeFiles{loading: true}
 	p := New(Options{Query: "a", Files: files, Ranker: &fakeRanker{}})
 	draw(p, 100, 30)
-	step := p.Update(runCmd(p.Init()))
+	step := p.update(runCmd(p.Init()))
 	if g := draw(p, 100, 30); !hasRow(g, "Loading files…") {
 		t.Fatal("running index with no match does not show the loading row")
 	}
@@ -286,7 +286,7 @@ func TestFileRankingRunsInACommandNotInUpdateOrDraw(t *testing.T) {
 	if got := r.calls.Load(); got != 0 {
 		t.Fatalf("New ranked %d times, want 0 until Init runs", got)
 	}
-	cmd := p.Update(typed("f"))
+	cmd := p.update(typed("f"))
 	draw(p, 100, 30)
 	if got := r.calls.Load(); got != 0 {
 		t.Fatalf("typing ranked %d times in Update and Draw, want 0", got)
@@ -302,7 +302,7 @@ func TestFileRankingRunsInACommandNotInUpdateOrDraw(t *testing.T) {
 	if got := r.calls.Load(); got != 1 {
 		t.Fatalf("ranker calls after the command = %d, want 1", got)
 	}
-	p.Update(msg)
+	p.update(msg)
 	if len(p.rows) == 0 || p.rows[0].kind != rowFile {
 		t.Fatalf("result did not become file rows: %+v", p.rows)
 	}
@@ -312,10 +312,10 @@ func TestStaleFileResultIsDropped(t *testing.T) {
 	files := &fakeFiles{files: []string{"a.txt", "ab.go"}}
 	p := New(Options{Files: files, Ranker: &fakeRanker{}})
 	draw(p, 100, 30)
-	first := p.Update(typed("a"))
-	second := p.Update(typed("b"))
-	p.Update(runCmd(second)) // the newer query lands first
-	p.Update(runCmd(first))  // the older one arrives late and must not win
+	first := p.update(typed("a"))
+	second := p.update(typed("b"))
+	p.update(runCmd(second)) // the newer query lands first
+	p.update(runCmd(first))  // the older one arrives late and must not win
 	if len(p.rows) != 1 || p.rows[0].name != "ab.go" {
 		t.Fatalf("rows = %+v, want only ab.go for the query \"ab\"", p.rows)
 	}
@@ -325,11 +325,11 @@ func TestFileRowsStayUntilTheNewResultArrives(t *testing.T) {
 	p := New(Options{Files: &fakeFiles{files: []string{"a.txt", "b.txt"}}, Ranker: &fakeRanker{}})
 	draw(p, 100, 30)
 	settle(t, p, p.Init(), 4)
-	cmd := p.Update(typed("b"))
+	cmd := p.update(typed("b"))
 	if len(p.rows) != 2 {
 		t.Fatalf("rows before the new result = %d, want the 2 from the old query", len(p.rows))
 	}
-	p.Update(runCmd(cmd))
+	p.update(runCmd(cmd))
 	if len(p.rows) != 1 || p.rows[0].name != "b.txt" {
 		t.Fatalf("rows after the result = %+v, want b.txt", p.rows)
 	}
@@ -356,7 +356,7 @@ func TestCommandEnterRunsTheAction(t *testing.T) {
 	if p.rows[0].action != "save" {
 		t.Fatalf("first row action = %q, want save", p.rows[0].action)
 	}
-	if got := runCmd(p.Update(key(tea.KeyEnter))); got != (RunCommandMsg{Action: "save"}) {
+	if got := runCmd(p.update(key(tea.KeyEnter))); got != (RunCommandMsg{Action: "save"}) {
 		t.Errorf("Enter emitted %#v, want RunCommandMsg save", got)
 	}
 	if p.Active() {
@@ -378,7 +378,7 @@ func TestDisabledCommandDoesNotRunAndStaysOpen(t *testing.T) {
 		t.Fatal("precondition: no disabled row in the matches")
 	}
 	p.nav.Select(disabled)
-	if cmd := p.Update(key(tea.KeyEnter)); cmd != nil || !p.Active() {
+	if cmd := p.update(key(tea.KeyEnter)); cmd != nil || !p.Active() {
 		t.Errorf("Enter on a disabled row: cmd=%v active=%v, want nil and open", cmd, p.Active())
 	}
 	g := draw(p, 100, 30)
@@ -392,7 +392,7 @@ func TestDisabledCommandDoesNotRunAndStaysOpen(t *testing.T) {
 func TestEnterWithNoRowsCloses(t *testing.T) {
 	p := New(commandOptions(">zzzqqq", nil))
 	draw(p, 100, 30)
-	if cmd := p.Update(key(tea.KeyEnter)); cmd != nil || p.Active() {
+	if cmd := p.update(key(tea.KeyEnter)); cmd != nil || p.Active() {
 		t.Errorf("Enter with no rows: cmd=%v active=%v, want nil and closed", cmd, p.Active())
 	}
 }
@@ -403,7 +403,7 @@ func TestLineModeGoesToLineAndColumn(t *testing.T) {
 	if !hasRow(g, "Go to line 12") {
 		t.Fatal("line row not shown")
 	}
-	if got := runCmd(p.Update(key(tea.KeyEnter))); got != (GotoLineMsg{Line: 12, Col: 3}) {
+	if got := runCmd(p.update(key(tea.KeyEnter))); got != (GotoLineMsg{Line: 12, Col: 3}) {
 		t.Errorf("Enter emitted %#v, want GotoLineMsg{12, 3}", got)
 	}
 }
@@ -415,7 +415,7 @@ func TestBufferModeActivatesTheMatchingTab(t *testing.T) {
 	if len(p.rows) != 1 || p.rows[0].name != "b.txt" {
 		t.Fatalf("rows = %+v, want only b.txt", p.rows)
 	}
-	if got := runCmd(p.Update(key(tea.KeyEnter))); got != (ActivateBufferMsg{Index: 1}) {
+	if got := runCmd(p.update(key(tea.KeyEnter))); got != (ActivateBufferMsg{Index: 1}) {
 		t.Errorf("Enter emitted %#v, want ActivateBufferMsg{1}", got)
 	}
 
@@ -431,7 +431,7 @@ func TestClickRunsTheRowUnderThePointer(t *testing.T) {
 	p := New(commandOptions(">Save File", st))
 	draw(p, 100, 30)
 	geo := layoutFor(100, 30)
-	got := runCmd(p.Update(click(10, geo.top+1)))
+	got := runCmd(p.update(click(10, geo.top+1)))
 	if got != (RunCommandMsg{Action: "save"}) {
 		t.Errorf("click emitted %#v, want RunCommandMsg save", got)
 	}
@@ -455,7 +455,7 @@ func TestClicksOutsideTheRowsDoNotDismiss(t *testing.T) {
 		tea.MouseClickMsg(tea.Mouse{X: 10, Y: geo.top + 1, Button: tea.MouseRight}),
 	}
 	for _, m := range misses {
-		if cmd := p.Update(m); cmd != nil || !p.Active() {
+		if cmd := p.update(m); cmd != nil || !p.Active() {
 			t.Errorf("click %+v: cmd=%v active=%v, want nil and open", m, cmd, p.Active())
 		}
 	}
@@ -463,7 +463,7 @@ func TestClicksOutsideTheRowsDoNotDismiss(t *testing.T) {
 
 func TestClickBeforeDrawChangesNothing(t *testing.T) {
 	p := New(commandOptions(">Save File", nil))
-	if cmd := p.Update(click(10, 17)); cmd != nil || !p.Active() {
+	if cmd := p.update(click(10, 17)); cmd != nil || !p.Active() {
 		t.Errorf("click before the first Draw: cmd=%v active=%v", cmd, p.Active())
 	}
 }
@@ -474,7 +474,7 @@ func TestWheelScrollsThreeRowsAndKeepsTheHighlight(t *testing.T) {
 	if first, count := p.nav.Window(); first != 0 || count != maxRows {
 		t.Fatalf("window = %d+%d, want 0+%d", first, count, maxRows)
 	}
-	p.Update(wheel(tea.MouseWheelDown))
+	p.update(wheel(tea.MouseWheelDown))
 	g := draw(p, 100, 30)
 	if first, _ := p.nav.Window(); first != wheelRows {
 		t.Errorf("after one notch down, first = %d, want %d", first, wheelRows)
@@ -485,8 +485,8 @@ func TestWheelScrollsThreeRowsAndKeepsTheHighlight(t *testing.T) {
 	if p.nav.Selected() != 0 {
 		t.Errorf("wheel moved the highlight to %d", p.nav.Selected())
 	}
-	p.Update(wheel(tea.MouseWheelUp))
-	p.Update(wheel(tea.MouseWheelUp))
+	p.update(wheel(tea.MouseWheelUp))
+	p.update(wheel(tea.MouseWheelUp))
 	draw(p, 100, 30)
 	if first, _ := p.nav.Window(); first != 0 {
 		t.Errorf("scrolling above the top: first = %d, want 0", first)
@@ -497,11 +497,11 @@ func TestHoverMovesTheHighlightOnlyOverRows(t *testing.T) {
 	p := New(Options{Query: ">Cmd", Commands: fakeCommands(5)})
 	draw(p, 100, 30)
 	geo := layoutFor(100, 30)
-	p.Update(tea.MouseMotionMsg(tea.Mouse{X: 10, Y: geo.top + 3}))
+	p.update(tea.MouseMotionMsg(tea.Mouse{X: 10, Y: geo.top + 3}))
 	if p.nav.Selected() != 2 {
 		t.Errorf("hover on row 2: highlight = %d, want 2", p.nav.Selected())
 	}
-	p.Update(tea.MouseMotionMsg(tea.Mouse{X: 10, Y: 0}))
+	p.update(tea.MouseMotionMsg(tea.Mouse{X: 10, Y: 0}))
 	if p.nav.Selected() != 2 {
 		t.Errorf("hover off the box moved the highlight to %d", p.nav.Selected())
 	}
@@ -510,16 +510,16 @@ func TestHoverMovesTheHighlightOnlyOverRows(t *testing.T) {
 func TestArrowKeysMoveAndTypingResetsTheHighlight(t *testing.T) {
 	p := New(Options{Query: ">Cmd", Commands: fakeCommands(5)})
 	draw(p, 100, 30)
-	p.Update(key(tea.KeyUp))
+	p.update(key(tea.KeyUp))
 	if p.nav.Selected() != 0 {
 		t.Errorf("Up at the top moved to %d", p.nav.Selected())
 	}
-	p.Update(key(tea.KeyDown))
-	p.Update(key(tea.KeyDown))
+	p.update(key(tea.KeyDown))
+	p.update(key(tea.KeyDown))
 	if p.nav.Selected() != 2 {
 		t.Errorf("two Downs: highlight = %d, want 2", p.nav.Selected())
 	}
-	p.Update(typed("1"))
+	p.update(typed("1"))
 	if p.nav.Selected() != 0 {
 		t.Errorf("typing did not return the highlight to the top: %d", p.nav.Selected())
 	}
@@ -529,14 +529,14 @@ func TestEscIsNotHandledByThePalette(t *testing.T) {
 	p := New(commandOptions(">Save", nil))
 	draw(p, 100, 30)
 	before := p.input.Value()
-	if cmd := p.Update(key(tea.KeyEscape)); cmd != nil || !p.Active() || p.input.Value() != before {
+	if cmd := p.update(key(tea.KeyEscape)); cmd != nil || !p.Active() || p.input.Value() != before {
 		t.Errorf("Esc changed the palette: cmd=%v active=%v query=%q", cmd, p.Active(), p.input.Value())
 	}
 }
 
 func TestPasteInsertsIntoTheQuery(t *testing.T) {
 	p := New(commandOptions(">", nil))
-	p.Update(tea.PasteMsg{Content: "save"})
+	p.update(tea.PasteMsg{Content: "save"})
 	if got := p.input.Value(); got != ">save" {
 		t.Errorf("query after paste = %q, want >save", got)
 	}
@@ -545,8 +545,8 @@ func TestPasteInsertsIntoTheQuery(t *testing.T) {
 func TestClosedPaletteIgnoresInput(t *testing.T) {
 	p := New(Options{Query: ":3"})
 	draw(p, 100, 30)
-	p.Update(key(tea.KeyEnter))
-	if cmd := p.Update(typed("x")); cmd != nil || p.Active() {
+	p.update(key(tea.KeyEnter))
+	if cmd := p.update(typed("x")); cmd != nil || p.Active() {
 		t.Errorf("closed palette: cmd=%v active=%v", cmd, p.Active())
 	}
 	draw(p, 100, 30)
@@ -557,8 +557,8 @@ func TestSmallFramesDoNotPanic(t *testing.T) {
 		for h := 0; h <= 6; h++ {
 			p := New(commandOptions(">save", nil))
 			draw(p, w, h)
-			p.Update(click(w/2, h/2))
-			p.Update(wheel(tea.MouseWheelDown))
+			p.update(click(w/2, h/2))
+			p.update(wheel(tea.MouseWheelDown))
 			draw(p, w, h)
 		}
 	}

@@ -8,9 +8,8 @@
 // (the highlight and the visible window) is palette.Palette's.
 //
 // Palette runs no action. A chosen row closes the palette and emits one of the
-// messages in this package, which the root handles. Overlay.Update returns the
-// ui type, which this package cannot name without importing ui, so the root
-// wraps *Palette in a small adapter that forwards Update, Draw and Active.
+// messages in this package, which the root handles. *Palette implements
+// overlay.Overlay directly, so the root stacks it without an adapter.
 package palette
 
 import (
@@ -25,9 +24,13 @@ import (
 	commands "github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
 )
+
+// The palette is an overlay of the root's stack.
+var _ overlay.Overlay = (*Palette)(nil)
 
 const (
 	// fileLimit is how many matches the file mode asks the Ranker for. It is
@@ -268,7 +271,7 @@ func (p *Palette) Init() tea.Cmd {
 // chosen or a click ran one, and after an Enter with no rows.
 func (p *Palette) Active() bool { return p.open }
 
-// Update handles one key or mouse message. Keys edit the query and move the
+// update handles one key or mouse message. Keys edit the query and move the
 // highlight; Enter runs the highlighted row. A left click runs the row under the
 // pointer, and a click anywhere else is swallowed, so it does not dismiss the
 // palette. The wheel scrolls the box by wheelRows and hovering moves the
@@ -277,7 +280,7 @@ func (p *Palette) Active() bool { return p.open }
 // A file query is ranked by a command, and its result comes back as a
 // FileRankedMsg, which Update applies. The returned command emits the message of
 // the chosen row, if the row has one, or the next ranking step of the file mode.
-func (p *Palette) Update(msg tea.Msg) tea.Cmd {
+func (p *Palette) update(msg tea.Msg) tea.Cmd {
 	if !p.open {
 		return nil
 	}
@@ -313,6 +316,16 @@ func (p *Palette) Update(msg tea.Msg) tea.Cmd {
 		return p.edit(msg)
 	}
 	return nil
+}
+
+// Update handles one message through the overlay contract: it runs update and
+// returns the palette, or nil once it is closed so the stack pops it.
+func (p *Palette) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
+	cmd := p.update(msg)
+	if !p.Active() {
+		return nil, cmd
+	}
+	return p, cmd
 }
 
 // Draw paints the box, the hint row and the query line over g. It records the

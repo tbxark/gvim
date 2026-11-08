@@ -22,6 +22,6 @@ func (m *Model) openLiveGrep(query string) tea.Cmd {
 		Grep:  g,
 		Theme: m.theme,
 	})
-	m.pushOverlay(paletteOverlay{p: p})
+	m.pushOverlay(p)
 	return p.Init()
 }

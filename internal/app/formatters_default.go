@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/tbxark/gvim/config"
-	"github.com/tbxark/gvim/syntax"
 )
 
 // defaultFormatter is one entry of Fresh's built-in formatter table
@@ -64,34 +63,3 @@ func formattersFor(cfg config.Config, lookPath func(string) (string, error)) map
 
 // lookPath is how the program finds formatters. A variable so that a test may replace it.
 var lookPath = exec.LookPath
-
-// formatterLanguageCache bounds the file names whose language newFileLanguage remembers.
-const formatterLanguageCache = 1024
-
-// fileLanguage returns the language of the file at path as the highlighter names it, in
-// lower case ("go" for main.go), or "" for plain text. It reads the name only.
-func fileLanguage(path string) string {
-	if n := strings.ToLower(syntax.Detect(path, nil).Config().Name); n != "" && !isPlainLexer(n) {
-		return n
-	}
-	return ""
-}
-
-// newFileLanguage returns fileLanguage with its results remembered per path, because the
-// editor asks for the language of the active file on every menu check. The map is cleared
-// when it grows past formatterLanguageCache names. The function is not safe for concurrent
-// use: the editor calls it from the update loop only.
-func newFileLanguage() func(path string) string {
-	known := make(map[string]string)
-	return func(path string) string {
-		if lang, ok := known[path]; ok {
-			return lang
-		}
-		if len(known) >= formatterLanguageCache {
-			clear(known)
-		}
-		lang := fileLanguage(path)
-		known[path] = lang
-		return lang
-	}
-}

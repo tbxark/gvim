@@ -9,6 +9,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/internal/uitest"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/theme"
@@ -24,7 +25,7 @@ func startEmptyApp(t *testing.T, w, h int) *uitest.Session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := tui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
+	m := tui.New(uiadapter.NewDeps(ed, keymap.Default(), th, nil, nil))
 	return uitest.Start(t, m, w, h)
 }
 
@@ -48,7 +49,7 @@ func startFilesApp(t *testing.T, w, h int, names ...string) *uitest.Session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := tui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
+	m := tui.New(uiadapter.NewDeps(ed, keymap.Default(), th, nil, nil))
 	return uitest.Start(t, m, w, h)
 }
 

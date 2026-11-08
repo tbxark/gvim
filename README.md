@@ -24,13 +24,17 @@ The module has three layers.
 - `internal/` holds the executable shell. Nothing outside this module can import it, and
   no top-level package of the module imports it either.
   - `internal/app`: the composition root (`Options`, `Run`, `buildRuntime` in `run.go`);
-    the only package that imports the concrete adapters, the TUI sub-packages and the
-    plugin runtime.
+    the only package that imports the host packages and the plugin runtime.
+  - host packages: `internal/uiadapter` (engine → TUI ports), `internal/pluginhost` (the
+    Lua runtime host), `internal/lsphost` (language-server port), `internal/restore`
+    (session + crash recovery), `internal/keybindings` (keymap adapter and user
+    bindings), `internal/highlight` (syntax-span cache); `internal/apptest` is test-only.
   - `internal/cli`: the cobra command tree; hands `app.Options` to a `Runner`.
   - `internal/tui`: the single Bubble Tea root model (`ports.go` defines its interfaces,
     `layout.go` is the geometry source for painting and hit testing). Sub-packages:
-    `editorpane`, `menubar`, `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`,
-    `popup`, `ctxmenu`, `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`.
+    `overlay` and `list` (the shared overlay contract and list/box kit), `editorpane`,
+    `menubar`, `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`,
+    `ctxmenu`, `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`.
   - `internal/terminal`: runs a program in a pseudo-terminal and keeps a model of its
     screen (the dock backend).
   - `internal/filewatch`: the fsnotify watcher behind the file tree and reloads.
@@ -42,7 +46,8 @@ The module has three layers.
 
 - Text: `buffer` (text model and its large-file mode), `editor` (documents, tabs, edits,
   motions, save/revert), `search`, `syntax`, `fold`, `diff`, `encoding`, `session`,
-  `decorations`, `textlayout`.
+  `decorations`, `textlayout`; `atomicfile` (atomic file replace) and `shellcmd` (run one
+  program with a timeout) are the shared leaves.
 - Project and files: `workspace`, `explorer`, `finder`, `fuzzy`, `fsops`, `gitstate`.
 - Settings: `config`, `keymap`, `theme`.
 - Services: `lsp`, `pluginapi` (plugin contract), `plugin` (Lua runtime, with

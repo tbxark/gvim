@@ -1,6 +1,9 @@
-// Package space holds the spacing system of the terminal UI: the paddings and
-// margins that components share, so a bar, a menu, a popup and a dialog breathe
-// the same way and narrow terminals give the room back in one place.
+// Package space holds the spacing and text-fitting system of the terminal UI:
+// the paddings and margins that components share, so a bar, a menu, a popup and
+// a dialog breathe the same way and narrow terminals give the room back in one
+// place, and the helpers that fit text to a cell budget (End, Tail, Middle,
+// Path, Name, Wrap, Window and PadTo). Rect is the shared rectangle type of the
+// layout and of the overlay kits.
 //
 // The rules, in cells:
 //

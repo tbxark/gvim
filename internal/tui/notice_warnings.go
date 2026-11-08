@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/space"
 )
 
@@ -81,16 +82,16 @@ func (m *Model) showWarnings() {
 		m.quietNotice("No warnings this session")
 		return
 	}
-	rows := make([]listRow, 0, len(m.notes.items))
+	rows := make([]list.Row, 0, len(m.notes.items))
 	for _, v := range slices.Backward(m.notes.items) {
-		rows = append(rows, listRow{left: v})
+		rows = append(rows, list.Row{Left: v})
 	}
-	v := newListView("Warnings", rows, m.listChrome(), func(_ *listView, r listRow) tea.Cmd {
-		text := r.left
+	v := list.New("Warnings", rows, m.listChrome(), func(_ *list.View, r list.Row) tea.Cmd {
+		text := r.Left
 		return func() tea.Msg { return warningDetailMsg{text: text} }
 	})
-	v.maxW, v.cut = warningsMaxWidth, warningText
-	m.pushOverlay(listOverlay{v: v})
+	v.MaxW, v.Cut = warningsMaxWidth, warningText
+	m.pushOverlay(v)
 }
 
 // warningText fits a warning to room cells for its row. A warning reads as a path, then
@@ -139,15 +140,11 @@ type warningDetailMsg struct{ text string }
 // openWarningDetail shows text, wrapped, in a box over the Warnings list. Enter or Esc
 // closes it.
 func (m *Model) openWarningDetail(text string) {
-	v := &boxView{
-		active: true,
-		chrome: m.listChrome(),
-		content: func() (string, []string, string) {
-			return "Warning", space.Wrap(text, boxTextWidth(m.width), maxDetailRows), "Enter or Esc close"
-		},
-		onKey: func(k tea.Key) bool { return k.Code == tea.KeyEnter },
-	}
-	m.pushOverlay(boxOverlay{v: v})
+	v := list.NewTextBox(m.listChrome(), func() (string, []string, string) {
+		return "Warning", space.Wrap(text, boxTextWidth(m.width), maxDetailRows), "Enter or Esc close"
+	})
+	v.OnKey = func(k tea.Key) bool { return k.Code == tea.KeyEnter }
+	m.pushOverlay(v)
 }
 
 // maxDetailRows caps the rows of the warning box. The box is centred and never taller
@@ -155,9 +152,9 @@ func (m *Model) openWarningDetail(text string) {
 const maxDetailRows = 20
 
 // boxTextWidth is the cells a line of a text box has in a frame w cells wide: the box
-// (boxMaxWidth, kept two cells inside each edge) less its border and padding.
+// (list.BoxMaxWidth, kept two cells inside each edge) less its border and padding.
 func boxTextWidth(w int) int {
-	return max(min(boxMaxWidth, w-4)-4, 1)
+	return max(min(list.BoxMaxWidth, w-4)-4, 1)
 }
 
 // clearWarnings drops the notices kept.

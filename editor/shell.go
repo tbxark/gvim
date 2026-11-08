@@ -1,19 +1,16 @@
 package editor
 
 import (
-	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/diff"
+	"github.com/tbxark/gvim/shellcmd"
 )
 
 // shellTimeout bounds one shell command. It is a variable so that a test can
@@ -147,7 +144,7 @@ func RunShellJob(job ShellJob) (string, error) {
 	if timeout <= 0 {
 		timeout = shellTimeout
 	}
-	return execShell(job.Dir, job.Command, job.Input, timeout)
+	return shellcmd.Run(job.Dir, job.Command, job.Input, timeout)
 }
 
 // EndShell applies the result of a job from BeginShell and RunShellJob, with out
@@ -224,45 +221,4 @@ func shellDir(d *Document) string {
 		return ""
 	}
 	return wd
-}
-
-// execShell runs command with sh -c in dir, with input on its standard input,
-// and returns its standard output with CRLF breaks turned into LF. A non-zero
-// exit, a timeout, or output that is not UTF-8 is an error.
-func execShell(dir, command, input string, timeout time.Duration) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Dir = dir
-	cmd.Stdin = strings.NewReader(input)
-	cmd.WaitDelay = time.Second
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	// A background child can hold the output open after the shell has exited 0.
-	// Wait then returns exec.ErrWaitDelay, and the command still succeeded.
-	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
-		err = nil
-	}
-	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("shell command timed out after %s", timeout)
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		msg := fmt.Sprintf("shell command failed: exit status %d", exitErr.ExitCode())
-		if s := strings.TrimSpace(stderr.String()); s != "" {
-			first, _, _ := strings.Cut(s, "\n")
-			msg += ": " + first
-		}
-		return "", errors.New(msg)
-	}
-	if err != nil {
-		return "", fmt.Errorf("shell command: %w", err)
-	}
-	if !utf8.Valid(stdout.Bytes()) {
-		return "", errors.New("shell command output is not valid UTF-8")
-	}
-	out, _ := splitLineEnding(stdout.String())
-	return out, nil
 }

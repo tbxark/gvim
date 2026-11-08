@@ -218,9 +218,9 @@ func topBrowser(t *testing.T, m *Model) *browser.Browser {
 	if len(m.overlays) == 0 {
 		t.Fatal("no overlay is open")
 	}
-	o, ok := m.overlays[len(m.overlays)-1].(browserOverlay)
+	o, ok := m.overlays[len(m.overlays)-1].(*browser.Browser)
 	if !ok {
 		t.Fatalf("top overlay is %T, want the browser", m.overlays[len(m.overlays)-1])
 	}
-	return o.b
+	return o
 }

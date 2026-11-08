@@ -15,11 +15,19 @@ import (
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/internal/filewatch"
+	"github.com/tbxark/gvim/internal/highlight"
+	"github.com/tbxark/gvim/internal/keybindings"
+	"github.com/tbxark/gvim/internal/lsphost"
+	"github.com/tbxark/gvim/internal/pluginhost"
+	"github.com/tbxark/gvim/internal/restore"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/find"
 	"github.com/tbxark/gvim/internal/tui/icons"
+	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/session"
+	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 	"github.com/tbxark/gvim/workspace"
 )
@@ -43,7 +51,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	if opts.SessionDir == "" {
-		if dir, err := defaultSessionDir(); err == nil {
+		if dir, err := restore.DefaultSessionDir(); err == nil {
 			opts.SessionDir = dir
 		}
 	}
@@ -91,7 +99,7 @@ func (r *runtime) exit() {
 	if err := r.save(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: session:", err)
 	} else if r.recovery != "" && (!r.interrupted || r.sessionDir != "") {
-		if clearRecovery(r.recovery) == nil {
+		if restore.ClearRecovery(r.recovery) == nil {
 			_ = os.RemoveAll(r.recovery)
 		}
 	}
@@ -108,7 +116,7 @@ func (r *runtime) exit() {
 type runtime struct {
 	model      *tui.Model
 	ed         *editor.Editor
-	projects   *projectOpener
+	projects   *uiadapter.Projects
 	watcher    *filewatch.Watcher // nil when no watch was started
 	sessionDir string             // empty when the session is neither restored nor saved
 	searchDir  string             // where the find history and toggles are kept; empty for nowhere
@@ -132,7 +140,7 @@ type runtime struct {
 
 // close stops the file index of the current root and the watcher.
 func (r *runtime) close() {
-	r.projects.close()
+	r.projects.Close()
 	if r.watcher != nil {
 		_ = r.watcher.Close()
 	}
@@ -144,7 +152,7 @@ func (r *runtime) save() error {
 	if r.sessionDir == "" {
 		return nil
 	}
-	return writeSession(r.ed, r.sessionDir, r.model.ExplorerState(), r.kept)
+	return restore.WriteSession(r.ed, r.sessionDir, r.model.ExplorerState(), r.kept)
 }
 
 // saveSearch writes the find histories and toggles to the session directory. They
@@ -224,7 +232,7 @@ func buildModel(ctx context.Context, opts Options) (*tui.Model, *finder.Index, e
 	if err != nil {
 		return nil, nil, err
 	}
-	return rt.model, rt.projects.index, nil
+	return rt.model, rt.projects.Index(), nil
 }
 
 // buildRuntime opens the files and returns the runtime that shows them, with the
@@ -263,15 +271,15 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	edOpts.SessionDir = opts.SessionDir
 	ed := newEditor(edOpts)
 	ed.SetFormatters(formattersFor(cfg, lookPath))
-	ed.SetLanguageNamer(newFileLanguage())
+	ed.SetLanguageNamer(syntax.CachedFileLanguage())
 	ed.SetLanguageSettings(languageSettings(cfg))
-	ed.SetStringContext(newStringContext())
-	ed.SetNonCodeContext(newNonCodeContext())
+	ed.SetStringContext(highlight.NewStringContext())
+	ed.SetNonCodeContext(highlight.NewNonCodeContext())
 	ed.SetEphemeralFilePatterns(cfg.EphemeralFilePatterns)
 	ed.SetRulers(cfg.Rulers)
 	var sess session.Session
 	restored := false
-	var failed []unrestored
+	var failed []restore.Unrestored
 	if len(opts.Files) == 0 && opts.SessionDir != "" {
 		s, ok, err := session.Load(opts.SessionDir)
 		switch {
@@ -279,7 +287,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: session:", err)
 		case ok:
 			sess, restored = s, true
-			failed = restoreSession(ed, opts.SessionDir, s)
+			failed = restore.RestoreSession(ed, opts.SessionDir, s)
 			tree.SetShowHidden(s.ShowHidden)
 			tree.SetShowIgnored(s.ShowIgnored)
 		}
@@ -311,8 +319,8 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if opts.Diff && len(ed.Tabs()) != 2 {
 		return nil, errors.New("--diff needs two different files")
 	}
-	recPort, recEvery := recoveryPort(ed, cfg, opts.SessionDir, watching)
-	recNotice := recoverFromCrash(ed, opts.SessionDir, watching, recPort)
+	recPort, recEvery := restore.RecoveryPort(ed, cfg, opts.SessionDir, watching)
+	recNotice := restore.RecoverFromCrash(ed, opts.SessionDir, watching, recPort)
 	choice, err := runKeymap(opts.Keymap, cfg)
 	if err != nil {
 		return nil, err
@@ -322,29 +330,29 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if err != nil {
 		return nil, err
 	}
-	files := startFiles(ctx, root)
+	files := uiadapter.StartFiles(ctx, root)
 	watcher, events := startWatcher(watching)
-	proj := newProjectOpener(ctx, watcher, root, files)
+	proj := uiadapter.NewProjects(ctx, watcher, root, files)
 	logFile, logNotice := startLogFile(opts.LogFile, diags)
 	if logFile != nil {
 		opts.pluginLog = logFile.Plugin
 	}
-	deps := newUIDeps(ed, km, th, tree, files)
+	deps := uiadapter.NewDeps(ed, km, th, tree, files)
 	if logFile != nil {
 		deps.NoticeSink = logFile.Notice
 	}
-	adapter, _ := deps.Editor.(editorAdapter)
-	if adapter.spans != nil {
-		adapter.spans.setContext(cfg.HighlightContextBytes)
+	adapter, _ := deps.Editor.(*uiadapter.Editor)
+	if adapter != nil {
+		adapter.SetContext(cfg.HighlightContextBytes)
 	}
 	deps.Settings = settingsFor(opts, cfg)
 	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
 	deps.Settings.IconsMode, deps.Settings.IconsWhy = icon.Mode.String(), icon.Why
 	deps.Settings.Keymap = choice.name
-	keys := newKeybindingStore(deps.Settings.ConfigFile, cfg)
-	liveCfg := func() config.Config { return keys.current(cfg) }
+	keys := keybindings.NewStore(deps.Settings.ConfigFile, cfg)
+	liveCfg := func() config.Config { return keys.Current(cfg) }
 	deps.SwitchKeymap = switchKeymapWith(liveCfg)
-	deps.LSP = newLSPPortFor(cfg)
+	deps.LSP = lsphost.NewFor(cfg)
 	// A folder argument shows the explorer at startup. Without one the explorer
 	// stays hidden until Ctrl+B, unless the session had it open.
 	deps.ShowExplorer = opts.Root != "" || (restored && sess.Explorer)
@@ -356,10 +364,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.Root = tui.RootPorts{
 		Projects: proj,
 		Grep:     grepFor(edOpts),
-		Git:      gitStatus{},
+		Git:      uiadapter.GitStatus{},
 		Watch:    events,
 		AutoSave: interval,
-		Stashes:  stashesFor(opts.SessionDir),
+		Stashes:  uiadapter.StashesFor(opts.SessionDir),
 	}
 	deps.Root.Keybindings = keys
 	deps.Root.AutoRevertPoll = autoRevertPoll(cfg)
@@ -370,10 +378,27 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		deps.Root.WatchDirs = watcher
 	}
 	// The plugin runtime is always wired. With --no-plugins its loader is disabled.
-	pw := newPluginRuntime(adapter, cfg, opts, presetKeymap(opts.Keymap, cfg), proj.rootDir)
-	deps.Root.Plugins = pw.rt
-	deps.Root.PluginEditor = pw.edit
-	deps.Root.PluginKeys = pw.keys
+	var markEdited func(*editor.Document)
+	if adapter != nil {
+		markEdited = adapter.MarkEdited
+	}
+	pw := pluginhost.New(cfg, ed, markEdited, pluginhost.Options{
+		Paths:    opts.PluginPaths,
+		Disabled: opts.NoPlugins,
+		LogSink:  opts.pluginLog,
+		Version:  gvimVersion(),
+		Preset:   presetKeymap(opts.Keymap, cfg),
+		Root:     proj.RootDir,
+	})
+	deps.Root.Plugins = pw.Runtime
+	deps.Root.PluginEditor = pw.Editor
+	deps.Root.PluginKeys = func(name string, bs []pluginapi.Binding) (tui.Keymap, error) {
+		km, err := pw.Keys(name, bs)
+		if km == nil {
+			return nil, err
+		}
+		return keybindings.NewKeymap(km), err
+	}
 	// Notice is the first config problem, then any session file whose unsaved
 	// text was kept, for the status row. Every warning still goes to stderr,
 	// before the alternate screen starts.
@@ -381,7 +406,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// how many there are and where to read them when there are more.
 	problems := configProblems(diags, choice.warnings)
 	var notices []string
-	if n := configNotice(problems); n != "" {
+	if n := keybindings.Notice(problems); n != "" {
 		notices = append(notices, n)
 	}
 	deps.Warnings = append(problems, choice.replaced...)
@@ -389,7 +414,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if logNotice != "" {
 		notices = append(notices, logNotice)
 	}
-	if n := restoreNotice(failed); n != "" {
+	if n := restore.RestoreNotice(failed); n != "" {
 		notices = append(notices, n)
 	}
 	if recNotice != "" {
@@ -401,7 +426,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.Notice = strings.Join(notices, "; ")
 	model := newUI(deps)
 	loadSearch(model, opts.SessionDir)
-	model.SetDock(tui.DockPorts{Starter: termStarter{ctx: ctx}, Clipboard: systemClipboard{}})
+	model.SetDock(tui.DockPorts{Starter: uiadapter.NewTermStarter(ctx), Clipboard: uiadapter.SystemClipboard{}})
 	if opts.Diff {
 		// The two files are in tabs 0 and 1: the tab count was checked before recovery.
 		model.OpenCompare(0, 1)
@@ -421,7 +446,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		searchDir:  opts.SessionDir,
 		stashDir:   opts.SessionDir,
 		kept:       keptFiles(failed),
-		recovery:   recoveryDirFor(opts.SessionDir, watching),
+		recovery:   restore.RecoveryDirFor(opts.SessionDir, watching),
 
 		recoveryWriter: deps.Root.Recovery,
 		log:            logFile,
@@ -431,17 +456,17 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 }
 
 // keptFiles returns the files of failed, in order, for the session save to list.
-func keptFiles(failed []unrestored) []session.FileState {
+func keptFiles(failed []restore.Unrestored) []session.FileState {
 	files := make([]session.FileState, len(failed))
 	for i, u := range failed {
-		files[i] = u.file
+		files[i] = u.File
 	}
 	return files
 }
 
 // startWatcher starts a file watcher when watching is set. It returns the watcher
 // and its event channel, and both are nil when no watcher runs. The watcher is
-// pointed at the tree root by newProjectOpener. A watcher that cannot start is a
+// pointed at the tree root by NewProjects. A watcher that cannot start is a
 // warning on stderr, and the tree then reloads only on Ctrl+R.
 func startWatcher(watching bool) (*filewatch.Watcher, <-chan filewatch.Changed) {
 	if !watching {
@@ -510,20 +535,20 @@ func runKeymap(flag string, cfg config.Config) (keymapChoice, error) {
 		name = cfg.Keymap
 	}
 	var warnings []string
-	km, err := keymapFor(name)
+	km, err := keybindings.Keymap(name)
 	if err != nil {
 		if flag != "" {
 			return keymapChoice{}, err
 		}
-		err = fmt.Errorf("%w (valid keymaps: %s); using the %s keymap", err, strings.Join(builtinKeymaps, ", "), keymap.DefaultName())
+		err = fmt.Errorf("%w (valid keymaps: %s); using the %s keymap", err, strings.Join(keybindings.BuiltinKeymaps, ", "), keymap.DefaultName())
 		warnings = append(warnings, inConfigFile(cfg, "keymap", err).Error())
 		km, name = keymap.Default(), ""
 	}
 	if name == "" {
 		name = keymap.DefaultName()
 	}
-	warnings = append(warnings, keybindingWarnings(cfg)...)
-	return keymapChoice{km: keymapWithOverrides(km, cfg), name: name, warnings: warnings, replaced: replacedBindings(km, cfg)}, nil
+	warnings = append(warnings, keybindings.Warnings(cfg)...)
+	return keymapChoice{km: keybindings.ApplyOverrides(km, cfg), name: name, warnings: warnings, replaced: keybindings.Replaced(km, cfg)}, nil
 }
 
 // presetKeymap returns the built-in keymap a session starts from, before the user's
@@ -534,7 +559,7 @@ func presetKeymap(flag string, cfg config.Config) *keymap.Map {
 	if name == "" {
 		name = cfg.Keymap
 	}
-	if km, err := keymapFor(name); err == nil {
+	if km, err := keybindings.Keymap(name); err == nil {
 		return km
 	}
 	return keymap.Default()
@@ -551,11 +576,11 @@ func switchKeymapFor(cfg config.Config) func(name string) (tui.Keymap, error) {
 // the keybinding editor changes the keybindings during the session.
 func switchKeymapWith(cfgNow func() config.Config) func(name string) (tui.Keymap, error) {
 	return func(name string) (tui.Keymap, error) {
-		km, err := keymapFor(name)
+		km, err := keybindings.Keymap(name)
 		if err != nil {
 			return nil, err
 		}
-		return keymapAdapter{km: keymapWithOverrides(km, cfgNow())}, nil
+		return keybindings.NewKeymap(keybindings.ApplyOverrides(km, cfgNow())), nil
 	}
 }
 
@@ -654,15 +679,6 @@ func resolveRoot(dir string) (string, error) {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning:", err)
 	}
 	return r.Path(), nil
-}
-
-// keymapFor returns the named built-in keymap. An empty name is the platform
-// default.
-func keymapFor(name string) (*keymap.Map, error) {
-	if name == "" {
-		return keymap.Default(), nil
-	}
-	return keymap.ByName(name)
 }
 
 // printDiagnostics writes one warning line to w for each config problem. Loading

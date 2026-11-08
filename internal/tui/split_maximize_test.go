@@ -22,7 +22,7 @@ func TestToggleMaximizeShowsOnlyTheFocusedPane(t *testing.T) {
 	if l.panes[0].rect != (rect{}) {
 		t.Errorf("the unfocused pane has area %v, want none", l.panes[0].rect)
 	}
-	if want := (rect{0, 2, 80, 21}); l.panes[1].rect != want {
+	if want := (rect{X: 0, Y: 2, W: 80, H: 21}); l.panes[1].rect != want {
 		t.Errorf("the focused pane is %v, want the whole band %v", l.panes[1].rect, want)
 	}
 	if len(l.borders) != 0 {
@@ -30,7 +30,7 @@ func TestToggleMaximizeShowsOnlyTheFocusedPane(t *testing.T) {
 	}
 
 	runAction(t, m, "toggle_maximize_split")
-	want := []rect{{0, 2, 40, 21}, {41, 2, 39, 21}}
+	want := []rect{{X: 0, Y: 2, W: 40, H: 21}, {X: 41, Y: 2, W: 39, H: 21}}
 	if got := paneRects(m.layout()); !slices.Equal(got, want) {
 		t.Errorf("after the second toggle: panes %v, want %v", got, want)
 	}
@@ -46,7 +46,7 @@ func TestMaximizedPaneFollowsTheFocus(t *testing.T) {
 	runAction(t, m, "next_split") // the left pane takes the focus, and is the one shown
 
 	l := m.layout()
-	if l.focus != 0 || l.panes[0].rect != (rect{0, 2, 80, 21}) || l.panes[1].rect != (rect{}) {
+	if l.focus != 0 || l.panes[0].rect != (rect{X: 0, Y: 2, W: 80, H: 21}) || l.panes[1].rect != (rect{}) {
 		t.Errorf("after next_split: focus %d, panes %v, want the left pane alone", l.focus, paneRects(l))
 	}
 }
@@ -62,7 +62,7 @@ func TestSplitWhileMaximizedRestoresEveryPane(t *testing.T) {
 		t.Fatalf("%d panes and %d lines, want 3 and 2", len(l.panes), len(l.borders))
 	}
 	for i, p := range l.panes {
-		if p.w <= 0 || p.h <= 0 {
+		if p.W <= 0 || p.H <= 0 {
 			t.Errorf("pane %d has no area after the split: %v", i, p.rect)
 		}
 	}
@@ -74,7 +74,7 @@ func TestMaximizeWithOnePaneSaysSo(t *testing.T) {
 	if m.notice != "Only one split is open" {
 		t.Errorf("notice = %q, want the one split notice", m.notice)
 	}
-	if got := paneRects(m.layout()); !slices.Equal(got, []rect{{0, 2, 80, 21}}) {
+	if got := paneRects(m.layout()); !slices.Equal(got, []rect{{X: 0, Y: 2, W: 80, H: 21}}) {
 		t.Errorf("panes = %v, want the whole band", got)
 	}
 }

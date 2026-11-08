@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/syntax"
 )
 
@@ -54,7 +55,7 @@ func (m *Model) openLanguages() {
 		}
 	}
 	names := append([]string{"Plain Text"}, syntax.Languages()...)
-	rows := make([]listRow, len(names))
+	rows := make([]list.Row, len(names))
 	for i, n := range names {
 		value := n
 		if i == 0 {
@@ -64,14 +65,14 @@ func (m *Model) openLanguages() {
 		if strings.EqualFold(current, value) {
 			right = "current"
 		}
-		rows[i] = listRow{left: n, right: right, value: value}
+		rows[i] = list.Row{Left: n, Right: right, Value: value}
 	}
-	v := newListView("Select Language", rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
-		v.active = false
-		return m.dispatch(Command{Action: "set_language", Args: map[string]any{"name": r.value}})
+	v := list.New("Select Language", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		return m.dispatch(Command{Action: "set_language", Args: map[string]any{"name": r.Value}})
 	})
-	v.bestFirst = true
-	m.pushOverlay(listOverlay{v: v})
+	v.BestFirst = true
+	m.pushOverlay(v)
 }
 
 // languageLabel is the language as the status row shows it: plain text is "Text".

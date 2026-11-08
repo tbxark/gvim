@@ -113,6 +113,25 @@ func TestSaveLeavesOnlySessionFile(t *testing.T) {
 	}
 }
 
+func TestSavedFilesArePrivate(t *testing.T) {
+	dir := t.TempDir()
+	if err := session.Save(dir, session.Session{Root: "/work"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SaveSearch(dir, session.Search{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"session.json", "search.json"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("mode of a new %s = %o, want 600", name, got)
+		}
+	}
+}
+
 func TestLoadRejectsUnknownVersion(t *testing.T) {
 	tests := []struct {
 		name    string

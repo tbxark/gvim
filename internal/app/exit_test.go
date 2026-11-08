@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/lsphost"
 	"github.com/tbxark/gvim/internal/tui"
 )
 
@@ -37,7 +38,7 @@ func TestExitSavesTheSessionBeforeStoppingTheServers(t *testing.T) {
 	t.Cleanup(func() { newUI = prevUI })
 	newUI = func(d tui.Deps) *tui.Model {
 		servers := map[string]config.LSPServer{"go": {Command: "gopls"}}
-		d.LSP = stopRecorder{LSPSession: newLSPPort(servers), onStop: func() {
+		d.LSP = stopRecorder{LSPSession: lsphost.New(servers), onStop: func() {
 			_, err := os.Stat(sessionFile)
 			sawSession = err == nil
 		}}

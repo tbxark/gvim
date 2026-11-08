@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // helpKeys is a keymap with a few bindings in three contexts, one action bound
@@ -65,7 +66,7 @@ func TestHelpRowsGroupByContextWithPrimaryShortcuts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var rows []listRow
+			var rows []list.Row
 			if tt.l != nil {
 				rows = helpRows(tt.l, nil)
 			}

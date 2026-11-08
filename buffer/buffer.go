@@ -1,9 +1,3 @@
-// Package buffer implements the text model behind the editor: a list of lines
-// addressed by rune columns, with edits that can be undone and redone.
-//
-// A Buffer is not safe for concurrent use. Every method works on positions
-// that are clamped into the document instead of failing, so callers never
-// need to pre-validate cursor coordinates.
 package buffer
 
 import (

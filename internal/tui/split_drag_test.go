@@ -28,31 +28,31 @@ func TestPressOnABorderDragsItsRatio(t *testing.T) {
 			name:  "a vertical line follows the pointer to the left",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{20, 5},
-			ratio: 25, line: rect{20, 2, 1, 21}, vertical: true,
+			ratio: 25, line: rect{X: 20, Y: 2, W: 1, H: 21}, vertical: true,
 		},
 		{
 			name:  "a vertical line follows the pointer to the right",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{60, 5},
-			ratio: 76, line: rect{60, 2, 1, 21}, vertical: true,
+			ratio: 76, line: rect{X: 60, Y: 2, W: 1, H: 21}, vertical: true,
 		},
 		{
 			name:  "a line dragged past the right edge stops at 90 percent",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{79, 5},
-			ratio: 90, line: rect{71, 2, 1, 21}, vertical: true,
+			ratio: 90, line: rect{X: 71, Y: 2, W: 1, H: 21}, vertical: true,
 		},
 		{
 			name:  "a line dragged past the left edge stops at 10 percent",
 			setup: []string{"split_vertical"},
 			press: [2]int{40, 5}, move: [2]int{0, 5},
-			ratio: 10, line: rect{8, 2, 1, 21}, vertical: true,
+			ratio: 10, line: rect{X: 8, Y: 2, W: 1, H: 21}, vertical: true,
 		},
 		{
 			name:  "a stacked line follows the pointer up",
 			setup: []string{"split_horizontal"},
 			press: [2]int{10, 12}, move: [2]int{10, 7},
-			ratio: 25, line: rect{0, 7, 80, 1}, vertical: false,
+			ratio: 25, line: rect{X: 0, Y: 7, W: 80, H: 1}, vertical: false,
 		},
 	}
 	for _, tt := range tests {
@@ -74,7 +74,7 @@ func TestPressOnABorderDragsItsRatio(t *testing.T) {
 			if len(l.borders) != 1 || l.borders[0].rect != tt.line || l.borders[0].vertical != tt.vertical {
 				t.Fatalf("lines = %+v, want one at %v", l.borders, tt.line)
 			}
-			if got := l.hit(tt.line.x, tt.line.y); got.Kind != hitSplitBorder {
+			if got := l.hit(tt.line.X, tt.line.Y); got.Kind != hitSplitBorder {
 				t.Errorf("hit on the moved line = %+v, want a split border", got)
 			}
 			m.Update(tea.MouseReleaseMsg(tea.Mouse{X: tt.move[0], Y: tt.move[1], Button: tea.MouseLeft}))

@@ -36,17 +36,17 @@ type tabZone struct {
 // Each edge takes a quarter of the extent, at least 3 columns or 2 rows, as Fresh does.
 // Edges come before the centre, and the left and right before the top and bottom.
 func dropEdges(r rect, x, y int) (dropEdge, rect) {
-	tx, ty := max(r.w/4, 3), max(r.h/4, 2)
-	rx, ry := x-r.x, y-r.y
+	tx, ty := max(r.W/4, 3), max(r.H/4, 2)
+	rx, ry := x-r.X, y-r.Y
 	switch {
 	case rx < tx:
-		return dropLeft, rect{r.x, r.y, min(tx, r.w), r.h}
-	case rx >= r.w-tx:
-		return dropRight, rect{r.x + max(r.w-tx, 0), r.y, min(tx, r.w), r.h}
+		return dropLeft, rect{X: r.X, Y: r.Y, W: min(tx, r.W), H: r.H}
+	case rx >= r.W-tx:
+		return dropRight, rect{X: r.X + max(r.W-tx, 0), Y: r.Y, W: min(tx, r.W), H: r.H}
 	case ry < ty:
-		return dropTop, rect{r.x, r.y, r.w, min(ty, r.h)}
-	case ry >= r.h-ty:
-		return dropBottom, rect{r.x, r.y + max(r.h-ty, 0), r.w, min(ty, r.h)}
+		return dropTop, rect{X: r.X, Y: r.Y, W: r.W, H: min(ty, r.H)}
+	case ry >= r.H-ty:
+		return dropBottom, rect{X: r.X, Y: r.Y + max(r.H-ty, 0), W: r.W, H: min(ty, r.H)}
 	}
 	return dropCenter, r
 }
@@ -60,7 +60,7 @@ func (m *Model) dragTabZone(l layout, mo tea.Mouse) {
 		return
 	}
 	for i, p := range l.panes {
-		if !p.contains(mo.X, mo.Y) {
+		if !p.Contains(mo.X, mo.Y) {
 			continue
 		}
 		edge, area := dropEdges(p.rect, mo.X, mo.Y)
@@ -138,8 +138,8 @@ func (m *Model) paintDropZone(g *grid.Grid) {
 	}
 	a := m.drag.tab.zone.area
 	bg := m.styles.Overlay.Selected.BG
-	for y := a.y; y < a.y+a.h; y++ {
-		for x := a.x; x < a.x+a.w; x++ {
+	for y := a.Y; y < a.Y+a.H; y++ {
+		for x := a.X; x < a.X+a.W; x++ {
 			c := g.At(x, y)
 			if c.Text == "" {
 				continue

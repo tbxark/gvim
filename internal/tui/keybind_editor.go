@@ -12,6 +12,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/list"
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/pluginapi"
@@ -90,14 +92,17 @@ type keybindEditor struct {
 	box        rect
 }
 
+// The editor is an overlay of the root's stack.
+var _ Overlay = (*keybindEditor)(nil)
+
 // openKeybindingEditor shows the editor over the active keymap.
 func (m *Model) openKeybindingEditor() {
 	l, _ := m.keys.(BindingLister)
 	if l == nil {
-		v := newListView("Keybinding Editor", nil, m.listChrome(), nil)
-		v.empty = noBindingsText
-		v.hint = readOnlyHint
-		m.pushOverlay(listOverlay{v: v})
+		v := list.New("Keybinding Editor", nil, m.listChrome(), nil)
+		v.Empty = noBindingsText
+		v.Hint = list.ReadOnlyHint
+		m.pushOverlay(v)
 		return
 	}
 	e := &keybindEditor{
@@ -241,7 +246,7 @@ func (e *keybindEditor) pageRows() int {
 	if e.page > 0 {
 		return e.page
 	}
-	return listDefaultPage
+	return list.DefaultPage
 }
 
 func (e *keybindEditor) keepVisible() {
@@ -294,9 +299,9 @@ func (e *keybindEditor) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 		if e.mode == kbList {
 			switch tea.Mouse(msg).Button {
 			case tea.MouseWheelUp:
-				e.move(-listWheelRows)
+				e.move(-list.WheelRows)
 			case tea.MouseWheelDown:
-				e.move(listWheelRows)
+				e.move(list.WheelRows)
 			}
 		}
 	}
@@ -309,10 +314,10 @@ func (e *keybindEditor) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 // rowAt is the index in shown of the row drawn at (x, y) in the last draw.
 func (e *keybindEditor) rowAt(x, y int) (int, bool) {
 	b := e.box
-	if !b.contains(x, y) || y < b.y+2 || y >= b.y+b.h-2 {
+	if !b.Contains(x, y) || y < b.Y+2 || y >= b.Y+b.H-2 {
 		return 0, false
 	}
-	k := e.top + (y - b.y - 2)
+	k := e.top + (y - b.Y - 2)
 	return k, k < len(e.shown)
 }
 
@@ -521,7 +526,7 @@ func (e *keybindEditor) confirmKey(k tea.Key) tea.Cmd {
 
 // canShowForm reports whether the dialog fits in a box of the size of parent.
 func canShowForm(parent rect) bool {
-	return parent.w >= formMinW+4 && parent.h >= formCompactH
+	return parent.W >= formMinW+4 && parent.H >= formCompactH
 }
 
 // startEdit opens the dialog on the highlighted row.
@@ -913,15 +918,15 @@ func kbColumnsFor(inner int) kbColumns {
 
 // Draw paints the table, and the dialog over it.
 func (e *keybindEditor) Draw(g *grid.Grid) {
-	box := centred(g.Width(), g.Height(), 100, listMaxHeight)
+	box := list.Centred(g.Width(), g.Height(), 100, list.MaxHeight)
 	e.box, e.drawn = box, true
-	if box.w == 0 {
+	if box.W == 0 {
 		if e.mode == kbEdit || e.mode == kbRecord {
 			e.mode = kbList
 		}
 		return
 	}
-	e.page = max(box.h-4, 1)
+	e.page = max(box.H-4, 1)
 	e.keepVisible()
 	if (e.mode == kbEdit || e.mode == kbRecord) && !canShowForm(box) {
 		// The dialog cannot be shown, so it must not keep taking keys unseen.
@@ -929,9 +934,9 @@ func (e *keybindEditor) Draw(g *grid.Grid) {
 		e.status, e.failed = "Terminal too small for the dialog", true
 	}
 	ov := e.chrome
-	ov.PaintBox(g, box.x, box.y, box.w, box.h, "Keybinding Editor")
-	end := box.x + box.w - 2
-	x0 := box.x + 2
+	ov.PaintBox(g, box.X, box.Y, box.W, box.H, "Keybinding Editor")
+	end := box.X + box.W - 2
+	x0 := box.X + 2
 	col := kbColumnsFor(end - x0)
 
 	filtering := e.searching || len(e.filter) > 0 || e.keyFilter != "" || e.ctxFilter != "" || e.srcFilter != ""
@@ -939,13 +944,13 @@ func (e *keybindEditor) Draw(g *grid.Grid) {
 	if filtering {
 		head = e.filterLine()
 	} else {
-		head = padCells("Key", col.key) + padCells("Action", col.action)
+		head = space.PadTo("Key", col.key) + space.PadTo("Action", col.action)
 		if col.desc > 0 {
-			head += padCells("Description", col.desc)
+			head += space.PadTo("Description", col.desc)
 		}
-		head += padCells("Context", col.context) + "Source"
+		head += space.PadTo("Context", col.context) + "Source"
 	}
-	g.Put(x0, box.y+1, end, truncateCells(head, end-x0), ov.Muted)
+	g.Put(x0, box.Y+1, end, space.End(head, end-x0), ov.Muted)
 
 	for k := range e.page {
 		idx := e.top + k
@@ -953,26 +958,26 @@ func (e *keybindEditor) Draw(g *grid.Grid) {
 			break
 		}
 		r := e.rows[e.shown[idx]]
-		y := box.y + 2 + k
+		y := box.Y + 2 + k
 		st := ov.Box
 		if idx == e.sel {
 			st = ov.Selected
-			g.Fill(box.x+1, box.x+box.w-1, y, st)
+			g.Fill(box.X+1, box.X+box.W-1, y, st)
 		}
 		action, desc := r.action, e.describe(r.action)
 		if r.action == keymap.ActionNoop {
 			action, desc = keymap.ActionNoop, "(disabled)"
 		}
-		line := padCells(truncateCells(keymap.FormatChord(r.chord), col.key-1), col.key) +
-			padCells(truncateCells(action, col.action-1), col.action)
+		line := space.PadTo(space.End(keymap.FormatChord(r.chord), col.key-1), col.key) +
+			space.PadTo(space.End(action, col.action-1), col.action)
 		if col.desc > 0 {
-			line += padCells(truncateCells(desc, col.desc-1), col.desc)
+			line += space.PadTo(space.End(desc, col.desc-1), col.desc)
 		}
-		line += padCells(truncateCells(r.context, col.context-1), col.context) + e.source(r)
-		g.Put(x0, y, end, truncateCells(line, end-x0), st)
+		line += space.PadTo(space.End(r.context, col.context-1), col.context) + e.source(r)
+		g.Put(x0, y, end, space.End(line, end-x0), st)
 	}
 	if len(e.shown) == 0 {
-		g.Put(x0, box.y+2, end, "No matching bindings", ov.Muted)
+		g.Put(x0, box.Y+2, end, "No matching bindings", ov.Muted)
 	}
 	statusStyle := ov.Muted
 	status := e.status
@@ -984,8 +989,8 @@ func (e *keybindEditor) Draw(g *grid.Grid) {
 	case status == "" && e.dirty():
 		status = "Unsaved changes: Ctrl+S saves them"
 	}
-	g.Put(x0, box.y+box.h-2, end, truncateCells(status, end-x0), statusStyle)
-	g.Put(x0, box.y+box.h-1, end, truncateCells(" "+e.hint(end-x0-2)+" ", end-x0), ov.Muted)
+	g.Put(x0, box.Y+box.H-2, end, space.End(status, end-x0), statusStyle)
+	g.Put(x0, box.Y+box.H-1, end, space.End(" "+e.hint(end-x0-2)+" ", end-x0), ov.Muted)
 	if e.mode == kbEdit || e.mode == kbRecord {
 		e.drawForm(g, box)
 	}
@@ -1070,21 +1075,21 @@ func (e *keybindEditor) drawForm(g *grid.Grid, parent rect) {
 	f := e.form
 	// The dialog sits inside the table's border with a cell to spare on every side, so it never
 	// paints over the border or the title. Short or narrow, it packs its fields.
-	inner := rect{x: parent.x + 1, y: parent.y + 1, w: parent.w - 2, h: parent.h - 2}
-	w, h := min(inner.w-2, 64), formFullH
-	compact := inner.h-2 < formFullH
+	inner := rect{X: parent.X + 1, Y: parent.Y + 1, W: parent.W - 2, H: parent.H - 2}
+	w, h := min(inner.W-2, 64), formFullH
+	compact := inner.H-2 < formFullH
 	if compact {
 		h = formCompactH
 	}
-	box := rect{x: inner.x + (inner.w-w)/2, y: inner.y + (inner.h-h)/2, w: w, h: h}
+	box := rect{X: inner.X + (inner.W-w)/2, Y: inner.Y + (inner.H-h)/2, W: w, H: h}
 	ov := e.chrome
 	title := "Add binding"
 	if f.orig != nil {
 		title = "Edit binding"
 	}
-	ov.PaintBox(g, box.x, box.y, box.w, box.h, title)
-	end := box.x + box.w - 2
-	x0 := box.x + 2
+	ov.PaintBox(g, box.X, box.Y, box.W, box.H, title)
+	end := box.X + box.W - 2
+	x0 := box.X + 2
 	// The rows of the key, action and context fields, the message line, the suggestions and
 	// the description.
 	rows := struct{ key, action, ctx, msg, sug, desc int }{1, 3, 5, 7, 8, 9}
@@ -1096,9 +1101,9 @@ func (e *keybindEditor) drawForm(g *grid.Grid, parent rect) {
 		if f.field == field {
 			st = ov.Focus
 		}
-		g.Put(x0, box.y+row, end, name, ov.Muted)
-		g.Fill(x0+10, end, box.y+row, st)
-		g.Put(x0+10, box.y+row, end, truncateCells(value, end-x0-10), st)
+		g.Put(x0, box.Y+row, end, name, ov.Muted)
+		g.Fill(x0+10, end, box.Y+row, st)
+		g.Put(x0+10, box.Y+row, end, space.End(value, end-x0-10), st)
 	}
 	keyText := "(press a key)"
 	switch {
@@ -1124,7 +1129,7 @@ func (e *keybindEditor) drawForm(g *grid.Grid, parent rect) {
 		}
 	}
 	if line != "" {
-		g.Put(x0, box.y+rows.msg, end, truncateCells(line, end-x0), ov.Error)
+		g.Put(x0, box.Y+rows.msg, end, space.End(line, end-x0), ov.Error)
 	}
 	if f.field == 1 {
 		sug := e.suggestions()
@@ -1134,12 +1139,12 @@ func (e *keybindEditor) drawForm(g *grid.Grid, parent rect) {
 			if i == f.suggest {
 				st = ov.Selected
 			}
-			x += g.Put(x, box.y+rows.sug, end, a, st) + 2
+			x += g.Put(x, box.Y+rows.sug, end, a, st) + 2
 		}
 		if len(sug) > 0 && rows.desc >= 0 {
-			g.Put(x0, box.y+rows.desc, end, truncateCells(e.describe(sug[min(f.suggest, len(sug)-1)]), end-x0), ov.Box)
+			g.Put(x0, box.Y+rows.desc, end, space.End(e.describe(sug[min(f.suggest, len(sug)-1)]), end-x0), ov.Box)
 		}
 	} else if a := strings.TrimSpace(string(f.action)); a != "" && rows.desc >= 0 {
-		g.Put(x0, box.y+rows.desc, end, truncateCells(e.describe(a), end-x0), ov.Muted)
+		g.Put(x0, box.Y+rows.desc, end, space.End(e.describe(a), end-x0), ov.Muted)
 	}
 }

@@ -195,9 +195,9 @@ func (m *Model) trySplit(dir splitDir) string {
 	// restored first.
 	m.splits.maximized = false
 	fp := m.layout().focusedPane()
-	extent := fp.w
+	extent := fp.W
 	if dir == stacked {
-		extent = fp.h
+		extent = fp.H
 	}
 	if extent < minSplitExtent {
 		return "Not enough room to split"
@@ -478,9 +478,9 @@ func (m *Model) focusedBodyRows() int {
 	fp := m.layout().focusedPane()
 	doc := m.ed.Active()
 	if doc == nil {
-		return fp.h
+		return fp.H
 	}
-	return m.paneGeometry(fp, doc).BodyRows(fp.w, fp.h)
+	return m.paneGeometry(fp, doc).BodyRows(fp.W, fp.H)
 }
 
 // revealCaretVisual scrolls the focused pane so that the caret's display row is on
@@ -502,8 +502,8 @@ func (m *Model) revealCaretVisual(margin int) {
 	fp := l.focusedPane()
 	// The notice band is painted over the bottom rows of the pane: the caret is kept
 	// above it, so the line being edited is not hidden by the message.
-	h := max(fp.h-max(fp.y+fp.h-l.bandTop(), 0), 1)
-	top, row := m.paneGeometry(fp, doc).RevealView(fp.w, h, margin)
+	h := max(fp.H-max(fp.Y+fp.H-l.bandTop(), 0), 1)
+	top, row := m.paneGeometry(fp, doc).RevealView(fp.W, h, margin)
 	if top != doc.Top() {
 		m.ed.ScrollTo(top)
 	}
@@ -566,7 +566,7 @@ func (m *Model) paneHitIn(i, x, y int) (p editorpane.Pane, hit editorpane.Hit, t
 		return p, hit, 0, false
 	}
 	p = m.paneGeometry(sp, doc)
-	return p, p.Hit(sp.w, sp.h, x-sp.x, y-sp.y), sp.top, true
+	return p, p.Hit(sp.W, sp.H, x-sp.X, y-sp.Y), sp.top, true
 }
 
 // paintPanes paints every editor pane and the lines between them. A pane with no
@@ -574,10 +574,10 @@ func (m *Model) paneHitIn(i, x, y int) (p editorpane.Pane, hit editorpane.Hit, t
 func (m *Model) paintPanes(g *grid.Grid, l layout) {
 	for _, p := range l.panes {
 		doc := m.paneDoc(p)
-		if doc == nil || p.w <= 0 || p.h <= 0 {
+		if doc == nil || p.W <= 0 || p.H <= 0 {
 			continue
 		}
-		editorpane.Blit(g, p.x, p.y, m.paneFor(p, doc).Render(p.w, p.h))
+		editorpane.Blit(g, p.X, p.Y, m.paneFor(p, doc).Render(p.W, p.H))
 	}
 	drawBorders(g, l.borders, m.splitCell())
 }
@@ -597,13 +597,13 @@ func (m *Model) splitCell() grid.Style {
 func drawBorders(g *grid.Grid, borders []splitBorder, cell grid.Style) {
 	for _, b := range borders {
 		if b.vertical {
-			for y := b.y; y < b.y+b.h; y++ {
-				g.Put(b.x, y, g.Width(), splitVLine, cell)
+			for y := b.Y; y < b.Y+b.H; y++ {
+				g.Put(b.X, y, g.Width(), splitVLine, cell)
 			}
 			continue
 		}
-		for x := b.x; x < b.x+b.w; x++ {
-			g.Put(x, b.y, g.Width(), splitHLine, cell)
+		for x := b.X; x < b.X+b.W; x++ {
+			g.Put(x, b.Y, g.Width(), splitHLine, cell)
 		}
 	}
 }

@@ -11,8 +11,9 @@
 // from.
 //
 // Esc is not seen here: the root pops every overlay on Esc, and the owner calls Close
-// when it does. The package does not import ui; the root wraps *Picker in its Overlay
-// type.
+// when it does. A picker is not an overlay itself: the root hosts it in a manager or
+// plugin overlay, which turns the events of a Result into commands, so the package does
+// not import the root model.
 package picker
 
 import (

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/buffer"
 )
 
@@ -156,13 +157,13 @@ func TestLargeSaveKeepsTheLineEndingsOfLinesThatWereNotEdited(t *testing.T) {
 
 func TestLargeSaveFailureLeavesTheFile(t *testing.T) {
 	t.Run("rename fails", func(t *testing.T) {
-		// Not parallel: it replaces renameFn.
+		// Not parallel: it replaces atomicfile.RenameFn.
 		e, d := openIndexed(t, largeOptions(), lineText(150))
 		before := readFile(t, d.Path)
 		d.Buffer.Insert(buffer.Pos{}, "edit ")
-		orig := renameFn
-		renameFn = func(string, string) error { return errors.New("no rename") }
-		t.Cleanup(func() { renameFn = orig })
+		orig := atomicfile.RenameFn
+		atomicfile.RenameFn = func(string, string) error { return errors.New("no rename") }
+		t.Cleanup(func() { atomicfile.RenameFn = orig })
 		if err := e.Save(); err == nil || !strings.Contains(err.Error(), "no rename") {
 			t.Fatalf("Save = %v", err)
 		}
@@ -667,12 +668,12 @@ func TestLargeSaveAsMovesOntoTheNewFile(t *testing.T) {
 }
 
 func TestSaveRebaseForeignFileEqualSize(t *testing.T) {
-	// Not parallel: it replaces renameFn.
+	// Not parallel: it replaces atomicfile.RenameFn.
 	e, d := openIndexed(t, largeOptions(), lineText(150))
 	d.Buffer.Insert(buffer.Pos{Line: 5}, "mine ")
 	want := strings.Replace(lineText(150), "line 0005", "mine line 0005", 1)
-	orig := renameFn
-	renameFn = func(from, to string) error {
+	orig := atomicfile.RenameFn
+	atomicfile.RenameFn = func(from, to string) error {
 		if err := os.Rename(from, to); err != nil {
 			return err
 		}
@@ -683,11 +684,11 @@ func TestSaveRebaseForeignFileEqualSize(t *testing.T) {
 		}
 		return os.Rename(foreign, to)
 	}
-	t.Cleanup(func() { renameFn = orig })
+	t.Cleanup(func() { atomicfile.RenameFn = orig })
 	if err := e.Save(); err != nil {
 		t.Fatal(err)
 	}
-	renameFn = orig
+	atomicfile.RenameFn = orig
 	if d.Modified() {
 		t.Error("the file was written, so the document is saved")
 	}

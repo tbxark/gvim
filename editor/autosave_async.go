@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/buffer"
 )
 
@@ -137,7 +138,7 @@ func (j SaveJob) RunContext(ctx context.Context) SaveResult {
 	if j.large != nil {
 		return j.writeLarge(ctx)
 	}
-	note, err := writeFileAtomic(j.path, j.data)
+	note, err := atomicfile.WriteFile(j.path, j.data)
 	if err != nil {
 		return SaveResult{job: j, err: fmt.Errorf("save %s: %w", j.path, err)}
 	}

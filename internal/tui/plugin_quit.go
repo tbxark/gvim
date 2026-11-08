@@ -45,7 +45,7 @@ func (m *Model) quitDiscard() tea.Cmd {
 		}
 		q += " and quit?"
 	}
-	m.pushOverlay(confirmOverlay{c: prompt.NewConfirm(m.styles, q, quitDiscardTag{})})
+	m.pushOverlay(prompt.NewConfirm(m.styles, q, quitDiscardTag{}))
 	return nil
 }
 

@@ -19,11 +19,11 @@ func (m *Model) openBookmarkPrompt(jump bool) {
 	if jump {
 		label = "Jump to bookmark (0-9):"
 	}
-	m.pushOverlay(lineOverlay{l: prompt.NewLine(m.styles, prompt.LineOptions{
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
 		Label:    label,
 		Tag:      bookmarkTag{jump: jump},
 		Validate: validateSlot,
-	})})
+	}))
 }
 
 // validateSlot accepts one digit, the name of a bookmark slot.

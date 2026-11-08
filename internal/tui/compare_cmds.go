@@ -49,9 +49,9 @@ func (m *Model) pickCompareFile(pick *comparePick, title string) {
 		dir = m.tree.Root()
 	}
 	m.splits.pick = pick
-	m.pushOverlay(browserOverlay{b: browser.New(browser.Options{
+	m.pushOverlay(browser.New(browser.Options{
 		Dir: dir, Styles: m.styles, Now: m.now, Title: title,
-	})})
+	}))
 }
 
 // comparePicked takes the file the browser chose for the waiting compare command: the left

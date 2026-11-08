@@ -8,6 +8,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/internal/uitest"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/theme"
@@ -29,7 +30,7 @@ func startApp(t *testing.T, text string) (*uitest.Session, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := tui.New(newUIDeps(ed, keymap.Default(), th, nil, nil))
+	m := tui.New(uiadapter.NewDeps(ed, keymap.Default(), th, nil, nil))
 	return uitest.Start(t, m, 100, 30), path
 }
 

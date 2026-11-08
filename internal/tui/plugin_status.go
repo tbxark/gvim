@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/pluginapi"
 )
 
@@ -101,7 +102,7 @@ func (m *Model) plugStatusItems() []statusItem {
 
 // plainCells makes text one line of at most maxStatusItemCells cells.
 func plainCells(s string) string {
-	return truncateCells(cleanText(s), maxStatusItemCells)
+	return space.End(cleanText(s), maxStatusItemCells)
 }
 
 // plugStatusClick runs the on_click function of the item at index in the list

@@ -124,7 +124,7 @@ func welcomeLines(x0, paneW, bodyTop, bodyRows int, recents []string, doorKeys [
 		if it.path != "" {
 			role = welcomeRecentRow
 		}
-		label := padCells(truncateCells(it.label, welcomeLabelW-1), welcomeLabelW)
+		label := space.PadTo(space.End(it.label, welcomeLabelW-1), welcomeLabelW)
 		rows = append(rows, welcomeLine{role: role, text: label, keyX: welcomeLabelW, key: fitKey(it, max(bw-welcomeLabelW, 0)), item: i, w: bw + 2*space.PadX})
 	}
 

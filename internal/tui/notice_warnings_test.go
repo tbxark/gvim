@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/theme"
 )
@@ -23,11 +24,11 @@ func overlayRows(m *Model) ([]string, bool) {
 	if len(m.overlays) == 0 {
 		return nil, false
 	}
-	o, ok := m.overlays[len(m.overlays)-1].(listOverlay)
+	o, ok := m.overlays[len(m.overlays)-1].(*list.View)
 	if !ok {
 		return nil, false
 	}
-	return rowsOf(o.v.rows), true
+	return rowsOf(o.Rows), true
 }
 
 // TestShowWarningsListsTheNoticesOfTheSessionNewestFirst checks that every notice the

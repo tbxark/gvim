@@ -321,6 +321,12 @@ func (lt *lspTest) settle(cmd tea.Cmd, rounds int) {
 
 // deliver runs cmd and returns the messages it produced, without feeding them
 // back. A batch is run one command at a time.
+// popupCmd feeds msg to p and returns the command p starts.
+func popupCmd(p *popup.Popup, msg tea.Msg) tea.Cmd {
+	_, cmd := p.Update(msg)
+	return cmd
+}
+
 func deliver(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
 		return nil
@@ -369,8 +375,8 @@ func (lt *lspTest) act(action string) []tea.Msg {
 func (lt *lspTest) popup() *popup.Popup {
 	lt.t.Helper()
 	if n := len(lt.m.overlays); n > 0 {
-		if po, ok := lt.m.overlays[n-1].(popupOverlay); ok {
-			return po.p
+		if po, ok := lt.m.overlays[n-1].(*popup.Popup); ok {
+			return po
 		}
 	}
 	lt.t.Fatal("no popup on top of the overlay stack")
@@ -578,7 +584,7 @@ func TestLSPDefinitionSeveralLocationsOpensAPopup(t *testing.T) {
 	}
 	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	var read []tea.Msg
-	for _, msg := range deliver(p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})) {
+	for _, msg := range deliver(popupCmd(p, tea.KeyPressMsg{Code: tea.KeyEnter})) {
 		read = append(read, lt.feed(msg)...)
 	}
 	for _, msg := range read {
@@ -799,7 +805,7 @@ func TestLSPCodeActionsChoiceShowsANotice(t *testing.T) {
 	for _, msg := range lt.act("lsp_code_actions") {
 		lt.feed(msg)
 	}
-	for _, msg := range deliver(lt.popup().Update(tea.KeyPressMsg{Code: tea.KeyEnter})) {
+	for _, msg := range deliver(popupCmd(lt.popup(), tea.KeyPressMsg{Code: tea.KeyEnter})) {
 		lt.feed(msg)
 	}
 	if !strings.Contains(lt.m.notice, "not supported yet") {
@@ -992,7 +998,7 @@ func TestLSPCompletionEnterInsertsTheHighlightedItem(t *testing.T) {
 		lt.feed(msg)
 	}
 	lt.popup().Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	for _, msg := range deliver(lt.popup().Update(tea.KeyPressMsg{Code: tea.KeyEnter})) {
+	for _, msg := range deliver(popupCmd(lt.popup(), tea.KeyPressMsg{Code: tea.KeyEnter})) {
 		lt.feed(msg)
 	}
 	want := editor.LSPEdit{From: buffer.Pos{Line: 0, Col: 2}, To: buffer.Pos{Line: 0, Col: 2}, Text: "beta"}

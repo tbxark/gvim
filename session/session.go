@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/buffer"
 )
 
@@ -261,31 +262,12 @@ func isOverlayName(name string) bool {
 		filepath.Base(name) == name
 }
 
-// writeAtomic writes data to dir/name through a temporary file and a rename,
-// so a reader sees either the old file or the new one. The temporary file is
-// synced before the rename, and dir is synced after it, so the new file is
-// still there after a crash.
-func writeAtomic(dir, name string, data []byte) (err error) {
-	f, err := os.CreateTemp(dir, name+".*.tmp")
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = f.Close()
-			_ = os.Remove(f.Name())
-		}
-	}()
-	if _, err = f.Write(data); err != nil {
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	if err = os.Rename(f.Name(), filepath.Join(dir, name)); err != nil {
+// writeAtomic writes data to dir/name through atomicfile.WriteFileMode with the
+// private mode 0600 for a new file, so a reader sees either the old file or the new
+// one, then syncs dir. The temporary file is synced before the rename, and dir is
+// synced after it, so the new file is still there after a crash.
+func writeAtomic(dir, name string, data []byte) error {
+	if _, err := atomicfile.WriteFileMode(filepath.Join(dir, name), data, 0o600); err != nil {
 		return err
 	}
 	return syncDir(dir)

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
 // statusRun returns the status-row run of the segment kind and index.
@@ -35,7 +36,7 @@ func TestLanguageSegmentOpensAFilterableListOfRealLanguages(t *testing.T) {
 	r := statusRun(t, m, statusSegmentLanguage)
 	clickAt(m, r.x, m.layout().statusY)
 	v := topList(m)
-	if v == nil || v.title != "Select Language" {
+	if v == nil || v.Title != "Select Language" {
 		t.Fatalf("top overlay = %+v, want the language list", v)
 	}
 	lefts := shownLefts(v)
@@ -128,18 +129,11 @@ func TestLineEndingListFitsItsRows(t *testing.T) {
 	if v == nil {
 		t.Fatal("no list")
 	}
-	if want := len(v.rows) + 3; v.box.h != want {
-		t.Errorf("box height %d, want %d (filter row, %d rows, two borders)", v.box.h, want, len(v.rows))
+	if want := len(v.Rows) + 3; v.Box.H != want {
+		t.Errorf("box height %d, want %d (filter row, %d rows, two borders)", v.Box.H, want, len(v.Rows))
 	}
-	if v.box.h > 6 {
-		t.Errorf("a two-row list is %d rows tall", v.box.h)
-	}
-}
-
-func TestLongListsKeepTheirMaximumHeight(t *testing.T) {
-	box, rows := listBoxFor(100, 60, 500)
-	if box.h != listMaxHeight || rows != listMaxHeight-3 {
-		t.Errorf("box %d rows %d, want %d and %d", box.h, rows, listMaxHeight, listMaxHeight-3)
+	if v.Box.H > 6 {
+		t.Errorf("a two-row list is %d rows tall", v.Box.H)
 	}
 }
 
@@ -151,7 +145,7 @@ func TestPositionSegmentOpensGoToLine(t *testing.T) {
 	if len(m.overlays) != 1 {
 		t.Fatalf("%d overlays after a click on Ln, Col, want the Go to Line prompt", len(m.overlays))
 	}
-	if _, ok := m.overlays[0].(lineOverlay); !ok {
+	if _, ok := m.overlays[0].(*prompt.Line); !ok {
 		t.Fatalf("overlay is %T, want the line prompt", m.overlays[0])
 	}
 }

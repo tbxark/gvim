@@ -95,24 +95,39 @@ type built struct {
 	ed     *editor.Editor // the editor the session was built on
 }
 
-// keymapOf returns the keymap that the UI resolves keys with.
-func keymapOf(t *testing.T, d tui.Deps) *keymap.Map {
+// resolveAction returns the action that chord runs in the normal context. It fails
+// when the chord is unbound.
+func resolveAction(t *testing.T, d tui.Deps, chord string) string {
 	t.Helper()
-	a, ok := d.Keys.(keymapAdapter)
-	if !ok {
-		t.Fatalf("Keys is %T, want keymapAdapter", d.Keys)
-	}
-	return a.km
-}
-
-// resolveAction returns the action that chord runs in the normal context.
-func resolveAction(t *testing.T, km *keymap.Map, chord string) string {
-	t.Helper()
-	b, ok := km.Resolve(chord, keymap.ContextNormal)
-	if !ok {
+	action := resolvedAction(t, d, chord)
+	if action == "" {
 		t.Fatalf("%s is unbound in normal", chord)
 	}
-	return b.Action
+	return action
+}
+
+// resolvedAction returns the action that chord runs in the normal context, or "" when
+// the chord is unbound.
+func resolvedAction(t *testing.T, d tui.Deps, chord string) string {
+	t.Helper()
+	key, mods := splitTestChord(chord)
+	cmd, ok := d.Keys.Resolve(tui.KeyPress{Name: key, Mods: mods}, tui.KeyContextNormal)
+	if !ok {
+		return ""
+	}
+	return cmd.Action
+}
+
+// splitTestChord splits a canonical chord into its key and its modifiers.
+func splitTestChord(c string) (key string, mods []string) {
+	if c == "+" {
+		return "+", []string{}
+	}
+	if strings.HasSuffix(c, "++") {
+		return "+", strings.Split(strings.TrimSuffix(c, "++"), "+")
+	}
+	parts := strings.Split(c, "+")
+	return parts[len(parts)-1], append([]string{}, parts[:len(parts)-1]...)
 }
 
 // defaultEditorOptions is what buildModel passes to editor.New with no config
@@ -252,12 +267,8 @@ func TestConfigKeymapIsUsedWithoutFlag(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildModel() error = %v", err)
 			}
-			want, err := keymap.ByName(tt.want)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if keymapOf(t, got.deps) != want {
-				t.Fatalf("keymap is not the %q preset", tt.want)
+			if got.deps.Settings.Keymap != tt.want {
+				t.Fatalf("keymap = %q, want the %q preset", got.deps.Settings.Keymap, tt.want)
 			}
 		})
 	}
@@ -270,14 +281,14 @@ func TestConfigKeybindingsOverridePreset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildModel() error = %v", err)
 	}
-	if action := resolveAction(t, keymapOf(t, got.deps), "ctrl+s"); action != "noop" {
+	if action := resolveAction(t, got.deps, "ctrl+s"); action != "noop" {
 		t.Fatalf("ctrl+s = %q, want noop from the keybindings override", action)
 	}
 	plain, err := buildCaptured(t, userRoot(t, `{"keymap": "emacs"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if action := resolveAction(t, keymapOf(t, plain.deps), "ctrl+s"); action == "noop" {
+	if action := resolveAction(t, plain.deps, "ctrl+s"); action == "noop" {
 		t.Fatal("ctrl+s is noop without any keybindings override")
 	}
 }
@@ -302,7 +313,7 @@ func TestBundledDocKeybindingsExampleLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the documented keybindings example does not load: %v", err)
 	}
-	if action := resolveAction(t, keymapOf(t, got.deps), "ctrl+alt+j"); action != "flash.jump" {
+	if action := resolveAction(t, got.deps, "ctrl+alt+j"); action != "flash.jump" {
 		t.Fatalf("ctrl+alt+j = %q, want flash.jump", action)
 	}
 	// The map-of-chords form is not a list of bindings: it binds nothing, and says so.
@@ -310,7 +321,7 @@ func TestBundledDocKeybindingsExampleLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a map of chords stopped startup: %v", err)
 	}
-	if b, ok := keymapOf(t, bad.deps).Resolve("ctrl+alt+j", keymap.ContextNormal); ok && b.Action == "flash.jump" {
+	if action := resolvedAction(t, bad.deps, "ctrl+alt+j"); action == "flash.jump" {
 		t.Fatal("a map of chords is accepted as keybindings")
 	}
 	if !strings.Contains(bad.deps.Notice, "keybindings") {
@@ -327,7 +338,7 @@ func TestConfigGlobalNoopUnbindsSaveInNormal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildModel() error = %v", err)
 	}
-	if action := resolveAction(t, keymapOf(t, got.deps), "ctrl+s"); action != "noop" {
+	if action := resolveAction(t, got.deps, "ctrl+s"); action != "noop" {
 		t.Fatalf("ctrl+s in normal = %q, want noop from the global keybindings override", action)
 	}
 }
@@ -401,11 +412,10 @@ func TestBuildModelWarnsOfBrokenKeybindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildModel() error = %v, want startup to go on", err)
 	}
-	km := keymapOf(t, got.deps)
-	if action := resolveAction(t, km, "alt+k"); action != "goto_line" {
+	if action := resolveAction(t, got.deps, "alt+k"); action != "goto_line" {
 		t.Errorf("alt+k = %q, want the good entry applied", action)
 	}
-	if b, ok := km.Resolve("alt+u", keymap.ContextNormal); ok && b.Action == "unknown_action_xyz" {
+	if action := resolvedAction(t, got.deps, "alt+u"); action == "unknown_action_xyz" {
 		t.Error("an unknown action was bound")
 	}
 	// alt+k is a good entry that takes over the default's lsp_hover, which Show Warnings
@@ -437,7 +447,7 @@ func TestBuildModelListsTheKeymapBindingsAUserEntryReplaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildModel() error = %v, want startup to go on", err)
 	}
-	if action := resolveAction(t, keymapOf(t, got.deps), "ctrl+q"); action != "save" {
+	if action := resolveAction(t, got.deps, "ctrl+q"); action != "save" {
 		t.Errorf("ctrl+q = %q, want the user's binding applied", action)
 	}
 	want := `keybindings: ctrl+q in normal replaces the keymap's "quit" on ctrl+q`
@@ -457,8 +467,7 @@ func TestBuildModelFallsBackFromAnUnknownConfigKeymap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildModel() error = %v, want startup to go on", err)
 	}
-	want, _ := keymap.ByName(keymap.DefaultName())
-	if keymapOf(t, got.deps) != want {
+	if got.deps.Settings.Keymap != keymap.DefaultName() {
 		t.Error("the keymap is not the platform default")
 	}
 	if got.deps.Settings.Keymap != keymap.DefaultName() {
@@ -479,11 +488,10 @@ func TestProjectConfigCannotRebindKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, _ := keymap.ByName(keymap.DefaultName())
-	if keymapOf(t, got.deps) != want {
+	if got.deps.Settings.Keymap != keymap.DefaultName() {
 		t.Error("the project file switched the keymap")
 	}
-	if action := resolveAction(t, keymapOf(t, got.deps), "ctrl+s"); action == "quit" {
+	if action := resolveAction(t, got.deps, "ctrl+s"); action == "quit" {
 		t.Error("the project file rebound ctrl+s")
 	}
 	if !strings.Contains(got.deps.Notice, "project config cannot set") {

@@ -19,13 +19,8 @@ const (
 	gapButtons = 2
 )
 
-// rect is a cell rectangle.
-type rect struct{ x, y, w, h int }
-
-// contains reports whether (x, y) is inside r.
-func (r rect) contains(x, y int) bool {
-	return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h
-}
+// rect is a cell rectangle, the shared geometry type of space.Rect.
+type rect = space.Rect
 
 // point is a cell position.
 type point struct{ x, y int }
@@ -82,10 +77,10 @@ func (m *modal) frame(g *grid.Grid, natural int, body func(cw int) []row) {
 	w, h := cw+boxChrome, len(rows)+boxRows
 	x := max((g.Width()-w)/2, 0)
 	y := max((g.Height()-h)/2, 0)
-	m.box = rect{x, y, w, h}
+	m.box = rect{X: x, Y: y, W: w, H: h}
 	m.caretOK = false
 	m.hits = m.hits[:0]
-	m.ov.PaintBox(g, m.box.x, m.box.y, m.box.w, m.box.h, m.title)
+	m.ov.PaintBox(g, m.box.X, m.box.Y, m.box.W, m.box.H, m.title)
 	for i, r := range rows {
 		r(g, x+2, y+2+i, cw)
 	}
@@ -131,7 +126,7 @@ func (m *modal) drawButtons(g *grid.Grid, x0, y, w int) {
 		}
 		bw := buttonWidth(b)
 		drawButton(g, x, y, b, st)
-		m.hits = append(m.hits, rect{x, y, bw, 1})
+		m.hits = append(m.hits, rect{X: x, Y: y, W: bw, H: 1})
 		x += bw + gapButtons
 	}
 }

@@ -227,13 +227,13 @@ func TestSplitWindowPlacement(t *testing.T) {
 			panes := m.layout().panes
 			extent := func(p splitPane) int {
 				if tc.dir == stacked {
-					return p.h
+					return p.H
 				}
-				return p.w
+				return p.W
 			}
-			total := band.w
+			total := band.W
 			if tc.dir == stacked {
-				total = band.h
+				total = band.H
 			}
 			first, second := splitSpan(total, tc.wantRatio)
 			if got := []int{extent(panes[0]), extent(panes[1])}; got[0] != first || got[1] != second {
@@ -481,7 +481,7 @@ func TestEqualizeAndWindowsAlong(t *testing.T) {
 		t.Fatalf("maximized = %v, %d panes", m.splits.maximized, len(panes))
 	}
 	for _, p := range panes {
-		if d := p.w - panes[0].w; d < -1 || d > 1 {
+		if d := p.W - panes[0].W; d < -1 || d > 1 {
 			t.Fatalf("pane widths are not equal: %v", paneRects(m.layout()))
 		}
 	}
@@ -552,7 +552,7 @@ func TestWindowGeometry(t *testing.T) {
 	l := m.layout()
 	p := l.panes[0]
 	w := winInfo(t, m, 1)
-	if w.X != p.textX || w.Y != p.y || w.Width != p.textW-1 || w.Height != p.h || w.TopLine != 0 || w.LeftCol != 0 {
+	if w.X != p.textX || w.Y != p.Y || w.Width != p.textW-1 || w.Height != p.H || w.TopLine != 0 || w.LeftCol != 0 {
 		t.Fatalf("window = %+v, pane = %+v", w, p)
 	}
 	if w.Width != 80-p.gutter-1 {
@@ -585,13 +585,13 @@ func TestWindowLeftColFollowsTheHorizontalScroll(t *testing.T) {
 	l := m.layout()
 	p := l.panes[0]
 	w := winInfo(t, m, 1)
-	left, _ := m.paneGeometry(p, m.ed.Active()).HScroll(p.w, p.h)
+	left, _ := m.paneGeometry(p, m.ed.Active()).HScroll(p.W, p.H)
 	if left == 0 || w.LeftCol != left {
 		t.Fatalf("LeftCol = %d, the pane scrolled to %d (want a positive column)", w.LeftCol, left)
 	}
 	// The horizontal bar takes the last row, so the window has one row less than the pane.
-	if w.Height != p.h-1 {
-		t.Fatalf("Height = %d, want %d: a window height counts text rows", w.Height, p.h-1)
+	if w.Height != p.H-1 {
+		t.Fatalf("Height = %d, want %d: a window height counts text rows", w.Height, p.H-1)
 	}
 }
 
@@ -688,10 +688,10 @@ func TestVisibleRowsMatchPainterRows(t *testing.T) {
 			p := l.panes[0]
 			doc := m.paneDoc(p)
 			pane := m.paneFor(p, doc)
-			g := pane.Render(p.w, p.h)
+			g := pane.Render(p.W, p.H)
 			for y, r := range rows {
 				var painted strings.Builder
-				for x := p.gutter; x < p.w-1; x++ {
+				for x := p.gutter; x < p.W-1; x++ {
 					painted.WriteString(g.At(x, y).Text)
 				}
 				text := strings.TrimRight(tc.lines[r.Line][r.ColFrom:r.ColTo], " ")
@@ -699,13 +699,13 @@ func TestVisibleRowsMatchPainterRows(t *testing.T) {
 					t.Errorf("row %d (line %d [%d,%d)) is painted as %q", y, r.Line, r.ColFrom, r.ColTo, got)
 				}
 				// The hit map agrees: the first cell of the row is the start of the span.
-				if hit := pane.PosAt(p.w, p.h, p.gutter, y); hit.Line != r.Line || hit.Col != r.ColFrom {
+				if hit := pane.PosAt(p.W, p.H, p.gutter, y); hit.Line != r.Line || hit.Col != r.ColFrom {
 					t.Errorf("row %d: the hit map says %+v, the list says line %d col %d", y, hit, r.Line, r.ColFrom)
 				}
 			}
 			// The first body row past the list is a "~" row or the horizontal bar.
-			if n := len(rows); n < p.h {
-				if cell := g.At(0, n); cell.Text != "~" && !tc.wrap && n < p.h-1 {
+			if n := len(rows); n < p.H {
+				if cell := g.At(0, n); cell.Text != "~" && !tc.wrap && n < p.H-1 {
 					t.Errorf("row %d is %q, want a ~ row after the %d listed", n, cell.Text, n)
 				}
 			}

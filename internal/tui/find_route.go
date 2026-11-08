@@ -9,7 +9,6 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/find"
-	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/search"
 )
 
@@ -44,30 +43,6 @@ type searchPort interface {
 type selectionTexter interface {
 	SelectionOrWord() (text string, from, to buffer.Pos, ok bool, err error)
 }
-
-// findOverlay adapts *find.Bar to Overlay. The bar cannot name Overlay, because
-// that would import this package. The bar stays on the stack until it closes
-// itself or Esc pops it.
-type findOverlay struct{ b *find.Bar }
-
-// Update forwards the message to the bar. It returns nil once the bar is closed,
-// so the stack pops it.
-func (o findOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
-	b, cmd := o.b.Update(msg)
-	if !b.Active() {
-		return nil, cmd
-	}
-	return o, cmd
-}
-
-// Draw paints the bar over the bottom rows of the frame.
-func (o findOverlay) Draw(g *grid.Grid) { o.b.Draw(g) }
-
-// Active reports whether the bar is still open.
-func (o findOverlay) Active() bool { return o.b.Active() }
-
-// Dismiss is called when Esc pops the bar: it puts the caret and selection back.
-func (o findOverlay) Dismiss() { o.b.Cancel() }
 
 // findHost is the find.Editor the bar works through. It reads the active document
 // and moves the caret and the selection through the EditorState port, so every
@@ -266,7 +241,7 @@ func (m *Model) queryReplace() {
 // popped, so the editor body gets its rows back.
 func (m *Model) findOpen() bool {
 	for _, o := range m.overlays {
-		if _, ok := o.(findOverlay); ok {
+		if _, ok := o.(*find.Bar); ok {
 			return true
 		}
 	}
@@ -331,7 +306,7 @@ func (m *Model) findShown() bool {
 // showFind puts the find bar on top of the overlay stack. The bar takes rows from
 // the editor body, so the body is resized and the caret is kept on screen.
 func (m *Model) showFind() {
-	m.pushOverlay(findOverlay{b: m.findBar})
+	m.pushOverlay(m.findBar)
 	m.syncViewport()
 	m.revealCaret()
 }

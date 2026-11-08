@@ -1,7 +1,13 @@
 // Package app is the composition root of gvim. It turns the parsed command
-// line into a running Bubble Tea program. It is the only package that imports
-// the concrete UI and domain packages together; the command-line layer in
-// internal/cli sees only the Options type defined here.
+// line into a running Bubble Tea program: Options and Run, the runtime
+// lifecycle, the config-to-settings mapping, the log file, live grep and the
+// default formatter table. The rest of the shell lives in its sibling host
+// packages: internal/uiadapter (the UI port adapters), internal/pluginhost (the
+// Lua plugin runtime), internal/lsphost (the language servers), internal/restore
+// (session restore and crash recovery), internal/keybindings (user keybindings)
+// and internal/highlight (the syntax-span cache). app is the only package that
+// imports them all. The command-line layer in internal/cli sees only the Options
+// type and the config-view backend declared here.
 package app
 
 import (

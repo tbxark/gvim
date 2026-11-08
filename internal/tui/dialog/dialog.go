@@ -31,26 +31,20 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
 )
 
-// Overlay is the shape the root's overlay stack expects, minus the root's own
-// type. The root wraps each dialog in a small adapter whose Update returns the
-// root's Overlay type. The methods here are the same as the root's Overlay,
-// with Cursor added for the caret of a text field.
-type Overlay interface {
-	// Update handles one key or mouse message. It returns the overlay that takes
-	// this one's place: the dialog itself while it is open, and nil once it has
-	// answered. The command reports the Result.
-	Update(msg tea.Msg) (Overlay, tea.Cmd)
-	// Draw paints the dialog centered in g. Only the cells of the box change.
-	Draw(g *grid.Grid)
-	// Cursor returns the caret of the focused text field in a frame of w by h
-	// cells. ok is false when no text field has the focus.
-	Cursor(w, h int) (x, y int, ok bool)
-	// Active reports whether the dialog is still open.
-	Active() bool
-}
+// Overlay is the shape the root's overlay stack expects. A dialog implements it
+// directly; the caret of a text field is the optional overlay.Caret, which the
+// root asserts on the top overlay.
+//
+// Update returns the dialog itself while it is open, and nil once it has
+// answered. The command reports the Result.
+type Overlay = overlay.Overlay
+
+// Caret is the optional caret capability a dialog with a text field implements:
+// the root asserts it on the top overlay to place the terminal caret.
+type Caret = overlay.Caret
 
 // Choice is the answer a dialog gives.
 type Choice int

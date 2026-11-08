@@ -3,6 +3,9 @@ package app
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/tbxark/gvim/internal/apptest"
+	"github.com/tbxark/gvim/internal/restore"
 )
 
 // TestValidateDiffNeedsTwoFiles checks that Diff takes exactly two files and no
@@ -76,10 +79,10 @@ func TestBuildRuntimeDiffSurvivesRecoveredTabs(t *testing.T) {
 	writeTestFile(t, c, "three\n")
 	sessDir := filepath.Join(dir, "session")
 
-	crashed := newSessionEditor()
+	crashed := apptest.NewSessionEditor()
 	must(t, crashed.OpenFile(c))
 	crashed.Do("insert_char", map[string]any{"text": "Z"})
-	must(t, newRecoveryWriter(crashed, recoveryDir(sessDir)).Plan()())
+	must(t, restore.NewRecoveryWriter(crashed, restore.RecoveryPath(sessDir)).Plan()())
 
 	opts := projectRoot(t, "")
 	opts.SessionDir = sessDir
@@ -93,7 +96,7 @@ func TestBuildRuntimeDiffSurvivesRecoveredTabs(t *testing.T) {
 	if !rt.model.Comparing() {
 		t.Fatal("the model is not in the compare view")
 	}
-	names, _ := tabNames(rt.ed)
+	names, _ := apptest.TabNames(rt.ed)
 	if len(names) != 3 || names[0] != "a.txt" || names[1] != "b.txt" {
 		t.Fatalf("tabs %v, want a.txt and b.txt first, then the recovered tab", names)
 	}

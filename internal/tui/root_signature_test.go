@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/tui/popup"
 )
 
 // TestSignatureHelpShowsTheSignatureInAPopup checks that Show Signature Help asks the
@@ -34,7 +35,7 @@ func TestSignatureHelpWithoutASignatureSaysSo(t *testing.T) {
 		lt.feed(msg)
 	}
 	for _, o := range lt.m.overlays {
-		if _, ok := o.(popupOverlay); ok {
+		if _, ok := o.(*popup.Popup); ok {
 			t.Fatal("a popup opened for an empty signature help")
 		}
 	}

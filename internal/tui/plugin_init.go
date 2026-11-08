@@ -157,13 +157,13 @@ func (m *Model) askMacroName(promote bool) {
 		m.notice = "No macro recorded"
 		return
 	}
-	m.pushOverlay(lineOverlay{l: prompt.NewLine(m.styles, prompt.LineOptions{
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
 		Label:     "Command name for the macro:",
 		Input:     "macro",
 		SelectAll: true,
 		Tag:       macroInitTag{promote: promote},
 		Validate:  validateMacroName,
-	})})
+	}))
 }
 
 // initSavedMsg is the answer of the command that appended a macro to init.lua.

@@ -128,8 +128,8 @@ func TestDepsTabSizeSetsTheTabStopOfThePane(t *testing.T) {
 	m := New(Deps{Editor: newFakeEditor("a\tb"), Keys: testKeys(), Theme: theme.Theme{}, Clock: testClock, TabSize: 8})
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
 	p := panesOf(t, m, 1)[0]
-	if got := m.paint().At(p.textX+8, p.y).Text; got != "b" {
-		t.Errorf("cell (%d, %d) = %q, want the b at tab stop 8", p.textX+8, p.y, got)
+	if got := m.paint().At(p.textX+8, p.Y).Text; got != "b" {
+		t.Errorf("cell (%d, %d) = %q, want the b at tab stop 8", p.textX+8, p.Y, got)
 	}
 }
 
@@ -158,7 +158,7 @@ func TestWheelDownIsNotUndoneWhenAWideLineChangesTheBodyHeight(t *testing.T) {
 	l := m.layout()
 	p := l.panes[0]
 	for i := 1; i <= 6; i++ {
-		m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.x + p.gutter + 2, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
+		m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.X + p.gutter + 2, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
 		if got, want := ed.Active().Top, i*wheelRows; got != want {
 			t.Fatalf("after %d notches the view top is %d, want %d", i, got, want)
 		}

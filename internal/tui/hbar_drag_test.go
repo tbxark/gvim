@@ -34,24 +34,24 @@ func TestScrollbarThumbDragReachesTheEndWithTheHorizontalBarShowing(t *testing.T
 	runAction(t, m, "toggle_line_wrap")
 	l := m.layout()
 	fp := l.focusedPane()
-	body := m.paneGeometry(fp, m.ed.Active()).BodyRows(fp.w, fp.h)
-	if body != fp.h-1 {
-		t.Fatalf("setup: %d text rows in a %d row pane, want the horizontal bar to take one", body, fp.h)
+	body := m.paneGeometry(fp, m.ed.Active()).BodyRows(fp.W, fp.H)
+	if body != fp.H-1 {
+		t.Fatalf("setup: %d text rows in a %d row pane, want the horizontal bar to take one", body, fp.H)
 	}
-	x := fp.x + fp.w - 1
-	mouseDownAt(m, x, fp.y) // the thumb at the top
-	for y := fp.y; y < fp.y+fp.h+3; y++ {
+	x := fp.X + fp.W - 1
+	mouseDownAt(m, x, fp.Y) // the thumb at the top
+	for y := fp.Y; y < fp.Y+fp.H+3; y++ {
 		mouseMove(m, x, y)
 	}
-	mouseUpAt(m, x, fp.y+fp.h)
+	mouseUpAt(m, x, fp.Y+fp.H)
 	if top, want := ed.Active().Top, m.ed.Active().LineCount()-m.bodyRows(); top != want {
 		t.Fatalf("top = %d after dragging the thumb past the bottom, want the last page %d", top, want)
 	}
 	// A press on the last track row goes to the last page too.
-	mouseDownAt(m, x, fp.y+3)
-	mouseUpAt(m, x, fp.y+3)
+	mouseDownAt(m, x, fp.Y+3)
+	mouseUpAt(m, x, fp.Y+3)
 	// The bar leaves once the wide line is scrolled off, so the track is one row longer.
-	last := fp.y + m.bodyRows() - 1
+	last := fp.Y + m.bodyRows() - 1
 	mouseDownAt(m, x, last)
 	mouseUpAt(m, x, last)
 	if top, want := ed.Active().Top, m.ed.Active().LineCount()-m.bodyRows(); top != want {
@@ -67,13 +67,13 @@ func TestScrollbarThumbDragToTheLastBodyRowReachesTheEnd(t *testing.T) {
 	m, ed := viewModel(t, DefaultViewOptions(), wideDoc(lines, 300), 80, 24)
 	runAction(t, m, "toggle_line_wrap")
 	fp := m.layout().focusedPane()
-	if body := m.bodyRows(); body != fp.h-1 {
-		t.Fatalf("setup: %d text rows in a %d row pane, want the horizontal bar to take one", body, fp.h)
+	if body := m.bodyRows(); body != fp.H-1 {
+		t.Fatalf("setup: %d text rows in a %d row pane, want the horizontal bar to take one", body, fp.H)
 	}
-	x := fp.x + fp.w - 1
+	x := fp.X + fp.W - 1
 	body := m.bodyRows()
-	mouseDownAt(m, x, fp.y)
-	last := fp.y + body - 1
+	mouseDownAt(m, x, fp.Y)
+	last := fp.Y + body - 1
 	mouseMove(m, x, last)
 	mouseUpAt(m, x, last)
 	// The last page is the one whose last line is on the last text row while the bar
@@ -92,36 +92,36 @@ func TestHorizontalScrollbarClickAndDragPanTheView(t *testing.T) {
 	runAction(t, m, "toggle_line_wrap")
 	fp := m.layout().focusedPane()
 	pane := m.paneGeometry(fp, m.ed.Active())
-	_, most := pane.HScroll(fp.w, fp.h)
+	_, most := pane.HScroll(fp.W, fp.H)
 	if most <= 0 {
 		t.Fatalf("setup: the view cannot pan (most %d)", most)
 	}
-	barY := fp.y + fp.h - 1
+	barY := fp.Y + fp.H - 1
 	left := func() int {
-		l, _ := m.paneGeometry(m.layout().focusedPane(), m.ed.Active()).HScroll(fp.w, fp.h)
+		l, _ := m.paneGeometry(m.layout().focusedPane(), m.ed.Active()).HScroll(fp.W, fp.H)
 		return l
 	}
 	caretBefore := ed.Active().Cursor
 
-	mouseDownAt(m, fp.x+fp.w-2, barY) // the right end of the track
+	mouseDownAt(m, fp.X+fp.W-2, barY) // the right end of the track
 	if got := left(); got != most {
 		t.Fatalf("a press on the right end of the bar gave left %d, want %d", got, most)
 	}
-	mouseMove(m, fp.x+fp.w/2, barY)
+	mouseMove(m, fp.X+fp.W/2, barY)
 	mid := left()
 	if mid <= 0 || mid >= most {
 		t.Fatalf("dragging to the middle gave left %d, want it between 0 and %d", mid, most)
 	}
-	mouseMove(m, fp.x-5, barY) // left of the track: the first column
+	mouseMove(m, fp.X-5, barY) // left of the track: the first column
 	if got := left(); got != 0 {
 		t.Fatalf("dragging past the left end gave left %d, want 0", got)
 	}
-	mouseUpAt(m, fp.x, barY)
+	mouseUpAt(m, fp.X, barY)
 	if ed.Active().Cursor != caretBefore {
 		t.Errorf("the caret moved from %v to %v while the bar was dragged", caretBefore, ed.Active().Cursor)
 	}
 	// After the release a move does not drag the bar.
-	mouseMove(m, fp.x+fp.w-2, barY)
+	mouseMove(m, fp.X+fp.W-2, barY)
 	if got := left(); got != 0 {
 		t.Errorf("a move after the release panned the view to %d", got)
 	}

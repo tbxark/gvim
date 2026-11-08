@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // encodingAction opens the chooser for set_encoding, reload_with_encoding and
@@ -40,20 +41,20 @@ func (m *Model) openEncodings(action, title string) {
 		current = doc.Encoding()
 	}
 	choices := editor.EncodingChoices()
-	rows := make([]listRow, len(choices))
+	rows := make([]list.Row, len(choices))
 	for i, c := range choices {
 		right := ""
 		// Text with no byte above 0x7f is reported as ASCII, and is UTF-8 on disk.
 		if current == c.Label || current == "ASCII" && c.Name == "utf-8" {
 			right = "current"
 		}
-		rows[i] = listRow{left: c.Label, right: right, value: c.Name}
+		rows[i] = list.Row{Left: c.Label, Right: right, Value: c.Name}
 	}
-	v := newListView(title, rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
-		v.active = false
-		return m.dispatch(Command{Action: action, Args: map[string]any{"name": r.value}})
+	v := list.New(title, rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		return m.dispatch(Command{Action: action, Args: map[string]any{"name": r.Value}})
 	})
-	m.pushOverlay(listOverlay{v: v})
+	m.pushOverlay(v)
 }
 
 // openLineEndings lists the two line endings. The ending of the active document is
@@ -63,20 +64,20 @@ func (m *Model) openLineEndings() {
 	if doc := m.ed.Active(); doc != nil {
 		current = doc.LineEnding()
 	}
-	rows := make([]listRow, 0, 2)
+	rows := make([]list.Row, 0, 2)
 	for _, e := range []struct{ label, value string }{{"LF", "lf"}, {"CRLF", "crlf"}} {
 		right := ""
 		if e.label == current {
 			right = "current"
 		}
-		rows = append(rows, listRow{left: e.label, right: right, value: e.value})
+		rows = append(rows, list.Row{Left: e.label, Right: right, Value: e.value})
 	}
-	v := newListView("Select Line Ending", rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
-		v.active = false
-		return m.dispatch(Command{Action: "set_line_ending", Args: map[string]any{"value": r.value}})
+	v := list.New("Select Line Ending", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		return m.dispatch(Command{Action: "set_line_ending", Args: map[string]any{"value": r.Value}})
 	})
-	v.fit = true
-	m.pushOverlay(listOverlay{v: v})
+	v.Fit = true
+	m.pushOverlay(v)
 }
 
 // statusSegmentClick runs the command behind the status row segment i: the line

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/icons"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // iconLabels names each icon use in the preview.
@@ -90,16 +91,15 @@ type openIconPreviewMsg struct{}
 // openIconPreview shows the icon sets side by side, and how to set ui_icons. Enter
 // opens the config file, where the setting is edited.
 func (m *Model) openIconPreview() {
-	v := &boxView{active: true, chrome: m.listChrome()}
-	v.content = func() (string, []string, string) {
+	v := list.NewTextBox(m.listChrome(), func() (string, []string, string) {
 		return "Interface icons", iconPreviewLines(m.util.settings, m.view.icons), "Enter opens the config file, Esc closes"
-	}
-	v.onKey = func(k tea.Key) bool {
+	})
+	v.OnKey = func(k tea.Key) bool {
 		if k.Code != tea.KeyEnter {
 			return false
 		}
 		m.openConfigFile()
 		return true
 	}
-	m.pushOverlay(boxOverlay{v: v})
+	m.pushOverlay(v)
 }

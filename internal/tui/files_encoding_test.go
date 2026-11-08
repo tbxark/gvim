@@ -8,15 +8,25 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
+// shownLefts returns the left text of each row of v that passes the filter.
+func shownLefts(v *list.View) []string {
+	var out []string
+	for _, r := range v.Visible() {
+		out = append(out, r.Left)
+	}
+	return out
+}
+
 // topList returns the list view on top of the overlay stack, or nil.
-func topList(m *Model) *listView {
+func topList(m *Model) *list.View {
 	if len(m.overlays) == 0 {
 		return nil
 	}
-	if o, ok := m.overlays[len(m.overlays)-1].(listOverlay); ok {
-		return o.v
+	if o, ok := m.overlays[len(m.overlays)-1].(*list.View); ok {
+		return o
 	}
 	return nil
 }
@@ -46,7 +56,7 @@ func TestEncodingActionsOpenAChooser(t *testing.T) {
 				t.Fatalf("the action reached the editor without an argument: %v", ed.actions)
 			}
 			v := topList(m)
-			if v == nil || v.title != tt.title {
+			if v == nil || v.Title != tt.title {
 				t.Fatalf("top overlay = %+v, want the %q list", v, tt.title)
 			}
 			for _, r := range tt.filter {
@@ -122,7 +132,7 @@ func TestStatusBarSegmentsOpenTheirChoosers(t *testing.T) {
 				t.Fatalf("no status segment %d in %+v", tt.index, l.status)
 			}
 			m.Update(tea.MouseClickMsg{X: click.x, Y: l.statusY, Button: tea.MouseLeft})
-			if v := topList(m); v == nil || v.title != tt.title {
+			if v := topList(m); v == nil || v.Title != tt.title {
 				t.Fatalf("top overlay after the click = %+v, want the %q list", v, tt.title)
 			}
 		})

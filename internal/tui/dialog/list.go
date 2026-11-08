@@ -51,7 +51,7 @@ func (l *recentList) selected() string {
 // rowAt returns the visible row at (x, y) in the last draw, or -1.
 func (l *recentList) rowAt(x, y int) int {
 	for k, r := range l.rects {
-		if r.contains(x, y) {
+		if r.Contains(x, y) {
 			return k
 		}
 	}
@@ -81,7 +81,7 @@ func (m *modal) listRows() []row {
 				g.Fill(x, x+w, y, st)
 			}
 			g.Put(x+1, y, x+w, l.items[idx], st)
-			l.rects = append(l.rects, rect{x, y, w, 1})
+			l.rects = append(l.rects, rect{X: x, Y: y, W: w, H: 1})
 		})
 	}
 	return rows
@@ -92,7 +92,7 @@ func (m *modal) listRows() []row {
 func (m *modal) fieldRow() row {
 	f := m.field
 	return func(g *grid.Grid, x, y, w int) {
-		m.fieldAt = rect{x, y, w, 1}
+		m.fieldAt = rect{X: x, Y: y, W: w, H: 1}
 		cx, ok := f.draw(g, x, y, w, m.ov.Idle)
 		m.caret = point{cx, y}
 		m.caretOK = ok

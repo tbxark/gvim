@@ -51,28 +51,28 @@ func TestResizeMovesTheRatioOfTheFocusedSplit(t *testing.T) {
 			setup:  []string{"split_vertical"},
 			action: "increase_split_size",
 			ratio:  45,
-			panes:  []rect{{0, 2, 36, 21}, {37, 2, 43, 21}},
+			panes:  []rect{{X: 0, Y: 2, W: 36, H: 21}, {X: 37, Y: 2, W: 43, H: 21}},
 		},
 		{
 			name:   "the focused second pane shrinks",
 			setup:  []string{"split_vertical"},
 			action: "decrease_split_size",
 			ratio:  55,
-			panes:  []rect{{0, 2, 43, 21}, {44, 2, 36, 21}},
+			panes:  []rect{{X: 0, Y: 2, W: 43, H: 21}, {X: 44, Y: 2, W: 36, H: 21}},
 		},
 		{
 			name:   "the focused first pane grows",
 			setup:  []string{"split_vertical", "next_split"},
 			action: "increase_split_size",
 			ratio:  55,
-			panes:  []rect{{0, 2, 43, 21}, {44, 2, 36, 21}},
+			panes:  []rect{{X: 0, Y: 2, W: 43, H: 21}, {X: 44, Y: 2, W: 36, H: 21}},
 		},
 		{
 			name:   "the focused first pane shrinks",
 			setup:  []string{"split_vertical", "next_split"},
 			action: "decrease_split_size",
 			ratio:  45,
-			panes:  []rect{{0, 2, 36, 21}, {37, 2, 43, 21}},
+			panes:  []rect{{X: 0, Y: 2, W: 36, H: 21}, {X: 37, Y: 2, W: 43, H: 21}},
 		},
 	}
 	for _, tt := range tests {
@@ -107,13 +107,13 @@ func TestResizeStopsAtTheRatioBounds(t *testing.T) {
 			name:  "a focused second pane stops at 10 percent",
 			setup: []string{"split_vertical"},
 			ratio: 10,
-			panes: []rect{{0, 2, 8, 21}, {9, 2, 71, 21}},
+			panes: []rect{{X: 0, Y: 2, W: 8, H: 21}, {X: 9, Y: 2, W: 71, H: 21}},
 		},
 		{
 			name:  "a focused first pane stops at 90 percent",
 			setup: []string{"split_vertical", "next_split"},
 			ratio: 90,
-			panes: []rect{{0, 2, 71, 21}, {72, 2, 8, 21}},
+			panes: []rect{{X: 0, Y: 2, W: 71, H: 21}, {X: 72, Y: 2, W: 8, H: 21}},
 		},
 	}
 	for _, tt := range tests {
@@ -151,7 +151,7 @@ func TestResizeTouchesOnlyTheSplitThatHoldsTheFocus(t *testing.T) {
 	if inner.dir != stacked || inner.share() != 45 {
 		t.Errorf("inner split dir %v ratio %d, want stacked at 45", inner.dir, inner.share())
 	}
-	want := []rect{{0, 2, 40, 21}, {41, 2, 39, 9}, {41, 12, 39, 11}}
+	want := []rect{{X: 0, Y: 2, W: 40, H: 21}, {X: 41, Y: 2, W: 39, H: 9}, {X: 41, Y: 12, W: 39, H: 11}}
 	if got := paneRects(m.layout()); !slices.Equal(got, want) {
 		t.Errorf("panes = %v, want %v", got, want)
 	}
@@ -163,7 +163,7 @@ func TestResizeWithOnePaneSaysSo(t *testing.T) {
 	if m.notice != "Only one split is open" {
 		t.Errorf("notice = %q, want the one split notice", m.notice)
 	}
-	if got := paneRects(m.layout()); !slices.Equal(got, []rect{{0, 2, 80, 21}}) {
+	if got := paneRects(m.layout()); !slices.Equal(got, []rect{{X: 0, Y: 2, W: 80, H: 21}}) {
 		t.Errorf("panes = %v, want the whole band", got)
 	}
 }

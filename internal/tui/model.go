@@ -839,12 +839,12 @@ type fileRecorder interface {
 // openGoto shows the go-to-line prompt with input as its text. The prompt takes
 // "N" or "N:COL", and Enter moves the caret there.
 func (m *Model) openGoto(input string) {
-	m.pushOverlay(lineOverlay{l: prompt.NewLine(m.styles, prompt.LineOptions{
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
 		Label:    "Go to line:",
 		Input:    input,
 		Tag:      gotoTag{},
 		Validate: prompt.ValidateLineCol,
-	})})
+	}))
 }
 
 // gotoText applies the text of the go-to-line prompt. The prompt has already
@@ -857,46 +857,6 @@ func (m *Model) gotoText(text string) {
 	}
 	m.gotoLine(line, col)
 }
-
-// lineOverlay adapts *prompt.Line to Overlay. The prompt closes itself when it
-// submits or is closed, and the adapter reports that to the stack.
-type lineOverlay struct{ l *prompt.Line }
-
-// Update forwards the message to the prompt. It returns nil once the prompt is
-// closed, so the stack pops it.
-func (o lineOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
-	l, cmd := o.l.Update(msg)
-	if !l.Active() {
-		return nil, cmd
-	}
-	return lineOverlay{l: l}, cmd
-}
-
-// Draw paints the prompt on the bottom row.
-func (o lineOverlay) Draw(g *grid.Grid) { o.l.Draw(g) }
-
-// Active reports whether the prompt is still open.
-func (o lineOverlay) Active() bool { return o.l.Active() }
-
-// confirmOverlay adapts *prompt.Confirm to Overlay, as lineOverlay does for
-// text prompts.
-type confirmOverlay struct{ c *prompt.Confirm }
-
-// Update forwards the message to the confirm. It returns nil once the confirm is
-// closed, so the stack pops it.
-func (o confirmOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
-	c, cmd := o.c.Update(msg)
-	if !c.Active() {
-		return nil, cmd
-	}
-	return confirmOverlay{c: c}, cmd
-}
-
-// Draw paints the question on the bottom row.
-func (o confirmOverlay) Draw(g *grid.Grid) { o.c.Draw(g) }
-
-// Active reports whether the confirm is still open.
-func (o confirmOverlay) Active() bool { return o.c.Active() }
 
 // needOps reports whether the file operations are wired. When they are not, the
 // notice row says so and the operation does nothing.
@@ -916,11 +876,11 @@ func (m *Model) askName(dir string, folder bool) {
 	if folder {
 		label = "New folder:"
 	}
-	m.pushOverlay(lineOverlay{l: prompt.NewLine(m.styles, prompt.LineOptions{
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
 		Label:    label,
 		Tag:      newNameTag{dir: dir, folder: folder},
 		Validate: validateName,
-	})})
+	}))
 }
 
 // askRename opens the rename prompt for path, with its current name filled in.
@@ -928,12 +888,12 @@ func (m *Model) askRename(path string) {
 	if !m.needOps() {
 		return
 	}
-	m.pushOverlay(lineOverlay{l: prompt.NewLine(m.styles, prompt.LineOptions{
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
 		Label:    "Rename to:",
 		Input:    filepath.Base(path),
 		Tag:      renameTag{path: path},
 		Validate: validateName,
-	})})
+	}))
 }
 
 // askDelete opens the Yes/No confirm for trashing paths. The focus starts on No. With
@@ -946,14 +906,14 @@ func (m *Model) askDelete(paths ...string) {
 	if len(paths) > 1 {
 		q = fmt.Sprintf("Delete %d items?", len(paths))
 	}
-	m.pushOverlay(confirmOverlay{c: prompt.NewConfirm(m.styles, q, deleteTag{paths: paths})})
+	m.pushOverlay(prompt.NewConfirm(m.styles, q, deleteTag{paths: paths}))
 }
 
 // askOverwrite asks whether a copy that hit an existing destination may replace
 // it. Yes runs the copy with the overwrite policy, and No runs it with skip.
 func (m *Model) askOverwrite(job fileJob) {
 	q := "Overwrite " + filepath.Base(job.path) + "?"
-	m.pushOverlay(confirmOverlay{c: prompt.NewConfirm(m.styles, q, overwriteTag{job: job})})
+	m.pushOverlay(prompt.NewConfirm(m.styles, q, overwriteTag{job: job}))
 }
 
 // validateName is the name check of the explorer prompts. It keeps the prompt
@@ -1222,31 +1182,8 @@ func (m *Model) openBrowser(folderOnly bool) {
 		Styles:     m.styles,
 		Now:        m.now,
 	})
-	m.pushOverlay(browserOverlay{b: b})
+	m.pushOverlay(b)
 }
-
-// browserOverlay adapts *browser.Browser to Overlay. The browser cannot name
-// Overlay, because that would import this package. The browser closes itself
-// when it sends a choice, and the adapter reports that to the stack.
-type browserOverlay struct {
-	b *browser.Browser
-}
-
-// Update forwards the message to the browser. It returns nil once the browser is
-// closed, so the stack pops it.
-func (o browserOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
-	b, cmd := o.b.Update(msg)
-	if !b.Active() {
-		return nil, cmd
-	}
-	return o, cmd
-}
-
-// Draw paints the browser over the frame.
-func (o browserOverlay) Draw(g *grid.Grid) { o.b.Draw(g) }
-
-// Active reports whether the browser is still open.
-func (o browserOverlay) Active() bool { return o.b.Active() }
 
 // openPalette shows the command palette with query as its input and returns the
 // command that ranks its files, if the query is a file query.
@@ -1262,7 +1199,7 @@ func (m *Model) openPalette(query string) tea.Cmd {
 		Ranker:   m.ranker,
 		Theme:    m.theme,
 	})
-	m.pushOverlay(paletteOverlay{p: p})
+	m.pushOverlay(p)
 	return p.Init()
 }
 
@@ -1302,33 +1239,6 @@ func (m *Model) paletteBuffers() []palette.Buffer {
 	}
 	return out
 }
-
-// paletteOverlay adapts *palette.Palette to Overlay. The palette cannot name
-// Overlay, because that would import this package. The palette closes itself
-// when a row runs, and the adapter reports that to the stack.
-type paletteOverlay struct {
-	p *palette.Palette
-}
-
-// Update forwards the message to the palette. It returns nil once the palette is
-// closed, so the stack pops it.
-func (o paletteOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
-	cmd := o.p.Update(msg)
-	if !o.p.Active() {
-		return nil, cmd
-	}
-	return o, cmd
-}
-
-// Draw paints the palette over the frame.
-func (o paletteOverlay) Draw(g *grid.Grid) { o.p.Draw(g) }
-
-// Covers reports whether the point is on the palette card. The root gives a press
-// elsewhere to the frame.
-func (o paletteOverlay) Covers(x, y, w, h int) bool { return o.p.Covers(x, y, w, h) }
-
-// Active reports whether the palette is still open.
-func (o paletteOverlay) Active() bool { return o.p.Active() }
 
 // rankerAdapter maps the root's FileRanker to the palette's Ranker. The two
 // Ranked types are distinct, so the rows are copied.
@@ -1806,11 +1716,11 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
 	case editorpane.HitScrollbarThumb:
 		m.drag = drag{active: true, thumb: true}
 	case editorpane.HitScrollbarTrack:
-		m.ed.ScrollTo(p.ScrollTopFor(m.layout().focusedPane().w, m.bodyRows(), hit.Row))
+		m.ed.ScrollTo(p.ScrollTopFor(m.layout().focusedPane().W, m.bodyRows(), hit.Row))
 		m.drag = drag{active: true, thumb: true}
 	case editorpane.HitHScrollbar:
 		m.drag = drag{active: true, hbar: true}
-		m.panBar(hit.Col + m.layout().focusedPane().x)
+		m.panBar(hit.Col + m.layout().focusedPane().X)
 	case editorpane.HitText, editorpane.HitGutter:
 		if hit.Fold && m.toggleFoldAt(hit.Pos.Line) {
 			return
@@ -1863,7 +1773,7 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 		return nil
 	}
 	fp := m.layout().focusedPane()
-	w, h := fp.w, fp.h
+	w, h := fp.W, fp.H
 	if h <= 0 || w <= 0 {
 		return nil
 	}
@@ -1878,7 +1788,7 @@ func (m *Model) handleDrag(mo tea.Mouse) tea.Cmd {
 		if rows <= 0 {
 			return nil
 		}
-		y := min(max(mo.Y-fp.y, 0), rows-1)
+		y := min(max(mo.Y-fp.Y, 0), rows-1)
 		m.ed.ScrollTo(m.paneFor(fp, doc).ScrollTopFor(w, rows, y))
 		return nil
 	}
@@ -2153,7 +2063,7 @@ func (m *Model) layout() layout {
 func (m *Model) statusHidden() bool {
 	return slices.ContainsFunc(m.overlays, func(o Overlay) bool {
 		switch o.(type) {
-		case paletteOverlay, browserOverlay:
+		case *palette.Palette, *browser.Browser:
 			return true
 		}
 		return false
@@ -2294,17 +2204,11 @@ func (m *Model) paintEditor(g *grid.Grid, l layout) {
 // editor does not have the focus, an overlay is open, or the caret is outside
 // the body.
 func (m *Model) caret() (x, y int, ok bool) {
-	// The find bar, when it is the top overlay, shows the caret in its search row.
 	// The overlays come before the explorer check, so a bar or dialog opened from the
-	// explorer keeps its caret.
+	// explorer keeps its caret. The find bar, a dialog's text field and a prompt report
+	// their caret through overlay.Caret.
 	if n := len(m.overlays); n > 0 {
-		if fo, isFind := m.overlays[n-1].(findOverlay); isFind {
-			return fo.b.Cursor(m.width, m.height)
-		}
-		// A dialog with a text field reports its caret the same way.
-		if c, ok := m.overlays[n-1].(interface {
-			Cursor(w, h int) (int, int, bool)
-		}); ok {
+		if c, ok := m.overlays[n-1].(Caret); ok {
 			return c.Cursor(m.width, m.height)
 		}
 		return 0, 0, false
@@ -2324,11 +2228,11 @@ func (m *Model) caret() (x, y int, ok bool) {
 		return 0, 0, false
 	}
 	fp := l.focusedPane()
-	cx, cy, ok := m.paneFor(fp, doc).Caret(fp.w, fp.h)
+	cx, cy, ok := m.paneFor(fp, doc).Caret(fp.W, fp.H)
 	if !ok {
 		return 0, 0, false
 	}
-	return fp.x + cx, fp.y + cy, true
+	return fp.X + cx, fp.Y + cy, true
 }
 
 // overlayInput reports whether msg is input that the top overlay takes: a key

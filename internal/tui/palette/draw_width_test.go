@@ -14,9 +14,9 @@ func TestGrepRowShowsTheMatchedTextInAWideFrame(t *testing.T) {
 	g := &fakeGrepper{hits: []GrepHit{{Rel: rel, Line: 103, Col: 1, Text: "compileCache()"}}}
 	p := New(liveOptions("", &fakeFiles{files: []string{rel}}, g))
 	draw(p, 120, 30)
-	settle(t, p, p.Update(typed("c")), 4)
+	settle(t, p, p.update(typed("c")), 4)
 	for _, c := range "ompileCache" {
-		settle(t, p, p.Update(typed(string(c))), 4)
+		settle(t, p, p.update(typed(string(c))), 4)
 	}
 	if got := draw(p, 120, 30); !hasRow(got, rel+":103: compileCache()") {
 		t.Fatalf("grep row is cut:\n%s", got)

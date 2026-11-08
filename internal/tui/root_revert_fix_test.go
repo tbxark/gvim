@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -119,7 +120,7 @@ func TestRevertFileAsksBeforeDiscardingChanges(t *testing.T) {
 				if len(m.overlays) == 0 {
 					t.Fatal("revert of a modified buffer did not open a confirm")
 				}
-				if _, ok := m.overlays[len(m.overlays)-1].(confirmOverlay); !ok {
+				if _, ok := m.overlays[len(m.overlays)-1].(*prompt.Confirm); !ok {
 					t.Fatal("the overlay on top of a modified buffer's revert is not a confirm")
 				}
 				if !strings.Contains(m.paint().String(), "Discard changes?") {

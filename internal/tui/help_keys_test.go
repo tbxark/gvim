@@ -55,21 +55,21 @@ func TestHelpChordsRunTheirAction(t *testing.T) {
 		l := presetLister{m}
 		rows := 0
 		for _, r := range helpRows(l, nil) {
-			if r.header {
+			if r.Header {
 				continue
 			}
 			rows++
-			p, ok := l.Primary(r.value)
+			p, ok := l.Primary(r.Value)
 			if !ok {
-				t.Errorf("%s: help row %q has no binding that runs", name, r.value)
+				t.Errorf("%s: help row %q has no binding that runs", name, r.Value)
 				continue
 			}
-			if want := keymap.FormatChord(p.Chord); r.right != want {
-				t.Errorf("%s: help row %q shows %q, want %q", name, r.value, r.right, want)
+			if want := keymap.FormatChord(p.Chord); r.Right != want {
+				t.Errorf("%s: help row %q shows %q, want %q", name, r.Value, r.Right, want)
 			}
 			b, ok := resolveAs(m, p.Chord, p.Context)
-			if !ok || b.Action != r.value {
-				t.Errorf("%s: help shows %s for %s, but the key runs %q (%v)", name, p.Chord, r.value, b.Action, ok)
+			if !ok || b.Action != r.Value {
+				t.Errorf("%s: help shows %s for %s, but the key runs %q (%v)", name, p.Chord, r.Value, b.Action, ok)
 			}
 		}
 		if rows < 60 {
@@ -88,8 +88,8 @@ func TestHelpLeavesOutActionsThatTheirPresetShadows(t *testing.T) {
 	}
 	listed := map[string]bool{}
 	for _, r := range helpRows(presetLister{m}, nil) {
-		if !r.header {
-			listed[r.value] = true
+		if !r.Header {
+			listed[r.Value] = true
 		}
 	}
 	for _, action := range []string{"replace", "focus_file_explorer", "select_line_start", "expand_line_selection"} {

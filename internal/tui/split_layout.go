@@ -2,13 +2,8 @@ package tui
 
 import "github.com/tbxark/gvim/internal/tui/space"
 
-// rect is a rectangle of frame cells: its first column and row, and its size.
-type rect struct{ x, y, w, h int }
-
-// contains reports whether cell (x, y) is inside r.
-func (r rect) contains(x, y int) bool {
-	return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h
-}
+// rect is a rectangle of frame cells, the shared geometry type of space.Rect.
+type rect = space.Rect
 
 // splitPane is one editor pane of the body, placed by computeLayout. Its rectangle
 // holds the gutter, the text and, on the last column, the scrollbar. The pane's
@@ -90,19 +85,19 @@ func placeSplits(n *splitNode, r rect, rects *[]rect, borders *[]splitBorder) {
 	var a, b rect
 	var line splitBorder
 	if n.dir == sideBySide {
-		first, second := splitSpan(r.w, n.share())
-		a = rect{r.x, r.y, first, r.h}
-		b = rect{r.x + first + 1, r.y, second, r.h}
-		line = splitBorder{rect: rect{r.x + first, r.y, 1, r.h}, vertical: true, node: n, area: r}
-		if r.w > 0 {
+		first, second := splitSpan(r.W, n.share())
+		a = rect{X: r.X, Y: r.Y, W: first, H: r.H}
+		b = rect{X: r.X + first + 1, Y: r.Y, W: second, H: r.H}
+		line = splitBorder{rect: rect{X: r.X + first, Y: r.Y, W: 1, H: r.H}, vertical: true, node: n, area: r}
+		if r.W > 0 {
 			*borders = append(*borders, line)
 		}
 	} else {
-		first, second := splitSpan(r.h, n.share())
-		a = rect{r.x, r.y, r.w, first}
-		b = rect{r.x, r.y + first + 1, r.w, second}
-		line = splitBorder{rect: rect{r.x, r.y + first, r.w, 1}, vertical: false, node: n, area: r}
-		if r.h > 0 {
+		first, second := splitSpan(r.H, n.share())
+		a = rect{X: r.X, Y: r.Y, W: r.W, H: first}
+		b = rect{X: r.X, Y: r.Y + first + 1, W: r.W, H: second}
+		line = splitBorder{rect: rect{X: r.X, Y: r.Y + first, W: r.W, H: 1}, vertical: false, node: n, area: r}
+		if r.H > 0 {
 			*borders = append(*borders, line)
 		}
 	}
@@ -116,7 +111,7 @@ func (l layout) focusedPane() splitPane {
 	if l.focus >= 0 && l.focus < len(l.panes) {
 		return l.panes[l.focus]
 	}
-	return splitPane{x: l.editorX, y: l.bodyTop, w: max(l.w-l.editorX, 0), h: max(l.bodyBottom-l.bodyTop+1, 0)}
+	return splitPane{X: l.editorX, Y: l.bodyTop, W: max(l.w-l.editorX, 0), H: max(l.bodyBottom-l.bodyTop+1, 0)}
 }
 
 // placePanes sets the panes, the lines between them and the focus from the split
@@ -128,7 +123,7 @@ func (l *layout) placePanes(in layoutInput) {
 		shape = &splitNode{}
 		leaves = []leafInfo{{tab: -1, lines: in.lines, focused: true}}
 	}
-	band := rect{x: l.editorX, y: l.bodyTop, w: max(l.w-l.editorX, 0), h: max(l.bodyBottom-l.bodyTop+1, 0)}
+	band := rect{X: l.editorX, Y: l.bodyTop, W: max(l.w-l.editorX, 0), H: max(l.bodyBottom-l.bodyTop+1, 0)}
 	var rects []rect
 	l.borders = nil
 	if in.maximized {
@@ -146,16 +141,16 @@ func (l *layout) placePanes(in layoutInput) {
 		// With the gutter hidden the text would start on the pane's first column, right
 		// against the explorer border or the split line. The pane gives up PadX cells
 		// at its left edge for that, so its text starts PadX cells in.
-		if in.hideLineNumbers && r.w > space.PadX {
-			r.x, r.w = r.x+space.PadX, r.w-space.PadX
+		if in.hideLineNumbers && r.W > space.PadX {
+			r.X, r.W = r.X+space.PadX, r.W-space.PadX
 		}
 		p := splitPane{rect: r, tab: li.tab, top: li.top, focused: li.focused}
 		if !in.hideLineNumbers {
 			p.gutter = gutterWidth(li.lines)
 		}
-		p.textX = r.x + p.gutter
-		p.textW = max(0, r.x+r.w-p.textX)
-		p.scrollbar = r.h > 0 && li.lines > r.h
+		p.textX = r.X + p.gutter
+		p.textW = max(0, r.X+r.W-p.textX)
+		p.scrollbar = r.H > 0 && li.lines > r.H
 		l.panes[i] = p
 		if li.focused {
 			l.focus = i

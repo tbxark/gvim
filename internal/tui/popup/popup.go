@@ -18,8 +18,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/space"
 )
+
+// The popup is an overlay of the root's stack.
+var _ overlay.Overlay = (*Popup)(nil)
 
 // maxRows is the most item rows a popup shows at once.
 const maxRows = 10
@@ -115,9 +119,9 @@ func (p *Popup) Selected() int { return p.sel }
 // Items returns a copy of the items the popup lists.
 func (p *Popup) Items() []Item { return slices.Clone(p.items) }
 
-// Update handles one key or mouse message and returns the command it starts: the
+// update handles one key or mouse message and returns the command it starts: the
 // Chosen message when a row is chosen. Other messages are ignored.
-func (p *Popup) Update(msg tea.Msg) tea.Cmd {
+func (p *Popup) update(msg tea.Msg) tea.Cmd {
 	if !p.open {
 		return nil
 	}
@@ -165,6 +169,16 @@ func (p *Popup) Update(msg tea.Msg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// Update handles one message through the overlay contract: it runs update and
+// returns the popup, or nil once it is closed so the stack pops it.
+func (p *Popup) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
+	cmd := p.update(msg)
+	if !p.Active() {
+		return nil, cmd
+	}
+	return p, cmd
 }
 
 // choose closes the popup and returns the command that sends the Chosen message

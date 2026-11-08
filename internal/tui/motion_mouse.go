@@ -105,21 +105,21 @@ type dragScrollMsg struct{ seq int }
 func (m *Model) dragSelect(fromTick bool) tea.Cmd {
 	doc := m.ed.Active()
 	fp := m.layout().focusedPane()
-	if doc == nil || fp.w <= 0 || fp.h <= 0 {
+	if doc == nil || fp.W <= 0 || fp.H <= 0 {
 		m.drag.tick = 0
 		return nil
 	}
-	w, h := fp.w, fp.h
+	w, h := fp.W, fp.H
 	p := m.paneFor(fp, doc)
-	x := min(max(m.drag.last.X-fp.x, 0), w-1)
-	py := m.drag.last.Y - fp.y
+	x := min(max(m.drag.last.X-fp.X, 0), w-1)
+	py := m.drag.last.Y - fp.Y
 	before := doc.Cursor()
 	pos := m.dragPos(p, doc, w, h, x, py)
 	last := max(p.BodyRows(w, h), 1) - 1
 	vs, vd := pastEdge(py, 0, last)
 	var hs, hd int
 	if p.PansSideways() {
-		hs, hd = pastEdge(m.drag.last.X-fp.x, fp.gutter, w-2)
+		hs, hd = pastEdge(m.drag.last.X-fp.X, fp.gutter, w-2)
 	}
 	if fromTick {
 		pos = dragStepPos(doc, pos, before, vs*dragStep(vd), hs*dragStep(hd), vs != 0, hs != 0)
@@ -220,11 +220,11 @@ func (m *Model) applyPan(pane editorpane.Pane, doc Document) editorpane.Pane {
 func (m *Model) panBar(x int) {
 	doc := m.ed.Active()
 	fp := m.layout().focusedPane()
-	if doc == nil || fp.w <= 0 || fp.h <= 0 {
+	if doc == nil || fp.W <= 0 || fp.H <= 0 {
 		return
 	}
 	m.mx.pan = panView{
-		on: true, left: m.paneGeometry(fp, doc).HScrollFor(fp.w, fp.h, x-fp.x),
+		on: true, left: m.paneGeometry(fp, doc).HScrollFor(fp.W, fp.H, x-fp.X),
 		tab: m.activeTab(), caret: doc.Cursor(),
 	}
 }
@@ -255,7 +255,7 @@ func (m *Model) panWheel(i int, mo tea.Mouse) bool {
 		return true
 	}
 	fp := l.panes[i]
-	left, most := m.paneGeometry(fp, doc).HScroll(fp.w, fp.h)
+	left, most := m.paneGeometry(fp, doc).HScroll(fp.W, fp.H)
 	m.mx.pan = panView{
 		on: true, left: min(max(left+dx, 0), most),
 		tab: m.activeTab(), caret: doc.Cursor(),

@@ -49,7 +49,7 @@ func TestLiveGrepSearchesInACommandOverTheFiles(t *testing.T) {
 	files := &fakeFiles{files: []string{"a.go", "src/b.go"}}
 	p := New(liveOptions("", files, g))
 	draw(p, 100, 30)
-	cmd := p.Update(typed("t"))
+	cmd := p.update(typed("t"))
 	if len(g.calls) != 0 {
 		t.Fatalf("typing searched %d times in Update, want 0", len(g.calls))
 	}
@@ -76,16 +76,16 @@ func TestLiveGrepShowsMatchesAndEnterOpensTheLine(t *testing.T) {
 	files := &fakeFiles{files: []string{"src/b.go"}}
 	p := New(liveOptions("", files, g))
 	draw(p, 100, 30)
-	settle(t, p, p.Update(typed("t")), 4)
+	settle(t, p, p.update(typed("t")), 4)
 	for _, c := range "odo" {
-		settle(t, p, p.Update(typed(string(c))), 4)
+		settle(t, p, p.update(typed(string(c))), 4)
 	}
 	g2 := draw(p, 100, 30)
 	if !hasRow(g2, "src/b.go:3: func todo() {}") {
 		t.Fatalf("hit row not shown:\n%s", g2)
 	}
 	want := OpenLineMsg{Path: "/w/src/b.go", Line: 3, Col: 5}
-	if got := runCmd(p.Update(key(tea.KeyEnter))); got != want {
+	if got := runCmd(p.update(key(tea.KeyEnter))); got != want {
 		t.Fatalf("Enter emitted %#v, want %#v", got, want)
 	}
 	if p.Active() {
@@ -142,9 +142,9 @@ func TestLiveGrepStaleResultIsDropped(t *testing.T) {
 	t.Parallel()
 	p := New(liveOptions("", &fakeFiles{}, &fakeGrepper{}))
 	draw(p, 100, 30)
-	p.Update(typed("a"))
-	p.Update(typed("b"))
-	p.Update(GrepResultMsg{Seq: 2, Text: "a", Hits: []GrepHit{{Rel: "old.go", Line: 1, Col: 1, Text: "a"}}})
+	p.update(typed("a"))
+	p.update(typed("b"))
+	p.update(GrepResultMsg{Seq: 2, Text: "a", Hits: []GrepHit{{Rel: "old.go", Line: 1, Col: 1, Text: "a"}}})
 	if hasRow(draw(p, 100, 30), "old.go") {
 		t.Fatal("a stale result replaced the rows of the current query")
 	}
@@ -156,8 +156,8 @@ func TestLiveGrepErrorIsShownAsARow(t *testing.T) {
 	t.Parallel()
 	p := New(liveOptions("", &fakeFiles{}, &fakeGrepper{}))
 	draw(p, 100, 30)
-	p.Update(typed("a"))
-	p.Update(GrepResultMsg{Seq: p.seq, Text: "a", Err: errors.New("read failed")})
+	p.update(typed("a"))
+	p.update(GrepResultMsg{Seq: p.seq, Text: "a", Err: errors.New("read failed")})
 	if !hasRow(draw(p, 100, 30), "Live Grep: read failed") {
 		t.Fatal("the search error is not shown")
 	}

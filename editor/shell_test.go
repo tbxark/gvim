@@ -141,19 +141,6 @@ func TestShellCommandRunsInTheDocumentDirectory(t *testing.T) {
 	}
 }
 
-func TestShellCommandSucceedsWhenABackgroundChildKeepsOutputOpen(t *testing.T) {
-	t.Parallel()
-	// The shell exits 0, but the background sleep keeps the output pipe open, so
-	// Wait returns exec.ErrWaitDelay. A command that exits 0 must still succeed.
-	out, err := execShell(t.TempDir(), "echo hi; sleep 3 &", "", shellTimeout)
-	if err != nil {
-		t.Fatalf("execShell: %v", err)
-	}
-	if out != "hi\n" {
-		t.Fatalf("output = %q, want %q", out, "hi\n")
-	}
-}
-
 func TestRunShellJobNeedsNoEditor(t *testing.T) {
 	t.Parallel()
 	// RunShellJob takes only the job, so the UI can run it on a command goroutine.

@@ -23,9 +23,9 @@ func (m *Model) dragBorder(x, y int) {
 	if !ok {
 		return
 	}
-	at, origin, extent := x, line.area.x, line.area.w
+	at, origin, extent := x, line.area.X, line.area.W
 	if !line.vertical {
-		at, origin, extent = y, line.area.y, line.area.h
+		at, origin, extent = y, line.area.Y, line.area.H
 	}
 	if extent < 2 {
 		return

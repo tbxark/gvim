@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/pluginhost"
 )
 
 func TestLiveGrepSkipsTheFilesThatOpenInLargeFileMode(t *testing.T) {
@@ -59,8 +60,8 @@ func TestReadSearchableSkipFrom(t *testing.T) {
 		{1, false},
 	}
 	for _, tt := range tests {
-		if _, ok := readSearchable(path, tt.skipFrom); ok != tt.want {
-			t.Errorf("readSearchable(100-byte file, skipFrom %d) = %v, want %v", tt.skipFrom, ok, tt.want)
+		if _, ok := pluginhost.ReadSearchable(path, tt.skipFrom); ok != tt.want {
+			t.Errorf("pluginhost.ReadSearchable(100-byte file, skipFrom %d) = %v, want %v", tt.skipFrom, ok, tt.want)
 		}
 	}
 }

@@ -95,7 +95,7 @@ func TestDecorPaintsTheDocumentsPane(t *testing.T) {
 	p := panesOf(t, m, 1)[0]
 	g := m.paint()
 	at := func(col, line int) (string, color.Color, color.Color) {
-		c := g.At(p.textX+col, p.y+line)
+		c := g.At(p.textX+col, p.Y+line)
 		return c.Text, c.Style.FG, c.Style.BG
 	}
 	// The highlight covers "wor" and nothing else.
@@ -109,11 +109,11 @@ func TestDecorPaintsTheDocumentsPane(t *testing.T) {
 		t.Errorf("virtual text cell = %q fg %v, want a green <", txt, fg)
 	}
 	// The gutter mark replaces the first gutter column of line 2.
-	if c := g.At(p.x, p.y+2); c.Text != "+" || c.Style.FG != dGreen {
+	if c := g.At(p.X, p.Y+2); c.Text != "+" || c.Style.FG != dGreen {
 		t.Errorf("gutter cell = %q fg %v, want a green +", c.Text, c.Style.FG)
 	}
 	// The scroll mark is in the last column of the pane.
-	if c := g.At(p.x+p.w-1, p.y+1); c.Style.FG != dRed {
+	if c := g.At(p.X+p.W-1, p.Y+1); c.Style.FG != dRed {
 		t.Errorf("scroll mark fg = %v, want red", c.Style.FG)
 	}
 	// The replacement shows over the "h" of "third", on a line that has a row style.
@@ -145,10 +145,10 @@ func TestDecorFollowsTheTextWhenAnchorsMove(t *testing.T) {
 	// one line, and the first line is clear.
 	m.plug.decor.Apply(1, []decorations.Edit{{Text: "new\n"}}, false)
 	g := m.paint()
-	if got := g.At(p.textX+6, p.y).Style.BG; got != nil {
+	if got := g.At(p.textX+6, p.Y).Style.BG; got != nil {
 		t.Errorf("line 0 is still highlighted: bg %v", got)
 	}
-	if got := g.At(p.textX+6, p.y+1).Style.BG; got != dBlue {
+	if got := g.At(p.textX+6, p.Y+1).Style.BG; got != dBlue {
 		t.Errorf("line 1 bg = %v, want the highlight that moved down", got)
 	}
 }
@@ -165,11 +165,11 @@ func TestDecorByteColumnsBecomeRuneColumns(t *testing.T) {
 	g := m.paint()
 	// Cells: é at 0, 世 at 1 and 2 (wide), x at 3.
 	for col, want := range map[int]color.Color{0: nil, 1: dBlue, 3: nil} {
-		if got := g.At(p.textX+col, p.y).Style.BG; got != want {
+		if got := g.At(p.textX+col, p.Y).Style.BG; got != want {
 			t.Errorf("cell %d bg = %v, want %v", col, got, want)
 		}
 	}
-	if got := g.At(p.textX+1, p.y).Text; got != "世" {
+	if got := g.At(p.textX+1, p.Y).Text; got != "世" {
 		t.Errorf("cell 1 = %q, want 世", got)
 	}
 }
@@ -184,10 +184,10 @@ func TestDecorOnlyOnItsOwnDocumentAcrossSplits(t *testing.T) {
 	}
 	ps := panesOf(t, m, 2)
 	g := m.paint()
-	if got := g.At(ps[0].textX, ps[0].y).Style.BG; got != nil {
+	if got := g.At(ps[0].textX, ps[0].Y).Style.BG; got != nil {
 		t.Errorf("the pane of buffer 1 shows buffer 2's decoration: bg %v", got)
 	}
-	if got := g.At(ps[1].textX, ps[1].y).Style.BG; got != dBlue {
+	if got := g.At(ps[1].textX, ps[1].Y).Style.BG; got != dBlue {
 		t.Errorf("the pane of buffer 2 bg = %v, want blue", got)
 	}
 }

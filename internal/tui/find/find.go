@@ -8,9 +8,8 @@
 // searches from, and the selection it made. The root implements Editor over the
 // editor, so every change of text and selection goes through the editor.
 //
-// The bar does not import the ui root. The root wraps *Bar in its Overlay type
-// (see internal/ui/ports.go), because an interface method cannot name a type
-// from a package that imports this one.
+// *Bar implements overlay.Overlay directly, so the root stacks it without an
+// adapter.
 package find
 
 import (
@@ -24,8 +23,15 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/search"
+)
+
+// The bar is an overlay of the root's stack.
+var (
+	_ overlay.Overlay = (*Bar)(nil)
+	_ overlay.Caret   = (*Bar)(nil)
 )
 
 // Labels of the bar. The search and replace prompts are the legacy texts.
@@ -364,11 +370,12 @@ func (b *Bar) StartQueryReplace() {
 	b.queryStep()
 }
 
-// Update handles one message. Key presses edit the bar. A paste, and the clipboard text
-// that Ctrl+V asked for, go to the focused field, except in query-replace. The returned
-// command is the clipboard read of Ctrl+V, and nil otherwise, because the bar answers every
-// change through Editor.
-func (b *Bar) Update(msg tea.Msg) (*Bar, tea.Cmd) {
+// Update handles one message and returns the bar itself, so the root can stack it as an
+// overlay. Key presses edit the bar. A paste, and the clipboard text that Ctrl+V asked
+// for, go to the focused field, except in query-replace. The returned command is the
+// clipboard read of Ctrl+V, and nil otherwise, because the bar answers every change
+// through Editor.
+func (b *Bar) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		if b.qr == nil {
@@ -506,6 +513,10 @@ func (b *Bar) commit() {
 // Cancel closes the bar as Esc does: it ends a running query-replace and puts the
 // caret and selection back where they were when the bar opened, if the bar moved
 // them to a match. The root calls it when it pops the bar on Esc.
+// Dismiss cancels the bar, as Esc does. The root calls it when it pops an
+// overlay on Esc.
+func (b *Bar) Dismiss() { b.Cancel() }
+
 func (b *Bar) Cancel() {
 	if b.qr != nil {
 		b.finishQuery()

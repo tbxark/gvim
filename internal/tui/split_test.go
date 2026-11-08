@@ -175,7 +175,7 @@ func TestSplitActionsShareTheTabInTheNewPane(t *testing.T) {
 			if !second.focused || first.focused || l.focus != 1 {
 				t.Errorf("focus on pane %d, want the new pane 1", l.focus)
 			}
-			if stacked := second.y > first.y; stacked != tt.stacked {
+			if stacked := second.Y > first.Y; stacked != tt.stacked {
 				t.Errorf("stacked = %v, want %v: panes %+v and %+v", stacked, tt.stacked, first, second)
 			}
 		})

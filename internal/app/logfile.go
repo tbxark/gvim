@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -177,4 +178,12 @@ func startLogFile(path string, diags []config.Diagnostic) (*fileLog, string) {
 		l.write("config", d.String())
 	}
 	return l, ""
+}
+
+// gvimVersion is the module version of the binary, or "dev" for a build from a work tree.
+func gvimVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
 }

@@ -219,7 +219,7 @@ func (m *modal) click(x, y int) tea.Cmd {
 		m.setFocusButton(i)
 		return m.onPress(i)
 	}
-	if m.field != nil && m.fieldAt.contains(x, y) {
+	if m.field != nil && m.fieldAt.Contains(x, y) {
 		m.focus = 0
 		return nil
 	}
@@ -235,7 +235,7 @@ func (m *modal) click(x, y int) tea.Cmd {
 // buttonAt returns the index of the button drawn at (x, y), or -1.
 func (m *modal) buttonAt(x, y int) int {
 	for i, r := range m.hits {
-		if r.contains(x, y) {
+		if r.Contains(x, y) {
 			return i
 		}
 	}

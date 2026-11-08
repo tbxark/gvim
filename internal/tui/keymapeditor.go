@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // keymapPresets are the built-in keymaps the switch lists, in menu order.
@@ -12,21 +13,21 @@ var keymapPresets = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 // openKeymapSwitch lists the built-in keymaps. The active one is marked, and
 // choosing a row switches to it.
 func (m *Model) openKeymapSwitch() {
-	rows := make([]listRow, len(keymapPresets))
+	rows := make([]list.Row, len(keymapPresets))
 	for i, name := range keymapPresets {
 		right := ""
 		if name == m.util.settings.Keymap {
 			right = "current"
 		}
-		rows[i] = listRow{left: name, right: right, value: name}
+		rows[i] = list.Row{Left: name, Right: right, Value: name}
 	}
-	v := newListView("Keymap", rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
-		v.active = false
-		m.switchKeymap(r.value)
+	v := list.New("Keymap", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		m.switchKeymap(r.Value)
 		return nil
 	})
-	v.hint = "Type to filter, Up/Down move, Enter switch, Esc close"
-	m.pushOverlay(listOverlay{v: v})
+	v.Hint = "Type to filter, Up/Down move, Enter switch, Esc close"
+	m.pushOverlay(v)
 }
 
 // switchKeymap replaces the keymap the next key press resolves in with the preset

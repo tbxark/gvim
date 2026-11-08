@@ -37,7 +37,7 @@ func (m *Model) rowWindow(line, col int) (starts []int, tall bool) {
 		return nil, false
 	}
 	fp := l.focusedPane()
-	return m.paneGeometry(fp, doc).RowWindow(fp.w, fp.h, line, col)
+	return m.paneGeometry(fp, doc).RowWindow(fp.W, fp.H, line, col)
 }
 
 // rowStarts returns the columns at which the display rows of a line of the active
@@ -52,7 +52,7 @@ func (m *Model) rowStarts(line int) []int {
 		return nil
 	}
 	fp := l.focusedPane()
-	return m.paneGeometry(fp, doc).RowStarts(fp.w, fp.h, line)
+	return m.paneGeometry(fp, doc).RowStarts(fp.W, fp.H, line)
 }
 
 // revealCaretCentered scrolls the editor body so the caret line is on screen after a

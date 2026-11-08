@@ -155,7 +155,7 @@ func (m Model) Runs(w int, c Content) []Run {
 			// The path keeps the room it needs, and the message keeps at least half.
 			msgMax = max(room-pathW, room/2)
 		}
-		msg := truncateCells(message, msgMax)
+		msg := space.End(message, msgMax)
 		msgW = ansi.StringWidth(msg)
 		if msgW > 0 {
 			runs = append(runs, Run{X: 0, W: msgW, Text: msg})
@@ -226,17 +226,6 @@ func rightWidth(right []segment) int {
 		total += ansi.StringWidth(seg.text)
 	}
 	return total
-}
-
-// truncateCells shortens s to at most w cells, ending with "…" when it is cut.
-func truncateCells(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if ansi.StringWidth(s) <= w {
-		return s
-	}
-	return ansi.Truncate(s, max(w-1, 0), "") + "…"
 }
 
 // truncateLeftCells shortens s to at most w cells by dropping its start. The

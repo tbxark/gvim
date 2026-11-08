@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/icons"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // Settings is the effective configuration that open_settings lists. The app fills
@@ -36,20 +37,20 @@ type Settings struct {
 
 // settingsRows returns one row per setting, named as the config file names it. An
 // unset text value shows as "(none)".
-func settingsRows(s Settings) []listRow {
-	return []listRow{
-		{left: "theme", right: orNone(s.Theme)},
-		{left: "keymap", right: orNone(s.Keymap)},
-		{left: "tab_size", right: strconv.Itoa(s.TabSize)},
-		{left: "insert_spaces", right: onOff(s.InsertSpaces)},
-		{left: "auto_indent", right: onOff(s.AutoIndent)},
-		{left: "line_numbers", right: onOff(s.LineNumbers)},
-		{left: "show_menu_bar", right: onOff(s.MenuBar)},
-		{left: "explorer_show_hidden", right: onOff(s.ExplorerShowHidden)},
-		{left: "explorer_show_ignored", right: onOff(s.ExplorerShowIgnored)},
-		{left: settingsIconsKey, right: iconsSettingText(s, iconModeOf(s))},
-		{left: "ui_icons_font", right: orNone(s.UIIconsFont)},
-		{left: "config_file", right: orNone(s.ConfigFile)},
+func settingsRows(s Settings) []list.Row {
+	return []list.Row{
+		{Left: "theme", Right: orNone(s.Theme)},
+		{Left: "keymap", Right: orNone(s.Keymap)},
+		{Left: "tab_size", Right: strconv.Itoa(s.TabSize)},
+		{Left: "insert_spaces", Right: onOff(s.InsertSpaces)},
+		{Left: "auto_indent", Right: onOff(s.AutoIndent)},
+		{Left: "line_numbers", Right: onOff(s.LineNumbers)},
+		{Left: "show_menu_bar", Right: onOff(s.MenuBar)},
+		{Left: "explorer_show_hidden", Right: onOff(s.ExplorerShowHidden)},
+		{Left: "explorer_show_ignored", Right: onOff(s.ExplorerShowIgnored)},
+		{Left: settingsIconsKey, Right: iconsSettingText(s, iconModeOf(s))},
+		{Left: "ui_icons_font", Right: orNone(s.UIIconsFont)},
+		{Left: "config_file", Right: orNone(s.ConfigFile)},
 	}
 }
 
@@ -83,9 +84,9 @@ func onOff(b bool) string {
 // opens the user config file: it is the only way to edit settings for now. The
 // ui_icons row opens the icon preview instead.
 func (m *Model) openSettings() {
-	v := newListView("Settings", settingsRows(m.util.settings), m.listChrome(), func(v *listView, r listRow) tea.Cmd {
-		v.active = false
-		if r.left == settingsIconsKey {
+	v := list.New("Settings", settingsRows(m.util.settings), m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		if r.Left == settingsIconsKey {
 			// The list is still on the stack while it runs, so the preview opens from
 			// a message, after the stack has popped the list.
 			return func() tea.Msg { return openIconPreviewMsg{} }
@@ -93,7 +94,7 @@ func (m *Model) openSettings() {
 		m.openConfigFile()
 		return nil
 	})
-	m.pushOverlay(listOverlay{v: v})
+	m.pushOverlay(v)
 }
 
 // openConfigFile opens the user config file in a tab of the editor, and moves the

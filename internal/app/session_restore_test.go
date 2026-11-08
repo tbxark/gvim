@@ -10,7 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/apptest"
+	"github.com/tbxark/gvim/internal/restore"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/find"
 	"github.com/tbxark/gvim/session"
@@ -18,133 +19,23 @@ import (
 
 // newSessionEditor returns an editor with no documents, as gvim starts without
 // file arguments.
-func newSessionEditor() *editor.Editor {
-	return editor.New(editor.Options{Empty: true})
-}
 
 // tabNames returns the names of the tabs of ed, in order, and the active index.
-func tabNames(ed *editor.Editor) ([]string, int) {
-	var names []string
-	active := -1
-	for i, t := range ed.Tabs() {
-		names = append(names, t.Name)
-		if t.Active {
-			active = i
-		}
-	}
-	return names, active
-}
 
 // TestSessionRoundTripKeepsTabsCursorsActiveAndUnsavedText saves a session with two
 // files, one of them edited and not saved, and restores it into a new editor. The
 // tabs, the active tab, the cursor of the first file and the unsaved text all come
 // back.
-func TestSessionRoundTripKeepsTabsCursorsActiveAndUnsavedText(t *testing.T) {
-	isolateConfig(t)
-	dir := t.TempDir()
-	a := filepath.Join(dir, "a.txt")
-	b := filepath.Join(dir, "b.txt")
-	must(t, os.WriteFile(a, []byte("one\ntwo\nthree\n"), 0o644))
-	must(t, os.WriteFile(b, []byte("bee\n"), 0o644))
-	sessDir := filepath.Join(dir, "session")
-
-	ed := newSessionEditor()
-	must(t, ed.OpenFile(a))
-	must(t, ed.GotoLine(2, 2))
-	must(t, ed.OpenFile(b))
-	if res := ed.Do("insert_char", map[string]any{"text": "Z"}); res.Err != nil {
-		t.Fatal(res.Err)
-	}
-	must(t, saveSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true}))
-
-	restored := newSessionEditor()
-	s, ok, err := session.Load(sessDir)
-	must(t, err)
-	if !ok {
-		t.Fatal("no session was saved")
-	}
-	restoreSession(restored, sessDir, s)
-
-	names, active := tabNames(restored)
-	if len(names) != 2 || names[0] != "a.txt" || names[1] != "b.txt" {
-		t.Fatalf("tabs = %v, want a.txt and b.txt", names)
-	}
-	if active != 1 {
-		t.Fatalf("active tab = %d, want 1 (b.txt)", active)
-	}
-	if got := restored.Active().Buffer.Text(); got != "Zbee\n" || !restored.Active().Modified() {
-		t.Fatalf("unsaved text = %q (modified %v), want Zbee modified", got, restored.Active().Modified())
-	}
-	restored.ActivateTab(0)
-	if c := restored.Active().Cursor; c.Line != 1 || c.Col != 1 {
-		t.Fatalf("cursor of a.txt = %+v, want line 2 column 2 (zero-based 1,1)", c)
-	}
-}
 
 // TestSessionSkipsSavedFilesThatAreGone checks that a file that was deleted since the
 // session was saved is not reopened as an empty tab, and that the active tab still
 // lands on the file that is there.
-func TestSessionSkipsSavedFilesThatAreGone(t *testing.T) {
-	isolateConfig(t)
-	dir := t.TempDir()
-	keep := filepath.Join(dir, "keep.txt")
-	must(t, os.WriteFile(keep, []byte("k\n"), 0o644))
-	s := session.Session{Files: []session.FileState{
-		{Path: filepath.Join(dir, "gone.txt"), Line: 1, Col: 1},
-		{Path: keep, Line: 1, Col: 1},
-	}, Active: 1}
-	ed := newSessionEditor()
-	restoreSession(ed, dir, s)
-
-	names, active := tabNames(ed)
-	if len(names) != 1 || names[0] != "keep.txt" || active != 0 {
-		t.Fatalf("tabs = %v (active %d), want only keep.txt active", names, active)
-	}
-}
 
 // TestSessionRestoresUnsavedUntitledText checks that an untitled buffer with text is
 // kept by the session and comes back as an untitled buffer with that text.
-func TestSessionRestoresUnsavedUntitledText(t *testing.T) {
-	isolateConfig(t)
-	sessDir := t.TempDir()
-	ed := newSessionEditor()
-	ed.Do("new", nil)
-	if res := ed.Do("insert_char", map[string]any{"text": "hello"}); res.Err != nil {
-		t.Fatal(res.Err)
-	}
-	must(t, saveSession(ed, sessDir, tui.ExplorerState{}))
-
-	s, _, err := session.Load(sessDir)
-	must(t, err)
-	restored := newSessionEditor()
-	restoreSession(restored, sessDir, s)
-	if doc := restored.Active(); doc == nil || doc.Buffer.Text() != "hello" {
-		t.Fatalf("untitled text = %v, want hello", restored.Active())
-	}
-	if !restored.Active().Untitled() || !restored.Active().Modified() {
-		t.Fatal("restored untitled buffer is not an unsaved untitled buffer")
-	}
-}
 
 // TestSessionDropsEmptyUntitledTabs checks that an untitled buffer with no text is
 // not kept, so the session does not grow an empty tab each time it is saved.
-func TestSessionDropsEmptyUntitledTabs(t *testing.T) {
-	isolateConfig(t)
-	dir := t.TempDir()
-	file := filepath.Join(dir, "a.txt")
-	must(t, os.WriteFile(file, []byte("a\n"), 0o644))
-	sessDir := filepath.Join(dir, "session")
-	ed := newSessionEditor()
-	must(t, ed.OpenFile(file))
-	ed.Do("new", nil)
-	must(t, saveSession(ed, sessDir, tui.ExplorerState{}))
-
-	s, _, err := session.Load(sessDir)
-	must(t, err)
-	if len(s.Files) != 1 || s.Files[0].Path != file {
-		t.Fatalf("saved files = %+v, want only a.txt", s.Files)
-	}
-}
 
 // TestBuildRuntimeRestoresTheSessionWhenNoFilesGiven checks the start-up path: with
 // no file arguments the saved tabs open, and the saved explorer settings apply.
@@ -154,14 +45,14 @@ func TestBuildRuntimeRestoresTheSessionWhenNoFilesGiven(t *testing.T) {
 	file := filepath.Join(dir, "a.txt")
 	must(t, os.WriteFile(file, []byte("a\n"), 0o644))
 	sessDir := filepath.Join(dir, "session")
-	ed := newSessionEditor()
+	ed := apptest.NewSessionEditor()
 	must(t, ed.OpenFile(file))
-	must(t, saveSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true, ShowIgnored: true}))
+	must(t, restore.SaveSession(ed, sessDir, tui.ExplorerState{Open: true, ShowHidden: true, ShowIgnored: true}))
 
 	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir}, false)
 	must(t, err)
 	defer rt.close()
-	names, _ := tabNames(rt.ed)
+	names, _ := apptest.TabNames(rt.ed)
 	if len(names) != 1 || names[0] != "a.txt" {
 		t.Fatalf("tabs at start = %v, want a.txt from the session", names)
 	}
@@ -181,14 +72,14 @@ func TestBuildRuntimeWithFilesDoesNotRestore(t *testing.T) {
 	must(t, os.WriteFile(saved, []byte("s\n"), 0o644))
 	must(t, os.WriteFile(given, []byte("g\n"), 0o644))
 	sessDir := filepath.Join(dir, "session")
-	ed := newSessionEditor()
+	ed := apptest.NewSessionEditor()
 	must(t, ed.OpenFile(saved))
-	must(t, saveSession(ed, sessDir, tui.ExplorerState{}))
+	must(t, restore.SaveSession(ed, sessDir, tui.ExplorerState{}))
 
 	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir, Files: []FileTarget{{Path: given}}}, false)
 	must(t, err)
 	defer rt.close()
-	names, _ := tabNames(rt.ed)
+	names, _ := apptest.TabNames(rt.ed)
 	if len(names) != 1 || names[0] != "given.txt" {
 		t.Fatalf("tabs = %v, want only given.txt", names)
 	}
@@ -231,17 +122,6 @@ func TestBuildRuntimeWithFilesLeavesTheSavedSessionAlone(t *testing.T) {
 
 // TestSessionDirDefaultsToTheUserCache checks the default session directory:
 // os.UserCacheDir()/gvim/session.
-func TestSessionDirDefaultsToTheUserCache(t *testing.T) {
-	isolateConfig(t)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	dir, err := defaultSessionDir()
-	must(t, err)
-	cache, err := os.UserCacheDir()
-	must(t, err)
-	if want := filepath.Join(cache, "gvim", "session"); dir != want {
-		t.Fatalf("defaultSessionDir() = %q, want %q", dir, want)
-	}
-}
 
 // TestRuntimeSaveWritesTheSessionAtExit checks what Run does when the program ends
 // after a start without file arguments: the runtime writes the session of its editor to

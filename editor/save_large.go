@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/buffer"
 )
 
@@ -130,7 +131,7 @@ func (j SaveJob) writeLarge(ctx context.Context) SaveResult {
 	opts := buffer.WriteOptions{EOL: lg.eol, Prefix: lg.prefix, AllowGrown: lg.allowGrown}
 	var res buffer.WriteResult
 	var tmp os.FileInfo
-	owner, err := writeFileAtomicStream(j.path, func(w io.Writer) error {
+	owner, err := atomicfile.WriteFileStream(j.path, func(w io.Writer) error {
 		bw := bufio.NewWriterSize(w, saveBufferSize)
 		var err error
 		if res, err = lg.snap.WriteTo(ctx, bw, opts); err != nil {
@@ -157,7 +158,7 @@ func (j SaveJob) writeLarge(ctx context.Context) SaveResult {
 }
 
 // saveNote is the status after a save whose note is note and which could not keep
-// what owner says (see writeFileAtomic).
+// what owner says (see atomicfile.WriteFile).
 func saveNote(note, owner string) string {
 	switch {
 	case owner == "":
@@ -285,4 +286,19 @@ func (d *Document) savedStatus() string {
 		return note
 	}
 	return "Saved"
+}
+
+// openSavedSource opens the file at path as the source of a large document that was
+// just written there. info is the state of the open file itself, taken from its
+// descriptor and not from the path, so the caller can tell which file was opened. It is
+// nil for a source that is not a file.
+func openSavedSource(path string) (src buffer.Source, info os.FileInfo, err error) {
+	src, err = buffer.OpenFileSource(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if st, ok := src.(interface{ Stat() (os.FileInfo, error) }); ok {
+		info, _ = st.Stat()
+	}
+	return src, info, nil
 }

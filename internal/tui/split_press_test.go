@@ -19,7 +19,7 @@ func TestPressOnAnUnfocusedPaneLandsOnTheLineUnderThePointer(t *testing.T) {
 	runAction(t, m, "next_split")     // the left pane takes the focus; the right keeps top 10
 
 	ps := panesOf(t, m, 2)
-	m.Update(click(ps[1].x+10, ps[1].y+2, tea.MouseLeft)) // row 2 of the right pane
+	m.Update(click(ps[1].X+10, ps[1].Y+2, tea.MouseLeft)) // row 2 of the right pane
 	if got := m.layout().focus; got != 1 {
 		t.Fatalf("focus %d after the press, want 1", got)
 	}

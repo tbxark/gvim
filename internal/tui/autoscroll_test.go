@@ -86,11 +86,11 @@ func TestDragToThePaneEdgePansHorizontallyWhileHeld(t *testing.T) {
 	l := m.layout()
 	fp := l.focusedPane()
 	left := func() int {
-		v, _ := m.paneGeometry(m.layout().focusedPane(), m.ed.Active()).HScroll(fp.w, fp.h)
+		v, _ := m.paneGeometry(m.layout().focusedPane(), m.ed.Active()).HScroll(fp.W, fp.H)
 		return v
 	}
 	mouseDownAt(m, l.textX+2, l.bodyTop)
-	edge := fp.x + fp.w - 2 // the last text column
+	edge := fp.X + fp.W - 2 // the last text column
 	_, cmd := m.Update(tea.MouseMotionMsg(tea.Mouse{X: edge, Y: l.bodyTop, Button: tea.MouseLeft}))
 	if cmd == nil {
 		t.Fatal("a drag to the right edge armed no autoscroll tick")
@@ -110,7 +110,7 @@ func TestDragToThePaneEdgePansHorizontallyWhileHeld(t *testing.T) {
 		t.Fatalf("after sixty ticks the head is at %v and the view at %d (was %d)", head2, left(), left0)
 	}
 	// On the scrollbar column the pan is faster.
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.x + fp.w - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
 	_, a, _ := selectionOf(ed)
 	tickOnce(t, m)
 	_, b, _ := selectionOf(ed)
@@ -127,7 +127,7 @@ func TestDragToThePaneEdgePansHorizontallyWhileHeld(t *testing.T) {
 		t.Errorf("a tick at the left edge: head %v to %v, view %d to %d, want both to move back", c, d, viewBefore, left())
 	}
 	// The chain ends once the head cannot move: at the end of the line.
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.x + fp.w - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
 	ended := false
 	for range 400 {
 		if _, cmd := m.Update(dragScrollMsg{seq: m.drag.tick}); cmd == nil {
@@ -148,13 +148,13 @@ func TestDragEndingOnTheScrollbarColumnKeepsTheCaretInView(t *testing.T) {
 	l := m.layout()
 	fp := l.focusedPane()
 	mouseDownAt(m, l.textX+2, l.bodyTop)
-	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.x + fp.w - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: fp.X + fp.W - 1, Y: l.bodyTop, Button: tea.MouseLeft}))
 	for range 30 {
 		m.Update(dragScrollMsg{seq: m.drag.tick})
 	}
-	mouseUpAt(m, fp.x+fp.w-1, l.bodyTop)
+	mouseUpAt(m, fp.X+fp.W-1, l.bodyTop)
 	pane := m.paneGeometry(m.layout().focusedPane(), m.ed.Active())
-	if _, _, ok := pane.Caret(fp.w, fp.h); !ok {
-		t.Errorf("the caret %v is outside the window (left %d)", ed.Active().Cursor, func() int { v, _ := pane.HScroll(fp.w, fp.h); return v }())
+	if _, _, ok := pane.Caret(fp.W, fp.H); !ok {
+		t.Errorf("the caret %v is outside the window (left %d)", ed.Active().Cursor, func() int { v, _ := pane.HScroll(fp.W, fp.H); return v }())
 	}
 }

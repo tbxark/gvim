@@ -165,7 +165,7 @@ func TestPluginManagerFlow(t *testing.T) {
 	// Down to "hello" (failed), Enter: the popup of its actions.
 	feed(m, runKey(m, special(tea.KeyDown)))
 	feed(m, runKey(m, special(tea.KeyEnter)))
-	if _, ok := m.overlays[len(m.overlays)-1].(popupOverlay); !ok || len(m.overlays) != 1 {
+	if _, ok := m.overlays[len(m.overlays)-1].(*popup.Popup); !ok || len(m.overlays) != 1 {
 		t.Fatalf("overlays = %v, want only the actions popup", m.overlays)
 	}
 	text = frameString(m)

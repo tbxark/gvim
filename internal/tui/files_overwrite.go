@@ -29,7 +29,7 @@ func (m *Model) askOverwriteSave(err error, f flow) bool {
 	}
 	m.notice = err.Error()
 	q := "File changed on disk. Overwrite it?"
-	m.pushOverlay(confirmOverlay{c: prompt.NewConfirm(m.styles, q, overwriteSaveTag{f: f})})
+	m.pushOverlay(prompt.NewConfirm(m.styles, q, overwriteSaveTag{f: f}))
 	return true
 }
 

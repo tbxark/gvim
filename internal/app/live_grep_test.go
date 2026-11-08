@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/tbxark/gvim/internal/pluginhost"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,7 +71,7 @@ func TestLiveGrepSkipsBinaryFiles(t *testing.T) {
 func TestLiveGrepReadsAtMostOneMegabytePerFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	long := strings.Repeat("a", grepMaxFileBytes) + "\ntodo\n"
+	long := strings.Repeat("a", pluginhost.GrepMaxFileBytes) + "\ntodo\n"
 	writeTree(t, dir, map[string]string{"long.txt": long})
 	hits, err := liveGrep{}.Search(dir, []string{"long.txt"}, "todo", 100)
 	if err != nil {
@@ -84,11 +85,11 @@ func TestLiveGrepReadsAtMostOneMegabytePerFile(t *testing.T) {
 func TestLiveGrepSearchesAtMostTwoThousandFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	files := make([]string, grepMaxFiles+1)
+	files := make([]string, pluginhost.GrepMaxFiles+1)
 	for i := range files {
 		files[i] = fmt.Sprintf("f%04d.txt", i)
 	}
-	writeTree(t, dir, map[string]string{files[grepMaxFiles]: "todo\n"})
+	writeTree(t, dir, map[string]string{files[pluginhost.GrepMaxFiles]: "todo\n"})
 	hits, err := liveGrep{}.Search(dir, files, "todo", 100)
 	if err != nil {
 		t.Fatal(err)

@@ -11,6 +11,7 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 
 	"github.com/tbxark/gvim/config"
+	"github.com/tbxark/gvim/internal/keybindings"
 	"github.com/tbxark/gvim/keymap"
 )
 
@@ -105,7 +106,7 @@ func LoadConfig(root string, opts Options) (ConfigView, error) {
 	for _, d := range diags {
 		view.Warnings = append(view.Warnings, d.String())
 	}
-	view.Warnings = append(view.Warnings, keybindingWarnings(cfg)...)
+	view.Warnings = append(view.Warnings, keybindings.Warnings(cfg)...)
 	return view, nil
 }
 

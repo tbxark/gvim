@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
 // forceSaveEditor adds the forced save to saveEditor, as the app adapter has it.
@@ -59,7 +60,7 @@ func TestSaveOverExternalChangeAsksToOverwrite(t *testing.T) {
 			if len(m.overlays) != 1 {
 				t.Fatalf("overlays after the refused save = %d, want the overwrite prompt", len(m.overlays))
 			}
-			if _, ok := m.overlays[0].(confirmOverlay); !ok {
+			if _, ok := m.overlays[0].(*prompt.Confirm); !ok {
 				t.Fatalf("overlay = %T, want the confirm prompt", m.overlays[0])
 			}
 			if got := saveFileText(path); got != "other\n" {

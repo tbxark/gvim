@@ -266,7 +266,7 @@ func (m *Model) compareDecor(p splitPane, pane editorpane.Pane) editorpane.Pane 
 		pane.TopRow = [2]*splitNode{m.splits.root.a, m.splits.root.b}[side].topRow
 		// The sides pan together: this one shows the columns the focused one shows.
 		if fp, doc := m.layout().focusedPane(), m.ed.Active(); doc != nil && fp.focused {
-			left, _ := m.paneGeometry(fp, doc).HScroll(fp.w, fp.h)
+			left, _ := m.paneGeometry(fp, doc).HScroll(fp.W, fp.H)
 			pane.Left, pane.KeepLeft = left, true
 		}
 	}

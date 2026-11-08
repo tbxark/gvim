@@ -5,7 +5,7 @@ import (
 )
 
 func TestDropEdgesFollowFreshsZones(t *testing.T) {
-	r := rect{10, 5, 40, 12} // edges: 10 columns, 3 rows
+	r := rect{X: 10, Y: 5, W: 40, H: 12} // edges: 10 columns, 3 rows
 	tests := []struct {
 		name string
 		x, y int
@@ -25,7 +25,7 @@ func TestDropEdgesFollowFreshsZones(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("edge at (%d,%d) = %v, want %v", tt.x, tt.y, got, tt.want)
 			}
-			if !area.contains(tt.x, tt.y) {
+			if !area.Contains(tt.x, tt.y) {
 				t.Errorf("the tinted area %+v does not hold the pointer (%d,%d)", area, tt.x, tt.y)
 			}
 		})
@@ -47,10 +47,10 @@ func TestDroppingATabOnAPaneEdgeSplitsIt(t *testing.T) {
 		wantDir     splitDir
 		newPaneLast bool // the pane with the dragged tab is the second child
 	}{
-		{"right", func(p splitPane) (int, int) { return p.x + p.w - 2, p.y + p.h/2 }, sideBySide, true},
-		{"left", func(p splitPane) (int, int) { return p.x + 1, p.y + p.h/2 }, sideBySide, false},
-		{"bottom", func(p splitPane) (int, int) { return p.x + p.w/2, p.y + p.h - 1 }, stacked, true},
-		{"top", func(p splitPane) (int, int) { return p.x + p.w/2, p.y }, stacked, false},
+		{"right", func(p splitPane) (int, int) { return p.X + p.W - 2, p.Y + p.H/2 }, sideBySide, true},
+		{"left", func(p splitPane) (int, int) { return p.X + 1, p.Y + p.H/2 }, sideBySide, false},
+		{"bottom", func(p splitPane) (int, int) { return p.X + p.W/2, p.Y + p.H - 1 }, stacked, true},
+		{"top", func(p splitPane) (int, int) { return p.X + p.W/2, p.Y }, stacked, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestDroppingATabInTheCentreShowsItInThatPane(t *testing.T) {
 	runAction(t, m, "split_vertical") // two panes, both showing tab 0; the right one has the focus
 	ps := panesOf(t, m, 2)
 	left := ps[0]
-	x, y := left.x+left.w/2, left.y+left.h/2
+	x, y := left.X+left.W/2, left.Y+left.H/2
 	dragTabTo(t, m, 1, x, y)
 	mouseUpAt(m, x, y)
 	if got := m.layout().focus; got != 0 {
@@ -123,14 +123,14 @@ func TestATabDragThatBarelyMovedDoesNotSplit(t *testing.T) {
 func TestDropZoneIsTintedWhileDragging(t *testing.T) {
 	m := newSplitModelTheme(t, newMultiFake(2, 30), "dark")
 	p := panesOf(t, m, 1)[0]
-	x, y := p.x+p.w-2, p.y+p.h/2
+	x, y := p.X+p.W-2, p.Y+p.H/2
 	tint := m.styles.Overlay.Selected.BG
 	dragTabTo(t, m, 1, x, y)
 	g := m.paint()
 	if got := g.At(x, y).Style.BG; got != tint {
 		t.Errorf("the cell under the pointer has background %v, want the drop tint %v", got, tint)
 	}
-	if got := g.At(p.x+p.w/2, y).Style.BG; got == tint {
+	if got := g.At(p.X+p.W/2, y).Style.BG; got == tint {
 		t.Error("the tint reaches the middle of the pane, which is not in the right edge zone")
 	}
 	mouseUpAt(m, x, y)

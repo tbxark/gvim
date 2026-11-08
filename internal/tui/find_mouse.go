@@ -9,8 +9,8 @@ import (
 // topFindBar returns the find bar when it is the top overlay, or nil.
 func (m *Model) topFindBar() *find.Bar {
 	if n := len(m.overlays); n > 0 {
-		if o, ok := m.overlays[n-1].(findOverlay); ok {
-			return o.b
+		if o, ok := m.overlays[n-1].(*find.Bar); ok {
+			return o
 		}
 	}
 	return nil

@@ -7,6 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/tui/find"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/search"
 	"github.com/tbxark/gvim/theme"
@@ -138,7 +140,7 @@ func TestCtrlFOpensTheFindBarThroughTheRoot(t *testing.T) {
 	if !m.findOpen() || len(m.overlays) != 1 {
 		t.Fatalf("overlay stack has %d entries after Ctrl+F, want the find bar", len(m.overlays))
 	}
-	if _, ok := m.overlays[0].(findOverlay); !ok {
+	if _, ok := m.overlays[0].(*find.Bar); !ok {
 		t.Fatalf("top overlay = %T, want the find bar", m.overlays[0])
 	}
 	rows := screenRows(m)
@@ -236,7 +238,7 @@ func TestPaletteColonJumpsOnTheFirstEnter(t *testing.T) {
 			t.Errorf("%q: GotoLine(%d, %d) after one Enter, want (%d, %d)", tc.query, ed.line, ed.col, tc.line, tc.col)
 		}
 		for _, o := range m.overlays {
-			if _, ok := o.(lineOverlay); ok {
+			if _, ok := o.(*prompt.Line); ok {
 				t.Errorf("%q: a go-to-line prompt opened after the jump", tc.query)
 			}
 		}
@@ -247,7 +249,7 @@ func TestGoToLineKeyOpensTheGotoPrompt(t *testing.T) {
 	ed := &fileEditorFake{fakeEditor: newFakeEditor("one", "two")}
 	m := newRouteModel(t, ed)
 	press(m, ctrl('l'))
-	if _, ok := m.overlays[len(m.overlays)-1].(lineOverlay); !ok {
+	if _, ok := m.overlays[len(m.overlays)-1].(*prompt.Line); !ok {
 		t.Fatalf("Ctrl+L opened %T, want the go-to-line prompt", m.overlays[len(m.overlays)-1])
 	}
 	for _, r := range "2:2" {

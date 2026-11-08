@@ -31,7 +31,7 @@ func (m *Model) scrollFocused(delta int) {
 		return
 	}
 	fp := l.focusedPane()
-	top, row := m.paneGeometry(fp, doc).ScrollView(fp.w, fp.h, delta)
+	top, row := m.paneGeometry(fp, doc).ScrollView(fp.W, fp.H, delta)
 	m.ed.ScrollTo(top)
 	m.setTopRow(row)
 }

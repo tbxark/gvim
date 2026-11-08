@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tbxark/gvim/internal/tui/palette"
+)
 
 // TestPressOutsideThePaletteReachesTheEditor: the palette is a card over the bottom of
 // the frame, and it takes only the presses on that card. A press above it reaches the
@@ -9,7 +13,7 @@ import "testing"
 func TestPressOutsideThePaletteReachesTheEditor(t *testing.T) {
 	m, ed := viewModel(t, DefaultViewOptions(), "hello world\nsecond line\nthird\n", 80, 24)
 	m.openPalette(">")
-	if _, ok := m.overlays[len(m.overlays)-1].(paletteOverlay); !ok {
+	if _, ok := m.overlays[len(m.overlays)-1].(*palette.Palette); !ok {
 		t.Fatal("setup: the palette is not the top overlay")
 	}
 	before := ed.Active().Cursor
@@ -18,7 +22,7 @@ func TestPressOutsideThePaletteReachesTheEditor(t *testing.T) {
 	if got := ed.Active().Cursor; got == before {
 		t.Errorf("the caret stayed at %v after a press in the editor while the palette was open", got)
 	}
-	if _, ok := m.overlays[len(m.overlays)-1].(paletteOverlay); !ok {
+	if _, ok := m.overlays[len(m.overlays)-1].(*palette.Palette); !ok {
 		t.Error("the palette closed on a press outside it")
 	}
 }

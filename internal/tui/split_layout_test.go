@@ -75,44 +75,44 @@ func TestSplitLayoutPanesAtOneTwoAndThreeLeaves(t *testing.T) {
 		{
 			name:  "one leaf fills the band",
 			tree:  leafNode(0),
-			panes: []rect{{0, 2, 80, 21}},
+			panes: []rect{{X: 0, Y: 2, W: 80, H: 21}},
 		},
 		{
 			name:    "two leaves side by side",
 			tree:    innerNode(sideBySide, leafNode(0), leafNode(1)),
-			panes:   []rect{{0, 2, 40, 21}, {41, 2, 39, 21}},
-			borders: []splitBorder{{rect: rect{40, 2, 1, 21}, vertical: true}},
+			panes:   []rect{{X: 0, Y: 2, W: 40, H: 21}, {X: 41, Y: 2, W: 39, H: 21}},
+			borders: []splitBorder{{rect: rect{X: 40, Y: 2, W: 1, H: 21}, vertical: true}},
 		},
 		{
 			name:    "two leaves stacked",
 			tree:    innerNode(stacked, leafNode(0), leafNode(1)),
-			panes:   []rect{{0, 2, 80, 10}, {0, 13, 80, 10}},
-			borders: []splitBorder{{rect: rect{0, 12, 80, 1}, vertical: false}},
+			panes:   []rect{{X: 0, Y: 2, W: 80, H: 10}, {X: 0, Y: 13, W: 80, H: 10}},
+			borders: []splitBorder{{rect: rect{X: 0, Y: 12, W: 80, H: 1}, vertical: false}},
 		},
 		{
 			name:    "three leaves, right column stacked",
 			tree:    innerNode(sideBySide, leafNode(0), innerNode(stacked, leafNode(1), leafNode(2))),
-			panes:   []rect{{0, 2, 40, 21}, {41, 2, 39, 10}, {41, 13, 39, 10}},
-			borders: []splitBorder{{rect: rect{40, 2, 1, 21}, vertical: true}, {rect: rect{41, 12, 39, 1}, vertical: false}},
+			panes:   []rect{{X: 0, Y: 2, W: 40, H: 21}, {X: 41, Y: 2, W: 39, H: 10}, {X: 41, Y: 13, W: 39, H: 10}},
+			borders: []splitBorder{{rect: rect{X: 40, Y: 2, W: 1, H: 21}, vertical: true}, {rect: rect{X: 41, Y: 12, W: 39, H: 1}, vertical: false}},
 		},
 		{
 			name:    "three leaves, bottom row side by side",
 			tree:    innerNode(stacked, leafNode(0), innerNode(sideBySide, leafNode(1), leafNode(2))),
-			panes:   []rect{{0, 2, 80, 10}, {0, 13, 40, 10}, {41, 13, 39, 10}},
-			borders: []splitBorder{{rect: rect{0, 12, 80, 1}, vertical: false}, {rect: rect{40, 13, 1, 10}, vertical: true}},
+			panes:   []rect{{X: 0, Y: 2, W: 80, H: 10}, {X: 0, Y: 13, W: 40, H: 10}, {X: 41, Y: 13, W: 39, H: 10}},
+			borders: []splitBorder{{rect: rect{X: 0, Y: 12, W: 80, H: 1}, vertical: false}, {rect: rect{X: 40, Y: 13, W: 1, H: 10}, vertical: true}},
 		},
 		{
 			name:    "three leaves, left column stacked",
 			tree:    innerNode(sideBySide, innerNode(stacked, leafNode(0), leafNode(1)), leafNode(2)),
-			panes:   []rect{{0, 2, 40, 10}, {0, 13, 40, 10}, {41, 2, 39, 21}},
-			borders: []splitBorder{{rect: rect{40, 2, 1, 21}, vertical: true}, {rect: rect{0, 12, 40, 1}, vertical: false}},
+			panes:   []rect{{X: 0, Y: 2, W: 40, H: 10}, {X: 0, Y: 13, W: 40, H: 10}, {X: 41, Y: 2, W: 39, H: 21}},
+			borders: []splitBorder{{rect: rect{X: 40, Y: 2, W: 1, H: 21}, vertical: true}, {rect: rect{X: 0, Y: 12, W: 40, H: 1}, vertical: false}},
 		},
 		{
 			name:     "two leaves side by side next to the explorer",
 			explorer: true,
 			tree:     innerNode(sideBySide, leafNode(0), leafNode(1)),
-			panes:    []rect{{32, 2, 24, 21}, {57, 2, 23, 21}},
-			borders:  []splitBorder{{rect: rect{56, 2, 1, 21}, vertical: true}},
+			panes:    []rect{{X: 32, Y: 2, W: 24, H: 21}, {X: 57, Y: 2, W: 23, H: 21}},
+			borders:  []splitBorder{{rect: rect{X: 56, Y: 2, W: 1, H: 21}, vertical: true}},
 		},
 	}
 	for _, tt := range tests {
@@ -143,7 +143,7 @@ func TestSinglePaneIsTheCurrentBand(t *testing.T) {
 				t.Fatalf("W=%d H=%d: %d panes, want 1", g.w, h, len(l.panes))
 			}
 			p := l.panes[0]
-			want := rect{l.editorX, l.bodyTop, g.w - l.editorX, l.bodyBottom - l.bodyTop + 1}
+			want := rect{X: l.editorX, Y: l.bodyTop, W: g.w - l.editorX, H: l.bodyBottom - l.bodyTop + 1}
 			if p.rect != want || !p.focused || l.focus != 0 {
 				t.Errorf("W=%d H=%d: pane %+v focus %d, want rect %+v focused", g.w, h, p, l.focus, want)
 			}

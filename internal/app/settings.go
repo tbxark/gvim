@@ -145,3 +145,9 @@ func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
 		SuggestOnTriggerCharacters: cfg.SuggestOnTriggerCharacters,
 	}
 }
+
+// autoRevertPoll is how often the root checks the open files for outside changes:
+// editor.auto_revert_poll_interval_ms.
+func autoRevertPoll(cfg config.Config) time.Duration {
+	return time.Duration(cfg.AutoRevertPollIntervalMS) * time.Millisecond
+}

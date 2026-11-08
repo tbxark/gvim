@@ -4,9 +4,8 @@
 // as a message. It is an overlay on the root's stack: the root routes key and
 // mouse input to it while it is open, and it closes itself when a choice is made.
 //
-// The browser cannot name ui.Overlay, because ui imports this package. Its
-// Update returns *Browser, so the root wraps it in a small adapter that returns
-// nil once Active reports false (see the Overlay contract in ui/ports.go).
+// *Browser implements overlay.Overlay directly, so the root stacks it without an
+// adapter.
 //
 // Listing runs in Update and in New. A directory is one ReadDir, which is what
 // the legacy browser did on every keystroke; the root's overlay routing has no
@@ -28,6 +27,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
@@ -161,6 +161,9 @@ type Browser struct {
 	closed bool
 }
 
+// The browser is an overlay of the root's stack.
+var _ overlay.Overlay = (*Browser)(nil)
+
 // box is where Draw put the list, so a mouse press can find its row.
 type box struct {
 	ok         bool
@@ -220,10 +223,10 @@ func (b *Browser) Notice() string { return b.notice }
 // Update handles one key or mouse message. It returns the browser that takes
 // the place of this one, which is the same pointer, and the command the message
 // starts. A choice returns a command that sends an Open or a Choose, and closes
-// the browser.
-func (b *Browser) Update(msg tea.Msg) (*Browser, tea.Cmd) {
+// the browser: nil comes back so the root pops it.
+func (b *Browser) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	if b.closed {
-		return b, nil
+		return nil, nil
 	}
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
@@ -235,6 +238,9 @@ func (b *Browser) Update(msg tea.Msg) (*Browser, tea.Cmd) {
 		cmd = b.click(tea.Mouse(msg))
 	case tea.MouseWheelMsg:
 		b.wheel(tea.Mouse(msg))
+	}
+	if !b.Active() {
+		return nil, cmd
 	}
 	return b, cmd
 }

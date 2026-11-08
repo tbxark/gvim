@@ -7,6 +7,7 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/popup"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -181,11 +182,11 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 // closeTopPopups closes the popups on top of the overlay stack, which take no text input.
 func (m *Model) closeTopPopups() {
 	for len(m.overlays) > 0 {
-		top, ok := m.overlays[len(m.overlays)-1].(popupOverlay)
+		top, ok := m.overlays[len(m.overlays)-1].(*popup.Popup)
 		if !ok {
 			return
 		}
-		if c := m.lsp.comp; c != nil && c.pop == top.p {
+		if c := m.lsp.comp; c != nil && c.pop == top {
 			m.closeCompletion(c)
 		} else {
 			m.popOverlay()

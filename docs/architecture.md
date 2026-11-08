@@ -17,8 +17,20 @@ cmd/gvimdebug/                  developer page: runs gvim in a PTY, serves the s
 
 internal/                       private executable shell (no top-level package imports it)
   app/                          composition root: Options, Run, buildRuntime
+  uiadapter/                    engine → TUI ports: editor/document views, dialogs, files,
+                                git status, projects, terminal/clipboard, auto-save gate
+  pluginhost/                   the Lua runtime host: real plugin.OS, editor, services, virtual
+                                buffers, decorations
+  lsphost/                      lsp client → TUI language-server port
+  restore/                      session save/restore and crash-recovery policy
+  keybindings/                  keymap adapter, user bindings store, plugin binding overlay
+  highlight/                    syntax-span cache for the TUI
+  apptest/                      test-only shared helpers; never in a production tree
   cli/                          cobra command tree, flags, DIR / FILE:LINE:COL
   tui/                          Bubble Tea v2 root model + widgets
+    overlay/ list/              shared kit: the Overlay/Caret contract and the list/box widget
+    browser/ ctxmenu/ dialog/ editorpane/ explorer/ find/ grid/ icons/ menubar/
+    palette/ picker/ popup/ prompt/ space/ statusbar/ style/
   terminal/                     PTY + screen model behind the terminal dock
   filewatch/                    fsnotify watcher (explorer reloads, project switches)
   uitest/                       test-only in-process UI harness
@@ -44,8 +56,9 @@ engine (editor, search, syntax, session, commands)
       ▼
 internal/tui  (depends on engine value types and the plugin contract, never on the shell)
       ▼
-internal/app  (composition root: the only package that imports the concrete adapters,
-               the TUI sub-packages and the plugin runtime)
+internal/{uiadapter,keybindings,lsphost,restore,highlight}   (host adapters)
+      ▼
+internal/app  (composition root: the only package that imports the host packages)
       ▼
 internal/cli → cmd/gvim
 ```
@@ -95,7 +108,14 @@ bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
 | Package | Role | May import |
 |---|---|---|
 | `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`), exit codes. | `internal/app` (Options only), cobra, stdlib |
-| `internal/app` | Composition root: `Options`, `Validate`, `Run`, `buildRuntime`; wires engine + TUI + plugin runtime. Feature wiring that is not a generic adapter lives here. | every engine package and `internal/*` host package, TUI |
+| `internal/app` | Composition root: `Options`, `Validate`, `Run`, `buildRuntime`; wires engine + host packages + TUI. | engine packages, host packages, TUI root and sub-packages, plugin runtime |
+| `internal/uiadapter` | Adapts engine to the TUI ports: editor/document views, dialogs, ranker, file ops, git status, projects, terminal/clipboard, auto-save gate. | engine packages, `tui` sub-packages, `highlight`, `keybindings`, `terminal` |
+| `internal/pluginhost` | The real `plugin.OS`, the editor as plugins see it, plugin services, virtual buffers and decorations. | engine packages, `plugin`, `pluginapi`, `keybindings` |
+| `internal/lsphost` | Language-server port: managers, document sync, diagnostics polling, server catalogue. | `lsp`, engine packages, `pluginapi`, `tui` |
+| `internal/restore` | Session save/restore and crash-recovery copies (session file, stash files, recovery dir). | `session`, `editor`, `buffer`, `config`, `tui` |
+| `internal/keybindings` | Built-in presets, user bindings and persistence, `keymap.Map` → TUI `Keymap` adapter, plugin binding overlay. | `keymap`, `config`, `commands`, `pluginapi`, `tui` |
+| `internal/highlight` | Syntax-span cache for the TUI: windowed lexing, generations, string-context queries. | `buffer`, `editor`, `syntax` |
+| `internal/apptest` | Test-only shared helpers (config isolation, temp roots, session editor, big files). | `editor` (and test-only imports elsewhere) |
 | `internal/tui` | The Bubble Tea v2 root model: routing, focus, layout, hit map, painting; interfaces in `ports.go`. | engine value types, `pluginapi`, `decorations`, its own sub-packages, charm |
 | `internal/tui/*` | Widgets and panels (see 4.2). | kits (`grid`, `space`, `style`, `icons`), engine value types, charm |
 | `internal/terminal` | Runs a program in a PTY and keeps a model of its screen (`Screen`, `Cell`, styles, cursor, paste). Backend of the terminal dock. | `creack/pty`, `x/vt`, `ultraviolet`, stdlib |
@@ -113,11 +133,11 @@ bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `fold` | Indentation fold ranges. | Small leaf used by `editor`. |
 | `diff` | Line diff (go-diff) into hunks; used by the compare view and plugin services. | |
 | `encoding` | Decoding/encoding detection and conversion (UTF-8/16, charsets via `x/text`). | |
-| `session` | Session file format and stash files (open tabs, cursors, unsaved overlays). | The restore *policy* lives in `internal/app`. Writes through `atomicfile`. |
+| `session` | Session file format and stash files (open tabs, cursors, unsaved overlays). | The restore *policy* lives in `internal/app`. Session and search JSON go through `atomicfile`. |
 | `decorations` | Plugin decoration store: namespaced items per buffer, anchors that follow edits, per-line query. | Pure data, stdlib only. |
 | `textlayout` | Terminal text geometry: indent width, indent guides, word occurrences, match columns. | Leaf; used by `editor`/`fold` and the editor pane. |
-| `atomicfile` | Atomic file replacement: temp+sync+rename, mode/owner/xattr, symlink following. | Leaf; used by `editor` (save) and `session` (stash files). |
-| `shellcmd` | Runs one external program with a timeout and output caps; the exec half of `editor/shell.go`. | Leaf; `editor` wraps it for shell-command actions. |
+| `atomicfile` | Atomic file replacement: temp+sync+rename, mode/owner/xattr, symlink following. | Leaf; used by `editor` (saves) and `session` (session and search JSON). |
+| `shellcmd` | Runs one external program in a directory with a timeout; the exec half of `editor/shell.go`. | Leaf; `editor` wraps it for shell-command actions. |
 | `workspace` | Project root switching and the recent-folders list. | |
 | `explorer` | File-tree model, `ListDir` with options, gitignore matching, async reload. | |
 | `finder` | Project file index (`git ls-files`/walk) and usage ranking. | |
@@ -146,7 +166,7 @@ still large internally, so a reader can find a feature without grepping by memor
 | terminal dock | `dock*.go` (+ `shell.go` for editor shell commands) | shell dock: PTY lifecycle, key/paste routing, paint |
 | LSP UI | `lsp.go`, `lsp_detect.go`, `diag.go`, `root_signature.go` | language-server UI controller, diagnostics, goto/hover/completion/code actions/rename, signature help |
 | plugin host | `plugin_*.go` | the UI side of the plugin contract: pump, events, keys/modes, prompts, windows, virtual buffers, decorations, manager, init.lua |
-| overlays / utilities | `keybind_editor.go`, `help_list.go`, `help_utility.go`, `notice_warnings.go`, `help.go`, `settings.go`, `icon_preview.go`, `tour.go`, `root_stash.go`, `language_pick.go`, `files_encoding.go`, `keymapeditor.go`, `keybind_ports.go` | the list/box overlay kit, keybinding editor, help/settings/tour/notices/pickers |
+| overlays / utilities | `keybind_editor.go`, `help_utility.go`, `notice_warnings.go`, `help.go`, `settings.go`, `icon_preview.go`, `tour.go`, `root_stash.go`, `language_pick.go`, `files_encoding.go`, `keymapeditor.go`, `keybind_ports.go` | keybinding editor, help/settings/tour/notices/pickers; the list/box machinery lives in `tui/list` |
 | frame chrome | `layout.go`, `welcome.go`, `hit.go`, `footer.go` | the single geometry source, hit map, welcome screen, footer hints |
 | view / display | `view.go`, `view_render.go` | display settings and per-document view settings |
 | find glue | `find_route.go`, `find_highlight.go`, `find_mouse.go` | controller between the find bar and the editor |
@@ -158,8 +178,10 @@ still large internally, so a reader can find a feature without grepping by memor
 
 ### 4.2 `internal/tui` sub-packages
 
-`grid` (cell surface on `x/ansi`), `space` (padding and text fitting), `style` (theme →
-lipgloss styles; the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
+`overlay` (the Overlay/Caret contract every overlay implements), `list` (the list/box
+overlay kit: `View`, `TextBox`, centring and scroll helpers), `grid` (cell surface on
+`x/ansi`), `space` (padding, text fitting and `Rect`), `style` (theme → lipgloss styles;
+the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
 (paints the text area; pure renderer, no tea), `menubar` (menu bar + dropdowns; generated
 menu table), `explorer` (file-tree panel), `palette` (command palette overlay), `find`
 (find bar), `prompt` (bottom-row prompts), `browser` (file/folder browser), `picker`
@@ -227,18 +249,24 @@ Done:
 
 1. Top-of-tree layout move and package renames (§5).
 2. `main` moved to `cmd/gvim`.
-3. Import gate rewritten for the new tree (R1-R12) and generator paths updated.
+3. Import gate rewritten for the new tree (R1-R13) and generator paths updated.
+4. `internal/app` split into host packages (`uiadapter`, `pluginhost`, `lsphost`,
+   `restore`, `keybindings`, `highlight`, plus test-only `apptest`); `app` is now seven
+   files (Options/Run/buildRuntime, settings, logfile, live grep, formatters, config view).
+5. TUI kits: `overlay` (contract + Caret), `list` (list/box kit), `space` (`Rect` and text
+   fitting), removing ten forwarding adapters (~36 methods) and the duplicated fit helpers.
+6. Engine leaves: `atomicfile`, `shellcmd`, the `buffer` two-mode doc, and file renames.
 
-Next (tracked as follow-up work, not required for the layout to be correct):
+Next (tracked as follow-up work; each keeps build + tests green):
 
-1. `internal/app` split into host packages (`uiadapter`, `pluginhost`, `lsphost`,
-   `restore`, `keybindings`, `highlight`) with `app` left as the thin composition root.
-2. TUI kits: an `overlay` contract package, a `list` kit and a `space`/text kit, removing
-   the root's wrapper adapters and duplicated box/text helpers.
-3. Further TUI extraction once the kits exist: split tree/geometry, frame (layout + hit),
-   keybinding editor, terminal dock, utility screens; the plugin host and LSP UI last.
-4. `editor` → `document` + `editor` split (the two god objects), with an alias bridge.
-5. Plugin leaf splits (`hostos`, `luastdlib`) and an `lsp/manager` split.
+1. Further TUI extraction now that the kits exist: split tree/geometry (`tui/split`), frame
+   geometry and hit map (`tui/frame`), keybinding editor (`tui/keybindeditor`), terminal
+   dock (`tui/dock`), utility screens; the plugin host and LSP UI last.
+2. Move the CLI config-view backend out of `internal/app` into `config`/`syntax` so `cli`
+   does not import `app` for `LoadConfig`/`ConfigPaths`/`GrammarNames`.
+3. `editor` → `document` + `editor` split (the two god objects), with an alias bridge.
+4. Plugin leaf splits (`hostos`, `luastdlib`) and an `lsp/manager` split.
+5. Fold `fold` into `textlayout` (needs a small `tui/editorpane` import update).
 
 The analysis these steps build on (file clusters, symbol-level boundaries, risk
 ordering) is in the session's analysis notes; the durable conclusions are kept in this

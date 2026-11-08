@@ -91,7 +91,7 @@ go build ./... && CGO_ENABLED=0 go build ./...   # shipped binary must stay pure
 go vet ./...
 golangci-lint run ./...                          # v2; currently reports 0 issues
 bash migration/tools/purity_check.sh             # pure-Go gate, prints PURE_GO_OK
-bash migration/tools/import_rules_check.sh       # layering gate R1-R12, prints IMPORT_RULES_OK
+bash migration/tools/import_rules_check.sh       # layering gate R1-R13, prints IMPORT_RULES_OK
 go test ./...                                    # all packages pass today
 go test ./internal/tui -run TestName             # single test
 go test -race ./...                              # test-only; needs cgo
@@ -100,29 +100,36 @@ go run ./cmd/gvim [DIR] [FILE[:LINE[:COL]]]...   # launch the TUI
 
 ### Architecture
 
-The design record is `docs/architecture.md` (package table, import rules R1-R12,
+The design record is `docs/architecture.md` (package table, import rules R1-R13,
 package maps, migration phases). `migration/ARCH-v4.md` is the earlier proposal-only
 record; where the two disagree, `docs/architecture.md` wins. The shape that needs
 several files to see:
 
 - Three layers. `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) →
-  `app.Run`. `internal/` is the private executable shell (`app`, `cli`, `tui`,
-  `terminal`, `filewatch`, `uitest`). TUI-free engine and library packages are at the
+  `app.Run`. `internal/` is the private executable shell (`app` plus the host packages
+  `uiadapter`, `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`, the
+  test-only `apptest`, then `cli`, `tui`, `terminal`, `filewatch`, `uitest`). TUI-free engine and library packages are at the
   module top level: `buffer`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,
   `session`, `decorations`, `textlayout`, `workspace`, `explorer`, `finder`, `fuzzy`,
   `fsops`, `gitstate`, `config`, `keymap`, `theme`, `lsp`, `pluginapi`, `plugin`,
-  `commands`.
+  `commands`, and the shared leaves `atomicfile` and `shellcmd`.
 - Import direction: engine → shell, never the reverse. No top-level package imports
-  `internal/`; only `internal/app` imports the concrete adapters and the TUI
-  sub-packages; `internal/cli` imports `internal/app` for `Options` only.
+  `internal/`. Only `internal/app` imports the host packages (`uiadapter`, `pluginhost`,
+  `lsphost`, `restore`, `keybindings`, `highlight`); only `internal/app` and
+  `internal/uiadapter` import the TUI sub-packages; `internal/cli` imports `internal/app`
+  for `Options` only.
   `migration/tools/import_rules_check.sh` is the enforcement.
-- `internal/app` is the composition root: `Options`, `Run`, `buildRuntime`.
+- `internal/app` is the thin composition root (`Options`, `Run`, `buildRuntime`, settings,
+  logfile, live grep, default formatters). The host packages implement the ports:
+  `uiadapter` (editor/document/dialogs/files/git/projects/terminal/clipboard),
+  `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`.
 - `internal/tui` is one Bubble Tea v2 root model (`package tui`). It depends on
   interfaces it defines in `ports.go` (`EditorState`, `Document`, ...); `app` satisfies
   them with adapters. `tui` must not import concrete `finder`, `fsops`, `lsp` or the
-  plugin runtime; its sub-packages (`editorpane`, `menubar`, `explorer`, `palette`,
-  `find`, `prompt`, `browser`, `picker`, `popup`, `ctxmenu`, `dialog`, `statusbar`,
-  `style`, `grid`, `icons`, `space`) must not import the root `tui`.
+  plugin runtime; its sub-packages (`overlay`, `list`, `editorpane`, `menubar`,
+  `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`, `ctxmenu`,
+  `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`) must not import the root
+  `tui`.
   `layout.go` is the single geometry source for both painting and the hit map
   (`hit.go`).
 - Engine packages (`buffer`, `editor`, `search`, `syntax`, `fold`, `diff`, `encoding`,

@@ -84,7 +84,7 @@ func TestClicksOnTheBordersAreNotRows(t *testing.T) {
 		t.Errorf("rowAt on the padding cell = %d, %v, want row 0", i, ok)
 	}
 	// A click on the bottom border neither chooses a row nor closes the popup.
-	if cmd := p.Update(tea.MouseClickMsg(tea.Mouse{X: b.x + 3, Y: bottom, Button: tea.MouseLeft})); cmd != nil || !p.Active() {
+	if cmd := p.update(tea.MouseClickMsg(tea.Mouse{X: b.x + 3, Y: bottom, Button: tea.MouseLeft})); cmd != nil || !p.Active() {
 		t.Errorf("a click on the border chose or closed: cmd=%v active=%v", cmd != nil, p.Active())
 	}
 }
@@ -96,7 +96,7 @@ func TestTinyFramesDoNotPanic(t *testing.T) {
 			p := New(Styles{})
 			p.Show(Point{w / 2, h / 2}, "Title", items(5))
 			p.Draw(grid.New(w, h))
-			p.Update(tea.MouseMotionMsg(tea.Mouse{X: w / 2, Y: h / 2}))
+			p.update(tea.MouseMotionMsg(tea.Mouse{X: w / 2, Y: h / 2}))
 		}
 	}
 }

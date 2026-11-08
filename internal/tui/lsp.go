@@ -796,7 +796,7 @@ func (m *Model) lspPopup(title string, items []popup.Item) *popup.Popup {
 	}
 	p := popup.New(popupStyles(m.styles))
 	p.Show(anchor, title, items)
-	m.pushOverlay(popupOverlay{p: p})
+	m.pushOverlay(p)
 	return p
 }
 
@@ -846,16 +846,16 @@ func insertEnd(from buffer.Pos, text string) buffer.Pos {
 // closePopup removes the popup overlay that holds p from the stack.
 func (m *Model) closePopup(p *popup.Popup) {
 	m.overlays = slices.DeleteFunc(m.overlays, func(o Overlay) bool {
-		po, ok := o.(popupOverlay)
-		return ok && po.p == p
+		po, ok := o.(*popup.Popup)
+		return ok && po == p
 	})
 }
 
 // onStack reports whether the popup overlay that holds p is on the overlay stack.
 func (m *Model) onStack(p *popup.Popup) bool {
 	return slices.ContainsFunc(m.overlays, func(o Overlay) bool {
-		po, ok := o.(popupOverlay)
-		return ok && po.p == p
+		po, ok := o.(*popup.Popup)
+		return ok && po == p
 	})
 }
 
@@ -872,7 +872,7 @@ func (m *Model) lspKey(msg tea.Msg) (tea.Cmd, bool) {
 	if c == nil || len(m.overlays) == 0 {
 		return nil, false
 	}
-	if top, ok := m.overlays[len(m.overlays)-1].(popupOverlay); !ok || top.p != c.pop {
+	if top, ok := m.overlays[len(m.overlays)-1].(*popup.Popup); !ok || top != c.pop {
 		return nil, false
 	}
 	switch tea.Key(k).Code {
@@ -1021,11 +1021,11 @@ func (m *Model) askLSPRename() {
 		return
 	}
 	at := doc.Cursor()
-	m.pushOverlay(lineOverlay{l: prompt.NewLine(m.styles, prompt.LineOptions{
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
 		Label: "New name:",
 		Input: lspWordAt(doc.Line(at.Line), at.Col),
 		Tag:   lspRenameTag{path: path, at: at},
-	})})
+	}))
 }
 
 // lspRenameDone starts the rename when the prompt was submitted with a name.

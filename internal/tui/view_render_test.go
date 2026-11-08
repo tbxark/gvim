@@ -27,7 +27,7 @@ func gutterRow(t *testing.T, m *Model, n int) string {
 	t.Helper()
 	l := m.layout()
 	var b strings.Builder
-	for x := l.panes[0].x; x < l.textX; x++ {
+	for x := l.panes[0].X; x < l.textX; x++ {
 		b.WriteString(viewCell(t, m, x, l.bodyTop+n).Text)
 	}
 	return strings.TrimRight(b.String(), " ")

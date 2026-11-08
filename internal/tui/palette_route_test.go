@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/theme"
 )
@@ -58,7 +59,7 @@ func TestCtrlPOpensThePaletteThroughTheRoot(t *testing.T) {
 	if len(m.overlays) != 1 {
 		t.Fatalf("overlay stack has %d entries after Ctrl+P, want the palette", len(m.overlays))
 	}
-	o, ok := m.overlays[0].(paletteOverlay)
+	o, ok := m.overlays[0].(*palette.Palette)
 	if !ok || !o.Active() {
 		t.Fatalf("top overlay = %T, want an active palette", m.overlays[0])
 	}

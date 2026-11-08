@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/buffer"
 )
 
@@ -148,10 +149,10 @@ func TestSaveSaysWhenALinkIsBroken(t *testing.T) {
 }
 
 func TestSaveSaysWhenTheOwnerCannotBeKept(t *testing.T) {
-	// Not parallel: it replaces fchownFn.
-	orig := fchownFn
-	fchownFn = func(*os.File, int, int) error { return syscall.EPERM }
-	t.Cleanup(func() { fchownFn = orig })
+	// Not parallel: it replaces atomicfile.FchownFn.
+	orig := atomicfile.FchownFn
+	atomicfile.FchownFn = func(*os.File, int, int) error { return syscall.EPERM }
+	t.Cleanup(func() { atomicfile.FchownFn = orig })
 	path := writeLargeFile(t, "owned.txt", lineText(150))
 	group := otherGroup(t, int(statOf(t, path).Gid))
 	if err := os.Chown(path, -1, group); err != nil {

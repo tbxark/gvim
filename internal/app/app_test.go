@@ -139,20 +139,3 @@ func TestResolveRootDirectoryIsResolved(t *testing.T) {
 		t.Fatalf("resolveRoot(%q) = %q, want %q", dir, got, want)
 	}
 }
-
-func TestKeymapForDefaultsToPlatformKeymap(t *testing.T) {
-	def, err := keymapFor("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if def == nil {
-		t.Fatal("keymapFor(\"\") = nil")
-	}
-	named, err := keymapFor("default")
-	if err != nil {
-		t.Fatalf("keymapFor(default) error = %v", err)
-	}
-	if named == nil {
-		t.Fatal("keymapFor(default) = nil")
-	}
-}

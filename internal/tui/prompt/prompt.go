@@ -5,8 +5,8 @@
 // A prompt never acts on the editor or the file system. When it ends, it emits
 // a Done message as a command, and the root applies the answer. Done carries the
 // Tag the opener gave the prompt, so one root handler can serve several prompts.
-// The root wraps *Line and *Confirm in its Overlay type, as it does for the find
-// bar.
+// *Line and *Confirm implement overlay.Overlay directly, so the root stacks them
+// without an adapter.
 //
 // Esc is not forwarded to an overlay (the root pops it), so a prompt that is
 // closed with Esc emits no Done. The effect is the same as a No: nothing runs.
@@ -21,8 +21,16 @@ import (
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/space"
 	"github.com/tbxark/gvim/internal/tui/style"
+)
+
+// The prompts are overlays of the root's stack.
+var (
+	_ overlay.Overlay = (*Line)(nil)
+	_ overlay.Caret   = (*Line)(nil)
+	_ overlay.Overlay = (*Confirm)(nil)
 )
 
 // Outcome is how a prompt ended.
@@ -150,11 +158,12 @@ func (l *Line) Active() bool { return !l.closed }
 // Value returns the current input.
 func (l *Line) Value() string { return l.field.Value() }
 
-// Update handles one message. Key presses are handled as described on Line. A paste, and
-// the clipboard text that Ctrl+V asked for, go to the text field. The returned command is
+// Update handles one message and returns the prompt itself, so the root can stack it
+// as an overlay. Key presses are handled as described on Line. A paste, and the
+// clipboard text that Ctrl+V asked for, go to the text field. The returned command is
 // the Done message when the prompt submits, the clipboard read of Ctrl+V, and nil
 // otherwise.
-func (l *Line) Update(msg tea.Msg) (*Line, tea.Cmd) {
+func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		if p, ok := msg.(tea.PasteMsg); ok {
@@ -332,9 +341,10 @@ func NewConfirmWith(st style.Styles, label string, tag any, o ConfirmOptions) *C
 // Active reports whether the prompt is open.
 func (c *Confirm) Active() bool { return !c.closed }
 
-// Update handles one message. The returned command is the Done message once an
-// answer is given, and nil otherwise.
-func (c *Confirm) Update(msg tea.Msg) (*Confirm, tea.Cmd) {
+// Update handles one message and returns the confirm itself, so the root can stack it
+// as an overlay. The returned command is the Done message once an answer is given, and
+// nil otherwise.
+func (c *Confirm) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return c, nil

@@ -10,8 +10,16 @@
 #   cmd/gvim, cmd/gvimdebug      executables (the only packages that import internal/)
 #   internal/                    the executable shell, private:
 #     app/                       composition root: the only package that imports the
-#                                concrete adapters, the TUI sub-packages and the
-#                                plugin runtime
+#                                private host packages (uiadapter, pluginhost, lsphost,
+#                                restore, keybindings, highlight) and the plugin runtime
+#     uiadapter/                 the UI port adapters; the only package besides app that
+#                                imports the TUI sub-packages
+#     pluginhost/                the Lua plugin host: runtime, OS, editor, services
+#     lsphost/                   the language-server port
+#     restore/                   session restore and crash recovery
+#     keybindings/               user keybindings, the editing store, plugin bindings
+#     highlight/                 the syntax-span cache
+#     apptest/                   test support only; never in a production tree
 #     cli/                       cobra command tree (imports app for Options only)
 #     tui/ (+ sub-packages)      the Bubble Tea UI
 #     terminal/  filewatch/      private backends of the shell
@@ -41,10 +49,12 @@
 #       parent package (internal/tui).
 #   R6  internal/cli imports internal/app and no other module package.
 #   R7  only cmd/gvim and internal/cli import internal/app; only cmd/gvim
-#       imports internal/cli; only internal/app (and plugin/plugintest) imports
-#       the plugin runtime or the TUI sub-packages.
+#       imports internal/cli; only internal/app, internal/pluginhost and
+#       plugin/plugintest import the plugin runtime; only internal/app and
+#       internal/uiadapter import the TUI sub-packages.
 #   R8  no production package (the dependency tree of cmd/gvim) imports test
-#       support: buffer/buffertest, plugin/plugintest, internal/uitest.
+#       support: buffer/buffertest, plugin/plugintest, internal/uitest,
+#       internal/apptest.
 #   R9  pluginapi and decorations import no module package and no charm package.
 #   R10 the plugin tree imports only the standard library, gopher-lua, hujson,
 #       pluginapi, plugin/bundled and plugin/pattern (plugintest may also import
@@ -194,11 +204,11 @@ while IFS=$'\t' read -r pkg imp; do
     if [ "$rel" != cmd/gvim ] && [ "$irel" = internal/cli ]; then
       add R7 "$pkg" "$imp"
     fi
-    if [ "$rel" != internal/app ] && [ "$rel" != plugin/plugintest ] && under "$irel" plugin &&
+    if [ "$rel" != internal/app ] && [ "$rel" != internal/pluginhost ] && [ "$rel" != plugin/plugintest ] && under "$irel" plugin &&
       [ "$irel" != pluginapi ] && [ "$irel" != plugin/pattern ] && [ "$irel" != plugin/bundled ]; then
       add R7 "$pkg" "$imp"
     fi
-    if [ "$rel" != internal/tui ] && [ "$rel" != internal/app ] && under "$irel" internal/tui &&
+    if [ "$rel" != internal/tui ] && [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ] && under "$irel" internal/tui &&
       [ "$irel" != internal/tui ]; then
       # Sub-packages of internal/tui may import the kits and their siblings.
       if ! under "$rel" internal/tui; then
@@ -234,14 +244,41 @@ while IFS=$'\t' read -r pkg imp; do
 
     # R12: only the tui root and the app import tui sub-packages.
     if under "$irel" internal/tui && [ "$irel" != internal/tui ] &&
-      [ "$rel" != internal/tui ] && [ "$rel" != internal/app ] && ! under "$rel" internal/tui; then
+      [ "$rel" != internal/tui ] && [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ] &&
+      ! under "$rel" internal/tui; then
       add R12 "$pkg" "$imp"
     fi
+
+    # R13: the private host packages. Only the composition root imports them; the
+    # only sibling edges are uiadapter -> {highlight, keybindings, restore} and
+    # pluginhost -> keybindings.
+    case "$irel" in
+      internal/uiadapter | internal/pluginhost | internal/lsphost)
+        if [ "$rel" != internal/app ]; then
+          add R13 "$pkg" "$imp"
+        fi
+        ;;
+      internal/restore)
+        if [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ]; then
+          add R13 "$pkg" "$imp"
+        fi
+        ;;
+      internal/highlight)
+        if [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ]; then
+          add R13 "$pkg" "$imp"
+        fi
+        ;;
+      internal/keybindings)
+        if [ "$rel" != internal/app ] && [ "$rel" != internal/uiadapter ] && [ "$rel" != internal/pluginhost ]; then
+          add R13 "$pkg" "$imp"
+        fi
+        ;;
+    esac
   fi
 
   # R8: test support never reaches a shipped binary.
   case "$imp" in
-    "$mod/buffer/buffertest" | "$mod/plugin/plugintest" | "$mod/internal/uitest")
+    "$mod/buffer/buffertest" | "$mod/plugin/plugintest" | "$mod/internal/uitest" | "$mod/internal/apptest")
       if printf '%s\n' "$prod" | grep -qxF "$pkg"; then
         add R8 "$pkg" "$imp"
       fi

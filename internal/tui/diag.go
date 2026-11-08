@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // eventRingSize is the number of input events event_debug keeps.
@@ -64,8 +65,7 @@ type calibrateState struct {
 // view.
 func (m *Model) openCalibrate() {
 	st := &calibrateState{}
-	v := &boxView{active: true, chrome: m.listChrome()}
-	v.content = func() (string, []string, string) {
+	v := list.NewTextBox(m.listChrome(), func() (string, []string, string) {
 		if !st.seen {
 			return "Keyboard calibration", []string{"Press a key to see how the terminal reports it."}, "Esc closes"
 		}
@@ -75,25 +75,24 @@ func (m *Model) openCalibrate() {
 			"Modifiers: " + mods,
 			"Text: " + text,
 		}, "Esc closes"
-	}
-	v.onKey = func(k tea.Key) bool {
+	})
+	v.OnKey = func(k tea.Key) bool {
 		st.key, st.seen = k, true
 		return false
 	}
-	m.pushOverlay(boxOverlay{v: v})
+	m.pushOverlay(v)
 }
 
 // openEventDebug shows the last input events, newest first. The view reads the ring
 // as it is drawn, so events that arrive while it is open appear too.
 func (m *Model) openEventDebug() {
 	events := &m.util.events
-	v := &boxView{active: true, chrome: m.listChrome()}
-	v.content = func() (string, []string, string) {
+	v := list.NewTextBox(m.listChrome(), func() (string, []string, string) {
 		lines := events.newest()
 		if len(lines) == 0 {
 			lines = []string{"No key or mouse events yet."}
 		}
 		return "Event debug: last 20 events, newest first", lines, "Esc closes"
-	}
-	m.pushOverlay(boxOverlay{v: v})
+	})
+	m.pushOverlay(v)
 }

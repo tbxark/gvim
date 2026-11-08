@@ -68,10 +68,10 @@ func (m *Model) windowInfos() []pluginapi.WindowInfo {
 		if i < len(l.panes) {
 			p := l.panes[i]
 			info.TopLine = p.top
-			info.X, info.Y = p.textX, p.y
-			info.Width, info.Height = max(p.textW-1, 0), p.h
-			if doc := m.paneDoc(p); doc != nil && p.w > 0 && p.h > 0 {
-				info.Height, info.LeftCol = m.paneGeometry(p, doc).View(p.w, p.h)
+			info.X, info.Y = p.textX, p.Y
+			info.Width, info.Height = max(p.textW-1, 0), p.H
+			if doc := m.paneDoc(p); doc != nil && p.W > 0 && p.H > 0 {
+				info.Height, info.LeftCol = m.paneGeometry(p, doc).View(p.W, p.H)
 			}
 		}
 		out[i] = info
@@ -263,10 +263,10 @@ func (m *Model) windowRows(n *splitNode) int {
 	}
 	p := l.panes[i]
 	doc := m.paneDoc(p)
-	if doc == nil || p.w <= 0 || p.h <= 0 {
-		return p.h
+	if doc == nil || p.W <= 0 || p.H <= 0 {
+		return p.H
 	}
-	rows, _ := m.paneGeometry(p, doc).View(p.w, p.h)
+	rows, _ := m.paneGeometry(p, doc).View(p.W, p.H)
 	return rows
 }
 
@@ -317,10 +317,10 @@ func (h *pluginHost) VisibleRows(w pluginapi.WinID) ([]pluginapi.VisibleRow, err
 	}
 	p := l.panes[i]
 	doc := m.paneDoc(p)
-	if doc == nil || p.w <= 0 || p.h <= 0 {
+	if doc == nil || p.W <= 0 || p.H <= 0 {
 		return nil, nil
 	}
-	spans := m.paneGeometry(p, doc).VisibleRows(p.w, p.h, maxVisibleRows)
+	spans := m.paneGeometry(p, doc).VisibleRows(p.W, p.H, maxVisibleRows)
 	rows := make([]pluginapi.VisibleRow, len(spans))
 	for k, s := range spans {
 		rows[k] = pluginapi.VisibleRow{Line: s.Line, ColFrom: s.From, ColTo: s.To, Wrapped: s.Wrapped}

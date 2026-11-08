@@ -58,8 +58,8 @@ func TestSettingsRowsShowWhatAutoResolvedTo(t *testing.T) {
 	}
 	for _, tt := range tests {
 		for _, row := range settingsRows(tt.s) {
-			if row.left == "ui_icons" && row.right != tt.want {
-				t.Errorf("%s: ui_icons row = %q, want %q", tt.name, row.right, tt.want)
+			if row.Left == "ui_icons" && row.Right != tt.want {
+				t.Errorf("%s: ui_icons row = %q, want %q", tt.name, row.Right, tt.want)
 			}
 		}
 	}
@@ -68,7 +68,7 @@ func TestSettingsRowsShowWhatAutoResolvedTo(t *testing.T) {
 func TestSettingsRowsSayWhenThereIsNoConfigFile(t *testing.T) {
 	rows := settingsRows(Settings{})
 	last := rows[len(rows)-1]
-	if last.left != "config_file" || last.right != "(none)" {
+	if last.Left != "config_file" || last.Right != "(none)" {
 		t.Fatalf("last row = %+v, want config_file with (none)", last)
 	}
 }

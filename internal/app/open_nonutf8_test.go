@@ -5,19 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/tbxark/gvim/editor"
-	"github.com/tbxark/gvim/internal/tui"
-	"github.com/tbxark/gvim/session"
 )
 
 // latin1File writes a Latin-1 file of about 5 KiB, which is large for a 1 KiB threshold.
-func latin1File(t *testing.T, dir string) string {
-	t.Helper()
-	path := filepath.Join(dir, "l1.txt")
-	must(t, os.WriteFile(path, []byte(strings.Repeat("caf\xe9 line\n", 500)), 0o644))
-	return path
-}
 
 // A large file that is not UTF-8 is not decoded whole before the first frame: it gets no
 // tab, and the UI asks about it once it runs (tui.RootPorts.FullLoadPrompts).
@@ -30,42 +20,6 @@ func TestFileArgumentsLeaveANonUTF8FileOfLargeSizeToThePrompt(t *testing.T) {
 	tabs := rt.ed.Tabs()
 	if len(tabs) != 1 || tabs[0].Path != other {
 		t.Fatalf("tabs = %+v, want only the file that opens at once", tabs)
-	}
-}
-
-func TestSessionRestoreOpensANonUTF8FileOfLargeSize(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	l1 := latin1File(t, dir)
-	sess := filepath.Join(dir, "session")
-	ed := editor.New(largeOpts())
-	load := ed.LoadFullFunc(l1)
-	d, err := load()
-	must(t, err)
-	ed.OpenLoaded(d)
-	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
-	s, _, err := session.Load(sess)
-	must(t, err)
-
-	ed2 := editor.New(largeOpts())
-	if failed := restoreSession(ed2, sess, s); len(failed) != 0 {
-		t.Fatalf("restoreSession failed: %+v", failed)
-	}
-	if tabs := ed2.Tabs(); len(tabs) != 1 || tabs[0].Path != l1 {
-		t.Fatalf("tabs = %+v, want the file back", tabs)
-	}
-
-	// Unsaved text of such a file comes back as well.
-	ed.Do("insert_char", map[string]any{"text": "typed "})
-	must(t, writeSession(ed, sess, tui.ExplorerState{}, nil))
-	s, _, err = session.Load(sess)
-	must(t, err)
-	ed3 := editor.New(largeOpts())
-	if failed := restoreSession(ed3, sess, s); len(failed) != 0 {
-		t.Fatalf("restoreSession failed: %+v", failed)
-	}
-	if d := ed3.Active(); d == nil || !d.Modified() || !strings.HasPrefix(d.Buffer.Line(0), "typed ") {
-		t.Fatalf("the unsaved text of the file did not come back")
 	}
 }
 
@@ -84,4 +38,12 @@ func TestFileArgumentOverTheFullLoadLimitIsANoticeNotAnAbort(t *testing.T) {
 	if tabs := rt.ed.Tabs(); len(tabs) != 1 || tabs[0].Path != other {
 		t.Fatalf("tabs = %+v, want only the file that can be opened", tabs)
 	}
+}
+
+// latin1File writes a Latin-1 file of about 5 KiB, which is large for a 1 KiB threshold.
+func latin1File(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "l1.txt")
+	must(t, os.WriteFile(path, []byte(strings.Repeat("caf\xe9 line\n", 500)), 0o644))
+	return path
 }

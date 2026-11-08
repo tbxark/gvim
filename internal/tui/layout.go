@@ -495,7 +495,7 @@ func statusRunsCut(w int, s statusView) ([]run, bool) {
 	}
 	left := []segment{
 		{space.Pad("Local"), hitNone, 0},
-		{space.Pad(padCells(s.position, positionWidth(s.lines))), hitStatusSegment, statusSegmentPosition},
+		{space.Pad(space.PadTo(s.position, positionWidth(s.lines))), hitStatusSegment, statusSegmentPosition},
 	}
 	for i, it := range s.extra {
 		if !it.right {
@@ -597,12 +597,12 @@ func statusRunsCut(w int, s statusView) ([]run, bool) {
 			if itemRoom <= 0 {
 				continue
 			}
-			text = truncateCells(text, itemRoom)
+			text = space.End(text, itemRoom)
 			itemRoom -= ansi.StringWidth(text)
 		}
 		tw := ansi.StringWidth(text)
 		if tw > room {
-			runs = append(runs, newRun(x, truncateCells(text, room), seg.kind, seg.id))
+			runs = append(runs, newRun(x, space.End(text, room), seg.kind, seg.id))
 			break
 		}
 		runs = append(runs, newRun(x, text, seg.kind, seg.id))
@@ -630,21 +630,4 @@ func statusRunsCut(w int, s statusView) ([]run, bool) {
 // digit gives 13.
 func positionWidth(lines int) int {
 	return 12 + len(strconv.Itoa(max(lines, 0)))
-}
-
-// padCells pads s with blanks on the right to n cells. Longer text is kept.
-func padCells(s string, n int) string {
-	if pad := n - ansi.StringWidth(s); pad > 0 {
-		return s + strings.Repeat(" ", pad)
-	}
-	return s
-}
-
-// truncateCells shortens s to at most w cells, ending with "…" when it is cut.
-func truncateCells(s string, w int) string {
-	if ansi.StringWidth(s) <= w {
-		return s
-	}
-	// The cut keeps one cell for the ellipsis.
-	return ansi.Truncate(s, max(w-1, 0), "") + "…"
 }

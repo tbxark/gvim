@@ -76,7 +76,7 @@ func TestHiddenVerticalScrollbarClearsTheScrollbarColumn(t *testing.T) {
 			t.Fatal("a pane still has the scrollbar with it hidden")
 		}
 	}
-	x := hidden.editorX + hidden.panes[0].w - 1
+	x := hidden.editorX + hidden.panes[0].W - 1
 	if got := hidden.hit(x, hidden.bodyTop); got.Kind == hitScrollbarTrack {
 		t.Errorf("the last column hits the scrollbar with it hidden")
 	}

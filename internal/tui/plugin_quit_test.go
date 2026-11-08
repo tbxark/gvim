@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
 // quitMsgs answers a key to the open confirm and returns the messages the answer produced,
@@ -61,7 +63,7 @@ func TestQuitDiscardRequiresConfirm(t *testing.T) {
 			if len(m.overlays) != 1 {
 				t.Fatalf("overlays = %d, want the question", len(m.overlays))
 			}
-			if _, ok := m.overlays[0].(confirmOverlay); !ok {
+			if _, ok := m.overlays[0].(*prompt.Confirm); !ok {
 				t.Fatalf("overlay = %T, want a confirm", m.overlays[0])
 			}
 			if len(tf.closed) != 0 || tf.quit {
@@ -105,7 +107,7 @@ func TestQuitDiscardThroughHostDoWaitsAndAsks(t *testing.T) {
 	if len(m.overlays) != 1 {
 		t.Fatalf("overlays = %d, want the question", len(m.overlays))
 	}
-	if _, ok := m.overlays[0].(confirmOverlay); !ok {
+	if _, ok := m.overlays[0].(*prompt.Confirm); !ok {
 		t.Fatalf("overlay = %T, want a confirm", m.overlays[0])
 	}
 	if msgs := quitMsgs(m, typed("n")); quitted(msgs) {

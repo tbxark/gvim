@@ -21,9 +21,9 @@ func paneRowOf(m *Model, i int, text string) int {
 	l := m.layout()
 	p := l.panes[i]
 	g := m.paint()
-	for y := p.y; y < p.y+p.h; y++ {
+	for y := p.Y; y < p.Y+p.H; y++ {
 		var b strings.Builder
-		for x := p.x; x < p.x+p.w; x++ {
+		for x := p.X; x < p.X+p.W; x++ {
 			b.WriteString(g.At(x, y).Text)
 		}
 		if strings.Contains(b.String(), text) {
@@ -166,7 +166,7 @@ func TestCompareScrollKeepsTheSidesLevel(t *testing.T) {
 			l := m.layout()
 			p := l.panes[overPane]
 			for n := range 40 {
-				m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.x + p.gutter + 2, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
+				m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.X + p.gutter + 2, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
 				if a, b := alignedTops(t, m); a != b {
 					t.Fatalf("after %d notches the panes start at rows %d and %d", n+1, a, b)
 				}
@@ -182,7 +182,7 @@ func TestCompareScrollKeepsTheSidesLevel(t *testing.T) {
 				}
 			}
 			for range 80 {
-				m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.x + p.gutter + 2, Y: l.bodyTop + 1, Button: tea.MouseWheelUp}))
+				m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.X + p.gutter + 2, Y: l.bodyTop + 1, Button: tea.MouseWheelUp}))
 			}
 			if a, b := alignedTops(t, m); a != 0 || b != 0 {
 				t.Errorf("after scrolling back up the panes start at rows %d and %d, want 0", a, b)
@@ -197,7 +197,7 @@ func TestCompareSwitchSideKeepsTheViewLevel(t *testing.T) {
 	m := newCompareModel(t, left, right)
 	l := m.layout()
 	for range 10 {
-		m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.panes[0].x + 8, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
+		m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.panes[0].X + 8, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
 	}
 	before, _ := alignedTops(t, m)
 	m.Update(palette.RunCommandMsg{Action: "compare_switch_side"})
@@ -244,7 +244,7 @@ func TestComparePressLandsOnTheLineUnderThePointer(t *testing.T) {
 		t.Errorf("caret after a press on a filler row = %+v, want the end of line 2", got)
 	}
 	m.ed.SetCursor(buffer.Pos{Line: 7}, false)
-	m.Update(tea.MouseClickMsg(tea.Mouse{X: left0.x + 1, Y: filler, Button: tea.MouseLeft}))
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: left0.X + 1, Y: filler, Button: tea.MouseLeft}))
 	if got := m.ed.Active().Cursor(); got.Line != 7 {
 		t.Errorf("a press on the gutter of a filler row moved the caret to %+v", got)
 	}
@@ -256,7 +256,7 @@ func TestCompareFocusSwitchByPressKeepsTheView(t *testing.T) {
 	m := newCompareModel(t, left, right)
 	l := m.layout()
 	for range 3 {
-		m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.panes[0].x + 8, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
+		m.Update(tea.MouseWheelMsg(tea.Mouse{X: l.panes[0].X + 8, Y: l.bodyTop + 1, Button: tea.MouseWheelDown}))
 	}
 	before, _ := alignedTops(t, m)
 	row := l.bodyTop + 2
@@ -289,7 +289,7 @@ func TestCompareDecorMarksTheLines(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := l.panes[tt.pane]
 			y := l.bodyTop + st.side[tt.pane].fill.TextRow(tt.line)
-			if got := g.At(p.x, y).Text; got != tt.want {
+			if got := g.At(p.X, y).Text; got != tt.want {
 				t.Errorf("mark = %q, want %q", got, tt.want)
 			}
 		})
@@ -461,7 +461,7 @@ func TestCompareMarksLinesThatDifferOnlyInTheirEnding(t *testing.T) {
 	rowText := func(pane, y int) string {
 		p := l.panes[pane]
 		var b strings.Builder
-		for x := p.x; x < p.x+p.w; x++ {
+		for x := p.X; x < p.X+p.W; x++ {
 			b.WriteString(g.At(x, y).Text)
 		}
 		return b.String()
@@ -469,7 +469,7 @@ func TestCompareMarksLinesThatDifferOnlyInTheirEnding(t *testing.T) {
 	for line := range 2 {
 		y := l.bodyTop + line
 		for pane, note := range []string{"CRLF line ending", "LF line ending"} {
-			if got := g.At(l.panes[pane].x, y).Text; got != "~" {
+			if got := g.At(l.panes[pane].X, y).Text; got != "~" {
 				t.Errorf("pane %d line %d mark = %q, want ~", pane, line, got)
 			}
 			if got := rowText(pane, y); !strings.Contains(got, note) {
@@ -478,13 +478,13 @@ func TestCompareMarksLinesThatDifferOnlyInTheirEnding(t *testing.T) {
 		}
 	}
 	// The empty last line is no line: it has no ending to differ in.
-	if got := g.At(l.panes[0].x, l.bodyTop+2).Text; got == "~" {
+	if got := g.At(l.panes[0].X, l.bodyTop+2).Text; got == "~" {
 		t.Errorf("the empty last line is marked")
 	}
 	// Equal endings mark nothing.
 	f.docs[1].eol = "CRLF"
 	g = m.paint()
-	if got := g.At(l.panes[0].x, l.bodyTop).Text; got == "~" {
+	if got := g.At(l.panes[0].X, l.bodyTop).Text; got == "~" {
 		t.Errorf("a line is marked although both sides end it the same way")
 	}
 }
@@ -500,7 +500,7 @@ func TestCompareScrollsBothSidesSideways(t *testing.T) {
 	lefts := [2]int{}
 	for i, p := range l.panes {
 		doc := m.paneDoc(p)
-		lefts[i], _ = m.paneGeometry(p, doc).HScroll(p.w, p.h)
+		lefts[i], _ = m.paneGeometry(p, doc).HScroll(p.W, p.H)
 	}
 	if lefts[0] == 0 {
 		t.Fatalf("the focused pane did not scroll sideways (left %d)", lefts[0])
@@ -512,7 +512,7 @@ func TestCompareScrollsBothSidesSideways(t *testing.T) {
 	g := m.paint()
 	var b strings.Builder
 	p := l.panes[1]
-	for x := p.x; x < p.x+p.w; x++ {
+	for x := p.X; x < p.X+p.W; x++ {
 		b.WriteString(g.At(x, l.bodyTop).Text)
 	}
 	if !strings.Contains(b.String(), "END") {

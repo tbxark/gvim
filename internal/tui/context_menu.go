@@ -11,32 +11,11 @@ import (
 	"github.com/tbxark/gvim/internal/tui/ctxmenu"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
-	"github.com/tbxark/gvim/internal/tui/grid"
 )
 
 // noContextMenuNotice is the status text of a right press on a part of the frame that
 // has no context menu.
 const noContextMenuNotice = "No context menu here: right-click a tab, the explorer or the editor text"
-
-// ctxOverlay adapts *ctxmenu.Menu to Overlay. The menu closes itself when a row is
-// chosen or a press falls outside it, and the adapter reports that to the stack.
-type ctxOverlay struct{ m *ctxmenu.Menu }
-
-// Update forwards the message to the menu. It returns nil once the menu is closed, so
-// the stack pops it.
-func (o ctxOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
-	cmd := o.m.Update(msg)
-	if !o.m.Active() {
-		return nil, cmd
-	}
-	return o, cmd
-}
-
-// Draw paints the menu over the frame.
-func (o ctxOverlay) Draw(g *grid.Grid) { o.m.Draw(g) }
-
-// Active reports whether the menu is still open.
-func (o ctxOverlay) Active() bool { return o.m.Active() }
 
 // showContextMenu opens a context menu with items at the pointer.
 func (m *Model) showContextMenu(mo tea.Mouse, items []ctxmenu.Item) {
@@ -45,7 +24,7 @@ func (m *Model) showContextMenu(mo tea.Mouse, items []ctxmenu.Item) {
 	disabled.Faint = true
 	menu := ctxmenu.New(ctxmenu.Styles{Box: ov.Box, Border: ov.Border, Selected: ov.Selected, Disabled: disabled})
 	menu.Show(mo.X, mo.Y, m.width, m.height, items)
-	m.pushOverlay(ctxOverlay{m: menu})
+	m.pushOverlay(menu)
 }
 
 // rightClick handles a right press. The tab strip, the explorer and the editor text

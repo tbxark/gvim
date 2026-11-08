@@ -152,7 +152,7 @@ func TestScrollbarTrackPressMovesTheViewport(t *testing.T) {
 	row := 6
 	m.Update(click(l.w-1, l.bodyTop+row, tea.MouseLeft))
 	p := m.pane(m.ed.Active())
-	if want := p.ScrollTopFor(l.focusedPane().w, m.bodyRows(), row); ed.doc.top != want || want == 0 {
+	if want := p.ScrollTopFor(l.focusedPane().W, m.bodyRows(), row); ed.doc.top != want || want == 0 {
 		t.Fatalf("viewport top = %d, want %d (non-zero)", ed.doc.top, want)
 	}
 }
@@ -491,15 +491,15 @@ func TestBrowserChoiceSetsANotice(t *testing.T) {
 }
 
 func TestBrowserOverlayPopsOnceClosed(t *testing.T) {
-	o := browserOverlay{b: browser.New(browser.Options{Dir: t.TempDir()})}
-	if !o.Active() {
+	b := browser.New(browser.Options{Dir: t.TempDir()})
+	if !b.Active() {
 		t.Fatal("a new browser is not active")
 	}
-	next, _ := o.Update(special(tea.KeyEscape))
+	next, _ := b.Update(special(tea.KeyEscape))
 	if next != nil {
 		t.Error("a closed browser was kept on the stack")
 	}
-	if o.Active() {
+	if b.Active() {
 		t.Error("the browser is still active after Esc")
 	}
 }

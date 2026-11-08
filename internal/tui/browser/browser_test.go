@@ -65,7 +65,7 @@ func click(x, y int) tea.MouseClickMsg {
 func send(t *testing.T, b *Browser, msg tea.Msg) tea.Msg {
 	t.Helper()
 	next, cmd := b.Update(msg)
-	if next != b {
+	if next != nil && next != b {
 		t.Fatal("Update returned a different browser")
 	}
 	if cmd == nil {

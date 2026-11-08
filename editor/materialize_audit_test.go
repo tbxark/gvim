@@ -33,19 +33,20 @@ var materializeAllowed = map[string]string{
 	"dabbrev.go:shows":              "a word on one line",
 	"dabbrev.go:begin":              "a word on one line",
 	"smart_lines.go:transposeChars": "two characters of one line",
-	// The application.
+	// The application and its restore host.
 	"files_recovery.go:Plan":  "skips large documents",
-	"session.go:writeSession": "skips large documents",
+	"session.go:WriteSession": "skips large documents",
 }
 
 // TestNoUncheckedMaterialize walks the packages that hold the actions and finds every
 // call of Buffer.Text and Buffer.Range, and fails for one that is not in the list above.
 // It is the guard against a whole-document read that a large document would silently
-// turn into an empty string.
+// turn into an empty string. The restore host is scanned too: it reads the unsaved text
+// of the tabs when it saves a session or a crash recovery.
 func TestNoUncheckedMaterialize(t *testing.T) {
 	t.Parallel()
 	used := map[string]bool{}
-	for _, dir := range []string{".", filepath.Join("..", "internal", "app")} {
+	for _, dir := range []string{".", filepath.Join("..", "internal", "app"), filepath.Join("..", "internal", "restore")} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
 			t.Fatal(err)

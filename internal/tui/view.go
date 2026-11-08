@@ -12,6 +12,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/icons"
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -382,7 +383,7 @@ func (m *Model) bufferFlag(action string, args map[string]any, cur bool) (tea.Cm
 
 // askNumber opens the prompt for the number a view command takes as its argument.
 func (m *Model) askNumber(action, key, label string, hi int) {
-	m.pushOverlay(lineOverlay{l: prompt.NewLine(m.styles, prompt.LineOptions{
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
 		Label: label,
 		Tag:   viewTag{action: action, key: key},
 		Validate: func(text string) error {
@@ -392,7 +393,7 @@ func (m *Model) askNumber(action, key, label string, hi int) {
 			}
 			return nil
 		},
-	})})
+	}))
 }
 
 // viewAnswer runs the view command of a prompt that was submitted. A prompt that was
@@ -427,40 +428,40 @@ func (m *Model) setCursorStyle(s string) {
 // openCursorStyles lists the caret shapes. The current one is marked.
 func (m *Model) openCursorStyles() {
 	names := []string{cursorBlock, cursorBar, cursorUnderline}
-	rows := make([]listRow, len(names))
+	rows := make([]list.Row, len(names))
 	for i, n := range names {
 		right := ""
 		if n == m.view.cursor {
 			right = "current"
 		}
-		rows[i] = listRow{left: n, right: right, value: n}
+		rows[i] = list.Row{Left: n, Right: right, Value: n}
 	}
-	v := newListView("Cursor style", rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
-		v.active = false
-		m.setCursorStyle(r.value)
+	v := list.New("Cursor style", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		m.setCursorStyle(r.Value)
 		return nil
 	})
-	m.pushOverlay(listOverlay{v: v})
+	m.pushOverlay(v)
 }
 
 // openThemes lists the bundled themes. The current one is marked, and choosing a row
 // applies it.
 func (m *Model) openThemes() {
 	names := theme.Names()
-	rows := make([]listRow, len(names))
+	rows := make([]list.Row, len(names))
 	for i, n := range names {
 		right := ""
 		if n == m.util.settings.Theme {
 			right = "current"
 		}
-		rows[i] = listRow{left: n, right: right, value: n}
+		rows[i] = list.Row{Left: n, Right: right, Value: n}
 	}
-	v := newListView("Theme", rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
-		v.active = false
-		m.applyTheme(r.value)
+	v := list.New("Theme", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		m.applyTheme(r.Value)
 		return nil
 	})
-	m.pushOverlay(listOverlay{v: v})
+	m.pushOverlay(v)
 }
 
 // applyTheme makes the bundled theme called name the theme of the frame, at once. Every
@@ -488,13 +489,13 @@ func (m *Model) applyTheme(name string) {
 // openLocales lists the locales built in. English is the only one, so the list has
 // one row, and choosing it says that the others are not built in.
 func (m *Model) openLocales() {
-	rows := []listRow{{left: "English", right: "current", value: "en"}}
-	v := newListView("Locale", rows, m.listChrome(), func(v *listView, r listRow) tea.Cmd {
-		v.active = false
+	rows := []list.Row{{Left: "English", Right: "current", Value: "en"}}
+	v := list.New("Locale", rows, m.listChrome(), func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
 		m.notice = "Other locales are not built in: English is the only locale"
 		return nil
 	})
-	m.pushOverlay(listOverlay{v: v})
+	m.pushOverlay(v)
 }
 
 // viewLayout sets the chrome rows and the gutter of the frame from the view state. It

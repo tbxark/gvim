@@ -60,7 +60,7 @@ func TestPopupFocusMovesTheTopmostPopupToTheTop(t *testing.T) {
 	if len(m.overlays) != 2 {
 		t.Fatalf("overlays = %d, want 2", len(m.overlays))
 	}
-	if _, ok := m.overlays[len(m.overlays)-1].(popupOverlay); !ok {
+	if _, ok := m.overlays[len(m.overlays)-1].(*popup.Popup); !ok {
 		t.Fatal("popup_focus did not put the popup on top")
 	}
 	if m.notice != "" {
@@ -76,7 +76,7 @@ func TestPopupFocusWhenPopupIsAlreadyOnTopChangesNothing(t *testing.T) {
 	if len(m.overlays) != 1 {
 		t.Fatalf("overlays = %d, want 1", len(m.overlays))
 	}
-	if _, ok := m.overlays[0].(popupOverlay); !ok {
+	if _, ok := m.overlays[0].(*popup.Popup); !ok {
 		t.Fatal("the popup is no longer the overlay")
 	}
 }

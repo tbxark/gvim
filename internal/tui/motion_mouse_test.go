@@ -99,7 +99,7 @@ func TestGutterClickTogglesTheFoldWithoutMovingTheCaret(t *testing.T) {
 	m, ed := viewModel(t, DefaultViewOptions(), "func a() {\n\tx := 1\n\ty := 2\n}\nz\n", 60, 12)
 	mouseAt(m, 3, 4, 0) // the caret goes to line 4
 	l := m.layout()
-	gx := l.panes[0].x + 1
+	gx := l.panes[0].X + 1
 	m.Update(tea.MouseClickMsg(tea.Mouse{X: gx, Y: l.bodyTop, Button: tea.MouseLeft}))
 	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: gx, Y: l.bodyTop, Button: tea.MouseLeft}))
 	if !ed.Active().Folded(0) {
@@ -127,11 +127,11 @@ func TestSidewaysWheelPansWithoutPullingBackToTheCaret(t *testing.T) {
 	l := m.layout()
 	p := l.panes[0]
 	scroll := func(b tea.MouseButton, mod tea.KeyMod) {
-		m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.x + p.gutter + 2, Y: l.bodyTop + 1, Button: b, Mod: mod}))
+		m.Update(tea.MouseWheelMsg(tea.Mouse{X: p.X + p.gutter + 2, Y: l.bodyTop + 1, Button: b, Mod: mod}))
 	}
 	left := func() int {
 		pane := m.paneGeometry(m.layout().panes[0], m.ed.Active())
-		v, _ := pane.HScroll(p.w, p.h)
+		v, _ := pane.HScroll(p.W, p.H)
 		return v
 	}
 	if left() != 0 {
@@ -158,7 +158,7 @@ func TestSidewaysWheelPansWithoutPullingBackToTheCaret(t *testing.T) {
 	for range 100 {
 		scroll(tea.MouseWheelRight, 0)
 	}
-	if got, want := left(), len(long)-(p.w-1-p.gutter); got != want {
+	if got, want := left(), len(long)-(p.W-1-p.gutter); got != want {
 		t.Fatalf("left = %d at the far end, want %d", got, want)
 	}
 	if got := ed.Active().Cursor; got != (buffer.Pos{}) {
@@ -234,14 +234,14 @@ func TestDragOvershootCountsFromTheLastTextRowAboveTheHorizontalBar(t *testing.T
 			runAction(t, m, "toggle_line_wrap")
 			l := m.layout()
 			fp := l.panes[0]
-			body := m.paneGeometry(fp, m.ed.Active()).BodyRows(fp.w, fp.h)
-			if body != fp.h-1 {
-				t.Fatalf("setup: %d text rows in a %d row pane, want the bar to take one", body, fp.h)
+			body := m.paneGeometry(fp, m.ed.Active()).BodyRows(fp.W, fp.H)
+			if body != fp.H-1 {
+				t.Fatalf("setup: %d text rows in a %d row pane, want the bar to take one", body, fp.H)
 			}
 			down := tea.Mouse{X: l.textX + 1, Y: l.bodyTop + 1, Button: tea.MouseLeft}
 			m.Update(tea.MouseClickMsg(down))
 			mo := down
-			mo.Y = fp.y + body + tt.rowFromBar
+			mo.Y = fp.Y + body + tt.rowFromBar
 			m.Update(tea.MouseMotionMsg(mo))
 			_, head, ok := selectionOf(ed)
 			if !ok {
@@ -292,8 +292,8 @@ func TestScrollOffsetCountsDisplayRowsOfWrappedLines(t *testing.T) {
 				press(m, special(tea.KeyDown))
 			}
 			fp := m.layout().focusedPane()
-			body := m.paneGeometry(fp, m.ed.Active()).BodyRows(fp.w, fp.h)
-			_, y, ok := m.paneGeometry(fp, m.ed.Active()).Caret(fp.w, fp.h)
+			body := m.paneGeometry(fp, m.ed.Active()).BodyRows(fp.W, fp.H)
+			_, y, ok := m.paneGeometry(fp, m.ed.Active()).Caret(fp.W, fp.H)
 			if !ok {
 				t.Fatalf("caret %v is off the body (top %d)", ed.Active().Cursor, ed.Active().Top)
 			}

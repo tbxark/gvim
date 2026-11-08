@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // tourSlide is one slide of the built-in tour. Its lines are text about the screen. A
@@ -51,7 +52,7 @@ var tourSlides = []tourSlide{
 }
 
 // tourTextWidth is the widest a line of the tour is drawn: the box less its borders and padding.
-const tourTextWidth = boxMaxWidth - 4
+const tourTextWidth = list.BoxMaxWidth - 4
 
 // tourToken matches the {action} placeholders of a tour line.
 var tourToken = regexp.MustCompile(`\{([a-z_]+)\}`)
@@ -85,8 +86,7 @@ func (t *tourState) step(d int) {
 // closes the tour. Esc closes it too.
 func (m *Model) openTour(slide int) {
 	st := &tourState{slide: slide}
-	v := &boxView{tour: st, active: true, chrome: m.listChrome()}
-	v.content = func() (string, []string, string) {
+	v := list.NewTextBox(m.listChrome(), func() (string, []string, string) {
 		s := tourSlides[st.slide]
 		title := fmt.Sprintf("Tour: %s (%d of %d)", s.title, st.slide+1, len(tourSlides))
 		var lines []string
@@ -96,8 +96,9 @@ func (m *Model) openTour(slide int) {
 			lines = append(lines, strings.Split(ansi.Wrap(m.tourText(l), tourTextWidth, ""), "\n")...)
 		}
 		return title, lines, tourFooter
-	}
-	v.onKey = func(k tea.Key) bool {
+	})
+	v.Data = st
+	v.OnKey = func(k tea.Key) bool {
 		switch k.Keystroke() {
 		case "enter":
 			if st.slide == len(tourSlides)-1 {
@@ -111,7 +112,7 @@ func (m *Model) openTour(slide int) {
 		}
 		return false
 	}
-	m.pushOverlay(boxOverlay{v: v})
+	m.pushOverlay(v)
 }
 
 // tourAction runs tour_next or tour_prev. With no tour open, either one opens the
@@ -132,8 +133,10 @@ func (m *Model) tourAction(action string) {
 // findTour returns the state of the topmost tour on the overlay stack, or nil.
 func (m *Model) findTour() *tourState {
 	for _, v := range slices.Backward(m.overlays) {
-		if o, ok := v.(boxOverlay); ok && o.v.tour != nil {
-			return o.v.tour
+		if o, ok := v.(*list.TextBox); ok {
+			if st, ok := o.Data.(*tourState); ok {
+				return st
+			}
 		}
 	}
 	return nil

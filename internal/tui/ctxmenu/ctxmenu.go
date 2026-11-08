@@ -19,7 +19,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
 )
+
+// The menu is an overlay of the root's stack.
+var _ overlay.Overlay = (*Menu)(nil)
 
 // Item is one row of a menu. Action and Data are the owner's: they come back in
 // Chosen. A Separator draws a rule, and a Disabled row is drawn faint and cannot be
@@ -104,9 +108,9 @@ func (m *Menu) Items() []Item { return slices.Clone(m.items) }
 // height. The width is 0 before the first draw.
 func (m *Menu) Box() (x, y, w, h int) { return m.box.x, m.box.y, m.box.w, m.box.h }
 
-// Update handles one key or mouse message and returns the command it starts: Chosen
+// update handles one key or mouse message and returns the command it starts: Chosen
 // when a row is chosen, or Reroute for a right press outside the menu.
-func (m *Menu) Update(msg tea.Msg) tea.Cmd {
+func (m *Menu) update(msg tea.Msg) tea.Cmd {
 	if !m.open {
 		return nil
 	}
@@ -134,6 +138,16 @@ func (m *Menu) Update(msg tea.Msg) tea.Cmd {
 		return m.press(msg)
 	}
 	return nil
+}
+
+// Update handles one message through the overlay contract: it runs update and
+// returns the menu, or nil once it is closed so the stack pops it.
+func (m *Menu) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
+	cmd := m.update(msg)
+	if !m.Active() {
+		return nil, cmd
+	}
+	return m, cmd
 }
 
 // visible is the number of rows the box shows.

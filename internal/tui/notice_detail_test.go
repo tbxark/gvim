@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -23,14 +24,14 @@ func TestWarningsListUsesTheWidthOfAWideTerminal(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ w, wantAtLeast int }{{80, 76}, {200, 150}} {
 		m := warningModel(t, tt.w, 30)
-		o, ok := m.overlays[len(m.overlays)-1].(listOverlay)
+		o, ok := m.overlays[len(m.overlays)-1].(*list.View)
 		if !ok {
 			t.Fatalf("width %d: no list overlay", tt.w)
 		}
 		frame := m.paint()
 		_ = frame
-		if o.v.box.w < tt.wantAtLeast {
-			t.Errorf("width %d: the warnings box is %d cells wide, want at least %d", tt.w, o.v.box.w, tt.wantAtLeast)
+		if o.Box.W < tt.wantAtLeast {
+			t.Errorf("width %d: the warnings box is %d cells wide, want at least %d", tt.w, o.Box.W, tt.wantAtLeast)
 		}
 	}
 	// At 200 columns the whole message fits, so no row is cut.
@@ -64,17 +65,17 @@ func TestEnterOnAWarningShowsItsFullText(t *testing.T) {
 		t.Fatal("Enter on a warning row started nothing")
 	}
 	m.Update(cmd())
-	top, ok := m.overlays[len(m.overlays)-1].(boxOverlay)
+	top, ok := m.overlays[len(m.overlays)-1].(*list.TextBox)
 	if !ok {
 		t.Fatalf("top overlay is %T, want the text box of the warning", m.overlays[len(m.overlays)-1])
 	}
-	_, lines, _ := top.v.content()
+	_, lines, _ := top.Content()
 	if got := strings.Join(lines, " "); !strings.Contains(got, "project config cannot enable a plugin") || !strings.Contains(got, ".gvim/config.json:") {
 		t.Errorf("the box holds %q, want the whole warning", got)
 	}
 	// Enter closes the box, and the list under it is still there.
 	press(m, special(tea.KeyEnter))
-	if _, ok := m.overlays[len(m.overlays)-1].(listOverlay); !ok {
+	if _, ok := m.overlays[len(m.overlays)-1].(*list.View); !ok {
 		t.Errorf("after Enter the top overlay is %T, want the list again", m.overlays[len(m.overlays)-1])
 	}
 }

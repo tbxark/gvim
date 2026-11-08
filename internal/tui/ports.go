@@ -4,14 +4,12 @@ import (
 	"context"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/tbxark/gvim/buffer"
 	commands "github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
-	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/overlay"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
@@ -252,32 +250,14 @@ type MarkdownRenderer interface {
 }
 
 // Overlay is a layer drawn over the frame and given the input while it is on
-// top: the palette, the find bar, the prompts, the browser and the menu
-// dropdowns. Sub-packages implement it. The root keeps a stack of overlays.
-//
-// Routing. A key or mouse message goes to the top overlay first, and the root
-// does not handle it further. Other messages, such as the palette's file ranking
-// results, also go to the top overlay, and the root handles them as usual. Esc
-// is not forwarded: it pops the top overlay, so every overlay is cancelled by
-// Esc. After an Update, the root replaces the top overlay with the one Update
-// returned, or pops it when Update returns nil. It also pops any overlay that
-// reports Active false, so an overlay that is done can say so from Update or
-// from its state.
-//
-// Painting. Every active overlay is drawn after the frame, bottom of the stack
-// first. An overlay covers only the cells it draws. The cells it does not draw
-// keep the frame under them.
-type Overlay interface {
-	// Update handles one key or mouse message. It returns the overlay that
-	// takes this one's place (the same overlay to keep it, nil to close it), and
-	// the command the message starts.
-	Update(msg tea.Msg) (Overlay, tea.Cmd)
-	// Draw paints the overlay over the frame in g. The grid's size is the frame
-	// size.
-	Draw(g *grid.Grid)
-	// Active reports whether the overlay is still open.
-	Active() bool
-}
+// top: the palette, the find bar, the prompts, the browser, the dialogs, the
+// lists and the menus. The contract, and the routing and painting rules, are in
+// package overlay; the alias lets the root and its ports use one type.
+type Overlay = overlay.Overlay
+
+// Caret is the optional part of an Overlay that owns the terminal caret. The
+// root asserts it on the top overlay.
+type Caret = overlay.Caret
 
 // KeyPress is one key press in the keymap vocabulary: the key name ("p", "Left",
 // "F10", " ") and the modifiers, a subset of "ctrl", "alt", "shift" and "super". The
@@ -319,7 +299,7 @@ type SequenceKeymap interface {
 }
 
 // Dialogs builds the dialogs the file actions open. The app adapter builds them
-// from internal/ui/dialog and checks the disk for the Save As prompt. Each one
+// from internal/tui/dialog and checks the disk for the Save As prompt. Each one
 // answers with a dialog.Result, which the root applies. A nil Dialogs leaves the
 // actions that need a dialog with a notice, and nothing is lost.
 type Dialogs interface {

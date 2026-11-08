@@ -94,8 +94,8 @@ func ctxTop(m *Model) *ctxmenu.Menu {
 	if len(m.overlays) == 0 {
 		return nil
 	}
-	if o, ok := m.overlays[len(m.overlays)-1].(ctxOverlay); ok {
-		return o.m
+	if o, ok := m.overlays[len(m.overlays)-1].(*ctxmenu.Menu); ok {
+		return o
 	}
 	return nil
 }

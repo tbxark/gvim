@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	commands "github.com/tbxark/gvim/commands"
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/keymap"
 )
 
@@ -60,14 +61,14 @@ func contextTitle(ctx string) string {
 // listed under its old chord. Bindings in a context gvim does not resolve are left out too. The
 // noop action only unbinds a key, so it is left out. A nil lister gives no rows. The action id
 // stays in the row's value, so typing it in the filter finds the row.
-func helpRows(l BindingLister, describe func(string) string) []listRow {
+func helpRows(l BindingLister, describe func(string) string) []list.Row {
 	if l == nil {
 		return nil
 	}
 	if describe == nil {
 		describe = humanAction
 	}
-	groups := map[string][]listRow{}
+	groups := map[string][]list.Row{}
 	seen := map[string]bool{}
 	for _, b := range l.Bindings() {
 		if b.Action == "" || b.Action == "noop" || b.Action == "unbind" || seen[b.Action] {
@@ -78,11 +79,11 @@ func helpRows(l BindingLister, describe func(string) string) []listRow {
 		if !ok || !keymap.Consulted(keymap.Context(p.Context)) {
 			continue
 		}
-		groups[p.Context] = append(groups[p.Context], listRow{left: describe(b.Action), right: commands.FormatChord(p.Chord), value: b.Action})
+		groups[p.Context] = append(groups[p.Context], list.Row{Left: describe(b.Action), Right: commands.FormatChord(p.Chord), Value: b.Action})
 	}
-	var out []listRow
+	var out []list.Row
 	for _, ctx := range contextsInOrder(groups) {
-		out = append(out, listRow{header: true, left: contextTitle(ctx)})
+		out = append(out, list.Row{Header: true, Left: contextTitle(ctx)})
 		out = append(out, groups[ctx]...)
 	}
 	return out
@@ -90,7 +91,7 @@ func helpRows(l BindingLister, describe func(string) string) []listRow {
 
 // contextsInOrder returns the context names of groups: the names in contextOrder
 // that have rows, then the others sorted by name.
-func contextsInOrder(groups map[string][]listRow) []string {
+func contextsInOrder(groups map[string][]list.Row) []string {
 	var out, rest []string
 	for _, c := range contextOrder {
 		if _, ok := groups[c]; ok {
@@ -111,9 +112,9 @@ func contextsInOrder(groups map[string][]listRow) []string {
 // the rows.
 func (m *Model) openHelp(title string) {
 	l, _ := m.keys.(BindingLister)
-	v := newListView(title, helpRows(l, m.actionDescriber()), m.listChrome(), nil)
+	v := list.New(title, helpRows(l, m.actionDescriber()), m.listChrome(), nil)
 	if l == nil {
-		v.empty = noBindingsText
+		v.Empty = noBindingsText
 	}
-	m.pushOverlay(listOverlay{v: v})
+	m.pushOverlay(v)
 }

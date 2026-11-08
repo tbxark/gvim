@@ -131,20 +131,20 @@ func (l layout) hitExplorer(x, y int) hitTarget {
 // hitSplitBorder and takes no press.
 func (l layout) hitEditor(x, y int) hitTarget {
 	for i, p := range l.panes {
-		if !p.contains(x, y) {
+		if !p.Contains(x, y) {
 			continue
 		}
-		row := y - p.y
+		row := y - p.Y
 		switch {
 		case x < p.textX:
 			return hitTarget{Kind: hitGutter, Index: row, Pane: i}
-		case p.scrollbar && x == p.x+p.w-1:
+		case p.scrollbar && x == p.X+p.W-1:
 			return hitTarget{Kind: hitScrollbarTrack, Index: row, Pane: i}
 		}
 		return hitTarget{Kind: hitEditorText, Index: row, Pane: i}
 	}
 	for i, b := range l.borders {
-		if b.contains(x, y) {
+		if b.Contains(x, y) {
 			return hitTarget{Kind: hitSplitBorder, Index: i}
 		}
 	}

@@ -303,7 +303,7 @@ func (o *pluginPopupOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	if o.closed {
 		return nil, nil
 	}
-	cmd := o.p.Update(msg)
+	_, cmd := o.p.Update(msg)
 	if o.p.Active() {
 		return o, cmd
 	}

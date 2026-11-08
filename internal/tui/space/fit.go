@@ -104,6 +104,15 @@ func Name(name string, w int) string {
 	return End(name, w)
 }
 
+// PadTo pads s with blanks on the right to w cells. Text that is already wider is
+// kept whole.
+func PadTo(s string, w int) string {
+	if pad := w - ansi.StringWidth(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
+}
+
 // Wrap breaks s into rows of at most w cells, at most maxRows of them. When the text
 // needs more rows, the last row ends with "…" in place of the rest. Words are kept
 // whole where they fit, and a longer word is broken.

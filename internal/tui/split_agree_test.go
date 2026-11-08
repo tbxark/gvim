@@ -15,13 +15,13 @@ func checkFrame(t *testing.T, m *Model, f *multiFake, label string) {
 		for x := l.editorX; x < l.w; x++ {
 			var owners []int // the panes that contain the cell
 			for i, p := range l.panes {
-				if p.contains(x, y) {
+				if p.Contains(x, y) {
 					owners = append(owners, i)
 				}
 			}
 			var lines []int // the lines that contain the cell
 			for j, b := range l.borders {
-				if b.contains(x, y) {
+				if b.Contains(x, y) {
 					lines = append(lines, j)
 				}
 			}
@@ -54,10 +54,10 @@ func TestLayoutAndHitMapAgreeAfterEachChange(t *testing.T) {
 	dragFirstLine := func(m *Model) {
 		b := m.layout().borders[0]
 		if b.vertical {
-			pressDrag(m, b.x, b.y, b.x-7, b.y)
+			pressDrag(m, b.X, b.Y, b.X-7, b.Y)
 			return
 		}
-		pressDrag(m, b.x, b.y, b.x, b.y-3)
+		pressDrag(m, b.X, b.Y, b.X, b.Y-3)
 	}
 	steps := []struct {
 		name string

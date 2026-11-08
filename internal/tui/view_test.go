@@ -203,7 +203,7 @@ func TestPromptLineToggleAddsARowUnderTheStatusRow(t *testing.T) {
 func TestVerticalScrollbarToggleClearsTheColumn(t *testing.T) {
 	long := strings.Repeat("line\n", 60)
 	m, _ := viewModel(t, DefaultViewOptions(), long, 40, 10)
-	x := m.layout().panes[0].x + m.layout().panes[0].w - 1
+	x := m.layout().panes[0].X + m.layout().panes[0].W - 1
 	y := m.layout().bodyTop
 	if got := viewCell(t, m, x, y).Text; got != "┃" {
 		t.Fatalf("setup: scrollbar cell %q, want the thumb", got)

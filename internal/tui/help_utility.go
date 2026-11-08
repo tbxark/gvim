@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
@@ -74,62 +73,6 @@ func (u utilities) keymapChecked(menuKey string) bool {
 	}
 	return active == name
 }
-
-// boxView is a centred box of text: a title, the body lines and a footer. The tour,
-// the calibration view and the event view use it. content is read at every draw, so
-// a view shows the live state it reads. onKey, when set, sees each key press the
-// box takes, and returns true to close the box.
-type boxView struct {
-	content func() (title string, lines []string, footer string)
-	onKey   func(k tea.Key) (done bool)
-	tour    *tourState // set on the tour only: tour_next and tour_prev step it
-	active  bool
-	chrome  style.Overlay
-	box     rect // the box at the last draw
-}
-
-// boxMaxWidth is the widest a text box is drawn.
-const boxMaxWidth = 76
-
-// draw paints the box with the border and title of the dialogs. The title is on
-// the top border and the footer on the bottom one, so the body lines fill the rows
-// between them. A long body keeps the first rows it can show.
-func (v *boxView) draw(g *grid.Grid) {
-	title, lines, footer := v.content()
-	box := centred(g.Width(), g.Height(), boxMaxWidth, len(lines)+2)
-	v.box = box
-	if box.w == 0 || box.h < 3 {
-		return
-	}
-	end := box.x + box.w - 2 // text stops before the padding cell at the right border
-	v.chrome.PaintBox(g, box.x, box.y, box.w, box.h, title)
-	for k := range min(len(lines), box.h-2) {
-		g.Put(box.x+2, box.y+1+k, end, truncateCells(lines[k], end-(box.x+2)), v.chrome.Box)
-	}
-	g.Put(box.x+2, box.y+box.h-1, end, truncateCells(" "+footer+" ", end-(box.x+2)), v.chrome.Muted)
-}
-
-// boxOverlay adapts *boxView to Overlay. The box closes itself when onKey reports
-// done, and the adapter reports that to the stack.
-type boxOverlay struct{ v *boxView }
-
-// Update passes a key press to onKey. It returns nil once the box is closed, so the
-// stack pops it.
-func (o boxOverlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
-	if k, ok := msg.(tea.KeyPressMsg); ok && o.v.onKey != nil && o.v.onKey(tea.Key(k)) {
-		o.v.active = false
-	}
-	if !o.v.active {
-		return nil, nil
-	}
-	return o, nil
-}
-
-// Draw paints the box over the frame.
-func (o boxOverlay) Draw(g *grid.Grid) { o.v.draw(g) }
-
-// Active reports whether the box is still open.
-func (o boxOverlay) Active() bool { return o.v.active }
 
 // keyLabel splits a key press for the calibration view: the key name without its
 // modifiers, the modifiers and the text, as the terminal reported them.

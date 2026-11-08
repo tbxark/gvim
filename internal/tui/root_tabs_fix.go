@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // openTabList opens the list of the tab names for Switch to Tab by Name. Choosing a row
@@ -14,21 +15,21 @@ func (m *Model) openTabList() tea.Cmd {
 		m.notice = "No open tabs to switch to"
 		return nil
 	}
-	rows := make([]listRow, len(tabs))
+	rows := make([]list.Row, len(tabs))
 	for i, t := range tabs {
-		rows[i] = listRow{left: t.Name, value: strconv.Itoa(i)}
+		rows[i] = list.Row{Left: t.Name, Value: strconv.Itoa(i)}
 	}
-	run := func(v *listView, r listRow) tea.Cmd {
-		v.active = false
-		i, err := strconv.Atoi(r.value)
+	run := func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
+		i, err := strconv.Atoi(r.Value)
 		if err != nil {
 			return nil
 		}
 		m.activateTab(i)
 		m.focusEditor()
-		m.notice = "Switched to " + r.left
+		m.notice = "Switched to " + r.Left
 		return nil
 	}
-	m.pushOverlay(listOverlay{v: newListView("Switch to tab", rows, m.listChrome(), run)})
+	m.pushOverlay(list.New("Switch to tab", rows, m.listChrome(), run))
 	return nil
 }

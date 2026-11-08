@@ -15,6 +15,7 @@ import (
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
 	"github.com/tbxark/gvim/internal/tui/find"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/search"
 	"github.com/tbxark/gvim/syntax"
@@ -620,7 +621,7 @@ func TestALargeFileInAnotherEncodingAsksBeforeItLoadsWhole(t *testing.T) {
 	if len(m.overlays) != 1 {
 		t.Fatalf("overlay stack has %d entries after the open, want the question", len(m.overlays))
 	}
-	if _, ok := m.overlays[0].(confirmOverlay); !ok {
+	if _, ok := m.overlays[0].(*prompt.Confirm); !ok {
 		t.Fatalf("top overlay = %T, want a confirm", m.overlays[0])
 	}
 	if !strings.Contains(m.notice, "requires full load") {

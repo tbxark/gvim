@@ -37,7 +37,7 @@
 //     grip drag and file operations come later. The key and wheel routing for
 //     focus, visibility and tree movement is in the root now.
 //   - Palette, find bar, prompts and browser (P4, P5): overlays on the root's
-//     stack (see Overlay in ports.go). An overlay takes the key and mouse input
+//     stack (see package overlay). An overlay takes the key and mouse input
 //     while it is on top, and Esc closes it.
 //
 // Sub-packages never import this package. The root never imports the concrete

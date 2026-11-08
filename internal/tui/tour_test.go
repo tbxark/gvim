@@ -7,13 +7,16 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // topTour returns the tour on the overlay stack, if one is open.
 func topTour(m *Model) (*tourState, bool) {
 	for _, v := range slices.Backward(m.overlays) {
-		if o, ok := v.(boxOverlay); ok && o.v.tour != nil {
-			return o.v.tour, true
+		if o, ok := v.(*list.TextBox); ok {
+			if st, ok := o.Data.(*tourState); ok {
+				return st, true
+			}
 		}
 	}
 	return nil, false
@@ -56,7 +59,7 @@ func TestTourTextFollowsTheKeymapAndFitsTheBox(t *testing.T) {
 			for i := range tourSlides {
 				m.overlays = nil
 				m.openTour(i)
-				_, lines, _ := m.overlays[0].(boxOverlay).v.content()
+				_, lines, _ := m.overlays[0].(*list.TextBox).Content()
 				for _, l := range lines {
 					if w := ansi.StringWidth(l); w > tourTextWidth {
 						t.Errorf("slide %d line is %d cells wide: %q", i+1, w, l)

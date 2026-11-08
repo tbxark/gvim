@@ -271,7 +271,7 @@ func (m *Model) askFullLoad(err editor.ErrLargeNeedsFullLoad) {
 	}
 	m.notice = err.Error()
 	q := err.Error() + ". Load it?"
-	m.pushOverlay(confirmOverlay{c: prompt.NewConfirm(m.styles, q, fullLoadTag{err: err})})
+	m.pushOverlay(prompt.NewConfirm(m.styles, q, fullLoadTag{err: err}))
 }
 
 // maybeAskFullLoad asks the question when err is the error of a large file that is not

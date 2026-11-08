@@ -50,23 +50,23 @@ func TestShowHighlightsTheFirstRowThatCanBeChosen(t *testing.T) {
 
 func TestKeysSkipSeparatorsAndDisabledRows(t *testing.T) {
 	m := newMenu()
-	m.Update(key(tea.KeyDown))
+	m.update(key(tea.KeyDown))
 	if m.Selected() != 3 {
 		t.Fatalf("Down from the first row chose %d, want 3 (the rows between cannot be chosen)", m.Selected())
 	}
-	m.Update(key(tea.KeyDown))
+	m.update(key(tea.KeyDown))
 	if m.Selected() != 3 {
 		t.Errorf("Down at the end moved to %d", m.Selected())
 	}
-	m.Update(key(tea.KeyUp))
+	m.update(key(tea.KeyUp))
 	if m.Selected() != 0 {
 		t.Errorf("Up chose %d, want 0", m.Selected())
 	}
-	m.Update(key(tea.KeyEnd))
+	m.update(key(tea.KeyEnd))
 	if m.Selected() != 3 {
 		t.Errorf("End chose %d", m.Selected())
 	}
-	msg := result(m.Update(key(tea.KeyEnter)))
+	msg := result(m.update(key(tea.KeyEnter)))
 	c, ok := msg.(Chosen)
 	if !ok || c.Item.Action != "copy_path" || c.Item.Data != 7 {
 		t.Fatalf("Enter sent %#v", msg)
@@ -97,8 +97,8 @@ func TestHoverOnAnAreaThatIsNotARowClearsTheHighlight(t *testing.T) {
 	}
 	for _, c := range cases {
 		m := newMenu()
-		m.Update(motion(x+3, y+4)) // the last row is highlighted first
-		m.Update(motion(c.x, c.y))
+		m.update(motion(x+3, y+4)) // the last row is highlighted first
+		m.update(motion(c.x, c.y))
 		if m.Selected() != c.want {
 			t.Errorf("%s: highlight %d, want %d", c.name, m.Selected(), c.want)
 		}
@@ -112,7 +112,7 @@ func TestClicks(t *testing.T) {
 	x, y, _, _ := newMenu().Box()
 	t.Run("left click on a row chooses it", func(t *testing.T) {
 		m := newMenu()
-		c, ok := result(m.Update(click(x+3, y+4, tea.MouseLeft))).(Chosen)
+		c, ok := result(m.update(click(x+3, y+4, tea.MouseLeft))).(Chosen)
 		if !ok || c.Item.Action != "copy_path" || m.Active() {
 			t.Fatalf("chosen %#v active %v", c, m.Active())
 		}
@@ -120,26 +120,26 @@ func TestClicks(t *testing.T) {
 	for name, pt := range map[string][2]int{"disabled row": {x + 3, y + 2}, "separator": {x + 3, y + 3}, "border": {x + 3, y}} {
 		t.Run(name+" does nothing", func(t *testing.T) {
 			m := newMenu()
-			if msg := result(m.Update(click(pt[0], pt[1], tea.MouseLeft))); msg != nil || !m.Active() {
+			if msg := result(m.update(click(pt[0], pt[1], tea.MouseLeft))); msg != nil || !m.Active() {
 				t.Fatalf("msg %#v active %v", msg, m.Active())
 			}
 		})
 	}
 	t.Run("right click inside does nothing", func(t *testing.T) {
 		m := newMenu()
-		if msg := result(m.Update(click(x+3, y+1, tea.MouseRight))); msg != nil || !m.Active() {
+		if msg := result(m.update(click(x+3, y+1, tea.MouseRight))); msg != nil || !m.Active() {
 			t.Fatalf("msg %#v active %v", msg, m.Active())
 		}
 	})
 	t.Run("left click outside closes", func(t *testing.T) {
 		m := newMenu()
-		if msg := result(m.Update(click(60, 20, tea.MouseLeft))); msg != nil || m.Active() {
+		if msg := result(m.update(click(60, 20, tea.MouseLeft))); msg != nil || m.Active() {
 			t.Fatalf("msg %#v active %v", msg, m.Active())
 		}
 	})
 	t.Run("right click outside closes and is sent on", func(t *testing.T) {
 		m := newMenu()
-		r, ok := result(m.Update(click(60, 20, tea.MouseRight))).(Reroute)
+		r, ok := result(m.update(click(60, 20, tea.MouseRight))).(Reroute)
 		if !ok || r.Press.X != 60 || m.Active() {
 			t.Fatalf("reroute %#v active %v", r, m.Active())
 		}
@@ -199,7 +199,7 @@ func TestKeyboardStaysOnTheRowsThatAreDrawn(t *testing.T) {
 	m := New(Styles{Selected: grid.Style{Bold: true}})
 	m.Show(2, 2, 40, 8, longItems(12))
 	for range 9 {
-		m.Update(key(tea.KeyDown))
+		m.update(key(tea.KeyDown))
 	}
 	if m.Selected() != 9 {
 		t.Fatalf("highlight %d after 9 Downs, want 9", m.Selected())
@@ -216,7 +216,7 @@ func TestKeyboardStaysOnTheRowsThatAreDrawn(t *testing.T) {
 	if !shown {
 		t.Errorf("the highlighted row 9 is not drawn selected in the window:\n%s", strings.Join(g.Plain(), "\n"))
 	}
-	if got, ok := result(m.Update(key(tea.KeyEnter))).(Chosen); !ok || got.Item.Action != "rowJ" {
+	if got, ok := result(m.update(key(tea.KeyEnter))).(Chosen); !ok || got.Item.Action != "rowJ" {
 		t.Errorf("Enter chose %+v, want the drawn row J", got)
 	}
 }
@@ -229,14 +229,14 @@ func TestLongMenuScrollsAndMarksTheHiddenRows(t *testing.T) {
 	if !strings.Contains(g.Plain()[7], "▼") || strings.Contains(g.Plain()[0], "▲") {
 		t.Errorf("first window markers: %q / %q", g.Plain()[0], g.Plain()[7])
 	}
-	m.Update(key(tea.KeyEnd))
+	m.update(key(tea.KeyEnd))
 	g = grid.New(40, 8)
 	m.Draw(g)
 	if !strings.Contains(g.Plain()[0], "▲") || strings.Contains(g.Plain()[7], "▼") || !strings.Contains(g.Plain()[6], "Row L") {
 		t.Errorf("last window:\n%s", strings.Join(g.Plain(), "\n"))
 	}
 	// A click on the drawn rows picks the row that is drawn there, not a hidden one.
-	cmd := m.Update(click(3, 6, tea.MouseLeft))
+	cmd := m.update(click(3, 6, tea.MouseLeft))
 	if got, ok := result(cmd).(Chosen); !ok || got.Item.Action != "rowL" {
 		t.Errorf("click on the bottom row chose %+v, want row L", got)
 	}
@@ -247,7 +247,7 @@ func TestWheelScrollsALongMenu(t *testing.T) {
 	m.Show(0, 0, 40, 8, longItems(12))
 	g := grid.New(40, 8)
 	m.Draw(g)
-	m.Update(tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 3, Button: tea.MouseWheelDown}))
+	m.update(tea.MouseWheelMsg(tea.Mouse{X: 3, Y: 3, Button: tea.MouseWheelDown}))
 	g = grid.New(40, 8)
 	m.Draw(g)
 	if !strings.Contains(g.Plain()[1], "Row B") {

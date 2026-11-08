@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -87,14 +88,14 @@ func frameRowHas(m *Model, parts ...string) bool {
 }
 
 // rowsOf renders list rows as "# header" for a group and "left=right" for an item.
-func rowsOf(rows []listRow) []string {
+func rowsOf(rows []list.Row) []string {
 	out := make([]string, len(rows))
 	for i, r := range rows {
-		if r.header {
-			out[i] = "# " + r.left
+		if r.Header {
+			out[i] = "# " + r.Left
 			continue
 		}
-		out[i] = r.left + "=" + r.right
+		out[i] = r.Left + "=" + r.Right
 	}
 	return out
 }

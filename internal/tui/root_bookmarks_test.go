@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -114,7 +115,7 @@ func TestBookmarkPromptIsALinePrompt(t *testing.T) {
 	if len(m.overlays) != 1 {
 		t.Fatalf("overlays = %d, want the slot prompt", len(m.overlays))
 	}
-	if _, ok := m.overlays[0].(lineOverlay); !ok {
+	if _, ok := m.overlays[0].(*prompt.Line); !ok {
 		t.Fatalf("overlay is %T, want a line prompt", m.overlays[0])
 	}
 }

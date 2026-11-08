@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/tbxark/gvim/internal/tui/list"
 )
 
 // Interrupted is one file whose unsaved text an interrupted save kept in a stash file.
@@ -58,20 +59,20 @@ func (m *Model) reviewed(msg interruptedMsg) {
 		m.notice = "No interrupted saves to review"
 		return
 	}
-	rows := make([]listRow, len(msg.items))
+	rows := make([]list.Row, len(msg.items))
 	for i, it := range msg.items {
-		rows[i] = listRow{left: it.name(), right: filepath.Base(it.Stash), value: it.Stash}
+		rows[i] = list.Row{Left: it.name(), Right: filepath.Base(it.Stash), Value: it.Stash}
 	}
-	run := func(v *listView, r listRow) tea.Cmd {
-		v.active = false
+	run := func(v *list.View, r list.Row) tea.Cmd {
+		v.Close()
 		for _, it := range msg.items {
-			if it.Stash == r.value {
+			if it.Stash == r.Value {
 				m.openInterrupted(it)
 			}
 		}
 		return nil
 	}
-	m.pushOverlay(listOverlay{v: newListView("Interrupted saves", rows, m.listChrome(), run)})
+	m.pushOverlay(list.New("Interrupted saves", rows, m.listChrome(), run))
 }
 
 // openInterrupted opens the file of a stashed item and names its stash. An untitled

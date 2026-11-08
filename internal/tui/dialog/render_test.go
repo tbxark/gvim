@@ -201,7 +201,9 @@ func TestDialogsDoNotPanicOnSmallGrids(t *testing.T) {
 	for _, o := range allDialogs() {
 		for _, s := range sizes {
 			g := draw(o, s[0], s[1])
-			o.Cursor(s[0], s[1])
+			if c, ok := o.(Caret); ok {
+				c.Cursor(s[0], s[1])
+			}
 			_ = screen(g)
 		}
 	}

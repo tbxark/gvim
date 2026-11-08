@@ -212,7 +212,7 @@ func TestOpenCompareShowsTwoTabsSideBySide(t *testing.T) {
 	if len(l.panes) != 2 || l.panes[0].tab != 0 || l.panes[1].tab != 1 || l.focus != 0 {
 		t.Fatalf("panes %+v focus %d, want tabs 0 and 1 with the focus on pane 0", l.panes, l.focus)
 	}
-	if l.panes[0].y != l.panes[1].y || l.panes[1].x <= l.panes[0].x {
+	if l.panes[0].Y != l.panes[1].Y || l.panes[1].X <= l.panes[0].X {
 		t.Errorf("panes %+v are not side by side", l.panes)
 	}
 	if m.openCompare(0, 2) {

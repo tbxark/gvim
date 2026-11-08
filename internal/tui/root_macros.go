@@ -1,6 +1,10 @@
 package tui
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tbxark/gvim/internal/tui/list"
+)
 
 // listMacros opens the steps of the kept macro, in order. The recorder keeps one
 // macro, so there is one list. With no macro it says so on the status row.
@@ -10,9 +14,9 @@ func (m *Model) listMacros() {
 		m.notice = "No macro recorded"
 		return
 	}
-	rows := make([]listRow, len(steps))
+	rows := make([]list.Row, len(steps))
 	for i, s := range steps {
-		rows[i] = listRow{left: fmt.Sprintf("%d. %s", i+1, s.cmd.Action)}
+		rows[i] = list.Row{Left: fmt.Sprintf("%d. %s", i+1, s.cmd.Action)}
 	}
-	m.pushOverlay(listOverlay{v: newListView("Recorded macro", rows, m.listChrome(), nil)})
+	m.pushOverlay(list.New("Recorded macro", rows, m.listChrome(), nil))
 }
