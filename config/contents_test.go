@@ -71,7 +71,7 @@ func TestContentsFoldBufferFallsBackToThePluginKey(t *testing.T) {
 }
 
 // TestContentsFoldBufferSetting checks the Settings-page row: it exists, is
-// user-only, applies on restart, and shows the effective value.
+// user-only, applies live, and shows the effective value.
 func TestContentsFoldBufferSetting(t *testing.T) {
 	t.Parallel()
 	setting, ok := SettingByKey("contents.fold_buffer")
@@ -84,8 +84,8 @@ func TestContentsFoldBufferSetting(t *testing.T) {
 	if setting.Layers != LayerUser {
 		t.Errorf("layers = %v, want user-only (the retired plugin's settings are user-only)", setting.Layers)
 	}
-	if setting.Apply != ApplyRestart {
-		t.Errorf("apply = %v, want restart (the running section reads it at startup)", setting.Apply)
+	if setting.Apply != ApplyLive {
+		t.Errorf("apply = %v, want live (the Contents section republishes when it is saved)", setting.Apply)
 	}
 	cfg := Defaults()
 	if got := setting.Value(cfg); got != "off" {
@@ -116,5 +116,19 @@ func TestContentsFoldBufferSettingEdit(t *testing.T) {
 	}
 	if diags := ValidateEdits(edit("true"), true); len(diags) != 0 {
 		t.Errorf("ValidateEdits(project) = %v, want the accepted-ignored project layer", diags)
+	}
+}
+
+// TestContentsFoldBufferSettingIsLive checks the Settings schema row: fold_buffer
+// applies to the running session (the Contents section republishes on save and
+// reload), not only at the next start.
+func TestContentsFoldBufferSettingIsLive(t *testing.T) {
+	t.Parallel()
+	setting, ok := SettingByKey("contents.fold_buffer")
+	if !ok {
+		t.Fatal("contents.fold_buffer is not in the settings schema")
+	}
+	if setting.Apply != ApplyLive {
+		t.Errorf("contents.fold_buffer applies %v, want live", setting.Apply)
 	}
 }

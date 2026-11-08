@@ -102,8 +102,13 @@ type tableRow struct {
 func splitTableRow(s string) tableRow {
 	r := []rune(s)
 	var row tableRow
-	for i, c := range r {
-		if c == '|' {
+	for i := 0; i < len(r); i++ {
+		if r[i] == '\\' && i+1 < len(r) && r[i+1] == '|' {
+			// An escaped pipe is cell text, not a separator.
+			i++
+			continue
+		}
+		if r[i] == '|' {
 			row.pipes = append(row.pipes, i)
 		}
 	}
@@ -154,9 +159,14 @@ func splitTableRow(s string) tableRow {
 }
 
 // isTableHeader reports whether s can hold the header cells of a table: it has
-// a pipe and is not itself a separator row.
+// a pipe, is not itself a separator row, and is not a blockquote or a list item.
+// A table inside those containers is not classified: the page view leaves such a
+// line literal (docs/markdown.md).
 func isTableHeader(s string) bool {
-	return strings.Contains(s, "|") && !isTableSeparator(s)
+	if !strings.Contains(s, "|") || isTableSeparator(s) {
+		return false
+	}
+	return !mdQuote.MatchString(s) && !mdList.MatchString(s)
 }
 
 // isTableSeparator reports whether s is the separator row under a table header:

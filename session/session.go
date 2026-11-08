@@ -35,6 +35,9 @@ type Session struct {
 	ShowIgnored bool        `json:"showIgnored"`
 	Active      int         `json:"active"`
 	Files       []FileState `json:"files"`
+	// Sidebar is the sidebar UI state (sections, sizes, scroll, width form). It is
+	// optional: a session file without it keeps the config defaults.
+	Sidebar *SidebarState `json:"sidebar,omitempty"`
 }
 
 // FileState is the saved state of one open file.
@@ -53,6 +56,13 @@ type FileState struct {
 	// delta over the file (StashOverlay). A file has a StashFile or an OverlayFile,
 	// never both.
 	OverlayFile string `json:"overlayFile,omitempty"`
+	// PageView and PageWidth are the per-file Markdown page view of the document
+	// (docs/markdown.md). A nil PageView means the file kept no override and the
+	// language's page_view decides, and the fields are omitted then, so a session
+	// written by an older version decodes unchanged and a reader that ignores them
+	// keeps the defaults. PageWidth zero means the language or viewport width.
+	PageView  *bool `json:"pageView,omitempty"`
+	PageWidth int   `json:"pageWidth,omitzero"`
 }
 
 // OverlayStash is the unsaved edits of a large file as the document package

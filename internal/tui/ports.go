@@ -261,12 +261,21 @@ type DiagnosticsEvent struct {
 	Versioned bool
 }
 
-// InlayHint is one inlay hint, drawn at the end of a line. Round 5 draws hints
-// end-of-line only (the placement residual vs Fresh's true inline insertion is in
-// docs/lsp.md); Text is the hint's label, rendered by the port.
+// InlayHint is one inlay hint. Col is the insertion point (a rune column of the
+// line); the pane inserts the hint cells there display-only (tier 2), and Text
+// remains the joined label the end-of-line tier-1 form uses when the pane cannot.
 type InlayHint struct {
 	Line int
+	// Col is the rune column the hint is anchored to, clamped to the line's
+	// length. The hint is drawn before the character there, and at the line's end
+	// when Col is the length.
+	Col  int
 	Text string
+	// Parts are the protocol label parts the port joined into Text, in order.
+	Parts []string
+	// PaddingLeft and PaddingRight ask for an extra space on that side of the
+	// hint's cells, from the protocol's paddingLeft/paddingRight.
+	PaddingLeft, PaddingRight bool
 	// Kind is the protocol's InlayHintKind: 1 type, 2 parameter, 0 unknown.
 	Kind int
 }
@@ -523,6 +532,11 @@ type Deps struct {
 	// ShowExplorer shows the explorer at startup, with the root expanded. The app
 	// sets it when a folder argument is given. It has no effect without Explorer.
 	ShowExplorer bool
+	// Sidebar is the restored session's sidebar UI state (sections open/collapsed,
+	// rows, width form/side, scroll). The app sets it only when it restores the
+	// saved layout (not for a hot-exit restore or a file launch); nil keeps the
+	// config defaults.
+	Sidebar *SidebarState
 	// HideMenuBar removes the menu bar row. The zero value shows it, as Fresh does.
 	HideMenuBar bool
 	// HideLineNumbers removes the line-number gutter. The zero value shows it.

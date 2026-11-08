@@ -18,6 +18,11 @@ type BufferGroupLeaf struct {
 	Name string // the panel name the group API uses
 	// Buffer shows an existing buffer; 0 makes the host create a read-only panel buffer.
 	Buffer BufferID
+	// Fixed asks for a fixed display height of Height rows (Fresh's {type="fixed",
+	// height=N} leaf). The host re-applies it on every layout change; split borders can
+	// leave it one row off, and a fixed leaf inside a ratio split is approximate.
+	Fixed  bool
+	Height int
 }
 
 // BufferGroupLayout is one node of a parsed layout: a leaf, or a split of two children.

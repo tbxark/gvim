@@ -17,6 +17,18 @@ import (
 type fakeSettingsPlugins struct {
 	infos    []pluginapi.PluginInfo
 	controls []pluginapi.Control
+	schemas  map[string][]pluginapi.PluginSettingSpec
+	values   map[string][]pluginapi.PluginSettingValue
+}
+
+func (f *fakeSettingsPlugins) SettingsSchema(name string) ([]pluginapi.PluginSettingSpec, bool) {
+	s, ok := f.schemas[name]
+	return s, ok
+}
+
+func (f *fakeSettingsPlugins) SettingsValues(name string) ([]pluginapi.PluginSettingValue, bool) {
+	v, ok := f.values[name]
+	return v, ok
 }
 
 func (f *fakeSettingsPlugins) Plugins() []pluginapi.PluginInfo { return f.infos }
@@ -187,3 +199,42 @@ func TestSettingsPluginReloadAction(t *testing.T) {
 		t.Error("the reload action wrote the config file")
 	}
 }
+
+// TestPluginsPageShowsDeclaredSettings checks the declared-settings rows: one typed,
+// read-only row per declared setting with the effective value and type/default/choices in
+// the note.
+func TestPluginsPageShowsDeclaredSettings(t *testing.T) {
+	plugins := &fakeSettingsPlugins{
+		infos: []pluginapi.PluginInfo{{Name: "hello", Source: "user", Status: "loaded", Enabled: true}},
+		schemas: map[string][]pluginapi.PluginSettingSpec{"hello": {
+			{Key: "mode", Type: "enum", Default: "fast", Choices: []string{"fast", "slow"}, Description: "pace"},
+			{Key: "count", Type: "integer", Default: float64(3), Min: floatPtr(1), Max: floatPtr(10), Project: true},
+		}},
+		values: map[string][]pluginapi.PluginSettingValue{"hello": {
+			{Key: "mode", Value: "slow"},
+			{Key: "count", Value: float64(9), Project: true},
+		}},
+	}
+	s, _ := pluginSettingsService(t, "", config.Config{}, plugins)
+	st := s.structurePlugins(config.Config{}, false)
+	rows := map[string]tui.SettingsStructureRow{}
+	for _, r := range st.Rows {
+		rows[r.Name] = r
+	}
+	mode, ok := rows["hello.mode"]
+	if !ok {
+		t.Fatalf("no hello.mode row in %+v", st.Rows)
+	}
+	if mode.Value != "slow" && mode.Value != `"slow"` {
+		t.Fatalf("mode row value = %q", mode.Value)
+	}
+	if !mode.Locked || !strings.Contains(mode.Note, "enum") || !strings.Contains(mode.Note, "values fast|slow") || !strings.Contains(mode.Note, "pace") {
+		t.Fatalf("mode row note = %q", mode.Note)
+	}
+	count := rows["hello.count"]
+	if count.Value != "9" || !strings.Contains(count.Note, "range 1..10") || !strings.Contains(count.Note, "from project") || !strings.Contains(count.Note, "project") {
+		t.Fatalf("count row = %+v", count)
+	}
+}
+
+func floatPtr(f float64) *float64 { return &f }

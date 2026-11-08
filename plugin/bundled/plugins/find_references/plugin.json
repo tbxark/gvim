@@ -1,0 +1,7 @@
+{
+  "name": "find_references",
+  "version": "1.0.0",
+  "description": "References to the symbol under the cursor: a filterable location list with source-line snippets, preview tabs, and jump",
+  "api": 2,
+  "default_enabled": false
+}

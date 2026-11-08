@@ -25,6 +25,9 @@ import (
 type tableColumnWidths struct {
 	widths []int
 	align  []syntax.TableAlign
+	// wrapped is set when the natural widths did not fit the measure and the
+	// columns were shrunk: cells may then need several visual rows.
+	wrapped bool
 }
 
 // tableModel is the page view's view of the document's tables, computed once per
@@ -33,6 +36,18 @@ type tableModel struct {
 	rows  map[int]syntax.TableLine
 	width map[int]tableColumnWidths // by table id
 	lines map[int][]int             // the line indexes of each table, by id
+	// cells holds, for each table row line, the visible content of every cell
+	// already split into the visual rows the wrapped cells need: cells[line][col]
+	// is the cell's row segments (each a rune with its kind and source column).
+	cells map[int][][][]tableCellRune
+}
+
+// tableCellRune is one visible rune of a table cell with its syntax kind and its
+// source rune column in the row.
+type tableCellRune struct {
+	r   rune
+	k   syntax.Kind
+	src int
 }
 
 // tables returns the document's table classification and widths, kept in the
@@ -45,25 +60,35 @@ func (f frame) tables() *tableModel {
 		}
 		class, tables := syntax.MarkdownTables(lines)
 		m := &tableModel{rows: map[int]syntax.TableLine{}, width: map[int]tableColumnWidths{},
-			lines: map[int][]int{}}
+			lines: map[int][]int{}, cells: map[int][][][]tableCellRune{}}
 		for i, tl := range class {
 			if tl.Kind != syntax.TableNone {
 				m.rows[i] = tl
 			}
 		}
 		for id, t := range tables {
-			m.width[id] = f.tableWidths(t, class)
+			layout := f.tableWidths(t, class)
+			m.width[id] = layout
 			m.lines[id] = append([]int(nil), t.Lines...)
+			for _, li := range t.Lines {
+				if class[li].Kind == syntax.TableHeader || class[li].Kind == syntax.TableBody {
+					m.cells[li] = f.tableCellSegments(li, class[li], layout)
+				}
+			}
 		}
 		return m
 	}
 	if lm, ok := f.doc.(LayoutMemo); ok && !isLarge(f.doc) {
-		return lm.MemoValue(composeTableKey{}, compute).(*tableModel)
+		return lm.MemoValue(composeTableKey{measure: f.pageMeasure}, compute).(*tableModel)
 	}
 	return compute().(*tableModel)
 }
 
-type composeTableKey struct{}
+// composeTableKey is the layout memo key of the table model: the model's widths
+// depend on the page measure, so the two panes of the dual view (different
+// measures) cannot share one entry. The document memo drops it when the text
+// changes.
+type composeTableKey struct{ measure int }
 
 // tableWidths computes the column widths of table t from every row of it, once
 // per text version: the natural width is the widest visible cell, and the budget
@@ -103,6 +128,8 @@ func (f frame) tableWidths(t syntax.Table, class []syntax.TableLine) tableColumn
 		}
 		return out
 	}
+	// The table is wider than the page: its cells may need several visual rows.
+	out.wrapped = true
 	const minCol = 3
 	if budget <= minCol*n {
 		for i := range out.widths {
@@ -153,6 +180,112 @@ func hiddenRunes(cell string) []bool {
 	return hidden
 }
 
+// tableCellSegments builds the visible content of every cell of one table row,
+// split into the visual rows the wrapped cells need. Hidden inline delimiters are
+// dropped, an escaped pipe shows as the pipe itself, and each visible rune keeps
+// its syntax kind and its source column so the primary row maps exactly.
+func (f frame) tableCellSegments(li int, tl syntax.TableLine, layout tableColumnWidths) [][][]tableCellRune {
+	raw := []rune(f.doc.Line(li))
+	kinds := kindsPerRune(f.doc.Line(li), f.doc.LineSpans(li))
+	out := make([][][]tableCellRune, len(layout.widths))
+	for c := range layout.widths {
+		if c >= len(tl.Cells) || c >= len(tl.Starts) || c >= len(tl.Ends) {
+			out[c] = [][]tableCellRune{{}}
+			continue
+		}
+		cell := tl.Cells[c]
+		hidden := hiddenRunes(cell)
+		start, end := tl.Starts[c], min(tl.Ends[c], len(raw))
+		var content []tableCellRune
+		for k := max(start, 0); k < end; k++ {
+			if rel := k - start; rel >= 0 && rel < len(hidden) && hidden[rel] {
+				continue
+			}
+			if raw[k] == '\\' && k+1 < end && raw[k+1] == '|' {
+				content = append(content, tableCellRune{'|', kindAt(kinds, k+1), k + 1})
+				k++
+				continue
+			}
+			content = append(content, tableCellRune{raw[k], kindAt(kinds, k), k})
+		}
+		if layout.wrapped {
+			out[c] = wrapCellSegments(content, max(layout.widths[c], 1))
+		} else {
+			out[c] = [][]tableCellRune{content}
+		}
+	}
+	return out
+}
+
+// wrapCellSegments wraps the visible runes of a cell into rows of at most width
+// cells, breaking after the last space that fits (the space ends the row) and
+// cutting a word that has no space to break at.
+func wrapCellSegments(content []tableCellRune, width int) [][]tableCellRune {
+	if len(content) == 0 {
+		return [][]tableCellRune{{}}
+	}
+	var out [][]tableCellRune
+	start := 0
+	for start < len(content) {
+		used := 0
+		end := start
+		lastSpace := -1
+		for end < len(content) {
+			w := ansi.StringWidth(string(content[end].r))
+			if used+w > width && end > start {
+				// The space just met ends the row; a word boundary behind it takes
+				// the break; a word longer than the row is cut.
+				if content[end].r == ' ' {
+					out = append(out, content[start:end])
+					start = end + 1
+				} else if lastSpace > start {
+					out = append(out, content[start:lastSpace])
+					start = lastSpace + 1
+				} else {
+					out = append(out, content[start:end])
+					start = end
+				}
+				for start < len(content) && content[start].r == ' ' {
+					start++
+				}
+				goto nextRow
+			}
+			used += w
+			if content[end].r == ' ' {
+				lastSpace = end
+			}
+			end++
+		}
+		out = append(out, content[start:])
+		break
+	nextRow:
+	}
+	return out
+}
+
+// tableContinuationRow builds visual row k (k >= 1) of a wrapped table row: the
+// same frame as the primary row, with every cell's k-th segment and blanks where
+// the cell has no such segment.
+func tableContinuationRow(widths []int, cellsAtLine [][][]tableCellRune, k int) string {
+	var b []rune
+	b = append(b, '│')
+	for c, w := range widths {
+		b = append(b, ' ')
+		n := 0
+		if c < len(cellsAtLine) && k < len(cellsAtLine[c]) {
+			for _, cr := range cellsAtLine[c][k] {
+				b = append(b, cr.r)
+				n += ansi.StringWidth(string(cr.r))
+			}
+		}
+		for ; n < w; n++ {
+			b = append(b, ' ')
+		}
+		b = append(b, ' ', '│')
+	}
+	return string(b)
+}
+
 // composeTableLine composes one line of a table. reveal shows the cell contents
 // raw (the caret's row) while keeping the frame's padding, so the rows above and
 // below do not jump.
@@ -191,32 +324,27 @@ func (f frame) composeTableLine(i int, tl syntax.TableLine, reveal bool) compose
 	nextPipe := func(c int) int { return pipeAt(c + 1) }
 	add('│', syntax.KindPlain, pipeAt(0))
 	widths := layout.widths
+	cellsAtLine := f.tables().cells[i]
 	for c := 0; c < len(widths); c++ {
 		add(' ', syntax.KindPlain, pipeAt(c))
-		cell := ""
-		var start, end int
-		if c < len(tl.Cells) {
-			cell = tl.Cells[c]
-			start, end = tl.Starts[c], tl.Ends[c]
+		var content []tableCellRune
+		start := 0
+		if c < len(tl.Cells) && c < len(tl.Starts) {
+			start = tl.Starts[c]
 		}
-		cellRunes := []rune(cell)
-		hidden := hiddenRunes(cell)
-		if reveal {
-			hidden = nil
-		}
-		type run struct {
-			r   rune
-			k   syntax.Kind
-			src int
-		}
-		var content []run
-		contentWidth := 0
-		for k, r := range cellRunes {
-			if k < len(hidden) && hidden[k] {
-				continue
+		switch {
+		case reveal && c < len(tl.Cells) && c < len(tl.Ends):
+			// The caret's row shows the raw cell text: markers and escapes as the
+			// source has them.
+			for k := start; k < min(tl.Ends[c], len(raw)); k++ {
+				content = append(content, tableCellRune{raw[k], kindAt(kinds, k), k})
 			}
-			content = append(content, run{r, kindAt(kinds, min(start+k, len(kinds)-1)), min(start+k, len(raw))})
-			contentWidth += ansi.StringWidth(string(r))
+		case c < len(cellsAtLine) && len(cellsAtLine[c]) > 0:
+			content = cellsAtLine[c][0]
+		}
+		contentWidth := 0
+		for _, cr := range content {
+			contentWidth += ansi.StringWidth(string(cr.r))
 		}
 		pad := max(widths[c]-contentWidth, 0)
 		align := syntax.AlignLeft
@@ -231,15 +359,14 @@ func (f frame) composeTableLine(i int, tl syntax.TableLine, reveal bool) compose
 			before, after = pad/2, pad-pad/2
 		}
 		for j := 0; j < before; j++ {
-			add(' ', syntax.KindPlain, start)
+			add(' ', syntax.KindPlain, start+j)
 		}
-		for _, rn := range content {
-			add(rn.r, rn.k, rn.src)
+		for _, cr := range content {
+			add(cr.r, cr.k, cr.src)
 		}
 		for j := 0; j < after; j++ {
-			add(' ', syntax.KindPlain, min(start+len(cellRunes), len(raw)))
+			add(' ', syntax.KindPlain, min(start+len(content)+j, len(raw)))
 		}
-		_ = end
 		add(' ', syntax.KindPlain, pipeAt(c))
 		add('│', syntax.KindPlain, nextPipe(c))
 	}

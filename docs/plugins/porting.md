@@ -33,6 +33,7 @@ a rewrite in idiomatic Lua. The bundled plugins are examples of the technique (s
 | `on("after_file_save", handler)` | `gvim.on("after_file_save", fn)`: the names are Fresh's; `buffer_id` becomes `ev.buf`, offsets become `Pos` |
 | `setStatus`, `info`, `warn`, `error`, `debug` | `gvim.notify`, `gvim.log.*` |
 | `prompt`, `startPrompt` with `setPromptSuggestions` | `gvim.ui.input` and `gvim.ui.set_prompt_suggestions` in its `on_change`, or `gvim.ui.picker` |
+| `import { Finder, defaultFuzzyFilter, getRelativePath } from "./lib/finder.ts"` | `require "gvim.finder"`: `Finder.new`/`open`/`close`, `filter`/`score`, `tree`, `open_locations`, `read_snippets`, `relative_path` (see [The shared Finder](#the-shared-finder-port-residual)) |
 | `showActionPopup` | `gvim.ui.action_popup` (`action_popup_result` event) |
 | `addMenuItem` | `gvim.menu.add_item` / `remove_item` / `clear` |
 | `t(...)`, plugin i18n files | `gvim.i18n.t` (`t` alias) + `<name>.i18n.json`; %-prefixed command titles are translated |
@@ -54,9 +55,9 @@ Widgets: Fresh's declarative widget API has a read-mostly v1 here (see
 [api-ui.md](api-ui.md#widget-panels-and-sidebar-sections)): `mountWidgetPanel`/`updateWidgetPanel`/
 `unmountWidgetPanel`, `widgetCommand`, `widgetMutate` and `mountSidebarSection` are
 `gvim.ui.mount_widget_panel`, `update_widget_panel`, `unmount_widget_panel`, `widget_command`,
-`widget_mutate` and `mount_sidebar_section`; the widget kinds are the read-only subset (no
-`textInput`, dropdown, radio or dual list yet) and there are no floating/dock placement
-controls.
+`widget_mutate` and `mount_sidebar_section`; the widget kinds are the interactive tier-1b set
+(text, number, dropdown, radio, dual list and wrappers) and there are no floating/dock
+placement controls.
 
 Not provided at all (and not stubbed): the editor-wide i18n (plugin texts are translated, see [api-core.md](api-core.md#gvimi18n)), project-local plugins, a trust store,
 synthetic buffer-group tabs and per-panel views of one buffer, a terminal API, Fresh's window and
@@ -64,7 +65,11 @@ authority runtimes, the package manager, the HTTP client API and `render_line`. 
 decoration surface is provided and painted (virtual lines, conceal, soft breaks, cursor-line
 overlay, ranged scrollbar marks and plugin folds), gated by `gvim.has("decor_virtual_paint")`;
 the 1c-C seams are provided too (split labels, per-plugin window state, open/focus/close split
-wrappers and the path/focus/window/group events).
+wrappers and the path/focus/window/group events), as are `setLineTargets`
+(`gvim.buf.set_line_targets`) and fixed-height group layout leaves (`{type="fixed",height=n}`,
+height 1..100, re-applied on layout changes; the split border can leave it one row off).
+Declared plugin settings (`gvim.settings.define`) are exposed read-only to the host and the
+Settings page with their schema and effective values.
 
 ### What changes when you port
 
@@ -94,8 +99,9 @@ API and this port does not ask for one. Recorded differences:
   with a DP-cell budget instead of natively.
 * gvim decorations have no `fgOnCollisionOnly` mode, so the diff line backgrounds use the theme's
   `editor.diff_*_bg` keys only (no `editor.diff_*_collision_fg`).
-* Virtual rows with the deleted old content and their word emphasis need tier-1c virtual-line
-  painting. The shipped TUI reports `gvim.has("decor_virtual_paint")`, so the full Fresh view is
+* Virtual rows with the deleted old content and their word emphasis use tier-1c virtual-line
+  painting. The shipped TUI reports `gvim.has("decor_virtual_paint")` (the paint surface is
+  provided), so the full Fresh view is
   what users get: one `virtual_line_above` row per deleted line with the `-` gutter glyph and
   bold+underlined removed-word `text_overlays`, in Fresh's priority order and cut to the host's
   64-rows-per-anchor cap plus an "… N more deleted lines" summary row. On a host without the
@@ -182,6 +188,29 @@ Lines are paired positionally inside a hunk (Fresh's documented fallback), the c
 for paths with `gvim.ui.input` instead of Fresh's file picker, and there is no `fresh --diff` launch
 hook or script-facing export (the native Compare view handles `--diff`). Enabling the plugin adds
 palette rows that duplicate the native Compare commands, which is why it is off by default.
+
+### The shared Finder (port residual)
+
+Fresh's `plugins/lib/finder.ts` (1862 lines) is split in three in the bundled `gvim.finder` library
+(`plugin/bundled/lib/finder.lua`): Fresh's fuzzy ranking with hard caps; a prompt frontend over
+`gvim.ui.picker` (`filter = "none"`, the library ranks in Lua so custom orderings such as symbols by
+source line survive, and `on_close` runs exactly once with `selected` / `cancelled` / `programmatic`);
+and a panel backend (`tree`) plus a locations finder (`open_locations`: relative `path:line` rows,
+snippet descriptions from open buffers or one bounded read, preview tabs on move, commit on Enter,
+cancel closes the preview). `diagnostics_panel` uses the tree backend and requires the library lazily
+on its first build, so the idle default bundle does not pay for it (the 8 MiB gate).
+
+Reduced or omitted from Fresh's Finder: asynchronous `SearchSource`s with cancellation handles and
+per-query process spawns (a source is a Lua loader; picker generations protect against stale
+`set_items`), the embedded preview pane and utility-dock routing, `syncWithEditor`,
+`navigateOnCursorMove`, `panelKeys` and the panel-mode prompt-type events; the panel backend covers
+the grouped/deduped tree use only. `lsp_navigation` and `find_references` add the LSP edges:
+`gvim.finder.lsp_locations` normalizes `Location`/`Location[]`/`LocationLink[]` and converts UTF-16
+columns to bytes when the target line is open. Both are command ports because gvim has no
+`lsp_references`/`lsp_implementation` plugin events (the native Find References action has its own
+UI); `lsp_navigation` also offers definition/implementation/type-definition list commands that are
+gvim additions over Fresh's core direct-jump actions, and the picker has no initial selected index, so
+Fresh's enclosing-symbol preselection is not reproduced.
 
 ### Notes for porters (learned from the bundled ports)
 

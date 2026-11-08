@@ -73,6 +73,9 @@ type styles struct {
 	stat     grid.Style
 	file     grid.Style
 	hint     grid.Style
+	// syntax maps a syntax kind name to its style for the preview column. It is empty
+	// when the root cannot highlight.
+	syntax map[string]grid.Style
 }
 
 func newStyles(st style.Styles) styles {
@@ -111,8 +114,23 @@ type Options struct {
 	// Previewer reads the selected match's context for the preview column. Nil hides
 	// the column.
 	Previewer Previewer
-	Styles    style.Styles
-	Theme     theme.Theme
+	// SyntaxStyles maps a syntax kind name to its grid style, so the preview paints
+	// coloured runs without importing the editor pane or the syntax package. Empty means
+	// a plain preview.
+	SyntaxStyles map[string]grid.Style
+	Styles       style.Styles
+	Theme        theme.Theme
+}
+
+// previewWheelRows is how many preview lines one wheel notch scrolls.
+const previewWheelRows = 3
+
+// previewBox is the preview column's cell rectangle from the last Draw, for wheel hit
+// testing.
+type previewBox struct{ x0, x1, y0, y1 int }
+
+func (b previewBox) contains(x, y int) bool {
+	return b.x1 > b.x0 && x >= b.x0 && x < b.x1 && y >= b.y0 && y <= b.y1
 }
 
 // Panel is the project-wide Search and Replace sheet, or the Git Grep sheet when Git is
@@ -127,9 +145,11 @@ type Panel struct {
 	searcher Searcher
 	grepper  GitGrepper
 
-	// previewer reads the selected match's context; preview is the column's state.
-	previewer Previewer
-	preview   previewState
+	// previewer reads the selected match's context; preview is the column's state, and
+	// previewBox is where the column was last drawn.
+	previewer  Previewer
+	preview    previewState
+	previewBox previewBox
 
 	// openFiles and current are the snapshots the searches see for unsaved text. Their
 	// source is the root, which refreshes them after a replacement.
@@ -214,6 +234,11 @@ type previewState struct {
 	loading bool
 	result  PreviewResult
 	err     string
+	// viewStart is the first file line the user scrolled the preview to, and scrolled is
+	// set once they scrolled away from the match-centred window. A new selected match
+	// resets both.
+	viewStart int
+	scrolled  bool
 }
 
 // previewDoneMsg brings a preview back to the update loop.
@@ -248,6 +273,7 @@ func New(o Options) *Panel {
 		}
 	}
 	p.history = append([]string(nil), o.History...)
+	p.styles.syntax = o.SyntaxStyles
 	p.query = newField(o.Query)
 	p.replace = newField("")
 	p.glob = newField(o.Glob)
@@ -309,6 +335,8 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		// A batch can fill an empty result while the rows already have the focus; the
 		// preview follows the new selected row. The target dedupe keeps this cheap.
 		return p, tea.Batch(p.applyBatch(msg), p.previewCmd())
+	case tea.MouseWheelMsg:
+		return p, p.previewWheel(msg)
 	case previewDoneMsg:
 		if msg.seq == p.preview.seq {
 			p.preview.loading = false
@@ -347,11 +375,8 @@ func (p *Panel) key(kp tea.KeyPressMsg) (overlay.Overlay, tea.Cmd) {
 		if p.git {
 			return p, nil
 		}
-		if p.scope == AllFiles {
-			p.scope = CurrentFile
-		} else {
-			p.scope = AllFiles
-		}
+		// All Files -> Open Buffers -> Current File -> All Files.
+		p.scope = Scope((int(p.scope) + 1) % 3)
 		return p, p.requery()
 	case "alt+r":
 		if p.git {
@@ -418,6 +443,14 @@ func (p *Panel) resultsKey(name string) tea.Cmd {
 		p.setAllChecked(false)
 	case "shift+enter":
 		return p.replaceCmd(true)
+	case "pgup":
+		return p.scrollPreview(-p.previewPage())
+	case "pgdown":
+		return p.scrollPreview(p.previewPage())
+	case "ctrl+home":
+		return p.scrollPreviewTo(0)
+	case "ctrl+end":
+		return p.scrollPreviewTo(p.previewMaxStart())
 	}
 	return nil
 }
@@ -556,7 +589,7 @@ func (p *Panel) previewTarget() (PreviewRequest, bool) {
 	req := PreviewRequest{
 		Path: f.Path, Name: f.Name, Dirty: f.Dirty,
 		Line: m.Line, Col: m.Col, EndLine: endLine, EndCol: endCol,
-		Lines: p.previewContextLines(),
+		Start: -1, Lines: p.previewFetchLines(),
 	}
 	for _, s := range p.openFiles {
 		if s.Path != "" && s.Path == f.Path {
@@ -603,8 +636,20 @@ func (p *Panel) previewCmd() tea.Cmd {
 			p.preview.loading = false
 			p.preview.result = PreviewResult{}
 			p.preview.err = ""
+			p.preview.scrolled = false
 		}
 		return nil
+	}
+	// A newly selected match resets the scroll to the match-centred window.
+	if !p.preview.hasReq || !sameMatch(p.preview.req, req) {
+		p.preview.scrolled = false
+		p.preview.viewStart = 0
+		p.preview.result = PreviewResult{}
+	}
+	if p.preview.scrolled {
+		req.Start = p.preview.viewStart
+	} else {
+		req.Start = -1
 	}
 	if p.preview.hasReq && samePreview(p.preview.req, req) && (p.preview.loading || p.preview.err == "") {
 		return nil
@@ -616,11 +661,133 @@ func (p *Panel) previewCmd() tea.Cmd {
 	p.preview.hasReq = true
 	p.preview.loading = true
 	p.preview.err = ""
-	p.preview.result = PreviewResult{}
 	return func() tea.Msg {
 		res, err := rev.Preview(req)
 		return previewDoneMsg{seq: seq, result: res, err: err}
 	}
+}
+
+// sameMatch reports whether two preview requests name the same selected match, ignoring
+// the requested window: scrolling keeps the match, so it does not reset the scroll.
+func sameMatch(a, b PreviewRequest) bool {
+	return a.Path == b.Path && a.Dirty == b.Dirty &&
+		a.Line == b.Line && a.Col == b.Col && a.EndLine == b.EndLine && a.EndCol == b.EndCol
+}
+
+// previewFetchLines is how many lines the panel asks for at a time: the visible context
+// lines plus a page of margin on each side, bounded so the cached window stays small.
+func (p *Panel) previewFetchLines() int {
+	h := p.previewContextLines()
+	if h <= 0 {
+		return 0
+	}
+	return min(max(h*3, h), 60)
+}
+
+// previewPage is how many lines one PgUp or PgDn scrolls the preview.
+func (p *Panel) previewPage() int {
+	h := p.previewContextLines()
+	if h <= 0 {
+		return 1
+	}
+	return h
+}
+
+// previewVisibleStart is the first file line the painted preview window shows.
+func (p *Panel) previewVisibleStart() int {
+	if p.preview.scrolled {
+		return p.preview.viewStart
+	}
+	return p.preview.result.Start
+}
+
+// previewMaxStart is the last scroll position that still fills the window.
+func (p *Panel) previewMaxStart() int {
+	total := p.preview.result.Total
+	if total <= 0 {
+		return max(p.previewVisibleStart(), 0)
+	}
+	return max(total-p.previewPage(), 0)
+}
+
+// scrollPreview scrolls the preview by delta lines and refetches only when the new window
+// is outside the cached one.
+func (p *Panel) scrollPreview(delta int) tea.Cmd {
+	if !p.wantsPreview() || p.preview.loading && len(p.preview.result.Lines) == 0 {
+		return nil
+	}
+	target := p.previewVisibleStart() + delta
+	if limit := p.previewMaxStart(); p.preview.result.Total > 0 {
+		target = clamp(target, 0, limit)
+	} else {
+		target = max(target, 0)
+	}
+	if target == p.previewVisibleStart() {
+		return nil
+	}
+	p.preview.scrolled = true
+	p.preview.viewStart = target
+	h := p.previewPage()
+	r := p.preview.result
+	if r.Start <= target && target+h <= r.Start+len(r.Lines) {
+		return nil
+	}
+	return p.previewCmd()
+}
+
+// scrollPreviewTo scrolls the preview to an absolute first line.
+func (p *Panel) scrollPreviewTo(first int) tea.Cmd {
+	if !p.wantsPreview() || p.preview.loading && len(p.preview.result.Lines) == 0 {
+		return nil
+	}
+	target := clamp(first, 0, p.previewMaxStart())
+	if target == p.previewVisibleStart() {
+		return nil
+	}
+	p.preview.scrolled = true
+	p.preview.viewStart = target
+	h := p.previewPage()
+	r := p.preview.result
+	if r.Start <= target && target+h <= r.Start+len(r.Lines) {
+		return nil
+	}
+	return p.previewCmd()
+}
+
+// previewWheel scrolls the preview when the wheel notch is over its column.
+func (p *Panel) previewWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	mo := msg.Mouse()
+	if !p.previewBox.contains(mo.X, mo.Y) {
+		return nil
+	}
+	switch mo.Button {
+	case tea.MouseWheelUp:
+		return p.scrollPreview(-previewWheelRows)
+	case tea.MouseWheelDown:
+		return p.scrollPreview(previewWheelRows)
+	}
+	return nil
+}
+
+// previewWindow returns the first file line and the number of lines the painted preview
+// window should show, clamped to the cached result.
+func (p *Panel) previewWindow(height int) (first, count int) {
+	s := p.preview
+	if len(s.result.Lines) == 0 || height <= 0 {
+		return s.result.Start, 0
+	}
+	first = s.result.Start
+	if s.scrolled {
+		first = s.viewStart
+	}
+	offset := first - s.result.Start
+	if offset < 0 {
+		offset, first = 0, s.result.Start
+	}
+	if offset >= len(s.result.Lines) {
+		return first, 0
+	}
+	return first, min(height, len(s.result.Lines)-offset)
 }
 
 // field returns the focused text field.

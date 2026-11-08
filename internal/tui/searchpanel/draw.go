@@ -2,6 +2,7 @@ package searchpanel
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -308,65 +309,149 @@ func (p *Panel) previewColumns(geo *geometry) {
 // bold.
 func (p *Panel) paintPreview(g *grid.Grid, geo geometry) {
 	if !geo.preview {
+		p.previewBox = previewBox{}
 		return
 	}
 	for k := 0; k < geo.results; k++ {
 		g.Put(geo.divX, geo.resultsTop+k, geo.divX+1, "│", p.styles.hint)
 	}
+	p.previewBox = previewBox{
+		x0: geo.prevX, x1: geo.prevEnd,
+		y0: geo.resultsTop + 1, y1: geo.resultsTop + geo.results - 1,
+	}
 	req, ok := p.previewTarget()
 	if !ok {
 		return
 	}
-	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req), p.styles.label)
 	s := p.preview
+	height := geo.results - 1
+	first, count := p.previewWindow(height)
+	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading), p.styles.label)
 	switch {
-	case s.loading:
+	case s.loading && len(s.result.Lines) == 0:
 		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "…", p.styles.label)
 		return
 	case s.err != "":
 		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "Preview unavailable: "+s.err, p.styles.label)
 		return
-	case len(s.result.Lines) == 0:
+	case len(s.result.Lines) == 0 || count == 0:
 		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "No lines", p.styles.label)
 		return
 	}
 	m, _, _ := p.selectedMatch()
-	last := s.result.Start + len(s.result.Lines)
-	gutter := len(strconv.Itoa(max(last, 1)))
-	rows := geo.results - 1
-	for k := 0; k < len(s.result.Lines) && k < rows; k++ {
-		y := geo.resultsTop + 1 + k
-		fileLine := s.result.Start + k
-		num := fmt.Sprintf("%*d", gutter, fileLine+1)
-		from, to, inMatch := previewSpan(m, fileLine, s.result.Lines[k])
-		text, hlStart, hlEnd := expandPreviewLine(s.result.Lines[k], from, to)
-		base := p.styles.field
-		if inMatch {
-			g.Fill(geo.prevX, geo.prevEnd, y, p.styles.selected)
-			base = p.styles.selected
+	spansByLine := make(map[int][]PreviewSpan, len(s.result.Spans))
+	for _, span := range s.result.Spans {
+		spansByLine[span.Line] = append(spansByLine[span.Line], span)
+	}
+	offset := first - s.result.Start
+	gutter := len(strconv.Itoa(max(s.result.Start+len(s.result.Lines), first+count, 1)))
+	for k := 0; k < count && k < height; k++ {
+		idx := offset + k
+		if idx < 0 || idx >= len(s.result.Lines) {
+			break
 		}
-		x := geo.prevX
-		x += g.Put(x, y, geo.prevEnd, num+" │ ", p.styles.label)
-		runes := []rune(text)
-		hlStart = min(max(hlStart, 0), len(runes))
-		hlEnd = min(max(hlEnd, hlStart), len(runes))
-		x += g.Put(x, y, geo.prevEnd, string(runes[:hlStart]), base)
-		bold := base
-		bold.Bold = true
-		x += g.Put(x, y, geo.prevEnd, string(runes[hlStart:hlEnd]), bold)
-		g.Put(x, y, geo.prevEnd, string(runes[hlEnd:]), base)
+		fileLine := s.result.Start + idx
+		y := geo.resultsTop + 1 + k
+		p.paintPreviewLine(g, geo, y, fileLine, s.result.Lines[idx], spansByLine[fileLine], m, gutter)
 	}
 }
 
-// previewHeader is the column's first row: the path and line (and range, and unsaved
-// marker) that the lines below show.
-func previewHeader(req PreviewRequest) string {
+// paintPreviewLine paints one preview line: the gutter, then the line split into its
+// syntax runs, with the match lines on the selected background and the matched runes bold.
+func (p *Panel) paintPreviewLine(g *grid.Grid, geo geometry, y, fileLine int, lineText string, spans []PreviewSpan, m Match, gutter int) {
+	from, to, inMatch := previewSpan(m, fileLine, lineText)
+	text, hlStart, hlEnd := expandPreviewLine(lineText, from, to)
+	runes := []rune(text)
+	base := p.styles.field
+	if inMatch {
+		g.Fill(geo.prevX, geo.prevEnd, y, p.styles.selected)
+		base = p.styles.selected
+	}
+	x := geo.prevX
+	x += g.Put(x, y, geo.prevEnd, fmt.Sprintf("%*d │ ", gutter, fileLine+1), p.styles.label)
+	// The syntax spans carry rune columns of the raw line; the painted text has tabs
+	// expanded, so map through the display offsets.
+	raw := []rune(lineText)
+	dispAt := displayOffsets(raw)
+	type spanRun struct {
+		from, to int
+		st       grid.Style
+	}
+	var runs []spanRun
+	for _, span := range spans {
+		st, ok := p.styles.syntax[span.Kind]
+		if !ok {
+			continue
+		}
+		st.BG = base.BG
+		lo := clamp(span.Start, 0, len(raw))
+		hi := clamp(span.End, 0, len(raw))
+		if hi <= lo {
+			continue
+		}
+		runs = append(runs, spanRun{from: dispAt[lo], to: dispAt[hi], st: st})
+	}
+	points := []int{0, len(runes), clamp(hlStart, 0, len(runes)), clamp(hlEnd, 0, len(runes))}
+	for _, r := range runs {
+		points = append(points, r.from, r.to)
+	}
+	sort.Ints(points)
+	for i := 0; i+1 < len(points); i++ {
+		a, b := points[i], points[i+1]
+		if a >= b {
+			continue
+		}
+		st := base
+		for _, r := range runs {
+			if r.from <= a && a < r.to {
+				st = r.st
+				break
+			}
+		}
+		if a >= hlStart && a < hlEnd {
+			st.Bold = true
+		}
+		x += g.Put(x, y, geo.prevEnd, string(runes[a:b]), st)
+	}
+}
+
+// displayOffsets returns, for every rune boundary of line, its display column when tabs
+// are expanded to four spaces: dispAt[i] is the display position before rune i, and the
+// last entry is the whole display width.
+func displayOffsets(line []rune) []int {
+	out := make([]int, len(line)+1)
+	disp := 0
+	for i, r := range line {
+		out[i] = disp
+		if r == '\t' {
+			disp += 4
+			continue
+		}
+		disp++
+	}
+	out[len(line)] = disp
+	return out
+}
+
+// previewHeader is the column's first row: the path and line (and range, its length, the
+// window's place in the file, and the unsaved marker), with a trailing ellipsis while a
+// scrolled window loads.
+func previewHeader(req PreviewRequest, first, count, total int, loading bool) string {
 	header := fmt.Sprintf("%s:%d", req.Name, req.Line)
 	if req.EndLine > req.Line {
 		header += fmt.Sprintf("–%d:%d", req.EndLine, req.EndCol)
+		if lines := req.EndLine - req.Line + 1; lines > 1 {
+			header += fmt.Sprintf(" (%d lines)", lines)
+		}
+	}
+	if total > 0 && count > 0 {
+		header += fmt.Sprintf(" · L%d–%d/%d", first+1, min(first+count, total), total)
 	}
 	if req.Dirty {
 		header += " (unsaved)"
+	}
+	if loading {
+		header += " …"
 	}
 	return header
 }
@@ -476,8 +561,17 @@ func (p *Panel) paintOptions(g *grid.Grid, geo geometry) {
 	if p.git {
 		opts = []opt{{p.modes.CaseSensitive, checkbox(p.modes.CaseSensitive) + "Case (Alt+C)"}}
 	} else {
+		// The scope is one of three, cycled by Alt+A: the chip always carries the
+		// current scope's name.
+		scopeName := "All Files"
+		switch p.scope {
+		case OpenBuffers:
+			scopeName = "Open Buffers"
+		case CurrentFile:
+			scopeName = "Current File"
+		}
 		opts = []opt{
-			{p.scope == AllFiles, checkbox(p.scope == AllFiles) + "All Files (Alt+A)"},
+			{true, checkbox(true) + scopeName + " (Alt+A)"},
 			{p.modes.CaseSensitive, checkbox(p.modes.CaseSensitive) + "Case (Alt+C)"},
 			{p.modes.Regex, checkbox(p.modes.Regex) + "Regex (Alt+R)"},
 			{p.modes.WholeWord, checkbox(p.modes.WholeWord) + "Whole (Alt+W)"},

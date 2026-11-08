@@ -39,6 +39,9 @@ type Settings struct {
 	IconsMode           string // the icon set in use, "plain" or "nerd", after "auto" is resolved
 	IconsWhy            string // why that set: the setting, the font or the terminal
 	ConfigFile          string
+	// FoldBuffer is contents.fold_buffer, the Contents section's heading-fold
+	// switch. It is applied live by applyLiveSetting.
+	FoldBuffer bool
 
 	// Read by gvim.config.get only; the Settings list does not show them.
 	LineEnding             string // line_ending: "auto", "lf", "crlf" or "cr"
@@ -1049,6 +1052,8 @@ func (m *Model) applyLiveSetting(key string, change SettingsChange) {
 	case "file_explorer.side":
 		m.explorerSide = v.Explorer.Side
 		m.view.opts.Explorer.Side = v.Explorer.Side
+	case "contents.fold_buffer":
+		m.setContentsFoldBuffer(change.Settings.FoldBuffer)
 	case "file_explorer.follow_active_buffer":
 		m.view.opts.Explorer.FollowActiveBuffer = v.Explorer.FollowActiveBuffer
 	case "file_explorer.auto_open_on_last_buffer_close":

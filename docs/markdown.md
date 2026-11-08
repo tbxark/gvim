@@ -124,9 +124,25 @@ the same table model and column widths the rows use. The hook owns every row
 calculation, so the caret, the mouse hit (an above row maps to the line start, a
 below row to its end), selection, scroll and the scrollbar treat the borders as
 ordinary display rows; a page too narrow for the table draws no borders (its
-rows wrap). The mid border stays the source separator row. Cells that need more
-than one visual row (a wrapped cell) are still residual: the single-visual-row
-cells are the tested contract.
+rows wrap). The mid border stays the source separator row.
+
+When the table is wider than the page and its columns are shrunk, a cell whose
+visible content does not fit its column wraps: the primary row shows the first
+segment of every cell with the exact source mapping, and the remaining segments
+are emitted by the same extra-row hook as continuation rows between the row and
+the bottom border (rows with rails on both sides, ordered nearest first). While
+the caret is on that source row the continuation rows stand down and the raw row
+is revealed, so the caret never sits on a non-source row; pressing a continuation
+row maps to the line end, which reveals the row and collapses the continuations
+(Fresh's row-level reveal semantics). Selection paints the primary row (the hook's
+rows take no selection), which is a documented limitation of wrapped cells.
+
+The column widths are keyed by (text version, page measure): the two panes of
+the dual view have different measures and must not share one width set. A pipe
+escaped as `\\|` is cell text and can never open a cell; the composed cell shows
+the pipe without the escape while the caret's revealed row keeps the source text.
+A table inside a blockquote or a list item is not classified as a top-level table:
+those lines are rendered literal (the documented container fallback).
 
 ## Dual view: source and page side by side
 
@@ -174,6 +190,17 @@ residuals.
 [^cmd]: The palette rows are the same five actions in `commands/markdown_commands.go`;
 the native palette therefore lists 229 commands.
 
+## Headings
+
+An ATX heading hides its leading hash run and the blanks after it, keeping the
+existing heading kind (bold keyword styling) for the text; the caret line and the
+line above a column-0 caret reveal the markers like the other compose conceals.
+A line with a hash run that does not end in a blank (or the line end) is not a
+heading and stays literal. In the page view the heading lines are also marked on
+the vertical scrollbar track (one mark per heading line, coloured like a
+heading), so their places in the file stay visible while composing; the marks are
+memoized per text version.
+
 ## Mapping through concealed bytes and soft rows
 
 The composition changes the visible runes, so the pane keeps two maps per
@@ -218,18 +245,27 @@ A large-file document (the editor's windowed large mode) is not composed and not
 paged: it keeps the normal full-width pane, like Fresh's plugin threshold. A
 document that is not Markdown gets the page geometry only.
 
+## Persistence
+
+The per-file page view is part of the session: `session.FileState` carries
+`pageView` (nil when the file kept no override, so the language's `page_view`
+decides) and `pageWidth` (zero: the language or viewport width). Both are
+omitted when unset, so a session written by an older version loads with the
+defaults and a reader that ignores them is unaffected; the writer takes the
+values from the document's view settings and the restore applies them after the
+file is opened. The dual split itself is not persisted (Fresh does not persist a
+buffer group either); it is documented with the other dual residuals below.
+
 ## Deferred
 
-- table cells that wrap over several visual rows (single-visual-row cells are
-  drawn), cells with escaped pipes, and tables in nested containers;
 - fence body lines whose continuation rows would need their own rails (the first
-  visual row is framed), and fences nested inside blockquotes or lists;
-- heading scrollbar markers and the heading marker conceal;
+  visual row is framed; a long body line wraps without rails on its continuation
+  rows), and fences nested inside blockquotes or lists (left literal);
 - task-list glyph conceal (the box stays visible as text), image conceal and
   inline HTML conceal;
-- heading marker conceal and the rest of Fresh's heading polish;
-- session persistence of the page-view mode and the per-buffer page width
-  (session.FileState carries no view fields yet);
+- session persistence of a dual split (the editor view per file is persisted,
+  see below; the dual view itself is session-only, as Fresh does not persist a
+  buffer group);
 - per-split view mode: gvim keeps one view mode per document, Fresh per split; the
   dual view adds one derived per-pane override (source vs preview) but does not
   make the mode a free per-pane setting;
@@ -237,8 +273,14 @@ document that is not Markdown gets the page geometry only.
   menu row (the generated menu table is not hand-edited), persisting the split,
   and more than one dual view of a document; the dual view is offered for a
   single-pane Markdown document only;
-- mapped occurrences, rulers, indent guides and whitespace marks in the page view,
-  and composed plugin overlays;
+- mapped occurrences, rulers and indent guides in the page view: they stay
+  deliberately off there (the page view owns its own visual language; a test
+  asserts rulers and guides do not paint). Whitespace marks are per-cell and
+  still show on the composed text. Composed plugin overlays order after the
+  compose (plugin pipeline) and stay out of normal panes; a mapped ordering test
+  is deferred with the plugin tier-1c remainder;
+- heading polish beyond the marker conceal and the scrollbar marks (setext
+  heading text styling).
 - horizontal scroll inside a page wider than the viewport (the measure clamps to
   the text area instead).
 
@@ -257,9 +299,18 @@ reveal with the frame width kept, hit into cells, selection over cells, widths
 recomputed when the text version changes, tables inside fences left literal),
 `pageview_table_borders_test.go` (top and bottom border cells, presses on a
 border mapping to the line start/end, the caret row shifted by the inserted rows,
-no borders for a wrapped table or a normal pane) and the TUI-level
+no borders for a wrapped table or a normal pane),
+`compose_table_wrap_test.go` (wrapped cells with continuation rows and rails,
+the primary row's exact hit mapping, continuation rows standing down under the
+caret, escaped pipes inside cells, and the widths keyed by measure),
+`compose_heading_test.go` (marker conceal and caret reveal), the TUI-level
+`pageview_heading_test.go` (heading scrollbar marks, memo invalidation) and
 `pageview_table_border_test.go` (borders in order around the header, separator
-and body rows of the whole frame),
+and body rows of the whole frame), `compose_fence_wrap_test.go` (continuation
+rails, the caret line keeping the whole body, a quoted fence staying literal),
+`session/pageview_test.go` (old-session migration, omitted fields) and
+`internal/restore/session_pageview_test.go` (save/restore round trip of the
+page view and width, optional fields for a plain file),
 `internal/tui/pageview_test.go` (Markdown detection, buffer override resolution,
 large-file fallback, pane wiring), `editor/markdown_pageview_test.go` (per-buffer
 toggle and width, status text, copy uses source markers, virtual space off),

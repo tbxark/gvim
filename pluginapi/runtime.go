@@ -108,6 +108,12 @@ type Runtime interface {
 	Drain(budget time.Duration) (work []Work, more bool)
 	Plugins() []PluginInfo
 	Log() []LogEntry
+	// SettingsSchema returns the settings the plugin declared with gvim.settings.define,
+	// sorted by key. ok is false when the plugin is not loaded or declared none.
+	SettingsSchema(name string) ([]PluginSettingSpec, bool)
+	// SettingsValues returns the effective value of each declared setting, in schema
+	// order, with the config layer that supplied it.
+	SettingsValues(name string) ([]PluginSettingValue, bool)
 	// Control returns the Work it needs (re-read of sources, compile, state writes) and notices.
 	// In a slice it only enqueues and returns (nil, nil).
 	Control(c Control) ([]Work, []Notice)

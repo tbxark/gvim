@@ -74,6 +74,13 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 			Col:  doc.Cursor.Col + 1,
 			Top:  doc.Top,
 		}
+		if view := doc.View(); view != nil {
+			if view.PageView != nil {
+				on := *view.PageView
+				fs.PageView = &on
+			}
+			fs.PageWidth = view.PageWidth
+		}
 		if doc.Large() {
 			// The unsaved text of a large document is not held whole. Its stash is the
 			// edited lines and the lines of the file they leave alone.
@@ -114,6 +121,7 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 		ShowIgnored: st.ShowIgnored,
 		Active:      active,
 		Files:       files,
+		Sidebar:     SaveSidebarState(st.Sidebar),
 	})
 }
 
@@ -235,6 +243,17 @@ func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace boo
 			// baseline, so a file that changed since is not overwritten unasked.
 			doc.ExpectDisk(f.Size, f.MTimeUnixNano)
 		}
+	}
+	if f.PageView != nil || f.PageWidth > 0 {
+		view := doc.View()
+		if f.PageView != nil {
+			on := *f.PageView
+			view.PageView = &on
+		}
+		if f.PageWidth > 0 {
+			view.PageWidth = f.PageWidth
+		}
+		doc.SetView(*view)
 	}
 	if f.Line > 0 {
 		_ = ed.GotoLine(f.Line, max(f.Col, 1))

@@ -230,4 +230,5 @@ type Host interface {
 	DecorHost
 	WorkspaceHost
 	ViewStateHost
+	LineTargetHost
 }

@@ -67,6 +67,11 @@ func TestBufferGroupLuaAPI(t *testing.T) {
 	if fg == nil || len(fg.Order) != 2 || fg.Order[0] != "files" || fg.Order[1] != "preview" {
 		t.Fatalf("group = %+v", fg)
 	}
+	// The fixed-height leaf carries its height (the JSON {type="fixed",height=10}).
+	if fg.Spec.Layout.Second == nil || fg.Spec.Layout.Second.Leaf == nil ||
+		!fg.Spec.Layout.Second.Leaf.Fixed || fg.Spec.Layout.Second.Leaf.Height != 10 {
+		t.Fatalf("fixed leaf = %+v", fg.Spec.Layout.Second)
+	}
 	if len(fg.Content["files"]) != 2 || fg.Content["files"][0].Props["file"] != "main.go" {
 		t.Fatalf("content = %+v", fg.Content["files"])
 	}

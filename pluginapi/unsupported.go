@@ -91,7 +91,11 @@ func (Unsupported) SetWindowState(string, BufferID, string, any) error {
 	return unsupported("SetWindowState")
 }
 func (Unsupported) ClearWindowState(string, BufferID, string) {}
-func (Unsupported) VisibleRows(WinID) ([]VisibleRow, error)   { return nil, unsupported("VisibleRows") }
+func (Unsupported) SetLineTargets(string, BufferID, []LineTarget) error {
+	return unsupported("SetLineTargets")
+}
+func (Unsupported) ClearLineTargets(string, BufferID)       {}
+func (Unsupported) VisibleRows(WinID) ([]VisibleRow, error) { return nil, unsupported("VisibleRows") }
 
 // CommandHost.
 

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/fold"
 )
 
@@ -143,18 +145,76 @@ func TestContentsFoldSurvivesAnEditBelowIt(t *testing.T) {
 	}
 }
 
-// TestContentsFoldClearedOnClose checks the clear path: closing the section clears
-// the published ranges and opens the folds the section applied.
-func TestContentsFoldClearedOnClose(t *testing.T) {
+// TestContentsFoldStaysPublishedOnPanelClose checks Fresh's tracking rule: closing
+// the section hides the panel but the Markdown buffer stays tracked, so the
+// published heading ranges and the folds the section applied stay in the buffer.
+func TestContentsFoldStaysPublishedOnPanelClose(t *testing.T) {
 	t.Parallel()
 	m, ed := foldBufferModel(t, "notes.md", headingFoldText)
 	m.contents.ToggleFoldPos(0)
 	m.closeContents()
-	if !ed.outlineSet || len(ed.outlineRanges) != 0 {
-		t.Fatalf("closing published %v, want the ranges cleared", ed.outlineRanges)
+	if m.contents.Open() {
+		t.Fatal("the Contents section stayed open")
 	}
-	if ed.folded[0] {
-		t.Fatalf("closing left line 0 folded: %v", ed.folded)
+	if !ed.outlineSet || len(ed.outlineRanges) != 3 {
+		t.Fatalf("closing published %v, want the ranges kept", ed.outlineRanges)
+	}
+	if !ed.folded[0] {
+		t.Fatalf("closing opened line 0, want the buffer fold kept: %v", ed.folded)
+	}
+}
+
+// TestContentsFoldPublishedWhileHidden checks the hidden-section scan: with the
+// panel closed an edit of the tracked Markdown buffer still rescans and publishes
+// the ranges for the new text version (the debounce is driven directly).
+func TestContentsFoldPublishedWhileHidden(t *testing.T) {
+	t.Parallel()
+	m, ed := foldBufferModel(t, "notes.md", headingFoldText)
+	m.closeContents()
+	// An edit of the last section: the heading offsets stay, the version moves.
+	ed.doc.lines[len(ed.doc.lines)-1] = "three and more"
+	ed.version++
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if !m.toc.armed {
+		t.Fatal("an edit while the section is hidden did not arm the rescan")
+	}
+	m.tocRescan(tocRescanMsg{seq: m.toc.seq})
+	if !ed.outlineSet || ed.outlineVersion != ed.version {
+		t.Fatalf("hidden rescan published version %d (set %v), want %d", ed.outlineVersion, ed.outlineSet, ed.version)
+	}
+	want := []fold.Range{{Start: 0, End: 8}, {Start: 3, End: 5}, {Start: 6, End: 8}}
+	if !slices.Equal(ed.outlineRanges, want) {
+		t.Fatalf("hidden rescan published %v, want %v", ed.outlineRanges, want)
+	}
+}
+
+// switchTOCBuffer makes the fake editor's active buffer another file.
+func switchTOCBuffer(ed *tocEditor, name string, lines ...string) {
+	ed.name = name
+	ed.doc = newFakeEditor(lines...).doc
+	ed.tabs = []TabInfo{{Name: name, Active: true}}
+}
+
+// TestContentsFoldHiddenClearsOnBufferSwitch checks the buffer-switch clear path
+// with the panel hidden: the old buffer's ranges go and the new Markdown buffer's
+// ranges are published (tracking continues for the new buffer).
+func TestContentsFoldHiddenClearsOnBufferSwitch(t *testing.T) {
+	t.Parallel()
+	m, ed := foldBufferModel(t, "notes.md", headingFoldText)
+	m.closeContents()
+	switchTOCBuffer(ed, "other.md", "# Other", "body")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if ed.outlinePath != "other.md" {
+		t.Fatalf("published path %q, want other.md after the switch", ed.outlinePath)
+	}
+	if !ed.outlineSet || len(ed.outlineRanges) != 1 || ed.outlineRanges[0].Start != 0 {
+		t.Fatalf("published ranges %v for the new buffer, want its heading", ed.outlineRanges)
+	}
+	// A non-Markdown buffer clears the ranges and stops tracking.
+	switchTOCBuffer(ed, "plain.txt", "# not a heading")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if !ed.outlineSet || len(ed.outlineRanges) != 0 {
+		t.Fatalf("a text buffer kept published ranges %v", ed.outlineRanges)
 	}
 }
 
@@ -171,5 +231,49 @@ func TestContentsFoldBufferNeedsMarkdown(t *testing.T) {
 	}
 	if ed.outlineSet {
 		t.Fatalf("a text buffer published heading ranges %v", ed.outlineRanges)
+	}
+}
+
+// TestContentsFoldBufferLiveApply checks that contents.fold_buffer is a live
+// setting: switching it on through the settings change publishes at once, and
+// switching it off clears the published ranges and opens the folds the section
+// applied (a hand fold would stay).
+func TestContentsFoldBufferLiveApply(t *testing.T) {
+	t.Parallel()
+	ed := newTOCEditor("notes.md", strings.Split(headingFoldText, "\n")...)
+	m := newTOCModel(t, ed, nil) // fold_buffer off: nothing published
+	if m.contents.FoldBuffer() || ed.outlineSet {
+		t.Fatalf("fold_buffer started on or published: %v %v", m.contents.FoldBuffer(), ed.outlineRanges)
+	}
+	m.applySettingsChange(SettingsChange{
+		Settings: Settings{FoldBuffer: true},
+		Live:     []string{"contents.fold_buffer"},
+	})
+	if !m.contents.FoldBuffer() {
+		t.Fatal("saving contents.fold_buffer = true did not reach the section")
+	}
+	if !ed.outlineSet || len(ed.outlineRanges) != 3 {
+		t.Fatalf("switching fold_buffer on published %v, want the heading ranges", ed.outlineRanges)
+	}
+	// A section fold, then switching the setting off: the ranges go and the fold
+	// the section applied is opened.
+	if !m.contents.ToggleFoldPos(0) {
+		t.Fatal("row 0 is not foldable")
+	}
+	if !ed.folded[0] {
+		t.Fatalf("the section fold did not reach the buffer: %v", ed.folded)
+	}
+	m.applySettingsChange(SettingsChange{
+		Settings: Settings{FoldBuffer: false},
+		Live:     []string{"contents.fold_buffer"},
+	})
+	if m.contents.FoldBuffer() {
+		t.Fatal("saving contents.fold_buffer = false did not reach the section")
+	}
+	if !ed.outlineSet || len(ed.outlineRanges) != 0 {
+		t.Fatalf("switching fold_buffer off published %v, want the ranges cleared", ed.outlineRanges)
+	}
+	if ed.folded[0] {
+		t.Fatalf("switching fold_buffer off left line 0 folded: %v", ed.folded)
 	}
 }

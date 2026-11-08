@@ -71,3 +71,22 @@ func TestPathCompleteRealHost(t *testing.T) {
 		t.Errorf("cancel notice = %q", got)
 	}
 }
+
+// TestRound9PortsRealHost drives the round-9 default-off ports on the real app: enabling
+// lsp_navigation and find_references in config makes their commands appear in the palette,
+// and the references command reaches the host's LSP layer (no server in this fixture, so it
+// reports the request failure instead of opening an empty list).
+func TestRound9PortsRealHost(t *testing.T) {
+	isolateConfig(t)
+	writeUserFile(t, "config.json", `{"plugins":{"lsp_navigation":{"enabled":true},"find_references":{"enabled":true}}}`)
+	s := newSession(t, Options{})
+	s.waitStatus("lsp_navigation", "loaded")
+	s.waitStatus("find_references", "loaded")
+	s.openFile("a.go", "package a\n\nfunc main() {}\n")
+	s.settle(30 * time.Millisecond)
+	for _, title := range []string{"Go to LSP Symbol", "Show References Panel"} {
+		if !s.paletteHas(title) {
+			t.Fatalf("the palette has no %q row for the config-enabled port:\n%s", title, strings.Join(s.rows(), "\n"))
+		}
+	}
+}

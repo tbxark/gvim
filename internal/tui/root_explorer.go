@@ -127,6 +127,12 @@ func (m *Model) followSelection() {
 	if m.tree == nil || !m.explorerOpen {
 		return
 	}
+	if m.restoredScroll {
+		// A restored tree already stands where the session left it; the first
+		// frame must not reveal the (selected) first row over that.
+		m.restoredScroll = false
+		return
+	}
 	sel, ok := m.tree.Selected()
 	if !ok {
 		return

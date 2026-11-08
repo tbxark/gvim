@@ -36,6 +36,9 @@ var groupSeq atomic.Uint64
 // maxGroupLayoutJSON bounds the layout JSON a plugin may send.
 const maxGroupLayoutJSON = 64 << 10
 
+// maxFixedGroupHeight bounds a fixed layout leaf's height.
+const maxFixedGroupHeight = 100
+
 // bgNode is one node of the layout JSON.
 type bgNode struct {
 	Type      string  `json:"type"`
@@ -222,6 +225,12 @@ func groupLayoutNode(node *bgNode, depth int) (pluginapi.BufferGroupLayout, erro
 		leaf := &pluginapi.BufferGroupLeaf{Name: node.ID}
 		if node.BufferID != nil {
 			leaf.Buffer = pluginapi.BufferID(*node.BufferID)
+		}
+		if node.Type == "fixed" {
+			if node.Height < 1 || node.Height > maxFixedGroupHeight {
+				return pluginapi.BufferGroupLayout{}, pluginapi.Errf(pluginapi.CodeInvalid, "layout: a fixed leaf height must be 1 to %d rows", maxFixedGroupHeight)
+			}
+			leaf.Fixed, leaf.Height = true, node.Height
 		}
 		return pluginapi.BufferGroupLayout{Leaf: leaf}, nil
 	case "split":

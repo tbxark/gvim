@@ -196,3 +196,15 @@ A command `title` or `description` that starts with `%` is a translation key and
 when the command is registered: `title = "%cmd.do_thing"` becomes `t("cmd.do_thing")`. Menu
 labels accept the same prefix.
 
+
+## Plugin declared settings (host view)
+
+A plugin declares its settings with `gvim.settings.define` (see
+[api-core.md](api-core.md#gvimsettings)). The runtime also exposes that schema, read-only, to
+the host: `SettingsSchema(name)` returns one `PluginSettingSpec` per declared key (key,
+description, type, default, enum choices, numeric min/max, project flag) and
+`SettingsValues(name)` returns the effective `PluginSettingValue` of each key with the layer
+that supplied it (a project override is marked; a user-config value wins over the default).
+The Settings page lists these rows read-only (type, default and the effective value in the
+note); editing still goes through `plugins.<name>.settings` in the config. Declaring a
+setting in a plugin therefore makes it visible to the page with no extra host code.

@@ -276,17 +276,20 @@ service and the root:
   hidden/ignored, menu-bar mnemonics, show menu bar), the status-bar element
   lists and separator, the file-explorer options (width, side, follow, auto-open,
   compact directories), the theme, the keymap and the icon set, rebuilding the
-  styles and the menu bar as those need.
+  styles and the menu bar as those need;
+- `contents.fold_buffer` applies live through the same path: switching it on
+  publishes the active Markdown buffer's heading ranges at once (the Contents
+  section rescans, also while hidden), and switching it off clears the outline
+  source and opens the folds the section applied, leaving hand folds alone.
 
 **Restart settings** in this slice: `editor.hot_exit`,
 `editor.restore_previous_session`, `editor.auto_save_enabled` and its
 interval, `editor.recovery_enabled`, `editor.virtual_space`,
 `editor.scroll_offset`, the default line ending, trim-trailing-whitespace and
 ensure-final-newline on save, `editor.auto_read_only`, `mouse_capture`, and
-the whole `terminal` section (the dock is built at startup), and
-`contents.fold_buffer` (the Contents section reads its settings when it
-starts). The LSP, plugin and large-file settings are not in the page at all yet
-(deferred), and they keep their own restart boundary when edited by hand.
+the whole `terminal` section (the dock is built at startup). The LSP, plugin and
+large-file settings are not in the page at all yet (deferred), and they keep
+their own restart boundary when edited by hand.
 
 **Command-line flags win over the file** for the running editor, as they already
 do: setting the theme or the keymap while `--theme`/`--keymap` is given
@@ -317,9 +320,11 @@ method behind it.
 - **R7-3 coverage is closed for the page surface:** the Language Servers page,
   the read-only Environment section, the per-language structured values with the
   reset-vs-inherit display, the Plugins page and the read-only Keybindings page
-  all ship. The exact residuals are: the plugin runtime exposes no
-  declared-settings schema/values API yet, so a plugin's settings are listed
-  read-only (keys only) and edited in the raw config file; there is no plugin
+  all ship. The exact residuals are: declared plugin settings are listed
+  read-only (the runtime now exposes the schema and effective values, so the
+  page shows each declared key with its type, default, bounds/choices and the
+  layer that supplied the value, but editing plugin settings still happens in
+  the raw config file, plugins.<name>.settings); there is no plugin
   gallery/install page; keybinding editing deliberately stays in the existing
   Keybinding Editor (no in-page capture, no second writer of the keybindings
   file);
@@ -358,7 +363,7 @@ opens the icon preview).
 | `internal/app/settings_runtime.go` | the page's optional live parts (LSP port, plugin runtime, effective keymap, icon resolution), the injected Language Servers/Environment rows and the Environment facts |
 | `internal/app/settings_lsp.go` | the Language Servers structures: effective servers from the built-in table + `lsp` + `universal_lsp`, live status, actions, whole-array JSON editing, project-layer locks |
 | `internal/app/settings_languages.go` | the per-language page: inherited scalar rows and the extensions/filenames/formatter/on_save/indent child structures |
-| `internal/app/settings_plugins.go` | the Plugins page: runtime inventory, user-layer enable/disable with file rollback, reload; declared settings read-only |
+| `internal/app/settings_plugins.go` | the Plugins page: runtime inventory, user-layer enable/disable with file rollback, reload; declared settings read-only rows from the runtime schema/values API |
 | `internal/app/settings_keybindings.go` | the read-only Keybindings list: effective preset+user bindings grouped by consulted context, and the editor action row |
 | `internal/tui/settings_actions.go` | the settings page's deferred TUI-action message and the Settings-overlay close helper |
 | `internal/app/run.go` | wires the port into the TUI |

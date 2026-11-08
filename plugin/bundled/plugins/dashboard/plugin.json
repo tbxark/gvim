@@ -1,0 +1,7 @@
+{
+  "name": "dashboard",
+  "version": "1.0.0",
+  "description": "A start screen with git state, recent files, quick actions and disk usage on the empty editor",
+  "api": 2,
+  "default_enabled": false
+}

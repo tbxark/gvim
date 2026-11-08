@@ -122,6 +122,9 @@ type Model struct {
 	// explorerAutoOpened reports that auto_open_on_last_buffer_close focused the
 	// explorer; a buffer opening afterwards gives the keyboard back to the editor.
 	explorerAutoOpened bool
+	// restoredScroll skips the first follow of a restored tree: the save kept the
+	// selection and scroll, and the startup reveal must not scroll back to row 0.
+	restoredScroll bool
 
 	overlays []Overlay // the stack; the last one is on top and gets the input first
 
@@ -278,6 +281,11 @@ func New(deps Deps) *Model {
 	m.installRowMapper()
 	m.plug = newPluginState(m, deps.Root)
 	m.plug.panels = pluginPanels{}
+	// The restored session's sidebar state is applied after the config defaults and
+	// the explorer root, and only when the app restored the saved layout.
+	if deps.Sidebar != nil {
+		m.restoreSidebarState(*deps.Sidebar)
+	}
 	// An undecided workspace that can execute code asks for the decision before
 	// the first frame, as Fresh's open-time trust prompt does.
 	m.startTrustPrompt()
@@ -429,6 +437,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	cmd = tea.Batch(cmd, m.pluginViewTail(snap))
 	m.syncScrollGroups()
+	m.applyGroupFixedHeights()
 	return next, cmd
 }
 
@@ -1615,6 +1624,9 @@ func (m *Model) dispatch(cmd Command) tea.Cmd {
 	if c, ok := m.editorPaste(cmd.Action, cmd.Args); ok {
 		return c
 	}
+	if c, ok := m.lineTargetAction(cmd.Action, cmd.Args); ok {
+		return c
+	}
 	res := m.editorDo(editor.Action(cmd.Action), cmd.Args)
 	m.plugFailed(res.Err)
 	m.plugUnknownAction(cmd.Action, res.Err)
@@ -1971,7 +1983,7 @@ func (m *Model) explorerMouse(msg tea.Msg) tea.Cmd {
 // pressPane. A text or gutter cell places the caret, a count of 2 selects the word
 // and a count of 3 the line. A press on the scrollbar track moves the viewport to
 // the press, and a press on the thumb grabs it for the drag.
-func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
+func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) tea.Cmd {
 	m.lastPress = count
 	m.focusEditor()
 	switch hit.Kind {
@@ -1985,13 +1997,20 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
 		m.panBar(hit.Col + m.layout().FocusedPane().X)
 	case editorpane.HitText, editorpane.HitGutter:
 		if hit.Fold && m.toggleFoldAt(hit.Pos.Line) {
-			return
+			return nil
+		}
+		if count == 1 && !m.mx.extend {
+			if t, ok := m.lineTargetAt(m.ed.Active(), hit.Pos.Line); ok {
+				m.drag = drag{}
+				return m.openLineTarget(t, m.ed.Active())
+			}
 		}
 		if hit.Below > 0 && count == 1 && !m.mx.extend && m.placeVirtualLine(hit) {
-			return
+			return nil
 		}
 		m.drag = m.placeCaret(hit.Pos, count, hit.Virtual)
 	}
+	return nil
 }
 
 // placeCaret moves the caret to pos, or selects the word or the line under it

@@ -50,27 +50,33 @@ func (f frame) composeFenceLine(i int, fl syntax.FenceLine, raw []rune, kinds []
 		add('╯', syntax.KindPlain, src)
 	case syntax.FenceBody:
 		inner := width - 4
+		segments := fenceBodySegments(raw, indent, inner)
+		show := segments[0]
+		if f.caret.Line == i {
+			// The caret line keeps the whole body text (the wrapped rows without
+			// rails are the editing view); the continuation rows stand down.
+			show = nil
+			for k := indent; k < len(raw); k++ {
+				r := raw[k]
+				if r == '\t' {
+					for q := 0; q < 4; q++ {
+						show = append(show, fenceBodyRune{' ', k})
+					}
+					continue
+				}
+				if unicode.IsControl(r) {
+					r = ' '
+				}
+				show = append(show, fenceBodyRune{r, k})
+			}
+		}
 		add('│', syntax.KindPlain, src)
 		add(' ', syntax.KindPlain, src)
 		used := 0
-		for k := indent; k < len(raw); k++ {
-			r := raw[k]
-			if r == '\t' {
-				for q := 0; q < 4; q++ {
-					add(' ', kindAt(kinds, k), indent+k)
-				}
-				used += 4
-				continue
-			}
-			if unicode.IsControl(r) {
-				r = ' '
-			}
-			add(r, kindAt(kinds, k), indent+k)
-			used += ansi.StringWidth(string(r))
+		for _, fr := range show {
+			add(fr.r, kindAt(kinds, fr.src), fr.src)
+			used += ansi.StringWidth(string(fr.r))
 		}
-		// The padding keeps the frame's right rail in its column; a body line
-		// wider than the inner width overflows and its continuation rows have no
-		// rails (documented residual).
 		for ; used < inner; used++ {
 			add(' ', syntax.KindPlain, len(raw))
 		}
@@ -79,6 +85,94 @@ func (f frame) composeFenceLine(i int, fl syntax.FenceLine, raw []rune, kinds []
 	}
 	finishMaps(&out, len(raw))
 	return out
+}
+
+// fenceBodyRune is one visible rune of a fence body line with its source column.
+type fenceBodyRune struct {
+	r   rune
+	src int
+}
+
+// fenceBodySegments returns the visible runes of a body line wrapped at the
+// frame's inner width: tabs expand to four blanks, control characters become
+// blanks, and the rows break at the last space that fits (a word longer than the
+// row is cut). The primary row shows segment 0; the caller's extra-row builder
+// emits the rest as railed continuation rows.
+func fenceBodySegments(raw []rune, indent, inner int) [][]fenceBodyRune {
+	inner = max(inner, 1)
+	var content []fenceBodyRune
+	for k := indent; k < len(raw); k++ {
+		r := raw[k]
+		if r == '\t' {
+			for q := 0; q < 4; q++ {
+				content = append(content, fenceBodyRune{' ', k})
+			}
+			continue
+		}
+		if unicode.IsControl(r) {
+			r = ' '
+		}
+		content = append(content, fenceBodyRune{r, k})
+	}
+	var out [][]fenceBodyRune
+	start := 0
+	for start < len(content) {
+		used := 0
+		end := start
+		lastSpace := -1
+		for end < len(content) {
+			w := ansi.StringWidth(string(content[end].r))
+			if used+w > inner && end > start {
+				switch {
+				case content[end].r == ' ':
+					out = append(out, content[start:end])
+					start = end + 1
+				case lastSpace > start:
+					out = append(out, content[start:lastSpace])
+					start = lastSpace + 1
+				default:
+					out = append(out, content[start:end])
+					start = end
+				}
+				for start < len(content) && content[start].r == ' ' {
+					start++
+				}
+				goto nextRow
+			}
+			used += w
+			if content[end].r == ' ' {
+				lastSpace = end
+			}
+			end++
+		}
+		out = append(out, content[start:])
+		break
+	nextRow:
+	}
+	if len(out) == 0 {
+		return [][]fenceBodyRune{{}}
+	}
+	return out
+}
+
+// fenceBodyRowText builds one railed row of a fence body from a segment: the
+// indent, "| ", the segment padded to inner, " |".
+func fenceBodyRowText(indent, inner int, seg []fenceBodyRune) string {
+	var b []rune
+	for j := 0; j < indent; j++ {
+		b = append(b, ' ')
+	}
+	b = append(b, '\u2502', ' ')
+	used := 0
+	for _, fr := range seg {
+		b = append(b, fr.r)
+		used += ansi.StringWidth(string(fr.r))
+	}
+	for ; used < inner; used++ {
+		b = append(b, ' ')
+	}
+	b = append(b, ' ', '\u2502')
+	return string(b)
 }
 
 // composeFenceOpen composes the top border of a fenced block. The language label

@@ -33,7 +33,6 @@ func (s *pluginSession) key(code rune) {
 func TestFlashOffByDefault(t *testing.T) {
 	isolateConfig(t)
 	s := newSession(t, Options{})
-	s.waitStatus("merge_conflict", "loaded")
 	s.settle(30 * time.Millisecond)
 	if st := s.status("flash"); st == "loaded" {
 		t.Fatal("flash is loaded without being enabled")

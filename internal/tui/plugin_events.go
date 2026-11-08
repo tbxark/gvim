@@ -280,6 +280,7 @@ func (m *Model) plugDiffTabs(before, cur *pluginSnap) {
 		if !has(cur.bufs, b.ID) {
 			m.plugEmit("buffer_closed", map[string]any{"id": b.ID, "path": b.Path})
 			m.plugViewStateDrop(b.ID)
+			m.plugLineTargetsDrop(pluginapi.BufferID(b.ID))
 			m.plug.folds.dropBuffer(pluginapi.BufferID(b.ID))
 		}
 	}

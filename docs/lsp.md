@@ -303,14 +303,29 @@ words in the buffer and everything else do not depend on it.
   knows the edit was accepted before it actually lands; if the edit is then refused (a stale
   version, a refused delete) the server has a success it cannot see doubted. The refusal is
   reported in the status row.
-- **Inlay hints.** A server's inlay hints — parameter names, inferred types — are shown at the
-  end of the line they belong to, as faint virtual text beside the text, so the document keeps its
-  text and nothing is inserted into it. This is the tier-1 placement: Fresh inserts the hint at
-  the hint's own character position, inside the line; gvim puts it after the line's last
-  character. Hints refresh after an edit (debounced), when a document opens, and the result is
-  cached per document version. **Toggle Inlay Hints** (the command palette; `toggle_inlay_hints`)
-  turns them on and off; they are on only when the server advertises `inlayHintProvider`. A
-  server that does not serve them says so once, and the refresh stops for that language.
+- **Inlay hints.** A server's inlay hints — parameter names, inferred types — are inserted
+  **inline at the protocol position** (tier 2): the hint's UTF-16 character is converted to a rune
+  column of its line, its cells are spliced into the display row before that character (at the end
+  of the line when the position is the line's end), and the text after them moves right on screen.
+  The cells are display-only and faint: they are not text of the document, so copy, edit, undo and
+  save never see them, and the caret, the mouse, selection, search and diagnostics keep the line's
+  own columns (a caret at the hint's anchor sits after the hint cells, as in Fresh; a press on a
+  hint maps to the character it annotates). Fresh's spacing is used — a hint inside a line is
+  followed by a space, one at the line's end is wrapped in spaces — and the protocol's
+  `paddingLeft`/`paddingRight` add one more space on the named side. As in Fresh there is **no
+  hiding on the caret's line**: hints show while the toggle is on. A wrapped line chooses the row
+  its insertion point is on, and a point on a row boundary starts the next row. A hint whose row
+  has no room is cut safely (never splitting a wide character, never pushing text past the pane)
+  and the rest fall back to the end of the line.
+
+  The end-of-line fallback remains for the cases the display row cannot take the cells: the page
+  view (the composed columns are not the line's own), a tall line of a very long wrapped line, a
+  line shown as a window of a large file, a row panned by horizontal scrolling, a row with no
+  room left, and an insertion point inside a concealed range. Hints refresh after an edit
+  (debounced), when a document opens, and the result is cached per document version. **Toggle
+  Inlay Hints** (the command palette; `toggle_inlay_hints`) turns them on and off; they are on
+  only when the server advertises `inlayHintProvider`. A server that does not serve them says so
+  once, and the refresh stops for that language.
 - **Semantic tokens.** A server's semantic tokens are painted as extra styling over the syntax
   colors, through the same theme keys the syntax highlighter uses, so no theme change is needed.
   The token type picks the color (keyword/modifier; function/method/macro/decorator;
@@ -418,8 +433,9 @@ Servers only start for files that have a name on disk, and not for files in larg
 
 The workspace store lists the files the servers reported on: the `workspace/diagnostic` pull is
 capability-gated, so a server that only publishes reports the files it chooses, and no
-workspace-folder-wide request is made to a server that does not advertise it. Inlay hints use the
-end-of-line tier; inserting them inline at the hint's own character position is a later
-refinement. No built-in universal language server ships (Fresh's quicklsp is not available), so
+workspace-folder-wide request is made to a server that does not advertise it. Inlay hints are
+inserted inline (tier 2); the end-of-line form remains only as the fallback listed with them (page
+view, tall lines, windowed lines, panned rows, rows without room, concealed insertion points).
+No built-in universal language server ships (Fresh's quicklsp is not available), so
 `universal_lsp` is config-only, and `process_limits` is parsed but not enforced. See
 docs/parity.md, backlog #7.

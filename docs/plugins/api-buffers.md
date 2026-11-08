@@ -253,8 +253,9 @@ gvim.buf.group_panels(id) -> { {name, buf, window?, visible}, ... } | nil, err
 
 A group is a layout of panels shown as splits of the current tab (gvim has no synthetic group
 tab yet: tier 1c). The layout is Fresh's JSON: a leaf is
-`{"type":"scrollable","id":"name"}` or `{"type":"fixed","id":"name","height":n}` (the fixed
-height is accepted and ignored: split ratios place the panels), and a split is
+`{"type":"scrollable","id":"name"}` or `{"type":"fixed","id":"name","height":n}` (1 to 100
+rows: the host gives the leaf that display height by setting the split ratio above it and
+re-applies it on every layout change, so a resize keeps it), and a split is
 `{"type":"split","direction":"h"|"v","ratio":0.5,"first":...,"second":...}`. A leaf may take
 `"bufferId"` to show an existing buffer; otherwise the host makes a read-only panel buffer the
 group owns and `set_panel_content` fills it with styled `entries` (the virtual-buffer content
@@ -265,9 +266,10 @@ keeping its buffer and content) and shows it again by splitting a visible panel.
 for the port APIs and does not paint a group tab. Closing the group closes the split windows it
 created and the panel buffers it made; unloading the plugin does the same. Limits: at most 8
 panels, a layout 4 deep, 64 KiB of layout JSON and 16 title segments. A leaf's
-§ratio§ is the FIRST child's share of its split. Fresh's fixed-height leaves (§{type="fixed",
-height=n}§) are not expressible: the height is accepted and ignored, so a fixed toolbar degrades
-to the ratio its layout gives it (git_log's height-1 toolbar renders as a short ratio row).
+§ratio§ is the FIRST child's share of its split. Fixed-height leaves are approximate: the split
+border can leave the leaf one row off, a fixed leaf inside a side-by-side split is only as
+exact as the ratio, a height taller than the body is clamped, and a hidden fixed panel's
+height is re-applied when it is shown again. git_log's height-1 toolbar now renders as one row.
 
 ### Scroll-sync groups
 
@@ -306,3 +308,20 @@ focused window (`direction = "right"` by default, or `"below"`) and opens the fi
 completing asynchronously like `gvim.buf.open`; `focus_split`/`close_split` are the plain
 wrappers over the window operations. Limits: a split label is at most 64 bytes; window state
 keeps at most 256 keys per plugin and buffer, keys up to 128 bytes and strings up to 4 KiB.
+
+## Line targets (tier 1c-B)
+
+```text
+gvim.buf.set_line_targets(buf, {{line=, path=, target=?, into=?}, ...}) -> true | nil, err
+gvim.buf.clear_line_targets(buf) -> true
+```
+
+A target makes a line of the buffer clickable: pressing Enter on it in Normal mode (count 1, no
+selection, no extra carets) or a single left click opens `path` at 0-based line `target` (the
+top when omitted). `into` names a split by its plugin label: a live labelled window takes the
+target; otherwise the target opens beside the pane that holds the targets, so a result list
+never replaces itself. `line` is the 0-based line in this buffer. The call replaces the
+buffer's previous targets; an empty list (or `clear_line_targets`) clears them. Targets are
+dropped when the buffer closes and when the owning plugin unloads; another plugin's later call
+replaces the set. Counts 2/3, extend-selection clicks and multi-caret mode keep their normal
+editing behaviour. Caps: 10 000 targets per buffer, path 4096 bytes, split label 64 bytes.

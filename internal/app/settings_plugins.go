@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/tbxark/gvim/config"
@@ -29,7 +31,7 @@ import (
 // settings the user config holds.
 func (s *settingsService) structurePlugins(cfg config.Config, project bool) tui.SettingsStructure {
 	st := tui.SettingsStructure{Key: "plugins", Title: "Plugins", Kind: "fields"}
-	st.Note = "Enablement is the user config layer. Declared plugin settings are read-only in this page until the plugin runtime exposes a settings schema; edit plugins.<name>.settings in the config (docs/settings.md)."
+	st.Note = "Enablement is the user config layer. Declared plugin settings are listed read-only with their effective values; edit plugins.<name>.settings in the config (docs/settings.md)."
 	if s.rt.plugins == nil {
 		st.Rows = append(st.Rows, tui.SettingsStructureRow{
 			Name: "No plugin runtime", Value: "disabled", Locked: true,
@@ -72,7 +74,104 @@ func (s *settingsService) structurePlugins(cfg config.Config, project bool) tui.
 		Name: "Reload plugins", Action: "act:plugin-reload",
 		Note: "re-reads every plugin source and settings from the config",
 	})
+	st.Rows = append(st.Rows, pluginSettingRows(cfg, s.rt.plugins, infos)...)
 	return st
+}
+
+// pluginSettingRows shows the settings a plugin declared with gvim.settings.define:
+// one read-only row per setting with its effective value and type/default/choices/bounds
+// in the note. The runtime owns the values; the page only reads them (editing goes through
+// plugins.<name>.settings in the config for now).
+func pluginSettingRows(cfg config.Config, rt settingsPlugins, infos []pluginapi.PluginInfo) []tui.SettingsStructureRow {
+	host, ok := rt.(interface {
+		SettingsSchema(name string) ([]pluginapi.PluginSettingSpec, bool)
+		SettingsValues(name string) ([]pluginapi.PluginSettingValue, bool)
+	})
+	if !ok {
+		return nil
+	}
+	var rows []tui.SettingsStructureRow
+	for _, info := range infos {
+		schema, ok := host.SettingsSchema(info.Name)
+		if !ok || len(schema) == 0 {
+			continue
+		}
+		values, _ := host.SettingsValues(info.Name)
+		effective := make(map[string]pluginapi.PluginSettingValue, len(values))
+		for _, v := range values {
+			effective[v.Key] = v
+		}
+		userKeys := cfg.Plugins[info.Name].Settings
+		for _, spec := range schema {
+			val := effective[spec.Key]
+			note := spec.Type
+			if spec.Description != "" {
+				note += " · " + spec.Description
+			}
+			note += " · default " + formatPluginSettingValue(spec.Default)
+			if len(spec.Choices) > 0 {
+				note += " · values " + strings.Join(spec.Choices, "|")
+			}
+			if spec.Min != nil || spec.Max != nil {
+				note += " · range " + rangeText(spec.Min, spec.Max)
+			}
+			if spec.Project {
+				note += " · project"
+			}
+			if _, ok := userKeys[spec.Key]; ok {
+				note += " · set in user config"
+			} else if !val.Project {
+				note += " · default"
+			}
+			if val.Project {
+				note += " · from project"
+			}
+			rows = append(rows, tui.SettingsStructureRow{
+				Name: info.Name + "." + spec.Key, Value: formatPluginSettingValue(val.Value),
+				Note: note, Locked: true, Group: "plugin settings",
+			})
+		}
+	}
+	return rows
+}
+
+// formatPluginSettingValue renders a declared setting value for the page.
+func formatPluginSettingValue(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "-"
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case string:
+		return strconv.Quote(x)
+	case []string:
+		parts := make([]string, len(x))
+		for i, s := range x {
+			parts[i] = strconv.Quote(s)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case float64:
+		if x == math.Trunc(x) {
+			return strconv.FormatInt(int64(x), 10)
+		}
+		return strconv.FormatFloat(x, 'g', -1, 64)
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+// rangeText is the min..max note of a numeric setting.
+func rangeText(min, max *float64) string {
+	lo, hi := "-", "-"
+	if min != nil {
+		lo = formatPluginSettingValue(float64(*min))
+	}
+	if max != nil {
+		hi = formatPluginSettingValue(float64(*max))
+	}
+	return lo + ".." + hi
 }
 
 // pluginSettingsText lists the settings keys the user config sets for a plugin,

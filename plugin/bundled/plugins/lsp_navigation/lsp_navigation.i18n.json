@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.goto_lsp_symbol": "Go to LSP Symbol",
+    "cmd.goto_lsp_symbol_desc": "List document symbols from LSP and navigate to selected",
+    "cmd.show_definitions": "LSP: Show Definitions",
+    "cmd.show_definitions_desc": "List the definitions of the symbol under the cursor (gvim addition; the native Go to Definition row jumps directly)",
+    "cmd.show_implementations": "LSP: Show Implementations",
+    "cmd.show_implementations_desc": "List the implementations of the symbol under the cursor (gvim addition)",
+    "cmd.show_type_definitions": "LSP: Show Type Definitions",
+    "cmd.show_type_definitions_desc": "List the type definitions of the symbol under the cursor (gvim addition)",
+    "status.no_language": "LSP navigation: this buffer has no language",
+    "status.no_file": "LSP navigation: this buffer has no file",
+    "status.symbols_failed": "LSP symbols failed: %{error}",
+    "status.no_symbols": "No symbols in this document",
+    "status.no_locations": "No %{kind} found for the symbol",
+    "status.request_failed": "%{kind} failed: %{error}",
+    "status.jumped_to": "Jumped to %{file}:%{line}",
+    "panel.symbols_title": "Go to symbol: ",
+    "panel.location_title": "%{kind} (%{count})",
+    "panel.placeholder": "Filter symbols...",
+    "panel.help": "Up/Down: move  RET: jump  Esc: cancel",
+    "kind.definition": "definitions",
+    "kind.implementation": "implementations",
+    "kind.type_definition": "type definitions"
+  }
+}

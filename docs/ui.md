@@ -127,8 +127,10 @@ result region:
   row per matching line ("[x] line:col  text", the matched runes bold, Enter opens it).
   Space toggles the focused row's checkbox (a file row takes its matches with it), a
   checks every match and n unchecks every match; the title says how many are selected.
-  The options are the All Files/Current File scope (Alt+A), Case (Alt+C), Regex (Alt+R)
-  and Whole (Alt+W) checkboxes; Tab moves the focus between the search field, the
+  The options are the scope chip (Alt+A cycles All Files, Open Buffers and Current File;
+  Open Buffers searches only the open buffers' unsaved text, like Fresh's universal-search
+  Buffers source, and the Files glob narrows the All Files walk), the Case (Alt+C), Regex
+  (Alt+R) and Whole (Alt+W) checkboxes; Tab moves the focus between the search field, the
   replacement field, the Files field and the result rows. The Files field is a comma or
   space separated glob filter: a pattern without a slash matches the file's name at any
   depth (*.go) and a pattern with a slash matches the root-relative path (src/**,
@@ -150,22 +152,35 @@ result region:
   older result: every file carries a content hash from the search, and a file whose text
   changed is skipped. Because the results stream, a replacement started before the search
   finishes plans from the rows that have arrived (the confirmation counts them); the fresh
-  search that follows the replacement shows the rest.
+  search that follows the replacement shows the rest. A closed file above the search read
+  cap (or above the large-file threshold when the editor runs in large-file mode) is never
+  searched and shows a skip reason; a file open in a buffer is searched from its snapshot
+  whatever its size, so replacing in an open large buffer goes through the same
+  unsaved-tab and hash model (Save All writes it), while a streamed writer for closed
+  oversize files stays a residual.
 - **Selected-match preview column** (while the result rows have the focus) follows the
   palette's file-preview conventions: a muted `│` divider at the right of the result
   region, a right-aligned line-number gutter, and a column only when the card's inner text
   width is at least 64 cells (the column takes 24..60 cells, the rows keep at least 30); a
   narrower card drops the column and keeps the full-width rows. The column's first row is
-  the header `path:line` (with `–endLine:endCol` for a multi-line match, and `(unsaved)`
-  for an open buffer); the lines come from the open buffer's snapshot or, for a closed
-  file, from a bounded read with the search caps (a large, binary or non-UTF-8 file shows
-  the reason instead of lines). The match's line or lines take the selected style and the
-  matched runes are bold. The column is a plain-text window bounded by the result
-  region's height: it does not scroll and has no syntax colours, and a multi-line match
-  longer than the window shows its first lines. Enter still opens the match.
+  the header `path:line` (with `–endLine:endCol` and `(N lines)` for a multi-line match,
+  `(unsaved)` for an open buffer, and `· Lfirst–last/total` for the window's place in the
+  file); the lines come from the open buffer's snapshot or, for a closed file, from a
+  bounded read with the search caps (a large, binary or non-UTF-8 file shows the reason
+  instead of lines). The match's line or lines take the selected style and the matched
+  runes are bold; the rest of a line is syntax-coloured automatically when the port can
+  highlight it (the highlighter is cached per file and bounded at 256 KiB or 4000 lines,
+  and a grammarless or oversized file stays plain). The window scrolls while the result
+  rows have the focus: PgUp/PgDn page it, Ctrl+Home/Ctrl+End jump it to the file start/end,
+  and a wheel notch over the column scrolls three lines; plain Home/End still select the
+  first/last result row, and without a column the scroll keys do nothing. A scrolled
+  window is painted from its cache and only asks the port again at the cache edge. Enter
+  still opens the match.
 - **Multi-line matches**: a regex match that spans lines is one row whose location reads
   `startLine:startCol–endLine:endCol` (the end exclusive); its text is the first line and
-  the preview shows the whole range, while replace still applies the exact range.
+  the preview shows the whole range, while replace still applies the exact range. A match
+  longer than the preview column is paged through with the same scroll keys; the header's
+  `(N lines)` says how long it is, and paging never changes the replacement range.
 - **Project search results as a list** (Alt+Q, or "Project Search Results in List" in
   the palette) is gvim's quickfix export: the result set opens in the shared list
   overlay, grouped by file, filterable, with Enter jumping to a match and the list
@@ -181,11 +196,13 @@ result region:
   catches a bad bracket first, and an invalid pattern blocks the search. git grep runs in
   the work tree of the workspace root in one call (its 100-row cap makes a stream
   unnecessary); exit 0 and 1 both mean a finished search (1 is no matches), 2 or more is
-  an error notice.
-- **Residuals of the search surfaces**: a preview window that scrolls or syntax-colours
-  its lines (it is a bounded plain-text window), a multi-line match longer than the
-  preview column (it shows its first lines), replacing in very large files (they are
-  skipped with a reason), provider scopes beyond files and the current buffer.
+  an error notice. The selected-match preview column, with its scrolling and syntax
+  colours, works the same way while its result rows have the focus.
+- **Residuals of the search surfaces**: replacing closed files above the search read cap
+  (a streamed writer; open buffers are covered by the unsaved-tab path), a soft-wrapped
+  preview (long lines truncate at the column), provider sources beyond files, open buffers
+  and the current buffer (recent files, diagnostics, terminals), and a toggle for the
+  preview's syntax colours (they are automatic and fall back to plain).
 
 ## 3. Component map
 

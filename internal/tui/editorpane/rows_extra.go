@@ -108,8 +108,93 @@ func (f frame) extrasFor(i int) ExtraRows {
 	if len(ex.Below) > 1 {
 		slices.SortStableFunc(ex.Below, extraRowOrder)
 	}
+	ex.Above = f.wrapExtraRows(ex.Above)
+	ex.Below = f.wrapExtraRows(ex.Below)
 	f.extraCache[i] = ex
 	return ex
+}
+
+// maxExpandedExtraRows bounds the display rows one line's extra rows may expand to when
+// they are wrapped, so a plugin cannot make one line cost unbounded rows.
+const maxExpandedExtraRows = 256
+
+// wrapExtraRows expands the extra rows that are longer than the pane's text width into
+// several display rows, so a virtual line wraps like a text row. The gutter glyph is
+// drawn on the first chunk only; text overlays are re-based to their chunk. The total
+// expansion is capped at maxExpandedExtraRows.
+func (f frame) wrapExtraRows(rows []ExtraRow) []ExtraRow {
+	if len(rows) == 0 {
+		return rows
+	}
+	avail := f.w - 1 - f.gutter
+	if avail < 1 {
+		avail = 1
+	}
+	out := make([]ExtraRow, 0, len(rows))
+	for _, row := range rows {
+		text := cleanVirtual(row.Text)
+		if ansi.StringWidth(text) <= avail {
+			row.Text = text
+			out = append(out, row)
+			if len(out) >= maxExpandedExtraRows {
+				return out[:maxExpandedExtraRows]
+			}
+			continue
+		}
+		for k, ch := range wrapExtraText(text, avail, row.Overlays) {
+			r := row
+			r.Text = ch.text
+			r.Overlays = ch.overlays
+			if k > 0 {
+				r.GutterText = ""
+			}
+			out = append(out, r)
+			if len(out) >= maxExpandedExtraRows {
+				return out[:maxExpandedExtraRows]
+			}
+		}
+	}
+	return out
+}
+
+// extraChunk is one wrapped display row of an extra row: its text and the overlays whose
+// byte ranges fall in it (re-based to the chunk).
+type extraChunk struct {
+	text     string
+	overlays []ExtraTextOverlay
+}
+
+// wrapExtraText splits text into chunks of at most avail display columns. The split is
+// byte-safe (a wide rune that cannot fit is kept whole) and the overlays are clipped and
+// re-based for each chunk.
+func wrapExtraText(text string, avail int, overlays []ExtraTextOverlay) []extraChunk {
+	var out []extraChunk
+	start, width := 0, 0
+	for i, r := range text {
+		w := ansi.StringWidth(string(r))
+		if width > 0 && width+w > avail {
+			out = append(out, extraChunk{text: text[start:i], overlays: chunkOverlays(overlays, start, i)})
+			start, width = i, 0
+		}
+		width += w
+	}
+	if start < len(text) {
+		out = append(out, extraChunk{text: text[start:], overlays: chunkOverlays(overlays, start, len(text))})
+	}
+	return out
+}
+
+// chunkOverlays returns the overlays of [from, to) of text, re-based to the chunk start.
+func chunkOverlays(overlays []ExtraTextOverlay, from, to int) []ExtraTextOverlay {
+	var out []ExtraTextOverlay
+	for _, ov := range overlays {
+		start, end := max(ov.Start, from), min(ov.End, to)
+		if start >= end {
+			continue
+		}
+		out = append(out, ExtraTextOverlay{Start: start - from, End: end - from, Style: ov.Style})
+	}
+	return out
 }
 
 func extraRowOrder(a, b ExtraRow) int { return cmp.Compare(a.Priority, b.Priority) }

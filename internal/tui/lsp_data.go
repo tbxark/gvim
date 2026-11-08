@@ -228,21 +228,22 @@ func (m *Model) lspDataRefresh(msg lspDataMsg) tea.Cmd {
 	return m.lspDataRequest(msg.kind)
 }
 
-// lspInlayText is the end-of-line text of the inlay hints of a line: the hints
-// joined by a middle dot, each preceded by a blank, so they sit beside the text
-// and never over it.
-func lspInlayText(hints []InlayHint) string {
-	if len(hints) == 0 {
-		return ""
+// lspInlayHintCells renders one hint's cells with Fresh's spacing: a hint inside a
+// line is inserted before a character and followed by a space, a hint at the line's end
+// is wrapped in spaces, and the protocol's padding flags add one more space on the side
+// they name.
+func lspInlayHintCells(h InlayHint, lineLen int) string {
+	text := h.Text
+	if h.PaddingLeft {
+		text = " " + text
 	}
-	text := ""
-	for i, h := range hints {
-		if i > 0 {
-			text += " · "
-		}
-		text += h.Text
+	if h.PaddingRight {
+		text += " "
 	}
-	return text
+	if h.Col >= lineLen {
+		return " " + text + " "
+	}
+	return text + " "
 }
 
 // lspDataDecoration wraps the pane's overlay hooks with the LSP data of doc: inlay
@@ -257,10 +258,6 @@ func (m *Model) lspData(pane editorpane.Pane, doc Document) editorpane.Pane {
 	if len(hints) == 0 && len(tokens) == 0 {
 		return pane
 	}
-	hintByLine := make(map[int][]InlayHint, len(hints))
-	for _, h := range hints {
-		hintByLine[h.Line] = append(hintByLine[h.Line], h)
-	}
 	tokenByLine := make(map[int][]editorpane.StyledSpan, len(tokens))
 	for _, tok := range tokens {
 		tokenByLine[tok.Line] = append(tokenByLine[tok.Line], editorpane.StyledSpan{
@@ -268,18 +265,30 @@ func (m *Model) lspData(pane editorpane.Pane, doc Document) editorpane.Pane {
 		})
 	}
 	if len(hints) > 0 {
-		inner := pane.EOL
+		// Tier 2: the hints are display-only cells spliced into their rows at the
+		// protocol position; the pane paints a hint at the end of the line when its row
+		// cannot take the cells (page view, a windowed or tall line, a panned row, no
+		// room, a concealed insertion point).
 		hintStyle := m.panes.Text
 		hintStyle.Faint = true
-		pane.EOL = func(line int) []editorpane.VirtualText {
-			var out []editorpane.VirtualText
-			if inner != nil {
-				out = append(out, inner(line)...)
+		hintByLine := make(map[int][]editorpane.InlineHint, len(hints))
+		for _, h := range hints {
+			if h.Line < 0 || h.Line >= doc.LineCount() {
+				continue
 			}
-			if text := lspInlayText(hintByLine[line]); text != "" {
-				out = append(out, editorpane.VirtualText{Text: " " + text, Style: hintStyle})
+			lineLen := len([]rune(doc.Line(h.Line)))
+			hintByLine[h.Line] = append(hintByLine[h.Line], editorpane.InlineHint{
+				Col:   min(max(h.Col, 0), lineLen),
+				Text:  lspInlayHintCells(h, lineLen),
+				Style: hintStyle,
+			})
+		}
+		inner := pane.InlineHints
+		pane.InlineHints = func(line int) []editorpane.InlineHint {
+			if inner == nil {
+				return hintByLine[line]
 			}
-			return out
+			return append(inner(line), hintByLine[line]...)
 		}
 	}
 	if len(tokens) > 0 {

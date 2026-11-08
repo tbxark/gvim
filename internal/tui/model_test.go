@@ -128,6 +128,16 @@ func (t *fakeTree) Move(delta int) {
 	t.selected = min(max(t.selected+delta, 0), len(t.rows)-1)
 }
 
+func (t *fakeTree) Select(path string) error {
+	for i, row := range t.rows {
+		if row.Path == path {
+			t.selected = i
+			return nil
+		}
+	}
+	return nil
+}
+
 func (t *fakeTree) ScrollBy(n int) {
 	t.scrolls = append(t.scrolls, n)
 	t.offset = min(max(t.offset+n, 0), max(len(t.rows)-1, 0))

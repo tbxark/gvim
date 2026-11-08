@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"github.com/tbxark/gvim/explorer"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/browser"
@@ -106,14 +108,82 @@ func (m *Model) rootAction(action string) (tea.Cmd, bool) {
 	return nil, true
 }
 
-// ExplorerState is the explorer state a session keeps: whether the panel is shown,
-// the tree root and the two listing settings. The zero value is the state of a
-// model with no explorer.
+// ExplorerState is the state a session keeps of the explorer column: whether the
+// panel is shown, the tree root, the two listing settings, and the bounded sidebar
+// UI state (sections, sizes, scroll, width form and side). The zero value is the
+// state of a model with no explorer.
 type ExplorerState struct {
 	Open        bool
 	Root        string
 	ShowHidden  bool
 	ShowIgnored bool
+	Sidebar     SidebarState
+}
+
+// SidebarState is the sidebar's per-session UI state: where the native sections
+// stand (the explorer folded, the Contents and Diagnostics sections open,
+// collapsed and their body rows), the explorer's width form and side, and the
+// scroll positions of the explorer and Contents trees. It is a bounded snapshot —
+// booleans and numbers, no file contents or diagnostics — saved in the session
+// file beside the explorer state. The zero value is the state a fresh session
+// starts from, so a session file without it (or an old one) keeps the config
+// defaults.
+type SidebarState struct {
+	ExplorerCollapsed bool
+	// Width and Side are the explorer's runtime width form and side: the config
+	// value, then the grip drag and the side toggle. The zero width is the frame's
+	// automatic width and the zero side is the left edge.
+	Width explorer.Width
+	Side  explorer.Side
+	// ExplorerSelected is the selected tree row's path, and ExplorerScroll the
+	// tree's first visible row offset; together they put the reader back where the
+	// tree stood (the selection keeps the offset meaningful across frame sizes).
+	ExplorerSelected     string
+	ExplorerScroll       int
+	ContentsOpen         bool
+	ContentsCollapsed    bool
+	ContentsRows         int
+	ContentsScroll       int
+	DiagnosticsOpen      bool
+	DiagnosticsCollapsed bool
+	DiagnosticsRows      int
+}
+
+// selectedTreePath is the tree's selected row path, or "" when nothing is
+// selected.
+func selectedTreePath(tree ExplorerTree) string {
+	if tree == nil {
+		return ""
+	}
+	row, ok := tree.Selected()
+	if !ok {
+		return ""
+	}
+	return row.Path
+}
+
+// SidebarState reports the sidebar's UI state for the session. Only the native
+// sections are kept: the plugin sections and their order belong to the plugin
+// runtime, and a model with no explorer has no sidebar state.
+func (m *Model) SidebarState() SidebarState {
+	if m.tree == nil {
+		return SidebarState{}
+	}
+	st := SidebarState{
+		ExplorerCollapsed:    m.explorerCollapsed,
+		Width:                m.explorerWidth,
+		Side:                 m.explorerSide,
+		ExplorerSelected:     selectedTreePath(m.tree),
+		ExplorerScroll:       m.tree.ScrollOffset(),
+		ContentsOpen:         m.contents.Open(),
+		ContentsCollapsed:    m.contents.Collapsed(),
+		ContentsRows:         m.contents.Rows(),
+		ContentsScroll:       m.contents.Scroll(),
+		DiagnosticsOpen:      m.diag.Open(),
+		DiagnosticsCollapsed: m.diag.Collapsed(),
+		DiagnosticsRows:      m.diag.Rows(),
+	}
+	return st
 }
 
 // ExplorerState reports the explorer state. Open is false when there is no tree.
@@ -126,5 +196,6 @@ func (m *Model) ExplorerState() ExplorerState {
 		Root:        m.tree.Root(),
 		ShowHidden:  m.tree.ShowHidden(),
 		ShowIgnored: m.tree.ShowIgnored(),
+		Sidebar:     m.SidebarState(),
 	}
 }

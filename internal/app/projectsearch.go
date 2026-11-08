@@ -18,6 +18,7 @@ import (
 	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/search"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // projectSearch is the panel's project-wide searcher and replacer over internal/search.
@@ -28,6 +29,10 @@ type projectSearch struct {
 	// skipFrom is the size in bytes from which a file is skipped: the files the editor
 	// opens in large file mode. Zero skips none beyond the search read cap.
 	skipFrom int64
+	// previewHighlighters caches one syntax highlighter per previewed file (bounded by
+	// previewHighlighterCache), and previewOrder is the LRU order of its paths.
+	previewHighlighters map[string]*previewHighlighter
+	previewOrder        []string
 }
 
 // newProjectSearch returns the project search for an editor with the options o.
@@ -120,19 +125,28 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 	}
 	open := openSourcesByPath(req.OpenFiles)
 
-	// The files to walk, in result order. The current-file scope has one; the file list is
-	// the request's snapshot, capped like live grep.
+	// The candidates to walk, in result order. CurrentFile is the active buffer, OpenBuffers
+	// are the open buffers' snapshots in tab order (one per tab, unnamed buffers included),
+	// and AllFiles is the request's file snapshot, capped like live grep.
 	var files []string
-	if req.Scope == searchpanel.CurrentFile {
+	var openSources []searchpanel.SourceFile
+	truncated := false
+	switch req.Scope {
+	case searchpanel.CurrentFile:
 		files = []string{""}
-	} else {
+	case searchpanel.OpenBuffers:
+		openSources = dedupeSources(req.OpenFiles)
+	default:
 		files = req.Files
+		if len(files) > pluginhost.GrepMaxFiles {
+			files = files[:pluginhost.GrepMaxFiles]
+		}
+		truncated = len(req.Files) > pluginhost.GrepMaxFiles
 	}
-	if len(files) > pluginhost.GrepMaxFiles {
-		files = files[:pluginhost.GrepMaxFiles]
-	}
-	truncated := req.Scope != searchpanel.CurrentFile && len(req.Files) > pluginhost.GrepMaxFiles
 	total := len(files)
+	if req.Scope == searchpanel.OpenBuffers {
+		total = len(openSources)
+	}
 	if total == 0 {
 		send(searchpanel.SearchBatch{Done: true, Truncated: truncated, Total: 0})
 		return
@@ -214,25 +228,63 @@ func (s *projectSearch) searchBatches(req searchpanel.SearchRequest, cancel <-ch
 		return addFile(abs, rel, false, text)
 	}
 
-	for _, rel := range files {
-		if !next() {
-			return
-		}
-		reached, err := walk(rel)
-		if err != nil {
-			flush(true, err.Error())
-			return
-		}
-		if reached {
-			break
-		}
+	flushAfter := func() bool {
 		if len(pending) >= searchBatchFiles || pendingMatches >= searchBatchMatches {
-			if !flush(false, "") {
+			return flush(false, "")
+		}
+		return true
+	}
+	if req.Scope == searchpanel.OpenBuffers {
+		for _, src := range openSources {
+			if !next() {
 				return
+			}
+			name := src.Name
+			if name == "" {
+				name = "[No Name]"
+			}
+			scanned++
+			reached, err := addFile(src.Path, name, true, src.Text)
+			if err != nil {
+				flush(true, err.Error())
+				return
+			}
+			if reached || !flushAfter() {
+				break
+			}
+		}
+	} else {
+		for _, rel := range files {
+			if !next() {
+				return
+			}
+			reached, err := walk(rel)
+			if err != nil {
+				flush(true, err.Error())
+				return
+			}
+			if reached || !flushAfter() {
+				break
 			}
 		}
 	}
 	flush(true, "")
+}
+
+// dedupeSources returns the open buffers in tab order, one per tab. An unnamed buffer is
+// part of the OpenBuffers scope too.
+func dedupeSources(files []searchpanel.SourceFile) []searchpanel.SourceFile {
+	seen := make(map[string]bool, len(files))
+	out := make([]searchpanel.SourceFile, 0, len(files))
+	for _, f := range files {
+		key := f.Path + "\x00" + f.Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, f)
+	}
+	return out
 }
 
 // ProjectReplace plans the replacement of req.Query with req.Replacement in each file.
@@ -336,25 +388,92 @@ func (s *projectSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.Pre
 		// A trailing line break does not add a line to preview.
 		lines = lines[:n-1]
 	}
-	start := req.Line - 1
-	start = clampInt(start, 0, max(len(lines)-1, 0))
+	total := len(lines)
+	out.Total = total
+	start := clampInt(req.Line-1, 0, max(total-1, 0))
 	end := req.EndLine - 1
 	if end < start {
 		end = start
 	}
-	// Centre the window on the match; a match longer than the window starts at its
-	// first line and so truncates (the bounded column cannot show it whole).
-	span := end - start + 1
-	first := start
-	if span < req.Lines {
-		first = start - (req.Lines-span)/2
+	first := 0
+	if req.Start >= 0 {
+		// An explicit window, from the panel scrolling through the file.
+		first = clampInt(req.Start, 0, max(total-req.Lines, 0))
+	} else {
+		// Centre the window on the match; a match longer than the window starts at its
+		// first line, so the panel pages through it from the start.
+		span := end - start + 1
+		first = start
+		if span < req.Lines {
+			first = start - (req.Lines-span)/2
+		}
+		first = clampInt(first, 0, max(total-req.Lines, 0))
 	}
-	first = clampInt(first, 0, max(len(lines)-req.Lines, 0))
 	out.Start = first
-	for k := first; k < len(lines) && k < first+req.Lines; k++ {
+	for k := first; k < total && k < first+req.Lines; k++ {
 		out.Lines = append(out.Lines, strings.TrimRight(lines[k], "\r"))
 	}
+	out.Spans = s.previewSpans(req.Path, text, lines, first, len(out.Lines))
 	return out, nil
+}
+
+// Bounds of the syntax-coloured preview: a bigger file is plain text, so the cached
+// highlighter stays small.
+const (
+	previewHighlightBytes   = 256 << 10
+	previewHighlightLines   = 4000
+	previewHighlighterCache = 8
+)
+
+// previewHighlighter is one preview cache entry: a highlighter and the content hash it was
+// built for.
+type previewHighlighter struct {
+	hash uint64
+	h    *syntax.Highlighter
+}
+
+// previewSpans returns the syntax-coloured runs of the preview window. It reuses a cached
+// highlighter per file (keyed by path and content hash), rebuilds it when the file changed,
+// and returns nothing, plain text, for a file over the size or line caps or without a
+// grammar.
+func (s *projectSearch) previewSpans(path, text string, lines []string, first, count int) []searchpanel.PreviewSpan {
+	if count <= 0 || len(text) > previewHighlightBytes || len(lines) > previewHighlightLines {
+		return nil
+	}
+	hash := hashText(text)
+	entry := s.previewHighlighters[path]
+	if entry == nil || entry.hash != hash {
+		entry = &previewHighlighter{hash: hash, h: syntax.NewHighlighter(syntax.Detect(path, []byte(text)))}
+		if s.previewHighlighters == nil {
+			s.previewHighlighters = make(map[string]*previewHighlighter)
+		}
+		s.previewHighlighters[path] = entry
+		s.previewOrder = append(s.previewOrder, path)
+		for len(s.previewOrder) > previewHighlighterCache {
+			oldest := s.previewOrder[0]
+			s.previewOrder = s.previewOrder[1:]
+			if oldest != path {
+				delete(s.previewHighlighters, oldest)
+			}
+		}
+	}
+	all := entry.h.Lines(int(hash), lines)
+	var out []searchpanel.PreviewSpan
+	for i := 0; i < count && first+i < len(all); i++ {
+		abs := first + i
+		line := lines[abs]
+		for _, span := range all[abs] {
+			if span.Kind == syntax.KindPlain {
+				continue
+			}
+			start := utf8.RuneCountInString(line[:min(span.Start, len(line))])
+			end := utf8.RuneCountInString(line[:min(span.End, len(line))])
+			if end > start {
+				out = append(out, searchpanel.PreviewSpan{Line: abs, Start: start, End: end, Kind: span.Kind.String()})
+			}
+		}
+	}
+	return out
 }
 
 // clampInt clamps v into [lo, hi].

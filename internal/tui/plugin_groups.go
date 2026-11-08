@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"math"
 	"sort"
 
 	"github.com/tbxark/gvim/pluginapi"
@@ -42,6 +43,8 @@ type groupPanel struct {
 	window  pluginapi.WinID // 0 when hidden
 	visible bool
 	created bool // the panel buffer is the group's (a virtual buffer it made)
+	// fixedHeight asks for a fixed display height (a fixed layout leaf), 0 for none.
+	fixedHeight int
 }
 
 // scrollGroup is one scroll-sync group.
@@ -174,6 +177,7 @@ func (h *pluginHost) CreateBufferGroup(plugin string, id pluginapi.BufferGroupID
 	}
 	ps.byID[id] = g
 	ps.order = append(ps.order, id)
+	m.applyGroupFixedHeights()
 	return nil
 }
 
@@ -200,7 +204,11 @@ func (h *pluginHost) mountGroupLeaf(g *mountedGroup, leaf pluginapi.BufferGroupL
 		}
 		return err
 	}
-	g.panels = append(g.panels, &groupPanel{name: leaf.Name, buffer: buf, window: win, visible: true, created: created})
+	p := &groupPanel{name: leaf.Name, buffer: buf, window: win, visible: true, created: created}
+	if leaf.Fixed {
+		p.fixedHeight = leaf.Height
+	}
+	g.panels = append(g.panels, p)
 	return nil
 }
 
@@ -514,4 +522,86 @@ func scrollFollow(anchors []pluginapi.ScrollAnchor, line int, fromLeft bool) int
 		}
 	}
 	return max(lastB+(line-lastA)*slope, 0)
+}
+
+// applyGroupFixedHeights gives the fixed layout leaves their requested display height by
+// setting the ratio of the split above them from the current layout. It runs after every
+// update while fixed panels exist, so a window resize re-applies the height. Limits: the
+// split border can leave the leaf one row off, a fixed leaf inside a side-by-side ratio
+// split is approximate, and a height taller than the body is clamped to fit.
+func (m *Model) applyGroupFixedHeights() {
+	if len(m.plug.groups.byID) == 0 {
+		return
+	}
+	type fixedPanel struct {
+		leaf   *splitNode
+		height int
+	}
+	var fixed []fixedPanel
+	for _, g := range m.plug.groups.byID {
+		for _, p := range g.panels {
+			if p.fixedHeight > 0 && p.window != 0 {
+				if n := m.splitByID(uint64(p.window)); n != nil {
+					fixed = append(fixed, fixedPanel{leaf: n, height: p.fixedHeight})
+				}
+			}
+		}
+	}
+	if len(fixed) == 0 {
+		return
+	}
+	panes := m.layout().Panes
+	leaves := m.windowLeaves()
+	if len(panes) != len(leaves) {
+		return
+	}
+	height := make(map[*splitNode]int, len(leaves))
+	for i, n := range leaves {
+		height[n] = panes[i].H
+	}
+	var subtreeHeight func(n *splitNode) int
+	subtreeHeight = func(n *splitNode) int {
+		if n == nil {
+			return 0
+		}
+		if n.Leaf() {
+			return height[n]
+		}
+		a, b := subtreeHeight(n.A), subtreeHeight(n.B)
+		if n.Dir == stacked {
+			return a + b + 1 // the split border row
+		}
+		return max(a, b)
+	}
+	var parentOf func(root, target *splitNode) *splitNode
+	parentOf = func(root, target *splitNode) *splitNode {
+		if root == nil || root.Leaf() {
+			return nil
+		}
+		if root.A == target || root.B == target {
+			return root
+		}
+		if p := parentOf(root.A, target); p != nil {
+			return p
+		}
+		return parentOf(root.B, target)
+	}
+	for _, f := range fixed {
+		parent := parentOf(m.splits.Root, f.leaf)
+		if parent == nil || parent.Dir != stacked {
+			continue
+		}
+		total := subtreeHeight(parent)
+		if total <= 1 {
+			continue
+		}
+		// Split ratios are percentages of the first child. Round up so a one-row leaf is
+		// not rounded away, and keep the split usable.
+		pct := int(math.Ceil(float64(f.height) * 100 / float64(total)))
+		pct = min(max(pct, 1), 99)
+		if parent.A != f.leaf {
+			pct = 100 - pct
+		}
+		parent.Ratio = pct
+	}
 }

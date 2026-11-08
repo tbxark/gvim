@@ -84,7 +84,7 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 | prompt suggestions | 100 rows; text and description 512 bytes, value 4096 |
 | action popup | 16 actions; message 4 KiB, label 200 bytes |
 | theme file written by a plugin | 1 MiB, validated as a theme file before it is saved |
-| a buffer group | 8 panels, layout depth 4, 64 KiB of layout JSON, 16 title segments, 10000 scroll-sync anchors |
+| a buffer group | 8 panels, layout depth 4, 64 KiB of layout JSON, 16 title segments, 10000 scroll-sync anchors; fixed leaf height 1..100 rows |
 | in-flight background jobs (`Work`) | 32 |
 | parked tasks | 64 (the awaiting call returns the error) |
 | live tasks | 10 000 |
@@ -93,6 +93,7 @@ Counted per plugin; going over returns `nil, "limit: ..."` (or raises, where not
 | plugin folds | 2000 ranges per (plugin, namespace, buffer), with one placeholder and a collapsed seed per range |
 | decorations | 20 000 per (plugin, namespace, buffer) and 50 000 per plugin; at most 256 drawn per kind and line; tier-1c items: 64 virtual rows and 64 soft breaks per line, 256 conceal spans per line, 8 text overlays per virtual line |
 | split labels and window state | split label 64 bytes; window state 256 keys per (plugin, buffer), key 128 bytes, string value 4 KiB |
+| line targets | 10 000 per buffer; path 4096 bytes; split label 64 bytes |
 | virtual buffers | 64 per plugin, 256 in all; 64 MiB of text per plugin, 256 MiB in all |
 | queued `gvim.emit` events | 1000; payload 64 KiB |
 | `gvim.state` | 1 MiB of keys and encoded values per plugin |

@@ -11,9 +11,11 @@ import (
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
+	"github.com/tbxark/gvim/syntax"
 )
 
 // projectSearchState is the root's project-search state: the last panel, kept after it
@@ -62,21 +64,28 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 	if pv, ok := m.root.ports.ProjectSearch.(searchpanel.Previewer); ok {
 		previewer = pv
 	}
+	// The panel paints the preview's syntax runs from the editor pane's kind styles, so it
+	// needs no syntax or editorpane import.
+	syntaxStyles := make(map[string]grid.Style, len(m.panes.Syntax))
+	for i := range m.panes.Syntax {
+		syntaxStyles[syntax.Kind(i).String()] = m.panes.Syntax[i]
+	}
 	p := searchpanel.New(searchpanel.Options{
-		Root:      m.rootDir(),
-		Files:     m.files,
-		OpenFiles: m.projectOpenFiles(),
-		Current:   m.projectCurrentFile(),
-		Modes:     modes,
-		Scope:     scope,
-		Glob:      glob,
-		History:   history,
-		Previewer: previewer,
-		Git:       git,
-		Searcher:  m.root.ports.ProjectSearch,
-		Grepper:   m.root.ports.GitGrep,
-		Styles:    m.styles,
-		Theme:     m.theme,
+		Root:         m.rootDir(),
+		Files:        m.files,
+		OpenFiles:    m.projectOpenFiles(),
+		Current:      m.projectCurrentFile(),
+		Modes:        modes,
+		Scope:        scope,
+		Glob:         glob,
+		History:      history,
+		Previewer:    previewer,
+		SyntaxStyles: syntaxStyles,
+		Git:          git,
+		Searcher:     m.root.ports.ProjectSearch,
+		Grepper:      m.root.ports.GitGrep,
+		Styles:       m.styles,
+		Theme:        m.theme,
 	})
 	m.proj.panel = p
 	m.pushOverlay(p)

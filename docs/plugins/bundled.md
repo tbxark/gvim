@@ -1,9 +1,10 @@
 # Bundled plugins
 
-gvim ships fifteen plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships nineteen plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
-`config.json` can override them). Ten are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`
-and `compare_files` are off until you turn them on:
+`config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
+`compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation` and `find_references`
+are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -20,10 +21,14 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `git_find_file` | on | Git Find File, Git Find File: Reload | none |
 | `git_log` | **off** | Git Log, Git Log: Current File, Git Log: Close, Git Log: Refresh | none |
 | `git_blame` | on (idle until toggled) | Git: Toggle Blame, Git: Show Commit, Git: Copy Commit Hash | `debounce_ms` (150, 50 to 2000, project), `summary_width` (60, 10 to 200, project) |
-| `merge_conflict` | on | Merge: Start Resolution, Next Conflict, Previous Conflict, Use Ours, Take Theirs, Use Both, Resolve Conflict... | none |
+| `merge_conflict` | **off** | Merge: Start Resolution, Next Conflict, Previous Conflict, Use Ours, Take Theirs, Use Both, Resolve Conflict... | none |
 | `diagnostics_panel` | on | Show Diagnostics Panel, Toggle Diagnostics Panel | none |
 | `path_complete` | on | Path Completion: Complete Path | none |
 | `lsp_help` | on | none (event driven: an LSP server error puts an install hint on the status row, and the LSP status click opens the help popup) | none |
+| `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
+| `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
+| `dashboard` | **off** | Show Dashboard | `show_on_empty` (true), `refresh_seconds` (5) |
+| `code_tour` | **off** | Tour: Load Definition..., Tour: Open Workspace Tour..., Tour: Next Step, Tour: Previous Step, Tour: Exit, Tour: Create from Current Location... | none |
 | `compare_files` | **off** | Compare Files..., Compare Active File With..., Compare: Next Difference, Compare: Previous Difference, Compare: Switch Side, Compare: Copy Change to Other Side, Compare: Take Change from Other Side, Compare: Close | none |
 | `live_diff` | **off** | Live Diff: Toggle (Global), Live Diff: Toggle (Buffer), Live Diff: vs HEAD, Live Diff: vs Disk (unsaved changes), Live Diff: vs Branch..., Live Diff: vs Default Branch, Live Diff: Refresh, Live Diff: Set Default Mode... | `default_mode` (head), `default_branch` (main), `debounce_ms` (75, 10 to 5000, project), `max_virtual_lines` (2000), `max_overlay_lines` (20000) |
 | `flash` | **off** | Flash: Jump | `labels`, `skip_rule` (true), `case_sensitive` |
@@ -109,9 +114,9 @@ marker shows in the gutter, a collapsed range hides its body behind the placehol
 action toggles it. The detail scroll position is remembered per commit via
 `gvim.buf.get/set_window_state` (in-session, cleared with the buffer). Reductions (also in init.lua and
 porting.md): the group is a layout of splits of the current tab and the panel buffers are also visible
-as tabs; the layout has ratio-only leaves (a JSON `fixed`/`height` leaf is accepted and ignored, so it
-degrades to the split ratio), so Fresh's fixed-height-1 toolbar takes its ratio share (about two rows); the log is a styled buffer whose cursor is the selection (a line decoration
-tints it), not a described List widget; the detail is raw git-show text carrying plugin decorations,
+as tabs; the layout supports fixed-height leaves (`{type="fixed",height=1}`), so Fresh's one-row
+toolbar renders as one row (the split border can leave it a row off); the log is a styled buffer
+whose cursor is the selection (a line decoration tints it), not a described List widget; the detail is raw git-show text carrying plugin decorations,
 not a host `.diff` background layer; there is no HEAD watcher (r refreshes, as Fresh's view). It is
 **off by default** for the idle-heap gate (see Memory).
 
@@ -168,6 +173,53 @@ Change from Other Side** (`do`) merge the hunk under the caret through the host'
 a status message. It is opt-in (`default_enabled: false`) for the bundled idle-heap budget and
 registers no default keybindings, matching Fresh; the native **Compare** view stays the default
 surface.
+
+**lsp_navigation** (with the shared finder): a port of Fresh's plugin on the shared `gvim.finder`
+library. **Go to LSP Symbol** asks the server for `textDocument/documentSymbol`, lists the symbols as
+`[kind] name` rows with the source line as the detail, filters them with Fresh's fuzzy algorithm
+(re-sorted by source line) and previews the selection in the buffer: moving the highlight moves the
+cursor onto the symbol and paints it in the search-match style, Enter commits the jump, Esc restores
+the cursor and clears the highlight. Symbol names are refined against their line (servers report the
+declaration start), and the kinds and both response shapes (DocumentSymbol/SymbolInformation) follow
+Fresh. The three **LSP: Show Definitions / Show Implementations / Show Type Definitions** list
+commands are gvim additions (in Fresh those are core actions that jump directly; gvim keeps its
+native Go to Definition rows) and share the references location list: one result jumps, several open
+the filterable list with preview tabs. Reductions (also in porting.md): the picker has no initial
+selected index, so the enclosing symbol is not preselected as in Fresh, and the highlight is a
+decoration, not an overlay namespace. No default key binding (Fresh's plugin registers none).
+
+**find_references** (reduced; command driven): Fresh's plugin answers the host's `lsp_references` /
+`lsp_implementation` events with a finder list; gvim has no such plugin events (its native Find
+References action opens its own UI), so the port exposes Fresh's own command keys — **Show References
+Panel** asks the server for `textDocument/references` for the symbol under the cursor (UTF-16 column,
+`includeDeclaration = true`, results capped at 100 rows) and shows a filterable location list:
+`relative path:line` rows, the source line as the detail (open buffers read in place, other files via
+one bounded read), a preview tab as the selection moves, Enter commits the jump and the hidden **Hide
+References Panel** command closes the list. Empty results, a missing symbol/language and server errors
+keep the Fresh status-line messages. Reductions: no reference/implementation events (commands
+instead), no implementation listener (that list lives in lsp_navigation), and no source-split reuse
+(preview tabs do). No default key binding (Fresh's core action has its own chord; the plugin
+registers none).
+
+**dashboard** (reduced Fresh port): a read-only start-screen tab shown when the editor has no file
+open — a centred frame with the repository state (branch, ahead/behind the default branch,
+working-tree counts, origin), recently visited files, keyboard-navigable quick actions (settings,
+explorer, live grep, theme, Git Log, diagnostics) and best-effort `df` disk rows. Tab/Down/j and
+Shift-Tab/Up/k move, Enter activates (a buffer-local mode); **Show Dashboard** reopens it. It
+auto-opens on an empty editor and after the last file closes (`show_on_empty`) and closes when a file
+opens; a timer refreshes it (`refresh_seconds`). Reductions: no weather/GitHub/network sections, no
+third-party section API or Utility Dock placement, no mouse clicks on rows and no sessions section.
+
+**code_tour** (reduced Fresh port): loads a Fresh `.fresh-tour.json` or a VS Code Edit CodeTour
+`.tour` (auto-detected; bounded at 1 MiB / 200 steps), shows the steps in a floating widget card (list,
+step counter and location, prose as styled plain text, Previous/Next/Jump/Exit buttons, hint bar) and
+walks them: each step opens its file at the line range with `gvim.buf.open` and highlights it with
+anchored decorations (the plugin keeps local line anchors; `gvim.buf.set_line_targets` is now
+available for a future version). One tour at a time; the last tour and step are
+restored from `gvim.state` on the next load. **Tour: Create from Current Location...** writes a
+VS Code-compatible starter `.tour` under `.tours/`, atomically. Load/schema/step errors stay in
+notices. No default bindings (Fresh's keys live in its dock-buffer mode; here the panel owns the
+keyboard).
 
 **The Markdown outline is not a plugin in gvim.** Fresh ships the Contents section as the bundled
 plugin `markdown_toc.ts`; gvim builds it into the TUI as the sidebar section under the File Explorer
@@ -235,11 +287,15 @@ Measured with the plugin set of this release (macOS arm64, Go 1.27, pure heap in
 
 | | Heap |
 |---|---|
-| the editor session without plugins | 1.89 MiB |
-| the same session with the 10 default-enabled plugins loaded and idle | about 9.8 MiB |
-| **cost of the default set** | **about 7.9 MiB** (gate: 8 MiB) |
+| the editor session without plugins | 1.86 MiB |
+| the same session with the 9 default-enabled plugins loaded and idle | about 8.9 MiB |
+| **cost of the default set** | **about 7.0 MiB** (gate: 8 MiB) |
 
-The gate passes with the ten default-enabled plugins, but with little headroom (about 0.08 MiB).
+The gate passes with the nine default-enabled plugins (about 1 MiB of headroom). Round 9 added host
+API surface and four new ports; the ten-plugin set first measured 8.07–8.10 MiB, over the gate, so
+`merge_conflict` (about 1.35 MiB) ships `default_enabled: false` as well. The shared Finder library is
+not part of the idle cost: `diagnostics_panel` requires `gvim.finder` lazily on its first build
+(requiring it at load measured 8.7 MiB with the round-8 set, over the gate).
 The opt-in plugins stay off for the heap budget: a trial measurement with `git_log` loaded too read
 about 8.7 MiB of idle heap (over the gate; that configuration never passed), `live_diff` is opt-in
 like Fresh's, and `compare_files` ships off as well. Per plugin, in
@@ -249,7 +305,8 @@ the first one loaded pays for the shared prelude): `goto_with_selection` 0.6 MiB
 the default set when it joined it, not in a bare runtime), `git_log` about 1.9 (the same kind of rise;
 that is why it is off), `path_complete` and `lsp_help` together about 1.2 (the same rise; both are
 small passive plugins, so they stay on), `git_gutter` 1.0, `git_blame` 1.15,
-`merge_conflict` 1.35, `flash` 1.55, and **`vi_mode` 6.9 MiB**. `vi_mode` is the one that would bust the
-budget (the default set plus vi would be about 13 MiB), which is why it is off by default; `flash` is off by
+`merge_conflict` 1.35 (flipped off in round 9 when the ten-plugin set measured 8.07–8.10 MiB),
+`flash` 1.55, and **`vi_mode` 6.9 MiB**. `vi_mode` is the one that would bust the
+budget (the default set plus vi would be about 14 MiB), which is why it is off by default; `flash` is off by
 default as well. If you do not use the git plugins, switching them off in the config saves about
 4 MiB.

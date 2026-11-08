@@ -1,6 +1,7 @@
 package editorpane
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -127,5 +128,95 @@ func TestSoftBreakActivation(t *testing.T) {
 	}
 	if got := f.rowCount(1); got != 2 {
 		t.Fatalf("if-cursor-in: caret line rows = %d, want 2", got)
+	}
+}
+
+// TestScrollbarThumbCountsInsertedRows checks the thumb scales by display rows when
+// virtual rows make the document taller: the length shrinks and the last line scrolls the
+// thumb to the bottom of the track.
+func TestScrollbarThumbCountsInsertedRows(t *testing.T) {
+	var lines []string
+	for i := 0; i < 10; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	doc := newDoc(lines...)
+	p := Pane{Doc: doc, ExtraRows: func(line int) ExtraRows {
+		if line == 0 {
+			return ExtraRows{Above: []ExtraRow{{Text: "one"}, {Text: "two"}, {Text: "three"}}}
+		}
+		return ExtraRows{}
+	}}
+	f, ok := p.newFrame(20, 5)
+	if !ok {
+		t.Fatal("no frame")
+	}
+	total, ok := f.rowTotal()
+	if !ok || total != 13 {
+		t.Fatalf("rowTotal = %d, %v; want 13", total, ok)
+	}
+	start, length := f.thumb()
+	if length >= 5 || start != 0 {
+		t.Fatalf("thumb at the top = (%d,%d), want a shorter thumb at 0", start, length)
+	}
+	// Scroll to the last line: the thumb must reach the bottom of the track.
+	last := Pane{Doc: doc, Top: 9, ExtraRows: p.ExtraRows}
+	last.Top = 9
+	lf, ok := last.newFrame(20, 5)
+	if !ok {
+		t.Fatal("no frame")
+	}
+	before, ok := lf.rowsBeforeTop()
+	if !ok || before != 12 {
+		t.Fatalf("rowsBeforeTop = %d, %v; want 12", before, ok)
+	}
+	s2, l2 := lf.thumb()
+	if s2 != 5-l2 {
+		t.Fatalf("thumb at the end = (%d,%d), want it at the bottom", s2, l2)
+	}
+}
+
+// TestExtraRowsWrapAtThePaneEdge checks a virtual row longer than the text width wraps
+// into display rows (like text rows), with the gutter glyph on the first chunk only,
+// overlays re-based per chunk and every chunk mapping to the anchor line.
+func TestExtraRowsWrapAtThePaneEdge(t *testing.T) {
+	overlay := ExtraTextOverlay{Start: 15, End: 20, Style: grid.Style{Bold: true}}
+	p := Pane{
+		Doc: newDoc("abc"),
+		ExtraRows: extraAt(map[int]ExtraRows{0: {Above: []ExtraRow{{
+			Text: "abcdefghijklmnopqrstuvwxyz", GutterText: "-", Overlays: []ExtraTextOverlay{overlay},
+		}}}}),
+	}
+	// Width 20 with the 6-column gutter leaves 13 text columns: 26 runes -> 2 rows.
+	f, ok := p.newFrame(20, 4)
+	if !ok {
+		t.Fatal("no frame")
+	}
+	ex := f.extrasFor(0)
+	if len(ex.Above) != 2 {
+		t.Fatalf("wrapped rows = %d, want 2: %+v", len(ex.Above), ex.Above)
+	}
+	if ex.Above[0].GutterText != "-" || ex.Above[1].GutterText != "" {
+		t.Fatalf("gutter glyphs = %q, %q; want it on the first chunk only", ex.Above[0].GutterText, ex.Above[1].GutterText)
+	}
+	if len(ex.Above[1].Overlays) != 1 || ex.Above[1].Overlays[0].Start != 2 || ex.Above[1].Overlays[0].End != 7 {
+		t.Fatalf("second chunk overlays = %+v", ex.Above[1].Overlays)
+	}
+	g := p.Render(20, 4)
+	if got := rowText(g, 0, textX, 13); got != "abcdefghijklm" {
+		t.Fatalf("row 0 = %q", got)
+	}
+	if got := rowText(g, 1, textX, 13); got != "nopqrstuvwxyz" {
+		t.Fatalf("row 1 = %q", got)
+	}
+	// Both chunks of the wrapped virtual row map to the anchor line's start.
+	if got := p.PosAt(20, 4, textX, 1); got != (buffer.Pos{Line: 0, Col: 0}) {
+		t.Fatalf("PosAt on the second chunk = %+v", got)
+	}
+	// The caret on the line moves down by both chunks.
+	doc := newDoc("abc")
+	doc.cursor = buffer.Pos{Line: 0, Col: 1}
+	p.Doc = doc
+	if _, y, ok := p.Caret(20, 4); !ok || y != 2 {
+		t.Fatalf("caret row = %d, %v; want 2", y, ok)
 	}
 }

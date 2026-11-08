@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/pluginhost"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 )
 
@@ -373,7 +374,7 @@ func TestProjectPreviewContext(t *testing.T) {
 	s := newProjectSearch(editor.Options{})
 	file := filepath.Join(dir, "a.txt")
 	// The window is centred on a single-line match.
-	res, err := s.Preview(searchpanel.PreviewRequest{Path: file, Line: 6, Col: 1, EndLine: 6, EndCol: 2, Lines: 5})
+	res, err := s.Preview(searchpanel.PreviewRequest{Path: file, Start: -1, Line: 6, Col: 1, EndLine: 6, EndCol: 2, Lines: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +385,7 @@ func TestProjectPreviewContext(t *testing.T) {
 		t.Fatalf("preview lines = %v", res.Lines)
 	}
 	// A match that fits the window is shown whole, even when it spans lines.
-	res, err = s.Preview(searchpanel.PreviewRequest{Path: file, Line: 4, Col: 1, EndLine: 6, EndCol: 5, Lines: 5})
+	res, err = s.Preview(searchpanel.PreviewRequest{Path: file, Start: -1, Line: 4, Col: 1, EndLine: 6, EndCol: 5, Lines: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,14 +394,14 @@ func TestProjectPreviewContext(t *testing.T) {
 	}
 	// The panel's unsaved text is used instead of the disk.
 	res, err = s.Preview(searchpanel.PreviewRequest{
-		Path: file, Text: "unsaved one\nunsaved two\n", Dirty: true,
+		Path: file, Start: -1, Text: "unsaved one\nunsaved two\n", Dirty: true,
 		Line: 2, Col: 1, EndLine: 2, EndCol: 2, Lines: 4,
 	})
 	if err != nil || len(res.Lines) != 2 || res.Lines[0] != "unsaved one" || res.Lines[1] != "unsaved two" {
 		t.Fatalf("unsaved preview = %+v, %v", res, err)
 	}
 	// A large or unreadable file is a reason, not lines.
-	res, err = s.Preview(searchpanel.PreviewRequest{Path: filepath.Join(dir, "gone.txt"), Line: 1, Col: 1, EndLine: 1, EndCol: 2, Lines: 4})
+	res, err = s.Preview(searchpanel.PreviewRequest{Path: filepath.Join(dir, "gone.txt"), Start: -1, Line: 1, Col: 1, EndLine: 1, EndCol: 2, Lines: 4})
 	if err != nil || res.Err != "unreadable file" {
 		t.Fatalf("missing file preview = %+v, %v", res, err)
 	}
@@ -535,5 +536,174 @@ func TestProjectSearchBatchesReportAQueryErrorInTheDoneBatch(t *testing.T) {
 	}
 	if _, err := s.ProjectSearch(req); err == nil {
 		t.Fatal("the one-shot search did not return the query error")
+	}
+}
+
+func TestProjectSearchOpenBuffersScope(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"disk.txt": "needle on disk\n"})
+	buffers := []searchpanel.SourceFile{
+		{Path: filepath.Join(dir, "disk.txt"), Name: "disk.txt", Text: "needle unsaved\n", Dirty: true},
+		{Path: filepath.Join(dir, "new.txt"), Name: "new.txt", Text: "needle new\n", Dirty: true},
+		{Name: "[No Name]", Text: "needle unnamed\n", Dirty: true},
+	}
+	s := newProjectSearch(editor.Options{})
+	req := projectSearchRequest(dir, []string{"disk.txt"}, "needle")
+	req.Scope = searchpanel.OpenBuffers
+	req.Files = []string{"disk.txt"} // ignore the disk index in this scope
+	req.OpenFiles = buffers
+	res, err := s.ProjectSearch(req)
+	if err != nil {
+		t.Fatalf("ProjectSearch: %v", err)
+	}
+	if len(res.Files) != 3 || !res.Files[0].Dirty || res.Files[0].Name != "disk.txt" || res.Files[1].Name != "new.txt" || res.Files[2].Name != "[No Name]" {
+		t.Fatalf("open-buffer result = %+v", res.Files)
+	}
+	if got := res.Files[0].Matches[0].Text; got != "needle unsaved" {
+		t.Fatalf("disk.txt matched %q, want the unsaved text", got)
+	}
+	// The replacement plans from the same Dirty snapshots.
+	rep := searchpanel.ReplaceRequest{
+		Root: dir, Query: "needle", Replacement: "done",
+		Files: []searchpanel.ReplaceFile{
+			{Path: buffers[0].Path, Name: "disk.txt", Hash: res.Files[0].Hash, Dirty: true, Text: buffers[0].Text},
+			{Path: buffers[1].Path, Name: "new.txt", Hash: res.Files[1].Hash, Dirty: true, Text: buffers[1].Text},
+			{Name: "[No Name]", Hash: res.Files[2].Hash, Dirty: true, Text: buffers[2].Text},
+		},
+		Limit: searchpanel.DefaultLimit,
+	}
+	out, err := s.ProjectReplace(rep)
+	if err != nil {
+		t.Fatalf("ProjectReplace: %v", err)
+	}
+	if len(out.Files) != 3 || len(out.Files[0].Edits) != 1 || len(out.Files[1].Edits) != 1 || len(out.Files[2].Edits) != 1 {
+		t.Fatalf("open-buffer replacement = %+v", out.Files)
+	}
+	if got := out.Files[1].Edits[0].Text; got != "done" {
+		t.Fatalf("replacement edit = %q", got)
+	}
+}
+
+func TestProjectPreviewStartTotalAndSpans(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"a.go": "package main\n\nfunc main() {\n\tx := \"hi\"\n}\n"})
+	s := newProjectSearch(editor.Options{})
+	file := filepath.Join(dir, "a.go")
+	// An explicit window reports where it is in the file and highlights the syntax.
+	res, err := s.Preview(searchpanel.PreviewRequest{Path: file, Start: 0, Lines: 5, Line: 3, Col: 2, EndLine: 3, EndCol: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Total != 5 || res.Start != 0 || len(res.Lines) != 5 {
+		t.Fatalf("preview window = start %d total %d lines %d", res.Start, res.Total, len(res.Lines))
+	}
+	if len(res.Spans) == 0 {
+		t.Fatal("a Go file previewed without syntax spans")
+	}
+	kinds := map[string]bool{}
+	for _, span := range res.Spans {
+		kinds[span.Kind] = true
+		if span.End <= span.Start {
+			t.Fatalf("empty span: %+v", span)
+		}
+	}
+	if !kinds["keyword"] {
+		t.Fatalf("kinds = %v, want the Go keywords", kinds)
+	}
+	// Scrolling requests an explicit later window.
+	res, err = s.Preview(searchpanel.PreviewRequest{Path: file, Start: 3, Lines: 2, Line: 3, Col: 2, EndLine: 3, EndCol: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Start != 3 || len(res.Lines) != 2 || !strings.Contains(res.Lines[0], "x :=") {
+		t.Fatalf("scrolled window = start %d lines %q", res.Start, res.Lines)
+	}
+	// A file with no grammar is plain text.
+	writeTree(t, dir, map[string]string{"notes.zzz": "some plain text\n"})
+	res, err = s.Preview(searchpanel.PreviewRequest{Path: filepath.Join(dir, "notes.zzz"), Start: 0, Lines: 4, Line: 1, Col: 1, EndLine: 1, EndCol: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Spans) != 0 {
+		t.Fatalf("a grammarless file had spans: %+v", res.Spans)
+	}
+	// The unsaved text highlights too.
+	res, err = s.Preview(searchpanel.PreviewRequest{Path: file, Text: "package main\n\nvar x = 1\n", Start: 0, Lines: 3, Line: 1, Col: 1, EndLine: 1, EndCol: 2})
+	if err != nil || len(res.Spans) == 0 || res.Total != 3 {
+		t.Fatalf("unsaved preview = %+v, %v", res, err)
+	}
+}
+
+func TestProjectReplaceWorksInAnOpenLargeBuffer(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	big := "needle\n" + strings.Repeat("x\n", 600_000) + "needle\n"
+	if len(big) <= pluginhost.GrepMaxFileBytes {
+		t.Fatalf("the test buffer is %d bytes, want over the read cap", len(big))
+	}
+	buffer := searchpanel.SourceFile{Path: filepath.Join(dir, "big.txt"), Name: "big.txt", Text: big, Dirty: true}
+	s := newProjectSearch(editor.Options{})
+	req := projectSearchRequest(dir, nil, "needle")
+	req.Scope = searchpanel.OpenBuffers
+	req.OpenFiles = []searchpanel.SourceFile{buffer}
+	res, err := s.ProjectSearch(req)
+	if err != nil || len(res.Files) != 1 || len(res.Files[0].Matches) != 2 {
+		t.Fatalf("open large buffer search = %+v, %v", res.Files, err)
+	}
+	rep := searchpanel.ReplaceRequest{
+		Root: dir, Query: "needle", Replacement: "done",
+		Files: []searchpanel.ReplaceFile{{
+			Path: buffer.Path, Name: "big.txt", Hash: res.Files[0].Hash, Dirty: true, Text: big,
+		}},
+		Limit: searchpanel.DefaultLimit,
+	}
+	out, err := s.ProjectReplace(rep)
+	if err != nil || len(out.Files) != 1 || len(out.Files[0].Edits) != 2 {
+		t.Fatalf("open large buffer replacement = %+v, %v", out.Files, err)
+	}
+	if out.Files[0].Edits[0].From.Line != 0 || out.Files[0].Edits[1].From.Line != 600_001 {
+		t.Fatalf("edits = %+v, want the two needles", out.Files[0].Edits)
+	}
+	// A closed file over the read cap stays refused with its reason.
+	writeTree(t, dir, map[string]string{"big.txt": big})
+	res, err = s.ProjectSearch(projectSearchRequest(dir, []string{"big.txt"}, "needle"))
+	if err != nil || len(res.Files) != 0 || !strings.Contains(strings.Join(res.Skipped, ", "), "large file") {
+		t.Fatalf("closed large file = %+v, %v; want it skipped as a large file", res, err)
+	}
+}
+
+func TestProjectReplaceMultiLineRangeIsExact(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"m.txt": "alpha\nbeta\ngamma\ndelta\n"})
+	s := newProjectSearch(editor.Options{})
+	req := projectSearchRequest(dir, []string{"m.txt"}, "beta\ngamma")
+	req.Options = searchpanel.MatchOptions{Regex: true}
+	res, err := s.ProjectSearch(req)
+	if err != nil || len(res.Files) != 1 || len(res.Files[0].Matches) != 1 {
+		t.Fatalf("multi-line search = %+v, %v", res.Files, err)
+	}
+	m := res.Files[0].Matches[0]
+	if m.Line != 2 || m.Col != 1 || m.EndLine != 3 || m.EndCol != 6 {
+		t.Fatalf("match = %d:%d-%d:%d, want 2:1-3:6", m.Line, m.Col, m.EndLine, m.EndCol)
+	}
+	rep := searchpanel.ReplaceRequest{
+		Root: dir, Query: "beta\ngamma", Replacement: "X",
+		Options: searchpanel.MatchOptions{Regex: true},
+		Files: []searchpanel.ReplaceFile{{
+			Path: res.Files[0].Path, Name: "m.txt", Hash: res.Files[0].Hash,
+			Selected: []searchpanel.Position{{Line: m.Line - 1, Col: m.Col - 1}},
+		}},
+		Limit: searchpanel.DefaultLimit,
+	}
+	out, err := s.ProjectReplace(rep)
+	if err != nil || len(out.Files) != 1 || len(out.Files[0].Edits) != 1 {
+		t.Fatalf("multi-line replacement = %+v, %v", out.Files, err)
+	}
+	e := out.Files[0].Edits[0]
+	if e.From.Line != 1 || e.From.Col != 0 || e.To.Line != 2 || e.To.Col != 5 || e.Text != "X" {
+		t.Fatalf("edit = %+v, want 1:0-2:5 replacing the exact range", e)
 	}
 }

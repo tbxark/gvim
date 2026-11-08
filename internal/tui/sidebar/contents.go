@@ -600,6 +600,13 @@ func (c *Contents) reveal() {
 	c.clampScroll()
 }
 
+// SetScroll sets the first visible row, clamped to the tree. A restored session
+// state uses it after the first scan.
+func (c *Contents) SetScroll(n int) {
+	c.scroll = n
+	c.clampScroll()
+}
+
 // clampScroll keeps the window over the rows.
 func (c *Contents) clampScroll() {
 	if c.scroll < 0 {

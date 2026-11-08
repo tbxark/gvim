@@ -116,6 +116,8 @@ type pluginState struct {
 	foldOrder int
 	// viewState is the tier-1c-C window state: buffer -> plugin -> key (plugin_seams.go).
 	viewState map[pluginapi.BufferID]map[string]map[string]any
+	// lineTargets are the clickable lines of plugin buffers (plugin_linetargets.go).
+	lineTargets map[pluginapi.BufferID]*lineTargetSet
 	// virtual records who made each virtual buffer (plugin_virtual.go).
 	virtual pluginVirtual
 

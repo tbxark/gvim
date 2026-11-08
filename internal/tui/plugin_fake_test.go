@@ -18,9 +18,11 @@ import (
 type fakeRuntime struct {
 	t *testing.T
 
-	owned   map[string]bool
-	wants   map[string]bool
-	plugins []pluginapi.PluginInfo // what Plugins reports, in load order
+	owned          map[string]bool
+	wants          map[string]bool
+	settingsSchema map[string][]pluginapi.PluginSettingSpec
+	settingsValues map[string][]pluginapi.PluginSettingValue
+	plugins        []pluginapi.PluginInfo // what Plugins reports, in load order
 
 	inSlice     bool
 	strictSlice bool
@@ -149,6 +151,17 @@ func (r *fakeRuntime) Drain(budget time.Duration) ([]pluginapi.Work, bool) {
 
 func (r *fakeRuntime) Plugins() []pluginapi.PluginInfo { return r.plugins }
 func (r *fakeRuntime) Log() []pluginapi.LogEntry       { return nil }
+
+// SettingsSchema and SettingsValues answer from the test's tables.
+func (r *fakeRuntime) SettingsSchema(name string) ([]pluginapi.PluginSettingSpec, bool) {
+	s, ok := r.settingsSchema[name]
+	return s, ok
+}
+
+func (r *fakeRuntime) SettingsValues(name string) ([]pluginapi.PluginSettingValue, bool) {
+	v, ok := r.settingsValues[name]
+	return v, ok
+}
 
 func (r *fakeRuntime) Control(c pluginapi.Control) ([]pluginapi.Work, []pluginapi.Notice) {
 	r.forbid("Control")

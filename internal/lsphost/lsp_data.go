@@ -44,8 +44,9 @@ type pulledDiagnostics struct {
 	items   []protocol.Diagnostic
 }
 
-// InlayHints returns the inlay hints of the document at path. Round 5 draws them at
-// the end of their line (tier 1); the hint's character position is not used.
+// InlayHints returns the inlay hints of the document at path. Each keeps the line and
+// rune column the pane inserts its cells at (tier 2), plus the joined label the
+// end-of-line fallback form uses.
 func (p *lspPort) InlayHints(path string) ([]tui.InlayHint, error) {
 	hs, rec, err := p.handles(path, manager.FeatureInlayHints)
 	if err != nil {
@@ -64,15 +65,51 @@ func (p *lspPort) InlayHints(path string) ([]tui.InlayHint, error) {
 	if err != nil {
 		return nil, err
 	}
+	return inlayHintsFrom(rec.lines, hints), nil
+}
+
+// inlayHintsFrom maps the protocol hints to the editor's form: the UTF-16 character is
+// converted to a rune column of its line (clamped to the line), the label's parts are
+// kept, and the padding flags are carried. A hint whose line is outside the document or
+// whose label is empty is dropped.
+func inlayHintsFrom(lines textLines, hints []protocol.InlayHint) []tui.InlayHint {
 	out := make([]tui.InlayHint, 0, len(hints))
 	for _, hint := range hints {
+		line := int(hint.Position.Line)
+		if line < 0 || line >= len(lines) {
+			continue
+		}
 		text := strings.TrimSpace(hintText(hint.Label))
 		if text == "" {
 			continue
 		}
-		out = append(out, tui.InlayHint{Line: int(hint.Position.Line), Text: text, Kind: int(hint.Kind)})
+		out = append(out, tui.InlayHint{
+			Line:         line,
+			Col:          lsp.UTF16ToRuneCol(lines.line(line), hint.Position.Character),
+			Text:         text,
+			Parts:        hintParts(hint.Label),
+			PaddingLeft:  hint.PaddingLeft != nil && *hint.PaddingLeft,
+			PaddingRight: hint.PaddingRight != nil && *hint.PaddingRight,
+			Kind:         int(hint.Kind),
+		})
 	}
-	return out, nil
+	return out
+}
+
+// hintParts returns the label's parts, one entry per protocol label part; a string label
+// is one part.
+func hintParts(label protocol.InlayHintLabel) []string {
+	switch v := label.(type) {
+	case protocol.String:
+		return []string{string(v)}
+	case protocol.InlayHintLabelPartSlice:
+		parts := make([]string, 0, len(v))
+		for _, part := range v {
+			parts = append(parts, part.Value)
+		}
+		return parts
+	}
+	return nil
 }
 
 // hintText renders an inlay hint label, which is a string or a list of parts.

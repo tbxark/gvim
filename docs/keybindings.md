@@ -81,13 +81,17 @@ buffer. Fresh's `Alt+A` opens the
 **project-wide Search and Replace** panel, which searches the project's files and the open buffers'
 unsaved text and replaces across files. The panel's keys are answered by the panel itself, as every
 overlay's are: `Tab` moves between the search field, the replacement field, the file-glob field and
-the result rows (Git Grep has no replacement row: its `Tab` walks search, files and rows); `Alt+A` switches between all files and the current file; `Alt+C`/`Alt+R`/`Alt+W`
-toggle Case, Regex and Whole; the file-glob field takes comma or space separated patterns (`*.go`,
+the result rows (Git Grep has no replacement row: its `Tab` walks search, files and rows);
+`Alt+A` cycles the scope chip through all files, open buffers and the current file (Open Buffers
+searches only the open buffers' unsaved text; the file-glob field narrows the All Files walk);
+`Alt+C`/`Alt+R`/`Alt+W` toggle Case, Regex and Whole; the file-glob field takes comma or space separated patterns (`*.go`,
 `src/**`); Up and Down in the search field walk the session's earlier patterns. In the match tree,
 `Space` checks or unchecks the focused row (a file row takes all its matches), `a` checks every
 match, `n` unchecks every match, and `Enter` on a match opens it. While the result rows have
-the focus the selected match's context shows in a preview column at the right of the results
-(it hides in a narrow window; no key is added for it). `Alt+Enter` replaces every
+the focus the selected match's context shows in a syntax-coloured preview column at the right
+of the results (it hides in a narrow window): `PgUp`/`PgDn` page the preview, `Ctrl+Home`/
+`Ctrl+End` jump it to the file's start/end, and the wheel over the column scrolls it three lines
+(`Home`/`End` still move the row selection). `Alt+Enter` replaces every
 checked match and `Shift+Enter` replaces the focused row alone (its checked matches for a file
 row), each after a confirmation; the changed files stay as unsaved tabs ("N files changed in M tabs;
 Save All to write"). `Alt+Q` lists the result set as a filterable list whose `Enter` jumps to a

@@ -1,5 +1,7 @@
 package editorpane
 
+import "github.com/tbxark/gvim/syntax"
+
 // PageViewTableBorders builds the page-view extra rows that draw a Markdown
 // table's missing frame: the top border (┌─┬─┐) above the table's header line and
 // the bottom border (└─┴─┘) below its last line. The middle border is the source
@@ -25,6 +27,28 @@ func PageViewTableBorders(doc Document, styles Styles) func(line, width, gutter,
 		// widths depend only on the document text (memoized per version) and the
 		// measure the hook reports, which is the page measure the compose used.
 		tm := frame{doc: doc, pageOn: true, pageMarkdown: true, pageMeasure: measure}.tables()
+		// Fenced code wins over a table-looking line inside it: the compose draws the
+		// frame, so the extra rows are the frame's continuation rows only.
+		if fl, ok := (frame{doc: doc, pageOn: true, pageMarkdown: true, pageMeasure: measure}).markdownFences()[line]; ok {
+			if fl.Kind != syntax.FenceBody {
+				return ExtraRows{}
+			}
+			if cur := doc.Cursor(); line == cur.Line || (line+1 == cur.Line && cur.Col == 0) {
+				return ExtraRows{}
+			}
+			indent := max(fl.Indent, 0)
+			inner := frameWidth(measure, indent) - 4
+			segs := fenceBodySegments([]rune(doc.Line(line)), indent, inner)
+			var rows []ExtraRow
+			for k := 1; k < len(segs); k++ {
+				rows = append(rows, ExtraRow{
+					Text:     fenceBodyRowText(indent, inner, segs[k]),
+					Style:    text,
+					Priority: k - 1,
+				})
+			}
+			return ExtraRows{Below: rows}
+		}
 		row, ok := tm.rows[line]
 		if !ok {
 			return ExtraRows{}
@@ -37,13 +61,35 @@ func PageViewTableBorders(doc Document, styles Styles) func(line, width, gutter,
 		if tableWidth(layout.widths) > measure {
 			return ExtraRows{}
 		}
-		switch {
-		case line == lines[0]:
-			return ExtraRows{Above: []ExtraRow{{Text: tableBorder(layout.widths, "┌", "┬", "┐"), Style: text}}}
-		case line == lines[len(lines)-1]:
-			return ExtraRows{Below: []ExtraRow{{Text: tableBorder(layout.widths, "└", "┴", "┘"), Style: text}}}
+		cur := doc.Cursor()
+		// The caret's line renders raw, so its wrapped continuation rows stand down.
+		revealed := line == cur.Line || (line+1 == cur.Line && cur.Col == 0)
+		var above, below []ExtraRow
+		if line == lines[0] {
+			above = append(above, ExtraRow{Text: tableBorder(layout.widths, "┌", "┬", "┐"), Style: text})
 		}
-		return ExtraRows{}
+		if !revealed {
+			cellsAtLine := tm.cells[line]
+			maxSeg := 0
+			for _, segs := range cellsAtLine {
+				maxSeg = max(maxSeg, len(segs))
+			}
+			for k := 1; k < maxSeg; k++ {
+				below = append(below, ExtraRow{
+					Text:     tableContinuationRow(layout.widths, cellsAtLine, k),
+					Style:    text,
+					Priority: k - 1,
+				})
+			}
+		}
+		if line == lines[len(lines)-1] {
+			below = append(below, ExtraRow{
+				Text:     tableBorder(layout.widths, "└", "┴", "┘"),
+				Style:    text,
+				Priority: len(below),
+			})
+		}
+		return ExtraRows{Above: above, Below: below}
 	}
 }
 

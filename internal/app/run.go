@@ -307,6 +307,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	var sess session.Session
 	restored := false
 	var failed []restore.Unrestored
+	var sidebarState *tui.SidebarState
 	if plan.load {
 		s, ok, err := session.Load(opts.SessionDir)
 		switch {
@@ -319,6 +320,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 				failed = restore.RestoreSession(ed, opts.SessionDir, s)
 				tree.SetShowHidden(s.ShowHidden)
 				tree.SetShowIgnored(s.ShowIgnored)
+				// The sidebar UI state is restored with the saved layout; a hot-exit
+				// restore and a file launch keep the config defaults.
+				sidebarState = restore.SidebarState(s)
 			case plan.hot:
 				// restore_previous_session off (or --no-restore): the layout and
 				// the clean tabs stay out, but the unsaved text comes back.
@@ -389,6 +393,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// stays hidden until Ctrl+B, unless the session had it open. --simple opens
 	// neither.
 	deps.ShowExplorer = plan.explorer && (opts.Root != "" || (plan.tabs && restored && sess.Explorer))
+	deps.Sidebar = sidebarState
 	deps.HideLineNumbers = !cfg.LineNumbers
 	deps.HideMenuBar = !cfg.ShowMenuBar
 	deps.TabSize = cfg.TabSize
@@ -688,6 +693,7 @@ func settingsFor(opts Options, cfg config.Config) tui.Settings {
 		UIIcons:             cfg.UIIcons,
 		UIIconsFont:         cfg.UIIconsFont,
 		ConfigFile:          opts.Config,
+		FoldBuffer:          cfg.ContentsFoldBuffer(),
 
 		LineEnding:             cfg.LineEnding,
 		TrimTrailingWhitespace: cfg.TrimTrailingWhitespace,

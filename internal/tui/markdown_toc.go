@@ -66,6 +66,20 @@ type tocState struct {
 	outlinePath string
 	folded      map[int]bool
 	applied     map[int]int
+	// restore is the saved session's Contents state, applied on the first
+	// Markdown buffer activation after a session load and then dropped. Its scroll
+	// and selected position wait for the first scan (there are no rows before it).
+	restore *contentsRestore
+	// pending is the restore's scroll/selected part, applied once after a scan.
+	pending *contentsRestore
+}
+
+// contentsRestore is the saved Contents section state of a restored session: the
+// panel's open flag, and the tree's scroll and selected row when it was saved.
+type contentsRestore struct {
+	open      bool
+	collapsed bool
+	scroll    int
 }
 
 // dividerState is a press on the Contents header: a drag resizes the section,
@@ -151,7 +165,7 @@ func (m *Model) publishOutlineFolds(doc Document) {
 	version, versioned := docVersion(doc)
 	setter, _ := m.ed.(outlineFoldSetter)
 	switch {
-	case setter == nil, path == "", !versioned, !m.contents.Open(),
+	case setter == nil, path == "", !versioned,
 		!m.toc.enabled, !m.contents.FoldBuffer(), !isMarkdownName(doc.Name()):
 		m.clearOutlineFolds(path)
 		return
@@ -249,6 +263,29 @@ func (m *Model) resetOutlineFolds() {
 	m.toc.applied = nil
 }
 
+// setContentsFoldBuffer applies contents.fold_buffer to the running section: the
+// setting takes effect at once, publishing the active Markdown buffer's heading
+// ranges when it is switched on (scanning first when there are no rows yet, also
+// while the section is hidden) and clearing the outline source when it is
+// switched off, which opens the folds the section applied; hand folds stay.
+func (m *Model) setContentsFoldBuffer(on bool) {
+	if m.contents.FoldBuffer() == on {
+		return
+	}
+	st := m.contents.Settings()
+	st.FoldBuffer = on
+	m.contents.SetSettings(st)
+	if !on {
+		path := ""
+		if doc := m.ed.Active(); doc != nil {
+			path = docPath(doc)
+		}
+		m.clearOutlineFolds(path)
+		return
+	}
+	m.rescanContents()
+}
+
 // contentsSync notices what changed since the last message: a new active
 // buffer, an edit of the one the rows describe, or a move of the caret, and
 // keeps the section's rows and selection current. It runs after every message
@@ -274,35 +311,65 @@ func (m *Model) contentsSync() tea.Cmd {
 		m.contents.Reset()
 		m.resetOutlineFolds()
 		markdown := isMarkdownName(doc.Name())
-		switch {
-		case !markdown || !m.toc.enabled || m.toc.closed:
-			m.contents.SetOpen(false)
-		case m.toc.wanted || m.contents.AutoOpen():
-			m.openContents(false)
-		default:
-			m.contents.SetOpen(false)
+		if r := m.toc.restore; r != nil && markdown && m.toc.enabled {
+			// The first Markdown buffer of a restored session gets the saved section
+			// state: its open flag now, its scroll and selected row after the scan.
+			m.toc.restore = nil
+			m.toc.pending = r
+			if r.open {
+				m.openContents(false)
+				// openContents unfolds the section for the reader (the keyboard does not
+				// go to a folded section); the restored layout keeps its fold.
+				m.contents.SetCollapsed(r.collapsed)
+			} else {
+				m.contents.SetOpen(false)
+			}
+		} else {
+			switch {
+			case !markdown || !m.toc.enabled || m.toc.closed:
+				m.contents.SetOpen(false)
+			case m.toc.wanted || m.contents.AutoOpen():
+				m.openContents(false)
+			default:
+				m.contents.SetOpen(false)
+			}
 		}
-	}
-	if !m.contents.Open() {
-		return nil
 	}
 	if !isMarkdownName(doc.Name()) {
 		m.clearOutlineFolds(docPath(doc))
 		m.contents.SetOpen(false)
 		return nil
 	}
+	if !m.contents.Open() {
+		// The section is hidden, but Fresh still tracks the Markdown buffer: keep a
+		// scan and the published heading ranges current without showing the panel,
+		// so the buffer's sections fold and unfold with the section's state even
+		// while the reader has it closed.
+		if m.toc.enabled && m.contents.FoldBuffer() {
+			if !m.toc.scanned {
+				m.scanContents(doc)
+			}
+			return m.armContentsRescanIfStale(doc)
+		}
+		return nil
+	}
 	m.setContentsViewRows()
 	m.contents.Follow(doc.Cursor().Line, doc.Top(), m.editorFocused())
-	// An edit of the scanned buffer waits for a pause, then rescans. One
-	// debounce is enough: the tick fires for the newest edit, and arming on
-	// every message would push the scan out for as long as messages arrive.
-	if ver, ok := docVersion(doc); ok && m.toc.versionOK && ver != m.toc.version {
-		if !m.toc.armed {
-			m.toc.armed = true
-			return m.armTOCRescan()
-		}
+	m.applyPendingContentsScroll()
+	return m.armContentsRescanIfStale(doc)
+}
+
+// armContentsRescanIfStale arms the debounced rescan when the active buffer's text
+// version moved past the version the rows were scanned from. One debounce is
+// enough: the tick fires for the newest edit, and arming on every message would
+// push the scan out for as long as messages arrive.
+func (m *Model) armContentsRescanIfStale(doc Document) tea.Cmd {
+	ver, ok := docVersion(doc)
+	if !ok || !m.toc.versionOK || ver == m.toc.version || m.toc.armed {
+		return nil
 	}
-	return nil
+	m.toc.armed = true
+	return m.armTOCRescan()
 }
 
 // setContentsViewRows gives the widget the body rows the layout gave the
@@ -347,7 +414,8 @@ func (m *Model) closeContents() {
 	}
 	m.toc.wanted = false
 	m.toc.closed = true
-	m.clearOutlineFolds(docPath(m.ed.Active()))
+	// The published heading ranges stay: the buffer is still tracked, and Fresh
+	// keeps folding it for a hidden section. A buffer switch or close clears them.
 	m.contents.SetOpen(false)
 	if m.contentsFocus {
 		m.focusEditor()
@@ -355,19 +423,47 @@ func (m *Model) closeContents() {
 	m.syncViewport()
 }
 
-// rescanContents reads the active buffer and rebuilds the tree.
+// rescanContents reads the active buffer and rebuilds the tree. The section is
+// hidden but the buffer is a tracked Markdown one, it still scans and publishes
+// the heading ranges (Fresh tracks the buffer whether its panel is shown); the
+// panel-only work is skipped.
 func (m *Model) rescanContents() {
 	doc := m.ed.Active()
-	if doc == nil || !m.contents.Open() {
+	if doc == nil {
 		return
 	}
+	if !m.contents.Open() {
+		if m.toc.enabled && m.contents.FoldBuffer() && isMarkdownName(doc.Name()) {
+			m.scanContents(doc)
+		}
+		return
+	}
+	m.scanContents(doc)
+	m.setContentsViewRows()
+	m.contents.Follow(doc.Cursor().Line, doc.Top(), m.editorFocused())
+}
+
+// applyPendingContentsScroll lands a restored session's Contents window once the
+// rows exist and after the first follow moved the selection: the reader's scroll
+// wins over the automatic reveal for the restored buffer, and later follows leave
+// it alone until the cursor moves.
+func (m *Model) applyPendingContentsScroll() {
+	r := m.toc.pending
+	if r == nil {
+		return
+	}
+	m.toc.pending = nil
+	m.contents.SetScroll(r.scroll)
+}
+
+// scanContents scans the active buffer, records the text version the rows
+// describe, and publishes (or clears) the heading fold ranges.
+func (m *Model) scanContents(doc Document) {
 	m.contents.Scan(doc)
 	m.toc.scanned = true
 	m.toc.armed = false
 	m.toc.version, m.toc.versionOK = docVersion(doc)
 	m.publishOutlineFolds(doc)
-	m.setContentsViewRows()
-	m.contents.Follow(doc.Cursor().Line, doc.Top(), m.editorFocused())
 }
 
 // armTOCRescan waits for a pause in the edits before the rescan.
@@ -380,7 +476,7 @@ func (m *Model) armTOCRescan() tea.Cmd {
 // tocRescan is the debounce that fired: the newest one scans, an older one is
 // dropped because a later edit armed its own.
 func (m *Model) tocRescan(msg tocRescanMsg) tea.Cmd {
-	if msg.seq != m.toc.seq || !m.contents.Open() {
+	if msg.seq != m.toc.seq {
 		return nil
 	}
 	m.toc.armed = false

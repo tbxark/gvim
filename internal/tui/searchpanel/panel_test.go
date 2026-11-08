@@ -2,6 +2,7 @@ package searchpanel
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -202,18 +203,24 @@ func TestTogglesRequeryWithTheNewOptions(t *testing.T) {
 	search(t, p, "foo")
 	tests := []struct {
 		name  string
-		key   tea.KeyPressMsg
+		keys  []tea.KeyPressMsg
 		check func(SearchRequest) bool
 	}{
-		{"case on", altKey('c'), func(r SearchRequest) bool { return r.Options.CaseSensitive }},
-		{"regex on", altKey('r'), func(r SearchRequest) bool { return r.Options.Regex }},
-		{"whole on", altKey('w'), func(r SearchRequest) bool { return r.Options.WholeWord }},
-		{"current file", altKey('a'), func(r SearchRequest) bool { return r.Scope == CurrentFile }},
+		{"case on", []tea.KeyPressMsg{altKey('c')}, func(r SearchRequest) bool { return r.Options.CaseSensitive }},
+		{"regex on", []tea.KeyPressMsg{altKey('r')}, func(r SearchRequest) bool { return r.Options.Regex }},
+		{"whole on", []tea.KeyPressMsg{altKey('w')}, func(r SearchRequest) bool { return r.Options.WholeWord }},
+		{"open buffers", []tea.KeyPressMsg{altKey('a')}, func(r SearchRequest) bool { return r.Scope == OpenBuffers }},
+		{"current file", []tea.KeyPressMsg{altKey('a'), altKey('a')}, func(r SearchRequest) bool { return r.Scope == CurrentFile }},
+		{"back to all files", []tea.KeyPressMsg{altKey('a'), altKey('a'), altKey('a')}, func(r SearchRequest) bool { return r.Scope == AllFiles }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s.reqs = nil
-			cmd := p.fieldKey(t, tt.key)
+			p.scope = AllFiles // each row starts from the default scope
+			var cmd tea.Cmd
+			for _, k := range tt.keys {
+				_, cmd = p.Update(k)
+			}
 			if cmd == nil {
 				t.Fatalf("%s returned no debounce command", tt.name)
 			}
@@ -772,15 +779,20 @@ func TestMultiLineMatchRowShowsItsRange(t *testing.T) {
 	}
 }
 
-// fakePreviewer records each preview request and answers with a fixed result.
+// fakePreviewer records each preview request and answers with a fixed result, or with the
+// result fn builds for the request when it is set.
 type fakePreviewer struct {
 	result PreviewResult
 	err    error
 	reqs   []PreviewRequest
+	fn     func(PreviewRequest) PreviewResult
 }
 
 func (f *fakePreviewer) Preview(req PreviewRequest) (PreviewResult, error) {
 	f.reqs = append(f.reqs, req)
+	if f.fn != nil {
+		return f.fn(req), nil
+	}
 	return f.result, f.err
 }
 
@@ -1238,5 +1250,199 @@ func TestGitModeLayoutCarriesTheFilesRow(t *testing.T) {
 	geo := layoutFor(100, 30, true)
 	if geo.globY != geo.optY-1 || geo.searchY != geo.globY-1 || geo.replY != -1 {
 		t.Fatalf("git geometry = %+v, want search and files rows above the options", geo)
+	}
+}
+
+// windowPreview answers a request with numbered lines: an explicit Start is honoured and
+// a negative Start centres the window on the match's line.
+func windowPreview(total int) func(PreviewRequest) PreviewResult {
+	return func(req PreviewRequest) PreviewResult {
+		if req.Lines <= 0 {
+			return PreviewResult{}
+		}
+		start := 0
+		if req.Start >= 0 {
+			start = req.Start
+		} else {
+			start = max(req.Line-1-(req.Lines-1)/2, 0)
+		}
+		start = clamp(start, 0, max(total-req.Lines, 0))
+		var lines []string
+		for i := 0; i < req.Lines && start+i < total; i++ {
+			lines = append(lines, fmt.Sprintf("line %d", start+i+1))
+		}
+		return PreviewResult{
+			Start: start, Lines: lines, Total: total,
+			Spans: []PreviewSpan{{Line: start, Start: 0, End: 4, Kind: "keyword"}},
+		}
+	}
+}
+
+// scrollPanel returns a searched panel with a window previewer wired and the result rows
+// focused, plus the last drawn geometry.
+func scrollPanel(t *testing.T, fn func(PreviewRequest) PreviewResult) (*Panel, *fakePreviewer, geometry) {
+	t.Helper()
+	s := &fakeSearcher{result: sampleResult()}
+	o := searchOptions(s)
+	pv := &fakePreviewer{fn: fn}
+	o.Previewer = pv
+	o.SyntaxStyles = map[string]grid.Style{"keyword": {Bold: true}}
+	p := New(o)
+	search(t, p, "foo")
+	focusResultsFeeding(t, p)
+	draw(p, 100, 30) // set the preview box for wheel tests
+	geo := previewGeo(p)
+	return p, pv, geo
+}
+
+func TestPreviewScrollsWithinTheCacheAndRefetchesAtTheEdge(t *testing.T) {
+	t.Parallel()
+	p, pv, geo := scrollPanel(t, windowPreview(100))
+	if len(pv.reqs) != 1 || pv.reqs[0].Start != -1 {
+		t.Fatalf("first preview request = %+v, want the match-centred window", pv.reqs)
+	}
+	height := geo.results - 1
+	first, _ := p.previewWindow(height)
+	if !hasRow(draw(p, 100, 30), "/100") {
+		t.Fatal("the header has no window indicator")
+	}
+	// A page down inside the cached window repaints without a request.
+	p.Update(specialKey(tea.KeyPgDown))
+	next, _ := p.previewWindow(height)
+	if next != first+p.previewPage() {
+		t.Fatalf("page-down moved the window from %d to %d, want %d", first, next, first+p.previewPage())
+	}
+	if len(pv.reqs) != 1 {
+		t.Fatalf("scrolling inside the cache refetched: %d requests", len(pv.reqs))
+	}
+	// Page down until the window leaves the cached lines: that refetches from the new
+	// start.
+	var cmd tea.Cmd
+	for i := 0; i < 4; i++ {
+		_, cmd = p.Update(specialKey(tea.KeyPgDown))
+		if cmd != nil {
+			break
+		}
+	}
+	if cmd == nil {
+		t.Fatal("scrolling past the cache did not refetch")
+	}
+	if p.preview.loading && hasRow(draw(p, 100, 30), "…") == false {
+		t.Log("the scrolled window did not show the loading marker; it already has the cached lines")
+	}
+	want := p.previewVisibleStart()
+	readBatchMsg := cmd()
+	p.Update(readBatchMsg)
+	if len(pv.reqs) != 2 || pv.reqs[1].Start != want {
+		t.Fatalf("refetch requests = %+v, want Start %d", pv.reqs, want)
+	}
+	if got, _ := p.previewWindow(height); got != want {
+		t.Fatalf("after the refetch the window starts at %d, want %d", got, want)
+	}
+	// Ctrl+End and Ctrl+Home jump the window; when the jump is inside the cache no
+	// command is returned and the window moved already.
+	if _, c := p.Update(tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl}); c != nil {
+		feedPanel(t, p, c)
+	}
+	if got, _ := p.previewWindow(height); got != 100-p.previewPage() {
+		t.Fatalf("ctrl+end window start = %d, want %d", got, 100-p.previewPage())
+	}
+	if _, c := p.Update(tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl}); c != nil {
+		feedPanel(t, p, c)
+	}
+	if got, _ := p.previewWindow(height); got != 0 {
+		t.Fatalf("ctrl+home window start = %d, want 0", got)
+	}
+}
+
+func TestPreviewPaintsSyntaxStyles(t *testing.T) {
+	t.Parallel()
+	p, _, geo := scrollPanel(t, windowPreview(100))
+	// The fake previewer colours the first four runes of the window's first line as a
+	// keyword; the panel's SyntaxStyles makes that bold.
+	y := geo.resultsTop + 1
+	start := geo.prevX + len("1 │ ")
+	if cell := draw(p, 100, 30).At(start, y); !cell.Style.Bold {
+		t.Fatalf("the keyword run is not bold at %d,%d", start, y)
+	}
+}
+
+func TestPreviewWheelScrollsOnlyOverTheColumn(t *testing.T) {
+	t.Parallel()
+	p, _, geo := scrollPanel(t, windowPreview(100))
+	first, _ := p.previewWindow(geo.results - 1)
+	// A notch over the result rows (left of the divider) is ignored.
+	p.Update(tea.MouseWheelMsg(tea.Mouse{X: geo.x0 + 1, Y: geo.resultsTop + 2, Button: tea.MouseWheelDown}))
+	if got, _ := p.previewWindow(geo.results - 1); got != first {
+		t.Fatalf("a wheel notch off the preview column scrolled it to %d", got)
+	}
+	// A notch over the preview column scrolls it by three lines.
+	p.Update(tea.MouseWheelMsg(tea.Mouse{X: geo.prevX + 1, Y: geo.resultsTop + 2, Button: tea.MouseWheelDown}))
+	if got, _ := p.previewWindow(geo.results - 1); got != first+previewWheelRows {
+		t.Fatalf("wheel window start = %d, want %d", got, first+previewWheelRows)
+	}
+}
+
+func TestPreviewScrollResetsOnASelectionChange(t *testing.T) {
+	t.Parallel()
+	p, pv, geo := scrollPanel(t, windowPreview(100))
+	p.Update(specialKey(tea.KeyPgDown))
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // a new match row
+	feedPanel(t, p, p.previewCmd())
+	if len(pv.reqs) == 0 {
+		t.Fatal("no preview requests")
+	}
+	if got := pv.reqs[len(pv.reqs)-1].Start; got != -1 {
+		t.Fatalf("the new match's preview request Start = %d, want the centred window", got)
+	}
+	if got, _ := p.previewWindow(geo.results - 1); got == 0 && p.preview.result.Start != 0 {
+		t.Fatalf("the scroll did not reset: window start %d", got)
+	}
+}
+
+func TestLongMultiLineMatchPagesAndKeepsItsRange(t *testing.T) {
+	t.Parallel()
+	s := &fakeSearcher{result: SearchResult{Files: []FileMatches{{
+		Path: "/w/a.go", Name: "a.go", Hash: 3,
+		Matches: []Match{{Line: 2, Col: 1, Len: 1, Text: "start", EndLine: 60, EndCol: 2}},
+	}}}}
+	o := searchOptions(s)
+	pv := &fakePreviewer{fn: windowPreview(200)}
+	o.Previewer = pv
+	p := New(o)
+	search(t, p, "foo")
+	focusResultsFeeding(t, p)
+	geo := previewGeo(p)
+	if !hasRow(draw(p, 100, 30), "(59 lines)") {
+		t.Fatal("the header does not say how long the match is")
+	}
+	if got := pv.reqs[0].Start; got != -1 {
+		t.Fatalf("the long match's first request Start = %d, want centred from its first line", got)
+	}
+	p.Update(specialKey(tea.KeyPgDown))
+	feedPanel(t, p, p.previewCmd())
+	if got, _ := p.previewWindow(geo.results - 1); got != p.previewPage() {
+		// windowPreview centres a -1 request on the match's line, which is 1 here.
+		t.Fatalf("paging through the match started at %d", got)
+	}
+	req, ok := p.ReplaceRequest()
+	if !ok || len(req.Files) != 1 || len(req.Files[0].Selected) != 1 || req.Files[0].Selected[0] != (Position{Line: 1, Col: 0}) {
+		t.Fatalf("paging changed the replacement range: %+v", req.Files)
+	}
+}
+
+func TestScopeChipFollowsTheThreeWayCycle(t *testing.T) {
+	t.Parallel()
+	p := New(searchOptions(&fakeSearcher{}))
+	if !hasRow(draw(p, 100, 30), "[x] All Files (Alt+A)") {
+		t.Fatal("the default scope chip is missing")
+	}
+	p.Update(altKey('a'))
+	if !hasRow(draw(p, 100, 30), "[x] Open Buffers (Alt+A)") {
+		t.Fatal("the Open Buffers chip is missing")
+	}
+	p.Update(altKey('a'))
+	if !hasRow(draw(p, 100, 30), "[x] Current File (Alt+A)") {
+		t.Fatal("the Current File chip is missing")
 	}
 }

@@ -172,16 +172,51 @@ declared as project-level, and markdown_toc declared none):
 | `enabled` | boolean | `true` | the section exists at all; off means no rows and the palette command says it is disabled |
 | `max_depth` | integer 1-6 | `6` | headings deeper than this are not rows of the tree |
 | `follow` | `"cursor"`/`"scroll"` | `"cursor"` | which heading the selected row follows |
-| `fold_buffer` | boolean | `false` | folding a heading also folds its section in the buffer, and unfolding opens it (see §6). gvim's native key is `contents.fold_buffer` (user layer, applies on restart); the Fresh-compatible `plugins.markdown_toc.settings.fold_buffer` still works, and the native key wins when both are set |
+| `fold_buffer` | boolean | `false` | folding a heading also folds its section in the buffer, and unfolding opens it (see §6). gvim's native key is `contents.fold_buffer` (user layer, applies live); the Fresh-compatible `plugins.markdown_toc.settings.fold_buffer` still works, and the native key wins when both are set |
 | `rows` | integer 1-200 | `10` | body rows the section asks for; a divider drag overrides it for the session |
 | `auto_open` | boolean | `true` | show the section when a Markdown buffer becomes active, hide it when the buffer is not Markdown |
 
-`rows` and the divider drag's value are session state, not saved in the session
-file yet; the config value is used from the next start. The
+`rows`, the divider drag's value, the section's open/folded state and its window
+scroll are saved in the session file (see §4b); without a saved session the
+config value is used. The
 `markdown_toc_toggle_follow` action flips `follow` for the session.
 `contents.fold_buffer` is a native Settings-page row (section Contents,
-user layer, applies on restart), shown with the effective value; writing it does
-not touch the retired plugin's settings path.
+user layer, applies live), shown with the effective value; writing it does not
+touch the retired plugin's settings path.
+
+## 4b. Session state and layout limits
+
+The sidebar's UI state is saved with the session (`session.Sidebar`, beside the
+explorer state) and restored only when the app restores the saved layout
+(`editor.restore_previous_session` on, the session loaded, no `--no-restore`): a
+hot-exit restore and a launch with explicit files keep the config defaults. The
+saved state is bounded — booleans, numbers and the selected explorer path, no
+file contents, diagnostics or plugin state:
+
+| Saved | Restored as |
+|---|---|
+| the column's width form (automatic / percent / columns) and side | the runtime width and side, so a grip drag and a side toggle survive the session |
+| the explorer section's fold, selected row path and scroll | the selection and window of the tree; the first frame does not reveal row 0 over it |
+| the Contents section's open/folded state, body rows and window scroll | the open flag applies to the first Markdown buffer of the restored session (it wins over `auto_open`), rows at once, and the scroll after that buffer's first scan |
+| the Diagnostics section's open/folded state and body rows | at once |
+
+Migration safety: the object is optional and every zero value is the default, so
+a session file from before this state existed decodes with no sidebar state and
+the config defaults win; the session format version does not change (an additive
+optional object), and a reader that does not know it ignores it. The plugin
+sections' order, sizes and folds are not part of this state.
+
+**Layout limits and the right side.** The column is one width: the explorer, the
+Contents section, the Diagnostics section and the plugin sections share
+`file_explorer.width` (a percentage or a column count, the zero value as the
+frame's automatic width). The grip on the column's inner border resizes it for
+the session and the side toggle (`file_explorer.side`) moves the whole column to
+the right edge, walls and close buttons mirrored; there is no separate Contents
+width. A column too short for every open section folds the lower sections first
+(the explorer keeps its header), and the Contents and Diagnostics headers can
+still be dragged within that; there is no additional minimum beyond the frame's
+explorer floor. Fresh's sidebar widget has per-section sizes and a drag-and-drop
+section order; those remain residuals (see §7).
 
 ## 5. Commands
 
@@ -223,21 +258,25 @@ Show Outline, and stays available across buffer switches once shown.
 - The palette commands are Show Outline / Close Outline (the names gvim's plugin
   used) rather than Fresh's single Toggle Table of Contents; both reach the same
   section.
-- **`fold_buffer` is implemented** (round 6, R1-1), matching Fresh's
-  `markdown_toc`: with the setting on, the section publishes every heading's section
-  as a toggleable fold range at the scanned text version (so the standard fold
-  keybinding sees them), nothing is pre-collapsed, and collapsing/expanding a row
-  folds/unfolds that heading's range in the buffer. The ranges go through a
-  separate outline fold source that is dropped when the text version changes, and
-  the reader's folded headings are re-applied by heading byte offset after a
-  rescan, so an edit never folds the wrong line. Divergences from Fresh: gvim
-  publishes the ranges only while the section is open (Fresh publishes while it
-  tracks a Markdown buffer even with the panel hidden), and the setting applies on
-  restart (the Settings row is marked restart; Fresh re-reads plugin settings per
-  event).
-- Residual gap — the sidebar itself cannot move to the right side or be
-  resized to fewer than its minimum (the pre-existing explorer limits), and the
-  section list is not persisted in the session.
+- **`fold_buffer` is implemented** (round 6, R1-1; live since round 9), matching
+  Fresh's `markdown_toc`: with the setting on, the section publishes every
+  heading's section as a toggleable fold range at the scanned text version (so the
+  standard fold keybinding sees them), nothing is pre-collapsed, and
+  collapsing/expanding a row folds/unfolds that heading's range in the buffer.
+  The ranges go through a separate outline fold source that is dropped when the
+  text version changes, and the reader's folded headings are re-applied by heading
+  byte offset after a rescan, so an edit never folds the wrong line. As in Fresh,
+  a Markdown buffer stays tracked while the panel is hidden: the published ranges
+  and the section-induced folds stay, edits still rescan (the same debounce), and
+  a buffer switch or close clears them; folds the reader applied by hand in the
+  buffer are not the section's and are left alone. The Settings row applies live:
+  switching it on publishes at once, switching it off clears the outline source and
+  opens the folds the section applied.
+- Native sidebar state is persisted in the session (R1-2): the column's width
+  form and side, the explorer fold/selection/scroll, the Contents section's
+  open/folded state, rows and scroll, and the Diagnostics section's open/folded
+  state and rows. Plugin sections, their order and their rows are plugin runtime
+  state and are not persisted; see the session-state section below.
 
 ## 7. Files and tests
 
@@ -253,7 +292,8 @@ Show Outline, and stays available across buffer switches once shown.
 | palette rows | `commands/markdown_commands.go` |
 | config wiring | `internal/app/markdown_toc.go` (plus `internal/app/plugins_markdown_toc_test.go`: the end-to-end tests) |
 | fold_buffer ranges and lifecycle | `document/fold.go` (outline source, text-version guard), `editor/outline_folds.go`, `internal/uiadapter/outline_folds.go`, `internal/tui/markdown_toc.go` (publish/re-apply/clear), `internal/tui/sidebar/contents.go` (`Headings`); tests `editor/outline_folds_test.go`, `internal/tui/markdown_toc_fold_test.go` |
-| native `contents.fold_buffer` | `config/contents.go` (parse, project layer ignored, effective value with the plugin-key fallback), `config/settings_schema.go` row, `internal/app/markdown_toc.go`; tests `config/contents_test.go` |
+| native `contents.fold_buffer` | `config/contents.go` (parse, project layer ignored, effective value with the plugin-key fallback), `config/settings_schema.go` row (live), `internal/app/markdown_toc.go`; tests `config/contents_test.go` |
+| sidebar session state | `session/sidebar.go`, `session.Session.Sidebar`, `internal/restore/sidebar.go`, `internal/tui/root.go` (`SidebarState`, `ExplorerState.Sidebar`), `internal/tui/sidebar_state.go`, `internal/tui/markdown_toc.go` (pending Contents restore), `internal/app/run.go`; tests `session/sidebar_test.go`, `internal/restore/sidebar_test.go`, `internal/tui/sidebar_state_test.go` |
 
 No test compares whole frames: the tests assert layout rectangles, hit targets,
 widget state and a few painted cells.

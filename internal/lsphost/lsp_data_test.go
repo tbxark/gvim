@@ -201,3 +201,51 @@ func TestMergeWorkspaceDiagnosticsPrecedence(t *testing.T) {
 		t.Fatalf("sources = %v", source)
 	}
 }
+
+// TestInlayHintsCarryPlacementPartsAndPadding checks the data the tier-2 placement
+// needs: the UTF-16 character becomes a rune column of its line (clamped to it), the
+// label parts are kept, the padding flags are carried, and hints outside the document
+// or with an empty label are dropped.
+func TestInlayHintsCarryPlacementPartsAndPadding(t *testing.T) {
+	t.Parallel()
+	lines := newTextLines("héllo\nx🙂y\nlast")
+	yes, no := true, false
+	hints := []protocol.InlayHint{
+		{Position: protocol.Position{Line: 0, Character: 2}, Label: protocol.String(": int")},
+		{Position: protocol.Position{Line: 1, Character: 1}, Kind: protocol.InlayHintKindParameter,
+			Label:       protocol.InlayHintLabelPartSlice{{Value: "a"}, {Value: ": "}, {Value: "int"}},
+			PaddingLeft: &yes, PaddingRight: &no},
+		{Position: protocol.Position{Line: 1, Character: 3}, Label: protocol.String("after emoji")},
+		{Position: protocol.Position{Line: 2, Character: 99}, Label: protocol.String("end")},
+		{Position: protocol.Position{Line: 5, Character: 0}, Label: protocol.String("gone")},
+		{Position: protocol.Position{Line: 0, Character: 0}, Label: protocol.String("   ")},
+	}
+	got := inlayHintsFrom(lines, hints)
+	if len(got) != 4 {
+		t.Fatalf("hints = %+v, want 4 (an out-of-document line and an empty label dropped)", got)
+	}
+	// "héllo": two UTF-16 units before the second l; rune column 2.
+	if got[0].Line != 0 || got[0].Col != 2 || got[0].Text != ": int" {
+		t.Fatalf("string hint = %+v, want line 0 col 2", got[0])
+	}
+	if !slices.Equal(got[0].Parts, []string{": int"}) {
+		t.Fatalf("string hint parts = %q", got[0].Parts)
+	}
+	// "x🙂y": the emoji is two units; character 1 is the rune column after x.
+	second := got[1]
+	if second.Line != 1 || second.Col != 1 || second.Text != "a: int" ||
+		!slices.Equal(second.Parts, []string{"a", ": ", "int"}) {
+		t.Fatalf("parts hint = %+v", second)
+	}
+	if !second.PaddingLeft || second.PaddingRight || second.Kind != 2 {
+		t.Fatalf("padding/kind = %+v, want left only and parameter kind", second)
+	}
+	// Character 3 is past the two-unit emoji: rune column 2.
+	if got[2].Line != 1 || got[2].Col != 2 {
+		t.Fatalf("emoji hint = %+v, want line 1 col 2", got[2])
+	}
+	// A column past the line clamps to its length.
+	if got[3].Line != 2 || got[3].Col != 4 {
+		t.Fatalf("end hint = %+v, want line 2 col 4 (clamped)", got[3])
+	}
+}

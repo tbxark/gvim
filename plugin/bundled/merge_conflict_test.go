@@ -1,6 +1,7 @@
 package bundled_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"slices"
@@ -166,8 +167,19 @@ func TestMergeConflictRegistersItsCommands(t *testing.T) {
 		t.Fatalf("commands = %v, want %v", got, want)
 	}
 	data, err := fs.ReadFile(bundled.FS, "plugins/merge_conflict/plugin.json")
-	if err != nil || strings.Contains(string(data), "default_enabled") {
-		t.Fatalf("plugin.json = %q, %v: merge_conflict is on by default", data, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// merge_conflict is off by default after the idle-heap gate decision (round 9); it is
+	// still available when enabled.
+	var manifest struct {
+		DefaultEnabled *bool `json:"default_enabled"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.DefaultEnabled == nil || *manifest.DefaultEnabled {
+		t.Fatalf("plugin.json = %q: merge_conflict must ship default_enabled false", data)
 	}
 }
 

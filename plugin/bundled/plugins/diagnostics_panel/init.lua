@@ -1,6 +1,7 @@
 -- Diagnostics Panel: a port of Fresh's plugins/diagnostics_panel.ts
--- (refs/fresh/crates/fresh-editor/plugins/diagnostics_panel.ts, 275 lines) with the
--- live-panel part of its plugins/lib/finder.ts (1862 lines).
+-- (refs/fresh/crates/fresh-editor/plugins/diagnostics_panel.ts, 275 lines) on the shared
+-- gvim.finder library (the live-panel subset of its plugins/lib/finder.ts; the library is
+-- plugin/bundled/lib/finder.lua, and its own header lists what Finder reduced).
 --
 -- Ported from Fresh:
 --   * a provider that rebuilds the result list on demand, and the panel refreshes itself on
@@ -17,7 +18,8 @@
 --     (a v1 widget panel holds the keyboard while it is focused; Fresh's dock panel stays up)
 --   * the panel's title names the filter, like Fresh's getTitle()
 --
--- Reduced or omitted from Finder (the reasons are the API, not the feature):
+-- Reduced or omitted from Finder by this panel (the reasons are the API, not the feature;
+-- the shared library's header lists the reductions every user of it inherits):
 --   * prompt mode and search sources (ripgrep, filters, debounce, cancellation): the
 --     diagnostics panel is a panel, not a prompt
 --   * the preview pane, syncWithEditor and navigateOnCursorMove: one selectable list, no
@@ -39,6 +41,28 @@ local gvim = require "gvim"
 
 local t = gvim.i18n.t
 
+-- The grouped tree rows and the string helpers are the shared gvim.finder library (the
+-- live-panel subset of Fresh's lib/finder.ts); see plugin/bundled/lib/finder.lua for what
+-- that library reduces. It is required lazily (on the first build, when the panel opens) so
+-- the library is not part of the idle default bundle: the bundled idle-heap gate does not
+-- pay for code no default plugin has run yet.
+local finder
+
+local function ensure_finder()
+  if not finder then
+    finder = require "gvim.finder"
+  end
+  return finder
+end
+
+local function clip(s, limit)
+  return ensure_finder().clip(s, limit)
+end
+
+local function cells(s, limit)
+  return ensure_finder().cells(s, limit)
+end
+
 -- Caps. all_diagnostics() may return up to 50 000 diagnostics; the panel keeps the first
 -- MAX_ROWS (grouped by file, so a file's whole group is either listed or is where the list
 -- stops). One panel node is at most 4 KiB and there are 5 000 tree nodes, both far away.
@@ -59,34 +83,6 @@ local state = {
   all_files = false, -- Fresh's showAllFiles
   node_row = {}, -- tree node index -> diagnostic row; nil for a file header
 }
-
--- clip cuts a string to a byte budget without splitting a UTF-8 sequence. Widget keys have a
--- byte cap (128); the cell helpers below are for what is drawn.
-local function clip(s, limit)
-  s = tostring(s or "")
-  if #s <= limit then
-    return s
-  end
-  local cut = s:sub(1, limit)
-  local i = #cut
-  while i > 0 do
-    local b = cut:byte(i)
-    if b < 0x80 then
-      break
-    end
-    if b >= 0xC0 then
-      cut = cut:sub(1, i - 1)
-      break
-    end
-    i = i - 1
-  end
-  return cut
-end
-
--- cells cuts a drawn string to a number of display cells.
-local function cells(s, limit)
-  return gvim.text.truncate(tostring(s or ""), limit)
-end
 
 -- first_line keeps the first line of a message: Fresh shows one line per diagnostic.
 local function first_line(message)
@@ -183,26 +179,18 @@ local function collect()
   return rows
 end
 
--- relative_dir is the directory shown next to a file's name: relative to the workspace root
--- (read once per build, passed in) when the file is inside it, as it is, otherwise. "" for a
--- file at the root.
-local function relative_dir(path, root)
-  local shown = path
-  if root ~= "" then
-    local rel = gvim.path.relative(root, path)
-    if rel then
-      shown = rel
-    end
-  end
-  local dir = gvim.path.dirname(shown)
+-- relative_dir is the directory shown next to a file's name, relative to the workspace root
+-- when the file is inside it (gvim.finder.relative_path), "" for a file at the root.
+local function relative_dir(path)
+  local dir = gvim.path.dirname(ensure_finder().relative_path(path))
   if dir == "." then
     dir = ""
   end
   return cells(dir, MAX_DIR_CELLS)
 end
 
--- file_header is the depth-0 node that groups one file's diagnostics (Fresh's "fileName:").
-local function file_header(path, root)
+-- group_header is the depth-0 node that groups one file's diagnostics (Fresh's "fileName:").
+local function group_header(path)
   local name = gvim.path.basename(path)
   if name == "" then
     name = path
@@ -210,9 +198,7 @@ local function file_header(path, root)
   return {
     key = clip("file:" .. path, MAX_KEY_BYTES),
     text = cells(name, MAX_NAME_CELLS) .. ":",
-    detail = relative_dir(path, root),
-    depth = 0,
-    expanded = true,
+    detail = relative_dir(path),
   }
 end
 
@@ -227,17 +213,6 @@ local function row_key(row)
   return clip(("%s:%d:%d:%s:%s"):format(row.path, row.line, row.col, row.severity, row.message), MAX_KEY_BYTES)
 end
 
--- row_node maps a diagnostic row to a tree node, styled like Fresh's buildItemEntry.
-local function row_node(row)
-  return {
-    key = row_key(row),
-    text = row_text(row),
-    detail = row.source,
-    depth = 1,
-    leaf = true,
-  }
-end
-
 -- filter_label names the current scope (Fresh's t("panel.current_file"/"panel.all_files")).
 local function filter_label()
   if state.all_files then
@@ -250,23 +225,24 @@ end
 -- Rows with one id are one entry (Fresh's formatUnique), so a server that publishes a
 -- diagnostic twice shows it once and the count agrees with the list.
 local function build()
-  local collected = collect()
+  -- Rows with one id are one entry (Fresh's formatUnique); the shared tree builder does the
+  -- grouping (one depth-0 header per file), the id dedupe, the caps and the node map.
+  local tree = ensure_finder().tree(collect(), {
+    key = row_key,
+    group = function(row)
+      local header = group_header(row.path)
+      return { key = header.key, text = header.text, detail = header.detail }
+    end,
+    row = function(row)
+      return { text = row_text(row), detail = row.source, key = row_key(row) }
+    end,
+    max_rows = MAX_ROWS,
+  })
+  local nodes, node_row = tree.nodes, tree.node_map
   local rows = {}
-  local seen = {}
-  local root = gvim.workspace.root()
-  local nodes, node_row = {}, {}
-  local last_path
-  for _, row in ipairs(collected) do
-    local key = row_key(row)
-    if not seen[key] then
-      seen[key] = true
-      rows[#rows + 1] = row
-      if row.path ~= last_path then
-        nodes[#nodes + 1] = file_header(row.path, root)
-        last_path = row.path
-      end
-      nodes[#nodes + 1] = row_node(row)
-      node_row[#nodes] = row
+  for i = 1, #node_row do
+    if node_row[i] ~= nil then
+      rows[#rows + 1] = node_row[i]
     end
   end
 
@@ -277,7 +253,7 @@ local function build()
       children = {
         { kind = "toggle", key = "scope", label = t("panel.all_files_toggle"), checked = state.all_files },
         { kind = "spacer", flex = true },
-        { kind = "label", key = "count", text = t("panel.count", { count = #rows }) },
+        { kind = "label", key = "count", text = t("panel.count", { count = tree.count }) },
       },
     },
     { kind = "divider", key = "divider" },
@@ -291,13 +267,7 @@ local function build()
   -- Start the selection on the first diagnostic, not on a file header (Fresh's panel opens
   -- on its title line and needs a Down to reach the first entry; an activated header is a
   -- no-op here).
-  local selected = 1
-  while selected <= #nodes and node_row[selected] == nil do
-    selected = selected + 1
-  end
-  if selected > #nodes then
-    selected = 1
-  end
+  local selected = ensure_finder().first_leaf(tree)
   children[#children + 1] = {
     kind = "tree",
     key = "rows",

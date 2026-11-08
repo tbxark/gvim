@@ -51,10 +51,11 @@ var ansiRE = regexp.MustCompile("\x1b\\[[0-9;:]*[A-Za-z]")
 func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 
 // conflictSession opens the conflict file in the real app with the bundled merge_conflict
-// plugin (on by default) and waits for its scan.
+// plugin (off by default after the idle-heap gate; enabled here) and waits for its scan.
 func conflictSession(t *testing.T) *pluginSession {
 	t.Helper()
 	isolateConfig(t)
+	writeUserFile(t, "config.json", `{"plugins":{"merge_conflict":{"enabled":true}}}`)
 	s := newSession(t, Options{})
 	s.waitStatus("merge_conflict", "loaded")
 	// The subscriptions exist now; the next message turns the change tracking on.

@@ -273,7 +273,7 @@ func (m *Model) editorContextMenu(mo tea.Mouse, t hitTarget) {
 	cl, _ := doc.(editorpane.CaretLister)
 	multi := cl != nil && len(cl.Cursors()) > 0
 	if !selected && !multi {
-		m.pressPane(t.Pane, mo.X, mo.Y, 1)
+		_ = m.pressPane(t.Pane, mo.X, mo.Y, 1)
 		m.drag = drag{}
 	}
 	readOnly := m.Holds("read_only")

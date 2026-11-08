@@ -17,6 +17,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/menubar"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/syntax"
 	"github.com/tbxark/gvim/theme"
 )
 
@@ -675,9 +676,10 @@ func (m *Model) viewPane(sp splitPane, p editorpane.Pane, doc Document) editorpa
 		p.PageView.NoCaretReveal = true
 	}
 	if p.PageView.On && p.PageView.Markdown {
-		// The Markdown table's top and bottom borders are display rows no source
-		// line owns; the shared inserted-row hook adds them above/below the rows.
+		// The Markdown table's top and bottom borders and the wrapped-cell rows are
+		// display rows no source line owns; the shared inserted-row hook adds them.
 		p.PageExtraRows = editorpane.PageViewTableBorders(doc, p.Styles)
+		p.TrackMarks = m.markdownHeadingMarks(doc, p)
 	}
 	// A large document wraps as the setting says: a line of more than editorpane.LongLineRunes
 	// is laid out in segments, a few of them at a time, so its length costs nothing.
@@ -768,6 +770,51 @@ func (m *Model) markdownDoc(doc Document) bool {
 		return true
 	}
 	return false
+}
+
+// headingMarksKey is the layout memo key of the page view's heading scrollbar
+// marks, kept until the document's text changes.
+type headingMarksKey struct{}
+
+// markdownHeadingMarks returns the scrollbar track marks of the document's ATX
+// heading lines, colored like a heading. The page view shows them on the
+// scrollbar so the headings' places in the file stay visible.
+func (m *Model) markdownHeadingMarks(doc Document, p editorpane.Pane) []editorpane.TrackMark {
+	if doc == nil {
+		return nil
+	}
+	compute := func() any {
+		style := p.Styles.Syntax[syntax.KindHeading]
+		var marks []editorpane.TrackMark
+		for i := 0; i < doc.LineCount(); i++ {
+			if !headingLine(doc.Line(i)) {
+				continue
+			}
+			marks = append(marks, editorpane.TrackMark{From: i, To: i, Style: style})
+		}
+		return marks
+	}
+	if lm, ok := doc.(editorpane.LayoutMemo); ok {
+		return lm.MemoValue(headingMarksKey{}, compute).([]editorpane.TrackMark)
+	}
+	return compute().([]editorpane.TrackMark)
+}
+
+// headingLine reports whether s is an ATX heading line ("#" to "######" after at
+// most three blanks, then a blank or the end).
+func headingLine(s string) bool {
+	trimmed := strings.TrimLeft(s, " ")
+	if len(s)-len(trimmed) > 3 {
+		return false
+	}
+	n := 0
+	for n < len(trimmed) && trimmed[n] == '#' {
+		n++
+	}
+	if n == 0 || n > 6 {
+		return false
+	}
+	return n == len(trimmed) || trimmed[n] == ' ' || trimmed[n] == '\t'
 }
 
 // caretShape is the caret shape of the pane for the cursor style.

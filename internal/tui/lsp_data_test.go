@@ -35,12 +35,13 @@ func lspRowText(g *grid.Grid, y int) string {
 	return b.String()
 }
 
-// TestInlayHintsPaintAtEndOfLine checks the inlay-hint tier-1 rendering: the hint
-// text is virtual text after the line, faint, and never part of the document.
-func TestInlayHintsPaintAtEndOfLine(t *testing.T) {
+// TestInlayHintsSpliceInlineAtThePosition checks the tier-2 rendering: the hint cells
+// are inserted at the protocol column inside the line, faint, and never part of the
+// document; turning the hints off drops them from the next frame.
+func TestInlayHintsSpliceInlineAtThePosition(t *testing.T) {
 	port := newFakeLSP("go")
-	tab := &lspTab{path: "/p/a.go", lines: []string{"let x = 1"}}
-	port.hints = []InlayHint{{Line: 0, Text: "int"}}
+	tab := &lspTab{path: "/p/a.go", lines: []string{"foo(bar)"}}
+	port.hints = []InlayHint{{Line: 0, Col: 4, Text: "x:"}}
 	lt := newLSPTest(t, port, tab)
 	lt.open()
 	// The hints start on with the default view options, so the open refreshes them.
@@ -50,23 +51,67 @@ func TestInlayHintsPaintAtEndOfLine(t *testing.T) {
 	}
 	g := lspRender(lt, 40, 6)
 	row := lspRowText(g, 0)
-	if !strings.Contains(row, "let x = 1") || !strings.Contains(row, "int") ||
-		strings.Index(row, "let x = 1") > strings.Index(row, "int") {
-		t.Fatalf("row = %q, want the text then the hint", row)
+	if !strings.Contains(row, "foo(x: bar)") {
+		t.Fatalf("row = %q, want the hint spliced before b", row)
 	}
-	x := strings.Index(row, "int")
+	x := strings.Index(row, "x: ")
 	if !g.At(x, 0).Style.Faint {
 		t.Fatalf("hint cell is not faint: %+v", g.At(x, 0).Style)
 	}
-	// The document keeps its text: virtual text is not part of the buffer.
-	if got := tab.lines[0]; got != "let x = 1" {
+	// The document keeps its text: the hint cells are display-only.
+	if got := tab.lines[0]; got != "foo(bar)" {
 		t.Fatalf("line = %q, want the text unchanged", got)
 	}
 
 	// Turning the hints off drops them from the next frame.
 	lt.runMsgs(lt.act("toggle_inlay_hints"))
-	if row := lspRowText(lspRender(lt, 40, 6), 0); strings.Contains(row, "int") {
+	if row := lspRowText(lspRender(lt, 40, 6), 0); strings.Contains(row, "x: ") {
 		t.Fatalf("row after turning hints off = %q", row)
+	}
+}
+
+// TestInlayHintCellsSpacing checks Fresh's spacing: a hint inside a line is followed by
+// a space, one at the line's end is wrapped in spaces, and protocol padding adds a space
+// on the named side.
+func TestInlayHintCellsSpacing(t *testing.T) {
+	tests := []struct {
+		name string
+		hint InlayHint
+		line int
+		want string
+	}{
+		{"inside", InlayHint{Col: 1, Text: "x:"}, 5, "x: "},
+		{"at the end", InlayHint{Col: 5, Text: "int"}, 5, " int "},
+		{"padding left", InlayHint{Col: 1, Text: "x", PaddingLeft: true}, 5, " x "},
+		{"padding right", InlayHint{Col: 1, Text: "x", PaddingRight: true}, 5, "x  "},
+		{"padding both at the end", InlayHint{Col: 5, Text: "x", PaddingLeft: true, PaddingRight: true}, 5, "  x  "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := lspInlayHintCells(tt.hint, tt.line); got != tt.want {
+				t.Fatalf("cells = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInlayHintsFallBackToTheEndOfLineInPageView checks the fallback: the page view does
+// not splice hint cells, so the hint is painted after the line, still faint.
+func TestInlayHintsFallBackToTheEndOfLineInPageView(t *testing.T) {
+	port := newFakeLSP("go")
+	port.hints = []InlayHint{{Line: 0, Col: 4, Text: "x:"}}
+	lt := newLSPTest(t, port, &lspTab{path: "/p/a.go", lines: []string{"foo(bar)"}})
+	lt.open()
+	lt.settle(lt.m.lspDataArm(lspDataHints), 3)
+	doc := lt.m.ed.Active()
+	pane := lt.m.lspData(editorpane.Pane{Doc: doc, PageView: editorpane.PageView{On: true, Measure: 12}}, doc)
+	g := pane.Render(40, 4)
+	row := lspRowText(g, 0)
+	if !strings.Contains(row, "foo(bar)") || !strings.Contains(row, "x:") {
+		t.Fatalf("row = %q, want the text and the end-of-line hint", row)
+	}
+	if strings.Contains(row, "foo(x:bar)") || strings.Contains(row, "foo(x: bar)") {
+		t.Fatalf("row = %q, the page view must not splice the hint", row)
 	}
 }
 

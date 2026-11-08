@@ -161,6 +161,11 @@ type Pane struct {
 	PageExtraRows func(line, width, gutter, measure int) ExtraRows
 	// SoftBreaks forces display row boundaries inside a line (tier 1c-B).
 	SoftBreaks func(line int) []SoftBreak
+	// InlineHints inserts display-only hint cells at rune columns of a line (tier-2
+	// inlay hints, inline_hints.go). The cells are not text: copy and edit keep the
+	// document, and the caret and the mouse map around them. The pane paints a hint
+	// inline when its row has room; otherwise it falls back to the end of the line.
+	InlineHints func(line int) []InlineHint
 	// PluginFolds merges plugin folding ranges with the document's: the ranges, the
 	// collapsed starts and the placeholder text by start line (tier 1c-B).
 	PluginFolds func() (ranges []fold.Range, collapsed map[int]bool, placeholder map[int]string)
@@ -352,9 +357,13 @@ type frame struct {
 	conceals   func(line int) []ConcealSpan
 	cursorLine func() (grid.Style, bool)
 	// The inserted-row hooks (rows_extra.go).
-	extras          func(line int) ExtraRows
-	pageExtras      func(line, width, gutter, measure int) ExtraRows
-	soft            func(line int) []SoftBreak
+	extras     func(line int) ExtraRows
+	pageExtras func(line, width, gutter, measure int) ExtraRows
+	soft       func(line int) []SoftBreak
+	// inline gives the tier-2 inline hints of a line, and inlineCache their placement
+	// per line for the frame (inline_hints.go).
+	inline          func(line int) []InlineHint
+	inlineCache     map[int]inlineLineData
 	pluginFolds     func() ([]fold.Range, map[int]bool, map[int]string)
 	foldPlaceholder map[int]string
 	extraCache      map[int]ExtraRows
@@ -437,6 +446,7 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 		extras:      p.ExtraRows,
 		pageExtras:  p.PageExtraRows,
 		soft:        p.SoftBreaks,
+		inline:      p.InlineHints,
 		pluginFolds: p.PluginFolds,
 	}
 	if f.extras != nil || f.pageExtras != nil {
@@ -445,7 +455,10 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 	if f.soft != nil {
 		f.softCache = make(map[int][]SoftBreak)
 	}
-	if f.hooks.any() || p.Conceals != nil {
+	if f.inline != nil {
+		f.inlineCache = make(map[int]inlineLineData)
+	}
+	if f.hooks.any() || p.Conceals != nil || f.inline != nil {
 		f.dx = &overlayFX{}
 	}
 	f.inlineDiag = p.InlineDiagnostics
@@ -819,6 +832,11 @@ func (f frame) paintLineRow(g *grid.Grid, rows []rowInfo, i int, rd rowDesc, y i
 	if drop := f.dropFor(ln); drop > 0 {
 		skip = droppedBeyond(cells, drop)
 		cells = dropColumns(cells, drop)
+	} else if f.inlineAvailable(i, ln) {
+		// Tier-2 inline hints: display-only cells spliced into the row before it is
+		// painted. widthAll above stays the document's own width, so the block
+		// rectangle is placed from text columns.
+		cells, _ = f.spliceInlineHints(i, ln, rd.k, cells)
 	}
 	end := f.paintCells(g, y, cells, cur)
 	if rd.last {
@@ -831,6 +849,8 @@ func (f frame) paintLineRow(g *grid.Grid, rows []rowInfo, i int, rd rowDesc, y i
 	f.paintBlockVirtual(g, i, y, end, widthAll)
 	if rd.last {
 		f.paintVirtualText(g, ln, i, y, end, skip, cur)
+		// Hints no row had room for keep the end-of-line form.
+		end = f.paintInlineHintFallback(g, i, ln, y, end, cur)
 		f.paintInlineDiagnostics(g, i, y, end, cur)
 	}
 	if rd.first {
@@ -1259,6 +1279,11 @@ func (f frame) cellOf(p buffer.Pos) (x, y int, ok bool) {
 			} else if k > 0 {
 				cells += ln.indent
 			}
+			if f.dropFor(ln) == 0 && f.inlineAvailable(i, ln) {
+				// The hint cells inserted before the caret's column move it right on
+				// the row; cells above are the document's own columns.
+				cells += f.inlineShift(i, ln, k, cells)
+			}
 			x := f.gutter + cells - f.dropFor(ln)
 			if f.virtual > 0 && p == f.caret {
 				x += f.virtual
@@ -1396,14 +1421,72 @@ func (p Pane) Thumb(h int) (start, length int) {
 }
 
 // thumb is the scrollbar thumb of the frame: its first body row and length.
+//
+// Inserted rows (virtual lines, soft breaks, page-view border rows) make a document
+// taller than its lines, so with them the thumb scales by display rows: its length and
+// start come from the frame's row count, matching what the painter actually shows. A
+// large or windowed document keeps the line-based thumb (counting every row would read
+// the whole document on each frame), and so does a document without inserted rows.
 func (f frame) thumb() (start, length int) {
 	if f.fill != nil {
 		return thumbOf(f.fill.Total(f.lines), f.h, f.fill.BlockStart(f.top)+f.topRow)
+	}
+	if f.insertedRows() && !isLarge(f.doc) && f.win == nil {
+		if total, ok := f.rowTotal(); ok && total > f.h {
+			if before, ok := f.rowsBeforeTop(); ok {
+				return thumbRows(total, f.h, before)
+			}
+		}
 	}
 	if f.wrapped() {
 		return thumbOfMax(f.display, f.h, f.top, f.lastPageTop())
 	}
 	return thumbOf(f.display, f.h, f.top)
+}
+
+// insertedRows reports whether the frame paints display rows no document line count
+// holds: extra rows (plugin virtual lines, page-view border rows) or soft breaks.
+func (f frame) insertedRows() bool {
+	return f.extras != nil || (f.pageExtras != nil && f.pageOn) || f.soft != nil
+}
+
+// rowTotal is the number of display rows of the whole document, counting the inserted
+// rows: one pass over the visible lines. ok is false when the count is not cheap (a
+// large or windowed document).
+func (f frame) rowTotal() (total int, ok bool) {
+	if isLarge(f.doc) || f.win != nil {
+		return 0, false
+	}
+	for i := 0; i < f.lines; i = f.next(i) {
+		total += f.rowCount(i)
+	}
+	return total, true
+}
+
+// rowsBeforeTop is the number of display rows above the frame's first visible row: the
+// rows of the lines above the top line, plus topRow rows of the top line itself.
+func (f frame) rowsBeforeTop() (before int, ok bool) {
+	if isLarge(f.doc) || f.win != nil {
+		return 0, false
+	}
+	for i := 0; i < f.top && i < f.lines; i = f.next(i) {
+		before += f.rowCount(i)
+	}
+	return before + max(f.topRow, 0), true
+}
+
+// thumbRows sizes the thumb for total display rows in a body h rows tall, with before
+// rows above the first visible row. It is thumbOf for rows instead of lines.
+func thumbRows(total, h, before int) (start, length int) {
+	if total <= h {
+		return 0, h
+	}
+	length = min(h, max(1, (h*h+total/2)/total))
+	span := h - length
+	if maxTop := total - h; maxTop > 0 && span > 0 {
+		start = min(max(before, 0), maxTop) * span / maxTop
+	}
+	return start, length
 }
 
 // wrapped reports whether the scrollbar maps the wrapped rows of the lines: wrap is on
@@ -1468,6 +1551,14 @@ func (f frame) posAt(x, row int) buffer.Pos {
 			// A click past the end of a row that is not the last one lands on its
 			// last character, not on the first character of the next row.
 			cells = r.endCells() - 1
+		}
+	}
+	if r.extra == 0 && r.valid && f.dropFor(r.ln) == 0 && f.inlineAvailable(r.line, r.ln) {
+		if adjusted, anchor, onHint := f.inlineUnshift(r.line, r.ln, r.k, cells); onHint {
+			// A press on a hint is a press on the character it annotates.
+			return buffer.Pos{Line: r.line, Col: r.ln.off + anchor}
+		} else {
+			cells = adjusted
 		}
 	}
 	pos := runeIndexAt(r.ln.raw, cells, f.tab)

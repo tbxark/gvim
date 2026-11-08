@@ -3,6 +3,8 @@ package tui
 import (
 	"slices"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
@@ -463,7 +465,7 @@ func (m *Model) caretNow() caretAt {
 // resolved against the pane as it is shown now, before the focus moves, because
 // focusing a pane reveals its caret and can scroll it. The pane then keeps the view it
 // was pressed in, so the caret lands on the line under the pointer.
-func (m *Model) pressPane(i, x, y, count int) {
+func (m *Model) pressPane(i, x, y, count int) tea.Cmd {
 	p, hit, top, ok := m.paneHitIn(i, x, y)
 	m.focusPane(i)
 	if ok {
@@ -472,7 +474,7 @@ func (m *Model) pressPane(i, x, y, count int) {
 			m.setTopRow(p.TopRow)
 		}
 	}
-	m.pressEditor(p, hit, count)
+	return m.pressEditor(p, hit, count)
 }
 
 // paneHitIn maps frame cell (x, y) to what editor pane i shows, against the pane's

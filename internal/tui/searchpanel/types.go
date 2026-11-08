@@ -30,6 +30,9 @@ const (
 	// AllFiles searches the project's files, with the open buffers' unsaved text in
 	// place of their files on disk.
 	AllFiles Scope = iota
+	// OpenBuffers searches only the open buffers, unsaved text included: the project's
+	// files on disk are not walked.
+	OpenBuffers
 	// CurrentFile searches only the active buffer, unsaved text included.
 	CurrentFile
 )
@@ -223,15 +226,32 @@ type PreviewRequest struct {
 	Text string
 	// Line, Col, EndLine and EndCol are the 1-based match range, End exclusive.
 	Line, Col, EndLine, EndCol int
+	// Start is the first file line the preview wants, 0-based. A negative Start asks
+	// for the window centred on the match instead.
+	Start int
 	// Lines is the most context lines the preview wants.
 	Lines int
 }
 
-// PreviewResult is one match's context: a window of the file's lines.
+// PreviewSpan is one syntax-coloured run of a preview line.
+type PreviewSpan struct {
+	Line       int    // 0-based file line
+	Start, End int    // half-open rune columns on that line
+	Kind       string // the syntax kind name, such as "keyword"; "plain" is uncoloured
+}
+
+// PreviewResult is one match's context: a window of the file's lines, with the syntax
+// runs of those lines when the port can highlight them.
 type PreviewResult struct {
 	Start int      // 0-based file line of Lines[0]
 	Lines []string // the context lines, tabs unexpanded
-	Err   string   // why the file could not be read or previewed
+	// Total is the file's line count after the read caps, so the panel can show the
+	// window's place and clamp scrolling. Zero means unknown.
+	Total int
+	// Spans are the syntax runs of the returned lines; empty means plain text (the port
+	// cannot highlight, or the file is too large or has no grammar).
+	Spans []PreviewSpan
+	Err   string // why the file could not be read or previewed
 }
 
 // Previewer reads a match's context for the panel's preview column. The app

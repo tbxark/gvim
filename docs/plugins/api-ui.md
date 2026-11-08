@@ -383,8 +383,12 @@ replacement is drawn in the first hidden cells, activation/scope decides per lin
 caret/hit/selection/search mappings stay source-based); soft breaks insert display rows inside
 a line (indent blanks and optional prefix before the continuation text, which keeps its
 columns); virtual lines insert rows above/below the anchor line (gutter glyph one cell,
-text_overlays styled inside the row, the highest 64 priorities kept); the cursor-line overlay
-tints the caret row after the other row paints. The composition order is wrap+folds ->
+text_overlays styled inside the row, the highest 64 priorities kept) and a virtual row longer
+than the pane's text width wraps into display rows like text (the gutter glyph is drawn on the
+first chunk only, and every chunk maps to the anchor line); the cursor-line overlay tints the
+caret row after the other row paints. The scrollbar thumb scales by display rows when inserted
+rows are present (a large or windowed document keeps the line-based thumb), so scrolling reaches
+the same rows the painter shows. The composition order is wrap+folds ->
 markdown compose -> conceal -> soft breaks -> virtual lines -> cursor-line overlay ->
 selection/tail, through one source<->display row mapping shared by painting, caret, hit
 testing, reveal/scrolling and the scrollbar. compose_only items are filtered per painted pane

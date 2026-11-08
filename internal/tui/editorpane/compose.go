@@ -56,6 +56,37 @@ func (f frame) rawComposed(i int) composedLine {
 	return cp
 }
 
+// headingMarkerLen returns the number of leading runes of an ATX heading that the
+// page view hides: its hash run and the blank after it. A line that is not a
+// heading returns 0.
+func headingMarkerLen(raw []rune) int {
+	i := 0
+	for i < len(raw) && raw[i] == ' ' {
+		i++
+	}
+	if i > 3 {
+		return 0
+	}
+	start := i
+	for i < len(raw) && raw[i] == '#' {
+		i++
+	}
+	n := i - start
+	if n == 0 || n > 6 {
+		return 0
+	}
+	if i == len(raw) {
+		return i
+	}
+	if raw[i] != ' ' && raw[i] != '\t' {
+		return 0
+	}
+	for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t') {
+		i++
+	}
+	return i
+}
+
 // preRune is one rune of a composed prefix, with its source rune column.
 type preRune struct {
 	r   rune
@@ -74,6 +105,22 @@ func (f frame) composeLine(i int) composedLine {
 		return f.composeTableLine(i, tl, false)
 	}
 	out := composedLine{}
+
+	// An ATX heading hides its leading "#" run and the blank after it; the text
+	// keeps the heading kind (bold keyword styling) and the caret line reveals the
+	// markers like the other compose conceals.
+	if n := headingMarkerLen(raw); n > 0 {
+		for j := 0; j < len(raw); j++ {
+			if j < n {
+				continue
+			}
+			out.runes = append(out.runes, raw[j])
+			out.kinds = append(out.kinds, kindAt(kinds, j))
+			out.src = append(out.src, j)
+		}
+		finishMaps(&out, len(raw))
+		return out
+	}
 
 	// A thematic break becomes one rule across the measure, two cells short of it
 	// so it never wraps onto a second row.

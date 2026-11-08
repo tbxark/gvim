@@ -1,0 +1,7 @@
+{
+  "name": "code_tour",
+  "version": "1.0.0",
+  "description": "Load, create and walk JSON code tours: step panel, prose, file/line jumps and per-step highlights",
+  "api": 2,
+  "default_enabled": false
+}

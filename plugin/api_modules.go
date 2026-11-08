@@ -25,6 +25,7 @@ var installers = []func(*apiEnv){
 	installBuf,
 	installWin,
 	installSeams,
+	installLineTargets,
 	installCmd,
 	installEvents,
 	installKeys,

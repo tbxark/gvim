@@ -1,0 +1,7 @@
+{
+  "name": "lsp_navigation",
+  "version": "1.0.0",
+  "description": "LSP navigation lists: document symbols from the server (Fresh's Go to LSP Symbol) plus definition/implementation/type-definition result lists, with a fuzzy filter, in-buffer preview highlight and jump",
+  "api": 2,
+  "default_enabled": false
+}

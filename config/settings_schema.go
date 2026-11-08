@@ -260,7 +260,7 @@ var settingsTable = []Setting{
 	// Contents (the Markdown outline sidebar section; the retired markdown_toc
 	// plugin's fold_buffer setting is the same behavior under Fresh's plugin path).
 	{Path: []string{"contents", "fold_buffer"}, Section: SectionContents, Kind: SettingBool,
-		Layers: LayerUser, Apply: ApplyRestart,
+		Layers: LayerUser, Apply: ApplyLive,
 		value: boolValue(func(c Config) bool { return c.ContentsFoldBuffer() }), encode: encodeBool},
 
 	// Session.

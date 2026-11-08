@@ -35,6 +35,7 @@ const maxSettingKeys = 128
 
 type settingSpec struct {
 	key, typ string
+	desc     string
 	def      any
 	min, max *float64
 	values   []string // enum
@@ -46,6 +47,8 @@ type settingsState struct {
 	specs  map[string]*settingSpec
 	keys   []string // sorted
 	values map[string]any
+	// projects marks the keys the project config layer supplied the effective value of.
+	projects map[string]bool
 }
 
 var settingTypes = map[string]bool{"boolean": true, "integer": true, "number": true, "string": true, "enum": true, "string_list": true}
@@ -174,6 +177,9 @@ func (p *plugin) parseSpec(L *lua.LState, key string, t *lua.LTable) *settingSpe
 	default:
 		bad("project must be a boolean")
 	}
+	if d, ok := t.RawGetString("description").(lua.LString); ok {
+		s.desc = string(d)
+	}
 	if dv := t.RawGetString("default"); dv != lua.LNil {
 		goVal, err := p.fromLua(dv)
 		if err != nil {
@@ -209,6 +215,7 @@ func (p *plugin) parseSpec(L *lua.LState, key string, t *lua.LTable) *settingSpe
 // compute fills st.values from the defaults and the two config layers.
 func (p *plugin) computeSettings(st *settingsState) {
 	st.values = make(map[string]any, len(st.specs))
+	st.projects = make(map[string]bool, len(st.specs))
 	for _, k := range st.keys {
 		st.values[k] = st.specs[k].def
 	}
@@ -224,6 +231,7 @@ func (p *plugin) computeSettings(st *settingsState) {
 		if raw, ok := p.data.project[k]; ok && s.project {
 			if v, err := s.check(raw); err == nil {
 				st.values[k] = v
+				st.projects[k] = true
 			} else {
 				p.r.logf(p.name, levelWarn, fmt.Sprintf("project setting '%s': %v; ignored", k, err))
 			}
