@@ -39,6 +39,13 @@ type LongRunning interface {
 // Gate is the trust check run before every launch on every backend. A nil gate allows.
 type Gate func(ctx context.Context, argv []string, cwd string) error
 
+// GateEnv is Gate with the launch's effective environment, so the gate can resolve a
+// bare command name through the PATH the child will actually inherit (the parent
+// environment plus the project overlay plus the launch's own entries). The local
+// backend uses it when set; the plain Gate remains for the backends that only know the
+// argv and cwd (and for callers that do not need PATH resolution).
+type GateEnv func(ctx context.Context, argv []string, cwd string, env map[string]string) error
+
 // EnvProvider supplies environment entries ("K=V") for remote launches; nil gives none.
 type EnvProvider func() []string
 
@@ -212,9 +219,10 @@ func (a *Authority) Close() error {
 	return a.remote.Close()
 }
 
-// ErrUnsupportedFileIO is the error every remote FileSystem returns in this slice: remote
-// file access needs the SFTP/remote-helper follow-up.
-var ErrUnsupportedFileIO = fmt.Errorf("authority: remote file access is not available in this slice (SFTP/remote-helper follow-up)")
+// ErrUnsupportedFileIO is the error a slot whose backend mounts no file surface returns:
+// a slot always answers the FileSystem contract, and the SSH backend mounts the helper
+// backend of ssh_files.go instead of refusing.
+var ErrUnsupportedFileIO = fmt.Errorf("authority: this authority mounts no file surface")
 
 // UnsupportedFiles refuses every file operation with ErrUnsupportedFileIO.
 type UnsupportedFiles struct{}

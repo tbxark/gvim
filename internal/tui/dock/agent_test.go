@@ -1,6 +1,7 @@
 package dock
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -178,5 +179,266 @@ func TestTabsStartAgentStartsATabAndRestartsWithResume(t *testing.T) {
 	}
 	if len(starter.launches) != 2 || !slices.Equal(starter.launches[1].Argv, []string{"claude", "--resume", "s1"}) {
 		t.Fatalf("restart launches = %+v", starter.launches)
+	}
+}
+
+func TestTabsStartAgentChoice(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	var tabs Tabs
+	tabs.SetHost(Host{
+		RootDir:     func() string { return "/ws" },
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return 80, 4 },
+		Focus:       func() {},
+	})
+	tabs.SetPorts(Ports{Starter: starter})
+	tabs.SetEffects(Effects{
+		ResumeAgents: true,
+		Agents: []Agent{{
+			Name: "claude", Argv: []string{"claude", "--session-id", "s1"},
+			ResumeArgv: []string{"claude", "--resume", "s1"},
+		}, {Name: "codex", Argv: []string{"codex"}}},
+	})
+	// A resume choice starts the resume argv now; the record keeps both lists.
+	cmd, ok := tabs.StartAgentChoice("claude", true)
+	if !ok || cmd == nil {
+		t.Fatalf("StartAgentChoice = %v, %v", cmd != nil, ok)
+	}
+	if _, ok := tabs.Update(cmd()); !ok {
+		t.Fatal("the start message was not taken")
+	}
+	if len(starter.launches) != 1 || !slices.Equal(starter.launches[0].Argv, []string{"claude", "--resume", "s1"}) {
+		t.Fatalf("launches = %+v, want the resume argv", starter.launches)
+	}
+	rec := tabs.Active()
+	if rec == nil || rec.launch.Agent != "claude" || !rec.launch.Ephemeral || len(rec.launch.ResumeArgv) != 3 {
+		t.Fatalf("launch record = %+v", rec)
+	}
+	if got := tabs.LaunchDir(); got != "/ws" {
+		t.Fatalf("LaunchDir = %q", got)
+	}
+	// An agent without a resume argv starts its launch argv even when resume is asked.
+	cmd, ok = tabs.StartAgentChoice("codex", true)
+	if !ok || cmd == nil {
+		t.Fatalf("codex choice = %v, %v", cmd != nil, ok)
+	}
+	tabs.Update(cmd())
+	if len(starter.launches) != 2 || !slices.Equal(starter.launches[1].Argv, []string{"codex"}) {
+		t.Fatalf("launches = %+v, want the codex launch argv", starter.launches)
+	}
+	if _, ok := tabs.StartAgentChoice("nope", false); ok {
+		t.Fatal("StartAgentChoice accepted an unknown agent")
+	}
+}
+
+// newAgentTabs is a dock with a fake starter and one configured agent.
+func newAgentTabs(starter *fakeStarter) *Tabs {
+	var tabs Tabs
+	tabs.SetHost(Host{
+		RootDir:     func() string { return "/ws" },
+		Notice:      func(string) {},
+		ContentSize: func() (int, int) { return 80, 4 },
+		Focus:       func() {},
+	})
+	tabs.SetPorts(Ports{Starter: starter})
+	tabs.SetEffects(Effects{
+		ResumeAgents: true,
+		Agents: []Agent{{
+			Name: "claude", Argv: []string{"claude", "--session-id", "s1"},
+			ResumeArgv: []string{"claude", "--resume", "s1"},
+		}},
+	})
+	return &tabs
+}
+
+// TestAgentRestartUsesTheChosenDirectory is the regression for a chosen launch
+// directory: the agent reports a different cwd (OSC 7), but a restart and a
+// resumed session start in the directory the user chose, including across the
+// saved-state round trip. Cwd keeps the reported directory for a plain shell.
+func TestAgentRestartUsesTheChosenDirectory(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	tabs := newAgentTabs(starter)
+	cmd, ok := tabs.StartAgentChoiceAt("claude", false, "/chosen")
+	if !ok || cmd == nil {
+		t.Fatalf("start = %v, %v", cmd != nil, ok)
+	}
+	tabs.Update(cmd())
+	if got := starter.launchDirs; !slices.Equal(got, []string{"/chosen"}) {
+		t.Fatalf("launch dirs = %v, want the chosen directory", got)
+	}
+	// The agent's program reports a different directory; that must not move a
+	// restart away from the chosen one.
+	starter.term.cwd = "/reported"
+	st := tabs.SavedState()
+	if st.Cwd != "/reported" {
+		t.Fatalf("saved cwd = %q, want the terminal's reported directory", st.Cwd)
+	}
+	if st.LaunchDir != "/chosen" {
+		t.Fatalf("saved launch dir = %q, want the chosen directory", st.LaunchDir)
+	}
+	if len(st.Tabs) != 1 || st.Tabs[0].LaunchDir != "/chosen" {
+		t.Fatalf("saved tabs = %+v, want the per-tab launch dir", st.Tabs)
+	}
+	if cmd := tabs.Restart(); cmd == nil {
+		t.Fatal("restart returned no command")
+	} else {
+		tabs.Update(cmd())
+	}
+	if got := starter.launchDirs; !slices.Equal(got, []string{"/chosen", "/chosen"}) {
+		t.Fatalf("launch dirs = %v, want the chosen directory for the restart", got)
+	}
+	if got := len(starter.launches); got != 2 || !slices.Equal(starter.launches[1].Argv, []string{"claude", "--resume", "s1"}) {
+		t.Fatalf("restart launches = %+v, want the resume argv", starter.launches)
+	}
+	// The round trip through JSON keeps both directories, and the restored tab
+	// (dead until restarted) uses the launch directory.
+	st = tabs.SavedState()
+	// Cwd is the fake term's report again; make the saved terminal consistent.
+	starter.term.cwd = "/reported"
+	data, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"launch_dir":"/chosen"`) {
+		t.Fatalf("saved json = %s, want launch_dir", data)
+	}
+	var loaded terminal.SavedState
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatal(err)
+	}
+	restored := newAgentTabs(starter)
+	restored.Restore(loaded)
+	if got := restored.Restored(); !got {
+		t.Fatal("the restored tab is not marked restored")
+	}
+	if cmd := restored.Restart(); cmd == nil {
+		t.Fatal("restored restart returned no command")
+	} else {
+		restored.Update(cmd())
+	}
+	if got := starter.launchDirs; len(got) != 3 || got[2] != "/chosen" {
+		t.Fatalf("launch dirs = %v, want the restored restart in /chosen", got)
+	}
+}
+
+// TestLegacySavedStateLaunchDirFallsBackToCwd checks the migration: a record
+// without launch_dir (an older file) restarts its recorded agent in its saved cwd.
+func TestLegacySavedStateLaunchDirFallsBackToCwd(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	var legacy terminal.SavedState
+	record := `{"version":1,"cwd":"/legacy","launch_argv":["old-agent"],"agent":"a"}`
+	if err := json.Unmarshal([]byte(record), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.LaunchDir != "" {
+		t.Fatalf("legacy launch dir = %q, want empty", legacy.LaunchDir)
+	}
+	tabs := newAgentTabs(starter)
+	tabs.Restore(legacy)
+	if got := tabs.SavedState().LaunchDir; got != "/legacy" {
+		t.Fatalf("restored launch dir = %q, want the cwd fallback", got)
+	}
+	if cmd := tabs.Restart(); cmd == nil {
+		t.Fatal("restart returned no command")
+	} else {
+		tabs.Update(cmd())
+	}
+	if got := starter.launchDirs; !slices.Equal(got, []string{"/legacy"}) {
+		t.Fatalf("launch dirs = %v, want the legacy cwd", got)
+	}
+	if len(starter.launches) != 1 || !slices.Equal(starter.launches[0].Argv, []string{"old-agent"}) {
+		t.Fatalf("launches = %+v, want the recorded argv", starter.launches)
+	}
+}
+
+// TestRestoreClipsTheSavedLaunchDir bounds a hand-edited launch_dir on load, so a
+// corrupt record cannot pass an unbounded path to a start.
+func TestRestoreClipsTheSavedLaunchDir(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	tabs := newAgentTabs(starter)
+	tabs.Restore(terminal.SavedState{
+		Version:    terminal.SavedStateVersion,
+		Open:       true,
+		Cwd:        "/reported",
+		LaunchArgv: []string{"claude"},
+		LaunchDir:  "/" + strings.Repeat("a", maxSavedDirBytes+10),
+	})
+	if got := len(tabs.SavedState().LaunchDir); got != maxSavedDirBytes {
+		t.Fatalf("restored launch dir length = %d, want the bound %d", got, maxSavedDirBytes)
+	}
+}
+
+// TestTabsStartProgramKeepsTheWholeRecord checks the workspace Import start: full
+// record (resume argv, agent, source, launch directory) and source lookup for
+// de-duplicating a repeated import.
+func TestTabsStartProgramKeepsTheWholeRecord(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	tabs := newAgentTabs(starter)
+	attach := []string{"tmux", "-S", "/tmp/tmux-501/default", "attach", "-t", "work"}
+	launch := terminal.Launch{
+		Argv: attach, Agent: "claude", ResumeArgv: attach, Ephemeral: true,
+		Source: "tmux:default/work",
+	}
+	cmd, ok := tabs.StartProgram(launch, "tmux:work", "/chosen")
+	if !ok || cmd == nil {
+		t.Fatalf("StartProgram = %v, %v", cmd != nil, ok)
+	}
+	tabs.Update(cmd())
+	if len(starter.launches) != 1 {
+		t.Fatalf("launches = %+v", starter.launches)
+	}
+	got := starter.launches[0]
+	if !slices.Equal(got.Argv, attach) || !slices.Equal(got.ResumeArgv, attach) || got.Agent != "claude" || !got.Ephemeral || got.Source != "tmux:default/work" {
+		t.Fatalf("record = %+v", got)
+	}
+	if len(starter.launchDirs) != 1 || starter.launchDirs[0] != "/chosen" {
+		t.Fatalf("launch dirs = %v", starter.launchDirs)
+	}
+	if idx, ok := tabs.FindSource("tmux:default/work"); !ok || idx != 0 {
+		t.Fatalf("FindSource = %d, %v, want the started tab", idx, ok)
+	}
+	if _, ok := tabs.FindSource("tmux:default/other"); ok {
+		t.Fatal("FindSource found an unknown source")
+	}
+	if _, ok := tabs.FindSource(""); ok {
+		t.Fatal("FindSource accepted the empty source")
+	}
+}
+
+// TestSourceSurvivesTheSavedStateRoundTrip keeps the attach identity across an
+// editor restart, so a repeated import after restore does not open a duplicate.
+func TestSourceSurvivesTheSavedStateRoundTrip(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	tabs := newAgentTabs(starter)
+	attach := []string{"tmux", "attach", "-t", "work"}
+	cmd, _ := tabs.StartProgram(terminal.Launch{
+		Argv: attach, ResumeArgv: attach, Ephemeral: true, Source: "tmux:default/work",
+	}, "tmux:work", "/chosen")
+	tabs.Update(cmd())
+	st := tabs.SavedState()
+	if st.Source != "tmux:default/work" || len(st.Tabs) != 1 || st.Tabs[0].Source != "tmux:default/work" {
+		t.Fatalf("saved source = %q tabs %+v", st.Source, st.Tabs)
+	}
+	restored := newAgentTabs(starter)
+	restored.Restore(st)
+	if idx, ok := restored.FindSource("tmux:default/work"); !ok || idx != 0 {
+		t.Fatalf("restored FindSource = %d, %v", idx, ok)
+	}
+	if got := restored.Active().launch.Source; got != "tmux:default/work" {
+		t.Fatalf("restored launch source = %q", got)
+	}
+	if cmd := restored.Restart(); cmd == nil {
+		t.Fatal("restart returned no command")
+	} else {
+		restored.Update(cmd())
+	}
+	if got := starter.launchDirs; len(got) != 2 || got[1] != "/chosen" {
+		t.Fatalf("restart dirs = %v, want the chosen directory", got)
 	}
 }

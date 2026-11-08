@@ -100,6 +100,9 @@ func (j SaveJob) RunContext(ctx context.Context) SaveResult {
 	if j.err != nil {
 		return SaveResult{Job: j, err: j.err}
 	}
+	if j.Doc != nil && j.Doc.access != nil {
+		return j.runWithAccess(j.Doc.access)
+	}
 	if j.RefuseExisting && !sameFile(j.OwnPath, j.Path) && diskStateOf(j.Path).Exists {
 		return SaveResult{Job: j, err: fmt.Errorf("save as %s: %w", j.Path, ErrExists)}
 	}
@@ -119,4 +122,37 @@ func (j SaveJob) RunContext(ctx context.Context) SaveResult {
 		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
 	}
 	return SaveResult{Job: j, Disk: diskStateOf(j.Path), Note: saveNote("", note)}
+}
+
+// runWithAccess writes a remote (or otherwise non-local) document's save through its
+// file I/O seam: the disk-state check, the Save As refusal and the write all use the
+// access, so no local filesystem path is ever consulted or written. A failed remote
+// write is an error, and ApplySaves only marks a save that ran without error, so user
+// data is never reported saved when it was not.
+func (j SaveJob) runWithAccess(access FileAccess) SaveResult {
+	if j.large != nil {
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, errNoRemoteLarge)}
+	}
+	now, err := access.Stat(j.Path)
+	if err != nil {
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
+	}
+	disk := now.diskState()
+	if j.RefuseExisting && !sameFile(j.OwnPath, j.Path) && disk.Exists {
+		return SaveResult{Job: j, err: fmt.Errorf("save as %s: %w", j.Path, ErrExists)}
+	}
+	if j.CheckDisk && disk.Exists && !disk.SameAs(j.Expect) {
+		return SaveResult{Job: j, err: fmt.Errorf("%s %w", j.Name, ErrChangedOnDisk)}
+	}
+	if err := access.WriteFileAtomic(j.Path, j.Data); err != nil {
+		return SaveResult{Job: j, err: fmt.Errorf("save %s: %w", j.Path, err)}
+	}
+	after, err := access.Stat(j.Path)
+	if err != nil {
+		// The write worked; only the follow-up stat failed. Report the saved write with
+		// the size the editor wrote, so the document is marked saved; a later disk check
+		// then sees the remote state rather than treating the file as missing.
+		return SaveResult{Job: j, Disk: diskState{Exists: true, Size: int64(len(j.Data))}}
+	}
+	return SaveResult{Job: j, Disk: after.diskState()}
 }

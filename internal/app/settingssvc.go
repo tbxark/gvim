@@ -115,8 +115,8 @@ func (s *settingsService) snapshotFor(cfg config.Config, themePreviews map[strin
 		item := tui.SettingsItem{
 			Key:     setting.Key(),
 			Path:    slices.Clone(setting.Path),
-			Name:    setting.Name(),
-			Section: setting.Section,
+			Name:    settingsLabel(setting),
+			Section: settingsSectionLabel(setting.Section),
 			Kind:    string(setting.Kind),
 			Value:   value,
 			Choices: s.choicesOf(setting),

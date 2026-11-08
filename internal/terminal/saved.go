@@ -25,6 +25,16 @@ type SavedState struct {
 	ResumeArgv []string `json:"resume_argv,omitempty"`
 	Agent      string   `json:"agent,omitempty"`
 	Ephemeral  bool     `json:"ephemeral,omitempty"`
+	// LaunchDir is the directory the launched program was started in. Cwd is the
+	// terminal's current directory (the shell's last OSC 7 report); an agent's
+	// internal chdir must not move a later restart or resume away from the chosen
+	// launch directory, so the two are kept apart. Additive: an older record has no
+	// launch_dir and keeps its cwd as the launch directory on restore.
+	LaunchDir string `json:"launch_dir,omitempty"`
+	// Source is the durable external identity of a discovered session (for example
+	// "tmux:default/work"), so a repeated import can find the tab that already
+	// attaches it. Additive; empty for a configured agent or a plain shell.
+	Source string `json:"source,omitempty"`
 	// Tabs holds every dock terminal tab when the dock had more than the one the
 	// top-level fields describe. The top-level fields mirror the active tab, so a
 	// reader that does not know Tabs still restores that tab; a reader that does
@@ -47,4 +57,6 @@ type SavedTab struct {
 	ResumeArgv []string `json:"resume_argv,omitempty"`
 	Agent      string   `json:"agent,omitempty"`
 	Ephemeral  bool     `json:"ephemeral,omitempty"`
+	LaunchDir  string   `json:"launch_dir,omitempty"`
+	Source     string   `json:"source,omitempty"`
 }

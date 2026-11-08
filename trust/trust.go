@@ -15,8 +15,9 @@
 // A fourth, empty Level value, Undecided, means no decision has been recorded
 // for the workspace. Its effective level is Restricted, Fresh's safe default.
 //
-// The package is TUI-free and does no other IO than reading and writing the
-// store file it is given, so it can be tested without an editor.
+// The package is TUI-free. Besides reading and writing the store file it is given, the
+// spawn gate (gate.go) stats PATH candidates and resolves symlinks when deciding a
+// launch; everything else does no IO, so the model can be tested without an editor.
 package trust
 
 import "strings"

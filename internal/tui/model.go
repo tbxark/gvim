@@ -140,6 +140,12 @@ type Model struct {
 	detach        func()        // ends the attached daemon client; nil when not hosted
 	pending       tea.Cmd       // commands a menu row started, returned by routeMenu
 	notice        string        // replaces the editor status until the next press
+	// startupOpen is a remote path the app parked for the root's first command (see
+	// Deps.StartupOpen); startupPending stays set until the asynchronous read succeeds,
+	// so an authority reconnect retries a failed startup open and a failure never turns
+	// into an empty buffer.
+	startupOpen    string
+	startupPending bool
 
 	clicks    clickCounter
 	lastPress int // the count of the last editor press, see pressEditor
@@ -173,6 +179,9 @@ type Model struct {
 	lsp lspState
 	// dock is the terminal dock under the body (see dock_glue.go and the dock package).
 	dock dock.Tabs
+	// discover scans for terminal sessions outside gvim, for the Discover Agent
+	// Sessions picker (see agent_discover.go). Nil disables the scan.
+	discover AgentDiscoverer
 	// view is the display state the view commands change (see view.go).
 	view viewState
 	// occ pauses the occurrence highlight after an edit (see occurrence.go).
@@ -191,6 +200,10 @@ type Model struct {
 	// shellRun, when set, runs shell_command/format_buffer jobs on the workspace
 	// authority instead of the local editor runner (see authority_status.go).
 	shellRun func(editor.ShellJob) (string, error)
+	// workspace is the daemon's workspace layer and workspaceLabel the active
+	// workspace's status-row label (see workspace_ui.go); both zero for a direct launch.
+	workspace      WorkspacePort
+	workspaceLabel string
 }
 
 // drag is the pointer gesture in progress: a text selection, or a grab of the
@@ -240,6 +253,8 @@ func New(deps Deps) *Model {
 		hideLineNumbers: deps.HideLineNumbers,
 		tabSize:         deps.TabSize,
 		notice:          deps.Notice,
+		startupOpen:     deps.StartupOpen,
+		startupPending:  deps.StartupOpen != "",
 		splits:          newSplitSet(),
 		util:            utilities{settings: deps.Settings, settingsPort: deps.SettingsPort, themeCatalog: deps.ThemeCatalog, switchKeymap: deps.SwitchKeymap},
 		root:            rootState{ports: deps.Root},
@@ -329,6 +344,21 @@ func RunWithIO(ctx context.Context, m *Model, in io.Reader, out io.Writer, onPro
 	return runProgramIO(ctx, m, out, onProgram, tea.WithInput(in), tea.WithOutput(out))
 }
 
+// RunWorkspaceHost runs a WorkspaceHost as the daemon's one program: the host swaps the
+// active workspace model on switch without restarting the program, and onProgram receives
+// the program (the daemon uses it for attach resizes and repaints).
+func RunWorkspaceHost(ctx context.Context, h *WorkspaceHost, in io.Reader, out io.Writer, onProgram func(*tea.Program)) error {
+	err := runProgramIO(ctx, h, out, func(p *tea.Program) {
+		h.setProgram(p)
+		if onProgram != nil {
+			onProgram(p)
+		}
+	}, tea.WithInput(in), tea.WithOutput(out))
+	// The program is over: Do would block on a dead message queue.
+	h.stop()
+	return err
+}
+
 // OpenFileMessage is the message a hosted daemon sends to open a path a client asked
 // for. It is the message the explorer sends when a row is activated.
 func OpenFileMessage(path string) tea.Msg { return expanel.OpenFileMsg{Path: path} }
@@ -346,7 +376,7 @@ func runProgram(ctx context.Context, m *Model, out io.Writer, opts ...tea.Progra
 
 // runProgramIO is the shared program loop: onProgram, when set, receives the program
 // before it starts, so the daemon can send attach resizes and request repaints.
-func runProgramIO(ctx context.Context, m *Model, out io.Writer, onProgram func(*tea.Program), opts ...tea.ProgramOption) error {
+func runProgramIO(ctx context.Context, m tea.Model, out io.Writer, onProgram func(*tea.Program), opts ...tea.ProgramOption) error {
 	p := tea.NewProgram(m, append([]tea.ProgramOption{tea.WithContext(ctx)}, opts...)...)
 	if onProgram != nil {
 		onProgram(p)
@@ -396,7 +426,7 @@ func (m *Model) Close() {
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd(), m.authorityInitCmd())
+	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd(), m.authorityInitCmd(), m.startupOpenCmd())
 }
 
 // Update implements tea.Model. It runs update, then keeps the split panes on tabs
@@ -419,6 +449,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if done, ok := msg.(authorityReconnectedMsg); ok {
 		m.reportAuthorityReconnect(done.err)
+		if done.err == nil {
+			// A startup open that failed while the authority was disconnected is
+			// retried once the connection is back: failures stay retryable, never a
+			// silently empty local buffer. The app's post-reconnect work (restarting the
+			// remote language servers that were running) runs in a command too, never on
+			// the update goroutine.
+			cmds := []tea.Cmd{m.startupOpenCmd()}
+			if m.auth.AfterReconnect != nil {
+				after := m.auth.AfterReconnect
+				cmds = append(cmds, func() tea.Msg {
+					count, err := after()
+					return authorityRestartDoneMsg{count: count, err: err}
+				})
+			}
+			return m, tea.Batch(cmds...)
+		}
+		return m, nil
+	}
+	if done, ok := msg.(authorityRestartDoneMsg); ok {
+		m.reportAuthorityRestart(done.count, done.err)
 		return m, nil
 	}
 	active, count, rows := m.activeTab(), len(m.ed.Tabs()), m.bodyRows()
@@ -1167,6 +1217,8 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		return m.viewAnswer(tag, d)
 	case terminalTabRenameTag:
 		m.renameDockTab(d.Text)
+	case agentRunDirTag:
+		return m.agentDirAnswer(d)
 	case newNameTag:
 		kind := jobCreate
 		if tag.folder {
@@ -1197,6 +1249,10 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 	case authorityPasswordTag:
 		if d.Outcome == prompt.Submitted {
 			return m.authorityReconnectCmd(d.Text)
+		}
+	default:
+		if cmd, ok := m.workspaceActionAnswer(d); ok {
+			return cmd
 		}
 	case gotoTag:
 		if d.Outcome == prompt.Submitted {
@@ -1426,7 +1482,7 @@ func (m *Model) openPalette(query string) tea.Cmd {
 	p := palette.New(palette.Options{
 		Query:    query,
 		Root:     m.rootDir(),
-		Commands: m.allCommands(),
+		Commands: translateCommands(m.allCommands()),
 		State:    &st,
 		Buffers:  m.paletteBuffers(),
 		Files:    m.files,
@@ -1838,6 +1894,9 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		"compare_files", "compare_with_file", "compare_copy_change", "compare_take_change", "compare_close":
 		m.splitAction(action)
 	default:
+		if cmd, ok := m.workspaceAction(action); ok {
+			return cmd, true
+		}
 		if cmd, ok := m.lspAction(action); ok {
 			return cmd, true
 		}
@@ -2532,6 +2591,9 @@ func (m *Model) statusView() statusView {
 	s.Chord = m.statusChord()
 	s.Extra = m.plugStatusItems()
 	if item, ok := m.authoritySegment(); ok {
+		s.Extra = append(s.Extra, item)
+	}
+	if item, ok := m.workspaceSegment(); ok {
 		s.Extra = append(s.Extra, item)
 	}
 	return s

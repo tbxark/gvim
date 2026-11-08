@@ -1,9 +1,13 @@
 # Authority (workspace backend slot)
 
-Status: first slice (#21a). The slot, the local backend, the remote-spec parsing, the SSH
-backend for terminal and one-shot exec, and the connection-state hooks are implemented in
-`authority/` and `internal/terminal/session_backend.go`. Wiring into the app/TUI is a
-separate step (see §7); until it lands the editor still runs one local authority.
+Status: #21a plus the round-13 remote completion. The slot, the local backend, the
+remote-spec parsing, the SSH backend for terminal/one-shot/long-running children, the
+remote `FileSystem`, and the connection-state hooks are implemented in `authority/` and
+`internal/terminal/session_backend.go`. The editor's file I/O and the language servers of a
+remote workspace are routed through the slot (§6), including automatic server restart after
+a reconnect; the remaining residuals are listed in §7 (remote explorer, external-change
+watch, remote large files, reconnect retry/backoff, remote trust store, terminal respawn as
+an open parity gap).
 
 ## 1. The slot and its four surfaces
 
@@ -92,18 +96,110 @@ Rules (all covered by table tests):
   `terminal.shell` override deliberately does not apply), stderr merged into the output,
   resize through `WindowChange`, transport `Backend` wrapped by
   `terminal.StartWithBackend`.
+- Files: the remote `FileSystem` is mounted (`authority/ssh_files.go`): bounded `sh -c`
+  helper commands over the same exec channel (a read cap, stat with GNU and BSD/macOS
+  `stat`, a sorted directory listing with an entry cap, atomic temp-file+rename writes
+  that preserve the target mode and write through a symlink, and a polling watch). The
+  decision, assumptions and limits are in `6.
 - Reconnect: `Reconnect(ctx)` closes the carrier and redials the stored target; a session
   that observes the death marks `Connected=false` with a reason for the indicator. Existing
-  remote terminals are not resurrected (they are respawned through the slot on activation).
+  remote terminals are not resurrected automatically: the transcript is kept read-only and
+  the user starts a shell again. Respawn of the previous terminal on reconnect is an open
+  parity gap; a safe version needs a recorded, replayable launch (the login shell only, or
+  an argv the user explicitly chose), never a silent replay of an arbitrary command.
 
-## 6. Remote file I/O (not in this slice)
+## 6. Remote file I/O (landed this round)
 
-The SSH `FileSystem` returns `authority.ErrUnsupportedFileIO`. Follow-up decision record:
-x/crypto/ssh is cached but an SFTP implementation is not an offline dependency; the next
-slice should either take `pkg/sftp` (dependency policy permitting) and implement
-`FileSystem` over ssh sessions, or ship a small remote helper on the host (the daemon
-protocol already exists) and route the same interface over it. Path translation, the
-`PathMapper` seam and the spec parsing above are ready for either.
+The SSH backend mounts a real `FileSystem`: every operation is one bounded helper command
+run through the existing exec channel (`sh -c` + `RemoteCommand` quoting), and nothing is
+installed on the remote host. This is the task's documented fallback, chosen on evidence,
+not preference: the offline module cache has no usable SFTP implementation (`pkg/sftp` has
+only a `.info` file and no module tree; no network), the dependency policy is pure Go, and
+Fresh's own remote filesystem needs a Python 3 agent on the host — a requirement this port
+deliberately does not take.
+
+- Operations: `ReadFile` reads through `head -c <max+1>` so an oversized file is detected
+  without transferring it (the error keeps the port's "larger than N bytes" shape); `Stat`
+  answers kind/size/mtime/mode, follows a live symbolic link and reports a broken link as a
+  symlink (the port's fallback); `ReadDir` returns a name-sorted listing with the port's
+  hidden filter and a symlink's target kind; `WriteFile` supports truncate/append, `Parents`
+  (`mkdir -p`) and `Atomic`; `Watch` polls (500 ms) because a remote host has no fsnotify
+  channel.
+- Atomic saves: the atomic path creates `mktemp` in the target directory, streams stdin into
+  it with `cat`, applies the resolved mode, then `mv -f` over the target: a same-directory
+  rename, which is the atomicity the local port relies on. The target's existing permission
+  is preserved when `WriteOptions.Mode` is zero; an explicit mode replaces it. A symbolic
+  link is resolved (bounded, 16 levels) and the target replaced, so the link stays a link —
+  matching the local atomic path. A non-atomic write follows symlinks like `cat` and keeps
+  an existing file's permission. These exact behaviours are asserted in
+  `authority/ssh_files_test.go`, not assumed.
+- Bounds and errors: collection is bounded during the transfer, not after it. The session
+  pump writes into a bounded buffer that keeps draining after its limit (so the remote
+  process never blocks) and records the overflow; an over-cap answer is an explicit error,
+  never a truncated success. Exact caps: whole-file read 64 MiB (the caller's `max` is
+  first capped to it; `head -c effective+1` detects oversize without transferring it),
+  directory listing transfer 4 MiB on top of the 5000-entry cap, stat/write helper stdout
+  64 KiB, and helper stderr 64 KiB (a failing helper's message is never parsed beyond the
+  cap — the error says the error output was over the cap). Every call is bounded by its
+  context (the authority kills the remote process when it ends) and the SSH layer's connect
+  timeout; a failed helper is an error, never an empty successful answer. Not-found and
+  permission failures wrap `fs.ErrNotExist`/`fs.ErrPermission` so callers can distinguish
+  them; a directory used as a file and a non-regular file keep the port's wording; any
+  other failure carries the remote stderr text.
+- Watch limits: polling cannot see a rename, so it is reported as `remove` + `create`; the
+  latency is the poll interval plus the debounce; events are coalesced over the
+  `hostos.WatchOptions.Debounce` window (50 ms default). A watch of a file reports that file;
+  a watch of a directory reports its immediate children.
+- Editor routing (landed): `document.FileAccess` is the document's file I/O seam
+  (`ReadFile`/`Stat`/`WriteFileAtomic`); `authority`-backed access is installed on the editor
+  once the SSH slot connects, and there is no local fallback at any site. Loads, saves,
+  Save As, reload (`Revert`), the changed-on-disk check and the periodic disk check all go
+  through the seam; a missing remote path is an error, never an empty "new file" buffer, and
+  a directory target and a broken/non-regular remote kind are refused. Saves are the
+  authority's atomic temp-file+rename; a failed remote save is an error and the buffer stays
+  modified, so nothing is reported saved that was not. The remote open is async: the app
+  installs the access after the connect attempt and parks the file path for the root's first
+  command (`tui.Deps.StartupOpen`), which loads it off the update loop; a failed or
+  disconnected open is a notice and stays retryable (it is retried after an authority
+  reconnect), never an empty local buffer. Remote path rules: a path is used as written on
+  the remote host (absolute or `~`-rooted; a relative path is rejected rather than resolved
+  against the local working directory), `~` expands through the remote shell's `$HOME`
+  (cached), and `~user` is refused (recorded residual).
+- LSP over SSH (landed): the language servers of a remote workspace start on the remote
+  host through the authority's `LongRunning` surface (a separate ssh exec channel with
+  piped stdio), not as local `exec.Command`s. The manager gained a `SetSpawner` seam (nil =
+  the local `lsp.Start`, so local launches are unchanged); for a remote launch the app
+  installs a spawner that starts the configured command verbatim on the remote host in the
+  remote workspace, overrides the initialize root URI with the remote workspace path
+  (`~` expanded through the remote shell's `$HOME`), clears the locally resolved Program
+  (the remote shell resolves a bare command in the remote PATH), keeps the remote login
+  environment rather than the local env overlay, and feeds the remote child's stdio through
+  a pipe adapter into the normal lsp client. The server's stderr is captured for the error
+  tail, and a configured `process_limits` is recorded as not applied remotely (the limits
+  would run on the local ssh client, not the remote host). The workspace spawn gate still
+  runs before the spawner, so the coarse remote trust rule decides first, and a denied gate
+  never reaches the spawner. After a successful reconnect the root runs the app's
+  post-reconnect command (off the update goroutine): the manager restarts each server that
+  was running before the drop (`Manager.RestartAfterReconnect`). Only previously started
+  servers are restarted — a server the user never started, stopped, or a muted language is
+  left alone — and a live handle or a start already in flight is kept, so a reconnect can
+  never create a duplicate. The spawn gate runs for every restart (trust), and the context
+  is checked between servers (cancellation); an in-flight handshake is the manager's own
+  bounded start and is not cancelled mid-flight. A manual restart after a reconnect keeps
+  the same state. Terminal respawn after a reconnect is an **open parity gap**, not a
+  permanent decision: replaying the previous command is not safe while it can be an
+  arbitrary program, and there is no recorded "replayable launch" (the login shell or an
+  argv the user explicitly chose) yet. Until that exists the restored transcript stays
+  read-only and the user starts a shell explicitly; the safe respawn design is the next
+  step.
+- Security and assumptions: helper output is parsed as data and never executed; every path
+  and mode is POSIX-quoted by `ShellQuote` (a path with spaces, quotes and a newline is
+  covered by a test); no shell evaluation of file names occurs. The remote base system must
+  provide a POSIX `sh`, `head`, `cat`, `chmod`, `mv`, `mkdir`, `dirname`, `readlink`,
+  `mktemp` and a `stat` that is GNU coreutils or BSD/macOS `stat` (the helper detects which
+  by its options); no package is installed and no interpreter (Python or otherwise) is
+  required. A remote whose `stat` is neither flavour gets a clear error rather than silent
+  wrong metadata.
 
 ## 7. Wiring (landed this round)
 
@@ -119,11 +215,21 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
   credentials (ssh-agent and identity files are tried first). The choice: lazy connect
   with a startup attempt, because a password prompt needs the running UI.
 - Remote UX: a remote launch opens no local files or session, does not restore or save
-  the local session, opens the SSH terminal at `RemoteSpec.Workspace()` and says on the
-  status row that remote file editing is the SFTP/remote-helper follow-up. It never
-  silently edits local files. The status row shows `SSH:user@host` or
-  `SSH:user@host · disconnected` (hand-written English this round; the statusbar owner
-  extracts `gvim.status.remote_ssh` / `remote_ssh_disconnected` in the i18n slice).
+  the local session, opens the SSH terminal at `RemoteSpec.Workspace()`, mounts a real
+  remote `FileSystem` and routes the editor's file I/O through it (see §6). The file named
+  by the remote target is opened by the root's first command; a directory target opens the
+  terminal only (the remote explorer is a recorded residual). The launch is scoped: no local
+  file watcher, no local crash-recovery copy of remote text, and no local language server
+  for remote buffers (`deps.LSP` is nil for a remote launch) — each is explicit here, not a
+  global change. The status row shows `SSH:user@host` or `SSH:user@host · disconnected`
+  (hand-written English this round; the statusbar owner extracts
+  `gvim.status.remote_ssh` / `remote_ssh_disconnected` in the i18n slice). After a
+  reconnect, the remote language servers that were running are restarted automatically and
+  a status notice says how many came back; a failed restart is a notice. The remote terminal
+  is not respawned automatically while a safe replayable-launch record does not exist (an
+  open parity gap: a silent replay of an arbitrary command is rejected, but restarting the
+  recorded login shell with the transcript preserved is the planned fix); the transcript is
+  kept read-only and the user starts the shell again explicitly for now.
 - Launch routing, with no backend-kind checks in the callers: the dock terminal starter
   asks `Terminal().Launch` (a nil `Backend` starts the local PTY as before, a transport
   goes through `terminal.StartWithBackend`); git grep, the shell/format runner and the
@@ -138,16 +244,33 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
 
 Residuals of this slice (documented, not bugs):
 
-- Remote file I/O is not routed: the editor's own file access still uses the local
-  process, and a remote launch deliberately opens no files. The SSH FileSystem already
-  returns `ErrUnsupportedFileIO`; the follow-up is SFTP (`pkg/sftp` when the dependency
-  policy allows; no SFTP module is cached offline) or a remote helper, then routing the
-  editor's file/watch calls through the slot.
-- LSP spawns are not routed through `TLongRunning` yet; the surface exists.
+- Remote residuals of the landed routing: remote explorer/listing (a directory target
+  opens the terminal only; the palette/explorer still describe the local tree), no remote
+  external-change watch (a file changed on the host is picked up by Revert/Reopen and by the
+  disk check, not by fsnotify-in-the-background), remote large-file mode (a document over
+  the 64 MiB read cap fails with the too-large error instead of opening lazily), remote
+  crash recovery and hot-exit (deliberately skipped for a remote launch so remote text is
+  never copied into a local cache), `~user` expansion, special remote files (the helper's
+  kind mapping only knows file/dir/symlink; a FIFO read is bounded by the context and fails
+  rather than blocking forever), and a remote save interrupted by a carrier drop surfaces
+  an error (never a local retry or a second write).
+- LSP over SSH residuals: the reconnect restart covers the servers that were running before
+  the drop (a server the user stopped or a muted language is kept as chosen; a start that is
+  already in flight when the carrier drops again is not cancelled mid-handshake — the
+  context is checked between servers), each server gets one restart attempt per reconnect
+  (no background retry/backoff), a remote server's `process_limits` are recorded but cannot
+  be applied (the local pid is the ssh client), the remote command is resolved by the remote
+  login shell's PATH only (no remote install probe; a missing server surfaces the start
+  error), and the remote workspace's trust decision still uses the local workspace's trust
+  (a remote trust store is a later slice). Remote terminal respawn is an open parity gap:
+  the safe version (respawn the recorded login shell or a user-approved argv, transcript
+  preserved, never a silent replay of an arbitrary command) is not landed yet, so the
+  terminal is restarted explicitly today.
 - The remote workspace's trust decision uses the local workspace's trust in this slice
   (a remote workspace needs its own trust store in a later slice).
-- A dropped carrier does not resurrect an open remote terminal; activation reconnects the
-  carrier and opening the terminal again starts a fresh session.
+- A dropped carrier does not resurrect an open remote terminal (open parity gap, see
+  above): activation reconnects the carrier, and opening the terminal again starts a fresh
+  session set by the user.
 - Plugin `gvim.fs`/`gvim.proc` still use the plugin OS port directly; routing them through
   the authority is the follow-up once remote file I/O exists.
 
@@ -162,6 +285,39 @@ Residuals of this slice (documented, not bugs):
 - SSH backend against an in-process `x/crypto/ssh` server (unix-only build tag): one-shot
   command composition and exit codes, PTY terminal with echo/resize, long-running stdio,
   identity-file auth, unknown-host error, dropped-carrier detection and reconnect.
+- Remote file helpers (`authority/ssh_files_test.go`, same in-process server running the
+  composed command locally so the real helper text and quoting are under test): read and
+  the read cap, missing/directory errors, atomic writes (content, mode, preserved mode,
+  explicit mode, parents, append, empty file, symlink written through), stat kinds and
+  the follow/broken-link rules, the sorted hidden-filtered listing with target kinds,
+  polled watch create/write/remove, permission mapping, a hostile path with spaces/quotes/
+  newline, and a dropped carrier failing file I/O clearly.
+- Editor routing (fake in-memory authority FileSystem, `internal/app/remote_editor_test.go`):
+  open and save go solely through the access (the local path is absent before and after a
+  save), a remote changed-on-disk state refuses the save and writes nothing, a failed or
+  disconnected open is an error with no tab bound to the remote path (no empty buffer), a
+  directory target is a directory error (no buffer), and Save As plus Revert go through the
+  same access. The asynchronous startup open and its reconnect retry are in the root
+  (`Deps.StartupOpen`); the document seam has unit coverage through these editor tests and
+  the existing editor suite.
+- The root's startup-open retry: `internal/tui/remote_startup_test.go`
+  TestStartupOpenRetriesAfterReconnect (a failed open is a notice with no document,
+  repeated failed reconnects keep the open pending, the first successful reconnect retries
+  once, and a later reconnect does not re-open).
+- LSP over SSH: `lsp/client_remote_test.go` (caller-launched client captures the remote
+  server's stderr tail and the limits note), `lsp/manager/spawner_test.go` (the injected
+  spawner is used and the spawn gate denies before it), and
+  `internal/app/remote_lsp_test.go` TestRemoteLSPSpawnerRunsOnTheAuthority (a real
+  initialize handshake over the authority transport; remote cwd, configured command
+  verbatim, remote limits note). The reconnect restart has behavior tests in
+  `lsp/manager/reconnect_restart_test.go`: a dropped server restarts once with no duplicate,
+  the spawn gate denies before the spawner (trust), a cancelled context starts nothing, and
+  a manually stopped server or muted language is not restarted; plus the root hook tests in
+  `internal/tui/authority_restart_test.go` (post-reconnect work schedules only on success,
+  off the update goroutine, and reports count/failure). A real-host manual acceptance
+  remains: start gvim on `user@host:/proj`, edit/save/revert a file, start a language
+  server, drop the connection and reactivate the window — the server restarts and the
+  notice says how many; restart the terminal explicitly.
 - CLI and app rules: remote forms reach `Targets.Remote`, malformed/mixed launches are startup
   errors, and `Options.Validate` repeats them.
 - TUI: the connected/disconnected segment, activation reconnect, the password prompt and

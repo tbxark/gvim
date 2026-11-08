@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path"
 	"slices"
 	"strings"
@@ -34,6 +35,7 @@ import (
 	"go.lsp.dev/protocol"
 
 	"github.com/tbxark/gvim/lsp"
+	"github.com/tbxark/gvim/trust"
 )
 
 // ErrNoServer is returned by Manager.Open for a language that has no server, and
@@ -232,6 +234,15 @@ type openDoc struct {
 	version  int32
 }
 
+// resumeSpec is a server that has run in this manager: enough to start it again after a
+// reconnect. It is recorded on a successful start and removed by an explicit user stop or
+// a mute.
+type resumeSpec struct {
+	language  string
+	cfg       ServerConfig
+	universal bool
+}
+
 // serverStart is a start of one server that is still running. A caller that needs
 // that server while it starts waits on done and shares the result.
 type serverStart struct {
@@ -250,7 +261,12 @@ type serverStart struct {
 // closes that server. A server whose connection has ended is replaced the next
 // time its language opens a document.
 type Manager struct {
-	rootURI   string
+	rootURI string
+	// rootDir is the workspace directory ("" for none), kept for the spawn gate's cwd.
+	rootDir string
+	// gate is the workspace trust spawn gate (nil allows); it runs before every server
+	// start, with the argv, the workspace root and the child's effective PATH.
+	gate      func(ctx context.Context, argv []string, cwd, pathValue string) error
 	servers   map[string][]ServerConfig // by language ID
 	universal []ServerConfig
 	start     func(context.Context, lsp.Config) (*lsp.Client, error)
@@ -286,6 +302,11 @@ type Manager struct {
 	// stopped holds the servers the user stopped by hand, so an Open does not start
 	// them again until a manual restart.
 	stopped map[string]bool
+	// resume records the servers that have been started successfully, so a reconnect can
+	// restart the ones that were running before a carrier drop. User stops and mutes
+	// delete their entries; a crash or a dropped carrier keeps them (that is the case a
+	// reconnect recovers).
+	resume map[string]resumeSpec
 	// failures holds the message of the last failed start, by server key.
 	failures map[string]string
 	// epoch counts Shutdown calls, so that a server started across one is not kept.
@@ -307,11 +328,13 @@ func NewManager(root string, servers map[string][]ServerConfig, universal []Serv
 	}
 	return &Manager{
 		rootURI:   rootURI,
+		rootDir:   root,
 		servers:   servers,
 		universal: slices.Clone(universal),
 		start:     lsp.Start,
 		timeout:   managerTimeout,
 		starting:  make(map[string]*serverStart),
+		resume:    make(map[string]resumeSpec),
 		docs:      make(map[string]*openDoc),
 		disabled:  make(map[string]bool),
 		forced:    make(map[string]bool),
@@ -326,6 +349,61 @@ func (m *Manager) SetSpawnEnv(overlay func() []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.spawnEnv = overlay
+}
+
+// SetSpawner replaces how a server process is started, for a backend that cannot start
+// a local exec.Command (a remote authority runs the server over SSH through its
+// LongRunning surface; see docs/authority.md). A nil spawner restores lsp.Start. The
+// spawn gate still runs before it in launch(), so a remote server is gated like a local
+// one. Call it before the servers start; the app wires it once for a remote workspace.
+func (m *Manager) SetSpawner(start func(context.Context, lsp.Config) (*lsp.Client, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if start == nil {
+		start = lsp.Start
+	}
+	m.start = start
+}
+
+// SetGate installs the workspace trust spawn gate. It is read at every server start,
+// so a trust decision applies to the next one. A nil gate allows every start.
+func (m *Manager) SetGate(gate func(ctx context.Context, argv []string, cwd, pathValue string) error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gate = gate
+}
+
+// gateSpawn runs the trust gate for one server start. The context is the launch's
+// bounded start context; a denial becomes an *lsp.StartError so the existing
+// failed-to-start surface shows the trust reason.
+func (m *Manager) gateSpawn(ctx context.Context, language string, cfg ServerConfig, command []string, pathValue string) error {
+	m.mu.Lock()
+	gate, rootDir := m.gate, m.rootDir
+	m.mu.Unlock()
+	if gate == nil {
+		return nil
+	}
+	if err := gate(ctx, command, rootDir, pathValue); err != nil {
+		return &lsp.StartError{
+			Language: language,
+			Name:     cfg.DisplayName(),
+			Command:  strings.Join(command, " "),
+			Err:      err,
+		}
+	}
+	return nil
+}
+
+// effectivePath returns the PATH the child resolves bare names through: the first
+// PATH entry of its environment (the process's own comes first, then the overlay), as
+// the C library and Go runtime read environment variables.
+func effectivePath(entries []string) string {
+	for _, kv := range entries {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == "PATH" {
+			return v
+		}
+	}
+	return ""
 }
 
 // SetApplyEdit installs the handler for a server's workspace/applyEdit request.
@@ -612,6 +690,7 @@ func (m *Manager) StopServer(language, name string) error {
 	m.stopKey(key)
 	m.mu.Lock()
 	m.stopped[key] = true
+	delete(m.resume, key)
 	m.mu.Unlock()
 	return nil
 }
@@ -640,6 +719,9 @@ func (m *Manager) SetLanguageEnabled(language string, enabled bool) {
 	m.mu.Unlock()
 	for _, key := range keys {
 		m.stopKey(key)
+		m.mu.Lock()
+		delete(m.resume, key)
+		m.mu.Unlock()
 	}
 }
 
@@ -800,6 +882,7 @@ func (m *Manager) startServer(key, language string, cfg ServerConfig, universal 
 		m.nextID++
 		h.id = m.nextID
 		m.handles = append(m.handles, h)
+		m.resume[key] = resumeSpec{language: language, cfg: cfg, universal: universal}
 		delete(m.failures, key)
 	} else if m.epoch == epoch {
 		m.failures[key] = err.Error()
@@ -850,11 +933,35 @@ func (m *Manager) spawnEnvList(configured []string) []string {
 // that fails a step is closed.
 func (m *Manager) launch(key, language string, cfg ServerConfig, universal bool) (*Handle, error) {
 	command := cfg.CommandLine()
+	serverEnv := m.spawnEnvList(envList(cfg.Env))
+	pathValue := effectivePath(append(os.Environ(), serverEnv...))
+	// Resolve a bare program here, through the same cwd and child PATH the gate uses, and
+	// hand the absolute path to lsp.Start (Config.Program): the executed binary, the one
+	// the gate judges and the one the test surface sees in Command stay consistent.
+	m.mu.Lock()
+	rootDir := m.rootDir
+	start := m.start
+	m.mu.Unlock()
+	program := ""
+	if len(command) > 0 && !strings.ContainsAny(command[0], "/\\") {
+		if resolved, ok := trust.ResolveSpawnPath(rootDir, command[0], pathValue); ok {
+			program = resolved
+		}
+	}
+	gateArgv := command
+	if program != "" {
+		gateArgv = append([]string{program}, command[1:]...)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
-	c, err := m.start(ctx, lsp.Config{
+	if err := m.gateSpawn(ctx, language, cfg, gateArgv, pathValue); err != nil {
+		cancel()
+		return nil, err
+	}
+	c, err := start(ctx, lsp.Config{
 		Command:               command,
+		Program:               program,
 		RootURI:               m.rootURI,
-		Env:                   m.spawnEnvList(envList(cfg.Env)),
+		Env:                   serverEnv,
 		InitializationOptions: cfg.InitializationOptions,
 		ApplyEdit:             m.applyEditHandler(language),
 		Limits:                cfg.Limits,
@@ -902,6 +1009,59 @@ func envList(env map[string]string) []string {
 		out = append(out, k+"="+env[k])
 	}
 	return out
+}
+
+// RestartAfterReconnect restarts the servers that were running before a carrier drop,
+// for a remote workspace (docs/authority.md). It restarts only the servers that were live
+// when the connection died, never servers the user stopped or a muted language, and it
+// starts nothing when a live handle or a start in flight already holds the key — so a
+// reconnect cannot create a duplicate server. The workspace spawn gate still runs for
+// every restart (trust), and ctx is checked between servers: a cancelled context, or one
+// that ends while a start is in flight, stops the loop before the next server (the flight
+// already begun is the manager's own bounded start, not cancelable here). The count is the
+// number of servers restarted.
+func (m *Manager) RestartAfterReconnect(ctx context.Context) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	m.mu.Lock()
+	m.pruneLocked()
+	type target struct {
+		key, language string
+		cfg           ServerConfig
+		universal     bool
+	}
+	var targets []target
+	for key, r := range m.resume {
+		if m.stopped[key] || (!r.universal && m.disabled[r.language]) {
+			continue
+		}
+		targets = append(targets, target{key: key, language: r.language, cfg: r.cfg, universal: r.universal})
+	}
+	epoch := m.epoch
+	m.mu.Unlock()
+
+	var errs []error
+	started := 0
+	for _, t := range targets {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
+		m.mu.Lock()
+		live := m.handleForKeyLocked(t.key) != nil
+		_, starting := m.starting[t.key]
+		m.mu.Unlock()
+		if live || starting {
+			continue
+		}
+		if _, err := m.startServer(t.key, t.language, t.cfg, t.universal, epoch); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		started++
+	}
+	return started, errors.Join(errs...)
 }
 
 // stopKey stops the running server named key, if any, and removes it from the
@@ -1074,6 +1234,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	m.forced = make(map[string]bool)
 	m.stopped = make(map[string]bool)
 	m.failures = make(map[string]string)
+	m.resume = make(map[string]resumeSpec)
 	m.mu.Unlock()
 
 	var errs []error

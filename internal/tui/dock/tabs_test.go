@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/frame"
@@ -12,10 +13,12 @@ import (
 	"github.com/tbxark/gvim/internal/tui/style"
 )
 
-// tabsStarter starts a fresh fake terminal for every tab.
+// tabsStarter starts a fresh fake terminal for every tab. It also launches
+// programs, so an agent tab can restart and rejoin its record.
 type tabsStarter struct {
-	terms []*fakeTerm
-	dirs  []string
+	terms    []*fakeTerm
+	dirs     []string
+	launches []terminal.Launch
 }
 
 func (s *tabsStarter) Start(dir string, cols, rows int) (Terminal, error) {
@@ -24,6 +27,12 @@ func (s *tabsStarter) Start(dir string, cols, rows int) (Terminal, error) {
 	t.history = []string{"output of " + dir}
 	s.terms = append(s.terms, t)
 	return t, nil
+}
+
+// StartLaunch starts a program (Run Agent/restart of a launched terminal).
+func (s *tabsStarter) StartLaunch(launch terminal.Launch, dir string, cols, rows int) (Terminal, error) {
+	s.launches = append(s.launches, launch)
+	return s.Start(dir, cols, rows)
 }
 
 // newTestTabs returns a tab container with a fake host/starter; notices are kept.
@@ -225,5 +234,174 @@ func TestTabsRestartStartsAFreshShellInTheSameTab(t *testing.T) {
 	}
 	if !tabs.Running() {
 		t.Fatal("the restarted tab is not running")
+	}
+}
+
+// setLaunch records a launch record on tab i, the way Run Agent/StartLaunch does.
+func setLaunch(tabs *Tabs, i int, l terminal.Launch) { tabs.tabs[i].launch = l }
+
+// TestTabsTitleFromLaunchRecord is the Fresh parity behavior: a tab is titled
+// after the program it runs (command[0]), else the configured agent name, and an
+// explicit user rename still wins.
+func TestTabsTitleFromLaunchRecord(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs) // plain shell: the numbered default
+	if got := tabs.TabNames()[0]; got != "Terminal 1" {
+		t.Fatalf("plain shell title = %q, want Terminal 1", got)
+	}
+	startTab(t, tabs)
+	setLaunch(tabs, 1, terminal.Launch{Argv: []string{"/usr/local/bin/claude", "--resume", "s1"}, Agent: "claude"})
+	if got := tabs.TabNames()[1]; got != "claude" {
+		t.Fatalf("launched tab title = %q, want claude", got)
+	}
+	// A Windows-style argv[0] is reduced to its base name too.
+	startTab(t, tabs)
+	setLaunch(tabs, 2, terminal.Launch{Argv: []string{"C:\\tools\\node.exe", "x"}})
+	if got := tabs.TabNames()[2]; got != "node.exe" {
+		t.Fatalf("windows argv title = %q, want node.exe", got)
+	}
+	// Agent-only records (no argv) fall back to the configured agent name.
+	startTab(t, tabs)
+	setLaunch(tabs, 3, terminal.Launch{Agent: "aider"})
+	if got := tabs.TabNames()[3]; got != "aider" {
+		t.Fatalf("agent-only title = %q, want aider", got)
+	}
+	// An explicit user rename wins over the launch record.
+	tabs.SetActive(1)
+	tabs.RenameActive("build")
+	if got := tabs.TabNames()[1]; got != "build" {
+		t.Fatalf("renamed title = %q, want build", got)
+	}
+	tabs.RenameActive("")
+	if got := tabs.TabNames()[1]; got != "claude" {
+		t.Fatalf("cleared title = %q, want the launch title back", got)
+	}
+}
+
+// TestTabsTitleDuplicatesDisambiguated checks Fresh's name (k) disambiguation for
+// launcher titles and for explicit duplicates, and that the exited marker comes
+// after the title.
+func TestTabsTitleDuplicatesDisambiguated(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	for range 3 {
+		startTab(t, tabs)
+	}
+	claude := terminal.Launch{Argv: []string{"claude"}}
+	setLaunch(tabs, 0, claude)
+	setLaunch(tabs, 1, claude)
+	setLaunch(tabs, 2, claude)
+	if got := tabs.TabNames(); strings.Join(got, "|") != "claude|claude (2)|claude (3)" {
+		t.Fatalf("duplicate titles = %q", got)
+	}
+	// An exited duplicate keeps the disambiguated title and adds the marker.
+	if _, ok := tabs.Update(exitMsg{gen: tabs.tabs[1].gen}); !ok {
+		t.Fatal("the exit message was not taken")
+	}
+	if got := tabs.TabNames()[1]; got != "claude (2) (exited)" {
+		t.Fatalf("exited duplicate = %q", got)
+	}
+	// Explicit duplicate renames disambiguate too: rename the exited tab and the
+	// third tab to the same name.
+	tabs.SetActive(1)
+	tabs.RenameActive("build")
+	tabs.SetActive(2)
+	tabs.RenameActive("build")
+	if got := tabs.TabNames(); got[0] != "claude" || got[1] != "build (exited)" || got[2] != "build (2)" {
+		t.Fatalf("renamed duplicates = %q", got)
+	}
+}
+
+// TestTabsRestoredAgentTitle checks a restored dead agent tab keeps the title its
+// saved launch record names, with the exited marker Fresh shows.
+func TestTabsRestoredAgentTitle(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	st := terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true,
+		Tabs: []terminal.SavedTab{
+			{Name: "build", Open: true, Rows: []string{"old build"}},
+			{Open: true, Rows: []string{"old agent"}, Agent: "claude", LaunchArgv: []string{"claude", "--session-id", "s1"}},
+		},
+		ActiveTab: 1,
+	}
+	tabs, _ := newTestTabs(t, &notices)
+	tabs.Restore(st)
+	if got := tabs.TabNames(); got[0] != "build (exited)" || got[1] != "claude (exited)" {
+		t.Fatalf("restored titles = %q", got)
+	}
+	if got := tabs.ActiveName(); got != "claude (exited)" {
+		t.Fatalf("active restored title = %q", got)
+	}
+}
+
+// TestTabsRestartDropsExitedMarker checks the marker follows the state, not the
+// title: restarting an exited launched tab shows the program name again.
+func TestTabsRestartDropsExitedMarker(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, starter := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	setLaunch(tabs, 0, terminal.Launch{Argv: []string{"claude"}})
+	if _, ok := tabs.Update(exitMsg{gen: tabs.tabs[0].gen}); !ok {
+		t.Fatal("the exit message was not taken")
+	}
+	if got := tabs.TabNames()[0]; got != "claude (exited)" {
+		t.Fatalf("exited title = %q", got)
+	}
+	cmd := tabs.Restart()
+	if cmd == nil {
+		t.Fatal("Restart did not start a command")
+	}
+	if _, ok := tabs.Update(cmd()); !ok {
+		t.Fatal("the restart message was not taken")
+	}
+	if !tabs.Running() || len(starter.terms) != 2 {
+		t.Fatalf("running = %v starts = %d after restart", tabs.Running(), len(starter.terms))
+	}
+	if got := tabs.TabNames()[0]; got != "claude" {
+		t.Fatalf("restarted title = %q, want the marker gone", got)
+	}
+}
+
+// TestTabsTitleStripIsCellAware checks the strip sanitizes control characters,
+// truncates in terminal cells (wide glyphs never split), and that the hit map
+// measures the same cells.
+func TestTabsTitleStripIsCellAware(t *testing.T) {
+	t.Parallel()
+	var notices []string
+	tabs, _ := newTestTabs(t, &notices)
+	startTab(t, tabs)
+	startTab(t, tabs)
+	// A title with a control character and a wide glyph; the display must drop the
+	// control and count the wide glyph as two cells.
+	setLaunch(tabs, 0, terminal.Launch{Argv: []string{"bad\x1bname\u6784\u5efa"}})
+	label := tabs.stripLabel(0)
+	if strings.ContainsRune(label, 0x1b) {
+		t.Fatalf("control character survived: %q", label)
+	}
+	if ansi.StringWidth(label) > MaxTerminalTabTitleCells {
+		t.Fatalf("label width %d over the cell budget", ansi.StringWidth(label))
+	}
+	// A very long title is truncated with an ellipsis and stays clickable.
+	setLaunch(tabs, 1, terminal.Launch{Argv: []string{strings.Repeat("x", 120)}})
+	if got := tabs.stripLabel(1); ansi.StringWidth(got) > MaxTerminalTabTitleCells || !strings.HasSuffix(got, "\u2026") {
+		t.Fatalf("long title = %q (width %d)", got, ansi.StringWidth(got))
+	}
+	l := frame.Layout{DockOn: true, DockY: 2, DockH: 4, W: 60}
+	g := grid.New(60, 8)
+	tabs.Draw(g, l, style.Styles{})
+	// Click the second tab using the cell width the strip painted: first label
+	// starts at column 1, so the second starts after its cells plus the two
+	// surrounding spaces.
+	first := 1 + ansi.StringWidth(" "+tabs.stripLabel(0)+" ")
+	if _, ok := tabs.Mouse(tea.MouseClickMsg{X: first, Y: 2, Button: tea.MouseLeft}, l, 1); !ok {
+		t.Fatal("the second tab's strip cells were not hit")
+	}
+	if got := tabs.ActiveIndex(); got != 1 {
+		t.Fatalf("active after the cell-aware click = %d, want 1", got)
 	}
 }

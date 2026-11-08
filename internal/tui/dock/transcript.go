@@ -2,6 +2,7 @@ package dock
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/internal/terminal"
 )
@@ -132,6 +133,8 @@ func (p *Panel) SavedState() terminal.SavedState {
 	st.ResumeArgv = launch.ResumeArgv
 	st.Agent = launch.Agent
 	st.Ephemeral = launch.Ephemeral
+	st.LaunchDir = clipSavedDir(p.launchDir)
+	st.Source = launch.Source
 	if p.term != nil {
 		if cwd := p.term.WorkingDirectory(); cwd != "" {
 			st.Cwd = cwd
@@ -209,6 +212,13 @@ func (p *Panel) Restore(st terminal.SavedState) {
 	p.open = st.Open || len(p.prior) > 0
 	p.focus = false
 	p.dir = st.Cwd
+	p.launchDir = clipSavedDir(st.LaunchDir)
+	if p.launchDir == "" {
+		// An older record has no launch_dir: its cwd is the best available launch
+		// directory (the migration keeps the old behaviour rather than inventing a
+		// path).
+		p.launchDir = clipSavedDir(st.Cwd)
+	}
 	p.term = nil
 	p.exited = true
 	p.notice = ""
@@ -219,11 +229,28 @@ func (p *Panel) Restore(st terminal.SavedState) {
 		ResumeArgv: append([]string(nil), st.ResumeArgv...),
 		Agent:      st.Agent,
 		Ephemeral:  st.Ephemeral,
+		Source:     st.Source,
 	}.Clean()
 	p.scroll = scrollState{on: true, screenRows: 0, gen: p.gen}
 	p.scroll.top = max(p.combined()-max(p.bodyRows(), 1), 0)
 	p.scroll.selected = max(p.combined()-1, 0)
 	p.clearSelection()
+}
+
+// maxSavedDirBytes bounds a saved directory field, so a hand-edited record cannot
+// pass an unbounded path to a start.
+const maxSavedDirBytes = 4096
+
+// clipSavedDir bounds a saved directory on a rune boundary.
+func clipSavedDir(dir string) string {
+	if len(dir) <= maxSavedDirBytes {
+		return dir
+	}
+	cut := dir[:maxSavedDirBytes]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut
 }
 
 // Restored reports whether the dock shows a restored transcript without a shell.

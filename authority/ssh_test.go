@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -48,6 +49,10 @@ type fakeSSH struct {
 	changes  []testSize
 	conns    []*ssh.ServerConn
 	accepted int
+	// execFunc, when set, answers every non-PTY exec request: it may read stdin and
+	// write stdout/stderr through the channel; the return value is the exit status.
+	// The remote file tests use it to run the composed helper command locally.
+	execFunc func(cmd string, stdin io.Reader, stdout, stderr io.Writer) int
 }
 
 // newFakeSSH starts the server on a loopback port.
@@ -182,6 +187,12 @@ func reply(req *ssh.Request, ok bool) {
 // stdin until EOF, everything else succeeds. The channel is closed after the exit status so
 // the client's Run returns.
 func (s *fakeSSH) runExec(ch ssh.Channel, cmd string) {
+	if s.execFunc != nil {
+		code := s.execFunc(cmd, ch, ch, ch.Stderr())
+		sendExit(ch, code)
+		_ = ch.Close()
+		return
+	}
 	switch {
 	case strings.Contains(cmd, "sleeper"):
 		buf := make([]byte, 1024)
@@ -251,6 +262,25 @@ func (s *fakeSSH) sizes() (ptys, changes []testSize) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]testSize(nil), s.ptys...), append([]testSize(nil), s.changes...)
+}
+
+// runLocally makes the server answer exec requests by running the composed command
+// with the local sh. The remote file tests use it so the real helper text and the real
+// quoting are under test; paths in those tests are local temp directories.
+func (s *fakeSSH) runLocally() {
+	s.execFunc = func(cmd string, stdin io.Reader, stdout, stderr io.Writer) int {
+		c := exec.Command("sh", "-c", cmd)
+		c.Stdin, c.Stdout, c.Stderr = stdin, stdout, stderr
+		if err := c.Run(); err != nil {
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				return exit.ExitCode()
+			}
+			_, _ = io.WriteString(stderr, "sh: "+err.Error())
+			return 127
+		}
+		return 0
+	}
 }
 
 // stop closes the listener and the live connections.

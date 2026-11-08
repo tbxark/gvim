@@ -50,7 +50,13 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return msg.ov.cmdFor(msg.ov.p.Update(msg.msg)), true
 	case agentPickMsg:
-		return m.startConfiguredAgent(msg.name), true
+		return m.openAgentActionPicker(msg.name), true
+	case agentActionMsg:
+		return m.startAgentChoice(msg.name, msg.resume, msg.dir), true
+	case agentChangeDirMsg:
+		return m.openAgentDirPrompt(msg.name, msg.dir), true
+	case agentRunDirMsg:
+		return m.agentDirChosen(msg), true
 	case gitStatusMsg:
 		m.applyGitStatus(msg)
 		return nil, true

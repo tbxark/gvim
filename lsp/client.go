@@ -38,6 +38,11 @@ type Config struct {
 	// Command is the program and its arguments. Only Start reads it; NewClient
 	// ignores it.
 	Command []string
+	// Program, when set, is the already-resolved executable Start runs instead of
+	// looking up Command[0] itself. The manager sets it after resolving the program
+	// through the same child PATH the trust gate judged, so the binary that starts is
+	// the binary the gate allowed. Empty means Start does its own PATH lookup.
+	Program string
 	// RootURI is the workspace root sent in initialize, for example
 	// "file:///home/u/proj". Empty means no root.
 	RootURI string
@@ -135,12 +140,18 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, err
 	}
 
-	// The program is looked up here, so a server that is not installed is told apart from
-	// one that failed, and nothing is launched for it. Start runs in a command, never in
-	// the update loop, so the PATH search is off the loop.
-	program, err := exec.LookPath(cfg.Command[0])
-	if err != nil {
-		return nil, &NotInstalledError{Command: cfg.Command[0]}
+	// The program is resolved here -- by the caller (cfg.Program, already checked
+	// against the trust gate and the child PATH) or by a PATH lookup -- so a server
+	// that is not installed is told apart from one that failed, and nothing is launched
+	// for it. Start runs in a command, never in the update loop, so the search is off
+	// the loop.
+	program := cfg.Program
+	if program == "" {
+		var err error
+		program, err = exec.LookPath(cfg.Command[0])
+		if err != nil {
+			return nil, &NotInstalledError{Command: cfg.Command[0]}
+		}
 	}
 	// A plan that needs the sh ulimit fallback wraps the resolved program; the wrapper
 	// passes it as an argument, so nothing is looked up twice and $@ keeps the arguments
@@ -205,6 +216,26 @@ const stderrKeep = 8 << 10
 func (c *Client) StderrTail() string {
 	return c.stderr.tail(4, 400)
 }
+
+// NewClientWithErrorOutput is NewClient for a server the caller launched itself (a
+// remote authority child): stderr is drained into the client's error-output tail, so a
+// server that fails still reports its last lines through StderrTail. A nil stderr keeps
+// StderrTail empty, like a plain NewClient. The caller owns rwc and stderr: Close closes
+// rwc; stderr's parent process is the caller's to terminate.
+func NewClientWithErrorOutput(rwc io.ReadWriteCloser, cfg Config, stderr io.Reader) *Client {
+	c := NewClient(rwc, cfg)
+	if stderr != nil {
+		tail := &tailBuffer{max: stderrKeep}
+		c.stderr = tail
+		go func() { _, _ = io.Copy(tail, stderr) }()
+	}
+	return c
+}
+
+// SetLimitsNote records why the caller's transport could not apply the configured
+// process_limits (for example: the process runs on a remote host, so the local limits do
+// not reach it). Start records the platform note itself; this is the caller-launched path.
+func (c *Client) SetLimitsNote(note string) { c.limitsNote = note }
 
 // NewClient wraps rwc as a connection to a server and starts the read loop. The
 // caller owns rwc only until Close, which closes it. cfg.Command and cfg.Env are

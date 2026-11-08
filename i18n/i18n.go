@@ -212,6 +212,20 @@ func T(locale, key string, vars map[string]any) string {
 	return interpolate(text, vars)
 }
 
+// TOr translates key like T, but returns fallback when the catalogue has no entry for
+// it (in the locale or in English) instead of returning the key. Display code that has
+// an English source text uses it, so a catalogue gap can never show a bare key.
+func TOr(locale, key, fallback string, vars map[string]any) string {
+	if key == "" {
+		return fallback
+	}
+	text, ok := lookup(locale, key)
+	if !ok {
+		return fallback
+	}
+	return interpolate(text, vars)
+}
+
 // TN translates the count-dependent message key for n. The catalogue holds one key per
 // CLDR plural category (key + ".one", key + ".other", ...); the form is picked by the
 // locale's own rule, and a missing form falls back to ".other" and then to English's. The

@@ -21,9 +21,9 @@ import (
 )
 
 // The SSH backend of the authority slot: pure-Go x/crypto/ssh. It provides one-shot exec,
-// long-running stdio children and the integrated terminal (exec channel + PTY request);
-// remote file access is the SFTP/remote-helper follow-up and refuses with
-// ErrUnsupportedFileIO. Connection state feeds the status row and reconnect-on-activate.
+// long-running stdio children, the integrated terminal (exec channel + PTY request) and
+// the remote FileSystem (bounded exec helper commands, ssh_files.go). Connection state
+// feeds the status row and reconnect-on-activate.
 //
 // The SSH client carries no path translation of its own: a remote workspace lives in one
 // path space (IdentityPathMapper). Authentication: ssh-agent (SSH_AUTH_SOCK), identity
@@ -77,7 +77,7 @@ func ConnectSSH(ctx context.Context, o SSHOptions) (*Authority, error) {
 		return nil, err
 	}
 	return New(Parts{
-		Files:       UnsupportedFiles{},
+		Files:       newSSHFiles(b),
 		OneShot:     b,
 		LongRunning: b,
 		Terminal:    b,
@@ -93,7 +93,7 @@ func ConnectSSH(ctx context.Context, o SSHOptions) (*Authority, error) {
 func NewSSH(o SSHOptions) *Authority {
 	b := &sshBackend{opts: o, spec: o.Spec, reason: "not connected yet"}
 	return New(Parts{
-		Files:       UnsupportedFiles{},
+		Files:       newSSHFiles(b),
 		OneShot:     b,
 		LongRunning: b,
 		Terminal:    b,
@@ -360,8 +360,18 @@ func (b *sshBackend) Close() error {
 	return nil
 }
 
-// runSession runs a one-shot command and maps ssh exit statuses into ProcResult.
+// runSession runs a one-shot command and maps ssh exit statuses into ProcResult. The
+// one-shot surface keeps the port's contract: output is collected without a transport
+// cap here (callers bound it with ProcOptions.MaxOutput where they need to).
 func (b *sshBackend) runSession(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	return b.runSessionBuffered(ctx, argv, o, newBoundBuffer(0), newBoundBuffer(0))
+}
+
+// runSessionBuffered runs one exec session, pumping stdout and stderr into the given
+// bounded buffers. A bounded buffer keeps draining the channel after its limit (so a
+// remote process never blocks on a full pipe) while recording that the answer was over
+// the cap; the caller can then reject the answer instead of using a truncated one.
+func (b *sshBackend) runSessionBuffered(ctx context.Context, argv []string, o hostos.ProcOptions, stdout, stderr *boundBuffer) (hostos.ProcResult, error) {
 	client, err := b.clientSnapshot()
 	if err != nil {
 		return hostos.ProcResult{}, err
@@ -373,9 +383,10 @@ func (b *sshBackend) runSession(ctx context.Context, argv []string, o hostos.Pro
 	}
 	defer func() { _ = sess.Close() }()
 	cmd := RemoteCommand(argv, o.Cwd, o.Env)
-	var stdout, stderr lockedBuffer
-	sess.Stdout, sess.Stderr = &stdout, &stderr
-	if len(o.Stdin) > 0 {
+	sess.Stdout, sess.Stderr = stdout, stderr
+	if o.Stdin != nil {
+		// An empty non-nil Stdin still means "send EOF": the remote helper's cat must
+		// see end of input rather than wait for stdin that never closes.
 		sess.Stdin = newSliceReader(o.Stdin)
 	}
 	done := make(chan error, 1)
@@ -624,22 +635,50 @@ func (t *sshTerminal) Close() error {
 	return err
 }
 
-// lockedBuffer is a concurrency-safe bytes buffer for the session pumps.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf []byte
+// boundBuffer is a concurrency-safe bytes buffer for the session pumps. A positive
+// limit caps the kept bytes and sets the overflow flag when more arrives; the write
+// still reports every byte as consumed so the SSH channel keeps draining and the remote
+// process never blocks on a full pipe. A limit <= 0 keeps everything.
+type boundBuffer struct {
+	mu      sync.Mutex
+	buf     []byte
+	limit   int64
+	dropped bool
 }
 
-func (b *lockedBuffer) Write(p []byte) (int, error) {
+// newBoundBuffer returns a buffer keeping at most limit bytes (limit <= 0: unbounded).
+func newBoundBuffer(limit int64) *boundBuffer { return &boundBuffer{limit: limit} }
+
+func (b *boundBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	n := len(p)
+	if b.limit > 0 {
+		room := b.limit - int64(len(b.buf))
+		switch {
+		case room <= 0:
+			b.dropped = true
+			return n, nil
+		case int64(len(p)) > room:
+			b.dropped = true
+			p = p[:room]
+		}
+	}
 	b.buf = append(b.buf, p...)
-	return len(p), nil
+	return n, nil
 }
-func (b *lockedBuffer) Bytes() []byte {
+
+func (b *boundBuffer) Bytes() []byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]byte(nil), b.buf...)
+}
+
+// Overflow reports whether more bytes arrived than the buffer kept.
+func (b *boundBuffer) Overflow() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.dropped
 }
 
 // sliceReader is a reader over a byte slice (a fresh copy per use).

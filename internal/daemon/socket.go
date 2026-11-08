@@ -65,14 +65,29 @@ func SocketPath(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if name == "" {
-		return "", errors.New("daemon: empty name")
+	if err := validateName(name); err != nil {
+		return "", err
 	}
 	path := filepath.Join(dir, name+".sock")
 	if len(path) > 100 {
 		return "", fmt.Errorf("daemon: socket path %q is too long for a Unix socket; use a shorter --name", path)
 	}
 	return path, nil
+}
+
+// validateName accepts a daemon name that is one safe file name: no separators, no
+// parent/self directory names, at most 64 bytes.
+func validateName(name string) error {
+	if name == "" {
+		return errors.New("daemon: empty name")
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") || strings.ContainsRune(name, os.PathSeparator) {
+		return fmt.Errorf("daemon: invalid name %q (want a single file name, not a path)", name)
+	}
+	if strings.ContainsRune(name, 0) || len(name) > 64 {
+		return fmt.Errorf("daemon: invalid name %q", name)
+	}
+	return nil
 }
 
 // probeDialTimeout bounds the liveness probe of an existing socket.
@@ -96,9 +111,14 @@ func Listen(name string) (net.Listener, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if _, err := os.Lstat(path); err == nil {
+	if fi, err := os.Lstat(path); err == nil {
 		if IsLive(path) {
 			return nil, path, fmt.Errorf("daemon: another daemon is running at %s", path)
+		}
+		// Only a stale socket may be replaced. A regular file (or a directory or
+		// symlink) at the socket path is the user's: never unlink it.
+		if fi.Mode()&os.ModeSocket == 0 {
+			return nil, path, fmt.Errorf("daemon: %s exists and is not a socket; refusing to replace it", path)
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, path, fmt.Errorf("daemon: remove stale socket: %w", err)

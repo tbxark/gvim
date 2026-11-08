@@ -51,6 +51,9 @@ type Hello struct {
 	Cols int      `json:"cols"`
 	Rows int      `json:"rows"`
 	Args []string `json:"args,omitempty"`
+	// Workspace names the workspace to attach to (its stable id or label); empty
+	// means the daemon's current foreground workspace.
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // Resize is a terminal size change.
@@ -77,14 +80,13 @@ func WriteFrame(w io.Writer, typ byte, payload []byte) error {
 	header := make([]byte, 5)
 	binary.BigEndian.PutUint32(header[:4], uint32(len(payload)))
 	header[4] = typ
-	if _, err := w.Write(header); err != nil {
+	if err := writeAll(w, header); err != nil {
 		return err
 	}
 	if len(payload) == 0 {
 		return nil
 	}
-	_, err := w.Write(payload)
-	return err
+	return writeAll(w, payload)
 }
 
 // ReadFrame reads one frame from r. A clean EOF before any byte is io.EOF; a

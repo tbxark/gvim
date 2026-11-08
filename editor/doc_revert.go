@@ -82,7 +82,7 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 		}
 		e.setError(err)
 		return RevertPlan{}, err
-	case d.LargeState() == nil && e.isLargePath(d.Path):
+	case d.FileAccess() == nil && d.LargeState() == nil && e.isLargePath(d.Path):
 		// A file that has grown into a large one since the document was opened is not
 		// read whole.
 		err := fmt.Errorf("revert %s: %w", d.Name(), ErrLargeFile)
@@ -97,7 +97,7 @@ func (e *Editor) PlanRevert(force bool) (RevertPlan, error) {
 		Eol:      d.Eol,
 		mark:     d.ContentMark(),
 	}
-	if d.LargeState() != nil {
+	if d.LargeState() != nil || d.FileAccess() != nil {
 		spec := e.loadSpec()
 		plan.spec = &spec
 	}

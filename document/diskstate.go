@@ -10,6 +10,7 @@ import (
 // file again, so a change made by another program is not overwritten.
 type diskState struct {
 	Exists bool
+	dir    bool
 	// special is set for a file that is neither regular nor a directory: a FIFO, a device
 	// or a socket. Opening one can block, so readDocument does not read it.
 	Special bool
@@ -27,11 +28,17 @@ func diskStateOf(path string) diskState {
 	}
 	return diskState{
 		Exists:  true,
+		dir:     info.IsDir(),
 		Special: !info.Mode().IsRegular() && !info.IsDir(),
 		Size:    info.Size(),
 		Mtime:   info.ModTime(),
 	}
 }
+
+// Dir reports whether the path is a directory. The local stat knows its mode; a remote
+// access reports directories through Special false and the caller opening no
+// directories, so a remote directory is caught when the read fails.
+func (s diskState) Dir() bool { return s.dir }
 
 // sameAs reports whether s and o describe the same file state.
 func (s diskState) SameAs(o diskState) bool {

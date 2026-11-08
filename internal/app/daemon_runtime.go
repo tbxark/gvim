@@ -6,7 +6,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/tbxark/gvim/internal/daemon"
 )
@@ -15,26 +14,28 @@ import (
 // one) and opens the named files in the hosted editor. It returns when the client
 // detaches, the daemon exits or the connection drops.
 func attachToDaemon(ctx context.Context, opts Options) error {
-	root := opts.Root
-	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		root = wd
-	}
-	name := ""
-	if opts.Daemon != nil {
-		name = opts.Daemon.Name
-	}
-	if name == "" {
-		name = daemon.DefaultName(root)
+	name, err := attachDaemonName(opts)
+	if err != nil {
+		return err
 	}
 	files := make([]string, 0, len(opts.Files))
 	for _, f := range opts.Files {
 		files = append(files, f.Path)
 	}
 	return daemon.AttachClient(ctx, name, files)
+}
+
+// attachDaemonName uses the same resolved root as daemon startup. An explicit
+// name does not depend on the client workspace.
+func attachDaemonName(opts Options) (string, error) {
+	if opts.Daemon != nil && opts.Daemon.Name != "" {
+		return opts.Daemon.Name, nil
+	}
+	root, err := resolveRoot(opts.Root)
+	if err != nil {
+		return "", err
+	}
+	return daemon.DefaultName(root), nil
 }
 
 // refuseIfDaemonRunning keeps the single-writer rule for a bare (session) launch: when

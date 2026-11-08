@@ -1,6 +1,10 @@
 package menubar
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/tbxark/gvim/i18n"
+)
 
 // menuKind classifies a row of the generated menu table.
 type menuKind uint8
@@ -16,8 +20,11 @@ const (
 // the context key that enables an action; checkbox names the context key for the
 // checked state, which the menu bar draws as a box before the label.
 type legacyItem struct {
-	kind     menuKind
-	label    string
+	kind  menuKind
+	label string
+	// key is the label's catalogue key (menu.<menu>.<item> or a gvim-only key for a
+	// gvim-rewritten label); empty for a row with no translated label.
+	key      string
 	keys     string
 	action   string
 	when     string
@@ -28,7 +35,9 @@ type legacyItem struct {
 // legacyMenu is one label of the menu bar with its rows.
 type legacyMenu struct {
 	id, label, when string
-	items           []legacyItem
+	// key is the bar title's catalogue key (menu.<menu>).
+	key   string
+	items []legacyItem
 }
 
 // Row is one row of an open dropdown, built from the table for the state at the
@@ -63,6 +72,14 @@ func barLabels(explorerFocus bool) []string {
 	return append(labels, "Help")
 }
 
+// menuBarLabel is the display text of a bar label: the catalogue title for the frame's
+// locale with the English table label as the explicit fallback. Bar identity, hit
+// testing and the open-title state stay the English label.
+func menuBarLabel(title string) string {
+	key := "menu." + strings.ToLower(title)
+	return i18n.TOr("", key, title, nil)
+}
+
 // dropdownRows returns the rows of the bar label title, with each action
 // enabled when its context key holds. A row shows the shortcut that keyOf gives
 // for its action when keyOf is not nil and reports ok, and the shortcut of the
@@ -83,7 +100,9 @@ func menuRows(items []legacyItem, holds func(string) bool, keyOf func(string) (s
 	for _, it := range items {
 		// The shortcut comes from the active keymap only. The table's own keys are the macOS
 		// labels of Fresh's menu, so a row with no keymap to ask shows none.
-		row := Row{Label: it.label, Action: childAction(it)}
+		// The label is resolved when the dropdown opens, so a live locale change is
+		// seen on the next open; the English label is the explicit fallback.
+		row := Row{Label: i18n.TOr("", it.key, it.label, nil), Action: childAction(it)}
 		switch it.kind {
 		case itemSeparator:
 			row.Separator = true

@@ -3,8 +3,10 @@ package dock
 import (
 	"strconv"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/frame"
@@ -24,6 +26,11 @@ import (
 // the dock's tabs as they are.
 const MaxTerminalTabs = 16
 
+// MaxTerminalTabTitleCells is the cell budget of one tab label in the strip
+// before it is truncated with an ellipsis. It keeps the painting and the strip
+// hit map measuring the same terminal cells.
+const MaxTerminalTabTitleCells = 24
+
 // Tabs is the dock's terminal-tab container. The zero value is an empty dock; the
 // root creates tabs through Show/NewTab.
 type Tabs struct {
@@ -33,6 +40,11 @@ type Tabs struct {
 	ports   Ports
 	effects Effects
 	names   []string // per tab: "" means the default name
+	// nextGen is the next shell-generation namespace. Messages carry only a
+	// generation, and every Panel counts its generations from 0, so each tab gets a
+	// disjoint million-wide range; otherwise an output/exit of one tab could match
+	// another tab's shell (two tabs would both start at generation 1).
+	nextGen int
 }
 
 // SetHost sets the host services every tab uses (and future tabs inherit).
@@ -57,6 +69,12 @@ func (t *Tabs) SetEffects(e Effects) {
 	for _, p := range t.tabs {
 		p.SetEffects(e)
 	}
+}
+
+// genBase returns the next tab's disjoint shell-generation namespace.
+func (t *Tabs) genBase() int {
+	t.nextGen++
+	return t.nextGen << 20
 }
 
 // Active returns the active tab, or nil when the dock has no tabs.
@@ -98,19 +116,101 @@ func (t *Tabs) TabNames() []string {
 	return out
 }
 
-// tabLabel is the strip/title label of tab i.
+// tabBaseLabels is the undecorated label of every tab: the explicit user name
+// when set, else a Fresh-style title from the tab's launch record, else
+// "Terminal N". Fresh names a terminal tab after the program it runs
+// (command[0]), falling back to the configured agent name; gvim's launch record
+// is the same information and is persisted per tab, so a restored agent tab has
+// its title back.
+func (t *Tabs) tabBaseLabels() []string {
+	out := make([]string, len(t.tabs))
+	for i, p := range t.tabs {
+		name := ""
+		if i < len(t.names) {
+			name = t.names[i]
+		}
+		if name == "" {
+			name = launchTitle(p.Launch())
+		}
+		if name == "" {
+			name = "Terminal " + strconv.Itoa(i+1)
+		}
+		out[i] = name
+	}
+	return out
+}
+
+// launchTitle derives the title of a launched program: the base name of argv[0],
+// else the configured agent name (Fresh's command[0] fallback), "" for the plain
+// shell.
+func launchTitle(l terminal.Launch) string {
+	if len(l.Argv) > 0 {
+		if name := cleanTabTitle(commandBase(l.Argv[0])); name != "" {
+			return name
+		}
+	}
+	return cleanTabTitle(l.Agent)
+}
+
+// commandBase is the program name of an argv[0], dropping a path with either
+// separator (argv comes from config and may name a Windows or Unix path).
+func commandBase(arg string) string {
+	if i := strings.LastIndexAny(arg, "/\\"); i >= 0 {
+		return arg[i+1:]
+	}
+	return arg
+}
+
+// cleanTabTitle strips control characters a title could carry into the strip and
+// trims it. The grid drops controls when painting, but the hit map must measure
+// the same text, so titles are cleaned in one place.
+func cleanTabTitle(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(s)
+}
+
+// tabLabels returns every tab's logical label: base labels with Fresh-style
+// duplicate disambiguation ("claude", "claude (2)") and the exited marker a dead
+// tab shows in-session and after restore.
+func (t *Tabs) tabLabels() []string {
+	labels := t.tabBaseLabels()
+	seen := make(map[string]int, len(labels))
+	counts := make(map[string]int, len(labels))
+	for _, label := range labels {
+		counts[label]++
+	}
+	for i, label := range labels {
+		if counts[label] > 1 {
+			seen[label]++
+			if seen[label] > 1 {
+				labels[i] = label + " (" + strconv.Itoa(seen[label]) + ")"
+			}
+		}
+		if t.tabs[i].Exited() {
+			labels[i] += " (exited)"
+		}
+	}
+	return labels
+}
+
+// tabLabel is the label of tab i.
 func (t *Tabs) tabLabel(i int) string {
-	name := ""
-	if i < len(t.names) {
-		name = t.names[i]
+	if i < 0 || i >= len(t.tabs) {
+		return ""
 	}
-	if name == "" {
-		name = "Terminal " + strconv.Itoa(i+1)
-	}
-	if t.tabs[i].Exited() {
-		name += " (exited)"
-	}
-	return name
+	return t.tabLabels()[i]
+}
+
+// stripLabel is a tab's label cleaned and truncated to one tab's cell budget with
+// an ellipsis, in terminal cells, so the strip paints and the hit map measures
+// the same text (a wide glyph is never split).
+func (t *Tabs) stripLabel(i int) string {
+	return ansi.Truncate(cleanTabTitle(t.tabLabel(i)), MaxTerminalTabTitleCells, "…")
 }
 
 // currentName is the active tab's label.
@@ -146,6 +246,7 @@ func (t *Tabs) NewTab() tea.Cmd {
 	p.SetHost(t.host)
 	p.SetPorts(t.ports)
 	p.SetEffects(t.effects)
+	p.gen = t.genBase()
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, "")
 	t.active = len(t.tabs) - 1
@@ -293,6 +394,7 @@ func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
 	p.SetHost(t.host)
 	p.SetPorts(t.ports)
 	p.SetEffects(t.effects)
+	p.gen = t.genBase()
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, name)
 	t.active = len(t.tabs) - 1
@@ -599,8 +701,8 @@ func (t *Tabs) tabAtX(w, x int) (int, bool) {
 	}
 	col := 1
 	for i := range t.tabs {
-		label := " " + t.tabLabel(i) + " "
-		n := len([]rune(label))
+		label := " " + t.stripLabel(i) + " "
+		n := ansi.StringWidth(label)
 		if col <= x && x < col+n {
 			return i, true
 		}
@@ -634,7 +736,7 @@ func (t *Tabs) drawStrip(g *grid.Grid, l frame.Layout, st style.Styles) {
 	g.Fill(0, l.W, l.DockY, bar)
 	x := 1
 	for i := range t.tabs {
-		label := " " + t.tabLabel(i) + " "
+		label := " " + t.stripLabel(i) + " "
 		cell := inactive
 		if i == t.active {
 			cell = active
@@ -674,7 +776,8 @@ func (t *Tabs) SavedState() terminal.SavedState {
 		st.Tabs[i] = terminal.SavedTab{
 			Name: t.names[i], Open: rec.Open, Cwd: rec.Cwd, Width: rec.Width,
 			Rows: rec.Rows, LaunchArgv: rec.LaunchArgv, ResumeArgv: rec.ResumeArgv,
-			Agent: rec.Agent, Ephemeral: rec.Ephemeral,
+			Agent: rec.Agent, Ephemeral: rec.Ephemeral, LaunchDir: rec.LaunchDir,
+			Source: rec.Source,
 		}
 	}
 	st.ActiveTab = t.active
@@ -695,7 +798,8 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 		saved = []terminal.SavedTab{{
 			Open: st.Open, Cwd: st.Cwd, Width: st.Width, Rows: st.Rows,
 			LaunchArgv: st.LaunchArgv, ResumeArgv: st.ResumeArgv,
-			Agent: st.Agent, Ephemeral: st.Ephemeral,
+			Agent: st.Agent, Ephemeral: st.Ephemeral, LaunchDir: st.LaunchDir,
+			Source: st.Source,
 		}}
 	}
 	for _, tab := range saved {
@@ -703,10 +807,12 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 		p.SetHost(t.host)
 		p.SetPorts(t.ports)
 		p.SetEffects(t.effects)
+		p.gen = t.genBase()
 		p.Restore(terminal.SavedState{
 			Version: st.Version, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
 			Rows: tab.Rows, LaunchArgv: tab.LaunchArgv, ResumeArgv: tab.ResumeArgv,
-			Agent: tab.Agent, Ephemeral: tab.Ephemeral,
+			Agent: tab.Agent, Ephemeral: tab.Ephemeral, LaunchDir: tab.LaunchDir,
+			Source: tab.Source,
 		})
 		t.tabs = append(t.tabs, &p)
 		t.names = append(t.names, tab.Name)

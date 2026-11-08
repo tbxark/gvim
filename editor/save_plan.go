@@ -87,7 +87,7 @@ func (e *Editor) PlanSaveAs(path string, force bool) (SavePlan, error) {
 		e.setError(ErrVirtual)
 		return SavePlan{}, ErrVirtual
 	}
-	path, err := absPath(path)
+	path, err := e.openPath(path)
 	if err != nil {
 		e.setError(err)
 		return SavePlan{}, err

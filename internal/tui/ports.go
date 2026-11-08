@@ -572,6 +572,13 @@ type Deps struct {
 	// Notice is a startup message for the status row, such as the first config
 	// warning. Empty shows nothing.
 	Notice string
+	// StartupOpen is a path opened by the root's first command, off the update loop.
+	// A remote launch sets the remote file here: its load goes through the remote file
+	// access (an editor with a non-local FileAccess reports itself as needing the
+	// asynchronous large-file path), so startup never blocks on remote I/O, a failed or
+	// disconnected read is a retryable notice rather than an empty buffer, and the
+	// open is retried after the authority reconnects.
+	StartupOpen string
 	// Warnings are config problems that Show Warnings lists, each as one entry, besides the
 	// Notice that the status row shows.
 	Warnings []string

@@ -142,6 +142,12 @@ PRODUCT_LABELS = {
     "Show Fresh Manual": "Show Help",
 }
 
+# Labels gvim rewrites get a gvim-only catalogue key: Fresh's translation would name
+# Fresh, so the translated row must not use the Fresh key.
+PRODUCT_KEYS = {
+    "Show Fresh Manual": "gvim.menu.show_help",
+}
+
 
 def product_label(label):
     if label in PRODUCT_LABELS:
@@ -150,16 +156,25 @@ def product_label(label):
 
 
 def label_of(body, en):
+    """Return (display label, catalogue key, original English label).
+
+    The catalogue key is Fresh's i18n key for the label (menu.<menu>.<item>), empty
+    for a label with no key; a label gvim rewrites gets its gvim-only key instead.
+    """
     m = re.search(r'\blabel:\s*t!\("([^"]+)"\)', body)
     if m:
         key = m.group(1)
         if key not in en:
             raise SystemExit(f"missing locale key {key}")
-        return product_label(en[key])
+        original = en[key]
+        if original in PRODUCT_KEYS:
+            return product_label(original), PRODUCT_KEYS[original], original
+        return product_label(original), key, original
     m = re.search(r'\blabel:\s*"((?:[^"\\]|\\.)*)"', body)
     if not m:
         raise SystemExit("item without a label: " + body[:80])
-    return product_label(m.group(1))
+    original = m.group(1)
+    return product_label(original), "", original
 
 
 def parse_items(text, en, ctx_keys, version, stats):
@@ -178,7 +193,8 @@ def parse_items(text, en, ctx_keys, version, stats):
             action = re.search(r'\baction:\s*"([^"]+)"', body).group(1)
             when = ctx_of(body, "when", ctx_keys)
             checkbox = ctx_of(body, "checkbox", ctx_keys)
-            items.append({"kind": "action", "label": label_of(body, en), "action": action,
+            label, key, _ = label_of(body, en)
+            items.append({"kind": "action", "label": label, "key": key, "action": action,
                           "when": when, "checkbox": checkbox, "children": []})
             stats["leaves"] += 1
             if when:
@@ -192,10 +208,12 @@ def parse_items(text, en, ctx_keys, version, stats):
             vec = body.index("vec![") + len("vec![") - 1
             vec_end = match_close(body, vec)
             children = parse_items(body[vec + 1 : vec_end], en, ctx_keys, version, stats)
-            items.append({"kind": "submenu", "label": label_of(body, en), "children": children})
+            slabel, skey, _ = label_of(body, en)
+            items.append({"kind": "submenu", "label": slabel, "key": skey, "children": children})
             stats["submenus"] += 1
         elif kind == "DynamicSubmenu":
-            items.append({"kind": "submenu", "label": label_of(body, en), "children": []})
+            label, key, _ = label_of(body, en)
+            items.append({"kind": "submenu", "label": label, "key": key, "children": []})
             stats["submenus"] += 1
             stats["dynamic_submenus"] += 1
         elif kind == "Label":
@@ -224,11 +242,11 @@ def parse_menus(src, en, ctx_keys, version, stats):
         vec = body.index("items: vec![") + len("items: vec![") - 1
         head = body[:vec]
         ident = re.search(r'id:\s*Some\("([^"]+)"', head).group(1)
-        title = label_of(head, en)
+        title, title_key, _ = label_of(head, en)
         when = ctx_of(head, "when", ctx_keys)
         vec_end = match_close(body, vec)
         items = parse_items(body[vec + 1 : vec_end], en, ctx_keys, version, stats)
-        menus.append({"id": ident, "label": title, "when": when, "items": items})
+        menus.append({"id": ident, "label": title, "key": title_key, "when": when, "items": items})
     return menus
 
 
@@ -243,12 +261,15 @@ def emit_item(it, merged, indent):
     if it["kind"] == "label":
         return [f"{pad}{{kind: itemLabel, label: {go_str(it['label'])}}},"]
     if it["kind"] == "submenu":
-        lines = [f"{pad}{{kind: itemSubmenu, label: {go_str(it['label'])}, children: []legacyItem{{"]
+        subkey = f"key: {go_str(it['key'])}, " if it.get("key") else ""
+        lines = [f"{pad}{{kind: itemSubmenu, label: {go_str(it['label'])}, {subkey}children: []legacyItem{{"]
         for c in it["children"]:
             lines += emit_item(c, merged, indent + 1)
         lines.append(f"{pad}}}}},")
         return lines
     fields = [f"kind: itemAction", f"label: {go_str(it['label'])}"]
+    if it.get("key"):
+        fields.append(f"key: {go_str(it['key'])}")
     keys = shortcut(it["action"], merged)
     if keys:
         fields.append(f"keys: {go_str(keys)}")
@@ -276,6 +297,8 @@ def emit(menus, merged):
         out.append("\t{")
         out.append(f"\t\tid: {go_str(menu['id'])},")
         out.append(f"\t\tlabel: {go_str(menu['label'])},")
+        if menu["key"]:
+            out.append(f"\t\tkey: {go_str(menu['key'])},")
         if menu["when"]:
             out.append(f"\t\twhen: {go_str(menu['when'])},")
         out.append("\t\titems: []legacyItem{")

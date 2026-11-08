@@ -164,7 +164,15 @@ background tabs' exited markers current.
 
 - **Strip.** The dock's title row is the tab strip: ` Terminal 1  build  Terminal 3 `,
   the active tab in the tab-strip active style, an exited tab with an `(exited)`
-  marker, and a click on a label selects that tab.
+  marker, and a click on a label selects that tab. A tab is titled by its explicit
+  rename; without one it takes the name of the program it runs, as Fresh does: the
+  base name of the launch record's argv (the agent's configured argv, for a Run
+  Agent tab), else the launch record's agent name, else `Terminal N`. Duplicate
+  titles get Fresh's ` (2)`, ` (3)` suffix, and because the launch record is
+  saved per tab, a restored dead tab comes back with the same title plus the
+  `(exited)` marker. Labels have control characters stripped and are truncated to
+  one tab's cell budget with an ellipsis, counted in terminal cells, so a wide
+  glyph is never split and the strip's click targets measure the same cells.
 - **Keys.** While the dock has the keyboard focus, Ctrl+PageDown / Ctrl+PageUp
   switch to the next/previous tab (wrapping); the keys work with or without
   keyboard capture, but not while the scrollback pager owns them. They are not
@@ -185,23 +193,61 @@ background tabs' exited markers current.
   whole dock; the last tab exiting hides the dock. A tab whose shell exits with
   close_on_exit off stays as read-only output with the exited marker.
 - **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
-  width, rows and the same launch/resume/agent/ephemeral record per tab) plus the
-  active index; the top-level fields keep mirroring the active tab, so a reader
-  that predates tabs restores that one tab exactly as before, and a record without
-  `tabs` restores as one terminal. The format version stays 1. Bounds: at most 16
-  tabs, each with the existing per-transcript bound (500 rows / 1 MiB, trailing
-  blanks trimmed, control characters stripped); a corrupt file cannot make the
-  loader allocate more. Restored tabs are **read-only and dead** with their saved
-  names and active index, exactly like the single restored terminal: no PTY is
-  restarted automatically; Restart per tab starts a fresh shell (using the saved
-  launch record when present: the agent resume/launch argv, gated by
-  `terminal.resume_agents`). Workspace-scoped tab sets are deferred to parity #19
-  (the dock currently shows every tab of the window, and a workspace switch keeps
-  them).
-- **Residuals.** Live ephemeral PTY restore (Fresh restarts terminal tabs live and
-  appends the saved scrollback) is not done: gvim keeps the saved transcript
-  read-only until the user restarts, and this is unchanged by tabs. Tab drag/reorder,
-  per-tab split terminals and workspace-scoped tabs remain open.
+  launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab)
+  plus the active index; the top-level fields keep mirroring the active tab, so a
+  reader that predates tabs restores that one tab exactly as before, and a record
+  without `tabs` restores as one terminal. The format version stays 1. `cwd` is the
+  terminal's reported directory and `launch_dir` the directory a recorded program
+  was started in; both are additive, `launch_dir` is bounded on load, and an older
+  record without `launch_dir` falls back to its `cwd`, so the format stays
+  migration-safe. Bounds:
+  at most 16 tabs, each with the existing per-transcript bound (500 rows / 1 MiB,
+  trailing blanks trimmed, control characters stripped); a corrupt file cannot
+  make the loader allocate more. Restored tabs are **read-only and dead** with
+  their saved names and active index, exactly like the single restored terminal:
+  no PTY is restarted automatically; Restart per tab starts a fresh shell (using
+  the saved launch record and launch directory when present: the agent
+  resume/launch argv, gated by `terminal.resume_agents`). In daemon mode the tab
+  set is scoped per workspace (see Terminal tabs in daemon workspaces below).
+### Terminal tabs in daemon workspaces (#19a)
+
+The daemon workspace layer owns one runtime and model per materialized workspace,
+so each workspace has its own dock and its own tab set: switching workspace swaps
+the model, never a tab list, and tabs cannot bleed across workspaces. A workspace's
+terminal record is `terminal.json` in its per-workspace session directory
+(`sessions/<stable-id>/`, next to `session.json`), in the same `SavedState`
+version-1 format (tabs, active index, launch records; the bounds above apply).
+The workspace registry file keeps identity and the editor layout, never the
+terminal record.
+
+- **Switching.** Selecting a workspace captures the outgoing one — its tab names,
+  active tab, transcripts and launch records are snapshotted into its session
+  directory — and shows the target. A target that is still warm keeps its live
+  tabs and their PTYs: switching away does not kill a shell. A dormant target is
+  materialized and its saved tabs are restored **read-only and dead**, exactly as a
+  single restored terminal; nothing starts automatically, and each tab can be
+  restarted on demand (agent resume included). The outgoing workspace stays warm,
+  so switching back returns to the same live shells and the same tab state.
+- **Closing.** Closing a workspace (or quitting the daemon) saves its capture and
+  closes its runtime, which closes the dock and kills its shells. The registry file
+  is removed but the session directory is kept, so the workspace can come back with
+  its transcript; nothing from a closed workspace runs.
+- **Scope.** New Terminal Tab starts in that workspace's root; `close_on_exit`,
+  the tab limit and the quick-switch keys are per workspace dock. The workspace
+  label/indicator and the switcher are the workspace layer's UI (#19a); the dock
+  strip only lists the tabs of the active workspace.
+- **Verification.** `internal/app/workspace_terminal_tabs_unix_test.go` drives a
+  real dock shell through switch-away/switch-back (same runtime, same pid alive),
+  closing a workspace (pid killed, session directory kept), a two-tab capture and
+  restore across a fresh workspace manager (names, active index, transcripts,
+  launch records; no duplicate tabs on repeated capture), and read-only restore
+  with no auto-launch (the shell's pid marker is untouched).
+
+Residuals of this pairing: Fresh restores terminal tabs **Live** and respawns the
+PTY on activation; gvim restores them read-only/dead until the user restarts (the
+same deliberate deviation as for a single terminal). A buffer shared across
+workspaces, extract-tab and per-workspace tab reordering are the #19b policy
+decisions and remain open.
 
 ## Persistence and reflow
 
@@ -253,13 +299,17 @@ appends that transcript too.
 
 An agent terminal restarts through Fresh's precedence: the recorded **agent resume
 argv** when `terminal.resume_agents` is on (the default), else the recorded
-**launch argv**, else the plain configured shell. The restart is always
-user-initiated — the palette row, the status affordance or a tab's restart — and
-nothing is ever re-executed automatically by a restore. A failed start keeps the
-record, so a retry still resumes; the transcript of the old shell stays above the
-new one, as with any restart. The launch record is also why Run Agent's sessions
-survive an editor restart as dead, restartable tabs (see Agent sessions and Run
-Agent).
+**launch argv**, else the plain configured shell. A recorded program restarts in
+the directory it was **launched** in — the Run Agent dialog's directory answer is
+saved as `launch_dir` and is kept apart from the terminal's reported cwd, so a
+program that changes directory (or reports a different one) cannot move a resume
+away from what the user chose. Plain shell tabs keep the live-directory rule above.
+The restart is always user-initiated — the palette row, the status affordance or a
+tab's restart — and nothing is ever re-executed automatically by a restore. A
+failed start keeps the record, so a retry still resumes; the transcript of the old
+shell stays above the new one, as with any restart. The launch record is also why
+Run Agent's sessions survive an editor restart as dead, restartable tabs (see
+Agent sessions and Run Agent).
 
 ## Agent sessions and Run Agent
 
@@ -303,12 +353,21 @@ shell) applies to the dock's plain shell tabs only, because a re-parenting
 authority would launch the remote login shell and ignore the agent argv.
 
 **Run Agent...** (hand-written palette row; Fresh has no command of this title
-because its agent sessions are plugin data) opens a picker of the configured agent
-names, filters it as you type, and starts the chosen agent in a new dock tab. The
-tab is ephemeral, is named after the agent, and its launch record makes Restart
-the resume flow. With no configured agents the row shows a notice pointing at
-`terminal.agents`. There is no workspace/tmux discovery yet (round 13, #20b), and
-no dock-row integration beyond starting the tab.
+because its agent sessions are plugin data) is a two-question dialog. The first
+picker lists the configured agent names and filters as you type; choosing one
+opens the second picker with the launch choices: **New session** (the agent's
+`command` + `args`) and, when the entry has `resume_args`, **Resume last
+session** (the recorded resume argv, a user-initiated rejoin that is allowed even
+with `terminal.resume_agents` off, which only gates automatic restarts). It shows
+where the terminal starts (the current workspace root, with a **Change
+directory…** row that opens a directory prompt; the answer is stat-checked in a
+command, not on the update loop, and a missing path is stated instead of
+starting) and whether a later Restart will resume, with the
+`terminal.resume_agents` state spelled out on the resume row. The chosen
+agent starts in a new ephemeral dock tab named after it, and its launch record
+makes Restart the resume flow. With no configured agents the row shows a notice
+pointing at `terminal.agents`; there is no dock-row integration beyond starting
+the tab (see Agent discovery for tmux sessions that already run outside gvim).
 
 **Exit and restore.** A terminal that dies keeps its transcript and its launch
 record, shows `(exited)` in the tab strip (and the agent name in the scrollback
@@ -317,6 +376,92 @@ dead**: no PTY is started, no agent is resumed, and only the user's restart uses
 the saved record. This is deliberate (Fresh's rule): reopening a workspace never
 silently re-runs a finished process, which for an agent would mean resuming the
 conversation unasked.
+
+## Agent discovery (tmux)
+
+The first discovery slice (`internal/agentdiscover`) finds tmux sessions that
+already exist outside gvim, so an agent running in tmux can be rejoined instead of
+started again. It is **read-only discovery**, not control: gvim asks tmux for its
+sessions and panes, builds each session's attach argv, and later lets the user
+open one in a terminal tab (level 0 in Fresh's tmux terms — tmux draws the panes,
+so gvim's splits/scrollback/search stop at the attached client). Control mode
+(`tmux -CC`, one gvim terminal per tmux pane) is explicitly not built.
+
+- **Scan.** Walk `$TMUX_TMPDIR` (else `/tmp`) for `tmux-<uid>/` directories and
+their sockets, then, when commands are allowed, run
+`tmux -S <socket> list-sessions -F ...` and `list-panes -a -F ...` per socket.
+Both are listing commands: no shell, no session is started or attached, and the
+scan never writes. A scan is bounded (2 s per command, 256 KiB per command
+output, 200 sessions, 2000 panes, 500 sockets, 2000 socket dirs) and returns a
+bounded problem list instead of an error, so a missing tmux, a stale socket, or a
+permission failure is shown as a stated reason.
+- **Rows.** A session carries its name, `session_path`, creation time, attachment
+state, pane count and the attach argv qualified by socket
+(`tmux -S <socket> attach -t <name>` — a bare `tmux attach` cannot reach a server
+on a non-default socket). Panes whose foreground command is a known agent name
+(claude, codex, gemini, goose, aider, cursor-agent, copilot, qwen, droid,
+opencode, amp, plus the config's `terminal.agents` command basenames) are
+reported as **probable agents**: a name match, not an identity. A live server
+with no sessions and a socket whose server is gone yield no row; a socket that
+was not queried (commands off) or whose server failed is a weaker socket-only
+row saying a server exists but its sessions are unknown.
+- **Trust gate.** Listing sessions runs commands, so a scan is only allowed from
+an explicit user action and only when the workspace trust policy allows spawning.
+`internal/agentdiscover` takes an injected command runner; the app's runner first
+calls the session's workspace spawn gate (`trust.DecideSpawn` with the live trust
+level and the inherited PATH), then resolves the command to an absolute path with
+the same PATH/cwd rules (`trust.ResolveSpawnPath`) and executes that exact path
+through the bounded `ExecRunner` (no shell). The second resolution is not
+redundant: os/exec's LookPath runs in the parent process before `cmd.Dir` applies,
+so letting it resolve a relative PATH entry would run a different file than the
+gate judged. So Trusted works, Blocked refuses every scan command, and Restricted
+only refuses a tmux executable that resolves inside the workspace; a refusal
+becomes a stated scan problem and the socket-only answer, which the picker shows.
+The scan never runs from the update loop: the picker starts it as a command and
+the report arrives as a message.
+- **Discover Agent Sessions...** is the palette row (`discover_agent_sessions`,
+hand-written English title; Fresh's command is 'Orchestrator: Import sessions',
+and this row's Import is a secondary action on the discovered session rather than
+a workspace-management command). It opens a filterable picker at once in a
+scanning state; Ctrl+R scans again without leaving it, Esc closes it. A row reads
+the tmux session name plus 'attached' and the probable agent name(s), with the
+server, pane count and path on its detail line. Enter opens the session's
+qualified attach argv in a **new ephemeral dock tab** named `tmux:<session>`
+(plus the agents when known); the tab records the attach argv as both its launch
+and its resume argv, so a user Restart reattaches. Its tab title and persisted
+launch/agent metadata flow through the same terminal record as a Run Agent
+session. **i** imports the selected session as a workspace: it asks the daemon's
+workspace layer to create (or reuse) the workspace for the session's
+`session_path` as root, labelled `tmux:<session>`, **and to start the session's
+attach argv in that workspace's dock once it is materialized and shown** — the
+terminal is an ephemeral tab whose launch and resume argv are the qualified attach
+argv, started in the session's directory, and recorded with a durable source
+identity (`tmux:<server>/<session>`). The registry enforces one workspace per
+canonical root, so a second session in the same directory reuses that workspace
+and opens a **second attach tab** for its own session (the selected session is
+never silently dropped); importing the same source again focuses the existing
+attach tab instead of opening a duplicate. A daemon build whose workspace layer
+predates the queued launch falls back to create-only with a notice that states the
+reduction and prints the attach argv; a direct launch (no workspace layer) states
+that instead of importing. Restart of the imported tab reattaches (the attach argv
+is both launch and resume). Empty states are stated: no tmux/socket, no sessions,
+socket exists but the server was not queried, a session with no directory cannot
+be imported, or the scan's bounded problem list ('Discovery problems:').
+- **Limitations.** Registry v1 still stores one workspace per canonical root and
+has no initial-terminal-launch field, so a second tmux session sharing a directory
+gets its own attach tab in the shared workspace but not its own workspace (layout
+and files are shared; per-session workspaces need a source identity in the
+registry). The attach tab is queued in the workspace's live model and its launch
+record is saved in that workspace's `terminal.json`, but a daemon restart brings
+the tab back dead/read-only like every terminal record — Import does not re-run
+the attach argv automatically. Import needs a daemon-hosted session. No dock/tmux
+rows outside the picker, and no scanning of other multiplexers (GNU
+screen/zellij) or remote machines. Nothing is attached or resumed automatically:
+only the picker's Enter or Import (user actions) start the attach, and a restored
+session tab stays dead until Restart. Agent rows are a foreground-command name
+match, not an identity.
+`docs/internal/tmux-native-sessions.md` in Fresh is the reference for the rungs
+above this one.
 
 ## Config
 
@@ -440,13 +585,17 @@ These are known gaps, not bugs:
 - **reflow** of live or saved output: x/vt has no reflow, so a resize clips or
   pads the live screen and stored transcript rows keep their old widths (see
   Persistence and reflow).
-- **workspace-scoped tab sets, tab drag/reorder and per-tab split terminals**: the
-  dock's tabs are window-wide and fixed in order; the group per workspace waits for
-  parity #19.
-- **agent discovery** (#20b): gvim's known agents are the config list
-  (`terminal.agents`), not Fresh's plugin agent registry; there is no scanning for
-  running agents, no workspace/tmux session list, and no optional launch prompt.
-  The record and the resume path are in place for a discovery layer to feed.
+- **tab drag/reorder and per-tab split terminals**: the dock's tabs are fixed in
+  order and one shell per tab. Workspace scoping landed with #19a (see Terminal
+  tabs in daemon workspaces); sharing a buffer across workspaces is the #19b
+  policy decision.
+- **agent discovery remainder** (#20b): the local tmux scanner and its picker are
+  in place (see Agent discovery and Run Agent), the Run Agent dialog has a
+  per-launch directory choice, and Import creates a workspace for the session's
+  directory. Still open: an imported workspace cannot carry the attach argv yet
+  (registry v1 has no initial-terminal-launch field), dock/agent rows outside the
+  picker, scanning of GNU screen/zellij and remote machines, and any agent
+  identity beyond the foreground-command name match.
 - **live ephemeral PTY restore**: Fresh restarts a saved terminal tab's PTY on
   restore and appends the saved transcript; gvim deliberately restores the tab
   read-only and dead, so no process (and no agent conversation) is re-run unasked.

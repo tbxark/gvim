@@ -35,7 +35,12 @@ type Entry struct {
 	Keybinding  string // formatted shortcut, for example "⌃⌥↑"; empty when unbound
 	Description string
 	Action      string // Fresh action name, for example "add_cursor_above"
-	Source      string // SourceBuiltin for the builtin table
+	// I18nKey and DescKey are catalogue keys for the title and description. The
+	// display resolves them through i18n with Name/Description as the explicit
+	// English fallback; an empty key means the row is not extracted.
+	I18nKey string
+	DescKey string
+	Source  string // SourceBuiltin for the builtin table
 	// Disabled is set by SearchIn: the command is listed but cannot run in the
 	// current state. Disabled entries sort after enabled ones.
 	Disabled bool
@@ -49,9 +54,13 @@ type Entry struct {
 
 // builtinCommand is one generated row of commands_gen.go.
 type builtinCommand struct {
-	Name           string
-	Description    string
-	Action         string
+	Name        string
+	Description string
+	Action      string
+	// Key and DescKey are Fresh's catalogue keys for Name and Description (the
+	// generated table always fills them; a hand-written row may leave them empty).
+	Key            string
+	DescKey        string
 	Contexts       []string
 	CustomContexts []string
 }
@@ -73,13 +82,25 @@ func Commands(km *keymap.Map) []Entry {
 	}
 	out := make([]Entry, 0, len(builtinCommands)+len(compareCommands)+len(markdownCommands)+len(terminalCommands)+len(pluginCommands))
 	for _, c := range slices.Concat(builtinCommands, compareCommands, markdownCommands, terminalCommands, pluginCommands) {
+		key, descKey := c.Key, c.DescKey
 		if r, ok := gvimRenames[c.Action]; ok {
 			c.Name, c.Description = cmp.Or(r.Name, c.Name), r.Description
+			// Fresh's translation of a renamed row names Fresh's file; use the
+			// gvim-specific key when the extraction table has one.
+			key, descKey = "", ""
+		}
+		if k, ok := gvimCommandKeys[c.Action]; ok {
+			key = k
+		}
+		if k, ok := gvimCommandDescKeys[c.Action]; ok {
+			descKey = k
 		}
 		e := Entry{
 			Name:           c.Name,
 			Description:    c.Description,
 			Action:         c.Action,
+			I18nKey:        key,
+			DescKey:        descKey,
 			Source:         SourceBuiltin,
 			contexts:       c.Contexts,
 			customContexts: c.CustomContexts,

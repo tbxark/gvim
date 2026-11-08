@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/pluginapi"
+	"github.com/tbxark/gvim/trust"
 )
 
 // Processes of the plugin OS (AMENDMENTS C16). Every child runs in its own process group so a
@@ -69,9 +71,27 @@ type osChunk struct {
 var _ hostos.Proc = (*osProc)(nil)
 
 // command builds the exec.Cmd for argv: no shell, its own process group, the environment
-// of the editor plus opts.Env.
-func (o *pluginOS) command(argv []string, opts hostos.ProcOptions) *exec.Cmd {
-	cmd := exec.Command(argv[0], argv[1:]...)
+// of the editor plus opts.Env. A bare command name is resolved here, with the same child
+// PATH and cwd the spawn gate judged, and the resolved absolute path is executed: letting
+// exec.Command run its own parent-environment LookPath could launch a different program
+// than the gate allowed (exec resolves before cmd.Dir applies and ignores the child env).
+// A name the child PATH cannot resolve is an error when a gate is installed; without a
+// gate the old exec.Command behavior is kept.
+func (o *pluginOS) command(argv []string, opts hostos.ProcOptions) (*exec.Cmd, error) {
+	name := argv[0]
+	if o.gate != nil && !strings.ContainsAny(name, "/\\") {
+		env := o.gateEnv(opts)
+		pathValue := env["PATH"]
+		if pathValue == "" {
+			pathValue = os.Getenv("PATH")
+		}
+		if resolved, ok := trust.ResolveSpawnPath(o.gateCwd(opts), name, pathValue); ok {
+			name = resolved
+		} else {
+			return nil, execErr(argv, fmt.Errorf("executable file not found in the child PATH"))
+		}
+	}
+	cmd := exec.Command(name, argv[1:]...)
 	if opts.Cwd != "" {
 		cmd.Dir = o.abs(opts.Cwd)
 	} else {
@@ -86,7 +106,7 @@ func (o *pluginOS) command(argv []string, opts hostos.ProcOptions) *exec.Cmd {
 	}
 	cmd.WaitDelay = waitDelay
 	setProcAttr(cmd)
-	return cmd
+	return cmd, nil
 }
 
 // mergeEnvFrom is the process environment with the active project environment's
@@ -215,7 +235,13 @@ func (o *pluginOS) Run(ctx context.Context, argv []string, opts hostos.ProcOptio
 	if err := ctxErr(ctx); err != nil {
 		return hostos.ProcResult{}, err
 	}
-	cmd := o.command(argv, opts)
+	if err := o.checkGate(ctx, argv, opts); err != nil {
+		return hostos.ProcResult{}, err
+	}
+	cmd, err := o.command(argv, opts)
+	if err != nil {
+		return hostos.ProcResult{}, err
+	}
 	limit := opts.MaxOutput
 	if limit <= 0 {
 		limit = defaultMaxOutput
@@ -264,7 +290,13 @@ func (o *pluginOS) Start(ctx context.Context, argv []string, opts hostos.ProcOpt
 	if err := ctxErr(ctx); err != nil {
 		return nil, err
 	}
-	cmd := o.command(argv, opts)
+	if err := o.checkGate(ctx, argv, opts); err != nil {
+		return nil, err
+	}
+	cmd, err := o.command(argv, opts)
+	if err != nil {
+		return nil, err
+	}
 	outR, outW, err := os.Pipe()
 	if err != nil {
 		return nil, mapErr(err, "")
@@ -509,4 +541,39 @@ func (p *osProc) Terminate(grace time.Duration) {
 		p.killGroup("TERM")
 		time.AfterFunc(grace, p.killGroupAfterGrace)
 	})
+}
+
+// gateEnv is the environment the child of opts will inherit, as a map: the editor's
+// environment, the active project overlay, then opts.Env (which wins), matching
+// command()'s mergeEnvFrom. It is what the spawn gate resolves a bare command name
+// through, so it must be asked before the command is built.
+func (o *pluginOS) gateEnv(opts hostos.ProcOptions) map[string]string {
+	var overlay []string
+	if o.spawnEnv != nil {
+		overlay = o.spawnEnv()
+	}
+	entries := mergeEnvFrom(overlay, opts.Env)
+	env := make(map[string]string, len(entries))
+	for _, kv := range entries {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			env[k] = v
+		}
+	}
+	return env
+}
+
+// gateCwd is the working directory the child of opts will run in.
+func (o *pluginOS) gateCwd(opts hostos.ProcOptions) string {
+	if opts.Cwd != "" {
+		return o.abs(opts.Cwd)
+	}
+	return o.dirs().Cwd
+}
+
+// checkGate runs the workspace trust spawn gate, if one is installed.
+func (o *pluginOS) checkGate(ctx context.Context, argv []string, opts hostos.ProcOptions) error {
+	if o.gate == nil {
+		return nil
+	}
+	return o.gate(ctx, argv, o.gateCwd(opts), o.gateEnv(opts))
 }

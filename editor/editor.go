@@ -3,6 +3,9 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
+
 	"github.com/tbxark/gvim/buffer"
 	"slices"
 	"time"
@@ -52,6 +55,11 @@ type Options struct {
 	// Root is the workspace root that copy_relative_file_path measures from. Empty
 	// means no root is known, and the relative copy then gives the absolute path.
 	Root string
+	// FileAccess is the file I/O seam of documents this editor opens: nil means the
+	// local filesystem, non-nil means every read, stat and save goes through it (a
+	// remote authority). The app installs it with SetFileAccess once a remote slot is
+	// connected, before the remote file is opened.
+	FileAccess fileAccess
 	// SessionDir is the directory of the saved session, which InterruptedSaves reads.
 	// Empty means there is no session, and InterruptedSaves lists nothing.
 	SessionDir string
@@ -256,6 +264,33 @@ func (e *Editor) SetViewport(rows, cols int) {
 	e.ensureVisible(e.Active())
 }
 
+// openPath resolves a path for open/load/save. With a local filesystem it is absPath; with
+// a non-local FileAccess the path belongs to the remote host, so it is kept as written and
+// only absolute or ~-rooted paths are accepted: a relative path must not be resolved
+// against the local working directory (that would silently name a different file).
+func (e *Editor) openPath(path string) (string, error) {
+	if e.opts.FileAccess == nil {
+		return absPath(path)
+	}
+	if path == "" {
+		return "", ErrEmptyPath
+	}
+	if filepath.IsAbs(path) || path == "~" || strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	return "", fmt.Errorf("open %s: a remote path must be absolute or start with ~", path)
+}
+
+// SetFileAccess installs the file I/O seam for documents opened from now on, and for
+// the ones already open: a remote authority connects after the editor exists, before the
+// remote file is opened. Nil returns the editor to the local filesystem.
+func (e *Editor) SetFileAccess(a fileAccess) {
+	e.opts.FileAccess = a
+	for _, d := range e.docs {
+		d.SetFileAccess(a)
+	}
+}
+
 // OpenFile opens path in a new tab and makes it active. If path is already open
 // in a tab, that tab is activated instead and its text is kept, not reloaded.
 // A missing file opens as an empty buffer bound to path, which is created on
@@ -272,7 +307,7 @@ func (e *Editor) OpenFile(path string) error {
 		e.setError(err)
 		return err
 	}
-	path, err := absPath(path)
+	path, err := e.openPath(path)
 	if err != nil {
 		e.setError(err)
 		return err

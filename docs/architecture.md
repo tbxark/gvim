@@ -46,7 +46,7 @@ internal/                       private executable shell (no top-level package i
   atomicfile/ shellcmd/
   workspace/ explorer/ finder/ fuzzy/ fsops/ gitstate/
   config/ keymap/ theme/
-  trust/ (workspace trust: levels, decision store, policy, executable-content scan)
+  trust/ (workspace trust: levels, decision store, policy, executable-content scan, the spawn gate DecideSpawn)
   lsp/ (+lsp/manager, lsp/lsptest) pluginapi/ plugin/ (+hostos, bundled, plugintest,
   pattern) commands/
 ```
@@ -124,6 +124,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`), exit codes. | `internal/app` (Options/Run), `internal/configview`, `syntax`, cobra, stdlib |
 | `internal/configview` | Backs `gvim config show`, `gvim config paths`: renders the effective config as JSON and reports config file locations. | `config`, `internal/keybindings`, `keymap`, `theme` |
 | `internal/app` | Composition root: `Options`, `Validate`, `Run`, `buildRuntime`; wires engine + host packages + TUI. | engine packages, host packages, TUI root and sub-packages, plugin runtime |
+| `internal/agentdiscover` | Read-only discovery of terminal sessions that already exist outside gvim: the tmux socket walk, bounded `list-sessions`/`list-panes` parsing, agent pane name matches and qualified attach argv. TUI-free; the runner and an `AllowCommands` trust gate are injected. | stdlib only; a scan never starts or attaches a session; see `docs/terminal.md` Agent discovery |
 | `internal/daemon` | The daemon MVP (#18a): the socket protocol and lifecycle, the hosted editor's socket IO, and the attach client that forwards this terminal to a daemon. | `internal/tui` (message types only), charm, stdlib |
 | `internal/uiadapter` | Adapts engine to the TUI ports: editor/document views, dialogs, ranker, file ops, git status, projects, terminal/clipboard, auto-save gate. | engine packages, `tui` sub-packages, `highlight`, `keybindings`, `terminal` |
 | `internal/pluginhost` | The real `plugin.OS`, the editor as plugins see it, plugin services, virtual buffers and decorations. | engine packages, `plugin`, `pluginapi`, `keybindings` |
@@ -165,7 +166,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `gitstate` | Git work-tree root, branch and per-file status with go-git. | |
 | `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins, and the top-level `locale`. | `hujson`. The project layer is skipped when `Options.Untrusted` is set (workspace trust; see docs/trust.md); a project `locale` is refused (a user preference). |
 | `i18n` | Translation layer: embedded English catalogue, `T`/`TN` with `%{name}` interpolation, CLDR plurals, locale resolution (`auto` from the environment or a configured code) and the plugin runtime's locale. | Leaf, stdlib only; embedded locale JSON in `i18n/locales/` (English source of truth, Fresh import); see `docs/i18n.md`. |
-| `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy and executable-content marker scan. | TUI-free; store at `config.Dir()/trust.json` through `atomicfile`; the app gates the config project layer on it (docs/trust.md). |
+| `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy, executable-content marker scan and the spawn gate (`DecideSpawn`, docs/trust.md §3.1). | TUI-free; store at `config.Dir()/trust.json` through `atomicfile`; the app gates the config project layer on the level and wires the same live level into the authority, plugin OS and LSP manager spawn paths. |
 | `keymap` | Embedded presets, chord parsing and canonicalization, resolve, user overrides. | Data files `keymap/*.json`. |
 | `theme` | Theme data (colors, syntax keys) from embedded JSON. | Data files `theme/data/*.json`. |
 | `lsp` | Pure-Go LSP client/protocol layer: JSON-RPC, transport, positions, requests, diagnostics, signature help. | |
@@ -392,8 +393,106 @@ workspace model (#19).
   (raw terminal bytes), resize (JSON cols/rows), detach, open-file (JSON paths),
   ping. Server frames: output (raw ANSI), notice (text), detached, pong, exit.
   Unknown or malformed frames drop only that client.
-- **Plan.** The rest of Fresh's daemon/workspace model is the #19a slice: a
-  workspace registry of per-root files (stable id, label, layout), lazy
-  materialization with inert placeholders, protocol workspace-list/select/new/
-  close/rename, a dock/session switcher and per-workspace save/restore with daemon
-  exit ordering. Today the daemon hosts one workspace, the launch directory.
+
+### 8.1 Workspace registry (#19a, landed round 13)
+
+The registry is the workspace store on top of the round-12 daemon ownership model. It
+mirrors Fresh's workspace cache: one durable file per workspace, no central list.
+
+- **Location and name.** `<user data dir>/gvim/workspaces/<encoded-canonical-root>.<stable-id>.json`
+  (`GVIM_WORKSPACE_DIR` overrides the directory for tests). The canonical root is
+  absolute, cleaned and symlink-resolved, so `./x`, `x/` and a symlinked spelling are one
+  workspace; one workspace exists per canonical root. The encoded root is one percent-encoded
+  file-name component (a deterministic sha256 name when it would exceed one filename); the
+  `root` recorded inside the file stays authoritative.
+- **Schema v1** (`daemon.WorkspaceFile`): `version`, `stable_id` (minted once with crypto/rand
+  at creation, adopted from the file on restore, used as the per-workspace session directory
+  name), `label` (defaults to the root basename and survives renames), `root`,
+  `last_focused_at` (unix milliseconds) and `layout` (the existing `session.Session` layout;
+  nil until captured). The per-workspace session directory `workspaces/sessions/<stable-id>/`
+  holds the stashes and the terminal record (`terminal.SavedState`, its own versioned schema,
+  owned by the terminal/dock layer: saved and loaded with `restore.SaveTerminal`/
+  `restore.LoadTerminal`). The workspace file never embeds the terminal record, and old
+  workspace files load unchanged; `authority_spec` is a future additive field.
+- **Registry API** (`internal/daemon/workspaces.go`): `WorkspaceDir`, `OpenRegistry(dir)`,
+  `CanonicalRoot`, `List` (deduped per canonical root, freshest `last_focused_at` first; a
+  stable-id-bearing file wins a tie, then the lexicographically first path), `Get`, `Create`
+  (returns the existing workspace for a known root), `Save`, `Rename`, `Touch`,
+  `UpdateLayout`, `Remove` (deletes only the registry file — session data is kept),
+  `RemoveSessionData` (explicit discard) and `SessionDir` (creates the per-workspace session
+  directory). `Workspace.Materialized`/`Active` are runtime flags, never persisted.
+- **Durability.** Saves are atomic: temp file in the same directory (0600), write, fsync,
+  close, rename over the target, then a directory fsync; a failed save leaves the previous
+  file intact and no temp file behind. A file whose `version` is newer than the binary is
+  refused on read and on overwrite (`ErrWorkspaceVersionTooNew`), skipped by scans with a
+  diagnostic and never modified or deleted; corrupt files are likewise skipped, not deleted.
+  The registry tests cover CRUD, stable-id durability across reopen, canonical-root and
+  symlink dedup, freshest-wins arbitration, future-version refusal/no-overwrite, corrupt-file
+  skipping, atomicity/no temp leftovers, rename/touch/layout persistence, close keeping
+  session data, safe encoded names and the directory override.
+- **Workspace protocol (wire + server dispatch + app handlers, landed).** The client
+  frames `workspace_list`, `workspace_select`, `workspace_new`, `workspace_close` and
+  `workspace_rename` carry JSON payloads; the server answers `workspaces` (the list with
+  the active id and each entry's id/label/root/materialized/active) or a notice. The server
+  exposes them through `Server.OnWorkspaceRequest`; a daemon without a workspace layer answers
+  with a notice, a malformed request is a notice too, and the connection survives either.
+  `Hello.Workspace` names the workspace to attach to (empty means the current
+  foreground one; the round-12 attach path still ignores it). `Registry.Discover(root)` is
+  the daemon-start view: the launch root is the foreground workspace (created/reused) and
+  every other registry entry is an inert descriptor. The app handlers drive the same
+  manager as the TUI port (list/select/new/close/rename against live runtimes; see the
+  switching lifecycle below). Wire types, validation, frame round trips, the server
+  dispatch and the end-to-end protocol are tested.
+- **Switching lifecycle (landed).** One tea program runs a `tui.WorkspaceHost` that swaps the active
+  workspace model; one `workspaceManager` (internal/app/workspace_host.go) owns the registry
+  and the materialized runtimes. The daemon start materializes the launch root's workspace
+  eagerly and returns the rest as inert descriptors. A switch captures the current
+  workspace and builds a dormant target OFF the UI goroutine (a tea command over a
+  `buildRuntime` in a worker, with a request sequence and a cancellable context: a newer
+  switch cancels the previous build and a stale result is closed instead of landing; build
+  failures leave the editor on the current workspace and show a notice). Warm runtimes are
+  kept (LSP, plugins, dock shells); switching back is a model swap and does not re-run the
+  model's Init. The TUI exposes Workspace: Switch/New/Close/Rename/Next (daemon only, added
+  to the model's command table at materialization; the static command table is unchanged),
+  a switcher list, root-then-label prompts, and a hand-written `WS <label>` status item.
+  The workspace protocol frames drive the same manager (workspace_list/select/new/close/
+  rename answer with the list and the active id; errors are notices). An open-file request
+  for a path open in another workspace switches to that workspace instead of duplicating
+  the buffer (single-writer v1; shared buffers are #19b) and a path open nowhere opens in
+  the active workspace. Discovery Import uses the additive
+  `WorkspaceLauncher.CreateWithLaunch(root, label, launch)` port: the manager creates or
+  reuses the workspace, remembers the discovered session's attach argv keyed by stable id,
+  and starts it in that workspace's dock once materialization + Show install the model
+  (through the host's command queue, never from a goroutine touching the editor). A
+  repeat import of the same root starts its own attach tab in the one workspace of that
+  root: the workspace layout/files are shared, the selected session survives as a terminal
+  tab (the model asks the dock to find a tab by the launch's Source and focuses it instead
+  of duplicating), because registry v1 has no per-session workspace identity or
+  initial-launch record yet.
+- **Capture is snapshot-and-write (landed).** The UI goroutine takes a consistent in-memory
+  snapshot (layout, unsaved buffer texts, large-file overlays, terminal record, find
+  history) and a per-workspace ordered writer queue writes the stash files, session JSON,
+  terminal record, search history and the registry layout/touch into the workspace's
+  session directory: two delayed snapshots of one workspace are written in snapshot order,
+  so an older write can never overwrite a newer one, and no disk work runs on the UI
+  goroutine (the registry itself is concurrency-safe for the UI, socket and writer
+  goroutines). Ordering: a close waits for that workspace's queued writes, and daemon quit
+  snapshots every materialized workspace, waits for every write before closing the
+  runtimes (active first); the synchronous save in the runtime close is the fallback and
+  reports its errors. Switching itself does NOT wait for the disk write (that is the point
+  of the writer); a crash between snapshot and write loses that last capture, while the
+  previous session file stays intact — this is the documented limitation of the slice, and
+  a failed write is reported (tested with a read-only session directory and an injected
+  failing writer). The capture is field-for-field compared against `restore.WriteSession` in a
+  regression test (layout, explorer/sidebar, cursor/top, active tab, unsaved stash; the
+  session format has no split record, so no split state exists to capture yet).
+  Per-workspace plugin runtimes are kept materialized per workspace (memory for
+  isolation): only materialized workspaces cost a runtime; the registry keeps the rest as
+  descriptors.
+- **Remainder of #19a (not shipped).** A remote workspace's `authority_spec` field (registry
+  v1 has no authority), the initial terminal-launch record in a workspace descriptor (the
+  discovery Import can create a workspace but not attach an argv to it yet), shared
+  buffers/daemon-level open-path map beyond the switch-to-existing-workspace rule (#19b),
+  a workspace switcher that shows live runtime details (the list shows label/root/state
+  only), and making the capture write itself cancellable/ordered under a slow disk beyond
+  the quit wait. The round-12 daemon still hosts exactly one attached client.

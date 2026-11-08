@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/icons"
 	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/lsp"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/session"
 	"github.com/tbxark/gvim/syntax"
@@ -121,29 +123,18 @@ func Run(ctx context.Context, opts Options) error {
 		opts.Daemon.Detach = srv.Detach
 		_, _ = fmt.Fprintf(os.Stderr, "gvim: daemon listening on %s\n", path)
 	}
+	if srv != nil {
+		// The daemon serves the workspace layer: one program over a host model that
+		// swaps workspace models, one runtime per materialized workspace.
+		return runDaemonHost(ctx, srv, opts)
+	}
 	rt, err := buildRuntime(ctx, opts, true)
 	if err != nil {
 		return err
 	}
 	defer rt.close()
-	if srv != nil {
-		// A client attached with files opens them in the hosted editor; the message
-		// is the one the explorer sends for an activated row.
-		srv.OnOpenFiles(func(paths []string) {
-			prog := srv.Program()
-			if prog == nil {
-				return
-			}
-			for _, path := range paths {
-				prog.Send(tui.OpenFileMessage(path))
-			}
-		})
-	}
 	var runErr error
 	switch {
-	case srv != nil:
-		go srv.Serve(ctx)
-		runErr = tui.RunWithIO(ctx, rt.model, srv, srv, srv.OnProgram)
 	case stdinInput != nil:
 		runErr = tui.RunWithInput(ctx, rt.model, stdinInput)
 	default:
@@ -357,9 +348,14 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}
 	if opts.Remote != nil {
 		// A remote launch keeps a local process root for the local-only pieces
-		// (plugin runtime, shells) but opens no local files and no explorer; the
-		// editor shows the remote terminal instead (pending-wiring UX).
+		// (plugin runtime, shells) but opens no local files and no explorer. The remote
+		// file access is installed after the SSH slot connects (setupRemoteEditing), and
+		// the remote file is opened by the root's first command, off the update loop.
+		// Watching and crash recovery are scoped off for a remote launch: a local
+		// watcher would watch nothing (the remote paths do not exist locally), and a
+		// local recovery copy would write remote text to the local cache.
 		root = remoteLocalRoot()
+		watching = false
 	}
 	// The trust decision gates the project config layer, so it is resolved
 	// before the config is loaded: an untrusted workspace is configured by the
@@ -450,8 +446,16 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if opts.Diff && len(ed.Tabs()) != 2 {
 		return nil, errors.New("--diff needs two different files")
 	}
-	recPort, recEvery := restore.RecoveryPort(ed, cfg, opts.SessionDir, watching)
-	recNotice := restore.RecoverFromCrash(ed, opts.SessionDir, watching, recPort)
+	// Crash recovery is local-only and deliberately scoped off for a remote launch: it
+	// would write a copy of remote buffer text into the local recovery cache, which is a
+	// local fallback for remote data. Every local launch keeps it unchanged.
+	var recPort tui.RecoveryPort
+	var recEvery time.Duration
+	var recNotice string
+	if opts.Remote == nil {
+		recPort, recEvery = restore.RecoveryPort(ed, cfg, opts.SessionDir, watching)
+		recNotice = restore.RecoverFromCrash(ed, opts.SessionDir, watching, recPort)
+	}
 	choice, err := runKeymap(opts.Keymap, cfg)
 	if err != nil {
 		return nil, err
@@ -483,18 +487,47 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// The project environment is detected once at workspace open (shallow, no
 	// execution) and its activation is applied to every process the editor spawns.
 	// Activation itself is host-gated on the live trust level.
-	trustedLive := func() bool {
+	levelOf := func() trust.Level {
 		if trustCtl != nil {
-			return trustCtl.State().Level == trust.Trusted
+			return trustCtl.State().Level
 		}
-		return trustState.Level == trust.Trusted
+		return trustState.Level
 	}
+	trustedLive := func() bool { return levelOf() == trust.Trusted }
 	envProvider := env.New(root, cfg.EnvDetectors(), trustedLive)
-	levelLive := func() string {
-		if trustCtl != nil {
-			return string(trustCtl.State().Level)
+	levelLive := func() string { return string(levelOf()) }
+	// The workspace spawn gate (docs/trust.md): Fresh's executable-path rule with the
+	// child's effective PATH resolved, read live so a decision applies to the next
+	// launch. Authority one-shots and the terminal, plugin processes and local
+	// language-server starts all consult it. A remote launch keeps the coarse rule: its
+	// commands run on another machine, whose trust store is deferred (#21).
+	spawnGate := func(_ context.Context, argv []string, cwd string, childEnv map[string]string) error {
+		if opts.Remote != nil {
+			if !trustedLive() {
+				return errors.New("workspace is not trusted: remote commands are disabled")
+			}
+			return nil
 		}
-		return string(trustState.Level)
+		pathValue := childEnv["PATH"]
+		if pathValue == "" {
+			pathValue = os.Getenv("PATH")
+		}
+		return trust.DecideSpawn(levelOf(), root, cwd, argv, pathValue)
+	}
+	// The authority's plain Gate (no environment) is the remote/fallback check; the local
+	// backend prefers the environment-aware form below.
+	authGate := func(ctx context.Context, argv []string, cwd string) error {
+		return spawnGate(ctx, argv, cwd, nil)
+	}
+	// The language-server gate has the manager's shape (it computes the child PATH).
+	lspGate := func(_ context.Context, argv []string, cwd, pathValue string) error {
+		if opts.Remote != nil {
+			if !trustedLive() {
+				return errors.New("workspace is not trusted: language servers cannot start")
+			}
+			return nil
+		}
+		return trust.DecideSpawn(levelOf(), root, cwd, argv, pathValue)
 	}
 	deps.Env = envPort{provider: envProvider, level: levelLive}
 	if logFile != nil {
@@ -522,6 +555,15 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if setter, ok := deps.LSP.(interface{ SetSpawnEnv(func() []string) }); ok {
 		setter.SetSpawnEnv(envProvider.Overlay)
 	}
+	if setter, ok := deps.LSP.(interface {
+		SetSpawnGate(func(context.Context, []string, string, string) error)
+	}); ok {
+		setter.SetSpawnGate(lspGate)
+	}
+	// A remote launch routes the language servers through the authority (LSP over SSH,
+	// docs/authority.md §7) once the slot exists, below. Until then the port is built as
+	// for a local launch; the manager never starts a local server for a remote workspace
+	// after the spawner is installed, and the spawn gate still runs before every start.
 	// A folder argument shows the explorer at startup. Without one the explorer
 	// stays hidden until Ctrl+B, unless the session had it open. --simple opens
 	// neither.
@@ -576,19 +618,30 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		Preset:   presetKeymap(opts.Keymap, cfg),
 		Root:     proj.RootDir,
 		SpawnEnv: envProvider.Overlay,
+		Gate:     spawnGate,
 	})
 	// The workspace authority: the local backend over the plugin OS (the same
 	// instance the plugin runtime uses) or the SSH backend of a remote launch. Every
 	// launch and one-shot goes through it; nothing downstream looks at the kind.
-	authGate := func(_ context.Context, _ []string, _ string) error {
-		if opts.Remote != nil && !trustedLive() {
-			return errors.New("workspace is not trusted: remote commands are disabled")
-		}
-		return nil
-	}
-	authSlot := newAuthority(opts, pw, authGate, envProvider.Overlay)
+	authSlot := newAuthority(opts, pw, authGate, spawnGate, envProvider.Overlay)
 	if connectNotice, _ := attemptAuthorityConnect(ctx, authSlot); connectNotice != "" {
 		openNotices = append(openNotices, connectNotice)
+	}
+	if opts.Remote != nil {
+		// The slot now has the real remote FileSystem: give the editor the file access and
+		// park the remote file for the root's first command. Installing the access is
+		// local bookkeeping only; the load itself runs in that command and a failure is a
+		// retryable notice, never an empty local buffer.
+		deps.StartupOpen = setupRemoteEditing(ed, authSlot, opts.Remote)
+		// LSP over SSH: the servers run on the remote host through the slot's
+		// LongRunning surface; a local server must never start for a remote buffer.
+		if deps.LSP != nil {
+			if setter, ok := deps.LSP.(interface {
+				SetSpawner(func(context.Context, lsp.Config) (*lsp.Client, error))
+			}); ok {
+				setter.SetSpawner(remoteLSPSpawner(authSlot, opts.Remote.Workspace()))
+			}
+		}
 	}
 	// The one-shots of the session go through the slot: git grep here, the shell and
 	// formatter runner below, the dock terminal through its starter.
@@ -648,7 +701,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		notices = append(notices, logNotice)
 	}
 	if opts.Remote != nil {
-		notices = append(notices, "Remote editing is not available yet: opened the SSH terminal at "+opts.Remote.Workspace()+"; local files are unchanged")
+		notices = append(notices, remoteEditingNotice(opts.Remote, deps.StartupOpen))
 	}
 	deps.Notice = strings.Join(notices, "; ")
 	if opts.Daemon != nil && opts.Daemon.Mode == DaemonServe {
@@ -693,6 +746,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			Agents:               dockAgents(cfg.Terminal),
 		},
 	})
+	// Agent discovery scans the local machine through the same spawn gate as the
+	// terminal and plugins; the picker runs the scan off the update loop.
+	model.SetAgentDiscoverer(newAgentDiscoverer(func() string { return proj.RootDir() }, spawnGate, cfg.Terminal.Agents))
 	// The workspace authority of the session: the shell and formatter runner go
 	// through the slot, and a remote launch shows its segment and opens the SSH
 	// terminal at the remote workspace.
@@ -720,6 +776,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			},
 			NeedsPassword: needsPassword,
 			Reconnect:     reconnect,
+			// LSP over SSH: after the connection is back, restart the remote servers
+			// that were running before the drop (never on the update goroutine; the
+			// manager honours trust and cancellation and starts no duplicate).
+			AfterReconnect: func() (int, error) { return restartLSPAfterReconnect(authSlot, deps.LSP) },
 		})
 		model.OpenAuthorityTerminalAtStart()
 	}

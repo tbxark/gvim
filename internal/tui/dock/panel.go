@@ -35,15 +35,19 @@ type Panel struct {
 	launcher  Launcher // optional: starts agent/resume programs; nil for a shell-only starter
 	clipboard ClipboardReader
 
-	open     bool // the dock is shown
-	focus    bool // key presses go to the shell, or to the terminal bindings
-	term     Terminal
-	dir      string // the directory the last shell was started in; a restart uses it
-	gen      int    // counts the shells the dock has had; messages carry it
-	starting bool   // a start is in flight
-	notice   string // why no shell runs, shown in place of the screen
-	exited   bool   // the shell has exited; its last screen stays on show
-	capture  bool   // keyboard capture: the shell gets every key while the dock has the focus
+	open  bool // the dock is shown
+	focus bool // key presses go to the shell, or to the terminal bindings
+	term  Terminal
+	dir   string // the terminal's current directory (the shell's last report); a plain restart uses it
+	// launchDir is the directory the launched program was started in. Cwd may move
+	// (the shell reports its own directory), but an agent restart/resume uses the
+	// chosen launch directory, so the two are stored apart.
+	launchDir string
+	gen       int    // counts the shells the dock has had; messages carry it
+	starting  bool   // a start is in flight
+	notice    string // why no shell runs, shown in place of the screen
+	exited    bool   // the shell has exited; its last screen stays on show
+	capture   bool   // keyboard capture: the shell gets every key while the dock has the focus
 
 	// effects are the terminal section settings the dock applies itself, and
 	// scroll is the read-only scrollback view. pressed is the button a forwarded
@@ -230,8 +234,15 @@ func (p *Panel) Restart() tea.Cmd {
 		} else {
 			dir = p.dir
 		}
+	} else if p.launchDir != "" {
+		dir = p.launchDir
 	} else if p.dir != "" {
 		dir = p.dir
+	}
+	// A recorded program (agent or discovered session) was chosen to run in a
+	// specific directory; its own chdir must not move a restart/resume elsewhere.
+	if !p.launch.Empty() && p.launchDir != "" {
+		dir = p.launchDir
 	}
 	p.open = true
 	// The focus leaves the shell that is closing. The start gives it back, because
@@ -281,6 +292,12 @@ func (p *Panel) StartAgent(name string) (tea.Cmd, bool) {
 // Agents returns the configured agent presets, in config order.
 func (p *Panel) Agents() []Agent { return p.effects.Agents }
 
+// Launch returns the program the tab's terminal was started with, empty for the
+// plain shell. It is read-only and bounded the way a start or save bounds it; the
+// record is what a restart replays and what the tab strip titles a terminal with
+// (Fresh names a tab after the program it runs).
+func (p *Panel) Launch() terminal.Launch { return p.launch.Clean() }
+
 // launchProgram closes the shell the dock holds and starts argv, recording rec as
 // the launch a restart should use. The record is set before the start, so a failed
 // start can be retried and is not lost.
@@ -297,6 +314,7 @@ func (p *Panel) launchProgram(dir string, argv []string, rec terminal.Launch, ep
 	p.starting = true
 	p.notice = ""
 	p.dir = dir
+	p.launchDir = dir
 	p.scroll = scrollState{}
 	p.restored = false
 	p.exited = false
@@ -329,6 +347,7 @@ func (p *Panel) launchShell(dir string) tea.Cmd {
 	p.starting = true
 	p.notice = ""
 	p.dir = dir
+	p.launchDir = dir
 	p.scroll = scrollState{}
 	p.restored = false
 	cols, rows := p.contentSize()

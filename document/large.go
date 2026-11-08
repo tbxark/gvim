@@ -81,6 +81,10 @@ type loadSpec struct {
 	Eol       string
 	AutoRO    bool
 	LargeConf largeSpec
+	// Access is the file I/O seam of the load: nil means the local filesystem, non-nil
+	// means every read and stat of the new document goes through it (a remote
+	// authority). The loaded document keeps it for its saves.
+	Access FileAccess
 }
 
 // orDefault returns v, or def when v is zero.

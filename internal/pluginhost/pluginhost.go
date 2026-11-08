@@ -1,6 +1,7 @@
 package pluginhost
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -47,7 +48,17 @@ type Options struct {
 	// SpawnEnv is the active project environment's set-only overlay for plugin
 	// processes, or nil.
 	SpawnEnv func() []string
+	// Gate is the workspace trust spawn gate for plugin processes: it receives the
+	// argv, the working directory and the effective environment (so a bare command
+	// name resolves through the child's PATH) and returns a refusal error. Nil
+	// allows every launch.
+	Gate SpawnGate
 }
+
+// SpawnGate is the trust check a plugin process launch goes through. It is a
+// function type, not a dependency on any particular authority: the app adapts its
+// trust gate to it.
+type SpawnGate func(ctx context.Context, argv []string, cwd string, env map[string]string) error
 
 // New builds the plugin runtime of a session. It starts nothing: the model's Init starts
 // the runtime, whose first Work discovers the plugins, and the plugins load when that Work
@@ -78,6 +89,7 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 		}
 	}
 	osys := newPluginOS(pluginDirs(cfgDir, o.Root), o.SpawnEnv)
+	osys.gate = o.Gate
 	return &Wiring{
 		OS: osys,
 		Runtime: plugin.New(plugin.Options{

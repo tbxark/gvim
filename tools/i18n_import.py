@@ -63,6 +63,8 @@ def main():
             raise SystemExit(f"Fresh has no locale file for {locale}: {path}")
         fresh = load(path)
         table = {}
+        # Explicit mappings first: gvim keys whose Fresh key differs (or that are
+        # gvim-only in English but reuse a Fresh translation).
         for gvim_key, fresh_key in mapping.items():
             text = fresh.get(fresh_key)
             if text is None:
@@ -73,6 +75,23 @@ def main():
                     f"{placeholders(en[gvim_key])} ({fresh_key})"
                 )
             table[gvim_key] = text
+        # Identity imports: catalogue keys that ARE Fresh's key (generated command and
+        # menu keys), imported when Fresh's English text for that key is exactly ours.
+        # This keeps fresh_map.json to the keys whose Fresh key differs.
+        for key, english in en.items():
+            if key in mapping or key.startswith("gvim."):
+                continue
+            if fresh_en.get(key) != english:
+                continue
+            text = fresh.get(key)
+            if text is None:
+                continue
+            if placeholders(text) != placeholders(english):
+                raise SystemExit(
+                    f"{locale}: {key} placeholders {placeholders(text)} do not match English "
+                    f"{placeholders(english)}"
+                )
+            table[key] = text
         data = json.dumps(dict(sorted(table.items())), ensure_ascii=False, indent=2) + "\n"
         out = LOCALES / f"{locale}.json"
         current = out.read_text(encoding="utf-8") if out.exists() else None

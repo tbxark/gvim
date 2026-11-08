@@ -64,7 +64,7 @@ func reloadWithEncoding(e *Editor, d *Document, args map[string]any) error {
 		return fmt.Errorf("%s: %w", d.Name(), ErrUnsaved)
 	}
 	// The disk state is taken before the read, as readDocument does.
-	disk := diskStateOf(d.Path)
+	disk := d.DiskState()
 	data, err := os.ReadFile(d.Path)
 	if err != nil {
 		return fmt.Errorf("reload %s: %w", d.Path, err)

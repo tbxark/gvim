@@ -27,11 +27,14 @@ func AttachClient(ctx context.Context, name string, files []string) error {
 	if w, h, err := term.GetSize(os.Stdout.Fd()); err == nil && w > 0 && h > 0 {
 		cols, rows = w, h
 	}
-	if err := WriteJSON(conn, TypeHello, Hello{Cols: cols, Rows: rows}); err != nil {
+	// One writer for this connection: the input goroutine and the SIGWINCH goroutine
+	// both write frames, and they must never interleave.
+	fw := NewFrameWriter(deadlineWriter{conn: conn, timeout: frameWriteTimeout})
+	if err := fw.WriteJSON(TypeHello, Hello{Cols: cols, Rows: rows}); err != nil {
 		return err
 	}
 	if len(files) > 0 {
-		if err := WriteJSON(conn, TypeOpenFile, OpenFile{Paths: files}); err != nil {
+		if err := fw.WriteJSON(TypeOpenFile, OpenFile{Paths: files}); err != nil {
 			return err
 		}
 	}
@@ -42,7 +45,7 @@ func AttachClient(ctx context.Context, name string, files []string) error {
 		}
 		defer func() { _ = term.Restore(os.Stdin.Fd(), state) }()
 	}
-	stopResize := watchResize(conn)
+	stopResize := watchResize(fw)
 	defer stopResize()
 	// Keep the terminal readable: a close or any read error ends the proxy.
 	done := make(chan error, 1)
@@ -51,7 +54,7 @@ func AttachClient(ctx context.Context, name string, files []string) error {
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
-				if werr := WriteFrame(conn, TypeInput, buf[:n]); werr != nil {
+				if werr := fw.WriteFrame(TypeInput, buf[:n]); werr != nil {
 					done <- werr
 					return
 				}

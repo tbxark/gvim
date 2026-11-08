@@ -546,7 +546,10 @@ func (m Model) holds(name string) bool {
 // labelRun is one bar label: its first column, its width and its text.
 type labelRun struct {
 	x, w  int
-	title string
+	title string // the English table label: identity for hit testing and open state
+	// display is the text drawn, translated through the catalogue; title is the
+	// fallback and the identity the open dropdown and hit map use.
+	display string
 }
 
 // labelRuns places the bar labels with labelGap blanks between them.
@@ -555,8 +558,9 @@ func labelRuns(explorerFocus bool) []labelRun {
 	var runs []labelRun
 	x := labelStart
 	for _, title := range titles {
-		w := ansi.StringWidth(title)
-		runs = append(runs, labelRun{x: x, w: w, title: title})
+		display := menuBarLabel(title)
+		w := ansi.StringWidth(display)
+		runs = append(runs, labelRun{x: x, w: w, title: title, display: display})
 		x += w + labelGap
 	}
 	return runs
@@ -632,7 +636,7 @@ func (m Model) geometry(w, h int) geometry {
 	g := geometry{labels: shown}
 	if more {
 		// A copy: shown shares the backing array of runs, which the lookup below reads.
-		g.labels = append(slices.Clone(shown), labelRun{x: w - 1, w: 1, title: moreTitle})
+		g.labels = append(slices.Clone(shown), labelRun{x: w - 1, w: 1, title: moreTitle, display: moreTitle})
 	}
 	if !m.IsOpen() {
 		return g
@@ -837,12 +841,16 @@ func checkGlyph(checked bool) string {
 // runs so one character can be underlined inside it, and this does the same on the
 // grid.
 func (m Model) paintLabel(g *grid.Grid, r labelRun, st grid.Style) {
-	i := m.mnemonicIndex(r.title)
+	label := r.display
+	if label == "" {
+		label = r.title
+	}
+	i := m.mnemonicIndex(label)
 	if i < 0 {
-		g.Put(r.x, m.row, g.Width(), r.title, st)
+		g.Put(r.x, m.row, g.Width(), label, st)
 		return
 	}
-	runes := []rune(r.title)
+	runes := []rune(label)
 	x := r.x
 	if pre := string(runes[:i]); pre != "" {
 		g.Put(x, m.row, g.Width(), pre, st)

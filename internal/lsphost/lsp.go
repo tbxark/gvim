@@ -102,7 +102,14 @@ func newPort(plan lspPlan, lspEnabled bool, spawnEnv func() []string) *lspPort {
 type lspPort struct {
 	// spawnEnv is the active project environment's set-only overlay for servers
 	// (nil when none is wired).
-	spawnEnv  func() []string
+	spawnEnv func() []string
+	// spawnGate is the workspace trust spawn gate for local server starts (nil when
+	// none is wired); it is read at every start.
+	spawnGate func(ctx context.Context, argv []string, cwd, pathValue string) error
+	// spawner, when set, starts the server instead of lsp.Start: a remote workspace
+	// runs the server on the remote host through the authority's LongRunning surface
+	// (docs/authority.md). The manager's spawn gate still runs before it.
+	spawner   func(context.Context, lsp.Config) (*lsp.Client, error)
 	servers   map[string][]manager.ServerConfig // by language ID; read only after construction
 	universal []manager.ServerConfig
 	info      map[string]tui.LSPServerInfo // read only after construction
@@ -991,6 +998,8 @@ func (p *lspPort) newManagerLocked(root string) *manager.Manager {
 	mgr := manager.NewManager(root, p.servers, p.universal)
 	mgr.SetApplyEdit(p.enqueueEdit)
 	mgr.SetSpawnEnv(p.spawnEnv)
+	mgr.SetGate(p.spawnGate)
+	mgr.SetSpawner(p.spawner)
 	for lang := range p.forced {
 		mgr.ForceLanguage(lang)
 	}
@@ -1017,6 +1026,62 @@ func (p *lspPort) SetSpawnEnv(overlay func() []string) {
 	p.mu.Lock()
 	p.spawnEnv = overlay
 	p.mu.Unlock()
+}
+
+// SetSpawnGate installs the workspace trust spawn gate for the servers this port starts
+// from now on. It is read at every start, so a trust decision applies to the next one.
+func (p *lspPort) SetSpawnGate(gate func(ctx context.Context, argv []string, cwd, pathValue string) error) {
+	p.mu.Lock()
+	p.spawnGate = gate
+	managers := make([]*manager.Manager, 0, len(p.managers))
+	for _, mgr := range p.managers {
+		managers = append(managers, mgr)
+	}
+	p.mu.Unlock()
+	for _, mgr := range managers {
+		mgr.SetGate(gate)
+	}
+}
+
+// SetSpawner installs how the servers this port starts are launched. It is for a
+// remote workspace, whose servers run on the remote host through the authority's
+// LongRunning surface; nil restores the local lsp.Start. The spawn gate still runs
+// before every start. It applies to the managers of every root, now and later.
+func (p *lspPort) SetSpawner(start func(context.Context, lsp.Config) (*lsp.Client, error)) {
+	p.mu.Lock()
+	p.spawner = start
+	managers := make([]*manager.Manager, 0, len(p.managers))
+	for _, mgr := range p.managers {
+		managers = append(managers, mgr)
+	}
+	p.mu.Unlock()
+	for _, mgr := range managers {
+		mgr.SetSpawner(start)
+	}
+}
+
+// RestartAfterReconnect restarts the servers that were running before an authority
+// reconnect, for a remote workspace: each manager restarts only its previously running
+// servers, never a user-stopped server or a muted language, and never a duplicate of a
+// live one (see manager.RestartAfterReconnect). ctx bounds the work and is checked
+// between servers.
+func (p *lspPort) RestartAfterReconnect(ctx context.Context) (int, error) {
+	p.mu.Lock()
+	managers := make([]*manager.Manager, 0, len(p.managers))
+	for _, mgr := range p.managers {
+		managers = append(managers, mgr)
+	}
+	p.mu.Unlock()
+	total := 0
+	var errs []error
+	for _, mgr := range managers {
+		n, err := mgr.RestartAfterReconnect(ctx)
+		total += n
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return total, errors.Join(errs...)
 }
 
 // doc returns the record of the open document at path.

@@ -15,6 +15,11 @@ type Launch struct {
 	Agent      string   `json:"agent,omitempty"`
 	ResumeArgv []string `json:"resume_argv,omitempty"`
 	Ephemeral  bool     `json:"ephemeral,omitempty"`
+	// Source is the durable external identity of a discovered session (for example
+	// "tmux:default/work"). It lets a repeated import find the tab that already
+	// attaches that session instead of opening a duplicate. Empty for a configured
+	// agent or shell.
+	Source string `json:"source,omitempty"`
 }
 
 // Bounds of a Launch, so a saved record or a config cannot hand the dock an
@@ -34,9 +39,13 @@ func (l Launch) Clean() Launch {
 		ResumeArgv: cleanArgv(l.ResumeArgv),
 		Agent:      l.Agent,
 		Ephemeral:  l.Ephemeral,
+		Source:     l.Source,
 	}
 	if len(out.Agent) > LaunchAgentMax {
 		out.Agent = out.Agent[:LaunchAgentMax]
+	}
+	if len(out.Source) > LaunchTextMax {
+		out.Source = out.Source[:LaunchTextMax]
 	}
 	return out
 }

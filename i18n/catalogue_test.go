@@ -56,9 +56,10 @@ func TestEmbeddedLocaleFiles(t *testing.T) {
 			t.Errorf("locale %q has no embedded file", code)
 		}
 	}
-	// The size stays bounded: the catalogue is the small extracted inventory, not
-	// Fresh's full 1.9k-key file. The cap leaves room for future slices but keeps a
-	// careless full-import from silently bloating the binary.
+	// The size stays bounded: the catalogue is the extracted inventory (the command and
+	// menu classes are the bulk), not Fresh's full 1.9k-key file. The measured key+value
+	// text is about 194 KiB; the cap leaves room for the rest of the extraction but keeps
+	// a careless full import from silently bloating the binary.
 	var total int
 	for code, table := range files {
 		for key, value := range table {
@@ -68,8 +69,8 @@ func TestEmbeddedLocaleFiles(t *testing.T) {
 			}
 		}
 	}
-	if total > 64*1024 {
-		t.Errorf("embedded locale text = %d bytes, want under the 64 KiB cap", total)
+	if total > 256*1024 {
+		t.Errorf("embedded locale text = %d bytes, want under the 256 KiB cap", total)
 	}
 }
 
@@ -122,10 +123,15 @@ func TestEnglishIsTheSourceOfTruth(t *testing.T) {
 	if len(gvimOnly)+len(mapping) != len(en) {
 		t.Fatalf("mapping (%d) and gvim-only (%d) do not cover the %d English keys", len(mapping), len(gvimOnly), len(en))
 	}
+	// An unmapped English key is one of the two extracted classes: a gvim-only key
+	// (gvim.*, English until a translation pass) or a Fresh-key identity (cmd.*, menu.*;
+	// its translation is imported from Fresh when the locale has it and falls back to
+	// English otherwise). The differing gvim->Fresh mappings live in fresh_map.json.
 	for _, key := range gvimOnly {
-		if !strings.HasPrefix(key, "gvim.") {
-			t.Errorf("unmapped key %q is not a gvim-only key", key)
+		if strings.HasPrefix(key, "gvim.") || strings.HasPrefix(key, "cmd.") || strings.HasPrefix(key, "menu.") {
+			continue
 		}
+		t.Errorf("unmapped key %q is neither a gvim-only key nor a Fresh-key identity", key)
 	}
 	for key, value := range en {
 		if value == "" {
@@ -168,8 +174,8 @@ func TestLocaleCoverage(t *testing.T) {
 				t.Errorf("%s: mapped key %q is missing (run tools/i18n_import.py)", lang.Code, key)
 			}
 		}
-		t.Logf("%s: %d/%d English keys translated (%d/%d mapped; %d gvim-only keys fall back to English)",
-			lang.Code, translated, len(en), translatedMapped, len(mapping), len(en)-len(mapping))
+		t.Logf("%s: %d/%d English keys translated (explicit mappings %d/%d; %d Fresh-key identities translated; %d keys fall back to English)",
+			lang.Code, translated, len(en), translatedMapped, len(mapping), translated-translatedMapped, len(en)-translated)
 	}
 }
 

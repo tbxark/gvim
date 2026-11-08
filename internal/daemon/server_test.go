@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -207,4 +209,110 @@ func TestServerCloseSendsExit(t *testing.T) {
 	if f.Type != TypeExit {
 		t.Fatalf("close frame type = %d, want exit", f.Type)
 	}
+}
+
+// TestServerConcurrentOutputFramesIntact checks frames written concurrently through
+// Server.Write arrive whole: every payload is one of the expected blocks, never a mix.
+func TestServerConcurrentOutputFramesIntact(t *testing.T) {
+	srv, _ := startTestServer(t)
+	c := dialTestDaemon(t, srv, 100, 30)
+	const n = 16
+	want := make([][]byte, n)
+	for i := range want {
+		want[i] = bytes.Repeat([]byte{byte('a' + i)}, 8<<10)
+	}
+	go func() {
+		for _, p := range want {
+			_, _ = srv.Write(p)
+		}
+	}()
+	got := make([][]byte, 0, n)
+	deadline := time.After(5 * time.Second)
+	for len(got) < n {
+		type res struct {
+			f   Frame
+			err error
+		}
+		ch := make(chan res, 1)
+		go func() {
+			f, err := ReadFrame(c.conn)
+			ch <- res{f, err}
+		}()
+		select {
+		case r := <-ch:
+			if r.err != nil {
+				t.Fatalf("read frame %d: %v", len(got), r.err)
+			}
+			got = append(got, r.f.Payload)
+		case <-deadline:
+			t.Fatalf("read %d of %d frames", len(got), n)
+		}
+	}
+	seen := make(map[string]bool, n)
+	for _, p := range got {
+		seen[string(p)] = true
+	}
+	for i, p := range want {
+		if !seen[string(p)] {
+			t.Fatalf("output frame %d never arrived whole", i)
+		}
+	}
+}
+
+// TestWorkspaceProtocolServer checks the workspace frames reach the hook and answer with a
+// workspaces frame, that a malformed request is a notice (not a disconnect), and that a
+// daemon without a hook refuses with a notice.
+func TestWorkspaceProtocolServer(t *testing.T) {
+	srv, _ := startTestServer(t)
+	c := dialTestDaemon(t, srv, 100, 30)
+	// No hook yet: a workspace_list gets a notice and the connection stays usable.
+	if err := WriteFrame(c.conn, TypeWorkspaceList, nil); err != nil {
+		t.Fatal(err)
+	}
+	f, err := ReadFrame(c.conn)
+	if err != nil || f.Type != TypeNotice || !strings.Contains(string(f.Payload), "no workspace layer") {
+		t.Fatalf("frame without a hook = %#v, %v", f, err)
+	}
+	var got WorkspaceRequest
+	srv.OnWorkspaceRequest(func(req WorkspaceRequest) WorkspaceResult {
+		got = req
+		return WorkspaceResult{List: &WorkspaceList{Active: "id-1", Entries: []WorkspaceInfo{{ID: "id-1", Label: "one", Root: "/tmp/one", Materialized: true, Active: true}}}}
+	})
+	if err := WriteFrame(c.conn, TypeWorkspaceList, nil); err != nil {
+		t.Fatal(err)
+	}
+	f, err = ReadFrame(c.conn)
+	if err != nil || f.Type != TypeWorkspaces {
+		t.Fatalf("workspace answer = %#v, %v", f, err)
+	}
+	var list WorkspaceList
+	if err := DecodeJSON(f, &list); err != nil {
+		t.Fatal(err)
+	}
+	if list.Active != "id-1" || len(list.Entries) != 1 || list.Entries[0].Label != "one" || !list.Entries[0].Materialized {
+		t.Fatalf("list = %+v", list)
+	}
+	if got.List == nil {
+		t.Fatalf("hook saw %+v, want a list request", got)
+	}
+	// A rename request reaches the hook with its fields.
+	if err := WriteJSON(c.conn, TypeWorkspaceRename, WorkspaceRename{ID: "id-1", Label: "renamed"}); err != nil {
+		t.Fatal(err)
+	}
+	f, err = ReadFrame(c.conn)
+	if err != nil || f.Type != TypeWorkspaces {
+		t.Fatalf("rename answer = %#v, %v", f, err)
+	}
+	if got.Rename == nil || got.Rename.Label != "renamed" {
+		t.Fatalf("hook saw %+v", got)
+	}
+	// A malformed request is a notice, and the connection survives (ping answers).
+	if err := WriteJSON(c.conn, TypeWorkspaceSelect, WorkspaceSelect{}); err != nil {
+		t.Fatal(err)
+	}
+	f, err = ReadFrame(c.conn)
+	if err != nil || f.Type != TypeNotice || !strings.Contains(string(f.Payload), "empty id") {
+		t.Fatalf("malformed request answer = %#v, %v", f, err)
+	}
+	waitAttached(t, c.conn)
 }

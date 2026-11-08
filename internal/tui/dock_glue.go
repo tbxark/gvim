@@ -109,6 +109,8 @@ func (m *Model) dockAction(action string) (tea.Cmd, bool) {
 		return m.dock.PasteClipboard(), true
 	case "run_agent":
 		return m.openAgentPicker(), true
+	case "discover_agent_sessions":
+		return m.openAgentDiscover(), true
 	case "terminal_tab_new":
 		return m.dock.NewTab(), true
 	case "terminal_tab_close":

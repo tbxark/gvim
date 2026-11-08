@@ -84,13 +84,19 @@ func TestStaleSocketIsUnlinked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A plain file at the socket path is stale and is replaced.
-	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+	// A socket left by a dead daemon is stale and is replaced. (A plain file at the
+	// path is the user's and is refused; TestListenRefusesToReplaceNonSocket.)
+	_ = os.Remove(path) // a previous run may have left the regular file this test used to seed
+	old, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("seed stale socket: %v", err)
+	}
+	if err := old.Close(); err != nil {
 		t.Fatal(err)
 	}
 	ln, got, err := Listen(name)
 	if err != nil {
-		t.Fatalf("Listen over a stale file: %v", err)
+		t.Fatalf("Listen over a stale socket: %v", err)
 	}
 	if got != path {
 		t.Fatalf("path = %q, want %q", got, path)

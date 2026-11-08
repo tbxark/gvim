@@ -69,7 +69,7 @@ func unitBounds(b *buffer.Buffer, p buffer.Pos, u Unit) (start, end buffer.Pos) 
 // Like OpenFile, it returns an error wrapping ErrNotDecodable or the file error,
 // and the same message is written to the status.
 func (e *Editor) OpenPreview(path string) error {
-	path, err := absPath(path)
+	path, err := e.openPath(path)
 	if err != nil {
 		e.setError(err)
 		return err

@@ -123,10 +123,10 @@ list is fixed in `trust/markers.go`.)
 |---|---|---|
 | Project config layer | Skipped entirely (`config.Options.Untrusted`) unless the workspace is Trusted. Covers `formatters`, `lsp` entries, `languages`, display settings, plugin enablement/settings. | **Enforced**, and **stricter than Fresh**, which merges the project config at any level. |
 | Project plugins, plugin settings | Via the project layer skip: a project cannot turn a plugin off or set a project setting. gvim discovers no plugins from the workspace itself (plugins come from the binary, the user config dir and `--plugin`), so there is nothing else to gate. | **Enforced** via the config layer. |
-| Explicit executables inside the workspace | Not enforced: gvim has no single process-spawn choke point. Terminals, shell commands, formatters, LSP server spawns, git/finder spawns and plugin process spawns are not consulted against the trust level. | **Not enforced** (gap). |
+| Explicit executables inside the workspace | Enforced by the spawn gate (`trust.DecideSpawn`, wired through the workspace authority's one-shots/long-running children/terminal, the plugin OS and the LSP manager): an executable that resolves inside the root is refused, lexically and through symlinks, and a bare name is resolved against the child's effective PATH first. See §3.1. | **Enforced.** |
 | LSP auto-start | `lsp_enabled` is forced off for the session when the workspace is not Trusted, so no server starts on its own (the LSP pill shows `LSP (off)`); Start/Restart LSP Server still starts one, as Fresh's manual start does in a restricted workspace. The user's config file is not changed. | **Enforced.** |
 | Environment activation, devcontainers, tasks | gvim has none of these features. | Not applicable. |
-| Blocked | Same restrictions as Restricted in gvim (project layer skipped, no language-server auto-start); the difference is the label and the notice. | **Partially enforced**: no project tooling, but processes are not blocked (same gap as above). |
+| Blocked | Blocked now denies every spawn (terminals, shell/formatter jobs, LSP starts, git/find spawns, plugin processes) in addition to the Restricted restrictions. | **Enforced** by the spawn gate. |
 
 Why the project layer is gated: it is the one place in gvim where a repository's file can
 name a program to run. The project `.gvim/config.json` can set `formatters`, whose command
@@ -138,11 +138,75 @@ extension: the whole project layer waits for the user's decision. Under **Truste
 C11 restrictions still hold — trusting a folder opens its configuration, not the ability
 to choose programs it should not.
 
-The known gap is a process gate. Fresh's authority layer gives it one seam to wrap; gvim's
-spawns are spread over `editor` shell jobs, formatters, `internal/lsphost`, the terminal
-dock (`internal/terminal`) and `plugin/hostos`. A later round can add a spawn gate that
-consults `State.Level` at those call sites (deny an explicit executable path inside the
-workspace under Restricted, deny all spawns under Blocked) without changing this model.
+The spawn gate (below) closes the process gap this page used to record, without changing
+the model: it consults the live level at launch time, so a decision taken during the
+session applies to the next spawn.
+
+### 3.1 The spawn gate
+
+One decision function, `trust.DecideSpawn(level, root, cwd, argv, pathValue)`, runs before
+every launch. `pathValue` is the child's effective `PATH` (parent environment, then the
+project environment overlay, then the launch's own environment), so a bare command name is
+judged by the program that would actually run, not by an assumption that `PATH` holds only
+system tools. Fresh's gate judges the explicit executable path only and lets a bare name through because a restricted workspace activates no environment, so no project `bin/` is on `PATH`; gvim resolves the bare name through the child's actual `PATH` as the Lead-directed strengthening (a user `PATH` entry pointing into the project, an empty entry — cwd — or a relative entry is caught), and checks the first token of the shell runner's `-c` string, which Fresh's gate does not see. Those are the deliberate differences; everything else follows Fresh's three-level policy.
+
+The rule matrix:
+
+| Level | Terminal (shell supplied separately) | Explicit path (relative/absolute) | Bare name |
+|---|---|---|---|
+| Trusted | allowed | allowed | allowed |
+| Restricted, Undecided (effective Restricted) | allowed — the shell is checked like any command | refused when the path is root or inside it, lexically **or through symlinks** | resolved through `pathValue` in order (an empty entry is cwd, a relative entry is relative to cwd); refused when the first existing executable is inside the root; allowed when it resolves nowhere (the exec then fails) or outside the root |
+| Blocked | refused | refused | refused |
+
+The root check compares the cleaned path and `filepath.EvalSymlinks` of both the root and
+the candidate, so a symlinked workspace and a symlinked executable both stay inside the
+rule. For the shell runner (one `sh -c` per job/format) the shell is judged like any
+command and the **first token** of the command string is checked the same way, which
+catches a project-relative or PATH-resolved formatter/shell command
+(`./.venv/bin/python -m black`). Refusals are the `*trust.SpawnRefusal` error: the level,
+the refused spelling and "trust the folder to allow project tooling" (Blocked says no
+processes may run). Each surface shows it with its existing notice/status path; nothing
+falls back to a shell, and a configured formatter or plugin environment cannot bypass it
+because the gate runs at the launch, after the configuration resolved.
+
+Where it runs: the workspace authority (`authority/local.go`: `Run`, `Start` and the
+dock terminal's `Launch`, with the environment-aware hook) covers git/find one-shots, the
+editor shell/formatter runner and the integrated terminal; `internal/pluginhost`'s OS runs
+it before every plugin `gvim.proc.run/spawn`; `lsp/manager` runs it in `launch` before
+`lsp.Start`, so auto-start, manual Start/Restart and universal servers are all covered.
+Only the local backend is gated: a remote launch (`internal/authority` SSH) keeps the
+coarse rule in the app (untrusted remote → remote commands denied) because a remote trust
+store is deferred to #21; its helper filesystem runs commands on the remote host, where a
+remote path policy would be a different decision.
+
+**Resolution of the executed program.** A gate decision is only as good as the binary that
+actually starts, and Go's `exec.Command` resolves a bare name with the *parent* environment
+before `cmd.Dir` or the child environment apply. The three seams therefore resolve the
+program themselves with the same cwd and child `PATH` the gate used, and execute the
+resulting absolute path: `pluginOS.command` (all plugin processes, and the authority's
+local OS beneath the shell/formatter/git one-shots), `authority`'s local `Launch` (the dock
+shell is returned resolved) and `lsp/manager`'s `launch` (the server command is resolved
+before `lsp.Start`'s own lookup, which passes an absolute path through). Any future spawn
+site must do the same (`trust.ResolveSpawnPath`, then exec the result); a call site that
+re-runs `exec.LookPath` in the parent environment would reintroduce the mismatch. The
+agent-discovery runner follows the same pattern when it pre-resolves its `tmux` argv.
+
+Residuals, recorded rather than claimed solved: the `-c` command string is inspected only
+for its first token (compound/quoted/variable-built commands are not parsed; the shell
+runner gap is reduced, not contained); Windows `PATH` resolution does not implement
+`PATHEXT` (an exact file name is required) and path comparisons are not
+drive-letter-case-normalized; a `PATH` value the gate cannot see (a per-launch environment
+injected below the authority/plugin OS/LSP layers) would not be resolved, though all three
+seams pass their child environment and resolve through it; and the gate decides, it does
+not kill an already-running process when the level drops. The open-time prompt and the trust dialog are
+unchanged: a spawn refusal does not open a dialog, it names the level and the command, and
+the user changes the decision through the existing trust UI.
+
+Tests: `trust/gate_test.go` (level matrix, explicit paths, PATH order/empty/relative
+entries, symlinks both ways, shell first token, refusal shape), `authority/local_gate_test.go`
+(env-aware hook for Run/Start/Launch, plain-gate fallback), `internal/pluginhost/pluginos_gate_test.go`,
+`lsp/manager/gate_test.go` and `internal/app/spawn_gate_test.go` (restricted/blocked/trusted
+through the real authority and the wired LSP port).
 
 **When a decision applies.** The trust state and the status pill change immediately when a
 decision is taken. The *config-layer* restriction is a startup decision: the editor builds

@@ -7,7 +7,7 @@ import (
 
 // loadSpec returns the load settings of the editor's options.
 func (e *Editor) loadSpec() loadSpec {
-	spec := loadSpec{Eol: e.defaultEOL(), AutoRO: e.opts.AutoReadOnly}
+	spec := loadSpec{Eol: e.defaultEOL(), AutoRO: e.opts.AutoReadOnly, Access: e.opts.FileAccess}
 	spec.LargeConf.FullMax = orDefault(e.opts.fullLoadMax, maxFullLoad)
 	if e.opts.LargeFileMode && e.opts.LargeFileThresholdBytes > 0 {
 		spec.LargeConf.Threshold = int64(e.opts.LargeFileThresholdBytes)
@@ -26,6 +26,12 @@ func (e *Editor) loadSpec() loadSpec {
 // It reads no file content, only the file's size, so the update loop may call
 // it.
 func (e *Editor) isLargePath(path string) bool {
+	if e.opts.FileAccess != nil {
+		// A remote document is loaded whole through its access in a command; there is no
+		// large-file mode for it, and no local stat may run for it here (Update calls
+		// this). Reporting true routes the TUI's open through its asynchronous load.
+		return true
+	}
 	spec := e.loadSpec().LargeConf
 	if spec.Threshold == 0 {
 		return false

@@ -26,7 +26,7 @@ import (
 // newAuthority mounts the slot of the session. It never dials a remote: the startup
 // attempt (and the activation retry, with a password prompt when needed) call Reconnect,
 // because a password prompt needs the running UI.
-func newAuthority(opts Options, pw *pluginhost.Wiring, gate authority.Gate, env authority.EnvProvider) authority.Slot {
+func newAuthority(opts Options, pw *pluginhost.Wiring, gate authority.Gate, gateEnv authority.GateEnv, env authority.EnvProvider) authority.Slot {
 	if opts.Remote != nil {
 		return authority.NewSSH(authority.SSHOptions{
 			Spec:           *opts.Remote,
@@ -43,9 +43,10 @@ func newAuthority(opts Options, pw *pluginhost.Wiring, gate authority.Gate, env 
 		osys = pw.OS
 	}
 	return authority.Local(authority.LocalOptions{
-		OS:   osys,
-		Gate: gate,
-		Env:  env,
+		OS:      osys,
+		Gate:    gate,
+		GateEnv: gateEnv,
+		Env:     env,
 	})
 }
 

@@ -18,7 +18,11 @@ import (
 // the first visible line of its viewport.
 type Document struct {
 	// Path is the absolute path of the file, or "" for an unnamed buffer.
-	Path   string
+	Path string
+	// access is the file I/O seam of the document: nil means the local filesystem, a
+	// non-nil access means every read, stat and save goes through it (a remote
+	// authority). See FileAccess and docs/authority.md.
+	access FileAccess
 	Buffer *buffer.Buffer
 	Cursor buffer.Pos
 	// Sel is nil when nothing is selected. Its Head always equals Cursor.
@@ -404,14 +408,50 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	// The state is taken before the read. A change between the two then shows
 	// as a difference on save, which is the safe side.
 	disk := diskStateOf(path)
+	if spec.Access != nil {
+		// A non-local document never consults os.Stat/os.ReadFile: its only file I/O is
+		// the access. A missing remote path is an error, not an empty buffer: the editor
+		// must not turn a failed or disconnected open into a "new file" that could be
+		// saved over something unexpected (Save As creates a new remote file).
+		st, err := spec.Access.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("open %s: %w", path, err)
+		}
+		if !st.Exists {
+			return nil, fmt.Errorf("open %s: %w", path, fs.ErrNotExist)
+		}
+		if st.Dir {
+			return nil, fmt.Errorf("open %s: is a directory", path)
+		}
+		disk = st.diskState()
+	}
 	if disk.Special {
 		return nil, fmt.Errorf("open %s: not a regular file", path)
 	}
-	if disk.Exists && spec.LargeConf.IsLarge(disk.Size) {
+	if disk.Dir() {
+		return nil, fmt.Errorf("open %s: is a directory", path)
+	}
+	if spec.Access == nil && disk.Exists && spec.LargeConf.IsLarge(disk.Size) {
 		return readLargeDocument(path, disk, spec.LargeConf)
 	}
-	data, err := os.ReadFile(path)
+	var data []byte
+	var err error
+	if spec.Access != nil {
+		// Remote documents are read whole through the access; the access bounds the
+		// transfer (authority/ssh_files.go), and large-file mode is local-only (a
+		// recorded residual), so a remote file over the cap fails clearly.
+		max := spec.LargeConf.FullMax
+		if max <= 0 {
+			max = maxFullLoad
+		}
+		data, err = spec.Access.ReadFile(path, max)
+	} else {
+		data, err = os.ReadFile(path)
+	}
 	if errors.Is(err, fs.ErrNotExist) {
+		if spec.Access != nil {
+			return nil, fmt.Errorf("open %s: %w", path, err)
+		}
 		d := newDocument(path, "")
 		d.Eol = spec.Eol
 		return d, nil
@@ -420,7 +460,9 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	if encoding.IsBinary(data) {
-		return binaryDocument(path, data, disk), nil
+		d := binaryDocument(path, data, disk)
+		d.access = spec.Access
+		return d, nil
 	}
 	decoded, codec, err := decodeFile(data)
 	if err != nil {
@@ -433,6 +475,7 @@ func readDocument(path string, spec loadSpec) (*Document, error) {
 	d.Disk = disk
 	d.Codec = codec
 	d.encoding = encodingLabel(codec, text)
+	d.access = spec.Access
 	return d, nil
 }
 

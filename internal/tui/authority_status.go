@@ -2,11 +2,14 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
@@ -28,6 +31,10 @@ type AuthorityHooks struct {
 	NeedsPassword func() bool
 	// Reconnect blocks until the backend reconnected; password "" means no prompt.
 	Reconnect func(ctx context.Context, password string) error
+	// AfterReconnect, when set, runs once after a successful reconnect, off the update
+	// goroutine, and reports how many language servers were restarted (or why not). The
+	// app uses it for LSP restart on a remote workspace; nil does nothing.
+	AfterReconnect func() (int, error)
 }
 
 // SetAuthorityHooks gives the root the workspace-authority hooks. The app calls it once,
@@ -47,8 +54,18 @@ func (m *Model) authoritySegment() (statusItem, bool) {
 	if st.Text == "" {
 		return statusItem{}, false
 	}
+	// The remote SSH label carries the host separately: the status row renders the
+	// catalogue key for the connected/disconnected state with %{userhost}, so a
+	// translated catalogue changes the wording while the English fallback keeps
+	// today's text. A label that is not an SSH authority keeps its own words.
 	text := st.Text
-	if !st.Connected {
+	if userhost, ok := strings.CutPrefix(st.Text, "SSH:"); ok {
+		key := "gvim.status.remote_ssh"
+		if !st.Connected {
+			key = "gvim.status.remote_ssh_disconnected"
+		}
+		text = i18n.T("", key, map[string]any{"userhost": userhost})
+	} else if !st.Connected {
 		text += " · disconnected"
 	}
 	return statusItem{ID: "authority", Text: text, Prio: 1 << 20}, true
@@ -97,6 +114,24 @@ func (m *Model) authorityReconnectCmd(password string) tea.Cmd {
 
 // authorityReconnectedMsg is the outcome of a reconnect.
 type authorityReconnectedMsg struct{ err error }
+
+// authorityRestartDoneMsg is the outcome of the app's AfterReconnect work.
+type authorityRestartDoneMsg struct {
+	count int
+	err   error
+}
+
+// reportAuthorityRestart puts the post-reconnect work's outcome on the status row: a
+// failure is a notice, and a successful restart says how many servers came back.
+func (m *Model) reportAuthorityRestart(count int, err error) {
+	if err != nil {
+		m.quietNotice("LSP restart after reconnect failed: " + err.Error())
+		return
+	}
+	if count > 0 {
+		m.quietNotice(fmt.Sprintf("LSP restarted after reconnect: %d server(s)", count))
+	}
+}
 
 // authorityPasswordTag is the tag of the SSH password prompt.
 type authorityPasswordTag struct{}

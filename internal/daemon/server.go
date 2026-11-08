@@ -1,9 +1,15 @@
 package daemon
 
 // Server hosts one editor program over the daemon socket: tui.RunWithIO reads the
-// attached client's input and writes the frame through this type, and an attach or a
+// attached client's input and writes frames through this type, and an attach or a
 // resize becomes a window-size message on the program. Detaching ends only the client;
 // the program keeps running and the next attach repaints it.
+//
+// Every write to a client goes through that client's FrameWriter, so frames from the
+// program output goroutine, the pong answers, a detach and the exit frame never
+// interleave. The frame writers carry a write deadline (frameWriteTimeout), so a slow
+// or wedged client delays one bounded write and is then detached: the program output
+// path and the shutdown path never block forever on a client.
 
 import (
 	"context"
@@ -13,9 +19,28 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+// frameWriteTimeout bounds one write to an attached client.
+const frameWriteTimeout = 2 * time.Second
+
+// deadlineWriter applies a per-write deadline to a connection, so a frame write cannot
+// block forever on a slow client. FrameWriter serializes the calls, so the deadline set
+// and clear never race with another writer on the same connection.
+type deadlineWriter struct {
+	conn    net.Conn
+	timeout time.Duration
+}
+
+func (d deadlineWriter) Write(p []byte) (int, error) {
+	_ = d.conn.SetWriteDeadline(time.Now().Add(d.timeout))
+	n, err := d.conn.Write(p)
+	_ = d.conn.SetWriteDeadline(time.Time{})
+	return n, err
+}
 
 // Server is the daemon side of the attach protocol. It implements io.Reader (the
 // client's terminal input) and io.Writer (the frame output) for the hosted program.
@@ -25,9 +50,17 @@ type Server struct {
 
 	mu   sync.Mutex
 	conn net.Conn
+	fw   *FrameWriter
 	prog *tea.Program
+	// helloCols/helloRows are the attached client's last known terminal size, so a
+	// program that starts after the hello still gets a window-size message.
+	helloCols, helloRows int
 	// openFiles, when set, opens the paths of a client's open_file frame.
 	openFiles func(paths []string)
+	// workspace, when set, answers the workspace_* frames (list/select/new/close/
+	// rename). The app wires it to the workspace layer; nil means the protocol is not
+	// available in this daemon and the client gets a notice.
+	workspace func(WorkspaceRequest) WorkspaceResult
 
 	readMu sync.Mutex
 	left   []byte
@@ -57,6 +90,14 @@ func (s *Server) OnOpenFiles(fn func(paths []string)) {
 	s.mu.Unlock()
 }
 
+// OnWorkspaceRequest sets the callback that answers the workspace frames. Without it a
+// workspace frame is answered with a notice (never a disconnect).
+func (s *Server) OnWorkspaceRequest(fn func(WorkspaceRequest) WorkspaceResult) {
+	s.mu.Lock()
+	s.workspace = fn
+	s.mu.Unlock()
+}
+
 // Serve accepts clients until the server is closed or ctx is done. It returns when
 // the listener closes; callers run it in a goroutine before starting the program.
 func (s *Server) Serve(ctx context.Context) {
@@ -76,11 +117,22 @@ func (s *Server) Serve(ctx context.Context) {
 	}
 }
 
-// OnProgram receives the hosted program, so an attach can resize and repaint it.
+// OnProgram receives the hosted program, so an attach can resize and repaint it. When a
+// client already attached (and sent its hello) before the program existed, the recorded
+// size is sent now: the daemon would otherwise start painting at no size.
 func (s *Server) OnProgram(p *tea.Program) {
 	s.mu.Lock()
 	s.prog = p
+	cols, rows := s.helloCols, s.helloRows
 	s.mu.Unlock()
+	if p != nil && cols > 0 && rows > 0 {
+		// Send from a goroutine: Program.Send before Run blocks until the program's
+		// loop starts, and OnProgram runs before Run in the daemon host.
+		go func() {
+			p.Send(tea.WindowSizeMsg{Width: cols, Height: rows})
+			p.Send(tea.RequestWindowSize())
+		}()
+	}
 }
 
 // Program returns the hosted program, or nil before RunWithIO started it.
@@ -94,29 +146,30 @@ func (s *Server) Program() *tea.Program {
 // connection. The hosted program is untouched.
 func (s *Server) Detach() {
 	s.mu.Lock()
-	conn := s.conn
-	s.conn = nil
+	conn, fw := s.conn, s.fw
+	s.conn, s.fw = nil, nil
 	s.mu.Unlock()
-	if conn == nil {
+	if conn == nil || fw == nil {
 		return
 	}
-	_ = WriteFrame(conn, TypeDetached, nil)
+	_ = fw.WriteFrame(TypeDetached, nil)
 	_ = conn.Close()
 }
 
 // Close sends the exit frame to the attached client, stops the listener and the
-// input reader, and closes the connection.
+// input reader, and closes the connection. The frame write is bounded by the
+// client's deadline writer, so a stalled client cannot hold shutdown.
 func (s *Server) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.closed = true
-		conn := s.conn
-		s.conn = nil
+		conn, fw := s.conn, s.fw
+		s.conn, s.fw = nil, nil
 		s.mu.Unlock()
 		close(s.stop)
-		if conn != nil {
-			_ = WriteFrame(conn, TypeExit, nil)
+		if conn != nil && fw != nil {
+			_ = fw.WriteFrame(TypeExit, nil)
 			_ = conn.Close()
 		}
 		err = s.ln.Close()
@@ -131,6 +184,8 @@ func (s *Server) Close() error {
 // frames until the connection closes.
 func (s *Server) handleConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
+	// One writer for this connection: every server frame to it goes through it.
+	fw := NewFrameWriter(deadlineWriter{conn: conn, timeout: frameWriteTimeout})
 	f, err := ReadFrame(conn)
 	if err != nil || f.Type != TypeHello {
 		return
@@ -146,10 +201,11 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 	if s.conn != nil && s.conn != conn {
 		s.mu.Unlock()
-		_ = WriteNotice(conn, "another client is attached to this daemon")
+		_ = fw.WriteNotice("another client is attached to this daemon")
 		return
 	}
-	s.conn = conn
+	s.conn, s.fw = conn, fw
+	s.helloCols, s.helloRows = hello.Cols, hello.Rows
 	prog := s.prog
 	s.mu.Unlock()
 	if prog != nil {
@@ -163,6 +219,30 @@ func (s *Server) handleConn(conn net.Conn) {
 		f, err := ReadFrame(conn)
 		if err != nil {
 			break
+		}
+		if req, ok, derr := decodeWorkspaceRequest(f); ok {
+			if derr != nil {
+				_ = fw.WriteNotice(derr.Error())
+				continue
+			}
+			s.mu.Lock()
+			hook := s.workspace
+			s.mu.Unlock()
+			if hook == nil {
+				_ = fw.WriteNotice("this daemon has no workspace layer")
+				continue
+			}
+			res := hook(req)
+			if res.Notice != "" {
+				_ = fw.WriteNotice(res.Notice)
+			}
+			if res.List != nil {
+				if err := fw.WriteJSON(TypeWorkspaces, *res.List); err != nil {
+					s.detachConn(conn)
+					return
+				}
+			}
+			continue
 		}
 		switch f.Type {
 		case TypeInput:
@@ -197,11 +277,11 @@ func (s *Server) handleConn(conn net.Conn) {
 				open(req.Paths)
 			}
 		case TypeDetach:
-			_ = WriteFrame(conn, TypeDetached, nil)
+			_ = fw.WriteFrame(TypeDetached, nil)
 			s.detachConn(conn)
 			return
 		case TypePing:
-			_ = WriteFrame(conn, TypePong, nil)
+			_ = fw.WriteFrame(TypePong, nil)
 		default:
 			// An unknown client frame: drop the connection and keep hosting.
 			s.detachConn(conn)
@@ -215,7 +295,7 @@ func (s *Server) handleConn(conn net.Conn) {
 func (s *Server) detachConn(conn net.Conn) {
 	s.mu.Lock()
 	if s.conn == conn {
-		s.conn = nil
+		s.conn, s.fw = nil, nil
 	}
 	s.mu.Unlock()
 }
@@ -250,17 +330,20 @@ func (s *Server) Read(p []byte) (int, error) {
 	}
 }
 
-// Write is the hosted program's frame output: only an attached client receives it,
-// and a client write error detaches that client instead of ending the program.
+// Write is the hosted program's frame output: only an attached client receives it.
+// A write error (or the deadline on a stalled client) detaches that client instead of
+// ending the program.
 func (s *Server) Write(p []byte) (int, error) {
 	s.mu.Lock()
-	conn := s.conn
+	conn, fw := s.conn, s.fw
 	s.mu.Unlock()
-	if conn == nil || len(p) == 0 {
+	if fw == nil || len(p) == 0 {
 		return len(p), nil
 	}
-	if err := WriteFrame(conn, TypeOutput, p); err != nil {
-		s.detachConn(conn)
+	if err := fw.WriteFrame(TypeOutput, p); err != nil {
+		if conn != nil {
+			s.detachConn(conn)
+		}
 	}
 	return len(p), nil
 }

@@ -14,11 +14,11 @@ func (e *Editor) LoadFunc(path string) func() (*Document, error) {
 		if path == "" {
 			return nil, fmt.Errorf("open: %w", ErrEmptyPath)
 		}
-		abs, err := absPath(path)
+		resolved, err := e.openPath(path)
 		if err != nil {
 			return nil, err
 		}
-		return loadDocument(abs, spec)
+		return loadDocument(resolved, spec)
 	}
 }
 

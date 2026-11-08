@@ -23,6 +23,7 @@ func (e *Editor) PlanDiskCheck() func() []DiskChange {
 	type recorded struct {
 		Path string
 		was  diskState
+		doc  *Document
 	}
 	var files []recorded
 	for _, d := range e.docs {
@@ -35,13 +36,13 @@ func (e *Editor) PlanDiskCheck() func() []DiskChange {
 		// Like the stat of RenamePath, it is the one exception to "Update does no IO".
 		_ = d.CheckSource()
 		if d.Path != "" && d.Disk.Exists {
-			files = append(files, recorded{d.Path, d.Disk})
+			files = append(files, recorded{Path: d.Path, was: d.Disk, doc: d})
 		}
 	}
 	return func() []DiskChange {
 		out := make([]DiskChange, 0, len(files))
 		for _, f := range files {
-			now := diskStateOf(f.Path)
+			now := f.doc.DiskState()
 			out = append(out, DiskChange{
 				Path:    f.Path,
 				Changed: now.Exists && !now.SameAs(f.was),

@@ -744,6 +744,18 @@ func (m *Model) openFileCmdErr(path string, preview bool, line, col int) (tea.Cm
 	}, nil
 }
 
+// startupOpenCmd opens the path a remote launch parked in Deps.StartupOpen through the
+// asynchronous file path, so Init never blocks on remote I/O. The open is retried after a
+// successful authority reconnect; a disconnected or failed read is a notice, and the
+// editor stays empty rather than opening a local file for the remote path.
+func (m *Model) startupOpenCmd() tea.Cmd {
+	if !m.startupPending || m.startupOpen == "" {
+		return nil
+	}
+	cmd, _ := m.openFileCmdErr(m.startupOpen, false, 0, 0)
+	return cmd
+}
+
 // openLoaded opens the large file that openFileCmd read. A file that is not UTF-8 asks
 // whether to load it whole, and any other failure is the notice.
 func (m *Model) openLoaded(msg openLoadedMsg) {
@@ -752,10 +764,15 @@ func (m *Model) openLoaded(msg openLoadedMsg) {
 		return
 	}
 	if msg.err != nil {
+		// A failed startup open stays pending so a reconnect retries it; it never turns
+		// into an empty local buffer.
 		if !m.maybeAskFullLoad(msg.err) {
 			m.notice = msg.err.Error()
 		}
 		return
+	}
+	if msg.path == m.startupOpen {
+		m.startupPending = false
 	}
 	m.notice = ""
 	ge.OpenLoaded(msg.doc)

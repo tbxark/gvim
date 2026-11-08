@@ -15,6 +15,7 @@
 #     uiadapter/                 the UI port adapters; the only package besides app that
 #                                imports the TUI sub-packages
 #     pluginhost/                the Lua plugin host: runtime, OS, editor, services
+#     agentdiscover/            read-only tmux/agent session discovery (a leaf of the shell)
 #     lsphost/                   the language-server port
 #     restore/                   session restore and crash recovery
 #     keybindings/               user keybindings, the editing store, plugin bindings

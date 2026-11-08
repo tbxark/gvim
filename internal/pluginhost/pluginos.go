@@ -27,6 +27,9 @@ import (
 // methods from Work goroutines, so the process and watcher tables sit behind mu, which is
 // never held across an IO call.
 type pluginOS struct {
+	// gate is the workspace trust spawn gate (nil allows); it runs before every
+	// process launch, with the child's effective environment for PATH resolution.
+	gate SpawnGate
 	dirs func() hostos.Dirs // evaluated at every call: the workspace root can change
 	// spawnEnv is the active project environment's set-only overlay for child
 	// processes (nil when none is wired).

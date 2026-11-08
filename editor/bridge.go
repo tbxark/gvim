@@ -81,6 +81,9 @@ const defaultCodec = document.DefaultCodec
 
 type diskState = document.DiskState
 
+// fileAccess is the document file I/O seam (nil = local filesystem).
+type fileAccess = document.FileAccess
+
 var diskStateOf = document.DiskStateOf
 
 type docExt = document.DocExt
