@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/internal/app"
 )
 
@@ -203,6 +204,64 @@ func TestSplitPosition(t *testing.T) {
 			}
 			if path != tt.wantPath || line != tt.wantLine || col != tt.wantCol {
 				t.Fatalf("got (%q, %d, %d), want (%q, %d, %d)", path, line, col, tt.wantPath, tt.wantLine, tt.wantCol)
+			}
+		})
+	}
+}
+
+// TestParseRemoteTargets checks the remote forms reach Targets.Remote and never touch
+// the local file system.
+func TestParseRemoteTargets(t *testing.T) {
+	t.Setenv("USER", "envuser")
+	disk := fakeFS{"dir": true}
+	tests := []struct {
+		name string
+		arg  string
+		want authority.RemoteSpec
+	}{
+		{"scp", "deploy@host:/etc/x", authority.RemoteSpec{User: "deploy", Host: "host", Path: "/etc/x"}},
+		{"scp line col", "u@h:/a/b.go:4:7", authority.RemoteSpec{User: "u", Host: "h", Path: "/a/b.go", Line: 4, Col: 7}},
+		{"url", "ssh://host.example/srv/x", authority.RemoteSpec{User: "envuser", Host: "host.example", Path: "/srv/x"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseTargets([]string{tt.arg}, disk.stat)
+			if err != nil {
+				t.Fatalf("ParseTargets(%q): %v", tt.arg, err)
+			}
+			if got.Remote == nil {
+				t.Fatalf("ParseTargets(%q) has no remote target", tt.arg)
+			}
+			tt.want.Raw = tt.arg
+			if *got.Remote != tt.want {
+				t.Fatalf("remote = %+v, want %+v", *got.Remote, tt.want)
+			}
+			if len(got.Files) != 0 || got.Root != "" {
+				t.Fatalf("remote launch parsed local targets: %+v", got)
+			}
+		})
+	}
+}
+
+// TestParseRemoteTargetErrors checks the startup errors of a remote launch.
+func TestParseRemoteTargetErrors(t *testing.T) {
+	t.Setenv("USER", "")
+	disk := fakeFS{"dir": true, "a.txt": false}
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{"malformed url", []string{"ssh://"}, "missing host and path"},
+		{"two remotes", []string{"u@h:/a", "u@h:/b"}, "only one remote target"},
+		{"remote and file", []string{"u@h:/a", "a.txt"}, "cannot be combined with local"},
+		{"remote and dir", []string{"u@h:/a", "dir"}, "cannot be combined with local"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseTargets(tt.args, disk.stat)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ParseTargets(%v) error = %v, want %q", tt.args, err, tt.wantErr)
 			}
 		})
 	}

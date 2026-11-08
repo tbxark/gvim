@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "Копирано",
+  "clipboard.copied_line": "Копиран ред",
+  "clipboard.copied_path": "Копиран път: %{path}",
+  "clipboard.copied_plain": "Копирано като обикновен текст",
+  "clipboard.cut": "Отрязано",
+  "clipboard.cut_line": "Отрязан ред",
+  "clipboard.pasted": "Поставено",
+  "format.formatted_with": "Форматирано с %{formatter}",
+  "gvim.lsp.inlay_hints_off": "Вградените подсказки са изключени",
+  "gvim.lsp.inlay_hints_on": "Вградените подсказки са включени",
+  "gvim.scrollback.copied_line": "Копиран ред",
+  "gvim.scrollback.no_selection": "Няма избрано за копиране",
+  "terminal.no_terminal_open": "Няма отворен терминал — първо отворете терминал"
+}

@@ -7,24 +7,29 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tbxark/gvim/internal/app"
 	"github.com/tbxark/gvim/internal/configview"
 )
 
 // configDeps are the functions the config commands call. The app package
 // supplies the real ones, and tests pass fakes. cwd gives the workspace root.
 // load gets the root flags that change the effective config (--config, --keymap
-// and --theme) as a configview.Options, and paths gets the --config path. An unset flag
-// is empty.
+// and --theme) as a configview.Options, paths gets the --config path, and trusted
+// resolves the workspace's recorded trust level read-only. An unset flag is empty.
 type configDeps struct {
-	cwd   func() (string, error)
-	load  func(root string, opts configview.Options) (configview.ConfigView, error)
-	paths func(root, configPath string) ([]configview.ConfigFile, error)
+	cwd     func() (string, error)
+	load    func(root string, opts configview.Options) (configview.ConfigView, error)
+	paths   func(root, configPath string) ([]configview.ConfigFile, error)
+	trusted func(root string) (bool, error)
 }
 
 // defaultConfigDeps returns the dependencies that read the real working
 // directory and the real config files.
 func defaultConfigDeps() configDeps {
-	return configDeps{cwd: os.Getwd, load: configview.Load, paths: configview.Paths}
+	return configDeps{
+		cwd: os.Getwd, load: configview.Load, paths: configview.Paths,
+		trusted: app.ProjectConfigTrusted,
+	}
 }
 
 // newConfigCommand returns the config command group, wired to the real
@@ -54,10 +59,12 @@ func newConfigShowCommand(d configDeps, configPath, keymapName, themeName *strin
 	return &cobra.Command{
 		Use:   "show",
 		Short: "Print the effective configuration",
-		Long: `Print the effective configuration as JSON. The user file and the project
-file (.gvim/config.json in the working directory or a parent) are merged over
-the built-in defaults. A file that cannot be read is skipped and reported on
-stderr as a warning.`,
+		Long: `Print the effective configuration as JSON. The user file and, when the
+workspace is trusted, the project file (.gvim/config.json in the working
+directory or a parent) are merged over the built-in defaults. An untrusted or
+undecided workspace omits the project layer and says so on stderr, exactly as
+the editor gates it. A file that cannot be read is skipped and reported as a
+warning.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root, err := d.cwd()
@@ -65,7 +72,13 @@ stderr as a warning.`,
 				cmd.SilenceUsage = true
 				return err
 			}
-			view, err := d.load(root, configview.Options{Config: *configPath, Keymap: *keymapName, Theme: *themeName})
+			trusted := false
+			if d.trusted != nil {
+				if ok, err := d.trusted(root); err == nil {
+					trusted = ok
+				}
+			}
+			view, err := d.load(root, configview.Options{Config: *configPath, Keymap: *keymapName, Theme: *themeName, Trusted: &trusted})
 			if err != nil {
 				cmd.SilenceUsage = true
 				return err

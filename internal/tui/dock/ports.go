@@ -67,6 +67,21 @@ type TerminalStarter interface {
 	Start(dir string, cols, rows int) (Terminal, error)
 }
 
+// Launcher is the optional starter half that runs a program other than the
+// configured shell: an agent session, or a resume of one. A starter without it
+// can still run the plain shell; the dock reports that agents are unavailable.
+type Launcher interface {
+	StartLaunch(launch terminal.Launch, dir string, cols, rows int) (Terminal, error)
+}
+
+// Agent is one terminal.agents entry, as the dock needs it: the name the picker
+// shows and the two argv lists a launch and a resume run.
+type Agent struct {
+	Name       string
+	Argv       []string // the new-session command and arguments
+	ResumeArgv []string // the argv that rejoins a previous session (may be nil)
+}
+
 // ClipboardReader reads the text a paste sends to the shell.
 type ClipboardReader interface {
 	Read() (string, error)
@@ -103,6 +118,12 @@ type Effects struct {
 	// shell as the key itself instead of pasting the last yank. False pastes the
 	// last yank instead; an unreadable clipboard pastes the last yank either way.
 	PassCtrlVWithoutText bool
+	// ResumeAgents is terminal.resume_agents: a restart of an exited agent
+	// terminal runs the agent's resume argv instead of its launch argv. Default
+	// true, as Fresh's is.
+	ResumeAgents bool
+	// Agents are the terminal.agents presets the Run Agent command offers.
+	Agents []Agent
 }
 
 // Ports are the terminal dock's ports. A nil Starter means the dock cannot start a
@@ -148,6 +169,10 @@ func (p *Panel) SetEffects(e Effects) { p.effects = e }
 // SetPorts gives the panel its ports. It is safe to call before the panel is used.
 func (p *Panel) SetPorts(ports Ports) {
 	p.starter, p.clipboard = ports.Starter, ports.Clipboard
+	p.launcher = nil
+	if l, ok := ports.Starter.(Launcher); ok {
+		p.launcher = l
+	}
 }
 
 // Clipboard returns the clipboard reader the dock was given, or nil. The root reads

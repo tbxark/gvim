@@ -137,6 +137,7 @@ type Model struct {
 	clip          *clipboard    // the explorer clipboard; nil when empty
 	lastYank      string        // the last text copied or cut, for the terminal's Ctrl+V fallback
 	quitting      bool          // set by a menu row that quit the editor
+	detach        func()        // ends the attached daemon client; nil when not hosted
 	pending       tea.Cmd       // commands a menu row started, returned by routeMenu
 	notice        string        // replaces the editor status until the next press
 
@@ -171,7 +172,7 @@ type Model struct {
 	// lsp is the language-server state (see lsp.go).
 	lsp lspState
 	// dock is the terminal dock under the body (see dock_glue.go and the dock package).
-	dock dock.Panel
+	dock dock.Tabs
 	// view is the display state the view commands change (see view.go).
 	view viewState
 	// occ pauses the occurrence highlight after an edit (see occurrence.go).
@@ -183,6 +184,13 @@ type Model struct {
 	// plug is the plugin host state (see plugin_pump.go). Its runtime is nil when
 	// plugins are off, and every hook is a nil check then.
 	plug pluginState
+	// auth is the workspace-authority hook set (see authority_status.go); both are
+	// zero for an ordinary local launch.
+	auth         AuthorityHooks
+	authOpenDock bool
+	// shellRun, when set, runs shell_command/format_buffer jobs on the workspace
+	// authority instead of the local editor runner (see authority_status.go).
+	shellRun func(editor.ShellJob) (string, error)
 }
 
 // drag is the pointer gesture in progress: a text selection, or a grab of the
@@ -236,6 +244,7 @@ func New(deps Deps) *Model {
 		util:            utilities{settings: deps.Settings, settingsPort: deps.SettingsPort, themeCatalog: deps.ThemeCatalog, switchKeymap: deps.SwitchKeymap},
 		root:            rootState{ports: deps.Root},
 		trust:           newTrustState(deps.Trust),
+		detach:          deps.Detach,
 		lsp:             lspState{port: deps.LSP},
 		env:             deps.Env,
 		view:            newViewState(viewOptionsOf(deps.View)),
@@ -312,6 +321,18 @@ func RunWithInput(ctx context.Context, m *Model, in io.Reader) error {
 	return runProgram(ctx, m, os.Stdout, tea.WithInput(in))
 }
 
+// RunWithIO runs m with in as the keyboard and out as the frame output, and calls
+// onProgram once with the program handle before it runs. The daemon hosts one program
+// this way: in and out are the client socket, and onProgram turns an attach or a resize
+// into a window-size message so the daemon repaints the attached client.
+func RunWithIO(ctx context.Context, m *Model, in io.Reader, out io.Writer, onProgram func(*tea.Program)) error {
+	return runProgramIO(ctx, m, out, onProgram, tea.WithInput(in), tea.WithOutput(out))
+}
+
+// OpenFileMessage is the message a hosted daemon sends to open a path a client asked
+// for. It is the message the explorer sends when a row is activated.
+func OpenFileMessage(path string) tea.Msg { return expanel.OpenFileMsg{Path: path} }
+
 // resetCursorStyle is the terminal's own caret shape. The frame sets a blinking block
 // as its caret shape, and the renderer restores only the shapes it did not start with,
 // so the shape is reset here after the program ends, as it is after a signal.
@@ -320,7 +341,16 @@ var resetCursorStyle = ansi.SetCursorStyle(0)
 // runProgram runs m with the options opts, and then resets the caret shape on out, which
 // is where the program writes.
 func runProgram(ctx context.Context, m *Model, out io.Writer, opts ...tea.ProgramOption) error {
+	return runProgramIO(ctx, m, out, nil, opts...)
+}
+
+// runProgramIO is the shared program loop: onProgram, when set, receives the program
+// before it starts, so the daemon can send attach resizes and request repaints.
+func runProgramIO(ctx context.Context, m *Model, out io.Writer, onProgram func(*tea.Program), opts ...tea.ProgramOption) error {
 	p := tea.NewProgram(m, append([]tea.ProgramOption{tea.WithContext(ctx)}, opts...)...)
+	if onProgram != nil {
+		onProgram(p)
+	}
 	stop := onContinue(func() { p.Send(tea.RequestWindowSize()) })
 	_, err := p.Run()
 	stop()
@@ -366,7 +396,7 @@ func (m *Model) Close() {
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd())
+	return tea.Batch(m.rootInit(), m.indexSync(), m.pluginInit(), m.clockCmd(), m.authorityInitCmd())
 }
 
 // Update implements tea.Model. It runs update, then keeps the split panes on tabs
@@ -381,6 +411,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A {clock} tick only asks for the next frame (the clock is read while the
 		// status row is built) and arms the tick for the minute after it.
 		return m, m.clockCmd()
+	}
+	if _, ok := msg.(tea.FocusMsg); ok {
+		// Activation of the terminal window is the reconnect-on-activate point of a
+		// remote workspace authority.
+		return m, m.beginAuthorityReconnect()
+	}
+	if done, ok := msg.(authorityReconnectedMsg); ok {
+		m.reportAuthorityReconnect(done.err)
+		return m, nil
 	}
 	active, count, rows := m.activeTab(), len(m.ed.Tabs()), m.bodyRows()
 	activePath := m.activeFilePath()
@@ -1126,6 +1165,8 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 	switch tag := d.Tag.(type) {
 	case viewTag:
 		return m.viewAnswer(tag, d)
+	case terminalTabRenameTag:
+		m.renameDockTab(d.Text)
 	case newNameTag:
 		kind := jobCreate
 		if tag.folder {
@@ -1153,6 +1194,10 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		return m.overwriteAnswer(tag, d)
 	case fullLoadTag:
 		return m.fullLoadAnswer(tag, d)
+	case authorityPasswordTag:
+		if d.Outcome == prompt.Submitted {
+			return m.authorityReconnectCmd(d.Text)
+		}
 	case gotoTag:
 		if d.Outcome == prompt.Submitted {
 			m.gotoText(d.Text)
@@ -1779,6 +1824,13 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		return m.saveAll(), true
 	case "quit":
 		return m.quitLoop(), true
+	case "detach_daemon":
+		if m.detach == nil {
+			m.notice = "Not attached to a daemon"
+			break
+		}
+		m.detach()
+		m.notice = "Detached from the daemon"
 	case "split_horizontal", "split_vertical", "next_split", "prev_split", "close_split",
 		"next_pane", "prev_pane", "next_window", "prev_window",
 		"increase_split_size", "decrease_split_size", "toggle_maximize_split", "switch_to_previous_tab",
@@ -2479,6 +2531,9 @@ func (m *Model) statusView() statusView {
 	s.Clock = m.now().Format(clockFormat)
 	s.Chord = m.statusChord()
 	s.Extra = m.plugStatusItems()
+	if item, ok := m.authoritySegment(); ok {
+		s.Extra = append(s.Extra, item)
+	}
 	return s
 }
 
@@ -2560,6 +2615,9 @@ func (m *Model) View() tea.View {
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
+	// A remote authority reconnects when the terminal window is activated, so the
+	// program must report focus.
+	v.ReportFocus = m.auth.Status != nil
 	v.MouseMode = tea.MouseModeAllMotion
 	if x, y, ok := m.caret(); ok {
 		v.Cursor = tea.NewCursor(x, y)

@@ -35,10 +35,8 @@ type TerminalShell struct {
 }
 
 // TerminalConfig is the terminal section of the config: Fresh's terminal keys
-// that gvim uses, plus gvim's scrollback_lines. The other Fresh terminal keys
-// (resume_agents, skip_app_execution_alias) are accepted and ignored: the
-// features they tune are not built yet, and a Fresh config must load without
-// diagnostics.
+// that gvim uses, gvim's scrollback_lines, and gvim's agents list (a gvim
+// extension). Fresh's skip_app_execution_alias is accepted and ignored.
 type TerminalConfig struct {
 	// Shell is the terminal.shell override. An empty Command keeps the behaviour
 	// of always starting $SHELL.
@@ -68,7 +66,36 @@ type TerminalConfig struct {
 	// clipboard that cannot be read at all pastes the last yank either way.
 	// Default true, as Fresh's is.
 	PassCtrlVWithoutText bool
+	// ResumeAgents is terminal.resume_agents: a restart of an exited agent
+	// terminal re-runs the agent's resume argv instead of its launch argv. Default
+	// true, as Fresh's is.
+	ResumeAgents bool
+	// Agents is gvim's terminal.agents list: the agent presets the Run Agent
+	// command offers and the metadata that turns a plain launch into a resumable
+	// agent session. It is a gvim extension: Fresh's agent data comes from plugins.
+	Agents []TerminalAgent
 }
+
+// TerminalAgent is one terminal.agents entry: a named agent command.
+type TerminalAgent struct {
+	// Name is the id the Run Agent picker shows and the record stores.
+	Name string
+	// Command is the program to run, looked up on PATH when it is not absolute.
+	Command string
+	// Args are the arguments of a new session.
+	Args []string
+	// ResumeArgs are the arguments that rejoin a previous session (for example
+	// ["--continue"] or ["--resume", "id"]); Run Agent and a restart with
+	// terminal.resume_agents on run Command + ResumeArgs.
+	ResumeArgs []string
+}
+
+// Bounds of the agent list and its strings, so a config cannot hand the dock an
+// unbounded command.
+const (
+	TerminalAgentsMax    = 32
+	TerminalAgentTextMax = 1024
+)
 
 // DefaultTerminalOptions returns the terminal defaults: the user's shell, the
 // dock kept after exit, ten thousand scrollback lines, mouse forwarding on
@@ -81,12 +108,13 @@ func DefaultTerminalOptions() TerminalConfig {
 		JumpToEndOnOutput:    true,
 		MouseDragSelects:     true,
 		PassCtrlVWithoutText: true,
+		ResumeAgents:         true,
 	}
 }
 
 // terminalKeysIgnored are Fresh's terminal keys that gvim accepts and ignores.
 var terminalKeysIgnored = []string{
-	"resume_agents", "skip_app_execution_alias",
+	"skip_app_execution_alias",
 }
 
 // setTerminal applies the terminal object of one config layer; path names the
@@ -169,6 +197,24 @@ func (c *Config) setTerminal(raw json.RawMessage, l layer, path string) (diags [
 				continue
 			}
 			c.Terminal.PassCtrlVWithoutText = b
+		case "resume_agents":
+			var b bool
+			if err := json.Unmarshal(v, &b); err != nil {
+				diag(k, "must be true or false")
+				continue
+			}
+			c.Terminal.ResumeAgents = b
+		case "agents":
+			if l == layerProject {
+				diag("agents", "project config cannot set terminal.agents: a repository must not choose programs gvim runs")
+				continue
+			}
+			agents, err := decodeTerminalAgents(v)
+			if err != nil {
+				diag("agents", err.Error())
+				continue
+			}
+			c.Terminal.Agents = agents
 		default:
 			if slices.Contains(terminalKeysIgnored, k) {
 				continue // a Fresh terminal key gvim accepts and ignores
@@ -200,6 +246,98 @@ func decodeTerminalShell(raw json.RawMessage) (TerminalShell, error) {
 		out.Args = slices.Clone(*v.Args)
 	}
 	return out, nil
+}
+
+// decodeTerminalAgents reads terminal.agents: an array of named agent commands.
+// Names must be unique and non-empty; the command and every argument are bounded.
+func decodeTerminalAgents(raw json.RawMessage) ([]TerminalAgent, error) {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, errors.New("must be an array of agent objects")
+	}
+	if len(items) > TerminalAgentsMax {
+		return nil, fmt.Errorf("takes at most %d agents, got %d", TerminalAgentsMax, len(items))
+	}
+	out := make([]TerminalAgent, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for i, item := range items {
+		var v struct {
+			Name       *string   `json:"name"`
+			Command    *string   `json:"command"`
+			Args       *[]string `json:"args"`
+			ResumeArgs *[]string `json:"resume_args"`
+		}
+		if trimmed := bytes.TrimSpace(item); len(trimmed) == 0 || trimmed[0] != '{' {
+			return nil, fmt.Errorf("agent %d must be an object", i+1)
+		}
+		if err := json.Unmarshal(item, &v); err != nil {
+			return nil, fmt.Errorf("agent %d must be an object", i+1)
+		}
+		name := ""
+		if v.Name != nil {
+			name = strings.TrimSpace(*v.Name)
+		}
+		if name == "" {
+			return nil, fmt.Errorf("agent %d has no name", i+1)
+		}
+		if len(name) > 64 {
+			return nil, fmt.Errorf("agent name %q is longer than 64 characters", name)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("agent name %q is defined twice", name)
+		}
+		seen[name] = true
+		command := ""
+		if v.Command != nil {
+			command = strings.TrimSpace(*v.Command)
+		}
+		if command == "" {
+			return nil, fmt.Errorf("agent %q has no command", name)
+		}
+		if err := checkAgentText("agent command", command); err != nil {
+			return nil, err
+		}
+		agent := TerminalAgent{Name: name, Command: command}
+		if v.Args != nil {
+			if len(*v.Args) > 32 {
+				return nil, fmt.Errorf("agent %q takes at most 32 args", name)
+			}
+			agent.Args = slices.Clone(*v.Args)
+			for _, a := range agent.Args {
+				if err := checkAgentText("agent arg", a); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if v.ResumeArgs != nil {
+			if len(*v.ResumeArgs) > 32 {
+				return nil, fmt.Errorf("agent %q takes at most 32 resume_args", name)
+			}
+			agent.ResumeArgs = slices.Clone(*v.ResumeArgs)
+			for _, a := range agent.ResumeArgs {
+				if err := checkAgentText("agent resume arg", a); err != nil {
+					return nil, err
+				}
+			}
+		}
+		out = append(out, agent)
+	}
+	return out, nil
+}
+
+// checkAgentText rejects an agent string that cannot be passed as one argv
+// element: empty after trimming, too long, or holding a NUL, CR or newline.
+func checkAgentText(what, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("%s must not be empty", what)
+	}
+	if len(text) > TerminalAgentTextMax {
+		return fmt.Errorf("%s is longer than %d bytes", what, TerminalAgentTextMax)
+	}
+	if strings.IndexByte(text, 0) >= 0 || strings.ContainsAny(text, "\n\r") {
+		return fmt.Errorf("%s must be one line without NUL bytes", what)
+	}
+	return nil
 }
 
 // TerminalShellOptions returns the shell command and arguments a terminal

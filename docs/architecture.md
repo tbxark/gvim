@@ -85,7 +85,7 @@ internal/cli → main (root package)
 | R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `i18n`, `plugin/bundled`, `plugin/pattern`, `outline`. (`lsp/manager` sits above `lsp` and may import it.) |
 | R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `trust` imports only `config` and `atomicfile`. `finder` imports only `explorer` and `fuzzy`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
-| R6 | `internal/cli` imports only `internal/app`, `internal/configview` and `syntax` (and cobra). |
+| R6 | `internal/cli` imports only `internal/app`, `internal/configview`, `authority` (the top-level remote-spec parser it classifies targets with) and `syntax` (and cobra). |
 | R7 | Only the root main package and `internal/cli` import `internal/app`; only the root main package imports `internal/cli`; only `internal/app`, `internal/pluginhost` and `plugin/plugintest` import the plugin runtime; only `internal/app` and `internal/uiadapter` import TUI sub-packages. |
 | R8 | No package in the shipped binary imports test support: `buffer/buffertest`, `plugin/plugintest`, `lsp/lsptest`, `internal/uitest`, `internal/apptest`. |
 | R9 | `pluginapi` and `decorations` import no module package and no charm package. |
@@ -124,6 +124,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `internal/cli` | cobra command tree, flags, target classification (DIR vs FILE:LINE:COL through an injected `stat`), exit codes. | `internal/app` (Options/Run), `internal/configview`, `syntax`, cobra, stdlib |
 | `internal/configview` | Backs `gvim config show`, `gvim config paths`: renders the effective config as JSON and reports config file locations. | `config`, `internal/keybindings`, `keymap`, `theme` |
 | `internal/app` | Composition root: `Options`, `Validate`, `Run`, `buildRuntime`; wires engine + host packages + TUI. | engine packages, host packages, TUI root and sub-packages, plugin runtime |
+| `internal/daemon` | The daemon MVP (#18a): the socket protocol and lifecycle, the hosted editor's socket IO, and the attach client that forwards this terminal to a daemon. | `internal/tui` (message types only), charm, stdlib |
 | `internal/uiadapter` | Adapts engine to the TUI ports: editor/document views, dialogs, ranker, file ops, git status, projects, terminal/clipboard, auto-save gate. | engine packages, `tui` sub-packages, `highlight`, `keybindings`, `terminal` |
 | `internal/pluginhost` | The real `plugin.OS`, the editor as plugins see it, plugin services, virtual buffers and decorations. | engine packages, `plugin`, `pluginapi`, `keybindings` |
 | `internal/lsphost` | Language-server port: managers, document sync, diagnostics polling, server catalogue. | `lsp`, `lsp/manager`, engine packages, `pluginapi`, `tui` |
@@ -151,6 +152,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `encoding` | Decoding/encoding detection and conversion (UTF-8/16, charsets via `x/text`). | |
 | `session` | Session file format and stash files (open tabs, cursors, unsaved overlays). | The restore *policy* lives in `internal/restore`. Session and search JSON go through `atomicfile`; the overlay-stash payload is `document.StashOverlay`. |
 | `decorations` | Plugin decoration store: namespaced items per buffer, anchors that follow edits, per-line query. | Pure data, stdlib only. |
+| `authority` | The workspace backend slot: four routing surfaces (file I/O, one-shot process, long-running stdio spawn, terminal wrapper), the local implementation over the plugin OS port, Fresh-compatible scp/ssh:// target parsing with path translation, and the first SSH backend (pure-Go x/crypto/ssh) for terminal and one-shot exec. | TUI-free, no internal imports; remote file I/O is the SFTP/remote-helper follow-up; the app/TUI wiring lands after the daemon work (docs/authority.md). |
 | `textlayout` | Terminal text geometry: indent width, indent guides, word occurrences, match columns. | Leaf; used by `editor`/`fold` and the editor pane. |
 | `outline` | Markdown heading scan for the sidebar's Contents section: ATX and setext headings, fenced code skipped, bounded to 1 MiB. | Leaf, TUI-free; the widget and the model half are in `internal/tui/sidebar` and `internal/tui/markdown_toc.go` (docs/sidebar.md). |
 | `atomicfile` | Atomic file replacement: temp+sync+rename, mode/owner/xattr, symlink following. | Leaf; used by `editor` (saves) and `session` (session and search JSON). |
@@ -162,7 +164,7 @@ bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `fsops` | Create, mkdir, rename, move, copy, trash with conflict policy. | |
 | `gitstate` | Git work-tree root, branch and per-file status with go-git. | |
 | `config` | Layered JSONC configuration (defaults, user, project), languages, formatters, plugins, and the top-level `locale`. | `hujson`. The project layer is skipped when `Options.Untrusted` is set (workspace trust; see docs/trust.md); a project `locale` is refused (a user preference). |
-| `i18n` | Translation layer: embedded English catalogue, `T`/`TN` with `%{name}` interpolation, CLDR plurals, locale resolution (`auto` from the environment or a configured code) and the plugin runtime's locale. | Leaf, stdlib only; catalogue JSON in `i18n/catalogues/`; see `docs/i18n.md`. |
+| `i18n` | Translation layer: embedded English catalogue, `T`/`TN` with `%{name}` interpolation, CLDR plurals, locale resolution (`auto` from the environment or a configured code) and the plugin runtime's locale. | Leaf, stdlib only; embedded locale JSON in `i18n/locales/` (English source of truth, Fresh import); see `docs/i18n.md`. |
 | `trust` | Workspace trust: the three levels and the undecided state, the per-user decision store, Fresh's open-time policy and executable-content marker scan. | TUI-free; store at `config.Dir()/trust.json` through `atomicfile`; the app gates the config project layer on it (docs/trust.md). |
 | `keymap` | Embedded presets, chord parsing and canonicalization, resolve, user overrides. | Data files `keymap/*.json`. |
 | `theme` | Theme data (colors, syntax keys) from embedded JSON. | Data files `theme/data/*.json`. |
@@ -354,3 +356,44 @@ file when each step lands.
 - Generated code stays generated: `commands/commands_gen.go`
   (`python3 commands/gen/generate.py refs/fresh`) and
   `internal/tui/menubar/menu_table_gen.go` (`python3 tools/gen_menus.py --check`).
+
+## 8. Daemon mode (#18a MVP)
+
+Fresh can host its editor in a daemon and attach terminals to it; gvim's first
+slice (round 12) implements the lifecycle and the client transport, not yet the
+workspace model (#19).
+
+- **Launch.** `gvim --daemon [NAME]` runs the ordinary editor runtime in the
+  foreground (the MVP does not fork) and listens on a Unix socket under the user
+  cache directory, mode 0600 in a 0700 directory. The socket name defaults to a
+  per-root name (`slug(basename)+8-hex hash(root)`); `NAME` overrides it. A
+  live daemon for the same name refuses a second listener; a stale socket file is
+  unlinked. While a daemon hosts a workspace, a bare launch in it refuses instead
+  of opening a second editor of the same session; file launches, `--simple`,
+  `--diff` and stdin launches stay direct launches.
+- **Attach.** `gvim -a [NAME]` (or `--attach`) dials the socket, sends a hello
+  with the terminal size (and any named files as an open-file frame), puts the
+  terminal in raw mode, and forwards input bytes, output frames, resize signals
+  and SIGWINCH. A detached/exit frame restores the terminal. Only one client is
+  attached at a time: a second attach gets a notice and is dropped, never a silent
+  takeover.
+- **Hosting.** The daemon runs the normal Bubble Tea program through `tui.RunWithIO`
+  with the server as its input and output: input frames block the program's reader
+  while no client is attached (the editor stays alive), output frames are written
+  only to the attached client (discarded otherwise), and an attach or resize sends
+  a window-size message so the frame is repainted at the client's size. The hosted
+  editor restores the session on daemon start and saves it on daemon exit; a
+  detach saves nothing and does not stop any process.
+- **Detach.** The hosted editor lists one extra palette row, "Detach from Daemon"
+  (only under `--daemon`). It sends the detached frame to the client and drops
+  the connection; the editor keeps running and the next attach repaints it.
+- **Protocol.** Length-prefixed frames: a 4-byte big-endian length (at most 1 MiB),
+  a type byte and the payload. Client frames: hello (JSON cols/rows/args), input
+  (raw terminal bytes), resize (JSON cols/rows), detach, open-file (JSON paths),
+  ping. Server frames: output (raw ANSI), notice (text), detached, pong, exit.
+  Unknown or malformed frames drop only that client.
+- **Plan.** The rest of Fresh's daemon/workspace model is the #19a slice: a
+  workspace registry of per-root files (stable id, label, layout), lazy
+  materialization with inert placeholders, protocol workspace-list/select/new/
+  close/rename, a dock/session switcher and per-workspace save/restore with daemon
+  exit ordering. Today the daemon hosts one workspace, the launch directory.

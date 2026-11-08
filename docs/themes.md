@@ -65,9 +65,15 @@ The plugin API `gvim.theme.override(colors)` / `gvim.theme.clear()` (owned by th
 ## 8. What is deferred
 
 - URL/packaged themes and remote packs: **decision recorded** — keep the clear refusal, no network code and no fetch slice until packaging/network policy exists (see §1);
-- inheriting from another *user* theme (Fresh's current limit, kept);
-- background images in themes;
-- drag-and-drop of theme values or swatches (mouse click and drag selection exist in the colour picker, but nothing is reordered); no colour-picker entry is bolted onto the Settings theme row: the picker edits theme values and belongs to the theme editor, while the Settings row's Enter/click opens Select Theme;
+- inheriting from another *user* theme: **decision** — one level of `extends` to a built-in
+  theme is the model (a user theme extends a built-in theme; Fresh's own limit, kept).
+- background images in themes: **decision** — out of the colour theme model (theme keys are
+  colours and attributes; Fresh's editor background support is a separate feature), recorded
+  as a deliberate refusal rather than a missing key.
+- drag-and-drop of theme values or swatches: **decision** — not added. The colour picker's
+  drag moves the selection; nothing reorders theme values, and no colour-picker entry is
+  bolted onto the Settings theme row (the picker edits theme values and belongs to the theme
+  editor, while the Settings row's Enter/click opens Select Theme);
 - untagged painters remain a fallback: compose/page-view/plugin/custom-overlay cells report `matched by colour` instead of provenance (the first-surface subset — editor text/syntax, gutter, selection/current line, status bar, popup/palette/Settings rows, menu — is attributed);
 - accent keys beyond gvim's own `ui.accent_*` extension; a Fresh theme and every bundled theme get the popup selection colors as their accent (§2).
 

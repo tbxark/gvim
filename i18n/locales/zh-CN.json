@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "已复制",
+  "clipboard.copied_line": "已复制行",
+  "clipboard.copied_path": "已复制路径：%{path}",
+  "clipboard.copied_plain": "已复制为纯文本",
+  "clipboard.cut": "已剪切",
+  "clipboard.cut_line": "已剪切行",
+  "clipboard.pasted": "已粘贴",
+  "format.formatted_with": "已使用 %{formatter} 格式化",
+  "gvim.lsp.inlay_hints_off": "内联提示已禁用",
+  "gvim.lsp.inlay_hints_on": "内联提示已启用",
+  "gvim.scrollback.copied_line": "已复制行",
+  "gvim.scrollback.no_selection": "无选择内容",
+  "terminal.no_terminal_open": "没有打开的终端 — 请先打开一个终端"
+}

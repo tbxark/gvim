@@ -129,13 +129,23 @@ func fakeLine(text string) terminal.Line {
 
 // fakeStarter implements TerminalStarter. It hands out term, or fails with err.
 type fakeStarter struct {
-	term *fakeTerm
-	err  error
-	dirs []string
+	term     *fakeTerm
+	err      error
+	dirs     []string
+	launches []terminal.Launch // the StartLaunch calls, in order
 }
 
 func (s *fakeStarter) Start(dir string, cols, rows int) (Terminal, error) {
 	s.dirs = append(s.dirs, dir)
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.term, nil
+}
+
+// StartLaunch records an agent/resume start, the way the real starter runs it.
+func (s *fakeStarter) StartLaunch(launch terminal.Launch, dir string, cols, rows int) (Terminal, error) {
+	s.launches = append(s.launches, launch)
 	if s.err != nil {
 		return nil, s.err
 	}

@@ -327,37 +327,43 @@ method behind it.
 
 ## 6. What is deferred
 
-- **R7-3 coverage is closed for the page surface:** the Language Servers page,
-  the read-only Environment section, the per-language structured values with the
-  reset-vs-inherit display, the Plugins page and the read-only Keybindings page
-  all ship. The exact residuals are: declared plugin settings are listed
-  read-only (the runtime now exposes the schema and effective values, so the
-  page shows each declared key with its type, default, bounds/choices and the
-  layer that supplied the value, but editing plugin settings still happens in
-  the raw config file, plugins.<name>.settings); there is no plugin
-  gallery/install page; keybinding editing deliberately stays in the existing
-  Keybinding Editor (no in-page capture, no second writer of the keybindings
-  file);
-- project-environment detection (`env.detectors`: venv/direnv/mise activation)
-  is not implemented; the Environment section says so;
-- an LSP server's fields are edited as the whole language array in JSON, not as
-  per-field dialogs (array elements cannot be patched one by one); the parsed
-  servers are shown read-only beside it, and `process_limits` is accepted,
-  validated and applied or reported per OS (see `docs/lsp.md`, "Process
-  limits");
-- Fresh's two-button per-field distinction between "reset to the built-in
-  default" and "inherit/unset", and a full per-change undo stack (the page has
-  one reset per setting and Ctrl+R to discard everything);
-- a config Reload keybinding (the palette row is the only entry point);
-- plugin settings editing in the page (the theme row's preview is not deferred: it landed with the theme slice);
-- Fresh's generic widget runtime (dual-list drag and drop, map entry dialogs
-  with nested fields).
+The page surface is complete for the settings it covers (R7-3 closed). What remains is a
+short list of deliberate decisions rather than unfinished paths:
 
-The read-only Settings list remains as the fallback when the app wires no
-`SettingsPort` (the TUI in a test, or a host without a config directory): it
-lists the effective settings and opens the config file on Enter (the ui_icons row
-opens the icon preview).
+- **Declared plugin settings are listed read-only** (`plugins.<name>.settings`): the runtime
+  exposes each declared key's type, default, bounds/choices and the layer that supplied the
+  value, so the Plugins page shows the effective settings, while editing stays in the raw
+  user config file. A structured per-plugin editor would need a plugin-owned schema-to-widget
+  mapping plus a reload/rollback path for the plugin runtime that the settings service does
+  not own, so it is deliberately not attempted here (the page shows the schema read-only for
+  the same reason).
+- **There is no plugin gallery or install page.** gvim installs no plugins from the network
+  or the workspace: plugins come from the binary, the user config directory and `--plugin`.
+  A gallery is a packaging/distribution-policy decision (like the recorded refusal of
+  URL/packaged themes), not a settings-page gap.
+- **An LSP server's fields are edited as the whole language array as validated JSON, not as
+  per-field dialogs.** `config.PatchBytes` cannot address one element of an array, so a
+  per-field dialog would need an array-index patch path and a lock/refusal story for writes
+  racing a reload; the page edits the array (the project layer is locked to mute/enable) and
+  shows the parsed servers read-only beside it. `process_limits` is accepted, validated and
+  applied or reported per OS (see `docs/lsp.md`, "Process limits").
+- **No in-page key capture and no second writer of the keybindings file**: keybinding editing
+  deliberately stays in the Keybinding Editor (`docs/keybindings.md`); the page's Keybindings
+  section is read-only.
+- **No project-environment activation**: `env.detectors` are resolved and listed on the
+  Environment section's Detectors page (round 10), but gvim does not activate the detected
+  environment; that remains a spawn-time decision (see `docs/trust.md`).
+- **Fresh's two-button per-field distinction between reset-to-default and inherit/unset, and
+  its full per-change undo stack**, are not ported: the page has one reset per setting and
+  `Ctrl+R` to discard everything; inherited rows show the inherited value and say so.
+- **A Reload keybinding**: Reload Configuration is a palette row only (no default key).
+  Command-line flags still win over the file for the running editor.
+- **Fresh's generic widget runtime** (dual-list drag and drop, map-entry dialogs with nested
+  fields) is not ported; the page has the native widgets its settings need.
 
+The read-only Settings list remains as the fallback when the app wires no `SettingsPort` (the
+TUI in a test, or a host without a config directory): it lists the effective settings and
+opens the config file on Enter (the ui_icons row opens the icon preview).
 ## 7. Files
 
 | File | Role |
@@ -366,7 +372,7 @@ opens the icon preview).
 | `config/settings_structured.go` | the structured knowledge: language override fields, language ids, status-bar element names, removable paths, page summaries, explorer width, `DecodeLayer` |
 | `config/patch.go` | `Edit` (set or remove), `PatchBytes` (surgical hujson patch with the reset cascade), `ValidateEdits` |
 | `config/config.go` | `applyObject`, the shared key-application path |
-| `i18n/i18n.go`, `i18n/catalogues/en.json` | the translation package and its embedded English catalogue: locale resolution, `T`/`TN`, plurals and `Register` for the `locale` row (see [i18n.md](i18n.md)) |
+| `i18n/i18n.go`, `i18n/catalogue.go`, `i18n/locales/*.json` | the translation package and its embedded catalogues: locale resolution, `T`/`TN`, plurals, the Fresh import mapping and catalogue validation for the `locale` row (see [i18n.md](i18n.md)) |
 | `config/contents.go` | the native `contents.fold_buffer` key, its project-layer rule (ignored: the retired markdown_toc plugin's settings are the user's) and `ContentsFoldBuffer`, the effective value with the plugin-key fallback |
 | `internal/tui/ports.go` | `SettingsPort`, `SettingsSnapshot`, `SettingsItem`, `SettingsStructure`, `SettingEdit`, `SettingsChange` |
 | `internal/tui/settings.go` | the main page, reset, reload action, `applySettingsChange`, the settings messages |

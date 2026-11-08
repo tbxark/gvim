@@ -32,6 +32,7 @@ type shellSize struct{ cols, rows int }
 type Panel struct {
 	host      Host
 	starter   TerminalStarter
+	launcher  Launcher // optional: starts agent/resume programs; nil for a shell-only starter
 	clipboard ClipboardReader
 
 	open     bool // the dock is shown
@@ -46,8 +47,11 @@ type Panel struct {
 
 	// effects are the terminal section settings the dock applies itself, and
 	// scroll is the read-only scrollback view. pressed is the button a forwarded
-	// drag is holding, or terminal.MouseNone.
+	// drag is holding, or terminal.MouseNone. launch is the program the dock's
+	// current terminal started (empty for the plain shell): it is the record a
+	// restart and the saved session use to rejoin an agent session.
 	effects Effects
+	launch  terminal.Launch
 	scroll  scrollState
 	pressed int
 	// sel is the text selection over the scrollback view, prior is the transcript
@@ -200,7 +204,8 @@ func (p *Panel) start() tea.Cmd {
 	if p.host.RootDir != nil {
 		dir = p.host.RootDir()
 	}
-	return p.launch(dir)
+	p.launch = terminal.Launch{}
+	return p.launchShell(dir)
 }
 
 // Restart closes the shell the dock shows and starts another in the directory the
@@ -232,12 +237,89 @@ func (p *Panel) Restart() tea.Cmd {
 	// The focus leaves the shell that is closing. The start gives it back, because
 	// the dock is shown.
 	p.focus = false
-	return p.launch(dir)
+	return p.relaunch(dir)
 }
 
-// launch closes the shell the dock holds, if any, and starts a shell in dir. The
-// close and the start run in a tea.Cmd, and the result comes back as a startedMsg.
-func (p *Panel) launch(dir string) tea.Cmd {
+// relaunch starts the recorded program for a user-initiated restart, with Fresh's
+// precedence: the agent's resume argv when terminal.resume_agents is on and the
+// record has one, then the recorded launch argv, then the default shell. The
+// record is kept across the restart, so a later restart can resume again.
+func (p *Panel) relaunch(dir string) tea.Cmd {
+	record := p.launch.Clean()
+	launch := record
+	if len(record.ResumeArgv) > 0 && p.effects.ResumeAgents {
+		launch.Argv = record.ResumeArgv
+	}
+	if launch.Empty() {
+		p.launch = terminal.Launch{}
+		return p.launchShell(dir)
+	}
+	return p.launchProgram(dir, launch.Argv, record, launch.Ephemeral)
+}
+
+// StartAgent starts a configured agent preset in the dock. It reports whether the
+// name is a configured agent; a miss is a status notice. The session terminal is
+// ephemeral and records the launch and resume argv, so Restart can rejoin it.
+func (p *Panel) StartAgent(name string) (tea.Cmd, bool) {
+	for _, agent := range p.effects.Agents {
+		if agent.Name != name {
+			continue
+		}
+		dir := ""
+		if p.host.RootDir != nil {
+			dir = p.host.RootDir()
+		}
+		record := terminal.Launch{Argv: agent.Argv, Agent: agent.Name, ResumeArgv: agent.ResumeArgv, Ephemeral: true}
+		p.open = true
+		p.focus = false
+		return p.launchProgram(dir, record.Argv, record, true), true
+	}
+	p.notice = "No terminal agent is configured under that name."
+	return nil, false
+}
+
+// Agents returns the configured agent presets, in config order.
+func (p *Panel) Agents() []Agent { return p.effects.Agents }
+
+// launchProgram closes the shell the dock holds and starts argv, recording rec as
+// the launch a restart should use. The record is set before the start, so a failed
+// start can be retried and is not lost.
+func (p *Panel) launchProgram(dir string, argv []string, rec terminal.Launch, ephemeral bool) tea.Cmd {
+	if p.launcher == nil || len(argv) == 0 {
+		p.notice = noTerminalsNotice()
+		return nil
+	}
+	if p.starting {
+		return nil
+	}
+	old := p.term
+	p.term = nil
+	p.starting = true
+	p.notice = ""
+	p.dir = dir
+	p.scroll = scrollState{}
+	p.restored = false
+	p.exited = false
+	rec = rec.Clean()
+	rec.Argv = append([]string(nil), argv...)
+	rec.Ephemeral = ephemeral
+	p.launch = rec
+	cols, rows := p.contentSize()
+	launcher := p.launcher
+	launch := rec
+	return func() tea.Msg {
+		if old != nil {
+			_ = old.Close()
+		}
+		t, err := launcher.StartLaunch(launch, dir, cols, rows)
+		return startedMsg{term: t, err: err, cols: cols, rows: rows}
+	}
+}
+
+// launchShell closes the shell the dock holds, if any, and starts the plain
+// configured shell in dir. The close and the start run in a tea.Cmd, and the
+// result comes back as a startedMsg.
+func (p *Panel) launchShell(dir string) tea.Cmd {
 	if p.starter == nil {
 		p.notice = noTerminalsNotice()
 		return nil

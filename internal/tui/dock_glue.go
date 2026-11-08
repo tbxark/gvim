@@ -5,6 +5,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/dock"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
 // The terminal dock lives in internal/tui/dock. These aliases keep the root's
@@ -12,6 +13,7 @@ import (
 type (
 	Terminal        = dock.Terminal
 	TerminalStarter = dock.TerminalStarter
+	Tabs            = dock.Tabs
 	ClipboardReader = dock.ClipboardReader
 	DockPorts       = dock.Ports
 	DockEffects     = dock.Effects
@@ -31,9 +33,9 @@ func (m *Model) SetDock(p DockPorts) {
 	m.dock.SetEffects(dock.Effects(p.Effects))
 }
 
-// dockNewPanel returns the dock panel with the root services it needs.
-func dockNewPanel(m *Model) dock.Panel {
-	var p dock.Panel
+// dockNewPanel returns the dock's tab container with the root services it needs.
+func dockNewPanel(m *Model) dock.Tabs {
+	var p dock.Tabs
 	p.SetHost(dock.Host{
 		RootDir:     func() string { return m.rootDir() },
 		Notice:      func(text string) { m.notice = text },
@@ -44,6 +46,28 @@ func dockNewPanel(m *Model) dock.Panel {
 	})
 	return p
 }
+
+// terminalTabRenameTag is the prompt tag of the dock's Rename Terminal Tab. The
+// answer names the active tab; an empty answer restores its default name.
+type terminalTabRenameTag struct{}
+
+// renameDockTabPrompt asks for the active tab's name, prefilled with the current
+// one.
+func (m *Model) renameDockTabPrompt() {
+	if m.dock.Count() == 0 {
+		m.notice = noTerminalNotice()
+		return
+	}
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Label:     "Rename terminal tab:",
+		Input:     m.dock.ActiveName(),
+		SelectAll: true,
+		Tag:       terminalTabRenameTag{},
+	}))
+}
+
+// renameDockTab applies the prompt's answer.
+func (m *Model) renameDockTab(name string) { m.dock.RenameActive(name) }
 
 // dockAction runs the dock's actions. It reports whether action is one of them, and
 // the command the action starts.
@@ -83,6 +107,22 @@ func (m *Model) dockAction(action string) (tea.Cmd, bool) {
 		return nil, true
 	case "terminal_paste":
 		return m.dock.PasteClipboard(), true
+	case "run_agent":
+		return m.openAgentPicker(), true
+	case "terminal_tab_new":
+		return m.dock.NewTab(), true
+	case "terminal_tab_close":
+		m.dock.CloseTab()
+		return nil, true
+	case "terminal_tab_next":
+		m.dock.Next()
+		return nil, true
+	case "terminal_tab_previous":
+		m.dock.Previous()
+		return nil, true
+	case "terminal_tab_rename":
+		m.renameDockTabPrompt()
+		return nil, true
 	case "send_selection_to_terminal":
 		return m.sendSelection(), true
 	}
@@ -124,6 +164,11 @@ func (m *Model) dockKeyboard() bool { return m.dock.Keyboard(m.layout()) }
 // that turns capture off runs as a binding. A key that none claims goes to the shell as
 // the bytes it sends.
 func (m *Model) dockKey(k tea.Key, kp KeyPress) tea.Cmd {
+	// The dock's quick-switch keys work whether or not the shell has keyboard
+	// capture, but not while the pager owns the keys.
+	if !m.dock.Scrolling() && m.dock.TabKey(k) {
+		return nil
+	}
 	// The scrollback view has its own keys, and Ctrl+Space is the switch into it
 	// from the live screen. Keyboard capture keeps every key for the shell, so it
 	// also keeps the switch; the keys it does not take are handled below, by the

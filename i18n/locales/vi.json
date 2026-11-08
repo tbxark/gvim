@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "Đã sao chép",
+  "clipboard.copied_line": "Đã sao chép dòng",
+  "clipboard.copied_path": "Đã sao chép đường dẫn: %{path}",
+  "clipboard.copied_plain": "Đã sao chép dạng văn bản thuần",
+  "clipboard.cut": "Đã cắt",
+  "clipboard.cut_line": "Đã cắt dòng",
+  "clipboard.pasted": "Đã dán",
+  "format.formatted_with": "Đã định dạng với %{formatter}",
+  "gvim.lsp.inlay_hints_off": "Đã tắt gợi ý nội tuyến",
+  "gvim.lsp.inlay_hints_on": "Đã bật gợi ý nội tuyến",
+  "gvim.scrollback.copied_line": "Đã sao chép dòng",
+  "gvim.scrollback.no_selection": "Không có vùng chọn để sao chép",
+  "terminal.no_terminal_open": "Không có terminal nào đang mở — hãy mở terminal trước"
+}

@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "Скопировано",
+  "clipboard.copied_line": "Строка скопирована",
+  "clipboard.copied_path": "Путь скопирован: %{path}",
+  "clipboard.copied_plain": "Скопировано как простой текст",
+  "clipboard.cut": "Вырезано",
+  "clipboard.cut_line": "Строка вырезана",
+  "clipboard.pasted": "Вставлено",
+  "format.formatted_with": "Отформатировано с помощью %{formatter}",
+  "gvim.lsp.inlay_hints_off": "Встроенные подсказки отключены",
+  "gvim.lsp.inlay_hints_on": "Встроенные подсказки включены",
+  "gvim.scrollback.copied_line": "Строка скопирована",
+  "gvim.scrollback.no_selection": "Нет выделения для копирования",
+  "terminal.no_terminal_open": "Нет открытого терминала — сначала откройте терминал"
+}

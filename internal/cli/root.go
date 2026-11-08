@@ -43,6 +43,10 @@ func (e *exitError) Unwrap() error { return e.err }
 // are checked by app.Options.Validate.
 var keymapNames = []string{"default", "macos", "macos-gui", "emacs", "vscode"}
 
+// daemonDefaultName is the NoOptDefVal of --daemon/-a: it marks a flag given with no
+// NAME, which means the per-root default socket name.
+const daemonDefaultName = "-"
+
 // NewRootCommand returns the gvim command tree. The root opens the editor with
 // the positional arguments and the flags. run is called once per invocation
 // with the parsed options, after they validate.
@@ -60,6 +64,8 @@ func NewRootCommand(run Runner) *cobra.Command {
 		simple     bool
 		stdin      bool
 		stdinName  string
+		daemonName string
+		attachName string
 	)
 	root := &cobra.Command{
 		Use:   "gvim [DIR] [FILE[:LINE[:COL]]]...",
@@ -87,7 +93,22 @@ keyboard then comes from the terminal. Use --stdin, or a - FILE argument anywher
 the files; when no files are named, piped stdin is read even without the flag, so
 "git show | gvim" works. The read is bounded at 32 MiB. A stdin launch never restores or
 saves the session. --stdin-name NAME names the buffer for the language (by extension) and
-the Save-As suggestion.`,
+the Save-As suggestion.
+
+A FILE may be a remote target instead: user@host:/path or
+ssh://[user@]host[:port]/path, optionally ending in :LINE[:COL]. ssh:// is exclusive
+(a malformed URL is a startup error) and the path may contain colons. This slice opens
+the SSH session's terminal at the remote workspace and says that remote file editing is
+the follow-up; remote targets take no local directory or files, are not restored or
+saved in the local session, and cannot be combined with --diff or --daemon.
+
+--daemon runs the editor as a daemon on a Unix socket (in the foreground; it prints the
+socket it listens on) and --attach/-a forwards this terminal to a running daemon. The
+socket name defaults to a per-workspace name; give NAME to use another. While a daemon
+hosts a workspace a bare launch in it refuses instead of opening a second editor: the
+session's unsaved buffers live in the daemon. A file launch, --simple and --diff stay
+direct launches. In the daemon the "Detach from Daemon" command drops this client and
+leaves the editor running.`,
 		Example: `  gvim
   gvim ~/project
   gvim ~/project main.go:42:7 README.md
@@ -127,6 +148,7 @@ the Save-As suggestion.`,
 			opts := app.Options{
 				Files:   targets.Files,
 				Root:    targets.Root,
+				Remote:  targets.Remote,
 				Config:  configPath,
 				Keymap:  keymapName,
 				Theme:   themeName,
@@ -142,6 +164,26 @@ the Save-As suggestion.`,
 
 				ReadStdin: stdin,
 				StdinName: stdinName,
+			}
+			// A daemon launch is either the host (--daemon) or a client (-a), never
+			// both. An omitted NAME means the per-root default socket name.
+			daemonSet, attachSet := cmd.Flags().Changed("daemon"), cmd.Flags().Changed("attach")
+			if daemonSet && attachSet {
+				return errors.New("--daemon cannot be combined with --attach")
+			}
+			if daemonSet {
+				name := daemonName
+				if name == daemonDefaultName {
+					name = ""
+				}
+				opts.Daemon = &app.DaemonOptions{Mode: app.DaemonServe, Name: name}
+			}
+			if attachSet {
+				name := attachName
+				if name == daemonDefaultName {
+					name = ""
+				}
+				opts.Daemon = &app.DaemonOptions{Mode: app.DaemonAttach, Name: name}
 			}
 			if err := opts.Validate(); err != nil {
 				// The message names the flag and the valid values: the whole usage text
@@ -172,6 +214,10 @@ the Save-As suggestion.`,
 	root.Flags().BoolVar(&simple, "simple", false, "open just what is named: no session restored or saved and no file explorer")
 	root.Flags().BoolVar(&stdin, "stdin", false, "read a [stdin] buffer from standard input (bounded at 32 MiB); the keyboard comes from the terminal")
 	root.Flags().StringVar(&stdinName, "stdin-name", "", "name the [stdin] buffer `NAME`, for the language and the Save-As suggestion")
+	flags.StringVar(&daemonName, "daemon", "", "run the editor as a daemon on a socket (foreground); `NAME` is the socket name, empty the default for this workspace")
+	flags.Lookup("daemon").NoOptDefVal = daemonDefaultName
+	flags.StringVarP(&attachName, "attach", "a", "", "attach this terminal to a running daemon; `NAME` is the socket name, empty the default for this workspace")
+	flags.Lookup("attach").NoOptDefVal = daemonDefaultName
 	_ = root.RegisterFlagCompletionFunc("keymap", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return keymapNames, cobra.ShellCompDirectiveNoFileComp
 	})

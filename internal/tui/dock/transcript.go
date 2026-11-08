@@ -125,6 +125,13 @@ func (p *Panel) SavedState() terminal.SavedState {
 		Cwd:     p.dir,
 		Width:   p.contentCols(),
 	}
+	// The launch record of the terminal that produced the transcript, so the
+	// user-initiated restart can rejoin it after an editor restart.
+	launch := p.launch.Clean()
+	st.LaunchArgv = launch.Argv
+	st.ResumeArgv = launch.ResumeArgv
+	st.Agent = launch.Agent
+	st.Ephemeral = launch.Ephemeral
 	if p.term != nil {
 		if cwd := p.term.WorkingDirectory(); cwd != "" {
 			st.Cwd = cwd
@@ -205,6 +212,14 @@ func (p *Panel) Restore(st terminal.SavedState) {
 	p.term = nil
 	p.exited = true
 	p.notice = ""
+	// The saved record never starts anything here: it only arms the user's
+	// restart/resume, which applies terminal.resume_agents at that point.
+	p.launch = terminal.Launch{
+		Argv:       append([]string(nil), st.LaunchArgv...),
+		ResumeArgv: append([]string(nil), st.ResumeArgv...),
+		Agent:      st.Agent,
+		Ephemeral:  st.Ephemeral,
+	}.Clean()
 	p.scroll = scrollState{on: true, screenRows: 0, gen: p.gen}
 	p.scroll.top = max(p.combined()-max(p.bodyRows(), 1), 0)
 	p.scroll.selected = max(p.combined()-1, 0)

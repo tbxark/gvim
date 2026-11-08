@@ -22,6 +22,7 @@ const terminalFileName = "terminal.json"
 const (
 	maxSavedTerminalRows  = 500
 	maxSavedTerminalBytes = 1 << 20
+	maxSavedTerminalTabs  = 16
 )
 
 // SaveTerminal writes the terminal dock state to dir/terminal.json. A state with
@@ -33,7 +34,7 @@ func SaveTerminal(dir string, st terminal.SavedState) error {
 		return nil
 	}
 	path := filepath.Join(dir, terminalFileName)
-	if !st.Open && len(st.Rows) == 0 {
+	if !st.Open && len(st.Rows) == 0 && len(st.Tabs) == 0 {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("terminal: remove %s: %w", terminalFileName, err)
 		}
@@ -72,24 +73,45 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 	if err := json.Unmarshal(data, &st); err != nil {
 		return terminal.SavedState{}, false, fmt.Errorf("terminal: decode %s: %w", terminalFileName, err)
 	}
-	if st.Version != terminal.SavedStateVersion || len(st.Rows) == 0 {
+	if st.Version != terminal.SavedStateVersion || (len(st.Rows) == 0 && len(st.Tabs) == 0) {
 		return terminal.SavedState{}, false, nil
 	}
-	if len(st.Rows) > maxSavedTerminalRows {
-		st.Rows = st.Rows[len(st.Rows)-maxSavedTerminalRows:]
+	st.Rows = boundTerminalRows(st.Rows)
+	// Tabs are bounded the same way: at most maxSavedTerminalTabs, each with the
+	// single-transcript row/byte bound. A tab with no rows and not open is dropped.
+	if len(st.Tabs) > maxSavedTerminalTabs {
+		st.Tabs = st.Tabs[len(st.Tabs)-maxSavedTerminalTabs:]
+	}
+	kept := st.Tabs[:0]
+	for _, tab := range st.Tabs {
+		tab.Rows = boundTerminalRows(tab.Rows)
+		if len(tab.Rows) == 0 && !tab.Open {
+			continue
+		}
+		kept = append(kept, tab)
+	}
+	st.Tabs = kept
+	return st, len(st.Rows) > 0 || len(st.Tabs) > 0, nil
+}
+
+// boundTerminalRows applies the saved-transcript bounds and strips control
+// characters from each row.
+func boundTerminalRows(rows []string) []string {
+	if len(rows) > maxSavedTerminalRows {
+		rows = rows[len(rows)-maxSavedTerminalRows:]
 	}
 	size := 0
-	for i := len(st.Rows) - 1; i >= 0; i-- {
-		size += len(st.Rows[i]) + 1
+	for i := len(rows) - 1; i >= 0; i-- {
+		size += len(rows[i]) + 1
 		if size > maxSavedTerminalBytes {
-			st.Rows = st.Rows[i+1:]
+			rows = rows[i+1:]
 			break
 		}
 	}
-	for i := range st.Rows {
-		st.Rows[i] = cleanTerminalText(st.Rows[i])
+	for i := range rows {
+		rows[i] = cleanTerminalText(rows[i])
 	}
-	return st, len(st.Rows) > 0, nil
+	return rows
 }
 
 // cleanTerminalText strips control characters from a saved transcript row.

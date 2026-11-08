@@ -105,9 +105,7 @@ func Start(ctx context.Context, opts Options) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("term: start %s: %w", shell, err)
 	}
-	s := newSession(pty, cols, rows, opts.ScrollbackLines)
-	go s.closeOnCancel(ctx)
-	return s, nil
+	return startSession(ctx, pty, cols, rows, opts.ScrollbackLines), nil
 }
 
 // checkSize rejects sizes that a PTY cannot hold.

@@ -1,7 +1,7 @@
 # Fresh parity record
 
 Status: live working record for the "full Fresh feature parity" goal, first written 2026-11-08 and
-refreshed after rounds 1–11 landed (round 1: workspace trust, sidebar Contents, status pills;
+refreshed after rounds 1–12 landed (round 1: workspace trust, sidebar Contents, status pills;
 round 2: virtual space, keymaps, status bar/menus, sessions; round 3: settings page, terminal
 scrollback/links/mouse, explorer options, palette preview/toggles; round 4: LSP router/edits,
 project-wide search/replace + Git Grep, settings coverage, virtual-space block/vertical, markdown
@@ -16,20 +16,20 @@ globs; round 9: Finder port wave (lsp_navigation, find_references, dashboard, co
 residual slice, search R8-5, inline-hint tier 2, Contents R6-6/sidebar state, tier-1c remainder +
 declared-settings API; round 10: git_grep, git_explorer + explorer host API, env-manager + env
 detection/activation, markdown/sidebar residuals, terminal slice A, theme slice A, LSP leftovers;
-round 11: daemon protocol/socket core (partial #18a), i18n foundation #22a, terminal completion
-(ConPTY/OSC52 write/transcript reflow), theme provenance, stdin-as-a-buffer #25, line-target
-migration, and the LSP small residuals). Every status below was checked in this tree or in
-`refs/fresh`, not inferred from the old migration notes. Update the affected row when a round
-lands instead of rewriting it.
+round 11: daemon protocol/socket core, i18n foundation #22a, terminal completion (ConPTY/OSC52
+write/transcript reflow), theme provenance, stdin-as-a-buffer #25, line-target migration, LSP
+small residuals; round 12: daemon #18a MVP end-to-end, terminal tabs, #20a agent sessions, #21a
+authority + SSH terminal/exec, #22b i18n catalogues, and the LSP residual sweep). Every status
+below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
+Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `bdfb627` plus the uncommitted round-11 work. Round 11's
+Last verified: 2026-11-09, tree commit `4cf47b2` plus the uncommitted round-12 work. Round 12's
 gate set was run by this audit: go build ./..., CGO_ENABLED=0 go build ./..., go vet,
 golangci-lint 0 issues, gofmt clean, purity and import rules green, the generated menu check
-clean, and the Windows cross-gates GOOS=windows go build ./... and GOOS=windows go vet ./...
-green (the ConPTY slice). go test ./... -count=1 had four load-timing failures —
-internal/tui TestPumpSharesOneDrainBudget, plugin TestHeatBusyTimerIsThrottled,
-plugin/bundled TestMergeConflictRecoversFromAKilledScan and TestViBigRangesFitTheBudget — all
-of which pass repeatedly in isolation (2x); no other failures. Fresh reference: the
+clean, and GOOS=windows go build ./... green. go test ./... -count=1 had two failures —
+internal/app TestDaemonHostsAttachDetachAndQuit (the attach read a repaint/output frame before
+the expected pong under load) and plugin/bundled TestViSuspendedDropsItsStatusAndMode (the known
+load flake) — both pass repeatedly in isolation; 70 packages pass. Fresh reference: the
 `refs/fresh` checkout as read on the same date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
@@ -398,6 +398,70 @@ port + adapter, tests), with multi-key overlay chords and the completion/composi
 text-field contexts remaining. Counts unchanged: 22 bundled/9 on/13 off, idle heap ~7.25 MiB
 of 8 PASS, palette 229, plugin API 242 functions/1478 lines, API level 2.
 
+**Round 12 outcome (2026-11-09).** Six tracks landed; the daemon MVP and architected slices are in:
+**Daemon #18a MVP (complete).** `internal/daemon/{server,attach}.go` + platform resize shim: the
+server owns the attach lifecycle (one client at a time, hello/resize/input/open_file/detach/ping,
+a detached client's input blocks without ending the editor, output goes only to the attached
+client with write-error detach, `OnProgram` repaint/resize hooks, `OnOpenFiles` forwarding,
+`Close` sends exit) and the attach client (hello with the terminal size, optional open-file
+frame, raw mode/restore, stdin→input, output→stdout, notices→stderr, SIGWINCH→resize). App:
+`Options.Daemon/DaemonMode/DaemonOptions` with validation, the attach branch before
+`requireTerminal` (no runtime/session), the serve branch (listener before `buildRuntime`,
+per-root default name, socket line, detach wiring, `tui.RunWithIO(srv,srv,OnProgram)`, open-file
+forwarding, session restore on start/save on exit, direct-mode/security checks), plus the single-
+writer refusal for bare/session launches while a per-root daemon is live (file/--simple/--diff/
+stdin launches stay direct). TUI `RunWithIO`/`Detach`/`OpenFileMessage`; CLI `--daemon[=NAME]` /
+-a/`--attach[=NAME]` with validation/help; palette "Detach from Daemon" only under --daemon.
+docs/architecture.md package rows + §8 daemon flow + the #19a outline; import rule R2 allows
+internal/daemon to host the TUI program. Tests: daemon server forwarding/refusal/detach-reattach/
+exit, CLI flag table, app start/attach/first-frame/detach/reattach/quit/session-save, single-
+writer refusal + direct exceptions. Recorded MVP reductions: foreground daemon (no fork),
+auto_attach start-if-absent NOT implemented (documented refusal policy instead), one client,
+single workspace until #19, Windows named pipes later. **Terminal tabs.** `internal/tui/dock/
+tabs.go`: a container of up to 16 single-session terminals (each with screen/scrollback/prior
+transcript/selection/links/launch record), a tab strip with active/exited/click-select,
+Ctrl+PgUp/PgDn quick-switch (not keymap data), palette New/Close/Next/Previous/Rename Terminal Tab
+(hand-written English; 235 palette rows), per-tab close_on_exit, background tabs synced but
+painted only when active; `terminal.json` gains additive `tabs[]`/`active_tab` (top-level fields
+mirror the active tab, bounds and old-file migration, restored read-only/dead with no auto-
+restart, Restart per tab with the saved launch record). **#20a agent sessions.**
+`internal/terminal/launch.go` Launch argv/agent/resume-argv/ephemeral (bounds 64×1024, agent 64),
+dock launch records + optional `Launcher/StartLaunch`, `terminal.resume_agents` (default true) and
+`terminal.agents` (gvim extension, bounded/user-layer-only) config, persisted launch fields with
+no auto-resume on restore, user-initiated restart precedence resume→launch→shell, agent naming in
+tab titles, Run Agent... palette row + picker (hand-written English); no workspace/tmux
+discovery yet. **#21a authority + SSH.** New `authority` package: the slot with four routing
+surfaces (FileSystem/OneShot/LongRunning/Terminal), State/Label/Connected/Reconnect/Close, a
+local backend byte-identical to the plugin OS port with trust-gate + env choke point, and a fake
+for tests; Fresh-compatible scp/ssh:// parsing with typed diagnostics and path translation
+(ssh:// exclusive, malformed is a startup error, remote never stat'ed, no local fallback; remote
+excludes local files/root/diff/stdin/restore/--daemon); SSH backend via cached pure-Go
+x/crypto/ssh (agent/identity/passphrase/password, known_hosts, POSIX-quoted one-shot exec,
+long-running stdio, PTY terminal with resize/reconnect); status segment `SSH:user@host` /
+disconnected (hand-written English, i18n keys reserved); reconnect-on-activate + password prompt;
+remote launch UX opens no local files/session and opens the remote terminal at Workspace() with a
+notice; one-shots (dock terminal/git grep/shell/formatter) routed through the slot;
+docs/authority.md + architecture row. Deferred: remote file I/O (SFTP/remote-helper plan in
+docs/authority.md §7), LSP routing, per-remote trust store, terminal respawn on drop, plugin
+fs/proc routing, devcontainer/k8s. **i18n #22b catalogues.** `i18n/locales/*.json` embedded
+(15 files, 12,646 bytes, cap test), English source of truth; 14 translated files carry the 13
+mapped keys imported from Fresh via `i18n/fresh_map.json` + `tools/i18n_import.py --check` +
+`tools/i18n_check.sh` CI; `ValidateCatalogue/CoverageFor` validate key shape/plurals/
+placeholders/duplicates/unknown keys (coverage 100% for mapped keys); lazy loading; embedded
+German rendering + fallback tests; plugin `t()` sees only its own .i18n.json; docs/i18n.md
+rewritten with the English boundary (generated CommandDef/menu tables, hand-written command rows
+incl. terminal-tab/Run Agent, settings labels and other in-round strings stay English).
+**LSP residual sweep.** R1-3 closed (`gvim config show` trust-gates the project layer read-only
+via `app.ProjectConfigTrusted`, skip note, trusted unchanged, `config paths` ungated, docs/tests);
+R4-4 partial (virtual-caret session persistence `virtualLines/virtualColumn` migration-safe +
+docs/internal/virtual-space-scoping.md with the exact residual list); R2-5 deferred with
+docs/internal/hot-exit-store.md; R8-3 docs exact (stale bullets removed, decision list);
+R11-3/R11-4 decisions recorded (kitty no seam, OSC52 read gap, live-screen reflow, background
+images/drag-and-drop/user-theme inheritance, untagged painters colour fallback); R1-2 verified
+closed and its stale open ranking entry removed. Counts: palette 235 (+6 rows: Run Agent + five
+terminal-tab rows); bundled 22/9/13 and idle heap ~7.25 MiB of 8 unchanged; plugin API 242
+functions/1478 lines; 47 registration sites; API level 2.
+
 The reference editor is the checkout in `refs/fresh` (read-only). The allowed differences are
 listed in §4; everything else that Fresh has and gvim lacks is a gap, ranked in §5.
 
@@ -528,6 +592,15 @@ paintInto/theme_inspect provenance,style/roles.go,theme_picker}`, `internal/tui/
 key-capture, `internal/terminal/{pty,pty_windows,osc52,reflow}.go`, `editor/{stdin,i18n}
 statuses`, plus the round-11 tests named in the tracking block.
 
+Round-12 evidence adds docs/authority.md, the architecture daemon §8 + authority rows, terminal
+tabs/agents/resume_agents docs, docs/i18n.md (catalogues/import/validation/English boundary),
+docs/internal/{virtual-space-scoping,hot-exit-store}.md, docs/trust.md config viewer,
+docs/settings.md §6, docs/themes.md §8 and the new code: `internal/daemon/{server,attach}
+*.go`, `authority/`, `internal/app/{daemon_runtime,authority_app,terminal_agents,config_trust}.go`,
+`internal/terminal/{launch,session_backend}.go`, `internal/tui/dock/tabs.go` + agent picker/
+authority status, `i18n/{catalogue.go,fresh_map.json,locales/*}`, `tools/i18n_*`,
+`commands/terminal_commands.go`, plus the round-12 tests named in the tracking block.
+
 ### 1.3 Status vocabulary
 
 | Status | Meaning |
@@ -577,7 +650,7 @@ for parity status.
 
 | Measure | Fresh | gvim | Note |
 |---|---|---|---|
-| Palette commands (runtime) | 206 core (Fresh's `CommandDef` table) | 229 | 206 generated + 23 non-generated (7 hand-written native rows + 4 plugin-management + 3 round-4 + 2 round-5 + 2 round-6 + 5 round-8 Markdown mode rows); `commands/palette_test.go` pins 229. Round 10 added no native palette rows; plugin commands (22 bundled plugins, 47 registration sites) appear at run time only while their plugin is enabled. All rows have a handler or a documented reason; the only bound-action gap is `file_explorer_search_backspace`. |
+| Palette commands (runtime) | 206 core (Fresh's `CommandDef` table) | 235 | 206 generated + 29 non-generated: 7 hand-written native rows + 4 plugin-management + 3 round-4 + 2 round-5 + 2 round-6 + 5 round-8 Markdown mode rows + 6 round-12 rows (Run Agent..., New/Close/Next/Previous/Rename Terminal Tab); `commands/palette_test.go` pins 235. The daemon adds a "Detach from Daemon" row only under --daemon (not counted). Plugin-command rows appear at run time only while their plugin is enabled (22 plugins, 47 registration sites). All rows have a handler or a documented reason. |
 | Documented "not applicable" commands | n/a | 4 | `internal/tui/notice_na.go` (detach, update, update log, wave). Inspect Theme now runs (round 5), and the round-1 trust command runs. |
 | Menus / menu actions | 8 / 103 static actions, 31 separators, 2 static submenus + 1 dynamic | 8 / 103 static actions, 31 separators, 2 static submenus + the dynamic theme submenu | Static parity is exact against Fresh's `translated_menus()` (103 actions / 31 separators / 2 static submenus); the dynamic "Copy with Formatting" submenu is filled at run time from the theme catalog (`internal/tui/menubar/dynamic.go`). Round 5 adds plugin-contributed rows (`gvim.menu.add_item`, `internal/tui/menubar/plugins.go`, at most 32 rows, owner-cleaned). Help's label row says "gvim" where Fresh writes its version. |
 | Keymap presets | 5 | 5 | Same names and inheritance graph. Round 7 closed R2-4: the overlay contexts (`prompt`, `searchPrompt`, `popup`, `menu`, `settings`, `dock`) consult the keymap before built-ins with fall-through; own/in-effect counts are now default 245/243, macos 60/266, macos-gui 52/317, emacs 98/309, vscode 9/248 (`keymap/common_set_test.go`, `docs/keybindings.md`). `completion`/`compositeBuffer` are not emitted; residual R7-4. |
@@ -587,8 +660,8 @@ for parity status.
 | LSP server entries | built-in + plugin helpers + universal servers | 62 built-in entries; universal_lsp is config-only | `lsp/manager/defaults.go`; gvim routes lists/universal entries and draws hints/tokens/folds/diagnostics, but no built-in universal server ships (Fresh's quicklsp is a separate user-installed Rust binary — decision recorded; user-configured universal_lsp works fully). `process_limits` is enforced on Linux (cgroup v2/ulimit fallback) and recorded as unreachable on macOS/Windows. |
 | Bundled plugin idle heap | n/a | about 7.25 MiB of the 8 MiB gate (9 default-enabled; ~9.3 MiB session baseline) | `TestBundledPluginsIdleHeap`, `docs/plugins/bundled.md`; round 11 measured ~7.25 MiB PASS (host growth from the round-10 wave), no new enabled plugin. |
 | Plugin API surface | ~372 methods | 242 functions | `docs/plugins/gvim.d.lua` is 1478 lines, API level 2; round 11 added no new API method (i18n/locale wiring feeds the existing `gvim.i18n`; line targets are the round-9 API). Remaining gaps: R9-5 (composite substitution/dock/per-panel/windowEmbed/markdown-in-text), package manager/HTTP, project-local plugins. |
-| Settings page | schema-driven page (~14k LOC in refs/fresh) over every setting | 69 settings in 14 sections + injected Languages entries/Language Servers/Plugins/Keybindings/Environment/Detectors pages | Rounds 3–10 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment and Plugins/Keybindings, Environment/Detectors, theme preview. Round 11 adds the Interface locale row (null encodes auto; ApplyLive pushes the locale into i18n + the plugin runtime live) and the config `locale` key. Residuals R8-3: plugin settings editing in raw config, no gallery/in-page capture, per-field LSP dialogs. |
-| Terminal | PTY terminal panes and utility dock, live/scrollback modes per split, keyboard capture, clickable paths (OSC 7), restart exited process + agent resume, shell override, send selection, mouse forwarding/drag-select, drag auto-scroll, word/line drag selection, Ctrl+hover links with file:line:col, pass_ctrl_v_without_text, close_on_exit, terminal tabs, ConPTY on Windows | **partial** (slices A+B; R3-2 closed; round-10 slice A) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved}.go`, `internal/tui/dock/{selection,transcript,scrollback,input,panel,render,ports,hover}.go` + `dock_glue.go`, `internal/restore/terminal.go`, `internal/uiadapter/terminal.go`, `docs/terminal.md` | Round 10 slice A: drag auto-scroll past the visible rows (fixed 80 ms seq-guarded tick, direction from the drag, forwarding while dragging, stops at ends/release/clear/focus-loss), word/line-wise drag extension after double/triple click, Ctrl+hover underline + `file:line:col` parsing/resolution/open, and the `pass_ctrl_v_without_text` matrix with LastYank. Round 11 completed R10-3: ConPTY on Windows (pure-Go x/sys/windows, compile-verified with GOOS=windows build/vet/test-compile; unverified until the real-Windows acceptance pass in docs/terminal.md), the child OSC 52 clipboard write (bounded streaming re-parse, clipboard.use_osc52 off by default + trusted workspace, selectors c/empty only), and stored-transcript reflow (styled cells/wide glyphs/hard rows preserved, text re-wrap not semantic; live screen still clipped). Residuals: kitty keyboard (x/vt legacy-only, explicit TODO), OSC 52 read/paste, live-screen reflow, terminal tabs, agent re-exec, report-split close_on_exit. |
+| Settings page | schema-driven page (~14k LOC in refs/fresh) over every setting | 69 settings in 14 sections + injected Languages entries/Language Servers/Plugins/Keybindings/Environment/Detectors pages | Rounds 3–10 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment and Plugins/Keybindings, Environment/Detectors, theme preview; round 11 the Interface locale row (null = auto, ApplyLive into i18n + plugin runtime). Round 12 adds no page row; `terminal.agents`/`resume_agents` are config-only (gvim extension/user layer) and the i18n locale row now switches the shipped catalogues. Residuals R8-3 (docs exact: declared plugin settings read-only + raw-config editing rationale, no gallery, whole-array LSP JSON, no in-page key capture, no env activation, no per-field reset/inherit/undo, Reload palette-row only, no generic widget runtime). |
+| Terminal | PTY terminal panes and utility dock, terminal tabs (up to 16) with strip/rename/close_on_exit/persistence, live/scrollback modes per tab, keyboard capture, clickable paths (OSC 7), launch records + agent resume (Run Agent picker), restart exited process, shell override, send selection, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover file:line:col links, pass_ctrl_v_without_text, close_on_exit, ConPTY on Windows, remote SSH terminal via the authority slot | **partial** (slices A+B; R3-2 closed; round-10 slice A; round-11 completion; round-12 tabs/agents/remote terminal) | `config/terminal.go` (shell/agents/resume_agents), `internal/terminal/{scrollback,mouse,saved,launch,session_backend}.go`, `internal/tui/dock/{selection,transcript,scrollback,input,panel,render,ports,hover,tabs}.go` + `dock_glue.go`, `internal/restore/terminal.go`, `internal/uiadapter/terminal.go`, `authority` (SSH terminal), `docs/terminal.md` | Round 10 slice A (drag/word-drag/hover/pass_ctrl_v), round 11 completion (ConPTY compile-verified/unverified, OSC52 write opt-in/trusted, transcript reflow), round 12: tabs container (16 max, strip/exited/click-select, Ctrl+PgUp/PgDn, palette rows, per-tab close_on_exit, additive SavedState tabs/active_tab with bounds/old-file migration, restored read-only dead), launch records + agent metadata/resume (no auto-resume, local executables), remote SSH terminal through the authority slot. Residuals R11-3/R12-2: kitty keyboard, OSC52 read, live-screen reflow, live ephemeral PTY restore, workspace-scoped tabs (#19), tab drag/reorder/per-tab splits, agent re-exec edges, report-split close_on_exit. |
 | Explorer options | `file_explorer.width/side/follow_active_buffer/auto_open_on_last_buffer_close/compact_directories/preview_tabs/…` + sticky parents | 5 options + sticky parents implemented | width percent/columns with grip, left/right side geometry, follow + reveal, auto-open on last close, compact chains, sticky band; side toggle session-only and 4 keys accepted-ignored (R3-3). |
 | Finder / Live Grep | file preview, Live Grep toolbar (case/word/regex, files/buffers/ignored/terminals/workspaces), quickfix, streaming | preview column + 6 Live Grep toggles | `internal/tui/palette/{preview,grep}.go`; deferred quickfix, terminals/workspaces providers, streaming, Live Grep row preview, Resume cache (R3-4). |
 | Project search / replace | plugin Search & Replace panel (match tree, scoped replace, globs, quickfix) + Git Grep | native panel + Git Grep (rounds 4–6) | Rounds 4–5 landed the panel/ports/checkboxes/scoped replace/globs/list export/history; round 6 added the selected-match preview column and multi-line match rows (exact ranges kept in replace): `internal/tui/searchpanel/{draw,panel,types}.go`, `docs/ui.md`. Residuals R6-3. |
@@ -621,9 +694,9 @@ for parity status.
 | Command palette and command table | 206 core commands + plugin commands, contexts/availability, prefix modes, key hints | **implemented** core / **partial** plugin commands | `commands/` (206 generated + native rows), `internal/tui/palette/`; Fresh `docs/features/command-palette.md` | The generated core table is exact (206/206). The runtime palette has 229 rows (unchanged in rounds 9–10): 206 generated + 23 non-generated (7 native + 4 plugin-management + 3 r4 + 2 r5 + 2 r6 + 5 Markdown mode rows) — `commands/palette_test.go`. Bundled plugin commands add rows only while their plugin is enabled (47 registration sites across twenty-two). |
 | Menu bar, context menus, help, welcome | 8 menus, 103 static actions, dynamic theme submenu, mnemonics/underlined accelerators, context menus, help overlay, welcome screen, dashboard | **implemented** menus/help/welcome; dashboard **missing** (plugin) | `internal/tui/menubar/{menu_table_gen,menubar,dynamic}.go`, `keymap/menu.go` (`Map.MenuMnemonic`), `internal/tui/menu_mnemonic_test.go`, `internal/tui/menubar/mnemonic_test.go`, `internal/tui/context_menu.go`, `internal/tui/help.go`, `internal/tui/welcome.go`, `docs/ui.md` §6; Fresh `docs/internal/editor-ux-features.md`, `docs/features/dashboard.md` | Menus match Fresh's static table exactly (103 actions, 31 separators, 2 static submenus), and the dynamic "Copy with Formatting" submenu lists the 10 bundled themes (`menubar/dynamic.go`). Round 2 added the accelerators: underlined keymap-assigned letters and Alt+letter through ordinary keymap resolution, F10 for the bar, `editor.menu_bar_mnemonics` off removes both; dropdown rows carry no mnemonics (as in Fresh). Help's label says "gvim" instead of Fresh's version string. Residual: the dashboard plugin (backlog #14), not the menu system. |
 | Status bar | configurable element lists (Fresh's defaults: left `{trust} {remote} {terminal_restart} {cursor} {diagnostics} {cursor_count} {messages}`; right `{read_only} {line_ending} {encoding} {language} {lsp} {warnings} {update} {palette}`), separator, per-element click actions, squeeze rule, `{filename}`/`{chord}`/`{clock}` | **implemented** (R2; parsed-but-unpainted elements documented) | `internal/tui/frame/frame.go` `StatusRuns`/`DefaultStatusLeft/Right`, `internal/tui/model.go` `statusView`/`statusRow`, `internal/tui/status_elements.go` (filename/chord/clock/tick), tests `statusbar_elements_test.go` + `statusbar_residual_test.go`, `docs/ui.md` §5; Fresh `config.rs` `StatusBarConfig`, `view/ui/status_bar.rs` | R2-3 closed in round 5: `{filename}` (workspace-relative or absolute path, document name when pathless, Fresh's " [+]" / " [RO]" markers), `{chord}` (shown only while a multi-key sequence waits, gvim's label style, muted — §4 item 22) and `{clock}` (24-hour `HH:MM`, static colon as Fresh's code — §4 item 23; a minute tick redraws while configured, a config change takes effect next launch). The filename resolves the root and the document through canonicalFilePath (the /private/var vs /var class) and falls back to the opened spelling outside the root (integration fix, statusbar_residual_test + status_filename_app_test). Still unpainted: plugin tokens `{plugin:token}`; `{warnings}`/`{update}` are deliberately empty (no warning-count domain/updater). Plugin status items keep their anchors. |
-| Config layers and Settings UI | 4 layers (system/user/project/session), per-buffer overrides, config write from toggles, Settings UI (tree, widgets, layer switch, save), `init.ts`, config reload, LSP/plugin/keybinding/env/locale sections | **partial** (R3/R4 page; R6 Contents; R7 Language Servers/Environment; R8 closed R7-3; R9 plugin declared settings; R10 env rows/Detectors + theme preview; R11 interface locale) | `config/settings_schema.go` (69 scalar rows, 14 sections), `config/{settings_structured,contents,patch,env,locale,clipboard}.go`, `internal/app/settingssvc.go`, `internal/app/settings_{lsp,runtime,plugins,languages,keybindings,theme_preview}.go`, `internal/tui/{settings,settings_structure,settings_actions,settings_theme_preview}.go`, `pluginapi/{settings_api,env}.go`, `i18n/`, `docs/settings.md` | Rounds 3–10 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment, Plugins/Keybindings pages, declared-settings read-only rows, Environment/Detectors and theme preview. Round 11 adds the `locale` config key (null/auto/15 codes, user-layer only; project refused) and the Interface locale row with live ApplyLive into i18n and the plugin runtime. Residuals R8-3: plugin settings editing in raw config, no gallery/in-page capture, per-field LSP dialogs. |
+| Config layers and Settings UI | 4 layers, per-buffer overrides, config write from toggles, Settings UI, `init.ts`, config reload, LSP/plugin/keybinding/env/locale sections | **partial** (page surface complete; r11 locale; r12 config additions) | `config/{settings_schema,settings_structured,contents,patch,env,locale,clipboard,terminal}.go`, `internal/app/settingssvc.go`, `internal/app/settings_*.go`, `internal/tui/{settings*,settings_theme_preview}.go`, `i18n/`, `docs/settings.md` | Rounds 3–11 built the page/structured editors/reset/Reload/Contents, non-scalar plumbing, Language Servers/Environment, Plugins/Keybindings, declared-settings rows, Environment/Detectors, theme preview and the Interface locale row (live). Round 12 adds the config `terminal.resume_agents` (Fresh key, default true) and `terminal.agents` (gvim extension, user-layer only, bounded) plus `clipboard.use_osc52` (r11). Residuals R8-3 as documented (docs/settings.md §6 exact). |
 | Keymaps and keybinding editor | 5 presets, user keybindings, unbind/noop, chords, custom keybinding maps, keybinding editor, overlay contexts | **partial** (R2 data; R7 overlay contexts; R11 unbind tombstones) | `keymap/*.json`, `keymap/common_set_test.go`, `keymap/menu.go`, `internal/keybindings/` (`Unbound` adapter), `internal/tui/overlay_keys.go`, `internal/tui/keybind_editor.go`, `docs/keybindings.md` | Round 7 closed R2-4 (overlay contexts with fall-through; own/in-effect default 245/243, macos 60/266, macos-gui 52/317, emacs 98/309, vscode 9/248; loader warns/skips multi-key overlay bindings). Round 11's explicit unbind tombstones (`keymap.Map.Unbound`, TUI `UnbindKeymap` port) let an overlay's built-in fallback be suppressed for an unbound chord. Residuals R7-4: multi-key bindings are not consulted in overlay contexts (one-press router; pending-chord state is root-only), and the completion/compositeBuffer/text-field contexts stay outside the router (Fresh implements them per surface). |
-| Themes and appearance | 10 built-in themes, theme files by name/path/URL/`builtin://`, `extends` inheritance, attributes on every color, theme editor, colour picker/mouse editing, inspect-at-cursor with per-cell provenance, plugin theme overrides, background images | 10 built-ins + user themes; plugin theme-file APIs; accent audit/picker/preview (r10); painted-key provenance (r11) | `theme/` (keys_table/registry/resolve/themefile/overrides), `internal/tui/{theme_editor,theme_picker,theme_inspect}.go`, `internal/tui/style/{style,roles}.go`, `internal/tui/grid/grid.go` (FGKey/BGKey + capture), `internal/app/{settings_theme_preview,theme_registry}.go`, `docs/themes.md` | Round 10: accent audit, Settings preview, colour picker/mouse editor, URL/packaged decision. Round 11: per-cell painted-key provenance for the first-surface subset (editor text/syntax/gutter/selection/current-line, status bar, menu, popup/palette/Settings rows, explorer/sidebar/diagnostics chrome) through an opt-in capture repaint; the inspector prints exact `Painted by (fg/bg)` keys and falls back to "matched by colour" for untagged painters. Residuals R10-4: untagged painters (compose/page-view/plugin/custom overlays) report the fallback, drag-and-drop of theme values, background images, user-theme inheritance (Fresh's own limit). |
+| Themes and appearance | 10 built-in themes, theme files by name/path/URL, extends, colour picker/mouse editing, inspect with per-cell provenance, plugin theme overrides, background images | 10 built-ins + user themes; plugin theme-file APIs; accent/picker/preview r10; provenance r11; r12 decisions | `theme/`, `internal/tui/{theme_editor,theme_picker,theme_inspect}.go`, `internal/tui/style/{style,roles}.go`, `internal/tui/grid` capture, `internal/app/settings_theme_preview.go`, `docs/themes.md` | Rounds 10–11 landed the accent audit, Settings four-chip preview, colour picker/mouse editor and first-surface painted-key provenance. Round 12 recorded the remaining decisions: background images are outside the colour theme model; drag-and-drop of theme values is not added; user-theme inheritance is one level of extends to a built-in theme (Fresh's own limit); untagged compose/page-view/plugin painters keep the documented "matched by colour" fallback. Remaining R11-4 items are decision-level, not missing keys. |
 
 ### 3.3 Services
 
@@ -632,16 +705,16 @@ for parity status.
 | LSP | diagnostics, hover, definition/implementation/references, completion, rename, code actions + server-initiated file ops, signature help, format, folding ranges, inlay hints (inline tier 2), semantic tokens, diagnostics panel, quickfix list, inline diagnostics + staleness, multi-server with only/except, universal servers, per-server status popup/mute, pull diagnostics (cancelable), workspace diagnostics for unopened files, progress, process limits (Linux), env/init options, root markers, C header routing | **partial** (#7 A–E complete; rounds 7–11 landed workspace edits/diagnostics/progress, inline tier 2, cancellation, process limits and the small residuals) | `lsp/{client,handler,requests,capabilities,progress,raw,limits}.go`, `lsp/manager/{manager,router}.go`, `internal/lsphost/{lsp,lsp_data}.go`, `internal/tui/{lsp,lsp_data,workspace_edit,diagpanel}.go` + `internal/tui/editorpane/inline_hints.go`, `editor/{lsp,outline}_folds.go`, `commands/lsp_commands.go`, `docs/lsp.md` | Rounds 4–10 landed the router/edits/status/staleness, hints/tokens/folds/pull diagnostics, panel/quickfix/progress, workspace edits/diagnostics, inline tier 2, cancel and process limits. Round 11 closed the small LSP residuals: preview soft wrap/toggle (`Alt+P`, 8-row cap + ellipsis, span/match remap, session default; recent-files provider recorded as needing a new history snapshot), the composed plugin-overlay ordering regression test, wrapped-cell/dual wording decisions, and explicit unbind tombstones for the overlay fallback. R7-5 residual is only the deliberate universal-server decision (no built-in quicklsp; user-configured universal_lsp supported) + the per-OS process_limits caveat; the stricter-than-Fresh stop-on-refused workspace-edit model stays (§4 item 18). |
 | Plugins runtime and host API | TypeScript on QuickJS, sandbox-lite with per-plugin contexts, ~372-method API, overlays/virtual text/conceals/soft breaks/folds/line targets, explorer decorations/slots, project environment, prompts/toolbars, modes/contexts, windows/splits (fixed heights), virtual+composite buffers, buffer groups, terminals, authority/remote, LSP requests, HTTP, widgets/floating/dock panels/sidebar sections, i18n, package manager, menus, events | **partial, runtime different; API level 2 (tiers 1a+1b+1c + round-10 edge APIs)** | `plugin/`, `pluginapi/` (incl. `widgetapi.go`, `buffergroup.go`, `compare.go`, `linetargets.go`, `settings_api.go`, `explorer.go`, `env.go`), `internal/pluginhost/`, `internal/tui/plugin*.go` + `pluginpanel/`, `plugin_groups.go`, `plugin_themes.go`, `plugin_folds.go`, `plugin_seams.go`, `plugin_linetargets.go`, `plugin_{explorer,env}.go`, `decorations/`, `env/`, `docs/plugins/` (6 API pages + `events.md`, 1478-line `gvim.d.lua`) | Lua 5.1 is the permitted runtime difference; API level 2. Rounds 5–9 added tiers 1a/1b/1c; round 10 added `gvim.explorer` decorations/slots (namespaced, caps, priority resolution, owner cleanup, host painter) and `gvim.env` + the host detection/activation gate (`env.detectors`, trust-gated overlay, spawn injection) with `env_changed`/`trust_changed` events. Remaining (R9-5/R10-1): composite API native substitution, dock/fullscreen placement, independent per-panel views, windowEmbed live panes, markdown-in-text, package manager/HTTP/project-local plugins, render_line; port reductions are R10-1. |
 | Bundled plugin feature set | 50 plugins: git_log, live_diff, git_grep, git_explorer, git_blame, git_gutter, git_statusbar, git_find_file, search_replace, diff_nav, diagnostics_panel, code-tour, dashboard, welcome*, theme_editor, markdown_toc, markdown_compose, markdown_source, path_complete, lsp_help, lsp_navigation, find_references, compare_files, flash, vi_mode, merge_conflict, tab_actions, goto_with_selection, env-manager, devcontainer, k8s-workspace, agent_*/orchestrator/live_sessions, pkg, audit_mode, language helpers | **partial** | `plugin/bundled/plugins/` (22; 9 default-enabled), `plugin/bundled/lib/{finder.lua,git.lua}`, `docs/plugins/bundled.md`; Fresh `plugins/*.ts` | Ported: diagnostics_panel (r6), git_log/live_diff (r7; full paths r8), compare_files (r8, opt-in), path_complete/lsp_help (r8), lsp_navigation/find_references/dashboard/code_tour + Finder lib (r9), git_grep/git_explorer/env_manager (r10, all opt-in). Missing: devcontainer, k8s-workspace, orchestrator/agent sessions/live_sessions, pkg, audit_mode, language helpers; native substitutions recorded: markdown_compose/source, theme_editor, search_replace, composite buffers, dashboard start tab, live_grep/diff_nav/welcome candidates. Remaining ports are daemon-era (gated on #18–#21) or packaging-dependent (pkg on #16). |
-| Terminal | PTY terminal panes and utility dock, live/scrollback modes per split, keyboard capture, clickable paths (OSC 7), restart exited process + agent resume, shell override, send selection, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover links with file:line:col, pass_ctrl_v_without_text, close_on_exit, terminal tabs, ConPTY on Windows | **partial** (slices A+B; R3-2 closed; round-10 slice A) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved}.go`, `internal/tui/dock/{selection,transcript,scrollback,input,panel,render,ports,hover}.go` + `dock_glue.go`, `internal/restore/terminal.go`, `internal/uiadapter/terminal.go`, `docs/terminal.md` | Round 10 slice A: drag auto-scroll past the visible rows (fixed 80 ms seq-guarded tick, direction from the drag, mouse forwarding while dragging, stops at ends/back-inside/release/clear/focus-loss), word/line-wise drag extension after double/triple click, Ctrl+hover underline + `file:line:col` link parsing/resolution/open (OSC 7 dir then workspace root, ambiguous-colon fallback), the `pass_ctrl_v_without_text` matrix with LastYank. Round 11 completed R10-3: ConPTY on Windows (pure-Go x/sys/windows, compile-verified with GOOS=windows build/vet/test-compile; unverified until the real-Windows acceptance pass in docs/terminal.md), the child OSC 52 clipboard write (bounded streaming re-parse, clipboard.use_osc52 off by default + trusted workspace, selectors c/empty only), and stored-transcript reflow (styled cells/wide glyphs/hard rows preserved, text re-wrap not semantic; live screen still clipped). Residuals: kitty keyboard (x/vt legacy-only, explicit TODO), OSC 52 read/paste, live-screen reflow, terminal tabs, agent re-exec, report-split close_on_exit. |
+| Terminal | PTY terminal panes and utility dock, terminal tabs (≤16) with strip/rename/per-tab close_on_exit/persistence, live/scrollback modes per tab, keyboard capture, OSC 7 paths, launch records + agent resume + Run Agent picker, restart exited process, shell override, send selection, mouse forwarding/drag-select, drag auto-scroll, word/line drag, Ctrl+hover file:line:col links, pass_ctrl_v_without_text, ConPTY on Windows, remote SSH terminal | **partial** (slices A+B; R3-2 closed; r10 slice A; r11 completion; r12 tabs/agents/remote terminal) | `config/terminal.go`, `internal/terminal/{scrollback,mouse,saved,launch,session_backend}.go`, `internal/tui/dock/{selection,transcript,scrollback,input,panel,render,ports,hover,tabs}.go`, `internal/restore/terminal.go`, `internal/uiadapter/terminal.go`, `authority/`, `docs/terminal.md` | Round 12 landed the tabs container (16 max, active/exited/click-select strip, Ctrl+PgUp/PgDn, five palette rows, per-tab close_on_exit, additive SavedState tabs/active_tab with top-level mirror + bounds + old-file migration; restored tabs read-only/dead with no auto-restart), launch records + agent metadata/resume (no auto-resume on restore, local executables), and the remote SSH terminal through the authority slot. Residuals R11-3/R12-2: kitty keyboard, OSC52 read, live-screen reflow, live ephemeral PTY restore, workspace-scoped tabs (#19), tab drag/reorder/per-tab splits, report-split close_on_exit, agent re-exec edges. |
 | Git surfaces | review diff (stage/unstage/discard/comments/export), range/stash reviews, git log with live diff, git blame panel with history, live diff baselines, diff chunk nav, git grep, git explorer, git find file, statusbar branch, gutter marks | **partial** | `gitstate/`, `plugin/bundled/plugins/git_gutter`, `git_statusbar`, `git_find_file`, `git_blame`, `merge_conflict`, `internal/tui/git.go`; Fresh `docs/features/git.md` | Missing: Review Diff (/range/stash), Git Log, Live Diff, Git Grep, Git Explorer, blame panel/history stepping (gvim has a reduced inline blame), merge view (reduced to in-buffer resolution), diff hunk sources beyond the HEAD gutter, review comments/export. Implemented: gutter hunk marks + next/prev change, branch statusbar, git find file, merge-conflict resolution, compare-as-difftool. |
-| Session, restore, daemon | session restore/save, hot exit of unsaved buffers, crash recovery, ephemeral-file patterns, per-file pins, `--restore`/`--no-restore`/`--simple`, daemon mode with attach/detach and `--cmd daemon open-file --wait`, direct-vs-daemon launch modes | **partial** (R2 landed hot exit/restore/CLI; round 11 daemon protocol/socket core only) | `internal/app/{session_plan,session_open,hotexit}.go`, `internal/app/run.go`, `internal/restore/session.go`, `internal/cli/root.go`, `internal/daemon/{protocol,socket}.go`, `session/`, `docs/i18n? no`; Fresh `docs/features/session-persistence.md` | Round 2: hot_exit, restore_previous_session, skip_session_restore_when_files_passed, --restore/--no-restore/--simple. Round 11 added the daemon protocol/socket core (frames, server frames, socket lifecycle/naming/perms/Attach) but not the app/CLI/TUI integration, Detach, single-writer refusal, auto_attach, session/PTY hosting or #19 outline (R11-1); task-68 continues in round 12. Still open: daemon attach/detach end-to-end, no per-buffer hot-exit store (R2-5), --no-restore still saves the session (deliberate, §4 item 10). |
-| Workspaces, windows, orchestrator, agents | orchestration dock, multiple workspaces per daemon (one per git worktree), workspace switcher, New Workspace dialog, Run Agent (claude/codex/opencode/aider), agent session discovery/resume, live sessions, extract tab to workspace | **missing** (daemon protocol core is the first step) | `internal/daemon/{protocol,socket}.go` (protocol/socket only), `internal/tui/remote.go` (remote unsupported), dashboard/code_tour ports (r9); Fresh `docs/features/session-persistence.md`, `internal/orchestrator-sessions.md` | Whole area still absent: gvim is one editor per process and has no workspace model, switcher, New Workspace, Run Agent or agent discovery. Round 11 laid the daemon protocol/socket foundation; #19 workspaces / #20 agents / #21 remote are the round-12+ plan (§5.5). |
+| Session, restore, daemon | session restore/save, hot exit, crash recovery, ephemeral-file patterns, per-file pins, --restore/--no-restore/--simple, daemon mode with attach/detach and open-file forwarding, direct-vs-daemon launch modes | **partial** (R2 hot exit/restore; round-12 daemon #18a MVP complete) | `internal/app/{session_plan,session_open,hotexit,daemon_runtime}.go`, `internal/app/run.go`, `internal/daemon/{server,attach,protocol,socket}.go`, `internal/cli/{root,args}.go`, `internal/tui/model.go` (RunWithIO/Detach/OpenFileMessage), `session/`, `internal/restore/session.go`, `docs/architecture.md` §8 | Round 12's daemon MVP: `gvim --daemon [NAME]` hosts the editor in the foreground on a Unix socket (0600 in 0700, per-root default name, stale unlink, live refusal), one attached client at a time (hello/resize/input/open-file/detach/ping; output only to the attached client; detached input blocks without stopping the editor; Close sends exit), `gvim -a/--attach` proxy with raw mode/SIGWINCH/notices, palette Detach under --daemon, session restore on start/save on exit (detach saves nothing), single-writer refusal for bare/session launches while the per-root daemon is live (file/--simple/--diff/stdin stay direct). Recorded reductions R12-1: foreground (no fork), auto_attach start-if-absent not implemented (documented refusal instead), one client, single workspace until #19, Windows named pipes later. Still open: per-buffer hot-exit store (R2-5, design doc), #19a workspaces. |
+| Workspaces, windows, orchestrator, agents | orchestration dock, multiple workspaces per daemon, workspace switcher, New Workspace dialog, Run Agent (claude/codex/opencode/aider), agent session discovery/resume, live sessions, extract tab to workspace | **partial** (round 12: launch records + Run Agent picker; daemon one workspace; no discovery) | `internal/terminal/launch.go`, `internal/tui/{dock/tabs,agent_picker}.go`, `internal/app/terminal_agents.go`, `config/terminal.go` (agents/resume_agents), `internal/restore/terminal.go`, `internal/daemon/` (one workspace); Fresh `docs/features/session-persistence.md`, `internal/orchestrator-sessions.md` | Round 12 added terminal launch records (argv/agent/resume argv/ephemeral, bounds), the Run Agent... palette row + picker over `terminal.agents`, persisted launch fields with user-initiated restart precedence (resume→launch→shell) and no auto-resume on restore. Not yet: multiple workspaces (#19a), a workspace/dock switcher, tmux session discovery/rejoin (#20b), agent-session plugins/orchestrator, live sessions. |
 | Remote authority | SSH editing (scp/URL forms), devcontainers (CLI attach/rebuild/ports/logs), Kubernetes workspaces, remote-aware LSP/terminal/processes, reconnect, remote indicator popup | **missing** | No `ssh`/`authority` implementation in the tree; `internal/tui/remote.go:10` popup says "Remote workspaces are not supported"; `docs/plugins/porting.md:46` "authority ... not provided"; Fresh `docs/features/ssh.md`, `docs/features/devcontainer.md` | Entire area absent. Requires an authority abstraction under fs/proc/terminal/LSP first. |
 | Workspace trust | per-folder Restricted/Trusted/Blocked, executable-marker detection, one-time prompt, status pill, dialog command, persisted per folder, gates LSP/build/env activation, env detectors | **partial** (R1 landed) | `trust/` (levels + Undecided, store at `config.Dir()/trust.json`, atomic writes, marker scan, Fresh startup policy), `internal/app/trust.go` and `internal/app/run.go` (`Options.Untrusted`, `lsp_enabled` forced off), `internal/tui/trust*.go` (dialog, port, notices, pill), `config/trust_test.go`, `docs/trust.md`; Fresh `docs/features/workspace-trust.md` | Implemented in round 1: the three levels plus Undecided, per-folder persistence, executable-marker scan and prompt (silent trust for plain folders, Fresh's policy), the open-time prompt, the `Workspace Trust…` palette command and dialog, the trust status pill with click routing, the project config layer skipped unless Trusted, and LSP auto-start forced off unless Trusted (manual Start/Restart still works). Still open: no process gate — terminal/shell/formatter/LSP/plugin spawns are not consulted against the level, and Blocked enforces the same as Restricted (`docs/trust.md` §3); env detection/activation and devcontainer/tasks are absent; the config gate is a startup decision (a mid-session trust change applies project tooling at the next start, documented divergence). Tracked as backlog #17. |
 | Markdown | syntax highlighting, markdown_source smart list editing, page view/compose, tables (wrapped cells), code-fence frames (continuation rails, container framing), dual view, heading conceal/scrollbar marks, page-view persistence, Contents section | **partial** (R1 Contents; R4 smart editing; R6 core; R7 fences/tables; R8 dual/borders; R9–11 residual slices) | `syntax/{markdown,markdown_inline,markdown_markers,markdown_fences,markdown_tables}.go`, `editor/markdown.go`, `internal/tui/editorpane/{compose,compose_layout,compose_fence,compose_table,compose_setext,pageview}.go` + `internal/tui/{pageview,dual}.go`, `internal/tui/sidebar/contents.go`, `session/pageview.go`, `docs/markdown.md`; Fresh `plugins/markdown_{toc,source,compose}.ts` | Round 9–10 landed wrapped cells, escaped pipes, container fallback, fence continuation rails, heading marks, page-view persistence, quote-container fences, setext conceal, task/image conceal, inline-HTML literal decision, mapped-decor no-paint, horizontal clamp, dual line-anchor/one-dual policy; round 11 verified composed plugin-overlay pipeline ordering and recorded the wrapped-cell selection decision (hook rows have no source line/row-source map) and tightened the dual/per-split wording. Remaining R10-2: free per-split view mode, dual split persistence, native Markdown menu row, exact byte dual anchors (approximation recorded), sidebar per-section widths/drag order. |
 | Diagnostics surfaces | gutter marks, underline, inline end-of-line text, diagnostics panel, quickfix list, error navigation, hover fusion, pull/workspace diagnostics, progress | **partial** (rounds 4–10) | `internal/tui/{diag,diagpanel,lsp}.go`, `internal/tui/editorpane/{decor,inline_diag,inline_hints}.go`, `commands/lsp_commands.go`, `docs/lsp.md`; Fresh `docs/features/lsp.md` | Gutter dots, underline, inline end-of-line text with staleness, status counts, F8 jumps and hover diagnostics exist. Round 6 added the native Diagnostics panel (file→severity grouping, counts, jump/scroll/focus, progress/empty) and the Diagnostics List quickfix; round 7 workspace diagnostics for unopened files (`(not open)` rows) and `$/progress`; round 9 inline-hint tier 2; round 10 cancellation (pullSet/`$/cancelRequest`) and Linux process limits. Remaining: no built-in universal server (deliberate), per-OS process limits caveat, capability-gated workspace diagnostics (publish-only servers report their own set), plugin `DiagnosticInfo` carries no code (native ones do). |
-| Scripting and CLI automation | `--cmd script`, `--cmd daemon open-file --wait`, stdin programs, `init.ts` startup script, agent channels, watch mode, CLI help for the API | **partial** (round 11 landed stdin-as-a-buffer) | `internal/cli/` (flags: config/keymap/theme/log-file/diff/no-plugins/plugin/stdin/stdin-name), `internal/app/stdin.go`, `internal/tui.RunWithInput`/`tty.go`, `plugin_init.go`; Fresh `docs/features/scripting.md` | gvim has `init.lua` and the Lua API plus gvim-only `gvim config show/paths` and `gvim grammar`. Round 11: stdin-as-a-buffer (`gvim -`/`--stdin` and piped stdin with no files, bounded 32 MiB, `[stdin]` untitled tab, `--stdin-name`, file-launch session semantics, keys from the controlling terminal). Missing: Fresh's external `--cmd` script channel, `open-file --wait`, daemon modes/CLI (round-11 protocol only), watch/agent capability. |
-| Internationalization | 15 locales, locale detection/config, plugin i18n (`t()`, locale JSON, translated menus/commands/prompts) | **partial** (round 11 foundation #22a) | `i18n/` (package + `catalogues/en.json`, 15 locale metadata, `Normalize`/`Resolve`, `T`/`TN`/`Register`, CLDR plurals), `config` `locale`, `internal/app` startup resolution + Settings Interface row (live ApplyLive), `internal/pluginhost` locale + Lua `gvim.i18n.locale`, `docs/i18n.md`, `docs/settings.md`; Fresh `docs/i18n.md` + 15 locale JSONs | Round 11 landed the foundation: locale resolution (config then LC_ALL/LC_MESSAGES/LANG then en), lookup with shorter-tag/en/key fallback, %{name} interpolation, CLDR plural forms (ru/uk/cs/fr etc.), an embedded English catalogue, the Settings locale row switching live into the UI + plugin runtime, and a first extraction slice (editor clipboard statuses, root copied-path/formatted/inlay notices, dock notices). Only English is embedded; generated command/palette/menu titles stay English by design. Remaining (R11-2/#22b): translated catalogues (reuse Fresh JSON where keys match), the extraction inventory completion (commands/menus), translation workflow/CI and the 14 locales. |
+| Scripting and CLI automation | `--cmd script`, `--cmd daemon open-file --wait`, stdin programs, `init.ts` startup script, agent channels, watch mode, CLI help for the API | **partial** (r11 stdin; r12 daemon flags + remote targets) | `internal/cli/{root,args}.go` (flags: config/keymap/theme/log-file/diff/no-plugins/plugin/stdin/stdin-name/daemon/attach), `internal/app/{stdin,daemon_runtime}.go`, `authority/spec.go` (scp/ssh:// parsing), `internal/tui.RunWithInput/RunWithIO`, `plugin_init.go`; Fresh `docs/features/scripting.md` | gvim has `init.lua`/the Lua API, stdin-as-a-buffer (r11), `gvim config show/paths` (show trust-gated r12), `gvim grammar`, daemon/attach flags (r12, foreground only, single writer/one workspace) and remote `user@host:path` / `ssh://` targets (remote launch opens the SSH terminal only; no remote files/LSP yet). Missing: Fresh's external `--cmd` script channel, `open-file --wait`, watch/agent capability, forked daemon/auto_attach. |
+| Internationalization | 15 locales, locale detection/config, plugin i18n (`t()`, locale JSON, translated menus/commands/prompts) | **partial** (r11 foundation #22a; r12 catalogues/import/validation #22b) | `i18n/` (package, `catalogue.go`, `locales/*.json` embedded, `fresh_map.json`), `tools/{i18n_import.py,i18n_check.sh}`, `config` locale, Settings Interface row, `internal/pluginhost` locale + Lua `gvim.i18n.locale`, `docs/i18n.md` | Round 12: 15 embedded catalogues (English source of truth; the 14 translated files carry the 13 mapped-from-Fresh keys; 12 gvim-only keys stay English by design; total 12,646 bytes with a 64 KiB cap test), the deterministic Fresh import (`fresh_map.json` + `i18n_import.py --check`) and CI validation (`i18n_check.sh`: embedded files validate, English complete, mapped keys translated, committed files match Fresh when present); `ValidateCatalogue`/`CoverageFor` check key shape, plural categories, %{name} placeholders, duplicates, unknown keys and coverage; lazy loading, embedded German rendering + fallback tests; plugin `t()` sees only its own .i18n.json. English boundary: generated CommandDef/menu tables, hand-written command rows (terminal-tab/Run Agent), settings labels and other in-round strings until a generator/extraction learns keys. Remaining R12-5: that extraction + translated coverage beyond the mapped subset. |
 | Update, packaging, telemetry | update check, in-editor self-update prompt, `--no-upgrade-check`, telemetry toggle, packaging matrix (deb/rpm/aur/nix/npm/brew/appimage/flatpak/winget), daemon packaging | **missing / deliberately not planned?** | `internal/tui/notice_na.go:12-13` (update/update log not applicable); `internal/cli/` has no update flags; Fresh `README.md` | Decide with the Lead: these are distribution features rather than editor features for a pure-Go terminal binary. If in scope, the in-editor update indicator belongs to the status bar (`{update}`). |
 | Platform input and OS integration | CSI-u/modifier disambiguation, AltGr/CapsLock quirks, key release, GPM mouse on Linux console, suspend, stdin streaming, ConPTY, OSC 52 clipboard, Window title | **partial** (stdin-as-buffer and ConPTY/OSC52/reflow round 11) | `internal/terminal/` (x/vt, `pty{,_windows}.go`, `osc52.go`, `reflow.go`), Bubble Tea v2 input, `internal/tui/clip.go`, `internal/tui/root_terminal.go`, `internal/app/stdin.go`, `internal/tui.RunWithInput`, `docs/terminal.md` | Round 11: stdin-as-a-buffer (bounded snapshot, not streaming; keys from the controlling terminal); Windows ConPTY pure-Go (GOOS=windows build/vet/test-compile verified — parity unverified until the real-Windows checklist pass); child OSC 52 clipboard write (parser bounded/chunk-safe; `clipboard.use_osc52` default off AND trusted workspace only; selectors c/empty; restored transcripts never hooked; write only, no read/paste reply); stored-transcript text re-wrap (styled cells/wide glyphs hard rows; live screen still clipped). Residuals: kitty keyboard (x/vt TODO/no seam), live-screen reflow, OSC 52 read, GPM/AltGr/CapsLock/key-release, stdin streaming, plugin focus/mouse events beyond focus_gained/active_window. |
 
@@ -775,17 +848,17 @@ for parity status.
     toggle live/read-only scrollback (Shift+PageUp also enters it), and Ctrl+] is the only chord
     that returns the keyboard to the editor (gvim addition). A user keymap cannot rebind it.
     `docs/terminal.md`, `docs/keybindings.md`.
-26. **Terminal persistence is a read-only transcript, not a live session; stored rows re-wrap.**
-    `terminal.json` keeps a bounded transcript (500 rows / 256 KiB, control-stripped); restore
-    brings it back read-only and dead, re-runs nothing. Round 11 adds a transcript-only
-    re-wrap: rows are stored as display rows, so on a content-width change gvim re-wraps the
-    stored rows (styles/wide glyph pairs preserved, hard rows stay hard, trailing blanks
-    trimmed) and a restored transcript whose width differed says `Scrollback (restored,
-    rewrapped)`. This is a text re-wrap, not a semantic reflow: a soft-wrapped continuation row
-    is not rejoined with the row above when the pane widens, and the live x/vt screen is still
-    clipped/padded (never reflowed). Fresh keeps live terminals and can resume tracked agents;
-    gvim's `resume_agents` stays accepted-ignored and restart starts a shell in the last OSC 7
-    directory. `docs/terminal.md`.
+26. **Terminal persistence is per-tab read-only/dead state; stored rows re-wrap.** `terminal.json`
+    keeps a bounded transcript (500 rows / 1 MiB, control-stripped) and — since round 12 — an
+    additive `tabs[]`/`active_tab` with the top-level fields mirroring the active tab (old readers
+    restore that one tab; old files restore as one terminal), at most 16 tabs, each with its own
+    transcript, name, open flag, cwd, width and launch/resume/agent/ephemeral record. Restore
+    brings every tab back **read-only and dead** with its saved name and active index; no PTY is
+    restarted automatically and the launch record never starts anything (Fresh's no-auto-resume
+    rule). A content-width change re-wraps the stored rows (styles/wide pairs preserved, hard
+    rows stay, text re-wrap not semantic reflow; live screen still clipped). Fresh restarts
+    terminal tabs live and appends the saved scrollback; gvim keeps the transcript read-only
+    until the user restarts (R12-2). `docs/terminal.md`.
 27. **Inlay hints use tier-2 inline placement, with a documented fallback set.** A server's hints
     are display-only faint cells spliced before the protocol position (UTF-16→rune column,
     parts/padding, wrap-aware, wide-safe truncation) through the additive `Pane.InlineHints`
@@ -1103,19 +1176,19 @@ for parity status.
     would be a new server project. gvim fully supports user-configured `universal_lsp` servers
     (config merge, manager defaults, status listing, tests). The residual stays open
     deliberately as documentation, not a missing-integration gap. `docs/lsp.md`; R7-5.
-67. **Terminal slice A is a fixed-step adaptation, and R10-3's remaining pieces landed round 11.**
-    Drag auto-scroll past the visible rows runs one fixed ~80 ms sequence-guarded tick (no
-    acceleration; one row at either end), forwards the mouse while dragging, keeps extending to
-    the edge row, and stops at the combined top/bottom/back-inside/release/selection-clear/focus
-    loss. Word/line drag extension after double/triple click; Ctrl+hover underlines a token with
-    no file access and resolves on click (absolute/~, then OSC 7 dir, then workspace root;
-    trailing :line[:col]); `pass_ctrl_v_without_text` matrix with LastYank. Round 11 completed
-    the rest of R10-3: Windows ConPTY (pure-Go x/sys/windows, compile-verified; real-Windows
-    acceptance pending — parity unverified), child OSC 52 write (opt-in `clipboard.use_osc52` off
-    by default, Trusted workspaces only, selectors c/empty, write-only, restored transcripts
-    never hooked, bytes still to x/vt) and transcript-only reflow (text re-wrap; live screen
-    clipped). Residuals: kitty keyboard, OSC 52 read/paste, live-screen reflow, tabs, agent
-    re-exec, report-split close_on_exit. `docs/terminal.md`; R11-3.
+67. **Terminal slice A is a fixed-step adaptation; round 12 added tabs, agents and the remote
+    terminal.** Drag auto-scroll is one fixed ~80 ms sequence-guarded tick (no acceleration),
+    forwarding the mouse while dragging, extending to the edge row, stopping at ends/back-
+    inside/release/selection-clear/focus-loss; word/line drag extension after double/triple
+    click; Ctrl+hover underlines/resolves on click (absolute/~, OSC 7 dir, workspace root;
+    :line[:col]); `pass_ctrl_v_without_text` matrix with LastYank. Round 11 completed R10-3
+    (ConPTY compile-verified/unverified, OSC 52 write opt-in/Trusted, transcript reflow).
+    Round 12 adds up to 16 terminal tabs (strip/active/exited/click-select, Ctrl+PgUp/PgDn,
+    palette rows, per-tab close_on_exit, per-tab persistence as above), launch records with
+    agent metadata/resume and the Run Agent picker, and the SSH terminal through the authority
+    slot. Residuals: kitty keyboard, OSC 52 read, live-screen reflow, live PTY restore,
+    workspace-scoped tabs (#19), drag/reorder/per-tab splits, agent re-exec edges, report-split
+    close_on_exit. `docs/terminal.md`; R11-3/R12-2.
 68. **Theme accents, URL refs and provenance are recorded decisions.** The six bundled themes no
     longer hand-pick accents: `ui.accent_bg/fg` fall back to `ui.popup_selection_bg/fg` and the
     audit pins that equality; a user theme may set accents explicitly. URL/packaged theme refs
@@ -1147,15 +1220,18 @@ for parity status.
     git_explorer, env_manager. The gate and per-plugin attribution are documented in
     `docs/plugins/bundled.md`.
 
-71. **Daemon #18a is a protocol/socket foundation only (partial by design).** Round 11 landed
-    `internal/daemon`: a frame stream (4-byte length + type + payload, ≤1 MiB; client
-    hello/input/resize/detach/open_file/ping; server output/notice/detached/pong/exit) and the
-    Unix socket (cache dir 0700, per-root default name slug+8-hex, liveness probe, stale unlink,
-    live refusal, 0600, Attach) with unit tests. Not landed: app.Options Reader/Writer +
-    `tui.RunWithIO` socketIO hosting/repaint, CLI `--daemon`/`-a`/`--attach`, Detach hook/palette
-    row/ack, single-writer refusal, `auto_attach`, session/PTY integration, docs/architecture and
-    the #19 design outline. Recorded as R11-1; task-68 continues in round 12 with the Phase-1
-    #18a/#19a plan.
+71. **Daemon #18a landed (MVP) with documented reductions.** Round 12 completed the daemon
+    end-to-end: `gvim --daemon [NAME]` hosts the ordinary runtime in the foreground on a Unix
+    socket (0600 in 0700, per-root default name, stale unlink, live refusal) and serves one
+    attached client at a time (hello/resize/input/open-file/detach/ping; output only to the
+    attached client; detached input blocks without stopping the editor; Close sends exit;
+    `OnProgram` repaint/resize), while `gvim -a/--attach` is a raw-mode proxy with SIGWINCH and
+    notices. The hosted editor restores the session on start and saves it on exit (detach saves
+    nothing); the palette gains Detach under --daemon; a live per-root daemon makes a bare/
+    session launch refuse with an attach hint (file/--simple/--diff/stdin launches stay direct);
+    unencrypted open-file frames are forwarded. Recorded MVP reductions: no fork (foreground
+    daemon), no `auto_attach` start-if-absent (refusal policy instead), one attached client, a
+    single workspace until #19, Windows named pipes later. `docs/architecture.md` §8; R12-1.
 72. **i18n is a foundation, not a translation.** Round 11 landed the package/resolution/
     catalogues/plurals/Settings row/live locale switching and a first extraction slice; only
     English is embedded, so the UI reads English today. Generated command/palette/menu titles
@@ -1217,6 +1293,69 @@ for parity status.
     (final, Lead-signed).** gvim ships as one pure-Go terminal binary; daemon mode itself (#18)
     is in scope, daemon packaging is not (§5.4 #26, §8).
 
+82. **The daemon MVP is foreground/single-client/single-workspace by design.** The first slice
+    keeps the server/proxy simple: `--daemon` runs in the foreground (no fork/daemonize), there
+    is no `auto_attach` config and no start-if-absent — instead a live per-root daemon makes a
+    bare or session launch refuse with an attach hint, while file, `--simple`, `--diff` and
+    stdin launches intentionally stay direct (they do not share the session); one client is
+    attached at a time (a second attach is refused, never silently taken over); the daemon hosts
+    one workspace (the launch directory) until #19; Windows named pipes are later; the session
+    is restored on daemon start and saved only on daemon exit. These are recorded reductions,
+    not missing wiring. `docs/architecture.md` §8; R12-1.
+83. **Terminal tabs are bounded and restore dead.** The dock runs at most 16 single-session
+    tabs; the strip shows active/exited/click-select, Ctrl+PgUp/PgDn quick-switch (not keymap
+    data), five hand-written palette rows (New/Close/Next/Previous/Rename), and
+    `close_on_exit` is per tab. `terminal.json` gains an additive `tabs[]`/`active_tab` with the
+    top-level fields mirroring the active tab, per-tab bounds and old-file migration; restored
+    tabs are read-only and dead (no PTY restart, no auto-resume) and Restart per tab uses the
+    saved launch record. No drag/reorder and no per-tab splits; workspace-scoped tab sets are
+    deferred to #19 (a workspace switch would keep them today). `docs/terminal.md`; R12-2.
+84. **Agent sessions are terminal launch records plus a config list, not a plugin registry.**
+    A `terminal.Launch` carries the launch argv, the configured agent name, the resume argv and
+    the ephemeral flag, bounded (64 argv entries × 1024 bytes, agent name 64) and persisted with
+    the transcript; a restore never auto-runs it. Restart precedence is user-initiated: the
+    recorded resume argv when `terminal.resume_agents` (Fresh key, default true) is on, else the
+    launch argv, else the configured shell. Agents come from gvim's `terminal.agents` config
+    extension (user-layer only, bounded; Fresh's agent data is plugin-owned), the Run Agent...
+    palette row/picker is hand-written English, and launches are local executables (no remote
+    helper or workspace discovery yet). `docs/terminal.md`; R12-3.
+85. **Remote authority is a first slice: SSH terminal and one-shot exec only.** The `authority`
+    slot routes four surfaces (FileSystem/OneShot/LongRunning/Terminal) with local forwarding
+    byte-identical to the plugin OS port, a trust-gate + env choke point, and State/Label/
+    Connected/Reconnect/Close; the SSH backend (cached pure-Go x/crypto/ssh) supports agent/
+    identity/passphrase/password, known_hosts, POSIX-quoted one-shot exec, long-running stdio
+    and a PTY terminal with resize/reconnect. Remote launches parse scp/ssh:// targets (ssh://
+    exclusive; malformed is a startup error; a remote path is never stat'ed; no local fallback)
+    and are mutually exclusive with local files, Root, --diff, stdin, --restore and --daemon;
+    they open no local files/session and open the SSH terminal at `Workspace()` with a notice;
+    the status row shows `SSH:user@host` or `· disconnected` (hand-written English) and
+    activation reconnects, prompting for a password when needed. Not routed yet (R12-4): the
+    editor's remote file I/O (SFTP vs remote-helper plan in docs/authority.md §7), LSP through
+    the long-running surface, plugin gvim.fs/gvim.proc, a per-remote trust store, terminal
+    respawn after a dropped carrier, devcontainer/k8s constructors. `docs/authority.md`.
+86. **i18n ships English-keyed catalogues with an explicit English boundary.** The embedded
+    `i18n/locales/*.json` (15 files, 12,646 bytes, 64 KiB cap test) have English as the source
+    of truth; the 14 translated files carry only the 13 keys imported from Fresh through
+    `fresh_map.json`/`i18n_import.py --check`, while 12 gvim-only keys deliberately stay English
+    (a missing translation falls back en→key). `i18n_check.sh` and `ValidateCatalogue/
+    CoverageFor` enforce key shape, plural categories, %{name} placeholders, duplicates,
+    unknown keys and coverage; the package loads English once and translations lazily. The
+    English boundary is explicit: generated CommandDef/menu tables, hand-written command rows
+    (terminal-tab/Run Agent), settings labels and other in-round strings stay English until a
+    generator/extraction learns keys; plugins' `t()` sees only their own .i18n.json.
+    `docs/i18n.md`; R12-5.
+87. **The LSP residual sweep is decision-complete.** R1-3 closed: `gvim config show` reads the
+    recorded trust level read-only (no open-time auto-trust write) and skips the project layer
+    for untrusted/undecided workspaces with a named-file warning; trusted merges as the editor
+    does; `config paths` stays ungated. R4-4: virtual-caret session persistence landed
+    (`virtualLines/virtualColumn`, migration-safe) with docs/internal/virtual-space-scoping.md
+    recording block rune-vs-byte geometry, wrap/multi-caret/large-file off, bool-only per-buffer
+    toggle, caret-row-only virtual lines, viewport/fold clamps. R2-5 stays deferred with
+    docs/internal/hot-exit-store.md (side store + stash design and the one-session-file
+    dependency). R8-3's decision list is exact in docs/settings.md §6; R11-3/R11-4 decisions
+    are in docs/terminal.md/docs/themes.md; the stale R1-2 open entry was removed (R6-6 already
+    recorded it closed). `docs/trust.md` §3.
+
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -1250,11 +1389,17 @@ Round 1 recorded three remaining gaps (R1-1 closed in round 6; the spawn gate is
   plugin-key fallback) publishes per-heading ranges through the version-guarded outline fold
   source; folding a Contents row folds its section (no fold command, Fresh parity). See the
   File explorer/sidebar row and R6-6 for the small residual differences.
-- **R1-2 (P2, S)** — persist sidebar section state in the session (section list/order, Contents
-  visibility and follow mode, heights; `internal/tui/sidebar`, `internal/restore`, `session`).
-- **R1-3 (P2, S)** — `gvim config show` still merges the project config layer regardless of
-  trust; gate it by the trust level or label the layers (`internal/configview`, `config`;
-  `docs/trust.md` §3 "Config viewer").
+- **R1-2 (CLOSED round 9, entry corrected round 12)** — sidebar/session persistence landed with
+  R6-6: `session.Session.Sidebar` + `session/sidebar.go`, `internal/restore/sidebar.go`,
+  `internal/tui/sidebar_state.go` + `plugin_sidebar_state.go`/`markdown_toc` (plugin-section
+  order/rows/folds since round 11) and `docs/sidebar.md`; the stale open ranking entry was removed.
+- **R1-3 (CLOSED round 12)** — `gvim config show` trust-gates the project layer: `configview.Load`
+  reads the recorded decision read-only (it never runs the open-time policy that would auto-
+  trust/write) through `app.ProjectConfigTrusted` and skips the project layer for
+  untrusted/undecided workspaces, printing "project config layer skipped: <file> (the workspace
+  is not trusted; start gvim in it to decide trust)"; trusted merges as before. `config paths`
+  still lists both locations ungated (documented). Tests: configview trust gate + CLI real-
+  command tests; docs/trust.md §3 "Config viewer".
 - **R1-4 (P1, L)** — per-spawn executable-path gate and Blocked spawn denial
   (terminal/shell/formatter/LSP/plugin processes); tracked as ranked item #17
   (`trust/` and the spawn sites; `docs/trust.md` §3).
@@ -1267,12 +1412,17 @@ Round 2 recorded two remaining gaps (R2-1/R2-2 closed in round 4, R2-3 in round 
   understand them; the loader accepts the contexts and warns+skips multi-key bindings there.
   Residual limits moved to R7-4 (single-key only, unbind semantics, text-field actions,
   completion/compositeBuffer/dialog/plugin-panel surfaces). `docs/keybindings.md`.
-- **R2-5 (P2, M)** — per-buffer hot-exit store and file-launch unsaved-text restore: one
-  session file means a file launch cannot keep its files' unsaved text and `--no-restore` must
-  still save (§4 item 10); a per-buffer store would close this.
-
-Round 3 recorded three remaining gaps (R3-1 closed in round 4):
-
+- **R2-5 (P2, M, deferred decision documented round 12)** — per-buffer hot-exit store and
+  file-launch unsaved-text restore: docs/internal/hot-exit-store.md records the precise design
+  (side store `<config.Dir()>/buffers/<sha256(canonical path)>.json` + stash side files through
+  atomicfile; versioned entry path/size/mtime/savedAt/sessionID/stash reusing
+  session.StashContent/StashOverlay; write on session save for every unsaved buffer regardless of
+  launch args, delete on clean; read at file open when hot exit is on and the restore put no
+  text; caps/LRU/retention GC; single-writer via the session lock/daemon attach;
+  trust/ephemeral gating; unknown versions ignored). Deferred because the one-session-file model
+  is load-bearing for restore order/quit prompt/hot-exit policy/daemon ownership — a partial
+  store would create two writers of unsaved text, so it must be scheduled with
+  launch/session-lock/daemon/--no-restore.
 - **R3-2 (CLOSED round 5)** — terminal slice B landed selection/copy, `jump_to_end_on_output` +
   `mouse_drag_selects`, regex/case scrollback search, dead-shell scrollback, restart-into-the-
   transcript and the saved `terminal.json` transcript (read-only/dead on restore, no process
@@ -1304,10 +1454,16 @@ Round 4 recorded five gaps (R4-1 closed in round 6; R4-2 partially closed in rou
   Plugins page and the read-only Keybindings page (round 8) close the page surface. Residuals
   are R8-3 (plugin settings schema API, plugin gallery, no in-page key capture, `env.detectors`,
   per-field LSP dialogs); the page's deliberate divergences are §4 items 46 and 17.
-- **R4-4 (P2, S)** — virtual-space limits: linear selections byte-clamped, block columns
-  rune-based (§4 item 19), no virtual space with wrap/multi-caret/large files, vertical lines
-  clamp at the viewport/folded end and cannot be selected, the per-buffer toggle cannot allow
-  block, positions are not session-persisted. `docs/internal/virtual-space-scoping.md`.
+- **R4-4 (P2, S, virtual-caret persistence landed round 12)** — virtual-space limits: the caret's
+  vertical position now persists (`session.FileState.virtualLines/virtualColumn`,
+  omitzero/migration-safe, restored after the cursor), and docs/internal/virtual-space-scoping.md
+  records the design/limits: block geometry is rune-based vs the linear byte-clamped rule (§4
+  item 19), virtual space is off under wrap/multi-caret/large-file mode, the per-buffer toggle
+  is bool-only (block stays a global editor mode; no tri-state override), vertical virtual lines
+  are caret rows only and cannot be selected, the viewport/fold end clamps and the view never
+  scrolls past text. Residual = per-buffer block override, virtual-line selection,
+  wrap/multi-caret support, the fold-clamp nuance. Tests: session round-trip + old-JSON restore
+  + restore/session_virtual_test.
 - **R4-5 (P2, M, partly closed round 6)** — the markdown_source subset landed in round 4 and the
   compose core in round 6; what remains of the Markdown work is R6-2 (tables, fence frames, dual
   view, heading polish, task/image/HTML conceal, page-view persistence and per-split mode,
@@ -1422,12 +1578,16 @@ Round 6 recorded six gaps:
   composed-overlay ordering test, dual exact row/byte anchors + native menu row + split
   persistence + multiple duals, free per-split mode, horizontal page scroll, wrapped-cell
   selection limitation.
-- **R8-3 (P2, M, shrunk rounds 9–10)** — the runtime exposes plugin declared-settings
-  schema/values (read-only Settings rows) and round 10 landed project-environment detection/
-  activation (`env.detectors` host detection, trust-gated overlay, Environment page + read-only
-  Detectors page). Remaining: plugin settings are still edited in the raw config
-  (`plugins.<name>.settings`), no plugin gallery/install page, no in-page key capture
-  (deliberate — the editor overlay is the writer), per-field LSP dialogs. `docs/settings.md` §6.
+- **R8-3 (P2, M, docs decision-complete round 12)** — docs/settings.md §6 is exact (stale
+  env.detectors/plugin-settings bullets removed): declared plugin settings are listed read-only
+  with schema/default/bounds/layer, editing stays in the raw user config because a structured
+  per-plugin editor needs a plugin-owned schema→widget mapping plus reload/rollback the settings
+  service does not own; no plugin gallery/install page (plugins come from the binary, user dir
+  and --plugin; a gallery is a packaging-policy decision like URL themes); LSP fields are edited
+  as the whole language array JSON because config.PatchBytes cannot address one array element; no
+  in-page key capture or second keybindings writer; no env activation; no per-field
+  reset-vs-inherit + full undo; Reload is a palette row only; Fresh's generic widget runtime is
+  not ported. These are decision-level residuals, not incomplete paths.
 - **R8-4 (P2, S)** — port reductions: compare_files (no synthetic group tab, no EOL-only hunks,
   fillers need virtual-line paint, positional pairing, ui.input paths, no `--diff` hook/export,
   opt-in duplicate palette rows), path_complete (no `prompt_changed` seam; exported engine + one
@@ -1513,25 +1673,60 @@ Round 10 recorded four gaps:
   inheritance, and the untagged composition/plugin painters. `docs/themes.md`.
 Round 11 recorded four gaps:
 
-- **R11-1 (P1, L)** — daemon #18a remainder: app.Options Reader/Writer + `tui.RunWithIO`
-  socketIO hosting/repaint, CLI `--daemon`/`-a`/`--attach`, the Detach hook/palette row/ack,
-  single-writer refusal, `auto_attach` config, session/PTY integration, docs/architecture and the
-  #19 design outline; then #19a workspaces (Phase-1 spec in the round-12 plan). Task-68 stays in
-  progress. `internal/daemon/`.
-- **R11-2 (P1, L/XL)** — i18n remainder (#22b): import Fresh locale JSON where keys match (15
-  locales; en 1895 keys vs non-en 2403–2430 -> intersection + explicit mapping), complete the
-  extraction inventory (generated command/palette/menu titles stay English by design until a
-  key-based command pass), a placeholder/plural coverage validator + CI check, translation
-  workflow/docs and the 14 translated catalogues. `docs/i18n.md`.
-- **R11-3 (P2, M)** — terminal remainder: kitty keyboard (x/vt v0.1.0 legacy-only, TODO/no
-  seam), OSC 52 read/paste request (write-side only today), live-screen reflow (x/vt has none;
-  stored transcript re-wraps), terminal tabs (pair with #19's workspace-scoped dock), automatic
-  agent re-exec (`resume_agents` accepted-ignored), report-split close_on_exit.
+- **R11-1 (CLOSED round 12, reductions R12-1)** — the daemon end-to-end landed: server/attach
+  lifecycle (single client, hello/resize/input/open_file/detach/ping, blocking detached reader,
+  output to the attached client only, repaint/resize hooks, exit on Close), the attach proxy
+  (raw mode/restore, stdin→input, output→stdout, notices→stderr, SIGWINCH), app options/branches
+  (attach before requireTerminal; serve builds the listener before the runtime, default per-root
+  name, session restore/save, detach row, open-file forwarding), CLI --daemon/-a/--attach,
+  single-writer refusal for bare/session launches, docs/architecture §8 and the #19a outline.
+  Reductions are R12-1 (foreground, no auto_attach start-if-absent/refusal policy, one client,
+  single workspace, Windows pipes later). Tests: daemon server suite, CLI flags, app daemon
+  start/attach/detach/reattach/quit/session-save and single-writer refusal.
+- **R11-2 (P1, L/XL, catalogues landed round 12; extraction remains R12-5)** — the i18n
+  foundation (#22a) and the catalogue/import/validation slice (#22b) landed: 15 embedded
+  catalogues with English as source of truth, 13 keys mapped from Fresh (fresh_map +
+  i18n_import --check) + 12 gvim-only keys, ValidateCatalogue/CoverageFor, i18n_check.sh CI,
+  lazy loading, embedded rendering/fallback tests, plugin t() scoped to its own .i18n.json and
+  the Settings locale row switching live. Remaining: extract the English boundary (generated
+  CommandDef/menu tables, hand-written command rows, settings labels, other in-round strings)
+  and expand translated coverage beyond the mapped subset (R12-5). `docs/i18n.md`.
+- **R11-3 (P2, M, terminal tabs/agents landed round 12; remainder R12-2)** — round 12 landed the
+  terminal tabs container, launch records/agent metadata with user-initiated resume, and the
+  remote SSH terminal through the authority slot. Remaining: kitty keyboard (x/vt legacy-only,
+  TODO/no seam), OSC 52 read/paste (write-only today), live-screen reflow (x/vt has none; stored
+  rows re-wrap), live ephemeral PTY restore (restored tabs stay read-only/dead),
+  workspace-scoped tab sets (#19), tab drag/reorder/per-tab splits, report-split close_on_exit.
   `docs/terminal.md`.
-- **R11-4 (P2, S/M)** — theme remainder: drag-and-drop of theme values, background images,
-  user-theme inheritance (Fresh's own limit), and extending painted-key capture to the untagged
-  compose/page-view/plugin painters (today the inspector falls back to colour-matching there).
-  `docs/themes.md`.
+- **R11-4 (P2, S/M, decisions recorded round 12)** — the theme remainder is decision-level:
+  background images are outside the colour theme model (Fresh's editor background support is
+  separate), drag-and-drop of theme values is deliberately not added (the picker's drag moves
+  selection; nothing reorders; the Settings row opens Select Theme), user-theme inheritance is
+  one level of extends to a built-in theme (Fresh's own limit), and untagged compose/page-view/
+  plugin painters keep the "matched by colour" inspector fallback. `docs/themes.md` §8.
+Round 12 recorded five gaps:
+
+- **R12-1 (P2, S/M)** — daemon MVP reductions: foreground (no fork/daemonize), no
+  `auto_attach`/start-if-absent (a live per-root daemon refuses bare/session launches with an
+  attach hint; file/--simple/--diff/stdin launches stay direct), one attached client, single
+  workspace (launch directory) until #19, Windows named pipes later. The #19a workspaces slice
+  builds on this ownership model. `docs/architecture.md` §8.
+- **R12-2 (P2, S/M)** — terminal-tab residual: live ephemeral PTY restore (restored tabs are
+  read-only/dead until Restart), workspace-scoped tab sets (#19), tab drag/reorder and per-tab
+  splits, agent re-exec edges, report-split close_on_exit. Bound semantics live in
+  docs/terminal.md.
+- **R12-3 (P2, M)** — agent-session residual: no workspace/tmux discovery (#20b), no dock
+  agent-state heuristics or workspace integration, agents are a config list of local executables
+  (no plugin-provided registry, no remote agent launches), and no automatic re-execution (by
+  design) — only the user-initiated restart. `docs/terminal.md`.
+- **R12-4 (P2, L)** — remote-authority residual: editor remote file I/O (SFTP vs remote-helper
+  decision in docs/authority.md §7), LSP routing through the long-running surface, plugin
+  gvim.fs/gvim.proc routing, a per-remote trust store (today the local workspace's trust is
+  used), terminal respawn after a dropped carrier, and devcontainer/k8s constructors.
+  `docs/authority.md`.
+- **R12-5 (P2, M)** — i18n English boundary: extract command/palette/menu titles (generated and
+  hand-written rows), settings labels and other in-round strings into keys; expand translated
+  coverage beyond the mapped subset and keep the CI validators. `docs/i18n.md`.
 
 ### 5.1 User-visible TUI and editing gaps (do first)
 
@@ -1552,16 +1747,20 @@ Round 11 recorded four gaps:
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 18 | Daemon mode: client/server split, attach/detach, `open-file`/`--wait`, auto-attach, socket lifecycle, direct-vs-daemon launch modes | P1 | XL | new daemon package, `internal/cli`, `internal/app` | session settings landed in round 2; daemon build starts here |
-| 19 | Workspaces/windows: workspace model, dock switcher, New Workspace, extract-tab-to-workspace, buffer groups | P1 | XL | new workspace model, `internal/tui` | #18 |
-| 20 | Agent sessions: Run Agent dialog, agent resume metadata, session discovery/resume, dock integration | P1 | L | workspace/terminal/plugin packages | #18/#19 |
-| 21 | Remote authority: SSH file/process/terminal/LSP backend, devcontainer attach, Kubernetes workspaces, remote indicator, reconnect | P1 | XL | new authority package; `plugin/hostos` | #13, #18 |
+| 18 | Daemon mode: client/server split, attach/detach, open-file forwarding, socket lifecycle, direct-vs-daemon launch modes, single-writer policy; **landed MVP round 12** (R12-1 reductions: foreground, no auto_attach/start-if-absent, one client, single workspace, Windows pipes later) | P1 | XL | `internal/daemon`, `internal/app`, `internal/cli`, `internal/tui` | R12-1; docs/architecture §8 |
+
+| 19 | Workspaces/windows on the daemon ownership model: durable workspace identity {stable id,label,root}, per-workspace files, protocol workspace-list/select/new/close/rename, lazy materialization with inert placeholders, dock/session switcher + palette + New Workspace, switching (stop program/keep runtime warm), per-workspace save/restore + exit ordering; then extract-tab, one-buffer-across-workspaces policy, per-session plugin state; first slice #19a (L), follow-ups #19b (M/L) | P1 | XL | `internal/daemon`, `internal/tui`, `session` | #18 landed; docs/architecture §8 outline; §5.5 round 13 |
+
+| 20 | Agent sessions: Run Agent dialog, tracked launch argv/agent metadata/resume, session discovery/rejoin v1 (tmux scan + Import as workspace), dock integration; **partial round 12 (#20a)**: launch records/resume + Run Agent picker landed, #20b discovery/rejoin/dock integration remains | P1 | L | `internal/terminal`, `internal/tui/dock`, `config/terminal.go`, plugin packages | R12-3; §5.5 round 13 |
+
+| 21 | Remote authority: SSH file/process/terminal/LSP backend, devcontainer attach, Kubernetes workspaces, remote indicator/reconnect; **first slice round 12 (#21a)**: authority slot + local parity + scp/ssh parsing + SSH terminal/one-shot exec + status/reconnect/password prompt; remote file I/O/LSP/trust-store/respawn/devcontainer/k8s remain | P1 | XL | `authority`, `internal/terminal/session_backend.go`, `internal/app/authority_app.go` | R12-4; docs/authority.md |
+
 
 ### 5.4 Polish and optional (P2)
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 22 | i18n: foundation #22a landed round 11 (package/catalogues/en, 15 locale metadata, resolution config+LC_ALL/LC_MESSAGES/LANG, T/TN/plurals, Settings locale row live, plugin locale, first extraction slice, docs); remaining #22b is the translation workflow: Fresh-JSON import where keys match, full extraction inventory (commands/menus by design later), coverage validation/CI, the 15 locales. | P1 | L infra; XL translation | `i18n/`, `internal/tui`, `commands/gen` | R11-2 |
+| 22 | i18n: #22a foundation + #22b catalogues/import/validation landed rounds 11–12 (15 embedded locales, English source of truth, 13 Fresh-mapped + 12 gvim-only keys, ValidateCatalogue/CoverageFor, i18n_check CI, lazy load, Settings locale row live, plugin t() scoped). Remaining R12-5: extract the English boundary (generated CommandDef/menu tables, hand-written rows, settings labels) and expand translated coverage | P1 | L infra; XL translation | `i18n/`, `internal/tui`, `commands/gen`, `tools` | R12-5 |
 | 23 | Terminal Windows support (ConPTY): **implemented round 11** pure-Go x/sys/windows (windows build tag, GOOS=windows build/vet/test-compile verified, pure-helper Windows tests) with a real-Windows acceptance checklist in docs/terminal.md; parity unverified until that pass is recorded, and the Windows row reads unverified | P2 | M | `internal/terminal` | R11-3 |
 | 24 | Update check/self-update/telemetry: **DECIDED OUT OF SCOPE (Lead-signed, final)** — no telemetry, no update check/self-update, no network upgrade code; the status-bar `{update}` element stays unimplemented and `--no-upgrade-check` is a documented no-op. Recorded in §4 item 79 and §8 | out of scope | — | n/a | Lead sign-off 2026-11-08 |
 | 25 | Platform edges: **DECIDED PARTIAL (Lead-signed, final)** — stdin-as-a-buffer landed round 11 (bounded snapshot, `--stdin-name` gvim-only, file-launch semantics); GPM console mouse, AltGr/CapsLock/key-release edges and plugin focus events beyond focus_gained/active_window are deferred/out of scope. Recorded in §4 item 80 and §8 | partial | — | `internal/cli`, `internal/app/stdin.go`, `internal/tui.RunWithInput` | Lead sign-off 2026-11-08 |
@@ -1569,32 +1768,36 @@ Round 11 recorded four gaps:
 
 ### 5.5 Suggested round order for the remaining goal
 
-1. **Round 12 — workspaces, terminal tabs and the first architecture slices.** #19a workspaces on
-   the round-11 daemon ownership model: durable workspace identity, per-workspace files under the
-   data dir, protocol workspace-list/select/new/close, inert lazy placeholders, dock/session
-   switcher, New Workspace, switch = stop the tea program but keep the runtime warm, per-workspace
-   save/restore, single-writer policy, tests; terminal tabs pair with the workspace-scoped dock
-   (N dock sessions, tab strip, names/exited markers, per-tab close_on_exit, persisted terminal
-   records). #20a can run in parallel: tracked terminal launch argv/agent metadata + exited-
-   terminal persistence + resume-capable restart (S/M). #21a: authority interface + local
-   implementation + scp/ssh:// spec parsing + status-bar remote indicator + reconnect-on-activate
-   + SSH terminal/exec via pure-Go x/crypto/ssh (L); SFTP files next. #22b i18n catalogue/
-   translation workflow (Fresh-JSON import, extraction inventory, coverage validator/CI) and
-   residual sweeps (R10-2/R11-3/R11-4/R9-2/R8-3/R1-2/R1-3/R2-5/R4-4).
-2. **Round 13 — remote file/LSP, workspaces follow-ups and daemon-era ports.** #21b remote file
-   I/O over SFTP + LSP over the long-running spawner + reconnect hardening; #19b extract tab,
-   one-buffer-across-workspaces policy, per-session plugin state, dormant/rename; #20b tmux
-   discovery/rejoin v1, Run Agent dialog and dock integration; i18n translations and the 15
-   locales; daemon-era plugin ports begin (orchestrator/live_sessions/agent_* family,
-   devcontainer/k8s after the authority slices; pkg after #16).
-3. **Round 14 — completion and polish.** R11-1/R11-3/R11-4/R10-2 remainders (daemon attach end-
-   to-end, kitty/live-screen reflow/OSC52 read, theme drag/background, per-section widths, dual
-   byte anchors), R11-2 catalogues, #17 trust spawn gate/R1-4, language helpers, any leftover
-   daemon-era ports; devcontainer/k8s workspace authorities if #21 landed.
-4. **Round 15 — final parity pass.** Re-read `refs/fresh`, re-run the §2 counts and the e2e feature
-   index, refresh every partial row, record the deliberate endgame gaps (composite API, native
-   substitutions, GUI/web/WASM/packaging scope, universal server, platform edges), and close the
-   book on the goal or report the documented endgame.
+1. **Round 13 — #19a workspaces, terminal-tab persistence, #20b discovery, #21 remote files/LSP.**
+   #19a on the round-12 daemon ownership model: registry of per-workspace files (stable id,
+   label, root, layout, authority_spec), protocol workspace-list/select/new/close/rename, inert
+   lazy placeholders, dock/session switcher + palette + New Workspace prompt, switching = stop
+   the tea program/keep the runtime warm/start the target, per-workspace save/restore + daemon
+   exit ordering, single-writer policy, socket + uitest-PTY tests; then terminal-tab persistence
+   per workspace (records/active tab in the workspace file) and workspace-scoped dock tabs.
+   #20b: tmux scanner (level 0), attach-argv rows, Import as workspace, dock rows/naming, Run
+   Agent dialog/dock integration after #20a. #21: remote file I/O (SFTP-first vs remote-helper
+   decision; atomic saves; polling watch), LSP over SSH through the long-running surface,
+   reconnect/respawn hardening, per-remote trust store. i18n R12-5: command/menu extraction +
+   coverage/CI. Residual sweeps (R11-3/R11-4/R10-2/R9-2/R8-3 remainders).
+2. **Round 14 — workspaces follow-ups, remote/devcontainer and the daemon-era ports.** #19b
+   extract tab, one-buffer-across-workspaces policy, dormant/rename; #20b dock rows/Run Agent
+   polish; #21 devcontainer/k8s authority constructors and remote UX polish (per-host trust,
+   sudo-save residual, remote explorer); daemon-era plugin ports begin (orchestrator,
+   live_sessions, agent_* family after #19/#20; devcontainer/k8s-workspace after #21; language
+   helpers; pkg after #16; audit_mode stays a native substitution); #17 trust spawn gate/R1-4;
+   residuals (kitty/live-screen reflow/OSC52 read, theme drag/background, per-section widths,
+   dual anchors/menu row) and the Windows ConPTY real-host pass.
+3. **Round 15 — final parity pass.** Freeze the Fresh reference (record commit/date), re-read
+   refs/fresh docs/features + internal, re-run the §2 counts (206 core commands/palette 235,
+   keymaps, themes, 22 bundled plugins vs Fresh's 50 + native substitutions, plugin API 242 vs
+   ~372, settings schema, e2e feature index) and refresh every §3 row; walk §4 divergences and
+   §5 residuals/closed ids, confirming each or recording a deliberate endgame gap; run the full
+   gate set (incl. Windows and the existing parity floor/testdata fixtures) and the docs-vs-code
+   audit; update §8 (final #24/#25/#26 decisions, composite API substitution, native
+   substitutions, GUI/web/WASM/packaging scope) and produce the endgame report — close the goal
+   or state the documented endgame. No new features in the final pass except fixes for
+   verification findings.
 
 ## 6. Tracking notes
 
@@ -2058,27 +2261,106 @@ Round 11 recorded four gaps:
   ~7.25 MiB of 8 PASS; palette 229; `gvim.d.lua` 242 functions/1478 lines; API level 2;
   settings 69/14 + Interface locale. No leftover temp harnesses.
 
-- The gaps the rounds opened are at the top of §5 (R1-2…R1-4, R2-5, R3-3…R3-4,
-  R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5, R10-1…R10-4,
-  R11-1…R11-4; #7/#8/#11/#15, R1-1, R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3,
-  R8-5 and R9-3/R9-4 are closed; R10-3 completed except R11-3 and R10-4's first surface landed);
-  §5.5 is the round-12..15 plan built from the ranked backlog minus the closed items. The #24/
-  #25/#26 decisions are final (Lead-signed) and recorded in §4 items 79–81, §5.4 and §8.
-
+- **Round 12 landed (2026-11-09).** Six tracks landed (daemon #18a MVP, terminal tabs, #20a agent
+  sessions, #21a authority + SSH, #22b i18n catalogues, LSP residual sweep); this audit ran
+  the gates and reviewed the diff (no scope creep; §7):
+  - **Daemon #18a MVP** (`internal/daemon/{server,attach,attach_resize_*}.go`, app/CLI/TUI wiring,
+    docs/architecture §8): server attach lifecycle (one client, hello/resize/input/open_file/
+    detach/ping; detached input blocks without ending the editor; output only to the attached
+    client with write-error detach; `OnProgram` repaint/resize; `OnOpenFiles`; Close sends exit)
+    and the attach proxy (hello+size, optional open-file frame, raw mode/restore, stdin→input,
+    output→stdout, notices→stderr, SIGWINCH); app Options.Daemon/DaemonMode/DaemonOptions +
+    validation, attach branch before requireTerminal (no runtime/session), serve branch (listener
+    before buildRuntime, per-root default name, socket line, detach wiring,
+    `tui.RunWithIO(srv,srv,OnProgram)`, open-file forwarding, session restore on start/save on
+    exit), single-writer refusal for bare/session launches (file/--simple/--diff/stdin direct),
+    palette Detach under --daemon; CLI --daemon[=NAME]/-a/--attach[=NAME]; import rule R2
+    allows internal/daemon to host the TUI program. Tests: server forwarding/refusal/detach-
+    reattach/exit, CLI parse/conflict table, app start/attach/first-frame/detach/reattach/quit/
+    session-save + single-writer refusal. Reductions R12-1.
+  - **Terminal tabs** (`internal/tui/dock/tabs.go`, `commands/terminal_commands.go`,
+    session/restore formats, docs/terminal.md): up to 16 single-session tabs (each with
+    screen/scrollback/prior transcript/selection/links/launch record), a strip with active/
+    exited/click-select, Ctrl+PgUp/PgDn (not keymap data), palette New/Close/Next/Previous/
+    Rename Terminal Tab (hand-written English; palette 235), per-tab close_on_exit, background
+    tabs synced/painted-only-when-active; `terminal.json` gains additive `tabs[]`/`active_tab`
+    with top-level mirror, bounds (16; per-tab 500 rows/1 MiB) and old-file migration; restored
+    tabs read-only/dead (no auto-restart), Restart per tab with the saved launch record.
+    Tests: dock tabs unit/UI, restore/terminal_tabs_test. Residuals R12-2.
+  - **#20a agent sessions** (`internal/terminal/launch.go`, dock launch records,
+    `internal/app/terminal_agents.go`, config terminal resume_agents/agents, docs/terminal.md):
+    Launch argv/agent/resume-argv/ephemeral bounded at 64×1024/agent 64, persisted with the
+    transcript (no auto-run on restore), user-initiated restart precedence resume→launch→shell
+    gated by terminal.resume_agents (Fresh key, default true), config terminal.agents (gvim
+    extension, user-layer only, bounded; names+command+args+resume_args), agent naming in tab
+    titles, Run Agent... palette row + picker (hand-written English). No workspace/tmux
+    discovery yet. Tests: dock agent, agent run/picker, config decode bounds. Residuals R12-3.
+  - **#21a authority + SSH** (`authority/` incl. authoritytest fake, `internal/app/authority_app.go`,
+    `internal/terminal/session_backend.go`, docs/authority.md + architecture row): the slot with
+    FileSystem/OneShot/LongRunning/Terminal + State/Label/Connected/Reconnect/Close; local
+    forwarding byte-identical to the plugin OS port with trust-gate + env choke point;
+    Fresh-compatible scp/ssh:// parsing (ssh:// exclusive, malformed startup error, never
+    stat'ed, no local fallback; remote excludes local files/root/diff/stdin/restore/--daemon)
+    with typed diagnostics; SSH backend via cached pure-Go x/crypto/ssh (agent/identity/
+    passphrase/password, known_hosts, POSIX-quoted one-shot exec, long-running stdio, PTY
+    terminal + resize/reconnect); status segment SSH:user@host / disconnected (hand-written
+    English, i18n keys reserved); reconnect-on-activate + password prompt; remote launches open
+    no local files/session and open the remote terminal at Workspace() with a notice; one-shots
+    (dock terminal/git grep/shell/formatter) routed through the slot. Tests: authority local
+    forwarding/gate/env/watch, spec table, SSH one-shot/state/reconnect/terminal/long-running.
+    Residuals R12-4.
+  - **i18n #22b catalogues** (`i18n/{catalogue.go,fresh_map.json,locales/*.json}`,
+    `tools/{i18n_import.py,i18n_check.sh}`, docs/i18n.md): 15 embedded catalogues (English
+    source of truth; 14 files carry the 13 mapped keys imported from Fresh; 12 gvim-only keys
+    stay English by design; 12,646 bytes, 64 KiB cap test), deterministic import with --check,
+    ValidateCatalogue/CoverageFor (key shape/plurals/placeholders/duplicates/unknown/coverage),
+    CI script, lazy loading, embedded German rendering + fallback tests, plugin t() scoped to
+    its own .i18n.json. English boundary documented (generated CommandDef/menu tables,
+    hand-written command rows incl. terminal-tab/Run Agent, settings labels, other in-round
+    strings). Tests: catalogue/validate/coverage/import/render. Residual R12-5.
+  - **LSP residual sweep**: R1-3 closed (config show trust-gated read-only via
+    app.ProjectConfigTrusted; skip note; trusted unchanged; config paths ungated; tests/docs/
+    CLI Long); R4-4 partial (virtual-caret persistence + docs/internal/virtual-space-scoping.md
+    with exact residual list); R2-5 deferred with docs/internal/hot-exit-store.md; R8-3 exact
+    decisions in docs/settings.md §6; R11-3/R11-4 decisions recorded (docs/terminal.md,
+    docs/themes.md); R1-2 verified closed and its stale open entry removed.
+- **Round 12 integration notes.** The Lead wrote the daemon track after the trust owner hit its
+  context limit; the audit verified the shared-file interactions: internal/app run/options/
+  session_plan/daemon_runtime/authority_app (daemon branches before requireTerminal, listener
+  before buildRuntime, authority slot + one-shot routing + remote UX, terminal agents/dock
+  effects), internal/cli root/args (daemon flags, remote target parsing before stat),
+  internal/tui model/ports (RunWithIO/Detach/OpenFileMessage/authority status/tab actions),
+  internal/pluginhost Wiring.OS (local authority over the same OS instance), config terminal
+  agents/resume_agents bounds, session/restore formats (virtual caret; terminal tabs/launch
+  records with old-file migration), and the daemon/authority/terminal-tab/session interactions
+  (single-writer refusal, detach keeps the editor alive, restored tabs dead, launch record
+  never auto-runs). No duplicate top-level functions were found; `git diff --check` reports
+  only a new blank line at EOF in docs/architecture.md (docs hygiene, trim before commit).
+  Metrics: palette 235; bundled 22/9/13, idle heap ~7.25 MiB of 8 PASS; plugin API 242
+  functions/1478 lines; 47 registration sites; API level 2; i18n 25 English keys / 13 mapped /
+  12 gvim-only / 15 locale files (12,646 bytes); terminal tabs max 16. No leftover temp
+  harnesses.
+- The gaps the rounds opened are at the top of §5 (R2-5, R3-3…R3-4, R4-4…R4-5,
+  R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5, R10-1…R10-4, R11-2…R11-4,
+  R12-1…R12-5; #7/#8/#11/#15, R1-1, R1-2, R1-3, R2-4, R5-1, R5-5, R6-5, R6-6,
+  R7-1/R7-2/R7-3, R8-5, R9-3/R9-4 and R11-1 are closed; R10-3 completed except R11-3 and
+  R10-4/R11-2 moved to residual lists); §5.5 is the round-13..15 plan built from the ranked
+  backlog minus the closed items. The #24/#25/#26 decisions are final (Lead-signed) and
+  recorded in §4 items 79–81, §5.4 and §8.
 ## 7. Verification limits and risks
 
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–11 had their full
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–12 had their full
   gate sets run by this audit on their trees: build ×2, vet, golangci-lint 0 issues, gofmt clean,
-  purity and import rules green, and (from round 10) the generated-menu check clean; from round
-  11 also the Windows cross-gates GOOS=windows go build ./... and GOOS=windows go vet ./...
-  (the ConPTY slice), both green. Round 11's go test ./... -count=1 had four load-timing
-  failures — internal/tui `TestPumpSharesOneDrainBudget` (completed too fast for the share
-  assertion under load), plugin `TestHeatBusyTimerIsThrottled` (heat timer not found under
-  load), plugin/bundled `TestMergeConflictRecoversFromAKilledScan` and
-  `TestViBigRangesFitTheBudget` — all four pass repeatedly in isolation (2×), so they are
-  recorded as load flakes, not regressions; the other 67 packages pass. Round-1 statuses were
-  read-code only (no gates were run by this audit then). A feature that exists but is broken
-  would still read "implemented": treat a status as a pointer, not proof.
+  purity and import rules green, the generated-menu check clean, and (from round 11) the
+  GOOS=windows go build ./... cross-gate. Round 12's go test ./... -count=1 had two failures:
+  internal/app `TestDaemonHostsAttachDetachAndQuit` (the attach read a repaint/output frame
+  before the expected pong under full-suite load — a frame-timing sensitivity in the test, not
+  a protocol bug) and plugin/bundled `TestViSuspendedDropsItsStatusAndMode` (the known
+  full-parallel load flake); both pass repeatedly in isolation (2x). The other 70 packages
+  pass. The lsp/manager dynamic-registration and authority SSH under-load hangs reported by
+  peers were also isolated-green here. Round-1 statuses were read-code only (no gates were run
+  by this audit then). A feature that exists but is broken would still read "implemented": treat
+  a status as a pointer, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.
@@ -2098,25 +2380,26 @@ Round 11 recorded four gaps:
   display/keymap/status/session code, and the round-3 refresh the settings/terminal/explorer/
   palette code; each ran the gates. The design records carry the detail and name the tests;
   this file points rather than proves.
-- Round-2/3/4/5/6/7/8/9/10/11 diff reviews (this audit): no scope creep outside the declared
-  tracks. Shared files stayed in scope (round 11: `internal/app/{run,options,session_plan}.go`,
-  `internal/cli/root.go`, `internal/tui/model.go` (RunWithInput + paint/paintInto split),
-  `internal/tui/ports.go`, `internal/tui/editorpane/styles.go`, `internal/keybindings/adapter.go`,
-  `internal/tui/theme_inspect.go` + `style/roles.go` + `grid`, `internal/terminal/` pty/osc52/
-  reflow, `internal/daemon/`, `i18n/`, `config/{locale,clipboard}.go`, the stdin path and docs),
-  and the generated tables, `refs/` and `_attic/` were not touched; no golden tests were added.
-  No lost/duplicated hunks were found: no duplicate top-level functions in the shared files,
-  `git diff --check` clean, and the `Run`/`paintInto` paths keep their callers. The daemon is a
-  protocol/socket foundation only (R11-1) — partial by design, not a defect. Round-11 findings
-  (recorded, not fixed): (a) no code bugs found in spot checks — i18n resolution/plural/fallback
-  and live locale switching, stdin bounded read/label/language/session semantics, daemon frame/
-  socket lifecycle and perms, ConPTY Windows compile/helpers and OSC52 parser/gating,
-  transcript reflow, provenance capture/tagging/inspector, LSP preview wrap/ordering/unbind,
-  dashboard line targets all match docs/tests; (b) the four round-11 test failures above are
-  load flakes (isolated green), not product regressions; (c) counts verified unchanged
-  (22/9/13, 47 registration sites, ~7.25 MiB, 242 functions/1478 lines, palette 229, API level
-  2); (d) deliberate divergences are §4 items 18, 40–81, including the final #24/#25/#26 scope
-  decisions and the recorded native substitutions.
+- Round-2/3/4/5/6/7/8/9/10/11/12 diff reviews (this audit): no scope creep outside the
+  declared tracks. Round 12's 86 files (50 modified, 35 untracked, 1 deleted; tracked diff
+  +1764/−244) stayed within the six tracks and their docs; the generated tables, refs/ and
+  _attic/ were untouched; no golden tests were added. Shared files were verified for
+  lost/duplicated edits (no duplicate top-level functions found): internal/app run/options/
+  session_plan/daemon_runtime/authority_app, internal/cli root/args, internal/tui model/ports/
+  dock glue, internal/pluginhost Wiring.OS, config terminal agents/resume_agents, and the
+  session/restore formats (virtual caret; terminal tabs/launch records with migration).
+  `git diff --check` reports only a trailing blank line at EOF in docs/architecture.md (docs
+  hygiene; trim before commit). Round-12 findings (recorded, not fixed): (a) the daemon attach
+  test's frame-order assumption is timing-sensitive under load — recommend reading/tolerating
+  output frames until pong (or a keepalive frame) so the test cannot fail on repaint timing;
+  (b) no code bugs found in spot checks — daemon server/attach lifecycle and single-writer
+  refusal, tab bounds/migration/exited markers, launch-record bounds/resume precedence,
+  authority spec/local parity/trust+env gate/SSH one-shot+terminal, i18n import/validation/
+  coverage/fallback, LSP sweep docs all match docs/tests; (c) metrics verified (palette 235,
+  22/9/13, ~7.25 MiB, 242 functions/1478 lines, 47 registration sites, API level 2, i18n 25
+  English/13 mapped/12 gvim-only keys, 15 locale files 12,646 bytes, max 16 tabs); (d) the
+  deliberate divergences are §4 items 18 and 40–87, including the #24/#25/#26 final decisions
+  and the recorded daemon/terminal/agent/remote/i18n reductions.
 - The round-2 formatting nit (an ATX heading appended directly after a list item without a
   blank line) no longer reproduces in `docs/ui.md`, `docs/sidebar.md`, `docs/lsp.md`,
   `docs/settings.md` or `docs/keybindings.md` as checked for this refresh.

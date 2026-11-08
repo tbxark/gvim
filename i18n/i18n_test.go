@@ -107,10 +107,15 @@ func TestTTranslatesAndFallsBack(t *testing.T) {
 	if got := T("en", "clipboard.copied_path", nil); got != "Copied path: %{path}" {
 		t.Fatalf("missing var = %q, want the placeholder kept", got)
 	}
-	// The active locale is used for the empty locale.
+	// The active locale is used for the empty locale; German is now embedded from
+	// Fresh's translations, so the extracted key is translated.
 	SetLocale("de")
-	if got := T("", "clipboard.copied", nil); got != "Copied" {
-		t.Fatalf("T with the active locale = %q, want the English fallback", got)
+	if got := T("", "clipboard.copied", nil); got != "Kopiert" {
+		t.Fatalf("T with the active locale = %q, want the embedded German text", got)
+	}
+	// A gvim-only key has no translation: it falls back to English.
+	if got := T("", "gvim.terminal.capture_on", nil); got != "Keyboard capture ON - all keys go to terminal (F9 to toggle)" {
+		t.Fatalf("gvim-only key = %q, want the English fallback", got)
 	}
 }
 

@@ -63,6 +63,13 @@ type FileState struct {
 	// keeps the defaults. PageWidth zero means the language or viewport width.
 	PageView  *bool `json:"pageView,omitempty"`
 	PageWidth int   `json:"pageWidth,omitzero"`
+	// VirtualLines and VirtualColumn are the caret's vertical virtual-space position:
+	// the empty display rows below the last line it sits on (0 when it is on text)
+	// and its display column there. Both are omitted when zero, so a session written
+	// by an older version decodes unchanged and a reader that ignores them keeps the
+	// caret on text (docs/internal/virtual-space-scoping.md).
+	VirtualLines  int `json:"virtualLines,omitzero"`
+	VirtualColumn int `json:"virtualColumn,omitzero"`
 }
 
 // OverlayStash is the unsaved edits of a large file as the document package

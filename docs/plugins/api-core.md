@@ -201,8 +201,10 @@ it is). `locale()` is the editor's resolved locale: the config `locale` (Setting
 Interface → locale, or the top-level `locale` key) when set, otherwise
 `LC_ALL`/`LC_MESSAGES`/`LANG`, otherwise `"en"`; a live Settings change reaches the
 plugin at its next call. The editor's own strings use the same resolution through the
-TUI-free `i18n` package (see [i18n.md](../i18n.md)); the translated catalogues are
-still to land.
+TUI-free `i18n` package (see [i18n.md](../i18n.md)). A plugin ships its own
+`.i18n.json`; the embedded editor catalogues are the editor's own translation layer and
+are not injected into plugins, so `gvim.i18n.t` only sees the plugin's file (plus its
+English entries) for the editor's locale.
 
 A command `title` or `description` that starts with `%` is a translation key and is resolved
 when the command is registered: `title = "%cmd.do_thing"` becomes `t("cmd.do_thing")`. Menu

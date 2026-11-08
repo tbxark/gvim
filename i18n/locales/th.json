@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "คัดลอกแล้ว",
+  "clipboard.copied_line": "คัดลอกบรรทัดแล้ว",
+  "clipboard.copied_path": "คัดลอกพาธแล้ว: %{path}",
+  "clipboard.copied_plain": "คัดลอกเป็นข้อความธรรมดาแล้ว",
+  "clipboard.cut": "ตัดแล้ว",
+  "clipboard.cut_line": "ตัดบรรทัดแล้ว",
+  "clipboard.pasted": "วางแล้ว",
+  "format.formatted_with": "จัดรูปแบบด้วย %{formatter}",
+  "gvim.lsp.inlay_hints_off": "ปิดใช้งานคำแนะนำแทรก",
+  "gvim.lsp.inlay_hints_on": "เปิดใช้งานคำแนะนำแทรก",
+  "gvim.scrollback.copied_line": "คัดลอกบรรทัดแล้ว",
+  "gvim.scrollback.no_selection": "ไม่มีส่วนที่เลือกให้คัดลอก",
+  "terminal.no_terminal_open": "ไม่มีเทอร์มินัลที่เปิดอยู่ — โปรดเปิดเทอร์มินัลก่อน"
+}

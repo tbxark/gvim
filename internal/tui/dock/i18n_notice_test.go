@@ -29,3 +29,20 @@ func TestNoticesFollowTheLocale(t *testing.T) {
 		t.Fatalf("English NoTerminalNotice() = %q, want %q", got, want)
 	}
 }
+
+// TestNoticesUseTheEmbeddedGermanCatalogue checks the shipped locale files: with the
+// embedded de catalogue active, the dock's terminal notice comes from Fresh's German
+// translation (the mapped terminal.no_terminal_open key) with no test registration.
+// Not parallel: it changes and restores the process locale.
+func TestNoticesUseTheEmbeddedGermanCatalogue(t *testing.T) {
+	i18n.SetLocale("de")
+	t.Cleanup(func() { i18n.SetLocale("en") })
+	want := "Kein offenes Terminal — zuerst ein Terminal öffnen"
+	if got := NoTerminalNotice(); got != want {
+		t.Fatalf("de NoTerminalNotice() = %q, want %q", got, want)
+	}
+	// The starting notice is gvim-only: the English fallback shows.
+	if got := startingShellNotice(); got != "Starting a shell..." {
+		t.Fatalf("de startingShellNotice() = %q, want the English fallback", got)
+	}
+}

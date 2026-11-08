@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "Copiado",
+  "clipboard.copied_line": "Linha copiada",
+  "clipboard.copied_path": "Caminho copiado: %{path}",
+  "clipboard.copied_plain": "Copiado como texto simples",
+  "clipboard.cut": "Recortado",
+  "clipboard.cut_line": "Linha recortada",
+  "clipboard.pasted": "Colado",
+  "format.formatted_with": "Formatado com %{formatter}",
+  "gvim.lsp.inlay_hints_off": "Dicas inline desativadas",
+  "gvim.lsp.inlay_hints_on": "Dicas inline ativadas",
+  "gvim.scrollback.copied_line": "Linha copiada",
+  "gvim.scrollback.no_selection": "Nenhuma seleção para copiar",
+  "terminal.no_terminal_open": "Nenhum terminal aberto — abra um terminal primeiro"
+}

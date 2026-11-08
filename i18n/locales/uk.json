@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "Скопійовано",
+  "clipboard.copied_line": "Рядок скопійовано",
+  "clipboard.copied_path": "Шлях скопійовано: %{path}",
+  "clipboard.copied_plain": "Скопійовано як звичайний текст",
+  "clipboard.cut": "Вирізано",
+  "clipboard.cut_line": "Рядок вирізано",
+  "clipboard.pasted": "Вставлено",
+  "format.formatted_with": "Відформатовано за допомогою %{formatter}",
+  "gvim.lsp.inlay_hints_off": "Вбудовані підказки вимкнено",
+  "gvim.lsp.inlay_hints_on": "Вбудовані підказки увімкнено",
+  "gvim.scrollback.copied_line": "Рядок скопійовано",
+  "gvim.scrollback.no_selection": "Немає виділення для копіювання",
+  "terminal.no_terminal_open": "Немає відкритого термінала — спочатку відкрийте термінал"
+}

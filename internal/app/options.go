@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/keymap"
 	"github.com/tbxark/gvim/pluginapi"
 	"github.com/tbxark/gvim/theme"
@@ -30,9 +31,40 @@ type FileTarget struct {
 	Col  int
 }
 
+// DaemonMode is what the launch does with the daemon: nothing, host the editor as a
+// daemon, or attach this terminal to a running daemon.
+type DaemonMode int
+
+const (
+	// DaemonOff is a direct launch: one process, no daemon.
+	DaemonOff DaemonMode = iota
+	// DaemonServe hosts the editor as a daemon on a Unix socket (--daemon). The
+	// process stays in the foreground and prints the socket it listens on; a
+	// forked daemon is not part of this MVP.
+	DaemonServe
+	// DaemonAttach forwards this terminal to a running daemon (--attach/-a).
+	DaemonAttach
+)
+
+// DaemonOptions carries a daemon launch. The CLI sets the mode and the socket name
+// (empty means the per-root default name); Run fills Detach for the hosted program.
+type DaemonOptions struct {
+	Mode DaemonMode
+	// Name is the socket name. Empty means DefaultName(root).
+	Name string
+	// Detach sends the detached frame to the attached client and drops it, so the
+	// hosted editor keeps running. Run sets it before building the runtime.
+	Detach func()
+}
+
 // Options is the parsed command line. The zero value starts gvim with no
 // files in the current directory, the platform keymap and the dark theme.
 type Options struct {
+	// Remote is a parsed user@host:/path or ssh:// target. A remote launch mounts the
+	// SSH authority, opens the remote terminal at its Workspace() and does not restore
+	// or save the local session; remote file editing is not available in this slice
+	// (the terminal is). It excludes local Files, Root, Diff and stdin.
+	Remote *authority.RemoteSpec
 	// Files open in order, each in its own tab. A missing file opens as an
 	// empty buffer that is created on save.
 	Files []FileTarget
@@ -103,6 +135,10 @@ type Options struct {
 	// unnamed.
 	StdinName string
 
+	// Daemon hosts the editor as a daemon (DaemonServe) or attaches this terminal
+	// to one (DaemonAttach). Nil is the direct launch, the default.
+	Daemon *DaemonOptions
+
 	// pluginLog receives the plugin log for LogFile; set by buildRuntime.
 	pluginLog func(pluginapi.LogEntry)
 }
@@ -165,9 +201,53 @@ func (o Options) Validate() error {
 	if o.StdinName != "" && !o.ReadStdin && len(o.Stdin) == 0 {
 		return errors.New("--stdin-name needs --stdin or a - argument")
 	}
+	if o.Daemon != nil {
+		switch o.Daemon.Mode {
+		case DaemonServe, DaemonAttach:
+		default:
+			return errors.New("daemon mode is invalid")
+		}
+		// A daemon launch is a hosted session, not a stdin/file/compare launch:
+		// those combinations would read two keyboards or restore twice.
+		if o.StdinLaunch() {
+			return errors.New("--daemon cannot be combined with --stdin")
+		}
+		if o.Diff {
+			return errors.New("--daemon cannot be combined with --diff")
+		}
+		if o.Restore || o.NoRestore {
+			return errors.New("--daemon cannot be combined with --restore/--no-restore")
+		}
+		if o.Simple {
+			return errors.New("--daemon cannot be combined with --simple")
+		}
+		if o.Daemon.Mode == DaemonServe && len(o.Files) > 0 {
+			return errors.New("--daemon opens no files: start it, then attach and open them")
+		}
+	}
 	for _, p := range o.PluginPaths {
 		if strings.TrimSpace(p) == "" {
 			return errors.New("--plugin: path is empty")
+		}
+	}
+	if o.Remote != nil {
+		if err := validateRemote(o.Remote); err != nil {
+			return err
+		}
+		if o.Diff {
+			return errors.New("a remote target cannot be combined with --diff")
+		}
+		if o.Root != "" || len(o.Files) > 0 {
+			return errors.New("a remote target cannot be combined with local directories or files")
+		}
+		if o.StdinLaunch() {
+			return errors.New("a remote target cannot be combined with --stdin")
+		}
+		if o.Restore {
+			return errors.New("a remote target does not restore the local session")
+		}
+		if o.Daemon != nil {
+			return errors.New("a remote target cannot be combined with --daemon/--attach")
 		}
 	}
 	for _, f := range o.Files {
@@ -180,6 +260,30 @@ func (o Options) Validate() error {
 		if f.Col > 0 && f.Line == 0 {
 			return fmt.Errorf("%s: a column needs a line", f.Path)
 		}
+	}
+	return nil
+}
+
+// validateRemote checks a programmatically built remote target. The CLI already parsed it;
+// this keeps a caller's --remote contract honest.
+func validateRemote(spec *authority.RemoteSpec) error {
+	if spec.Host == "" {
+		return errors.New("remote target: host is empty")
+	}
+	if spec.User == "" {
+		return errors.New("remote target: user is empty")
+	}
+	if spec.Path == "" {
+		return errors.New("remote target: path is empty")
+	}
+	if spec.Port < 0 || spec.Port > 65535 {
+		return fmt.Errorf("remote target: port %d is invalid", spec.Port)
+	}
+	if spec.Line < 0 || spec.Col < 0 {
+		return errors.New("remote target: line and column must not be negative")
+	}
+	if spec.Col > 0 && spec.Line == 0 {
+		return errors.New("remote target: a column needs a line")
 	}
 	return nil
 }

@@ -39,8 +39,12 @@ func (m *Model) shellAction(action string, args map[string]any) (tea.Cmd, bool) 
 		sr.EndShell(editor.ShellJob{}, "", err)
 		return nil, true
 	}
+	run := editor.RunShellJob
+	if m.shellRun != nil {
+		run = m.shellRun
+	}
 	return func() tea.Msg {
-		out, err := editor.RunShellJob(job)
+		out, err := run(job)
 		return shellDone{job: job, out: out, err: err}
 	}, true
 }

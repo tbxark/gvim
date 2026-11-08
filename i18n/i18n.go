@@ -2,12 +2,14 @@
 // %{name} interpolation and CLDR plural forms. It is a TUI-free leaf package: only the
 // standard library, so both the engine packages and the UI can translate through it.
 //
-// The catalogues are keyed like Fresh's (refs/fresh/.../locales/en.json): "clipboard.copied",
-// "terminal.no_terminal_open", "explorer.copied". Where gvim has a string of its own that
-// Fresh does not name, the key lives under "gvim." in the same file. The English catalogue
-// starts small: it holds the strings a first extraction slice moved out of the code, and it
-// grows as more app-owned strings are extracted. Other languages stay empty until translated
-// catalogues are registered with Register (the shape Fresh's locale JSON files already have).
+// The catalogues are embedded from i18n/locales/*.json and keyed like Fresh's
+// (refs/fresh/.../locales/en.json): "clipboard.copied", "terminal.no_terminal_open".
+// Where gvim has a string of its own that Fresh does not name, the key lives under
+// "gvim." in the same file. i18n/locales/en.json is the source of truth; the other
+// locale files are generated from Fresh's translations by tools/i18n_import.py and
+// contain only the keys whose English wording matches Fresh (the rest fall back to
+// English at runtime). Register installs or replaces a locale table for tests and
+// callers; embedded files are loaded lazily on first use.
 //
 // Lookup order is the active locale, each shorter tag of it (zh-Hant-CN -> zh-Hant -> zh),
 // then English, then the key itself. A missing translation therefore reads as a key rather
@@ -15,7 +17,7 @@
 package i18n
 
 import (
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -151,8 +153,8 @@ var (
 	loadOnce   sync.Once
 )
 
-//go:embed catalogues/en.json
-var enCatalogue []byte
+//go:embed locales/*.json
+var localeFiles embed.FS
 
 // Register installs (or replaces) the catalogue of a locale. It is the seam for the
 // translated Fresh JSON files and for tests; the English catalogue is embedded and
@@ -174,17 +176,30 @@ func Register(locale string, table map[string]string) {
 	catalogues[code] = copyTable
 }
 
-// ensureEnglish loads the embedded English catalogue once.
+// ensureEnglish loads the embedded English catalogue once. It is the source of truth
+// the other locales are validated against.
 func ensureEnglish() {
 	loadOnce.Do(func() {
-		var table map[string]string
-		if err := json.Unmarshal(enCatalogue, &table); err != nil {
-			panic("i18n: embedded English catalogue: " + err.Error())
-		}
+		table := decodeEmbedded(DefaultLocale)
 		catMu.Lock()
 		catalogues[DefaultLocale] = table
 		catMu.Unlock()
 	})
+}
+
+// decodeEmbedded loads and decodes one embedded locale file. A malformed embedded
+// file is a build-time bug, so it panics on first use; the catalogue tests catch it
+// before a release.
+func decodeEmbedded(code string) map[string]string {
+	data, err := localeFiles.ReadFile("locales/" + code + ".json")
+	if err != nil {
+		panic("i18n: embedded locale " + code + ": " + err.Error())
+	}
+	var table map[string]string
+	if err := json.Unmarshal(data, &table); err != nil {
+		panic("i18n: embedded locale " + code + ": " + err.Error())
+	}
+	return table
 }
 
 // T translates key in locale, falling back to English and then to the key itself, and
@@ -289,12 +304,37 @@ func chain(locale string) []string {
 	return out
 }
 
-// catalogue returns the table of one locale code, or nil.
+// catalogue returns the table of one locale code, or nil. An embedded locale file is
+// loaded lazily the first time its code is consulted, so a session that never uses a
+// translated locale pays only for English. Register tables win over the embedded file.
 func catalogue(code string) map[string]string {
 	ensureEnglish()
+	if code == "" {
+		return nil
+	}
 	catMu.RLock()
-	defer catMu.RUnlock()
-	return catalogues[code]
+	table := catalogues[code]
+	catMu.RUnlock()
+	if table != nil {
+		return table
+	}
+	if !hasEmbeddedLocale(code) {
+		return nil
+	}
+	table = decodeEmbedded(code)
+	catMu.Lock()
+	defer catMu.Unlock()
+	if existing := catalogues[code]; existing != nil {
+		return existing // Register raced with the lazy load.
+	}
+	catalogues[code] = table
+	return table
+}
+
+// hasEmbeddedLocale reports whether i18n/locales has a file for code.
+func hasEmbeddedLocale(code string) bool {
+	_, err := localeFiles.ReadFile("locales/" + code + ".json")
+	return err == nil
 }
 
 // lookup resolves key through the fallback chain.

@@ -44,6 +44,13 @@ func (m *Model) rootInit() tea.Cmd {
 // the rest of the root still see it.
 func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case agentRankMsg:
+		if !msg.ov.p.Active() {
+			return nil, true // the picker closed while the ranking ran
+		}
+		return msg.ov.cmdFor(msg.ov.p.Update(msg.msg)), true
+	case agentPickMsg:
+		return m.startConfiguredAgent(msg.name), true
 	case gitStatusMsg:
 		m.applyGitStatus(msg)
 		return nil, true

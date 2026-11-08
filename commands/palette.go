@@ -71,8 +71,8 @@ func Commands(km *keymap.Map) []Entry {
 	if km == nil {
 		km = keymap.Default()
 	}
-	out := make([]Entry, 0, len(builtinCommands)+len(compareCommands)+len(markdownCommands)+len(pluginCommands))
-	for _, c := range slices.Concat(builtinCommands, compareCommands, markdownCommands, pluginCommands) {
+	out := make([]Entry, 0, len(builtinCommands)+len(compareCommands)+len(markdownCommands)+len(terminalCommands)+len(pluginCommands))
+	for _, c := range slices.Concat(builtinCommands, compareCommands, markdownCommands, terminalCommands, pluginCommands) {
 		if r, ok := gvimRenames[c.Action]; ok {
 			c.Name, c.Description = cmp.Or(r.Name, c.Name), r.Description
 		}

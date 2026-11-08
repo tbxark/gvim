@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui"
 )
 
@@ -68,4 +69,22 @@ func TestTermStarterScrollbackLinesReachTheSession(t *testing.T) {
 	if got := term.ScrollbackLen(); got != 0 {
 		t.Fatalf("ScrollbackLen = %d with terminal.scrollback_lines 0, want the history disabled", got)
 	}
+}
+
+// TestTermStarterStartLaunchRunsTheAgentArgv checks the Launcher half: Run Agent
+// and Resume start the recorded argv instead of the configured shell.
+func TestTermStarterStartLaunchRunsTheAgentArgv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the terminal is Unix only")
+	}
+	starter := NewTermStarter(context.Background(), TermStarterOptions{Shell: "/bin/sh"})
+	term, err := starter.StartLaunch(terminal.Launch{
+		Argv:  []string{"/bin/sh", "-c", "printf 'agent-%s\\n' ok; exec sleep 5"},
+		Agent: "test-agent",
+	}, t.TempDir(), 40, 6)
+	if err != nil {
+		t.Fatalf("StartLaunch: %v", err)
+	}
+	defer func() { _ = term.Close() }()
+	waitScreenText(t, term, "agent-ok")
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/internal/configview"
 	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/trust"
 )
 
 // runTree runs a command tree with args and returns its stdout, its stderr and
@@ -288,6 +289,11 @@ func TestConfigShowReal(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"tab_size": 8, "bogus": true}`)
 	t.Chdir(root)
+	// The viewer follows the editor's trust gate, so the workspace has to be trusted for
+	// its project layer to merge.
+	if err := trust.NewStore(filepath.Join(userDir, "trust.json")).Set(root, trust.Trusted); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout, stderr bytes.Buffer
 	code := Execute(context.Background(), []string{"config", "show"}, &stdout, &stderr, nil)
@@ -506,5 +512,33 @@ func writeFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestConfigShowRealUntrustedGatesProjectLayer checks the trust gate in the real
+// command: an undecided workspace omits the project layer and names the skipped file
+// on stderr, so the output is the configuration the editor would run with.
+func TestConfigShowRealUntrustedGatesProjectLayer(t *testing.T) {
+	isolateHome(t)
+	userDir, err := config.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(userDir, "config.json"), `{"theme": "light", "tab_size": 2}`)
+	root := t.TempDir()
+	project := filepath.Join(root, ".gvim", "config.json")
+	writeFile(t, project, `{"tab_size": 8}`)
+	t.Chdir(root)
+
+	var stdout, stderr bytes.Buffer
+	code := Execute(context.Background(), []string{"config", "show"}, &stdout, &stderr, nil)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"tab_size": 2`) || strings.Contains(stdout.String(), `"tab_size": 8`) {
+		t.Fatalf("stdout = %s, want the user tab size without the project layer", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "project config layer skipped: "+project) {
+		t.Fatalf("stderr = %q, want the skipped project-layer note", stderr.String())
 	}
 }

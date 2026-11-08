@@ -10,6 +10,8 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
+	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/env"
@@ -17,6 +19,7 @@ import (
 	"github.com/tbxark/gvim/finder"
 	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/configview"
+	"github.com/tbxark/gvim/internal/daemon"
 	"github.com/tbxark/gvim/internal/filewatch"
 	"github.com/tbxark/gvim/internal/highlight"
 	"github.com/tbxark/gvim/internal/keybindings"
@@ -53,13 +56,25 @@ func Run(ctx context.Context, opts Options) error {
 	if err := opts.Validate(); err != nil {
 		return err
 	}
-	if err := requireTerminal(os.Stdout); err != nil {
-		return err
+	// An attach is a terminal proxy: it builds no editor and touches no session.
+	if opts.Daemon != nil && opts.Daemon.Mode == DaemonAttach {
+		return attachToDaemon(ctx, opts)
+	}
+	serveDaemon := opts.Daemon != nil && opts.Daemon.Mode == DaemonServe
+	if !serveDaemon {
+		if err := requireTerminal(os.Stdout); err != nil {
+			return err
+		}
+		// The daemon owns the workspace's session: a bare launch refuses instead of
+		// becoming a second editor of the same workspace.
+		if err := refuseIfDaemonRunning(opts); err != nil {
+			return err
+		}
 	}
 	// A pipe on standard input with no files named is buffer content, as in Fresh
 	// ("git show | gvim"): consume it even without --stdin. A launch that asks for
 	// stdin explicitly must have a pipe: a terminal would block forever on a read.
-	if !opts.StdinLaunch() && len(opts.Files) == 0 && !term.IsTerminal(os.Stdin.Fd()) {
+	if !serveDaemon && !opts.StdinLaunch() && len(opts.Files) == 0 && !term.IsTerminal(os.Stdin.Fd()) {
 		opts.ReadStdin = true
 	}
 	var stdinInput *os.File
@@ -87,15 +102,51 @@ func Run(ctx context.Context, opts Options) error {
 			opts.SessionDir = dir
 		}
 	}
+	var srv *daemon.Server
+	if serveDaemon {
+		name := opts.Daemon.Name
+		if name == "" {
+			root, err := resolveRoot(opts.Root)
+			if err != nil {
+				return err
+			}
+			name = daemon.DefaultName(root)
+		}
+		ln, path, err := daemon.Listen(name)
+		if err != nil {
+			return err
+		}
+		srv = daemon.NewServer(ln, path)
+		defer func() { _ = srv.Close() }()
+		opts.Daemon.Detach = srv.Detach
+		_, _ = fmt.Fprintf(os.Stderr, "gvim: daemon listening on %s\n", path)
+	}
 	rt, err := buildRuntime(ctx, opts, true)
 	if err != nil {
 		return err
 	}
 	defer rt.close()
+	if srv != nil {
+		// A client attached with files opens them in the hosted editor; the message
+		// is the one the explorer sends for an activated row.
+		srv.OnOpenFiles(func(paths []string) {
+			prog := srv.Program()
+			if prog == nil {
+				return
+			}
+			for _, path := range paths {
+				prog.Send(tui.OpenFileMessage(path))
+			}
+		})
+	}
 	var runErr error
-	if stdinInput != nil {
+	switch {
+	case srv != nil:
+		go srv.Serve(ctx)
+		runErr = tui.RunWithIO(ctx, rt.model, srv, srv, srv.OnProgram)
+	case stdinInput != nil:
 		runErr = tui.RunWithInput(ctx, rt.model, stdinInput)
-	} else {
+	default:
 		runErr = tui.Run(ctx, rt.model)
 	}
 	if runErr != nil {
@@ -173,6 +224,9 @@ type runtime struct {
 	interrupted bool
 	// log is the --log-file writer; nil when there is none.
 	log *fileLog
+	// auth is the workspace authority slot of the session (docs/authority.md): the
+	// local backend, or the SSH backend of a remote launch.
+	auth authority.Slot
 }
 
 // close stops the file index of the current root and the watcher.
@@ -180,6 +234,9 @@ func (r *runtime) close() {
 	r.projects.Close()
 	if r.watcher != nil {
 		_ = r.watcher.Close()
+	}
+	if r.auth != nil {
+		_ = r.auth.Close()
 	}
 	r.log.Close()
 }
@@ -298,6 +355,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if err != nil {
 		return nil, err
 	}
+	if opts.Remote != nil {
+		// A remote launch keeps a local process root for the local-only pieces
+		// (plugin runtime, shells) but opens no local files and no explorer; the
+		// editor shows the remote terminal instead (pending-wiring UX).
+		root = remoteLocalRoot()
+	}
 	// The trust decision gates the project config layer, so it is resolved
 	// before the config is loaded: an untrusted workspace is configured by the
 	// user's own file only.
@@ -322,6 +385,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// its layout (the unsaved text only), or not at all, and whether it is saved
 	// and hot-exited when the program ends.
 	plan := planSession(opts, cfg)
+	if opts.Remote != nil {
+		// No local session restore or save for a remote launch: the files of the
+		// remote workspace are the SFTP follow-up, and the local session must not
+		// come back under an SSH workspace.
+		plan = sessionPlan{}
+	}
 	tree, err := explorer.Open(root)
 	if err != nil {
 		return nil, err
@@ -508,6 +577,22 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		Root:     proj.RootDir,
 		SpawnEnv: envProvider.Overlay,
 	})
+	// The workspace authority: the local backend over the plugin OS (the same
+	// instance the plugin runtime uses) or the SSH backend of a remote launch. Every
+	// launch and one-shot goes through it; nothing downstream looks at the kind.
+	authGate := func(_ context.Context, _ []string, _ string) error {
+		if opts.Remote != nil && !trustedLive() {
+			return errors.New("workspace is not trusted: remote commands are disabled")
+		}
+		return nil
+	}
+	authSlot := newAuthority(opts, pw, authGate, envProvider.Overlay)
+	if connectNotice, _ := attemptAuthorityConnect(ctx, authSlot); connectNotice != "" {
+		openNotices = append(openNotices, connectNotice)
+	}
+	// The one-shots of the session go through the slot: git grep here, the shell and
+	// formatter runner below, the dock terminal through its starter.
+	deps.Root.GitGrep = gitGrep{spawnEnv: envProvider.Overlay, oneShot: authSlot.OneShot()}
 	deps.Root.Plugins = pw.Runtime
 	deps.Root.PluginEditor = pw.Editor
 	deps.Root.PluginKeys = func(name string, bs []pluginapi.Binding) (tui.Keymap, error) {
@@ -562,14 +647,31 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if logNotice != "" {
 		notices = append(notices, logNotice)
 	}
+	if opts.Remote != nil {
+		notices = append(notices, "Remote editing is not available yet: opened the SSH terminal at "+opts.Remote.Workspace()+"; local files are unchanged")
+	}
 	deps.Notice = strings.Join(notices, "; ")
+	if opts.Daemon != nil && opts.Daemon.Mode == DaemonServe {
+		// A hosted editor offers Detach: the client goes away, the editor keeps running.
+		deps.Detach = opts.Daemon.Detach
+		rows := make([]commands.Entry, 0, len(deps.Commands)+1)
+		rows = append(rows, deps.Commands...)
+		rows = append(rows, commands.Entry{
+			Name:        "Detach from Daemon",
+			Description: "Detach this client and leave the editor running in the daemon",
+			Action:      "detach_daemon",
+			Source:      commands.SourceBuiltin,
+		})
+		deps.Commands = rows
+	}
 	model := newUI(deps)
 	loadSearch(model, opts.SessionDir)
 	shellCommand, shellArgs := cfg.Terminal.TerminalShellOptions()
 	model.SetDock(tui.DockPorts{
 		Starter: uiadapter.NewTermStarter(ctx, uiadapter.TermStarterOptions{
 			Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines,
-			SpawnEnv: envProvider.Overlay,
+			SpawnEnv:  envProvider.Overlay,
+			Authority: authSlot,
 			// A child OSC 52 writes the system clipboard only when the config asks
 			// for it and the workspace is trusted (output is untrusted data, and
 			// the default is off); the session parser is inert otherwise.
@@ -587,8 +689,41 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			StayInScrollback:     !cfg.Terminal.JumpToEndOnOutput,
 			NoMouseDragSelects:   !cfg.Terminal.MouseDragSelects,
 			PassCtrlVWithoutText: cfg.Terminal.PassCtrlVWithoutText,
+			ResumeAgents:         cfg.Terminal.ResumeAgents,
+			Agents:               dockAgents(cfg.Terminal),
 		},
 	})
+	// The workspace authority of the session: the shell and formatter runner go
+	// through the slot, and a remote launch shows its segment and opens the SSH
+	// terminal at the remote workspace.
+	if run := authorityShellRunner(authSlot); run != nil {
+		model.SetShellRunner(run)
+	}
+	if opts.Remote != nil {
+		slot := authSlot
+		needsPassword := func() bool {
+			p, ok := slot.(interface{ NeedsPassword() bool })
+			return ok && p.NeedsPassword()
+		}
+		reconnect := func(ctx context.Context, password string) error {
+			if p, ok := slot.(interface {
+				ReconnectWithPassword(context.Context, string) error
+			}); ok {
+				return p.ReconnectWithPassword(ctx, password)
+			}
+			return slot.Reconnect(ctx)
+		}
+		model.SetAuthorityHooks(tui.AuthorityHooks{
+			Status: func() tui.AuthorityStatus {
+				st := slot.State()
+				return tui.AuthorityStatus{Text: st.Label, Connected: st.Connected, Reason: st.Reason}
+			},
+			NeedsPassword: needsPassword,
+			Reconnect:     reconnect,
+		})
+		model.OpenAuthorityTerminalAtStart()
+	}
+
 	// A restored session brings the terminal transcript back, dead: nothing is
 	// re-run automatically, and Restart starts a shell below the transcript.
 	if plan.load && plan.tabs && opts.SessionDir != "" {
@@ -622,6 +757,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 
 		recoveryWriter: deps.Root.Recovery,
 		log:            logFile,
+		auth:           authSlot,
 	}
 	model.SetQuitStash(rt.stashForQuit)
 	return rt, nil

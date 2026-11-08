@@ -121,6 +121,9 @@ func (p *Panel) title() string {
 		return p.scrollbackTitle()
 	}
 	if p.exited {
+		if agent := p.launch.Agent; agent != "" {
+			return "Terminal (exited) — " + agent
+		}
 		return "Terminal (exited)"
 	}
 	return "Terminal"
@@ -139,6 +142,11 @@ func (p *Panel) scrollbackTitle() string {
 		if p.reflowed {
 			name = "Scrollback (restored, rewrapped)"
 		}
+	}
+	// The agent name is part of the record a restart rejoins, so it stays visible
+	// on the dead transcript too.
+	if agent := p.launch.Agent; agent != "" {
+		name += " — " + agent
 	}
 	title := fmt.Sprintf("%s — rows %d-%d of %d (Ctrl+Space returns)", name, first, last, combined)
 	if p.scroll.typing {

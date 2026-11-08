@@ -8,6 +8,7 @@ import (
 	goruntime "runtime"
 	"time"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui"
 )
@@ -45,6 +46,11 @@ type TermStarterOptions struct {
 	// text. The host decides whether the feature is on (clipboard.use_osc52 and a
 	// trusted workspace); a nil hook leaves the feature inert.
 	OSC52 func(selection, text string) bool
+	// Authority is the workspace authority slot of the session (nil for none). The
+	// local backend returns a launch with no backend, so the local PTY starts as
+	// before; a remote backend returns a transport the dock drives through
+	// terminal.StartWithBackend. The starter never asks what kind the slot is.
+	Authority authority.Slot
 }
 
 // TermStarter starts shells for the dock. A shell lives until the dock closes it, or
@@ -68,6 +74,25 @@ func NewTermStarter(ctx context.Context, opts ...TermStarterOptions) TermStarter
 // Start runs the shell in dir with the given size. It returns a nil Terminal with
 // the error, so the dock never holds a typed nil.
 func (s TermStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
+	return s.startProgram(s.opts.Shell, s.opts.Args, dir, cols, rows, true)
+}
+
+// StartLaunch runs a recorded or configured program instead of the shell: an
+// agent session or a resume, as the argv names it. It satisfies the dock's
+// Launcher port, so Run Agent and Resume start without a shell in between.
+func (s TermStarter) StartLaunch(launch terminal.Launch, dir string, cols, rows int) (tui.Terminal, error) {
+	launch = launch.Clean()
+	if len(launch.Argv) == 0 {
+		return s.Start(dir, cols, rows)
+	}
+	// An agent/resume program is a local executable: it does not go through a
+	// re-parenting authority (a remote login shell would ignore the argv).
+	return s.startProgram(launch.Argv[0], launch.Argv[1:], dir, cols, rows, false)
+}
+
+// startProgram runs one program in dir with the dock's environment and clipboard
+// hook. An empty program runs the user's shell.
+func (s TermStarter) startProgram(shell string, args []string, dir string, cols, rows int, viaAuthority bool) (tui.Terminal, error) {
 	scrollback := s.opts.ScrollbackLines
 	if scrollback == 0 {
 		// config's 0 means "no history"; the terminal package's 0 means its
@@ -78,8 +103,45 @@ func (s TermStarter) Start(dir string, cols, rows int) (tui.Terminal, error) {
 	if s.opts.SpawnEnv != nil {
 		extraEnv = s.opts.SpawnEnv()
 	}
+	// The workspace authority decides where the terminal runs. The local backend
+	// returns a launch with no transport (the local PTY path below); a remote backend
+	// returns a transport that the same Session drives through StartWithBackend.
+	if viaAuthority && s.opts.Authority != nil {
+		launch, err := s.opts.Authority.Terminal().Launch(s.ctx, authority.TerminalOptions{
+			Dir: dir, Shell: shell, Args: args, Env: extraEnv, Cols: cols, Rows: rows,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if launch.Shell != "" {
+			shell = launch.Shell
+		}
+		if len(launch.Args) > 0 {
+			args = launch.Args
+		}
+		if launch.Dir != "" {
+			dir = launch.Dir
+		}
+		if len(launch.Env) > 0 {
+			extraEnv = launch.Env
+		}
+		if launch.Backend != nil {
+			sess, err := terminal.StartWithBackend(s.ctx, terminal.Options{
+				Dir: launch.Dir, Cols: cols, Rows: rows,
+				ScrollbackLines: scrollback,
+			}, launch.Backend)
+			if err != nil {
+				_ = launch.Backend.Close()
+				return nil, err
+			}
+			if s.opts.OSC52 != nil {
+				sess.SetOSC52Handler(s.opts.OSC52)
+			}
+			return sess, nil
+		}
+	}
 	sess, err := terminal.Start(s.ctx, terminal.Options{
-		Shell: s.opts.Shell, Args: s.opts.Args,
+		Shell: shell, Args: args,
 		Dir: dir, Cols: cols, Rows: rows,
 		ScrollbackLines: scrollback, Env: extraEnv,
 	})

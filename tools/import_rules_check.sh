@@ -35,9 +35,11 @@
 # Rules:
 #   R1  no top-level (non-cmd, non-internal) package imports internal/.
 #   R2  charm.land/* (Bubble Tea v2 and friends) may be imported only by the
-#       TUI tree (internal/tui/...), the terminal backend and the test-only
-#       UI harness (internal/uitest). The plain github.com/charmbracelet/x/*
-#       utility libraries (ansi, term) are not the UI framework and stay free.
+#       TUI tree (internal/tui/...), the daemon host (internal/daemon, which
+#       runs the TUI program over a client socket), the terminal backend and the
+#       test-only UI harness (internal/uitest). The plain
+#       github.com/charmbracelet/x/* utility libraries (ansi, term) are not the
+#       UI framework and stay free.
 #   R3  leaf packages import no module package: buffer, textlayout, diff,
 #       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp,
 #       lsp/lsptest, atomicfile, shellcmd, config, explorer, keymap, i18n,
@@ -56,8 +58,9 @@
 #   R5  the TUI tree must not import internal/app, internal/cli, the plugin
 #       runtime, lsp, finder or fsops; a tui sub-package must not import its
 #       parent package (internal/tui).
-#   R6  internal/cli imports only internal/app, internal/configview and syntax (plus
-#       the standard library and cobra).
+#   R6  internal/cli imports only internal/app, internal/configview, authority and
+#       syntax (plus the standard library and cobra). authority is the top-level
+#       remote-spec parser the target classification needs; it imports no internal/.
 #   R7  only the root main package and internal/cli import internal/app; only
 #       the root main package imports internal/cli; only internal/app,
 #       internal/pluginhost and plugin/plugintest import the plugin runtime;
@@ -150,7 +153,7 @@ while IFS=$'\t' read -r pkg imp; do
   case "$imp" in
     charm.land/*)
       if ! under "$rel" internal/tui && ! under "$rel" internal/terminal &&
-        [ "$rel" != internal/uitest ]; then
+        [ "$rel" != internal/uitest ] && [ "$rel" != internal/daemon ]; then
         add R2 "$pkg" "$imp"
       fi
       ;;
@@ -215,7 +218,7 @@ while IFS=$'\t' read -r pkg imp; do
     # R6: cli is the flags layer; app holds the run, configview the config views.
     if [ "$rel" = internal/cli ]; then
       case "$irel" in
-        internal/app | internal/configview | syntax) ;;
+        internal/app | internal/configview | syntax | authority) ;;
         *) add R6 "$pkg" "$imp" ;;
       esac
     fi

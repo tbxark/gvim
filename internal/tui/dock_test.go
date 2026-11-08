@@ -144,10 +144,11 @@ func fakeLine(text string) terminal.Line {
 // fakeStarter implements TerminalStarter. It hands out term, or fails with err, and
 // it records the directory and size of each start.
 type fakeStarter struct {
-	term  *fakeTerm
-	err   error
-	dirs  []string
-	sizes [][2]int
+	term     *fakeTerm
+	err      error
+	dirs     []string
+	sizes    [][2]int
+	launches []terminal.Launch // the StartLaunch calls, in order
 }
 
 func newFakeStarter() *fakeStarter {
@@ -156,6 +157,16 @@ func newFakeStarter() *fakeStarter {
 
 func (s *fakeStarter) Start(dir string, cols, rows int) (Terminal, error) {
 	s.dirs = append(s.dirs, dir)
+	s.sizes = append(s.sizes, [2]int{cols, rows})
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.term, nil
+}
+
+// StartLaunch records an agent/resume start, the way the real starter runs it.
+func (s *fakeStarter) StartLaunch(launch terminal.Launch, dir string, cols, rows int) (Terminal, error) {
+	s.launches = append(s.launches, launch)
 	s.sizes = append(s.sizes, [2]int{cols, rows})
 	if s.err != nil {
 		return nil, s.err

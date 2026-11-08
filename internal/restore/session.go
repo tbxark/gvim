@@ -81,6 +81,9 @@ func WriteSession(ed *editor.Editor, dir string, st tui.ExplorerState, kept []se
 			}
 			fs.PageWidth = view.PageWidth
 		}
+		if n := doc.VirtualLines(); n > 0 {
+			fs.VirtualLines, fs.VirtualColumn = n, doc.VirtualLineColumn()
+		}
 		if doc.Large() {
 			// The unsaved text of a large document is not held whole. Its stash is the
 			// edited lines and the lines of the file they leave alone.
@@ -260,6 +263,12 @@ func restoreFile(ed *editor.Editor, dir string, f session.FileState, replace boo
 	}
 	if f.Top > 0 {
 		ed.ScrollTo(f.Top)
+	}
+	if f.VirtualLines > 0 {
+		// The saved caret sat on empty rows below the last line: park it there again.
+		// SetVirtualLines refuses a document with a selection or windowed extras, and
+		// reports how many rows it took.
+		doc.SetVirtualLines(f.VirtualLines, f.VirtualColumn)
 	}
 	return true, nil
 }

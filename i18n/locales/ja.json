@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "コピーしました",
+  "clipboard.copied_line": "行をコピーしました",
+  "clipboard.copied_path": "パスをコピーしました: %{path}",
+  "clipboard.copied_plain": "プレーンテキストとしてコピーしました",
+  "clipboard.cut": "切り取りました",
+  "clipboard.cut_line": "行を切り取りました",
+  "clipboard.pasted": "貼り付けました",
+  "format.formatted_with": "%{formatter} でフォーマットしました",
+  "gvim.lsp.inlay_hints_off": "インレイヒントを無効化",
+  "gvim.lsp.inlay_hints_on": "インレイヒントを有効化",
+  "gvim.scrollback.copied_line": "行をコピーしました",
+  "gvim.scrollback.no_selection": "選択範囲がありません",
+  "terminal.no_terminal_open": "開いているターミナルがありません — 先にターミナルを開いてください"
+}

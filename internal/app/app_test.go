@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/tbxark/gvim/authority"
 	"os"
 	"path/filepath"
 	"strings"
@@ -182,5 +183,40 @@ func TestResolveRootDirectoryIsResolved(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("resolveRoot(%q) = %q, want %q", dir, got, want)
+	}
+}
+
+// TestValidateRemote checks the remote-launch rules of app.Options.
+func TestValidateRemote(t *testing.T) {
+	spec := &authority.RemoteSpec{User: "u", Host: "h", Path: "/srv"}
+	tests := []struct {
+		name    string
+		opts    Options
+		wantErr string
+	}{
+		{"remote alone", Options{Remote: spec}, ""},
+		{"remote with file", Options{Remote: spec, Files: []FileTarget{{Path: "a.go"}}}, "local directories or files"},
+		{"remote with root", Options{Remote: spec, Root: "dir"}, "local directories or files"},
+		{"remote with diff", Options{Remote: spec, Diff: true}, "--diff"},
+		{"remote with restore", Options{Remote: spec, Restore: true}, "does not restore"},
+		{"remote with stdin", Options{Remote: spec, ReadStdin: true}, "--stdin"},
+		{"remote with daemon", Options{Remote: spec, Daemon: &DaemonOptions{Mode: DaemonServe}}, "--daemon"},
+		{"remote empty host", Options{Remote: &authority.RemoteSpec{User: "u", Path: "/x"}}, "host is empty"},
+		{"remote empty user", Options{Remote: &authority.RemoteSpec{Host: "h", Path: "/x"}}, "user is empty"},
+		{"remote empty path", Options{Remote: &authority.RemoteSpec{User: "u", Host: "h"}}, "path is empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.opts.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() = %v, want %q", err, tt.wantErr)
+			}
+		})
 	}
 }

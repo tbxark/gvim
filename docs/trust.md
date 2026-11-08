@@ -152,9 +152,17 @@ again. Switching the project with Switch Project loads the new root's decision a
 its pill, but the running session keeps the config it started with (gvim does not hot-reload
 the config; Fresh applies trust to live spawns instead).
 
-**Config viewer.** `gvim config show` still merges the project layer: it is a read-only
-diagnostic of the files, not a simulation of the trust gate. The editor itself follows the
-gate.
+**Config viewer.** `gvim config show` reads the same trust store the editor uses and gates
+the project layer on the workspace's recorded level. It is read-only in the strict sense: it
+does not call the open-time policy that would auto-trust and record a decision for a clean
+undecided workspace, so an undecided workspace shows untrusted (what the editor would use until
+the user decides at open) and nothing is ever written.
+A trusted workspace merges the project file exactly as the editor does; an untrusted or
+undecided workspace omits the project layer and prints a warning naming the file it skipped
+("project config layer skipped: … (the workspace is not trusted; start gvim in it to decide
+trust)"). The command never prompts, never records a decision and never changes a file.
+`gvim config paths` still lists both locations and whether each exists: a path listing
+contains no config, so it is not gated.
 
 ## 4. UI
 

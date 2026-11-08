@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/gitstate"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/shellcmd"
@@ -20,6 +21,9 @@ type gitGrep struct {
 	// spawnEnv is the active project environment's set-only overlay for the git
 	// process; nil applies the inherited environment.
 	spawnEnv func() []string
+	// oneShot is the workspace authority's one-shot surface: git grep runs through
+	// it, so a remote workspace greps the remote work tree. Nil keeps shellcmd.
+	oneShot authority.OneShot
 }
 
 // gitGrepTimeout bounds one git grep run.
@@ -61,7 +65,14 @@ func (g gitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResult, err
 	if g.spawnEnv != nil {
 		extraEnv = g.spawnEnv()
 	}
-	text, code, err := shellcmd.RunArgsEnv(root, argv, "", gitGrepTimeout, extraEnv)
+	var text string
+	var code int
+	var err error
+	if g.oneShot != nil {
+		text, code, err = runGitGrepOneShot(g.oneShot, root, argv, extraEnv, gitGrepTimeout)
+	} else {
+		text, code, err = shellcmd.RunArgsEnv(root, argv, "", gitGrepTimeout, extraEnv)
+	}
 	if err != nil {
 		return out, err
 	}

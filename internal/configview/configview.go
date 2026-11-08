@@ -48,6 +48,10 @@ type Options struct {
 	// Keymap and Theme override the names the config files set.
 	Keymap string
 	Theme  string
+	// Trusted tells Load whether the workspace's recorded trust level allows the
+	// project config layer (docs/trust.md). The caller resolves it read-only; nil
+	// (no trust information) keeps the project layer out, the conservative choice.
+	Trusted *bool
 }
 
 // validate reports the first option that cannot be used. The messages are the
@@ -102,6 +106,12 @@ type effectiveSettings struct {
 // is set. A root that is not absolute is made absolute first. The error is
 // non-nil when opts is invalid, when the result cannot be built, or when
 // opts.Config is set and does not exist.
+//
+// The project layer is trust-gated exactly as the editor's config load is
+// (docs/trust.md): it is merged only when the workspace's recorded trust level
+// allows project config, so an untrusted or undecided workspace shows the
+// configuration the editor would actually run with. When a project file exists
+// but the gate skips it, the view carries a warning naming the file.
 func Load(root string, opts Options) (ConfigView, error) {
 	if err := opts.validate(); err != nil {
 		return ConfigView{}, err
@@ -109,7 +119,9 @@ func Load(root string, opts Options) (ConfigView, error) {
 	if err := CheckFile(opts.Config); err != nil {
 		return ConfigView{}, err
 	}
-	cfg, diags, err := config.Load(config.Options{Root: root, UserFile: opts.Config})
+	trusted := opts.Trusted != nil && *opts.Trusted
+	projectPath, projectFound := projectConfigFile(root)
+	cfg, diags, err := config.Load(config.Options{Root: root, UserFile: opts.Config, Untrusted: !trusted})
 	if err != nil {
 		return ConfigView{}, err
 	}
@@ -146,8 +158,27 @@ func Load(root string, opts Options) (ConfigView, error) {
 	for _, d := range diags {
 		view.Warnings = append(view.Warnings, d.String())
 	}
+	if !trusted && projectFound {
+		view.Warnings = append(view.Warnings, fmt.Sprintf(
+			"project config layer skipped: %s (the workspace is not trusted; start gvim in it to decide trust)", projectPath))
+	}
 	view.Warnings = append(view.Warnings, keybindings.Warnings(cfg)...)
 	return view, nil
+}
+
+// projectConfigFile returns the project config file the nearest-project search finds
+// for root. The trust decision itself is the caller's (Options.Trusted): this package is
+// a config/keybindings leaf and does not read the trust store.
+func projectConfigFile(root string) (path string, found bool) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	path, found, err = config.ProjectFile(abs)
+	if err != nil {
+		return path, false
+	}
+	return path, found
 }
 
 // Paths returns the user config file and the project config file for root. A

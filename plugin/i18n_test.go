@@ -164,3 +164,39 @@ func TestSetLocaleSwitchesTheRuntimeLocale(t *testing.T) {
 		t.Fatalf("notices after SetLocale(en) = %q, want %q", got, want)
 	}
 }
+
+const i18nJSONDe = `{
+  "en": {"status.ready": "Ready", "cmd.open": "Open File"},
+  "de": {"status.ready": "Bereit", "cmd.open": "Datei öffnen"}
+}`
+
+const i18nIndependentPlugin = `
+local gvim = require 'gvim'
+gvim.command.register{
+  name = "report",
+  run = function()
+    gvim.notify(gvim.i18n.t("clipboard.copied"))
+  end,
+}
+`
+
+// TestI18nPluginUsesItsOwnFile checks that a plugin translates from its own
+// <name>.i18n.json for the editor locale, independently of the embedded editor
+// catalogues: the editor's de clipboard translation is not injected into the plugin,
+// so an editor-only key reads as the key until the plugin translates it itself.
+func TestI18nPluginUsesItsOwnFile(t *testing.T) {
+	files := plugintest.Files{"p.lua": i18nIndependentPlugin, "p.i18n.json": i18nJSONDe}
+	h := plugintest.New(t, files, plugintest.Options{Locale: "de"})
+	h.Start()
+	if p, ok := h.Plugin("p"); !ok || p.Status != "loaded" {
+		t.Fatalf("plugin status = %+v, log %v", p, h.LogText(""))
+	}
+	if err := h.Run("p.report", nil); err != nil {
+		t.Fatal(err)
+	}
+	// The plugin file has no clipboard.copied entry and the editor catalogue is not
+	// consulted, so the key itself is returned.
+	if got := h.NoticeTexts(); len(got) != 1 || got[0] != "clipboard.copied" {
+		t.Fatalf("notices = %q, want the untranslated key", got)
+	}
+}

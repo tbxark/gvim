@@ -1,8 +1,8 @@
 # Terminal dock
 
-This is the design record for the integrated terminal: the shell the dock runs,
-what the dock shows, the keys and mouse it takes, its selection and its
-persistence, and what is deliberately not built yet. The code is
+This is the design record for the integrated terminal: the shells the dock runs
+(terminal tabs and agent sessions), what the dock shows, the keys and mouse it
+takes, its selection and persistence, and what is deliberately not built yet. The code is
 `internal/terminal` (PTY, emulator, session API), `internal/tui/dock` (panel,
 keys, painting, scrollback, selection, mouse, links), `internal/tui/dock_glue.go`
 (the root glue), `internal/restore` (the saved transcript) and
@@ -153,6 +153,56 @@ done on a Windows 10 1809+ / Windows 11 host:
    Unix.
 Record the pass in `docs/parity.md`; until then the Windows row reads unverified.
 
+## Terminal tabs
+
+The dock runs up to 16 shells at once as **terminal tabs**. Every tab is the same
+single-session terminal the dock had before (its own screen, scrollback, prior
+transcript, selection, links and launch record), so switching tabs loses nothing
+and a background shell keeps running: the dock syncs every tab (output/exit waits,
+resizes, queued input), paints only the active one, and still keeps the
+background tabs' exited markers current.
+
+- **Strip.** The dock's title row is the tab strip: ` Terminal 1  build  Terminal 3 `,
+  the active tab in the tab-strip active style, an exited tab with an `(exited)`
+  marker, and a click on a label selects that tab.
+- **Keys.** While the dock has the keyboard focus, Ctrl+PageDown / Ctrl+PageUp
+  switch to the next/previous tab (wrapping); the keys work with or without
+  keyboard capture, but not while the scrollback pager owns them. They are not
+  keymap data. Everything else goes to the active shell as before.
+- **Commands.** New Terminal Tab, Close Terminal Tab, Next Terminal Tab, Previous
+  Terminal Tab and Rename Terminal Tab (hand-written English titles, no Fresh i18n
+  keys); Rename opens a one-line prompt prefilled with the current name, and an
+  empty answer restores the default `Terminal N`. Run Agent... is the terminal's
+  agent row (see Agent sessions and Run Agent). There are no default keymap
+  bindings beyond the documented quick-switch keys.
+- **Lifecycle.** A new tab starts its own shell in the workspace root and takes the
+  focus. Closing a tab closes its shell immediately (gvim has no running-process
+  prompt; closing the editor prompts as before) and removes the tab; closing the
+  last tab leaves the dock closed. Restart restarts the active tab's shell with its
+  transcript kept (and, when the launch record and terminal.resume_agents say so,
+  rejoins its agent — that metadata is the launch record too). `close_on_exit`
+  is per tab: a tab whose shell exits under it is removed rather than closing the
+  whole dock; the last tab exiting hides the dock. A tab whose shell exits with
+  close_on_exit off stays as read-only output with the exited marker.
+- **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
+  width, rows and the same launch/resume/agent/ephemeral record per tab) plus the
+  active index; the top-level fields keep mirroring the active tab, so a reader
+  that predates tabs restores that one tab exactly as before, and a record without
+  `tabs` restores as one terminal. The format version stays 1. Bounds: at most 16
+  tabs, each with the existing per-transcript bound (500 rows / 1 MiB, trailing
+  blanks trimmed, control characters stripped); a corrupt file cannot make the
+  loader allocate more. Restored tabs are **read-only and dead** with their saved
+  names and active index, exactly like the single restored terminal: no PTY is
+  restarted automatically; Restart per tab starts a fresh shell (using the saved
+  launch record when present: the agent resume/launch argv, gated by
+  `terminal.resume_agents`). Workspace-scoped tab sets are deferred to parity #19
+  (the dock currently shows every tab of the window, and a workspace switch keeps
+  them).
+- **Residuals.** Live ephemeral PTY restore (Fresh restarts terminal tabs live and
+  appends the saved scrollback) is not done: gvim keeps the saved transcript
+  read-only until the user restarts, and this is unchanged by tabs. Tab drag/reorder,
+  per-tab split terminals and workspace-scoped tabs remain open.
+
 ## Persistence and reflow
 
 The dock's transcript survives an editor restart through the session directory:
@@ -201,11 +251,72 @@ stays above the new shell's output — the minimum of Fresh's
 restart-into-the-same-transcript. The command also works on a live shell; it then
 appends that transcript too.
 
-Fresh's automatic **agent resume** is deferred: Fresh tracks each terminal's launch
-argv and can replay an agent's resume argv (`terminal.resume_agents`). gvim starts
-only the configured interactive shell, so it has no tracked launch command or
-agent argv to resume. The key is still accepted and ignored, and nothing is ever
-re-executed automatically by a restore or a restart.
+An agent terminal restarts through Fresh's precedence: the recorded **agent resume
+argv** when `terminal.resume_agents` is on (the default), else the recorded
+**launch argv**, else the plain configured shell. The restart is always
+user-initiated — the palette row, the status affordance or a tab's restart — and
+nothing is ever re-executed automatically by a restore. A failed start keeps the
+record, so a retry still resumes; the transcript of the old shell stays above the
+new one, as with any restart. The launch record is also why Run Agent's sessions
+survive an editor restart as dead, restartable tabs (see Agent sessions and Run
+Agent).
+
+## Agent sessions and Run Agent
+
+The dock tracks how a terminal was launched. Each tab keeps a **launch record**:
+the launch argv (program + arguments, passed to the PTY one argv element at a
+time, never through a shell), the agent name it came from (empty for a plain
+shell), the agent's resume argv when it has one, and whether the tab is an
+**ephemeral** session terminal (an agent started by Run Agent) rather than a
+user's shell. The record is bounded (at most 64 argv entries of 1024 bytes, agent
+name 64 bytes), holds no environment variables and no clipboard/credential text,
+and is persisted with the transcript so a restart can rejoin the session.
+
+**Agent metadata convention.** gvim has no plugin agent registry (Fresh's agent
+data comes from its plugins); the known agents are a config list:
+
+```json
+{
+  "terminal": {
+    "resume_agents": true,
+    "agents": [
+      { "name": "claude", "command": "claude",
+        "args": ["--permission-mode", "plan"],
+        "resume_args": ["--resume"] },
+      { "name": "codex", "command": "codex",
+        "args": [], "resume_args": ["--continue"] }
+    ]
+  }
+}
+```
+
+`name` is the id the picker shows and the record stores; `command` + `args` is the
+new-session argv; `command` + `resume_args` is the argv that rejoins the previous
+session. `terminal.agents` is a gvim extension (Fresh has no such key) and is
+**user-layer only**: a repository must not choose programs gvim runs. The list is
+bounded (32 agents, unique names, at most 32 arguments each, one line per string);
+a bad entry is a config diagnostic and the list is left unchanged. The config also
+accepts `terminal.resume_agents` (Fresh's key, default on): with it off, a restart
+re-runs the launch argv instead of the resume argv. An agent or resume program is
+a local executable in a local PTY: the workspace authority (a remote/sandboxed
+shell) applies to the dock's plain shell tabs only, because a re-parenting
+authority would launch the remote login shell and ignore the agent argv.
+
+**Run Agent...** (hand-written palette row; Fresh has no command of this title
+because its agent sessions are plugin data) opens a picker of the configured agent
+names, filters it as you type, and starts the chosen agent in a new dock tab. The
+tab is ephemeral, is named after the agent, and its launch record makes Restart
+the resume flow. With no configured agents the row shows a notice pointing at
+`terminal.agents`. There is no workspace/tmux discovery yet (round 13, #20b), and
+no dock-row integration beyond starting the tab.
+
+**Exit and restore.** A terminal that dies keeps its transcript and its launch
+record, shows `(exited)` in the tab strip (and the agent name in the scrollback
+title), and offers Restart. A restored session brings the tabs back **read-only and
+dead**: no PTY is started, no agent is resumed, and only the user's restart uses
+the saved record. This is deliberate (Fresh's rule): reopening a workspace never
+silently re-runs a finished process, which for an agent would mean resuming the
+conversation unasked.
 
 ## Config
 
@@ -221,21 +332,24 @@ uses:
 | `terminal.jump_to_end_on_output` | bool, `true` | new output returns the view to the live screen unless a selection is active. |
 | `terminal.mouse_drag_selects` | bool, `true` | a live-grid drag selects text by dropping into scrollback; false makes live drags inert (scrollback drags and Shift+drags still select). |
 | `terminal.pass_ctrl_v_without_text` | bool, `true` | a Ctrl+V whose system clipboard has no text (an image, say) goes to the shell as the key itself instead of pasting the last yank; false pastes the last yank. An unreadable clipboard pastes the last yank either way. |
+| `terminal.resume_agents` | bool, `true` | a restart of an exited agent terminal runs its recorded resume argv instead of its launch argv. Turn it off to re-run the launch command. |
+| `terminal.agents` | `[{ "name", "command", "args", "resume_args" }]`, empty | **gvim extension**: the agent presets Run Agent... offers and the resume metadata a restart uses (see Agent sessions and Run Agent). User layer only. |
 | `clipboard.use_osc52` | bool, `false` | let a program in the dock write the system clipboard with the OSC 52 escape (base64 text). Off by default: the child's output is untrusted data. When it is on, a write happens only if the workspace is trusted and only for the clipboard selection (selector `c` or empty); primary/select selections and cut-buffer numbers are ignored. The bytes still go to the emulator, which ignores the sequence. |
 
-The other Fresh `terminal` keys are accepted and ignored, so a Fresh config file
-loads without diagnostics: `resume_agents` and `skip_app_execution_alias`.
-`terminal.shell`, `terminal.close_on_exit`, `terminal.pass_ctrl_v_without_text`,
-`terminal.mouse_forwarding`, `terminal.jump_to_end_on_output` and
-`terminal.mouse_drag_selects` are Fresh's keys with Fresh's values;
-`terminal.scrollback_lines` is the one gvim addition.
+The other Fresh `terminal` key is accepted and ignored, so a Fresh config file
+loads without diagnostics: `skip_app_execution_alias`. `terminal.shell`,
+`terminal.close_on_exit`, `terminal.pass_ctrl_v_without_text`,
+`terminal.resume_agents`, `terminal.mouse_forwarding`,
+`terminal.jump_to_end_on_output` and `terminal.mouse_drag_selects` are Fresh's keys
+with Fresh's values; `terminal.scrollback_lines` and `terminal.agents` are gvim
+extensions.
 
 **Trust.** The project config layer may set `close_on_exit`, `scrollback_lines`,
-`mouse_forwarding`, `jump_to_end_on_output`, `mouse_drag_selects` and
-`pass_ctrl_v_without_text` — they tune the dock — but it may not set
-`terminal.shell`: a repository must not choose the program gvim executes. A
-project `terminal.shell` is refused with a diagnostic, like the project `lsp`
-command rule (C11 in `docs/trust.md`).
+`mouse_forwarding`, `jump_to_end_on_output`, `mouse_drag_selects`,
+`pass_ctrl_v_without_text` and `resume_agents` — they tune the dock — but it may
+not set `terminal.shell` or `terminal.agents`: a repository must not choose the
+programs gvim executes. Both are refused with a diagnostic, like the project
+`lsp` command rule (C11 in `docs/trust.md`).
 
 ## Working directory and clickable paths
 
@@ -326,21 +440,30 @@ These are known gaps, not bugs:
 - **reflow** of live or saved output: x/vt has no reflow, so a resize clips or
   pads the live screen and stored transcript rows keep their old widths (see
   Persistence and reflow).
-- **terminal tabs** in the dock: the dock is one shell per panel; title, restart,
-  persistence and focus all key off it, so tabs are a larger slice.
-- **automatic agent re-exec** (`terminal.resume_agents`): gvim starts only an
-  interactive shell, so there is no tracked launch or agent argv to replay. The
-  manual restart keeps the transcript instead (see Restart and agent resume).
-- **live-screen reflow**: x/vt has no reflow, so a resize clips or pads the live
-  screen; only the stored transcript is re-wrapped (see Persistence and reflow).
-- **OSC 52 read (paste)**: the dock parses a child's OSC 52 *write*; a child
-  *reading* the clipboard through OSC 52 (a paste request) is not answered, so a
-  program that asks the terminal for the clipboard gets no reply. gvim's Ctrl+V
-  paste path is the editor's, not the child's.
-- **the kitty keyboard protocol**: x/vt v0.1.0 encodes child keys with legacy
-  bytes only; its `SendKey` carries an explicit `TODO: Support Kitty, CSI u, and
-  XTerm modifyOtherKeys` and the emulator exposes no keyboard-mode seam, so gvim
-  cannot offer the protocol to the program inside the dock yet. The outer
-  terminal's keyboard protocol is Bubble Tea's business, not x/vt's. Revisit when
-  x/vt lands the encoding.
+- **workspace-scoped tab sets, tab drag/reorder and per-tab split terminals**: the
+  dock's tabs are window-wide and fixed in order; the group per workspace waits for
+  parity #19.
+- **agent discovery** (#20b): gvim's known agents are the config list
+  (`terminal.agents`), not Fresh's plugin agent registry; there is no scanning for
+  running agents, no workspace/tmux session list, and no optional launch prompt.
+  The record and the resume path are in place for a discovery layer to feed.
+- **live ephemeral PTY restore**: Fresh restarts a saved terminal tab's PTY on
+  restore and appends the saved transcript; gvim deliberately restores the tab
+  read-only and dead, so no process (and no agent conversation) is re-run unasked.
+  The restart is one user action away (see Agent sessions and Run Agent).
+- **live-screen reflow** — **decision:** only the stored transcript is re-wrapped; the
+  live screen stays clipped or padded on a resize because x/vt has no reflow and adding it
+  would mean owning the emulator's scrollback reflow (see Persistence and reflow).
+- **OSC 52 read (paste)** — **decision:** the gap is recorded and deliberately not
+  bridged. The dock parses a child's OSC 52 *write* (opt-in, Trusted-only, write-only); a
+  child *reading* the clipboard through OSC 52 (a paste request) gets no reply. Answering it
+  needs an app-to-terminal response channel, a trust decision for reads, and x/vt query
+  support — no seam exists today, and gvim's Ctrl+V paste path is the editor's, not the
+  child's.
+- **the kitty keyboard protocol** — **decision:** not ported, because there is no seam to
+  port against. x/vt v0.1.0 encodes child keys with legacy bytes only; its `SendKey` carries
+  the explicit `TODO: Support Kitty, CSI u, and XTerm modifyOtherKeys` and the emulator
+  exposes no keyboard-mode API. Reimplementing the protocol inside gvim would mean owning
+  the emulator's input encoding stack; revisit when x/vt lands it. The outer terminal's
+  keyboard protocol is Bubble Tea's business, not x/vt's.
 - **close_on_exit for report-split terminals**: gvim only has the dock.

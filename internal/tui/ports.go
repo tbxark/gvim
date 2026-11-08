@@ -629,6 +629,10 @@ type Deps struct {
 	// builtin://name, a user-dir relative path or file://); empty means the theme
 	// field is already the resolved name.
 	ThemeRef string
+	// Detach ends the attached daemon client while the hosted editor keeps running
+	// (the "Detach from Daemon" command). Nil when this program is not hosted by a
+	// daemon: the command then explains that nothing is attached.
+	Detach func()
 }
 
 // SettingsPort is the Settings UI's link to the config files. internal/app

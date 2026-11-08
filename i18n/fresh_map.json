@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "clipboard.copied",
+  "clipboard.copied_line": "clipboard.copied_line",
+  "clipboard.cut": "clipboard.cut",
+  "clipboard.cut_line": "clipboard.cut_line",
+  "clipboard.pasted": "clipboard.pasted",
+  "clipboard.copied_plain": "clipboard.copied_plain",
+  "clipboard.copied_path": "clipboard.copied_path",
+  "format.formatted_with": "format.formatted_with",
+  "terminal.no_terminal_open": "terminal.no_terminal_open",
+  "gvim.scrollback.copied_line": "clipboard.copied_line",
+  "gvim.scrollback.no_selection": "clipboard.no_selection",
+  "gvim.lsp.inlay_hints_on": "toggle.inlay_hints_enabled",
+  "gvim.lsp.inlay_hints_off": "toggle.inlay_hints_disabled"
+}

@@ -19,6 +19,9 @@ import (
 type Wiring struct {
 	Runtime *plugin.Runtime
 	Editor  pluginapi.BufferEditor
+	// OS is the hostos.OS the runtime uses. The app mounts the local authority over the
+	// same instance, so a launch routed through the slot sees the same machine rules.
+	OS hostos.OS
 	// Keys builds the keymap of a preset with the plugin bindings layered over it: the
 	// preset, then the bindings, then the user's own. An empty name is the preset the
 	// session started with.
@@ -76,6 +79,7 @@ func New(cfg config.Config, ed *editor.Editor, markEdited func(*editor.Document)
 	}
 	osys := newPluginOS(pluginDirs(cfgDir, o.Root), o.SpawnEnv)
 	return &Wiring{
+		OS: osys,
 		Runtime: plugin.New(plugin.Options{
 			Timeout:  cfg.PluginTimeout,
 			OS:       osys,

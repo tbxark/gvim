@@ -1,0 +1,660 @@
+package authority
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/tbxark/gvim/plugin/hostos"
+)
+
+// The SSH backend of the authority slot: pure-Go x/crypto/ssh. It provides one-shot exec,
+// long-running stdio children and the integrated terminal (exec channel + PTY request);
+// remote file access is the SFTP/remote-helper follow-up and refuses with
+// ErrUnsupportedFileIO. Connection state feeds the status row and reconnect-on-activate.
+//
+// The SSH client carries no path translation of its own: a remote workspace lives in one
+// path space (IdentityPathMapper). Authentication: ssh-agent (SSH_AUTH_SOCK), identity
+// files (plain or with the injected passphrase callback) and the injected password
+// callback, tried in that order. Host keys come from ~/.ssh/known_hosts (knownhosts.New)
+// unless the caller injects a callback (tests use ssh.FixedHostKey); an unknown host is a
+// clear error, never silently trusted.
+
+// SSHOptions configure a connection.
+type SSHOptions struct {
+	Spec RemoteSpec
+	// Timeout bounds the TCP connect and the SSH handshake. Zero: 15 s.
+	Timeout time.Duration
+	// IdentityFiles are the private keys to try, in order. Empty: the usual
+	// ~/.ssh/id_ed25519, id_ecdsa and id_rsa that exist.
+	IdentityFiles []string
+	// DisableAgent turns ssh-agent authentication off (it is on by default through
+	// SSH_AUTH_SOCK).
+	DisableAgent bool
+	// Password supplies a password when the server asks for one; nil disables password
+	// auth. The callback may prompt the user.
+	Password func(ctx context.Context) (string, error)
+	// Passphrase supplies the passphrase of an encrypted identity file; nil skips the file.
+	Passphrase func(ctx context.Context, path string) (string, error)
+	// KnownHostsPath is the known_hosts file; empty uses ~/.ssh/known_hosts.
+	KnownHostsPath string
+	// HostKeyCallback overrides the known_hosts check (tests).
+	HostKeyCallback ssh.HostKeyCallback
+}
+
+// sshBackend is the mounted remote state, process surfaces and terminal wrapper.
+type sshBackend struct {
+	mu        sync.Mutex
+	opts      SSHOptions
+	spec      RemoteSpec
+	client    *ssh.Client
+	connected bool
+	reason    string
+	closed    bool
+	// password is the secret supplied by the UI for the next dial; "" means none.
+	password string
+	// needsPassword is set when the last dial failed because no non-interactive
+	// credential was accepted, so the UI should ask for a password.
+	needsPassword bool
+}
+
+// ConnectSSH dials the remote and mounts an authority slot over it.
+func ConnectSSH(ctx context.Context, o SSHOptions) (*Authority, error) {
+	b := &sshBackend{opts: o, spec: o.Spec}
+	if err := b.connect(ctx); err != nil {
+		return nil, err
+	}
+	return New(Parts{
+		Files:       UnsupportedFiles{},
+		OneShot:     b,
+		LongRunning: b,
+		Terminal:    b,
+		Label:       b.Label(),
+		Remote:      b,
+		RemoteSpec:  &b.spec,
+	}), nil
+}
+
+// NewSSH mounts an SSH slot without dialing: the caller connects with Reconnect (a
+// startup attempt, then reconnect-on-activate). This is the constructor the app wires so a
+// password prompt can happen after the UI exists.
+func NewSSH(o SSHOptions) *Authority {
+	b := &sshBackend{opts: o, spec: o.Spec, reason: "not connected yet"}
+	return New(Parts{
+		Files:       UnsupportedFiles{},
+		OneShot:     b,
+		LongRunning: b,
+		Terminal:    b,
+		Label:       b.Label(),
+		Remote:      b,
+		RemoteSpec:  &b.spec,
+	})
+}
+
+// Label is the status-row text of the connection ("SSH:user@host"); the brackets are the
+// status row's business.
+func (b *sshBackend) Label() string { return "SSH:" + b.spec.Display() }
+
+// Connected reports whether the carrier is believed alive.
+func (b *sshBackend) Connected() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.connected
+}
+
+// Reason is why the connection is down.
+func (b *sshBackend) Reason() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.reason
+}
+
+// clientSnapshot returns the live client, refusing when the connection is down.
+func (b *sshBackend) clientSnapshot() (*ssh.Client, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return nil, errors.New("authority: SSH connection is closed")
+	}
+	if b.client == nil || !b.connected {
+		return nil, fmt.Errorf("authority: SSH connection is down (%s)", b.reason)
+	}
+	return b.client, nil
+}
+
+// markDown records a broken carrier; the next operation or the activation hook reconnects.
+func (b *sshBackend) markDown(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.connected = false
+	if err != nil {
+		b.reason = err.Error()
+	}
+}
+
+// dial opens one SSH client.
+func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
+	spec := b.opts.Spec
+	timeout := b.opts.Timeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	port := spec.Port
+	if port == 0 {
+		port = DefaultSSHPort
+	}
+	hostKey, err := b.hostKeyCallback()
+	if err != nil {
+		return nil, err
+	}
+	auth, err := b.authMethods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &ssh.ClientConfig{User: spec.User, Auth: auth, HostKeyCallback: hostKey, Timeout: timeout}
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var d net.Dialer
+	addr := net.JoinHostPort(spec.Host, strconv.Itoa(port))
+	conn, err := d.DialContext(dialCtx, "tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("ssh %s: %w", spec.Display(), err)
+	}
+	if dl, ok := dialCtx.Deadline(); ok {
+		_ = conn.SetDeadline(dl)
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("ssh %s: %w", spec.Display(), err)
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return ssh.NewClient(c, chans, reqs), nil
+}
+
+// connect establishes the carrier (first dial or reconnect).
+func (b *sshBackend) connect(ctx context.Context) error {
+	client, err := b.dial(ctx)
+	if err != nil {
+		b.mu.Lock()
+		b.connected, b.reason = false, err.Error()
+		lower := strings.ToLower(err.Error())
+		b.needsPassword = strings.Contains(lower, "unable to authenticate") ||
+			strings.Contains(lower, "no authentication method") ||
+			strings.Contains(lower, "password")
+		b.mu.Unlock()
+		return err
+	}
+	b.mu.Lock()
+	old := b.client
+	b.client, b.connected, b.reason, b.needsPassword = client, true, "", false
+	b.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	return nil
+}
+
+// hostKeyCallback resolves the host-key check: injected, known_hosts, or a clear error
+// saying how to make the host known.
+func (b *sshBackend) hostKeyCallback() (ssh.HostKeyCallback, error) {
+	if b.opts.HostKeyCallback != nil {
+		return b.opts.HostKeyCallback, nil
+	}
+	path := b.opts.KnownHostsPath
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("ssh: no known_hosts path: %w", err)
+		}
+		path = filepath.Join(home, ".ssh", "known_hosts")
+	}
+	cb, err := knownhosts.New(path)
+	if err != nil {
+		return nil, fmt.Errorf("ssh: read %s: %w (add the host key with ssh(1), or inject a test host-key callback)", path, err)
+	}
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		if err := cb(hostname, remote, key); err != nil {
+			return fmt.Errorf("ssh: host key of %s rejected by %s: %w (add it with ssh-keyscan)", hostname, path, err)
+		}
+		return nil
+	}, nil
+}
+
+// authMethods builds the authentication order: agent, identity files, password.
+func (b *sshBackend) authMethods(ctx context.Context) ([]ssh.AuthMethod, error) {
+	var methods []ssh.AuthMethod
+	if !b.opts.DisableAgent {
+		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
+			if conn, err := net.Dial("unix", sock); err == nil {
+				ag := agent.NewClient(conn)
+				methods = append(methods, ssh.PublicKeysCallback(ag.Signers))
+			}
+		}
+	}
+	files := b.opts.IdentityFiles
+	if len(files) == 0 {
+		if home, err := os.UserHomeDir(); err == nil {
+			files = existingIdentityFiles(filepath.Join(home, ".ssh"))
+		}
+	}
+	var signers []ssh.Signer
+	for _, path := range files {
+		signer, err := parseIdentity(path, b.opts.Passphrase, ctx)
+		if err != nil {
+			if len(b.opts.IdentityFiles) > 0 {
+				return nil, err
+			}
+			continue
+		}
+		signers = append(signers, signer)
+	}
+	if len(signers) > 0 {
+		methods = append(methods, ssh.PublicKeys(signers...))
+	}
+	b.mu.Lock()
+	stored := b.password
+	b.mu.Unlock()
+	if stored != "" {
+		methods = append(methods, ssh.Password(stored))
+	}
+	if b.opts.Password != nil {
+		methods = append(methods, ssh.PasswordCallback(func() (string, error) { return b.opts.Password(ctx) }))
+	}
+	if len(methods) == 0 {
+		return nil, errors.New("ssh: no authentication method (no agent, no usable identity file, no password callback)")
+	}
+	return methods, nil
+}
+
+// existingIdentityFiles lists the usual private keys that exist.
+func existingIdentityFiles(dir string) []string {
+	var out []string
+	for _, name := range []string{"id_ed25519", "id_ecdsa", "id_rsa"} {
+		p := filepath.Join(dir, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// parseIdentity reads one private key, asking the passphrase callback when it is encrypted.
+func parseIdentity(path string, passphrase func(context.Context, string) (string, error), ctx context.Context) (ssh.Signer, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	signer, err := ssh.ParsePrivateKey(data)
+	if err == nil {
+		return signer, nil
+	}
+	var missing *ssh.PassphraseMissingError
+	if !errors.As(err, &missing) || passphrase == nil {
+		return nil, fmt.Errorf("ssh: identity %s: %w", path, err)
+	}
+	phrase, perr := passphrase(ctx, path)
+	if perr != nil {
+		return nil, perr
+	}
+	return ssh.ParsePrivateKeyWithPassphrase(data, []byte(phrase))
+}
+
+// NeedsPassword reports whether the last failure wants a password from the UI.
+func (b *sshBackend) NeedsPassword() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.needsPassword && !b.connected
+}
+
+// ReconnectWithPassword stores password and redials (the UI prompt path).
+func (b *sshBackend) ReconnectWithPassword(ctx context.Context, password string) error {
+	b.mu.Lock()
+	b.password = password
+	b.mu.Unlock()
+	return b.Reconnect(ctx)
+}
+
+// Reconnect closes the carrier and dials the stored target again.
+func (b *sshBackend) Reconnect(ctx context.Context) error {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return errors.New("authority: SSH connection is closed")
+	}
+	old := b.client
+	b.client, b.connected, b.reason = nil, false, "reconnecting"
+	b.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	return b.connect(ctx)
+}
+
+// Close shuts the carrier down.
+func (b *sshBackend) Close() error {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return nil
+	}
+	b.closed, b.connected = true, false
+	old := b.client
+	b.client = nil
+	b.mu.Unlock()
+	if old != nil {
+		return old.Close()
+	}
+	return nil
+}
+
+// runSession runs a one-shot command and maps ssh exit statuses into ProcResult.
+func (b *sshBackend) runSession(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	client, err := b.clientSnapshot()
+	if err != nil {
+		return hostos.ProcResult{}, err
+	}
+	sess, err := client.NewSession()
+	if err != nil {
+		b.markDown(err)
+		return hostos.ProcResult{}, err
+	}
+	defer func() { _ = sess.Close() }()
+	cmd := RemoteCommand(argv, o.Cwd, o.Env)
+	var stdout, stderr lockedBuffer
+	sess.Stdout, sess.Stderr = &stdout, &stderr
+	if len(o.Stdin) > 0 {
+		sess.Stdin = newSliceReader(o.Stdin)
+	}
+	done := make(chan error, 1)
+	go func() { done <- sess.Run(cmd) }()
+	select {
+	case <-ctx.Done():
+		_ = sess.Signal(ssh.SIGKILL)
+		_ = sess.Close()
+		return hostos.ProcResult{}, ctx.Err()
+	case err := <-done:
+		res := hostos.ProcResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+		var exit *ssh.ExitError
+		switch {
+		case err == nil:
+			return res, nil
+		case errors.As(err, &exit):
+			res.Code = exit.ExitStatus()
+			if exit.Signal() != "" {
+				res.Signal = exit.Signal()
+			}
+			return res, nil
+		default:
+			b.markDown(err)
+			return hostos.ProcResult{}, err
+		}
+	}
+}
+
+// Run is the one-shot surface.
+func (b *sshBackend) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+	return b.runSession(ctx, argv, o)
+}
+
+// Start is the long-running stdio surface.
+func (b *sshBackend) Start(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.Proc, error) {
+	client, err := b.clientSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	sess, err := client.NewSession()
+	if err != nil {
+		b.markDown(err)
+		return nil, err
+	}
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		_ = sess.Close()
+		return nil, err
+	}
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		_ = sess.Close()
+		return nil, err
+	}
+	stderr, err := sess.StderrPipe()
+	if err != nil {
+		_ = sess.Close()
+		return nil, err
+	}
+	cmd := RemoteCommand(argv, o.Cwd, o.Env)
+	if err := sess.Start(cmd); err != nil {
+		_ = sess.Close()
+		return nil, err
+	}
+	p := &sshProc{sess: sess, stdin: stdin, backend: b, chunks: make(chan hostos.ProcChunk, 64)}
+	p.pump(stdout, false)
+	p.pump(stderr, true)
+	return p, nil
+}
+
+// Launch starts the integrated terminal on the remote host and returns its transport.
+func (b *sshBackend) Launch(ctx context.Context, o TerminalOptions) (TerminalLaunch, error) {
+	client, err := b.clientSnapshot()
+	if err != nil {
+		return TerminalLaunch{}, err
+	}
+	sess, err := client.NewSession()
+	if err != nil {
+		b.markDown(err)
+		return TerminalLaunch{}, err
+	}
+	cols, rows := o.Cols, o.Rows
+	if cols <= 0 {
+		cols = 80
+	}
+	if rows <= 0 {
+		rows = 24
+	}
+	modes := ssh.TerminalModes{ssh.ECHO: 1, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}
+	if err := sess.RequestPty("xterm-256color", rows, cols, modes); err != nil {
+		_ = sess.Close()
+		return TerminalLaunch{}, err
+	}
+	pr, pw := io.Pipe()
+	sess.Stdout, sess.Stderr = pw, pw
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		_ = sess.Close()
+		_ = pw.Close()
+		return TerminalLaunch{}, err
+	}
+	cmd := remoteLoginCommand(o.Dir)
+	if err := sess.Start(cmd); err != nil {
+		_ = sess.Close()
+		_ = pw.Close()
+		return TerminalLaunch{}, err
+	}
+	t := &sshTerminal{sess: sess, stdin: stdin, out: pr, outW: pw, waitDone: make(chan struct{})}
+	return TerminalLaunch{Dir: o.Dir, ManagesCwd: true, Label: b.Label(), Backend: t}, nil
+}
+
+// remoteLoginCommand is the remote shell command of the terminal: cd into the workspace and
+// exec the remote login shell ($SHELL is the remote shell; the local terminal.shell
+// override deliberately does not apply).
+func remoteLoginCommand(dir string) string {
+	shell := "exec " + "$" + "{SHELL:-/bin/sh}" + " -l"
+	if dir == "" {
+		return shell
+	}
+	return "cd " + QuoteDir(dir) + " && " + shell
+}
+
+// sshProc is one long-running stdio child over an ssh session.
+type sshProc struct {
+	sess    *ssh.Session
+	stdin   io.WriteCloser
+	backend *sshBackend
+	chunks  chan hostos.ProcChunk
+}
+
+// pump copies one stream into the chunk channel.
+func (p *sshProc) pump(r io.Reader, stderr bool) {
+	go func() {
+		buf := make([]byte, 32<<10)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				p.chunks <- hostos.ProcChunk{Stderr: stderr, Data: append([]byte(nil), buf[:n]...)}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+}
+
+func (p *sshProc) PID() int { return 0 }
+func (p *sshProc) Write(data []byte) error {
+	_, err := p.stdin.Write(data)
+	if err != nil {
+		p.backend.markDown(err)
+	}
+	return err
+}
+func (p *sshProc) CloseStdin() { _ = p.stdin.Close() }
+func (p *sshProc) Kill(signal string) error {
+	sig := ssh.SIGTERM
+	if signal == "KILL" {
+		sig = ssh.SIGKILL
+	}
+	return p.sess.Signal(sig)
+}
+func (p *sshProc) Terminate(grace time.Duration) {
+	go func() {
+		_ = p.Kill("TERM")
+		time.Sleep(grace)
+		_ = p.Kill("KILL")
+	}()
+}
+func (p *sshProc) Output(ctx context.Context) (hostos.ProcChunk, bool) {
+	select {
+	case c := <-p.chunks:
+		return c, true
+	case <-ctx.Done():
+		return hostos.ProcChunk{}, false
+	}
+}
+func (p *sshProc) Wait(ctx context.Context) (hostos.ProcResult, error) {
+	done := make(chan error, 1)
+	go func() { done <- p.sess.Wait() }()
+	select {
+	case <-ctx.Done():
+		return hostos.ProcResult{}, ctx.Err()
+	case err := <-done:
+		res := hostos.ProcResult{}
+		var exit *ssh.ExitError
+		switch {
+		case err == nil:
+			return res, nil
+		case errors.As(err, &exit):
+			res.Code = exit.ExitStatus()
+			return res, nil
+		default:
+			p.backend.markDown(err)
+			return hostos.ProcResult{}, err
+		}
+	}
+}
+
+// sshTerminal is the PTY transport of the integrated terminal.
+type sshTerminal struct {
+	sess  *ssh.Session
+	stdin io.WriteCloser
+	out   *io.PipeReader
+	outW  *io.PipeWriter
+	once  sync.Once
+	// waitOnce makes Wait idempotent: the first caller reaps the ssh session and closes
+	// the output pipe (so a Read after the remote end exits sees io.EOF); later callers
+	// wait for that one result.
+	waitOnce sync.Once
+	waitDone chan struct{}
+	waitErr  error
+}
+
+func (t *sshTerminal) Read(p []byte) (int, error)  { return t.out.Read(p) }
+func (t *sshTerminal) Write(p []byte) (int, error) { return t.stdin.Write(p) }
+func (t *sshTerminal) Resize(cols, rows int) error {
+	if cols <= 0 || rows <= 0 {
+		return nil
+	}
+	return t.sess.WindowChange(rows, cols)
+}
+func (t *sshTerminal) Kill() error {
+	if err := t.sess.Signal(ssh.SIGKILL); err != nil {
+		return err
+	}
+	return t.sess.Close()
+}
+func (t *sshTerminal) Wait() error {
+	t.waitOnce.Do(func() {
+		t.waitErr = t.sess.Wait()
+		_ = t.outW.Close()
+		close(t.waitDone)
+	})
+	<-t.waitDone
+	return t.waitErr
+}
+func (t *sshTerminal) Close() error {
+	var err error
+	t.once.Do(func() {
+		err = t.sess.Close()
+		_ = t.stdin.Close()
+		_ = t.outW.Close()
+		_ = t.out.Close()
+	})
+	return err
+}
+
+// lockedBuffer is a concurrency-safe bytes buffer for the session pumps.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+func (b *lockedBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buf...)
+}
+
+// sliceReader is a reader over a byte slice (a fresh copy per use).
+type sliceReader struct {
+	b []byte
+	i int
+}
+
+func newSliceReader(b []byte) *sliceReader { return &sliceReader{b: append([]byte(nil), b...)} }
+
+func (r *sliceReader) Read(p []byte) (int, error) {
+	if r.i >= len(r.b) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.b[r.i:])
+	r.i += n
+	return n, nil
+}

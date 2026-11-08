@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ func TestTerminalDefaults(t *testing.T) {
 		JumpToEndOnOutput:    true,
 		MouseDragSelects:     true,
 		PassCtrlVWithoutText: true,
+		ResumeAgents:         true,
 	}
 	if !reflect.DeepEqual(cfg.Terminal, want) {
 		t.Fatalf("Terminal = %+v, want %+v", cfg.Terminal, want)
@@ -98,7 +100,6 @@ func withTerminal(change func(*TerminalConfig)) TerminalConfig {
 func TestTerminalFreshKeysAccepted(t *testing.T) {
 	t.Parallel()
 	body := `{"terminal": {
-  "resume_agents": false,
   "skip_app_execution_alias": false
 }}`
 	cfg, diags := loadBody(t, body)
@@ -207,5 +208,81 @@ func TestTerminalShellOptions(t *testing.T) {
 	cmd, args := full.TerminalShellOptions()
 	if cmd != "fish" || !reflect.DeepEqual(args, []string{"-l"}) {
 		t.Fatalf("TerminalShellOptions = %q, %v; want fish and [-l]", cmd, args)
+	}
+}
+
+// TestTerminalResumeAgents checks terminal.resume_agents, Fresh's default-on gate
+// for rejoining an agent session on restart.
+func TestTerminalResumeAgents(t *testing.T) {
+	t.Parallel()
+	if !DefaultTerminalOptions().ResumeAgents {
+		t.Fatal("resume_agents does not default to true")
+	}
+	cfg, diags := loadBody(t, `{"terminal": {"resume_agents": false}}`)
+	if len(diags) != 0 || cfg.Terminal.ResumeAgents {
+		t.Fatalf("resume_agents = %v, diags %v", cfg.Terminal.ResumeAgents, diags)
+	}
+	if _, diags := loadBody(t, `{"terminal": {"resume_agents": "no"}}`); len(diags) != 1 || diags[0].Key != "terminal.resume_agents" {
+		t.Fatalf("invalid resume_agents diagnostics = %v", diags)
+	}
+}
+
+// TestTerminalAgents checks gvim's terminal.agents list and its bounds.
+func TestTerminalAgents(t *testing.T) {
+	t.Parallel()
+	cfg, diags := loadBody(t, `{"terminal": {"agents": [
+		{"name": "claude", "command": "claude", "args": ["--permission-mode", "plan"], "resume_args": ["--continue"]},
+		{"name": "codex", "command": "/usr/local/bin/codex"}
+	]}}`)
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics = %v", diags)
+	}
+	if len(cfg.Terminal.Agents) != 2 || cfg.Terminal.Agents[0].Name != "claude" ||
+		cfg.Terminal.Agents[0].Command != "claude" ||
+		!reflect.DeepEqual(cfg.Terminal.Agents[0].Args, []string{"--permission-mode", "plan"}) ||
+		!reflect.DeepEqual(cfg.Terminal.Agents[0].ResumeArgs, []string{"--continue"}) {
+		t.Fatalf("agents = %+v", cfg.Terminal.Agents)
+	}
+	if cfg.Terminal.Agents[1].Command != "/usr/local/bin/codex" {
+		t.Fatalf("second agent = %+v", cfg.Terminal.Agents[1])
+	}
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"an agent without a name", `{"terminal": {"agents": [{"command": "x"}]}}`},
+		{"an agent without a command", `{"terminal": {"agents": [{"name": "x"}]}}`},
+		{"a duplicate name", `{"terminal": {"agents": [{"name": "x", "command": "a"}, {"name": "x", "command": "b"}]}}`},
+		{"an agent that is not an object", `{"terminal": {"agents": ["x"]}}`},
+		{"agents that are not an array", `{"terminal": {"agents": {"name": "x"}}}`},
+		{"a command with a NUL byte", `{"terminal": {"agents": [{"name": "x", "command": "a\u0000b"}]}}`},
+	}
+	for _, tt := range tests {
+		if _, diags := loadBody(t, tt.body); len(diags) != 1 || diags[0].Key != "terminal.agents" {
+			t.Errorf("%s: diagnostics = %v, want one for agents", tt.name, diags)
+		}
+	}
+}
+
+// TestTerminalAgentsProjectLayerRefused checks that a repository cannot choose the
+// programs gvim runs as agents (the terminal.shell rule).
+func TestTerminalAgentsProjectLayerRefused(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), `{"terminal": {"agents": [{"name": "x", "command": "x"}]}}`)
+	cfg, diags, err := Load(Options{Root: root, UserFile: filepath.Join(t.TempDir(), "absent.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Terminal.Agents) != 0 {
+		t.Fatalf("project agents applied: %+v", cfg.Terminal.Agents)
+	}
+	found := false
+	for _, d := range diags {
+		if d.Key == "terminal.agents" && strings.Contains(d.Message, "project config cannot set terminal.agents") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %v, want the project agents refusal", diags)
 	}
 }

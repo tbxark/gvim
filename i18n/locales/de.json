@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "Kopiert",
+  "clipboard.copied_line": "Zeile kopiert",
+  "clipboard.copied_path": "Pfad kopiert: %{path}",
+  "clipboard.copied_plain": "Als Klartext kopiert",
+  "clipboard.cut": "Ausgeschnitten",
+  "clipboard.cut_line": "Zeile ausgeschnitten",
+  "clipboard.pasted": "Eingefügt",
+  "format.formatted_with": "Formatiert mit %{formatter}",
+  "gvim.lsp.inlay_hints_off": "Inlay-Hinweise deaktiviert",
+  "gvim.lsp.inlay_hints_on": "Inlay-Hinweise aktiviert",
+  "gvim.scrollback.copied_line": "Zeile kopiert",
+  "gvim.scrollback.no_selection": "Keine Auswahl zum Kopieren",
+  "terminal.no_terminal_open": "Kein offenes Terminal — zuerst ein Terminal öffnen"
+}

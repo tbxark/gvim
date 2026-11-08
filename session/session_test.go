@@ -54,6 +54,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			},
 		},
 		{
+			name: "virtual caret position",
+			in: session.Session{Files: []session.FileState{
+				{Path: "/work/project/main.go", Line: 3, Col: 1, VirtualLines: 4, VirtualColumn: 9},
+			}},
+		},
+		{
 			name: "no files and every flag off",
 			in:   session.Session{Root: "/work/empty", Files: []session.FileState{}},
 		},
@@ -320,5 +326,21 @@ func TestSaveWithUnreadablePreviousSessionDeletesNoStash(t *testing.T) {
 	assertExists(t, filepath.Join(dir, stash))
 	if got, ok, err := session.Load(dir); err != nil || !ok || got.Root != "/work" {
 		t.Fatalf("Load() = %+v, %v, %v; want the new session", got, ok, err)
+	}
+}
+
+// TestLoadWithoutVirtualFieldsKeepsTheCaretOnText checks the migration: a session
+// written before the virtual caret fields existed decodes with them zero, so the
+// restore keeps the caret on text.
+func TestLoadWithoutVirtualFieldsKeepsTheCaretOnText(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "session.json"),
+		fmt.Sprintf("{\"version\":%d,\"files\":[{\"path\":\"/w/a\",\"line\":2,\"col\":1}]}", session.Version))
+	s, ok, err := session.Load(dir)
+	if err != nil || !ok {
+		t.Fatalf("session.Load = %+v, %v, %v", s, ok, err)
+	}
+	if len(s.Files) != 1 || s.Files[0].VirtualLines != 0 || s.Files[0].VirtualColumn != 0 {
+		t.Fatalf("file state = %+v, want no virtual caret fields", s.Files)
 	}
 }

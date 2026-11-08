@@ -1,0 +1,15 @@
+{
+  "clipboard.copied": "Zkopírováno",
+  "clipboard.copied_line": "Zkopírován řádek",
+  "clipboard.copied_path": "Zkopírována cesta: %{path}",
+  "clipboard.copied_plain": "Zkopírováno jako prostý text",
+  "clipboard.cut": "Vyjmuto",
+  "clipboard.cut_line": "Vyjmut řádek",
+  "clipboard.pasted": "Vloženo",
+  "format.formatted_with": "Formátováno pomocí %{formatter}",
+  "gvim.lsp.inlay_hints_off": "Vložené nápovědy zakázány",
+  "gvim.lsp.inlay_hints_on": "Vložené nápovědy povoleny",
+  "gvim.scrollback.copied_line": "Zkopírován řádek",
+  "gvim.scrollback.no_selection": "Žádný výběr ke kopírování",
+  "terminal.no_terminal_open": "Žádný otevřený terminál — nejprve otevřete terminál"
+}
