@@ -91,7 +91,7 @@ type Document struct {
 	// saveNote is what the status says after the last save of a document that is not large,
 	// in place of "Saved", or empty. See savedStatus.
 	SaveNote string
-	// codec is the encoding name the text was read with, from internal/encoding.
+	// codec is the encoding name the text was read with, from encoding.
 	// Save encodes with it. "" means utf-8, the encoding of a new document.
 	Codec string
 	// readOnly refuses every change to the text and to the file. See readonly.go.

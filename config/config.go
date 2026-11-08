@@ -38,7 +38,7 @@
 //
 // The lsp key maps a language ID to the language server that runs for it:
 // {"lsp": {"go": {"command": "gopls", "args": []}}}. It overrides the built-in table of
-// servers (internal/lsp), which starts a server for a language when its program is on
+// servers (lsp), which starts a server for a language when its program is on
 // PATH. An entry with "enabled": false turns the server of its language off, and the
 // top-level lsp_enabled key turns all of them off. A later layer that sets lsp replaces
 // the whole map.

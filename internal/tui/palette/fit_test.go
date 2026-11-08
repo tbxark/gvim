@@ -99,7 +99,7 @@ func TestFitGrepNeverExceedsTheWidth(t *testing.T) {
 
 func TestFitFileKeepsTheBaseNameAndTheMatchedRunes(t *testing.T) {
 	t.Parallel()
-	name := "internal/plugin/bundled/plugins/git_log/main.lua"
+	name := "plugin/bundled/plugins/git_gutter/main.lua"
 	// The runes of "main" are the matched ones.
 	start := strings.Index(name, "main")
 	hl := []int{start, start + 1, start + 2, start + 3}

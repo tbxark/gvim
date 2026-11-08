@@ -9,7 +9,7 @@ import (
 )
 
 // codecArg reads the "name" argument of an encoding action. The name must be one
-// that internal/encoding lists.
+// that encoding lists.
 func codecArg(action Action, args map[string]any) (string, error) {
 	name, ok := args["name"].(string)
 	if !ok {

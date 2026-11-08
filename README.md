@@ -20,7 +20,7 @@ The module has three layers.
 
 **Entry and executable shell (private):**
 
-- `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) → `app.Run`.
+- `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) → `internal/app.Run`.
 - `internal/` holds the executable shell. Nothing outside this module can import it, and
   no top-level package of the module imports it either.
   - `internal/app`: the composition root (`Options`, `Run`, `buildRuntime` in `run.go`);
@@ -31,13 +31,12 @@ The module has three layers.
     bindings), `internal/highlight` (syntax-span cache); `internal/apptest` is test-only.
   - `internal/configview`: the backend of `gvim config show` / `config paths`.
   - `internal/cli`: the cobra command tree; hands `app.Options` to a `Runner`.
-  - `internal/tui`: the single Bubble Tea root model (`ports.go` defines its interfaces,
-    `layout.go` is the geometry source for painting and hit testing). Sub-packages:
+  - `internal/tui`: the single Bubble Tea root model (`ports.go` defines its interfaces;
+    `internal/tui/frame` is the geometry source for painting and hit testing). Sub-packages:
     `overlay`, `list` (the shared overlay contract and list/box kit), `frame`, `split`,
     `tabstrip` (layout/hit map, split tree, tab strip), `dock` (the terminal dock),
-    `editorpane`,
-    `menubar`, `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`,
-    `ctxmenu`, `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`.
+    `editorpane`, `menubar`, `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`,
+    `popup`, `ctxmenu`, `dialog`, `style`, `grid`, `icons`, `space`.
   - `internal/terminal`: runs a program in a pseudo-terminal and keeps a model of its
     screen (the dock backend).
   - `internal/filewatch`: the fsnotify watcher behind the file tree and reloads.
@@ -60,10 +59,13 @@ The module has three layers.
   registry that feeds the command palette).
 - They must not import `internal/` and must not import bubbletea, bubbles or lipgloss.
   Engine packages do not import the UI, the app or the plugin runtime.
-- `migration/tools/import_rules_check.sh` (R1–R12) enforces the direction; see
+- `tools/import_rules_check.sh` (R1–R16) enforces the direction; see
   `docs/architecture.md`.
 
 **Data and tools:**
+
+- `tools/`: `purity_check.sh` and `import_rules_check.sh` are the architectural gates;
+  `gen_menus.py` regenerates the menu bar; `lint_version.txt` pins the linter.
 
 - `docs/plugins/`: the plugin author documentation and the `gvim.d.lua` type stubs.
 - `refs/`: read-only reference checkouts. Do not edit or import them. `_attic/` is the
@@ -90,8 +92,8 @@ The shipped binary must stay pure Go:
 
 ```sh
 CGO_ENABLED=0 go build ./...
-bash migration/tools/purity_check.sh        # prints PURE_GO_OK
-bash migration/tools/import_rules_check.sh  # prints IMPORT_RULES_OK
+bash tools/purity_check.sh        # prints PURE_GO_OK
+bash tools/import_rules_check.sh  # prints IMPORT_RULES_OK
 ```
 
 Gates to pass before calling work done:
@@ -107,11 +109,8 @@ go test -race ./...                         # test-only; needs cgo
 Generated files. Do not edit them by hand:
 
 - `commands/commands_gen.go`: `python3 commands/gen/generate.py refs/fresh`
-- `internal/tui/menubar/menu_table_gen.go`: `python3 migration/tools/gen_menus.py`
+- `internal/tui/menubar/menu_table_gen.go`: `python3 tools/gen_menus.py`
   (`--check` reports drift)
-
-`CLAUDE.md` mentions `migration/tui_parity.py` and `migration/parity/`. Neither is in the
-working tree, so do not rely on them.
 
 ## Debugging the TUI
 
@@ -387,7 +386,7 @@ From `CLAUDE.md`:
 
 - Plain Go unit tests: table-driven, asserting values and behavior.
 - No golden or snapshot tests for the TUI, no full-frame string comparisons, and no new
-  `migration/parity` scenarios.
+  golden-screen scenarios.
 - Fix a bug with a regression test that fails first.
 - Keep the existing `testdata` fixtures. Do not regenerate them to make a test pass.
 - `TestWriteScreenshots` is a debugging aid. It is gated by an environment variable, skips

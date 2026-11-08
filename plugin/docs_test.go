@@ -452,7 +452,7 @@ func TestDocsQuotasMatchLimits(t *testing.T) {
 // ran into: what the runtime does differs from what one would assume. The behaviour itself
 // is tested where it lives: TestUnloadAndShutdownHooksCannotWait, TestSelectIndexIsOneBased,
 // TestBufVirtualReadOnlyAndMode, TestGrepScopeIsTheFileIndex (internal/app) and
-// TestViOwnsOnlyDocumentedCtrlKeys (internal/plugin/bundled). This keeps the docs from losing the note.
+// TestViOwnsOnlyDocumentedCtrlKeys (plugin/bundled). This keeps the docs from losing the note.
 // Whitespace is collapsed, so a line break in the Markdown does not matter.
 func TestDocsStateKnownBehaviour(t *testing.T) {
 	tests := []struct {

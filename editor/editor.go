@@ -374,7 +374,7 @@ func (e *Editor) StatusIsError() bool {
 func (e *Editor) ClearStatus() { e.setStatus("") }
 
 // SetLanguage records the lexer name of the active tab. The UI resolves the
-// name (internal/syntax) and sets it, because the lexer depends on the file
+// name (syntax) and sets it, because the lexer depends on the file
 // name. An empty name clears it. Renaming the tab clears it. It does nothing
 // when no tab is open.
 func (e *Editor) SetLanguage(name string) {

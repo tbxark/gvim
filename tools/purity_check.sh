@@ -2,7 +2,7 @@
 # Pure-Go gate: the module must build with cgo disabled, and no package in the
 # dependency graph may contain cgo files or import "C" or runtime/cgo.
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 CGO_ENABLED=0 go build ./...
 cgo_pkgs=$(CGO_ENABLED=0 go list -deps -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v '^$' || true)
 if [ -n "$cgo_pkgs" ]; then

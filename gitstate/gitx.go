@@ -1,4 +1,4 @@
-// Package gitx reads the state of a git work tree with go-git: the work tree
+// Package gitstate reads the state of a git work tree with go-git: the work tree
 // root, the checked-out branch, and the status of each changed file.
 package gitstate
 

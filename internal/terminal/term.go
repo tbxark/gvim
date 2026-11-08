@@ -1,4 +1,4 @@
-// Package term runs a program in a pseudo-terminal and keeps a model of its
+// Package terminal runs a program in a pseudo-terminal and keeps a model of its
 // screen, so that a UI pane can show it.
 //
 // On Unix the PTY comes from github.com/creack/pty. The child runs in a new

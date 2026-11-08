@@ -21,7 +21,7 @@ type EncodingChoice struct {
 	Name, Label string
 }
 
-// EncodingChoices lists the encodings of internal/encoding, with their labels.
+// EncodingChoices lists the encodings of encoding, with their labels.
 func EncodingChoices() []EncodingChoice {
 	names := encoding.Names()
 	choices := make([]EncodingChoice, len(names))

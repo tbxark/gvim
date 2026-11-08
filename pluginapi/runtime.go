@@ -149,7 +149,7 @@ type Services interface {
 	DiffText(a, b string, o DiffOptions) []Hunk                                      // called inside a Work
 	Fuzzy(ctx context.Context, query string, items []string, limit int) []FuzzyMatch // inside a Work; stops early (nil) when ctx is done
 	Grep(ctx context.Context, r GrepRequest) ([]GrepHit, error)                      // inside a Work
-	Decode(encoding string, data []byte) (string, error)                             // sync, data <= 16 MiB (internal/encoding)
+	Decode(encoding string, data []byte) (string, error)                             // sync, data <= 16 MiB (encoding)
 	GitRoot(dir string) (string, bool)                                               // gitx.FindRoot; sync-cheap, called in a Work
 	GitBranch(root string) (string, error)                                           // gitx.Branch;   called in a Work
 	ValidateChord(chord string) error                                                // keymap.ValidateChord; sync, cheap; nil when chord can be bound

@@ -75,7 +75,7 @@ func (f *FakeServices) Truncate(s string, w int, ellipsis string) string {
 	return sb.String() + ellipsis
 }
 
-// Diff is an LCS line diff with the hunk conventions of internal/diff.
+// Diff is an LCS line diff with the hunk conventions of diff.
 func (*FakeServices) Diff(a, b []string) []pluginapi.Hunk {
 	n, m := len(a), len(b)
 	lcs := make([][]int, n+1)

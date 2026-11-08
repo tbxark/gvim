@@ -10,7 +10,7 @@ import (
 // edited: its text is not the bytes of the file.
 var ErrBinary = errors.New("binary file")
 
-// binaryDocument is the read-only document for a file that internal/encoding calls
+// binaryDocument is the read-only document for a file that encoding calls
 // binary. Each byte shows as one character: the bytes of Latin-1, except that a
 // control byte shows as its Unicode control picture and a C1 control as U+FFFD,
 // so nothing in the text can act on the terminal. The line endings are left as

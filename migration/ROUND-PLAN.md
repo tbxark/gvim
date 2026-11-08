@@ -1,5 +1,8 @@
 # ROUND-PLAN: finishing the remaining features
 
+> Historical record: package paths in this file are pre-reorganization. See
+> `docs/architecture.md` for the current layout.
+
 > **Superseded (plugin runtime).** Q2 and the T2 track (goja runtime, esbuild transpile) describe the old plan. The plugin runtime in this repository is **Lua on
 > `github.com/yuin/gopher-lua`** (`internal/plugin`), not JavaScript. The JS system (`goja`, `esbuild`,
 > `slowjs`) was removed completely, and `.js`/`.ts` files in the plugin folder are never executed.

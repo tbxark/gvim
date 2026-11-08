@@ -51,7 +51,7 @@ func (f fastServices) DiffText(a, b string, o pluginapi.DiffOptions) []pluginapi
 	return f.Diff(strings.Split(a, "\n"), strings.Split(b, "\n"))
 }
 
-// myers is the O(ND) diff of Myers (1986), returned as hunks like internal/diff does.
+// myers is the O(ND) diff of Myers (1986), returned as hunks like diff does.
 func myers(a, b []string) []pluginapi.Hunk {
 	n, m := len(a), len(b)
 	off := n + m

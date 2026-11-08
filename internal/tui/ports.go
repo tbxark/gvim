@@ -112,7 +112,7 @@ type ExplorerTree interface {
 	SetShowIgnored(v bool)
 }
 
-// FileIndex is the async file list from internal/finder. Nil leaves the palette's
+// FileIndex is the async file list from finder. Nil leaves the palette's
 // file mode on its loading row.
 type FileIndex interface {
 	Snapshot() (files []string, loading bool)
@@ -330,7 +330,7 @@ type Deps struct {
 	Dialogs Dialogs    // nil: the unsaved and Save As dialogs are not offered
 	Files   FileIndex  // nil: the palette's file mode shows its loading row
 	Ranker  FileRanker // nil: the palette's file rows are not ranked
-	// Commands is the palette's command table, as internal/palette builds it. Nil
+	// Commands is the palette's command table, as commands builds it. Nil
 	// means commands.Commands(nil): the builtin table with the default keymap's
 	// shortcuts.
 	Commands []commands.Entry

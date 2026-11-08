@@ -1,8 +1,8 @@
-// Package pluginapi is the contract between internal/ui (host side) and
-// internal/plugin (Lua runtime). It holds plain types, the Host and Runtime
-// interfaces, the error codes and Unsupported, a Host that refuses everything.
-// It imports the standard library only, so both sides and the editor adapters can
-// depend on it without a cycle.
+// Package pluginapi is the contract between the plugin host in internal/tui and
+// internal/app (host side) and the plugin package (Lua runtime). It holds plain
+// types, the Host and Runtime interfaces, the error codes and Unsupported, a Host
+// that refuses everything. It imports the standard library only, so both sides
+// and the host packages can depend on it without a cycle.
 package pluginapi
 
 import (

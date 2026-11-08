@@ -18,7 +18,7 @@ import (
 // a file of about 2 GB). The file is only read. The save benchmark writes its copy to
 // GVIM_BIG_TMP, or to the system temporary directory, and removes it.
 //
-//	GVIM_BIG_FILE=/tmp/gvim-big/big.txt go test ./internal/buffer -run '^$' -bench Large -benchtime 1x
+//	GVIM_BIG_FILE=/tmp/gvim-big/big.txt go test ./buffer -run '^$' -bench Large -benchtime 1x
 const bigFileEnv = "GVIM_BIG_FILE"
 
 // bigFile returns the path in GVIM_BIG_FILE, or skips the benchmark.

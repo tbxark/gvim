@@ -1,14 +1,16 @@
-// Package ui is the Bubble Tea v2 root model of gvim. It is one tea.Model that
+// Package tui is the Bubble Tea v2 root model of gvim. It is one tea.Model that
 // composes sub-models. Each sub-model has an Update(msg) (Model, tea.Cmd) and a
 // View, and it is a value of its own package. The root routes input, holds the
-// focus, and computes the layout. Painting is into the cell grid in ui/grid,
-// and the colors come from ui/style.
+// focus, and computes the layout. Painting is into the cell grid in
+// internal/tui/grid, and the colors come from internal/tui/style.
 //
-// Layout and hit testing. computeLayout (layout.go) is the one geometry source.
+// Layout and hit testing. frame.ComputeLayout (internal/tui/frame) is the one
+// geometry source.
 // Row 0 is the menu bar, row 1 the tab strip, rows 2 to h-2 the body, and row
 // h-1 the status row. The explorer panel takes the left columns of rows 1 to
 // h-2, and the editor takes the rest. A frame smaller than 8x3 shows only the
-// gate message. The hit map (hit.go) reads the same layout as the painter.
+// gate message. The hit map (internal/tui/frame) reads the same layout as the
+// painter.
 //
 // Input. The root resolves key presses through the Keymap in the focused
 // context, and inserts text when no binding claims it and the editor has focus.

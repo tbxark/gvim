@@ -1,5 +1,6 @@
-// Package palette holds the command palette's entries and the logic that
-// filters and ranks them for a query, following Fresh's command registry
+// Package commands is the command registry behind the command palette: the
+// entries, the query modes, the availability rules and the filtering and
+// ranking for a query, following Fresh's command registry
 // (crates/fresh-editor/src/input/command_registry.rs).
 //
 // The builtin command table (commands_gen.go) is generated from the Fresh
@@ -9,7 +10,7 @@
 // The query has four modes, chosen by its first character: no prefix searches
 // files; ">" runs commands; ":" jumps to a line; "#" picks a buffer. Nothing is
 // forced: a query without ">" is a file query. Search ranks only command mode.
-// File search is internal/finder's; line and buffer modes are the editor's, and
+// File search is finder's; line and buffer modes are the editor's, and
 // Search returns nil for them.
 package commands
 

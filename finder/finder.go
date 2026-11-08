@@ -5,7 +5,7 @@
 //
 // Enumeration prefers git: inside a work tree, "git ls-files" lists tracked and
 // untracked files that .gitignore does not exclude. Elsewhere, or when git is
-// missing, a walk of the directory honours .gitignore through internal/explorer.
+// missing, a walk of the directory honours .gitignore through explorer.
 // Start runs enumeration in the background so the picker can open at once, with
 // the status "Loading files…" until the list is complete.
 package finder

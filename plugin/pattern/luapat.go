@@ -1,4 +1,4 @@
-// Package luapat is a Lua 5.1 pattern matcher (lstrlib.c's str_find_aux,
+// Package pattern is a Lua 5.1 pattern matcher (lstrlib.c's str_find_aux,
 // gmatch and gsub) with a step budget, a cancel hook and output caps, so that
 // untrusted plugin code can use string patterns without being able to hang or
 // exhaust the editor. It adds %f (frontier) and %b, back references %1-%9,

@@ -162,7 +162,7 @@ func TestPluginServicesDiff(t *testing.T) {
 func TestPluginServicesFuzzy(t *testing.T) {
 	svc := pluginServices{}
 	ctx := context.Background()
-	items := []string{"internal/ui/model.go", "README.md", "main.go", "internal/model/main.go"}
+	items := []string{"internal/tui/model.go", "README.md", "main.go", "internal/model/main.go"}
 	got := svc.Fuzzy(ctx, "main", items, 0)
 	if len(got) < 2 || got[0].Index != 2 {
 		t.Fatalf("Fuzzy(main) = %+v, want main.go first", got)

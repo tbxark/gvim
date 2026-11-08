@@ -12,7 +12,7 @@ import (
 )
 
 // dialogPort is the root's Dialogs port. It builds the dialogs of
-// internal/ui/dialog and answers the Save As prompt's path questions from the
+// internal/tui/dialog and answers the Save As prompt's path questions from the
 // disk, so the root does no file IO itself.
 type dialogPort struct{}
 

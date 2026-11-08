@@ -9,7 +9,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/space"
 )
 
-// ellipsisRune is the cut mark the shortening in internal/ui/space leaves.
+// ellipsisRune is the cut mark the shortening in internal/tui/space leaves.
 const ellipsisRune = '…'
 
 // fitName returns the name of r shortened to at most width cells, and the rune

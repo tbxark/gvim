@@ -1,4 +1,4 @@
-// Package watch reports changes to directories on disk so the explorer can
+// Package filewatch reports changes to directories on disk so the explorer can
 // refresh. It wraps github.com/fsnotify/fsnotify and debounces bursts: changes
 // that arrive within one quiet period of each other become one Changed value.
 //

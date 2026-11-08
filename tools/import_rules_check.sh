@@ -39,7 +39,8 @@
 #       utility libraries (ansi, term) are not the UI framework and stay free.
 #   R3  leaf packages import no module package: buffer, textlayout, diff,
 #       encoding, fuzzy, pluginapi, decorations, theme, fsops, gitstate, lsp,
-#       lsp/lsptest, atomicfile, shellcmd. (lsp/manager sits above lsp and may
+#       lsp/lsptest, atomicfile, shellcmd, config, explorer, keymap,
+#       plugin/bundled, plugin/pattern. (lsp/manager sits above lsp and may
 #       import it.)
 #   R4  engine direction: document (the per-file model) imports only its leaf
 #       packages (buffer, search, syntax, textlayout, fold, diff, encoding,
@@ -74,7 +75,7 @@
 # Bash 3.2 compatible (macOS).
 
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 
 mod="github.com/tbxark/gvim"
 
@@ -155,7 +156,7 @@ while IFS=$'\t' read -r pkg imp; do
   if [ "$ours" = 1 ]; then
     # R3: leaf packages have no module dependency at all.
     case "$rel" in
-      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd)
+      buffer | textlayout | diff | encoding | fuzzy | pluginapi | decorations | theme | fsops | gitstate | lsp | lsp/lsptest | atomicfile | shellcmd | config | explorer | keymap | plugin/bundled | plugin/pattern)
         add R3 "$pkg" "$imp"
         ;;
     esac
@@ -305,6 +306,13 @@ while IFS=$'\t' read -r pkg imp; do
     esac
   fi
 
+  if [ "$ours" = 1 ] && [ "$irel" = internal/tui ]; then
+    case "$rel" in
+      internal/tui | internal/app | internal/uiadapter | internal/keybindings | internal/lsphost | internal/restore | internal/uitest) ;;
+      *) add R15 "$pkg" "$imp" ;;
+    esac
+  fi
+
   # R8: test support never reaches a shipped binary.
   case "$imp" in
     "$mod/buffer/buffertest" | "$mod/plugin/plugintest" | "$mod/lsp/lsptest" | "$mod/internal/uitest" | "$mod/internal/apptest")
@@ -319,6 +327,29 @@ while IFS=$'\t' read -r pkg imp; do
     add R9 "$pkg" "$imp"
   fi
 done <<<"$edges"
+
+
+# R16: a top-level package's tests do not import internal/.
+if ! testgraph=$(go list -test -f '{{.ImportPath}}: {{join .TestImports " "}}' ./... 2>&1); then
+  echo "import_rules_check: go list -test failed:" >&2
+  echo "$testgraph" >&2
+  exit 2
+fi
+while IFS=: read -r tpkg timps; do
+  [ -n "$tpkg" ] || continue
+  trel=${tpkg#"$mod"}
+  trel=${trel#/}
+  case "$trel" in
+    internal | internal/* | cmd | cmd/* | "") continue ;;
+  esac
+  for timp in $timps; do
+    case "$timp" in
+      "$mod"/internal | "$mod"/internal/*)
+        add R16 "$tpkg (test)" "$timp"
+        ;;
+    esac
+  done
+done <<<"$testgraph"
 
 if [ "$count" -eq 0 ]; then
   echo "IMPORT_RULES_OK"

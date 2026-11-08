@@ -2,7 +2,7 @@
 // the bottom row, a box of matches above it and a hint row, laid out as the
 // legacy palette was (BLUEPRINT-v2 section 4.4).
 //
-// The query picks the mode with internal/palette: no prefix searches files, ">"
+// The query picks the mode with commands: no prefix searches files, ">"
 // runs commands, ":" goes to a line and "#" picks a buffer. Command matching is
 // the domain model's, file ranking is the Ranker's, and the list navigation
 // (the highlight and the visible window) is palette.Palette's.
@@ -63,7 +63,7 @@ type Files interface {
 }
 
 // Ranker scores paths against a query and returns at most limit of them, best
-// first. The app adapter fills it over internal/finder and internal/fuzzy. Rank
+// first. The app adapter fills it over finder and fuzzy. Rank
 // is called from a tea.Cmd, never from Update or Draw, so it may take a while
 // over a large list.
 type Ranker interface {
@@ -91,7 +91,7 @@ type Options struct {
 	// Root is the directory the file rows are relative to. OpenFileMsg.Path is
 	// Root joined with the row's path.
 	Root string
-	// Commands is the command table, as internal/palette builds it.
+	// Commands is the command table, as commands builds it.
 	Commands []commands.Entry
 	// State is the editor state the commands are checked against. Nil means
 	// commands.DefaultState.

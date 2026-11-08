@@ -13,7 +13,7 @@ import (
 var ErrNotDecodable = errors.New("file cannot be decoded")
 
 // ErrUnknownEncoding is returned by set_encoding and reload_with_encoding for a
-// name that internal/encoding does not list.
+// name that encoding does not list.
 var ErrUnknownEncoding = errors.New("unknown encoding")
 
 // defaultCodec is the encoding of text that was not read from a file in another

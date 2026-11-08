@@ -30,7 +30,7 @@ var ErrTooLargeToTranscode = errors.New("too large to transcode")
 // user, and LoadFullFunc loads the file if the answer is yes.
 type ErrLargeNeedsFullLoad struct {
 	// Path is the file, Size its size in bytes, and Codec the name of the
-	// encoding that was detected, as internal/encoding names it.
+	// encoding that was detected, as encoding names it.
 	Path  string
 	Size  int64
 	Codec string

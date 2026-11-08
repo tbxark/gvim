@@ -1,5 +1,8 @@
 # GVIM Phase 1 Editor Spec
 
+> Historical record: package paths in this file are pre-reorganization. See
+> `docs/architecture.md` for the current layout.
+
 ## 1. Goal and scope
 
 Phase 1 is a usable terminal text editor for macOS (darwin/arm64 is the audited platform). It is built on bubbletea v2 and must stay pure Go.

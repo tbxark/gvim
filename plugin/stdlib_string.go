@@ -87,7 +87,7 @@ func stringByte(L *lua.LState) int {
 	return int(n)
 }
 
-// ---------- patterns (internal/luapat) ----------
+// ---------- patterns (plugin/pattern) ----------
 
 // patOptions are the luapat options of a call made on thread L: the default step budget,
 // the output cap, and cancellation by the slice context.

@@ -1,5 +1,8 @@
 # GAP-v3: gvim port vs full Fresh TUI
 
+> Historical record: package paths in this file are pre-reorganization. See
+> `docs/architecture.md` for the current layout.
+
 > **Superseded (plugin runtime).** Section 4 ("Plugin language decision"), milestone M7, and the rows that mention JS plugins describe the old plan. The plugin runtime in this repository is **Lua on
 > `github.com/yuin/gopher-lua`** (`internal/plugin`), not JavaScript. The JS system (`goja`, `esbuild`,
 > `slowjs`) was removed completely, and `.js`/`.ts` files in the plugin folder are never executed.

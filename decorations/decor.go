@@ -1,4 +1,4 @@
-// Package decor is the store of the decorations that plugins put on documents: virtual text,
+// Package decorations is the store of the decorations that plugins put on documents: virtual text,
 // styles, gutter marks and scrollbar marks that are drawn over a document and are not part
 // of it. It is pure data: it imports the standard library only and has no notion of colors
 // as the terminal knows them (a Color is a theme key or a literal RGB value, resolved by the

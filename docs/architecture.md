@@ -2,7 +2,7 @@
 
 Status: design record for the package reorganization (`master`, after the layout move).
 This file describes the package tree, what each package is for, and the import rules the
-compiler and `migration/tools/import_rules_check.sh` enforce. `migration/ARCH-v4.md` is the
+compiler and `tools/import_rules_check.sh` enforce. `migration/ARCH-v4.md` is the
 earlier proposal-only record and is superseded by this file where they disagree.
 
 The goal of the layout is that a reader (or a coding agent) can tell from the import path
@@ -31,8 +31,9 @@ internal/                       private executable shell (no top-level package i
   tui/                          Bubble Tea v2 root model + widgets
     overlay/ list/              shared kit: the Overlay/Caret contract and the list/box widget
     frame/ split/ tabstrip/     geometry kit: layout + hit map, split tree, tab strip
+    dock/                       terminal dock panel (the root keeps the glue)
     browser/ ctxmenu/ dialog/ editorpane/ explorer/ find/ grid/ icons/ menubar/
-    palette/ picker/ popup/ prompt/ space/ statusbar/ style/
+    palette/ picker/ popup/ prompt/ space/ style/
   terminal/                     PTY + screen model behind the terminal dock
   filewatch/                    fsnotify watcher (explorer reloads, project switches)
   uitest/                       test-only in-process UI harness
@@ -71,14 +72,14 @@ internal/cli → cmd/gvim
 
 ## 2. Import rules
 
-`migration/tools/import_rules_check.sh` reads the direct imports of every package
+`tools/import_rules_check.sh` reads the direct imports of every package
 (`go list`) and fails with a rule id and the offending edge. The rules:
 
 | Rule | Statement |
 |---|---|
 | R1 | No top-level package (not `internal/…`, not `cmd/…`) imports `internal/…`. |
 | R2 | `charm.land/*` (Bubble Tea, bubbles, lipgloss) is imported only by `internal/tui/…`, `internal/terminal` and `internal/uitest`. The plain `github.com/charmbracelet/x/*` helper libraries (`ansi`, `term`, `vt`) are not the UI framework and stay free. |
-| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`. (`lsp/manager` sits above `lsp` and may import it.) |
+| R3 | Leaf packages import no package of this module: `buffer`, `textlayout`, `diff`, `encoding`, `fuzzy`, `pluginapi`, `decorations`, `theme`, `fsops`, `gitstate`, `lsp`, `lsp/lsptest`, `atomicfile`, `shellcmd`, `config`, `explorer`, `keymap`, `plugin/bundled`, `plugin/pattern`. (`lsp/manager` sits above `lsp` and may import it.) |
 | R4 | Engine direction. `editor` does not import the UI, app, cli, plugin runtime/contract, lsp, finder, fsops, workspace, keymap, theme, config or commands. `search` does not import `editor`. `syntax` imports only `theme` among module packages. `session` imports only `buffer`. `commands` imports only `fuzzy` and `keymap`. `workspace` imports only `config`. `finder` imports only `explorer` and `fuzzy`. |
 | R5 | The TUI tree does not import `internal/app`, `internal/cli`, the plugin runtime, `lsp`, `finder` or `fsops`; a TUI sub-package does not import its parent `internal/tui`. |
 | R6 | `internal/cli` imports only `internal/app`, `internal/configview` and `syntax` (and cobra). |
@@ -90,6 +91,8 @@ internal/cli → cmd/gvim
 | R12 | Only `internal/tui` (its root and its own sub-packages), `internal/app` and `internal/uiadapter` import TUI sub-packages. |
 | R13 | The private host packages: only `internal/app` imports `uiadapter`, `pluginhost`, `lsphost` and `restore`; `keybindings` may also be imported by `uiadapter`/`pluginhost`/`configview`; `highlight` by `uiadapter`. |
 | R14 | `internal/configview` imports only `config`, `internal/keybindings`, `keymap` and `theme` among module packages; it never imports `internal/app`, `internal/cli` or `internal/tui`. |
+| R15 | The TUI root contract (`internal/tui`) is imported only by `internal/app`, the host packages (`uiadapter`, `keybindings`, `lsphost`, `restore`) and `internal/uitest`; TUI sub-packages never import the root (R5). |
+| R16 | No top-level package's test files import `internal/`; tests follow the same layer rule as the package they test. |
 
 Run the gates:
 
@@ -98,8 +101,8 @@ go build ./... && CGO_ENABLED=0 go build ./...
 go vet ./...
 golangci-lint run ./...
 go test ./...
-bash migration/tools/purity_check.sh        # PURE_GO_OK
-bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
+bash tools/purity_check.sh        # PURE_GO_OK
+bash tools/import_rules_check.sh  # IMPORT_RULES_OK
 ```
 
 ## 3. Package catalogue
@@ -120,7 +123,7 @@ bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
 | `internal/app` | Composition root: `Options`, `Validate`, `Run`, `buildRuntime`; wires engine + host packages + TUI. | engine packages, host packages, TUI root and sub-packages, plugin runtime |
 | `internal/uiadapter` | Adapts engine to the TUI ports: editor/document views, dialogs, ranker, file ops, git status, projects, terminal/clipboard, auto-save gate. | engine packages, `tui` sub-packages, `highlight`, `keybindings`, `terminal` |
 | `internal/pluginhost` | The real `plugin.OS`, the editor as plugins see it, plugin services, virtual buffers and decorations. | engine packages, `plugin`, `pluginapi`, `keybindings` |
-| `internal/lsphost` | Language-server port: managers, document sync, diagnostics polling, server catalogue. | `lsp`, engine packages, `pluginapi`, `tui` |
+| `internal/lsphost` | Language-server port: managers, document sync, diagnostics polling, server catalogue. | `lsp`, `lsp/manager`, engine packages, `pluginapi`, `tui` |
 | `internal/restore` | Session save/restore and crash-recovery copies (session file, stash files, recovery dir). | `session`, `editor`, `buffer`, `config`, `tui` |
 | `internal/keybindings` | Built-in presets, user bindings and persistence, `keymap.Map` → TUI `Keymap` adapter, plugin binding overlay. | `keymap`, `config`, `commands`, `pluginapi`, `tui` |
 | `internal/highlight` | Syntax-span cache for the TUI: windowed lexing, generations, string-context queries. | `buffer`, `editor`, `syntax` |
@@ -137,13 +140,13 @@ bash migration/tools/import_rules_check.sh  # IMPORT_RULES_OK
 |---|---|---|
 | `buffer` | The text model: lines of runes, positions, edits, undo/redo, observer, large-file mode. | Two storage modes in one package: in-memory lines, and a disk-backed `bigStore` for large files (`OpenLarge`, `Snapshot`, `IndexScan`, `Rebase`). A split was considered and rejected: the mode is part of `Buffer`, not a layer on it (see `buffer/doc.go`). |
 | `document` | One open file: text, cursor/carets, selection, folds, view settings, saved/on-disk/encoding/EOL state, large-file mode, text commands and motions, document-level load/save planning, and the per-document plugin seam data. | The model half of the old `editor` god package; imports `buffer`/`search`/`syntax`/`textlayout`/`fold`/`diff`/`encoding`/`atomicfile`, never `editor`, `session` or `internal/`. |
-| `editor` | The editing session: tabs, active document, action registry and `Do` dispatch, statuses, save/revert/autosave jobs, disk polling, shell jobs, settings resolution, marks/jumps, and the plugin seam's session half. | Imports `document` and the engine leaves; no UI. `editor/bridge.go` still aliases the moved names for consumers. |
-| `search` | Find, scan, replace and range search over `buffer` lines. | `large.go` is the visible-window search (renamed from a misleading name). |
+| `editor` | The editing session: tabs, active document, action registry and `Do` dispatch, statuses, save/revert/autosave jobs, disk polling, shell jobs, settings resolution, marks/jumps, and the plugin seam's session half. | Imports `document`, `atomicfile`, `shellcmd` and the engine leaves; no UI. `editor/bridge.go` still aliases the moved names for consumers. |
+| `search` | Find, scan, replace and range search over `buffer` lines. | `visible.go` is the visible-window search (renamed from a misleading name). |
 | `syntax` | Chroma lexer resolution, token spans for a visible window, markdown inline styling, style table from a theme. | |
 | `fold` | Indentation fold ranges. | Small leaf used by `editor`. |
 | `diff` | Line diff (go-diff) into hunks; used by the compare view and plugin services. | |
 | `encoding` | Decoding/encoding detection and conversion (UTF-8/16, charsets via `x/text`). | |
-| `session` | Session file format and stash files (open tabs, cursors, unsaved overlays). | The restore *policy* lives in `internal/app`. Session and search JSON go through `atomicfile`. |
+| `session` | Session file format and stash files (open tabs, cursors, unsaved overlays). | The restore *policy* lives in `internal/restore`. Session and search JSON go through `atomicfile`; the overlay-stash payload is `document.StashOverlay`. |
 | `decorations` | Plugin decoration store: namespaced items per buffer, anchors that follow edits, per-line query. | Pure data, stdlib only. |
 | `textlayout` | Terminal text geometry: indent width, indent guides, word occurrences, match columns. | Leaf; used by `editor`/`fold` and the editor pane. |
 | `atomicfile` | Atomic file replacement: temp+sync+rename, mode/owner/xattr, symlink following. | Leaf; used by `editor` (saves) and `session` (session and search JSON). |
@@ -176,7 +179,7 @@ still large internally, so a reader can find a feature without grepping by memor
 |---|---|---|
 | core / dispatch | `model.go`, `root.go`, `ports.go`, `doc.go`, `dialogs.go`, `key_hints.go`, `keybind_known.go`, `chord_keys.go`, notices, `status_expiry.go`, `cont_*` | `Model` + `Deps`, `New/Run/Close/Init/Update/View`, update pipeline, key translation/dispatch, overlay stack, painting, ports |
 | splits / tabs / compare | `split.go`, `split_resize.go`, `split_drag.go`, `split_tabs.go`, `tabs.go`, `tab_drag.go`, `tab_drop.go`, `compare*.go` | pane controllers and drag/drop over the `tui/split` tree, tab strip glue over `tui/tabstrip`, side-by-side compare |
-| terminal dock | `dock*.go` (+ `shell.go` for editor shell commands) | shell dock: PTY lifecycle, key/paste routing, paint |
+| terminal dock | `dock_glue.go`, `dock_commands.go`, `dock_text.go` (`shell.go` is editor shell commands) | root glue over `tui/dock`: port aliases, action routing, paint calls, selection helpers |
 | LSP UI | `lsp.go`, `lsp_detect.go`, `diag.go`, `root_signature.go` | language-server UI controller, diagnostics, goto/hover/completion/code actions/rename, signature help |
 | plugin host | `plugin_*.go` | the UI side of the plugin contract: pump, events, keys/modes, prompts, windows, virtual buffers, decorations, manager, init.lua |
 | overlays / utilities | `keybind_editor.go`, `help_utility.go`, `notice_warnings.go`, `help.go`, `settings.go`, `icon_preview.go`, `tour.go`, `root_stash.go`, `language_pick.go`, `files_encoding.go`, `keymapeditor.go`, `keybind_ports.go` | keybinding editor, help/settings/tour/notices/pickers; the list/box machinery lives in `tui/list` |
@@ -201,7 +204,8 @@ styles; the only place that happens), `icons` (Nerd Font glyphs), `editorpane`
 menu table), `explorer` (file-tree panel), `palette` (command palette overlay), `find`
 (find bar), `prompt` (bottom-row prompts), `browser` (file/folder browser), `picker`
 (plugin list picker), `popup` (anchored list popup), `ctxmenu` (right-click menu),
-`dialog` (modal dialogs), `statusbar` (status row primitives).
+`dialog` (modal dialogs), `dock` (the terminal dock panel: PTY lifecycle, input/paste,
+resize/exit, capture, paint).
 
 ### 4.3 `document` and `editor`
 
@@ -233,9 +237,9 @@ compiling until consumers are retargeted.
 
 ### 4.4 `buffer`
 
-One package with two storage modes: an in-memory `[][]rune` model (`buffer.go`,
-`lines_tree.go`, `history.go`, `snapshot.go`, edits and observers) and a disk-backed large
-mode (`large_*.go`: source, index, pages, overlay, writes, rebase, budget). `Buffer.big`
+One package with two storage modes: an in-memory model (`buffer.go`, `history.go`,
+`snapshot.go`, edits and observers) and a disk-backed large mode (`lines_tree.go` and the
+`large_*.go` files: source, index, pages, overlay, writes, rebase, budget). `Buffer.big`
 selects the mode; every public method handles both. The split into two packages was
 considered and rejected (see `migration/ARCH-v4.md` history and `buffer/doc.go`).
 
@@ -294,6 +298,9 @@ Done:
 7. `editor` split into top-level `document/` (per-file model, 61 files/7.0k LOC) and a
    slimmed `editor/` (session, 65 files/6.6k LOC), with a temporary alias bridge so no
    consumer package changed; the import gate gained the `document` direction (R4/R11).
+8. Terminal dock extracted to `internal/tui/dock` (panel + tests), root keeps the glue;
+   the zero-importer `internal/tui/statusbar` package (status row primitives duplicated by
+   `tui/frame.StatusView`) was deleted.
 
 Next (tracked as follow-up work; each keeps build + tests green):
 
@@ -319,9 +326,9 @@ file when each step lands.
 ## 7. What enforces the layout
 
 - The compiler: import cycles and illegal `internal/` imports fail the build.
-- `migration/tools/import_rules_check.sh`: R1-R14, run in every gate.
-- `migration/tools/purity_check.sh`: the shipped binary stays pure Go (no cgo).
+- `tools/import_rules_check.sh`: R1-R16, run in every gate.
+- `tools/purity_check.sh`: the shipped binary stays pure Go (no cgo).
 - `go vet ./...`, `golangci-lint run ./...`, `go test ./...`.
 - Generated code stays generated: `commands/commands_gen.go`
   (`python3 commands/gen/generate.py refs/fresh`) and
-  `internal/tui/menubar/menu_table_gen.go` (`python3 migration/tools/gen_menus.py --check`).
+  `internal/tui/menubar/menu_table_gen.go` (`python3 tools/gen_menus.py --check`).

@@ -90,8 +90,8 @@ there is no `Makefile`, no `.sphere/layout.json`, and no generate target.
 go build ./... && CGO_ENABLED=0 go build ./...   # shipped binary must stay pure Go
 go vet ./...
 golangci-lint run ./...                          # v2; currently reports 0 issues
-bash migration/tools/purity_check.sh             # pure-Go gate, prints PURE_GO_OK
-bash migration/tools/import_rules_check.sh       # layering gate R1-R14, prints IMPORT_RULES_OK
+bash tools/purity_check.sh             # pure-Go gate, prints PURE_GO_OK
+bash tools/import_rules_check.sh       # layering gate R1-R16, prints IMPORT_RULES_OK
 go test ./...                                    # all packages pass today
 go test ./internal/tui -run TestName             # single test
 go test -race ./...                              # test-only; needs cgo
@@ -100,13 +100,13 @@ go run ./cmd/gvim [DIR] [FILE[:LINE[:COL]]]...   # launch the TUI
 
 ### Architecture
 
-The design record is `docs/architecture.md` (package table, import rules R1-R14,
+The design record is `docs/architecture.md` (package table, import rules R1-R16,
 package maps, migration phases). `migration/ARCH-v4.md` is the earlier proposal-only
 record; where the two disagree, `docs/architecture.md` wins. The shape that needs
 several files to see:
 
 - Three layers. `cmd/gvim/main.go` → `internal/cli` (cobra flags and arguments) →
-  `app.Run`. `internal/` is the private executable shell (`app` plus the host packages
+  `internal/app.Run`. `internal/` is the private executable shell (`app` plus the host packages
   `uiadapter`, `pluginhost`, `lsphost`, `restore`, `keybindings`, `highlight`, the
   test-only `apptest`, then `configview`, `cli`, `tui`, `terminal`, `filewatch`,
   `uitest`). TUI-free engine and library packages are at the
@@ -121,7 +121,7 @@ several files to see:
   `internal/uiadapter` import the TUI sub-packages; `internal/cli` imports `internal/app`
   for `Options`/`Run` and `internal/configview` + `syntax` for the config and grammar
   commands.
-  `migration/tools/import_rules_check.sh` is the enforcement.
+  `tools/import_rules_check.sh` is the enforcement.
 - `internal/app` is the thin composition root (`Options`, `Run`, `buildRuntime`, settings,
   logfile, live grep, default formatters); the `gvim config` backend is
   `internal/configview`. The host packages implement the ports:
@@ -133,7 +133,7 @@ several files to see:
   plugin runtime; its sub-packages (`overlay`, `list`, `frame`, `split`, `tabstrip`, `dock`,
   `editorpane`, `menubar`,
   `explorer`, `palette`, `find`, `prompt`, `browser`, `picker`, `popup`, `ctxmenu`,
-  `dialog`, `statusbar`, `style`, `grid`, `icons`, `space`) must not import the root
+  `dialog`, `style`, `grid`, `icons`, `space`) must not import the root
   `tui`.
   `internal/tui/frame` is the single geometry source for painting and the hit map;
   `internal/tui/split` owns the split tree and `internal/tui/tabstrip` the strip paint.
@@ -154,7 +154,7 @@ several files to see:
 
 - Write plain Go unit tests: table-driven, asserting on values and behaviour. Do **not** add
   golden-file or snapshot tests for the TUI (no `testdata` screen dumps, no full-frame string
-  comparisons, no new `migration/parity` scenarios). They are too costly to maintain.
+  comparisons, no new golden-screen scenarios). They are too costly to maintain.
 - For `internal/tui` code, drive `Update` with messages and assert on model state, emitted `tea.Cmd`s,
   layout rectangles and hit-map results. To check rendering, assert on a few specific cells or
   rows of the `grid`, not on the whole frame.
@@ -168,15 +168,13 @@ several files to see:
 
 - `commands/commands_gen.go`: regenerate with
   `python3 commands/gen/generate.py refs/fresh`. Do not edit by hand.
-- `internal/tui/menubar/menu_table_gen.go`: regenerate with `python3 migration/tools/gen_menus.py`
+- `internal/tui/menubar/menu_table_gen.go`: regenerate with `python3 tools/gen_menus.py`
   (`--check` reports drift). It reads `refs/fresh`. Do not edit by hand.
 - `refs/` (crush, fresh, lazygit, micro, orbiton, toast) are read-only reference checkouts, and
   `_attic/tui` is the retired legacy TUI. Neither is part of the build (`_attic` is ignored by
   `./...`, and `go list ./...` lists nothing under `refs`). Do not edit or import them.
-- Parity tooling (`migration/tui_parity.py`, `migration/parity/`) compares against Fresh goldens
-  and needs a Python venv with `pyte`. See `migration/parity/FLOOR.md` for the commands. Goldens
-  other than the 26-scenario floor are informational only. This is a manual comparison tool, not
-  a pattern to copy into Go tests (see Testing).
+- The old parity/golden scripts mentioned by earlier notes are not in the working tree;
+  the current gates are the ones in `Commands` and `docs/architecture.md`.
 
 ---
 

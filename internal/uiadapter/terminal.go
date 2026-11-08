@@ -12,7 +12,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui"
 )
 
-// The terminal dock's adapters: a shell from internal/term, and the system clipboard
+// The terminal dock's adapters: a shell from internal/terminal, and the system clipboard
 // that terminal_paste reads. The ui package defines the interfaces; this file is the
 // only place that imports the concrete term package for the dock.
 

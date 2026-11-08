@@ -35,7 +35,7 @@ func TestRuntimeInitFileAndNoPlugins(t *testing.T) {
 	}
 }
 
-// The two blocks internal/ui writes for Macro: Save to init.lua and Macro: Promote to
+// The two blocks internal/tui writes for Macro: Save to init.lua and Macro: Promote to
 // command (ui.savedMacroBlock and ui.promotedMacroBlock). The ui test pins the text; this
 // test runs it, so the generated Lua is known to register and to replay its steps.
 const (

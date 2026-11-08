@@ -14,7 +14,7 @@ import (
 // installStdlib applies the repaired standard library to a fresh state (FINAL 8.1 step 4,
 // AMENDMENTS C5/C6): tonumber, math.huge, table.concat/sort/unpack/pack/move,
 // string.rep/format/byte, unpack, a reduced os, and string.find/match/gmatch/gsub from
-// internal/luapat (step budget, cancel on the slice context, output cap).
+// plugin/pattern (step budget, cancel on the slice context, output cap).
 //
 // Every function that allocates in proportion to its arguments computes the final size
 // before allocating and raises beyond the caps of limits.go (rule 8.1.R). Documented

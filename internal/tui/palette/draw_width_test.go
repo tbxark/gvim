@@ -27,7 +27,7 @@ func TestGrepRowShowsTheMatchedTextInAWideFrame(t *testing.T) {
 // path up to the "file" label when the frame has room for it.
 func TestFileRowShowsTheWholePathBeforeTheSourceLabel(t *testing.T) {
 	t.Parallel()
-	name := "internal/plugin/bundled/plugins/git_log/main.lua"
+	name := "plugin/bundled/plugins/git_gutter/main.lua"
 	p := New(Options{Files: &fakeFiles{files: []string{name}}, Ranker: &fakeRanker{}})
 	settle(t, p, p.Init(), 4)
 	got := draw(p, 120, 30)

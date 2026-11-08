@@ -5,7 +5,7 @@ import "testing"
 // The speed floor of the spec (AMENDMENTS C6) for a 10 MiB subject:
 // Find("TODO") <= 20 ms, Find("%s+$") <= 150 ms. Run with
 //
-//	go test ./internal/luapat -bench . -benchtime 5x
+//	go test ./plugin/pattern -bench . -benchtime 5x
 func BenchmarkFindTODO10MiB(b *testing.B) {
 	s := wordsSubject(10<<20, true)
 	b.SetBytes(int64(len(s)))
