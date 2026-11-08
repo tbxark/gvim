@@ -80,7 +80,8 @@ func TestHelpChordsRunTheirAction(t *testing.T) {
 
 // TestHelpLeavesOutActionsThatTheirPresetShadows: an action whose only binding is shadowed by
 // the preset has no key, so the help does not list it with the shadowing key. Each of these is
-// the emacs preset's shadowing of a default binding, and the menus show no key for them either.
+// a default binding Fresh's Emacs preset gives to another action, and the menus show no key
+// for them either.
 func TestHelpLeavesOutActionsThatTheirPresetShadows(t *testing.T) {
 	m, err := keymap.ByName("emacs")
 	if err != nil {
@@ -92,9 +93,23 @@ func TestHelpLeavesOutActionsThatTheirPresetShadows(t *testing.T) {
 			listed[r.Value] = true
 		}
 	}
-	for _, action := range []string{"replace", "focus_file_explorer", "select_line_start", "expand_line_selection"} {
+	// Fresh's Emacs: Ctrl+R finds previous (Replace has no key), Ctrl+E moves to the line
+	// end (Focus File Explorer has none), Ctrl+L recenters (Expand Line Selection has none),
+	// Ctrl+D deletes forward and Alt+N finds the selection (Add Cursor has none), Alt+Up and
+	// Alt+Down scroll (Move Line has none), Alt+/ expands a dabbrev (Live Grep has none) and
+	// Shift+Home selects the line start (Select Smart Home has none).
+	for _, action := range []string{
+		"replace", "focus_file_explorer", "expand_line_selection", "add_cursor_next_match",
+		"open_live_grep", "move_line_up", "move_line_down", "select_smart_home",
+	} {
 		if listed[action] {
 			t.Errorf("emacs help lists %s, which has no binding that runs in emacs", action)
+		}
+	}
+	// The actions Fresh's Emacs does bind are listed: the check is not vacuous.
+	for _, action := range []string{"cut", "query_replace", "find_previous", "goto_line"} {
+		if !listed[action] {
+			t.Errorf("emacs help leaves out %s, which has a binding", action)
 		}
 	}
 }

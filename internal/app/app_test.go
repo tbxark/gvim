@@ -41,6 +41,12 @@ func TestValidate(t *testing.T) {
 		{name: "negative line", opts: Options{Files: []FileTarget{{Path: "a.go", Line: -1}}}, wantErr: "must not be negative"},
 		{name: "negative column", opts: Options{Files: []FileTarget{{Path: "a.go", Line: 1, Col: -2}}}, wantErr: "must not be negative"},
 		{name: "column without line", opts: Options{Files: []FileTarget{{Path: "a.go", Col: 4}}}, wantErr: "a column needs a line"},
+		{name: "restore with no-restore", opts: Options{Restore: true, NoRestore: true}, wantErr: "--restore cannot be combined with --no-restore"},
+		{name: "restore with simple", opts: Options{Restore: true, Simple: true}, wantErr: "--restore cannot be combined with --simple"},
+		{name: "restore with diff", opts: Options{Restore: true, Diff: true, Files: []FileTarget{{Path: "a"}, {Path: "b"}}}, wantErr: "--restore cannot be combined with --diff"},
+		{name: "simple with no-restore", opts: Options{Simple: true, NoRestore: true}},
+		{name: "restore alone", opts: Options{Restore: true}},
+		{name: "simple alone", opts: Options{Simple: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -78,9 +78,9 @@ func TestCtrlNHidesWelcomeAndOpensUntitledTab(t *testing.T) {
 }
 
 // Closing the last clean tab with Ctrl+W shows the welcome screen again.
-func TestCtrlWOnLastTabShowsWelcomeAgain(t *testing.T) {
+func TestCloseTabKeyOnLastTabShowsWelcomeAgain(t *testing.T) {
 	s, _ := startApp(t, "hello\n")
-	s.Key("ctrl+w")
+	s.Key(closeTabChord(t))
 	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("a terminal editor") })
 	if sc.Contains("a.txt") {
 		t.Fatalf("the tab is still shown after closing it:\n%s", sc)

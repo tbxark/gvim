@@ -69,7 +69,9 @@ type Options struct {
 	AutoClose    bool
 	AutoSurround bool
 	// VirtualSpace is editor.virtual_space: VirtualSpaceOff (default), VirtualSpaceBlock or
-	// VirtualSpaceOn. Empty reads as off.
+	// VirtualSpaceOn. Empty reads as off. Only "on" puts the caret past the end of a
+	// line for now; "block" is accepted and its block-selection half is not built yet
+	// (see virtualspace.go).
 	VirtualSpace string
 	// ScrollOffset is editor.scroll_offset (default 3): the lines kept visible above and
 	// below the caret. Zero keeps none.
@@ -452,6 +454,12 @@ func (e *Editor) Do(a Action, args map[string]any) Result {
 		err := ErrNoDocument
 		e.setError(err)
 		return Result{Err: err}
+	}
+	// An edit or a move that is not taught about virtual space ends the caret's
+	// virtual position before it runs (Fresh's safe default). The virtual moves
+	// and edits set it again themselves.
+	if d != nil && !virtualSpaceActions[a] {
+		d.ClearVirtual()
 	}
 	kind := typingKind(a)
 	if d != nil && (kind == "" || kind != e.lastKind) {

@@ -83,6 +83,7 @@ func (d *Document) CutLines() {
 // step. When the text has as many lines as there are carets, and more than one,
 // caret i gets line i.
 func (d *Document) PasteText(text string) {
+	d.MaterializeVirtual()
 	lines := strings.Split(text, "\n")
 	if len(lines) > 1 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]

@@ -223,16 +223,18 @@ func TestDiagCountsText(t *testing.T) {
 	}
 }
 
-// TestStatusRowDiagnosticsBadgeSitsNextToThePill checks the badge's place: after the
-// LSP pill (and the right plugin items) and before the palette hint, in Fresh's
-// bracket style around its E:/W:/I: text.
-func TestStatusRowDiagnosticsBadgeSitsNextToThePill(t *testing.T) {
-	s := StatusView{
-		Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8", Language: "Go",
-		LSP: "LSP (off)", Diags: DiagCounts{Errors: 1, Warnings: 2},
+// TestStatusRowDiagnosticsBadgeFollowsTheConfiguredList checks that the badge is the
+// {diagnostics} element and so follows the configured lists: Fresh's default puts it
+// on the left after the cursor position, and a config that names it in the right
+// group renders it there, in Fresh's bracket style around its E:/W:/I: text. It is a
+// count, not a click target.
+func TestStatusRowDiagnosticsBadgeFollowsTheConfiguredList(t *testing.T) {
+	base := StatusView{
+		Position: "Ln 1, Col 1", Line: 1, Col: 1, Cursors: 1, Lines: 4,
+		EOL: "LF", Encoding: "UTF-8", Language: "Go", LSP: "LSP (off)",
+		Diags: DiagCounts{Errors: 1, Warnings: 2},
 	}
-	runs := StatusRuns(100, s)
-	at := func(text string) *Run {
+	find := func(runs []Run, text string) *Run {
 		for i := range runs {
 			if runs[i].Text == text {
 				return &runs[i]
@@ -240,19 +242,47 @@ func TestStatusRowDiagnosticsBadgeSitsNextToThePill(t *testing.T) {
 		}
 		return nil
 	}
-	pill, badge, palette := at(" LSP (off) "), at(" [E:1 W:2] "), at(" "+PaletteHelp+" ")
-	switch {
-	case pill == nil || pill.Kind != HitStatusSegment || pill.Index != StatusSegmentLSP:
-		t.Fatalf("the pill run = %+v, want a clickable LSP segment", pill)
-	case badge == nil:
+	badge := " [E:1 W:2] "
+	runs := StatusRuns(100, base)
+	got := find(runs, badge)
+	if got == nil {
 		t.Fatalf("no badge run in %+v", runs)
-	case palette == nil:
-		t.Fatalf("no palette hint in %+v", runs)
-	case pill.X >= badge.X || badge.X >= palette.X:
-		t.Errorf("pill at %d, badge at %d, palette at %d: want the badge between the pill and the hint", pill.X, badge.X, palette.X)
 	}
-	if badge.Kind != HitNone {
-		t.Errorf("the badge is clickable (%v); it is a count, not a target", badge.Kind)
+	if got.Kind != HitNone {
+		t.Errorf("the badge is clickable (%v); it is a count, not a target", got.Kind)
+	}
+	var cursor *Run
+	for i := range runs {
+		if runs[i].Kind == HitStatusSegment && runs[i].Index == StatusSegmentPosition {
+			cursor = &runs[i]
+		}
+	}
+	if cursor == nil || cursor.X >= got.X {
+		t.Errorf("badge at %d, cursor %+v: Fresh's default list puts the badge after the cursor", got.X, cursor)
+	}
+	if pill := find(runs, " LSP (off) "); pill == nil || got.X >= pill.X {
+		t.Errorf("badge at %d, pill %+v: the badge is a left element and the pill a right one", got.X, pill)
+	}
+
+	// A configured right group puts the badge where the user named it.
+	placed := base
+	placed.Row = StatusRow{
+		Left: []StatusElement{{Kind: StatusElementMessages}},
+		Right: []StatusElement{
+			{Kind: StatusElementLanguage}, {Kind: StatusElementLSP},
+			{Kind: StatusElementDiagnostics}, {Kind: StatusElementPalette},
+		},
+	}
+	runs = StatusRuns(100, placed)
+	badgeRun := find(runs, badge)
+	pill, palette := find(runs, " LSP (off) "), find(runs, " "+PaletteHelp+" ")
+	switch {
+	case badgeRun == nil:
+		t.Fatalf("no configured badge run in %+v", runs)
+	case pill == nil || palette == nil:
+		t.Fatalf("pill %+v, palette %+v in %+v", pill, palette, runs)
+	case pill.X >= badgeRun.X || badgeRun.X >= palette.X:
+		t.Errorf("pill at %d, badge at %d, palette at %d: want the configured order", pill.X, badgeRun.X, palette.X)
 	}
 }
 
@@ -291,15 +321,21 @@ func TestStatusRowReservesTheDiagnosticsSlotUntilTheCountsAreKnown(t *testing.T)
 	}
 }
 
-// TestNarrowStatusRowDropsTheBadgeBeforeThePill checks the right group's order on a
-// narrow row: the palette hint goes first, then the diagnostics badge, and the LSP
-// pill and the language keep their place. Every run stays inside the row.
-func TestNarrowStatusRowDropsTheBadgeBeforeThePill(t *testing.T) {
+// TestNarrowStatusRowDropsTheRightGroupFromItsEnd checks Fresh's squeeze rule with
+// configured lists: a too-wide right group loses its right-most element first, so the
+// palette hint goes before the LSP pill and the pill before the language; the left
+// group is elided at its tail. Every run stays inside the row.
+func TestNarrowStatusRowDropsTheRightGroupFromItsEnd(t *testing.T) {
 	s := StatusView{
-		Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8", Language: "Go",
-		LSP: "LSP (off)", Diags: DiagCounts{Errors: 1, Warnings: 2},
+		Position: "Ln 1, Col 1", Line: 1, Col: 1, Cursors: 1, Lines: 4,
+		EOL: "LF", Encoding: "UTF-8", Language: "Go", LSP: "LSP (off)",
+		Row: StatusRow{
+			Left:  []StatusElement{{Kind: StatusElementTrust}, {Kind: StatusElementMessages}},
+			Right: []StatusElement{{Kind: StatusElementLanguage}, {Kind: StatusElementLSP}, {Kind: StatusElementPalette}},
+		},
+		Trust: "Trusted",
 	}
-	hasText := func(runs []Run, text string) bool {
+	has := func(runs []Run, text string) bool {
 		for _, r := range runs {
 			if r.Text == text {
 				return true
@@ -307,64 +343,28 @@ func TestNarrowStatusRowDropsTheBadgeBeforeThePill(t *testing.T) {
 		}
 		return false
 	}
-	pill, badge := " LSP (off) ", " [E:1 W:2] "
-	both, dropped := 0, false
-	for w := 12; w <= 100; w++ {
+	const lang, pill, palette = " Go ", " LSP (off) ", " " + PaletteHelp + " "
+	sawPaletteDropped := false
+	for w := 8; w <= 100; w++ {
 		runs := StatusRuns(w, s)
 		for _, r := range runs {
 			if r.X < 0 || r.X+r.W > w {
 				t.Fatalf("w=%d: run %+v is outside the row", w, r)
 			}
 		}
-		hasPill, hasBadge := hasText(runs, pill), hasText(runs, badge)
-		if hasBadge && !hasPill {
-			t.Fatalf("w=%d: the badge is on the row without the pill: %+v", w, runs)
+		hasLang, hasPill, hasPalette := has(runs, lang), has(runs, pill), has(runs, palette)
+		if hasPalette && !hasPill {
+			t.Fatalf("w=%d: the palette hint is on the row without the pill: %+v", w, runs)
 		}
-		if hasPill && !hasBadge {
-			dropped = true
+		if hasPill && !hasLang {
+			t.Fatalf("w=%d: the pill is on the row without the language: %+v", w, runs)
 		}
-		if hasPill && hasBadge {
-			both = w
+		if hasLang && !hasPalette {
+			sawPaletteDropped = true
 		}
 	}
-	if !dropped {
-		t.Error("no width drops the badge while the pill stays; the right group's order changed")
-	}
-	if both == 0 {
-		t.Error("no width shows both the pill and the badge")
-	}
-}
-
-// TestTrustPillLeadsTheLeftGroup checks Fresh's bottom-left guarantee: the workspace
-// trust level is the first element of the status row, it is clickable, and Restricted
-// and Blocked take the theme's warning role (Trusted stays on the bar's own style).
-func TestTrustPillLeadsTheLeftGroup(t *testing.T) {
-	tests := []struct {
-		trust string
-		warn  bool
-		role  RunStyle
-	}{
-		{"Trusted", false, StyleDefault},
-		{"Restricted", true, StyleWarning},
-		{"Blocked", true, StyleWarning},
-	}
-	for _, tt := range tests {
-		s := StatusView{Trust: tt.trust, TrustWarn: tt.warn, Position: "Ln 1, Col 1", Lines: 4, EOL: "LF", Encoding: "UTF-8", Language: "Go"}
-		runs := StatusRuns(100, s)
-		first := runs[0]
-		if first.X != 0 || first.Text != " "+tt.trust+" " {
-			t.Errorf("%s: the first left run = %+v, want it at column 0", tt.trust, first)
-		}
-		if first.Kind != HitStatusSegment || first.Index != StatusSegmentTrust {
-			t.Errorf("%s: the first run kind = %v index %d, want the trust segment", tt.trust, first.Kind, first.Index)
-		}
-		if first.Style != tt.role {
-			t.Errorf("%s: style = %v, want %v", tt.trust, first.Style, tt.role)
-		}
-		l := ComputeLayout(100, 30, Input{Status: s})
-		if got := l.Hit(1, l.StatusY); got.Kind != HitStatusSegment || got.Index != StatusSegmentTrust {
-			t.Errorf("%s: hit at column 1 = %+v, want the trust segment", tt.trust, got)
-		}
+	if !sawPaletteDropped {
+		t.Error("no width drops the palette hint while the language stays; the right group's order changed")
 	}
 }
 
@@ -407,5 +407,288 @@ func TestNarrowStatusRowKeepsTheTrustPill(t *testing.T) {
 	first := StatusRuns(100, s)[0]
 	if first.Text != label {
 		t.Errorf("the trust pill at a wide row = %q, want the whole label", first.Text)
+	}
+}
+
+// TestStatusRowUsesFreshDefaultListsWhenUnset checks the zero StatusView: the row is
+// Fresh's default element lists (left trust, remote, terminal_restart, cursor,
+// diagnostics, cursor_count, messages; right read_only, line_ending, encoding,
+// language, lsp, warnings, update, palette), with the elements gvim does not paint
+// simply absent.
+func TestStatusRowUsesFreshDefaultListsWhenUnset(t *testing.T) {
+	s := StatusView{
+		Position: "Ln 1, Col 1", Line: 1, Col: 1, Cursors: 1, Lines: 4,
+		EOL: "LF", Encoding: "UTF-8", Language: "Go", LSP: "LSP", Trust: "Trusted",
+	}
+	left, right := DefaultStatusLeft(), DefaultStatusRight()
+	if len(left) != 7 || left[0].Kind != StatusElementTrust || left[6].Kind != StatusElementMessages {
+		t.Errorf("default left list = %+v, want Fresh's seven elements from {trust} to {messages}", left)
+	}
+	if len(right) != 8 || right[0].Kind != StatusElementReadOnly || right[7].Kind != StatusElementPalette {
+		t.Errorf("default right list = %+v, want Fresh's eight elements from {read_only} to {palette}", right)
+	}
+	runs := StatusRuns(100, s)
+	if len(runs) == 0 || runs[0].Text != " Trusted " {
+		t.Fatalf("first run = %+v, want the trust pill first", runs)
+	}
+	at := func(text string) int {
+		for _, r := range runs {
+			if r.Text == text {
+				return r.X
+			}
+		}
+		return -1
+	}
+	// The rows paint in list order: trust, Local, cursor, then the right group's
+	// EOL, encoding, language and pill from the right edge.
+	if x := at(" Local "); x < 0 {
+		t.Errorf("no remote label in %+v", runs)
+	}
+	if x, y := at(" LF "), at(" UTF-8 "); x < 0 || y < 0 || x >= y {
+		t.Errorf("line ending and encoding = %d, %d; want them in that order", x, y)
+	}
+	if at(" LSP ") < 0 {
+		t.Errorf("no LSP pill in %+v", runs)
+	}
+	if at(" "+PaletteHelp+" ") < 0 {
+		t.Errorf("no palette hint in %+v", runs)
+	}
+}
+
+// TestStatusRowWalksTheConfiguredLists checks that the row is exactly the configured
+// elements: order, a missing element gone, and the separator between neighbours.
+func TestStatusRowWalksTheConfiguredLists(t *testing.T) {
+	s := StatusView{
+		Position: "Ln 1, Col 1", Line: 1, Col: 1, Cursors: 1, Lines: 4,
+		EOL: "LF", Encoding: "UTF-8", Language: "Go", LSP: "LSP", ReadOnly: true,
+		Row: StatusRow{
+			Left:      []StatusElement{{Kind: StatusElementCursor}, {Kind: StatusElementMessages}},
+			Right:     []StatusElement{{Kind: StatusElementReadOnly}, {Kind: StatusElementLanguage}, {Kind: StatusElementPalette}},
+			Separator: "|",
+		},
+	}
+	runs := StatusRuns(120, s)
+	var texts []string
+	for _, r := range runs {
+		texts = append(texts, r.Text)
+	}
+	joined := strings.Join(texts, "\x00")
+	for _, want := range []string{" Ln 1, Col 1   ", "|", " Go ", " [RO] ", " " + PaletteHelp + " "} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("row %q has no %q", texts, want)
+		}
+	}
+	// No EOL, encoding or LSP: they are not configured.
+	for _, gone := range []string{" LF ", " UTF-8 ", " LSP "} {
+		if strings.Contains(joined, gone) {
+			t.Errorf("row paints %q although the list does not name it: %q", gone, texts)
+		}
+	}
+	// The separator sits between neighbours, never first or last.
+	for i, r := range runs {
+		if r.Text != "|" {
+			continue
+		}
+		if i == 0 || i == len(runs)-1 {
+			t.Errorf("separator at run %d of %d: it has no neighbour on one side", i, len(runs))
+		}
+		if runs[i-1].X+runs[i-1].W != r.X || r.X+r.W != runs[i+1].X {
+			t.Errorf("separator %+v is not between %+v and %+v", r, runs[i-1], runs[i+1])
+		}
+	}
+	// An explicitly empty list paints nothing.
+	empty := s
+	empty.Row = StatusRow{Left: []StatusElement{}, Right: []StatusElement{}}
+	if runs := StatusRuns(80, empty); len(runs) != 0 {
+		t.Errorf("an empty configured row paints %+v", runs)
+	}
+}
+
+// TestStatusRowElementsShowTheirState checks the elements whose text depends on the
+// session: {cursor:compact}, {cursor_count}, {terminal_restart} and the clickable
+// {messages}, plus the elements gvim parses but does not paint.
+func TestStatusRowElementsShowTheirState(t *testing.T) {
+	row := func(kinds ...StatusElementKind) StatusRow {
+		els := make([]StatusElement, len(kinds))
+		for i, k := range kinds {
+			els[i] = StatusElement{Kind: k}
+		}
+		return StatusRow{Left: els}
+	}
+	base := StatusView{
+		Position: "Ln 7, Col 3", Line: 7, Col: 3, Cursors: 1, Lines: 100,
+		EOL: "LF", Encoding: "UTF-8", Language: "Go",
+	}
+	text := func(s StatusView) string {
+		var b strings.Builder
+		for _, r := range StatusRuns(120, s) {
+			b.WriteString(r.Text)
+		}
+		return b.String()
+	}
+	// {cursor:compact} pads "7:3" to the compact width (line digits + colon + reserve).
+	compact := base
+	compact.Row = row(StatusElementCursorCompact)
+	if want := " 7:3     "; text(compact) != want {
+		t.Errorf("compact cursor = %q, want %q", text(compact), want)
+	}
+	// {cursor_count} shows above one cursor only.
+	count := base
+	count.Row = row(StatusElementCursorCount)
+	if got := text(count); got != "" {
+		t.Errorf("one cursor paints %q, want nothing", got)
+	}
+	count.Cursors = 3
+	if got := text(count); got != " 3 cursors " {
+		t.Errorf("three cursors = %q, want %q", got, " 3 cursors ")
+	}
+	// {terminal_restart} renders only while the dock's shell has exited, and clicks
+	// restart it.
+	restart := base
+	restart.Row = row(StatusElementTerminalRestart)
+	if got := text(restart); got != "" {
+		t.Errorf("a running dock paints %q, want nothing", got)
+	}
+	restart.TerminalRestart = "Restart terminal"
+	runs := StatusRuns(120, restart)
+	if len(runs) != 1 || runs[0].Text != " Restart terminal " ||
+		runs[0].Kind != HitStatusSegment || runs[0].Index != StatusSegmentTerminalRestart {
+		t.Errorf("terminal restart run = %+v, want a clickable restart segment", runs)
+	}
+	// {messages} is clickable: it opens the warnings list.
+	msg := base
+	msg.Row = row(StatusElementMessages)
+	msg.Message = "Saved"
+	runs = StatusRuns(120, msg)
+	if len(runs) != 1 || runs[0].Kind != HitStatusSegment || runs[0].Index != StatusSegmentMessages {
+		t.Errorf("messages run = %+v, want a clickable message segment", runs)
+	}
+	// The elements gvim parses but does not paint render nothing.
+	hidden := base
+	hidden.Row = row(StatusElementFilename, StatusElementChord, StatusElementClock,
+		StatusElementWarnings, StatusElementUpdate, StatusElementCustom)
+	hidden.Row.Left[5].Key = "plugin:token"
+	if got := text(hidden); got != "" {
+		t.Errorf("hidden elements paint %q, want nothing", got)
+	}
+}
+
+// TestStatusRowPluginItemsSitAtTheirAnchors checks the gvim plugin items: the left
+// ones between the position and the message, the right ones before the trailing
+// counter elements, clickable items keeping their hit target.
+func TestStatusRowPluginItemsSitAtTheirAnchors(t *testing.T) {
+	s := StatusView{
+		Position: "Ln 1, Col 1", Line: 1, Col: 1, Cursors: 1, Lines: 4,
+		EOL: "LF", Encoding: "UTF-8", Language: "Go", LSP: "LSP",
+		Message: "Saved",
+		Extra: []StatusItem{
+			{ID: "mode", Plugin: "vi", Text: "-- NORMAL --"},
+			{ID: "branch", Plugin: "git", Text: "main", Right: true, Clickable: true},
+		},
+	}
+	runs := StatusRuns(120, s)
+	at := func(text string) *Run {
+		for i := range runs {
+			if runs[i].Text == text {
+				return &runs[i]
+			}
+		}
+		return nil
+	}
+	var cursor *Run
+	for i := range runs {
+		if runs[i].Kind == HitStatusSegment && runs[i].Index == StatusSegmentPosition {
+			cursor = &runs[i]
+		}
+	}
+	mode, msg := at(" -- NORMAL -- "), at(" Saved ")
+	if cursor == nil || mode == nil || msg == nil {
+		t.Fatalf("cursor %+v, left item %+v, message %+v in %+v", cursor, mode, msg, runs)
+	}
+	if cursor.X >= mode.X || mode.X >= msg.X {
+		t.Errorf("cursor %d, left plugin item %d, message %d: want the item between position and message", cursor.X, mode.X, msg.X)
+	}
+	branch, pill, palette := at(" main "), at(" LSP "), at(" "+PaletteHelp+" ")
+	if branch == nil || pill == nil || palette == nil {
+		t.Fatalf("right item %+v, pill %+v, palette %+v in %+v", branch, pill, palette, runs)
+	}
+	if pill.X >= branch.X || branch.X >= palette.X {
+		t.Errorf("pill %d, right plugin item %d, palette %d: want the item after the language cluster", pill.X, branch.X, palette.X)
+	}
+	if branch.Kind != HitStatusPlugin || branch.Index != 1 {
+		t.Errorf("right plugin item = %+v, want a clickable hit target for extra 1", branch)
+	}
+}
+
+// TestParseStatusElements checks the config names: braces are optional, unknown
+// names are rejected, a colon is a plugin token, and nil and empty differ.
+func TestParseStatusElements(t *testing.T) {
+	tests := []struct {
+		name string
+		kind StatusElementKind
+		ok   bool
+	}{
+		{"{cursor}", StatusElementCursor, true},
+		{"cursor", StatusElementCursor, true},
+		{" {cursor:compact} ", StatusElementCursorCompact, true},
+		{"{terminal_restart}", StatusElementTerminalRestart, true},
+		{"{read_only}", StatusElementReadOnly, true},
+		{"{remote}", StatusElementRemote, true},
+		{"{trust}", StatusElementTrust, true},
+		{"{plugin:token}", StatusElementCustom, true},
+		{"{no_such_element}", StatusElementFilename, false},
+	}
+	for _, tt := range tests {
+		got, ok := ParseStatusElement(tt.name)
+		if ok != tt.ok {
+			t.Errorf("ParseStatusElement(%q) ok = %v, want %v", tt.name, ok, tt.ok)
+			continue
+		}
+		if ok && got.Kind != tt.kind {
+			t.Errorf("ParseStatusElement(%q) = %+v, want kind %v", tt.name, got, tt.kind)
+		}
+	}
+	if got := ParseStatusElements(nil); got != nil {
+		t.Errorf("nil list parses to %+v, want nil", got)
+	}
+	if got := ParseStatusElements([]string{}); got == nil || len(got) != 0 {
+		t.Errorf("empty list parses to %+v, want an empty non-nil side", got)
+	}
+	if got := ParseStatusElements([]string{"{trust}", "{no_such_element}", "{language}"}); len(got) != 2 {
+		t.Errorf("unknown names are kept: %+v", got)
+	}
+}
+
+// TestNarrowStatusRowDropsTheRemoteLabelWithOneSeparator checks the label the squeeze
+// rule gives up first: when the "Local" ({remote}) element is dropped, the configured
+// separator between its neighbours is not left doubled.
+func TestNarrowStatusRowDropsTheRemoteLabelWithOneSeparator(t *testing.T) {
+	s := StatusView{
+		Position: "Ln 1, Col 1", Line: 1, Col: 1, Cursors: 1, Lines: 4,
+		EOL: "LF", Encoding: "UTF-8", Language: "Go", Trust: "Trusted", Message: "Saved",
+		Row: StatusRow{
+			Left:      []StatusElement{{Kind: StatusElementTrust}, {Kind: StatusElementRemote}, {Kind: StatusElementMessages}},
+			Separator: "|",
+		},
+		Extra: []StatusItem{{ID: "m", Plugin: "p", Text: "xx"}},
+	}
+	dropped := false
+	for w := 12; w <= 60; w++ {
+		runs := StatusRuns(w, s)
+		hasRemote := false
+		for i, r := range runs {
+			if r.Text == " Local " {
+				hasRemote = true
+			}
+			if r.Text == "|" && i > 0 && runs[i-1].Text == "|" {
+				t.Errorf("w=%d: two separators are adjacent: %+v", w, runs)
+			}
+		}
+		if !hasRemote {
+			dropped = true
+		}
+	}
+	if !dropped {
+		t.Error("no width drops the Local label with a plugin item on the row")
 	}
 }

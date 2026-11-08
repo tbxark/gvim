@@ -56,6 +56,16 @@ type Document interface {
 	LineSpans(i int) []syntax.Span
 }
 
+// VirtualDocument is implemented by a Document whose caret may sit past the end
+// of its line (virtual space). The pane draws the caret and the terminal cursor
+// out there and lets the horizontal scroll reach it; a document without it never
+// has a virtual caret.
+type VirtualDocument interface {
+	// VirtualColumns is how many display columns the caret is past the end of its
+	// line; 0 when it is on the text.
+	VirtualColumns() int
+}
+
 // Pane is the editor text area for one frame.
 type Pane struct {
 	Doc Document // nil paints blank body rows
@@ -97,6 +107,10 @@ type Pane struct {
 	Occurrences bool
 	// Diagnostics gives the diagnostic spans of line i. Nil paints none.
 	Diagnostics func(line int) []DiagnosticSpan
+	// InlineDiagnostics draws the most severe diagnostic message of a line
+	// right-aligned at the end of its last row, where the row leaves room
+	// (editor.diagnostics_inline_text).
+	InlineDiagnostics bool
 	// TabSize is the columns per tab stop, for tab expansion, indent guides, visible
 	// whitespace and indentation folds. The zero value is defaultTabSize.
 	TabSize int
@@ -162,6 +176,9 @@ const (
 type DiagnosticSpan struct {
 	Start, End int
 	Severity   int
+	// Message is the diagnostic's text, drawn at the end of the line under
+	// editor.diagnostics_inline_text. Empty draws nothing.
+	Message string
 }
 
 // The LSP severities of a diagnostic.
@@ -197,9 +214,13 @@ const (
 // which the scrollbar uses with ScrollTopFor.
 type Hit struct {
 	Kind HitKind
-	Pos  buffer.Pos
-	Row  int
-	Col  int // the pane column of a horizontal scrollbar hit
+	// Virtual is how many display columns past the line's end a text press
+	// landed, 0 when it landed on text or the line does not take a virtual
+	// caret. The root parks the caret there when the editor has virtual space on.
+	Virtual int
+	Pos     buffer.Pos
+	Row     int
+	Col     int // the pane column of a horizontal scrollbar hit
 	// Fold is set for a gutter hit on the first row of a line that starts a fold
 	// that a click may toggle: any collapsed fold, and an open one while the
 	// fold markers show.
@@ -265,10 +286,15 @@ type frame struct {
 	contentW int
 	overflow bool
 	caret    buffer.Pos
-	sels     []buffer.Selection // the primary selection and the extra ones
-	extra    []buffer.Pos       // the positions of the extra carets
-	bar      map[int]bool       // lines that get the margin bar
-	scroll   map[int]bool       // lines that get the last-column change mark
+	// virtual is how many display columns the caret is past the end of its line
+	// (virtual space); 0 when it is on the text.
+	virtual int
+	// inlineDiag draws the end-of-line diagnostic messages.
+	inlineDiag bool
+	sels       []buffer.Selection // the primary selection and the extra ones
+	extra      []buffer.Pos       // the positions of the extra carets
+	bar        map[int]bool       // lines that get the margin bar
+	scroll     map[int]bool       // lines that get the last-column change mark
 	// highlights gives the search highlights of a line. Nil paints none.
 	highlights func(line int) []Highlight
 	// folds maps each fold start line to whether it is collapsed. hidden marks
@@ -331,6 +357,10 @@ func (p Pane) newFrame(w, h int) (frame, bool) {
 	}
 	if f.hooks.any() {
 		f.dx = &overlayFX{}
+	}
+	f.inlineDiag = p.InlineDiagnostics
+	if vd, ok := p.Doc.(VirtualDocument); ok && !f.wrap {
+		f.virtual = vd.VirtualColumns()
 	}
 	if p.HideGutter {
 		f.gutter = 0
@@ -656,6 +686,7 @@ func (f frame) paintText(g *grid.Grid) []rowInfo {
 			f.paintRowTail(g, ln, y, end, cur)
 			if rd.last {
 				f.paintVirtualText(g, ln, i, y, end, skip, cur)
+				f.paintInlineDiagnostics(g, i, y, end, cur)
 			}
 			if rd.first {
 				// The marker is drawn after the text, so it never covers a text cell.
@@ -1086,7 +1117,11 @@ func (f frame) cellOf(p buffer.Pos) (x, y int, ok bool) {
 			if k > 0 {
 				cells += ln.indent
 			}
-			return f.gutter + cells - f.dropFor(ln), y, y >= 0 && y < f.h
+			x := f.gutter + cells - f.dropFor(ln)
+			if f.virtual > 0 && p == f.caret {
+				x += f.virtual
+			}
+			return x, y, y >= 0 && y < f.h
 		}
 		y += f.rowsIn(i, ln)
 	}
@@ -1119,7 +1154,23 @@ func (p Pane) Hit(w, h, x, y int) Hit {
 		}
 		return Hit{Kind: HitScrollbarTrack, Row: y}
 	}
-	return Hit{Kind: HitText, Pos: f.posAt(x, y), Row: y}
+	return Hit{Kind: HitText, Pos: f.posAt(x, y), Row: y, Virtual: f.virtualAt(x, y)}
+}
+
+// virtualAt is how many display columns past the end of its line a text press at
+// (x, y) landed, when that row is the line's last and Wrap is off. A wrapped pane,
+// a windowed long line, or an earlier row of the line has no empty region past
+// the end, so those presses keep the caret on the text.
+func (f frame) virtualAt(x, y int) int {
+	if f.wrap || f.win != nil {
+		return 0
+	}
+	r := f.rowAt(y)
+	if r.filler != notFiller || !r.valid || !r.last {
+		return 0
+	}
+	cells := r.startCells() + x - f.gutter + f.dropFor(r.ln)
+	return max(cells-r.endCells(), 0)
 }
 
 // PosAt maps a pane-local cell to a document position. The row and the column

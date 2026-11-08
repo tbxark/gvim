@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,8 +35,8 @@ func startApp(t *testing.T, text string) (*uitest.Session, string) {
 	return uitest.Start(t, m, 100, 30), path
 }
 
-// TestPaletteOpensTheMenuBar: with F10 gone, the "Open Menu Bar" palette command opens the File
-// menu, and no cell of the bar is underlined.
+// TestPaletteOpensTheMenuBar: the "Open Menu Bar" palette command opens the File menu,
+// and the bar underlines the mnemonic letters (editor.menu_bar_mnemonics, default on).
 func TestPaletteOpensTheMenuBar(t *testing.T) {
 	s, _ := startApp(t, "hello\n")
 	s.Key("ctrl+p")
@@ -44,8 +45,18 @@ func TestPaletteOpensTheMenuBar(t *testing.T) {
 	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Open Menu Bar") })
 	s.Key("enter")
 	sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("New File") })
-	if got := sc.Underlined(0); len(got) != 0 {
-		t.Fatalf("underlined menu-bar cells = %q, want none", got)
+	if got, want := sc.Underlined(0), []string{"F", "E", "V", "S", "G", "L", "H"}; !slices.Equal(got, want) {
+		t.Fatalf("underlined menu-bar cells = %q, want %q", got, want)
+	}
+}
+
+// TestMenuBarUnderlinesMnemonics checks that the closed bar names the mnemonic letters:
+// a cell of each title is underlined.
+func TestMenuBarUnderlinesMnemonics(t *testing.T) {
+	s, _ := startApp(t, "hello\n")
+	sc := s.Screen()
+	if got, want := sc.Underlined(0), []string{"F", "E", "V", "S", "G", "L", "H"}; !slices.Equal(got, want) {
+		t.Fatalf("closed menu bar underlines = %q, want %q:\n%s", got, want, sc)
 	}
 }
 
@@ -71,10 +82,22 @@ func TestHoverSlidesTheOpenDropdownAcrossTitles(t *testing.T) {
 	}
 }
 
-func TestCtrlWOnADirtyTabAsksBeforeClosing(t *testing.T) {
+// closeTabChord is the chord the platform keymap binds to close_tab. The tests use it
+// instead of a literal key, so a preset change cannot silently stop them from reaching
+// the close path.
+func closeTabChord(t *testing.T) string {
+	t.Helper()
+	b, ok := keymap.Default().Primary("close_tab")
+	if !ok {
+		t.Fatal("the active keymap binds no close_tab key")
+	}
+	return b.Chord
+}
+
+func TestCloseTabKeyOnADirtyTabAsksBeforeClosing(t *testing.T) {
 	s, _ := startApp(t, "alpha\n")
 	s.Type("X")
-	s.Key("ctrl+w")
+	s.Key(closeTabChord(t))
 	s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("Unsaved Changes") })
 	s.Key("esc")
 	sc := s.WaitFor(func(sc uitest.Screen) bool { return !sc.Contains("Unsaved Changes") })
@@ -83,13 +106,7 @@ func TestCtrlWOnADirtyTabAsksBeforeClosing(t *testing.T) {
 	}
 }
 
-func TestMenuBarHasNoUnderlinedMnemonicsWhileClosed(t *testing.T) {
-	s, _ := startApp(t, "hello\n")
-	sc := s.Screen()
-	if got := sc.Underlined(0); len(got) != 0 {
-		t.Fatalf("closed menu bar underlines = %q, want none:\n%s", got, sc)
-	}
-}
+
 
 func TestHelpMenuShowsGvimNotFresh(t *testing.T) {
 	s, _ := startApp(t, "hello\n")

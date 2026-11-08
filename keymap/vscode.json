@@ -1,19 +1,14 @@
 {
   "inherits": "default",
   "bindings": [
-    {"comment": "VS Code: Ctrl+Shift+F searches the project", "key": "f", "modifiers": ["ctrl", "shift"], "action": "open_live_grep", "when": "normal"},
-    {"comment": "Moved to Ctrl+Shift+F", "key": "/", "modifiers": ["alt"], "action": "noop", "when": "normal"},
-    {"comment": "VS Code: Ctrl+Shift+E focuses the explorer", "key": "e", "modifiers": ["ctrl", "shift"], "action": "focus_file_explorer", "when": "normal"},
-    {"comment": "Moved to Ctrl+Shift+E", "key": "e", "modifiers": ["ctrl"], "action": "noop", "when": "normal"},
+    {"comment": "VSCode-specific overrides", "key": "d", "modifiers": ["ctrl"], "action": "add_cursor_next_match", "when": "normal"},
+    {"key": "/", "modifiers": ["ctrl"], "action": "toggle_comment", "when": "normal"},
+    {"key": "k", "modifiers": ["ctrl","shift"], "action": "delete_line", "when": "normal"},
+    {"key": "g", "modifiers": ["ctrl"], "action": "goto_line", "when": "normal"},
+    {"comment": "VS Code: Ctrl+Shift+F searches the project", "key": "f", "modifiers": ["ctrl","shift"], "action": "open_live_grep", "when": "normal"},
+    {"comment": "VS Code: Ctrl+Shift+E focuses the explorer", "key": "e", "modifiers": ["ctrl","shift"], "action": "focus_file_explorer", "when": "normal"},
     {"comment": "VS Code: Ctrl+K Ctrl+L toggles the fold", "keys": [{"key": "k", "modifiers": ["ctrl"]}, {"key": "l", "modifiers": ["ctrl"]}], "action": "toggle_fold", "when": "normal"},
-    {"comment": "Moved to Ctrl+K Ctrl+L", "key": "f", "modifiers": ["alt"], "action": "noop", "when": "normal"},
-    {"comment": "VS Code: Ctrl+W closes the tab", "key": "w", "modifiers": ["ctrl"], "action": "close_tab", "when": "normal"},
-    {"comment": "Moved to Ctrl+W", "key": "w", "modifiers": ["alt"], "action": "noop", "when": "normal"},
-    {"comment": "VS Code: Ctrl+H replaces", "key": "h", "modifiers": ["ctrl"], "action": "replace", "when": "normal"},
-    {"comment": "Moved to Ctrl+H", "key": "r", "modifiers": ["ctrl"], "action": "noop", "when": "normal"},
     {"comment": "VS Code: Ctrl+` shows the terminal", "key": "`", "modifiers": ["ctrl"], "action": "toggle_utility_dock", "when": "normal"},
-    {"comment": "Moved to Ctrl+`", "key": "j", "modifiers": ["alt"], "action": "noop", "when": "normal"},
-    {"comment": "VS Code: Ctrl+Shift+\\ jumps to the bracket", "key": "\\", "modifiers": ["ctrl", "shift"], "action": "goto_matching_bracket", "when": "normal"},
-    {"comment": "Moved to Ctrl+Shift+\\", "key": "]", "modifiers": ["ctrl"], "action": "noop", "when": "normal"}
+    {"comment": "VS Code: Ctrl+Shift+\\ jumps to the bracket", "key": "\\", "modifiers": ["ctrl","shift"], "action": "goto_matching_bracket", "when": "normal"}
   ]
 }

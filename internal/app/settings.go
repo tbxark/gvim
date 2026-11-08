@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"time"
 
 	"github.com/tbxark/gvim/config"
@@ -117,20 +118,15 @@ func viewOptions(cfg config.Config, icons string) *tui.ViewOptions {
 			ConfirmEach:   cfg.Search.ConfirmEach,
 		},
 		StatusBar: tui.StatusBarOptions{
-			Left:      append([]string(nil), cfg.StatusBar.Left...),
-			Right:     append([]string(nil), cfg.StatusBar.Right...),
+			Left:      slices.Clone(cfg.StatusBar.Left),
+			Right:     slices.Clone(cfg.StatusBar.Right),
 			Separator: cfg.StatusBar.Separator,
 		},
-		MenuBarMnemonics:       cfg.MenuBarMnemonics,
-		Animations:             cfg.Animations,
-		CursorJumpAnimation:    cfg.CursorJumpAnimation,
-		ViewportEdgeFade:       cfg.ViewportEdgeFade,
-		SmoothScroll:           cfg.SmoothScroll,
-		UseTerminalBG:          cfg.UseTerminalBG,
-		SetWindowTitle:         cfg.SetWindowTitle,
-		TerminalAutoTitle:      cfg.TerminalAutoTitle,
-		ScreensaverEnabled:     cfg.ScreensaverEnabled,
-		ScreensaverIdleMinutes: cfg.ScreensaverIdleMinutes,
+		MenuBarMnemonics:  cfg.MenuBarMnemonics,
+		SmoothScroll:      cfg.SmoothScroll,
+		UseTerminalBG:     cfg.UseTerminalBG,
+		SetWindowTitle:    cfg.SetWindowTitle,
+		TerminalAutoTitle: cfg.TerminalAutoTitle,
 
 		MouseWheelScrollLines: cfg.MouseWheelScrollLines,
 		DoubleClickTimeMS:     cfg.DoubleClickTimeMS,

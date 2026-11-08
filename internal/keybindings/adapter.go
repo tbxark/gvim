@@ -79,6 +79,12 @@ func (k adapter) Label(action string) string {
 	return commands.FormatChord(b.Chord)
 }
 
+// MenuMnemonic returns the letter a menu's label underlines: the character of an
+// Alt+<letter> binding that opens the menu named name. The menus take it from the
+// keymap, so a user binding can change a mnemonic. ok is false when the active keymap
+// binds no such letter.
+func (k adapter) MenuMnemonic(name string) (rune, bool) { return k.km.MenuMnemonic(name) }
+
 // keyBinding maps a keymap binding to the root's view of it.
 func keyBinding(b keymap.Binding) tui.KeyBinding {
 	return tui.KeyBinding{Action: b.Action, Chord: b.Chord, Context: string(b.When)}

@@ -10,6 +10,7 @@ var ErrNothingSelected = errors.New("nothing selected")
 
 // insertText types s at the cursor, replacing any selection first.
 func (d *Document) InsertText(s string) {
+	d.MaterializeVirtual()
 	d.DeleteSelection()
 	if d.editRefused() {
 		// The selection could not be deleted, so the text is not typed over it.

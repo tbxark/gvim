@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
+	"github.com/tbxark/gvim/keymap"
 )
 
 // eventsPlugin logs the events of the editor as "EV <name> <fields>" lines in the plugin
@@ -54,6 +55,35 @@ gvim.command.register{
   end,
 }
 `
+
+// pressAction presses the active keymap's binding for action, so the test follows the
+// presets instead of a literal chord.
+func (s *pluginSession) pressAction(t *testing.T, action string) {
+	t.Helper()
+	b, ok := keymap.Default().Primary(action)
+	if !ok {
+		t.Fatalf("the active keymap binds no %s key", action)
+	}
+	parts := strings.Split(b.Chord, "+")
+	runes := []rune(parts[len(parts)-1])
+	if len(runes) != 1 {
+		t.Fatalf("%s is bound to %q, not a single key", action, b.Chord)
+	}
+	var mod tea.KeyMod
+	for _, m := range parts[:len(parts)-1] {
+		switch m {
+		case "ctrl":
+			mod |= tea.ModCtrl
+		case "alt":
+			mod |= tea.ModAlt
+		case "shift":
+			mod |= tea.ModShift
+		default:
+			t.Fatalf("unknown modifier %q in %q", m, b.Chord)
+		}
+	}
+	s.press(tea.KeyPressMsg{Code: runes[0], Mod: mod})
+}
 
 // pluginLines returns the log lines of the events plugin that start with prefix, without it.
 func (s *pluginSession) pluginLines(prefix string) []string {
@@ -126,7 +156,7 @@ func TestPluginEventsEndToEnd(t *testing.T) {
 	}
 
 	// Closing the active tab closes b and activates a.
-	s.press(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	s.pressAction(t, "close_tab")
 	s.settle(20 * time.Millisecond)
 	if got, want := s.pluginLines("EV closed "), []string{b}; !slices.Equal(got, want) {
 		t.Fatalf("buffer_closed = %v, want %v", got, want)

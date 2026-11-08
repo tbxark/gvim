@@ -50,7 +50,7 @@ var viewFlags = map[Action]viewFlag{
 	},
 	"toggle_virtual_space_current_buffer": {
 		func(s *ViewSettings) **bool { return &s.VirtualSpace }, constDefault(false),
-		"Virtual space (stored; the pane does not use it)",
+		"Virtual space",
 	},
 	"toggle_indentation_style": {
 		func(s *ViewSettings) **bool { return &s.IndentTabs }, func(e *Editor) bool { return e.opts.UseTabs },
@@ -98,7 +98,9 @@ func (f viewFlag) current(e *Editor, d *Document) bool {
 	return OverrideOr(*f.field(d.View()), f.def(e))
 }
 
-// togglePageView sets the page view flag. It is stored only.
+// togglePageView sets the page view flag. It is stored only: drawing the page
+// view belongs to the Markdown compose/rendered-view work, deferred to its own
+// round (docs/parity.md backlog #12), so no paint reads it yet.
 func togglePageView(e *Editor, d *Document, args map[string]any) error {
 	value, err := boolArg(args, "value", !d.View().PageView)
 	if err != nil {

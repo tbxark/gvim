@@ -3,7 +3,8 @@
 //
 // Five built-in keymaps are embedded: "default", "macos", "emacs", "vscode"
 // and "macos-gui". default.json is the base. macos, emacs and vscode inherit
-// from it, and macos-gui inherits from macos. Default returns the keymap for
+// from it, and macos-gui inherits from macos. They hold Fresh's bindings for the
+// contexts gvim resolves (ConsultedContexts), plus a few gvim-specific keys. Default returns the keymap for
 // the current platform, as Fresh does: "macos" on darwin and "default"
 // elsewhere. ByName selects any of them explicitly.
 //

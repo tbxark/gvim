@@ -168,6 +168,7 @@ func (d *Document) clampCaret(c caret) caret {
 func (d *Document) SetCarets(cs []caret) {
 	cs = normalize(cs)
 	d.Want = -1
+	d.virtual = 0
 	d.Block = nil
 	d.Extra = nil
 	for _, c := range cs {

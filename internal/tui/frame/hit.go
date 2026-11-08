@@ -52,14 +52,17 @@ const (
 )
 
 // The Index of a hitStatusSegment target: the line ending, the encoding, the language,
-// the caret position, the language server or the workspace-trust level of the status row.
+// the caret position, the language server, the workspace-trust level, the status
+// message or the terminal restart of the status row.
 const (
 	StatusSegmentEOL = iota
 	StatusSegmentEncoding
 	StatusSegmentLanguage
-	StatusSegmentPosition // the line and column of the caret: opens Go to Line
-	StatusSegmentLSP      // the state of the language server: shows its status
-	StatusSegmentTrust    // the workspace-trust level: opens the Workspace Trust dialog
+	StatusSegmentPosition        // the line and column of the caret: opens Go to Line
+	StatusSegmentLSP             // the state of the language server: shows its status
+	StatusSegmentTrust           // the workspace-trust level: opens the Workspace Trust dialog
+	StatusSegmentMessages        // the status message: opens the warnings list (the status log)
+	StatusSegmentTerminalRestart // the dock's shell has exited: restarts the terminal
 )
 
 // HitTarget is the result of a hit test. Index depends on Kind. Menu labels,

@@ -129,6 +129,21 @@ func RestoreSession(ed *editor.Editor, dir string, s session.Session) []Unrestor
 	return restoreFiles(ed, dir, s, false)
 }
 
+// RestoreHotExit opens only the tabs of s that carry unsaved text: the stashed
+// edits of a file and the unnamed buffers with text. It is the restore of
+// editor.restore_previous_session=false: the layout, the clean tabs and the
+// explorer state are skipped, but in-progress work comes back. The saved active
+// tab is not applied, because most of the saved tabs are not opened.
+func RestoreHotExit(ed *editor.Editor, dir string, s session.Session) []Unrestored {
+	var hot session.Session
+	for _, f := range s.Files {
+		if f.StashFile != "" || f.OverlayFile != "" {
+			hot.Files = append(hot.Files, f)
+		}
+	}
+	return restoreFiles(ed, dir, hot, false)
+}
+
 // restoreFiles is RestoreSession. With replace set, the stashed edits of a large file
 // replace the ones that the document holds already: the copy is newer than what the
 // editor restored before (see editor.ReplaceOverlay).

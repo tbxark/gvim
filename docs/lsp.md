@@ -25,8 +25,9 @@ indicator, in Fresh's priority order, with gvim's wording where Fresh's is less 
 A language with no server shows no pill. Click it, or run **Show LSP Status**, for the
 details. The states are Fresh's priority order: the per-buffer `(n/a)` first, then a failure,
 then starting and running, and last the language-level `(off)`. gvim adds no fixed-width
-padding to the pill (Fresh pads it to 11 cells so the bar does not shift): the right group is
-right-aligned, and the blank slot before the count badge keeps the badge's columns for it.
+padding to the pill (Fresh pads it to 11 cells so the bar does not shift): the pill is the
+`{lsp}` element of `editor.status_bar`, so the configured lists and the row's squeeze rule
+place it, and the blank slot of the `{diagnostics}` element keeps that element's columns.
 
 Nothing is started when the program is missing. The first time a file of that language opens, the
 status row says what is missing and how to get it, once per language and session:
@@ -151,14 +152,16 @@ words in the buffer and everything else do not depend on it.
 
 ## What the servers add
 
-- **Diagnostics.** The status row counts the diagnostics of the active file next to the pill,
-  as Fresh's diagnostics element does: `[E:1 W:2 I:3]`, errors, warnings, and info and hints
-  together, each part only when its count is above zero. The counts are the stored diagnostics
-  of the file, so they stay on the row while the pill says the server is missing, failed or off,
-  and they go when the server is stopped, as Fresh's do. While the server runs with no count
-  known yet the row keeps a blank seven-cell slot, so the right group does not jump when the
-  first diagnostic arrives; on a narrow row the palette hint and then the badge are dropped,
-  and the pill keeps its place.
+- **Diagnostics.** The `{diagnostics}` status element counts the diagnostics of the active
+  file, as Fresh's element does: `[E:1 W:2 I:3]`, errors, warnings, and info and hints
+  together, each part only when its count is above zero. Fresh's default element lists put the
+  badge on the left after `{cursor}` (see [the status bar](ui.md)); `editor.status_bar` can
+  move it to any side or position. The counts are the stored diagnostics of the file, so they
+  stay on the row while the pill says the server is missing, failed or off, and they go when
+  the server is stopped, as Fresh's do. While the server runs with no count known yet the
+  element keeps a blank seven-cell slot, so its neighbours do not jump when the first
+  diagnostic arrives; when the row is too narrow the element is elided with the rest of the
+  left group's tail.
   Each affected line has a dot in the gutter, in the color of its worst severity, and the
   offending text is underlined. **Jump to Next Error** and **Jump to Previous Error** move to the
   next and previous error or warning and show its message in the status row. They are `F8` and

@@ -12,10 +12,9 @@ func TestDefaultParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The common-set pruning: the count is bounded in TestPresetsStayCommon, here only that
-	// the file is far smaller than Fresh's 276.
-	if got := len(base.Bindings()); got == 0 || got >= 276 {
-		t.Fatalf("default bindings = %d, want a pruned set below Fresh's 276", got)
+	// The count is pinned in TestPresetBindingCounts; here only that the file parsed.
+	if got := len(base.Bindings()); got == 0 {
+		t.Fatal("default keymap has no bindings")
 	}
 	m := keymap.Default()
 	if keymap.Default() != m {
@@ -40,7 +39,9 @@ func TestResolveRequiredChords(t *testing.T) {
 		{"ctrl+s", keymap.ContextNormal, "save"},
 		{"ctrl+shift+p", keymap.ContextGlobal, "command_palette"},
 		{"ctrl+alt+up", keymap.ContextNormal, "add_cursor_above"},
-		{"alt+shift+down", keymap.ContextNormal, "duplicate_line"},
+		{"alt+shift+down", keymap.ContextNormal, "block_select_down"},
+		{"shift+alt+i", keymap.ContextNormal, "add_cursors_to_line_ends"},
+		{"ctrl+w", keymap.ContextNormal, "select_word"},
 		{"ctrl+e", keymap.ContextFileExplorer, "focus_editor"},
 	}
 	for _, tc := range tests {

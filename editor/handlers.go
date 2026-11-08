@@ -14,23 +14,26 @@ type moveSpec struct {
 	motion    motion
 	// vertical moves keep the wanted column; all others reset it.
 	vertical bool
+	// virtual names the plain move virtual space teaches; the others clear the
+	// virtual column and run their normal motion.
+	virtual virtualMoveKind
 }
 
 // moves lists every cursor motion the keymap uses. Each one is registered
 // twice: once to move, and once to extend the selection.
 var moves = []moveSpec{
-	{"move_left", "select_left", motionLeft, false},
-	{"move_right", "select_right", motionRight, false},
-	{"move_up", "select_up", motionUp, true},
-	{"move_down", "select_down", motionDown, true},
-	{"move_word_left", "select_word_left", motionWordLeft, false},
-	{"move_word_right", "select_word_right", motionWordRight, false},
-	{"move_word_end", "select_word_end", motionWordEnd, false},
-	{"move_line_start", "select_line_start", motionLineStart, false},
-	{"move_line_end", "select_line_end", motionLineEnd, false},
-	{"smart_home", "select_smart_home", motionSmartHome, false},
-	{"move_document_start", "select_document_start", motionDocStart, false},
-	{"move_document_end", "select_document_end", motionDocEnd, false},
+	{"move_left", "select_left", motionLeft, false, virtualMoveLeft},
+	{"move_right", "select_right", motionRight, false, virtualMoveRight},
+	{"move_up", "select_up", motionUp, true, virtualMoveUp},
+	{"move_down", "select_down", motionDown, true, virtualMoveDown},
+	{"move_word_left", "select_word_left", motionWordLeft, false, virtualMoveNone},
+	{"move_word_right", "select_word_right", motionWordRight, false, virtualMoveNone},
+	{"move_word_end", "select_word_end", motionWordEnd, false, virtualMoveNone},
+	{"move_line_start", "select_line_start", motionLineStart, false, virtualMoveNone},
+	{"move_line_end", "select_line_end", motionLineEnd, false, virtualMoveNone},
+	{"smart_home", "select_smart_home", motionSmartHome, false, virtualMoveNone},
+	{"move_document_start", "select_document_start", motionDocStart, false, virtualMoveNone},
+	{"move_document_end", "select_document_end", motionDocEnd, false, virtualMoveNone},
 }
 
 // handlers maps every action name to its implementation.
@@ -39,8 +42,8 @@ var handlers = buildHandlers()
 func buildHandlers() map[Action]handler {
 	h := make(map[Action]handler, 2*len(moves)+32)
 	for _, m := range moves {
-		h[m.Move] = moveHandler(m.motion, false, m.vertical)
-		h[m.Sel] = moveHandler(m.motion, true, m.vertical)
+		h[m.Move] = moveHandler(m.motion, false, m.vertical, m.virtual)
+		h[m.Sel] = moveHandler(m.motion, true, m.vertical, m.virtual)
 	}
 	h["move_page_up"] = pageHandler(-1, false)
 	h["select_page_up"] = pageHandler(-1, true)
@@ -56,6 +59,7 @@ func buildHandlers() map[Action]handler {
 	})
 	h["insert_char"] = docAction(insertChar)
 	h["insert_newline"] = docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.ClearVirtual()
 		e.newline(d)
 		return nil
 	})
@@ -275,6 +279,7 @@ func docAction(fn func(e *Editor, d *Document, args map[string]any) error) handl
 // pageHandler moves the cursor one pane in direction dir (-1 up, +1 down).
 func pageHandler(dir int, extend bool) handler {
 	return docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		d.ClearVirtual()
 		e.pageCarets(d, dir, extend || e.marking(d))
 		return nil
 	})
@@ -319,8 +324,11 @@ func pageMove(e *Editor, d *Document, dir int, extend bool) {
 }
 
 // moveHandler runs a cursor motion, optionally extending the selection.
-func moveHandler(m motion, extend, vertical bool) handler {
+func moveHandler(m motion, extend, vertical bool, virtual virtualMoveKind) handler {
 	return docAction(func(e *Editor, d *Document, _ map[string]any) error {
+		if e.virtualMove(d, virtual, extend || e.marking(d)) {
+			return nil
+		}
 		e.moveCarets(d, m, extend || e.marking(d), vertical)
 		return nil
 	})

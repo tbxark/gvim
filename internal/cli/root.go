@@ -55,6 +55,9 @@ func NewRootCommand(run Runner) *cobra.Command {
 		diff       bool
 		noPlugins  bool
 		pluginPath []string
+		restore    bool
+		noRestore  bool
+		simple     bool
 	)
 	root := &cobra.Command{
 		Use:   "gvim [DIR] [FILE[:LINE[:COL]]]...",
@@ -66,11 +69,22 @@ A DIR argument sets the project root that the file explorer shows. At most one
 directory may be given. Each FILE opens in its own tab. A FILE that does not
 exist opens as an empty buffer and is created on save. FILE may end in :LINE or
 :LINE:COL to place the cursor. With --diff, exactly two FILE arguments open side
-by side in a compare view.`,
+by side in a compare view.
+
+A launch without files restores the session saved by an earlier run — the open
+tabs, their cursors and unsaved text — and saves it again when the editor quits.
+Unsaved buffers are kept across a quit by default (editor.hot_exit); set that
+key to false to be asked to save or discard each one instead. A launch with
+files opens only those files by default (editor.skip_session_restore_when_files_passed),
+restoring and saving no session. --restore forces the session for this run,
+--no-restore skips it (still bringing the session's unsaved text back), and
+--simple opens just what is named with no session at all.`,
 		Example: `  gvim
   gvim ~/project
   gvim ~/project main.go:42:7 README.md
-  gvim --diff old.go new.go`,
+  gvim --diff old.go new.go
+  gvim --no-restore
+  gvim --simple`,
 		Args:          cobra.ArbitraryArgs,
 		Version:       versionString(),
 		SilenceErrors: true,
@@ -90,6 +104,10 @@ by side in a compare view.`,
 
 				NoPlugins:   noPlugins,
 				PluginPaths: pluginPath,
+
+				Restore:   restore,
+				NoRestore: noRestore,
+				Simple:    simple,
 			}
 			if err := opts.Validate(); err != nil {
 				// The message names the flag and the valid values: the whole usage text
@@ -114,6 +132,10 @@ by side in a compare view.`,
 	root.Flags().BoolVar(&diff, "diff", false, "compare the two FILE arguments side by side")
 	root.Flags().BoolVar(&noPlugins, "no-plugins", false, "do not discover or load plugins (--plugin still loads)")
 	root.Flags().StringArrayVar(&pluginPath, "plugin", nil, "load the plugin at `PATH` (a .lua file or a plugin directory); repeatable")
+	root.Flags().BoolVar(&restore, "restore", false, "restore the previous session even when editor.restore_previous_session is off; makes a launch with files a session launch")
+	root.Flags().BoolVar(&noRestore, "no-restore", false, "do not restore the previous session for this run; its unsaved text still comes back")
+	root.Flags().BoolVar(&noRestore, "no-session", false, "alias for --no-restore")
+	root.Flags().BoolVar(&simple, "simple", false, "open just what is named: no session restored or saved and no file explorer")
 	_ = root.RegisterFlagCompletionFunc("keymap", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return keymapNames, cobra.ShellCompDirectiveNoFileComp
 	})

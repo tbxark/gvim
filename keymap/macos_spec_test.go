@@ -6,100 +6,134 @@ import (
 	"github.com/tbxark/gvim/keymap"
 )
 
-// specKeys are the macOS chords of migration/PHASE1-EDITOR.md section 4 and
-// the action each must resolve to in the normal context.
-var specKeys = []struct {
-	chord  string
-	action string
-}{
-	{"F1", "show_help"},
-	{"ctrl+n", "new"},
-	{"ctrl+o", "open"},
-	{"alt+s", "save_as"},
-	{"ctrl+pagedown", "next_buffer"},
-	{"ctrl+pageup", "prev_buffer"},
-	{"alt+w", "close_tab"},
-	{"ctrl+w", "close_tab"},
-	{"ctrl+q", "quit"},
-	{"ctrl+s", "save"},
-	{"ctrl+z", "undo"},
-	{"ctrl+y", "redo"},
-	{"ctrl+r", "redo"},
-	{"ctrl+x", "cut"},
-	{"ctrl+c", "copy"},
-	{"ctrl+v", "paste"},
-	{"ctrl+a", "select_all"},
-	{"ctrl+f", "search"},
-	{"F3", "find_next"},
-	{"shift+F3", "find_previous"},
-	{"ctrl+g", "find_next"},
-	{"ctrl+l", "goto_line"},
-	{"ctrl+d", "duplicate_line"},
-	{"alt+r", "replace"},
-	{"ctrl+alt+d", "add_cursor_next_match"},
-	{"ctrl+k", "delete_line"},
-	{"ctrl+b", "toggle_file_explorer"},
-	{"ctrl+e", "focus_file_explorer"},
-	{"ctrl+t", "command_palette"},
-}
-
-func TestMacosSpecKeysResolve(t *testing.T) {
+// TestMacosBindings pins Fresh's macOS preset: it avoids Ctrl+Shift chords and the ASCII
+// control characters a terminal cannot send, and moves the editor's common keys to the
+// Ctrl and Option chords macOS terminals have.
+func TestMacosBindings(t *testing.T) {
 	m := mustPreset(t, "macos")
-	for _, tc := range specKeys {
-		b, ok := m.Resolve(tc.chord, keymap.ContextNormal)
+	tests := []struct {
+		chord  string
+		ctx    keymap.Context
+		action string
+	}{
+		{"ctrl+n", keymap.ContextNormal, "new"},
+		{"ctrl+o", keymap.ContextNormal, "open"},
+		{"ctrl+s", keymap.ContextNormal, "save"},
+		{"alt+shift+s", keymap.ContextNormal, "save_as"},
+		{"ctrl+q", keymap.ContextNormal, "quit"},
+		{"ctrl+z", keymap.ContextNormal, "undo"},
+		{"ctrl+r", keymap.ContextNormal, "redo"},
+		{"ctrl+y", keymap.ContextNormal, "redo"},
+		{"ctrl+x", keymap.ContextNormal, "cut"},
+		{"ctrl+c", keymap.ContextNormal, "copy"},
+		{"ctrl+v", keymap.ContextNormal, "paste"},
+		{"ctrl+f", keymap.ContextNormal, "search"},
+		{"ctrl+g", keymap.ContextNormal, "find_next"},
+		{"ctrl+alt+g", keymap.ContextNormal, "find_previous"},
+		{"F3", keymap.ContextNormal, "find_next"},
+		{"shift+F3", keymap.ContextNormal, "find_previous"},
+		{"ctrl+l", keymap.ContextNormal, "goto_line"},
+		{"ctrl+k", keymap.ContextNormal, "delete_to_line_end"},
+		{"ctrl+alt+k", keymap.ContextNormal, "delete_line"},
+		{"ctrl+u", keymap.ContextNormal, "delete_to_line_start"},
+		{"ctrl+d", keymap.ContextNormal, "add_cursor_next_match"},
+		{"ctrl+b", keymap.ContextNormal, "toggle_file_explorer"},
+		{"ctrl+e", keymap.ContextNormal, "move_line_end"},
+		{"ctrl+a", keymap.ContextNormal, "move_line_start"},
+		{"ctrl+t", keymap.ContextNormal, "command_palette"},
+		{"ctrl+-", keymap.ContextNormal, "navigate_back"},
+		{"ctrl+=", keymap.ContextNormal, "navigate_forward"},
+		{"ctrl+]", keymap.ContextNormal, "navigate_forward"},
+		{"ctrl+.", keymap.ContextNormal, "lsp_goto_definition"},
+		{"ctrl+,", keymap.ContextNormal, "lsp_references"},
+		{"ctrl+alt+r", keymap.ContextNormal, "lsp_rename"},
+		{"ctrl+pagedown", keymap.ContextNormal, "next_buffer"},
+		{"ctrl+pageup", keymap.ContextNormal, "prev_buffer"},
+		{"alt+up", keymap.ContextNormal, "move_line_up"},
+		{"alt+down", keymap.ContextNormal, "move_line_down"},
+		{"alt+left", keymap.ContextNormal, "move_word_left"},
+		{"alt+right", keymap.ContextNormal, "move_word_end"},
+		{"alt+f", keymap.ContextNormal, "move_word_right"},
+		{"alt+b", keymap.ContextNormal, "move_word_left"},
+		{"alt+backspace", keymap.ContextNormal, "delete_word_backward"},
+		{"alt+delete", keymap.ContextNormal, "delete_word_forward"},
+		{"ctrl+left", keymap.ContextNormal, "move_word_left"},
+		{"ctrl+right", keymap.ContextNormal, "move_word_end"},
+		{"ctrl+shift+left", keymap.ContextNormal, "select_word_left"},
+		{"ctrl+shift+right", keymap.ContextNormal, "select_word_end"},
+		{"ctrl+'", keymap.ContextNormal, "jump_to_next_error"},
+		{"ctrl+;", keymap.ContextNormal, "jump_to_previous_error"},
+		{"ctrl+e", keymap.ContextFileExplorer, "focus_editor"},
+		{"ctrl+b", keymap.ContextFileExplorer, "focus_editor"},
+		{"ctrl+backslash", keymap.ContextTerminal, "toggle_keyboard_capture"},
+		{"ctrl+/", keymap.ContextTerminal, "toggle_keyboard_capture"},
+		{"ctrl+p", keymap.ContextGlobal, "quick_open"},
+	}
+	for _, tc := range tests {
+		b, ok := m.Resolve(tc.chord, tc.ctx)
 		if !ok || b.Action != tc.action {
-			t.Errorf("macos %s = %q (%v), want %q", tc.chord, b.Action, ok, tc.action)
+			t.Errorf("macos %s/%s = %q (%v), want %q", tc.ctx, tc.chord, b.Action, ok, tc.action)
 		}
 	}
 }
 
-// TestMacosAltFIsNoLongerAMenuKey: the menu-activation keys are gone from every preset. The
-// old test pinned Alt+F as File menu; Alt+F is now fold toggle (inherited from default).
-func TestMacosAltFIsNoLongerAMenuKey(t *testing.T) {
+// TestMacosAltFIsAWordMoveAndFileKeepsItsAccelerator: Fresh's macOS preset moves Alt+F to
+// the next word in the normal context, and the File menu keeps the global Alt+F
+// accelerator. The normal binding wins in the editor, as Fresh's resolver does.
+func TestMacosAltFIsAWordMoveAndFileKeepsItsAccelerator(t *testing.T) {
 	m := mustPreset(t, "macos")
-	b, ok := m.Resolve("alt+f", keymap.ContextNormal)
-	if !ok || b.Action != "toggle_fold" {
-		t.Errorf("macos alt+f = %+v, %v; want toggle_fold", b, ok)
+	if b, ok := m.Resolve("alt+f", keymap.ContextNormal); !ok || b.Action != "move_word_right" {
+		t.Errorf("macos alt+f in normal = %+v, %v; want move_word_right", b, ok)
 	}
-	if _, ok := m.Resolve("alt+f", keymap.ContextGlobal); ok {
-		t.Error("macos still binds alt+f globally")
+	if b, ok := m.Resolve("alt+f", keymap.ContextGlobal); !ok || b.Action != "menu_open" || b.Args["name"] != "File" {
+		t.Errorf("macos alt+f globally = %+v, %v; want menu_open File", b, ok)
+	}
+	if letter, ok := m.MenuMnemonic("File"); !ok || letter != 'f' {
+		t.Errorf("macos menu mnemonic of File = %q, %v; want f", letter, ok)
 	}
 }
 
 func TestMacosPrimaryShortcuts(t *testing.T) {
 	m := mustPreset(t, "macos")
 	tests := map[string]string{
-		"show_help":  "F1",
-		"new":        "ctrl+n",
-		"open":       "ctrl+o",
-		"save":       "ctrl+s",
-		"save_as":    "alt+s",
-		"close_tab":  "ctrl+w",
-		"quit":       "ctrl+q",
-		"undo":       "ctrl+z",
-		"redo":       "ctrl+r",
-		"cut":        "ctrl+x",
-		"copy":       "ctrl+c",
-		"paste":      "ctrl+v",
-		"select_all": "ctrl+a",
-		"search":     "ctrl+f",
-		// ctrl+g is the macos file's own binding and F3 only inherited: Primary prefers the
-		// preset's own idiom (AK-08), where Fresh's menu shows the simplest chord, F3.
+		"show_help":            "F1",
+		"new":                  "ctrl+n",
+		"open":                 "ctrl+o",
+		"save":                 "ctrl+s",
+		"save_as":              "alt+shift+s",
+		"close_tab":            "alt+w",
+		"quit":                 "ctrl+q",
+		"undo":                 "ctrl+z",
+		"redo":                 "ctrl+r",
+		"cut":                  "ctrl+x",
+		"copy":                 "ctrl+c",
+		"paste":                "ctrl+v",
+		"search":               "ctrl+f",
 		"find_next":            "ctrl+g",
 		"goto_line":            "ctrl+l",
-		"duplicate_line":       "ctrl+d",
-		"delete_line":          "ctrl+k",
+		"delete_line":          "ctrl+alt+k",
+		"delete_to_line_end":   "ctrl+k",
 		"toggle_file_explorer": "ctrl+b",
-		"focus_file_explorer":  "ctrl+e",
 		"command_palette":      "ctrl+t",
 		"next_buffer":          "ctrl+pagedown",
 		"prev_buffer":          "ctrl+pageup",
+		"navigate_back":        "ctrl+-",
+		"navigate_forward":     "ctrl+=",
+		"move_word_right":      "alt+f",
 	}
 	for action, want := range tests {
 		b, ok := m.Primary(action)
 		if !ok || b.Chord != want {
 			t.Errorf("macos Primary(%s) = %q (%v), want %q", action, b.Chord, ok, want)
 		}
+	}
+	// Fresh's macOS preset has no Select All key: Ctrl+A moves to the start of the line,
+	// and Cmd+A belongs to the GUI preset.
+	if b, ok := m.Primary("select_all"); ok {
+		t.Errorf("macos Primary(select_all) = %q; want none", b.Chord)
+	}
+	if b, ok := m.Primary("focus_file_explorer"); ok {
+		t.Errorf("macos Primary(focus_file_explorer) = %q; want none: Ctrl+E moves to the end of the line", b.Chord)
 	}
 }
 

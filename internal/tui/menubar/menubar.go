@@ -18,6 +18,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -63,6 +64,14 @@ type KeyLabeler interface {
 	KeyLabel(action string) (label string, ok bool)
 }
 
+// Mnemonicer is the optional part of Ports that knows the accelerator letter of a
+// menu: the letter Fresh's active keymap binds to menu_open for that label, so the
+// label underlines the character that opens it. A port without it underlines nothing,
+// which is also the case for a keymap that binds no menu accelerators.
+type Mnemonicer interface {
+	MenuMnemonic(name string) (rune, bool)
+}
+
 // Failed is emitted as a command when an activated row could not run. The root
 // shows Label in the status row, and Err is ErrUnsupported when the row has no
 // implementation.
@@ -103,6 +112,7 @@ type Model struct {
 	selected      int // index of the highlighted row, -1 when none can be highlighted
 	scroll        int // index of the first row shown, when the rows do not fit the frame
 	sub           subMenu
+	mnemonics     bool // underline each label's accelerator letter (editor.menu_bar_mnemonics)
 }
 
 // subMenu is the open submenu of a row: the row it hangs from, its highlighted
@@ -155,6 +165,14 @@ func (m Model) SetSize(w, h int) Model {
 
 // WithExplorerFocus sets whether the explorer label joins the bar. An open
 // dropdown whose label leaves the bar closes.
+// WithMnemonics sets whether the bar labels underline their accelerator letter.
+// editor.menu_bar_mnemonics is the setting; the letter itself comes from Ports'
+// Mnemonicer.
+func (m Model) WithMnemonics(on bool) Model {
+	m.mnemonics = on
+	return m
+}
+
 func (m Model) WithExplorerFocus(on bool) Model {
 	m.explorerFocus = on
 	if m.title != "" && m.title != moreTitle && !slices.Contains(barLabels(on), m.title) {
@@ -760,7 +778,7 @@ func (m Model) Paint(g *grid.Grid) {
 		if r.title == m.title {
 			st = m.styles.activeLabel
 		}
-		g.Put(r.x, m.row, g.Width(), r.title, st)
+		m.paintLabel(g, r, st)
 	}
 	if geo.hasBox {
 		m.paintBox(g, geo.box)
@@ -781,6 +799,57 @@ func checkGlyph(checked bool) string {
 // paintBox draws the rows of box in view on the shared overlay frame: the rounded
 // border with the plain rule of an untitled box on its top border, the rows with their
 // checkboxes and right-aligned shortcuts, and the separator rules inset by PadX.
+// paintLabel draws one bar label. With mnemonics on and a Mnemonicer port, the
+// letter the active keymap binds to menu_open is underlined: Fresh cuts the label into
+// runs so one character can be underlined inside it, and this does the same on the
+// grid.
+func (m Model) paintLabel(g *grid.Grid, r labelRun, st grid.Style) {
+	i := m.mnemonicIndex(r.title)
+	if i < 0 {
+		g.Put(r.x, m.row, g.Width(), r.title, st)
+		return
+	}
+	runes := []rune(r.title)
+	x := r.x
+	if pre := string(runes[:i]); pre != "" {
+		g.Put(x, m.row, g.Width(), pre, st)
+		x += ansi.StringWidth(pre)
+	}
+	under := st
+	under.Underline = true
+	char := string(runes[i])
+	g.Put(x, m.row, g.Width(), char, under)
+	x += ansi.StringWidth(char)
+	if post := string(runes[i+1:]); post != "" {
+		g.Put(x, m.row, g.Width(), post, st)
+	}
+}
+
+// mnemonicIndex is the rune index of the label's accelerator letter: the first
+// character (case-insensitively) that the keymap's menu_open binding uses, as Fresh
+// underlines it. -1 means the label underlines nothing: mnemonics are off, the port
+// has no Mnemonicer, the menu has no binding, or the letter is not in the label.
+func (m Model) mnemonicIndex(label string) int {
+	if !m.mnemonics {
+		return -1
+	}
+	mm, ok := m.ports.(Mnemonicer)
+	if !ok {
+		return -1
+	}
+	letter, ok := mm.MenuMnemonic(label)
+	if !ok {
+		return -1
+	}
+	letter = unicode.ToLower(letter)
+	for i, r := range []rune(label) {
+		if unicode.ToLower(r) == letter {
+			return i
+		}
+	}
+	return -1
+}
+
 func (m Model) paintBox(g *grid.Grid, box dropBox) {
 	chrome := m.styles.chrome
 	x0, right := box.x, box.x+box.w-1

@@ -1,19 +1,29 @@
 # Fresh parity record
 
 Status: live working record for the "full Fresh feature parity" goal, first written 2026-11-08 and
-refreshed on the same date after the round-1 features landed (workspace trust, sidebar Contents,
-status pills) on top of `588f4d7`. Every status below was checked in this tree or in
-`refs/fresh`, not inferred from the old migration notes. Update the affected row when a round
-lands instead of rewriting it.
+refreshed on the same date after rounds 1–2 landed (round 1: workspace trust, sidebar Contents,
+status pills; round 2: virtual space, keymaps, status bar/menus, sessions) on top of `588f4d7`.
+Every status below was checked in this tree or in `refs/fresh`, not inferred from the old
+migration notes. Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-08, tree commit `588f4d7` plus the round-1 work (the tree is green
-per the Lead's round gate). Fresh reference: the `refs/fresh` checkout as read on the same date.
+Last verified: 2026-11-08, tree commit `6d19e31` plus the uncommitted round-2 work. Round 2's
+full gate set was run by this audit (go build ./..., CGO_ENABLED=0 go build ./..., go vet,
+golangci-lint 0 issues, purity, import rules, go test ./... -count=1: all green).
+Fresh reference: the `refs/fresh` checkout as read on the same date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
 config-layer + LSP-autostart gating/status pill), native sidebar sections with the Markdown
 Contents section (the Lua `markdown_toc` plugin is retired: bundled plugins 9, 7 enabled by
 default; runtime palette 217 rows), and the status bar's trust pill, LSP pill states and
-`[E:1 W:2 I:3]` diagnostics badge. Residual gaps round 1 recorded are in §5.5.
+`[E:1 W:2 I:3]` diagnostics badge. Residual gaps round 1 recorded are R1-1…R1-4 in §5.
+
+**Round 2 outcome (2026-11-08):** virtual space (the `on` subset) and end-of-line inline
+diagnostics; the five keymaps rebuilt on Fresh's inheritance graph with Fresh's bindings for the
+four contexts gvim resolves (default 198 own/196 in effect, macos 53/212, macos-gui 50/261,
+emacs 78/243, vscode 9/201); config-driven status bar element lists (Fresh's defaults,
+separator, squeeze rule) plus menu accelerators (`editor.menu_bar_mnemonics`); and session
+settings/CLI (`hot_exit`, `restore_previous_session`, `skip_session_restore_when_files_passed`,
+`--restore`/`--no-restore`/`--no-session`/`--simple`). Residuals are R2-1…R2-5 in §5.
 
 The reference editor is the checkout in `refs/fresh` (read-only). The allowed differences are
 listed in §4; everything else that Fresh has and gvim lacks is a gap, ranked in §5.
@@ -51,6 +61,12 @@ gvim's own release-grade sources used here: `README.md`, `docs/architecture.md`,
 `config/*` (settings schema and layers), `keymap/*.json`, `theme/data/*.json`, the bundled
 plugin tree, the round-1 packages and their design docs (`trust/`, `outline/`,
 `internal/tui/sidebar/`), and the per-feature `*_test.go` files.
+
+Round-2 evidence adds `document/virtualspace.go`, `editor/virtualspace.go`,
+`internal/tui/editorpane/inline_diag.go`, `keymap/menu.go`,
+`internal/app/{hotexit,session_open,session_plan}.go`, the status-row code in
+`internal/tui/frame/frame.go`, and the updated design records (`docs/ui.md` status bar and
+menu accelerators, `docs/keybindings.md`, `docs/lsp.md`, README sessions and flags).
 
 ### 1.3 Status vocabulary
 
@@ -103,8 +119,8 @@ for parity status.
 |---|---|---|---|
 | Palette commands (runtime) | 206 core (Fresh's `CommandDef` table) | 217 | 206 generated from Fresh's `CommandDef` table + 7 hand-written native rows (compare, markdown Contents, keys) + 4 plugin-management rows; `commands/palette_test.go` pins 217. All have a handler or a documented reason (`unhandledPaletteActions` is empty, `internal/uiadapter/dead_bindings_test.go`). The bound-action gap list (`unhandledActions`) now holds only `file_explorer_search_backspace`. |
 | Documented "not applicable" commands | n/a | 5 | `internal/tui/notice_na.go:9` (detach, update, update log, wave, inspect theme). The round-1 trust command is no longer here: `workspace_trust_prompt` now runs. |
-| Menus / menu actions | 8 / 107 | 8 / 103 | generated from `translated_menus()`; gap is the dynamic "Copy with Formatting" submenu (empty) and its theme rows. |
-| Keymap presets | 5 | 5 | same names: default, macos, macos-gui, emacs, vscode. Binding data is reduced; see the Keymaps row in §3.2. |
+| Menus / menu actions | 8 / 103 static actions, 31 separators, 2 static submenus + 1 dynamic | 8 / 103 static actions, 31 separators, 2 static submenus + the dynamic one filled from 10 themes | Static parity is exact against Fresh's `translated_menus()` (103 actions / 31 separators / 2 static submenus); the dynamic "Copy with Formatting" submenu is filled at run time from the bundled themes (`internal/tui/menubar/dynamic.go`, present before round 1 — the round-1 note that it was empty was wrong). Help's label row says "gvim" where Fresh writes its version. Round 2 added the `editor.menu_bar_mnemonics` accelerators. |
+| Keymap presets | 5 | 5 | Same names and inheritance graph (default base; macos/emacs/vscode inherit default; macos-gui inherits macos). Own / in-effect bindings after round 2: default 198/196, macos 53/212, macos-gui 50/261, emacs 78/243, vscode 9/201 (`keymap/common_set_test.go`); the presets are Fresh's own binding data for the four contexts gvim resolves (`docs/keybindings.md`). |
 | Bundled plugins | 50 | 9 (10 before round 1) | 7 on by default (8 before round 1); `flash` and `vi_mode` off; round 1 retired the Lua `markdown_toc` plugin and folded the feature into the native Contents section (`docs/plugins/bundled.md` documents nine plugins). |
 | Bundled plugin commands | ~180 | 13 after round 1 (15 before) | from `registerCommand(` / `gvim.command.register` counts; round 1 removed `markdown_toc`'s 2 registrations. |
 | Themes | 10 built-ins | 10 built-ins | same names (`theme/data/` mirrors `fresh-editor-core/themes/`). |
@@ -124,7 +140,7 @@ for parity status.
 | Undo, save pipeline, file metadata | one-undo-step edits, atomic saves, interrupted-save recovery, permissions/read-only, final-newline/trim on save, auto-save, auto-revert | **implemented** | `document/save_plan.go`, `atomicfile/`, `editor/files_recovery.go`, `editor/interrupted.go`, `internal/restore`, `docs/architecture.md` | Fresh's `sudo save prompt` is missing (no `sudo` path found); permission/ownership preservation is present. |
 | Search & replace (in-buffer) | find, replace, query replace (y/n/!/q), find in selection, selection next/prev, case/whole-word/regex toggles, confirm-each, search history, match counts | **implemented** | `search/`, `internal/tui/find/`, `internal/tui/find_route.go`, tests `find_*_test.go`; Fresh `docs/features/search-replace.md` | Project-wide Search & Replace is missing (row 21); Git Grep plugin is missing. |
 | Navigation, bookmarks, macros | position history, go to line/bracket, bookmarks 0-9 (set/jump/list), macros 0-9 + save-to-init/promote-to-command | **partial** | `editor/nav*.go`, `editor/goto.go`, `editor/marks.go`, `internal/tui/root_bookmarks.go`, `internal/tui/macro.go`; Fresh `docs/features/editing.md` | `List Bookmarks` is a stub ("editor does not list its bookmark slots", `internal/tui/root_commands.go:16`). One macro slot only: record/play/list work, `Macro: Save to init.ts`/`Promote to command` write an `init.lua` block (Fresh writes `init.ts`), no macro registers 0-9. |
-| Display & view options | line numbers/relative, wrap + wrap_column + wrap indent, page view, rulers, indent guides + rainbow, whitespace marks incl. newlines/CR, current line/column, occurrence, post-EOF tilde, scrollbars + markers, smooth scroll, animations, screensaver | **partial** | `internal/tui/view.go` (`ViewOptions`), `internal/tui/view_render.go`, `editor/viewsettings.go`, `config/editoropts.go`, tests `view_*_test.go`; Fresh `docs/features/editing.md` | Page view is parsed and stored but not drawn (`document/viewsettings.go:18`); virtual space is stored only (`document/viewsettings.go:16`); `diagnostics_inline_text`, `animations`, `cursor_jump_animation`, `viewport_edge_fade`, `screensaver_*` are parsed/plumbed but have no consumer; mouse hover is not built (`internal/tui/view.go` toggle notice); scroll sync skips compare views. |
+| Display & view options | line numbers/relative, wrap + wrap_column + wrap indent, page view, virtual space, rulers, indent guides + rainbow, whitespace marks incl. newlines/CR, current line/column, occurrence, post-EOF tilde, scrollbars + markers, smooth scroll, inline diagnostics, animations, screensaver | **partial** (R2 landed the user-visible subset) | `document/virtualspace.go`, `editor/virtualspace.go`, `internal/tui/editorpane/{inline_diag,pane}.go`, `internal/tui/virtual_space_test.go`, `editor/virtualspace_test.go`, `internal/tui/editorpane/virtual_inline_test.go`, `docs/lsp.md`; Fresh `docs/features/editing.md`, `docs/internal/virtual-space-scoping.md` | Round 2 closed: virtual space for the horizontal `on` subset (caret past EOL, typing pads the gap, up/down keep the column, clicks, per-buffer toggle; off when wrapped, multi-caret or large file) and end-of-line inline diagnostics (most severe message, right-aligned, severity colour, dropped when narrow). Still open: virtual space `block` mode and Fresh's vertical virtual lines (R2-1); no version-aware staleness for inline diagnostics (R2-2); page view is stored only and belongs to the Markdown row/backlog #12; mouse hover is not built; scroll sync skips compare views. The style-only keys (`animations`, `cursor_jump_animation`, `viewport_edge_fade`, `screensaver_*`) are accepted config keys but deliberately not carried into the TUI (§4 item 9). |
 | Folding | indent folds + LSP `foldingRange`, fold indicators, per-buffer toggle | **partial** | `editor/fold.go`, `document/fold.go`, `internal/tui/editorpane` gutter; Fresh `docs/features/editing.md` | No LSP folding ranges (grep for `foldingRange` returns nothing); indent folding, gutter arrows, toggle and per-buffer override are implemented. |
 | Splits, tabs, panes, windows | splits (vertical/horizontal), tab strip, tab drag, preview tabs, buffer groups, multiple windows/workspaces | **partial** | `internal/tui/split*`, `internal/tui/tabs.go`, `internal/tui/tab_drag.go`, `internal/tui/tab_drop.go`, preview tabs in `internal/tui/model.go`; Fresh `docs/features/navigation.md` | No buffer groups, no second window/workspace model; "Move tab to other split" and "Extract Tab to New Workspace" are notices (`internal/tui/tab_drag.go:45`, `internal/tui/root_fix.go:40`); `next_window`/`prev_window` map to pane cycling (`internal/tui/split_tabs.go`). |
 | Compare files | `fresh --diff A B`, editable side-by-side, change copy/take, next/prev difference, switch side, scrollbar marks | **implemented** | `internal/tui/compare*.go`, `docs/compare.md`, `compare_*_test.go`, `internal/cli` `--diff`; Fresh `docs/features/compare-files.md` | Presentation differs deliberately (two file tabs, §4). Fresh's plugin API `compareBuffers`/`replaceRange` for plugins is missing; large file mode is refused on both sides. |
@@ -136,10 +152,10 @@ for parity status.
 | File explorer and sidebar | tree, file create/delete/rename/copy/cut/paste, hidden/gitignored toggles, git status marks, context menu, async reload, width/side, follow active buffer, compact chains, sticky parents, plugin rows/decorations, sidebar sections | **partial** (R1 landed) | `explorer/`, `internal/tui/explorer/`, `internal/tui/sidebar/` (sections + Contents widget), `outline/` (Markdown heading scan), `internal/tui/root_sidebar.go`, `commands/markdown_commands.go`, `docs/sidebar.md`, `docs/ui.md`; Fresh `docs/features/file-explorer.md`, `docs/internal/sidebar-sections-design.md` | Round 1 landed native sidebar sections: shared section borders, focus cycle, and the Markdown Contents section (`internal/tui/sidebar`, `outline/`, `docs/sidebar.md`), with palette rows Show Outline, Close Outline and Contents — Follow Cursor/Scroll as hand-written native commands (`commands/markdown_commands.go`). The Lua `markdown_toc` plugin is retired (deleted; bundled set 10 → 9, commands 15 → 13). Still open: follow-active-buffer, compact chains, sticky parents, reveal feedback, auto-open-on-last-close; explorer width/side fixed (`toggle_file_explorer_side` is a notice; `sidebar` config accepted and ignored); plugin explorer decorations/slots; Contents residual gaps per `docs/sidebar.md` §6 and §5.5 (per-heading fold ranges, section state persistence). |
 | Finder, quick open, live grep | Ctrl+P modes (file/command/line/buffer), fuzzy ranking, streaming enumeration, finder preview, live grep with provider toggles (case/regex/word/files/buffers/ignored/terminals/workspaces), quickfix export, resume | **partial** | `finder/`, `fuzzy/`, `internal/tui/palette/` (4 modes, Live Grep); Fresh `docs/features/command-palette.md` | No file-content preview in the palette; Live Grep has no Fresh toggle set and no quickfix export/workspace scope (search string only). Resume Live Grep is implemented (`internal/app/live_grep.go`). |
 | Command palette and command table | 206 core commands + plugin commands, contexts/availability, prefix modes, key hints | **implemented** core / **partial** plugin commands | `commands/` (206 generated + native rows), `internal/tui/palette/`; Fresh `docs/features/command-palette.md` | The generated core table is exact (206/206). The runtime palette has 217 rows: 206 generated from Fresh's table + 7 hand-written native rows (compare, markdown Contents, keys) + 4 plugin-management rows (`commands/palette_test.go`). Bundled plugin commands number 13 after round 1 (15 before), vs Fresh's ~180, so palettes differ by the missing plugins (the Bundled plugin feature set row, §3.3). |
-| Menu bar, context menus, help, welcome | 8 menus, 107 actions, dynamic theme submenu, mnemonics/underlined accelerators, context menus, help overlay, welcome screen, dashboard | **partial** | `internal/tui/menubar/menu_table_gen.go`, `internal/tui/context_menu.go`, `internal/tui/help.go`, `internal/tui/welcome.go`; Fresh `docs/internal/editor-ux-features.md`, `docs/features/dashboard.md` | "Copy with Formatting" submenu is empty (`internal/tui/menubar/menu_table_gen.go:40`; Fresh fills it from installed themes at runtime). Menus have no mnemonics/F10/Alt+letter by design of this port (`docs/keybindings.md`). Dashboard plugin is missing; gvim has its own welcome/tour instead. |
-| Status bar | configurable element lists (`{trust} {remote} {terminal_restart} {cursor} {diagnostics} {cursor_count} {messages}` left; `{read_only} {line_ending} {encoding} {language} {lsp} {warnings} {update} {palette}` right), per-element click actions, LSP pill with count badge | **partial**; trust pill, LSP pill states and `[E:1 W:2 I:3]` diagnostics badge **implemented** (R1) | `internal/tui/frame/frame.go` `StatusRuns`, `internal/tui/model.go` `statusView`, `internal/tui/lsp_detect.go` `lspPill`, `internal/tui/trust_state.go`, `internal/tui/statusbar_trust_test.go`, `docs/lsp.md`, `docs/trust.md`; Fresh `view/ui/status_bar.rs` (`Diagnostics` renders `E:1 W:2 I:3`, `Warnings` renders `[⚠ N]`) | The row is still hardcoded (trust pill, `Local`, position, plugin items, message; right: large, `[RO]`, EOL, encoding, language, LSP, plugin items, diagnostics badge, palette hint); `editor.status_bar` element lists are parsed and plumbed but not applied. Missing `{terminal_restart}`, `{cursor_count}` and `{update}`; the general `{warnings}` element is not painted (gvim's general warnings are the notices Show Warnings lists); `Local` stands in for Fresh's `{remote}`. Backlog #3. |
-| Config layers and Settings UI | 4 layers (system/user/project/session), per-buffer overrides, config write from toggles, Settings UI (tree, widgets, layer switch, save), `init.ts`, config reload | **partial** (R1 added the trust gate on the project layer) | `config/config.go`, `config/editoropts.go`, `config/language.go`, `internal/app/settings.go`, `internal/tui/settings.go`, `docs/trust.md`; Fresh `docs/configuration/index.md` | Layers: user + project only; no session layer, no per-buffer pin persistence (toggles are per-buffer session state), no config-write path from the UI. Round 1: the project layer is skipped entirely unless the workspace is Trusted (`config.Options.Untrusted`), which is stricter than Fresh, which merges project config at any level (see `docs/trust.md`). Settings UI is a read-only list that opens `config.json` in a tab; no config reload (`docs/plugins/limits.md`). `gvim config show` still merges the project layer regardless of trust (R1-3 in §5.5). Many Fresh `editor.*` options are parsed; `hot_exit` and `restore_previous_session` are parsed but not consumed. Fresh-only top-level keys are accepted and ignored (`config/editoropts.go`). |
-| Keymaps and keybinding editor | 5 presets, 276 default bindings across 13 contexts, user `keybindings`, unbind/noop, chords, custom keybinding maps, keybinding editor | **partial** | `keymap/*.json`, `internal/keybindings/`, `internal/tui/keybind_editor.go`; Fresh `docs/configuration/keyboard.md`, `docs/features/keybinding-editor.md` | Presets are hand-curated and much smaller: default 109 bindings / 74 actions vs Fresh 276 / 251 in the data files (Fresh's maps are larger and cover prompt/popup/menu/settings/completion contexts; gvim resolves overlay keys in code, `docs/keybindings.md`). Missing user-facing bindings include block select, line-end cursors, bookmark keys, LSP code actions/completion/implementation, shell commands, case transforms, expand-line-selection. Custom `keybinding_maps` are refused with a warning; the editor itself is implemented. |
+| Menu bar, context menus, help, welcome | 8 menus, 103 static actions, dynamic theme submenu, mnemonics/underlined accelerators, context menus, help overlay, welcome screen, dashboard | **implemented** menus/help/welcome; dashboard **missing** (plugin) | `internal/tui/menubar/{menu_table_gen,menubar,dynamic}.go`, `keymap/menu.go` (`Map.MenuMnemonic`), `internal/tui/menu_mnemonic_test.go`, `internal/tui/menubar/mnemonic_test.go`, `internal/tui/context_menu.go`, `internal/tui/help.go`, `internal/tui/welcome.go`, `docs/ui.md` §6; Fresh `docs/internal/editor-ux-features.md`, `docs/features/dashboard.md` | Menus match Fresh's static table exactly (103 actions, 31 separators, 2 static submenus), and the dynamic "Copy with Formatting" submenu lists the 10 bundled themes (`menubar/dynamic.go`). Round 2 added the accelerators: underlined keymap-assigned letters and Alt+letter through ordinary keymap resolution, F10 for the bar, `editor.menu_bar_mnemonics` off removes both; dropdown rows carry no mnemonics (as in Fresh). Help's label says "gvim" instead of Fresh's version string. Residual: the dashboard plugin (backlog #14), not the menu system. |
+| Status bar | configurable element lists (Fresh's defaults: left `{trust} {remote} {terminal_restart} {cursor} {diagnostics} {cursor_count} {messages}`; right `{read_only} {line_ending} {encoding} {language} {lsp} {warnings} {update} {palette}`), separator, per-element click actions, squeeze rule | **implemented** (R2; parsed-but-unpainted elements documented) | `internal/tui/frame/frame.go` `StatusRuns`/`ParseStatusElement`/`DefaultStatusLeft/Right`, `internal/tui/model.go` `statusView`/`statusRow`, `internal/tui/statusbar_elements_test.go`, `config/editoropts.go` status-element validation, `config/statusbar_test.go`, `docs/ui.md` §5; Fresh `config.rs` `StatusBarConfig` and `view/ui/status_bar.rs` | Round 2 replaced the hardcoded row with the configured lists (Fresh's defaults when unset, an explicitly empty list paints nothing), the configured separator, Fresh's squeeze/drop order, and the element semantics: trust, remote ("Local", not clickable), cursor + cursor:compact, diagnostics `[E:1 W:2 I:3]` with its blank slot, cursor_count, messages, read_only, line_ending/encoding/language pickers, lsp, terminal_restart (when the dock shell exited), palette. Parsed but painting nothing: `{filename}`, `{chord}`, `{clock}` and plugin tokens (R2-3); `{warnings}` and `{update}` are deliberately hidden (no warning-count domain, no updater). Plugin status items keep their anchors around messages/diagnostics/warnings/update/palette; the large-file chip is a gvim extension leading the right group. |
+| Config layers and Settings UI | 4 layers (system/user/project/session), per-buffer overrides, config write from toggles, Settings UI (tree, widgets, layer switch, save), `init.ts`, config reload | **partial** (R1 trust gate on the project layer) | `config/config.go`, `config/editoropts.go`, `config/language.go`, `internal/app/settings.go`, `internal/tui/settings.go`, `docs/trust.md`; Fresh `docs/configuration/index.md` | Layers: user + project only; no session layer, no per-buffer pin persistence (toggles are per-buffer session state), no config-write path from the UI. Round 1: the project layer is skipped entirely unless the workspace is Trusted (`config.Options.Untrusted`), which is stricter than Fresh, which merges project config at any level (see `docs/trust.md`). Settings UI is a read-only list that opens `config.json` in a tab; no config reload (`docs/plugins/limits.md`). `gvim config show` still merges the project layer regardless of trust (R1-3 in §5). Session keys (`hot_exit`, `restore_previous_session`) are consumed since round 2 (see the session row). Fresh-only top-level keys are accepted and ignored (`config/editoropts.go`). |
+| Keymaps and keybinding editor | 5 presets (276/104/64/54/4 own bindings across 13 contexts), user `keybindings`, unbind/noop, chords, custom keybinding maps, keybinding editor | **partial** (R2 landed the data for the four resolvable contexts) | `keymap/*.json` (inheritance graph), `keymap/common_set_test.go` (own/in-effect counts), `keymap/menu.go`, `internal/keybindings/`, `internal/tui/keybind_editor.go`, `docs/keybindings.md`; Fresh `docs/configuration/keyboard.md`, `docs/features/keybinding-editor.md` | Round 2 rebuilt the presets on Fresh's inheritance graph with Fresh's own bindings for the four contexts gvim resolves (`global`, `normal`, `file_explorer`, `terminal`): own/in-effect default 198/196, macos 53/212, macos-gui 50/261, emacs 78/243, vscode 9/201. Missing keys were added (block select, line-end cursors, marks/bookmarks, LSP actions, shell, case/query-replace, scroll, tour/macro), gvim-specific keys kept where Fresh has none, conflicts resolved to Fresh's data; `docs/keybindings.md` rewritten. Residual: the eight contexts gvim resolves in code are not keymap-addressable and a user binding there is skipped with a warning (§4 item 5, R2-4). Custom `keybinding_maps` are refused with a warning; the editor itself is implemented. |
 | Themes and appearance | 10 built-in themes, theme files by name/path/URL/`builtin://`, `extends` inheritance, attributes on every color, theme editor, inspect-at-cursor, plugin theme overrides, background images | **partial** | `theme/`, `theme/data/*.json`, `internal/tui/style/`, `internal/tui/view.go`; Fresh `docs/features/themes.md` | All 10 built-in names and RGB/object+modifier values load; no named/default colors, no `extends`/inheritance, no file/URL theme forms. No theme editor or inspect-at-cursor (`internal/tui/notice_na.go:15`), no plugin theme override API, background image/blend is a not-applicable notice. |
 
 ### 3.3 Services
@@ -151,11 +167,11 @@ for parity status.
 | Bundled plugin feature set | 50 plugins: git_log, live_diff, git_grep, git_explorer, git_blame, git_gutter, git_statusbar, git_find_file, search_replace, diff_nav, diagnostics_panel, code-tour, dashboard, welcome*, theme_editor, markdown_toc, markdown_compose, markdown_source, path_complete, lsp_help, lsp_navigation, find_references, compare_files, flash, vi_mode, merge_conflict, tab_actions, goto_with_selection, env-manager, devcontainer, k8s-workspace, agent_*/orchestrator/live_sessions, pkg, audit_mode, language helpers | **partial** | `plugin/bundled/plugins/` (9 after round 1), `docs/plugins/bundled.md` (including its reduced/not-ported notes: git_blame reduced, merge_conflict reduced to in-buffer resolution, vi_mode limits; markdown_toc was retired in round 1 into the native Contents section and is not a port target); Fresh `plugins/*.ts` | Round 1 retired markdown_toc, leaving 9: goto_with_selection, tab_actions, git_gutter (with diff-nav commands), git_statusbar, git_find_file, git_blame (reduced), merge_conflict (reduced), flash, vi_mode. Missing plugin features: git_log, live_diff, git_grep, git_explorer, search_replace (project), diagnostics_panel, code-tour, dashboard, theme_editor, markdown_compose, markdown_source, path_complete, lsp_help, lsp_navigation, env-manager, devcontainer, k8s-workspace, orchestrator/agent sessions, live_sessions, pkg, audit_mode, compare_files (built-in in gvim instead), welcome (built-in), language-helper plugins. |
 | Terminal | PTY terminal panes and utility dock, live/scrollback modes per split, keyboard capture, clickable paths (OSC 7), restart exited process + agent resume, shell override, send selection, mouse forwarding/drag-select, close_on_exit, terminal tabs, ConPTY on Windows | **partial** | `internal/terminal/`, `internal/tui/dock/`, `internal/tui/dock_*.go`, tests `dock_*_test.go`; Fresh `docs/features/terminal.md`, `docs/internal/terminal.md` | No scrollback model (`internal/terminal/term.go:13`), so no read-only scrollback mode, no terminal search/copy from history, no clickable paths/OSC 7 cwd tracking, no mouse forwarding/drag-select. No `terminal.shell` config (shell is `$SHELL`, `internal/uiadapter/terminal.go:42`), no agent-resume, no `close_on_exit`, no terminal tabs inside the dock. Unix only: Windows returns `ErrUnsupported`. Keyboard capture, restart, resize, selection copy, send-selection and split terminals exist. |
 | Git surfaces | review diff (stage/unstage/discard/comments/export), range/stash reviews, git log with live diff, git blame panel with history, live diff baselines, diff chunk nav, git grep, git explorer, git find file, statusbar branch, gutter marks | **partial** | `gitstate/`, `plugin/bundled/plugins/git_gutter`, `git_statusbar`, `git_find_file`, `git_blame`, `merge_conflict`, `internal/tui/git.go`; Fresh `docs/features/git.md` | Missing: Review Diff (/range/stash), Git Log, Live Diff, Git Grep, Git Explorer, blame panel/history stepping (gvim has a reduced inline blame), merge view (reduced to in-buffer resolution), diff hunk sources beyond the HEAD gutter, review comments/export. Implemented: gutter hunk marks + next/prev change, branch statusbar, git find file, merge-conflict resolution, compare-as-difftool. |
-| Session, restore, daemon | session restore/save, hot exit of unsaved buffers, crash recovery, ephemeral-file patterns, per-file pins, daemon mode with attach/detach and `--cmd daemon open-file --wait`, direct-vs-daemon launch modes | **partial** | `internal/restore/`, `session/`, `document/stash.go`, `editor/interrupted.go`, `internal/app/run.go`, tests `session_restore_test.go`, `files_recovery_test.go`; Fresh `docs/features/session-persistence.md` | Session save/restore, crash recovery and hot-exit stash exist. Missing: daemon mode (task "detach" is a documented not-applicable reason), `--restore`/`--no-restore`/`--simple` flags, daemon `open-file`/`--wait`, `hot_exit` and `restore_previous_session` settings are parsed but ignored (`internal/app/run.go` restores whenever no file arguments are given). |
+| Session, restore, daemon | session restore/save, hot exit of unsaved buffers, crash recovery, ephemeral-file patterns, per-file pins, `--restore`/`--no-restore`/`--simple`, daemon mode with attach/detach and `--cmd daemon open-file --wait`, direct-vs-daemon launch modes | **partial** (R2 landed hot exit, the restore settings and the CLI flags) | `internal/app/{session_plan,session_open,hotexit}.go`, `internal/app/run.go`, `internal/restore/session.go` (`RestoreHotExit`), `internal/cli/root.go`, session/ files, tests `session_plan_test.go`, `session_launch_test.go`, `restore/session_hot_test.go`, `internal/cli/root_test.go`, README sessions/flags; Fresh `docs/features/session-persistence.md` | Round 2 landed: `hot_exit` (quit without asking, the session save stashes the text; off asks per dirty tab), `restore_previous_session` (tabs/layout vs the unsaved text only), `skip_session_restore_when_files_passed` (file launch, or restore then append the given files), and the one-shot `--restore`/`--no-restore` (alias `--no-session`)/`--simple` with mutual-exclusion errors. Still open: daemon mode and its CLI, no per-buffer hot-exit store (a file launch cannot keep/restore its files' unsaved text), `--no-restore` still saves the session (deliberate; §4 item 10, R2-5), and `--simple`'s "no dock" is vacuous. |
 | Workspaces, windows, orchestrator, agents | orchestration dock, multiple workspaces per daemon (one per git worktree), workspace switcher, New Workspace dialog, Run Agent (claude/codex/opencode/aider), agent session discovery/resume, live sessions, extract tab to workspace | **missing** | `grep -ri orchestrator --include=*.go` finds only command-table/capability strings; `internal/tui/remote.go` says remote workspaces unsupported; `extract_tab_to_new_workspace` is a notice; Fresh `docs/features/session-persistence.md`, `docs/features/scripting.md` | Whole area absent; gvim is one editor per process. Depends on daemon/workspace model. |
 | Remote authority | SSH editing (scp/URL forms), devcontainers (CLI attach/rebuild/ports/logs), Kubernetes workspaces, remote-aware LSP/terminal/processes, reconnect, remote indicator popup | **missing** | No `ssh`/`authority` implementation in the tree; `internal/tui/remote.go:10` popup says "Remote workspaces are not supported"; `docs/plugins/porting.md:46` "authority ... not provided"; Fresh `docs/features/ssh.md`, `docs/features/devcontainer.md` | Entire area absent. Requires an authority abstraction under fs/proc/terminal/LSP first. |
 | Workspace trust | per-folder Restricted/Trusted/Blocked, executable-marker detection, one-time prompt, status pill, dialog command, persisted per folder, gates LSP/build/env activation, env detectors | **partial** (R1 landed) | `trust/` (levels + Undecided, store at `config.Dir()/trust.json`, atomic writes, marker scan, Fresh startup policy), `internal/app/trust.go` and `internal/app/run.go` (`Options.Untrusted`, `lsp_enabled` forced off), `internal/tui/trust*.go` (dialog, port, notices, pill), `config/trust_test.go`, `docs/trust.md`; Fresh `docs/features/workspace-trust.md` | Implemented in round 1: the three levels plus Undecided, per-folder persistence, executable-marker scan and prompt (silent trust for plain folders, Fresh's policy), the open-time prompt, the `Workspace Trust…` palette command and dialog, the trust status pill with click routing, the project config layer skipped unless Trusted, and LSP auto-start forced off unless Trusted (manual Start/Restart still works). Still open: no process gate — terminal/shell/formatter/LSP/plugin spawns are not consulted against the level, and Blocked enforces the same as Restricted (`docs/trust.md` §3); env detection/activation and devcontainer/tasks are absent; the config gate is a startup decision (a mid-session trust change applies project tooling at the next start, documented divergence). Tracked as backlog #17. |
-| Markdown | syntax highlighting, markdown_source smart list editing, compose/rendered/dual modes, conceal, tables, Contents sidebar section | **partial**; the native Contents section is **implemented** (R1) | `syntax/` markdown styling, `internal/tui/sidebar/contents.go`, `outline/`, `commands/markdown_commands.go`, `docs/sidebar.md`, `docs/ui.md`; Fresh `docs/features/editing.md` Markdown section, `refs/fresh/crates/fresh-editor/plugins/markdown_toc.ts` (retired in gvim) | Round 1 replaced the Lua virtual-buffer outline with the native sidebar Contents section and hand-written palette rows (Show Outline, Close Outline, Contents — Follow Cursor/Scroll); see the sidebar row and `docs/sidebar.md`. Still open: markdown_source (list continuation/checkbox/Tab bullet cycling), compose/rendered/dual view mode (page view is stored only), conceal/soft-break rendering, and tables (backlog #12). |
+| Markdown | syntax highlighting, markdown_source smart list editing, compose/rendered/dual modes, conceal, tables, Contents sidebar section | **partial**; the native Contents section is **implemented** (R1) | `syntax/` markdown styling, `internal/tui/sidebar/contents.go`, `outline/`, `commands/markdown_commands.go`, `docs/sidebar.md`, `docs/ui.md`; Fresh `docs/features/editing.md` Markdown section, `refs/fresh/crates/fresh-editor/plugins/markdown_toc.ts` (retired in gvim) | Round 1 replaced the Lua virtual-buffer outline with the native sidebar Contents section and hand-written palette rows (Show Outline, Close Outline, Contents — Follow Cursor/Scroll); see the sidebar row and `docs/sidebar.md`. Still open: `markdown_source` (list continuation/checkbox/Tab bullet cycling), compose/rendered/dual view mode — **page view is stored only and belongs to this item**, not the display row — plus conceal/soft-break rendering and tables (backlog #12). |
 | Diagnostics surfaces | gutter marks, underline, inline end-of-line text, diagnostics panel, quickfix list, error navigation, hover fusion | **partial** | `internal/tui/diag.go`, `internal/tui/lsp.go`, `internal/tui/editorpane/decor.go`, `docs/lsp.md`; Fresh `docs/features/lsp.md` | Gutter dots, underline, status count, F8 jumps and hover diagnostics exist. End-of-line inline text is parsed but unused; diagnostics panel/dock and quickfix list are missing. |
 | Scripting and CLI automation | `--cmd script`, `--cmd daemon open-file --wait`, stdin programs, `init.ts` startup script, agent channels, watch mode, CLI help for the API | **partial** | `internal/cli/` (flags: config/keymap/theme/log-file/diff/no-plugins/plugin), `plugin_init.go` (`init.lua`); Fresh `docs/features/scripting.md` | gvim has `init.lua` and the Lua API, plus gvim-only `gvim config show/paths` and `gvim grammar` subcommands. Missing: Fresh's external `--cmd` script channel, `open-file --wait`, daemon modes, stdin piping, `--restore/--no-restore/--simple/--web`, watch/agent capability. |
 | Internationalization | 15 locales, locale detection, config locale, plugin i18n (`t()`, locale JSON, translated menus/commands/prompts) | **missing** | English only: `internal/tui/view.go` select_locale notice; no locale data in tree; Fresh `docs/i18n.md`, locales dir 15 files | Whole area missing; menus/labels are hardcoded English. |
@@ -177,10 +193,13 @@ for parity status.
 4. **Compare presentation.** gvim opens the two files in their own tabs marked `⇄`
    (`docs/compare.md`); Fresh uses one composite-buffer tab. Both sides remain editable and
    diff-equivalent.
-5. **Overlay keys are code-resolved.** Prompts, popups, menus, the find bar and the settings
-   list answer their keys in code, so a user binding in those `when` contexts is skipped with a
-   warning (`docs/keybindings.md`). Fresh exposes those as first-class keymap contexts. This is
-   a deliberate port simplification, but it is why the keymap row is partial, not implemented.
+5. **Keymap contexts are narrowed to four.** gvim resolves `global`, `normal`,
+   `file_explorer` and `terminal`; since round 2 the five presets are Fresh's own binding data for
+   exactly those contexts, with Fresh's inheritance graph. Fresh's other contexts (`prompt`,
+   `searchPrompt`, `popup`, `completion`, `settings`, `menu`, `compositeBuffer`, `dock`) are not
+   emitted: gvim's overlays answer their keys in code, and the loader skips a user binding there
+   with a warning (`docs/keybindings.md`). This is the remaining deliberate narrowing; closing it
+   is backlog R2-4.
 6. **Project config is deliberately weaker, and trust-gated.** The project `.gvim/config.json`
    cannot set `keymap`, `keybindings` or an LSP `command` (C11; `config/config.go` package doc and
    `setProjectLSP`), and since round 1 the whole project layer is skipped unless the workspace is
@@ -197,6 +216,18 @@ for parity status.
    `internal/tui/view.go` `backgroundNotice`). Fresh's GUI/desktop builds, browser `--web` UI and
    WASM build are outside a terminal-only pure-Go binary; this is a port decision the Lead
    should confirm rather than a silent omission (see §5 P2).
+9. **Style-only display options are parsed but never consumed.** `editor.animations`,
+   `cursor_jump_animation`, `viewport_edge_fade` and `screensaver_enabled`/`screensaver_idle_minutes`
+   load without diagnostics for Fresh config compatibility but are not carried into the TUI: the
+   cell-grid component style (`docs/ui.md`) draws no animations, fading edges or screensaver.
+   Round 2 made this an explicit decision and removed the inert plumbing from `ViewOptions`.
+10. **Session semantics differ where gvim has no daemon and one session file.** A file launch
+    (`gvim FILE…`) restores and saves no session and cannot bring the launched files' own
+    hot-exit text back, where Fresh does; `--no-restore`/`restore_previous_session=false` still
+    saves the session at quit (only the restore is skipped), because gvim's session file is also
+    its hot-exit store and skipping the save would lose in-progress work; and `--simple`'s
+    "no dock" is vacuous because gvim has no dock. README documents all three; round 2 delivers
+    them deliberately.
 
 ## 5. Ranked backlog for the remaining rounds
 
@@ -205,12 +236,15 @@ The order follows the goal's dependency shape: user-visible TUI/editing gaps fir
 plugin-API breadth that unblocks Fresh's plugin-era features, then the daemon/remote/agent
 architecture. "Owner area" names the package that should own the work.
 
-Round 1 closed the workspace-trust surface, native sidebar sections/Contents and the LSP pill
-states + diagnostics badge; those are no longer backlog items. The ranked items below are the
-remaining gaps, with the round-1 gaps listed as R1-1…R1-4 before them.
+Rounds 1–2 closed the workspace-trust surface, native sidebar sections/Contents and the LSP
+pill + diagnostics badge (round 1); virtual space (`on`), inline diagnostics, Fresh's keymap
+data, the config-driven status bar + menu accelerators, and the session settings/CLI (round 2).
+Those are no longer backlog items (their numbers are retired ids, so §5.1 jumps from #4 to
+#6). The ranked items below are the remaining gaps, with the gaps the rounds opened listed
+first as R1-* and R2-*.
+the rounds opened listed first as R1-* and R2-*.
 
-Round 1 opened four gaps to rank with the items below (they are new, so they carry R1 ids
-instead of a rank; ranked item #17 already covers the spawn gate):
+Round 1 recorded four gaps (R1-1…R1-4; the spawn gate is also ranked as #17):
 
 - **R1-1 (P1, M)** — per-heading fold ranges for the Contents `fold_buffer` setting: the
   setting is read and plumbed but does nothing until the editor accepts fold ranges from
@@ -224,22 +258,38 @@ instead of a rank; ranked item #17 already covers the spawn gate):
   (terminal/shell/formatter/LSP/plugin processes); tracked as ranked item #17
   (`trust/` and the spawn sites; `docs/trust.md` §3).
 
+Round 2 recorded five gaps:
+
+- **R2-1 (P1, M)** — virtual space `block` mode and vertical virtual space: gvim implements the
+  horizontal `on` subset; `block` (rectangular selection geometry, block copy/paste past EOL) is
+  accepted but clamped, and Fresh's vertical virtual lines below the last line are not
+  implemented (`editor`/`document`/`editorpane`; `docs/internal/virtual-space-scoping.md`).
+- **R2-2 (P2, S)** — version-aware inline-diagnostic staleness: the port carries no diagnostic
+  version, so inline text is always the latest server reply and is never dimmed; Fresh dims
+  stale versions (`internal/tui/editorpane/inline_diag.go`, `internal/tui/ports.go`).
+- **R2-3 (P2, S)** — status-bar elements parsed but unpainted: `{filename}`, `{chord}`,
+  `{clock}` and plugin tokens (`{plugin:token}` needs a register/paint API); `{warnings}` and
+  `{update}` stay hidden deliberately (no warning-count domain, no updater) — `docs/ui.md`.
+- **R2-4 (P2, M)** — the eight code-resolved keymap contexts: expose Fresh's
+  prompt/searchPrompt/popup/completion/settings/menu/compositeBuffer/dock contexts to user
+  bindings once the overlays take keymap bindings; today such bindings are skipped with a
+  warning (`docs/keybindings.md`).
+- **R2-5 (P2, M)** — per-buffer hot-exit store and file-launch unsaved-text restore: one
+  session file means a file launch cannot keep its files' unsaved text and `--no-restore` must
+  still save (§4 item 10); a per-buffer store would close this.
+
 ### 5.1 User-visible TUI and editing gaps (do first)
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 1 | Display/view: draw page view, honour virtual space, render end-of-line inline diagnostics; decide animations/cursor-jump/viewport-edge-fade/screensaver (implement or delete the parsed keys) | P0 | M | `document/viewsettings.go`, `internal/tui/view_render.go`, `editor` | parsed-but-inert keys documented in the Display & view matrix row (§3.1) |
-| 2 | Keymap data parity: port the user-facing Fresh bindings gvim lacks (block select, add-cursors-to-line-ends, bookmark set/jump/list, LSP actions, shell commands, case transforms, expand-line-selection, query replace, delete-to-line-end, scroll actions, tour/macro keys) across all five presets | P0 | M | `keymap/*.json`, `commands/gen` if regenerated | the dead-action lists (`internal/uiadapter/dead_bindings_test.go`: `unhandledActions` = 1, `unhandledPaletteActions` = 0) are the dispatch floor, not the feature gap; pair each key with its owner feature |
-| 3 | Status bar + menus: apply `editor.status_bar` element lists (the trust/LSP/diagnostics elements landed in round 1 but are still hardcoded), add the general `{warnings}` element and `{terminal_restart}`/`{cursor_count}`/`{update}`, add menu mnemonics (F10/Alt+letter/underlines), and fill the dynamic "Copy with Formatting" submenu from the built-in themes | P0 | S/M | `internal/tui/frame/frame.go`, `internal/tui/view.go`, `internal/tui/menubar`, `tools/gen_menus.py` | — |
-| 4 | Settings UI editing + save + reload (the Settings list becomes an editor over the config schema: layer switch, write user/project file, reload config and plugins without restart) | P0 | M | `internal/tui/settings.go`, `config`, `internal/app` | `docs/plugins/limits.md` known limitation |
-| 5 | Session settings + CLI: honour `hot_exit`, `restore_previous_session`, `skip_session_restore_when_files_passed`; add `--restore`/`--no-restore`/`--simple` | P0 | S | `internal/app/run.go`, `internal/cli`, `config` | — |
-| 6 | Terminal: scrollback/read-only mode + terminal search/copy, clickable paths + OSC 7, `terminal.shell` config, mouse forwarding/drag-select, agent resume | P0 | L | `internal/terminal`, `internal/tui/dock`, `internal/app` | Fresh `docs/features/terminal.md`, `docs/internal/terminal.md` |
-| 7 | LSP user-visible completion: code-action apply + workspace edits, inlay hints, semantic tokens, `foldingRange`, diagnostics panel + end-of-line inline diagnostics, multi-server merge, per-server status popup/mute, `universal_lsp`/feature filters/env/init options/process limits (the pill states and diagnostics badge are landed) | P1 | L | `lsp/`, `internal/lsphost`, `internal/tui/lsp*.go`, `config` | — |
+| 4 | Settings UI editing + save + reload (the Settings list becomes an editor over the config schema: layer switch, write user/project file, live apply, reload of the live subset) | P0 | M | `internal/tui/settings.go`, `config`, `internal/app` | Phase-1 spec written in the round-3 recon: config descriptor table + JSONC `PatchFile` + `SettingsPort` + explicit restart boundary; target of round 3 |
+| 6 | Terminal: `terminal.shell` config, read-only scrollback pager + search/copy, clickable paths + OSC 7, mouse forwarding (drag-select and reflow/persisted scrollback follow) | P0 | L | `internal/terminal`, `internal/tui/dock`, `internal/app` | Fresh `docs/features/terminal.md`, `docs/internal/terminal.md`; Phase-1 spec written (x/vt already carries scrollback, OSC 7 and SendMouse); target of round 3 |
+| 7 | LSP user-visible completion: code-action apply + workspace edits, inlay hints, semantic tokens, `foldingRange`, diagnostics panel + end-of-line inline diagnostics, multi-server merge, per-server status popup/mute, `universal_lsp`/feature filters/env/init options/process limits | P1 | L | `lsp/`, `internal/lsphost`, `internal/tui/lsp*.go`, `config` | the pill states, diagnostics badge and status-bar element wiring landed in rounds 1–2 |
 | 8 | Project-wide Search & Replace + Git Grep (results panel, replace across files, provider toggles) | P1 | M | `search/`, `internal/tui`, bundled plugin | minimal results panel; plugin version depends on #13 |
 | 9 | Finder/palette: file-content preview, Live Grep toggles (case/regex/word/files/buffers/ignored/terminals/workspaces), quickfix export, streaming provider model | P1 | M | `internal/tui/palette`, `finder`, `internal/app` | — |
 | 10 | Explorer parity: follow active buffer, compact chains, sticky parents, reveal feedback, auto-open/close policy, sidebar width/side config, plugin explorer decorations/slots | P1 | M | `explorer/`, `internal/tui/explorer`, `internal/tui/root_sidebar.go` | #13 for plugin slots |
 | 11 | Theme model/editor: `extends`/inheritance, named colors, file/URL/`builtin://` forms, theme editor + inspect-at-cursor, plugin theme overrides | P1 | M | `theme/`, `internal/tui`, `internal/configview` | #13 for plugin overrides |
-| 12 | Markdown: compose/rendered/dual view, `markdown_source` smart editing, conceal/soft breaks, tables | P1 | L | `editor`, `syntax`, `internal/tui`, `plugin/bundled` | #1 and #13 |
+| 12 | Markdown: compose/rendered/dual view (including page view), `markdown_source` smart editing, conceal/soft breaks, tables | P1 | L | `editor`, `syntax`, `internal/tui`, `plugin/bundled` | #13; page view belongs to this item |
 
 ### 5.2 Plugin-API breadth (unblocks Fresh's plugin-era features)
 
@@ -255,7 +305,7 @@ instead of a rank; ranked item #17 already covers the spawn gate):
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 18 | Daemon mode: client/server split, attach/detach, `open-file`/`--wait`, auto-attach, socket lifecycle, direct-vs-daemon launch modes | P1 | XL | new daemon package, `internal/cli`, `internal/app` | #5 |
+| 18 | Daemon mode: client/server split, attach/detach, `open-file`/`--wait`, auto-attach, socket lifecycle, direct-vs-daemon launch modes | P1 | XL | new daemon package, `internal/cli`, `internal/app` | session settings landed in round 2; daemon build starts here |
 | 19 | Workspaces/windows: workspace model, dock switcher, New Workspace, extract-tab-to-workspace, buffer groups | P1 | XL | new workspace model, `internal/tui` | #18 |
 | 20 | Agent sessions: Run Agent dialog, agent resume metadata, session discovery/resume, dock integration | P1 | L | workspace/terminal/plugin packages | #18/#19 |
 | 21 | Remote authority: SSH file/process/terminal/LSP backend, devcontainer attach, Kubernetes workspaces, remote indicator, reconnect | P1 | XL | new authority package; `plugin/hostos` | #13, #18 |
@@ -272,26 +322,27 @@ instead of a rank; ranked item #17 already covers the spawn gate):
 
 ### 5.5 Suggested round order for the remaining goal
 
-1. **Round 2 — visible editing/view sweep.** #1 display/view, #2 keymap data, #3 status bar/menus,
-   #4 settings UI, #5 session flags, #6 terminal scrollback/shell/paths, R1-3 `gvim config show`.
-   Exit: every TUI surface gvim advertises behaves as Fresh does, and every parsed-but-inert
-   setting is implemented or removed from the schema and docs.
-2. **Round 3 — LSP completion and project search.** #7 LSP user-visible set, #8 project-wide
-   search + git grep with a minimal results panel, #9 finder/palette preview and Live Grep toggles.
-3. **Round 4 — plugin API tier 1.** #13 host capability tier, #15 diff/compare plugin API, then
+1. **Round 3 — Settings UI and the terminal (the two P0s).** #4 Settings UI (editable
+   settings over a schema, User/Project layers, JSONC write, live apply, reload of the live
+   subset) and #6 terminal slice A (`terminal.shell` config, read-only scrollback pager +
+   search/copy, OSC 7/Ctrl+Click links, mouse forwarding). Phase-1 implementation specs for both
+   are with the Lead. Exit: both close their advertised halves; drag-select, reflow/persisted
+   scrollback and plugin/LSP reload stay as their residual list.
+2. **Round 4 — LSP and search.** #7 LSP user-visible completion (code-action apply, inlay
+   hints, semantic tokens, `foldingRange`, diagnostics panel/inline, multi-server, feature
+   filters), #8 project-wide search + Git Grep with a small results panel, #9 finder/palette
+   preview and Live Grep toggles.
+3. **Round 5 — plugin API tier 1.** #13 host capability tier, #15 diff/compare plugin API, then
    start #14 with git_log, live_diff, git_grep and diagnostics_panel.
-4. **Round 5 — plugin-era feature set.** Finish #14 (search_replace, code-tour, dashboard,
-   theme_editor, path_complete, lsp_help/lsp_navigation), #12 markdown compose/source, #10
-   explorer parity, #11 theme model/editor, R1-1 Contents fold ranges.
-5. **Round 6 — daemon and automation.** #18 daemon mode and its CLI/automation surface, then
+4. **Round 6 — plugin-era features and polish.** Finish #14 (search_replace, code-tour,
+   dashboard, theme_editor, path_complete, lsp helpers), #12 markdown compose/source (and page
+   view), #10 explorer parity, #11 theme model/editor, plus R2-1 (virtual-space block/vertical),
+   R2-3 (status-bar residual elements) and R2-4 (keymap contexts).
+5. **Round 7 — daemon and workspaces.** #18 daemon mode and its CLI/automation surface, then
    begin #19 workspaces/windows.
-6. **Round 7 — workspaces, agents, remote.** Finish #19, #20 agent sessions, #21 remote
-   authority, #17 trust process gate and env detection/activation.
-7. **Round 8 — polish/optional.** #22 i18n, #23 Windows ConPTY, #24 update/telemetry decision,
-   #25 platform input edges, #26 scope decision, R1-2 sidebar state persistence; a final sweep
-   re-reads `refs/fresh` and refreshes this file. Keep direct mode and `--no-plugins` working
-   throughout the daemon/remote rounds.
-
+6. **Round 8 — agents, remote and polish.** #20 agent sessions, #21 remote authority, #17 trust
+   process gate + env detection, #22 i18n; then #23–#26 and R2-2/R2-5 in a following sweep.
+   Keep direct mode and `--no-plugins` working throughout the daemon/remote rounds.
 
 ## 6. Tracking notes
 
@@ -313,9 +364,38 @@ instead of a rank; ranked item #17 already covers the spawn gate):
     per-heading fold ranges for `fold_buffer` (R1-1), section state not persisted (R1-2).
   - **Status bar** (`docs/lsp.md`): the LSP pill state set and the `[E:1 W:2 I:3]` diagnostics
     badge with its blank slot, plus the trust pill. Residual: config-driven element lists, the
-    general `{warnings}` element, `{terminal_restart}`, `{cursor_count}`, `{update}` (ranked #3).
-- The gaps round 1 opened are listed at the top of §5 (R1-1…R1-4); §5.5 is the round-2 plan built from the ranked backlog
-  minus the closed items.
+    general `{warnings}` element, `{terminal_restart}`, `{cursor_count}`, `{update}`. Round 2 closed this list (see below).
+- **Round 2 landed (2026-11-08).** All four round-2 tasks are complete; this audit ran the full
+  gate set and reviewed the diff (no scope creep; §7):
+  - **Display**: virtual space `on` subset (`document/virtualspace.go`,
+    `editor/virtualspace.go`, pane painting/hit testing; `editor/virtualspace_test.go`,
+    `internal/tui/virtual_space_test.go`), end-of-line inline diagnostics
+    (`internal/tui/editorpane/inline_diag.go`; no version staleness), and the inert-key decision:
+    animations/cursor-jump/viewport-edge-fade/screensaver stay accepted config keys but left
+    `ViewOptions` (§4 item 9). Page view untouched, under #12. Residuals R2-1, R2-2.
+  - **Keymap**: five presets rebuilt on Fresh's inheritance graph with Fresh's bindings
+    for the four resolvable contexts; own/in-effect counts default 198/196, macos 53/212,
+    macos-gui 50/261, emacs 78/243, vscode 9/201 (`keymap/common_set_test.go`);
+    `docs/keybindings.md` rewritten; gvim-specific keys kept where Fresh has none; palette/menu
+    labels follow the new presets. Residual R2-4.
+  - **Status bar + menus**: `editor.status_bar` lists drive the row via
+    `frame.StatusRuns` (`internal/tui/frame/frame.go`, `internal/tui/model.go`
+    `statusView`/`statusRow`), Fresh's default lists, separator, element semantics and squeeze
+    rule; element parse/validation in `config/editoropts.go` + `config/statusbar_test.go`;
+    `editor.menu_bar_mnemonics` accelerators via `keymap.Map.MenuMnemonic` (`keymap/menu.go`),
+    `menubar.WithMnemonics` and model dispatch; `docs/ui.md` §5–6. The dynamic "Copy with
+    Formatting" submenu was already filled from the themes (correction to the round-1 record).
+    Residual R2-3.
+  - **Session + CLI**: `planSession` (`internal/app/session_plan.go`) honours
+    `hot_exit`, `restore_previous_session`, `skip_session_restore_when_files_passed`; new
+    `--restore`/`--no-restore`/`--no-session`/`--simple` (`internal/cli/root.go`,
+    `internal/app/options.go`), hot-exit quit policy (`internal/app/hotexit.go`), hot-exit-only
+    restore (`internal/restore/session.go` `RestoreHotExit`), file targets reuse restored tabs
+    (`internal/app/session_open.go`), README sessions/flags; tests `session_plan_test.go`,
+    `session_launch_test.go`, `restore/session_hot_test.go` and the CLI flag tests. Residual R2-5
+    and the deliberate divergences in §4 item 10.
+- The gaps the rounds opened are at the top of §5 (R1-1…R1-4, R2-1…R2-5); §5.5 is the round-3
+  plan built from the ranked backlog minus the closed items.
 - The command palette table is generated from Fresh; keep `commands/gen/generate.py` and
   `tools/gen_menus.py` in the parity loop. Regenerating after a Fresh update is the cheapest way
   to find newly added commands/menus; `tools/gen_menus.py --check` reports drift.
@@ -324,30 +404,35 @@ instead of a rank; ranked item #17 already covers the spawn gate):
 
 ## 7. Verification limits and risks
 
-- All statuses are static-read evidence from the tree at the time of writing, including the
-  round-1 work, which the Lead's round gate reports green (build/vet/lint/tests). This file's
-  statuses were re-checked by reading the code and its design docs, not by re-running the gates,
-  so a feature that exists but is broken would still read "implemented". Treat a status as a
-  pointer to re-check, not a proof.
+- Statuses are read evidence from the tree at the time of writing. Round 2's full gate set was
+  run by this audit on the round-2 tree (go build ./..., CGO_ENABLED=0 go build ./..., go vet,
+  golangci-lint 0 issues, purity, import rules, go test ./... -count=1: all green) and the diff
+  was reviewed; round-1 statuses were verified by reading code and docs only. A feature that
+  exists but is broken would still read "implemented": treat a status as a pointer, not a proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.
-- Keymap numbers compare raw data files; Fresh's presets inherit from one another and gvim
-  resolves overlay keys in code, so effective user-visible coverage is closer than the raw
-  counts suggest but still partial (the Keymaps matrix row).
-- Some `editor.*` options are parsed to make Fresh configs load; this document only calls out
-  options whose consumption was checked (page view, virtual space, inline diagnostics,
-  animations/screensaver, status bar, `hot_exit`, `restore_previous_session`). Do not infer that
-  unlisted options are wired.
+- Keymap counts are from the preset files and the inheritance graph
+  (`keymap/common_set_test.go`); what remains partial is the eight contexts gvim resolves in
+  code (§4 item 5, R2-4), not the data.
+- Display options that are parsed but deliberately unconsumed are listed in §4 item 9 (the
+  style-only keys); the status bar and the session keys are consumed as of rounds 1–2. Do not
+  infer that other unlisted options are wired.
 - Fresh features that depend on its GUI/web/WASM builds or its update/install infrastructure are
   listed but flagged as a scope decision (§4 item 8, backlog #26).
 - The repo's dispatch gap lists are close to empty (`unhandledActions` has one bound action,
   `unhandledPaletteActions` none). Do not read that as parity: a handler can dispatch and
   answer with a reduced-feature notice, and plugin-era features are whole commands that do not
   exist here yet.
-- The round-1 refresh (same day) re-read the landed trust, sidebar and status-pill code.
-  Their design records (`docs/trust.md`, `docs/sidebar.md`, `docs/lsp.md`) carry the detail and
-  name the tests; this file still points rather than proves.
+- The round-1 refresh re-read the trust/sidebar/status-pill code; the round-2 refresh re-read
+  the display/keymap/status/session code and ran the gates. Their design records carry the
+  detail and name the tests; this file points rather than proves.
+- Round-2 diff review (this audit): no scope creep outside the four tasks' areas. The only
+  cross-owner helper is `keymap/menu.go` (keymap package, used by the menu bar) and it sits inside
+  the keymap owner's scope. Nits, not bugs: `--restore` combined with `--diff` is accepted and
+  silently has no effect (diff is always a file launch); `docs/ui.md`'s new "## 5" heading
+  directly follows a list item without a blank line. `hotExitEditor` is a documented temporary
+  wrapper (`internal/app/hotexit.go`). The generated tables and `refs/` were not touched.
 - The `migration/` docs, including GAP-v3's numbers, are historical (§1.4). Do not plan from
   them.
 
@@ -357,8 +442,3 @@ instead of a rank; ranked item #17 already covers the spawn gate):
 `cmd/gvimdebug` PTY-served debug page, the screenshot sweep, and the config/UI-tree dump commands
 are gvim tooling. They do not count toward Fresh parity, but they are the fastest way to verify
 new feature work; keep them working.
-
-
-
-
-

@@ -1,27 +1,63 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/internal/tui"
+	"github.com/tbxark/gvim/internal/uiadapter"
 	"github.com/tbxark/gvim/internal/uitest"
+	"github.com/tbxark/gvim/keymap"
+	"github.com/tbxark/gvim/theme"
 )
 
-// TestAltLettersNoLongerOpenMenus runs the real UI on the platform's default keymap: the
-// menu-activation keys (F10, Alt+letter) are not bound, so no menu opens. The old test
-// pinned Alt+F, Alt+E, Alt+V, Alt+G and Alt+H opening their dropdowns.
-func TestAltLettersNoLongerOpenMenus(t *testing.T) {
-	for _, key := range []string{"alt+f", "alt+e", "alt+v", "alt+g", "alt+h", "f10"} {
-		s, _ := startApp(t, "hello\n")
-		s.Key(key)
-		// Type a probe so that the key has been handled before the screen is read.
-		s.Type("x")
-		sc := s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains("xhello") })
-		for _, row := range []string{"New File", "Undo", "Line Numbers", "Go to Line", "Show Help"} {
-			if sc.Contains(row) {
-				t.Errorf("%s opened a dropdown showing %q:\n%s", key, row, sc)
-			}
-		}
+// startAppWithKeymap runs the real UI on one file with the named built-in keymap.
+func startAppWithKeymap(t *testing.T, name, text string) *uitest.Session {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ed := editor.New(editor.Options{Rows: 27, Cols: 100})
+	if err := ed.OpenFile(path); err != nil {
+		t.Fatal(err)
+	}
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	km, err := keymap.ByName(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := tui.New(uiadapter.NewDeps(ed, km, th, nil, nil))
+	return uitest.Start(t, m, 100, 30)
+}
+
+// TestAltLettersOpenMenus runs the real UI on the built-in default keymap: the menu
+// accelerators are keymap bindings (Alt+letter -> menu_open, F10 -> menu_activate), so
+// each chord opens its dropdown. The platform keymap shadows some letters with
+// normal-context bindings (macOS Alt+F moves by word), which is why this asks for the
+// default preset explicitly.
+func TestAltLettersOpenMenus(t *testing.T) {
+	tests := []struct{ key, row string }{
+		{"alt+f", "New File"},
+		{"alt+e", "Undo"},
+		{"alt+v", "Line Numbers"},
+		{"alt+s", "Select All"},
+		{"alt+g", "Go to Line"},
+		{"alt+h", "Show Help"},
+		{"f10", "New File"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			s := startAppWithKeymap(t, "default", "hello\n")
+			s.Key(tt.key)
+			s.WaitFor(func(sc uitest.Screen) bool { return sc.Contains(tt.row) })
+		})
 	}
 }
 

@@ -72,6 +72,11 @@ type Document struct {
 	// want is the column that vertical moves try to keep. -1 means unset,
 	// so the next vertical move takes the current column.
 	Want int
+	// virtual is how many display columns the caret sits past the end of its line
+	// (the virtual-space feature, editor.virtual_space). The caret's byte position
+	// stays on the text; this is view state that typing materializes as spaces. See
+	// virtualspace.go.
+	virtual int
 
 	// untitled is N for a buffer created by New as Untitled-N. It is 0 for the
 	// placeholder buffer and for any buffer that has a path.
@@ -475,6 +480,7 @@ func (d *Document) ensureFinalNewline() {
 // new step even inside the same wall-clock bucket.
 func (d *Document) Move(p buffer.Pos, extend bool) {
 	d.Buffer.Break()
+	d.virtual = 0
 	if !extend {
 		d.Cursor = p
 		d.Sel = nil

@@ -53,6 +53,11 @@ type SearchDefaults struct {
 type EditorOptions struct {
 	// Display.
 
+	// Animations, CursorJumpAnimation and ViewportEdgeFade are parsed for Fresh
+	// config compatibility and accepted without a diagnostic. gvim's cell-grid
+	// TUI draws no animations and no fading edges (the component style differs, as
+	// docs/ui.md records), so no consumer reads them; the decision is recorded in
+	// docs/parity.md.
 	Animations                 bool // animations, default true
 	CursorJumpAnimation        bool // cursor_jump_animation, default true
 	ViewportEdgeFade           bool // viewport_edge_fade, default true
@@ -68,7 +73,9 @@ type EditorOptions struct {
 	PageWidth          int
 	SyntaxHighlighting bool // syntax_highlighting, default true
 	// ScreensaverEnabled and ScreensaverIdleMinutes are screensaver_enabled (false)
-	// and screensaver_idle_minutes (5).
+	// and screensaver_idle_minutes (5). Parsed for Fresh config compatibility and
+	// accepted without a diagnostic; a terminal session has no screensaver to
+	// drive, so no consumer reads them.
 	ScreensaverEnabled     bool
 	ScreensaverIdleMinutes int
 	MenuBarMnemonics       bool            // menu_bar_mnemonics, default true
@@ -514,6 +521,44 @@ func EditorKeys() []string {
 	return keys
 }
 
+// statusBarElementNames are the elements editor.status_bar.left and .right accept,
+// without their braces. They are Fresh's StatusBarElement names (fresh-editor-core
+// config.rs TryFrom<String>). The list is repeated here because the config package
+// cannot import internal/tui/frame, where the renderer parses the same names
+// (frame.ParseStatusElement); a change to one belongs in both.
+var statusBarElementNames = map[string]bool{
+	"filename": true, "read_only": true, "cursor": true, "cursor:compact": true,
+	"diagnostics": true, "cursor_count": true, "messages": true, "chord": true,
+	"line_ending": true, "encoding": true, "language": true, "lsp": true,
+	"warnings": true, "update": true, "terminal_restart": true, "palette": true,
+	"clock": true, "remote": true, "trust": true,
+}
+
+// validStatusBarElement reports whether name is an element Fresh's status bar parses,
+// with or without its braces. A name with a colon is a plugin token, which Fresh
+// accepts too; gvim paints nothing for it (see docs/ui.md).
+func validStatusBarElement(name string) bool {
+	inner := strings.TrimSpace(name)
+	if len(inner) >= 2 && strings.HasPrefix(inner, "{") && strings.HasSuffix(inner, "}") {
+		inner = inner[1 : len(inner)-1]
+	}
+	if statusBarElementNames[inner] {
+		return true
+	}
+	return strings.Contains(inner, ":")
+}
+
+// validateStatusBarSide checks one configured element list. Fresh's TryFrom fails on a
+// name it does not know, so a typo is reported instead of silently painting nothing.
+func validateStatusBarSide(side string, names []string) error {
+	for _, name := range names {
+		if !validStatusBarElement(name) {
+			return fmt.Errorf("%s: unknown status bar element %q", side, name)
+		}
+	}
+	return nil
+}
+
 func applyStatusBar(c *Config, raw json.RawMessage) error {
 	var in struct {
 		Left      *[]string `json:"left"`
@@ -524,9 +569,15 @@ func applyStatusBar(c *Config, raw json.RawMessage) error {
 		return err
 	}
 	if in.Left != nil {
+		if err := validateStatusBarSide("left", *in.Left); err != nil {
+			return err
+		}
 		c.StatusBar.Left = slices.Clone(*in.Left)
 	}
 	if in.Right != nil {
+		if err := validateStatusBarSide("right", *in.Right); err != nil {
+			return err
+		}
 		c.StatusBar.Right = slices.Clone(*in.Right)
 	}
 	if in.Separator != nil {

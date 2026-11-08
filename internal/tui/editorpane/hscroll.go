@@ -39,7 +39,10 @@ func (f *frame) placeHorizontal(want, rows int) {
 		content = max(content, ansi.StringWidth(string(ln.geom)))
 		if i == f.caret.Line {
 			raw := []rune(f.doc.Line(i))
-			caretCol = ansi.StringWidth(string(ln.geom[:expandedIndex(raw, f.caret.Col, f.tab)]))
+			caretCol = ansi.StringWidth(string(ln.geom[:expandedIndex(raw, f.caret.Col, f.tab)])) + f.virtual
+			// The window reaches the virtual caret, so it stays visible past the
+			// end of the text.
+			content = max(content, caretCol)
 			caretShown = true
 		}
 	}
@@ -63,7 +66,9 @@ func (f *frame) placeHorizontal(want, rows int) {
 			left = min(reach+margin, max(content-textW+1, reach))
 		}
 	}
-	f.left = left
+	// A short line whose caret is in virtual space can make the reach negative;
+	// the window never scrolls left of the first column.
+	f.left = max(left, 0)
 }
 
 // HScroll returns the first visible display column of a w by h pane, and the largest

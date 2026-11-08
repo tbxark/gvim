@@ -50,7 +50,9 @@ func TestKeybindingColumnFromKeymap(t *testing.T) {
 	tests := map[string]string{
 		"Add Cursor Above": "Ctrl+Alt+Up",
 		"Add Cursor Below": "Ctrl+Alt+Down",
-		"Duplicate Line":   "Alt+Shift+Down",
+		// Fresh's default keymap has no Duplicate Line key; gvim keeps one on Ctrl+Shift+D
+		// (Fresh uses Alt+Shift+Down for block selection).
+		"Duplicate Line": "Ctrl+Shift+D",
 	}
 	for name, want := range tests {
 		if got := find(t, entries, name).Keybinding; got != want {
@@ -59,23 +61,26 @@ func TestKeybindingColumnFromKeymap(t *testing.T) {
 	}
 }
 
-// The default preset binds Ctrl+D to Add Cursor at Next Match. The macOS keymap
-// rebinds Ctrl+D to Duplicate Line, so on macOS that shortcut is not in effect: the
-// palette shows the Ctrl+Alt+D the macOS keymap gives it, the same as the menu.
+// A chord a preset gives to another action is not the old action's shortcut, so the
+// palette shows none for it: the default preset binds Ctrl+R to Replace, and Fresh's macOS
+// preset makes Ctrl+R Redo there. Add Cursor at Next Match is Ctrl+D in both.
 func TestKeybindingIgnoresShadowedBinding(t *testing.T) {
 	def, err := keymap.ByName("default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := find(t, commands.Commands(def), "Add Cursor at Next Match").Keybinding; got != "Ctrl+D" {
-		t.Errorf("default preset keybinding = %q, want Ctrl+D", got)
+	if got := find(t, commands.Commands(def), "Replace").Keybinding; got != "Ctrl+R" {
+		t.Errorf("default Replace keybinding = %q, want Ctrl+R", got)
 	}
 	mac, err := keymap.ByName("macos")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := find(t, commands.Commands(mac), "Add Cursor at Next Match").Keybinding; got != "Ctrl+Alt+D" {
-		t.Errorf("macos keybinding = %q, want Ctrl+Alt+D: Ctrl+D is Duplicate Line there", got)
+	if got := find(t, commands.Commands(mac), "Replace").Keybinding; got != "" {
+		t.Errorf("macos Replace keybinding = %q, want none: Ctrl+R is Redo there", got)
+	}
+	if got := find(t, commands.Commands(mac), "Add Cursor at Next Match").Keybinding; got != "Ctrl+D" {
+		t.Errorf("macos Add Cursor at Next Match keybinding = %q, want Ctrl+D", got)
 	}
 }
 

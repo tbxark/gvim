@@ -129,6 +129,56 @@ Generated files. Do not edit them by hand:
 - `internal/tui/menubar/menu_table_gen.go`: `python3 tools/gen_menus.py`
   (`--check` reports drift)
 
+## Sessions, quitting and the command line
+
+gvim has two launch kinds, following Fresh. A **session launch** — a bare `gvim` or
+`gvim DIR` — restores the session saved by an earlier run (the open tabs, their cursors
+and their unsaved text) and saves it again when the editor quits. A **file launch** —
+`gvim FILE…` — opens only the named files and neither restores nor saves the project's
+session; it is what `git commit` and `gvim --diff` use. Crash recovery and the find
+history work in every launch.
+
+| Flag | Effect |
+|---|---|
+| `--restore` | Force the session restore for this run, even when `editor.restore_previous_session` is off. It also makes a launch with files a session launch. Cannot be combined with `--no-restore`, `--simple` or `--diff` (a compare launch is always a file launch). |
+| `--no-restore` (alias `--no-session`) | Skip the saved tabs for this run, as `editor.restore_previous_session = false` does. The session's unsaved text still comes back, and the session is still saved at quit. |
+| `--simple` | Open just what is named (the welcome screen when nothing is): no session restored or saved, no file explorer, and unsaved buffers are not kept across the quit. |
+
+The three `editor.*` keys behind them:
+
+```json
+{
+  "editor": {
+    "hot_exit": true,
+    "restore_previous_session": true,
+    "skip_session_restore_when_files_passed": true
+  }
+}
+```
+
+- `hot_exit` (default true): keep unsaved buffers — unnamed ones included — across a quit
+  and restore them on the next start. The text goes into the session's stash file at
+  quit, so a session launch quits without asking about each modified tab. Set it to
+  false to be asked to save or discard every unsaved buffer at quit; only a crash or a
+  forced exit then leaves unsaved work (as the crash-recovery copy).
+- `restore_previous_session` (default true): restore the tabs and layout. When false,
+  only the unsaved text comes back — the dirty files and unnamed buffers — and the
+  session is still saved at quit.
+- `skip_session_restore_when_files_passed` (default true): a launch with files opens only
+  those files. Set it to false to restore the session even when files are given: the saved
+  tabs open first and the given files follow them in new tabs (a given file the session
+  already has open is activated at the requested line instead of opening a second tab).
+  `--restore` does this for one run.
+
+Three differences from Fresh, from gvim keeping one session file and no per-buffer
+hot-exit store: a file launch (and `--simple`) cannot keep unsaved buffers, because it
+saves no session — it asks save/discard at quit even when `hot_exit` is on, where Fresh
+would bring the launched files' own unsaved changes back; `--no-restore` still saves the
+session at quit (it skips the restore only), where Fresh's `--no-session` also stops the
+workspace write, because gvim's session file is also its hot-exit store and skipping the
+save would lose in-progress work; and gvim has no dock to leave closed, so `--simple`'s
+"no dock" has nothing to do.
+
 ## Debugging the TUI
 
 Use the lowest layer that shows the bug.

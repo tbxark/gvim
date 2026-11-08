@@ -1337,7 +1337,7 @@ func (m *Model) lspSpans(doc Document) func(line int) []editorpane.DiagnosticSpa
 			if end <= start {
 				end = start + 1
 			}
-			out = append(out, editorpane.DiagnosticSpan{Start: start, End: end, Severity: d.Severity})
+			out = append(out, editorpane.DiagnosticSpan{Start: start, End: end, Severity: d.Severity, Message: d.Message})
 		}
 		return out
 	}

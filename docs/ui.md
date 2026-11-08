@@ -116,3 +116,77 @@ Inside a frame the roles are fixed:
    the box; `PaintBox` cuts a title that cannot fit.
 5. Keep the placement geometry in one pure function that painting and hit testing
    both call, so a box and its click targets cannot drift apart.
+
+## 5. The status bar
+
+One row on the last row of the frame, laid out by `frame.StatusRuns`. Its content is
+`editor.status_bar` as Fresh defines it: a left list and a right list of element names, and a
+separator drawn between neighbours on the same side (default: none). The app passes the lists
+through `tui.StatusBarOptions`; `internal/tui/frame` parses the names and lays the row out, and
+painting and the hit map read the same runs. The TUI's fallback when no lists are passed is
+Fresh's default element lists.
+
+| Side | Default elements |
+|------|------------------|
+| left | `{trust}`, `{remote}`, `{terminal_restart}`, `{cursor}`, `{diagnostics}`, `{cursor_count}`, `{messages}` |
+| right | `{read_only}`, `{line_ending}`, `{encoding}`, `{language}`, `{lsp}`, `{warnings}`, `{update}`, `{palette}` |
+
+Elements can be moved between the sides or omitted. A name Fresh knows but gvim paints nothing
+for still parses, so a Fresh config loads unchanged; a name neither knows is a config error, as
+Fresh's `StatusBarElement::try_from` rejects it.
+
+| Element | What gvim paints |
+|---------|------------------|
+| `{trust}` | the workspace-trust pill ("Trusted", "Restricted", "Blocked"), warning role for the restricted levels; click opens the Workspace Trust dialog |
+| `{remote}` | "Local"; gvim is local-only, so the element is not clickable (there is no remote menu to open) |
+| `{terminal_restart}` | "Restart terminal" while the terminal dock's shell has exited; click runs `restart_terminal` |
+| `{cursor}` | the padded "Ln 1, Col 1"; click opens Go to Line |
+| `{cursor:compact}` | the padded "12:3" form; click opens Go to Line |
+| `{diagnostics}` | Fresh's split counts `[E:1 W:2 I:3]` (only the non-zero parts), a blank seven-cell slot while a server runs and no count is known yet; not clickable |
+| `{cursor_count}` | "N cursors" when the active document has more than one caret, hidden at one |
+| `{messages}` | the status message; click opens Show Warnings, gvim's status log; when the row cuts it the message wraps on the notice band above the row |
+| `{read_only}` | "[RO]" for a read-only document; not clickable (gvim has no read-only menu) |
+| `{line_ending}`, `{encoding}`, `{language}` | the indicator; click opens the chooser, as before |
+| `{lsp}` | the language-server pill (see `docs/lsp.md`) |
+| `{palette}` | "Palette: Ctrl+P", or the chord of the active keymap; click opens the command palette |
+| `{warnings}` | nothing: gvim has no general-warning domain (Fresh's `[⚠ N]` counts its tracing warnings). gvim's equivalent list is Show Warnings, which keeps every notice, so a count of it would never reach zero. |
+| `{update}` | nothing: gvim has no update checker |
+| `{filename}` | nothing: the tab strip is gvim's filename surface |
+| `{chord}`, `{clock}` | nothing yet (parsed; rendering is a follow-up) |
+| `{plugin:token}` | nothing: gvim plugins contribute status items, not registered tokens (below) |
+
+**Plugin items.** `gvim.ui.statusbar.item` items are placed by anchor, so they survive
+configuration changes: left-aligned items go before the first `{messages}` element (or at the
+end of the left group when `{messages}` is not configured), and right-aligned items before the
+first configured of `{diagnostics}`, `{warnings}`, `{update}` and `{palette}` (or at the
+end of the right group when none is). A clickable item keeps its hit target and `on_click`.
+The large-file chip ("LARGE 42%") is a gvim extension, not a Fresh element: it leads the right
+group.
+
+**Squeeze rule (Fresh's).** The right group is sized first and dropped from its end, right-most
+element first, but `min(floor(2W/5), 40)` cells stay for the left group and the first right
+element survives while the row has at least 15 cells. The left group is elided at its tail: the
+element that does not fit is cut and the rest drop. The `{remote}` label gives way as a whole
+before the rest of the left group. When `{messages}` is cut or does not fit the row, the
+message wraps on the notice band (section 1). The default left list starts with `{trust}`, so
+the trust pill is the last left element to give way.
+
+## 6. Menu accelerators
+
+`editor.menu_bar_mnemonics` (default on) controls the menu-bar accelerators, as in Fresh:
+
+- Each top-level label underlines the letter of the active keymap's Alt+letter `menu_open`
+  binding for that menu — Fresh's `find_menu_mnemonic` rule. The default keymap binds File F,
+  Edit E, View V, Selection S, Go G, Help H and Explorer X; gvim's own LSP menu (Fresh has no
+  such menu) binds L. The letter is keymap data: a keymap with no `menu_open` chord for a
+  label underlines nothing, and a keymap that binds a different letter moves the underline.
+- The accelerator opens the menu through ordinary keymap resolution (the global `menu_open`
+  binding); there is no second dispatch path. A normal-context binding shadows it, as Fresh's
+  resolution does: on the macOS and Emacs keymaps Alt+F moves by word and Alt+L lower-cases
+  text in the normal context, so those reach their menu only where no normal binding takes the
+  chord, while the underline still marks the letter.
+- F10 opens the menu bar (Fresh's `menu_activate`), and `editor.menu_bar_mnemonics` does not
+  affect it: it is not a mnemonic.
+- With the setting off, no label is underlined and an Alt+letter that the keymap only binds to
+  `menu_open` does nothing; a user binding on the same chord still runs its own action.
+- Dropdown rows carry no mnemonics; Fresh underlines bar labels only.

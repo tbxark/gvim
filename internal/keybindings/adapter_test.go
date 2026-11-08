@@ -256,6 +256,23 @@ func TestKeymapAdapterLabel(t *testing.T) {
 	}
 }
 
+// The adapter forwards the keymap's menu mnemonic lookup, so the menu bar can
+// underline the Alt+letter of a menu the active keymap binds.
+func TestKeymapAdapterMenuMnemonic(t *testing.T) {
+	k := adapter{km: keymap.Default()}
+	for name, want := range map[string]rune{
+		"File": 'f', "Edit": 'e', "View": 'v', "Selection": 's', "Go": 'g',
+		"Help": 'h', "Explorer": 'x', "LSP": 'l',
+	} {
+		if got, ok := k.MenuMnemonic(name); !ok || got != want {
+			t.Errorf("MenuMnemonic(%q) = %q, %v; want %q", name, got, ok, want)
+		}
+	}
+	if _, ok := k.MenuMnemonic("NoSuchMenu"); ok {
+		t.Error("MenuMnemonic of a menu no binding names reported a letter")
+	}
+}
+
 func TestOneBadBindingKeepsOthers(t *testing.T) {
 	preset := keymap.Default()
 	tests := []struct {

@@ -307,6 +307,13 @@ func (a *Editor) SetCursor(p buffer.Pos, extend bool) {
 	a.ed.SetCursor(p, extend)
 }
 
+// VirtualSpaceEnabled reports whether the active document may put its caret past
+// the end of a line (editor.virtual_space, the per-buffer switch, wrap off).
+func (a *Editor) VirtualSpaceEnabled() bool { return a.ed.VirtualSpaceEnabled() }
+
+// SetVirtualColumns parks the caret n display columns past the end of its line.
+func (a *Editor) SetVirtualColumns(n int) { a.ed.SetVirtualColumns(n) }
+
 // ExtendSelection grows the selection to p by the unit of a drag.
 func (a *Editor) ExtendSelection(p buffer.Pos, u editor.Unit) {
 	a.ed.ExtendSelection(p, u)

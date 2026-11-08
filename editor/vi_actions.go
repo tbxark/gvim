@@ -49,10 +49,10 @@ func (e *Editor) viVertical(d *Document, dir int) buffer.Pos {
 
 // registerViHandlers adds the vi_mode actions to h.
 func registerViHandlers(h map[Action]handler) {
-	h["move_left_in_line"] = moveHandler(motionLeftInLine, false, false)
-	h["move_right_in_line"] = moveHandler(motionRightInLine, false, false)
-	h["vi_move_up"] = moveHandler(motionViUp, false, true)
-	h["vi_move_down"] = moveHandler(motionViDown, false, true)
+	h["move_left_in_line"] = moveHandler(motionLeftInLine, false, false, virtualMoveLeft)
+	h["move_right_in_line"] = moveHandler(motionRightInLine, false, false, virtualMoveRight)
+	h["vi_move_up"] = moveHandler(motionViUp, false, true, virtualMoveUp)
+	h["vi_move_down"] = moveHandler(motionViDown, false, true, virtualMoveDown)
 	h["toggle_case"] = docAction(func(_ *Editor, d *Document, _ map[string]any) error {
 		d.ToggleCase()
 		return nil

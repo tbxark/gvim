@@ -75,6 +75,19 @@ type Options struct {
 	// PluginPaths are plugins to load besides the discovered ones: each is a .lua
 	// file or a plugin directory, given with --plugin.
 	PluginPaths []string
+	// Restore forces the restore of the saved session even when
+	// editor.restore_previous_session is off, and makes a launch with files a
+	// session launch (see editor.skip_session_restore_when_files_passed). It is
+	// --restore.
+	Restore bool
+	// NoRestore skips the restore of the saved tabs for this run, as
+	// editor.restore_previous_session=false does, while the unsaved text of the
+	// session still comes back. It is --no-restore (Fresh's --no-session).
+	NoRestore bool
+	// Simple opens just what is named (or the welcome screen) with no session
+	// restored or saved and no file explorer: gvim's file-launch behavior
+	// without needing a file. It is --simple.
+	Simple bool
 
 	// pluginLog receives the plugin log for LogFile; set by buildRuntime.
 	pluginLog func(pluginapi.LogEntry)
@@ -99,6 +112,17 @@ func (o Options) Validate() error {
 		if o.Root != "" {
 			return errors.New("--diff compares two files, not a folder")
 		}
+	}
+	if o.Restore && o.NoRestore {
+		return errors.New("--restore cannot be combined with --no-restore")
+	}
+	if o.Restore && o.Simple {
+		return errors.New("--restore cannot be combined with --simple")
+	}
+	// A compare launch is a file launch by definition, so --restore would be a
+	// no-op there; refuse it rather than silently ignoring it.
+	if o.Restore && o.Diff {
+		return errors.New("--restore cannot be combined with --diff")
 	}
 	for _, p := range o.PluginPaths {
 		if strings.TrimSpace(p) == "" {

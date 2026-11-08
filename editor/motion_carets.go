@@ -12,6 +12,9 @@ func (e *Editor) moveCarets(d *Document, m motion, extend, vertical bool) {
 		if !vertical {
 			d.Want = -1
 		}
+		// A motion that is not taught about virtual space ends the virtual
+		// position (Fresh's safe default); the virtual moves run before this.
+		d.ClearVirtual()
 		d.Move(m(e, d, extend), extend)
 	}
 	if len(d.Extra) == 0 {

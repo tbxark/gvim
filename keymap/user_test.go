@@ -64,8 +64,8 @@ func TestWithUserBindings(t *testing.T) {
 		},
 		{
 			name: "an unknown when clause warns", preset: "default",
-			data:  `[{"key":"u","modifiers":["alt"],"action":"to_upper_case","when":"nowhere"}]`,
-			chord: "alt+u", ctx: keymap.ContextNormal, want: "",
+			data:  `[{"key":"u","modifiers":["alt"],"action":"quit","when":"nowhere"}]`,
+			chord: "alt+u", ctx: keymap.ContextNormal, want: "to_upper_case",
 			warnings: []string{`keybindings[0]: unknown when clause "nowhere"; skipped`},
 		},
 		{
@@ -123,6 +123,8 @@ func TestWithUserBindings(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			base := mustPreset(t, tc.preset)
+			// The base binding of alt+u, whatever it is, must survive the user's list.
+			baseAltU, baseAltUOK := base.Resolve("alt+u", keymap.ContextNormal)
 			m, warnings := base.WithUserBindings([]byte(tc.data), knownTestActions)
 			b, ok := m.Resolve(tc.chord, tc.ctx)
 			if tc.want == "" && ok {
@@ -133,7 +135,7 @@ func TestWithUserBindings(t *testing.T) {
 			if !slices.Equal(warnings, tc.warnings) {
 				t.Errorf("warnings = %q, want %q", warnings, tc.warnings)
 			}
-			if got, _ := base.Resolve("alt+u", keymap.ContextNormal); got.Action == "to_upper_case" {
+			if got, ok := base.Resolve("alt+u", keymap.ContextNormal); ok != baseAltUOK || got.Action != baseAltU.Action {
 				t.Error("the preset itself was changed")
 			}
 		})

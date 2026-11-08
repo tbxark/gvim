@@ -117,16 +117,156 @@ type StatusView struct {
 	Lines    int    // line count; its digits set the message column
 	Large    string // the chip of a document in large file mode, with the index progress, or ""
 
-	Trust     string     // the workspace-trust pill ("Trusted", "Restricted", "Blocked"), or "" for no trust port
-	TrustWarn bool       // paint the trust pill in the warning role (Restricted and Blocked)
-	LSP       string     // the language-server pill ("LSP", "LSP (off)"), or "" for a language with no server
-	DiagSlot  bool       // reserve the blank diagnostic-count slot
-	Diags     DiagCounts // diagnostics of the active document; shown as " [E:1 W:2 I:3] "
-	ReadOnly  bool       // the document is read-only; shown as " [RO] "
+	Line, Col int // the caret, one-based; the {cursor:compact} element
+	Cursors   int // carets in the active document; {cursor_count} shows it above one
+
+	Trust           string     // the workspace-trust pill ("Trusted", "Restricted", "Blocked"), or "" for no trust port
+	TrustWarn       bool       // paint the trust pill in the warning role (Restricted and Blocked)
+	LSP             string     // the language-server pill ("LSP", "LSP (off)"), or "" for a language with no server
+	DiagSlot        bool       // reserve the blank diagnostic-count slot
+	Diags           DiagCounts // diagnostics of the active document; shown as " [E:1 W:2 I:3] "
+	ReadOnly        bool       // the document is read-only; shown as " [RO] "
+	TerminalRestart string     // "Restart terminal" while the dock's shell has exited, or ""
 
 	Extra []StatusItem // the items of plugins (plugin_status.go)
 
-	PaletteHint string // the palette hint of the right group; empty for PaletteHelp
+	PaletteHint string // the palette hint; empty for PaletteHelp
+
+	// Row is the configured status row: the element lists of the two sides and the
+	// separator between neighbours. The zero value shows Fresh's default lists.
+	Row StatusRow
+}
+
+// StatusElementKind names one element of a configured status row side, as Fresh's
+// editor.status_bar.left/right lists name them. The kinds gvim parses but does not
+// paint are kept, so a config that names them loads and renders nothing (see
+// docs/ui.md).
+type StatusElementKind int
+
+// The status-row elements. The names and order are Fresh's StatusBarElement enum.
+const (
+	StatusElementFilename StatusElementKind = iota
+	StatusElementReadOnly
+	StatusElementCursor
+	StatusElementCursorCompact
+	StatusElementDiagnostics
+	StatusElementCursorCount
+	StatusElementMessages
+	StatusElementChord
+	StatusElementLineEnding
+	StatusElementEncoding
+	StatusElementLanguage
+	StatusElementLSP
+	StatusElementWarnings
+	StatusElementUpdate
+	StatusElementTerminalRestart
+	StatusElementPalette
+	StatusElementClock
+	StatusElementRemote
+	StatusElementTrust
+	StatusElementCustom
+)
+
+// statusElementNames maps the configured name, without its braces, to its kind.
+var statusElementNames = map[string]StatusElementKind{
+	"filename":         StatusElementFilename,
+	"read_only":        StatusElementReadOnly,
+	"cursor":           StatusElementCursor,
+	"cursor:compact":   StatusElementCursorCompact,
+	"diagnostics":      StatusElementDiagnostics,
+	"cursor_count":     StatusElementCursorCount,
+	"messages":         StatusElementMessages,
+	"chord":            StatusElementChord,
+	"line_ending":      StatusElementLineEnding,
+	"encoding":         StatusElementEncoding,
+	"language":         StatusElementLanguage,
+	"lsp":              StatusElementLSP,
+	"warnings":         StatusElementWarnings,
+	"update":           StatusElementUpdate,
+	"terminal_restart": StatusElementTerminalRestart,
+	"palette":          StatusElementPalette,
+	"clock":            StatusElementClock,
+	"remote":           StatusElementRemote,
+	"trust":            StatusElementTrust,
+}
+
+// StatusElement is one entry of a configured status row side. Key is the
+// "plugin:token" name of a custom element; it is empty for the built-in elements.
+type StatusElement struct {
+	Kind StatusElementKind
+	Key  string
+}
+
+// StatusRow is the configured status row: the element lists of the two sides and the
+// text drawn between two neighbours of one side, used as-is (Fresh's
+// editor.status_bar.separator).
+type StatusRow struct {
+	Left, Right []StatusElement
+	Separator   string
+}
+
+// ParseStatusElement parses one configured element name, with or without its braces
+// ("{cursor}" or "cursor"). ok is false for a name gvim does not know. A name with a
+// colon is a plugin token: gvim parses it but paints nothing for it, because its
+// plugins have status items, not registered tokens (see docs/ui.md).
+func ParseStatusElement(name string) (StatusElement, bool) {
+	inner := strings.TrimSpace(name)
+	if len(inner) >= 2 && strings.HasPrefix(inner, "{") && strings.HasSuffix(inner, "}") {
+		inner = inner[1 : len(inner)-1]
+	}
+	if kind, ok := statusElementNames[inner]; ok {
+		return StatusElement{Kind: kind}, true
+	}
+	if strings.Contains(inner, ":") {
+		return StatusElement{Kind: StatusElementCustom, Key: inner}, true
+	}
+	return StatusElement{}, false
+}
+
+// ParseStatusElements parses a configured side. A nil list parses to nil; a non-nil
+// empty list parses to an empty side, so a config can remove a whole group. Names the
+// config layer rejects are dropped here: reaching this function with one means a
+// hand-built test or an older config.
+func ParseStatusElements(names []string) []StatusElement {
+	if names == nil {
+		return nil
+	}
+	out := make([]StatusElement, 0, len(names))
+	for _, name := range names {
+		if e, ok := ParseStatusElement(name); ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// DefaultStatusLeft is Fresh's default left element list
+// (fresh-editor-core config.rs default_status_bar_left).
+func DefaultStatusLeft() []StatusElement {
+	return []StatusElement{
+		{Kind: StatusElementTrust},
+		{Kind: StatusElementRemote},
+		{Kind: StatusElementTerminalRestart},
+		{Kind: StatusElementCursor},
+		{Kind: StatusElementDiagnostics},
+		{Kind: StatusElementCursorCount},
+		{Kind: StatusElementMessages},
+	}
+}
+
+// DefaultStatusRight is Fresh's default right element list
+// (fresh-editor-core config.rs default_status_bar_right).
+func DefaultStatusRight() []StatusElement {
+	return []StatusElement{
+		{Kind: StatusElementReadOnly},
+		{Kind: StatusElementLineEnding},
+		{Kind: StatusElementEncoding},
+		{Kind: StatusElementLanguage},
+		{Kind: StatusElementLSP},
+		{Kind: StatusElementWarnings},
+		{Kind: StatusElementUpdate},
+		{Kind: StatusElementPalette},
+	}
 }
 
 // DiagCounts is the diagnostics of the active document by severity, counted as
@@ -573,107 +713,215 @@ const statusMessageMin = 24
 // status row gives way for.
 const statusItemKeep = 36
 
-// StatusRuns lays out the status row (section 4.5). The left group is cut first
-// to the room the right group leaves. The right group is dropped from its end
-// until the left group keeps at least min(floor(2W/5), 40) cells.
+// StatusRuns lays out the status row (section 4.5). The rows are the configured
+// elements of Fresh's editor.status_bar (the default lists when none are configured).
+// The left group is cut first to the room the right group leaves; the right group is
+// dropped from its end until the left group keeps at least min(floor(2W/5), 40) cells.
 func StatusRuns(w int, s StatusView) []Run {
 	runs, _ := statusRunsCut(w, s)
 	return runs
 }
 
-// statusRunsCut is StatusRuns, and it also reports whether the status message was cut
-// or dropped to fit the row.
-func statusRunsCut(w int, s StatusView) ([]Run, bool) {
-	type segment struct {
-		text  string
-		kind  HitKind
-		id    int // the Run index of a hitStatusSegment (one of the statusSegment constants) or of a hitStatusPlugin
-		style RunStyle
-	}
-	// A plugin item is clickable when it has an on_click function; its Run index is its
-	// place in s.extra.
-	pluginSeg := func(i int) segment {
-		it := s.Extra[i]
-		if it.Clickable {
-			return segment{space.Pad(it.Text), HitStatusPlugin, i, StyleDefault}
-		}
-		return segment{space.Pad(it.Text), HitNone, 0, StyleDefault}
-	}
-	// The workspace-trust pill leads the left group, as Fresh's {trust} does: whether
-	// repo-controlled execution is gated must be the first thing on the bottom-left,
-	// and it is the last left element the narrow-row rule gives up.
-	var left []segment
-	if s.Trust != "" {
-		runStyle := StyleDefault
-		if s.TrustWarn {
-			runStyle = StyleWarning
-		}
-		left = append(left, segment{space.Pad(s.Trust), HitStatusSegment, StatusSegmentTrust, runStyle})
-	}
-	labelIdx := len(left)
-	left = append(left, segment{space.Pad("Local"), HitNone, 0, StyleDefault})
-	posIdx := len(left)
-	left = append(left, segment{space.Pad(space.PadTo(s.Position, PositionWidth(s.Lines))), HitStatusSegment, StatusSegmentPosition, StyleDefault})
-	for i, it := range s.Extra {
-		if !it.Right {
-			left = append(left, pluginSeg(i))
-		}
-	}
-	msgIdx := len(left)
-	left = append(left, segment{space.Pad(s.Message), HitNone, 0, StyleDefault})
-	var right []segment
-	if s.Large != "" {
-		right = append(right, segment{space.Pad(s.Large), HitNone, 0, StyleDefault})
-	}
-	if s.ReadOnly {
-		right = append(right, segment{space.Pad("[RO]"), HitNone, 0, StyleDefault})
-	}
-	right = append(right,
-		segment{space.Pad(s.EOL), HitStatusSegment, StatusSegmentEOL, StyleDefault},
-		segment{space.Pad(s.Encoding), HitStatusSegment, StatusSegmentEncoding, StyleDefault},
-		segment{space.Pad(s.Language), HitStatusSegment, StatusSegmentLanguage, StyleDefault},
-	)
-	if s.LSP != "" {
-		right = append(right, segment{space.Pad(s.LSP), HitStatusSegment, StatusSegmentLSP, StyleDefault})
-	}
-	for i, it := range s.Extra {
-		if it.Right {
-			right = append(right, pluginSeg(i))
-		}
-	}
-	// The badge counts the active document's language-server diagnostics, as Fresh's
-	// diagnostics element does: E: errors, W: warnings, and I: info and hints. It is not
-	// Fresh's general-warning indicator ([⚠ N]); gvim's general warnings are the notices
-	// that Show Warnings lists.
-	switch {
-	case s.Diags.Any():
-		right = append(right, segment{space.Pad("[" + s.Diags.Text() + "]"), HitNone, 0, StyleDefault})
-	case s.DiagSlot:
-		// The blank keeps the columns a one-severity badge takes once it is known.
-		right = append(right, segment{strings.Repeat(" ", diagBlankWidth), HitNone, 0, StyleDefault})
-	}
-	hint := PaletteHelp
-	if s.PaletteHint != "" {
-		hint = s.PaletteHint
-	}
-	right = append(right, segment{space.Pad(hint), HitStatusPalette, 0, StyleDefault})
+// statusSeg is one segment of the row before it is placed: an element, a separator,
+// or a plugin item, with what a click on it reaches.
+type statusSeg struct {
+	text  string
+	kind  HitKind
+	id    int // the Run index: a statusSegment constant or a plugin item's place in Extra
+	style RunStyle
+	sep   bool // the configured separator between two elements
+	// plugin marks an item of a plugin: the left ones share what the other elements
+	// leave, and a plugin cannot push the status message out of the row.
+	plugin bool
+	// messages marks the {messages} element: a row that cuts it wraps the message on the
+	// notice band above.
+	messages bool
+	// remote marks the {remote} element: on a row too narrow for the left group, the
+	// "Local" label is dropped before the rest of the group.
+	remote bool
+}
 
-	// The label of a modal plugin is the only sign of its state, so it comes before the right
-	// group (the palette hint, then the language and the rest go first) and before " Local ".
-	itemW := 0
+// statusSide turns one configured side into the segments it paints: the element texts
+// in order, the configured separator between neighbours, and the plugin items at their
+// anchors. The search hint (Palette) and every clickable element keep their hit
+// targets.
+func statusSide(elements []StatusElement, s StatusView, right bool) []statusSeg {
+	out := make([]statusSeg, 0, len(elements)+len(s.Extra)+1)
+	add := func(seg statusSeg) {
+		if seg.text == "" {
+			return
+		}
+		if s.Row.Separator != "" && len(out) > 0 {
+			out = append(out, statusSeg{text: s.Row.Separator, sep: true})
+		}
+		out = append(out, seg)
+	}
+	plugin := func(i int) {
+		it := s.Extra[i]
+		seg := statusSeg{text: space.Pad(it.Text), plugin: true}
+		if it.Clickable {
+			seg.kind, seg.id = HitStatusPlugin, i
+		}
+		add(seg)
+	}
+	// The large-file chip is a gvim extension, not a Fresh element: it leads the right
+	// group, before the configured elements.
+	if right && s.Large != "" {
+		add(statusSeg{text: space.Pad(s.Large)})
+	}
+	plugins := make([]int, 0, len(s.Extra))
 	for i, it := range s.Extra {
-		if !it.Right {
-			itemW += ansi.StringWidth(pluginSeg(i).text)
+		if it.Right == right {
+			plugins = append(plugins, i)
+		}
+	}
+	inserted := false
+	for _, e := range elements {
+		if !inserted && statusPluginAnchor(e.Kind, right) {
+			for _, i := range plugins {
+				plugin(i)
+			}
+			inserted = true
+		}
+		if seg, ok := statusElementSeg(e, s); ok {
+			add(seg)
+		}
+	}
+	if !inserted {
+		for _, i := range plugins {
+			plugin(i)
+		}
+	}
+	return out
+}
+
+// statusPluginAnchor reports whether the plugin items of a side are inserted before
+// the element kind: the left items sit between the cursor position and the message,
+// as docs/plugins/api-ui.md says, and the right items before the first of
+// {diagnostics}, {warnings}, {update} and {palette}, after the language/LSP cluster.
+func statusPluginAnchor(k StatusElementKind, right bool) bool {
+	if !right {
+		return k == StatusElementMessages
+	}
+	switch k {
+	case StatusElementDiagnostics, StatusElementWarnings, StatusElementUpdate, StatusElementPalette:
+		return true
+	}
+	return false
+}
+
+// statusElementSeg is the segment one element paints, or false when it has nothing to
+// show. The elements gvim does not paint — {filename}, {chord}, {clock}, {warnings},
+// {update} and plugin tokens — render nothing at all; docs/ui.md says why.
+func statusElementSeg(e StatusElement, s StatusView) (statusSeg, bool) {
+	pad := func(text string) string { return space.Pad(text) }
+	switch e.Kind {
+	case StatusElementTrust:
+		if s.Trust == "" {
+			return statusSeg{}, false
+		}
+		seg := statusSeg{text: pad(s.Trust), kind: HitStatusSegment, id: StatusSegmentTrust}
+		if s.TrustWarn {
+			seg.style = StyleWarning
+		}
+		return seg, true
+	case StatusElementRemote:
+		return statusSeg{text: pad("Local"), remote: true}, true
+	case StatusElementTerminalRestart:
+		if s.TerminalRestart == "" {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad(s.TerminalRestart), kind: HitStatusSegment, id: StatusSegmentTerminalRestart}, true
+	case StatusElementCursor:
+		return statusSeg{text: pad(space.PadTo(s.Position, PositionWidth(s.Lines))), kind: HitStatusSegment, id: StatusSegmentPosition}, true
+	case StatusElementCursorCompact:
+		if s.Position == "" {
+			return statusSeg{}, false
+		}
+		text := strconv.Itoa(s.Line) + ":" + strconv.Itoa(s.Col)
+		return statusSeg{text: pad(space.PadTo(text, CompactPositionWidth(s.Lines))), kind: HitStatusSegment, id: StatusSegmentPosition}, true
+	case StatusElementDiagnostics:
+		switch {
+		case s.Diags.Any():
+			return statusSeg{text: pad("[" + s.Diags.Text() + "]")}, true
+		case s.DiagSlot:
+			return statusSeg{text: strings.Repeat(" ", diagBlankWidth)}, true
+		}
+		return statusSeg{}, false
+	case StatusElementCursorCount:
+		if s.Cursors <= 1 {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad(strconv.Itoa(s.Cursors) + " cursors")}, true
+	case StatusElementMessages:
+		return statusSeg{text: pad(s.Message), kind: HitStatusSegment, id: StatusSegmentMessages, messages: true}, true
+	case StatusElementReadOnly:
+		if !s.ReadOnly {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad("[RO]")}, true
+	case StatusElementLineEnding:
+		if s.EOL == "" {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad(s.EOL), kind: HitStatusSegment, id: StatusSegmentEOL}, true
+	case StatusElementEncoding:
+		if s.Encoding == "" {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad(s.Encoding), kind: HitStatusSegment, id: StatusSegmentEncoding}, true
+	case StatusElementLanguage:
+		if s.Language == "" {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad(s.Language), kind: HitStatusSegment, id: StatusSegmentLanguage}, true
+	case StatusElementLSP:
+		if s.LSP == "" {
+			return statusSeg{}, false
+		}
+		return statusSeg{text: pad(s.LSP), kind: HitStatusSegment, id: StatusSegmentLSP}, true
+	case StatusElementPalette:
+		hint := PaletteHelp
+		if s.PaletteHint != "" {
+			hint = s.PaletteHint
+		}
+		return statusSeg{text: pad(hint), kind: HitStatusPalette}, true
+	}
+	// {filename}, {chord}, {clock}, {warnings}, {update} and plugin tokens: parsed,
+	// not painted by gvim.
+	return statusSeg{}, false
+}
+
+// statusRunsCut is StatusRuns, and it also reports whether the status message was cut
+// or dropped to fit the row (which wraps it onto the notice band above).
+func statusRunsCut(w int, s StatusView) ([]Run, bool) {
+	if s.Row.Left == nil && s.Row.Right == nil {
+		s.Row = StatusRow{Left: DefaultStatusLeft(), Right: DefaultStatusRight()}
+	}
+	left := statusSide(s.Row.Left, s, false)
+	right := statusSide(s.Row.Right, s, true)
+
+	// The widths that decide the right group's drop: the left elements that are not
+	// plugin items, the room the messages keep, and the plugin items' own share.
+	essentialW, itemW, msgW := 0, 0, 0
+	for _, seg := range left {
+		switch {
+		case seg.plugin:
+			itemW += ansi.StringWidth(seg.text)
+		case seg.messages:
+			msgW = min(ansi.StringWidth(seg.text), statusMessageMin)
+		default:
+			essentialW += ansi.StringWidth(seg.text)
 		}
 	}
 	itemW = min(itemW, statusItemKeep)
-	headW := 0
-	if s.Trust != "" {
-		headW = ansi.StringWidth(left[0].text)
+	remoteIdx := -1
+	for i := range left {
+		if left[i].remote {
+			remoteIdx = i
+			break
+		}
 	}
-	labelW := ansi.StringWidth(left[labelIdx].text)
-	posW := ansi.StringWidth(left[posIdx].text)
-	msgW := min(ansi.StringWidth(left[msgIdx].text), statusMessageMin)
 	keep := 0
 	if w >= 15 {
 		keep = 1
@@ -689,32 +937,71 @@ func statusRunsCut(w int, s StatusView) ([]Run, bool) {
 	for pass := 0; ; pass++ {
 		minLeft := min(2*w/5, 40)
 		if itemW > 0 {
-			base := headW + labelW + posW + itemW + msgW
-			minLeft = max(minLeft, base)
+			minLeft = max(minLeft, essentialW+itemW+msgW)
 		}
 		budget := w - (minLeft + 1)
 		right = full
 		for rightWidth() > budget && len(right) > keep {
 			right = right[:len(right)-1]
+			// A dropped element takes the separator before it with it.
+			for len(right) > 0 && right[len(right)-1].sep {
+				right = right[:len(right)-1]
+			}
 		}
-		if itemW == 0 || pass > 0 || w-rightWidth() >= headW+labelW+posW+itemW+msgW {
+		if itemW == 0 || pass > 0 || w-rightWidth() >= essentialW+itemW+msgW {
 			break
 		}
-		left[labelIdx].text = "" // still no room for the label: " Local " goes
+		if remoteIdx < 0 {
+			break
+		}
+		// Still no room: the "Local" label goes before the rest of the left group.
+		// Its separator goes with it, so the neighbours are still separated once.
+		essentialW -= ansi.StringWidth(left[remoteIdx].text)
+		left = append(left[:remoteIdx], left[remoteIdx+1:]...)
+		if remoteIdx < len(left) && left[remoteIdx].sep {
+			essentialW -= ansi.StringWidth(left[remoteIdx].text)
+			left = append(left[:remoteIdx], left[remoteIdx+1:]...)
+		}
 	}
-	// The budget pass above may have dropped the label; the items share what is left
-	// after what is actually on the row.
-	labelW = ansi.StringWidth(left[labelIdx].text)
-
 	var runs []Run
-	cut := s.Message != ""
-	room := w - rightWidth()
 	x := 0
-	// left is the trust pill, " Local ", the position, the plugin items, the message. The
-	// items share what the others leave, with the first cells of the message kept for it:
-	// a plugin cannot push a notice out of the row.
-	itemRoom := room - headW - labelW - posW - msgW
-	for i, seg := range left {
+	room := w - rightWidth()
+	// The budget pass may have dropped the label; the items share what is left after
+	// what is actually on the row.
+	itemRoom := room - essentialW - msgW
+	// A plugin item that got no room is dropped before painting, with one of its
+	// separators, so the label of a modal plugin never leaves a doubled separator
+	// behind. The rest of the items are cut to their share here.
+	painted := make([]statusSeg, 0, len(left))
+	skipSep := false
+	for _, seg := range left {
+		if seg.plugin {
+			if itemRoom > 0 {
+				seg.text = space.End(seg.text, itemRoom)
+				itemRoom -= ansi.StringWidth(seg.text)
+			}
+			if seg.text == "" {
+				if n := len(painted); n > 0 && painted[n-1].sep {
+					painted = painted[:n-1]
+				}
+				skipSep = true
+				continue
+			}
+		} else if seg.sep && skipSep {
+			skipSep = false
+			continue
+		}
+		painted = append(painted, seg)
+	}
+	left = painted
+	sawMessages, hasMessages := false, false
+	for _, seg := range left {
+		if seg.messages {
+			hasMessages = true
+		}
+	}
+	cut := false
+	for _, seg := range left {
 		if room <= 0 {
 			break
 		}
@@ -722,37 +1009,34 @@ func statusRunsCut(w int, s StatusView) ([]Run, bool) {
 		if text == "" {
 			continue
 		}
-		if i > posIdx && i < msgIdx {
-			if itemRoom <= 0 {
-				continue
-			}
-			text = space.End(text, itemRoom)
-			itemRoom -= ansi.StringWidth(text)
-		}
 		tw := ansi.StringWidth(text)
 		if tw > room {
 			r := newRun(x, space.End(text, room), seg.kind, seg.id)
 			r.Style = seg.style
 			runs = append(runs, r)
+			if seg.messages {
+				cut = true
+			}
 			break
 		}
 		r := newRun(x, text, seg.kind, seg.id)
 		r.Style = seg.style
 		runs = append(runs, r)
-		if i == msgIdx {
+		if seg.messages {
+			sawMessages = true
 			cut = strings.Contains(s.Message, "\n")
 		}
 		x += tw
 		room -= tw
 	}
+	if hasMessages && !sawMessages && s.Message != "" {
+		// The row ended before the message element: the band carries the message.
+		cut = true
+	}
 
 	x = w - rightWidth()
-	for i, seg := range right {
-		index := i
-		if seg.kind == HitStatusSegment || seg.kind == HitStatusPlugin {
-			index = seg.id
-		}
-		runs = append(runs, newRun(x, seg.text, seg.kind, index))
+	for _, seg := range right {
+		runs = append(runs, newRun(x, seg.text, seg.kind, seg.id))
 		x += ansi.StringWidth(seg.text)
 	}
 	return runs, cut
@@ -763,4 +1047,10 @@ func statusRunsCut(w int, s StatusView) ([]Run, bool) {
 // digit gives 13.
 func PositionWidth(lines int) int {
 	return 12 + len(strconv.Itoa(max(lines, 0)))
+}
+
+// CompactPositionWidth is the width the {cursor:compact} item is padded to: the
+// line digits, the colon, and Fresh's three-cell column reserve. One digit gives 5.
+func CompactPositionWidth(lines int) int {
+	return 4 + len(strconv.Itoa(max(lines, 0)))
 }

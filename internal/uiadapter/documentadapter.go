@@ -127,6 +127,10 @@ func (d documentAdapter) LineSpansIn(i, col int, text string) []syntax.Span {
 // secondary caret style.
 func (d documentAdapter) Cursors() []editor.Caret { return d.doc.Cursors() }
 
+// VirtualColumns is how many display columns the caret sits past the end of its
+// line (virtual space), which the pane draws the caret at.
+func (d documentAdapter) VirtualColumns() int { return d.doc.VirtualColumns() }
+
 // Folds returns the indentation fold ranges, for a tab of tabWidth columns.
 func (d documentAdapter) Folds(tabWidth int) []fold.Range { return d.doc.Folds(tabWidth) }
 

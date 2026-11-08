@@ -67,9 +67,9 @@ func TestPrimaryReturnsSequencesForEmacs(t *testing.T) {
 		{"open", "ctrl+x ctrl+f", "Ctrl+X Ctrl+F"},
 		{"quit", "ctrl+x ctrl+c", "Ctrl+X Ctrl+C"},
 		{"select_all", "ctrl+x h", "Ctrl+X H"},
-		// Undo has one key in the emacs preset: C-/ (C-_ and C-- were dropped with the rest of
-		// the duplicate Emacs keys, so that each preset binds a common action once).
-		{"undo", "ctrl+/", "Ctrl+/"},
+		// Fresh's emacs preset binds undo to C-/, C-_ (via the terminal alias) and C--.
+		// Primary shows the simplest chord, and C-- sorts before C-/.
+		{"undo", "ctrl+-", "Ctrl+-"},
 	}
 	for _, tc := range tests {
 		b, ok := em.Primary(tc.action)

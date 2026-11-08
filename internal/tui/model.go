@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -229,7 +230,7 @@ func New(deps Deps) *Model {
 	}
 	// The menu bar reads its rows and context keys through the root, so it gets
 	// the root pointer.
-	m.menu = menubar.New(m, st)
+	m.menu = menubar.New(m, st).WithMnemonics(m.view.opts.MenuBarMnemonics)
 	if deps.Explorer != nil {
 		m.explorerPanel = expanel.New(deps.Explorer, st, now)
 	}
@@ -590,7 +591,33 @@ func isLabelPress(bar menubar.Model, msg tea.Msg) bool {
 // current state. Closing the dropdown when its label leaves the bar is part of
 // WithExplorerFocus.
 func (m *Model) syncMenu() {
-	m.menu = m.menu.SetSize(m.width, m.height).WithExplorerFocus(m.explorerFocus)
+	m.menu = m.menu.SetSize(m.width, m.height).
+		WithExplorerFocus(m.explorerFocus).
+		WithMnemonics(m.view.opts.MenuBarMnemonics)
+}
+
+// MenuMnemonic implements menubar.Mnemonicer: the letter a menu-bar label underlines,
+// asked of the active keymap (the alt+letter binding of menu_open for that label). A
+// keymap port that does not provide the method has no mnemonics, which is how the
+// test fakes behave.
+func (m *Model) MenuMnemonic(name string) (rune, bool) {
+	if mm, ok := m.keys.(interface {
+		MenuMnemonic(string) (rune, bool)
+	}); ok {
+		return mm.MenuMnemonic(name)
+	}
+	return 0, false
+}
+
+// suppressedMnemonic reports whether a resolved command is a menu accelerator while
+// editor.menu_bar_mnemonics is off. Fresh drops those bindings at resolution, so with
+// the setting off an Alt+letter the keymap only uses for menu_open does nothing; a
+// user binding on the same chord resolves to its own action and is not affected.
+func (m *Model) suppressedMnemonic(kp KeyPress, cmd Command) bool {
+	if m.view.opts.MenuBarMnemonics || cmd.Action != "menu_open" {
+		return false
+	}
+	return len(kp.Mods) == 1 && kp.Mods[0] == "alt" && utf8.RuneCountInString(kp.Name) == 1
 }
 
 // failedNotice is the status text for a menu row that could not run.
@@ -1370,6 +1397,9 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 			return cmd
 		}
 		if cmd, ok := m.keys.Resolve(kp, ctx); ok {
+			if m.suppressedMnemonic(kp, cmd) {
+				return nil
+			}
 			if m.pluginGate(kp, ctx, cmd) {
 				return nil
 			}
@@ -1379,6 +1409,9 @@ func (m *Model) handleKey(k tea.Key) tea.Cmd {
 			// The explorer keymap binds only its own keys. An application-wide key
 			// that it does not bind keeps its Normal binding, as in Fresh.
 			if cmd, ok := m.keys.Resolve(kp, KeyContextNormal); ok && explorerFallthrough[cmd.Action] {
+				if m.suppressedMnemonic(kp, cmd) {
+					return nil
+				}
 				return m.dispatch(cmd)
 			}
 		}
@@ -1728,6 +1761,13 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	case hitStatusPalette:
 		return m.openPalette(">")
 	case hitStatusSegment:
+		switch t.Index {
+		case frame.StatusSegmentMessages:
+			// Fresh's {messages} opens the status log; gvim's is the warnings list.
+			return m.dispatch(Command{Action: "show_warnings"})
+		case frame.StatusSegmentTerminalRestart:
+			return m.dispatch(Command{Action: "restart_terminal"})
+		}
 		return m.statusSegmentClick(t.Index)
 	case hitStatusPlugin:
 		return m.plugStatusClick(t.Index)
@@ -1777,14 +1817,14 @@ func (m *Model) pressEditor(p editorpane.Pane, hit editorpane.Hit, count int) {
 		if hit.Fold && m.toggleFoldAt(hit.Pos.Line) {
 			return
 		}
-		m.drag = m.placeCaret(hit.Pos, count)
+		m.drag = m.placeCaret(hit.Pos, count, hit.Virtual)
 	}
 }
 
 // placeCaret moves the caret to pos, or selects the word or the line under it
 // for counts 2 and 3. It returns the drag that follows the press, which grows
 // the selection by the same unit.
-func (m *Model) placeCaret(pos buffer.Pos, count int) drag {
+func (m *Model) placeCaret(pos buffer.Pos, count int, virtual int) drag {
 	if count == 1 && m.mx.extend {
 		m.ed.SetCursor(pos, true)
 		return drag{active: true, unit: editor.UnitChar}
@@ -1801,7 +1841,20 @@ func (m *Model) placeCaret(pos buffer.Pos, count int) drag {
 		return drag{active: true, unit: editor.UnitLine}
 	}
 	m.ed.SetCursor(pos, false)
+	m.parkVirtualCaret(virtual)
 	return drag{active: true, unit: editor.UnitChar}
+}
+
+// parkVirtualCaret puts the caret n display columns past the end of its line when
+// a press asked for it and the editor has virtual space on. The click on the line
+// end has already put the caret there.
+func (m *Model) parkVirtualCaret(n int) {
+	if n <= 0 {
+		return
+	}
+	if vs, ok := m.ed.(VirtualSpaceEditor); ok && vs.VirtualSpaceEnabled() {
+		vs.SetVirtualColumns(n)
+	}
 }
 
 // handleDrag moves the grab of a text selection or of the scrollbar thumb. The
@@ -2166,9 +2219,17 @@ func (m *Model) statusView() statusView {
 	s.Trust, s.TrustWarn = m.trustStatus()
 	s.DiagSlot, s.Diags = m.lspShowsDiags(), m.lspDiagCounts()
 	s.LSP = m.lspPill()
+	s.Row = m.statusRow()
+	s.Cursors = 1
+	if m.dock.Open() && m.dock.Exited() {
+		// Fresh's {terminal_restart} for a terminal whose process quit: gvim's
+		// terminal is the dock, so its exited shell is the affordance.
+		s.TerminalRestart = "Restart terminal"
+	}
 	if doc := m.ed.Active(); doc != nil {
 		c := doc.Cursor()
 		s.Position = "Ln " + strconv.Itoa(c.Line+1) + ", Col " + strconv.Itoa(c.Col+1)
+		s.Line, s.Col = c.Line+1, c.Col+1
 		s.Lines = displayLines(doc)
 		s.Large = largeLabel(doc)
 		s.EOL = doc.LineEnding()
@@ -2177,11 +2238,31 @@ func (m *Model) statusView() statusView {
 		if ro, ok := doc.(interface{ ReadOnly() bool }); ok {
 			s.ReadOnly = ro.ReadOnly()
 		}
+		if cl, ok := doc.(editorpane.CaretLister); ok {
+			s.Cursors += len(cl.Cursors())
+		}
 	}
 	m.viewStatus(&s)
 	s.PaletteHint = m.paletteHint()
 	s.Extra = m.plugStatusItems()
 	return s
+}
+
+// statusRow is the configured editor.status_bar of the session: Fresh's default
+// element lists when the view options leave them unset (a TUI-only test, a hand-built
+// model), and the configured lists — an empty one paints nothing — when the app
+// passes them.
+func (m *Model) statusRow() frame.StatusRow {
+	opts := m.view.opts.StatusBar
+	left := frame.ParseStatusElements(opts.Left)
+	if left == nil {
+		left = frame.DefaultStatusLeft()
+	}
+	right := frame.ParseStatusElements(opts.Right)
+	if right == nil {
+		right = frame.DefaultStatusRight()
+	}
+	return frame.StatusRow{Left: left, Right: right, Separator: opts.Separator}
 }
 
 // noDocumentNotice is the status text for an action that needs an open tab.

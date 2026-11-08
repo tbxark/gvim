@@ -43,8 +43,9 @@ var (
 
 // Run validates opts, builds the terminal UI and runs it in the alternate
 // screen until the user quits. Canceling ctx stops the program, and Run then
-// returns the context's error. The session is saved when the program ends, to
-// Options.SessionDir, or to the default directory when that is empty.
+// returns the context's error. When the launch is a session launch (see
+// planSession) the session is saved when the program ends, to Options.SessionDir,
+// or to the default directory when that is empty.
 func Run(ctx context.Context, opts Options) error {
 	if err := opts.Validate(); err != nil {
 		return err
@@ -243,9 +244,13 @@ func buildModel(ctx context.Context, opts Options) (*tui.Model, *finder.Index, e
 // opened. The layered config is loaded first: the file named by opts.Config, or the
 // default user file, then the project file for the root. A named config file that
 // does not exist is an error. The flags win over the config where both set a value.
-// With no file arguments and a session directory, the saved session is restored
-// first. With file arguments the session is neither restored nor saved, so the saved
-// session stays as it is. When watching is set, the tree root is watched for changes.
+//
+// What the launch does with the saved session comes from planSession: a session
+// launch restores it first (the tabs, or only the unsaved text when the layout
+// restore is off) and saves it at exit; a file launch (the default when files are
+// given) and --simple restore and save none of it, so the saved session stays as
+// it is. Crash recovery and the find history work in every launch. When watching
+// is set, the tree root is watched for changes.
 func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime, err error) {
 	if err := configview.CheckFile(opts.Config); err != nil {
 		return nil, err
@@ -270,6 +275,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	if trustWarning != "" {
 		_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: "+trustWarning)
 	}
+	// What this launch does with the saved session: restored, restored without
+	// its layout (the unsaved text only), or not at all, and whether it is saved
+	// and hot-exited when the program ends.
+	plan := planSession(opts, cfg)
 	tree, err := explorer.Open(root)
 	if err != nil {
 		return nil, err
@@ -293,40 +302,28 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	var sess session.Session
 	restored := false
 	var failed []restore.Unrestored
-	if len(opts.Files) == 0 && opts.SessionDir != "" {
+	if plan.load {
 		s, ok, err := session.Load(opts.SessionDir)
 		switch {
 		case err != nil:
 			_, _ = fmt.Fprintln(os.Stderr, "gvim: warning: session:", err)
 		case ok:
 			sess, restored = s, true
-			failed = restore.RestoreSession(ed, opts.SessionDir, s)
-			tree.SetShowHidden(s.ShowHidden)
-			tree.SetShowIgnored(s.ShowIgnored)
+			switch {
+			case plan.tabs:
+				failed = restore.RestoreSession(ed, opts.SessionDir, s)
+				tree.SetShowHidden(s.ShowHidden)
+				tree.SetShowIgnored(s.ShowIgnored)
+			case plan.hot:
+				// restore_previous_session off (or --no-restore): the layout and
+				// the clean tabs stay out, but the unsaved text comes back.
+				failed = restore.RestoreHotExit(ed, opts.SessionDir, s)
+			}
 		}
 	}
-	var openNotices []string
-	var fullLoads []editor.ErrLargeNeedsFullLoad
-	for _, f := range opts.Files {
-		if err := ed.OpenFile(f.Path); err != nil {
-			var need editor.ErrLargeNeedsFullLoad
-			if errors.As(err, &need) {
-				// Decoding it whole would hold the first frame back. The UI asks.
-				fullLoads = append(fullLoads, need)
-				continue
-			}
-			if errors.Is(err, editor.ErrTooLargeToTranscode) {
-				// Only this file is lost: the others open, and the status row says why.
-				openNotices = append(openNotices, err.Error())
-				continue
-			}
-			return nil, err
-		}
-		if f.Line > 0 {
-			if err := ed.GotoLine(f.Line, f.Col); err != nil {
-				return nil, err
-			}
-		}
+	openNotices, fullLoads, err := openTargets(ed, opts.Files, plan.tabs)
+	if err != nil {
+		return nil, err
 	}
 	// Counted before crash recovery, which adds tabs of its own after the two files.
 	if opts.Diff && len(ed.Tabs()) != 2 {
@@ -360,6 +357,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	adapter, _ := deps.Editor.(*uiadapter.Editor)
 	if adapter != nil {
 		adapter.SetContext(cfg.HighlightContextBytes)
+		// The hot-exit quit policy is a wrapper over the adapter, so the session
+		// save and the recovery copy keep using the real adapter and runtime.ed.
+		deps.Editor = hotExitEditor{Editor: adapter, hot: plan.hotExit}
 	}
 	deps.Settings = settingsFor(opts, cfg)
 	icon := icons.Resolve(cfg.UIIcons, cfg.UIIconsFont, os.Getenv)
@@ -370,8 +370,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	deps.SwitchKeymap = switchKeymapWith(liveCfg)
 	deps.LSP = newLSP(lspConfig(cfg, trustState))
 	// A folder argument shows the explorer at startup. Without one the explorer
-	// stays hidden until Ctrl+B, unless the session had it open.
-	deps.ShowExplorer = opts.Root != "" || (restored && sess.Explorer)
+	// stays hidden until Ctrl+B, unless the session had it open. --simple opens
+	// neither.
+	deps.ShowExplorer = plan.explorer && (opts.Root != "" || (plan.tabs && restored && sess.Explorer))
 	deps.HideLineNumbers = !cfg.LineNumbers
 	deps.HideMenuBar = !cfg.ShowMenuBar
 	deps.TabSize = cfg.TabSize
@@ -451,11 +452,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// The two files are in tabs 0 and 1: the tab count was checked before recovery.
 		model.OpenCompare(0, 1)
 	}
-	// File arguments skip the restore, so the session is not saved either. A save
+	// A launch that does not restore the session does not save it either: a save
 	// would replace the saved session and remove the stash files that it names.
-	sessionDir := opts.SessionDir
-	if len(opts.Files) > 0 {
-		sessionDir = ""
+	// A file launch and --simple are those launches.
+	sessionDir := ""
+	if plan.save {
+		sessionDir = opts.SessionDir
 	}
 	rt = &runtime{
 		model:      model,

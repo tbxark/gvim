@@ -23,6 +23,9 @@ func (e *Editor) langOf(s LanguageSettings) string {
 // of the document's language settings. Longer text, which a paste or a plugin
 // sends, is inserted as it is.
 func (e *Editor) typeText(d *Document, text string) {
+	// Typing at a virtual caret first turns the gap into real spaces, in the same
+	// undo step as the text (the buffer keeps one group until the next Break).
+	d.MaterializeVirtual()
 	plain := func(c caret) edit { return replaceEdit(c, text) }
 	r, size := utf8.DecodeRuneInString(text)
 	s := e.SettingsFor(d)
@@ -101,6 +104,9 @@ func (e *Editor) planChar(d *Document, s LanguageSettings, rules *indentRules, t
 // auto_close a caret between a bracket pair opens a three-line block with the
 // closer on its own line.
 func (e *Editor) newline(d *Document) {
+	// Enter at a virtual caret is a line break at the real end of the line: the
+	// gap is not typed out (Fresh does the same).
+	d.ClearVirtual()
 	s := e.SettingsFor(d)
 	tab := e.tabSizeOf(d)
 	plain := func(c caret) edit { return replaceEdit(c, "\n") }
@@ -144,6 +150,13 @@ func (e *Editor) newline(d *Document) {
 // spaces), both characters of an empty pair that auto_close inserted, or else the
 // character before the caret, which may be a line break.
 func (e *Editor) backspace(d *Document) {
+	// Backspace in virtual space walks the caret back with no buffer change
+	// until it reaches the line's text.
+	if n := d.VirtualColumns(); n > 0 {
+		d.SetVirtualColumns(n - 1)
+		d.Want = -1
+		return
+	}
 	s := e.SettingsFor(d)
 	tab := e.tabSizeOf(d)
 	plan := func(c caret) edit {

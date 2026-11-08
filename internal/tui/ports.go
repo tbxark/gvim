@@ -40,6 +40,19 @@ type EditorState interface {
 	ScrollTo(top int)
 }
 
+// VirtualSpaceEditor is the optional part of EditorState that puts the caret past
+// the end of a line and reports whether the setting lets it. The app adapter
+// implements it; an editor without it keeps every caret on the text.
+type VirtualSpaceEditor interface {
+	// VirtualSpaceEnabled reports whether the active document may put its caret
+	// past the end of a line (editor.virtual_space on, the per-buffer switch, and
+	// line wrap off).
+	VirtualSpaceEnabled() bool
+	// SetVirtualColumns parks the caret n display columns past the end of its
+	// line. It is 0 when the editor's mode does not allow the position.
+	SetVirtualColumns(n int)
+}
+
 // PluginEditor is the port of the editor that plugins use: documents by id, edits in API
 // coordinates, tabs, change tracking. The app builds it over the editor and passes it as
 // RootPorts.PluginEditor. It cannot be an optional method set of EditorState: both have a

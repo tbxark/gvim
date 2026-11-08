@@ -66,15 +66,15 @@ type ViewOptions struct {
 	Search                     SearchOptions
 	StatusBar                  StatusBarOptions
 	MenuBarMnemonics           bool // editor.menu_bar_mnemonics, default true
-	Animations                 bool // editor.animations, default true
-	CursorJumpAnimation        bool // editor.cursor_jump_animation, default true
-	ViewportEdgeFade           bool // editor.viewport_edge_fade, default true
 	SmoothScroll               bool // editor.smooth_scroll, default true
 	UseTerminalBG              bool // editor.use_terminal_bg, default false
 	SetWindowTitle             bool // editor.set_window_title, default true
 	TerminalAutoTitle          bool // editor.terminal_auto_title, default true
-	ScreensaverEnabled         bool // editor.screensaver_enabled, default false
-	ScreensaverIdleMinutes     int  // editor.screensaver_idle_minutes, default 5
+	// editor.animations, editor.cursor_jump_animation, editor.viewport_edge_fade
+	// and editor.screensaver_* are not ViewOptions: gvim's cell-grid TUI draws no
+	// animations, fades or screensaver, so the config keys are accepted and
+	// parsed (config/editoropts.go) but not carried into the UI. The decision is
+	// recorded in docs/parity.md; the keys load without diagnostics.
 
 	// Mouse. Zero reads as the default.
 
@@ -114,7 +114,9 @@ type SearchOptions struct {
 }
 
 // StatusBarOptions are editor.status_bar: the status row elements as Fresh names them,
-// such as "{cursor}" and "{language}". Empty lists mean gvim's own layout.
+// such as "{cursor}" and "{language}", and the separator between neighbours. A nil list
+// (the zero value) means Fresh's default list for that side; a non-nil empty list paints
+// nothing, so a config can remove a whole group.
 type StatusBarOptions struct {
 	Left      []string
 	Right     []string
@@ -143,13 +145,9 @@ func DefaultViewOptions() ViewOptions {
 		HighlightMatchingBrackets: true,
 		RainbowBrackets:           true,
 		MenuBarMnemonics:          true,
-		Animations:                true,
-		CursorJumpAnimation:       true,
-		ViewportEdgeFade:          true,
 		SmoothScroll:              true,
 		SetWindowTitle:            true,
 		TerminalAutoTitle:         true,
-		ScreensaverIdleMinutes:    5,
 		MouseWheelScrollLines:     3,
 		DoubleClickTimeMS:         500,
 		MouseHoverDelayMS:         500,
@@ -477,7 +475,7 @@ func (m *Model) applyTheme(name string) {
 	m.theme = th
 	m.styles = st
 	m.panes = editorpane.NewStyles(th)
-	m.menu = menubar.New(m, st)
+	m.menu = menubar.New(m, st).WithMnemonics(m.view.opts.MenuBarMnemonics)
 	if m.tree != nil {
 		m.explorerPanel = expanel.New(m.tree, st, m.now).CarryCut(m.explorerPanel)
 	}
@@ -544,6 +542,7 @@ func (m *Model) viewPane(p editorpane.Pane, doc Document) editorpane.Pane {
 	p.HideTabArrows = !s.TabIndicatorsOn()
 	p.HideVerticalScrollbar = !m.view.vScroll
 	p.HideHorizontalScrollbar = !m.view.hScroll
+	p.InlineDiagnostics = m.view.opts.DiagnosticsInlineText
 	p.CaretShape = m.caretShape()
 	// The rulers are the buffer's own. Each buffer starts with the configured ones
 	// (editor.SetRulers), so one can be removed from a buffer.
