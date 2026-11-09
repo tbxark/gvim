@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	iofs "io/fs"
 	"os"
 	"path/filepath"
@@ -60,7 +61,7 @@ func (f *remoteFS) ReadRange(_ context.Context, path string, off, n int64) ([]by
 	end := min(off+n, int64(len(data)))
 	out := append([]byte(nil), data[off:end]...)
 	if end < off+n {
-		return out, errors.New("short read")
+		return out, io.EOF
 	}
 	return out, nil
 }

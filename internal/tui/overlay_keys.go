@@ -49,7 +49,7 @@ var overlayActionNames = []string{
 	// menu: the menu bar dropdown and the context menu.
 	"menu_left", "menu_right", "menu_up", "menu_down", "menu_execute", "menu_close",
 	// settings: the Settings page.
-	"close_settings", "settings_activate", "settings_inherit", "settings_help",
+	"close_settings", "settings_activate", "settings_inherit", "settings_help", "settings_search",
 }
 
 // overlayContextOf returns the keymap context of an overlay that takes its keys in code and
@@ -228,6 +228,12 @@ func (m *Model) runOverlayAction(ctx KeyContext, cmd Command) (tea.Cmd, bool) {
 	case "settings_help":
 		if p, ok := m.overlays[len(m.overlays)-1].(*settingsPage); ok {
 			p.help = true
+			return nil, true
+		}
+		return nil, false
+	case "settings_search":
+		if p, ok := m.overlays[len(m.overlays)-1].(*settingsPage); ok {
+			p.startSearch()
 			return nil, true
 		}
 		return nil, false

@@ -169,6 +169,7 @@ func testKeys() fakeKeymap {
 		"normal|n|ctrl":        {Action: "new"},
 		"normal|w|ctrl":        {Action: "close_tab"},
 		"settings|?|":          {Action: "settings_help"},
+		"settings|/|":          {Action: "settings_search"},
 	}
 }
 

@@ -829,19 +829,20 @@ still loads unchanged.
   document snapshots (the authority loaded that text; unsaved edits included) with the same
   match caps, batching and query validation as locally, and start no remote process; no local
   disk is read. The panel preview column is wired for remote results: an open buffer's text is
-  used as the panel already has it, otherwise the file's head (at most 256 KiB) is read through
-  the authority's bounded windowed read with an honest truncated marker and stale-request guard
-  (the panel's sequence drops superseded answers; a disconnected authority is an error, never a
-  local read). The preview now carries syntax spans from the same shared highlighter as the
-  local preview (`internal/app/preview_highlight.go`): up to 256 KiB and 4000 lines, one cached
-  highlighter per file in an 8-entry bounded cache (safe for concurrent preview commands),
-  CPU-only inside the preview command and with no extra remote I/O. An open-buffer preview is
-  highlighted from the panel's text; a remote head is highlighted over that bounded head. Files
-  over the caps or without a grammar stay plain text, and a truncated head can cut a multi-line
-  construct (best-effort colouring). Remaining remote gaps: the preview is head-only for files
-  over 256 KiB (including its syntax colouring) and has no semantic/LSP spans; Fresh renders its
-  overlay preview as a real buffer through the text pipeline, while gvim has no remote preview
-  buffer and only this bounded head highlighter; the explicit-candidate path needs a complete remote
+  used as the panel already has it; otherwise the remote adapter's
+  `ContextWindowPreviewer` scans the file through authority `ReadRange` in 64 KiB chunks
+  until the selected match's surrounding window (8 MiB scan budget, 256 KiB output/line
+  cap, the panel's cancellation context and stale sequence). EOF makes the total line count
+  known; stopping at the window reports `Window`+`Truncated` with an unknown total
+  (`window only`); a match past the scan budget is an explicit error, never a file head or
+  local read. The window scan validates NUL/binary and UTF-8 (with a carried partial rune)
+  and returns the explicit binary/not-UTF-8 reason instead of sanitizing a partial excerpt. The preview carries syntax spans from the shared highlighter
+  (`internal/app/preview_highlight.go`) only when the total is known and within its 4000-line
+  cap, so an unknown-total deep window stays plain; an open-buffer preview is highlighted from
+  the panel's text. Remaining remote gaps: an unknown-total window is plain text and the scan
+  cannot reach a hit beyond 8 MiB; there are no semantic/LSP spans. Fresh renders its overlay
+  preview as a real buffer through the text pipeline, while gvim has no remote preview
+  buffer and only this bounded window; the explicit-candidate path needs a complete remote
   git listing (a failed/truncated listing keeps the tool's defaults, can omit tracked files
   matching .gitignore, and is reported with the non-fatal notice); a candidate list too
   large for the batched path falls back to the widened whole-tree scan (reported with the
@@ -905,7 +906,7 @@ still loads unchanged.
   already open during the refresh keeps its previous rows until it re-ranks or reopens).
   Residuals: palette file rows carry no git letters (the local palette rows do not either;
   marks are the explorer's), and the remote project-search panel's preview column now reads
-  through this same authority windowed/whole-file path (head-only, plain text).
+  through this same authority windowed window path (window-only for a deep hit, known-total syntax colour).
 - **Remote explorer (landed).** A remote launch shows the remote workspace tree in the
   explorer: a lazy `tui.RemoteExplorerTree` over a `RemoteDirLoader` port
   (app adapter `authorityDirLoader`) lists each directory through `authority.Files().ReadDir`,

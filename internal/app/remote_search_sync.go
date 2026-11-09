@@ -11,10 +11,8 @@ package app
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
@@ -22,9 +20,10 @@ import (
 )
 
 const (
-	// remoteSearchPreviewHeadBytes bounds the remote preview's read: the whole file when it is
-	// smaller, otherwise an honest head with Truncated set. It matches the local preview's
-	// syntax-colour cap.
+	// remoteSearchPreviewHeadBytes is the remote preview's bounded display/line cap. It
+	// used to bound a head read; the window scan now uses it as the output cap so a long
+	// context line or a dense window cannot grow without a bound (and it still matches the
+	// local preview's syntax-colour byte cap).
 	remoteSearchPreviewHeadBytes = 256 << 10
 	// remoteSearchPreviewTimeout bounds one preview read.
 	remoteSearchPreviewTimeout = 10 * time.Second
@@ -126,7 +125,24 @@ func (s *remoteSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.Prev
 // PreviewContext is the cancellable remote preview seam: the caller's context (cancelled
 // when the panel's selection changes or the panel closes) bounds the authority ReadRange
 // together with the fixed preview timeout. No local disk is ever consulted.
+// PreviewWindow implements searchpanel.WindowPreviewer: a closed remote file is read
+// around the selected match through authority ReadRange chunks (bounded scan) instead of
+// only at its head. The open-buffer snapshot path is unchanged: it is already in memory
+// and is used without any authority read.
+func (s *remoteSearch) PreviewWindow(req searchpanel.PreviewRequest) (searchpanel.PreviewResult, error) {
+	return s.PreviewWindowContext(context.Background(), req)
+}
+
+// PreviewContext keeps the context-capable seam; it now reads the same window.
 func (s *remoteSearch) PreviewContext(ctx context.Context, req searchpanel.PreviewRequest) (searchpanel.PreviewResult, error) {
+	return s.PreviewWindowContext(ctx, req)
+}
+
+// PreviewWindowContext is the cancellable window preview: selection changes/dismissal
+// stop the authority scan. The scan has a fixed byte/scan budget; a hit beyond it is
+// reported as a partial/window preview (or an explicit error when no line was reached),
+// never by silently falling back to the file head or the local disk.
+func (s *remoteSearch) PreviewWindowContext(ctx context.Context, req searchpanel.PreviewRequest) (searchpanel.PreviewResult, error) {
 	var out searchpanel.PreviewResult
 	if req.Lines <= 0 {
 		return out, nil
@@ -134,41 +150,77 @@ func (s *remoteSearch) PreviewContext(ctx context.Context, req searchpanel.Previ
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
-	text := req.Text
-	if text == "" {
-		if s.files == nil {
-			out.Err = "remote preview is not available"
-			return out, nil
-		}
-		ctx, cancel := context.WithTimeout(ctx, remoteSearchPreviewTimeout)
-		data, err := s.files.ReadRange(ctx, req.Path, 0, remoteSearchPreviewHeadBytes+1)
-		readErr := ctx.Err()
-		cancel()
-		if readErr != nil {
-			return out, readErr
-		}
-		if err != nil && len(data) == 0 && !errors.Is(err, io.EOF) {
-			out.Err = err.Error()
-			return out, nil
-		}
-		if len(data) > remoteSearchPreviewHeadBytes {
-			data = data[:remoteSearchPreviewHeadBytes]
-			out.Truncated = true
-			if i := strings.LastIndexByte(string(data), '\n'); i >= 0 {
-				data = data[:i+1]
-			}
-		} else if errors.Is(err, io.EOF) || err != nil {
-			// A short window: the read reached the end (or the fake/port's short-read
-			// shape); this is the whole file.
-			out.Truncated = false
-		}
-		if !utf8.Valid(data) {
-			out.Err = "preview: the remote file is not UTF-8 text"
-			return out, nil
-		}
-		text = string(data)
+	if req.Text != "" {
+		// The panel already holds the open buffer's text; window it locally with the
+		// same centering/scroll rules as before, with full-text syntax spans.
+		return previewStoredText(req, &s.previewCache), nil
 	}
-	lines := strings.Split(text, "\n")
+	if s.files == nil {
+		out.Err = "remote preview is not available"
+		return out, nil
+	}
+	first := req.Start + 1
+	if req.Start < 0 {
+		start := req.Line - 1
+		end := req.EndLine - 1
+		if end < start {
+			end = start
+		}
+		span := end - start + 1
+		first = start + 1
+		if span < req.Lines {
+			first -= (req.Lines - span) / 2
+		}
+		if first < 1 {
+			first = 1
+		}
+	}
+	readCtx, cancel := context.WithTimeout(ctx, remoteSearchPreviewTimeout)
+	win, err := readRemotePreviewWindow(readCtx, s.files, req.Path, first, req.Lines)
+	cancelled := readCtx.Err()
+	cancel()
+	if err != nil {
+		if cancelled != nil {
+			return out, cancelled
+		}
+		if errors.Is(err, errRemotePreviewScanBudget) {
+			out.Window = true
+			out.Truncated = true
+			if len(win.lines) == 0 {
+				out.Err = "preview window is past the remote scan budget"
+				return out, nil
+			}
+			out.Start = win.first - 1
+			out.Lines = append(out.Lines, win.lines...)
+			return out, nil
+		}
+		out.Err = err.Error()
+		return out, nil
+	}
+	out.Window = true
+	out.Start = win.first - 1
+	out.Lines = append(out.Lines, win.lines...)
+	out.Total = win.total
+	out.Truncated = win.truncated
+	// Syntax colour is CPU-only but bounded per file. A window whose total line count is
+	// unknown cannot prove it is under the highlighter's line cap, so it stays plain
+	// (the panel still shows the text); a known-small file keeps the shared spans.
+	if out.Total > 0 && out.Total <= previewHighlightLines && len(out.Lines) > 0 {
+		text := strings.Join(out.Lines, "\n") + "\n"
+		spans := s.previewCache.spans(req.Path, text, out.Lines, 0, len(out.Lines))
+		for i := range spans {
+			spans[i].Line += out.Start
+		}
+		out.Spans = spans
+	}
+	return out, nil
+}
+
+// previewStoredText windows text the panel already holds (an open buffer) around the
+// request's match, with the same centering and scroll rules as the closed-file path.
+func previewStoredText(req searchpanel.PreviewRequest, cache *previewHighlighterCache) searchpanel.PreviewResult {
+	var out searchpanel.PreviewResult
+	lines := strings.Split(req.Text, "\n")
 	if n := len(lines); n > 1 && lines[n-1] == "" {
 		lines = lines[:n-1]
 	}
@@ -194,6 +246,6 @@ func (s *remoteSearch) PreviewContext(ctx context.Context, req searchpanel.Previ
 	for k := first; k < total && k < first+req.Lines; k++ {
 		out.Lines = append(out.Lines, strings.TrimRight(lines[k], "\r"))
 	}
-	out.Spans = s.previewCache.spans(req.Path, text, lines, first, len(out.Lines))
-	return out, nil
+	out.Spans = cache.spans(req.Path, req.Text, lines, first, len(out.Lines))
+	return out
 }

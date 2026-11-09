@@ -344,7 +344,7 @@ func (p *Panel) paintPreview(g *grid.Grid, geo geometry) {
 		return
 	}
 	first, count := p.previewWindow(height)
-	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated), p.styles.label)
+	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated, s.result.Window), p.styles.label)
 	switch {
 	case s.loading && len(s.result.Lines) == 0:
 		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "…", p.styles.label)
@@ -383,15 +383,15 @@ func (p *Panel) paintPreviewWrapped(g *grid.Grid, geo geometry, height int, req 
 	}
 	switch {
 	case s.loading && len(s.result.Lines) == 0:
-		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated), p.styles.label)
+		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated, s.result.Window), p.styles.label)
 		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "…", p.styles.label)
 		return
 	case s.err != "":
-		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated), p.styles.label)
+		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated, s.result.Window), p.styles.label)
 		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "Preview unavailable: "+s.err, p.styles.label)
 		return
 	case len(s.result.Lines) == 0 || count == 0:
-		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated), p.styles.label)
+		g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, first, count, s.result.Total, s.loading, s.result.Truncated, s.result.Window), p.styles.label)
 		g.Put(geo.prevX, geo.resultsTop+1, geo.prevEnd, "No lines", p.styles.label)
 		return
 	}
@@ -423,7 +423,7 @@ func (p *Panel) paintPreviewWrapped(g *grid.Grid, geo geometry, height int, req 
 			}
 		}
 	}
-	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, firstLine, linesShown, s.result.Total, s.loading, s.result.Truncated), p.styles.label)
+	g.Put(geo.prevX, geo.resultsTop, geo.prevEnd, previewHeader(req, firstLine, linesShown, s.result.Total, s.loading, s.result.Truncated, s.result.Window), p.styles.label)
 	for k, row := range views {
 		p.paintPreviewSegment(g, geo, geo.resultsTop+1+k, row.fileLine, gutter, row.view,
 			row.seg[0], row.seg[1], row.first, row.truncate)
@@ -588,7 +588,7 @@ func displayOffsets(line []rune) []int {
 // previewHeader is the column's first row: the path and line (and range, its length, the
 // window's place in the file, and the unsaved marker), with a trailing ellipsis while a
 // scrolled window loads.
-func previewHeader(req PreviewRequest, first, count, total int, loading bool, truncated bool) string {
+func previewHeader(req PreviewRequest, first, count, total int, loading, truncated, window bool) string {
 	header := fmt.Sprintf("%s:%d", req.Name, req.Line)
 	if req.EndLine > req.Line {
 		header += fmt.Sprintf("–%d:%d", req.EndLine, req.EndCol)
@@ -603,9 +603,13 @@ func previewHeader(req PreviewRequest, first, count, total int, loading bool, tr
 		header += " (unsaved)"
 	}
 	if truncated {
-		// The remote preview reads a bounded head; say so instead of posing as the whole
-		// file (the line range shown is the whole of what was read).
-		header += " · head only"
+		// A bounded read is never posed as the whole file: the window around a hit is
+		// marked separately from a file-head fallback.
+		if window {
+			header += " · window only"
+		} else {
+			header += " · head only"
+		}
 	}
 	if loading {
 		header += " …"

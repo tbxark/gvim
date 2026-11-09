@@ -2994,6 +2994,7 @@ func (m *Model) takeExplorerFocus() {
 	if m.tree == nil {
 		return
 	}
+	m.blurPluginPanels()
 	if !m.explorerOpen {
 		m.explorerOpen = true
 		m.syncViewport()
@@ -3007,7 +3008,19 @@ func (m *Model) takeExplorerFocus() {
 }
 
 // focusEditor gives keyboard focus back to the editor. The panel stays visible.
+// focusEditor gives the keyboard to the editor. It also hands the widget-panel
+// layer back from a focused plugin section; plugin input modes and key captures
+// are plugin state and are documented as such (they do not see keys while a native
+// chrome region owns the keyboard).
 func (m *Model) focusEditor() {
+	m.blurPluginPanels()
+	m.focusEditorChrome()
+}
+
+// focusEditorChrome clears the chrome focus flags without touching a focused plugin
+// panel (focusPluginPanel has just set one). The plugin panel layer is separate
+// from the plugin's own input modes and key captures.
+func (m *Model) focusEditorChrome() {
 	m.explorerFocus = false
 	m.contentsFocus = false
 	m.contents.SetFocus(false)
@@ -3083,6 +3096,9 @@ func (m *Model) cycleFocus() {
 
 // setStage gives keyboard focus to the stage s.
 func (m *Model) setStage(s focusStage) {
+	// Every stage is a non-plugin region: hand the keyboard back from a focused
+	// plugin section first, so the plugin key layer cannot swallow keys after F6.
+	m.blurPluginPanels()
 	m.menu = m.menu.Close()
 	switch s {
 	case stageMenu:

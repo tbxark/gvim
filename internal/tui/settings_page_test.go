@@ -484,3 +484,70 @@ func TestSettingsHelpKey(t *testing.T) {
 		t.Fatalf("second Esc left %d overlay(s), want the Settings page closed", len(m.overlays))
 	}
 }
+
+// TestSettingsSearchMode: Fresh's settings_search on / starts a search mode over the
+// settings rows. Typing filters, Enter jumps/leaves search, and Esc cancels the search
+// without closing the page; a second Esc closes Settings.
+func TestSettingsSearchMode(t *testing.T) {
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	m, _ := openSettingsPage(t, port)
+	m.Update(typed("/"))
+	page := m.overlays[len(m.overlays)-1].(*settingsPage)
+	if !page.searching || len(page.filter) != 0 {
+		t.Fatalf("search mode = %v filter %q, want started empty", page.searching, string(page.filter))
+	}
+	if body := ansi.Strip(m.View().Content); !strings.Contains(body, "Search: ") {
+		t.Fatalf("search mode is not painted:\n%s", body)
+	}
+	for _, c := range "theme" {
+		m.Update(typed(string(c)))
+	}
+	if got := string(page.filter); got != "theme" {
+		t.Fatalf("filter = %q, want theme", got)
+	}
+	var items []settingsRow
+	for _, row := range page.rows {
+		if !row.header {
+			items = append(items, row)
+		}
+	}
+	if len(items) != 1 || items[0].item.Key != "theme" {
+		t.Fatalf("filtered items = %+v, want only theme", items)
+	}
+	m.Update(special(tea.KeyEscape))
+	if page.searching || len(page.filter) != 0 {
+		t.Fatalf("Esc did not cancel search: searching %v filter %q", page.searching, string(page.filter))
+	}
+	if len(m.overlays) == 0 {
+		t.Fatal("Esc closed Settings together with the search")
+	}
+	m.Update(special(tea.KeyEscape))
+	if len(m.overlays) != 0 {
+		t.Fatalf("second Esc left %d overlay(s), want Settings closed", len(m.overlays))
+	}
+}
+
+// TestSettingsSearchEnterEndsSearch: Enter leaves search mode on the current filtered
+// selection without editing it; the page stays open and the filter remains applied.
+func TestSettingsSearchEnterEndsSearch(t *testing.T) {
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	m, _ := openSettingsPage(t, port)
+	m.Update(typed("/"))
+	page := m.overlays[len(m.overlays)-1].(*settingsPage)
+	for _, c := range "theme" {
+		m.Update(typed(string(c)))
+	}
+	m.Update(special(tea.KeyEnter))
+	if page.searching {
+		t.Fatal("Enter did not end search mode")
+	}
+	if got := string(page.filter); got != "theme" {
+		t.Fatalf("Enter changed the filter to %q", got)
+	}
+	if len(page.rows) < 2 || page.rows[page.sel].item.Key != "theme" {
+		t.Fatalf("Enter lost the filtered selection: rows %d sel %d", len(page.rows), page.sel)
+	}
+	if len(m.overlays) == 0 {
+		t.Fatal("Enter closed the Settings page")
+	}
+}

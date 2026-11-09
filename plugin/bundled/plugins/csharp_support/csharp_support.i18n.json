@@ -21,6 +21,8 @@
     "actions.copy": "Copy: %{value}",
     "actions.restart": "Start/Restart LSP Server",
     "actions.status": "Show LSP Status",
-    "actions.dismiss": "Dismiss (Esc)"
+    "actions.dismiss": "Dismiss (Esc)",
+    "actions.disable": "Disable C# LSP",
+    "status.no_lsp": "No language server is configured"
   }
 }

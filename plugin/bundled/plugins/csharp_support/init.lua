@@ -118,6 +118,28 @@ local function restore_for_path(path, force)
   run_restore(root, force)
 end
 
+-- disable_active_csharp_language is the controlled native disable action: re-check the
+-- active buffer, carry its path/language to the TUI, and let the native action validate the
+-- target atomically before its root-level language mute. The async mute result is native-owned.
+local function disable_active_csharp_language()
+  local buf = active_csharp_buffer()
+  if not buf then
+    gvim.status(t("status.not_csharp"))
+    return
+  end
+  if not gvim.has("lsp") then
+    gvim.status(t("status.no_lsp"))
+    return
+  end
+  local ran, err = gvim.command.run("lsp_disable_language_target", {
+    path = buf:path(),
+    language = tostring(buf:language() or ""),
+  })
+  if not ran then
+    gvim.status(t("status.action_failed", { error = tostring(err) }))
+  end
+end
+
 -- show_help is the install-help popup for a missing/broken csharp-ls server.
 local function show_help()
   local buf = active_csharp_buffer()
@@ -136,6 +158,7 @@ local function show_help()
       { id = "copy:install", label = t("actions.copy", { value = INSTALL_COMMAND }) },
       { id = "act:lsp_restart", label = t("actions.restart") },
       { id = "act:show_lsp_status", label = t("actions.status") },
+      { id = "act:lsp_disable_language", label = t("actions.disable") },
       { id = "dismiss", label = t("actions.dismiss") },
     },
   })
@@ -148,6 +171,10 @@ local function show_help()
     return
   end
   local action = choice:match("^act:(.+)$")
+  if action == "lsp_disable_language" then
+    disable_active_csharp_language()
+    return
+  end
   if action then
     local ran, err = gvim.command.run(action)
     if not ran then

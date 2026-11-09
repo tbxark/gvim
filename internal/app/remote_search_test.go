@@ -466,8 +466,12 @@ func TestRemoteSearchPreviewHeadAndErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Truncated || len(res.Lines) != 5 || res.Total <= 0 {
-		t.Fatalf("big preview = truncated %v lines %d total %d", res.Truncated, len(res.Lines), res.Total)
+	if !res.Window || !res.Truncated || len(res.Lines) != 5 {
+		t.Fatalf("big preview = window %v truncated %v lines %d", res.Window, res.Truncated, len(res.Lines))
+	}
+	// The window stopped before EOF, so the total line count is honestly unknown.
+	if res.Total != 0 {
+		t.Fatalf("big preview total = %d, want unknown (0) for a deep window", res.Total)
 	}
 	if strings.Contains(res.Lines[0], "line") == false {
 		t.Fatalf("big preview line = %q", res.Lines[0])
@@ -1119,11 +1123,12 @@ func (f *readCountingRemoteFS) reads() int {
 	return f.readRange
 }
 
-// TestRemoteSearchPreviewTruncatedHeadHighlightsOnce checks the existing preview's bounded
-// head keeps both its syntax spans and its honest Truncated flag, and highlighting causes no
-// second remote read. The file is over the 256 KiB head cap but under the 4000-line syntax
-// cap, so there is a coloured truncated window.
-func TestRemoteSearchPreviewTruncatedHeadHighlightsOnce(t *testing.T) {
+// TestRemoteSearchPreviewWindowStopsBeforeTotal checks a deep window over the old head cap
+// is marked Window+Truncated, keeps the match lines, and needs no second remote read. The
+// total line count is unknown because the scan stops at the window; the window therefore
+// stays plain (syntax colour needs a known-small total), which is the honest bounded
+// behaviour.
+func TestRemoteSearchPreviewWindowStopsBeforeTotal(t *testing.T) {
 	base := newRemoteFS()
 	base.put("/remote/w/large.go", "package main\n")
 	var text strings.Builder
@@ -1143,19 +1148,156 @@ func TestRemoteSearchPreviewTruncatedHeadHighlightsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Err != "" {
-		t.Fatalf("truncated preview error = %q", res.Err)
+		t.Fatalf("window preview error = %q", res.Err)
 	}
-	if !res.Truncated {
-		t.Fatalf("truncated head not marked: %+v", res)
+	if !res.Window || !res.Truncated {
+		t.Fatalf("window preview = %+v, want Window+Truncated", res)
 	}
-	if len(res.Spans) == 0 {
-		t.Fatal("truncated bounded head lost its syntax spans")
+	if len(res.Lines) != 6 || res.Total != 0 {
+		t.Fatalf("window lines = %d total %d, want 6 known-window lines and unknown total", len(res.Lines), res.Total)
+	}
+	if len(res.Spans) != 0 {
+		t.Fatalf("unknown-total window claimed syntax spans: %d", len(res.Spans))
 	}
 	if got := fs.reads(); got != 1 {
-		t.Fatalf("preview remote reads = %d, want exactly the bounded head read", got)
+		t.Fatalf("preview remote reads = %d, want exactly the bounded window read", got)
 	}
-	if res.Total > previewHighlightLines {
-		t.Fatalf("preview total = %d, beyond the syntax line cap", res.Total)
+}
+
+// TestRemoteSearchPreviewWindowRejectsNonText: a window is not sanitized into readable
+// text: invalid UTF-8 and NUL/binary remote files get the explicit reason instead.
+func TestRemoteSearchPreviewWindowRejectsNonText(t *testing.T) {
+	fs := newRemoteFS()
+	fs.put("/remote/w/latin1.md", "caf\xe9\nline two\n")
+	fs.put("/remote/w/binary.md", "abc\x00def\n")
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	for _, tt := range []struct {
+		path, want string
+	}{
+		{"/remote/w/latin1.md", "not UTF-8 text"},
+		{"/remote/w/binary.md", "binary"},
+	} {
+		res, err := s.Preview(searchpanel.PreviewRequest{
+			Path: tt.path, Name: "x.md", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 3,
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", tt.path, err)
+		}
+		if !strings.Contains(res.Err, tt.want) {
+			t.Fatalf("%s preview err = %q, want %q", tt.path, res.Err, tt.want)
+		}
+		if len(res.Lines) != 0 {
+			t.Fatalf("%s preview lines = %q, want none", tt.path, res.Lines)
+		}
+	}
+}
+
+// partialErrorFS injects a non-EOF error on the first ReadRange while still returning
+// data, proving the window scan surfaces the read failure instead of treating the data as
+// a clean EOF.
+type partialErrorFS struct {
+	*remoteFS
+	injected bool
+}
+
+func (f *partialErrorFS) ReadRange(ctx context.Context, path string, off, n int64) ([]byte, error) {
+	data, err := f.remoteFS.ReadRange(ctx, path, off, n)
+	if !f.injected && len(data) > 0 {
+		f.injected = true
+		return data, errors.New("remote read broke")
+	}
+	return data, err
+}
+
+func TestRemoteSearchPreviewWindowSurfacesReadError(t *testing.T) {
+	base := newRemoteFS()
+	base.put("/remote/w/a.md", "one\ntwo\nthree\n")
+	fs := &partialErrorFS{remoteFS: base}
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	res, err := s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/a.md", Name: "a.md", Line: 2, EndLine: 2, EndCol: 2, Start: -1, Lines: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Err, "remote read broke") {
+		t.Fatalf("preview err = %q, want the read failure", res.Err)
+	}
+}
+
+// TestRemoteSearchPreviewWindowScanBudgetIsHonest: a hit beyond the bounded scan budget
+// is refused with an explicit window/scan-budget error, never a silently truncated head or
+// a local read.
+func TestRemoteSearchPreviewWindowScanBudgetIsHonest(t *testing.T) {
+	base := newRemoteFS()
+	var text strings.Builder
+	line := strings.Repeat("x", 1024)
+	for i := 0; i < 9000; i++ {
+		text.WriteString(line)
+		text.WriteString("\n")
+	}
+	base.put("/remote/w/huge.md", text.String())
+	fs := &readCountingRemoteFS{remoteFS: base}
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	res, err := s.PreviewContext(context.Background(), searchpanel.PreviewRequest{
+		Path: "/remote/w/huge.md", Name: "huge.md", Line: 8500, EndLine: 8500, EndCol: 2, Start: -1, Lines: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err == "" || !strings.Contains(res.Err, "scan budget") {
+		t.Fatalf("beyond-budget preview = %+v, want the scan-budget error", res)
+	}
+	if !res.Window || !res.Truncated {
+		t.Fatalf("beyond-budget preview flags = window %v truncated %v", res.Window, res.Truncated)
+	}
+	if fs.reads() == 0 {
+		t.Fatal("the beyond-budget preview did not read the authority")
+	}
+}
+
+// TestRemoteSearchPreviewReadsWindowAroundDeepHit: a match far past the old 256 KiB head
+// still previews its surrounding lines through authority ReadRange chunks, with the
+// window's start and unknown total reported honestly and no local file fallback.
+func TestRemoteSearchPreviewReadsWindowAroundDeepHit(t *testing.T) {
+	base := newRemoteFS()
+	var text strings.Builder
+	for i := 1; i <= 30000; i++ {
+		if i == 25000 {
+			text.WriteString("needle line\n")
+		} else {
+			text.WriteString("filler line\n")
+		}
+	}
+	base.put("/remote/w/deep.md", text.String())
+	fs := &readCountingRemoteFS{remoteFS: base}
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	res, err := s.PreviewContext(context.Background(), searchpanel.PreviewRequest{
+		Path: "/remote/w/deep.md", Name: "deep.md", Line: 25000, EndLine: 25000, EndCol: 13, Start: -1, Lines: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err != "" || !res.Window || len(res.Lines) == 0 {
+		t.Fatalf("deep preview = %+v", res)
+	}
+	found := false
+	for _, line := range res.Lines {
+		if line == "needle line" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("deep window lines = %q, want the match line", res.Lines)
+	}
+	if res.Start <= 0 || res.Start+len(res.Lines) < 25000 {
+		t.Fatalf("deep window start %d lines %d does not cover line 25000", res.Start, len(res.Lines))
+	}
+	if res.Total != 0 {
+		t.Fatalf("deep window total = %d, want unknown", res.Total)
+	}
+	if fs.reads() == 0 {
+		t.Fatal("deep window did not read through the authority")
 	}
 }
 

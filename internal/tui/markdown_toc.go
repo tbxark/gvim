@@ -671,6 +671,7 @@ func (m *Model) takeContentsFocus() {
 		m.explorerOpen = true
 		m.syncViewport()
 	}
+	m.blurPluginPanels()
 	m.tabFocus = false
 	m.explorerFocus = false
 	m.dock.SetFocus(false)

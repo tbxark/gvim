@@ -263,10 +263,12 @@ type PreviewResult struct {
 	// Spans are the syntax runs of the returned lines; empty means plain text (the port
 	// cannot highlight, or the file is too large or has no grammar).
 	Spans []PreviewSpan
-	// Truncated says the preview is an honest head of a larger file: the port read a
-	// bounded window and Lines/Total describe only what it could read (a remote preview
-	// shows complete head lines). The header marks it.
+	// Truncated says the preview is an honest partial view of a larger file: the port
+	// read a bounded window and Lines/Total describe only what it could read. The header
+	// marks it; Window says the bounded read was a window around the selected match
+	// rather than a file head.
 	Truncated bool
+	Window    bool
 	Err       string // why the file could not be read or previewed
 }
 
@@ -275,6 +277,21 @@ type PreviewResult struct {
 // PreviewResult.Err and no lines means the file has no lines to show.
 type Previewer interface {
 	Preview(PreviewRequest) (PreviewResult, error)
+}
+
+// WindowPreviewer is the optional bounded-window seam: instead of a file head it reads
+// around the selected match (or the requested Start line). The remote adapter implements
+// it through the authority's ReadRange with a scan budget; the panel prefers it over
+// Preview when available and keeps the plain seam for local/test previewers.
+type WindowPreviewer interface {
+	PreviewWindow(PreviewRequest) (PreviewResult, error)
+}
+
+// ContextWindowPreviewer is WindowPreviewer with the panel's cancellation context, so a
+// selection change/panel dismissal stops the authority read. A previewer implementing it
+// is used before the context-only seam.
+type ContextWindowPreviewer interface {
+	PreviewWindowContext(context.Context, PreviewRequest) (PreviewResult, error)
 }
 
 // ContextPreviewer is the cancellable preview seam. The panel calls PreviewContext with a

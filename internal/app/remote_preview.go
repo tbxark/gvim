@@ -6,11 +6,13 @@ package app
 // unchanged.
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/internal/tui/palette"
@@ -188,3 +190,180 @@ func (p *remotePreviewer) ReadWindow(ctx context.Context, path string, line, max
 }
 
 var _ palette.WindowPreviewer = (*remotePreviewer)(nil)
+
+// Bounds of the search-panel window preview. It reads through the authority's chunked
+// ReadRange, never the local disk: one line is capped, the whole scan is capped, and the
+// amount returned to the panel is capped. A window that could not reach the hit before
+// the scan budget is reported as incomplete instead of silently showing the file head.
+const (
+	remotePreviewWindowChunk     = 64 << 10
+	remotePreviewWindowScanBytes = 8 << 20
+	remotePreviewWindowMaxLine   = 256 << 10
+	remotePreviewWindowMaxOutput = remoteSearchPreviewHeadBytes
+)
+
+var (
+	errRemotePreviewScanBudget = errors.New("remote preview window is past the scan budget")
+	errRemotePreviewBinary     = errors.New("preview: the remote file is binary")
+	errRemotePreviewNotUTF8    = errors.New("preview: the remote file is not UTF-8 text")
+)
+
+// remotePreviewWindow is a bounded line window: Lines (complete lines), the 1-based file
+// line of Lines[0], the known total line count when EOF was reached (zero when the scan
+// stopped at the window), truncated when the window/byte budget cut the preview, and
+// budget when the scan budget stopped before the requested window (partial lines may be
+// present).
+type remotePreviewWindow struct {
+	lines     []string
+	first     int
+	total     int
+	truncated bool
+	budget    bool
+}
+
+// remoteRangeReader is an io.Reader over authority ReadRange chunks. It stops with
+// errRemotePreviewScanBudget after the byte budget, so a deep match cannot turn the
+// preview into an unbounded read.
+type remoteRangeReader struct {
+	ctx     context.Context
+	files   authority.FileSystem
+	path    string
+	off     int64
+	scanned int
+	eof     bool
+	carry   []byte // an incomplete UTF-8 rune at a chunk boundary
+}
+
+// validate checks every byte the scan reads for NUL/control binary markers and invalid
+// UTF-8. A window is not a place to silently sanitize a binary/legacy-encoded remote file
+// into a plausible-looking excerpt; the caller gets the explicit reason instead. A
+// multi-byte rune split at a chunk boundary is carried to the next read.
+func (r *remoteRangeReader) validate(data []byte) error {
+	buf := append(r.carry, data...)
+	r.carry = r.carry[:0]
+	for len(buf) > 0 {
+		if buf[0] == 0 {
+			return errRemotePreviewBinary
+		}
+		rn, size := utf8.DecodeRune(buf)
+		if rn == utf8.RuneError && size == 1 {
+			if !utf8.FullRune(buf) {
+				r.carry = append(r.carry[:0], buf...)
+				return nil
+			}
+			return errRemotePreviewNotUTF8
+		}
+		buf = buf[size:]
+	}
+	return nil
+}
+
+// Read implements io.Reader over the authority's windowed read.
+func (r *remoteRangeReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if r.eof {
+		return 0, io.EOF
+	}
+	if r.scanned >= remotePreviewWindowScanBytes {
+		return 0, errRemotePreviewScanBudget
+	}
+	if len(p) > remotePreviewWindowChunk {
+		p = p[:remotePreviewWindowChunk]
+	}
+	data, err := r.files.ReadRange(r.ctx, r.path, r.off, int64(len(p)))
+	if len(data) > 0 {
+		if verr := r.validate(data); verr != nil {
+			return 0, verr
+		}
+		copy(p, data)
+		r.off += int64(len(data))
+		r.scanned += len(data)
+	}
+	// Only io.EOF ends the scan. Any other error with data is returned to the scanner
+	// (which surfaces it after the already-delivered tokens) rather than being mistaken
+	// for a clean end of file; the caller then reports the partial/failed read.
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			r.eof = true
+			if len(r.carry) > 0 {
+				return 0, errRemotePreviewNotUTF8
+			}
+			if len(data) == 0 {
+				return 0, io.EOF
+			}
+			return len(data), nil
+		}
+		if len(data) > 0 {
+			return len(data), err
+		}
+		return 0, err
+	}
+	if len(data) == 0 {
+		return 0, io.EOF
+	}
+	return len(data), nil
+}
+
+// readRemotePreviewWindow scans the remote file from its start (authority ReadRange has
+// no line index) until firstLine and lineCount complete lines are collected. The scan is
+// bounded by remotePreviewWindowScanBytes and the context; a hit beyond that budget is
+// returned with budget=true rather than pretending the file starts there.
+func readRemotePreviewWindow(ctx context.Context, files authority.FileSystem, path string, firstLine, lineCount int) (remotePreviewWindow, error) {
+	var out remotePreviewWindow
+	if firstLine < 1 {
+		firstLine = 1
+	}
+	if lineCount < 1 {
+		lineCount = 1
+	}
+	rd := &remoteRangeReader{ctx: ctx, files: files, path: path}
+	sc := bufio.NewScanner(rd)
+	sc.Buffer(make([]byte, 0, remotePreviewWindowChunk), remotePreviewWindowMaxLine)
+	lineNo := 0
+	bytesOut := 0
+	for sc.Scan() {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		lineNo++
+		if lineNo < firstLine {
+			continue
+		}
+		if len(out.lines) >= lineCount {
+			// One more line after the window: the file continues and the total is
+			// unknown. This is an honest window-only preview.
+			out.truncated = true
+			out.total = 0
+			return out, nil
+		}
+		line := strings.TrimRight(sc.Text(), "\r")
+		if len(out.lines) == 0 {
+			out.first = lineNo
+		}
+		if len(out.lines) == 0 && len(line) > remotePreviewWindowMaxOutput {
+			line = line[:remotePreviewWindowMaxOutput]
+			out.truncated = true
+		}
+		if bytesOut+len(line)+1 > remotePreviewWindowMaxOutput {
+			out.truncated = true
+			return out, nil
+		}
+		out.lines = append(out.lines, line)
+		bytesOut += len(line) + 1
+	}
+	if err := sc.Err(); err != nil {
+		if errors.Is(err, errRemotePreviewScanBudget) {
+			out.truncated = true
+			out.budget = true
+			return out, errRemotePreviewScanBudget
+		}
+		return out, err
+	}
+	// EOF: the total line count is known when no earlier window stop happened.
+	if out.total == 0 {
+		out.total = lineNo
+	}
+	return out, nil
+}

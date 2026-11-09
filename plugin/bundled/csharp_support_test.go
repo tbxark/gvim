@@ -166,6 +166,12 @@ func TestCSharpInstallHelpAndActions(t *testing.T) {
 	t.Parallel()
 	r := csRig(t, "/work/proj/a.cs", "class A {}\n", nil)
 	r.host.EnvTrust = "trusted"
+	r.host.LSP().Enabled = true
+	for _, b := range r.host.Buffers {
+		if b.Info.Path == "/work/proj/a.cs" {
+			b.Info.Language = "csharp"
+		}
+	}
 	r.h.Emit(pluginapi.Event{Name: "lsp_server_error", Data: map[string]any{"error": "csharp-ls: server not found"}})
 	if got := lastNoticeText(r.h); !strings.Contains(got, "C# LSP server not found") {
 		t.Fatalf("status = %q", got)
@@ -179,7 +185,7 @@ func TestCSharpInstallHelpAndActions(t *testing.T) {
 	for _, a := range ov.ActionPopup.Actions {
 		ids[a.ID] = true
 	}
-	for _, want := range []string{"copy:install", "act:lsp_restart", "act:show_lsp_status", "dismiss"} {
+	for _, want := range []string{"copy:install", "act:lsp_restart", "act:show_lsp_status", "act:lsp_disable_language", "dismiss"} {
 		if !ids[want] {
 			t.Errorf("help popup lacks %q (actions %v)", want, ids)
 		}
@@ -202,6 +208,61 @@ func TestCSharpInstallHelpAndActions(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("commands = %v, want lsp_restart", r.host.Cmd().Ran())
+	}
+	// Switch away after the popup opens: the controlled disable must refuse the wrong tab.
+	r.h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
+	ov = r.host.UI().Last("action_popup")
+	notes := r.host.AddBuffer("/work/proj/notes.md", "# notes\n")
+	r.host.SetActive(notes)
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language_target" {
+			t.Fatalf("disable dispatched for a non-C# active buffer: %v", r.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r.h); got != "Open a C# file first (.cs)" {
+		t.Fatalf("switched-buffer status = %q", got)
+	}
+	// Back on the C# buffer the target action receives path/language; success is native-owned.
+	r.host.SetActive(r.ids["/work/proj/a.cs"])
+	r.h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
+	ov = r.host.UI().Last("action_popup")
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	found = false
+	for _, call := range r.host.Cmd().Calls {
+		if call.Action == "lsp_disable_language_target" {
+			found = true
+			if call.Args["path"] != "/work/proj/a.cs" || call.Args["language"] != "csharp" {
+				t.Fatalf("disable target args = %+v", call.Args)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("commands = %v, want the controlled disable target", r.host.Cmd().Ran())
+	}
+	if strings.Contains(strings.Join(r.h.NoticeTexts(), "\n"), "disabled") {
+		t.Fatalf("plugin claimed async disable success: %v", r.h.NoticeTexts())
+	}
+}
+
+func TestCSharpDisableWithoutLSPDoesNotDispatch(t *testing.T) {
+	t.Parallel()
+	r := csRig(t, "/work/proj/a.cs", "class A {}\n", nil)
+	r.host.EnvTrust = "trusted"
+	r.h.Emit(pluginapi.Event{Name: "lsp_server_error", Data: map[string]any{"error": "csharp-ls: server not found"}})
+	r.h.Emit(pluginapi.Event{Name: "lsp_status_clicked", Data: map[string]any{}})
+	ov := r.host.UI().Last("action_popup")
+	if ov == nil {
+		t.Fatalf("no help popup (log %v)", r.h.LogText(""))
+	}
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_disable_language_target" {
+			t.Fatalf("disable dispatched without LSP: %v", r.host.Cmd().Ran())
+		}
+	}
+	if got := lastNoticeText(r.h); got != "No language server is configured" {
+		t.Fatalf("no-LSP status = %q", got)
 	}
 }
 

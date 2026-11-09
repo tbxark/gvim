@@ -432,6 +432,7 @@ func (m *Model) takeDiagFocus() {
 		m.explorerOpen = true
 		m.syncViewport()
 	}
+	m.blurPluginPanels()
 	m.tabFocus = false
 	m.dock.SetFocus(false)
 	m.explorerFocus = false

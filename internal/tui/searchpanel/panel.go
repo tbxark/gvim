@@ -741,6 +741,23 @@ func (p *Panel) previewCmd() tea.Cmd {
 	p.preview.hasReq = true
 	p.preview.loading = true
 	p.preview.err = ""
+	// Prefer the window seam: a remote preview reads around the match through the
+	// authority instead of only the file head. The context-capable form cancels the
+	// authority read when a newer selection supersedes it.
+	if cw, ok := p.previewer.(ContextWindowPreviewer); ok {
+		ctx, cancel := context.WithCancel(context.Background())
+		p.previewCancel = cancel
+		return func() tea.Msg {
+			res, err := cw.PreviewWindowContext(ctx, req)
+			return previewDoneMsg{seq: seq, result: res, err: err, owner: owner}
+		}
+	}
+	if w, ok := p.previewer.(WindowPreviewer); ok {
+		return func() tea.Msg {
+			res, err := w.PreviewWindow(req)
+			return previewDoneMsg{seq: seq, result: res, err: err, owner: owner}
+		}
+	}
 	if cp := p.previewContext; cp != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		p.previewCancel = cancel

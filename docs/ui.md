@@ -152,15 +152,16 @@ remains theoretically possible); hidden entries are not listed for a hidden dire
 query.
 
 - **File preview column** (the file mode, when a `Preview` reader is wired and the
-  card's inner text width is at least 64 cells). The selected row's file head, read in a
+  card's inner text width is at least 64 cells). The selected row's file preview, read in a
   `tea.Cmd` and cached for the palette's lifetime, is painted in a right-hand column
   after a muted `│` divider; the list columns are recomputed from the narrower width.
-  The column has a right-aligned line-number gutter, highlights the line a
-  `path:line[:col]` query names, and shows a placeholder for a binary, empty or
-  unreadable file; a file longer than the 16 KiB head or the twelve lines kept ends with
-  `…`. A narrower frame drops the column and keeps the full-width list. The preview is
-  a plain-text head: it has no syntax colours and does not scroll (see §4.5 of
-  `docs/parity.md`).
+  With no line target it is the 16 KiB file head; a `path:line[:col]` query uses the
+  optional window reader around that line (the same bounded window as Live Grep, 12 lines)
+  so a target past the head is visible. The column has a right-aligned line-number gutter,
+  highlights the named line, and shows a placeholder for a binary, empty or unreadable
+  file; a file longer than the head or the twelve lines kept ends with `…`. A narrower
+  frame drops the column and keeps the full-width list. The preview is plain text: it has
+  no syntax colours and does not scroll (see §4.5 of `docs/parity.md`).
 **Palette keyboard.** Up/Down move the selection, PageUp/PageDown move it one visible
 page and clamp at the first/last row (Fresh's `prompt_page_up`/`prompt_page_down`; there is
 no page before the first layout), Enter or Ctrl+F runs/opens the selected row (Fresh's
@@ -189,7 +190,7 @@ Each. In either focused query field, `Ctrl+Delete` deletes the next word and
 these are widget chords, not editor actions, so the field keeps focus and the bar stays
 open.
 
-**Settings page keyboard.** Typing filters the settings rows; Up/Down move, PgUp/PgDn page, Home/End jump, Enter edits, Tab switches layer, Ctrl+S saves and Ctrl+R resets, Delete inherits/resets the row, and Ctrl+E edits the raw JSON. `?` opens Fresh's settings_help panel listing these keys; any key closes it, and Esc then closes the Settings page. The panel uses the existing overlay chrome and does not change focus or the cursor.
+**Settings page keyboard.** Typing filters the settings rows; `/` starts Fresh's settings search mode (clear filter, type to search, Enter ends the search keeping the current selection without editing it, Esc cancels the search without closing Settings); Up/Down move, PgUp/PgDn page, Home/End jump, Enter edits, Tab switches layer, Ctrl+S saves and Ctrl+R resets, Delete inherits/resets the row, and Ctrl+E edits the raw JSON. `?` opens Fresh's settings_help panel listing these keys; any key closes it, and Esc then closes the Settings page. The panel uses the existing overlay chrome and does not change focus or the cursor.
 
 **Live Grep Resume.** Closing Live Grep captures the prior query, match modes and
 scope toggles; it does not keep a reusable result set. Live Grep: Resume restores those
@@ -335,7 +336,13 @@ result region:
   `(unsaved)` for an open buffer, and `· Lfirst–last/total` for the window's place in the
   file); the lines come from the open buffer's snapshot or, for a closed file, from a
   bounded read with the search caps (a large, binary or non-UTF-8 file shows the reason
-  instead of lines). The match's line or lines take the selected style and the matched
+  instead of lines). A remote closed file uses the window seam: the authority is scanned
+  in bounded ReadRange chunks around the selected match (8 MiB scan budget), the header
+  says `window only` when the window stops before EOF, a known total is shown when EOF
+  was reached, and a hit beyond the scan budget is an explicit error (never the file head
+  or a local read). The scan rejects NUL/binary content and invalid UTF-8 explicitly (the
+  panel shows the reason/placeholder, never a sanitized partial excerpt). Syntax colour is
+  kept only for a known-small total; the open-buffer path is unchanged. The match's line or lines take the selected style and the matched
   runes are bold; the rest of a line is syntax-coloured automatically when the port can
   highlight it (the highlighter is cached per file and bounded at 256 KiB or 4000 lines,
   and a grammarless or oversized file stays plain). The window scrolls while the result

@@ -134,10 +134,28 @@ child, Enter jumps, Esc leaves for the editor; Space/Enter unfold a folded
 section. In `scroll` mode the caret does not move while browsing; the pane is
 scrolled to the selected heading instead. The app-wide actions keep their Normal
 bindings, so Ctrl+P, Ctrl+B and the tab and split keys work; typed text is
-dropped and never reaches the buffer. F6 and `focus_next_sidebar_section` /
-`focus_prev_sidebar_section` cycle explorer → Contents → Diagnostics (when open) →
-editor; focusing a folded section unfolds it. Plugin sections stay out of F6 (a
-recorded residual); their order is fixed after the native sections.
+dropped and never reaches the buffer. The command cycle
+`focus_next_sidebar_section` / `focus_prev_sidebar_section` follows the column's
+**rendered order**: the explorer, Contents (when open), Diagnostics (when open; a
+folded section is unfolded and takes the keyboard), each mounted plugin section, then
+the editor; backwards walks the same stops. A focused plugin section takes the
+keyboard through the provider's panel (its selected row/highlight is the panel's), and
+leaving it (another stop, the editor, or F6) blurs the panel first, so its widget-panel
+layer cannot swallow keys meant for the new focus. The default Alt+Shift+N / Alt+Shift+P
+chords reach the keymap even while a plugin section has the keyboard: the panel's key
+path passes the root's sidebar focus-cycle actions through (its Alt/Ctrl drop and a
+plugin input mode/key capture do not eat them), so the real key leaves the panel and
+moves to the next stop. **Blur scope:** a native focus move
+clears only the widget-panel layer (`ps.focus`, the panel's focused state and the
+provider's `focus_lost`); plugin input modes and `gvim.input.next_key` captures are
+plugin-owned state and are not ended by a focus move (only the plugin's mode API, the
+panic chords or unload end them). They cannot steal keys while a native chrome region
+owns the keyboard — the plugin key layer is gated by editor key ownership — and they
+own the editor again when it regains the keys. **F6 is unchanged**: its chrome cycle is
+menu → tab strip → explorer → Contents → Diagnostics (when open) → editor and does not
+visit plugin sections (a recorded residual); pressing F6 from a focused plugin section
+still clears that panel's widget-panel layer before the stage moves (a plugin mode or
+pending key capture remains plugin-owned and is gated while the new stage owns keys).
 
 **Mouse**: press a header row to focus the section; dragging any section's header
 resizes that section's body (the dragged section and every other open section keep
@@ -354,7 +372,8 @@ widget state and a few painted cells.
    `sidebar.Spec` in `Model.sidebarSpecs`, a paint case in
    `Model.paintSidebar`, and a hit case in `Model.handleClick`.
 4. Add it to `sidebarSections`/`sectionFocused`/`focusSection` if it takes the
-   keyboard, and to `stageContents`-style stages if F6 should reach it.
+   keyboard (plugin sections enter the command cycle this way; F6 only visits the
+   native stages, so add a `stageContents`-style stage only if F6 should reach it).
 5. Record it here and in `docs/ui.md`'s component map.
 
 ### Plugin sections (plugin API tier 1a)
@@ -380,7 +399,19 @@ A plugin can mount a declarative widget panel as a section of the column:
   and raises a `cancel` `widget_event`; a click in the body focuses the section and goes to the
   panel (a list row selects, a button activates, the wheel moves a list). A focused section
   takes the keyboard before the editor keymap and swallows the keys its widgets do not use;
-  Escape gives the keyboard back.
+  Escape gives the keyboard back. `focus_next_sidebar_section` /
+  `focus_prev_sidebar_section` include each mounted plugin section in rendered order after
+  the native sections; leaving one for another stop, the editor or F6 raises the panel's
+  `focus_lost` and clears its widget-panel layer first, so it cannot keep swallowing keys.
+  Alt+Shift+N/P (the default focus-cycle chords) are passed through by the panel key
+  path and by a plugin input mode/key capture, so the real key always reaches the root
+  and leaves the panel; F6 likewise.
+  That is the only layer a native focus move clears: plugin input modes and
+  `gvim.input.next_key` captures are plugin state. While the explorer, tab strip,
+  Contents, Diagnostics, dock or welcome screen owns the keys, the plugin key layer is
+  not consulted at all (so it cannot steal those keys); it owns the editor again when
+  the editor regains the keys. The panic chords, the plugin's own mode API or unload
+  is what ends a plugin mode.
 * Lifecycle: the panel host owns the sections. Unmounting a plugin (or reloading it) removes
   its sections. Mounting shows the column when it was hidden.
 

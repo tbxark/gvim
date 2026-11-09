@@ -381,9 +381,11 @@ project detection and the trust-gated restore, and reuses the native LSP actions
   `gvim.env.trust_level()` is not `trusted`; `trust_changed` drains the pending roots, as
   env_manager does. The process runs through `gvim.proc.run`, so it follows a remote workspace's
   authority; Fresh's `runOnTarget` is replaced by that one call;
-* the plugin API has no call to disable a language's LSP server, so Fresh's "Disable C# LSP" popup
-  action is not ported; the help popup offers Start/Restart LSP Server, Show LSP Status and the
-  copy-install row instead;
+* "Disable C# LSP" is delegated to the controlled native `lsp_disable_language_target` action:
+  the plugin captures the active C# buffer's path/language, the TUI re-validates both before a
+  root-level LSP-port mute, and a popup/tab switch or language mismatch is refused; it is not a
+  catalog command and the native layer owns the async/no-server result. The help popup also offers
+  Start/Restart LSP Server, Show LSP Status and the copy-install row;
 * Fresh prechecks `dotnet --version` and caches the answer; the port runs `dotnet restore` directly
   and reports an exec error, which also avoids trusting a local-machine `which` in a remote workspace;
 * i18n is English-only, unlike Fresh's translated status strings; the plugin registers two commands
@@ -392,8 +394,10 @@ project detection and the trust-gated restore, and reuses the native LSP actions
 Tests: `plugin/bundled/csharp_support_test.go` covers the command table/no bindings, nearest-project
 restore and its once-per-project rule, the untrusted→`trust_changed` deferral, the no-project-file
 fallback, restore failure and missing-dotnet status, the explicit restore command, install-help
-popup/copy/native restart, and that non-C# buffers are ignored. The tests set the fake host's trust
-level and raise `after_file_open` themselves.
+popup/copy/native restart, the controlled disable target with no-LSP and active-tab-switch refusals,
+and that non-C# buffers are ignored. The tests set the fake host's trust level and raise
+`after_file_open` themselves. The native target action is covered separately in
+`internal/tui/lsp_target_test.go`; there is no plugin→TUI end-to-end test.
 ### Clangd support: no server-specific LSP request (port residual)
 
 Fresh's `clangd_support.ts` sends clangd's non-standard `textDocument/switchSourceHeader` request

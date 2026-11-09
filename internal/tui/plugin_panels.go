@@ -386,7 +386,7 @@ func (m *Model) focusPluginPanel(id pluginapi.PanelID) {
 	}
 	ps.focus = id
 	mp.panel.SetFocused(true)
-	m.focusEditor()
+	m.focusEditorChrome()
 	m.explorerFocus = false
 	m.contentsFocus = false
 	m.tabFocus = false
@@ -397,7 +397,12 @@ func (m *Model) focusPluginPanel(id pluginapi.PanelID) {
 	}
 }
 
-// blurPluginPanels takes the keyboard from the mounted panels.
+// blurPluginPanels takes the widget-panel layer of the keyboard from the mounted
+// panels: the focused panel, ps.focus, and the provider's focus_lost/focus_gained.
+// Plugin input modes and key captures are plugin state, not panel focus; they are not
+// cleared here. They are gated while a native chrome region owns the keys (see
+// editorHasKeys) and own the editor again when it regains them; only the plugin's own
+// mode API, the panic chords or unload end them.
 func (m *Model) blurPluginPanels() {
 	ps := &m.plug.panels
 	if ps.focus == 0 {
@@ -639,12 +644,42 @@ func (m *Model) pluginSidebarSection(mp *mountedPanel) (sidebar.Section, bool) {
 
 // ---- input
 
+// sidebarFocusCycleKey reports whether k resolves through the normal keymap to one of
+// the root's sidebar focus-cycle actions. A focused widget panel must not swallow
+// those: they move the focus out of the panel itself, so the panel would otherwise
+// trap Alt+Shift+N/P (the panel key path drops every Alt/Ctrl chord).
+func (m *Model) sidebarFocusCycleKey(k tea.Key) bool {
+	if m.keys == nil {
+		return false
+	}
+	kp, _ := translateKey(k)
+	if len(kp.Mods) == 0 {
+		return false
+	}
+	cmd, ok := m.keys.Resolve(kp, KeyContextNormal)
+	if !ok {
+		return false
+	}
+	return cmd.Action == "focus_next_sidebar_section" || cmd.Action == "focus_prev_sidebar_section"
+}
+
 // pluginPanelKey routes one key press to the panel with the keyboard, the panel's widgets
 // first: it reports whether the panel took the message. A panel swallows the keys it does
 // not handle, so a keypress meant for a panel never edits the buffer under it.
 func (m *Model) pluginPanelKey(msg tea.Msg) (tea.Cmd, bool) {
 	k, ok := msg.(tea.KeyPressMsg)
 	if !ok || m.plug.panels.focus == 0 {
+		return nil, false
+	}
+	// F6 is the application's chrome cycle, never a panel key: it must reach the
+	// root so a focused plugin section cannot swallow the focus move (the root's
+	// stage move then blurs the panel).
+	if kp, _ := translateKey(tea.Key(k)); len(kp.Mods) == 0 && kp.Name == "F6" {
+		return nil, false
+	}
+	// The root's sidebar focus-cycle keys (Alt+Shift+N/P) move the focus out of the
+	// panel; the panel's Alt/Ctrl drop below must not eat them.
+	if m.sidebarFocusCycleKey(tea.Key(k)) {
 		return nil, false
 	}
 	mp := m.plug.panels.get(m.plug.panels.focus)

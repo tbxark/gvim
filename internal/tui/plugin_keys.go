@@ -573,7 +573,12 @@ func pluginKeyOf(k tea.Key) pluginapi.Key {
 // editorHasKeys reports whether the editor, not the explorer, the tab strip, the dock or
 // the welcome screen, has the keyboard.
 func (m *Model) editorHasKeys() bool {
-	return !m.explorerFocus && !m.tabFocus && !m.dockKeyboard() && !m.welcomeVisible()
+	// Plugin modes and key captures are plugin state, not panel focus: they are
+	// consulted only while the editor owns the keyboard. Every native chrome region
+	// that has its own keys (explorer, tab strip, Contents, Diagnostics, dock,
+	// welcome) keeps its keys even with a plugin mode or a pending key capture.
+	return !m.explorerFocus && !m.tabFocus && !m.dockKeyboard() && !m.welcomeVisible() &&
+		!m.contentsFocus && !m.diag.focus
 }
 
 // activeMode returns the mode that takes keys now: the editor's input mode, else the mode of
@@ -614,6 +619,11 @@ func (m *Model) pluginInputActive() bool {
 // focus.
 func (m *Model) pluginKey(k tea.Key) (tea.Cmd, bool) {
 	if m.plug.rt == nil || !m.editorHasKeys() {
+		return nil, false
+	}
+	if m.sidebarFocusCycleKey(k) {
+		// The root's sidebar focus cycle is app-wide, not a plugin key: a plugin
+		// input mode or pending capture must not swallow it.
 		return nil, false
 	}
 	ks := &m.plug.keys

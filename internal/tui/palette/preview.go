@@ -276,6 +276,7 @@ func (p *Palette) previewCmd() tea.Cmd {
 	}
 	target := 0
 	key := r.rel
+	fileWindow := fileMode && p.fileLine > 0
 	if liveFile {
 		target = r.line
 		// A Live Grep preview is a window around the hit, so the match line is part
@@ -283,6 +284,11 @@ func (p *Palette) previewCmd() tea.Cmd {
 		key = r.rel + "\x00" + strconv.Itoa(r.line)
 	} else {
 		target = p.fileLine
+		if fileWindow {
+			// A quick-open path:line target previews around that line too, not only the
+			// remote file head; the line is part of the cache identity.
+			key = r.rel + "\x00" + strconv.Itoa(target)
+		}
 	}
 	if key == s.rel && (s.ready || s.loading) {
 		return nil
@@ -296,7 +302,7 @@ func (p *Palette) previewCmd() tea.Cmd {
 	s.seq++
 	seq, read, root, owner := s.seq, p.opts.Preview, p.opts.Root, p.owner
 	path := filePath(root, r.rel, p.opts.Remote)
-	if liveFile {
+	if liveFile || fileWindow {
 		if window, ok := read.(WindowPreviewer); ok {
 			ctx, cancel := context.WithCancel(context.Background())
 			s.cancel = cancel

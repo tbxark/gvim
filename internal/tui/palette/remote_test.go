@@ -1,6 +1,7 @@
 package palette
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -108,5 +109,46 @@ func TestRemotePreviewReadsTheRemotePath(t *testing.T) {
 	settle(t, p, p.Init(), 8)
 	if len(pv.paths) == 0 || pv.paths[0] != "/remote/w/src/a.go" {
 		t.Fatalf("preview paths = %v, want the remote path", pv.paths)
+	}
+}
+
+// remoteWindowPreviewer is a fake previewer exposing the bounded-window seam.
+type remoteWindowPreviewer struct {
+	paths  []string
+	lines  []int
+	frames int
+}
+
+func (p *remoteWindowPreviewer) ReadHead(string, int) ([]byte, bool, error) {
+	return []byte("head\n"), false, nil
+}
+
+func (p *remoteWindowPreviewer) ReadWindow(_ context.Context, path string, line, _ int) ([]byte, int, bool, error) {
+	p.paths = append(p.paths, path)
+	p.lines = append(p.lines, line)
+	p.frames++
+	return []byte("line 10\nline 11\nline 12 target\nline 13\n"), 10, false, nil
+}
+
+// TestRemoteQuickOpenLineTargetUsesWindowPreview: a remote path:line query previews around
+// the target line through WindowPreviewer, instead of only reading the file head.
+func TestRemoteQuickOpenLineTargetUsesWindowPreview(t *testing.T) {
+	pv := &remoteWindowPreviewer{}
+	files := &fakeFiles{files: []string{"src/a.go"}}
+	p := New(Options{
+		Query:   "src/a.go:12",
+		Root:    "/remote/w",
+		Remote:  true,
+		Files:   files,
+		Ranker:  &fakeRanker{},
+		Preview: pv,
+	})
+	settle(t, p, p.Init(), 8)
+	if len(pv.paths) != 1 || pv.paths[0] != "/remote/w/src/a.go" || pv.lines[0] != 12 {
+		t.Fatalf("window preview = paths %v lines %v, want /remote/w/src/a.go at 12", pv.paths, pv.lines)
+	}
+	joined := strings.Join(shownPreview(t, p), "\n")
+	if !strings.Contains(joined, "12 │ line 12 target") {
+		t.Fatalf("preview does not show the target line:\n%s", joined)
 	}
 }

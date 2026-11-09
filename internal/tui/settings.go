@@ -169,6 +169,9 @@ type settingsPage struct {
 	box          space.Rect
 	// help is Fresh's settings_help panel: it lists the page's keys and any key closes it.
 	help bool
+	// searching is Fresh's settings_search mode: / starts it, Esc cancels it without
+	// closing the page, and Enter leaves it on the current filtered selection.
+	searching bool
 }
 
 // settingsPending is one unsaved change: a scalar row's display value, a
@@ -400,13 +403,38 @@ func (p *settingsPage) writable(it SettingsItem) bool {
 	return p.layer == SettingsLayerUser || slices.Contains(it.Layers, SettingsLayerProject)
 }
 
+// startSearch is Fresh's settings_search: enter the filter/search mode and clear the old
+// filter so typing starts a fresh search.
+func (p *settingsPage) startSearch() {
+	p.searching = true
+	p.filter = nil
+	p.rebuild()
+	p.sel = p.firstItem()
+	p.keepVisible()
+}
+
 // key handles one key press. It returns the command the press starts.
 func (p *settingsPage) key(msg tea.KeyPressMsg) tea.Cmd {
 	if p.help {
 		p.help = false
 		return nil
 	}
-	switch tea.Key(msg).Keystroke() {
+	ks := tea.Key(msg).Keystroke()
+	if p.searching {
+		switch ks {
+		case "esc":
+			p.searching = false
+			p.filter = nil
+			p.rebuild()
+			return nil
+		case "enter":
+			// Fresh's search: Enter jumps to the selected result. Keep the filtered rows
+			// and leave search mode; a second Enter edits the setting.
+			p.searching = false
+			return nil
+		}
+	}
+	switch ks {
 	case "up":
 		p.move(-1)
 	case "down":
@@ -1159,8 +1187,11 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 	}
 	ov.PaintBox(g, box.X, box.Y, box.W, box.H, title)
 	end := box.X + box.W - 2
-	// Filter row.
-	const filterLabel = "Filter: "
+	// Filter/search row.
+	filterLabel := "Filter: "
+	if p.searching {
+		filterLabel = uiText("gvim.settings.search_label", "Search: ")
+	}
 	filterY := box.Y + 1
 	g.Fill(box.X+1, box.X+box.W-1, filterY, ov.Box)
 	labelX := box.X + 2 + g.Put(box.X+2, filterY, end, filterLabel, ov.Muted)
@@ -1218,6 +1249,9 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 		g.Put(box.X+2, box.Y+2, end, "No matches", ov.Muted)
 	}
 	footer := "Enter edit · Del reset · Tab layer · ^S save · ^R discard · ^E raw · Esc close"
+	if p.searching {
+		footer = uiText("gvim.settings.search_footer", "Enter end search - Esc cancel search - type to filter")
+	}
 	for _, row := range p.rows {
 		if !row.header && len(row.item.Preview) > 0 {
 			// The legend leads so a narrow footer still names the chips (PaintFooter
@@ -1261,7 +1295,10 @@ func (p *settingsPage) Cursor(_, _ int) (x, y int, ok bool) {
 	if p.help || p.box.W == 0 {
 		return 0, 0, false
 	}
-	const label = "Filter: "
+	label := "Filter: "
+	if p.searching {
+		label = uiText("gvim.settings.search_label", "Search: ")
+	}
 	labelX := p.box.X + 2 + ansi.StringWidth(label)
 	room := p.box.X + p.box.W - 2 - labelX
 	if room < 0 {

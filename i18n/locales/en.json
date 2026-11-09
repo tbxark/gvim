@@ -1147,5 +1147,7 @@
   "gvim.settings.help.navigation": "Up/Down move  PgUp/PgDn page  Home/End first/last",
   "gvim.settings.help.edit": "Enter edit  Tab layer  Ctrl+S save  Ctrl+R reset",
   "gvim.settings.help.raw": "Ctrl+E edit raw  Delete inherit/reset the row",
-  "gvim.settings.help.filter": "Type to filter; Esc close help, then Esc close Settings"
+  "gvim.settings.help.filter": "Type to filter; / starts search; Esc close help, then Esc close Settings",
+  "gvim.settings.search_label": "Search: ",
+  "gvim.settings.search_footer": "Enter end search - Esc cancel search - type to filter"
 }

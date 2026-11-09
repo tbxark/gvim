@@ -942,9 +942,25 @@ Remote row preview uses `remotePreviewer.ReadWindow`: a cancellable authority
 lines maximum, 16 KiB display/64 KiB hard cap) returns complete remote lines around
 the match; it never reads the local disk and falls back to a bounded whole-file
 `ReadFile` only when the backend has no windowed primitive. The palette cancels the
-window read on selection change/dismiss. Enter on a file hit emits the remote absolute
-path (root joined with `/`, never the local separator), so the existing remote
-document access opens the real remote file.
+window read on selection change/dismiss; a quick-open remote `path:line` query uses the
+same window around its target line instead of only the head. Enter on a file hit emits the
+remote absolute path (root joined with `/`, never the local separator), so the existing
+remote document access opens the real remote file.
+
+The project-search panel's selected-match preview uses the same windowed idea through its
+optional `searchpanel.ContextWindowPreviewer` seam: `remoteSearch.PreviewWindowContext`
+scans the remote file from the start in 64 KiB `ReadRange` chunks until the selected
+match's surrounding window, with an 8 MiB scan budget, a 256 KiB output/line cap, the
+panel's cancellation context and the existing stale-sequence guard. A window that reaches
+EOF reports the true total line count; one that stops at its window reports `Window` +
+`Truncated` and an unknown total (the header says `window only`), and a match beyond the
+scan budget is an explicit error (never a silent file head or local fallback). Syntax
+colour is applied only when the total is known and within the shared highlighter's line
+cap, so a deep unknown-total window stays plain; the open-buffer path is unchanged. The
+window scan validates the bytes it reads (no NUL/binary and strict UTF-8, with a carried
+partial rune at chunk boundaries): a non-UTF-8 or binary remote file returns the explicit
+`not UTF-8 text`/`binary` error (or the palette's binary placeholder) instead of being
+silently sanitized into a plausible partial excerpt.
 
 Remote Live Grep keeps no result cache of its own. Resume restores the query/modes/
 scopes only (the palette re-runs the search), which is the honest behavior for remote

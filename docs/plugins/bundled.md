@@ -256,14 +256,19 @@ status row reports restoring/completed/failed, with the first stderr line on fai
 `lsp_server_error` that names the C# server (csharp/c#/roslyn/omnisharp) on a C# buffer puts an
 install hint on the status row, and the LSP-status click opens the help popup with a copyable
 `dotnet tool install --global csharp-ls` command, the native Start/Restart LSP Server and Show LSP
-Status actions, and Dismiss. Commands: **C#: Restore Project** (force a restore for the active file's
-project) and **C#: Show LSP Help**; it binds no key and registers no settings. It is opt-in
+Status actions, **Disable C# LSP**, and Dismiss. The disable action captures the active C# buffer's
+path/language and dispatches the controlled native `lsp_disable_language_target` action, which
+re-validates that same document/language before a root-level LSP-port mute; it is not a catalog
+command and the native LSP layer owns the async result/no-server notice (the plugin never claims
+success). Commands: **C#: Restore Project** (force a restore for the active file's project) and
+**C#: Show LSP Help**; it binds no key and registers no settings. It is opt-in
 (`default_enabled: false`) because it runs dotnet. Reductions (also in porting.md): gvim's plugin API
 cannot set the C# server's root URI, so Fresh's `setLspRootUri` step is replaced by gvim's LSP
 configuration/root detection; there is no server-request event for Roslyn's
 `workspace/_roslyn_projectNeedsRestore`, so that half of Fresh's restore flow is not ported (the
-open-file restore covers the common case); Fresh's "Disable C# LSP" action is replaced by the native
-LSP status menu (gvim has no plugin call to disable a language's server); Fresh's `dotnet --version`
+open-file restore covers the common case); the disable action is delegated to the controlled native
+LSP action above (a popup/tab switch or language mismatch is refused before the port-level mute);
+Fresh's `dotnet --version`
 precheck is replaced by running restore and reporting a start error; and the plugin ships only English
 i18n strings.
 
