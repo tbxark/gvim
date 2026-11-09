@@ -51,6 +51,54 @@ var envInputFiles = []string{
 	".venv/pyvenv.cfg",
 }
 
+// EnvInputFiles returns the workspace-relative files whose changes affect the activated
+// environment (a copy; the local fingerprint cache and the remote watcher both use it).
+func EnvInputFiles() []string { return append([]string(nil), envInputFiles...) }
+
+// EnvInputRootNames returns the top-level entries a workspace-root watch must treat as
+// env-input changes: the direct files plus the directories that hold nested inputs
+// (".venv" for ".venv/pyvenv.cfg"). A root watch reports direct children only, so a
+// change inside .venv appears as a .venv directory event.
+//
+// EnvInputNestedDirs returns the workspace-relative parent directories of nested inputs
+// (".venv"): the remote watcher must also watch those directories, because changing the
+// content of .venv/pyvenv.cfg changes the file but not the .venv directory mtime the root
+// watch sees.
+func EnvInputNestedDirs() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range envInputFiles {
+		i := strings.IndexByte(name, '/')
+		if i <= 0 {
+			continue
+		}
+		dir := name[:i]
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		out = append(out, dir)
+	}
+	return out
+}
+
+func EnvInputRootNames() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range envInputFiles {
+		root := name
+		if i := strings.IndexByte(root, '/'); i >= 0 {
+			root = root[:i]
+		}
+		if root == "" || seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, root)
+	}
+	return out
+}
+
 // Runner runs one shell command in dir and returns its standard output. It is a
 // variable for tests; the default runs sh -c with a timeout.
 type Runner func(dir, command string) (string, error)

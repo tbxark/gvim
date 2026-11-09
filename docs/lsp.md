@@ -360,8 +360,13 @@ once in the same atomic edit as the per-caret inserts. The combined edit list is
 an inverted range, overlapping ranges, an insert strictly inside a replaced range, or two
 zero-width inserts at the same point refuse the whole accept (ErrOverlappingEdits) and nothing
 is written. All of it is one undo step and keeps the request version guard. A server item that
-needs `completionItem/resolve` still refuses with extra carets, because its edits arrive later
-and the per-caret positions can no longer be guaranteed. With one caret the existing accept
+needs `completionItem/resolve` is resolved in a command too: at acceptance gvim snapshots the
+document version and every caret, closes the popup so the resolve never blocks the update loop,
+and applies the resolved candidate only if the active document, its version and every caret are
+still exactly that snapshot. The reply then goes through the same per-caret atomic path, with
+the resolved snippet stop and `additionalTextEdits` included; an edit, a moved/added/collapsed
+caret, a switch to another document, a failed resolve, or a missing version/editor capability
+refuses the whole accept with a notice and writes nothing. With one caret the existing accept
 path is unchanged: server edit range, snippet expansion, additional import edits, resolve and
 cursor placement all behave as before.
 
@@ -381,7 +386,8 @@ atomic edit guarded by the document version captured when the completion was ask
 an overlap check: if the document changed, or the main edit and an additional edit overlap,
 nothing is written and the status row says why ("completion is stale…", "completion edits
 overlap…"). A resolve reply is applied the same way; if the document changed while it was in
-flight, it is refused instead of editing newer text. Not ported from Fresh: tabstop
+flight, it is refused instead of editing newer text, and with multiple carets the caret snapshot
+above must also still match. Not ported from Fresh: tabstop
 navigation (Fresh does not navigate either — it inserts defaults and jumps to the final
 stop), and the request-id bookkeeping Fresh keeps for a completion that is re-asked while
 open. Multi-cursor insertion, including per-caret snippets and auto-imports, is covered above.

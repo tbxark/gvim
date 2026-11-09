@@ -7,10 +7,11 @@
 -- picked up by the next paint.
 --
 -- Reduction vs Fresh (docs/plugins/bundled.md):
---   * weather is not ported, and the third-party section API is absent. GitHub PRs
---     are a user-opt-in section (github_prs + network settings) over the bounded
---     gvim.http.get capability: public repos only, failures are a muted unavailable
---     line, and the response never touches disk.
+--   * weather and GitHub PRs are user-opt-in sections (weather / github_prs, plus
+--     network) over the bounded gvim.http.get capability; the third-party section
+--     API is absent. Weather uses wttr.in j1 JSON (public conditions only), GitHub
+--     reads public repositories; failures are a muted unavailable line and the
+--     response never touches disk.
 --   * the disk section shells out to df for the workspace mount and $HOME only.
 --   * every row is clickable: recent-file rows are path line targets and the
 --     action rows (including the Git section's branch-log row) are action line
@@ -35,9 +36,21 @@ local settings = gvim.settings.define {
     type = "boolean", default = false,
     description = "Show open GitHub pull requests for the workspace repository (needs network = true)",
   },
+  weather = {
+    type = "boolean", default = false,
+    description = "Show current weather and today/tomorrow from wttr.in (needs network = true)",
+  },
+  weather_location = {
+    type = "string", default = "",
+    description = "Place name or coordinates passed to wttr.in (e.g. Berlin or 52.52,13.40); empty uses wttr.in's IP geolocation",
+  },
+  weather_units = {
+    type = "enum", values = { "metric", "imperial" }, default = "metric",
+    description = "Units of the weather section: metric (C, km/h) or imperial (F, mph)",
+  },
   network = {
     type = "boolean", default = false,
-    description = "Allow this plugin to make bounded HTTPS GET requests (currently only the GitHub PR section)",
+    description = "Allow this plugin to make bounded HTTPS GET requests (needed by the weather and GitHub PR sections)",
   },
 }
 
@@ -75,6 +88,9 @@ local DISK_TTL_MS = 60000
 local GITHUB_TTL_MS = 60000
 local GITHUB_API = "https://api.github.com"
 local GITHUB_MAX_ROWS = 6
+local WEATHER_TTL_MS = 600000
+local WEATHER_URL = "https://wttr.in"
+local WEATHER_MAX_LOCATION = 100
 local RECENT_MAX = 10
 local MAX_ACTIONS = 8
 local MAX_RECENT_ROWS = 10
@@ -173,6 +189,7 @@ local state = {
   frame = "",            -- last painted frame text (skip identical writes)
   git = nil,             -- { at, branch, url, repo_url, branch_url, ... }
   github = nil,          -- { at, rows, unavailable, loading } from the GitHub REST API
+  weather = nil,         -- { at, now_text, evening, tomorrow, unavailable, loading }
   click_rows = {},       -- non-focusable clickable lines: { index, action }
   disk = nil,            -- { at, rows = { {mount, pct, free} } }
   timer = nil,
@@ -444,6 +461,241 @@ local function fetch_github()
   state.github = { at = now, rows = rows }
 end
 
+-- Weather (opt-in) --------------------------------------------------------
+-- Fresh registers its weather section only from explicit user init and shells out to
+-- curl for wttr.in's j1 JSON. gvim uses the bounded gvim.http.get instead: the URL host
+-- is fixed (https://wttr.in), a configured location is percent-encoded into one path
+-- segment, there are no credentials or request headers, the 5 s timeout keeps the
+-- awaitable Work off the update loop, and a failure renders one muted line.
+-- Display follows Fresh: current conditions, the 5pm nearest 3-hour sample and a
+-- tomorrow summary, with the user's metric/imperial setting.
+
+local function weather_units()
+  return (settings.weather_units == "imperial") and "imperial" or "metric"
+end
+
+local function weather_location()
+  local loc = settings.weather_location or ""
+  loc = loc:match("^%s*(.-)%s*$") or ""
+  if #loc > WEATHER_MAX_LOCATION then
+    loc = loc:sub(1, WEATHER_MAX_LOCATION)
+  end
+  return loc
+end
+
+-- encode the location as ONE path segment: everything but unreserved URL bytes becomes
+-- %XX (including spaces and UTF-8 bytes), so it cannot escape wttr.in's path or add a
+-- query fragment.
+local function weather_encode(s)
+  return (s:gsub("[^%w%-%._~]", function(c)
+    return string.format("%%%02X", string.byte(c))
+  end))
+end
+
+local function weather_text(v)
+  if type(v) == "string" then
+    return v
+  end
+  return ""
+end
+
+local function weather_cond(entry)
+  if type(entry) ~= "table" then
+    return ""
+  end
+  local desc = entry.weatherDesc
+  if type(desc) == "table" and type(desc[1]) == "table" then
+    return weather_text(desc[1].value)
+  end
+  return ""
+end
+
+local function weather_join(parts)
+  local out = {}
+  for _, part in ipairs(parts) do
+    if part ~= "" then
+      out[#out + 1] = part
+    end
+  end
+  return table.concat(out, " · ")
+end
+
+local function weather_clip(s)
+  if #s > 200 then
+    return gvim.text.truncate(s, 200, "…")
+  end
+  return s
+end
+
+-- hourly_at finds the 3-hour sample nearest target; wttr.in encodes time as "0", "300",
+-- ..., "2100", so 17:00 snaps to the 1800 sample (Fresh rounds rather than floors).
+local function weather_hourly_at(hours, target)
+  if type(hours) ~= "table" then
+    return nil
+  end
+  local best, best_delta = nil, math.huge
+  for _, hour in ipairs(hours) do
+    if type(hour) == "table" then
+      local raw = tonumber(hour.time) or 0
+      local hh = math.floor(raw / 100 + 0.5)
+      local delta = math.abs(hh - target)
+      if delta < best_delta then
+        best, best_delta = hour, delta
+      end
+    end
+  end
+  return best
+end
+
+local function weather_current(entry)
+  if type(entry) ~= "table" then
+    return ""
+  end
+  local cond = weather_cond(entry)
+  local temp, feels, wind
+  if weather_units() == "imperial" then
+    temp = weather_text(entry.temp_F)
+    if temp ~= "" then
+      temp = temp .. "°F"
+    end
+    feels = weather_text(entry.FeelsLikeF)
+    if feels ~= "" and feels ~= weather_text(entry.temp_F) then
+      feels = "feels " .. feels .. "°F"
+    else
+      feels = ""
+    end
+    wind = weather_text(entry.windspeedMiles)
+    if wind ~= "" then
+      wind = wind .. " mph"
+    end
+  else
+    temp = weather_text(entry.temp_C)
+    if temp ~= "" then
+      temp = temp .. "°C"
+    end
+    feels = weather_text(entry.FeelsLikeC)
+    if feels ~= "" and feels ~= weather_text(entry.temp_C) then
+      feels = "feels " .. feels .. "°C"
+    else
+      feels = ""
+    end
+    wind = weather_text(entry.windspeedKmph)
+    if wind ~= "" then
+      wind = wind .. " km/h"
+    end
+  end
+  local humidity = weather_text(entry.humidity)
+  if humidity ~= "" then
+    humidity = humidity .. "%"
+  end
+  return weather_clip(weather_join({ cond, temp, feels, wind, humidity }))
+end
+
+local function weather_hour(entry)
+  if type(entry) ~= "table" then
+    return ""
+  end
+  local cond = weather_cond(entry)
+  local temp, feels
+  if weather_units() == "imperial" then
+    temp = weather_text(entry.tempF)
+    if temp ~= "" then
+      temp = temp .. "°F"
+    end
+    feels = weather_text(entry.FeelsLikeF)
+    if feels ~= "" and feels ~= weather_text(entry.tempF) then
+      feels = "feels " .. feels .. "°F"
+    else
+      feels = ""
+    end
+  else
+    temp = weather_text(entry.tempC)
+    if temp ~= "" then
+      temp = temp .. "°C"
+    end
+    feels = weather_text(entry.FeelsLikeC)
+    if feels ~= "" and feels ~= weather_text(entry.tempC) then
+      feels = "feels " .. feels .. "°C"
+    else
+      feels = ""
+    end
+  end
+  return weather_clip(weather_join({ cond, temp, feels }))
+end
+
+local function weather_day(day)
+  if type(day) ~= "table" then
+    return ""
+  end
+  local cond = weather_cond(weather_hourly_at(day.hourly, 12))
+  local range = ""
+  if weather_units() == "imperial" then
+    local lo, hi = weather_text(day.mintempF), weather_text(day.maxtempF)
+    if lo ~= "" and hi ~= "" then
+      range = lo .. "°.." .. hi .. "°F"
+    end
+  else
+    local lo, hi = weather_text(day.mintempC), weather_text(day.maxtempC)
+    if lo ~= "" and hi ~= "" then
+      range = lo .. "°.." .. hi .. "°C"
+    end
+  end
+  return weather_clip(weather_join({ range, cond }))
+end
+
+local function fetch_weather()
+  if not settings.weather then
+    state.weather = nil
+    return
+  end
+  local now = now_ms()
+  if state.weather and state.weather.at and now - state.weather.at < WEATHER_TTL_MS then
+    return
+  end
+  local loc = weather_location()
+  local path = ""
+  if loc ~= "" then
+    path = "/" .. weather_encode(loc)
+  end
+  local url = WEATHER_URL .. path .. "?format=j1"
+  state.weather = { at = now, loading = true }
+  local res, err = gvim.http.get(url, { timeout_ms = 5000 })
+  if not res then
+    local text = tostring(err)
+    local reason = "unavailable"
+    if text:find("network is disabled", 1, true) then
+      reason = "network disabled (set network = true)"
+    end
+    state.weather = { at = now, unavailable = reason }
+    return
+  end
+  if res.status ~= 200 then
+    state.weather = { at = now, unavailable = "unavailable" }
+    return
+  end
+  local ok, parsed = pcall(json.decode, res.body)
+  if not ok or type(parsed) ~= "table" then
+    state.weather = { at = now, unavailable = "invalid response" }
+    return
+  end
+  local current = type(parsed.current_condition) == "table" and parsed.current_condition[1] or nil
+  local today_day = type(parsed.weather) == "table" and parsed.weather[1] or nil
+  local tomorrow_day = type(parsed.weather) == "table" and parsed.weather[2] or nil
+  local current_text = weather_current(current)
+  local evening = weather_hour(weather_hourly_at(today_day and today_day.hourly or nil, 17))
+  local tomorrow_text = weather_day(tomorrow_day)
+  if current_text == "" and evening == "" and tomorrow_text == "" then
+    state.weather = { at = now, unavailable = "invalid response" }
+    return
+  end
+  state.weather = {
+    at = now,
+    now_text = current_text,
+    evening = evening,
+    tomorrow = tomorrow_text,
+  }
+end
+
 -- disk data --------------------------------------------------------------
 
 local function fetch_disk()
@@ -578,6 +830,26 @@ local function build_rows(inner)
   elseif state.git and state.git.missing then
     heading("Git")
     kv("repository", "none in this workspace", STYLE.muted)
+  end
+  if settings.weather then
+    if #lines > 0 then
+      lines[#lines + 1] = { text = "" }
+    end
+    heading("Weather")
+    local w = state.weather
+    if not w or w.loading then
+      kv("weather", "loading…", STYLE.muted)
+    elseif w.unavailable then
+      kv("weather", w.unavailable, STYLE.muted)
+    else
+      kv("now", w.now_text ~= "" and w.now_text or "–", w.now_text ~= "" and STYLE.accent or STYLE.muted)
+      if w.evening and w.evening ~= "" then
+        kv("5pm", w.evening, STYLE.value)
+      end
+      if w.tomorrow and w.tomorrow ~= "" then
+        kv("tomorrow", w.tomorrow, STYLE.value)
+      end
+    end
   end
   if settings.github_prs then
     if #lines > 0 then
@@ -813,6 +1085,13 @@ local function refresh(force)
     if not ok then
       gvim.log.debug("dashboard: git: " .. tostring(err))
       state.git = { at = at, missing = true }
+    end
+  end
+  if settings.weather and (force or not state.weather or at - (state.weather.at or 0) > WEATHER_TTL_MS) then
+    local ok, err = pcall(fetch_weather)
+    if not ok then
+      gvim.log.debug("dashboard: weather: " .. tostring(err))
+      state.weather = { at = at, unavailable = "unavailable" }
     end
   end
   if settings.github_prs and (force or not state.github or at - (state.github.at or 0) > GITHUB_TTL_MS) then

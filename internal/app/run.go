@@ -904,6 +904,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 				}
 			}
 			go envRemote.Warm(ctx)
+			// Env-input changes on the remote host invalidate detection/capture through
+			// the authority's own watch (no local fallback); the watcher degrades to a
+			// Settings notice + manual Env: Reload when the backend cannot watch.
+			startRemoteEnvWatch(ctx, authSlot, envRemote, remoteRoot)
 		}
 		// Project search and Git Grep run on the remote host through the authority's
 		// one-shot surface (the gate still applies); their results carry absolute remote

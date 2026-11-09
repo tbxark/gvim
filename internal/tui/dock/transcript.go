@@ -45,6 +45,29 @@ func (p *Panel) capturePrior() {
 	p.trimPrior()
 }
 
+// exitMarkerPending reports whether the exited shell's marker still needs its
+// synthetic transcript row. When the shell exits, the marker is part of the
+// scrollback transcript immediately (Fresh appends it to the backing file at the
+// exit instant); until a restart captures it into the prior rows (or a restore
+// brings it back as an ordinary row), it is appended virtually after the frozen
+// screen so it is visible, copyable and saved exactly once.
+func (p *Panel) exitMarkerPending() bool { return p.exited && p.exitMarker }
+
+// exitMarkerRow is the absolute combined row of the pending exit marker: right
+// after the frozen screen's real rows (the pager's screen window is trimmed at the
+// marker, so no blank rows separate the marker from the last output). It is -1
+// when no marker is pending.
+func (p *Panel) exitMarkerRow() int {
+	if !p.exitMarkerPending() {
+		return -1
+	}
+	rows := p.scroll.screenRows
+	if p.term != nil {
+		rows = min(rows, p.term.Screen().Rows)
+	}
+	return len(p.prior) + p.scroll.total + rows
+}
+
 // appendExitMarker appends the exit marker line unless the transcript already
 // ends with it, so a restore/restart cycle never writes it twice.
 func appendExitMarker(lines []terminal.Line) []terminal.Line {

@@ -59,7 +59,7 @@ type settingsRuntime struct {
 // detector matched, whether an environment is active and the trust level that
 // gates activation. They read the env.Provider, never a subprocess.
 func (s *settingsService) projectEnvFacts() []envFact {
-	facts := make([]envFact, 0, 4)
+	facts := make([]envFact, 0, 5)
 	if det, ok := s.env.Detected(); ok {
 		facts = append(facts, envFact{
 			name: "Project environment", value: det.Name + " (" + string(det.Kind) + ")",
@@ -80,6 +80,11 @@ func (s *settingsService) projectEnvFacts() []envFact {
 	if n, ok := s.env.(interface{ Notice() string }); ok {
 		if notice := n.Notice(); notice != "" {
 			facts = append(facts, envFact{name: "Environment shell", value: "fallback", note: notice})
+		}
+	}
+	if n, ok := s.env.(interface{ WatchNotice() string }); ok {
+		if notice := n.WatchNotice(); notice != "" {
+			facts = append(facts, envFact{name: "Environment watch", value: "degraded", note: notice})
 		}
 	}
 	return facts

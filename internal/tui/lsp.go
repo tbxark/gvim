@@ -207,6 +207,24 @@ type completionResolvedMsg struct {
 	err  error
 }
 
+// completionMultiResolve is the document state a multi-caret resolve must still find
+// when its reply arrives: the version and every caret at the moment of acceptance.
+// The reply is applied only while all of it is unchanged, so the lazy edits cannot
+// land at positions computed for a different document or a different caret set.
+type completionMultiResolve struct {
+	path    string
+	version editor.Version
+	carets  []buffer.Pos // the primary caret first, then the extra carets
+}
+
+// completionMultiResolvedMsg is the answer of a completionItem/resolve started with
+// extra carets. state is the snapshot the accept took before the request.
+type completionMultiResolvedMsg struct {
+	state completionMultiResolve
+	item  CompletionItem
+	err   error
+}
+
 // lspAsk is a request to a server that gets a reply.
 type lspAsk int
 
@@ -556,6 +574,8 @@ func (m *Model) lspMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.lspReply(msg), true
 	case completionResolvedMsg:
 		return m.completionResolved(msg), true
+	case completionMultiResolvedMsg:
+		return m.completionMultiResolved(msg), true
 	case lspLoadedMsg:
 		m.lspLoaded(msg)
 		return nil, true
@@ -1158,6 +1178,9 @@ func (m *Model) acceptCompletion(c *lspCompletion, index int) tea.Cmd {
 		return nil
 	}
 	item := c.items[index]
+	if cmd, handled := m.resolveMultiCursorAccept(c, item); handled {
+		return cmd
+	}
 	if m.multiCursorAccept(c, item) {
 		return nil
 	}
@@ -1202,6 +1225,133 @@ func (m *Model) completionResolved(msg completionResolvedMsg) tea.Cmd {
 	return nil
 }
 
+// completionDocumentVersioner is the optional editor view that reports an open
+// document's version. A multi-caret resolve refuses to start without it: the async
+// reply needs a version captured at acceptance to prove the document did not change.
+type completionDocumentVersioner interface {
+	DocumentVersion(path string) (editor.Version, bool)
+}
+
+// resolveMultiCursorAccept handles an item whose lazy fields need
+// completionItem/resolve while the document has extra carets. It captures the
+// document version and every caret before the request and applies the reply only
+// when both are still identical. It reports whether it handled the acceptance.
+func (m *Model) resolveMultiCursorAccept(c *lspCompletion, item CompletionItem) (tea.Cmd, bool) {
+	if item.ResolveToken == 0 {
+		return nil, false
+	}
+	doc := m.ed.Active()
+	if doc == nil || docPath(doc) != c.path {
+		return nil, false
+	}
+	lister, ok := doc.(editorpane.CaretLister)
+	if !ok || len(lister.Cursors()) == 0 {
+		return nil, false
+	}
+	resolver, ok := m.lsp.port.(CompletionResolver)
+	if !ok {
+		m.closeCompletion(c)
+		m.notice = uiText("gvim.notice.completion.unresolved", "completion: this server item cannot be resolved")
+		return nil, true
+	}
+	if _, ok := m.ed.(completionItemAtCarets); !ok {
+		m.closeCompletion(c)
+		m.notice = "completion: multi-cursor resolved acceptance is not available in this editor"
+		return nil, true
+	}
+	versioner, ok := m.ed.(completionDocumentVersioner)
+	if !ok {
+		m.closeCompletion(c)
+		m.notice = "completion: a multi-cursor resolve cannot verify the document version here; collapse the extra carets and accept with one cursor"
+		return nil, true
+	}
+	version, versionOK := versioner.DocumentVersion(c.path)
+	if !versionOK {
+		m.closeCompletion(c)
+		m.notice = "completion: a multi-cursor resolve cannot verify the document version here; collapse the extra carets and accept with one cursor"
+		return nil, true
+	}
+	state := completionMultiResolve{path: c.path, version: version, carets: completionCaretHeads(doc)}
+	if len(state.carets) < 2 {
+		return nil, false
+	}
+	m.closeCompletion(c)
+	return m.resolveMultiCompletion(resolver, state, item.ResolveToken), true
+}
+
+// resolveMultiCompletion asks the server for the lazy fields in a command; the reply
+// carries the snapshot taken by the accept, never a pointer into a live document.
+func (m *Model) resolveMultiCompletion(resolver CompletionResolver, state completionMultiResolve, token int) tea.Cmd {
+	path := state.path
+	return func() tea.Msg {
+		item, err := resolver.ResolveCompletion(path, token)
+		return completionMultiResolvedMsg{state: state, item: item, err: err}
+	}
+}
+
+// completionCaretHeads returns the primary caret followed by the extra carets, in the
+// order the editor reports them. It is both the snapshot a resolve validates and the
+// current state it compares against.
+func completionCaretHeads(doc Document) []buffer.Pos {
+	heads := []buffer.Pos{doc.Cursor()}
+	if lister, ok := doc.(editorpane.CaretLister); ok {
+		for _, c := range lister.Cursors() {
+			heads = append(heads, c.Cursor)
+		}
+	}
+	return heads
+}
+
+// completionMultiResolved applies a multi-caret resolve reply. The lazy edits were
+// computed against the document the accept saw, so it writes nothing when the active
+// document, its version or any caret changed while the request ran. The resolved
+// insert, snippet stop and additional (import) edits still go through the editor's one
+// atomic, version-guarded multi-caret path, so the whole accept is one undo step.
+func (m *Model) completionMultiResolved(msg completionMultiResolvedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.notice = "completion: " + msg.err.Error()
+		return nil
+	}
+	doc := m.ed.Active()
+	if doc == nil || docPath(doc) != msg.state.path {
+		m.notice = "completion: the document is no longer active, so the resolved completion was not applied"
+		return nil
+	}
+	versioner, ok := m.ed.(completionDocumentVersioner)
+	if !ok {
+		m.notice = "completion: the document version can no longer be verified, so the resolved completion was not applied"
+		return nil
+	}
+	version, versionOK := versioner.DocumentVersion(msg.state.path)
+	if !versionOK || version != msg.state.version {
+		m.notice = "completion is stale: the document changed while the item was being resolved, so nothing was applied"
+		return nil
+	}
+	if heads := completionCaretHeads(doc); !slices.Equal(heads, msg.state.carets) {
+		m.notice = "completion: the cursors changed while the item was being resolved, so nothing was applied"
+		return nil
+	}
+	accepter, ok := m.ed.(completionItemAtCarets)
+	if !ok {
+		m.notice = "completion: multi-cursor resolved acceptance is not available in this editor"
+		return nil
+	}
+	additional := make([]editor.LSPEdit, 0, len(msg.item.Additional))
+	for _, add := range msg.item.Additional {
+		additional = append(additional, editor.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
+	}
+	cursorOffset := -1
+	if msg.item.Snippet && msg.item.CursorOffset >= 0 {
+		cursorOffset = msg.item.CursorOffset
+	}
+	wordChars := m.docLanguageSettings(doc).WordCharacters
+	expect := msg.state.version
+	if _, err := accepter.ApplyCompletionItemAtCarets(msg.state.path, msg.item.Insert, cursorOffset, additional, wordChars, &expect); err != nil {
+		m.notice = completionAcceptNotice(err)
+	}
+	return nil
+}
+
 // completionAtCarets is the optional editor view that accepts one completion at every
 // caret as one atomic edit with a version guard. The app adapter implements it; a fake
 // or an editor without it keeps the single-caret accept path.
@@ -1222,9 +1372,9 @@ type completionItemAtCarets interface {
 // insert_completion_text: each caret replaces its own identifier prefix with the same
 // text in one atomic edit (one undo step), and the version captured at the request stays
 // the guard. A snippet's rune stop places every caret inside its own insertion; the
-// additional (auto-import) edits are applied once in the same atomic edit. A resolve item
-// still refuses with extra carets: its lazy edits arrive later, when the per-caret
-// positions can no longer be guaranteed.
+// additional (auto-import) edits are applied once in the same atomic edit. A resolve
+// item is handled earlier by resolveMultiCursorAccept, which validates the snapshot its
+// async reply is applied against.
 func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 	doc := m.ed.Active()
 	if doc == nil || docPath(doc) != c.path {
@@ -1233,11 +1383,6 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 	lister, ok := doc.(editorpane.CaretLister)
 	if !ok || len(lister.Cursors()) == 0 {
 		return false
-	}
-	if item.ResolveToken != 0 {
-		m.closeCompletion(c)
-		m.notice = "completion: a resolved completion applies with one cursor; collapse the extra carets"
-		return true
 	}
 	var expect *editor.Version
 	if c.versionOK {
@@ -1272,16 +1417,20 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 	}
 	m.closeCompletion(c)
 	if err != nil {
-		switch {
-		case errors.Is(err, editor.ErrStale):
-			m.notice = "completion is stale: the document changed, so nothing was applied"
-		case errors.Is(err, editor.ErrOverlappingEdits):
-			m.notice = "completion edits overlap, so nothing was applied"
-		default:
-			m.notice = err.Error()
-		}
+		m.notice = completionAcceptNotice(err)
 	}
 	return true
+}
+
+// completionAcceptNotice is the status-row text for a refused multi-caret accept.
+func completionAcceptNotice(err error) string {
+	switch {
+	case errors.Is(err, editor.ErrStale):
+		return "completion is stale: the document changed, so nothing was applied"
+	case errors.Is(err, editor.ErrOverlappingEdits):
+		return "completion edits overlap, so nothing was applied"
+	}
+	return err.Error()
 }
 
 // applyCompletionItem inserts one accepted item and its additional edits (an

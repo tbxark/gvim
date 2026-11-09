@@ -47,11 +47,33 @@ type fakeRemoteOps struct {
 	target string
 	copies []string
 	moves  []string
-	// conflict makes a cancel-policy copy/move report explorer.ErrConflict.
-	conflict bool
-	policies []explorer.Conflict
-	copyAs   [][3]string // src, dstDir, name
-	moveAs   []string    // dstDir/name of a move
+	// conflict makes a cancel-policy copy/move report explorer.ErrConflict; conflictFor
+	// limits it to one source and fail makes one source return an error.
+	conflict    bool
+	conflictFor string
+	fail        map[string]error
+	policies    []explorer.Conflict
+	copyAs      [][3]string // src, dstDir, name
+	moveAs      []string    // dstDir/name of a move
+}
+
+// sourceConflict reports the cancel-policy conflict of one source.
+func (f *fakeRemoteOps) sourceConflict(src string, c explorer.Conflict) error {
+	if !f.conflict || c != explorer.ConflictCancel {
+		return nil
+	}
+	if f.conflictFor != "" && f.conflictFor != src {
+		return nil
+	}
+	return errors.Join(explorer.ErrConflict, errors.New("exists"))
+}
+
+// sourceFailure reports an injected error of one source.
+func (f *fakeRemoteOps) sourceFailure(src string) error {
+	if f.fail == nil {
+		return nil
+	}
+	return f.fail[src]
 }
 
 func (f *fakeRemoteOps) RemoteTarget() string { return f.target }
@@ -67,8 +89,11 @@ func (f *fakeRemoteOps) Move(_ context.Context, src, dstDir string) (string, err
 }
 func (f *fakeRemoteOps) MoveAs(_ context.Context, src, dstDir, name string, c explorer.Conflict) (string, error) {
 	f.policies = append(f.policies, c)
-	if f.conflict && c == explorer.ConflictCancel {
-		return "", errors.Join(explorer.ErrConflict, errors.New("exists"))
+	if err := f.sourceFailure(src); err != nil {
+		return "", err
+	}
+	if err := f.sourceConflict(src, c); err != nil {
+		return "", err
 	}
 	if name == "" {
 		name = path.Base(src)
@@ -80,8 +105,11 @@ func (f *fakeRemoteOps) MoveAs(_ context.Context, src, dstDir, name string, c ex
 }
 func (f *fakeRemoteOps) Copy(_ context.Context, src, dstDir string, c explorer.Conflict) (string, error) {
 	f.policies = append(f.policies, c)
-	if f.conflict && c == explorer.ConflictCancel {
-		return "", errors.Join(explorer.ErrConflict, errors.New("exists"))
+	if err := f.sourceFailure(src); err != nil {
+		return "", err
+	}
+	if err := f.sourceConflict(src, c); err != nil {
+		return "", err
 	}
 	f.copies = append(f.copies, src+" -> "+dstDir)
 	return dstDir + "/" + path.Base(src), nil
@@ -369,5 +397,126 @@ func TestRemoteCutPasteConflictOverwrite(t *testing.T) {
 	}
 	if len(ops.moveAs) != 1 || ops.moveAs[0] != "/r/dst/a.go" {
 		t.Fatalf("moveAs = %v", ops.moveAs)
+	}
+}
+
+// startRemotePaste starts a paste of paths and runs it until the first conflict overlay
+// (or completion).
+func startRemotePaste(t *testing.T, m *Model, ops *fakeRemoteOps, paths []string, cut bool) {
+	t.Helper()
+	m.clip = newClipboard("", paths, cut)
+	cmd := m.paste("/r/dst")
+	if cmd == nil {
+		t.Fatal("the paste started no jobs")
+	}
+	settle(t, m, cmd)
+	if len(m.overlays) == 0 {
+		t.Fatal("the paste did not stop at a conflict")
+	}
+}
+
+// chooseRemoteConflict answers the top conflict overlay with a mnemonic key.
+func chooseRemoteConflict(t *testing.T, m *Model, mnemonic string) {
+	t.Helper()
+	_, cmd := m.Update(typed(mnemonic))
+	settle(t, m, cmd)
+}
+
+// TestRemotePasteOverwriteAll checks Overwrite All overwrites the current conflict and
+// applies the overwrite policy to every remaining job, so no further prompt appears.
+func TestRemotePasteOverwriteAll(t *testing.T) {
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true}
+	m := remotePasteModel(t, ops)
+	startRemotePaste(t, m, ops, []string{"/r/a.go", "/r/b.go"}, false)
+	chooseRemoteConflict(t, m, "O")
+	if len(m.overlays) != 0 {
+		t.Fatalf("overlays = %d after Overwrite All", len(m.overlays))
+	}
+	if len(ops.copies) != 2 {
+		t.Fatalf("copies = %v, want both items", ops.copies)
+	}
+	if len(ops.policies) != 3 || ops.policies[0] != explorer.ConflictCancel || ops.policies[1] != explorer.ConflictOverwrite || ops.policies[2] != explorer.ConflictOverwrite {
+		t.Fatalf("policies = %v, want cancel then two overwrites", ops.policies)
+	}
+}
+
+// TestRemotePasteSkipKeepsAsking checks Skip skips only the current conflict and asks
+// again on the next one; skipping all conflicts finishes without running them.
+func TestRemotePasteSkipKeepsAsking(t *testing.T) {
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true}
+	m := remotePasteModel(t, ops)
+	startRemotePaste(t, m, ops, []string{"/r/a.go", "/r/b.go"}, false)
+	chooseRemoteConflict(t, m, "s")
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want the second conflict prompt", len(m.overlays))
+	}
+	chooseRemoteConflict(t, m, "s")
+	if len(m.overlays) != 0 {
+		t.Fatalf("overlays = %d after the last skip", len(m.overlays))
+	}
+	if len(ops.copies) != 0 {
+		t.Fatalf("copies = %v, want none after skips", ops.copies)
+	}
+}
+
+// TestRemotePasteSkipAllStopsRemaining checks Skip All skips the current and every
+// remaining conflict at once.
+func TestRemotePasteSkipAllStopsRemaining(t *testing.T) {
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true}
+	m := remotePasteModel(t, ops)
+	startRemotePaste(t, m, ops, []string{"/r/a.go", "/r/b.go", "/r/c.go"}, false)
+	chooseRemoteConflict(t, m, "S")
+	if len(m.overlays) != 0 {
+		t.Fatalf("overlays = %d after Skip All", len(m.overlays))
+	}
+	if len(ops.copies) != 0 || len(ops.policies) != 1 {
+		t.Fatalf("copies = %v policies = %v, want only the first attempt", ops.copies, ops.policies)
+	}
+	if !strings.Contains(m.notice, "Paste skipped") {
+		t.Fatalf("notice = %q, want the skip notice", m.notice)
+	}
+}
+
+// TestRemotePasteCancelKeepsCompletedItems checks Cancel after one item already completed
+// stops the remaining jobs, keeps the completed copy, and says how many items completed.
+func TestRemotePasteCancelKeepsCompletedItems(t *testing.T) {
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true, conflictFor: "/r/b.go"}
+	m := remotePasteModel(t, ops)
+	startRemotePaste(t, m, ops, []string{"/r/a.go", "/r/b.go", "/r/c.go"}, false)
+	chooseRemoteConflict(t, m, "c")
+	if len(ops.copies) != 1 || !strings.Contains(ops.copies[0], "/r/a.go") {
+		t.Fatalf("copies = %v, want the completed a.go only", ops.copies)
+	}
+	if len(m.overlays) != 0 {
+		t.Fatalf("overlays = %d after Cancel", len(m.overlays))
+	}
+	if !strings.Contains(m.notice, "Paste cancelled") || !strings.Contains(m.notice, "1 item(s)") {
+		t.Fatalf("notice = %q, want cancelled plus the completed count", m.notice)
+	}
+}
+
+// TestRemotePasteFailureKeepsCompletedCount checks a failure later in an Overwrite All
+// chain stops the rest, reports the error with the already-pasted count, and leaves the
+// completed copy alone.
+func TestRemotePasteFailureKeepsCompletedCount(t *testing.T) {
+	ops := &fakeRemoteOps{
+		target:   "SSH:u@h:/r",
+		conflict: true,
+		fail:     map[string]error{"/r/b.go": errors.New("disk full")},
+	}
+	m := remotePasteModel(t, ops)
+	startRemotePaste(t, m, ops, []string{"/r/a.go", "/r/b.go", "/r/c.go"}, false)
+	chooseRemoteConflict(t, m, "O")
+	if len(ops.copies) != 1 || !strings.Contains(ops.copies[0], "/r/a.go") {
+		t.Fatalf("copies = %v, want a.go only", ops.copies)
+	}
+	if len(ops.policies) != 3 {
+		t.Fatalf("policies = %v, want a's cancel+overwrite and b's overwrite", ops.policies)
+	}
+	if !strings.Contains(m.notice, "disk full") || !strings.Contains(m.notice, "1 item(s)") {
+		t.Fatalf("notice = %q, want the failure plus the completed count", m.notice)
+	}
+	if len(m.overlays) != 0 {
+		t.Fatal("a failure left a conflict overlay open")
 	}
 }

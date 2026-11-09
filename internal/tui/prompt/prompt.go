@@ -53,6 +53,9 @@ type Done struct {
 	Tag     any
 	Outcome Outcome
 	Text    string // the input of a text prompt; empty for a confirm
+	// Choice is the selected option of a Choice prompt (Overwrite/Overwrite All/Skip/
+	// Skip All/Cancel); 0 for every other prompt kind.
+	Choice int
 }
 
 // done returns the command that reports d.

@@ -96,6 +96,11 @@ func (p *Panel) bodyRows() int {
 // combined is the rows the scrollback view scrolls through: a restarted shell's
 // prior transcript, then the history, then the live screen rows.
 func (p *Panel) combined() int {
+	if marker := p.exitMarkerRow(); marker >= 0 {
+		// The marker follows the frozen screen's real rows; rows the pager window
+		// keeps below it are not reachable while the marker is the transcript end.
+		return marker + 1
+	}
 	return len(p.prior) + p.scroll.total + p.scroll.screenRows
 }
 
@@ -465,6 +470,9 @@ func (p *Panel) jumpToMatch(i int) {
 func (p *Panel) combinedText(abs int) (string, bool) {
 	if abs < 0 || abs >= p.combined() {
 		return "", false
+	}
+	if abs == p.exitMarkerRow() {
+		return terminalExitMarker, true
 	}
 	if abs < len(p.prior) {
 		return p.prior[abs].Text(), true

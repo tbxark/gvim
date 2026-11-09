@@ -124,8 +124,8 @@ it), otherwise the call fails with `unsupported` before any DNS or request. The 
 The call is awaitable Work: it never blocks the update loop. Failures are returned as `nil, err`
 (`invalid` for policy, `timeout`, `too_large`, `io` for network/DNS, `unsupported` when the
 network setting is off); a caller that wants a silent degradation handles the error. This is the
-capability behind the dashboard's opt-in GitHub PR section; there is no generic fetch API for
-non-JSON/plain-text scraping, no authentication/token, and no response cache.
+capability behind the dashboard's opt-in GitHub PR and weather sections; there is no generic
+fetch API for non-JSON/plain-text scraping, no authentication/token, and no response cache.
 
 ## gvim.proc and gvim.env
 

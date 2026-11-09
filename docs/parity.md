@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `a6b49f2` plus the merged round-29 work (206–210,212; 211
+Last verified: 2026-11-09, tree commit `0712aa9` plus the merged round-30 work (213–217; 218
 audit). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet,
-golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 115 KiB / de 82
-KiB / both 198 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
-EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r29-tests.log`). The audit ran build/gofmt/
-i18n_check plus targeted round-29 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
+golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 110 KiB / de 82
+KiB / both 193 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
+EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r30-tests.log`). The audit ran build/gofmt/
+i18n_check plus targeted round-30 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
 search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain
 security/secret-tool, real-tmux, Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching
 remain UNTESTED. Fresh reference: `refs/fresh` same date.
@@ -1515,6 +1515,75 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-30 outcome (2026-11-09, merged working tree on `0712aa9`).** Five tasks landed (213–217);
+218 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
+0: 76 packages ok, no FAIL (log `/tmp/gvim-r30-tests.log`). The audit read the diff and ran targeted
+tests; the Lead ran the full suite.
+**Opt-in dashboard weather (213).** With plugins.dashboard.settings.weather=true (and the host network
+gate settings.network=true; project layer never grants), optional weather_location (a place name or
+coordinates; empty asks wttr.in to use the host's public IP) and weather_units=metric|imperial, the
+dashboard makes one bounded `https://wttr.in[/<percent-encoded location>]?format=j1` request (5 s
+timeout, 10 min refresh TTL) through the restricted gvim.http capability. Rendered as Fresh: “now”
+condition/temperature/feels-like/wind/humidity, “5pm” from the nearest 3-hour sample, and a
+“tomorrow” range/condition summary. No credentials or caller headers, body stays in memory (no disk
+write), never blocks the UI; timeout/offline/malformed body/disabled network renders one muted
+unavailable/invalid response/network disabled line with no notice. Third-party section API remains
+absent; reductions: no multi-day detail beyond today/tomorrow and no dedicated location picker (plain
+string; empty delegates geolocation to wttr.in) (R9-1/R13-6).
+**Terminal exit marker at the exit instant (214).** The `[Terminal process exited]` marker is no longer
+appended only at save: it becomes the transcript's last row AT THE EXIT INSTANT as a synthetic row
+while the frozen screen is still on show, so the scrollback pager (Ctrl+Space) shows it immediately and
+it can be selected/copied without saving first. A save stores it as an ordinary bounded transcript row;
+a restart captures it before the new shell, so restart/resume continues BELOW it and never overwrites
+output. Tab title still carries the status; gvim keeps the frozen last screen in its live view on exit
+(Fresh switches that buffer to read-only scrollback), so the marker is visible in the pager at the exit
+instant but not painted on the frozen live screen; an alternate-screen exit has no pager (“The
+alternate screen has no scrollback.”) though the marker row is persisted for restore. Old sessions keep
+their behavior; exactly-once/no duplication across save/restart/restore (R13-15).
+**Remote env-input file watching (215).** The authority's own file watch now watches .envrc, mise.toml,
+.mise.toml, .tool-versions, pyvenv.cfg and the .venv directory: a change invalidates the cached
+detection/capture and re-warms it in the background (no local filesystem consulted). The watcher arms
+the workspace root plus existing nested input directories (.venv), so a content-only change to
+.venv/pyvenv.cfg is seen even when the root directory entry does not change; when a nested directory
+appears, the next root event re-arms the watcher with it. A backend whose file surface cannot watch
+degrades safely: the watcher stops, Settings Environment rows say the inputs are not watched and point
+at Env: Reload, and manual reload keeps working; other watch failures retry with the same bounded
+backoff as the remote document watch. Detection is cached until Refresh/SetRoot or an env-input event;
+invalidation is asynchronous (an in-flight spawn can use the previous captured delta until warm);
+Settings rows show remote facts only after the background warm; no status-row active remote-
+environment indicator yet; local unchanged (R13-18).
+**Resolve multi-cursor completion (216).** When the accepted item has a ResolveToken and the active
+document has extra carets, acceptance snapshots the document version and every caret, closes the popup
+so the resolve never blocks the update loop, and applies the resolved candidate only if the active
+document, its version and every caret are still exactly that snapshot. The reply then goes through the
+same per-caret atomic path, with the resolved snippet stop and additionalTextEdits included: one atomic
+edit/one undo, request version guard. An edit, a moved/added/collapsed caret, a switch to another
+document, a failed resolve, or a missing version/editor capability refuses the whole accept with a
+notice and writes nothing. Single-caret path unchanged (R13-7).
+**Remote batch-paste conflicts: Skip/Skip All/Overwrite All (217).** A multi-item remote paste conflict
+now opens Fresh's dialog Overwrite (o) / Overwrite All (O) / Skip (s) / Skip All (S) / Cancel (c, Esc)
+through a Choice overlay. Overwrite handles the current item and asks about the next conflict;
+Overwrite All applies the overwrite policy to every remaining job of that paste (no further prompts);
+Skip skips only the current item and asks about the next; Skip All skips current and all remaining
+items and stops (a cut paste also drops those stranded sources from the clipboard, like Fresh's
+finished batch); Cancel stops current and remaining jobs, keeps already-completed files and leaves the
+clipboard for a retry. Stop notices count completed items; a later non-conflict failure stops the
+remaining jobs, keeps completed/partial results and appends the count to the error notice. Rename
+remains a single-item prefilled “Paste as on SSH:…” CopyAs/MoveAs; Overwrite still removes the existing
+destination first and copies (cut source removed only after success); the adapter's Skip leaves the
+destination/reports the path and returns the source for cut. Local Overwrite/Skip prompt unchanged;
+Duplicate stays a same-directory free-name copy. Recorded divergence: Fresh resolves the whole multi-
+conflict queue first and runs the batch only then, so its Cancel executes nothing; gvim runs the chain
+incrementally, so a later Cancel/Skip All keeps items already pasted (notices count them; no hidden
+undo). Overwrite All applies only to the remaining jobs of that one paste and is not remembered for a
+later paste; remove-then-copy remains no-rollback (a re-created destination between removal and copy is
+a documented race; file copy atomically replaces it, directory copy fails at Mkdir); no local fallback
+(R13-21).
+Metrics: palette 240, settings 69 in 14 sections, bundled 25 (9 on)/16 off, plugin API 244 functions/
+1489 lines level 2; i18n en 1015 / 579 per locale, 564 KiB text (under 640 KiB cap), ≈654 KiB JSON,
+heap 110-82-193 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r30-tests.log); real hosts
+UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-29 outcome (2026-11-09, merged working tree on `a6b49f2`).** Six tasks landed (206–210,212);
 211 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
@@ -3762,6 +3831,42 @@ for parity status.
      part alone as-is/both empty Terminal N. Untrusted cleaned again; v1/old readers ignore/old records
      old defaults/corrupt cleaned. OPEN: recorded launch program not live foreground process (no pty
      foreground cache; later foreground change not reflected).
+184. **Opt-in dashboard weather (213; R9-1/R13-6).** plugins.dashboard.settings.weather=true +
+     network=true user-layer; optional weather_location (place/coords, empty host IP via wttr.in),
+     weather_units metric|imperial; one bounded https://wttr.in[/<encoded location>]?format=j1 (5s
+     timeout,10min TTL) via gvim.http; renders now condition/temp/feels/wind/humidity, 5pm nearest
+     3-hour sample, tomorrow range/condition; no credentials/caller headers, memory-only, no UI block;
+     timeout/offline/malformed/disabled network -> one muted line no notice. Residuals: no multi-day
+     beyond today/tomorrow, no location picker (plain string/empty geolocation), third-party section
+     API absent.
+185. **Terminal exit marker at exit instant (214; R13-15).** Marker becomes transcript last row AT
+     EXIT (synthetic while frozen screen shown), pager Ctrl+Space shows immediately/select/copy without
+     save; save stores ordinary bounded row; restart captures before new shell/restart-resume below
+     never overwrites; tab title status; gvim keeps frozen live view so marker in pager not painted on
+     frozen screen; alt-screen no pager message but marker persisted for restore; old sessions
+     compatible/exactly once/no duplicate.
+186. **Remote env-input watch (215; R13-18).** authority watch .envrc/mise.toml/.mise.toml/.tool-
+     versions/pyvenv.cfg/.venv; change invalidates cached detection/capture and background re-warm, no
+     local FS; arms root + existing nested input dirs so content-only pyvenv.cfg seen; new nested dir
+     re-arms next root event; no-watch backend degrades: watcher stops, Settings rows say not watched +
+     Env: Reload, manual reload works; other watch failures bounded backoff like document watch; cached
+     until Refresh/SetRoot/env event; async invalidation (in-flight spawn previous delta); Settings after
+     warm; no status-row active-env indicator; local unchanged.
+187. **Resolve multi-cursor completion (216; R13-7).** ResolveToken + extra carets: acceptance
+     snapshots doc version + every caret, closes popup (resolve no UI block), applies only if active doc/
+     version/every caret still exactly snapshot; reply via same per-caret atomic path incl resolved
+     snippet stop/additionalTextEdits, one atomic edit/undo/version guard; edit/moved/added/collapsed
+     caret/switch doc/failed resolve/missing version-editor capability -> whole accept refused/no write;
+     single-caret unchanged.
+188. **Remote batch-paste conflict dialog (217; R13-21).** Multi-item paste: Choice overlay Overwrite
+     (o)/Overwrite All(O)/Skip(s)/Skip All(S)/Cancel(c,Esc); current/next prompt semantics, Overwrite All
+     remaining jobs no prompts, Skip only current, Skip All current+remaining stops (cut drops stranded
+     clipboard), Cancel keeps completed/leaves clipboard retry, notices count completed, later failure
+     stops remaining keeps completed/partial+count; Rename single prefilled CopyAs/MoveAs; Overwrite
+     remove-then-copy (cut source after success); adapter Skip direct; local prompt unchanged; Duplicate
+     free-name. Divergence: Fresh resolves queue before running, gvim incremental so later Cancel/Skip All
+     keeps already-pasted items (no hidden undo); Overwrite All only remaining of that paste; remove-then-
+     copy no rollback/re-creation race; no local fallback.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -5545,21 +5650,35 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-30 verification (2026-11-09, merged tree on `0712aa9`; 213–217 landed; 218 audit).**
+  STATIC GATES PASS (Lead, default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint
+  0, purity, import rules, menus, i18n_check with catalogue heap en 110 KiB / de 82 KiB / both 193
+  KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76
+  packages ok, no FAIL line (log `/tmp/gvim-r30-tests.log`). The audit ran build/gofmt/i18n_check
+  plus targeted round-30 tests/diff review only; the Lead ran the full suite. Tracks: 213 dashboard
+  weather opt-in via restricted HTTPS; 214 terminal exit marker at exit instant (pager-visible,
+  exactly-once/old-session compatible); 215 remote env-input file watch invalidation/re-warm +
+  degradation notice; 216 resolve multi-cursor snapshot validation/atomic apply; 217 remote batch-paste
+  Overwrite All/Skip/Skip All/Cancel (incremental execution divergence recorded).
+  Heap-guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-
+  only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
+  a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
+  fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-29 landed kitty fixes, remote env re-probe, dashboard PR clickable, finder degradation notice,
-  HTTPS IPv6-transition SSRF refusal, terminal title combination; full suite EXIT 0 (76 packages, log
-  /tmp/gvim-r29-tests.log); §5.5 is round-30/31 plan; TUI-only scope/genuine-equivalence §4 item 94/
-  §8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–29 had their gate sets
-  run. Round 29 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-30 landed weather opt-in, terminal exit-instant marker, remote env-input watch, resolve
+  multi-cursor, batch-paste All/Skip; full suite EXIT 0 (76 packages, log /tmp/gvim-r30-tests.log);
+  §5.5 is round-31/32 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks
+  UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–30 had their gate sets
+  run. Round 30 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  115 KiB / de 82 KiB / both 198 KiB, git diff --check). Final full
+  110 KiB / de 82 KiB / both 193 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r29-tests.log`. The audit ran build/gofmt/i18n_check plus targeted round-29 tests and
+  `/tmp/gvim-r30-tests.log`. The audit ran build/gofmt/i18n_check plus targeted round-30 tests and
   diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
   recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
   production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling
@@ -5661,18 +5780,18 @@ modifier-only/media/F13+ not encoded); clangd_support no server-specific switchS
 custom notifications/floating panel/ancestor .clangd walk; csharp_support no setLspRootUri/Roslyn
 needs-restore event/Disable/--version precheck/English-only; asm_lsp exclusive create local crash-
 partial/remote claim-write cleanup/once-only; multi-cursor resolve-based completion/large-file/request-
-id; remote paste no All variants and overwrite remove-then-copy re-creation race; mixed extract
+id; r30 batch paste Overwrite All/Skip/Skip All/Cancel landed (incremental vs Fresh resolve-first, overwrite remove-then-copy no rollback); mixed extract
 co-tenant-only/no PTY handover/default-name conflicts/no undo-drag/shared buffers; SSH keychain opt-in
 fake-tested (macOS argv exposure/Linux keyring-DBus, 2FA/passphrase not stored)/real host UNTESTED;
 update_command no download/install engine/no Settings row; URL http(s)-only/no non-GitHub branch URL/
 opener not configurable; dashboard weather/GitHub-network/section API/dock/mouse/sessions OPEN;
-terminal restart indicator lacks OS foreground name/different hover/marker at capture; remote preview
+terminal restart indicator lacks OS foreground name/different hover; r30 marker exit-instant but frozen live screen keeps it pager-only; remote preview
 head-only >256 KiB/no semantic-LSP/no remote preview buffer; shared Save As reservation in-process/
 dropped-plan leak/non-gvim writers/disk exists/dormant-owner; remote search failed/truncated defaults/
 widened notices/match limit after merge/nested inner ignore/finder snapshot; plugin copy descendant
 no-overwrite/partial tree/no-cap backend/16 MiB fallback; remote explorer drag/move/undo/whole-subtree
 transaction/mode-mtime-hardlink-xattr/watch latency/Windows; remote marker scan/hot-exit local-staging
-privacy/conflict/ownership; SSH 2FA/signature detail/real host; remote env fallback; live-restore
+privacy/conflict/ownership; SSH 2FA/signature detail/real host; remote env input watch landed r30; fallback/no active-env status remains; live-restore
 byte-exact/OSC gaps; input GPM/kitty host; URL packaged; auto_attach nuances; plugin ports (r28
 clangd_support, r27 csharp_support, r25 asm_lsp ported; remaining OPEN); universal; ConPTY; i18n
 boundary are OPEN (R13-1…R13-24). Landed/no longer open: r28 plugin HTTPS/GitHub PR, remote

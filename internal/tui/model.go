@@ -1204,6 +1204,8 @@ type fileJob struct {
 	name    string           // the new name: create, mkdir, rename
 	policy  expanel.Conflict // copy and move conflict choice
 	dstName string           // copy/move destination name after a conflict rename
+	pasted  int              // how many items of the same paste were already completed
+	multi   bool             // this job belongs to a multi-item paste (Fresh's multi dialog)
 	rest    []fileJob        // the jobs of the same paste after this one
 }
 
@@ -1228,7 +1230,10 @@ type (
 	// remotePasteRenameTag carries the new destination name.
 	remotePasteConflictTag struct{ job fileJob }
 	remotePasteRenameTag   struct{ job fileJob }
-	gotoTag                struct{}
+	// remotePasteMultiTag asks the multi-item remote paste conflict dialog (Overwrite,
+	// Overwrite All, Skip, Skip All, Cancel).
+	remotePasteMultiTag struct{ job fileJob }
+	gotoTag             struct{}
 )
 
 // fileRecorder is the ranker's frecency record. A ranker that has one gets the
@@ -1486,6 +1491,85 @@ func (m *Model) askRemotePasteRename(job fileJob) {
 	}))
 }
 
+// Indices of the remote multi-paste conflict choices (mirrors Fresh's multi dialog).
+const (
+	remotePasteOverwrite = iota
+	remotePasteOverwriteAll
+	remotePasteSkip
+	remotePasteSkipAll
+	remotePasteCancel
+)
+
+// remoteMultiPasteOptions are Fresh's multi-entry conflict answers: o/O differ only in
+// case (current/all), and so do s/S.
+func remoteMultiPasteOptions() []prompt.ChoiceOption {
+	return []prompt.ChoiceOption{
+		{Label: "Overwrite", Key: "o"},
+		{Label: "Overwrite All", Key: "O"},
+		{Label: "Skip", Key: "s"},
+		{Label: "Skip All", Key: "S"},
+		{Label: "Cancel", Key: "c"},
+	}
+}
+
+// askRemoteMultiPasteConflict asks the multi-item paste conflict dialog.
+func (m *Model) askRemoteMultiPasteConflict(job fileJob) {
+	name := job.dstName
+	if name == "" {
+		name = filepath.Base(job.path)
+	}
+	q := "Remote destination exists on " + m.remoteExplorerTarget() + ": " + name
+	m.pushOverlay(prompt.NewChoice(m.styles, q, remotePasteMultiTag{job: job}, remoteMultiPasteOptions()))
+}
+
+// answerRemoteMultiPaste applies one multi-item conflict answer. Overwrite asks for the
+// next conflict; Overwrite All also applies the overwrite policy to the remaining jobs;
+// Skip skips only this item and asks again on the next conflict; Skip All stops the
+// remaining items (clearing a cut paste's clipboard for the stranded sources, as Fresh's
+// finished batch does); Cancel stops the remaining items and keeps the clipboard for a
+// retry. Already-completed items are never touched.
+func (m *Model) answerRemoteMultiPaste(job fileJob, choice int) tea.Cmd {
+	switch choice {
+	case remotePasteOverwrite:
+		job.policy = expanel.ConflictOverwrite
+		return m.runJob(job)
+	case remotePasteOverwriteAll:
+		job.policy = expanel.ConflictOverwrite
+		rest := append([]fileJob(nil), job.rest...)
+		for i := range rest {
+			if rest[i].kind == jobCopy || rest[i].kind == jobMove {
+				rest[i].policy = expanel.ConflictOverwrite
+			}
+		}
+		job.rest = rest
+		return m.runJob(job)
+	case remotePasteSkip:
+		return m.runJobs(job.rest)
+	case remotePasteSkipAll:
+		m.notice = pasteStopNotice("Paste skipped", job.pasted)
+		if job.kind == jobMove {
+			m.forgetClipboard(job.path)
+			for _, next := range job.rest {
+				m.forgetClipboard(next.path)
+			}
+		}
+		return nil
+	case remotePasteCancel:
+		m.notice = pasteStopNotice("Paste cancelled", job.pasted)
+		return nil
+	}
+	return nil
+}
+
+// pasteStopNotice names how many items of a stopped paste already completed, so a cancel
+// or skip-all after some work is never mistaken for nothing having happened.
+func pasteStopNotice(prefix string, completed int) string {
+	if completed > 0 {
+		return fmt.Sprintf("%s; %d item(s) of this paste were already pasted", prefix, completed)
+	}
+	return prefix
+}
+
 // pasteAsLabel names the conflict rename prompt, including the remote target when there
 // is one.
 func pasteAsLabel(target string) string {
@@ -1564,6 +1648,8 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		job.dstName = d.Text
 		job.policy = expanel.ConflictCancel
 		return m.runJob(job)
+	case remotePasteMultiTag:
+		return m.answerRemoteMultiPaste(tag.job, d.Choice)
 	case overwriteSaveTag:
 		return m.overwriteAnswer(tag, d)
 	case fullLoadTag:
@@ -1621,9 +1707,9 @@ func (m *Model) paste(dir string) tea.Cmd {
 	jobs := make([]fileJob, 0, len(paths))
 	for _, p := range paths {
 		if c.cut {
-			jobs = append(jobs, fileJob{kind: jobMove, path: p, dir: dir})
+			jobs = append(jobs, fileJob{kind: jobMove, path: p, dir: dir, multi: len(paths) > 1})
 		} else {
-			jobs = append(jobs, fileJob{kind: jobCopy, path: p, dir: dir, policy: expanel.ConflictCancel})
+			jobs = append(jobs, fileJob{kind: jobCopy, path: p, dir: dir, policy: expanel.ConflictCancel, multi: len(paths) > 1})
 		}
 	}
 	return m.runJobs(jobs)
@@ -1734,10 +1820,15 @@ func (m *Model) runJob(job fileJob) tea.Cmd {
 func (m *Model) fileDone(r fileResultMsg) tea.Cmd {
 	if r.err != nil {
 		conflict := errors.Is(r.err, expanel.ErrConflict)
-		// A remote paste conflict offers overwrite, rename or cancel (Esc). The local
-		// adapter keeps its existing overwrite/skip prompt.
+		// A remote paste conflict offers Fresh's dialogs: the single-item one is
+		// overwrite/rename/cancel; a multi-item paste gets overwrite/overwrite all/skip/
+		// skip all/cancel. The local adapter keeps its existing overwrite/skip prompt.
 		if conflict && m.remoteExplorerTarget() != "" && (r.job.kind == jobCopy || r.job.kind == jobMove) {
-			m.askRemotePasteConflict(r.job)
+			if r.job.multi || len(r.job.rest) > 0 {
+				m.askRemoteMultiPasteConflict(r.job)
+			} else {
+				m.askRemotePasteConflict(r.job)
+			}
 			return nil
 		}
 		if r.job.kind == jobCopy && r.job.policy == expanel.ConflictCancel && conflict {
@@ -1745,6 +1836,11 @@ func (m *Model) fileDone(r fileResultMsg) tea.Cmd {
 			return nil
 		}
 		m.notice = r.err.Error()
+		// The completed-item count is part of the remote multi-paste conflict flow only:
+		// a local paste failure keeps its established error notice unchanged.
+		if r.job.pasted > 0 && r.job.multi && m.remoteExplorerTarget() != "" && (r.job.kind == jobCopy || r.job.kind == jobMove) {
+			m.notice += fmt.Sprintf(" (%d item(s) of this paste were already pasted)", r.job.pasted)
+		}
 		return nil
 	}
 	job := r.job
@@ -1777,7 +1873,14 @@ func (m *Model) fileDone(r fileResultMsg) tea.Cmd {
 		m.notice = "Paste stopped: the cut was cancelled"
 		return reload
 	}
-	return tea.Batch(reload, m.runJobs(job.rest))
+	rest := job.rest
+	if len(rest) > 0 {
+		rest = append([]fileJob(nil), rest...)
+		for i := range rest {
+			rest[i].pasted = job.pasted + 1
+		}
+	}
+	return tea.Batch(reload, m.runJobs(rest))
 }
 
 // cutHolds reports whether the clipboard is still a cut that holds path.

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/style"
 )
 
 // exitedPanel is a live panel whose shell has just reported exit status code/known.
@@ -204,4 +206,84 @@ func TestRestoredExitStatusAndMarkerOrder(t *testing.T) {
 		t.Fatalf("old record gained exit state: %+v", st)
 	}
 	_ = color.RGBA{}
+}
+
+// TestExitMarkerAppearsAtExit checks the marker is part of the scrollback
+// transcript immediately when the shell exits (not only on save): it is the last
+// combined row, copyable, painted in the pager, and saved exactly once after the
+// frozen output.
+func TestExitMarkerAppearsAtExit(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.screen = newScreen(20, "bye now")
+	p := newTestPanel(t, &fakeStarter{term: term})
+	if _, ok := p.Update(exitMsg{gen: p.gen, code: 3, codeOK: true}); !ok {
+		t.Fatal("the exit message was not handled")
+	}
+	if !p.exitMarkerPending() {
+		t.Fatal("the exit marker is not pending at the exit")
+	}
+	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+		t.Fatalf("last transcript row at exit = %q, %v", got, ok)
+	}
+	// It is visible in the pager without any save: ordering is output, then marker.
+	applyScroll(t, p, p.ToggleScrollback())
+	l := scrollLayout()
+	g := grid.New(l.W, l.H)
+	p.Draw(g, l, style.Styles{})
+	rows := g.Plain()
+	markerAt, outputAt := -1, -1
+	for i, row := range rows {
+		if strings.Contains(row, terminalExitMarker) {
+			markerAt = i
+		}
+		if strings.Contains(row, "bye now") {
+			outputAt = i
+		}
+	}
+	if markerAt < 0 || outputAt < 0 || markerAt <= outputAt {
+		t.Fatalf("marker/output order in the pager: marker=%d output=%d rows=%q", markerAt, outputAt, rows)
+	}
+	// Saving twice still records one marker after the frozen output.
+	for range 2 {
+		st := p.SavedState()
+		if len(st.Rows) < 2 || st.Rows[len(st.Rows)-1] != terminalExitMarker {
+			t.Fatalf("saved rows = %q", st.Rows)
+		}
+		if n := strings.Count(strings.Join(st.Rows, "\n"), terminalExitMarker); n != 1 {
+			t.Fatalf("saved marker count = %d", n)
+		}
+		if !strings.Contains(strings.Join(st.Rows[:len(st.Rows)-1], "\n"), "bye now") {
+			t.Fatalf("saved rows lost the frozen output: %q", st.Rows)
+		}
+	}
+}
+
+// TestExitMarkerNotDuplicatedAfterRestore checks an old/restored transcript whose
+// marker is an ordinary row does not gain the synthetic row: the combined
+// transcript ends with that row exactly once.
+func TestExitMarkerNotDuplicatedAfterRestore(t *testing.T) {
+	t.Parallel()
+	screen := &terminal.SavedScreen{Cols: 3, Rows: []terminal.SavedRow{{Cells: []terminal.SavedCell{
+		{Rune: 'o'}, {Rune: 'u'}, {Rune: 't'},
+	}}}}
+	state := terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Live: false,
+		Rows: []string{"out", terminalExitMarker}, Screen: screen,
+	}
+	var tabs Tabs
+	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
+	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	tabs.Restore(state)
+	p := tabs.tabs[0]
+	if p.exitMarkerPending() {
+		t.Fatal("a restored marker row became a synthetic row too")
+	}
+	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+		t.Fatalf("restored last row = %q, %v", got, ok)
+	}
+	st := tabs.SavedState()
+	if n := strings.Count(strings.Join(st.Rows, "\n"), terminalExitMarker); n != 1 {
+		t.Fatalf("restored re-save marker count = %d (%q)", n, st.Rows)
+	}
 }

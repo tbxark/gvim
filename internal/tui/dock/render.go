@@ -61,6 +61,8 @@ func (p *Panel) paintScrollback(g *grid.Grid, top, rows, w int, sc terminal.Scre
 		y := top + i
 		hist := abs - len(p.prior)
 		switch {
+		case abs == p.exitMarkerRow():
+			paintShellCells(g, y, w, lineFromText(terminalExitMarker).Cells, base)
 		case abs < len(p.prior):
 			paintShellCells(g, y, w, p.prior[abs].Cells, base)
 		case hist < p.scroll.total:

@@ -49,7 +49,17 @@ shell when one is available — `bash -ilc` or `zsh -ilc`, preferring `$SHELL` w
 bash/zsh — so a detector that depends on interactive rc initialization captures the same
 environment the remote terminal gets. If no such shell is found, or the interactive
 invocation fails, the capture falls back to the previous `sh -c` path and records an
-explicit notice (startup notice and the Settings Environment rows). After every successful
+explicit notice (startup notice and the Settings Environment rows). The remote env-input files
+are watched through the authority's own file watch: a change to `.envrc`, `mise.toml`,
+`.mise.toml`, `.tool-versions`, `pyvenv.cfg` or the `.venv` directory invalidates the
+cached detection/capture and re-warms it in the background (no local filesystem is
+consulted). The watcher arms the workspace root plus the existing nested input directories
+(`.venv`), so a content-only change to `.venv/pyvenv.cfg` is seen even though the root
+directory entry does not change; when a nested directory appears, the next root event
+re-arms the watcher with it. A backend whose file surface cannot watch degrades safely: the watcher stops,
+the Settings Environment rows say the inputs are not watched and point at `Env: Reload`,
+and the manual reload path keeps working; other watch failures retry with the same bounded
+backoff as the remote document watch. After every successful
 authority reconnect the app re-probes the interactive shell in the background, off the UI
 update loop, and refreshes the fallback state/notice: a probe that failed at startup is no
 longer pinned to `sh -c` for the session, and a later successful probe clears the Settings
@@ -415,10 +425,16 @@ Residuals of this slice (documented, not bugs):
   startup notice, and it does not re-detect the env markers or recapture the overlay (Env:
   Reload or a new activation re-captures); if the re-probe is cancelled/disconnected it
   leaves a fallback notice reflecting that attempt. Changed remote env input files are not
-  watched (Env: Reload or a new activation re-captures), the detection result is cached until
-  Refresh/SetRoot, the Settings Environment rows show the remote facts only after the
-  background warm, and there is no status-row indicator of the active remote environment yet
-  (Fresh shows one). Local behavior is unchanged.
+  watched through authority polled watches (one bounded directory snapshot per poll for the
+  root and each existing nested input dir such as .venv; the polling latency and root
+  listing cost are the same limits as remote document watching, and an event burst re-arms
+  the nested watch), the
+  detection result is cached until Refresh/SetRoot or an env-input event, a backend without
+  the watch capability (or whose watch keeps failing) degrades to the manual Env: Reload path
+  with a Settings notice, the detect/capture invalidation is asynchronous (an in-flight spawn
+  can use the previous captured delta until the warm finishes), the Settings Environment rows
+  show the remote facts only after the background warm, and there is no status-row indicator
+  of the active remote environment yet (Fresh shows one). Local behavior is unchanged.
 - SSH authentication/connection residuals: ssh-agent forwarding and \`ssh_config\` reading
   (ProxyJump, Host aliases, IdentityAgent, host-key algorithms) are not implemented; the known
   hosts file is the default \`~/.ssh/known_hosts\` only; a supplied password/passphrase/2FA
@@ -616,19 +632,31 @@ subtree (the port follows links on Stat, so the no-follow answer comes from the 
 listing), the workspace root itself as source, paths outside the remote root, a destination
 inside the source, and a copy/move onto an existing name in another directory now goes
 through the explorer's conflict choice instead of blindly refusing: Cancel reports
-`explorer.ErrConflict`, changes nothing and the root offers Overwrite / Rename / Cancel
-(Esc, which also drops the rest of a multi-item paste); Rename opens a prefilled "Paste as
-on SSH:…" name prompt and retries through the adapter's `CopyAs`/`MoveAs` with that
-destination name; Overwrite removes the existing destination first and then copies (a cut
-paste removes its source only after the copy succeeded). The adapter also supports Skip
-(leave the destination, report its path; for a cut paste return the source, which cancels
-the cut). The local conflict prompt (Overwrite / Skip) is unchanged. Duplicate stays a
+`explorer.ErrConflict` and changes nothing. A single-item conflict asks Overwrite / Rename /
+Cancel (Esc); a multi-item paste asks Fresh's multi dialog Overwrite (o) / Overwrite All
+(O) / Skip (s) / Skip All (S) / Cancel (c, Esc). Overwrite handles the current item and
+asks about the next conflict; Overwrite All applies the overwrite policy to every
+remaining job of the paste so no further prompt appears; Skip skips only the current item
+and asks about the next conflict; Skip All skips the current and every remaining item and
+stops (a cut paste also drops those stranded sources from the clipboard, like Fresh's
+finished batch); Cancel stops the current and remaining jobs, keeps the already-completed
+files and leaves the clipboard for a retry. Stop notices say how many items of the paste
+already completed; a later non-conflict failure stops the remaining jobs, keeps the
+completed/partial results, and appends that count to the error notice. Rename (single-item
+dialog) opens a prefilled "Paste as on SSH:…" name prompt and retries through the adapter's
+`CopyAs`/`MoveAs` with that destination name; Overwrite removes the existing destination
+first and then copies (a cut paste removes its source only after the copy succeeded). The
+adapter also supports Skip directly (leave the destination, report its path; for a cut
+paste return the source, which cancels the cut). The local conflict prompt (Overwrite /
+Skip) is unchanged. Duplicate stays a
 same-directory copy with Fresh's rule — "name copy.ext", then "name copy 2.ext", ... checked
 against the remote directory (1000 attempts) — so it never prompts. A cancellation or I/O
 failure in the write phase keeps the partial destination and the error says how many files
 were written and where the partial copy is; gvim never deletes remote data on a failed
-copy. Fresh's dialog additionally has Overwrite All / Skip / Skip All; gvim's remote
-prompt is the bounded per-item Overwrite / Rename / Cancel (recorded gap). Every clipboard action
+copy. This matches Fresh's multi dialog, with one recorded divergence: Fresh resolves
+the whole multi-conflict queue first and only then runs the batch, so a Cancel there
+executes nothing, while gvim runs the chain incrementally and a later Cancel / Skip All
+therefore keeps the items already pasted (the notices count them) — no hidden undo. Every clipboard action
 confirms first on a remote workspace and names the target (copy/cut/duplicate name the
 entry or count, paste names the destination and count); a local workspace keeps the old
 no-confirmation behavior. The tree refresh after success is the existing file-job refresh.
@@ -641,8 +669,10 @@ exclusive rename/copy; New File's create race is closed by the exclusive-create 
 Overwrite is remove-then-copy with no rollback: a process that re-creates the destination
 between that removal and the copy is a documented race (the file copy atomically replaces
 the re-created file because the user chose overwrite; a directory copy fails at Mkdir
-instead of silently replacing it), and the conflict decision is not remembered across the
-multi-item paste (Fresh's All variants are not implemented).
+instead of silently replacing it), and an Overwrite All decision applies only to the
+remaining jobs of that one paste (it is not remembered for a later paste), while a later
+Cancel / Skip All cannot undo items already pasted (incremental execution diverges from
+Fresh's resolve-then-run batch).
 Real-host manual acceptance remains unautomated (the copy tests use a fake
 authority file system, with a local decoy tree proving no local fallback).
 

@@ -67,6 +67,9 @@ type Remote struct {
 	// example "interactive shell failed; using sh -c"); it is shown in the startup
 	// notice and the Settings Environment rows.
 	notice string
+	// watchNotice is the state of the env-input file watcher on the remote host (an
+	// unsupported watch capability or a retryable failure), for the Settings rows.
+	watchNotice string
 }
 
 // NewRemote builds the provider for a remote workspace rooted at root (the remote
@@ -103,6 +106,21 @@ func (p *Remote) Notice() string {
 	return p.notice
 }
 
+// SetWatchNotice records the env-input file watcher state ("" when watching works).
+func (p *Remote) SetWatchNotice(text string) {
+	p.mu.Lock()
+	p.watchNotice = text
+	p.mu.Unlock()
+}
+
+// WatchNotice returns the env-input file watcher state, or "" when watching works or has
+// not been attempted.
+func (p *Remote) WatchNotice() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.watchNotice
+}
+
 // Root returns the remote root the probes use.
 func (p *Remote) Root() string {
 	p.mu.Lock()
@@ -132,8 +150,8 @@ func (p *Remote) Warm(ctx context.Context) {
 	hasRecipe := strings.TrimSpace(p.snippet) != ""
 	trusted := p.trusted != nil && p.trusted()
 	p.mu.Unlock()
-	if hasRecipe && trusted {
-		_ = p.Overlay()
+	if hasRecipe && trusted && ctx.Err() == nil {
+		_ = p.overlay(ctx)
 	}
 }
 
@@ -241,7 +259,15 @@ func (p *Remote) Refresh() {
 // caller gets the last cached delta, so no UI path waits. It returns nil when no recipe is
 // active, the workspace is untrusted, or the capture failed.
 func (p *Remote) Overlay() []string {
-	p.ensureDetected(context.Background())
+	return p.overlay(context.Background())
+}
+
+// overlay is Overlay with a caller context: a background warm/invalidation passes the
+// watcher/session context so cancellation reaches the two remote capture commands. A
+// cancelled capture keeps the previous delta instead of clearing it (a reload interrupted
+// by shutdown must not erase a valid environment).
+func (p *Remote) overlay(ctx context.Context) []string {
+	p.ensureDetected(ctx)
 	p.mu.Lock()
 	if strings.TrimSpace(p.snippet) == "" {
 		p.mu.Unlock()
@@ -260,10 +286,16 @@ func (p *Remote) Overlay() []string {
 	snippet, dir := p.snippet, p.dir
 	p.mu.Unlock()
 
-	set, unset, err := p.captureRemote(snippet, dir)
+	set, unset, err := p.captureRemote(ctx, snippet, dir)
 
 	p.mu.Lock()
 	p.capturing = false
+	if err != nil && ctx.Err() != nil {
+		// Keep the last captured delta: a cancellation is not a capture change.
+		out := append([]string(nil), p.set...)
+		p.mu.Unlock()
+		return out
+	}
 	if err != nil {
 		p.lastErr = err
 		p.set, p.unset = nil, nil
@@ -315,7 +347,7 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 
 // captureRemote runs the remote baseline and activation shell and diffs their
 // environments. Activation runs with set -a in the remote workspace directory.
-func (p *Remote) captureRemote(snippet, dir string) (set, unset []string, err error) {
+func (p *Remote) captureRemote(ctx context.Context, snippet, dir string) (set, unset []string, err error) {
 	p.mu.Lock()
 	run := p.captureRun
 	if run == nil {
@@ -329,11 +361,11 @@ func (p *Remote) captureRemote(snippet, dir string) (set, unset []string, err er
 	if strings.TrimSpace(dir) == "" {
 		dir = root
 	}
-	baseline, err := run(context.Background(), "cd "+shellQuoteRemote(dir)+" && env -0")
+	baseline, err := run(ctx, "cd "+shellQuoteRemote(dir)+" && env -0")
 	if err != nil {
 		return nil, nil, fmt.Errorf("env: reading the remote baseline environment: %w", err)
 	}
-	activated, err := run(context.Background(), "cd "+shellQuoteRemote(dir)+" && set -a; "+snippet+"\nenv -0")
+	activated, err := run(ctx, "cd "+shellQuoteRemote(dir)+" && set -a; "+snippet+"\nenv -0")
 	if err != nil {
 		return nil, nil, fmt.Errorf("env: activating the remote environment: %w", err)
 	}

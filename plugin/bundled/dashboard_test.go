@@ -785,3 +785,139 @@ func TestDashboardGitHubPRRowCap(t *testing.T) {
 		t.Fatalf("PR targets = %d, want the six-row cap (%+v)", len(targets), targets)
 	}
 }
+
+func dashboardWeatherSettings(network bool, extra map[string]any) map[string]plugin.PluginSettings {
+	user := map[string]any{"weather": true, "network": network}
+	for k, v := range extra {
+		user[k] = v
+	}
+	return map[string]plugin.PluginSettings{dashboardPlugin: {User: user}}
+}
+
+const dashboardWeatherJSON = "{\"current_condition\":[{\"temp_C\":\"21\",\"temp_F\":\"70\",\"FeelsLikeC\":\"20\",\"FeelsLikeF\":\"68\",\"windspeedKmph\":\"12\",\"windspeedMiles\":\"7\",\"humidity\":\"55\",\"weatherDesc\":[{\"value\":\"Sunny\"}]}],\"weather\":[{\"mintempC\":\"15\",\"maxtempC\":\"24\",\"mintempF\":\"59\",\"maxtempF\":\"75\",\"hourly\":[{\"time\":\"0\",\"tempC\":\"15\",\"tempF\":\"59\",\"FeelsLikeC\":\"14\",\"FeelsLikeF\":\"57\",\"weatherDesc\":[{\"value\":\"Clear\"}]},{\"time\":\"1200\",\"tempC\":\"23\",\"tempF\":\"73\",\"weatherDesc\":[{\"value\":\"Sunny\"}]},{\"time\":\"1800\",\"tempC\":\"20\",\"tempF\":\"68\",\"FeelsLikeC\":\"19\",\"FeelsLikeF\":\"66\",\"weatherDesc\":[{\"value\":\"Cloudy\"}]}]},{\"mintempC\":\"16\",\"maxtempC\":\"25\",\"mintempF\":\"61\",\"maxtempF\":\"77\",\"hourly\":[{\"time\":\"1200\",\"weatherDesc\":[{\"value\":\"Rain\"}]}]}]}"
+
+// TestDashboardWeatherOptIn: weather + network in the user settings with a location makes
+// one encoded wttr.in j1 request and renders Fresh's now/5pm/tomorrow rows.
+func TestDashboardWeatherOptIn(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: dashboardWeatherJSON}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardWeatherSettings(true, map[string]any{"weather_location": "New York"}),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "Weather")
+	for _, want := range []string{"Weather", "now", "Sunny", "21°C", "feels 20°C", "5pm", "Cloudy", "20°C", "tomorrow", "16°..25°C", "Rain"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("weather text missing %q:\n%s", want, text)
+		}
+	}
+	if tr.count() != 1 {
+		t.Fatalf("weather requests = %d, want one", tr.count())
+	}
+	u := tr.first()
+	if u == nil || u.Host != "wttr.in" || u.EscapedPath() != "/New%20York" || u.Query().Get("format") != "j1" {
+		t.Fatalf("weather request = %v", u)
+	}
+}
+
+// TestDashboardWeatherImperial: the units setting selects Fahrenheit/mph fields.
+func TestDashboardWeatherImperial(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: dashboardWeatherJSON}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardWeatherSettings(true, map[string]any{"weather_units": "imperial"}),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "70°F")
+	for _, want := range []string{"70°F", "feels 68°F", "7 mph", "55%", "68°F", "61°..77°F", "Rain"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("imperial weather text missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestDashboardWeatherDisabled: without the explicit weather setting there is no Weather
+// section and no request at all.
+func TestDashboardWeatherDisabled(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: dashboardWeatherJSON}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardText(t, r.host)
+	if strings.Contains(text, "Weather") {
+		t.Fatalf("the Weather section rendered without opt-in:\n%s", text)
+	}
+	if tr.count() != 0 {
+		t.Fatalf("weather requests = %d without opt-in", tr.count())
+	}
+}
+
+// TestDashboardWeatherNetworkDisabled: weather enabled but the host network gate off is a
+// muted network-disabled line, no request and no notice.
+func TestDashboardWeatherNetworkDisabled(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: dashboardWeatherJSON}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardWeatherSettings(false, nil),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "network disabled")
+	if !strings.Contains(text, "Weather") || !strings.Contains(text, "network disabled") {
+		t.Fatalf("weather network-disabled text missing:\n%s", text)
+	}
+	if tr.count() != 0 {
+		t.Fatalf("a request escaped the disabled network gate: %d", tr.count())
+	}
+	if len(r.h.NoticeTexts()) != 0 {
+		t.Fatalf("the disabled weather section raised notices: %v", r.h.NoticeTexts())
+	}
+}
+
+// TestDashboardWeatherUnavailable: a 500 or malformed body is one muted line, no notice;
+// the rest of the dashboard still renders.
+func TestDashboardWeatherUnavailable(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+		want   string
+	}{
+		"http error": {status: 500, body: "oops", want: "unavailable"},
+		"malformed":  {status: 200, body: "{not json", want: "invalid response"},
+	} {
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			tr := &githubTransport{status: tc.status, body: tc.body}
+			r := startRig(t, rigOpts{
+				plugins:    []string{dashboardPlugin},
+				script:     dashboardRemoteScript("https://github.com/me/repo"),
+				settings:   dashboardWeatherSettings(true, nil),
+				httpClient: &http.Client{Transport: tr},
+			})
+			dashboardReady(t, r)
+			text := dashboardSettle(t, r, tc.want)
+			if !strings.Contains(text, "Weather") || !strings.Contains(text, tc.want) {
+				t.Fatalf("weather failure state missing:\n%s", text)
+			}
+			if !strings.Contains(text, "Open Settings") {
+				t.Fatalf("the rest of the dashboard did not render:\n%s", text)
+			}
+			if len(r.h.NoticeTexts()) != 0 {
+				t.Fatalf("a failed weather fetch raised notices: %v", r.h.NoticeTexts())
+			}
+		})
+	}
+}

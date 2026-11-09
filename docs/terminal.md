@@ -215,9 +215,12 @@ background tabs' exited markers current.
   the exact `[Terminal process exited]` line to the backing/log transcript at exit
   and shows a clickable restart call-to-action in the status bar with the program
   name and the code when it is non-zero; gvim's bounded slice puts the same
-  information on the dock's own surfaces: the marker line is written after the
-  frozen screen into the saved/restored/restarted transcript (so a restart or
-  resume continues *below* it, never overwriting output), and the tab title says
+  information on the dock's own surfaces: the marker line becomes the transcript's
+  last row AT THE EXIT INSTANT (a synthetic row while the frozen screen is still on
+  show, so the scrollback pager shows it immediately and it can be selected/copied
+  without saving first; a save stores it as an ordinary bounded transcript row and
+  a restart captures it before the new shell, so a restart or resume continues
+  *below* it and never overwrites output), and the tab title says
   `Terminal (exited, exit N)` or `Terminal (exited, signal)` for a non-zero/signal
   exit — a clean exit 0 keeps the plain `Terminal (exited)`, matching Fresh's
   decision to omit exit 0. A restored read-only tab shows the same suffix on its
@@ -242,9 +245,12 @@ background tabs' exited markers current.
   that remain: the program name comes from the recorded launch/resume argv, not
   the OS foreground process; the hover is underline+bold rather than Fresh's
   ERROR-colour swap; signal exits append ` (signal)` because gvim records -1
-  where Fresh's i32 exit code has no signal field; and the marker is appended
-  when the transcript is captured (save or restart) rather than at the exit
-  instant, because the frozen screen stays on show.
+  where Fresh's i32 exit code has no signal field; and gvim keeps the frozen last
+  screen in its live view on exit (Fresh switches that buffer to read-only
+  scrollback), so the marker is visible in the scrollback pager (Ctrl+Space) at the
+  exit instant but is not painted on the frozen live screen; the same applies to an
+  alternate-screen exit, whose pager is unavailable (`The alternate screen has no
+  scrollback.`) even though the marker row is still persisted for the restore.
 - **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
   launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab,
   plus the additive `title` (OSC 0/2), `exit_code`/`exit_known` pair for an exited

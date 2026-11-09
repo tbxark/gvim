@@ -325,9 +325,20 @@ control/overlong titles are sanitized before painting, entries with a string, fr
 or out-of-range number (and any `html_url`/other API-provided links) are ignored, and at most six
 valid rows are kept from at most 200 examined entries. Without a token a private or missing
 repository returns 404 and the section shows a muted `unavailable` line (no notice, the rest of the
-dashboard is unaffected); failures and the disabled state are also one muted line. Weather is not ported (no wttr.in request/formatting), and the third-party
-section API is still absent. Reductions: no weather, no third-party section API or Utility Dock
-placement and no sessions section.
+dashboard is unaffected); failures and the disabled state are also one muted line. The weather
+section is also opt-in: set `plugins.dashboard.settings.weather = true` (and `network = true`),
+optionally `weather_location` (a place name or coordinates; empty asks wttr.in to use the host's
+public IP) and `weather_units = "metric" | "imperial"`. One bounded request to
+`https://wttr.in[/<percent-encoded location>]?format=j1` (5 s timeout, 10 min refresh TTL) is
+rendered as Fresh does: `now` with condition/temperature/feels-like/wind/humidity, `5pm` from
+the nearest 3-hour sample and a `tomorrow` range/condition summary. The request carries no
+credentials or caller headers, stays in memory (no disk write) and never blocks the UI; a
+timeout, offline response, malformed body or disabled network renders one muted
+`unavailable`/`invalid response`/`network disabled` line with no notice. The third-party section
+API is still absent. Reductions: no third-party section API or Utility Dock placement and no
+sessions section; weather has no multi-day detail beyond today/tomorrow and no dedicated
+location picker (the place setting is a plain string, and empty delegates geolocation to
+wttr.in).
 
 **code_tour** (reduced Fresh port): loads a Fresh `.fresh-tour.json` or a VS Code Edit CodeTour
 `.tour` (auto-detected; bounded at 1 MiB / 200 steps), shows the steps in a floating widget card (list,
