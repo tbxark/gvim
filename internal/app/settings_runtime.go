@@ -53,6 +53,9 @@ type settingsRuntime struct {
 	// plugins' t() and gvim.i18n.locale() follow a Settings save at once. Nil leaves
 	// the plugins on the startup locale (the app still sets the i18n package).
 	localeApply func(locale string)
+	// lspReload pushes a reloaded config into the LSP port so future managers and
+	// explicit Start/Restart use the new baseline. Existing managers are not rebuilt.
+	lspReload func(cfg config.Config)
 }
 
 // projectEnvFacts are the Environment rows of the project environment: which

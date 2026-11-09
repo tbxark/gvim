@@ -191,3 +191,20 @@ func TestSettingsLSPActions(t *testing.T) {
 		t.Error("an unknown action did not error")
 	}
 }
+
+// TestSettingsReloadPushesReloadedLSPConfig checks the reload hook receives the new config so
+// the LSP port can update its baseline (the port's initial server plan is otherwise fixed).
+func TestSettingsReloadPushesReloadedLSPConfig(t *testing.T) {
+	s := lspSettingsService(t, "", "{}", config.Defaults(), &fakeSettingsLSP{})
+	var got config.Config
+	s.rt.lspReload = func(next config.Config) { got = next }
+	if err := os.WriteFile(s.userFile, []byte("{\"lsp\":{\"typescript\":{\"command\":\"new-ts\"}}}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.reload(nil, ""); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if list, ok := got.LSP["typescript"]; !ok || len(list) != 1 || list[0].Command != "new-ts" {
+		t.Fatalf("reload hook config LSP[typescript] = %+v ok=%v, want the reloaded explicit server", list, ok)
+	}
+}

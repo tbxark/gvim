@@ -22,7 +22,8 @@ const (
 	// ProbeLimit caps the paths a probe returns, Fresh's truncate(50) bound.
 	ProbeLimit = 50
 	// ProbeScanLimit caps directory entries inspected for one probe, so a huge
-	// directory cannot make one keystroke unbounded.
+	// directory cannot make one keystroke unbounded. The cap is a resource bound,
+	// not a claim that a result is complete for an enormous directory.
 	ProbeScanLimit = 4096
 )
 
@@ -51,12 +52,18 @@ func ProbePath(query string) (rel string, ok bool) {
 	return clean, true
 }
 
-// LocalPrefixProbe returns the local probe bound to root. It follows a symlink
-// only after proving its final real path is inside the real root, so neither an
-// entry symlink nor a symlinked parent can make a result escape the workspace.
-// A missing path, directory/special entry, unreadable path, root that cannot be
-// resolved, or an escape yields no result. A canceled context is an error.
+// LocalPrefixProbe returns the local probe bound to root with the explorer's hidden
+// files hidden. LocalPrefixProbeOptions takes the Show Hidden Files setting, as
+// Fresh's FileProvider does.
 func LocalPrefixProbe(root string) ProbeFunc {
+	return LocalPrefixProbeOptions(root, false)
+}
+
+// LocalPrefixProbeOptions is LocalPrefixProbe with showHidden selecting whether a
+// directory listing (and the parent-prefix branch) includes dot entries. A typed
+// basename starting with "." includes its dot matches regardless, as shell
+// completion does; Fresh's probe has the same exception.
+func LocalPrefixProbeOptions(root string, showHidden bool) ProbeFunc {
 	return func(ctx context.Context, query string) ([]string, error) {
 		rel, ok := ProbePath(query)
 		if !ok {
@@ -75,17 +82,17 @@ func LocalPrefixProbe(root string) ProbeFunc {
 		if realCandidate, err := filepath.EvalSymlinks(candidate); err == nil {
 			if containedLocal(realRoot, realCandidate) {
 				if st, err := os.Stat(realCandidate); err == nil && st.IsDir() {
-					return listLocalProbeDir(ctx, realRoot, rel, realCandidate)
+					return listLocalProbeDir(ctx, realRoot, rel, realCandidate, showHidden)
 				}
 			}
 		}
-		return listLocalProbePrefix(ctx, realRoot, rel)
+		return listLocalProbePrefix(ctx, realRoot, rel, showHidden)
 	}
 }
 
 // listLocalProbeDir lists the regular files directly inside dir, bounded by
 // ProbeScanLimit and ProbeLimit. dirRel is the slash-relative directory.
-func listLocalProbeDir(ctx context.Context, realRoot, dirRel, dirReal string) ([]string, error) {
+func listLocalProbeDir(ctx context.Context, realRoot, dirRel, dirReal string, showHidden bool) ([]string, error) {
 	entries, err := readLocalProbeDir(ctx, dirReal)
 	if err != nil {
 		return nil, err
@@ -99,8 +106,8 @@ func listLocalProbeDir(ctx context.Context, realRoot, dirRel, dirReal string) ([
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if strings.HasPrefix(entry.Name(), ".") {
-			continue // directory listing hides dot files, like Fresh's default
+		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
+			continue
 		}
 		rel := path.Join(dirRel, entry.Name())
 		if _, ok := localProbeFile(ctx, realRoot, dirReal, entry.Name()); ok {
@@ -114,9 +121,9 @@ func listLocalProbeDir(ctx context.Context, realRoot, dirRel, dirReal string) ([
 }
 
 // listLocalProbePrefix lists the regular files in rel's parent whose names start
-// with rel's basename. Hidden entries are included only when the basename itself
-// starts with a dot, as Fresh's include_hidden rule does.
-func listLocalProbePrefix(ctx context.Context, realRoot, rel string) ([]string, error) {
+// with rel's basename. Hidden entries are included when showHidden is set or the
+// basename itself starts with a dot, as Fresh's include_hidden rule does.
+func listLocalProbePrefix(ctx context.Context, realRoot, rel string, showHidden bool) ([]string, error) {
 	parentRel := path.Dir(rel)
 	base := path.Base(rel)
 	parentAbs := filepath.Join(realRoot, filepath.FromSlash(parentRel))
@@ -136,7 +143,7 @@ func listLocalProbePrefix(ctx context.Context, realRoot, rel string) ([]string, 
 		return nil, err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	includeHidden := strings.HasPrefix(base, ".")
+	includeHidden := showHidden || strings.HasPrefix(base, ".")
 	out := make([]string, 0, ProbeLimit)
 	for _, entry := range entries {
 		if len(out) >= ProbeLimit {
@@ -175,7 +182,14 @@ func readLocalProbeDir(ctx context.Context, dir string) ([]os.DirEntry, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		batch, err := f.ReadDir(128)
+		// Request only what the bound still allows: a fixed ReadDir(128) would
+		// overshoot ProbeScanLimit by up to a batch on the final read.
+		remaining := ProbeScanLimit - len(out)
+		n := 128
+		if remaining < n {
+			n = remaining
+		}
+		batch, err := f.ReadDir(n)
 		out = append(out, batch...)
 		if err == io.EOF {
 			break

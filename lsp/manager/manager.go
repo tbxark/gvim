@@ -266,10 +266,13 @@ type Manager struct {
 	rootDir string
 	// gate is the workspace trust spawn gate (nil allows); it runs before every server
 	// start, with the argv, the workspace root and the child's effective PATH.
-	gate      func(ctx context.Context, argv []string, cwd, pathValue string) error
-	servers   map[string][]ServerConfig // by language ID
-	universal []ServerConfig
-	start     func(context.Context, lsp.Config) (*lsp.Client, error)
+	gate func(ctx context.Context, argv []string, cwd, pathValue string) error
+	// autoStartGate is the live trust gate for automatic starts (Open/ensure). It is not
+	// used by manual StartLanguage/Restart and never stops a running server.
+	autoStartGate func() bool
+	servers       map[string][]ServerConfig // by language ID
+	universal     []ServerConfig
+	start         func(context.Context, lsp.Config) (*lsp.Client, error)
 	// applyEdit answers a server's workspace/applyEdit request. It gets the
 	// language of the requesting server ("" for a universal one). It is read and
 	// set under mu.
@@ -373,6 +376,24 @@ func (m *Manager) SetGate(gate func(ctx context.Context, argv []string, cwd, pat
 	m.gate = gate
 }
 
+// SetAutoStartGate installs the live auto-start gate (normally the live workspace trust
+// check). While it returns false, Open/ensureServers skips AutoStart servers and universal
+// starts; manual StartLanguage/Restart still goes through the spawn gate. It never stops a
+// running server.
+func (m *Manager) SetAutoStartGate(gate func() bool) {
+	m.mu.Lock()
+	m.autoStartGate = gate
+	m.mu.Unlock()
+}
+
+// autoStartAllowed reads the live gate without holding m.mu across it.
+func (m *Manager) autoStartAllowed() bool {
+	m.mu.Lock()
+	gate := m.autoStartGate
+	m.mu.Unlock()
+	return gate == nil || gate()
+}
+
 // gateSpawn runs the trust gate for one server start. The context is the launch's
 // bounded start context; a denial becomes an *lsp.StartError so the existing
 // failed-to-start surface shows the trust reason.
@@ -392,6 +413,43 @@ func (m *Manager) gateSpawn(ctx context.Context, language string, cfg ServerConf
 		}
 	}
 	return nil
+}
+
+// PreflightServers checks the workspace spawn gate for every config of language without
+// starting anything. ReplaceServers calls it before stopping a running language's servers,
+// so a trust revocation (or a project executable) cannot make an explicit restart destroy a
+// live server and only then fail the new start. A nil gate allows every start.
+func (m *Manager) PreflightServers(language string, configs []ServerConfig) error {
+	for _, cfg := range configs {
+		if err := m.preflightServer(language, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// preflightServer mirrors the gate part of launch: same command/env/PATH and executable
+// resolution, no process start and no lock held across the gate.
+func (m *Manager) preflightServer(language string, cfg ServerConfig) error {
+	command := cfg.CommandLine()
+	serverEnv := m.spawnEnvList(envList(cfg.Env))
+	pathValue := effectivePath(append(os.Environ(), serverEnv...))
+	m.mu.Lock()
+	rootDir := m.rootDir
+	m.mu.Unlock()
+	program := ""
+	if len(command) > 0 && !strings.ContainsAny(command[0], "/\\") {
+		if resolved, ok := trust.ResolveSpawnPath(rootDir, command[0], pathValue); ok {
+			program = resolved
+		}
+	}
+	gateArgv := command
+	if program != "" {
+		gateArgv = append([]string{program}, command[1:]...)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+	defer cancel()
+	return m.gateSpawn(ctx, language, cfg, gateArgv, pathValue)
 }
 
 // effectivePath returns the PATH the child resolves bare names through: the first
@@ -660,6 +718,11 @@ func (m *Manager) RestartServer(language, name string) error {
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrNoServer, language)
 	}
+	// Preflight the trust gate before stopping the running server: a revoked trust must
+	// not turn an explicit restart into a stop-then-fail.
+	if err := m.PreflightServers(language, []ServerConfig{cfg}); err != nil {
+		return err
+	}
 	key := serverKey(language, cfg.DisplayName())
 	m.stopKey(key)
 
@@ -758,6 +821,62 @@ func (m *Manager) AllHandles() []*Handle {
 	return slices.Clone(m.handles)
 }
 
+// CurrentServers returns a copy of the configured servers for language.
+func (m *Manager) CurrentServers(language string) []ServerConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.servers[language])
+}
+
+// ReplaceServers replaces the configured servers of language and starts them as a manual
+// start. It is for an explicit Start/Restart after a completed per-root selection (Deno
+// auto-selection): it stops only the running servers of that language (never another
+// language or a universal server), waits for any in-flight start of the language so a late
+// old-config handle cannot survive, clears old stopped/failure/resume bookkeeping, then
+// starts the new configs. It is not called from automatic paths.
+func (m *Manager) ReplaceServers(language string, configs []ServerConfig) error {
+	language = strings.TrimSpace(language)
+	if language == "" {
+		return fmt.Errorf("%w: empty language", ErrNoServer)
+	}
+	configs = slices.Clone(configs)
+	if err := m.PreflightServers(language, configs); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.servers[language] = configs
+	m.forced[language] = true
+	delete(m.disabled, language)
+	keys := make(map[string]bool)
+	for _, h := range m.handles {
+		if h.language == language && !h.universal {
+			keys[h.key] = true
+		}
+	}
+	var waiting []chan struct{}
+	for key, s := range m.starting {
+		if strings.HasPrefix(key, language+"\x00") {
+			keys[key] = true
+			waiting = append(waiting, s.done)
+		}
+	}
+	m.mu.Unlock()
+	for _, done := range waiting {
+		<-done
+	}
+	m.mu.Lock()
+	for key := range keys {
+		delete(m.stopped, key)
+		delete(m.failures, key)
+		delete(m.resume, key)
+	}
+	m.mu.Unlock()
+	for key := range keys {
+		m.stopKey(key)
+	}
+	return m.StartLanguage(language)
+}
+
 // findConfig returns the configured server language/name names. An empty name
 // takes the first configured server of the language.
 func (m *Manager) findConfig(language, name string) (cfg ServerConfig, universal bool, ok bool) {
@@ -792,6 +911,7 @@ func (m *Manager) ensureServers(language string) ([]*Handle, []error) {
 	disabled := m.disabled[language]
 	forced := m.forced[language]
 	m.mu.Unlock()
+	auto := m.autoStartAllowed()
 
 	var hs []*Handle
 	var errs []error
@@ -806,7 +926,7 @@ func (m *Manager) ensureServers(language string) ([]*Handle, []error) {
 		stopped := m.stopped[key]
 		epoch := m.epoch
 		m.mu.Unlock()
-		if stopped || (!forced && (disabled || !cfg.AutoStart)) {
+		if stopped || (!forced && (!auto || disabled || !cfg.AutoStart)) {
 			continue
 		}
 		h, err := m.startServer(key, language, cfg, false, epoch)
@@ -828,6 +948,7 @@ func (m *Manager) ensureUniversal() []*Handle {
 	configs := slices.Clone(m.universal)
 	epoch := m.epoch
 	m.mu.Unlock()
+	auto := m.autoStartAllowed()
 
 	var hs []*Handle
 	for _, cfg := range configs {
@@ -840,7 +961,7 @@ func (m *Manager) ensureUniversal() []*Handle {
 		}
 		stopped := m.stopped[key]
 		m.mu.Unlock()
-		if stopped || !cfg.AutoStart {
+		if stopped || !auto || !cfg.AutoStart {
 			continue
 		}
 		h, err := m.startServer(key, "", cfg, true, epoch)

@@ -47,6 +47,10 @@ type Tabs struct {
 	// Sync its live revival starts (a tea.Cmd, so Update never blocks on the spawn).
 	// A second dive before the sync replaces it with the newest target.
 	dive *Panel
+	// history is the dock-wide scrollback-search query history: Fresh keeps its
+	// search prompt history per window, so it is shared by every tab and saved with
+	// the terminal state (terminal.SavedState.SearchHistory).
+	history searchHistoryStore
 	// hostBlurred is the outer terminal window's focus state, inherited by every
 	// tab (and by tabs created later); a child is focused only while the window and
 	// the dock both have the keyboard. Zero value = focused.
@@ -306,6 +310,7 @@ func (t *Tabs) NewTab() tea.Cmd {
 	p.SetPorts(t.ports)
 	p.SetEffects(t.effects)
 	p.hostBlurred = t.hostBlurred
+	p.history = &t.history
 	p.gen = t.genBase()
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, "")
@@ -532,6 +537,7 @@ func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
 	p.SetPorts(t.ports)
 	p.SetEffects(t.effects)
 	p.hostBlurred = t.hostBlurred
+	p.history = &t.history
 	p.gen = t.genBase()
 	t.tabs = append(t.tabs, &p)
 	t.names = append(t.names, name)
@@ -1084,6 +1090,9 @@ func (t *Tabs) SavedState() terminal.SavedState {
 		st.Tabs[i] = t.savedTabOf(i, p)
 	}
 	st.ActiveTab = t.active
+	if history := t.history.snapshot(); len(history) > 0 {
+		st.SearchHistory = history
+	}
 	return st
 }
 
@@ -1161,6 +1170,7 @@ func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
 	p.SetPorts(t.ports)
 	p.SetEffects(t.effects)
 	p.hostBlurred = t.hostBlurred
+	p.history = &t.history
 	p.gen = t.genBase()
 	p.Restore(terminal.SavedState{
 		Version: terminal.SavedStateVersion, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,
@@ -1181,6 +1191,7 @@ func (t *Tabs) AppendRestoredTab(tab terminal.SavedTab) int {
 // without tabs restores the single terminal exactly as before. The active tab is
 // the saved one, clamped to the restored set. Nothing runs automatically.
 func (t *Tabs) Restore(st terminal.SavedState) {
+	t.history.restore(st.SearchHistory)
 	t.Close()
 	t.tabs = nil
 	t.names = nil
@@ -1202,6 +1213,7 @@ func (t *Tabs) Restore(st terminal.SavedState) {
 		p.SetPorts(t.ports)
 		p.SetEffects(t.effects)
 		p.hostBlurred = t.hostBlurred
+		p.history = &t.history
 		p.gen = t.genBase()
 		p.Restore(terminal.SavedState{
 			Version: st.Version, Open: tab.Open, Cwd: tab.Cwd, Width: tab.Width,

@@ -217,25 +217,72 @@ configured TS/JS server but keeps it as the baseline. Two safety rules are delib
 
 - **Authority only**: the config file is checked with the workspace authority's `Stat`, and
   `deno` is confirmed by one bounded `sh -c 'command -v deno'` through `authority.OneShot()`
-  under the workspace trust gate. A remote workspace never checks the local disk or local
-  PATH. The probe is asynchronous (startup and after a reconnect), bounded to 5 s and
+  under the workspace trust gate; only a clean exit-0 result counts (a Code-0 timeout, signal,
+  start failure or cancellation is rejected). A remote workspace never checks the local disk
+  or local PATH. The probe is asynchronous (startup and after a reconnect), bounded to 5 s and
   cancellable; a failed/timed-out/disconnected probe selects nothing.
 - **User decisions win**: auto-selection is disabled when `lsp_enabled` is false, when the
   language is disabled (`enabled: false`/`LSPDisabled`), or when an explicit `lsp` entry
   exists for typescript or javascript. It never touches `tsx`, other languages, or an
   explicit/disabled configuration.
+- **Live trust gate**: the Settings reload path passes the reloaded config through
+  `lspConfig` with the current live trust state before it reaches `SetConfig`, and the Deno
+  probe evaluates the same gated config. A live trust revoke/restore likewise re-gates the
+  baseline immediately (outside a Settings reload). A Restricted/Blocked workspace therefore
+  cannot gain *new* auto-starting servers through a reload or a trust change (the initial
+  build has the same gate, and an already-in-flight start has the window described below);
+  manual Start/Restart remains available. This live gate is also consulted by
+  every automatic start of an already-created manager: after a revoke its old `AutoStart`
+  configs no longer start new servers, and the gate never stops an existing process. An
+  explicit Start/Restart that would replace a language's servers first preflights the spawn
+  gate: a trust refusal leaves the old running servers and the old config in place instead
+  of stopping them and then failing; the same-config **Restart Server** path preflights
+  before stopping too. A repeated Start of an already-running server returns the live handle
+  without spawning again or consulting the gate. Other start failures (missing binary,
+  initialize failure) are not transactional (recorded residual).
 
-The selection is installed as a per-root server provider: it applies only to a manager
-created for the exact probed workspace root (other/nested roots keep the configured server),
-and clearing it restores the baseline. `deno lsp` is registered with `auto_start: false`, as
-Fresh does, so it is never silently spawned; **Start/Restart LSP Server** starts it when the
-root's manager was created with the Deno provider (a fresh root). A manager that already
-exists when the delayed answer lands keeps its configured server for the rest of the session:
-a plain Start/Restart keeps that manager's config, and only a newly created manager, a
-project reload that rebuilds the port, or a relaunch uses the provider (recorded residual).
-The provider re-reads the live config when a future manager is created, so a config change
-made after the probe cannot let a stale decision override a new explicit/disabled entry; a newer reconnect probe supersedes an older one and the older answer
-is dropped. The probe is re-run on a remote reconnect and when the editor switches project
+**Trust-check windows (precise, no strong atomicity).** An automatic start has two live
+checks: `ensureServers` consults the auto-start gate, then `launch` resolves the executable
+and consults the spawn gate again. A Trust revoke between those checks does **not** by
+itself guarantee refusal: under Restricted the spawn gate allows a system-installed binary
+outside the project (it refuses only project-contained executables), so the start may still
+proceed. It refuses when the spawn gate itself denies — Blocked, a remote workspace that is
+not Trusted, or a project-contained executable. A revoke after the spawn gate has passed but
+before the child is actually started can likewise let that already-in-flight start proceed.
+So “a revoke between the checks refuses the start” is false as a general statement; only
+these cases refuse. No check and no revoke stops an already-running process. Steady state
+after the revoke is safe: later Opens do not start that language's auto servers.
+
+The explicit restart preflight has the same non-transactional shape: after preflight passes,
+the old language servers are stopped and the launch consults the spawn gate again. A revoke
+to Restricted in that preflight→launch window can still let a system binary start after the
+old servers were stopped; if the spawn gate denies (Blocked, remote-untrusted, project
+contained), the old servers are stopped and the new start refused. There is no atomic
+preflight→stop→launch guarantee. A repeated Start of an already-running server returns the
+live handle without spawning or consulting either gate — even at Blocked.
+
+The selection is installed as a per-root server provider: it applies automatically only to a
+manager created for the exact probed workspace root (other/nested roots keep the configured
+server), and clearing it restores the baseline. Installing/clearing the provider never stops
+a running server. `deno lsp` is registered with `auto_start: false`, as Fresh does, so it is
+never silently spawned. An explicit **Start/Restart LSP Server** for typescript/javascript
+applies the completed current-root selection to an existing manager: the port compares the
+manager's config with the current selection and, when they differ, stops only that
+language's servers and starts the selected config (manual start). The same explicit action
+restores the baseline when the selection was cleared (explicit/disabled config reload or a
+failed/no longer current probe); other languages are not stopped or restarted. When this
+whole-language replacement happens, **Restart Server** on any row of that language replaces
+the language's entire configured server list (for a multi-server array too) with the current
+selection — the clicked row's `name` is not used in that branch. When no replacement is
+needed, Restart Server keeps its normal meaning and restarts only the named server. A
+root-wide LSP Restart rebuilds managers, so the selection applies when the root creates the
+next manager; installing the provider never stops a running server by itself. The provider re-reads the live config when it is evaluated, so a config change
+made after the probe cannot let a stale decision override a new explicit/disabled entry. A
+Settings Save/Reload also pushes the reloaded config's server baseline into the port
+(`SetConfig`): future managers and the next explicit Start/Restart use the new baseline,
+including a newly added explicit server; an existing manager is not rebuilt by the reload
+and keeps its old config until that explicit action. A newer reconnect probe supersedes an
+older one and the older answer is dropped. The probe is re-run on a remote reconnect and when the editor switches project
 root (`SetRoot`): the old root's provider is cleared so future managers there restore the
 baseline, the new root is probed, and any still-running probe for the old root is cancelled.
 It is not repeated on every settings change, and Deno disappearing after a successful probe

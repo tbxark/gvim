@@ -246,15 +246,48 @@ func TestDenoLspHelpPopup(t *testing.T) {
 		"lsp_enabled is true and the language is typescript/javascript",
 		"only applies to an LSP manager created for that exact workspace root",
 		"nested/per-file TS/JS roots keep their configured server",
-		"already existed before the async probe answer landed",
-		"plain Start/Restart restarts that manager, not Deno",
+		"installing or clearing it never stops a running server",
+		"explicit Start/Restart LSP Server for typescript/javascript applies the completed current-root selection",
+		"replaces the whole language server list and restarts only that language's servers",
+		"other languages and universal servers are untouched",
+		"same explicit action restores the configured baseline",
+		"Restart Server on any row of that language replaces the entire server list",
+		"clicked row's name is not used in that branch",
+		"root-wide LSP Restart rebuilds managers",
+		"Settings Save/Reload pushes the reloaded config's server baseline",
+		"reload itself does not rebuild or restart a running manager",
+		"Deno auto-selection is not applied while an explicit/disabled entry is present",
+		"Trust gates live",
+		"reload and revoke/restore pass the LSP config gate before the baseline",
+		"Restricted/Blocked cannot gain auto-starting servers",
+		"after a revoke an already-created manager's old AutoStart configs do not start servers on Open",
+		"running ones are not stopped",
+		"manual Start/Restart stays allowed",
+		"Auto-start and launch spawn are two live checks, not atomic",
+		"refuses only when the spawn gate denies",
+		"Blocked, remote workspace not Trusted, or a project-contained executable",
+		"under Restricted a system-installed binary outside the project may still start",
+		"A revoke after the spawn gate passes can likewise let that in-flight start proceed",
+		"Neither check nor revoke stops an existing process",
+		"later Opens do not auto-start after a revoke",
+		"Both replacing and same-config Restart preflight the spawn gate before stopping",
+		"refusal preserves running servers/config",
+		"preflight→launch is non-transactional",
+		"old servers may be stopped and the new start refused when the spawn gate denies",
+		"though under Restricted a system-installed binary outside the project may still start",
+		"repeated Start of a running server returns the live handle without spawning or gating, even when Blocked",
+		"missing-binary/initialize failures are not transactional",
+		"strictly clean exit 0",
+		"disconnected authority select nothing",
 		"Explicit configuration wins and opts out",
 		"tsx is untouched",
 		"only controls its copy/check/help commands",
-		"does not control the native Deno auto-selection",
-		"runs in core regardless of whether this helper plugin is loaded/enabled",
+		"does not control native auto-selection",
+		"runs in core regardless of plugin load/enable",
 		"auto_start: false",
 		"workspace authority",
+		"workspace trust gate (the gate may refuse the probe)",
+		"only a successful check (exit 0, no timeout or signal) counts",
 		"local-only PATH lookup is never used",
 	} {
 		if !strings.Contains(msg, want) {
@@ -303,4 +336,101 @@ func TestDenoLspCheckLocalLookPathHitDoesNotFakeAuthoritySuccess(t *testing.T) {
 	if strings.Contains(got, "Deno project ready") {
 		t.Fatalf("status trusted a local LookPath hit: %q", got)
 	}
+}
+
+func TestDenoLspCheckNonZeroExitIsNotReady(t *testing.T) {
+	t.Parallel()
+	t.Run("config and non-zero --version", func(t *testing.T) {
+		t.Parallel()
+		r := denoRig(t, func(o *plugintest.FakeOS) {
+			o.SetFile("/work/deno.json", "{}\n")
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Code: 1, Stdout: "deno 2.1.0\n", Stderr: "error: cannot load deno\n"})
+		})
+		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
+			t.Fatal(err)
+		}
+		got := lastNoticeText(r.h)
+		for _, want := range []string{"cannot be reported ready", "did not exit successfully", "error: cannot load deno"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("status = %q, want %q", got, want)
+			}
+		}
+		for _, forbidden := range []string{"Deno project ready", "deno is runnable on the workspace"} {
+			if strings.Contains(got, forbidden) {
+				t.Errorf("non-zero --version reported success (%q): %q", forbidden, got)
+			}
+		}
+		if runs := r.os.Runs(); len(runs) != 1 || !slices.Equal(runs[0].Argv, []string{"deno", "--version"}) {
+			t.Fatalf("runs = %+v, want one authority --version probe", runs)
+		}
+	})
+
+	t.Run("no config and non-zero --version", func(t *testing.T) {
+		t.Parallel()
+		r := denoRig(t, func(o *plugintest.FakeOS) {
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Code: 1, Stdout: "deno 2.1.0\n"})
+		})
+		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
+			t.Fatal(err)
+		}
+		got := lastNoticeText(r.h)
+		for _, want := range []string{"cannot be reported ready", "no deno.json or deno.jsonc", "exit code 1"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("status = %q, want %q", got, want)
+			}
+		}
+		if strings.Contains(got, "deno is runnable on the workspace") {
+			t.Errorf("non-zero --version reported success: %q", got)
+		}
+	})
+
+	t.Run("timeout is not ready even with version output", func(t *testing.T) {
+		t.Parallel()
+		r := denoRig(t, func(o *plugintest.FakeOS) {
+			o.SetFile("/work/deno.json", "{}\n")
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Stdout: "deno 2.1.0\n", TimedOut: true})
+		})
+		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
+			t.Fatal(err)
+		}
+		got := lastNoticeText(r.h)
+		if !strings.Contains(got, "timed out") || !strings.Contains(got, "cannot be reported ready") {
+			t.Fatalf("timeout status = %q", got)
+		}
+		if strings.Contains(got, "Deno project ready") {
+			t.Fatalf("timed-out --version reported ready: %q", got)
+		}
+	})
+
+	t.Run("signal is not ready", func(t *testing.T) {
+		t.Parallel()
+		r := denoRig(t, func(o *plugintest.FakeOS) {
+			o.SetFile("/work/deno.json", "{}\n")
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Signal: "KILL"})
+		})
+		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
+			t.Fatal(err)
+		}
+		got := lastNoticeText(r.h)
+		if !strings.Contains(got, "signal KILL") || !strings.Contains(got, "cannot be reported ready") {
+			t.Fatalf("signal status = %q", got)
+		}
+	})
+
+	t.Run("trust-gate refusal is a probe failure, never missing", func(t *testing.T) {
+		t.Parallel()
+		r := denoRig(t, func(o *plugintest.FakeOS) {
+			o.SetFile("/work/deno.json", "{}\n")
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Err: pluginapi.Errf(pluginapi.CodeInvalid, "workspace is not trusted")})
+		})
+		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
+			t.Fatal(err)
+		}
+		got := lastNoticeText(r.h)
+		for _, want := range []string{"workspace is not trusted", "could not be run on the workspace", "trust gate", "local-only", "cannot prove deno is missing"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("status = %q, want %q", got, want)
+			}
+		}
+	})
 }

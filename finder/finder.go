@@ -165,9 +165,10 @@ type Index struct {
 	notice string
 	// probe is the optional literal-path probe (Fresh's fast prefix-probe slice).
 	// It performs no enumeration and is set before the palette uses the index; the
-	// lock only protects a late SetProbe from a reader.
-	probeMu sync.RWMutex
-	probe   ProbeFunc
+	// lock protects a late SetProbe or Show Hidden Files change from a reader.
+	probeMu   sync.RWMutex
+	probe     ProbeFunc
+	probeRoot string // set for a local Start; empty for remote/custom indexes
 }
 
 // Start begins enumerating root in a goroutine and returns at once. The index
@@ -177,8 +178,31 @@ func Start(ctx context.Context, root string) *Index {
 	x := startWith(ctx, func(ctx context.Context, emit func(string) bool) error {
 		return Enumerate(ctx, root, emit)
 	})
-	x.SetProbe(LocalPrefixProbe(root))
+	x.setLocalProbe(root)
 	return x
+}
+
+// setLocalProbe installs the local exact/prefix probe for root.
+func (x *Index) setLocalProbe(root string) {
+	x.probeMu.Lock()
+	x.probeRoot = root
+	x.probe = LocalPrefixProbe(root)
+	x.probeMu.Unlock()
+}
+
+// SetProbeShowHidden rebuilds a local index's probe with the file explorer's Show Hidden
+// Files setting, matching Fresh's FileProvider::set_visibility. It is a no-op for an
+// index without a local root (a remote or custom enumeration), whose exact probe has no
+// directory listing to filter.
+func (x *Index) SetProbeShowHidden(showHidden bool) {
+	if x == nil {
+		return
+	}
+	x.probeMu.Lock()
+	if x.probeRoot != "" {
+		x.probe = LocalPrefixProbeOptions(x.probeRoot, showHidden)
+	}
+	x.probeMu.Unlock()
 }
 
 // SetProbe installs the literal-path probe used by the quick-open file mode. Fresh

@@ -4,6 +4,14 @@ package terminal
 // keeps. A loader ignores a state from a version it does not know.
 const SavedStateVersion = 1
 
+// Bounds on the additive search-query history in a saved terminal state. They are
+// exported so the dock's in-memory history and the restore loader apply the same
+// limits (Fresh's InputHistory cap is 100).
+const (
+	MaxSearchHistoryEntries = 100
+	MaxSearchQueryBytes     = 512
+)
+
 // SavedState is the terminal dock state that survives an editor restart: the
 // dock's open flag and directory, the pane width the transcript was captured at,
 // the newest transcript rows as text, the launch record of the terminal that
@@ -55,6 +63,12 @@ type SavedState struct {
 	// It is additive: an old record has none and keeps the plain "(exited)" state.
 	ExitCode  int  `json:"exit_code,omitempty"`
 	ExitKnown bool `json:"exit_known,omitempty"`
+	// SearchHistory is the dock's scrollback-search query history (oldest first,
+	// newest last): Fresh keeps its search prompt history per window and persists it
+	// with the workspace, and gvim's dock mirrors that for its pager. Additive and
+	// optional: an older record has none (an empty history) and is bounded/cleaned on
+	// load. It never starts a process; it only restores what the search input recalls.
+	SearchHistory []string `json:"search_history,omitempty"`
 	// Screen is the bounded styled snapshot of the visible screen at the capture.
 	// It is additive and optional (an old record has none and restores the plain
 	// text transcript exactly as before); a restored tab paints the snapshot above

@@ -68,36 +68,76 @@ local function probe_deno()
   )
 end
 
+local function first_line(text)
+  return (tostring(text or ""):match("^[^\r\n]*")) or ""
+end
+
+-- probe_error describes why a completed process is not a successful version check.
+-- proc.run's result.ok is false on a non-zero exit, a signal or a timeout, so checking
+-- only "result exists" would report a probe that never succeeded as a runnable runtime.
+local function probe_error(result)
+  if result.timed_out then
+    return t("status.timeout")
+  end
+  if result.signal and result.signal ~= "" then
+    return t("status.signal", { signal = tostring(result.signal) })
+  end
+  local detail = first_line(result.stderr)
+  if detail ~= "" then
+    return detail
+  end
+  return t("status.exit_code", { code = tostring(result.code) })
+end
+
 local function check_project()
   local root = project_root()
   local configs = project_configs(root)
   local config_text = table.concat(configs, ", ")
   local install = install_command()
   local result, err = probe_deno()
-  local has_deno = result ~= nil
-
-  if #configs > 0 and has_deno then
-    gvim.status(t("status.ready", { root = root, config = config_text }))
-    return
-  end
-  if #configs > 0 then
-    gvim.status(t("status.config_probe_failed", {
+  if not result then
+    if #configs > 0 then
+      gvim.status(t("status.config_probe_failed", {
+        root = root,
+        config = config_text,
+        install = install,
+        error = tostring(err),
+      }))
+      return
+    end
+    gvim.status(t("status.no_project_probe_failed", {
       root = root,
-      config = config_text,
       install = install,
       error = tostring(err),
     }))
     return
   end
-  if has_deno then
-    gvim.status(t("status.deno_no_config", { root = root }))
+  -- result.ok is true only for exit code 0 with no signal and no timeout. A non-zero
+  -- deno --version is not evidence that the runtime can serve Deno LSP, so it must never
+  -- reach the ready/no-config-success branches.
+  if not result.ok then
+    local detail = probe_error(result)
+    if #configs > 0 then
+      gvim.status(t("status.version_failed", {
+        root = root,
+        config = config_text,
+        install = install,
+        error = detail,
+      }))
+      return
+    end
+    gvim.status(t("status.version_failed_no_config", {
+      root = root,
+      install = install,
+      error = detail,
+    }))
     return
   end
-  gvim.status(t("status.no_project_probe_failed", {
-    root = root,
-    install = install,
-    error = tostring(err),
-  }))
+  if #configs > 0 then
+    gvim.status(t("status.ready", { root = root, config = config_text }))
+    return
+  end
+  gvim.status(t("status.deno_no_config", { root = root }))
 end
 
 -- show_help explains the reduced port: install commands, the config entry gvim needs, the

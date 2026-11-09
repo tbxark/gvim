@@ -2,15 +2,26 @@ package dock
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tbxark/gvim/internal/terminal"
 )
 
 // commitSearch opens the input (applying its initial preview), types query over
 // any pre-fill, and commits it with Enter.
 func commitSearch(t *testing.T, p *Panel, query string) {
 	t.Helper()
+	if !p.Scrolling() {
+		// A live tab enters the pager first (Ctrl+Space), like the user does.
+		enter, _ := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl})
+		applyKeys(t, p, enter)
+		if !p.Scrolling() {
+			t.Fatal("Ctrl+Space did not enter the scrollback view")
+		}
+	}
 	cmd, ok := p.ScrollKey(tea.Key{Code: '/', Text: "/"})
 	if !ok || !p.scroll.typing {
 		t.Fatal("'/' did not open the search input")
@@ -33,8 +44,8 @@ func TestSearchHistoryPrefillRecallAndCommit(t *testing.T) {
 	p := restoredSearchPanel(t, "one", "two", "three", "beta", "five")
 	commitSearch(t, p, "beta")
 	commitSearch(t, p, "two")
-	if len(p.searchHistory) != 2 || p.searchHistory[0] != "beta" || p.searchHistory[1] != "two" {
-		t.Fatalf("search history = %v, want [beta two]", p.searchHistory)
+	if len(p.searchHistoryEntries()) != 2 || p.searchHistoryEntries()[0] != "beta" || p.searchHistoryEntries()[1] != "two" {
+		t.Fatalf("search history = %v, want [beta two]", p.searchHistoryEntries())
 	}
 	// Re-opening pre-fills the newest query, selected: a typed rune replaces it.
 	openCmd, ok := p.ScrollKey(tea.Key{Code: '/', Text: "/"})
@@ -96,20 +107,20 @@ func TestSearchHistoryPrefillRecallAndCommit(t *testing.T) {
 	// Committing the restored input records 'x' (new query), then committing 'two'
 	// again is skipped as the newest duplicate only when 'two' is already newest.
 	applyKeys(t, p, p.searchInputKey(tea.Key{Code: tea.KeyEnter}))
-	if p.SearchQuery() != "x" || len(p.searchHistory) != 3 {
-		t.Fatalf("committed restored input = %q history %v", p.SearchQuery(), p.searchHistory)
+	if p.SearchQuery() != "x" || len(p.searchHistoryEntries()) != 3 {
+		t.Fatalf("committed restored input = %q history %v", p.SearchQuery(), p.searchHistoryEntries())
 	}
 	commitSearch(t, p, "two")
-	if len(p.searchHistory) != 4 {
-		t.Fatalf("history after committing two = %v", p.searchHistory)
+	if len(p.searchHistoryEntries()) != 4 {
+		t.Fatalf("history after committing two = %v", p.searchHistoryEntries())
 	}
 	// A second immediate commit of the same query is a newest-duplicate: reopen and
 	// press Enter without editing the selected pre-fill.
 	openAgain, _ := p.ScrollKey(tea.Key{Code: '/', Text: "/"})
 	applyKeys(t, p, openAgain)
 	applyKeys(t, p, p.searchInputKey(tea.Key{Code: tea.KeyEnter}))
-	if len(p.searchHistory) != 4 {
-		t.Fatalf("history after a duplicate commit = %v", p.searchHistory)
+	if len(p.searchHistoryEntries()) != 4 {
+		t.Fatalf("history after a duplicate commit = %v", p.searchHistoryEntries())
 	}
 	if p.SearchQuery() != "two" || p.SearchMatches() != 1 {
 		t.Fatalf("committed recalled query = %q/%d", p.SearchQuery(), p.SearchMatches())
@@ -125,20 +136,36 @@ func TestSearchHistoryIsBoundedAndSkipsDuplicates(t *testing.T) {
 	p.rememberSearch("")
 	p.rememberSearch("a")
 	p.rememberSearch("a")
-	if len(p.searchHistory) != 1 || p.searchHistory[0] != "a" {
-		t.Fatalf("history after duplicates = %v", p.searchHistory)
+	if len(p.searchHistoryEntries()) != 1 || p.searchHistoryEntries()[0] != "a" {
+		t.Fatalf("history after duplicates = %v", p.searchHistoryEntries())
 	}
-	for i := 0; i < searchHistoryMax+20; i++ {
+	for i := 0; i < terminal.MaxSearchHistoryEntries+20; i++ {
 		p.rememberSearch(fmt.Sprintf("q%d", i))
 	}
-	if len(p.searchHistory) != searchHistoryMax {
-		t.Fatalf("history length = %d, want %d", len(p.searchHistory), searchHistoryMax)
+	if len(p.searchHistoryEntries()) != terminal.MaxSearchHistoryEntries {
+		t.Fatalf("history length = %d, want %d", len(p.searchHistoryEntries()), terminal.MaxSearchHistoryEntries)
 	}
-	if first := p.searchHistory[0]; first != "q20" {
+	if first := p.searchHistoryEntries()[0]; first != "q20" {
 		t.Fatalf("oldest history entry = %q, want q20", first)
 	}
-	if last := p.searchHistory[len(p.searchHistory)-1]; last != fmt.Sprintf("q%d", searchHistoryMax+19) {
+	if last := p.searchHistoryEntries()[len(p.searchHistoryEntries())-1]; last != fmt.Sprintf("q%d", terminal.MaxSearchHistoryEntries+19) {
 		t.Fatalf("newest history entry = %q", last)
+	}
+	// The save side is bounded too: a long/control query is cleaned and cut to the
+	// record's 512-byte limit, and the snapshot never exceeds 100 entries.
+	p.rememberSearch(strings.Repeat("x", terminal.MaxSearchQueryBytes+30))
+	p.rememberSearch("bad\x01\nquery")
+	snapshot := p.historyStore().snapshot()
+	if len(snapshot) > terminal.MaxSearchHistoryEntries {
+		t.Fatalf("snapshot length = %d", len(snapshot))
+	}
+	last := snapshot[len(snapshot)-1]
+	if last != "badquery" {
+		t.Fatalf("cleaned snapshot query = %q", last)
+	}
+	long := snapshot[len(snapshot)-2]
+	if len(long) != terminal.MaxSearchQueryBytes {
+		t.Fatalf("snapshot long query length = %d, want %d", len(long), terminal.MaxSearchQueryBytes)
 	}
 }
 
@@ -184,5 +211,95 @@ func TestSearchCancelOnFocusLoss(t *testing.T) {
 	}
 	if p.scroll.typing {
 		t.Fatal("the search input reopened after the focus round trip")
+	}
+}
+
+// applyTabStart runs one tab-start command and the commands Update answers with
+// (bounded depth), so history/start state is settled like in the running dock.
+func applyTabStart(t *testing.T, tabs *Tabs, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("start did not return a command")
+	}
+	var run func(cmd tea.Cmd, depth int)
+	run = func(cmd tea.Cmd, depth int) {
+		if cmd == nil || depth > 3 {
+			return
+		}
+		for _, msg := range messages(cmd) {
+			if next, ok := tabs.Update(msg); ok {
+				run(next, depth+1)
+			}
+		}
+	}
+	run(cmd, 0)
+}
+
+// TestDockSearchHistoryIsSharedAndPersisted checks the slice: one dock-wide history
+// shared by every tab (Fresh's window-level search prompt history), saved into the
+// terminal state, restored without starting anything, and absent (empty) in an old
+// record that has no field.
+func TestDockSearchHistoryIsSharedAndPersisted(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	var tabs Tabs
+	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 4 }, Focus: func() {}})
+	tabs.SetPorts(Ports{Starter: starter})
+	applyTabStart(t, &tabs, tabs.NewTab())
+	first := tabs.tabs[0]
+	commitSearch(t, first, "alpha")
+	applyTabStart(t, &tabs, tabs.NewTab())
+	second := tabs.tabs[len(tabs.tabs)-1]
+	if got := second.searchHistoryEntries(); len(got) != 1 || got[0] != "alpha" {
+		t.Fatalf("second tab history = %v, want the first tab's query", got)
+	}
+	// Opening the search input in the other tab pre-fills the shared newest query.
+	if !second.Scrolling() {
+		enter, _ := second.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl})
+		applyKeys(t, second, enter)
+	}
+	open, _ := second.ScrollKey(tea.Key{Code: '/', Text: "/"})
+	applyKeys(t, second, open)
+	if second.scroll.searchInput != "alpha" || !second.scroll.searchPrefill {
+		t.Fatalf("second tab prefill = %q/%v", second.scroll.searchInput, second.scroll.searchPrefill)
+	}
+	applyKeys(t, second, second.searchInputKey(tea.Key{Code: tea.KeyEscape}))
+	commitSearch(t, second, "beta")
+	if got := first.searchHistoryEntries(); len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
+		t.Fatalf("shared history = %v, want [alpha beta]", got)
+	}
+	// The state carries the dock-wide history; a restore installs it without
+	// starting a process (a transcript-only restore has no starter calls).
+	saved := tabs.SavedState()
+	if len(saved.SearchHistory) != 2 || saved.SearchHistory[1] != "beta" {
+		t.Fatalf("saved search history = %v", saved.SearchHistory)
+	}
+	restoredStarter := &fakeStarter{term: newFakeTerm()}
+	var restored Tabs
+	restored.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 4 }, Focus: func() {}})
+	restored.SetPorts(Ports{Starter: restoredStarter})
+	restored.Restore(saved)
+	if len(restoredStarter.dirs) != 0 || len(restoredStarter.launches) != 0 {
+		t.Fatalf("restore started a process: dirs %v launches %v", restoredStarter.dirs, restoredStarter.launches)
+	}
+	if got := restored.history.entries(); len(got) != 2 || got[0] != "alpha" {
+		t.Fatalf("restored history = %v", got)
+	}
+	openRestored, _ := restored.tabs[0].ScrollKey(tea.Key{Code: '/', Text: "/"})
+	applyKeys(t, restored.tabs[0], openRestored)
+	if restored.tabs[0].scroll.searchInput != "beta" {
+		t.Fatalf("restored prefill = %q, want beta", restored.tabs[0].scroll.searchInput)
+	}
+	// Old record compatibility: no field means an empty history, still no process.
+	var legacy Tabs
+	legacy.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 4 }, Focus: func() {}})
+	legacyStarter := &fakeStarter{term: newFakeTerm()}
+	legacy.SetPorts(Ports{Starter: legacyStarter})
+	legacy.Restore(terminal.SavedState{Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"}})
+	if len(legacy.history.entries()) != 0 {
+		t.Fatalf("legacy record history = %v, want empty", legacy.history.entries())
+	}
+	if len(legacyStarter.dirs) != 0 || len(legacyStarter.launches) != 0 {
+		t.Fatalf("legacy restore started a process: %v/%v", legacyStarter.dirs, legacyStarter.launches)
 	}
 }

@@ -195,6 +195,8 @@ func TestRustLspHelpPopupActions(t *testing.T) {
 		"enable/disable toggle only controls these helper commands",
 		"does not start, stop or select the native Rust LSP server",
 		"workspace authority",
+		"workspace trust gate may refuse it",
+		"Only a successful check (exit 0, no timeout or signal) counts",
 		"local-only PATH lookup is never used",
 		"https://rust-analyzer.github.io/book/installation.html",
 	} {
@@ -247,5 +249,50 @@ func TestRustLspCheckLocalLookPathHitDoesNotFakeAuthoritySuccess(t *testing.T) {
 	}
 	if runs := r.os.Runs(); len(runs) != 1 {
 		t.Fatalf("runs = %+v, want one authority probe", runs)
+	}
+}
+
+func TestRustLspCheckTimeoutOrSignalIsNotRunnable(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		s    plugintest.ProcScript
+		want string
+	}{
+		{"timeout", plugintest.ProcScript{Stdout: "rust-analyzer 1.2.3\n", TimedOut: true}, "timed out"},
+		{"signal", plugintest.ProcScript{Stdout: "rust-analyzer 1.2.3\n", Signal: "KILL"}, "signal KILL"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := rustRig(t, func(o *plugintest.FakeOS) {
+				o.Script([]string{"rust-analyzer", "--version"}, tt.s)
+			})
+			if err := r.h.Run("rust_lsp.check", nil); err != nil {
+				t.Fatal(err)
+			}
+			got := lastNoticeText(r.h)
+			if !strings.Contains(got, "runnable on the workspace, but --version failed") || !strings.Contains(got, tt.want) {
+				t.Fatalf("status = %q, want a failed --version containing %q", got, tt.want)
+			}
+			if strings.Contains(got, "rust-analyzer is runnable on the workspace (") {
+				t.Fatalf("abnormal exit reported as a successful version: %q", got)
+			}
+		})
+	}
+}
+
+func TestRustLspCheckTrustGateRefusalIsNotMissing(t *testing.T) {
+	t.Parallel()
+	r := rustRig(t, func(o *plugintest.FakeOS) {
+		o.Script([]string{"rust-analyzer", "--version"}, plugintest.ProcScript{Err: pluginapi.Errf(pluginapi.CodeInvalid, "workspace is not trusted")})
+	})
+	if err := r.h.Run("rust_lsp.check", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := lastNoticeText(r.h)
+	for _, want := range []string{"workspace is not trusted", "Could not run rust-analyzer on the workspace", "workspace trust gate", "local-only", "cannot prove rust-analyzer is missing"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status = %q, want %q", got, want)
+		}
 	}
 }

@@ -296,11 +296,12 @@ language-disable or register/restart-for-language seam, so the port exposes the 
 install/help half as four palette commands: **Rust: Copy rustup Install Command** copies
 `rustup component add rust-analyzer` and **Rust: Copy brew Install Command** copies
 `brew install rust-analyzer` (status row confirms); **Rust: Check rust-analyzer** runs
-`rust-analyzer --version` through `gvim.proc` (authority-following, so a remote workspace is
-probed on the remote host), reporting the first version line, a runnable-but-failed `--version`, or
-a probe failure. A failed probe is reported as "could not run rust-analyzer on the workspace" with
-the local-only LookPath limitation named — it is never reported as an authoritative missing binary
-for a remote workspace. The native Rust LSP server is gvim's built-in entry, not something this
+`rust-analyzer --version` through `gvim.proc` (authority-following and workspace-trust-gated, so
+a remote workspace is probed on the remote host and a refused/untrusted probe is reported, not
+bypassed). It reports the first version line only when `result.ok` is true (exit 0, no timeout or
+signal); a non-zero exit, timeout or signal is a failed `--version` check. A failed probe is
+reported as "could not run rust-analyzer on the workspace" with the local-only LookPath limitation
+named — it is never reported as an authoritative missing binary for a remote workspace. The native Rust LSP server is gvim's built-in entry, not something this
 plugin starts: it runs under the normal LSP rules (lsp_enabled, Rust root markers such as
 Cargo.toml, auto_start), an explicit `lsp.rust` entry or a disabled Rust language replaces/skips
 it, and this plugin's enable/disable toggle only controls the helper commands and never changes the
@@ -319,19 +320,48 @@ now lives in gvim's native core rather than in this plugin: when the probed work
 root gvim opened or switched to) has `deno.json`/`deno.jsonc`, the Deno runtime is confirmed
 through the workspace authority under the workspace trust gate, `lsp_enabled` is true and the language is `typescript` or
 `javascript`, core selects `deno lsp`. It applies only to an LSP manager created for that exact
-workspace root (nested/per-file TS/JS roots keep their configured server), installs the server with
-`auto_start: false` (nothing is spawned silently; Start/Restart LSP Server starts that manager),
-and a TS/JS manager that already existed before the async probe answer keeps its configured server
-for the session — a plain restart does not switch it; a new manager/relaunch does. Explicit
+workspace root (nested/per-file TS/JS roots keep their configured server) and installs the server
+with `auto_start: false` (nothing is spawned silently). A Settings Save/Reload pushes the reloaded
+config's server baseline into the LSP port: future managers and the next explicit Start/Restart use
+that baseline (including a newly added explicit TS/JS server), while the reload itself does not
+rebuild or restart an existing manager — it keeps its old config until the explicit action; Deno
+auto-selection is not applied while an explicit/disabled entry is present. Settings reload and a live
+trust revoke/restore pass that config through the LSP config gate before the baseline is pushed (the
+Deno probe shares the gate): a Restricted/Blocked workspace cannot gain auto-starting servers via a
+reload or trust change, a manager created after a revoke does not auto-start, and after a revoke an
+already-created manager's old AutoStart configs no longer start new servers on Open without stopping
+running processes; manual Start/Restart remains available. Auto-start and launch spawn are two live checks, not atomic: a revoke between them refuses only when
+the spawn gate denies (Blocked, remote workspace not Trusted, or a project-contained executable);
+under Restricted a system-installed binary outside the project may still start. A revoke after the
+spawn gate passes can likewise let that in-flight start proceed. Neither check nor a revoke stops
+existing processes; later Opens do not auto-start after the revoke. Both replacing and same-config
+Restart preflight the spawn gate before stopping, so a denial preserves running servers/config;
+preflight→launch is non-transactional (old servers may already be stopped and the new start refused
+when the spawn gate denies, though under Restricted a system-installed binary outside the project
+may still start); a repeated Start of a running server returns the live handle without spawning or
+consulting the gate, even when Blocked; other start failures (missing binary/initialize) are not
+transactional. Installing/clearing the selection never
+stops a running server. An explicit Start/Restart LSP Server for typescript/javascript applies the
+completed current-root selection to an existing manager: when its config differs, gvim replaces the
+whole language server list and restarts only that language's servers (other languages/universal
+servers untouched); when the selection was cleared, the same explicit action restores the configured
+baseline. If a whole-language replacement is needed, Restart Server on any row of that language
+replaces the entire list with the current selection (the clicked row's name is not used); otherwise
+it restarts only the named server. A root-wide LSP Restart rebuilds managers, and the selection
+applies when the root creates the next one; `deno lsp` stays `auto_start: false`, so an explicit
+Start/Restart launches it. Explicit
 `lsp` entries for typescript/javascript always win and opt out, as do disabled languages and
 `lsp_enabled: false`; `tsx` is untouched. The bundled plugin's `default_enabled: false` toggle
 only controls its helper commands and does **not** control native auto-selection, which runs in
 core regardless of whether the plugin is loaded/enabled. The helper keeps three palette commands.
 **Deno: Check Project** checks the workspace root (cwd fallback) for `deno.json` and `deno.jsonc` and runs
-`deno --version` through `gvim.proc` (authority-following), reporting ready (config plus a
-runnable runtime), config with a probe failure, runtime without a Deno project config, or neither;
-the probe-failure cases say the runtime could not be run on the workspace and name the local-only
-LookPath limitation, never a definitive missing binary, and include the install command.
+`deno --version` through `gvim.proc` (authority-following and workspace-trust-gated). It reports
+ready only when the config exists and `result.ok` is true (exit 0, no timeout or signal); config
+with a non-zero/timeout/signal `--version` is a failed check and is never reported as ready. It
+also reports runtime without a Deno project config, probe start/trust-gate failures, or neither;
+the probe-failure cases say the runtime could not be run on the workspace under the workspace trust
+gate, name the local-only LookPath limitation, never claim a definitive missing binary, and include
+the install command.
 **Deno: Copy Install Command** copies the official
 `curl -fsSL https://deno.land/install.sh | sh` command with a status-row confirmation; the help
 popup still lists Homebrew, but a local `brew` lookup never chooses the remote host's installer.
@@ -346,9 +376,11 @@ active-window root tracking, and no LSP-menu/disable/register seam; Check Projec
 is the authority-following `deno --version` probe; the plugin's local LookPath is never used for
 presence. Tests: `plugin/bundled/deno_lsp_test.go` covers the
 manifest/commands/no bindings, the curl installer regardless of a local brew, an authority probe
-succeeding despite a local LookPath miss, the probe-failure/ready/no-config states, `deno.jsonc`
-and a custom workspace root, the help popup's native auto-selection/explicit-config/plugin-toggle
-text and actions plus copy/check/native-restart dispatch.
+succeeding despite a local LookPath miss, ready only for a successful version check, non-zero
+exit/timeout/signal never ready, probe start and workspace-trust-gate failures (not a missing-binary
+claim), the probe-failure/ready/no-config states, `deno.jsonc` and a custom workspace root, the help
+popup's native auto-selection/explicit-config/plugin-toggle text and actions plus
+copy/check/native-restart dispatch.
 
 **markdown_source** (port of Fresh's `plugins/markdown_source.ts`): gvim's editor already
 implements Fresh's Markdown source-mode list rules natively (`editor/markdown.go`, called from the

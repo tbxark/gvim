@@ -762,6 +762,12 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	}); ok {
 		setter.SetSpawnGate(lspGate)
 	}
+	if setter, ok := deps.LSP.(interface{ SetAutoStartGate(func() bool) }); ok {
+		// The live trust check gates automatic starts for managers that already exist
+		// (a trust revoke must not leave their old AutoStart configs running new
+		// servers); manual StartLanguage/Restart still goes through lspGate.
+		setter.SetAutoStartGate(trustedLive)
+	}
 	// A remote launch routes the language servers through the authority (LSP over SSH,
 	// docs/authority.md §7) once the slot exists, below. Until then the port is built as
 	// for a local launch; the manager never starts a local server for a remote workspace
@@ -1034,8 +1040,17 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	settingsSvc = newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat, settingsRuntime{
 		lsp:         deps.LSP,
 		localeApply: func(locale string) { pw.Runtime.SetLocale(locale) },
-		plugins:     pw.Runtime,
-		pluginsCfg:  cfg,
+		lspReload: func(next config.Config) {
+			// The reload must not bypass the live trust gate: a Restricted/Blocked
+			// workspace ignores reloaded project tooling auto-start just as the initial
+			// port build does (manual Start/Restart remains available).
+			gated := lspConfig(next, trust.State{Level: levelOf()})
+			if setter, ok := deps.LSP.(interface{ SetConfig(config.Config) }); ok {
+				setter.SetConfig(gated)
+			}
+		},
+		plugins:    pw.Runtime,
+		pluginsCfg: cfg,
 		keymapOf: func(cfg config.Config) tui.Keymap {
 			return keybindings.NewKeymap(keybindings.ApplyOverrides(presetKeymap(opts.Keymap, cfg), cfg))
 		},
@@ -1048,6 +1063,18 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	settingsSvc.setEnvWatch(envWatch)
 	deps.SettingsPort = settingsSvc
 
+	// A live trust change (revoke/restore) re-gates the LSP baseline at once, so a
+	// revoke cannot leave an auto-starting configuration behind even without a
+	// Settings reload. Manual Start/Restart remains available through the normal gate.
+	if trustCtl != nil {
+		trustCtl.SetChangeListener(func(state trust.State) {
+			gated := lspConfig(settingsSvc.currentConfig(), state)
+			if setter, ok := deps.LSP.(interface{ SetConfig(config.Config) }); ok {
+				setter.SetConfig(gated)
+			}
+		})
+	}
+
 	// Project-root Deno auto-selection (Fresh deno_lsp parity with authority-only checks):
 	// one bounded background probe against the workspace root; it never overrides an explicit
 	// or disabled user LSP config and is re-run after a reconnect or project-root switch. The
@@ -1055,7 +1082,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// settings service's live config (a settings reload thus invalidates a stale decision).
 	var denoAuto *denoAutoSelector
 	if deps.LSP != nil && authSlot != nil && denoRoot != "" {
-		denoCfg := func() config.Config { return settingsSvc.currentConfig() }
+		denoCfg := func() config.Config {
+			// The Deno selection is an auto-start choice, so evaluate it against the same
+			// live-trust-gated config the port uses, never the raw reloaded settings.
+			return lspConfig(settingsSvc.currentConfig(), trust.State{Level: levelOf()})
+		}
 		denoAuto = newDenoAutoSelector(deps.LSP, authSlot, denoRoot, opts.Remote != nil, authGate, envProvider.Overlay, denoCfg)
 		if denoAuto != nil {
 			if setter, ok := deps.LSP.(interface{ SetRootChangeListener(func(string)) }); ok {

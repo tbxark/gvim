@@ -184,3 +184,93 @@ func TestIndexGenerationChangesOnRestart(t *testing.T) {
 		t.Fatalf("generation after Restart = %d, want greater than %d", g2, g1)
 	}
 }
+
+// TestLocalPrefixProbeHiddenSetting: the explorer's Show Hidden Files setting reaches
+// the directory and parent-prefix branches; a typed dot basename includes its dot
+// matches even when hidden files are otherwise off, Fresh's shell-completion exception.
+func TestLocalPrefixProbeHiddenSetting(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.go", ".a.go", ".hidden.go", "sub/visible.go", "sub/.dot.go"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name       string
+		showHidden bool
+		query      string
+		want       []string
+	}{
+		{"parent prefix hides dot files", false, "a", []string{"a.go"}},
+		{"typed dot basename includes dot files", false, ".a", []string{".a.go"}},
+		{"directory listing hides dot files", false, "sub", []string{"sub/visible.go"}},
+		{"directory listing includes dot files with setting", true, "sub", []string{"sub/.dot.go", "sub/visible.go"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LocalPrefixProbeOptions(root, tt.showHidden)(context.Background(), tt.query)
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("probe(showHidden=%v, %q) = %v, %v; want %v", tt.showHidden, tt.query, got, err, tt.want)
+			}
+		})
+	}
+}
+
+// TestIndexSetProbeShowHidden: the local index probe is rebuilt with the explorer's Show
+// Hidden Files setting; a remote/custom probe (no local root) is left alone.
+func TestIndexSetProbeShowHidden(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sub/visible.go", "sub/.hidden.go"} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	x := Start(context.Background(), root)
+	defer x.Close()
+	<-x.Done()
+	got, err := x.Probe(context.Background(), "sub")
+	if err != nil || !reflect.DeepEqual(got, []string{"sub/visible.go"}) {
+		t.Fatalf("default index probe = %v, %v; want only the visible file", got, err)
+	}
+	x.SetProbeShowHidden(true)
+	got, err = x.Probe(context.Background(), "sub")
+	if err != nil || !reflect.DeepEqual(got, []string{"sub/.hidden.go", "sub/visible.go"}) {
+		t.Fatalf("show-hidden index probe = %v, %v; want both files", got, err)
+	}
+
+	// A custom/remote index has no local root; the setter must not replace its probe.
+	x2 := startWith(context.Background(), func(context.Context, func(string) bool) error { return nil })
+	defer x2.Close()
+	x2.SetProbe(func(context.Context, string) ([]string, error) { return []string{"remote.go"}, nil })
+	x2.SetProbeShowHidden(true)
+	if got, err := x2.Probe(context.Background(), "remote.go"); err != nil || !reflect.DeepEqual(got, []string{"remote.go"}) {
+		t.Fatalf("custom index probe after the hidden setter = %v, %v; want remote.go", got, err)
+	}
+}
+
+// TestReadLocalProbeDirNeverExceedsTheScanCap: a directory larger than the cap must
+// return at most ProbeScanLimit entries; the final ReadDir request is clamped instead
+// of overshooting with a full batch.
+func TestReadLocalProbeDirNeverExceedsTheScanCap(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < ProbeScanLimit+40; i++ {
+		name := "f" + fmt.Sprintf("%05d", i)
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := readLocalProbeDir(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != ProbeScanLimit {
+		t.Fatalf("readLocalProbeDir returned %d entries, want exactly the %d cap", len(entries), ProbeScanLimit)
+	}
+}

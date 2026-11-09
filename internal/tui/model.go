@@ -2051,16 +2051,17 @@ func (m *Model) openPalette(query string) tea.Cmd {
 	// authority-backed remote reader for a remote one (run.go installs it).
 	preview := m.root.ports.Preview
 	p := palette.New(palette.Options{
-		Query:    query,
-		Root:     root,
-		Remote:   remote,
-		Commands: translateCommands(m.allCommands()),
-		State:    &st,
-		Buffers:  m.paletteBuffers(),
-		Files:    m.files,
-		Ranker:   m.ranker,
-		Preview:  preview,
-		Theme:    m.theme,
+		Query:      query,
+		Root:       root,
+		Remote:     remote,
+		ShowHidden: m.tree != nil && m.tree.ShowHidden(),
+		Commands:   translateCommands(m.allCommands()),
+		State:      &st,
+		Buffers:    m.paletteBuffers(),
+		Files:      m.files,
+		Ranker:     m.ranker,
+		Preview:    preview,
+		Theme:      m.theme,
 	})
 	m.pushOverlay(p)
 	return p.Init()

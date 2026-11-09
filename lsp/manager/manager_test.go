@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -764,5 +765,70 @@ func TestConcurrentOpensShareOneServerStart(t *testing.T) {
 		if _, ok := m.ClientFor(p); !ok {
 			t.Fatalf("ClientFor(%s) reports no document after its Open", p)
 		}
+	}
+}
+
+// TestAutoStartGateBlocksOpenStartsButManualStartWorks checks the live auto-start gate:
+// Open skips AutoStart servers while it is false (existing processes untouched), while a
+// manual StartLanguage still starts the (gated) server.
+func TestAutoStartGateBlocksOpenStartsButManualStartWorks(t *testing.T) {
+	log := &startLog{t: t}
+	m := newLoggedManager(log, goAndMarkdown)
+	m.SetAutoStartGate(func() bool { return false })
+	_ = m.Open(mgrAPath, "go", "package a\n")
+	if len(log.cfgs) != 0 {
+		t.Fatalf("Open started %d server(s) while the auto-start gate was false", len(log.cfgs))
+	}
+	if err := m.StartLanguage("go"); err != nil {
+		t.Fatalf("manual StartLanguage: %v", err)
+	}
+	if len(log.cfgs) != 1 {
+		t.Fatalf("manual StartLanguage started %d server(s), want 1", len(log.cfgs))
+	}
+	// An already running server is not stopped by flipping the gate; a repeated Start
+	// returns the live handle without spawning or consulting the gate again.
+	hs := m.Handles("go")
+	if len(hs) != 1 {
+		t.Fatalf("handles after manual start = %d, want 1", len(hs))
+	}
+	original := hs[0]
+	m.SetAutoStartGate(func() bool { return false })
+	m.SetGate(func(context.Context, []string, string, string) error { return errors.New("should not gate") })
+	if err := m.StartLanguage("go"); err != nil {
+		t.Fatalf("repeated StartLanguage: %v", err)
+	}
+	if len(log.cfgs) != 1 {
+		t.Fatalf("repeated StartLanguage spawned %d server(s)", len(log.cfgs)-1)
+	}
+	if got := m.Handles("go"); len(got) != 1 || got[0] != original {
+		t.Fatal("repeated StartLanguage replaced the running handle")
+	}
+}
+
+// TestRestartServerPreflightKeepsRunningServer checks the normal (same-config) Restart
+// Server preflights the trust gate: a refusal must leave the live server and handle alone.
+func TestRestartServerPreflightKeepsRunningServer(t *testing.T) {
+	log := &startLog{t: t}
+	m := newLoggedManager(log, goAndMarkdown)
+	if err := m.StartLanguage("go"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	hs := m.Handles("go")
+	if len(hs) != 1 {
+		t.Fatalf("handles = %d, want 1", len(hs))
+	}
+	original := hs[0]
+	m.SetGate(func(context.Context, []string, string, string) error {
+		return errors.New("workspace trust: Blocked")
+	})
+	err := m.RestartServer("go", "")
+	if err == nil || !strings.Contains(err.Error(), "Blocked") {
+		t.Fatalf("RestartServer error = %v, want the trust refusal", err)
+	}
+	if len(log.cfgs) != 1 {
+		t.Fatalf("refused RestartServer started %d server(s)", len(log.cfgs)-1)
+	}
+	if got := m.Handles("go"); len(got) != 1 || got[0] != original {
+		t.Fatal("refused RestartServer stopped/replaced the running server")
 	}
 }

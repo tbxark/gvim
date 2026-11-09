@@ -1265,3 +1265,31 @@ func TestFileProbeCacheInvalidatesOnIndexGeneration(t *testing.T) {
 		t.Fatalf("post-refresh rows = %+v, want new.go", p.rows)
 	}
 }
+
+// hiddenSetterFiles records the explorer Show Hidden Files setting the palette forwards
+// to the local literal-path probe.
+type hiddenSetterFiles struct {
+	*probeFiles
+	hidden bool
+	sets   int
+}
+
+func (f *hiddenSetterFiles) SetProbeShowHidden(show bool) {
+	f.hidden = show
+	f.sets++
+}
+
+// TestPalettePassesTheShowHiddenSetting: the palette applies the explorer setting to the
+// probe port at construction (no I/O in the probe itself).
+func TestPalettePassesTheShowHiddenSetting(t *testing.T) {
+	files := &hiddenSetterFiles{probeFiles: &probeFiles{fakeFiles: fakeFiles{loading: false}}}
+	New(Options{Query: "a", Files: files, Ranker: &fakeRanker{}, ShowHidden: true})
+	if files.sets != 1 || !files.hidden {
+		t.Fatalf("show-hidden setting = %v after %d sets, want true after one", files.hidden, files.sets)
+	}
+	files2 := &hiddenSetterFiles{probeFiles: &probeFiles{fakeFiles: fakeFiles{loading: false}}}
+	New(Options{Query: "a", Files: files2, Ranker: &fakeRanker{}})
+	if files2.sets != 1 || files2.hidden {
+		t.Fatalf("default show-hidden = %v after %d sets, want false", files2.hidden, files2.sets)
+	}
+}

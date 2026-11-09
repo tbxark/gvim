@@ -47,10 +47,19 @@ local function check_server()
     gvim.status(t("status.probe_failed", { error = tostring(err), rustup = RUSTUP_COMMAND }))
     return
   end
-  if result.code ~= 0 then
-    local detail = first_line(result.stderr)
-    if detail == "" then
-      detail = t("status.exit_code", { code = tostring(result.code) })
+  -- result.ok covers non-zero exits plus a signal or timeout; checking only code ~= 0
+  -- would report a probe that timed out or was killed as runnable.
+  if not result.ok then
+    local detail
+    if result.timed_out then
+      detail = t("status.timeout")
+    elseif result.signal and result.signal ~= "" then
+      detail = t("status.signal", { signal = tostring(result.signal) })
+    else
+      detail = first_line(result.stderr)
+      if detail == "" then
+        detail = t("status.exit_code", { code = tostring(result.code) })
+      end
     end
     gvim.status(t("status.version_failed", { error = detail }))
     return

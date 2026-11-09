@@ -378,25 +378,21 @@ func isCtrlSpace(k tea.Key) bool {
 }
 
 // searchInputKey edits the search input line.
-// searchHistoryMax is Fresh's InputHistory default capacity.
-const searchHistoryMax = 100
-
-// rememberSearch records a committed query like Fresh's prompt history: empty
-// queries and an exact repeat of the newest entry are skipped, the oldest entry is
-// dropped past the bound. Navigation state is reset by the caller.
-func (p *Panel) rememberSearch(query string) {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return
+// historyStore returns the dock-wide search history, or a panel-local one for a
+// panel built without Tabs (tests, an extracted/standalone panel).
+func (p *Panel) historyStore() *searchHistoryStore {
+	if p.history == nil {
+		p.history = &p.ownHistory
 	}
-	if n := len(p.searchHistory); n > 0 && p.searchHistory[n-1] == query {
-		return
-	}
-	p.searchHistory = append(p.searchHistory, query)
-	if over := len(p.searchHistory) - searchHistoryMax; over > 0 {
-		p.searchHistory = append([]string(nil), p.searchHistory[over:]...)
-	}
+	return p.history
 }
+
+// rememberSearch records a committed query in the dock-wide history (the store
+// applies Fresh's InputHistory rules: bounded, empty/newest-duplicate skipped).
+func (p *Panel) rememberSearch(query string) { p.historyStore().remember(query) }
+
+// searchHistoryEntries returns the dock-wide queries, oldest first.
+func (p *Panel) searchHistoryEntries() []string { return p.historyStore().entries() }
 
 // startSearchInput opens the search input: the last committed query is
 // pre-filled and selected (typing replaces it), the view is saved for Esc, an
@@ -416,11 +412,11 @@ func (p *Panel) startSearchInput() tea.Cmd {
 	p.scroll.searchSavedTop = p.scroll.top
 	p.scroll.searchSavedSelected = p.scroll.selected
 	p.scroll.searchSeq++
-	if n := len(p.searchHistory); n > 0 {
-		p.scroll.searchInput = p.searchHistory[n-1]
+	if history := p.searchHistoryEntries(); len(history) > 0 {
+		p.scroll.searchInput = history[len(history)-1]
 		p.scroll.searchPrefill = true
-		p.scroll.searchHistPos = n - 1
-		p.scroll.searchHistTemp = p.searchHistory[n-1]
+		p.scroll.searchHistPos = len(history) - 1
+		p.scroll.searchHistTemp = history[len(history)-1]
 		return p.incrementalSearchCmd()
 	}
 	return nil
@@ -455,7 +451,8 @@ func (p *Panel) cancelSearchInput() tea.Cmd {
 // started from. A recalled query is previewed through the same ordered search
 // command as typing, so late answers from an older recall are dropped.
 func (p *Panel) recallSearchHistory(previous bool) tea.Cmd {
-	n := len(p.searchHistory)
+	history := p.searchHistoryEntries()
+	n := len(history)
 	if n == 0 {
 		return nil
 	}
@@ -482,7 +479,7 @@ func (p *Panel) recallSearchHistory(previous bool) tea.Cmd {
 		pos++
 	}
 	p.scroll.searchHistPos = pos
-	p.scroll.searchInput = p.searchHistory[pos]
+	p.scroll.searchInput = history[pos]
 	p.scroll.searchPrefill = false
 	return p.incrementalSearchCmd()
 }

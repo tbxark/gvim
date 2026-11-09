@@ -496,6 +496,9 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	s.lastDiags = diags
 	s.themePreviews = previews
 	s.mu.Unlock()
+	if s.rt.lspReload != nil {
+		s.rt.lspReload(cfg)
+	}
 	s.applyEnvDetectorChange(previous, cfg)
 	return change, nil
 }

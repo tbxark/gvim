@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `d53d2cd` (the previous round's commit is folded in) plus the
-merged round-45 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+Last verified: 2026-11-09, tree commit `1b42aad` (the previous round's commit is folded in) plus the
+merged round-46 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
 GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-122 KiB / de 82 KiB / both 205 KiB, git diff --check). Final full
+122 KiB / de 88 KiB / both 210 KiB, git diff --check). Final full
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
-`/tmp/gvim-r45-final2.log`). The audit ran build/gofmt/i18n_check plus targeted round-45 tests/diff
+`/tmp/gvim-r46-final4.log`). The audit ran build/gofmt/i18n_check plus targeted round-46 tests/diff
 review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
 real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
@@ -1514,6 +1514,81 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-46 outcome (2026-11-09, merged working tree on `1b42aad`).** Five slices landed: explicit
+Start/Restart applies a completed Deno selection to an existing manager plus live-trust regating;
+sidebar search-history persistence with hard load/save caps; keymap probe setting/generation gaps;
+plugin non-zero/timeout/signal probe fixes; statusbar i18n. Static gates pass; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL (log
+`/tmp/gvim-r46-final4.log`). The audit read the diff and ran targeted tests; the Lead ran the full
+suite.
+**Explicit Start/Restart applies selection; live trust gate (lsp; item 256).** The LSP port now
+compares an existing manager's servers with the current selection and the current root provider:
+an explicit Start/Restart applies the completed Deno selection (or restores the configured
+baseline when it was cleared) to an existing manager, stopping/restarting only that language's
+non-universal servers; other languages and universal servers are untouched, and the
+Restart Server row semantics (whole-language replacement when the config differs; named-server
+restart otherwise) are documented. Settings Save/Reload pushes the reloaded server plan through
+`SetConfig` (gated by the live trust state) so future managers and the next explicit Start use the
+new baseline, including a newly added explicit server; an existing manager is not rebuilt by the
+reload. Trust is enforced live: `lspConfig` gates the reloaded config, a trust change listener
+re-gates the baseline, and an auto-start gate is consulted by every automatic start of existing
+and future managers; a revoke never stops an existing process. Explicit Start/Restart of a
+replacement preflights the spawn gate before stopping (a refusal keeps the old server/config); a
+same-config Restart Server preflights before stopping, and a repeated Start on a running server
+returns the live handle without spawning or consulting the gate.
+AUDITED RESIDUAL (Restricted race): the auto-start gate is read first and the spawn gate is
+checked again at launch. A Trust revoke to Blocked between those checks refuses the start; a
+revoke to Restricted can still let an automatic start of a SYSTEM binary through, because
+Restricted only refuses workspace-contained executables (a revoke after the spawn gate passed but
+before exec can also let that in-flight start proceed). The auto-start check is therefore not an
+atomic cross-check guarantee; the docs say exactly this and the tests cover the normal revoke path,
+not the narrow Restricted race. Preflight→stop→launch has the same shape: a revoke can leave old
+servers stopped and the new start refused (or, for a Restricted system binary, let it start);
+missing-binary/initialize failures are likewise non-transactional. A revoke never stops a running
+process, so Blocked's no-new-processes rule is about starts, not retroactive kills (R13-8/R13-3).
+**Sidebar search-history persistence + hard record cap (sidebar; item 257).** Scrollback search
+queries are dock-wide (shared by tabs), bounded 100 entries x 512 bytes, and persisted as the
+additive optional `search_history` of the terminal record; the format version stays 1 so old
+readers/records keep working. Save and Load both apply the bounds (store remember/snapshot,
+`SaveTerminal` generic entry point, `LoadTerminal`), cleaning controls/invalid UTF-8, trimming,
+dropping empties and cutting on rune boundaries. The loader now has a hard 64 MiB terminal.json
+cap checked with Stat before the read and enforced with LimitReader, so a malicious file cannot
+allocate without bound; JSON decode/clean/bound follows. A record above the cap is reported
+unreadable and ignored; a normal old record (no search_history, otherwise within bounds) restores
+an empty history. AUDITED BOUNDARY: records from older versions above 64 MiB are now refused
+rather than migrated/truncated (deliberate hard-cap compatibility boundary; the writer refuses to
+emit such a record and keeps the previous file byte-identical). History is plaintext in the
+per-workspace session directory (dir 0700/file 0600), restored only on the full session-restore
+path; it never starts a process or reaches config/disks elsewhere (R13-15).
+**Keymap probe gaps (keymap; item 258).** The local literal-path probe now follows the file
+explorer's Show Hidden Files setting for directory listings and parent-prefix matches (a typed dot
+basename still includes its dot matches), streams the bounded directory in 128-entry reads with
+cancellation, and its 4096-entry/50-result caps are exact (the final ReadDir request is clamped to
+the remaining budget; a huge directory can miss matches after the inspected subset, which follows
+filesystem order). The remote probe remains exact-path Stat only (authority realpath+Stat, no local
+disk, no directory enumeration); the 16-path cache still belongs to the finder generation and is
+dropped on Restart/reconnect, with an in-command generation recheck. Residuals: remote
+parent-basename/directory branches are not probed (no bounded remote directory reader); local scan
+subset is not a complete listing; probe branch has no .gitignore filtering; an external
+create/remove without an index refresh can serve a cached answer until refresh/reopen; exact local
+symlink followed only while its real target stays inside the workspace (realpath-check→Stat TOCTOU
+theoretical); hidden setting is applied when the palette opens (R3/R13-3).
+**Plugin non-zero/timeout/signal fixes (plugin; item 259).** Rust: Check rust-analyzer and Deno:
+Check Project now treat only `result.ok` (exit 0, no signal, no timeout) as a runnable/runnable
+version check. A non-zero exit (first stderr line), timeout, signal, exec start failure or trust
+refusal has its own status and never reaches ready/found; the authority-following probe is used
+for the workspace, local LookPath is never a presence decision, and a failed probe never claims
+the remote host lacks the binary. Deno Copy Install stays the official curl alternative; help
+popups list both commands (R13-6/R13-13/R13-8).
+**Statusbar i18n (statusbar; item 260).** The recent status-bar/degradation strings were extracted
+with English byte-identical; formatting/fallback/key-guard tests refreshed. Catalogue remains en
+1124 / de 579 keys, 575 KiB key+value text (under the 640 KiB cap), ≈665 KiB embedded JSON, loader
+heap en 122 KiB / de 88 KiB / both 210 KiB (R13-5).
+Metrics: palette 240, settings 69 in 14 sections, bundled 30 (9 on)/21 off, 68 bundled-command
+registration sites, plugin API 247 functions/1501 lines level 2; i18n en 1124 / 579 per locale, 575
+KiB text, ≈665 KiB JSON, heap 122-88-210 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r46-
+final4.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-45 outcome (2026-11-09, merged working tree on `d53d2cd`).** Five slices landed: native Deno
 authority root selection + Fresh/plugin-toggle difference; Rust/Deno version probes through the
@@ -5180,6 +5255,34 @@ for parity status.
      generation; Restart bumps gen and palette drops cache; command re-checks gen; negative cached
      within generation; external create/remove without refresh can stale until refresh/reopen; remote
      exact Stat only/no enumeration.
+256. **LSP explicit Start/Restart selection + live trust gate (lsp; R13-8/R13-3).** existing manager
+     applies completed Deno selection or restores baseline on explicit Start/Restart, only target
+     language/non-universal; other languages/universal untouched; RestartServer whole-language replacement
+     semantics documented. SetConfig reload baseline (gated by live trust) for future/manual Start,
+     existing manager not rebuilt; trust listener re-gates, auto-start gate on existing/future managers,
+     no stop on revoke; preflight before stop for ReplaceServers/same-config RestartServer; repeated
+     Start running handle no spawn/no gate. RESIDUALS: Restricted between-check revoke can still start
+     a SYSTEM binary (only workspace-contained refused), preflight→launch non-transactional, revoke
+     does not stop existing processes; missing-binary/initialize failures non-transactional; real host
+     UNTESTED.
+257. **Sidebar search-history persistence + 64 MiB cap (sidebar; R13-15).** dock-wide 100x512,
+     Save/Load clean/bound, additive search_history format v1, plaintext 0700/0600, full-restore only,
+     no process. Loader 64 MiB Stat+LimitReader cap; >cap record unreadable/ignored; normal old record
+     without history loads empty; older >64 MiB records intentionally refused (hard-cap compatibility
+     boundary, not migrated/truncated); Save bounds generic entry point and refuses over-cap keeping old
+     file.
+258. **Keymap probe gaps (R3/R13-3).** local probe honors Show Hidden Files for dir listing/parent prefix
+     (typed dot basename exception), exact 4096/50 caps with clamped final batch, cancellation; remote
+     exact Stat only/no enumeration; 16-path cache per finder generation, dropped on Restart and
+     rechecked in command. Residuals inspected subset follows FS order/not complete, no gitignore,
+     external change without refresh can cache, realpath→Stat TOCTOU, hidden setting applied at palette
+     open.
+259. **Plugin non-zero/timeout/signal (R13-6/R13-13/R13-8).** Rust/Deno Check use result.ok (exit0/no
+     signal/no timeout); non-zero first stderr, timeout, signal, exec failure, trust refusal have own
+     status and never ready/found; authority probe, local LookPath never presence; no remote missing
+     claim; official curl copy.
+260. **Statusbar i18n (R13-5).** recent strings extracted English byte-identical/fallback/key-guard;
+     en1124/de579, 575 KiB text, ≈665 KiB JSON, heap122-88-210.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7148,28 +7251,36 @@ Round 13 recorded five open gaps:
   Tracks: native Deno authority root selection + Fresh/helper-toggle difference; Rust/Deno authority
   version probes; diff_nav saved-deletion seam + real provider interop; sidebar transcript query
   history; finder-generation probe cache. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-46 verification (2026-11-09, merged tree on `1b42aad`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 122 KiB / de 88 KiB / both 210 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+  `/tmp/gvim-r46-final4.log`). Audit: build/gofmt/i18n_check plus targeted round-46 tests/diff review.
+  Tracks: LSP explicit Start/Restart selection + SetConfig/live trust/preflight (Restricted race
+  recorded); sidebar history persistence + 64 MiB hard cap; keymap probe setting/cap gaps; plugin
+  non-zero/timeout/signal; statusbar i18n. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-45 landed native Deno selection, authority version probes, diff_nav deletion seam, transcript
-  history, probe generation cache; full suite EXIT 0 (76 packages, log /tmp/gvim-r45-final2.log);
-  §5.5 is round-46/47 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks
-  UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–45 had their gate sets
-  run. Round 45 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-46 landed LSP explicit reselect/live trust/preflight, history persistence+64 MiB cap, probe
+  settings/caps, plugin strict exits, statusbar i18n; full suite EXIT 0 (76 packages, log /tmp/gvim-
+  r46-final4.log); §5.5 is round-47/48 plan; TUI-only scope/genuine-equivalence §4 item 94/§8;
+  real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–46 had their gate sets
+  run. Round 46 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  122 KiB / de 82 KiB / both 205 KiB, git diff --check). Final full
+  122 KiB / de 88 KiB / both 210 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r45-final2.log`. The audit ran build/gofmt/i18n_check plus targeted round-45 tests and
+  `/tmp/gvim-r46-final4.log`. The audit ran build/gofmt/i18n_check plus targeted round-46 tests and
   diff review only (no full suite); the Lead ran the full suite. Real-host verification remains
   UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
   save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
   box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
-  switching, local macOS/BSD/Linux process polling, outer-terminal focus reporting, real Deno/Rust
-  workspace authority probes; ~/… expansion against a local real `sh`, not a live host. Treat
-  statuses as pointers, not proof.
+  switching, local macOS/BSD/Linux process polling, outer-terminal focus reporting, real LSP/trust
+  changes; ~/… expansion against a local real `sh`, not a live host. Treat statuses as pointers, not
+  proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

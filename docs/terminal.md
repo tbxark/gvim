@@ -77,10 +77,20 @@ dropped). The history is bounded to 100 entries and skips empty queries and an
 exact repeat of the newest one, like Fresh's InputHistory. Losing the dock's
 keyboard focus closes an open input exactly like Esc (view and committed search
 restored, pending preview answers dropped), so no hidden input outlives the focus.
-The history is in-memory per tab: it survives tab switches and a shell restart in
-the same dock, but not a gvim restart/restored session, and is not shared across
-tabs (Fresh keeps prompt histories per window and persists them with the
-workspace — a documented residual). While the input is open, F3 and
+The history is **dock-wide**, like Fresh's per-window search prompt history: every
+tab in the dock shares it (a query committed in one tab is recalled in another),
+and it survives tab switches, tab closes and a shell restart. It is also
+persisted: `Tabs.SavedState` writes it as the additive, bounded `search_history`
+field of the terminal record (at most 100 queries of at most 512 bytes each; the
+loader cleans controls/invalid UTF-8, trims, skips empty entries and keeps the
+newest 100), and a full session restore installs it again — restoring history
+starts no process and has no PTY side effect, exactly like the rest of the
+read-only terminal state. An old record without the field restores an empty
+history; the format version stays 1. Residuals: only the pager search queries are
+persisted (Fresh persists the other prompt histories too), the history rides the
+per-workspace terminal record so daemon workspaces keep separate histories, and it
+is restored only on the full session-restore path (not `--no-restore`/hot-exit
+recovery). While the input is open, F3 and
 Shift+F3 step the preview forward/backward through the current query's matches
 (wrapping at the ends) without closing the input or committing the query; this
 mirrors Fresh, whose default keymap binds `find_next`/`find_previous` to
@@ -321,8 +331,10 @@ background tabs' exited markers current.
   restart, resume or dive starts in the saved `cwd` (Fresh's respawn rule);
   `launch_dir` is only the fallback when a record never reported a directory. Bounds:
   at most 16 tabs, each with the existing per-transcript bound (500 rows / 1 MiB,
-  trailing blanks trimmed, control characters stripped); a corrupt file cannot
-  make the loader allocate more. The order of the `tabs` array, not the tab
+  trailing blanks trimmed, control characters stripped); the read/decode is capped
+  at 64 MiB first (see Persistence), and only then are these bounds applied, so a
+  corrupt file cannot make the loader keep more than the bounded record. The
+  order of the `tabs` array, not the tab
   names, is the saved tab order, and the active index tells which tab is shown on
   restore, so a reorder survives an editor restart. The record also gains an
   additive `live` flag per tab (and mirrored at the top level): whether a process
@@ -506,8 +518,31 @@ transcript rows: the prior transcript, the bounded history window and the live
 screen rows, as text with trailing blanks trimmed and control characters stripped,
 capped at 500 rows / 256 KiB (the loader re-applies the same bounds and ignores a
 version it does not know). It also carries the optional bounded, styled visible
-screen snapshot described under Terminal tabs; a restore overlays it on the
-matching text tail, and an old record without it keeps the text-only transcript.
+screen snapshot described under Terminal tabs (a restore overlays it on the
+matching text tail, and an old record without it keeps the text-only transcript),
+and an additive `search_history` array: the dock-wide pager search queries, at
+most 100 of at most 512 bytes, cleaned on both write and load; an old record
+without it restores an empty history and history restore never starts a process.
+The array is **plaintext** like the rest of `terminal.json` (the session directory
+is created 0700 and the file is written 0600, so the queries are as private as
+that per-workspace session directory — gvim does not encrypt them). A malicious
+file cannot force an unbounded allocation: the loader first refuses any
+`terminal.json` above a hard **64 MiB** cap (the size is checked before the read
+and the read itself is limited), reporting the record as unreadable and ignoring
+it — it can still allocate up to that cap plus JSON decoding, but no more; after
+parsing, JSON that does not decode makes the loader ignore the record and every
+field is cleaned/capped again (an oversized or control-laden `search_history` is
+reduced to 100×512, so it cannot smuggle control bytes or grow the in-memory
+history). **`SaveTerminal` bounds its generic entry point with the same rules
+before encoding** (at most 16 tabs; per transcript 500 rows cleaned first then
+capped at 1 MiB of text, so JSON escaping is at most 2×; each styled screen
+hard-capped at 512 KiB of serialized JSON; each argv at most 64 entries, 4096
+bytes per argument and 32 KiB of argument text, JSON-escaped at most 6×; labels
+at most 256 bytes; history 100×512), and the worst-case bounded state is covered
+by a test that checks it encodes below the 64 MiB cap. As a last resort the exact
+encoded size is measured before writing: if it would exceed the cap,
+`SaveTerminal` returns an error and leaves the previous record byte-identical
+instead of writing a record its own loader would refuse.
 
 The state is only restored on the full session-restore path (not `--no-restore`
 or a hot-exit-only recovery). **A restored terminal is read-only until the user

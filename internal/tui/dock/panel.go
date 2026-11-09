@@ -77,12 +77,11 @@ type Panel struct {
 	// session, so combined window/dock focus changes never send a duplicate.
 	termFocusSet bool
 	termFocus    bool
-	// searchHistory is this tab's committed scrollback-search queries (oldest
-	// first), bounded like Fresh's prompt InputHistory (100, empty and a repeat of
-	// the newest skipped). It is deliberately in-memory: a restore builds a new
-	// panel, so the history does not survive a gvim restart (Fresh persists prompt
-	// histories with the workspace; a gvim residual).
-	searchHistory []string
+	// history is the dock-wide search-query history shared by every tab (Fresh keeps
+	// its prompt history per window). Tabs assigns one store to each panel; a panel
+	// built without Tabs (tests, an extracted/standalone panel) lazily uses its own.
+	history    *searchHistoryStore
+	ownHistory searchHistoryStore
 	// fgName is the cached foreground process name of a local shell, refreshed by
 	// the bounded poll chain in foreground.go. Empty for a remote/unsupported
 	// terminal, a restored tab or an exited shell (the label then falls back to the

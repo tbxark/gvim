@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -108,6 +109,9 @@ type lspPort struct {
 	// spawnGate is the workspace trust spawn gate for local server starts (nil when
 	// none is wired); it is read at every start.
 	spawnGate func(ctx context.Context, argv []string, cwd, pathValue string) error
+	// autoStartGate is the live trust gate for automatic (Open) starts. Manual
+	// StartLanguage/Restart bypasses it; it never stops a running server.
+	autoStartGate func() bool
 	// spawner, when set, starts the server instead of lsp.Start: a remote workspace
 	// runs the server on the remote host through the authority's LongRunning surface
 	// (docs/authority.md). The manager's spawn gate still runs before it.
@@ -119,9 +123,13 @@ type lspPort struct {
 	startable map[string]bool              // languages with any configured server
 	status    []tui.LSPServerStatus        // every configured server, for the popup
 
-	mu       sync.Mutex
-	root     string
-	managers map[string]*manager.Manager // by root
+	mu sync.Mutex
+	// selectionMu serializes per-root provider updates with an explicit Start/Restart
+	// applying them, so an async selection cannot change between the snapshot and the
+	// manager replacement.
+	selectionMu sync.Mutex
+	root        string
+	managers    map[string]*manager.Manager // by root
 	// rootProviders lets the app provide a per-root server override (Deno auto-selection)
 	// without rebuilding the port. A provider is consulted only when the manager for its
 	// exact root is created; it may return a replacement config for a language.
@@ -826,14 +834,37 @@ func (p *lspPort) Format(path, text string, tabSize int, insertSpaces bool) ([]e
 // overrides auto_start, lsp_enabled and the mute. It waits on the starts, so the
 // root and the settings service call it from a command.
 func (p *lspPort) StartLanguage(language string) error {
+	p.selectionMu.Lock()
+	defer p.selectionMu.Unlock()
+	type managerDesired struct {
+		root    string
+		mgr     *manager.Manager
+		desired []manager.ServerConfig
+	}
 	p.mu.Lock()
 	p.forced[language] = true
 	delete(p.muted, language)
-	mgrs := slices.Collect(maps.Values(p.managers))
+	list := make([]managerDesired, 0, len(p.managers))
+	for root, mgr := range p.managers {
+		list = append(list, managerDesired{root: root, mgr: mgr, desired: slices.Clone(p.serverConfigsFor(root)[language])})
+	}
 	p.mu.Unlock()
+
 	var errs []error
-	for _, mgr := range mgrs {
-		errs = append(errs, mgr.StartLanguage(language))
+	for _, item := range list {
+		if !reflect.DeepEqual(item.mgr.CurrentServers(language), item.desired) {
+			// The completed per-root selection differs from this existing manager's config
+			// (for example Deno was confirmed after the manager was created, or a config
+			// reload removed/disabled the override). Applying it is explicit: Start/Restart
+			// only, and only this language's servers are stopped by ReplaceServers.
+			err := item.mgr.ReplaceServers(language, item.desired)
+			errs = append(errs, err)
+			if err == nil {
+				errs = append(errs, p.reopenDocs(item.root, language)...)
+			}
+			continue
+		}
+		errs = append(errs, item.mgr.StartLanguage(language))
 	}
 	return errors.Join(errs...)
 }
@@ -931,10 +962,42 @@ func runState(s manager.ServerState) tui.LSPServerRunState {
 func (p *lspPort) RestartServer(language, name string) error {
 	// The pull may be asking this very server: cancel it before the restart.
 	p.wsPulls.cancelAll()
-	mgr := p.managerForServer(language, name)
+	p.selectionMu.Lock()
+	defer p.selectionMu.Unlock()
 	p.mu.Lock()
 	delete(p.muted, language)
+	var root string
+	var mgr *manager.Manager
+	for r, m := range p.managers {
+		for _, st := range m.Servers() {
+			if st.Language == language && (name == "" || st.Name == name) {
+				root, mgr = r, m
+				break
+			}
+		}
+		if mgr != nil {
+			break
+		}
+	}
+	if mgr == nil {
+		root = p.root
+		mgr = p.managers[root]
+		if mgr == nil {
+			mgr = p.newManagerLocked(root)
+			p.managers[root] = mgr
+		}
+	}
+	desired := slices.Clone(p.serverConfigsFor(root)[language])
 	p.mu.Unlock()
+	if !reflect.DeepEqual(mgr.CurrentServers(language), desired) {
+		// Explicit Restart Server applies a completed per-root selection to the existing
+		// manager (only this language's servers are stopped by ReplaceServers).
+		err := mgr.ReplaceServers(language, desired)
+		if err != nil {
+			return err
+		}
+		return errors.Join(p.reopenDocs(root, language)...)
+	}
 	return mgr.RestartServer(language, name)
 }
 
@@ -961,6 +1024,28 @@ func (p *lspPort) SetLanguageEnabled(language string, enabled bool) error {
 		mgr.SetLanguageEnabled(language, enabled)
 	}
 	return nil
+}
+
+// reopenDocs re-sends didOpen for the open documents of one root/language after an explicit
+// Start/Restart replaced that language's server config. The manager cannot do this itself:
+// it does not keep the document text. Errors are reported alongside the start result.
+func (p *lspPort) reopenDocs(root, language string) []error {
+	type sample struct{ path, lang, text string }
+	p.mu.Lock()
+	var docs []sample
+	for path, rec := range p.docs {
+		if rec.root == root && rec.lang == language {
+			docs = append(docs, sample{path: path, lang: rec.lang, text: rec.text})
+		}
+	}
+	p.mu.Unlock()
+	var errs []error
+	for _, d := range docs {
+		if _, err := p.Open(d.path, d.lang, d.text); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
 // managerForServer returns the manager that has the named server, or the one of the
@@ -1106,12 +1191,32 @@ func (p *lspPort) rootMarkers(language string) []string {
 	return nil
 }
 
+// SetConfig reapplies the server plan of a settings reload: future managers and explicit
+// Start/Restart use the new baseline, while existing managers keep their current config until
+// an explicit Start/Restart applies a difference. It does not touch running servers or the
+// per-root Deno providers (they re-read the live config too).
+func (p *lspPort) SetConfig(cfg config.Config) {
+	plan := lspPlanFor(cfg)
+	p.selectionMu.Lock()
+	defer p.selectionMu.Unlock()
+	p.mu.Lock()
+	p.servers = plan.servers
+	p.universal = plan.universal
+	p.info = plan.info
+	p.auto = plan.auto
+	p.startable = plan.startable
+	p.status = statusList(plan)
+	p.mu.Unlock()
+}
+
 // SetRootServerProvider installs a per-root server replacement resolver. The provider is
 // consulted when the manager for exactly root is created (never for another root); it may
 // return a replacement config for a language. A nil provider clears it. Existing managers
 // are not rebuilt: a running or already-created server keeps its config (Deno auto-selection
 // therefore lands on future roots/managers only).
 func (p *lspPort) SetRootServerProvider(root string, provider func(language string) (manager.ServerConfig, bool)) {
+	p.selectionMu.Lock()
+	defer p.selectionMu.Unlock()
 	p.mu.Lock()
 	if p.rootProviders == nil {
 		p.rootProviders = make(map[string]func(language string) (manager.ServerConfig, bool))
@@ -1126,7 +1231,11 @@ func (p *lspPort) SetRootServerProvider(root string, provider func(language stri
 
 // ClearRootServerProvider removes the per-root provider for root.
 func (p *lspPort) ClearRootServerProvider(root string) {
-	p.SetRootServerProvider(root, nil)
+	p.selectionMu.Lock()
+	defer p.selectionMu.Unlock()
+	p.mu.Lock()
+	delete(p.rootProviders, root)
+	p.mu.Unlock()
 }
 
 // serverConfigsFor returns the language configs a manager of root starts with: the
@@ -1169,6 +1278,7 @@ func (p *lspPort) newManagerLocked(root string) *manager.Manager {
 	mgr.SetApplyEdit(p.enqueueEdit)
 	mgr.SetSpawnEnv(p.spawnEnv)
 	mgr.SetGate(p.spawnGate)
+	mgr.SetAutoStartGate(p.autoStartGate)
 	mgr.SetSpawner(p.spawner)
 	for lang := range p.forced {
 		mgr.ForceLanguage(lang)
@@ -1210,6 +1320,19 @@ func (p *lspPort) SetSpawnGate(gate func(ctx context.Context, argv []string, cwd
 	p.mu.Unlock()
 	for _, mgr := range managers {
 		mgr.SetGate(gate)
+	}
+}
+
+// SetAutoStartGate installs the live trust gate for automatic starts. It is applied to
+// existing managers (without stopping anything) and to managers created later; manual
+// StartLanguage/Restart still uses the spawn gate.
+func (p *lspPort) SetAutoStartGate(gate func() bool) {
+	p.mu.Lock()
+	p.autoStartGate = gate
+	mgrs := slices.Collect(maps.Values(p.managers))
+	p.mu.Unlock()
+	for _, mgr := range mgrs {
+		mgr.SetAutoStartGate(gate)
 	}
 }
 

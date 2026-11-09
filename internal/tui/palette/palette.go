@@ -128,6 +128,10 @@ type Options struct {
 	// the rows' relative paths are joined with slashes; the caller passes a nil
 	// Preview (no local file preview for remote rows).
 	Remote bool
+	// ShowHidden is the file explorer's Show Hidden Files setting for the local
+	// literal-path probe's directory and parent-prefix branches. A typed basename
+	// starting with "." still includes its dot matches regardless.
+	ShowHidden bool
 	// Theme gives the chrome colors.
 	Theme theme.Theme
 	// Live opens the palette in Live Grep mode: the whole query is searched as text
@@ -330,6 +334,9 @@ func New(opts Options) *Palette {
 			input:    ov.Idle,
 			muted:    ov.Muted,
 		},
+	}
+	if setter, ok := opts.Files.(interface{ SetProbeShowHidden(bool) }); ok {
+		setter.SetProbeShowHidden(opts.ShowHidden)
 	}
 	p.input = textinput.New()
 	p.input.Prompt = ""

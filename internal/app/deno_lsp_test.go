@@ -336,3 +336,26 @@ func TestDenoAutoSelectorRebindDropsLateOldAnswer(t *testing.T) {
 		t.Fatal("the late old-root answer changed the new root state")
 	}
 }
+
+// TestDenoProviderRefusesDisconnectedAuthority checks a completed provider does not hand an
+// old carrier's decision to an explicit Start while the authority is down.
+func TestDenoProviderRefusesDisconnectedAuthority(t *testing.T) {
+	root := "/remote/proj"
+	fake := authoritytest.New()
+	fake.FileSystem = &denoFakeFiles{present: map[string]hostos.FileStat{path.Join(root, "deno.json"): {Kind: "file"}}}
+	fake.OneShotter = &fakeOneShot{script: func(context.Context, []string, hostos.ProcOptions) (hostos.ProcResult, error) {
+		return hostos.ProcResult{Code: 0}, nil
+	}}
+	port := &denoFakePort{}
+	selector := newDenoAutoSelector(port, fake, root, true, nil, nil, func() config.Config { return config.Defaults() })
+	selector.Start(context.Background())
+	waitDenoProvider(t, port, root, true)
+	provider := port.provider(root)
+	if _, ok := provider("javascript"); !ok {
+		t.Fatal("connected authority did not provide the selection")
+	}
+	fake.Disconnect("down")
+	if _, ok := provider("javascript"); ok {
+		t.Fatal("a disconnected authority still provided the selection")
+	}
+}

@@ -117,10 +117,12 @@ resolves the root and every candidate through symlinks and returns a path only w
 real target stays inside the real workspace (an entry symlink or a symlinked parent that
 escapes is skipped). A local query naming an existing directory lists that directory's
 visible regular files; otherwise it lists the parent and keeps the regular files whose
-names start with the query's basename. That local directory work is bounded: at most
-4096 entries are inspected (in batches, checking cancellation) and at most 50 paths
-returned; hidden entries are included only when the typed basename itself starts with a
-dot, and a directory listing skips them. The remote probe intentionally supports the
+names start with the query's basename. Local directory work is bounded: at most 4096 entries are inspected in 128-entry
+batches with cancellation, then sorted, and at most 50 paths are returned. A directory
+listing follows the file explorer's Show Hidden Files setting for dot entries; the
+parent-prefix branch includes hidden names when that setting is on or when the typed
+basename itself starts with a dot (Fresh's shell-completion exception), and a typed dot
+basename matches its dot names even when hidden files are otherwise off. The remote probe intentionally supports the
 exact-path Stat slice only: it resolves the root and the literal candidate through the
 authority's realpath capability and stats that one file, never the local disk, and
 refuses when the backend cannot prove containment. It performs no remote directory
@@ -138,10 +140,13 @@ still match. Confirmed paths are merged before the normal rank, so fuzzy scoring
 boost, the `:line[:col]` target and the 100-row file cap apply. Missing paths, escapes
 through `..` or symlinks, unreadable paths produce no probe row; a probe never falls back
 to another filesystem. Residuals: the remote parent-basename/directory branches are not
-probed (they need a bounded directory-reader port); the local directory scan cap can
-miss entries beyond the first 4096; the probe branch has no `.gitignore` filtering; the
-an external create/remove without an index refresh can still serve a cached negative or
-positive until the next refresh or palette reopen (Fresh re-probes every query); an exact local symlink is followed only while its
+probed (they need a bounded directory-reader port); the local scan cap can miss matches
+beyond the first 4096 entries of a directory larger than that (the inspected subset follows
+filesystem order, so it is not a complete listing); the probe branch has no `.gitignore`
+filtering; an external create/remove without an index refresh can still serve a cached
+negative or positive until the next refresh or palette reopen (Fresh re-probes every query);
+the Show Hidden Files setting is applied when the palette opens, so toggling it while the
+palette is open applies on the next open; an exact local symlink is followed only while its
 real target stays inside the workspace (a TOCTOU swap between realpath check and Stat
 remains theoretically possible); hidden entries are not listed for a hidden directory
 query.

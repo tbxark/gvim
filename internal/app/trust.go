@@ -25,6 +25,10 @@ type trustController struct {
 	// recordKey, when set, is the explicit store key of a non-filesystem workspace (a
 	// remote target). Decide writes the record key instead of canonicalizing a root.
 	recordKey string
+	// onChange is notified after the live level changes (Decide/Load), outside the lock.
+	// The app re-gates the LSP port from the new level so a revoke cannot leave an
+	// auto-starting baseline behind.
+	onChange func(state trust.State)
 }
 
 var _ tui.TrustPort = (*trustController)(nil)
@@ -63,15 +67,34 @@ func (c *trustController) State() trust.State {
 	return c.state
 }
 
+// SetChangeListener installs the app's live-level callback. It is called outside
+// the controller lock after Decide/Load changed the state.
+func (c *trustController) SetChangeListener(fn func(trust.State)) {
+	c.mu.Lock()
+	c.onChange = fn
+	c.mu.Unlock()
+}
+
+// notify runs the change listener outside the lock.
+func (c *trustController) notify(state trust.State) {
+	c.mu.Lock()
+	fn := c.onChange
+	c.mu.Unlock()
+	if fn != nil {
+		fn(state)
+	}
+}
+
 // Decide records level for the open workspace. The state changes even when the
 // write fails, as Fresh's set_level does: the level applies to the session, and
 // the error says the decision was not saved. The markers are kept, so the
 // dialog can still explain why the workspace asked.
 func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if !level.Valid() {
-		return c.state, fmt.Errorf("trust: invalid level %q", string(level))
+		state := c.state
+		c.mu.Unlock()
+		return state, fmt.Errorf("trust: invalid level %q", string(level))
 	}
 	var err error
 	if c.recordKey != "" {
@@ -81,7 +104,10 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 	}
 	c.state.Level = level
 	c.state.Decided = true
-	return c.state, err
+	state := c.state
+	c.mu.Unlock()
+	c.notify(state)
+	return state, err
 }
 
 // Load resolves the trust state of root, with the startup policy applied, and
@@ -89,12 +115,14 @@ func (c *trustController) Decide(level trust.Level) (trust.State, error) {
 // level. It keeps the current state when the load fails.
 func (c *trustController) Load(root string) (trust.State, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	state, err := c.store.Open(root)
 	if state.Root != "" {
 		c.state = state
 	}
-	return c.state, err
+	current := c.state
+	c.mu.Unlock()
+	c.notify(current)
+	return current, err
 }
 
 // lspConfig returns the config the language-server port is built from. Fresh

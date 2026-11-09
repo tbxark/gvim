@@ -126,6 +126,12 @@ func (s *denoAutoSelector) Rebind(ctx context.Context, root string) {
 // provider is evaluated when a manager for the exact root is created. It re-reads the live
 // config each time: an explicit entry or a disabled language added after the probe wins.
 func (s *denoAutoSelector) provider(language string) (manager.ServerConfig, bool) {
+	// A decision belongs to the carrier that answered the probe. While the authority is
+	// disconnected (or being replaced), do not hand an old selection to an explicit start;
+	// reconnect re-probes and the fresh result installs a new provider.
+	if !s.slot.Connected() {
+		return manager.ServerConfig{}, false
+	}
 	if !denoLanguageEligible(s.cfg(), language) {
 		return manager.ServerConfig{}, false
 	}
@@ -191,7 +197,7 @@ func (s *denoAutoSelector) denoAvailable(ctx context.Context, root string) bool 
 		opts.Env = remoteEnvMap(s.env())
 	}
 	res, err := one.Run(ctx, argv, opts)
-	if err != nil {
+	if err != nil || res.TimedOut || res.Signal != "" || res.StartErr != "" || res.Cancel != "" {
 		return false
 	}
 	return res.Code == 0
