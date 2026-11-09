@@ -222,7 +222,11 @@ func (p *Palette) paint(g *grid.Grid) {
 // and buffer modes, or the Live Grep keys.
 func (p *Palette) hint() string {
 	if p.live {
-		return liveHint
+		out := liveHint
+		if note := p.liveCompletenessHint(); note != "" {
+			out += " · " + note
+		}
+		return out
 	}
 	return hint
 }

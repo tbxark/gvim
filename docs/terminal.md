@@ -544,10 +544,28 @@ the line the search found. This only enters the existing pager: it starts no she
 touches no PTY, reads no file and starts no process. A tab that has no pager — a
 restored read-only tab without a live session, or a running alternate-screen
 program whose history does not exist — is still focused with the honest notice
-`Live Grep: the terminal transcript line cannot be located`. The same id+row pair
-is what the Alt+Q export stores, so the quickfix list keeps locating the right
-transcript line while it stays open; a legacy `t` row (no id) only focuses the tab,
-and an out-of-range row clamps into the transcript. The searched content remains
+`Live Grep: the terminal transcript line cannot be located`.
+
+The snapshot row is **validated, not trusted blindly**: the hit carries the expected
+line text, its immediate neighbours where the snapshot had them, and the terminal's
+scrollback length at snapshot time. The stable id is resolved first; then a reveal
+relocates only when exactly one current row matches the expected text (and its
+neighbours, which disambiguate duplicate lines). The exact case is a matching line at
+the recorded absolute row; after new output, screen reuse or scrollback eviction the
+unique content match is used even when the row moved. An **empty matched line is a
+real blank-line hit**, not "no snapshot": it is validated/relocated by its known
+neighbours (known/unknown flags distinguish a blank neighbour from a window edge),
+and two equally matching blanks are refused like any other ambiguous line. A
+malformed quickfix payload is refused, never clamped. If the line is missing from
+the current searchable window, the history was truncated, or two rows match equally
+(no context can choose), the reveal **refuses with the honest notice
+`Live Grep: the terminal transcript line cannot be located`** instead of clamping to a
+neighbour or guessing — it never jumps to the wrong transcript line. An exited live
+shell is validated against its frozen transcript the same way; a tab that closed
+reports "no longer open" before any pager work. The same id+row+text+scrollback-length
+snapshot is what Alt+Q stores, so its list relocates/refuses exactly like the direct
+result while it stays open; a legacy `t` row (no id/text) only focuses the tab, and
+an out-of-range legacy row clamps into the transcript. The searched content remains
 only the open tabs' newest window (no closed-terminal backing-file search), and
 restored transcripts are location-only via their saved rows when a live session is
 absent.

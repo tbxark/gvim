@@ -30,7 +30,7 @@ func (remoteEmptyRanker) Rank(string, []string, int) []Ranked { return nil }
 // slash-separated form (a local filepath.Join would use the client's separator).
 func TestRemoteFileRowJoinsWithSlashes(t *testing.T) {
 	r := row{kind: rowFile, rel: "src/main.go", line: 2, col: 3}
-	remoteCmd := r.command("/remote/w", true)
+	remoteCmd := r.command("/remote/w", true, Owner{})
 	if remoteCmd == nil {
 		t.Fatal("no remote open command")
 	}
@@ -38,7 +38,7 @@ func TestRemoteFileRowJoinsWithSlashes(t *testing.T) {
 	if !ok || remote.Path != "/remote/w/src/main.go" {
 		t.Fatalf("remote message = %#v", remoteCmd())
 	}
-	local, ok := r.command("/local/w", false)().(OpenFileMsg)
+	local, ok := r.command("/local/w", false, Owner{})().(OpenFileMsg)
 	if !ok || local.Path != filepath.Join("/local/w", "src/main.go") {
 		t.Fatalf("local path = %q", local.Path)
 	}

@@ -243,13 +243,60 @@ func (p *Panel) transcriptRows() (rows []string, first int) {
 	return rows, first
 }
 
-// RevealTranscriptRow opens the read-only scrollback pager and selects combined
-// transcript row (0-based). It reports false when there is no pager to reveal: a
-// restored tab without a live session, a running alternate-screen program, or a dock
-// with no rows. It starts no process; the returned command fetches the pager window.
-func (p *Panel) RevealTranscriptRow(row int) (tea.Cmd, bool) {
+// RevealTranscriptRow opens the read-only scrollback pager and selects the hit's
+// combined transcript row. Snapshot hits are validated as a whole: an unchanged
+// scrollback total with the expected line and known neighbours at the recorded row is
+// exact; otherwise exactly one current row must match the expected text (including an
+// empty blank line) and the known neighbours, which is the relocation case. Missing,
+// truncated, ambiguous or invalid snapshots refuse (false) so the pager never lands on
+// a wrong row. A legacy Snapshot=false hit uses the row as given. It reports false when
+// there is no pager (restored no-session tab, running alternate-screen program, empty
+// dock) and starts no process; the returned command fetches the pager window.
+func (p *Panel) RevealTranscriptRow(h TranscriptHit) (tea.Cmd, bool) {
 	if p.term == nil {
 		return nil, false
+	}
+	target := h.Row
+	if h.Snapshot {
+		if !h.Valid {
+			return nil, false
+		}
+		lines, first := p.transcriptRows()
+		current := p.term.ScrollbackLen()
+		match := func(i int) bool {
+			if lines[i] != h.Text {
+				return false
+			}
+			if h.BeforeKnown && (i == 0 || lines[i-1] != h.Before) {
+				return false
+			}
+			if h.AfterKnown && (i+1 >= len(lines) || lines[i+1] != h.After) {
+				return false
+			}
+			return true
+		}
+		// Collect every row that matches the expected text and known neighbours. Even
+		// when the scrollback total is unchanged and the recorded row matches, a second
+		// equally matching row means the snapshot is ambiguous (duplicate blank/output
+		// lines); refuse instead of trusting the stale absolute row.
+		found := -1
+		for i := range lines {
+			if !match(i) {
+				continue
+			}
+			if found >= 0 {
+				return nil, false
+			}
+			found = i
+		}
+		if found < 0 {
+			return nil, false
+		}
+		if h.Total == current && h.Row >= first && h.Row < first+len(lines) && found == h.Row-first {
+			target = h.Row
+		} else {
+			target = first + found
+		}
 	}
 	var cmd tea.Cmd
 	if !p.scroll.on {
@@ -262,7 +309,7 @@ func (p *Panel) RevealTranscriptRow(row int) (tea.Cmd, bool) {
 	if combined <= 0 {
 		return cmd, false
 	}
-	p.scroll.selected = min(max(row, 0), combined-1)
+	p.scroll.selected = min(max(target, 0), combined-1)
 	p.revealScroll()
 	return tea.Batch(cmd, p.requestScrollback()), true
 }

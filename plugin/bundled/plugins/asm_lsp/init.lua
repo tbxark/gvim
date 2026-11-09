@@ -248,7 +248,15 @@ local function disable_active_language()
     gvim.status(t("status.no_lsp"))
     return
   end
-  local ran, err = gvim.command.run("lsp_disable_language")
+  -- Carry the target buffer/language explicitly: the native controlled action validates
+  -- both again in the same Update slice before muting, so a tab change between this popup
+  -- choice and the action cannot mute another document's language.
+  local target_path = buf:path()
+  local target_language = tostring(buf:language() or "")
+  local ran, err = gvim.command.run("lsp_disable_language_target", {
+    path = target_path,
+    language = target_language,
+  })
   if not ran then
     gvim.status(t("status.action_failed", { error = tostring(err) }))
   end

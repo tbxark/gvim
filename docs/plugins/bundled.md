@@ -223,16 +223,16 @@ that names the assembly server the status row gets an install hint; clicking the
 the help popup with copyable `cargo install asm-lsp` / `cargo binstall asm-lsp` commands, the
 native Start/Restart LSP Server, Show LSP Status and **Disable Assembly LSP** actions, and Dismiss.
 The disable action is not a catalog command: it re-checks that the active buffer is still an
-assembly file and that `gvim.has("lsp")` is true, then dispatches gvim's native
-`lsp_disable_language` action. That native action resolves the language of the **current active
-document** and applies a **root-level language mute at the LSP port** (the port's
-`SetLanguageEnabled`), not a per-buffer disable; the plugin's active-buffer check only prevents a
-dispatch when the popup's target tab has changed, it cannot scope the mute to the originating
-buffer or to one root. The native LSP layer owns the asynchronous mute, its no-server notice and
-any success notice, and the plugin never claims the mute completed. There is **no plugin→native
-end-to-end integration test**: plugin tests assert the filtered dispatch with a fake host and TUI
-tests assert the nil-port/no-server behavior directly, but no single test loads asm_lsp into a real
-TUI model and observes the language mute. Commands:
+assembly file and that `gvim.has("lsp")` is true, captures that buffer's path and language, and
+dispatches gvim's controlled native `lsp_disable_language_target` action with both. The native
+action re-validates that the same path/language is still active in the same Update slice before
+muting, so a tab/document switch between the popup choice and the action cannot disable another
+document's language. The mute itself is a **root-level language mute at the LSP port** (the port's
+`SetLanguageEnabled`), not a per-buffer disable; the plugin cannot scope it to the originating
+buffer or one root. The native LSP layer owns the asynchronous mute, its no-server notice and any
+success notice, and the plugin never claims the mute completed. TUI integration tests exercise the
+controlled target action's success, tab-switch refusal, language-mismatch refusal and nil-port
+notice; there is still no plugin→TUI end-to-end test that loads asm_lsp itself into a real model. Commands:
 **Assembly: Create .asm-lsp.toml** (re-opens the offer) and **Assembly: Show LSP Help**; it binds
 no key and registers no settings. Reductions (also in porting.md): gvim's
 `lsp_server_error` payload has no language/server/error-type fields, so the error is only claimed on

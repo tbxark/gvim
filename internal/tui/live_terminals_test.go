@@ -42,8 +42,8 @@ func TestTerminalSourcesSnapshotBoundsAndNames(t *testing.T) {
 	if got[0].Name != "shell" || got[0].Index != 0 || len(got[0].Lines) != 2 || got[0].Lines[1] != "todo here" {
 		t.Fatalf("named tab snapshot = %+v", got[0])
 	}
-	if got[0].ID == 0 || got[0].ID != m.dock.TabID(0) || got[0].First != 0 {
-		t.Fatalf("snapshot identity/first = %+v, want id %d first 0", got[0], m.dock.TabID(0))
+	if got[0].ID == 0 || got[0].ID != m.dock.TabID(0) || got[0].First != 0 || got[0].Total != 0 {
+		t.Fatalf("snapshot identity/first/total = %+v, want id %d first 0 total 0", got[0], m.dock.TabID(0))
 	}
 	if got[1].ID != m.dock.TabID(1) {
 		t.Fatalf("second snapshot id = %d, want %d", got[1].ID, m.dock.TabID(1))
@@ -212,9 +212,10 @@ func TestOpenTerminalMsgRevealsTheTranscriptRow(t *testing.T) {
 	}
 }
 
-// TestLiveGrepTerminalExportKeepsStableIDAndRow checks Alt+Q's terminal encoding uses
-// the stable id and absolute transcript row, and Enter on that list row reveals the
-// same place while the list stays open.
+// TestLiveGrepTerminalExportKeepsStableIDAndRow checks Alt+Q's terminal encoding
+// carries the stable id, absolute row and snapshot payload (total + expected line and
+// neighbours), and Enter after new output relocates the same line while the list stays
+// open instead of landing on the shifted/duplicate row.
 func TestLiveGrepTerminalExportKeepsStableIDAndRow(t *testing.T) {
 	t.Parallel()
 	starter := &shellsStarter{}
@@ -226,11 +227,21 @@ func TestLiveGrepTerminalExportKeepsStableIDAndRow(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		term.history = append(term.history, "row")
 	}
+	term.history[42] = "needle"
 	id := m.dock.TabID(0)
 	hit := palette.GrepHit{Source: palette.GrepTerminals, TerminalID: id, Index: 0, Rel: "shell",
-		Line: 43, TranscriptFirst: 0, Text: "needle"}
-	if got, want := liveGrepExportValue(hit), fmt.Sprintf("T\t%d\t42\tshell", id); got != want {
-		t.Fatalf("export value = %q, want %q", got, want)
+		Line: 43, TranscriptFirst: 0, TerminalTotal: 100, Text: "needle",
+		TerminalBefore: "row", TerminalAfter: "row", TerminalSnapshot: true, TerminalValid: true,
+		TerminalBeforeKnown: true, TerminalAfterKnown: true}
+	value := liveGrepExportValue(hit)
+	kind, tab, rowStr, payloadStr, ok := parseLiveGrepExportValue(value)
+	if !ok || kind != "T" || tab != fmt.Sprint(id) || rowStr != "42" {
+		t.Fatalf("terminal export value = %q (parsed %q %q %q %v)", value, kind, tab, rowStr, ok)
+	}
+	payload, valid := decodeTerminalExportPayload(payloadStr)
+	if !valid || payload.Total != 100 || payload.Text != "needle" || payload.Before != "row" || payload.After != "row" ||
+		!payload.BeforeKnown || !payload.AfterKnown {
+		t.Fatalf("terminal export payload = %+v, valid %v", payload, valid)
 	}
 	cmd := m.openLiveGrepResultsList(palette.GrepExportMsg{
 		Root: "/ws", Query: "needle", Hits: []palette.GrepHit{hit},
@@ -238,15 +249,81 @@ func TestLiveGrepTerminalExportKeepsStableIDAndRow(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("opening the export returned %v", cmd)
 	}
+	// New output/eviction changes the absolute row: drop 12 old rows and append 12 new
+	// ones so the needle moves to 30 while the total stays 100. The quickfix callback
+	// must relocate by the carried text/context, not jump to 42.
+	shifted := append([]string(nil), term.history[12:]...)
+	for i := 0; i < 12; i++ {
+		shifted = append(shifted, "new row")
+	}
+	term.history = shifted
 	feed(m, runKey(m, special(tea.KeyEnter)))
-	if !m.dock.Scrolling() || m.dock.ScrollSelected() != 42 {
-		t.Fatalf("export Enter did not reveal the row: scrolling %v selected %d", m.dock.Scrolling(), m.dock.ScrollSelected())
+	if !m.dock.Scrolling() || m.dock.ScrollSelected() != 30 {
+		t.Fatalf("export Enter did not relocate: scrolling %v selected %d", m.dock.Scrolling(), m.dock.ScrollSelected())
 	}
 	if len(starter.terms) != 1 {
 		t.Fatalf("export Enter started shells: %d", len(starter.terms))
 	}
 	if len(m.overlays) != 1 {
 		t.Fatal("the quickfix list closed after revealing the terminal row")
+	}
+}
+
+// TestOpenTerminalMsgValidatesAndRelocatesAfterDrift checks a direct terminal hit
+// whose snapshot row moved: the expected line+neighbours are used to find the unique
+// new row; a missing/ambiguous line is refused with the honest notice instead of
+// jumping to the stale row.
+func TestOpenTerminalMsgValidatesAndRelocatesAfterDrift(t *testing.T) {
+	t.Parallel()
+	starter := &shellsStarter{}
+	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	openDock(t, m)
+	waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
+	term := starter.terms[0]
+	term.history = make([]string, 600)
+	for i := range term.history {
+		term.history[i] = "row"
+	}
+	term.history[250] = "needle direct"
+	src := m.terminalSources()[0]
+	// Shift: 50 old rows drop, 50 new arrive; the needle moves from 250 to 200 while
+	// the total stays 600, so the stored row 250 now holds another line.
+	shifted := append([]string(nil), term.history[50:]...)
+	for i := 0; i < 50; i++ {
+		shifted = append(shifted, "new row")
+	}
+	term.history = shifted
+	m.Update(palette.OpenTerminalMsg{
+		ID: src.ID, Row: src.First + 150, Total: src.Total,
+		Text: "needle direct", Before: "row", After: "row",
+		BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true,
+	})
+	if !m.dock.Scrolling() || m.dock.ScrollSelected() != 200 {
+		t.Fatalf("drifted direct hit = scrolling %v selected %d, want row 200", m.dock.Scrolling(), m.dock.ScrollSelected())
+	}
+	// Ambiguous: two identical lines with the same neighbours; a validation match
+	// cannot choose, so the hit refuses and shows the honest notice instead of guessing.
+	m2 := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m2.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	term2 := newFakeTerm()
+	term2.history = make([]string, 20)
+	for i := range term2.history {
+		term2.history[i] = "row"
+	}
+	term2.history[5], term2.history[15] = "dup", "dup"
+	m2.SetDock(DockPorts{Starter: &shellsStarter{makeTerm: func() *fakeTerm { return term2 }}})
+	openDock(t, m2)
+	waitDock(t, m2, "the ambiguous dock shell to start", func() bool { return m2.dock.Running() })
+	m2.Update(palette.OpenTerminalMsg{
+		ID: m2.dock.TabID(0), Row: 5, Total: 20, Text: "dup", Before: "row", After: "row",
+		BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true,
+	})
+	if m2.dock.Scrolling() {
+		t.Fatal("an ambiguous line opened the pager")
+	}
+	if !strings.Contains(m2.notice, "cannot be located") {
+		t.Fatalf("ambiguous notice = %q", m2.notice)
 	}
 }
 
@@ -312,5 +389,122 @@ func TestOpenTerminalMsgUsesTheIDAfterAClose(t *testing.T) {
 	}
 	if !strings.Contains(m.notice, "no longer open") {
 		t.Fatalf("stale id notice = %q", m.notice)
+	}
+}
+
+// TestOpenTerminalMsgValidatesBlankLineHit covers the empty-text regression directly:
+// a blank matched line is a real snapshot hit. It relocates by its known neighbours
+// after a shift; ambiguous blank lines and an invalid snapshot payload refuse with the
+// honest notice instead of clamping to the stored row.
+func TestOpenTerminalMsgValidatesBlankLineHit(t *testing.T) {
+	t.Parallel()
+	starter := &shellsStarter{}
+	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	openDock(t, m)
+	waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
+	term := starter.terms[0]
+	term.history = make([]string, 30)
+	for i := range term.history {
+		term.history[i] = "row"
+	}
+	term.history[4], term.history[5], term.history[6] = "a", "", "b"
+	term.history[19], term.history[20], term.history[21] = "c", "", "d"
+	src := m.terminalSources()[0]
+	// Shift three rows: the blank line moves from 5 to 2 with the same a/b neighbours.
+	shifted := append([]string(nil), term.history[3:]...)
+	for i := 0; i < 3; i++ {
+		shifted = append(shifted, "new row")
+	}
+	term.history = shifted
+	m.Update(palette.OpenTerminalMsg{
+		ID: src.ID, Row: src.First + 5, Total: src.Total, Text: "",
+		Before: "a", After: "b", BeforeKnown: true, AfterKnown: true,
+		Snapshot: true, Valid: true,
+	})
+	if !m.dock.Scrolling() || m.dock.ScrollSelected() != 2 {
+		t.Fatalf("blank hit = scrolling %v selected %d, want relocated row 2", m.dock.Scrolling(), m.dock.ScrollSelected())
+	}
+	// Ambiguous blanks with identical neighbours: refuse, do not clamp to the old row.
+	m2 := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m2.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	term2 := newFakeTerm()
+	term2.history = make([]string, 30)
+	for i := range term2.history {
+		term2.history[i] = "row"
+	}
+	term2.history[4], term2.history[5], term2.history[6] = "x", "", "y"
+	term2.history[14], term2.history[15], term2.history[16] = "x", "", "y"
+	m2.SetDock(DockPorts{Starter: &shellsStarter{makeTerm: func() *fakeTerm { return term2 }}})
+	openDock(t, m2)
+	waitDock(t, m2, "the ambiguous blank dock shell to start", func() bool { return m2.dock.Running() })
+	m2.Update(palette.OpenTerminalMsg{
+		ID: m2.dock.TabID(0), Row: 5, Total: 30, Text: "",
+		Before: "x", After: "y", BeforeKnown: true, AfterKnown: true,
+		Snapshot: true, Valid: true,
+	})
+	if m2.dock.Scrolling() {
+		t.Fatal("an ambiguous blank line opened the pager")
+	}
+	if !strings.Contains(m2.notice, "cannot be located") {
+		t.Fatalf("ambiguous blank notice = %q", m2.notice)
+	}
+	// A malformed snapshot payload (Valid false) refuses without using the stored row.
+	m2.notice = ""
+	m2.Update(palette.OpenTerminalMsg{
+		ID: m2.dock.TabID(0), Row: 5, Total: 30, Snapshot: true,
+	})
+	if m2.dock.Scrolling() {
+		t.Fatal("an invalid snapshot payload opened the pager")
+	}
+	if !strings.Contains(m2.notice, "cannot be located") {
+		t.Fatalf("invalid payload notice = %q", m2.notice)
+	}
+}
+
+// TestLiveGrepTerminalExportBlankLineDrift covers Alt+Q for the empty-text hit: the
+// payload keeps the blank line's known neighbours, so after a shift the quickfix
+// Enter relocates it; a malformed payload decodes as invalid and is refused.
+func TestLiveGrepTerminalExportBlankLineDrift(t *testing.T) {
+	t.Parallel()
+	starter := &shellsStarter{}
+	m := newTerminalModel(t, newFakeTree(1), dockKeys(), starter)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	openDock(t, m)
+	waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
+	term := starter.terms[0]
+	term.history = make([]string, 30)
+	for i := range term.history {
+		term.history[i] = "row"
+	}
+	term.history[4], term.history[5], term.history[6] = "a", "", "b"
+	term.history[19], term.history[20], term.history[21] = "c", "", "d"
+	hit := palette.GrepHit{Source: palette.GrepTerminals, TerminalID: m.dock.TabID(0),
+		Rel: "shell", Line: 6, TranscriptFirst: 0, TerminalTotal: 30, Text: "",
+		TerminalBefore: "a", TerminalAfter: "b", TerminalBeforeKnown: true, TerminalAfterKnown: true,
+		TerminalSnapshot: true, TerminalValid: true}
+	value := liveGrepExportValue(hit)
+	_, _, _, payloadStr, ok := parseLiveGrepExportValue(value)
+	if !ok {
+		t.Fatalf("blank-line export value = %q", value)
+	}
+	payload, valid := decodeTerminalExportPayload(payloadStr)
+	if !valid || payload.Text != "" || payload.Before != "a" || payload.After != "b" ||
+		!payload.BeforeKnown || !payload.AfterKnown || payload.Total != 30 {
+		t.Fatalf("blank-line export payload = %+v valid %v", payload, valid)
+	}
+	m.openLiveGrepResultsList(palette.GrepExportMsg{Root: "/ws", Query: "^$", Hits: []palette.GrepHit{hit}})
+	// Shift three rows: the blank line moves to 2 with the same a/b neighbours.
+	shifted := append([]string(nil), term.history[3:]...)
+	for i := 0; i < 3; i++ {
+		shifted = append(shifted, "new row")
+	}
+	term.history = shifted
+	feed(m, runKey(m, special(tea.KeyEnter)))
+	if !m.dock.Scrolling() || m.dock.ScrollSelected() != 2 {
+		t.Fatalf("Alt+Q blank hit = scrolling %v selected %d, want relocated row 2", m.dock.Scrolling(), m.dock.ScrollSelected())
+	}
+	if _, valid := decodeTerminalExportPayload("!!!"); valid {
+		t.Fatal("a malformed payload decoded as valid")
 	}
 }

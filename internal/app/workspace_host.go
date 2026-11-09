@@ -77,6 +77,18 @@ type workspaceManager struct {
 	// write lock; it lets a test hold a writer BEFORE it commits (the delayed-writer
 	// regression for the exit commit token). Nil in production.
 	captureWriterGate func()
+	// quiesceFn is a test hook replacing quiesceModelForTeardown, so tests can simulate a
+	// host.Do timeout without a live program. Nil in production.
+	quiesceFn func(*workspaceSession) error
+	// doTimeout is a test hook shortening WorkspaceHost.DoWithTimeout for teardown tests
+	// that block the UI. Zero uses the host default.
+	doTimeout time.Duration
+	// snapshotCaptureFn is a test hook replacing snapshotCapture so the reentrant
+	// enqueue-capture failure path can be exercised with a real host. Nil in production.
+	snapshotCaptureFn func(*workspaceSession) (*captureSnapshot, error)
+	// dropEditorFn is a test hook replacing shared.DropEditor, so a test can assert that a
+	// failed quiesce did not perform the irreversible ownership drop. Nil in production.
+	dropEditorFn func(*editor.Editor)
 	// beginSelectFn is a test hook replacing beginSelect for the extract path, so a
 	// regression can inject a synchronous refusal and a queued-switch failure.
 	beginSelectFn func(string) (func() error, error)
@@ -91,6 +103,10 @@ type workspaceManager struct {
 	// lastFocus is when each materialized workspace last became active, the LRU order of
 	// eviction. Updated on the UI goroutine only.
 	lastFocus map[string]time.Time
+	// modelGeneration numbers every built workspace model. Palette async/open messages
+	// carry it; it is unique even when a workspace is re-created after eviction, so an
+	// old model's stale seq/terminal ids cannot be applied to the new one.
+	modelGeneration uint64
 	// evicting marks workspaces whose runtime is being torn down by the eviction pass: a
 	// select/close of one is refused instead of racing the teardown.
 	evicting map[string]bool
@@ -238,6 +254,55 @@ func (m *workspaceManager) runOnUI(fn func()) bool {
 	return h.Do(fn)
 }
 
+// dropEditor moves the shared-buffer ownership away from ed before a runtime teardown.
+func (m *workspaceManager) dropEditor(ed *editor.Editor) {
+	if m.dropEditorFn != nil {
+		m.dropEditorFn(ed)
+		return
+	}
+	if m.shared != nil {
+		m.shared.DropEditor(ed)
+	}
+}
+
+// quiesceModelForTeardown performs the model-side part of a teardown atomically on the
+// UI goroutine: mark the model closed (serializes with an in-flight Update and makes later
+// envelopes drop), cancel its transient palette/project-search work, and drop its
+// shared-buffer ownership. All three run in ONE host call so a timeout cannot leave a
+// half-prepared workspace. If the UI does not answer, nothing here ran (the cancelable
+// host call is discarded), the workspace stays materialized and the caller reports.
+func (m *workspaceManager) quiesceModelForTeardown(sess *workspaceSession) error {
+	if m.quiesceFn != nil {
+		return m.quiesceFn(sess)
+	}
+	if sess == nil || sess.rt == nil || sess.rt.model == nil {
+		return nil
+	}
+	model := sess.rt.model
+	prepare := func() {
+		model.MarkClosed()
+		model.CancelTransientWork()
+		m.dropEditor(sess.rt.ed)
+	}
+	m.mu.Lock()
+	h := m.host
+	m.mu.Unlock()
+	if h == nil || !h.Ready() {
+		prepare()
+		return nil
+	}
+	ok := false
+	if m.doTimeout > 0 {
+		ok = h.DoWithTimeout(m.doTimeout, prepare)
+	} else {
+		ok = h.Do(prepare)
+	}
+	if !ok {
+		return errors.New("workspace: the UI did not quiesce; the workspace stays materialized")
+	}
+	return nil
+}
+
 // notify shows a failure on the active workspace's status row.
 func (m *workspaceManager) notify(err error) {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, errWorkspaceStale) {
@@ -249,6 +314,26 @@ func (m *workspaceManager) notify(err error) {
 	m.mu.Unlock()
 	if h != nil {
 		h.Notify(err.Error())
+	}
+}
+
+// notifyOnUI reports err without leaving the UI goroutine: it sets the observable
+// lastNotice and writes the active model's notice directly. Use it only from a hostCall /
+// UI callback; notify (which marshals with Do) is for off-UI callers. This keeps a UI
+// callback from re-entering Do and deadlocking until the timeout.
+func (m *workspaceManager) notifyOnUI(err error) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, errWorkspaceStale) {
+		return
+	}
+	m.mu.Lock()
+	m.lastNotice = err.Error()
+	h := m.host
+	m.mu.Unlock()
+	if h == nil {
+		return
+	}
+	if active := h.Active(); active != nil {
+		active.Notify(err.Error())
 	}
 }
 
@@ -307,6 +392,11 @@ func (m *workspaceManager) buildWorkspace(ctx context.Context, id string) (*work
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	m.modelGeneration++
+	generation := m.modelGeneration
+	m.mu.Unlock()
+	rt.model.SetWorkspaceOwner(ws.File.StableID, generation)
 	rt.model.SetWorkspacePort(m)
 	rt.model.SetWorkspaceLabel(ws.File.Label)
 	rt.model.AddWorkspaceCommands()
@@ -352,7 +442,9 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 	if m.evicting[targetID] {
 		m.pendingID = ""
 		m.mu.Unlock()
-		m.notify(fmt.Errorf("workspace: workspace %q is being evicted from memory; try again", targetID))
+		// applyCommit runs inside a hostCall on the UI goroutine: h.Notify would call Do
+		// again and freeze the UI. Write the notice to the active model directly.
+		m.notifyOnUI(fmt.Errorf("workspace: workspace %q is being evicted from memory; try again", targetID))
 		return
 	}
 	target := m.sessions[targetID]
@@ -382,7 +474,9 @@ func (m *workspaceManager) applyCommit(seq uint64) {
 	if host != nil {
 		host.Show(target.rt.model)
 		if hasLaunch {
-			host.Queue(target.rt.model.StartWorkspaceLaunch(launch))
+			if !host.QueueFor(target.rt.model, target.rt.model.StartWorkspaceLaunch(launch)) {
+				m.notifyOnUI(errors.New("workspace: the imported terminal launch was not queued because the workspace UI is busy; reopen the workspace to retry"))
+			}
 		}
 	}
 	// The switch may have pushed the daemon over daemon.materialized_workspaces: evict the
@@ -441,6 +535,10 @@ func (m *workspaceManager) beginSelect(id string) (func() error, error) {
 	cur := m.sessions[m.active]
 	m.mu.Unlock()
 	if cur != nil {
+		// The current model is about to be hidden: cancel its palette probe, ranking,
+		// Live Grep search and preview reads before any result can outlive it, and
+		// invalidate its sequence numbers. This runs on the UI goroutine and is cheap.
+		cur.rt.model.CancelTransientWork()
 		m.enqueueCapture(cur)
 	}
 	m.mu.Lock()
@@ -568,7 +666,9 @@ func (m *workspaceManager) startPendingLaunch(id string) {
 	if !ok || host == nil || sess == nil {
 		return
 	}
-	host.Queue(sess.rt.model.StartWorkspaceLaunch(launch))
+	if !host.QueueFor(sess.rt.model, sess.rt.model.StartWorkspaceLaunch(launch)) {
+		m.notifyOnUI(errors.New("workspace: the imported terminal launch was not queued because the workspace UI is busy; reopen the workspace to retry"))
+	}
 }
 
 // CreateWithLaunch implements the discovery picker's Import: create (or reuse) the
@@ -734,10 +834,11 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 		}
 	}
 	if sess != nil {
-		if m.shared != nil {
-			// Closing the workspace must not lose a buffer another workspace mirrors:
-			// ownership moves to a mirror before the runtime is torn down.
-			m.runOnUI(func() { m.shared.DropEditor(sess.rt.ed) })
+		// Quiesce BEFORE any irreversible teardown (shared-buffer ownership drop): a
+		// failed host.Do keeps the workspace fully materialized and owned.
+		if err := m.quiesceModelForTeardown(sess); err != nil {
+			m.notify(err)
+			return err
 		}
 		sess.rt.exit()
 		m.releasePluginWorkspace(sess)
@@ -994,10 +1095,16 @@ func (m *workspaceManager) openTarget(target workspaceOpenTarget) {
 	}
 	m.mu.Lock()
 	host := m.host
-	_, ok := m.sessions[m.active]
+	sess := m.sessions[m.active]
+	var targetModel *tui.Model
+	if sess != nil && sess.rt != nil {
+		targetModel = sess.rt.model
+	}
 	m.mu.Unlock()
-	if ok && host != nil {
-		host.PostOpenFileAt(canonical, line, col)
+	if targetModel != nil && host != nil {
+		if !host.PostOpenFileAt(targetModel, canonical, line, col) {
+			m.notify(fmt.Errorf("open %s: the workspace UI is busy; the file was not opened", canonical))
+		}
 	}
 }
 

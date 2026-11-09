@@ -49,15 +49,17 @@ func newRemoteLiveGrep(search *remoteSearch, gate ...func(ctx context.Context, a
 // remote project-search adapter still bounds every command (probe/list/tool) with its own
 // deadlines.
 func (g *remoteLiveGrep) Search(req palette.GrepRequest) ([]palette.GrepHit, error) {
-	return g.SearchContext(context.Background(), req)
+	res, err := g.SearchContext(context.Background(), req)
+	return res.Hits, err
 }
 
 // SearchContext is the cancellable Live Grep path: canceling ctx stops the streaming remote
 // project search between records/commands and closes its batch channel. Nothing here reads
 // the local file system.
-func (g *remoteLiveGrep) SearchContext(ctx context.Context, req palette.GrepRequest) ([]palette.GrepHit, error) {
+func (g *remoteLiveGrep) SearchContext(ctx context.Context, req palette.GrepRequest) (palette.GrepResult, error) {
+	var out palette.GrepResult
 	if req.Text == "" || req.Limit <= 0 {
-		return nil, nil
+		return out, nil
 	}
 	q := search.Query{
 		Text:          req.Text,
@@ -66,47 +68,48 @@ func (g *remoteLiveGrep) SearchContext(ctx context.Context, req palette.GrepRequ
 		Regex:         req.Query.Regex,
 	}
 	if err := validateQuery(q); err != nil {
-		return nil, err
+		return out, err
 	}
 	if req.Sources.Files || req.Sources.Ignored {
 		if g.gate != nil {
 			if err := g.gate(ctx, []string{"gvim-remote-live-grep", g.search.root}, g.search.root); err != nil {
-				return nil, err
+				return out, err
 			}
 		}
 	}
-	var hits []palette.GrepHit
 	if req.Sources.Ignored {
 		var err error
-		if hits, err = g.searchIgnored(ctx, req, q, req.Limit); err != nil {
-			return nil, err
+		if out, err = g.searchIgnored(ctx, req, q, req.Limit); err != nil {
+			return out, err
 		}
 	} else if req.Sources.Files {
 		var err error
-		if hits, err = g.searchFiles(ctx, req, req.Limit); err != nil {
-			return nil, err
+		if out, err = g.searchFiles(ctx, req, req.Limit); err != nil {
+			return out, err
 		}
 	}
-	if len(hits) < req.Limit && req.Sources.Buffers {
+	if len(out.Hits) < req.Limit && req.Sources.Buffers {
 		var err error
-		if hits, err = searchBuffers(req.Buffers, q, req.Limit, hits); err != nil {
-			return nil, err
+		if out.Hits, err = searchBuffers(req.Buffers, q, req.Limit, out.Hits); err != nil {
+			return out, err
 		}
 	}
-	if len(hits) < req.Limit && req.Sources.Terminals {
+	if len(out.Hits) < req.Limit && req.Sources.Terminals {
 		var err error
-		if hits, err = searchTerminals(req.Terminals, q, req.Limit, hits); err != nil {
-			return nil, err
+		if out.Hits, err = searchTerminals(req.Terminals, q, req.Limit, out.Hits); err != nil {
+			return out, err
 		}
 	}
-	return hits, nil
+	return out, nil
 }
 
 // searchFiles runs the remote project search over the palette's file-index snapshot and maps
 // its per-line matches to Live Grep hits. The project-search adapter owns the candidate
-// scope, ignore rules, output cap and streaming; this function only converts the batches and
-// stops as soon as the palette's row limit is reached (canceling the remaining stream).
-func (g *remoteLiveGrep) searchFiles(ctx context.Context, req palette.GrepRequest, limit int) ([]palette.GrepHit, error) {
+// scope, ignore rules, output cap and streaming; this function preserves its non-fatal
+// Notice/Truncated signal while collecting at most the palette's row limit. It keeps draining
+// the (authority-bounded) stream after the limit so a degradation/cap notice that arrives on
+// the Done batch is not silently lost; cancellation still closes the stream.
+func (g *remoteLiveGrep) searchFiles(ctx context.Context, req palette.GrepRequest, limit int) (palette.GrepResult, error) {
 	sr := searchpanel.SearchRequest{
 		Root:    req.Root,
 		Query:   req.Text,
@@ -117,43 +120,64 @@ func (g *remoteLiveGrep) searchFiles(ctx context.Context, req palette.GrepReques
 	}
 	searchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	hits := make([]palette.GrepHit, 0, limit)
+	out := palette.GrepResult{Hits: make([]palette.GrepHit, 0, limit)}
 	for batch := range g.search.ProjectSearchBatches(sr, searchCtx.Done()) {
-		if batch.Err != "" {
-			return nil, errors.New(batch.Err)
+		if batch.Truncated {
+			out.Truncated = true
 		}
+		if batch.Notice != "" {
+			out.Notice = joinRemoteLiveGrepNotice(out.Notice, batch.Notice)
+		}
+		// Parse the batch's files BEFORE looking at its error: a tool exit>1 batch carries
+		// the stdout matches and the error together (Done), and those successful hits must
+		// be kept.
 		for _, file := range batch.Files {
 			for _, m := range file.Matches {
-				hits = append(hits, palette.GrepHit{
+				if len(out.Hits) >= limit {
+					continue
+				}
+				out.Hits = append(out.Hits, palette.GrepHit{
 					Rel:    file.Name,
 					Line:   m.Line,
 					Col:    m.Col,
 					Text:   m.Text,
 					Source: palette.GrepFiles,
 				})
-				if len(hits) >= limit {
-					return hits, nil
-				}
 			}
+		}
+		if batch.Err != "" {
+			if err := ctx.Err(); err != nil {
+				return out, err
+			}
+			if len(out.Hits) > 0 {
+				// Keep the successful hits; expose the failure as incomplete instead of
+				// replacing the whole result with an error row.
+				out.Truncated = true
+				out.Notice = joinRemoteLiveGrepNotice(out.Notice, "remote Live Grep stopped early: "+batch.Err)
+				return out, nil
+			}
+			return out, errors.New(batch.Err)
 		}
 		if batch.Done {
 			break
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return out, err
 	}
-	return hits, nil
+	return out, nil
 }
 
 // searchIgnored uses the remote tool's widened scan for Live Grep's Ignored scope: no
 // candidate list can name untracked ignored files, so the tool scans the whole remote tree
 // with --no-ignore/--hidden (rg) through the same authority one-shot, output cap and parser.
 // The result is filtered to safe, project-relative paths; .git content is never returned.
-func (g *remoteLiveGrep) searchIgnored(ctx context.Context, req palette.GrepRequest, q search.Query, limit int) ([]palette.GrepHit, error) {
+// A tool output-cap hit is carried as an incomplete result notice instead of being dropped.
+func (g *remoteLiveGrep) searchIgnored(ctx context.Context, req palette.GrepRequest, q search.Query, limit int) (palette.GrepResult, error) {
+	var out palette.GrepResult
 	tool, err := g.search.probeTool(ctx)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	runCtx, stop := context.WithTimeout(ctx, g.search.timeout)
 	defer stop()
@@ -167,18 +191,44 @@ func (g *remoteLiveGrep) searchIgnored(ctx context.Context, req palette.GrepRequ
 	res, err := g.search.run(runCtx, g.search.root, remoteSearchArgv(tool, sr, true, nil))
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return out, ctx.Err()
 		}
-		return nil, fmt.Errorf("remote Live Grep ignored scan failed: %w", err)
+		if parsed := ignoredLiveGrepHits(tool, res.Stdout, limit); len(parsed) > 0 {
+			out.Hits = parsed
+			out.Truncated = true
+			out.Notice = appText("gvim.notice.remote_live_grep_stopped", "remote Live Grep stopped early: the widened ignored-file scan failed on the remote host; the shown matches are incomplete")
+			return out, nil
+		}
+		return out, fmt.Errorf("remote Live Grep ignored scan failed: %w", err)
 	}
 	if res.Code > 1 {
-		return nil, fmt.Errorf("%s failed on the remote host (exit %d)", tool, res.Code)
+		if parsed := ignoredLiveGrepHits(tool, res.Stdout, limit); len(parsed) > 0 {
+			// Keep the matches the tool printed before its non-zero exit; the partial
+			// result is explicitly incomplete rather than silently dropped.
+			out.Hits = parsed
+			out.Truncated = true
+			out.Notice = appText("gvim.notice.remote_live_grep_stopped", "remote Live Grep stopped early: the widened ignored-file scan failed on the remote host; the shown matches are incomplete")
+			return out, nil
+		}
+		return out, fmt.Errorf("%s failed on the remote host (exit %d)", tool, res.Code)
 	}
 	if res.Code == 1 {
-		return nil, nil
+		return out, nil
 	}
+	out.Hits = ignoredLiveGrepHits(tool, res.Stdout, limit)
+	if res.Truncated {
+		out.Truncated = true
+		out.Notice = appText("gvim.notice.remote_live_grep_cap", "remote Live Grep result is incomplete: the widened ignored-file scan hit the remote output cap; narrow the scope or refine the query")
+	}
+	return out, nil
+}
+
+// ignoredLiveGrepHits parses the widened tool's output into at most limit project-relative
+// hits, dropping .git/skip directories and escaping paths. It is shared by the success and
+// partial-failure paths so a capped run keeps its successful hits.
+func ignoredLiveGrepHits(tool string, stdout []byte, limit int) []palette.GrepHit {
 	hits := make([]palette.GrepHit, 0, limit)
-	for _, rec := range parseRemoteSearchOutput(tool, res.Stdout) {
+	for _, rec := range parseRemoteSearchOutput(tool, stdout) {
 		if ignoredRemotePath(rec.rel) {
 			continue
 		}
@@ -197,7 +247,18 @@ func (g *remoteLiveGrep) searchIgnored(ctx context.Context, req palette.GrepRequ
 			break
 		}
 	}
-	return hits, nil
+	return hits
+}
+
+// joinRemoteLiveGrepNotice appends one adapter notice to another without duplicating it.
+func joinRemoteLiveGrepNotice(a, b string) string {
+	if a == "" || a == b {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	return a + "; " + b
 }
 
 // ignoredRemotePath reports a path under .git or a tool-hardcoded skip directory. The

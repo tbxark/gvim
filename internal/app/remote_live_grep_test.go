@@ -84,7 +84,7 @@ func TestRemoteLiveGrepIgnoredScansWidenedAuthority(t *testing.T) {
 		return hostos.ProcResult{}, errors.New("unexpected remote command: " + strings.Join(argv, " "))
 	}}
 	g := newRemoteLiveGrep(newRemoteProjectSearch(one, "/remote/w"))
-	hits, err := g.SearchContext(context.Background(), palette.GrepRequest{
+	res, err := g.SearchContext(context.Background(), palette.GrepRequest{
 		Root:    "/remote/w",
 		Text:    "todo",
 		Query:   palette.SearchOptions{Regex: true},
@@ -94,8 +94,8 @@ func TestRemoteLiveGrepIgnoredScansWidenedAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchContext: %v", err)
 	}
-	if len(hits) != 1 || hits[0].Rel != ".hidden/x.go" || hits[0].Col != 1 {
-		t.Fatalf("ignored hits = %+v, want only the hidden file", hits)
+	if len(res.Hits) != 1 || res.Hits[0].Rel != ".hidden/x.go" || res.Hits[0].Col != 1 {
+		t.Fatalf("ignored hits = %+v, want only the hidden file", res.Hits)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -233,5 +233,178 @@ func TestRemoteLiveGrepSnapshotsOnlyStartsNoRemoteCommand(t *testing.T) {
 	}
 	if len(hits) != 2 {
 		t.Fatalf("hits = %+v, want buffer and terminal hits", hits)
+	}
+}
+
+// TestRemoteLiveGrepPropagatesProjectNotice: a project-search degradation notice reaches the
+// Live Grep result together with the successful hits; it is not silently dropped.
+func TestRemoteLiveGrepPropagatesProjectNotice(t *testing.T) {
+	one := rgScopeOneShot(true, nil, "a.go:1:1:todo a\n", false)
+	base := one.script
+	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && strings.Contains(strings.Join(argv, " "), "ls-files") {
+			return hostos.ProcResult{Code: 1}, nil
+		}
+		return base(ctx, argv, o)
+	}
+	g := newRemoteLiveGrep(newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS()))
+	res, err := g.SearchContext(context.Background(), palette.GrepRequest{
+		Root:    "/remote/w",
+		Text:    "todo",
+		Query:   palette.SearchOptions{Regex: true},
+		Sources: palette.GrepSources{Files: true},
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("SearchContext: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Rel != "a.go" {
+		t.Fatalf("hits = %+v, want the successful file hit kept", res.Hits)
+	}
+	if !strings.Contains(res.Notice, "ignore scope unavailable") {
+		t.Fatalf("notice = %q, want the project-search degradation notice", res.Notice)
+	}
+}
+
+// TestRemoteLiveGrepPropagatesProjectTruncation: a project batch/output cap hit is carried as
+// Truncated while the hits collected before the cap remain available.
+func TestRemoteLiveGrepPropagatesProjectTruncation(t *testing.T) {
+	one := rgScopeOneShot(true, []byte(gitLsEntry("100644", "a.go")), "a.go:1:1:todo a\n", false)
+	base := one.script
+	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "rg" {
+			res, err := base(ctx, argv, o)
+			res.Truncated = true
+			return res, err
+		}
+		return base(ctx, argv, o)
+	}
+	g := newRemoteLiveGrep(newRemoteProjectSearch(one, "/remote/w"))
+	res, err := g.SearchContext(context.Background(), palette.GrepRequest{
+		Root:    "/remote/w",
+		Text:    "todo",
+		Query:   palette.SearchOptions{Regex: true},
+		Sources: palette.GrepSources{Files: true},
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("SearchContext: %v", err)
+	}
+	if !res.Truncated {
+		t.Fatalf("result = %+v, want Truncated for the cap-hit batch", res)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("hits = %+v, want the successful hit kept", res.Hits)
+	}
+}
+
+// TestRemoteLiveGrepIgnoredTruncationNotice: the widened ignored scan's output cap is
+// visible as an incomplete notice while its successful hits are kept.
+func TestRemoteLiveGrepIgnoredTruncationNotice(t *testing.T) {
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) >= 2 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		return hostos.ProcResult{Stdout: []byte(".hidden/x.go:1:1:todo hidden\n"), Truncated: true}, nil
+	}}
+	g := newRemoteLiveGrep(newRemoteProjectSearch(one, "/remote/w"))
+	res, err := g.SearchContext(context.Background(), palette.GrepRequest{
+		Root:    "/remote/w",
+		Text:    "todo",
+		Query:   palette.SearchOptions{Regex: true},
+		Sources: palette.GrepSources{Ignored: true},
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("SearchContext: %v", err)
+	}
+	if !res.Truncated || !strings.Contains(res.Notice, "incomplete") {
+		t.Fatalf("result = %+v, want the incomplete ignored-cap notice", res)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Rel != ".hidden/x.go" {
+		t.Fatalf("hits = %+v, want the successful ignored hit kept", res.Hits)
+	}
+}
+
+// TestRemoteLiveGrepIgnoredPartialOnNonZeroExit: a tool that prints matches then exits 2
+// keeps those hits and reports an incomplete notice instead of discarding stdout; with no
+// parsed hits the error is still returned.
+func TestRemoteLiveGrepIgnoredPartialOnNonZeroExit(t *testing.T) {
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) >= 2 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		return hostos.ProcResult{Stdout: []byte(".hidden/x.go:1:1:todo hidden\n"), Code: 2}, nil
+	}}
+	g := newRemoteLiveGrep(newRemoteProjectSearch(one, "/remote/w"))
+	res, err := g.SearchContext(context.Background(), palette.GrepRequest{
+		Root:    "/remote/w",
+		Text:    "todo",
+		Query:   palette.SearchOptions{Regex: true},
+		Sources: palette.GrepSources{Ignored: true},
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("SearchContext returned an error despite partial hits: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Rel != ".hidden/x.go" {
+		t.Fatalf("partial hits = %+v, want the stdout match kept", res.Hits)
+	}
+	if !res.Truncated || !strings.Contains(res.Notice, "incomplete") {
+		t.Fatalf("partial result = %+v, want the incomplete notice", res)
+	}
+
+	// No parsed hit: the non-zero exit remains a hard error.
+	empty := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) >= 2 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		return hostos.ProcResult{Code: 2}, nil
+	}}
+	g = newRemoteLiveGrep(newRemoteProjectSearch(empty, "/remote/w"))
+	if _, err := g.SearchContext(context.Background(), palette.GrepRequest{
+		Root:    "/remote/w",
+		Text:    "todo",
+		Query:   palette.SearchOptions{Regex: true},
+		Sources: palette.GrepSources{Ignored: true},
+		Limit:   10,
+	}); err == nil {
+		t.Fatal("a non-zero exit without any hit returned no error")
+	}
+}
+
+// TestRemoteLiveGrepFilesKeepsPartialStdoutOnExitError: the Files scope's tool exit>1 keeps
+// the stdout matches as incomplete Live Grep hits instead of dropping them.
+func TestRemoteLiveGrepFilesKeepsPartialStdoutOnExitError(t *testing.T) {
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		joined := strings.Join(argv, " ")
+		switch {
+		case len(argv) >= 2 && argv[0] == "sh":
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		case strings.Contains(joined, "rev-parse"):
+			return hostos.ProcResult{Stdout: []byte("true")}, nil
+		case strings.Contains(joined, "ls-files"):
+			return hostos.ProcResult{Stdout: []byte(gitLsEntry("100644", "a.go"))}, nil
+		case len(argv) > 0 && argv[0] == "rg":
+			return hostos.ProcResult{Stdout: []byte("a.go:1:1:todo\n"), Code: 2}, nil
+		}
+		return hostos.ProcResult{}, errors.New("unexpected command: " + joined)
+	}}
+	g := newRemoteLiveGrep(newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS()))
+	res, err := g.SearchContext(context.Background(), palette.GrepRequest{
+		Root:    "/remote/w",
+		Text:    "todo",
+		Query:   palette.SearchOptions{Regex: true},
+		Sources: palette.GrepSources{Files: true},
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("SearchContext: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Rel != "a.go" {
+		t.Fatalf("hits = %+v, want the partial stdout hit kept", res.Hits)
+	}
+	if !res.Truncated || !strings.Contains(res.Notice, "stopped early") {
+		t.Fatalf("result = %+v, want an incomplete notice for the tool exit error", res)
 	}
 }

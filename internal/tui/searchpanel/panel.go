@@ -11,6 +11,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/overlay"
+	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/style"
 	"github.com/tbxark/gvim/theme"
 )
@@ -95,7 +96,10 @@ func newStyles(st style.Styles) styles {
 
 // Options are the input of New.
 type Options struct {
-	Root      string
+	Root string
+	// Owner is the workspace model generation started this panel; every async and
+	// root-facing message carries it so a stale model cannot act on another one.
+	Owner     palette.Owner
 	Files     Files
 	OpenFiles []SourceFile
 	Current   *SourceFile
@@ -143,6 +147,7 @@ func (b previewBox) contains(x, y int) bool {
 type Panel struct {
 	styles styles
 	root   string
+	owner  palette.Owner
 	files  Files
 	limit  int
 	git    bool
@@ -217,19 +222,30 @@ type Panel struct {
 }
 
 // tickMsg and doneMsg bring a search back to the update loop.
-type tickMsg struct{ seq int }
+type tickMsg struct {
+	seq   int
+	owner palette.Owner
+}
+
+func (m tickMsg) PaletteOwner() palette.Owner { return m.owner }
 
 type searchDoneMsg struct {
 	seq    int
 	result SearchResult
 	err    error
+	owner  palette.Owner
 }
+
+func (m searchDoneMsg) PaletteOwner() palette.Owner { return m.owner }
 
 type gitDoneMsg struct {
 	seq    int
 	result GitResult
 	err    error
+	owner  palette.Owner
 }
+
+func (m gitDoneMsg) PaletteOwner() palette.Owner { return m.owner }
 
 // searchBatchMsg carries one batch of a streaming project search.
 type searchBatchMsg struct {
@@ -237,7 +253,10 @@ type searchBatchMsg struct {
 	ch    <-chan SearchBatch
 	batch SearchBatch
 	ok    bool
+	owner palette.Owner
 }
+
+func (m searchBatchMsg) PaletteOwner() palette.Owner { return m.owner }
 
 // previewState is the preview column's last target and its fetched context.
 type previewState struct {
@@ -259,13 +278,17 @@ type previewDoneMsg struct {
 	seq    int
 	result PreviewResult
 	err    error
+	owner  palette.Owner
 }
+
+func (m previewDoneMsg) PaletteOwner() palette.Owner { return m.owner }
 
 // New returns the panel.
 func New(o Options) *Panel {
 	p := &Panel{
 		styles:      newStyles(o.Styles),
 		root:        o.Root,
+		owner:       o.Owner,
 		files:       o.Files,
 		limit:       o.Limit,
 		git:         o.Git,
@@ -338,7 +361,7 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return p.key(msg)
 	case tickMsg:
-		if msg.seq != p.seq || p.query.Value() == "" {
+		if msg.owner != p.owner || msg.seq != p.seq || p.query.Value() == "" {
 			return p, nil
 		}
 		return p, p.searchCmd(msg.seq)
@@ -355,6 +378,9 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		return p, p.previewWheel(msg)
 	case previewDoneMsg:
+		if msg.owner != p.owner {
+			return p, nil
+		}
 		if msg.seq == p.preview.seq {
 			p.preview.loading = false
 			p.previewCancel = nil
@@ -492,7 +518,8 @@ func (p *Panel) exportCmd() tea.Cmd {
 	// The export opens its list over the panel's result view: an in-flight preview read
 	// is no longer needed and is cancelled before the command returns.
 	p.cancelPreviewRead()
-	return func() tea.Msg { return ExportMsg{} }
+	owner := p.owner
+	return func() tea.Msg { return ExportMsg{Owner: owner} }
 }
 
 // ExportItems returns the current result set as flat list rows for the root's list
@@ -709,7 +736,7 @@ func (p *Panel) previewCmd() tea.Cmd {
 	// for the file/authority read itself.
 	p.cancelPreviewRead()
 	p.preview.seq++
-	seq := p.preview.seq
+	seq, owner := p.preview.seq, p.owner
 	p.preview.req = req
 	p.preview.hasReq = true
 	p.preview.loading = true
@@ -719,7 +746,7 @@ func (p *Panel) previewCmd() tea.Cmd {
 		p.previewCancel = cancel
 		return func() tea.Msg {
 			res, err := cp.PreviewContext(ctx, req)
-			return previewDoneMsg{seq: seq, result: res, err: err}
+			return previewDoneMsg{seq: seq, result: res, err: err, owner: owner}
 		}
 	}
 	rev := p.previewer
@@ -942,7 +969,7 @@ func (p *Panel) requery() tea.Cmd {
 	}
 	p.loading = true
 	seq := p.seq
-	return tea.Tick(searchDebounce, func(time.Time) tea.Msg { return tickMsg{seq: seq} })
+	return tea.Tick(searchDebounce, func(time.Time) tea.Msg { return tickMsg{seq: seq, owner: p.owner} })
 }
 
 // ReSearch re-runs the current search immediately, without the debounce. The root uses
@@ -964,6 +991,7 @@ func (p *Panel) ReSearch() tea.Cmd {
 // searchCmd returns the command that runs the current search. The file index snapshot is
 // read in the command, so the update loop does no IO.
 func (p *Panel) searchCmd(seq int) tea.Cmd {
+	owner := p.owner
 	query := p.query.Value()
 	if p.git {
 		g := p.grepper
@@ -972,11 +1000,13 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 			Pathspecs: globPatterns(p.glob.Value()), Limit: p.limit,
 		}
 		if g == nil {
-			return func() tea.Msg { return gitDoneMsg{seq: seq, err: fmt.Errorf("git grep is not supported in this port")} }
+			return func() tea.Msg {
+				return gitDoneMsg{seq: seq, err: fmt.Errorf("git grep is not supported in this port"), owner: owner}
+			}
 		}
 		return func() tea.Msg {
 			res, err := g.GitGrep(req)
-			return gitDoneMsg{seq: seq, result: res, err: err}
+			return gitDoneMsg{seq: seq, result: res, err: err, owner: owner}
 		}
 	}
 	s := p.searcher
@@ -993,7 +1023,7 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 	}
 	if s == nil {
 		return func() tea.Msg {
-			return searchDoneMsg{seq: seq, err: fmt.Errorf("project search is not supported in this port")}
+			return searchDoneMsg{seq: seq, err: fmt.Errorf("project search is not supported in this port"), owner: owner}
 		}
 	}
 	if bs, ok := s.(BatchSearcher); ok {
@@ -1010,7 +1040,7 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 			req.Files = matcher.filter(req.Files)
 			ch := bs.ProjectSearchBatches(req, cancel)
 			batch, ok := <-ch
-			return searchBatchMsg{seq: seq, ch: ch, batch: batch, ok: ok}
+			return searchBatchMsg{seq: seq, ch: ch, batch: batch, ok: ok, owner: owner}
 		}
 	}
 	return func() tea.Msg {
@@ -1019,22 +1049,22 @@ func (p *Panel) searchCmd(seq int) tea.Cmd {
 		}
 		req.Files = matcher.filter(req.Files)
 		res, err := s.ProjectSearch(req)
-		return searchDoneMsg{seq: seq, result: res, err: err}
+		return searchDoneMsg{seq: seq, result: res, err: err, owner: owner}
 	}
 }
 
 // waitBatch returns the command that reads the next batch of the live stream.
-func waitBatch(seq int, ch <-chan SearchBatch) tea.Cmd {
+func waitBatch(seq int, ch <-chan SearchBatch, owner palette.Owner) tea.Cmd {
 	return func() tea.Msg {
 		batch, ok := <-ch
-		return searchBatchMsg{seq: seq, ch: ch, batch: batch, ok: ok}
+		return searchBatchMsg{seq: seq, ch: ch, batch: batch, ok: ok, owner: owner}
 	}
 }
 
 // applyBatch appends one streaming batch and keeps reading, or finishes the search on the
 // done batch. A batch for an older search is dropped (its stream was cancelled).
 func (p *Panel) applyBatch(msg searchBatchMsg) tea.Cmd {
-	if msg.seq != p.seq {
+	if msg.owner != p.owner || msg.seq != p.seq {
 		return nil
 	}
 	if !msg.ok {
@@ -1073,7 +1103,7 @@ func (p *Panel) applyBatch(msg searchBatchMsg) tea.Cmd {
 		p.recordHistory(p.query.Value())
 		return nil
 	}
-	return waitBatch(msg.seq, msg.ch)
+	return waitBatch(msg.seq, msg.ch, p.owner)
 }
 
 // appendBatchFiles adds whole files from a streaming batch. Existing rows do not move, so
@@ -1105,6 +1135,20 @@ func (p *Panel) cancelBatches() {
 	p.batchCh = nil
 }
 
+// CancelWork cancels the in-flight search stream and preview read without closing the
+// panel. The daemon workspace host calls it before its model is hidden (switch, evict,
+// close) so a hidden model does no further background search work; the results already
+// on screen stay, and a later return can search again. The sequence counters are
+// advanced so a late result cannot paint into the panel.
+func (p *Panel) CancelWork() {
+	p.cancelBatches()
+	p.cancelPreviewRead()
+	p.seq++
+	p.preview.seq++
+	p.preview.loading = false
+	p.loading = false
+}
+
 // Dismiss closes the panel and cancels its stream; the root calls it when Esc closes the
 // overlay.
 func (p *Panel) Dismiss() {
@@ -1117,7 +1161,7 @@ func (p *Panel) Dismiss() {
 
 // applySearch shows a project search result when it answers the current search.
 func (p *Panel) applySearch(msg searchDoneMsg) {
-	if msg.seq != p.seq {
+	if msg.owner != p.owner || msg.seq != p.seq {
 		return
 	}
 	p.loading = false
@@ -1142,7 +1186,7 @@ func (p *Panel) applySearch(msg searchDoneMsg) {
 
 // applyGit shows a git grep result when it answers the current search.
 func (p *Panel) applyGit(msg gitDoneMsg) {
-	if msg.seq != p.seq {
+	if msg.owner != p.owner || msg.seq != p.seq {
 		return
 	}
 	p.loading = false
@@ -1246,8 +1290,9 @@ func (p *Panel) activate() tea.Cmd {
 		return nil
 	}
 	f := p.fileMatches[r.file]
+	owner := p.owner
 	return func() tea.Msg {
-		return OpenMsg{Path: f.Path, Line: r.line, Col: r.col}
+		return OpenMsg{Path: f.Path, Line: r.line, Col: r.col, Owner: owner}
 	}
 }
 
@@ -1277,7 +1322,8 @@ func (p *Panel) replaceCmd(scoped bool) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	return func() tea.Msg { return ReplaceRequestMsg{Request: req} }
+	owner := p.owner
+	return func() tea.Msg { return ReplaceRequestMsg{Request: req, Owner: owner} }
 }
 
 // ReplaceRequest returns the replacement of the checked matches. ok is false in Git Grep
@@ -1453,7 +1499,7 @@ func (p *Panel) NextMatch(forward bool) (OpenMsg, bool) {
 		p.selectRow(i)
 		r := p.rows[i]
 		f := p.fileMatches[r.file]
-		return OpenMsg{Path: f.Path, Line: r.line, Col: r.col}, true
+		return OpenMsg{Path: f.Path, Line: r.line, Col: r.col, Owner: p.owner}, true
 	}
 	return OpenMsg{}, false
 }

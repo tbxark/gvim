@@ -351,6 +351,11 @@ type TranscriptTab struct {
 	Program string // the launch/resume argv basename, for a label fallback
 	Lines   []string
 	First   int
+	// Total is the terminal's scrollback history length at the snapshot. A reveal
+	// compares it with the current length: an unchanged total keeps the absolute row
+	// mapping valid; a changed one needs a unique content match to relocate (or an
+	// honest refusal), so a hit never lands on the wrong line after output/eviction.
+	Total int
 }
 
 // Transcripts snapshots every open tab's searchable transcript for Live Grep. It only
@@ -362,6 +367,10 @@ func (t *Tabs) Transcripts() []TranscriptTab {
 	for i, p := range t.tabs {
 		lines, first := p.transcriptRows()
 		launch := p.Launch()
+		total := 0
+		if p.term != nil {
+			total = p.term.ScrollbackLen()
+		}
 		out = append(out, TranscriptTab{
 			ID:      t.ids[i],
 			Name:    t.names[i],
@@ -369,25 +378,45 @@ func (t *Tabs) Transcripts() []TranscriptTab {
 			Program: restartProgramName(launch.Argv),
 			Lines:   lines,
 			First:   first,
+			Total:   total,
 		})
 	}
 	return out
 }
 
+// TranscriptHit is a Live Grep terminal hit for a reveal: the stable tab id, the
+// snapshot's absolute transcript row and the snapshot validation data. Snapshot false
+// is the legacy row-only form (tests/old callers). A Snapshot hit with Valid false
+// (a malformed export payload) is refused, never clamped: an empty expected Text is a
+// real hit (a blank transcript line), so validation uses the known neighbours.
+type TranscriptHit struct {
+	ID                      uint64
+	Row                     int
+	Total                   int
+	Text                    string
+	Before, After           string
+	BeforeKnown, AfterKnown bool
+	Snapshot, Valid         bool
+}
+
 // RevealTranscriptLine focuses the tab with the stable id and opens its read-only
-// scrollback at combined transcript row (0-based). It reports false when the tab is
-// gone or has no pager to reveal (a restored tab without a live session, a running
-// alternate-screen program). It never starts a process; a pager row may be fetched by
-// the returned command.
-func (t *Tabs) RevealTranscriptLine(id uint64, row int) (tea.Cmd, bool) {
-	i, ok := t.IndexForID(id)
+// scrollback at the snapshot's transcript row. A Snapshot hit is validated before
+// anything moves: the recorded row is used only when the scrollback total is unchanged
+// and the expected line/known neighbours match; after output/eviction only a unique
+// text/neighbour match relocates the line; a missing, truncated, ambiguous or invalid
+// match refuses (false) so the pager never jumps to a wrong row. A hit with Snapshot
+// false keeps the legacy row behavior. It reports false when the tab is gone or has no
+// pager (restored no-session tab, running alternate-screen program), and never starts a
+// process; the returned command may fetch pager rows.
+func (t *Tabs) RevealTranscriptLine(h TranscriptHit) (tea.Cmd, bool) {
+	i, ok := t.IndexForID(h.ID)
 	if !ok {
 		return nil, false
 	}
 	if !t.SetActive(i) {
 		return nil, false
 	}
-	return t.tabs[i].RevealTranscriptRow(row)
+	return t.tabs[i].RevealTranscriptRow(h)
 }
 
 // NewTab adds a tab at the end, makes it active, and starts its shell. A dock at

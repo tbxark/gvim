@@ -351,3 +351,39 @@ func TestRemoteLiveGrepResumeSearchesRemoteAgain(t *testing.T) {
 		t.Fatalf("remote resume opened %v, want the remote path", ed.opened)
 	}
 }
+
+// TestLiveGrepExportShowsIncompleteState: a capped/degraded remote result's export list
+// says so in the title and in a leading header row, while the hits remain listed.
+func TestLiveGrepExportShowsIncompleteState(t *testing.T) {
+	t.Parallel()
+	m, _ := newLiveModel(t, &grepPort{})
+	cmd := m.openLiveGrepResultsList(palette.GrepExportMsg{
+		Root:      "/remote/w",
+		Remote:    true,
+		Query:     "todo",
+		Truncated: true,
+		Notice:    "ignored scan hit the output cap",
+		Hits: []palette.GrepHit{
+			{Source: palette.GrepFiles, Rel: "src/a.go", Line: 2, Col: 1, Text: "todo a"},
+		},
+	})
+	if cmd != nil {
+		t.Fatalf("export list returned %v", cmd)
+	}
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want one export list", len(m.overlays))
+	}
+	v, ok := m.overlays[0].(*list.View)
+	if !ok {
+		t.Fatalf("overlay = %T", m.overlays[0])
+	}
+	if !strings.Contains(v.Title, "incomplete") {
+		t.Fatalf("export title = %q, want incomplete", v.Title)
+	}
+	if len(v.Rows) < 2 || !v.Rows[0].Header || !strings.Contains(v.Rows[0].Left, "output cap") {
+		t.Fatalf("export rows = %+v, want the notice header before the hits", v.Rows)
+	}
+	if !strings.Contains(v.Rows[1].Left, "src/a.go:2") {
+		t.Fatalf("export hit row = %+v", v.Rows[1])
+	}
+}

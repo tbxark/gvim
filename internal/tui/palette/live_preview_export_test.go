@@ -249,7 +249,7 @@ func TestRemoteLiveGrepExportCarriesTheRemoteFlag(t *testing.T) {
 	p.seq = 1
 	p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{
 		{Rel: "src/a.go", Line: 2, Col: 1, Text: "todo remote"},
-	}})
+	}, Notice: "ignored scan incomplete", Truncated: true})
 	cmd := p.key(altKey('q'))
 	if cmd == nil {
 		t.Fatal("remote export produced no message")
@@ -257,5 +257,8 @@ func TestRemoteLiveGrepExportCarriesTheRemoteFlag(t *testing.T) {
 	msg := cmd().(GrepExportMsg)
 	if !msg.Remote || msg.Root != "/remote/w" || msg.Hits[0].Rel != "src/a.go" {
 		t.Fatalf("remote export = %+v, want Remote true and the remote root", msg)
+	}
+	if !msg.Truncated || msg.Notice != "ignored scan incomplete" {
+		t.Fatalf("remote export = %+v, want the completeness signal", msg)
 	}
 }

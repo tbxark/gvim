@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -147,6 +148,7 @@ type Model struct {
 	clip          *clipboard    // the explorer clipboard; nil when empty
 	lastYank      string        // the last text copied or cut, for the terminal's Ctrl+V fallback
 	quitting      bool          // set by a menu row that quit the editor
+	closed        atomic.Bool   // Close ran: late host command results are discarded
 	detach        func()        // ends the attached daemon client; nil when not hosted
 	pending       tea.Cmd       // commands a menu row started, returned by routeMenu
 	notice        string        // replaces the editor status until the next press
@@ -238,6 +240,9 @@ type Model struct {
 	// workspace's status-row label (see workspace_ui.go); both zero for a direct launch.
 	workspace      WorkspacePort
 	workspaceLabel string
+	// workspaceOwner identifies this model generation for palette async/open messages.
+	// The app sets it per built daemon workspace; the zero value is a direct launch.
+	workspaceOwner palette.Owner
 }
 
 // drag is the pointer gesture in progress: a text selection, or a grab of the
@@ -446,6 +451,7 @@ var dockCloseWait = 2 * time.Second
 // once the session is saved. A shell that does not close in time is left to the exit of
 // the process.
 func (m *Model) Close() {
+	m.closed.Store(true)
 	// A signal ends the program without a quit, so the writes in flight are stopped here
 	// and waited for: they remove their temporary files before the process exits.
 	m.large.stop()
@@ -469,6 +475,16 @@ func (m *Model) Close() {
 	}
 }
 
+// Closed reports whether Close ran. The daemon host uses it to discard command results
+// that arrive after the model's runtime was evicted or closed.
+func (m *Model) Closed() bool { return m.closed.Load() }
+
+// MarkClosed stops the daemon host from delivering command results to this model. The
+// app calls it ON THE UI GOROUTINE (through WorkspaceHost.Do) before tearing down a warm
+// model: once it returns, no source.Update is in flight or can start, so the heavier
+// runtime teardown may run off the UI goroutine without racing model fields. Idempotent.
+func (m *Model) MarkClosed() { m.closed.Store(true) }
+
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.
 func (m *Model) Init() tea.Cmd {
@@ -483,6 +499,17 @@ func (m *Model) Init() tea.Cmd {
 // marker changes neither, so it is not undone here. The viewport is not re-synced on
 // every message, because the editor moves it to the caret.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if owned, ok := msg.(palette.OwnedMsg); ok {
+		owner := owned.PaletteOwner()
+		// A palette always stamps its workspace/model generation. A zero owner is a
+		// direct-launch or a test/legacy caller constructing an action by hand (it cannot
+		// be a stale palette result: those are never zero in a daemon model). Drop any
+		// nonzero owner that is not this model's before an overlay or action sees it: its
+		// seq and terminal tab ids are model-local and can collide with ours.
+		if owner != (palette.Owner{}) && owner != m.workspaceOwner {
+			return m, nil
+		}
+	}
 	if _, ok := msg.(clockTickMsg); ok {
 		// A {clock} tick only asks for the next frame (the clock is read while the
 		// status row is built) and arms the tick for the minute after it.
@@ -917,7 +944,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			cmd = m.showDock()
-			if reveal, located := m.dock.RevealTranscriptLine(msg.ID, msg.Row); located {
+			reveal, located := m.dock.RevealTranscriptLine(dock.TranscriptHit{
+				ID: msg.ID, Row: msg.Row, Total: msg.Total,
+				Text: msg.Text, Before: msg.Before, After: msg.After,
+				BeforeKnown: msg.BeforeKnown, AfterKnown: msg.AfterKnown,
+				Snapshot: msg.Snapshot, Valid: msg.Valid,
+			})
+			if located {
 				cmd = tea.Batch(cmd, reveal)
 			} else {
 				// The tab is there and focused, but a restored read-only tab or a
@@ -2084,6 +2117,7 @@ func (m *Model) openPalette(query string) tea.Cmd {
 	preview := m.root.ports.Preview
 	p := palette.New(palette.Options{
 		Query:      query,
+		Owner:      m.workspaceOwner,
 		Root:       root,
 		Remote:     remote,
 		ShowHidden: m.tree != nil && m.tree.ShowHidden(),
@@ -2508,7 +2542,7 @@ func (m *Model) uiAction(action string, args map[string]any) (tea.Cmd, bool) {
 		if cmd, ok := m.workspaceAction(action); ok {
 			return cmd, true
 		}
-		if cmd, ok := m.lspAction(action); ok {
+		if cmd, ok := m.lspAction(action, args); ok {
 			return cmd, true
 		}
 		if cmd, ok := m.dockAction(action); ok {

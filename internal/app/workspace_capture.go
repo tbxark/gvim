@@ -201,10 +201,18 @@ func (m *workspaceManager) enqueueCapture(s *workspaceSession) *saveJob {
 		return job
 	}
 	job := &saveJob{done: make(chan struct{})}
-	snap, snapErr := m.snapshotCapture(s)
+	var snap *captureSnapshot
+	var snapErr error
+	if m.snapshotCaptureFn != nil {
+		snap, snapErr = m.snapshotCaptureFn(s)
+	} else {
+		snap, snapErr = m.snapshotCapture(s)
+	}
 	if snapErr != nil {
 		job.err = snapErr
-		m.notify(fmt.Errorf("snapshot workspace %q: %w", s.ws.File.Label, snapErr))
+		// enqueueCapture runs inside a runOnUI closure (hostCall). notify would re-enter
+		// Do from the UI goroutine and freeze it; write the notice directly instead.
+		m.notifyOnUI(fmt.Errorf("snapshot workspace %q: %w", s.ws.File.Label, snapErr))
 		close(job.done)
 		return job
 	}

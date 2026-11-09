@@ -20,7 +20,7 @@ func TestLSPEventsReachPlugins(t *testing.T) {
 	useHost(rt, m)
 	// The click site: the show_lsp_status action. The model has no port, so the popup
 	// command fails, but the event is queued before it.
-	if _, ok := m.lspAction("show_lsp_status"); !ok {
+	if _, ok := m.lspAction("show_lsp_status", nil); !ok {
 		t.Fatal("show_lsp_status is not an LSP action")
 	}
 	m.pluginTail(pluginSnap{}, nil)

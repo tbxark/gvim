@@ -439,12 +439,13 @@ func TestLiveResumeRerunsWhenBuffersOrTerminalsAreScoped(t *testing.T) {
 func TestLiveGrepTerminalScope(t *testing.T) {
 	t.Parallel()
 	g := &fakeGrepper{hits: []GrepHit{
-		{Rel: "shell", Line: 2, Col: 4, Text: "xx todo output", Source: GrepTerminals, Index: 1, TerminalID: 9, TranscriptFirst: 40},
+		{Rel: "shell", Line: 2, Col: 4, Text: "xx todo output", Source: GrepTerminals, Index: 1,
+			TerminalID: 9, TranscriptFirst: 40, TerminalTotal: 60, TerminalBefore: "out", TerminalAfter: "tail"},
 	}}
 	opts := liveOptions("todo", &fakeFiles{files: []string{"a.go"}}, g)
 	opts.SourceTerminals = []TerminalSource{
-		{ID: 7, Index: 0, Name: "first", Lines: []string{"nothing"}},
-		{ID: 9, Index: 1, Name: "shell", First: 40, Lines: []string{"out", "xx todo output"}},
+		{ID: 7, Index: 0, Name: "first", Total: 20, Lines: []string{"nothing"}},
+		{ID: 9, Index: 1, Name: "shell", First: 40, Total: 60, Lines: []string{"out", "xx todo output", "tail"}},
 	}
 	p := New(opts)
 	draw(p, 140, 30)
@@ -453,7 +454,7 @@ func TestLiveGrepTerminalScope(t *testing.T) {
 		t.Fatalf("initial terminal request = %+v", g.reqs)
 	}
 	if got := g.reqs[0].Terminals; got[0].ID != 7 || got[0].Index != 0 || got[0].Name != "first" ||
-		got[1].ID != 9 || got[1].First != 40 || len(got[1].Lines) != 2 {
+		got[1].ID != 9 || got[1].First != 40 || got[1].Total != 60 || len(got[1].Lines) != 3 {
 		t.Fatalf("terminal snapshot = %+v", got)
 	}
 	if !hasRow(draw(p, 140, 30), "shell:2: xx todo output") {
@@ -471,7 +472,8 @@ func TestLiveGrepTerminalScope(t *testing.T) {
 		t.Fatalf("terminal-on request = %+v", g.reqs)
 	}
 	p.update(GrepResultMsg{Seq: p.seq, Text: "todo", Hits: g.hits})
-	want := OpenTerminalMsg{ID: 9, Row: 41, Index: 1}
+	want := OpenTerminalMsg{ID: 9, Row: 41, Index: 1, Total: 60,
+		Text: "xx todo output", Before: "out", After: "tail"}
 	if got := runCmd(p.update(key(tea.KeyEnter))); got != want {
 		t.Fatalf("Enter emitted %#v, want the stable tab id + transcript row %#v", got, want)
 	}
@@ -526,5 +528,53 @@ func TestBoundTerminalSources(t *testing.T) {
 	}
 	if total > GrepTerminalsMaxBytes {
 		t.Fatalf("total snapshot bytes = %d, over the %d cap", total, GrepTerminalsMaxBytes)
+	}
+}
+
+// TestLiveGrepRowOpenMessagesCarryPaletteOwner: the rowGrep path builds its open
+// messages outside row.command's helper, so every source must still stamp the palette's
+// workspace/model owner; a zero owner here would bypass the root guard.
+func TestLiveGrepRowOpenMessagesCarryPaletteOwner(t *testing.T) {
+	t.Parallel()
+	owner := Owner{Workspace: "ws-a", Generation: 7}
+	tests := []struct {
+		name string
+		hit  GrepHit
+		want any
+	}{
+		{"file", GrepHit{Rel: "a.go", Line: 2, Col: 3, Text: "todo file"}, OpenLineMsg{}},
+		{"buffer", GrepHit{Rel: "buf", Line: 4, Col: 2, Text: "todo buffer", Source: GrepBuffers, Index: 1}, OpenBufferLineMsg{}},
+		{"terminal", GrepHit{Rel: "term", Line: 5, Col: 1, Text: "todo term", Source: GrepTerminals, Index: 1, TerminalID: 9, TranscriptFirst: 40}, OpenTerminalMsg{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New(Options{
+				Live: true, Query: "todo", Root: "/w", Owner: owner,
+				Files:         &fakeFiles{files: []string{"a.go"}},
+				Grep:          &fakeGrepper{},
+				SourceBuffers: []BufferSource{{Name: "buf", Index: 1, Text: "todo buffer"}},
+				// A non-nil terminal snapshot offers the scope; the hit below is what
+				// the row command opens.
+				SourceTerminals: []TerminalSource{{Name: "term", Index: 1, Lines: []string{"todo term"}}},
+			})
+			p.seq = 1
+			p.applyGrep(GrepResultMsg{Seq: 1, Text: "todo", Hits: []GrepHit{tt.hit}, Owner: owner})
+			if len(p.rows) != 1 {
+				t.Fatalf("rows = %d, want 1", len(p.rows))
+			}
+			msg := runCmd(p.update(key(tea.KeyEnter)))
+			owned, ok := msg.(OwnedMsg)
+			if !ok {
+				t.Fatalf("Enter emitted %T, want an OwnedMsg", msg)
+			}
+			if got := owned.PaletteOwner(); got != owner {
+				t.Fatalf("Enter emitted owner %+v, want %+v", got, owner)
+			}
+			switch msg.(type) {
+			case OpenLineMsg, OpenBufferLineMsg, OpenTerminalMsg:
+			default:
+				t.Fatalf("Enter emitted %T, want %T family", msg, tt.want)
+			}
+		})
 	}
 }

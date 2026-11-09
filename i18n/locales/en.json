@@ -1125,6 +1125,8 @@
   "gvim.notice.remote_ignore_git_unavailable": "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted",
   "gvim.notice.remote_ignore_listing_failed": "remote ignore scope unavailable: the remote git candidate listing failed, timed out or truncated; ignored files may be searched and tracked files that match .gitignore may be omitted",
   "gvim.notice.remote_search_cap": "remote search result is incomplete: the widened fallback scan hit the remote output cap before all candidate files were reported; narrow the scope or refine the query",
+  "gvim.notice.remote_live_grep_cap": "remote Live Grep result is incomplete: the widened ignored-file scan hit the remote output cap; narrow the scope or refine the query",
+  "gvim.notice.remote_live_grep_stopped": "remote Live Grep stopped early: the widened ignored-file scan failed on the remote host; the shown matches are incomplete",
   "gvim.notice.remote_search_stale_snapshot": "remote search was limited to the quick-open file-index snapshot; matching remote files outside it were not searched (they may be new since the index last refreshed, or excluded by the glob) — use File Explorer: Refresh to re-enumerate the index",
   "gvim.command.resume_live_grep_desc": "Reopen Live Grep with the prior query, match modes and scopes and search again; cached matches are never reused because file contents may have changed"
 }

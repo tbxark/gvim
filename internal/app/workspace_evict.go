@@ -79,7 +79,11 @@ func (m *workspaceManager) scheduleEviction() {
 		m.evictToCap()
 		return
 	}
-	h.Queue(cmd)
+	if !h.Queue(cmd) {
+		// The UI/cap rejected the pass. Do not drop it silently: the over-cap count is
+		// still visible, and scheduleEviction is called again on the next switch.
+		m.notifyOnUI(errors.New("workspace: eviction could not be scheduled because the workspace UI is busy; it will retry on the next workspace switch"))
+	}
 }
 
 // evictToCap evicts least-recently-focused local workspaces until the cap holds. A workspace
@@ -154,8 +158,10 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, cap int) (kept
 	// The plugin namespace of this local workspace was flushed when the switch left it (a
 	// shared runtime's SwitchWorkspaceState). Closing the model cancels any plugin UI waits
 	// it still owns, then closes terminals, documents and the runtime.
-	if m.shared != nil {
-		m.runOnUI(func() { m.shared.DropEditor(sess.rt.ed) })
+	// Quiesce BEFORE any irreversible teardown (shared-buffer ownership drop). A failed
+	// host.Do keeps the workspace materialized with its ownership intact.
+	if err := m.quiesceModelForTeardown(sess); err != nil {
+		return true, err
 	}
 	sess.rt.exit()
 	m.mu.Lock()

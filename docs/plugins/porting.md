@@ -326,13 +326,15 @@ reimplemented and is not a catalog command):
   payload is only `{error}` (no language, `error_type` or `server_command`), so the port claims a
   failure only when the active buffer is an assembly file and the message names `asm`/`assembly`;
 * "Disable Assembly LSP" is not a plugin/catalog command: before dispatch the plugin re-checks
-  that the active buffer is still an assembly file and `gvim.has("lsp")`, then runs the native
-  `lsp_disable_language` action. That command mutes the language of the **current active document
-  at the LSP port for all roots** (`SetLanguageEnabled`), not just that buffer; the plugin's check
-  only refuses a dispatch after the popup's target tab changed. gvim has no plugin API to name a
-  language explicitly. The native LSP layer owns the async result and no-server/no-port notice;
-  the plugin reports only immediate dispatch errors and never claims success. The help popup also
-  offers Start/Restart, Show LSP Status and copy-install actions;
+  that the active buffer is still an assembly file and `gvim.has("lsp")`, captures that buffer's
+  path and language, and runs the controlled native `lsp_disable_language_target` action with both.
+  The native action re-validates the same path/language is still active before muting, preventing a
+  popup/tab-switch TOCTOU from disabling another document's language; the mute itself is a
+  **root-level language mute at the LSP port for all roots** (`SetLanguageEnabled`), not just that
+  buffer. gvim has no plugin API to name a language independently of the controlled action. The
+  native LSP layer owns the async result and no-server/no-port notice; the plugin reports only
+  immediate dispatch errors and never claims success. The help popup also offers Start/Restart,
+  Show LSP Status and copy-install actions;
 * restarting after the config is written uses the native `lsp_restart` action for the active
   language, not Fresh's `restartLspForLanguage(offer.language)`;
 * the global asm-lsp config check goes through the workspace file system, so a remote/SSH workspace
@@ -351,11 +353,12 @@ reimplemented and is not a catalog command):
 Tests: `plugin/bundled/asm_lsp_test.go` covers command registration/no bindings, the offer and
 created TOML for NASM/GAS, MASM + ARM64 detection, the project/XDG-global skip rules, the never-ask
 choice, the install-help popup/clipboard/native restart, the active-tab switch refusal and
-no-LSP/no-dispatch for the native disable action, and that non-assembly buffers are ignored. There
-is **no plugin→native end-to-end integration test**: the plugin side is asserted against the fake
-host's command recorder, while the TUI nil-port/no-server guard is covered separately in
-`internal/tui`; no test loads asm_lsp into a real TUI model and observes the root-level language
-mute.
+no-LSP/no-dispatch for the controlled native disable action, and that non-assembly buffers are
+ignored. TUI integration tests cover the target action itself (captured path/language success,
+active-document and language-mismatch refusal, nil-port notice, and the old nil-port panic guard).
+There is still **no plugin→TUI end-to-end test** that loads asm_lsp into a real model and observes
+the root-level mute; the plugin side uses the fake host's command recorder and the native side is
+covered separately in `internal/tui`.
 The harness does not run the real loader's startup flush, so the tests raise `plugins_loaded`
 explicitly.
 

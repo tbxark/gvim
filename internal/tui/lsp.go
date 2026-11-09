@@ -1649,7 +1649,7 @@ func (m *Model) lspKey(msg tea.Msg) (tea.Cmd, bool) {
 
 // lspAction runs the language-server action named action. It reports whether it
 // handled the action, and the command the action starts.
-func (m *Model) lspAction(action string) (tea.Cmd, bool) {
+func (m *Model) lspAction(action string, args map[string]any) (tea.Cmd, bool) {
 	switch action {
 	case "lsp_goto_definition":
 		return m.lspAsked(lspAskDefinition), true
@@ -1690,6 +1690,10 @@ func (m *Model) lspAction(action string) (tea.Cmd, bool) {
 		return m.lspSetLanguageEnabled(true), true
 	case "lsp_disable_language":
 		return m.lspSetLanguageEnabled(false), true
+	case "lsp_disable_language_target":
+		path, _ := args["path"].(string)
+		language, _ := args["language"].(string)
+		return m.lspSetLanguageEnabledTarget(false, path, language), true
 	case "toggle_inlay_hints":
 		return m.lspToggleInlayHints(), true
 	case "completion_accept":
@@ -2039,6 +2043,33 @@ func (m *Model) lspSetLanguageEnabled(enabled bool) tea.Cmd {
 	// no server to mute, and calling a nil port would panic in the command. Report the same
 	// no-server notice the other LSP actions use instead.
 	if m.lsp.port == nil {
+		m.notice = m.lspNoServer(lang)
+		return nil
+	}
+	return m.lspSetLanguage(!enabled, lang)
+}
+
+// lspSetLanguageEnabledTarget is the controlled form for plugins that captured a target
+// buffer/language before an action popup. It mutes only when the active document is still
+// exactly that path and language; otherwise it refuses with a notice. The validation and
+// lspSetLanguage call happen in the same Update slice, so a later tab switch cannot move
+// the mute to another language.
+func (m *Model) lspSetLanguageEnabledTarget(enabled bool, path, language string) tea.Cmd {
+	doc := m.ed.Active()
+	if doc == nil || docPath(doc) == "" {
+		m.notice = noDocumentNotice
+		return nil
+	}
+	lang := m.lspLanguage(doc)
+	if path == "" || language == "" || docPath(doc) != path || lang != strings.ToLower(language) {
+		m.notice = "The active document changed; the language server was not changed"
+		return nil
+	}
+	if enabled && m.lsp.port == nil {
+		m.notice = m.lspNoServer(lang)
+		return nil
+	}
+	if !enabled && m.lsp.port == nil {
 		m.notice = m.lspNoServer(lang)
 		return nil
 	}

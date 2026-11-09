@@ -131,7 +131,10 @@ type previewMsg struct {
 	Seq     int
 	Rel     string
 	Preview Preview
+	Owner   Owner
 }
+
+func (m previewMsg) PaletteOwner() Owner { return m.Owner }
 
 // newPreview turns the head of a file into what the preview column paints. A head with
 // a NUL byte or bytes that are not UTF-8 is binary, so it has no lines; text is split
@@ -291,7 +294,7 @@ func (p *Palette) previewCmd() tea.Cmd {
 	s.reset()
 	s.rel, s.target, s.data, s.ready, s.loading = key, target, Preview{}, false, true
 	s.seq++
-	seq, read, root := s.seq, p.opts.Preview, p.opts.Root
+	seq, read, root, owner := s.seq, p.opts.Preview, p.opts.Root, p.owner
 	path := filePath(root, r.rel, p.opts.Remote)
 	if liveFile {
 		if window, ok := read.(WindowPreviewer); ok {
@@ -300,18 +303,18 @@ func (p *Palette) previewCmd() tea.Cmd {
 			return func() tea.Msg {
 				data, first, truncated, err := window.ReadWindow(ctx, path, target, previewMaxBytes)
 				if err != nil {
-					return previewMsg{Seq: seq, Rel: key, Preview: Preview{Err: err}}
+					return previewMsg{Seq: seq, Rel: key, Preview: Preview{Err: err}, Owner: owner}
 				}
-				return previewMsg{Seq: seq, Rel: key, Preview: newWindowPreview(data, first, truncated)}
+				return previewMsg{Seq: seq, Rel: key, Preview: newWindowPreview(data, first, truncated), Owner: owner}
 			}
 		}
 	}
 	return func() tea.Msg {
 		data, truncated, err := read.ReadHead(path, previewMaxBytes)
 		if err != nil {
-			return previewMsg{Seq: seq, Rel: key, Preview: Preview{Err: err}}
+			return previewMsg{Seq: seq, Rel: key, Preview: Preview{Err: err}, Owner: owner}
 		}
-		return previewMsg{Seq: seq, Rel: key, Preview: newPreview(data, truncated)}
+		return previewMsg{Seq: seq, Rel: key, Preview: newPreview(data, truncated), Owner: owner}
 	}
 }
 
@@ -328,7 +331,7 @@ func newWindowPreview(data []byte, firstLine int, truncated bool) Preview {
 // applyPreview shows a read that answers the current selection, and caches it.
 func (p *Palette) applyPreview(msg previewMsg) {
 	s := &p.preview
-	if msg.Seq != s.seq || msg.Rel != s.rel {
+	if msg.Owner != p.owner || msg.Seq != s.seq || msg.Rel != s.rel {
 		return
 	}
 	s.data, s.ready, s.loading = msg.Preview, true, false

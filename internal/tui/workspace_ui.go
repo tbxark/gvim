@@ -18,6 +18,7 @@ import (
 	"github.com/tbxark/gvim/commands"
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/list"
+	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
@@ -270,6 +271,41 @@ func (m *Model) SetWorkspacePort(p WorkspacePort) { m.workspace = p }
 
 // SetWorkspaceLabel sets the status-row label of the active workspace.
 func (m *Model) SetWorkspaceLabel(label string) { m.workspaceLabel = label }
+
+// SetWorkspaceOwner sets the durable workspace id and the unique generation of this
+// model. Every built model gets a fresh generation (including a re-created workspace
+// after eviction), so palette messages from a model that is no longer active cannot be
+// applied by the one now shown. Called by the daemon workspace manager before the model
+// can be shown; a direct launch leaves the zero owner.
+func (m *Model) SetWorkspaceOwner(workspace string, generation uint64) {
+	m.workspaceOwner = palette.Owner{Workspace: workspace, Generation: generation}
+}
+
+// WorkspaceOwner returns this model's workspace stable id and generation: the token its
+// palette stamps on async/open messages and the host uses to reject stale work. The zero
+// value is a direct launch.
+func (m *Model) WorkspaceOwner() palette.Owner { return m.workspaceOwner }
+
+// CancelTransientWork cancels asynchronous work owned by this model's overlays before
+// the daemon hides, evicts or closes the workspace: palette ranking/probe/Live Grep
+// searches and preview reads stop, and their sequence numbers are invalidated. The
+// daemon workspace manager calls it on the UI goroutine; it does no I/O and no search.
+func (m *Model) CancelTransientWork() {
+	for _, ov := range m.overlays {
+		if c, ok := ov.(interface{ CancelWork() }); ok {
+			c.CancelWork()
+		}
+	}
+	// The project-search panel keeps its previous panel after it closes, so it may not be
+	// on the overlay stack when the workspace is hidden; its replacements too.
+	if m.proj.panel != nil && m.proj.panel.Active() {
+		m.proj.panel.CancelWork()
+	}
+	if m.proj.replaceCancel != nil {
+		m.proj.replaceCancel()
+		m.proj.replaceCancel = nil
+	}
+}
 
 // workspaceSegment is the status-row item of the active workspace, if any.
 func (m *Model) workspaceSegment() (statusItem, bool) {

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -64,6 +66,7 @@ func (m *Model) openLiveGrepResume(query string, resume *palette.LiveResume) tea
 	// of them serves every search. Without the port the Buffers scope is not offered.
 	p := palette.New(palette.Options{
 		Query:           query,
+		Owner:           m.workspaceOwner,
 		Resume:          resume,
 		Root:            root,
 		Remote:          remote,
@@ -110,7 +113,7 @@ func (m *Model) terminalSources() []palette.TerminalSource {
 		}
 		total += size
 		out = append(out, palette.TerminalSource{
-			ID: tab.ID, Name: terminalSourceName(tab), Index: i, First: first, Lines: lines,
+			ID: tab.ID, Name: terminalSourceName(tab), Index: i, First: first, Total: tab.Total, Lines: lines,
 		})
 	}
 	return out
@@ -190,7 +193,17 @@ func (m *Model) openLiveGrepResultsList(msg palette.GrepExportMsg) tea.Cmd {
 		m.notice = uiText("gvim.palette.live_export_empty", "No Live Grep results to export")
 		return nil
 	}
-	rows := make([]list.Row, 0, len(msg.Hits))
+	rows := make([]list.Row, 0, len(msg.Hits)+1)
+	// The exported list must not look complete when the search was truncated or degraded:
+	// a header row states the adapter's notice (or the bare incomplete state) before the
+	// hits, and the title carries the same signal.
+	if msg.Notice != "" || msg.Truncated {
+		notice := textsafe.Clean(msg.Notice)
+		if notice == "" {
+			notice = "result is incomplete"
+		}
+		rows = append(rows, list.Row{Header: true, Left: "… " + notice})
+	}
 	for _, hit := range msg.Hits {
 		// Only the display fields are sanitized; Value keeps the raw path/index the row
 		// action opens or focuses, so a cleaned label can never redirect the target.
@@ -203,6 +216,11 @@ func (m *Model) openLiveGrepResultsList(msg palette.GrepExportMsg) tea.Cmd {
 		})
 	}
 	title := fmt.Sprintf("Live Grep: %s (%d matches)", textsafe.Clean(msg.Query), len(msg.Hits))
+	if msg.Truncated {
+		title += " · incomplete"
+	} else if msg.Notice != "" {
+		title += " · notice"
+	}
 	v := list.New(title, rows, m.listChrome(), func(_ *list.View, r list.Row) tea.Cmd {
 		kind, name, lineStr, colStr, ok := parseLiveGrepExportValue(r.Value)
 		if !ok {
@@ -220,15 +238,25 @@ func (m *Model) openLiveGrepResultsList(msg palette.GrepExportMsg) tea.Cmd {
 			m.gotoLine(line, col)
 			m.focusEditor()
 		case "t", "T":
-			// t carries the legacy dock position; T carries the stable tab id and the
-			// absolute transcript row. Prefer the id so a later close/reorder cannot
-			// focus a different terminal, and reveal the matched pager line.
+			// t carries the legacy dock position; T carries the stable tab id, the
+			// absolute transcript row and a snapshot payload (scrollback length + the
+			// expected line/neighbours). Prefer the id and validated payload so a later
+			// close/reorder/output drift cannot focus or land on a different terminal line.
 			n, _ := strconv.ParseUint(name, 10, 64)
 			if kind == "T" {
 				row, _ := strconv.Atoi(lineStr)
-				return func() tea.Msg { return palette.OpenTerminalMsg{ID: n, Row: row} }
+				payload, valid := decodeTerminalExportPayload(colStr)
+				return func() tea.Msg {
+					return palette.OpenTerminalMsg{
+						ID: n, Row: row, Total: payload.Total,
+						Text: payload.Text, Before: payload.Before, After: payload.After,
+						BeforeKnown: payload.BeforeKnown, AfterKnown: payload.AfterKnown,
+						Snapshot: true, Valid: valid,
+						Owner: m.workspaceOwner,
+					}
+				}
 			}
-			return func() tea.Msg { return palette.OpenTerminalMsg{Index: int(n)} }
+			return func() tea.Msg { return palette.OpenTerminalMsg{Index: int(n), Owner: m.workspaceOwner} }
 		}
 		return nil
 	})
@@ -241,22 +269,62 @@ func (m *Model) openLiveGrepResultsList(msg palette.GrepExportMsg) tea.Cmd {
 
 // liveGrepExportValue encodes one hit for the list row: kind, name, line and column,
 // tab separated (the path is kept as the second field, the positions as numbers).
+// terminalExportPayload is the snapshot context a terminal export row keeps so the
+// quickfix callback can validate/relocate the transcript row later, exactly like the
+// direct result. It is base64(JSON) in the value's fourth field, so tabs/newlines in
+// terminal output can never break the wire format.
+type terminalExportPayload struct {
+	Total       int    `json:"total"`
+	Text        string `json:"text"`
+	Before      string `json:"before,omitempty"`
+	After       string `json:"after,omitempty"`
+	BeforeKnown bool   `json:"before_known,omitempty"`
+	AfterKnown  bool   `json:"after_known,omitempty"`
+}
+
+// encodeTerminalExportPayload and decodeTerminalExportPayload are the wire pair for
+// terminal quickfix rows; a decode failure is the legacy row-only form.
+func encodeTerminalExportPayload(p terminalExportPayload) string {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	return base64.RawStdEncoding.EncodeToString(data)
+}
+
+func decodeTerminalExportPayload(encoded string) (terminalExportPayload, bool) {
+	data, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil {
+		return terminalExportPayload{}, false
+	}
+	var p terminalExportPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return terminalExportPayload{}, false
+	}
+	return p, true
+}
+
 func liveGrepExportValue(hit palette.GrepHit) string {
 	switch hit.Source {
 	case palette.GrepBuffers:
-		return fmt.Sprintf("b\t%d\t%d\t%d", hit.Index, hit.Line, hit.Col)
+		return fmt.Sprintf("b	%d	%d	%d", hit.Index, hit.Line, hit.Col)
 	case palette.GrepTerminals:
-		// T, stable dock tab id, absolute transcript row, terminal label. The callback
+		// T, stable dock tab id, absolute transcript row, snapshot payload. The callback
 		// focuses and positions the existing dock tab (never a file or a shell); the id
-		// survives closes/reorders. A hit without an id (old caller/test) falls back to
-		// t/index (focus only, no line position).
+		// survives closes/reorders and the payload validates/relocates the row. A hit
+		// without an id (old caller/test) falls back to t/index (focus only).
 		row := hit.TranscriptFirst + hit.Line - 1
 		if hit.TerminalID != 0 {
-			return fmt.Sprintf("T\t%d\t%d\t%s", hit.TerminalID, row, hit.Rel)
+			payload := encodeTerminalExportPayload(terminalExportPayload{
+				Total: hit.TerminalTotal, Text: hit.Text,
+				Before: hit.TerminalBefore, After: hit.TerminalAfter,
+				BeforeKnown: hit.TerminalBeforeKnown, AfterKnown: hit.TerminalAfterKnown,
+			})
+			return fmt.Sprintf("T	%d	%d	%s", hit.TerminalID, row, payload)
 		}
-		return fmt.Sprintf("t\t%d\t%s\t%d", hit.Index, hit.Rel, hit.Line)
+		return fmt.Sprintf("t	%d	%s	%d", hit.Index, hit.Rel, hit.Line)
 	default:
-		return fmt.Sprintf("f\t%s\t%d\t%d", hit.Rel, hit.Line, hit.Col)
+		return fmt.Sprintf("f	%s	%d	%d", hit.Rel, hit.Line, hit.Col)
 	}
 }
 

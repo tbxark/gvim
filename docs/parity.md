@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `64ab4ec` (the previous round's commit is folded in) plus the
-merged round-52 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
-GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-122 KiB / de 82 KiB / both 205 KiB, git diff --check). Final full
+Last verified: 2026-11-09, tree commit `52a1ac0` (the previous round's commit is folded in) plus the
+merged round-53 work. Static gates PASS (Lead, all writes stopped; default GOCACHE: build,
+CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with
+catalogue heap en 123 KiB / de 82 KiB / both 206 KiB, git diff --check, gofmt clean). Final full
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r52-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-52 tests/diff
+`/tmp/gvim-r53-final6.log`). The audit ran build/gofmt/i18n_check plus targeted round-53 tests/diff
 review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
 real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
@@ -1514,6 +1514,87 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-53 outcome (2026-11-09, merged working tree on `52a1ac0`).** Five slices landed: remote
+Live Grep/project partial-result and incomplete-notice handling; terminal transcript row validation and
+export payload; workspace source-routed async ownership with invalidated/cancelable host calls; the final
+controls-only Live Grep Resume state; and the asm_lsp target-bound Disable action. Static gates pass;
+final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL (log
+`/tmp/gvim-r53-final6.log`). The audit read the diff and ran targeted tests; the Lead ran the full suite.
+**Remote partial results / incomplete notices (item 285).** A remote project tool that prints matches and
+then exits >1 now has its stdout merged by `runBatched` (Code/Truncated recorded) and parsed by the batch
+searcher; the Done batch carries the error while the already-found files remain visible in the panel.
+Live Grep converts that result to hits + a "stopped early" notice, and the widened Ignored scan keeps
+stdout hits on exit>1 too (exit1/no matches stays empty; no hits keeps the hard error). A tool output-cap
+hit on either path is carried as Truncated/Notice. `GrepResult/GrepResultMsg` carry the non-fatal
+completeness signal; the palette title marks `incomplete` and the footer shows the notice, and Alt+Q copies
+Notice/Truncated into the list title plus a leading explanation header while all accepted hits stay. The
+seq/owner guard drops a stale result so it cannot overwrite the current notice/rows. AUDITED RESIDUALS:
+the notice is footer/title chrome, not a dedicated row (long text can be truncated by the frame); the
+Ignored widened scan is one command/8 MiB and skipped directories can consume the cap; a Files tool
+failure from the authority one-shot (not a tool exit code) can still lack stdout partials; real remote
+SSH/rg/grep/permission failures are UNTESTED (R13-11/R13-23/R3-4).
+**Terminal transcript row validation / export payload (item 286).** A Live Grep terminal hit carries the
+stable dock tab ID, combined transcript row, snapshot scrollback total, expected line and its known
+neighbours. A reveal uses the recorded row only when the total is unchanged and the line/neighbours are
+unique there; after output/eviction it relocates only to a unique text+neighbour match, and refuses on
+missing/truncated/ambiguous/invalid snapshots instead of clamping onto a neighbour. An empty matched line
+is validated by its known neighbour flags, so a blank hit is not mistaken for "no snapshot". Alt+Q
+terminal rows carry the same context as base64(JSON) in the fourth field (tabs/newlines are safe); a
+malformed payload is refused, and a legacy t/index row still focuses only the tab. Stable tab IDs move
+with reorders and are never reused; stale IDs report "no longer open". AUDITED RESIDUALS: line identity is
+a text+neighbour heuristic rather than a content hash (duplicate blank/identical-neighbour lines refuse,
+which is honest); a snapshot can clamp when the transcript changed beyond recognition; the payload adds
+up to two neighbour lines per exported hit (bounded by the terminal snapshot caps); legacy Snapshot=false
+rows still use the old clamping path; real terminal host UNTESTED (R13-15).
+**Workspace source-routed async ownership (item 287).** Every built workspace model has a palette.Owner
+{stable workspace id, monotonic generation}; the host wraps commands returned by its Update/Init and by
+QueueFor at enqueue with {owner, source model}, rewraps BatchMsg subcommands, and routes a hidden warm
+model's result back to that model's Update on the UI goroutine (active model untouched; commands it starts
+are retagged). Closed models drop results and `wrapModelCmd` checks the atomic closed flag before running.
+The post-Show WindowSize replay is bound to the shown model; PostOpenFileAt carries the selected source;
+Program-level results (Quit/ClearScreen/Suspend/Interrupt/clipboard/raw/print/terminal queries) go to the
+Program only for the active source, and hidden program effects are dropped. Host calls use one sender
+goroutine and a bounded outbound queue (64): DoWithTimeout cancels a call the UI has not claimed and
+reports false (callback never ran), or waits for a started callback (true=completed); no program returns
+false. PostOpenFileAt uses the same queue with a 2 s accept bound; true means accepted, not delivered.
+QueueFor has its own 64-entry pending cap and rejects closed sources/stopped hosts. Queue/QueueFor
+return bool; the app's startPendingLaunch and scheduleEviction handle false with a visible notifyOnUI
+notice (the imported launch says to reopen the workspace; a rejected eviction pass is retried on the next
+switch). Notify is safe from any goroutine: it queues a notifyMsg through the same bounded outbound queue
+and host Update applies it on the UI goroutine (UI-callback notices use notifyOnUI); a 32-goroutine
+regression exercises it. Notify is best-effort and returns false when stopped/not ready/queue full; the
+caller may ignore that but must not retry in a loop. Close/evict quiesce through ONE UI closure:
+MarkClosed + CancelTransientWork + shared-buffer DropEditor, before the off-UI rt.exit, so a UI timeout
+leaves the workspace materialized with ownership intact. Real blocked-UI timeout and close race tests
+(normal and `-race`) cover the host. AUDITED RESIDUALS: a callback that already started has no hard
+timeout (Do/close/evict can wait indefinitely if it hangs); PostOpen accepted can still end undelivered
+if the source closes/program stops, and a hidden warm source opens without being shown; the host is single-use (stop clears pending and closes the sender, but does not reset
+senderStarted/outbound for a later program); a sender blocked in Program.Send observes stop only via the
+Program context; direct daemon Program.Send resize/open calls bypass the queue; tea.Sequence,
+tea.RequestCapability and tea.Exec callbacks are documented unsupported/active-only; arbitrary plugin
+async messages are not individually audited. Real SSH/daemon restart/large workspace races UNTESTED.
+**Controls-only Resume (item 288).** LiveResume carries only the query, match modes and scope toggles; no
+hits or selected row are captured, and restore always runs a fresh search through the normal seq guard.
+Remote Resume uses the remote root/Grep/Preview ports and re-searches under the authority rather than
+replaying cache. Project-root/config/keymap changes clear the controls; in-memory capture/restore does no
+IO on Update. The old "cached matches/selected row" comments were corrected. AUDITED RESIDUALS: selected
+row is not restored (by design); remote state/trust can change between close and Resume (hence re-search);
+no cache means no stale-hit mitigation is needed, but the Live Grep command description must stay in step.
+**asm_lsp target-bound Disable action (item 289).** The help popup re-checks the active assembly buffer and
+gvim.has("lsp"), then dispatches the controlled native `lsp_disable_language_target` with the captured
+buffer path and language. The native action re-validates the exact active path/language in the same Update
+slice before muting, so a tab/document switch between the popup choice and the action cannot mute another
+document's language; mismatches and nil ports report a notice instead of panicking. The mute is the LSP
+port's language-wide SetLanguageEnabled for all roots, not a per-buffer/project disable; the plugin never
+claims async success. The action is a TUI action, not a catalog command. AUDITED RESIDUALS: bundled
+asm_lsp tests use the fake host and there is no end-to-end plugin→native fake-LSP execution test; native
+target-action tests cover success/tab-switch/language-mismatch/nil-port; the real asm buffer's buf:language()
+and a plugin check→deferred-native window remain UNTESTED; real LSP/host UNTESTED (R13-15).
+Metrics: palette 240, settings 69 in 14 sections, bundled 31 (9 on)/22 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; i18n en 1130 / 579 per locale, 575
+KiB text, ≈665 KiB JSON, heap 123-82-206 KiB. Full suite EXIT 0 (77 packages, log /tmp/gvim-r53-
+final6.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-52 outcome (2026-11-09, merged working tree on `64ab4ec`).** Four slices landed: terminal
 stable runtime IDs + transcript-row reveal for Live Grep hits/export; remote Live Grep through the
@@ -5804,6 +5885,33 @@ for parity status.
      target-tab switch test; language-wide mute at port for all roots documented; no success claim; action
      not a catalog command. Residuals: bundled test is fake-host only (no end-to-end plugin→native fakeLSP),
      check→deferred-native active-doc window, real LSP/host UNTESTED.
+285. **Remote partial results / incomplete notices (R13-11/R13-23/R3-4).** tool exit>1 merges stdout in
+     runBatched and Done Err+Truncated; Files keeps panel files+error; Live Grep keeps hits+Notice; Ignored
+     exit>1 partial, cap Truncated; palette title/footer + Alt+Q title/header; seq/owner guard; tests. Residuals:
+     chrome-only notice/long truncation, one-command ignored cap, authority-error stdout not preserved, real
+     remote permissions UNTESTED.
+286. **Terminal row validation + export payload (R13-15).** TranscriptHit stable ID/row/total/text/known
+     neighbours; exact row only if total unchanged+unique, else unique text/neighbour relocate, refusal on
+     missing/ambiguous/invalid; blank line validated by known flags; base64(JSON) Alt+Q payload; malformed
+     refused; stable IDs. Residuals: heuristic not content hash, duplicate blanks refuse, payload two neighbour
+     lines/hit, legacy Snapshot=false clamp, real host UNTESTED.
+287. **Workspace source-route + host queue/quiesce (R13-15).** owner stable id+generation; source envelopes
+     for Update/Init/QueueFor/Batch; hidden warm delivery, closed drop/precheck; Window replay/PostOpen source;
+     Program messages active-only; single sender outbound64, Do timeout cancel-before-start/started wait, no
+     program false; PostOpen accepted; QueueFor cap64/closed/stopped with app-visible rejection handling
+     (launch notice, eviction retry next switch); Notify via bounded notifyMsg, any-goroutine safe/UI-applied,
+     best-effort false on stop/full and 32-goroutine regression; quiesce one UI closure MarkClosed+Cancel+
+     DropEditor before rt.exit; blocked-UI timeout/close race normal+-race tests. Residuals: started callback no
+     hard timeout, PostOpen accepted-not-delivered/hidden open, host single-use/stop sender/outbound, direct
+     Program.Send exceptions, Sequence/RequestCapability/Exec, arbitrary plugin async unaudited; real daemon
+     races UNTESTED.
+288. **Controls-only Live Grep Resume (R13-15).** LiveResume query/modes/scopes only; always fresh search;
+     remote ports; root/config/keymap clear; stale comments fixed. Residuals: no selected row, remote state
+     changes require re-search, command description must stay accurate.
+289. **asm_lsp target-bound Disable action (R13-15).** popup captures path/language, native
+     lsp_disable_language_target re-validates exact active doc same Update, nil-port notices, never claims async
+     success; language-wide all roots; not catalog. Residuals: no plugin→native e2e fake-LSP, real buf:language
+     and deferred-native window UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7827,29 +7935,38 @@ Round 13 recorded five open gaps:
   Tracks: terminal stable IDs/transcript reveal; remote Live Grep authority/cancel/limits/preview/open;
   controls-only Resume; asm_lsp Disable action nil guard/popup tab revalidation. Real-host checks
   remain UNTESTED. No full-parity claim.
+- **Round-53 verification (2026-11-09, merged tree on `52a1ac0`).** STATIC GATES PASS (Lead, all writes
+  stopped; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 123 KiB / de 82 KiB / both 206 KiB, git diff --check, gofmt
+  clean). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line
+  (log `/tmp/gvim-r53-final6.log`). Audit: build/gofmt/i18n_check plus targeted round-53 tests/diff review.
+  Tracks: remote partial/incomplete notices; terminal row validation/export payload; workspace source-route
+  and host queue/quiesce; controls-only Resume; asm_lsp target-bound Disable. Real-host checks remain
+  UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-52 landed terminal stable IDs/transcript reveal, remote Live Grep authority/cancel/limits,
-  controls-only Resume, asm_lsp Disable/nil guard; full suite EXIT 0 (77 packages, log /tmp/gvim-r52-
-  final.log); §5.5 is round-53/54 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host
-  checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–52 had their gate sets
-  run. Round 52 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
-  build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  122 KiB / de 82 KiB / both 205 KiB, git diff --check). Final full
+  (round-53 landed remote partial/incomplete notices, terminal row validation/export payload, workspace
+  source-route + host queue/quiesce, controls-only Resume, asm_lsp target-bound Disable; full suite EXIT 0
+  (77 packages, log /tmp/gvim-r53-final6.log); §5.5 is the next plan; TUI-only scope/genuine-equivalence
+  §4 item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–53 had their gate sets
+  run. Round 53 static gates PASS (Lead, all writes stopped; default GOCACHE: build, CGO_ENABLED=0 build,
+  GOOS=windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue
+  heap en 123 KiB / de 82 KiB / both 206 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r52-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-52 tests and
-  diff review only (no full suite); the Lead ran the full suite. Real-host verification remains
-  UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
-  save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
-  box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
-  switching, local macOS/BSD/Linux process polling, outer-terminal focus reporting, real LSP/trust
-  changes, real slangd/slang-synth, watcher host behavior, dashboard/GitHub network, Live Grep live
-  tabs/preview/export, remote Live Grep SSH/ReadRange/trust revocation, daemon/mixed-workspace extraction;
-  ~/… expansion against a local real `sh`, not a live host. Treat statuses as pointers, not proof.
+  `/tmp/gvim-r53-final6.log`. The audit ran build/gofmt/i18n_check plus targeted round-53 tests and diff
+  review only (no full suite); the Lead ran the full suite. Real-host verification remains UNTESTED rather
+  than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
+  realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts
+  policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching, local
+  macOS/BSD/Linux process polling, outer-terminal focus reporting, real LSP/trust changes, real
+  slangd/slang-synth, watcher host behavior, dashboard/GitHub network, Live Grep live
+  tabs/preview/export, workspace source-route under a real daemon/SSH race, remote partial/permission
+  results, daemon/mixed-workspace extraction; ~/… expansion against a local real `sh`, not a live host.
+  Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

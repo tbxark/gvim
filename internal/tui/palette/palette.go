@@ -109,6 +109,10 @@ type Options struct {
 	// Query is the raw query, mode prefix included. Ctrl+P opens ">" in the
 	// root; the empty query is the file mode.
 	Query string
+	// Owner is the workspace model generation started this palette. Every async result
+	// and open message carries it, so a model that is no longer active cannot consume or
+	// act on this palette's work. The zero value is a direct launch's single model.
+	Owner Owner
 	// Root is the directory the file rows are relative to. OpenFileMsg.Path is
 	// Root joined with the row's path.
 	Root string
@@ -163,13 +167,19 @@ type Options struct {
 // sent after the palette has closed.
 type RunCommandMsg struct {
 	Action string
+	Owner  Owner
 }
+
+func (m RunCommandMsg) PaletteOwner() Owner { return m.Owner }
 
 // GotoLineMsg asks the root to move the caret to a line and a column. Both are
 // 1-based, as the user typed them.
 type GotoLineMsg struct {
 	Line, Col int
+	Owner     Owner
 }
+
+func (m GotoLineMsg) PaletteOwner() Owner { return m.Owner }
 
 // OpenFileMsg asks the root to open a file. Rel is the path the Ranker returned
 // and Path is Rel joined with Options.Root. Line and Col are the 1-based position a
@@ -177,13 +187,19 @@ type GotoLineMsg struct {
 type OpenFileMsg struct {
 	Path, Rel string
 	Line, Col int
+	Owner     Owner
 }
+
+func (m OpenFileMsg) PaletteOwner() Owner { return m.Owner }
 
 // ActivateBufferMsg asks the root to activate the tab at Index, which is its
 // position in Options.Buffers.
 type ActivateBufferMsg struct {
 	Index int
+	Owner Owner
 }
+
+func (m ActivateBufferMsg) PaletteOwner() Owner { return m.Owner }
 
 // FileRankedMsg carries the file rows ranked for one file query. The palette
 // applies it only when Seq is the query it sent last, so a slow ranking of an
@@ -212,13 +228,19 @@ type FileRankedMsg struct {
 	// ProbeDone says Probed is the probe's answer (possibly empty). False means no
 	// probe ran for this result.
 	ProbeDone bool
+	Owner     Owner
 }
+
+func (m FileRankedMsg) PaletteOwner() Owner { return m.Owner }
 
 // fileTickMsg asks the palette to rank the file rows again. It is sent after
 // pollInterval while the index is loading, and it is ignored once Seq is stale.
 type fileTickMsg struct {
-	Seq int
+	Seq   int
+	Owner Owner
 }
+
+func (m fileTickMsg) PaletteOwner() Owner { return m.Owner }
 
 // rowKind says what a row does when it is chosen.
 type rowKind int
@@ -234,20 +256,28 @@ const (
 
 // row is one line of the box.
 type row struct {
-	kind     rowKind
-	name     string
-	keys     string // shortcut column, commands only
-	desc     string
-	source   string
-	disabled bool  // a command the editor state does not allow; choosing it does nothing
-	hl       []int // matched rune offsets in name, for file rows
-	action   string
-	rel      string
-	index    int
-	termID   uint64
-	termRow  int
-	line     int
-	col      int
+	kind            rowKind
+	name            string
+	keys            string // shortcut column, commands only
+	desc            string
+	source          string
+	disabled        bool  // a command the editor state does not allow; choosing it does nothing
+	hl              []int // matched rune offsets in name, for file rows
+	action          string
+	rel             string
+	index           int
+	termID          uint64
+	termRow         int
+	termTotal       int
+	termText        string
+	termBefore      string
+	termAfter       string
+	termSnapshot    bool
+	termValid       bool
+	termBeforeKnown bool
+	termAfterKnown  bool
+	line            int
+	col             int
 	// A grep row keeps its line text apart from name, so the label can be cut around the
 	// match: text is the trimmed line, mcol the match's rune offset in it and qlen the
 	// match's length in runes.
@@ -298,6 +328,8 @@ type Palette struct {
 	shown   string
 	// live is true in Live Grep mode, which has no prefixes.
 	live bool
+	// owner is the workspace model generation this palette belongs to.
+	owner Owner
 	// preview is the file mode's file preview: its reader, cache and shown file.
 	preview previewState
 	// fileLine and fileCol are the position a "path:line[:col]" file query names, both
@@ -337,6 +369,7 @@ func New(opts Options) *Palette {
 		state:   st,
 		open:    true,
 		live:    opts.Live,
+		owner:   opts.Owner,
 		preview: previewState{},
 		grep:    newGrepState(opts),
 		chrome: chrome{
@@ -408,7 +441,7 @@ func (p *Palette) update(msg tea.Msg) tea.Cmd {
 	case previewMsg:
 		p.applyPreview(msg)
 	case fileTickMsg:
-		if msg.Seq == p.seq && p.inFile {
+		if msg.Owner == p.owner && msg.Seq == p.seq && p.inFile {
 			cmd = p.rankCmd(p.seq, p.fileText)
 		}
 	case tea.MouseClickMsg:
@@ -672,7 +705,7 @@ func (p *Palette) run(i int) tea.Cmd {
 	p.cancelGrepSearch()
 	p.preview.reset()
 	p.open = false
-	return r.command(p.opts.Root, p.opts.Remote)
+	return r.command(p.opts.Root, p.opts.Remote, p.owner)
 }
 
 // Dismiss cancels the in-flight literal-path probe. The root calls it when Esc (or
@@ -680,6 +713,19 @@ func (p *Palette) run(i int) tea.Cmd {
 func (p *Palette) Dismiss() {
 	p.cancelProbe()
 	p.cancelGrepSearch()
+	p.preview.reset()
+}
+
+// CancelWork cancels the asynchronous work this palette started when its workspace model
+// stops being active (switch, eviction, close). It invalidates sequence-numbered results,
+// cancels the literal-path probe and the Live Grep search context, and drops the preview
+// read, so the model keeps no carried-over loading state. It is O(open overlays) and is
+// called on the UI goroutine, never from Update's I/O path.
+func (p *Palette) CancelWork() {
+	p.seq++
+	p.cancelProbe()
+	p.cancelGrepSearch()
+	p.preview.seq++
 	p.preview.reset()
 }
 
@@ -809,6 +855,7 @@ func (p *Palette) requery() tea.Cmd {
 // it is now. The result comes back as a FileRankedMsg. It returns nil when no
 // Ranker is wired, and the file mode then keeps the loading row.
 func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
+	owner := p.owner
 	if p.opts.Ranker == nil {
 		return nil
 	}
@@ -881,7 +928,7 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 			list = withProbePaths(list, probed)
 		}
 		matches := rk.Rank(text, list, fileLimit)
-		return FileRankedMsg{Seq: seq, Text: text, Matches: matches, Loading: loading, ErrText: errText, Truncated: truncated, Notice: notice, Probed: probed, ProbeDone: probeDone}
+		return FileRankedMsg{Seq: seq, Text: text, Matches: matches, Loading: loading, ErrText: errText, Truncated: truncated, Notice: notice, Probed: probed, ProbeDone: probeDone, Owner: owner}
 	}
 }
 
@@ -913,9 +960,10 @@ func withProbePaths(list, probes []string) []string {
 // was still loading asks for another ranking after pollInterval, so the rows
 // follow the index without a key press.
 func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
-	// A ranking/probe result is shown only when it is the current query: the seq is
-	// the palette's latest and the text is the path this result ranked.
-	if msg.Seq != p.seq || !p.inFile || msg.Text != p.fileText {
+	// A ranking/probe result is shown only when it belongs to this workspace-model
+	// generation and is the current query: the seq is the palette's latest and the text
+	// is the path this result ranked.
+	if msg.Owner != p.owner || msg.Seq != p.seq || !p.inFile || msg.Text != p.fileText {
 		return nil
 	}
 	if msg.ProbeDone {
@@ -931,7 +979,7 @@ func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
 		return nil
 	}
 	seq := msg.Seq
-	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return fileTickMsg{Seq: seq} })
+	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return fileTickMsg{Seq: seq, Owner: p.owner} })
 }
 
 // rowsFor returns the rows the query matches in its command, line or buffer
@@ -1063,27 +1111,33 @@ func filePath(root, rel string, remote bool) string {
 
 // command returns the message that runs the row, or nil for a row that only
 // informs.
-func (r row) command(root string, remote bool) tea.Cmd {
+func (r row) command(root string, remote bool, owner Owner) tea.Cmd {
 	var msg tea.Msg
 	switch r.kind {
 	case rowCommand:
-		msg = RunCommandMsg{Action: r.action}
+		msg = RunCommandMsg{Action: r.action, Owner: owner}
 	case rowFile:
-		msg = OpenFileMsg{Path: filePath(root, r.rel, remote), Rel: r.rel, Line: r.line, Col: r.col}
+		msg = OpenFileMsg{Path: filePath(root, r.rel, remote), Rel: r.rel, Line: r.line, Col: r.col, Owner: owner}
 	case rowBuffer:
-		msg = ActivateBufferMsg{Index: r.index}
+		msg = ActivateBufferMsg{Index: r.index, Owner: owner}
 	case rowLine:
-		msg = GotoLineMsg{Line: r.line, Col: r.col}
+		msg = GotoLineMsg{Line: r.line, Col: r.col, Owner: owner}
 	case rowGrep:
 		switch r.grepSource {
 		case GrepBuffers:
-			msg = OpenBufferLineMsg{Index: r.index, Line: r.line, Col: r.col}
+			msg = OpenBufferLineMsg{Index: r.index, Line: r.line, Col: r.col, Owner: owner}
 		case GrepTerminals:
 			// A terminal hit focuses the open dock tab; it opens no file and starts no
 			// shell (the transcript line is only the search location).
-			msg = OpenTerminalMsg{ID: r.termID, Row: r.termRow, Index: r.index}
+			msg = OpenTerminalMsg{
+				ID: r.termID, Row: r.termRow, Index: r.index,
+				Total: r.termTotal, Text: r.termText, Before: r.termBefore, After: r.termAfter,
+				Snapshot: r.termSnapshot, Valid: r.termValid,
+				BeforeKnown: r.termBeforeKnown, AfterKnown: r.termAfterKnown,
+				Owner: owner,
+			}
 		default:
-			msg = OpenLineMsg{Path: filePath(root, r.rel, remote), Line: r.line, Col: r.col}
+			msg = OpenLineMsg{Path: filePath(root, r.rel, remote), Line: r.line, Col: r.col, Owner: owner}
 		}
 	default:
 		return nil

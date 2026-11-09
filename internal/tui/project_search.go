@@ -105,6 +105,7 @@ func (m *Model) openProjectSearch(git bool) tea.Cmd {
 	}
 	p := searchpanel.New(searchpanel.Options{
 		Root:         root,
+		Owner:        m.workspaceOwner,
 		Files:        m.files,
 		OpenFiles:    m.projectOpenFiles(),
 		Current:      m.projectCurrentFile(),

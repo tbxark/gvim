@@ -912,21 +912,23 @@ directories are filtered out defensively. Buffers and Terminals are
 searched from the editor's in-memory snapshots after the file hits (no PTY, no
 process, no local file read); they are client-side text, not remote files.
 
-The palette implements the optional `ContextGrepper` seam (`SearchContext(ctx, req)`) and
-cancels the active remote search when the query/scopes are superseded, the palette is
-dismissed/closed, a row is chosen, or an export opens; the Grep result itself keeps no
-cache. The Alt+Q quickfix export carries the palette's `Remote` flag, so its file rows join
-the remote root with `/` and open through the remote document access (never the local
-filepath path).
-
-The palette's optional `ContextGrepper` seam gives one search a cancellable context:
-changing the query, turning a scope, dismissing the palette or choosing a row cancels
-the in-flight remote search, which stops the streaming project search between records
-and closes the authority command's context (the same cancellation the project-search
-panel uses). The search is also bounded by the palette's 100-row result cap and the
-project-search limits; a capped/truncated remote result is not presented with more
-rows than the palette cap (Live Grep has no notice row for the project-search
-degradation notices — recorded residual).
+The palette implements the optional `ContextGrepper` seam
+(`SearchContext(ctx, req) (GrepResult, error)`) and cancels the active remote search when
+the query/scopes are superseded, the palette is dismissed/closed, a row is chosen, or an
+export opens: the streaming project search stops between records and the authority
+command's context closes. The search is bounded by the palette's 100-row result cap and
+the project-search limits. The result carries the project-search `Notice` and
+`Truncated` signal (and an Ignored-scan output-cap notice) alongside the successful hits;
+the palette paints the hits and shows the incomplete/degradation state in its title
+(`… · incomplete`) and footer; a tool exit>1 with printed stdout is parsed as a partial
+result (the project adapter merges that stdout before the Done error), so candidates found
+before the failure are not silently dropped, while the seq guard drops a late result from an older
+query instead of overwriting the new query's notice or rows. The Grep result itself keeps
+no cache. The Alt+Q quickfix export carries the palette's `Remote` flag and the result's
+`Notice`/`Truncated`, so its file rows join the remote root with `/` and open through the
+remote document access (never the local filepath path), and a degraded/capped result is
+marked `· incomplete` in the list title with a leading notice header instead of looking
+complete.
 
 Remote row preview uses `remotePreviewer.ReadWindow`: a cancellable authority
 `ReadRange` scan (64 KiB chunks, 8 MiB scan budget, five lines before the hit, twelve

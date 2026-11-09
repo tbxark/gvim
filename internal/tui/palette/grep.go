@@ -71,6 +71,10 @@ type TerminalSource struct {
 	// First is the combined scrollback row of Lines[0] (prior transcript, then
 	// history, then screen), so a matched line can be revealed in the pager.
 	First int
+	// Total is the terminal's scrollback length at snapshot time. A reveal compares it
+	// with the current length and the expected line/context: when they no longer line
+	// up, only a unique content match relocates, otherwise the hit refuses honestly.
+	Total int
 	Lines []string // the transcript window, oldest first
 }
 
@@ -123,7 +127,7 @@ func boundTerminalSources(src []TerminalSource) []TerminalSource {
 			break
 		}
 		total += bytes
-		out = append(out, TerminalSource{ID: term.ID, Name: term.Name, Index: term.Index, First: term.First + start, Lines: lines})
+		out = append(out, TerminalSource{ID: term.ID, Name: term.Name, Index: term.Index, First: term.First + start, Total: term.Total, Lines: lines})
 	}
 	if len(out) == 0 {
 		return nil
@@ -182,16 +186,37 @@ type GrepHit struct {
 	// TranscriptFirst is the combined scrollback row of the terminal hit's snapshot
 	// window; Line is relative to it, so Line+First-1 is the absolute pager row.
 	TranscriptFirst int
+	// TerminalTotal is the terminal's scrollback length at snapshot time, and
+	// TerminalBefore/TerminalAfter are the hit's snapshot neighbours (empty at the
+	// window edge). A reveal uses them to validate/relocate the snapshot row so new
+	// output or eviction never lands on the wrong transcript line.
+	TerminalTotal  int
+	TerminalBefore string
+	TerminalAfter  string
+	// TerminalSnapshot marks a hit that carries the snapshot validation payload (all
+	// app-produced terminal hits); TerminalValid is false for a malformed export
+	// payload, which the reveal refuses instead of clamping. Before/AfterKnown tell an
+	// empty expected line/neighbour from "no neighbour at the window edge" (an empty
+	// matched line is a real blank-line hit).
+	TerminalSnapshot    bool
+	TerminalValid       bool
+	TerminalBeforeKnown bool
+	TerminalAfterKnown  bool
 }
 
 // GrepResultMsg carries the hits of one Live Grep query. The palette applies it only
 // when Seq is the query it sent last. Text is the query that was searched.
 type GrepResultMsg struct {
-	Seq  int
-	Text string
-	Hits []GrepHit
-	Err  error
+	Seq       int
+	Text      string
+	Hits      []GrepHit
+	Err       error
+	Notice    string // non-fatal degradation/cap explanation from the adapter
+	Truncated bool   // the adapter's result is incomplete
+	Owner     Owner
 }
+
+func (m GrepResultMsg) PaletteOwner() Owner { return m.Owner }
 
 // LiveResume is the state Resume restores: the previous query, match modes and scope
 // toggles. It deliberately carries no hits or selected row: a hit's file contents may
@@ -208,7 +233,10 @@ type LiveResume struct {
 type OpenLineMsg struct {
 	Path      string
 	Line, Col int
+	Owner     Owner
 }
+
+func (m OpenLineMsg) PaletteOwner() Owner { return m.Owner }
 
 // OpenBufferLineMsg asks the root to activate the tab at Index and put the caret at
 // Line and Col, both 1-based. It is sent when a live grep row of an open buffer is
@@ -216,7 +244,10 @@ type OpenLineMsg struct {
 type OpenBufferLineMsg struct {
 	Index     int
 	Line, Col int
+	Owner     Owner
 }
+
+func (m OpenBufferLineMsg) PaletteOwner() Owner { return m.Owner }
 
 // OpenTerminalMsg asks the root to show the dock and focus the terminal tab at Index.
 // It is sent when a live grep row of a terminal transcript is chosen, after the palette
@@ -231,7 +262,25 @@ type OpenTerminalMsg struct {
 	// caller has no line (legacy).
 	Row   int
 	Index int
+	Owner Owner
+	// Total is the terminal's scrollback length at snapshot time and Text/Before/After
+	// are the expected line and its snapshot neighbours; they let the reveal validate
+	// the row and relocate it by unique content after output/eviction (or refuse).
+	Total  int
+	Text   string
+	Before string
+	After  string
+	// Snapshot marks a hit whose stored row must be validated before revealing (all
+	// app-produced terminal hits). Valid false (a malformed quickfix payload) is
+	// refused honestly. BeforeKnown/AfterKnown keep blank neighbours distinct from a
+	// window edge, so an empty matched line is validated, not clamped.
+	Snapshot    bool
+	Valid       bool
+	BeforeKnown bool
+	AfterKnown  bool
 }
+
+func (m OpenTerminalMsg) PaletteOwner() Owner { return m.Owner }
 
 // GrepExportMsg asks the root to show the last Live Grep result set as its
 // quickfix-style list, after the palette has closed. Root is the local workspace root
@@ -245,7 +294,15 @@ type GrepExportMsg struct {
 	// Remote says Root/Rel are remote slash-separated paths: the root list must join and
 	// open them through the remote document access, never the local filepath/open path.
 	Remote bool
+	// Notice/Truncated carry the search's non-fatal completeness signal into the export
+	// list, so the quickfix view says why it is incomplete instead of presenting a bounded
+	// result as complete.
+	Notice    string
+	Truncated bool
+	Owner     Owner
 }
+
+func (m GrepExportMsg) PaletteOwner() Owner { return m.Owner }
 
 // liveExportCap is the independent bound on rows a Live Grep quickfix export hands to
 // the list overlay; the palette's result cap is smaller today, but the export stays
@@ -296,6 +353,10 @@ type grepState struct {
 	// hits keeps the raw result for the Alt+Q quickfix export; they are not used by
 	// Resume (which always searches again).
 	hits []GrepHit
+	// notice/truncated are the last result's non-fatal completeness signal, shown in
+	// the palette chrome; they are replaced only by a result whose seq is current.
+	notice    string
+	truncated bool
 	// cancel stops the in-flight ContextGrepper search when a newer query/scope
 	// supersedes it or the palette closes. Nil for the plain Grepper seam.
 	cancel context.CancelFunc
@@ -393,13 +454,13 @@ func (p *Palette) exportGrep() tea.Cmd {
 	if len(hits) > liveExportCap {
 		hits = hits[:liveExportCap]
 	}
-	query, root := p.grep.text, p.opts.Root
+	query, root, owner := p.grep.text, p.opts.Root, p.owner
 	p.open = false
 	p.cancelProbe()
 	p.cancelGrepSearch()
 	p.preview.reset()
 	return func() tea.Msg {
-		return GrepExportMsg{Root: root, Query: query, Hits: hits, Total: total, Remote: p.opts.Remote}
+		return GrepExportMsg{Root: root, Query: query, Hits: hits, Total: total, Remote: p.opts.Remote, Notice: p.grep.notice, Truncated: p.grep.truncated, Owner: owner}
 	}
 }
 
@@ -410,6 +471,7 @@ func (p *Palette) refreshGrep() tea.Cmd {
 	p.seq++
 	p.grep.done = false
 	p.grep.hits = nil
+	p.grep.notice, p.grep.truncated = "", false
 	return p.grepCmd(p.seq, p.input.Value())
 }
 
@@ -421,10 +483,14 @@ func (p *Palette) liveQuery(seq int, text string) tea.Cmd {
 		p.cancelGrepSearch()
 		p.rows = nil
 		p.grep.done, p.grep.count, p.grep.err, p.grep.text = false, 0, nil, ""
+		p.grep.notice, p.grep.truncated = "", false
 		p.grep.hits = nil
 		p.syncSize()
 		p.nav.Select(0)
 		return nil
+	}
+	if text != p.grep.text {
+		p.grep.notice, p.grep.truncated = "", false
 	}
 	return p.grepCmd(seq, text)
 }
@@ -439,6 +505,7 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 	if p.opts.Grep == nil || text == "" {
 		return nil
 	}
+	owner := p.owner
 	g, files, root := p.opts.Grep, p.opts.Files, p.opts.Root
 	buffers, terminals, query, sources := p.opts.SourceBuffers, p.opts.SourceTerminals, p.grep.opts, p.grep.sources
 	contextGrep, cancellable := g.(ContextGrepper)
@@ -455,14 +522,14 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 		if sources.Terminals {
 			req.Terminals = boundTerminalSources(terminals)
 		}
-		var hits []GrepHit
+		var result GrepResult
 		var err error
 		if cancellable {
-			hits, err = contextGrep.SearchContext(ctx, req)
+			result, err = contextGrep.SearchContext(ctx, req)
 		} else {
-			hits, err = g.Search(req)
+			result.Hits, err = g.Search(req)
 		}
-		return GrepResultMsg{Seq: seq, Text: text, Hits: hits, Err: err}
+		return GrepResultMsg{Seq: seq, Text: text, Hits: result.Hits, Err: err, Notice: result.Notice, Truncated: result.Truncated, Owner: owner}
 	}
 	if cancellable {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -476,11 +543,12 @@ func (p *Palette) grepCmd(seq int, text string) tea.Cmd {
 // goes to the top when the text changed. The result also sets the count the title
 // shows.
 func (p *Palette) applyGrep(msg GrepResultMsg) tea.Cmd {
-	if msg.Seq != p.seq || !p.live {
+	if msg.Owner != p.owner || msg.Seq != p.seq || !p.live {
 		return nil
 	}
 	p.grep.done, p.grep.text, p.grep.err = true, msg.Text, msg.Err
 	p.grep.cancel = nil
+	p.grep.notice, p.grep.truncated = msg.Notice, msg.Truncated
 	p.grep.count = len(msg.Hits)
 	// Keep the hits for the quickfix export (Alt+Q); rows are display-only and lose
 	// the raw positions/identity the export needs.
@@ -541,7 +609,24 @@ func (p *Palette) liveTitle() string {
 	if p.grep.count >= grepLimit {
 		mark = "+"
 	}
-	return fmt.Sprintf("%s · %d%s matches", title, p.grep.count, mark)
+	out := fmt.Sprintf("%s · %d%s matches", title, p.grep.count, mark)
+	if p.grep.truncated {
+		out += " · incomplete"
+	}
+	return out
+}
+
+// liveCompletenessHint is the non-fatal completeness signal shown on the Live Grep footer:
+// the adapter's degradation/cap notice when present, or a short "result incomplete" for a
+// truncated result without a longer explanation. The successful hits stay on screen.
+func (p *Palette) liveCompletenessHint() string {
+	if p.grep.notice != "" {
+		return p.grep.notice
+	}
+	if p.grep.truncated {
+		return "result incomplete"
+	}
+	return ""
 }
 
 // toolbarSeg is one segment of the Live Grep toolbar: the key, the label, the state, and
@@ -634,6 +719,12 @@ func grepRows(msg GrepResultMsg) []row {
 			r.grepSource = GrepTerminals
 			r.index = h.Index
 			r.termID = h.TerminalID
+			r.termTotal = h.TerminalTotal
+			r.termText = h.Text
+			r.termBefore, r.termAfter = h.TerminalBefore, h.TerminalAfter
+			r.termSnapshot = h.TerminalSnapshot
+			r.termValid = h.TerminalValid
+			r.termBeforeKnown, r.termAfterKnown = h.TerminalBeforeKnown, h.TerminalAfterKnown
 			if h.Line > 0 {
 				r.termRow = h.TranscriptFirst + h.Line - 1
 			}

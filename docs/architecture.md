@@ -578,6 +578,77 @@ still loads unchanged.
   tab (the model asks the dock to find a tab by the launch's Source and focuses it instead
   of duplicating), because registry v1 has no per-session workspace identity or
   initial-launch record yet.
+- **Workspace-scoped async ownership (landed safety slice).** Every built workspace model
+  gets a palette.Owner {workspace stable id, model generation}; the app's workspace
+  manager increments the generation for every build (a re-created workspace after eviction
+  gets a new one, a warm switch keeps its own). Palette async results/open actions and
+  project-search async/root-facing messages carry the owner; the active model drops a
+  mismatched nonzero owner before any overlay/action sees it, and the search panel also
+  owner-checks its own result messages. This prevents stale GrepResult/preview/fileTick/
+  OpenTerminalMsg/searchpanel results from colliding with the newly shown model's seq or
+  model-local dock tab id. A zero owner means a direct launch (one model) or a hand-built
+  legacy/test action; generated messages are never zero in a daemon model. The manager calls
+  Model.CancelTransientWork on the UI goroutine before a switch (beginSelect), for a
+  non-active close and for eviction; the palette cancels its probe, Live Grep context and
+  preview read, the project-search panel cancels its stream/preview (Panel.CancelWork) and
+  the root cancels its kept replacement. Dock PTY waits are never canceled: a warm
+  workspace must keep receiving output/exit.
+  The WorkspaceHost source-route wraps commands returned by a model's Update/Init and by
+  QueueFor at enqueue with {owner, source model}; a BatchMsg is re-wrapped per subcommand,
+  and the post-Show WindowSize replay is bound to the model that was shown. A hidden warm
+  model's result is delivered back to that model's Update on the UI goroutine (active model
+  untouched; commands it starts are re-tagged with the same source); a closed model's
+  result is discarded, and a wrapped command checks the source's atomic closed flag BEFORE
+  running. Program-level results (tea.Quit/ClearScreen/Suspend/Interrupt, clipboard, raw/
+  print, terminal queries) are handed to the Program for the active source; a hidden
+  source's program effect is dropped. hostCallMsg/Do is a separate cancelable handshake:
+  a timeout before the UI claims the call marks it canceled so the queued fn can never run
+  later; if the call already started, Do waits for it to finish rather than returning
+  while it mutates state. Its bool is a completion guarantee: false means the callback
+  never ran, true means it ran to completion (DoWithTimeout lets tests use a short bound).
+  Calls go through one host-owned sender goroutine and a bounded queue (64), never a
+  goroutine per call: a blocked UI costs one sender plus the queue, and a full queue makes
+  Do fail fast (callback never ran). A timed-out queued call is canceled and skipped when
+  the UI eventually drains it; a call already started is waited for. PostOpenFileAt uses
+  the same bounded queue with a 2 s default bound (PostOpenFileAtWithTimeout for other
+  bounds): it returns false instead of blocking a socket goroutine, and the app reports
+  that the open was not delivered. A true PostOpenFileAt only means ACCEPTED into the
+  bounded queue, not delivered or opened: the program may stop first. The sender prefers
+  the stop channel when both it and the queue are ready, so a stopped host does not start
+  another send. The WorkspaceHost is single-use: one program/sender for its lifetime; after
+  stop, Do/PostOpenFileAt/QueueFor cannot deliver (QueueFor requires the host and a source
+  model, rejects a stopped host or a closed source, and is capped at 64 pending commands;
+  pending work is drained only by a later Update/Show). Rejected imported-terminal launches
+  and rejected eviction passes are reported with a visible notice (the eviction pass retries
+  on the next switch) rather than silently dropped. host.Notify is safe from any goroutine:
+  it queues a bounded notifyMsg through the same outbound sender (never Do or a model write
+  from the caller); host Update applies it on the UI goroutine, and a full/stopped queue
+  makes Notify return false (notices are best-effort). UI callbacks that need a guaranteed
+  notice use manager notifyOnUI, which writes the active model directly. DoWithTimeout false
+  guarantees the callback never ran; true guarantees it completed. A callback that already
+  started has no hard timeout: Do waits for it even past the nominal bound.
+  Teardown uses ONE UI closure: quiesceModelForTeardown runs MarkClosed +
+  CancelTransientWork + shared-buffer DropEditor atomically through host.Do, BEFORE the
+  off-UI runtime teardown. If the UI does not answer, the cancelable host call never runs,
+  the workspace stays fully materialized with its ownership intact, and close/evict report
+  the failure (tests cover both). An already-starting command can finish its side effect,
+  but its result is dropped by the closed check. UI callbacks never use the blocking
+  notify path: applyCommit's eviction-refusal notice and enqueueCapture's snapshot-failure
+  notice call notifyOnUI (direct active-model notice), avoiding a self-Do freeze.
+  Explicit exceptions: tea.Sequence is unsupported (its unexported sequenceMsg runs
+  subcommands outside the envelope; gvim has no usage, and hidden subcommands would lose
+  lifecycle work, so no unsafe reflection is used); tea.RequestCapability is unsupported
+  (its response is untagged and cannot be correlated to a hidden request); tea.Exec's
+  request is program-level and active-source-only (hidden callbacks are dropped);
+  hostCallMsg is app-internal UI work and is never model-routed. Untagged external
+  program.Send/program-delivered resize/open messages stay active-targeted by design; the
+  manager's internal PostOpenFileAt is target-bound. LSP/watcher routing is structural
+  rather than covered by a dedicated regression; arbitrary plugin async messages are not
+  individually audited. This is not cross-workspace Live Grep: there is still no read-only
+  WorkspaceSearch port, workspace-scoped hit identity for other workspaces, or
+  remote-authority-aware open routing, and those remain prerequisites for the
+  All-workspaces scope.
+
 - **Cross-workspace shared buffers (landed #19b bounded slice).** A daemon's local
   workspaces share one `editor.SharedBuffers` registry (`internal/app/workspace_shared.go`, created once by
   the workspace manager and copied into every workspace build's editor options; a direct
@@ -795,15 +866,21 @@ still loads unchanged.
   and the authority command. Row preview uses the remote previewer's cancellable
   `ReadRange` window (64 KiB chunks, 8 MiB scan budget, 5 lines before, 12 lines
   maximum, 16 KiB output) and the local head reader is never used for a remote row; a
-  hit opens the remote absolute path through the existing remote document access. No
-  remote result cache survives Resume: the palette restores controls only and always
-  re-searches, and a reconnect/root change rebuilds the remote index/ports (a
-  disconnected authority reports its error). Residuals: Live Grep has no notice row for
-  the project-search degradation/truncation notices, so a capped remote result is only
-  best-effort; the Ignored wide scan is bounded but can hit the per-command cap; the
-  remote preview window is a bounded line scan (deep hits can be unavailable past the
-  8 MiB prefix budget), not a remote buffer; and Buffers/Terminals are client-side text,
-  not remote host state.
+  hit opens the remote absolute path through the existing remote document access. The
+  project-search degradation/cap Notice and Truncated flag travel with the successful
+  hits through `GrepResult`/`GrepResultMsg`; a tool exit>1 keeps the stdout candidates
+  parsed before the failure and marks the result incomplete (the Done error still says
+  why); the palette title marks `incomplete` and its
+  footer shows the notice, the Alt+Q export list carries the same signal in its title and
+  a leading header row, and the seq guard drops a late result from an older query so it
+  cannot overwrite the current notice/rows. No remote result cache survives Resume:
+  the palette restores controls only and always re-searches, and a reconnect/root change
+  rebuilds the remote index/ports (a disconnected authority reports its error).
+  Residuals: the notice is a footer/title chrome string, not a separate row (a long
+  notice can be truncated by the frame); the Ignored wide scan is bounded but can hit
+  the per-command cap; the remote preview window is a bounded line scan (deep hits can be
+  unavailable past the 8 MiB prefix budget), not a remote buffer; and Buffers/Terminals
+  are client-side text, not remote host state.
 - **Remote data surfaces: git marks, quick-open preview, finder refresh (landed).**
   The remote explorer's git letters come from a porcelain-v1 NUL-separated git status run
   through the authority one-shot with the remote workspace cwd and the remote captured

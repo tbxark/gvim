@@ -205,14 +205,21 @@ func searchTerminals(terms []palette.TerminalSource, q search.Query, limit int, 
 			}
 			last = m.Start.Line
 			hits = append(hits, palette.GrepHit{
-				Rel:             label,
-				Line:            m.Start.Line + 1,
-				Col:             m.Start.Col + 1,
-				Text:            strings.TrimRight(b.Line(m.Start.Line), "\r"),
-				Source:          palette.GrepTerminals,
-				Index:           src.Index,
-				TerminalID:      src.ID,
-				TranscriptFirst: src.First,
+				Rel:                 label,
+				Line:                m.Start.Line + 1,
+				Col:                 m.Start.Col + 1,
+				Text:                strings.TrimRight(b.Line(m.Start.Line), "\r"),
+				Source:              palette.GrepTerminals,
+				Index:               src.Index,
+				TerminalID:          src.ID,
+				TranscriptFirst:     src.First,
+				TerminalTotal:       src.Total,
+				TerminalBefore:      terminalContextBefore(src.Lines, m.Start.Line),
+				TerminalAfter:       terminalContextAfter(src.Lines, m.Start.Line),
+				TerminalSnapshot:    true,
+				TerminalValid:       true,
+				TerminalBeforeKnown: m.Start.Line > 0,
+				TerminalAfterKnown:  m.Start.Line+1 < len(src.Lines),
 			})
 			if len(hits) >= limit {
 				return hits, nil
@@ -220,6 +227,24 @@ func searchTerminals(terms []palette.TerminalSource, q search.Query, limit int, 
 		}
 	}
 	return hits, nil
+}
+
+// terminalContextBefore/After return the snapshot neighbours of the terminal hit at
+// line index (0-based), or "" at the window edge. They let a reveal validate the
+// snapshot row after output/eviction and disambiguate duplicate lines; the strings are
+// copied into the hit, so the export can carry them too.
+func terminalContextBefore(lines []string, index int) string {
+	if index <= 0 || index > len(lines) {
+		return ""
+	}
+	return lines[index-1]
+}
+
+func terminalContextAfter(lines []string, index int) string {
+	if index < 0 || index+1 >= len(lines) {
+		return ""
+	}
+	return lines[index+1]
 }
 
 // ignoredFiles lists the files of root including the hidden and .gitignore-matched

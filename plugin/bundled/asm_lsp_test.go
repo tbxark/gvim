@@ -206,6 +206,11 @@ func TestAsmLspInstallHelpAndActions(t *testing.T) {
 		o.SetFile("/work/.asm-lsp.toml", "assembler = \"nasm\"\n")
 	})
 	r.host.LSP().Enabled = true
+	for _, b := range r.host.Buffers {
+		if b.Info.Path == "/work/a.asm" {
+			b.Info.Language = "asm"
+		}
+	}
 	r.h.Emit(pluginapi.Event{Name: "lsp_server_error", Data: map[string]any{"error": "asm-lsp: server not found"}})
 	if got := lastNoticeText(r.h); !strings.Contains(got, "Assembly LSP server not found") {
 		t.Fatalf("status = %q", got)
@@ -248,7 +253,7 @@ func TestAsmLspInstallHelpAndActions(t *testing.T) {
 	r.host.SetActive(notes)
 	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
 	for _, action := range r.host.Cmd().Ran() {
-		if action == "lsp_disable_language" {
+		if action == "lsp_disable_language" || action == "lsp_disable_language_target" {
 			t.Fatalf("disable dispatched for non-assembly active buffer: commands %v", r.host.Cmd().Ran())
 		}
 	}
@@ -263,13 +268,16 @@ func TestAsmLspInstallHelpAndActions(t *testing.T) {
 	ov = asmPopup(r.h)
 	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
 	found = false
-	for _, action := range r.host.Cmd().Ran() {
-		if action == "lsp_disable_language" {
+	for _, call := range r.host.Cmd().Calls {
+		if call.Action == "lsp_disable_language_target" {
 			found = true
+			if call.Args["path"] != "/work/a.asm" || call.Args["language"] != "asm" {
+				t.Fatalf("disable target args = %+v, want the active path/language", call.Args)
+			}
 		}
 	}
 	if !found {
-		t.Fatalf("commands = %v, want lsp_disable_language", r.host.Cmd().Ran())
+		t.Fatalf("commands = %v, want lsp_disable_language_target", r.host.Cmd().Ran())
 	}
 	if strings.Contains(strings.Join(r.h.NoticeTexts(), "\n"), "Assembly LSP disabled") {
 		t.Fatalf("plugin falsely claimed disable success: %v", r.h.NoticeTexts())
@@ -292,7 +300,7 @@ func TestAsmLspDisableWithoutLSPDoesNotDispatch(t *testing.T) {
 	}
 	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_disable_language"}})
 	for _, action := range r.host.Cmd().Ran() {
-		if action == "lsp_disable_language" {
+		if action == "lsp_disable_language" || action == "lsp_disable_language_target" {
 			t.Fatalf("disable dispatched without an LSP feature: commands %v", r.host.Cmd().Ran())
 		}
 	}

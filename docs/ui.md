@@ -204,8 +204,11 @@ root's query/modes/scopes. The command description says that it searches again.
   `Alt+U` buffers when a buffer snapshot is available, `Alt+T` terminals when the dock
   has an open terminal (on by default, matching Fresh's terminal-scrollback default),
   and `Alt+I` ignored and hidden files. The title border shows `Live Grep · N matches`
-  (or `no matches`, `error`, `N+` at the 100-row cap), and an empty box says whether
-  to type, turn a source on or that nothing matched. Live Grep's keys are answered by
+  (or `no matches`, `error`, `N+` at the 100-row cap, `· incomplete` when the remote
+  adapter reports its result is truncated), and the footer carries the adapter's
+  degradation/cap notice; an empty box says whether to type, turn a source on or that
+  nothing matched. A late result from an older query cannot overwrite the current
+  notice or rows. Live Grep's keys are answered by
   the overlay, as every overlay key is (parity §4.5), and its request carries the modes
   and scopes to the search port.
 - **Live Grep row preview** (the selected match while the result rows have the focus) follows
@@ -237,7 +240,9 @@ root's query/modes/scopes. The command description says that it searches again.
   only focuses the tab: the search transcript line is not scrolled to (terminal-hit
   focus-only residual). The list's label/right text and title are textsafe-cleaned before
   painting, but its row Value keeps the raw path or dock index, so cleaning the display can
-  never change which file/tab Enter opens or focuses. This is a list view, not a persistent quickfix stack: no
+  never change which file/tab Enter opens or focuses. The export also carries the search's
+  Notice/Truncated: its title gains `· incomplete` (or `· notice`) and a leading header row
+  states the degradation/cap reason when the result is not complete. This is a list view, not a persistent quickfix stack: no
   gvim session state outlives it. The export is bounded independently of the palette's
   100-row result cap (at most 100 rows), and a capped export shows a notice naming the
   bound. A Live Grep search with no hits does not open an empty list.
@@ -251,11 +256,18 @@ root's query/modes/scopes. The command description says that it searches again.
   resolves that tab by its **stable runtime id** and reveals the matched line in the
   read-only scrollback pager (active main-screen terminals and exited live shells;
   a restored tab without a session or a running alternate-screen program has no
-  pager and gets the honest "line cannot be located" notice). A stale id — the tab
-  closed since the search — leaves the active tab alone and shows "no longer open",
-  so a close/reorder or duplicate labels cannot focus the wrong terminal. It opens
-  no file and starts no shell; the Alt+Q export stores the same id+row and locates
-  the same line while its list stays open. The scope starts on when a dock snapshot
+  pager and gets the honest "line cannot be located" notice). The stored snapshot row
+  is validated, not trusted: the hit carries the expected line text, its snapshot
+  neighbours and the scrollback length, so new output/scrollback eviction relocates
+  the line only by a unique content match (an empty matched line is a real blank-line
+  hit, validated/relocated by its known neighbours; a malformed snapshot payload is
+  refused, not clamped); a missing, truncated or ambiguous line refuses with the same
+  honest notice instead of jumping to the wrong row. A stale
+  id — the tab closed since the search — leaves the active tab alone and shows "no
+  longer open", so a close/reorder or duplicate labels cannot focus the wrong
+  terminal. It opens no file and starts no shell; the Alt+Q export stores the same
+  id+row+snapshot payload and validates/relocates identically while its list stays
+  open. The scope starts on when a dock snapshot
   exists (Fresh's default) and can be turned off for the session with `Alt+T`.
   **Residual:** only the open dock's newest transcript window is searched. gvim has no
   Fresh-style per-terminal backing files (`<data>/terminals/*.txt`), so a closed

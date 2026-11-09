@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/palette"
 )
 
 // typedKey is a printable key press.
@@ -1463,5 +1464,67 @@ func TestStalePreviewResultIsDropped(t *testing.T) {
 		if line == "stale" {
 			t.Fatal("a stale preview result was applied")
 		}
+	}
+}
+
+// TestCancelWorkStopsTheStreamAndPreviewWithoutClosing: the daemon workspace host calls
+// this when the model is hidden; background search/preview work must stop and its late
+// results be invalidated, but the panel stays open for the model's return.
+func TestCancelWorkStopsTheStreamAndPreviewWithoutClosing(t *testing.T) {
+	p := New(Options{Root: "/w"})
+	stream := make(chan struct{})
+	p.searchCancel = stream
+	previewCanceled := false
+	p.previewCancel = func() { previewCanceled = true }
+	p.preview.loading = true
+	p.preview.seq = 3
+	p.loading = true
+	p.open = true
+	beforeSeq := p.seq
+
+	p.CancelWork()
+	if p.searchCancel != nil || p.batchCh != nil {
+		t.Fatal("CancelWork left the search stream armed")
+	}
+	select {
+	case <-stream:
+	default:
+		t.Fatal("CancelWork did not close the search cancel channel")
+	}
+	if !previewCanceled || p.previewCancel != nil {
+		t.Fatal("CancelWork did not cancel the in-flight preview")
+	}
+	if p.preview.seq != 4 || p.preview.loading || p.loading {
+		t.Fatalf("preview seq/loading = %d/%v, search loading = %v", p.preview.seq, p.preview.loading, p.loading)
+	}
+	if p.seq != beforeSeq+1 {
+		t.Fatalf("search seq = %d, want %d", p.seq, beforeSeq+1)
+	}
+	if !p.open {
+		t.Fatal("CancelWork closed the panel; only Dismiss should")
+	}
+}
+
+// TestPanelRejectsStaleOwnerResult: a search result from another workspace model
+// generation must not paint even when its sequence number matches; the panel's own owner
+// result applies normally. This is the searchpanel half of the workspace-owner guard.
+func TestPanelRejectsStaleOwnerResult(t *testing.T) {
+	owner := palette.Owner{Workspace: "ws-b", Generation: 2}
+	p := New(Options{Root: "/w", Owner: owner})
+	p.seq = 1
+	p.loading = true
+	result := func(name string) SearchResult {
+		return SearchResult{Files: []FileMatches{{
+			Path: "/w/" + name, Name: name,
+			Matches: []Match{{Line: 1, Col: 1, Len: 1, Text: "x", EndLine: 1, EndCol: 2}},
+		}}}
+	}
+	p.Update(searchDoneMsg{seq: 1, result: result("stale.go"), owner: palette.Owner{Workspace: "ws-a", Generation: 1}})
+	if !p.loading || len(p.rows) != 0 {
+		t.Fatalf("stale owner result painted: loading %v rows %d", p.loading, len(p.rows))
+	}
+	p.Update(searchDoneMsg{seq: 1, result: result("fresh.go"), owner: owner})
+	if p.loading || len(p.rows) == 0 {
+		t.Fatalf("own result did not apply: loading %v rows %d", p.loading, len(p.rows))
 	}
 }

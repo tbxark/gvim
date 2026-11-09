@@ -12,7 +12,11 @@
 // next and previous match actions can walk the last result set from the editor.
 package searchpanel
 
-import "context"
+import (
+	"context"
+
+	"github.com/tbxark/gvim/internal/tui/palette"
+)
 
 // DefaultLimit is the most matches a project search returns when Options.Limit is zero:
 // the same cap Fresh's project search uses.
@@ -290,12 +294,19 @@ type Files interface {
 
 // ReplaceRequestMsg asks the root to confirm and apply a replacement. The panel sends it
 // when the user presses Alt+Enter.
-type ReplaceRequestMsg struct{ Request ReplaceRequest }
+type ReplaceRequestMsg struct {
+	Request ReplaceRequest
+	Owner   palette.Owner
+}
+
+func (m ReplaceRequestMsg) PaletteOwner() palette.Owner { return m.Owner }
 
 // ExportMsg asks the root to show the current result set as a navigable list: the
 // quickfix-style export of a project search. The panel sends it when the user presses
 // Alt+Q.
-type ExportMsg struct{}
+type ExportMsg struct{ Owner palette.Owner }
+
+func (m ExportMsg) PaletteOwner() palette.Owner { return m.Owner }
 
 // ExportItem is one row of an exported result set: a file header or one match. The
 // root turns the items into its list overlay; the panel itself does not import it.
@@ -315,4 +326,7 @@ type ExportItem struct {
 type OpenMsg struct {
 	Path      string
 	Line, Col int
+	Owner     palette.Owner
 }
+
+func (m OpenMsg) PaletteOwner() palette.Owner { return m.Owner }

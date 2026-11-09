@@ -112,7 +112,7 @@ func TestRevealTranscriptLineFocusesAndSelectsRow(t *testing.T) {
 	tabs.tabs[1].term.(*fakeTerm).history = []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"}
 	second := tabs.TabID(1)
 	dirs := len(tabs.ports.Starter.(*fakeStarter).dirs)
-	cmd, ok := tabs.RevealTranscriptLine(second, 12)
+	cmd, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: second, Row: 12})
 	if !ok || cmd == nil {
 		t.Fatalf("reveal = %v, %v", cmd, ok)
 	}
@@ -128,7 +128,7 @@ func TestRevealTranscriptLineFocusesAndSelectsRow(t *testing.T) {
 	// A closed tab's id is refused without changing the active tab.
 	tabs.removeAt(1)
 	before := tabs.ActiveIndex()
-	if _, ok := tabs.RevealTranscriptLine(second, 12); ok {
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: second, Row: 12}); ok {
 		t.Fatal("a stale id revealed a tab")
 	}
 	if tabs.ActiveIndex() != before {
@@ -148,7 +148,7 @@ func TestRevealTranscriptLineSupportsExitedAndRefusesRestored(t *testing.T) {
 	if cmd, _ := p.Update(exitMsg{gen: p.gen, code: 0, codeOK: true}); cmd != nil {
 		_ = cmd
 	}
-	if _, ok := tabs.RevealTranscriptLine(id, 1); !ok {
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: id, Row: 1}); !ok {
 		t.Fatal("an exited live tab was not positioned")
 	}
 
@@ -158,7 +158,7 @@ func TestRevealTranscriptLineSupportsExitedAndRefusesRestored(t *testing.T) {
 		Version: terminal.SavedStateVersion, Open: true,
 		Tabs: []terminal.SavedTab{{Open: true, Rows: []string{"saved line"}}},
 	})
-	if _, ok := restored.RevealTranscriptLine(restoredID, 0); ok {
+	if _, ok := restored.RevealTranscriptLine(TranscriptHit{ID: restoredID, Row: 0}); ok {
 		t.Fatal("a restored no-session tab reported a pager")
 	}
 }
@@ -199,5 +199,159 @@ func TestStartDiscoveredKeepsIDsAligned(t *testing.T) {
 	}
 	if tr := tabs.Transcripts(); len(tr) != 2 || tr[1].ID != tabs.TabID(1) {
 		t.Fatalf("transcripts after NewTab = %+v", tr)
+	}
+}
+
+// TestRevealValidatesContentAndRelocatesAfterEviction checks the snapshot row is not
+// trusted blindly: same scrollback total + matching text uses the absolute row; after
+// rows shift (same total, content moved) a unique text match relocates to the new row;
+// a missing or ambiguous match refuses without moving the pager.
+func TestRevealValidatesContentAndRelocatesAfterEviction(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.history = make([]string, 600)
+	for i := range term.history {
+		term.history[i] = "row"
+	}
+	term.history[250] = "needle unique"
+	tabs := identityTabs(t, term)
+	tr := tabs.Transcripts()
+	if len(tr) != 1 || tr[0].Total != 600 || tr[0].First != 100 {
+		t.Fatalf("snapshot = %+v", tr)
+	}
+	id := tr[0].ID
+	// Exact: the line is still at the absolute row (total unchanged).
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: id, Row: 250, Total: 600, Text: "needle unique", Before: "row", After: "row", BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true}); !ok {
+		t.Fatal("exact reveal failed")
+	}
+	if got := tabs.ScrollSelected(); got != 250 {
+		t.Fatalf("exact selected = %d, want 250", got)
+	}
+	// Shift: drop 50 old rows, append 50 new ones; the history length stays 600 but
+	// "needle unique" moves to absolute row 200. The recorded row 250 now holds a
+	// different line, so the reveal must relocate by the unique text instead of landing
+	// on 250.
+	shifted := append([]string(nil), term.history[50:]...)
+	for i := 0; i < 50; i++ {
+		shifted = append(shifted, "new row")
+	}
+	term.history = shifted
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: id, Row: 250, Total: 600, Text: "needle unique", Before: "row", After: "row", BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true}); !ok {
+		t.Fatal("relocation after a row shift failed")
+	}
+	if got := tabs.ScrollSelected(); got != 200 {
+		t.Fatalf("relocated selected = %d, want the shifted row 200", got)
+	}
+	// Ambiguous: two identical lines and a changed total require a context match; the
+	// reveal refuses instead of guessing either occurrence.
+	dup := append([]string(nil), term.history...)
+	dup[150] = "dup line"
+	dup[220] = "dup line"
+	term.history = dup
+	tabs.Active().scroll = scrollState{} // leave the previous pager view
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: id, Row: 150, Total: 600, Text: "dup line", Before: "row", After: "row", BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true}); ok {
+		t.Fatal("an ambiguous line was revealed")
+	}
+	// Missing: a vanished line is refused, not clamped onto a neighbour.
+	missing := append([]string(nil), term.history...)
+	for i := range missing {
+		missing[i] = "gone"
+	}
+	term.history = missing
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: id, Row: 150, Total: 600, Text: "needle unique", Before: "row", After: "row", BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true}); ok {
+		t.Fatal("a missing line was revealed")
+	}
+}
+
+// TestRevealExitedTranscriptIsValidated checks an exited live shell still uses the
+// frozen transcript and the same text/total validation; truncating the searchable
+// window (the line fell out of the newest rows) reports false.
+func TestRevealExitedTranscriptIsValidated(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.history = make([]string, 50)
+	for i := range term.history {
+		term.history[i] = "old row"
+	}
+	term.history[10] = "frozen needle"
+	tabs := identityTabs(t, term)
+	p := tabs.Active()
+	if cmd, _ := p.Update(exitMsg{gen: p.gen, code: 0, codeOK: true}); cmd != nil {
+		_ = cmd
+	}
+	tr := tabs.Transcripts()
+	if len(tr) != 1 {
+		t.Fatalf("transcripts = %+v", tr)
+	}
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: tr[0].ID, Row: tr[0].First + 10, Total: tr[0].Total, Text: "frozen needle", Before: "old row", After: "old row", BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true}); !ok {
+		t.Fatal("an exited transcript line was not revealed")
+	}
+	// Drop the line out of the current searchable window: the old absolute row would
+	// clamp to a different row, which must be refused instead.
+	for i := range term.history {
+		term.history[i] = "later row"
+	}
+	term.history = append(term.history, make([]string, 600)...)
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: tr[0].ID, Row: tr[0].First + 10, Total: tr[0].Total, Text: "frozen needle", Before: "old row", After: "old row", BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true}); ok {
+		t.Fatal("a truncated-away line was revealed")
+	}
+}
+
+// TestRevealBlankLineValidates is the empty-text regression: a blank matched line is
+// a real hit, not "no snapshot". Empty text is validated with the known neighbours;
+// a unique blank line relocates after a shift, two equally matching blanks refuse,
+// and a Snapshot hit with Valid false (malformed export payload) is refused rather
+// than clamped to the stored row.
+func TestRevealBlankLineValidates(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.history = make([]string, 30)
+	for i := range term.history {
+		term.history[i] = "row"
+	}
+	// Two blank lines with different neighbours; only the first has a/b.
+	term.history[4], term.history[5], term.history[6] = "a", "", "b"
+	term.history[19], term.history[20], term.history[21] = "c", "", "d"
+	tabs := identityTabs(t, term)
+	tr := tabs.Transcripts()
+	if len(tr) != 1 || tr[0].Total != 30 {
+		t.Fatalf("snapshot = %+v", tr)
+	}
+	hit := TranscriptHit{ID: tr[0].ID, Row: 5, Total: 30, Text: "",
+		Before: "a", After: "b", BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true}
+	if _, ok := tabs.RevealTranscriptLine(hit); !ok {
+		t.Fatal("a unique blank line was refused")
+	}
+	if got := tabs.ScrollSelected(); got != 5 {
+		t.Fatalf("blank line selected = %d, want 5", got)
+	}
+	// Shift: drop 3 old rows and append 3 new ones; the blank line moves to 2 with the
+	// same neighbours and must relocate there, never clamp to the stored 5.
+	shifted := append([]string(nil), term.history[3:]...)
+	for i := 0; i < 3; i++ {
+		shifted = append(shifted, "new row")
+	}
+	term.history = shifted
+	if _, ok := tabs.RevealTranscriptLine(hit); !ok {
+		t.Fatal("a shifted blank line was refused")
+	}
+	if got := tabs.ScrollSelected(); got != 2 {
+		t.Fatalf("relocated blank line selected = %d, want 2", got)
+	}
+	// Ambiguous blank lines with identical neighbours: no context can choose.
+	dup := append([]string(nil), term.history...)
+	dup[8], dup[9], dup[10] = "x", "", "y"
+	dup[18], dup[19], dup[20] = "x", "", "y"
+	term.history = dup
+	tabs.Active().scroll = scrollState{}
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: hit.ID, Row: 5, Total: 30, Text: "",
+		Before: "x", After: "y", BeforeKnown: true, AfterKnown: true, Snapshot: true, Valid: true}); ok {
+		t.Fatal("an ambiguous blank line was revealed")
+	}
+	// A malformed payload (Valid false) must refuse, not use the stored row.
+	tabs.Active().scroll = scrollState{}
+	if _, ok := tabs.RevealTranscriptLine(TranscriptHit{ID: hit.ID, Row: 5, Total: 30,
+		Text: "", BeforeKnown: true, AfterKnown: true, Snapshot: true}); ok {
+		t.Fatal("an invalid snapshot payload was revealed")
 	}
 }

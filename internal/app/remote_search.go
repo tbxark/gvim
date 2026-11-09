@@ -227,14 +227,16 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	if cancelled() {
 		return
 	}
+	// A non-zero tool exit (other than "no matches", exit 1) may still have printed
+	// matches before failing. Keep parsing that stdout as a partial result: the Done
+	// batch carries the error AND the successful files, so the panel can show what was
+	// found while saying the search is incomplete (Live Grep converts this to an
+	// incomplete notice). If stdout is empty this is the old error-only behavior.
+	partialErr := ""
 	if res.Code > 1 {
-		errText := fmt.Sprintf("%s failed on the remote host (exit %d)", tool, res.Code)
-		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, cancelled, send, errText) {
-			return
-		}
-		return
+		partialErr = fmt.Sprintf("%s failed on the remote host (exit %d)", tool, res.Code)
 	}
-	truncated := res.Truncated
+	truncated := res.Truncated || partialErr != ""
 	if widen && res.Truncated && scope != nil {
 		// A widened run consumed the remote output cap: candidate files beyond the cap
 		// were neither searched nor reported, so the result is explicitly incomplete. The
@@ -252,6 +254,9 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	outsideSnapshot := false
 	flush := func(done bool) bool {
 		batch := searchpanel.SearchBatch{Files: pending, Truncated: truncated, Done: done}
+		if done && partialErr != "" {
+			batch.Err = partialErr
+		}
 		if done && scope != nil {
 			batch.Notice = scope.notice
 		}
@@ -888,10 +893,12 @@ func (s *remoteSearch) runBatched(ctx context.Context, tool string, req searchpa
 		if err != nil {
 			return hostos.ProcResult{}, err
 		}
-		if res.Code > 1 {
-			return hostos.ProcResult{}, fmt.Errorf("%s failed on the remote host (exit %d)", tool, res.Code)
-		}
-		out.Truncated = out.Truncated || res.Truncated
+		// A non-zero exit may still carry matches for the batches already searched. Merge
+		// that stdout before reporting the partial failure: the caller (the project-search
+		// panel or Live Grep) keeps the successful files and marks the result incomplete.
+		partial := res.Code > 1
+		resTruncated := res.Truncated || partial
+		out.Truncated = out.Truncated || resTruncated
 		if room := remoteSearchMaxOutput - len(stdout); room > 0 {
 			add := res.Stdout
 			if len(add) > room {
@@ -903,6 +910,13 @@ func (s *remoteSearch) runBatched(ctx context.Context, tool string, req searchpa
 				stdout = append(stdout, '\n')
 			}
 		} else {
+			out.Truncated = true
+		}
+		if partial {
+			out.Code = res.Code
+			break
+		}
+		if len(stdout) >= remoteSearchMaxOutput {
 			out.Truncated = true
 			break
 		}

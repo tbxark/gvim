@@ -18,10 +18,10 @@ func (b *blockingContextGrepper) Search(GrepRequest) ([]GrepHit, error) {
 	return nil, nil
 }
 
-func (b *blockingContextGrepper) SearchContext(ctx context.Context, _ GrepRequest) ([]GrepHit, error) {
+func (b *blockingContextGrepper) SearchContext(ctx context.Context, _ GrepRequest) (GrepResult, error) {
 	b.started <- ctx
 	<-ctx.Done()
-	return nil, ctx.Err()
+	return GrepResult{}, ctx.Err()
 }
 
 func newBlockingGrepPalette(t *testing.T) (*Palette, *blockingContextGrepper) {
