@@ -801,9 +801,16 @@ snapshot still bounds AllFiles, but open buffers are searched from the editor's 
 file's remote disk line is skipped: unsaved edits are found exactly as Fresh's
 project_files searches open buffers, with no extra remote read. An open file outside the
 workspace root, or excluded by the panel's file snapshot, is left to the dedicated Open
-Buffers scope. All commands run through the authority one-shot surface with the remote cwd,
-stay bounded/cancellable (the search context bounds every nested listing), and never read
-the local disk; a degradation is carried as a non-fatal panel notice.
+Buffers scope. When the remote search tool cannot be probed at all (missing), or its run
+fails/times out, those open-buffer snapshots are still streamed first and then a terminal
+error batch names the original tool/probe failure and says only open buffers were searched
+from their editor snapshots — the remote project files were not searched. The result is
+never presented as complete, no local disk is read, and a user cancellation still closes
+the batch stream without a Done batch (no open-snapshot rows are emitted after the cancel).
+The same panel limit/caps apply to the snapshot matches. All commands run through the
+authority one-shot surface with the remote cwd, stay bounded/cancellable (the search
+context bounds every nested listing), and never read the local disk; other degradations are
+carried as non-fatal panel notices.
 
 ### Windowed remote reads (remote large-file mode)
 

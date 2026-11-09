@@ -109,6 +109,25 @@ behavior: 50,000 indexed files, 100 file-mode results, background enumeration
 cancellation, and the palette's sequence guard that drops a ranking result for a query
 the user already changed.
 
+**Literal-path probe.** While the file index is still enumerating, the file mode asks
+the index's optional exact-path probe for the literal file path the query names, Fresh's
+fast prefix-probe slice (a typed `etc/hosts` finds the file before enumeration
+reaches it). This slice is deliberately one exact path, not a directory or basename-prefix
+listing: the local probe resolves the candidate's real path and the root's real path and
+returns only when the candidate is a regular file inside the workspace; the remote probe
+uses the authority's realpath capability and Stat and never the local disk, and refuses
+when the backend cannot prove containment. The probe runs only in a `tea.Cmd`, never in
+Update/Draw; its context is canceled when the query changes or the palette closes; its
+answer is cached for the loading poll ticks and a result is displayed only when both the
+query sequence and text still match. The confirmed path is merged before the normal rank,
+so the usual fuzzy scoring, prefix boost, `:line[:col]` target and file-row cap apply.
+Missing paths, directories, unreadable paths, escapes through `..` or a nested symlink,
+and a completed index (no probe phase) produce no probe row; a probe never falls back to
+another filesystem. Residuals: parent-directory basename-prefix matches and directory
+content listings are not probed; a completed but truncated index is not probed; an exact
+local symlink is followed only if its real target stays inside the workspace (a
+TOCTOU swap between the realpath check and Stat remains theoretically possible).
+
 
 - **File preview column** (the file mode, when a `Preview` reader is wired and the
   card's inner text width is at least 64 cells). The selected row's file head, read in a

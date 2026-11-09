@@ -51,7 +51,7 @@ Scrollback keys:
 | Up, Down | move the selected row by one |
 | PageUp, PageDown | move by a screen |
 | Home, End | oldest row, newest row |
-| `/` or Ctrl+F | open the search input; type the query, Enter commits, Esc cancels |
+| `/` or Ctrl+F | open the search input; typing previews the matches and jumps the view to the first one, Enter commits, Esc cancels and restores the previous view/search |
 | Ctrl+R | toggle a regular-expression search |
 | Ctrl+A | toggle a search that respects case |
 | n, N | next, previous match |
@@ -59,8 +59,17 @@ Scrollback keys:
 | Ctrl+C | copy the visible rows (or the selection) |
 
 The search matches the prior transcript, the x/vt history and the live screen
-rows; a bad regular expression is reported as a notice and keeps the previous
-matches. When the transcript is re-wrapped by a width change (a restored
+rows. It is **incremental**, as Fresh's search is: while the query is typed every
+change runs a search asynchronously and the view jumps to the first match, so the
+transcript (including a restored one) previews its result without committing; an
+empty query cancels the pending previews and moves nothing, and the regex/case
+toggles re-run the preview. Only the newest request may apply: each search answer
+carries a request sequence, so a late answer for an older keystroke (or for a
+preview superseded by Enter) is dropped and cannot move the view or replace the
+committed search. Enter commits the query and its matches (the title shows
+`k/n`), while Esc drops the preview, restores the view the input opened on and
+keeps the previously committed search/matches. A bad regular expression is
+reported as a notice and keeps the previous matches. When the transcript is re-wrapped by a width change (a restored
 transcript or a restarted shell's prior rows), the stored match row indexes no
 longer hold, so Sync re-runs a committed query over the new rows asynchronously
 (Update/Draw never search): the query and its regex/case options survive, the

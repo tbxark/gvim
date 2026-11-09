@@ -163,15 +163,49 @@ type Index struct {
 	// "used a directory walk because the git file list was unavailable"). It is cleared
 	// when a run starts, so a reconnect/refresh does not keep a stale notice.
 	notice string
+	// probe is the optional literal-path probe (Fresh's fast prefix-probe slice).
+	// It performs no enumeration and is set before the palette uses the index; the
+	// lock only protects a late SetProbe from a reader.
+	probeMu sync.RWMutex
+	probe   ProbeFunc
 }
 
 // Start begins enumerating root in a goroutine and returns at once. The index
 // stops when ctx is done or Close is called. Enumeration errors are kept for
 // Err; a partial list is still usable.
 func Start(ctx context.Context, root string) *Index {
-	return startWith(ctx, func(ctx context.Context, emit func(string) bool) error {
+	x := startWith(ctx, func(ctx context.Context, emit func(string) bool) error {
 		return Enumerate(ctx, root, emit)
 	})
+	x.SetProbe(LocalPrefixProbe(root))
+	return x
+}
+
+// SetProbe installs the literal-path probe used by the quick-open file mode while
+// the index is loading. A nil probe disables it.
+func (x *Index) SetProbe(probe ProbeFunc) {
+	if x == nil {
+		return
+	}
+	x.probeMu.Lock()
+	x.probe = probe
+	x.probeMu.Unlock()
+}
+
+// Probe asks the installed literal-path probe for the exact file query names. It
+// returns nil for an index without a probe and does not touch the enumerated list.
+// The palette calls it from a tea.Cmd, never from Update/Draw.
+func (x *Index) Probe(ctx context.Context, query string) ([]string, error) {
+	if x == nil {
+		return nil, nil
+	}
+	x.probeMu.RLock()
+	probe := x.probe
+	x.probeMu.RUnlock()
+	if probe == nil {
+		return nil, nil
+	}
+	return probe(ctx, query)
 }
 
 // StartFunc begins an index over any enumeration function and returns at once. enum is

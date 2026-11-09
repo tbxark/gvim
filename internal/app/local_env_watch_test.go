@@ -212,3 +212,117 @@ func TestLocalEnvWatchCloseIsCancellable(t *testing.T) {
 		t.Fatal("Close did not close the file watcher")
 	}
 }
+
+func waitFakeWatchClosed(t *testing.T, fake *fakeEnvFileWatch) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		fake.mu.Lock()
+		closed := fake.closed
+		fake.mu.Unlock()
+		if closed {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the file watcher was not closed (resource leak)")
+}
+
+func TestLocalEnvWatchParentCancellationReclaimsWatcher(t *testing.T) {
+	root := t.TempDir()
+	provider := env.New(root, nil, func() bool { return true })
+	fake := newFakeEnvFileWatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
+	if lw == nil {
+		t.Fatal("no local watcher")
+	}
+	cancel()
+	// No Close call: session-context cancellation alone must release fsnotify.
+	waitFakeWatchClosed(t, fake)
+}
+
+func TestLocalEnvWatchRootAddFailureReclaimsAndNotices(t *testing.T) {
+	root := t.TempDir()
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := env.New(root, testLocalDetector("node", ".nvmrc"), func() bool { return true })
+	fake := newFakeEnvFileWatch()
+	fake.failDir = rootAbs
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil); lw != nil {
+		lw.Close()
+		t.Fatal("a watcher started although the workspace root could not be watched")
+	}
+	waitFakeWatchClosed(t, fake)
+	notice := provider.WatchNotice()
+	if !strings.Contains(notice, "Local environment:") || !strings.Contains(notice, "workspace root cannot be watched") || !strings.Contains(notice, "Env: Reload") {
+		t.Fatalf("root-Add-failure notice = %q", notice)
+	}
+	if strings.Contains(notice, "Remote environment:") {
+		t.Fatalf("root-Add-failure notice leaked remote wording: %q", notice)
+	}
+}
+
+func TestLocalEnvWatchPartialAddFailureRecoversAndClearsNotice(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, ".venv")
+	if err := os.Mkdir(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	provider := env.New(root, testLocalDetector("node", ".nvmrc"), func() bool { return true })
+	fake := newFakeEnvFileWatch()
+	fake.failDir = nested
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
+	if lw == nil {
+		t.Fatal("no local watcher")
+	}
+	defer lw.Close()
+	notice := provider.WatchNotice()
+	if !strings.Contains(notice, "Local environment:") || !strings.Contains(notice, "cannot be watched") {
+		t.Fatalf("partial-Add-failure notice = %q", notice)
+	}
+	// A later arm retries the failed directory after the transient error clears.
+	fake.mu.Lock()
+	fake.failDir = ""
+	fake.mu.Unlock()
+	fake.push(filewatch.Changed{Dirs: []string{root}})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if provider.WatchNotice() == "" {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("partial-Add-failure notice did not clear after retry: %q", provider.WatchNotice())
+}
+
+func TestLocalEnvWatchConstructorClosesWatcherOnEarlyFailure(t *testing.T) {
+	root := t.TempDir()
+	// Nil provider: ownership of the watcher still transferred and must be released.
+	fake := newFakeEnvFileWatch()
+	if lw := startLocalEnvWatchWith(context.Background(), nil, root, fake, nil); lw != nil {
+		t.Fatal("a watcher started with a nil provider")
+	}
+	waitFakeWatchClosed(t, fake)
+
+	// Watcher start error with a non-nil watcher: close it too.
+	provider := env.New(root, nil, func() bool { return true })
+	fake = newFakeEnvFileWatch()
+	if lw := startLocalEnvWatchWith(context.Background(), provider, root, fake, errors.New("fsnotify start failed")); lw != nil {
+		t.Fatal("a watcher started after an fsnotify start error")
+	}
+	waitFakeWatchClosed(t, fake)
+	if notice := provider.WatchNotice(); !strings.Contains(notice, "file watching is unavailable") {
+		t.Fatalf("start-error notice = %q", notice)
+	}
+}
+
+func testLocalDetector(name, marker string) []config.EnvDetector {
+	return []config.EnvDetector{{Name: name, Markers: []string{marker}, Kind: config.EnvKindShell, Snippet: "true"}}
+}

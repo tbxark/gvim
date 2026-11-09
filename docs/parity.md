@@ -21,16 +21,15 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `f3ab872` (the previous round's commit is folded in) plus the
-merged round-38 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
-GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-120 KiB / de 82 KiB / both 203 KiB, git diff --check). Final full
-`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
-`/tmp/gvim-r38-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-38 tests/diff
-review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
-real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
-same date.
+Last verified: 2026-11-09, tree commit `bc5624b` plus the merged round-39 work. Static gates PASS
+(Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import
+rules, menus, i18n_check with catalogue heap en 126 KiB / de 82 KiB / both 208 KiB, git diff
+--check). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL
+line (log `/tmp/gvim-r39-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-39
+tests/diff review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/
+streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux,
+Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh
+reference: `refs/fresh` same date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
 config-layer + LSP-autostart gating/status pill), native sidebar sections with the Markdown
@@ -1514,6 +1513,73 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-39 outcome (2026-11-09, merged working tree on `bc5624b`).** Five slices landed: literal-
+path quick-open probe; remote search tool-failure open-buffer fallback; local watcher closeResources;
+incremental terminal scrollback search; SSH copy new-target link-commit research only (not
+implemented). Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76
+packages ok, no FAIL (log `/tmp/gvim-r39-final.log`). The audit read the diff and ran targeted tests;
+the Lead ran the full suite.
+**Literal-path quick-open probe (keymap; Fresh's fast prefix-probe slice).** While the file index is
+still enumerating, file mode asks the index's optional exact-path probe for the literal file path the
+query names, so a typed `etc/hosts` finds the file before enumeration reaches it. This is deliberately
+ONE exact path — not a directory or basename-prefix listing. The local probe resolves the candidate's
+real path and the root's real path and returns only when the candidate is a regular file inside the
+workspace; the remote probe uses the authority's realpath capability and Stat, never the local disk,
+and refuses when the backend cannot prove containment. The probe runs only in a tea.Cmd, never in
+Update/Draw; its context is canceled when the query changes or the palette closes; its answer is
+cached for the loading poll ticks and a result is displayed only when both the query sequence and text
+still match. The confirmed path is merged before the normal rank, so the usual fuzzy scoring, prefix
+boost, :line[:col] target and file-row cap apply. Missing paths, directories, unreadable paths, escapes
+through .. or a nested symlink, and a completed index (no probe phase) produce no probe row; a probe
+never falls back to another filesystem. Residuals: parent-directory basename-prefix matches and
+directory content listings are not probed; a completed-but-truncated index is not probed; an exact
+local symlink is followed only if its real target stays inside the workspace (a TOCTOU swap between
+the realpath check and Stat remains theoretically possible) (R3/R13-3).
+**Remote search tool-failure open-buffer fallback (lsp).** When the remote search tool cannot be probed
+(missing) or its run fails/times out, the open-buffer snapshots are still streamed first, then a
+terminal error batch names the original tool/probe failure and says only open buffers were searched
+from their editor snapshots — the remote project files were not searched. The result is never
+presented as complete; no local disk is read; a user cancellation still closes the batch stream
+without a Done batch (no open-snapshot rows are emitted after the cancel). The same panel limit/caps
+apply to snapshot matches. All commands still run through the authority one-shot surface with the
+remote cwd, stay bounded/cancellable (the search context bounds every nested listing), and never read
+the local disk; other degradations are non-fatal panel notices (R13-11/R13-23).
+**Local watcher closeResources fix (trust).** The local env watcher now releases its file watcher
+exactly once via closeResources/sync.Once across the startup-failure path, Close, and the goroutine
+exiting on session cancellation (previously each path could close the watcher independently).
+armDirs-before-RefreshDetection is preserved, real-fsnotify tests still cover marker lifecycle/nested
+parent appearance/unwatchable root, and detection remains detection-only (no recipe re-activation, no
+capture-cache recapture). Close is idempotent; no watcher/goroutine leak; local wording kept
+(R13-18).
+**Incremental terminal scrollback search (sidebar).** '/' or Ctrl+F opens the search input; while
+the query is typed every change runs a search asynchronously and the view jumps to the first match
+(a restored transcript previews its result without committing). An empty query cancels pending
+previews and moves nothing; regex/case toggles re-run the preview. Only the newest request may apply:
+each answer carries a request sequence, so a late answer for an older keystroke (or a preview
+superseded by Enter) is dropped and cannot move the view or replace the committed search. Enter
+commits the query and its matches (title shows k/n); Esc drops the preview, restores the view the
+input opened on and keeps the previously committed search/matches. A bad regex is a notice that
+keeps the previous matches. When the transcript is re-wrapped by a width change, Sync asynchronously
+re-runs the committed query over the new rows (Update/Draw never search), keeping query/options and
+n/N/title alignment; copy uses the editor clipboard path. Fresh's read-only scrollback is a normal
+buffer, so its search naturally continues over re-wrapped text; this is the gvim bounded equivalent
+(R13-15).
+**SSH plugin copy new-target link-commit — research only, NOT implemented.** The SSH backend still
+does not advertise NoFollowWriteStreamer and plugin fs.copy remains unsupported on SSH (before
+reading/creating/writing). The research considered a future SSH link-commit for a new target, but it
+was not implemented because POSIX mv follows a destination symlink-to-directory, and a rail with
+check→rm→mv has TOCTOU windows (target swap between check and rm, a symlink-to-directory appearing
+before mv so the temp is moved into it, failure/cancel after rm losing the destination entry) and
+parent-path races; no portable remote rename is proven to replace a link atomically without a
+check-then-remove helper. Local no-follow (temp+os.Rename) remains the only advertised capability,
+with the documented local parent-path TOCTOU residual; no SSH strong/atomic no-overwrite guarantee is
+claimed. The old rm-before-mv path must not be reintroduced without a fix for those exact windows
+(R13-19/R13-21).
+Metrics: palette 240, settings 69 in 14 sections, bundled 26 (9 on)/17 off, plugin API 244 functions/
+1489 lines level 2; i18n en 1117 / 579 per locale, 573 KiB text (under 640 KiB cap), ≈663 KiB JSON,
+heap 126-82-208 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r39-final.log); real hosts
+UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-38 outcome (2026-11-09, merged working tree on `f3ab872`).** Six unboarded slices landed
 (file multi-word matcher already present; buffer-mode fuzzy multi-word; remote AllFiles open-buffer
@@ -4591,6 +4657,31 @@ for parity status.
      SSH unsupported BEFORE read/create/write; local requires RealPather/DirectoryCreator/inside-source
      checks. Residuals local parent-path TOCTOU, canonicalization pre-write proof/symlink swap
      TOCTOU, no general no-overwrite guarantee; tree failure-after-claim partial, metadata/growth/cancel.
+229. **Literal-path quick-open probe (keymap; R3/R13-3).** while file index enumerating, file mode
+     exact-path probe for literal query path (Fresh prefix-probe; etc/hosts before enumeration); only
+     one exact regular file inside workspace; local realpath candidate/root contained; remote authority
+     realpath+Stat/no local disk/refuse if containment unprovable; tea.Cmd only/context cancel/cache
+     poll ticks/query seq+text match; merge before rank preserves fuzzy/prefix/:line[:col]/cap;
+     missing/dir/unreadable/../symlink escape/completed index no row/no fallback. Residuals
+     dir/basename-prefix listing not probed, truncated completed index not probed, local realpath-check
+     vs Stat TOCTOU theoretical.
+230. **Remote search tool-failure open-buffer fallback (lsp; R13-11/R13-23).** tool probe missing or
+     run fail/timeout: open-buffer snapshots streamed first, terminal error batch names original failure
+     and says only open buffers from editor snapshots were searched, remote project files not searched;
+     never complete/no local disk; cancel closes without Done batch; panel limit/caps same.
+231. **Local watcher closeResources (trust; R13-18).** sync.Once closeResources across startup failure/
+     Close/session-cancel goroutine; watcher released exactly once, Close idempotent, no leak;
+     arm-before-refresh/real fsnotify tests/detection-only/local wording preserved.
+232. **Incremental terminal scrollback search (sidebar; R13-15).** '/'/Ctrl+F input; every typed change
+     async search + jump first match (preview without commit); empty cancels; regex/case re-run; request
+     sequence drops late/stale answers; Enter commits/title k/n; Esc restores view/keeps previous
+     search; bad regex notice; resize re-wrapped Sync re-search; Update/Draw never search; copy editor
+     clipboard; Fresh read-only scrollback equivalent.
+233. **SSH plugin copy link-commit research only (plugin streamer; R13-19/R13-21).** NOT implemented;
+     SSH no NoFollowWriteStreamer/fs.copy unsupported before read/create/write; future link-commit
+     rejected due POSIX mv dir-symlink follow, check→rm→mv TOCTOU, failure-after-rm destination loss,
+     parent path races; local no-follow only capability with local parent TOCTOU; no SSH strong/atomic
+     no-overwrite claim.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6497,21 +6588,33 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-39 verification (2026-11-09, merged tree on `bc5624b`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 126 KiB / de 82 KiB / both 208 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+  `/tmp/gvim-r39-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-39 tests/diff
+  review only; the Lead ran the full suite. Tracks: literal-path quick-open probe; remote search
+  tool-failure open-buffer fallback; local watcher closeResources; incremental terminal scrollback
+  search; SSH plugin-copy link-commit research only (not implemented; SSH copy still unsupported).
+  Heap-guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-
+  only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
+  a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
+  fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-38 landed multi-word file/buffer matching, remote AllFiles open-buffer snapshots, local
-  fsnotify arm-before-refresh, terminal transcript re-search, plugin no-follow local-only/SSH copy
-  unsupported; full suite EXIT 0 (76 packages, log /tmp/gvim-r38-final.log); §5.5 is round-39/40 plan;
-  TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–38 had their gate sets
-  run. Round 38 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-39 landed literal-path probe, remote tool-failure open-buffer fallback, local watcher
+  closeResources, incremental terminal search; SSH link-commit research only/no implementation; full
+  suite EXIT 0 (76 packages, log /tmp/gvim-r39-final.log); §5.5 is round-40/41 plan; TUI-only scope/
+  genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–39 had their gate sets
+  run. Round 39 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  120 KiB / de 82 KiB / both 203 KiB, git diff --check). Final full
+  126 KiB / de 82 KiB / both 208 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r38-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-38 tests and
+  `/tmp/gvim-r39-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-39 tests and
   diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
   recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
   production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling

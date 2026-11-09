@@ -52,6 +52,19 @@ type scrollState struct {
 	// index into them the view is on.
 	matches []int
 	match   int
+	// searchSeq orders the asynchronous searches: a reply from an older keystroke
+	// is dropped, so typing can never be overwritten by a late answer.
+	searchSeq int
+	// preview holds the matches of the in-progress incremental search (the typing
+	// input). It is separate from the committed matches, so Esc can drop the
+	// preview and return to the committed search and its view.
+	preview []int
+	// searchSaved/searchSavedTop/searchSavedSelected remember the view before the
+	// search input opened; Esc restores it (Fresh cancels an incremental search
+	// without moving the view).
+	searchSaved         bool
+	searchSavedTop      int
+	searchSavedSelected int
 	// searchStale marks a committed search whose match rows no longer hold because
 	// the transcript was re-wrapped at a new width. Sync re-runs it in a command
 	// (never in Update/Draw) so a restored transcript keeps its search after a
@@ -73,6 +86,8 @@ type scrollbackMsg struct {
 type searchMsg struct {
 	gen     int
 	query   string
+	seq     int  // the request this answers; an older seq is dropped
+	commit  bool // false = incremental preview while typing
 	matches []int
 	err     string
 }
@@ -279,7 +294,7 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 		case k.Mod&tea.ModCtrl != 0 && k.Code == 'f':
 			cmd := p.enterScrollback()
 			if p.scroll.on {
-				p.scroll.typing, p.scroll.searchInput = true, ""
+				p.startSearchInput()
 			}
 			return cmd, true
 		}
@@ -300,7 +315,7 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 		}
 		return p.leaveScrollback(), true
 	case k.Mod == 0 && k.Code == '/':
-		p.scroll.typing, p.scroll.searchInput = true, ""
+		p.startSearchInput()
 		return nil, true
 	case k.Mod == 0 && k.Code == 'n':
 		return p.nextMatch(1), true
@@ -317,7 +332,7 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 		}
 		return p.copyScreen(), true
 	case k.Mod&tea.ModCtrl != 0 && k.Code == 'f':
-		p.scroll.typing, p.scroll.searchInput = true, ""
+		p.startSearchInput()
 		return nil, true
 	case k.Code == tea.KeyUp:
 		p.scrollBy(-1)
@@ -349,15 +364,51 @@ func isCtrlSpace(k tea.Key) bool {
 }
 
 // searchInputKey edits the search input line.
+// startSearchInput opens the search input: a fresh query, an ordered preview, and
+// the view saved for Esc (an incremental search previews matches while typing but
+// cancelling restores the previous view and committed search).
+func (p *Panel) startSearchInput() {
+	p.scroll.typing = true
+	p.scroll.searchInput = ""
+	p.scroll.preview = nil
+	p.scroll.searchSaved = true
+	p.scroll.searchSavedTop = p.scroll.top
+	p.scroll.searchSavedSelected = p.scroll.selected
+	p.scroll.searchSeq++
+}
+
+// incrementalSearchCmd runs the in-progress query asynchronously and returns one
+// ordered command. An empty input cancels pending previews and jumps nothing; a
+// late answer for an older input is dropped by applySearch (searchSeq).
+func (p *Panel) incrementalSearchCmd() tea.Cmd {
+	query := strings.TrimSpace(p.scroll.searchInput)
+	if query == "" {
+		p.scroll.searchSeq++
+		p.scroll.preview = nil
+		return nil
+	}
+	return p.searchCommand(query, p.scroll.regex, p.scroll.matchCase, false)
+}
+
 func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 	switch {
 	case k.Code == tea.KeyEscape:
 		p.scroll.typing, p.scroll.searchInput = false, ""
+		p.scroll.preview = nil
+		p.scroll.searchSeq++ // pending previews must not land after the cancel
+		if p.scroll.searchSaved {
+			p.scroll.top = p.scroll.searchSavedTop
+			p.scroll.selected = p.scroll.searchSavedSelected
+			p.scroll.searchSaved = false
+			p.clampScroll()
+		}
 		// Cancelling the input can reveal that the committed search is stale after a
 		// re-wrap that happened while the input was open.
 		return p.takeStaleSearch()
 	case k.Code == tea.KeyEnter:
 		p.scroll.typing = false
+		p.scroll.preview = nil
+		p.scroll.searchSaved = false
 		p.scroll.search = strings.TrimSpace(p.scroll.searchInput)
 		if p.scroll.search == "" {
 			p.scroll.matches, p.scroll.match = nil, 0
@@ -366,18 +417,18 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 		return p.searchCmd(p.scroll.search, p.scroll.regex, p.scroll.matchCase)
 	case k.Mod&tea.ModCtrl != 0 && k.Code == 'r':
 		p.scroll.regex = !p.scroll.regex
-		return p.refreshSearch()
+		return p.incrementalSearchCmd()
 	case k.Mod&tea.ModCtrl != 0 && k.Code == 'a':
 		p.scroll.matchCase = !p.scroll.matchCase
-		return p.refreshSearch()
+		return p.incrementalSearchCmd()
 	case k.Code == tea.KeyBackspace:
 		if r := []rune(p.scroll.searchInput); len(r) > 0 {
 			p.scroll.searchInput = string(r[:len(r)-1])
 		}
-		return nil
+		return p.incrementalSearchCmd()
 	case k.Mod == 0 && k.Text != "":
 		p.scroll.searchInput += k.Text
-		return nil
+		return p.incrementalSearchCmd()
 	}
 	return nil
 }
@@ -408,13 +459,22 @@ func (p *Panel) refreshSearch() tea.Cmd {
 	return p.searchCmd(p.scroll.search, p.scroll.regex, p.scroll.matchCase)
 }
 
-// searchCmd searches the prior transcript, the history and the live screen for
-// query, in a command. The options choose a regular expression and a match that
-// respects case.
+// searchCmd runs one committed search (the code path refreshSearch and a commit
+// use). The asynchronous request is ordered like an incremental preview.
 func (p *Panel) searchCmd(query string, regex, matchCase bool) tea.Cmd {
+	return p.searchCommand(query, regex, matchCase, true)
+}
+
+// searchCommand searches the prior transcript, the history and the live screen for
+// query, in a command, and tags the answer with a fresh request sequence. commit
+// says whether the answer redefines the committed search or is an incremental
+// preview while the user types.
+func (p *Panel) searchCommand(query string, regex, matchCase, commit bool) tea.Cmd {
+	p.scroll.searchSeq++
+	seq := p.scroll.searchSeq
 	match, err := matcher(query, regex, matchCase)
 	if err != nil {
-		return func() tea.Msg { return searchMsg{gen: p.gen, query: query, err: err.Error()} }
+		return func() tea.Msg { return searchMsg{gen: p.gen, query: query, seq: seq, commit: commit, err: err.Error()} }
 	}
 	t, gen := p.term, p.gen
 	prior := slices.Clone(p.prior)
@@ -431,7 +491,7 @@ func (p *Panel) searchCmd(query string, regex, matchCase bool) tea.Cmd {
 		if t != nil {
 			found, _, err := t.SearchScrollbackMode(query, regex, matchCase, 200)
 			if err != nil {
-				return searchMsg{gen: gen, query: query, err: err.Error()}
+				return searchMsg{gen: gen, query: query, seq: seq, commit: commit, err: err.Error()}
 			}
 			for _, i := range found {
 				matches = append(matches, len(prior)+i)
@@ -443,7 +503,7 @@ func (p *Panel) searchCmd(query string, regex, matchCase bool) tea.Cmd {
 				}
 			}
 		}
-		return searchMsg{gen: gen, query: query, matches: matches}
+		return searchMsg{gen: gen, query: query, seq: seq, commit: commit, matches: matches}
 	}
 }
 
@@ -471,15 +531,27 @@ func matcher(query string, regex, matchCase bool) (func(string) bool, error) {
 	}, nil
 }
 
-// applySearch stores the matches of a search and jumps to the first one.
+// applySearch stores the matches of a search and jumps to the first one. An answer
+// whose request sequence is not the newest is dropped: fast typing and a commit can
+// have several searches in flight, and only the latest may win. An incremental
+// preview jumps the view but never replaces the committed search/matches; a commit
+// replaces them and clears the preview.
 func (p *Panel) applySearch(msg searchMsg) tea.Cmd {
-	if msg.gen != p.gen || !p.scroll.on || msg.query != p.scroll.search {
+	if msg.gen != p.gen || !p.scroll.on || msg.seq != p.scroll.searchSeq {
 		return nil
 	}
 	if msg.err != "" {
 		p.noticeOf(dockTextVars("gvim.dock.bad_pattern", "Bad pattern: %{error}", map[string]any{"error": msg.err}))
 		return nil
 	}
+	if !msg.commit {
+		p.scroll.preview = msg.matches
+		if len(msg.matches) > 0 {
+			p.jumpToRow(msg.matches[0])
+		}
+		return p.requestScrollback()
+	}
+	p.scroll.preview = nil
 	p.scroll.matches, p.scroll.match = msg.matches, 0
 	if len(msg.matches) == 0 {
 		p.noticeOf(searchNoMatchNotice())
@@ -487,6 +559,17 @@ func (p *Panel) applySearch(msg searchMsg) tea.Cmd {
 	}
 	p.jumpToMatch(0)
 	return p.requestScrollback()
+}
+
+// jumpToRow centres the view on one absolute row (an incremental preview match),
+// without touching the committed match list.
+func (p *Panel) jumpToRow(abs int) {
+	if abs < 0 || abs >= p.combined() {
+		return
+	}
+	p.scroll.selected = abs
+	p.scroll.top = max(abs-max(p.bodyRows(), 1)/2, 0)
+	p.revealScroll()
 }
 
 // nextMatch moves to the next (dir 1) or previous (-1) match.

@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -95,7 +96,80 @@ func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (
 		}
 		return finder.EnumerateRemote(ctx, remoteFinderFS{files: files, ignore: newIgnoreBatch(files, expanded)}, expanded, finder.Options{}, emit)
 	}
-	return finder.StartFuncNotify(ctx, enum), expanded
+	x := finder.StartFuncNotify(ctx, enum)
+	// The literal-path probe is authority-only too: it resolves the candidate through
+	// the remote realpath capability and stats it there. There is no local os path, and
+	// a backend that cannot prove containment yields no probe result.
+	x.SetProbe(newRemotePrefixProbe(slot, expanded))
+	return x, expanded
+}
+
+// newRemotePrefixProbe is the remote exact-path probe, bound to the expanded remote
+// root. RealPath is required: without it containment cannot be proven, so the probe
+// refuses rather than falling back to the local filesystem. The candidate must resolve
+// inside the resolved remote root and stat as a regular file.
+func newRemotePrefixProbe(slot authority.Slot, root string) finder.ProbeFunc {
+	return func(ctx context.Context, query string) ([]string, error) {
+		rel, ok := finder.ProbePath(query)
+		if !ok {
+			return nil, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if slot == nil {
+			return nil, nil
+		}
+		fs := slot.Files()
+		if fs == nil {
+			return nil, nil
+		}
+		resolver, ok := authority.RealPathResolver(fs)
+		if !ok {
+			return nil, nil
+		}
+		realRoot, err := resolver.RealPath(ctx, root)
+		if err != nil {
+			return nil, nil
+		}
+		realCandidate, err := resolver.RealPath(ctx, remoteFinderJoin(root, rel))
+		if err != nil {
+			return nil, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !remoteFinderContained(realRoot, realCandidate) {
+			return nil, nil
+		}
+		st, err := fs.Stat(ctx, realCandidate)
+		if err != nil || st.Kind != "file" {
+			return nil, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return []string{rel}, nil
+	}
+}
+
+// remoteFinderJoin joins a slash-separated relative path to a remote root.
+func remoteFinderJoin(root, rel string) string {
+	return strings.TrimSuffix(root, "/") + "/" + rel
+}
+
+// remoteFinderContained reports whether the resolved remote candidate is below the
+// resolved remote root. Both paths are absolute POSIX paths from RealPath.
+func remoteFinderContained(root, candidate string) bool {
+	if !strings.HasPrefix(root, "/") || !strings.HasPrefix(candidate, "/") {
+		return false
+	}
+	root = path.Clean(root)
+	candidate = path.Clean(candidate)
+	if root == "/" {
+		return candidate != "/"
+	}
+	return strings.HasPrefix(candidate, root+"/")
 }
 
 // remoteFinderGitCandidates returns the remote git work tree's candidate files, or ok

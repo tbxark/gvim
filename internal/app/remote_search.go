@@ -166,11 +166,13 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if cancelled() {
 			return
 		}
+		errText := err.Error()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			send(searchpanel.SearchBatch{Done: true, Err: "remote search tool probe timed out"})
+			errText = "remote search tool probe timed out"
+		}
+		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, cancelled, send, errText) {
 			return
 		}
-		send(searchpanel.SearchBatch{Done: true, Err: err.Error()})
 		return
 	}
 	// Fresh's project-file scope is the search scope. When the complete git candidate
@@ -213,18 +215,23 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		if cancelled() {
 			return
 		}
+		errText := "remote search failed: " + err.Error()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			send(searchpanel.SearchBatch{Done: true, Err: "remote search timed out"})
+			errText = "remote search timed out"
+		}
+		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, cancelled, send, errText) {
 			return
 		}
-		send(searchpanel.SearchBatch{Done: true, Err: "remote search failed: " + err.Error()})
 		return
 	}
 	if cancelled() {
 		return
 	}
 	if res.Code > 1 {
-		send(searchpanel.SearchBatch{Done: true, Err: fmt.Sprintf("%s failed on the remote host (exit %d)", tool, res.Code)})
+		errText := fmt.Sprintf("%s failed on the remote host (exit %d)", tool, res.Code)
+		if !sendOpenSnapshotsOnFailure(s, req, q, limit, allowed, cancelled, send, errText) {
+			return
+		}
 		return
 	}
 	truncated := res.Truncated
@@ -357,6 +364,92 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		}
 	}
 	flush(true)
+}
+
+// sendOpenSnapshotsOnFailure streams the open-buffer snapshots (current buffer first)
+// before a terminal tool failure, so unsaved editor text is still searchable when the
+// remote search tool is missing, times out or fails. The terminal batch carries the
+// original error and a notice that only open buffers were searched: the result is never
+// presented as a complete project search, and no local disk is read. It returns false when
+// the caller cancelled (no Done batch is sent then).
+func sendOpenSnapshotsOnFailure(s *remoteSearch, req searchpanel.SearchRequest, q search.Query, limit int, allowed map[string]bool, cancelled func() bool, send func(searchpanel.SearchBatch) bool, errText string) bool {
+	if cancelled() {
+		return false
+	}
+	openSources, _, openOrder := remoteOpenSources(req, s.root, allowed)
+	if len(openSources) == 0 {
+		send(searchpanel.SearchBatch{Done: true, Err: errText})
+		return true
+	}
+	var pending []searchpanel.FileMatches
+	total := 0
+	truncated := false
+	flush := func(done bool, err string, notice string) bool {
+		batch := searchpanel.SearchBatch{Files: pending, Truncated: truncated, Done: done, Err: err, Notice: notice}
+		if done && len(pending) > 0 {
+			batch.Notice = "remote search tool unavailable: only open buffers were searched from their editor snapshots; the remote project files were not searched"
+		}
+		if !send(batch) {
+			return false
+		}
+		pending = nil
+		return true
+	}
+	add := func(rel string, src searchpanel.SourceFile) bool {
+		if cancelled() || total >= limit {
+			return true
+		}
+		matches := remoteSourceMatches(src.Text, q)
+		if len(matches) == 0 {
+			return true
+		}
+		fm := searchpanel.FileMatches{Path: joinRemotePath(s.root, rel), Name: rel, Hash: hashText(src.Text), Dirty: src.Dirty}
+		for _, m := range matches {
+			fm.Matches = append(fm.Matches, m)
+			if total+len(fm.Matches) >= limit {
+				truncated = true
+				break
+			}
+		}
+		if len(fm.Matches) > 0 {
+			total += len(fm.Matches)
+			pending = append(pending, fm)
+		}
+		if len(pending) >= searchBatchFiles || total >= searchBatchMatches {
+			return flush(false, "", "")
+		}
+		return true
+	}
+	emitted := map[string]bool{}
+	if req.Current != nil {
+		if rel, ok := remoteRelPath(req.Current.Path, s.root); ok {
+			if src, in := openSources[rel]; in {
+				emitted[rel] = true
+				if !add(rel, src) {
+					return false
+				}
+			}
+		}
+	}
+	for _, rel := range openOrder {
+		if emitted[rel] {
+			continue
+		}
+		if !add(rel, openSources[rel]) {
+			return false
+		}
+	}
+	if len(pending) > 0 {
+		if !flush(false, "", "") {
+			return false
+		}
+	}
+	// The terminal failure batch: the files already streamed above remain visible, while
+	// the error says the project search did not run.
+	if !send(searchpanel.SearchBatch{Done: true, Truncated: truncated, Err: errText, Notice: "remote search tool unavailable: only open buffers were searched from their editor snapshots; the remote project files were not searched"}) {
+		return false
+	}
+	return true
 }
 
 // remoteProjectResultScope narrows the whole-tree remote project search to Fresh's

@@ -1,10 +1,13 @@
 package palette
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -887,5 +890,201 @@ func TestBufferModeUsesTheFuzzyMatcher(t *testing.T) {
 	// Every term must match: "save my" has no buffer with both terms.
 	if p := New(Options{Query: "#save my", Buffers: buffers}); len(p.rows) != 0 {
 		t.Fatalf("all-term query matched %+v, want no rows", p.rows)
+	}
+}
+
+// probeFiles is a Files whose optional literal-path probe returns probe's answer and
+// counts calls. It models the finder index during its initial enumeration.
+type probeFiles struct {
+	fakeFiles
+	calls int
+	probe func(ctx context.Context, query string) ([]string, error)
+}
+
+func (f *probeFiles) Probe(ctx context.Context, query string) ([]string, error) {
+	f.calls++
+	if f.probe != nil {
+		return f.probe(ctx, query)
+	}
+	return nil, nil
+}
+
+// blockingProbeFiles blocks its probe until the palette cancels it.
+type blockingProbeFiles struct {
+	fakeFiles
+	started  chan struct{}
+	canceled chan struct{}
+	once     sync.Once
+}
+
+func (f *blockingProbeFiles) Probe(ctx context.Context, _ string) ([]string, error) {
+	f.once.Do(func() { close(f.started) })
+	<-ctx.Done()
+	close(f.canceled)
+	return nil, ctx.Err()
+}
+
+// TestFileModeUsesTheLiteralPathProbe: the exact path is added before ranking while
+// the index is loading, and the probe runs only in the tea.Cmd (never in New/Update).
+func TestFileModeUsesTheLiteralPathProbe(t *testing.T) {
+	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	files.probe = func(context.Context, string) ([]string, error) { return []string{"a.go"}, nil }
+	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
+	if files.calls != 0 {
+		t.Fatalf("probe ran synchronously %d times in New", files.calls)
+	}
+	cmd := p.Init()
+	if cmd == nil {
+		t.Fatal("Init returned no ranking command")
+	}
+	if files.calls != 0 {
+		t.Fatalf("probe ran synchronously when the command was built")
+	}
+	msg := cmd()
+	if files.calls != 1 {
+		t.Fatalf("probe calls = %d, want 1", files.calls)
+	}
+	p.update(msg)
+	if p.probeText != "a.go" || len(p.probePaths) != 1 || p.probePaths[0] != "a.go" {
+		t.Fatalf("probe cache = %q %v, want a.go", p.probeText, p.probePaths)
+	}
+	if len(p.rows) == 0 || p.rows[0].kind != rowFile || p.rows[0].name != "a.go" {
+		t.Fatalf("rows = %+v, want the probed a.go", p.rows)
+	}
+}
+
+// TestFileProbeResultIsDroppedForAChangedQuery: a probe/ranking message is displayed
+// only for the current seq and text.
+func TestFileProbeResultIsDroppedForAChangedQuery(t *testing.T) {
+	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
+	// Force a newer query without running the old command.
+	p.update(typed("x"))
+	if cmd := p.update(FileRankedMsg{Seq: p.seq - 1, Text: "a.go", Matches: []Ranked{{Path: "a.go"}}, Loading: false, Probed: []string{"a.go"}, ProbeDone: true}); cmd != nil {
+		t.Fatalf("stale probe result returned a command: %v", cmd)
+	}
+	for _, r := range p.rows {
+		if r.kind == rowFile {
+			t.Fatalf("stale probe result showed a file row: %+v", p.rows)
+		}
+	}
+	if p.probeText == "a.go" {
+		t.Fatal("stale probe result populated the probe cache")
+	}
+}
+
+// TestFileProbeIsCanceledWhenTheQueryChanges: Update returns at once while the probe
+// is blocked, and the next query cancels the in-flight probe context.
+func TestFileProbeIsCanceledWhenTheQueryChanges(t *testing.T) {
+	files := &blockingProbeFiles{
+		fakeFiles: fakeFiles{loading: true},
+		started:   make(chan struct{}),
+		canceled:  make(chan struct{}),
+	}
+	p := New(Options{Query: "a", Files: files, Ranker: &fakeRanker{}})
+	cmd := p.Init()
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	select {
+	case <-files.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the probe did not start")
+	}
+	// Update must not wait for the probe; it replaces/cancels it.
+	next := p.update(typed("b"))
+	_ = next
+	select {
+	case <-files.canceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("changing the query did not cancel the blocked probe")
+	}
+	select {
+	case msg := <-done:
+		if msg != nil {
+			t.Fatalf("a canceled probe command returned %#v, want nil", msg)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the canceled probe command did not return")
+	}
+}
+
+// TestFileProbeIsCachedWhileLoading: poll ticks while the index is still loading reuse
+// the probe answer instead of probing once per tick.
+func TestFileProbeIsCachedWhileLoading(t *testing.T) {
+	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	files.probe = func(context.Context, string) ([]string, error) { return []string{"a.go"}, nil }
+	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
+	msg := p.Init()()
+	p.update(msg)
+	if files.calls != 1 {
+		t.Fatalf("probe calls after first rank = %d, want 1", files.calls)
+	}
+	tick := p.update(fileTickMsg{Seq: p.seq})
+	if tick == nil {
+		t.Fatal("a loading tick returned no ranking command")
+	}
+	p.update(tick())
+	if files.calls != 1 {
+		t.Fatalf("probe calls after a loading tick = %d, want the cached 1", files.calls)
+	}
+}
+
+// TestFileProbeStopsAfterLoading: the probe is part of the loading phase only; a
+// completed index is ranked from its list.
+func TestFileProbeStopsAfterLoading(t *testing.T) {
+	files := &probeFiles{fakeFiles: fakeFiles{loading: false}}
+	files.probe = func(context.Context, string) ([]string, error) { return []string{"a.go"}, nil }
+	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
+	p.update(p.Init()())
+	if files.calls != 0 {
+		t.Fatalf("probe calls after the index completed = %d, want 0", files.calls)
+	}
+}
+
+// TestPaletteDismissCancelsTheProbe: the root's Esc/cancel path calls Dismiss, which
+// must cancel an in-flight literal-path probe.
+func TestPaletteDismissCancelsTheProbe(t *testing.T) {
+	files := &blockingProbeFiles{
+		fakeFiles: fakeFiles{loading: true},
+		started:   make(chan struct{}),
+		canceled:  make(chan struct{}),
+	}
+	p := New(Options{Query: "a", Files: files, Ranker: &fakeRanker{}})
+	cmd := p.Init()
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	select {
+	case <-files.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the probe did not start")
+	}
+	p.Dismiss()
+	select {
+	case <-files.canceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Dismiss did not cancel the probe")
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the canceled probe command did not return")
+	}
+}
+
+// TestFileResultWithTheWrongTextIsDropped: even with the current seq, a result whose
+// text is not the palette's current file text is not displayed or cached.
+func TestFileResultWithTheWrongTextIsDropped(t *testing.T) {
+	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
+	if cmd := p.update(FileRankedMsg{Seq: p.seq, Text: "other.go", Matches: []Ranked{{Path: "a.go"}}, Loading: false, Probed: []string{"a.go"}, ProbeDone: true}); cmd != nil {
+		t.Fatalf("wrong-text result returned a command: %v", cmd)
+	}
+	for _, r := range p.rows {
+		if r.kind == rowFile {
+			t.Fatalf("wrong-text result showed a file row: %+v", p.rows)
+		}
+	}
+	if p.probeText == "a.go" {
+		t.Fatal("wrong-text result populated the probe cache")
 	}
 }

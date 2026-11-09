@@ -1635,3 +1635,138 @@ func TestRemoteSearchOpenSnapshotWithoutFileIndexStillSearched(t *testing.T) {
 		t.Fatalf("files = %v, want only the under-root open snapshot", names)
 	}
 }
+
+// TestRemoteSearchToolUnavailableStillShowsOpenSnapshots checks the Fresh behavior where
+// open-buffer snapshots remain searchable when the remote tool is missing: the matches are
+// streamed first, then a terminal error says the project files were not searched (never a
+// complete result). No local disk is read.
+func TestRemoteSearchToolUnavailableStillShowsOpenSnapshots(t *testing.T) {
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("none")}, nil
+		}
+		return hostos.ProcResult{}, errors.New("unexpected command: " + strings.Join(argv, " "))
+	}}
+	cur := searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "todo unsaved\n", Dirty: true}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:      "/remote/w",
+		Query:     "todo",
+		Scope:     searchpanel.AllFiles,
+		Current:   &cur,
+		OpenFiles: []searchpanel.SourceFile{cur},
+	}, nil))
+	var files []searchpanel.FileMatches
+	var done *searchpanel.SearchBatch
+	for i := range batches {
+		files = append(files, batches[i].Files...)
+		if batches[i].Done {
+			done = &batches[i]
+		}
+	}
+	if done == nil || done.Err == "" || !strings.Contains(done.Err, "no search tool") {
+		t.Fatalf("done = %+v, want the no-tool error", done)
+	}
+	if len(files) != 1 || files[0].Name != "a.go" || !files[0].Dirty || len(files[0].Matches) != 1 {
+		t.Fatalf("open snapshot files = %+v, want a.go with the unsaved match", files)
+	}
+	if !strings.Contains(done.Notice, "only open buffers were searched") {
+		t.Fatalf("notice = %q, want the partial-results notice", done.Notice)
+	}
+}
+
+// TestRemoteSearchToolFailureStillShowsOpenSnapshots checks the same partial behavior when
+// the tool exists but its run fails: the open matches survive, and the terminal batch keeps
+// the original failure.
+func TestRemoteSearchToolFailureStillShowsOpenSnapshots(t *testing.T) {
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		return hostos.ProcResult{}, errors.New("spawn failed")
+	}}
+	cur := searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "todo open\n", Dirty: true}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:      "/remote/w",
+		Query:     "todo",
+		Scope:     searchpanel.AllFiles,
+		Current:   &cur,
+		OpenFiles: []searchpanel.SourceFile{cur},
+	}, nil))
+	var files []searchpanel.FileMatches
+	var done *searchpanel.SearchBatch
+	for i := range batches {
+		files = append(files, batches[i].Files...)
+		if batches[i].Done {
+			done = &batches[i]
+		}
+	}
+	if done == nil || !strings.Contains(done.Err, "remote search failed") {
+		t.Fatalf("done = %+v, want the tool-run failure", done)
+	}
+	if len(files) != 1 || files[0].Name != "a.go" || len(files[0].Matches) != 1 {
+		t.Fatalf("open snapshot files = %+v, want a.go match", files)
+	}
+}
+
+// TestRemoteSearchToolUnavailableWithoutOpenSnapshots checks the unchanged empty case: no
+// open buffers means just the accurate terminal error and no fake result rows.
+func TestRemoteSearchToolUnavailableWithoutOpenSnapshots(t *testing.T) {
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		return hostos.ProcResult{Stdout: []byte("none")}, nil
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	if len(batches) != 1 || !batches[0].Done || batches[0].Err == "" || len(batches[0].Files) != 0 {
+		t.Fatalf("batches = %+v, want one error-only Done", batches)
+	}
+}
+
+// TestRemoteSearchToolUnavailableCancellation checks cancellation still closes the stream
+// without a Done batch and without emitting open-snapshot rows after the cancel.
+func TestRemoteSearchToolUnavailableCancellation(t *testing.T) {
+	probeStarted := make(chan struct{})
+	one := &fakeOneShot{script: func(ctx context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		close(probeStarted)
+		<-ctx.Done()
+		return hostos.ProcResult{}, ctx.Err()
+	}}
+	cur := searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "todo open\n", Dirty: true}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	cancel := make(chan struct{})
+	ch := s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:      "/remote/w",
+		Query:     "todo",
+		Scope:     searchpanel.AllFiles,
+		Current:   &cur,
+		OpenFiles: []searchpanel.SourceFile{cur},
+	}, cancel)
+	select {
+	case <-probeStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the tool probe did not start")
+	}
+	close(cancel)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case b, ok := <-ch:
+			if !ok {
+				return
+			}
+			if b.Done {
+				t.Fatal("a cancelled search sent a Done batch")
+			}
+			if len(b.Files) > 0 {
+				t.Fatalf("a cancelled search emitted open rows: %+v", b.Files)
+			}
+		case <-deadline:
+			t.Fatal("a cancelled search did not close its channel")
+		}
+	}
+}

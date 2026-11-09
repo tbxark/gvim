@@ -499,3 +499,25 @@ local overlay is never forwarded to the remote host; see docs/authority.md §2/�
 kind, markers and require evidence; it is read-only this round — edit
 `env.detectors` in the user config JSON to replace the built-in list (a project
 config cannot set it).
+
+For a **local** workspace the app watches the detector marker/require entries with the
+editor's local fsnotify watcher (the same bounded `env.MaxDetectorWatchDirs` /
+`env.MaxDetectorWatchPaths` plan as the remote watcher: the root plus existing parent
+directories). A created/removed marker refreshes the passive detection on the watcher
+goroutine, never the UI update loop; the active recipe/capture cache stays independent. If
+fsnotify cannot start or the workspace root/parent cannot be watched, the Environment rows
+show a clear `Environment watch` notice pointing at Env: Reload (no polling or remote
+fallback), and a later successful re-arm clears it. The watcher is released exactly once on
+startup failure, optional-directory failure, session cancellation and Close. Real-fsnotify
+integration tests use temporary directories (marker create/remove, a nested detector parent
+appearing after start with arm-before-refresh, and an unwatchable root), waiting on state
+with deadlines rather than fixed sleeps; production still pays filewatch's quiet period
+(150 ms) and platform event latency. This deliberately differs from Fresh's env probe watch,
+which treats a watch-registration failure as a silent no-watch and leaves the cached
+detection stale until another invalidation.
+
+A config Reload that changes `env.detectors` applies immediately without a restart: a local
+provider replaces its detector list and re-runs the passive scan (detection-only; active
+recipe/cache kept), and a remote provider is updated with its bounded authority watcher
+re-planned off the update loop. The Detectors page itself stays read-only; external config
+edits need Reload/restart.

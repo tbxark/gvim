@@ -51,6 +51,9 @@ type localEnvWatch struct {
 	replan chan struct{}
 
 	wg sync.WaitGroup
+	// closeWatch makes watcher/fsnotify cleanup idempotent across the startup-failure
+	// path, Close, and the goroutine exiting on session cancellation.
+	closeWatch sync.Once
 
 	mu     sync.Mutex
 	added  map[string]bool
@@ -69,14 +72,29 @@ func startLocalEnvWatch(parent context.Context, provider *env.Provider, root str
 }
 
 func startLocalEnvWatchWith(parent context.Context, provider *env.Provider, root string, watcher envFileWatch, err error) *localEnvWatch {
-	if provider == nil || root == "" {
+	// Ownership of watcher transfers to this constructor: every early return must release
+	// a started fsnotify watcher instead of leaking its goroutine/descriptors.
+	closeWatcher := func() {
+		if watcher != nil {
+			_ = watcher.Close()
+		}
+	}
+	if provider == nil {
+		closeWatcher()
+		return nil
+	}
+	if root == "" {
+		closeWatcher()
+		provider.SetWatchNotice(appTextVars("gvim.notice.local_env_watch_root_failed", "Local environment: cannot resolve the workspace root (%{error}); changed detector markers are picked up on Env: Reload", map[string]any{"error": "no workspace root"}))
 		return nil
 	}
 	if err != nil {
+		closeWatcher()
 		provider.SetWatchNotice(appTextVars("gvim.notice.local_env_watch_unavailable", "Local environment: file watching is unavailable (%{error}); changed detector markers are picked up on Env: Reload", map[string]any{"error": err}))
 		return nil
 	}
 	if watcher == nil {
+		provider.SetWatchNotice(appTextVars("gvim.notice.local_env_watch_unavailable", "Local environment: file watching is unavailable (%{error}); changed detector markers are picked up on Env: Reload", map[string]any{"error": "the file watcher is unavailable"}))
 		return nil
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -87,7 +105,7 @@ func startLocalEnvWatchWith(parent context.Context, provider *env.Provider, root
 	lw.plan.Store(buildEnvWatchPlan(provider.Detectors()))
 	if !lw.armDirs() {
 		// The workspace root could not be watched: fsnotify is unusable for this launch.
-		_ = watcher.Close()
+		lw.closeResources()
 		cancel()
 		return nil
 	}
@@ -123,12 +141,25 @@ func (lw *localEnvWatch) Close() {
 	lw.closed = true
 	lw.mu.Unlock()
 	lw.cancel()
-	_ = lw.watcher.Close()
+	lw.closeResources()
 	lw.wg.Wait()
+}
+
+// closeResources releases the file watcher exactly once, whether startup failed, the
+// session context ended, or Close was called.
+func (lw *localEnvWatch) closeResources() {
+	lw.closeWatch.Do(func() {
+		if lw.watcher != nil {
+			_ = lw.watcher.Close()
+		}
+	})
 }
 
 func (lw *localEnvWatch) run() {
 	defer lw.wg.Done()
+	// Session cancellation ends the goroutine; no caller necessarily calls Close in
+	// production, so release the fsnotify watcher here (idempotent with Close).
+	defer lw.closeResources()
 	for {
 		select {
 		case <-lw.ctx.Done():

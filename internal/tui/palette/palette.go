@@ -21,6 +21,7 @@ package palette
 
 import (
 	"cmp"
+	"context"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -71,6 +72,15 @@ type Files interface {
 	// Snapshot returns the files found so far and whether the enumeration is
 	// still running.
 	Snapshot() (files []string, loading bool)
+}
+
+// PrefixProber is the optional literal-path probe of the file index: it returns
+// the exact file a typed path names, without enumerating anything. It is called
+// from a tea.Cmd only; implementations must honor ctx and must not fall back to
+// another filesystem or root. A nil error with no paths means the typed path is
+// not a file there.
+type PrefixProber interface {
+	Probe(ctx context.Context, query string) ([]string, error)
 }
 
 // Ranker scores paths against a query and returns at most limit of them, best
@@ -182,6 +192,13 @@ type FileRankedMsg struct {
 	// from the git file list to a directory walk). It is shown as one informative row; it
 	// never hides or disables the results.
 	Notice string
+	// Probed is the literal-path probe's result for this query, already merged into
+	// Matches. A poll while the index is still loading reuses it instead of probing
+	// again.
+	Probed []string
+	// ProbeDone says Probed is the probe's answer (possibly empty). False means no
+	// probe ran for this result.
+	ProbeDone bool
 }
 
 // fileTickMsg asks the palette to rank the file rows again. It is sent after
@@ -270,6 +287,12 @@ type Palette struct {
 	// fileLine and fileCol are the position a "path:line[:col]" file query names, both
 	// 1-based; 0 when the query names none.
 	fileLine, fileCol int
+	// probeCancel cancels the literal-path probe of the current file query; it is
+	// replaced on every ranking and called when the query changes or the palette
+	// closes. probeText/probePaths cache the probe answer for the loading poll ticks.
+	probeCancel context.CancelFunc
+	probeText   string
+	probePaths  []string
 	// grep is the Live Grep state: the match modes, the scope toggles and the last
 	// result's count.
 	grep grepState
@@ -582,6 +605,7 @@ func (p *Palette) click(m tea.Mouse) tea.Cmd {
 // closes. A disabled command stays open, so the user can pick another row.
 func (p *Palette) run(i int) tea.Cmd {
 	if len(p.rows) == 0 {
+		p.cancelProbe()
 		p.open = false
 		return nil
 	}
@@ -592,8 +616,23 @@ func (p *Palette) run(i int) tea.Cmd {
 	if r.disabled {
 		return nil
 	}
+	p.cancelProbe()
 	p.open = false
 	return r.command(p.opts.Root, p.opts.Remote)
+}
+
+// Dismiss cancels the in-flight literal-path probe. The root calls it when Esc (or
+// another cancel path) closes the palette; the palette's own run path calls it too.
+func (p *Palette) Dismiss() {
+	p.cancelProbe()
+}
+
+// cancelProbe cancels the query's probe, if any.
+func (p *Palette) cancelProbe() {
+	if p.probeCancel != nil {
+		p.probeCancel()
+		p.probeCancel = nil
+	}
 }
 
 // Covers reports whether the point (x, y) of a w by h frame is on the palette card:
@@ -640,6 +679,9 @@ func (p *Palette) syncSize() {
 // until its result arrives. The first file query shows the loading row.
 func (p *Palette) requery() tea.Cmd {
 	p.seq++
+	p.cancelProbe()
+	p.probeText = ""
+	p.probePaths = nil
 	query := p.input.Value()
 	if p.live {
 		return p.liveQuery(p.seq, query)
@@ -680,8 +722,19 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 	if p.opts.Ranker == nil {
 		return nil
 	}
+	p.cancelProbe()
+	ctx, cancel := context.WithCancel(context.Background())
+	p.probeCancel = cancel
 	files, rk := p.opts.Files, p.opts.Ranker
+	// A ranking poll while loading reuses the probe answer for the same query. A new
+	// query reset the cache in requery, so probeText not matching text means probe.
+	probed := p.probePaths
+	probeDone := p.probeText == text
+	if !probeDone {
+		probed = nil
+	}
 	return func() tea.Msg {
+		defer cancel()
 		var list []string
 		loading := true
 		errText := ""
@@ -703,8 +756,51 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 				}
 			}
 		}
-		return FileRankedMsg{Seq: seq, Text: text, Matches: rk.Rank(text, list, fileLimit), Loading: loading, ErrText: errText, Truncated: truncated, Notice: notice}
+		// Fresh's fast prefix probe slice: while the index is still enumerating,
+		// ask the literal-path probe for the one exact file the query names. The
+		// probe is I/O in this command goroutine, never in Update/Draw; ctx makes it
+		// cancellable when the query changes or the palette closes.
+		if !probeDone && loading && text != "" {
+			if prober, ok := files.(PrefixProber); ok {
+				paths, err := prober.Probe(ctx, text)
+				if err == nil {
+					probed = paths
+				}
+				probeDone = true
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+		if len(probed) > 0 {
+			list = withProbePaths(list, probed)
+		}
+		matches := rk.Rank(text, list, fileLimit)
+		return FileRankedMsg{Seq: seq, Text: text, Matches: matches, Loading: loading, ErrText: errText, Truncated: truncated, Notice: notice, Probed: probed, ProbeDone: probeDone}
 	}
+}
+
+// withProbePaths puts the literal-path probe results first and drops duplicates from
+// the index list, so the confirmed exact path is ranked with the normal scorer/prefix
+// boost and cannot appear twice.
+func withProbePaths(list, probes []string) []string {
+	seen := make(map[string]struct{}, len(list)+len(probes))
+	out := make([]string, 0, len(list)+len(probes))
+	for _, path := range probes {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	for _, path := range list {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
 }
 
 // applyFiles shows a ranked result when it answers the current query. The
@@ -712,8 +808,14 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 // was still loading asks for another ranking after pollInterval, so the rows
 // follow the index without a key press.
 func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
-	if msg.Seq != p.seq || !p.inFile {
+	// A ranking/probe result is shown only when it is the current query: the seq is
+	// the palette's latest and the text is the path this result ranked.
+	if msg.Seq != p.seq || !p.inFile || msg.Text != p.fileText {
 		return nil
+	}
+	if msg.ProbeDone {
+		p.probeText = msg.Text
+		p.probePaths = msg.Probed
 	}
 	p.rows = fileRows(msg.Matches, msg.Loading, p.fileLine, p.fileCol, msg.ErrText, msg.Truncated, msg.Notice)
 	p.syncSize()
