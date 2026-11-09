@@ -162,11 +162,14 @@ type plugin struct {
 	mkv     map[string]lua.LValue
 	feature map[string]bool
 
-	data      dataState // settings, exports and caches of the data API (api_data.go)
-	unloadFns []*lua.LFunction
-	cleanups  []func()
-	format    lua.LValue // the stock string.format, for logging
-	tostring  lua.LValue // the stock tostring
+	data dataState // settings, exports and caches of the data API (api_data.go)
+	// dashboard are the dashboard sections this plugin registered (api_dashboard.go).
+	dashboard    map[string]*dashboardSection // by name
+	dashboardSeq int
+	unloadFns    []*lua.LFunction
+	cleanups     []func()
+	format       lua.LValue // the stock string.format, for logging
+	tostring     lua.LValue // the stock tostring
 }
 
 // muted plugins receive no events, timers or key layers (failed, suspended or gone).

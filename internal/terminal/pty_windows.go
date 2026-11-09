@@ -219,3 +219,10 @@ func (e *windowsExitError) Error() string {
 
 // ExitCode returns the process exit code.
 func (e *windowsExitError) ExitCode() int { return int(e.code) }
+
+// supportsForegroundProcess reports false: ConPTY has no portable foreground
+// process group to read, so the dock keeps the recorded launch/OSC title.
+func (p *windowsPTY) supportsForegroundProcess() bool { return false }
+
+// foregroundProcessName is unavailable on Windows.
+func (p *windowsPTY) foregroundProcessName() (string, bool) { return "", false }

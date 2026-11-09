@@ -77,6 +77,11 @@ type Panel struct {
 	// session, so combined window/dock focus changes never send a duplicate.
 	termFocusSet bool
 	termFocus    bool
+	// fgName is the cached foreground process name of a local shell, refreshed by
+	// the bounded poll chain in foreground.go. Empty for a remote/unsupported
+	// terminal, a restored tab or an exited shell (the label then falls back to the
+	// launch record and then the OSC title).
+	fgName string
 	// hostBlurred is the outer terminal window's focus state (true when the OS
 	// window is not focused). The child gets focus-in only when the dock has the
 	// keyboard focus AND the window is focused; zero value = focused, matching a
@@ -558,7 +563,16 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			// The dock was shown to get this shell, so the shell takes the focus.
 			p.focusDock()
 		}
+		// Start the bounded foreground-process poll chain (a command; Update does no
+		// IO). A remote or Windows transport reports unsupported and returns nil.
+		if p.foregroundPollSupported() {
+			return p.foregroundPollCmd(), true
+		}
 		return nil, true
+	case foregroundPollMsg:
+		return p.applyForegroundPoll(msg), true
+	case foregroundPollTickMsg:
+		return p.applyForegroundTick(msg), true
 	case dragScrollMsg:
 		return p.dragScrollTick(msg), true
 	case outputMsg:
@@ -588,6 +602,7 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			p.exitCode, p.exitKnown = msg.code, msg.codeOK
 			p.exitMarker = true
 			p.termFocusSet = false
+			p.fgName = ""
 			p.focus = false
 			p.queue = nil
 			p.scroll = scrollState{}

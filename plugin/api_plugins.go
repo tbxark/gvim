@@ -146,7 +146,17 @@ func installPlugins(e *apiEnv) {
 			L.Push(lua.LString("fn"))
 			return 1
 		}
-		if _, ok := target.data.exports[key]; ok {
+		if target.dashboardFunction(key) != nil {
+			// Only the bundled dashboard plugin may call a section callback key. Other
+			// plugins must not even see a callable proxy for it.
+			if !isDashboardConsumer(p) {
+				L.Push(lua.LNil)
+				return 1
+			}
+			L.Push(lua.LString("fn"))
+			return 1
+		}
+		if target.exportedFunction(key) != nil {
 			L.Push(lua.LString("fn"))
 			return 1
 		}
@@ -177,9 +187,14 @@ func awaitPluginCall(c *awaitCall) {
 		c.Fail(notFoundErr("plugin '%s' is not loaded", name))
 		return
 	}
-	fn, _ := target.data.exports[key].(*lua.LFunction)
+	fn := target.exportedFunction(key)
 	if fn == nil {
 		c.Fail(notFoundErr("plugin '%s' does not export a function '%s'", name, key))
+		return
+	}
+	dashboardCallback := target.dashboardFunction(key) != nil
+	if dashboardCallback && !isDashboardConsumer(caller) {
+		c.Fail(invalidErr("dashboard section callbacks may only be called by the bundled dashboard plugin"))
 		return
 	}
 	if c.t.xdepth >= maxXDepth {
@@ -244,6 +259,11 @@ func awaitPluginCall(c *awaitCall) {
 				}
 				if err != nil {
 					return fail(errString(invalidErr("result: %s", err.Error())))
+				}
+				if dashboardCallback {
+					if err := validateDashboardResult(goVal); err != nil {
+						return fail(errString(err))
+					}
 				}
 				out = append(out, caller.toLua(goVal))
 			}

@@ -178,6 +178,16 @@ deliberately does not take.
   hidden filter and a symlink's target kind; `WriteFile` supports truncate/append, `Parents`
   (`mkdir -p`) and `Atomic`; `Watch` polls (500 ms) because a remote host has no fsnotify
   channel.
+- Server-side bounded directory listing (evaluated, NOT enabled): the remote finder fallback
+  cannot get a provable hard server-side bound from the portable tools. A `find -print0 |
+  head -c` pass limits output/memory bytes and avoids shell-glob materialisation, but a
+  kind-filtered pass may walk entries without emitting them, so it is not a provable bound
+  on traversal/entries; a `-exec` per-entry marker would spawn unbounded children for
+  short names, and `-printf` is not portable to BSD/macOS. The earlier candidate therefore
+  ships nothing: no `LimitedDirReader` capability is advertised, the finder keeps its
+  existing `ReadDir` walk and its explicit oversized-directory error, and gvim does not
+  claim a server-side bounded listing. The finder's existing entry/dir caps and the
+  directory listing's 5000-entry/4 MiB error remain the limits.
 - Atomic saves: the atomic path creates `mktemp` in the target directory, streams stdin into
   it with `cat`, applies the resolved mode, then `mv -f` over the target: a same-directory
   rename, which is the atomicity the local port relies on. The target's existing permission

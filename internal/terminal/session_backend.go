@@ -57,3 +57,11 @@ func (p backendProc) Resize(cols, rows int) error { return p.b.Resize(cols, rows
 func (p backendProc) Kill() error                 { return p.b.Kill() }
 func (p backendProc) Wait() error                 { return p.b.Wait() }
 func (p backendProc) Close() error                { return p.b.Close() }
+
+// supportsForegroundProcess reports false for a remote transport: the dock polls
+// only a local PTY, and a remote shell's foreground process lives on the far host
+// (this is not the remote editing filesystem either).
+func (p backendProc) supportsForegroundProcess() bool { return false }
+
+// foregroundProcessName is unavailable on a remote transport.
+func (p backendProc) foregroundProcessName() (string, bool) { return "", false }

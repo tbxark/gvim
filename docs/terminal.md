@@ -350,11 +350,20 @@ background tabs' exited markers current.
   top level, so a restored tab keeps its recorded title and re-saves it even
   without a live shell; an old record has no `title` and keeps its derived label.
   The visible effect is the tab label, following Fresh's
-  `combine_terminal_title`: an explicit rename wins; otherwise the recorded launch
-  program (argv[0]/agent — Fresh's "command leads" half) and the recorded or live
-  OSC title are combined as `command — title` (em dash), except when the OSC title
-  already names the command case-insensitively (vim's `file - VIM`), which is used
-  alone; either part alone is used as-is and both empty falls back to `Terminal N`.
+  `combine_terminal_title`: an explicit rename wins; otherwise the terminal's live
+  foreground command and the recorded or live OSC title are combined as
+  `command — title` (em dash), except when the OSC title already names the command
+  case-insensitively (vim's `file - VIM`), which is used alone; either part alone
+  is used as-is and both empty falls back to `Terminal N`. For a **local Unix**
+  shell the command is the foreground process name Fresh polls (its
+  `FG_POLL_INTERVAL` of about one second): gvim does the same bounded, non-blocking
+  poll in a `tea.Cmd` — one `tcgetpgrp` ioctl on the PTY master plus a
+  bounded `/proc/<pgid>/comm` read on Linux, or a 500 ms-bounded
+  `ps -o comm= -p <pgid>` on other Unix platforms (no shell involved) — and caches
+  the sanitized name per tab, so a program that starts, exits or is replaced in the
+  foreground updates the label within one poll. A **remote**, **Windows**,
+  **restored** or **exited** terminal reports no poll capability and falls back to
+  the recorded launch program (argv[0]/agent), then the OSC title.
   The strip's duplicate disambiguation and cell-budget truncation still apply, and
   an untrusted title is cleaned again before painting/combining. The record format
   stays version 1, old readers ignore the field, old records without a title keep
@@ -452,14 +461,21 @@ cwd (persisted and used for the next start, but not replayed as terminal state),
 OSC 52 clipboard and hyperlinks are not replayed, per-cell hyperlinks are not
 representable in the snapshot (the cell encoding has no link field), the cursor
 shape is recorded but the read-only view paints it as a block (the restored shell
-does not inherit the old DECSCUSR mode), the OSC 0/2 title is combined with the
-recorded launch program rather than Fresh's live foreground-process name (gvim
-keeps no pty foreground cache, so a program that later starts a different
-foreground process inside the shell is not reflected — OPEN), and alternate-screen content is restored
+does not inherit the old DECSCUSR mode), and alternate-screen content is restored
 only as the read-only transcript frame: a revived shell starts on its own main
 screen, the main screen's history while the alt screen was active is not captured
 (the alt screen has no scrollback), and the alt frame is bounded by the same
-snapshot limits as the visible screen. Fresh can bring live tabs back without a dive because its layout focuses
+snapshot limits as the visible screen. The title's command half is now the live
+local foreground process polled every ~1 s (tcgetpgrp and `/proc/<pgid>/comm` on
+Linux, a 500 ms-bounded `ps` elsewhere); it is the process-group leader's program
+name, not the full argv, its polling is bounded and starts/stops with the shell
+(an old shell generation's answer is dropped), and a foreground change is
+reflected up to one poll interval later. Remote and Windows terminals keep the
+recorded launch program instead (no remote process introspection, no ConPTY
+foreground group); a restored or exited tab keeps the saved title/launch fallback;
+background tabs keep polling; Linux `comm` truncates to 15 characters, a missing
+`ps` degrades to the fallback rather than an error, and the name is sanitized and
+bounded to 64 runes before it reaches a label. Fresh can bring live tabs back without a dive because its layout focuses
 the tab; gvim's dock is not restored into an editor split, so the dive is the
 first user action on the dock. A buffer shared across workspaces and extract-tab
 are the #19b policy decisions and remain open.

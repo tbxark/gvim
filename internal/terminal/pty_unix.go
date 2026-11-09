@@ -5,6 +5,7 @@ package terminal
 import (
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/creack/pty"
 )
@@ -23,6 +24,12 @@ func spawn(cmd *exec.Cmd, cols, rows int) (ptyProc, error) {
 type unixPTY struct {
 	ptmx *os.File
 	cmd  *exec.Cmd
+	// fdMu guards the master fd against Close while a foreground-process poll is
+	// reading the terminal's foreground process group (tcgetpgrp). The poll holds
+	// it only for the ioctl, not for the process-name lookup (which uses the pgid
+	// alone), so Close is not delayed by a ps spawn.
+	fdMu   sync.RWMutex
+	closed bool
 }
 
 func (p *unixPTY) Read(b []byte) (int, error)  { return p.ptmx.Read(b) }
@@ -45,4 +52,14 @@ func (p *unixPTY) Kill() error {
 func (p *unixPTY) Wait() error { return p.cmd.Wait() }
 
 // Close releases the PTY master.
-func (p *unixPTY) Close() error { return p.ptmx.Close() }
+func (p *unixPTY) Close() error {
+	p.fdMu.Lock()
+	p.closed = true
+	err := p.ptmx.Close()
+	p.fdMu.Unlock()
+	return err
+}
+
+// supportsForegroundProcess reports that a local Unix PTY can expose the
+// foreground process group.
+func (p *unixPTY) supportsForegroundProcess() bool { return true }

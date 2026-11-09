@@ -945,8 +945,8 @@ func TestFileModeUsesTheLiteralPathProbe(t *testing.T) {
 		t.Fatalf("probe calls = %d, want 1", files.calls)
 	}
 	p.update(msg)
-	if p.probeText != "a.go" || len(p.probePaths) != 1 || p.probePaths[0] != "a.go" {
-		t.Fatalf("probe cache = %q %v, want a.go", p.probeText, p.probePaths)
+	if paths, ok := p.cachedProbe("a.go"); !ok || len(paths) != 1 || paths[0] != "a.go" {
+		t.Fatalf("probe cache = %v, %v; want a.go", paths, ok)
 	}
 	if len(p.rows) == 0 || p.rows[0].kind != rowFile || p.rows[0].name != "a.go" {
 		t.Fatalf("rows = %+v, want the probed a.go", p.rows)
@@ -968,7 +968,7 @@ func TestFileProbeResultIsDroppedForAChangedQuery(t *testing.T) {
 			t.Fatalf("stale probe result showed a file row: %+v", p.rows)
 		}
 	}
-	if p.probeText == "a.go" {
+	if _, ok := p.cachedProbe("a.go"); ok {
 		t.Fatal("stale probe result populated the probe cache")
 	}
 }
@@ -1029,15 +1029,88 @@ func TestFileProbeIsCachedWhileLoading(t *testing.T) {
 	}
 }
 
-// TestFileProbeStopsAfterLoading: the probe is part of the loading phase only; a
-// completed index is ranked from its list.
-func TestFileProbeStopsAfterLoading(t *testing.T) {
+// TestFileProbeRunsAfterLoading: Fresh probes the literal path even after the index
+// has completed, so an unindexed/truncated exact file can still be opened.
+func TestFileProbeRunsAfterLoading(t *testing.T) {
 	files := &probeFiles{fakeFiles: fakeFiles{loading: false}}
 	files.probe = func(context.Context, string) ([]string, error) { return []string{"a.go"}, nil }
 	p := New(Options{Query: "a.go", Files: files, Ranker: &fakeRanker{}})
 	p.update(p.Init()())
-	if files.calls != 0 {
-		t.Fatalf("probe calls after the index completed = %d, want 0", files.calls)
+	if files.calls != 1 {
+		t.Fatalf("probe calls after the index completed = %d, want 1", files.calls)
+	}
+	if len(p.rows) == 0 || p.rows[0].kind != rowFile || p.rows[0].name != "a.go" {
+		t.Fatalf("rows = %+v, want the completed-index probe result", p.rows)
+	}
+}
+
+// TestFileProbeCacheAvoidsRepeatedStatForSamePath: a :line change keeps the same
+// literal path, so the bounded cache serves the probe and no second Stat runs. It also
+// covers a multi-word literal path and a mode-prefix escaped path.
+func TestFileProbeCacheAvoidsRepeatedStatForSamePath(t *testing.T) {
+	files := &probeFiles{fakeFiles: fakeFiles{loading: false}}
+	files.probe = func(_ context.Context, query string) ([]string, error) {
+		return []string{query}, nil
+	}
+	p := New(Options{Query: "a.go:12:3", Files: files, Ranker: &fakeRanker{}})
+	p.update(p.Init()())
+	if files.calls != 1 {
+		t.Fatalf("first probe calls = %d, want 1", files.calls)
+	}
+	if p.fileLine != 12 || p.fileCol != 3 {
+		t.Fatalf("line target = %d:%d, want 12:3", p.fileLine, p.fileCol)
+	}
+	// Typing another column digit keeps the path a.go; the cached answer is reused.
+	cmd := p.update(typed("4"))
+	if cmd == nil {
+		t.Fatal("typing the column produced no ranking command")
+	}
+	p.update(cmd())
+	if files.calls != 1 {
+		t.Fatalf("probe calls after a :line change = %d, want cached 1", files.calls)
+	}
+	if p.fileCol != 34 {
+		t.Fatalf("line target column = %d, want 34", p.fileCol)
+	}
+
+	// A literal path containing spaces reaches the probe unchanged.
+	p = New(Options{Query: "my file.txt", Files: files, Ranker: &fakeRanker{}})
+	p.update(p.Init()())
+	if files.calls != 2 {
+		t.Fatalf("multi-word probe calls = %d, want 2 total", files.calls)
+	}
+	if got := p.rows[0].name; got != "my file.txt" {
+		t.Fatalf("multi-word row = %q, want my file.txt", got)
+	}
+
+	// A mode-prefix-leading path is probed unescaped under the file-mode escape.
+	p = New(Options{Query: "./>notes.txt", Files: files, Ranker: &fakeRanker{}})
+	p.update(p.Init()())
+	if files.calls != 3 {
+		t.Fatalf("mode-prefix probe calls = %d, want 3 total", files.calls)
+	}
+	if got := p.input.Value(); got != "./>notes.txt" {
+		t.Fatalf("mode-prefix query = %q", got)
+	}
+	if len(p.rows) == 0 || p.rows[0].kind != rowFile || p.rows[0].name != ">notes.txt" {
+		t.Fatalf("mode-prefix rows = %+v, want >notes.txt", p.rows)
+	}
+}
+
+// TestProbeCacheIsBounded: the palette keeps at most probeCacheSize answers.
+func TestProbeCacheIsBounded(t *testing.T) {
+	p := New(Options{})
+	for i := 0; i < probeCacheSize+3; i++ {
+		p.rememberProbe(fmt.Sprintf("p%d", i), []string{fmt.Sprintf("p%d", i)})
+	}
+	if len(p.probeCache) != probeCacheSize {
+		t.Fatalf("probe cache size = %d, want %d", len(p.probeCache), probeCacheSize)
+	}
+	if _, ok := p.cachedProbe("p0"); ok {
+		t.Fatal("oldest probe cache entry was not evicted")
+	}
+	if _, ok := p.cachedProbe(fmt.Sprintf("p%d", probeCacheSize+2)); !ok {
+		t.Fatal("newest probe cache entry is missing")
 	}
 }
 
@@ -1084,7 +1157,7 @@ func TestFileResultWithTheWrongTextIsDropped(t *testing.T) {
 			t.Fatalf("wrong-text result showed a file row: %+v", p.rows)
 		}
 	}
-	if p.probeText == "a.go" {
+	if _, ok := p.cachedProbe("a.go"); ok {
 		t.Fatal("wrong-text result populated the probe cache")
 	}
 }
@@ -1098,8 +1171,8 @@ func TestFileProbeMergesPrefixResults(t *testing.T) {
 	}
 	p := New(Options{Query: "save", Files: files, Ranker: &fakeRanker{}})
 	p.update(p.Init()())
-	if len(p.probePaths) != 2 {
-		t.Fatalf("probe cache = %v, want two prefix paths", p.probePaths)
+	if paths, ok := p.cachedProbe("save"); !ok || len(paths) != 2 {
+		t.Fatalf("probe cache = %v, %v; want two prefix paths", paths, ok)
 	}
 	got := make([]string, 0, len(p.rows))
 	for _, r := range p.rows {
@@ -1109,5 +1182,28 @@ func TestFileProbeMergesPrefixResults(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "save_file.rs" || got[1] != "save_other.rs" {
 		t.Fatalf("rows = %v, want the two probed prefix paths", got)
+	}
+}
+
+// TestFileProbeCachesANegativeAnswer: a completed index and a missing exact path are
+// cached too, so a poll or a :line change for the same path does not Stat again.
+func TestFileProbeCachesANegativeAnswer(t *testing.T) {
+	files := &probeFiles{fakeFiles: fakeFiles{loading: false}}
+	files.probe = func(context.Context, string) ([]string, error) { return nil, nil }
+	p := New(Options{Query: "missing.go:4", Files: files, Ranker: &fakeRanker{}})
+	p.update(p.Init()())
+	if files.calls != 1 {
+		t.Fatalf("first negative probe calls = %d, want 1", files.calls)
+	}
+	cmd := p.update(fileTickMsg{Seq: p.seq})
+	if cmd == nil {
+		t.Fatal("a rank tick returned no command")
+	}
+	p.update(cmd())
+	if files.calls != 1 {
+		t.Fatalf("negative probe calls after a rank tick = %d, want cached 1", files.calls)
+	}
+	if paths, ok := p.cachedProbe("missing.go"); !ok || len(paths) != 0 {
+		t.Fatalf("negative cache = %v, %v; want a cached empty answer", paths, ok)
 	}
 }

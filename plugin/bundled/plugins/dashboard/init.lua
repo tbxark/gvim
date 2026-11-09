@@ -8,10 +8,12 @@
 --
 -- Reduction vs Fresh (docs/plugins/bundled.md):
 --   * weather and GitHub PRs are user-opt-in sections (weather / github_prs, plus
---     network) over the bounded gvim.http.get capability; the third-party section
---     API is absent. Weather uses wttr.in j1 JSON (public conditions only), GitHub
---     reads public repositories; failures are a muted unavailable line and the
---     response never touches disk.
+--     network) over the bounded gvim.http.get capability. Weather uses wttr.in j1
+--     JSON (public conditions only), GitHub reads public repositories; failures are
+--     a muted unavailable line and the response never touches disk.
+--   * third-party plugins register sections through gvim.dashboard; this plugin
+--     discovers them and invokes their proxy callback as a bounded task with a
+--     per-section timeout, keeping failures/stale data isolated to that section.
 --   * the disk section shells out to df for the workspace mount and $HOME only.
 --   * every row is clickable: recent-file rows are path line targets and the
 --     action rows (including the Git section's branch-log row) are action line
@@ -98,6 +100,9 @@ local WEATHER_MAX_LOCATION = 100
 local RECENT_MAX = 10
 local MAX_ACTIONS = 8
 local MAX_RECENT_ROWS = 10
+local EXTERNAL_MAX_SECTIONS = 8
+local EXTERNAL_MAX_ROWS = 64
+local EXTERNAL_MAX_TEXT = 500
 
 local ACTIONS = {
   { label = "Open Settings", action = "open_settings" },
@@ -876,6 +881,36 @@ local function build_rows(inner)
       end
     end
   end
+  for _, item in ipairs(state.external_order or {}) do
+    local entry = item.entry
+    if #lines > 0 then
+      lines[#lines + 1] = { text = "" }
+    end
+    local suffix = ""
+    if entry.error and entry.rows then
+      suffix = " (" .. t("external.stale") .. ")"
+    end
+    heading((entry.title or "plugin") .. suffix)
+    if entry.error and not entry.rows then
+      kv("status", entry.error, STYLE.muted)
+    elseif not entry.rows then
+      kv("status", t("external.loading"), STYLE.muted)
+    elseif #entry.rows == 0 then
+      kv("status", t("external.no_data"), STYLE.muted)
+    else
+      for _, row in ipairs(entry.rows) do
+        if row.kind == "kv" then
+          kv(row.label, row.value, row.style)
+        elseif row.kind == "text" then
+          plain("  " .. row.text, row.style)
+        elseif row.kind == "error" then
+          kv("error", row.text, STYLE.err)
+        else
+          lines[#lines + 1] = { text = "" }
+        end
+      end
+    end
+  end
   if #recent > 0 then
     if #lines > 0 then
       lines[#lines + 1] = { text = "" }
@@ -1078,6 +1113,166 @@ local function paint()
   return true
 end
 
+
+-- External dashboard sections ---------------------------------------------
+-- Third-party plugins register through gvim.dashboard.register_section. The dashboard
+-- discovers metadata from the host and calls the provider's exported proxy function as a
+-- task with a per-section timeout; failures/stale data stay in that section and cannot
+-- break the rest of the dashboard. Rows are plain data, validated and clipped here.
+
+local function external_string(value, max)
+  local text = type(value) == "string" and value or ""
+  text = text:gsub("[%c\127]", " "):gsub("%s+", " ")
+  text = text:match("^%s*(.-)%s*$") or ""
+  if #text > max then
+    text = gvim.text.truncate(text, max, "…")
+  end
+  return text
+end
+
+local function external_style(color)
+  local styles = {
+    muted = STYLE.muted, accent = STYLE.accent, value = STYLE.value,
+    number = STYLE.number, ok = STYLE.ok, warn = STYLE.warn, err = STYLE.err,
+    title = STYLE.title,
+  }
+  return styles[tostring(color or "value")] or STYLE.value
+end
+
+local function external_rows(result)
+  if type(result) ~= "table" then
+    return nil
+  end
+  local rows = {}
+  for i, row in ipairs(result) do
+    if i > EXTERNAL_MAX_ROWS then
+      break
+    end
+    if type(row) == "table" then
+      local kind = tostring(row.kind or "kv")
+      if kind == "kv" then
+        rows[#rows + 1] = {
+          kind = "kv",
+          label = external_string(row.label, 40),
+          value = external_string(row.value, EXTERNAL_MAX_TEXT),
+          style = external_style(row.color),
+        }
+      elseif kind == "text" then
+        rows[#rows + 1] = {
+          kind = "text",
+          text = external_string(row.text, EXTERNAL_MAX_TEXT),
+          style = external_style(row.color),
+        }
+      elseif kind == "error" then
+        rows[#rows + 1] = {
+          kind = "error",
+          text = external_string(row.text or row.value or t("external.unavailable"), EXTERNAL_MAX_TEXT),
+        }
+      elseif kind == "blank" then
+        rows[#rows + 1] = { kind = "blank" }
+      end
+    end
+  end
+  return rows
+end
+
+local function refresh_external_sections(force, inner)
+  local ok, list = pcall(gvim.dashboard.sections)
+  if not ok or type(list) ~= "table" then
+    state.external = {}
+    state.external_order = {}
+    return
+  end
+  local now = now_ms()
+  local prev = state.external or {}
+  local next_entries = {}
+  local order = {}
+  for _, sec in ipairs(list) do
+    if #order >= EXTERNAL_MAX_SECTIONS then
+      break
+    end
+    if type(sec) == "table" and type(sec.plugin) == "string" and type(sec.name) == "string"
+      and type(sec.key) == "string" then
+      local id = sec.plugin .. "\1" .. sec.name
+      local entry = prev[id]
+      local ttl = tonumber(sec.ttl_ms) or 30000
+      local timeout = tonumber(sec.timeout_ms) or 8000
+      local title = external_string(sec.title, 120)
+      if title == "" then
+        title = external_string(sec.name, 120)
+      end
+      local due = force or not entry or now - (entry.at or 0) >= ttl
+      if due then
+        local rows, err
+        local provider = gvim.plugins.get(sec.plugin)
+        local fn = provider and provider[sec.key] or nil
+        if type(fn) ~= "function" then
+          err = t("external.unavailable")
+        else
+          local task = gvim.async.spawn(function()
+            -- Cross-plugin proxies return their results directly (mkv strips the
+            -- leading ok): a failed call is (nil, error), a success is (rows).
+            local result, cerr = fn({ width = inner, plugin = sec.plugin, name = sec.name })
+            if result == nil then
+              return nil, tostring(cerr or t("external.invalid"))
+            end
+            return result
+          end)
+          if not task then
+            gvim.log.debug("dashboard: external section " .. id .. ": spawn failed")
+            err = t("external.unavailable")
+          else
+            local okw, result, werr = pcall(task.wait, task, { timeout_ms = timeout })
+            if not okw then
+              pcall(task.cancel, task)
+              err = tostring(result)
+            elseif werr ~= nil then
+              pcall(task.cancel, task)
+              err = tostring(werr)
+            elseif result == nil then
+              err = t("external.invalid")
+            else
+              rows = external_rows(result)
+              if rows == nil then
+                err = t("external.invalid")
+              end
+            end
+            if err ~= nil then
+              gvim.log.debug("dashboard: external section " .. id .. ": " .. tostring(err))
+            end
+            if err ~= nil then
+              pcall(task.cancel, task)
+            end
+          end
+        end
+        if rows ~= nil then
+          entry = { at = now, rows = rows }
+        elseif entry ~= nil then
+          entry = { at = now, rows = entry.rows, error = err or t("external.unavailable") }
+        else
+          entry = { at = now, error = err or t("external.unavailable") }
+        end
+      end
+      if entry then
+        entry.title = title
+        entry.ttl = ttl
+        entry.timeout = timeout
+        entry.priority = tonumber(sec.priority) or 0
+        next_entries[id] = entry
+        order[#order + 1] = { id = id, entry = entry }
+      end
+    end
+  end
+  table.sort(order, function(a, b)
+    if a.entry.priority ~= b.entry.priority then
+      return a.entry.priority > b.entry.priority
+    end
+    return a.id < b.id
+  end)
+  state.external = next_entries
+  state.external_order = order
+end
+
 local function refresh(force)
   local buf = valid_buf()
   if not buf then
@@ -1111,6 +1306,14 @@ local function refresh(force)
       gvim.log.debug("dashboard: disk: " .. tostring(err))
       state.disk = { at = at, rows = {} }
     end
+  end
+  local size = gvim.ui.size()
+  local inner = select(1, frame_width(size.width or 100))
+  local ok, err = pcall(refresh_external_sections, force, inner)
+  if not ok then
+    gvim.log.debug("dashboard: external sections: " .. tostring(err))
+    state.external = {}
+    state.external_order = {}
   end
   paint()
 end

@@ -181,8 +181,9 @@ func Start(ctx context.Context, root string) *Index {
 	return x
 }
 
-// SetProbe installs the literal-path probe used by the quick-open file mode while
-// the index is loading. A nil probe disables it.
+// SetProbe installs the literal-path probe used by the quick-open file mode. Fresh
+// probes both while the index is loading and after it completes, so an exact path can
+// be opened even when enumeration missed/truncated it. A nil probe disables it.
 func (x *Index) SetProbe(probe ProbeFunc) {
 	if x == nil {
 		return

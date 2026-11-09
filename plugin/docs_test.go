@@ -272,6 +272,17 @@ var docExamples = map[string]exampleRow{
 			}
 		},
 	},
+	"dashboard_section": {
+		setup: func(*plugintest.FakeHost) {},
+		check: func(t *testing.T, h *plugintest.Harness) {
+			if err := h.Run("dashboard_section.report", nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(h.NoticeTexts(), "|"); !strings.Contains(got, "demo 0/1") {
+				t.Fatalf("notices = %q, want the registered section report", got)
+			}
+		},
+	},
 	"bookmarks": {
 		setup: func(h *plugintest.FakeHost) { h.AddBuffer("/w/a.go", "package a\n\tfunc f() {}\nvar x = 1") },
 		check: func(t *testing.T, h *plugintest.Harness) {

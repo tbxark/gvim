@@ -30,6 +30,11 @@ func TestDashboardWeatherI18nEnglish(t *testing.T) {
 		"weather.unavailable":      "unavailable",
 		"weather.invalid_response": "invalid response",
 		"weather.network_disabled": "network disabled (set network = true)",
+		"external.loading":         "loading…",
+		"external.unavailable":     "unavailable",
+		"external.invalid":         "invalid response",
+		"external.stale":           "stale",
+		"external.no_data":         "no data",
 	}
 	en := catalog["en"]
 	if len(en) != len(want) {

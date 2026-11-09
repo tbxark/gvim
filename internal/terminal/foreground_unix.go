@@ -1,0 +1,141 @@
+//go:build unix
+
+package terminal
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+// The foreground-process name is Fresh's other half of the terminal tab title:
+// Fresh reads tcgetpgrp(master) and (on Linux) /proc/<pgid>/comm once a second and
+// combines that command name with the program's OSC title. gvim does the same for
+// a local Unix PTY, with bounded, non-blocking introspection: the syscall is a
+// single ioctl, the name read is capped, and the fallback on platforms without
+// /proc (macOS, the BSDs) spawns ps with a timeout. The dock calls this from a
+// tea.Cmd, never from Update.
+
+const (
+	// foregroundProcessTimeout bounds the ps fallback (the ioctl and the /proc read
+	// are not interruptible but are local and tiny).
+	foregroundProcessTimeout = 500 * time.Millisecond
+	// maxForegroundProcessBytes caps one process-name read.
+	maxForegroundProcessBytes = 256
+)
+
+// foregroundProcessName reports the foreground process group's program name for a
+// local Unix PTY. It returns false when the PTY is closed, the ioctl fails, or no
+// name can be read.
+func (p *unixPTY) foregroundProcessName() (string, bool) {
+	p.fdMu.RLock()
+	if p.closed {
+		p.fdMu.RUnlock()
+		return "", false
+	}
+	// The ioctl reads the kernel's foreground process group of the master. Keep the
+	// read lock only for this call: Close must not race a reused fd, but the /proc
+	// or ps lookup below uses the pgid alone.
+	pgid, err := unix.IoctlGetInt(int(p.ptmx.Fd()), unix.TIOCGPGRP)
+	p.fdMu.RUnlock()
+	if err != nil || pgid <= 0 {
+		return "", false
+	}
+	name := sanitizeForegroundProcessName(foregroundNameOf(pgid))
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// foregroundNameOf resolves a process group id to a program name: /proc on Linux,
+// a bounded ps elsewhere (and as a Linux fallback when /proc is unavailable).
+func foregroundNameOf(pgid int) string {
+	if name := readProcComm(pgid); name != "" {
+		return name
+	}
+	return psComm(pgid)
+}
+
+// readProcComm reads /proc/<pgid>/comm, bounded and without spawning anything.
+func readProcComm(pgid int) string {
+	f, err := os.Open("/proc/" + strconv.Itoa(pgid) + "/comm")
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, maxForegroundProcessBytes))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// cappedWriter keeps the newest max bytes and always reports a full write, so a
+// child writing more than that cannot grow the buffer or fail the command.
+type cappedWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	if rem := w.max - w.buf.Len(); rem > 0 {
+		if len(p) > rem {
+			p = p[:rem]
+		}
+		_, _ = w.buf.Write(p)
+	}
+	return n, nil
+}
+
+// psComm asks ps for the process group leader's command name. The process id is
+// an integer we read from the kernel, never user input; the command is bounded by
+// ctx and the capped stdout, and no shell is involved.
+func psComm(pgid int) string {
+	ctx, cancel := context.WithTimeout(context.Background(), foregroundProcessTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ps", "-o", "comm=", "-p", strconv.Itoa(pgid))
+	out := &cappedWriter{max: maxForegroundProcessBytes}
+	cmd.Stdout = out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(out.buf.String())
+	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
+		line = strings.TrimSpace(line[:i])
+	}
+	if line == "" {
+		return ""
+	}
+	// ps -o comm= may print the full path (macOS); the tab title wants the program
+	// name, like Fresh's /proc/<pid>/comm.
+	return filepath.Base(line)
+}
+
+// sanitizeForegroundProcessName cleans an untrusted process name before it can
+// reach a tab label or the i18n chrome: controls/invalid UTF-8 are dropped, outer
+// space is trimmed and the name is bounded to 64 runes.
+func sanitizeForegroundProcessName(name string) string {
+	name = strings.ToValidUTF8(name, "")
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, name)
+	name = strings.TrimSpace(name)
+	const maxRunes = 64
+	if runes := []rune(name); len(runes) > maxRunes {
+		name = strings.TrimSpace(string(runes[:maxRunes]))
+	}
+	return name
+}

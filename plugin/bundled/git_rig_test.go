@@ -103,7 +103,14 @@ func startRig(t *testing.T, o rigOpts) *rig {
 		timeout = 200 * time.Millisecond
 	}
 	r.h = plugintest.New(t, files, plugintest.Options{Host: r.host, OS: r.os, Services: o.services, Timeout: timeout, EventBudget: 5 * time.Second, HTTPClient: o.httpClient})
+	bundledNames := map[string]bool{}
+	for _, name := range o.plugins {
+		bundledNames[name] = true
+	}
 	for i := range r.h.Sources {
+		if bundledNames[r.h.Sources[i].Name] {
+			r.h.Sources[i].Kind = plugin.SourceBundled
+		}
 		if st, ok := o.settings[r.h.Sources[i].Name]; ok {
 			r.h.Sources[i].Settings = st.User
 			r.h.Sources[i].ProjectSettings = st.Project

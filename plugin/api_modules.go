@@ -45,6 +45,7 @@ var installers = []func(*apiEnv){
 	installData,
 	installWorkspace,
 	installPlugins,
+	installDashboard,
 	installLSP,
 	installHTTP,
 }

@@ -1234,6 +1234,18 @@ function gvim.diff.compare_buffers(left, right) end
 ---@return boolean|nil, string?
 function gvim.diff.replace_range(buf, start, end, text, expected_version) end
 
+gvim.dashboard = {}
+---@param name string
+---@param refresh fun(ctx: {width: integer, plugin: string, name: string}): table|nil, string?
+---@param opts? {title?: string, ttl_ms?: integer, timeout_ms?: integer, priority?: integer}
+---@return integer|nil, string?
+function gvim.dashboard.register_section(name, refresh, opts) end
+---@param id_or_name integer|string
+---@return boolean
+function gvim.dashboard.remove_section(id_or_name) end
+---@return {id: integer, plugin: string, name: string, title: string, key: string, ttl_ms: integer, timeout_ms: integer, priority: integer}[] key is non-empty only for the bundled dashboard consumer
+function gvim.dashboard.sections() end
+
 gvim.plugins = {}
 ---@return {name: string, status: string, version: string, source: string}[]
 function gvim.plugins.list() end

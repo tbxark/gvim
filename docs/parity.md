@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `6c6f71b` (the previous round's commit is folded in) plus the
-merged round-40 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+Last verified: 2026-11-09, tree commit `ce03f16` (the previous round's commit is folded in) plus the
+merged round-41 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
 GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-126 KiB / de 88 KiB / both 214 KiB, git diff --check). Final full
+122 KiB / de 82 KiB / both 205 KiB, git diff --check). Final full
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
-`/tmp/gvim-r40-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-40 tests/diff
+`/tmp/gvim-r41-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-41 tests/diff
 review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
 real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
@@ -1514,6 +1514,81 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-41 outcome (2026-11-09, merged working tree on `ce03f16`).** Five slices landed (with the lsp
+bounded-directory candidate WITHDRAWN after audit): completed-index exact probe + 16-path cache;
+sidebar local foreground-process title; dashboard callback isolation; statusbar i18n; no server-side
+bounded directory listing. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout
+1200s` EXIT 0: 76 packages ok, no FAIL (log `/tmp/gvim-r41-final.log`). The audit read the diff and
+ran targeted tests; the Lead ran the full suite.
+**No server-side bounded directory listing (lsp; candidate evaluated and WITHDRAWN).** The remote
+finder fallback cannot get a provable hard server-side bound from the portable tools: a
+find -print0 | head -c pass limits output/memory bytes and avoids shell-glob materialisation, but a
+kind-filtered pass may walk entries without emitting them (so it is not a provable bound on traversal/
+entries), a per-entry -exec marker spawns unbounded children for short names, and -printf is not
+portable to BSD/macOS. Nothing ships: no LimitedDirReader/BoundedDirLister/ReadDirLimited capability is
+advertised, SSH ReadDir keeps its existing behaviour and its 5000-entry/4 MiB error limits, the remote
+finder fallback keeps the existing ReadDir walk and explicit oversized-directory error, and gvim does
+NOT claim a server-side bounded listing or bounded remote read. The remote literal probe remains
+exact-path Stat only (realpath+Stat, no directory enumeration). The earlier find+head candidate's
+residual is retained as the reason: output bytes are bounded but per-directory helper subprocesses are
+not; real SSH UNTESTED (R13-8/R13-3).
+**Completed-index literal-path probe + 16-path cache (keymap).** The file mode now asks the index's
+optional literal-path probe both while the index is enumerating AND after it has completed, as Fresh
+does: a completed/truncated index can still miss an exact file, so a typed path probes directly. The
+local probe resolves root and every candidate through symlinks and returns a path only when its real
+target stays inside the real workspace; a local directory query lists that directory's visible regular
+files, otherwise the parent's files whose names start with the query's basename, bounded at 4096
+inspected entries/batches/cancel and at most 50 returned (hidden rules as before). The REMOTE probe
+remains the exact-path Stat slice only (authority realpath+Stat, no local disk, no directory
+enumeration). Probes run only in tea.Cmd, never Update/Draw; context cancels on query change/palette
+close. The answer INCLUDING A NEGATIVE is cached for the palette's lifetime in a bounded 16-path cache
+keyed by path text, so a loading poll, repeated key, :line[:col] change or mode-prefix escape for the
+same path does not repeat the Stat; a changed path probes again. A result is displayed only when query
+sequence and text still match. Confirmed paths merge before normal rank so fuzzy/prefix/:line[:col]/
+100-row cap apply. Residuals: remote parent-basename/directory branches still not probed (need a
+bounded directory reader that does not exist); local 4096 scan cap can miss later entries; probe branch
+has no .gitignore filtering; the 16-path cache is per open palette, so a file created/removed after a
+cached negative/positive needs the palette reopened; exact local symlink followed only while its real
+target stays inside the workspace (realpath-check→Stat TOCTOU remains theoretical) (R3/R13-3).
+**Sidebar local foreground-process title (sidebar).** Terminal tab labels now follow Fresh's
+combine_terminal_title fully for LOCAL Unix shells: explicit rename wins; otherwise the terminal's live
+foreground command and the recorded or live OSC title are combined as `command — title` (em dash),
+unless the OSC title already names the command case-insensitively (e.g. vim's file - VIM), which is
+used alone; either part alone is used as-is and both empty falls back to Terminal N. The command is
+the foreground process name Fresh polls (~1 s): gvim does the same bounded, non-blocking poll in a
+tea.Cmd — one tcgetpgrp ioctl on the PTY master plus a bounded /proc/<pgid>/comm read on Linux, or a
+500 ms-bounded ps -o comm= -p <pgid> on other Unix (no shell) — caches the sanitized name per tab,
+drops a late answer from an old shell generation, and updates within one poll; background tabs keep
+polling. A remote, Windows, restored or exited terminal reports no poll capability and falls back to
+the recorded launch program, then OSC title. Name is sanitized (controls/invalid UTF-8 dropped,
+trimmed, bounded 64 runes); Linux comm truncates at 15 chars; missing ps degrades to fallback.
+AUDITED RESIDUAL: the ps fallback is resolved through PATH by exec.CommandContext (no shell, pgid is
+kernel-read integer, stdout bounded), but there is no absolute-path/allowlist; a poisoned or
+project-activated PATH could put a different ps first and the once-per-second poll would execute it.
+This is recorded, not called a proven security boundary. Real macOS/BSD/Linux PTY/process polling
+remains UNTESTED (R13-15).
+**Dashboard callback isolation (plugin).** gvim.dashboard.register_section/remove_section/sections
+(third-party dashboard sections) register bounded plain-data refresh callbacks retained in the
+provider's Lua state. The host enforces isDashboardConsumer: only the BUNDLED dashboard plugin (name
+dashboard AND SourceBundled) receives a non-empty key from sections(); every other plugin gets key=""
+and the cross-plugin proxy's lookup returns nil for a dashboard key (a direct call is rejected even if
+a key were guessed). The callback value is never exposed across states; args are plain data; results
+go through plainData and validateDashboardResult (nodes 4096/depth 8/string 4 KiB), registration caps
+16 per plugin/64 total, name 64/title 120, ttl/timeout/priority clamps; dashboard side applies per-
+section timeout/TTL/row caps and keeps failures/stale rows isolated. No command/URL/network execution
+path is added; dashboard rows are text only. Residual/limits as documented: up to 8 external sections
+painted/64 rows each, sequential provider refreshes can delay later sections up to a timeout, a timed-
+out provider's nested work may finish later, external rows have no column layout/click actions/URL
+targets, and real third-party/remote providers are UNTESTED (R13-6/R13-24).
+**Statusbar i18n (statusbar).** Recent status-bar/degradation title strings are catalogued with English
+byte-identical; formatting/fallback/key-guard tests refreshed. Catalogue now en 1124 / de 579 keys,
+575 KiB key+value text (under 640 KiB cap), ≈665 KiB embedded JSON, loader heap en 122 KiB / de 82
+KiB / both 205 KiB (R13-5).
+Metrics: palette 240, settings 69 in 14 sections, bundled 26 (9 on)/17 off, plugin API 247 functions/
+1501 lines level 2 (gvim.dashboard +3 functions); i18n en 1124 / 579 per locale, 575 KiB text, ≈665
+KiB JSON, heap 122-82-205 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r41-final.log); real
+hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-40 outcome (2026-11-09, merged working tree on `6c6f71b`).** Five slices landed: local
 bounded prefix/directory probe with remote exact-Stat fallback; remote external-snapshot notice;
@@ -4794,6 +4869,30 @@ for parity status.
      over existing); per-dir probe cache stale; capability proof not strong atomicity; tree same-FS
      assumption/partial after claim; real SSH UNTESTED/local helper tests only; no durability/fsync/
      general filesystem-race guarantee; temp-by-path same-account replacement outside protection.
+239. **No server-side bounded directory listing (lsp; candidate withdrawn).** find+head output
+     byte-bounded but no provable traversal/entry bound; kind-filtered find may walk without emit,
+     per-entry -exec spawns unbounded children, -printf nonportable. No LimitedDirReader/BoundedDirLister
+     advertised; SSH ReadDir keeps 5000-entry/4MiB error; remote finder fallback unchanged; remote
+     probe exact Stat only; no claim bounded remote read; real SSH UNTESTED.
+240. **Dashboard callback isolation (plugin; R13-6/R13-24).** register_section/remove/sections; callbacks
+     retained in provider state; only bundled dashboard (name+SourceBundled) gets key; others key="" and
+     lookup nil/direct call rejected; plain args/results + validateDashboardResult nodes4096/depth8/string
+     4KiB; caps 16/64/name64/title120/ttl/timeout/priority; dashboard timeout/TTL/row caps/error isolated;
+     no command/URL/network; rows text-only; limits 8 sections/64 rows/sequential refresh/no layout/
+     click/URL; third-party/remote providers UNTESTED.
+241. **Sidebar local foreground-process title (sidebar; R13-15).** local Unix only: ~1s tea.Cmd poll
+     tcgetpgrp + Linux /proc/<pgid>/comm or 500ms bounded ps -o comm= -p <pgid> (no shell); sanitize
+     controls/UTF8/64 runes; per-tab cache/gen drop; remote/Windows/restored/exited fallback launch/OSC;
+     background tabs poll. AUDITED RESIDUAL: ps resolved through PATH (no absolute/allowlist); poisoned/
+     project-activated PATH could execute a different ps once/s; real macOS/BSD/Linux polling UNTESTED.
+242. **Completed-index exact probe + 16-path cache (keymap; R3/R13-3).** probe both loading and completed
+     index; local exact/dir/parent-prefix bounded 4096/50/async; remote exact Stat only/no enumeration;
+     tea.Cmd/cancel/query seq+text; cache incl negative 16 paths per palette lifetime keyed path text
+     (:line[:col]/mode escape same path no repeat Stat; changed path reprobe); merge before rank preserves
+     fuzzy/prefix/target/cap. Residuals per palettes/lifetime/local 4096/no gitignore/remote branches/
+     TOCTOU/truncated list not complete.
+243. **Statusbar i18n (statusbar; R13-5).** recent status/degradation strings English byte-identical;
+     formatting/fallback/key-guard tests; en1124/de579, 575 KiB text, ≈665 KiB JSON, heap122-82-205.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6721,27 +6820,35 @@ Round 13 recorded five open gaps:
   F3/Shift+F3 preview stepping; Env:Reload watcher retry supervisor; SSH new-target link capability
   (audited residuals: temp cleanup best-effort/parent TOCTOU/stale cache/capability proof/real SSH
   UNTESTED). Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-41 verification (2026-11-09, merged tree on `ce03f16`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 122 KiB / de 82 KiB / both 205 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+  `/tmp/gvim-r41-final.log`). Audit: build/gofmt/i18n_check plus targeted round-41 tests/diff review.
+  Tracks: no server-side bounded directory listing (candidate WITHDRAWN); completed-index exact probe +
+  16-path cache; sidebar local foreground-process title (ps PATH residual recorded); dashboard callback
+  isolation (bundled dashboard only); statusbar i18n. Real-host checks remain UNTESTED. No full-parity
+  claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-40 landed bounded local probe/remote exact-Stat, external-snapshot notice, F3 preview
-  stepping, Env:Reload watch retry, SSH new-target link capability; full suite EXIT 0 (76 packages,
-  log /tmp/gvim-r40-final.log); §5.5 is round-41/42 plan; TUI-only scope/genuine-equivalence §4 item
-  94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–40 had their gate sets
-  run. Round 40 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-41 landed no bounded dir listing, completed-index probe/cache, local foreground title, dashboard
+  isolation, statusbar i18n; full suite EXIT 0 (76 packages, log /tmp/gvim-r41-final.log); §5.5 is
+  round-42/43 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–41 had their gate sets
+  run. Round 41 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  126 KiB / de 88 KiB / both 214 KiB, git diff --check). Final full
+  122 KiB / de 82 KiB / both 205 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r40-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-40 tests and
+  `/tmp/gvim-r41-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-41 tests and
   diff review only (no full suite); the Lead ran the full suite. Real-host verification remains
   UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
   save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
   box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
-  switching; ~/… expansion against a local real `sh`, not a live host. Treat statuses as pointers,
-  not proof.
+  switching, local macOS/BSD process polling; ~/… expansion against a local real `sh`, not a live
+  host. Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

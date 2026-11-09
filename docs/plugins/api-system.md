@@ -139,6 +139,90 @@ network setting is off); a caller that wants a silent degradation handles the er
 capability behind the dashboard's opt-in GitHub PR and weather sections; there is no generic
 fetch API for non-JSON/plain-text scraping, no authentication/token, and no response cache.
 
+## gvim.dashboard
+
+Third-party dashboard sections, the gvim counterpart of Fresh's
+`dashboard.registerSection` API. The dashboard plugin consumes them; a plugin can register
+sections whether or not the dashboard is currently open.
+
+```text
+gvim.dashboard.register_section(name, refresh, opts?) -> id | nil, err
+gvim.dashboard.remove_section(id_or_name) -> boolean
+gvim.dashboard.sections() -> { {id, plugin, name, title, key, ttl_ms, timeout_ms, priority}, ... }
+```
+
+`name` is the section's stable name within the registering plugin (1..64 characters, no
+NUL); `refresh` is a Lua function (see the callback contract below); `opts`:
+
+| key | meaning | default / bounds |
+|---|---|---|
+| `title` | section heading | name; clipped to 120 chars |
+| `ttl_ms` | minimum age before a refresh is re-run | 30000, clamped 1000..600000 |
+| `timeout_ms` | per-refresh budget; the dashboard abandons the call | 8000, clamped 100..30000 |
+| `priority` | ordering hint, higher first | 0, clamped -100..100 |
+
+Limits are host-enforced: 16 sections per plugin and 64 total, and the dashboard paints at
+most 8 external sections and 64 rows per section (extra rows are clipped/skipped). `register_section` returns a
+numeric id for `remove_section`; a duplicate name in the same plugin, a bad name, or a cap
+violation returns `nil, err`. Removing only affects the caller's own sections. Sections are
+removed when the plugin unloads.
+
+`gvim.dashboard.sections()` returns the live registrations of all loaded plugins as plain
+data; `key` is the internal proxy name the dashboard plugin uses to call the provider. The
+key is returned only to the **bundled dashboard plugin**; other callers receive an empty
+`key` and the cross-plugin proxy refuses a dashboard section key to them (lookup returns
+nil, and a direct call is rejected even if a key were guessed). The callback is never
+exposed as a Lua value across states. The dashboard plugin is the only consumer: after
+opening it asks for the list and invokes each due provider through
+`gvim.plugins.get(plugin)[key]`. The callback's `ctx` is plain dashboard-produced data;
+providers should rely only on the documented fields (`width`, `plugin`, `name`) and treat
+everything else as ordinary untrusted input.
+
+### Refresh callback
+
+```lua
+gvim.dashboard.register_section("demo", function(ctx)
+  -- ctx = { width = <dashboard inner width>, plugin = "demo", name = "demo" }
+  return {
+    { kind = "kv", label = "branch", value = "main" },
+    { kind = "text", text = "a free-form row" },
+    { kind = "blank" },
+  }
+end, { title = "Demo", ttl_ms = 5000, timeout_ms = 1000 })
+```
+
+The callback runs as a dashboard-spawned task, so it may use awaitable APIs; it must return
+a bounded array of row tables (or `nil, err`):
+
+* `{kind="kv", label=..., value=..., color=?}` — a label/value row (label clipped to 40,
+  value to 500 chars).
+* `{kind="text", text=..., color=?}` — a padded line (500 chars).
+* `{kind="error", text=...}` — a muted/error status row.
+* `{kind="blank"}` — an empty row.
+
+`color` is one of `muted`, `accent`, `value`, `number`, `ok`, `warn`, `err`, `title`;
+unknown colors fall back to `value`. The dashboard caps a section at 64 rows and clips all
+text (control characters become spaces); unknown row kinds are skipped. A callback error,
+timeout, missing/unloaded provider or invalid result marks only that section stale/unavailable
+and keeps the last successful rows with a `stale` heading note; other sections and the rest of
+the dashboard continue. A provider that is unloaded/disabled is discovered as unavailable on
+the next refresh. The callback's `ttl_ms`/`timeout_ms` are enforced by the dashboard; the
+host registration caps are the hard bound.
+
+Fresh difference: Fresh passes a `DashboardContext` with `kv`/`text`/`columns`/`newline`/
+`error` drawing functions and a `SectionRefresh` promise. gvim keeps callbacks in the
+provider state and returns plain row data instead, so no function crosses a plugin state and
+the dashboard can bound/validate/sanitize rows before painting. Fresh's `removeSection`
+(global name), `clearAllSections`, `setAutoOpen` and `builtinHandlers` are not exposed; gvim's
+built-in sections are fixed and third-party registration is per plugin. External rows are
+text only (no column layout, click actions or URL targets); section row strings are
+plugin-owned text, while dashboard-generated status strings live in the dashboard plugin's
+`dashboard.i18n.json`. External refreshes run sequentially in the dashboard task: a slow
+section can delay the painting of later external sections up to its timeout, but it never
+blocks the editor's update loop; a timed-out dashboard task is cancelled, although a
+provider's own nested work may finish later. A complete example plugin is
+[examples/dashboard_section.lua](examples/dashboard_section.lua).
+
 ## gvim.proc and gvim.env
 
 ```text

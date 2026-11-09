@@ -312,10 +312,9 @@ func (f *sshFiles) Stat(ctx context.Context, path string) (hostos.FileStat, erro
 	return hostos.FileStat{Kind: kind, Size: size, MTime: time.Unix(sec, 0), Mode: mode}, nil
 }
 
-// ReadDir lists one directory (hidden filtered like the port), sorted by name, with
-// a symlink's target kind. The helper walks the entries itself so the listing is one
-// bounded command; a directory with more than sshFilesMaxDirEntries entries is an
-// error rather than a silently truncated listing.
+// ReadDir lists one directory (hidden filtered like the port), sorted by name, with a
+// symlink's target kind. Its helper expands a shell glob; a directory with more than
+// sshFilesMaxDirEntries entries is an error rather than a silently truncated listing.
 func (f *sshFiles) ReadDir(ctx context.Context, path string, hidden bool) ([]hostos.DirEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

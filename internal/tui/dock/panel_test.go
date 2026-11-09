@@ -39,6 +39,10 @@ type fakeTerm struct {
 	exitOK        bool                  // whether the fake reports an exit status
 	title         string                // the OSC 0/2 title the fake reports
 	focusCalls    []bool                // the DECSET 1004 focus reports the dock forwarded
+	fgSupported   bool                  // whether ForegroundProcessSupported reports a local PTY
+	fgName        string                // the foreground process name ForegroundProcessName returns
+	fgOK          bool                  // whether ForegroundProcessName read a name
+	fgCalls       int                   // the calls to ForegroundProcessName
 	mouse         bool                  // the shell asked for mouse reporting
 	drag          bool                  // the shell asked for drag motion (1002)
 	allMotion     bool                  // the shell asked for all motion (1003)
@@ -73,14 +77,19 @@ func (f *fakeTerm) Resize(cols, rows int) error {
 	return nil
 }
 
-func (f *fakeTerm) Screen() terminal.Screen   { return f.screen }
-func (f *fakeTerm) Updates() <-chan struct{}  { return f.updates }
-func (f *fakeTerm) Done() <-chan struct{}     { return f.done }
-func (f *fakeTerm) AppCursorKeys() bool       { return f.appCursor }
-func (f *fakeTerm) KittyKeyboardFlags() uint8 { return f.kittyFlags }
-func (f *fakeTerm) Title() string             { return f.title }
-func (f *fakeTerm) Focus(focused bool)        { f.focusCalls = append(f.focusCalls, focused) }
-func (f *fakeTerm) Close() error              { f.closed = true; return nil }
+func (f *fakeTerm) Screen() terminal.Screen          { return f.screen }
+func (f *fakeTerm) Updates() <-chan struct{}         { return f.updates }
+func (f *fakeTerm) Done() <-chan struct{}            { return f.done }
+func (f *fakeTerm) AppCursorKeys() bool              { return f.appCursor }
+func (f *fakeTerm) KittyKeyboardFlags() uint8        { return f.kittyFlags }
+func (f *fakeTerm) Title() string                    { return f.title }
+func (f *fakeTerm) Focus(focused bool)               { f.focusCalls = append(f.focusCalls, focused) }
+func (f *fakeTerm) ForegroundProcessSupported() bool { return f.fgSupported }
+func (f *fakeTerm) ForegroundProcessName() (string, bool) {
+	f.fgCalls++
+	return f.fgName, f.fgOK
+}
+func (f *fakeTerm) Close() error { f.closed = true; return nil }
 
 // Scrollback returns the history window the dock asks for.
 func (f *fakeTerm) Scrollback(from, count int) (lines []terminal.Line, total int) {

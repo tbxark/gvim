@@ -141,6 +141,32 @@ func (s *Session) Focus(focused bool) {
 	}
 }
 
+// ForegroundProcessSupported reports whether this session's transport can name its
+// foreground process group (a local Unix PTY). Remote transports and ConPTY report
+// false, and the dock then keeps the recorded launch/OSC title without polling.
+func (s *Session) ForegroundProcessSupported() bool {
+	s.mu.Lock()
+	pty, closed := s.pty, s.closed
+	s.mu.Unlock()
+	return !closed && pty != nil && pty.supportsForegroundProcess()
+}
+
+// ForegroundProcessName reads the current foreground process group's program name
+// through bounded OS introspection: one tcgetpgrp ioctl plus at most one bounded
+// /proc read (Linux) or a ps spawn with a 500 ms timeout (other Unix). It performs
+// no IO on the update path and never blocks the dock: callers run it in a tea.Cmd.
+// It returns false for remote/unsupported transports, a closed session, or a
+// failed read.
+func (s *Session) ForegroundProcessName() (string, bool) {
+	s.mu.Lock()
+	pty, closed := s.pty, s.closed
+	s.mu.Unlock()
+	if closed || pty == nil {
+		return "", false
+	}
+	return pty.foregroundProcessName()
+}
+
 // Paste sends text to the child as a paste. The emulator wraps the text in the
 // bracketed-paste markers when the child has turned that mode on, and sends it
 // unchanged otherwise. Like Write, it does not wait for the child to read the

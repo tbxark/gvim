@@ -1115,5 +1115,12 @@
   "gvim.dock.tab_limit": "Terminal: the tab limit is reached",
   "gvim.dock.tab_limit_max": "Terminal: the tab limit (%{max}) is reached",
   "gvim.dock.hover_open": "Ctrl+Click to open %{token}",
-  "gvim.dock.title_numbered": "Terminal %{number}"
+  "gvim.dock.title_numbered": "Terminal %{number}",
+  "gvim.notice.local_env_watch_off": "Local environment: file watching is off; changed detector markers are picked up on Env: Reload",
+  "gvim.notice.remote_search_nested_repos": "remote search scanned the nested repositories/submodules in place because their candidate lists were unavailable; ignored entries may be scanned and results may be capped",
+  "gvim.notice.remote_search_ignored_candidates": "remote search scanned ignored entries because the candidate file list was too large to pass explicitly; results may be capped before every candidate file is searched",
+  "gvim.notice.remote_ignore_git_unavailable": "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted",
+  "gvim.notice.remote_ignore_listing_failed": "remote ignore scope unavailable: the remote git candidate listing failed, timed out or truncated; ignored files may be searched and tracked files that match .gitignore may be omitted",
+  "gvim.notice.remote_search_cap": "remote search result is incomplete: the widened fallback scan hit the remote output cap before all candidate files were reported; narrow the scope or refine the query",
+  "gvim.notice.remote_search_stale_snapshot": "remote search was limited to the quick-open file-index snapshot; matching remote files outside it were not searched (they may be new since the index last refreshed, or excluded by the glob) — use File Explorer: Refresh to re-enumerate the index"
 }

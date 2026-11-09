@@ -193,8 +193,8 @@ type FileRankedMsg struct {
 	// never hides or disables the results.
 	Notice string
 	// Probed is the literal-path probe's result for this query, already merged into
-	// Matches. A poll while the index is still loading reuses it instead of probing
-	// again.
+	// Matches. It is cached by path text (including negative answers) so a later rank,
+	// poll, :line change or repeated key does not Stat the same path again.
 	Probed []string
 	// ProbeDone says Probed is the probe's answer (possibly empty). False means no
 	// probe ran for this result.
@@ -289,10 +289,12 @@ type Palette struct {
 	fileLine, fileCol int
 	// probeCancel cancels the literal-path probe of the current file query; it is
 	// replaced on every ranking and called when the query changes or the palette
-	// closes. probeText/probePaths cache the probe answer for the loading poll ticks.
+	// closes. probeCache keeps the bounded literal-path answers by path text, including
+	// negatives, so poll ticks or a :line/mode change of the same path do not Stat the
+	// path again; probeOrder evicts the oldest entry.
 	probeCancel context.CancelFunc
-	probeText   string
-	probePaths  []string
+	probeCache  map[string][]string
+	probeOrder  []string
 	// grep is the Live Grep state: the match modes, the scope toggles and the last
 	// result's count.
 	grep grepState
@@ -635,6 +637,35 @@ func (p *Palette) cancelProbe() {
 	}
 }
 
+// probeCacheSize bounds the exact-path answers kept for one open palette.
+const probeCacheSize = 16
+
+// cachedProbe returns the cached literal-path answer for text. The bool is true for a
+// cached negative (an empty answer) as well.
+func (p *Palette) cachedProbe(text string) ([]string, bool) {
+	if p.probeCache == nil {
+		return nil, false
+	}
+	paths, ok := p.probeCache[text]
+	return paths, ok
+}
+
+// rememberProbe stores one path's answer (possibly empty) in the bounded FIFO cache.
+func (p *Palette) rememberProbe(text string, paths []string) {
+	if p.probeCache == nil {
+		p.probeCache = make(map[string][]string, probeCacheSize)
+	}
+	if _, ok := p.probeCache[text]; !ok {
+		p.probeOrder = append(p.probeOrder, text)
+		if len(p.probeOrder) > probeCacheSize {
+			old := p.probeOrder[0]
+			p.probeOrder = p.probeOrder[1:]
+			delete(p.probeCache, old)
+		}
+	}
+	p.probeCache[text] = paths
+}
+
 // Covers reports whether the point (x, y) of a w by h frame is on the palette card:
 // its rows, its query row and its borders, within the card columns. A press
 // elsewhere is not the palette's, and the frame takes it.
@@ -680,8 +711,6 @@ func (p *Palette) syncSize() {
 func (p *Palette) requery() tea.Cmd {
 	p.seq++
 	p.cancelProbe()
-	p.probeText = ""
-	p.probePaths = nil
 	query := p.input.Value()
 	if p.live {
 		return p.liveQuery(p.seq, query)
@@ -726,13 +755,11 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.probeCancel = cancel
 	files, rk := p.opts.Files, p.opts.Ranker
-	// A ranking poll while loading reuses the probe answer for the same query. A new
-	// query reset the cache in requery, so probeText not matching text means probe.
-	probed := p.probePaths
-	probeDone := p.probeText == text
-	if !probeDone {
-		probed = nil
-	}
+	// Reuse the exact-path answer for this path: a loading poll, a changed :line[:col]
+	// or an unchanged path after another key does not repeat the Stat. The cache is
+	// bounded (probeCacheSize) and is filled in applyFiles only after the result is
+	// accepted for the current query.
+	probed, probeDone := p.cachedProbe(text)
 	return func() tea.Msg {
 		defer cancel()
 		var list []string
@@ -756,17 +783,16 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 				}
 			}
 		}
-		// Fresh's fast prefix probe slice: while the index is still enumerating,
-		// ask the literal-path probe for the one exact file the query names. The
+		// Fresh probes the literal path on every query, including after the index has
+		// completed (an unindexed/truncated file can still be opened exactly). The
 		// probe is I/O in this command goroutine, never in Update/Draw; ctx makes it
-		// cancellable when the query changes or the palette closes.
-		if !probeDone && loading && text != "" {
+		// cancellable when the query changes or the palette closes. A cached positive or
+		// negative answer skips the call.
+		if !probeDone && text != "" {
 			if prober, ok := files.(PrefixProber); ok {
-				paths, err := prober.Probe(ctx, text)
-				if err == nil {
-					probed = paths
+				if paths, err := prober.Probe(ctx, text); err == nil {
+					probed, probeDone = paths, true
 				}
-				probeDone = true
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -814,8 +840,7 @@ func (p *Palette) applyFiles(msg FileRankedMsg) tea.Cmd {
 		return nil
 	}
 	if msg.ProbeDone {
-		p.probeText = msg.Text
-		p.probePaths = msg.Probed
+		p.rememberProbe(msg.Text, msg.Probed)
 	}
 	p.rows = fileRows(msg.Matches, msg.Loading, p.fileLine, p.fileCol, msg.ErrText, msg.Truncated, msg.Notice)
 	p.syncSize()

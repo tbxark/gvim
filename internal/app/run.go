@@ -683,7 +683,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			}
 			localWatchRetry = retry.Retry
 		} else {
-			localProvider.SetWatchNotice("Local environment: file watching is off; changed detector markers are picked up on Env: Reload")
+			localProvider.SetWatchNotice(appText("gvim.notice.local_env_watch_off", "Local environment: file watching is off; changed detector markers are picked up on Env: Reload"))
 		}
 	}
 	levelLive := func() string { return string(levelOf()) }

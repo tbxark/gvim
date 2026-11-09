@@ -349,8 +349,10 @@ the nearest 3-hour sample and a `tomorrow` range/condition summary. The request 
 credentials or caller headers, stays in memory (no disk write) and never blocks the UI; a
 timeout, offline response, malformed body or disabled network renders one muted
 `unavailable`/`invalid response`/`network disabled` line with no notice. The third-party section
-API is still absent. Reductions: no third-party section API or Utility Dock placement and no
-sessions section; weather has no multi-day detail beyond today/tomorrow and no dedicated
+API: third-party plugins can register dashboard sections through
+`gvim.dashboard.register_section` (bounded plain-data refresh callbacks; see
+[api-system.md](api-system.md#gvimdashboard)); gvim's built-in Weather/GitHub/Disk/Git rows
+are unchanged. Reductions: no Utility Dock placement and no sessions section; weather has no multi-day detail beyond today/tomorrow and no dedicated
 location picker (the place setting is a plain string, and empty delegates geolocation to
 wttr.in).
 

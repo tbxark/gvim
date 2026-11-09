@@ -28,7 +28,7 @@ log (**Plugin: Show Log**) has the full text.
 | [bundled.md](bundled.md) | the plugins that ship with gvim, their commands, settings and memory cost |
 | [porting.md](porting.md) | Fresh to gvim and old gvim JS API to Lua |
 | [gvim.d.lua](gvim.d.lua) | type stubs for editor completion (checked against the runtime by a test) |
-| [examples/](examples/) | four complete plugins, loaded and run by the tests |
+| [examples/](examples/) | five complete plugins, loaded and run by the tests |
 
 ## Quick start
 
@@ -137,7 +137,7 @@ log (**Plugin: Show Log**) has the full text.
 | [bundled.md](bundled.md) | the plugins that ship with gvim, their commands, settings and memory cost |
 | [porting.md](porting.md) | Fresh to gvim and old gvim JS API to Lua |
 | [gvim.d.lua](gvim.d.lua) | type stubs for editor completion (checked against the runtime by a test) |
-| [examples/](examples/) | four complete plugins, loaded and run by the tests |
+| [examples/](examples/) | five complete plugins, loaded and run by the tests |
 
 ## Quick start
 

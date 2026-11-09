@@ -17,4 +17,12 @@ type ptyProc interface {
 	Wait() error
 	// Close releases the terminal handles. It does not kill the child.
 	Close() error
+	// supportsForegroundProcess reports whether this transport can name the
+	// foreground process group's program. Only a local Unix PTY can; a Windows
+	// ConPTY or a remote backend cannot.
+	supportsForegroundProcess() bool
+	// foregroundProcessName reads the foreground process group's program name. It
+	// performs bounded OS introspection (tcgetpgrp + /proc or a bounded ps), never
+	// touches the dock's Update loop and returns false when unavailable.
+	foregroundProcessName() (string, bool)
 }

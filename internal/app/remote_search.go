@@ -196,11 +196,11 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 			// those prefixes, not the whole tree, so unrelated ignored entries cannot
 			// consume the output cap before them. The prefix filter still decides what is
 			// in scope; a cap hit is reported as incomplete below.
-			scope.notice = "remote search scanned the nested repositories/submodules in place because their candidate lists were unavailable; ignored entries may be scanned and results may be capped"
+			scope.notice = appText("gvim.notice.remote_search_nested_repos", "remote search scanned the nested repositories/submodules in place because their candidate lists were unavailable; ignored entries may be scanned and results may be capped")
 			widen = true
 			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen, scope.prefixes))
 		case !ok:
-			scope.notice = "remote search scanned ignored entries because the candidate file list was too large to pass explicitly; results may be capped before every candidate file is searched"
+			scope.notice = appText("gvim.notice.remote_search_ignored_candidates", "remote search scanned ignored entries because the candidate file list was too large to pass explicitly; results may be capped before every candidate file is searched")
 			widen = true
 			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen, nil))
 		case len(scope.paths) == 0:
@@ -239,7 +239,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		// A widened run consumed the remote output cap: candidate files beyond the cap
 		// were neither searched nor reported, so the result is explicitly incomplete. The
 		// generic degradation notice is kept, with the cap consequence spelled out.
-		capNotice := "remote search result is incomplete: the widened fallback scan hit the remote output cap before all candidate files were reported; narrow the scope or refine the query"
+		capNotice := appText("gvim.notice.remote_search_cap", "remote search result is incomplete: the widened fallback scan hit the remote output cap before all candidate files were reported; narrow the scope or refine the query")
 		if scope.notice != "" {
 			scope.notice += "; " + capNotice
 		} else {
@@ -256,7 +256,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 			batch.Notice = scope.notice
 		}
 		if done && outsideSnapshot {
-			stale := "remote search was limited to the quick-open file-index snapshot; matching remote files outside it were not searched (they may be new since the index last refreshed, or excluded by the glob) — use File Explorer: Refresh to re-enumerate the index"
+			stale := appText("gvim.notice.remote_search_stale_snapshot", "remote search was limited to the quick-open file-index snapshot; matching remote files outside it were not searched (they may be new since the index last refreshed, or excluded by the glob) — use File Explorer: Refresh to re-enumerate the index")
 			if batch.Notice != "" {
 				batch.Notice += "; " + stale
 			} else {
@@ -509,14 +509,14 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 	}
 	res, err := s.run(ctx, s.root, []string{"git", "rev-parse", "--is-inside-work-tree"})
 	if err != nil {
-		scope.notice = "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted"
+		scope.notice = appText("gvim.notice.remote_ignore_git_unavailable", "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted")
 		return scope
 	}
 	if res.Code != 0 {
 		if strings.Contains(strings.ToLower(string(res.Stderr)), "not a git repository") {
 			return scope // a plain non-git workspace: Fresh's walk applies, no degradation
 		}
-		scope.notice = "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted"
+		scope.notice = appText("gvim.notice.remote_ignore_git_unavailable", "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted")
 		return scope
 	}
 	if strings.TrimSpace(string(res.Stdout)) != "true" {
@@ -525,7 +525,7 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 	scope.gitRepo = true
 	files, err := s.run(ctx, s.root, []string{"git", "-c", "core.quotePath=false", "ls-files", "-z", "-s", "--cached", "--others", "--exclude-standard"})
 	if err != nil || files.Code != 0 || files.Truncated {
-		scope.notice = "remote ignore scope unavailable: the remote git candidate listing failed, timed out or truncated; ignored files may be searched and tracked files that match .gitignore may be omitted"
+		scope.notice = appText("gvim.notice.remote_ignore_listing_failed", "remote ignore scope unavailable: the remote git candidate listing failed, timed out or truncated; ignored files may be searched and tracked files that match .gitignore may be omitted")
 		return scope
 	}
 	scope.listed = true

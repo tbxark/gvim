@@ -109,32 +109,36 @@ behavior: 50,000 indexed files, 100 file-mode results, background enumeration
 cancellation, and the palette's sequence guard that drops a ranking result for a query
 the user already changed.
 
-**Literal-path probe.** While the file index is still enumerating, the file mode asks
-the index's optional literal-path probe for the path the query names, Fresh's fast
-prefix probe (a typed `etc/hosts` finds the file before enumeration reaches it). The local
-probe resolves the root and every candidate through symlinks and returns a path only
-when its real target stays inside the real workspace (an entry symlink or a symlinked
-parent that escapes is skipped). A local query naming an existing directory lists that
-directory's visible regular files; otherwise it lists the parent and keeps the regular
-files whose names start with the query's basename. That local directory work is bounded:
-at most 4096 entries are inspected (in batches, checking cancellation) and at most 50
-paths returned; hidden entries are included only when the typed basename itself starts
-with a dot, and a directory listing skips them. The remote probe intentionally supports
-the exact-path Stat slice only: it resolves the root and the literal candidate through
-the authority's realpath capability and stats that one file, never the local disk, and
+**Literal-path probe.** The file mode always asks the index's optional literal-path
+probe for the path the query names, both while the index is enumerating and after it
+has completed, as Fresh does (a typed `etc/hosts` finds the file before enumeration
+reaches it; a completed/truncated index can still miss an exact file). The local probe
+resolves the root and every candidate through symlinks and returns a path only when its
+real target stays inside the real workspace (an entry symlink or a symlinked parent that
+escapes is skipped). A local query naming an existing directory lists that directory's
+visible regular files; otherwise it lists the parent and keeps the regular files whose
+names start with the query's basename. That local directory work is bounded: at most
+4096 entries are inspected (in batches, checking cancellation) and at most 50 paths
+returned; hidden entries are included only when the typed basename itself starts with a
+dot, and a directory listing skips them. The remote probe intentionally supports the
+exact-path Stat slice only: it resolves the root and the literal candidate through the
+authority's realpath capability and stats that one file, never the local disk, and
 refuses when the backend cannot prove containment. It performs no remote directory
 enumeration, because the authority ReadDir shell glob materializes the whole directory
 before any client-side limit could trim it. Every probe runs only in a `tea.Cmd`, never in
-Update/Draw; its context is canceled when the query changes or the palette closes; its
-answer is cached for the loading poll ticks; and a result is displayed only when both
-the query sequence and text still match. Confirmed paths are merged before the normal
-rank, so fuzzy scoring, prefix boost, the `:line[:col]` target and the 100-row file cap
-apply. Missing paths, escapes through `..` or symlinks, unreadable paths, and a completed
-index (no probe phase) produce no probe row; a probe never falls back to another
-filesystem. Residuals: the remote parent-basename/directory branches are not probed
-(they need a bounded directory-reader port); the local directory scan cap can miss
-entries beyond the first 4096; the probe branch has no `.gitignore` filtering; a completed
-but truncated index is not probed; an exact local symlink is followed only while its
+Update/Draw; its context is canceled when the query changes or the palette closes. The
+answer, including a negative, is cached for the palette's lifetime in a bounded
+(16-path) cache keyed by the path text, so a loading poll, a repeated key, a `:line[:col]`
+change or a mode-prefix escape for the same path does not repeat the Stat; a changed
+path does probe again. A result is displayed only when both the query sequence and text
+still match. Confirmed paths are merged before the normal rank, so fuzzy scoring, prefix
+boost, the `:line[:col]` target and the 100-row file cap apply. Missing paths, escapes
+through `..` or symlinks, unreadable paths produce no probe row; a probe never falls back
+to another filesystem. Residuals: the remote parent-basename/directory branches are not
+probed (they need a bounded directory-reader port); the local directory scan cap can
+miss entries beyond the first 4096; the probe branch has no `.gitignore` filtering; the
+16-path cache is per open palette, so a file created/removed after a cached negative or
+positive needs the palette reopened; an exact local symlink is followed only while its
 real target stays inside the workspace (a TOCTOU swap between realpath check and Stat
 remains theoretically possible); hidden entries are not listed for a hidden directory
 query.

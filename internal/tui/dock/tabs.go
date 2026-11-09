@@ -141,11 +141,15 @@ func (t *Tabs) tabBaseLabels() []string {
 			name = t.names[i]
 		}
 		if name == "" {
-			// Fresh combines the command with the program's OSC title; gvim's
-			// available "command" is the recorded launch program (no pty foreground
-			// cache is kept — an OPEN residual). The OSC title never wins outright
-			// over a launch record: it becomes context for it.
-			name = combineTabTitle(launchTitle(p.Launch()), p.TitleText())
+			// Fresh combines the foreground command with the program's OSC title. A
+			// local Unix shell supplies the live foreground process name from the
+			// bounded poll; a restored/exited tab, a remote session or an unsupported
+			// platform falls back to the recorded launch program, then the OSC title.
+			command := p.foregroundName()
+			if command == "" {
+				command = launchTitle(p.Launch())
+			}
+			name = combineTabTitle(command, p.TitleText())
 		}
 		if name == "" {
 			name = "Terminal " + strconv.Itoa(i+1)
