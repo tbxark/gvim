@@ -166,7 +166,7 @@ func TestAuthorityOSCopyTreeRemote(t *testing.T) {
 	if err := osys.Copy(ctx, "src", "dst"); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(mutable.mkdirs, ","); got != "/srv/proj/dst,/srv/proj/dst/sub" {
+	if got := strings.Join(mutable.mkdirs, ","); got != "/srv/proj,/srv/proj/dst/sub" {
 		t.Fatalf("copied dirs = %q", got)
 	}
 	if remote.files["/srv/proj/dst/b.go"] != "b" || remote.files["/srv/proj/dst/sub/c.go"] != "c" {

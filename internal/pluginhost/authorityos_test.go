@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path"
 	"sync"
 	"testing"
 	"time"
@@ -137,6 +138,18 @@ func (f *fakeMutableFiles) Rename(_ context.Context, from, to string) error {
 	f.renames = append(f.renames, [2]string{from, to})
 	return nil
 }
+
+// RealPath implements the authority's safety capability for copy tests: this fake has no
+// symlinks, so the identity path is the canonical answer once the path exists.
+func (f *fakeMutableFiles) RealPath(_ context.Context, p string) (string, error) {
+	if _, err := f.Stat(context.Background(), p); err != nil {
+		return "", err
+	}
+	return path.Clean(p), nil
+}
+
+// MkdirNew implements the atomic destination claim used by a safe tree copy.
+func (f *fakeMutableFiles) MkdirNew(context.Context, string) error { return nil }
 
 type fakeOneShot struct {
 	mu   sync.Mutex

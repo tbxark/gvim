@@ -163,9 +163,9 @@ func (m *workspaceManager) evictWorkspace(sess *workspaceSession, cap int) (kept
 	h := m.host
 	m.mu.Unlock()
 
-	msg := fmt.Sprintf("Evicted workspace %q from memory (limit %d materialized workspaces)", label, cap)
+	msg := appTextVars("gvim.workspace.report_evicted", "Evicted workspace %{label} from memory (limit %{limit} materialized workspaces)", map[string]any{"label": fmt.Sprintf("%q", label), "limit": cap})
 	if captureErr != nil {
-		msg += fmt.Sprintf("; its capture write failed (%v) but the fallback save kept the session", captureErr)
+		msg += appTextVars("gvim.workspace.report_evicted_capture", "%{message}; its capture write failed (%{error}) but the fallback save kept the session", map[string]any{"message": msg, "error": captureErr})
 	}
 	m.mu.Lock()
 	m.lastEviction = msg

@@ -750,11 +750,11 @@ func (m *workspaceManager) closeWorkspace(id string) error {
 	}
 	switch {
 	case len(running) > 0:
-		m.report(fmt.Sprintf("Closed workspace %q; stopped %s", closeLabel, runningTerminalSummary(running)))
+		m.report(appTextVars("gvim.workspace.report_closed_running", "Closed workspace %{label}; stopped %{summary}", map[string]any{"label": fmt.Sprintf("%q", closeLabel), "summary": runningTerminalSummary(running)}))
 	case !wasMaterialized:
 		// A dormant workspace has no runtime and no processes: report the cheap close
 		// so the action is not silent.
-		m.report("Closed a dormant workspace")
+		m.report(appText("gvim.workspace.report_closed_dormant", "Closed a dormant workspace"))
 	}
 	return persistErr
 }
@@ -779,7 +779,7 @@ func (m *workspaceManager) Rename(id, label string) error {
 			sess.rt.model.SetWorkspaceLabel(ws.File.Label)
 		})
 	}
-	m.notifyText(fmt.Sprintf("Renamed workspace to %q", ws.File.Label))
+	m.notifyText(appTextVars("gvim.workspace.report_renamed", "Renamed workspace to %{label}", map[string]any{"label": fmt.Sprintf("%q", ws.File.Label)}))
 	return nil
 }
 

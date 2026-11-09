@@ -38,6 +38,7 @@ type fakeTerm struct {
 	exitCode      int                   // the status ExitStatus reports
 	exitOK        bool                  // whether the fake reports an exit status
 	title         string                // the OSC 0/2 title the fake reports
+	focusCalls    []bool                // the DECSET 1004 focus reports the dock forwarded
 	mouse         bool                  // the shell asked for mouse reporting
 	drag          bool                  // the shell asked for drag motion (1002)
 	allMotion     bool                  // the shell asked for all motion (1003)
@@ -78,6 +79,7 @@ func (f *fakeTerm) Done() <-chan struct{}     { return f.done }
 func (f *fakeTerm) AppCursorKeys() bool       { return f.appCursor }
 func (f *fakeTerm) KittyKeyboardFlags() uint8 { return f.kittyFlags }
 func (f *fakeTerm) Title() string             { return f.title }
+func (f *fakeTerm) Focus(focused bool)        { f.focusCalls = append(f.focusCalls, focused) }
 func (f *fakeTerm) Close() error              { f.closed = true; return nil }
 
 // Scrollback returns the history window the dock asks for.

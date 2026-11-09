@@ -46,6 +46,14 @@ type Session struct {
 	cwd       string             // OSC 7 working directory, or "" until the child reports one
 	altScreen bool               // the child is on the alternate screen
 	mouse     map[ansi.Mode]bool // the mouse-reporting modes the child turned on
+	// Focus reporting (DECSET 1004): the child wants CSI I/CSI O when this
+	// terminal gains/loses the keyboard focus. focused is the host-side state the
+	// dock reports with Focus; focusJustEnabled triggers the initial focus-in after
+	// the child turns the mode on while already focused (a real terminal reports
+	// the current focus state then, so a program that enables 1004 starts focused).
+	focusEnabled     bool
+	focusJustEnabled bool
+	focused          bool
 	// scrollbackOff disables the history: x/vt cannot remove its buffer, so the
 	// session keeps it at one line and reports no history.
 	scrollbackOff bool
@@ -108,6 +116,29 @@ func (s *Session) Write(p []byte) (int, error) {
 		return 0, errClosed
 	}
 	return len(p), nil
+}
+
+// Focus tells the session whether its terminal widget has the keyboard focus.
+// When the child enabled focus reporting (DECSET 1004) this queues CSI I (focus in)
+// or CSI O (focus out) as child input through the emulator's reply path; otherwise
+// it only records the state so turning 1004 on later reports an initial focus-in
+// when the terminal is focused. Duplicate reports are ignored. It is safe to call
+// from the UI update path: the bytes go through the asynchronous input inbox.
+func (s *Session) Focus(focused bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.focused == focused {
+		return
+	}
+	s.focused = focused
+	if !s.focusEnabled {
+		return
+	}
+	if focused {
+		s.emu.Focus()
+	} else {
+		s.emu.Blur()
+	}
 }
 
 // Paste sends text to the child as a paste. The emulator wraps the text in the
@@ -210,6 +241,13 @@ func (s *Session) noteMode(mode ansi.Mode, on bool) {
 	switch mode {
 	case ansi.ModeCursorKeys:
 		s.appCursor = on
+	case ansi.ModeFocusEvent:
+		// DECSET/DECRST 1004: focus in/out reporting. On the enable transition the
+		// feed loop sends the initial focus-in if the dock already has the focus.
+		s.focusEnabled = on
+		if on {
+			s.focusJustEnabled = true
+		}
 	case ansi.ModeMouseX10, ansi.ModeMouseNormal, ansi.ModeMouseHighlight,
 		ansi.ModeMouseButtonEvent, ansi.ModeMouseAnyEvent:
 		// Any of the reporting modes means the child wants the mouse. The
@@ -328,6 +366,15 @@ func (s *Session) feed(p []byte) bool {
 	// inbox is the only writer to the PTY, so they cannot interleave.
 	for _, reply := range s.kitty.scan(p) {
 		s.in.push(reply)
+	}
+	// The child may just have enabled focus reporting; tell it it is focused once,
+	// after this output chunk (writing to the emulator's reply pipe from the parse
+	// callback would interleave with the parse).
+	if s.focusJustEnabled {
+		s.focusJustEnabled = false
+		if s.focused {
+			s.emu.Focus()
+		}
 	}
 	return true
 }

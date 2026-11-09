@@ -11,8 +11,9 @@ package pluginhost
 //     file is read whole and capped (remoteCopyFileMax); symlinks in a tree are refused
 //     (there is no remote readlink primitive, so copying them as links is impossible and
 //     silently dropping them would be wrong), and the tree is bounded by copyTreeMax
-//     entries. RealPath remains unsupported: without remote readlink a cleaned path
-//     would be a wrong answer for a symlink.
+//     entries. Copy requires the authority's optional RealPather capability to prove
+//     source/destination safety (and DirectoryCreator for a tree); a backend without
+//     them gets a clear unsupported error instead of guessing or falling back locally.
 //
 // A cancelled context stops the walk/copy at the next check and is mapped to the plugin
 // API's cancelled code; no operation ever falls back to the local machine.
@@ -144,12 +145,23 @@ func (o *authorityOS) walkInto(ctx context.Context, dir, relBase string, opts ho
 // Copy implements hostos.OS: one regular file, or a directory tree, copied entirely
 // through the authority. Symbolic links are refused for trees (no remote readlink); the
 // destination directory must not exist; a directory copy into itself is refused.
+//
+// A copy is a data-safety operation, so the authority must be able to prove where the
+// write lands: both paths are canonicalized through the RealPather capability before any
+// write, and a backend without that capability (or whose realpath answer cannot be
+// trusted absolute) returns unsupported. A directory tree additionally needs the
+// DirectoryCreator atomic destination claim; a backend without it returns unsupported
+// instead of falling back to a check-then-mkdir merge. The tree entry cap is never used
+// as a substitute for this safety check.
 func (o *authorityOS) Copy(ctx context.Context, from, to string) error {
 	if err := ctx.Err(); err != nil {
 		return mapErr(err, "")
 	}
 	src, dst := o.resolve(from), o.resolve(to)
-	if src == dst || src == "" || dst == "" {
+	if src == "" || dst == "" {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "copy: empty path")
+	}
+	if src == dst {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: source and destination are the same path", src)
 	}
 	st, err := o.files().Stat(ctx, src)
@@ -157,24 +169,107 @@ func (o *authorityOS) Copy(ctx context.Context, from, to string) error {
 		return mapErr(err, from)
 	}
 	switch st.Kind {
-	case "dir":
-		return o.copyTree(ctx, src, dst, from)
-	case "file":
+	case "dir", "file":
 	default:
 		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: not a regular file (remote copy supports files and directory trees)", from)
 	}
-	if d, err := o.files().Stat(ctx, dst); err == nil && d.Kind == "dir" {
+	srcReal, dstReal, err := o.copyCanonicalPaths(ctx, src, dst)
+	if err != nil {
+		return err
+	}
+	if srcReal == dstReal {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: source and destination are the same path", from)
+	}
+	if st.Kind == "dir" {
+		if strings.HasPrefix(dstReal, srcReal+"/") {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "cannot copy %s into itself", from)
+		}
+		return o.copyTree(ctx, srcReal, dstReal, from, to)
+	}
+	if d, err := o.files().Stat(ctx, dstReal); err == nil && d.Kind == "dir" {
 		return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination is a directory", to)
 	}
-	return o.copyFile(ctx, src, dst, from, st.Size, st.Mode)
+	return o.copyFile(ctx, srcReal, dstReal, from, st.Size, st.Mode)
 }
 
-func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom string) error {
+// copyCanonicalPaths proves where the copy would read and write. RealPather absence or a
+// failed/relative resolution refuses safely (unsupported/invalid/io) before any write:
+// path normalization alone cannot prove that a symlink or alias does not point into the
+// source or elsewhere. A missing destination is canonicalized through its deepest
+// existing ancestor; a dangling symlink component is refused instead of guessed.
+func (o *authorityOS) copyCanonicalPaths(ctx context.Context, src, dst string) (string, string, error) {
+	rp, ok := authority.RealPathResolver(o.files())
+	if !ok {
+		return "", "", pluginapi.Errf(pluginapi.CodeUnsupported,
+			"copy: the workspace authority has no realpath capability to prove source/destination safety")
+	}
+	srcReal, err := rp.RealPath(ctx, src)
+	if err != nil {
+		return "", "", mapErr(err, src)
+	}
+	if !path.IsAbs(srcReal) {
+		return "", "", pluginapi.Errf(pluginapi.CodeUnsupported, "%s: copy: realpath returned a non-absolute source path %q", src, srcReal)
+	}
+	dstReal, err := o.copyDestinationRealPath(ctx, rp, dst)
+	if err != nil {
+		return "", "", err
+	}
+	return path.Clean(srcReal), path.Clean(dstReal), nil
+}
+
+// copyDestinationRealPath resolves the existing part of a destination through realpath
+// and appends the missing suffix lexically. Every symlink component must resolve; a
+// dangling/looping/permission-denied link or an unprovable answer is a safe refusal.
+func (o *authorityOS) copyDestinationRealPath(ctx context.Context, rp authority.RealPather, dst string) (string, error) {
+	var suffix []string
+	cur := dst
+	for {
+		st, err := o.files().Stat(ctx, cur)
+		if err == nil {
+			real, rerr := rp.RealPath(ctx, cur)
+			if rerr != nil {
+				if st.Kind == "symlink" {
+					return "", pluginapi.Errf(pluginapi.CodeInvalid, "%s: destination symbolic link cannot be resolved safely", dst)
+				}
+				return "", mapErr(rerr, cur)
+			}
+			if !path.IsAbs(real) {
+				return "", pluginapi.Errf(pluginapi.CodeUnsupported, "%s: copy: realpath returned a non-absolute destination %q", dst, real)
+			}
+			for i := len(suffix) - 1; i >= 0; i-- {
+				real = path.Join(real, suffix[i])
+			}
+			if real == "" {
+				return "", pluginapi.Errf(pluginapi.CodeIO, "%s: destination realpath returned no path", dst)
+			}
+			return path.Clean(real), nil
+		}
+		if pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
+			return "", mapErr(err, cur)
+		}
+		parent := path.Dir(cur)
+		if parent == cur || parent == "." {
+			return "", pluginapi.Errf(pluginapi.CodeInvalid, "%s: cannot prove the copy destination is safe", dst)
+		}
+		suffix = append(suffix, path.Base(cur))
+		cur = parent
+	}
+}
+
+// copyTree copies a canonicalized source directory to a canonicalized, not-yet-existing
+// destination. The atomic destination claim is required: without DirectoryCreator a
+// check-then-mkdir fallback could merge into a destination created concurrently and
+// overwrite its files, so that backend gets a clear unsupported error before any write.
+func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displayTo string) error {
 	if strings.HasPrefix(dst, src+"/") || dst == src {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "cannot copy %s into itself", displayFrom)
 	}
 	if _, err := o.files().Stat(ctx, dst); err == nil {
-		return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination already exists", dst)
+		return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination already exists", displayTo)
+	}
+	creator := authority.DirectoryCreators(o.files())
+	if creator == nil {
+		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend cannot atomically claim a copy destination; refusing an unsafe directory copy", displayTo)
 	}
 	// The tree is listed before any write, so a refused symlink cannot leave a partial
 	// copy behind and the entry cap is checked before doing work.
@@ -197,32 +292,19 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom string
 	if err := claimCtx(ctx); err != nil {
 		return err
 	}
-	if creator := authority.DirectoryCreators(o.files()); creator != nil {
-		// Create missing ancestors (a benign operation), then claim the destination root
-		// with one exclusive mkdir. The old path used mkdir -p on the destination itself:
-		// a directory created concurrently between the Stat check and that mkdir was
-		// silently merged into (and its files could be overwritten). MkdirNew fails
-		// atomically with fs.ErrExist, so the copy refuses a destination that appeared
-		// meanwhile.
-		if parent := path.Dir(dst); parent != "." && parent != "/" {
-			if err := mapErr(m.Mkdir(ctx, parent, true), parent); err != nil {
-				return err
-			}
-		}
-		if err := creator.MkdirNew(ctx, dst); err != nil {
-			if errors.Is(err, fs.ErrExist) {
-				return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination already exists (atomic no-overwrite claim; a concurrent creator won)", dst)
-			}
-			return mapErr(err, dst)
-		}
-	} else {
-		// The backend cannot guarantee an atomic claim: keep the previous check-then-mkdir
-		// behaviour instead of failing a copy that used to work, and record the residual
-		// race (the Stat check above, and Mkdir with parents, can merge into a concurrent
-		// creator). Current authority backends implement DirectoryCreator.
-		if err := mapErr(m.Mkdir(ctx, dst, true), dst); err != nil {
+	// Create missing ancestors (a benign operation), then claim the destination root with
+	// one exclusive mkdir. MkdirNew fails atomically with fs.ErrExist, so a destination
+	// created concurrently after the pre-check is refused instead of being merged into.
+	if parent := path.Dir(dst); parent != "." && parent != "/" {
+		if err := mapErr(m.Mkdir(ctx, parent, true), parent); err != nil {
 			return err
 		}
+	}
+	if err := creator.MkdirNew(ctx, dst); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination already exists (atomic no-overwrite claim; a concurrent creator won)", displayTo)
+		}
+		return mapErr(err, dst)
 	}
 	for _, entry := range res.Entries {
 		if err := claimCtx(ctx); err != nil {

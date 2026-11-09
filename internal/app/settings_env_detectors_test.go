@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -69,5 +71,26 @@ func TestSettingsDetectorChangeReplansWatcher(t *testing.T) {
 	waitWatchCount(t, raw, 3) // initial root, re-armed root, custom config dir
 	if w := watcherForDir(raw, "/remote/proj/config"); w == nil {
 		t.Fatalf("settings detector change did not re-plan the watcher: %v", raw.dirs)
+	}
+}
+
+func TestSettingsDetectorChangeAppliesToLocalProvider(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".nvmrc"), []byte("20"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous := detectorsConfig("old", ".old")
+	provider := env.New(root, previous.EnvDetectors(), func() bool { return true })
+	if det, ok := provider.Detected(); ok || det.Name != "" {
+		t.Fatalf("initial local detection = %+v, %v", det, ok)
+	}
+	svc := &settingsService{env: provider}
+	next := detectorsConfig("node", ".nvmrc")
+	svc.applyEnvDetectorChange(previous, next)
+	if got := provider.Detectors(); len(got) != 1 || got[0].Name != "node" {
+		t.Fatalf("local provider detectors = %+v", got)
+	}
+	if det, ok := provider.Detected(); !ok || det.Name != "node" {
+		t.Fatalf("local detection after Reload = %+v, %v", det, ok)
 	}
 }

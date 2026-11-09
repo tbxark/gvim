@@ -362,12 +362,16 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 		}
 		switch {
 		case submodule:
-			scope.prefixes = append(scope.prefixes, strings.TrimSuffix(pathPart, "/")+"/")
+			if walkedRemotePathAllowed(strings.TrimSuffix(pathPart, "/")) {
+				scope.prefixes = append(scope.prefixes, strings.TrimSuffix(pathPart, "/")+"/")
+			}
 		case tracked:
 			scope.tracked[pathPart] = true
 			scope.paths = append(scope.paths, pathPart)
 		case strings.HasSuffix(pathPart, "/"):
-			scope.prefixes = append(scope.prefixes, pathPart)
+			if walkedRemotePathAllowed(strings.TrimSuffix(pathPart, "/")) {
+				scope.prefixes = append(scope.prefixes, pathPart)
+			}
 		default:
 			scope.untracked[pathPart] = true
 			if !hiddenRemotePath(pathPart) {
@@ -405,7 +409,9 @@ func (sc *remoteProjectResultScope) allows(rel string) bool {
 		return false
 	}
 	if !sc.listed {
-		return !hiddenRemotePath(clean)
+		// A walk scope (no complete git candidate list): Fresh's walk never enters a
+		// hidden directory or one of the IGNORED_DIRS (node_modules, target, ...).
+		return walkedRemotePathAllowed(clean)
 	}
 	if sc.tracked[clean] {
 		return true
@@ -415,7 +421,10 @@ func (sc *remoteProjectResultScope) allows(rel string) bool {
 	}
 	for _, prefix := range sc.prefixes {
 		if strings.HasPrefix(clean, prefix) {
-			return !hiddenRemotePath(strings.TrimPrefix(clean, prefix))
+			// The nested repository is walked by Fresh's walk rules: hidden directories
+			// and IGNORED_DIRS inside it are left out (its own .gitignore still cannot be
+			// applied by this single listing; that remains a recorded residual).
+			return walkedRemotePathAllowed(strings.TrimPrefix(clean, prefix))
 		}
 	}
 	return false
@@ -429,6 +438,25 @@ func hiddenRemotePath(p string) bool {
 		}
 	}
 	return false
+}
+
+// skippedRemotePath reports a path segment Fresh's directory walk never enters
+// (IGNORED_DIRS: .git, node_modules, target, __pycache__, .hg, .svn, .DS_Store).
+func skippedRemotePath(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		for _, skip := range remoteGrepSkipDirs {
+			if seg == skip {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// walkedRemotePathAllowed is the Fresh walk's project-file scope for a path reached by
+// walking (no complete git candidate membership): not hidden and not inside a skip dir.
+func walkedRemotePathAllowed(p string) bool {
+	return !hiddenRemotePath(p) && !skippedRemotePath(p)
 }
 
 // remoteAllowedFiles turns the panel's project-relative file snapshot into a membership set

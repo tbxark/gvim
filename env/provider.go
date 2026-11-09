@@ -159,6 +159,24 @@ func (p *Provider) Detectors() []config.EnvDetector {
 	return append([]config.EnvDetector(nil), p.detectors...)
 }
 
+// SetDetectors replaces the detector list at runtime (a config Reload that changed
+// env.detectors) and re-runs the passive local marker scan immediately, so the Settings
+// Environment/Detectors rows and the next spawn see the new list. Empty restores the
+// built-in detectors. This is passive stat work bounded by the config's detector caps and
+// runs on the Reload path, not the UI update loop; the active recipe and its capture cache
+// are unaffected because detection and activation are separate.
+func (p *Provider) SetDetectors(detectors []config.EnvDetector) {
+	if len(detectors) == 0 {
+		detectors = config.DefaultEnvDetectors()
+	}
+	detectors = append([]config.EnvDetector(nil), detectors...)
+	det, incomplete := trust.DetectEnv(p.root, detectors)
+	p.mu.Lock()
+	p.detectors = detectors
+	p.detected, p.found, p.incomplete = det, det.Name != "", incomplete
+	p.mu.Unlock()
+}
+
 // Detected returns the environment detected at the workspace root, if any.
 func (p *Provider) Detected() (trust.DetectedEnv, bool) {
 	p.mu.RLock()

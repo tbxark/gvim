@@ -344,10 +344,10 @@ func (m *workspaceManager) closeMixedSources(ext *mixedExtract, targetID, target
 		}
 	}
 	if skipped := ext.total() - closedFiles - closedTerms; skipped > 0 {
-		m.report(fmt.Sprintf("Extracted %d tabs into workspace %q; %d changed and stayed open", ext.total()-skipped, targetLabel, skipped))
+		m.report(appTextVars("gvim.workspace.report_tabs_changed", "Extracted %{count} tabs into workspace %{label}; %{changed} changed and stayed open", map[string]any{"count": ext.total() - skipped, "label": fmt.Sprintf("%q", targetLabel), "changed": skipped}))
 		return
 	}
-	m.report(fmt.Sprintf("Extracted %d tabs into workspace %q", ext.total(), targetLabel))
+	m.report(appTextVars("gvim.workspace.report_tabs", "Extracted %{count} tabs into workspace %{label}", map[string]any{"count": ext.total(), "label": fmt.Sprintf("%q", targetLabel)}))
 }
 
 // selectionOf rebuilds the TUI selection from the captured extraction (for the

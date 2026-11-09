@@ -454,7 +454,7 @@ func (p *Panel) applySearch(msg searchMsg) tea.Cmd {
 		return nil
 	}
 	if msg.err != "" {
-		p.noticeOf("Bad pattern: " + msg.err)
+		p.noticeOf(dockTextVars("gvim.dock.bad_pattern", "Bad pattern: %{error}", map[string]any{"error": msg.err}))
 		return nil
 	}
 	p.scroll.matches, p.scroll.match = msg.matches, 0

@@ -300,7 +300,7 @@ func (m *Model) workspaceAction(action string) (tea.Cmd, bool) {
 		m.openNewWorkspacePrompt()
 		return nil, true
 	case "workspace_close":
-		m.openWorkspacePicker("Close Workspace", m.workspaceCloseEntry)
+		m.openWorkspacePicker(uiText("gvim.workspace.picker_close", "Close Workspace"), m.workspaceCloseEntry)
 		return nil, true
 	case "workspace_extract_tab":
 		return m.extractWorkspaceTab(), true
@@ -316,9 +316,9 @@ func (m *Model) workspaceAction(action string) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case "workspace_rename":
-		m.openWorkspacePicker("Rename Workspace", func(e WorkspaceEntry) tea.Cmd {
+		m.openWorkspacePicker(uiText("gvim.workspace.picker_rename", "Rename Workspace"), func(e WorkspaceEntry) tea.Cmd {
 			m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
-				Label: "Workspace label:",
+				Label: uiText("gvim.workspace.label_prompt", "Workspace label:"),
 				Input: e.Label,
 				Tag:   workspaceRenameTag{id: e.ID},
 			}))
@@ -338,9 +338,9 @@ func (m *Model) workspaceCloseEntry(e WorkspaceEntry) tea.Cmd {
 		// close also stops the dock shells, so it asks first and names exactly what it
 		// will kill.
 		m.pushOverlay(prompt.NewConfirmWith(m.styles,
-			"Close workspace \""+e.Label+"\"? This stops "+workspaceRunningSummary(running),
+			uiTextVars("gvim.workspace.close_question", "Close workspace %{label}? This stops %{summary}", map[string]any{"label": fmt.Sprintf("%q", e.Label), "summary": workspaceRunningSummary(running)}),
 			workspaceCloseRunningTag{id: e.ID},
-			prompt.ConfirmOptions{Yes: "Close", No: "Cancel", DefaultYes: true}))
+			prompt.ConfirmOptions{Yes: uiText("gvim.workspace.close_button", "Close"), No: uiText("gvim.dialog.button.cancel", "Cancel"), DefaultYes: true}))
 		return nil
 	}
 	cmd, err := m.workspace.Close(e.ID)
@@ -372,7 +372,7 @@ func workspaceRunningSummary(running []WorkspaceRunningTerminal) string {
 	for i, r := range running {
 		name := r.Name
 		if name == "" {
-			name = "terminal"
+			name = uiText("gvim.workspace.noun_terminal", "terminal")
 		}
 		if r.Agent != "" {
 			parts[i] = name + " (agent " + r.Agent + ")"
@@ -380,11 +380,11 @@ func workspaceRunningSummary(running []WorkspaceRunningTerminal) string {
 			parts[i] = name
 		}
 	}
-	noun := "terminal"
+	noun := uiText("gvim.workspace.noun_terminal", "terminal")
 	if len(running) != 1 {
-		noun = "terminals"
+		noun = uiText("gvim.workspace.noun_terminals", "terminals")
 	}
-	return fmt.Sprintf("%d running %s: %s", len(running), noun, strings.Join(parts, ", "))
+	return uiTextVars("gvim.workspace.running_summary", "%{count} running %{noun}: %{parts}", map[string]any{"count": len(running), "noun": noun, "parts": strings.Join(parts, ", ")})
 }
 
 // extractWorkspaceTab asks the workspace layer to move the active tab into its own
@@ -394,12 +394,12 @@ func workspaceRunningSummary(running []WorkspaceRunningTerminal) string {
 // reason and the tab stays open.
 func (m *Model) extractWorkspaceTab() tea.Cmd {
 	if m.workspace == nil {
-		m.quietNotice("Extracting a tab needs the daemon workspace layer")
+		m.quietNotice(uiText("gvim.workspace.extract_needs_daemon", "Extracting a tab needs the daemon workspace layer"))
 		return nil
 	}
 	p, ok := m.workspace.(workspaceExtractPort)
 	if !ok {
-		m.quietNotice("Extracting a tab is not supported by this workspace layer")
+		m.quietNotice(uiText("gvim.workspace.extract_unsupported", "Extracting a tab is not supported by this workspace layer"))
 		return nil
 	}
 	cmd, err := p.ExtractTab()
@@ -445,7 +445,7 @@ func (m *Model) extractTargetEntries() []WorkspaceEntry {
 func (m *Model) openExtractTargetPicker(title string, run func(id string) (WorkspaceCmd, error)) bool {
 	entries := m.extractTargetEntries()
 	if len(entries) == 0 {
-		m.quietNotice("No other workspace over this root to extract into")
+		m.quietNotice(uiText("gvim.workspace.extract_no_other", "No other workspace over this root to extract into"))
 		return false
 	}
 	rows := make([]list.Row, 0, len(entries))
@@ -471,10 +471,10 @@ func (m *Model) openExtractTargetPicker(title string, run func(id string) (Works
 func (m *Model) extractWorkspaceTabTo() tea.Cmd {
 	p, ok := m.workspace.(workspaceExtractTargetPort)
 	if !ok {
-		m.quietNotice("Extracting a tab into an existing workspace is not supported by this workspace layer")
+		m.quietNotice(uiText("gvim.workspace.extract_into_existing_unsupported", "Extracting a tab into an existing workspace is not supported by this workspace layer"))
 		return nil
 	}
-	m.openExtractTargetPicker("Extract Tab to Workspace", p.ExtractTabTo)
+	m.openExtractTargetPicker(uiText("gvim.workspace.extract_title_single", "Extract Tab to Workspace"), p.ExtractTabTo)
 	return nil
 }
 
@@ -484,14 +484,14 @@ func (m *Model) extractWorkspaceTabTo() tea.Cmd {
 func (m *Model) extractWorkspaceTerminalTo() tea.Cmd {
 	p, ok := m.workspace.(workspaceExtractTargetPort)
 	if !ok {
-		m.quietNotice("Extracting a terminal tab is not supported by this workspace layer")
+		m.quietNotice(uiText("gvim.workspace.extract_terminal_unsupported", "Extracting a terminal tab is not supported by this workspace layer"))
 		return nil
 	}
 	if m.dock.Count() == 0 {
 		m.quietNotice(noTerminalNotice())
 		return nil
 	}
-	m.openExtractTargetPicker("Extract Terminal Tab to Workspace", p.ExtractTerminalTabTo)
+	m.openExtractTargetPicker(uiText("gvim.workspace.extract_title_terminal", "Extract Terminal Tab to Workspace"), p.ExtractTerminalTabTo)
 	return nil
 }
 
@@ -501,7 +501,7 @@ func (m *Model) extractWorkspaceTerminalTo() tea.Cmd {
 // extract action, the others have no file state to carry.
 func (m *Model) openExtractTabsPicker() {
 	if _, ok := m.workspace.(workspaceExtractManyPort); !ok {
-		m.quietNotice("Extracting several tabs is not supported by this workspace layer")
+		m.quietNotice(uiText("gvim.workspace.extract_many_unsupported", "Extracting several tabs is not supported by this workspace layer"))
 		return
 	}
 	tabs := m.ed.Tabs()
@@ -521,7 +521,7 @@ func (m *Model) openExtractTabsPicker() {
 		rows = append(rows, list.Row{Left: left, Right: right, Value: t.Path})
 	}
 	if len(rows) == 0 {
-		m.quietNotice("No file tabs to extract")
+		m.quietNotice(uiText("gvim.workspace.extract_no_file_tabs", "No file tabs to extract"))
 		return
 	}
 	extract := func(view *list.View, paths []string) tea.Cmd {
@@ -540,12 +540,12 @@ func (m *Model) openExtractTabsPicker() {
 	// Enter with no marks runs the highlighted row through this single-tab callback;
 	// a marked set goes through ChooseMany. Both keep the multi-select rule "the
 	// active tab alone or the marked tabs".
-	v := list.New("Extract Tabs to New Workspace", rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
+	v := list.New(uiText("gvim.workspace.extract_title_tabs_new", "Extract Tabs to New Workspace"), rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
 		return extract(view, []string{r.Value})
 	})
 	v.Multi = true
 	v.Fit, v.MaxW = true, 80
-	v.Hint = "Space mark, Enter extract, type to filter, Esc close"
+	v.Hint = uiText("gvim.workspace.extract_hint_select", "Space mark, Enter extract, type to filter, Esc close")
 	v.ChooseMany = func(view *list.View, marked []list.Row) tea.Cmd {
 		paths := make([]string, 0, len(marked))
 		for _, r := range marked {
@@ -570,7 +570,7 @@ const (
 // large-file overlay refuses the whole action in the command.
 func (m *Model) openMixedExtractPicker() {
 	if _, ok := m.workspace.(workspaceExtractMixedPort); !ok {
-		m.quietNotice("Extracting mixed file and terminal tabs is not supported by this workspace layer")
+		m.quietNotice(uiText("gvim.workspace.extract_mixed_unsupported", "Extracting mixed file and terminal tabs is not supported by this workspace layer"))
 		return
 	}
 	termRefs := m.TerminalTabRefs()
@@ -595,7 +595,7 @@ func (m *Model) openMixedExtractPicker() {
 		rows = append(rows, list.Row{Left: ref.Label, Right: "terminal", Value: extractTerminalValue + strconv.Itoa(ref.Index)})
 	}
 	if len(rows) == 0 {
-		m.quietNotice("No tabs to extract")
+		m.quietNotice(uiText("gvim.workspace.no_tabs_to_extract", "No tabs to extract"))
 		return
 	}
 	selectionOf := func(selected []list.Row) ExtractSelection {
@@ -619,12 +619,12 @@ func (m *Model) openMixedExtractPicker() {
 		sel := selectionOf(selected)
 		return tea.Cmd(func() tea.Msg { return mixedExtractSelectionMsg{selection: sel} })
 	}
-	v := list.New("Extract Tabs to Workspace", rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
+	v := list.New(uiText("gvim.workspace.extract_title_tabs_existing", "Extract Tabs to Workspace"), rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
 		return extract(view, []list.Row{r})
 	})
 	v.Multi = true
 	v.Fit, v.MaxW = true, 80
-	v.Hint = "Space mark, Enter choose target, type to filter, Esc close"
+	v.Hint = uiText("gvim.workspace.extract_hint_target", "Space mark, Enter choose target, type to filter, Esc close")
 	v.ChooseMany = func(view *list.View, marked []list.Row) tea.Cmd {
 		return extract(view, marked)
 	}
@@ -636,23 +636,23 @@ func (m *Model) openMixedExtractPicker() {
 // the new co-tenant is created directly.
 func (m *Model) afterMixedExtractSelection(sel ExtractSelection) tea.Cmd {
 	if sel.Len() == 0 {
-		m.quietNotice("No tabs selected")
+		m.quietNotice(uiText("gvim.workspace.extract_none_selected", "No tabs selected"))
 		return nil
 	}
 	if _, ok := m.workspace.(workspaceExtractMixedPort); !ok {
-		m.quietNotice("Extracting mixed file and terminal tabs is not supported by this workspace layer")
+		m.quietNotice(uiText("gvim.workspace.extract_mixed_unsupported", "Extracting mixed file and terminal tabs is not supported by this workspace layer"))
 		return nil
 	}
 	targets := m.extractTargetEntries()
 	if len(targets) == 0 {
 		return m.runMixedExtract(sel, "", false)
 	}
-	rows := []list.Row{{Left: "New workspace", Right: "new co-tenant over this root", Value: ""}}
+	rows := []list.Row{{Left: uiText("gvim.workspace.extract_new_workspace_row", "New workspace"), Right: uiText("gvim.workspace.extract_new_workspace_detail", "new co-tenant over this root"), Value: ""}}
 	for _, e := range targets {
 		left, right := workspaceRowText(e)
 		rows = append(rows, list.Row{Left: left, Right: right, Value: e.ID})
 	}
-	v := list.New("Extract Tabs To", rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
+	v := list.New(uiText("gvim.workspace.extract_title_tabs_choice", "Extract Tabs To"), rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
 		view.Close()
 		return m.runMixedExtract(sel, r.Value, false)
 	})
@@ -667,7 +667,7 @@ func (m *Model) afterMixedExtractSelection(sel ExtractSelection) tea.Cmd {
 func (m *Model) runMixedExtract(sel ExtractSelection, targetID string, replace bool) tea.Cmd {
 	p, ok := m.workspace.(workspaceExtractMixedPort)
 	if !ok {
-		m.quietNotice("Extracting mixed file and terminal tabs is not supported by this workspace layer")
+		m.quietNotice(uiText("gvim.workspace.extract_mixed_unsupported", "Extracting mixed file and terminal tabs is not supported by this workspace layer"))
 		return nil
 	}
 	cmd, err := p.ExtractMixed(sel, targetID, replace)
@@ -702,8 +702,7 @@ func extractConflictQuestion(msg ExtractConflictMsg) string {
 		label = msg.TargetID
 	}
 	conflicts := strings.Join(msg.Conflicts, ", ")
-	return "Workspace \"" + label + "\" already has: " + conflicts +
-		". Continue? The target's file state is replaced; same-name terminal tabs are added alongside. The source tabs stay open until the target accepts."
+	return uiTextVars("gvim.workspace.conflict", "Workspace %{label} already has: %{conflicts}. Continue? The target's file state is replaced; same-name terminal tabs are added alongside. The source tabs stay open until the target accepts.", map[string]any{"label": fmt.Sprintf("%q", label), "conflicts": conflicts})
 }
 
 // workspaceRowText is the switcher text of one workspace: the label, the root and the

@@ -162,7 +162,11 @@ func (p *Panel) Focus() bool { return p.focus }
 // explorer and the tab strip. Losing the focus leaves the scrollback view, so the
 // dock is live again when it is next focused.
 func (p *Panel) SetFocus(v bool) {
+	was := p.focus
 	p.focus = v
+	if was != v {
+		p.reportTerminalFocus(v)
+	}
 	if !v {
 		p.ClearHover()
 		// A restored transcript is the whole dock until it is restarted, so it
@@ -228,6 +232,9 @@ func (p *Panel) Show() tea.Cmd {
 // Hide hides the dock and gives up its focus. The shell keeps running.
 func (p *Panel) Hide() {
 	p.open = false
+	if p.focus {
+		p.reportTerminalFocus(false)
+	}
 	p.focus = false
 	p.scroll = scrollState{}
 	p.clearSelection()
@@ -244,7 +251,29 @@ func (p *Panel) focusDock() {
 	if p.host.Focus != nil {
 		p.host.Focus()
 	}
-	p.focus = true
+	if !p.focus {
+		p.focus = true
+		p.reportTerminalFocus(true)
+	}
+}
+
+// terminalFocuser is the optional focus-reporting half of a terminal session
+// (terminal.Session.Focus). A fake or a transcript without a session simply does
+// not implement it, and the dock then sends nothing.
+type terminalFocuser interface{ Focus(bool) }
+
+// reportTerminalFocus forwards this panel's keyboard focus to its child when the
+// child asked for focus reporting (DECSET 1004). It is called only on real focus
+// transitions, so the child receives one CSI I on focus and one CSI O on blur; a
+// child that enables 1004 later gets an initial focus-in from the session when the
+// dock is focused. A dead/restored panel has no session and reports nothing.
+func (p *Panel) reportTerminalFocus(focused bool) {
+	if p.term == nil {
+		return
+	}
+	if f, ok := p.term.(terminalFocuser); ok {
+		f.Focus(focused)
+	}
 }
 
 // start starts a shell unless one is starting or running. A shell that has exited
@@ -332,7 +361,7 @@ func (p *Panel) StartAgent(name string) (tea.Cmd, bool) {
 		p.focus = false
 		return p.launchProgram(dir, record.Argv, record, true), true
 	}
-	p.notice = "No terminal agent is configured under that name."
+	p.notice = dockText("gvim.dock.no_agent", "No terminal agent is configured under that name.")
 	return nil, false
 }
 
@@ -493,6 +522,9 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 		p.applied = shellSize{msg.cols, msg.rows}
 		p.armed, p.resizing, p.writing = false, false, false
 		p.queue = nil
+		// The replacement session starts with the dock's current focus state (a
+		// focus call may have happened before this session existed).
+		p.reportTerminalFocus(p.focus)
 		if p.open {
 			// The dock was shown to get this shell, so the shell takes the focus.
 			p.focusDock()
@@ -609,7 +641,7 @@ func startNotice(err error) string {
 	if errors.Is(err, terminal.ErrUnsupported) {
 		return unsupportedNotice()
 	}
-	return "Could not start a shell: " + err.Error()
+	return dockTextVars("gvim.dock.shell_start_failed", "Could not start a shell: %{error}", map[string]any{"error": err.Error()})
 }
 
 // ToggleCapture turns keyboard capture on or off, with the dock's notices. It does

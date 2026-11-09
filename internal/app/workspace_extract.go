@@ -259,7 +259,7 @@ func (m *workspaceManager) runExtractTab(ext *extractTab) {
 				return
 			}
 		}
-		m.report(fmt.Sprintf("Extracted %s into workspace %q; the source tab changed and is still open", ext.name, ws.File.Label))
+		m.report(appTextVars("gvim.workspace.report_named_changed", "Extracted %{name} into workspace %{label}; the source tab changed and is still open", map[string]any{"name": ext.name, "label": fmt.Sprintf("%q", ws.File.Label)}))
 		return
 	}
 	if wait != nil {
@@ -270,7 +270,7 @@ func (m *workspaceManager) runExtractTab(ext *extractTab) {
 			return
 		}
 	}
-	m.report(fmt.Sprintf("Extracted %s into workspace %q", ext.name, ws.File.Label))
+	m.report(appTextVars("gvim.workspace.report_named", "Extracted %{name} into workspace %{label}", map[string]any{"name": ext.name, "label": fmt.Sprintf("%q", ws.File.Label)}))
 }
 
 // beginExtractSelect starts the switch of an extraction. beginSelectFn is a test hook so

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1134,5 +1135,88 @@ func TestRemoteSearchPreviewDisconnectPreservesError(t *testing.T) {
 	}
 	if got := fs.reads(); got != 1 {
 		t.Fatalf("open-buffer preview read remotely: %d", got)
+	}
+}
+
+// TestRemoteSearchCandidateWalkSkipsHiddenAndIgnoredDirs checks the walk half of Fresh's
+// project-file scope: content below a nested repository is accepted only under the walk's
+// hidden and IGNORED_DIRS rules (node_modules/target/... and hidden directories are left
+// out), a nested repository whose own path is hidden or under a skip dir is not entered at
+// all, and tracked candidates keep their explicit-membership exception elsewhere.
+func TestRemoteSearchCandidateWalkSkipsHiddenAndIgnoredDirs(t *testing.T) {
+	ls := gitLsEntry("100644", "a.go") +
+		gitLsEntry("160000", "vendor") +
+		gitLsEntry("160000", "node_modules/sub") +
+		gitLsEntry("", "nested/") +
+		gitLsEntry("", ".hiddenrepo/")
+	out := strings.Join([]string{
+		"a.go:1:1:todo a",
+		"vendor/keep.go:1:1:todo v",
+		"vendor/node_modules/pkg.go:1:1:todo n",
+		"vendor/.cache/x.go:1:1:todo h",
+		"nested/inner.go:1:1:todo i",
+		"nested/target/x.go:1:1:todo t",
+		"node_modules/sub/inner.go:1:1:todo s",
+		".hiddenrepo/x.go:1:1:todo r",
+		"outside.go:1:1:todo o",
+	}, "\n")
+	one := rgScopeOneShot(true, []byte(ls), out+"\n", false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	names := remoteSearchFileNames(t, batches)
+	sort.Strings(names)
+	if got := strings.Join(names, ","); got != "a.go,nested/inner.go,vendor/keep.go" {
+		t.Fatalf("files = %v, want only the walk-visible nested paths", names)
+	}
+	if notice := doneBatchNotice(t, batches); !strings.Contains(notice, "nested repositories") {
+		t.Fatalf("notice = %q, want the nested-repository notice", notice)
+	}
+	if calls := rgCalls(one); len(calls) != 1 || !strings.Contains(strings.Join(calls[0], " "), "--no-ignore") {
+		t.Fatalf("rg calls = %v, want one widened nested fallback", calls)
+	}
+}
+
+// TestRemoteGrepFallbackOutsideGitAppliesWalkSkips checks the non-git walk scope: grep may
+// scan everything, but the result filter drops hidden entries and the IGNORED_DIRS the
+// Fresh walk never enters.
+func TestRemoteGrepFallbackOutsideGitAppliesWalkSkips(t *testing.T) {
+	one := grepScopeOneShot(false, nil, strings.Join([]string{
+		"a.go:1:todo a",
+		"node_modules/pkg.go:1:todo n",
+		"target/x.go:1:todo t",
+		"sub/.cache/x.go:1:todo h",
+	}, "\n")+"\n", false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	names := remoteSearchFileNames(t, batches)
+	if got := strings.Join(names, ","); got != "a.go" {
+		t.Fatalf("files = %v, want only the walk-visible a.go", names)
+	}
+}
+
+// TestRemoteSearchTrackedCandidateUnderSkipDirStillSearched checks the explicit candidate
+// half keeps Fresh's exception: a tracked file whose path is under node_modules is still a
+// candidate (git lists it, so it is passed explicitly), even though a walked tree would
+// skip that directory.
+func TestRemoteSearchTrackedCandidateUnderSkipDirStillSearched(t *testing.T) {
+	ls := gitLsEntry("100644", "node_modules/tracked.go") + gitLsEntry("100644", "a.go")
+	one := candidateRgScript(true, []byte(ls), 0, false)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	names := remoteSearchFileNames(t, batches)
+	if got := strings.Join(names, ","); got != "node_modules/tracked.go,a.go" {
+		t.Fatalf("files = %v, want the tracked skip-dir candidate and a.go", names)
 	}
 }

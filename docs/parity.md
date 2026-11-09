@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `564e2a4` plus the merged round-34 work (237–241; 242
+Last verified: 2026-11-09, tree commit `0650fd4` plus the merged round-35 work (243–247; 248
 audit). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet,
-golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 120 KiB / de 82
-KiB / both 203 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
-EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r34-final.log`). The audit ran build/gofmt/
-i18n_check plus targeted round-34 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
+golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 119 KiB / de 88
+KiB / both 207 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
+EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r35-final.log`). The audit ran build/gofmt/
+i18n_check plus targeted round-35 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
 search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain
 security/secret-tool, real-tmux, Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching
 remain UNTESTED. Fresh reference: `refs/fresh` same date.
@@ -1513,6 +1513,63 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-35 outcome (2026-11-09, merged working tree on `0650fd4`).** Five tasks landed (243–247);
+248 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
+0: 76 packages ok, no FAIL (log `/tmp/gvim-r35-final.log`). The audit read the diff and ran targeted
+tests; the Lead ran the full suite.
+**Local env detector hot reload — detection-only (243).** A local env.Provider config Reload
+re-scans/updates the detector RESULTS passively; it does NOT invalidate or recapture the active
+recipe/capture cache and does not re-activate/re-warm the environment. UI remains non-blocking and
+this path is local-only. (Corrected per trust report: 243 is detection-only, not a capture re-warm.)
+**Remote search candidate filter (244).** Walked/nested-content filtering now follows Fresh's walk
+scope: hidden path segments and IGNORED_DIRS (.git, node_modules, target, __pycache__, .hg, .svn,
+.DS_Store) are refused. Applied to the non-git/incomplete-listing fallback and to contents below
+nested repositories/submodules in the widened fallback; nested prefixes whose own path is hidden or
+under a skip dir are no longer registered. A complete git listing keeps its explicit-membership
+exception: tracked/untracked candidates (including a tracked file under node_modules) stay
+searchable exactly as Fresh's git path does. Unchanged: bounded explicit batches, cancellation/
+timeouts, authority-only reads, non-fatal degradation notices, finder-snapshot authority, no local
+fallback (R13-11/R13-23).
+**Embedded-terminal focus events (DECSET 1004) (245; gvim extension).** A child asks for focus in/out
+with `ESC [ ? 1004 h`; the session tracks the mode from the emulator and, while on, writes canonical
+`CSI I`/`CSI O` into the child's input through the same asynchronous inbox as key input and emulator
+replies. Reports are sent only on real transitions: dock/tab gains keyboard focus, editor takes it
+back, tab switch (old out/new in), dock hidden; scrollback/pager movement does not blur the shell,
+and a repeated focus call is ignored. If the child enables 1004 while the dock already has focus, the
+session sends the initial focus-in after that output chunk; disabling the mode stops reports while
+focus state is still tracked. A new/restarted shell learns the dock's current focus state on start
+before any 1004 request; dead/restored tabs have no session and send nothing. Bytes are sent only
+after opt-in, so programs that never ask see no change; mouse/keyboard/clipboard forwarding
+unaffected. Fresh asks its host terminal for focus events but does not forward them to embedded
+terminals, so this is a gvim extension. Remaining difference: only the dock's keyboard focus is
+forwarded, not OS window focus (with View.ReportFocus for a remote authority, losing the outer
+terminal window while the dock is focused sends no blur); focus mode is not persisted in
+terminal.json (revived shell starts off until the program asks) (R13-15).
+**Plugin copy canonicalization + capability refusal (246).** Both plugin copy forms now canonicalize
+source and destination before the first write: a destination that is the source or lies inside a
+copied directory tree — directly or through a symlinked/case-aliased parent — is refused with
+invalid, as is an unresolvable/dangling destination symlink rather than guessing. The local backend
+compares real paths + file identity (os.SameFile), so hard links, symlink components and case
+variants cannot bypass the check; a bounded tree walk is never used as a substitute. Authority copy
+requires the optional RealPather and canonicalizes source/destination before any write (a missing
+destination is resolved through its deepest existing ancestor; dangling/unresolvable is refused); a
+backend without RealPather returns unsupported rather than trusting a cleaned path or falling back
+locally. A directory copy on a backend without DirectoryCreator also returns unsupported instead of
+using the unsafe check-then-mkdir -p merge fallback. The root claim remains atomic root-only;
+residuals: canonicalization is a pre-write proof, so a concurrent symlink swap after it (TOCTOU) is
+documented; remote hard-link identity cannot be compared like local os.SameFile; parents are created
+before the claim; failure after claim can leave a partial destination; single-file copy still
+replaces an existing regular file; stream/no-stream 16 MiB/shrink/growth/cancel and metadata/partial
+tree residuals unchanged (R13-19/R13-21).
+**i18n extraction round-35 (247).** Recent terminal/env/workspace user-visible notices were extracted
+with English byte-identical; catalogue rules/budget/docs/fallback and formatting tests refreshed.
+Catalogue now en 1107 / de 579 keys, 572 KiB key+value text (under 640 KiB cap), ≈662 KiB embedded
+JSON, loader heap en 119 KiB / de 88 KiB / both 207 KiB (R13-5).
+Metrics: palette 240, settings 69 in 14 sections, bundled 26 (9 on)/17 off, plugin API 244 functions/
+1489 lines level 2; i18n en 1107 / 579 per locale, 572 KiB text, ≈662 KiB JSON, heap 119-88-207 KiB.
+Full suite EXIT 0 (76 packages, log /tmp/gvim-r35-final.log); real hosts UNTESTED; no full-parity
+claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-34 outcome (2026-11-09, merged working tree on `564e2a4`).** Five tasks landed (237–241);
 242 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
@@ -4253,6 +4310,34 @@ for parity status.
 208. **i18n extraction round-34 (241; R13-5).** Recent env/terminal notices catalogued English
      byte-identical; rules/budget/docs/fallback tests. en 1054/de 579, 568 KiB text, ≈658 KiB JSON,
      heap 120-82-203.
+209. **Local env detector hot reload — detection-only (243; R13-18).** local env.Provider config
+     Reload re-scans/updates detector results passively; does NOT invalidate/recapture active
+     recipe/capture cache, no re-activate/re-warm; non-blocking/local-only. Corrected per trust report.
+210. **Remote search walked candidate filter (244; R13-11/R13-23).** walked/nested content uses Fresh
+     walk scope: hidden segments + IGNORED_DIRS (.git/node_modules/target/__pycache__/.hg/.svn/
+     .DS_Store) refused; applied non-git/incomplete fallback and nested repo/submodule widened
+     fallback; hidden/skip nested prefixes not registered. Complete git listing keeps explicit
+     membership exception (tracked/untracked candidates incl tracked under node_modules searchable).
+     Unchanged bounds/cancel/authority-only/non-fatal notices/finder snapshot/no local.
+211. **Embedded terminal focus events DECSET 1004 (245; R13-15; gvim extension).** child enables ESC[?
+     1004h; session tracks mode and sends canonical CSI I/O via async input inbox only after opt-in;
+     real transitions dock/tab focus gained, editor takes back, tab switch, dock hidden; pager no blur;
+     repeated ignored; enable-while-focused initial focus-in after chunk; disable stops reports but
+     tracks; new/restarted shell learns current focus before request; dead/restored no session;
+     mouse/keyboard/clipboard unaffected. Residual: dock keyboard focus only, not OS window focus;
+     focus mode not persisted (revived starts off until asks).
+212. **Plugin copy canonicalization/capability safety (246; R13-19/R13-21).** both forms canonicalize
+     src/dst before first write; dst == src or inside copied tree (direct/symlink/case-alias parent)
+     invalid; unresolvable/dangling dst symlink invalid. Local real paths + os.SameFile (hardlink/
+     symlink/case cannot bypass); no bounded-walk substitute. Authority requires RealPather
+     canonicalize src/dst (missing dst via deepest existing ancestor); no RealPather unsupported;
+     directory copy no DirectoryCreator unsupported (no check-then-mkdir fallback). Root claim
+     atomic root-only. Residuals concurrent symlink swap TOCTOU, remote hardlink identity, parents
+     before claim, failure-after-claim partial destination, single-file replace, stream/no-stream
+     16MiB/shrink/growth/cancel, metadata/partial tree.
+213. **i18n extraction round-35 (247; R13-5).** terminal/env/workspace new notices English
+     byte-identical; rules/budget/docs/fallback/formatting tests. en 1107/de 579, 572 KiB text,
+     ≈662 KiB JSON, heap 119-88-207.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6104,21 +6189,35 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-35 verification (2026-11-09, merged tree on `0650fd4`; 243–247 landed; 248 audit).**
+  STATIC GATES PASS (Lead, default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint
+  0, purity, import rules, menus, i18n_check with catalogue heap en 119 KiB / de 88 KiB / both 207
+  KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76
+  packages ok, no FAIL line (log `/tmp/gvim-r35-final.log`). The audit ran build/gofmt/i18n_check
+  plus targeted round-35 tests/diff review only; the Lead ran the full suite. Tracks: 243 local env
+  detector hot reload DETECTION-ONLY (passive rescan; no capture/recipe invalidate/re-warm); 244
+  remote search walked candidate filter; 245 embedded-terminal DECSET 1004 focus events (gvim
+  extension); 246 plugin copy canonicalization + capability refusal (TOCTOU/remote-hardlink
+  residuals); 247 i18n extraction.
+  Heap-guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-
+  only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
+  a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
+  fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-34 landed remote-preview syntax regressions, local large bounded edit context, detector
-  reload watcher re-plan, terminal exit auto-transcript, i18n extraction; full suite EXIT 0 (76
-  packages, log /tmp/gvim-r34-final.log); §5.5 is round-35/36 plan; TUI-only scope/genuine-
+  (round-35 landed detector reload (detection-only), remote search walked filter, DECSET 1004 focus
+  forwarding, plugin copy canonicalization/capability refusal, i18n extraction; full suite EXIT 0 (76
+  packages, log /tmp/gvim-r35-final.log); §5.5 is round-36/37 plan; TUI-only scope/genuine-
   equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–34 had their gate sets
-  run. Round 34 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–35 had their gate sets
+  run. Round 35 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  120 KiB / de 82 KiB / both 203 KiB, git diff --check). Final full
+  119 KiB / de 88 KiB / both 207 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r34-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-34 tests and
+  `/tmp/gvim-r35-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-35 tests and
   diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
   recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
   production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling

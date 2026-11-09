@@ -850,6 +850,35 @@ The forwarded coordinates are relative to the shell's first row. The dock keeps
 the pressed button for drag events, so a drag under all-motion reports the button
 it holds.
 
+## Focus events (DECSET 1004)
+
+A child can ask for focus in/out reports with `ESC [ ? 1004 h` (xterm's mode). The
+session tracks the mode from the emulator and, while it is on, writes the
+canonical `CSI I` (focus in) / `CSI O` (focus out) bytes into the child's input
+through the same asynchronous inbox as key input and emulator replies. Reports
+are sent only on real transitions: the dock forwards a focus-in when the tab or
+the dock gains the keyboard, a focus-out when the editor takes it back, on a tab
+switch (old tab out, new tab in) and when the dock is hidden; toggling scrollback
+and moving inside the pager do not blur the shell. A repeated focus call is
+ignored. If the child enables 1004 while the dock already has the focus, the
+session sends the initial focus-in after that output chunk, so a program that
+starts asking mid-session begins focused; disabling the mode stops the reports
+while the dock keeps tracking the focus state. A restarted or newly started
+shell learns the dock's current focus state on start, before any 1004 request.
+Dead/restored tabs have no session and therefore send nothing. The bytes are only
+sent after the child opted in, so programs that never ask see no change, and
+mouse, keyboard and clipboard forwarding are unaffected.
+
+Fresh asks its host terminal for focus events itself (for its focus announcer) but
+does not forward them to embedded terminals, so this forwarding is a gvim
+extension. Its one remaining difference: gvim currently forwards only the dock's
+keyboard focus, not the OS window focus — with `View.ReportFocus` enabled only for
+a remote workspace authority, losing focus of the outer terminal window while the
+dock is focused does not send a blur to the child (and regaining it does not send
+a focus-in); switching the keyboard to the editor or hiding the dock does. Focus
+mode is not persisted in `terminal.json`: a revived shell starts with the mode
+off until the program asks again.
+
 ## close_on_exit
 
 With `terminal.close_on_exit = true`, a shell that exits hides the dock and

@@ -230,7 +230,7 @@ func (m *workspaceManager) runExtractTabTo(extTo *extractTabTo) {
 				return
 			}
 		}
-		m.report(fmt.Sprintf("Extracted %s into workspace %q; the source tab changed and is still open", ext.name, target.File.Label))
+		m.report(appTextVars("gvim.workspace.report_named_changed", "Extracted %{name} into workspace %{label}; the source tab changed and is still open", map[string]any{"name": ext.name, "label": fmt.Sprintf("%q", target.File.Label)}))
 		return
 	}
 	if wait != nil {
@@ -239,7 +239,7 @@ func (m *workspaceManager) runExtractTabTo(extTo *extractTabTo) {
 			return
 		}
 	}
-	m.report(fmt.Sprintf("Extracted %s into workspace %q", ext.name, target.File.Label))
+	m.report(appTextVars("gvim.workspace.report_named", "Extracted %{name} into workspace %{label}", map[string]any{"name": ext.name, "label": fmt.Sprintf("%q", target.File.Label)}))
 }
 
 // mergeExtractMru puts the moved documents (newest first) before the target's existing
@@ -418,7 +418,7 @@ func (m *workspaceManager) runExtractTerminalTab(ext *extractTerminalTab) {
 		if wait != nil {
 			_ = wait()
 		}
-		m.report(fmt.Sprintf("Extracted terminal tab %q into workspace %q; the source tab changed and is still open", terminalTabName(ext.tab), target.File.Label))
+		m.report(appTextVars("gvim.workspace.report_terminal_tab_changed", "Extracted terminal tab %{name} into workspace %{label}; the source tab changed and is still open", map[string]any{"name": fmt.Sprintf("%q", terminalTabName(ext.tab)), "label": fmt.Sprintf("%q", target.File.Label)}))
 		return
 	}
 	if wait != nil {
@@ -427,7 +427,7 @@ func (m *workspaceManager) runExtractTerminalTab(ext *extractTerminalTab) {
 			return
 		}
 	}
-	m.report(fmt.Sprintf("Extracted terminal tab %q into workspace %q; it revives on the first dive", terminalTabName(ext.tab), target.File.Label))
+	m.report(appTextVars("gvim.workspace.report_terminal_tab_revives", "Extracted terminal tab %{name} into workspace %{label}; it revives on the first dive", map[string]any{"name": fmt.Sprintf("%q", terminalTabName(ext.tab)), "label": fmt.Sprintf("%q", target.File.Label)}))
 }
 
 // acceptExtractTerminalTab puts the saved terminal tab into the target: a
@@ -624,5 +624,5 @@ func (m *workspaceManager) runExtractTabs(exts []*extractTab, mru []session.MruF
 	if closed != 1 {
 		noun = "tabs"
 	}
-	m.report(fmt.Sprintf("Extracted %d %s into workspace %q", closed, noun, ws.File.Label))
+	m.report(appTextVars("gvim.workspace.report_count_noun", "Extracted %{count} %{noun} into workspace %{label}", map[string]any{"count": closed, "noun": noun, "label": fmt.Sprintf("%q", ws.File.Label)}))
 }

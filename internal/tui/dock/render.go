@@ -151,7 +151,7 @@ func (p *Panel) title() string {
 	if p.exited {
 		return p.exitedTitle()
 	}
-	return "Terminal"
+	return dockText("gvim.dock.title", "Terminal")
 }
 
 // exitedTitle is the dock title of a shell that quit: Fresh shows a restart
@@ -159,9 +159,9 @@ func (p *Panel) title() string {
 // in-scope surface is the tab title, which shows the non-zero code (or a signal)
 // and keeps "exit 0" implicit exactly like Fresh.
 func (p *Panel) exitedTitle() string {
-	title := "Terminal (exited)"
+	title := dockText("gvim.dock.title_exited", "Terminal (exited)")
 	if suffix := p.exitSuffix(); suffix != "" {
-		title = "Terminal (exited, " + suffix + ")"
+		title = dockTextVars("gvim.dock.title_exited_suffix", "Terminal (exited, %{suffix})", map[string]any{"suffix": suffix})
 	}
 	if agent := p.launch.Agent; agent != "" {
 		title += " — " + agent
@@ -177,12 +177,12 @@ func (p *Panel) exitSuffix() string {
 		return ""
 	}
 	if p.exitCode < 0 {
-		return "signal"
+		return dockText("gvim.dock.exit_signal", "signal")
 	}
 	if p.exitCode == 0 {
 		return ""
 	}
-	return fmt.Sprintf("exit %d", p.exitCode)
+	return dockTextVars("gvim.dock.exit_code", "exit %{code}", map[string]any{"code": p.exitCode})
 }
 
 // scrollbackTitle is the title of the scrollback view: its visible rows of the
@@ -192,11 +192,11 @@ func (p *Panel) scrollbackTitle() string {
 	rows := max(p.bodyRows(), 1)
 	first := min(p.scroll.top+1, combined)
 	last := min(p.scroll.top+rows, combined)
-	name := "Scrollback"
+	name := dockText("gvim.dock.scrollback", "Scrollback")
 	if p.restored && p.term == nil {
-		name = "Scrollback (restored)"
+		name = dockText("gvim.dock.scrollback_restored", "Scrollback (restored)")
 		if p.reflowed {
-			name = "Scrollback (restored, rewrapped)"
+			name = dockText("gvim.dock.scrollback_restored_rewrapped", "Scrollback (restored, rewrapped)")
 		}
 	}
 	if p.exited {
@@ -205,7 +205,7 @@ func (p *Panel) scrollbackTitle() string {
 		// A live shell's auto-shown transcript names the exit as well, so the title
 		// still says the shell is gone now that the frozen screen is a pager.
 		if p.term != nil {
-			name = "Scrollback (exited)"
+			name = dockText("gvim.dock.scrollback_exited", "Scrollback (exited)")
 		}
 		if suffix := p.exitSuffix(); suffix != "" {
 			name += ", " + suffix

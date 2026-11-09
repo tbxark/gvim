@@ -441,6 +441,13 @@ func (o *pluginOS) RealPath(ctx context.Context, path string) (string, error) {
 
 // Copy implements hostos.OS: a file, or a directory tree (symbolic links are copied as
 // links, never followed). The destination must not be an existing directory.
+//
+// Both paths are canonicalized before the destination is touched: every existing symlink
+// component is resolved, a dangling symlink destination is refused rather than guessed,
+// and self/descendant checks run on the real source and real destination. That closes the
+// alias hole where a lexical check missed a copy into the source through a symlinked
+// parent. If the resolution cannot prove the destination, the copy is refused (no write);
+// the bounded tree walk is a size guard, never a substitute for this safety check.
 func (o *pluginOS) Copy(ctx context.Context, from, to string) error {
 	if err := ctxErr(ctx); err != nil {
 		return err
@@ -450,27 +457,49 @@ func (o *pluginOS) Copy(ctx context.Context, from, to string) error {
 	if err != nil {
 		return mapErr(err, a)
 	}
-	if d, err := os.Stat(b); err == nil && d.IsDir() {
+	srcReal, err := filepath.EvalSymlinks(a)
+	if err != nil {
+		return mapErr(err, a)
+	}
+	dstReal, err := realCopyDestination(b)
+	if err != nil {
+		return err
+	}
+	if d, err := os.Stat(dstReal); err == nil && d.IsDir() {
 		return pluginapi.Errf(pluginapi.CodeConflict, "%s: the destination is a directory", b)
 	}
-	if dst, err := os.Stat(b); err == nil && os.SameFile(st, dst) {
-		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: source and destination are the same file", a)
+	if dst, err := os.Stat(dstReal); err == nil && os.SameFile(st, dst) {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: source and destination are the same file", b)
 	}
-	if !st.IsDir() {
-		if !st.Mode().IsRegular() {
-			return pluginapi.Errf(pluginapi.CodeInvalid, "%s: not a regular file", a)
-		}
-		return mapErr(copyFile(ctx, a, b, st.Mode().Perm()), a)
-	}
-	if rel, err := filepath.Rel(a, b); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if srcReal == dstReal {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "cannot copy %s into itself", a)
 	}
-	root, err := os.OpenRoot(a)
+	if st.IsDir() {
+		rel, err := filepath.Rel(srcReal, dstReal)
+		if err != nil {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "%s: cannot prove the destination is not inside the source", b)
+		}
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "cannot copy %s into itself", a)
+		}
+		// The components of a canonical path are still compared case-sensitively; walk
+		// the destination ancestors and compare file identity as well, so a case variant
+		// or another inode alias of the source directory cannot slip through.
+		if err := refuseCopyInsideSource(st, dstReal, b); err != nil {
+			return err
+		}
+	} else if !st.Mode().IsRegular() {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: not a regular file", a)
+	}
+	if !st.IsDir() {
+		return mapErr(copyFile(ctx, srcReal, dstReal, st.Mode().Perm()), a)
+	}
+	root, err := os.OpenRoot(srcReal)
 	if err != nil {
 		return mapErr(err, a)
 	}
 	defer func() { _ = root.Close() }()
-	if err := os.MkdirAll(b, st.Mode().Perm()|0o700); err != nil {
+	if err := os.MkdirAll(dstReal, st.Mode().Perm()|0o700); err != nil {
 		return mapErr(err, b)
 	}
 	n := 0
@@ -489,7 +518,7 @@ func (o *pluginOS) Copy(ctx context.Context, from, to string) error {
 		if rel == "." {
 			return nil
 		}
-		dst := filepath.Join(b, filepath.FromSlash(rel))
+		dst := filepath.Join(dstReal, filepath.FromSlash(rel))
 		switch typ := d.Type(); {
 		case typ&fs.ModeSymlink != 0:
 			target, err := fs.ReadLink(root.FS(), rel)
@@ -518,6 +547,59 @@ func (o *pluginOS) Copy(ctx context.Context, from, to string) error {
 		return nil // sockets, devices and the like are not copied
 	})
 	return mapErr(err, a)
+}
+
+// refuseCopyInsideSource proves, by file identity, that dst (which may not exist yet) is
+// not the source directory or inside it. os.SameFile catches case variants and inode
+// aliases that a lexical path comparison cannot; an ancestor that cannot be examined
+// refuses the copy rather than guessing.
+func refuseCopyInsideSource(src os.FileInfo, dst, display string) error {
+	for cur := filepath.Clean(dst); ; {
+		info, err := os.Stat(cur)
+		if err == nil && os.SameFile(src, info) {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "cannot copy %s into itself", display)
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "%s: cannot prove the destination is not inside the source: %v", display, err)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return nil
+		}
+		cur = parent
+	}
+}
+
+// realCopyDestination canonicalizes a copy destination without requiring the final
+// component to exist. Every existing component is resolved through symlinks (EvalSymlinks
+// of the deepest existing ancestor plus the missing suffix); an existing symlink that does
+// not resolve (dangling/loop/permission) and any resolution error refuse the copy, because
+// guessing where the write would land is exactly what this safety check prevents.
+func realCopyDestination(p string) (string, error) {
+	suffix := []string{}
+	cur := filepath.Clean(p)
+	for {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				real = filepath.Join(real, suffix[i])
+			}
+			return filepath.Clean(real), nil
+		}
+		if fi, err := os.Lstat(cur); err == nil {
+			if fi.Mode()&fs.ModeSymlink != 0 {
+				return "", pluginapi.Errf(pluginapi.CodeInvalid, "%s: symbolic link destination cannot be resolved safely", cur)
+			}
+			return "", pluginapi.Errf(pluginapi.CodeInvalid, "%s: cannot prove the copy destination is safe", cur)
+		} else if !os.IsNotExist(err) {
+			return "", pluginapi.Errf(pluginapi.CodeInvalid, "%s: cannot prove the copy destination is safe: %v", cur, err)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", pluginapi.Errf(pluginapi.CodeInvalid, "%s: cannot prove the copy destination is safe", p)
+		}
+		suffix = append(suffix, filepath.Base(cur))
+		cur = parent
+	}
 }
 
 func copyFile(ctx context.Context, from, to string, mode fs.FileMode) error {

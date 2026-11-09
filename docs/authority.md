@@ -752,6 +752,23 @@ clipboard, so a pending cut is left as it was.
 Real-host manual acceptance remains unautomated (the copy tests use a fake
 authority file system, with a local decoy tree proving no local fallback).
 
+### Remote project search candidate scope
+
+Remote project search uses Fresh's project-file scope (`project_files`): a complete bounded
+`git ls-files --cached --others --exclude-standard` listing is authoritative in a work tree
+— tracked files (including tracked files that match .gitignore and tracked dotfiles) and
+untracked non-hidden files are candidates, passed explicitly to rg/grep in bounded batches
+so ignored trees are never scanned into the output cap. Nested repositories/submodules are
+walked for content with the walk rules below; their own `.gitignore` is not applied (a
+recorded residual). When there is no complete listing (non-git workspace, git failure, or a
+too-large/nested batch fallback to the whole-tree tool), the candidate filter applies the
+`Fresh` walk scope: hidden path segments and `IGNORED_DIRS` (`.git`, `node_modules`,
+`target`, `__pycache__`, `.hg`, `.svn`, `.DS_Store`) are refused. The explicit-candidate
+half keeps git's exception: a tracked candidate under such a directory is still searched
+because git lists it; only walked/nested content is pruned. All commands run through the
+authority one-shot surface with the remote cwd, stay bounded/cancellable, and never read
+the local disk; a degradation is carried as a non-fatal panel notice.
+
 ### Windowed remote reads (remote large-file mode)
 
 The authority file port has `FileSystem.ReadRange(ctx, path, off, n)`: a bounded window
