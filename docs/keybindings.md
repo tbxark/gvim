@@ -16,11 +16,11 @@ plus its own, so a key Fresh defines once is defined for every preset.
 
 | Preset | Own bindings | In effect |
 |---|---|---|
-| `default` | 245 | 243 |
-| `macos` | 60 | 266 |
-| `macos-gui` | 52 | 317 |
-| `emacs` | 98 | 309 |
-| `vscode` | 9 | 248 |
+| `default` | 246 | 244 |
+| `macos` | 60 | 267 |
+| `macos-gui` | 52 | 318 |
+| `emacs` | 98 | 310 |
+| `vscode` | 9 | 249 |
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
 overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not
@@ -35,8 +35,8 @@ commands, case transforms, folding and the view, tabs and splits, the explorer, 
 dock, the sidebar section cycle, code tours and compare files. The overlay contexts carry
 Fresh's rows for the keys gvim's surfaces already understand: the prompt field's moves, word
 deletion and paste; the find bar's match steps and option toggles; list navigation and cancel;
-the menu bar's walk and close; the settings page's close, activate and reset; and the dock's
-focus keys. Each preset keeps its own idiom:
+the menu bar's walk and close; the settings page's close, activate, reset and question-mark
+key help; and the dock's focus keys. Each preset keeps its own idiom:
 Emacs has the `C-x` chords and the `M-` keys, VS Code has `Ctrl+K Ctrl+L` and friends, macOS
 keeps its Ctrl and Option keys, `macos-gui` uses Cmd (a terminal that reports Super sends those;
 the Ctrl keys it inherits still work when it does not), and `default` is the cross-platform set.
@@ -193,8 +193,8 @@ Limits, all deliberate: only single-key bindings apply in the overlay contexts (
 is skipped with a warning, since the router resolves one key at a time); `unbind` removes the
 preset's row, but the surface's built-in handler still runs on the freed chord; a prompt's text
 field has no selection, clipboard or suggestion list in gvim, so the selection, copy/cut and
-suggestion actions are not bound; the Settings page has no search or help action; and the
-completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
+suggestion actions are not bound; the Settings page has type-to-filter and question-mark
+key help but no separate slash search action; the completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
 are not keymap surfaces yet (a binding there is skipped with a warning, as are bindings in
 contexts Fresh does not name).
 

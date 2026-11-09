@@ -521,11 +521,6 @@ func (m *Model) diagJump() tea.Cmd {
 
 // pressDiagHeader is a left press on the Diagnostics header: it takes the keyboard
 // and folds or unfolds the section.
-func (m *Model) pressDiagHeader() {
-	m.takeDiagFocus()
-	m.diag.ToggleCollapsed()
-}
-
 // pressDiagRow is a left press on a row of the Diagnostics body: it selects the row
 // and, for a diagnostic, jumps to it. A header row only selects nothing.
 func (m *Model) pressDiagRow(row int) tea.Cmd {

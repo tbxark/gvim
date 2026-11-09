@@ -1142,5 +1142,10 @@
   "gvim.notice.remote_live_grep_cap": "remote Live Grep result is incomplete: the widened ignored-file scan hit the remote output cap; narrow the scope or refine the query",
   "gvim.notice.remote_live_grep_stopped": "remote Live Grep stopped early: the widened ignored-file scan failed on the remote host; the shown matches are incomplete",
   "gvim.notice.remote_search_stale_snapshot": "remote search was limited to the quick-open file-index snapshot; matching remote files outside it were not searched (they may be new since the index last refreshed, or excluded by the glob) — use File Explorer: Refresh to re-enumerate the index",
-  "gvim.command.resume_live_grep_desc": "Reopen Live Grep with the prior query, match modes and scopes and search again; cached matches are never reused because file contents may have changed"
+  "gvim.command.resume_live_grep_desc": "Reopen Live Grep with the prior query, match modes and scopes and search again; cached matches are never reused because file contents may have changed",
+  "gvim.settings.help.title": "Settings keys",
+  "gvim.settings.help.navigation": "Up/Down move  PgUp/PgDn page  Home/End first/last",
+  "gvim.settings.help.edit": "Enter edit  Tab layer  Ctrl+S save  Ctrl+R reset",
+  "gvim.settings.help.raw": "Ctrl+E edit raw  Delete inherit/reset the row",
+  "gvim.settings.help.filter": "Type to filter; Esc close help, then Esc close Settings"
 }

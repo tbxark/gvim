@@ -187,8 +187,9 @@ func TestWidgetPanelSidebarSection(t *testing.T) {
 	if row := g.Plain()[sec.HeaderY]; !strings.Contains(row, "Outline") {
 		t.Errorf("header %q does not show the title", row)
 	}
-	// A click on the header folds the section.
+	// A click (press + release, no motion) on the header folds the section.
 	m.Update(click(l.ExX+3, sec.HeaderY, tea.MouseLeft))
+	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: l.ExX + 3, Y: sec.HeaderY, Button: tea.MouseLeft}))
 	l = m.layout()
 	for _, s := range l.Sections {
 		if s.Kind == sidebar.KindPlugin && !s.Collapsed {

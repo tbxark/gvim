@@ -457,6 +457,8 @@
   "gvim.scrollback.no_selection": "Нет выделения для копирования",
   "gvim.settings.field.editor.auto_close": "Автозакрытие",
   "gvim.settings.field.editor.whitespace_show": "Показать пробелы",
+  "gvim.settings.help.navigation": "↑↓:Навигация  Tab:Далее  Enter:Редактировать  /:Поиск  Esc:Закрыть",
+  "gvim.settings.help.title": "Горячие клавиши",
   "gvim.status.blocked": "Заблокировано",
   "gvim.status.restricted": "Ограничено",
   "gvim.status.terminal_restart": "⟳ Перезапустить %{program}",

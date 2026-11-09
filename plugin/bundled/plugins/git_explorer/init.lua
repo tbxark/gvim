@@ -9,11 +9,13 @@
 -- candidate directory, never one exists call per entry) finds a directory whose .git
 -- entry is present and runs git status from that directory's own root. The scan is capped
 -- at 128 directory listings, depth 3, 32 repos and a 1.5 s wall-clock/status budget; a
--- partial scan decorates what it found and shows a one-time warning. Root-repo HEAD is
--- watched; nested repos refresh on the same file/focus events. Differences from Fresh
--- (documented in bundled.md): no hover tooltips or arbitrary icons (symbols only); nested
--- HEADs are event-driven rather than watched; a setting change applies on the next refresh;
--- the plugin is off by default to keep the default memory budget.
+-- partial scan decorates what it found and shows a one-time warning. The root repo's .git
+-- directory and every discovered regular nested repo's .git directory are watched (at most the
+-- 32-repo discovery cap plus one), so commits/checkouts in another terminal refresh the badges
+-- for the whole monorepo; linked-worktree .git files are skipped because their HEAD lives
+-- elsewhere. Differences from Fresh (documented in bundled.md): no hover tooltips or arbitrary
+-- icons (symbols only); a setting change applies on the next refresh; the plugin is off by
+-- default to keep the default memory budget.
 local gvim = require "gvim"
 local git = gvim.git
 
@@ -46,8 +48,9 @@ local settings = gvim.settings.define {
 
 local refresh_in_flight = false
 local refresh_pending = false
-local watcher = nil
-local watched_dir = nil
+-- One HEAD-directory watcher per root/nested repository, bounded by the discovery repo cap.
+local watchers = {}
+
 
 local function status_to_decoration(x, y)
   if x == "?" and y == "?" then
@@ -170,6 +173,7 @@ local MONOREPO_MAX_DEPTH = 3
 local DISCOVERY_MAX_DIRS = 128
 local DISCOVERY_MAX_REPOS = 32
 local DISCOVERY_BUDGET_MS = 1500
+local MAX_WATCHERS = DISCOVERY_MAX_REPOS + 1 -- every discovered repo plus the root
 
 local unloaded = false
 local refresh_generation = 0
@@ -301,19 +305,64 @@ local function merge_slots(groups)
   return out
 end
 
-local function watch_repo(head)
-  local dir = gvim.path.dirname(head)
-  if dir == "" or dir == watched_dir then
+local function watcher_count()
+  local n = 0
+  for _ in pairs(watchers) do
+    n = n + 1
+  end
+  return n
+end
+
+-- watch_repo adds want[dir] and starts a debounced watcher when the repo is new and the
+-- watcher cap has room. Reconciliation after a refresh stops watchers for repos that vanished.
+local function watch_repo(head, want)
+  if type(head) ~= "string" then
     return
   end
-  if watcher then
-    watcher:stop()
-    watcher = nil
+  local dir = gvim.path.dirname(head)
+  if dir == "" then
+    return
   end
-  watched_dir = dir
-  watcher = gvim.fs.watch(dir, function()
-    refresh()
+  want[dir] = true
+  if watchers[dir] or watcher_count() >= MAX_WATCHERS then
+    return
+  end
+  local w = gvim.fs.watch(dir, function()
+    if not unloaded then
+      refresh()
+    end
   end, { debounce_ms = 200 })
+  if w then
+    watchers[dir] = w
+  end
+end
+
+-- watch_nested_repo watches the nested repo's .git directory directly. Discovery already
+-- proved a .git entry exists; a regular repository has a .git directory whose HEAD moves on
+-- commit/checkout. Linked-worktree .git files are skipped here (their HEAD lives elsewhere),
+-- which is documented as a residual.
+local function watch_nested_repo(sub, want)
+  local gitdir = gvim.path.join(sub, ".git")
+  local st = gvim.fs.stat(gitdir)
+  if st and st.kind == "dir" then
+    watch_repo(gvim.path.join(gitdir, "HEAD"), want)
+  end
+end
+
+local function prune_watchers(want)
+  for dir, w in pairs(watchers) do
+    if not want[dir] then
+      w:stop()
+      watchers[dir] = nil
+    end
+  end
+end
+
+local function stop_watchers()
+  for _, w in pairs(watchers) do
+    w:stop()
+  end
+  watchers = {}
 end
 
 function refresh()
@@ -325,12 +374,15 @@ function refresh()
   refresh_generation = refresh_generation + 1
   local generation = refresh_generation
   local ok, err = pcall(function()
+    local want = {}
     if not git.available() then
+      prune_watchers(want)
       clear_all()
       return
     end
     local cwd = gvim.workspace.root()
     if cwd == "" or cwd == nil then
+      prune_watchers(want)
       clear_all()
       return
     end
@@ -338,7 +390,7 @@ function refresh()
     local started = gvim.time.monotonic_ms()
     local root_repo = git.repo(cwd)
     if root_repo then
-      watch_repo(root_repo.head)
+      watch_repo(root_repo.head, want)
       add_group(groups, seen, root_repo.root)
     end
     local subrepos, complete = discover_subrepos(cwd, generation)
@@ -353,8 +405,10 @@ function refresh()
         complete = false
         break
       end
+      watch_nested_repo(sub, want)
       add_group(groups, seen, sub)
     end
+    prune_watchers(want)
     if not complete then
       notify_discovery_partial(cwd)
     end
@@ -399,9 +453,6 @@ refresh()
 gvim.plugin.on_unload(function()
   unloaded = true
   refresh_generation = refresh_generation + 1
-  if watcher then
-    watcher:stop()
-    watcher = nil
-  end
+  stop_watchers()
   clear_all()
 end)

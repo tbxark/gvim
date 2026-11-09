@@ -206,9 +206,9 @@ at the top of both panes in all but the last partial rows. One dual view exists 
 a time: asking again is a no-op, and a tab change, close_split or compare view ends
 it (the validity check). Exact row/byte anchors across the two different
 wraps, a native Markdown menu row (the menu table is generated from Fresh and its
-plugin contributions are not hand-edited), persisting the split, more than one
-dual view of a document, and the page-view width/session persistence remain
-residuals.
+plugin contributions are not hand-edited), more than one dual view of a document,
+and free per-split width settings remain residuals. The dual split itself and its
+per-leaf source/rendered modes persist in the session (see Persistence).
 
 [^cmd]: The palette rows are the same five actions in `commands/markdown_commands.go`;
 the native palette therefore lists 229 commands.
@@ -281,8 +281,23 @@ decides) and `pageWidth` (zero: the language or viewport width). Both are
 omitted when unset, so a session written by an older version loads with the
 defaults and a reader that ignores them is unaffected; the writer takes the
 values from the document's view settings and the restore applies them after the
-file is opened. The dual split itself is not persisted (Fresh does not persist a
-buffer group either); it is documented with the other dual residuals below.
+file is opened.
+
+The Markdown dual split is persisted too, additively in the same version-1 layout:
+`session.SplitLayout.dual` marks a dual record, each leaf carries `viewMode`
+(`source` on the left, `rendered` on the right), and both leaves name the same
+`Session.Files` entry/path with `Focus` zero (the source, the one-dual policy).
+Capture is pure — it records the open dual state without switching tabs or
+scrolling — and a restored record is validated as a side-by-side two-leaf split of
+the same restored file before it is applied; a bad marker, a different file, a
+wrong focus or a missing pane rejects the whole layout and falls back to one pane,
+never to a wrong file or a second dual view. The restored leaves keep their
+source/rendered pane overrides, so the source stays plain and the preview composed;
+the capture always writes focus 0 (the source) even when the user focused the
+preview before saving — the one-dual policy restores with the source focused, so a
+preview-focused save cannot produce an invalid `Dual=true, Focus=1` record; ending
+the dual view clears those leaf modes and the document's own page view returns. A normal split or an older session omits `dual`/`viewMode` and is
+unchanged.
 
 ## Deferred
 
@@ -296,19 +311,17 @@ buffer group either); it is documented with the other dual residuals below.
   overlays paint on normal panes only, and no compose-only item reaches a normal
   pane); a mapped painting of overlay spans onto composed cells stays the
   documented no-paint decision (the page view owns its visual language);
-- session persistence of a dual split (the editor view per file is persisted,
-  see below; the dual view itself is session-only, as Fresh does not persist a
-  buffer group);
-- per-split view mode: gvim keeps one view mode per document, Fresh per split; the
-  dual view adds one derived per-pane override (source vs preview) but does not
-  make the mode a free per-pane setting;
+- free per-pane view mode: gvim keeps one view mode per document. The dual
+  split persists its two derived source/rendered pane overrides and restores them,
+  but there is no command to set a mode on an arbitrary single pane independently
+  of the document;
 - dual view: exact row/byte scroll anchors beyond the documented line anchor
   (deliberate: the two panes wrap differently, so a byte-exact anchor needs the
   compare anchoring machinery and the line anchor keeps the same source line at
   the top in all but the last partial rows), a native Markdown menu row (the
-  generated menu table is not hand-edited), persisting the split, and more than
-  one dual view of a document (the policy is one dual view at a time; the dual
-  view is offered for a single-pane Markdown document only);
+  generated menu table is not hand-edited), and more than one dual view of a
+  document (the policy is one dual view at a time; the dual view is offered for a
+  single-pane Markdown document only);
 - mapped occurrences, rulers and indent guides in the page view: they stay
   deliberately off there (the page view owns its own visual language; a test
   asserts rulers and guides do not paint). Whitespace marks are per-cell and

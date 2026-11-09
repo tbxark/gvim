@@ -10,10 +10,13 @@ type TabState struct {
 	Tab    int // the editor tab index the pane shows
 	Top    int // the first visible buffer line
 	TopRow int // the scrolled rows of that line; compare views only
+	// ModeOf returns a leaf's Markdown view override ("source"/"rendered", empty:
+	// document default). It is optional; nil leaves every ViewMode empty.
+	ModeOf func(*Node) string
 }
 
 // Capture returns the saved layout of t, or nil when the layout cannot be restored
-// faithfully (a single pane, a compare/dual view state the tree cannot name, a leaf
+// faithfully (a single pane, a compare view state the tree cannot name, a leaf
 // whose tab the session does not save, or a missing focused leaf). fileOf maps an
 // editor tab index to its index in the session's file list and to that file's path;
 // it reports false for a tab that the session will not save (a virtual buffer, an
@@ -72,7 +75,14 @@ func captureNode(n *Node, focus *Node, focusState TabState, fileOf func(int) (in
 		if !ok || path == "" || file < 0 {
 			return nil, false
 		}
-		return &session.SplitNode{File: file, Path: path, Top: top, TopRow: topRow}, true
+		mode := ""
+		if focusState.ModeOf != nil {
+			mode = focusState.ModeOf(n)
+		}
+		if mode == "" {
+			mode = n.ViewMode
+		}
+		return &session.SplitNode{File: file, Path: path, Top: top, TopRow: topRow, ViewMode: mode}, true
 	}
 	a, ok := captureNode(n.A, focus, focusState, fileOf)
 	if !ok {
@@ -138,7 +148,7 @@ func applyNode(n *session.SplitNode, tabs []int, next *int) (*Node, bool) {
 	if n.Leaf() {
 		tab := tabs[*next]
 		*next++
-		return &Node{Tab: tab, Top: n.Top, TopRow: n.TopRow}, true
+		return &Node{Tab: tab, Top: n.Top, TopRow: n.TopRow, ViewMode: n.ViewMode}, true
 	}
 	a, ok := applyNode(n.A, tabs, next)
 	if !ok {

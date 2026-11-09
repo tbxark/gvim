@@ -43,6 +43,9 @@ type Node struct {
 	ID     uint64 // the window id, or zero until Tree.IDOf gives one
 	// Label is the plugin split label (tier 1c-C), or "" for none.
 	Label string
+	// ViewMode is the pane's Markdown view override ("source"/"rendered"), or ""
+	// for the document's own page view. It is persisted in a dual split's leaves.
+	ViewMode string
 }
 
 // Share returns the percentage of the area the first child takes.

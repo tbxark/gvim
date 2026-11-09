@@ -457,6 +457,8 @@
   "gvim.scrollback.no_selection": "无选择内容",
   "gvim.settings.field.editor.auto_close": "自动闭合",
   "gvim.settings.field.editor.whitespace_show": "显示空白字符",
+  "gvim.settings.help.navigation": "↑↓:导航  Tab:下一个  Enter:编辑  /:搜索  Esc:关闭",
+  "gvim.settings.help.title": "键盘快捷键",
   "gvim.status.blocked": "已阻止",
   "gvim.status.restricted": "受限",
   "gvim.status.terminal_restart": "⟳ 重启 %{program}",

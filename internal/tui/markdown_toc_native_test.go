@@ -199,7 +199,9 @@ func TestContentsDividerDragWinsOverAFloatingPanel(t *testing.T) {
 	if !m.contents.Open() {
 		t.Fatal("the Contents section is not open")
 	}
-	m.divider = dividerState{active: true, startY: 8, startRows: m.contents.Rows()}
+	sec, _ := contentsSection(m.layout())
+	m.contents.SetRows(10)
+	m.divider = dividerState{active: true, section: sec.Index, kind: sidebar.KindContents, startY: 8, startRows: m.contents.Rows()}
 	// A floating plugin panel covers the whole frame and would take a pointer event.
 	mount := pluginpanel.New(pluginapi.WidgetPanel{}, pluginpanel.Options{})
 	ps := &m.plug.panels

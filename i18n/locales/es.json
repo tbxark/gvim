@@ -457,6 +457,8 @@
   "gvim.scrollback.no_selection": "No hay selección para copiar",
   "gvim.settings.field.editor.auto_close": "Cierre automático",
   "gvim.settings.field.editor.whitespace_show": "Mostrar espacios en blanco",
+  "gvim.settings.help.navigation": "↑↓:Navegar  Tab:Siguiente  Enter:Editar  /:Buscar  Esc:Cerrar",
+  "gvim.settings.help.title": "Atajos de teclado",
   "gvim.status.blocked": "Bloqueado",
   "gvim.status.restricted": "Restringido",
   "gvim.status.terminal_restart": "⟳ Reiniciar %{program}",

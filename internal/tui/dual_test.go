@@ -7,6 +7,7 @@ import (
 	"github.com/tbxark/gvim/buffer"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/session"
 )
 
 // dualModel returns a model over a Markdown document, with the caret on a line
@@ -17,6 +18,18 @@ func dualModel(t *testing.T) (*Model, *editor.Editor) {
 		"Some **x** text\nline two\nline three\nline four\n", 80, 16)
 	ed.Active().SetLanguage("markdown")
 	return m, ed
+}
+
+// pathRealEditor is realEditor with the path-bearing TabInfo the app adapter returns,
+// so split persistence tests can resolve tab identities.
+type pathRealEditor struct{ realEditor }
+
+func (p pathRealEditor) Tabs() []TabInfo {
+	var out []TabInfo
+	for _, tab := range p.ed.Tabs() {
+		out = append(out, TabInfo{Name: tab.Name, Path: tab.Path, Modified: tab.Modified, Preview: tab.Preview, Active: tab.Active})
+	}
+	return out
 }
 
 // paneRows renders the pane at index i of the layout and returns its plain rows.
@@ -357,5 +370,67 @@ func TestDualRefusesLargeDocuments(t *testing.T) {
 	runAction(t, m, "markdown_mode_dual")
 	if !strings.Contains(m.notice, "too large") {
 		t.Fatalf("notice = %q, want the large-file refusal", m.notice)
+	}
+}
+
+// TestDualStateCaptureAndRestore: a saved Markdown dual split round-trips through the
+// session split format: marker, per-leaf source/rendered modes, focus on the source, and
+// restored panes derive the right page-view override; closing it returns the document's
+// own view and clears the persisted leaf modes.
+func TestDualStateCaptureAndRestore(t *testing.T) {
+	t.Parallel()
+	m, _ := dualModel(t)
+	m.ed = pathRealEditor{m.ed.(realEditor)}
+	runAction(t, m, "markdown_mode_dual")
+	if d := m.validDual(); d == nil {
+		t.Fatalf("dual view did not open: %q", m.notice)
+	}
+	// Focus the preview before saving: capture must still write the source as the
+	// one-dual policy focus.
+	m.focusPane(1)
+	layout := m.SplitState()
+	if layout == nil || !layout.Dual || layout.Focus != 0 {
+		t.Fatalf("captured dual layout = %+v", layout)
+	}
+	if layout.Root.Dir != session.SplitSideBySide || len(layout.Root.Leaves()) != 2 {
+		t.Fatalf("captured dual root = %+v", layout.Root)
+	}
+	if layout.Root.A == nil || layout.Root.B == nil ||
+		layout.Root.A.ViewMode != "source" || layout.Root.B.ViewMode != "rendered" {
+		t.Fatalf("captured dual modes = %+v", layout.Root)
+	}
+
+	// Restore over a fresh model/tab on the same path.
+	m2, _ := dualModel(t)
+	m2.ed = pathRealEditor{m2.ed.(realEditor)}
+	path := m2.tabPath(0)
+	layout.Root.A.Path = path
+	layout.Root.B.Path = path
+	if !m2.RestoreSplits(layout, []session.FileState{{Path: path}}) {
+		t.Fatal("the saved dual layout was rejected")
+	}
+	if got := m2.validDual(); got == nil {
+		t.Fatal("the restored model has no valid dual view")
+	}
+	panes := m2.layout().Panes
+	if len(panes) != 2 {
+		t.Fatalf("restored panes = %d", len(panes))
+	}
+	doc := m2.ed.Active()
+	if pv := m2.panePageView(panes[0], doc); pv.On {
+		t.Fatalf("restored source pane page view = %+v, want off", pv)
+	}
+	if pv := m2.panePageView(panes[1], doc); !pv.On || !pv.Markdown {
+		t.Fatalf("restored preview pane page view = %+v, want on markdown", pv)
+	}
+	// Ending the dual view clears the saved leaf modes and leaves the document mode.
+	m2.closeMarkdownDual()
+	if m2.validDual() != nil || !m2.splits.Root.Leaf() {
+		t.Fatalf("dual close left %d panes dual=%v", len(m2.splits.Root.Leaves()), m2.validDual())
+	}
+	for _, leaf := range m2.splits.Root.Leaves() {
+		if leaf.ViewMode != "" {
+			t.Fatalf("closed dual left a leaf mode %+v", leaf)
+		}
 	}
 }

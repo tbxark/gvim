@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/session"
 )
@@ -97,6 +99,7 @@ func TestBuildRuntimeSkipsInvalidStaleAndMissingSplitLayouts(t *testing.T) {
 		{name: "invalid ratio", layout: &session.SplitLayout{Root: session.SplitNode{Dir: session.SplitSideBySide, Ratio: 150, A: &session.SplitNode{File: 0, Path: a}, B: &session.SplitNode{File: 1, Path: b}}}},
 		{name: "path mismatch", layout: &session.SplitLayout{Root: session.SplitNode{Dir: session.SplitSideBySide, A: &session.SplitNode{File: 0, Path: b}, B: &session.SplitNode{File: 1, Path: a}}}},
 		{name: "out of range", layout: &session.SplitLayout{Root: session.SplitNode{Dir: session.SplitSideBySide, A: &session.SplitNode{File: 0, Path: a}, B: &session.SplitNode{File: 7, Path: b}}}},
+		{name: "invalid dual focus", layout: &session.SplitLayout{Dual: true, Focus: 1, Root: session.SplitNode{Dir: session.SplitSideBySide, A: &session.SplitNode{File: 0, Path: a, ViewMode: "source"}, B: &session.SplitNode{File: 0, Path: a, ViewMode: "rendered"}}}},
 		{name: "missing file", layout: twoSplitLayout(a, b), remove: b},
 	}
 	for _, tt := range tests {
@@ -182,5 +185,68 @@ func TestMalformedLayoutJSONStartsWithoutSplits(t *testing.T) {
 	defer rt.close()
 	if got := rt.model.SplitState(); got != nil {
 		t.Fatalf("a malformed layout was applied: %+v", got)
+	}
+}
+
+// TestBuildRuntimeRestoresMarkdownDualLayout restores a saved dual split: one Markdown
+// file in both panes, source left/rendered right, focus on the source, with the per-leaf
+// view modes intact.
+func TestBuildRuntimeRestoresMarkdownDualLayout(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	md := filepath.Join(dir, "notes.md")
+	apptest.WriteTestFile(t, md, "# Title\n\ntext\n")
+	sessDir := filepath.Join(dir, "session")
+	layout := &session.SplitLayout{
+		Dual:  true,
+		Focus: 0,
+		Root: session.SplitNode{
+			Dir: session.SplitSideBySide,
+			A:   &session.SplitNode{File: 0, Path: md, ViewMode: "source"},
+			B:   &session.SplitNode{File: 0, Path: md, ViewMode: "rendered"},
+		},
+	}
+	must(t, session.Save(sessDir, session.Session{
+		Root: dir, Active: 0,
+		Files:  []session.FileState{{Path: md}},
+		Layout: layout,
+	}))
+	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir}, false)
+	must(t, err)
+	defer rt.close()
+	got := rt.model.SplitState()
+	if got == nil || !got.Dual || got.Focus != 0 || len(got.Root.Leaves()) != 2 {
+		t.Fatalf("restored dual layout = %+v", got)
+	}
+	if got.Root.A == nil || got.Root.B == nil || got.Root.A.ViewMode != "source" || got.Root.B.ViewMode != "rendered" {
+		t.Fatalf("restored dual modes = %+v", got.Root)
+	}
+}
+
+// TestBuildRuntimeCapturesMarkdownDualLayout opens the dual view through the public action
+// and checks the session layout now records it (previous behavior returned nil for dual).
+func TestBuildRuntimeCapturesMarkdownDualLayout(t *testing.T) {
+	isolateConfig(t)
+	dir := t.TempDir()
+	md := filepath.Join(dir, "notes.md")
+	apptest.WriteTestFile(t, md, "# Title\n\ntext\n")
+	sessDir := filepath.Join(dir, "session")
+	must(t, session.Save(sessDir, session.Session{
+		Root: dir, Active: 0,
+		Files: []session.FileState{{Path: md}},
+	}))
+	rt, err := buildRuntime(t.Context(), Options{SessionDir: sessDir}, false)
+	must(t, err)
+	defer rt.close()
+	rt.model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	must(t, rt.model.Run("markdown_mode_dual"))
+	// Focus the preview; the captured layout must still name the source as focus 0.
+	must(t, rt.model.Run("next_pane"))
+	got := rt.model.SplitState()
+	if got == nil || !got.Dual || got.Focus != 0 {
+		t.Fatalf("captured dual layout = %+v", got)
+	}
+	if got.Root.A == nil || got.Root.B == nil || got.Root.A.ViewMode != "source" || got.Root.B.ViewMode != "rendered" {
+		t.Fatalf("captured dual modes = %+v", got.Root)
 	}
 }

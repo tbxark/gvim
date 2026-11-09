@@ -157,6 +157,39 @@ func TestGitExplorerDecoratesNestedSubRepos(t *testing.T) {
 	}
 }
 
+// TestGitExplorerWatchesNestedHead: a commit/checkout in another terminal for a nested
+// monorepo repository refreshes its badges too, not just the root repository's.
+func TestGitExplorerWatchesNestedHead(t *testing.T) {
+	r := startRig(t, rigOpts{plugins: []string{"git_explorer"}, script: func(o *plugintest.FakeOS) {
+		explorerOS(" M a.go\x00")(o)
+		o.SetDir("/work/vendor/lib")
+		o.SetDir("/work/vendor/lib/.git")
+		o.SetFile("/work/vendor/lib/.git/HEAD", "ref: refs/heads/main\n")
+		o.Script(explorerStatusArgv, plugintest.ProcScript{Stdout: " M a.go\x00"})
+	}})
+	r.emit("after_file_open", "", nil)
+	if watches := r.os.Watches(); len(watches) < 2 {
+		t.Fatalf("watchers = %d, want the root and nested HEAD directories", len(watches))
+	}
+	// Rewrite the fake status answer and poke the nested repository's git directory.
+	r.os.Rescript(explorerStatusArgv, plugintest.ProcScript{Stdout: " M a.go\x00 M b.go\x00"})
+	r.os.Emit("/work/vendor/lib/.git/index", "write")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		r.h.Settle()
+		found := false
+		for _, d := range r.host.ExplorerDecorations("git_explorer", "git_explorer") {
+			if d.Path == "/work/vendor/lib/b.go" && d.Symbol == "M" {
+				found = true
+			}
+		}
+		if found {
+			return
+		}
+	}
+	t.Fatalf("the nested watcher did not refresh the nested badges: %+v", r.host.ExplorerDecorations("git_explorer", "git_explorer"))
+}
+
 // TestGitExplorerWorksWithoutRootRepo: when the workspace root is not a repository but a
 // nested repo is, that nested repo is still decorated (Fresh's sole discovery path).
 func TestGitExplorerWorksWithoutRootRepo(t *testing.T) {

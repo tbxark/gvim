@@ -53,5 +53,7 @@
   "gvim.status.terminal_resume": "status.terminal_resume",
   "gvim.status.trusted": "statusbar.trust.trusted",
   "gvim.status.update_available": "status.update_available",
-  "terminal.no_terminal_open": "terminal.no_terminal_open"
+  "terminal.no_terminal_open": "terminal.no_terminal_open",
+  "gvim.settings.help.title": "settings.shortcuts.title",
+  "gvim.settings.help.navigation": "settings.help_default"
 }

@@ -23,7 +23,7 @@ import (
 // stash restores it) but has no stable path, so a layout that shows one returns nil
 // instead of writing a pane that could resolve to the wrong tab later.
 func (m *Model) SplitState() *session.SplitLayout {
-	if m.splits.comparing || m.splits.dual != nil || m.splits.Root == nil || m.splits.Root.Leaf() {
+	if m.splits.comparing || m.splits.Root == nil || m.splits.Root.Leaf() {
 		return nil
 	}
 	tabs := m.ed.Tabs()
@@ -55,7 +55,34 @@ func (m *Model) SplitState() *session.SplitLayout {
 	if doc := m.ed.Active(); doc != nil {
 		focusTop = doc.Top()
 	}
-	return split.Capture(m.splits.Tree, split.TabState{Tab: focusTab, Top: focusTop, TopRow: focusTopRow}, fileOf)
+	dual := m.validDual()
+	// The one-dual policy always restores with the focus on the source. A user may
+	// focus the preview before saving; capture the source leaf as the focus anyway,
+	// otherwise the session would record Dual=true/Focus=1 and be rejected on load.
+	tree := m.splits.Tree
+	if dual != nil {
+		tree.Focus = dual.source
+		focusTab = dual.source.Tab
+		focusTop, focusTopRow = dual.source.Top, dual.source.TopRow
+	}
+	modeOf := func(n *split.Node) string {
+		if dual != nil {
+			switch n {
+			case dual.source:
+				return "source"
+			case dual.preview:
+				return "rendered"
+			}
+		}
+		return n.ViewMode
+	}
+	layout := split.Capture(tree, split.TabState{
+		Tab: focusTab, Top: focusTop, TopRow: focusTopRow, ModeOf: modeOf,
+	}, fileOf)
+	if layout != nil && dual != nil {
+		layout.Dual = true
+	}
+	return layout
 }
 
 // RestoreSplits applies a saved pane layout over the editor's restored tabs. A nil
@@ -70,7 +97,7 @@ func (m *Model) RestoreSplits(layout *session.SplitLayout, files []session.FileS
 	if layout == nil || m.splits.comparing || m.splits.dual != nil || m.ed == nil {
 		return false
 	}
-	if !layout.Valid(len(files)) {
+	if !layout.Valid(len(files)) || !validDualLayout(layout) {
 		return false
 	}
 	// Every leaf must still name the file at its saved index: a hand-edited or
@@ -103,6 +130,42 @@ func (m *Model) RestoreSplits(layout *session.SplitLayout, files []session.FileS
 	focus := m.splits.Focus
 	m.splits.Focus = nil
 	m.focusLeaf(focus)
+	if layout.Dual {
+		leaves := m.splits.Root.Leaves()
+		if len(leaves) != 2 {
+			return false
+		}
+		leaves[0].ViewMode = "source"
+		leaves[1].ViewMode = "rendered"
+		m.splits.dual = &dualView{tab: leaves[0].Tab, source: leaves[0], preview: leaves[1]}
+	}
+	return true
+}
+
+// validDualLayout checks the optional dual marker: two side-by-side leaves of the
+// same saved file, focus on the source (first leaf), exactly the one-dual policy.
+// ViewMode records are inferred when an older writer omitted them; a dual marker on
+// any other shape makes the whole layout fall back to one pane.
+func validDualLayout(layout *session.SplitLayout) bool {
+	if layout == nil || !layout.Dual {
+		return true
+	}
+	if layout.Focus != 0 {
+		return false
+	}
+	root := layout.Root
+	if root.Dir != session.SplitSideBySide || root.A == nil || root.B == nil || !root.A.Leaf() || !root.B.Leaf() {
+		return false
+	}
+	if root.A.File != root.B.File || root.A.Path == "" || root.A.Path != root.B.Path {
+		return false
+	}
+	if root.A.ViewMode != "" && root.A.ViewMode != "source" {
+		return false
+	}
+	if root.B.ViewMode != "" && root.B.ViewMode != "rendered" {
+		return false
+	}
 	return true
 }
 

@@ -135,13 +135,16 @@ section. In `scroll` mode the caret does not move while browsing; the pane is
 scrolled to the selected heading instead. The app-wide actions keep their Normal
 bindings, so Ctrl+P, Ctrl+B and the tab and split keys work; typed text is
 dropped and never reaches the buffer. F6 and `focus_next_sidebar_section` /
-`focus_prev_sidebar_section` cycle explorer → Contents → editor; focusing a
-folded section unfolds it.
+`focus_prev_sidebar_section` cycle explorer → Contents → Diagnostics (when open) →
+editor; focusing a folded section unfolds it. Plugin sections stay out of F6 (a
+recorded residual); their order is fixed after the native sections.
 
-**Mouse**: press a header row to focus the section, drag the Contents header to
-resize it (the explorer keeps at least one row), a release that never moved
-folds it; the `×` closes it; the wheel scrolls its window; a press on a row
-selects and jumps, a press on its glyph folds it.
+**Mouse**: press a header row to focus the section; dragging any section's header
+resizes that section's body (the dragged section and every other open section keep
+at least one row), and a release that never moved folds it; the `×` closes it; the
+wheel scrolls its window; a press on a row selects and jumps, a press on its glyph
+folds it. The Explorer's top header grows it when dragged down; the other headers
+grow their section when dragged up, the direction the Contents divider always had.
 
 ## 4. Settings
 
@@ -209,20 +212,28 @@ file contents, diagnostics or plugin state:
 |---|---|
 | the column's width form (automatic / percent / columns) and side | the runtime width and side, so a grip drag and a side toggle survive the session |
 | the explorer section's fold, selected row path and scroll | the selection and window of the tree; the first frame does not reveal row 0 over it |
-| the Contents section's open/folded state, body rows and window scroll | the open flag applies to the first Markdown buffer of the restored session (it wins over `auto_open`), rows at once, and the scroll after that buffer's first scan |
-| the Diagnostics section's open/folded state and body rows | at once |
+| the unified per-section heights (`SectionRows`: explorer, contents, diagnostics, plugin ids) — **only heights the reader explicitly set** by dragging/restoring, never a config default | each section's explicit body height at once; Contents 1..200, every other section (explorer, diagnostics, plugin ids) 1..1000; a section without an explicit height keeps the config default/flex remainder (Explorer by default). A present `SectionRows` map is authoritative: the legacy `ContentsRows`/`DiagnosticsRows`/`ExplorerRows`/`PluginRows` fields are read only when it is absent, so a stale legacy value cannot contradict it (and it is still written with explicit heights for older readers) |
+| the Contents section's open/folded state and window scroll | the open flag applies to the first Markdown buffer of the restored session (it wins over `auto_open`) and the scroll after that buffer's first scan; a body height comes only from the explicit `SectionRows` entry |
+| the Diagnostics section's open/folded state | at once; a body height comes only from the explicit `SectionRows` entry |
 | the plugin sections' stack order, requested body rows and folded state (by plugin panel id) | when the sections mount: known ids take their rows/fold/order, unknown or absent ids keep the plugin's mount order and defaults; at most 64 sections, row counts clamped to 1000, no section content is stored |
 
 Migration safety: the object is optional and every zero value is the default, so
 a session file from before this state existed decodes with no sidebar state and
 the config defaults win; the session format version does not change (an additive
-optional object), and a reader that does not know it ignores it. The plugin
+optional object), and a reader that does not know it ignores it. Because the
+session records only explicit heights, editing a config section height
+(`contents.rows`, a plugin's requested rows) and restarting applies the new value
+unless the previous session had a reader-dragged override for that section; the
+capture path itself never applies a pending plugin restore (only the next sidebar
+layout does), so taking a session snapshot is side-effect free. The plugin
 sections' order, sizes and folds are part of this state (R9-4): their ids keep
 the mount order and their requested rows/folds; restoring reorders the mounted
 sections by the saved rank, applies the rows and folds to the ids that mount, and
 leaves any section the plugin no longer mounts alone. The plugin host mounts
-sections after the model is built, so the state is stashed and applied when the
-first sections appear.
+sections after the model is built, so the state is stashed and applied **lazily**:
+a section that mounts later still gets its saved rows/fold/rank on the next sidebar
+layout, and each id's rows/fold are applied once so a later drag is not overwritten.
+The restore stays bounded (at most 64 ids, rows clamped to 1000).
 
 **Layout limits and the right side.** The column is one width: the explorer, the
 Contents section, the Diagnostics section and the plugin sections share
@@ -234,11 +245,18 @@ width. A column too short for every open section folds the lower sections first
 (the explorer keeps its header), and the Contents and Diagnostics headers can
 still be dragged within that; there is no additional minimum beyond the frame's
 explorer floor: the width form clamps to [16, 60] columns and the frame keeps 20
-columns for the editor on a narrow frame, on either side. A plugin section's
-requested rows are a fixed body height inside the shared column, so the same
-clamp applies there; there is no per-section width. Fresh's sidebar widget has
-per-section widths and a drag-and-drop section order; the order is persisted now,
-the drag itself and per-section widths remain residuals (see §7).
+columns for the editor on a narrow frame, on either side. Every section's
+body height is independent (the Explorer included); dragging a header resizes its
+section from the absolute pointer delta and clamps both sides to one row, and the
+height is saved in the session (below) so a restart restores it. The last open
+section still flexes to fill the column, and a live config `contents.rows` change
+resets that section's drag value. There is **one column width** — no per-section
+widths — because that is Fresh's sidebar model too (the width grip spans the whole
+column). Fresh also supports rows **or percent** per section; gvim stores rows only
+(percent heights remain a residual). Fresh has **no drag-and-drop section order**
+(it pins the explorer first and lists reordering as an unimplemented open question),
+so gvim keeps the fixed explorer → Contents → Diagnostics → plugin order and does
+not claim that as a Fresh gap.
 
 ## 5. Commands
 
@@ -282,9 +300,9 @@ buffer switches once shown. The setting applies live through the Settings page.
 - The selection is painted as a background band even when the section does not
   have the keyboard, with the `▌` marker for focus; Fresh's tree marks the
   selection with `▌` only.
-- The palette commands are Show Outline / Close Outline (the names gvim's plugin
-  used) rather than Fresh's single Toggle Table of Contents; both reach the same
-  section.
+- The palette commands match Fresh's three (`Markdown: Toggle Table of Contents`,
+  `Contents — Follow Cursor/Scroll`, `Focus Contents`) and keep gvim's older
+  Show/Close Outline rows as extras; all reach the same section.
 - **`fold_buffer` is implemented** (round 6, R1-1; live since round 9), matching
   Fresh's `markdown_toc`: with the setting on, the section publishes every
   heading's section as a toggleable fold range at the scanned text version (so the
@@ -366,8 +384,9 @@ A plugin can mount a declarative widget panel as a section of the column:
 * Lifecycle: the panel host owns the sections. Unmounting a plugin (or reloading it) removes
   its sections. Mounting shows the column when it was hidden.
 
-Residual (v1): plugin sections are not in the F6 focus cycle, the header does not drag-resize
-(rows come from the mount call), and sections cannot be reordered.
+Residual (v1): plugin sections are not in the F6 focus cycle, and sections cannot be
+reordered (Fresh has no drag-reorder either); their header now drag-resizes like every
+other section, and the mount rows are only the starting height.
 
 ## 9. Explorer behaviours
 

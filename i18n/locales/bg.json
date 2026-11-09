@@ -457,6 +457,8 @@
   "gvim.scrollback.no_selection": "Няма избрано за копиране",
   "gvim.settings.field.editor.auto_close": "Автоматично затваряне",
   "gvim.settings.field.editor.whitespace_show": "Показване на интервалите",
+  "gvim.settings.help.navigation": "↑↓:Навигация  Tab:Следващ  Enter:Редактиране  /:Търсене  Esc:Затваряне",
+  "gvim.settings.help.title": "Клавишни комбинации",
   "gvim.status.blocked": "Блокирана",
   "gvim.status.restricted": "Ограничена",
   "gvim.status.terminal_restart": "⟳ Рестартиране на %{program}",

@@ -21,16 +21,16 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `b34dbbf` (the previous round's commit is folded in) plus the
-merged round-54 work. Static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
+Last verified: 2026-11-09, tree commit `ff8c978` (the previous round's commit is folded in) plus the
+merged round-55 work. Static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
 build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check
-with catalogue heap en 124 KiB / de 82 KiB / both 207 KiB, git diff --check, gofmt clean; i18n_import.py
-also removed stale de entries). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77
-packages ok, no FAIL line (log `/tmp/gvim-r54-final2.log`). The audit ran build/gofmt/i18n_check plus
-targeted round-54 tests/diff review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/
-clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-
-tmux, Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh
-reference: `refs/fresh` same date.
+with catalogue heap en 124 KiB / de 83 KiB / both 207 KiB, git diff --check, gofmt clean). Final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r55-final2.log`). The audit ran build/gofmt/i18n_check plus targeted round-55 tests/diff
+review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
+file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY, real-
+host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh` same
+date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
 config-layer + LSP-autostart gating/status pill), native sidebar sections with the Markdown
@@ -320,8 +320,14 @@ kept literal, mapped-decorations decision documented (occurrences/rulers/guides 
 off in page view + no-paint tests), horizontal-page clamp decision + test, dual line-anchor
 approximation + one-dual-at-a-time policy, and sidebar plugin-section stack order/requested
 rows/folds persisted (additive bounded Session.SidebarState fields, migration-safe, applied
-when sections mount). Residuals: exact byte dual anchors, native menu row, per-section widths/
-drag order, mapped ordering test. **Terminal slice A.** Drag auto-scroll (band/direction from
+when sections mount; the lazy plugin restore applies state to late-mounting sections
+too). Residuals: exact byte dual anchors, native menu row, mapped ordering test. Sidebar
+per-section heights landed in R10-2: every section (Explorer/Contents/Diagnostics/plugin)
+has an explicit row height, its header drags to resize with both neighbours clamped, and
+session.Sidebar stores bounded SectionRows/ExplorerRows. Fresh's rows-or-percent sizing
+(gvim stores rows only) and a drag-and-drop order (Fresh has none either; it pins the
+explorer first and calls reordering an open question) are documented design differences,
+not Fresh gaps. **Terminal slice A.** Drag auto-scroll (band/direction from
 the drag, dock mouse forwarding while dragging, fixed ~80 ms seq-guarded one-row tick, stops at
 ends/back-inside/release/clear/focus loss), word/line-wise drag extension after double/triple
 click, Ctrl+hover underline + file:line:col parsing/resolution/open in a Cmd (OSC 7 dir then
@@ -1520,6 +1526,63 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-55 outcome (2026-11-09, merged working tree on `ff8c978`).** Four slices landed: sidebar
+per-section heights with bounded session persistence; Markdown dual-split session persistence; the
+Settings settings_help keybinding plus the plugin sidebar restore/divider lifecycle; and nested
+git_explorer HEAD watchers. Static gates PASS; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL (log
+`/tmp/gvim-r55-final2.log`). The audit read the diff and ran targeted tests; the Lead ran the full suite.
+**Sidebar per-section heights/order persistence (item 294).** Every section header is now a divider:
+a drag resizes that section from the absolute pointer delta, clamps the dragged section and every
+other open section to at least one row, and a release without motion folds the section. The Explorer
+has an explicit height (0 means flex in a fresh layout); Contents 1..200, Diag/Explorer/plugin 1..1000.
+Session SidebarState writes bounded SectionRows/ExplorerRows plus the legacy fields, only for
+heights the reader explicitly set (a config default is not snapshotted); the unified map is
+authoritative and legacy heights are read only when it is absent. Plugin sections apply restored
+rows/folds/order lazily (a late mount still gets them once, later drags are not overwritten); capture
+does not apply a pending restore, and unmount clears a divider aimed at that panel. Plugin F6 remains
+out. AUDITED RESIDUALS: rows-only sizing (Fresh also has rows/percent; gvim does not implement
+percent), one shared column width (no per-section width, matching Fresh), no section reordering (Fresh
+has no drag-reorder either; gvim keeps explorer→Contents→Diagnostics→plugin), plugin sections still
+outside F6, real mouse/layout host UNTESTED (R9-4/R10-2/R9-5).
+**Markdown dual-split persistence (item 295).** session.SplitLayout is additive v1: dual marks a
+dual record and each leaf carries viewMode (source left, rendered right). Capture records the
+two same-file leaves and ALWAYS writes focus 0 (source), even when the user focused the preview before
+saving; restore validates a same-file side-by-side two-leaf split with focus-source and rebuilds the
+dual state, then the panes derive plain source/composed preview. A bad marker, different file, wrong
+focus or missing pane rejects the whole layout and falls back to one pane; closing the dual clears
+the leaf modes and returns the document's own view. Tests cover TUI capture/restore incl. preview
+focus, app buildRuntime restore/capture, and session round-trip/validation. AUDITED RESIDUALS: free
+per-pane independent view mode has no UI (only the dual leaves persist source/rendered; a normal-split
+leaf's viewMode is accepted from a future/hand-written session), exact byte dual anchors stay the
+line-anchor approximation, native Markdown menu row absent, one dual per document only, real host
+UNTESTED (R10-2).
+**Settings help keybinding and plugin behavior (item 296).** The settings keymap context now binds ?
+to Fresh's settings_help; all five presets inherit it (default own bindings 246/in effect 244, and
+the other presets +1). The Settings page shows a centred key-help panel (navigation/edit/raw/filter
+lines); any key closes the panel and Esc then closes Settings, with the page's own key handler and
+overlay router agreeing. The panel strings are catalogued via gvim.settings.help.* and mapped to
+Fresh's settings shortcut keys. Plugin sidebar behavior: plugin headers now share the generic divider
+(drag-resize/fold), restored plugin sections apply lazily to late mounts, capture folds pending values
+without mutating the model, and unmount/editor-chrome replacement clears an in-flight divider.
+AUDITED RESIDUALS: the de catalogue reuses English-derived Fresh shortcut strings for help.edit/raw/
+filter, so those German lines are semantically approximate rather than a faithful translation (English
+is authoritative); plugin sections are still not in the F6 cycle; the help panel is keyboard-only
+(mouse does not dismiss it); real host UNTESTED (R2-4/R9-5/R13-5).
+**git_explorer nested HEAD watchers (item 297).** The root repository's .git directory and every
+discovered regular nested repository's .git directory are watched (at most 33 watcher directories:
+32 repos + root), debounced 200 ms; watchers are pruned when a repo disappears and stopped on unload,
+and a yielded refresh checks unload/generation. A commit/checkout in another terminal refreshes both
+root and nested badges. Tests cover nested decoration, no-root-repo discovery, bounded discovery and
+the nested watcher. AUDITED RESIDUALS: a linked-worktree .git file's HEAD lives elsewhere and is
+not watched (that nested repo remains event-driven), no hover/icons, directory-list/status failures
+are skipped (partial warning only for bounds), root status can consume the discovery budget, real
+remote/large-monorepo behavior UNTESTED (R13-6/R13-9).
+Metrics: palette 242, settings 77 in 14 sections, bundled 31 (9 on)/22 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; i18n en 1149 / 584 per locale, 575
+KiB text, ≈665 KiB JSON, heap 124-83-207 KiB. Full suite EXIT 0 (77 packages, log /tmp/gvim-r55-
+final2.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-54 outcome (2026-11-09, merged working tree on `b34dbbf`).** Four slices landed: the Contents
 section's native settings/commands/live apply/jump suppression/project-layer rules; git_explorer's bounded
@@ -3725,7 +3788,7 @@ for parity status.
 | Undo, save pipeline, file metadata | one-undo-step edits, atomic saves, interrupted-save recovery, permissions/read-only, final-newline/trim on save, auto-save, auto-revert | **implemented** | `document/save_plan.go`, `atomicfile/`, `editor/files_recovery.go`, `editor/interrupted.go`, `internal/restore`, `docs/architecture.md` | Fresh's `sudo save prompt` is missing (no `sudo` path found); permission/ownership preservation is present. |
 | Search & replace (in-buffer) | find, replace, query replace (y/n/!/q), find in selection, selection next/prev, case/whole-word/regex toggles, confirm-each, search history, match counts | **implemented** | `search/`, `internal/tui/find/`, `internal/tui/find_route.go`, tests `find_*_test.go`; Fresh `docs/features/search-replace.md` | Project-wide search/replace and Git Grep landed rounds 4–9 (next row); remaining search-panel residuals are the closed oversize-file streamed writer, provider sources beyond files/open buffers/current buffer, and a preview wrap/toggle (R9-2). |
 | Navigation, bookmarks, macros | position history, go to line/bracket, bookmarks 0-9 (set/jump/list), macros 0-9 + save-to-init/promote-to-command | **partial** | `editor/nav*.go`, `editor/goto.go`, `editor/marks.go`, `internal/tui/root_bookmarks.go`, `internal/tui/macro.go`; Fresh `docs/features/editing.md` | `List Bookmarks` is a stub ("editor does not list its bookmark slots", `internal/tui/root_commands.go:16`). One macro slot only: record/play/list work, `Macro: Save to init.ts`/`Promote to command` write an `init.lua` block (Fresh writes `init.ts`), no macro registers 0-9. |
-| Display & view options | line numbers/relative, wrap + wrap_column + wrap indent, page view, virtual space (block/vertical), rulers, indent guides + rainbow, whitespace marks incl. newlines/CR, current line/column, occurrence, post-EOF tilde, scrollbars + markers, smooth scroll, inline diagnostics + staleness, inlay hints, semantic tokens, Markdown page view (compose, fences, tables, dual split, wrapped cells, container fences, setext/task/image conceal), animations, screensaver | **partial** (R2+R4+R5+R6+R7+R8+R9+R10 landed the user-visible subset) | `document/{virtualspace,block}.go`, `editor/{virtualspace,block,smart}.go`, `internal/tui/editorpane/{inline_diag,virtual_block,virtual_lines,compose,compose_layout,compose_fence,compose_table,compose_setext,pageview,rows_extra,conceal,inline_hints}.go` + `syntax/markdown_{markers,fences,tables}.go`, `internal/tui/{virtual_space,pageview,dual}.go`, `docs/markdown.md`; Fresh `docs/features/editing.md` | Round 9 landed inline-hint tier 2; round 10 added quote-container fence framing + per-line literal fallback, setext styling/conceal, task-list glyph conceal, image alt-text conceal, inline-HTML literal decision, the mapped-decorations no-paint decision, the horizontal-page clamp decision, the dual line-anchor approximation/one-dual policy, and sidebar plugin-section state. Remaining: R9-3/R10-2 residuals (exact byte dual anchors, native menu row, per-section widths/drag order, mapped ordering test); R4-4 virtual-space limits; style-only keys out of `ViewOptions` (§4 item 9). |
+| Display & view options | line numbers/relative, wrap + wrap_column + wrap indent, page view, virtual space (block/vertical), rulers, indent guides + rainbow, whitespace marks incl. newlines/CR, current line/column, occurrence, post-EOF tilde, scrollbars + markers, smooth scroll, inline diagnostics + staleness, inlay hints, semantic tokens, Markdown page view (compose, fences, tables, dual split, wrapped cells, container fences, setext/task/image conceal), animations, screensaver | **partial** (R2+R4+R5+R6+R7+R8+R9+R10 landed the user-visible subset) | `document/{virtualspace,block}.go`, `editor/{virtualspace,block,smart}.go`, `internal/tui/editorpane/{inline_diag,virtual_block,virtual_lines,compose,compose_layout,compose_fence,compose_table,compose_setext,pageview,rows_extra,conceal,inline_hints}.go` + `syntax/markdown_{markers,fences,tables}.go`, `internal/tui/{virtual_space,pageview,dual}.go`, `docs/markdown.md`; Fresh `docs/features/editing.md` | Round 9 landed inline-hint tier 2; round 10 added quote-container fence framing + per-line literal fallback, setext styling/conceal, task-list glyph conceal, image alt-text conceal, inline-HTML literal decision, the mapped-decorations no-paint decision, the horizontal-page clamp decision, the dual line-anchor approximation/one-dual policy, and sidebar plugin-section state. Remaining: R9-3/R10-2 residuals (exact byte dual anchors, native menu row, mapped ordering test; sidebar per-section heights landed and rows-or-percent sizing stays the Fresh difference); R4-4 virtual-space limits; style-only keys out of `ViewOptions` (§4 item 9). |
 | Folding | indent folds + LSP `foldingRange` + outline/Contents folds + plugin namespace folds, fold indicators, fold-first toggle, per-buffer toggle | **implemented** core; all four sources | `editor/fold.go`, `document/fold.go`, `editor/{lsp_folds,outline_folds}.go` + `internal/uiadapter/{lsp,outline}_folds.go`, `internal/tui/plugin_folds.go`, `internal/tui/editorpane/` gutter; tests `decorations/tier1c_test.go`, `plugin/decor_tier1c_test.go`, `editor/{lsp,outline}_folds_test.go` | Round 5 LSP ranges, round 6 Contents outline source, round 7 plugin namespace store, round 8 pane integration + fold-first toggle, round 9 live `contents.fold_buffer` + hidden-section publication. Residuals: a source that changes ranges without an edit refreshes on the next edit/open; no fold command (Fresh parity). |
 | Splits, tabs, panes, windows | splits (vertical/horizontal), tab strip, tab drag, preview tabs, buffer groups (fixed-height leaves), split labels, per-buffer window state, line targets, multiple windows/workspaces | **partial** | `internal/tui/split*`, `internal/tui/tabs.go`, `internal/tui/tab_drag.go`, `internal/tui/tab_drop.go`, preview tabs in `internal/tui/model.go`, plugin group-lite in `internal/tui/plugin_groups.go` + `pluginapi/buffergroup.go`, 1c-C seams in `internal/tui/{plugin_seams,plugin_events}.go`, line targets in `internal/tui/plugin_linetargets.go` + `pluginapi/linetargets.go`; Fresh `docs/features/navigation.md` | Round 6 groups, round 8 1c-C seams + ratio fix; round 9 added fixed-height group leaves (`{type="fixed",height=N}`, 1–100 rows, re-applied on layout change; git_log's height-1 toolbar renders one row) and line targets (Enter/click opens `path` at a 0-based line, `into` a labelled split, 10k/buffer cap, owner cleanup). Still open: no synthetic group tab/per-panel views, no second window/workspace model; "Move tab to other split"/"Extract Tab to New Workspace" are notices (R9-5/R8-1). |
 | Compare files | `fresh --diff A B`, editable side-by-side, change copy/take, next/prev difference, switch side, scrollbar marks, plugin compare API (compareBuffers/replaceRange) and the compare_files plugin | **implemented** (native view + plugin API + opt-in plugin port) | `internal/tui/compare*.go`, `docs/compare.md`, `compare_*_test.go`, `internal/cli` `--diff`, `pluginapi/compare.go` + `internal/pluginhost/compare.go` (CompareResult/DiffSource/DiffHost, one-edit/one-undo replaceRange), `plugin/compare_geom.go` + tests, Lua `gvim.diff.compare_buffers/replace_range`, `plugin/bundled/plugins/compare_files/` (8 commands, group-lite splits, hunk-anchored scroll sync, copy/take, opt-in); Fresh `docs/features/compare-files.md` | Native Compare is gvim's default surface for Fresh's Compare Files (two file tabs, fillers, hunks, take/copy, synced scroll, large-file refusal; §4 item 1 for presentation). Round 8 added the plugin API and the port: group-lite splits of the two file buffers (opened as ordinary tabs when needed; Close closes only ones it opened when unmodified), hunk-anchored scroll sync, Fresh theme decorations, filler rows gated on `decor_virtual_paint`, copy/take through replace_range (one undo per merge), binary/large refusal, 8 Fresh commands/no default keys, opt-in for the heap gate (enabling duplicates the native palette rows). Residuals R8-4: no synthetic group tab, no EOL-only hunks (EOL normalisation), filler rows need the paint capability, positional pairing fallback, ui.input instead of Fresh's picker, no `--diff` launch hook/script-facing export. |
@@ -3759,7 +3822,7 @@ for parity status.
 | Remote authority | SSH editing, remote file system, processes/terminals, plugin fs/proc authority OS, remote LSP, watch, finder/search, replace, explorer writes/ignore/watch/clipboard, env, SSH auth/config/ProxyJump/agent forwarding/known_hosts policy/host-key algorithms/keyring, jump box, editable windowed remote large-file with STREAMED save (arbitrary size), remote hot-exit/trust/reconnect, saved-session restore, FileMutations/ReadRange/WriteStream **landed**; r21 plugin walk/copy (realpath landed r22; r23 remote search ignore scope + plugin copy streaming), OPEN: Fresh server-side patched recipe, whole-file non-windowed transport cap, search preview head-only >256 KiB/no semantic-LSP spans (bounded head syntax-highlighted r26/r28)/ignore, explorer drag/move/undo/whole-subtree transaction/mode-mtime-hardlinks-xattrs/existence race/overwrite prompt (r27 remote paste/duplicate Overwrite/Rename/Cancel landed; no All variants; overwrite remove-then-copy race)/watch latency, remote marker scan, hot-exit local-staging privacy divergence, ~user/special/sudo, reconnect/terminal respawn, keyring backends real macOS security/Linux secret-tool landed r27 (opt-in; real host UNTESTED)/2FA not stored, devcontainer/k8s, saved-session conflict detection, restored terminal dead/ownership, real SSH UNTESTED | P1 | XL | `authority`, `internal/app/remote_*`, `internal/pluginhost` authority OS, `document/{remote_large,large_save}.go`, `buffer`, `internal/tui`, `trust` — R13-3/R13-17/R13-19/R13-21/R13-22/R13-23 |
 
 | Workspace trust | per-folder Restricted/Trusted/Blocked, marker detection, open-time prompt, status pill, per-spawn executable gate, config-layer gating, env activation gating | **implemented** (r1–r3 model/prompt/markers; r12 env gate; r13 spawn gate) | `trust/{trust,markers,env,gate}.go`, `internal/app/{trust,config_trust}.go`, `internal/tui/trust*.go`, `authority/local.go` gate hook + authoritytest, `internal/pluginhost/pluginos*.go`, `lsp/manager` gate, `internal/agentdiscover` runner gate, `docs/trust.md` | R13 closed the process-spawn gap: `trust.DecideSpawn` runs before every launch in the local authority (Run/Start/dock Launch: git/find/shell/formatter/terminal), the plugin OS (gvim.proc.run/spawn), the LSP manager (auto/manual/universal) and discovery; it resolves bare names through the child's effective PATH, executes the resolved absolute path, checks explicit paths lexically+symlinks, checks the shell `-c` first token, and refuses with a typed error naming level/spelling/help; Blocked refuses all, Restricted/Undecided refuse project-internal executables; the gate decides and does not kill running processes. Open (R13-4): only the shell first token is inspected (compound/quoted/variable-built commands not parsed), Windows PATHEXT/drive-case gaps, environment injected below the three seams unresolved, no kill on demote, and the remote path keeps the coarse app rule pending a remote trust store. |
-| Markdown | syntax highlighting, markdown_source smart list editing, page view/compose, tables (wrapped cells), code-fence frames (continuation rails, container framing), dual view, heading conceal/scrollbar marks, page-view persistence, Contents section | **partial** (R1 Contents; R4 smart editing; R6 core; R7 fences/tables; R8 dual/borders; R9–11 residual slices) | `syntax/{markdown,markdown_inline,markdown_markers,markdown_fences,markdown_tables}.go`, `editor/markdown.go`, `internal/tui/editorpane/{compose,compose_layout,compose_fence,compose_table,compose_setext,pageview}.go` + `internal/tui/{pageview,dual}.go`, `internal/tui/sidebar/contents.go`, `session/pageview.go`, `docs/markdown.md`; Fresh `plugins/markdown_{toc,source,compose}.ts` | Round 9–10 landed wrapped cells, escaped pipes, container fallback, fence continuation rails, heading marks, page-view persistence, quote-container fences, setext conceal, task/image conceal, inline-HTML literal decision, mapped-decor no-paint, horizontal clamp, dual line-anchor/one-dual policy; round 11 verified composed plugin-overlay pipeline ordering and recorded the wrapped-cell selection decision (hook rows have no source line/row-source map) and tightened the dual/per-split wording. Remaining R10-2: free per-split view mode, dual split persistence, native Markdown menu row, exact byte dual anchors (approximation recorded), sidebar per-section widths/drag order. |
+| Markdown | syntax highlighting, markdown_source smart list editing, page view/compose, tables (wrapped cells), code-fence frames (continuation rails, container framing), dual view, heading conceal/scrollbar marks, page-view persistence, Contents section | **partial** (R1 Contents; R4 smart editing; R6 core; R7 fences/tables; R8 dual/borders; R9–11 residual slices) | `syntax/{markdown,markdown_inline,markdown_markers,markdown_fences,markdown_tables}.go`, `editor/markdown.go`, `internal/tui/editorpane/{compose,compose_layout,compose_fence,compose_table,compose_setext,pageview}.go` + `internal/tui/{pageview,dual}.go`, `internal/tui/sidebar/contents.go`, `session/pageview.go`, `docs/markdown.md`; Fresh `plugins/markdown_{toc,source,compose}.ts` | Round 9–10 landed wrapped cells, escaped pipes, container fallback, fence continuation rails, heading marks, page-view persistence, quote-container fences, setext conceal, task/image conceal, inline-HTML literal decision, mapped-decor no-paint, horizontal clamp, dual line-anchor/one-dual policy; round 11 verified composed plugin-overlay pipeline ordering and recorded the wrapped-cell selection decision (hook rows have no source line/row-source map) and tightened the dual/per-split wording. Remaining R10-2: free per-pane view mode, native Markdown menu row, exact byte dual anchors (approximation recorded); dual-split persistence and sidebar per-section heights landed (rows-or-percent remains the Fresh difference; no per-section widths or drag reorder; Fresh has no section widths/reorder either). |
 | Diagnostics surfaces | gutter marks, underline, inline end-of-line text, diagnostics panel, quickfix list, error navigation, hover fusion, pull/workspace diagnostics, progress | **partial** (rounds 4–10) | `internal/tui/{diag,diagpanel,lsp}.go`, `internal/tui/editorpane/{decor,inline_diag,inline_hints}.go`, `commands/lsp_commands.go`, `docs/lsp.md`; Fresh `docs/features/lsp.md` | Gutter dots, underline, inline end-of-line text with staleness, status counts, F8 jumps and hover diagnostics exist. Round 6 added the native Diagnostics panel (file→severity grouping, counts, jump/scroll/focus, progress/empty) and the Diagnostics List quickfix; round 7 workspace diagnostics for unopened files (`(not open)` rows) and `$/progress`; round 9 inline-hint tier 2; round 10 cancellation (pullSet/`$/cancelRequest`) and Linux process limits. Remaining: no built-in universal server (deliberate), per-OS process limits caveat, capability-gated workspace diagnostics (publish-only servers report their own set), plugin `DiagnosticInfo` carries no code (native ones do). |
 | Scripting and CLI automation | `--cmd script`, `--cmd daemon open-file --wait`, stdin programs, `init.ts` startup script, agent channels, watch mode, CLI help for the API | **partial** (r11 stdin; r12 daemon flags+remote; r13 workspace CLI/remote) | `internal/cli/{root,args}.go`, `internal/app/{stdin,daemon_runtime,workspace_host,remote_editor,remote_lsp}.go`, `authority/spec.go`, `internal/tui.RunWithInput/RunWithIO`, `plugin_init.go`; Fresh `docs/features/scripting.md` | gvim has `init.lua`/Lua API, stdin-as-a-buffer, trust-gated `gvim config show/paths`, `gvim grammar`, foreground daemon/attach flags, workspace frames (workspace_list/select/new/close/rename; `Hello.Workspace` parsed but ignored), and remote `user@host:path`/`ssh://` launches with remote editor/LSP routing. Missing (open): Fresh's external `--cmd` script channel, `open-file --wait`, watch/agent capability, forked daemon/auto_attach, multiple clients, workspace CLI management. |
 | Internationalization | 15 locales, locale detection/config, plugin i18n, translated command/menu/settings/status/dialog/prompt/picker/chrome/authority-remote strings | **partial** (r11 foundation; r12 catalogues; r13 extraction 2; r14–r18 slices; r19 remainder 4; r20 remainder 5) | `i18n/`, `tools/{i18n_import.py,i18n_check.sh}`, `commands/gen`/`tools/gen_menus.py`, `internal/tui/*i18n*`, `internal/app/settings_i18n.go`, `docs/i18n.md` | Round 20: extracted SSH reconnect notice/refresh-failure suffix, LSP restart-count plural (TN), remote workspace restore notice, remote trust display, workspace trust warning, plugin focus/scope notices, remote explorer clipboard/recovery notices, remaining settings/status strings; docs inventory/budgets refreshed. Metrics: en 998 keys, every non-English 575; key+value 573,676 B (560 KiB, under 640 KiB text cap), JSON 664,221 B (≈649 KiB), heap en 114 KiB / de 82 KiB / both 197 KiB; i18n_check green. OPEN (R13-5): rows without Fresh keys, structured field/row schema names, some keybinding help/plugin-manager edges; restore_live config-only; self-update commands absent. |
@@ -4172,8 +4235,15 @@ for parity status.
     open/rows/window, Diagnostics) and `FileState.pageView/pageWidth` are optional/omitted at zero,
     so older sessions load with defaults and the format version does not change; the sidebar
     state restores only when the saved layout is used (`editor.restore_previous_session` on, no
-    `--no-restore`), and a Contents restore waits for the first scan. Plugin sections' order/
-    sizes/folds and per-section widths are not saved (R9-4). `docs/sidebar.md`, `docs/markdown.md`.
+    `--no-restore`), and a Contents restore waits for the first scan. Sidebar section heights are saved as
+the bounded SectionRows/ExplorerRows map only when the reader explicitly sized them (a
+config default is not snapshotted, so a config edit applied on restart wins); a present
+SectionRows map is authoritative and the legacy ContentsRows/DiagnosticsRows/ExplorerRows/
+PluginRows fields are read only when it is absent (they remain written for older readers).
+Plugin sections' order/sizes/folds are saved too and applied lazily to late mounts (R9-4);
+the capture path does not apply the pending restore. Per-section widths and drag-order are deliberately not part
+of the state: Fresh's sidebar has one column width and no section reordering, and gvim
+matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.md`.
 60. **Search's large-file replace distinction is explicit.** An open buffer is searched from its
     snapshot whatever its size and replaced through the unsaved-tab/hash model (Save All writes
     it); a closed file above the search read cap (or above the large-file threshold in large-file
@@ -6006,6 +6076,27 @@ for parity status.
      (no CreateNew+WriteFile fallback); existing/dangling untouched, mode honored, concurrency/symlink/write-
      failure tests. Residuals: write failure leaves claimed partial file (no temp+rename), create-once only,
      real host/permissions UNTESTED.
+294. **Sidebar per-section heights/order persistence (R9-4/R10-2/R9-5).** every native/plugin header
+     drags its own section with absolute pointer delta and one-row clamps both sides; click/no-motion folds;
+     Explorer explicit height; Contents 1..200, Diag/Explorer/plugin 1..1000; bounded SectionRows/ExplorerRows
+     only for explicit heights, unified map authoritative/legacy fallback; plugin lazy late-mount restore,
+     capture no side effect, unmount clears divider; tests. Residuals: rows-only (no percent), one shared
+     column width/no per-section width, no drag-reorder (Fresh has none; fixed order), plugin F6 out, real
+     mouse/layout host UNTESTED.
+295. **Markdown dual-split persistence (R10-2).** session.SplitLayout.Dual + per-leaf ViewMode; capture
+     source focus even when preview focused; restore validates same-file side-by-side focus-source and
+     rebuilds dual; invalid falls back one pane; close clears modes; TUI/app/session tests. Residuals: free
+     per-pane independent mode UI absent (normal-split viewMode only future/hand-written), exact byte
+     anchors, native Markdown menu row, one dual per document, real host UNTESTED.
+296. **Settings help keybinding + plugin behavior (R2-4/R9-5/R13-5).** settings context ? -> settings_help
+     in all presets (default file246/in effect244); centred help panel any-key closes/Esc then Settings;
+     catalogued gvim.settings.help.*; plugin header generic divider, lazy restore, capture no mutation, unmount
+     divider clear; tests. Residuals: de help.edit/raw/filter are approximate Fresh shortcut strings (English
+     authoritative), plugin sections not F6, help mouse does not dismiss, real host UNTESTED.
+297. **git_explorer nested HEAD watchers (R13-6/R13-9).** root+nested regular .git dirs watched, cap33
+     directories, debounce200ms, prune vanished, unload stop/generation guard; tests nested watcher.
+     Residuals: linked-worktree .git file not watched (event-driven), no hover/icons, listing/status errors
+     skipped, partial warning bounds only, real remote/large monorepo UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6192,8 +6283,10 @@ Round 6 recorded six gaps:
   rescans heading ranges while the Contents section is hidden (Fresh tracking), and
   `contents.fold_buffer` applies live through the outline fold source (`ApplyLive`) instead of
   restart. Residuals moved to R9-4; round 10 closed the plugin-section persistence (order/
-  rows/folds), so only per-section widths and the drag-and-drop order remain (plugin explorer
-  rows wait on R9-5).
+  rows/folds). Sidebar per-section heights (every header draggable, both neighbours clamped,
+  release saved) closed in R10-2; rows-or-percent sizing is the remaining Fresh difference.
+  Per-section widths and drag-and-drop order are not Fresh sidebar behaviours (single column
+  width, explorer pinned first) and are recorded as gvim design differences, not gaps.
 - **R7-4 (P2, S, unbind landed round 11)** — explicit unbind tombstones are recorded by the
   keymap (context + global) and exposed through `keymap.Map.Unbound` + the TUI `UnbindKeymap`
   port/adapter; the overlay router swallows an explicitly unbound chord instead of running the
@@ -6280,8 +6373,11 @@ Round 9 recorded five gaps:
   sections: stack order, requested body rows and folded state by plugin-panel id, additive/
   bounded Session.SidebarState fields, migration-safe, applied when the sections mount (unknown
   ids keep mount order/defaults; at most 64 sections, rows clamped to 1000, no content stored).
-  What remains (R10-2): per-section widths and the drag-and-drop section order (the shared-
-  column model and right-side floor are documented decisions). `docs/sidebar.md`.
+  What remains: Fresh's rows-or-percent sizing for sections (gvim persists rows only).
+  Per-section heights, including the Explorer and a plugin section's draggable header, landed
+  in R10-2 with both-side clamping and bounded session persistence; per-section widths and
+  drag-and-drop order are not Fresh behaviours (single shared column, explorer pinned first)
+  and are documented design differences. `docs/sidebar.md`.
 - **R9-5 (P2, L, explorer rows landed round 10)** — round 10's explorer decoration/slot host
   API + git_explorer port closed the plugin-explorer-rows part. Remaining: composite buffers
   recorded as a native substitution (API surface only), dock/fullscreen placement, independent
@@ -6298,13 +6394,17 @@ Round 10 recorded four gaps:
   activation, no persisted recipe, opt-in), and the earlier ports' items in R9-1. Optional
   line-target migration for code_tour/dashboard/git_log (S/M) and dashboard/code_tour polish
   blocked on R9-5 dock/per-panel views. `docs/plugins/porting.md`.
-- **R10-2 (P2, S, overlay ordering/decisions closed round 11)** — residual UI polish: free
-  per-split view mode, dual split persistence and the native Markdown menu row; exact byte dual
-  anchors stay the recorded line-anchor approximation and wrapped-cell selection the recorded
-  primary-row-only decision (hook rows have no source line/row-source map); sidebar per-section
-  widths and drag-and-drop section order (shared-column model documented). The composed plugin-
-  overlay ordering regression test landed in round 11, so that item is gone. `docs/markdown.md`,
-  `docs/sidebar.md`.
+- **R10-2 (P2, S, overlay ordering/decisions closed round 11; sidebar heights closed)** —
+  residual UI polish: free per-pane view mode and the native Markdown menu row; dual-split persistence
+  landed (Focus source, per-leaf viewMode, invalid fallback), exact byte dual anchors stay the recorded line-anchor approximation and wrapped-cell
+  selection the recorded primary-row-only decision (hook rows have no source line/row-source
+  map). Sidebar per-section heights landed: Explorer/Contents/Diagnostics/plugin headers drag
+  with absolute pointer deltas, both neighbours clamp at one row, and bounded §session rows are
+  persisted/restored (late plugin mounts lazy). Fresh's rows-or-percent section sizing remains
+  (gvim rows only); per-section widths and drag-and-drop order are not Fresh sidebar behaviours
+  (single shared width, explorer pinned first) and stay recorded design differences. The
+  composed plugin-overlay ordering regression test landed in round 11, so that item is gone.
+  `docs/markdown.md`, `docs/sidebar.md`.
 - **R10-3 (P2, M, completed except R11-3)** — terminal completion landed in round 11: ConPTY
   (pure-Go x/sys/windows, GOOS=windows build/vet/test-compile verified; real-Windows acceptance
   checklist pending — parity unverified), child OSC 52 clipboard write (opt-in
@@ -6592,7 +6692,7 @@ Round 13 recorded five open gaps:
 
 | # | Gap | Pri | Size | Owner area | Notes / depends on |
 |---|---|---|---|---|---|
-| 12 | Markdown residual: free per-split view mode, dual split persistence, native Markdown menu row; exact byte dual anchors stay the recorded line-anchor approximation and wrapped-cell selection the recorded primary-row-only decision. Round 9–11 landed the renderer core/fences/tables/wrapped cells/borders/dual/heading marks/container fences/setext/task-image conceal/page-view persistence/mapped-decisions/overlay ordering | P1 | L | `editor`, `syntax`, `internal/tui/editorpane`, `internal/tui`, `session` | R10-2 |
+| 12 | Markdown residual: free per-pane view mode, native Markdown menu row; dual-split persistence landed; exact byte dual anchors stay the recorded line-anchor approximation and wrapped-cell selection the recorded primary-row-only decision. Round 9–11 landed the renderer core/fences/tables/wrapped cells/borders/dual/heading marks/container fences/setext/task-image conceal/page-view persistence/mapped-decisions/overlay ordering; sidebar per-section heights landed in R10-2 (rows-or-percent and per-section widths/drag order remain documented differences: Fresh has no section widths or drag reorder) | P1 | L | `editor`, `syntax`, `internal/tui/editorpane`, `internal/tui`, `session` | R10-2 |
 
 ### 5.2 Plugin-API breadth (unblocks Fresh's plugin-era features)
 
@@ -8021,6 +8121,14 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-55 verification (2026-11-09, merged tree on `ff8c978`).** STATIC GATES PASS (Lead, final pass
+  after all writes stopped; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0,
+  purity, import rules, menus, i18n_check with catalogue heap en 124 KiB / de 83 KiB / both 207 KiB,
+  git diff --check, gofmt clean). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77
+  packages ok, no FAIL line (log `/tmp/gvim-r55-final2.log`). Audit: build/gofmt/i18n_check plus targeted
+  round-55 tests/diff review. Tracks: sidebar per-section heights/persistence; Markdown dual-split
+  persistence; settings_help keybinding + plugin divider/restore lifecycle; git_explorer nested HEAD
+  watchers. Real-host checks remain UNTESTED. No full-parity claim.
 - **Round-54 verification (2026-11-09, merged tree on `b34dbbf`).** STATIC GATES PASS (Lead, final pass
   after all writes stopped; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0,
   purity, import rules, menus, i18n_check with catalogue heap en 124 KiB / de 82 KiB / both 207 KiB,
@@ -8051,16 +8159,16 @@ Round 13 recorded five open gaps:
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-54 landed Contents native settings/commands/live/jump/project isolation, git_explorer nested
-  bounded discovery, Ctrl+F confirm and same-handle exclusive create; full suite EXIT 0 (77 packages,
-  log /tmp/gvim-r54-final2.log); §5.5 is the next plan; TUI-only scope/genuine-equivalence §4 item 94/§8;
+  (round-55 landed sidebar per-section heights/persistence, dual-split persistence, settings_help +
+  plugin lifecycle, and nested HEAD watchers; full suite EXIT 0 (77 packages, log
+  /tmp/gvim-r55-final2.log); §5.5 is the next plan; TUI-only scope/genuine-equivalence §4 item 94/§8;
   real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–54 had their gate sets
-  run. Round 54 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE: build,
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–55 had their gate sets
+  run. Round 55 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE: build,
   CGO_ENABLED=0 build, GOOS=windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
-  i18n_check with catalogue heap en 124 KiB / de 82 KiB / both 207 KiB, git diff --check). Final full
+  i18n_check with catalogue heap en 124 KiB / de 83 KiB / both 207 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r54-final2.log`. The audit ran build/gofmt/i18n_check plus targeted round-54 tests and diff
+  `/tmp/gvim-r55-final2.log`. The audit ran build/gofmt/i18n_check plus targeted round-55 tests and diff
   review only (no full suite); the Lead ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts
@@ -8068,9 +8176,9 @@ Round 13 recorded five open gaps:
   macOS/BSD/Linux process polling, outer-terminal focus reporting, real LSP/trust changes, real
   slangd/slang-synth, watcher host behavior, dashboard/GitHub network, Live Grep live
   tabs/preview/export, workspace source-route under a real daemon/SSH race, remote partial/permission
-  results, same-handle exclusive create on a real remote, git_explorer on a real large monorepo,
-  daemon/mixed-workspace extraction; ~/… expansion against a local real `sh`, not a live host. Treat
-  statuses as pointers, not proof.
+  results, same-handle exclusive create on a real remote, git_explorer nested watchers on a real large
+  monorepo, daemon/mixed-workspace extraction; ~/… expansion against a local real `sh`, not a live host.
+  Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

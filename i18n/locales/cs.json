@@ -457,6 +457,8 @@
   "gvim.scrollback.no_selection": "Žádný výběr ke kopírování",
   "gvim.settings.field.editor.auto_close": "Automatické uzavírání",
   "gvim.settings.field.editor.whitespace_show": "Zobrazit bílé znaky",
+  "gvim.settings.help.navigation": "↑↓:Navigace  Tab:Další  Enter:Upravit  /:Hledat  Esc:Zavřít",
+  "gvim.settings.help.title": "Klávesové zkratky",
   "gvim.status.blocked": "Blokováno",
   "gvim.status.restricted": "Omezeno",
   "gvim.status.terminal_restart": "⟳ Restartovat %{program}",

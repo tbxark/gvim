@@ -167,6 +167,8 @@ type settingsPage struct {
 	structureSeq int
 	active       bool
 	box          space.Rect
+	// help is Fresh's settings_help panel: it lists the page's keys and any key closes it.
+	help bool
 }
 
 // settingsPending is one unsaved change: a scalar row's display value, a
@@ -400,6 +402,10 @@ func (p *settingsPage) writable(it SettingsItem) bool {
 
 // key handles one key press. It returns the command the press starts.
 func (p *settingsPage) key(msg tea.KeyPressMsg) tea.Cmd {
+	if p.help {
+		p.help = false
+		return nil
+	}
 	switch tea.Key(msg).Keystroke() {
 	case "up":
 		p.move(-1)
@@ -1221,11 +1227,38 @@ func (p *settingsPage) Draw(g *grid.Grid) {
 		}
 	}
 	ov.PaintFooter(g, box.X, box.Y+box.H-1, box.W, footer)
+	if p.help {
+		p.paintHelp(g)
+	}
+}
+
+// paintHelp draws the Settings key panel opened by Fresh's settings_help. It is a plain
+// centred box over the page; no new styles are introduced.
+func (p *settingsPage) paintHelp(g *grid.Grid) {
+	lines := []string{
+		uiText("gvim.settings.help.navigation", "Up/Down move  PgUp/PgDn page  Home/End first/last"),
+		uiText("gvim.settings.help.edit", "Enter edit  Tab layer  Ctrl+S save  Ctrl+R reset"),
+		uiText("gvim.settings.help.raw", "Ctrl+E edit raw  Delete inherit/reset the row"),
+		uiText("gvim.settings.help.filter", "Type to filter; Esc close help, then Esc close Settings"),
+	}
+	w := 0
+	for _, line := range lines {
+		w = max(w, ansi.StringWidth(line)+4)
+	}
+	box := list.Centred(g.Width(), g.Height(), w, len(lines)+2)
+	if box.W == 0 || box.H < 3 {
+		return
+	}
+	ov := p.m.styles.Overlay
+	ov.PaintBox(g, box.X, box.Y, box.W, box.H, uiText("gvim.settings.help.title", "Settings keys"))
+	for i, line := range lines {
+		g.Put(box.X+2, box.Y+1+i, box.X+box.W-2, line, ov.Box)
+	}
 }
 
 // Cursor returns the caret in the filter row.
 func (p *settingsPage) Cursor(_, _ int) (x, y int, ok bool) {
-	if p.box.W == 0 {
+	if p.help || p.box.W == 0 {
 		return 0, 0, false
 	}
 	const label = "Filter: "

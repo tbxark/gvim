@@ -19,6 +19,11 @@ type SplitLayout struct {
 	// Focus is the focused leaf's index in reading order (the leaves of Root,
 	// first child before second, depth first). Zero is the first pane.
 	Focus int `json:"focus,omitempty"`
+	// Dual marks the Markdown dual view: Root must be a side-by-side two-leaf
+	// split of the same saved file, the first leaf is the source and the second
+	// the composed/rendered pane, and Focus is zero (the source, Fresh's policy).
+	// It is optional and additive: an older session or a normal split omits it.
+	Dual bool `json:"dual,omitempty"`
 }
 
 // SplitNode is one node of SplitLayout: a leaf when A and B are nil, else an inner
@@ -46,6 +51,10 @@ type SplitNode struct {
 	// line (compare views only). Zero is the first line.
 	Top    int `json:"top,omitempty"`
 	TopRow int `json:"topRow,omitempty"`
+	// ViewMode is the leaf's Markdown view override: "source" or "rendered"; empty
+	// means the document's own page view. Persisted for the dual view's two panes,
+	// so the saved split keeps each side's mode; an older session omits it.
+	ViewMode string `json:"viewMode,omitempty"`
 }
 
 // Split directions, the data names of split.Dir.
@@ -78,7 +87,37 @@ func (l *SplitLayout) Valid(nFiles int) bool {
 	if !ok || leaves < 1 || leaves > MaxSplitLeaves || depth > MaxSplitDepth {
 		return false
 	}
-	return l.Focus >= 0 && l.Focus < leaves
+	if l.Focus < 0 || l.Focus >= leaves {
+		return false
+	}
+	if l.Dual && !l.validDual() {
+		return false
+	}
+	return true
+}
+
+// validDual validates the optional Markdown dual marker: two side-by-side leaves of
+// the same saved file, source first and rendered second, focus on the source. Empty
+// ViewMode values are accepted for backward-compatible writers and inferred by the
+// restore; a non-empty value must name the leaf's side.
+func (l *SplitLayout) validDual() bool {
+	if l.Focus != 0 {
+		return false
+	}
+	root := l.Root
+	if root.Dir != SplitSideBySide || root.A == nil || root.B == nil || !root.A.Leaf() || !root.B.Leaf() {
+		return false
+	}
+	if root.A.File != root.B.File || root.A.Path == "" || root.A.Path != root.B.Path {
+		return false
+	}
+	if root.A.ViewMode != "" && root.A.ViewMode != "source" {
+		return false
+	}
+	if root.B.ViewMode != "" && root.B.ViewMode != "rendered" {
+		return false
+	}
+	return true
 }
 
 // valid checks n and its subtree. It returns the leaf count and the subtree depth.

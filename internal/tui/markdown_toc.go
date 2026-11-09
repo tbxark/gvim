@@ -11,6 +11,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/sidebar"
 	"github.com/tbxark/gvim/outline"
+	"github.com/tbxark/gvim/pluginapi"
 )
 
 // The Contents sidebar section: the Markdown outline under the File Explorer.
@@ -89,6 +90,11 @@ type dividerState struct {
 	startY    int
 	startRows int
 	moved     bool
+	// section, kind and panel identify the pressed section: the drag resizes that
+	// section's body height and a release without motion toggles its fold.
+	section int
+	kind    sidebar.Kind
+	panel   *mountedPanel
 }
 
 // markdownExtensions are the file extensions the section treats as Markdown,
@@ -633,7 +639,7 @@ func (m *Model) scrollContentsToSelection() {
 
 // sidebarSpecs is the section stack of the column for the layout.
 func (m *Model) sidebarSpecs() []sidebar.Spec {
-	specs := []sidebar.Spec{{Kind: sidebar.KindExplorer, Collapsed: m.explorerCollapsed}}
+	specs := []sidebar.Spec{{Kind: sidebar.KindExplorer, Rows: m.explorerRows, Collapsed: m.explorerCollapsed}}
 	if m.contents.Open() {
 		specs = append(specs, sidebar.Spec{
 			Kind:      sidebar.KindContents,
@@ -783,15 +789,39 @@ func (m *Model) sidebarFallthroughKey(kp KeyPress) tea.Cmd {
 // keyboard when it is alone; the Contents header starts the divider drag, and a
 // release that never moved folds the section.
 func (m *Model) pressSidebarHeader(section int, y int) tea.Cmd {
-	if section == 0 {
-		m.takeExplorerFocus()
-		if len(m.layout().Sections) > 1 {
-			m.explorerCollapsed = !m.explorerCollapsed
-		}
+	sec, ok := m.sidebarSection(section)
+	if !ok {
 		return nil
 	}
-	m.takeContentsFocus()
-	m.divider = dividerState{active: true, startY: y, startRows: m.contents.Rows()}
+	d := dividerState{active: true, section: section, kind: sec.Kind, startY: y}
+	switch sec.Kind {
+	case sidebar.KindExplorer:
+		m.takeExplorerFocus()
+		d.startRows = m.explorerRows
+		if d.startRows <= 0 {
+			d.startRows = max(sec.Rows(), 1)
+		}
+	case sidebar.KindContents:
+		m.takeContentsFocus()
+		d.startRows = m.contents.Rows()
+	case sidebar.KindDiagnostics:
+		m.takeDiagFocus()
+		d.startRows = m.diag.Rows()
+	case sidebar.KindPlugin:
+		mp := m.pluginSectionAt(section)
+		if mp == nil {
+			return nil
+		}
+		m.focusPluginSection(mp)
+		d.panel = mp
+		d.startRows = mp.mount.Rows
+		if d.startRows <= 0 {
+			d.startRows = max(sec.Rows(), 1)
+		}
+	default:
+		return nil
+	}
+	m.divider = d
 	return nil
 }
 
@@ -824,20 +854,69 @@ func (m *Model) wheelContents(up bool) {
 
 // dragDivider moves the boundary between the sections: the pointer row sets
 // the Contents section's rows, and the explorer keeps at least one row.
+// dragDivider resizes the pressed section from the absolute pointer delta since the
+// press, clamping its own body at one row and leaving at least one row to every other
+// open section (both neighbours of the shared header are kept visible). The explorer
+// grows when its top header is dragged down; the other sections grow when their header
+// is dragged up, the same direction the existing Contents divider always used.
 func (m *Model) dragDivider(y int) {
+	if !m.divider.active {
+		return
+	}
+	if y != m.divider.startY {
+		m.divider.moved = true
+	}
 	delta := m.divider.startY - y
-	rows := m.divider.startRows + delta
-	if total := m.columnBodyRows(); total > 0 {
-		rows = min(rows, total-1)
+	if m.divider.kind == sidebar.KindExplorer {
+		delta = -delta
 	}
-	rows = max(rows, 1)
-	if rows != m.contents.Rows() {
-		m.divider.moved = true
+	rows := max(m.divider.startRows+delta, 1)
+	total := m.columnBodyRows()
+	open := 0
+	for _, sec := range m.layout().Sections {
+		if !sec.Collapsed {
+			open++
+		}
+	}
+	if targetOpen := !m.dividerSectionCollapsed(); targetOpen {
+		open--
+	}
+	open = max(open, 0)
+	if total > 0 {
+		rows = min(rows, max(total-open, 1))
+	}
+	switch m.divider.kind {
+	case sidebar.KindExplorer:
+		m.explorerRows = rows
+	case sidebar.KindContents:
 		m.contents.SetRows(rows)
+	case sidebar.KindDiagnostics:
+		m.diag.rows = rows
+	case sidebar.KindPlugin:
+		if m.divider.panel != nil {
+			m.divider.panel.mount.Rows = min(rows, maxSessionPluginSectionRow)
+		}
 	}
-	if delta != 0 {
-		m.divider.moved = true
+	m.syncViewport()
+}
+
+// forgetDividerPanel drops an in-flight divider drag that targets a plugin panel
+// which is being unmounted: a later pointer message must not touch a gone section.
+func (m *Model) forgetDividerPanel(id pluginapi.PanelID) {
+	if m.divider.active && m.divider.panel != nil && m.divider.panel.id == id {
+		m.divider = dividerState{}
 	}
+}
+
+// dividerSectionCollapsed reports whether the section being dragged is folded now.
+func (m *Model) dividerSectionCollapsed() bool {
+	if m.divider.section < 0 {
+		return true
+	}
+	if sec, ok := m.sidebarSection(m.divider.section); ok {
+		return sec.Collapsed
+	}
+	return true
 }
 
 // releaseDivider ends a press on the Contents header: a drag keeps the new
@@ -846,10 +925,26 @@ func (m *Model) releaseDivider() {
 	if !m.divider.active {
 		return
 	}
-	if !m.divider.moved {
-		m.contents.ToggleCollapsed()
-	}
+	d := m.divider
 	m.divider = dividerState{}
+	if d.moved {
+		// The new height is in the model's fields already; the session capture that
+		// follows persists it (SidebarState/SectionRows). No IO here.
+		return
+	}
+	switch d.kind {
+	case sidebar.KindExplorer:
+		if len(m.layout().Sections) > 1 {
+			m.explorerCollapsed = !m.explorerCollapsed
+		}
+	case sidebar.KindContents:
+		m.contents.ToggleCollapsed()
+	case sidebar.KindDiagnostics:
+		m.diag.ToggleCollapsed()
+	case sidebar.KindPlugin:
+		m.togglePluginSection(d.panel)
+	}
+	m.syncViewport()
 }
 
 // columnBodyRows is the body rows the column shares between its sections: the

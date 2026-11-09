@@ -611,15 +611,16 @@ repos with Fresh's depth 3, under a 1.5 s wall-clock budget; the same budget cap
 partial, and a one-time warning notice says the discovery stopped instead of scanning without a
 bound; unloading the plugin stops a yielded refresh from applying. It refreshes on ready,
 after-file-open/save/revert, `focus_gained` and config changes plus a debounced watcher of the
-root repository's git directory (so commits/checkouts elsewhere update the root badges); nested
-repositories are refreshed by those events because only the root HEAD is watched (bounded watcher
-budget). It clears itself outside any repository. It drives the
+root repository's git directory and each discovered nested repository's `.git` directory (at most
+33 watcher directories, the discovery repo cap plus the root), so commits/checkouts elsewhere
+update both root and nested badges. A linked-worktree `.git` file is not watched because its HEAD
+lives elsewhere; those nested repos stay event-driven. It clears itself outside any repository. It drives the
 explorer through `gvim.explorer.set_decorations/clear_decorations` and `set_slots/clear_slots` (the
 host surface mirrors Fresh's setFileExplorerDecorations/Slots with per-plugin namespaces, priority
 then namespace resolution, absolute/root-relative path normalization and owner cleanup); colour keys
 reuse the theme's `ui.file_status_*_fg` keys, so a theme can recolour the badges. Reductions: no
-hover tooltips, symbols only (no arbitrary icons), nested-repository HEAD changes are event-driven
-rather than watched, and a setting change applies on the next refresh. It is opt-in: enabling it
+hover tooltips, symbols only (no arbitrary icons), linked-worktree `.git` files are not watched
+(regular nested `.git` directories are), and a setting change applies on the next refresh. It is opt-in: enabling it
 costs about 1.5 MiB of idle heap, which the default set cannot afford.
 
 **env_manager** (reduced Fresh port): detects and activates the project's environment — virtualenv,

@@ -105,6 +105,9 @@ type Model struct {
 	tabFocus           bool // the tab strip has keyboard focus (F6 cycle)
 	// The Contents sidebar section (see markdown_toc.go): contents is its tree
 	// and settings, contentsFocus says it holds the keyboard, and
+	// explorerRows is the explorer section's explicit body height (1..max); 0 means
+	// the explorer is the flex remainder, as Fresh's last open section is.
+	explorerRows int
 	// explorerCollapsed folds the tree when the section is stacked under it.
 	contents          sidebar.Contents
 	contentsFocus     bool
@@ -2700,10 +2703,9 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	case hitExplorerTitleClose, hitExplorerTitleReload, hitExplorerGrip:
 		return m.explorerMouse(msg)
 	case hitSidebarHeader:
-		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {
-			m.pressDiagHeader()
-			return nil
-		}
+		// Every section header (explorer, Contents, Diagnostics, plugin) is the shared
+		// divider/header: a press starts the height drag, a release without motion folds
+		// the section. Focus follows the pressed section.
 		return m.pressSidebarHeader(t.Section, mo.Y)
 	case hitSidebarClose:
 		if sec, ok := m.sidebarSection(t.Section); ok && sec.Kind == sidebar.KindDiagnostics {

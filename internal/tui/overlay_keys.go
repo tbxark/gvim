@@ -49,7 +49,7 @@ var overlayActionNames = []string{
 	// menu: the menu bar dropdown and the context menu.
 	"menu_left", "menu_right", "menu_up", "menu_down", "menu_execute", "menu_close",
 	// settings: the Settings page.
-	"close_settings", "settings_activate", "settings_inherit",
+	"close_settings", "settings_activate", "settings_inherit", "settings_help",
 }
 
 // overlayContextOf returns the keymap context of an overlay that takes its keys in code and
@@ -130,6 +130,11 @@ func (m *Model) menuKeymap(k tea.Key) (tea.Cmd, bool) {
 func (m *Model) overlayKey(k tea.Key) (tea.Cmd, bool) {
 	if m.keys == nil || len(m.overlays) == 0 {
 		return nil, false
+	}
+	if p, ok := m.overlays[len(m.overlays)-1].(*settingsPage); ok && p.help {
+		// Any key closes the Settings help panel; Esc then closes the page itself.
+		p.help = false
+		return nil, true
 	}
 	ctx, ok := overlayContextOf(m.overlays[len(m.overlays)-1])
 	if !ok {
@@ -220,6 +225,12 @@ func (m *Model) runOverlayAction(ctx KeyContext, cmd Command) (tea.Cmd, bool) {
 		return m.deliverOverlay(syntheticKey(tea.KeyEnter, 0)), true
 	case "settings_inherit":
 		return m.deliverOverlay(syntheticKey(tea.KeyDelete, 0)), true
+	case "settings_help":
+		if p, ok := m.overlays[len(m.overlays)-1].(*settingsPage); ok {
+			p.help = true
+			return nil, true
+		}
+		return nil, false
 	case "find_next":
 		// With the find bar open, stepping matches is the bar's own operation: the same
 		// keys the editor's Find Next and Find Previous run through the bar.

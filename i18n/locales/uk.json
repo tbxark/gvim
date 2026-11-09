@@ -457,6 +457,8 @@
   "gvim.scrollback.no_selection": "Немає виділення для копіювання",
   "gvim.settings.field.editor.auto_close": "Автозакриття",
   "gvim.settings.field.editor.whitespace_show": "Показати пробіли",
+  "gvim.settings.help.navigation": "↑↓:Навігація  Tab:Далі  Enter:Редагувати  /:Пошук  Esc:Закрити",
+  "gvim.settings.help.title": "Гарячі клавіші",
   "gvim.status.blocked": "Заблоковано",
   "gvim.status.restricted": "Обмежено",
   "gvim.status.terminal_restart": "⟳ Перезапустити %{program}",

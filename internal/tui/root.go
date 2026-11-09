@@ -7,6 +7,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/tui/browser"
 	"github.com/tbxark/gvim/internal/tui/palette"
+	"github.com/tbxark/gvim/internal/tui/sidebar"
 )
 
 // rootState is the state of the root features that the editor does not own: the
@@ -169,8 +170,13 @@ type SidebarState struct {
 	// ExplorerSelected is the selected tree row's path, and ExplorerScroll the
 	// tree's first visible row offset; together they put the reader back where the
 	// tree stood (the selection keeps the offset meaningful across frame sizes).
-	ExplorerSelected     string
-	ExplorerScroll       int
+	ExplorerSelected string
+	ExplorerScroll   int
+	// ExplorerRows is the explorer section's explicit body height (0 = flex).
+	ExplorerRows int
+	// SectionRows is the unified bounded per-section height map (explorer, contents,
+	// diagnostics, plugin:<id>); legacy readers use the fields below.
+	SectionRows          map[string]int
 	ContentsOpen         bool
 	ContentsCollapsed    bool
 	ContentsRows         int
@@ -214,14 +220,42 @@ func (m *Model) SidebarState() SidebarState {
 		ExplorerScroll:       m.tree.ScrollOffset(),
 		ContentsOpen:         m.contents.Open(),
 		ContentsCollapsed:    m.contents.Collapsed(),
-		ContentsRows:         m.contents.Rows(),
 		ContentsScroll:       m.contents.Scroll(),
 		DiagnosticsOpen:      m.diag.Open(),
 		DiagnosticsCollapsed: m.diag.Collapsed(),
-		DiagnosticsRows:      m.diag.Rows(),
 	}
-	m.applyPluginSidebarRestore()
-	st.PluginOrder, st.PluginRows, st.PluginCollapsed = m.pluginSidebarState()
+	// Capture must not apply the pending plugin restore (it would mutate the model
+	// while the UI is only being snapshotted); the helper folds the pending values
+	// into the snapshot without applying them.
+	st.PluginOrder, st.PluginRows, st.PluginCollapsed = m.pluginSidebarCaptureState()
+	// Only the reader's explicit heights belong in the session: a config default
+	// contents.rows/diagnostics height must not become an override that beats a later
+	// config edit on restart. The explorer is explicit only after its own drag.
+	if m.explorerRows > 0 {
+		st.ExplorerRows = clampSectionRows(sidebar.KindExplorer, m.explorerRows)
+	}
+	if m.contents.RowsOverridden() {
+		st.ContentsRows = clampSectionRows(sidebar.KindContents, m.contents.Rows())
+	}
+	if m.diag.rows > 0 {
+		st.DiagnosticsRows = clampSectionRows(sidebar.KindDiagnostics, m.diag.Rows())
+	}
+	rows := map[string]int{}
+	if st.ExplorerRows > 0 {
+		rows["explorer"] = st.ExplorerRows
+	}
+	if st.ContentsRows > 0 {
+		rows["contents"] = st.ContentsRows
+	}
+	if st.DiagnosticsRows > 0 {
+		rows["diagnostics"] = st.DiagnosticsRows
+	}
+	for id, n := range st.PluginRows {
+		rows["plugin:"+id] = clampSectionRows(sidebar.KindPlugin, n)
+	}
+	if len(rows) > 0 {
+		st.SectionRows = rows
+	}
 	return st
 }
 

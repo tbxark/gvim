@@ -244,6 +244,7 @@
     {"comment": "Settings context (Fresh's settings context): the bindings gvim's settings page supports", "key": "Escape", "modifiers": [], "action": "close_settings", "when": "settings"},
     {"key": "Enter", "modifiers": [], "action": "settings_activate", "when": "settings"},
     {"key": "Delete", "modifiers": [], "action": "settings_inherit", "when": "settings"},
+    {"comment": "Open the Settings key help (Fresh's settings_help)", "key": "?", "modifiers": [], "action": "settings_help", "when": "settings"},
     {"comment": "Dock context (Fresh's dock context): the dock's UI keys", "key": "o", "modifiers": ["alt"], "action": "toggle_dock_focus", "when": "dock"},
     {"key": "n", "modifiers": ["alt", "shift"], "action": "focus_next_sidebar_section", "when": "dock"},
     {"key": "p", "modifiers": ["alt", "shift"], "action": "focus_prev_sidebar_section", "when": "dock"}

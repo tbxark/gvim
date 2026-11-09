@@ -457,6 +457,8 @@
   "gvim.scrollback.no_selection": "ไม่มีส่วนที่เลือกให้คัดลอก",
   "gvim.settings.field.editor.auto_close": "ปิดอัตโนมัติ",
   "gvim.settings.field.editor.whitespace_show": "แสดงช่องว่าง",
+  "gvim.settings.help.navigation": "↑↓:นำทาง  Tab:ถัดไป  Enter:แก้ไข  /:ค้นหา  Esc:ปิด",
+  "gvim.settings.help.title": "ปุ่มลัด",
   "gvim.status.blocked": "ปิดกั้น",
   "gvim.status.restricted": "จำกัด",
   "gvim.status.terminal_restart": "⟳ เริ่ม %{program} ใหม่",

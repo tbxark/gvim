@@ -28,6 +28,14 @@ type SidebarState struct {
 	DiagnosticsOpen      bool `json:"diagnosticsOpen,omitzero"`
 	DiagnosticsCollapsed bool `json:"diagnosticsCollapsed,omitzero"`
 	DiagnosticsRows      int  `json:"diagnosticsRows,omitzero"`
+	// ExplorerRows is the explorer section's explicit body height (0 = flex, the
+	// remainder). It is additive/optional so an older session keeps the flex.
+	ExplorerRows int `json:"explorerRows,omitzero"`
+	// SectionRows is the unified per-section body height map (keys explorer, contents,
+	// diagnostics and plugin:<id>), bounded on collect and clamped on restore. It is
+	// additive/optional: an older session keeps the legacy ContentsRows/DiagnosticsRows/
+	// PluginRows fields, and a reader that does not know it ignores it.
+	SectionRows map[string]int `json:"sectionRows,omitempty"`
 	// PluginOrder, PluginRows and PluginCollapsed are the plugin sections' stack
 	// order, requested body rows and folded state, by the plugin panel id. They are
 	// optional and bounded (at most 64 sections, rows clamped, unknown ids ignored

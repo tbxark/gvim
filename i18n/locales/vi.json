@@ -457,6 +457,8 @@
   "gvim.scrollback.no_selection": "Không có vùng chọn để sao chép",
   "gvim.settings.field.editor.auto_close": "Tự động đóng",
   "gvim.settings.field.editor.whitespace_show": "Hiển thị khoảng trắng",
+  "gvim.settings.help.navigation": "↑↓:Điều hướng  Tab:Tiếp theo  Enter:Chỉnh sửa  /:Tìm kiếm  Esc:Đóng",
+  "gvim.settings.help.title": "Phím tắt",
   "gvim.status.blocked": "Đã chặn",
   "gvim.status.restricted": "Giới hạn",
   "gvim.status.terminal_restart": "⟳ Khởi động lại %{program}",

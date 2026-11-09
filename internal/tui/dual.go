@@ -60,7 +60,19 @@ func (m *Model) validDual() *dualView {
 
 // clearDual forgets an open dual view. The document is not touched: the panes go
 // back to the document's own view settings.
-func (m *Model) clearDual() { m.splits.dual = nil }
+func (m *Model) clearDual() {
+	if d := m.splits.dual; d != nil {
+		// A restored dual split carries its modes on the leaves for persistence;
+		// once the dual view ends the panes go back to the document's settings.
+		if d.source != nil {
+			d.source.ViewMode = ""
+		}
+		if d.preview != nil {
+			d.preview.ViewMode = ""
+		}
+	}
+	m.splits.dual = nil
+}
 
 // markdownMode derives the view mode of the active document: dual while a valid
 // dual view shows it, rendered when its page view is on, source otherwise.
@@ -106,6 +118,27 @@ func (m *Model) dualRoleOf(p splitPane) dualRole {
 	return dualNone
 }
 
+// paneViewMode returns the saved per-pane Markdown view override: the leaves of
+// the layout are in the geometry panes' reading order, and a pane built without a
+// rectangle takes the focused leaf's mode.
+func (m *Model) paneViewMode(p splitPane) string {
+	if m.splits.Root == nil {
+		return ""
+	}
+	leaves := m.splits.Root.Leaves()
+	if p.W > 0 {
+		for i, lp := range m.layout().Panes {
+			if lp == p && i < len(leaves) {
+				return leaves[i].ViewMode
+			}
+		}
+	}
+	if p.Focused && m.splits.Focus != nil {
+		return m.splits.Focus.ViewMode
+	}
+	return ""
+}
+
 // panePageView returns the page view of pane p: the document's, unless the pane
 // is a side of the dual view, where the preview is composed and the source is
 // plain whatever the document's settings say.
@@ -118,6 +151,18 @@ func (m *Model) panePageView(p splitPane, doc Document) editorpane.PageView {
 		return pv
 	case dualSource:
 		return editorpane.PageView{}
+	}
+	// A restored normal split may carry an explicit per-pane mode (a future or
+	// hand-written session); the document default stays for an empty value.
+	if m.markdownDoc(doc) {
+		switch m.paneViewMode(p) {
+		case "rendered":
+			pv.On = true
+			pv.Markdown = true
+			return pv
+		case "source":
+			return editorpane.PageView{}
+		}
 	}
 	return pv
 }
@@ -195,6 +240,9 @@ func (m *Model) closeMarkdownDual() bool {
 	if d == nil {
 		m.clearDual()
 		return false
+	}
+	if d.source != nil {
+		d.source.ViewMode = ""
 	}
 	m.splits.Root = split.RemoveLeaf(m.splits.Root, d.preview)
 	m.splits.dual = nil

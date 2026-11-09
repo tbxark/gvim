@@ -8,6 +8,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/prompt"
@@ -454,5 +456,31 @@ func TestReloadKeepsUnsavedChanges(t *testing.T) {
 	}
 	if !strings.Contains(m.notice, "Config reloaded") {
 		t.Errorf("notice = %q, want the reload notice", m.notice)
+	}
+}
+
+// TestSettingsHelpKey: Fresh's settings context binds ? to settings_help. gvim now opens a
+// key-help panel; any key closes the panel, and Esc then closes the page itself.
+func TestSettingsHelpKey(t *testing.T) {
+	port := &fakeSettingsPort{snap: settingsSnapshot()}
+	m, _ := openSettingsPage(t, port)
+	m.Update(typed("?"))
+	page := m.overlays[len(m.overlays)-1].(*settingsPage)
+	if !page.help {
+		t.Fatal("? did not open the Settings keys help")
+	}
+	if body := ansi.Strip(m.View().Content); !strings.Contains(body, "Settings keys") {
+		t.Fatalf("help panel is not painted:\n%s", body)
+	}
+	m.Update(special(tea.KeyEscape))
+	if page.help {
+		t.Fatal("Esc did not close the help panel")
+	}
+	if len(m.overlays) == 0 {
+		t.Fatal("Esc closed the Settings page together with the help panel")
+	}
+	m.Update(special(tea.KeyEscape))
+	if len(m.overlays) != 0 {
+		t.Fatalf("second Esc left %d overlay(s), want the Settings page closed", len(m.overlays))
 	}
 }

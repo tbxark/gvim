@@ -287,6 +287,7 @@ func (m *Model) clearEditorChrome() {
 		if ps.focus == id {
 			ps.focus = 0
 		}
+		m.forgetDividerPanel(id)
 		ps.remove(id)
 	}
 }
@@ -296,6 +297,7 @@ func (m *Model) clearEditorChrome() {
 func (m *Model) installEditorChrome(specs []editorChromeSpec) {
 	for _, spec := range specs {
 		if old := m.plug.panels.get(spec.id); old != nil {
+			m.forgetDividerPanel(spec.id)
 			m.plug.panels.remove(spec.id)
 		}
 		mp := newMountedPanel(m, spec.id, spec.owner, spec.mount)

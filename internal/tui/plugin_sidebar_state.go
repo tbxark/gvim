@@ -23,6 +23,10 @@ type pluginSidebarRestore struct {
 	order     []string
 	rows      map[string]int
 	collapsed map[string]bool
+	// applied marks the ids whose rows/fold were taken, so a late mount still gets
+	// its saved state exactly once while a later user drag is not overwritten by
+	// repeated lazy applications.
+	applied map[pluginapi.PanelID]bool
 }
 
 // pluginSidebarState collects the mounted plugin sections' order, requested rows
@@ -66,9 +70,11 @@ func (m *Model) stashPluginSidebarRestore(st SidebarState) {
 	m.plug.panels.restore = r
 }
 
-// applyPluginSidebarRestore applies the restored order/rows/fold state to the
-// mounted sidebar sections and clears it. It runs once, when the first sections
-// have mounted; sections that never mount keep their plugin defaults.
+// applyPluginSidebarRestore applies the restored order/rows/fold state lazily: every
+// call looks at the currently mounted sidebar sections, applies the saved state to
+// ids it has not applied yet and re-ranks the mounted order by the saved order. It
+// therefore also covers a section that mounts late, while keeping the state bounded
+// and never overwriting a later user drag (each id is applied once).
 func (m *Model) applyPluginSidebarRestore() {
 	ps := &m.plug.panels
 	r := ps.restore
@@ -79,26 +85,36 @@ func (m *Model) applyPluginSidebarRestore() {
 	if len(sections) == 0 {
 		return
 	}
+	if r.applied == nil {
+		r.applied = make(map[pluginapi.PanelID]bool, len(sections))
+	}
 	known := make(map[string]*mountedPanel, len(sections))
 	for _, mp := range sections {
 		known[strconv.FormatUint(uint64(mp.id), 10)] = mp
 	}
-	for id, on := range r.collapsed {
-		mp := known[id]
-		if mp == nil || !on {
+	// Rows and folds apply once per mounted id; a section that mounts later is picked
+	// up on the next lazy call, and a drag done after this point is not overwritten.
+	for _, mp := range sections {
+		if r.applied[mp.id] {
 			continue
 		}
-		if ps.collapsed == nil {
-			ps.collapsed = map[pluginapi.PanelID]bool{}
+		id := strconv.FormatUint(uint64(mp.id), 10)
+		id64, _ := strconv.ParseUint(id, 10, 64)
+		applied := false
+		if n := r.rows[id]; n > 0 {
+			mp.mount.Rows = min(n, maxSessionPluginSectionRow)
+			applied = true
 		}
-		ps.collapsed[mp.id] = true
-	}
-	for id, n := range r.rows {
-		mp := known[id]
-		if mp == nil || n <= 0 {
-			continue
+		if r.collapsed[id] {
+			if ps.collapsed == nil {
+				ps.collapsed = map[pluginapi.PanelID]bool{}
+			}
+			ps.collapsed[pluginapi.PanelID(id64)] = true
+			applied = true
 		}
-		mp.mount.Rows = min(n, maxSessionPluginSectionRow)
+		if applied {
+			r.applied[mp.id] = true
+		}
 	}
 	if len(r.order) > 0 {
 		rank := make(map[pluginapi.PanelID]int, len(r.order))
@@ -140,5 +156,84 @@ func (m *Model) applyPluginSidebarRestore() {
 			ps.order[slot] = items[k].id
 		}
 	}
-	ps.restore = nil
+}
+
+// pluginSidebarCaptureState is the session snapshot of the plugin sections. Unlike the
+// layout path it never applies the pending restore: it starts from the mounted state and
+// folds the pending order/rows/folds for ids that have not been applied yet (an id can be
+// mounted but not visited by the first layout, or not mounted at all). Everything stays
+// bounded and the model is not mutated.
+func (m *Model) pluginSidebarCaptureState() (order []string, rows map[string]int, collapsed map[string]bool) {
+	order, rows, collapsed = m.pluginSidebarState()
+	r := m.plug.panels.restore
+	if r == nil {
+		return order, rows, collapsed
+	}
+	if rows == nil {
+		rows = map[string]int{}
+	}
+	if collapsed == nil {
+		collapsed = map[string]bool{}
+	}
+	mounted := make(map[string]bool, len(order))
+	for _, id := range order {
+		mounted[id] = true
+	}
+	add := func(id string) bool {
+		if mounted[id] || len(order) >= maxSessionPluginSections {
+			return false
+		}
+		mounted[id] = true
+		order = append(order, id)
+		return true
+	}
+	applyPending := func(id string) {
+		if r.applied[pluginapi.PanelID(parsePanelID(id))] {
+			return
+		}
+		if n := r.rows[id]; n > 0 {
+			rows[id] = min(n, maxSessionPluginSectionRow)
+		}
+		if r.collapsed[id] {
+			collapsed[id] = true
+		}
+	}
+	for _, id := range r.order {
+		if add(id) {
+			applyPending(id)
+			continue
+		}
+		if mounted[id] {
+			applyPending(id)
+		}
+	}
+	// A rows id that the order did not list still belongs to the snapshot if it has not
+	// mounted; cap the appended count.
+	pending := 0
+	for id := range r.rows {
+		if pending >= maxSessionPluginSections {
+			break
+		}
+		if !mounted[id] && add(id) {
+			applyPending(id)
+			pending++
+		}
+	}
+	if len(rows) == 0 {
+		rows = nil
+	}
+	if len(collapsed) == 0 {
+		collapsed = nil
+	}
+	return order, rows, collapsed
+}
+
+// parsePanelID parses a saved plugin panel id for the applied-state lookup; malformed
+// ids are 0, which no mounted panel uses in the session state.
+func parsePanelID(id string) uint64 {
+	n, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }

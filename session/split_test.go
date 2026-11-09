@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,4 +129,45 @@ func leavesString(l *SplitLayout) string {
 		b.WriteString(string(rune('0' + f)))
 	}
 	return b.String()
+}
+
+// TestSplitLayoutDualFieldsRoundTrip: the Markdown dual marker and each leaf's view mode
+// are additive JSON fields; a valid dual layout passes Valid, and a dual marker on any
+// other shape is rejected instead of restoring the wrong panes.
+func TestSplitLayoutDualFieldsRoundTrip(t *testing.T) {
+	t.Parallel()
+	layout := &SplitLayout{
+		Dual:  true,
+		Focus: 0,
+		Root: SplitNode{
+			Dir: SplitSideBySide,
+			A:   &SplitNode{File: 0, Path: "/w/notes.md", ViewMode: "source"},
+			B:   &SplitNode{File: 0, Path: "/w/notes.md", ViewMode: "rendered"},
+		},
+	}
+	if !layout.Valid(1) {
+		t.Fatal("a valid dual layout was rejected")
+	}
+	b, err := json.Marshal(layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got SplitLayout
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Dual || got.Root.A == nil || got.Root.B == nil ||
+		got.Root.A.ViewMode != "source" || got.Root.B.ViewMode != "rendered" {
+		t.Fatalf("round-trip dual layout = %+v", got)
+	}
+	bad := *layout
+	bad.Focus = 1
+	if bad.Valid(1) {
+		t.Fatal("a dual layout focused on the preview was accepted")
+	}
+	bad = *layout
+	bad.Root.B = &SplitNode{File: 1, Path: "/w/other.md", ViewMode: "rendered"}
+	if bad.Valid(2) {
+		t.Fatal("a dual layout over two files was accepted")
+	}
 }

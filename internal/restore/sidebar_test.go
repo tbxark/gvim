@@ -28,6 +28,8 @@ func TestSidebarStateConversion(t *testing.T) {
 		DiagnosticsOpen:      true,
 		DiagnosticsCollapsed: true,
 		DiagnosticsRows:      7,
+		ExplorerRows:         6,
+		SectionRows:          map[string]int{"explorer": 6, "contents": 11, "diagnostics": 7, "plugin:1": 5},
 		PluginOrder:          []string{"3", "1"},
 		PluginRows:           map[string]int{"1": 5},
 		PluginCollapsed:      map[string]bool{"3": true},

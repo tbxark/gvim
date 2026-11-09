@@ -189,6 +189,8 @@ Each. In either focused query field, `Ctrl+Delete` deletes the next word and
 these are widget chords, not editor actions, so the field keeps focus and the bar stays
 open.
 
+**Settings page keyboard.** Typing filters the settings rows; Up/Down move, PgUp/PgDn page, Home/End jump, Enter edits, Tab switches layer, Ctrl+S saves and Ctrl+R resets, Delete inherits/resets the row, and Ctrl+E edits the raw JSON. `?` opens Fresh's settings_help panel listing these keys; any key closes it, and Esc then closes the Settings page. The panel uses the existing overlay chrome and does not change focus or the cursor.
+
 **Live Grep Resume.** Closing Live Grep captures the prior query, match modes and
 scope toggles; it does not keep a reusable result set. Live Grep: Resume restores those
 controls and always searches again. Cached hits are deliberately not restored: a hit's

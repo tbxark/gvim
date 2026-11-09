@@ -147,6 +147,7 @@ func (m *Model) plugPanelsBufferClosed(id pluginapi.BufferID) {
 			if ps.focus == pid {
 				ps.focus = 0
 			}
+			m.forgetDividerPanel(pid)
 			ps.remove(pid)
 			removed = true
 		}
@@ -299,6 +300,7 @@ func (h *pluginHost) UnmountWidgetPanel(id pluginapi.PanelID) {
 		m.plugEmitWidget(pluginapi.WidgetEvent{Panel: uint64(id), Event: "focus_lost", Index: -1})
 	}
 	scopeEditor := mp.mount.Scope == pluginapi.ScopeEditor
+	m.forgetDividerPanel(id)
 	m.plug.panels.remove(id)
 	if scopeEditor {
 		m.noteEditorChromeChanged()
@@ -354,6 +356,7 @@ func (m *Model) plugPanelsGone(plugin string, gen uint64) {
 			if mp.mount.Scope == pluginapi.ScopeEditor {
 				hadEditor = true
 			}
+			m.forgetDividerPanel(id)
 			m.plug.panels.remove(id)
 		}
 	}
@@ -419,6 +422,7 @@ func (m *Model) focusPluginSection(mp *mountedPanel) {
 
 // unmountPanel removes a mounted panel; a model without a plugin host has none.
 func (m *Model) unmountPanel(id pluginapi.PanelID) {
+	m.forgetDividerPanel(id)
 	if m.plug.host != nil {
 		m.plug.host.UnmountWidgetPanel(id)
 	}
@@ -709,15 +713,10 @@ func (m *Model) pluginPanelMouse(msg tea.Msg) (tea.Cmd, bool) {
 	t := m.layout().Hit(mo.X, mo.Y)
 	switch t.Kind {
 	case hitSidebarHeader:
-		mp := m.pluginSectionAt(t.Section)
-		if mp == nil {
-			return nil, false
-		}
-		if _, isClick := msg.(tea.MouseClickMsg); isClick {
-			m.togglePluginSection(mp)
-			m.focusPluginSection(mp)
-		}
-		return nil, true
+		// The root owns every section header now: a press starts a height drag/fold
+		// gesture and a release folds a section that did not move. Falling through lets
+		// the root's click routing run; the panel keeps the close button and body below.
+		return nil, false
 	case hitSidebarClose:
 		mp := m.pluginSectionAt(t.Section)
 		if mp == nil {
