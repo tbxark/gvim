@@ -76,31 +76,58 @@ func TestRustLspCopyInstallCommands(t *testing.T) {
 	}
 }
 
-func TestRustLspCheckMissing(t *testing.T) {
+func TestRustLspCheckProbeFailureIsNotAuthoritativeMissing(t *testing.T) {
 	t.Parallel()
+	// No LookPath entry and no scripted process: the plugin's local PATH cannot decide
+	// anything for a remote workspace, so a failed authority probe must not say the binary
+	// was "not found on PATH".
 	r := rustRig(t, nil)
 	if err := r.h.Run("rust_lsp.check", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastNoticeText(r.h); !strings.Contains(got, "rust-analyzer not found on PATH") ||
-		!strings.Contains(got, "rustup component add rust-analyzer") {
-		t.Fatalf("status = %q", got)
+	got := lastNoticeText(r.h)
+	for _, want := range []string{
+		"Could not run rust-analyzer on the workspace",
+		"local-only",
+		"cannot prove rust-analyzer is missing",
+		"rustup component add rust-analyzer",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status = %q, want %q", got, want)
+		}
 	}
-	if runs := r.os.Runs(); len(runs) != 0 {
-		t.Fatalf("a missing binary was still run: %v", runs)
+	if strings.Contains(got, "not found on PATH") || strings.Contains(got, "is missing on the workspace") || strings.Contains(got, "deno is not on PATH") {
+		t.Fatalf("status overclaims a missing binary: %q", got)
+	}
+	if runs := r.os.Runs(); len(runs) != 1 || !slices.Equal(runs[0].Argv, []string{"rust-analyzer", "--version"}) {
+		t.Fatalf("runs = %+v, want one authority --version probe", runs)
+	}
+}
+
+func TestRustLspCheckAuthorityProbeFindsDespiteLocalLookPathMiss(t *testing.T) {
+	t.Parallel()
+	// This is the remote case: the local LookPath is empty, but the authority probe
+	// (gvim.proc.run) succeeds, so the plugin must report found — never missing.
+	r := rustRig(t, func(o *plugintest.FakeOS) {
+		o.Script([]string{"rust-analyzer", "--version"}, plugintest.ProcScript{Stdout: "rust-analyzer 1.2.3\n"})
+	})
+	if err := r.h.Run("rust_lsp.check", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastNoticeText(r.h); got != "rust-analyzer is runnable on the workspace (rust-analyzer 1.2.3)" {
+		t.Fatalf("status = %q", got)
 	}
 }
 
 func TestRustLspCheckFoundReportsVersion(t *testing.T) {
 	t.Parallel()
 	r := rustRig(t, func(o *plugintest.FakeOS) {
-		o.Bin["rust-analyzer"] = "/usr/local/bin/rust-analyzer"
 		o.Script([]string{"rust-analyzer", "--version"}, plugintest.ProcScript{Stdout: "rust-analyzer 1.2.3\ncommit abc\n"})
 	})
 	if err := r.h.Run("rust_lsp.check", nil); err != nil {
 		t.Fatal(err)
 	}
-	want := "rust-analyzer found: /usr/local/bin/rust-analyzer (rust-analyzer 1.2.3)"
+	want := "rust-analyzer is runnable on the workspace (rust-analyzer 1.2.3)"
 	if got := lastNoticeText(r.h); got != want {
 		t.Fatalf("status = %q, want %q", got, want)
 	}
@@ -112,13 +139,12 @@ func TestRustLspCheckFoundReportsVersion(t *testing.T) {
 func TestRustLspCheckVersionFailure(t *testing.T) {
 	t.Parallel()
 	r := rustRig(t, func(o *plugintest.FakeOS) {
-		o.Bin["rust-analyzer"] = "/usr/local/bin/rust-analyzer"
 		o.Script([]string{"rust-analyzer", "--version"}, plugintest.ProcScript{Code: 1, Stderr: "error: toolchain missing\nmore"})
 	})
 	if err := r.h.Run("rust_lsp.check", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastNoticeText(r.h); !strings.Contains(got, "but --version failed: error: toolchain missing") {
+	if got := lastNoticeText(r.h); !strings.Contains(got, "runnable on the workspace, but --version failed: error: toolchain missing") {
 		t.Fatalf("status = %q", got)
 	}
 }
@@ -126,13 +152,14 @@ func TestRustLspCheckVersionFailure(t *testing.T) {
 func TestRustLspCheckStartFailure(t *testing.T) {
 	t.Parallel()
 	r := rustRig(t, func(o *plugintest.FakeOS) {
-		o.Bin["rust-analyzer"] = "/usr/local/bin/rust-analyzer"
 		o.Script([]string{"rust-analyzer", "--version"}, plugintest.ProcScript{Err: pluginapi.Errf(pluginapi.CodeIO, "exec: permission denied")})
 	})
 	if err := r.h.Run("rust_lsp.check", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastNoticeText(r.h); !strings.Contains(got, "but could not start it: io: exec: permission denied") {
+	got := lastNoticeText(r.h)
+	if !strings.Contains(got, "Could not run rust-analyzer on the workspace (io: exec: permission denied)") ||
+		!strings.Contains(got, "cannot prove rust-analyzer is missing") {
 		t.Fatalf("status = %q", got)
 	}
 }
@@ -159,9 +186,21 @@ func TestRustLspHelpPopupActions(t *testing.T) {
 			t.Errorf("help popup lacks %q (actions %v)", want, ids)
 		}
 	}
-	if !strings.Contains(ov.ActionPopup.Message, "rustup component add rust-analyzer") ||
-		!strings.Contains(ov.ActionPopup.Message, "https://rust-analyzer.github.io/book/installation.html") {
-		t.Errorf("help message = %q", ov.ActionPopup.Message)
+	for _, want := range []string{
+		"rustup component add rust-analyzer",
+		"How gvim starts rust-analyzer",
+		"Cargo.toml",
+		"explicit user configuration always wins",
+		"never changes the native selection",
+		"enable/disable toggle only controls these helper commands",
+		"does not start, stop or select the native Rust LSP server",
+		"workspace authority",
+		"local-only PATH lookup is never used",
+		"https://rust-analyzer.github.io/book/installation.html",
+	} {
+		if !strings.Contains(ov.ActionPopup.Message, want) {
+			t.Errorf("help message lacks %q: %q", want, ov.ActionPopup.Message)
+		}
 	}
 	// Copy from the popup.
 	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"copy:brew"}})
@@ -174,7 +213,7 @@ func TestRustLspHelpPopupActions(t *testing.T) {
 	}
 	ov = r.host.UI().Last("action_popup")
 	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:check"}})
-	if got := lastNoticeText(r.h); !strings.Contains(got, "rust-analyzer found: /usr/local/bin/rust-analyzer") {
+	if got := lastNoticeText(r.h); !strings.Contains(got, "rust-analyzer is runnable on the workspace") {
 		t.Fatalf("check status = %q", got)
 	}
 	// Native restart action from the popup.
@@ -185,5 +224,28 @@ func TestRustLspHelpPopupActions(t *testing.T) {
 	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_restart"}})
 	if got := r.host.Cmd().Ran(); !slices.Contains(got, "lsp_restart") {
 		t.Fatalf("actions = %v, want lsp_restart", got)
+	}
+}
+
+func TestRustLspCheckLocalLookPathHitDoesNotFakeAuthoritySuccess(t *testing.T) {
+	t.Parallel()
+	// The reverse misjudgment: a local LookPath entry must not make the plugin report the
+	// binary found when the workspace-authority probe cannot run it (e.g. a remote host
+	// without rust-analyzer).
+	r := rustRig(t, func(o *plugintest.FakeOS) {
+		o.Bin["rust-analyzer"] = "/usr/local/bin/rust-analyzer"
+	})
+	if err := r.h.Run("rust_lsp.check", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := lastNoticeText(r.h)
+	if !strings.Contains(got, "Could not run rust-analyzer on the workspace") {
+		t.Fatalf("status = %q, want an authority probe failure", got)
+	}
+	if strings.Contains(got, "runnable on the workspace") {
+		t.Fatalf("status trusted a local LookPath hit: %q", got)
+	}
+	if runs := r.os.Runs(); len(runs) != 1 {
+		t.Fatalf("runs = %+v, want one authority probe", runs)
 	}
 }

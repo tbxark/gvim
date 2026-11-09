@@ -77,6 +77,12 @@ type Panel struct {
 	// session, so combined window/dock focus changes never send a duplicate.
 	termFocusSet bool
 	termFocus    bool
+	// searchHistory is this tab's committed scrollback-search queries (oldest
+	// first), bounded like Fresh's prompt InputHistory (100, empty and a repeat of
+	// the newest skipped). It is deliberately in-memory: a restore builds a new
+	// panel, so the history does not survive a gvim restart (Fresh persists prompt
+	// histories with the workspace; a gvim residual).
+	searchHistory []string
 	// fgName is the cached foreground process name of a local shell, refreshed by
 	// the bounded poll chain in foreground.go. Empty for a remote/unsupported
 	// terminal, a restored tab or an exited shell (the label then falls back to the
@@ -183,6 +189,13 @@ func (p *Panel) SetFocus(v bool) {
 	}
 	if !v {
 		p.ClearHover()
+		// Losing the keyboard focus closes an open search input cleanly: its pending
+		// preview answers are invalidated, the view is restored and no hidden input
+		// keeps swallowing keys (a restored transcript keeps its read-only view, it
+		// just no longer has a search open).
+		if p.scroll.typing {
+			_ = p.cancelSearchInput()
+		}
 		// A restored transcript is the whole dock until it is restarted, so it
 		// keeps its read-only view when the focus leaves.
 		if p.scroll.on && !p.restored && !p.exited {
@@ -250,6 +263,9 @@ func (p *Panel) Hide() {
 		p.reportTerminalFocus(false)
 	}
 	p.focus = false
+	if p.scroll.typing {
+		_ = p.cancelSearchInput()
+	}
 	p.scroll = scrollState{}
 	p.clearSelection()
 	// A hidden dock that shows an exited shell opens its transcript again when it

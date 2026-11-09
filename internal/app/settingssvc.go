@@ -67,6 +67,15 @@ type settingsService struct {
 	ioMu sync.Mutex
 }
 
+// currentConfig returns the effective configuration of the last load/reload. Deno
+// auto-selection reads it when a manager is created, so a settings reload invalidates a
+// decision taken before an explicit/disabled change.
+func (s *settingsService) currentConfig() config.Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
+
 var _ tui.SettingsPort = (*settingsService)(nil)
 
 // newSettingsService returns the Settings page's service. trusted reports whether

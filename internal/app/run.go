@@ -427,6 +427,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		root = remoteLocalRoot()
 		watching = false
 	}
+	// The Deno auto-selection workspace root: the local root, replaced by the expanded
+	// remote root below for a remote launch.
+	denoRoot := root
 	// The trust decision gates the project config layer, so it is resolved
 	// before the config is loaded: an untrusted workspace is configured by the
 	// user's own file only.
@@ -917,6 +920,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		// the local disk, so it is refused for a remote launch.
 		var remoteRoot string
 		remoteFiles, remoteRoot = newRemoteFileIndex(ctx, authSlot, opts.Remote.Workspace())
+		denoRoot = remoteRoot
 		deps.Files = remoteFiles
 		deps.FileRoot = remoteRoot
 		remoteRootPorts(&deps.Root)
@@ -1043,6 +1047,25 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	settingsSvc.env = envProvider
 	settingsSvc.setEnvWatch(envWatch)
 	deps.SettingsPort = settingsSvc
+
+	// Project-root Deno auto-selection (Fresh deno_lsp parity with authority-only checks):
+	// one bounded background probe against the workspace root; it never overrides an explicit
+	// or disabled user LSP config and is re-run after a reconnect or project-root switch. The
+	// provider is evaluated when a manager for exactly this root is created, re-reading the
+	// settings service's live config (a settings reload thus invalidates a stale decision).
+	var denoAuto *denoAutoSelector
+	if deps.LSP != nil && authSlot != nil && denoRoot != "" {
+		denoCfg := func() config.Config { return settingsSvc.currentConfig() }
+		denoAuto = newDenoAutoSelector(deps.LSP, authSlot, denoRoot, opts.Remote != nil, authGate, envProvider.Overlay, denoCfg)
+		if denoAuto != nil {
+			if setter, ok := deps.LSP.(interface{ SetRootChangeListener(func(string)) }); ok {
+				setter.SetRootChangeListener(func(root string) {
+					denoAuto.Rebind(ctx, root)
+				})
+			}
+			denoAuto.Start(ctx)
+		}
+	}
 	// Notice is the first config problem, then any session file whose unsaved
 	// text was kept, for the status row. Every warning still goes to stderr,
 	// before the alternate screen starts.
@@ -1228,6 +1251,11 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 				}
 				if remoteFiles != nil {
 					remoteFiles.Restart()
+				}
+				if denoAuto != nil {
+					// New carrier: clear the old decision and probe again; a late answer from
+					// the dropped carrier cannot apply because the generation moves.
+					denoAuto.Start(ctx)
 				}
 				return restartLSPAfterReconnect(authSlot, deps.LSP)
 			},

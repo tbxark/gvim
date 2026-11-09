@@ -48,7 +48,7 @@ Scrollback keys:
 | key | action |
 | --- | --- |
 | Ctrl+Space, Esc | back to the live screen (not on a restored transcript) |
-| Up, Down | move the selected row by one |
+| Up, Down | move the selected row by one; while the search input is open, recall the older/newer search query (Up at the oldest and Down past the newest keep/restore the input) |
 | PageUp, PageDown | move by a screen |
 | Home, End | oldest row, newest row |
 | `/` or Ctrl+F | open the search input; typing previews the matches and jumps the view to the first one, F3 / Shift+F3 step the preview to the next/previous match, Enter commits, Esc cancels and restores the previous view/search |
@@ -68,7 +68,19 @@ carries a request sequence, so a late answer for an older keystroke (or for a
 preview superseded by Enter) is dropped and cannot move the view or replace the
 committed search. Enter commits the query and its matches (the title shows
 `k/n`), while Esc drops the preview, restores the view the input opened on and
-keeps the previously committed search/matches. While the input is open, F3 and
+keeps the previously committed search/matches. The search input also has Fresh's
+prompt history: opening it pre-fills the last committed query selected, so typing
+replaces it; Up recalls older queries and Down newer ones, with Down past the
+newest restoring the input navigation started from, and each recall previews
+through the same ordered async search (a late answer for an older recall is
+dropped). The history is bounded to 100 entries and skips empty queries and an
+exact repeat of the newest one, like Fresh's InputHistory. Losing the dock's
+keyboard focus closes an open input exactly like Esc (view and committed search
+restored, pending preview answers dropped), so no hidden input outlives the focus.
+The history is in-memory per tab: it survives tab switches and a shell restart in
+the same dock, but not a gvim restart/restored session, and is not shared across
+tabs (Fresh keeps prompt histories per window and persists them with the
+workspace — a documented residual). While the input is open, F3 and
 Shift+F3 step the preview forward/backward through the current query's matches
 (wrapping at the ends) without closing the input or committing the query; this
 mirrors Fresh, whose default keymap binds `find_next`/`find_previous` to

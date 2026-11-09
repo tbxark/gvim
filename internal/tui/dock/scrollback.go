@@ -55,6 +55,15 @@ type scrollState struct {
 	// searchSeq orders the asynchronous searches: a reply from an older keystroke
 	// is dropped, so typing can never be overwritten by a late answer.
 	searchSeq int
+	// searchPrefill says the input holds the last history entry pre-selected: the
+	// first typed rune/backspace replaces it, like Fresh's pre-filled search prompt
+	// (its input starts selected so typing starts a new query).
+	searchPrefill bool
+	// searchHistPos/searchHistTemp are the open input's history navigation state:
+	// -1 means the current (non-history) input; temp keeps the input as it was when
+	// navigation started so Down past the newest restores it.
+	searchHistPos  int
+	searchHistTemp string
 	// preview holds the matches of the in-progress incremental search (the typing
 	// input). It is separate from the committed matches, so Esc can drop the
 	// preview and return to the committed search and its view.
@@ -299,7 +308,9 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 		case k.Mod&tea.ModCtrl != 0 && k.Code == 'f':
 			cmd := p.enterScrollback()
 			if p.scroll.on {
-				p.startSearchInput()
+				if open := p.startSearchInput(); open != nil {
+					cmd = tea.Batch(cmd, open)
+				}
 			}
 			return cmd, true
 		}
@@ -320,8 +331,7 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 		}
 		return p.leaveScrollback(), true
 	case k.Mod == 0 && k.Code == '/':
-		p.startSearchInput()
-		return nil, true
+		return p.startSearchInput(), true
 	case k.Mod == 0 && k.Code == 'n':
 		return p.nextMatch(1), true
 	case k.Mod == 0 && k.Code == 'N':
@@ -337,8 +347,7 @@ func (p *Panel) ScrollKey(k tea.Key) (tea.Cmd, bool) {
 		}
 		return p.copyScreen(), true
 	case k.Mod&tea.ModCtrl != 0 && k.Code == 'f':
-		p.startSearchInput()
-		return nil, true
+		return p.startSearchInput(), true
 	case k.Code == tea.KeyUp:
 		p.scrollBy(-1)
 		return p.afterScroll(), true
@@ -369,20 +378,113 @@ func isCtrlSpace(k tea.Key) bool {
 }
 
 // searchInputKey edits the search input line.
-// startSearchInput opens the search input: a fresh query, an ordered preview, and
-// the view saved for Esc (an incremental search previews matches while typing but
-// cancelling restores the previous view and committed search).
-func (p *Panel) startSearchInput() {
+// searchHistoryMax is Fresh's InputHistory default capacity.
+const searchHistoryMax = 100
+
+// rememberSearch records a committed query like Fresh's prompt history: empty
+// queries and an exact repeat of the newest entry are skipped, the oldest entry is
+// dropped past the bound. Navigation state is reset by the caller.
+func (p *Panel) rememberSearch(query string) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return
+	}
+	if n := len(p.searchHistory); n > 0 && p.searchHistory[n-1] == query {
+		return
+	}
+	p.searchHistory = append(p.searchHistory, query)
+	if over := len(p.searchHistory) - searchHistoryMax; over > 0 {
+		p.searchHistory = append([]string(nil), p.searchHistory[over:]...)
+	}
+}
+
+// startSearchInput opens the search input: the last committed query is
+// pre-filled and selected (typing replaces it), the view is saved for Esc, an
+// initial ordered preview runs for the pre-fill, and any pending preview answer is
+// invalidated. It returns the preview command (nil with no history).
+func (p *Panel) startSearchInput() tea.Cmd {
 	p.scroll.typing = true
 	p.scroll.searchInput = ""
 	p.scroll.preview = nil
 	p.scroll.previewQuery = ""
 	p.scroll.previewIdx = 0
 	p.scroll.previewStep = 0
+	p.scroll.searchPrefill = false
+	p.scroll.searchHistPos = -1
+	p.scroll.searchHistTemp = ""
 	p.scroll.searchSaved = true
 	p.scroll.searchSavedTop = p.scroll.top
 	p.scroll.searchSavedSelected = p.scroll.selected
 	p.scroll.searchSeq++
+	if n := len(p.searchHistory); n > 0 {
+		p.scroll.searchInput = p.searchHistory[n-1]
+		p.scroll.searchPrefill = true
+		p.scroll.searchHistPos = n - 1
+		p.scroll.searchHistTemp = p.searchHistory[n-1]
+		return p.incrementalSearchCmd()
+	}
+	return nil
+}
+
+// cancelSearchInput closes the input and restores the view it opened on, keeping
+// the previously committed search/matches. It is used by Esc and when the dock
+// loses the keyboard focus, so an unfocused dock never keeps an input swallowing
+// keys or applying a late preview answer (the sequence bump drops those).
+func (p *Panel) cancelSearchInput() tea.Cmd {
+	if !p.scroll.typing {
+		return nil
+	}
+	p.scroll.typing, p.scroll.searchInput = false, ""
+	p.scroll.preview = nil
+	p.scroll.previewQuery, p.scroll.previewIdx, p.scroll.previewStep = "", 0, 0
+	p.scroll.searchPrefill = false
+	p.scroll.searchHistPos, p.scroll.searchHistTemp = -1, ""
+	p.scroll.searchSeq++
+	if p.scroll.searchSaved {
+		p.scroll.top = p.scroll.searchSavedTop
+		p.scroll.selected = p.scroll.searchSavedSelected
+		p.scroll.searchSaved = false
+		p.clampScroll()
+	}
+	return p.takeStaleSearch()
+}
+
+// recallSearchHistory navigates the open input through its query history like
+// Fresh's prompt InputHistory: Up goes older (saving the current input first),
+// Down goes newer, and Down past the newest restores the input the navigation
+// started from. A recalled query is previewed through the same ordered search
+// command as typing, so late answers from an older recall are dropped.
+func (p *Panel) recallSearchHistory(previous bool) tea.Cmd {
+	n := len(p.searchHistory)
+	if n == 0 {
+		return nil
+	}
+	pos := p.scroll.searchHistPos
+	if previous {
+		if pos < 0 {
+			p.scroll.searchHistTemp = p.scroll.searchInput
+			pos = n
+		}
+		if pos <= 0 {
+			return nil
+		}
+		pos--
+	} else {
+		if pos < 0 {
+			return nil
+		}
+		if pos >= n-1 {
+			p.scroll.searchHistPos = -1
+			p.scroll.searchInput = p.scroll.searchHistTemp
+			p.scroll.searchPrefill = false
+			return p.incrementalSearchCmd()
+		}
+		pos++
+	}
+	p.scroll.searchHistPos = pos
+	p.scroll.searchInput = p.searchHistory[pos]
+	p.scroll.searchPrefill = false
+	return p.incrementalSearchCmd()
 }
 
 // incrementalSearchCmd runs the in-progress query asynchronously and returns one
@@ -424,6 +526,10 @@ func (p *Panel) previewStepCmd(dir int) tea.Cmd {
 
 func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 	switch {
+	case k.Code == tea.KeyUp:
+		return p.recallSearchHistory(true)
+	case k.Code == tea.KeyDown:
+		return p.recallSearchHistory(false)
 	case k.Code == tea.KeyF3:
 		dir := 1
 		if k.Mod&tea.ModShift != 0 {
@@ -431,25 +537,16 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 		}
 		return p.previewStepCmd(dir)
 	case k.Code == tea.KeyEscape:
-		p.scroll.typing, p.scroll.searchInput = false, ""
-		p.scroll.preview = nil
-		p.scroll.previewQuery, p.scroll.previewIdx, p.scroll.previewStep = "", 0, 0
-		p.scroll.searchSeq++ // pending previews must not land after the cancel
-		if p.scroll.searchSaved {
-			p.scroll.top = p.scroll.searchSavedTop
-			p.scroll.selected = p.scroll.searchSavedSelected
-			p.scroll.searchSaved = false
-			p.clampScroll()
-		}
-		// Cancelling the input can reveal that the committed search is stale after a
-		// re-wrap that happened while the input was open.
-		return p.takeStaleSearch()
+		return p.cancelSearchInput()
 	case k.Code == tea.KeyEnter:
 		p.scroll.typing = false
 		p.scroll.preview = nil
 		p.scroll.previewQuery, p.scroll.previewIdx, p.scroll.previewStep = "", 0, 0
+		p.scroll.searchPrefill = false
+		p.scroll.searchHistPos, p.scroll.searchHistTemp = -1, ""
 		p.scroll.searchSaved = false
 		p.scroll.search = strings.TrimSpace(p.scroll.searchInput)
+		p.rememberSearch(p.scroll.search)
 		if p.scroll.search == "" {
 			p.scroll.matches, p.scroll.match = nil, 0
 			return nil
@@ -462,11 +559,23 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 		p.scroll.matchCase = !p.scroll.matchCase
 		return p.incrementalSearchCmd()
 	case k.Code == tea.KeyBackspace:
-		if r := []rune(p.scroll.searchInput); len(r) > 0 {
+		if p.scroll.searchPrefill {
+			// The pre-filled last query is selected: a delete removes the selection.
+			p.scroll.searchInput = ""
+			p.scroll.searchPrefill = false
+		} else if r := []rune(p.scroll.searchInput); len(r) > 0 {
 			p.scroll.searchInput = string(r[:len(r)-1])
 		}
+		p.scroll.searchHistPos, p.scroll.searchHistTemp = -1, ""
 		return p.incrementalSearchCmd()
 	case k.Mod == 0 && k.Text != "":
+		if p.scroll.searchPrefill {
+			// Typing over the selected pre-fill starts a new query, like Fresh's
+			// pre-filled search prompt.
+			p.scroll.searchInput = ""
+			p.scroll.searchPrefill = false
+		}
+		p.scroll.searchHistPos, p.scroll.searchHistTemp = -1, ""
 		p.scroll.searchInput += k.Text
 		return p.incrementalSearchCmd()
 	}

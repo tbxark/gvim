@@ -1207,3 +1207,61 @@ func TestFileProbeCachesANegativeAnswer(t *testing.T) {
 		t.Fatalf("negative cache = %v, %v; want a cached empty answer", paths, ok)
 	}
 }
+
+// generatedProbeFiles is probeFiles with a file-index generation, like finder.Index.
+type generatedProbeFiles struct {
+	*probeFiles
+	gen uint64
+}
+
+func (f *generatedProbeFiles) Generation() uint64 { return f.gen }
+
+// TestFileProbeCacheInvalidatesOnIndexGeneration: a refresh (Restart) bumps the index
+// generation; the stale negative exact-path answer is dropped, so a file created by
+// the refreshed index is found without reopening the palette. The same generation
+// still reuses the cache, and the probe still runs only in the command.
+func TestFileProbeCacheInvalidatesOnIndexGeneration(t *testing.T) {
+	files := &generatedProbeFiles{
+		probeFiles: &probeFiles{fakeFiles: fakeFiles{loading: false}},
+		gen:        1,
+	}
+	files.probe = func(context.Context, string) ([]string, error) {
+		if files.gen >= 2 {
+			return []string{"new.go"}, nil
+		}
+		return nil, nil
+	}
+	p := New(Options{Query: "new.go", Files: files, Ranker: &fakeRanker{}})
+	p.update(p.Init()())
+	if files.calls != 1 {
+		t.Fatalf("first probe calls = %d, want 1", files.calls)
+	}
+	if len(p.rows) != 0 {
+		t.Fatalf("rows before refresh = %+v, want none", p.rows)
+	}
+	// A re-rank in the same generation still reuses the negative answer.
+	tick := p.update(fileTickMsg{Seq: p.seq})
+	if tick == nil {
+		t.Fatal("same-generation rank tick returned no command")
+	}
+	p.update(tick())
+	if files.calls != 1 {
+		t.Fatalf("same-generation probe calls = %d, want cached 1", files.calls)
+	}
+	// Simulate finder.Index.Restart: generation changes and the exact file now exists.
+	files.gen = 2
+	cmd := p.update(fileTickMsg{Seq: p.seq})
+	if cmd == nil {
+		t.Fatal("post-refresh rank tick returned no command")
+	}
+	if files.calls != 1 {
+		t.Fatalf("probe ran synchronously in Update: calls = %d", files.calls)
+	}
+	p.update(cmd())
+	if files.calls != 2 {
+		t.Fatalf("post-refresh probe calls = %d, want a fresh 2", files.calls)
+	}
+	if len(p.rows) == 0 || p.rows[0].kind != rowFile || p.rows[0].name != "new.go" {
+		t.Fatalf("post-refresh rows = %+v, want new.go", p.rows)
+	}
+}

@@ -343,6 +343,19 @@ func (x *Index) Snapshot() (files []string, loading bool) {
 	return x.files, !closedDone(x.done)
 }
 
+// Generation reports the current enumeration run's generation. Restart (a manual
+// refresh, a reconnect or a workspace rebuild) increments it and clears the list, so a
+// reader can tell that its cached observations of the file list/probe belong to an older
+// run. The zero Index reports 0.
+func (x *Index) Generation() uint64 {
+	if x == nil {
+		return 0
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.gen
+}
+
 // Loading reports whether enumeration is still running.
 func (x *Index) Loading() bool {
 	x.mu.Lock()

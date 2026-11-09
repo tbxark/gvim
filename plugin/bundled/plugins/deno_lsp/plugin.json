@@ -1,7 +1,7 @@
 {
   "name": "deno_lsp",
   "version": "1.0.0",
-  "description": "Deno language-server helper: detect deno.json/deno.jsonc and deno on PATH, copy the official curl/Homebrew install command, and show Deno LSP configuration help",
+  "description": "Deno language-server helper: detect deno.json/deno.jsonc and whether deno runs on the workspace authority, copy the official install command, and show Deno LSP configuration help",
   "api": 2,
   "default_enabled": false
 }

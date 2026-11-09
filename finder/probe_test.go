@@ -165,3 +165,22 @@ func TestLocalPrefixProbeSkipsEscapingEntry(t *testing.T) {
 		t.Fatalf("prefix probe with escaping symlink = %v, %v; want only save_ok.go", got, err)
 	}
 }
+
+// TestIndexGenerationChangesOnRestart: a refresh/restart bumps the generation the palette
+// uses to invalidate its exact-path probe cache.
+func TestIndexGenerationChangesOnRestart(t *testing.T) {
+	x := StartFunc(context.Background(), func(_ context.Context, emit func(string) bool) error {
+		emit("a.go")
+		return nil
+	})
+	defer x.Close()
+	g1 := x.Generation()
+	if g1 == 0 {
+		t.Fatalf("initial generation = 0, want a nonzero run generation")
+	}
+	x.Restart()
+	g2 := x.Generation()
+	if g2 <= g1 {
+		t.Fatalf("generation after Restart = %d, want greater than %d", g2, g1)
+	}
+}

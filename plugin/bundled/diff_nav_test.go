@@ -223,3 +223,146 @@ func TestDiffNavPreviousFromEnd(t *testing.T) {
 		t.Fatalf("line = %d, want 1", got)
 	}
 }
+
+// TestDiffNavUsesRealGitGutterHunks: interoperability with the actual git_gutter plugin,
+// not a fake export. The real plugin computes HEAD hunks from git show; diff_nav must
+// consume its line, type and count without a shape adapter.
+func TestDiffNavUsesRealGitGutterHunks(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"diff_nav", "git_gutter"},
+		buffers: []rigBuffer{{"/work/a.txt", "a\nB\nc\nd\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\nd\n"})
+		},
+	})
+	r.emit("after_file_open", "/work/a.txt", nil)
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1" {
+		t.Fatalf("real git_gutter status = %q (log %v)", got, r.h.LogText(""))
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("real git_gutter line = %d, want 1", got)
+	}
+}
+
+// TestDiffNavUsesRealLiveDiffHunks: interoperability with the actual live_diff plugin.
+func TestDiffNavUsesRealLiveDiffHunks(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"diff_nav", "live_diff"},
+		buffers: []rigBuffer{{"/work/a.txt", "a\nB\nc\nd\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\nd\n"})
+		},
+	})
+	if err := r.h.Run("live_diff.toggle_global", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.emit("after_file_open", "/work/a.txt", nil)
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1" {
+		t.Fatalf("real live_diff status = %q (log %v)", got, r.h.LogText(""))
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("real live_diff line = %d, want 1", got)
+	}
+}
+
+// TestDiffNavSavedDeletionJumpsBeforeTheSeam: b:diff_saved reports an empty new side for a
+// deletion; the standalone navigation must land on the line before the seam like the
+// git_gutter merged navigation, not on the line after the removed text.
+func TestDiffNavSavedDeletionJumpsBeforeTheSeam(t *testing.T) {
+	r := diffRig(t, "a\nb\nc\nd\n", "", "")
+	r.edit("/work/a.txt", "a\nc\nd\n")
+	if err := r.host.SetCursor(r.ids["/work/a.txt"], pluginapi.Pos{}, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1 [wrapped]" {
+		t.Fatalf("deletion saved-diff status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 0 {
+		t.Fatalf("deletion saved-diff line = %d, want 0 (line before the seam)", got)
+	}
+}
+
+// TestDiffNavI18nEnglish checks the plugin-owned Fresh catalogue is byte-identical and
+// complete for the commands/status rows this plugin uses.
+func TestDiffNavI18nEnglish(t *testing.T) {
+	data, err := fs.ReadFile(bundled.FS, "plugins/diff_nav/diff_nav.i18n.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalog map[string]map[string]string
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"cmd.next_change":       "Next Change",
+		"cmd.next_change_desc":  "Jump to the next changed region",
+		"cmd.prev_change":       "Previous Change",
+		"cmd.prev_change_desc":  "Jump to the previous changed region",
+		"status.no_changes":     "No changes",
+		"status.change":         "Change %{n}/%{total}",
+		"status.change_wrapped": "Change %{n}/%{total} [wrapped]",
+		"status.jump_failed":    "Could not jump to the change: %{error}",
+	}
+	en := catalog["en"]
+	if len(en) != len(want) {
+		t.Fatalf("en keys = %d, want %d", len(en), len(want))
+	}
+	for key, value := range want {
+		if en[key] != value {
+			t.Errorf("en[%s] = %q, want %q", key, en[key], value)
+		}
+	}
+}
+
+// TestDiffNavMergesRealProvidersAndSavedDiff exercises all three sources against the real
+// git_gutter and live_diff plugins: HEAD changes come from both exporters, the unsaved
+// edit comes from b:diff_saved, and the duplicate HEAD line is deduplicated.
+func TestDiffNavMergesRealProvidersAndSavedDiff(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"diff_nav", "git_gutter", "live_diff"},
+		buffers: []rigBuffer{{"/work/a.txt", "a\nB\nc\nd\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\nd\n"})
+		},
+	})
+	if err := r.h.Run("live_diff.toggle_global", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.emit("after_file_open", "/work/a.txt", nil)
+	// Make the saved source independent of the HEAD diff without re-running the providers.
+	r.edit("/work/a.txt", "a\nB\nC\nd\n")
+	if err := r.host.SetCursor(r.ids["/work/a.txt"], pluginapi.Pos{}, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/2" {
+		t.Fatalf("real three-source first status = %q (log %v)", got, r.h.LogText(""))
+	}
+	if got := diffCursorLine(t, r); got != 1 {
+		t.Fatalf("real three-source first line = %d, want 1", got)
+	}
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 2/2" {
+		t.Fatalf("real three-source second status = %q", got)
+	}
+	if got := diffCursorLine(t, r); got != 2 {
+		t.Fatalf("real three-source second line = %d, want 2", got)
+	}
+}
+
+// TestDiffNavUsesRealGitGutterDeletedHunk covers the deleted-run line contract: the real
+// git_gutter export places the jump on the line before the seam.
+func TestDiffNavUsesRealGitGutterDeletedHunk(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"diff_nav", "git_gutter"},
+		buffers: []rigBuffer{{"/work/a.txt", "a\nc\nd\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Stdout: "a\nb\nc\nd\n"})
+		},
+	})
+	r.emit("after_file_open", "/work/a.txt", nil)
+	if got := diffRun(t, r, "diff_nav.next_change"); got != "Change 1/1 [wrapped]" {
+		t.Fatalf("real deleted-hunk status = %q (log %v)", got, r.h.LogText(""))
+	}
+	if got := diffCursorLine(t, r); got != 0 {
+		t.Fatalf("real deleted-hunk line = %d, want 0", got)
+	}
+}

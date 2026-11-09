@@ -5,10 +5,12 @@
 -- command that registers a full/reduced-memory rust-analyzer). gvim's plugin API has no
 -- LSP-menu contribution, language-disable or register/restart-for-language seam, so this
 -- port keeps the user-visible install/help half as explicit commands: copy the official
--- rustup command, copy the Homebrew alternative, check the rust-analyzer on PATH (and
--- its --version), and a troubleshooting popup that reuses the native Start/Restart and
+-- rustup command, copy the Homebrew alternative, check rust-analyzer on the workspace (its
+-- --version), and a troubleshooting popup that reuses the native Start/Restart and
 -- Show LSP Status actions. No automatic LSP error status, contributed menu rows,
--- disable action or reduced-memory registration are ported (see porting.md).
+-- disable action or reduced-memory registration are ported (see porting.md). The native
+-- Rust LSP server is gvim's built-in entry and is not controlled by this plugin: the
+-- enable/disable toggle here only affects these helper commands.
 local gvim = require "gvim"
 
 local t = gvim.i18n.t
@@ -31,22 +33,18 @@ local function copy_command(value)
   gvim.status(t("status.copied", { value = value }))
 end
 
--- check_server looks the binary up on PATH first (the plugin API's LookPath is the
--- local machine's, so in a remote workspace this is a best-effort local check; the
--- version probe below runs through gvim.proc and follows the workspace authority) and
--- then runs "rust-analyzer --version" for a concrete status.
+-- check_server probes "rust-analyzer --version" through gvim.proc, which follows the
+-- workspace authority (local or remote). The plugin API's LookPath is documented as a
+-- local-machine lookup, so a missing entry there must never be reported as "missing" in a
+-- remote workspace: a failed probe is reported as "could not run on the workspace" with
+-- the local-PATH limitation named, not as an authoritative not-found.
 local function check_server()
-  local found = gvim.proc.which("rust-analyzer")
-  if not found or found == "" then
-    gvim.status(t("status.not_found", { rustup = RUSTUP_COMMAND }))
-    return
-  end
   local result, err = gvim.proc.run(
     { "rust-analyzer", "--version" },
     { timeout_ms = VERSION_TIMEOUT_MS, max_output = VERSION_MAX_OUTPUT }
   )
   if not result then
-    gvim.status(t("status.version_error", { path = found, error = tostring(err) }))
+    gvim.status(t("status.probe_failed", { error = tostring(err), rustup = RUSTUP_COMMAND }))
     return
   end
   if result.code ~= 0 then
@@ -54,18 +52,18 @@ local function check_server()
     if detail == "" then
       detail = t("status.exit_code", { code = tostring(result.code) })
     end
-    gvim.status(t("status.version_failed", { path = found, error = detail }))
+    gvim.status(t("status.version_failed", { error = detail }))
     return
   end
   local version = first_line(result.stdout)
   if version == "" then
     version = t("status.version_unknown")
   end
-  gvim.status(t("status.found", { path = found, version = version }))
+  gvim.status(t("status.found", { version = version }))
 end
 
--- show_help is the troubleshooting popup: the fresh install commands, the PATH check,
--- the native LSP actions and the common rust-analyzer setup notes.
+-- show_help is the troubleshooting popup: the fresh install commands, the workspace
+-- probe, the native LSP actions and the common rust-analyzer setup notes.
 local function show_help()
   local message = t("help.message")
   local choice = gvim.ui.action_popup({

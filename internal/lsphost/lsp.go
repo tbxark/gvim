@@ -76,6 +76,7 @@ func newPort(plan lspPlan, lspEnabled bool, spawnEnv func() []string) *lspPort {
 		auto:             make(map[string]bool, len(plan.auto)),
 		startable:        make(map[string]bool, len(plan.startable)),
 		managers:         make(map[string]*manager.Manager),
+		rootProviders:    make(map[string]func(language string) (manager.ServerConfig, bool)),
 		docs:             make(map[string]lspDocRec),
 		muted:            make(map[string]bool),
 		forced:           make(map[string]bool),
@@ -121,7 +122,15 @@ type lspPort struct {
 	mu       sync.Mutex
 	root     string
 	managers map[string]*manager.Manager // by root
-	docs     map[string]lspDocRec        // by path: the documents the port has open
+	// rootProviders lets the app provide a per-root server override (Deno auto-selection)
+	// without rebuilding the port. A provider is consulted only when the manager for its
+	// exact root is created; it may return a replacement config for a language.
+	rootProviders map[string]func(language string) (manager.ServerConfig, bool)
+	// rootChanged is the app's project-root switch callback (Deno auto-selection re-probes
+	// the new root and clears the old root's decision). It is called off SetRoot, out of the
+	// lock; nil means nobody listens.
+	rootChanged func(root string)
+	docs        map[string]lspDocRec // by path: the documents the port has open
 	// pending holds the workspace edits servers asked for, in arrival order. They
 	// are converted to the port's form when the root drains them, because the
 	// conversion reads the files the edits touch.
@@ -207,8 +216,21 @@ func statusList(plan lspPlan) []tui.LSPServerStatus {
 // SetRoot names the workspace root that new documents are opened under.
 func (p *lspPort) SetRoot(root string) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.root = root
+	changed := p.rootChanged
+	p.mu.Unlock()
+	if changed != nil {
+		changed(root)
+	}
+}
+
+// SetRootChangeListener installs the app's project-root switch callback. It is called
+// outside the port lock when SetRoot names a root, so the listener may probe/cancel without
+// deadlocking. The listener is not called for the current root here.
+func (p *lspPort) SetRootChangeListener(fn func(root string)) {
+	p.mu.Lock()
+	p.rootChanged = fn
+	p.mu.Unlock()
 }
 
 // Supports reports whether a server starts on its own for lang.
@@ -1084,6 +1106,50 @@ func (p *lspPort) rootMarkers(language string) []string {
 	return nil
 }
 
+// SetRootServerProvider installs a per-root server replacement resolver. The provider is
+// consulted when the manager for exactly root is created (never for another root); it may
+// return a replacement config for a language. A nil provider clears it. Existing managers
+// are not rebuilt: a running or already-created server keeps its config (Deno auto-selection
+// therefore lands on future roots/managers only).
+func (p *lspPort) SetRootServerProvider(root string, provider func(language string) (manager.ServerConfig, bool)) {
+	p.mu.Lock()
+	if p.rootProviders == nil {
+		p.rootProviders = make(map[string]func(language string) (manager.ServerConfig, bool))
+	}
+	if provider == nil {
+		delete(p.rootProviders, root)
+	} else {
+		p.rootProviders[root] = provider
+	}
+	p.mu.Unlock()
+}
+
+// ClearRootServerProvider removes the per-root provider for root.
+func (p *lspPort) ClearRootServerProvider(root string) {
+	p.SetRootServerProvider(root, nil)
+}
+
+// serverConfigsFor returns the language configs a manager of root starts with: the
+// port's plan, with the root provider's replacement applied to each language it answers
+// for. p.mu must be held.
+func (p *lspPort) serverConfigsFor(root string) map[string][]manager.ServerConfig {
+	if p.rootProviders == nil {
+		return p.servers
+	}
+	provider := p.rootProviders[root]
+	if provider == nil {
+		return p.servers
+	}
+	servers := make(map[string][]manager.ServerConfig, len(p.servers))
+	for lang, list := range p.servers {
+		servers[lang] = list
+		if cfg, ok := provider(lang); ok {
+			servers[lang] = []manager.ServerConfig{cfg}
+		}
+	}
+	return servers
+}
+
 // managerFor returns the manager of root, creating it on first use.
 func (p *lspPort) managerFor(root string) *manager.Manager {
 	p.mu.Lock()
@@ -1099,7 +1165,7 @@ func (p *lspPort) managerFor(root string) *manager.Manager {
 // newManagerLocked builds the manager of root and applies the manual starts. p.mu
 // must be held.
 func (p *lspPort) newManagerLocked(root string) *manager.Manager {
-	mgr := manager.NewManager(root, p.servers, p.universal)
+	mgr := manager.NewManager(root, p.serverConfigsFor(root), p.universal)
 	mgr.SetApplyEdit(p.enqueueEdit)
 	mgr.SetSpawnEnv(p.spawnEnv)
 	mgr.SetGate(p.spawnGate)

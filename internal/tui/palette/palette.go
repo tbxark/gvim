@@ -295,6 +295,11 @@ type Palette struct {
 	probeCancel context.CancelFunc
 	probeCache  map[string][]string
 	probeOrder  []string
+	// probeGen is the file index generation the cache belongs to. A finder Restart
+	// (refresh/reconnect) bumps it, and rankCmd drops the cache before using it: an exact
+	// path that was absent in the old run is probed again and can appear after the refresh.
+	probeGen    uint64
+	probeGenSet bool
 	// grep is the Live Grep state: the match modes, the scope toggles and the last
 	// result's count.
 	grep grepState
@@ -666,6 +671,13 @@ func (p *Palette) rememberProbe(text string, paths []string) {
 	p.probeCache[text] = paths
 }
 
+// clearProbeCache drops every cached exact-path answer, used when the file index
+// generation changed (a refresh may have added or removed the paths).
+func (p *Palette) clearProbeCache() {
+	p.probeCache = nil
+	p.probeOrder = nil
+}
+
 // Covers reports whether the point (x, y) of a w by h frame is on the palette card:
 // its rows, its query row and its borders, within the card columns. A press
 // elsewhere is not the palette's, and the frame takes it.
@@ -755,6 +767,17 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.probeCancel = cancel
 	files, rk := p.opts.Files, p.opts.Ranker
+	// The cache belongs to one file-index generation. A Restart/refresh bumps the
+	// generation and clears/re-enumerates the list, so an exact path that was absent in
+	// the old run must be probed again instead of served from a stale negative entry.
+	gen, hasGen := uint64(0), false
+	if g, ok := files.(interface{ Generation() uint64 }); ok {
+		gen, hasGen = g.Generation(), true
+		if p.probeGenSet && p.probeGen != gen {
+			p.clearProbeCache()
+		}
+		p.probeGen, p.probeGenSet = gen, true
+	}
 	// Reuse the exact-path answer for this path: a loading poll, a changed :line[:col]
 	// or an unchanged path after another key does not repeat the Stat. The cache is
 	// bounded (probeCacheSize) and is filled in applyFiles only after the result is
@@ -767,6 +790,13 @@ func (p *Palette) rankCmd(seq int, text string) tea.Cmd {
 		errText := ""
 		truncated := false
 		notice := ""
+		if hasGen {
+			if g, ok := files.(interface{ Generation() uint64 }); ok && g.Generation() != gen {
+				// The index restarted between building this command and running it: the
+				// cached negative/positive belongs to the old list, so probe this run.
+				probed, probeDone = nil, false
+			}
+		}
 		if files != nil {
 			list, loading = files.Snapshot()
 			if n, ok := files.(interface{ Notice() string }); ok {

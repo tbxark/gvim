@@ -1,7 +1,7 @@
 {
   "name": "rust_lsp",
   "version": "1.0.0",
-  "description": "Rust language-server helper: copy rustup/brew rust-analyzer install commands, check the rust-analyzer on PATH, and show troubleshooting help",
+  "description": "Rust language-server helper: copy rustup/brew rust-analyzer install commands, check rust-analyzer through the workspace authority, and show troubleshooting help",
   "api": 2,
   "default_enabled": false
 }

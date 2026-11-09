@@ -278,7 +278,7 @@ Fresh's `diff_nav.ts` is the unified Next/Previous Change plugin over three sour
 `git_gutter` publishes, the `live_diff` hunks, and the saved-text diff. gvim first implemented that
 merged navigation inside `git_gutter` (round 14/15) while the standalone plugin/i18n namespace stayed
 open (R13-9 residual c). `plugin/bundled/plugins/diff_nav/` is now the standalone, opt-in port
-with Fresh's command ids, keys and messages; Fresh ships the plugin default-enabled, gvim does not
+with Fresh's command ids and i18n messages; Fresh ships the plugin default-enabled, gvim does not
 because adding it to the default set measured 8.12 MiB against the 8 MiB idle-heap gate (the nine
 pre-existing defaults stay unchanged, and git_gutter's own merged navigation remains default-on):
 
@@ -287,6 +287,11 @@ pre-existing defaults stay unchanged, and git_gutter's own merged navigation rem
   export from `live_diff`, and `buf:diff_saved()`; each source is optional and a missing/older/
   erroring export, an absent git binary or an unloaded plugin contributes nothing (navigation still
   works from the remaining sources, including saved diff + live_diff with git_gutter disabled);
+* the provider data shapes are the real exports, not test adapters: git_gutter
+  `{type, line, count}` (0-based line; its deleted-run line is the line before the seam) and
+  live_diff `{kind, newStart, newCount}` (0-based); `buf:diff_saved()` yields the host's
+  `{kind, new_start, new_count}` hunks, and when `new_count == 0` (deletion) the jump line is
+  `max(new_start - 1, 0)`, matching git_gutter's merged navigation;
 * targets are sorted by byte position, deduplicated by line, and wrapped; the jump calls
   `buf:set_cursor(..., { center = true })`, and the status row uses Fresh's exact
   `Change n/total` / `Change n/total [wrapped]` / `No changes` i18n strings; malformed hunk entries
@@ -303,10 +308,12 @@ buffers can still only navigate sources that export something (a host that canno
 falls back to line ordering; git_gutter keeps its own large-file notice); live_diff must be loaded to
 contribute its active-diff hunks.
 
-Tests: `plugin/bundled/diff_nav_test.go` covers the manifest/default, the Fresh command ids/titles,
-merged git+live sorting and wrapping (next/prev, status strings), line deduplication, saved-diff-only
-navigation with no providers, live_diff-only and no-change cases, a raising provider degrading, and
-prev from the end of the buffer.
+Tests: `plugin/bundled/diff_nav_test.go` covers the manifest/default, the exact en i18n table,
+the Fresh command ids/titles, merged git+live sorting and wrapping (next/prev, status strings), line
+deduplication, saved-diff-only navigation with no providers, live_diff-only and no-change cases, a
+raising provider degrading, prev from the end, and real interoperability with the actual git_gutter and
+live_diff plugins (including the real three-source merge, a deleted HEAD hunk, and the saved deletion
+seam).
 ### Assembly LSP: project config offer (port residual)
 
 Fresh's `asm-lsp.ts` helper has three parts: the install-help popup for a missing server, the
@@ -466,14 +473,18 @@ commands:
 * `Rust: Copy rustup Install Command` / `Rust: Copy brew Install Command` use `gvim.clipboard.set`
   and report on the status row (`rustup component add rust-analyzer` and
   `brew install rust-analyzer`, the commands Fresh's popup offers);
-* `Rust: Check rust-analyzer` uses `gvim.proc.which` for the PATH check and then
-  `gvim.proc.run {"rust-analyzer", "--version"}` (5 s / 64 KiB bounds) for the version. The LookPath
-  call is the local-machine API by documentation, so a remote workspace's PATH is only checked best
-  effort; the version probe itself goes through the workspace authority. Missing binary, exec
-  failure, non-zero exit (first stderr line) and an empty version line each have their own status;
-* `Rust: Language Server Help` is a `gvim.ui.action_popup` with Fresh's install commands, PATH/restart/
-  toolchain troubleshooting notes and the upstream installation link, plus copy/check rows and the
-  native Start/Restart LSP Server and Show LSP Status actions.
+* `Rust: Check rust-analyzer` runs `gvim.proc.run {"rust-analyzer", "--version"}` (5 s / 64 KiB
+  bounds) through the workspace authority; the plugin's `LookPath` is a documented local-machine API
+  and is not used for the presence decision. A failed probe (including exec failure), a non-zero
+  exit (first stderr line) and an empty version line each have their own status; a failed probe says
+  it could not run on the workspace, names the local-only LookPath limitation, and never reports a
+  remote workspace's binary as missing;
+* `Rust: Language Server Help` is a `gvim.ui.action_popup` with Fresh's install commands, the
+  native Rust LSP-selection rules (built-in Rust entry under the normal `lsp_enabled`/root-marker/
+  `auto_start` rules; an explicit `lsp.rust` entry or a disabled Rust language replaces/skips it;
+  the plugin toggle only controls the helper commands and never changes the native selection),
+  PATH/restart/toolchain troubleshooting notes and the upstream installation link, plus copy/check
+  rows and the native Start/Restart LSP Server and Show LSP Status actions.
 
 Not ported: automatic status on `lsp_server_error`, contributed "Plugin actions" rows in the
 native LSP-Servers popup, recovery detection via `lsp_status_clicked`, Disable Rust LSP, and
@@ -483,41 +494,61 @@ status click, so this plugin deliberately does not add a second `lsp_server_erro
 is `default_enabled: false`, registers no keys and no settings.
 
 Tests: `plugin/bundled/rust_lsp_test.go` covers the visible command table/no bindings, both copy
-commands (clipboard/status), the missing-PATH status with no process launch, found+version, non-zero
-version exit, exec failure, and the help popup's message/actions plus copy/check/native-restart
-dispatch.
-### Deno LSP: no language-server selection seam (port residual)
+commands (clipboard/status), the authority probe finding rust-analyzer despite a local LookPath
+miss, the non-authoritative probe-failure status (no missing claim), found+version, non-zero version
+exit, exec failure, and the help popup's message/actions plus copy/check/native-restart dispatch.
+### Deno LSP: native auto-selection plus a reduced helper plugin (port updated)
 
-Fresh's `deno_lsp.ts` selects `deno lsp` for TypeScript and JavaScript when the active window's root
-holds `deno.json` or `deno.jsonc` and the Deno runtime is on PATH. It remembers the configured
-entries as a baseline and restores them when the active window is not a Deno project; it also leaves
-a language the user disabled alone. gvim's plugin API has no register/select-language-server call,
-no active-window list and no LSP-menu contribution, so the bundled port
-(`plugin/bundled/plugins/deno_lsp/`, opt-in) keeps the user-visible helper surface instead:
+Fresh's `deno_lsp.ts` selects `deno lsp` for TypeScript and JavaScript when the active window's
+root holds `deno.json` or `deno.jsonc` and the Deno runtime is available; it remembers the
+configured entries as a baseline and restores them when the active window is not a Deno project,
+leaving a disabled language alone. That selection is now ported in **gvim's native core**
+(`internal/app/deno_lsp.go`, documented in `docs/lsp.md`), not in the bundled plugin. The core
+rules: it probes the workspace root gvim opened/switched to (not every nested per-file root); when
+that root has `deno.json`/`deno.jsonc`, one bounded authority check confirms the runtime
+(`sh -c 'command -v deno'` through `authority.OneShot()` under the workspace trust gate; remote
+never uses local disk/PATH), `lsp_enabled` is true, and the language is `typescript` or
+`javascript`, core registers `deno lsp` for a manager created for that exact root. Nested/per-file
+TS/JS roots and other languages keep their configured servers, and `tsx` is untouched. An explicit
+`lsp` entry for typescript/javascript always wins and opts out, as does a disabled language or
+`lsp_enabled: false`. The provider uses `auto_start: false` (nothing is spawned silently;
+Start/Restart starts that manager); a TS/JS manager that already existed before the async probe
+answer keeps its configured server for the session — a plain restart does not switch it to Deno,
+only a newly created manager/rebuilt port/relaunch does. Probe failures/timeouts/disconnects/trust
+denials select nothing. The bundled plugin's `default_enabled: false` toggle only controls its
+helper commands and does not control the native auto-selection.
+
+The bundled port (`plugin/bundled/plugins/deno_lsp/`, opt-in) keeps the user-visible helper
+surface instead:
 
 * `Deno: Check Project` reads the workspace root (`gvim.dirs.cwd()` when there is none), checks
-  `deno.json` and `deno.jsonc` through `gvim.fs.exists`/`gvim.path.join` and looks up `deno` with
-  `gvim.proc.which`. It reports four states: ready (both paths), config without the runtime,
-  runtime without a Deno project config, and neither; the missing-runtime states name the selected
-  install command and point at the help popup.
-* `Deno: Copy Install Command` chooses `brew install deno` when `brew` is on PATH, otherwise
-  `curl -fsSL https://deno.land/install.sh | sh`, copies it with `gvim.clipboard.set` and reports
-  the copied value on the status row. The help popup offers explicit copy-both actions, so a user
-  with both package managers can choose.
-* `Deno: Language Server Help` is a `gvim.ui.action_popup` with the install commands, the
-  `typescript`/`javascript` `"lsp"` entries gvim needs (`command: "deno"`, `args: ["lsp"]`,
-  `auto_start: false`, `root_markers: ["deno.json", "deno.jsonc"]`,
-  `initialization_options: {"enable": true}`), the local-LookPath caveat, the native Start/Restart
-  LSP Server and Show LSP Status actions, and the upstream installation link.
+  `deno.json` and `deno.jsonc` through `gvim.fs.exists`/`gvim.path.join` and runs
+  `deno --version` through `gvim.proc` (5 s / 64 KiB bounds). It reports four states: ready
+  (config plus runnable runtime), config with a probe failure, runtime without a Deno project
+  config, and neither. The plugin's `LookPath` is local-only and is not used for the presence
+  decision; a failed probe says it could not run on the workspace, names that limitation and never
+  claims the remote host lacks deno, and points at the install command/help popup.
+* `Deno: Copy Install Command` always copies the official
+  `curl -fsSL https://deno.land/install.sh | sh`, because a local `brew` lookup says nothing about
+  a remote host; the help popup still offers explicit copy-brew for users who prefer it, and the
+  status row reports the copied value.
+* `Deno: Language Server Help` is a `gvim.ui.action_popup` with the install commands, the native
+  auto-selection rules and explicit-config opt-out, the `typescript`/`javascript` `"lsp"`
+  entries (`command: "deno"`, `args: ["lsp"]`, `auto_start: false`,
+  `root_markers: ["deno.json", "deno.jsonc"]`, `initialization_options: {"enable": true}`),
+  the workspace-authority probe note and local-only LookPath caveat, the native Start/Restart LSP
+  Server and Show LSP Status actions, and the upstream installation link.
 
-Not ported: automatic server selection/baseline restore, the active-window root decision, the
-disabled-language protection and the Fresh debug log. The PATH lookup is the local-machine API, so a
-remote workspace's PATH is only checked best effort; the project-file existence checks and the
-configuration itself are workspace-facing. The plugin is `default_enabled: false`, registers no keys
-and no settings.
+Not ported in the plugin: server selection/baseline restore (native core owns it now), the
+active-window root decision, and the Fresh debug log. The presence check is the authority-following
+`deno --version` probe (not the local-machine LookPath); the project-file existence checks and the
+configuration itself are workspace-facing. The plugin is `default_enabled: false`, registers no
+keys and no settings.
 
 Tests: `plugin/bundled/deno_lsp_test.go` covers the manifest/command table/no bindings, the
-Homebrew-versus-curl selection and clipboard/status, the four Check Project states plus `deno.jsonc` and a custom workspace root, and the help popup's message/actions plus
+always-curl installer and clipboard/status, an authority probe succeeding despite a local LookPath
+miss, the probe-failure/ready/no-config states plus `deno.jsonc` and a custom workspace root, and
+the help popup's native auto-selection/explicit-config/plugin-toggle text and actions plus
 copy/check/native-restart dispatch.
 
 ### Notes for porters (learned from the bundled ports)

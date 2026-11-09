@@ -127,18 +127,21 @@ refuses when the backend cannot prove containment. It performs no remote directo
 enumeration, because the authority ReadDir shell glob materializes the whole directory
 before any client-side limit could trim it. Every probe runs only in a `tea.Cmd`, never in
 Update/Draw; its context is canceled when the query changes or the palette closes. The
-answer, including a negative, is cached for the palette's lifetime in a bounded
-(16-path) cache keyed by the path text, so a loading poll, a repeated key, a `:line[:col]`
-change or a mode-prefix escape for the same path does not repeat the Stat; a changed
-path does probe again. A result is displayed only when both the query sequence and text
+answer, including a negative, is cached in a bounded (16-path) cache keyed by the path
+text, so a loading poll, a repeated key, a `:line[:col]` change or a mode-prefix escape
+for the same path does not repeat the Stat; a changed path does probe again. The cache
+belongs to one file-index generation: a finder Restart (manual refresh, reconnect or
+workspace rebuild) bumps the generation and drops the whole cache, so a path that was
+absent before the refresh is probed again and a newly created file can appear without
+reopening the palette. A result is displayed only when both the query sequence and text
 still match. Confirmed paths are merged before the normal rank, so fuzzy scoring, prefix
 boost, the `:line[:col]` target and the 100-row file cap apply. Missing paths, escapes
 through `..` or symlinks, unreadable paths produce no probe row; a probe never falls back
 to another filesystem. Residuals: the remote parent-basename/directory branches are not
 probed (they need a bounded directory-reader port); the local directory scan cap can
 miss entries beyond the first 4096; the probe branch has no `.gitignore` filtering; the
-16-path cache is per open palette, so a file created/removed after a cached negative or
-positive needs the palette reopened; an exact local symlink is followed only while its
+an external create/remove without an index refresh can still serve a cached negative or
+positive until the next refresh or palette reopen (Fresh re-probes every query); an exact local symlink is followed only while its
 real target stays inside the workspace (a TOCTOU swap between realpath check and Stat
 remains theoretically possible); hidden entries are not listed for a hidden directory
 query.

@@ -524,3 +524,31 @@ gvim.plugins.export { hunks = function(buf_id) error("boom") end }`},
 		})
 	}
 }
+
+// TestGitGutterNavigationUsesRealLiveDiff: the merged navigation consumes the actual
+// live_diff export, not a test adapter. HEAD is absent, so the only source is a real
+// live_diff in disk mode (the buffer differs from the file on disk).
+func TestGitGutterNavigationUsesRealLiveDiff(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{"git_gutter", "live_diff"},
+		buffers: []rigBuffer{{gutterFile, "a\nB\nc\n"}},
+		script: func(o *plugintest.FakeOS) {
+			o.SetFile(gutterFile, "a\nb\nc\n")
+			o.Script(showArgv("a.txt"), plugintest.ProcScript{Code: 128, Stderr: "fatal: not in HEAD"})
+		},
+	})
+	if err := r.h.Run("live_diff.vs_disk", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.emit("after_file_open", gutterFile, nil)
+	if err := r.h.Run("git_gutter.next_change", nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := r.host.Cursors(r.ids[gutterFile])
+	if cs[0].Pos.Line != 1 {
+		t.Fatalf("caret line = %d, want the real live_diff hunk at line 1 (log %v)", cs[0].Pos.Line, r.h.LogText(""))
+	}
+	if notices := r.h.NoticeTexts(); len(notices) == 0 || notices[len(notices)-1] != "Change 1/1" {
+		t.Fatalf("notices = %v, want one merged live_diff target", notices)
+	}
+}

@@ -78,11 +78,18 @@ local function collect_targets(buf)
   end
 
   -- Source 3: the saved text against the current text ({kind, new_start, ...}).
+  -- For an empty new side (a deletion) the jump belongs on the line before the seam,
+  -- exactly like git_gutter's merged navigation; using new_start would jump past the
+  -- deleted region. new_count > 0 uses the first new line.
   local saved = buf:diff_saved()
   if type(saved) == "table" then
     for _, h in ipairs(saved) do
       if type(h) == "table" then
-        add(h.new_start)
+        local start = tonumber(h.new_start)
+        if start and start >= 0 then
+          local count = tonumber(h.new_count) or 0
+          add(count > 0 and start or math.max(start - 1, 0))
+        end
       end
     end
   end

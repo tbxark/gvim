@@ -80,51 +80,50 @@ func TestDenoLspManifestAndCommands(t *testing.T) {
 	}
 }
 
-func TestDenoLspCopyInstallPicksCurlOrBrew(t *testing.T) {
+func TestDenoLspCopyInstallAlwaysCurl(t *testing.T) {
 	t.Parallel()
-	r := denoRig(t, nil)
-	if err := r.h.Run("deno_lsp.copy_install", nil); err != nil {
-		t.Fatal(err)
-	}
+	// A local brew must not choose the copied command: in a remote workspace it says
+	// nothing about the remote host, so Copy Install always copies the official installer.
 	curl := "curl -fsSL https://deno.land/install.sh | sh"
-	if got := r.host.Clipboard; got != curl {
-		t.Fatalf("clipboard = %q, want the curl command %q", got, curl)
-	}
-	if got := lastNoticeText(r.h); got != "Copied: "+curl {
-		t.Errorf("status = %q", got)
-	}
-
-	brewer := denoRig(t, func(o *plugintest.FakeOS) {
-		o.Bin["brew"] = "/opt/homebrew/bin/brew"
-	})
-	if err := brewer.h.Run("deno_lsp.copy_install", nil); err != nil {
-		t.Fatal(err)
-	}
-	brew := "brew install deno"
-	if got := brewer.host.Clipboard; got != brew {
-		t.Fatalf("clipboard = %q, want the brew command %q", got, brew)
-	}
-	if got := lastNoticeText(brewer.h); got != "Copied: "+brew {
-		t.Errorf("status = %q", got)
+	for _, bin := range []map[string]string{nil, {"/opt/homebrew/bin/brew": "/opt/homebrew/bin/brew"}} {
+		r := denoRig(t, func(o *plugintest.FakeOS) {
+			for name, path := range bin {
+				o.Bin[name] = path
+			}
+		})
+		if err := r.h.Run("deno_lsp.copy_install", nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.host.Clipboard; got != curl {
+			t.Fatalf("clipboard with brew bin %v = %q, want the curl command %q", bin, got, curl)
+		}
+		if got := lastNoticeText(r.h); got != "Copied: "+curl {
+			t.Errorf("status = %q", got)
+		}
 	}
 }
 
 func TestDenoLspCheckProject(t *testing.T) {
 	t.Parallel()
-	t.Run("ready", func(t *testing.T) {
+	t.Run("ready through the authority despite a local LookPath miss", func(t *testing.T) {
 		t.Parallel()
+		// The local LookPath is deliberately empty: the authority probe (gvim.proc.run)
+		// is what proves deno is runnable, so a remote workspace is never misjudged.
 		r := denoRig(t, func(o *plugintest.FakeOS) {
 			o.SetFile("/work/deno.json", "{}\n")
-			o.Bin["deno"] = "/usr/local/bin/deno"
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Stdout: "deno 2.1.0\n"})
 		})
 		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
 			t.Fatal(err)
 		}
 		got := lastNoticeText(r.h)
-		for _, want := range []string{"Deno project ready", "/work/deno.json", "/usr/local/bin/deno"} {
+		for _, want := range []string{"Deno project ready", "/work/deno.json", "runnable on the workspace"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("status = %q, want %q", got, want)
 			}
+		}
+		if strings.Contains(got, "not on PATH") {
+			t.Errorf("status overclaims a missing deno: %q", got)
 		}
 	})
 
@@ -132,7 +131,7 @@ func TestDenoLspCheckProject(t *testing.T) {
 		t.Parallel()
 		r := denoRig(t, func(o *plugintest.FakeOS) {
 			o.SetFile("/work/deno.jsonc", "{}\n")
-			o.Bin["deno"] = "/usr/local/bin/deno"
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Stdout: "deno 2.1.0\n"})
 		})
 		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
 			t.Fatal(err)
@@ -143,7 +142,7 @@ func TestDenoLspCheckProject(t *testing.T) {
 		}
 	})
 
-	t.Run("config without deno", func(t *testing.T) {
+	t.Run("config but probe cannot run deno", func(t *testing.T) {
 		t.Parallel()
 		r := denoRig(t, func(o *plugintest.FakeOS) {
 			o.SetFile("/work/deno.json", "{}\n")
@@ -152,40 +151,46 @@ func TestDenoLspCheckProject(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := lastNoticeText(r.h)
-		for _, want := range []string{"/work/deno.json", "not on PATH", "curl -fsSL https://deno.land/install.sh | sh"} {
+		for _, want := range []string{"/work/deno.json", "could not be run on the workspace", "local-only", "cannot prove deno is missing", "curl -fsSL https://deno.land/install.sh | sh"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("status = %q, want %q", got, want)
 			}
+		}
+		if strings.Contains(got, "not on PATH") {
+			t.Errorf("status overclaims a missing deno: %q", got)
 		}
 	})
 
 	t.Run("deno without config", func(t *testing.T) {
 		t.Parallel()
 		r := denoRig(t, func(o *plugintest.FakeOS) {
-			o.Bin["deno"] = "/usr/local/bin/deno"
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Stdout: "deno 2.1.0\n"})
 		})
 		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
 			t.Fatal(err)
 		}
 		got := lastNoticeText(r.h)
-		for _, want := range []string{"/usr/local/bin/deno", "no deno.json or deno.jsonc", "/work"} {
+		for _, want := range []string{"runnable on the workspace", "no deno.json or deno.jsonc", "/work"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("status = %q, want %q", got, want)
 			}
 		}
 	})
 
-	t.Run("neither", func(t *testing.T) {
+	t.Run("neither and probe cannot run deno", func(t *testing.T) {
 		t.Parallel()
 		r := denoRig(t, nil)
 		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
 			t.Fatal(err)
 		}
 		got := lastNoticeText(r.h)
-		for _, want := range []string{"No deno.json/deno.jsonc in /work", "not on PATH", "curl -fsSL"} {
+		for _, want := range []string{"No deno.json/deno.jsonc in /work", "could not be run on the workspace", "local-only", "cannot prove deno is missing", "curl -fsSL"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("status = %q, want %q", got, want)
 			}
+		}
+		if strings.Contains(got, "not on PATH") {
+			t.Errorf("status overclaims a missing deno: %q", got)
 		}
 	})
 
@@ -194,7 +199,7 @@ func TestDenoLspCheckProject(t *testing.T) {
 		r := denoRig(t, func(o *plugintest.FakeOS) {
 			o.SetDir("/work/proj")
 			o.SetFile("/work/proj/deno.jsonc", "{}\n")
-			o.Bin["deno"] = "/usr/local/bin/deno"
+			o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Stdout: "deno 2.1.0\n"})
 		})
 		r.host.Workspace().RootDir = "/work/proj"
 		if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
@@ -210,7 +215,7 @@ func TestDenoLspHelpPopup(t *testing.T) {
 	t.Parallel()
 	r := denoRig(t, func(o *plugintest.FakeOS) {
 		o.SetFile("/work/deno.json", "{}\n")
-		o.Bin["deno"] = "/usr/local/bin/deno"
+		o.Script([]string{"deno", "--version"}, plugintest.ProcScript{Stdout: "deno 2.1.0\n"})
 	})
 	if err := r.h.Run("deno_lsp.help", nil); err != nil {
 		t.Fatal(err)
@@ -235,7 +240,22 @@ func TestDenoLspHelpPopup(t *testing.T) {
 		"curl -fsSL https://deno.land/install.sh | sh",
 		"brew install deno",
 		"https://docs.deno.com/runtime/getting_started/installation/",
-		"auto_start",
+		"How gvim chooses deno lsp",
+		"Native auto-selection (core behaviour, not this helper plugin)",
+		"probed workspace root (the root gvim opened or switched to)",
+		"lsp_enabled is true and the language is typescript/javascript",
+		"only applies to an LSP manager created for that exact workspace root",
+		"nested/per-file TS/JS roots keep their configured server",
+		"already existed before the async probe answer landed",
+		"plain Start/Restart restarts that manager, not Deno",
+		"Explicit configuration wins and opts out",
+		"tsx is untouched",
+		"only controls its copy/check/help commands",
+		"does not control the native Deno auto-selection",
+		"runs in core regardless of whether this helper plugin is loaded/enabled",
+		"auto_start: false",
+		"workspace authority",
+		"local-only PATH lookup is never used",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("help message lacks %q", want)
@@ -264,5 +284,23 @@ func TestDenoLspHelpPopup(t *testing.T) {
 	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"act:lsp_restart"}})
 	if got := r.host.Cmd().Ran(); !slices.Contains(got, "lsp_restart") {
 		t.Fatalf("actions = %v, want lsp_restart", got)
+	}
+}
+
+func TestDenoLspCheckLocalLookPathHitDoesNotFakeAuthoritySuccess(t *testing.T) {
+	t.Parallel()
+	r := denoRig(t, func(o *plugintest.FakeOS) {
+		o.SetFile("/work/deno.json", "{}\n")
+		o.Bin["deno"] = "/usr/local/bin/deno"
+	})
+	if err := r.h.Run("deno_lsp.check_project", nil); err != nil {
+		t.Fatal(err)
+	}
+	got := lastNoticeText(r.h)
+	if !strings.Contains(got, "could not be run on the workspace") {
+		t.Fatalf("status = %q, want an authority probe failure", got)
+	}
+	if strings.Contains(got, "Deno project ready") {
+		t.Fatalf("status trusted a local LookPath hit: %q", got)
 	}
 }

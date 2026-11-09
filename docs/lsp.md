@@ -209,6 +209,38 @@ folder you opened, and a file with no marker above it uses that folder, as does 
 no markers. An `lsp` entry may set `root_markers` for its language. With several servers for one
 language the first server's markers pick the root.
 
+### Deno projects
+
+A project root with `deno.json`/`deno.jsonc` gets `deno lsp` for **typescript/javascript**
+once the Deno runtime is confirmed, mirroring Fresh's `deno_lsp` plugin: it replaces the
+configured TS/JS server but keeps it as the baseline. Two safety rules are deliberate:
+
+- **Authority only**: the config file is checked with the workspace authority's `Stat`, and
+  `deno` is confirmed by one bounded `sh -c 'command -v deno'` through `authority.OneShot()`
+  under the workspace trust gate. A remote workspace never checks the local disk or local
+  PATH. The probe is asynchronous (startup and after a reconnect), bounded to 5 s and
+  cancellable; a failed/timed-out/disconnected probe selects nothing.
+- **User decisions win**: auto-selection is disabled when `lsp_enabled` is false, when the
+  language is disabled (`enabled: false`/`LSPDisabled`), or when an explicit `lsp` entry
+  exists for typescript or javascript. It never touches `tsx`, other languages, or an
+  explicit/disabled configuration.
+
+The selection is installed as a per-root server provider: it applies only to a manager
+created for the exact probed workspace root (other/nested roots keep the configured server),
+and clearing it restores the baseline. `deno lsp` is registered with `auto_start: false`, as
+Fresh does, so it is never silently spawned; **Start/Restart LSP Server** starts it when the
+root's manager was created with the Deno provider (a fresh root). A manager that already
+exists when the delayed answer lands keeps its configured server for the rest of the session:
+a plain Start/Restart keeps that manager's config, and only a newly created manager, a
+project reload that rebuilds the port, or a relaunch uses the provider (recorded residual).
+The provider re-reads the live config when a future manager is created, so a config change
+made after the probe cannot let a stale decision override a new explicit/disabled entry; a newer reconnect probe supersedes an older one and the older answer
+is dropped. The probe is re-run on a remote reconnect and when the editor switches project
+root (`SetRoot`): the old root's provider is cleared so future managers there restore the
+baseline, the new root is probed, and any still-running probe for the old root is cancelled.
+It is not repeated on every settings change, and Deno disappearing after a successful probe
+is not re-confirmed (residual).
+
 ## Changing or turning servers off
 
 Entries of the `lsp` key in `~/.config/gvim/config.json` are laid over the table. The key is the

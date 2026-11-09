@@ -1,17 +1,21 @@
 -- Deno language-server helper: a reduced port of Fresh's plugins/deno_lsp.ts.
 --
 -- Fresh's plugin selects "deno lsp" for TypeScript/JavaScript when the active window's
--- root has deno.json/deno.jsonc and the Deno runtime is on PATH, restoring the configured
--- server otherwise. gvim's plugin API has no register/select-language-server call and no
--- active-window list, so this port keeps the user-visible check/install/help surface as
--- palette commands; the user configures "deno lsp" in the LSP settings (the help popup
--- shows the entry), and Check Project reports both prerequisites.
+-- root has deno.json/deno.jsonc and the Deno runtime is available. gvim now ports that
+-- selection natively in core (internal/app/deno_lsp.go, docs/lsp.md): the probed workspace
+-- root, authority/trust-gated runtime confirmation, lsp_enabled and the explicit/disabled
+-- user rules decide it, and this helper plugin's opt-in toggle does not control it. gvim's
+-- plugin API has no register/select-language-server call and no active-window list, so this
+-- port keeps only the user-visible check/install/help surface as palette commands; Check
+-- Project reports both prerequisites through the workspace authority.
 local gvim = require "gvim"
 
 local t = gvim.i18n.t
 
 local CURL_INSTALL = "curl -fsSL https://deno.land/install.sh | sh"
 local BREW_INSTALL = "brew install deno"
+local VERSION_TIMEOUT_MS = 5000
+local VERSION_MAX_OUTPUT = 64 * 1024
 
 -- project_root is the workspace root; a session without one falls back to the process cwd,
 -- matching the other language helpers.
@@ -36,13 +40,11 @@ local function project_configs(root)
   return found
 end
 
--- install_command picks Homebrew when it is on PATH, otherwise the official curl script.
--- The command that will be copied is also the one reported by Check Project, so the user sees
--- exactly which alternative applies to this machine.
+-- install_command copies the official curl installer. The plugin must not choose Homebrew
+-- from a local gvim.proc.which: in a remote workspace the clipboard/install command belongs
+-- to the remote host, where the local machine's brew tells us nothing. The help popup still
+-- lists both alternatives for the user to pick.
 local function install_command()
-  if gvim.proc.which("brew") then
-    return BREW_INSTALL
-  end
   return CURL_INSTALL
 end
 
@@ -55,32 +57,52 @@ local function copy_command(value)
   gvim.status(t("status.copied", { value = value }))
 end
 
+-- probe_deno runs "deno --version" through gvim.proc, which follows the workspace
+-- authority (local or remote). The plugin API's LookPath is a documented local-machine
+-- lookup, so it is never used to declare deno missing: a failed probe is reported as
+-- "could not run on the workspace" with that limitation named.
+local function probe_deno()
+  return gvim.proc.run(
+    { "deno", "--version" },
+    { timeout_ms = VERSION_TIMEOUT_MS, max_output = VERSION_MAX_OUTPUT }
+  )
+end
+
 local function check_project()
   local root = project_root()
   local configs = project_configs(root)
-  local deno = gvim.proc.which("deno")
-  local has_deno = deno ~= nil and deno ~= ""
   local config_text = table.concat(configs, ", ")
   local install = install_command()
+  local result, err = probe_deno()
+  local has_deno = result ~= nil
 
   if #configs > 0 and has_deno then
-    gvim.status(t("status.ready", { root = root, config = config_text, path = deno }))
+    gvim.status(t("status.ready", { root = root, config = config_text }))
     return
   end
   if #configs > 0 then
-    gvim.status(t("status.config_no_deno", { root = root, config = config_text, install = install }))
+    gvim.status(t("status.config_probe_failed", {
+      root = root,
+      config = config_text,
+      install = install,
+      error = tostring(err),
+    }))
     return
   end
   if has_deno then
-    gvim.status(t("status.deno_no_config", { root = root, path = deno }))
+    gvim.status(t("status.deno_no_config", { root = root }))
     return
   end
-  gvim.status(t("status.no_project_no_deno", { root = root, install = install }))
+  gvim.status(t("status.no_project_probe_failed", {
+    root = root,
+    install = install,
+    error = tostring(err),
+  }))
 end
 
 -- show_help explains the reduced port: install commands, the config entry gvim needs, the
--- local-PATH caveat and the native LSP actions. Its copy/check/restart actions reuse the
--- command implementations above, so there is one source of behaviour.
+-- workspace-authority probe and the native LSP actions. Its copy/check/restart actions reuse
+-- the command implementations above, so there is one source of behaviour.
 local function show_help()
   local choice = gvim.ui.action_popup({
     title = t("help.title"),
