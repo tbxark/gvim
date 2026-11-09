@@ -21,7 +21,13 @@ func TestDockTitlesUseTheCatalogue(t *testing.T) {
 	if got := dockTextVars("gvim.dock.bad_pattern", "Bad pattern: %{error}", map[string]any{"error": "x"}); got != "Bad pattern: x" {
 		t.Errorf("bad pattern notice = %q", got)
 	}
-	for _, key := range []string{"gvim.dock.title", "gvim.dock.title_exited", "gvim.dock.title_exited_suffix", "gvim.dock.scrollback", "gvim.dock.scrollback_restored", "gvim.dock.scrollback_restored_rewrapped", "gvim.dock.scrollback_exited", "gvim.dock.exit_signal", "gvim.dock.exit_code", "gvim.dock.no_agent", "gvim.dock.shell_start_failed", "gvim.dock.bad_pattern"} {
+	if got := dockTextVars("gvim.dock.tab_limit_max", "Terminal: the tab limit (%{max}) is reached", map[string]any{"max": 8}); got != "Terminal: the tab limit (8) is reached" {
+		t.Errorf("tab limit = %q", got)
+	}
+	if got := dockTextVars("gvim.dock.hover_open", "Ctrl+Click to open %{token}", map[string]any{"token": "http://x"}); got != "Ctrl+Click to open http://x" {
+		t.Errorf("hover notice = %q", got)
+	}
+	for _, key := range []string{"gvim.dock.tab_limit", "gvim.dock.tab_limit_max", "gvim.dock.hover_open", "gvim.dock.title_numbered", "gvim.dock.title", "gvim.dock.title_exited", "gvim.dock.title_exited_suffix", "gvim.dock.scrollback", "gvim.dock.scrollback_restored", "gvim.dock.scrollback_restored_rewrapped", "gvim.dock.scrollback_exited", "gvim.dock.exit_signal", "gvim.dock.exit_code", "gvim.dock.no_agent", "gvim.dock.shell_start_failed", "gvim.dock.bad_pattern"} {
 		if got := i18n.T("en", key, nil); got == key {
 			t.Errorf("missing English entry for %s", key)
 		}

@@ -115,7 +115,10 @@ func (p *Panel) enterScrollback() tea.Cmd {
 		p.noticeOf(NoTerminalNotice())
 		return nil
 	}
-	if p.term.AltScreen() {
+	if p.term.AltScreen() && !p.exitMarkerPending() {
+		// A running full-screen program's own drawing has no scrollback; only an
+		// EXITED alternate screen can be shown as the frozen-frame transcript (the
+		// visible rows plus the exit marker, with no history).
 		p.noticeOf(altScrollbackNotice())
 		return nil
 	}
@@ -142,10 +145,6 @@ func (p *Panel) enterScrollback() tea.Cmd {
 // its frozen frame stays and the marker remains in the saved transcript.
 func (p *Panel) maybeShowExitScrollback() tea.Cmd {
 	if !p.autoExitScroll || p.term == nil || p.scroll.on || p.restored {
-		return nil
-	}
-	if p.term.AltScreen() {
-		p.autoExitScroll = false
 		return nil
 	}
 	if p.bodyRows() <= 0 {

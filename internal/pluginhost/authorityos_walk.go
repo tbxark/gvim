@@ -7,13 +7,15 @@ package pluginhost
 //     entries, skipped directories, MaxDepth and MaxEntries; symlinks are reported but
 //     never followed; unreadable subdirectories are skipped; cancellation is checked
 //     throughout. It reads the remote directory entries, never the local filesystem.
-//   - Copy copies a regular file, or a directory tree, entirely remote-to-remote. A
-//     file is read whole and capped (remoteCopyFileMax); symlinks in a tree are refused
-//     (there is no remote readlink primitive, so copying them as links is impossible and
-//     silently dropping them would be wrong), and the tree is bounded by copyTreeMax
-//     entries. Copy requires the authority's optional RealPather capability to prove
-//     source/destination safety (and DirectoryCreator for a tree); a backend without
-//     them gets a clear unsupported error instead of guessing or falling back locally.
+//   - Copy copies a regular file, or a directory tree, entirely remote-to-remote. Every
+//     file is copied through the authority's atomic streamed-write surface; a backend
+//     without it gets a clear unsupported error before reading/creating/writing the
+//     destination (there is no same-handle exclusive create+write fallback). Symlinks in
+//     a tree are refused (there is no remote readlink primitive, so copying them as links
+//     is impossible and silently dropping them would be wrong), and the tree is bounded
+//     by copyTreeMax entries. Copy also requires RealPather to prove source/destination
+//     safety and DirectoryCreator for a tree; a backend without those capabilities gets a
+//     clear unsupported error instead of guessing or falling back locally.
 //
 // A cancelled context stops the walk/copy at the next check and is mapped to the plugin
 // API's cancelled code; no operation ever falls back to the local machine.
@@ -33,10 +35,6 @@ import (
 )
 
 const (
-	// remoteCopyFileMax is the largest single file Copy moves through the authority's
-	// value-based ReadFile/WriteFile. Larger files are a clear too_large error (the
-	// local OS streams instead; a remote streaming copy is a recorded follow-up).
-	remoteCopyFileMax = 16 << 20
 	// remoteWalkDefaultEntries matches the local Walk's default when MaxEntries is zero.
 	remoteWalkDefaultEntries = 50_000
 	// remoteCopyChunk is the bounded ReadRange window of a streamed remote copy, matching
@@ -273,6 +271,12 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displ
 	if creator == nil {
 		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend cannot atomically claim a copy destination; refusing an unsafe directory copy", displayTo)
 	}
+	// A tree copy writes files below the claimed destination. Without the atomic streamed
+	// write surface a fallback would create/write a target through a separate (non-exclusive)
+	// call; refuse before the claim/walk instead of leaving a partial or racy destination.
+	if authority.WriteStreams(o.files()) == nil {
+		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend has no atomic streamed-write surface; refusing a copy that could race another writer", displayTo)
+	}
 	// The tree is listed before any write, so a refused symlink cannot leave a partial
 	// copy behind and the entry cap is checked before doing work.
 	res, err := o.Walk(ctx, src, hostos.WalkOptions{Hidden: true, MaxEntries: copyTreeMax})
@@ -329,40 +333,19 @@ func (o *authorityOS) copyTree(ctx context.Context, src, dst, displayFrom, displ
 	return nil
 }
 
-// copyFile copies one remote file. When the backend has the authority's streamed-write
-// surface, it copies in bounded ReadRange windows into an atomic WriteStream: memory is
-// one chunk, the destination is untouched until Commit, and a failure/cancellation Aborts
-// the temporary file (so an existing destination survives). Without that surface it keeps
-// the previous whole-file fallback, whose 16 MiB cap is deliberately conservative because
-// a whole-file ReadFile/WriteFile pair is neither streaming nor atomic on every backend.
+// copyFile copies one remote file through the authority's atomic streamed-write surface.
+// The destination is untouched until Commit and a failure/cancellation aborts the temp file.
+// A backend without that surface is refused before reading or writing: FileCreator creates
+// an empty file but gives no exclusive handle for the subsequent data write, so a
+// create-then-WriteFile fallback would let another writer replace the path and then be
+// overwritten by the copy. There is no provable same-handle create+write primitive here, so
+// the only safe behavior is unsupported with no target created or written.
 func (o *authorityOS) copyFile(ctx context.Context, src, dst, display string, size int64, mode fs.FileMode) error {
-	if streamer := authority.WriteStreams(o.files()); streamer != nil {
-		return o.copyStreamedFile(ctx, streamer, src, dst, display, size, mode)
+	streamer := authority.WriteStreams(o.files())
+	if streamer == nil {
+		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend has no atomic streamed-write surface; refusing a copy that could race another writer", display)
 	}
-	if _, err := o.files().Stat(ctx, dst); err == nil {
-		// Without an atomic replace surface, the whole-file fallback opens the
-		// destination for truncation. A destination hard-linked to the source would then
-		// truncate the source itself, and realpath cannot distinguish hard links (it
-		// canonicalizes paths, not inodes). Refuse instead of risking source data.
-		return pluginapi.Errf(pluginapi.CodeUnsupported, "%s: this backend cannot atomically replace an existing destination (it has no streamed-write surface); refusing to risk a hard-link alias", display)
-	} else if pluginapi.CodeOf(err) != pluginapi.CodeNotFound {
-		return mapErr(err, dst)
-	}
-	if size > remoteCopyFileMax {
-		return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded on this backend: it has no streamed-write surface)", display, remoteCopyFileMax)
-	}
-	data, err := o.files().ReadFile(ctx, src, remoteCopyFileMax)
-	if err != nil {
-		return mapErr(err, src)
-	}
-	if int64(len(data)) > remoteCopyFileMax {
-		return pluginapi.Errf(pluginapi.CodeTooLarge, "%s: larger than %d bytes (remote copy is bounded on this backend: it has no streamed-write surface)", display, remoteCopyFileMax)
-	}
-	opts := hostos.WriteOptions{}
-	if mode != 0 {
-		opts.Mode = mode
-	}
-	return mapErr(o.files().WriteFile(ctx, dst, data, opts), dst)
+	return o.copyStreamedFile(ctx, streamer, src, dst, display, size, mode)
 }
 
 // copyStreamedFile copies exactly the source size observed before the copy. A source that

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/plugin/plugintest"
 	"github.com/tbxark/gvim/pluginapi"
 )
@@ -19,6 +21,11 @@ type fakeAtomicDirFiles struct {
 	mu     sync.Mutex
 	claims []string
 	raceOn string
+}
+
+func (f *fakeAtomicDirFiles) WriteStream(ctx context.Context, p string, o hostos.WriteOptions) (authority.WriteStream, error) {
+	// A safe tree copy needs the atomic stream surface in addition to the atomic claim.
+	return (&fakeStreamFiles{fakeMutableFiles: f.fakeMutableFiles}).WriteStream(ctx, p, o)
 }
 
 func (f *fakeAtomicDirFiles) MkdirNew(ctx context.Context, p string) error {

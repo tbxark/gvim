@@ -1105,5 +1105,15 @@
   "gvim.workspace.report_closed_running": "Closed workspace %{label}; stopped %{summary}",
   "gvim.workspace.report_closed_dormant": "Closed a dormant workspace",
   "gvim.workspace.report_renamed": "Renamed workspace to %{label}",
-  "gvim.workspace.extract_title_tabs_choice": "Extract Tabs To"
+  "gvim.workspace.extract_title_tabs_choice": "Extract Tabs To",
+  "gvim.notice.local_env_watch_unavailable": "Local environment: file watching is unavailable (%{error}); changed detector markers are picked up on Env: Reload",
+  "gvim.notice.local_env_watch_ended": "Local environment: the file watcher ended; changed detector markers are picked up on Env: Reload",
+  "gvim.notice.local_env_watch_root_failed": "Local environment: cannot resolve the workspace root (%{error}); changed detector markers are picked up on Env: Reload",
+  "gvim.notice.local_env_watch_root_unwatchable": "Local environment: the workspace root cannot be watched; changed detector markers are picked up on Env: Reload",
+  "gvim.notice.local_env_watch_dirs": "Local environment: %{count} detector marker director(ies) cannot be watched; changed markers there are picked up on Env: Reload",
+  "gvim.notice.local_env_watch_limit": "Local environment: %{markers} detector marker path(s) in %{directories} director(ies) are not watched (watch bound reached); use Env: Reload after changing them",
+  "gvim.dock.tab_limit": "Terminal: the tab limit is reached",
+  "gvim.dock.tab_limit_max": "Terminal: the tab limit (%{max}) is reached",
+  "gvim.dock.hover_open": "Ctrl+Click to open %{token}",
+  "gvim.dock.title_numbered": "Terminal %{number}"
 }

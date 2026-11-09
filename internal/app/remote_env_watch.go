@@ -16,7 +16,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path"
 	"sort"
 	"sync"
@@ -33,10 +32,25 @@ import (
 // detector set plus the fixed env-input files. Replanning swaps the pointer atomically and
 // wakes the watcher, which re-arms; an in-flight arm keeps using its snapshot.
 type envWatchPlan struct {
-	names       map[string]bool
-	rearmNames  map[string]bool
-	dirs        map[string]map[string]bool
-	limitNotice string
+	names      map[string]bool
+	rearmNames map[string]bool
+	dirs       map[string]map[string]bool
+	// omitted/omittedDirs are the plan-bound counts; the local and remote watchers format
+	// their own scope-specific notice from them (a shared remote string must never leak into
+	// the local Environment row).
+	omitted     int
+	omittedDirs int
+}
+
+// remoteEnvWatchLimitNotice is the remote Environment-watch bound notice.
+func remoteEnvWatchLimitNotice(plan *envWatchPlan) string {
+	return appTextVars("gvim.notice.remote_env_watch_limit", "Remote environment: %{markers} detector marker path(s) in %{directories} director(ies) are not watched (watch bound reached); use Env: Reload after changing them", map[string]any{"markers": plan.omitted, "directories": plan.omittedDirs})
+}
+
+// localEnvWatchLimitNotice is the local Environment-watch bound notice. It is a distinct
+// string/key so a local bounded plan never reports itself as a remote environment.
+func localEnvWatchLimitNotice(plan *envWatchPlan) string {
+	return appTextVars("gvim.notice.local_env_watch_limit", "Local environment: %{markers} detector marker path(s) in %{directories} director(ies) are not watched (watch bound reached); use Env: Reload after changing them", map[string]any{"markers": plan.omitted, "directories": plan.omittedDirs})
 }
 
 func buildEnvWatchPlan(detectors []config.EnvDetector) *envWatchPlan {
@@ -60,11 +74,7 @@ func buildEnvWatchPlan(detectors []config.EnvDetector) *envWatchPlan {
 	for name := range spec.RearmNames {
 		rearm[name] = true
 	}
-	limitNotice := ""
-	if spec.Omitted > 0 || spec.OmittedDirs > 0 {
-		limitNotice = fmt.Sprintf("Remote environment: %d detector marker path(s) in %d director(ies) are not watched (watch bound reached); use Env: Reload after changing them", spec.Omitted, spec.OmittedDirs)
-	}
-	return &envWatchPlan{names: names, rearmNames: rearm, dirs: spec.Dirs, limitNotice: limitNotice}
+	return &envWatchPlan{names: names, rearmNames: rearm, dirs: spec.Dirs, omitted: spec.Omitted, omittedDirs: spec.OmittedDirs}
 }
 
 type remoteEnvWatch struct {
@@ -182,8 +192,8 @@ func (w *remoteEnvWatch) run() {
 			continue
 		}
 		backoff = remoteWatchRetryMin
-		if plan := w.plan.Load(); plan != nil && plan.limitNotice != "" {
-			w.provider.SetWatchNotice(plan.limitNotice)
+		if plan := w.plan.Load(); plan != nil && (plan.omitted > 0 || plan.omittedDirs > 0) {
+			w.provider.SetWatchNotice(remoteEnvWatchLimitNotice(plan))
 		} else {
 			w.provider.SetWatchNotice("")
 		}

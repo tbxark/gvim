@@ -94,7 +94,7 @@ func newStreamFiles() *fakeStreamFiles {
 
 func TestAuthorityOSCopyStreamsLargeFile(t *testing.T) {
 	stream := newStreamFiles()
-	data := strings.Repeat("x", int(remoteCopyFileMax)+17)
+	data := strings.Repeat("x", (16<<20)+17)
 	stream.files["/srv/proj/big.bin"] = data
 	stream.files["/srv/proj/copy.bin"] = "old target must survive until commit"
 	slot, _, _ := authorityTestSlot(stream)
@@ -194,15 +194,18 @@ func TestAuthorityOSCopyStreamsTreeFiles(t *testing.T) {
 	}
 }
 
-func TestAuthorityOSCopyFallbackWithoutStreamsKeepsBound(t *testing.T) {
-	// A backend without WriteStreamer keeps the old whole-file 16 MiB cap (safe fallback).
+func TestAuthorityOSCopyWithoutStreamerIsUnsupported(t *testing.T) {
+	// There is no same-handle exclusive create+write primitive and no atomic streamer, so
+	// the copy must be refused before it can create or write the destination.
 	remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
-	remote.files["/srv/proj/big.bin"] = ""
-	remote.sizes = map[string]int64{"/srv/proj/big.bin": remoteCopyFileMax + 1}
+	remote.files["/srv/proj/big.bin"] = "source"
 	slot, _, _ := authorityTestSlot(remote)
 	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil)
 	err := osys.Copy(context.Background(), "big.bin", "copy.bin")
-	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeTooLarge || !strings.Contains(err.Error(), "no streamed-write surface") {
-		t.Fatalf("fallback oversize copy = %v, code %q", err, pluginapi.CodeOf(err))
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("copy without a streamer = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if _, ok := remote.files["/srv/proj/copy.bin"]; ok {
+		t.Fatal("unsupported copy created the destination")
 	}
 }

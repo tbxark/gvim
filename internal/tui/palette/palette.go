@@ -254,7 +254,12 @@ type Palette struct {
 	// highlight back on the top row.
 	inFile   bool
 	fileText string
-	shown    string
+	// fileRaw is the path an accepted file suggestion named when the path itself ends
+	// in a colon+number that parseFileTarget would otherwise read as a line target (a
+	// file literally named "a:12"). While the query is exactly that accepted path it is
+	// used verbatim; any edit clears the bypass and normal :line[:col] parsing returns.
+	fileRaw string
+	shown   string
 	// live is true in Live Grep mode, which has no prefixes.
 	live bool
 	// preview is the file mode's file preview: its reader, cache and shown file.
@@ -492,10 +497,68 @@ func (p *Palette) acceptSuggestion() tea.Cmd {
 		if r.kind != rowFile {
 			return nil
 		}
-		value = r.rel
+		value = fileTargetValue(r.rel, r.line, r.col)
+		p.fileRaw = ""
+		if raw := fileQueryText(value); r.line == 0 && raw != "" && fileTargetAmbiguous(raw) {
+			// The accepted path itself looks like "path:number"; keep it verbatim for
+			// the requery so the file does not turn into a jump target.
+			p.fileRaw = raw
+		}
+		if needsFileModeEscape(value) {
+			// A file name may begin with the palette's mode characters (>, #, :).
+			// Fill it in file mode by writing "./" in front; the ranker strips that
+			// escape again, so the mode does not switch and the path still matches.
+			value = "./" + value
+		}
 	}
 	p.input.SetValue(prefix + value)
 	return p.requery()
+}
+
+// fileTargetValue appends the "path:line[:col]" target the file query named to a file
+// suggestion. The path itself is left untouched, so a Windows drive or another colon
+// in the path survives; the target's colon is the separator parseFileTarget reads from
+// the end.
+func fileTargetValue(path string, line, col int) string {
+	if line <= 0 {
+		return path
+	}
+	if col > 0 {
+		return path + ":" + strconv.Itoa(line) + ":" + strconv.Itoa(col)
+	}
+	return path + ":" + strconv.Itoa(line)
+}
+
+// needsFileModeEscape reports whether a file value would be read as a command, buffer
+// or line query instead of a file query. Those are the three palette mode prefixes.
+func needsFileModeEscape(value string) bool {
+	if value == "" {
+		return false
+	}
+	switch value[0] {
+	case '>', '#', ':':
+		return true
+	}
+	return false
+}
+
+// fileTargetAmbiguous reports whether path would be read as a :line[:col] target by
+// parseFileTarget, which is true for a file whose own name ends in ":12" or ":12:3".
+func fileTargetAmbiguous(path string) bool {
+	parsed, line, col := parseFileTarget(path)
+	return parsed != path || line > 0 || col > 0
+}
+
+// fileQueryText removes the "./" mode escape Tab uses for a file whose name begins
+// with >, # or :. It is applied only before ranking/parsing, never to the visible
+// query, so the path the ranker sees has no escape and a later :line[:col] append is
+// parsed normally. Only that exact escape is removed, so ordinary "./" paths keep
+// their meaning.
+func fileQueryText(text string) string {
+	if len(text) > 2 && text[0] == '.' && text[1] == '/' && needsFileModeEscape(text[2:]) {
+		return text[2:]
+	}
+	return text
 }
 
 // click runs the row under a left click. Other buttons, and clicks that miss the
@@ -581,6 +644,7 @@ func (p *Palette) requery() tea.Cmd {
 	mode, text := commands.ParseQuery(query)
 	if mode != commands.ModeFile {
 		p.inFile = false
+		p.fileRaw = ""
 		p.fileLine, p.fileCol = 0, 0
 		p.rows = p.rowsFor(query)
 		p.syncSize()
@@ -596,7 +660,13 @@ func (p *Palette) requery() tea.Cmd {
 	p.inFile = true
 	// A "path:line[:col]" query ranks the path and names the position the preview
 	// highlights and Enter jumps to, as Fresh's file finder documents.
-	p.fileText, p.fileLine, p.fileCol = parseFileTarget(text)
+	queryText := fileQueryText(text)
+	if p.fileRaw != "" && queryText == p.fileRaw {
+		p.fileText, p.fileLine, p.fileCol = p.fileRaw, 0, 0
+	} else {
+		p.fileText, p.fileLine, p.fileCol = parseFileTarget(queryText)
+		p.fileRaw = ""
+	}
 	return p.rankCmd(p.seq, p.fileText)
 }
 

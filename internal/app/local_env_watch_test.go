@@ -167,8 +167,30 @@ func TestLocalEnvWatchBoundsDetectorDirs(t *testing.T) {
 	if got, want := fake.addedCount(), 1+env.MaxDetectorWatchDirs; got > want {
 		t.Fatalf("watched %d dirs, want at most %d", got, want)
 	}
-	if notice := provider.WatchNotice(); !strings.Contains(notice, "not watched") || !strings.Contains(notice, "watch bound") {
-		t.Fatalf("bound notice = %q", notice)
+	notice := provider.WatchNotice()
+	if !strings.HasPrefix(notice, "Local environment:") || !strings.Contains(notice, "not watched") || !strings.Contains(notice, "watch bound") {
+		t.Fatalf("local bound notice = %q", notice)
+	}
+	if strings.Contains(notice, "Remote environment:") {
+		t.Fatalf("local bound notice leaked the remote wording: %q", notice)
+	}
+}
+
+func TestEnvWatchLimitNoticesUseTheirScope(t *testing.T) {
+	plan := &envWatchPlan{omitted: 3, omittedDirs: 2}
+	local := localEnvWatchLimitNotice(plan)
+	if !strings.HasPrefix(local, "Local environment:") || !strings.Contains(local, "3 detector marker path(s) in 2 director(ies)") || !strings.Contains(local, "Env: Reload") {
+		t.Fatalf("local limit notice = %q", local)
+	}
+	if strings.Contains(local, "Remote environment:") {
+		t.Fatalf("local limit notice has remote wording: %q", local)
+	}
+	remote := remoteEnvWatchLimitNotice(plan)
+	if !strings.HasPrefix(remote, "Remote environment:") || !strings.Contains(remote, "3 detector marker path(s) in 2 director(ies)") || !strings.Contains(remote, "Env: Reload") {
+		t.Fatalf("remote limit notice = %q", remote)
+	}
+	if strings.Contains(remote, "Local environment:") {
+		t.Fatalf("remote limit notice has local wording: %q", remote)
 	}
 }
 

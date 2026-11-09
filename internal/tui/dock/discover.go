@@ -100,7 +100,7 @@ func (t *Tabs) startLaunchRecordAt(launch terminal.Launch, name, dir string) (te
 	}
 	if len(t.tabs) >= MaxTerminalTabs {
 		if t.host.Notice != nil {
-			t.host.Notice("Terminal: the tab limit is reached")
+			t.host.Notice(dockText("gvim.dock.tab_limit", "Terminal: the tab limit is reached"))
 		}
 		return nil, false
 	}

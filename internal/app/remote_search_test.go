@@ -1303,7 +1303,6 @@ func TestRemoteSearchResolvesNestedRepositoryCandidates(t *testing.T) {
 func TestRemoteSearchNestedListingFailureKeepsFallbackWithNotice(t *testing.T) {
 	top := []byte(gitLsEntry("100644", "a.go") + gitLsEntry("160000", "nested"))
 	one := nestedCandidateScript(top, nil, 1, false)
-	// The widened fallback returns a nested file; the prefix walk filter accepts it.
 	base := one.script
 	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
 		if len(argv) > 0 && argv[0] == "rg" {
@@ -1322,10 +1321,10 @@ func TestRemoteSearchNestedListingFailureKeepsFallbackWithNotice(t *testing.T) {
 	}
 	calls := rgCalls(one)
 	if len(calls) != 1 || !strings.Contains(strings.Join(calls[0], " "), "--no-ignore") {
-		t.Fatalf("rg calls = %v, want the widened fallback (no partial explicit candidates)", calls)
+		t.Fatalf("rg calls = %v, want the widened fallback", calls)
 	}
-	if len(argvAfterSlashSlash(calls[0])) != 0 {
-		t.Fatalf("partial nested candidates were used despite the failed listing: %v", calls[0])
+	if roots := argvAfterSlashSlash(calls[0]); len(roots) != 1 || roots[0] != "nested" {
+		t.Fatalf("fallback roots = %v, want the nested prefix", roots)
 	}
 	names := remoteSearchFileNames(t, batches)
 	if got := strings.Join(names, ","); got != "a.go,nested/inner.go" {
@@ -1411,5 +1410,110 @@ func TestRemoteSearchNestedListingCancellation(t *testing.T) {
 		case <-deadline:
 			t.Fatal("a cancelled nested search did not close its channel")
 		}
+	}
+}
+
+// TestRemoteSearchNestedFallbackNarrowsRoots checks an unresolved nested repository is
+// scanned in place: the widened rg command's roots are the prefixes, not ".", so unrelated
+// ignored entries elsewhere cannot consume the output cap.
+func TestRemoteSearchNestedFallbackNarrowsRoots(t *testing.T) {
+	top := []byte(gitLsEntry("160000", "nested"))
+	one := nestedCandidateScript(top, nil, 1, false)
+	base := one.script
+	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "rg" {
+			return hostos.ProcResult{Stdout: []byte("nested/inner.go:1:1:todo n\n")}, nil
+		}
+		return base(ctx, argv, o)
+	}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	calls := rgCalls(one)
+	if len(calls) != 1 {
+		t.Fatalf("rg calls = %v, want one fallback", calls)
+	}
+	roots := argvAfterSlashSlash(calls[0])
+	if len(roots) != 1 || roots[0] != "nested" {
+		t.Fatalf("fallback roots = %v, want exactly the nested prefix", roots)
+	}
+	if got := strings.Join(remoteSearchFileNames(t, batches), ","); got != "nested/inner.go" {
+		t.Fatalf("files = %q, want the prefix-walk result", got)
+	}
+}
+
+// TestRemoteSearchWidenedCapMarkedIncomplete checks a widened fallback that hits the remote
+// output cap is explicitly marked incomplete (Truncated plus a cap notice), never reported
+// as a complete search that merely missed some candidates.
+func TestRemoteSearchWidenedCapMarkedIncomplete(t *testing.T) {
+	top := []byte(gitLsEntry("160000", "nested"))
+	one := nestedCandidateScript(top, nil, 1, false)
+	base := one.script
+	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "rg" {
+			return hostos.ProcResult{Stdout: []byte(""), Truncated: true}, nil
+		}
+		return base(ctx, argv, o)
+	}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	var done *searchpanel.SearchBatch
+	for i := range batches {
+		if batches[i].Done {
+			done = &batches[i]
+			break
+		}
+	}
+	if done == nil {
+		t.Fatal("no Done batch")
+	}
+	if !done.Truncated {
+		t.Fatalf("Done batch = %+v, want Truncated for a cap-hit widened run", *done)
+	}
+	if !strings.Contains(done.Notice, "incomplete") || !strings.Contains(done.Notice, "output cap") {
+		t.Fatalf("notice = %q, want the explicit cap-incomplete notice", done.Notice)
+	}
+}
+
+// TestRemoteSearchTooLargeWidenedCapMarkedIncomplete checks the same honesty for the
+// too-large candidate-list widened fallback (roots are the whole tree there).
+func TestRemoteSearchTooLargeWidenedCapMarkedIncomplete(t *testing.T) {
+	var ls strings.Builder
+	for i := 0; i < searchScopeMaxBatches*searchScopeBatchFiles+1; i++ {
+		ls.WriteString(gitLsEntry("100644", fmt.Sprintf("src/f%05d.go", i)))
+	}
+	base := candidateRgScript(true, []byte(ls.String()), 0, false)
+	one := &fakeOneShot{}
+	one.script = func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "rg" {
+			return hostos.ProcResult{Stdout: []byte(""), Truncated: true}, nil
+		}
+		return base.script(ctx, argv, o)
+	}
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	var done *searchpanel.SearchBatch
+	for i := range batches {
+		if batches[i].Done {
+			done = &batches[i]
+			break
+		}
+	}
+	if done == nil || !done.Truncated {
+		t.Fatalf("Done batch = %+v, want Truncated for a cap-hit widened run", done)
+	}
+	if !strings.Contains(done.Notice, "incomplete") || !strings.Contains(done.Notice, "output cap") || !strings.Contains(done.Notice, "too large") {
+		t.Fatalf("notice = %q, want the too-large reason plus cap-incomplete", done.Notice)
 	}
 }

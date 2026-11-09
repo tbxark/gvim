@@ -765,11 +765,17 @@ git defines it (tracked-ignored files included, untracked ignored files left out
 candidates join the explicit batches, and a complete resolution carries no degradation
 notice. Resolution is all-or-nothing: more than 8 nested repositories, a failed/truncated
 or non-UTF-8 listing, a path escaping the workspace, or a deeper nested
-repository/submodule leaves every prefix unresolved and keeps the widened whole-tree walk,
-which prunes hidden path segments and `IGNORED_DIRS` (`.git`, `node_modules`, `target`,
-`__pycache__`, `.hg`, `.svn`, `.DS_Store`) and carries the non-fatal notice — a partial
-nested candidate set is never presented as complete, and a deeper nested repository's own
-`.gitignore` is not applied in that fallback (recorded residual). The explicit-candidate
+repository/submodule leaves every prefix unresolved and keeps the widened walk fallback.
+That fallback searches the unresolved nested-prefix roots in place (not the whole tree), so
+unrelated ignored entries cannot consume its output cap before them; the wider whole-tree
+fallback is reserved for a candidate list too large for the bounded explicit batches. Both
+prune hidden path segments and `IGNORED_DIRS` (`.git`, `node_modules`, `target`,
+`__pycache__`, `.hg`, `.svn`, `.DS_Store`) in the candidate filter and carry the non-fatal
+notice. If the widened run hits the remote output cap, the batches are marked `Truncated`
+and the notice says the result is incomplete because candidate files beyond the cap were
+not reported — never a complete-looking result; a partial nested candidate set is never
+presented as complete, and a deeper nested repository's own `.gitignore` is not applied in
+that fallback (recorded residual). The explicit-candidate
 half keeps git's exception: a tracked candidate under such a directory is still searched
 because git lists it; only walked/nested content is pruned. All commands run through the
 authority one-shot surface with the remote cwd, stay bounded/cancellable (the search context

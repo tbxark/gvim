@@ -376,19 +376,20 @@ func TestExitMarkerAppearsWhenTheDockWasHidden(t *testing.T) {
 	}
 }
 
-// TestAltScreenExitKeepsTheFrozenFrameAndSavesTheMarker checks the alternate-screen
-// exception: there is no scrollback to open, so the frozen frame stays (no
-// surprise notice), while the marker is still persisted exactly once for the
-// restore.
-func TestAltScreenExitKeepsTheFrozenFrameAndSavesTheMarker(t *testing.T) {
+// TestAltScreenExitShowsFrozenFrameAndOneMarker checks the alternate-screen exit:
+// there is no history to scroll, but the frozen frame is shown as the read-only
+// transcript with Fresh's marker last (the exit is visible instead of hidden behind
+// the frozen screen), Ctrl+Space still toggles the frozen frame, and the marker is
+// saved exactly once after the frame's output.
+func TestAltScreenExitShowsFrozenFrameAndOneMarker(t *testing.T) {
 	t.Parallel()
 	term := newFakeTerm()
 	term.screen = newScreen(20, "alt frame")
 	term.alt = true
 	p := newTestPanel(t, &fakeStarter{term: term})
 	p.Update(exitMsg{gen: p.gen})
-	if p.Scrolling() {
-		t.Fatal("an alternate-screen exit opened a scrollback it does not have")
+	if !p.Scrolling() {
+		t.Fatal("an alternate-screen exit did not show its frozen-frame transcript")
 	}
 	if p.notice != "" {
 		t.Fatalf("alternate-screen exit notice = %q, want none", p.notice)
@@ -396,17 +397,106 @@ func TestAltScreenExitKeepsTheFrozenFrameAndSavesTheMarker(t *testing.T) {
 	if got := p.title(); !strings.Contains(got, "(exited)") {
 		t.Fatalf("alt exit title = %q, want the exit named", got)
 	}
-	st := p.SavedState()
-	if len(st.Rows) == 0 || st.Rows[len(st.Rows)-1] != terminalExitMarker {
-		t.Fatalf("saved rows = %q, want the marker last", st.Rows)
+	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+		t.Fatalf("alt transcript last row = %q, %v", got, ok)
 	}
-	if n := strings.Count(strings.Join(st.Rows, "\n"), terminalExitMarker); n != 1 {
-		t.Fatalf("saved marker count = %d", n)
+	// The frame is not overwritten: output above, marker below, in the pager.
+	l := scrollLayout()
+	g := grid.New(l.W, l.H)
+	p.Draw(g, l, style.Styles{})
+	rows := g.Plain()
+	frameAt, markerAt := -1, -1
+	for i, row := range rows {
+		if strings.Contains(row, "alt frame") {
+			frameAt = i
+		}
+		if strings.Contains(row, terminalExitMarker) {
+			markerAt = i
+		}
 	}
-	// A later sync does not retry the impossible pager or add a notice.
+	if frameAt < 0 || markerAt < 0 || markerAt <= frameAt {
+		t.Fatalf("alt pager rows = %q, want frame then marker", rows)
+	}
+	// Ctrl+Space returns to the frozen frame (no marker there) and back.
+	if _, ok := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl}); !ok || p.Scrolling() {
+		t.Fatalf("Ctrl+Space from the alt transcript: taken %v scrolling %v", ok, p.Scrolling())
+	}
+	g = grid.New(l.W, l.H)
+	p.Draw(g, l, style.Styles{})
+	if got := strings.Join(g.Plain(), "\n"); strings.Contains(got, terminalExitMarker) || !strings.Contains(got, "alt frame") {
+		t.Fatalf("frozen alt frame = %q", g.Plain())
+	}
+	if _, ok := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl}); !ok || !p.Scrolling() {
+		t.Fatalf("Ctrl+Space back to the alt transcript: taken %v scrolling %v", ok, p.Scrolling())
+	}
+	// Saving twice records the frame once and the marker once.
+	for range 2 {
+		st := p.SavedState()
+		joined := strings.Join(st.Rows, "\n")
+		if n := strings.Count(joined, terminalExitMarker); n != 1 {
+			t.Fatalf("saved alt marker count = %d in %q", n, st.Rows)
+		}
+		if n := strings.Count(joined, "alt frame"); n != 1 {
+			t.Fatalf("saved alt frame count = %d in %q", n, st.Rows)
+		}
+		if st.Rows[len(st.Rows)-1] != terminalExitMarker {
+			t.Fatalf("saved alt rows = %q, want the marker last", st.Rows)
+		}
+	}
+	// A later sync keeps the transcript and adds no notice.
 	p.Sync()
-	if p.Scrolling() || p.notice != "" {
+	if !p.Scrolling() || p.notice != "" {
 		t.Fatalf("after sync: scrolling %v notice %q", p.Scrolling(), p.notice)
+	}
+}
+
+// TestAltScreenExitRestartAndRestoreKeepOneMarker checks the alternate-screen
+// transcript survives a restart and a save/restore round trip: the frozen frame is
+// above one marker, the restarted shell continues below it, and a restored read-only
+// record does not duplicate either.
+func TestAltScreenExitRestartAndRestoreKeepOneMarker(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.screen = newScreen(20, "alt frame")
+	term.alt = true
+	starter := &fakeStarter{term: term}
+	p := newTestPanel(t, starter)
+	p.Update(exitMsg{gen: p.gen})
+	st := p.SavedState()
+	// Restart from the frozen-frame transcript: the old frame and exactly one marker
+	// stay above the new shell's output.
+	starter.term = newFakeTerm()
+	starter.term.screen = newScreen(20, "new output")
+	cmd := p.Restart()
+	if cmd == nil {
+		t.Fatal("Restart from the alt transcript returned no command")
+	}
+	for _, msg := range messages(cmd) {
+		p.Update(msg)
+	}
+	if !p.Running() || p.Scrolling() {
+		t.Fatalf("after alt restart: running %v scrolling %v", p.Running(), p.Scrolling())
+	}
+	after := p.SavedState()
+	joined := strings.Join(after.Rows, "\n")
+	if n := strings.Count(joined, terminalExitMarker); n != 1 {
+		t.Fatalf("marker after alt restart = %d in %q", n, after.Rows)
+	}
+	if n := strings.Count(joined, "alt frame"); n != 1 {
+		t.Fatalf("old alt frame after restart = %d in %q", n, after.Rows)
+	}
+	// A save/restore round trip of the exited alt state keeps one marker and the frame.
+	var tabs Tabs
+	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 4 }, Focus: func() {}})
+	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	tabs.Restore(st)
+	restored := tabs.SavedState()
+	joined = strings.Join(restored.Rows, "\n")
+	if n := strings.Count(joined, terminalExitMarker); n != 1 || !strings.Contains(joined, "alt frame") {
+		t.Fatalf("restored alt rows = %q", restored.Rows)
+	}
+	if !tabs.Restored() {
+		t.Fatal("the restored alt record is not read-only")
 	}
 }
 

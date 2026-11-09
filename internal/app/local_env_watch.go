@@ -18,7 +18,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -74,7 +73,7 @@ func startLocalEnvWatchWith(parent context.Context, provider *env.Provider, root
 		return nil
 	}
 	if err != nil {
-		provider.SetWatchNotice(fmt.Sprintf("Local environment: file watching is unavailable (%v); changed detector markers are picked up on Env: Reload", err))
+		provider.SetWatchNotice(appTextVars("gvim.notice.local_env_watch_unavailable", "Local environment: file watching is unavailable (%{error}); changed detector markers are picked up on Env: Reload", map[string]any{"error": err}))
 		return nil
 	}
 	if watcher == nil {
@@ -139,7 +138,7 @@ func (lw *localEnvWatch) run() {
 			lw.provider.RefreshDetection()
 		case changed, ok := <-lw.watcher.Events():
 			if !ok {
-				lw.provider.SetWatchNotice("Local environment: the file watcher ended; changed detector markers are picked up on Env: Reload")
+				lw.provider.SetWatchNotice(appText("gvim.notice.local_env_watch_ended", "Local environment: the file watcher ended; changed detector markers are picked up on Env: Reload"))
 				return
 			}
 			plan := lw.plan.Load()
@@ -177,7 +176,7 @@ func (lw *localEnvWatch) armDirs() bool {
 	desired := map[string]bool{}
 	rootAbs, err := filepath.Abs(lw.root)
 	if err != nil {
-		lw.provider.SetWatchNotice(fmt.Sprintf("Local environment: cannot resolve the workspace root (%v); changed detector markers are picked up on Env: Reload", err))
+		lw.provider.SetWatchNotice(appTextVars("gvim.notice.local_env_watch_root_failed", "Local environment: cannot resolve the workspace root (%{error}); changed detector markers are picked up on Env: Reload", map[string]any{"error": err}))
 		return false
 	}
 	desired[rootAbs] = true
@@ -225,12 +224,12 @@ func (lw *localEnvWatch) armDirs() bool {
 	}
 	switch {
 	case rootFailed:
-		lw.provider.SetWatchNotice("Local environment: the workspace root cannot be watched; changed detector markers are picked up on Env: Reload")
+		lw.provider.SetWatchNotice(appText("gvim.notice.local_env_watch_root_unwatchable", "Local environment: the workspace root cannot be watched; changed detector markers are picked up on Env: Reload"))
 		return false
 	case failed > 0:
-		lw.provider.SetWatchNotice(fmt.Sprintf("Local environment: %d detector marker director(ies) cannot be watched; changed markers there are picked up on Env: Reload", failed))
-	case plan.limitNotice != "":
-		lw.provider.SetWatchNotice(plan.limitNotice)
+		lw.provider.SetWatchNotice(appTextVars("gvim.notice.local_env_watch_dirs", "Local environment: %{count} detector marker director(ies) cannot be watched; changed markers there are picked up on Env: Reload", map[string]any{"count": failed}))
+	case plan.omitted > 0 || plan.omittedDirs > 0:
+		lw.provider.SetWatchNotice(localEnvWatchLimitNotice(plan))
 	default:
 		lw.provider.SetWatchNotice("")
 	}

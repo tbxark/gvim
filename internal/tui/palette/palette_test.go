@@ -730,3 +730,126 @@ func TestTabIsANoOpInLiveGrep(t *testing.T) {
 		t.Fatal("Tab closed Live Grep")
 	}
 }
+
+// TestTabFileSuggestionKeepsTheLineTarget: a file query's :line[:col] target survives
+// Tab. The path may contain a colon (a Windows drive or a colon in a file name); the
+// target is read from the end and the path is not cut. A leading palette mode
+// character in the file name is escaped with "./" so the query stays in file mode and
+// the ranker sees the unescaped path.
+func TestTabFileSuggestionKeepsTheLineTarget(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		files []string
+		want  string
+		path  string
+		line  int
+		col   int
+	}{
+		{
+			name: "path with target", query: "src/a.go:12:3",
+			files: []string{"src/a.go", "src/a_test.go"},
+			want:  "src/a.go:12:3", path: "src/a.go", line: 12, col: 3,
+		},
+		{
+			name: "windows drive and target", query: "C:\\repo\\a.go:7",
+			files: []string{"C:\\repo\\a.go"},
+			want:  "C:\\repo\\a.go:7", path: "C:\\repo\\a.go", line: 7,
+		},
+		{
+			name: "colon in a file name", query: "dir/a:b.go:5:2",
+			files: []string{"dir/a:b.go"},
+			want:  "dir/a:b.go:5:2", path: "dir/a:b.go", line: 5, col: 2,
+		},
+		{
+			name: "leading mode prefix needs an escape", query: "notes:3",
+			files: []string{">notes.txt"},
+			want:  "./>notes.txt:3", path: ">notes.txt", line: 3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New(Options{Query: tt.query, Files: &fakeFiles{files: tt.files}, Ranker: &fakeRanker{}})
+			settle(t, p, p.Init(), 4)
+			if len(p.rows) == 0 || p.rows[p.nav.Selected()].kind != rowFile {
+				t.Fatalf("no file row selected for %q: %+v", tt.query, p.rows)
+			}
+			cmd := p.update(key(tea.KeyTab))
+			settle(t, p, cmd, 4)
+			if got := p.input.Value(); got != tt.want {
+				t.Fatalf("query after Tab = %q, want %q", got, tt.want)
+			}
+			mode, _ := commands.ParseQuery(p.input.Value())
+			if mode != commands.ModeFile {
+				t.Fatalf("query %q is in mode %v, want file mode", p.input.Value(), mode)
+			}
+			if p.fileText != tt.path || p.fileLine != tt.line || p.fileCol != tt.col {
+				t.Fatalf("parsed file target = %q:%d:%d, want %q:%d:%d", p.fileText, p.fileLine, p.fileCol, tt.path, tt.line, tt.col)
+			}
+		})
+	}
+}
+
+// TestTabFileSuggestionWithoutATarget: a file query with no jump target still accepts
+// the path; a path whose own name ends in a colon+number is kept verbatim instead of
+// being re-read as a jump target, and a leading mode character is escaped.
+func TestTabFileSuggestionWithoutATarget(t *testing.T) {
+	t.Run("numeric suffix in the path", func(t *testing.T) {
+		p := New(Options{Query: "dir/a", Files: &fakeFiles{files: []string{"dir/a:12"}}, Ranker: &fakeRanker{}})
+		settle(t, p, p.Init(), 4)
+		if len(p.rows) == 0 || p.rows[p.nav.Selected()].kind != rowFile {
+			t.Fatalf("no file row selected: %+v", p.rows)
+		}
+		settle(t, p, p.update(key(tea.KeyTab)), 4)
+		if got := p.input.Value(); got != "dir/a:12" {
+			t.Fatalf("query after Tab = %q, want the verbatim path dir/a:12", got)
+		}
+		if p.fileText != "dir/a:12" || p.fileLine != 0 || p.fileCol != 0 {
+			t.Fatalf("parsed file = %q:%d:%d, want dir/a:12 with no target", p.fileText, p.fileLine, p.fileCol)
+		}
+	})
+	t.Run("leading mode prefix", func(t *testing.T) {
+		p := New(Options{Query: "note", Files: &fakeFiles{files: []string{">notes.txt"}}, Ranker: &fakeRanker{}})
+		settle(t, p, p.Init(), 4)
+		if len(p.rows) == 0 || p.rows[p.nav.Selected()].kind != rowFile {
+			t.Fatalf("no file row selected: %+v", p.rows)
+		}
+		settle(t, p, p.update(key(tea.KeyTab)), 4)
+		if got := p.input.Value(); got != "./>notes.txt" {
+			t.Fatalf("query after Tab = %q, want the escaped path ./%s", got, ">notes.txt")
+		}
+		if p.fileText != ">notes.txt" || p.fileLine != 0 || p.fileCol != 0 {
+			t.Fatalf("parsed file = %q:%d:%d, want %q with no target", p.fileText, p.fileLine, p.fileCol, ">notes.txt")
+		}
+	})
+}
+
+// TestTabFileRawPathDoesNotLeakAcrossModes: the verbatim accepted-path bypass is only
+// for the accepted file query. Leaving file mode clears it, so returning to a query
+// with the same text parses normally again instead of keeping a stale bypass.
+func TestTabFileRawPathDoesNotLeakAcrossModes(t *testing.T) {
+	p := New(Options{Query: "dir/a", Files: &fakeFiles{files: []string{"dir/a:12"}}, Ranker: &fakeRanker{}})
+	settle(t, p, p.Init(), 4)
+	settle(t, p, p.update(key(tea.KeyTab)), 4)
+	if p.fileRaw != "dir/a:12" {
+		t.Fatalf("accepted raw path = %q, want dir/a:12", p.fileRaw)
+	}
+	// Move to the start, enter command mode, and come back to the same file text.
+	settle(t, p, p.update(key(tea.KeyHome)), 4)
+	settle(t, p, p.update(typed(">")), 4)
+	if got := p.input.Value(); got != ">dir/a:12" {
+		t.Fatalf("command-mode query = %q, want >dir/a:12", got)
+	}
+	if p.fileRaw != "" {
+		t.Fatalf("the file bypass survived a mode switch: %q", p.fileRaw)
+	}
+	settle(t, p, p.update(key(tea.KeyBackspace)), 4)
+	if got := p.input.Value(); got != "dir/a:12" {
+		t.Fatalf("file-mode query = %q, want dir/a:12", got)
+	}
+	// With the stale bypass gone, the query parses as the original contract:
+	// path dir/a with line 12. (The user would retype the full path to avoid this.)
+	if p.fileText != "dir/a" || p.fileLine != 12 {
+		t.Fatalf("file parse = %q:%d, want dir/a:12 as path:line without the bypass", p.fileText, p.fileLine)
+	}
+}

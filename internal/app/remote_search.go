@@ -189,24 +189,25 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		batches, ok := batchSearchPaths(scope.paths)
 		switch {
 		case len(scope.prefixes) > 0:
-			// Nested repositories/submodules are listed only by name, so their contents
-			// cannot be passed as explicit candidate files without silently losing them.
-			// Keep the whole-tree scan (which reaches them through the prefix rule) and
-			// tell the user that ignored entries were scanned.
-			scope.notice = "remote search scanned the whole tree because nested repositories/submodules cannot be passed as explicit candidate paths; ignored entries may be scanned and results may be capped"
+			// The nested repositories/submodules that could not be resolved into their own
+			// candidate lists are searched in place: the widened run's roots are exactly
+			// those prefixes, not the whole tree, so unrelated ignored entries cannot
+			// consume the output cap before them. The prefix filter still decides what is
+			// in scope; a cap hit is reported as incomplete below.
+			scope.notice = "remote search scanned the nested repositories/submodules in place because their candidate lists were unavailable; ignored entries may be scanned and results may be capped"
 			widen = true
-			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen))
+			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen, scope.prefixes))
 		case !ok:
 			scope.notice = "remote search scanned ignored entries because the candidate file list was too large to pass explicitly; results may be capped before every candidate file is searched"
 			widen = true
-			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen))
+			res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen, nil))
 		case len(scope.paths) == 0:
 			// An empty candidate list has no files to search: no tool run and no paths.
 		default:
 			res, err = s.runBatched(ctx, tool, req, batches)
 		}
 	} else {
-		res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen))
+		res, err = s.run(ctx, s.root, remoteSearchArgv(tool, req, widen, nil))
 	}
 	if err != nil {
 		if cancelled() {
@@ -227,6 +228,17 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		return
 	}
 	truncated := res.Truncated
+	if widen && res.Truncated && scope != nil {
+		// A widened run consumed the remote output cap: candidate files beyond the cap
+		// were neither searched nor reported, so the result is explicitly incomplete. The
+		// generic degradation notice is kept, with the cap consequence spelled out.
+		capNotice := "remote search result is incomplete: the widened fallback scan hit the remote output cap before all candidate files were reported; narrow the scope or refine the query"
+		if scope.notice != "" {
+			scope.notice += "; " + capNotice
+		} else {
+			scope.notice = capNotice
+		}
+	}
 	pending := make([]searchpanel.FileMatches, 0, searchBatchFiles)
 	pendingMatches := 0
 	totalMatches := 0
@@ -702,10 +714,13 @@ func remoteSearchArgvWithPaths(tool string, req searchpanel.SearchRequest, paths
 
 // remoteSearchArgv builds the remote search command line: no shell, the query is a single
 // -e argument.
-// A whole-tree fallback run (widen) scans ignored and hidden entries for the caller's
-// candidate filter; the normal path passes explicit candidate paths instead. rg uses its vimgrep output (file:line:byte-column:text); grep falls back to
-// -r -n -I and the column is recovered from the line text.
-func remoteSearchArgv(tool string, req searchpanel.SearchRequest, widen bool) []string {
+// A widened fallback run (widen) scans ignored and hidden entries for the caller's
+// candidate filter; roots narrows it to the unresolved nested-repository prefixes when
+// there are any, otherwise the whole tree is scanned. A cap hit is made explicit as an
+// incomplete result by the caller. The normal path passes explicit candidate files. rg
+// uses its vimgrep output (file:line:byte-column:text); grep falls back to -r -n -I and the
+// column is recovered from the line text.
+func remoteSearchArgv(tool string, req searchpanel.SearchRequest, widen bool, roots []string) []string {
 	switch tool {
 	case "rg":
 		argv := []string{"rg", "--vimgrep", "--no-heading", "--color", "never", "--no-messages"}
@@ -724,7 +739,8 @@ func remoteSearchArgv(tool string, req searchpanel.SearchRequest, widen bool) []
 			// notice that ignored entries were scanned.
 			argv = append(argv, "--no-ignore", "--hidden", "-g", "!.git")
 		}
-		return append(argv, "-e", req.Query, ".")
+		argv = append(argv, "-e", req.Query)
+		return remoteSearchRoots(argv, roots)
 	default:
 		argv := []string{"grep", "-r", "-n", "-I", "--color=never"}
 		for _, dir := range remoteGrepSkipDirs {
@@ -741,8 +757,23 @@ func remoteSearchArgv(tool string, req searchpanel.SearchRequest, widen bool) []
 		} else {
 			argv = append(argv, "-F")
 		}
-		return append(argv, "-e", req.Query, ".")
+		argv = append(argv, "-e", req.Query)
+		return remoteSearchRoots(argv, roots)
 	}
+}
+
+// remoteSearchRoots appends the widened run's roots after -- when there are narrower
+// roots (nested repositories searched in place); otherwise the caller leaves the "."
+// default so the ordinary whole-tree fallback is unchanged.
+func remoteSearchRoots(argv []string, roots []string) []string {
+	if len(roots) == 0 {
+		return append(argv, ".")
+	}
+	argv = append(argv, "--")
+	for _, root := range roots {
+		argv = append(argv, strings.TrimSuffix(root, "/"))
+	}
+	return argv
 }
 
 // remoteGrepLine matches both rg's file:line:byte-column:text and grep's file:line:text,

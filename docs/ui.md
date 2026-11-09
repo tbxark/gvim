@@ -106,11 +106,16 @@ same card, between its borders:
 **Palette keyboard.** Up/Down move the selection, PageUp/PageDown page it, Enter
 runs/opens the selected row and Escape closes the palette. Tab accepts the selected
 suggestion into the query instead of running it (Fresh's `prompt_accept_suggestion`): in
-the file mode it fills the ranked path, in command/buffer/line modes the command name,
-buffer name or line target, preserving the `>`, `#` or `:` mode prefix; the palette stays
-open, the rows re-query, and Enter then runs/opens it. A message row, a disabled command
-or no selection leaves the query unchanged. In Live Grep's floating overlay Tab is a
-no-op, as in Fresh (its suggestion values are opaque).
+the file mode it fills the ranked path together with the `:line[:col]` target the query named,
+so a jump target is not lost; a Windows drive or any other colon in the path is left intact
+and the target is read from the end. A file whose own name ends in `:number` is kept verbatim
+for that accepted query instead of being re-read as a jump target, and a name that begins
+with a palette mode character (`>`, `#` or `:`) is written with a leading `./` escape so the query stays
+in file mode (the ranker strips that escape). In command/buffer/line modes Tab fills the
+command name, buffer name or line target, preserving the `>`, `#` or `:` mode prefix; the palette
+stays open, the rows re-query, and Enter then runs/opens it. A message row, a disabled
+command or no selection leaves the query unchanged. In Live Grep's floating overlay Tab
+is a no-op, as in Fresh (its suggestion values are opaque).
 
 - **Live Grep toolbar** (one row between the title border and the item rows, in Live
   Grep mode only). The match modes and the scopes are `Alt+<letter> Label:on|off`

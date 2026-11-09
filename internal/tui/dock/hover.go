@@ -52,7 +52,7 @@ func (p *Panel) updateHover(mo tea.Mouse, row int) {
 		start: start, end: end, token: token,
 	}
 	if p.host.Notice != nil {
-		p.host.Notice("Ctrl+Click to open " + token)
+		p.host.Notice(dockTextVars("gvim.dock.hover_open", "Ctrl+Click to open %{token}", map[string]any{"token": token}))
 	}
 }
 

@@ -32,8 +32,11 @@ The switch is **Ctrl+Space** while the dock has the focus; the dock reads the ke
 before the keymap, so no preset binds it. **Ctrl+]** is the only chord that gives
 the keyboard back to the editor. Inside scrollback, **Esc** also returns to the
 live screen. **Shift+PageUp** enters scrollback from the live screen, as Fresh's
-does. A shell on the alternate screen has no history, so Ctrl+Space only reports
-`The alternate screen has no scrollback.` there. Keyboard capture (F9) keeps
+does. A RUNNING shell on the alternate screen has no history, so Ctrl+Space only
+reports `The alternate screen has no scrollback.` there; once that shell exits, the
+frozen frame can be shown as the read-only transcript (its visible rows plus the
+exit marker, with no history) and Ctrl+Space opens it, as described under Exit
+status and the exit marker. Keyboard capture (F9) keeps
 every key for the shell, including Ctrl+Space; turn capture off to reach
 scrollback. Losing the dock's focus leaves scrollback, so the dock is live the
 next time it is focused; a restored transcript keeps its read-only view instead.
@@ -255,10 +258,17 @@ background tabs' exited markers current.
   where Fresh's i32 exit code has no signal field; and gvim keeps an extra frozen
   live screen reachable with Ctrl+Space (Fresh stays in read-only scrollback), so
   the marker is on the view the dock opens at exit but a user who toggles back to
-  the frozen screen does not see it there; an alternate-screen exit cannot open a
-  pager (`The alternate screen has no scrollback.`) — gvim keeps that frozen frame
-  silently and persists the marker row for the restore instead of raising the
-  pager notice.
+  the frozen screen does not see it there. An alternate-screen exit has no history
+  to page through, but gvim still shows the exit: the frozen frame is turned into
+  the read-only transcript (the visible alt rows followed by the marker, title
+  `Scrollback (exited, …)`), auto-opened at exit like a main-screen one, and
+  Ctrl+Space still toggles it with the frozen frame. Nothing overwrites the
+  frame's output: a save stores the frame rows with exactly one marker after them,
+  a restart continues below the captured frame and marker, and a restore shows the
+  same text record without duplicating either. The pager has no alternate-screen
+  history (x/vt keeps none), so only the visible frame and the marker are there; a
+  running alt-screen program still gets the plain `The alternate screen has no
+  scrollback.` refusal.
 - **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
   launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab,
   plus the additive `title` (OSC 0/2), `exit_code`/`exit_known` pair for an exited

@@ -3,6 +3,7 @@ package pluginhost
 import (
 	"context"
 	"path"
+	"sync"
 	"testing"
 
 	"github.com/tbxark/gvim/plugin/hostos"
@@ -111,11 +112,10 @@ func TestAuthorityOSCopyCanonicalAliasesRefused(t *testing.T) {
 	}
 }
 
-// TestAuthorityOSCopyWithoutStreamerRefusesExistingDestination: on a backend with no
-// atomic WriteStream the whole-file fallback truncates the destination. A destination
-// hard-linked to the source would therefore destroy the source, and realpath cannot
-// identify hard links; refuse an existing destination instead. A missing destination
-// still takes the bounded fallback (no pre-existing data to lose).
+// TestAuthorityOSCopyWithoutStreamerRefusesExistingDestination: without an atomic
+// streamed-write surface an existing destination cannot be replaced safely (a hard link
+// to the source cannot be identified by realpath, and a plain WriteFile truncates), so
+// the copy refuses before writing. The destination and source stay unchanged.
 func TestAuthorityOSCopyWithoutStreamerRefusesExistingDestination(t *testing.T) {
 	remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
 	remote.files["/srv/proj/a.txt"] = "source data"
@@ -162,5 +162,68 @@ func TestAuthorityOSCopyRootIntoChildRefused(t *testing.T) {
 	}
 	if calls := local.Calls(); len(calls) != 0 {
 		t.Fatalf("refused root copy touched the local OS: %v", calls)
+	}
+}
+
+// fakeNoStreamFiles records any fallback write so a test can prove that a backend without
+// an atomic streamer refuses before creating or writing the destination.
+type fakeNoStreamFiles struct {
+	*fakeMutableFiles
+	mu     sync.Mutex
+	writes int
+}
+
+func (f *fakeNoStreamFiles) WriteFile(ctx context.Context, p string, data []byte, o hostos.WriteOptions) error {
+	f.mu.Lock()
+	f.writes++
+	f.mu.Unlock()
+	return f.fakeMutableFiles.WriteFile(ctx, p, data, o)
+}
+
+func (f *fakeNoStreamFiles) writeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.writes
+}
+
+// TestAuthorityOSCopyWithoutStreamerRefusesBeforeWrite: there is no same-handle
+// create+write or atomic streamer on this backend, so even a new destination must be
+// refused before it is created; a concurrent writer's pre-existing target is untouched.
+// This is the regression for the rejected create-then-WriteFile scheme.
+func TestAuthorityOSCopyWithoutStreamerRefusesBeforeWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dst  string
+		pre  string
+	}{
+		{name: "new destination", dst: "new.txt"},
+		{name: "concurrent writer target", dst: "new.txt", pre: "winner"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
+			remote.files["/srv/proj/a.txt"] = "source data"
+			if tc.pre != "" {
+				remote.files["/srv/proj/"+tc.dst] = tc.pre
+			}
+			files := &fakeNoStreamFiles{fakeMutableFiles: remote}
+			slot, _, _ := authorityTestSlot(files)
+			local := plugintest.NewFakeOS()
+			osys := NewAuthorityOS(slot, local, nil).(*authorityOS)
+			err := osys.Copy(context.Background(), "a.txt", tc.dst)
+			if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+				t.Fatalf("copy without a streamer = %v, code %q; want unsupported", err, pluginapi.CodeOf(err))
+			}
+			if writes := files.writeCount(); writes != 0 {
+				t.Fatalf("refused copy called WriteFile %d times", writes)
+			}
+			if got, ok := remote.files["/srv/proj/"+tc.dst]; ok && tc.pre == "" {
+				t.Fatalf("refused copy created destination %q", got)
+			} else if tc.pre != "" && got != tc.pre {
+				t.Fatalf("refused copy changed the concurrent target: %q", got)
+			}
+			if calls := local.Calls(); len(calls) != 0 {
+				t.Fatalf("refused copy touched the local OS: %v", calls)
+			}
+		})
 	}
 }

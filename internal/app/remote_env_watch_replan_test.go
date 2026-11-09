@@ -103,7 +103,7 @@ func TestRemoteEnvWatchReplanRespectsBounds(t *testing.T) {
 	waitWatchCount(t, raw, 1)
 	watch.Replan(detectors)
 	waitWatchCount(t, raw, 1+env.MaxDetectorWatchDirs)
-	if notice := provider.WatchNotice(); !strings.Contains(notice, "not watched") || !strings.Contains(notice, "watch bound") {
+	if notice := provider.WatchNotice(); !strings.HasPrefix(notice, "Remote environment:") || !strings.Contains(notice, "not watched") || !strings.Contains(notice, "watch bound") {
 		t.Fatalf("replan bound notice = %q", notice)
 	}
 }

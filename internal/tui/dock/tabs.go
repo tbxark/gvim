@@ -290,7 +290,7 @@ type tabDrag struct {
 func (t *Tabs) NewTab() tea.Cmd {
 	if len(t.tabs) >= MaxTerminalTabs {
 		if t.host.Notice != nil {
-			t.host.Notice("Terminal: the tab limit (" + strconv.Itoa(MaxTerminalTabs) + ") is reached")
+			t.host.Notice(dockTextVars("gvim.dock.tab_limit_max", "Terminal: the tab limit (%{max}) is reached", map[string]any{"max": MaxTerminalTabs}))
 		}
 		return nil
 	}
@@ -516,7 +516,7 @@ func (t *Tabs) StartAgent(name string) (tea.Cmd, bool) {
 	}
 	if len(t.tabs) >= MaxTerminalTabs {
 		if t.host.Notice != nil {
-			t.host.Notice("Terminal: the tab limit (" + strconv.Itoa(MaxTerminalTabs) + ") is reached")
+			t.host.Notice(dockTextVars("gvim.dock.tab_limit_max", "Terminal: the tab limit (%{max}) is reached", map[string]any{"max": MaxTerminalTabs}))
 		}
 		return nil, false
 	}

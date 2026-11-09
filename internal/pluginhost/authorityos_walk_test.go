@@ -122,17 +122,23 @@ func TestAuthorityOSWalkRootError(t *testing.T) {
 }
 
 func TestAuthorityOSCopyFileRemote(t *testing.T) {
-	remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
+	remote := walkFixture()
 	remote.files["/srv/proj/a.txt"] = "payload"
-	osys, local, _ := authorityOSFor(t, remote)
+	stream := &fakeStreamFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}}
+	slot, _, _ := authorityTestSlot(stream)
+	local := plugintest.NewFakeOS()
+	osys := NewAuthorityOS(slot, local, nil)
 	if err := osys.Copy(context.Background(), "a.txt", "b.txt"); err != nil {
 		t.Fatal(err)
 	}
-	if got := remote.files["/srv/proj/b.txt"]; got != "payload" {
+	if got := stream.files["/srv/proj/b.txt"]; got != "payload" {
 		t.Fatalf("copied file = %q", got)
 	}
-	if got := remote.reads; len(got) != 1 || got[0] != "/srv/proj/a.txt" {
-		t.Fatalf("remote reads = %v", got)
+	stream.mu.Lock()
+	commits := stream.commits
+	stream.mu.Unlock()
+	if commits != 1 {
+		t.Fatalf("streamed file commits = %d, want 1", commits)
 	}
 	if calls := local.Calls(); len(calls) != 0 {
 		t.Fatalf("copy touched the local OS: %v", calls)
@@ -141,12 +147,6 @@ func TestAuthorityOSCopyFileRemote(t *testing.T) {
 	// A destination directory is a conflict, never a recursive overwrite.
 	if err := osys.Copy(context.Background(), "a.txt", "src"); err == nil || pluginapi.CodeOf(err) != pluginapi.CodeConflict {
 		t.Fatalf("copy onto a directory = %v, code %q", err, pluginapi.CodeOf(err))
-	}
-	// A bounded whole-file copy refuses an oversize source before reading it.
-	remote.files["/srv/proj/huge.bin"] = ""
-	remote.sizes = map[string]int64{"/srv/proj/huge.bin": remoteCopyFileMax + 1}
-	if err := osys.Copy(context.Background(), "huge.bin", "copy.bin"); err == nil || pluginapi.CodeOf(err) != pluginapi.CodeTooLarge {
-		t.Fatalf("oversize copy = %v, code %q", err, pluginapi.CodeOf(err))
 	}
 	// A symlink source is not a regular file.
 	if err := osys.Copy(context.Background(), "link", "link-copy"); err == nil || pluginapi.CodeOf(err) != pluginapi.CodeInvalid {
@@ -158,19 +158,22 @@ func TestAuthorityOSCopyFileRemote(t *testing.T) {
 }
 
 func TestAuthorityOSCopyTreeRemote(t *testing.T) {
-	remote := &fakeMutableFiles{fakeRemoteFiles: walkFixture()}
-	remote.files["/srv/proj/src/b.go"] = "b"
-	remote.files["/srv/proj/src/sub/c.go"] = "c"
-	osys, local, mutable := authorityOSFor(t, remote)
+	remote := walkFixture()
+	remote.files["/srv/proj/src/b.go"] = "bb"
+	remote.files["/srv/proj/src/sub/c.go"] = "ccc"
+	stream := &fakeStreamFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}}
+	slot, _, _ := authorityTestSlot(stream)
+	local := plugintest.NewFakeOS()
+	osys := NewAuthorityOS(slot, local, nil)
 	ctx := context.Background()
 	if err := osys.Copy(ctx, "src", "dst"); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(mutable.mkdirs, ","); got != "/srv/proj,/srv/proj/dst/sub" {
+	if got := strings.Join(stream.mkdirs, ","); got != "/srv/proj,/srv/proj/dst/sub" {
 		t.Fatalf("copied dirs = %q", got)
 	}
-	if remote.files["/srv/proj/dst/b.go"] != "b" || remote.files["/srv/proj/dst/sub/c.go"] != "c" {
-		t.Fatalf("copied files = %v", remote.files)
+	if stream.files["/srv/proj/dst/b.go"] != "bb" || stream.files["/srv/proj/dst/sub/c.go"] != "ccc" {
+		t.Fatalf("copied files = %v", stream.files)
 	}
 	if calls := local.Calls(); len(calls) != 0 {
 		t.Fatalf("tree copy touched the local OS: %v", calls)

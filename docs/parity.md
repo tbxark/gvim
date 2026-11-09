@@ -21,15 +21,16 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `40598e7` plus the merged round-36 work (249–253; 254
-audit). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet,
-golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 124 KiB / de 82
-KiB / both 207 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
-EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r36-final.log`). The audit ran build/gofmt/
-i18n_check plus targeted round-36 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
-search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain
-security/secret-tool, real-tmux, Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching
-remain UNTESTED. Fresh reference: `refs/fresh` same date.
+Last verified: 2026-11-09, tree commit `c0b42a1` plus the merged round-37 work (255–257 plus the
+alt-screen/local-watcher fixes). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
+126 KiB / de 82 KiB / both 208 KiB, git diff --check). Final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+`/tmp/gvim-r37-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-37 tests/diff
+review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
+file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
+real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
+same date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
 config-layer + LSP-autostart gating/status pill), native sidebar sections with the Markdown
@@ -1513,6 +1514,61 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-37 outcome (2026-11-09, merged working tree on `c0b42a1`).** Tasks 255–257 landed plus the
+alternate-screen exit and local-watcher scope/i18n fixes. Static gates pass; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL (log
+`/tmp/gvim-r37-final.log`). The audit read the diff and ran targeted tests; the Lead ran the full
+suite.
+**Palette Tab keeps the file jump target (255; gvim extension).** In file mode Tab now fills the
+ranked path together with the `:line[:col]` target the query named, so a jump target is not lost
+(Fresh itself loses it). A Windows drive or any other colon in the path is left intact and the
+target is read from the end; a file whose own name ends in `:number` is kept verbatim for that
+accepted query instead of being re-read as a jump target; a name beginning with a palette mode
+character (>, # or :) is written with a leading `./` escape so the query stays in file mode (the
+ranker strips it). Command/buffer/line modes still fill the command/buffer name or line target
+preserving the >, # or : prefix; the palette stays open, rows re-query, Enter runs/opens. Message/
+disabled/no selection unchanged; Live Grep overlay Tab remains a no-op (R3/R13-3).
+**Remote plugin copy requires the atomic streamed-write surface (256).** Every remote file copy now
+goes through the authority's atomic WriteStream; a backend without that surface gets unsupported
+BEFORE reading, creating or writing the destination. There is deliberately no create-then-WriteFile
+fallback: FileCreator only creates an empty file and gives no exclusive handle for the data write, so
+another writer could replace the path and then be overwritten by the copy. A directory copy also
+requires the streamed-write surface (in addition to DirectoryCreator) before the destination claim/
+walk. With the surface an existing destination is atomically replaced (temp commit/abort), so the
+hard-link boundary is safe; a refused capability leaves no target created or written. Residuals:
+canonicalization is a pre-write proof (concurrent symlink swap after it is a documented TOCTOU),
+remote hard-link identity cannot be compared like local os.SameFile, parents are created before the
+claim, failure after claim can leave a partial tree, and metadata/growth/cancel limits remain
+(R13-19/R13-21).
+**Nested-prefix fallback roots + cap notice (257).** When nested candidates cannot all be resolved,
+the fallback now searches the unresolved nested-prefix ROOTS in place instead of the whole tree, so
+unrelated ignored entries cannot consume its output cap before them; the wider whole-tree fallback is
+reserved for a candidate list too large for the bounded explicit batches. Both prune hidden path
+segments and IGNORED_DIRS (.git, node_modules, target, __pycache__, .hg, .svn, .DS_Store) in the
+candidate filter and carry the non-fatal notice. If the widened run hits the remote output cap, the
+batches are marked Truncated and the notice says the result is incomplete because candidate files
+beyond the cap were not reported — never a complete-looking result; a partial nested candidate set is
+never presented as complete, and a deeper nested repository's own .gitignore is not applied in that
+fallback (recorded residual) (R13-11/R13-23).
+**Alternate-screen exit shows the read-only frame + marker.** A RUNNING alt-screen shell still has no
+history (Ctrl+Space reports “The alternate screen has no scrollback.”); once it exits, the frozen alt
+frame is turned into the read-only transcript (its visible rows plus the exit marker, title
+`Scrollback (exited, …)`), auto-opened at exit like a main-screen exit, and Ctrl+Space still toggles
+it with the frozen frame. Nothing overwrites the frame's output: a save stores the frame rows with
+exactly one marker after them, a restart continues below the captured frame and marker, and a restore
+shows the same text record without duplicating either. The pager has no alternate-screen history
+(x/vt keeps none), so only the visible frame and the marker are there (R13-15).
+**Local watcher scope notice + i18n.** Local env-watch degradation notices now use catalogue keys
+(unavailable/ended/root-failed/root-unwatchable/dirs/limit), and the watch-plan omitted/omittedDirs
+counters drive the limit notice (marker paths/directories not watched; use Env: Reload after changes).
+New dock strings (tab limit/numbered title/hover token), workspace extract title and the local-watch
+keys are catalogued; en 1117 / de 579 keys, 573 KiB text (under 640 KiB cap), ≈663 KiB embedded
+JSON, loader heap en 126 KiB / de 82 KiB / both 208 KiB (R13-5/R13-18).
+Metrics: palette 240, settings 69 in 14 sections, bundled 26 (9 on)/17 off, plugin API 244 functions/
+1489 lines level 2; i18n en 1117 / 579 per locale, 573 KiB text, ≈663 KiB JSON, heap 126-82-208 KiB.
+Full suite EXIT 0 (76 packages, log /tmp/gvim-r37-final.log); real hosts UNTESTED; no full-parity
+claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-36 outcome (2026-11-09, merged working tree on `40598e7`).** Five tasks landed (249–253);
 254 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
@@ -4425,6 +4481,31 @@ for parity status.
      fills selected suggestion into query (file ranked path; command/buffer/line name/target preserve
      >/#/: prefix), palette stays open/rows re-query, Enter runs; message/disabled/no selection unchanged;
      Live Grep floating overlay Tab no-op as Fresh; keyboard/state tests/docs.
+219. **Palette Tab keeps file jump target (255; R3/R13-3; gvim extension).** file mode fills ranked
+     path + query :line[:col]; Windows drive/other colon intact/target from end; filename ending
+     :number verbatim; leading palette mode char escaped ./* to stay file mode; command/buffer/line
+     modes as before; palette open/re-query/Enter; message/disabled/no selection unchanged; Live Grep
+     overlay no-op.
+220. **Remote plugin copy requires atomic WriteStream (256; R13-19/R13-21).** every file copied via
+     authority WriteStream; no streamer → unsupported BEFORE read/create/write; no create-then-
+     WriteFile fallback (FileCreator gives no exclusive data handle); directory copy also needs
+     WriteStream+DirectoryCreator before claim/walk; streamer existing target atomically replaced;
+     capability refusal leaves nothing created/written. Residuals canonicalization TOCTOU symlink swap,
+     remote hardlink identity not os.SameFile, parents/failure-after-claim partial tree, metadata/
+     growth/cancel limits.
+221. **Nested-prefix fallback roots + cap notice (257; R13-11/R13-23).** unresolved nested prefixes
+     searched in place (not whole tree); wider whole-tree only when candidate list too large for
+     bounded explicit batches; both prune hidden/IGNORED_DIRS + non-fatal notice; output cap marks
+     batches Truncated + says incomplete because candidate files beyond cap not reported; never
+     complete-looking/partial-as-complete; deeper nested .gitignore residual.
+222. **Alternate-screen exit read-only frame + marker (R13-15).** running alt-screen no history refusal;
+     after exit frozen alt frame becomes read-only transcript (visible rows+marker, Scrollback exited
+     title), auto-open at exit, Ctrl+Space toggle frozen frame; save one marker after rows/restart
+     below/restore same record no duplicate; no output overwrite.
+223. **Local watcher scope notice + i18n (R13-18/R13-5).** local env-watch notices catalogued
+     (unavailable/ended/root-failed/root-unwatchable/dirs/limit); omitted/omittedDirs drives limit
+     notice; new dock tab-limit/numbered/hover + extract title keys; en1117/de579, 573 KiB text,
+     ≈663 KiB JSON, heap126-82-208.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6304,21 +6385,35 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-37 verification (2026-11-09, merged tree on `c0b42a1`; 255–257 + alt-screen/local-watch**
+  **fixes landed).** STATIC GATES PASS (Lead, default GOCACHE: build, CGO_ENABLED=0, GOOS=windows,
+  vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 126 KiB / de
+  82 KiB / both 208 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
+  EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r37-final.log`). The audit ran build/gofmt/
+  i18n_check plus targeted round-37 tests/diff review only; the Lead ran the full suite. Tracks: 255
+  palette Tab preserves file :line[:col] target; 256 remote plugin copy requires atomic WriteStream
+  (no fallback, unsupported before any destination write); 257 nested-prefix fallback roots + output-
+  cap incomplete notice; alternate-screen exit shows read-only frame+marker; local watcher scope
+  notices/i18n.
+  Heap-guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-
+  only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
+  a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
+  fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-36 landed host/dock focus merge, local detector invalidation detection-only, nested git
-  candidates, plugin copy root-source/no-streamer hardlink safety, palette Tab accept; full suite EXIT 0
-  (76 packages, log /tmp/gvim-r36-final.log); §5.5 is round-37/38 plan; TUI-only scope/genuine-
+  (round-37 landed palette Tab jump target, remote copy atomic-WriteStream requirement, nested-prefix
+  fallback/cap notice, alternate-screen exit transcript, local watcher notices/i18n; full suite EXIT 0
+  (76 packages, log /tmp/gvim-r37-final.log); §5.5 is round-38/39 plan; TUI-only scope/genuine-
   equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–36 had their gate sets
-  run. Round 36 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–37 had their gate sets
+  run. Round 37 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  124 KiB / de 82 KiB / both 207 KiB, git diff --check). Final full
+  126 KiB / de 82 KiB / both 208 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r36-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-36 tests and
+  `/tmp/gvim-r37-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-37 tests and
   diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
   recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
   production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling
