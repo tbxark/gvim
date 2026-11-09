@@ -24,6 +24,19 @@ func TestOSC7Path(t *testing.T) {
 		{"a path with a newline", "/tmp/a\nb", ""},
 		{"a path with invalid UTF-8", "/tmp/\xffx", ""},
 		{"an over-long path", "/" + strings.Repeat("a", maxWorkingDirectoryBytes), ""},
+		{"a Windows drive file URL", "file:///C:/Users/me", "C:/Users/me"},
+		{"a lowercase drive file URL", "file:///c:/Users/me", "c:/Users/me"},
+		{"a Windows drive bare path", "C:\\Users\\me", "C:\\Users\\me"},
+		{"a Windows forward-slash drive path", "C:/Users/me", "C:/Users/me"},
+		{"a UNC path", "\\\\server\\share\\dir", "\\\\server\\share\\dir"},
+		{"a Windows file URL with a host", "file://host/C:/dir", "C:/dir"},
+		{"a drive-relative path is rejected", "C:dir", ""},
+		{"a bare drive is rejected", "C:", ""},
+		{"a drive with a forward slash is absolute", "C:/dir", "C:/dir"},
+		{"a drive with a backslash is absolute", "C:\\dir", "C:\\dir"},
+		{"a single-backslash root is not UNC", "\\root", ""},
+		{"an invalid percent escape in a URI path stays verbatim", "file:///tmp/a%zzb", "/tmp/a%zzb"},
+		{"a URI path with percent-encoded UTF-8", "file:///tmp/%E7%95%8C", "/tmp/界"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

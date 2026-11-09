@@ -57,14 +57,17 @@ shell when one is available — `bash -ilc` or `zsh -ilc`, preferring `$SHELL` w
 bash/zsh — so a detector that depends on interactive rc initialization captures the same
 environment the remote terminal gets. If no such shell is found, or the interactive
 invocation fails, the capture falls back to the previous `sh -c` path and records an
-explicit notice (startup notice and the Settings Environment rows). The remote env-input files
-are watched through the authority's own file watch: a change to `.envrc`, `mise.toml`,
-`.mise.toml`, `.tool-versions`, `pyvenv.cfg` or the `.venv` directory invalidates the
-cached detection/capture and re-warms it in the background (no local filesystem is
-consulted). The watcher arms the workspace root plus the existing nested input directories
-(`.venv`), so a content-only change to `.venv/pyvenv.cfg` is seen even though the root
-directory entry does not change; when a nested directory appears, the next root event
-re-arms the watcher with it. A backend whose file surface cannot watch degrades safely: the watcher stops,
+explicit notice (startup notice and the Settings Environment rows). The remote env inputs are
+watched through the authority's own file watch: a change to the fixed `.envrc`,
+`mise.toml`, `.mise.toml`, `.tool-versions`, `pyvenv.cfg` or `.venv` inputs, or to a
+user-configured detector marker/require path, invalidates the cached detection/capture and
+re-warms it in the background (no local filesystem is consulted). The watcher arms the
+workspace root plus the existing parent directories of the watched paths (bounded:
+`env.MaxDetectorWatchPaths` marker paths and `env.MaxDetectorWatchDirs` directories; excess
+paths are reported in the Settings notice and still work through `Env: Reload`). Nested
+content changes are seen because the parent directory is watched even when the root
+directory entry does not change; when a watched parent directory appears, the next relevant
+root event re-arms the watcher with it. A backend whose file surface cannot watch degrades safely: the watcher stops,
 the Settings Environment rows say the inputs are not watched and point at `Env: Reload`,
 and the manual reload path keeps working; other watch failures retry with the same bounded
 backoff as the remote document watch. After every successful
@@ -442,11 +445,14 @@ Residuals of this slice (documented, not bugs):
   re-probe updates the shell choice and the Settings fallback row but not the already-shown
   startup notice, and it does not re-detect the env markers or recapture the overlay (Env:
   Reload or a new activation re-captures); if the re-probe is cancelled/disconnected it
-  leaves a fallback notice reflecting that attempt. Changed remote env input files are
-  watched through authority polled watches (one bounded directory snapshot per poll for the
-  root and each existing nested input dir such as .venv; the polling latency and root
-  listing cost are the same limits as remote document watching, and an event burst re-arms
-  the nested watch), the
+  leaves a fallback notice reflecting that attempt. Fixed env inputs and user-configured detector marker/require
+  paths are watched through authority polled watches (one bounded directory snapshot per
+  poll for the root and each existing parent directory; the plan is capped at
+  MaxDetectorWatchPaths/MaxDetectorWatchDirs, excess paths are reported in Settings and
+  remain usable via Env: Reload; a deeply nested path whose intermediate parents do not yet
+  exist is picked up when a relevant root/parent event re-arms the plan, otherwise the next
+  Env: Reload/reconnect re-evaluates; the polling latency/cost limits are the same as remote
+  document watching), the
   detection result is cached until Refresh/SetRoot or an env-input event, a backend without
   the watch capability (or whose watch keeps failing) degrades to the manual Env: Reload path
   with a Settings notice, the detect/capture invalidation is asynchronous (an in-flight spawn

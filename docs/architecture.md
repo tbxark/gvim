@@ -897,6 +897,21 @@ still loads unchanged.
   success and failure, name validation, target-exists refusal, recursive directory delete,
   disconnected refusal touching nothing, trust gate before any mutation, unsupported
   move/copy, outside-workspace refusal, local decoy untouched).
+- **MRU persistence in crash recovery and workspace extraction (landed).** The editor's
+  document-identity MRU is already saved by the normal session writer (`Session.MRU`, additive
+  `[]MruFile {Path, Label}`). Two paths wrote a session without it and now carry it too: the
+  crash-recovery copy (`restore.RecoveryWriter`) records the active tab and the MRU order limited
+  to the unsaved documents it stashes, plus the label of a pathless buffer, so `recoverCrash`
+  restores the pre-crash completion/dabbrev order through the same `applySessionMru` mapping; and
+  every workspace-extraction path (single/multi-tab/mixed into a new co-tenant, and a transfer
+  into a dormant existing workspace) writes the source editor's MRU order restricted to the moved
+  documents, newest first, with `mergeExtractMru` putting them before the target's existing refs
+  and dropping a stale ref for the same path. A materialized target keeps the normal capture
+  path. Old sessions and old recovery copies without the fields restore exactly as before
+  (activation-derived order); stale/missing refs are skipped and the remaining order is kept.
+  Tests: `internal/restore/recovery_test.go` (MRU+active round trip, pathless label, old copy
+  without the fields) and `internal/app/workspace_extract_mru_test.go` plus the extract
+  session/MRU assertions (new single/multi/mixed co-tenant, dormant merge, materialized capture).
 - **Remote workspace recovery, trust and reconnect (landed).** Direct remote launches now
   have bounded hot-exit/crash recovery: the ordinary `restore.RecoveryWriter` stages the
   unsaved text of remote documents under a local staging session directory keyed by the

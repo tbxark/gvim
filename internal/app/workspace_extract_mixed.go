@@ -30,6 +30,9 @@ type mixedExtract struct {
 	terms    []terminal.SavedTab
 	termRefs []tui.ExtractTerminalRef
 	destID   string
+	// mru is the source editor MRU order restricted to the selected file tabs
+	// (newest first), carried into the target session.
+	mru []session.MruFile
 }
 
 // ExtractMixed captures the selected file and dock terminal tabs for a mixed
@@ -60,6 +63,11 @@ func (m *workspaceManager) ExtractMixed(sel tui.ExtractSelection, targetID strin
 		}
 		ext.files = append(ext.files, file)
 	}
+	pathsSet := make(map[string]bool, len(ext.files))
+	for _, f := range ext.files {
+		pathsSet[f.path] = true
+	}
+	ext.mru = extractMru(sess.rt.ed, pathsSet)
 	for _, ref := range sel.Terminals {
 		tab, ok := sess.rt.model.TerminalTabStateAt(ref.Index)
 		if !ok || tab.Name != ref.Name {
@@ -153,7 +161,7 @@ func (m *workspaceManager) runMixedExtractExisting(ext *mixedExtract, replace bo
 			}
 			file.StashFile = name
 		}
-		if err := m.acceptExtractTab(target.File.StableID, targetRoot, dir, file); err != nil {
+		if err := m.acceptExtractTab(target.File.StableID, targetRoot, dir, file, ext.mru); err != nil {
 			m.notify(fmt.Errorf("cannot extract: %w; %d of %d tabs transferred, sources kept", err, acceptedFiles+acceptedTerms, ext.total()))
 			return nil
 		}
@@ -264,6 +272,8 @@ func (m *workspaceManager) runMixedExtractNew(ext *mixedExtract) {
 		}
 		layout.Files = append(layout.Files, file)
 	}
+	layout.MRU = ext.mru
+	layout.Active = activeForMru(layout.Files, ext.mru)
 	if err := session.Save(dir, layout); err != nil {
 		discard()
 		m.notify(fmt.Errorf("cannot extract: write the new workspace's session: %w", err))

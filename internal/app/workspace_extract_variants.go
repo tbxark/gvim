@@ -137,6 +137,7 @@ func (m *workspaceManager) ExtractTabTo(id string) (tui.WorkspaceCmd, error) {
 	if err != nil {
 		return nil, err
 	}
+	ext.mru = extractMru(sess.rt.ed, map[string]bool{ext.path: true})
 	extTo := &extractTabTo{extractTab: *ext, destID: id}
 	return tui.WorkspaceCmdOf(func() { m.runExtractTabTo(extTo) }), nil
 }
@@ -183,7 +184,7 @@ func (m *workspaceManager) runExtractTabTo(extTo *extractTabTo) {
 		}
 		file.StashFile = name
 	}
-	if err := m.acceptExtractTab(target.File.StableID, targetRoot, dir, file); err != nil {
+	if err := m.acceptExtractTab(target.File.StableID, targetRoot, dir, file, ext.mru); err != nil {
 		m.notify(fmt.Errorf("cannot extract: %w; the tab stays open", err))
 		return
 	}
@@ -241,11 +242,35 @@ func (m *workspaceManager) runExtractTabTo(extTo *extractTabTo) {
 	m.report(fmt.Sprintf("Extracted %s into workspace %q", ext.name, target.File.Label))
 }
 
+// mergeExtractMru puts the moved documents (newest first) before the target's existing
+// MRU refs, dropping any old ref for a moved path. Existing refs to documents that were
+// not moved keep their relative order, and an old target session without MRU simply
+// gains the moved refs (the field is additive and optional).
+func mergeExtractMru(existing, moved []session.MruFile) []session.MruFile {
+	if len(moved) == 0 {
+		return existing
+	}
+	removed := make(map[string]bool, len(moved))
+	for _, ref := range moved {
+		if ref.Path != "" {
+			removed[ref.Path] = true
+		}
+	}
+	out := append([]session.MruFile(nil), moved...)
+	for _, ref := range existing {
+		if ref.Path != "" && removed[ref.Path] {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
+}
+
 // acceptExtractTab writes the file state into the target workspace: a materialized
 // target opens it in its live editor (so its own capture keeps it), a dormant one
 // gets it merged into its saved session. The error means the target refused and
 // nothing in the source was touched.
-func (m *workspaceManager) acceptExtractTab(id, root, dir string, file session.FileState) error {
+func (m *workspaceManager) acceptExtractTab(id, root, dir string, file session.FileState, moved []session.MruFile) error {
 	m.mu.Lock()
 	target := m.sessions[id]
 	m.mu.Unlock()
@@ -268,6 +293,10 @@ func (m *workspaceManager) acceptExtractTab(id, root, dir string, file session.F
 		if !replaced {
 			layout.Files = append(layout.Files, file)
 		}
+		layout.MRU = mergeExtractMru(layout.MRU, moved)
+		if len(moved) > 0 {
+			layout.Active = activeForMru(layout.Files, layout.MRU)
+		}
 		if err := session.Save(dir, layout); err != nil {
 			return fmt.Errorf("write the target workspace's session: %w", err)
 		}
@@ -287,6 +316,7 @@ func (m *workspaceManager) acceptExtractTab(id, root, dir string, file session.F
 			Version: session.Version,
 			Root:    root,
 			Files:   []session.FileState{file},
+			MRU:     moved,
 		})
 		for _, u := range failed {
 			if u.File.Path == file.Path {
@@ -480,7 +510,12 @@ func (m *workspaceManager) ExtractTabs(paths []string) (tui.WorkspaceCmd, error)
 	if len(exts) == 0 {
 		return nil, errors.New("cannot extract: no file tabs were selected")
 	}
-	return tui.WorkspaceCmdOf(func() { m.runExtractTabs(exts) }), nil
+	pathsSet := make(map[string]bool, len(exts))
+	for _, ext := range exts {
+		pathsSet[ext.path] = true
+	}
+	mru := extractMru(ed, pathsSet)
+	return tui.WorkspaceCmdOf(func() { m.runExtractTabs(exts, mru) }), nil
 }
 
 // documentForPath returns the open document whose path is path.
@@ -495,7 +530,7 @@ func documentForPath(ed *editor.Editor, path string) *editor.Document {
 
 // runExtractTabs creates the co-tenant with all selected files, then queues the
 // switch and closes every source tab only after it was accepted.
-func (m *workspaceManager) runExtractTabs(exts []*extractTab) {
+func (m *workspaceManager) runExtractTabs(exts []*extractTab, mru []session.MruFile) {
 	m.mu.Lock()
 	sess := m.sessions[exts[0].sourceID]
 	active := m.active
@@ -536,6 +571,8 @@ func (m *workspaceManager) runExtractTabs(exts []*extractTab) {
 		}
 		layout.Files = append(layout.Files, file)
 	}
+	layout.MRU = mru
+	layout.Active = activeForMru(layout.Files, mru)
 	if err := session.Save(dir, layout); err != nil {
 		discard()
 		m.notify(fmt.Errorf("cannot extract: write the new workspace's session: %w", err))

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	goruntime "runtime"
+	"strings"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
@@ -119,14 +120,22 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 	// The workspace authority decides where the terminal runs. The local backend
 	// returns a launch with no transport (the local PTY path below); a remote backend
 	// returns a transport that the same Session drives through StartWithBackend.
+	remote := s.opts.Authority != nil && s.opts.Authority.State().Remote != nil
 	if viaAuthority && s.opts.Authority != nil {
 		// A restored/restarted shell's saved cwd may no longer exist on the remote
 		// host. Verify it through the authority before the launch command (SSH does
 		// a remote cd && exec, which would otherwise leave the shell dead) and fall
 		// back to the authority's default directory. This only ever stats the
 		// authority's file system: no local path is read and nothing is executed to
-		// probe the directory.
-		dir = s.checkedRemoteDir(s.ctx, dir)
+		// probe the directory. A Windows-flavoured path is refused before the stat:
+		// this remote backend is a POSIX (SSH) host, so the path can never be valid
+		// there. A local authority gets the same platform-flavour check as a local
+		// start.
+		if remote {
+			dir = s.checkedRemoteDir(s.ctx, dir)
+		} else {
+			dir = s.checkedLocalDir(dir)
+		}
 		launch, err := s.opts.Authority.Terminal().Launch(s.ctx, authority.TerminalOptions{
 			Dir: dir, Shell: shell, Args: args, Env: extraEnv, Cols: cols, Rows: rows,
 		})
@@ -163,6 +172,11 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 			return sess, nil
 		}
 	}
+	// A local start (no authority, a local authority, or a remote workspace's local
+	// agent executable) validates the directory against this host's path flavour:
+	// a saved Windows path must not be handed to a POSIX PTY (or the reverse), and
+	// the fallback is the default local directory, never a translation.
+	dir = s.checkedLocalDir(dir)
 	sess, err := terminal.Start(s.ctx, terminal.Options{
 		Shell: shell, Args: args,
 		Dir: dir, Cols: cols, Rows: rows,
@@ -182,14 +196,20 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 
 // checkedRemoteDir validates a saved/restarted working directory on a remote
 // authority. Local slots, empty directories and non-remote authorities are left
-// untouched. When the remote directory is missing, not a directory, or the
-// authority is disconnected, it reports a notice (when configured) and returns ""
-// so the authority starts in its own default directory; it never falls back to a
-// local path.
+// untouched. The remote backend is a POSIX host (SSH today), so a path that is
+// not POSIX-absolute is refused before any stat — a Windows path must never be
+// used as a remote POSIX start cwd. When the directory is unusable (wrong flavour,
+// missing, not a directory, or the authority is disconnected), it reports a
+// notice (when configured) and returns "" so the authority starts in its own
+// default directory; it never falls back to a local path.
 func (s TermStarter) checkedRemoteDir(ctx context.Context, dir string) string {
 	slot := s.opts.Authority
 	if slot == nil || dir == "" || slot.State().Remote == nil {
 		return dir
+	}
+	if !strings.HasPrefix(dir, "/") {
+		s.remoteDirFallback(dir, "it is not a POSIX path for this remote workspace")
+		return ""
 	}
 	if !slot.Connected() {
 		s.remoteDirFallback(dir, "the workspace is disconnected")
@@ -203,6 +223,41 @@ func (s TermStarter) checkedRemoteDir(ctx context.Context, dir string) string {
 		return ""
 	}
 	return dir
+}
+
+// dirAbsoluteForPlatform reports whether dir is absolute for goos: POSIX-absolute
+// on Unix, drive-absolute or UNC on Windows. The platform is explicit so the
+// check is testable on any host.
+func dirAbsoluteForPlatform(dir, goos string) bool {
+	if goos == "windows" {
+		if strings.HasPrefix(dir, "\\\\") {
+			return true
+		}
+		if len(dir) < 3 {
+			return false
+		}
+		c := dir[0]
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		if !isLetter || dir[1] != ':' {
+			return false
+		}
+		return dir[2] == '/' || dir[2] == '\\'
+	}
+	return strings.HasPrefix(dir, "/")
+}
+
+// checkedLocalDir refuses a saved directory whose flavour does not match this
+// host: a Windows path on a Unix host (or a POSIX path on a Windows host) is
+// reported and replaced by "" (the default local directory). It never translates
+// the path and never reads the local file system to guess.
+func (s TermStarter) checkedLocalDir(dir string) string {
+	if dir == "" || dirAbsoluteForPlatform(dir, goruntime.GOOS) {
+		return dir
+	}
+	if s.opts.Notice != nil {
+		s.opts.Notice(fmt.Sprintf("Terminal directory %q is not an absolute path on this platform; starting in the default directory", dir))
+	}
+	return ""
 }
 
 // remoteDirFallback tells the user why a saved remote directory was not used. The

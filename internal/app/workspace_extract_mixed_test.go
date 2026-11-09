@@ -119,6 +119,9 @@ func TestMixedExtractToNewWorkspace(t *testing.T) {
 	if err != nil || string(stash) != "MIX-disk\n" {
 		t.Fatalf("stash = %q, %v", stash, err)
 	}
+	if len(layout.MRU) != 1 || layout.MRU[0].Path != path || layout.Active != 0 {
+		t.Fatalf("mixed MRU/active = %+v/%d, want the moved file and active", layout.MRU, layout.Active)
+	}
 	termRec, ok, err := restore.LoadTerminal(dir)
 	if err != nil || !ok || len(termRec.Tabs) != 1 || termRec.Tabs[0].Name != "shell" {
 		t.Fatalf("terminal record = %+v, %v, %v", termRec, ok, err)

@@ -3,6 +3,7 @@ package uiadapter
 import (
 	"context"
 	"errors"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -129,6 +130,23 @@ func TestCheckedRemoteDir(t *testing.T) {
 		t.Fatalf("disconnected authority stat calls = %d, want no stat", validFS.calls)
 	}
 
+	// A Windows-flavoured saved path must never be used as a remote POSIX start
+	// cwd, and it is refused before any authority round trip.
+	windowsFS := &dirFS{stats: map[string]hostos.FileStat{`C:work`: {Kind: "dir"}}}
+	slot = &dirSlot{fs: windowsFS, remote: remote, connected: true}
+	if got := dirStarter(slot, &notices).checkedRemoteDir(ctx, `C:work`); got != "" {
+		t.Fatalf("Windows remote dir = %q, want the remote default", got)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], "not a POSIX path") {
+		t.Fatalf("Windows remote dir notices = %q", notices)
+	}
+	if windowsFS.calls != 0 {
+		t.Fatalf("Windows remote dir stat calls = %d, want none", windowsFS.calls)
+	}
+	if got := dirStarter(slot, &notices).checkedRemoteDir(ctx, `\servershare`); got != "" || len(notices) != 1 {
+		t.Fatalf("UNC remote dir = %q notices %q", got, notices)
+	}
+
 	// Local slots are untouched: no stat, no notice, the directory passes through.
 	localFS := &dirFS{}
 	slot = &dirSlot{fs: localFS, remote: nil, connected: true}
@@ -170,6 +188,12 @@ func TestRemoteStartFallsBackToTheDefaultDirectory(t *testing.T) {
 	if len(term.dirs) != 2 || term.dirs[1] != "/work" {
 		t.Fatalf("launch dirs = %v, want the valid remote directory", term.dirs)
 	}
+	if _, err := starter.Start(`C:\work`, 40, 6); err == nil {
+		t.Fatal("Start did not return the scripted launch error")
+	}
+	if len(term.dirs) != 3 || term.dirs[2] != "" {
+		t.Fatalf("launch dirs = %v, want no remote launch of a Windows path", term.dirs)
+	}
 
 	// A local (non-remote) authority keeps the local directory behavior.
 	localTerm := &dirTerminal{}
@@ -179,5 +203,69 @@ func TestRemoteStartFallsBackToTheDefaultDirectory(t *testing.T) {
 	}
 	if len(localTerm.dirs) != 1 || localTerm.dirs[0] != "/local/dir" {
 		t.Fatalf("local launch dirs = %v, want the local path unchanged", localTerm.dirs)
+	}
+}
+
+// TestDirAbsoluteForPlatform checks the two path conventions explicitly, so the
+// Windows behaviour is covered even though this test runs on a Unix host.
+func TestDirAbsoluteForPlatform(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		dir, goos string
+		want      bool
+	}{
+		{"/tmp/x", "linux", true},
+		{"/tmp/x", "darwin", true},
+		{"/tmp/x", "windows", false},
+		{`C:\Users\me`, "windows", true},
+		{`C:/Users/me`, "windows", true},
+		{`\\server\share`, "windows", true},
+		{`C:\Users\me`, "linux", false},
+		{`C:/Users/me`, "darwin", false},
+		{`\\server\share`, "linux", false},
+		{"C:dir", "windows", false}, // drive-relative is not absolute
+		{"C:", "windows", false},
+		{"dir", "windows", false},
+		{"dir", "linux", false},
+	}
+	for _, tt := range tests {
+		if got := dirAbsoluteForPlatform(tt.dir, tt.goos); got != tt.want {
+			t.Errorf("dirAbsoluteForPlatform(%q, %q) = %v, want %v", tt.dir, tt.goos, got, tt.want)
+		}
+	}
+}
+
+// TestLocalStartRejectsCrossPlatformDir checks the local launch path keeps its
+// platform's semantics: on a Unix test host a saved Windows cwd is reported and
+// replaced by the default local directory before any PTY launch, while a POSIX
+// cwd passes through untouched.
+func TestLocalStartRejectsCrossPlatformDir(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS == "windows" {
+		t.Skip("the local flavour check runs against a Unix host in this test")
+	}
+	term := &dirTerminal{}
+	var notices []string
+	starter := dirStarter(&dirSlot{fs: &dirFS{}, connected: true, term: term}, &notices)
+	if _, err := starter.Start(`C:\Users\me`, 40, 6); err == nil {
+		t.Fatal("Start did not return the scripted launch error")
+	}
+	if len(term.dirs) != 1 || term.dirs[0] != "" {
+		t.Fatalf("Windows local launch dirs = %v, want the default directory", term.dirs)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], "not an absolute path on this platform") {
+		t.Fatalf("Windows local notices = %q", notices)
+	}
+	if _, err := starter.Start(`\\server\share`, 40, 6); err == nil {
+		t.Fatal("Start did not return the scripted launch error")
+	}
+	if len(term.dirs) != 2 || term.dirs[1] != "" {
+		t.Fatalf("UNC local launch dirs = %v, want the default directory", term.dirs)
+	}
+	if _, err := starter.Start("/tmp/work", 40, 6); err == nil {
+		t.Fatal("Start did not return the scripted launch error")
+	}
+	if len(term.dirs) != 3 || term.dirs[2] != "/tmp/work" {
+		t.Fatalf("POSIX local launch dirs = %v, want the POSIX path", term.dirs)
 	}
 }

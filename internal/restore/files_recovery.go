@@ -77,6 +77,12 @@ func (w *RecoveryWriter) Plan() func() error {
 			buf: d.Buffer,
 			ver: d.Buffer.Version(),
 		}
+		if d.Path == "" {
+			// The recovery session names a pathless buffer by label, the same way the
+			// saved session and the MRU references do; an older copy without it restores
+			// as an ordinary untitled buffer.
+			e.state.Label = d.Label()
+		}
 		stampDisk(&e.state, d)
 		if prev, ok := w.last[d]; ok && prev.buf == e.buf && prev.ver == e.ver {
 			e.name = prev.name
@@ -92,6 +98,29 @@ func (w *RecoveryWriter) Plan() func() error {
 			e.text = d.Buffer.Text()
 		}
 		entries = append(entries, e)
+	}
+	// The recovery copy carries the editor MRU, like the saved session: after a crash
+	// the restored tabs keep their relative completion/dabbrev order. Only the documents
+	// in the copy can be referenced, so a saved ref is limited to entries that have a
+	// stash (the same ones session.Save would write for a normal session).
+	savedByDoc := make(map[*editor.Document]int, len(entries))
+	for i := range entries {
+		savedByDoc[entries[i].doc] = i
+	}
+	var mru []session.MruFile
+	active := 0
+	for _, tabIndex := range w.ed.RecentTabIndices() {
+		doc := w.ed.DocAt(tabIndex)
+		fileIndex, ok := savedByDoc[doc]
+		if !ok {
+			continue
+		}
+		mru = append(mru, session.MruFile{Path: entries[fileIndex].state.Path, Label: entries[fileIndex].state.Label})
+	}
+	if doc := w.ed.Active(); doc != nil {
+		if fileIndex, ok := savedByDoc[doc]; ok {
+			active = fileIndex
+		}
 	}
 	idle := len(entries) == 0 && !w.wrote
 	w.mu.Unlock()
@@ -131,7 +160,7 @@ func (w *RecoveryWriter) Plan() func() error {
 			files = append(files, e.state)
 			last[e.doc] = stashed{buf: e.buf, ver: e.ver, name: e.name}
 		}
-		if err := session.Save(w.dir, session.Session{Files: files}); err != nil {
+		if err := session.Save(w.dir, session.Session{Active: active, Files: files, MRU: mru}); err != nil {
 			return fail(err)
 		}
 		w.mu.Lock()

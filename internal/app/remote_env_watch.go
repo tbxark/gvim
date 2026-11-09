@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"sync"
 	"time"
 
@@ -32,8 +33,10 @@ type remoteEnvWatch struct {
 	slot        authority.Slot
 	provider    *env.Remote
 	root        string
-	names       map[string]bool
-	nestedNames map[string]bool
+	names       map[string]bool            // event basenames relevant to detection/activation
+	rearmNames  map[string]bool            // root-level directory names whose appearance needs a re-arm
+	dirs        map[string]map[string]bool // workspace-relative parent dirs to watch
+	limitNotice string
 
 	wg sync.WaitGroup
 
@@ -60,12 +63,31 @@ func startRemoteEnvWatch(parent context.Context, slot authority.Slot, provider *
 	for _, name := range env.EnvInputRootNames() {
 		names[name] = true
 	}
-	nested := make(map[string]bool)
+	rearm := make(map[string]bool)
 	for _, dir := range env.EnvInputNestedDirs() {
-		nested[dir] = true
+		rearm[dir] = true
+	}
+	// User-configured detector marker/require paths: watch their parent directories
+	// (bounded) and match their top-level/child names so a changed custom marker
+	// invalidates detection just like the fixed env inputs.
+	spec := env.DetectorWatchPaths(provider.Detectors())
+	for name := range spec.RootNames {
+		names[name] = true
+	}
+	for _, children := range spec.Dirs {
+		for child := range children {
+			names[child] = true
+		}
+	}
+	for name := range spec.RearmNames {
+		rearm[name] = true
+	}
+	limitNotice := ""
+	if spec.Omitted > 0 || spec.OmittedDirs > 0 {
+		limitNotice = fmt.Sprintf("Remote environment: %d detector marker path(s) in %d director(ies) are not watched (watch bound reached); use Env: Reload after changing them", spec.Omitted, spec.OmittedDirs)
 	}
 	ctx, cancel := context.WithCancel(parent)
-	w := &remoteEnvWatch{ctx: ctx, cancel: cancel, slot: slot, provider: provider, root: root, names: names, nestedNames: nested}
+	w := &remoteEnvWatch{ctx: ctx, cancel: cancel, slot: slot, provider: provider, root: root, names: names, rearmNames: rearm, dirs: spec.Dirs, limitNotice: limitNotice}
 	w.wg.Add(1)
 	go w.run()
 	return w
@@ -126,7 +148,11 @@ func (w *remoteEnvWatch) run() {
 			continue
 		}
 		backoff = remoteWatchRetryMin
-		w.provider.SetWatchNotice("")
+		if w.limitNotice != "" {
+			w.provider.SetWatchNotice(w.limitNotice)
+		} else {
+			w.provider.SetWatchNotice("")
+		}
 
 		events := make(chan hostos.WatchEvent, 64)
 		var pumps sync.WaitGroup
@@ -171,7 +197,7 @@ func (w *remoteEnvWatch) run() {
 				w.refresh()
 				// A nested input's parent (".venv") may have just appeared: re-arm so the
 				// new directory is watched for content-only changes the root cannot see.
-				if w.nestedNames[name] {
+				if w.rearmNames[name] {
 					rearm = true
 				}
 			}
@@ -198,11 +224,28 @@ func (w *remoteEnvWatch) run() {
 func (w *remoteEnvWatch) targets(ctx context.Context) []string {
 	targets := []string{w.root}
 	files := w.slot.Files()
-	for _, dir := range env.EnvInputNestedDirs() {
+	seen := map[string]bool{}
+	addDir := func(dir string) {
+		dir = path.Clean(dir)
+		if dir == "" || dir == "." || dir == "/" || seen[dir] {
+			return
+		}
 		candidate := path.Join(w.root, dir)
 		if st, err := files.Stat(ctx, candidate); err == nil && st.Kind == "dir" {
+			seen[dir] = true
 			targets = append(targets, candidate)
 		}
+	}
+	for _, dir := range env.EnvInputNestedDirs() {
+		addDir(dir)
+	}
+	dirs := make([]string, 0, len(w.dirs))
+	for dir := range w.dirs {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	for _, dir := range dirs {
+		addDir(dir)
 	}
 	return targets
 }

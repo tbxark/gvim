@@ -724,31 +724,57 @@ project `lsp` command rule (C11 in `docs/trust.md`).
 ## Working directory and clickable paths
 
 A shell reports its working directory with OSC 7. The session keeps the last
-value (a plain path or a `file://host/path` URL; the host is dropped and percent
-escapes are decoded), and the dock hands it to the path resolver and persists it
-for restarts/dives (see above). Because the child's output is untrusted, the
-report is cleaned and bounded before it is kept: it must be a non-empty
-POSIX-absolute path of at most 4096 bytes, valid UTF-8 and free of control
-characters, otherwise the report is ignored (no cwd). The saved `cwd` is cleaned
+value (a plain path or a `file://host/path` URL; the URL's host is dropped at the
+first `/`, the URI path is percent-decoded and a leading `/C:/` becomes the
+drive-absolute `C:/...`), and the dock hands it to the path resolver and persists
+it for restarts/dives (see above). Matching Fresh's `parse_osc7_path` with one deliberate hardening, a path is
+accepted only when it is **absolute** in POSIX or Windows convention: a leading
+`/`, a UNC `\\server\share` path, or an ASCII drive letter followed by a
+separator (`X:/...` or `X:\...`); a bare payload is not percent-decoded (Fresh
+does not decode it either). The drive-relative `C:dir` and the bare `C:` that
+Fresh's letter-colon check accepts are **rejected** here: they are relative to
+the drive's current directory and are not safe to use as a terminal start cwd.
+The flavour follows the reporting shell's OS, not gvim's, so a Windows shell's
+absolute path is kept as reported even when gvim itself runs on another OS. Because the child's output is
+untrusted, the report is cleaned and bounded before it is kept: it must be
+non-empty, at most 4096 bytes, valid UTF-8 and free of control characters,
+otherwise the report is ignored (no cwd). The saved `cwd` is cleaned
 and bounded again on capture and on load, so a hand-edited record cannot smuggle
 control characters or an unbounded path into a start. On a remote workspace a
 restart/dive with a saved cwd verifies it through the authority's file system
 (5 s bound, remote `stat` only — no local path read, no shell probe); if it is
 missing, not a directory, or the workspace is disconnected, a clear status
 notice says so and the terminal starts in the authority's default directory.
-Local starts keep their existing behavior (a missing local directory is the
+The start side enforces the platform semantics as well as the record
+parser: a **local** start (including a local authority and a remote workspace's
+local agent executable) checks the saved directory against this host's flavour —
+POSIX-absolute on Unix, drive-absolute or UNC on Windows — and a mismatch is
+reported in the status row and replaced by the default local directory, never
+translated or passed to a PTY of the other flavour. A **remote** start (the
+remote backend is a POSIX SSH host) requires a POSIX-absolute path: a Windows
+path is refused with the remote-default notice before any authority stat. Local
+starts otherwise keep their existing behavior (a missing local directory is the
 starter's normal error notice, not a silent fallback).
 
-Residuals: only POSIX-absolute OSC 7 paths are accepted (a Windows-style
-`C:\...` report is ignored, as are reports the emulator drops or that exceed the
-bound); the remote fallback is the authority's own default directory (an SSH
-login shell starts in its home directory, not necessarily the workspace root) and
-it is announced only in the status row; local saved directories are not
-pre-validated (the starter's normal error covers them); the remote check is a
-point-in-time `stat` before the launch, so a directory removed between the check
-and the PTY launch still fails the authoritative `cd` and is reported as a start
-error; a remote shell's later `cd` changes the saved cwd for the next start but is
-not applied to the live session's files (no remote terminal state replay).
+Residuals: Windows paths are kept exactly as reported (no slash normalisation,
+drive-letter case folding or conversion to the host's flavour); a path from the
+other flavour is now refused at start time with a status notice and the default
+directory (it used to reach the starter and fail there), and it is not translated;
+Fresh's letter-colon rule also accepts a drive-relative `C:dir`, which gvim
+deliberately rejects as a start cwd (parser divergence documented above); the
+remote backend is assumed POSIX (SSH is the only remote transport today), so a
+future Windows remote authority would need a flavour signal instead of this
+hard-coded POSIX check; invalid percent escapes stay verbatim and an invalid-UTF-8
+path is rejected (stricter than Fresh's lossy decode); reports the emulator drops
+or that exceed the 4096-byte bound are ignored; the remote fallback is the authority's own
+default directory (an SSH login shell starts in its home directory, not
+necessarily the workspace root) and it is announced only in the status row; local
+saved directories are not pre-validated (the starter's normal error covers them);
+the remote check is a point-in-time `stat` before the launch, so a directory
+removed between the check and the PTY launch still fails the authoritative `cd`
+and is reported as a start error; a remote shell's later `cd` changes the saved
+cwd for the next start but is not applied to the live session's files (no remote
+terminal state replay).
 
 **Ctrl+Click on a path in the output opens it**, in the live view and in
 scrollback. The token under the pointer is the run of non-space characters

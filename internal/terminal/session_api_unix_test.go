@@ -121,6 +121,18 @@ func TestWorkingDirectoryFromOSC7(t *testing.T) {
 	}
 }
 
+// TestWorkingDirectoryFromOSC7AcceptsWindowsPath checks the OSC 7 flavour follows
+// the reporting shell's OS, not gvim's: a Windows drive file URL is kept as a
+// Windows path even on this (Unix) host.
+func TestWorkingDirectoryFromOSC7AcceptsWindowsPath(t *testing.T) {
+	s := startSh(t, "printf '\\033]7;file:///C:/Users/me\\033\\\\'; printf 'mark\\n'; exec sleep 5")
+	waitFor(t, s, "the marker", hasText("mark"))
+	waitFor(t, s, "the Windows OSC 7 directory", func(Screen) bool { return s.WorkingDirectory() != "" })
+	if got := s.WorkingDirectory(); got != "C:/Users/me" {
+		t.Fatalf("WorkingDirectory = %q, want the Windows path as reported", got)
+	}
+}
+
 // TestWorkingDirectoryFromOSC7RejectsTamperedInput checks the child's OSC 7 path is
 // untrusted: an over-long payload is ignored instead of being kept and later used
 // as a start directory (control bytes are covered by TestOSC7Path; the emulator's

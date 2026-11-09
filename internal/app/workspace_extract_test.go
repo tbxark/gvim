@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -113,6 +114,9 @@ func TestWorkspaceExtractCarriesUnsavedTab(t *testing.T) {
 	}
 	if len(layout.Files) != 1 {
 		t.Fatalf("extracted layout = %+v", layout)
+	}
+	if want := []session.MruFile{{Path: path}}; !slices.Equal(layout.MRU, want) {
+		t.Fatalf("extracted MRU = %+v, want %+v", layout.MRU, want)
 	}
 	fs := layout.Files[0]
 	if fs.Path != path || fs.Line != 2 || fs.Col != 3 || fs.Top != 1 {

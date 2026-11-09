@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `9c1e936` plus the merged round-32 work (225–229; 230
+Last verified: 2026-11-09, tree commit `8bbe790` plus the merged round-33 work (231–235; 236
 audit). Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet,
-golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 119 KiB / de 82
+golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 118 KiB / de 82
 KiB / both 201 KiB, git diff --check). Final full `go test ./... -p 1 -count=1 -timeout 1200s`
-EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r32-final.log`). The audit ran build/gofmt/
-i18n_check plus targeted round-32 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
+EXIT 0: 76 packages ok, no FAIL line (log `/tmp/gvim-r33-final.log`). The audit ran build/gofmt/
+i18n_check plus targeted round-33 tests/diff review. Real-host SSH/jump-box/agent-forwarding/
 search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain
 security/secret-tool, real-tmux, Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching
 remain UNTESTED. Fresh reference: `refs/fresh` same date.
@@ -1515,6 +1515,77 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-33 outcome (2026-11-09, merged working tree on `8bbe790`).** Four tasks landed (231–234);
+235 is read-only trash research; 236 is this audit. Static gates pass; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL (log
+`/tmp/gvim-r33-final.log`). The audit read the diff and ran targeted tests; the Lead ran the full
+suite.
+**OSC 7 Windows paths + start-platform validation (231).** OSC 7 parsing matches Fresh's
+parse_osc7_path with one deliberate hardening: the payload may be a plain path or file://host/path
+(host dropped at first /, URI path percent-decoded, a leading /C:/ becomes drive-absolute C:/...),
+and is accepted only when absolute in POSIX or Windows convention — leading /, UNC \\server\share,
+or an ASCII drive letter followed by a separator (X:/... or X:\...). The drive-relative C:dir and
+bare C: that Fresh's letter-colon check accepts are REJECTED here: they are relative to the drive's
+current directory and unsafe as a start cwd. The flavour follows the reporting shell's OS, not gvim's;
+a bare payload is not percent-decoded (like Fresh). Untrusted output is still cleaned and bounded
+(non-empty, <=4096 bytes, valid UTF-8, no control characters) before it is kept; saved cwd is
+cleaned again on capture/load. Start side mirrors platform semantics: a LOCAL start checks the saved
+directory against this host's flavour (POSIX on Unix, drive-absolute/UNC on Windows) and a mismatch
+is reported in the status row and replaced by the default local directory, never translated or passed
+to a PTY of the other flavour. A REMOTE start (POSIX SSH host) requires a POSIX-absolute path; a
+Windows path is refused with the remote-default notice before any authority stat. Residuals: Windows
+paths kept exactly as reported (no slash normalisation/drive-case folding/conversion), cross-flavour
+now refused at start rather than reaching the starter, Fresh also accepts drive-relative C:dir (gvim
+deliberately rejects), a future Windows remote authority would need a flavour signal (SSH assumed
+POSIX), invalid percent escapes stay verbatim and invalid UTF-8 is rejected (stricter than Fresh's
+lossy decode), emulator-dropped/>4096 reports ignored, remote fallback is the authority default
+(status-only), local saved dirs not pre-validated, remote check is point-in-time and a later remote
+cd is not applied to the live session's files (R13-15).
+**Bounded edit context for windowed remote large files (232).** Editing context for a windowed remote
+large file follows the same loaded-window rule: the quote auto-close check and indent rules' non-code
+mask ask StringContext/NonCodeContext caches that now read only loaded, contiguous, byte-bounded
+(64 KiB) lines from the remote windows and never read or request an unloaded 1 MiB window. A query
+outside the loaded windows answers “not in a string”/no mask without I/O, so typing a quote there
+inserts normally without synchronous remote I/O. The window-arrival generation is part of the context
+cache key, so when the paint later loads the window the next query re-lexes the context instead of
+serving spans computed from blank placeholder lines; a loaded window's context is bounded by the
+300-line reach, 64 KiB budget and 4096-byte line limit. Local large files keep their old behavior (no
+editing context; reading their lines on the UI goroutine is not bounded by a windowed source)
+(R13-15/R13-7).
+**Custom detector marker/require watch (233).** The remote env-input watch now also covers
+user-configured detector marker/require paths: a change invalidates cached detection/capture and
+re-warms it in the background (no local filesystem). The watcher arms the workspace root plus the
+existing parent directories of the watched paths, bounded by env.MaxDetectorWatchPaths marker paths
+and env.MaxDetectorWatchDirs directories; excess paths are reported in the Settings notice and still
+work through Env: Reload. Nested content changes are seen because the parent directory is watched even
+when the root directory entry does not change; when a watched parent appears, the next relevant root
+event re-arms the watcher. A backend whose file surface cannot watch degrades safely: watcher stops,
+Settings says inputs are not watched and points at Env: Reload (manual reload works); other failures
+retry with the same bounded backoff as remote document watching. Polling latency/cost limits are the
+same as remote document watching; a deeply nested path whose intermediate parents do not exist yet
+is picked up on a relevant root/parent event, otherwise the next Env: Reload/reconnect re-evaluates;
+cancellation/no local fallback/caps preserved (R13-18).
+**MRU in crash recovery and extraction (234).** Item 199 records it: RecoveryWriter sessions carry
+Active + MRU (unsaved-doc refs, newest first) + FileState.Label so recoverCrash preserves the pre-
+crash active tab and completion/dabbrev order; every extraction path writes the source MRU restricted
+to moved docs with mergeExtractMru putting them before a dormant target's old refs and dropping a
+same-path stale ref; materialized target keeps normal capture. Old sessions/recovery copies without
+the fields restore exactly as before; stale/missing refs are skipped; no session Version bump
+(additive optional fields) (R13-7/R13-1).
+**Remote trash capability research (235; read-only, no code/docs changes).** VERDICT: safe remote trash
+is NOT implementable on the current authority contract; keep permanent remote delete (explicit
+confirmation) and mode/mtime preservation. Fresh's remote trash is not a safety proof: home trash +
+create_dir_all + seconds timestamp + replacing rename, cross-device sibling fallback, no no-replace/
+private-mode/device checks (its FS trait lacks them). Authority gaps: Rename is replacing by contract
+(mv -f/os.Rename); Mkdir has no private mode/umask guarantee; FileStat/DirEntry have no device/owner
+(SSH stat helper lacks them); SSH mv -n is non-POSIX/non-atomic and cross-FS copy+unlink can lose the
+source on cancel; no renameat2/RENAME_NOREPLACE through the base surface. No trash/undo landed; the
+existing permanent-delete residual and any future trash design remain OPEN/gated (R13-21).
+Metrics: palette 240, settings 69 in 14 sections, bundled 26 (9 on)/17 off, plugin API 244 functions/
+1489 lines level 2; i18n en 1046 / 579 per locale, 567 KiB text (under 640 KiB cap), ≈656 KiB JSON,
+heap 118-82-201 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r33-final.log); real hosts
+UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-32 outcome (2026-11-09, merged working tree on `9c1e936`).** Five tasks landed (225–229);
 230 is this audit. Static gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT
@@ -4066,6 +4137,49 @@ for parity status.
 198. **i18n extraction round-32 (229; R13-5).** Move confirmation/notice + resolve multi-cursor
      refusal new copy + retired trash/move keys; English byte-identical; budgets/docs/fallback tests.
      en 1046/de 579, 567 KiB text, ≈656 KiB JSON, heap 119-82-201.
+199. **MRU persistence for crash recovery and extraction (234; R13-7/R13-1).** Session MRU/Active
+     (r31) now also covers crash recovery and workspace extraction; no session Version bump (additive
+     optional fields). Crash recovery: restore.RecoveryWriter session carries Active + MRU (refs limited
+     to the unsaved documents it stashes, newest first) and FileState.Label for pathless buffers;
+     recoverCrash uses the existing restoreFiles/applySessionMru, so the pre-crash active tab and
+     completion/dabbrev MRU order survive an unclean exit. Old recovery copies without Active/MRU restore
+     exactly as before (activation/saved-file order); a previous active tab in a running editor is still
+     kept (existing behavior). Extraction: new single/multi/mixed co-tenant sessions carry the source
+     editor MRU restricted to moved docs (newest first) and set Active to the MRU-first moved doc;
+     transfer into a DORMANT existing workspace merges moved refs to the front via mergeExtractMru
+     (drops an old ref for the same path, keeps unrelated old refs) and aligns Active; a materialized
+     target keeps the normal live capture. Old sessions without MRU unchanged; stale/missing refs skipped
+     by the existing matcher. Tests: recovery MRU+active round trip b,a,c; pathless label MRU; old copy
+     without fields; extract merge order/dedup/pathless/nil, extractMru recency+subset; single/multi/
+     mixed new co-tenant, dormant target, warm target capture assertions. Residuals: recovery MRU limited
+     to unsaved docs in the copy; running-editor active preserved; extraction only named tabs;
+     materialized target order reflects transfer activation; dormant-target Active now MRU-first
+     (behavior change).
+200. **OSC7 Windows paths + start-platform validation (231; R13-15).** parser accepts absolute
+     POSIX/UNC/drive+separator only; drive-relative C:dir/bare C: rejected; file://host path
+     host-dropped/percent-decoded/leading /C:/ becomes C:/; shell OS flavour not gvim; cleaned
+     <=4096B/UTF-8/no-control. Start: local platform check mismatch => status + default local dir
+     no translation; remote POSIX requires POSIX-absolute, Windows refused before authority stat.
+     Residuals no normalization/translation, Fresh accepts drive-relative, future Windows remote
+     needs flavour signal, invalid escapes verbatim/invalid UTF-8 rejected, emulator-dropped/>4096
+     ignored, remote fallback authority default/status-only, local no prevalidate, point-in-time
+     stat, later remote cd not live-replayed.
+201. **Bounded remote large-file edit context (232; R13-15/R13-7).** StringContext/NonCodeContext
+     read only loaded, contiguous, byte-bounded (64 KiB) remote-window lines; never unloaded 1MiB
+     window; outside loaded answers not-in-string/no mask without I/O; window-arrival generation in
+     cache key so paint-loaded window re-lexes (no stale blank-line spans); context bounded 300-line
+     reach/64KiB/4096B line. Local large files keep old no-editing-context behavior.
+202. **Custom detector marker/require watch (233; R13-18).** user-configured marker/require changes
+     invalidate/re-warm via authority watch; arms root + existing parent dirs; bounded
+     MaxDetectorWatchPaths/MaxDetectorWatchDirs, excess Settings notice + Env: Reload; parent content
+     seen, appearing parent re-arms next root event; no-watch backend stops/Settings/Env Reload;
+     other failures bounded backoff; polling same limits; cancel/no local fallback.
+203. **Remote trash capability research (235; R13-21; read-only).** NOT implementable on current
+     authority contract; keep permanent remote delete + mode/mtime. Fresh trash not safety proof (home
+     trash/create_dir_all/replacing rename/cross-device fallback/no no-replace/private/device checks).
+     Gaps: Rename replacing by contract; Mkdir no private mode; FileStat/DirEntry no device/owner;
+     SSH mv -n non-POSIX/non-atomic cross-FS source loss; no renameat2. NO trash/undo landed;
+     permanent-delete residual + future design OPEN/gated.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -5890,32 +6004,45 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-33 verification (2026-11-09, merged tree on `8bbe790`; 231–234 landed; 235 read-only**
+  **research; 236 audit).** STATIC GATES PASS (Lead, default GOCACHE: build, CGO_ENABLED=0,
+  GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap
+  en 118 KiB / de 82 KiB / both 201 KiB, git diff --check). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+  `/tmp/gvim-r33-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-33 tests/diff
+  review only; the Lead ran the full suite. Tracks: 231 OSC7 Windows absolute paths + start-platform
+  validation; 232 bounded loaded-window edit context for remote large files; 233 custom marker/require
+  authority watch; 234 crash-recovery/extraction MRU (item 199); 235 trash capability research only
+  (NOT implementable, no code/docs change, no trash/undo).
+  Heap-guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-
+  only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
+  a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
+  fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-32 landed OSC7 cwd persistence/restore + authority Stat validation, permanent delete + copy
-  mode/mtime best effort (trash/undo NOT shipped), pre-trust env Stat marker probe, remote large-window
-  highlight generation, i18n extraction; full suite EXIT 0 (76 packages, log /tmp/gvim-r32-final.log);
-  §5.5 is round-33/34 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks
-  UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–32 had their gate sets
-  run. Round 32 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-33 landed OSC7 Windows/platform validation, bounded remote large-file edit context, custom
+  detector watch, crash/extraction MRU; 235 trash research only, no trash/undo; full suite EXIT 0 (76
+  packages, log /tmp/gvim-r33-final.log); §5.5 is round-34/35 plan; TUI-only scope/genuine-
+  equivalence §4 item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–33 had their gate sets
+  run. Round 33 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  119 KiB / de 82 KiB / both 201 KiB, git diff --check). Final full
+  118 KiB / de 82 KiB / both 201 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r32-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-32 tests and
-  diff review only (no full suite); the Lead ran the full suite after the trash safety rollback. Heap-
-  guard semantics remain as recorded: shared-process HeapSys/garbage test contamination, test-only
-  fresh-child/strict/4× fix, production sampled circuit breaker (not a strict hard limit); beyond 4×
-  is a test-ceiling violation that may be sampling delay or a guard fault, not proof the guard never
-  fired. LSP manager fake-server async dispatch fix 40/40 remains. Real-host verification remains
-  UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
-  save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
-  box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
-  switching; ~/… expansion against a local real `sh`, not a live host. Phase-2 exit-path limits are
-  in §4 item 82/§6. Treat statuses as pointers, not proof.
+  `/tmp/gvim-r33-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-33 tests and
+  diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
+  recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
+  production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling
+  violation that may be sampling delay or a guard fault, not proof the guard never fired. LSP manager
+  fake-server async dispatch fix 40/40 remains. Real-host verification remains UNTESTED rather than
+  passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
+  realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_
+  hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching;
+  ~/… expansion against a local real `sh`, not a live host. Phase-2 exit-path limits are in §4 item
+  82/§6. Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

@@ -4,10 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/internal/apptest"
 	"github.com/tbxark/gvim/internal/restore"
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/session"
@@ -73,6 +75,9 @@ func TestExtractTabToDormantWorkspace(t *testing.T) {
 	layout, ok, err := session.Load(targetDir)
 	if err != nil || !ok || len(layout.Files) != 1 {
 		t.Fatalf("target session = %+v, %v, %v", layout, ok, err)
+	}
+	if len(layout.MRU) != 1 || layout.MRU[0].Path != path || layout.Active != 0 {
+		t.Fatalf("target MRU/active = %+v/%d, want the moved file first and active", layout.MRU, layout.Active)
 	}
 	fs := layout.Files[0]
 	if fs.Path != path || fs.Line != 2 || fs.Col != 3 || fs.Top != 1 || fs.StashFile == "" {
@@ -146,6 +151,16 @@ func TestExtractTabToMaterializedWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(got, "WARM-") {
 		t.Fatalf("the target document text = %q, want the unsaved text", got)
+	}
+	// The warm target's own capture persists the MRU; the moved tab is the most recent.
+	apptest.Must(t, m.waitWrites(10e9))
+	dir, err := m.reg.SessionDir(targetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, ok, err := session.Load(dir)
+	if err != nil || !ok || len(layout.MRU) == 0 || layout.MRU[0].Path != path {
+		t.Fatalf("warm target session MRU = %+v, %v, %v; want the moved file first", layout.MRU, ok, err)
 	}
 }
 
@@ -328,6 +343,12 @@ func TestExtractTabsToNewWorkspace(t *testing.T) {
 	layout, ok, err := session.Load(dir)
 	if err != nil || !ok || len(layout.Files) != 2 {
 		t.Fatalf("multi session = %+v, %v, %v", layout, ok, err)
+	}
+	if want := []session.MruFile{{Path: two}, {Path: one}}; !slices.Equal(layout.MRU, want) {
+		t.Fatalf("multi MRU = %+v, want the source recency order %+v", layout.MRU, want)
+	}
+	if layout.Active != 1 {
+		t.Fatalf("multi active = %d, want the source-active tab two.txt (index 1)", layout.Active)
 	}
 	stashed := map[string]string{}
 	for _, f := range layout.Files {

@@ -367,3 +367,158 @@ func TestRecoverAbandonedKeepsTheOldCopyWhenTheNewOneCannotBeWritten(t *testing.
 		})
 	}
 }
+
+// recentPaths maps the editor's MRU order to tab paths, dropping virtual/empty tabs.
+func recentPaths(ed *editor.Editor) []string {
+	tabs := ed.Tabs()
+	var out []string
+	for _, i := range ed.RecentTabIndices() {
+		if i < 0 || i >= len(tabs) {
+			continue
+		}
+		name := tabs[i].Path
+		if name == "" {
+			name = tabs[i].Name
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// TestRecoveryWriterSavesAndRestoresMRU: the crash-recovery copy carries the editor's
+// most-recently-used order (and active tab), so completion/dabbrev order after an
+// unclean exit is the order from before the crash, not tab order.
+func TestRecoveryWriterSavesAndRestoresMRU(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+	c := filepath.Join(dir, "c.txt")
+	for _, p := range []string{a, b, c} {
+		apptest.Must(t, os.WriteFile(p, []byte(filepath.Base(p)+"\n"), 0o644))
+	}
+	rec := filepath.Join(dir, "recovery")
+	crashed := apptest.NewSessionEditor()
+	for _, p := range []string{a, b, c} {
+		apptest.Must(t, crashed.OpenFile(p))
+	}
+	// Opening a, b, c activates c; then a and b make the MRU b, a, c with b active.
+	crashed.ActivateTab(0)
+	crashed.ActivateTab(1)
+	for i := range 3 {
+		crashed.ActivateTab(i)
+		crashed.Do("insert_char", map[string]any{"text": "X"})
+	}
+	// Leave the MRU b, a, c with b active.
+	crashed.ActivateTab(0)
+	crashed.ActivateTab(1)
+	if got, want := recentPaths(crashed), []string{b, a, c}; !slices.Equal(got, want) {
+		t.Fatalf("source MRU = %v, want %v", got, want)
+	}
+	apptest.Must(t, NewRecoveryWriter(crashed, rec).Plan()())
+
+	s, ok, err := session.Load(rec)
+	apptest.Must(t, err)
+	if !ok {
+		t.Fatal("no recovery session was saved")
+	}
+	wantMru := []session.MruFile{{Path: b}, {Path: a}, {Path: c}}
+	if !slices.Equal(s.MRU, wantMru) {
+		t.Fatalf("recovery MRU = %+v, want %+v", s.MRU, wantMru)
+	}
+	if s.Active != 1 {
+		t.Fatalf("recovery active = %d, want 1 (b.txt)", s.Active)
+	}
+
+	fresh := apptest.NewSessionEditor()
+	failed, n := recoverCrash(fresh, rec)
+	if len(failed) != 0 || n != 3 {
+		t.Fatalf("recoverCrash = %d recovered, failed %v, want 3 and none", n, failed)
+	}
+	if got, want := recentPaths(fresh), []string{b, a, c}; !slices.Equal(got, want) {
+		t.Fatalf("restored MRU = %v, want %v", got, want)
+	}
+	if d := fresh.Active(); d == nil || d.Path != b {
+		t.Fatalf("active document = %+v, want b.txt", d)
+	}
+}
+
+// TestRecoveryMRUKeepsUntitledLabel: a pathless buffer is named by its label in the
+// recovery copy's MRU, so recovery can put it back at the right rank next to a file.
+func TestRecoveryMRUKeepsUntitledLabel(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	apptest.Must(t, os.WriteFile(a, []byte("a\n"), 0o644))
+	rec := filepath.Join(dir, "recovery")
+	crashed := apptest.NewSessionEditor()
+	apptest.Must(t, crashed.OpenFile(a))
+	crashed.ActivateTab(0)
+	crashed.Do("new", nil)
+	crashed.Active().SetLabel("scratch")
+	crashed.Do("insert_char", map[string]any{"text": "notes"})
+	crashed.ActivateTab(0)
+	crashed.Do("insert_char", map[string]any{"text": "A"})
+	crashed.ActivateTab(1)
+	if got, want := recentPaths(crashed), []string{"scratch", a}; !slices.Equal(got, want) {
+		t.Fatalf("source MRU = %v, want %v", got, want)
+	}
+	apptest.Must(t, NewRecoveryWriter(crashed, rec).Plan()())
+
+	s, ok, err := session.Load(rec)
+	apptest.Must(t, err)
+	if !ok {
+		t.Fatal("no recovery session was saved")
+	}
+	wantMru := []session.MruFile{{Label: "scratch"}, {Path: a}}
+	if !slices.Equal(s.MRU, wantMru) {
+		t.Fatalf("recovery MRU = %+v, want %+v", s.MRU, wantMru)
+	}
+	fresh := apptest.NewSessionEditor()
+	failed, n := recoverCrash(fresh, rec)
+	if len(failed) != 0 || n != 2 {
+		t.Fatalf("recoverCrash = %d recovered, failed %v", n, failed)
+	}
+	if d := fresh.Active(); d == nil || d.Path != "" || d.Label() != "scratch" {
+		t.Fatalf("active document = %+v, want the labelled untitled buffer", d)
+	}
+	if got, want := recentPaths(fresh), []string{"scratch", a}; !slices.Equal(got, want) {
+		t.Fatalf("restored MRU = %v, want %v", got, want)
+	}
+}
+
+// TestRecoverySessionWithoutMRUStillRestores: a crash-recovery copy written by an older
+// build (no active/MRU fields) restores as before, keeping the activation-derived order
+// instead of inventing references.
+func TestRecoverySessionWithoutMRUStillRestores(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.txt")
+	b := filepath.Join(dir, "b.txt")
+	apptest.Must(t, os.WriteFile(a, []byte("a\n"), 0o644))
+	apptest.Must(t, os.WriteFile(b, []byte("b\n"), 0o644))
+	rec := filepath.Join(dir, "recovery")
+	crashed := apptest.NewSessionEditor()
+	apptest.Must(t, crashed.OpenFile(a))
+	apptest.Must(t, crashed.OpenFile(b))
+	crashed.ActivateTab(0)
+	crashed.Do("insert_char", map[string]any{"text": "X"})
+	crashed.ActivateTab(1)
+	crashed.Do("insert_char", map[string]any{"text": "X"})
+	apptest.Must(t, NewRecoveryWriter(crashed, rec).Plan()())
+
+	old, ok, err := session.Load(rec)
+	apptest.Must(t, err)
+	if !ok {
+		t.Fatal("no recovery session")
+	}
+	old.MRU, old.Active = nil, 0
+	apptest.Must(t, session.Save(rec, old))
+
+	fresh := apptest.NewSessionEditor()
+	failed, n := recoverCrash(fresh, rec)
+	if len(failed) != 0 || n != 2 {
+		t.Fatalf("recoverCrash = %d recovered, failed %v", n, failed)
+	}
+	names, _ := apptest.TabNames(fresh)
+	if !slices.Equal(names, []string{"a.txt", "b.txt"}) {
+		t.Fatalf("restored tabs = %v, want the saved file order", names)
+	}
+}

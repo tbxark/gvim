@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/tbxark/gvim/buffer"
+	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/internal/daemon"
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/session"
@@ -34,6 +35,54 @@ type extractTab struct {
 	destRoot string // the workspace root shared with the source workspace (the co-tenant)
 	file     session.FileState
 	unsaved  string
+	// mru is the source editor's most-recently-used order restricted to the extracted
+	// documents (newest first). The new workspace's session carries it so completion and
+	// dabbrev order survive the extraction; a moved tab is a named file, so only Path is
+	// used.
+	mru []session.MruFile
+}
+
+// extractMru returns the source editor's MRU order for the selected named documents,
+// newest first. It reads RecentTabIndices before any capture activates tabs; a path that
+// is no longer open is simply absent.
+func extractMru(ed *editor.Editor, paths map[string]bool) []session.MruFile {
+	if ed == nil || len(paths) == 0 {
+		return nil
+	}
+	var mru []session.MruFile
+	seen := make(map[string]bool, len(paths))
+	tabs := ed.Tabs()
+	for _, tabIndex := range ed.RecentTabIndices() {
+		if tabIndex < 0 || tabIndex >= len(tabs) {
+			continue
+		}
+		path := tabs[tabIndex].Path
+		if path == "" || !paths[path] || seen[path] {
+			continue
+		}
+		seen[path] = true
+		mru = append(mru, session.MruFile{Path: path})
+	}
+	return mru
+}
+
+// activeForMru returns the saved-files index of the first MRU reference that matches a
+// file, or 0. A restored session makes that tab active, and RecentTabIndices puts the
+// active tab first, so this is what makes the saved MRU order the restored order after a
+// new/modified session is materialized.
+func activeForMru(files []session.FileState, mru []session.MruFile) int {
+	for _, ref := range mru {
+		for i, f := range files {
+			if f.Path != ref.Path {
+				continue
+			}
+			if f.Path == "" && f.Label != ref.Label {
+				continue
+			}
+			return i
+		}
+	}
+	return 0
 }
 
 // ExtractTab implements the TUI's optional workspace extract action. It runs on the UI
@@ -63,6 +112,7 @@ func (m *workspaceManager) ExtractTab() (tui.WorkspaceCmd, error) {
 		path:     doc.Path,
 		name:     filepath.Base(doc.Path),
 		destRoot: sess.ws.File.Root,
+		mru:      []session.MruFile{{Path: doc.Path}},
 		file: session.FileState{
 			Path: doc.Path,
 			Line: doc.Cursor.Line + 1,
@@ -140,8 +190,9 @@ func (m *workspaceManager) runExtractTab(ext *extractTab) {
 		Version:  session.Version,
 		Root:     canonical,
 		Explorer: true,
-		Active:   0,
+		Active:   activeForMru([]session.FileState{file}, ext.mru),
 		Files:    []session.FileState{file},
+		MRU:      ext.mru,
 	}
 	if err := session.Save(dir, layout); err != nil {
 		discard()
