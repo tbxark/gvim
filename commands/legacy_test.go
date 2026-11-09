@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -103,4 +104,28 @@ func TestHiddenCommandsAreNotListed(t *testing.T) {
 			t.Error("Detach is gated on SESSION_MODE and must be hidden")
 		}
 	}
+}
+
+// TestResumeLiveGrepDescriptionMatchesCacheBehavior: the generated Fresh description
+// promised cached results with no re-run unconditionally. The gvim override must say
+// that the cache is used only while current and that invalidations search again.
+func TestResumeLiveGrepDescriptionMatchesCacheBehavior(t *testing.T) {
+	for _, e := range Commands(nil) {
+		if e.Action != "resume_live_grep" {
+			continue
+		}
+		if strings.Contains(e.Description, "no re-run") {
+			t.Fatalf("description still overstates Resume: %q", e.Description)
+		}
+		for _, want := range []string{"cached matches", "files-only", "still current", "searches again", "Buffers/Terminals"} {
+			if !strings.Contains(e.Description, want) {
+				t.Fatalf("description = %q, want %q", e.Description, want)
+			}
+		}
+		if e.DescKey != "gvim.command.resume_live_grep_desc" {
+			t.Fatalf("description key = %q", e.DescKey)
+		}
+		return
+	}
+	t.Fatal("Resume Live Grep command not found")
 }

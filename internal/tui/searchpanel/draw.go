@@ -11,6 +11,7 @@ import (
 
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/textsafe"
 )
 
 // The panel's labels and shared column widths.
@@ -483,24 +484,28 @@ type previewRun struct {
 // finds the match range.
 func (p *Panel) buildPreviewLine(fileLine int, lineText string, spans []PreviewSpan, m Match) previewLineView {
 	from, to, inMatch := previewSpan(m, fileLine, lineText)
-	text, hlStart, hlEnd := expandPreviewLine(lineText, from, to)
+	// The preview text is untrusted (remote files, arbitrary open buffers): remove Cc/Cf
+	// and invalid UTF-8 before it reaches the grid, and move the match and syntax spans
+	// onto the cleaned runes so a removed bidi/control rune cannot shift the highlight.
+	cleanText, mapping := textsafe.CleanWithMap(lineText)
+	from = textsafe.MapIndex(mapping, from)
+	to = textsafe.MapIndex(mapping, to)
+	text, hlStart, hlEnd := expandPreviewLine(cleanText, from, to)
 	view := previewLineView{expanded: []rune(text), hlStart: hlStart, hlEnd: hlEnd, inMatch: inMatch}
 	view.base = p.styles.field
 	if inMatch {
 		view.base = p.styles.selected
 	}
-	// The syntax spans carry rune columns of the raw line; the painted text has tabs
-	// expanded, so map through the display offsets.
 	raw := []rune(lineText)
-	dispAt := displayOffsets(raw)
+	dispAt := displayOffsets([]rune(cleanText))
 	for _, span := range spans {
 		st, ok := p.styles.syntax[span.Kind]
 		if !ok {
 			continue
 		}
 		st.BG = view.base.BG
-		lo := clamp(span.Start, 0, len(raw))
-		hi := clamp(span.End, 0, len(raw))
+		lo := textsafe.MapIndex(mapping, clamp(span.Start, 0, len(raw)))
+		hi := textsafe.MapIndex(mapping, clamp(span.End, 0, len(raw)))
 		if hi <= lo {
 			continue
 		}

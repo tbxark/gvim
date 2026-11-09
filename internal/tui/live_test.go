@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tbxark/gvim/internal/tui/list"
 	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/theme"
 )
@@ -128,12 +129,12 @@ func runKey(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-// TestResumeLiveGrepReopensTheLastQuery checks that resume_live_grep searches the
-// query of the last live grep again.
-func TestResumeLiveGrepReopensTheLastQuery(t *testing.T) {
+// TestResumeLiveGrepRestoresCachedMatches: resume reopens the last Live Grep without
+// searching again; the cached row is still there and Enter opens it as before.
+func TestResumeLiveGrepRestoresCachedMatches(t *testing.T) {
 	t.Parallel()
 	g := &grepPort{hits: []palette.GrepHit{{Rel: "a.go", Line: 1, Col: 1, Text: "todo"}}}
-	m, _ := newLiveModel(t, g)
+	m, ed := newLiveModel(t, g)
 	must(t, m.Run("open_live_grep"))
 	typeInto(m, "todo")
 	m.Update(special(tea.KeyEscape))
@@ -142,8 +143,105 @@ func TestResumeLiveGrepReopensTheLastQuery(t *testing.T) {
 	must(t, m.Run("resume_live_grep"))
 	feed(m, m.pending)
 	m.pending = nil
+	if len(g.queries) != 0 {
+		t.Fatalf("resume re-ran the search: %v", g.queries)
+	}
+	if len(m.overlays) == 0 {
+		t.Fatal("resume did not open the palette")
+	}
+	feed(m, runKey(m, special(tea.KeyEnter)))
+	if len(ed.opened) != 1 || ed.opened[0] != "/ws/a.go" {
+		t.Fatalf("resume cached row opened %v, want /ws/a.go", ed.opened)
+	}
+}
+
+// TestResumeLiveGrepRestoresTheSelectedRow: the selected index is part of the
+// resumed state, not just the hits.
+func TestResumeLiveGrepRestoresTheSelectedRow(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{hits: []palette.GrepHit{
+		{Rel: "a.go", Line: 1, Col: 1, Text: "todo"},
+		{Rel: "b.go", Line: 2, Col: 1, Text: "todo"},
+	}}
+	m, ed := newLiveModel(t, g)
+	must(t, m.Run("open_live_grep"))
+	typeInto(m, "todo")
+	feed(m, runKey(m, special(tea.KeyDown)))
+	m.Update(special(tea.KeyEscape))
+
+	g.queries = nil
+	must(t, m.Run("resume_live_grep"))
+	feed(m, m.pending)
+	m.pending = nil
+	if len(g.queries) != 0 {
+		t.Fatalf("resume re-ran the search: %v", g.queries)
+	}
+	feed(m, runKey(m, special(tea.KeyEnter)))
+	if len(ed.opened) != 1 || ed.opened[0] != "/ws/b.go" {
+		t.Fatalf("resume selection opened %v, want the second row /ws/b.go", ed.opened)
+	}
+}
+
+// TestResumeLiveGrepHonestlyRerunsAfterAQueryEdit: changing the query invalidates the
+// cached matches (Fresh's rule); resume keeps the text but searches it again.
+func TestResumeLiveGrepHonestlyRerunsAfterAQueryEdit(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{hits: []palette.GrepHit{{Rel: "a.go", Line: 1, Col: 1, Text: "todo"}}}
+	m, _ := newLiveModel(t, g)
+	must(t, m.Run("open_live_grep"))
+	typeInto(m, "todo")
+	// Type without feeding the new search: the old result is still on screen but the
+	// query no longer matches it, so Resume must not restore the stale hits.
+	m.Update(typed("x"))
+	m.Update(special(tea.KeyEscape))
+
+	g.queries = nil
+	must(t, m.Run("resume_live_grep"))
+	feed(m, m.pending)
+	m.pending = nil
+	if !slices.Equal(g.queries, []string{"todox"}) {
+		t.Fatalf("resume after an edit searched %v, want todox", g.queries)
+	}
+}
+
+// genFiles is a file index with the generation the palette uses to decide whether a
+// cached Live Grep result is still current.
+type genFiles struct {
+	*fakeIndex
+	gen uint64
+}
+
+func (g *genFiles) Generation() uint64 { return g.gen }
+
+// TestResumeLiveGrepRerunsWhenTheIndexGenerationChanges: an index Restart invalidates
+// the cached matches even if the query and selection are unchanged; resume searches
+// again rather than presenting rows from the old index.
+func TestResumeLiveGrepRerunsWhenTheIndexGenerationChanges(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{hits: []palette.GrepHit{{Rel: "a.go", Line: 1, Col: 1, Text: "todo"}}}
+	ed := &lineEditor{fakeEditor: newFakeEditor("x")}
+	files := &genFiles{fakeIndex: &fakeIndex{}, gen: 1}
+	m := New(Deps{
+		Editor:   ed,
+		Explorer: newFakeTree(1),
+		Keys:     testKeys(),
+		Theme:    theme.Theme{},
+		Clock:    testClock,
+		Files:    files,
+		Root:     RootPorts{Grep: g},
+	})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	must(t, m.Run("open_live_grep"))
+	typeInto(m, "todo")
+	m.Update(special(tea.KeyEscape))
+
+	files.gen = 2
+	g.queries = nil
+	must(t, m.Run("resume_live_grep"))
+	feed(m, m.pending)
+	m.pending = nil
 	if !slices.Equal(g.queries, []string{"todo"}) {
-		t.Fatalf("resume searched %v, want the last query todo", g.queries)
+		t.Fatalf("resume after a generation change searched %v, want todo", g.queries)
 	}
 }
 
@@ -270,5 +368,102 @@ func TestRemoteLiveGrepRefusesLocalSearch(t *testing.T) {
 	must(t, m.Run("resume_live_grep"))
 	if len(m.overlays) != 0 || len(g.queries) != 0 {
 		t.Fatalf("resume opened/searched locally: overlays %d queries %v", len(m.overlays), g.queries)
+	}
+}
+
+// TestResumeCacheResetOnConfigAndProjectChanges: a configuration change and a project
+// root change both drop the cached Live Grep state, so Resume cannot replay matches
+// from the old root or configuration.
+func TestResumeCacheResetOnConfigAndProjectChanges(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, newFakeEditor("x"), newFakeTree(1), 80, 24)
+	m.root.lastGrep = &palette.LiveResume{Text: "todo", Done: true}
+	m.applySettingsChange(SettingsChange{})
+	if m.root.lastGrep != nil {
+		t.Fatal("config change kept the resume cache")
+	}
+	m.root.lastGrep = &palette.LiveResume{Text: "todo", Done: true}
+	m.util.switchKeymap = func(string) (Keymap, error) { return testKeys(), nil }
+	m.switchKeymap("emacs")
+	if m.root.lastGrep != nil {
+		t.Fatal("keymap/config switch kept the resume cache")
+	}
+	m.root.lastGrep = &palette.LiveResume{Text: "todo", Done: true}
+	m.adoptProject(projectOpenedMsg{root: "/next", project: Project{Tree: treeAt("/next", 1), Files: &fakeIndex{}}})
+	if m.root.lastGrep != nil {
+		t.Fatal("project root change kept the resume cache")
+	}
+}
+
+// TestLiveGrepExportOpensQuickfixList: Alt+Q from Live Grep closes the palette and opens
+// the shared list overlay with the hits; Enter on a row jumps to it while the list stays
+// open (the same walking behavior as the project-search export).
+func TestLiveGrepExportOpensQuickfixList(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{hits: []palette.GrepHit{
+		{Rel: "src/a.go", Line: 7, Col: 2, Text: "todo a"},
+		{Rel: "src/b.go", Line: 3, Col: 1, Text: "todo b"},
+	}}
+	m, ed := newLiveModel(t, g)
+	must(t, m.Run("open_live_grep"))
+	typeInto(m, "todo")
+	feed(m, runKey(m, altKey('q')))
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays after export = %d, want the quickfix list only", len(m.overlays))
+	}
+	v, ok := m.overlays[0].(*list.View)
+	if !ok {
+		t.Fatalf("top overlay = %T, want the quickfix list", m.overlays[len(m.overlays)-1])
+	}
+	if !strings.Contains(v.Title, "Live Grep: todo") || !strings.Contains(v.Title, "2 matches") {
+		t.Fatalf("list title = %q", v.Title)
+	}
+	if len(v.Rows) != 2 || !strings.Contains(v.Rows[0].Left, "src/a.go:7") {
+		t.Fatalf("list rows = %+v", v.Rows)
+	}
+	// Enter on the first row opens the file and keeps the list open for the next row.
+	feed(m, runKey(m, special(tea.KeyEnter)))
+	if len(ed.opened) != 1 || ed.opened[0] != "/ws/src/a.go" {
+		t.Fatalf("opened %v from the quickfix list, want the first hit", ed.opened)
+	}
+	if len(m.overlays) == 0 {
+		t.Fatal("the quickfix list closed after Enter")
+	}
+}
+
+// TestLiveGrepExportSanitizesDisplayOnly: the quickfix list label/right text are cleaned,
+// but the row Value still carries the raw path/index so Enter opens the real target.
+func TestLiveGrepExportSanitizesDisplayOnly(t *testing.T) {
+	t.Parallel()
+	m := newTerminalModel(t, newFakeTree(1), dockKeys(), &shellsStarter{})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	rawRel := "\u202Eevil.go"
+	cmd := m.openLiveGrepResultsList(palette.GrepExportMsg{
+		Root:  "/ws",
+		Query: "todo\u202E",
+		Hits: []palette.GrepHit{{
+			Source: palette.GrepFiles, Rel: rawRel, Line: 2, Col: 1, Text: "\u202Etodo\u0080",
+		}},
+	})
+	_ = cmd
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want one export list", len(m.overlays))
+	}
+	v, ok := m.overlays[0].(*list.View)
+	if !ok {
+		t.Fatalf("overlay = %T", m.overlays[0])
+	}
+	if len(v.Rows) != 1 {
+		t.Fatalf("rows = %+v", v.Rows)
+	}
+	row := v.Rows[0]
+	if strings.ContainsAny(row.Left+row.Right, "\u202e\u0080") {
+		t.Fatalf("export display kept spoof bytes: %+v", row)
+	}
+	if !strings.HasPrefix(row.Value, "f\t") || !strings.Contains(row.Value, rawRel) {
+		t.Fatalf("export value = %q, want raw path target %q", row.Value, rawRel)
+	}
+	if strings.Contains(v.Title, "\u202e") {
+		t.Fatalf("export title kept bidi: %q", v.Title)
 	}
 }

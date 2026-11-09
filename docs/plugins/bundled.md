@@ -480,7 +480,8 @@ integer cells are displayed: capacity/used must be plain non-negative integer Ki
 must be `^%d+%%?$` (digits with at most one trailing `%`), so decimals, signs, whitespace and
 misplaced percent signs are unknown. A bad cell, zero/invalid capacity or `used > capacity` marks
 that mount `unavailable` and omits the meter/used-capacity cell instead of showing bogus 0/0 or
-100%; a valid numeric percentage (including df's odd out-of-range value) is clamped to 0..100. Tab/Down/j and
+100%; a valid numeric percentage (including df's odd out-of-range value) is clamped to 0..100, and
+mount labels go through the Cc/Cf display sanitizer before painting. Tab/Down/j and
 Shift-Tab/Up/k move, Enter activates (a buffer-local mode); **Show Dashboard** reopens it. It
 auto-opens on an empty editor and after the last file closes (`show_on_empty`) and closes when a file
 opens; a timer refreshes it (`refresh_seconds`). A plugin developer can override the auto-open decision
@@ -542,13 +543,15 @@ public IP) and `weather_units = "metric" | "imperial"`. One bounded request to
 `https://wttr.in[/<percent-encoded location>]?format=j1` (5 s timeout, 10 min refresh TTL) is
 rendered as Fresh does: `now` with condition/temperature/feels-like/wind/humidity, `5pm` from
 the nearest 3-hour sample and a `tomorrow` range/condition summary. The request carries no
-credentials or caller headers, stays in memory (no disk write) and never blocks the UI; a
+credentials or caller headers; response text goes through the same Cc/Cf display sanitizer before
+painting, stays in memory (no disk write) and never blocks the UI; a
 timeout, offline response, malformed body or disabled network renders one muted
 `unavailable`/`invalid response`/`network disabled` line with no notice. The third-party section
 API: third-party plugins can register dashboard sections through
 `gvim.dashboard.register_section` (bounded plain-data refresh callbacks; see
-[api-system.md](api-system.md#gvimdashboard)); gvim's built-in Weather/GitHub/Disk/Git rows
-are unchanged. Reductions: no Utility Dock placement and no sessions section; weather has no multi-day detail beyond today/tomorrow and no dedicated
+[api-system.md](api-system.md#gvimdashboard)); external section titles/rows go through the same
+Cc/Cf display sanitizer as PR titles, so plugin- or network-provided bidi/zero-width marks cannot
+spoof the row. gvim's built-in Weather/GitHub/Disk/Git rows are unchanged. Reductions: no Utility Dock placement and no sessions section; weather has no multi-day detail beyond today/tomorrow and no dedicated
 location picker (the place setting is a plain string, and empty delegates geolocation to
 wttr.in).
 

@@ -443,3 +443,35 @@ func TestProjectPreviewWrapPersists(t *testing.T) {
 		t.Fatal("wrap did not stay off")
 	}
 }
+
+// TestProjectExportCapAndNotice: the project-search quickfix list gets an independent
+// row cap (smaller than the search's 10000-match limit) and a notice naming the omitted
+// count; the exported list stays bounded.
+func TestProjectExportCapAndNotice(t *testing.T) {
+	t.Parallel()
+	matches := make([]searchpanel.Match, projectExportCap+5)
+	for i := range matches {
+		matches[i] = searchpanel.Match{Line: i + 1, Col: 1, Len: 3, Text: "foo"}
+	}
+	s := &fakeProjectSearcher{result: searchpanel.SearchResult{Files: []searchpanel.FileMatches{{
+		Path: "/ws/a.go", Name: "a.go", Hash: 1, Matches: matches,
+	}}}}
+	ed := newProjEd([]TabInfo{{Name: "a.go", Path: "/ws/a.go", Active: true}}, []BufferText{{Name: "a.go", Path: "/ws/a.go", Text: "foo"}})
+	m := newProjectPanelModel(t, ed, s, nil, nil)
+	openSearchPanel(t, m)
+	projectSearch(t, m, "foo")
+	if err := m.Run("project_search_results"); err != nil {
+		t.Fatalf("project_search_results: %v", err)
+	}
+	v, ok := m.overlays[len(m.overlays)-1].(*list.View)
+	if !ok {
+		t.Fatalf("the capped export opened %T, want the list overlay", m.overlays[len(m.overlays)-1])
+	}
+	if !strings.Contains(m.notice, "limited to 2000 matches") || !strings.Contains(m.notice, "5 more") {
+		t.Fatalf("notice = %q, want the cap and omitted count", m.notice)
+	}
+	// header + 2000 match rows + the omitted header row.
+	if len(v.Rows) != projectExportCap+2 {
+		t.Fatalf("list rows = %d, want header + %d matches + omitted marker", len(v.Rows), projectExportCap)
+	}
+}

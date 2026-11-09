@@ -204,7 +204,9 @@ a bounded array of row tables (or `nil, err`):
 
 `color` is one of `muted`, `accent`, `value`, `number`, `ok`, `warn`, `err`, `title`;
 unknown colors fall back to `value`. The dashboard caps a section at 64 rows and clips all
-text (control characters become spaces); unknown row kinds are skipped. A callback error,
+text; display strings are parsed as UTF-8 and Cc controls become spaces while assigned Cf format
+marks are removed (the same Cc/Cf sanitizer used for GitHub PR titles, so bidi/zero-width marks
+cannot spoof a row); invalid UTF-8 bytes become spaces and unknown row kinds are skipped. A callback error,
 timeout, missing/unloaded provider or invalid result marks only that section stale/unavailable
 and keeps the last successful rows with a `stale` heading note; other sections and the rest of
 the dashboard continue. A provider that is unloaded/disabled is discovered as unavailable on

@@ -903,6 +903,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activateTab(msg.Index)
 		m.gotoLine(msg.Line, msg.Col)
 		m.focusEditor()
+	case palette.OpenTerminalMsg:
+		// A Live Grep hit in an open dock terminal focuses that tab (showing the dock
+		// when hidden). It starts no shell and touches no PTY: the terminal is already
+		// open, the transcript line is only where the match was found.
+		if m.dock.SetActive(msg.Index) {
+			cmd = m.showDock()
+			m.focusDock()
+		} else {
+			m.notice = "Live Grep: the terminal tab is no longer open"
+		}
 	case palette.GotoLineMsg:
 		// The ':' mode jumps at once, as Fresh's does: one Enter reaches the line.
 		m.gotoLine(msg.Line, msg.Col)
@@ -3470,10 +3480,20 @@ func (m *Model) routeOverlay(msg tea.Msg) tea.Cmd {
 
 // popOverlay removes the top overlay. It does nothing on an empty stack.
 func (m *Model) popOverlay() {
-	if n := len(m.overlays); n > 0 {
-		m.overlays[n-1] = nil
-		m.overlays = m.overlays[:n-1]
+	n := len(m.overlays)
+	if n == 0 {
+		return
 	}
+	// Resume captures Live Grep's state as the overlay closes: the query, modes,
+	// scopes, selected row and cached matches (bounded by the palette). The capture is
+	// in memory, so closing starts no search or I/O.
+	if r, ok := m.overlays[n-1].(interface{ LiveResumeState() *palette.LiveResume }); ok {
+		if state := r.LiveResumeState(); state != nil {
+			m.root.lastGrep = state
+		}
+	}
+	m.overlays[n-1] = nil
+	m.overlays = m.overlays[:n-1]
 }
 
 // updateStatusRestartHover keeps the {terminal_restart} hover in step with the

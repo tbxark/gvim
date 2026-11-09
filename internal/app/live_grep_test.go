@@ -283,3 +283,50 @@ func TestGrepForSkipsLargeFiles(t *testing.T) {
 		t.Fatalf("skipFrom = %d, want 1000", got)
 	}
 }
+
+// TestLiveGrepSearchesTerminalSnapshot checks the Terminals scope is searched after
+// the files/buffers sources, in dock-tab/line order, one hit per line, tagged with the
+// dock tab index, and still obeys the request limit. The text arrives in the request:
+// the search itself does not read a PTY or start a process.
+func TestLiveGrepSearchesTerminalSnapshot(t *testing.T) {
+	t.Parallel()
+	req := palette.GrepRequest{
+		Text:    "todo",
+		Sources: palette.GrepSources{Buffers: true, Terminals: true},
+		Limit:   100,
+		Buffers: []palette.BufferSource{{Index: 4, Name: "notes.md", Text: "todo buffer\n"}},
+		Terminals: []palette.TerminalSource{
+			{Index: 1, Name: "shell", Lines: []string{"first", "xx todo one", "todo two"}},
+			{Index: 3, Name: "", Lines: []string{"todo three"}},
+		},
+	}
+	hits, err := (&liveGrep{}).Search(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []palette.GrepHit{
+		{Rel: "notes.md", Line: 1, Col: 1, Text: "todo buffer", Source: palette.GrepBuffers, Index: 4},
+		{Rel: "shell", Line: 2, Col: 4, Text: "xx todo one", Source: palette.GrepTerminals, Index: 1},
+		{Rel: "shell", Line: 3, Col: 1, Text: "todo two", Source: palette.GrepTerminals, Index: 1},
+		{Rel: "terminal", Line: 1, Col: 1, Text: "todo three", Source: palette.GrepTerminals, Index: 3},
+	}
+	if fmt.Sprint(hits) != fmt.Sprint(want) {
+		t.Fatalf("hits = %v, want %v", hits, want)
+	}
+	req.Limit = 2
+	hits, err = (&liveGrep{}).Search(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || hits[0].Source != palette.GrepBuffers || hits[1].Source != palette.GrepTerminals {
+		t.Fatalf("limited hits = %v, want the buffer then the first terminal hit", hits)
+	}
+	// A regex error from the shared mode handling is reported for terminal-only
+	// searches too.
+	req = palette.GrepRequest{Text: "(", Sources: palette.GrepSources{Terminals: true}, Limit: 10,
+		Terminals: []palette.TerminalSource{{Index: 0, Name: "t", Lines: []string{"x"}}}}
+	req.Query.Regex = true
+	if _, err := (&liveGrep{}).Search(req); err == nil {
+		t.Fatal("an invalid regex over terminals was not rejected")
+	}
+}

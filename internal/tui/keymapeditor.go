@@ -47,6 +47,7 @@ func (m *Model) switchKeymap(name string) {
 		return
 	}
 	m.keys = m.pluginSwitchKeymap(name, k)
+	m.resetLiveGrepResume()
 	m.relabelCommands()
 	m.util.settings.Keymap = name
 	m.notice = "Keymap: " + name + " for this session; set \"keymap\" in the config to keep it"

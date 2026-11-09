@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `3ca0e57` (the previous round's commit is folded in) plus the
-merged round-50 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+Last verified: 2026-11-09, tree commit `4c48060` (the previous round's commit is folded in) plus the
+merged round-51 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
 GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-122 KiB / de 88 KiB / both 210 KiB, git diff --check). Final full
-`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
-`/tmp/gvim-r50-final2.log`). The audit ran build/gofmt/i18n_check plus targeted round-50 tests/diff
+128 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r51-final3.log`). The audit ran build/gofmt/i18n_check plus targeted round-51 tests/diff
 review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
 real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
@@ -1514,6 +1514,66 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-51 outcome (2026-11-09, merged working tree on `4c48060`).** Four slices landed: Live Grep
+row preview + Alt+Q export/resume/Terminals-scope hardening; project-search preview cancellation +
+2000-match export cap; shared textsafe Cc/Cf display sanitizer (previews, Live Grep rows/export,
+dashboard external/df rows) and Live Grep display/target separation. Static gates pass; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL (log
+`/tmp/gvim-r51-final3.log`). The audit read the diff and ran targeted tests; the Lead ran the full
+suite.
+**Live Grep row preview / export / resume / Terminals scope (item 277).** The selected file hit gets a
+bounded preview window through the optional palette WindowPreviewer: a tea.Cmd reads at most 16 KiB
+and 12 complete lines (five before the hit) with the line-number gutter and target-line highlight;
+the read context is canceled when the highlight moves, on Dismiss/Enter/export, and a non-window
+port falls back to the bounded file head. Buffer/terminal hits have no file preview (their content
+is not a file; recorded residual). Alt+Q exports the current hits to a shared non-persistent list
+overlay with an independent 100-row cap and a notice; terminal hits encode t/index and Enter focuses
+the dock tab through OpenTerminalMsg (never opens a file or starts a shell); live rows keep raw
+rel/line/col/index for the target while display rel/text/title go through textsafe, so a cleaned
+label cannot redirect a target. Resume captures query, modes, scopes, selected row and cached hits
+in memory; it restores the cached result only for a FILES-ONLY search after checking the query and
+file-index generation. Buffers/Terminals hits carry volatile in-memory tab indices, so Resume keeps
+the controls but always re-runs the search when either scope was on; a query edit, finder restart/
+generation change, project-root or configuration change also re-runs or clears the cache. Terminals
+scope (Alt+T) searches the open dock's newest transcript windows: <=16 tabs, <=500 rows and <=1 MiB
+per tab, <=4 MiB total, no process/PTY; Enter focuses the matching dock tab. The Live Grep command
+description says the cache is used only while current. AUDITED RESIDUALS: Files-only Resume still
+trusts the cached file text when the file list/query unchanged (no per-file hash/mtime; stale
+content), terminal-hit export focuses the tab but does not scroll the transcript to the match line,
+ReadWindow refuses a hit beyond the 8 MiB prefix scan and may report truncated=true on exactly 12
+lines (false positive), buffer/terminal hits have no file preview, remote Live Grep is refused, and
+the shared list is not a persistent quickfix stack (R13-11/R13-15).
+**Project-search preview cancellation + 2000-match export cap (item 278).** The search panel gained an
+optional ContextPreviewer seam: the panel passes a context into the preview read, cancels it on a
+selection change/dismiss/Enter/export, and drops superseded answers by sequence; export cancels the
+in-flight preview before opening the list. Alt+Q builds at most 2000 match rows plus headers and one
+omitted-marker row, with a notice naming the omitted count; the search result itself stays subject to
+the 10000-match limit and the panel remains the source of truth (no persistent quickfix stack).
+AUDITED RESIDUALS: the export list can carry one header per contributing file (up to ~2000 extra
+header rows), Files-only preview reads still use the existing 1 MiB whole-file search cap, and real
+local/remote preview hosts are UNTESTED (R13-11/R13-15).
+**Shared textsafe display sanitizer (item 279).** A new internal/tui/textsafe package parses UTF-8,
+removes invalid bytes and Cc/Cf categories while keeping tab/newline, and exposes Clean/
+CleanWithMap/MapIndex/IsClean. It is used for palette and search-panel preview lines (tab expansion
+after clean, match/syntax spans remapped through the rune map), Live Grep display rows/export labels/
+titles (raw targets preserved), and dashboard PR titles/external section titles/rows/df mount labels.
+The tests cover ANSI/C1/BEL/bidi/zero-width/BOM/soft-hyphen/invalid UTF-8 and raw-target separation;
+Cf path display remains a recorded residual. The sanitizer adds one package (full suite now 77
+packages) and is CPU-only/data-only: no process, IO, target mutation or URL dispatch (R13-15).
+**Dashboard display hardening (item 280).** GitHub PR titles, network response text, external section
+titles/rows, weather text and df mount labels now go through the same Cc/Cf sanitizer before painting;
+unknown external row kinds are skipped, invalid cells stay unavailable, and raw callback data never
+reaches the terminal. GitHub checks remain opt-in (github_prs+network, fixed api.github.com, validated
+nwo/SHA, no token/auth/header, no disk persistence, TTL/rate-bounded) with the per-plugin/workspace
+rate-budget residual, private/no-token and future-Unicode-Cf-table residual; external providers still
+return plain rows to the bundled dashboard by their own plugin privilege, never cross-plugin keys.
+Real GitHub/remote hosts and non-Cf invisible/composited homoglyph spoofing remain UNTESTED/
+out-of-scope (R13-6/R13-24).
+Metrics: palette 240, settings 69 in 14 sections, bundled 31 (9 on)/22 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; i18n en 1128 / 579 per locale, 575
+KiB text, ≈665 KiB JSON, heap 128-82-210 KiB. Full suite EXIT 0 (77 packages, log /tmp/gvim-r51-
+final3.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-50 outcome (2026-11-09, merged working tree on `3ca0e57`).** Four slices landed: remote search
 output/path/display hardening; terminal foreground-name Cf/restart-indicator/hover; dashboard
@@ -5642,6 +5702,28 @@ for parity status.
      numbered tab labels back through dockText/dockTextVars; tests; porting Slang cache and architecture
      per-command-cap wording fixed. Residual: non-English locale English fallbacks where no translation;
      real host/UI UNTESTED.
+277. **Live Grep row preview/export/resume/Terminals (R13-11/R13-15).** file-hit window preview 16KiB/
+     12 lines/5 before via WindowPreviewer + ctx cancel selection/dismiss/enter/export; fallback head.
+     Alt+Q shared non-persistent list cap100+notice; terminal t/index→OpenTerminalMsg focus dock (no
+     file/shell); display textsafe cleaned, raw target preserved. Resume in-memory: Files-only + query +
+     file-index generation restore; Buffers/Terminals always re-run (volatile tab indices); query edit/gen/
+     root/config invalidates. Terminals Alt+T caps 16 tabs/500 rows/1MiB tab/4MiB total, no process.
+     Residuals: Files-only stale file content (no hash/mtime), terminal export focus-only no transcript
+     scroll, ReadWindow >8MiB prefix unavailable/exact12 truncated false-positive, buffer/terminal no file
+     preview, remote Live Grep refused, no persistent quickfix.
+278. **Project-search preview cancellation + export cap (R13-11/R13-15).** ContextPreviewer seam, ctx cancel
+     on selection/dismiss/enter/export, seq drops superseded, export cancels preview; Alt+Q cap2000 match
+     rows+headers+omitted marker/notice, panel source of truth/no quickfix stack. Residuals: up to ~2000
+     header rows extra, Files-only preview still 1MiB whole-file cap, real hosts UNTESTED.
+279. **Shared textsafe display sanitizer (R13-15).** new package Clean/CleanWithMap/MapIndex/IsClean; Cc/Cf/
+     invalid UTF8 removed, tab/newline kept; applied palette/searchpanel previews+span remap, Live Grep
+     display rows/export labels/titles, dashboard PR/external/df; raw targets preserved; tests incl
+     ANSI/C1/bidi/BOM/invalid; Cf path display residual; adds one package (77 total).
+280. **Dashboard display hardening (R13-6/R13-24).** PR/network/external/weather/df display sanitized;
+     unknown external rows skipped, invalid df cells unavailable; checks opt-in fixed host/validated
+     nwo/SHA/no token/no persistence/TTL/rate. Residuals: per-plugin/workspace rate budget, private/no
+     token, future Cf table, non-Cf homoglyphs, external provider data by provider privilege; real hosts
+     UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7649,29 +7731,37 @@ Round 13 recorded five open gaps:
   Tracks: remote search NUL/path/display hardening; terminal foreground Cf/restart/hover; dashboard
   GitHub checks; statusbar/tab-title i18n regression/docs corrections. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-51 verification (2026-11-09, merged tree on `4c48060`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 128 KiB / de 82 KiB / both 210 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r51-final3.log`). Audit: build/gofmt/i18n_check plus targeted round-51 tests/diff review.
+  Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
+  cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
+  UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-50 landed remote search NUL/path/display hardening, foreground Cf/restart/hover, dashboard
-  GitHub checks, tab-title i18n/docs fixes; full suite EXIT 0 (76 packages, log /tmp/gvim-r50-
-  final2.log); §5.5 is round-51/52 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host
-  checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–50 had their gate sets
-  run. Round 50 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-51 landed Live Grep preview/export/resume/Terminals, project-search preview cancellation/
+  export cap, shared textsafe display sanitizer, dashboard display hardening; full suite EXIT 0 (77
+  packages, log /tmp/gvim-r51-final3.log); §5.5 is round-52/53 plan; TUI-only scope/genuine-
+  equivalence §4 item 94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–51 had their gate sets
+  run. Round 51 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  122 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
-  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r50-final2.log`. The audit ran build/gofmt/i18n_check plus targeted round-50 tests and
+  128 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
+  `/tmp/gvim-r51-final3.log`. The audit ran build/gofmt/i18n_check plus targeted round-51 tests and
   diff review only (no full suite); the Lead ran the full suite. Real-host verification remains
   UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
   save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
   box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
   switching, local macOS/BSD/Linux process polling, outer-terminal focus reporting, real LSP/trust
-  changes, real slangd/slang-synth, watcher host behavior, dashboard/GitHub network, daemon/mixed-
-  workspace extraction; ~/… expansion against a local real `sh`, not a live host. Treat statuses as
-  pointers, not proof.
+  changes, real slangd/slang-synth, watcher host behavior, dashboard/GitHub network, Live Grep live
+  tabs/preview/export, daemon/mixed-workspace extraction; ~/… expansion against a local real `sh`, not
+  a live host. Treat statuses as pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

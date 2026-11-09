@@ -16,8 +16,9 @@ type rootState struct {
 	ports    RootPorts
 	gitMarks map[string]rune // the explorer's status letters, keyed by absolute path
 	macro    macroState
-	// lastGrep is the text of the last live grep query, which resume reopens.
-	lastGrep string
+	// lastGrep is the last Live Grep session's resume state: query, modes, scopes,
+	// selected row and cached matches, captured when the palette closes.
+	lastGrep *palette.LiveResume
 	// reload is the state of the background tree reload. See watch_reload.go.
 	reload treeReload
 	// watched holds the folders of the open documents that were asked of the file
@@ -25,6 +26,13 @@ type rootState struct {
 	watched map[string]bool
 	// recoveryFailed is set while the last write of the crash-recovery copy failed.
 	recoveryFailed bool
+}
+
+// resetLiveGrepResume drops the cached Live Grep session. A project-root change or a
+// configuration change makes the cached query/modes/matches belong to a different
+// context, so Resume must start fresh instead of restoring them.
+func (m *Model) resetLiveGrepResume() {
+	m.root.lastGrep = nil
 }
 
 // rootInit returns the commands the root starts when the program starts: the git
@@ -78,6 +86,8 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return m.watchChanged(), true
 	case browser.Choose:
 		return m.switchProject(msg.Path), true
+	case palette.GrepExportMsg:
+		return m.openLiveGrepResultsList(msg), true
 	case palette.OpenLineMsg:
 		cmd := m.openFileCmd(msg.Path, false, msg.Line, msg.Col)
 		m.focusEditor()
@@ -85,8 +95,6 @@ func (m *Model) rootMessage(msg tea.Msg) (tea.Cmd, bool) {
 	case openLoadedMsg:
 		m.openLoaded(msg)
 		return nil, true
-	case palette.GrepResultMsg:
-		m.root.lastGrep = msg.Text
 	case projectOpenedMsg:
 		return m.adoptProject(msg), true
 	case shellDone:
@@ -118,7 +126,12 @@ func (m *Model) rootAction(action string) (tea.Cmd, bool) {
 	case "open_live_grep":
 		return m.openLiveGrep(""), true
 	case "resume_live_grep":
-		return m.openLiveGrep(m.root.lastGrep), true
+		resume := m.root.lastGrep
+		query := ""
+		if resume != nil {
+			query = resume.Text
+		}
+		return m.openLiveGrepResume(query, resume), true
 	default:
 		return nil, false
 	}

@@ -946,6 +946,7 @@ func (m *Model) settingsMessage(msg tea.Msg) (tea.Cmd, bool) {
 // applied; the Restart names are announced in one notice, because gvim does not
 // hot-reload the parts of itself that read them at startup.
 func (m *Model) applySettingsChange(change SettingsChange) {
+	m.resetLiveGrepResume()
 	m.util.settings = change.Settings
 	if m.util.settingsPort != nil {
 		// The editor is owned by the update loop, so its setters run here and not

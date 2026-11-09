@@ -43,10 +43,13 @@ func grepFor(o editor.Options) *liveGrep {
 }
 
 // Search returns at most req.Limit hits of req.Text, one per matching line: the file
-// hits first, in file order, then the buffer hits in buffer order. The query is matched
-// with the modes of req.Query. A regex that does not compile is an error, which the
-// palette shows as a message row. The files are relative to req.Root. A file that cannot
-// be read is skipped, and so is a file of skipFrom bytes or more.
+// hits first, in file order, then the buffer hits in buffer order, then the terminal
+// transcript hits in dock-tab/line order. The query is matched with the modes of
+// req.Query. A regex that does not compile is an error, which the palette shows as a
+// message row. The files are relative to req.Root. A file that cannot be read is
+// skipped, and so is a file of skipFrom bytes or more. The terminal and buffer
+// snapshots come in the request: searching them is in-memory text work, never a PTY
+// or process read.
 func (g *liveGrep) Search(req palette.GrepRequest) ([]palette.GrepHit, error) {
 	if req.Text == "" || req.Limit <= 0 {
 		return nil, nil
@@ -81,6 +84,12 @@ func (g *liveGrep) Search(req palette.GrepRequest) ([]palette.GrepHit, error) {
 	if len(hits) < req.Limit && req.Sources.Buffers {
 		var err error
 		if hits, err = searchBuffers(req.Buffers, q, req.Limit, hits); err != nil {
+			return nil, err
+		}
+	}
+	if len(hits) < req.Limit && req.Sources.Terminals {
+		var err error
+		if hits, err = searchTerminals(req.Terminals, q, req.Limit, hits); err != nil {
 			return nil, err
 		}
 	}
@@ -158,6 +167,49 @@ func searchBuffers(buffers []palette.BufferSource, q search.Query, limit int, hi
 				Col:    m.Start.Col + 1,
 				Text:   strings.TrimRight(b.Line(m.Start.Line), "\r"),
 				Source: palette.GrepBuffers,
+				Index:  src.Index,
+			})
+			if len(hits) >= limit {
+				return hits, nil
+			}
+		}
+	}
+	return hits, nil
+}
+
+// searchTerminals appends the hits of q in the bounded dock terminal snapshots to
+// hits, in dock-tab order and one per matching line, up to limit hits. The snapshot is
+// already bounded by the palette/root caps (≤500 rows/1 MiB per tab, ≤16 tabs/4 MiB
+// total), so this is a bounded in-memory search: no PTY read, no process, no IO.
+func searchTerminals(terms []palette.TerminalSource, q search.Query, limit int, hits []palette.GrepHit) ([]palette.GrepHit, error) {
+	for _, src := range terms {
+		if len(hits) >= limit {
+			break
+		}
+		if len(src.Lines) == 0 {
+			continue
+		}
+		b := buffer.New(strings.Join(src.Lines, "\n"))
+		matches, err := search.Find(b, q)
+		if err != nil {
+			return nil, err
+		}
+		label := src.Name
+		if label == "" {
+			label = "terminal"
+		}
+		last := -1
+		for _, m := range matches {
+			if m.Start.Line == last {
+				continue
+			}
+			last = m.Start.Line
+			hits = append(hits, palette.GrepHit{
+				Rel:    label,
+				Line:   m.Start.Line + 1,
+				Col:    m.Start.Col + 1,
+				Text:   strings.TrimRight(b.Line(m.Start.Line), "\r"),
+				Source: palette.GrepTerminals,
 				Index:  src.Index,
 			})
 			if len(hits) >= limit {

@@ -12,6 +12,8 @@
 // next and previous match actions can walk the last result set from the editor.
 package searchpanel
 
+import "context"
+
 // DefaultLimit is the most matches a project search returns when Options.Limit is zero:
 // the same cap Fresh's project search uses.
 const DefaultLimit = 10000
@@ -269,6 +271,15 @@ type PreviewResult struct {
 // PreviewResult.Err and no lines means the file has no lines to show.
 type Previewer interface {
 	Preview(PreviewRequest) (PreviewResult, error)
+}
+
+// ContextPreviewer is the cancellable preview seam. The panel calls PreviewContext with a
+// context that it cancels when the selected match/query/size changes, the column no longer
+// wants the preview, or the panel closes, so a provider can stop an in-flight file or
+// authority read instead of doing stale work. A Previewer that cannot take a context keeps
+// working through Preview (the panel then only drops the stale answer by sequence).
+type ContextPreviewer interface {
+	PreviewContext(context.Context, PreviewRequest) (PreviewResult, error)
 }
 
 // Files is the file index snapshot the panel searches, for AllFiles. The finder index

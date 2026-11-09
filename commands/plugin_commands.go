@@ -23,4 +23,8 @@ var gvimRenames = map[string]gvimRename{
 	"init_reload":               {"init: Reload init.lua", "Reload init.lua via the plugin pipeline"},
 	"prompt_promote_macro":      {"Macro: Promote to command", "Turn a recorded macro into an editable init.lua command you can extend with arbitrary code"},
 	"prompt_save_macro_to_init": {"Macro: Save to init.lua", "Persist a recorded macro to init.lua as a command that replays its steps"},
+	// Fresh's generated description says "cached results — no re-run" unconditionally.
+	// gvim keeps the cache only while it is current; this text says what happens on
+	// Resume instead of overstating it.
+	"resume_live_grep": {"", "Reopen Live Grep with the prior query, selection and cached matches when the search was files-only and is still current; Buffers/Terminals, a query, file-index, project or config change searches again"},
 }

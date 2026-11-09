@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tbxark/gvim/internal/tui/space"
+	"github.com/tbxark/gvim/internal/tui/textsafe"
 )
 
 // ellipsisRune is the cut mark the shortening in internal/tui/space leaves.
@@ -66,14 +67,16 @@ const (
 func fitGrep(r row, width int) (string, []int) {
 	loc := ":" + strconv.Itoa(r.line) + ": "
 	text := r.text
-	full := r.rel + loc + text
+	// The path is display text; r.rel stays the raw target the row opens.
+	displayRel := textsafe.Clean(r.rel)
+	full := displayRel + loc + text
 	if ansi.StringWidth(full) <= width {
 		return full, matchOffsets(len([]rune(r.rel+loc)), r.mcol, r.qlen, len([]rune(text)))
 	}
 	locW := ansi.StringWidth(loc)
 	// The path takes what the line text does not need, and leaves it half the row.
 	minText := min(ansi.StringWidth(text), max(width/2, grepMinText))
-	pw := min(ansi.StringWidth(r.rel), max(width-locW-minText, grepMinPath))
+	pw := min(ansi.StringWidth(displayRel), max(width-locW-minText, grepMinPath))
 	room := width - locW - pw
 	if room < 4 {
 		pw = max(width-locW-4, 1)
@@ -82,7 +85,7 @@ func fitGrep(r row, width int) (string, []int) {
 	if room <= 0 {
 		return space.End(full, width), nil
 	}
-	path := space.Path(r.rel, pw)
+	path := space.Path(displayRel, pw)
 	body, off := windowAround(text, r.mcol, r.qlen, room)
 	label := path + loc + body
 	prefix := len([]rune(path + loc))

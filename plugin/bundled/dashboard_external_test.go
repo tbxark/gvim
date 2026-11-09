@@ -127,3 +127,34 @@ func TestDashboardThirdPartySectionRowCap(t *testing.T) {
 		t.Fatalf("external row cap did not apply: %s", text)
 	}
 }
+
+const formatCharDashboardPlugin = `
+local gvim = require 'gvim'
+gvim.dashboard.register_section('spoof', function()
+  return {
+    { kind = 'kv', label = 'la\226\128\174bel', value = 'va\226\128\174lue' },
+    { kind = 'text', text = 'te\226\128\174xt' },
+  }
+end, { title = 'Ti\226\128\174tle', ttl_ms = 1000 })
+`
+
+// TestDashboardThirdPartySectionStripsFormatChars: section titles/rows are plugin data and
+// can carry network-sourced text too; the dashboard applies the same Cc/Cf display
+// sanitizer as PR titles, so bidi/zero-width marks cannot visually reorder a section.
+func TestDashboardThirdPartySectionStripsFormatChars(t *testing.T) {
+	r := startRig(t, rigOpts{
+		plugins: []string{dashboardPlugin},
+		script:  dashboardRemoteScript("https://github.com/me/repo"),
+		extra:   map[string]string{"demo/init.lua": formatCharDashboardPlugin},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "Title")
+	if strings.Contains(text, "\u202e") {
+		t.Fatalf("external section kept a bidi mark:\n%s", text)
+	}
+	for _, want := range []string{"Title", "label", "value", "text"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("external section lacks readable %q:\n%s", want, text)
+		}
+	}
+}

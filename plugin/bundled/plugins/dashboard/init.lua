@@ -683,10 +683,12 @@ local function weather_encode(s)
 end
 
 local function weather_text(v)
-  if type(v) == "string" then
-    return v
+  if type(v) ~= "string" then
+    return ""
   end
-  return ""
+  -- wttr.in text is network-provided display data; use the same Cc/Cf sanitizer as PR
+  -- titles so bidi/zero-width marks cannot spoof the weather rows.
+  return strip_pr_format(v:sub(1, 1024)):gsub("%s+", " ")
 end
 
 local function weather_cond(entry)
@@ -1011,6 +1013,19 @@ local function disk_size(kb)
   return string.format("%dK", kb)
 end
 
+local function external_string(value, max)
+  local text = type(value) == "string" and value or ""
+  if #text > 1024 then
+    text = text:sub(1, 1024)
+  end
+  text = strip_pr_format(text):gsub("%s+", " ")
+  text = text:match("^%s*(.-)%s*$") or ""
+  if #text > max then
+    text = gvim.text.truncate(text, max, "…")
+  end
+  return text
+end
+
 -- build_rows flattens the sections into display lines and the focusable rows.
 local function build_rows(inner)
   local lines = {}
@@ -1136,7 +1151,7 @@ local function build_rows(inner)
     end
     heading((entry.title or "plugin") .. suffix)
     if entry.error and not entry.rows then
-      kv("status", entry.error, STYLE.muted)
+      kv("status", external_string(entry.error, 500), STYLE.muted)
     elseif not entry.rows then
       kv("status", t("external.loading"), STYLE.muted)
     elseif #entry.rows == 0 then
@@ -1186,9 +1201,10 @@ local function build_rows(inner)
     end
     heading("Disk")
     for _, row in ipairs(state.disk.rows) do
+      local mount = strip_pr_format(tostring(row.mount or "")):gsub("%s+", " ")
       if row.unavailable then
         lines[#lines + 1] = { segments = {
-          { text = padded(" " .. row.mount, 13), style = STYLE.muted },
+          { text = padded(" " .. mount, 13), style = STYLE.muted },
           { text = " " .. t("disk.unavailable"), style = STYLE.muted },
         } }
       else
@@ -1205,7 +1221,7 @@ local function build_rows(inner)
         end
         local style = pct >= 90 and STYLE.err or pct >= 75 and STYLE.warn or STYLE.ok
         lines[#lines + 1] = { segments = {
-          { text = padded(" " .. row.mount, 13), style = STYLE.muted },
+          { text = padded(" " .. mount, 13), style = STYLE.muted },
           { text = " " .. clip(value, room), style = style },
         } }
       end
@@ -1385,16 +1401,6 @@ end
 -- discovers metadata from the host and calls the provider's exported proxy function as a
 -- task with a per-section timeout; failures/stale data stay in that section and cannot
 -- break the rest of the dashboard. Rows are plain data, validated and clipped here.
-
-local function external_string(value, max)
-  local text = type(value) == "string" and value or ""
-  text = text:gsub("[%c\127]", " "):gsub("%s+", " ")
-  text = text:match("^%s*(.-)%s*$") or ""
-  if #text > max then
-    text = gvim.text.truncate(text, max, "…")
-  end
-  return text
-end
 
 local function external_style(color)
   local styles = {

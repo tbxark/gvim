@@ -51,6 +51,7 @@ func (m *Model) adoptProject(msg projectOpenedMsg) tea.Cmd {
 		tree.SetShowIgnored(old.ShowIgnored())
 	}
 	m.tree = tree
+	m.resetLiveGrepResume()
 	m.explorerPanel = expanel.New(tree, m.styles, m.now)
 	if old != nil {
 		// The pending cut keeps its dimming, as it does when the panel is hidden.

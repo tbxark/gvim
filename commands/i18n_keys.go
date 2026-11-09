@@ -78,6 +78,7 @@ var gvimCommandDescKeys = map[string]string{
 	"prompt_promote_macro":       "gvim.command.prompt_promote_macro_desc",
 	"prompt_save_macro_to_init":  "gvim.command.prompt_save_macro_to_init_desc",
 	"reload_config":              "gvim.command.reload_config_desc",
+	"resume_live_grep":           "gvim.command.resume_live_grep_desc",
 	"run_agent":                  "gvim.command.run_agent_desc",
 	"start_git_grep":             "gvim.command.start_git_grep_desc",
 	"start_search_replace":       "gvim.command.start_search_replace_desc",

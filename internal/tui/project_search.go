@@ -179,6 +179,11 @@ func (m *Model) projectCurrentFile() *searchpanel.SourceFile {
 	return &f
 }
 
+// projectExportCap bounds the quickfix-style list the root builds from a project search:
+// the search itself may hold DefaultLimit (10000) matches, but the list overlay gets an
+// independent, smaller row budget and a notice naming the omitted count.
+const projectExportCap = 2000
+
 // openProjectResultsList opens the last project result set as the filterable list
 // overlay: gvim's mapping of a quickfix export (there is no quickfix stack; the results
 // panel stays the source of truth). The list's Enter jumps to a match and leaves the
@@ -189,12 +194,15 @@ func (m *Model) openProjectResultsList() tea.Cmd {
 		m.notice = uiText("gvim.project_search.no_results_run_first", "No project search results: run Search and Replace in Project first")
 		return nil
 	}
-	items := p.ExportItems()
+	items, omitted := p.ExportItemsCapped(projectExportCap)
 	if len(items) == 0 {
 		m.notice = uiText("gvim.project_search.no_results_list", "No project search results to list")
 		return nil
 	}
-	rows := make([]list.Row, 0, len(items))
+	if omitted > 0 {
+		m.notice = uiTextVars("gvim.project_search.export_truncated", "Project Search export limited to %{cap} matches; %{omitted} more are not listed", map[string]any{"cap": projectExportCap, "omitted": omitted})
+	}
+	rows := make([]list.Row, 0, len(items)+1)
 	for _, it := range items {
 		if it.Header {
 			rows = append(rows, list.Row{Header: true, Left: it.Name})
@@ -205,6 +213,9 @@ func (m *Model) openProjectResultsList() tea.Cmd {
 			Right: filepath.Base(it.Path),
 			Value: projectListValue(it),
 		})
+	}
+	if omitted > 0 {
+		rows = append(rows, list.Row{Header: true, Left: fmt.Sprintf("… %d more matches not listed (export cap)", omitted)})
 	}
 	v := list.New(uiText("gvim.project_search.results_title", "Project Search Results"), rows, m.listChrome(), func(_ *list.View, r list.Row) tea.Cmd {
 		t, ok := parseProjectListValue(r.Value)

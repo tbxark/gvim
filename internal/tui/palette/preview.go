@@ -2,6 +2,7 @@ package palette
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/internal/tui/grid"
+	"github.com/tbxark/gvim/internal/tui/textsafe"
 )
 
 // The file preview is the file mode's right-hand column: the start of the selected
@@ -96,9 +98,23 @@ type Previewer interface {
 	ReadHead(path string, maxBytes int) (data []byte, truncated bool, err error)
 }
 
+// WindowPreviewer is the optional bounded, cancellable window read a Live Grep row's
+// preview uses: instead of the head it returns the lines around a match line. The app's
+// local previewer implements it; a reader that only implements Previewer still previews
+// the selected row's file head. ReadWindow is called from a tea.Cmd, never from Update
+// or Draw; the palette cancels ctx when the selection moves away.
+type WindowPreviewer interface {
+	// ReadWindow returns complete lines around the 1-based line, at most maxBytes, and
+	// firstLine is the 1-based file line of data[0]. truncated reports that the file has
+	// more lines outside the returned window.
+	ReadWindow(ctx context.Context, path string, line, maxBytes int) (data []byte, firstLine int, truncated bool, err error)
+}
+
 // Preview is one file's preview: the lines the column paints, or the reason there are
 // no lines. It is what the palette caches per file.
 type Preview struct {
+	// StartLine is the 1-based file line of Lines[0]; a head starts at line 1.
+	StartLine int
 	// Lines are the first lines of the file, at most previewMaxLines of them.
 	Lines []string
 	// Binary reports a file whose head is not text, so Lines is nil.
@@ -138,7 +154,7 @@ func newPreview(data []byte, truncated bool) Preview {
 	for i, line := range lines {
 		lines[i] = cleanPreviewLine(line)
 	}
-	return Preview{Lines: lines, Truncated: truncated}
+	return Preview{StartLine: 1, Lines: lines, Truncated: truncated}
 }
 
 // isBinary reports whether data is not text: a NUL byte or a byte sequence that is not
@@ -162,13 +178,12 @@ func isBinary(data []byte) bool {
 // characters become spaces, and a tab becomes previewTabSize spaces.
 func cleanPreviewLine(line string) string {
 	line = strings.TrimSuffix(line, "\r")
+	// Preview text is untrusted (remote files, arbitrary buffers). Reuse the shared
+	// Cc+Cf+invalid-UTF-8 filter so C1 controls, bidi overrides, zero-width format
+	// characters and a BOM cannot be painted; tab keeps its preview expansion.
+	line = textsafe.Clean(line)
 	line = strings.ReplaceAll(line, "\t", strings.Repeat(" ", previewTabSize))
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return ' '
-		}
-		return r
-	}, line)
+	return line
 }
 
 // previewState is the file mode's preview: the reader, the cache, and the preview of
@@ -177,16 +192,24 @@ type previewState struct {
 	cache map[string]Preview
 	order []string // the cache keys, least recently used first
 
-	rel     string // the file the preview is for
-	seq     int    // the read started last; older reads are dropped
-	data    Preview
-	ready   bool // data is the preview of rel
-	loading bool // the read of rel is running
+	rel    string // the file/window the preview is for (a cache key)
+	target int    // the 1-based line to highlight, 0 for none
+	seq    int    // the read started last; older reads are dropped
+	data   Preview
+	ready  bool // data is the preview of rel
+	// loading is true while the read of rel is running.
+	loading bool
+	// cancel stops the in-flight live window read when the selection moves away.
+	cancel context.CancelFunc
 }
 
 // reset drops the shown preview, as when the selected row is not a file.
 func (s *previewState) reset() {
-	s.rel, s.data, s.ready, s.loading = "", Preview{}, false, false
+	if s.cancel != nil {
+		s.cancel()
+		s.cancel = nil
+	}
+	s.rel, s.target, s.data, s.ready, s.loading = "", 0, Preview{}, false, false
 }
 
 // lookup returns the cached preview of rel and moves rel to the young end of the LRU
@@ -227,41 +250,79 @@ func (s *previewState) put(rel string, p Preview) {
 }
 
 // previewCmd returns the command that reads the selected file's preview, or nil when
-// there is nothing to read: the palette is not in file mode, it has no reader, the
-// selected row is not a file, or that file's preview is loaded or loading. It is
+// there is nothing to read: the palette has no reader, the selected row is not a file
+// (file mode) or file hit (Live Grep), or that preview is loaded or loading. It is
 // called after every message, so moving the highlight starts the read of the new row.
 func (p *Palette) previewCmd() tea.Cmd {
 	s := &p.preview
-	if p.live || !p.inFile || p.opts.Preview == nil {
+	if p.opts.Preview == nil {
 		s.reset()
 		return nil
 	}
 	i := p.nav.Selected()
-	if i < 0 || i >= len(p.rows) || p.rows[i].kind != rowFile {
+	if i < 0 || i >= len(p.rows) {
 		s.reset()
 		return nil
 	}
-	rel := p.rows[i].rel
-	if rel == s.rel && (s.ready || s.loading) {
+	r := p.rows[i]
+	fileMode := !p.live && p.inFile && r.kind == rowFile
+	liveFile := p.live && r.kind == rowGrep && r.grepSource == GrepFiles
+	if !fileMode && !liveFile {
+		s.reset()
 		return nil
 	}
-	if cached, ok := s.lookup(rel); ok {
-		s.rel, s.data, s.ready, s.loading = rel, cached, true, false
+	target := 0
+	key := r.rel
+	if liveFile {
+		target = r.line
+		// A Live Grep preview is a window around the hit, so the match line is part
+		// of the identity and cache key.
+		key = r.rel + "\x00" + strconv.Itoa(r.line)
+	} else {
+		target = p.fileLine
+	}
+	if key == s.rel && (s.ready || s.loading) {
 		return nil
 	}
-	s.rel, s.data, s.ready, s.loading = rel, Preview{}, false, true
+	if cached, ok := s.lookup(key); ok {
+		s.rel, s.target, s.data, s.ready, s.loading = key, target, cached, true, false
+		return nil
+	}
+	s.reset()
+	s.rel, s.target, s.data, s.ready, s.loading = key, target, Preview{}, false, true
 	s.seq++
 	seq, read, root := s.seq, p.opts.Preview, p.opts.Root
-	// A remote workspace's rows are remote paths: join with slashes, the way the row's
-	// OpenFileMsg path is built (never the client's filepath separator).
-	path := filePath(root, rel, p.opts.Remote)
+	path := filePath(root, r.rel, p.opts.Remote)
+	if liveFile {
+		if window, ok := read.(WindowPreviewer); ok {
+			ctx, cancel := context.WithCancel(context.Background())
+			s.cancel = cancel
+			return func() tea.Msg {
+				data, first, truncated, err := window.ReadWindow(ctx, path, target, previewMaxBytes)
+				if err != nil {
+					return previewMsg{Seq: seq, Rel: key, Preview: Preview{Err: err}}
+				}
+				return previewMsg{Seq: seq, Rel: key, Preview: newWindowPreview(data, first, truncated)}
+			}
+		}
+	}
 	return func() tea.Msg {
 		data, truncated, err := read.ReadHead(path, previewMaxBytes)
 		if err != nil {
-			return previewMsg{Seq: seq, Rel: rel, Preview: Preview{Err: err}}
+			return previewMsg{Seq: seq, Rel: key, Preview: Preview{Err: err}}
 		}
-		return previewMsg{Seq: seq, Rel: rel, Preview: newPreview(data, truncated)}
+		return previewMsg{Seq: seq, Rel: key, Preview: newPreview(data, truncated)}
 	}
+}
+
+// newWindowPreview turns a bounded window around a match line into a preview.
+func newWindowPreview(data []byte, firstLine int, truncated bool) Preview {
+	p := newPreview(data, truncated)
+	if firstLine < 1 {
+		firstLine = 1
+	}
+	p.StartLine = firstLine
+	return p
 }
 
 // applyPreview shows a read that answers the current selection, and caches it.
@@ -277,7 +338,14 @@ func (p *Palette) applyPreview(msg previewMsg) {
 // previewWanted reports whether the file mode has a preview column to paint: it needs a
 // reader. The layout decides the width, so a narrow frame still paints no column.
 func (p *Palette) previewWanted() bool {
-	return p != nil && !p.live && p.inFile && p.opts.Preview != nil
+	if p == nil || p.opts.Preview == nil {
+		return false
+	}
+	if p.live {
+		i := p.nav.Selected()
+		return i >= 0 && i < len(p.rows) && p.rows[i].kind == rowGrep && p.rows[i].grepSource == GrepFiles
+	}
+	return p.inFile
 }
 
 // paintPreview draws the preview column inside the card, to the right of the rows: the
@@ -309,15 +377,25 @@ func (p *Palette) paintPreview(g *grid.Grid, geo geometry) {
 		g.Put(geo.prevX, geo.rowsTop, geo.prevEnd, previewNoLinesText(), muted)
 		return
 	}
-	gutter := len(strconv.Itoa(max(len(lines), p.fileLine)))
+	startLine := s.data.StartLine
+	if startLine < 1 {
+		startLine = 1
+	}
+	target := p.fileLine
+	if p.live {
+		target = s.target
+	}
+	lastLine := startLine + len(lines) - 1
+	gutter := len(strconv.Itoa(max(lastLine, target)))
 	for k := 0; k < geo.rows && k < len(lines); k++ {
 		y := geo.rowsTop + k
+		lineNo := startLine + k
 		st := p.chrome.panel
-		if p.fileLine == k+1 {
+		if target == lineNo {
 			st = p.chrome.selected
 			g.Fill(geo.prevX, geo.prevEnd, y, st)
 		}
-		num := fmt.Sprintf("%*d", gutter, k+1)
+		num := fmt.Sprintf("%*d", gutter, lineNo)
 		label := num + " │ " + strings.TrimRight(lines[k], " ")
 		g.Put(geo.prevX, y, geo.prevEnd, truncate(label, geo.prevEnd-geo.prevX), st)
 	}

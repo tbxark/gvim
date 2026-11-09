@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -368,9 +369,19 @@ func (s *projectSearch) ProjectReplace(req searchpanel.ReplaceRequest) (searchpa
 // window is centred on the match and shifted to reach the match's end when it spans
 // lines.
 func (s *projectSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.PreviewResult, error) {
+	return s.PreviewContext(context.Background(), req)
+}
+
+// PreviewContext is the cancellable local preview seam: the file read itself is a
+// bounded os.ReadFile, but a context that ended before (or while) the read returns the
+// cancellation instead of continuing into syntax/range work.
+func (s *projectSearch) PreviewContext(ctx context.Context, req searchpanel.PreviewRequest) (searchpanel.PreviewResult, error) {
 	var out searchpanel.PreviewResult
 	if req.Lines <= 0 {
 		return out, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return out, err
 	}
 	text := req.Text
 	if text == "" {
@@ -379,6 +390,9 @@ func (s *projectSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.Pre
 		if reason != "" {
 			out.Err = reason
 			return out, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return out, err
 		}
 	}
 	lines := strings.Split(text, "\n")

@@ -63,7 +63,7 @@ const (
 	// liveHint is the bottom border of Live Grep, which has no prefixes: the whole
 	// query is the text searched for, the toolbar row carries the toggles and their
 	// keys, and Enter opens the selected row.
-	liveHint = "type text to search · Enter open · Esc close"
+	liveHint = "type text to search · Enter open · Alt+Q quickfix · Esc close"
 )
 
 // Files is the file list the file mode searches. *finder.Index satisfies it.
@@ -139,12 +139,21 @@ type Options struct {
 	// with a nil Grep shows no rows.
 	Live bool
 	Grep Grepper
+	// Resume restores a previous Live Grep session: query, modes, scopes, selected row
+	// and cached matches without searching when the cached file-index generation still
+	// matches. Nil opens a fresh Live Grep.
+	Resume *LiveResume
 	// LiveSearch is the starting state of the Live Grep match modes. Nil means Fresh's
 	// defaults: regex on, whole word off, case folded.
 	LiveSearch *SearchOptions
 	// SourceBuffers are the open buffers' text, for Live Grep's Buffers scope. Nil means
 	// the scope is not available: its toggle is not painted and it stays off.
 	SourceBuffers []BufferSource
+	// SourceTerminals are the open dock terminals' bounded transcript windows, for Live
+	// Grep's Terminals scope. Nil means the scope is not available: its toggle is not
+	// painted and it stays off. A non-nil (even empty) snapshot offers the scope, which
+	// starts on, matching Fresh's default for terminal scrollback.
+	SourceTerminals []TerminalSource
 	// Preview reads the start of a file for the file mode's preview column. Nil paints
 	// no column.
 	Preview Previewer
@@ -242,8 +251,9 @@ type row struct {
 	// match's length in runes.
 	text       string
 	mcol, qlen int
-	// grepSource says whether a grep row is in a file or an open buffer; a buffer row
-	// also carries the tab index Enter activates.
+	// grepSource says whether a grep row is in a file, an open buffer or an open dock
+	// terminal; a buffer row carries the editor tab index and a terminal row the dock
+	// tab index Enter activates/focuses.
 	grepSource GrepSource
 }
 
@@ -307,6 +317,8 @@ type Palette struct {
 	// grep is the Live Grep state: the match modes, the scope toggles and the last
 	// result's count.
 	grep grepState
+	// liveResumed says Resume restored a cached result, so Init must not search.
+	liveResumed bool
 }
 
 // New returns an open palette for opts. The query is the input and its rows are
@@ -343,7 +355,11 @@ func New(opts Options) *Palette {
 	p.input.SetValue(opts.Query)
 	p.input.CursorEnd()
 	p.input.Focus() // the blink command is not needed: Draw paints the cursor cell
-	p.requery()
+	if p.live && opts.Resume != nil {
+		p.restoreLive(*opts.Resume)
+	} else {
+		p.requery()
+	}
 	return p
 }
 
@@ -354,6 +370,9 @@ func (p *Palette) Init() tea.Cmd {
 		return nil
 	}
 	if p.live {
+		if p.liveResumed {
+			return nil
+		}
 		return p.grepCmd(p.seq, p.input.Value())
 	}
 	if !p.inFile {
@@ -653,6 +672,7 @@ func (p *Palette) run(i int) tea.Cmd {
 		return nil
 	}
 	p.cancelProbe()
+	p.preview.reset()
 	p.open = false
 	return r.command(p.opts.Root, p.opts.Remote)
 }
@@ -661,6 +681,7 @@ func (p *Palette) run(i int) tea.Cmd {
 // another cancel path) closes the palette; the palette's own run path calls it too.
 func (p *Palette) Dismiss() {
 	p.cancelProbe()
+	p.preview.reset()
 }
 
 // cancelProbe cancels the query's probe, if any.
@@ -1055,9 +1076,14 @@ func (r row) command(root string, remote bool) tea.Cmd {
 	case rowLine:
 		msg = GotoLineMsg{Line: r.line, Col: r.col}
 	case rowGrep:
-		if r.grepSource == GrepBuffers {
+		switch r.grepSource {
+		case GrepBuffers:
 			msg = OpenBufferLineMsg{Index: r.index, Line: r.line, Col: r.col}
-		} else {
+		case GrepTerminals:
+			// A terminal hit focuses the open dock tab; it opens no file and starts no
+			// shell (the transcript line is only the search location).
+			msg = OpenTerminalMsg{Index: r.index}
+		default:
 			msg = OpenLineMsg{Path: filePath(root, r.rel, remote), Line: r.line, Col: r.col}
 		}
 	default:
@@ -1074,8 +1100,8 @@ func (p *Palette) emptyText() string {
 		switch {
 		case p.input.Value() == "":
 			return paletteText("gvim.palette.type_to_search", "Type to search the files")
-		case !p.grep.sources.Files && !p.grep.sources.Buffers && !p.grep.sources.Ignored:
-			return paletteText("gvim.palette.turn_on_sources", "Turn on Files or Buffers to search")
+		case !p.grep.sources.Files && !p.grep.sources.Buffers && !p.grep.sources.Terminals && !p.grep.sources.Ignored:
+			return paletteText("gvim.palette.turn_on_sources", "Turn on Files, Buffers or Terminals to search")
 		}
 		return paletteText("gvim.palette.no_matches", "No matches")
 	}

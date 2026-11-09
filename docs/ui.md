@@ -187,14 +187,87 @@ Each. In either focused query field, `Ctrl+Delete` deletes the next word and
 these are widget chords, not editor actions, so the field keeps focus and the bar stays
 open.
 
+**Live Grep Resume.** Closing Live Grep captures the session in memory: the query,
+match modes, scope toggles, selected row and the cached matches (bounded to the 100-row
+result cap) together with the file-index generation they came from. Live Grep: Resume
+reopens that exact state without searching only when the search was **files-only** and
+the cached result still matches the current query and index generation; the selected
+row comes back too. Buffers and Terminals hits carry an index into an in-memory tab
+snapshot that can be reordered, renamed, closed or edited while the palette is closed,
+so a session that had either scope enabled always keeps its query/modes/scopes but
+re-runs the search instead of restoring stale tab indices. The capture and restore are
+in-memory, so closing and resuming do no I/O on Update. The cache is invalidated
+honestly: editing the query after the last result keeps the text but re-runs the
+search on resume; a finder Restart/generation change (refresh, reconnect, workspace
+rebuild) also re-runs instead of showing hits from the old index; and a project-root or
+configuration change clears the cache, so Resume opens a fresh session rather than
+replaying the old root/controls. A re-run is the ordinary Live Grep
+`tea.Cmd` with its sequence guard; the controls and cached rows are never mutated by
+the resume itself. A Files-only Resume restores cached hits without re-reading the files:
+the query and file-index generation are checked, but file contents changed since the search
+are not (there is no per-file hash/mtime check), so the displayed file text can be stale
+(Files-only Resume stale-content residual). The Fresh command description is overridden to
+say the cache is used only while current.
+
 - **Live Grep toolbar** (one row between the title border and the item rows, in Live
   Grep mode only). The match modes and the scopes are `Alt+<letter> Label:on|off`
   segments: `Alt+C` case, `Alt+G` regex, `Alt+O` whole word; `Alt+L` files,
-  `Alt+U` buffers when a buffer snapshot is available, and `Alt+I` ignored and hidden
-  files. The title border shows `Live Grep · N matches` (or `no matches`, `error`,
-  `N+` at the 100-row cap), and an empty box says whether to type, turn a source on or
-  that nothing matched. Live Grep's keys are answered by the overlay, as every overlay
-  key is (parity §4.5), and its request carries the modes and scopes to the search port.
+  `Alt+U` buffers when a buffer snapshot is available, `Alt+T` terminals when the dock
+  has an open terminal (on by default, matching Fresh's terminal-scrollback default),
+  and `Alt+I` ignored and hidden files. The title border shows `Live Grep · N matches`
+  (or `no matches`, `error`, `N+` at the 100-row cap), and an empty box says whether
+  to type, turn a source on or that nothing matched. Live Grep's keys are answered by
+  the overlay, as every overlay key is (parity §4.5), and its request carries the modes
+  and scopes to the search port.
+- **Live Grep row preview** (the selected match while the result rows have the focus) follows
+  the palette's preview column: a file hit reads a bounded window around the match line
+  (at most 16 KiB / 12 complete lines, the five lines before the hit included) in a
+  `tea.Cmd` through the optional window-preview port, paints the line-number gutter and
+  the selected target line, and never reads on Update or Draw. The read's context is
+  canceled when the highlight moves to another hit, so a stale window cannot land on the
+  new row; a port without the window seam falls back to the bounded file head. Only file
+  hits preview: a buffer hit keeps the full-width rows (its unsaved text is already in the
+  open-buffer snapshot), and a frame too narrow keeps the full-width list. Preview lines
+  are display-sanitized: invalid UTF-8 and the Unicode Cc/Cf categories (C1 controls,
+  bidi overrides, zero-width format characters, soft hyphen and BOM) are removed, while
+  tabs keep their preview expansion and readable text is unchanged; the match highlight
+  and syntax spans are remapped through the same rune map, so a removed control before
+  the match cannot shift the bold run. Live Grep result rows follow the same rule: the
+  displayed file/terminal label and line text are textsafe-cleaned, and `mcol`/`qlen` are
+  remapped through CleanWithMap so the bold run stays on the visible query; the raw
+  `rel`/`line`/`col`/index remain the open/focus target. A window that ends exactly at the
+  12-line cap is marked truncated because the reader stops at the cap without probing for one
+  more line, so the column may show its `…` marker at EOF (exact-maxLines truncated
+  false-positive residual).
+- **Live Grep quickfix export** (`Alt+Q` in Live Grep, Fresh's
+  `live_grep_export_quickfix`): the current hits open in the shared, filterable list
+  overlay as `Live Grep: <query> (N matches)`, grouped by one row per hit; Enter opens
+  the file at the hit, activates the buffer's tab, or — for a terminal transcript hit —
+  focuses that existing dock tab (showing the dock when hidden, starting no shell or
+  file), and leaves the list open so the set can be walked; Esc closes it. A terminal row
+  only focuses the tab: the search transcript line is not scrolled to (terminal-hit
+  focus-only residual). The list's label/right text and title are textsafe-cleaned before
+  painting, but its row Value keeps the raw path or dock index, so cleaning the display can
+  never change which file/tab Enter opens or focuses. This is a list view, not a persistent quickfix stack: no
+  gvim session state outlives it. The export is bounded independently of the palette's
+  100-row result cap (at most 100 rows), and a capped export shows a notice naming the
+  bound. A Live Grep search with no hits does not open an empty list.
+- **Live Grep Terminals scope** (`Alt+T`): searches the open dock terminals' transcript
+  windows, after the file and buffer hits (Fresh's order). The root snapshots the dock
+  on the UI thread from the in-memory terminal state — no PTY read, no process start,
+  no file IO — bounded to the newest 500 rows / 1 MiB per tab, 16 tabs and 4 MiB total;
+  the palette re-applies those caps when it builds a request, so an unbudgeted caller
+  cannot grow the search. A terminal hit row is labelled with the tab's name, its OSC
+  title or its launch program (`terminal` when none), and Enter shows the dock and
+  focuses that tab; it opens no file and starts no shell. The scope starts on when a
+  dock snapshot exists (Fresh's default) and can be turned off for the session with
+  `Alt+T`.
+  **Residual:** only the open dock's newest transcript window is searched. gvim has no
+  Fresh-style per-terminal backing files (`<data>/terminals/*.txt`), so a closed
+  terminal and scrollback older than the bounded window are not searchable; the
+  terminals of other workspaces are out of scope (the workspaces provider needs its own
+  cross-workspace seam). Diagnostics and all-workspaces sources remain out of scope for
+  the same provider-protocol reason.
 
 ### Search panel details: project-wide Search and Replace, and Git Grep
 
@@ -259,7 +332,16 @@ result region:
   and a wheel notch over the column scrolls three lines; plain Home/End still select the
   first/last result row, and without a column the scroll keys do nothing. A scrolled
   window is painted from its cache and only asks the port again at the cache edge. Enter
-  still opens the match.
+  still opens the match. A preview read takes the panel's cancellation context: changing the
+  selected row or query, requesting another preview window, and closing the panel, cancel
+  an in-flight local or remote read (the remote provider passes it into the authority's windowed read);
+  a port that only implements the plain preview seam keeps working, with its stale answer
+  dropped by sequence. Preview lines are untrusted display text: the palette and the
+  search panel strip invalid UTF-8 and Unicode Cc/Cf (C1 controls, bidi overrides,
+  zero-width format characters, soft hyphen and BOM) before painting, keep tabs'
+  semantics, and remap the match highlight and syntax spans through the same rune map.
+  File names are normalized but a legal Unicode Cf character in a path is displayed as
+  named on disk (Cf path display residual).
 - **Multi-line matches**: a regex match that spans lines is one row whose location reads
   `startLine:startCol–endLine:endCol` (the end exclusive); its text is the first line and
   the preview shows the whole range, while replace still applies the exact range. A match
@@ -268,9 +350,12 @@ result region:
 - **Project search results as a list** (Alt+Q, or "Project Search Results in List" in
   the palette) is gvim's quickfix export: the result set opens in the shared list
   overlay, grouped by file, filterable, with Enter jumping to a match and the list
-  staying open so the set can be walked. gvim has no persistent quickfix stack and the
-  results panel stays the source of truth; the next and previous project-match chords
-  walk the same set from the editor.
+  staying open so the set can be walked. Opening the list cancels an in-flight
+  selected-match preview read (the result view is being replaced). The list is capped
+  independently of the search's 10000-match limit: at most 2000 match rows are built,
+  with a final header row and a notice naming how many matches were not listed. gvim has no persistent quickfix
+  stack and the results panel stays the source of truth; the next and previous
+  project-match chords walk the same set from the editor.
 - **Git Grep** (command palette row only) is the same card with a single search field and
   the Files row: the All Files/Case toggles collapse to Case (Alt+C), the replacement and
   scoped rows are absent, and Enter opens the match; its results can be listed with Alt+Q
@@ -288,8 +373,10 @@ result region:
   decision rather than a half-landed source: gvim keeps recent folders for the welcome
   screen and the restored tabs, but no opened-file history to scope a search to, so a
   faithful source needs a new app-level history snapshot and its own streaming/replace
-  semantics — deliberately out of this slice (diagnostics and terminals sources remain
-  out of scope for the same reason: they need provider-specific snapshot protocols). The preview soft-wraps long lines (Alt+P, in the editor: on Linux the
+  semantics — deliberately out of this slice (diagnostics and all-workspaces sources
+  remain out of scope for the same reason: they need provider-specific snapshot
+  protocols; the open dock's terminals are covered by Live Grep's bounded Terminals
+  scope above). The preview soft-wraps long lines (Alt+P, in the editor: on Linux the
   setting is per session; the session value is remembered while gvim runs) and its syntax
   colours are automatic — a colour toggle is a deliberate non-goal because the preview
   falls back to plain when the port cannot highlight.

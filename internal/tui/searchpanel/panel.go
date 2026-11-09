@@ -1,6 +1,7 @@
 package searchpanel
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -155,6 +156,10 @@ type Panel struct {
 	preview     previewState
 	previewBox  previewBox
 	previewWrap bool
+	// previewContext is set when previewer also implements ContextPreviewer; previewCancel
+	// cancels the in-flight preview read when the request is superseded or the panel closes.
+	previewContext ContextPreviewer
+	previewCancel  context.CancelFunc
 
 	// openFiles and current are the snapshots the searches see for unsaved text. Their
 	// source is the root, which refreshes them after a replacement.
@@ -275,6 +280,9 @@ func New(o Options) *Panel {
 		open:        true,
 		top:         0,
 	}
+	if cp, ok := o.Previewer.(ContextPreviewer); ok {
+		p.previewContext = cp
+	}
 	if p.limit <= 0 {
 		p.limit = DefaultLimit
 		if p.git {
@@ -349,6 +357,7 @@ func (p *Panel) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	case previewDoneMsg:
 		if msg.seq == p.preview.seq {
 			p.preview.loading = false
+			p.previewCancel = nil
 			if msg.err != nil {
 				p.preview.err = msg.err.Error()
 				p.preview.result = PreviewResult{}
@@ -480,6 +489,9 @@ func (p *Panel) exportCmd() tea.Cmd {
 		p.errText = "No matches to list"
 		return nil
 	}
+	// The export opens its list over the panel's result view: an in-flight preview read
+	// is no longer needed and is cancelled before the command returns.
+	p.cancelPreviewRead()
 	return func() tea.Msg { return ExportMsg{} }
 }
 
@@ -488,13 +500,34 @@ func (p *Panel) exportCmd() tea.Cmd {
 // or not. The panel keeps ownership of the result; the list is a read-only view that
 // jumps through the same positions.
 func (p *Panel) ExportItems() []ExportItem {
+	items, _ := p.ExportItemsCapped(0)
+	return items
+}
+
+// ExportItemsCapped is ExportItems with an independent bound on exported matches: it
+// stops after limit match rows (a file header is added only for files that contribute
+// one) and returns how many matches were left out. A limit <= 0 means no bound, which
+// is what ExportItems uses for the panel's existing callers. The root passes a cap so a
+// 10000-match project search cannot build an unbounded quickfix list; the omitted count
+// becomes the panel notice.
+func (p *Panel) ExportItemsCapped(limit int) ([]ExportItem, int) {
+	if limit <= 0 {
+		limit = int(^uint(0) >> 1)
+	}
 	var out []ExportItem
+	exported, omitted := 0, 0
 	for _, f := range p.fileMatches {
 		if len(f.Matches) == 0 {
 			continue
 		}
+		remaining := limit - exported
+		if remaining <= 0 {
+			omitted += len(f.Matches)
+			continue
+		}
+		take := min(len(f.Matches), remaining)
 		out = append(out, ExportItem{Header: true, Name: fmt.Sprintf("%s (%d)", f.Name, len(f.Matches))})
-		for _, m := range f.Matches {
+		for _, m := range f.Matches[:take] {
 			out = append(out, ExportItem{
 				Path: f.Path,
 				Line: m.Line,
@@ -502,8 +535,10 @@ func (p *Panel) ExportItems() []ExportItem {
 				Text: fmt.Sprintf("%d:%d  %s", m.Line, m.Col, strings.TrimRight(m.Text, " ")),
 			})
 		}
+		exported += take
+		omitted += len(f.Matches) - take
 	}
-	return out
+	return out, omitted
 }
 
 // History returns the session's searched patterns, most recent first, for the root to
@@ -644,6 +679,7 @@ func samePreview(a, b PreviewRequest) bool {
 func (p *Panel) previewCmd() tea.Cmd {
 	req, ok := p.previewTarget()
 	if !ok || !p.wantsPreview() {
+		p.cancelPreviewRead()
 		if p.preview.hasReq {
 			p.preview.seq++
 			p.preview.hasReq = false
@@ -668,16 +704,37 @@ func (p *Panel) previewCmd() tea.Cmd {
 	if p.preview.hasReq && samePreview(p.preview.req, req) && (p.preview.loading || p.preview.err == "") {
 		return nil
 	}
-	rev := p.previewer
+	// Supersede any read still running for the previous request; its answer is dropped
+	// by the new sequence too. A context-capable previewer gets a cancellation channel
+	// for the file/authority read itself.
+	p.cancelPreviewRead()
 	p.preview.seq++
 	seq := p.preview.seq
 	p.preview.req = req
 	p.preview.hasReq = true
 	p.preview.loading = true
 	p.preview.err = ""
+	if cp := p.previewContext; cp != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		p.previewCancel = cancel
+		return func() tea.Msg {
+			res, err := cp.PreviewContext(ctx, req)
+			return previewDoneMsg{seq: seq, result: res, err: err}
+		}
+	}
+	rev := p.previewer
 	return func() tea.Msg {
 		res, err := rev.Preview(req)
 		return previewDoneMsg{seq: seq, result: res, err: err}
+	}
+}
+
+// cancelPreviewRead cancels the context-capable preview read in flight, if any. The
+// caller also invalidates/advances the preview sequence when the result must be dropped.
+func (p *Panel) cancelPreviewRead() {
+	if p.previewCancel != nil {
+		p.previewCancel()
+		p.previewCancel = nil
 	}
 }
 
@@ -1052,7 +1109,9 @@ func (p *Panel) cancelBatches() {
 // overlay.
 func (p *Panel) Dismiss() {
 	p.cancelBatches()
-	p.loading = false
+	p.cancelPreviewRead()
+	p.preview.seq++
+	p.preview.loading = false
 	p.open = false
 }
 

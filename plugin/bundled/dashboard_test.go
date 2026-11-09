@@ -1288,3 +1288,42 @@ func TestDashboardPRTitleStripsCcAndCf(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardDiskMountStripsFormatChars(t *testing.T) {
+	r := startRig(t, rigOpts{plugins: []string{dashboardPlugin}, script: func(o *plugintest.FakeOS) {
+		o.SetDir("/work")
+		dashboardGitScript(o)
+		o.Script([]string{"df", "-k", "/work"}, plugintest.ProcScript{Stdout: "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/x 100 50 50 50% /work\u202e\n"})
+	}})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "50%")
+	if strings.Contains(text, "\u202e") {
+		t.Fatalf("disk mount kept a bidi mark:\n%s", text)
+	}
+	if !strings.Contains(text, "work") {
+		t.Fatalf("disk mount readable text missing:\n%s", text)
+	}
+}
+
+// TestDashboardWeatherStripsFormatChars: wttr.in condition text is untrusted network data;
+// the weather rows use the same Cc/Cf sanitizer as PR titles, so bidi/zero-width marks
+// cannot reorder or hide the section.
+func TestDashboardWeatherStripsFormatChars(t *testing.T) {
+	t.Parallel()
+	body := strings.ReplaceAll(dashboardWeatherJSON, "Sunny", "Sun\\u202Eny")
+	tr := &githubTransport{body: body}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardWeatherSettings(true, nil),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "Sunny")
+	if strings.Contains(text, "\\u202e") {
+		t.Fatalf("weather text kept a bidi mark:\n%s", text)
+	}
+	if !strings.Contains(text, "Sunny") {
+		t.Fatalf("weather text lost readable condition:\n%s", text)
+	}
+}

@@ -120,9 +120,19 @@ func (s *remoteSearch) searchSnapshots(req searchpanel.SearchRequest, q search.Q
 // authority's bounded windowed read — never the local disk. A head shorter than the whole
 // file sets Truncated and keeps complete lines only, so the panel can say so honestly.
 func (s *remoteSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.PreviewResult, error) {
+	return s.PreviewContext(context.Background(), req)
+}
+
+// PreviewContext is the cancellable remote preview seam: the caller's context (cancelled
+// when the panel's selection changes or the panel closes) bounds the authority ReadRange
+// together with the fixed preview timeout. No local disk is ever consulted.
+func (s *remoteSearch) PreviewContext(ctx context.Context, req searchpanel.PreviewRequest) (searchpanel.PreviewResult, error) {
 	var out searchpanel.PreviewResult
 	if req.Lines <= 0 {
 		return out, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return out, err
 	}
 	text := req.Text
 	if text == "" {
@@ -130,9 +140,13 @@ func (s *remoteSearch) Preview(req searchpanel.PreviewRequest) (searchpanel.Prev
 			out.Err = "remote preview is not available"
 			return out, nil
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), remoteSearchPreviewTimeout)
+		ctx, cancel := context.WithTimeout(ctx, remoteSearchPreviewTimeout)
 		data, err := s.files.ReadRange(ctx, req.Path, 0, remoteSearchPreviewHeadBytes+1)
+		readErr := ctx.Err()
 		cancel()
+		if readErr != nil {
+			return out, readErr
+		}
 		if err != nil && len(data) == 0 && !errors.Is(err, io.EOF) {
 			out.Err = err.Error()
 			return out, nil
