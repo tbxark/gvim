@@ -18,8 +18,10 @@
 -- location list as find_references - LSP: Show Definitions / Show Implementations / Show Type
 -- Definitions. One result jumps directly, several open the list with preview tabs.
 --
--- Reductions vs Fresh: the picker has no initial selected index, so the enclosing symbol is
--- not preselected (Fresh preselects it and previews it); the preview highlight is a decoration
+-- Fresh preselects the smallest symbol enclosing the cursor and previews it. gvim's picker has
+-- no initial-selected-index option, so the port approximates this user-visible behavior by
+-- ordering the preselected symbol first for the empty query and previewing it immediately;
+-- typed queries return to the normal line order. The preview highlight is a decoration
 -- (gvim has no overlay namespace API for plugins) and is cleared on cancel/select. No default
 -- key binding: Fresh registers only the command, with no chord.
 local gvim = require "gvim"
@@ -156,6 +158,24 @@ local function parse_symbols(result, buf)
   return symbols
 end
 
+-- find_enclosing_symbol matches Fresh's findMatchingSymbolIndex: the smallest symbol range
+-- containing cursor_line, then the earliest start line, then the earliest name character.
+local function find_enclosing_symbol(symbols, cursor_line)
+  local best, best_span, best_start, best_char = nil, math.huge, math.huge, math.huge
+  for _, symbol in ipairs(symbols) do
+    if symbol.start_line <= cursor_line and cursor_line <= symbol.end_line then
+      local span = symbol.end_line - symbol.start_line
+      if span < best_span or
+        (span == best_span and symbol.start_line < best_start) or
+        (span == best_span and symbol.start_line == best_start and
+          symbol.name_col < best_char) then
+        best, best_span, best_start, best_char = symbol, span, symbol.start_line, symbol.name_col
+      end
+    end
+  end
+  return best
+end
+
 local function symbols_filter(items, query)
   local ranked = finder.filter(items, query, function(symbol) return symbol.name end, finder.MAX_RESULTS)
   table.sort(ranked, function(a, b)
@@ -164,6 +184,18 @@ local function symbols_filter(items, query)
     end
     return a.name < b.name
   end)
+  -- gvim's picker cannot be given an initial selected index. For Fresh's enclosing-symbol
+  -- preselection, put that symbol first while the query is empty (the host highlights the
+  -- first row); a typed query keeps Fresh's line order.
+  if query == "" and session and session.preselected then
+    for i, item in ipairs(ranked) do
+      if item == session.preselected then
+        table.remove(ranked, i)
+        table.insert(ranked, 1, item)
+        break
+      end
+    end
+  end
   return ranked
 end
 
@@ -201,6 +233,7 @@ local function open_symbol_finder(buf, symbols)
     buf = buf,
     origin = buf:cursor(),
     confirmed = false,
+    preselected = find_enclosing_symbol(symbols, buf:cursor().line),
   }
   finder_obj = finder.new {
     title = t("panel.symbols_title"),
@@ -237,7 +270,13 @@ local function open_symbol_finder(buf, symbols)
       session = nil
     end,
   }
-  return finder_obj:open()
+  local pick, err = finder_obj:open()
+  if pick and session.preselected then
+    -- Fresh previews its initial selected symbol immediately; the first-row ordering above
+    -- makes that same symbol the picker's selected row.
+    show_symbol_at(session.preselected)
+  end
+  return pick, err
 end
 
 local function goto_lsp_symbol()

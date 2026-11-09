@@ -50,7 +50,23 @@ type AuthorityHooks struct {
 
 // SetAuthorityHooks gives the root the workspace-authority hooks. The app calls it once,
 // after New, for any launch (local hooks show nothing and reconnect nothing).
-func (m *Model) SetAuthorityHooks(h AuthorityHooks) { m.auth = h }
+func (m *Model) SetAuthorityHooks(h AuthorityHooks) {
+	m.auth = h
+	// Seed the preview-cache connectivity state now: the first poll may not run before
+	// the user opens the palette, and a disconnected carrier must not inherit a stale
+	// "connected" assumption.
+	m.authorityPreviewConnected = h.Status != nil && h.Status().Connected
+}
+
+// invalidateRemotePreviews drops cached remote preview reads when the authority's
+// connectivity changes. It runs on the update loop; only in-memory state is touched.
+func (m *Model) invalidateRemotePreviews() {
+	for _, o := range m.overlays {
+		if inv, ok := o.(interface{ InvalidatePreviews() }); ok {
+			inv.InvalidatePreviews()
+		}
+	}
+}
 
 // OpenAuthorityTerminalAtStart opens the dock terminal in Init: a remote launch starts
 // the SSH terminal at the remote workspace instead of a local file.
@@ -105,6 +121,8 @@ func (m *Model) beginAuthorityReconnect() tea.Cmd {
 	if m.auth.Status().Connected || m.authorityBusy {
 		return nil
 	}
+	// The attempt starts before any credential prompt or dial: drop old previews now.
+	m.noteAuthorityReconnectAttempt()
 	if m.auth.NeedsPassword != nil && m.auth.NeedsPassword() {
 		m.authorityBusy = true
 		m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
@@ -131,6 +149,14 @@ func (m *Model) beginAuthorityReconnect() tea.Cmd {
 		}
 	}
 	return m.authorityReconnectCmd("")
+}
+
+// noteAuthorityReconnectAttempt starts a reconnect attempt: cached remote previews are
+// invalidated immediately (not only after the dial fails) and the tracker is marked
+// disconnected, so Update never paints an old-carrier preview during the attempt.
+func (m *Model) noteAuthorityReconnectAttempt() {
+	m.authorityPreviewConnected = false
+	m.invalidateRemotePreviews()
 }
 
 // authorityReconnectCmd runs one reconnect off the UI goroutine.
@@ -226,8 +252,13 @@ func (m *Model) authorityPollTick() tea.Cmd {
 	}
 	st := m.auth.Status()
 	if st.Connected {
+		m.authorityPreviewConnected = true
 		m.resetAuthorityRetry()
 		return next
+	}
+	if m.authorityPreviewConnected {
+		m.authorityPreviewConnected = false
+		m.invalidateRemotePreviews()
 	}
 	if st.Connecting || m.authorityBusy {
 		return next
@@ -261,6 +292,7 @@ func (m *Model) authorityRetryTick() tea.Cmd {
 		m.resetAuthorityRetry()
 		return nil
 	}
+	m.noteAuthorityReconnectAttempt()
 	return m.authorityReconnectCmd("")
 }
 

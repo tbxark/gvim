@@ -334,6 +334,21 @@ func newWindowPreview(data []byte, firstLine int, truncated bool) Preview {
 	return p
 }
 
+// InvalidatePreviews drops the displayed preview, the in-flight read and the whole
+// per-palette preview cache. The root calls it when a remote authority disconnects or
+// reconnects: a preview read before the carrier changed must not stay painted as if it
+// still described the current remote file.
+func (p *Palette) InvalidatePreviews() {
+	// Bump the sequence first: a command already running for the old selection must not
+	// apply on top of the cleared state even if its key were reused. (The windowed read
+	// is also cancelled below; the portable ReadHead path has no caller context, so its
+	// result is only dropped by this sequence guard — a declared limitation.)
+	p.preview.seq++
+	p.preview.reset()
+	p.preview.cache = nil
+	p.preview.order = nil
+}
+
 // applyPreview shows a read that answers the current selection, and caches it.
 func (p *Palette) applyPreview(msg previewMsg) {
 	s := &p.preview

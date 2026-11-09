@@ -15,6 +15,7 @@ package prompt
 import (
 	"github.com/tbxark/gvim/i18n"
 
+	"reflect"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -164,6 +165,9 @@ type Line struct {
 	// shown above the prompt row. selSuggestion is the highlighted one, -1 for none.
 	suggestions   []Suggestion
 	selSuggestion int
+	// paste reads the clipboard for Ctrl+V. It is textinput.Paste in production; a
+	// test can substitute a deterministic result without touching the system clipboard.
+	paste func() tea.Msg
 }
 
 // NewLine returns a text prompt with the options of o. The field is focused.
@@ -185,6 +189,7 @@ func NewLine(st style.Styles, o LineOptions) *Line {
 		prefill:  o.SelectAll && o.Input != "",
 		history:  o.History,
 		at:       len(o.History),
+		paste:    textinput.Paste,
 
 		selSuggestion: -1,
 	}
@@ -230,10 +235,11 @@ func (l *Line) CutValue() string {
 func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
-		if p, ok := msg.(tea.PasteMsg); ok {
-			l.untouch(p.Content != "")
-			p.Content = strings.ReplaceAll(strings.ReplaceAll(p.Content, "\r\n", "\n"), "\r", "\n")
-			msg = p
+		if text, ok := pasteContent(msg); ok {
+			if l.prefill && text != "" {
+				l.untouch(true)
+			}
+			msg = tea.PasteMsg{Content: strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")}
 		}
 		l.edit(msg)
 		return l, nil
@@ -284,16 +290,34 @@ func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 		}
 		return l, nil
 	}
-	// Ctrl+V must keep the selected prefill: its clipboard read arrives as a PasteMsg,
-	// whose untouch(true) replaces the whole text. Untouching here would append instead.
-	if ks != "ctrl+v" {
-		l.untouch(kp.Text != "" && kp.Mod&^tea.ModShift == 0)
+	if ks == "ctrl+v" {
+		// Keep the selected prefill while the clipboard read is in flight. Its result
+		// (textinput's unexported pasteMsg) is handled in the non-key branch, where the
+		// prefill is cleared before the field inserts the pasted text, so a selected
+		// prompt replaces rather than appends.
+		read := l.paste
+		if read == nil {
+			read = textinput.Paste
+		}
+		return l, func() tea.Msg { return read() }
 	}
-	cmd := l.edit(kp)
-	if tea.Key(kp).Keystroke() != "ctrl+v" {
-		cmd = nil
+	l.untouch(kp.Text != "" && kp.Mod&^tea.ModShift == 0)
+	return l, l.edit(kp)
+}
+
+// pasteContent recognizes a paste result delivered to the prompt. tea.PasteMsg is the
+// public bracketed paste; textinput's Ctrl+V command returns its own unexported string
+// type pasteMsg, which is recognized by type name and kind (the package path is not
+// exported, and this is the only string-kind pasteMsg a prompt receives).
+func pasteContent(msg tea.Msg) (string, bool) {
+	if p, ok := msg.(tea.PasteMsg); ok {
+		return p.Content, true
 	}
-	return l, cmd
+	t := reflect.TypeOf(msg)
+	if t == nil || t.Kind() != reflect.String || t.Name() != "pasteMsg" {
+		return "", false
+	}
+	return reflect.ValueOf(msg).String(), true
 }
 
 // SetSuggestions replaces the suggestion list and the highlighted row (0-based; -1 for

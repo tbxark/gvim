@@ -38,13 +38,22 @@ func TestLineSelectAllBackspaceAndDeleteClear(t *testing.T) {
 	}
 }
 
+// pasteMsg stands in for textinput's unexported Ctrl+V paste result. The prompt
+// recognizes it by type name and string kind, exactly as it recognizes the real one, so
+// this test drives Update(Ctrl+V) -> command -> result -> Update without the system
+// clipboard.
+type pasteMsg string
+
 // TestLineSelectAllCtrlVPasteReplaces: Ctrl+V keeps the prefill selected while the
-// clipboard read command is in flight; the PasteMsg then clears the old text and inserts
-// the pasted text, so Ctrl+A Ctrl+V replaces rather than appends.
+// clipboard read command is in flight. Executing that command yields textinput's
+// pasteMsg; feeding it back clears the old text and inserts the pasted text, so
+// Ctrl+A Ctrl+V replaces rather than appends. The prefill is gone afterwards, so a
+// Backspace edits the new text instead of clearing it.
 func TestLineSelectAllCtrlVPasteReplaces(t *testing.T) {
 	t.Parallel()
 	var changed []string
 	l := NewLine(testStyles(), LineOptions{Label: "Value:", Input: "old", OnChange: func(s string) { changed = append(changed, s) }})
+	l.paste = func() tea.Msg { return pasteMsg("new") }
 	l.SelectAll()
 	_, cmd := l.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if cmd == nil {
@@ -53,12 +62,23 @@ func TestLineSelectAllCtrlVPasteReplaces(t *testing.T) {
 	if l.Value() != "old" || !l.prefill {
 		t.Fatalf("Ctrl+V lost the selected prefill: value %q prefill %v", l.Value(), l.prefill)
 	}
-	l.Update(tea.PasteMsg{Content: "new"})
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("the Ctrl+V command returned no paste result")
+	}
+	l.Update(msg)
 	if got := l.Value(); got != "new" {
 		t.Fatalf("Ctrl+A Ctrl+V paste = %q, want new", got)
 	}
+	if l.prefill {
+		t.Fatal("prefill stayed set after the replacement paste")
+	}
 	if len(changed) != 1 || changed[0] != "new" {
 		t.Fatalf("onChange = %v, want only the pasted text", changed)
+	}
+	l.Update(key("backspace"))
+	if got := l.Value(); got != "ne" {
+		t.Fatalf("Backspace after replacement = %q, want ne (not a prefill clear)", got)
 	}
 }
 

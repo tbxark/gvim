@@ -217,8 +217,11 @@ the grouped/deduped tree use only. `lsp_navigation` and `find_references` add th
 columns to bytes when the target line is open. Both are command ports because gvim has no
 `lsp_references`/`lsp_implementation` plugin events (the native Find References action has its own
 UI); `lsp_navigation` also offers definition/implementation/type-definition list commands that are
-gvim additions over Fresh's core direct-jump actions, and the picker has no initial selected index, so
-Fresh's enclosing-symbol preselection is not reproduced.
+gvim additions over Fresh's core direct-jump actions. Fresh's enclosing-symbol preselection is
+approximated: the smallest containing symbol (same span/start/character tie-break) is placed first
+for the empty query and previewed immediately. gvim's picker API has no initialSelectedIndex, so
+the selected row is established by first-row ordering rather than an index; typed queries return to
+the normal line sort.
 
 ### Git blame: inline parent stepping, no panel (port residual)
 

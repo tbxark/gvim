@@ -238,6 +238,9 @@ type Model struct {
 	// zero for an ordinary local launch.
 	auth         AuthorityHooks
 	authOpenDock bool
+	// authorityPreviewConnected is the last observed carrier connectivity; a
+	// connected→disconnected transition drops cached remote previews once.
+	authorityPreviewConnected bool
 	// Background authority reconnect (authority_status.go): one dial in flight, the
 	// capped backoff, the one-shot credential prompt flag and the 2FA answer queue.
 	authorityBusy bool
@@ -577,11 +580,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if done, ok := msg.(authorityReconnectedMsg); ok {
 		m.authorityBusy = false
 		if done.err != nil {
+			// A failed background/focus reconnect is an attempt boundary too: clear any
+			// preview that was cached before the poll observed the disconnect.
+			m.noteAuthorityReconnectAttempt()
 			m.reportAuthorityReconnect(done.err)
 			// Keep the backoff from the poll: it schedules the next attempt.
 			return m, nil
 		}
 		m.resetAuthorityRetry()
+		// A reconnect means the remote carrier changed: drop every cached preview so no
+		// pre-disconnect read is painted as current (also covers a reconnect that the
+		// poll did not observe as a disconnect transition).
+		m.invalidateRemotePreviews()
+		m.authorityPreviewConnected = true
 		// One notice reports the refreshed workspace. When the app's post-reconnect work
 		// runs it finishes the sentence (and any restart count/failure); without that hook
 		// the reconnect outcome itself is the notice.

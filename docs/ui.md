@@ -196,7 +196,11 @@ the highlight by the visible suggestion rows and clamp at the ends (Fresh prompt
 Ctrl+A marks the whole prompt text as selected (Fresh prompt_select_all) in the default and VS Code
 presets; this is an invisible prefill state, not a reverse-video/background-highlighted selection.
 The macOS and Emacs presets keep their Ctrl+A prompt Home binding instead. Typing or pasting replaces
-it, Backspace/Delete clears it, and an arrow cancels the selection while keeping the text. Ctrl+C copies
+it, Backspace/Delete clears it, and an arrow cancels the selection while keeping the text. Fresh's
+prompt also has a real text selection: Shift+Left/Right/Home/End extend it and Ctrl+Shift+Left/Right
+select by word. gvim's prompt field is bubbletea's single-line textinput with no selection model and
+no selection rendering, so those move-selecting/select-word bindings are deliberately not added
+rather than faked; Ctrl+A is only the invisible whole-input prefill described here. Ctrl+C copies
 the whole prompt text and Ctrl+X cuts it (copy then clear), as Fresh's prompt_copy/
 prompt_cut do when the field has no selection. Both actions wait for a native clipboard write to report its result: Copy shows Copied only on
 success and Copy failed on an error, while Cut also waits before clearing. The OSC 52 write alone

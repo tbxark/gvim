@@ -584,9 +584,12 @@ declaration start), and the kinds and both response shapes (DocumentSymbol/Symbo
 Fresh. The three **LSP: Show Definitions / Show Implementations / Show Type Definitions** list
 commands are gvim additions (in Fresh those are core actions that jump directly; gvim keeps its
 native Go to Definition rows) and share the references location list: one result jumps, several open
-the filterable list with preview tabs. Reductions (also in porting.md): the picker has no initial
-selected index, so the enclosing symbol is not preselected as in Fresh, and the highlight is a
-decoration, not an overlay namespace. No default key binding (Fresh's plugin registers none).
+the filterable list with preview tabs. Fresh's enclosing-symbol preselection is ported as a
+user-visible approximation: the smallest symbol range containing the cursor is moved to the first
+row for the empty query and previewed immediately (cursor + search-match highlight); gvim's picker
+has no initial-selected-index option, so typed queries return to the normal line order and the
+selected row is no longer forced. The highlight is a decoration, not an overlay namespace. No
+default key binding (Fresh's plugin registers none).
 
 **find_references** (reduced; command driven): Fresh's plugin answers the host's `lsp_references` /
 `lsp_implementation` events with a finder list; gvim has no such plugin events (its native Find

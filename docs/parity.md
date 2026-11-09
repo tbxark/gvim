@@ -21,16 +21,15 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `b4ee547` (the round-61 commit; the previous round's commit is
-folded in) plus the merged round-62 work. Final full
-`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r62-final3.log`); 0 FAIL. The supplied round-62 gate log covers the full suite, not a new
-heap/static-gate measurement: the last recorded static PASS remains Round61 (heap en 127 KiB / de 83 KiB /
-both 210 KiB), and the changed-package build/CGO/windows/vet/lint0/purity/import/gofmt/diff checks were
-reported green separately. Targeted round-62 tests pass; real-host checks remain UNTESTED. Real-host SSH/jump-box/agent-forwarding/
-search/explorer/replace/clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/
-secret-tool, real-tmux, Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching remain
-UNTESTED. Fresh reference: `refs/fresh` same
+Last verified: 2026-11-10, tree commit `9534cd5` (the round-62 commit; the previous round's commit is
+folded in) plus the merged round-63 work. Static gates PASS (Lead, final pass after all writes stopped; default
+GOCACHE: native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, purity, import rules, menus,
+i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check, gofmt clean).
+Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r63-final2.log`). The audit ran targeted round-63 tests/diff review; the Lead ran the full
+suite. Real-host checks remain UNTESTED: SSH/jump-box/agent-forwarding/search/explorer/replace/
+clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux,
+Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching. Fresh reference: `refs/fresh` same
 date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
@@ -902,7 +901,7 @@ closed), restarted on reconnect and by File Explorer: Refresh (a full re-walk, n
 palette open keeps previous rows until re-rank/reopen. Tests: remote_git/preview/finder_refresh,
 palette remote. Residuals: palette rows carry no git letters (local rows do not either), the
 project-search panel preview column is unwired, refresh is a full re-walk, an open palette keeps
-old rows until re-rank/reopen, a preview cached before disconnect may linger, and there is no full
+old rows until re-rank/reopen, and there is no full
 fake-slot buildRuntime reconnect test.
 **Completion trigger chars/live re-filter/dabbrev (117).** The open servers' advertised
 `completionProvider.triggerCharacters` (static + dynamic registrations, union over eligible
@@ -1531,6 +1530,40 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-63 outcome (2026-11-10, merged working tree on `9534cd5`).** Three slices plus docs:
+the real Ctrl+V prefill replacement for prompt select-all; remote palette preview-cache invalidation on
+authority carrier changes/reconnect attempts (R13-8); and fresh lsp_navigation enclosing-symbol
+preselection. Static gates PASS; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0:
+77 packages ok, no FAIL line (log `/tmp/gvim-r63-final2.log`); heap en 127 KiB / de 83 KiB / both
+210 KiB. No commit was made.
+**Prompt Ctrl+V replacement (item 315 refinement).** The prompt now recognizes both tea.PasteMsg and
+textinput's unexported Ctrl+V pasteMsg (type name/kind via pasteContent), keeps the prefill pending
+until the paste result, clears it before inserting, and normalizes CRLF; the real Ctrl+V command result
+is fed back in tests. Empty Backspace/Delete no onChange, stale validation error cleared, arrows cancel;
+selection stays intentionally invisible (documented). Intentional scope: the prompt field has no range
+selection model/keys beyond Ctrl+A — no Shift+arrow/word/line selection and no selected-range Copy/Cut;
+copy/cut remain whole-field. RESIDUALS: no real system/terminal clipboard or root-level late paste
+integration; real terminals UNTESTED.
+**Remote palette preview invalidation (item 317).** Palette.InvalidatePreviews bumps the preview
+generation, resets display/loading and clears cache/order; the root seeds authorityPreviewConnected
+from SetAuthorityHooks, invalidates on disconnect transition, at reconnect-attempt start (credential
+prompt/background retry), on failed reconnect, and on successful reconnect (then marks connected).
+Tests cover cache/display clear, stale old-seq result rejection, pre-poll disconnect, reconnect failure
+immediate clear and reconnect→pre-poll-disconnect. Windowed reads cancel through their context; ReadHead
+has no caller context/cancel (bounded timeout, eventual result discarded by the sequence guard) — now
+documented. RESIDUALS: authorityRetryTick's noteAuthorityReconnectAttempt path is not separately tested;
+no root-level late-preview-command integration test; palette stays open with blank preview until another
+palette update after invalidation; real SSH/host UNTESTED.
+**lsp_navigation preselection (item 318).** Fresh's smallest enclosing symbol is approximated by moving
+that symbol first for the empty query and previewing/highlighting it immediately; typed queries return
+to line order; cursor/decoration behavior and tests are in place. gvim's picker has no initial
+selected-index API. RESIDUALS: first-row ordering is an approximation, the preview highlight is a
+plugin decoration (no overlay namespace API), and real LSP/remote behavior is UNTESTED.
+Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; keymap default own 253/in effect
+251, macos 60/273, macos-gui 52/324, emacs 98/316, vscode 9/256; i18n en 1184 / 581 per locale,
+575 KiB text, ≈665 KiB JSON, heap 127-83-210 KiB. Full suite EXIT 0 (77 packages, log
+/tmp/gvim-r63-final2.log); real hosts UNTESTED; no full-parity claim.
 **Round-62 outcome (2026-11-10, merged working tree on `b4ee547`).** Two slices plus docs:
 the prompt-select-all overlay action and the opt-in Deno/Slang helper Disable actions. Final full
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
@@ -4999,8 +5032,7 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
     cancel/await/re-enumerate with generation guard and reconnect restart, File Explorer: Refresh
     re-enumerates on demand (full re-walk, not incremental). OPEN: palette file rows carry no git
     letters (local rows do not either), project-search panel preview column unwired, refresh is a
-    full re-walk, an open palette keeps old rows until re-rank/reopen, a preview cached before
-    disconnect may linger, no full fake-slot buildRuntime reconnect test, and the walk is one
+    full re-walk, an open palette keeps old rows until re-rank/reopen, no full fake-slot buildRuntime reconnect test, and the walk is one
     authority ReadDir exec per directory (not Fresh's server-side streaming walk).
 97. **diff_nav (Diff Chunk Navigation) is partially covered; its residuals are recorded (R13-9).**
     Fresh's built-in `diff_nav` plugin merges three hunk sources — `git_gutter_hunks`,
@@ -5140,7 +5172,7 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
     guard, done channel closed), reconnect restart and File Explorer: Refresh (full re-walk).
     OPEN: palette rows carry no git letters (local rows do not either), project-search panel
     preview column unwired, refresh is full re-walk not incremental, open palette keeps old rows
-    until re-rank/reopen, preview cached before disconnect may linger, no full fake-slot
+    until re-rank/reopen, no full fake-slot
     buildRuntime reconnect test; finder walk still per-directory round trips.
 110. **Authority FileMutations + remote explorer write UI/clipboard are landed; write residuals**
      **(R13-21).** FileMutations (Mkdir/Rename/Remove; local + SSH helpers), New File/New Directory/
@@ -6629,12 +6661,15 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      (non-Rust, no LSP, changed target). Residuals: no real LSP-server/remote e2e; mute is language-wide at
      the port, not a per-buffer/server setting.
 315. **Prompt select-all (R2-4).** Ctrl+A in the default/VS Code prompt context sets an
-     invisible whole-input prefill; typing, bracketed paste and Ctrl+V replace it, Backspace/Delete clear
-     it once (no onChange on empty, stale validation error cleared), arrows cancel keeping text; macOS/Emacs
-     keep their own Ctrl+A prompt Home. Keymap counts/docs updated; unit + real root Update tests cover
-     typing, Ctrl+V pending prefill, empty/no-onChange, error clearing, Backspace/Delete and arrow.
-     Residuals: no visual selection highlight (documented); Ctrl+V replacement only at prompt unit seam,
-     not a real root/terminal clipboard; real terminal UNTESTED.
+     invisible whole-input prefill; typing, bracketed paste and real Ctrl+V replace it, Backspace/Delete
+     clear it once (no onChange on empty, stale validation error cleared), arrows cancel keeping text;
+     macOS/Emacs keep their own Ctrl+A prompt Home. The Ctrl+V command result is recognized through
+     pasteContent (tea.PasteMsg and textinput's unexported pasteMsg by type/kind), prefill is cleared before
+     insertion, and CRLF is normalized. The field intentionally has no range-selection model/keys beyond
+     Ctrl+A: no Shift+arrow/word/line selection and no selected-range Copy/Cut; copy/cut remain whole-field.
+     Keymap counts/docs updated; unit + real root Update tests cover typing, executed Ctrl+V result,
+     empty/no-onChange, error clearing, Backspace/Delete and arrow. Residuals: no visual selection
+     highlight (documented); no real root/system-clipboard/terminal paste test; real terminal UNTESTED.
 316. **Deno/Slang Disable actions (R13-6).** Opt-in deno_lsp/slang_lsp help popups offer controlled
      lsp_disable_language_target only for exact recognized languages + gvim.has("lsp"), re-check after the
      popup, carry path/language and never claim async success. Deno accepts typescript/javascript, maps
@@ -6642,6 +6677,21 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      slang; text/unrecognized (.cjs/.slangh default) never dispatch. i18n/docs/tests cover extensions,
      tab/language changes, missing LSP, refusals and no false success. Residuals: .cjs/.slangh require a
      configured language entry (documented); TUI tsx mapping uses a fake port; no real server/remote e2e.
+317. **Remote palette preview invalidation (R13-8).** Palette.InvalidatePreviews bumps the
+     preview generation before resetting display/loading and clearing cache/order, so an old command cannot
+     paint over cleared state. Root seeds authorityPreviewConnected from SetAuthorityHooks, invalidates on
+     connected→disconnected, reconnect-attempt start (credential prompt/background retry), failed reconnect,
+     and successful reconnect (then marks connected). Tests cover cache/display, old-seq rejection, pre-poll
+     disconnect, reconnect-failure immediate clear and reconnect→pre-poll-disconnect. Windowed reads cancel
+     by context; portable ReadHead has no caller context/cancel (bounded timeout, seq-discarded) documented.
+     Residuals: authorityRetryTick's noteAuthorityReconnectAttempt path is not separately tested; no
+     root-level late-preview-command integration test; palette stays blank until another palette update
+     after invalidation; real SSH/host UNTESTED.
+318. **lsp_navigation enclosing-symbol preselection (R13-6/R13-9).** The smallest symbol containing the
+     cursor (span/start/name-character tie-break) is moved first for the empty query and previewed/highlighted
+     immediately; typed queries return to gvim's line order; cursor and decoration are tested. gvim's picker
+     has no initialSelectedIndex API. Residuals: first-row ordering is an approximation; plugin decoration
+     not an overlay namespace; real LSP/remote UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7070,11 +7120,14 @@ Round 13 recorded five open gaps:
   project ports cleared), palette slash paths, ~/… safe real-shell expansion, bounds/truncation.
   Round 16: remote git letters via porcelain-v1 -z one-shot (8 s/8 MiB, 2 s cache, reconnect
   invalidate, A/M/D/U/R/C approximations, local git never consulted); palette head preview via
-  authority ReadRange (64 KiB+1/honest truncation/whole-file fallback/disconnected error); finder
+  authority ReadRange (64 KiB+1/honest truncation/whole-file fallback/disconnected error; its
+  per-palette preview cache/display are dropped and the seq is bumped on authority disconnect/
+  reconnect attempt (prompt/failure included) and successful reconnect, so a late old-carrier result cannot paint; windowed reads cancel, the portable
+  ReadHead path has no caller context/cancel and its result is only seq-discarded — declared
+  limitation); finder
   index in-place Restart with generation guard, reconnect restart and File Explorer: Refresh (full
   re-walk). OPEN: palette rows no git letters (local rows do not either), project-search preview
-  column unwired, full re-walk, open palette old rows until re-rank/reopen, preview cached before
-  disconnect may linger, no full fake-slot buildRuntime reconnect test, finder walk still per-
+  column unwired, full re-walk, open palette old rows until re-rank/reopen, no full fake-slot buildRuntime reconnect test, finder walk still per-
   directory round trips (not Fresh's server-side walk). Remote search/replace is R13-11.
 - **R13-9 (P2, M; PARTIAL — merged navigation landed, residual gaps open)** —
   `git_gutter`'s Next/Previous Change now merges Fresh diff_nav's three sources: its own
@@ -7310,7 +7363,7 @@ Round 13 recorded five open gaps:
 
 | 32 | Remote project replace residual: no cross-file rollback and no undo history for direct remote writes (undo across a run), dirty open buffers skipped, remote .gitignore/large-file filtering not in candidate list, local preview/git-status adapter stays cleared | P2 | M | `internal/app/remote_replace.go`, `internal/tui/project_search.go` | R13-19/R13-11 |
 
-| 33 | Remote data surfaces residual: palette file rows carry no git letters (local rows do not either), project-search panel preview column unwired, finder File Explorer Refresh is a full re-walk not incremental, open palette keeps old rows until re-rank/reopen, preview cached before disconnect may linger, no full fake-slot buildRuntime reconnect test, finder walk per-directory round trips | P2 | M | `internal/app/{remote_git,remote_preview}.go`, `finder/index.go`, `internal/tui/palette/preview.go` | R13-8/R13-23 |
+| 33 | Remote data surfaces residual: palette file rows carry no git letters (local rows do not either), project-search panel preview column unwired, finder File Explorer Refresh is a full re-walk not incremental, open palette keeps old rows until re-rank/reopen, no full fake-slot buildRuntime reconnect test, finder walk per-directory round trips | P2 | M | `internal/app/{remote_git,remote_preview}.go`, `finder/index.go`, `internal/tui/palette/preview.go` | R13-8/R13-23 |
 
 | 34 | URL/packaged themes residual: packaged repository form refused (`repo#fragment`), marketplace/browser not ported, URL fetch is startup-only (no in-session fetch/cache refresh), remote packs/local archives; theme background images/drag/inheritance edges | P3 | M | `theme/url.go`, `theme/registry.go`, `internal/app/theme_url.go`, `docs/themes.md` | R13-20/R13-6 |
 
@@ -8667,6 +8720,14 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-63 verification (2026-11-10, merged tree on `9534cd5`).** STATIC GATES PASS (Lead,
+  final pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
+  golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 127 KiB / de 83 KiB /
+  both 210 KiB, git diff --check, gofmt clean). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r63-final2.log`). Audit: targeted round-63 tests/diff review. Tracks: prompt real
+  Ctrl+V; palette preview invalidation/reconnect attempts; lsp_navigation preselect. Real-host checks
+  remain UNTESTED. No full-parity claim.
 - **Round-62 verification (2026-11-10, merged tree on `b4ee547`).** FULL SUITE PASS: final
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0, 77 packages ok, 0 FAIL (log
   `/tmp/gvim-r62-final3.log`). The supplied log covers the full suite; no new heap/static measurement
@@ -8765,14 +8826,16 @@ Round 13 recorded five open gaps:
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
   (round-60 landed prompt copy/cut identity/owner/token, welcome startup toggle state, remote
   candidate-listing degradation, native env/LSP withdrawal; round-61 adds remote glob/finder-health and rust_lsp Disable; round-62 adds prompt select-all and
-  Deno/Slang Disable; full suite EXIT 0 (77 packages, log /tmp/gvim-r62-final3.log); real-host checks
-  UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–62 had their full-suite gate runs
-  (Rounds 2–61 also recorded static gates; Round62 supplied the full-suite log). Round 62 final full
+  Deno/Slang Disable; round-63 adds prompt real Ctrl+V, palette preview invalidation and lsp_navigation
+  preselect; full suite EXIT 0 (77 packages, log /tmp/gvim-r63-final2.log); real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–63 had their full-suite gate runs
+  (Rounds 2–61 also recorded static gates; Round 62 supplied a full-suite log without a new static
+  measurement). Round 63 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
+  native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
+  i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r62-final3.log`; no new heap/static measurement accompanied that log (last recorded static
-  PASS Round61 heap en 127 KiB / de 83 KiB / both 210 KiB). The audit ran targeted round-62 tests and
-  diff review only; the Lead ran the full suite. Real-host verification remains UNTESTED rather
+  `/tmp/gvim-r63-final2.log`. The audit ran targeted round-63 tests and diff review only; the Lead
+  ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts
   policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching, local

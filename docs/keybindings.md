@@ -203,8 +203,9 @@ operation; `Esc`, `Enter`, the arrows and the page keys therefore keep their mea
 Limits, all deliberate: only single-key bindings apply in the overlay contexts (a sequence there
 is skipped with a warning, since the router resolves one key at a time); `unbind` removes the
 preset's row, but the surface's built-in handler still runs on the freed chord; a prompt's text
-field has no selection, clipboard or suggestion list in gvim, so the selection, copy/cut and
-suggestion actions are not bound; the Settings page has type-to-filter, slash search and question-mark key help; the completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
+field has no selection model in gvim, so Fresh's Shift+Left/Right/Home/End move-selecting and
+Ctrl+Shift+Left/Right select-word actions are deliberately not bound rather than faked; Ctrl+A is
+only the invisible whole-input prefill and copy/cut use the whole prompt text; the Settings page has type-to-filter, slash search and question-mark key help; the completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
 are not keymap surfaces yet (a binding there is skipped with a warning, as are bindings in
 contexts Fresh does not name).
 

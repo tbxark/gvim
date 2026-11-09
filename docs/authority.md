@@ -963,7 +963,14 @@ remote document access (never the local filepath path), and a degraded/capped re
 marked `· incomplete` in the list title with a leading notice header instead of looking
 complete.
 
-Remote row preview uses `remotePreviewer.ReadWindow`: a cancellable authority
+The palette's per-file preview cache and displayed preview are dropped when the authority
+transitions to disconnected or starts any reconnect attempt (including credential prompts,
+and again on a failed attempt) and on a successful reconnect, and the preview sequence is bumped so a command
+started for the old carrier cannot paint over the cleared state. The windowed `ReadWindow`
+read is cancelled through its context; the portable `ReadHead` path has no caller
+context/cancel (only its own bounded timeout), so its eventual result is discarded by the
+sequence guard while the underlying bounded read may finish — a declared limitation, not a
+cancellation claim. Remote row preview uses `remotePreviewer.ReadWindow`: a cancellable authority
 `ReadRange` scan (64 KiB chunks, 8 MiB scan budget, five lines before the hit, twelve
 lines maximum, 16 KiB display/64 KiB hard cap) returns complete remote lines around
 the match; it never reads the local disk and falls back to a bounded whole-file

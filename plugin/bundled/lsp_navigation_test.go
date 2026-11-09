@@ -271,3 +271,37 @@ func TestLSPNavigationDefinitionsList(t *testing.T) {
 		t.Errorf("jump notice = %q", got)
 	}
 }
+
+func TestLSPNavigationPreselectsEnclosingSymbol(t *testing.T) {
+	t.Parallel()
+	host, buf := lspNavHost(t)
+	if err := host.SetCursor(buf, pluginapi.Pos{Line: 3, Col: 1}, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	host.LSP().Reply = func(c plugintest.LSPCall) (any, string) {
+		if c.Method == "textDocument/documentSymbol" {
+			return []any{
+				map[string]any{"name": "outer", "kind": 12.0, "location": map[string]any{"uri": "file:///work/a.go",
+					"range": map[string]any{"start": map[string]any{"line": 0.0, "character": 0.0}, "end": map[string]any{"line": 6.0, "character": 0.0}}}},
+				map[string]any{"name": "inner", "kind": 12.0, "location": map[string]any{"uri": "file:///work/a.go",
+					"range": map[string]any{"start": map[string]any{"line": 2.0, "character": 5.0}, "end": map[string]any{"line": 4.0, "character": 0.0}}}},
+			}, ""
+		}
+		return nil, ""
+	}
+	h := startLSPNav(t, host)
+	navRun(t, h, "goto_lsp_symbol")
+	o := h.Host.UI().Last("picker")
+	if o == nil {
+		t.Fatalf("no symbol finder opened (log %v)", h.LogText(""))
+	}
+	if len(o.Picker.Items) != 2 || !strings.Contains(o.Picker.Items[0].Text, "[fn] inner") {
+		t.Fatalf("preselected row is not first: %+v", o.Picker.Items)
+	}
+	if cursors, _ := host.Cursors(buf); len(cursors) == 0 || cursors[0].Pos.Line != 2 {
+		t.Fatalf("cursor = %+v, want the enclosing symbol line 2", cursors)
+	}
+	if items := host.Decor().Items(lspNavPlugin, "lsp_symbol_nav", buf); len(items) != 1 || items[0].Kind != pluginapi.DecorHighlight {
+		t.Fatalf("preselected highlight = %+v", items)
+	}
+}
