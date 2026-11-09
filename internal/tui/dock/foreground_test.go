@@ -83,8 +83,10 @@ func TestLocalShellPollsForegroundName(t *testing.T) {
 }
 
 // TestForegroundPollStopsOnExitAndIgnoresOldGenerations checks the chain is
-// bounded to the shell: exit clears the cached name and stops ticking, and an
-// answer/restart from an earlier generation cannot repopulate it.
+// bounded to the shell: exit stops ticking but keeps the last polled name for the
+// restart indicator (the exited tab label itself shows no foreground command), and
+// an answer/restart from an earlier generation cannot repopulate it; a new shell
+// generation starts without the old program.
 func TestForegroundPollStopsOnExitAndIgnoresOldGenerations(t *testing.T) {
 	t.Parallel()
 	term := newFakeTerm()
@@ -96,8 +98,14 @@ func TestForegroundPollStopsOnExitAndIgnoresOldGenerations(t *testing.T) {
 		t.Fatal("tick did not start a poll")
 	}
 	p.Update(exitMsg{gen: p.gen})
-	if p.fgName != "" {
-		t.Fatalf("exit kept the foreground name %q", p.fgName)
+	if p.fgName != "old" {
+		t.Fatalf("exit dropped the last foreground name %q; the restart indicator needs it", p.fgName)
+	}
+	if got := p.lastForegroundName(); got != "old" {
+		t.Fatalf("last foreground name = %q, want the kept poll", got)
+	}
+	if got := p.foregroundName(); got != "" {
+		t.Fatalf("an exited tab label still shows the live foreground command %q", got)
 	}
 	if next, ok := p.Update(foregroundPollTickMsg{gen: p.gen}); !ok || next != nil {
 		t.Fatalf("an exited shell kept polling: %v, %v", next, ok)
@@ -113,6 +121,9 @@ func TestForegroundPollStopsOnExitAndIgnoresOldGenerations(t *testing.T) {
 	}
 	if !p.Running() {
 		t.Fatal("the shell did not restart")
+	}
+	if p.fgName != "" {
+		t.Fatalf("the new shell generation kept the old foreground name %q", p.fgName)
 	}
 	for _, msg := range messages(stale) {
 		p.Update(msg)

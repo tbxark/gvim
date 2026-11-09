@@ -599,15 +599,19 @@ URI hook:
   (`[A-Za-z0-9._-]`, at most 64 bytes, no leading `.`/`-`); userinfo, port, query, fragment
   and `.`/`..`/backslash path segments are refused, and the path is never a filesystem path;
 * it is **local authority only**: a remote/SSH workspace refuses explicitly instead of writing or
-  opening on the other side or falling back to a local command; the fixed
-  `slangd --print-builtin-module <module>` runs through `authority.OneShot()` under the
-  workspace trust gate, with no `os/exec` path;
+  opening on the other side or falling back to a local command; `<Program>
+  --print-builtin-module <module>` runs through `authority.OneShot()` under the workspace trust
+  gate, with no `os/exec` path, where `Program`/`env`/cwd come from the answering LSP server (a bare
+  configured command falls back to that spelling resolved by the authority one-shot);
 * bounds are 5 s / 4 MiB stdout; timeout, signal, start/cancel failure, truncation and non-zero
   exit are LSP location errors; invalid URIs and untrusted workspaces execute nothing;
-* the dump is written atomically under the user cache (`gvim/slang-builtin/<module>.slang`,
-  regenerated each request so it matches the connected slangd) and opened with the editor's
-  generated/read-only marker at the LSP position. The editor still has no generic plugin
-  URI-scheme/external-URI API.
+* the dump is written atomically under a **content-addressed** user cache file
+  (`gvim/slang-builtin/<module>-<sha256>.slang`, 0444 in a 0700 directory), so concurrent
+  resolutions of the same module never overwrite a path another goto is about to read and an
+  already-open document is reused only for identical bytes; a throttled non-blocking sweep drops
+  entries older than seven days and keeps at most 128 older-than-an-hour files. The path is opened
+  with the editor's generated/read-only marker at the LSP position. The editor still has no generic
+  plugin URI-scheme/external-URI API.
 
 The bundled port (`plugin/bundled/plugins/slang_lsp/`, opt-in) keeps only the user-facing
 install/check/help half; it does not handle synth URIs:
@@ -629,9 +633,10 @@ install/check/help half; it does not handle synth URIs:
 
 Not ported: a generic plugin-provided URI-scheme claim or `lsp_open_external_uri` hook (still no
 plugin API), arbitrary external-URI providers, remote/SSH generation (the native flow refuses
-explicitly), and Fresh's version-keyed persistent cache (gvim regenerates per request). The plugin
-is `default_enabled: false`, registers no keys/settings, and the native Slang LSP entry (if the
-user configures one) is untouched.
+explicitly), Fresh's version-keyed persistent cache (gvim keys the cache by content instead), custom
+server argv/wrapper arguments (only the resolved program is reused) and an exact-binary guarantee when
+the configured command is left bare for the child to resolve. The plugin is `default_enabled: false`,
+registers no keys/settings, and the native Slang LSP entry (if the user configures one) is untouched.
 
 Tests: `plugin/bundled/slang_lsp_test.go` covers the manifest/visible commands/no bindings, the
 copy instruction (clipboard/status), both tools OK (version lines, argv order), one tool failing

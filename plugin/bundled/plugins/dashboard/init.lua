@@ -9,8 +9,10 @@
 -- Reduction vs Fresh (docs/plugins/bundled.md):
 --   * weather and GitHub PRs are user-opt-in sections (weather / github_prs, plus
 --     network) over the bounded gvim.http.get capability. Weather uses wttr.in j1
---     JSON (public conditions only), GitHub reads public repositories; failures are
---     a muted unavailable line and the response never touches disk.
+--     JSON (public conditions only), GitHub reads public repositories; optional
+--     GitHub commit-status tags use a rate-bounded public endpoint with no token.
+--     PR titles strip Cc/Cf formatting characters before display. Failures are a
+--     muted unavailable line and responses never touch disk.
 --   * third-party plugins register sections through gvim.dashboard; this plugin
 --     discovers them and invokes their proxy callback as a bounded task with a
 --     per-section timeout, keeping failures/stale data isolated to that section.
@@ -46,6 +48,10 @@ local settings = gvim.settings.define {
   github_prs = {
     type = "boolean", default = false,
     description = "Show open GitHub pull requests for the workspace repository (needs network = true)",
+  },
+  github_checks = {
+    type = "boolean", default = false,
+    description = "Fetch each shown PR's public commit status (up to 6 requests per 15 min; needs github_prs and network = true)",
   },
   weather = {
     type = "boolean", default = false,
@@ -96,7 +102,13 @@ local INNER_MAX = 110
 local SIZE_FRACTION = 0.9
 local GIT_TTL_MS = 15000
 local DISK_TTL_MS = 60000
-local GITHUB_TTL_MS = 60000
+-- Unauthenticated GitHub REST allows 60 requests/hour per IP. The PR list refreshes at
+-- most every 2 min (30/h) and the optional commit-status batch at most every 15 min with
+-- six requests (24/h): the plugin's steady-state ceiling is 54/h, leaving headroom.
+local GITHUB_TTL_MS = 120000
+local GITHUB_CHECKS_TTL_MS = 900000
+local GITHUB_CHECKS_MAX = 6
+local GITHUB_CHECK_TIMEOUT_MS = 2000
 local GITHUB_API = "https://api.github.com"
 local GITHUB_MAX_ROWS = 6
 local WEATHER_TTL_MS = 600000
@@ -401,13 +413,93 @@ local function pull_number(value)
   return string.format("%d", value)
 end
 
--- pr_title keeps a display string from untrusted JSON: non-strings, control characters
--- and runaway lengths are replaced/clipped instead of reaching the frame verbatim.
+-- Unicode Cc/Cf handling for PR titles. Cc controls become spaces; Cf format marks
+-- (bidi overrides/isolates, ZWSP/ZWJ/ZWNJ, soft hyphen, BOM, tags, interlinear
+-- annotations, ...) are removed so a hostile title cannot visually reorder or hide the
+-- dashboard row. The table is the assigned Cf set as of Unicode 15.1; invalid UTF-8 bytes
+-- become spaces rather than reaching the terminal.
+local CF_RANGES = {
+  { 0x00AD, 0x00AD }, { 0x0600, 0x0605 }, { 0x061C, 0x061C }, { 0x06DD, 0x06DD },
+  { 0x070F, 0x070F }, { 0x0890, 0x0891 }, { 0x08E2, 0x08E2 }, { 0x180E, 0x180E },
+  { 0x200B, 0x200F }, { 0x202A, 0x202E }, { 0x2060, 0x2064 }, { 0x2066, 0x206F },
+  { 0xFEFF, 0xFEFF }, { 0xFFF9, 0xFFFB }, { 0x110BD, 0x110BD }, { 0x110CD, 0x110CD },
+  { 0x13430, 0x1343F }, { 0x1BCA0, 0x1BCA3 }, { 0x1D173, 0x1D17A },
+  { 0xE0001, 0xE0001 }, { 0xE0020, 0xE007F },
+}
+
+local function is_cf(cp)
+  for _, range in ipairs(CF_RANGES) do
+    if cp >= range[1] and cp <= range[2] then
+      return true
+    end
+  end
+  return false
+end
+
+local function utf8_codepoint(text, i)
+  local b1 = text:byte(i)
+  if not b1 then
+    return nil, nil
+  end
+  if b1 < 0x80 then
+    return b1, 1
+  end
+  if b1 >= 0xC2 and b1 <= 0xDF then
+    local b2 = text:byte(i + 1)
+    if b2 and b2 >= 0x80 and b2 <= 0xBF then
+      return (b1 - 0xC0) * 0x40 + (b2 - 0x80), 2
+    end
+  elseif b1 >= 0xE0 and b1 <= 0xEF then
+    local b2, b3 = text:byte(i + 1), text:byte(i + 2)
+    if b2 and b3 and b2 >= 0x80 and b2 <= 0xBF and b3 >= 0x80 and b3 <= 0xBF then
+      local cp = (b1 - 0xE0) * 0x1000 + (b2 - 0x80) * 0x40 + (b3 - 0x80)
+      if cp >= 0x800 and not (cp >= 0xD800 and cp <= 0xDFFF) then
+        return cp, 3
+      end
+    end
+  elseif b1 >= 0xF0 and b1 <= 0xF4 then
+    local b2, b3, b4 = text:byte(i + 1), text:byte(i + 2), text:byte(i + 3)
+    if b2 and b3 and b4 and b2 >= 0x80 and b2 <= 0xBF and b3 >= 0x80 and b3 <= 0xBF and b4 >= 0x80 and b4 <= 0xBF then
+      local cp = (b1 - 0xF0) * 0x40000 + (b2 - 0x80) * 0x1000 + (b3 - 0x80) * 0x40 + (b4 - 0x80)
+      if cp >= 0x10000 and cp <= 0x10FFFF then
+        return cp, 4
+      end
+    end
+  end
+  return nil, 1
+end
+
+local function strip_pr_format(text)
+  local out = {}
+  local i = 1
+  while i <= #text do
+    local cp, width = utf8_codepoint(text, i)
+    if not cp or width == nil then
+      out[#out + 1] = " "
+      i = i + 1
+    elseif cp <= 0x1F or cp == 0x7F or (cp >= 0x80 and cp <= 0x9F) then
+      out[#out + 1] = " "
+      i = i + width
+    elseif is_cf(cp) then
+      -- Cf marks are invisible/format-only: remove them, keeping surrounding text.
+      i = i + width
+    else
+      out[#out + 1] = text:sub(i, i + width - 1)
+      i = i + width
+    end
+  end
+  return table.concat(out)
+end
+
+-- pr_title keeps a display string from untrusted JSON: non-strings, Cc controls and Cf
+-- format characters and runaway lengths are replaced/removed/clipped instead of reaching
+-- the frame verbatim. The input slice is bounded before decoding.
 local function pr_title(value)
   if type(value) ~= "string" then
     return "(untitled)"
   end
-  local text = value:gsub("[%c\127]", " "):gsub("%s+", " ")
+  local text = value:sub(1, 1024)
+  text = strip_pr_format(text):gsub("%s+", " ")
   text = text:match("^%s*(.-)%s*$") or ""
   if text == "" then
     return "(untitled)"
@@ -416,6 +508,35 @@ local function pr_title(value)
     text = gvim.text.truncate(text, 200, "…")
   end
   return text
+end
+
+-- pull_sha reads the PR head SHA from the untrusted list response; only a 40/64-char
+-- hexadecimal value is accepted, and it is percent-safe input to the fixed status URL.
+local function pull_sha(pr)
+  local head = pr.head
+  if type(head) ~= "table" then
+    return nil
+  end
+  local sha = head.sha
+  if type(sha) ~= "string" or (#sha ~= 40 and #sha ~= 64) or not sha:match("^[%x]+$") then
+    return nil
+  end
+  return sha
+end
+
+-- github_check_tag maps the public commit-status state onto Fresh's compact check labels.
+-- Unknown states are omitted rather than guessed.
+local function github_check_tag(state)
+  if state == "success" then
+    return t("github.check_pass")
+  end
+  if state == "failure" or state == "error" then
+    return t("github.check_fail")
+  end
+  if state == "pending" then
+    return t("github.check_run")
+  end
+  return nil
 end
 
 local function fetch_github()
@@ -427,13 +548,17 @@ local function fetch_github()
   if state.github and state.github.at and now - state.github.at < GITHUB_TTL_MS then
     return
   end
+  -- Keep the last-good check tags/cooldown across a failed list refresh.
+  local previous = state.github
+  local checks = (previous and previous.checks) or {}
+  local last_checks = (previous and previous.checked_at) or -1
   local nwo = state.git and github_nwo(state.git.repo_url) or nil
   if not nwo then
-    state.github = { at = now, unavailable = "not a github repository" }
+    state.github = { at = now, unavailable = "not a github repository", checks = checks, checked_at = last_checks }
     return
   end
   local url = GITHUB_API .. "/repos/" .. nwo .. "/pulls?state=open&per_page=" .. tostring(GITHUB_MAX_ROWS)
-  state.github = { at = now, loading = true }
+  state.github = { at = now, loading = true, checks = checks, checked_at = last_checks }
   local res, err = gvim.http.get(url, { timeout_ms = 5000 })
   if not res then
     local text = tostring(err)
@@ -441,16 +566,16 @@ local function fetch_github()
     if text:find("network is disabled", 1, true) then
       reason = "network disabled (set network = true)"
     end
-    state.github = { at = now, unavailable = reason }
+    state.github = { at = now, unavailable = reason, checks = checks, checked_at = last_checks }
     return
   end
   if res.status ~= 200 then
-    state.github = { at = now, unavailable = "unavailable" }
+    state.github = { at = now, unavailable = "unavailable", checks = checks, checked_at = last_checks }
     return
   end
   local ok, list = pcall(json.decode, res.body)
   if not ok or type(list) ~= "table" then
-    state.github = { at = now, unavailable = "invalid response" }
+    state.github = { at = now, unavailable = "invalid response", checks = checks, checked_at = last_checks }
     return
   end
   local rows = {}
@@ -468,11 +593,62 @@ local function fetch_github()
           title = pr_title(pr.title),
           draft = pr.draft == true,
           url = pull_url(nwo, number),
+          sha = pull_sha(pr),
         }
       end
     end
   end
-  state.github = { at = now, rows = rows }
+  if settings.github_checks then
+    for _, row in ipairs(rows) do
+      local cached = checks[row.number]
+      if cached and row.sha and cached.sha == row.sha then
+        row.check_tag = cached.tag
+      end
+    end
+  end
+  local checked_at = last_checks
+  if settings.github_checks and #rows > 0 and (last_checks < 0 or now - last_checks >= GITHUB_CHECKS_TTL_MS) then
+    local updated = {}
+    local fetched = 0
+    for _, row in ipairs(rows) do
+      local cached = checks[row.number]
+      if row.sha and fetched < GITHUB_CHECKS_MAX then
+        fetched = fetched + 1
+        -- Public commit-status endpoint only: no token/auth header, no provided URL.
+        -- The SHA and repo slug are validated/derived above; response state is mapped
+        -- to a fixed tag and every failure leaves the tag absent (cached last-good only).
+        local res2 = gvim.http.get(
+          GITHUB_API .. "/repos/" .. nwo .. "/commits/" .. row.sha .. "/status",
+          { timeout_ms = GITHUB_CHECK_TIMEOUT_MS }
+        )
+        local tag = nil
+        if res2 and res2.status == 200 then
+          local ok2, data = pcall(json.decode, res2.body)
+          if ok2 and type(data) == "table" then
+            tag = github_check_tag(data.state)
+          end
+        end
+        if tag then
+          updated[row.number] = { sha = row.sha, tag = tag }
+          row.check_tag = tag
+        elseif cached and cached.sha == row.sha then
+          updated[row.number] = cached
+          row.check_tag = cached.tag
+        end
+      elseif cached and row.sha and cached.sha == row.sha then
+        updated[row.number] = cached
+        row.check_tag = cached.tag
+      end
+    end
+    checks = updated
+    checked_at = now
+  end
+  state.github = {
+    at = now,
+    rows = rows,
+    checks = settings.github_checks and checks or nil,
+    checked_at = checked_at,
+  }
 end
 
 -- Weather (opt-in) --------------------------------------------------------
@@ -940,6 +1116,9 @@ local function build_rows(inner)
     else
       for i, pr in ipairs(gh.rows) do
         local label = "#" .. tostring(pr.number)
+        if settings.github_checks and pr.check_tag and pr.check_tag ~= "" then
+          label = label .. " " .. pr.check_tag
+        end
         local title = pr.draft and ("draft " .. pr.title) or pr.title
         local target = "dashboard.click_pr_" .. i
         action_row(label, title, { kind = "action", action = target, target = target })
@@ -1380,7 +1559,9 @@ local function refresh(force)
       state.weather = { at = at, unavailable = t("weather.unavailable") }
     end
   end
-  if settings.github_prs and (force or not state.github or at - (state.github.at or 0) > GITHUB_TTL_MS) then
+  -- GitHub has its own TTL even for an explicit refresh: the unauthenticated REST
+  -- budget must not be spent by rapid dashboard open/close cycles.
+  if settings.github_prs and (not state.github or at - (state.github.at or 0) > GITHUB_TTL_MS) then
     local ok, err = pcall(fetch_github)
     if not ok then
       gvim.log.debug("dashboard: github: " .. tostring(err))

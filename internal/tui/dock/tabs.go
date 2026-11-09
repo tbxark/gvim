@@ -156,7 +156,7 @@ func (t *Tabs) tabBaseLabels() []string {
 			name = combineTabTitle(command, p.TitleText())
 		}
 		if name == "" {
-			name = "Terminal " + strconv.Itoa(i+1)
+			name = dockTextVars("gvim.dock.title_numbered", "Terminal %{number}", map[string]any{"number": i + 1})
 		}
 		out[i] = name
 	}
@@ -205,12 +205,14 @@ func combineTabTitle(command, osc string) string {
 	return command + " " + "\u2014" + " " + osc
 }
 
-// cleanTabTitle strips control characters a title could carry into the strip and
-// trims it. The grid drops controls when painting, but the hit map must measure
-// the same text, so titles are cleaned in one place.
+// cleanTabTitle strips control and Cf format characters (bidi overrides/isolates,
+// zero-width/direction marks, BOMs, soft hyphens) a title or launch name could carry
+// into the strip, and trims it; combining marks are readable text and stay. The grid
+// drops controls when painting, but the hit map must measure the same text, so titles
+// are cleaned in one place.
 func cleanTabTitle(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r
@@ -264,7 +266,7 @@ func (t *Tabs) stripLabel(i int) string {
 // currentName is the active tab's label.
 func (t *Tabs) currentName() string {
 	if len(t.tabs) == 0 {
-		return "Terminal"
+		return dockText("gvim.dock.title", "Terminal")
 	}
 	return t.tabLabel(t.active)
 }
@@ -610,10 +612,31 @@ func (t *Tabs) Exited() bool { p := t.Active(); return p != nil && p.Exited() }
 // launch argv's program; "" for a plain shell), how the process ended, and
 // whether the restart rejoins an agent conversation.
 type RestartInfo struct {
-	Program      string
-	ExitCode     int
-	ExitKnown    bool
-	ResumesAgent bool
+	// Program is the name the indicator displays: the last polled OS foreground
+	// process when the local poll had one, else the recorded resume/launch argv
+	// basename (both bounded), and "" for a plain shell that never reported a process.
+	Program string
+	// ProgramFromForeground reports that Program is the real foreground process name
+	// captured by the bounded async poll, not the recorded launch argv fallback.
+	ProgramFromForeground bool
+	ExitCode              int
+	ExitKnown             bool
+	ResumesAgent          bool
+}
+
+// maxRestartProgramRunes is the display bound of the restart indicator's program
+// name (the foreground poll's own bound is 64 runes; this keeps a hand-written or
+// old record's argv basename from growing the status element without limit).
+const maxRestartProgramRunes = 64
+
+// boundRestartProgram cleans and rune-bounds one restart program name.
+func boundRestartProgram(name string) string {
+	name = cleanTabTitle(name)
+	runes := []rune(name)
+	if len(runes) > maxRestartProgramRunes {
+		name = string(runes[:maxRestartProgramRunes])
+	}
+	return name
 }
 
 // ExitedRestartInfo returns the restart description of the active tab while its
@@ -629,11 +652,19 @@ func (t *Tabs) ExitedRestartInfo() (RestartInfo, bool) {
 	info := RestartInfo{ExitCode: p.exitCode, ExitKnown: p.exitKnown}
 	launch := p.Launch()
 	info.ResumesAgent = t.effects.ResumeAgents && len(launch.ResumeArgv) > 0
+	if fg := p.lastForegroundName(); fg != "" {
+		// The OS poll saw the real foreground process before it died: name that
+		// (bounded), even when the launch record would name a wrapper.
+		info.Program, info.ProgramFromForeground = boundRestartProgram(fg), true
+		return info, true
+	}
 	argv := launch.ResumeArgv
 	if len(argv) == 0 {
 		argv = launch.Argv
 	}
-	info.Program = restartProgramName(argv)
+	// Honest degradation: no foreground poll (remote/Windows/restored/never read or
+	// a failed last read) falls back to the recorded program, then plain-shell label.
+	info.Program = boundRestartProgram(restartProgramName(argv))
 	return info, true
 }
 

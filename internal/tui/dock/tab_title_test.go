@@ -124,17 +124,37 @@ func TestTabTitleDuplicateAndStripWidth(t *testing.T) {
 func TestCombineTabTitleUnit(t *testing.T) {
 	t.Parallel()
 	tests := map[[2]string]string{
-		{"python3", "root@host: ~/proj"}: "python3 — root@host: ~/proj",
-		{"vim", "file - VIM"}:            "file - VIM",
-		{"Vim", "file - vim"}:            "file - vim",
-		{"bash", ""}:                     "bash",
-		{"", "root@host: ~/proj"}:        "root@host: ~/proj",
-		{"", ""}:                         "",
-		{"bash", "  "}:                   "bash",
+		{"python3", "root@host: ~/proj"}:       "python3 — root@host: ~/proj",
+		{"vim", "file - VIM"}:                  "file - VIM",
+		{"Vim", "file - vim"}:                  "file - vim",
+		{"bash", ""}:                           "bash",
+		{"", "root@host: ~/proj"}:              "root@host: ~/proj",
+		{"", ""}:                               "",
+		{"bash", "  "}:                         "bash",
+		{"bash", "\u202Eevil\u202C\u200Bzero"}: "bash — evilzero",
+		{"\u2066cmd\u2069", "cafe\u0301"}:      "cmd — cafe\u0301",
 	}
 	for in, want := range tests {
 		if got := combineTabTitle(in[0], in[1]); got != want {
 			t.Errorf("combineTabTitle(%q, %q) = %q, want %q", in[0], in[1], got, want)
 		}
+	}
+}
+
+// TestTabLabelStripsFormatCharacters covers the restored tab-label path too: the
+// recorded OSC title and launch command pass through the shared cleaner before the
+// strip paints/measures them, so bidi/zero-width characters cannot spoof a label.
+func TestTabLabelStripsFormatCharacters(t *testing.T) {
+	t.Parallel()
+	tabs := titleTabs(t, []terminal.SavedTab{{
+		Open: true, Rows: []string{"x"},
+		Title: "safe\u202Eevil\u202C\u200Bzero",
+	}})
+	label := tabs.stripLabel(0)
+	if strings.ContainsAny(label, "\u202a\u202b\u202c\u202d\u202e\u200b\u200c\u200d\u2066\u2067\u2068\u2069\ufeff") {
+		t.Fatalf("tab label kept a Cf format character: %q", label)
+	}
+	if !strings.Contains(label, "safeevilzero") {
+		t.Fatalf("tab label = %q, want the readable title text", label)
 	}
 }

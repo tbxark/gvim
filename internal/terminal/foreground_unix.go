@@ -154,16 +154,11 @@ func psComm(pgid int) string {
 }
 
 // sanitizeForegroundProcessName cleans an untrusted process name before it can
-// reach a tab label or the i18n chrome: controls/invalid UTF-8 are dropped, outer
-// space is trimmed and the name is bounded to 64 runes.
+// reach a tab label or the i18n chrome: Cc controls, Cf format characters (bidi/
+// zero-width spoofing) and invalid UTF-8 are dropped, outer space is trimmed and the
+// name is bounded to 64 runes; combining marks are kept as readable text.
 func sanitizeForegroundProcessName(name string) string {
-	name = strings.ToValidUTF8(name, "")
-	name = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return -1
-		}
-		return r
-	}, name)
+	name = cleanLabelText(name)
 	name = strings.TrimSpace(name)
 	const maxRunes = 64
 	if runes := []rune(name); len(runes) > maxRunes {

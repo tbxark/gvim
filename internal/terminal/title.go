@@ -33,18 +33,25 @@ func (s *Session) Title() string {
 	return s.title
 }
 
-// CleanTitle strips control characters and bounds a terminal title on a rune
-// boundary. It is the one place a title becomes safe to keep, paint, persist or
-// restore (restore.LoadTerminal and the dock use it too).
-func CleanTitle(title string) string {
-	// Drop invalid UTF-8 bytes rather than letting them become replacement runes.
-	title = strings.ToValidUTF8(title, "")
-	title = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+// cleanLabelText removes invalid UTF-8 and the runes a hostile child/process can use to
+// spoof or corrupt a tab label: Cc controls and Cf format characters (bidi overrides/
+// isolates, zero-width/direction marks, BOMs, soft hyphens). Combining marks are kept:
+// they are readable text rather than formatting controls, so decomposed accents survive.
+func cleanLabelText(text string) string {
+	text = strings.ToValidUTF8(text, "")
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r
-	}, title)
+	}, text)
+}
+
+// CleanTitle strips control/format characters and bounds a terminal title on a rune
+// boundary. It is the one place a title becomes safe to keep, paint, persist or restore
+// (restore.LoadTerminal and the dock use it too).
+func CleanTitle(title string) string {
+	title = cleanLabelText(title)
 	title = strings.TrimSpace(title)
 	if utf8.RuneCountInString(title) <= MaxTitleRunes {
 		return title

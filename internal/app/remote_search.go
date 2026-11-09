@@ -11,10 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/tbxark/gvim/authority"
@@ -327,14 +327,11 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		}
 		return true
 	}
-	for _, line := range strings.Split(string(res.Stdout), "\n") {
-		if line == "" || cancelled() {
+	for _, hit := range parseRemoteSearchOutput(tool, res.Stdout) {
+		if cancelled() {
 			break
 		}
-		rel, lineNo, lineText, byteCol, ok := parseRemoteGrepLine(tool, line)
-		if !ok {
-			continue
-		}
+		rel, lineNo, lineText, byteCol := hit.rel, hit.line, hit.text, hit.byteCol
 		if scope != nil && !scope.allows(rel) {
 			continue
 		}
@@ -719,18 +716,24 @@ func walkedRemotePathAllowed(p string) bool {
 // remoteRelPath turns an absolute remote buffer path into a project-relative slash path,
 // rejecting paths outside root and the root itself.
 func remoteRelPath(abs, root string) (string, bool) {
+	if abs == "" || !utf8.ValidString(abs) || strings.ContainsRune(abs, 0) {
+		return "", false
+	}
 	clean := path.Clean(abs)
 	cleanRoot := path.Clean(root)
+	if !strings.HasPrefix(clean, "/") {
+		return "", false
+	}
 	if cleanRoot == "/" {
-		if !strings.HasPrefix(clean, "/") || clean == "/" {
+		if clean == "/" {
 			return "", false
 		}
-		return strings.TrimPrefix(clean, "/"), true
+		return cleanRemoteRel(strings.TrimPrefix(clean, "/"))
 	}
 	if clean == cleanRoot || !strings.HasPrefix(clean, cleanRoot+"/") {
 		return "", false
 	}
-	return strings.TrimPrefix(clean, cleanRoot+"/"), true
+	return cleanRemoteRel(strings.TrimPrefix(clean, cleanRoot+"/"))
 }
 
 // remoteOpenSources collects the open-buffer snapshots that belong to the AllFiles scope:
@@ -766,7 +769,11 @@ func remoteOpenSources(req searchpanel.SearchRequest, root string, allowed map[s
 // remoteSourceMatches finds a buffer snapshot's matches with the same local search engine as
 // the local project search; it does no IO and does not consult the remote file.
 func remoteSourceMatches(text string, q search.Query) []searchpanel.Match {
-	b := buffer.New(text)
+	// Display controls/format characters never reach the panel. Searching the clean text
+	// keeps Col/Len in the same coordinates as the painted line (a query containing a
+	// stripped character no longer matches; readable queries are unaffected).
+	clean := cleanRemoteDisplayText(text)
+	b := buffer.New(clean)
 	found, err := search.Find(b, q)
 	if err != nil {
 		return nil
@@ -794,7 +801,9 @@ func remoteAllowedFiles(files []string) map[string]bool {
 	}
 	out := make(map[string]bool, len(files))
 	for _, f := range files {
-		out[strings.TrimPrefix(f, "./")] = true
+		if clean, ok := cleanRemoteRel(f); ok {
+			out[clean] = true
+		}
 	}
 	return out
 }
@@ -908,7 +917,7 @@ func (s *remoteSearch) runBatched(ctx context.Context, tool string, req searchpa
 func remoteSearchArgvWithPaths(tool string, req searchpanel.SearchRequest, paths []string) []string {
 	switch tool {
 	case "rg":
-		argv := []string{"rg", "--vimgrep", "--no-heading", "--color", "never", "--no-messages"}
+		argv := []string{"rg", "--vimgrep", "--null", "--no-heading", "--color", "never", "--no-messages"}
 		if !req.Options.CaseSensitive {
 			argv = append(argv, "-i")
 		}
@@ -921,7 +930,7 @@ func remoteSearchArgvWithPaths(tool string, req searchpanel.SearchRequest, paths
 		argv = append(argv, "-e", req.Query, "--")
 		return append(argv, paths...)
 	default:
-		argv := []string{"grep", "-r", "-n", "-I", "--color=never"}
+		argv := []string{"grep", "-r", "-n", "-I", "--null", "--color=never"}
 		for _, dir := range remoteGrepSkipDirs {
 			argv = append(argv, "--exclude-dir="+dir)
 		}
@@ -952,7 +961,7 @@ func remoteSearchArgvWithPaths(tool string, req searchpanel.SearchRequest, paths
 func remoteSearchArgv(tool string, req searchpanel.SearchRequest, widen bool, roots []string) []string {
 	switch tool {
 	case "rg":
-		argv := []string{"rg", "--vimgrep", "--no-heading", "--color", "never", "--no-messages"}
+		argv := []string{"rg", "--vimgrep", "--null", "--no-heading", "--color", "never", "--no-messages"}
 		if !req.Options.CaseSensitive {
 			argv = append(argv, "-i")
 		}
@@ -971,7 +980,7 @@ func remoteSearchArgv(tool string, req searchpanel.SearchRequest, widen bool, ro
 		argv = append(argv, "-e", req.Query)
 		return remoteSearchRoots(argv, roots)
 	default:
-		argv := []string{"grep", "-r", "-n", "-I", "--color=never"}
+		argv := []string{"grep", "-r", "-n", "-I", "--null", "--color=never"}
 		for _, dir := range remoteGrepSkipDirs {
 			argv = append(argv, "--exclude-dir="+dir)
 		}
@@ -1005,39 +1014,139 @@ func remoteSearchRoots(argv []string, roots []string) []string {
 	return argv
 }
 
-// remoteGrepLine matches both rg's file:line:byte-column:text and grep's file:line:text,
-// where the path may itself hold colons.
-var (
-	remoteRGLine       = regexp.MustCompile("^(.+?):([0-9]+):([0-9]+):(.*)$")
-	remoteGrepTextLine = regexp.MustCompile("^(.+?):([0-9]+):(.*)$")
-)
+// remoteSearchHit is one parsed tool record: the NUL-terminated file path, the
+// line/column and the matched line text.
+type remoteSearchHit struct {
+	rel     string
+	line    int
+	byteCol int
+	text    string
+}
 
-// parseRemoteGrepLine splits one output line. byteCol is 0 for grep (no column printed).
-func parseRemoteGrepLine(tool, line string) (rel string, lineNo int, text string, byteCol int, ok bool) {
+// cleanRemoteRel normalizes a tool- or snapshot-supplied project-relative path for the
+// remote root. It rejects absolute paths, NUL/invalid UTF-8/control characters, and any
+// path that escapes the root after cleaning (.., empty, .). A colon is legal in a Unix
+// file name and is kept: the NUL-delimited tool output, not a colon split, delimits it.
+func cleanRemoteRel(rel string) (string, bool) {
+	rel = strings.TrimPrefix(rel, "./")
+	if rel == "" || !utf8.ValidString(rel) || strings.ContainsRune(rel, 0) {
+		return "", false
+	}
+	for _, r := range rel {
+		if r < 0x20 || r == 0x7f {
+			return "", false
+		}
+	}
+	if strings.HasPrefix(rel, "/") {
+		return "", false
+	}
+	clean := path.Clean(rel)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", false
+	}
+	return clean, true
+}
+
+// parseRemoteSearchOutput parses the tool stream. Both tools print each match as a file
+// path followed by a NUL byte and then the line/column/text fields, so a remote file name
+// containing a newline or colon cannot invent a different path or a second match. Output
+// without a NUL record delimiter is ignored rather than guessed at; the old colon-parsed
+// format is exactly the spoofable one.
+func parseRemoteSearchOutput(tool string, stdout []byte) []remoteSearchHit {
+	var hits []remoteSearchHit
+	rest := string(stdout)
+	for {
+		nul := strings.IndexByte(rest, 0)
+		if nul <= 0 {
+			return hits
+		}
+		rel := rest[:nul]
+		rest = rest[nul+1:]
+		end := strings.IndexByte(rest, '\n')
+		var fields string
+		if end < 0 {
+			fields = rest
+			rest = ""
+		} else {
+			fields = rest[:end]
+			rest = rest[end+1:]
+		}
+		clean, ok := cleanRemoteRel(rel)
+		if !ok {
+			continue
+		}
+		hit, ok := parseRemoteFields(tool, clean, fields)
+		if ok {
+			hits = append(hits, hit)
+		}
+	}
+}
+
+// parseRemoteFields parses the part after the NUL: rg's line:column:text (vimgrep) or
+// grep's line:text. Only the numeric prefixes are split, so the matched text may itself
+// contain colons; text with a newline cannot occur because the tools emit line records.
+func parseRemoteFields(tool, rel, fields string) (remoteSearchHit, bool) {
 	if tool == "rg" {
-		m := remoteRGLine.FindStringSubmatch(line)
-		if m == nil {
-			return "", 0, "", 0, false
+		lineStr, rest, ok := strings.Cut(fields, ":")
+		if !ok {
+			return remoteSearchHit{}, false
 		}
-		n, err := strconv.Atoi(m[2])
-		if err != nil {
-			return "", 0, "", 0, false
+		colStr, text, ok := strings.Cut(rest, ":")
+		if !ok {
+			return remoteSearchHit{}, false
 		}
-		col, err := strconv.Atoi(m[3])
-		if err != nil {
-			return "", 0, "", 0, false
+		lineNo, err := strconv.Atoi(lineStr)
+		if err != nil || lineNo <= 0 {
+			return remoteSearchHit{}, false
 		}
-		return strings.TrimPrefix(m[1], "./"), n, m[4], col, true
+		byteCol, err := strconv.Atoi(colStr)
+		if err != nil || byteCol <= 0 {
+			return remoteSearchHit{}, false
+		}
+		return remoteSearchHit{rel: rel, line: lineNo, byteCol: byteCol, text: text}, true
 	}
-	m := remoteGrepTextLine.FindStringSubmatch(line)
-	if m == nil {
-		return "", 0, "", 0, false
+	lineStr, text, ok := strings.Cut(fields, ":")
+	if !ok {
+		return remoteSearchHit{}, false
 	}
-	n, err := strconv.Atoi(m[2])
-	if err != nil {
-		return "", 0, "", 0, false
+	lineNo, err := strconv.Atoi(lineStr)
+	if err != nil || lineNo <= 0 {
+		return remoteSearchHit{}, false
 	}
-	return strings.TrimPrefix(m[1], "./"), n, m[3], 0, true
+	return remoteSearchHit{rel: rel, line: lineNo, text: text}, true
+}
+
+// cleanRemoteDisplayTextWithMap makes match text safe to paint and returns, for every raw
+// rune position (and one past the end), its position in the clean text. It removes invalid
+// UTF-8 bytes and the Cc (control) and Cf (format) categories, which a hostile remote file
+// could use for terminal escape/look-alike/bidi spoofing; tab and newline are kept because
+// they are the normal semantics of a displayed line, and all other readable runes are
+// unchanged. The map lets a match found against the raw line keep its display columns.
+func cleanRemoteDisplayTextWithMap(s string) (string, []int) {
+	runes := make([]rune, 0, len(s))
+	mapping := make([]int, 0, utf8.RuneCountInString(s)+1)
+	clean := 0
+	for len(s) > 0 {
+		mapping = append(mapping, clean)
+		r, size := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && size == 1 {
+			s = s[1:]
+			continue
+		}
+		s = s[size:]
+		if r == '\t' || r == '\n' || (!unicode.Is(unicode.Cc, r) && !unicode.Is(unicode.Cf, r)) {
+			runes = append(runes, r)
+			clean++
+		}
+	}
+	mapping = append(mapping, clean)
+	return string(runes), mapping
+}
+
+// cleanRemoteDisplayText is cleanRemoteDisplayTextWithMap without the column map.
+func cleanRemoteDisplayText(s string) string {
+	clean, _ := cleanRemoteDisplayTextWithMap(s)
+	return clean
 }
 
 // remoteLineMatches finds the matches on one output line with the same search engine the
@@ -1050,30 +1159,67 @@ func remoteLineMatches(q search.Query, lineNo int, line string, byteCol, total, 
 	if remaining <= 0 {
 		return nil
 	}
+	// The engine matches the raw line, then the match span is mapped through the display
+	// sanitizer: a control/format rune removed before a match must not shift the painted
+	// highlight (col/len are display-rune coordinates, the same as Text).
+	clean, mapping := cleanRemoteDisplayTextWithMap(line)
 	b := buffer.New(line)
 	matches, err := search.Find(b, q)
 	var out []searchpanel.Match
+	mapIndex := func(i int) int {
+		if i < 0 {
+			return 0
+		}
+		if i >= len(mapping) {
+			return mapping[len(mapping)-1]
+		}
+		return mapping[i]
+	}
 	if err == nil {
 		for _, m := range matches {
 			if len(out) >= remaining {
 				break
 			}
+			startCol, endCol := mapIndex(m.Start.Col), mapIndex(m.End.Col)
+			if endCol <= startCol {
+				// The whole match was made of stripped characters; there is no readable span
+				// to paint.
+				continue
+			}
 			out = append(out, searchpanel.Match{
 				Line:    lineNo,
-				Col:     m.Start.Col + 1,
-				Len:     matchRunes(b, m),
-				Text:    line,
-				EndLine: m.End.Line + 1,
-				EndCol:  m.End.Col + 1,
+				Col:     startCol + 1,
+				Len:     endCol - startCol,
+				Text:    clean,
+				EndLine: lineNo,
+				EndCol:  endCol + 1,
 			})
 		}
 	}
 	if len(out) == 0 {
+		// The synthetic fallback has no engine span to map, so its column/length must be
+		// clamped to the sanitized text itself. An entirely stripped line (clean rune
+		// count 0) or a query made only of stripped characters has no readable span:
+		// drop the fallback instead of reporting a highlight outside Text.
+		displayQuery := cleanRemoteDisplayText(q.Text)
+		cleanCount := utf8.RuneCountInString(clean)
+		if cleanCount == 0 || utf8.RuneCountInString(displayQuery) == 0 {
+			return nil
+		}
 		col := 1
 		if byteCol > 1 && byteCol-1 <= len(line) {
-			col = utf8.RuneCountInString(line[:byteCol-1]) + 1
+			col = utf8.RuneCountInString(cleanRemoteDisplayText(line[:byteCol-1])) + 1
 		}
-		out = append(out, searchpanel.Match{Line: lineNo, Col: col, Len: len([]rune(q.Text)), Text: line})
+		if col < 1 {
+			col = 1
+		} else if col > cleanCount {
+			col = cleanCount
+		}
+		length := max(utf8.RuneCountInString(displayQuery), 1)
+		if room := cleanCount - col + 1; length > room {
+			length = room
+		}
+		out = append(out, searchpanel.Match{Line: lineNo, Col: col, Len: length, Text: clean})
 	}
 	return out
 }
@@ -1138,7 +1284,7 @@ func (g *remoteGitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResu
 	if limit <= 0 {
 		limit = 100
 	}
-	text, code, err := runGitGrepOneShot(g.one, repo, gitGrepArgv(req), extraEnv, gitGrepTimeout)
+	text, code, err := runGitGrepOneShot(g.one, repo, gitGrepNullArgv(req), extraEnv, gitGrepTimeout)
 	if err != nil {
 		return out, err
 	}
@@ -1148,20 +1294,113 @@ func (g *remoteGitGrep) GitGrep(req searchpanel.GitRequest) (searchpanel.GitResu
 	if code == 1 || text == "" {
 		return out, nil
 	}
-	return parseGitGrepOutput(text, limit, len([]rune(req.Query)), func(rel string) string {
+	return parseGitGrepNullOutput(text, limit, len([]rune(req.Query)), func(rel string) string {
 		return joinRemotePath(repo, rel)
 	}), nil
+}
+
+// gitGrepNullArgv is gitGrepArgv with git grep's NUL filename/field output: the remote
+// adapter prints path NUL line NUL column NUL text, so a hostile remote file name (newline,
+// colon, ...) cannot spoof a different path or a second field. The local adapter keeps
+// the colon format because its output never crosses the authority boundary.
+func gitGrepNullArgv(req searchpanel.GitRequest) []string {
+	base := gitGrepArgv(req)
+	if len(base) < 4 || base[3] != "grep" {
+		return base
+	}
+	out := append([]string(nil), base[:4]...)
+	out = append(out, "--null")
+	return append(out, base[4:]...)
+}
+
+// parseGitGrepNullOutput parses the remote git grep NUL format into whole-file matches,
+// at most limit. Every path goes through cleanRemoteRel; abs returns "" for a path that
+// escapes the repository, and such a record is dropped.
+func parseGitGrepNullOutput(text string, limit, matchLen int, abs func(rel string) string) searchpanel.GitResult {
+	var out searchpanel.GitResult
+	byPath := map[string]int{}
+	total := 0
+	rest := text
+	for total < limit {
+		p := strings.IndexByte(rest, 0)
+		if p <= 0 {
+			break
+		}
+		relRaw := rest[:p]
+		rest = rest[p+1:]
+		l := strings.IndexByte(rest, 0)
+		if l < 0 {
+			break
+		}
+		lineStr := rest[:l]
+		rest = rest[l+1:]
+		c := strings.IndexByte(rest, 0)
+		if c < 0 {
+			break
+		}
+		colStr := rest[:c]
+		rest = rest[c+1:]
+		nl := strings.IndexByte(rest, '\n')
+		var content string
+		if nl < 0 {
+			content = rest
+			rest = ""
+		} else {
+			content = rest[:nl]
+			rest = rest[nl+1:]
+		}
+		rel, ok := cleanRemoteRel(relRaw)
+		if !ok {
+			continue
+		}
+		path := abs(rel)
+		if path == "" {
+			continue
+		}
+		lineNo, errLine := strconv.Atoi(strings.TrimSpace(lineStr))
+		col, errCol := strconv.Atoi(strings.TrimSpace(colStr))
+		if errLine != nil || errCol != nil || lineNo <= 0 || col <= 0 {
+			continue
+		}
+		rawContent := strings.TrimRight(content, "\r")
+		display := cleanRemoteDisplayText(rawContent)
+		displayCol := col
+		if col > 1 && col-1 <= len(rawContent) {
+			// git grep --column is a byte column; the displayed line is sanitized, so
+			// convert the prefix to its display-rune column.
+			displayCol = utf8.RuneCountInString(cleanRemoteDisplayText(rawContent[:col-1])) + 1
+		}
+		length := max(matchLen, 1)
+		if room := utf8.RuneCountInString(display) - displayCol + 1; room > 0 && length > room {
+			length = room
+		}
+		idx, ok := byPath[rel]
+		if !ok {
+			idx = len(out.Files)
+			byPath[rel] = idx
+			out.Files = append(out.Files, searchpanel.FileMatches{Path: path, Name: rel})
+		}
+		out.Files[idx].Matches = append(out.Files[idx].Matches, searchpanel.Match{
+			Line: lineNo,
+			Col:  displayCol,
+			Len:  length,
+			Text: display,
+		})
+		total++
+	}
+	return out
 }
 
 // joinRemotePath joins a slash-separated remote relative path onto a remote directory,
 // keeping remote (POSIX) separators and an absolute path absolute.
 func joinRemotePath(root, rel string) string {
-	rel = strings.TrimPrefix(rel, "./")
-	if strings.HasPrefix(rel, "/") {
-		return rel
+	clean, ok := cleanRemoteRel(rel)
+	if !ok {
+		return ""
 	}
 	if root == "" || root == "/" {
-		return "/" + rel
+		return "/" + clean
 	}
-	return strings.TrimSuffix(root, "/") + "/" + rel
+	cleanRoot := path.Clean(root)
+	return strings.TrimSuffix(cleanRoot, "/") + "/" + clean
 }

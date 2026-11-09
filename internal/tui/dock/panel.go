@@ -83,9 +83,10 @@ type Panel struct {
 	history    *searchHistoryStore
 	ownHistory searchHistoryStore
 	// fgName is the cached foreground process name of a local shell, refreshed by
-	// the bounded poll chain in foreground.go. Empty for a remote/unsupported
-	// terminal, a restored tab or an exited shell (the label then falls back to the
-	// launch record and then the OSC title).
+	// the bounded poll chain in foreground.go. It is kept across an exit: the tab
+	// label ignores it when exited, but the restart indicator uses the last polled
+	// program (the real foreground process) and falls back to the launch record.
+	// Empty for a remote/unsupported terminal or a restored tab.
 	fgName string
 	// hostBlurred is the outer terminal window's focus state (true when the OS
 	// window is not focused). The child gets focus-in only when the dock has the
@@ -564,6 +565,9 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		p.gen++
 		p.term = msg.term
+		// A new shell has its own foreground: forget the old program so the restart
+		// indicator cannot name a process that belonged to the previous generation.
+		p.fgName = ""
 		p.live = true
 		p.exited = false
 		p.notice = ""
@@ -617,7 +621,9 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			p.exitCode, p.exitKnown = msg.code, msg.codeOK
 			p.exitMarker = true
 			p.termFocusSet = false
-			p.fgName = ""
+			// fgName is deliberately kept: it is the last real foreground process and
+			// the restart indicator names it (bounded/cleaned); the tab label ignores it
+			// once exited and falls back to the launch record/OSC title.
 			p.focus = false
 			p.queue = nil
 			p.scroll = scrollState{}

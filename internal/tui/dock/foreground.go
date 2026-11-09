@@ -95,6 +95,14 @@ func (p *Panel) applyForegroundTick(msg foregroundPollTickMsg) tea.Cmd {
 	return p.foregroundPollCmd()
 }
 
+// lastForegroundName is the most recent polled foreground process name, kept after
+// the shell exits for the restart indicator. It is empty for a restored tab, a
+// remote/unsupported transport, or a poll that never succeeded, so the indicator
+// honestly falls back to the recorded launch/resume program and then the plain
+// "Restart terminal" label. The name was sanitized/bounded by the terminal poll and
+// is cleaned/bounded again where it is displayed.
+func (p *Panel) lastForegroundName() string { return cleanTabTitle(p.fgName) }
+
 // foregroundName is the cached live command name for a tab label. It is empty for
 // a restored/exited tab, a remote session or an unsupported platform, so the label
 // falls back to the recorded launch program and then the OSC title.

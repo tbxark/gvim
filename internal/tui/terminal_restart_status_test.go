@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/dock"
 	"github.com/tbxark/gvim/internal/tui/frame"
+	"github.com/tbxark/gvim/internal/tui/style"
+	"github.com/tbxark/gvim/theme"
 )
 
 // waitDock pumps the dock's commands until cond holds or a generous deadline
@@ -103,8 +106,8 @@ func TestTerminalRestartStatusText(t *testing.T) {
 }
 
 // TestTerminalRestartHover checks the hover hit area is the clickable segment:
-// moving onto it underlines the painted run, moving off clears it, and the click
-// still restarts.
+// moving onto it underlines the painted run (a theme adds Fresh's error-hover
+// colours; a zero theme has none), moving off clears it, and the click restarts.
 func TestTerminalRestartHover(t *testing.T) {
 	t.Parallel()
 	m, starter := exitedDockModel(t, 4, true)
@@ -122,8 +125,8 @@ func TestTerminalRestartHover(t *testing.T) {
 	}
 	g := m.paint()
 	cell := g.At(restart.X, l.StatusY)
-	if !cell.Style.Underline || !cell.Style.Bold {
-		t.Fatalf("hovered run style = %+v, want underline+bold", cell.Style)
+	if !cell.Style.Underline {
+		t.Fatalf("hovered run style = %+v, want an underline", cell.Style)
 	}
 	m.Update(tea.MouseMotionMsg{X: 2, Y: 2})
 	if m.statusRestartHover {
@@ -208,5 +211,86 @@ func TestRestoredRestartClickAndKeyboardParity(t *testing.T) {
 	})
 	if len(keyStarter.terms) != 1 || keyModel.dock.Exited() || !keyModel.dock.Running() {
 		t.Fatalf("keyboard restart: shells=%d exited=%v running=%v", len(keyStarter.terms), keyModel.dock.Exited(), keyModel.dock.Running())
+	}
+}
+
+// TestTerminalRestartStatusNamesForegroundProgram checks the live-exit label names
+// the real OS foreground process captured by the async poll (a plain shell has no
+// recorded program), and that a failed poll read honestly degrades to the plain
+// "Restart terminal" label instead of naming a stale/guessed process.
+func TestTerminalRestartStatusNamesForegroundProgram(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		fgOK bool
+		want string
+	}{
+		{"foreground read", true, "⟳ Restart claude (exit 1)"},
+		{"failed read falls back", false, "⟳ Restart terminal (exit 1)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			term := newFakeTerm()
+			term.fgSupported, term.fgName, term.fgOK = true, "claude", tt.fgOK
+			starter := &shellsStarter{makeTerm: func() *fakeTerm { return term }}
+			m := New(Deps{Editor: newFakeEditor("hello"), Explorer: newFakeTree(3), Keys: dockKeys(), Theme: theme.Theme{}, Clock: testClock})
+			m.SetDock(DockPorts{Starter: starter})
+			m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			openDock(t, m)
+			waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
+			waitDock(t, m, "the first foreground poll", func() bool { return term.fgCalls > 0 })
+			term.exitCode, term.exitOK = 1, true
+			close(term.done)
+			waitDock(t, m, "the dock shell to exit", func() bool { return m.dock.Exited() })
+			if got := m.statusView().TerminalRestart; got != tt.want {
+				t.Fatalf("restart label = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTerminalRestartHoverUsesFreshErrorColors checks the hovered restart element
+// is repainted in Fresh's ERROR hover keys (status_error_indicator_hover_fg/bg,
+// underlined) rather than only underlined, and releasing restores the base colours.
+func TestTerminalRestartHoverUsesFreshErrorColors(t *testing.T) {
+	t.Parallel()
+	th, err := theme.Load("dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	starter := &shellsStarter{}
+	m := New(Deps{Editor: newFakeEditor("hello"), Explorer: newFakeTree(3), Keys: dockKeys(), Theme: th, Clock: testClock})
+	m.SetDock(DockPorts{Starter: starter})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	openDock(t, m)
+	waitDock(t, m, "the dock shell to start", func() bool { return m.dock.Running() })
+	starter.terms[0].exitCode, starter.terms[0].exitOK = 0, true
+	close(starter.terms[0].done)
+	waitDock(t, m, "the dock shell to exit", func() bool { return m.dock.Exited() })
+	restart := restartSegment(t, m)
+	if restart == nil {
+		t.Fatalf("no restart segment: %+v", m.layout().Status)
+	}
+	wantFG := style.Color(th, "ui", "status_error_indicator_hover_fg")
+	wantBG := style.Color(th, "ui", "status_error_indicator_hover_bg")
+	if wantFG == nil || wantBG == nil {
+		t.Fatal("the dark theme lacks the Fresh error hover keys")
+	}
+	l := m.layout()
+	m.Update(tea.MouseMotionMsg{X: restart.X + 1, Y: l.StatusY})
+	cell := m.paint().At(restart.X, l.StatusY)
+	if !cell.Style.Underline {
+		t.Fatalf("hovered restart is not underlined: %+v", cell.Style)
+	}
+	if !reflect.DeepEqual(cell.Style.FG, wantFG) || !reflect.DeepEqual(cell.Style.BG, wantBG) {
+		t.Fatalf("hovered restart colors = fg %v bg %v, want fg %v bg %v", cell.Style.FG, cell.Style.BG, wantFG, wantBG)
+	}
+	m.Update(tea.MouseMotionMsg{X: 2, Y: 2})
+	base := m.paint().At(restart.X, l.StatusY)
+	if base.Style.Underline {
+		t.Fatalf("unhovered restart is still underlined: %+v", base.Style)
+	}
+	if reflect.DeepEqual(base.Style.BG, wantBG) {
+		t.Fatalf("unhovered restart kept the hover background: %+v", base.Style)
 	}
 }

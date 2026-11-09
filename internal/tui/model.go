@@ -3519,8 +3519,10 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 	muted := bar
 	muted.Faint = true
 	// Fresh paints {terminal_restart} with the ERROR role; gvim uses the theme's
-	// error foreground over the bar, and the hovered element takes an underline
-	// (Fresh's Hover::Swap equivalent on a bar with no background to swap).
+	// error foreground over the bar. The hovered element takes Fresh's ERROR hover
+	// keys (repainted/underlined, Hover::Swap) instead of only an underline: the
+	// same label text, which now names the real foreground program when the poll saw
+	// one, in the theme's status_error_indicator_hover_fg on ..._hover_bg.
 	restart := bar
 	if fg := style.Cell(m.styles.DiagError).FG; fg != nil {
 		restart.FG, restart.Bold = fg, true
@@ -3539,7 +3541,14 @@ func (m *Model) paintStatus(g *grid.Grid, l layout) {
 			st = restart
 			if m.statusRestartHover {
 				st.Underline = true
-				st.Bold = true
+				if c := style.Color(m.theme, "ui", "status_error_indicator_hover_fg"); c != nil {
+					st.FG = c
+					st.FGKey = style.KeyIDFor("ui", "status_error_indicator_hover_fg")
+				}
+				if c := style.Color(m.theme, "ui", "status_error_indicator_hover_bg"); c != nil {
+					st.BG = c
+					st.BGKey = style.KeyIDFor("ui", "status_error_indicator_hover_bg")
+				}
 			}
 		case r.Kind == hitStatusPalette:
 			st = palette

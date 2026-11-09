@@ -728,8 +728,10 @@ still loads unchanged.
   plus untracked non-hidden files; the tool therefore never scans ignored or hidden trees,
   so ignored matches cannot consume the output cap or the result limit before candidates.
   Paths follow `--` (a name starting with a dash is a path, not an option), the query stays
-  a single `-e` argument, cancellation and the search timeout stop between batches, and the
-  merged output is capped (8 MiB, truncation flagged). The existing rg/grep regex engine is
+  a single `-e` argument, cancellation and the search timeout stop between batches, and each
+  tool command's output is capped at 8 MiB (truncation flagged); one search may start at most 64
+  batched candidate commands, all within the 20 s search deadline, so the cap is per command and
+  not an 8 MiB total. The existing rg/grep regex engine is
   unchanged: there is no POSIX-ERE prefilter, and every returned line is re-checked by the
   local search engine as before. The candidate filter still drops anything outside the
   scope (untracked hidden files, ignored entries). Nested repositories/submodules are listed

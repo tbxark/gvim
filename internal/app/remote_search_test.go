@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/tbxark/gvim/internal/tui"
 	"github.com/tbxark/gvim/internal/tui/searchpanel"
 	"github.com/tbxark/gvim/plugin/hostos"
+	"github.com/tbxark/gvim/search"
 )
 
 // oneShotCall is one recorded authority one-shot invocation.
@@ -30,6 +32,9 @@ type fakeOneShot struct {
 	mu     sync.Mutex
 	calls  []oneShotCall
 	script func(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error)
+	// rawOutput disables the colon-to-NUL fixture conversion in Run, so a test can feed
+	// the parser exactly the legacy/spoofed bytes it is expected to reject.
+	rawOutput bool
 }
 
 func (f *fakeOneShot) Run(ctx context.Context, argv []string, o hostos.ProcOptions) (hostos.ProcResult, error) {
@@ -43,7 +48,59 @@ func (f *fakeOneShot) Run(ctx context.Context, argv []string, o hostos.ProcOptio
 	if f.script == nil {
 		return hostos.ProcResult{}, errors.New("unexpected remote command")
 	}
-	return f.script(ctx, argv, o)
+	res, err := f.script(ctx, argv, o)
+	if err == nil && !f.rawOutput {
+		res = nullizeToolFixture(argv, res)
+	}
+	return res, err
+}
+
+// nullizeToolFixture converts the simple colon-form fixtures the older tests use into the
+// NUL-delimited format both tools now emit (path NUL line:col:text / path NUL line:text),
+// so the parser is exercised in the shipped format. Tests that want the old bytes set
+// fakeOneShot.rawOutput.
+func nullizeToolFixture(argv []string, res hostos.ProcResult) hostos.ProcResult {
+	if len(argv) == 0 || len(res.Stdout) == 0 || strings.IndexByte(string(res.Stdout), 0) >= 0 {
+		return res
+	}
+	tool := argv[0]
+	if tool == "git" && !slices.Contains(argv, "grep") {
+		return res
+	}
+	if tool != "rg" && tool != "grep" && tool != "git" {
+		return res
+	}
+	lines := strings.Split(string(res.Stdout), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		if tool == "git" {
+			parts := strings.SplitN(line, ":", 4)
+			if len(parts) == 4 {
+				out = append(out, parts[0]+"\x00"+parts[1]+"\x00"+parts[2]+"\x00"+parts[3])
+				continue
+			}
+		} else if tool == "rg" {
+			parts := strings.SplitN(line, ":", 4)
+			if len(parts) == 4 {
+				out = append(out, parts[0]+"\x00"+parts[1]+":"+parts[2]+":"+parts[3])
+				continue
+			}
+		} else {
+			parts := strings.SplitN(line, ":", 3)
+			if len(parts) == 3 {
+				out = append(out, parts[0]+"\x00"+parts[1]+":"+parts[2])
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	if len(out) > 0 {
+		res.Stdout = []byte(strings.Join(out, "\n") + "\n")
+	}
+	return res
 }
 
 func (f *fakeOneShot) recorded() []oneShotCall {
@@ -268,7 +325,7 @@ func TestRemoteGitGrepRunsOnTheHost(t *testing.T) {
 		switch {
 		case strings.Contains(joined, "rev-parse --show-toplevel"):
 			return hostos.ProcResult{Stdout: []byte("/remote/repo\n")}, nil
-		case strings.Contains(joined, "grep -n --column -I"):
+		case strings.Contains(joined, "grep --null -n --column -I"):
 			return hostos.ProcResult{Stdout: []byte("src/x.go:3:5:hit todo\n")}, nil
 		default:
 			return hostos.ProcResult{}, errors.New("unexpected remote command: " + joined)
@@ -1857,5 +1914,433 @@ func TestRemoteSearchSnapshotNoticeSurvivesToolFailure(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].Name != "a.go" {
 		t.Fatalf("files = %+v, want the open snapshot", files)
+	}
+}
+
+// TestCleanRemoteRel normalizes project-relative tool/snapshot paths and rejects every
+// escape form; a colon is legal, a control character is not.
+func TestCleanRemoteRel(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{"a.go", "a.go", true},
+		{"./sub/../a.go", "a.go", true},
+		{"weird:name.go", "weird:name.go", true},
+		{"./x", "x", true},
+		{"", "", false},
+		{".", "", false},
+		{"..", "", false},
+		{"../evil.go", "", false},
+		{"sub/../../evil.go", "", false},
+		{"/etc/passwd", "", false},
+		{"a\nb.go", "", false},
+		{"a\x01b.go", "", false},
+		{"a\x7fb.go", "", false},
+		{"a\x00b.go", "", false},
+		{"inv\xffalid.go", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := cleanRemoteRel(tt.in)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("cleanRemoteRel(%q) = %q, %v; want %q, %v", tt.in, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+// TestParseRemoteSearchOutputRejectsSpoofedRecords checks the NUL-delimited records: a
+// path with a newline/colon or an escape cannot invent a different file or a second
+// match, legacy colon-only output is ignored, and legal colon names and ..-cleaned
+// relative paths still parse.
+func TestParseRemoteSearchOutputRejectsSpoofedRecords(t *testing.T) {
+	// Legacy colon output: must not be guessed at.
+	if hits := parseRemoteSearchOutput("rg", []byte("a.go:1:1:fake\n")); len(hits) != 0 {
+		t.Fatalf("legacy colon output parsed as %+v, want no records", hits)
+	}
+	raw := "../../etc/passwd\x001:1:secret\n" +
+		"evil\nname:1:1:fake\x002:1:todo\n" +
+		"a.go:1:1:fake\nb.go\x003:1:todo spoof\n" +
+		"outer:name.go\x004:5:todo colon\n" +
+		"sub/../clean.go\x006:1:todo clean\n"
+	hits := parseRemoteSearchOutput("rg", []byte(raw))
+	if len(hits) != 2 {
+		t.Fatalf("hits = %+v, want only the two safe records", hits)
+	}
+	if hits[0].rel != "outer:name.go" || hits[0].line != 4 || hits[0].byteCol != 5 || hits[0].text != "todo colon" {
+		t.Errorf("colon-name hit = %+v", hits[0])
+	}
+	if hits[1].rel != "clean.go" || hits[1].line != 6 || hits[1].text != "todo clean" {
+		t.Errorf("cleaned hit = %+v", hits[1])
+	}
+	// grep uses line:text after the NUL.
+	grepRaw := "a.go\x0010:todo grep\n../evil.go\x0011:todo evil\n"
+	hits = parseRemoteSearchOutput("grep", []byte(grepRaw))
+	if len(hits) != 1 || hits[0].rel != "a.go" || hits[0].line != 10 || hits[0].byteCol != 0 || hits[0].text != "todo grep" {
+		t.Fatalf("grep hits = %+v", hits)
+	}
+}
+
+// TestRemoteSearchRejectsSpoofedRemoteFileNames is the end-to-end form: a hostile remote
+// file named with a newline/colon or an escaping path cannot appear as another file in
+// the search list, while an ordinary match still does.
+func TestRemoteSearchRejectsSpoofedRemoteFileNames(t *testing.T) {
+	raw := "../../etc/passwd\x001:1:secret\n" +
+		"evil\nname:1:1:fake\x002:1:todo\n" +
+		"a.go:1:1:fake\nb.go\x003:1:todo spoof\n" +
+		"ok.go\x004:1:todo ok\n"
+	one := &fakeOneShot{rawOutput: true, script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) >= 2 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		return hostos.ProcResult{Stdout: []byte(raw)}, nil
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	names := remoteSearchFileNames(t, collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil)))
+	if got := strings.Join(names, ","); got != "ok.go" {
+		t.Fatalf("files = %v, want only ok.go (no traversal/spoofed b.go)", names)
+	}
+}
+
+// TestRemoteSearchIgnoresLegacyUnnulledOutput checks the shipped parser does not fall back
+// to the spoofable colon format when a remote tool prints it (for example an older tool
+// that ignored --null): the search lists nothing rather than guessing.
+func TestRemoteSearchIgnoresLegacyUnnulledOutput(t *testing.T) {
+	one := &fakeOneShot{rawOutput: true, script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) >= 2 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		return hostos.ProcResult{Stdout: []byte("a.go:1:1:todo a\n../../etc/passwd:1:1:secret\n")}, nil
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	if names := remoteSearchFileNames(t, batches); len(names) != 0 {
+		t.Fatalf("files = %v, want no guessed records from legacy output", names)
+	}
+}
+
+// TestRemoteRelPathRejectsEscapes checks the snapshot-path conversion: it cleans dots for
+// under-root paths and refuses absolute, relative, control-character and escaping inputs.
+func TestRemoteRelPathRejectsEscapes(t *testing.T) {
+	tests := []struct {
+		abs, root, want string
+		ok              bool
+	}{
+		{"/remote/w/sub/../a.go", "/remote/w", "a.go", true},
+		{"/remote/w/./b.go", "/remote/w", "b.go", true},
+		{"/remote/w/../etc/passwd", "/remote/w", "", false},
+		{"/remote/ww/a.go", "/remote/w", "", false},
+		{"/remote/w", "/remote/w", "", false},
+		{"a/../b.go", "/remote/w", "", false},
+		{"/remote/w/a\nb.go", "/remote/w", "", false},
+		{"/x/../y.go", "/", "y.go", true},
+	}
+	for _, tt := range tests {
+		got, ok := remoteRelPath(tt.abs, tt.root)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("remoteRelPath(%q, %q) = %q, %v; want %q, %v", tt.abs, tt.root, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+// TestRemoteAllowedFilesNormalizes checks the panel snapshot's keys are cleaned and
+// escaping entries are dropped, so an untrusted/old snapshot cannot widen the search.
+func TestRemoteAllowedFilesNormalizes(t *testing.T) {
+	got := remoteAllowedFiles([]string{"./a.go", "sub/../b.go", "../evil.go", "/abs.go", "a\nb.go", "ok:name.go"})
+	want := map[string]bool{"a.go": true, "b.go": true, "ok:name.go": true}
+	if len(got) != len(want) {
+		t.Fatalf("allowed = %v, want %v", got, want)
+	}
+	for path := range want {
+		if !got[path] {
+			t.Errorf("allowed lacks %q: %v", path, got)
+		}
+	}
+	for _, bad := range []string{"../evil.go", "/abs.go", "a\nb.go", "sub/../b.go"} {
+		if got[bad] {
+			t.Errorf("allowed contains unsafe key %q", bad)
+		}
+	}
+}
+
+// TestRemoteSearchArgvUsesNullFileDelimiter: both tools are asked for the NUL-delimited
+// file-name form, so the parser never has to split a hostile path on colons.
+func TestRemoteSearchArgvUsesNullFileDelimiter(t *testing.T) {
+	req := searchpanel.SearchRequest{Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles}
+	hasNull := func(argv []string) bool {
+		for _, a := range argv {
+			if a == "--null" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, argv := range [][]string{
+		remoteSearchArgv("rg", req, false, nil),
+		remoteSearchArgv("grep", req, false, nil),
+		remoteSearchArgvWithPaths("rg", req, []string{"a.go"}),
+		remoteSearchArgvWithPaths("grep", req, []string{"a.go"}),
+	} {
+		if !hasNull(argv) {
+			t.Fatalf("argv = %v, want --null", argv)
+		}
+	}
+}
+
+// TestParseGitGrepNullOutputRejectsSpoofedPaths checks the remote git grep NUL format:
+// a path with a newline or an escaping path is dropped, while a legal colon name and a
+// ..-cleaned relative path are kept.
+func TestParseGitGrepNullOutputRejectsSpoofedPaths(t *testing.T) {
+	text := "a.go\x001\x002\x00todo a\n" +
+		"../../etc/passwd\x001\x001\x00evil\n" +
+		"evil\nname\x001\x001\x00spoof\n" +
+		"sub/../clean.go\x003\x004\x00todo clean\n" +
+		"outer:name.go\x005\x006\x00todo colon\n"
+	abs := func(rel string) string {
+		if rel == "" {
+			return ""
+		}
+		return "/repo/" + rel
+	}
+	res := parseGitGrepNullOutput(text, 10, 4, abs)
+	var names []string
+	for _, f := range res.Files {
+		names = append(names, f.Name)
+		if f.Path != "/repo/"+f.Name {
+			t.Errorf("path = %q for %q", f.Path, f.Name)
+		}
+	}
+	want := []string{"a.go", "clean.go", "outer:name.go"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("names = %v, want %v", names, want)
+	}
+}
+
+// TestCleanRemoteDisplayText: match text drops Cc/Cf and invalid UTF-8 bytes before paint,
+// keeping tab/newline semantics and readable characters.
+func TestCleanRemoteDisplayText(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain and tab/newline kept", "hello\tworld\nnext", "hello\tworld\nnext"},
+		{"CJK and emoji kept", "你好🙂", "你好🙂"},
+		{"ANSI escape and BEL removed", "safe\x1b[31mred\x07", "safe[31mred"},
+		{"CSI and OSC controls removed", "a\x9b31mb\x1b]0;title\x07c", "a31mb]0;titlec"},
+		{"bidi and zero-width format removed", "a\u202Eb\u200Bc\u200E", "abc"},
+		{"invalid UTF-8 bytes removed", "a\xffb\xc3", "ab"},
+		{"carriage return removed", "a\rb", "ab"},
+		{"NUL and other Cc removed", "a\x00b\x01c\x7fd", "abcd"},
+	}
+	if got := cleanRemoteDisplayText(""); got != "" {
+		t.Errorf("empty = %q", got)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cleanRemoteDisplayText(tt.in); got != tt.want {
+				t.Errorf("cleanRemoteDisplayText(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRemoteSearchSanitizesMatchText: a hostile remote body cannot paint control/format
+// bytes in the result list, while the match itself is still found.
+func TestRemoteSearchSanitizesMatchText(t *testing.T) {
+	raw := "a.go\x001:1:todo \x1b[31mred\x07\u202Eevil\n"
+	one := &fakeOneShot{rawOutput: true, script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) >= 2 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		return hostos.ProcResult{Stdout: []byte(raw)}, nil
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	var texts []string
+	for _, b := range batches {
+		for _, f := range b.Files {
+			for _, m := range f.Matches {
+				texts = append(texts, m.Text)
+			}
+		}
+	}
+	if len(texts) != 1 {
+		t.Fatalf("matches = %v, want one", texts)
+	}
+	if strings.ContainsAny(texts[0], "\x1b\u202e\u200e\x07") {
+		t.Fatalf("match text kept control/format bytes: %q", texts[0])
+	}
+	if !strings.Contains(texts[0], "todo") {
+		t.Fatalf("match text = %q, want readable todo", texts[0])
+	}
+}
+
+// TestParseGitGrepNullOutputSanitizesText checks the remote git grep match text is
+// sanitized too, not just the project-search tool text.
+func TestParseGitGrepNullOutputSanitizesText(t *testing.T) {
+	res := parseGitGrepNullOutput("a.go\x001\x002\x00todo \x1b[31mred\u202E\n", 5, 4, func(rel string) string { return "/repo/" + rel })
+	if len(res.Files) != 1 || len(res.Files[0].Matches) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	text := res.Files[0].Matches[0].Text
+	if strings.ContainsAny(text, "\x1b\u202e") {
+		t.Fatalf("git grep text kept control/format bytes: %q", text)
+	}
+}
+
+// TestRemoteSourceMatchesSanitizesSnapshotText checks the open-buffer snapshot path (which
+// does not come from the search tool) also strips display controls before Match.Text.
+func TestRemoteSourceMatchesSanitizesSnapshotText(t *testing.T) {
+	matches := remoteSourceMatches("todo \x1b[31mred\u202Eevil\n", search.Query{Text: "todo"})
+	if len(matches) != 1 {
+		t.Fatalf("matches = %+v", matches)
+	}
+	if strings.ContainsAny(matches[0].Text, "\x1b\u202e") {
+		t.Fatalf("snapshot match text kept controls: %q", matches[0].Text)
+	}
+}
+
+// TestRemoteLineMatchesDisplayColumns checks Col/Len stay in the sanitized text's rune
+// coordinates: controls/format characters removed before a hit must not shift the painted
+// highlight off the readable text.
+func TestRemoteLineMatchesDisplayColumns(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		wantText string
+		wantCol  int
+		wantLen  int
+	}{
+		{"controls before", "\x01\x02todo rest", "todo rest", 1, 4},
+		{"bidi before", "\u202Etodo rest", "todo rest", 1, 4},
+		{"control between", "a\x01todo", "atodo", 2, 4},
+		{"escape before leaves readable brackets", "\x1b[31mtodo", "[31mtodo", 5, 4},
+		{"plain position", "x todo y", "x todo y", 3, 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := remoteLineMatches(search.Query{Text: "todo"}, 7, tt.line, 0, 0, 10)
+			if len(got) != 1 {
+				t.Fatalf("matches = %+v", got)
+			}
+			m := got[0]
+			if m.Text != tt.wantText || m.Col != tt.wantCol || m.Len != tt.wantLen {
+				t.Fatalf("match = %+v, want text %q col %d len %d", m, tt.wantText, tt.wantCol, tt.wantLen)
+			}
+			runes := []rune(m.Text)
+			if m.Col-1+m.Len > len(runes) || string(runes[m.Col-1:m.Col-1+m.Len]) != "todo" {
+				t.Fatalf("highlight [%d,%d) does not land on todo in %q", m.Col-1, m.Col-1+m.Len, m.Text)
+			}
+		})
+	}
+	// No engine match: the synthetic fallback maps the tool's raw byte column through the
+	// sanitizer too.
+	got := remoteLineMatches(search.Query{Text: "zzz"}, 1, "\x01abc", 2, 0, 10)
+	if len(got) != 1 || got[0].Col != 1 || got[0].Text != "abc" {
+		t.Fatalf("synthetic fallback = %+v", got)
+	}
+}
+
+// TestRemoteSearchMatchSpansLandOnSanitizedText is the end-to-end regression: for a
+// hostile tool line the report's Col/Len slice Must identify the readable query text.
+func TestRemoteSearchMatchSpansLandOnSanitizedText(t *testing.T) {
+	raw := "a.go\x001:1:\x01\x02todo rest\x1b[0m\n"
+	one := &fakeOneShot{rawOutput: true, script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) >= 2 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("rg")}, nil
+		}
+		return hostos.ProcResult{Stdout: []byte(raw)}, nil
+	}}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	var got []searchpanel.Match
+	for _, b := range batches {
+		for _, f := range b.Files {
+			got = append(got, f.Matches...)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("matches = %+v", got)
+	}
+	m := got[0]
+	runes := []rune(m.Text)
+	if m.Col < 1 || m.Len < 1 || m.Col-1+m.Len > len(runes) {
+		t.Fatalf("span col=%d len=%d outside text %q", m.Col, m.Len, m.Text)
+	}
+	if string(runes[m.Col-1:m.Col-1+m.Len]) != "todo" {
+		t.Fatalf("highlight %q in %q, want todo", string(runes[m.Col-1:m.Col-1+m.Len]), m.Text)
+	}
+	if strings.ContainsAny(m.Text, "\x01\x1b") {
+		t.Fatalf("text not sanitized: %q", m.Text)
+	}
+}
+
+// TestRemoteSourceMatchesSanitizedColumns checks open-buffer snapshot matches use the
+// sanitized text's coordinates too.
+func TestRemoteSourceMatchesSanitizedColumns(t *testing.T) {
+	matches := remoteSourceMatches("\x01\x02todo x\n", search.Query{Text: "todo"})
+	if len(matches) != 1 || matches[0].Col != 1 || matches[0].Len != 4 || matches[0].Text != "todo x" {
+		t.Fatalf("matches = %+v", matches)
+	}
+}
+
+// TestParseGitGrepNullOutputSanitizedColumns checks the remote git grep byte column is
+// converted to the sanitized display's rune column.
+func TestParseGitGrepNullOutputSanitizedColumns(t *testing.T) {
+	res := parseGitGrepNullOutput("a.go\x001\x002\x00\x01todo x\n", 5, 4, func(rel string) string { return "/repo/" + rel })
+	if len(res.Files) != 1 || len(res.Files[0].Matches) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	m := res.Files[0].Matches[0]
+	if m.Text != "todo x" || m.Col != 1 || m.Len != 4 {
+		t.Fatalf("match = %+v", m)
+	}
+}
+
+// TestRemoteLineMatchesSyntheticFallbackBounds: when there is no engine match the fallback
+// must not paint outside the sanitized text; an empty sanitized line or a wholly stripped
+// query drops the match, and a tool column/length past the clean text is clamped.
+func TestRemoteLineMatchesSyntheticFallbackBounds(t *testing.T) {
+	if got := remoteLineMatches(search.Query{Text: "todo"}, 1, "\x01\x02", 3, 0, 10); len(got) != 0 {
+		t.Fatalf("all-controls line fallback = %+v, want dropped", got)
+	}
+	if got := remoteLineMatches(search.Query{Text: "\x01\x02"}, 1, "abc", 2, 0, 10); len(got) != 0 {
+		t.Fatalf("all-controls query fallback = %+v, want dropped", got)
+	}
+	// Clean text "a": raw byteCol past the line and a longer query clamp to col=1 len=1.
+	got := remoteLineMatches(search.Query{Text: "todo"}, 1, "a\x01", 3, 0, 10)
+	if len(got) != 1 {
+		t.Fatalf("clamped fallback = %+v", got)
+	}
+	m := got[0]
+	if m.Text != "a" || m.Col != 1 || m.Len != 1 || m.Col-1+m.Len > len([]rune(m.Text)) {
+		t.Fatalf("clamped fallback = %+v, want col 1 len 1 within %q", m, m.Text)
+	}
+	// Clean text "ab": the raw column after a stripped control maps to 2, length clamps to 1.
+	got = remoteLineMatches(search.Query{Text: "todo"}, 1, "a\x01b", 4, 0, 10)
+	if len(got) != 1 {
+		t.Fatalf("mid-control fallback = %+v", got)
+	}
+	m = got[0]
+	runes := []rune(m.Text)
+	if m.Text != "ab" || m.Col < 1 || m.Len < 1 || m.Col-1+m.Len > len(runes) {
+		t.Fatalf("mid-control fallback = %+v outside %q", m, m.Text)
 	}
 }

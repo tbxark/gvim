@@ -2,6 +2,7 @@ package bundled_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -513,6 +514,68 @@ func (g *githubTransport) first() *url.URL {
 		return nil
 	}
 	return g.requests[0]
+}
+
+// githubCheckTransport serves the PR list and the optional public commit-status calls
+// separately, recording every request and its headers so the test can assert the
+// unauthenticated/public shape and the request budget.
+type githubCheckTransport struct {
+	mu       sync.Mutex
+	requests []*http.Request
+	pullBody string
+	statuses map[string]string // head SHA -> commit status state
+}
+
+func (g *githubCheckTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	g.mu.Lock()
+	g.requests = append(g.requests, req)
+	g.mu.Unlock()
+	status, body := 200, g.pullBody
+	if strings.HasSuffix(req.URL.Path, "/status") {
+		parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+		sha := ""
+		if len(parts) >= 2 {
+			sha = parts[len(parts)-2]
+		}
+		state, ok := g.statuses[sha]
+		if !ok {
+			status, body = 404, "{\"message\":\"Not Found\"}"
+		} else {
+			body = "{\"state\":\"" + state + "\"}"
+		}
+	}
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+func (g *githubCheckTransport) count() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.requests)
+}
+
+func (g *githubCheckTransport) urls() []*url.URL {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]*url.URL, 0, len(g.requests))
+	for _, req := range g.requests {
+		out = append(out, req.URL)
+	}
+	return out
+}
+
+func (g *githubCheckTransport) authHeaders() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]string, 0, len(g.requests))
+	for _, req := range g.requests {
+		out = append(out, req.Header.Get("Authorization"))
+	}
+	return out
 }
 
 func dashboardGitHubSettings(network bool) map[string]plugin.PluginSettings {
@@ -1078,4 +1141,150 @@ func TestDashboardDiskMalformedFields(t *testing.T) {
 			t.Fatalf("valid numeric capacity was not retained:\n%s", text)
 		}
 	})
+}
+
+// TestDashboardGitHubCommitChecks: the opt-in github_checks setting adds one public,
+// unauthenticated commit-status request per shown PR and renders Fresh's compact
+// pass/fail/run labels. The repo and SHA come from the already-validated list response,
+// never from an API-provided URL.
+func TestDashboardGitHubCommitChecks(t *testing.T) {
+	t.Parallel()
+	sha1 := strings.Repeat("a", 40)
+	sha2 := strings.Repeat("b", 40)
+	tr := &githubCheckTransport{
+		pullBody: "[{\"number\":12,\"title\":\"Fix the thing\",\"head\":{\"sha\":\"" + sha1 + "\"}}," +
+			"{\"number\":34,\"title\":\"Add docs\",\"head\":{\"sha\":\"" + sha2 + "\"}}]",
+		statuses: map[string]string{sha1: "success", sha2: "pending"},
+	}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   map[string]plugin.PluginSettings{dashboardPlugin: {User: map[string]any{"github_prs": true, "github_checks": true, "network": true}}},
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "#12 pass")
+	if !strings.Contains(text, "#34 run") {
+		t.Fatalf("dashboard text misses pending check tag:\n%s", text)
+	}
+	if tr.count() != 3 {
+		t.Fatalf("GitHub requests = %d, want list + two status checks", tr.count())
+	}
+	urls := tr.urls()
+	if urls[0].Host != "api.github.com" || !strings.Contains(urls[0].Path, "/pulls") {
+		t.Fatalf("first request = %v, want the PR list", urls[0])
+	}
+	for i, sha := range []string{sha1, sha2} {
+		u := urls[i+1]
+		if u.Host != "api.github.com" || u.Path != "/repos/me/repo/commits/"+sha+"/status" {
+			t.Fatalf("status request %d = %v", i, u)
+		}
+	}
+	for i, auth := range tr.authHeaders() {
+		if auth != "" {
+			t.Fatalf("request %d carried Authorization %q; the public endpoint must be unauthenticated", i, auth)
+		}
+	}
+}
+
+// TestDashboardGitHubCheckCap: at most six status requests are made even when the PR
+// list (bounded to six rows) is full; no request is made for a non-hex head SHA.
+func TestDashboardGitHubCheckCapAndSHSASafety(t *testing.T) {
+	t.Parallel()
+	shas := make([]string, 8)
+	for i := range shas {
+		shas[i] = strings.Repeat(string(rune('a'+i)), 40)
+	}
+	body := ""
+	for i := 1; i <= 8; i++ {
+		if body != "" {
+			body += ","
+		}
+		sha := shas[i-1]
+		if i == 8 {
+			sha = "../../not-a-sha"
+		}
+		body += fmt.Sprintf("{\"number\":%d,\"title\":\"PR %d\",\"head\":{\"sha\":\"%s\"}}", i, i, sha)
+	}
+	statuses := map[string]string{}
+	for i := 1; i <= 6; i++ {
+		statuses[shas[i-1]] = "success"
+	}
+	tr := &githubCheckTransport{pullBody: "[" + body + "]", statuses: statuses}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   map[string]plugin.PluginSettings{dashboardPlugin: {User: map[string]any{"github_prs": true, "github_checks": true, "network": true}}},
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "#6 pass")
+	for _, want := range []string{"#1 pass", "#6 pass"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("dashboard lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "#7") {
+		t.Fatalf("row cap failed:\n%s", text)
+	}
+	if tr.count() != 7 { // one list + six status calls
+		t.Fatalf("GitHub requests = %d, want 7", tr.count())
+	}
+	for _, u := range tr.urls()[1:] {
+		if !strings.HasSuffix(u.Path, "/status") || strings.Contains(u.Path, "not-a-sha") {
+			t.Fatalf("unsafe/invalid SHA reached a status URL: %v", u)
+		}
+	}
+}
+
+// TestDashboardGitHubCheckUnsafeSHAIsIgnored: a head SHA is only used after strict
+// 40/64-hex validation; a path-like value from the list body never reaches a URL or the
+// status fetch, and the PR row still renders without a check tag.
+func TestDashboardGitHubCheckUnsafeSHAIsIgnored(t *testing.T) {
+	t.Parallel()
+	tr := &githubCheckTransport{
+		pullBody: `[{"number":12,"title":"Bad SHA","head":{"sha":"../../not-a-sha"}}]`,
+		statuses: map[string]string{},
+	}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   map[string]plugin.PluginSettings{dashboardPlugin: {User: map[string]any{"github_prs": true, "github_checks": true, "network": true}}},
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "#12")
+	if strings.Contains(text, "pass") || strings.Contains(text, "fail") || strings.Contains(text, "run") {
+		t.Fatalf("unsafe SHA produced a check tag:\n%s", text)
+	}
+	if tr.count() != 1 {
+		t.Fatalf("GitHub requests = %d, want just the PR list", tr.count())
+	}
+}
+
+// TestDashboardPRTitleStripsCcAndCf: PR titles are untrusted display text. Cc controls
+// (including C1) become spaces and Cf format marks (bidi overrides, zero-width marks,
+// soft hyphen, BOM) are removed, so a hostile title cannot reorder/hide the row while the
+// readable surrounding text stays.
+func TestDashboardPRTitleStripsCcAndCf(t *testing.T) {
+	t.Parallel()
+	tr := &githubTransport{body: "[{\"number\":12,\"title\":\"safe\\u202eevil zero\\u200bwidth soft\\u00adhyphen c1\\u0085control iso\\u2066late bom\\uFEFFend\"}]"}
+	r := startRig(t, rigOpts{
+		plugins:    []string{dashboardPlugin},
+		script:     dashboardRemoteScript("https://github.com/me/repo"),
+		settings:   dashboardGitHubSettings(true),
+		httpClient: &http.Client{Transport: tr},
+	})
+	dashboardReady(t, r)
+	text := dashboardSettle(t, r, "#12")
+	for _, forbidden := range []string{"\u202e", "\u200b", "\u00ad", "\u0085", "\u2066", "\uFEFF"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("title still contains Cf/Cc %q:\n%s", forbidden, text)
+		}
+	}
+	for _, want := range []string{"safeevil", "zerowidth", "softhyphen", "c1 control", "isolate bomend"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("title lost readable text %q:\n%s", want, text)
+		}
+	}
 }

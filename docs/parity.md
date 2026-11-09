@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `3d2c244` (the previous round's commit is folded in) plus the
-merged round-49 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+Last verified: 2026-11-09, tree commit `3ca0e57` (the previous round's commit is folded in) plus the
+merged round-50 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
 GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
-122 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
+122 KiB / de 88 KiB / both 210 KiB, git diff --check). Final full
 `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
-`/tmp/gvim-r49-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-49 tests/diff
+`/tmp/gvim-r50-final2.log`). The audit ran build/gofmt/i18n_check plus targeted round-50 tests/diff
 review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
 real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
@@ -1514,6 +1514,77 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-50 outcome (2026-11-09, merged working tree on `3ca0e57`).** Four slices landed: remote search
+output/path/display hardening; terminal foreground-name Cf/restart-indicator/hover; dashboard
+GitHub checks; and the statusbar/tab-title i18n regression fix plus docs corrections. Static
+gates pass; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL
+(log `/tmp/gvim-r50-final2.log`). The audit read the diff and ran targeted tests; the Lead ran the
+full suite.
+**Remote search output trust/path/display (item 273).** Remote project search and remote Git Grep now
+demand NUL-delimited output: rg uses `--vimgrep --null` (path NUL then `line:column:text`), grep uses
+`--null` (path NUL then `line:text`), and remote git grep parses `path NUL line NUL column NUL text`;
+legacy colon-only output is ignored instead of guessed at. Every tool/snapshot/open-buffer path goes
+through `cleanRemoteRel`: strips one `./`, path.Clean-collapses inert . / .. segments, and refuses
+empty/dot/.., absolute/root-escaping paths, NUL, C0/DEL controls and invalid UTF-8; a colon stays
+legal. The path normalization is applied to parsed records, `remoteAllowedFiles`, `remoteRelPath` and
+`joinRemotePath`, so an allowed-less search cannot leak an escaped path and a stale snapshot cannot
+widen scope. Match display text is sanitized (invalid UTF-8 and Cc/Cf removed; tab/newline and
+CJK/emoji kept); raw-line tool matches are remapped through a raw-rune→display-rune map, snapshot
+matches search the sanitized text, and remote git grep's byte column is converted to display-rune
+column with Len clamped. A stripped-only match/query/line is dropped; the synthetic tool-column
+fallback computes the sanitized query/line, drops zero-readable cases, and clamps Col/Len inside
+Text. The bounded context (20 s search, 5 s probe, cancellation, no local fallback) is unchanged;
+output is capped at 8 MiB PER remote tool command (up to 64 batched candidate commands, each
+command and the whole run bounded by the 20 s deadline), not one 8 MiB total. AUDITED RESIDUALS:
+legacy tools without `--null` fail/no-result rather than fall back to spoofable parsing; newline/
+control/non-UTF-8 file NAMES are skipped (not escaped); a legal Cf in a path is not stripped from
+display (Cf path-display residual; the actual path is exact); stripping Cf/ZWNJ/ZWJ can change
+emoji/grapheme presentation; synthetic fallback `Match.EndLine/EndCol` remain zero (single-line
+only); local Git Grep keeps its trusted colon format; real remote rg/grep/git UNTESTED
+(R13-11/R13-23).
+**Terminal foreground-name sanitization + restart indicator (item 274).** Foreground process names from
+the bounded local poll and OSC titles now drop Cc controls, Cf format characters (bidi overrides/
+isolates, zero-width/direction marks, BOMs, soft hyphens) and invalid UTF-8, keep combining marks as
+readable text, trim and bound to 64 runes; tab labels are cleaned through the same place and the
+hit map measures the painted text. The exit marker/restart row prefers the last real OS foreground
+name captured before exit (kept across the exit, cleaned/bounded to 64 runes) and otherwise falls
+back to the resume/launch argv basename, then the plain restart label; a new shell generation clears
+the cached name. The row takes the error foreground and, on hover, Fresh's ERROR hover keys
+`status_error_indicator_hover_fg/bg` (theme fallback keys exist). AUDITED RESIDUALS: real macOS/BSD/
+Linux ps/PTY and remote transports UNTESTED; local foreground polling is one bounded ps/read per tab
+about once a second (background tabs included); pgid reuse can name a previous process-group leader;
+the restart indicator deliberately names the OS foreground process (argv fallback), a gvim extension
+over Fresh's argv-only label (R13-15).
+**Dashboard GitHub checks (plugin; item 275).** Opt-in `github_checks = true` (requires `github_prs` and
+`network`) enriches each shown PR with Fresh's compact pass/fail/run tag from one public,
+unauthenticated status request per valid row. The repo slug comes only from the dashboard's own
+normalized github.com remote, the head SHA must be 40/64 hex, and links are rebuilt from those
+validated fields, never from API URLs; no token/auth header is sent and responses are not persisted.
+Work is asynchronous with no UI blocking; the PR list TTL is 120 s and the status batch 900 s with
+at most six 2 s requests (steady-state ~54/h; GitHub's 60/h limit is per source IP). PR titles are
+untrusted display text: Cc including C1 become spaces, and Unicode-15.1 Cf marks (bidi embeddings/
+overrides/isolates, zero-width space/joiner/non-joiner, soft hyphen, BOM, tag/interlinear marks)
+are removed before the 200-byte display cap; the test covers bidi/zero-width/soft-hyphen/C1/
+isolate/BOM. AUDITED RESIDUALS: the rate budget is per loaded dashboard plugin/workspace, so daemon
+multi-workspace or plugin reload can exceed the per-IP 60/h; no token means private repos are
+unavailable; future Unicode Cf code points need the embedded Unicode-15.1 table updated;
+non-Cf invisibles/combining/variation selectors/line separators/homoglyphs are not normalized;
+removing ZWJ can change emoji presentation; check-run rollups/review threads need GraphQL/auth and
+remain unported; external dashboard section providers still read their own plugin APIs and return
+plain rows to the bundled dashboard (provider privilege/opt-in, no cross-plugin key); real GitHub/
+private repos/remote hosts UNTESTED (R13-6/R13-24).
+**Statusbar/tab-title i18n regression + docs corrections (item 276).** The tab-title generated/
+terminal-numbered labels go through `dockTextVars`/`dockText` again (no hard-coded “Terminal %d”),
+and the status row/tab title regression tests pass. The porting doc's Slang cache text was corrected
+to the content-addressed <module>-<sha256>.slang / cache semantics, and docs/architecture's
+“merged 8 MiB output” wording was corrected to the per-command cap. AUDITED RESIDUALS: statusbar/
+tab-title strings remain English fallbacks in non-English locales where no translation is loaded
+(existing i18n policy); real host/UI UNTESTED (R13-5/R13-15).
+Metrics: palette 240, settings 69 in 14 sections, bundled 31 (9 on)/22 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; i18n en 1124 / 579 per locale, 575
+KiB text, ≈665 KiB JSON, heap 122-88-210 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r50-
+final2.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-49 outcome (2026-11-09, merged working tree on `3d2c244`).** Four slices landed: native
 slang-synth external locations; terminal-record symlink migration/data protection; find-bar
@@ -5547,6 +5618,30 @@ for parity status.
      KiB; percentage ^digits%?$; decimals/signs/whitespace/misplaced %/zero capacity/used>capacity
      unavailable; out-of-range numeric pct clamped; df 3s/8KiB authority. Residual: truncation not explicitly
      rejected; mount-path spaces become unavailable; real remote df UNTESTED.
+273. **Remote search output/path/display hardening (R13-11/R13-23).** NUL delimiters for rg/grep/
+     remote git grep; legacy colon output ignored; cleanRemoteRel for parser/snapshot/open/join rejects
+     escape/abs/NUL/control/invalid UTF8; Cc/Cf/invalid display sanitizer + raw→display col/len remap;
+     snapshot sanitized search; git grep byte→display col/Len clamp; stripped-only dropped, synthetic
+     fallback drops zero-readable and clamps. Limits: per-command 8 MiB, <=64 batched commands, 20s
+     deadline. Residuals: --null hard requirement/no fallback; newline/control/non-UTF8 names skipped;
+     Cf path display; ZWJ/ZWJ grapheme; synthetic EndLine/EndCol zero; local Git Grep/real host UNTESTED.
+274. **Terminal foreground Cf/restart indicator/hover (R13-15).** Foreground/title/label strip Cc+Cf+
+     invalid UTF8, keep combining/CJK, bound64/256; restart row prefers last real foreground, clears on
+     new shell, falls back resume/launch argv then plain label; Fresh ERROR hover keys with theme fallback.
+     Residuals: real ps/PTY/remote UNTESTED; 1s poll per local tab incl background; pgid reuse; OS-forward
+     preference is gvim extension.
+275. **Dashboard GitHub checks (R13-6/R13-24).** opt-in github_checks requires github_prs+network; fixed
+     api.github.com; nwo from normalized remote; SHA 40/64 hex; URL rebuilt; no token/auth/header; no
+     persistence; TTL 120s/900s, <=6 2s requests, ~54/h per plugin; PR title Cc/C1→space, Unicode-15.1 Cf
+     removed before 200-byte cap. Residuals: per-plugin/workspace rate (daemon multi-workspace/reload can
+     exceed per-IP 60/h), private repos unavailable no token, future Cf needs table update, non-Cf
+     invisibles/combining/variation/line separators/homoglyphs not normalized, ZWJ emoji presentation,
+     check-run rollups/review threads unported, external provider data to dashboard by provider privilege;
+     real GitHub/remote UNTESTED.
+276. **Statusbar/tab-title i18n regression + docs corrections (R13-5/R13-15).** generated/terminal
+     numbered tab labels back through dockText/dockTextVars; tests; porting Slang cache and architecture
+     per-command-cap wording fixed. Residual: non-English locale English fallbacks where no translation;
+     real host/UI UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7546,27 +7641,37 @@ Round 13 recorded five open gaps:
   Tracks: native slang-synth external locations; terminal symlink protection/extraction prechecks;
   find-bar Ctrl+Delete/Ctrl+Backspace; dashboard df strict cells. Real-host checks remain UNTESTED.
   No full-parity claim.
+- **Round-50 verification (2026-11-09, merged tree on `3ca0e57`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 122 KiB / de 88 KiB / both 210 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+  `/tmp/gvim-r50-final2.log`). Audit: build/gofmt/i18n_check plus targeted round-50 tests/diff review.
+  Tracks: remote search NUL/path/display hardening; terminal foreground Cf/restart/hover; dashboard
+  GitHub checks; statusbar/tab-title i18n regression/docs corrections. Real-host checks remain
+  UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-49 landed native slang-synth flow, terminal symlink data protection, find word-delete chords,
-  dashboard df strict cells; full suite EXIT 0 (76 packages, log /tmp/gvim-r49-final.log); §5.5 is
-  round-50/51 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–49 had their gate sets
-  run. Round 49 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-50 landed remote search NUL/path/display hardening, foreground Cf/restart/hover, dashboard
+  GitHub checks, tab-title i18n/docs fixes; full suite EXIT 0 (76 packages, log /tmp/gvim-r50-
+  final2.log); §5.5 is round-51/52 plan; TUI-only scope/genuine-equivalence §4 item 94/§8; real-host
+  checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–50 had their gate sets
+  run. Round 50 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
   122 KiB / de 82 KiB / both 210 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r49-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-49 tests and
+  `/tmp/gvim-r50-final2.log`. The audit ran build/gofmt/i18n_check plus targeted round-50 tests and
   diff review only (no full suite); the Lead ran the full suite. Real-host verification remains
   UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
   save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
   box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
   switching, local macOS/BSD/Linux process polling, outer-terminal focus reporting, real LSP/trust
-  changes, real slangd/slang-synth, watcher host behavior, daemon/mixed-workspace extraction; ~/…
-  expansion against a local real `sh`, not a live host. Treat statuses as pointers, not proof.
+  changes, real slangd/slang-synth, watcher host behavior, dashboard/GitHub network, daemon/mixed-
+  workspace extraction; ~/… expansion against a local real `sh`, not a live host. Treat statuses as
+  pointers, not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

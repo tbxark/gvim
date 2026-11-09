@@ -14,6 +14,9 @@
     "external.invalid": "invalid response",
     "external.stale": "stale",
     "external.no_data": "no data",
-    "disk.unavailable": "unavailable"
+    "disk.unavailable": "unavailable",
+    "github.check_pass": "pass",
+    "github.check_fail": "fail",
+    "github.check_run": "run"
   }
 }

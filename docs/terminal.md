@@ -290,21 +290,32 @@ background tabs' exited markers current.
   record has a non-empty resume argv, `⟳ Restart <program>` for a launch argv,
   `⟳ Restart terminal` for a plain shell, plus ` (exit N)` only for a non-zero
   code (exit 0 omitted, as Fresh does) or ` (signal)` for a Unix signal. The
-  program is the basename of the resume (preferred) or launch argv's program.
-  The element appears for both a live exit and a restored exited tab (the record
-  persists the status and launch record), takes the theme's error foreground, is
-  underlined+bold while the pointer is over it, and disappears once the shell is
-  restarted; the keyboard equivalent stays the palette/menu "Restart Terminal
-  Process" row (action `restart_terminal`). A narrow status row follows the
-  frame's normal squeeze rule: the longer label is dropped or clipped with the
-  rest of its group, never overflowing the row (tested). Deliberate divergences
-  that remain: the program name comes from the recorded launch/resume argv, not
-  the OS foreground process; the hover is underline+bold rather than Fresh's
-  ERROR-colour swap; signal exits append ` (signal)` because gvim records -1
-  where Fresh's i32 exit code has no signal field; and gvim keeps an extra frozen
-  live screen reachable with Ctrl+Space (Fresh stays in read-only scrollback), so
-  the marker is on the view the dock opens at exit but a user who toggles back to
-  the frozen screen does not see it there. An alternate-screen exit has no history
+  displayed program prefers the **last real OS foreground process name** captured
+  by the bounded async poll described under Terminal title (the poll result is
+  kept across the exit and cleaned/bounded to 64 runes); when there is none — a
+  restored exited tab, a remote/Windows transport, a poll that never succeeded or
+  whose last read failed — it honestly falls back to the basename of the resume
+  (preferred) or launch argv's program, and a plain shell with neither keeps
+  `⟳ Restart terminal`. A new shell generation clears the cached name, so a
+  later exit cannot name the previous program. Fresh's `ExitedTerminal`
+  `program_name` is argv-based; the foreground preference is gvim's extension over
+  that, with the argv fallback preserving Fresh's label on transports with no
+  process introspection. The element appears for both a live exit and a restored
+  exited tab (the record persists the status and launch record), takes the theme's
+  error foreground, and while the pointer is over it is repainted (underlined) in
+  Fresh's ERROR hover keys `ui.status_error_indicator_hover_fg` on
+  `ui.status_error_indicator_hover_bg` — the same hover treatment as Fresh's
+  `Hover::Swap`; it disappears once the shell is restarted. The keyboard
+  equivalent stays the palette/menu "Restart Terminal Process" row (action
+  `restart_terminal`). A narrow status row follows the frame's normal squeeze
+  rule: the longer label is dropped or clipped with the rest of its group, never
+  overflowing the row (tested). Deliberate divergences that remain: signal exits
+  append ` (signal)` because gvim records -1 where Fresh's i32 exit code has no
+  signal field; the indicator names the OS foreground process with the argv
+  fallback as described (Fresh names the recorded argv); and gvim keeps an extra
+  frozen live screen reachable with Ctrl+Space (Fresh stays in read-only
+  scrollback), so the marker is on the view the dock opens at exit but a user who
+  toggles back to the frozen screen does not see it there. An alternate-screen exit has no history
   to page through, but gvim still shows the exit: the frozen frame is turned into
   the read-only transcript (the visible alt rows followed by the marker, title
   `Scrollback (exited, …)`), auto-opened at exit like a main-screen one, and
@@ -367,9 +378,10 @@ background tabs' exited markers current.
   set is scoped per workspace (see Terminal tabs in daemon workspaces below).
 - **Terminal title.** A child's OSC 0 (icon+window title) and OSC 2 (window title)
   set the session's terminal title, mirroring Fresh's Event::Title; the session
-  keeps the last one, cleaned (control characters and invalid UTF-8 dropped,
-  trimmed) and bounded to 256 runes, and an empty payload (a title reset) clears
-  it. OSC 1 only sets the icon name and deliberately does not change the title.
+  keeps the last one, cleaned (Cc control characters and Cf format characters such as
+  bidi overrides/isolates, zero-width/direction marks, BOMs and soft hyphens dropped;
+  invalid UTF-8 dropped; combining marks kept as readable text; outer space trimmed) and
+  bounded to 256 runes, and an empty payload (a title reset) clears it. OSC 1 only sets the icon name and deliberately does not change the title.
   The title is additive in the saved record: a `title` per tab and mirrored at the
   top level, so a restored tab keeps its recorded title and re-saves it even
   without a live shell; an old record has no `title` and keeps its derived label.
@@ -386,12 +398,15 @@ background tabs' exited markers current.
   `ps -o comm= -p <pgid>` on other Unix platforms (no shell involved; the ps
   binary is only a fixed absolute system path from `/bin/ps`, `/usr/bin/ps`,
   `/sbin/ps`, `/usr/sbin/ps`, so `PATH` and a project environment can never
-  redirect it) — and caches the sanitized name per tab, so a program that starts,
+  redirect it) — and caches the sanitized name per tab (Cc/Cf characters dropped,
+  combining marks kept, bounded to 64 runes), so a program that starts,
   exits or is replaced in the foreground updates the label within one poll. A **remote**, **Windows**,
   **restored** or **exited** terminal reports no poll capability and falls back to
   the recorded launch program (argv[0]/agent), then the OSC title.
   The strip's duplicate disambiguation and cell-budget truncation still apply, and
-  an untrusted title is cleaned again before painting/combining. The record format
+  an untrusted title is cleaned again before painting/combining, and the tab-label
+  sanitizer also drops Cf format characters from launch names and explicit renames.
+  The record format
   stays version 1, old readers ignore the field, old records without a title keep
   exactly their old command/default label, and a corrupt/overlong title is cleaned
   again on load.
@@ -498,8 +513,11 @@ name, not the full argv, its polling is bounded and starts/stops with the shell
 (an old shell generation's answer is dropped), and a foreground change is
 reflected up to one poll interval later. Remote and Windows terminals keep the
 recorded launch program instead (no remote process introspection, no ConPTY
-foreground group); a restored or exited tab keeps the saved title/launch fallback;
-background tabs keep polling; Linux `comm` truncates to 15 characters, a missing
+foreground group); a restored tab keeps the saved title/launch fallback, and an
+exited tab's label does too, but the last successful poll is retained for the
+restart indicator (a new shell clears it; a failed read clears it, which is the
+documented honest fallback); background tabs keep polling; Linux `comm`
+truncates to 15 characters, a missing
 `ps` (or one outside the fixed absolute system paths — a `ps` on `PATH` is
 never executed) degrades to the fallback rather than an error, and the name is
 sanitized and bounded to 64 runes before it reaches a label. Fresh can bring live tabs back without a dive because its layout focuses

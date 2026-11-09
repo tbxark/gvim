@@ -516,7 +516,26 @@ control/overlong titles are sanitized before painting, entries with a string, fr
 or out-of-range number (and any `html_url`/other API-provided links) are ignored, and at most six
 valid rows are kept from at most 200 examined entries. Without a token a private or missing
 repository returns 404 and the section shows a muted `unavailable` line (no notice, the rest of the
-dashboard is unaffected); failures and the disabled state are also one muted line. The weather
+dashboard is unaffected); failures and the disabled state are also one muted line. An additional
+opt-in `github_checks = true` (with `github_prs` and `network`) enriches each shown PR with
+Fresh's compact check tag: `pass`/`fail`/`run` from one public, unauthenticated
+`GET /repos/<owner>/<repo>/commits/<head-sha>/status` per valid row. The repo slug and head SHA are
+taken only from the already-validated remote/list response (never an API-provided URL), no token or
+auth header is sent, and failures leave the tag absent or keep the last good one without a notice.
+The unauthenticated 60-request/hour budget is bounded per **loaded dashboard plugin instance**: the
+PR list refreshes at most every 2 minutes (≤30/h) and the status batch at most every 15 minutes, for
+at most six status requests per batch and a 2 s timeout each (≤24/h; steady-state ceiling ~54/h);
+this is asynchronous and never blocks the UI. GitHub's 60/h limit is per source IP, so multiple gvim
+processes or other plugins share it and can still consume that headroom. Fresh's full check-run
+rollup and unresolved review-thread columns need GraphQL/authentication and remain unported.
+PR titles are untrusted display text: Cc controls (including C1) become spaces and Cf format marks
+(bidi embedding/override/isolate marks, zero-width space/joiner/non-joiner, soft hyphen, BOM, tag
+characters, interlinear annotation and the other assigned Cf ranges in the embedded Unicode-15.1
+table) are removed before the 200-byte display cap, so a title cannot reorder or visually hide the
+row. Residual: newly assigned/future Cf code points need a table update; non-Cf invisible marks
+(combining/variation selectors), Unicode line/paragraph separators, homoglyph/confusable text and
+invalid UTF-8 bytes are not normalized (invalid bytes become spaces); removing zero-width joiners can
+change emoji presentation. Tiles/rows remain bounded to the sanitized/truncated title. The weather
 section is also opt-in: set `plugins.dashboard.settings.weather = true` (and `network = true`),
 optionally `weather_location` (a place name or coordinates; empty asks wttr.in to use the host's
 public IP) and `weather_units = "metric" | "imperial"`. One bounded request to

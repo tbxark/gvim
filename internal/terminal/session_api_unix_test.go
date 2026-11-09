@@ -241,8 +241,8 @@ func TestSessionTitleFromOSC(t *testing.T) {
 	}
 }
 
-// TestCleanTitle checks the one title sanitizer: controls stripped, trimmed and
-// bounded on a rune boundary.
+// TestCleanTitle checks the one title sanitizer: Cc/Cf stripped, trimmed and bounded
+// on a rune boundary; combining marks stay.
 func TestCleanTitle(t *testing.T) {
 	tests := map[string]string{
 		"plain":           "plain",
@@ -250,6 +250,15 @@ func TestCleanTitle(t *testing.T) {
 		"\033]0;evil\007": "]0;evil",
 		"a\x00b\nc":       "abc",
 		"\xff\xfeos":      "os",
+		// Cf format characters (bidi overrides/isolates, zero-width markers, BOM,
+		// soft hyphen) are stripped so a child cannot reorder or hide the label.
+		"\u202eevil\u202c":    "evil",
+		"a\u200bb\u200dc":     "abc",
+		"\u2066isolate\u2069": "isolate",
+		"\ufeffstart":         "start",
+		"soft\u00adhyphen":    "softhyphen",
+		// Combining marks are readable text, not formatting controls: keep them.
+		"cafe\u0301": "cafe\u0301",
 	}
 	for in, want := range tests {
 		if got := CleanTitle(in); got != want {
@@ -263,5 +272,18 @@ func TestCleanTitle(t *testing.T) {
 	wide := strings.Repeat("界", MaxTitleRunes+5)
 	if got := CleanTitle(wide); utf8.RuneCountInString(got) != MaxTitleRunes {
 		t.Fatalf("wide long title length = %d, want %d", utf8.RuneCountInString(got), MaxTitleRunes)
+	}
+}
+
+// TestSessionTitleStripsFormatCharacters checks the OSC 0/2 path: bidi overrides,
+// zero-width marks and other Cf format characters never reach Title()/the tab label.
+func TestSessionTitleStripsFormatCharacters(t *testing.T) {
+	s := startSh(t, "printf '\033]2;safe\342\200\256bidi\342\200\254\342\200\213zero\007'; sleep 30")
+	t.Cleanup(func() { closeSession(t, s) })
+	waitFor(t, s, "the cleaned OSC title", func(Screen) bool {
+		return s.Title() == "safebidizero"
+	})
+	if got := s.Title(); strings.ContainsAny(got, "\u202a\u202b\u202c\u202d\u202e\u200b\u200c\u200d\u2066\u2067\u2068\u2069\ufeff") {
+		t.Fatalf("Title kept a Cf format character: %q", got)
 	}
 }

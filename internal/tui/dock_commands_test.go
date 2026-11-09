@@ -20,6 +20,8 @@ type shellsStarter struct {
 	launches   []terminal.Launch
 	launchDirs []string
 	err        error
+	// makeTerm builds each started shell; nil starts a plain newFakeTerm().
+	makeTerm func() *fakeTerm
 }
 
 func (s *shellsStarter) Start(dir string, cols, rows int) (Terminal, error) {
@@ -28,6 +30,9 @@ func (s *shellsStarter) Start(dir string, cols, rows int) (Terminal, error) {
 		return nil, s.err
 	}
 	t := newFakeTerm()
+	if s.makeTerm != nil {
+		t = s.makeTerm()
+	}
 	s.terms = append(s.terms, t)
 	return t, nil
 }

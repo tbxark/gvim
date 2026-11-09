@@ -845,6 +845,51 @@ run through the authority one-shot surface with the remote cwd, stay bounded/can
 (the search context bounds every nested listing), and never read the local disk; other
 degradations are carried as non-fatal panel notices.
 
+### Remote search output trust and path normalization
+
+Remote search treats the tool's output as untrusted, because a remote file name can contain
+a newline, a colon or `..` segments. Both tools are invoked with `--null`
+(`rg --vimgrep --null ...` and `grep -r -n -I --null ...`), so each match is
+`path NUL line:column:text` (rg) or `path NUL line:text` (grep) and a name containing a
+colon or newline cannot be split into a different path or a fabricated second match. The
+parser requires the NUL record delimiter: output without one (for example a tool that
+ignores `--null`) is ignored instead of guessed at. Before a record becomes a result the
+path is normalized: one leading `./` is stripped, `path.Clean` collapses `.`/`..`, and
+absolute paths, paths that escape the root, empty/dot paths, NUL, control characters and
+invalid UTF-8 are refused (a colon stays legal). The same normalization is applied to the
+panel's quick-open snapshot keys (`remoteAllowedFiles`), to open-buffer paths
+(`remoteRelPath`), and to `joinRemotePath`, so an `allowed`-less search cannot produce an
+escaped result path and a stale or hostile snapshot cannot widen the scope. Each remote tool command keeps at most 8 MiB of output (the cap is per command, not a total: one
+search can start at most 64 batched candidate commands and every command/deadline is bounded by
+the 20 s search deadline, so a full search can return more than 8 MiB across batches while each
+batch is capped). The result's `Match.Text` is display-sanitized before the panel sees it: invalid
+UTF-8 bytes and Unicode Cc/Cf categories are removed (terminal escapes, BEL/NUL/CR, bidi overrides
+and zero-width format characters included), while tab and newline keep their normal semantics and
+all readable text (including CJK/emoji) is preserved. For tool hits the engine still matches
+the raw line, then the match span is remapped through the sanitizer's raw-rune→display-rune map,
+so a control/format character removed before the hit cannot shift `Match.Col`/`Len`/`EndCol` off
+the painted text; an open-buffer snapshot searches the sanitized text directly, and the remote
+git grep byte column is converted to the sanitized line's rune column. A match made entirely of
+stripped characters has no readable span and is dropped; when the engine finds nothing the
+synthetic fallback (tool line + byte column) is dropped too if the sanitized line or query has
+zero readable runes, and otherwise its column/length are clamped inside the sanitized text. A
+snapshot query containing a stripped character no longer matches (recorded residual); readable
+queries are unaffected. This is a display-only bound: the stored file text
+and the search engine are untouched. File *names* are normalized by `cleanRemoteRel` but a legal
+Unicode Cf character in a remote path is not stripped before display (`Cf path display residual`);
+the path is still displayed in the panel exactly as named on the remote host. The search
+context still bounds every listing/tool command, cancellation still stops between records,
+and no local file system is read. Remote Git Grep uses the same protection: its remote argv
+adds `--null` and its output is parsed as `path NUL line NUL column NUL text`, with each path
+through `cleanRemoteRel` and an empty/escaping path dropped (the local Git Grep adapter keeps
+its colon format because that output never crosses the authority boundary). Tests cover
+colon/newline spoof records, traversal and `..` paths, legacy colon-only output, legal colon
+names, the `--null` argv for both tools, and the remote Git Grep NUL parser
+(`TestParseRemoteSearchOutputRejectsSpoofedRecords`,
+`TestRemoteSearchRejectsSpoofedRemoteFileNames`, `TestRemoteSearchIgnoresLegacyUnnulledOutput`,
+`TestRemoteRelPathRejectsEscapes`, `TestRemoteAllowedFilesNormalizes`,
+`TestRemoteSearchArgvUsesNullFileDelimiter`, `TestParseGitGrepNullOutputRejectsSpoofedPaths`).
+
 ### Windowed remote reads (remote large-file mode)
 
 The authority file port has `FileSystem.ReadRange(ctx, path, off, n)`: a bounded window

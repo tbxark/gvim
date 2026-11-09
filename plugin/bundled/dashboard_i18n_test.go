@@ -36,6 +36,9 @@ func TestDashboardWeatherI18nEnglish(t *testing.T) {
 		"external.stale":           "stale",
 		"external.no_data":         "no data",
 		"disk.unavailable":         "unavailable",
+		"github.check_pass":        "pass",
+		"github.check_fail":        "fail",
+		"github.check_run":         "run",
 	}
 	en := catalog["en"]
 	if len(en) != len(want) {
