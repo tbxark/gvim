@@ -208,3 +208,74 @@ func TestRestrictedRevokeStopsNewLanguageAutoStart(t *testing.T) {
 		t.Fatalf("Restricted Open of a never-run language spawned %d server(s)", spawned-1)
 	}
 }
+
+// TestTrustedManualStartDoesNotSurviveRevoke checks the forced-state audit: a language
+// manually started while Trusted must not keep bypassing the auto-start gate after a revoke,
+// for the existing manager and for a new root manager created later.
+func TestTrustedManualStartDoesNotSurviveRevoke(t *testing.T) {
+	isolateConfig(t)
+	root := t.TempDir()
+	user := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(user, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := useTrustStore(t)
+	if err := store.Set(root, trust.Trusted); err != nil {
+		t.Fatal(err)
+	}
+	prev := newLSP
+	var port tui.LSPSession
+	newLSP = func(cfg config.Config) tui.LSPSession {
+		port = prev(cfg)
+		return port
+	}
+	t.Cleanup(func() { newLSP = prev })
+	got, err := buildCaptured(t, Options{Root: root, Config: user, Simple: true, NoPlugins: true, SessionDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	spawned := 0
+	if setter, ok := port.(interface {
+		SetSpawner(func(context.Context, lsp.Config) (*lsp.Client, error))
+	}); ok {
+		setter.SetSpawner(func(context.Context, lsp.Config) (*lsp.Client, error) {
+			spawned++
+			return nil, context.Canceled
+		})
+	}
+	port.SetRoot(root)
+	_, _ = port.Open(filepath.Join(root, "a.go"), "go", "package a\n") // trusted auto
+	if spawned != 1 {
+		t.Fatalf("trusted auto start spawned %d, want 1", spawned)
+	}
+	// Manual start under Trusted creates the forced state.
+	_ = port.StartLanguage("go")
+	if spawned != 2 {
+		t.Fatalf("manual trusted start spawned %d, want 2", spawned)
+	}
+	tc, ok := got.deps.Trust.(*trustController)
+	if !ok {
+		t.Fatal("the runtime trust controller is not wired")
+	}
+	if _, err := tc.Decide(trust.Restricted); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	waitLSPBaseline(t, got)
+	// Same manager: forced cleared, live auto gate closed.
+	_, _ = port.Open(filepath.Join(root, "b.go"), "go", "package b\n")
+	if spawned != 2 {
+		t.Fatalf("existing manager started %d server(s) after revoke", spawned-2)
+	}
+	// New root manager: port-level forced cleared, so it is not forced either.
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "go.mod"), []byte("module sub\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = port.Open(filepath.Join(sub, "a.go"), "go", "package a\n")
+	if spawned != 2 {
+		t.Fatalf("new root manager started %d server(s) after revoke", spawned-2)
+	}
+}

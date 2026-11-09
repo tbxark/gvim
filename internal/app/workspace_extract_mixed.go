@@ -143,7 +143,11 @@ func (m *workspaceManager) runMixedExtractExisting(ext *mixedExtract, replace bo
 	// A protected target terminal record must refuse the whole mixed migration
 	// before any write (files would be migrated too), not only the terminal half.
 	if marker, protected := restore.TerminalRecordProtected(dir); protected {
-		m.notify(fmt.Errorf("cannot extract: the target workspace's terminal record is protected (%s); inspect it and remove the marker before migrating terminals; nothing was moved", marker))
+		where := marker
+		if where == "" {
+			where = "saving the terminal record is disabled for this process"
+		}
+		m.notify(fmt.Errorf("cannot extract: the target workspace's terminal record is protected (%s); inspect it and remove the marker before migrating terminals; nothing was moved", where))
 		return nil
 	}
 	conflicts, err := m.mixedExtractConflicts(target.File.StableID, dir, ext)

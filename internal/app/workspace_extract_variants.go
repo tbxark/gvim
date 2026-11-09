@@ -438,7 +438,11 @@ func (m *workspaceManager) acceptExtractTerminalTab(target daemon.Workspace, dir
 	// protected by a marker: never migrate a terminal into it (pure readers check
 	// this before any write), so the extraction leaves both sides untouched.
 	if marker, protected := restore.TerminalRecordProtected(dir); protected {
-		return fmt.Errorf("the target workspace's terminal record is protected (%s); inspect it and remove the marker before migrating terminals", marker)
+		where := marker
+		if where == "" {
+			where = "saving the terminal record is disabled for this process"
+		}
+		return fmt.Errorf("the target workspace's terminal record is protected (%s); inspect it and remove the marker before migrating terminals", where)
 	}
 	m.mu.Lock()
 	open := m.sessions[target.File.StableID]

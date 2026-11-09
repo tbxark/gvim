@@ -69,7 +69,7 @@ func SaveTerminal(dir string, st terminal.SavedState) error {
 	// An unreadable record that could not be quarantined leaves a marker: never
 	// write or remove the original in that case, so a later save cannot silently
 	// destroy what the user may still want to recover.
-	if _, err := os.Stat(path + terminalProtectMarkerSuffix); err == nil {
+	if _, err := os.Lstat(path + terminalProtectMarkerSuffix); err == nil {
 		return fmt.Errorf("terminal: %s exists (an unreadable record could not be quarantined); refusing to overwrite it — inspect the record and remove the marker to continue", path+terminalProtectMarkerSuffix)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("terminal: check %s: %w", path+terminalProtectMarkerSuffix, err)
@@ -173,16 +173,22 @@ func resetSaveProtectionForTest(dir string) {
 	delete(saveDisabledDirs, dir)
 }
 
-// TerminalRecordProtected reports the protection marker path when a live save must
-// not touch a record (an unreadable record that could not be quarantined). Pure
-// readers such as workspace extraction check it before migrating anything.
+// TerminalRecordProtected reports when a save must not touch a record: either the
+// persistent .protected marker exists (checked with Lstat, so a dangling symlink at
+// that name still counts) or this process disabled saves for the directory in memory
+// (an unreadable record could neither be quarantined nor marked). Pure readers such
+// as workspace extraction check it before migrating anything; the path is empty for
+// the in-memory case.
 func TerminalRecordProtected(dir string) (string, bool) {
 	if dir == "" {
 		return "", false
 	}
 	marker := filepath.Join(dir, terminalFileName) + terminalProtectMarkerSuffix
-	if _, err := os.Stat(marker); err == nil {
+	if _, err := os.Lstat(marker); err == nil {
 		return marker, true
+	}
+	if saveDisabledReason(dir) != "" {
+		return "", true
 	}
 	return "", false
 }
@@ -231,7 +237,10 @@ func QuarantineTerminalRecord(dir string) (string, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", nil
 		}
-		return "", err
+		// A stat failure (permission denied, symlink loop, ...) means we cannot
+		// prove the record absent or move it: protect it rather than risk a later
+		// save silently replacing it once permissions recover.
+		return "", protectUnquarantined(dir, path, err)
 	}
 	rejected, err := quarantinePath(path)
 	if err != nil {

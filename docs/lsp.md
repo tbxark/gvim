@@ -233,8 +233,28 @@ configured TS/JS server but keeps it as the baseline. Two safety rules are delib
   build has the same gate, and an already-in-flight start has the window described below);
   manual Start/Restart remains available. This live gate is also consulted by
   every automatic start of an already-created manager: after a revoke its old `AutoStart`
-  configs no longer start new servers, and the gate never stops an existing process. Settings
-  reload and live trust changes feed one serialized baseline updater: it applies the newest
+  configs no longer start new servers, and the gate never stops an existing process. A live
+  trust change also clears the manual-start **forced** state in the port and in every
+  existing manager (`ClearForced`), without stopping anything: a language manually started
+  while Trusted does not keep an `automatic=false` bypass after a revoke, so later Opens and
+  newly created root managers do not start it automatically; the user can still start it
+  explicitly again. A manual start performed while the workspace is *not* Trusted is
+  one-shot: it may start the server now as an explicit action, but it does not persist
+  `forced`, so it cannot turn later Opens into automatic starts behind the live gate. Manual
+  actions are versioned per language by `actionSeq[language]`/`trustSeq`: an in-flight
+  Start/Restart whose trust changed while it ran clears the forced state it may have
+  installed for its own language, and a newer action for *another* language (or a root-wide
+  Restart, which bumps no language token) cannot suppress that cleanup. The cleanup is
+  per-language, so it cannot clear a newer action for another language. As a second defense,
+  the manager never lets `forced` bypass the live auto-start gate for an automatic Open: it
+  only overrides `auto_start`/disabled server selection, while explicit Start/Restart remains
+  a manual, spawn-gated start. A root-wide LSP Restart (`Restart("")`) clears the port-level
+  forced entries for all languages but bumps no per-language action token and does not change
+  `trustSeq`, so an in-flight per-language Start's finishManual still clears its own language;
+  managers created for the rebuilt roots therefore inherit no stale forced state. Under
+  non-Trusted trust subsequent Opens stay gated, and an explicit per-language Start remains
+  the way to run one now. Settings reload and live trust changes feed one serialized baseline
+  updater: it applies the newest
   config+trust snapshot in sequence, so a trust callback that read an older settings snapshot
   cannot overwrite a newer reloaded baseline, and the apply happens off the UI goroutine so a
   blocked baseline update never freezes the trust dialog. An explicit Start/Restart that

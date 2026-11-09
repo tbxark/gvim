@@ -1,0 +1,24 @@
+{
+  "en": {
+    "cmd.check": "Slang: Check slangd / slangc",
+    "cmd.check_desc": "Run slangd --version and slangc -v through the workspace and report their real status",
+    "cmd.copy_install": "Slang: Copy Install Command",
+    "cmd.copy_install_desc": "Copy the official Slang binary-release instructions to the clipboard",
+    "cmd.help": "Slang: Language Server Help",
+    "cmd.help_desc": "Troubleshooting and configuration help for slangd, the Slang shader language server",
+    "status.copied": "Copied: %{value}",
+    "status.copy_failed": "Could not copy the install instruction: %{error}",
+    "status.found": "%{tool}: %{version}",
+    "status.exit_failed": "%{tool} failed (exit %{code}): %{detail}",
+    "status.start_failed": "Could not start %{tool}: %{error}",
+    "status.no_output": "(no version output)",
+    "status.action_failed": "Could not run %{action}: %{error}",
+    "help.title": "Slang Language Server (slangd)",
+    "help.message": "slangd is the Slang shader language server (diagnostics, completion, hover and go-to-definition for .slang files); slangc is the compiler beside it.\n\nInstall and configure:\n  * download a Slang binary release from https://github.com/shader-slang/slang/releases and put both slangc and slangd on PATH (Slang has no single official package-manager command, so Copy Install Command copies that release instruction);\n  * add a language-server entry for Slang in config.json (lsp.slang with command slangd; if gvim does not detect .slang files as a Slang language yet, add a languages.slang entry with the .slang/.slangh extensions), then run Start/Restart LSP Server after changing it;\n  * verify both tools with Slang: Check slangd / slangc; a start error is reported verbatim (it may be a missing binary, a remote-authority error or a sandbox refusal) and is never rewritten as not found.\n\nBuiltin modules (slang-synth://):\n  * slangd answers go-to-definition on builtins (float3, normalize, ...) with a synthetic URI such as slang-synth://core/core.builtin that has no file on disk;\n  * Fresh's slang-lsp.ts claims that URI scheme and dumps the requested module with slangd --print-builtin-module <module> into a cached .slang file, then opens it read-only;\n  * gvim's plugin API has no LSP URI-scheme/external-URI hook, so this port cannot open those targets; the editor keeps its external-location fallback. The mechanism and its implementation guide are documented upstream.\n\nDocs: https://shader-slang.org/docs/  (language server and tooling pages)",
+    "actions.copy_install": "Copy install instruction: %{command}",
+    "actions.check": "Check slangd and slangc",
+    "actions.restart": "Start/Restart LSP Server",
+    "actions.status": "Show LSP Status",
+    "actions.dismiss": "Dismiss (Esc)"
+  }
+}

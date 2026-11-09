@@ -916,3 +916,122 @@ func TestAutoStartGateRaceBoundary(t *testing.T) {
 		t.Fatalf("automatic Open spawned %d server(s) after the gate closed", got-before)
 	}
 }
+
+// TestClearForcedStopsAutomaticBypass checks a manual force removed by ClearForced no longer
+// makes Open start a language while the live auto-start gate is closed.
+func TestClearForcedStopsAutomaticBypass(t *testing.T) {
+	log := &startLog{t: t, fail: errStartFailed}
+	m := newLoggedManager(log, goAndMarkdown)
+	var allowed atomic.Bool
+	allowed.Store(true)
+	m.SetAutoStartGate(func() bool { return allowed.Load() })
+	m.ForceLanguage("go")
+	_ = m.Open(mgrAPath, "go", "package a\n")
+	if len(log.cfgs) != 1 {
+		t.Fatalf("forced Open under Trusted starts = %d, want 1", len(log.cfgs))
+	}
+	allowed.Store(false)
+	m.ClearForced()
+	_ = m.Open(mgrAPath, "go", "package a\n")
+	if len(log.cfgs) != 1 {
+		t.Fatalf("Open after revoke/ClearForced started %d extra server(s)", len(log.cfgs)-1)
+	}
+}
+
+// TestClearForcedDuringForcedOpenDoesNotBypassRevokedGate: ClearForced can land while a
+// forced automatic Open is between its ensure snapshot and the spawn. The late validation
+// must reclassify it as automatic; with the live auto-start gate closed the start is
+// refused instead of bypassing the revoke.
+func TestClearForcedDuringForcedOpenDoesNotBypassRevokedGate(t *testing.T) {
+	log := &startLog{t: t}
+	m := newLoggedManager(log, goAndMarkdown)
+	var allowed atomic.Bool
+	allowed.Store(true)
+	m.SetAutoStartGate(func() bool { return allowed.Load() })
+	m.ForceLanguage("go")
+	gateCalled := false
+	m.SetGate(func(context.Context, []string, string, string) error {
+		gateCalled = true
+		allowed.Store(false)
+		m.ClearForced()
+		return nil
+	})
+	err := m.Open(mgrAPath, "go", "package a\n")
+	if err == nil || !strings.Contains(err.Error(), "automatic") {
+		t.Fatalf("Open error = %v (gateCalled %v, starts %d), want the automatic-start trust refusal", err, gateCalled, len(log.cfgs))
+	}
+	if len(log.cfgs) != 0 {
+		t.Fatalf("stale forced start reached the spawner after revoke/ClearForced: %d", len(log.cfgs))
+	}
+}
+
+// TestForcedOpenOverridesAutoStartOnlyWhileTrusted: forced keeps its config-selection role
+// for auto_start:false servers under a Trusted (gate true) workspace, but an automatic start
+// never bypasses a closed live gate.
+func TestForcedOpenOverridesAutoStartOnlyWhileTrusted(t *testing.T) {
+	log := &startLog{t: t, fail: errStartFailed}
+	m := NewManager(mgrRoot, map[string][]ServerConfig{
+		"go": {{Command: []string{"gopls"}, AutoStart: false}},
+	}, nil)
+	m.start = log.start
+	var allowed atomic.Bool
+	allowed.Store(true)
+	m.SetAutoStartGate(func() bool { return allowed.Load() })
+	m.ForceLanguage("go")
+	_ = m.Open(mgrAPath, "go", "package a\n")
+	if len(log.cfgs) != 1 {
+		t.Fatalf("forced Open under Trusted starts = %d, want 1", len(log.cfgs))
+	}
+	allowed.Store(false)
+	_ = m.Open(mgrBPath, "go", "package b\n")
+	if len(log.cfgs) != 1 {
+		t.Fatalf("forced automatic start bypassed the closed gate: %d total", len(log.cfgs))
+	}
+}
+
+// TestClearForcedDuringManualStartStillStarts: a trust revoke/ClearForced racing an explicit
+// StartLanguage must not silently turn the manual action into a no-op. The manual start
+// still goes through the spawn gate.
+func TestClearForcedDuringManualStartStillStarts(t *testing.T) {
+	log := &startLog{t: t}
+	m := newLoggedManager(log, goAndMarkdown)
+	m.SetAutoStartGate(func() bool { return false })
+	m.SetGate(func(context.Context, []string, string, string) error {
+		m.ClearForced()
+		return nil
+	})
+	if err := m.StartLanguage("go"); err != nil {
+		t.Fatalf("manual StartLanguage after ClearForced: %v", err)
+	}
+	if len(log.cfgs) != 1 {
+		t.Fatalf("manual StartLanguage started %d server(s), want 1", len(log.cfgs))
+	}
+}
+
+// TestClearForcedKeepsRunningServerAndManualRestart: ClearForced never stops a running
+// server, and a normal manual Restart under Trusted still works afterwards.
+func TestClearForcedKeepsRunningServerAndManualRestart(t *testing.T) {
+	log := &startLog{t: t}
+	m := newLoggedManager(log, goAndMarkdown)
+	if err := m.StartLanguage("go"); err != nil {
+		t.Fatal(err)
+	}
+	hs := m.Handles("go")
+	if len(hs) != 1 {
+		t.Fatalf("handles = %d, want 1", len(hs))
+	}
+	before := hs[0]
+	m.ClearForced()
+	if got := m.Handles("go"); len(got) != 1 || got[0] != before {
+		t.Fatal("ClearForced stopped/replaced the running server")
+	}
+	if err := m.RestartServer("go", ""); err != nil {
+		t.Fatalf("manual RestartServer after ClearForced: %v", err)
+	}
+	if len(log.cfgs) != 2 {
+		t.Fatalf("RestartServer starts = %d, want 2 (initial + restart)", len(log.cfgs))
+	}
+	if got := m.Handles("go"); len(got) != 1 || got[0] == before {
+		t.Fatal("manual RestartServer did not replace the server")
+	}
+}

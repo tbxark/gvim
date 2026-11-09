@@ -81,6 +81,7 @@ func newPort(plan lspPlan, lspEnabled bool, spawnEnv func() []string) *lspPort {
 		docs:             make(map[string]lspDocRec),
 		muted:            make(map[string]bool),
 		forced:           make(map[string]bool),
+		actionSeq:        make(map[string]uint64),
 		sem:              make(map[string]semanticCache),
 		pulled:           make(map[string]pulledDiagnostics),
 		completionTokens: make(map[int]completionResolve),
@@ -147,6 +148,15 @@ type lspPort struct {
 	// started by hand, which start their servers whatever auto_start says.
 	muted  map[string]bool
 	forced map[string]bool
+	// actionSeq and trustSeq version manual-start actions per language against trust
+	// clears: ClearForced bumps trustSeq, a newer Start/Restart for a language bumps that
+	// language's actionSeq, and an in-flight action only re-applies its forced intent when
+	// it still owns the newest action for its own language and the trust version is
+	// unchanged. A manual start under non-Trusted trust never persists forced (see
+	// finishManual). Keeping this per-language means a newer action for another language
+	// (or a root-wide Restart) cannot suppress this language's cleanup.
+	actionSeq map[string]uint64
+	trustSeq  uint64
 	// sem caches the semantic-token data of open documents, and pulled the
 	// server-pulled diagnostics. Both are keyed by path and invalidated when the
 	// document closes, or on a restart.
@@ -842,7 +852,17 @@ func (p *lspPort) StartLanguage(language string) error {
 		desired []manager.ServerConfig
 	}
 	p.mu.Lock()
-	p.forced[language] = true
+	p.actionSeq[language]++
+	startSeq := p.actionSeq[language]
+	trustSeq := p.trustSeq
+	// A manual start under Restricted/Blocked may start the server now (explicit user
+	// action) but must not leave a persistent forced bypass of the live auto-start gate.
+	persist := p.autoStartGate == nil || p.autoStartGate()
+	if persist {
+		p.forced[language] = true
+	} else {
+		delete(p.forced, language)
+	}
 	delete(p.muted, language)
 	list := make([]managerDesired, 0, len(p.managers))
 	for root, mgr := range p.managers {
@@ -866,6 +886,7 @@ func (p *lspPort) StartLanguage(language string) error {
 		}
 		errs = append(errs, item.mgr.StartLanguage(language))
 	}
+	p.finishManual(language, startSeq, trustSeq, persist)
 	return errors.Join(errs...)
 }
 
@@ -877,9 +898,27 @@ func (p *lspPort) Restart(language string) error {
 	// it on the wire instead of letting it answer into a cache the restart clears.
 	p.wsPulls.cancelAll()
 	p.mu.Lock()
+	var startSeq, trustSeq uint64
+	var persist bool
 	if language != "" {
-		p.forced[language] = true
+		// Root-wide Restart (language == "") must not bump any per-language action token:
+		// an in-flight manual Start for a language must still finish its own cleanup.
+		p.actionSeq[language]++
+		startSeq = p.actionSeq[language]
+		trustSeq = p.trustSeq
+		persist = p.autoStartGate == nil || p.autoStartGate()
+		if persist {
+			p.forced[language] = true
+		} else {
+			delete(p.forced, language)
+		}
 		delete(p.muted, language)
+	} else {
+		// Root-wide Restart clears the port-level manual intent: it must not be
+		// inherited by managers created for the rebuilt roots. It does not bump any
+		// per-language action token or trustSeq, so an in-flight per-language Start's
+		// finishManual still owns and clears its own language.
+		p.forced = make(map[string]bool)
 	}
 	mgrs := slices.Collect(maps.Values(p.managers))
 	p.managers = make(map[string]*manager.Manager)
@@ -892,6 +931,9 @@ func (p *lspPort) Restart(language string) error {
 	var errs []error
 	for _, mgr := range mgrs {
 		errs = append(errs, mgr.Shutdown(ctx))
+	}
+	if language != "" {
+		p.finishManual(language, startSeq, trustSeq, persist)
 	}
 	return errors.Join(errs...)
 }
@@ -965,6 +1007,10 @@ func (p *lspPort) RestartServer(language, name string) error {
 	p.selectionMu.Lock()
 	defer p.selectionMu.Unlock()
 	p.mu.Lock()
+	p.actionSeq[language]++
+	startSeq := p.actionSeq[language]
+	trustSeq := p.trustSeq
+	persist := p.autoStartGate == nil || p.autoStartGate()
 	delete(p.muted, language)
 	var root string
 	var mgr *manager.Manager
@@ -989,16 +1035,19 @@ func (p *lspPort) RestartServer(language, name string) error {
 	}
 	desired := slices.Clone(p.serverConfigsFor(root)[language])
 	p.mu.Unlock()
+	var err error
 	if !reflect.DeepEqual(mgr.CurrentServers(language), desired) {
 		// Explicit Restart Server applies a completed per-root selection to the existing
 		// manager (only this language's servers are stopped by ReplaceServers).
-		err := mgr.ReplaceServers(language, desired)
-		if err != nil {
-			return err
+		err = mgr.ReplaceServers(language, desired)
+		if err == nil {
+			err = errors.Join(p.reopenDocs(root, language)...)
 		}
-		return errors.Join(p.reopenDocs(root, language)...)
+	} else {
+		err = mgr.RestartServer(language, name)
 	}
-	return mgr.RestartServer(language, name)
+	p.finishManual(language, startSeq, trustSeq, persist)
+	return err
 }
 
 // StopServer stops the named server.
@@ -1320,6 +1369,45 @@ func (p *lspPort) SetSpawnGate(gate func(ctx context.Context, argv []string, cwd
 	p.mu.Unlock()
 	for _, mgr := range managers {
 		mgr.SetGate(gate)
+	}
+}
+
+// finishManual reconciles a manual start with the live trust version. When the action is
+// still the newest (not superseded by another manual action) and it did not persist (manual
+// start while not Trusted) or trust changed while it ran, it clears the forced state it may
+// have installed, so a concurrent ClearForced cannot be overwritten. It never stops the
+// servers the explicit action started.
+func (p *lspPort) finishManual(language string, startSeq, trustSeq uint64, persist bool) {
+	p.mu.Lock()
+	currentStart, currentTrust := p.actionSeq[language], p.trustSeq
+	if currentStart != startSeq {
+		p.mu.Unlock()
+		return // a newer manual action owns the forced state
+	}
+	if persist && currentTrust == trustSeq {
+		p.mu.Unlock()
+		return
+	}
+	delete(p.forced, language)
+	mgrs := slices.Collect(maps.Values(p.managers))
+	p.mu.Unlock()
+	for _, mgr := range mgrs {
+		mgr.ClearForcedLanguage(language)
+	}
+}
+
+// ClearForced drops the manual-start overrides of the port and all of its managers. A
+// trust change calls it so a language manually started while Trusted cannot keep an
+// automatic=false bypass of the auto-start gate after a revoke; running processes are not
+// stopped. It takes no selectionMu (the trust dialog must not wait on an LSP start).
+func (p *lspPort) ClearForced() {
+	p.mu.Lock()
+	p.trustSeq++
+	p.forced = make(map[string]bool)
+	mgrs := slices.Collect(maps.Values(p.managers))
+	p.mu.Unlock()
+	for _, mgr := range mgrs {
+		mgr.ClearForced()
 	}
 }
 

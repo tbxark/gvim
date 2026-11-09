@@ -1074,8 +1074,14 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// snapshot cannot overwrite a newer baseline. Manual Start/Restart remains available.
 	if trustCtl != nil {
 		trustCtl.SetChangeListener(func(state trust.State) {
+			// A manual start performed while Trusted must not survive as a forced
+			// automatic=false bypass after a revoke. Clear it before any new manager or
+			// Open can consult it; running servers are not stopped.
+			if setter, ok := deps.LSP.(interface{ ClearForced() }); ok {
+				setter.ClearForced()
+			}
 			if lspBase != nil {
-				lspBase.UpdateTrust(state)
+				lspBase.UpdateTrust(trust.State{Level: state.Level})
 			}
 		})
 	}

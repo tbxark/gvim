@@ -497,7 +497,7 @@ func (m *Manager) applyEditHandler(language string) func(protocol.ApplyWorkspace
 func (m *Manager) Open(path, languageID, text string) error {
 	// The starts run without the send lock: a start can take seconds, and a change
 	// or close of a document on another, running server must not wait for it.
-	hs, errs := m.ensureServers(languageID)
+	hs, errs := m.ensureServers(languageID, false)
 	hs = append(hs, m.ensureUniversal()...)
 	if len(hs) == 0 {
 		if len(errs) > 0 {
@@ -788,6 +788,25 @@ func (m *Manager) SetLanguageEnabled(language string, enabled bool) {
 	}
 }
 
+// ClearForced drops every manual-start override. It is used when the live trust level
+// changes (a Trusted manual start must not survive a revoke as an automatic=false bypass of
+// the auto-start gate). It never stops a running server.
+func (m *Manager) ClearForced() {
+	m.mu.Lock()
+	m.forced = make(map[string]bool)
+	m.mu.Unlock()
+}
+
+// ClearForcedLanguage drops one manual-start override. It is used when a trust change
+// cleared the port's forces while an explicit Start/Restart was between its snapshot and
+// its manager call and re-installed the force; only the language that operation owns is
+// dropped, and running servers are not stopped.
+func (m *Manager) ClearForcedLanguage(language string) {
+	m.mu.Lock()
+	delete(m.forced, language)
+	m.mu.Unlock()
+}
+
 // ForceLanguage marks language as started by hand: every configured server of it
 // starts at the next Open, whatever auto_start or the mute says. It starts nothing
 // now.
@@ -802,7 +821,11 @@ func (m *Manager) ForceLanguage(language string) {
 // or the mute says. It is the manual start of a whole language.
 func (m *Manager) StartLanguage(language string) error {
 	m.ForceLanguage(language)
-	_, errs := m.ensureServers(language)
+	// manual=true keeps an explicit start explicit even if a concurrent trust change
+	// clears the forced flag before the starts run: the servers still go through the
+	// spawn gate, so the trust refusal remains possible but the manual action is not
+	// silently reduced to a no-op.
+	_, errs := m.ensureServers(language, true)
 	return errors.Join(errs...)
 }
 
@@ -905,11 +928,10 @@ func (m *Manager) findConfig(language, name string) (cfg ServerConfig, universal
 
 // ensureServers returns the running handles of language, starting the servers
 // that should start now. The second result holds the failures of the starts.
-func (m *Manager) ensureServers(language string) ([]*Handle, []error) {
+func (m *Manager) ensureServers(language string, manual bool) ([]*Handle, []error) {
 	m.mu.Lock()
 	configs := slices.Clone(m.servers[language])
 	disabled := m.disabled[language]
-	forced := m.forced[language]
 	m.mu.Unlock()
 	auto := m.autoStartAllowed()
 
@@ -924,12 +946,19 @@ func (m *Manager) ensureServers(language string) ([]*Handle, []error) {
 			continue
 		}
 		stopped := m.stopped[key]
+		forced := m.forced[language]
 		epoch := m.epoch
 		m.mu.Unlock()
-		if stopped || (!forced && (!auto || disabled || !cfg.AutoStart)) {
+		if stopped {
 			continue
 		}
-		h, err := m.startServer(key, language, cfg, false, epoch, !forced)
+		if !manual && !forced && (!auto || disabled || !cfg.AutoStart) {
+			continue
+		}
+		// Forced only overrides the auto_start/disabled switches: an automatic start never
+		// bypasses the live auto-start gate. Explicit StartLanguage/Restart passes manual and
+		// remains a manual, spawn-gated start.
+		h, err := m.startServer(key, language, cfg, false, epoch, !manual)
 		if err != nil {
 			errs = append(errs, err)
 			continue

@@ -1,0 +1,7 @@
+{
+  "name": "slang_lsp",
+  "version": "1.0.0",
+  "description": "Slang shader language-server helper: check slangd/slangc, copy the official Slang release instructions, and show slangd/slang-synth troubleshooting help",
+  "api": 2,
+  "default_enabled": false
+}

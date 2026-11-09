@@ -585,6 +585,41 @@ start/workspace-trust-gate failures (not a missing-binary claim), the probe-fail
 states plus `deno.jsonc` and a custom workspace root, and the help popup's native
 auto-selection/explicit-config/plugin-toggle text and actions plus copy/check/native-restart dispatch.
 
+### Slang: no LSP URI-scheme seam (port residual)
+
+Fresh's `slang-lsp.ts` is an LSP URI-scheme provider, not an install helper: it claims the
+`slang-synth://` scheme so the core routes builtin go-to-definition targets to it, then answers
+`lsp_open_external_uri` by running `slangd --print-builtin-module <module>` and opening the dumped
+`.slang` source read-only (cache keyed by `slangc -v`). gvim's plugin API has neither an LSP
+URI-scheme claim nor an external-URI hook, so the bundled port
+(`plugin/bundled/plugins/slang_lsp/`, opt-in) keeps the user-facing install/check/help half:
+
+* `Slang: Check slangd / slangc` runs `slangd --version` and `slangc -v` with `gvim.proc.run`
+  (through the workspace authority, 5 s / 64 KiB bounds), decides with `result.ok`, and reports each
+  tool's first version line; a non-ok result carries exit code + first stderr/stdout line, and a
+  start failure carries the actual error (remote-authority/sandbox/broken-executable errors are never
+  rewritten as "not found"); one tool failing does not hide the other's answer;
+* `Slang: Copy Install Command` copies the official release instruction. Slang has no single
+  official package-manager command (the upstream install page points at binary releases), so the
+  clipboard text names the GitHub releases page and putting `slangc`/`slangd` on PATH rather than
+  inventing a manager command;
+* `Slang: Language Server Help` explains adding `lsp.slang` (and a user `languages.slang` entry for
+  `.slang`/`.slangh` when needed), the `slang-synth://` builtin-module mechanism and the missing
+  scheme seam, verification/restart steps, the releases/docs links, and offers copy/check plus the
+  native Start/Restart LSP Server and Show LSP Status actions.
+
+Not ported: the `slang-synth://` scheme claim, `lsp_open_external_uri` handling, the
+`--print-builtin-module` cache (version-keyed persistent or ephemeral), and opening the generated
+source read-only. gvim's native fallback for a non-file URI still reports an external location.
+The plugin is `default_enabled: false`, registers no keys/settings, and the native Slang LSP entry
+(if the user configures one) is untouched.
+
+Tests: `plugin/bundled/slang_lsp_test.go` covers the manifest/visible commands/no bindings, the
+copy instruction (clipboard/status), both tools OK (version lines, argv order), one tool failing
+(non-zero exit named), a start failure preserved verbatim and not rewritten as missing, and the help
+popup's message/actions plus copy/check/native-restart dispatch.
+
+
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.

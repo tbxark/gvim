@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships thirty plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships thirty-one plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome`, `markdown_source`, `rust_lsp`, `deno_lsp` and `diff_nav` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome`, `markdown_source`, `rust_lsp`, `deno_lsp`, `diff_nav` and `slang_lsp` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -31,6 +31,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `clangd_support` | **off** | Clangd: Switch Source/Header, Clangd: Project Setup, Clangd: Open Project Config | none |
 | `rust_lsp` | **off** | Rust: Copy rustup Install Command, Rust: Copy brew Install Command, Rust: Check rust-analyzer, Rust: Language Server Help | none |
 | `deno_lsp` | **off** | Deno: Check Project, Deno: Copy Install Command, Deno: Language Server Help | none |
+| `slang_lsp` | **off** | Slang: Check slangd / slangc, Slang: Copy Install Command, Slang: Language Server Help | none |
 | `welcome` | **off** | Plugin Demo: Open Help, Plugin Demo: Save File, Plugin Demo: Say Hello, Plugin Demo: Insert Time, Plugin Demo: Insert Comment | none |
 | `markdown_source` | **off** | none (hidden Enter/Tab/Shift+Tab key handlers for Markdown lists) | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
@@ -381,6 +382,28 @@ exit/timeout/signal never ready, probe start and workspace-trust-gate failures (
 claim), the probe-failure/ready/no-config states, `deno.jsonc` and a custom workspace root, the help
 popup's native auto-selection/explicit-config/plugin-toggle text and actions plus
 copy/check/native-restart dispatch.
+
+**slang_lsp** (reduced Fresh port): the Slang shader language-server helper. Fresh's `slang-lsp.ts`
+is an LSP URI-scheme provider: it claims `slang-synth://` and, when go-to-definition lands on a
+builtin (float3, normalize, ...), dumps the builtin module with `slangd --print-builtin-module` to a
+version-keyed cache and opens it read-only. gvim's plugin API has no LSP URI-scheme claim or
+external-URI hook, so that half is not portable (the editor keeps its external-location fallback);
+the port keeps the install/verification/help surface as three commands. **Slang: Check slangd /
+slangc** runs `slangd --version` and `slangc -v` through `gvim.proc` (authority-following), uses
+`result.ok` for the verdict, and reports each tool's first version line — a non-ok result includes
+its exit code and first output line, and a start failure reports the actual error verbatim (a remote
+authority error, sandbox refusal or broken executable is never rewritten as a missing binary).
+**Slang: Copy Install Command** copies the official release instruction (Slang has no single
+official package-manager command; the upstream install page points at binary releases from
+https://github.com/shader-slang/slang/releases, with `slangc`/`slangd` to put on PATH). **Slang:
+Language Server Help** opens a popup covering the `lsp.slang` configuration (and a user
+`languages.slang` entry for `.slang`/`.slangh` when gvim does not detect them), the `slang-synth://`
+builtin-module mechanism and why gvim cannot open those synthetic targets, verification/restart
+notes, the release link and https://shader-slang.org/docs/, with copy/check and the native
+Start/Restart LSP Server and Show LSP Status actions. No keys/settings; opt-in
+(`default_enabled: false`). Reductions (also in porting.md): no URI-scheme claim/external-URI hook
+so builtin targets keep the native fallback; no `--print-builtin-module` cache; the install command
+is release guidance rather than a package-manager one-liner.
 
 **markdown_source** (port of Fresh's `plugins/markdown_source.ts`): gvim's editor already
 implements Fresh's Markdown source-mode list rules natively (`editor/markdown.go`, called from the

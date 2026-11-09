@@ -559,17 +559,21 @@ ignored by the loader as an unknown version/empty shape) to a
 the original bytes, and reports the explicit warning (stderr and the status row);
 the next normal save then writes a fresh record while the quarantined original
 stays for inspection. The quarantine name search is bounded (100 `.rejected`
-attempts) before the record is protected. If the rename fails, a
-`terminal.json.protected` marker is written and every later `SaveTerminal` refuses
-to write or remove anything (so even a normal exit cannot destroy the original);
-if the directory is unwritable so that the marker write ALSO fails, the loader
-disables saving that record **in memory for the rest of the process**, so the
-next save is refused even without a marker. Extraction paths keep using the pure
-loader and check the marker before any migration: a target with a valid record
-plus `.protected` refuses the whole mixed extraction (files and terminals) before
-any write, and the single-terminal path refuses likewise. History migration rides
-the same rules: the migrated queries are bounded/cleaned like any saved history
-and restoring/merging them starts no process. Durability of the migration differs
+attempts) before the record is protected; a `stat` failure that is not simply
+"missing" (permission denied, a symlink loop, …) is also protected rather than
+returned unprotected, because the loader cannot prove the record absent. If the
+rename fails, a `terminal.json.protected` marker is written and every later
+`SaveTerminal` refuses to write or remove anything (so even a normal exit cannot
+destroy the original); the marker check uses `lstat`, so a dangling symlink at the
+marker name still counts. If the directory is unwritable so that the marker write
+ALSO fails, the loader disables saving that record **in memory for the rest of the
+process**, so the next save is refused even without a marker. Extraction paths
+keep using the pure loader and check the protection state — marker **or** the
+in-memory block — before any migration: a target whose record is protected refuses
+the whole mixed extraction (files and terminals) before any write, and the
+single-terminal path refuses likewise. History migration rides the same rules:
+the migrated queries are bounded/cleaned like any saved history and
+restoring/merging them starts no process. Durability of the migration differs
 by target state: a dormant target's merged history is written synchronously into
 its terminal record, while a materialized target merges it into the live dock and
 relies on the normal asynchronous workspace capture — a crash before that capture
