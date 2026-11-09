@@ -54,6 +54,9 @@ type localEnvWatch struct {
 	// closeWatch makes watcher/fsnotify cleanup idempotent across the startup-failure
 	// path, Close, and the goroutine exiting on session cancellation.
 	closeWatch sync.Once
+	// dead is true once the watcher resources were released (natural end, startup failure
+	// or Close); Env: Reload may then start a fresh watcher.
+	dead atomic.Bool
 
 	mu     sync.Mutex
 	added  map[string]bool
@@ -104,11 +107,14 @@ func startLocalEnvWatchWith(parent context.Context, provider *env.Provider, root
 	}
 	lw.plan.Store(buildEnvWatchPlan(provider.Detectors()))
 	if !lw.armDirs() {
-		// The workspace root could not be watched: fsnotify is unusable for this launch.
+		// The workspace root could not be watched: fsnotify is unusable for this launch,
+		// but Env: Reload may retry once the root becomes watchable.
+		lw.provider.SetWatchRetryNeeded(true)
 		lw.closeResources()
 		cancel()
 		return nil
 	}
+	lw.provider.RefreshDetection()
 	lw.wg.Add(1)
 	go lw.run()
 	return lw
@@ -149,10 +155,62 @@ func (lw *localEnvWatch) Close() {
 // session context ended, or Close was called.
 func (lw *localEnvWatch) closeResources() {
 	lw.closeWatch.Do(func() {
+		lw.dead.Store(true)
 		if lw.watcher != nil {
 			_ = lw.watcher.Close()
 		}
 	})
+}
+
+// Dead reports whether the watcher's resources were released and a retry may start a new
+// watcher (Env: Reload after a root-Add failure recovers this way).
+func (lw *localEnvWatch) Dead() bool { return lw == nil || lw.dead.Load() }
+
+// localEnvWatchRetry owns the replace-on-demand lifecycle of the local detector watcher.
+// The first start can fail when the workspace root is not watchable yet (fsnotify Add
+// fails); the provider keeps the Env: Reload notice. Env: Reload (an env-manager set/clear
+// action) calls Retry, which starts a fresh bounded watcher off the UI goroutine, closes a
+// dead predecessor once, and installs the new watcher for runtime detector re-plans. A
+// live watcher is left alone, so ordinary activations do not churn fsnotify.
+type localEnvWatchRetry struct {
+	mu      sync.Mutex
+	ctx     context.Context
+	current *localEnvWatch
+	start   func() *localEnvWatch
+	install func(*localEnvWatch)
+}
+
+// Current returns the installed watcher (tests/status); nil before the first success.
+func (r *localEnvWatchRetry) Current() *localEnvWatch {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.current
+}
+
+func (r *localEnvWatchRetry) Retry() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ctx != nil && r.ctx.Err() != nil {
+		return
+	}
+	if r.current != nil && !r.current.Dead() {
+		return
+	}
+	lw := r.start()
+	if lw == nil {
+		return
+	}
+	old := r.current
+	r.current = lw
+	if old != nil {
+		old.Close()
+	}
+	if r.install != nil {
+		r.install(lw)
+	}
 }
 
 func (lw *localEnvWatch) run() {
@@ -170,6 +228,7 @@ func (lw *localEnvWatch) run() {
 		case changed, ok := <-lw.watcher.Events():
 			if !ok {
 				lw.provider.SetWatchNotice(appText("gvim.notice.local_env_watch_ended", "Local environment: the file watcher ended; changed detector markers are picked up on Env: Reload"))
+				lw.provider.SetWatchRetryNeeded(true)
 				return
 			}
 			plan := lw.plan.Load()
@@ -258,13 +317,18 @@ func (lw *localEnvWatch) armDirs() bool {
 	switch {
 	case rootFailed:
 		lw.provider.SetWatchNotice(appText("gvim.notice.local_env_watch_root_unwatchable", "Local environment: the workspace root cannot be watched; changed detector markers are picked up on Env: Reload"))
+		lw.provider.SetWatchRetryNeeded(true)
 		return false
 	case failed > 0:
 		lw.provider.SetWatchNotice(appTextVars("gvim.notice.local_env_watch_dirs", "Local environment: %{count} detector marker director(ies) cannot be watched; changed markers there are picked up on Env: Reload", map[string]any{"count": failed}))
+		// The root itself is watched; only optional parent dirs are missing, so an Env:
+		// Reload does not need to replace the watcher.
+		lw.provider.SetWatchRetryNeeded(false)
 	case plan.omitted > 0 || plan.omittedDirs > 0:
 		lw.provider.SetWatchNotice(localEnvWatchLimitNotice(plan))
 	default:
 		lw.provider.SetWatchNotice("")
+		lw.provider.SetWatchRetryNeeded(false)
 	}
 	return true
 }

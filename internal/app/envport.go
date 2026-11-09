@@ -16,6 +16,11 @@ import (
 type envPort struct {
 	provider workspaceEnv
 	level    func() string
+	// retryWatch is the local detector-watcher recovery hook: an env-manager
+	// activation/reload (gvim.env.set/clear) after a root-Add failure asks it to start a
+	// fresh bounded watcher in the background. nil for remote launches or when local file
+	// watching is off.
+	retryWatch func()
 }
 
 var _ interface {
@@ -32,6 +37,13 @@ func envInfo(info env.Info) pluginapi.EnvInfo {
 
 func (e envPort) DetectedEnv() (pluginapi.EnvInfo, bool) {
 	det, ok := e.provider.Detected()
+	// Env: Reload starts the env-manager's reload with detected(); that read must also
+	// recover a local watcher whose root Add failed (the command may return "no env"
+	// before any set/clear action). Retry only when the provider says one is needed, so
+	// ordinary detection reads do not churn fsnotify.
+	if wn, ok := e.provider.(interface{ WatchRetryNeeded() bool }); ok && wn.WatchRetryNeeded() {
+		e.retryWatchAsync()
+	}
 	if !ok {
 		return pluginapi.EnvInfo{}, false
 	}
@@ -65,10 +77,23 @@ func (e envPort) SetEnv(snippet, dir, kind string) error {
 	if errors.Is(err, env.ErrUntrusted) {
 		return pluginapi.Errf(pluginapi.CodeInvalid, "%s", strings.TrimPrefix(err.Error(), "untrusted: "))
 	}
+	if err == nil {
+		e.retryWatchAsync()
+	}
 	return err
 }
 
 func (e envPort) ClearEnv() error {
 	e.provider.Clear()
+	e.retryWatchAsync()
 	return nil
+}
+
+// retryWatchAsync runs the potentially stat-watching recovery hook off the caller: the
+// plugin env action stays non-blocking and no fsnotify call ever lands on the UI update
+// loop. A live watcher makes the hook a no-op.
+func (e envPort) retryWatchAsync() {
+	if e.retryWatch != nil {
+		go e.retryWatch()
+	}
 }

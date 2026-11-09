@@ -199,24 +199,40 @@ deliberately does not take.
   answer, never the whole file; every chunk and the commit are bounded by their contexts
   (a cancelled chunk is an error, and the abort still removes the temporary file with its
   own short bounded context).
-- Copy-safe no-follow streamed writes: `NoFollowWriteStreamer` (reached with
-  `authority.NoFollowWriteStreams(fs)`) is the optional copy-safe variant of
-  `WriteStreamer`. It uses the same temp-file/`Commit`/`Abort` protocol but does **not**
-  resolve a symbolic link at the final destination: `Commit` renames over the destination
-  path itself, replacing a link instead of following it. The ordinary `WriteStream` keeps
-  the save semantics of following the final link. Only the LOCAL backend implements the
-  copy-safe surface, using `os.Rename` (atomic, no-follow). The SSH backend deliberately
-  does **not** advertise it: POSIX `mv` follows a destination symlink-to-directory, and
-  there is no portable remote rename proven to replace a link atomically without a
-  check-then-remove helper; the old rm-before-mv approach could lose a target on failure or
-  race the check. Plugin `fs.copy` requires the no-follow surface, so on SSH it returns
-  `unsupported` before reading, creating or writing anything; a backend that provides the
-  capability (the local authority) gets the atomic stream. Copy canonicalizes the
-  destination first, so a concurrent symlink to the source cannot redirect the stream: the
-  ordinary stream would follow it at open, which is why the capability gate exists. Tests
-  cover the local no-follow behaviour, the SSH capability refusal, and the plugin-host
-  copy refusal (`authority/write_stream_test.go`,
-  `internal/pluginhost/authorityos_copy_safety_test.go`).
+- Copy-safe streamed writes have two capability-gated surfaces, and plugin `fs.copy`
+  refuses a backend with neither before reading source data or touching a target:
+  * **Local no-follow replace.** `NoFollowWriteStreamer` (`authority.NoFollowWriteStreams`)
+    uses the same temp-file/`Commit`/`Abort` protocol but does **not** resolve a symbolic
+    link at the final destination: `Commit` renames over the destination path itself,
+    replacing a link instead of following it. Existing destinations can be atomically
+    replaced. Ordinary `WriteStream` keeps the save semantics of following the final link.
+  * **SSH new target only.** `NewTargetWriteStreamer` (`authority.NewTargetWriteStreams`)
+    streams into a private `mktemp` in the destination directory and `Commit`s with the
+    POSIX `link` utility (exact target) — one no-clobber hard link, never `ln`/`mv`/rm of
+    the target. A pre-write probe in the destination directory must prove exact-target
+    hardlink semantics (`link` present; a second link, symlink target and directory target
+    all EEXIST without being followed); otherwise the operation is `unsupported` before
+    source data is read. Existing files/directories/symlinks/dangling symlinks (and a
+    target that appears concurrently) are `conflict` and are never followed, replaced or
+    deleted; abort/failure attempts to remove only the private temp (best-effort, not a
+    guarantee). The destination parent must already exist for the pre-write probe.
+    `NewTargetProver` exposes that probe so a tree copy can refuse a backend before
+    claiming/creating its destination root. These are pre-write path/capability proofs,
+    not a general atomicity or durability guarantee: parent-component replacement after
+    the proof remains a TOCTOU hole; the per-directory probe cache can become stale after
+    a mount/replacement; a probe can pass on a non-EEXIST second-link failure while the
+    later commit still fails safely; temp cleanup is best-effort; and the SSH helper path is
+    tested against the local helper shell, not a real SSH host. When the helper succeeds,
+    the target is complete and atomically linked, and an existing target is never followed,
+    replaced or deleted.
+  Plugin `fs.copy` canonicalizes the destination first, so a concurrent symlink to the
+  source cannot redirect the local no-follow stream (the ordinary save stream would follow
+  it at open). On SSH only new destinations are supported; replacing an existing
+  destination is unsupported, and the SSH no-follow replace surface remains absent. Tests
+  cover the local no-follow behaviour, the SSH new-target link commit (existing/
+  concurrent targets, links, directories, abort/cancel, multi-chunk) and the plugin-host
+  capability selection/refusal (`authority/ssh_new_target_stream_test.go`,
+  `authority/write_stream_test.go`, `internal/pluginhost/authorityos_copy_safety_test.go`).
 - Exclusive create: `CreateNew` is the optional `FileCreator` surface (reached with
   `authority.Creators(fs)`) for callers that must not replace an existing entry. The SSH
   backend creates the empty file with one POSIX noclobber redirection (`set -C; : > "$p"`,
@@ -807,10 +823,17 @@ error batch names the original tool/probe failure and says only open buffers wer
 from their editor snapshots — the remote project files were not searched. The result is
 never presented as complete, no local disk is read, and a user cancellation still closes
 the batch stream without a Done batch (no open-snapshot rows are emitted after the cancel).
-The same panel limit/caps apply to the snapshot matches. All commands run through the
-authority one-shot surface with the remote cwd, stay bounded/cancellable (the search
-context bounds every nested listing), and never read the local disk; other degradations are
-carried as non-fatal panel notices.
+The same panel limit/caps apply to the snapshot matches. When the search is bounded by the
+panel's quick-open file-index snapshot and the remote tool returns a matching path outside
+that snapshot, the Done batch carries a non-fatal notice saying the result was limited to
+the snapshot and that the path may be new since the index last refreshed (or excluded by
+the glob), pointing at File Explorer: Refresh; the batch is not marked Truncated because
+this is a snapshot bound, not an output cap, but the result is never presented as an
+unqualified complete project search. The finder index still does not refresh itself on a
+search; the notice is the safe slice until a panel-driven refresh is wired. All commands
+run through the authority one-shot surface with the remote cwd, stay bounded/cancellable
+(the search context bounds every nested listing), and never read the local disk; other
+degradations are carried as non-fatal panel notices.
 
 ### Windowed remote reads (remote large-file mode)
 

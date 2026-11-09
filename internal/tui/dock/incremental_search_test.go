@@ -192,3 +192,110 @@ func TestIncrementalSearchOnALiveTranscript(t *testing.T) {
 		t.Fatalf("preview selected row = %q, %v", got, ok)
 	}
 }
+
+// TestIncrementalSearchPreviewNextPrevious checks the Fresh search-prompt
+// interaction: F3/Shift+F3 step the preview through the matches while the query
+// stays editable, wrapping at the ends, and Enter commits the query with the same
+// matches. (Fresh binds find_next/find_previous to F3/Shift+F3 when searchPrompt is
+// open, keeping the bar open.)
+func TestIncrementalSearchPreviewNextPrevious(t *testing.T) {
+	t.Parallel()
+	p := restoredSearchPanel(t, "alpha", "beta", "alphabet", "alpine", "gamma")
+	p.startSearchInput()
+	typeSearch(t, p, "al")
+	if len(p.scroll.preview) != 3 || p.ScrollSelected() != 0 {
+		t.Fatalf("preview = %v selected %d, want three matches starting at row 0", p.scroll.preview, p.ScrollSelected())
+	}
+	step := func(shift bool) {
+		k := tea.Key{Code: tea.KeyF3}
+		if shift {
+			k.Mod = tea.ModShift
+		}
+		cmd, ok := p.ScrollKey(k)
+		if !ok {
+			t.Fatal("F3 was not taken by the open search input")
+		}
+		applyKeys(t, p, cmd)
+	}
+	step(false)
+	if p.ScrollSelected() != 2 {
+		t.Fatalf("F3 selected %d, want the second preview match row 2", p.ScrollSelected())
+	}
+	step(false)
+	if p.ScrollSelected() != 3 {
+		t.Fatalf("F3 selected %d, want the third preview match row 3", p.ScrollSelected())
+	}
+	step(false) // wraps
+	if p.ScrollSelected() != 0 {
+		t.Fatalf("F3 wrap selected %d, want row 0", p.ScrollSelected())
+	}
+	step(true) // previous wraps backwards
+	if p.ScrollSelected() != 3 {
+		t.Fatalf("Shift+F3 selected %d, want the last preview match row 3", p.ScrollSelected())
+	}
+	if !p.scroll.typing || p.SearchQuery() != "" {
+		t.Fatalf("stepping closed or committed the search: typing %v query %q", p.scroll.typing, p.SearchQuery())
+	}
+	if title := p.title(); !strings.Contains(title, "/al") || strings.Contains(title, "1/3") {
+		t.Fatalf("stepping title = %q, want the editable query without committed k/n", title)
+	}
+	// Enter commits the same query; n/N then step the committed matches.
+	applyKeys(t, p, p.searchInputKey(tea.Key{Code: tea.KeyEnter}))
+	if p.SearchQuery() != "al" || p.SearchMatches() != 3 {
+		t.Fatalf("committed search = %q/%d", p.SearchQuery(), p.SearchMatches())
+	}
+	applyKeys(t, p, p.nextMatch(1))
+	if p.ScrollSelected() != 2 {
+		t.Fatalf("n after commit selected %d, want row 2", p.ScrollSelected())
+	}
+}
+
+// TestIncrementalSearchStepOrdersAndRestores checks F3 answers follow the async
+// ordering (a late answer for an older query is dropped), a first F3 on an
+// un-answered query lands on its first match, Shift+F3 lands on its last, and Esc
+// still restores the pre-search view.
+func TestIncrementalSearchStepOrdersAndRestores(t *testing.T) {
+	t.Parallel()
+	p := restoredSearchPanel(t, "one", "two", "three", "beta", "five")
+	// Commit "beta" (row 3) as the previous search.
+	p.startSearchInput()
+	typeSearch(t, p, "beta")
+	applyKeys(t, p, p.searchInputKey(tea.Key{Code: tea.KeyEnter}))
+	top, selected := p.scroll.top, p.scroll.selected
+	// Start a new query but leave its typing answer un-applied; a step request must
+	// supersede it (newer sequence), and a late typing answer must be dropped.
+	p.startSearchInput()
+	cmdTyping, _ := p.ScrollKey(tea.Key{Code: 'o', Text: "o"})
+	cmdStep, _ := p.ScrollKey(tea.Key{Code: tea.KeyF3})
+	if cmdTyping == nil || cmdStep == nil {
+		t.Fatal("typing/F3 produced no search command")
+	}
+	applyKeys(t, p, cmdStep) // first F3 on the un-answered query lands on its first match
+	if got, ok := p.combinedText(p.ScrollSelected()); !ok || !strings.Contains(got, "one") {
+		t.Fatalf("first F3 selected %q, %v, want the first 'o' match", got, ok)
+	}
+	applyKeys(t, p, cmdTyping) // late answer for the pre-F3 typing
+	if got, ok := p.combinedText(p.ScrollSelected()); !ok || !strings.Contains(got, "one") {
+		t.Fatalf("a late typing answer moved the preview: %q, %v", got, ok)
+	}
+	// Shift+F3 on a fresh un-answered query lands on its last match.
+	p2 := restoredSearchPanel(t, "alpha", "beta", "alphabet", "alpine")
+	p2.startSearchInput()
+	_, _ = p2.ScrollKey(tea.Key{Code: 'a', Text: "a"}) // un-applied answer for "a"
+	cmdPrev, _ := p2.ScrollKey(tea.Key{Code: tea.KeyF3, Mod: tea.ModShift})
+	applyKeys(t, p2, cmdPrev)
+	last := len(p2.scroll.preview) - 1
+	if p2.scroll.previewIdx != last || p2.ScrollSelected() != p2.scroll.preview[last] {
+		t.Fatalf("first Shift+F3 idx %d selected %d preview %v, want the last match", p2.scroll.previewIdx, p2.ScrollSelected(), p2.scroll.preview)
+	}
+	// Esc drops the preview and restores the pre-search view/search.
+	if _, ok := p.ScrollKey(tea.Key{Code: tea.KeyEscape}); !ok {
+		t.Fatal("Esc was not taken")
+	}
+	if p.scroll.top != top || p.scroll.selected != selected || p.scroll.previewQuery != "" || p.scroll.previewIdx != 0 || p.scroll.previewStep != 0 {
+		t.Fatalf("after Esc: top %d selected %d preview %q/%d/%d, want %d/%d and cleared", p.scroll.top, p.scroll.selected, p.scroll.previewQuery, p.scroll.previewIdx, p.scroll.previewStep, top, selected)
+	}
+	if p.SearchQuery() != "beta" || p.SearchMatches() != 1 {
+		t.Fatalf("Esc changed the committed search: %q/%d", p.SearchQuery(), p.SearchMatches())
+	}
+}

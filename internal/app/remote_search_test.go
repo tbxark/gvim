@@ -1770,3 +1770,92 @@ func TestRemoteSearchToolUnavailableCancellation(t *testing.T) {
 		}
 	}
 }
+
+// TestRemoteSearchStaleSnapshotNotice checks that when the remote tool returns a matching
+// file outside the panel's quick-open file-index snapshot, the Done batch explicitly says
+// the search was limited to that snapshot and points at File Explorer: Refresh, instead of
+// silently presenting a complete-looking result.
+func TestRemoteSearchStaleSnapshotNotice(t *testing.T) {
+	out := "a.go:1:1:todo a\nnew.go:1:1:todo new\n"
+	s := newRemoteProjectSearch(&fakeOneShot{script: toolScript("rg", out)}, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+		Files: []string{"a.go"},
+	}, nil))
+	var names []string
+	var done *searchpanel.SearchBatch
+	for i := range batches {
+		for _, f := range batches[i].Files {
+			names = append(names, f.Name)
+		}
+		if batches[i].Done {
+			done = &batches[i]
+		}
+	}
+	if got := strings.Join(names, ","); got != "a.go" {
+		t.Fatalf("files = %q, want only the snapshot file", got)
+	}
+	if done == nil {
+		t.Fatal("no Done batch")
+	}
+	if done.Truncated {
+		t.Fatalf("Done batch = %+v, want not truncated (the snapshot filter is not a cap)", *done)
+	}
+	if !strings.Contains(done.Notice, "file-index snapshot") || !strings.Contains(done.Notice, "File Explorer: Refresh") {
+		t.Fatalf("notice = %q, want the stale-snapshot/refresh guidance", done.Notice)
+	}
+}
+
+// TestRemoteSearchSnapshotBoundWithoutOutsideMatchesNoNotice checks the ordinary case:
+// results all inside the snapshot do not get a staleness notice.
+func TestRemoteSearchSnapshotBoundWithoutOutsideMatchesNoNotice(t *testing.T) {
+	out := "a.go:1:1:todo a\n"
+	s := newRemoteProjectSearch(&fakeOneShot{script: toolScript("rg", out)}, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+		Files: []string{"a.go"},
+	}, nil))
+	if notice := doneBatchNotice(t, batches); notice != "" {
+		t.Fatalf("notice = %q, want no staleness notice when every match is in the snapshot", notice)
+	}
+}
+
+// TestRemoteSearchSnapshotNoticeSurvivesToolFailure checks the tool-unavailable path with
+// open snapshots can still carry the limited-snapshot notice when a filtered outside match
+// was seen, while the original tool error is preserved.
+func TestRemoteSearchSnapshotNoticeSurvivesToolFailure(t *testing.T) {
+	one := &fakeOneShot{script: func(_ context.Context, argv []string, _ hostos.ProcOptions) (hostos.ProcResult, error) {
+		if len(argv) > 0 && argv[0] == "sh" {
+			return hostos.ProcResult{Stdout: []byte("none")}, nil
+		}
+		return hostos.ProcResult{}, errors.New("unexpected")
+	}}
+	cur := searchpanel.SourceFile{Path: "/remote/w/a.go", Name: "a.go", Text: "todo open\n", Dirty: true}
+	s := newRemoteProjectSearch(one, "/remote/w")
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:      "/remote/w",
+		Query:     "todo",
+		Scope:     searchpanel.AllFiles,
+		Files:     []string{"a.go"},
+		Current:   &cur,
+		OpenFiles: []searchpanel.SourceFile{cur},
+	}, nil))
+	var files []searchpanel.FileMatches
+	var done *searchpanel.SearchBatch
+	for i := range batches {
+		files = append(files, batches[i].Files...)
+		if batches[i].Done {
+			done = &batches[i]
+		}
+	}
+	if done == nil || done.Err == "" || !strings.Contains(done.Notice, "only open buffers") {
+		t.Fatalf("done = %+v, want the tool error + partial notice", done)
+	}
+	if len(files) != 1 || files[0].Name != "a.go" {
+		t.Fatalf("files = %+v, want the open snapshot", files)
+	}
+}

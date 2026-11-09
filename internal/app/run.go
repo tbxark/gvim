@@ -637,6 +637,8 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	var envShell *remoteEnvShell
 	var envWatch envWatchReplanner
 	var envProvider workspaceEnv
+	var localWatchRetry func()
+	var settingsSvc *settingsService
 	if opts.Remote != nil {
 		rootOf := func() string {
 			if envRemote == nil {
@@ -663,8 +665,23 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			// Local detector markers are watched with the editor's fsnotify watcher so a
 			// created/removed .envrc/.nvmrc/.venv refreshes detection off the UI loop. If
 			// fsnotify is unavailable the provider carries an Env: Reload degradation
-			// notice instead of blocking or polling the tree.
-			envWatch = startLocalEnvWatch(ctx, localProvider, root)
+			// notice instead of blocking or polling the tree. Env: Reload retries a
+			// failed start (e.g. the root was not watchable yet) in the background.
+			localWatch := startLocalEnvWatch(ctx, localProvider, root)
+			envWatch = localWatch
+			retry := &localEnvWatchRetry{
+				ctx:     ctx,
+				current: localWatch,
+				start: func() *localEnvWatch {
+					return startLocalEnvWatch(ctx, localProvider, root)
+				},
+				install: func(lw *localEnvWatch) {
+					if settingsSvc != nil {
+						settingsSvc.setEnvWatch(lw)
+					}
+				},
+			}
+			localWatchRetry = retry.Retry
 		} else {
 			localProvider.SetWatchNotice("Local environment: file watching is off; changed detector markers are picked up on Env: Reload")
 		}
@@ -711,7 +728,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		}
 		return trust.DecideSpawn(levelOf(), root, cwd, argv, pathValue)
 	}
-	deps.Env = envPort{provider: envProvider, level: levelLive}
+	deps.Env = envPort{provider: envProvider, level: levelLive, retryWatch: localWatchRetry}
 	if logFile != nil {
 		deps.NoticeSink = logFile.Notice
 	}
@@ -1010,7 +1027,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// The Settings page's live parts: the LSP manager for its Language Servers
 	// page statuses and actions, and the plugin runtime for its Plugins page. They
 	// are built after the page's config snapshot and before the model.
-	settingsSvc := newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat, settingsRuntime{
+	settingsSvc = newSettingsService(root, opts, ed, trustedForSettings, cfg, themeCat, settingsRuntime{
 		lsp:         deps.LSP,
 		localeApply: func(locale string) { pw.Runtime.SetLocale(locale) },
 		plugins:     pw.Runtime,
@@ -1024,7 +1041,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		version:    gvimVersion(),
 	})
 	settingsSvc.env = envProvider
-	settingsSvc.envWatch = envWatch
+	settingsSvc.setEnvWatch(envWatch)
 	deps.SettingsPort = settingsSvc
 	// Notice is the first config problem, then any session file whose unsaved
 	// text was kept, for the status row. Every warning still goes to stderr,

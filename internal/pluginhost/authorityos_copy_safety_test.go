@@ -2,7 +2,10 @@ package pluginhost
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"path"
+	"strings"
 	"sync"
 	"testing"
 
@@ -311,5 +314,188 @@ func TestAuthorityOSCopyRequiresNoFollowStream(t *testing.T) {
 	}
 	if calls := local.Calls(); len(calls) != 0 {
 		t.Fatalf("unsupported copy touched the local OS: %v", calls)
+	}
+}
+
+// fakeNewTargetFiles has only the new-target link-commit stream (no no-follow), modeling
+// the SSH capability. It records streams and can simulate a destination created by another
+// writer at Commit.
+type fakeNewTargetFiles struct {
+	*fakeMutableFiles
+	mu          sync.Mutex
+	opened      int
+	unsupported bool
+	race        string
+	conflicts   int
+}
+
+func (f *fakeNewTargetFiles) ProveNewTarget(context.Context, string) error {
+	if f.unsupported {
+		return fmt.Errorf("%w: hardlink proof unavailable", authority.ErrUnsupportedFileIO)
+	}
+	return nil
+}
+
+func (f *fakeNewTargetFiles) WriteStreamNewTarget(_ context.Context, p string, _ hostos.WriteOptions) (authority.WriteStream, error) {
+	if f.unsupported {
+		return nil, fmt.Errorf("%w: hardlink proof unavailable", authority.ErrUnsupportedFileIO)
+	}
+	f.mu.Lock()
+	f.opened++
+	f.mu.Unlock()
+	return &fakeNewTargetStream{parent: f, path: p}, nil
+}
+
+type fakeNewTargetStream struct {
+	parent *fakeNewTargetFiles
+	path   string
+	buf    strings.Builder
+	done   bool
+}
+
+func (s *fakeNewTargetStream) Write(_ context.Context, p []byte) error {
+	if s.done {
+		return fs.ErrClosed
+	}
+	s.buf.Write(p)
+	return nil
+}
+
+func (s *fakeNewTargetStream) Commit(_ context.Context) error {
+	if s.done {
+		return fs.ErrClosed
+	}
+	s.parent.mu.Lock()
+	defer s.parent.mu.Unlock()
+	if s.parent.race != "" && s.path == s.parent.race {
+		s.parent.files[s.path] = "winner"
+		s.parent.conflicts++
+		s.done = true
+		return fmt.Errorf("%s: %w: destination already exists", s.path, fs.ErrExist)
+	}
+	if _, ok := s.parent.files[s.path]; ok {
+		return fmt.Errorf("%s: %w: destination already exists", s.path, fs.ErrExist)
+	}
+	s.parent.files[s.path] = s.buf.String()
+	s.done = true
+	return nil
+}
+
+func (s *fakeNewTargetStream) Abort(context.Context) { s.done = true }
+
+func (f *fakeNewTargetFiles) openCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.opened
+}
+
+func TestAuthorityOSCopyNewTargetCapability(t *testing.T) {
+	remote := walkFixture()
+	remote.files["/srv/proj/a.txt"] = "payload"
+	files := &fakeNewTargetFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}}
+	slot, _, _ := authorityTestSlot(files)
+	local := plugintest.NewFakeOS()
+	osys := NewAuthorityOS(slot, local, nil).(*authorityOS)
+	if err := osys.Copy(context.Background(), "a.txt", "b.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if got := remote.files["/srv/proj/b.txt"]; got != "payload" {
+		t.Fatalf("new-target copy = %q", got)
+	}
+	if files.openCount() != 1 {
+		t.Fatalf("new-target streams = %d, want one", files.openCount())
+	}
+	if got := remote.files["/srv/proj/a.txt"]; got != "payload" {
+		t.Fatalf("source changed: %q", got)
+	}
+	if calls := local.Calls(); len(calls) != 0 {
+		t.Fatalf("new-target copy touched the local OS: %v", calls)
+	}
+}
+
+func TestAuthorityOSCopyNewTargetExistingDestinationUnsupported(t *testing.T) {
+	remote := walkFixture()
+	remote.files["/srv/proj/a.txt"] = "source"
+	remote.files["/srv/proj/b.txt"] = "keep me"
+	files := &fakeNewTargetFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}}
+	slot, _, _ := authorityTestSlot(files)
+	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil).(*authorityOS)
+	err := osys.Copy(context.Background(), "a.txt", "b.txt")
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("new-target copy over existing = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if got := remote.files["/srv/proj/b.txt"]; got != "keep me" {
+		t.Fatalf("existing destination changed: %q", got)
+	}
+	if files.openCount() != 0 {
+		t.Fatalf("an existing destination opened %d streams", files.openCount())
+	}
+}
+
+func TestAuthorityOSCopyNewTargetConcurrentCreatorConflict(t *testing.T) {
+	remote := walkFixture()
+	remote.files["/srv/proj/a.txt"] = "source"
+	files := &fakeNewTargetFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}, race: "/srv/proj/b.txt"}
+	slot, _, _ := authorityTestSlot(files)
+	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil).(*authorityOS)
+	err := osys.Copy(context.Background(), "a.txt", "b.txt")
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeConflict {
+		t.Fatalf("concurrent new-target copy = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if got := remote.files["/srv/proj/b.txt"]; got != "winner" {
+		t.Fatalf("concurrent winner changed: %q", got)
+	}
+	if got := remote.files["/srv/proj/a.txt"]; got != "source" {
+		t.Fatalf("source changed: %q", got)
+	}
+}
+
+func TestAuthorityOSCopyNewTargetUnsupportedProbe(t *testing.T) {
+	remote := walkFixture()
+	remote.files["/srv/proj/a.txt"] = "source"
+	files := &fakeNewTargetFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}, unsupported: true}
+	slot, _, _ := authorityTestSlot(files)
+	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil).(*authorityOS)
+	err := osys.Copy(context.Background(), "a.txt", "b.txt")
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("unproven new-target copy = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if _, ok := remote.files["/srv/proj/b.txt"]; ok {
+		t.Fatal("unproven new-target copy created a destination")
+	}
+}
+
+func TestAuthorityOSCopyNewTargetTree(t *testing.T) {
+	remote := walkFixture()
+	remote.files["/srv/proj/src/b.go"] = "bb"
+	remote.files["/srv/proj/src/sub/c.go"] = "ccc"
+	files := &fakeNewTargetFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}}
+	slot, _, _ := authorityTestSlot(files)
+	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil).(*authorityOS)
+	if err := osys.Copy(context.Background(), "src", "dst"); err != nil {
+		t.Fatal(err)
+	}
+	if remote.files["/srv/proj/dst/b.go"] != "bb" || remote.files["/srv/proj/dst/sub/c.go"] != "ccc" {
+		t.Fatalf("new-target tree files = %v", remote.files)
+	}
+	if files.openCount() != 2 {
+		t.Fatalf("new-target streams = %d, want 2", files.openCount())
+	}
+}
+
+func TestAuthorityOSCopyNewTargetTreeUnsupportedProbe(t *testing.T) {
+	remote := walkFixture()
+	files := &fakeNewTargetFiles{fakeMutableFiles: &fakeMutableFiles{fakeRemoteFiles: remote}, unsupported: true}
+	slot, _, _ := authorityTestSlot(files)
+	osys := NewAuthorityOS(slot, plugintest.NewFakeOS(), nil).(*authorityOS)
+	err := osys.Copy(context.Background(), "src", "dst")
+	if err == nil || pluginapi.CodeOf(err) != pluginapi.CodeUnsupported {
+		t.Fatalf("unprovable new-target tree = %v, code %q", err, pluginapi.CodeOf(err))
+	}
+	if len(files.mkdirs) != 0 {
+		t.Fatalf("unprovable tree created directories: %v", files.mkdirs)
+	}
+	if _, ok := remote.files["/srv/proj/dst/b.go"]; ok {
+		t.Fatal("unprovable tree wrote a destination file")
 	}
 }

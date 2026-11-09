@@ -59,6 +59,11 @@ const (
 // sshFiles implements FileSystem for one SSH backend.
 type sshFiles struct {
 	b *sshBackend
+	// newTargetMu guards the per-directory proof of the no-clobber hardlink commit used
+	// by the new-target-only copy stream.
+	newTargetMu  sync.Mutex
+	newTargetOK  map[string]bool
+	newTargetErr map[string]error
 }
 
 func newSSHFiles(b *sshBackend) *sshFiles { return &sshFiles{b: b} }

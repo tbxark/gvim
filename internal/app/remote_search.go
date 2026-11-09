@@ -249,10 +249,19 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 	pending := make([]searchpanel.FileMatches, 0, searchBatchFiles)
 	pendingMatches := 0
 	totalMatches := 0
+	outsideSnapshot := false
 	flush := func(done bool) bool {
 		batch := searchpanel.SearchBatch{Files: pending, Truncated: truncated, Done: done}
 		if done && scope != nil {
 			batch.Notice = scope.notice
+		}
+		if done && outsideSnapshot {
+			stale := "remote search was limited to the quick-open file-index snapshot; matching remote files outside it were not searched (they may be new since the index last refreshed, or excluded by the glob) — use File Explorer: Refresh to re-enumerate the index"
+			if batch.Notice != "" {
+				batch.Notice += "; " + stale
+			} else {
+				batch.Notice = stale
+			}
 		}
 		if !send(batch) {
 			return false
@@ -330,6 +339,7 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 			continue
 		}
 		if allowed != nil && !allowed[rel] {
+			outsideSnapshot = true
 			continue
 		}
 		if _, isOpen := openByRel[rel]; isOpen {

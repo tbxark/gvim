@@ -54,12 +54,15 @@ func remoteProbeSlot(fs authority.FileSystem) authority.Slot {
 	return authority.New(authority.Parts{Files: fs})
 }
 
-// TestRemotePrefixProbeUsesAuthorityRealPath: the remote probe resolves both the root
-// and the candidate through the authority's RealPath capability and stats the remote
-// file; a space in the path is legal.
+// TestRemotePrefixProbeUsesAuthorityRealPath: the remote probe is the exact-path
+// slice only: it resolves the root and the literal candidate through the authority's
+// RealPath capability and stats the remote file. Parent basename-prefix and directory
+// enumeration are deliberately not wired remotely (the authority ReadDir is unbounded
+// before trimming); spaces in the path are legal.
 func TestRemotePrefixProbeUsesAuthorityRealPath(t *testing.T) {
 	fs := newRemoteProbeFS()
 	fs.reals["/remote/w"] = "/remote/w"
+	fs.stats["/remote/w"] = hostos.FileStat{Kind: "dir"}
 	fs.reals["/remote/w/a.go"] = "/remote/w/a.go"
 	fs.reals["/remote/w/my file.txt"] = "/remote/w/my file.txt"
 	fs.stats["/remote/w/a.go"] = hostos.FileStat{Kind: "file"}
@@ -72,6 +75,8 @@ func TestRemotePrefixProbeUsesAuthorityRealPath(t *testing.T) {
 		{"a.go", []string{"a.go"}},
 		{"my file.txt", []string{"my file.txt"}},
 		{"missing.go", nil},
+		{"a", nil},   // no remote parent-prefix branch
+		{"sub", nil}, // no remote directory branch
 		{"../secret", nil},
 	} {
 		got, err := probe(context.Background(), tt.query)
@@ -141,6 +146,7 @@ func TestRemoteFileIndexInstallsTheProbe(t *testing.T) {
 	fs := newRemoteProbeFS()
 	fs.dirs["/remote/w"] = []hostos.DirEntry{{Name: "a.go", Kind: "file"}}
 	fs.reals["/remote/w"] = "/remote/w"
+	fs.stats["/remote/w"] = hostos.FileStat{Kind: "dir"}
 	fs.reals["/remote/w/a.go"] = "/remote/w/a.go"
 	fs.stats["/remote/w/a.go"] = hostos.FileStat{Kind: "file"}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

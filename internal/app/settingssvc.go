@@ -497,6 +497,14 @@ type envWatchReplanner interface {
 	Replan(detectors []config.EnvDetector)
 }
 
+// setEnvWatch installs/replaces the watch surface after an Env: Reload recovery started a
+// fresh local watcher (safe against a concurrent Settings reload reading it).
+func (s *settingsService) setEnvWatch(w envWatchReplanner) {
+	s.mu.Lock()
+	s.envWatch = w
+	s.mu.Unlock()
+}
+
 // applyEnvDetectorChange re-plans the remote env watcher/provider when a config Reload
 // changed env.detectors. The provider is updated (invalidating detection/capture) and the
 // watcher re-arms its bounded watch plan off the update loop; no local filesystem is read

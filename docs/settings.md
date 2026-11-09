@@ -516,6 +516,16 @@ with deadlines rather than fixed sleeps; production still pays filewatch's quiet
 which treats a watch-registration failure as a silent no-watch and leaves the cached
 detection stale until another invalidation.
 
+If the very first local watch start fails (most commonly the workspace root is not
+watchable yet — fsnotify Add failed), the Environment rows keep the Local Env: Reload notice
+and a later **Env: Reload** recovers it: the env-manager's next Env: Reload does so — its first
+detection read (or its set/clear action when an environment is active) asks the app to start
+a fresh bounded watcher in the background (no fsnotify call on the UI update loop),
+the dead predecessor's resources are already released exactly once, and a successful retry
+re-runs the passive detection and clears the notice; a live watcher is left untouched, so
+ordinary activations do not churn fsnotify. Fresh's env probe never retries its best-effort
+watch registration, so this recovery path is a deliberate gvim improvement.
+
 A config Reload that changes `env.detectors` applies immediately without a restart: a local
 provider replaces its detector list and re-runs the passive scan (detection-only; active
 recipe/cache kept), and a remote provider is updated with its bounded authority watcher

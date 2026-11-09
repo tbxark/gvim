@@ -51,7 +51,7 @@ Scrollback keys:
 | Up, Down | move the selected row by one |
 | PageUp, PageDown | move by a screen |
 | Home, End | oldest row, newest row |
-| `/` or Ctrl+F | open the search input; typing previews the matches and jumps the view to the first one, Enter commits, Esc cancels and restores the previous view/search |
+| `/` or Ctrl+F | open the search input; typing previews the matches and jumps the view to the first one, F3 / Shift+F3 step the preview to the next/previous match, Enter commits, Esc cancels and restores the previous view/search |
 | Ctrl+R | toggle a regular-expression search |
 | Ctrl+A | toggle a search that respects case |
 | n, N | next, previous match |
@@ -68,8 +68,17 @@ carries a request sequence, so a late answer for an older keystroke (or for a
 preview superseded by Enter) is dropped and cannot move the view or replace the
 committed search. Enter commits the query and its matches (the title shows
 `k/n`), while Esc drops the preview, restores the view the input opened on and
-keeps the previously committed search/matches. A bad regular expression is
-reported as a notice and keeps the previous matches. When the transcript is re-wrapped by a width change (a restored
+keeps the previously committed search/matches. While the input is open, F3 and
+Shift+F3 step the preview forward/backward through the current query's matches
+(wrapping at the ends) without closing the input or committing the query; this
+mirrors Fresh, whose default keymap binds `find_next`/`find_previous` to
+F3/Shift+F3 in the `searchPrompt` context so the search bar stays open while its
+matches are stepped (the first press on an edited/unrun query runs it first). If
+the answer for the current query has not arrived yet, the F3 request is ordered
+like any other preview: the answer lands on the first (F3) or last (Shift+F3)
+match — Fresh's backward first press instead lands on the match before the cursor,
+a documented approximation. A bad regular expression is reported as a notice and
+keeps the previous matches. When the transcript is re-wrapped by a width change (a restored
 transcript or a restarted shell's prior rows), the stored match row indexes no
 longer hold, so Sync re-runs a committed query over the new rows asynchronously
 (Update/Draw never search): the query and its regex/case options survive, the

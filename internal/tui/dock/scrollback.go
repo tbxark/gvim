@@ -58,7 +58,12 @@ type scrollState struct {
 	// preview holds the matches of the in-progress incremental search (the typing
 	// input). It is separate from the committed matches, so Esc can drop the
 	// preview and return to the committed search and its view.
-	preview []int
+	preview      []int
+	previewQuery string
+	previewIdx   int
+	// previewStep is a next/previous request that arrived before the answer for
+	// the current query: the answer then lands on its first (or last) match.
+	previewStep int
 	// searchSaved/searchSavedTop/searchSavedSelected remember the view before the
 	// search input opened; Esc restores it (Fresh cancels an incremental search
 	// without moving the view).
@@ -371,6 +376,9 @@ func (p *Panel) startSearchInput() {
 	p.scroll.typing = true
 	p.scroll.searchInput = ""
 	p.scroll.preview = nil
+	p.scroll.previewQuery = ""
+	p.scroll.previewIdx = 0
+	p.scroll.previewStep = 0
 	p.scroll.searchSaved = true
 	p.scroll.searchSavedTop = p.scroll.top
 	p.scroll.searchSavedSelected = p.scroll.selected
@@ -382,19 +390,50 @@ func (p *Panel) startSearchInput() {
 // late answer for an older input is dropped by applySearch (searchSeq).
 func (p *Panel) incrementalSearchCmd() tea.Cmd {
 	query := strings.TrimSpace(p.scroll.searchInput)
+	p.scroll.previewStep = 0
 	if query == "" {
 		p.scroll.searchSeq++
 		p.scroll.preview = nil
+		p.scroll.previewQuery = ""
+		p.scroll.previewIdx = 0
 		return nil
 	}
 	return p.searchCommand(query, p.scroll.regex, p.scroll.matchCase, false)
 }
 
+// previewStepCmd is F3/Shift+F3 while the incremental search input is open: step
+// the preview through the current query's matches without closing the input (Fresh
+// keeps the search prompt open and binds F3/Shift+F3 to find_next/find_previous
+// while it is up). When the answer for the current query has not arrived yet, the
+// request is ordered and the answer lands on the first (or last) match, like the
+// first press of a fresh query in Fresh.
+func (p *Panel) previewStepCmd(dir int) tea.Cmd {
+	query := strings.TrimSpace(p.scroll.searchInput)
+	if query == "" {
+		return nil
+	}
+	if p.scroll.previewQuery == query && len(p.scroll.preview) > 0 {
+		n := len(p.scroll.preview)
+		p.scroll.previewIdx = (p.scroll.previewIdx + dir + n) % n
+		p.jumpToRow(p.scroll.preview[p.scroll.previewIdx])
+		return p.requestScrollback()
+	}
+	p.scroll.previewStep = dir
+	return p.searchCommand(query, p.scroll.regex, p.scroll.matchCase, false)
+}
+
 func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 	switch {
+	case k.Code == tea.KeyF3:
+		dir := 1
+		if k.Mod&tea.ModShift != 0 {
+			dir = -1
+		}
+		return p.previewStepCmd(dir)
 	case k.Code == tea.KeyEscape:
 		p.scroll.typing, p.scroll.searchInput = false, ""
 		p.scroll.preview = nil
+		p.scroll.previewQuery, p.scroll.previewIdx, p.scroll.previewStep = "", 0, 0
 		p.scroll.searchSeq++ // pending previews must not land after the cancel
 		if p.scroll.searchSaved {
 			p.scroll.top = p.scroll.searchSavedTop
@@ -408,6 +447,7 @@ func (p *Panel) searchInputKey(k tea.Key) tea.Cmd {
 	case k.Code == tea.KeyEnter:
 		p.scroll.typing = false
 		p.scroll.preview = nil
+		p.scroll.previewQuery, p.scroll.previewIdx, p.scroll.previewStep = "", 0, 0
 		p.scroll.searchSaved = false
 		p.scroll.search = strings.TrimSpace(p.scroll.searchInput)
 		if p.scroll.search == "" {
@@ -546,8 +586,15 @@ func (p *Panel) applySearch(msg searchMsg) tea.Cmd {
 	}
 	if !msg.commit {
 		p.scroll.preview = msg.matches
+		p.scroll.previewQuery = msg.query
+		idx := 0
+		if p.scroll.previewStep < 0 && len(msg.matches) > 0 {
+			idx = len(msg.matches) - 1
+		}
+		p.scroll.previewStep = 0
+		p.scroll.previewIdx = idx
 		if len(msg.matches) > 0 {
-			p.jumpToRow(msg.matches[0])
+			p.jumpToRow(msg.matches[idx])
 		}
 		return p.requestScrollback()
 	}

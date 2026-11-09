@@ -21,15 +21,16 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-09, tree commit `bc5624b` plus the merged round-39 work. Static gates PASS
-(Lead; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import
-rules, menus, i18n_check with catalogue heap en 126 KiB / de 82 KiB / both 208 KiB, git diff
---check). Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL
-line (log `/tmp/gvim-r39-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-39
-tests/diff review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/
-streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux,
-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh
-reference: `refs/fresh` same date.
+Last verified: 2026-11-09, tree commit `6c6f71b` (the previous round's commit is folded in) plus the
+merged round-40 work. Static gates PASS (Lead; default GOCACHE: build, CGO_ENABLED=0,
+GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en
+126 KiB / de 88 KiB / both 214 KiB, git diff --check). Final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+`/tmp/gvim-r40-final.log`). The audit ran build/gofmt/i18n_check plus targeted round-40 tests/diff
+review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
+file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY,
+real-host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh`
+same date.
 
 **Round 1 outcome (2026-11-08):** workspace trust (levels/store/prompt/dialog/palette command/
 config-layer + LSP-autostart gating/status pill), native sidebar sections with the Markdown
@@ -1513,6 +1514,87 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-40 outcome (2026-11-09, merged working tree on `6c6f71b`).** Five slices landed: local
+bounded prefix/directory probe with remote exact-Stat fallback; remote external-snapshot notice;
+sidebar F3/Shift+F3 preview stepping; Env:Reload watcher retry supervisor; SSH new-target link
+capability (audited, with explicit residuals). Static gates pass; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL (log
+`/tmp/gvim-r40-final.log`). The audit read the diff and ran targeted tests; the Lead ran the full
+suite.
+**Bounded local file probe; remote exact-Stat fallback (keymap).** The local literal-path probe now
+supports Fresh's prefix slice beyond one exact path: a query naming an existing directory lists that
+directory's visible regular files; otherwise it lists the parent and keeps regular files whose names
+start with the query's basename. Local directory work is bounded in batches (at most 4096 inspected
+entries, checking cancellation, at most 50 returned paths; hidden entries only when the typed
+basename starts with a dot; a directory listing skips them), and every candidate is resolved through
+symlinks and returned only when its real target stays inside the real workspace. The REMOTE probe
+deliberately supports the exact-path Stat slice ONLY: it resolves root and literal candidate through
+the authority's realpath capability and stats that one file, never the local disk, and refuses when
+containment cannot be proven. It performs no remote directory enumeration because the authority
+ReadDir shell glob materializes the whole directory before any client-side limit could trim it (so the
+probe does not claim remote reads are bounded). Every probe runs only in a tea.Cmd, never
+Update/Draw; context cancels on query change/palette close; answers are cached for loading poll ticks
+and displayed only when query sequence/text still match; confirmed paths merge before normal rank so
+fuzzy scoring/prefix boost/:line[:col]/file-row cap apply. Residuals: remote parent-basename/directory
+branches are not probed (need a bounded directory-reader port); local scan cap can miss entries past
+4096; probe branch has no .gitignore filtering; completed-but-truncated index not probed; exact local
+symlink followed only while real target stays inside workspace (realpath-check→Stat TOCTOU remains
+theoretical); hidden entries not listed for a hidden-directory query (R3/R13-3).
+**Remote external-snapshot notice (lsp).** When a remote search is bounded by the panel's quick-open
+file-index snapshot and the remote tool returns a matching path outside that snapshot, the Done batch
+carries a non-fatal notice: the result was limited to the snapshot, the path may be new since the
+index last refreshed (or excluded by the glob), pointing at File Explorer: Refresh. It is not marked
+Truncated because this is a snapshot bound, not an output cap, but the result is never presented as
+an unqualified complete project search. The finder index still does not refresh itself on a search;
+the notice is the safe slice until a panel-driven refresh is wired. Authority-only/bounded/cancel/no
+local disk/no complete-looking result (R13-11/R13-23).
+**Sidebar terminal F3/Shift+F3 preview stepping (sidebar).** While the scrollback search input is
+open, F3 and Shift+F3 step the preview forward/backward through the current query's matches (wrapping
+at the ends) without closing the input or committing the query, mirroring Fresh's find_next/
+find_previous bindings in the searchPrompt context. The first press on an edited/unrun query runs it
+first; if the current query's answer has not arrived, the F3 request is ordered like any other
+preview (F3 answer lands on the first match, Shift+F3 on the last — Fresh's backward first press lands
+on the match before the cursor, a documented approximation). Bad regex is a notice that keeps
+previous matches; Enter commits, Esc restores the previous view/search; Update/Draw never search
+(R13-15).
+**Env:Reload watcher retry supervisor (trust).** If the very first local watch start fails (most
+commonly an unwatchable workspace root), Environment rows keep the Local Env: Reload notice, and a
+later Env: Reload recovers it: the env-manager's first detection read (or set/clear action when an
+environment is active) asks the app to start a fresh bounded watcher in the background (no fsnotify
+call on the UI update loop); the dead predecessor's resources are released exactly once; a successful
+retry re-runs passive detection and clears the notice; a live watcher is untouched so ordinary
+activations do not churn fsnotify. Fresh never retries its best-effort watch registration, so this
+recovery path is a deliberate gvim improvement; detection-only semantics and local wording preserved
+(R13-18).
+**SSH new-target link capability (plugin copy; audited).** Plugin copy now has two capability-gated
+safe surfaces: local no-follow replace (temp+rename over the path, existing destination atomically
+replaced) and SSH NEW-TARGET ONLY: stream into a private mktemp in the destination directory, commit
+with the POSIX link utility (exact target, one no-clobber hard link; never ln/mv/rm of the target). A
+pre-write probe in the destination directory proves exact-target hardlink semantics (link present;
+second link/symlink target/directory target all EEXIST without following); otherwise unsupported
+before source data is read. Existing files/directories/symlinks/dangling symlinks and concurrent
+creators are conflict and are never followed, replaced or deleted; abort/failure removes only the
+private temp. A tree copy needs DirectoryCreator plus this stream and proves the destination parent
+BEFORE claiming the root; existing SSH destinations are unsupported (no no-follow replace). Audit
+residuals recorded in docs: (a) temp cleanup is best-effort, not guaranteed — commit transport
+errors/cancellation and failed rm after a successful link can leave .gvim-* temps, a killed probe can
+leave .gvim-lnprobe-*; the target is still complete and is never deleted; (b) parent-path TOCTOU is
+not closed — canonicalization/probe are pre-write proofs only, so a renamed/symlinked parent can make
+link create a new target in an unexpected directory (never over an existing target; no dirfd/openat
+containment recheck); (c) per-lexical-directory probe cache can go stale after replacement/mount (a
+later commit fails safely or links under the current path); (d) probe is a capability proof, not a
+strong atomicity proof (a second-link failure for quota/permission/link-count rather than EEXIST can
+pass; later commit only fails safely with target absent/untouched); (e) tree proof covers the parent
+and assumes the created tree is on the same filesystem, failure after root claim can leave a partial
+tree; (f) tests exercise the local SSH helper shell, NOT a real SSH host — only the claim "hardlink
+no-clobber exact target; target complete atomically when the helper succeeds" is made; no durability/
+fsync or general filesystem-race guarantee; the temp is appended by path, so a same-account process
+that can replace the private temp name is outside this protection (R13-19/R13-21).
+Metrics: palette 240, settings 69 in 14 sections, bundled 26 (9 on)/17 off, plugin API 244 functions/
+1489 lines level 2; i18n en 1117 / 579 per locale, 573 KiB text (under 640 KiB cap), ≈663 KiB JSON,
+heap 126-88-214 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r40-final.log); real hosts
+UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-39 outcome (2026-11-09, merged working tree on `bc5624b`).** Five slices landed: literal-
 path quick-open probe; remote search tool-failure open-buffer fallback; local watcher closeResources;
@@ -4682,6 +4764,36 @@ for parity status.
      rejected due POSIX mv dir-symlink follow, check→rm→mv TOCTOU, failure-after-rm destination loss,
      parent path races; local no-follow only capability with local parent TOCTOU; no SSH strong/atomic
      no-overwrite claim.
+234. **Bounded local probe; remote exact-Stat fallback (keymap; R3/R13-3).** local directory
+     files/parent-basename-prefix probe bounded 4096 inspected/50 returned/batches/cancel; hidden rules/
+     realpath containment; remote exact-path only via authority realpath+Stat/no local disk/no dir
+     enumeration (authority ReadDir shell glob materializes whole dir before client caps; no claim remote
+     reads bounded). tea.Cmd/context/poll cache/query seq+text; merge before rank preserves fuzzy/
+     prefix/:line[:col]/cap. Residuals remote branches not probed/local 4096 miss/no gitignore/
+     truncated index not probed/realpath→Stat TOCTOU/hidden dir query.
+235. **Remote external-snapshot notice (lsp; R13-11/R13-23).** remote search bounded by panel quick-
+     open snapshot + match outside snapshot: Done batch non-fatal notice result limited to snapshot/
+     path may be new or glob-excluded/File Explorer: Refresh; not Truncated (snapshot bound), never
+     complete-looking; finder does not self-refresh on search.
+236. **Sidebar terminal F3/Shift+F3 preview stepping (sidebar; R13-15).** search input open: F3/
+     Shift+F3 step preview forward/back through current query matches (wrap) without closing/committing;
+     first press runs edited/unrun query; answer pending ordered F3 first/Shift+F3 last; bad regex notice;
+     Enter commit/Esc restore; Update/Draw never search.
+237. **Env:Reload watcher retry supervisor (trust; R13-18).** first local watch start failure keeps
+     Local Env: Reload notice; later Env: Reload asks app to start fresh bounded watcher in background
+     (no fsnotify UI call), predecessor resources released exactly once, successful retry re-runs passive
+     detection/clears notice; live watcher untouched; detection-only/local wording; gvim improvement over
+     Fresh no-retry.
+238. **SSH new-target link capability (plugin copy; R13-19/R13-21; audited).** local no-follow replace;
+     SSH new-target only: private mktemp + POSIX link exact target one no-clobber hard link, never ln/
+     mv/rm target; probe exact-target hardlink semantics (second link/symlink/dir target EEXIST, no
+     follow) else unsupported before source read; existing/concurrent targets conflict untouched; tree
+     needs DirectoryCreator+stream and proves parent before root claim. Residuals temp cleanup best-
+     effort (commit error/cancel/rm failure/probe kill leave temps; target complete never deleted);
+     parent-path TOCTOU not closed (no dirfd/openat recheck; new target can land in unexpected dir, never
+     over existing); per-dir probe cache stale; capability proof not strong atomicity; tree same-FS
+     assumption/partial after claim; real SSH UNTESTED/local helper tests only; no durability/fsync/
+     general filesystem-race guarantee; temp-by-path same-account replacement outside protection.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6600,31 +6712,36 @@ Round 13 recorded five open gaps:
   only fresh-child/strict/4× fix, production sampled circuit breaker (not hard limit); beyond 4× is
   a test-ceiling violation, not proof the guard never fired. LSP manager fake-server async dispatch
   fix 40/40 remains. Real-host checks remain UNTESTED. No full-parity claim.
+- **Round-40 verification (2026-11-09, merged tree on `6c6f71b`).** STATIC GATES PASS (Lead,
+  default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules,
+  menus, i18n_check with catalogue heap en 126 KiB / de 88 KiB / both 214 KiB, git diff --check).
+  Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line (log
+  `/tmp/gvim-r40-final.log`). Audit: build/gofmt/i18n_check plus targeted round-40 tests/diff review.
+  Tracks: local bounded prefix/dir probe + remote exact-Stat fallback; remote external-snapshot notice;
+  F3/Shift+F3 preview stepping; Env:Reload watcher retry supervisor; SSH new-target link capability
+  (audited residuals: temp cleanup best-effort/parent TOCTOU/stale cache/capability proof/real SSH
+  UNTESTED). Real-host checks remain UNTESTED. No full-parity claim.
 - The gaps the rounds opened are at the top of §5 (open TUI work, with concrete gaps:
   R2-5, R3-3…R3-4, R4-4…R4-5, R5-2…R5-6, R6-1…R6-3, R7-4…R7-5, R8-1…R8-4, R9-1…R9-5,
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-39 landed literal-path probe, remote tool-failure open-buffer fallback, local watcher
-  closeResources, incremental terminal search; SSH link-commit research only/no implementation; full
-  suite EXIT 0 (76 packages, log /tmp/gvim-r39-final.log); §5.5 is round-40/41 plan; TUI-only scope/
-  genuine-equivalence §4 item 94/§8; real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–39 had their gate sets
-  run. Round 39 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
+  (round-40 landed bounded local probe/remote exact-Stat, external-snapshot notice, F3 preview
+  stepping, Env:Reload watch retry, SSH new-target link capability; full suite EXIT 0 (76 packages,
+  log /tmp/gvim-r40-final.log); §5.5 is round-41/42 plan; TUI-only scope/genuine-equivalence §4 item
+  94/§8; real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–40 had their gate sets
+  run. Round 40 static gates PASS (Lead, default GOCACHE: build, CGO_ENABLED=0 build, GOOS=windows
   build, vet, golangci-lint 0, gofmt, purity, import rules, menus, i18n_check with catalogue heap en
-  126 KiB / de 82 KiB / both 208 KiB, git diff --check). Final full
+  126 KiB / de 88 KiB / both 214 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 76 packages ok, no FAIL line, log
-  `/tmp/gvim-r39-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-39 tests and
-  diff review only (no full suite); the Lead ran the full suite. Heap-guard semantics remain as
-  recorded: shared-process HeapSys/garbage test contamination, test-only fresh-child/strict/4× fix,
-  production sampled circuit breaker (not a strict hard limit); beyond 4× is a test-ceiling
-  violation that may be sampling delay or a guard fault, not proof the guard never fired. LSP manager
-  fake-server async dispatch fix 40/40 remains. Real-host verification remains UNTESTED rather than
-  passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
-  realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_
-  hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching;
-  ~/… expansion against a local real `sh`, not a live host. Phase-2 exit-path limits are in §4 item
-  82/§6. Treat statuses as pointers, not proof.
+  `/tmp/gvim-r40-final.log`. The audit ran build/gofmt/i18n_check plus targeted round-40 tests and
+  diff review only (no full suite); the Lead ran the full suite. Real-host verification remains
+  UNTESTED rather than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file
+  save/plugin realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-
+  box/known_hosts policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace
+  switching; ~/… expansion against a local real `sh`, not a live host. Treat statuses as pointers,
+  not proof.
 - Fresh is a moving reference checkout. Counts are pinned to the `refs/fresh` state read on
   2026-11-08; 413 e2e files and ~180 plugin command registrations are indexes, not exact feature
   counts.

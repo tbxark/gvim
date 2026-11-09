@@ -43,6 +43,36 @@ func WriteStreams(fs FileSystem) WriteStreamer {
 	return s
 }
 
+// NewTargetWriteStreamer is the optional copy-safe surface for creating a destination
+// that must NOT already exist. The caller streams into a private temporary file and
+// Commit publishes it with one no-clobber hard link: the target appears complete and
+// atomically, an existing file/directory/symlink makes Commit fail with fs.ErrExist, and
+// the target path is never opened for writing, followed, replaced or deleted. Abort
+// removes only the temporary file. A backend without this capability must be treated as
+// unable to copy overwriting destinations.
+type NewTargetWriteStreamer interface {
+	WriteStreamNewTarget(ctx context.Context, path string, o hostos.WriteOptions) (WriteStream, error)
+}
+
+// NewTargetWriteStreams returns the new-target-only copy-safe surface of fs, or nil.
+func NewTargetWriteStreams(fs FileSystem) NewTargetWriteStreamer {
+	s, _ := fs.(NewTargetWriteStreamer)
+	return s
+}
+
+// NewTargetProver is the optional pre-write proof for a directory where a new-target
+// stream will create files. Plugin tree copy calls it before claiming/creating any
+// destination directory, so an unprovable backend is unsupported before any write.
+type NewTargetProver interface {
+	ProveNewTarget(ctx context.Context, dir string) error
+}
+
+// NewTargetProvers returns the pre-write proof surface of fs, or nil.
+func NewTargetProvers(fs FileSystem) NewTargetProver {
+	p, _ := fs.(NewTargetProver)
+	return p
+}
+
 // NoFollowWriteStreamer is the copy-safe variant of WriteStreamer: it opens the same
 // atomic temp-file stream but does NOT resolve a symbolic link at the final destination
 // component. Commit therefore renames the temporary file over the path itself (replacing

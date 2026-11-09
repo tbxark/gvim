@@ -104,10 +104,13 @@ func newRemoteFileIndex(ctx context.Context, slot authority.Slot, root string) (
 	return x, expanded
 }
 
-// newRemotePrefixProbe is the remote exact-path probe, bound to the expanded remote
-// root. RealPath is required: without it containment cannot be proven, so the probe
-// refuses rather than falling back to the local filesystem. The candidate must resolve
-// inside the resolved remote root and stat as a regular file.
+// newRemotePrefixProbe is the remote literal-path probe, bound to the expanded
+// remote root. It is deliberately the exact-path slice only: Fresh's parent/directory
+// branches need a bounded directory reader, while the authority's ReadDir shell glob
+// materializes the whole directory before any client-side cap, so they are not used
+// here. RealPath is required: without it containment cannot be proven, so the probe
+// refuses rather than falling back to the local filesystem. The exact candidate must
+// resolve inside the resolved remote root and stat as a regular file.
 func newRemotePrefixProbe(slot authority.Slot, root string) finder.ProbeFunc {
 	return func(ctx context.Context, query string) ([]string, error) {
 		rel, ok := finder.ProbePath(query)
@@ -129,7 +132,7 @@ func newRemotePrefixProbe(slot authority.Slot, root string) finder.ProbeFunc {
 			return nil, nil
 		}
 		realRoot, err := resolver.RealPath(ctx, root)
-		if err != nil {
+		if err != nil || !strings.HasPrefix(realRoot, "/") {
 			return nil, nil
 		}
 		realCandidate, err := resolver.RealPath(ctx, remoteFinderJoin(root, rel))
@@ -155,7 +158,7 @@ func newRemotePrefixProbe(slot authority.Slot, root string) finder.ProbeFunc {
 
 // remoteFinderJoin joins a slash-separated relative path to a remote root.
 func remoteFinderJoin(root, rel string) string {
-	return strings.TrimSuffix(root, "/") + "/" + rel
+	return path.Join(root, rel)
 }
 
 // remoteFinderContained reports whether the resolved remote candidate is below the
@@ -166,10 +169,7 @@ func remoteFinderContained(root, candidate string) bool {
 	}
 	root = path.Clean(root)
 	candidate = path.Clean(candidate)
-	if root == "/" {
-		return candidate != "/"
-	}
-	return strings.HasPrefix(candidate, root+"/")
+	return candidate == root || strings.HasPrefix(candidate, root+"/")
 }
 
 // remoteFinderGitCandidates returns the remote git work tree's candidate files, or ok

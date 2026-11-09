@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tbxark/gvim/config"
@@ -139,6 +140,9 @@ type Provider struct {
 	// watchNotice is the local detector/marker watcher's degradation message ("" when
 	// watching works or was not attempted), shown in the Settings Environment rows.
 	watchNotice string
+	// watchRetry is set while a failed/dead local watcher should be retried by an Env:
+	// Reload (the app's env port checks it on detection reads and env actions).
+	watchRetry atomic.Bool
 }
 
 // New builds the provider for root with the configured detectors. It detects the
@@ -190,6 +194,14 @@ func (p *Provider) WatchNotice() string {
 	defer p.mu.RUnlock()
 	return p.watchNotice
 }
+
+// SetWatchRetryNeeded records whether the local detector watcher is missing/dead and an
+// Env: Reload should try to start it again. The app's env port consults it before
+// triggering the retry so ordinary detection reads do not churn fsnotify.
+func (p *Provider) SetWatchRetryNeeded(needed bool) { p.watchRetry.Store(needed) }
+
+// WatchRetryNeeded reports whether an Env: Reload should retry the local watcher.
+func (p *Provider) WatchRetryNeeded() bool { return p.watchRetry.Load() }
 
 // SetDetectors replaces the detector list at runtime (a config Reload that changed
 // env.detectors) and re-runs the passive local marker scan immediately, so the Settings

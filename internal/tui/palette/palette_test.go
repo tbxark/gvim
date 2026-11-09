@@ -1088,3 +1088,26 @@ func TestFileResultWithTheWrongTextIsDropped(t *testing.T) {
 		t.Fatal("wrong-text result populated the probe cache")
 	}
 }
+
+// TestFileProbeMergesPrefixResults: the parent-prefix probe can return several files;
+// all are merged, deduplicated and ranked through the normal path.
+func TestFileProbeMergesPrefixResults(t *testing.T) {
+	files := &probeFiles{fakeFiles: fakeFiles{loading: true}}
+	files.probe = func(context.Context, string) ([]string, error) {
+		return []string{"save_file.rs", "save_other.rs"}, nil
+	}
+	p := New(Options{Query: "save", Files: files, Ranker: &fakeRanker{}})
+	p.update(p.Init()())
+	if len(p.probePaths) != 2 {
+		t.Fatalf("probe cache = %v, want two prefix paths", p.probePaths)
+	}
+	got := make([]string, 0, len(p.rows))
+	for _, r := range p.rows {
+		if r.kind == rowFile {
+			got = append(got, r.name)
+		}
+	}
+	if len(got) != 2 || got[0] != "save_file.rs" || got[1] != "save_other.rs" {
+		t.Fatalf("rows = %v, want the two probed prefix paths", got)
+	}
+}

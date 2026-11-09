@@ -326,3 +326,120 @@ func TestLocalEnvWatchConstructorClosesWatcherOnEarlyFailure(t *testing.T) {
 func testLocalDetector(name, marker string) []config.EnvDetector {
 	return []config.EnvDetector{{Name: name, Markers: []string{marker}, Kind: config.EnvKindShell, Snippet: "true"}}
 }
+
+func TestLocalEnvWatchRetryAfterRootAddFailure(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "workspace-does-not-exist-yet")
+	provider := env.New(root, testLocalDetector("node", ".nvmrc"), func() bool { return true })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := startLocalEnvWatch(ctx, provider, root)
+	if first != nil {
+		first.Close()
+		t.Skip("fsnotify accepted the nonexistent root on this platform")
+	}
+	if notice := provider.WatchNotice(); !strings.Contains(notice, "workspace root cannot be watched") {
+		t.Fatalf("initial root-Add notice = %q", notice)
+	}
+	if !provider.WatchRetryNeeded() {
+		t.Fatal("root-Add failure did not mark the watcher retry needed")
+	}
+	// The root becomes watchable; an Env: Reload-style retry must recover the watcher.
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".nvmrc"), []byte("20"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	retry := &localEnvWatchRetry{
+		ctx:   ctx,
+		start: func() *localEnvWatch { return startLocalEnvWatch(ctx, provider, root) },
+	}
+	retry.Retry()
+	if retry.current == nil {
+		t.Fatal("retry did not start a watcher after the root became watchable")
+	}
+	defer retry.current.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		det, ok := provider.Detected()
+		if ok && det.Name == "node" && provider.WatchNotice() == "" && !provider.WatchRetryNeeded() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	det, ok := provider.Detected()
+	t.Fatalf("retry detection/watch notice = %+v, %v, %q", det, ok, provider.WatchNotice())
+}
+
+func TestLocalEnvWatchRetrySkipsLiveWatcher(t *testing.T) {
+	root := t.TempDir()
+	provider := env.New(root, nil, func() bool { return true })
+	fake := newFakeEnvFileWatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lw := startLocalEnvWatchWith(ctx, provider, root, fake, nil)
+	if lw == nil {
+		t.Fatal("no watcher")
+	}
+	defer lw.Close()
+	called := false
+	retry := &localEnvWatchRetry{ctx: ctx, current: lw, start: func() *localEnvWatch {
+		called = true
+		return nil
+	}}
+	retry.Retry()
+	if called {
+		t.Fatal("Retry started a second watcher while the first was live")
+	}
+	if retry.current != lw {
+		t.Fatal("Retry replaced a live watcher")
+	}
+}
+
+func TestLocalEnvWatchRetryReplacesDeadWatcher(t *testing.T) {
+	root := t.TempDir()
+	provider := env.New(root, nil, func() bool { return true })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	firstFake := newFakeEnvFileWatch()
+	first := startLocalEnvWatchWith(ctx, provider, root, firstFake, nil)
+	if first == nil {
+		t.Fatal("no first watcher")
+	}
+	first.Close()
+	if !first.Dead() {
+		t.Fatal("closed watcher was not marked dead")
+	}
+	secondFake := newFakeEnvFileWatch()
+	second := startLocalEnvWatchWith(ctx, provider, root, secondFake, nil)
+	if second == nil {
+		t.Fatal("no second watcher")
+	}
+	defer second.Close()
+	installed := false
+	retry := &localEnvWatchRetry{
+		ctx:     ctx,
+		current: first,
+		start:   func() *localEnvWatch { return second },
+		install: func(*localEnvWatch) { installed = true },
+	}
+	retry.Retry()
+	if retry.current != second || !installed {
+		t.Fatal("Retry did not replace/install the dead watcher")
+	}
+}
+
+func TestLocalEnvWatchRetryHonoursCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	retry := &localEnvWatchRetry{ctx: ctx, start: func() *localEnvWatch {
+		called = true
+		return nil
+	}}
+	retry.Retry()
+	if called {
+		t.Fatal("Retry started a watcher after the session context was cancelled")
+	}
+}
