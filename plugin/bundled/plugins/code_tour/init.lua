@@ -33,10 +33,11 @@ local HIGHLIGHT_BG = "editor.selection_bg"
 local ns = gvim.decor.namespace("code_tour")
 
 local state = {
-  tour = nil,      -- { path, title, manifest, step, panel }
+  tour = nil,      -- { path, title, manifest, step, panel, drift }
   panel = nil,     -- mounted widget panel id
   buf = nil,       -- the buffer the current step highlighted
   restoring = false,
+  load_gen = 0,    -- bumps on load/exit so a stale drift lookup cannot mount a tour
 }
 
 local function notice(msg)
@@ -131,9 +132,22 @@ local function parse_manifest(text, path)
   if ours and data.schema_version ~= "1.0" then
     return nil, t("error.bad_version", { version = tostring(data.schema_version) })
   end
+  -- CodeTour's ref and the Fresh schema's commit_hash are the only recorded revisions
+  -- Fresh checks for drift; branch/tag refs are deliberately not hashes and are ignored.
+  local function commit_hash(value)
+    if type(value) ~= "string" then
+      return nil
+    end
+    value = gvim.text.lower(value)
+    if #value >= 7 and #value <= 40 and value:match("^[0-9a-f]+$") then
+      return value
+    end
+    return nil
+  end
   local manifest = {
     title = (type(data.title) == "string" and data.title ~= "") and data.title or gvim.path.basename(path),
     description = type(data.description) == "string" and data.description or "",
+    commit_hash = ours and commit_hash(data.commit_hash) or commit_hash(data.ref),
     steps = {},
   }
   for i = 1, count do
@@ -253,8 +267,14 @@ local function panel_spec()
     items[#items + 1] = { text = s.title, detail = detail }
   end
   local prose = wrap_prose(step and step.explanation or "")
+  local title_runs = {
+    { text = tour.manifest.title, style = { fg = "syntax.keyword", bold = true } },
+  }
+  if tour.drift then
+    title_runs[#title_runs + 1] = { text = "   " .. tour.drift, style = { fg = "syntax.comment", italic = true } }
+  end
   local children = {
-    { kind = "label", text = tour.manifest.title, style = { fg = "syntax.keyword", bold = true } },
+    { kind = "label", runs = title_runs },
     { kind = "divider" },
     {
       kind = "label",
@@ -384,6 +404,9 @@ goToStep = function(index, jump)
 end
 
 local function exit_tour(quiet)
+  -- Invalidate any load still waiting on its drift lookup, even when there is no active
+  -- tour to unmount.
+  state.load_gen = state.load_gen + 1
   if not active() then
     return
   end
@@ -398,12 +421,47 @@ local function exit_tour(quiet)
   end
 end
 
-local function start_tour(path, manifest, step)
+-- commit_drift is Fresh's commitDrift: when a VS Code tour records a commit ref and the
+-- repository's current short HEAD differs, say so in the panel header. It is silent when
+-- there is no recorded hash, no repository, no git binary, or the command fails.
+local function commit_drift(manifest)
+  local recorded = manifest.commit_hash
+  if not recorded or not gvim.git.available() then
+    return nil
+  end
+  local here = workspace_root()
+  local buf = gvim.buf.current()
+  if buf and not buf:is_virtual() and buf:path() and buf:path() ~= "" then
+    here = buf:path()
+  end
+  local repo = gvim.git.repo(here)
+  if not repo and here ~= workspace_root() then
+    repo = gvim.git.repo(workspace_root())
+  end
+  if not repo then
+    return nil
+  end
+  local result = gvim.git.run({ "rev-parse", "--short", "HEAD" }, { cwd = repo.root })
+  if not result or not result.ok then
+    return nil
+  end
+  local current = gvim.text.lower(gvim.text.trim(result.stdout or ""))
+  if current == "" then
+    return nil
+  end
+  if current:sub(1, #recorded) == recorded or recorded:sub(1, #current) == current then
+    return nil
+  end
+  return t("panel.drift", { recorded = recorded, current = current })
+end
+
+local function start_tour(path, manifest, step, drift)
   exit_tour(true)
   state.tour = {
     path = path,
     manifest = manifest,
     step = math.max(1, math.min(step or 1, #manifest.steps)),
+    drift = drift,
   }
   gvim.context.set("tour_active", true)
   save_state()
@@ -423,7 +481,13 @@ local function load_tour(path, step)
     notice(err)
     return
   end
-  start_tour(path, manifest, step)
+  state.load_gen = state.load_gen + 1
+  local generation = state.load_gen
+  local drift = commit_drift(manifest)
+  if state.load_gen ~= generation then
+    return
+  end
+  start_tour(path, manifest, step, drift)
 end
 
 -- Discovery and create ------------------------------------------------------

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fsops"
@@ -25,6 +26,35 @@ import (
 // expl.ErrConflict.
 type fileOps struct {
 	ed pathEditor
+	// warn carries a non-fatal copy fallback (no hard links) to the root, which
+	// asserts TakeCopyWarning after a successful copy.
+	warn *copyWarnings
+}
+
+type copyWarnings struct {
+	mu   sync.Mutex
+	text string
+}
+
+func (w *copyWarnings) set(text string) {
+	if w == nil || text == "" {
+		return
+	}
+	w.mu.Lock()
+	w.text = text
+	w.mu.Unlock()
+}
+
+// TakeCopyWarning returns and clears the pending non-fatal copy warning.
+func (f fileOps) TakeCopyWarning() string {
+	if f.warn == nil {
+		return ""
+	}
+	f.warn.mu.Lock()
+	defer f.warn.mu.Unlock()
+	text := f.warn.text
+	f.warn.text = ""
+	return text
 }
 
 // pathEditor is the part of *editor.Editor the file operations use. Tests pass a
@@ -41,7 +71,7 @@ func NewFileOps(ed *editor.Editor) tui.FileOps { return newFileOps(ed) }
 // newFileOps returns the adapter over ed. ed is used by CheckRename, FollowRename
 // and CloseDeleted.
 func newFileOps(ed pathEditor) fileOps {
-	return fileOps{ed: ed}
+	return fileOps{ed: ed, warn: &copyWarnings{}}
 }
 
 // The adapter satisfies the root's FileOps port. The root also asserts the
@@ -88,18 +118,22 @@ func (f fileOps) Rename(_ context.Context, path, newName string) (string, error)
 		return "", err
 	}
 	np := filepath.Join(filepath.Dir(path), newName)
-	if err := fsops.Rename(path, np); err != nil {
+	result, err := fsops.RenameNoReplaceResult(path, np)
+	if err != nil {
 		return "", classify(err)
 	}
+	f.warn.set(result.Warning)
 	return np, nil
 }
 
 // Move moves src into dstDir, keeping its name, and returns the new path.
 func (f fileOps) Move(_ context.Context, src, dstDir string) (string, error) {
 	dst := filepath.Join(dstDir, filepath.Base(src))
-	if err := fsops.Move(src, dstDir); err != nil {
+	result, err := fsops.MoveNoReplaceResult(src, dstDir)
+	if err != nil {
 		return "", classify(err)
 	}
+	f.warn.set(result.Warning)
 	return dst, nil
 }
 
@@ -107,7 +141,7 @@ func (f fileOps) Move(_ context.Context, src, dstDir string) (string, error) {
 // in dstDir, the copy gets a free name such as "a copy.txt" (fsops.CopyName),
 // so a paste into the same directory never overwrites the source. Otherwise the
 // copy keeps the name and c decides a conflict.
-func (fileOps) Copy(_ context.Context, src, dstDir string, c expl.Conflict) (string, error) {
+func (f fileOps) Copy(_ context.Context, src, dstDir string, c expl.Conflict) (string, error) {
 	policy, err := toPolicy(c)
 	if err != nil {
 		return "", err
@@ -120,8 +154,12 @@ func (fileOps) Copy(_ context.Context, src, dstDir string, c expl.Conflict) (str
 		}
 	}
 	dst := filepath.Join(dstDir, name)
-	if err := fsops.Copy(src, dst, policy); err != nil {
+	result, err := fsops.CopyWithResult(src, dst, policy)
+	if err != nil {
 		return "", classify(err)
+	}
+	if result.Warning != "" {
+		f.warn.set(result.Warning)
 	}
 	return dst, nil
 }

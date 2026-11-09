@@ -707,9 +707,12 @@ anchored decorations. The plugin keeps local line anchors because its step rows 
 card, not buffer lines: `gvim.buf.set_line_targets` maps a *buffer* line to a file:line, so it cannot
 express a widget row (see porting.md). One tour at a time; the last tour and step are
 restored from `gvim.state` on the next load. **Tour: Create from Current Location...** writes a
-VS Code-compatible starter `.tour` under `.tours/`, atomically. Load/schema/step errors stay in
-notices. No default bindings (Fresh's keys live in its dock-buffer mode; here the panel owns the
-keyboard).
+VS Code-compatible starter `.tour` under `.tours/`, atomically. A VS Code tour's recorded commit
+`ref` (or a Fresh manifest's `commit_hash`) is compared with the repository's current short HEAD
+through the safe `gvim.git` reader; a mismatch puts Fresh's **recorded at … · you are on …** warning
+in the panel header, and a branch/tag ref or a missing repository is silently ignored. Load/schema/
+step errors stay in notices. No default bindings (Fresh's keys live in its dock-buffer mode; here
+the panel owns the keyboard).
 
 **git_grep** (with the shared finder; reduced adaptation): Fresh's live git grep. **Git Grep** opens a
 live search over the files git tracks: each typed query runs `git grep -n --column -I [-i] -e

@@ -19,6 +19,7 @@
     "panel.steps": "Steps",
     "panel.step_counter": "Step %{step} of %{total}",
     "panel.file_missing": "%{file} is not in this working tree.",
+    "panel.drift": "recorded at %{recorded} · you are on %{current}",
     "panel.no_explanation": "(this step has no explanation)",
     "panel.location": "%{file}   lines %{from}–%{to}",
     "panel.location_missing": "file not found — step text still readable",

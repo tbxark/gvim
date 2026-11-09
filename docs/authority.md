@@ -720,6 +720,26 @@ available today (SSH `mv -n` is not portable/atomic across filesystems and can c
 `Mkdir` carries no private-permission option), so gvim does not create a trash directory and
 does not claim delete is reversible. This remains the gating residual for trash recovery.
 
+The local explorer uses the same publication rules through `fsops`:
+a free copy creates its destination in place with O_EXCL files, `os.Mkdir` directories and
+an O_EXCL-like symlink, so a concurrent creator cannot be overwritten. A copied file is
+first written to a unique 0600 temporary file in the destination directory, given its
+mode, and published with an atomic no-clobber `os.Link(temp, target)`; the temporary file
+is then removed. A failed write removes the temporary file and leaves no target, and a
+failed directory copy removes the directory it created, so a retry is not blocked by a
+partial destination. If the filesystem cannot hard-link, the copy falls back to the
+recorded direct O_EXCL write: `fsops.CopyWithResult` (and the Rename/Move result variants)
+return the warning, the local adapter surfaces it through `TakeCopyWarning` (status notice),
+and the fallback can leave a partial target on a later write failure. Cleanup failures are joined into the returned error, never
+silently ignored. Local Rename and Move publish with that bounded
+copy-and-remove path (10000 entries / 256 MiB / 64 levels) because `os.Rename` replaces an
+existing target; the source is removed only after the copy succeeds, and a larger tree is
+refused before anything is touched. The explicit Overwrite policy keeps the local
+staging/swap path (the old target is moved aside, the new copy swapped in); it is the only
+path that replaces and the confirmation makes that choice explicit. That explicit overwrite
+is not a no-replace guarantee: a destination re-created concurrently between the swap
+renames can be replaced, which is the recorded non-atomicity.
+
 The clipboard is wired on the same surface (`internal/app/remote_explorer_copy.go`, task
 148). Copy walks the source subtree with `Files().ReadDir` (hidden entries included) and
 publishes destinations without replacing anything: directories are claimed with
@@ -801,8 +821,10 @@ workspaces), no journal undo/history for remote writes, no remote trash/restore 
 be proven; a remote delete is therefore documented and prompted as permanent), no
 whole-subtree transaction or cleanup UI for a partial copy, FileEntry/Mode and mtimes are not
 restored (the port's DirEntry has no mode), hard links/xattrs are not preserved, and a
-copy/rename's existence check still races the write (the FileMutations surface has no
-exclusive rename/copy; New File's create race is closed by the exclusive-create surface).
+copy/paste destinations are now no-replace (remote DirectoryCreator/FileContentCreator; local
+O_EXCL/os.Mkdir/symlink create), and Rename uses a bounded copy-and-remove because no
+backend has an atomic rename-new surface; explicit Overwrite is still remove/replace-based
+and non-atomic by user choice.
 Overwrite is remove-then-copy with no rollback: a process that re-creates the destination
 between that removal and the copy is a documented race (the file copy atomically replaces
 the re-created file because the user chose overwrite; a directory copy fails at Mkdir

@@ -116,6 +116,17 @@ API and this port does not ask for one. Recorded differences:
   a deletion block longer than the host's 64-virtual-rows-per-anchor cap is summarised by an
   "`… N more deleted lines`“ row.
 
+### Code tour: recorded-ref drift
+
+Fresh's `code-tour.ts` computes `commitDrift` on open: a tour's recorded commit hash is compared
+with `git rev-parse --short HEAD`, and a mismatch is shown in the panel header/prose. The port
+parses code-tour's `commit_hash` and VS Code CodeTour's seven-to-forty-digit hex `ref` (branch and
+tag refs are ignored, matching Fresh), resolves the repository from the active file or workspace,
+and runs the bounded, neutralized `gvim.git` read; missing git/repository or a failed command is
+silent. Loads carry a generation: a drift lookup that completes after another load or an exit is
+discarded, so it cannot mount a stale tour. Tests: `code_tour_test.go` covers a mismatched
+recorded ref showing the warning and a matching HEAD prefix showing none.
+
 ### Streaming a process into a buffer
 
 A view that streams a command's output (a patch, a log, a diff) does not need a file-backed buffer

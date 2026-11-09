@@ -57,7 +57,28 @@ func (p ConflictPolicy) String() string {
 // is dst, lies inside dst, or is the same file as dst, because an overwrite
 // would remove the target. The parent of dst must already exist. src is cleaned
 // first, so a trailing separator does not make Copy follow a link.
+// CopyResult carries a non-fatal warning of a successful copy. The only current
+// warning is the atomic-publish fallback: a filesystem without hard links falls back to
+// direct O_EXCL creation, which can leave a partial target if the write fails afterwards.
+type CopyResult struct {
+	Warning string
+}
+
+// Copy copies src to dst under the conflict policy. It returns an error only; use
+// CopyWithResult when the caller needs a non-fatal publication warning.
 func Copy(src, dst string, policy ConflictPolicy) error {
+	_, err := CopyWithResult(src, dst, policy)
+	return err
+}
+
+// CopyWithResult is Copy plus the warning of a non-fatal fallback.
+func CopyWithResult(src, dst string, policy ConflictPolicy) (CopyResult, error) {
+	report := &copyReport{}
+	err := copyWithReport(src, dst, policy, report)
+	return CopyResult{Warning: report.warning}, err
+}
+
+func copyWithReport(src, dst string, policy ConflictPolicy, report *copyReport) error {
 	if policy < Overwrite || policy > Cancel {
 		return fmt.Errorf("fsops: copy: unknown conflict policy %d", int(policy))
 	}
@@ -98,7 +119,7 @@ func Copy(src, dst string, policy ConflictPolicy) error {
 			return fmt.Errorf("fsops: copy to %s: %w: %w", dst, ErrCanceled, ErrConflict)
 		}
 	}
-	return place(src, srcInfo, dst, replace)
+	return place(src, srcInfo, dst, replace, report)
 }
 
 // linkTargetIsDest reports whether the symbolic link src points at dst, at a
@@ -165,9 +186,14 @@ func physicalPath(path string) (string, error) {
 // it to force a failure.
 var renamePath = os.Rename
 
-// place builds a copy of src in a staging directory beside dst, then renames
-// it onto dst. When replace is true, the existing dst is moved aside by swapIn.
-func place(src string, srcInfo fs.FileInfo, dst string, replace bool) error {
+// place builds a copy of src at dst. A free destination is created in place with
+// O_EXCL/O_Mkdir/OSymlink, so a concurrent creator cannot be overwritten (a failed
+// copy can leave a partial destination, which the caller reports). An explicit
+// overwrite still uses a staging directory and swapIn.
+func place(src string, srcInfo fs.FileInfo, dst string, replace bool, report *copyReport) error {
+	if !replace {
+		return copyTree(src, srcInfo, dst, report)
+	}
 	stage, err := os.MkdirTemp(filepath.Dir(dst), ".fsops-copy-*")
 	if err != nil {
 		return opError("copy", dst, err)
@@ -175,7 +201,7 @@ func place(src string, srcInfo fs.FileInfo, dst string, replace bool) error {
 	defer func() { _ = os.RemoveAll(stage) }()
 
 	staged := filepath.Join(stage, filepath.Base(dst))
-	if err := copyTree(src, srcInfo, staged); err != nil {
+	if err := copyTree(src, srcInfo, staged, report); err != nil {
 		return err
 	}
 	if replace {
@@ -217,7 +243,7 @@ func swapIn(staged, dst string) error {
 
 // copyTree copies the entry at src, described by info, to dst, which must not
 // exist.
-func copyTree(src string, info fs.FileInfo, dst string) error {
+func copyTree(src string, info fs.FileInfo, dst string, report *copyReport) error {
 	mode := info.Mode()
 	switch {
 	case mode&fs.ModeSymlink != 0:
@@ -235,33 +261,122 @@ func copyTree(src string, info fs.FileInfo, dst string) error {
 		if err := os.Mkdir(dst, 0o700); err != nil {
 			return opError("copy", dst, err)
 		}
+		cleanup := func(err error) error {
+			if rerr := os.RemoveAll(dst); rerr != nil {
+				return errors.Join(err, fmt.Errorf("fsops: copy to %s: remove partial destination: %w", dst, rerr))
+			}
+			return err
+		}
 		entries, err := os.ReadDir(src)
 		if err != nil {
-			return opError("copy", src, err)
+			return cleanup(opError("copy", src, err))
 		}
 		for _, e := range entries {
 			childInfo, err := e.Info()
 			if err != nil {
-				return opError("copy", filepath.Join(src, e.Name()), err)
+				return cleanup(opError("copy", filepath.Join(src, e.Name()), err))
 			}
-			if err := copyTree(filepath.Join(src, e.Name()), childInfo, filepath.Join(dst, e.Name())); err != nil {
-				return err
+			if err := copyTree(filepath.Join(src, e.Name()), childInfo, filepath.Join(dst, e.Name()), report); err != nil {
+				return cleanup(err)
 			}
 		}
 		if err := os.Chmod(dst, mode.Perm()); err != nil {
-			return opError("copy", dst, err)
+			return cleanup(opError("copy", dst, err))
 		}
 		return nil
 	case mode.IsRegular():
-		return copyFile(src, dst, mode.Perm())
+		return copyFileAtomic(src, dst, mode.Perm(), report)
 	default:
 		return fmt.Errorf("fsops: copy %s: unsupported file type %s", src, mode.Type())
 	}
 }
 
-// copyFile copies the contents of the regular file src to a new file dst with
-// the given permission bits.
-func copyFile(src, dst string, perm fs.FileMode) error {
+// copyReport collects non-fatal copy observations.
+type copyReport struct {
+	warning string
+}
+
+func (r *copyReport) fallback(dst string, linkErr error) {
+	if r.warning == "" {
+		r.warning = fmt.Sprintf("file copy used the O_EXCL fallback at %s (hard-link publish failed: %v); a failed write can leave a partial target", dst, linkErr)
+	}
+}
+
+// linkCopyFile publishes a completed temporary file. Tests replace it to exercise the
+// no-hard-link fallback.
+var linkCopyFile = os.Link
+
+// copyFileWriteHook, when set by a test, fails a copy after the temporary file is
+// complete but before it is published.
+var copyFileWriteHook func() error
+
+// copyFileAtomic writes src into a unique 0600 temporary file in dst's directory, applies
+// perm, then publishes it with a no-clobber hard link. A failed write removes the
+// temporary file and leaves no target, so a retry is not a conflict. If the filesystem
+// cannot hard-link, it records the fallback and uses the older direct O_EXCL write (whose
+// partial-target risk is the recorded warning).
+func copyFileAtomic(src, dst string, perm fs.FileMode, report *copyReport) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return opError("copy", src, err)
+	}
+	defer func() { _ = in.Close() }()
+
+	temp, err := os.CreateTemp(filepath.Dir(dst), ".fsops-copy-*")
+	if err != nil {
+		return opError("copy", dst, err)
+	}
+	tempName := temp.Name()
+	cleanup := func() error {
+		if rerr := os.Remove(tempName); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+			return fmt.Errorf("fsops: copy to %s: remove temporary file %s: %w", dst, tempName, rerr)
+		}
+		return nil
+	}
+	defer func() {
+		if cerr := cleanup(); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}()
+
+	if _, err = io.Copy(temp, in); err != nil {
+		_ = temp.Close()
+		return opError("copy", src, err)
+	}
+	if err = temp.Chmod(perm); err != nil {
+		_ = temp.Close()
+		return opError("copy", dst, err)
+	}
+	if err = temp.Close(); err != nil {
+		return opError("copy", dst, err)
+	}
+	if hook := copyFileWriteHook; hook != nil {
+		if err = hook(); err != nil {
+			return err
+		}
+	}
+	linkErr := linkCopyFile(tempName, dst)
+	if linkErr == nil {
+		return nil
+	}
+	if errors.Is(linkErr, fs.ErrExist) || os.IsExist(linkErr) {
+		return opError("copy", dst, linkErr)
+	}
+	// No usable hard link in this directory/filesystem: publish the bytes with the
+	// direct O_EXCL write. The report names the fallback so the UI can show its risk.
+	report.fallback(dst, linkErr)
+	if err = cleanup(); err != nil {
+		return err
+	}
+	if err = copyFileDirect(src, dst, perm); err != nil {
+		return err
+	}
+	return nil
+}
+
+// copyFileDirect is the fallback: it creates dst with O_EXCL and writes into that target
+// directly. A failure can leave a partial target; only the no-hard-link fallback uses it.
+func copyFileDirect(src, dst string, perm fs.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return opError("copy", src, err)
@@ -279,7 +394,6 @@ func copyFile(src, dst string, perm fs.FileMode) error {
 	if err := out.Close(); err != nil {
 		return opError("copy", dst, err)
 	}
-	// The umask may have stripped bits from the mode passed to OpenFile.
 	if err := os.Chmod(dst, perm); err != nil {
 		return opError("copy", dst, err)
 	}

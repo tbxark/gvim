@@ -129,6 +129,42 @@ func TestDragExtendsTheSelectionToTheCell(t *testing.T) {
 	}
 }
 
+// TestTripleClickSelectsTheLine: three real left presses in the same text cell within the
+// double-click window take placeCaret's count==3 branch, selecting the whole line. A drag
+// then extends by the same line unit, and a motion after release no longer extends.
+func TestTripleClickSelectsTheLine(t *testing.T) {
+	m, ed := viewModel(t, DefaultViewOptions(), "hello\nworld\nthird\nfourth\n", 60, 15)
+	l := m.layout()
+	x, y := l.TextX+2, l.BodyTop+1 // the world line
+	m.Update(click(x, y, tea.MouseLeft))
+	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseLeft}))
+	m.Update(click(x, y, tea.MouseLeft))
+	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseLeft}))
+	m.Update(click(x, y, tea.MouseLeft)) // third press stays held for the drag
+
+	anchor, head, ok := selectionOf(ed)
+	if !ok {
+		t.Fatalf("triple-click selected no line; lastPress=%d", m.lastPress)
+	}
+	if anchor != (buffer.Pos{Line: 1, Col: 0}) || head != (buffer.Pos{Line: 2, Col: 0}) {
+		t.Fatalf("triple-click selection = %v to %v, want 1:0 to 2:0", anchor, head)
+	}
+
+	// The drag that follows a triple press grows by whole lines.
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: x + 2, Y: l.BodyTop + 2, Button: tea.MouseLeft}))
+	anchor, head, ok = selectionOf(ed)
+	if !ok || anchor != (buffer.Pos{Line: 1, Col: 0}) || head != (buffer.Pos{Line: 3, Col: 0}) {
+		t.Fatalf("line drag selection = %v to %v, ok %v, want 1:0 to 3:0", anchor, head, ok)
+	}
+	m.Update(tea.MouseReleaseMsg(tea.Mouse{X: x + 2, Y: l.BodyTop + 2, Button: tea.MouseLeft}))
+	_, before, _ := selectionOf(ed)
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: x, Y: l.BodyTop + 3, Button: tea.MouseLeft}))
+	_, after, _ := selectionOf(ed)
+	if after != before {
+		t.Fatalf("motion after release extended the line selection: %v to %v", before, after)
+	}
+}
+
 func TestWheelOverEditorScrollsTheViewportNotTheCaret(t *testing.T) {
 	ed := newFakeEditor(numberedLines(40)...)
 	ed.doc.cursor = buffer.Pos{Line: 0, Col: 0}

@@ -463,16 +463,22 @@ local and remote: the local adapter calls one `os.Mkdir`, the remote adapter cal
 authority's no-replace `MkdirNew`, and a backend without that capability reports that it
 cannot create a directory exclusively rather than falling back to a check-then-create.
 
-Copy, paste and Rename publish their destination without replacing an existing entry:
-the remote adapter claims directories with `MkdirNew` and files with
-`CreateNewWithContent`, so a destination created concurrently produces the same
-overwrite/rename/cancel conflict dialog as a destination that existed at check time; a
-backend without those surfaces reports the inability before writing (no check-then-write
-fallback). Overwrite is only the explicit conflict-dialog choice: it removes the old
-target first and then writes, so it is intentionally not atomic and a concurrent
-re-creation can be replaced. Remote Rename uses the same bounded copy-and-remove path
-because the authority has no atomic rename-new surface; its source is removed only after
-the destination is complete. The operations run in the existing file-job command, so the
+Copy, paste, Move and Rename publish their destination without replacing an existing
+entry: the remote adapter claims directories with `MkdirNew` and files with
+`CreateNewWithContent`; the local adapter writes a unique 0600 temporary file beside the
+target, publishes it with an atomic no-clobber hard link, and removes the temporary file
+(no partial file on a failed write), creates directories with one `os.Mkdir`, and uses an
+exclusive symlink create. A failed directory copy removes the directory it made. If hard
+links are unavailable, the local O_EXCL fallback succeeds with a status-row warning that
+names its partial-target risk; cleanup failures are reported in the error. A destination created concurrently
+therefore produces the same overwrite/rename/cancel conflict dialog as a destination that
+existed at check time; a backend without the remote surfaces reports the inability before
+writing (no check-then-write fallback). Overwrite is only the explicit conflict-dialog
+choice: it removes the old target first and then writes (local: staging + swap), so it is
+intentionally not a no-replace guarantee. Rename uses the same bounded copy-and-remove
+path locally and remotely because neither has an atomic rename-new surface; its source is
+removed only after the destination is complete, and a tree over the copy bounds is
+refused before the source is touched. The operations run in the existing file-job command, so the
 update loop never waits on them and the tree refresh follows the same asynchronous reload
 as the other writes.
 

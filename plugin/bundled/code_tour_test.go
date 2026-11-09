@@ -308,3 +308,49 @@ func TestCodeTourCreatesATour(t *testing.T) {
 }
 
 var _ = slices.Equal[[]string]
+
+func TestCodeTourWarnsAboutCommitDrift(t *testing.T) {
+	t.Parallel()
+	host, os := codeTourHost(t)
+	tour := strings.Replace(vscodeTourJSON(), `"title":"VS Tour"`, `"title":"VS Tour","ref":"abc1234"`, 1)
+	os.SetFile("/w/drift.tour", tour)
+	os.Script(gitArgv("rev-parse", "--show-toplevel", "--git-path", "HEAD"), plugintest.ProcScript{Stdout: "/w\n.git/HEAD\n"})
+	os.Script(gitArgv("rev-parse", "--short", "HEAD"), plugintest.ProcScript{Stdout: "def5678\n"})
+	h := startCodeTour(t, host, os)
+	if err := h.Run(codeTourPlugin+".load", nil); err != nil {
+		t.Fatal(err)
+	}
+	resolvePrompt(t, h, "/w/drift.tour")
+	h.CompleteBuffers()
+	h.Advance(20 * time.Millisecond)
+	panels := codeTourPanels(h)
+	if len(panels) != 1 {
+		t.Fatalf("panels = %d (notices %v log %v)", len(panels), h.NoticeTexts(), h.LogText(""))
+	}
+	if text := widgetText(panels[0].Panel.Root); !strings.Contains(text, "recorded at abc1234 · you are on def5678") {
+		t.Fatalf("panel text = %q, want the commit drift warning", text)
+	}
+}
+
+func TestCodeTourCommitDriftMatchesHEADPrefix(t *testing.T) {
+	t.Parallel()
+	host, os := codeTourHost(t)
+	tour := strings.Replace(vscodeTourJSON(), `"title":"VS Tour"`, `"title":"VS Tour","ref":"def5678"`, 1)
+	os.SetFile("/w/same.tour", tour)
+	os.Script(gitArgv("rev-parse", "--show-toplevel", "--git-path", "HEAD"), plugintest.ProcScript{Stdout: "/w\n.git/HEAD\n"})
+	os.Script(gitArgv("rev-parse", "--short", "HEAD"), plugintest.ProcScript{Stdout: "def5678\n"})
+	h := startCodeTour(t, host, os)
+	if err := h.Run(codeTourPlugin+".load", nil); err != nil {
+		t.Fatal(err)
+	}
+	resolvePrompt(t, h, "/w/same.tour")
+	h.CompleteBuffers()
+	h.Advance(20 * time.Millisecond)
+	panels := codeTourPanels(h)
+	if len(panels) != 1 {
+		t.Fatalf("panels = %d (notices %v log %v)", len(panels), h.NoticeTexts(), h.LogText(""))
+	}
+	if text := widgetText(panels[0].Panel.Root); strings.Contains(text, "recorded at") {
+		t.Fatalf("panel text = %q, want no drift warning for a matching HEAD", text)
+	}
+}
