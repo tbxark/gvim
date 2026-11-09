@@ -587,7 +587,19 @@ gopls (language server for go) failed to start: lsp: initialize: EOF [command: g
 gvim does not start it again for that language until **Start/Restart LSP Server**, and the status
 popup shows it in the error state with the same reason.
 
-Servers only start for files that have a name on disk, and not for files in large file mode (local, or a remote large file in windowed mode). A remote large file's save is independent of any language server: the overlay is merged and streamed through the authority's atomic write stream (or the bounded whole-file fallback), so a large file with no server still saves with bounded memory.
+Syntax highlighting of a large file is windowed too, for local and remote large files. The
+highlighter lexes a bounded window of lines around the lines on screen and keeps a few windows,
+so scrolling inside the window lexes nothing and a new stretch lexes only its own window; it never
+reads or highlights the whole file. For a windowed remote large file the highlighter reads only
+lines whose 1 MiB source windows have already arrived: asking whether a line is available is a
+pure cache check (`Buffer.LineLoaded` / `Document.LineLoaded`), and the first paint of an
+unloaded line leaves it unstyled instead of turning the highlight into an extra remote read (the
+paint's own text read is what records the window the root loads). When such a window arrives it
+changes the source's window generation without changing the text version; the highlighter keys
+its windows and long-line segments by that generation, so the next repaint re-lexes them with the
+loaded text, and scrolling the same loaded window again performs no remote I/O. The pass is
+read-only: it never edits the document, never changes the read-only flag of a binary remote large
+file, and cannot block on a remote read. Servers only start for files that have a name on disk, and not for files in large file mode (local, or a remote large file in windowed mode). A remote large file's save is independent of any language server: the overlay is merged and streamed through the authority's atomic write stream (or the bounded whole-file fallback), so a large file with no server still saves with bounded memory.
 
 ## What is not here yet
 

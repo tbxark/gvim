@@ -56,6 +56,10 @@ type TermStarterOptions struct {
 	// before; a remote backend returns a transport the dock drives through
 	// terminal.StartWithBackend. The starter never asks what kind the slot is.
 	Authority authority.Slot
+	// Notice, when not nil, receives a short user-facing notice when a remote
+	// working directory is refused and the terminal falls back to the authority's
+	// default directory. It is only called for a remote slot.
+	Notice func(string)
 }
 
 // TermStarter starts shells for the dock. A shell lives until the dock closes it, or
@@ -75,6 +79,10 @@ func NewTermStarter(ctx context.Context, opts ...TermStarterOptions) TermStarter
 	}
 	return s
 }
+
+// remoteDirCheckTimeout bounds the authority stat that validates a restored remote
+// working directory before a shell is launched.
+const remoteDirCheckTimeout = 5 * time.Second
 
 // Start runs the shell in dir with the given size. It returns a nil Terminal with
 // the error, so the dock never holds a typed nil.
@@ -112,6 +120,13 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 	// returns a launch with no transport (the local PTY path below); a remote backend
 	// returns a transport that the same Session drives through StartWithBackend.
 	if viaAuthority && s.opts.Authority != nil {
+		// A restored/restarted shell's saved cwd may no longer exist on the remote
+		// host. Verify it through the authority before the launch command (SSH does
+		// a remote cd && exec, which would otherwise leave the shell dead) and fall
+		// back to the authority's default directory. This only ever stats the
+		// authority's file system: no local path is read and nothing is executed to
+		// probe the directory.
+		dir = s.checkedRemoteDir(s.ctx, dir)
 		launch, err := s.opts.Authority.Terminal().Launch(s.ctx, authority.TerminalOptions{
 			Dir: dir, Shell: shell, Args: args, Env: extraEnv, Cols: cols, Rows: rows,
 		})
@@ -163,6 +178,39 @@ func (s TermStarter) startProgram(shell string, args []string, dir string, cols,
 		sess.SetOSC52QueryHandler(s.opts.OSC52Query)
 	}
 	return sess, nil
+}
+
+// checkedRemoteDir validates a saved/restarted working directory on a remote
+// authority. Local slots, empty directories and non-remote authorities are left
+// untouched. When the remote directory is missing, not a directory, or the
+// authority is disconnected, it reports a notice (when configured) and returns ""
+// so the authority starts in its own default directory; it never falls back to a
+// local path.
+func (s TermStarter) checkedRemoteDir(ctx context.Context, dir string) string {
+	slot := s.opts.Authority
+	if slot == nil || dir == "" || slot.State().Remote == nil {
+		return dir
+	}
+	if !slot.Connected() {
+		s.remoteDirFallback(dir, "the workspace is disconnected")
+		return ""
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, remoteDirCheckTimeout)
+	defer cancel()
+	st, err := slot.Files().Stat(checkCtx, dir)
+	if err != nil || st.Kind != "dir" {
+		s.remoteDirFallback(dir, "the directory no longer exists")
+		return ""
+	}
+	return dir
+}
+
+// remoteDirFallback tells the user why a saved remote directory was not used. The
+// directory is quoted so no control byte from a record can reach the status row.
+func (s TermStarter) remoteDirFallback(dir, reason string) {
+	if s.opts.Notice != nil {
+		s.opts.Notice(fmt.Sprintf("Remote terminal directory %q is unavailable (%s); starting in the remote default directory", dir, reason))
+	}
 }
 
 // SystemClipboard reads the system clipboard with the platform's own tool.

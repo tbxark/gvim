@@ -20,6 +20,10 @@ func TestOSC7Path(t *testing.T) {
 		{"a remote URL without a path", "file://host", ""},
 		{"a relative path", "tmp/x", ""},
 		{"empty", "", ""},
+		{"a path with a control byte", "/tmp/a\x01b", ""},
+		{"a path with a newline", "/tmp/a\nb", ""},
+		{"a path with invalid UTF-8", "/tmp/\xffx", ""},
+		{"an over-long path", "/" + strings.Repeat("a", maxWorkingDirectoryBytes), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1296,7 +1296,7 @@ func remoteClipboardQuestion(kind string, paths []string, dir, target string) st
 	case len(paths) == 1:
 		what = filepath.Base(paths[0])
 	case len(paths) > 1:
-		what = fmt.Sprintf("%d entries", len(paths))
+		what = uiTextVars("gvim.prompt.move_entries", "%{count} entries", map[string]any{"count": len(paths)})
 	}
 	switch kind {
 	case remoteClipboardCopy:
@@ -1409,8 +1409,10 @@ func renamePromptLabel(target string) string {
 	return uiTextVars("gvim.remote.rename_on_target", "Rename to on %{target}:", map[string]any{"target": target})
 }
 
-// deleteQuestion is the delete confirmation. A remote delete is permanent (no trash on
-// the remote host) and the question states the target.
+// deleteQuestion is the delete confirmation. A remote delete is permanent: no trash
+// exists on the remote host (a trash move was audited and deferred until an atomic
+// same-filesystem no-replace move and a private trash directory are available), so the
+// question says so and names the target; a local delete keeps the shorter OS-trash form.
 func deleteQuestion(paths []string, target string) string {
 	q := uiTextVars("gvim.remote.delete_file", "Delete %{name}?", map[string]any{"name": filepath.Base(paths[0])})
 	if len(paths) > 1 {
@@ -1418,11 +1420,10 @@ func deleteQuestion(paths []string, target string) string {
 	}
 	if target != "" {
 		if len(paths) > 1 {
-			q = uiTextVars("gvim.remote.permanent_delete_items", "Permanently delete %{count} items on %{target}?", map[string]any{"count": len(paths), "target": target})
+			q = uiTextVars("gvim.remote.permanent_delete_items", "Permanently delete %{count} items on %{target}? Remote deletes have no trash.", map[string]any{"count": len(paths), "target": target})
 		} else {
-			q = uiTextVars("gvim.remote.permanent_delete_file", "Permanently delete %{name} on %{target}?", map[string]any{"name": filepath.Base(paths[0]), "target": target})
+			q = uiTextVars("gvim.remote.permanent_delete_file", "Permanently delete %{name} on %{target}? Remote deletes have no trash.", map[string]any{"name": filepath.Base(paths[0]), "target": target})
 		}
-		q += uiText("gvim.remote.no_trash_suffix", " Remote deletes have no trash.")
 	}
 	return q
 }
@@ -1587,17 +1588,17 @@ func (m *Model) askMoveTo(dir string, paths []string) tea.Cmd {
 		return nil
 	}
 	if m.remoteExplorerTarget() == "" {
-		m.notice = "Moving by drag is available in a remote workspace; use Cut and Paste for a local move"
+		m.notice = uiText("gvim.notice.move_drag_remote_only", "Moving by drag is available in a remote workspace; use Cut and Paste for a local move")
 		return nil
 	}
 	var what string
 	if len(paths) == 1 {
 		what = filepath.Base(paths[0])
 	} else {
-		what = fmt.Sprintf("%d entries", len(paths))
+		what = uiTextVars("gvim.prompt.move_entries", "%{count} entries", map[string]any{"count": len(paths)})
 	}
-	q := "Move " + what + " on " + m.remoteExplorerTarget() + " to " + dir + "?"
-	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, moveToTag{dir: dir, paths: paths}, prompt.ConfirmOptions{Yes: "Move", No: "Cancel"}))
+	q := uiTextVars("gvim.prompt.move_remote", "Move %{what} on %{target} to %{dir}?", map[string]any{"what": what, "target": m.remoteExplorerTarget(), "dir": dir})
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, moveToTag{dir: dir, paths: paths}, prompt.ConfirmOptions{Yes: uiText("gvim.prompt.move", "Move"), No: uiText("gvim.dialog.button.cancel", "Cancel")}))
 	return nil
 }
 
@@ -1683,7 +1684,7 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		return m.answerRemoteMultiPaste(tag.job, d.Choice)
 	case moveToTag:
 		if d.Outcome != prompt.Yes {
-			m.notice = "Move cancelled"
+			m.notice = uiText("gvim.notice.move_cancelled", "Move cancelled")
 			return nil
 		}
 		jobs := make([]fileJob, 0, len(tag.paths))
@@ -1925,6 +1926,11 @@ func (m *Model) fileDone(r fileResultMsg) tea.Cmd {
 		rest = append([]fileJob(nil), rest...)
 		for i := range rest {
 			rest[i].pasted = job.pasted + 1
+		}
+	}
+	if wo, ok := m.ops.(interface{ TakeCopyWarning() string }); ok {
+		if w := wo.TakeCopyWarning(); w != "" {
+			m.notice = w
 		}
 	}
 	return tea.Batch(reload, m.runJobs(rest))

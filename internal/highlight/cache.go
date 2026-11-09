@@ -16,16 +16,21 @@ import (
 // large document is lexed in windows of lines instead, kept by the version of its
 // text (spans_large.go). The cache is used on the UI goroutine only.
 type Cache struct {
-	gen     uint64           // bumped by every action that may edit
-	doc     *editor.Document // the document the lexer belongs to
-	lang    string           // the language the lexer was chosen for, as set with Set Language
-	plain   bool             // no lexer matched the document: no spans
-	hl      *syntax.Highlighter
-	spans   [][]syntax.Span
-	valid   bool           // spans were lexed
-	lexedAt uint64         // gen the spans were lexed at
-	lexedV  editor.Version // the text version the spans were lexed at
-	lexes   int            // how many times the whole text was lexed, the version Highlighter sees
+	gen   uint64           // bumped by every action that may edit
+	doc   *editor.Document // the document the lexer belongs to
+	lang  string           // the language the lexer was chosen for, as set with Set Language
+	plain bool             // no lexer matched the document: no spans
+	// headDetected says the lexer was chosen with the head of the document. A
+	// windowed remote large document whose first window has not arrived is detected
+	// from its path alone, and detected again after the paint loads the head, so the
+	// detection never turns a context read into an extra remote window load.
+	headDetected bool
+	hl           *syntax.Highlighter
+	spans        [][]syntax.Span
+	valid        bool           // spans were lexed
+	lexedAt      uint64         // gen the spans were lexed at
+	lexedV       editor.Version // the text version the spans were lexed at
+	lexes        int            // how many times the whole text was lexed, the version Highlighter sees
 
 	// sized is the text version size was measured at, and big whether the text was
 	// then over windowedBytes.
@@ -102,7 +107,8 @@ func (c *Cache) LineSpans(doc *editor.Document, i int) []syntax.Span {
 // useLexer starts a new lexer when the cache is used for another document, or when
 // the language of the document changed.
 func (c *Cache) useLexer(doc *editor.Document) {
-	if c.doc == doc && c.lang == doc.Language() {
+	headLoaded := doc.LineLoaded(0)
+	if c.doc == doc && c.lang == doc.Language() && (c.headDetected || !headLoaded) {
 		return
 	}
 	c.doc = doc
@@ -110,23 +116,30 @@ func (c *Cache) useLexer(doc *editor.Document) {
 	c.valid = false
 	c.large = largeSpans{}
 	c.segs = nil
-	lexer := documentLexer(doc)
+	lexer, headDetected := documentLexer(doc)
+	c.headDetected = headDetected
 	c.plain = lexer == lexers.Fallback
 	c.hl = syntax.NewHighlighter(lexer)
 }
 
-// documentLexer returns the lexer of doc. A language set with Set Language names the
-// lexer, when the name matches one. Otherwise the file name and the text choose it, as
-// syntax.Detect does.
-func documentLexer(doc *editor.Document) chroma.Lexer {
+// documentLexer returns the lexer of doc and whether the head was available to choose
+// it. A language set with Set Language names the lexer, when the name matches one.
+// Otherwise the file name and the text choose it, as syntax.Detect does. A windowed
+// remote large document whose first window has not arrived is detected from its path
+// alone: reading the head would turn filling a syntax cache into an extra remote
+// window load. Once the paint has loaded the head, useLexer detects again.
+func documentLexer(doc *editor.Document) (chroma.Lexer, bool) {
 	if name := doc.Language(); name != "" {
 		if lexer := lexers.Get(name); lexer != nil {
-			return lexer
+			return lexer, true
 		}
+	}
+	if !doc.LineLoaded(0) {
+		return syntax.Detect(doc.Path, nil), false
 	}
 	// Detect looks at the head of the text only, so the head is all it is given: a
 	// large document never builds its whole text for this.
-	return syntax.Detect(doc.Path, []byte(doc.Buffer.TextPrefix(lexerHeadBytes)))
+	return syntax.Detect(doc.Path, []byte(doc.Buffer.TextPrefix(lexerHeadBytes))), true
 }
 
 // lexerHeadBytes is how much of the start of a document syntax.Detect is given. It is

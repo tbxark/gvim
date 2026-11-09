@@ -84,8 +84,10 @@ func TestTabsLiveRestoreWaitsForDiveAndUsesResume(t *testing.T) {
 	if len(starter.launches) != 1 || !slices.Equal(starter.launches[0].Argv, []string{"claude", "--resume", "s1"}) {
 		t.Fatalf("launches = %+v, want the resume argv", starter.launches)
 	}
-	if len(starter.launchDirs) != 1 || starter.launchDirs[0] != "/chosen" {
-		t.Fatalf("launch dirs = %v, want the saved launch dir", starter.launchDirs)
+	// Fresh respawns in the persisted last reported directory, not the recorded
+	// launch_dir: the record's cwd wins.
+	if len(starter.launchDirs) != 1 || starter.launchDirs[0] != "/work" {
+		t.Fatalf("launch dirs = %v, want the saved cwd", starter.launchDirs)
 	}
 	if !tabs.Running() || tabs.Restored() || tabs.Exited() {
 		t.Fatalf("after the dive: running %v restored %v exited %v", tabs.Running(), tabs.Restored(), tabs.Exited())

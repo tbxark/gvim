@@ -76,7 +76,7 @@ func (c *stringCache) refresh(doc *editor.Document, line int) {
 	b := doc.Buffer
 	if c.doc != doc || c.lang != doc.Language() || c.path != doc.Path {
 		c.doc, c.lang, c.path = doc, doc.Language(), doc.Path
-		c.lexer = documentLexer(doc)
+		c.lexer, _ = documentLexer(doc)
 		c.valid = false
 	}
 	if c.valid && c.version == b.Version() && line >= c.start && line < c.end {

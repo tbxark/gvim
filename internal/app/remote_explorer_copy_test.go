@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/authority/authoritytest"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 )
 
@@ -497,5 +500,90 @@ func TestRemoteCopyTrustGate(t *testing.T) {
 	}
 	if calls != 2 || len(fake.writes) != 0 || len(fake.removes) != 0 {
 		t.Fatalf("gate calls = %d writes = %v removes = %v", calls, fake.writes, fake.removes)
+	}
+}
+
+// TestRemoteCopyPreservesMetadataBestEffort checks a successful copy passes the source
+// permission bits to the atomic file write and applies both mode and mtime through the
+// optional FileMetadata surface, with no warning when that works.
+func TestRemoteCopyPreservesMetadataBestEffort(t *testing.T) {
+	when := time.Unix(1_700_000_000, 0)
+	later := when.Add(time.Hour)
+	fake := newRemoteOpsFake().
+		putMode("/remote/w/a.txt", "a", 0o600, when).
+		putMode("/remote/w/src/", "", 0o750, when).
+		putMode("/remote/w/src/x.txt", "x", 0o640, later).
+		putMode("/remote/w/dst/", "", 0o755, when)
+	ops, _ := fake.ops(true)
+
+	out, err := ops.Copy(context.Background(), "/remote/w/a.txt", "/remote/w/dst", expanel.ConflictCancel)
+	if err != nil {
+		t.Fatalf("file copy: %v", err)
+	}
+	if fake.modes[out] != 0o600 || fake.mtime[out] != when.Unix() {
+		t.Fatalf("file metadata = %v, %v; want 0600 and %v", fake.modes[out], timeUnix(fake.mtime[out]), when)
+	}
+	if len(fake.writeOpts) == 0 || fake.writeOpts[len(fake.writeOpts)-1].Mode != 0o600 {
+		t.Fatalf("file write options = %+v, want mode 0600", fake.writeOpts)
+	}
+	if w := ops.TakeCopyWarning(); w != "" {
+		t.Fatalf("working metadata reported warning %q", w)
+	}
+
+	dir, err := ops.Copy(context.Background(), "/remote/w/src", "/remote/w/dst", expanel.ConflictCancel)
+	if err != nil {
+		t.Fatalf("dir copy: %v", err)
+	}
+	if fake.modes[dir] != 0o750 || fake.mtime[dir] != when.Unix() {
+		t.Fatalf("dir metadata = %v, %v; want 0750 and %v", fake.modes[dir], timeUnix(fake.mtime[dir]), when)
+	}
+	if fake.modes[dir+"/x.txt"] != 0o640 || fake.mtime[dir+"/x.txt"] != later.Unix() {
+		t.Fatalf("nested file metadata = %v, %v; want 0640 and %v", fake.modes[dir+"/x.txt"], timeUnix(fake.mtime[dir+"/x.txt"]), later)
+	}
+	for _, p := range fake.metaEntries {
+		if !strings.HasPrefix(p, "/remote/w/dst/") {
+			t.Fatalf("metadata was applied outside the destination: %q", p)
+		}
+	}
+	if w := ops.TakeCopyWarning(); w != "" {
+		t.Fatalf("working dir metadata reported warning %q", w)
+	}
+}
+
+// TestRemoteCopyMetadataWarningIsNonFatal checks a metadata failure leaves the copied
+// bytes intact, returns no copy error, and leaves one warning for the TUI notice.
+func TestRemoteCopyMetadataWarningIsNonFatal(t *testing.T) {
+	fake := newRemoteOpsFake().putMode("/remote/w/a.txt", "a", 0o600, time.Unix(1_700_000_000, 0)).put("/remote/w/dst/", "")
+	fake.metaErr = errors.New("chmod denied by test")
+	ops, _ := fake.ops(true)
+	out, err := ops.Copy(context.Background(), "/remote/w/a.txt", "/remote/w/dst", expanel.ConflictCancel)
+	if err != nil {
+		t.Fatalf("a metadata failure failed the copy: %v", err)
+	}
+	if got := string(fake.files[out]); got != "a" {
+		t.Fatalf("copied bytes = %q, want a", got)
+	}
+	w := ops.TakeCopyWarning()
+	if !strings.Contains(w, "permissions/mtime") || !strings.Contains(w, "chmod denied") {
+		t.Fatalf("warning = %q, want the metadata failure", w)
+	}
+	if again := ops.TakeCopyWarning(); again != "" {
+		t.Fatalf("warning was not one-shot: %q", again)
+	}
+}
+
+// TestRemoteCopyMetadataUnsupportedIsNotClaimed checks a backend without FileMetadata
+// copies the bytes without inventing a warning or pretending metadata was preserved.
+func TestRemoteCopyMetadataUnsupportedIsNotClaimed(t *testing.T) {
+	fake := newRemoteOpsFake().putMode("/remote/w/a.txt", "a", 0o600, time.Unix(1_700_000_000, 0)).put("/remote/w/dst/", "")
+	slot := authoritytest.New()
+	slot.FileSystem = struct{ authority.FileSystem }{fake}
+	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
+	out, err := ops.Copy(context.Background(), "/remote/w/a.txt", "/remote/w/dst", expanel.ConflictCancel)
+	if err != nil || string(fake.files[out]) != "a" {
+		t.Fatalf("copy = %q, %v", out, err)
+	}
+	if w := ops.TakeCopyWarning(); w != "" {
+		t.Fatalf("unsupported metadata claimed a warning: %q", w)
 	}
 }

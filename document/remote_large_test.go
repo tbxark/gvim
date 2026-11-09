@@ -218,8 +218,22 @@ func TestReadRemoteLargeDocumentMissLoadRepaint(t *testing.T) {
 	if !d.Index().Complete {
 		t.Fatalf("index not complete: %+v", d.Index())
 	}
+	// The index scan may leave its last miss recorded; a paint-driven check starts
+	// clean below.
+	for {
+		if _, ok := d.TakePendingLargeWindow(); !ok {
+			break
+		}
+	}
 	// The scan loaded 12 windows; the 8-window cache evicted the first line's
-	// window, so the paint read misses and returns at once.
+	// window, so it is not available, and merely asking must not request it.
+	if d.LineLoaded(0) {
+		t.Fatal("line 0 is reported loaded although its window was evicted")
+	}
+	if _, ok := d.TakePendingLargeWindow(); ok {
+		t.Fatal("LineLoaded(0) recorded a window miss")
+	}
+	// The paint read misses and returns at once.
 	line := d.Buffer.Line(0)
 	if line != "" {
 		t.Fatalf("Line(0) before loading = %q, want the blank pending placeholder", line)
@@ -233,6 +247,12 @@ func TestReadRemoteLargeDocumentMissLoadRepaint(t *testing.T) {
 	}
 	if got := d.Buffer.Line(0); got != "line00000000xxxxxxxx" {
 		t.Fatalf("Line(0) after load = %q", got)
+	}
+	if !d.LineLoaded(0) {
+		t.Fatal("line 0 is not reported loaded after its window arrived")
+	}
+	if _, ok := d.TakePendingLargeWindow(); ok {
+		t.Fatal("LineLoaded(0) after load recorded a window miss")
 	}
 	if d.WindowGeneration() == 0 {
 		t.Fatal("window generation did not change")

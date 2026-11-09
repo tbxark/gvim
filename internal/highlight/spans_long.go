@@ -21,7 +21,11 @@ const (
 
 // segSpans is the lexed spans of one segment of a line, for one version of the text.
 type segSpans struct {
-	ver       uint64
+	ver uint64
+	// gen is the asynchronous window generation of the text the segment was read
+	// from; a remote window arrival can replace the segment text without a version
+	// change, so the cached spans must not outlive it.
+	gen       uint64
 	line, col int
 	n         int // the length of the segment's text in bytes
 	spans     []syntax.Span
@@ -38,9 +42,15 @@ func (c *Cache) Segment(doc *editor.Document, i, col int, text string) []syntax.
 	if c.plain || c.hl.Language() == plainTextLexer {
 		return nil
 	}
+	if !doc.LineLoaded(i) {
+		// The pane has no text for this line yet; do not read a context slice of an
+		// unloaded remote window and make it load one.
+		return nil
+	}
 	ver := doc.Buffer.Version()
+	gen := doc.Buffer.WindowGeneration()
 	for _, s := range c.segs {
-		if s.ver == ver && s.line == i && s.col == col && s.n == len(text) {
+		if s.ver == ver && s.gen == gen && s.line == i && s.col == col && s.n == len(text) {
 			return s.spans
 		}
 	}
@@ -57,7 +67,7 @@ func (c *Cache) Segment(doc *editor.Document, i, col int, text string) []syntax.
 		}
 		out = append(out, syntax.Span{Start: max(s.Start-len(before), 0), End: s.End - len(before), Kind: s.Kind})
 	}
-	c.segs = append(c.segs, segSpans{ver: ver, line: i, col: col, n: len(text), spans: out})
+	c.segs = append(c.segs, segSpans{ver: ver, gen: gen, line: i, col: col, n: len(text), spans: out})
 	if len(c.segs) > maxSegSpans {
 		c.segs = c.segs[len(c.segs)-maxSegSpans:]
 	}

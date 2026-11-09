@@ -44,10 +44,15 @@ type remoteOpsFake struct {
 	// makeErr makes the next mutation of that kind fail.
 	writeErr, mkdirErr, renameErr, removeErr error
 	statErr                                  error
+	// FileMetadata bookkeeping: modes and the mtime map are updated by SetMetadata, and
+	// metaErr makes it fail for the best-effort warning test.
+	modes       map[string]fs.FileMode
+	metaEntries []string
+	metaErr     error
 }
 
 func newRemoteOpsFake() *remoteOpsFake {
-	return &remoteOpsFake{files: map[string][]byte{}, dirs: map[string]bool{}, mtime: map[string]int64{}, symlinks: map[string]string{}}
+	return &remoteOpsFake{files: map[string][]byte{}, dirs: map[string]bool{}, mtime: map[string]int64{}, modes: map[string]fs.FileMode{}, symlinks: map[string]string{}}
 }
 
 func (f *remoteOpsFake) put(path, text string) *remoteOpsFake {
@@ -60,6 +65,34 @@ func (f *remoteOpsFake) put(path, text string) *remoteOpsFake {
 	f.files[path] = []byte(text)
 	f.mtime[path] = 1
 	return f
+}
+
+// putMode stores a file or directory with a mode and mtime for the metadata tests.
+func (f *remoteOpsFake) putMode(p, text string, mode fs.FileMode, mtime time.Time) *remoteOpsFake {
+	f.put(p, text)
+	key := strings.TrimSuffix(p, "/")
+	f.mu.Lock()
+	f.modes[key] = mode
+	f.mtime[key] = mtime.Unix()
+	f.mu.Unlock()
+	return f
+}
+
+// SetMetadata implements authority.FileMetadata for the copy tests.
+func (f *remoteOpsFake) SetMetadata(_ context.Context, p string, mode fs.FileMode, mtime time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.metaErr != nil {
+		return f.metaErr
+	}
+	if mode != 0 {
+		f.modes[p] = mode.Perm()
+	}
+	if !mtime.IsZero() {
+		f.mtime[p] = mtime.Unix()
+	}
+	f.metaEntries = append(f.metaEntries, p)
+	return nil
 }
 
 func (f *remoteOpsFake) putSymlink(p, target string) *remoteOpsFake {
@@ -148,10 +181,10 @@ func (f *remoteOpsFake) Stat(_ context.Context, p string) (hostos.FileStat, erro
 		return hostos.FileStat{Kind: "symlink"}, nil
 	}
 	if f.dirs[p] {
-		return hostos.FileStat{Kind: "dir"}, nil
+		return hostos.FileStat{Kind: "dir", MTime: timeUnix(f.mtime[p]), Mode: f.modes[p]}, nil
 	}
 	if data, ok := f.files[p]; ok {
-		return hostos.FileStat{Kind: "file", Size: int64(len(data)), MTime: timeUnix(f.mtime[p])}, nil
+		return hostos.FileStat{Kind: "file", Size: int64(len(data)), MTime: timeUnix(f.mtime[p]), Mode: f.modes[p]}, nil
 	}
 	return hostos.FileStat{}, &os.PathError{Op: "stat", Path: p, Err: fs.ErrNotExist}
 }

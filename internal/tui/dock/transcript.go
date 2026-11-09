@@ -236,6 +236,9 @@ func (p *Panel) SavedState() terminal.SavedState {
 			st.Cwd = cwd
 		}
 	}
+	// The saved cwd is untrusted input too (OSC 7 today, a hand-edited record
+	// tomorrow): clean its controls and bound it like the launch directory.
+	st.Cwd = clipSavedDir(cleanSavedText(st.Cwd))
 	var rows []string
 	add := func(text string) {
 		rows = append(rows, cleanSavedText(text))
@@ -334,7 +337,7 @@ func (p *Panel) Restore(st terminal.SavedState) {
 	p.priorWidth = st.Width
 	p.open = st.Open || len(p.prior) > 0
 	p.focus = false
-	p.dir = st.Cwd
+	p.dir = clipSavedDir(cleanSavedText(st.Cwd))
 	p.launchDir = clipSavedDir(st.LaunchDir)
 	if p.launchDir == "" {
 		// An older record has no launch_dir: its cwd is the best available launch

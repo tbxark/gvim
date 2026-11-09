@@ -1216,7 +1216,7 @@ func (m *Model) resolveCompletion(resolver CompletionResolver, c *lspCompletion,
 // failed resolve changes nothing and says why.
 func (m *Model) completionResolved(msg completionResolvedMsg) tea.Cmd {
 	if msg.err != nil {
-		m.notice = "completion: " + msg.err.Error()
+		m.notice = uiTextVars("gvim.notice.completion.error", "completion: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil
 	}
 	if err := m.applyCompletionItem(msg.comp, msg.item); err != nil {
@@ -1256,19 +1256,19 @@ func (m *Model) resolveMultiCursorAccept(c *lspCompletion, item CompletionItem) 
 	}
 	if _, ok := m.ed.(completionItemAtCarets); !ok {
 		m.closeCompletion(c)
-		m.notice = "completion: multi-cursor resolved acceptance is not available in this editor"
+		m.notice = uiText("gvim.notice.completion.resolve_unsupported", "completion: multi-cursor resolved acceptance is not available in this editor")
 		return nil, true
 	}
 	versioner, ok := m.ed.(completionDocumentVersioner)
 	if !ok {
 		m.closeCompletion(c)
-		m.notice = "completion: a multi-cursor resolve cannot verify the document version here; collapse the extra carets and accept with one cursor"
+		m.notice = uiText("gvim.notice.completion.resolve_version_unverifiable", "completion: a multi-cursor resolve cannot verify the document version here; collapse the extra carets and accept with one cursor")
 		return nil, true
 	}
 	version, versionOK := versioner.DocumentVersion(c.path)
 	if !versionOK {
 		m.closeCompletion(c)
-		m.notice = "completion: a multi-cursor resolve cannot verify the document version here; collapse the extra carets and accept with one cursor"
+		m.notice = uiText("gvim.notice.completion.resolve_version_unverifiable", "completion: a multi-cursor resolve cannot verify the document version here; collapse the extra carets and accept with one cursor")
 		return nil, true
 	}
 	state := completionMultiResolve{path: c.path, version: version, carets: completionCaretHeads(doc)}
@@ -1309,31 +1309,31 @@ func completionCaretHeads(doc Document) []buffer.Pos {
 // atomic, version-guarded multi-caret path, so the whole accept is one undo step.
 func (m *Model) completionMultiResolved(msg completionMultiResolvedMsg) tea.Cmd {
 	if msg.err != nil {
-		m.notice = "completion: " + msg.err.Error()
+		m.notice = uiTextVars("gvim.notice.completion.error", "completion: %{error}", map[string]any{"error": msg.err.Error()})
 		return nil
 	}
 	doc := m.ed.Active()
 	if doc == nil || docPath(doc) != msg.state.path {
-		m.notice = "completion: the document is no longer active, so the resolved completion was not applied"
+		m.notice = uiText("gvim.notice.completion.resolve_inactive", "completion: the document is no longer active, so the resolved completion was not applied")
 		return nil
 	}
 	versioner, ok := m.ed.(completionDocumentVersioner)
 	if !ok {
-		m.notice = "completion: the document version can no longer be verified, so the resolved completion was not applied"
+		m.notice = uiText("gvim.notice.completion.resolve_version_lost", "completion: the document version can no longer be verified, so the resolved completion was not applied")
 		return nil
 	}
 	version, versionOK := versioner.DocumentVersion(msg.state.path)
 	if !versionOK || version != msg.state.version {
-		m.notice = "completion is stale: the document changed while the item was being resolved, so nothing was applied"
+		m.notice = uiText("gvim.notice.completion.resolve_stale", "completion is stale: the document changed while the item was being resolved, so nothing was applied")
 		return nil
 	}
 	if heads := completionCaretHeads(doc); !slices.Equal(heads, msg.state.carets) {
-		m.notice = "completion: the cursors changed while the item was being resolved, so nothing was applied"
+		m.notice = uiText("gvim.notice.completion.resolve_cursors_changed", "completion: the cursors changed while the item was being resolved, so nothing was applied")
 		return nil
 	}
 	accepter, ok := m.ed.(completionItemAtCarets)
 	if !ok {
-		m.notice = "completion: multi-cursor resolved acceptance is not available in this editor"
+		m.notice = uiText("gvim.notice.completion.resolve_unsupported", "completion: multi-cursor resolved acceptance is not available in this editor")
 		return nil
 	}
 	additional := make([]editor.LSPEdit, 0, len(msg.item.Additional))
@@ -1394,7 +1394,7 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 		accepter, ok := m.ed.(completionItemAtCarets)
 		if !ok {
 			m.closeCompletion(c)
-			m.notice = "completion: multi-cursor snippet/import acceptance is not available in this editor"
+			m.notice = uiText("gvim.notice.completion.accept_snippet_import_unsupported", "completion: multi-cursor snippet/import acceptance is not available in this editor")
 			return true
 		}
 		additional := make([]editor.LSPEdit, 0, len(item.Additional))
@@ -1410,7 +1410,7 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 		accepter, ok := m.ed.(completionAtCarets)
 		if !ok {
 			m.closeCompletion(c)
-			m.notice = "completion: multi-cursor acceptance is not available in this editor"
+			m.notice = uiText("gvim.notice.completion.accept_unsupported", "completion: multi-cursor acceptance is not available in this editor")
 			return true
 		}
 		_, err = accepter.ApplyCompletionAtCarets(c.path, item.Insert, wordChars, expect)
@@ -1426,9 +1426,9 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 func completionAcceptNotice(err error) string {
 	switch {
 	case errors.Is(err, editor.ErrStale):
-		return "completion is stale: the document changed, so nothing was applied"
+		return uiText("gvim.notice.completion.offer_stale", "completion is stale: the document changed, so nothing was applied")
 	case errors.Is(err, editor.ErrOverlappingEdits):
-		return "completion edits overlap, so nothing was applied"
+		return uiText("gvim.notice.completion.offer_overlap", "completion edits overlap, so nothing was applied")
 	}
 	return err.Error()
 }

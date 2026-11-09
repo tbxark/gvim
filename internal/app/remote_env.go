@@ -19,6 +19,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -73,6 +75,59 @@ func runRemoteEnvStdout(ctx context.Context, slot func() authority.Slot, root fu
 		return "", fmt.Errorf("remote environment command failed (exit %d): %s", res.Code, msg)
 	}
 	return string(res.Stdout), nil
+}
+
+// remoteMarkerProbeTimeout bounds one shell-free authority marker probe (all paths of
+// that probe share this budget). The authority Stat calls are sequential; the path count
+// is bounded by env.MaxMarkerProbePaths in the env package.
+const remoteMarkerProbeTimeout = 10 * time.Second
+
+// newRemoteMarkerProber returns the shell-free marker probe used before a remote
+// workspace is trusted: authority.FileSystem.Stat for each marker/require path, no remote
+// process, no local filesystem. A missing path is absence (not error); any other Stat
+// failure aborts the probe with a clear error so detection reports it and stays
+// unavailable/uncached. ctx and the shared timeout bound the work.
+func newRemoteMarkerProber(slot func() authority.Slot) env.MarkerProber {
+	return func(ctx context.Context, root string, paths []string) (map[string]bool, error) {
+		s := slot()
+		if s == nil {
+			return nil, errors.New("remote environment: the remote authority is not mounted")
+		}
+		files := s.Files()
+		if files == nil {
+			return nil, errors.New("remote environment: the remote authority has no file surface")
+		}
+		if root == "" {
+			return nil, errors.New("remote environment: no remote workspace root for marker detection")
+		}
+		ctx, cancel := context.WithTimeout(ctx, remoteMarkerProbeTimeout)
+		defer cancel()
+		exists := make(map[string]bool, len(paths))
+		for _, rel := range paths {
+			rel = strings.TrimSpace(rel)
+			if rel == "" || path.IsAbs(rel) {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			st, err := files.Stat(ctx, path.Join(root, rel))
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return nil, fmt.Errorf("remote environment: marker %s: %w", rel, err)
+			}
+			// The authority Stat follows symlinks but reports a broken link as Kind
+			// "symlink"; the trusted shell probe's [ -e ] is false there, so do not count
+			// a broken link as an existing marker.
+			if st.Kind == "symlink" {
+				continue
+			}
+			exists[rel] = true
+		}
+		return exists, nil
+	}
 }
 
 // newRemoteEnvRunner returns the env.RemoteRunner of a remote session for detection and

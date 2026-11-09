@@ -44,9 +44,10 @@ func (t *remoteCapTree) Selected() (tree.Row, bool) {
 // fakeRemoteOps is a remote explorerOps: RemoteTarget drives the confirmations and the
 // clipboard methods record what the UI runs.
 type fakeRemoteOps struct {
-	target string
-	copies []string
-	moves  []string
+	copyWarning string
+	target      string
+	copies      []string
+	moves       []string
 	// conflict makes a cancel-policy copy/move report explorer.ErrConflict; conflictFor
 	// limits it to one source and fail makes one source return an error.
 	conflict    bool
@@ -618,5 +619,33 @@ func TestRemoteDragMoveConflictAsksBeforeOverwrite(t *testing.T) {
 	}
 	if len(m.overlays) != 1 {
 		t.Fatalf("overlays = %d, want the existing conflict prompt", len(m.overlays))
+	}
+}
+
+// copyWarning is the non-fatal metadata warning the fake remote adapter reports.
+type copyWarningOps interface{ TakeCopyWarning() string }
+
+func (f *fakeRemoteOps) TakeCopyWarning() string {
+	w := f.copyWarning
+	f.copyWarning = ""
+	return w
+}
+
+// TestRemoteCopyMetadataWarningBecomesNotice checks a successful file job surfaces the
+// adapter's non-fatal metadata warning as the notice instead of dropping it.
+func TestRemoteCopyMetadataWarningBecomesNotice(t *testing.T) {
+	want := "copy completed, but permissions/mtime were not preserved on 1 of 2 entries: chmod denied"
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r", copyWarning: want}
+	m := remotePasteModel(t, ops)
+	if _, ok := m.ops.(copyWarningOps); !ok {
+		t.Fatal("the remote adapter lost the warning surface")
+	}
+	_, cmd := m.Update(fileResultMsg{job: fileJob{kind: jobCopy, path: "/r/a", dir: "/r/dst", policy: explorer.ConflictCancel}, out: "/r/dst/a"})
+	settle(t, m, cmd)
+	if m.notice != want {
+		t.Fatalf("notice = %q, want the metadata warning", m.notice)
+	}
+	if got := ops.TakeCopyWarning(); got != "" {
+		t.Fatalf("the warning was not consumed: %q", got)
 	}
 }

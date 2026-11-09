@@ -19,7 +19,10 @@ func TestTask138StringsUseTheCatalogue(t *testing.T) {
 		t.Errorf("remote new-folder label = %q", got)
 	}
 	if got := deleteQuestion([]string{"/w/a.go"}, "host"); got != "Permanently delete a.go on host? Remote deletes have no trash." {
-		t.Errorf("remote delete question = %q", got)
+		t.Errorf("remote delete question = %q, want the full permanent-delete sentence", got)
+	}
+	if got := deleteQuestion([]string{"/w/a.go", "/w/b.go"}, "host"); got != "Permanently delete 2 items on host? Remote deletes have no trash." {
+		t.Errorf("remote multi delete question = %q, want the full permanent-delete sentence", got)
 	}
 	if got := uiText("gvim.prompt.name_empty", "name is empty"); got != "name is empty" {
 		t.Errorf("validation = %q, want the English fallback", got)

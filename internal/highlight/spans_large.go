@@ -64,7 +64,12 @@ func lineSize(b *buffer.Buffer, i int) int {
 type largeSpans struct {
 	buf     *buffer.Buffer
 	version uint64
-	wins    []spanWindow // newest first
+	// gen is the asynchronous window-arrival generation at which wins were lexed, or
+	// zero for a local file. A remote window that arrives changes no text version, yet
+	// its lines were blank when the window was lexed; a new generation therefore drops
+	// the windows and lets the next paint lex them with the loaded text.
+	gen  uint64
+	wins []spanWindow // newest first
 	// hot is set when the text changed since the last window was lexed: the next window is
 	// a short one.
 	hot bool
@@ -120,16 +125,30 @@ func (c *Cache) window(doc *editor.Document, i int) []syntax.Span {
 		return nil
 	}
 	ver := b.Version()
-	if c.large.buf != b || c.large.version != ver {
-		// A buffer seen for the first time is not an edit: it is scrolled to.
-		c.large = largeSpans{buf: b, version: ver, hot: c.large.buf == b}
+	gen := b.WindowGeneration()
+	genChanged := c.large.buf == b && c.large.gen != gen
+	if c.large.buf != b || c.large.version != ver || c.large.gen != gen {
+		// A buffer seen for the first time is not an edit: it is scrolled to. A version
+		// change is an edit and asks for a short window. A generation change is a remote
+		// window arriving: the text version is the same, so the window is not hot, but
+		// the spans must be lexed again because the loaded lines replaced blanks. The
+		// old windows are dropped either way.
+		hot := c.large.buf == b && c.large.version != ver
+		c.large = largeSpans{buf: b, version: ver, gen: gen, hot: hot}
+	}
+	if genChanged {
+		// The text version did not change when a remote window arrived, so the
+		// highlighter's window cache (keyed by version, first line and length) would
+		// otherwise return the spans lexed from the blank lines. Drop it; the next
+		// LinesWindow lexes the loaded text.
+		c.hl.Invalidate()
 	}
 	for _, w := range c.large.wins {
 		if i >= w.served && i <= w.last {
 			return w.spans[i-w.first]
 		}
 	}
-	w := c.lexWindow(b, ver, i, c.large.hot)
+	w := c.lexWindow(doc, b, ver, i, c.large.hot)
 	c.large.hot = false
 	c.large.wins = slices.Insert(c.large.wins, 0, w)
 	if len(c.large.wins) > maxSpanWindows {
@@ -138,42 +157,56 @@ func (c *Cache) window(doc *editor.Document, i int) []syntax.Span {
 	return w.spans[i-w.first]
 }
 
-// lexWindow lexes the lines around line i, a short window when hot.
-func (c *Cache) lexWindow(b *buffer.Buffer, ver uint64, i int, hot bool) spanWindow {
+// lexWindow lexes the lines around line i, a short window when hot. A line of an
+// asynchronous window source that has not arrived is left blank (and gets no spans):
+// reading it would turn highlighting a line on screen into an extra remote window
+// load. The window-generation key above re-lexes after such a window arrives.
+func (c *Cache) lexWindow(doc *editor.Document, b *buffer.Buffer, ver uint64, i int, hot bool) spanWindow {
 	back, ahead := windowBack, windowAhead
 	if hot {
 		back, ahead = hotBack, hotAhead
 	}
 	served := max(i-back, 0)
-	first := max(served-contextLines(b, served, c.context()), 0)
+	first := max(served-contextLines(doc, b, served, c.context()), 0)
 	last := min(i+ahead, b.Lines()-1)
 	if first == 0 {
 		served = 0
 	}
 	text := make([]string, last-first+1)
-	var long []int
+	var noSpans []int
 	for k := range text {
+		if !doc.LineLoaded(first + k) {
+			// Do not read a line whose remote window is not loaded: a read returns the
+			// blank placeholder and records a window miss the paint did not need.
+			noSpans = append(noSpans, k)
+			continue
+		}
 		if lineSize(b, first+k) > maxLexedLineBytes {
 			// Lexing such a line would cost more than the rest of the window together,
 			// and the pane paints a line past editorpane.LongLineRunes as a window of its
 			// own that wants no spans.
-			long = append(long, k)
+			noSpans = append(noSpans, k)
 			continue
 		}
 		text[k] = b.Line(first + k)
 	}
 	spans := slices.Clone(c.hl.LinesWindow(int(ver), first, text).Spans)
-	for _, k := range long {
+	for _, k := range noSpans {
 		spans[k] = nil
 	}
 	return spanWindow{served: served, last: last, first: first, spans: spans}
 }
 
 // contextLines is how many lines above line from hold about bytes bytes, or fewer
-// when the document or maxContextLines ends first.
-func contextLines(b *buffer.Buffer, from, bytes int) int {
+// when the document, maxContextLines, or an unloaded remote window ends first. An
+// unloaded line is not measured: lineSize would read its window and make highlighting
+// a context line perform remote I/O the paint did not ask for.
+func contextLines(doc *editor.Document, b *buffer.Buffer, from, bytes int) int {
 	n, sum := 0, 0
 	for j := from - 1; j >= 0 && n < maxContextLines && sum < bytes; j-- {
+		if !doc.LineLoaded(j) {
+			break
+		}
 		sum += lineSize(b, j) + 1
 		n++
 	}

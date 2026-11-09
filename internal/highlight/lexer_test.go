@@ -24,7 +24,10 @@ func TestDocumentLexerReadsOnlyTheHeadOfALargeDocument(t *testing.T) {
 	if !doc.Large() {
 		t.Fatal("the document is not large")
 	}
-	lexer := documentLexer(doc)
+	lexer, headDetected := documentLexer(doc)
+	if !headDetected {
+		t.Fatal("the head was not available to choose the lexer")
+	}
 	if lexer == nil || lexer.Config().Name != "Python" {
 		t.Fatalf("lexer = %v, want Python from the shebang", lexer)
 	}

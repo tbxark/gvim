@@ -219,6 +219,28 @@ func (s *remoteWindowSource) evictOldestLocked() {
 // Generation returns how many windows have arrived.
 func (s *remoteWindowSource) Generation() uint64 { return s.gen.Load() }
 
+// Loaded reports whether [off, off+n) is entirely cached, without recording a miss.
+// It implements buffer.WindowAvailability for line-aware readers such as the syntax
+// highlighter, which must not turn a context read into an extra remote window load.
+func (s *remoteWindowSource) Loaded(off, n int64) bool {
+	if n <= 0 {
+		n = 1
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	for pos := off; pos < off+n; {
+		index := pos / RemoteWindowSize
+		if _, ok := s.windows[index]; !ok {
+			return false
+		}
+		pos = (index + 1) * RemoteWindowSize
+	}
+	return true
+}
+
 // TakePendingWindow returns and clears the first missed window.
 func (s *remoteWindowSource) TakePendingWindow() (off, n int64, ok bool) {
 	s.mu.Lock()
@@ -327,6 +349,14 @@ func (d *Document) LoadLargeWindow(ctx context.Context, w LargeWindow) error {
 		return fmt.Errorf("large window: not this remote document")
 	}
 	return d.Buffer.LoadWindow(ctx, w.Off, w.N)
+}
+
+// LineLoaded reports whether line i of the document can be read without a remote
+// read or a pending-window request. It is true for memory buffers, local large files
+// and overlay lines; a windowed remote large file reports false for a line in a
+// window that has not arrived yet.
+func (d *Document) LineLoaded(i int) bool {
+	return d.Buffer != nil && d.Buffer.LineLoaded(i)
 }
 
 // WindowGeneration returns the source's window-arrival counter.

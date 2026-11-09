@@ -12,6 +12,8 @@ package authority
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"time"
 
 	"github.com/tbxark/gvim/plugin/hostos"
 )
@@ -46,6 +48,23 @@ type FileMutations interface {
 // implement one.
 func Mutations(fs FileSystem) FileMutations {
 	m, _ := fs.(FileMutations)
+	return m
+}
+
+// FileMetadata is the optional part of a file system that can preserve the permissions
+// and modification time of a copied entry. It is separate from the read surface because
+// a backend may be read-only or may not expose metadata; a caller that needs it asks with
+// Metadata and treats its absence as "this backend does not support metadata", never as
+// a successful no-op. mode is the permission part of fs.FileMode; an mtime of the zero
+// time (or a zero mode) leaves that field alone.
+type FileMetadata interface {
+	SetMetadata(ctx context.Context, path string, mode fs.FileMode, mtime time.Time) error
+}
+
+// Metadata returns the optional metadata surface of fs, or nil when the backend cannot
+// set permissions/mtime.
+func Metadata(fs FileSystem) FileMetadata {
+	m, _ := fs.(FileMetadata)
 	return m
 }
 

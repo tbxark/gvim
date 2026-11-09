@@ -650,6 +650,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		})
 		envRemote = env.NewRemote(opts.Remote.Workspace(), cfg.EnvDetectors(), trustedLive,
 			envShell.RunDetect, envShell.RunCapture)
+		// Before trust the authority command gate refuses the shell probe; the marker
+		// detector then uses shell-free authority Stat calls so an untrusted workspace can
+		// still show the remote detection result (activation remains trust-gated).
+		envRemote.SetMarkerProber(newRemoteMarkerProber(func() authority.Slot { return authSlot }))
 		envProvider = envRemote
 	} else {
 		envProvider = env.New(root, cfg.EnvDetectors(), trustedLive)
@@ -1072,6 +1076,9 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			Shell: shellCommand, Args: shellArgs, ScrollbackLines: cfg.Terminal.ScrollbackLines,
 			SpawnEnv:  envProvider.Overlay,
 			Authority: authSlot,
+			// A refused remote cwd falls back to the authority's default directory and
+			// says so in the status row (the terminal port has no notice channel).
+			Notice: model.Notify,
 			// A child OSC 52 writes the system clipboard only when the config asks
 			// for it and the workspace is trusted (output is untrusted data, and
 			// the default is off); the session parser is inert otherwise.

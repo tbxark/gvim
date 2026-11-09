@@ -7,6 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/tbxark/gvim/atomicfile"
 	"github.com/tbxark/gvim/internal/terminal"
@@ -23,6 +26,8 @@ const (
 	maxSavedTerminalRows  = 500
 	maxSavedTerminalBytes = 1 << 20
 	maxSavedTerminalTabs  = 16
+	// maxSavedTerminalDirBytes bounds a persisted terminal working directory.
+	maxSavedTerminalDirBytes = 4096
 )
 
 // SaveTerminal writes the terminal dock state to dir/terminal.json. A state with
@@ -77,6 +82,7 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 		return terminal.SavedState{}, false, nil
 	}
 	st.Title = terminal.CleanTitle(st.Title)
+	st.Cwd = boundTerminalDir(st.Cwd)
 	st.Rows = boundTerminalRows(st.Rows)
 	// The styled screen snapshot is bounded/cleaned the same way: a corrupt or
 	// hand-edited snapshot is dropped rather than painted.
@@ -89,6 +95,7 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 	kept := st.Tabs[:0]
 	for _, tab := range st.Tabs {
 		tab.Title = terminal.CleanTitle(tab.Title)
+		tab.Cwd = boundTerminalDir(tab.Cwd)
 		tab.Rows = boundTerminalRows(tab.Rows)
 		tab.Screen = tab.Screen.Bounded()
 		if len(tab.Rows) == 0 && !tab.Open {
@@ -98,6 +105,27 @@ func LoadTerminal(dir string) (terminal.SavedState, bool, error) {
 	}
 	st.Tabs = kept
 	return st, len(st.Rows) > 0 || len(st.Tabs) > 0, nil
+}
+
+// boundTerminalDir bounds a saved working directory and strips control characters.
+// It is deliberately not POSIX-only: a local Windows path is a legitimate saved
+// cwd (OSC 7 itself is POSIX-only and is cleaned in the terminal package).
+func boundTerminalDir(dir string) string {
+	dir = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(dir, ""))
+	dir = strings.TrimSpace(dir)
+	if len(dir) <= maxSavedTerminalDirBytes {
+		return dir
+	}
+	cut := dir[:maxSavedTerminalDirBytes]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut
 }
 
 // boundTerminalRows applies the saved-transcript bounds and strips control

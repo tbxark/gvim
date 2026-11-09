@@ -103,6 +103,30 @@ func helperFailure(op, path string, hr helperResult) error {
 	return remoteFileErr(op, path, hr.res)
 }
 
+// SetMetadata implements FileMetadata with one bounded helper: chmod the permission
+// bits, then touch -t the mtime interpreted in UTC (the client sends the UTC stamp, so
+// the remote timezone does not matter). A zero mode or zero mtime skips that part.
+func (f *sshFiles) SetMetadata(ctx context.Context, path string, mode fs.FileMode, mtime time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	modeArg, mtimeArg := "", ""
+	if mode != 0 {
+		modeArg = fmt.Sprintf("%04o", mode.Perm())
+	}
+	if !mtime.IsZero() {
+		mtimeArg = mtime.UTC().Format("200601021504.05")
+	}
+	hr, err := f.execScript(ctx, sshSetMetadataScript, []string{path, modeArg, mtimeArg}, nil, sshFilesMaxHelperBytes, sshFilesMaxStderrBytes)
+	if err != nil {
+		return err
+	}
+	if hr.res.Code != 0 {
+		return helperFailure("set metadata", path, hr)
+	}
+	return nil
+}
+
 // Mkdir implements FileMutations with mkdir, optionally creating ancestors.
 func (f *sshFiles) Mkdir(ctx context.Context, path string, parents bool) error {
 	if err := ctx.Err(); err != nil {
@@ -558,6 +582,13 @@ func boolArg(b bool) string {
 }
 
 // sshMkdirScript creates $1, with ancestors when $2 is 1.
+const sshSetMetadataScript = `p=$1
+mode=$2
+mtime=$3
+if [ -n "$mode" ]; then chmod "$mode" "$p" || exit 2; fi
+if [ -n "$mtime" ]; then TZ=UTC touch -t "$mtime" "$p" || exit 2; fi
+`
+
 const sshMkdirScript = `p=$1
 if [ "$2" = 1 ]; then mkdir -p "$p"; else mkdir "$p"; fi`
 

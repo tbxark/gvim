@@ -260,10 +260,12 @@ background tabs' exited markers current.
   version 1; the top-level fields keep mirroring the active tab, so a
   reader that predates tabs restores that one tab exactly as before, and a record
   without `tabs` restores as one terminal. The format version stays 1. `cwd` is the
-  terminal's reported directory and `launch_dir` the directory a recorded program
-  was started in; both are additive, `launch_dir` is bounded on load, and an older
-  record without `launch_dir` falls back to its `cwd`, so the format stays
-  migration-safe. Bounds:
+  terminal's last reported directory (OSC 7) and `launch_dir` the directory a
+  recorded program was started in; both are additive and bounded/cleaned on load
+  (4096 bytes, control characters stripped), and an older record without
+  `launch_dir` falls back to its `cwd`, so the format stays migration-safe. A
+  restart, resume or dive starts in the saved `cwd` (Fresh's respawn rule);
+  `launch_dir` is only the fallback when a record never reported a directory. Bounds:
   at most 16 tabs, each with the existing per-transcript bound (500 rows / 1 MiB,
   trailing blanks trimmed, control characters stripped); a corrupt file cannot
   make the loader allocate more. The order of the `tabs` array, not the tab
@@ -285,7 +287,12 @@ background tabs' exited markers current.
   focuses the dock on it, or opens the dock on it) the dock revives it with a
   fresh PTY: the recorded argv precedence (agent-resume when
   `terminal.resume_agents` is on, else the launch argv, else the plain shell) in
-  its recorded `launch_dir`, with the saved transcript kept above it. This is
+  its last reported `cwd` (falling back to `launch_dir`, then the workspace root),
+  with the saved transcript kept above it. On a remote workspace the saved cwd is
+  verified through the authority before the PTY is launched; a directory that no
+  longer exists is reported in the status row and the authority starts in its own
+  default directory instead (no local path is read and no shell is run to probe).
+  This is
   Fresh's Live restore: the PTY is ephemeral and re-spawned on the dive, and an
   agent resume is deferred to that dive rather than done by the restore. The dive
   is attempted once: a failed start is a notice, not a retry loop (Restart still
@@ -398,8 +405,9 @@ snapshot); gvim persists bounded text rows plus the bounded styled snapshot
 revives on the explicit dive with a fresh PTY, and
 `terminal.restore_live = false` turns that off. Full backing-file semantics
 still do not round-trip: the scrollback is a bounded styled window, not
-byte-exact (deep history beyond 200 rows is text-only), OSC 1 icon names, OSC 7
-cwd, OSC 52 clipboard and hyperlinks are not replayed, per-cell hyperlinks are not
+byte-exact (deep history beyond 200 rows is text-only), OSC 1 icon names, the OSC 7
+cwd (persisted and used for the next start, but not replayed as terminal state),
+OSC 52 clipboard and hyperlinks are not replayed, per-cell hyperlinks are not
 representable in the snapshot (the cell encoding has no link field), the cursor
 shape is recorded but the read-only view paints it as a block (the restored shell
 does not inherit the old DECSCUSR mode), the OSC 0/2 title is combined with the
@@ -470,11 +478,13 @@ appends that transcript too.
 
 An agent terminal restarts through Fresh's precedence: the recorded **agent resume
 argv** when `terminal.resume_agents` is on (the default), else the recorded
-**launch argv**, else the plain configured shell. A recorded program restarts in
-the directory it was **launched** in — the Run Agent dialog's directory answer is
-saved as `launch_dir` and is kept apart from the terminal's reported cwd, so a
-program that changes directory (or reports a different one) cannot move a resume
-away from what the user chose. Plain shell tabs keep the live-directory rule above.
+**launch argv**, else the plain configured shell. Following Fresh's respawn, the
+restart/resume starts in the terminal's **last reported OSC 7 cwd**; the Run
+Agent dialog's chosen directory is saved as `launch_dir` and is only the fallback
+when the record never reported a cwd (the migration for old records). This means
+a program that changes directory is resumed in that directory, like Fresh; the
+chosen launch dir stays persisted as provenance. Plain shell tabs use the same
+live-directory-first rule.
 The restart is always user-initiated — the palette row, the status affordance or a
 tab's restart — and nothing is ever re-executed automatically by a restore. A
 failed start keeps the record, so a retry still resumes; the transcript of the old
@@ -715,8 +725,30 @@ project `lsp` command rule (C11 in `docs/trust.md`).
 
 A shell reports its working directory with OSC 7. The session keeps the last
 value (a plain path or a `file://host/path` URL; the host is dropped and percent
-escapes are decoded) and the dock hands it to the path resolver (and to a restart,
-see above).
+escapes are decoded), and the dock hands it to the path resolver and persists it
+for restarts/dives (see above). Because the child's output is untrusted, the
+report is cleaned and bounded before it is kept: it must be a non-empty
+POSIX-absolute path of at most 4096 bytes, valid UTF-8 and free of control
+characters, otherwise the report is ignored (no cwd). The saved `cwd` is cleaned
+and bounded again on capture and on load, so a hand-edited record cannot smuggle
+control characters or an unbounded path into a start. On a remote workspace a
+restart/dive with a saved cwd verifies it through the authority's file system
+(5 s bound, remote `stat` only — no local path read, no shell probe); if it is
+missing, not a directory, or the workspace is disconnected, a clear status
+notice says so and the terminal starts in the authority's default directory.
+Local starts keep their existing behavior (a missing local directory is the
+starter's normal error notice, not a silent fallback).
+
+Residuals: only POSIX-absolute OSC 7 paths are accepted (a Windows-style
+`C:\...` report is ignored, as are reports the emulator drops or that exceed the
+bound); the remote fallback is the authority's own default directory (an SSH
+login shell starts in its home directory, not necessarily the workspace root) and
+it is announced only in the status row; local saved directories are not
+pre-validated (the starter's normal error covers them); the remote check is a
+point-in-time `stat` before the launch, so a directory removed between the check
+and the PTY launch still fails the authoritative `cd` and is reported as a start
+error; a remote shell's later `cd` changes the saved cwd for the next start but is
+not applied to the live session's files (no remote terminal state replay).
 
 **Ctrl+Click on a path in the output opens it**, in the live view and in
 scrollback. The token under the pointer is the run of non-space characters

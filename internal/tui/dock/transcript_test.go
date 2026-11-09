@@ -214,3 +214,31 @@ func TestRestoredTranscriptReflowsToTheContentWidth(t *testing.T) {
 		t.Fatalf("combined rows after widening = %d, want the two stored rows", got)
 	}
 }
+
+// TestSavedCwdIsCleanedAndBounded checks the persisted cwd is treated as untrusted
+// input: control characters are stripped (so a record cannot smuggle them into a
+// start) and the field is bounded like launch_dir.
+func TestSavedCwdIsCleanedAndBounded(t *testing.T) {
+	t.Parallel()
+	p := newTestPanel(t, &fakeStarter{term: newFakeTerm()})
+	p.dir = "/ws/ok\x1b]0;evil\x07\n"
+	if got := p.SavedState().Cwd; got != "/ws/ok]0;evil" {
+		t.Fatalf("saved cwd = %q, want the cleaned path", got)
+	}
+	p.dir = "/" + strings.Repeat("a", maxSavedDirBytes+10)
+	if got := len(p.SavedState().Cwd); got != maxSavedDirBytes {
+		t.Fatalf("saved cwd length = %d, want %d", got, maxSavedDirBytes)
+	}
+	// Restoring a hand-edited record applies the same bounds.
+	var tabs Tabs
+	tabs.SetHost(Host{RootDir: func() string { return "/ws" }, Notice: func(string) {}, ContentSize: func() (int, int) { return 80, 24 }, Focus: func() {}})
+	tabs.SetPorts(Ports{Starter: &fakeStarter{term: newFakeTerm()}})
+	tabs.Restore(terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true,
+		Cwd:  "/restored\x00\x1b",
+		Rows: []string{"out"},
+	})
+	if got := tabs.tabs[0].dir; got != "/restored" {
+		t.Fatalf("restored cwd = %q, want the cleaned value", got)
+	}
+}

@@ -34,6 +34,18 @@ import (
 // environment.
 type RemoteRunner func(ctx context.Context, command string) (string, error)
 
+// MarkerProber checks the existence of workspace-relative paths on the remote host
+// WITHOUT running a shell (the app backs it with authority.FileSystem.Stat). It is used
+// for detection before a workspace is trusted, where the remote command gate would refuse
+// the shell probe. The caller bounds the path count and timeout; the prober must return a
+// map containing only existing paths and stop on ctx cancellation.
+type MarkerProber func(ctx context.Context, root string, paths []string) (map[string]bool, error)
+
+// MaxMarkerProbePaths bounds one authority-backed marker probe. The config allows up to
+// 64 detectors x (16 markers + 16 require) paths; a workspace whose detector set needs
+// more than this is refused with a clear notice instead of issuing unbounded Stat calls.
+const MaxMarkerProbePaths = 256
+
 // Remote is the environment provider of one remote workspace. It is safe for concurrent
 // use; the spawn paths read it from their own goroutines and never block the UI update
 // loop on a remote capture (the app warms it after connecting, and spawn paths get the
@@ -44,6 +56,9 @@ type Remote struct {
 	detectors []config.EnvDetector
 	trusted   func() bool
 	run       RemoteRunner
+	// markerProbe, when set, is the shell-free authority-backed existence probe used in an
+	// untrusted workspace (and as a trusted fallback when no shell runner exists).
+	markerProbe MarkerProber
 	// captureRun runs the activation baseline/recipe. The app supplies an
 	// interactive-login-shell runner here (bash/zsh -ilc when available) while detection
 	// stays on the plain sh -c runner: detection is passive and may run in an untrusted
@@ -96,6 +111,16 @@ func NewRemote(root string, detectors []config.EnvDetector, trusted func() bool,
 		p.captureRun = captureRun[0]
 	}
 	return p
+}
+
+// SetMarkerProber installs the shell-free authority-backed marker probe. It is used in an
+// untrusted workspace so detection can still show the remote facts without executing a
+// remote command; activation remains trust-gated.
+func (p *Remote) SetMarkerProber(probe MarkerProber) {
+	p.mu.Lock()
+	p.markerProbe = probe
+	p.detectedSet = false
+	p.mu.Unlock()
 }
 
 // SetNotice records the user-facing fallback/limitation message of the capture runner.
@@ -346,11 +371,13 @@ func (p *Remote) LastError() error {
 	return p.lastErr
 }
 
-// ensureDetected runs the remote marker probe once, and only in a trusted workspace:
-// remote detection executes one bounded existence-checking shell command on the remote
-// host, so it is gated exactly like any other remote command. Untrusted and failed probes
-// leave an explicit notice (Settings Environment rows) and no local scan is ever done; a
-// later trust change or Refresh/SetRoot re-probes.
+// ensureDetected probes the remote markers once. In a trusted workspace it runs one
+// bounded, cancellable sh existence command through the authority one-shot gate. Before
+// trust that gate would refuse a shell command, so detection uses the authority-backed
+// shell-free MarkerProber (FileSystem.Stat) when the app supplied one; the result is shown
+// read-only and activation stays trust-gated. A failed probe is not cached: it clears the
+// result and records an explicit notice, retried on the next Warm/Overlay. The number of
+// paths and the wall time are bounded.
 func (p *Remote) ensureDetected(ctx context.Context) {
 	p.mu.Lock()
 	trusted := p.trusted != nil && p.trusted()
@@ -358,34 +385,63 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 		p.mu.Unlock()
 		return
 	}
-	if !trusted {
-		p.detected, p.found = trust.DetectedEnv{}, false
-		p.detectedSet, p.detectedTrusted = true, false
-		p.detectionNotice = "Remote environment: marker detection is disabled until this workspace is trusted (activation is trust-gated too)"
-		p.mu.Unlock()
-		return
-	}
 	root := p.root
 	detectors := append([]config.EnvDetector(nil), p.detectors...)
 	run := p.run
+	prober := p.markerProbe
 	p.mu.Unlock()
 
-	det, found, _, err := detectRemote(ctx, root, detectors, run)
+	var (
+		det        trust.DetectedEnv
+		found      bool
+		incomplete bool
+		err        error
+	)
+	if !trusted && prober == nil {
+		p.mu.Lock()
+		p.detected, p.found = trust.DetectedEnv{}, false
+		p.detectedSet, p.detectedTrusted = true, false
+		p.detectionNotice = "Remote environment: marker detection needs a trusted workspace (activation is trust-gated too)"
+		p.mu.Unlock()
+		return
+	}
+	if !trusted || run == nil {
+		det, found, incomplete, err = detectRemoteProbe(ctx, root, detectors, prober)
+	} else {
+		det, found, incomplete, err = detectRemote(ctx, root, detectors, run)
+	}
+	_ = incomplete
 
 	p.mu.Lock()
-	p.detectedTrusted = true
+	p.detectedTrusted = trusted
 	if err != nil {
 		p.detected, p.found = trust.DetectedEnv{}, false
 		p.detectedSet = false
 		p.detectionNotice = fmt.Sprintf("Remote environment: marker detection failed: %v; no detector is active until Env: Reload/reconnect succeeds", err)
 	} else {
 		p.detected, p.found = det, found
-		// A failed probe is retried by the next Warm/Overlay (a disconnected authority
-		// reconnects); a successful one is cached until Refresh/SetRoot or a trust change.
 		p.detectedSet = true
 		p.detectionNotice = ""
 	}
 	p.mu.Unlock()
+}
+
+// detectRemoteProbe is the shell-free detection path: one bounded authority probe over the
+// marker+require existence set, then the same trust.DetectEnv rules as the shell path.
+func detectRemoteProbe(ctx context.Context, root string, detectors []config.EnvDetector, prober MarkerProber) (trust.DetectedEnv, bool, bool, error) {
+	if prober == nil {
+		return trust.DetectedEnv{}, false, false, errors.New("env: no shell-free marker prober")
+	}
+	paths, err := remoteMarkerPaths(detectors)
+	if err != nil {
+		return trust.DetectedEnv{}, false, false, err
+	}
+	exists, err := prober(ctx, root, paths)
+	if err != nil {
+		return trust.DetectedEnv{}, false, false, fmt.Errorf("env: probing the remote markers through the authority: %w", err)
+	}
+	det, found, incomplete := detectedFromExists(root, detectors, exists)
+	return det, found, incomplete, nil
 }
 
 // captureRemote runs the remote baseline and activation shell and diffs their
@@ -437,14 +493,11 @@ func (p *Remote) invalidateLocked() {
 	p.lastErr = nil
 }
 
-// detectRemote probes the detector markers on the remote host with ONE bounded shell
-// command that only tests existence, then applies the same detector order/require rules
-// as trust.DetectEnv. Marker names come from the validated detector config; each is
-// shell-quoted so a configured name can never become command syntax.
-func detectRemote(ctx context.Context, root string, detectors []config.EnvDetector, run RemoteRunner) (trust.DetectedEnv, bool, bool, error) {
-	if run == nil {
-		return trust.DetectedEnv{}, false, false, errors.New("env: no remote runner")
-	}
+// remoteMarkerPaths returns the deduplicated marker+require existence set, validated and
+// bounded. Require paths are included because a detector such as .venv (needing
+// .venv/bin/python) must not match from a marker alone; that is the same rule as
+// trust.DetectEnv. The bound keeps an authority-backed Stat probe from becoming unbounded.
+func remoteMarkerPaths(detectors []config.EnvDetector) ([]string, error) {
 	var flat []string
 	seen := map[string]bool{}
 	addPath := func(rel string) {
@@ -459,12 +512,57 @@ func detectRemote(ctx context.Context, root string, detectors []config.EnvDetect
 		for _, rel := range d.Markers {
 			addPath(rel)
 		}
-		// Require paths are part of the same existence probe: without them a detector
-		// such as .venv (which needs .venv/bin/python) could never match remotely, and
-		// its marker-only result would disagree with the local trust.DetectEnv scan.
 		for _, rel := range d.Require {
 			addPath(rel)
 		}
+	}
+	if len(flat) > MaxMarkerProbePaths {
+		return nil, fmt.Errorf("env: %d marker/require paths exceed the %d-path remote probe bound; narrow env.detectors", len(flat), MaxMarkerProbePaths)
+	}
+	return flat, nil
+}
+
+// detectedFromExists applies the trust.DetectEnv order/require rules to an existence set.
+func detectedFromExists(root string, detectors []config.EnvDetector, exists map[string]bool) (trust.DetectedEnv, bool, bool) {
+	anyExists := func(paths []string) bool {
+		for _, rel := range paths {
+			rel = strings.TrimSpace(rel)
+			if rel != "" && !filepath.IsAbs(rel) && exists[rel] {
+				return true
+			}
+		}
+		return false
+	}
+	incomplete := false
+	for _, d := range detectors {
+		if !anyExists(d.Markers) {
+			continue
+		}
+		if len(d.Require) > 0 && !anyExists(d.Require) {
+			incomplete = true
+			continue
+		}
+		return trust.DetectedEnv{
+			Name:    d.Name,
+			Kind:    d.Kind,
+			Snippet: strings.ReplaceAll(d.Snippet, "{dir}", root),
+		}, true, incomplete
+	}
+	return trust.DetectedEnv{}, false, incomplete
+}
+
+// detectRemote probes the detector markers on the remote host with ONE bounded shell
+// command that only tests existence, then applies the same detector order/require rules
+// as trust.DetectEnv. Marker names come from the validated detector config; each is
+// shell-quoted so a configured name can never become command syntax. This path runs only
+// in a trusted workspace (the authority command gate would refuse it otherwise).
+func detectRemote(ctx context.Context, root string, detectors []config.EnvDetector, run RemoteRunner) (trust.DetectedEnv, bool, bool, error) {
+	if run == nil {
+		return trust.DetectedEnv{}, false, false, errors.New("env: no remote runner")
+	}
+	flat, err := remoteMarkerPaths(detectors)
+	if err != nil {
+		return trust.DetectedEnv{}, false, false, err
 	}
 	var b strings.Builder
 	b.WriteString("cd " + shellQuoteRemote(root) + " && ")
@@ -494,31 +592,8 @@ func detectRemote(ctx context.Context, root string, detectors []config.EnvDetect
 		}
 		exists[flat[idx]] = true
 	}
-	anyExists := func(paths []string) bool {
-		for _, rel := range paths {
-			rel = strings.TrimSpace(rel)
-			if rel != "" && !filepath.IsAbs(rel) && exists[rel] {
-				return true
-			}
-		}
-		return false
-	}
-	incomplete := false
-	for _, d := range detectors {
-		if !anyExists(d.Markers) {
-			continue
-		}
-		if len(d.Require) > 0 && !anyExists(d.Require) {
-			incomplete = true
-			continue
-		}
-		return trust.DetectedEnv{
-			Name:    d.Name,
-			Kind:    d.Kind,
-			Snippet: strings.ReplaceAll(d.Snippet, "{dir}", root),
-		}, true, incomplete, nil
-	}
-	return trust.DetectedEnv{}, false, incomplete, nil
+	det, found, incomplete := detectedFromExists(root, detectors, exists)
+	return det, found, incomplete, nil
 }
 
 // shellQuoteRemote quotes a string for one POSIX shell word: single quotes around it, an

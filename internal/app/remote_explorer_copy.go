@@ -15,11 +15,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"path"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/fsops"
 	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/plugin/hostos"
@@ -70,8 +72,10 @@ func (l remoteCopyLimits) bounded() remoteCopyLimits {
 // remoteCopyNode is one planned entry of a subtree copy: rel is "" for the source
 // itself, otherwise its slash-relative path under the source.
 type remoteCopyNode struct {
-	rel  string
-	kind string
+	rel   string
+	kind  string
+	mode  fs.FileMode // source permission bits, preserved best-effort
+	mtime time.Time   // source modification time, preserved best-effort
 }
 
 // remoteCopyPartialError reports a failure after the destination may hold part of the
@@ -275,7 +279,7 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 	if st.Kind == "symlink" {
 		return nil, fmt.Errorf("remote copy refused: %s is a symbolic link", src)
 	}
-	nodes := []remoteCopyNode{{rel: "", kind: st.Kind}}
+	nodes := []remoteCopyNode{{rel: "", kind: st.Kind, mode: st.Mode, mtime: st.MTime}}
 	count, bytes := 1, int64(0)
 	if st.Kind == "file" {
 		if st.Size > limits.MaxBytes {
@@ -308,6 +312,12 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 			if e.Kind == "symlink" {
 				return fmt.Errorf("remote copy refused: %s contains a symbolic link (%s); remote copy does not follow links", src, e.Name)
 			}
+			childMode, childTime := fs.FileMode(0), e.MTime
+			if cs, serr := o.files.Stat(ctx, path.Join(dir, e.Name)); serr == nil {
+				// Best effort: metadata is a nice-to-have, and a backend that cannot
+				// stat an entry still copies its bytes.
+				childMode, childTime = cs.Mode, cs.MTime
+			}
 			count++
 			if count > limits.MaxEntries {
 				return fmt.Errorf("remote copy refused: the subtree has more than %d entries", limits.MaxEntries)
@@ -317,7 +327,7 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 				if depth+1 > limits.MaxDepth {
 					return fmt.Errorf("remote copy refused: the subtree is deeper than %d directories", limits.MaxDepth)
 				}
-				nodes = append(nodes, remoteCopyNode{rel: childRel, kind: "dir"})
+				nodes = append(nodes, remoteCopyNode{rel: childRel, kind: "dir", mode: childMode, mtime: childTime})
 				if err := walk(path.Join(dir, e.Name), childRel, depth+1); err != nil {
 					return err
 				}
@@ -329,7 +339,7 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 				if bytes > limits.MaxBytes {
 					return fmt.Errorf("remote copy refused: the subtree is larger than the %d-byte copy bound", limits.MaxBytes)
 				}
-				nodes = append(nodes, remoteCopyNode{rel: childRel, kind: "file"})
+				nodes = append(nodes, remoteCopyNode{rel: childRel, kind: "file", mode: childMode, mtime: childTime})
 			default:
 				return fmt.Errorf("remote copy refused: %s is not a file or directory", path.Join(dir, e.Name))
 			}
@@ -378,12 +388,47 @@ func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, node
 		if bytes > limits.MaxBytes {
 			return written, fmt.Errorf("the copy is larger than the %d-byte copy bound", limits.MaxBytes)
 		}
-		if err := o.files.WriteFile(ctx, to, data, hostos.WriteOptions{Atomic: true, Parents: true}); err != nil {
+		if err := o.files.WriteFile(ctx, to, data, hostos.WriteOptions{Atomic: true, Parents: true, Mode: node.mode}); err != nil {
 			return written, fmt.Errorf("write %s: %w", to, err)
 		}
 		written++
 	}
+	o.applyCopyMetadata(ctx, dst, nodes)
 	return written, nil
+}
+
+// applyCopyMetadata restores the planned permission bits and mtimes after the bytes are
+// complete, best effort: files first, then directories in reverse (a parent's mtime must
+// be the last thing set). A backend without authority.FileMetadata keeps the bytes-only
+// copy and is not claimed to preserve metadata. Any failure is collected into the
+// non-fatal copy warning the TUI surfaces; it never turns a completed copy into an error.
+func (o *remoteExplorerOps) applyCopyMetadata(ctx context.Context, dst string, nodes []remoteCopyNode) {
+	meta := authority.Metadata(o.files)
+	if meta == nil {
+		return
+	}
+	failed, total := 0, 0
+	var firstErr error
+	for i := len(nodes) - 1; i >= 0; i-- {
+		node := nodes[i]
+		if node.mode == 0 && node.mtime.IsZero() {
+			continue
+		}
+		to := dst
+		if node.rel != "" {
+			to = path.Join(dst, node.rel)
+		}
+		total++
+		if err := meta.SetMetadata(ctx, to, node.mode, node.mtime); err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if failed > 0 {
+		o.setCopyWarning(appTextVars("gvim.notice.copy_metadata_warning", "copy completed, but permissions/mtime were not preserved on %{failed} of %{total} entries: %{error}", map[string]any{"failed": failed, "total": total, "error": firstErr}))
+	}
 }
 
 // uniqueCopyName returns Fresh's free duplicate name for name in dir: "name copy.ext",

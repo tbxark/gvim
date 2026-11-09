@@ -42,13 +42,17 @@ local backend applies the same rule as the remote ones.
 An `EnvProvider` is merged into LOCAL children only. A remote launch never sends the
 local overlay: its environment is `env.Remote`, whose marker probe and activation
 recipe run on the REMOTE host through the authority's one-shot surface (a raw exec with no
-env map of its own, so capture cannot recurse). Marker detection is trust-gated: only a
-trusted workspace may run the one bounded, cancellable `sh -c` existence probe (it checks
-both the detectors' markers and their require evidence; nothing is executed beyond the fixed
-shell test and rc files are not sourced), and an untrusted workspace runs no remote command,
-reports an explicit Settings notice and shows no detector. A failed probe clears the
-detection and leaves a notice (never a local scan or a stale result); the trusted activation
-baseline/recipe runs under the user's interactive login
+env map of its own, so capture cannot recurse). Marker detection checks both detectors'
+markers and their require evidence. Before the workspace is trusted the authority command
+gate would refuse a shell command, so detection uses the app's shell-free authority probe:
+`authority.FileSystem.Stat` for each marker/require path (no remote process, no local
+filesystem, at most `env.MaxMarkerProbePaths` paths and a 10 s shared timeout), letting an
+untrusted workspace still display the remote detection result read-only (activation stays
+trust-gated). A trusted workspace uses the single bounded, cancellable `sh -c` existence
+probe instead (nothing is executed beyond the fixed shell test and rc files are not
+sourced). A failed probe clears the detection and leaves an explicit Settings notice
+(never a local scan or a stale result); the trusted activation baseline/recipe runs under
+the user's interactive login
 shell when one is available — `bash -ilc` or `zsh -ilc`, preferring `$SHELL` when it is
 bash/zsh — so a detector that depends on interactive rc initialization captures the same
 environment the remote terminal gets. If no such shell is found, or the interactive
@@ -341,9 +345,9 @@ The app mounts the slot in `internal/app/authority_app.go` and keeps it on the r
   from the authority, never the local overlay, so a remote-captured variable cannot leak back
   into local children.
 - Remote launches' environment (R13-13): `env.Remote` detects the configured markers and
-  require evidence on the remote host (one bounded passive `sh -c` existence probe, only in
-  a trusted workspace; untrusted/failed probes produce a Settings notice, never a local
-  scan) and activates the recipe
+  require evidence on the remote host — shell-free authority Stat before trust (bounded path
+  count + timeout), one bounded passive `sh -c` existence probe when trusted; a failed
+  probe produces a Settings notice and is never a local scan — and activates the recipe
   through the authority one-shot surface under the remote interactive login shell
   (`bash -ilc`/`zsh -ilc` when detected), diffing the remote activated environment against
   the same interactive-login baseline. Its captured delta is what the remote terminal, shell/formatter runner,
@@ -422,14 +426,17 @@ Residuals of this slice (documented, not bugs):
   terminal is restarted explicitly today.
 - Remote environment residuals: interactive-login capture supports bash and zsh only; other
   shells (fish, csh, ...) keep the `sh -c` fallback, and a bash/zsh whose interactive rc is
-  unavailable or fails falls back per capture with a notice. Marker detection is one
-  trust-gated `sh -c` existence command (markers plus require paths, bounded by the config's
-  detector/marker caps, the command timeout/output bound and the caller context); an
-  untrusted workspace runs no probe and shows an explicit Settings detection notice, a
-  failed/cancelled probe clears detection and shows the failure notice and is retried on the
-  next Warm/Overlay rather than cached. Fresh's marker scan is a passive filesystem scan
-  (used while trust is still undecided); gvim's remote probe needs the remote command gate,
-  so before trust the remote detector is simply absent (the rest of the remote trust flow is
+  unavailable or fails falls back per capture with a notice. Marker detection has two
+  bounded paths: before trust, shell-free authority Stat for each marker/require path (path
+  count capped by `env.MaxMarkerProbePaths`, a 10 s shared timeout, sequential Stat calls,
+  cancellation through the caller context), which shows the remote detection result in an
+  untrusted workspace without executing anything; once trusted, the single `sh -c`
+  existence command (same paths, config caps, command timeout/output and caller context).
+  A failed/cancelled probe clears detection, shows the failure notice and is retried on the
+  next Warm/Overlay rather than cached; the untrusted path needs the authority file surface
+  (a backend without it shows the explicit detection notice). Fresh's marker scan is a
+  passive filesystem scan available while trust is undecided; gvim now matches that
+  read-only visibility through authority Stat (the rest of the remote trust flow is
   unchanged). Shell startup output before the command is discarded via a NUL marker; the interactive shell is run once per baseline/recipe capture (two remote
   commands), so rc-sourcing latency is paid per capture but not per spawn. A post-reconnect
   re-probe updates the shell choice and the Settings fallback row but not the already-shown
@@ -614,7 +621,12 @@ the caller report `ErrUnsupportedFileIO` instead of a panic, and test doubles ar
 The local backend forwards to the plugin OS port; the SSH backend runs `mkdir [-p]`, `mv -f`
 and `rm [-r] -f` as bounded helpers under the same quoting, stderr cap and context
 cancellation as the read helpers, and maps a missing path/permission denial into the port's
-errors. A remote delete is permanent: there is no trash on the remote host.
+errors. A remote delete is permanent: `Mutations.Remove` (recursive for a directory), no
+trash. A trash move was audited and deferred: no current backend can prove an atomic
+same-filesystem no-replace move (an `mv -n` may copy/unlink across filesystems or lose the
+source to cancellation, and its no-clobber flags are not portable), and the authority has
+no private-permissions directory surface for a trash; delete therefore keeps its explicit
+permanent semantics instead of claiming an unproven recoverability.
 
 The remote explorer's write UI is wired (`internal/app/remote_explorer_ops.go`): New File,
 New Directory, Rename and Delete run through `Files()`/`authority.Creators(fs)`/
@@ -626,10 +638,16 @@ target created concurrently by another process is never overwritten: the backend
 creates the empty file atomically or reports `fs.ErrExist`; a backend without the surface is
 refused explicitly (no Stat + WriteFile fallback). A rename still refuses an existing target
 with a pre-mutation check, and that check-to-write race remains a recorded residual (the
-mutation surface has no exclusive rename). A remote delete asks first and says it is
-permanent (no remote trash). After a successful operation the existing explorer file-job
-refresh reloads the remote tree through its reload command, so the update loop never waits
-on the host.
+mutation surface has no exclusive rename). A remote delete asks first and the question
+says it is permanent (no remote trash). After a successful operation the existing explorer
+file-job refresh reloads the remote tree through its reload command, so the update loop
+never waits on the host.
+
+The trash design is recorded but not shipped: it requires an authority surface that proves
+an atomic same-filesystem no-replace move and a private (0700) trash directory. Neither is
+available today (SSH `mv -n` is not portable/atomic across filesystems and can copy+unlink;
+`Mkdir` carries no private-permission option), so gvim does not create a trash directory and
+does not claim delete is reversible. This remains the gating residual for trash recovery.
 
 The clipboard is wired on the same surface (`internal/app/remote_explorer_copy.go`, task
 148). Copy walks the source subtree with `Files().ReadDir` (hidden entries included) and
@@ -689,9 +707,21 @@ cancellation in the copy phase keeps the source and any partial destination, and
 source removal keeps both and reports it. The drop target is only underlined while the drag
 is held; there is no animation/preview beyond that.
 
+Copies preserve permission bits and modification times best-effort when the backend
+implements the optional `FileMetadata` surface (`SetMetadata(ctx, path, mode, mtime)`; the
+local and SSH backends do): the source mode is also passed to the atomic file write, and
+mode/mtime are applied to files and then directories after the bytes are complete. A
+backend without the surface keeps the byte copy and is not claimed to preserve metadata. A
+metadata failure never fails an otherwise complete copy or move; the adapter packages it as
+a one-shot warning (`TakeCopyWarning`) which the file-job UI shows as a notice. A metadata
+stat failure during planning is tolerated (the bytes still copy) and can leave that entry
+with default metadata.
+
 Remaining gaps: the drag/move has no cross-window or above-root target and no
 animation/preview beyond the drop-target underline (and is disabled for local
-workspaces), no undo/history for remote writes, no
+workspaces), no journal undo/history for remote writes, no remote trash/restore UI
+(deferred until the atomic same-filesystem no-replace move and private trash directory can
+be proven; a remote delete is therefore documented and prompted as permanent), no
 whole-subtree transaction or cleanup UI for a partial copy, FileEntry/Mode and mtimes are not
 restored (the port's DirEntry has no mode), hard links/xattrs are not preserved, and a
 copy/rename's existence check still races the write (the FileMutations surface has no

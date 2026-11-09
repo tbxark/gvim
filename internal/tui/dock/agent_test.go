@@ -252,11 +252,11 @@ func newAgentTabs(starter *fakeStarter) *Tabs {
 	return &tabs
 }
 
-// TestAgentRestartUsesTheChosenDirectory is the regression for a chosen launch
-// directory: the agent reports a different cwd (OSC 7), but a restart and a
-// resumed session start in the directory the user chose, including across the
-// saved-state round trip. Cwd keeps the reported directory for a plain shell.
-func TestAgentRestartUsesTheChosenDirectory(t *testing.T) {
+// TestAgentRestartUsesTheReportedDirectory is Fresh's respawn rule: the agent's
+// last reported cwd (OSC 7) wins for a restart/resume, including across the
+// saved-state round trip. The chosen launch_dir is only the fallback for an older
+// record that never reported a cwd (see the legacy migration test).
+func TestAgentRestartUsesTheReportedDirectory(t *testing.T) {
 	t.Parallel()
 	starter := &fakeStarter{term: newFakeTerm()}
 	tabs := newAgentTabs(starter)
@@ -268,8 +268,8 @@ func TestAgentRestartUsesTheChosenDirectory(t *testing.T) {
 	if got := starter.launchDirs; !slices.Equal(got, []string{"/chosen"}) {
 		t.Fatalf("launch dirs = %v, want the chosen directory", got)
 	}
-	// The agent's program reports a different directory; that must not move a
-	// restart away from the chosen one.
+	// The agent's program reports a different directory; Fresh's respawn uses that
+	// reported cwd for the restart/resume.
 	starter.term.cwd = "/reported"
 	st := tabs.SavedState()
 	if st.Cwd != "/reported" {
@@ -286,8 +286,8 @@ func TestAgentRestartUsesTheChosenDirectory(t *testing.T) {
 	} else {
 		tabs.Update(cmd())
 	}
-	if got := starter.launchDirs; !slices.Equal(got, []string{"/chosen", "/chosen"}) {
-		t.Fatalf("launch dirs = %v, want the chosen directory for the restart", got)
+	if got := starter.launchDirs; !slices.Equal(got, []string{"/chosen", "/reported"}) {
+		t.Fatalf("launch dirs = %v, want the reported cwd for the restart", got)
 	}
 	if got := len(starter.launches); got != 2 || !slices.Equal(starter.launches[1].Argv, []string{"claude", "--resume", "s1"}) {
 		t.Fatalf("restart launches = %+v, want the resume argv", starter.launches)
@@ -318,8 +318,8 @@ func TestAgentRestartUsesTheChosenDirectory(t *testing.T) {
 	} else {
 		restored.Update(cmd())
 	}
-	if got := starter.launchDirs; len(got) != 3 || got[2] != "/chosen" {
-		t.Fatalf("launch dirs = %v, want the restored restart in /chosen", got)
+	if got := starter.launchDirs; len(got) != 3 || got[2] != "/reported" {
+		t.Fatalf("launch dirs = %v, want the restored restart in the saved cwd", got)
 	}
 }
 

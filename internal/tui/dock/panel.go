@@ -255,21 +255,19 @@ func (p *Panel) Restart() tea.Cmd {
 	}
 	if p.term != nil {
 		// Keep the old transcript above the new shell, and restart in the
-		// directory the shell reported last.
+		// directory the shell reported last (Fresh's respawn cwd).
 		p.capturePrior()
 		if cwd := p.term.WorkingDirectory(); cwd != "" {
-			dir = cwd
-		} else {
+			dir = clipSavedDir(cleanSavedText(cwd))
+		} else if p.dir != "" {
 			dir = p.dir
 		}
-	} else if p.launchDir != "" {
-		dir = p.launchDir
 	} else if p.dir != "" {
+		// A restored tab uses its persisted last cwd; launch_dir is the fallback
+		// for an older record (migration keeps the old behavior).
 		dir = p.dir
 	}
-	// A recorded program (agent or discovered session) was chosen to run in a
-	// specific directory; its own chdir must not move a restart/resume elsewhere.
-	if !p.launch.Empty() && p.launchDir != "" {
+	if dir == "" {
 		dir = p.launchDir
 	}
 	p.open = true
@@ -359,7 +357,11 @@ func (p *Panel) launchProgram(dir string, argv []string, rec terminal.Launch, ep
 	// marker itself is already in the prior transcript when a restart captured it).
 	p.exitCode, p.exitKnown, p.exitMarker = 0, false, false
 	p.dir = dir
-	p.launchDir = dir
+	if p.launchDir == "" {
+		// Keep the recorded program's chosen launch directory as provenance/fallback
+		// across restarts; the cwd (p.dir / the saved Cwd) is what a restart uses.
+		p.launchDir = dir
+	}
 	p.scroll = scrollState{}
 	p.restored = false
 	p.exited = false
@@ -395,7 +397,11 @@ func (p *Panel) launchShell(dir string) tea.Cmd {
 	// marker itself is already in the prior transcript when a restart captured it).
 	p.exitCode, p.exitKnown, p.exitMarker = 0, false, false
 	p.dir = dir
-	p.launchDir = dir
+	if p.launchDir == "" {
+		// Keep the recorded program's chosen launch directory as provenance/fallback
+		// across restarts; the cwd (p.dir / the saved Cwd) is what a restart uses.
+		p.launchDir = dir
+	}
 	p.scroll = scrollState{}
 	p.restored = false
 	cols, rows := p.contentSize()
@@ -436,9 +442,12 @@ func (p *Panel) dive() tea.Cmd {
 	p.restored = false
 	p.exited = false
 	p.open = true
-	dir := p.launchDir
+	// Fresh restores/respawns in the persisted last reported directory; gvim's
+	// recorded cwd takes precedence and launch_dir is only the fallback for an
+	// older record that never reported one.
+	dir := p.dir
 	if dir == "" {
-		dir = p.dir
+		dir = p.launchDir
 	}
 	return p.relaunch(dir)
 }

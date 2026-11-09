@@ -121,6 +121,20 @@ func TestWorkingDirectoryFromOSC7(t *testing.T) {
 	}
 }
 
+// TestWorkingDirectoryFromOSC7RejectsTamperedInput checks the child's OSC 7 path is
+// untrusted: an over-long payload is ignored instead of being kept and later used
+// as a start directory (control bytes are covered by TestOSC7Path; the emulator's
+// OSC parser does not hand every control byte through to the callback).
+func TestWorkingDirectoryFromOSC7RejectsTamperedInput(t *testing.T) {
+	long := startSh(t, "printf '\\033]7;file:///"+
+		strings.Repeat("a", maxWorkingDirectoryBytes+10)+
+		"\\007'; printf 'mark\\n'; exec sleep 5")
+	waitFor(t, long, "the marker", hasText("mark"))
+	if got := long.WorkingDirectory(); got != "" {
+		t.Fatalf("WorkingDirectory with an over-long path = %q, want none", got)
+	}
+}
+
 func TestMouseReportingFromChildModes(t *testing.T) {
 	s := startSh(t, "printf '\\033[?1000h'; exec sleep 5")
 	waitFor(t, s, "mouse reporting", func(Screen) bool {

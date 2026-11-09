@@ -18,7 +18,7 @@ func TestProjectEnvFactsShowsRemoteDetectionNotice(t *testing.T) {
 	facts := svc.projectEnvFacts()
 	found := false
 	for _, f := range facts {
-		if f.name == "Environment detection" && strings.Contains(f.note, "until this workspace is trusted") {
+		if f.name == "Environment detection" && strings.Contains(f.note, "needs a trusted workspace") {
 			found = true
 		}
 	}

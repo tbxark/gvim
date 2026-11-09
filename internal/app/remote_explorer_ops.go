@@ -13,7 +13,11 @@ package app
 // fsops rules as the local adapter and must stay inside the remote workspace root, a create
 // or rename never overwrites an existing entry (checked before the mutation; a race between
 // the check and the write is a recorded residual because FileMutations has no exclusive
-// create), and a remote delete is permanent: Mutations.Remove, no trash.
+// create), and a remote delete is permanent: Mutations.Remove, no trash. A trash move was
+// evaluated and deferred until the authority can prove an atomic same-filesystem
+// no-replace move and a private trash directory; the audit rejected mv -n/cross-FS
+// assumptions, so delete keeps its explicit permanent semantics rather than claiming an
+// unproven recoverability.
 
 import (
 	"context"
@@ -21,6 +25,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"sync"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
@@ -51,6 +56,11 @@ type remoteExplorerOps struct {
 	root  string
 	label string
 	ed    *editor.Editor
+
+	// warnMu guards copyWarning: the most recent non-fatal metadata warning of a
+	// successful copy. The TUI takes it after a file job and shows it as a notice.
+	warnMu      sync.Mutex
+	copyWarning string
 }
 
 // newRemoteExplorerOps returns the write adapter of the remote workspace root.
@@ -61,6 +71,23 @@ func newRemoteExplorerOps(slot authority.Slot, root, label string, gate func(ctx
 		o.muts = authority.Mutations(o.files)
 	}
 	return o
+}
+
+// setCopyWarning records one non-fatal copy warning (metadata could not be preserved).
+func (o *remoteExplorerOps) setCopyWarning(text string) {
+	o.warnMu.Lock()
+	o.copyWarning = text
+	o.warnMu.Unlock()
+}
+
+// TakeCopyWarning returns and clears the pending copy warning, or "". The root calls it
+// after a successful file job; a warning never turns the job into a failure.
+func (o *remoteExplorerOps) TakeCopyWarning() string {
+	o.warnMu.Lock()
+	defer o.warnMu.Unlock()
+	w := o.copyWarning
+	o.copyWarning = ""
+	return w
 }
 
 // RemoteTarget names the backend in the explorer's confirmations.

@@ -27,7 +27,7 @@ func TestRemoteDetectionIsTrustGated(t *testing.T) {
 	if det, ok := p.Detected(); ok || det.Name != "" {
 		t.Fatalf("untrusted detected = %+v, %v", det, ok)
 	}
-	if notice := p.DetectionNotice(); !strings.Contains(notice, "until this workspace is trusted") {
+	if notice := p.DetectionNotice(); !strings.Contains(notice, "needs a trusted workspace") {
 		t.Fatalf("untrusted detection notice = %q", notice)
 	}
 

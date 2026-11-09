@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tbxark/gvim/plugin/hostos"
 	"github.com/tbxark/gvim/trust"
@@ -87,6 +88,25 @@ func (l *local) Mkdir(ctx context.Context, path string, parents bool) error {
 // Rename implements FileMutations.
 func (l *local) Rename(ctx context.Context, from, to string) error {
 	return l.os.Rename(ctx, from, to)
+}
+
+// SetMetadata implements FileMetadata: chmod and chtimes on the local path. A zero mode
+// or zero mtime leaves that field unchanged.
+func (l *local) SetMetadata(ctx context.Context, path string, mode fs.FileMode, mtime time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if mode != 0 {
+		if err := os.Chmod(path, mode.Perm()); err != nil {
+			return err
+		}
+	}
+	if !mtime.IsZero() {
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Remove implements FileMutations.

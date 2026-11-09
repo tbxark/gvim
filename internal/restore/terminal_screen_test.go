@@ -316,3 +316,32 @@ func TestLoadTerminalAltScreenContent(t *testing.T) {
 		t.Fatalf("alt title = %q / %q", got.Title, got.Tabs[0].Title)
 	}
 }
+
+// TestLoadTerminalCwdIsBounded checks a hand-edited cwd is cleaned and bounded on
+// load, while an ordinary/old record keeps its directory exactly.
+func TestLoadTerminalCwdIsBounded(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	long := "/" + strings.Repeat("a", maxSavedTerminalDirBytes+20)
+	st := terminal.SavedState{
+		Version: terminal.SavedStateVersion, Open: true, Rows: []string{"out"},
+		Cwd: "/ws/ok\x00\x1b\n",
+		Tabs: []terminal.SavedTab{
+			{Name: "a", Open: true, Rows: []string{"out"}, Cwd: "/tab/ok\x07"},
+			{Name: "b", Open: true, Rows: []string{"out"}, Cwd: long},
+		},
+	}
+	if err := SaveTerminal(dir, st); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadTerminal(dir)
+	if err != nil || !ok {
+		t.Fatalf("LoadTerminal = %v, %v", ok, err)
+	}
+	if got.Cwd != "/ws/ok" || got.Tabs[0].Cwd != "/tab/ok" {
+		t.Fatalf("cleaned cwds = %q / %q", got.Cwd, got.Tabs[0].Cwd)
+	}
+	if n := len(got.Tabs[1].Cwd); n != maxSavedTerminalDirBytes {
+		t.Fatalf("bounded tab cwd = %d, want %d", n, maxSavedTerminalDirBytes)
+	}
+}

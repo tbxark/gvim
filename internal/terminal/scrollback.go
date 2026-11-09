@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -171,6 +173,11 @@ func (s *Session) MouseReporting() (reporting, drag, allMotion bool) {
 // absolute path or a file URL, "file://host/path", whose host is empty for the
 // local machine and is dropped for paths (the terminal has no remote filesystem).
 // Percent escapes are decoded. A payload that is not a path yields "".
+// maxWorkingDirectoryBytes bounds an OSC 7 working-directory payload. Fresh's
+// Osc7Scanner abandons a payload longer than 4096 bytes; the emulator has already
+// parsed ours, so an over-long or tempered path is refused here instead.
+const maxWorkingDirectoryBytes = 4096
+
 func osc7Path(raw string) string {
 	p := strings.TrimSpace(raw)
 	if p == "" {
@@ -187,11 +194,25 @@ func osc7Path(raw string) string {
 		}
 		p = rest
 	}
-	if !strings.HasPrefix(p, "/") {
-		return ""
-	}
 	if unescaped, err := url.PathUnescape(p); err == nil {
 		p = unescaped
+	}
+	return cleanWorkingDirectory(p)
+}
+
+// cleanWorkingDirectory validates an OSC 7 path before it is kept or used: the
+// child's output is untrusted input. It must be a non-empty POSIX-absolute path of
+// at most maxWorkingDirectoryBytes, valid UTF-8 and free of control characters; a
+// path that fails any check is ignored (no cwd) rather than repaired, so a
+// reported directory can never smuggle escapes into the record or a start.
+func cleanWorkingDirectory(p string) string {
+	if p == "" || len(p) > maxWorkingDirectoryBytes || !strings.HasPrefix(p, "/") || !utf8.ValidString(p) {
+		return ""
+	}
+	for _, r := range p {
+		if unicode.IsControl(r) {
+			return ""
+		}
 	}
 	return p
 }
