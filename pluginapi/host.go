@@ -185,6 +185,12 @@ type DecorHost interface {
 // WorkspaceHost is read access to the workspace and the theme.
 type WorkspaceHost interface {
 	Root() string
+	// FileLaunch reports whether this editor was launched to open command-line files
+	// (or --simple/--diff) rather than a session. Standalone stdin is not a Fresh file
+	// launch even though gvim keeps it out of the session. It is a property of the
+	// invocation fixed at startup: restored tabs, later file opens and daemon workspace
+	// switches never change it. A daemon workspace reports the flag of its own build.
+	FileLaunch() bool
 	Files(limit int) (files []string, loading bool) // finder index snapshot, no IO
 	Config(key string) (any, bool)                  // allowlisted effective settings
 	Theme() ThemeInfo

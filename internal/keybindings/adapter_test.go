@@ -469,3 +469,51 @@ func TestAdapterExactUnbindNormalAndExplorer(t *testing.T) {
 		})
 	}
 }
+
+// TestAdapterExactUnbindOverlayContexts covers the modal contexts: an explicit F6
+// unbind in prompt/searchPrompt/popup/settings/menu is visible through the real adapter
+// as an ExactUnbind tombstone with no exact binding, while Resolve still exposes the
+// global fallback the overlay code must not run past the tombstone.
+func TestAdapterExactUnbindOverlayContexts(t *testing.T) {
+	t.Parallel()
+	base, err := keymap.ByName("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f6 := tui.KeyPress{Name: "F6"}
+	for _, tc := range []struct {
+		name string
+		when string
+		ctx  tui.KeyContext
+	}{
+		{name: "prompt", when: "prompt", ctx: tui.KeyContextPrompt},
+		{name: "search prompt", when: "searchPrompt", ctx: tui.KeyContextSearchPrompt},
+		{name: "popup", when: "popup", ctx: tui.KeyContextPopup},
+		{name: "settings", when: "settings", ctx: tui.KeyContextSettings},
+		{name: "menu", when: "menu", ctx: tui.KeyContextMenu},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw := "[{\"key\":\"F6\",\"modifiers\":[],\"action\":\"unbind\",\"when\":\"" + tc.when + "\"}]"
+			layer, _ := base.WithUserBindings([]byte(raw), nil)
+			ad := NewKeymap(layer)
+			exact := ad.(interface {
+				ResolveExact(tui.KeyPress, tui.KeyContext) (tui.Command, bool)
+			})
+			unbind := ad.(interface {
+				UnboundExact(tui.KeyPress, tui.KeyContext) bool
+			})
+			if !unbind.UnboundExact(f6, tc.ctx) {
+				t.Fatalf("UnboundExact(%s) = false", tc.name)
+			}
+			if cmd, ok := exact.ResolveExact(f6, tc.ctx); ok {
+				t.Fatalf("ResolveExact(%s) after unbind = %+v, want none", tc.name, cmd)
+			}
+			// The real Resolve still falls back to Global; the overlay must check the
+			// exact tombstone first (as overlayKey now does).
+			if cmd, ok := ad.Resolve(f6, tc.ctx); !ok || cmd.Action != "show_remote_indicator_menu" {
+				t.Fatalf("Resolve(%s) fallback = %+v/%v, want the global remote action", tc.name, cmd, ok)
+			}
+		})
+	}
+}

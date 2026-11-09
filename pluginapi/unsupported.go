@@ -207,6 +207,7 @@ func (Unsupported) DecorRefreshLines(BufferID)               {}
 // WorkspaceHost.
 
 func (Unsupported) Root() string                               { return "" }
+func (Unsupported) FileLaunch() bool                           { return false }
 func (Unsupported) Files(int) ([]string, bool)                 { return nil, false }
 func (Unsupported) Config(string) (any, bool)                  { return nil, false }
 func (Unsupported) Theme() ThemeInfo                           { return ThemeInfo{} }

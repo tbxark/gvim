@@ -505,6 +505,20 @@ enabled by default, so it adds no idle page or default palette row; `auto_open` 
 the plugin is enabled. It starts no process, performs no network access or file writes, does no
 foreground IO and relies only on existing plugin APIs (no new trust path).
 
+**File-launch guard (landed).** Fresh's guard is
+`if (!force && editor.fileLaunch()) return` before creating the page: `fileLaunch()` is true for
+`fresh FILE…` (including `$EDITOR`/git editor) and `fresh --simple`, false for bare `fresh`,
+`fresh DIR`, a daemon and a session restore. gvim now keeps the `sessionPlan.fileLaunch` decision
+(files/`--simple`/`--diff`, with `--restore` and the skip-session config taken into account;
+stdin is not part of Fresh's `is_file_launch`, and gvim's stdin-still-sessionless rule stays
+separate). It passes it through `tui.Deps` to the model and exposes it read-only as
+`gvim.workspace.file_launch()`; `auto_open()` skips when it is true and the explicit
+**Welcome Screen: Show** command keeps `force`. The value is immutable and is never inferred from
+`gvim.buf.list()`: CLI files and restored-session tabs both exist before plugins load. A
+daemon-hosted/shared runtime routes the host call to the active workspace's model, so the flag is
+that workspace build's invocation property; `workspaceOptions` builds daemon workspaces without
+launch files (they restore their session), so they report false.
+
 **OPEN gaps (not implemented, not claimed):** Fresh's full onboarding ladder and section banners;
 page `WidgetPanel`, widgets/buttons/chips, hover styling and composed page width; sidebar
 `Contents` and focus/scroll interaction; recent-file persistence beyond the current session;

@@ -1112,6 +1112,8 @@ function gvim.async.suspend(fn, opts) end
 gvim.workspace = {}
 ---@return string
 function gvim.workspace.root() end
+---@return boolean -- immutable Fresh file launch: command-line files/--simple/--diff (not standalone stdin)
+function gvim.workspace.file_launch() end
 ---@param opts? {limit?: integer}
 ---@return {files: string[], loading: boolean} -- paths relative to the workspace root
 function gvim.workspace.files(opts) end

@@ -108,31 +108,47 @@ func TestValidateStdin(t *testing.T) {
 	}
 }
 
-func TestPlanSessionTreatsStdinAsAFileLaunch(t *testing.T) {
+// TestPlanSessionTreatsStdinAsNoSessionButNotFreshFileLaunch: gvim keeps every stdin
+// launch out of the session (its piped text is not session state), while Fresh's
+// is_file_launch does not count standalone stdin; files combined with stdin still follow
+// Fresh's file condition.
+func TestPlanSessionTreatsStdinAsNoSessionButNotFreshFileLaunch(t *testing.T) {
 	t.Parallel()
-	cfg := config.Config{}
+	cfg := config.Defaults()
 	for _, tt := range []struct {
-		name string
-		opts Options
+		name           string
+		opts           Options
+		wantFileLaunch bool
 	}{
-		{"stdin content", Options{Stdin: []byte("x"), SessionDir: "/s"}},
-		{"read flag", Options{ReadStdin: true, SessionDir: "/s"}},
-		{"name", Options{StdinName: "a.md", SessionDir: "/s"}},
-		{"stdin with files", Options{Stdin: []byte("x"), Files: []FileTarget{{Path: "a.txt"}}, SessionDir: "/s"}},
+		{"stdin content", Options{Stdin: []byte("x"), SessionDir: "/s"}, false},
+		{"read flag", Options{ReadStdin: true, SessionDir: "/s"}, false},
+		{"name", Options{StdinName: "a.md", SessionDir: "/s"}, false},
+		// Explicit files are still Fresh's file launch even alongside stdin.
+		{"stdin with files", Options{Stdin: []byte("x"), Files: []FileTarget{{Path: "a.txt"}}, SessionDir: "/s"}, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			plan := planSession(tt.opts, cfg)
+			if plan.fileLaunch != tt.wantFileLaunch {
+				t.Errorf("fileLaunch = %v, want %v (Fresh is_file_launch excludes stdin)", plan.fileLaunch, tt.wantFileLaunch)
+			}
 			if plan.load || plan.save || plan.hotExit || plan.tabs || plan.hot {
-				t.Errorf("plan = %+v, want a file launch (no restore, no save)", plan)
+				t.Errorf("plan = %+v, want no session (stdin is not session state)", plan)
 			}
 		})
 	}
-	// A stdin launch with editor.skip_session_restore_when_files_passed=false is still a
-	// file launch: the pipe is not session state.
+	// A stdin launch with editor.skip_session_restore_when_files_passed=false is still
+	// sessionless; standalone stdin is still not a Fresh file launch.
 	restoreAlways := cfg
 	restoreAlways.SkipSessionRestoreWhenFilesPassed = false
-	if plan := planSession(Options{Stdin: []byte("x"), SessionDir: "/s"}, restoreAlways); plan.load || plan.save {
-		t.Errorf("plan = %+v, want no session even with the config restoring file launches", plan)
+	plan := planSession(Options{Stdin: []byte("x"), SessionDir: "/s"}, restoreAlways)
+	if plan.fileLaunch || plan.load || plan.save {
+		t.Errorf("plan = %+v, want no Fresh file launch and no session", plan)
+	}
+	// --restore wins over the file condition just as Fresh's is_file_launch does; the
+	// stdin session exclusion is independent.
+	plan = planSession(Options{Stdin: []byte("x"), Restore: true, Files: []FileTarget{{Path: "a.txt"}}, SessionDir: "/s"}, cfg)
+	if plan.fileLaunch || plan.load || plan.save {
+		t.Errorf("plan = %+v, want --restore to keep Fresh fileLaunch false and stdin sessionless", plan)
 	}
 }
 

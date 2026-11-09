@@ -561,6 +561,13 @@ func (h *pluginHost) OwnerGone(plugin string, gen uint64) {
 // Root is the workspace root, or "" when there is no explorer.
 func (h *pluginHost) Root() string { return h.model().rootDir() }
 
+// FileLaunch is the immutable launch property of the model the call routes to
+// (the active daemon workspace for the shared host).
+func (h *pluginHost) FileLaunch() bool {
+	m := h.model()
+	return m != nil && m.fileLaunch
+}
+
 // Files is the file index snapshot, at most limit entries (all when limit <= 0).
 func (h *pluginHost) Files(limit int) (files []string, loading bool) {
 	if h.model().files == nil {

@@ -11,6 +11,7 @@ import (
 // gvim.workspace (stage S9):
 //
 //	gvim.workspace.root() -> string
+//	gvim.workspace.file_launch() -> boolean   immutable startup invocation property (Fresh editor.fileLaunch())
 //	gvim.workspace.files(opts?) -> {files = {...}, loading = bool}   finder index snapshot, no IO; opts {limit = 50000}
 //	gvim.workspace.grep(query, opts?) ⏳ -> { {path, line, col, text}, ... } | nil, err
 //	      opts {regex = false, case_sensitive = false, max = 2000}; line and col are 0-based, col a
@@ -34,6 +35,10 @@ func installWorkspace(e *apiEnv) {
 	t := e.area("workspace")
 	e.set(t, "root", func(L *lua.LState) int {
 		L.Push(lua.LString(r.guard.Root()))
+		return 1
+	})
+	e.set(t, "file_launch", func(L *lua.LState) int {
+		L.Push(lua.LBool(r.guard.FileLaunch()))
 		return 1
 	})
 	e.set(t, "files", func(L *lua.LState) int {

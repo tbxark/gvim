@@ -379,3 +379,26 @@ func TestWelcomeScreenFocusDoesNotRevealInBackground(t *testing.T) {
 		t.Fatalf("active buffer = %d, want the file %d", got, fileID)
 	}
 }
+
+// TestWelcomeScreenAutoOpenHonorsFileLaunch: the immutable file-launch property (a
+// gvim FILE/--simple/--diff/stdin invocation) suppresses the automatic background page;
+// the explicit Welcome command still opens it.
+func TestWelcomeScreenAutoOpenHonorsFileLaunch(t *testing.T) {
+	r := welcomeScreenRig(t, rigOpts{
+		buffers:    []rigBuffer{{"/work/a.go", "package a\n"}},
+		fileLaunch: true,
+		script:     func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	r.h.Emit(pluginapi.Event{Name: "plugins_loaded"})
+	r.h.Emit(pluginapi.Event{Name: "ready"})
+	r.h.Settle()
+	if id := welcomeScreenBuffer(r.host); id != 0 {
+		t.Fatalf("welcome page auto-opened for a file launch: %d", id)
+	}
+	if err := r.h.Run("welcome_screen.show", nil); err != nil {
+		t.Fatal(err)
+	}
+	if id := welcomeScreenBuffer(r.host); id == 0 {
+		t.Fatal("explicit Welcome command was blocked by the file-launch guard")
+	}
+}

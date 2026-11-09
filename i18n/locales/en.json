@@ -1165,5 +1165,8 @@
   "gvim.status.env_active": "%{name} ✓",
   "gvim.status.env_active_unknown": "active",
   "gvim.status.env_detected": "%{name}",
-  "gvim.status.env_locked": "%{name} (locked)"
+  "gvim.status.env_locked": "%{name} (locked)",
+  "gvim.notice.env_none": "No environment manager detected in this project",
+  "gvim.notice.env_activate_unavailable": "Env: Activate is unavailable — enable the env-manager plugin",
+  "gvim.notice.env_reload_unavailable": "Env: Reload is unavailable — enable the env-manager plugin"
 }

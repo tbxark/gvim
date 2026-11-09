@@ -437,6 +437,14 @@ local function auto_open()
   if not settings.auto_open or state.opened_auto then
     return
   end
+  -- Fresh's file launch (fresh FILE, --simple, --diff) asked for those files and
+  -- only those; the page is still one palette command away. This is the immutable
+  -- invocation property, not a guess from the open buffers: restored session tabs
+  -- and daemon workspace restores are not file launches, and standalone stdin is
+  -- not a Fresh file launch (gvim still keeps stdin out of the session).
+  if gvim.workspace.file_launch() then
+    return
+  end
   state.opened_auto = true
   -- Fresh opens the page as a background tab and never steals the foreground.
   ensure_buffer(false)

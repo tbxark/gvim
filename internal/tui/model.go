@@ -179,6 +179,10 @@ type Model struct {
 	tabFirst int
 	// recents are the recent folders the welcome screen lists.
 	recents []string
+	// fileLaunch is the immutable invocation property plugins read through
+	// gvim.workspace.file_launch(): true when this editor was started to open
+	// command-line files (or --simple/--diff), false for a session or standalone stdin.
+	fileLaunch bool
 	// welcomeSel is the highlighted row of the welcome screen.
 	welcomeSel int
 	// splits is the editor's pane layout: the split tree, the focused pane, and
@@ -293,6 +297,7 @@ func New(deps Deps) *Model {
 		themeOverrides:  map[string]string{},
 		commands:        cmds,
 		recents:         deps.Recents,
+		fileLaunch:      deps.FileLaunch,
 		hideMenuBar:     deps.HideMenuBar,
 		hideLineNumbers: deps.HideLineNumbers,
 		tabSize:         deps.TabSize,
@@ -2754,6 +2759,9 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 		}
 		return m.statusSegmentClick(t.Index)
 	case hitStatusPlugin:
+		if entry, ok := m.statusExtraEntryAt(t.Index); ok && entry.source == statusExtraEnv {
+			return m.envStatusClick()
+		}
 		return m.plugStatusClick(t.Index)
 	case hitEditorText, hitGutter, hitScrollbarTrack:
 		m.pressPane(t.Pane, mo.X, mo.Y, count)
@@ -3282,16 +3290,7 @@ func (m *Model) statusView() statusView {
 	s.PaletteHint = m.paletteHint()
 	s.Clock = m.now().Format(clockFormat)
 	s.Chord = m.statusChord()
-	s.Extra = m.plugStatusItems()
-	if item, ok := m.authoritySegment(); ok {
-		s.Extra = append(s.Extra, item)
-	}
-	if item, ok := m.workspaceSegment(); ok {
-		s.Extra = append(s.Extra, item)
-	}
-	if item, ok := m.envStatusSegment(); ok {
-		s.Extra = append(s.Extra, item)
-	}
+	s.Extra = m.statusExtraItems()
 	return s
 }
 

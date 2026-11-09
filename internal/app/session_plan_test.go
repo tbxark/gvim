@@ -41,13 +41,13 @@ func TestPlanSession(t *testing.T) {
 			name: "a file launch skips the session by default",
 			opts: Options{SessionDir: "/s", Files: []FileTarget{{Path: "a.txt"}}},
 			cfg:  sessionConfig(t, nil),
-			want: sessionPlan{explorer: true},
+			want: sessionPlan{fileLaunch: true, explorer: true},
 		},
 		{
 			name: "a file launch with no session directory",
 			opts: Options{Files: []FileTarget{{Path: "a.txt"}}},
 			cfg:  sessionConfig(t, nil),
-			want: sessionPlan{explorer: true},
+			want: sessionPlan{fileLaunch: true, explorer: true},
 		},
 		{
 			name: "restore_previous_session off keeps only the unsaved text",
@@ -102,19 +102,19 @@ func TestPlanSession(t *testing.T) {
 			name: "simple restores and saves nothing",
 			opts: Options{SessionDir: "/s", Simple: true},
 			cfg:  sessionConfig(t, nil),
-			want: sessionPlan{},
+			want: sessionPlan{fileLaunch: true},
 		},
 		{
 			name: "simple with a directory and files opens just them",
 			opts: Options{SessionDir: "/s", Simple: true, Root: "/w", Files: []FileTarget{{Path: "a.txt"}}},
 			cfg:  sessionConfig(t, nil),
-			want: sessionPlan{},
+			want: sessionPlan{fileLaunch: true},
 		},
 		{
 			name: "a compare launch is a file launch even with restore",
 			opts: Options{SessionDir: "/s", Diff: true, Restore: true, Files: []FileTarget{{Path: "a"}, {Path: "b"}}},
 			cfg:  sessionConfig(t, nil),
-			want: sessionPlan{explorer: true},
+			want: sessionPlan{fileLaunch: true, explorer: true},
 		},
 	}
 	for _, tt := range tests {
@@ -124,5 +124,18 @@ func TestPlanSession(t *testing.T) {
 				t.Fatalf("planSession = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestPlanSessionRootOnlyIsNotAFileLaunch: a directory argument is the workspace root, not
+// a file target; Fresh's fileLaunch is false for it (and for a bare launch).
+func TestPlanSessionRootOnlyIsNotAFileLaunch(t *testing.T) {
+	t.Parallel()
+	cfg := sessionConfig(t, nil)
+	if plan := planSession(Options{Root: "/w", SessionDir: "/s"}, cfg); plan.fileLaunch {
+		t.Fatalf("directory-only plan = %+v, want no file launch", plan)
+	}
+	if plan := planSession(Options{Root: "/w", SessionDir: "/s", Files: []FileTarget{{Path: "/w/a.txt"}}}, cfg); !plan.fileLaunch {
+		t.Fatalf("file plan = %+v, want a file launch", plan)
 	}
 }

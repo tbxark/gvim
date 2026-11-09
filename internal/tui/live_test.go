@@ -387,3 +387,25 @@ func TestLiveGrepExportShowsIncompleteState(t *testing.T) {
 		t.Fatalf("export hit row = %+v", v.Rows[1])
 	}
 }
+
+// TestLiveGrepExportAltMAlias: Fresh binds both Alt+Q and Alt+M to
+// live_grep_export_quickfix; Alt+M must open the same quickfix-style list through the
+// real overlay Update path.
+func TestLiveGrepExportAltMAlias(t *testing.T) {
+	t.Parallel()
+	g := &grepPort{hits: []palette.GrepHit{{Rel: "src/a.go", Line: 7, Col: 2, Text: "todo a"}}}
+	m, _ := newLiveModel(t, g)
+	must(t, m.Run("open_live_grep"))
+	typeInto(m, "todo")
+	feed(m, runKey(m, altKey('m')))
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays after Alt+M export = %d, want the quickfix list only", len(m.overlays))
+	}
+	v, ok := m.overlays[0].(*list.View)
+	if !ok {
+		t.Fatalf("top overlay = %T, want the quickfix list", m.overlays[len(m.overlays)-1])
+	}
+	if len(v.Rows) != 1 || !strings.Contains(v.Rows[0].Left, "src/a.go:7") {
+		t.Fatalf("Alt+M export rows = %+v", v.Rows)
+	}
+}

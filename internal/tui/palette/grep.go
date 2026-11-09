@@ -405,7 +405,9 @@ func (p *Palette) liveKey(name string) (tea.Cmd, bool) {
 		return p.toggleScope(scopeTerminals), true
 	case "alt+i":
 		return p.toggleScope(scopeIgnored), true
-	case "alt+q":
+	case "alt+q", "alt+m":
+		// Fresh's prompt context binds both Alt+Q and Alt+M to
+		// live_grep_export_quickfix; both export the same result set.
 		return p.exportGrep(), true
 	}
 	return nil, false

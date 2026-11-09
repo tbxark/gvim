@@ -336,6 +336,7 @@ end, { timeout_ms = 60000 })
 
 ```text
 gvim.workspace.root() -> string
+gvim.workspace.file_launch() -> boolean
 gvim.workspace.files(opts?) -> { files = {...}, loading = boolean }
 gvim.workspace.grep(query, opts?) ⏳ -> { {path, line, col, text}, ... } | nil, err
 gvim.workspace.git_root(dir) ⏳ -> root | nil
@@ -343,6 +344,20 @@ gvim.workspace.git_branch(root) ⏳ -> name | nil, err
 ```
 
 * `root` is the workspace root now (it changes when the user opens a project).
+* `file_launch` is Fresh's `editor.fileLaunch()`: the invocation opened the files named on
+  its command line (`gvim FILE...`), `--simple` or `--diff` instead of a session. It is
+  fixed at startup and never changes with restored tabs, later file opens or a daemon
+  workspace switch. `--restore` with files restores a session instead, so the flag is false;
+  `editor.skip_session_restore_when_files_passed = false` likewise makes a launch with files a
+  session launch. A directory argument becomes the workspace `Root`, not a file target, so a
+  directory-only launch reports false; Files must be file targets. A bare launch, a restored
+  session and a standalone stdin launch report false: Fresh's `is_file_launch` does not count
+  stdin, even though gvim still keeps a stdin launch out of the session. Explicit files
+  combined with stdin follow the files rule. A daemon/shared runtime reports the flag of the
+  **active workspace's own build**: daemon workspaces are built without launch files (they restore their session), so the shared host normally reports false
+  there. A direct remote launch has no local session plan; a normal remote target reports false,
+  while an explicit `--simple` on that launch reports true. The flag is never inferred from the
+  open buffers.
 * `files` is a snapshot of the editor's file index, no IO; `opts.limit` (default and maximum 50 000);
   `loading` is true while the index is still being built. The paths are **relative to the workspace
   root**, with `/` separators.

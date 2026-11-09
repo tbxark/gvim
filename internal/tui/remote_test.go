@@ -288,3 +288,154 @@ func TestRemoteMenuFromOverlayContexts(t *testing.T) {
 		t.Fatalf("closing the remote menu left %d popup overlays", len(m.overlays))
 	}
 }
+
+// TestOverlayF6UnbindTombstones checks the modal contexts: an exact-context F6 unbind
+// is a tombstone that beats the global Remote Indicator fallback in prompt, popup,
+// settings and menu. Normal typed text still reaches the prompt.
+func TestOverlayF6UnbindTombstones(t *testing.T) {
+	t.Parallel()
+	newModel := func(t *testing.T, unbound map[string]bool) *Model {
+		keys := testKeys()
+		return newUtilityModel(t, newFakeEditor("hi"), exactFakeKeymap{
+			fakeKeymap: keys,
+			unbound:    unbound,
+		}, Settings{}, nil)
+	}
+
+	t.Run("prompt", func(t *testing.T) {
+		t.Parallel()
+		m := newModel(t, map[string]bool{string(KeyContextPrompt) + "|F6|": true})
+		p := pushPrompt(m, "")
+		press(m, special(tea.KeyF6))
+		if len(m.overlays) != 1 {
+			t.Fatalf("prompt F6 unbind opened another overlay (overlays %d)", len(m.overlays))
+		}
+		press(m, typed("x"))
+		if got := p.Value(); got != "x" {
+			t.Fatalf("prompt value = %q, want the typed x", got)
+		}
+	})
+
+	t.Run("popup", func(t *testing.T) {
+		t.Parallel()
+		m := newModel(t, map[string]bool{string(KeyContextPopup) + "|F6|": true})
+		m.pushOverlay(list.New("Pick", []list.Row{{Left: "a", Value: "a"}}, m.styles.Overlay, nil))
+		press(m, special(tea.KeyF6))
+		if len(m.overlays) != 1 {
+			t.Fatalf("popup F6 unbind opened another overlay (overlays %d)", len(m.overlays))
+		}
+	})
+
+	t.Run("settings", func(t *testing.T) {
+		t.Parallel()
+		m := newModel(t, map[string]bool{string(KeyContextSettings) + "|F6|": true})
+		page := &settingsPage{m: m, active: true}
+		m.pushOverlay(page)
+		press(m, special(tea.KeyF6))
+		if len(m.overlays) != 1 {
+			t.Fatalf("settings F6 unbind opened another overlay (overlays %d)", len(m.overlays))
+		}
+	})
+
+	t.Run("menu", func(t *testing.T) {
+		t.Parallel()
+		m := newModel(t, map[string]bool{string(KeyContextMenu) + "|F6|": true})
+		m.menu = m.menu.Open(0)
+		press(m, special(tea.KeyF6))
+		if len(m.overlays) != 0 {
+			t.Fatalf("menu F6 unbind opened the remote menu (overlays %d)", len(m.overlays))
+		}
+		if !m.menu.IsOpen() {
+			t.Fatal("menu F6 unbind closed the menu")
+		}
+	})
+}
+
+// TestOverlayUnbindPrintableStillTypes checks that an exact tombstone for a printable
+// character does not swallow modal text/typeahead: prompt and settings still receive x,
+// while F6 and Esc tombstones keep suppressing the global action / closing built-in.
+func TestOverlayUnbindPrintableStillTypes(t *testing.T) {
+	t.Parallel()
+	newModel := func(t *testing.T, unbound map[string]bool) *Model {
+		return newUtilityModel(t, newFakeEditor("hi"), exactFakeKeymap{
+			fakeKeymap: testKeys(),
+			unbound:    unbound,
+		}, Settings{}, nil)
+	}
+
+	// A prompt still types an explicitly unbound printable.
+	m := newModel(t, map[string]bool{"prompt|x|": true})
+	p := pushPrompt(m, "")
+	press(m, typed("x"))
+	if got := p.Value(); got != "x" {
+		t.Fatalf("prompt value = %q, want x after an unbound printable", got)
+	}
+
+	// Settings type-to-filter still receives the printable.
+	m = newModel(t, map[string]bool{"settings|x|": true})
+	page := &settingsPage{m: m, active: true}
+	m.pushOverlay(page)
+	press(m, typed("x"))
+	if got := string(page.filter); got != "x" {
+		t.Fatalf("settings filter = %q, want x after an unbound printable", got)
+	}
+
+	// F6 tombstone still suppresses the global remote action.
+	m = newModel(t, map[string]bool{"prompt|F6|": true})
+	pushPrompt(m, "")
+	press(m, special(tea.KeyF6))
+	if len(m.overlays) != 1 {
+		t.Fatalf("prompt F6 tombstone opened another overlay: %d", len(m.overlays))
+	}
+
+	// Esc tombstone still suppresses the built-in close.
+	m = newModel(t, map[string]bool{"prompt|Escape|": true})
+	pushPrompt(m, "")
+	press(m, special(tea.KeyEscape))
+	if len(m.overlays) != 1 {
+		t.Fatalf("prompt Esc tombstone closed the prompt: %d overlays", len(m.overlays))
+	}
+}
+
+// TestLegacyOverlayUnbindScope covers the legacy UnbindKeymap path (a keymap with no
+// exact resolver): prompt/settings printable tombstones must still type, while Esc and
+// F6 tombstones keep suppressing the built-in close and the global remote action.
+func TestLegacyOverlayUnbindScope(t *testing.T) {
+	t.Parallel()
+	newModel := func(t *testing.T, unbound map[string]bool) *Model {
+		keys := fakeUnbindKeymap{
+			fakeKeymap: fakeKeymap{"global|F6|": {Action: "show_remote_indicator_menu"}},
+			unbound:    unbound,
+		}
+		return newUtilityModel(t, newFakeEditor("hi"), keys, Settings{}, nil)
+	}
+
+	m := newModel(t, map[string]bool{"prompt|x|": true})
+	p := pushPrompt(m, "")
+	press(m, typed("x"))
+	if got := p.Value(); got != "x" {
+		t.Fatalf("legacy prompt printable unbind swallowed the key: value %q", got)
+	}
+
+	m = newModel(t, map[string]bool{"settings|x|": true})
+	page := &settingsPage{m: m, active: true}
+	m.pushOverlay(page)
+	press(m, typed("x"))
+	if got := string(page.filter); got != "x" {
+		t.Fatalf("legacy settings printable unbind swallowed the key: filter %q", got)
+	}
+
+	m = newModel(t, map[string]bool{"prompt|Escape|": true})
+	pushPrompt(m, "")
+	press(m, special(tea.KeyEscape))
+	if len(m.overlays) != 1 {
+		t.Fatalf("legacy prompt Esc unbind closed the prompt: %d overlays", len(m.overlays))
+	}
+
+	m = newModel(t, map[string]bool{"prompt|F6|": true})
+	pushPrompt(m, "")
+	press(m, special(tea.KeyF6))
+	if len(m.overlays) != 1 {
+		t.Fatalf("legacy prompt F6 unbind opened the global remote menu: %d overlays", len(m.overlays))
+	}
+}

@@ -643,9 +643,15 @@ type Deps struct {
 	// Recents are the recent folders, newest first. The welcome screen lists up to
 	// five of them. Nil leaves the list empty.
 	Recents []string
-	Dialogs Dialogs    // nil: the unsaved and Save As dialogs are not offered
-	Files   FileIndex  // nil: the palette's file mode shows its loading row
-	Ranker  FileRanker // nil: the palette's file rows are not ranked
+	// FileLaunch is the immutable startup-invocation property exposed to plugins as
+	// gvim.workspace.file_launch(): true when this editor was launched to open
+	// command-line files, --simple or --diff rather than a session. A standalone stdin
+	// launch is not Fresh's file launch; a restored session and a daemon workspace
+	// build that restores tabs leave it false.
+	FileLaunch bool
+	Dialogs    Dialogs    // nil: the unsaved and Save As dialogs are not offered
+	Files      FileIndex  // nil: the palette's file mode shows its loading row
+	Ranker     FileRanker // nil: the palette's file rows are not ranked
 	// FileRoot is the root the palette's file rows are relative to when it is not the
 	// explorer's root (a remote workspace: the rows are remote relative paths). Empty
 	// uses the explorer root. A non-empty FileRoot also marks the session as remote for

@@ -13,6 +13,12 @@ import "github.com/tbxark/gvim/config"
 // one-shot flags are --restore, --no-restore (Fresh's --no-session) and
 // --simple.
 type sessionPlan struct {
+	// fileLaunch records Fresh's is_file_launch decision for plugins: --simple or
+	// --diff, or explicit non-directory files with the skip-session setting on and no
+	// --restore. A standalone stdin launch is not a Fresh file launch even though
+	// gvim still keeps it out of the session (sessionLaunch below). It is fixed at
+	// startup and exposed read-only to plugins.
+	fileLaunch bool
 	// load reads the saved session file at startup.
 	load bool
 	// tabs restores the saved tabs, their cursors and the explorer state.
@@ -55,17 +61,21 @@ func planSession(opts Options, cfg config.Config) sessionPlan {
 	// launch whatever is named. A compare launch is always a file launch: the
 	// compare view is its two named files.
 	fileLaunch := files && cfg.SkipSessionRestoreWhenFilesPassed && !opts.Restore
-	// --simple and --diff are file launches whatever is named; a stdin launch is one
-	// too, because the piped content is not session state and must never be saved.
-	if opts.Simple || opts.Diff || opts.StdinLaunch() {
+	if opts.Simple || opts.Diff {
 		fileLaunch = true
 	}
-	sessionLaunch := !fileLaunch
+	// The session side is broader than Fresh's plugin-visible fileLaunch: gvim keeps a
+	// stdin launch out of the session (the piped text is not session state and must
+	// never be saved), but Fresh's is_file_launch does not count stdin alone. Keeping
+	// the two decisions separate preserves both the recorded session semantics and the
+	// plugin property.
+	sessionLaunch := !fileLaunch && !opts.StdinLaunch()
 	hasStore := opts.SessionDir != ""
 	plan := sessionPlan{
-		load:     hasStore && sessionLaunch,
-		save:     hasStore && sessionLaunch,
-		explorer: !opts.Simple,
+		fileLaunch: fileLaunch,
+		load:       hasStore && sessionLaunch,
+		save:       hasStore && sessionLaunch,
+		explorer:   !opts.Simple,
 	}
 	if !plan.load {
 		return plan

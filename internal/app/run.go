@@ -466,6 +466,10 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	// its layout (the unsaved text only), or not at all, and whether it is saved
 	// and hot-exited when the program ends.
 	plan := planSession(opts, cfg)
+	// fileLaunch is the invocation property plugins read; it is fixed here, before the
+	// remote launch's session plan is reset, so an explicit --simple on a remote target
+	// still reports a file launch while a normal remote target does not name files.
+	fileLaunch := plan.fileLaunch
 	// A direct remote launch keeps no local session (the local session must not come back
 	// under an SSH workspace). A daemon-hosted remote workspace is different: its session
 	// lives in the workspace session directory and is restored after the authority
@@ -606,6 +610,8 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		opts.pluginLog = logFile.Plugin
 	}
 	deps := uiadapter.NewDeps(ed, km, th, tree, files)
+	// Expose the startup invocation property to plugins (gvim.workspace.file_launch).
+	deps.FileLaunch = fileLaunch
 	// Remote large files read windows through the app's authority-backed loader in
 	// commands; a local session reports no async large document and arms no polling.
 	deps.LargeWindows = newLargeWindows(ed)

@@ -21,13 +21,14 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `b645c8f` (the previous round's commit is folded in) plus the
-merged round-58 work. Static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
-build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0, purity, import rules, menus, i18n_check
-with catalogue heap en 125 KiB / de 83 KiB / both 208 KiB, git diff --check, gofmt clean). Final full
-`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r58-final3.log`). The audit ran build/gofmt/i18n_check plus targeted round-58 tests/diff
-review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
+Last verified: 2026-11-10, tree commit `a4433fd` (the round-58 commit; the previous round's commit is
+folded in) plus the merged round-59 work. Static gates PASS (Lead, final pass after all writes stopped;
+default GOCACHE: native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, purity, import rules, menus,
+i18n_check with catalogue heap en 130 KiB / de 83 KiB / both 213 KiB, git diff --check, gofmt clean).
+Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r59-final3.log`); one earlier run had a timing-only `TestLocalLiveRestoreOptions` failure,
+then isolated 3x and the full rerun passed. The audit ran build/gofmt/i18n_check plus targeted
+round-59 tests/diff review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY, real-
 host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh` same
 date.
@@ -1530,6 +1531,59 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-59 outcome (2026-11-10, merged working tree on `a4433fd`).** Five slices landed: the
+F6 modal/overlay exact-unbind-and-legacy-printable fix; the Fresh-compatible welcome_screen fileLaunch
+guard; typed status-Extra routing for the environment click with official env-manager pill dedupe; the
+Live Grep Alt+M export alias; and the accompanying docs/metrics. Static gates PASS; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL (log
+`/tmp/gvim-r59-final3.log`); one earlier timing-only `TestLocalLiveRestoreOptions` failure reran 3x and
+in the full suite clean. The audit read the final diff and ran targeted tests; the Lead ran the full suite.
+**F6 overlay/legacy unbind + printable text (item 304).** Prompt/search-prompt/popup/settings/menu
+now consult the exact context and its unbind tombstone before the Global fallback: F6/remote tombstones
+still consume, while an explicitly unbound printable x in prompt/settings actual key paths still types
+(and list/settings typeahead keeps working). The legacy `UnbindKeymap`-without-exact path uses the same
+`exactUnbindConsumes` gate, so it no longer swallows printable text; Escape/control tombstones still
+suppress the built-in close. Tests cover prompt/settings x, F6 and Esc, plus the legacy fake path.
+AUDITED RESIDUALS: F6 menu is status/reconnect only, F7 excludes plugins, exact/legacy behavior is
+tested with fake and real adapters but real host keystrokes are UNTESTED (R2-4/R9-5).
+**Fresh fileLaunch / welcome guard (item 302; detailed item 307).** `sessionPlan.fileLaunch` now follows
+Fresh's `is_file_launch`: `--simple`, `--diff`, or explicit non-directory files with
+`skip_session_restore_when_files_passed` on and no `--restore`. A directory argument is the workspace
+`Root`, not a file target; gvim DIR reports false, DIR FILE true. Standalone stdin is **not** a Fresh
+fileLaunch (Fresh's `is_file_launch` excludes it), but gvim keeps it sessionless via a separate
+`sessionLaunch` rule; explicit files combined with stdin follow the files rule. The value is captured
+before the direct-remote session-plan reset, passed through `tui.Deps` to the immutable model field, and
+exposed read-only as `gvim.workspace.file_launch()`. welcome_screen `auto_open` skips only when true;
+the explicit Welcome Screen: Show command keeps its `force` path. Daemon/shared workspaces clear the
+launch fields and the shared host reads the active model's flag. Real app+plugin startup tests cover
+bare, explicit file, file over saved session, `--simple`, `--diff`, standalone stdin, stdin+files,
+restored session, `--restore` with files, config skip=false and directory-only root; plan/API/TUI/
+daemon tests cover the rest. AUDITED COVERAGE GAPS: no real app/CLI `ParseTargets` directory
+integration (the directory case uses `Options.Root`), no direct-remote normal/`--simple` or daemon/
+shared active-workspace welcome e2e, no untrusted-workspace auto_open case, and manual Show force is
+only covered by the bundled-plugin fake. `sessionPlan` still trusts the documented `Options.Files`
+file-only contract (a directory placed directly in `Files` would falsely report a file launch); real
+hosts UNTESTED (R13-6/R13-9).
+**Typed environment status click + official pill dedupe (item 305; detailed item 308).** Status Extra
+entries carry a structural `statusExtraSource`; only the native env entry reaches `envStatusClick`, a
+plugin item reusing ID `env` stays a plugin item and runs its own status-click action. The official
+`env_manager` plugin pill (plugin name + item id) suppresses the native segment, producing one
+environment pill owned by the plugin; other plugins' `env` id does not suppress it. Native click remains
+trust-safe: untrusted opens the cancellable Workspace Trust dialog (no decision/activation), trusted
+dispatches the exact `env_manager.activate`/`env_manager.reload` command with the unavailable/no-env
+notices. Tests cover real status-hit routing, plugin env-ID collision, official dedupe, other-plugin
+independence and trust entry. AUDITED RESIDUALS: no pending-decision activation after trust (click
+again), active env stays informational after revoke, real watcher/provider UNTESTED (R13-18).
+**Live Grep Alt+M (item 309).** The Live Grep overlay accepts both Alt+Q and Alt+M for
+`live_grep_export_quickfix`, matching Fresh's prompt-context binding; the real overlay Update path opens
+the same quickfix-style list, with no normal/emacs `smart_home` conflict because the overlay context
+wins. Tests cover the alias; real host key chords UNTESTED.
+Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; keymap default own 250/in effect
+248, macos 60/271, macos-gui 52/322, emacs 98/314, vscode 9/253; i18n en 1167 / 581 per locale, 575
+KiB text, ≈665 KiB JSON, heap 130-83-213 KiB. Full suite EXIT 0 (77 packages, log /tmp/gvim-r59-
+final3.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
 **Round-58 outcome (2026-11-10, merged working tree on `b645c8f`).** Five slices landed: the F6
 keymap action rebind/exact-unbind/focus precedence; the remote 256 KiB exact-cap boundary; the
 welcome_screen selected-row caret reveal; the side-effect-free cached environment status; and
@@ -1566,8 +1620,8 @@ invalid-UTF-8 cleaned and line targets follow the one-line sanitized rows. AUDIT
 reduced page is still opt-in rather than Fresh's default startup surface, has no page WidgetPanel/
 onboarding/Contents/widgets/hover, orchestrator/workspace/agent/auto-attach cards, dashboard built-
 ins, persistent recent files or full localization; command/setting names remain Welcome Screen:
-Show/auto_open rather than Welcome/showOnStartup; auto_open has no Fresh fileLaunch guard, so gvim
-FILE still gains a background Welcome tab; no plugin-to-host page composition e2e (R13-6/R13-9).
+Show/auto_open rather than Welcome/showOnStartup. Round59 adds Fresh's fileLaunch guard and the manual
+force path (item 302/307); no plugin-to-host page composition e2e (R13-6/R13-9).
 **Cached environment status (item 305).** The status row's env segment now calls a dedicated
 `CachedEnvStatus` read (cached detected/active names + live trust level) instead of the plugin/Env:
 Reload `DetectedEnv` path: rendering triggers no detection, watcher retry, capture, spawn or trust
@@ -1576,9 +1630,9 @@ decision, and the app regression test proves a pending watcher retry is not fire
 invalid UTF-8) before paint; an active environment remains shown as `<name> ✓` after a later trust
 revocation (informational only; deactivation is explicit), while a detected-only untrusted env
 shows `<name> (locked)`. AUDITED RESIDUALS: unlike Fresh the segment is always present and omits the
-neutral `system` value; it has no click-to-activate/trust affordance; the trust-remains-active
-semantics are informational and do not un-apply an environment; no project shell code is touched;
-real watcher/provider UNTESTED (R13-18).
+neutral `system` value; Round59 adds the safe click/trust entry and official-pill dedupe (item 305/308);
+the trust-remains-active semantics are informational and do not un-apply an environment; no project shell
+code is touched; real watcher/provider UNTESTED (R13-18).
 **git_blame parent revision / race / Save As (item 306).** Git: Blame Previous Revision resolves
 the blamed commit's first parent and re-blames only the captured cursor line at that revision;
 Git: Blame HEAD clears the override. The cache key includes the revision, and the revision tracks
@@ -1615,7 +1669,7 @@ bounded reduced port, not Fresh's page WidgetPanel: no onboarding levels, widget
 Contents sidebar/focus-follows-cursor/scroll-to-widget, orchestrator/workspace/agent/auto-attach cards,
 dashboard rendered built-ins, persistent recent files or long-form localization; it is opt-in while Fresh's
 page is default-enabled, and the visible command/setting are `Welcome Screen: Show`/`auto_open` rather than
-Fresh's `Welcome`/`showOnStartup`; no plugin-to-host page composition e2e is claimed. Round58 later adds the selected row's caret reveal on short viewports; a background Welcome tab is skipped. auto_open still lacks Fresh's fileLaunch guard, so with the plugin enabled gvim FILE gains a background Welcome tab (reduced-port difference; R13-6/R13-9).
+Fresh's `Welcome`/`showOnStartup`; no plugin-to-host page composition e2e is claimed. Round58 later adds the selected row's caret reveal on short viewports; Round59 adds Fresh's fileLaunch guard and manual force, so a file launch no longer gains a background page (reduced-port difference; R13-6/R13-9).
 **diff_nav Compare Files source (item 303).** compare_files now exports its active comparison's hunks for
 the buffer's side through `gvim.plugins.export`; diff_nav consumes them as a fourth source after
 git_gutter/live_diff/saved-diff, with deleted-only side targeting seam-1. Existing sort/dedup/bytePos
@@ -1639,8 +1693,11 @@ updated (default own 250/in effect 248 after adding Fresh's F6 global binding; m
 (`show_remote_indicator_menu`, default binding F6, rebindable/movable by a keybinding override and
 resolved before plugin panels/terminal/focus surfaces with exact context precedence (Dock→Terminal→
 Global for a focused dock; user Terminal rebind/unbind beats Global; an exact unbind tombstone consumes the remote chord in
-normal/file_explorer/dock/terminal instead of falling through to Global, while unbound printables still
-flow to the editor/terminal; fake and real-adapter tests); F7 remains the built-in gvim chrome cycle. AUDITED RESIDUALS: the F6 menu is status/reconnect only (no SSH/Container action
+normal/file_explorer/dock/terminal and in the prompt/search-prompt/popup/settings/menu overlay contexts
+instead of falling through to Global, while unbound printables still flow to the editor/terminal/modal
+text field/typeahead (an overlay tombstone only swallows non-text control keys or chords whose global
+fallback is the remote action; prompt/settings unbound-printable actual-key tests); fake and real-adapter
+tests); F7 remains the built-in gvim chrome cycle. AUDITED RESIDUALS: the F6 menu is status/reconnect only (no SSH/Container action
 list beyond Reconnect, no remote workspace switching), and the command cycle covers rendered sections
 while F7 deliberately omits plugins; real host/authority acceptance UNTESTED (R2-4/R9-5).
 Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 bundled-command
@@ -5625,11 +5682,19 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      until Refresh/SetRoot/env event; async invalidation (in-flight spawn previous delta); Settings after
      warm; the status row shows the cached active/detected environment indicator (`<name> ✓`,
      `<name>`, or `<name> (locked)` while untrusted; hidden when nothing is detected, so Fresh's
-     opt-in `system` pill is not shown and there is no click-to-activate/trust affordance — the
-     indicator is read-only, reads a side-effect-free cached status (no detection/watcher
-     retry/activation from rendering), keeps an already-active env shown after a later trust
-     revocation (informational only; deactivation/reload is explicit), and uses no project
-     shell code); local unchanged.
+     opt-in `system` pill is not shown). Rendering reads a side-effect-free cached status (no
+     detection/watcher retry/activation) and keeps an already-active env shown after a later
+     trust revocation (informational only; deactivation/reload is explicit). Its click is a
+     safe action entry: untrusted -> the existing cancellable Workspace Trust dialog (same
+     surface as the trust pill; the click never decides trust itself), trusted -> the
+     env-manager plugin's own Env: Activate (detected) / Env: Reload (active) action, with an
+     explicit 'enable the env-manager plugin' notice when that plugin is disabled; no detected
+     env -> a 'no environment manager detected' notice. No activation logic runs in the status
+     row and no Update/render path blocks; unlike Fresh there is no pending-decision popup and
+     after trusting the user clicks again to activate (no trust_changed auto-activation hook).
+     When the official env-manager plugin is enabled its own status pill replaces the native
+     segment (one pill, plugin-owned click path; matched structurally by plugin name+item id,
+     so another plugin reusing the id `env` never suppresses it); local unchanged.
 187. **Resolve multi-cursor completion (216; R13-7).** ResolveToken + extra carets: acceptance
      snapshots doc version + every caret, closes popup (resolve no UI block), applies only if active doc/
      version/every caret still exactly snapshot; reply via same per-caret atomic path incl resolved
@@ -6332,8 +6397,12 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      localization; opt-in while Fresh default-on; command/setting names reduced; no plugin->host page e2e;
      Round58 adds the selected actionable row's caret reveal (set_cursor reveal=true) when the page is current,
      so short viewports scroll the choice in before Enter; a background page is skipped. Still no page-level
-     focus-follows-cursor/scrollToWidget widget; auto_open has no fileLaunch guard (gvim FILE gets a background
-     Welcome tab).
+     focus-follows-cursor/scrollToWidget widget. Round59 adds the Fresh fileLaunch guard (--simple/--diff/
+     files with skip && !restore; standalone stdin is not a Fresh fileLaunch but stays sessionless) and the
+     manual Show force path; a background page is suppressed only for fileLaunch. Real app+plugin start covers
+     bare/file/simple/diff/stdin/restored/--restore/config-false/directory-root; CLI-directory integration,
+     direct-remote normal/--simple, daemon/shared e2e, untrusted and real-app manual-Show remain coverage gaps
+     (R13-6/R13-9).
 303. **diff_nav Compare Files source (R13-9).** compare_files exports active-comparison hunks; diff_nav
      consumes as 4th source with seam-1 deletion semantics, existing sort/dedup/bytePos; real compare interop
      test. Residuals: Compare Next/Prev Difference vs diff_nav two entry points, large-file offset fallback,
@@ -6344,18 +6413,21 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      (was F6); command cycle Alt+Shift+N/P includes rendered plugin sections; prompt PgUp/PgDn paging and
      keymap counts default250/248 (Fresh's F6 global binding added). F6 is now the configurable keymap action
      show_remote_indicator_menu (default F6, real rebind/context-precedence tests incl. plugin panel/terminal);
-     exact Dock/Terminal/Global unbinds consume only when a weaker context would run the remote action, so an
-     unbound printable key still types/reaches the shell, while an unbound F6/remote chord is swallowed; moved
-     F6->F8 covered. F7 is the built-in chrome cycle. Residuals: F6 menu has status/reconnect only (no SSH/
-     Container action list/workspace switching), F7 excludes plugins, legacy custom Keymap without ExactKeymap
-     cannot separate exact/global fallback (real adapter does), real authority/host UNTESTED.
+     exact Dock/Terminal/Global and prompt/search-prompt/popup/settings/menu unbinds consume only when a
+     weaker context would run the remote action or the chord has no text (control keys); an unbound printable
+     still types/reaches the shell/modal text, including the legacy UnbindKeymap path; moved F6->F8 covered.
+     F7 is the built-in chrome cycle. Residuals: F6 menu has status/reconnect only (no SSH/Container action
+     list/workspace switching), F7 excludes plugins, real authority/host UNTESTED.
 305. **Cached environment status (R13-18).** app envPort adds CachedEnvStatus (cached detected/active
      names + live trust) used only by the status row; no DetectedEnv watcher-retry/detection/capture/spawn/trust
      decision on render (TestEnvPortCachedStatusDoesNotTriggerWatchRetry), Env: Reload retains recovery.
      Names run textsafe.Clean (Cc/Cf/invalid UTF-8); active stays shown as <name> ✓ after revoke
-     (informational, deactivation explicit), detected untrusted <name> (locked). Residuals: segment always
-     present and no neutral system value (Fresh opt-in pill), no click-to-activate/trust, active env not
-     un-applied on revoke, real watcher/provider UNTESTED.
+     (informational, deactivation explicit), detected untrusted <name> (locked). Round59 makes the native
+     segment clickable (untrusted -> Workspace Trust dialog; trusted -> exact env_manager.activate/reload
+     command with notices) and uses structural Extra sources so a plugin item reusing id `env` stays a plugin
+     item; the official env_manager env pill suppresses/duplicates the native segment correctly. Residuals:
+     segment always present and no neutral system value (Fresh opt-in pill), no pending activation after
+     trust (click again), active env not un-applied on revoke, real watcher/provider UNTESTED.
 306. **git_blame parent revision / race / Save As (R13-9).** Blame Previous resolves first parent and
      re-blames only the snapshot line; Blame HEAD clears it; cache key includes revision, view_path ties a
      revision to its path, Save As clears both and bumps generation; snapshot (buffer/path/version/cursor/rev/
@@ -6364,6 +6436,25 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      unchanged. Residuals: inline one-step history not Fresh scrollable panel/history stack/no b/q stack;
      parent window uses current buffer line count (shorter parent -> notice); direct Show/Copy snapshot-checked
      but not a full user-edit race guarantee; real git/authority UNTESTED.
+307. **Fresh fileLaunch / welcome guard (R13-6/R13-9).** sessionPlan.fileLaunch follows Fresh's
+     is_file_launch: --simple/--diff or explicit non-directory files with skip_session_restore_when_files_passed
+     and no --restore; directory arg is Root; standalone stdin is not a Fresh fileLaunch but keeps gvim's
+     separate sessionless rule; stdin+files follows files. Captured before direct-remote plan reset, passed
+     through tui.Deps to immutable Model, exposed as gvim.workspace.file_launch(); auto_open skips only true,
+     manual Welcome Screen: Show force kept. Daemon workspaceOptions clears launch fields; shared host reads
+     active model; real app+plugin startup covers 11 cases incl stdin/--restore/config false/directory root.
+     Residuals: no CLI ParseTargets directory integration, no direct-remote normal/--simple or daemon/shared
+     active-welcome e2e, no untrusted auto_open, manual force only plugin fake; sessionPlan trusts Files file-
+     only contract; real hosts UNTESTED.
+308. **Typed env status click + official pill dedupe (R13-18).** Status Extra carries statusExtraSource;
+     only native statusExtraEnv reaches envStatusClick; plugin id "env" stays a plugin status click. Official
+     env_manager plugin pill (name+id) suppresses native segment; other plugin id "env" does not. Native click
+     trust-safe: untrusted opens Workspace Trust (no decision/activation), trusted dispatches exact
+     env_manager.activate/reload with unavailable/no-env notices. Tests cover real status hit, collision,
+     dedupe and trust; residual real watcher/provider UNTESTED, active env informational after revoke.
+309. **Live Grep Alt+M alias (R2-4).** Live Grep overlay accepts alt+q and alt+m for Fresh's
+     live_grep_export_quickfix; real overlay Update opens same quickfix list; emacs normal alt+m smart_home
+     not active in popup context; docs updated. Residual real host chord UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -8388,6 +8479,15 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-59 verification (2026-11-10, merged tree on `a4433fd`).** STATIC GATES PASS (Lead,
+  final pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
+  golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 130 KiB / de 83 KiB /
+  both 213 KiB, git diff --check, gofmt clean). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r59-final3.log`); one earlier timing-only `TestLocalLiveRestoreOptions` failure reran 3x
+  and in the full suite clean. Audit: build/gofmt/i18n_check plus targeted round-59 tests/diff review.
+  Tracks: F6 exact/legacy overlay unbind vs printable; Fresh fileLaunch/welcome guard; typed env status
+  click + official pill dedupe; Live Grep Alt+M. Real-host checks remain UNTESTED. No full-parity claim.
 - **Round-58 verification (2026-11-10, merged tree on `b645c8f`).** STATIC GATES PASS (Lead, final pass
   after all writes stopped; default GOCACHE: build, CGO_ENABLED=0, GOOS=windows, vet, golangci-lint 0,
   native build, purity, import rules, menus, i18n_check with catalogue heap en 125 KiB / de 83 KiB /
@@ -8451,17 +8551,17 @@ Round 13 recorded five open gaps:
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-58 landed F6 rebind/exact unbind, remote 256 KiB exact cap, welcome focus reveal, cached env
-  status and git_blame parent/race/Save As; full suite EXIT 0 (77 packages, log
-  /tmp/gvim-r58-final3.log); §5.5 is the next plan; TUI-only scope/genuine-equivalence §4 item 94/§8;
-  real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–58 had their gate sets
-  run. Round 58 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE: build,
-  CGO_ENABLED=0 build, native/Windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
-  i18n_check with catalogue heap en 125 KiB / de 83 KiB / both 208 KiB, git diff --check). Final full
+  (round-59 landed F6 overlay/legacy printable unbind, Fresh fileLaunch/welcome manual force, env status
+  click + official pill dedupe, Live Grep Alt+M; full suite EXIT 0 (77 packages, log
+  /tmp/gvim-r59-final3.log); real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–59 had their gate sets
+  run. Round 59 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
+  native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
+  i18n_check with catalogue heap en 130 KiB / de 83 KiB / both 213 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r58-final3.log`. The audit ran build/gofmt/i18n_check plus targeted round-58 tests and diff
-  review only (no full suite); the Lead ran the full suite. Real-host verification remains UNTESTED rather
+  `/tmp/gvim-r59-final3.log`; one earlier timing-only `TestLocalLiveRestoreOptions` failure reran 3x
+  and in the full suite clean. The audit ran build/gofmt/i18n_check plus targeted round-59 tests and
+  diff review only (no full suite); the Lead ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts
   policy, real-tmux, real-Windows ConPTY, real-host OSC52, multi-head/PTY workspace switching, local

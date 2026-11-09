@@ -7,13 +7,14 @@ import "github.com/tbxark/gvim/pluginapi"
 
 // FakeWorkspace is the state behind FakeHost.Root, Files, Config, Theme and ThemeColor.
 type FakeWorkspace struct {
-	RootDir   string
-	FileList  []string
-	Loading   bool
-	Settings  map[string]any
-	ThemeName string
-	Dark      bool
-	Colors    map[string][3]uint8 // theme key ("section.key") -> r, g, b
+	RootDir    string
+	FileLaunch bool
+	FileList   []string
+	Loading    bool
+	Settings   map[string]any
+	ThemeName  string
+	Dark       bool
+	Colors     map[string][3]uint8 // theme key ("section.key") -> r, g, b
 }
 
 // Workspace returns the workspace state of the fake host, creating it on first use.
@@ -30,6 +31,12 @@ func (f *FakeHost) Workspace() *FakeWorkspace {
 func (f *FakeHost) Root() string {
 	f.rec("Root")
 	return f.Workspace().RootDir
+}
+
+// FileLaunch reports the fake launch flag.
+func (f *FakeHost) FileLaunch() bool {
+	f.rec("FileLaunch")
+	return f.Workspace().FileLaunch
 }
 
 // Files returns at most limit entries of the file index.

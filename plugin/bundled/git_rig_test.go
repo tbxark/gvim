@@ -47,7 +47,10 @@ type rigOpts struct {
 	plugins  []string          // bundled plugins to load
 	probe    string            // Lua source of an extra plugin "probe"
 	extra    map[string]string // extra plugin files by path, e.g. "live_diff/init.lua"
-	encoding string            // the encoding of the first buffer (default utf-8)
+	// fileLaunch is the fake host's gvim.workspace.file_launch() value (the
+	// immutable startup invocation property).
+	fileLaunch bool
+	encoding   string // the encoding of the first buffer (default utf-8)
 	// settings are the plugins.<name>.settings layers, by plugin name, applied to the
 	// matching source before Start.
 	settings map[string]plugin.PluginSettings
@@ -88,6 +91,7 @@ func startRig(t *testing.T, o rigOpts) *rig {
 		files[name] = src
 	}
 	r := &rig{t: t, host: plugintest.NewFakeHost(), os: plugintest.NewFakeOS(), ids: map[string]pluginapi.BufferID{}}
+	r.host.Workspace().FileLaunch = o.fileLaunch
 	if !o.noGit {
 		r.os.Bin["git"] = "/usr/bin/git"
 	}

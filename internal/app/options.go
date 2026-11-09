@@ -181,9 +181,10 @@ type Options struct {
 // the file system: a missing file is valid, and a root is checked when Run
 // opens it.
 // StdinLaunch reports whether the launch carries standard-input content: the explicit
-// --stdin/- flag, a directly-set Stdin, or a --stdin-name. Such a launch is treated as a
-// file launch (no session restore or save), because the piped content is not session
-// state.
+// --stdin/- flag, a directly-set Stdin, or a --stdin-name. Such a launch is kept out of
+// the session (no session restore or save), because the piped content is not session
+// state; it is not Fresh's plugin-visible file launch (Fresh's is_file_launch excludes
+// standalone stdin), so the two decisions are kept separate.
 func (o Options) StdinLaunch() bool {
 	return o.ReadStdin || len(o.Stdin) > 0 || o.StdinName != ""
 }

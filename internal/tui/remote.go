@@ -159,6 +159,8 @@ func remoteActionFallback(km Keymap, kp KeyPress, contexts []KeyContext) bool {
 // (dock/terminal) and fall back to global. The list order is precedence.
 func (m *Model) keyContexts() []KeyContext {
 	switch {
+	case m.menu.IsOpen():
+		return []KeyContext{KeyContextMenu, KeyContextGlobal}
 	case m.dockKeyboard():
 		return []KeyContext{KeyContextDock, KeyContextTerminal, KeyContextGlobal}
 	case m.explorerFocus:

@@ -341,7 +341,17 @@ same Cc/Cf/newline/invalid-UTF-8 cleaning used for dashboard external text befor
 page line, and line targets are computed from the resulting one-line rows; a hostile path cannot
 inject a row or shift a click target. With `auto_open` (default true) the plugin opens the page as
 a **background** tab once at startup and never steals the foreground; closing it is sticky (the
-page does not reopen on file open/close). It starts no processes, performs no network/file writes or foreground IO, and uses only
+page does not reopen on file open/close). Fresh suppresses the page for a file launch
+(`editor.fileLaunch()`): `gvim FILE`, `--simple` and `--diff` now report an immutable
+`gvim.workspace.file_launch()` and `auto_open` skips only when it is true, so those launches open
+only what was asked for; the explicit **Welcome Screen: Show** command still forces the page.
+Standalone stdin is not a Fresh file launch (Fresh's `is_file_launch` excludes it), so it does
+not suppress the page even though gvim still keeps stdin out of the session; explicit files
+combined with stdin follow the files rule. Restored session tabs are never counted as a file
+launch (a bare launch, a directory-only root and a restored session still get the background
+page), and `--restore` with files follows Fresh's rule (session launch, flag false). A
+daemon/shared runtime reports the active workspace build's flag; daemon workspaces are built from session state without launch files, so they report false. The value is fixed at startup
+and is not inferred from the open buffers; command-line files and restored tabs can look the same. It starts no processes, performs no network/file writes or foreground IO, and uses only
 existing plugin APIs. OPEN/reduced differences from Fresh (also in porting.md): Fresh's page is a
 virtual buffer plus a page `WidgetPanel` with Contents, focus-follows-cursor and scroll-to-widget
 composition; the current gvim plugin API has no equivalent page/widget-panel combination, so this

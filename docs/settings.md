@@ -499,7 +499,13 @@ indicator: the active environment as `<name> ✓`, a detected but inactive one a
 It reads a side-effect-free cached status (no detection, capture, watcher retry, activation
 or trust decision, and no environment variables/snippets are displayed); an already-active
 environment stays shown as active if trust is later revoked (the indicator is informational;
-deactivation/reload is explicit); see docs/parity.md residual R13-18.
+deactivation/reload is explicit). Clicking the indicator is safe: untrusted workspaces open
+the existing cancellable Workspace Trust dialog (the click never decides trust itself);
+trusted workspaces dispatch the env-manager plugin's Env: Activate (detected) or Env: Reload
+(active) action, or say to enable the plugin when it is disabled; no detected env gets a
+notice. When the official env-manager plugin is enabled its own `env` status pill replaces
+this native segment (single pill, plugin click path); another plugin's item that merely
+reuses the id `env` does not suppress it. See docs/parity.md residual R13-18.
 
 In a REMOTE workspace the provider is `env.Remote`: the markers are probed and the
 recipe activated on the remote host through the authority, so these rows describe the remote

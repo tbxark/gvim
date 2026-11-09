@@ -241,7 +241,7 @@ root's query/modes/scopes. The command description says that it searches again.
   12-line cap is marked truncated because the reader stops at the cap without probing for one
   more line, so the column may show its `…` marker at EOF (exact-maxLines truncated
   false-positive residual).
-- **Live Grep quickfix export** (`Alt+Q` in Live Grep, Fresh's
+- **Live Grep quickfix export** (`Alt+Q` or `Alt+M` in Live Grep, Fresh's
   `live_grep_export_quickfix`): the current hits open in the shared, filterable list
   overlay as `Live Grep: <query> (N matches)`, grouped by one row per hit; Enter opens
   the file at the hit, activates the buffer's tab, or — for a terminal transcript hit —

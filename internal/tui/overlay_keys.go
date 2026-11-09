@@ -78,13 +78,36 @@ func (m *Model) menuKeymap(k tea.Key) (tea.Cmd, bool) {
 		return nil, false
 	}
 	kp, _ := translateKey(k)
+	// Exact menu context and its unbind tombstone outrank the global fallback: a menu
+	// F6 unbind must not run the global Remote Indicator action.
+	if exact, ok := m.keys.(ExactKeymap); ok {
+		if ub, ok := m.keys.(ExactUnbindKeymap); ok && ub.UnboundExact(kp, KeyContextMenu) {
+			if m.exactUnbindConsumes(k, kp) {
+				return nil, true
+			}
+			return nil, false
+		}
+		if cmd, found := exact.ResolveExact(kp, KeyContextMenu); found {
+			return m.runMenuBinding(cmd)
+		}
+	}
 	cmd, found := m.keys.Resolve(kp, KeyContextMenu)
 	if !found {
 		if ub, ok := m.keys.(UnbindKeymap); ok && ub.Unbound(kp, KeyContextMenu) {
-			return nil, true
+			if m.exactUnbindConsumes(k, kp) {
+				return nil, true
+			}
+			return nil, false
 		}
 		return nil, false
 	}
+	return m.runMenuBinding(cmd)
+}
+
+// runMenuBinding runs one resolved menu-context binding: a menu surface action is
+// turned into the synthetic key the dropdown consumes, and a real model action runs
+// through dispatch. Reported false leaves the key to the next router.
+func (m *Model) runMenuBinding(cmd Command) (tea.Cmd, bool) {
 	if cmd.Action == "noop" {
 		return nil, true
 	}
@@ -124,6 +147,19 @@ func (m *Model) menuKeymap(k tea.Key) (tea.Cmd, bool) {
 	return out, true
 }
 
+// exactUnbindConsumes reports whether an exact-context unbind tombstone should consume
+// k: either the global binding would otherwise run the Remote Indicator action, or the
+// chord carries no text (Esc/Enter/named keys, where the overlay's built-in action is
+// the fallback). A printable key is never swallowed by a tombstone, so prompt input and
+// list/settings typeahead keep working.
+func (m *Model) exactUnbindConsumes(k tea.Key, kp KeyPress) bool {
+	if cmd, ok := m.keys.Resolve(kp, KeyContextGlobal); ok && cmd.Action == "show_remote_indicator_menu" {
+		return true
+	}
+	_, text := translateKey(k)
+	return text == ""
+}
+
 // overlayKey resolves a key press in the top overlay's keymap context before the overlay's
 // own handler. It reports whether it consumed the key. A binding runs the surface's action;
 // an unbound key, or a bound action neither the surface nor the model knows, falls through
@@ -142,12 +178,33 @@ func (m *Model) overlayKey(k tea.Key) (tea.Cmd, bool) {
 		return nil, false
 	}
 	kp, _ := translateKey(k)
+	// Exact context and its unbind tombstone outrank the global fallback: a modal
+	// F6 unbind must not run the global Remote Indicator action, while an unbound
+	// ordinary key still falls through to the modal's text handler.
+	if exact, ok := m.keys.(ExactKeymap); ok {
+		if ub, ok := m.keys.(ExactUnbindKeymap); ok && ub.UnboundExact(kp, ctx) {
+			// Swallow the tombstone only for a chord that would otherwise run the
+			// remote action or an overlay built-in. A printable key still reaches the
+			// field/typeahead, even if the user unbound that character in this context.
+			if m.exactUnbindConsumes(k, kp) {
+				return nil, true
+			}
+			return nil, false
+		}
+		if cmd, found := exact.ResolveExact(kp, ctx); found {
+			return m.runOverlayAction(ctx, cmd)
+		}
+	}
 	cmd, found := m.keys.Resolve(kp, ctx)
 	if !found {
 		if ub, ok := m.keys.(UnbindKeymap); ok && ub.Unbound(kp, ctx) {
-			// The user explicitly unbound the key in this context: swallow it instead of
-			// falling back to the surface's built-in handling.
-			return nil, true
+			// The user explicitly unbound the key in this context: swallow it in the same
+			// cases the exact path does (the remote fallback or a non-text control key),
+			// while a printable key still reaches the field/typeahead.
+			if m.exactUnbindConsumes(k, kp) {
+				return nil, true
+			}
+			return nil, false
 		}
 		return nil, false
 	}
