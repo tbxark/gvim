@@ -34,7 +34,8 @@ server (completion, hover, definition, references, implementation, rename, code 
 commands, case transforms, folding and the view, tabs and splits, the explorer, the terminal
 dock, the sidebar section cycle, code tours and compare files. The overlay contexts carry
 Fresh's rows for the keys gvim's surfaces already understand: the prompt field's moves, page keys for
-its suggestion list, select-all (Ctrl+A paints the real reverse-video selection; the macOS and Emacs
+its suggestion list, select-all (Ctrl+A paints the real reverse-video selection; a left click places
+the caret at the clicked rune, while Fresh's prompt has no drag/double-click word selection; the macOS and Emacs
 presets keep their own Ctrl+A prompt move-start binding), move-selecting (Shift+Left/Right/Home/End and
 Ctrl+Shift+Left/Right select by word), word deletion, paste, and
 copy/cut of the selected range (or the whole prompt when nothing is selected; copy/cut report only
@@ -204,8 +205,8 @@ operation; `Esc`, `Enter`, the arrows and the page keys therefore keep their mea
 Limits, all deliberate: only single-key bindings apply in the overlay contexts (a sequence there
 is skipped with a warning, since the router resolves one key at a time); `unbind` removes the
 preset's row, but the surface's built-in handler still runs on the freed chord; a prompt's selection
-is the single-line field's rune range (no mouse or multi-line selection); copy/cut use that selected
-range, or the whole prompt when nothing is selected; the Settings page has type-to-filter, slash search and question-mark key help; the completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
+is the single-line field's rune range (a left click places the caret, but there is no mouse drag/double
+or multi-line selection); copy/cut use that selected range, or the whole prompt when nothing is selected; the Settings page has type-to-filter, slash search and question-mark key help; the completion and compositeBuffer contexts, the custom settings/theme dialogs and the plugin panels
 are not keymap surfaces yet (a binding there is skipped with a warning, as are bindings in
 contexts Fresh does not name).
 

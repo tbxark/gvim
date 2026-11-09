@@ -7,13 +7,15 @@ package app
 // failure in the write phase keeps the partial destination and says so (there is no
 // rollback). Move/cut copies first and removes the source only after the copy fully
 // succeeded. A same-directory copy/duplicate uses Fresh's "name copy[.ext]" naming
-// rule; a paste onto an existing destination in another directory is refused (remote
-// paste never overwrites). Nothing here touches the local file system: every read and
+// rule. A destination that exists follows the explicit conflict choice: cancel reports
+// ErrConflict, skip leaves it, and overwrite (the only path that replaces) removes the
+// old target first; the exclusive no-replace path is used for every other choice. Nothing here touches the local file system: every read and
 // write goes through authority.FileSystem/FileMutations, and every operation runs the
 // workspace trust gate first.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -103,10 +105,10 @@ func (o *remoteExplorerOps) copyContext(ctx context.Context) (context.Context, c
 // also Duplicate). A paste into another directory keeps the name; an existing destination
 // follows the explorer's conflict choice: cancel reports ErrConflict (the root then offers
 // overwrite/rename), skip leaves it alone and returns its path, overwrite removes it first
-// (there is no rollback after that removal; a concurrent re-creation is documented as a
-// race).
+// (there is no rollback after that removal; that explicit overwrite is non-atomic, and a
+// concurrent re-creation can be replaced).
 func (o *remoteExplorerOps) Copy(ctx context.Context, src, dstDir string, c expanel.Conflict) (string, error) {
-	return o.transfer(ctx, src, dstDir, "", false, c)
+	return o.transfer(ctx, src, dstDir, "", false, c, "copy")
 }
 
 // CopyAs copies src into dstDir under name, for a conflict prompt's rename choice. It
@@ -115,7 +117,7 @@ func (o *remoteExplorerOps) CopyAs(ctx context.Context, src, dstDir, name string
 	if name == "" {
 		return "", fmt.Errorf("remote copy: empty destination name")
 	}
-	return o.transfer(ctx, src, dstDir, name, false, c)
+	return o.transfer(ctx, src, dstDir, name, false, c, "copy")
 }
 
 // Move cuts src into dstDir: it copies the subtree first and removes the source only
@@ -125,14 +127,14 @@ func (o *remoteExplorerOps) CopyAs(ctx context.Context, src, dstDir, name string
 // returns the source (the root cancels the cut), overwrite removes the destination first
 // (no rollback; documented race).
 func (o *remoteExplorerOps) Move(ctx context.Context, src, dstDir string) (string, error) {
-	return o.transfer(ctx, src, dstDir, "", true, expanel.ConflictCancel)
+	return o.transfer(ctx, src, dstDir, "", true, expanel.ConflictCancel, "move")
 }
 
 // MoveAs is Move with a conflict policy and an optional destination name: an empty name
 // keeps the source's name (the overwrite choice) and a name is the conflict prompt's rename
 // choice.
 func (o *remoteExplorerOps) MoveAs(ctx context.Context, src, dstDir, name string, c expanel.Conflict) (string, error) {
-	return o.transfer(ctx, src, dstDir, name, true, c)
+	return o.transfer(ctx, src, dstDir, name, true, c, "move")
 }
 
 // remotePasteConflictError is a paste destination that already exists. It matches
@@ -140,12 +142,16 @@ func (o *remoteExplorerOps) MoveAs(ctx context.Context, src, dstDir, name string
 type remotePasteConflictError struct{ dst string }
 
 func (e *remotePasteConflictError) Error() string {
-	return "remote paste destination " + e.dst + " already exists"
+	return "remote destination " + e.dst + " already exists"
 }
 func (e *remotePasteConflictError) Is(target error) bool { return target == expanel.ErrConflict }
 
+// errRemoteExplorerNoExclusiveCopy refuses a paste when the backend has no atomic
+// no-replace destination surface: a Stat + copy/write fallback would reopen the race.
+var errRemoteExplorerNoExclusiveCopy = errors.New("this backend cannot create a copy destination exclusively; refusing to race an existing target")
+
 // transfer is the shared Copy/CopyAs/Move/MoveAs implementation.
-func (o *remoteExplorerOps) transfer(ctx context.Context, src, dstDir, name string, move bool, c expanel.Conflict) (string, error) {
+func (o *remoteExplorerOps) transfer(ctx context.Context, src, dstDir, name string, move bool, c expanel.Conflict, gateOp string) (string, error) {
 	if err := o.check(); err != nil {
 		return "", err
 	}
@@ -158,7 +164,7 @@ func (o *remoteExplorerOps) transfer(ctx context.Context, src, dstDir, name stri
 	}
 	opCtx, cancel := o.copyContext(ctx)
 	defer cancel()
-	if err := o.gateOp(opCtx, "copy", src); err != nil {
+	if err := o.gateOp(opCtx, gateOp, src); err != nil {
 		return "", err
 	}
 	ok, st, err := o.exists(opCtx, src)
@@ -219,8 +225,19 @@ func (o *remoteExplorerOps) transfer(ctx context.Context, src, dstDir, name stri
 	if err != nil {
 		return "", err
 	}
-	written, err := o.writeCopy(opCtx, src, dst, nodes, limits)
+	if c != expanel.ConflictOverwrite {
+		if err := o.requireExclusiveCopy(dst, nodes); err != nil {
+			return "", err
+		}
+	}
+	written, started, err := o.writeCopy(opCtx, src, dst, nodes, limits, c != expanel.ConflictOverwrite)
 	if err != nil {
+		if errors.Is(err, expanel.ErrConflict) {
+			return "", err
+		}
+		if !started {
+			return "", err
+		}
 		return "", &remoteCopyPartialError{dst: dst, files: written, err: err}
 	}
 	if move {
@@ -352,24 +369,67 @@ func (o *remoteExplorerOps) planCopy(ctx context.Context, src string, st hostos.
 	return nodes, nil
 }
 
-// writeCopy creates the planned destination and writes every file atomically. It
-// returns how many files were written; on error the caller keeps the partial
-// destination and reports it (no rollback).
-func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, nodes []remoteCopyNode, limits remoteCopyLimits) (int, error) {
+// requireExclusiveCopy checks the optional no-replace surfaces before anything is
+// created. A backend without them refuses the paste instead of falling back to the
+// check-to-create race.
+func (o *remoteExplorerOps) requireExclusiveCopy(dst string, nodes []remoteCopyNode) error {
+	content := authority.ContentCreators(o.files)
+	dirs := authority.DirectoryCreators(o.files)
+	for _, node := range nodes {
+		switch node.kind {
+		case "dir":
+			if dirs == nil {
+				return fmt.Errorf("remote copy: %w: %s", errRemoteExplorerNoExclusiveCopy, dst)
+			}
+		case "file":
+			if content == nil {
+				return fmt.Errorf("remote copy: %w: %s", errRemoteExplorerNoExclusiveCopy, dst)
+			}
+		}
+	}
+	return nil
+}
+
+// writeCopy publishes the planned destination. exclusive uses DirectoryCreator.MkdirNew
+// and FileContentCreator.CreateNewWithContent, so the top-level destination has one
+// atomic winner and a concurrent creator gets the conflict flow; the explicit-overwrite
+// path removes the old destination first and uses Mutations.Mkdir/WriteFile(Atomic: true)
+// (non-atomic by user choice). It returns how many files were written, whether the
+// top-level destination was started, and the error; on a started error the caller keeps
+// the partial destination and reports it (no rollback).
+func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, nodes []remoteCopyNode, limits remoteCopyLimits, exclusive bool) (int, bool, error) {
 	limits = limits.bounded()
 	written := 0
+	started := false
 	bytes := int64(0)
+	dirs := authority.DirectoryCreators(o.files)
+	content := authority.ContentCreators(o.files)
 	for _, node := range nodes {
 		if err := ctx.Err(); err != nil {
-			return written, err
+			return written, started, err
 		}
 		to := dst
 		if node.rel != "" {
 			to = path.Join(dst, node.rel)
 		}
 		if node.kind == "dir" {
-			if err := o.muts.Mkdir(ctx, to, false); err != nil {
-				return written, fmt.Errorf("create directory %s: %w", to, err)
+			var err error
+			if exclusive {
+				err = dirs.MkdirNew(ctx, to)
+			} else {
+				err = o.muts.Mkdir(ctx, to, false)
+			}
+			if err != nil {
+				if exclusive && node.rel == "" && errors.Is(err, fs.ErrExist) {
+					return written, started, &remotePasteConflictError{dst: to}
+				}
+				if errors.Is(err, authority.ErrUnsupportedFileIO) {
+					return written, started, fmt.Errorf("remote copy: %w: %s", errRemoteExplorerNoExclusiveCopy, to)
+				}
+				return written, started, fmt.Errorf("create directory %s: %w", to, err)
+			}
+			if node.rel == "" {
+				started = true
 			}
 			continue
 		}
@@ -379,22 +439,36 @@ func (o *remoteExplorerOps) writeCopy(ctx context.Context, src, dst string, node
 		}
 		data, err := o.files.ReadFile(ctx, from, limits.MaxBytes+1)
 		if err != nil {
-			return written, fmt.Errorf("read %s: %w", from, err)
+			return written, started, fmt.Errorf("read %s: %w", from, err)
 		}
 		if int64(len(data)) > limits.MaxBytes {
-			return written, fmt.Errorf("read %s: larger than the %d-byte copy bound", from, limits.MaxBytes)
+			return written, started, fmt.Errorf("read %s: larger than the %d-byte copy bound", from, limits.MaxBytes)
 		}
 		bytes += int64(len(data))
 		if bytes > limits.MaxBytes {
-			return written, fmt.Errorf("the copy is larger than the %d-byte copy bound", limits.MaxBytes)
+			return written, started, fmt.Errorf("the copy is larger than the %d-byte copy bound", limits.MaxBytes)
 		}
-		if err := o.files.WriteFile(ctx, to, data, hostos.WriteOptions{Atomic: true, Parents: true, Mode: node.mode}); err != nil {
-			return written, fmt.Errorf("write %s: %w", to, err)
+		if exclusive {
+			err = content.CreateNewWithContent(ctx, to, data, hostos.WriteOptions{Atomic: true, Mode: node.mode})
+		} else {
+			err = o.files.WriteFile(ctx, to, data, hostos.WriteOptions{Atomic: true, Parents: true, Mode: node.mode})
+		}
+		if err != nil {
+			if exclusive && node.rel == "" && errors.Is(err, fs.ErrExist) {
+				return written, started, &remotePasteConflictError{dst: to}
+			}
+			if errors.Is(err, authority.ErrUnsupportedFileIO) {
+				return written, started, fmt.Errorf("remote copy: %w: %s", errRemoteExplorerNoExclusiveCopy, to)
+			}
+			return written, started, fmt.Errorf("write %s: %w", to, err)
+		}
+		if node.rel == "" {
+			started = true
 		}
 		written++
 	}
 	o.applyCopyMetadata(ctx, dst, nodes)
-	return written, nil
+	return written, started, nil
 }
 
 // applyCopyMetadata restores the planned permission bits and mtimes after the bytes are

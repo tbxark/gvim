@@ -22,8 +22,10 @@
 -- the shared library's header lists the reductions every user of it inherits):
 --   * prompt mode and search sources (ripgrep, filters, debounce, cancellation): the
 --     diagnostics panel is a panel, not a prompt
---   * the preview pane and navigateOnCursorMove: one selectable list, no preview tabs and no
---     source-split navigation. syncWithEditor is ported: an editor cursor moving onto a
+--   * the embedded preview pane: there is no split/preview composition. navigateOnCursorMove is
+--     ported as a real preview tab: moving the panel selection schedules a 90 ms debounced
+--     gvim.buf.open with preview=true, background=true, so the latest selected location is shown
+--     without changing focus. syncWithEditor is ported: an editor cursor moving onto a
 --     diagnostic's line selects/reveals that diagnostic in the panel
 --   * useUtilityDock: gvim's widget panel v1 has float, buffer and sidebar placements, not a
 --     utility dock; the port mounts a float card
@@ -73,6 +75,9 @@ local MAX_NAME_CELLS = 40
 local MAX_DIR_CELLS = 60
 local MAX_SOURCE_CELLS = 40
 local MAX_KEY_BYTES = 120
+-- Fresh's Finder.PREVIEW_DEBOUNCE_MS: the panel selection must sit still before its file is
+-- previewed, so fast arrow-key browsing opens only the final location.
+local PREVIEW_DEBOUNCE_MS = 90
 
 -- Fresh's severity mapping is numeric 1..4; gvim already names the levels.
 local SEVERITY_ICON = { error = "[E]", warning = "[W]", info = "[I]", hint = "[H]" }
@@ -302,9 +307,15 @@ local function mount()
   return id, #rows
 end
 
+-- stop_pending_preview is defined with the preview helpers below; refresh needs it first.
+local stop_pending_preview
+
 -- refresh rebuilds the rows of the open panel. A panel the host dropped (an owner change, a
 -- reload) is forgotten instead of being fought over.
 local function refresh()
+  -- The node map is about to be rebuilt: a pending preview points at a row table from the
+  -- old map (the diagnostic can have moved or disappeared), so cancel it before building.
+  stop_pending_preview()
   if not state.panel then
     return 0
   end
@@ -317,6 +328,60 @@ local function refresh()
   end
   state.node_row = node_row
   return #rows
+end
+
+-- stop_pending_preview cancels the debounce timer and forgets its target. The preview itself
+-- is opened by the host's single preview tab (a later preview replaces it); closing the panel
+-- before the timer fires cancels the open outright.
+stop_pending_preview = function()
+  if state.preview_timer then
+    state.preview_timer:cancel()
+  end
+  state.preview_timer, state.preview_row = nil, nil
+end
+
+-- preview_tick is Fresh's debounced previewTick: open the latest selected row in the host's
+-- preview tab without focus or a tab switch. gvim.buf.open is async, so it runs in this timer
+-- task; a superseded target was already replaced by schedule_preview.
+local function preview_tick()
+  state.preview_timer = nil
+  local row = state.preview_row
+  state.preview_row = nil
+  local selected = state.selected_index
+  local current = selected and state.node_row[selected]
+  if not state.panel or not row or current ~= row then
+    return
+  end
+  local buf, err = gvim.buf.open(row.path, {
+    pos = gvim.pos(row.line, row.col),
+    preview = true,
+    background = true,
+    focus = false,
+  })
+  if not buf and err then
+    gvim.log.debug("preview %s: %s", tostring(row.path), tostring(err))
+  end
+end
+
+-- schedule_preview is Fresh's navigateOnCursorMove path: the latest panel selection wins and
+-- one debounce timer stays armed; stop_pending_preview cancels it on close, refresh, cancel
+-- and activate. preview_tick additionally verifies the row is still the selected row of the
+-- current (possibly refreshed) node map before opening it.
+local function schedule_preview(row)
+  if not row or not state.panel then
+    return
+  end
+  state.preview_row = row
+  if state.preview_timer then
+    return
+  end
+  local timer, err = gvim.timer.after(PREVIEW_DEBOUNCE_MS, preview_tick)
+  if not timer then
+    gvim.log.debug("preview timer: %s", tostring(err))
+    state.preview_row = nil
+    return
+  end
+  state.preview_timer = timer
 end
 
 -- sync_to_editor is Fresh's syncWithEditor handler: when the editor cursor moves onto a
@@ -337,7 +402,10 @@ local function sync_to_editor(ev)
   for i = 1, #state.node_row do
     local row = state.node_row[i]
     if row and row.path == path and row.line == ev.pos.line then
-      gvim.ui.widget_mutate(state.panel, { kind = "setSelectedIndex", widget_key = "rows", index = i })
+      local ok = gvim.ui.widget_mutate(state.panel, { kind = "setSelectedIndex", widget_key = "rows", index = i })
+      if ok then
+        state.selected_index = i
+      end
       return
     end
   end
@@ -345,10 +413,11 @@ end
 
 -- close unmounts the panel (if it is mounted) and forgets its rows.
 local function close(notice)
+  stop_pending_preview()
   if state.panel then
     gvim.ui.unmount_widget_panel(state.panel)
   end
-  state.panel, state.node_row = nil, {}
+  state.panel, state.node_row, state.selected_index = nil, {}, nil
   if notice then
     gvim.notify(notice)
   end
@@ -409,13 +478,20 @@ gvim.on("widget_event", function(ev)
     if state.panel then
       gvim.notify(t("status.showing", { label = filter_label() }))
     end
+  elseif ev.event == "select" then
+    -- Fresh's navigateOnCursorMove: a panel cursor move previews the row's location. Record
+    -- the selection even for a file header so a pending preview of an older row cannot fire.
+    state.selected_index = ev.index
+    schedule_preview(state.node_row[ev.index])
   elseif ev.event == "activate" then
     -- A tree reports the key of the activated row, so the event is matched by its index:
     -- node_row has nil for a file header, and jump(nil) does nothing.
+    stop_pending_preview()
     jump(state.node_row[ev.index])
   elseif ev.event == "cancel" then
     -- The host unmounted the panel already; only the plugin state is left to clear.
-    state.panel, state.node_row = nil, {}
+    stop_pending_preview()
+    state.panel, state.node_row, state.selected_index = nil, {}, nil
     gvim.notify(t("status.closed"))
   end
 end)

@@ -202,7 +202,10 @@ the selected text, or the whole prompt when nothing is selected; Ctrl+X cuts the
 whole prompt when nothing is selected, as Fresh's prompt_copy/prompt_cut do. A dialog that opens with
 preselected prefilled text (LineOptions.SelectAll, e.g. rename/overwrite) starts with the same real
 reverse-video selection, so typing/paste replaces it, Backspace/Delete deletes it, and an arrow
-cancels it while keeping the text. Both actions wait for a native clipboard write to report its result: Copy shows Copied only on
+cancels it while keeping the text. A left click inside the single-line prompt input places the caret
+at the clicked rune. Fresh's prompt exposes press positioning only (prompt_line.rs has a Press
+gesture, no prompt drag/double-click selection), so gvim does not fake drag or double-click word
+selection. Both actions wait for a native clipboard write to report its result: Copy shows Copied only on
 success and Copy failed on an error, while Cut also waits before clearing. The OSC 52 write alone
 is best-effort, so without a native writer the copy is reported as requested (not Copied) and the
 prompt is kept; a failed cut keeps it too. A late result is applied only to the same
@@ -458,9 +461,20 @@ directory once; an already-existing target, or a missing parent, is reported in 
 row instead of opening a second dialog or partially creating the path. This is the same
 local and remote: the local adapter calls one `os.Mkdir`, the remote adapter calls the
 authority's no-replace `MkdirNew`, and a backend without that capability reports that it
-cannot create a directory exclusively rather than falling back to a check-then-create. The
-operation runs in the existing file-job command, so the update loop never waits on it and
-the tree refresh follows the same asynchronous reload as the other writes.
+cannot create a directory exclusively rather than falling back to a check-then-create.
+
+Copy, paste and Rename publish their destination without replacing an existing entry:
+the remote adapter claims directories with `MkdirNew` and files with
+`CreateNewWithContent`, so a destination created concurrently produces the same
+overwrite/rename/cancel conflict dialog as a destination that existed at check time; a
+backend without those surfaces reports the inability before writing (no check-then-write
+fallback). Overwrite is only the explicit conflict-dialog choice: it removes the old
+target first and then writes, so it is intentionally not atomic and a concurrent
+re-creation can be replaced. Remote Rename uses the same bounded copy-and-remove path
+because the authority has no atomic rename-new surface; its source is removed only after
+the destination is complete. The operations run in the existing file-job command, so the
+update loop never waits on them and the tree refresh follows the same asynchronous reload
+as the other writes.
 
 ## 4. Rules for a new component
 

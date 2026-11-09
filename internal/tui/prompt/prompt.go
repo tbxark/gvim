@@ -161,6 +161,12 @@ type Line struct {
 	// selAnchor is the selection anchor in rune indices, -1 when there is no selection.
 	// The caret (field.Position) is the moving head; a non-empty range is highlighted.
 	selAnchor int
+	// The last painted input window, for a left press that places the caret. Fresh's
+	// prompt reports only a press position (prompt_line.rs GestureKind::Press); it has no
+	// prompt drag or double-click word selection, so neither is implemented here.
+	fieldX, fieldY, fieldW int
+	winStart, winStop      int
+	drawn                  bool
 
 	history []string // earlier answers, oldest first
 	at      int      // the entry of history shown; len(history) is the text being typed
@@ -319,6 +325,29 @@ func (l *Line) deleteSelectionSilent() bool {
 	return true
 }
 
+// clickAt places the caret at the rune under a left press in the painted input
+// window. Fresh's prompt reports a press position only; clicks outside the input are
+// ignored, and there is deliberately no prompt drag/double-click selection.
+func (l *Line) clickAt(x, y int) {
+	if !l.drawn || y != l.fieldY || x < l.fieldX || x >= l.fieldX+l.fieldW {
+		return
+	}
+	runes := []rune(l.field.Value())
+	at, col := l.winStart, l.fieldX
+	for i := l.winStart; i < l.winStop; i++ {
+		w := ansi.StringWidth(string(runes[i]))
+		if x < col+w {
+			at = i
+			break
+		}
+		col += w
+		at = i + 1
+	}
+	at = min(max(at, 0), len(runes))
+	l.field.SetCursor(at)
+	l.clearSelection()
+}
+
 // DeleteSelection removes the real selection and reports the resulting text through
 // onChange, as Backspace/Delete and a confirmed cut do. It returns the removed text.
 func (l *Line) DeleteSelection() string {
@@ -358,6 +387,12 @@ func (l *Line) CutValue() string {
 func (l *Line) Update(msg tea.Msg) (overlay.Overlay, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
+		if click, ok := msg.(tea.MouseClickMsg); ok {
+			if click.Button == tea.MouseLeft {
+				l.clickAt(click.X, click.Y)
+			}
+			return l, nil
+		}
 		if text, ok := pasteContent(msg); ok {
 			text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 			if text == "" {
@@ -641,6 +676,8 @@ func (l *Line) Draw(g *grid.Grid) {
 	g.Fill(x, end, y, l.styles.field)
 	runes := []rune(l.field.Value())
 	start, stop := windowRange(l.field.Value(), l.field.Position(), end-x)
+	l.fieldX, l.fieldY, l.fieldW = x, y, end-x
+	l.winStart, l.winStop, l.drawn = start, stop, x < end
 	selStart, selEnd, hasSel := l.selectionRange()
 	for i := start; i < stop && x < end; i++ {
 		st := l.styles.field

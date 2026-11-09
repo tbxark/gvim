@@ -633,3 +633,103 @@ func TestDiagnosticsPanelSyncsSelectionToEditorCursor(t *testing.T) {
 		t.Fatalf("mutations after a non-diagnostic line = %+v, want unchanged", fp.Mutations)
 	}
 }
+
+func TestDiagnosticsPanelPreviewsPanelSelection(t *testing.T) {
+	t.Parallel()
+	host, a, _ := diagHost(t)
+	host.LSP().Diags[a] = []pluginapi.DiagnosticInfo{
+		diag(2, 4, "error", "undefined: foo", "gopls"),
+		diag(0, 0, "warning", "unused variable", "gopls"),
+	}
+	h := startDiagPanel(t, host)
+	if err := h.Run(diagPlugin+".show_diagnostics_panel", nil); err != nil {
+		t.Fatal(err)
+	}
+	fp := mountedPanel(t, h)
+	tree := mustWidget(t, fp.Panel.Root, "rows")
+	if len(tree.Nodes) != 3 {
+		t.Fatalf("nodes = %+v, want header + two diagnostics", tree.Nodes)
+	}
+	// Two rapid selection moves: Fresh debounces and previews only the latest location as a
+	// background preview tab, without changing focus.
+	emitWidget(h, fp.ID, map[string]any{"event": "select", "widget": "rows", "index": 2})
+	h.Settle()
+	emitWidget(h, fp.ID, map[string]any{"event": "select", "widget": "rows", "index": 3})
+	h.Settle()
+	h.Advance(100 * time.Millisecond)
+	h.CompleteBuffers()
+
+	var opens []pluginapi.OpenRequest
+	for _, c := range h.Host.Calls() {
+		if c.Method == "Open" {
+			if req, ok := c.Args[1].(pluginapi.OpenRequest); ok {
+				opens = append(opens, req)
+			}
+		}
+	}
+	if len(opens) != 1 {
+		t.Fatalf("open requests = %+v, want exactly one debounced preview", opens)
+	}
+	req := opens[0]
+	if req.Path != "/w/a.go" || !req.Preview || !req.Background || req.Focus {
+		t.Fatalf("preview request = %+v, want a background non-focused preview of /w/a.go", req)
+	}
+	if req.Pos == nil || req.Pos.Line != 2 || req.Pos.Col != 4 {
+		t.Fatalf("preview pos = %+v, want line 2 col 4 (the latest selection)", req.Pos)
+	}
+	if got := h.Host.Panels().Mounted(); len(got) != 1 {
+		t.Fatalf("panel mounted after preview = %d, want 1", len(got))
+	}
+	h.CompleteBuffers()
+}
+
+func TestDiagnosticsPanelRefreshCancelsPendingPreview(t *testing.T) {
+	t.Parallel()
+	host, a, _ := diagHost(t)
+	host.LSP().Diags[a] = []pluginapi.DiagnosticInfo{
+		diag(0, 0, "warning", "first", "gopls"),
+		diag(2, 4, "error", "selected", "gopls"),
+	}
+	h := startDiagPanel(t, host)
+	if err := h.Run(diagPlugin+".show_diagnostics_panel", nil); err != nil {
+		t.Fatal(err)
+	}
+	fp := mountedPanel(t, h)
+	tree := mustWidget(t, fp.Panel.Root, "rows")
+	if len(tree.Nodes) != 3 {
+		t.Fatalf("nodes = %+v, want header + two rows", tree.Nodes)
+	}
+
+	// Select the pending row (line 2); the preview timer is now armed for it.
+	emitWidget(h, fp.ID, map[string]any{"event": "select", "widget": "rows", "index": 3})
+	h.Settle()
+
+	// Refresh inside the debounce window and remove the selected diagnostic. The old row
+	// table is no longer in the rebuilt map, so the timer must be cancelled rather than open
+	// its stale line.
+	host.LSP().Diags[a] = []pluginapi.DiagnosticInfo{diag(0, 0, "warning", "first", "gopls")}
+	h.Emit(pluginapi.Event{Name: "diagnostics_updated", Data: map[string]any{
+		"buf": a, "path": "/w/a.go", "counts": map[string]any{"warning": 1},
+	}})
+	h.Settle()
+	if n := h.Host.CallCount("UpdateWidgetPanel"); n != 1 {
+		t.Fatalf("updates = %d, want the refresh to have run", n)
+	}
+	h.Advance(100 * time.Millisecond)
+	h.CompleteBuffers()
+	if n := h.Host.CallCount("Open"); n != 0 {
+		t.Fatalf("opens = %d, want none: refresh must cancel the stale pending preview", n)
+	}
+
+	// A pending preview is also dropped when the selection moves to the file header: the
+	// timer may remain armed, but its row is no longer the current selection.
+	emitWidget(h, fp.ID, map[string]any{"event": "select", "widget": "rows", "index": 2})
+	h.Settle()
+	emitWidget(h, fp.ID, map[string]any{"event": "select", "widget": "rows", "index": 1})
+	h.Settle()
+	h.Advance(100 * time.Millisecond)
+	h.CompleteBuffers()
+	if n := h.Host.CallCount("Open"); n != 0 {
+		t.Fatalf("opens = %d, want none: only the current selected row may preview", n)
+	}
+}

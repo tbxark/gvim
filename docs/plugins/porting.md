@@ -214,7 +214,14 @@ per-query process spawn management, the embedded preview pane and utility-dock r
 `navigateOnCursorMove`, `panelKeys` and the panel-mode prompt-type events; the panel backend covers
 the grouped/deduped tree use only. `diagnostics_panel` implements Fresh's `syncWithEditor` itself
 from the existing cursor_moved event: the exact active-file/line diagnostic is selected/revealed
-through a widget mutation (no preview, no focus change). `lsp_navigation` and `find_references` add the LSP edges:
+through a widget mutation (no preview, no focus change). It also implements
+`navigateOnCursorMove`: a 90 ms debounce (Fresh's Finder.PREVIEW_DEBOUNCE_MS) opens the latest
+selected location with `gvim.buf.open(..., preview=true, background=true, focus=false)`,
+leaving the panel focused and the host's single preview tab replacing the previous one; closing
+the panel, activating a row, or refreshing the rows cancels the pending timer. The tick also
+checks that its captured row is still the row at the current selection index in the rebuilt node
+map, so a refresh that removes/moves the diagnostic cannot open its stale location. As with any
+plugin `buf.open`, an open request already issued to the host is not cancellable. `lsp_navigation` and `find_references` add the LSP edges:
 `gvim.finder.lsp_locations` normalizes `Location`/`Location[]`/`LocationLink[]` and converts UTF-16
 columns to bytes when the target line is open. Both are command ports because gvim has no
 `lsp_references`/`lsp_implementation` plugin events (the native Find References action has its own

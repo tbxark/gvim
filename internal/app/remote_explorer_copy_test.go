@@ -202,6 +202,11 @@ func TestRemotePasteConflictPolicies(t *testing.T) {
 	if got := string(fake.files["/remote/w/dst/a.go"]); got != "new" {
 		t.Fatalf("overwrite content = %q, want the copy", got)
 	}
+	// Overwrite is the explicit user choice: it removes the old target first and uses
+	// the replacing write path, not the exclusive new-target create.
+	if len(fake.removes) != 1 || len(fake.contentCreates) != 0 {
+		t.Fatalf("overwrite removes=%v exclusive creates=%v, want explicit non-atomic replace", fake.removes, fake.contentCreates)
+	}
 }
 
 // TestRemotePasteConflictOverwriteDirectory checks overwrite replaces an existing
@@ -577,7 +582,12 @@ func TestRemoteCopyMetadataWarningIsNonFatal(t *testing.T) {
 func TestRemoteCopyMetadataUnsupportedIsNotClaimed(t *testing.T) {
 	fake := newRemoteOpsFake().putMode("/remote/w/a.txt", "a", 0o600, time.Unix(1_700_000_000, 0)).put("/remote/w/dst/", "")
 	slot := authoritytest.New()
-	slot.FileSystem = struct{ authority.FileSystem }{fake}
+	// Keep the no-replace copy capabilities while hiding FileMetadata.
+	slot.FileSystem = struct {
+		authority.FileSystem
+		authority.FileContentCreator
+		authority.DirectoryCreator
+	}{FileSystem: fake, FileContentCreator: fake, DirectoryCreator: fake}
 	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
 	out, err := ops.Copy(context.Background(), "/remote/w/a.txt", "/remote/w/dst", expanel.ConflictCancel)
 	if err != nil || string(fake.files[out]) != "a" {
@@ -585,5 +595,148 @@ func TestRemoteCopyMetadataUnsupportedIsNotClaimed(t *testing.T) {
 	}
 	if w := ops.TakeCopyWarning(); w != "" {
 		t.Fatalf("unsupported metadata claimed a warning: %q", w)
+	}
+}
+
+// TestRemoteCopyConcurrentDestinationIsExclusive: two copies racing for the same absent
+// destination use the backend's no-replace surfaces; exactly one creates it and the other
+// reports the existing-target conflict, never overwriting the winner.
+func TestRemoteCopyConcurrentDestinationIsExclusive(t *testing.T) {
+	fake := newRemoteOpsFake().put("/remote/w/a.txt", "a").put("/remote/w/dst/", "")
+	ops, _ := fake.ops(true)
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := ops.Copy(context.Background(), "/remote/w/a.txt", "/remote/w/dst", expanel.ConflictCancel)
+			results <- err
+		}()
+	}
+	var wins, conflicts int
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			wins++
+		case errors.Is(err, expanel.ErrConflict):
+			conflicts++
+		default:
+			t.Fatalf("concurrent copy error = %v", err)
+		}
+	}
+	if wins != 1 || conflicts != 1 {
+		t.Fatalf("concurrent copy wins=%d conflicts=%d, want 1/1", wins, conflicts)
+	}
+	if got := string(fake.files["/remote/w/dst/a.txt"]); got != "a" {
+		t.Fatalf("winner content = %q", got)
+	}
+	if len(fake.contentCreates) != 1 {
+		t.Fatalf("exclusive content creates = %v, want one", fake.contentCreates)
+	}
+}
+
+// TestRemoteCopyWithoutExclusiveSurfaceRefuses: a backend without the exclusive content
+// or directory create surface refuses the paste before touching the destination; it does
+// not fall back to check-then-write.
+func TestRemoteCopyWithoutExclusiveSurfaceRefuses(t *testing.T) {
+	fake := newRemoteOpsFake().put("/remote/w/a.txt", "a").put("/remote/w/dst/", "")
+	slot := authoritytest.New()
+	slot.FileSystem = struct{ authority.FileSystem }{fake}
+	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
+	if _, err := ops.Copy(context.Background(), "/remote/w/a.txt", "/remote/w/dst", expanel.ConflictCancel); err == nil || !strings.Contains(err.Error(), "cannot create a copy destination exclusively") {
+		t.Fatalf("no-capability copy error = %v", err)
+	}
+	if len(fake.writes) != 0 || len(fake.contentCreates) != 0 || len(fake.mkdirs) != 0 {
+		t.Fatalf("no-capability copy touched the destination: writes=%v contents=%v mkdirs=%v", fake.writes, fake.contentCreates, fake.mkdirs)
+	}
+}
+
+// TestRemoteRenameConcurrentDestinationIsExclusive: two renames racing for the same
+// absent destination publish through the no-replace copy path; one wins and the loser
+// reports a conflict without overwriting the winner, and only the winner's source is
+// removed.
+func TestRemoteRenameConcurrentDestinationIsExclusive(t *testing.T) {
+	fake := newRemoteOpsFake().put("/remote/w/a.go", "a").put("/remote/w/b.go", "b")
+	ops, _ := fake.ops(true)
+	results := make(chan error, 2)
+	for _, src := range []string{"/remote/w/a.go", "/remote/w/b.go"} {
+		go func(src string) {
+			_, err := ops.Rename(context.Background(), src, "x.go")
+			results <- err
+		}(src)
+	}
+	var wins, conflicts int
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			wins++
+		case errors.Is(err, expanel.ErrConflict):
+			conflicts++
+		default:
+			t.Fatalf("concurrent rename error = %v", err)
+		}
+	}
+	if wins != 1 || conflicts != 1 {
+		t.Fatalf("concurrent rename wins=%d conflicts=%d, want 1/1", wins, conflicts)
+	}
+	if _, ok := fake.files["/remote/w/x.go"]; !ok {
+		t.Fatal("the winning rename did not publish the destination")
+	}
+	if len(fake.removes) != 1 {
+		t.Fatalf("renames removed sources = %v, want exactly the winner", fake.removes)
+	}
+}
+
+// TestRemoteRenameWithoutExclusiveSurfaceRefuses: no atomic rename-new capability exists,
+// so a backend without the exclusive copy surfaces is refused before touching anything.
+func TestRemoteRenameWithoutExclusiveSurfaceRefuses(t *testing.T) {
+	fake := newRemoteOpsFake().put("/remote/w/a.go", "a")
+	slot := authoritytest.New()
+	slot.FileSystem = struct{ authority.FileSystem }{fake}
+	ops := newRemoteExplorerOps(slot, "/remote/w", "SSH:u@h", nil, nil)
+	if _, err := ops.Rename(context.Background(), "/remote/w/a.go", "x.go"); err == nil || !strings.Contains(err.Error(), "cannot create a copy destination exclusively") {
+		t.Fatalf("no-capability rename error = %v", err)
+	}
+	if _, ok := fake.files["/remote/w/a.go"]; !ok {
+		t.Fatal("no-capability rename removed the source")
+	}
+	if len(fake.writes) != 0 || len(fake.contentCreates) != 0 || len(fake.removes) != 0 {
+		t.Fatalf("no-capability rename mutated: writes=%v contents=%v removes=%v", fake.writes, fake.contentCreates, fake.removes)
+	}
+}
+
+// TestRemoteDirectoryCopyConcurrentDestinationIsExclusive: the directory top-level is
+// claimed with one atomic mkdir, so concurrent same-name copies cannot merge into one
+// destination.
+func TestRemoteDirectoryCopyConcurrentDestinationIsExclusive(t *testing.T) {
+	fake := newRemoteOpsFake().put("/remote/w/src/", "").put("/remote/w/src/x.txt", "x").put("/remote/w/dst/", "")
+	ops, _ := fake.ops(true)
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := ops.Copy(context.Background(), "/remote/w/src", "/remote/w/dst", expanel.ConflictCancel)
+			results <- err
+		}()
+	}
+	var wins, conflicts int
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			wins++
+		case errors.Is(err, expanel.ErrConflict):
+			conflicts++
+		default:
+			t.Fatalf("concurrent directory copy error = %v", err)
+		}
+	}
+	if wins != 1 || conflicts != 1 {
+		t.Fatalf("concurrent directory copy wins=%d conflicts=%d, want 1/1", wins, conflicts)
+	}
+	if _, ok := fake.files["/remote/w/dst/src/x.txt"]; !ok {
+		t.Fatal("the winning directory copy lost its child")
+	}
+	if len(fake.mkdirs) != 1 {
+		t.Fatalf("directory creates = %v, want only the winner's top-level claim", fake.mkdirs)
 	}
 }

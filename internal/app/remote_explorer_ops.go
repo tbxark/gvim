@@ -32,6 +32,7 @@ import (
 	"github.com/tbxark/gvim/authority"
 	"github.com/tbxark/gvim/editor"
 	"github.com/tbxark/gvim/fsops"
+	expanel "github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/plugin/hostos"
 )
 
@@ -249,9 +250,15 @@ func (o *remoteExplorerOps) Mkdir(ctx context.Context, dir, name string) (string
 }
 
 // Rename renames one remote entry inside its directory and returns the new path. A target
-// that already exists is refused (no overwrite), matching the local explorer.
+// that already exists is refused (no overwrite), matching the local explorer. The
+// authority has no atomic rename-new surface: using Mutations.Rename after a Stat would
+// overwrite a target created concurrently (mv -f replaces), so the rename is published
+// through the same bounded copy-and-remove path as Move (exclusive content / directory
+// create for the destination, source removed only after the copy succeeds). For a large
+// tree this is bounded by the remote copy limits and reports the bound rather than
+// overwriting; metadata follows the copy path's best-effort behavior.
 func (o *remoteExplorerOps) Rename(ctx context.Context, p, newName string) (string, error) {
-	if err := o.checkMutations(); err != nil {
+	if err := o.check(); err != nil {
 		return "", err
 	}
 	if !o.inside(p) {
@@ -265,20 +272,11 @@ func (o *remoteExplorerOps) Rename(ctx context.Context, p, newName string) (stri
 	if np == p {
 		return p, nil
 	}
-	opCtx, cancel := o.opContext()
-	defer cancel()
-	if err := o.gateOp(opCtx, "rename", p); err != nil {
+	dst, err := o.transfer(ctx, p, dir, newName, true, expanel.ConflictCancel, "rename")
+	if err != nil {
 		return "", err
 	}
-	if ok, _, err := o.exists(opCtx, np); err != nil {
-		return "", fmt.Errorf("remote file operation: stat %s: %w", np, err)
-	} else if ok {
-		return "", fmt.Errorf("remote file operation: %s already exists", np)
-	}
-	if err := o.muts.Rename(opCtx, p, np); err != nil {
-		return "", fmt.Errorf("remote file operation: rename %s: %w", p, err)
-	}
-	return np, nil
+	return dst, nil
 }
 
 // Trash deletes one remote entry permanently (there is no remote trash): a directory is

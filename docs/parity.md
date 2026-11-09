@@ -21,12 +21,12 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `a2516e9` (the round-64 commit; the previous round's commit is
-folded in) plus the merged round-65 work. Static gates PASS (Lead, final pass after all writes stopped; default
+Last verified: 2026-11-10, tree commit `54da2aa` (the round-65 commit; the previous round's commit is
+folded in) plus the merged round-66 work. Static gates PASS (Lead, final pass after all writes stopped; default
 GOCACHE: native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, purity, import rules, menus,
-i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check, gofmt clean).
+i18n_check with catalogue heap en 133 KiB / de 83 KiB / both 216 KiB, git diff --check, gofmt clean).
 Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r65-final.log`). The audit ran targeted round-65 tests/diff review; the Lead ran the full
+`/tmp/gvim-r66-final.log`). The audit ran targeted round-66 tests/diff review; the Lead ran the full
 suite. Real-host checks remain UNTESTED: SSH/jump-box/agent-forwarding/search/explorer/replace/
 clipboard/streaming large-file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux,
 Windows ConPTY, real-host OSC52 and multi-head/PTY workspace switching. Fresh reference: `refs/fresh` same
@@ -1309,9 +1309,10 @@ not delete the path (another process may have replaced it). Append/Parents are r
 of racing Stat+WriteFile. The remote explorer New File now uses this exclusively; a concurrent
 create gets exactly one success and one ErrExist, and a dangling symlink is preserved. Fresh
 comparison: Fresh's local create_new_file is O_EXCL but its remote authority returns Unsupported;
-gvim's helper channel provides the remote guarantee. Residual: rename/copy still use a
-pre-mutation existence check and can race an intervening create (no exclusive rename/copy in the
-mutation surface) (R13-21).
+gvim's helper channel provides the remote guarantee. Remote copy/paste/move destinations now use
+DirectoryCreator/FileContentCreator no-replace publishing; remote Rename uses bounded copy-and-remove
+(no exclusive rename-new). Residuals: local Rename still check-then-rename, local copy/paste keep
+destination prechecks, and explicit Overwrite is remove-then-write (non-atomic) (R13-21).
 **Shared-buffer close behavior (158).** Closing now follows Fresh's view-vs-buffer rule: closing a
 mirror tab detaches the mirror without the unsaved prompt (the owner keeps the text); closing an
 owner tab while a mirror exists promotes the canonical document to that mirror first (unsaved
@@ -1530,6 +1531,35 @@ plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 K
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
+**Round-66 outcome (2026-11-10, merged working tree on `54da2aa`).** Three slices plus docs:
+remote copy/paste/move destination publishing and Rename, prompt mouse positioning, and diagnostics_panel
+navigateOnCursorMove previews. Static gates PASS; final full
+`go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+`/tmp/gvim-r66-final.log`); heap en 133 KiB / de 83 KiB / both 216 KiB. No commit was made.
+**Atomic remote copy/paste/move + Rename (item 322).** Non-overwrite remote copy/paste/move now require the
+authority's DirectoryCreator.MkdirNew and FileContentCreator.CreateNewWithContent surfaces: the destination
+root is published with one no-replace create, a concurrent creator gets the conflict dialog, and no Stat
+check-then-create fallback runs. A backend without either surface is refused explicitly. Explicit Overwrite
+remains remove-then-write (non-atomic by user choice). Remote Rename now goes through the bounded
+copy-and-remove transfer because the authority has no atomic rename-new: the destination is published
+no-replace, the source is removed only after a successful copy, and copy limits/metadata behavior apply.
+RESIDUALS: local Rename still check-then-rename; copy/paste destination prechecks remain for local explorer
+paths; explicit overwrite races; SSH/real host UNTESTED.
+**Prompt left-click positioning (item 323).** A left press inside the painted single-line input places the
+caret at the clicked rune through the real overlay path. Fresh's prompt exposes press positioning only, so
+drag and double-click word selection are deliberately not implemented; an outside click and an unpainted
+prompt are ignored. RESIDUALS: no mouse drag/double-click/multi-line selection; real terminal mouse UNTESTED.
+**diagnostics_panel navigateOnCursorMove (item 324).** Moving the panel selection schedules a 90 ms debounced
+preview through gvim.buf.open (preview/background, no focus change); a later selection supersedes it. refresh
+cancels a pending preview and preview_tick verifies the row is still the current selected row of the rebuilt
+node map before opening, so diagnostics updates cannot open a stale location. syncWithEditor still
+selects/reveals via setSelectedIndex. RESIDUALS: fake LSP/host test only; real LSP/remote diagnostics and the
+preview tab under a real host UNTESTED.
+Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; keymap default own 259/in effect
+257, macos 60/279, macos-gui 52/330, emacs 98/322, vscode 9/262; i18n en 1184 / 581 per locale,
+575 KiB text, ≈665 KiB JSON, heap 133-83-216 KiB. Full suite EXIT 0 (77 packages, log
+/tmp/gvim-r66-final.log); real hosts UNTESTED; no full-parity claim.
 **Round-65 outcome (2026-11-10, merged working tree on `a2516e9`).** Three slices plus docs:
 initial prompt selection, atomic New Directory creation, and diagnostics_panel cursor sync. Static gates PASS;
 final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
@@ -1545,8 +1575,9 @@ DirectoryCreator.MkdirNew capability: one no-replace mkdir, no Stat check-then-a
 entries report fs.ErrExist, missing parents fs.ErrNotExist, cancellation passes through, and a backend without
 the capability is refused explicitly. Local New Directory remains a single os.Mkdir/fsops.Mkdir. Tests cover
 no-Stat, existing/parent/cancel, concurrent one-winner, no-capability zero mutation, and local conflict/parent.
-RESIDUALS: copy/paste/rename destination-exists refusal is still a pre-write check (remote rename/copy has no
-exclusive destination surface); SSH/real host UNTESTED.
+At this point copy/paste/move destination publishing and Rename still used the pre-check path; Round66
+replaced them with no-replace create surfaces and bounded copy-and-remove (see Round66). RESIDUALS: explicit
+Overwrite remained remove-then-write; SSH/real host UNTESTED.
 **diagnostics_panel syncWithEditor (item 321).** cursor_moved onto a diagnostic's exact file+line selects and
 reveals that row through a setSelectedIndex widget mutation, without opening a preview or changing focus;
 tests cover the exact-line selection and a non-diagnostic line leaving it alone. RESIDUALS: fake LSP/host test
@@ -4259,7 +4290,7 @@ for parity status.
 
 | Area | Fresh features (evidence) | gvim status | gvim evidence | Notable sub-gaps |
 |---|---|---|---|---|
-| File explorer and sidebar | tree, file create/delete/rename/copy/cut/paste, hidden/gitignored toggles, git status marks, natural sorting, plugin rows/decorations/slots, context menu, async reload, width/side, follow active buffer, compact chains, sticky parents, sidebar sections, session state, Contents settings/commands, remote tree with remote git letters, preview, refresh, local-style ignore filtering, directory watching, write operations and clipboard | **partial** (R3; R1; R6; R9; R10; r15 remote explorer; r16 git/preview/refresh; r17 writes; r18 ignore/watch gvim extension; r19 clipboard; r21 exclusive create) | `explorer/{options,sticky,gitignore}.go`, `internal/tui/explorer/`, `internal/tui/{root_explorer,remote_tree,markdown_toc}.go`, `internal/tui/sidebar/`, `internal/tui/palette/preview.go`, `internal/app/{remote_explorer,remote_explorer_ops,remote_explorer_copy,remote_git,remote_preview,remote_ignore}.go`, `finder/index.go`, `docs/sidebar.md`/`docs/architecture.md` §8.1 | Local tree/local residuals. Remote: authority-ReadDir lazy tree, git letters, palette head preview, finder Restart/reconnect/Refresh, r17 New File/New Directory/Rename/Delete, r18 remote .gitignore + polled directory watch (gvim extensions), r19 cut/copy/paste/duplicate over authority (bounds 10k entries/256 MiB/64 levels/2 min; atomic per-file writes, binary-safe; cut copy-then-remove; paste refuses existing name; duplicate Fresh free-name; symlink/root/outside/inside-source refusals; confirmations naming target; trust gate/disconnected/refresh; partial destination reported on cancel/failure). OPEN: no drag/move between directories, no undo/history, no whole-subtree transaction/cleanup UI, mode/mtime/hardlink/xattr not preserved, copy/paste/rename destination-exists refusal is only a pre-write check (concurrent create can be overwritten; New File and New Directory are exclusive, rename has no exclusive surface), no remote overwrite prompt, watch latency/rename approximation, palette rows no git letters (local too), project-search preview? now wired, Windows paths; real-host acceptance. |
+| File explorer and sidebar | tree, file create/delete/rename/copy/cut/paste, hidden/gitignored toggles, git status marks, natural sorting, plugin rows/decorations/slots, context menu, async reload, width/side, follow active buffer, compact chains, sticky parents, sidebar sections, session state, Contents settings/commands, remote tree with remote git letters, preview, refresh, local-style ignore filtering, directory watching, write operations and clipboard | **partial** (R3; R1; R6; R9; R10; r15 remote explorer; r16 git/preview/refresh; r17 writes; r18 ignore/watch gvim extension; r19 clipboard; r21 exclusive create) | `explorer/{options,sticky,gitignore}.go`, `internal/tui/explorer/`, `internal/tui/{root_explorer,remote_tree,markdown_toc}.go`, `internal/tui/sidebar/`, `internal/tui/palette/preview.go`, `internal/app/{remote_explorer,remote_explorer_ops,remote_explorer_copy,remote_git,remote_preview,remote_ignore}.go`, `finder/index.go`, `docs/sidebar.md`/`docs/architecture.md` §8.1 | Local tree/local residuals. Remote: authority-ReadDir lazy tree, git letters, palette head preview, finder Restart/reconnect/Refresh, r17 New File/New Directory/Rename/Delete, r18 remote .gitignore + polled directory watch (gvim extensions), r19 cut/copy/paste/duplicate over authority (bounds 10k entries/256 MiB/64 levels/2 min; atomic per-file writes, binary-safe; cut copy-then-remove; paste refuses existing name; duplicate Fresh free-name; symlink/root/outside/inside-source refusals; confirmations naming target; trust gate/disconnected/refresh; partial destination reported on cancel/failure). OPEN: no drag/move between directories, no undo/history, no whole-subtree transaction/cleanup UI, mode/mtime/hardlink/xattr not preserved, copy/paste/move destinations use DirectoryCreator/FileContentCreator (concurrent creator gets the conflict dialog; explicit overwrite is remove-then-write and non-atomic), Rename uses bounded copy-and-remove because there is no exclusive rename surface, no remote overwrite prompt, watch latency/rename approximation, palette rows no git letters (local too), project-search preview? now wired, Windows paths; real-host acceptance. |
 | Finder, quick open, live grep | Ctrl+P modes (file/command/line/buffer), fuzzy ranking, streaming enumeration (local + remote authority), finder preview (local only), live grep with provider toggles (case/regex/word/files/buffers/ignored/terminals/workspaces), quickfix export, resume | **partial** (R3 landed the preview and toggles; phase 2 adds remote finder) | `finder/finder.go`, `finder/remote.go`, `internal/app/{remote_finder,remote_watch}.go`, `internal/tui/palette/{preview,grep,palette,draw}.go`, `internal/app/{preview,live_grep}.go`, `docs/ui.md`; Fresh `docs/features/command-palette.md` | Remote launch uses the authority file system only (idle placeholder → real remote index; no local fallback), ~/… roots expand in a real shell, errors/truncation surface as rows, and all remote project-search/Git Grep/replace/Live Grep entry points are refused before touching local ports. Still open: **remote Live Grep/project search/Git Grep** (authority-backed search), **remote git marks/preview/refresh** (remote file finder rows are plain; palette preview nil; index is built once and not rebuilt on reconnect/watch), quickfix export, terminals/workspaces providers, syntax colours/scrolling in the local preview, and Resume re-runs the search instead of restoring cached matches (R3-4/R13-3). |
 
 | Project-wide search, replace and Git Grep | plugin Search & Replace panel: match tree, scoped replace, globs, current-file/all-files/open-buffers, 10k cap, unsaved buffers, quickfix export, search history, selected-match preview with scrolling/syntax/soft wrap, multi-line matches, streaming results; git grep finder with case toggle and pathspec field; bundled git_grep plugin | **implemented** core; **partial** against the plugins (R4–R11) | `search/plan.go`, `internal/app/{projectsearch,gitgrep}.go`, `internal/tui/searchpanel/{glob,types,panel,draw,preview}.go` + `internal/tui/project_search.go`, `internal/tui/workspace_edit.go`, `plugin/bundled/plugins/git_grep/`, `commands/search_commands.go`, `docs/keybindings.md`, `docs/ui.md`; Fresh `plugins/search_replace.ts`, `plugins/git_grep.ts` | Round 9 previews/large-file distinction/Open Buffers; round 10 ported git_grep; round 11 added preview soft wrap/toggle (`Options.PreviewWrap`, `Alt+P` in panel and editor, wrapped rows with syntax-span/match remap, 8-row cap + ellipsis, display-row window, session-persisted) and recorded the recent-files provider decision (no app-level opened-file history; needs a history snapshot + streaming/replace semantics). Residuals R9-2: closed-oversize streamed writer, provider sources beyond files/open/current (diagnostics/terminal need provider-specific snapshots); R10-1 git_grep reductions. |
@@ -5136,7 +5167,7 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      target-naming confirmations, trust gate/disconnected/refresh, cancellation/failure keeps and
      reports the partial destination. OPEN: no drag/move between directories, no undo/history, no
      whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes not restored, hardlinks/xattrs not
-     preserved, copy/paste/rename destination-exists refusal only a pre-write check (concurrent create overwritten; no exclusive destination create), no overwrite prompt, watch latency/rename
+     preserved, copy/paste/move destinations published through DirectoryCreator/FileContentCreator (concurrent creator gets the conflict dialog; no check-then-write fallback), remote Rename uses bounded copy-and-remove (no exclusive rename surface), explicit Overwrite is remove-then-write and non-atomic; no overwrite prompt, watch latency/rename
      approximation, palette rows no git letters (local too), Windows paths, real-host acceptance.
 101. **Extract variants: co-tenant + existing workspace + terminal saved-state + multi-select**
      **(R13-14/R13-1; the last three are gvim extensions — Fresh only has extract-to-new-workspace).**
@@ -5236,8 +5267,7 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      disconnected error, permanent-delete confirmation naming target, queued reload), and round-19
      cut/copy/paste/duplicate over authority (see item 131). OPEN: drag/move between directories,
      no undo/history, no whole-subtree transaction/cleanup UI for partial copies, FileEntry/Mode/
-     mtimes not restored, hardlinks/xattrs not preserved, copy/paste/rename destination-exists refusal only at check time (concurrent create can be overwritten; no
-     exclusive create), no overwrite prompt (collision refused), watch latency, Windows paths,
+     mtimes not restored, hardlinks/xattrs not preserved, copy/paste/move destinations use the no-replace surfaces (concurrent creator gets the conflict dialog; explicit overwrite is remove-then-write and non-atomic), remote Rename is bounded copy-and-remove (no exclusive rename surface), no overwrite prompt (collision refused), watch latency, Windows paths,
      real-host acceptance.
 111. **Remote large-file mode is EDITABLE and saves via a STREAMED atomic write (r20; 150;**
      **R13-22).** Overlay over untouched windowed base (4 KiB head/large-index loop); save plans
@@ -5396,7 +5426,7 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      before creation; confirmations name remote target; trust gate/disconnected/refresh; partial
      destination kept and reported on cancel/failure (no rollback/deletion). OPEN: no drag/move,
      no undo/history, no whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes/hardlinks/
-     xattrs not preserved, copy/paste/rename destination-exists refusal only at check time (concurrent create can be overwritten; New File/New Directory exclusive), no overwrite prompt, real host.
+     xattrs not preserved, copy/paste/move destinations use DirectoryCreator/FileContentCreator (concurrent creator gets the conflict dialog; explicit overwrite is non-atomic by choice), Rename uses bounded copy-and-remove (no exclusive rename surface), no overwrite prompt, real host.
 132. **Full plugin window-scope chrome + focus announcer (141; see item 120/R13-24).** Per-mount
      editor/window/buffer chrome scope, active_window_changed/focus_gained announcer with split/
      buffer ids, buffer activated/deactivated, switch seeding; OPEN per-workspace id namespacing
@@ -5460,8 +5490,9 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      at the path → fs.ErrExist without follow/truncate/replace; Mode chmod after create, chmod
      failure reports but never deletes the path; Append/Parents → ErrUnsupportedFileIO; backend
      without surface refused explicitly, no Stat+WriteFile fallback; explorer New File uses it.
-     OPEN: rename/copy still use pre-mutation existence checks and can race an intervening create
-     (no exclusive rename/copy in mutation surface).
+     OPEN: local Rename still check-then-rename and local copy/paste keep destination prechecks;
+     remote copy/paste/move use no-replace surfaces, remote Rename is bounded copy-and-remove, and
+     explicit Overwrite is remove-then-write (non-atomic).
 141. **Shared-buffer close behavior (158; R13-1).** View-vs-buffer rule: mirror-tab close detaches
      without unsaved prompt; owner-tab close with a mirror promotes canonical doc first (unsaved+
      undo preserved) and asks nothing; final view (no mirror) keeps save/discard/cancel prompt and
@@ -6758,12 +6789,29 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      existing entries report fs.ErrExist, missing parents fs.ErrNotExist, cancellation passes through, and a
      backend without the capability is refused explicitly. Local New Directory remains one os.Mkdir/fsops.Mkdir.
      Tests cover no-Stat, existing/parent/cancel, concurrent one-winner, no-capability zero mutation and local
-     conflict/parent. Residuals: copy/paste/rename destination-exists refusal is still a pre-write check (remote
-     rename/copy has no exclusive destination surface); SSH/real host UNTESTED.
+     conflict/parent. Residuals: remote copy/paste/move destination atomicity, Rename copy-and-remove and the
+     explicit-Overwrite race are item 322; SSH/real host UNTESTED.
 321. **diagnostics_panel syncWithEditor.** cursor_moved onto a diagnostic's exact file+line selects/reveals that
      row through a setSelectedIndex widget mutation without opening a preview or changing focus; a non-diagnostic
      line leaves the selection alone. Tests cover exact-line selection and no-op. Residuals: fake LSP/host test
      only; real LSP/remote diagnostics UNTESTED.
+322. **Remote copy/paste/move no-replace + bounded Rename.** Non-overwrite remote copy/paste/move
+     publish the destination through DirectoryCreator.MkdirNew/FileContentCreator.CreateNewWithContent, one
+     no-replace create; a concurrent creator gets the conflict dialog and there is no Stat+create fallback. A
+     backend without either surface is refused. Explicit Overwrite remains remove-then-write (non-atomic by
+     user choice). Remote Rename uses the bounded copy-and-remove transfer because the authority has no atomic
+     rename-new: destination no-replace, source removed only after success, copy limits/metadata apply.
+     Residuals: local Rename still check-then-rename; copy/paste destination prechecks remain for local paths;
+     explicit overwrite remains non-atomic; SSH/real host UNTESTED.
+323. **Prompt left-click caret.** A left press inside the painted single-line input places the caret at the
+     clicked rune through the overlay Update path; outside/unpainted clicks are ignored. Fresh's prompt exposes
+     press positioning only, so drag/double-click word selection is deliberately not implemented. Residuals: no
+     mouse drag/double-click/multi-line selection; real terminal mouse UNTESTED.
+324. **diagnostics_panel navigateOnCursorMove.** Panel selection movement schedules a 90 ms debounced
+     gvim.buf.open preview (preview+background, focus unchanged); refresh cancels a pending timer and
+     preview_tick re-checks that its row is still the selected row of the rebuilt node map, so removed/moved
+     diagnostics cannot open stale locations. syncWithEditor still selects/reveals. Residuals: fake LSP/host
+     test only; real LSP/remote diagnostics and real preview tab UNTESTED.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -7258,7 +7306,7 @@ Round 13 recorded five open gaps:
   name; duplicate Fresh free-name; symlink/root/outside/inside-source refusals; target-naming
   confirmations; trust gate/disconnected/refresh; partial destination kept/reported). OPEN: no
   drag/move, no undo/history, no whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes not
-  restored, hardlinks/xattrs not preserved, copy/paste/rename destination-exists refusal only at check time (concurrent create can be overwritten), no overwrite prompt,
+  restored, hardlinks/xattrs not preserved, copy/paste/move destinations use DirectoryCreator/FileContentCreator (concurrent creator gets the conflict dialog; explicit overwrite is non-atomic by choice), Rename uses bounded copy-and-remove (no exclusive rename surface), no overwrite prompt,
   watch latency/rename approximation, palette rows no git letters (local too), Windows paths, real
   host.
 - **R13-14 (P2, M; co-tenant/session restore/extract variants + r27 mixed extraction landed)** —
@@ -7423,7 +7471,7 @@ Round 13 recorded five open gaps:
 
 
 | 26 | Fresh GUI/desktop, browser `--web` UI, WASM build, packaging/installer matrix, daemon packaging: **outside the TUI objective** (objective boundary in §8 — the user asked for Fresh TUI functionality; Lua and visual style are the only flexible parts). Daemon mode itself is in scope; these are not backlog gaps unless a TUI feature needs one (none does). Not closed by size/effort — closed by not being TUI | objective boundary | — | n/a | §4 item 81; §8 |
-| 27 | Remote explorer write/watch/clipboard: r17 New File/New Directory/Rename/Delete; r18 remote .gitignore + polled directory watch (gvim extensions); r19 cut/copy/paste/duplicate over authority (10k entries/256 MiB/64 levels/2 min, atomic per-file binary-safe, cut copy-then-remove, paste refuses existing name, duplicate Fresh free-name, symlink/root/outside/inside-source refusals before creation, confirmations naming target, trust gate/disconnected/refresh, partial destination kept/reported). OPEN: no drag/move, no undo/history, no whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes/hardlinks/xattrs not preserved, copy/paste/rename destination-exists refusal only at check time (concurrent create can be overwritten), no overwrite prompt, watch latency/rename approximation, Windows paths, real host | P2 | M | `authority`, `internal/app/{remote_explorer,remote_explorer_ops,remote_explorer_copy,remote_ignore}`, `internal/tui/remote_tree`/`explorer`, `explorer/gitignore.go` | R13-13/R13-21 |
+| 27 | Remote explorer write/watch/clipboard: r17 New File/New Directory/Rename/Delete; r18 remote .gitignore + polled directory watch (gvim extensions); r19 cut/copy/paste/duplicate over authority (10k entries/256 MiB/64 levels/2 min, atomic per-file binary-safe, cut copy-then-remove, paste refuses existing name, duplicate Fresh free-name, symlink/root/outside/inside-source refusals before creation, confirmations naming target, trust gate/disconnected/refresh, partial destination kept/reported). OPEN: no drag/move, no undo/history, no whole-subtree transaction/cleanup UI, FileEntry/Mode/mtimes/hardlinks/xattrs not preserved, copy/paste/move destinations use DirectoryCreator/FileContentCreator (concurrent creator gets the conflict dialog; explicit overwrite is non-atomic by choice), Rename uses bounded copy-and-remove (no exclusive rename surface), no overwrite prompt, watch latency/rename approximation, Windows paths, real host | P2 | M | `authority`, `internal/app/{remote_explorer,remote_explorer_ops,remote_explorer_copy,remote_ignore}`, `internal/tui/remote_tree`/`explorer`, `explorer/gitignore.go` | R13-13/R13-21 |
 
 
 
@@ -8792,6 +8840,14 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-66 verification (2026-11-10, merged tree on `54da2aa`).** STATIC GATES PASS (Lead, final
+  pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
+  golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 133 KiB / de 83 KiB /
+  both 216 KiB, git diff --check, gofmt clean). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r66-final.log`). Audit: targeted round-66 tests/diff review. Tracks: remote copy/paste/move
+  no-replace publication + bounded Rename; prompt left-click caret; diagnostics navigateOnCursorMove
+  preview. Real-host checks remain UNTESTED. No full-parity claim.
 - **Round-65 verification (2026-11-10, merged tree on `a2516e9`).** STATIC GATES PASS (Lead, final
   pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
   golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 127 KiB / de 83 KiB /
@@ -8916,15 +8972,16 @@ Round 13 recorded five open gaps:
   candidate-listing degradation, native env/LSP withdrawal; round-61 adds remote glob/finder-health and rust_lsp Disable; round-62 adds prompt select-all and
   Deno/Slang Disable; round-63 adds prompt real Ctrl+V, palette preview invalidation and lsp_navigation
   preselect; round-64 adds prompt real selection, palette instance tokens and git_statusbar window-focus
-  refresh; round-65 adds prompt initial real selection, atomic New Directory and diagnostics syncWithEditor;
-  full suite EXIT 0 (77 packages, log /tmp/gvim-r65-final.log); real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–65 had their full-suite gate runs
+  refresh; round-65 adds prompt initial real selection, atomic New Directory and diagnostics syncWithEditor; round-66
+  adds remote copy/paste/move no-replace, bounded Rename and diagnostics preview; full suite EXIT 0 (77
+  packages, log /tmp/gvim-r66-final.log); real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–66 had their full-suite gate runs
   (Rounds 2–61 also recorded static gates; Round 62 supplied a full-suite log without a new static
-  measurement). Round 65 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
+  measurement). Round 66 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
   native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
-  i18n_check with catalogue heap en 127 KiB / de 83 KiB / both 210 KiB, git diff --check). Final full
+  i18n_check with catalogue heap en 133 KiB / de 83 KiB / both 216 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r65-final.log`. The audit ran targeted round-65 tests and diff review only; the Lead
+  `/tmp/gvim-r66-final.log`. The audit ran targeted round-66 tests and diff review only; the Lead
   ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts

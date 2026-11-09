@@ -37,6 +37,7 @@ type remoteOpsFake struct {
 	// Exclusive create (authority.FileCreator): creates records successful creates,
 	// createModes their options, and the flags force the backend failures.
 	creates           []string
+	contentCreates    []string
 	createModes       []hostos.WriteOptions
 	createErr         error
 	createUnsupported bool
@@ -164,6 +165,54 @@ func (f *remoteOpsFake) CreateNew(ctx context.Context, p string, o hostos.WriteO
 	f.mtime[p] = 1
 	f.creates = append(f.creates, p)
 	f.createModes = append(f.createModes, o)
+	return nil
+}
+
+// CreateNewWithContent implements authority.FileContentCreator: the mutex is the
+// atomicity point, so a concurrent copy can only ever claim one destination.
+func (f *remoteOpsFake) CreateNewWithContent(ctx context.Context, p string, data []byte, o hostos.WriteOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	if f.createUnsupported {
+		f.mu.Unlock()
+		return authority.ErrUnsupportedFileIO
+	}
+	if f.createErr != nil {
+		err := f.createErr
+		f.mu.Unlock()
+		return err
+	}
+	if _, ok := f.files[p]; ok {
+		f.mu.Unlock()
+		return &os.PathError{Op: "create", Path: p, Err: fs.ErrExist}
+	}
+	if _, ok := f.symlinks[p]; ok {
+		f.mu.Unlock()
+		return &os.PathError{Op: "create", Path: p, Err: fs.ErrExist}
+	}
+	if f.dirs[p] {
+		f.mu.Unlock()
+		return &os.PathError{Op: "create", Path: p, Err: fs.ErrExist}
+	}
+	if f.writeErr != nil {
+		err := f.writeErr
+		f.mu.Unlock()
+		return err
+	}
+	f.files[p] = append([]byte(nil), data...)
+	f.mtime[p] = 1
+	f.creates = append(f.creates, p)
+	f.contentCreates = append(f.contentCreates, p)
+	f.createModes = append(f.createModes, o)
+	f.writeOpts = append(f.writeOpts, o)
+	f.writes = append(f.writes, p)
+	hook := f.onWrite
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return nil
 }
 
@@ -380,14 +429,23 @@ func TestRemoteExplorerMkdirAndRename(t *testing.T) {
 		t.Fatalf("Mkdir = %q, %v dirs=%v", p, err, fake.dirs)
 	}
 	np, err := ops.Rename(context.Background(), "/remote/w/a.go", "c.go")
-	if err != nil || np != "/remote/w/c.go" || len(fake.renames) != 1 {
-		t.Fatalf("Rename = %q, %v renames=%v", np, err, fake.renames)
+	if err != nil || np != "/remote/w/c.go" {
+		t.Fatalf("Rename = %q, %v", np, err)
 	}
 	if got := string(fake.files["/remote/w/c.go"]); got != "a" {
 		t.Fatalf("renamed content = %q", got)
 	}
+	if _, ok := fake.files["/remote/w/a.go"]; ok {
+		t.Fatal("rename kept the source")
+	}
+	if len(fake.contentCreates) != 1 || len(fake.removes) != 1 || fake.removes[0] != "/remote/w/a.go" {
+		t.Fatalf("rename creates=%v removes=%v, want one create and the source removal", fake.contentCreates, fake.removes)
+	}
 	if _, err := ops.Rename(context.Background(), "/remote/w/c.go", "b.go"); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("rename onto existing error = %v", err)
+	}
+	if got := string(fake.files["/remote/w/b.go"]); got != "b" {
+		t.Fatalf("rename overwrote the existing target: %q", got)
 	}
 	if same, err := ops.Rename(context.Background(), "/remote/w/c.go", "c.go"); err != nil || same != "/remote/w/c.go" {
 		t.Fatalf("rename to same name = %q, %v", same, err)

@@ -151,11 +151,16 @@ so the keyboard goes back to the editor (a v1 widget panel holds it while it is 
 panel stays open), Esc closes it, `diagnostics_updated` rebuilds the rows live, and activating
 another file re-filters them. Fresh's `syncWithEditor` is ported: moving the editor cursor onto a
 diagnostic's exact file+line selects/reveals that row in the panel without changing focus or
-opening a preview. At most 500 diagnostics are listed (the API can return 50 000); a
-message is cut to its first line and 120 cells, and paths and sources are bounded too. Ported from
+opening a preview. Fresh's `navigateOnCursorMove` is ported too: moving the panel selection
+previews the selected location after Fresh's 90 ms debounce, as a background preview tab
+(`preview = true, background = true`, no focus change), so rapid browsing opens only the final
+location; the debounce timer is cancelled when the panel closes, a row is activated, or the
+rows are refreshed, and a tick additionally checks that its row is still the current selection
+of the rebuilt node map before opening it. At most 500 diagnostics are listed (the API can return
+50 000); a message is cut to its first line and 120 cells, and paths and sources are bounded too. Ported from
 `refs/fresh/crates/fresh-editor/plugins/diagnostics_panel.ts` (275 lines) on the live-panel part of
 its `plugins/lib/finder.ts` (1862 lines). Not ported from the Finder library: prompt mode and search
-sources, the preview pane, `navigateOnCursorMove`, the utility-dock placement, the
+sources, the embedded preview pane, the utility-dock placement, the
 `q`/`a`/`r` panel keys (the filter is a widget toggle, refresh is automatic, Esc closes) and Fresh's
 severity colours. The diagnostic *code* is not shown because gvim's LSP API carries the source but
 no code. Like every bundled plugin it binds no key; bind `diagnostics_panel.toggle_diagnostics_panel`

@@ -349,6 +349,21 @@ func firstPromptCopyMsg(t *testing.T, cmd tea.Cmd) promptCopyMsg {
 // confirm's question) without mutating it. With a native writer the Copied notice waits
 // for that write's result; a failure says so and a reader-only clipboard is reported as
 // an unconfirmed OSC 52 request, never as Copied.
+// TestPromptMouseClickThroughRoot: a real left press routed through the overlay takes the
+// prompt's click positioning; clicking between b and c then typing inserts there. Fresh's
+// prompt only reports press positioning, so no drag/double-click selection is exercised.
+func TestPromptMouseClickThroughRoot(t *testing.T) {
+	m := overlayModel(t, fakeKeymap{})
+	p := prompt.NewLine(m.styles, prompt.LineOptions{Label: "", Input: "abcd"})
+	m.pushOverlay(p)
+	_ = m.View() // paints the prompt and records the input window
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: 4, Y: 29, Button: tea.MouseLeft}))
+	m.Update(typed("X"))
+	if got := p.Value(); got != "abXcd" {
+		t.Fatalf("click + X = %q, want abXcd", got)
+	}
+}
+
 // TestPromptInitialSelectAllThroughRoot: a dialog opened with LineOptions.SelectAll
 // starts with the real reverse-video selection, not an invisible prefill. Typing replaces
 // it, an arrow cancels it while keeping text, and Backspace deletes the selected range.

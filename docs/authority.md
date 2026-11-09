@@ -704,9 +704,12 @@ refused explicitly (no Stat + WriteFile fallback). New Directory uses the author
 `DirectoryCreator.MkdirNew` surface: one no-replace `mkdir`, so an existing entry reports
 `fs.ErrExist`, a missing parent reports `fs.ErrNotExist`, and a backend without the surface
 is refused explicitly (no Stat + Mkdir fallback). The local explorer's New Directory is
-`os.Mkdir` itself, the same atomic no-replace semantics. A rename still refuses an existing target
-with a pre-mutation check, and that check-to-write race remains a recorded residual (the
-mutation surface has no exclusive rename). A remote delete asks first and the question
+`os.Mkdir` itself, the same atomic no-replace semantics. A rename has no atomic rename-new authority surface; instead of a Stat + replacing
+`Mutations.Rename` (whose check-to-write race can overwrite a concurrent target), gvim
+publishes the destination through the same bounded copy-and-remove path as Move: exclusive
+file/directory create for the destination, source removal only after the copy succeeds.
+Large trees are bounded by the copy limits and report the bound; metadata follows the copy
+path's best-effort behavior, and a symbolic-link source is refused rather than followed. A remote delete asks first and the question
 says it is permanent (no remote trash). After a successful operation the existing explorer
 file-job refresh reloads the remote tree through its reload command, so the update loop
 never waits on the host.
@@ -719,9 +722,15 @@ does not claim delete is reversible. This remains the gating residual for trash 
 
 The clipboard is wired on the same surface (`internal/app/remote_explorer_copy.go`, task
 148). Copy walks the source subtree with `Files().ReadDir` (hidden entries included) and
-writes destination directories with `Mutations.Mkdir` and files with
-`WriteFile(Atomic: true)`, so every file lands atomically and binary data is carried
-byte-for-byte. Cut (`Move`) is copy-then-remove: the source is removed with
+publishes destinations without replacing anything: directories are claimed with
+`DirectoryCreator.MkdirNew` and files with `FileContentCreator.CreateNewWithContent`, so
+the top-level name has one atomic winner, a concurrent creator gets `fs.ErrExist` (the
+root's existing conflict dialog), and binary data is carried byte-for-byte. A backend
+without either no-replace surface is refused before any destination write; there is no
+Stat + write fallback. The explicit Overwrite choice is different: the root removes the
+old target first and writes through `Mutations.Mkdir`/`WriteFile(Atomic: true)`, so that
+user-chosen replacement is not atomic and a concurrent re-creation can be replaced; the
+confirmation remains the only way to take that path. Cut (`Move`) is copy-then-remove: the source is removed with
 `Mutations.Remove` only after the whole copy succeeded. Bounds: 10000 entries, 256 MiB,
 64 directory levels, and a 2-minute context (the caller's context still cancels). Refusals
 are explicit and happen before the destination is created: symbolic links anywhere in the
