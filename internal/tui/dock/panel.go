@@ -73,6 +73,12 @@ type Panel struct {
 	// saved width of a restored transcript); a content-width change reflows the
 	// rows to the new width (transcript.go reflowPrior).
 	priorWidth int
+	// autoExitScroll asks the next Sync/Show to open the read-only scrollback view
+	// when the shell has exited, so the frozen transcript (ending in Fresh's exit
+	// marker) is what the dock shows, like Fresh's read-only exited terminal. It is
+	// consumed on the first successful enter and cleared when the user deliberately
+	// returns to the frozen live screen (Ctrl+Space) or the dock restarts.
+	autoExitScroll bool
 	// titleText is the terminal title recorded for this tab (OSC 0/2): the live
 	// session's current title while a shell runs, or the restored one while dead.
 	// It is a tab-label fallback behind an explicit rename and the launch record.
@@ -161,7 +167,10 @@ func (p *Panel) SetFocus(v bool) {
 		p.ClearHover()
 		// A restored transcript is the whole dock until it is restarted, so it
 		// keeps its read-only view when the focus leaves.
-		if p.scroll.on && !p.restored {
+		if p.scroll.on && !p.restored && !p.exited {
+			// A live shell leaves scrollback when the focus goes; an exited shell's
+			// read-only transcript (with its marker) stays, like Fresh's read-only
+			// exited terminal.
 			p.scroll = scrollState{}
 		}
 		p.clearSelection()
@@ -204,6 +213,15 @@ func (p *Panel) Show() tea.Cmd {
 	if p.Running() {
 		p.focusDock()
 	}
+	// An exited shell shows its read-only transcript (ending in the marker), and a
+	// restored tab stays read-only until an explicit dive/restart: opening the dock
+	// must not spawn a shell behind either of them.
+	if p.exited || p.restored {
+		return p.maybeShowExitScrollback()
+	}
+	if auto := p.maybeShowExitScrollback(); auto != nil {
+		return auto
+	}
 	return p.start()
 }
 
@@ -213,6 +231,9 @@ func (p *Panel) Hide() {
 	p.focus = false
 	p.scroll = scrollState{}
 	p.clearSelection()
+	// A hidden dock that shows an exited shell opens its transcript again when it
+	// is next shown, so the marker is not lost by hiding the dock.
+	p.autoExitScroll = p.exited && p.exitMarker && p.term != nil
 }
 
 // focusDock gives the dock the focus through the host.
@@ -356,6 +377,7 @@ func (p *Panel) launchProgram(dir string, argv []string, rec terminal.Launch, ep
 	// A new shell has its own exit to come: forget the old status/marker (the
 	// marker itself is already in the prior transcript when a restart captured it).
 	p.exitCode, p.exitKnown, p.exitMarker = 0, false, false
+	p.autoExitScroll = false
 	p.dir = dir
 	if p.launchDir == "" {
 		// Keep the recorded program's chosen launch directory as provenance/fallback
@@ -396,6 +418,7 @@ func (p *Panel) launchShell(dir string) tea.Cmd {
 	// A new shell has its own exit to come: forget the old status/marker (the
 	// marker itself is already in the prior transcript when a restart captured it).
 	p.exitCode, p.exitKnown, p.exitMarker = 0, false, false
+	p.autoExitScroll = false
 	p.dir = dir
 	if p.launchDir == "" {
 		// Keep the recorded program's chosen launch directory as provenance/fallback
@@ -507,7 +530,13 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 			p.queue = nil
 			p.scroll = scrollState{}
 			p.clearSelection()
+			// Fresh turns an exited terminal into its read-only scrollback; gvim keeps
+			// the frozen screen as the live view but shows the transcript (whose last
+			// row is the exit marker) automatically, so the marker is visible without
+			// saving or pressing Ctrl+Space. A dock without layout rows waits for Sync.
+			p.autoExitScroll = !p.effects.CloseOnExit
 			if p.effects.CloseOnExit {
+				p.autoExitScroll = false
 				// terminal.close_on_exit: the dock goes away with its shell
 				// instead of keeping the last screen as scrollback. The release
 				// is IO, so it runs in a command, not in Update.
@@ -522,7 +551,7 @@ func (p *Panel) Update(msg tea.Msg) (tea.Cmd, bool) {
 				}
 			}
 		}
-		return nil, true
+		return p.maybeShowExitScrollback(), true
 	case scrollbackMsg:
 		if p.applyScrollback(msg) {
 			return p.requestScrollback(), true
@@ -757,6 +786,7 @@ func (p *Panel) Sync() tea.Cmd {
 		}
 		return nil
 	}
+	p.maybeShowExitScrollback()
 	t, gen := p.term, p.gen
 	var cmds []tea.Cmd
 	// One wait is in flight at a time. It returns at the next screen change, or at

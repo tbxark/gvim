@@ -76,11 +76,21 @@ func TestDeadShellTakesFocusAndScrollback(t *testing.T) {
 	if !m.dock.Focus() {
 		t.Fatal("a press did not focus the exited dock")
 	}
-	// Ctrl+Space opens the read-only pager over its frozen screen and history.
+	// The exit already opened the read-only pager over its frozen screen and
+	// history (Fresh's read-only exited terminal); Ctrl+Space returns to the frozen
+	// screen and opens the pager again.
+	if !m.dock.Scrolling() {
+		t.Fatal("the exit did not show the read-only transcript automatically")
+	}
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	dockSettle(t, m, cmd)
+	if m.dock.Scrolling() {
+		t.Fatal("Ctrl+Space did not return to the frozen live screen")
+	}
 	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl})
 	dockSettle(t, m, cmd)
 	if !m.dock.Scrolling() {
-		t.Fatal("Ctrl+Space did not open the exited shell's scrollback")
+		t.Fatal("Ctrl+Space did not reopen the exited shell's scrollback")
 	}
 }
 

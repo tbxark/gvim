@@ -635,6 +635,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 	var authSlot authority.Slot
 	var envRemote *env.Remote
 	var envShell *remoteEnvShell
+	var envWatch *remoteEnvWatch
 	var envProvider workspaceEnv
 	if opts.Remote != nil {
 		rootOf := func() string {
@@ -911,7 +912,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 			// Env-input changes on the remote host invalidate detection/capture through
 			// the authority's own watch (no local fallback); the watcher degrades to a
 			// Settings notice + manual Env: Reload when the backend cannot watch.
-			startRemoteEnvWatch(ctx, authSlot, envRemote, remoteRoot)
+			envWatch = startRemoteEnvWatch(ctx, authSlot, envRemote, remoteRoot)
 		}
 		// Project search and Git Grep run on the remote host through the authority's
 		// one-shot surface (the gate still applies); their results carry absolute remote
@@ -1013,6 +1014,7 @@ func buildRuntime(ctx context.Context, opts Options, watching bool) (rt *runtime
 		version:    gvimVersion(),
 	})
 	settingsSvc.env = envProvider
+	settingsSvc.envWatch = envWatch
 	deps.SettingsPort = settingsSvc
 	// Notice is the first config problem, then any session file whose unsaved
 	// text was kept, for the status row. Every warning still goes to stderr,

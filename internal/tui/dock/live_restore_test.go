@@ -228,3 +228,38 @@ func TestTabsRunningTabsListsBaseLabels(t *testing.T) {
 		t.Fatalf("second running tab = %+v", running[1])
 	}
 }
+
+// TestDockShowKeepsARestoredTranscriptReadOnly checks opening the dock after a
+// restore does not spawn anything behind the read-only transcript (a dive or an
+// explicit restart is still required).
+func TestDockShowKeepsARestoredTranscriptReadOnly(t *testing.T) {
+	t.Parallel()
+	starter := &fakeStarter{term: newFakeTerm()}
+	tabs := liveTestTabs(t, Effects{RestoreLive: true, ResumeAgents: true}, starter)
+	var st terminal.SavedState
+	st.Version, st.Open, st.Cwd, st.Live = terminal.SavedStateVersion, true, "/work", true
+	st.Rows = []string{"restored output"}
+	st.LaunchArgv, st.ResumeArgv, st.Agent = []string{"claude"}, []string{"claude", "--resume"}, "claude"
+	st.Tabs = []terminal.SavedTab{{
+		Name: "agent", Open: true, Cwd: "/work", Rows: []string{"restored output"},
+		LaunchArgv: st.LaunchArgv, ResumeArgv: st.ResumeArgv, Agent: "claude", Live: true,
+	}}
+	tabs.Restore(st)
+	tabs.Hide()
+	cmd := tabs.Show()
+	if cmd != nil {
+		// Show may return the transcript request command; it must not be a start.
+		for _, msg := range messages(cmd) {
+			if _, ok := msg.(tabStartedMsg); ok {
+				t.Fatalf("Show spawned a shell: %T", msg)
+			}
+			tabs.Update(msg)
+		}
+	}
+	if len(starter.dirs) != 0 || len(starter.launches) != 0 {
+		t.Fatalf("Show started something: dirs %v launches %v", starter.dirs, starter.launches)
+	}
+	if !tabs.Restored() {
+		t.Fatal("the restored transcript is no longer read-only after Show")
+	}
+}

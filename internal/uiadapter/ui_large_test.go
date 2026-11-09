@@ -223,16 +223,35 @@ func TestAdapterWriteStopsWhenItsContextIsCancelled(t *testing.T) {
 	}
 }
 
-func TestStringContextOfALargeDocumentReadsNothing(t *testing.T) {
+// TestStringContextOfALargeDocumentReadsABoundedWindow is the readable-side contract
+// for a local large file: the query may read its bounded context window (task-238 made
+// large files editable-context-capable), but it must never read the whole file. The old
+// zero-read contract predates local large-file context; a regression that reads far past
+// the window or materializes the file must fail here, not be hidden by a loose bound.
+func TestStringContextOfALargeDocumentReadsABoundedWindow(t *testing.T) {
 	t.Parallel()
 	ed := openBig(t, bigLines(t, t.TempDir()))
-	before := ed.Active().Buffer.Stats()
-	if highlight.NewStringContext()(ed.Active(), buffer.Pos{Line: 2, Col: 3}) {
-		t.Errorf("a position of a large document is in a string")
+	doc := ed.Active()
+	before := doc.Buffer.Stats()
+	if highlight.NewStringContext()(doc, buffer.Pos{Line: 2, Col: 3}) {
+		t.Errorf("a position of a large document with no string is reported inside a string")
 	}
-	after := ed.Active().Buffer.Stats()
-	if after.LineCalls != before.LineCalls {
-		t.Errorf("stringContext read %d lines of a large document", after.LineCalls-before.LineCalls)
+	after := doc.Buffer.Stats()
+	linesRead := after.LineCalls - before.LineCalls
+	// The context reads at most the 300 lines above and below the query, with two
+	// index probes per line (size and text); anything past this is out of contract.
+	const reach = 300
+	if maxLines := int64(2 * (2*reach + 1)); linesRead <= 0 || linesRead > maxLines {
+		t.Fatalf("stringContext read %d lines of a large document, want the bounded window (0, %d]", linesRead, maxLines)
+	}
+	if total := int64(doc.Buffer.Lines()); linesRead >= total/4 {
+		t.Fatalf("stringContext read %d of %d lines; a bounded window must be far below the file", linesRead, total)
+	}
+	// Page-granular reads may pull a few pages around the window; they must stay small
+	// and far below the whole file.
+	readBytes := after.ReadBytes - before.ReadBytes
+	if readBytes < 0 || readBytes > 1<<20 || readBytes >= after.TotalBytes/4 {
+		t.Fatalf("stringContext read %d of %d bytes; a bounded window must not read the file", readBytes, after.TotalBytes)
 	}
 }
 

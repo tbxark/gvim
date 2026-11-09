@@ -20,23 +20,63 @@ import (
 	"path"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tbxark/gvim/authority"
+	"github.com/tbxark/gvim/config"
 	"github.com/tbxark/gvim/env"
 	"github.com/tbxark/gvim/plugin/hostos"
 )
 
-type remoteEnvWatch struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	slot        authority.Slot
-	provider    *env.Remote
-	root        string
-	names       map[string]bool            // event basenames relevant to detection/activation
-	rearmNames  map[string]bool            // root-level directory names whose appearance needs a re-arm
-	dirs        map[string]map[string]bool // workspace-relative parent dirs to watch
+// envWatchPlan is the immutable, bounded watch plan derived from the provider's current
+// detector set plus the fixed env-input files. Replanning swaps the pointer atomically and
+// wakes the watcher, which re-arms; an in-flight arm keeps using its snapshot.
+type envWatchPlan struct {
+	names       map[string]bool
+	rearmNames  map[string]bool
+	dirs        map[string]map[string]bool
 	limitNotice string
+}
+
+func buildEnvWatchPlan(detectors []config.EnvDetector) *envWatchPlan {
+	names := make(map[string]bool)
+	for _, name := range env.EnvInputRootNames() {
+		names[name] = true
+	}
+	rearm := make(map[string]bool)
+	for _, dir := range env.EnvInputNestedDirs() {
+		rearm[dir] = true
+	}
+	spec := env.DetectorWatchPaths(detectors)
+	for name := range spec.RootNames {
+		names[name] = true
+	}
+	for _, children := range spec.Dirs {
+		for child := range children {
+			names[child] = true
+		}
+	}
+	for name := range spec.RearmNames {
+		rearm[name] = true
+	}
+	limitNotice := ""
+	if spec.Omitted > 0 || spec.OmittedDirs > 0 {
+		limitNotice = fmt.Sprintf("Remote environment: %d detector marker path(s) in %d director(ies) are not watched (watch bound reached); use Env: Reload after changing them", spec.Omitted, spec.OmittedDirs)
+	}
+	return &envWatchPlan{names: names, rearmNames: rearm, dirs: spec.Dirs, limitNotice: limitNotice}
+}
+
+type remoteEnvWatch struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	slot     authority.Slot
+	provider *env.Remote
+	root     string
+	plan     atomic.Pointer[envWatchPlan]
+	// replan is poked when the detector config changes at runtime; the run loop stops its
+	// current watches and re-arms against the new bounded plan (no local read).
+	replan chan struct{}
 
 	wg sync.WaitGroup
 
@@ -59,35 +99,9 @@ func startRemoteEnvWatch(parent context.Context, slot authority.Slot, provider *
 	if root == "" {
 		return nil
 	}
-	names := make(map[string]bool)
-	for _, name := range env.EnvInputRootNames() {
-		names[name] = true
-	}
-	rearm := make(map[string]bool)
-	for _, dir := range env.EnvInputNestedDirs() {
-		rearm[dir] = true
-	}
-	// User-configured detector marker/require paths: watch their parent directories
-	// (bounded) and match their top-level/child names so a changed custom marker
-	// invalidates detection just like the fixed env inputs.
-	spec := env.DetectorWatchPaths(provider.Detectors())
-	for name := range spec.RootNames {
-		names[name] = true
-	}
-	for _, children := range spec.Dirs {
-		for child := range children {
-			names[child] = true
-		}
-	}
-	for name := range spec.RearmNames {
-		rearm[name] = true
-	}
-	limitNotice := ""
-	if spec.Omitted > 0 || spec.OmittedDirs > 0 {
-		limitNotice = fmt.Sprintf("Remote environment: %d detector marker path(s) in %d director(ies) are not watched (watch bound reached); use Env: Reload after changing them", spec.Omitted, spec.OmittedDirs)
-	}
 	ctx, cancel := context.WithCancel(parent)
-	w := &remoteEnvWatch{ctx: ctx, cancel: cancel, slot: slot, provider: provider, root: root, names: names, rearmNames: rearm, dirs: spec.Dirs, limitNotice: limitNotice}
+	w := &remoteEnvWatch{ctx: ctx, cancel: cancel, slot: slot, provider: provider, root: root, replan: make(chan struct{}, 1)}
+	w.plan.Store(buildEnvWatchPlan(provider.Detectors()))
 	w.wg.Add(1)
 	go w.run()
 	return w
@@ -109,6 +123,26 @@ func (w *remoteEnvWatch) Close() {
 	w.cancel()
 	w.wg.Wait()
 	w.refreshWG.Wait()
+}
+
+// Replan applies a runtime detector-config change: the provider gets the new detectors
+// (invalidating detection/capture so the next Warm re-probes) and the watcher re-arms its
+// bounded watch set from a fresh plan. It never reads the local filesystem and the
+// existing session context still bounds every probe/watch. Safe to call when watching is
+// unavailable: the old degradation notice remains until a watch can be armed.
+func (w *remoteEnvWatch) Replan(detectors []config.EnvDetector) {
+	if w == nil {
+		return
+	}
+	w.provider.SetDetectors(detectors)
+	w.plan.Store(buildEnvWatchPlan(detectors))
+	// Re-detect/re-capture with the new detector set in the background; the watcher
+	// re-arm itself is only about matching future changes.
+	w.refresh()
+	select {
+	case w.replan <- struct{}{}:
+	default:
+	}
 }
 
 func (w *remoteEnvWatch) run() {
@@ -134,10 +168,10 @@ func (w *remoteEnvWatch) run() {
 			}
 			armCancel()
 			if errors.Is(armErr, authority.ErrUnsupportedFileIO) {
-				w.provider.SetWatchNotice("Remote environment: this authority cannot watch files, so changed .envrc/mise.toml files are picked up on Env: Reload (or the next reconnect)")
+				w.provider.SetWatchNotice(appText("gvim.notice.remote_env_watch_unsupported", "Remote environment: this authority cannot watch files, so changed .envrc/mise.toml files are picked up on Env: Reload (or the next reconnect)"))
 				return
 			}
-			w.provider.SetWatchNotice(fmt.Sprintf("Remote environment: could not watch the env input files (%v); retrying", armErr))
+			w.provider.SetWatchNotice(appTextVars("gvim.notice.remote_env_watch_failed", "Remote environment: could not watch the env input files (%{error}); retrying", map[string]any{"error": armErr}))
 			if !sleepContext(w.ctx, backoff) {
 				return
 			}
@@ -148,8 +182,8 @@ func (w *remoteEnvWatch) run() {
 			continue
 		}
 		backoff = remoteWatchRetryMin
-		if w.limitNotice != "" {
-			w.provider.SetWatchNotice(w.limitNotice)
+		if plan := w.plan.Load(); plan != nil && plan.limitNotice != "" {
+			w.provider.SetWatchNotice(plan.limitNotice)
 		} else {
 			w.provider.SetWatchNotice("")
 		}
@@ -176,7 +210,11 @@ func (w *remoteEnvWatch) run() {
 
 		rearm := false
 		for !rearm {
+			plan := w.plan.Load()
 			select {
+			case <-w.replan:
+				rearm = true
+				continue
 			case <-w.ctx.Done():
 				armCancel()
 				for _, watch := range watches {
@@ -190,14 +228,17 @@ func (w *remoteEnvWatch) run() {
 					// next successful snapshot reports any real change.
 					continue
 				}
+				if plan == nil {
+					continue
+				}
 				name := path.Base(event.Path)
-				if !w.names[name] {
+				if !plan.names[name] {
 					continue
 				}
 				w.refresh()
 				// A nested input's parent (".venv") may have just appeared: re-arm so the
 				// new directory is watched for content-only changes the root cannot see.
-				if w.rearmNames[name] {
+				if plan.rearmNames[name] {
 					rearm = true
 				}
 			}
@@ -222,6 +263,7 @@ func (w *remoteEnvWatch) run() {
 // content change to .venv/pyvenv.cfg is visible even though it does not change the .venv
 // directory entry the root watch snapshots.
 func (w *remoteEnvWatch) targets(ctx context.Context) []string {
+	plan := w.plan.Load()
 	targets := []string{w.root}
 	files := w.slot.Files()
 	seen := map[string]bool{}
@@ -239,8 +281,11 @@ func (w *remoteEnvWatch) targets(ctx context.Context) []string {
 	for _, dir := range env.EnvInputNestedDirs() {
 		addDir(dir)
 	}
-	dirs := make([]string, 0, len(w.dirs))
-	for dir := range w.dirs {
+	if plan == nil {
+		return targets
+	}
+	dirs := make([]string, 0, len(plan.dirs))
+	for dir := range plan.dirs {
 		dirs = append(dirs, dir)
 	}
 	sort.Strings(dirs)

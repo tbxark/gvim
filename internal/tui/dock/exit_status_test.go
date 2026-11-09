@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tbxark/gvim/internal/terminal"
 	"github.com/tbxark/gvim/internal/tui/grid"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -28,8 +30,8 @@ func exitedPanel(t *testing.T, code int, known bool) *Panel {
 func TestExitStatusTitleAndSavedMarker(t *testing.T) {
 	t.Parallel()
 	zero := exitedPanel(t, 0, true)
-	if got := zero.title(); got != "Terminal (exited)" {
-		t.Fatalf("exit-0 title = %q, want the code omitted like Fresh", got)
+	if got := zero.title(); !strings.Contains(got, "(exited)") || strings.Contains(got, "exit 0") {
+		t.Fatalf("exit-0 title = %q, want the exit named and the code omitted like Fresh", got)
 	}
 	code := exitedPanel(t, 3, true)
 	if got := code.title(); !strings.Contains(got, "exit 3") {
@@ -63,7 +65,7 @@ func TestExitStatusTitleAndSavedMarker(t *testing.T) {
 	if _, ok := p.Update(exitMsg{gen: p.gen}); !ok {
 		t.Fatal("the exit message was not handled")
 	}
-	if got := p.title(); got != "Terminal (exited)" {
+	if got := p.title(); !strings.Contains(got, "(exited)") {
 		t.Fatalf("unknown-status title = %q", got)
 	}
 }
@@ -226,8 +228,14 @@ func TestExitMarkerAppearsAtExit(t *testing.T) {
 	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
 		t.Fatalf("last transcript row at exit = %q, %v", got, ok)
 	}
-	// It is visible in the pager without any save: ordering is output, then marker.
-	applyScroll(t, p, p.ToggleScrollback())
+	// It is visible WITHOUT saving or a manual Ctrl+Space: the exit opens the
+	// read-only transcript automatically (Fresh's read-only exited terminal).
+	if !p.Scrolling() {
+		t.Fatal("the exited shell did not open its read-only transcript automatically")
+	}
+	if got := p.title(); !strings.Contains(got, "(exited)") {
+		t.Fatalf("auto transcript title = %q, want the exit named", got)
+	}
 	l := scrollLayout()
 	g := grid.New(l.W, l.H)
 	p.Draw(g, l, style.Styles{})
@@ -285,5 +293,187 @@ func TestExitMarkerNotDuplicatedAfterRestore(t *testing.T) {
 	st := tabs.SavedState()
 	if n := strings.Count(strings.Join(st.Rows, "\n"), terminalExitMarker); n != 1 {
 		t.Fatalf("restored re-save marker count = %d (%q)", n, st.Rows)
+	}
+}
+
+// TestExitAutoScrollbackToggleKeepsOutputAndMarker checks the auto-shown exited
+// transcript is the frozen output plus exactly one marker, and that Ctrl+Space
+// still returns to the frozen live screen and back again without losing either.
+func TestExitAutoScrollbackToggleKeepsOutputAndMarker(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.screen = newScreen(20, "frozen output")
+	p := newTestPanel(t, &fakeStarter{term: term})
+	p.Update(exitMsg{gen: p.gen})
+	if !p.Scrolling() {
+		t.Fatal("the exit did not open the read-only transcript")
+	}
+	// Ctrl+Space returns to the frozen live screen: no marker there, output kept.
+	if _, ok := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl}); !ok || p.Scrolling() {
+		t.Fatalf("Ctrl+Space from the auto transcript: taken %v scrolling %v", ok, p.Scrolling())
+	}
+	l := scrollLayout()
+	g := grid.New(l.W, l.H)
+	p.Draw(g, l, style.Styles{})
+	frozen := strings.Join(g.Plain(), "\n")
+	if strings.Contains(frozen, terminalExitMarker) || !strings.Contains(frozen, "frozen output") {
+		t.Fatalf("frozen live screen = %q", g.Plain())
+	}
+	// Ctrl+Space again returns to the transcript with the marker still last.
+	if _, ok := p.ScrollKey(tea.Key{Code: tea.KeySpace, Mod: tea.ModCtrl}); !ok || !p.Scrolling() {
+		t.Fatalf("Ctrl+Space back to the transcript: taken %v scrolling %v", ok, p.Scrolling())
+	}
+	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+		t.Fatalf("transcript last row = %q, %v", got, ok)
+	}
+	g = grid.New(l.W, l.H)
+	p.Draw(g, l, style.Styles{})
+	if rows := g.Plain(); !strings.Contains(strings.Join(rows, "\n"), terminalExitMarker) {
+		t.Fatalf("transcript paint = %q, want the marker", rows)
+	}
+	// One marker survives two saves.
+	for range 2 {
+		if n := strings.Count(strings.Join(p.SavedState().Rows, "\n"), terminalExitMarker); n != 1 {
+			t.Fatalf("saved marker count = %d", n)
+		}
+	}
+}
+
+// TestExitMarkerAppearsWhenTheDockWasHidden checks a shell that exits while the
+// dock has no layout rows (hidden) shows the transcript and marker when it is next
+// synced/shown, not just after a save.
+func TestExitMarkerAppearsWhenTheDockWasHidden(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.screen = newScreen(20, "hidden output")
+	p := newTestPanel(t, &fakeStarter{term: term})
+	// Simulate a dock that is not laid out (hidden) at the exit.
+	p.SetHost(Host{
+		RootDir: func() string { return "/ws" }, Notice: func(string) {},
+		ContentSize: func() (int, int) { return 0, 0 }, Focus: func() {},
+	})
+	p.Hide()
+	if _, ok := p.Update(exitMsg{gen: p.gen}); !ok {
+		t.Fatal("the exit message was not handled")
+	}
+	if p.Scrolling() {
+		t.Fatal("a dock without layout rows entered scrollback early")
+	}
+	// Laying it out and syncing opens the transcript automatically.
+	p.SetHost(Host{
+		RootDir: func() string { return "/ws" }, Notice: func(string) {},
+		ContentSize: func() (int, int) { return 80, 4 }, Focus: func() {},
+	})
+	p.Sync()
+	if !p.Scrolling() {
+		t.Fatal("the hidden exit did not open the transcript after layout")
+	}
+	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+		t.Fatalf("transcript last row = %q, %v", got, ok)
+	}
+	if got := p.title(); !strings.Contains(got, "(exited)") {
+		t.Fatalf("title = %q, want the exit named", got)
+	}
+}
+
+// TestAltScreenExitKeepsTheFrozenFrameAndSavesTheMarker checks the alternate-screen
+// exception: there is no scrollback to open, so the frozen frame stays (no
+// surprise notice), while the marker is still persisted exactly once for the
+// restore.
+func TestAltScreenExitKeepsTheFrozenFrameAndSavesTheMarker(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.screen = newScreen(20, "alt frame")
+	term.alt = true
+	p := newTestPanel(t, &fakeStarter{term: term})
+	p.Update(exitMsg{gen: p.gen})
+	if p.Scrolling() {
+		t.Fatal("an alternate-screen exit opened a scrollback it does not have")
+	}
+	if p.notice != "" {
+		t.Fatalf("alternate-screen exit notice = %q, want none", p.notice)
+	}
+	if got := p.title(); !strings.Contains(got, "(exited)") {
+		t.Fatalf("alt exit title = %q, want the exit named", got)
+	}
+	st := p.SavedState()
+	if len(st.Rows) == 0 || st.Rows[len(st.Rows)-1] != terminalExitMarker {
+		t.Fatalf("saved rows = %q, want the marker last", st.Rows)
+	}
+	if n := strings.Count(strings.Join(st.Rows, "\n"), terminalExitMarker); n != 1 {
+		t.Fatalf("saved marker count = %d", n)
+	}
+	// A later sync does not retry the impossible pager or add a notice.
+	p.Sync()
+	if p.Scrolling() || p.notice != "" {
+		t.Fatalf("after sync: scrolling %v notice %q", p.Scrolling(), p.notice)
+	}
+}
+
+// TestRestartFromTheAutoShownTranscript checks a restart taken from the automatic
+// exited transcript keeps one marker above the new shell and returns to a live view.
+func TestRestartFromTheAutoShownTranscript(t *testing.T) {
+	t.Parallel()
+	old := newFakeTerm()
+	old.screen = newScreen(20, "old auto output")
+	starter := &fakeStarter{term: old}
+	p := newTestPanel(t, starter)
+	p.Update(exitMsg{gen: p.gen})
+	if !p.Scrolling() {
+		t.Fatal("the exit did not open the transcript")
+	}
+	// The restarted shell is a different session.
+	starter.term = newFakeTerm()
+	starter.term.screen = newScreen(20, "new live output")
+	cmd := p.Restart()
+	if cmd == nil {
+		t.Fatal("Restart from the auto transcript returned no command")
+	}
+	for _, msg := range messages(cmd) {
+		p.Update(msg)
+	}
+	if p.Scrolling() || !p.Running() || p.Exited() {
+		t.Fatalf("after restart: scrolling %v running %v exited %v", p.Scrolling(), p.Running(), p.Exited())
+	}
+	rows := p.SavedState().Rows
+	joined := strings.Join(rows, "\n")
+	if n := strings.Count(joined, terminalExitMarker); n != 1 {
+		t.Fatalf("marker count after restart = %d in %q", n, rows)
+	}
+	if !strings.Contains(joined, "old auto output") {
+		t.Fatalf("restart lost the old output: %q", rows)
+	}
+}
+
+// TestDockShowKeepsTheExitedTranscript checks opening the dock on a shell that
+// exited while it was hidden shows the read-only transcript with the marker and
+// never spawns a replacement shell (Fresh reopens the read-only terminal).
+func TestDockShowKeepsTheExitedTranscript(t *testing.T) {
+	t.Parallel()
+	term := newFakeTerm()
+	term.screen = newScreen(20, "hidden frozen output")
+	starter := &fakeStarter{term: term}
+	p := newTestPanel(t, starter)
+	p.Update(exitMsg{gen: p.gen})
+	p.Hide()
+	if p.Scrolling() {
+		t.Fatal("hiding did not drop the transcript view")
+	}
+	// Show must not call start() on the exited panel.
+	_ = p.Show()
+	if p.Running() || !p.Exited() {
+		t.Fatalf("reopening the dock restarted the shell: running %v exited %v", p.Running(), p.Exited())
+	}
+	if len(starter.dirs) != 1 {
+		t.Fatalf("starter dirs = %v, want only the original start", starter.dirs)
+	}
+	if !p.Scrolling() {
+		t.Fatal("reopening the dock did not show the exited transcript")
+	}
+	if got, ok := p.combinedText(p.combined() - 1); !ok || got != terminalExitMarker {
+		t.Fatalf("reopened transcript last row = %q, %v", got, ok)
+	}
+	if got := p.title(); !strings.Contains(got, "(exited)") {
+		t.Fatalf("reopened title = %q", got)
 	}
 }

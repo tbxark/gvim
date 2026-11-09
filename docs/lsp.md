@@ -587,16 +587,20 @@ gopls (language server for go) failed to start: lsp: initialize: EOF [command: g
 gvim does not start it again for that language until **Start/Restart LSP Server**, and the status
 popup shows it in the error state with the same reason.
 
-Editing context for a windowed remote large file follows the same loaded-window rule. The
-quote auto-close check and the indent rules' non-code mask ask the StringContext/NonCodeContext
-caches, which now read only loaded, contiguous, byte-bounded (64 KiB) lines from the remote
-windows and never read or request an unloaded 1 MiB window; a query outside the loaded windows
-answers "not in a string"/no mask without I/O, so typing a quote there inserts normally without
-synchronous remote I/O. The window-arrival generation is part of the context cache key, so when
-the paint later loads the window the next query re-lexes the context instead of serving spans
+Editing context for a large file is bounded too. The quote auto-close check and the indent
+rules' non-code mask ask the StringContext/NonCodeContext caches. For a windowed remote large
+file they read only loaded, contiguous, byte-bounded (64 KiB) lines and never read or request an
+unloaded 1 MiB window; a query outside the loaded windows answers "not in a string"/no mask
+without I/O, so typing a quote there inserts normally without synchronous remote I/O. For a local
+large file the same bounded window is read through the buffer's page cache: a query reads at most
+the 300-line reach around it within the 64 KiB text budget, never the whole file (page-granular
+reads can make the touched bytes a little larger than the budget), and a line longer than the
+4096-byte lexer limit has no context and becomes the boundary of its neighbours' window instead
+of being materialized. The window-arrival generation is part of the remote context cache key, so
+when the paint later loads a window the next query re-lexes the context instead of serving spans
 computed from blank placeholder lines; a loaded window's context is bounded by the 300-line reach,
-the 64 KiB budget and the 4096-byte line limit. Local large files keep their old behavior (no
-editing context): reading their lines on the UI goroutine is not bounded by a windowed source.
+the 64 KiB budget and the 4096-byte line limit. A context query is read-only and does not change
+the document's editable/read-only semantics.
 
 Syntax highlighting of a large file is windowed too, for local and remote large files. The
 highlighter lexes a bounded window of lines around the lines on screen and keeps a few windows,

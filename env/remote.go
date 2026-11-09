@@ -75,6 +75,9 @@ type Remote struct {
 	detectedSet     bool
 	detectedTrusted bool
 	detectionNotice string
+	// detectorsGen increments on SetDetectors so an in-flight probe started with an older
+	// detector list cannot overwrite the detection of the newer list.
+	detectorsGen uint64
 
 	// Activation state: the recipe the plugin activated, and the captured delta.
 	snippet   string
@@ -193,6 +196,23 @@ func (p *Remote) Warm(ctx context.Context) {
 	if hasRecipe && trusted && ctx.Err() == nil {
 		_ = p.overlay(ctx)
 	}
+}
+
+// SetDetectors replaces the configured detectors at runtime (a config Reload that changed
+// env.detectors). It invalidates detection/capture so the next Warm/Overlay re-probes with
+// the new markers; the app's watcher re-plans its bounded watch targets from the same list.
+func (p *Remote) SetDetectors(detectors []config.EnvDetector) {
+	if len(detectors) == 0 {
+		detectors = config.DefaultEnvDetectors()
+	}
+	p.mu.Lock()
+	p.detectors = append([]config.EnvDetector(nil), detectors...)
+	p.detectorsGen++
+	p.detected, p.found = trust.DetectedEnv{}, false
+	p.detectedSet, p.detectedTrusted = false, false
+	p.detectionNotice = ""
+	p.invalidateLocked()
+	p.mu.Unlock()
 }
 
 // Detectors returns the configured detectors.
@@ -387,6 +407,7 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 	}
 	root := p.root
 	detectors := append([]config.EnvDetector(nil), p.detectors...)
+	gen := p.detectorsGen
 	run := p.run
 	prober := p.markerProbe
 	p.mu.Unlock()
@@ -413,6 +434,12 @@ func (p *Remote) ensureDetected(ctx context.Context) {
 	_ = incomplete
 
 	p.mu.Lock()
+	if p.detectorsGen != gen {
+		// A runtime detector change landed while this probe was in flight: its result is
+		// for the old marker set. Do not cache it; the next Warm/Overlay probes the new set.
+		p.mu.Unlock()
+		return
+	}
 	p.detectedTrusted = trusted
 	if err != nil {
 		p.detected, p.found = trust.DetectedEnv{}, false

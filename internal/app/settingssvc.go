@@ -52,6 +52,9 @@ type settingsService struct {
 	// env is the workspace environment provider for the Environment rows and the
 	// read-only detectors page; nil when the app wired none.
 	env workspaceEnv
+	// envWatch is the remote env-input/detector watcher, when the launch is remote. A
+	// config Reload that changes env.detectors re-plans its bounded watch set.
+	envWatch *remoteEnvWatch
 
 	// lastDiags are the diagnostics of the last reload, so a write-then-reload
 	// path can verify that the file it wrote still loads (the plugin toggle rolls
@@ -483,7 +486,34 @@ func (s *settingsService) reloadUnlocked(changed []string, layer string) (tui.Se
 	s.lastDiags = diags
 	s.themePreviews = previews
 	s.mu.Unlock()
+	s.applyEnvDetectorChange(previous, cfg)
 	return change, nil
+}
+
+// applyEnvDetectorChange re-plans the remote env watcher/provider when a config Reload
+// changed env.detectors. The provider is updated (invalidating detection/capture) and the
+// watcher re-arms its bounded watch plan off the update loop; no local filesystem is read
+// and the session context still bounds all watches. Without a watcher (local launch or a
+// remote provider whose watcher was not started) only a provider implementing SetDetectors
+// is updated.
+func (s *settingsService) applyEnvDetectorChange(previous, next config.Config) {
+	if reflect.DeepEqual(previous.EnvDetectors(), next.EnvDetectors()) {
+		return
+	}
+	s.mu.Lock()
+	watch := s.envWatch
+	env := s.env
+	s.mu.Unlock()
+	detectors := next.EnvDetectors()
+	if watch != nil {
+		go watch.Replan(detectors)
+		return
+	}
+	if setter, ok := env.(interface {
+		SetDetectors([]config.EnvDetector)
+	}); ok {
+		setter.SetDetectors(detectors)
+	}
 }
 
 // diagnosticsOf returns the diagnostics of the last reload whose path is file.

@@ -272,7 +272,12 @@ func TestCloseOnExitOffKeepsTheScreen(t *testing.T) {
 	if !p.Open() || p.Running() || !p.Exited() {
 		t.Fatalf("after the exit: open %v running %v exited %v", p.Open(), p.Running(), p.Exited())
 	}
-	if got := p.title(); got != "Terminal (exited)" {
+	if got := p.title(); !strings.Contains(got, "(exited)") {
 		t.Fatalf("title = %q, want the exited title", got)
+	}
+	// The exited shell now shows its read-only transcript (ending in the marker)
+	// automatically, like Fresh's read-only exited terminal.
+	if !p.Scrolling() {
+		t.Fatal("the exited shell did not show its transcript automatically")
 	}
 }

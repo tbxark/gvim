@@ -215,16 +215,23 @@ background tabs' exited markers current.
   the exact `[Terminal process exited]` line to the backing/log transcript at exit
   and shows a clickable restart call-to-action in the status bar with the program
   name and the code when it is non-zero; gvim's bounded slice puts the same
-  information on the dock's own surfaces: the marker line becomes the transcript's
-  last row AT THE EXIT INSTANT (a synthetic row while the frozen screen is still on
-  show, so the scrollback pager shows it immediately and it can be selected/copied
-  without saving first; a save stores it as an ordinary bounded transcript row and
-  a restart captures it before the new shell, so a restart or resume continues
-  *below* it and never overwrites output), and the tab title says
+  information on the dock's own surfaces: at the exit instant the dock
+  automatically opens the exited shell's read-only transcript (Fresh turns an
+  exited terminal into read-only scrollback), whose last row is the marker, so the
+  frozen output and the marker are what the user sees without saving or pressing
+  Ctrl+Space; the marker can be selected/copied there, a save stores it as an
+  ordinary bounded transcript row, and a restart captures it before the new shell,
+  so a restart or resume continues *below* it and never overwrites output. A
+  hidden/background dock opens that transcript the first time it can be laid out
+  (the next sync/show). While the transcript is shown the title is
+  `Scrollback (exited, exit N)`/`Scrollback (exited, signal)` (plain
+  `Scrollback (exited)` for exit 0/unknown), and the tab title stays
   `Terminal (exited, exit N)` or `Terminal (exited, signal)` for a non-zero/signal
-  exit — a clean exit 0 keeps the plain `Terminal (exited)`, matching Fresh's
-  decision to omit exit 0. A restored read-only tab shows the same suffix on its
-  `Scrollback (restored)` title. The marker is written once per exit (a
+  exit — a clean exit 0 keeps the plain `Terminal (exited)`/`Scrollback (exited)`,
+  matching Fresh's decision to omit exit 0. A restored read-only tab shows the
+  same suffix on its `Scrollback (restored)` title. Ctrl+Space still leaves the
+  transcript for the frozen last screen (and back again), a gvim extension on top
+  of Fresh's read-only terminal. The marker is written once per exit (a
   restore/restart cycle deduplicates it) and is not painted from the styled
   snapshot (it sits after the visible screen, outside its strict text match).
   gvim also implements Fresh's clickable status-bar element `{terminal_restart}`
@@ -245,12 +252,13 @@ background tabs' exited markers current.
   that remain: the program name comes from the recorded launch/resume argv, not
   the OS foreground process; the hover is underline+bold rather than Fresh's
   ERROR-colour swap; signal exits append ` (signal)` because gvim records -1
-  where Fresh's i32 exit code has no signal field; and gvim keeps the frozen last
-  screen in its live view on exit (Fresh switches that buffer to read-only
-  scrollback), so the marker is visible in the scrollback pager (Ctrl+Space) at the
-  exit instant but is not painted on the frozen live screen; the same applies to an
-  alternate-screen exit, whose pager is unavailable (`The alternate screen has no
-  scrollback.`) even though the marker row is still persisted for the restore.
+  where Fresh's i32 exit code has no signal field; and gvim keeps an extra frozen
+  live screen reachable with Ctrl+Space (Fresh stays in read-only scrollback), so
+  the marker is on the view the dock opens at exit but a user who toggles back to
+  the frozen screen does not see it there; an alternate-screen exit cannot open a
+  pager (`The alternate screen has no scrollback.`) — gvim keeps that frozen frame
+  silently and persists the marker row for the restore instead of raising the
+  pager notice.
 - **Persistence.** `terminal.json` gains an additive `tabs` array (name, open, cwd,
   launch_dir, width, rows and the same launch/resume/agent/ephemeral record per tab,
   plus the additive `title` (OSC 0/2), `exit_code`/`exit_known` pair for an exited
@@ -693,7 +701,7 @@ uses:
 | key | type and default | meaning |
 | --- | --- | --- |
 | `terminal.shell` | `{ "command": string, "args": [string] }`, unset | the program a terminal starts instead of `$SHELL` (then `/bin/sh`). An empty command means `$SHELL`. |
-| `terminal.close_on_exit` | bool, `false` | hide the dock when its shell exits instead of keeping the last screen as read-only scrollback. |
+| `terminal.close_on_exit` | bool, `false` | hide the dock when its shell exits instead of keeping the exited transcript (frozen output plus Fresh's exit marker) as the read-only scrollback it opens automatically. |
 | `terminal.scrollback_lines` | int, `10000` | **gvim extension**, not a Fresh key: the history rows the emulator keeps. `0` disables the history; the cap is `1000000`. |
 | `terminal.mouse_forwarding` | `"requested"` (default) or `"alt_screen"` | when the mouse reaches the program inside the terminal. |
 | `terminal.jump_to_end_on_output` | bool, `true` | new output returns the view to the live screen unless a selection is active. |

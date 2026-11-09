@@ -1039,3 +1039,100 @@ func TestRemoteSearchPreviewSyntaxSpans(t *testing.T) {
 		t.Fatalf("an over-line-cap preview had spans: %d", len(res.Spans))
 	}
 }
+
+// readCountingRemoteFS wraps the test remote file system and counts windowed preview reads,
+// so the preview/highlight path can be checked for extra remote I/O.
+type readCountingRemoteFS struct {
+	*remoteFS
+	mu        sync.Mutex
+	readRange int
+}
+
+func (f *readCountingRemoteFS) ReadRange(ctx context.Context, p string, off, n int64) ([]byte, error) {
+	f.mu.Lock()
+	f.readRange++
+	f.mu.Unlock()
+	return f.remoteFS.ReadRange(ctx, p, off, n)
+}
+
+func (f *readCountingRemoteFS) reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.readRange
+}
+
+// TestRemoteSearchPreviewTruncatedHeadHighlightsOnce checks the existing preview's bounded
+// head keeps both its syntax spans and its honest Truncated flag, and highlighting causes no
+// second remote read. The file is over the 256 KiB head cap but under the 4000-line syntax
+// cap, so there is a coloured truncated window.
+func TestRemoteSearchPreviewTruncatedHeadHighlightsOnce(t *testing.T) {
+	base := newRemoteFS()
+	base.put("/remote/w/large.go", "package main\n")
+	var text strings.Builder
+	text.WriteString("package main\n")
+	for text.Len() <= remoteSearchPreviewHeadBytes+2048 {
+		text.WriteString("var value = \"")
+		text.WriteString(strings.Repeat("x", 1000))
+		text.WriteString("\"\n")
+	}
+	base.put("/remote/w/large.go", text.String())
+	fs := &readCountingRemoteFS{remoteFS: base}
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	res, err := s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/large.go", Name: "large.go", Line: 1, EndLine: 1, EndCol: 2, Start: -1, Lines: 6,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Err != "" {
+		t.Fatalf("truncated preview error = %q", res.Err)
+	}
+	if !res.Truncated {
+		t.Fatalf("truncated head not marked: %+v", res)
+	}
+	if len(res.Spans) == 0 {
+		t.Fatal("truncated bounded head lost its syntax spans")
+	}
+	if got := fs.reads(); got != 1 {
+		t.Fatalf("preview remote reads = %d, want exactly the bounded head read", got)
+	}
+	if res.Total > previewHighlightLines {
+		t.Fatalf("preview total = %d, beyond the syntax line cap", res.Total)
+	}
+}
+
+// TestRemoteSearchPreviewDisconnectPreservesError checks a disconnected authority is an
+// explicit preview error with no spans and no local-file fallback, and the open-buffer text
+// path still highlights without any authority read.
+func TestRemoteSearchPreviewDisconnectPreservesError(t *testing.T) {
+	base := newRemoteFS()
+	base.put("/remote/w/a.go", "package main\n")
+	fs := &readCountingRemoteFS{remoteFS: base}
+	s := newRemoteProjectSearch(&fakeOneShot{}, "/remote/w").withFiles(fs)
+	base.setErr(errors.New("remote workspace is disconnected"))
+	res, err := s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/a.go", Name: "a.go", Line: 1, EndLine: 1, Start: -1, Lines: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Err, "disconnected") {
+		t.Fatalf("disconnect error = %q, want the authority error", res.Err)
+	}
+	if len(res.Lines) != 0 || len(res.Spans) != 0 {
+		t.Fatalf("disconnected preview exposed lines/spans: %+v", res)
+	}
+	if got := fs.reads(); got != 1 {
+		t.Fatalf("disconnected preview remote reads = %d, want one failed read", got)
+	}
+	// An open buffer's text is highlighted from the panel's text, no remote read.
+	res, err = s.Preview(searchpanel.PreviewRequest{
+		Path: "/remote/w/a.go", Name: "a.go", Text: "package main\n\nvar x = 1\n", Line: 1, EndLine: 1, Start: -1, Lines: 4,
+	})
+	if err != nil || res.Err != "" || len(res.Spans) == 0 {
+		t.Fatalf("open-buffer preview = %+v err %v", res, err)
+	}
+	if got := fs.reads(); got != 1 {
+		t.Fatalf("open-buffer preview read remotely: %d", got)
+	}
+}

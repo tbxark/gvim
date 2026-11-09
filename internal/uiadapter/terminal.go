@@ -255,7 +255,7 @@ func (s TermStarter) checkedLocalDir(dir string) string {
 		return dir
 	}
 	if s.opts.Notice != nil {
-		s.opts.Notice(fmt.Sprintf("Terminal directory %q is not an absolute path on this platform; starting in the default directory", dir))
+		s.opts.Notice(uiadapterTextVars("gvim.notice.terminal_dir_invalid", "Terminal directory %{dir} is not an absolute path on this platform; starting in the default directory", map[string]any{"dir": fmt.Sprintf("%q", dir)}))
 	}
 	return ""
 }
@@ -264,7 +264,7 @@ func (s TermStarter) checkedLocalDir(dir string) string {
 // directory is quoted so no control byte from a record can reach the status row.
 func (s TermStarter) remoteDirFallback(dir, reason string) {
 	if s.opts.Notice != nil {
-		s.opts.Notice(fmt.Sprintf("Remote terminal directory %q is unavailable (%s); starting in the remote default directory", dir, reason))
+		s.opts.Notice(uiadapterTextVars("gvim.notice.remote_terminal_dir_unavailable", "Remote terminal directory %{dir} is unavailable (%{reason}); starting in the remote default directory", map[string]any{"dir": fmt.Sprintf("%q", dir), "reason": reason}))
 	}
 }
 

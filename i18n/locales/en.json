@@ -1044,5 +1044,13 @@
   "gvim.notice.completion.offer_overlap": "completion edits overlap, so nothing was applied",
   "gvim.notice.copy_metadata_warning": "copy completed, but permissions/mtime were not preserved on %{failed} of %{total} entries: %{error}",
   "gvim.remote.permanent_delete_file": "Permanently delete %{name} on %{target}? Remote deletes have no trash.",
-  "gvim.remote.permanent_delete_items": "Permanently delete %{count} items on %{target}? Remote deletes have no trash."
+  "gvim.remote.permanent_delete_items": "Permanently delete %{count} items on %{target}? Remote deletes have no trash.",
+  "gvim.notice.remote_env_watch_limit": "Remote environment: %{markers} detector marker path(s) in %{directories} director(ies) are not watched (watch bound reached); use Env: Reload after changing them",
+  "gvim.notice.remote_env_watch_unsupported": "Remote environment: this authority cannot watch files, so changed .envrc/mise.toml files are picked up on Env: Reload (or the next reconnect)",
+  "gvim.notice.remote_env_watch_failed": "Remote environment: could not watch the env input files (%{error}); retrying",
+  "gvim.notice.remote_env_shell_detect_failed": "Remote environment: could not detect an interactive login shell on the host (%{error}); using sh -c (interactive init may differ from the terminal)",
+  "gvim.notice.remote_env_shell_none": "Remote environment: no interactive bash/zsh login shell was found on the host; using sh -c (environment recipes that rely on interactive init may differ from the terminal)",
+  "gvim.notice.remote_env_capture_failed": "Remote environment: %{shell} -ilc failed (%{error}); using sh -c for this capture (interactive init may not be available)",
+  "gvim.notice.terminal_dir_invalid": "Terminal directory %{dir} is not an absolute path on this platform; starting in the default directory",
+  "gvim.notice.remote_terminal_dir_unavailable": "Remote terminal directory %{dir} is unavailable (%{reason}); starting in the remote default directory"
 }

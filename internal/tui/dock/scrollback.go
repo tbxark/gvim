@@ -134,9 +134,31 @@ func (p *Panel) enterScrollback() tea.Cmd {
 	return p.requestScrollback()
 }
 
+// maybeShowExitScrollback opens the read-only transcript of an exited shell the
+// first time the dock can lay it out, so the frozen output and Fresh's exit marker
+// are what the user sees (Fresh turns an exited terminal into read-only
+// scrollback). A pending auto-view that cannot be shown yet (hidden dock without
+// rows) waits for the next Sync/Show. An alternate-screen exit has no pager, so
+// its frozen frame stays and the marker remains in the saved transcript.
+func (p *Panel) maybeShowExitScrollback() tea.Cmd {
+	if !p.autoExitScroll || p.term == nil || p.scroll.on || p.restored {
+		return nil
+	}
+	if p.term.AltScreen() {
+		p.autoExitScroll = false
+		return nil
+	}
+	if p.bodyRows() <= 0 {
+		return nil
+	}
+	p.autoExitScroll = false
+	return p.enterScrollback()
+}
+
 // leaveScrollback returns to the live screen.
 func (p *Panel) leaveScrollback() tea.Cmd {
 	p.scroll = scrollState{}
+	p.autoExitScroll = false
 	p.clearSelection()
 	return nil
 }

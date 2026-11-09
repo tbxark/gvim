@@ -97,20 +97,14 @@ func (c *stringCache) refresh(doc *editor.Document, line int) bool {
 	}
 	var start int
 	var lines []string
-	if doc.AsyncLarge() {
+	if doc.Large() {
 		var ok bool
-		start, lines, ok = c.asyncStringWindow(doc, b, line)
+		start, lines, ok = c.largeStringWindow(doc, b, line)
 		if !ok {
 			c.valid = false
 			return false
 		}
 	} else {
-		if doc.Large() {
-			// A local large document keeps the old behavior: reading its lines on the
-			// UI goroutine for a typed quote is not bounded by a loaded-window cache.
-			c.valid = false
-			return false
-		}
 		end := 0
 		start, end = stringWindow(b.Lines(), line, func(i int) bool {
 			return strings.TrimSpace(b.Line(i)) == ""
@@ -127,13 +121,14 @@ func (c *stringCache) refresh(doc *editor.Document, line int) bool {
 	return true
 }
 
-// asyncStringWindow returns the loaded, contiguous, byte-bounded lines around line,
-// starting at start. It never reads a line whose remote window is not loaded: the
+// largeStringWindow returns the bounded, contiguous lines around line of a large
+// document. It never reads a line whose remote window is not loaded (LineLoaded is
+// always true for a local large document, whose page cache serves the read): the
 // backward walk stops at the first unloaded or too-large line, the forward walk does
-// the same, and a line that is too big for the lexer bounds the window. The query line
-// itself must be loaded and lexable. The budget is stringMaxBytes, so a burst of long
-// lines cannot make typing a quote lex megabytes on the UI goroutine.
-func (c *stringCache) asyncStringWindow(doc *editor.Document, b *buffer.Buffer, line int) (start int, lines []string, ok bool) {
+// the same, and a line too big for the lexer bounds the window. The query line must be
+// readable and lexable. The budget is stringMaxBytes, so a burst of long lines cannot
+// make typing a quote lex megabytes on the UI goroutine.
+func (c *stringCache) largeStringWindow(doc *editor.Document, b *buffer.Buffer, line int) (start int, lines []string, ok bool) {
 	if line < 0 || line >= b.Lines() || !doc.LineLoaded(line) || lineTooBig(b, line) {
 		return 0, nil, false
 	}
@@ -196,13 +191,10 @@ func (c *stringCache) inString(doc *editor.Document, p buffer.Pos) bool {
 	if p.Line < 0 || p.Line >= doc.Buffer.Lines() {
 		return false
 	}
-	// A local large document keeps the old no-context behavior. A windowed remote
-	// large document is read only from lines whose windows have arrived; a missing
-	// window answers false without reading.
-	if doc.Large() && !doc.AsyncLarge() {
-		return false
-	}
-	if doc.AsyncLarge() && (!doc.LineLoaded(p.Line) || lineTooBig(doc.Buffer, p.Line)) {
+	// A large document is read only from lines that are available and lexable;
+	// for a windowed remote document LineLoaded is the loaded-window check, and a
+	// missing window answers false without reading.
+	if doc.Large() && (!doc.LineLoaded(p.Line) || lineTooBig(doc.Buffer, p.Line)) {
 		return false
 	}
 	if !c.refresh(doc, p.Line) {
@@ -229,10 +221,7 @@ func (c *stringCache) nonCode(doc *editor.Document, line int) []bool {
 	if line < 0 || line >= doc.Buffer.Lines() {
 		return nil
 	}
-	if doc.Large() && !doc.AsyncLarge() {
-		return nil
-	}
-	if doc.AsyncLarge() && (!doc.LineLoaded(line) || lineTooBig(doc.Buffer, line)) {
+	if doc.Large() && (!doc.LineLoaded(line) || lineTooBig(doc.Buffer, line)) {
 		return nil
 	}
 	if !c.refresh(doc, line) {

@@ -202,6 +202,11 @@ func (p *Panel) scrollbackTitle() string {
 	if p.exited {
 		// The restored read-only view is the scrollback, so the exit status rides
 		// on this title too (Fresh shows it in its restart status-bar indicator).
+		// A live shell's auto-shown transcript names the exit as well, so the title
+		// still says the shell is gone now that the frozen screen is a pager.
+		if p.term != nil {
+			name = "Scrollback (exited)"
+		}
 		if suffix := p.exitSuffix(); suffix != "" {
 			name += ", " + suffix
 		}

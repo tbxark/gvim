@@ -67,7 +67,11 @@ workspace root plus the existing parent directories of the watched paths (bounde
 paths are reported in the Settings notice and still work through `Env: Reload`). Nested
 content changes are seen because the parent directory is watched even when the root
 directory entry does not change; when a watched parent directory appears, the next relevant
-root event re-arms the watcher with it. A backend whose file surface cannot watch degrades safely: the watcher stops,
+root event re-arms the watcher with it. A runtime config Reload that changes
+`env.detectors` swaps the provider's detectors (invalidating detection/capture and
+re-warming them in the background off the update loop) and re-plans the watcher from the new
+list; the old watches are stopped and the new plan is still bounded by the same path and
+directory caps, using only authority watches (no local read). A backend whose file surface cannot watch degrades safely: the watcher stops,
 the Settings Environment rows say the inputs are not watched and point at `Env: Reload`,
 and the manual reload path keeps working; other watch failures retry with the same bounded
 backoff as the remote document watch. After every successful
@@ -452,7 +456,10 @@ Residuals of this slice (documented, not bugs):
   remain usable via Env: Reload; a deeply nested path whose intermediate parents do not yet
   exist is picked up when a relevant root/parent event re-arms the plan, otherwise the next
   Env: Reload/reconnect re-evaluates; the polling latency/cost limits are the same as remote
-  document watching), the
+  document watching; a runtime env.detectors change re-plans only the remote provider/watcher
+  (a local launch's provider keeps its startup detector set), and if the watcher had already
+  degraded to the no-watch notice the detector provider is updated but no watches are
+  restarted), the
   detection result is cached until Refresh/SetRoot or an env-input event, a backend without
   the watch capability (or whose watch keeps failing) degrades to the manual Env: Reload path
   with a Settings notice, the detect/capture invalidation is asynchronous (an in-flight spawn

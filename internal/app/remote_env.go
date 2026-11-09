@@ -239,7 +239,7 @@ func (r *remoteEnvShell) Reprobes(ctx context.Context) {
 func (r *remoteEnvShell) probe(ctx context.Context) (shell, notice string) {
 	out, err := runRemoteEnvStdout(ctx, r.slot, r.root, []string{"sh", "-c", remoteEnvShellProbe})
 	if err != nil {
-		return "sh", fmt.Sprintf("Remote environment: could not detect an interactive login shell on the host (%v); using sh -c (interactive init may differ from the terminal)", err)
+		return "sh", appTextVars("gvim.notice.remote_env_shell_detect_failed", "Remote environment: could not detect an interactive login shell on the host (%{error}); using sh -c (interactive init may differ from the terminal)", map[string]any{"error": err})
 	}
 	switch strings.TrimSpace(out) {
 	case "bash":
@@ -247,7 +247,7 @@ func (r *remoteEnvShell) probe(ctx context.Context) (shell, notice string) {
 	case "zsh":
 		return "zsh", ""
 	}
-	return "sh", "Remote environment: no interactive bash/zsh login shell was found on the host; using sh -c (environment recipes that rely on interactive init may differ from the terminal)"
+	return "sh", appText("gvim.notice.remote_env_shell_none", "Remote environment: no interactive bash/zsh login shell was found on the host; using sh -c (environment recipes that rely on interactive init may differ from the terminal)")
 }
 
 // finishProbe publishes one probe result and notifies the observer (an empty notice
@@ -306,7 +306,7 @@ func (r *remoteEnvShell) RunCapture(ctx context.Context, command string) (string
 		}
 		err = fmt.Errorf("%s -ilc: %s", shell, msg)
 	}
-	notice := fmt.Sprintf("Remote environment: %s -ilc failed (%v); using sh -c for this capture (interactive init may not be available)", shell, err)
+	notice := appTextVars("gvim.notice.remote_env_capture_failed", "Remote environment: %{shell} -ilc failed (%{error}); using sh -c for this capture (interactive init may not be available)", map[string]any{"shell": shell, "error": err})
 	r.setNotice(notice)
 	return r.RunDetect(ctx, command)
 }
