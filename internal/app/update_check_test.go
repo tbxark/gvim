@@ -103,3 +103,25 @@ func TestUpdateFeedPrecedence(t *testing.T) {
 		t.Fatalf("configured feed = %q", got)
 	}
 }
+
+// TestUpdateCommandHooks: update_command becomes a shell argv for the dock even when
+// the release check is off, and an unset command stays nil (the rows stay hidden).
+func TestUpdateCommandHooks(t *testing.T) {
+	isolateConfig(t)
+	cfg := config.Defaults()
+	cfg.Update.Check = false
+	cfg.Update.Command = "git pull --ff-only"
+	hooks := newUpdateHooks(&cfg)
+	if hooks.Check != nil {
+		t.Fatal("check_for_updates false installed a check hook")
+	}
+	if len(hooks.Command) != 3 {
+		t.Fatalf("command argv = %v, want three entries", hooks.Command)
+	}
+	if hooks.Command[len(hooks.Command)-1] != "git pull --ff-only" {
+		t.Fatalf("command argv = %v, want the configured command last", hooks.Command)
+	}
+	if got := updateCommandArgv("  "); got != nil {
+		t.Fatalf("blank command argv = %v, want nil", got)
+	}
+}

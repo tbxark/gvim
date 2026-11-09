@@ -8,6 +8,7 @@ package tui
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -61,6 +62,45 @@ type workspaceExtractTargetPort interface {
 // multi-select row.
 type workspaceExtractManyPort interface {
 	ExtractTabs(paths []string) (WorkspaceCmd, error)
+}
+
+// ExtractTerminalRef names one dock terminal tab in a mixed extract selection. Index
+// is the tab's slot at capture time and Name its saved name ("" for a default-named
+// tab), so the command can verify the tab still exists before closing it.
+type ExtractTerminalRef struct {
+	Index int
+	Name  string
+}
+
+// ExtractSelection is the tabs the mixed extract picker selected: file tabs by path
+// and dock terminal tabs by reference. It is a gvim extension: Fresh's only extract
+// action moves a single tab into a new co-tenant window.
+type ExtractSelection struct {
+	Files     []string
+	Terminals []ExtractTerminalRef
+}
+
+// Len is the number of selected tabs.
+func (s ExtractSelection) Len() int { return len(s.Files) + len(s.Terminals) }
+
+// workspaceExtractMixedPort is the optional mixed-selection surface: move the selected
+// file AND terminal tabs into a new co-tenant workspace (targetID "") or an existing
+// one over the same root. replace allows replacing a target file's existing state; a
+// same-name terminal tab is added alongside (never replaced), which the conflict
+// prompt states. A conflict is reported through ExtractConflictMsg before any write.
+type workspaceExtractMixedPort interface {
+	ExtractMixed(selection ExtractSelection, targetID string, replace bool) (WorkspaceCmd, error)
+}
+
+// ExtractConflictMsg reports that an existing target workspace already holds some of
+// the selected tabs. It is sent by the extraction command BEFORE any write; the root
+// asks the confirmation and only then retries with replace=true. Conflicts names the
+// colliding paths/tab names.
+type ExtractConflictMsg struct {
+	Selection   ExtractSelection
+	TargetID    string
+	TargetLabel string
+	Conflicts   []string
 }
 
 // workspaceRunningPort is the optional running-terminal surface of the workspace layer:
@@ -195,6 +235,13 @@ func (m *Model) StartWorkspaceLaunch(l WorkspaceLaunch) WorkspaceCmd {
 // imported launch opened its tab; the app may also use it for future status items.
 func (m *Model) DockTabNames() []string { return m.dock.TabNames() }
 
+// WorkspaceCmdWhen wraps work that may report a message: a non-nil result is
+// delivered to Update (the mixed extract's pre-write conflict report), a nil one is
+// a silent side effect. The workspace layer uses it so it never imports Bubble Tea.
+func WorkspaceCmdWhen(work func() any) WorkspaceCmd {
+	return func() tea.Msg { return work() }
+}
+
 // WorkspaceCmdOf wraps a function as a program command: the workspace layer uses it for
 // the work that must not block the UI (creating, closing, materializing).
 func WorkspaceCmdOf(fn func()) WorkspaceCmd {
@@ -262,7 +309,11 @@ func (m *Model) workspaceAction(action string) (tea.Cmd, bool) {
 	case "workspace_extract_terminal_to":
 		return m.extractWorkspaceTerminalTo(), true
 	case "workspace_extract_tabs":
-		m.openExtractTabsPicker()
+		if _, ok := m.workspace.(workspaceExtractMixedPort); ok {
+			m.openMixedExtractPicker()
+		} else {
+			m.openExtractTabsPicker()
+		}
 		return nil, true
 	case "workspace_rename":
 		m.openWorkspacePicker("Rename Workspace", func(e WorkspaceEntry) tea.Cmd {
@@ -505,6 +556,156 @@ func (m *Model) openExtractTabsPicker() {
 	m.pushOverlay(v)
 }
 
+// The extract picker values: a file tab's path or a dock tab's index, so one
+// multi-select list can carry both kinds.
+const (
+	extractFileValue     = "file:"
+	extractTerminalValue = "term:"
+)
+
+// openMixedExtractPicker offers the open file tabs and the dock's terminal tabs in
+// one multi-select list (gvim extension: Fresh extracts a single tab only). Space
+// marks rows, Enter asks for the target (a new co-tenant always, plus every existing
+// same-root workspace), and a file tab without a path (the welcome screen) or a
+// large-file overlay refuses the whole action in the command.
+func (m *Model) openMixedExtractPicker() {
+	if _, ok := m.workspace.(workspaceExtractMixedPort); !ok {
+		m.quietNotice("Extracting mixed file and terminal tabs is not supported by this workspace layer")
+		return
+	}
+	termRefs := m.TerminalTabRefs()
+	termNames := make(map[int]string, len(termRefs))
+	rows := make([]list.Row, 0, len(m.ed.Tabs())+len(termRefs))
+	for _, t := range m.ed.Tabs() {
+		if t.Path == "" {
+			continue
+		}
+		left := t.Name
+		if left == "" {
+			left = t.Path
+		}
+		right := "file"
+		if t.Modified {
+			right = "file · modified"
+		}
+		rows = append(rows, list.Row{Left: left, Right: right, Value: extractFileValue + t.Path})
+	}
+	for _, ref := range termRefs {
+		termNames[ref.Index] = ref.Name
+		rows = append(rows, list.Row{Left: ref.Label, Right: "terminal", Value: extractTerminalValue + strconv.Itoa(ref.Index)})
+	}
+	if len(rows) == 0 {
+		m.quietNotice("No tabs to extract")
+		return
+	}
+	selectionOf := func(selected []list.Row) ExtractSelection {
+		var sel ExtractSelection
+		for _, r := range selected {
+			switch {
+			case strings.HasPrefix(r.Value, extractFileValue):
+				sel.Files = append(sel.Files, strings.TrimPrefix(r.Value, extractFileValue))
+			case strings.HasPrefix(r.Value, extractTerminalValue):
+				idx, err := strconv.Atoi(strings.TrimPrefix(r.Value, extractTerminalValue))
+				if err != nil {
+					continue
+				}
+				sel.Terminals = append(sel.Terminals, ExtractTerminalRef{Index: idx, Name: termNames[idx]})
+			}
+		}
+		return sel
+	}
+	extract := func(view *list.View, selected []list.Row) tea.Cmd {
+		view.Close()
+		sel := selectionOf(selected)
+		return tea.Cmd(func() tea.Msg { return mixedExtractSelectionMsg{selection: sel} })
+	}
+	v := list.New("Extract Tabs to Workspace", rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
+		return extract(view, []list.Row{r})
+	})
+	v.Multi = true
+	v.Fit, v.MaxW = true, 80
+	v.Hint = "Space mark, Enter choose target, type to filter, Esc close"
+	v.ChooseMany = func(view *list.View, marked []list.Row) tea.Cmd {
+		return extract(view, marked)
+	}
+	m.pushOverlay(v)
+}
+
+// afterMixedExtractSelection asks for the target: "New workspace" is always offered;
+// the existing same-root workspaces follow when there are any. With no existing target
+// the new co-tenant is created directly.
+func (m *Model) afterMixedExtractSelection(sel ExtractSelection) tea.Cmd {
+	if sel.Len() == 0 {
+		m.quietNotice("No tabs selected")
+		return nil
+	}
+	if _, ok := m.workspace.(workspaceExtractMixedPort); !ok {
+		m.quietNotice("Extracting mixed file and terminal tabs is not supported by this workspace layer")
+		return nil
+	}
+	targets := m.extractTargetEntries()
+	if len(targets) == 0 {
+		return m.runMixedExtract(sel, "", false)
+	}
+	rows := []list.Row{{Left: "New workspace", Right: "new co-tenant over this root", Value: ""}}
+	for _, e := range targets {
+		left, right := workspaceRowText(e)
+		rows = append(rows, list.Row{Left: left, Right: right, Value: e.ID})
+	}
+	v := list.New("Extract Tabs To", rows, m.listChrome(), func(view *list.View, r list.Row) tea.Cmd {
+		view.Close()
+		return m.runMixedExtract(sel, r.Value, false)
+	})
+	v.Fit, v.MaxW = true, 80
+	m.pushOverlay(v)
+	return nil
+}
+
+// runMixedExtract calls the mixed extract surface. targetID "" means a new co-tenant;
+// replace is set only after the conflict confirmation, which the command sends BEFORE
+// any write. An immediate error is a refusal (nothing moved) and is shown as a notice.
+func (m *Model) runMixedExtract(sel ExtractSelection, targetID string, replace bool) tea.Cmd {
+	p, ok := m.workspace.(workspaceExtractMixedPort)
+	if !ok {
+		m.quietNotice("Extracting mixed file and terminal tabs is not supported by this workspace layer")
+		return nil
+	}
+	cmd, err := p.ExtractMixed(sel, targetID, replace)
+	if err != nil {
+		m.workspaceActionError(err)
+		return nil
+	}
+	return cmd
+}
+
+// mixedExtractSelectionMsg carries a completed multi-select picker selection to
+// Update. The target chooser is opened from Update rather than from inside the list
+// callback, so the picker has already been popped off the overlay stack when the
+// chooser is pushed.
+type mixedExtractSelectionMsg struct {
+	selection ExtractSelection
+}
+
+// extractConflictAnswer is the tag of the mixed-extract conflict confirmation: Yes
+// retries with replace (target file state replaced; same-name terminal tabs added
+// alongside) and No cancels with everything untouched.
+type extractConflictAnswer struct {
+	selection ExtractSelection
+	targetID  string
+}
+
+// extractConflictQuestion states exactly what the conflicts are and what Yes does,
+// including the append semantics for a same-name terminal tab.
+func extractConflictQuestion(msg ExtractConflictMsg) string {
+	label := msg.TargetLabel
+	if label == "" {
+		label = msg.TargetID
+	}
+	conflicts := strings.Join(msg.Conflicts, ", ")
+	return "Workspace \"" + label + "\" already has: " + conflicts +
+		". Continue? The target's file state is replaced; same-name terminal tabs are added alongside. The source tabs stay open until the target accepts."
+}
+
 // workspaceRowText is the switcher text of one workspace: the label, the root and the
 // state (active/materialized/dormant).
 func workspaceRowText(e WorkspaceEntry) (left, right string) {
@@ -582,6 +783,13 @@ func (m *Model) openNewWorkspaceLabelPrompt(root string) {
 // workspaceActionAnswer applies the answers of the workspace prompts. It returns nil
 // when the tag is not a workspace tag.
 func (m *Model) workspaceActionAnswer(d prompt.Done) (tea.Cmd, bool) {
+	if tag, ok := d.Tag.(extractConflictAnswer); ok {
+		if d.Outcome == prompt.Yes {
+			return m.runMixedExtract(tag.selection, tag.targetID, true), true
+		}
+		m.quietNotice("Extraction cancelled; nothing was moved")
+		return nil, true
+	}
 	switch tag := d.Tag.(type) {
 	case workspaceNewRootTag:
 		if d.Outcome == prompt.Submitted {
@@ -647,7 +855,9 @@ func (m *Model) AddWorkspaceCommands() {
 			commands.Entry{Name: "Extract terminal tab to workspace…", Description: "Move the active dock terminal tab into an existing workspace over the same root (it revives on the first dive)", Action: "workspace_extract_terminal_to", Source: commands.SourceBuiltin},
 		)
 	}
-	if _, ok := m.workspace.(workspaceExtractManyPort); ok {
+	if _, ok := m.workspace.(workspaceExtractMixedPort); ok {
+		rows = append(rows, commands.Entry{Name: "Extract tabs to workspace…", Description: "Choose file and terminal tabs and move them into a new or existing workspace over the same root", Action: "workspace_extract_tabs", Source: commands.SourceBuiltin})
+	} else if _, ok := m.workspace.(workspaceExtractManyPort); ok {
 		rows = append(rows, commands.Entry{Name: "Extract tabs to new workspace…", Description: "Choose several file tabs and open them in one new workspace over the same root", Action: "workspace_extract_tabs", Source: commands.SourceBuiltin})
 	}
 	for _, row := range rows {

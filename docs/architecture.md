@@ -1170,6 +1170,40 @@ still loads unchanged.
     the active tab) after acceptance. A tab that changed mid-action is skipped (its text
     is still in the target; the report says how many closed), a refused switch discards
     the just-created co-tenant and moves nothing.
+  - **Mixed file+terminal multi-selection (round 18, task-193; gvim extension).**
+    Fresh's only extract action still moves a single tab (file tabs and terminal tabs
+    dispatch to the same action); the mixed selection builds on the gvim multi-select
+    extension above. The palette "Extract tabs to workspace…" picker now lists the
+    open file tabs AND the dock's terminal tabs, type-labelled ("file", "file ·
+    modified", "terminal"). Enter opens a target chooser whose first row is a NEW
+    co-tenant over the same root, followed by every existing same-root workspace
+    (ExtractTargets); with no existing target the new co-tenant is created directly.
+    A new target writes one session (all FileStates + stashes) and one terminal record
+    (all SavedTabs) before the switch is queued, then closes the source file tabs by
+    path and the source terminal tabs by identity (highest index first, saved-name
+    checked) only after the switch was accepted, re-captures the source and reports
+    "Extracted N tabs into workspace". For an existing target the command first
+    detects conflicts in a READ-ONLY pass — a selected file already present in the
+    target's session/open editor, or a non-empty terminal tab name already in its
+    terminal record/dock — and sends ExtractConflictMsg BEFORE any write; the TUI
+    confirmation names the target and every conflict and states the semantics: Yes
+    replaces the target's existing file state and ADDS a same-name terminal tab
+    alongside (it is never replaced), No cancels with all target records and source
+    tabs untouched ("Extraction cancelled; nothing was moved"). After acceptance all
+    files and terminal records are transferred (dormant merge or warm editor/dock
+    append), then the switch is queued and accepted, then the sources close; an
+    acceptance failure stops with "N of M tabs transferred, sources kept", and a
+    source tab that changed meanwhile is skipped and counted in the report. The same
+    ordering guarantees as round 16 hold throughout (transfer accepted -> queued
+    switch accepted -> source close), and Update does no I/O (capture on the UI
+    goroutine, disk/materialization in the tea command, conflict detection in the
+    command). Limits/residuals: a large-file overlay, a welcome tab or any tab that
+    closed during capture refuses the whole action; extraction is co-tenant-only (a
+    target over another root is refused); no PTY is handed over (the target revives
+    the terminal on its first dive exactly like the terminal action); default-named
+    terminal tabs (empty saved name) are not part of the name-conflict check and can
+    duplicate names; there is no undo, no drag-and-drop target and no cross-workspace
+    shared buffers (#19b).
   The close-workspace flow asks first when the
   workspace still runs terminals: the confirmation lists every one of them and its agent
   (the dock's `RunningTabs` snapshot), and the close report and protocol close answer say
@@ -1191,8 +1225,7 @@ still loads unchanged.
   full shared-buffer view independence (#19b; bounded slice landed) and a live PTY/process hand-off (gvim moves terminal state and
   restarts in the target, Fresh moves the PTY in-process), large-file overlay extraction,
   extracting to a workspace over a DIFFERENT root (refused: extraction is co-tenant only,
-  matching Fresh's root-preserving extract), terminal tabs in the multi-select picker
-  (they use the terminal action; a mixed selection cannot be expressed yet), and all-tabs-
+  matching Fresh's root-preserving extract), and all-tabs-
   of-a-file semantics (there is no such Fresh action; the multi-select picker is the
   bounded substitute). The target picker is a plain list: no drag-and-drop between
   workspaces and no cross-workspace undo, same as the rest of the workspace UI.

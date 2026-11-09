@@ -221,8 +221,13 @@ func (b *sshBackend) authMethodsResolved(ctx context.Context, res sshResolved, a
 		methods = append(methods, b.passwordAuth("ui", func() (string, error) { return stored, nil }))
 	} else if b.opts.PasswordStore != nil {
 		// The OS keyring is tried before the UI prompt: a stored password is not a new
-		// secret and does not need the interactive callback.
-		if pw, ok, err := b.opts.PasswordStore.Lookup(res.host, res.user); err == nil && ok && pw != "" {
+		// secret and does not need the interactive callback. A broken/unavailable backend
+		// is surfaced as a notice and falls through to the prompt (never a hard dial
+		// failure unless the user's callback also fails).
+		pw, ok, kerr := b.opts.PasswordStore.Lookup(ctx, res.host, res.user)
+		if kerr != nil {
+			b.addNotice(fmt.Sprintf("SSH: could not read the OS-keyring password for %s@%s: %v; using the password prompt", res.user, res.host, kerr))
+		} else if ok && pw != "" {
 			methods = append(methods, b.passwordAuth("keyring", func() (string, error) { return pw, nil }))
 		}
 	}

@@ -1,0 +1,7 @@
+{
+  "name": "csharp_support",
+  "version": "1.0.0",
+  "description": "C# language-server helper: detects the .csproj/.sln project root, restores NuGet packages for trusted workspaces, and offers install help for csharp-ls",
+  "api": 2,
+  "default_enabled": false
+}

@@ -329,6 +329,13 @@ func (f *FakeOS) WriteFile(_ context.Context, path string, data []byte, o hostos
 		f.mkdirAll(filepath.Dir(p))
 	}
 	old := f.nodes[p]
+	if o.Exclusive && old != nil {
+		kind := "file"
+		if old.dir {
+			kind = "directory"
+		}
+		return pluginapi.Errf(pluginapi.CodeConflict, "%s: exists as a %s; a create-new does not replace it", p, kind)
+	}
 	if old != nil && old.dir {
 		return pluginapi.Errf(pluginapi.CodeIO, "%s: is a directory", p)
 	}

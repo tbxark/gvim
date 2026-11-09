@@ -174,9 +174,9 @@ func TestPreviewDegradesForBinaryLargeAndUnreadableFiles(t *testing.T) {
 		read previewRead
 		want string
 	}{
-		{"binary", previewRead{data: "ab\x00cd"}, previewBinary},
-		{"unreadable", previewRead{err: errors.New("permission denied")}, previewUnavailable},
-		{"empty", previewRead{data: ""}, previewNoLines},
+		{"binary", previewRead{data: "ab\x00cd"}, previewBinaryText()},
+		{"unreadable", previewRead{err: errors.New("permission denied")}, previewUnavailableText()},
+		{"empty", previewRead{data: ""}, previewNoLinesText()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

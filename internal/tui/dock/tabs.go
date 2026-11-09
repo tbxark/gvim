@@ -1036,17 +1036,62 @@ func (t *Tabs) SavedState() terminal.SavedState {
 	st := t.Active().SavedState()
 	st.Tabs = make([]terminal.SavedTab, len(t.tabs))
 	for i, p := range t.tabs {
-		rec := p.SavedState()
-		st.Tabs[i] = terminal.SavedTab{
-			Name: t.names[i], Open: rec.Open, Cwd: rec.Cwd, Width: rec.Width,
-			Rows: rec.Rows, LaunchArgv: rec.LaunchArgv, ResumeArgv: rec.ResumeArgv,
-			Agent: rec.Agent, Ephemeral: rec.Ephemeral, LaunchDir: rec.LaunchDir,
-			Source: rec.Source, Live: rec.Live, Screen: rec.Screen,
-			ExitCode: rec.ExitCode, ExitKnown: rec.ExitKnown,
-		}
+		st.Tabs[i] = t.savedTabOf(i, p)
 	}
 	st.ActiveTab = t.active
 	return st
+}
+
+// savedTabOf builds tab i's saved record from its panel.
+func (t *Tabs) savedTabOf(i int, p *Panel) terminal.SavedTab {
+	rec := p.SavedState()
+	return terminal.SavedTab{
+		Name: t.names[i], Open: rec.Open, Cwd: rec.Cwd, Width: rec.Width,
+		Rows: rec.Rows, LaunchArgv: rec.LaunchArgv, ResumeArgv: rec.ResumeArgv,
+		Agent: rec.Agent, Ephemeral: rec.Ephemeral, LaunchDir: rec.LaunchDir,
+		Source: rec.Source, Live: rec.Live, Screen: rec.Screen,
+		ExitCode: rec.ExitCode, ExitKnown: rec.ExitKnown,
+	}
+}
+
+// TabRef names one dock tab for the extract picker: Index is the tab's slot
+// (stable until the selection is executed), Name is its saved name ("" for a
+// default-named tab, used to verify identity before closing) and Label is the
+// display label.
+type TabRef struct {
+	Index int
+	Name  string
+	Label string
+}
+
+// TabRefs returns every dock tab as a picker reference, in tab order.
+func (t *Tabs) TabRefs() []TabRef {
+	out := make([]TabRef, len(t.tabs))
+	for i := range t.tabs {
+		out[i] = TabRef{Index: i, Name: t.names[i], Label: t.tabLabel(i)}
+	}
+	return out
+}
+
+// SavedTabAt returns tab i's saved record, for the mixed extract action that
+// moves a file+terminal selection into another workspace.
+func (t *Tabs) SavedTabAt(i int) (terminal.SavedTab, bool) {
+	if i < 0 || i >= len(t.tabs) {
+		return terminal.SavedTab{}, false
+	}
+	return t.savedTabOf(i, t.tabs[i]), true
+}
+
+// CloseTabAtForExtract force-closes tab i when its saved name is name, without
+// asking: the extract action already wrote the tab's record into the target, so
+// closing stops this shell and drops nothing. It reports false when the tab
+// changed (another tab closed/moved), leaving everything untouched.
+func (t *Tabs) CloseTabAtForExtract(i int, name string) bool {
+	if i < 0 || i >= len(t.tabs) || t.names[i] != name {
+		return false
+	}
+	t.removeAt(i)
+	return true
 }
 
 // ActiveSavedTab returns the active tab's saved record (the same per-tab record

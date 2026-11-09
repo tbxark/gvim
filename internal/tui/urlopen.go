@@ -5,7 +5,6 @@ package tui
 // is a tea.Cmd, so a slow browser launch never blocks Update.
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 	"unicode"
@@ -89,7 +88,7 @@ func (h *pluginHost) OpenURL(raw string) error {
 // confirmOpenURL pushes the Yes/No dialog that gates one URL open. Yes starts the opener,
 // No/Esc closes it; the dialog is a normal prompt overlay, reachable from the keyboard.
 func (m *Model) confirmOpenURL(raw string) {
-	q := fmt.Sprintf("Open %s in the system browser?", displayURL(raw))
+	q := uiTextVars("gvim.url.open_confirm", "Open %{url} in the system browser?", map[string]any{"url": displayURL(raw)})
 	m.pushOverlay(prompt.NewConfirm(m.styles, q, urlOpenTag{url: raw}))
 }
 
@@ -99,7 +98,7 @@ func (m *Model) confirmOpenURL(raw string) {
 func (m *Model) openURLCmd(raw string) tea.Cmd {
 	opener := m.root.ports.OpenURL
 	if opener == nil {
-		m.notice = "Opening URLs is not available in this environment"
+		m.notice = uiText("gvim.url.unavailable", "Opening URLs is not available in this environment")
 		return nil
 	}
 	return func() tea.Msg {
@@ -120,7 +119,7 @@ func displayURL(raw string) string {
 // openURLAnswer handles the confirmation answer.
 func (m *Model) openURLAnswer(tag urlOpenTag, d prompt.Done) tea.Cmd {
 	if d.Outcome != prompt.Yes {
-		m.quietNotice("URL opening cancelled")
+		m.quietNotice(uiText("gvim.url.cancelled", "URL opening cancelled"))
 		return nil
 	}
 	return m.openURLCmd(tag.url)
@@ -130,10 +129,10 @@ func (m *Model) openURLAnswer(tag urlOpenTag, d prompt.Done) tea.Cmd {
 // why, so a missing/broken platform opener is never silent.
 func (m *Model) openURLDone(msg urlOpenedMsg) {
 	if msg.err != nil {
-		m.notice = "Open URL: " + msg.err.Error()
+		m.notice = uiTextVars("gvim.url.error", "Open URL: %{error}", map[string]any{"error": msg.err.Error()})
 		return
 	}
-	m.quietNotice("Opened URL")
+	m.quietNotice(uiText("gvim.url.opened", "Opened URL"))
 }
 
 var _ pluginapi.URLOpenHost = (*pluginHost)(nil)

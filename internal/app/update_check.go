@@ -7,7 +7,10 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,29 +87,57 @@ func (t *updateTracker) status() tui.UpdateStatus {
 	return t.st
 }
 
-// newUpdateHooks builds the release check of this launch, or the zero value when
-// check_for_updates is off. The feed is the configured update_check_url, else the
-// GVIM_RELEASES_URL override, else the built-in feed; the transport policy is
-// applied when the check runs, so a refused mirror only means no indicator.
+// updateCommandArgv turns update_command into the argv the terminal dock runs. The
+// config value is a command line, so it goes through the user's shell: $SHELL -c on
+// Unix (POSIX shells and fish all accept -c) and cmd.exe /C on Windows. It returns nil
+// for an unset command, which keeps the update rows hidden.
+func updateCommandArgv(command string) []string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+	if goruntime.GOOS == "windows" {
+		return []string{"cmd.exe", "/C", command}
+	}
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	return []string{shell, "-c", command}
+}
+
+// newUpdateHooks builds the release check and update command of this launch. The
+// command is independent of check_for_updates (a user may update without polling the
+// feed); when the check is off the Check/Force/Status hooks stay nil and the two
+// update-check commands say so. The feed is the configured update_check_url, else the
+// GVIM_RELEASES_URL override, else the built-in feed; the transport policy is applied
+// when the check runs, so a refused mirror only means no indicator.
 func newUpdateHooks(cfg *config.Config) tui.UpdateHooks {
-	if cfg == nil || !cfg.Update.Check {
+	if cfg == nil {
 		return tui.UpdateHooks{}
 	}
-	tracker := newUpdateTracker(cfg)
-	return tui.UpdateHooks{
-		Check: func(ctx context.Context) *tui.UpdateInfo {
-			st := tracker.run(ctx, true)
-			if !st.Available {
-				return nil
-			}
-			return &tui.UpdateInfo{Version: st.Latest, URL: st.URL}
-		},
-		Force: func(ctx context.Context) tui.UpdateStatus {
-			return tracker.run(ctx, false)
-		},
-		Status: tracker.status,
+	hooks := tui.UpdateHooks{Command: updateCommandArgv(cfg.Update.Command)}
+	if !cfg.Update.Check {
+		return hooks
 	}
+	tracker := newUpdateTracker(cfg)
+	hooks.Check = tracker.check
+	hooks.Force = tracker.force
+	hooks.Status = tracker.status
+	return hooks
 }
+
+// check is the startup hook: the daily-debounced check, or nil when no newer release.
+func (t *updateTracker) check(ctx context.Context) *tui.UpdateInfo {
+	st := t.run(ctx, true)
+	if !st.Available {
+		return nil
+	}
+	return &tui.UpdateInfo{Version: st.Latest, URL: st.URL}
+}
+
+// force is the Check for Updates command: ignore the debounce and report the state.
+func (t *updateTracker) force(ctx context.Context) tui.UpdateStatus { return t.run(ctx, false) }
 
 // updateFeedURL is the feed this launch polls: the configured URL when it is set,
 // else the environment override, else the built-in feed.

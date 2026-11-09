@@ -1209,14 +1209,22 @@ type completionAtCarets interface {
 	ApplyCompletionAtCarets(path, text, wordChars string, expect *editor.Version) (int, error)
 }
 
+// completionItemAtCarets is the optional editor view for a snippet/auto-import accept at
+// every caret: one atomic edit with the per-caret insert text, the snippet's rune stop and
+// the additional (import) edits, guarded by the request version. An editor without it
+// keeps the explicit refusal.
+type completionItemAtCarets interface {
+	ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []editor.LSPEdit, wordChars string, expect *editor.Version) (int, error)
+}
+
 // multiCursorAccept accepts the completion at every caret when the active document has
 // extra carets. It reports whether it handled the acceptance. It follows Fresh's
 // insert_completion_text: each caret replaces its own identifier prefix with the same
 // text in one atomic edit (one undo step), and the version captured at the request stays
-// the guard. A snippet or auto-import completion is refused with a notice for now: those
-// carry additional edits/caret offsets whose per-caret semantics are not covered by this
-// bounded slice, so the single-caret path stays byte-identical and nothing is applied at
-// the wrong places.
+// the guard. A snippet's rune stop places every caret inside its own insertion; the
+// additional (auto-import) edits are applied once in the same atomic edit. A resolve item
+// still refuses with extra carets: its lazy edits arrive later, when the per-caret
+// positions can no longer be guaranteed.
 func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 	doc := m.ed.Active()
 	if doc == nil || docPath(doc) != c.path {
@@ -1226,15 +1234,9 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 	if !ok || len(lister.Cursors()) == 0 {
 		return false
 	}
-	if item.Snippet || len(item.Additional) > 0 || item.ResolveToken != 0 {
+	if item.ResolveToken != 0 {
 		m.closeCompletion(c)
-		m.notice = "completion: a snippet or import completion applies with one cursor; collapse the extra carets"
-		return true
-	}
-	accepter, ok := m.ed.(completionAtCarets)
-	if !ok {
-		m.closeCompletion(c)
-		m.notice = "completion: multi-cursor acceptance is not available in this editor"
+		m.notice = "completion: a resolved completion applies with one cursor; collapse the extra carets"
 		return true
 	}
 	var expect *editor.Version
@@ -1242,7 +1244,32 @@ func (m *Model) multiCursorAccept(c *lspCompletion, item CompletionItem) bool {
 		expect = &c.version
 	}
 	wordChars := m.docLanguageSettings(doc).WordCharacters
-	_, err := accepter.ApplyCompletionAtCarets(c.path, item.Insert, wordChars, expect)
+	var err error
+	if item.Snippet || len(item.Additional) > 0 {
+		accepter, ok := m.ed.(completionItemAtCarets)
+		if !ok {
+			m.closeCompletion(c)
+			m.notice = "completion: multi-cursor snippet/import acceptance is not available in this editor"
+			return true
+		}
+		additional := make([]editor.LSPEdit, 0, len(item.Additional))
+		for _, add := range item.Additional {
+			additional = append(additional, editor.LSPEdit{From: add.Range.Start, To: add.Range.End, Text: add.Text})
+		}
+		cursorOffset := -1
+		if item.Snippet && item.CursorOffset >= 0 {
+			cursorOffset = item.CursorOffset
+		}
+		_, err = accepter.ApplyCompletionItemAtCarets(c.path, item.Insert, cursorOffset, additional, wordChars, expect)
+	} else {
+		accepter, ok := m.ed.(completionAtCarets)
+		if !ok {
+			m.closeCompletion(c)
+			m.notice = "completion: multi-cursor acceptance is not available in this editor"
+			return true
+		}
+		_, err = accepter.ApplyCompletionAtCarets(c.path, item.Insert, wordChars, expect)
+	}
 	m.closeCompletion(c)
 	if err != nil {
 		switch {

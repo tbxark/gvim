@@ -353,10 +353,17 @@ one atomic edit (one undo step): each caret keeps its own prefix length, ends af
 inserted text, and the document version captured at the request is the stale guard, exactly as
 the single-caret accept uses it. Two carets whose replacement ranges overlap (both inside one
 word) refuse the accept as a whole and write nothing. Snippet and auto-import candidates are
-single-caret in this bounded slice: with extra carets the popup dismisses with a notice and
-nothing is written, because their caret offsets/additional edits are not defined per caret here.
-With one caret the existing accept path is unchanged: server edit range, snippet expansion,
-additional import edits, resolve and cursor placement all behave as before.
+accepted too, with the same per-caret rule: every caret replaces its own word prefix with the
+expanded snippet text, the snippet's final stop is a RUNE offset into that text (so each caret
+lands inside its own insertion), and the auto-import `additionalTextEdits` are applied exactly
+once in the same atomic edit as the per-caret inserts. The combined edit list is validated first:
+an inverted range, overlapping ranges, an insert strictly inside a replaced range, or two
+zero-width inserts at the same point refuse the whole accept (ErrOverlappingEdits) and nothing
+is written. All of it is one undo step and keeps the request version guard. A server item that
+needs `completionItem/resolve` still refuses with extra carets, because its edits arrive later
+and the per-caret positions can no longer be guaranteed. With one caret the existing accept
+path is unchanged: server edit range, snippet expansion, additional import edits, resolve and
+cursor placement all behave as before.
 
 **Accepting a language-server completion.** A server item is inserted with everything the
 server asked for in one edit: its snippet text is expanded, the import edits of an
@@ -376,9 +383,8 @@ nothing is written and the status row says why ("completion is stale…", "compl
 overlap…"). A resolve reply is applied the same way; if the document changed while it was in
 flight, it is refused instead of editing newer text. Not ported from Fresh: tabstop
 navigation (Fresh does not navigate either — it inserts defaults and jumps to the final
-stop), multi-cursor insertion (gvim has a single
-caret), and the request-id bookkeeping Fresh keeps for a completion that is re-asked while
-open.
+stop), and the request-id bookkeeping Fresh keeps for a completion that is re-asked while
+open. Multi-cursor insertion, including per-caret snippets and auto-imports, is covered above.
 
 ## What the servers add
 

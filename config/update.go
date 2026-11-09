@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -18,7 +19,15 @@ type UpdateConfig struct {
 	// Only an https URL, or an http URL on the loopback interface for a local
 	// mirror, is accepted (see package updatecheck).
 	URL string
+	// Command is the user's update command line (gvim extension update_command).
+	// Empty hides the Update fresh / update output commands; a set command runs in
+	// the terminal dock (through the user's shell) and the tab keeps its output.
+	Command string
 }
+
+// MaxUpdateCommandBytes bounds update_command: it is a user preference, but a
+// pathological config should not fill memory before the command is even started.
+const MaxUpdateCommandBytes = 4096
 
 // DefaultUpdate returns the release-check defaults: checking is on (Fresh's
 // default) and the feed is the built-in one.
@@ -35,6 +44,19 @@ func (c *Config) setUpdate(key string, raw json.RawMessage) error {
 			return errors.New("must be true or false")
 		}
 		c.Update.Check = v
+	case "update_command":
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return errors.New("must be a command string")
+		}
+		s = strings.TrimSpace(s)
+		if len(s) > MaxUpdateCommandBytes {
+			return fmt.Errorf("must be at most %d bytes", MaxUpdateCommandBytes)
+		}
+		if strings.ContainsRune(s, 0) {
+			return errors.New("must not contain a NUL byte")
+		}
+		c.Update.Command = s
 	case "update_check_url":
 		var s string
 		if err := json.Unmarshal(raw, &s); err != nil {

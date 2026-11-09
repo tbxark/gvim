@@ -39,6 +39,13 @@ watcher:stop()  watcher:active() -> boolean
   permission bits. `stat` follows symlinks, and a broken link is `kind = "symlink"`.
 * `write` is **atomic** by default (a temporary file, then a rename; through a symlink it writes the
   target), except with `append = true`. `mode` 0 keeps the mode of the file it replaces, else 0644.
+* `write` with `exclusive = true` is a **create-new**: it fails with `conflict` (and leaves the
+  existing entry untouched) when the path already exists as a file, directory or symlink, so a
+  config file cannot be silently overwritten after an existence check raced another process. It
+  cannot combine with `append` or `parents`, ignores `atomic` (the target is created directly, not
+  renamed over), and uses the workspace authority's optional `FileCreator` capability on a remote
+  workspace; a backend without that capability returns `unsupported` instead of falling back to a
+  racy check-then-write. A failed create-new removes the file it just created.
 * `copy` of a single file refuses a source that is not a regular file (a FIFO, a device) with
   `invalid`, as `read` does.
 * `remove` refuses `/`, `$HOME`, the workspace root and the gvim config directory, even with

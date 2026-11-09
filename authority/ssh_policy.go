@@ -6,6 +6,7 @@ package authority
 // host keys itself and only exposes the bounded knobs below (docs/authority.md).
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -196,10 +197,11 @@ func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
 // before the UI prompt when enabled; Store is called only when the user config set
 // ssh.keyring and the server accepted the password (never without that consent).
 type PasswordStore interface {
-	// Lookup returns the stored password for user@host, if any.
-	Lookup(host, user string) (password string, ok bool, err error)
-	// Store records password for user@host.
-	Store(host, user, password string) error
+	// Lookup returns the stored password for user@host, if any. ctx cancels the backing
+	// keyring command.
+	Lookup(ctx context.Context, host, user string) (password string, ok bool, err error)
+	// Store records password for user@host. ctx cancels the backing keyring command.
+	Store(ctx context.Context, host, user, password string) error
 }
 
 // ErrPasswordStoreUnavailable is returned by the no-op store, and by OS backends that
@@ -210,10 +212,14 @@ var ErrPasswordStoreUnavailable = errors.New("authority: no OS keyring integrati
 // store, so the caller never claims a password was saved when it was not.
 type NoopPasswordStore struct{}
 
-func (NoopPasswordStore) Lookup(string, string) (string, bool, error) { return "", false, nil }
-func (NoopPasswordStore) Store(string, string, string) error          { return ErrPasswordStoreUnavailable }
+func (NoopPasswordStore) Lookup(context.Context, string, string) (string, bool, error) {
+	return "", false, nil
+}
+func (NoopPasswordStore) Store(context.Context, string, string, string) error {
+	return ErrPasswordStoreUnavailable
+}
 
-// SystemPasswordStore returns the build's OS password store. This bounded slice ships
-// the interface and the no-op default: the macOS-keychain and Linux-secret-service
-// backends are recorded follow-ups (docs/authority.md).
-func SystemPasswordStore() PasswordStore { return NoopPasswordStore{} }
+// SystemPasswordStore returns the platform password store when its tool is installed
+// (macOS security, Linux secret-tool); otherwise the no-op store, whose Store reports
+// ErrPasswordStoreUnavailable honestly. The app calls this only when ssh.keyring is on.
+func SystemPasswordStore() PasswordStore { return systemPasswordStore() }

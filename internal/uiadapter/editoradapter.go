@@ -278,6 +278,13 @@ func (a *Editor) ApplyCompletionAtCarets(path, text, wordChars string, expect *e
 	return a.ed.ApplyCompletionAtCarets(path, text, wordChars, expect)
 }
 
+// ApplyCompletionItemAtCarets accepts a snippet/auto-import completion at every caret
+// as one atomic, version-guarded edit. See editor.Editor.ApplyCompletionItemAtCarets;
+// the TUI's multi-cursor snippet/import accept path uses it.
+func (a *Editor) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []editor.LSPEdit, wordChars string, expect *editor.Version) (int, error) {
+	return a.ed.ApplyCompletionItemAtCarets(path, text, cursorOffset, additional, wordChars, expect)
+}
+
 // RecentTabIndices returns the editor's open tabs in MRU order (the active tab first),
 // as editor.Editor.RecentTabIndices does. The TUI's multi-buffer completion reads it;
 // without it completion falls back to tab order.

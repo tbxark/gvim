@@ -285,16 +285,30 @@ func prepFSWrite(c *awaitCall) ioJob {
 		return nil
 	}
 	wo := hostos.WriteOptions{
-		Atomic:  o.boolean("atomic", true),
-		Append:  o.boolean("append", false),
-		Mode:    fs.FileMode(o.number("mode", 0, 0, 0o7777)),
-		Parents: o.boolean("parents", false),
+		Atomic:    o.boolean("atomic", true),
+		Append:    o.boolean("append", false),
+		Mode:      fs.FileMode(o.number("mode", 0, 0, 0o7777)),
+		Parents:   o.boolean("parents", false),
+		Exclusive: o.boolean("exclusive", false),
 	}
 	if !c.optionsDone(2, "write", o) {
 		return nil
 	}
 	if wo.Append {
 		wo.Atomic = false // appending to a copy and renaming would lose concurrent appends
+	}
+	if wo.Exclusive {
+		if wo.Append {
+			c.Fail(pluginapi.Errf(pluginapi.CodeInvalid, "write: a create-new (exclusive) cannot append"))
+			return nil
+		}
+		if wo.Parents {
+			c.Fail(pluginapi.Errf(pluginapi.CodeInvalid, "write: a create-new (exclusive) does not create parent directories"))
+			return nil
+		}
+		// A create-new is not a replace: writing through a temp file and renaming would
+		// defeat the exclusive claim, so the backends create the target directly.
+		wo.Atomic = false
 	}
 	return func(ctx context.Context, os hostos.OS) ([]any, error) {
 		if err := os.WriteFile(ctx, path, []byte(data), wo); err != nil {

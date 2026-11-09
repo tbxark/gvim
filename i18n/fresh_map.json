@@ -47,6 +47,10 @@
   "gvim.settings.field.editor.whitespace_show": "settings.field.editor.whitespace_show",
   "gvim.status.blocked": "statusbar.trust.blocked",
   "gvim.status.restricted": "statusbar.trust.restricted",
+  "gvim.status.terminal_restart": "status.terminal_restart",
+  "gvim.status.terminal_restart_code": "status.terminal_restart_code",
+  "gvim.status.terminal_restart_shell": "status.terminal_restart_shell",
+  "gvim.status.terminal_resume": "status.terminal_resume",
   "gvim.status.trusted": "statusbar.trust.trusted",
   "gvim.status.update_available": "status.update_available",
   "terminal.no_terminal_open": "terminal.no_terminal_open"

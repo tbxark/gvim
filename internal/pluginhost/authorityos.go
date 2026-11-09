@@ -124,7 +124,37 @@ func (o *authorityOS) ReadFile(ctx context.Context, p string, max int64) ([]byte
 }
 
 func (o *authorityOS) WriteFile(ctx context.Context, p string, data []byte, opts hostos.WriteOptions) error {
-	return mapErr(o.files().WriteFile(ctx, o.resolve(p), data, opts), p)
+	if !opts.Exclusive {
+		return mapErr(o.files().WriteFile(ctx, o.resolve(p), data, opts), p)
+	}
+	// Exclusive create is the authority's optional FileCreator capability: it is the
+	// only way to claim the path without a check-then-write race. A backend without it
+	// is refused explicitly instead of falling back to a racy Stat.
+	if opts.Append || opts.Parents {
+		return pluginapi.Errf(pluginapi.CodeInvalid, "%s: a create-new cannot append or create parent directories", p)
+	}
+	resolved := o.resolve(p)
+	creator := authority.Creators(o.files())
+	if creator == nil {
+		return pluginapi.Errf(pluginapi.CodeUnsupported,
+			"%s: the workspace authority does not support exclusive file creation", p)
+	}
+	createOpts := opts
+	createOpts.Exclusive = false
+	createOpts.Atomic = false
+	if err := creator.CreateNew(ctx, resolved, createOpts); err != nil {
+		return mapErr(err, p)
+	}
+	if err := o.files().WriteFile(ctx, resolved, data, hostos.WriteOptions{Mode: opts.Mode}); err != nil {
+		// The claim is ours; remove the empty file rather than leave a half-created
+		// config. Mutations is optional, so a backend without Remove leaves it and the
+		// error says the write failed.
+		if m := authority.Mutations(o.files()); m != nil {
+			_ = m.Remove(ctx, resolved, false)
+		}
+		return mapErr(err, p)
+	}
+	return nil
 }
 
 func (o *authorityOS) ReadDir(ctx context.Context, p string, hidden bool) ([]hostos.DirEntry, error) {

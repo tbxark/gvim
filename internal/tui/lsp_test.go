@@ -49,12 +49,14 @@ type lspEd struct {
 	// recent is the explicit MRU tab order (active first); nil falls back to tab order.
 	recent []int
 	// multiApplies records multi-caret completion accepts; multiErr makes the next
-	// one fail.
-	multiApplies []multiCompletionApply
-	multiErr     error
-	opened       []string
-	gotos        [][2]int
-	applied      map[string][]editor.LSPEdit
+	// one fail. multiItemApplies records snippet/import multi-caret accepts.
+	multiApplies     []multiCompletionApply
+	multiErr         error
+	multiItemApplies []multiItemApply
+	multiItemErr     error
+	opened           []string
+	gotos            [][2]int
+	applied          map[string][]editor.LSPEdit
 	// version is what DocumentVersion reports, when versionOK is set.
 	version   editor.Version
 	versionOK bool
@@ -235,6 +237,24 @@ func (e *lspEd) ApplyCompletionAtCarets(path, text, wordChars string, expect *ed
 	e.multiApplies = append(e.multiApplies, multiCompletionApply{path: path, text: text, wordChars: wordChars, expect: expect})
 	if e.multiErr != nil {
 		return 0, e.multiErr
+	}
+	return len(e.tabs[e.active].carets) + 1, nil
+}
+
+// multiItemApply records one multi-caret snippet/auto-import accept.
+type multiItemApply struct {
+	path, text   string
+	cursorOffset int
+	additional   []editor.LSPEdit
+	wordChars    string
+	expect       *editor.Version
+}
+
+// ApplyCompletionItemAtCarets records a multi-caret snippet/import accept.
+func (e *lspEd) ApplyCompletionItemAtCarets(path, text string, cursorOffset int, additional []editor.LSPEdit, wordChars string, expect *editor.Version) (int, error) {
+	e.multiItemApplies = append(e.multiItemApplies, multiItemApply{path: path, text: text, cursorOffset: cursorOffset, additional: additional, wordChars: wordChars, expect: expect})
+	if e.multiItemErr != nil {
+		return 0, e.multiItemErr
 	}
 	return len(e.tabs[e.active].carets) + 1, nil
 }

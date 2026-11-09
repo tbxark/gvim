@@ -305,6 +305,13 @@ existing API only:
   path uses `gvim.workspace.root()`, the authority-correct project directory;
 * the "don't ask again" choice is per project root in `gvim.state`; a root long enough to overflow
   the 256-byte state-key cap persists a stable suffix instead of failing the write.
+* the project config is created with `gvim.fs.write {exclusive = true}` rather than an atomic
+  overwrite: the offer's existence check can race an external creator (the task-197 audit), so the
+  create-new must claim the path or fail without replacing it. The plugin API gained that optional
+  capability: the local plugin OS opens with `O_EXCL`, a remote workspace uses the authority's
+  `FileCreator` (`CreateNew`) capability and then writes the data, and a backend without the
+  capability returns `unsupported` — the plugin re-checks existence and reports either "created by
+  another process, not overwritten" or an explicit create refusal, never a silent overwrite.
 
 Tests: `plugin/bundled/asm_lsp_test.go` covers command registration/no bindings, the offer and
 created TOML for NASM/GAS, MASM + ARM64 detection, the project/XDG-global skip rules, the never-ask
@@ -312,6 +319,37 @@ choice, the install-help popup/clipboard/native restart, and that non-assembly b
 The harness does not run the real loader's startup flush, so the tests raise `plugins_loaded`
 explicitly.
 
+### C# support: no LSP root or server-request seam (port residual)
+
+Fresh's `csharp_support.ts` has four parts: nearest-project detection, `setLspRootUri`,
+trust-gated `dotnet restore`, and Roslyn's `workspace/_roslyn_projectNeedsRestore` plus the
+csharp-ls install help. The gvim port (`plugin/bundled/plugins/csharp_support/`, opt-in) keeps the
+project detection and the trust-gated restore, and reuses the native LSP actions for help:
+
+* the plugin API has no `setLspRootUri`: gvim's language configuration and its root detection choose
+  the server root, so the port only runs restores (a project with no configured C# server still gets
+  its packages restored);
+* gvim has no plugin event for **server-to-client requests**, so Roslyn's
+  `workspace/_roslyn_projectNeedsRestore` is not handled. The open-file restore covers the usual
+  "first open of a project" case, but a server that asks for a restore later (for example after a
+  project file changes) is not answered;
+* the restore is once per project root per session (`restored` table) and skipped/deferred while
+  `gvim.env.trust_level()` is not `trusted`; `trust_changed` drains the pending roots, as
+  env_manager does. The process runs through `gvim.proc.run`, so it follows a remote workspace's
+  authority; Fresh's `runOnTarget` is replaced by that one call;
+* the plugin API has no call to disable a language's LSP server, so Fresh's "Disable C# LSP" popup
+  action is not ported; the help popup offers Start/Restart LSP Server, Show LSP Status and the
+  copy-install row instead;
+* Fresh prechecks `dotnet --version` and caches the answer; the port runs `dotnet restore` directly
+  and reports an exec error, which also avoids trusting a local-machine `which` in a remote workspace;
+* i18n is English-only, unlike Fresh's translated status strings; the plugin registers two commands
+  (Fresh has none) and no keys/settings.
+
+Tests: `plugin/bundled/csharp_support_test.go` covers the command table/no bindings, nearest-project
+restore and its once-per-project rule, the untrusted→`trust_changed` deferral, the no-project-file
+fallback, restore failure and missing-dotnet status, the explicit restore command, install-help
+popup/copy/native restart, and that non-C# buffers are ignored. The tests set the fake host's trust
+level and raise `after_file_open` themselves.
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.

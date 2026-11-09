@@ -996,5 +996,22 @@
   "gvim.remote.not_supported": "Remote workspaces are not supported",
   "gvim.plugin.scope_buffer_needs_buffer": "a buffer-scoped panel needs the buffer it belongs to",
   "gvim.plugin.scope_invalid": "scope must be \"window\", \"editor\" or \"buffer\", not %{scope}",
-  "gvim.plugin.placement_invalid": "placement must be \"float\", \"buffer\" or \"sidebar\", not %{placement}"
+  "gvim.plugin.placement_invalid": "placement must be \"float\", \"buffer\" or \"sidebar\", not %{placement}",
+  "gvim.notice.update_command_missing": "Update command is not configured (update_command)",
+  "gvim.notice.update_running": "Updating...",
+  "gvim.notice.update_no_output": "No update output yet: run Update fresh first",
+  "gvim.notice.update_dock_failed": "Update: the terminal dock could not start the update command",
+  "gvim.url.open_confirm": "Open %{url} in the system browser?",
+  "gvim.url.unavailable": "Opening URLs is not available in this environment",
+  "gvim.url.cancelled": "URL opening cancelled",
+  "gvim.url.error": "Open URL: %{error}",
+  "gvim.url.opened": "Opened URL",
+  "gvim.status.terminal_restart": "⟳ Restart %{program}",
+  "gvim.status.terminal_resume": "⟳ Resume %{program}",
+  "gvim.status.terminal_restart_shell": "⟳ Restart terminal",
+  "gvim.status.terminal_restart_code": "%{label} (exit %{code})",
+  "gvim.status.terminal_restart_signal": "%{label} (signal)",
+  "gvim.palette.preview_no_lines": "(empty file)",
+  "gvim.palette.preview_binary": "Binary file · not previewed",
+  "gvim.palette.preview_unavailable": "Preview unavailable"
 }

@@ -148,9 +148,18 @@ end
 
 local function create_config(buf, assembler, arch)
   local path = project_config_path()
-  local ok, err = gvim.fs.write(path, config_toml(assembler, arch), { atomic = true, mode = 420 })
+  -- Exclusive create (gvim.fs.write {exclusive = true}): the existence check at offer
+  -- time races anything else that creates this project file. The create-new maps to the
+  -- authority's FileCreator capability, so a file another process created meanwhile is
+  -- never replaced; a backend without the capability refuses explicitly instead of
+  -- falling back to a racy check-then-write.
+  local ok, err = gvim.fs.write(path, config_toml(assembler, arch), { exclusive = true, mode = 420 })
   if not ok then
-    gvim.status(t("status.write_failed", { path = path, error = tostring(err) }))
+    if gvim.fs.exists(path) then
+      gvim.status(t("status.config_exists", { path = path }))
+    else
+      gvim.status(t("status.create_refused", { path = path, error = tostring(err) }))
+    end
     return
   end
   gvim.status(t("status.created", { assembler = assembler, arch = arch }))

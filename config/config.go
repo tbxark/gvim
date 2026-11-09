@@ -583,6 +583,10 @@ func applyObject(cfg *Config, keys map[string]json.RawMessage, path string, l la
 			// silence the user check. Say so instead of ignoring it.
 			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set " + key + ": the release check is a user preference, so set it in the user config"})
 			continue
+		case key == "update_command" && l == layerProject:
+			// A repository must never choose a command the editor will run.
+			diags = append(diags, Diagnostic{Path: path, Key: key, Message: "project config cannot set update_command: the update command is a user preference, so set it in the user config"})
+			continue
 		case key == "locale" && l == layerProject:
 			// The UI language is a user preference; a repository choosing it would be a
 			// surprise, so the project layer is refused like keymap.
@@ -817,7 +821,7 @@ func (c *Config) set(key string, raw json.RawMessage) error {
 			return err
 		}
 		c.Formatters = formatters
-	case "check_for_updates", "update_check_url":
+	case "check_for_updates", "update_check_url", "update_command":
 		return c.setUpdate(key, raw)
 	case "terminal":
 		// The flat setters are the user layer: a project file never comes here,

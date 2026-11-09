@@ -69,3 +69,51 @@ func TestUpdateCheckProjectLayerRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestUpdateCommandParsing: update_command is a trimmed user command line; a blank
+// value clears it, and malformed/oversized values are diagnosed.
+func TestUpdateCommandParsing(t *testing.T) {
+	t.Parallel()
+	cfg, diags := loadBody(t, "{\"update_command\": \"  git pull --ff-only  \"}")
+	if len(diags) != 0 || cfg.Update.Command != "git pull --ff-only" {
+		t.Fatalf("update_command: %+v, diags %v", cfg.Update, diags)
+	}
+	cfg, diags = loadBody(t, "{\"update_command\": \"\"}")
+	if len(diags) != 0 || cfg.Update.Command != "" {
+		t.Fatalf("empty update_command: %+v, diags %v", cfg.Update, diags)
+	}
+	tooLong := "{\"update_command\": \"" + strings.Repeat("x", MaxUpdateCommandBytes+1) + "\"}"
+	for _, body := range []string{
+		"{\"update_command\": 5}",
+		"{\"update_command\": \"a\\u0000b\"}",
+		tooLong,
+	} {
+		if _, diags := loadBody(t, body); len(diags) != 1 {
+			t.Fatalf("%s: diagnostics = %v, want one", body, diags)
+		}
+	}
+}
+
+// TestUpdateCommandProjectLayerRefused: a repository must never choose a command the
+// editor will run.
+func TestUpdateCommandProjectLayerRefused(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".gvim", "config.json"), "{\"update_command\": \"git pull\"}")
+	cfg, diags, err := Load(Options{Root: root, UserFile: filepath.Join(t.TempDir(), "absent.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Update.Command != "" {
+		t.Fatalf("project layer applied update_command: %+v", cfg.Update)
+	}
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, "project config cannot set update_command") &&
+			strings.Contains(d.Message, "user preference") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %v, want the update_command refusal", diags)
+	}
+}

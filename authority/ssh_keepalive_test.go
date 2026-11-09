@@ -61,10 +61,6 @@ func (s *silentSSH) port() int { return s.ln.Addr().(*net.TCPAddr).Port }
 // disconnected with a keepalive reason before the next user operation, and that a
 // reconnect restarts the carrier.
 func TestSSHKeepaliveMarksTheCarrierDown(t *testing.T) {
-	oldInterval, oldTimeout := keepaliveInterval, keepaliveTimeout
-	keepaliveInterval, keepaliveTimeout = 20*time.Millisecond, 40*time.Millisecond
-	t.Cleanup(func() { keepaliveInterval, keepaliveTimeout = oldInterval, oldTimeout })
-
 	srv := newSilentSSH(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -75,7 +71,8 @@ func TestSSHKeepaliveMarksTheCarrierDown(t *testing.T) {
 		IdentityFiles:   []string{},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // test server
 		Password:        func(context.Context) (string, error) { return "pw", nil },
-	}, spec: RemoteSpec{User: "u", Host: "127.0.0.1", Port: srv.port(), Path: "/srv/proj"}}
+	}, spec: RemoteSpec{User: "u", Host: "127.0.0.1", Port: srv.port(), Path: "/srv/proj"},
+		keepaliveInterval: 20 * time.Millisecond, keepaliveTimeout: 40 * time.Millisecond}
 	if err := b.connect(ctx); err != nil {
 		t.Fatalf("connect: %v", err)
 	}

@@ -183,7 +183,7 @@ type fakePasswordStore struct {
 	stored   []string
 }
 
-func (f *fakePasswordStore) Lookup(host, user string) (string, bool, error) {
+func (f *fakePasswordStore) Lookup(_ context.Context, host, user string) (string, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.looked = append(f.looked, user+"@"+host)
@@ -193,7 +193,7 @@ func (f *fakePasswordStore) Lookup(host, user string) (string, bool, error) {
 	return f.password, f.has, nil
 }
 
-func (f *fakePasswordStore) Store(host, user, password string) error {
+func (f *fakePasswordStore) Store(_ context.Context, host, user, password string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.storeErr != nil {
@@ -268,7 +268,8 @@ func TestPasswordKeyringConsent(t *testing.T) {
 	}
 	_ = a.Close()
 
-	// A lookup error falls through to the prompt instead of failing the dial.
+	// A lookup error falls through to the prompt instead of failing the dial, and the
+	// failure is surfaced honestly as a notice (never silently swallowed).
 	store = &fakePasswordStore{lookErr: errors.New("keyring locked")}
 	opts = securityOptions(srv, "")
 	opts.HostKeyCallback = fixed
@@ -276,6 +277,10 @@ func TestPasswordKeyringConsent(t *testing.T) {
 	if a, err := connectSecurity(t, opts); err != nil {
 		t.Fatalf("lookup error fell through wrong: %v", err)
 	} else {
+		notices := strings.Join(a.TakeNotices(), "; ")
+		if !strings.Contains(notices, "could not read the OS-keyring password") || !strings.Contains(notices, "keyring locked") {
+			t.Fatalf("lookup-error notices = %q", notices)
+		}
 		_ = a.Close()
 	}
 }

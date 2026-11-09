@@ -1011,7 +1011,7 @@ gvim.fs = {}
 function gvim.fs.read(path, opts) end
 ---@param path string
 ---@param data string
----@param opts? {atomic?: boolean, append?: boolean, mode?: integer, parents?: boolean}
+---@param opts? {atomic?: boolean, append?: boolean, mode?: integer, parents?: boolean, exclusive?: boolean}
 ---@return true|nil, string?
 function gvim.fs.write(path, data, opts) end
 ---@param path string

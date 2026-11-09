@@ -400,7 +400,7 @@ Residuals of this slice (documented, not bugs):
 - SSH authentication/connection residuals: ssh-agent forwarding and \`ssh_config\` reading
   (ProxyJump, Host aliases, IdentityAgent, host-key algorithms) are not implemented; the known
   hosts file is the default \`~/.ssh/known_hosts\` only; a supplied password/passphrase/2FA
-  answer is kept in memory for the session (no keyring/agent integration); the passphrase is
+  answer is kept in memory for the session by default; with `ssh.keyring` on, a host password may be looked up/stored in the OS keyring (macOS security / Linux secret-tool, docs below) — passphrases and 2FA answers are never keyring-stored; the passphrase is
   asked for only after a dial reports it needs one (no interactive first-open prompt for a
   key that is decrypted on demand either way); keyboard-interactive is replayed as one answer
   per server question, with no server-specific OTP retry policy beyond re-asking the whole
@@ -592,12 +592,21 @@ byte-for-byte. Cut (`Move`) is copy-then-remove: the source is removed with
 are explicit and happen before the destination is created: symbolic links anywhere in the
 subtree (the port follows links on Stat, so the no-follow answer comes from the parent
 listing), the workspace root itself as source, paths outside the remote root, a destination
-inside the source, and a copy/move onto an existing name in another directory (remote paste
-never overwrites; the overwrite conflict choice is ignored). A same-directory copy
-(Duplicate) gets Fresh's rule — "name copy.ext", then "name copy 2.ext", ... checked against
-the remote directory (1000 attempts). A cancellation or I/O failure in the write phase keeps
-the partial destination and the error says how many files were written and where the
-partial copy is; gvim never deletes remote data on a failed copy. Every clipboard action
+inside the source, and a copy/move onto an existing name in another directory now goes
+through the explorer's conflict choice instead of blindly refusing: Cancel reports
+`explorer.ErrConflict`, changes nothing and the root offers Overwrite / Rename / Cancel
+(Esc, which also drops the rest of a multi-item paste); Rename opens a prefilled "Paste as
+on SSH:…" name prompt and retries through the adapter's `CopyAs`/`MoveAs` with that
+destination name; Overwrite removes the existing destination first and then copies (a cut
+paste removes its source only after the copy succeeded). The adapter also supports Skip
+(leave the destination, report its path; for a cut paste return the source, which cancels
+the cut). The local conflict prompt (Overwrite / Skip) is unchanged. Duplicate stays a
+same-directory copy with Fresh's rule — "name copy.ext", then "name copy 2.ext", ... checked
+against the remote directory (1000 attempts) — so it never prompts. A cancellation or I/O
+failure in the write phase keeps the partial destination and the error says how many files
+were written and where the partial copy is; gvim never deletes remote data on a failed
+copy. Fresh's dialog additionally has Overwrite All / Skip / Skip All; gvim's remote
+prompt is the bounded per-item Overwrite / Rename / Cancel (recorded gap). Every clipboard action
 confirms first on a remote workspace and names the target (copy/cut/duplicate name the
 entry or count, paste names the destination and count); a local workspace keeps the old
 no-confirmation behavior. The tree refresh after success is the existing file-job refresh.
@@ -607,6 +616,11 @@ whole-subtree transaction or cleanup UI for a partial copy, FileEntry/Mode and m
 restored (the port's DirEntry has no mode), hard links/xattrs are not preserved, and a
 copy/rename's existence check still races the write (the FileMutations surface has no
 exclusive rename/copy; New File's create race is closed by the exclusive-create surface).
+Overwrite is remove-then-copy with no rollback: a process that re-creates the destination
+between that removal and the copy is a documented race (the file copy atomically replaces
+the re-created file because the user chose overwrite; a directory copy fails at Mkdir
+instead of silently replacing it), and the conflict decision is not remembered across the
+multi-item paste (Fresh's All variants are not implemented).
 Real-host manual acceptance remains unautomated (the copy tests use a fake
 authority file system, with a local decoy tree proving no local fallback).
 
@@ -753,15 +767,29 @@ verification is a user security choice). Fresh delegates SSH to `ssh(1)` and get
   negotiated signature algorithm separately from the presented key type, so an RSA host key
   is reported by its key type rather than which RSA-SHA2 variant signed the handshake.
 - **`ssh.keyring`** — default **false**: no OS keyring is consulted and no password is
-  stored. When true, the transport asks the `authority.PasswordStore` for the host password
-  before the UI password prompt, and, after the server accepts a password the user supplied,
-  stores it and queues an honest notice. Storage happens only with this explicit consent and
-  only for an accepted password; a lookup error falls through to the prompt, and a store
-  error is reported as "accepted but not stored", never as success. The interface and a
-  no-op default (`SystemPasswordStore`) ship in this slice; the macOS-keychain and Linux
-  secret-service backends are recorded follow-ups, so with the knob on today the app reports
-  that the password was not stored. Password storage for 2FA/keyboard-interactive answers is
-  not covered.
+  stored. When true, the transport asks `authority.SystemPasswordStore()` for the host
+  password before the UI password prompt, and after the server accepts a password the user
+  supplied, stores it and queues an honest notice. Storage happens only with this explicit
+  consent and only for an accepted password. The real backends are:
+  - **macOS**: `/usr/bin/security` — lookup `find-generic-password -s gvim-ssh -a
+    user@host -w`, store `add-generic-password -U -s gvim-ssh -a user@host -w PASSWORD`.
+    The password is passed as the `-w` argv value, which briefly exposes it to process
+    listings (a recorded platform limitation); there is no shell.
+  - **Linux**: `secret-tool` over the Secret Service (D-Bus) — lookup `lookup service
+    gvim-ssh account user@host`, store `store --label=... service gvim-ssh account
+    user@host` with the password on stdin, never argv. It needs a running keyring/DBus
+    session; without one the failure is reported honestly.
+  - The tool is used only when `exec.LookPath` finds it; otherwise `SystemPasswordStore`
+    returns the no-op store and a store attempt reports "not stored in the OS keyring"
+    (never success). All invocations are argv without a shell, bounded (64 KiB per
+    answer), inherit the process environment, and honor the dial's context (cancellation
+    kills the child). One entry is keyed by `user@host` (no port; the resolved alias host
+    is used), the tool's one trailing newline is stripped and password bytes otherwise
+    preserved (embedded/trailing LF and CR included; a password that the tool cannot
+    round-trip unchanged is a platform limitation). A lookup error queues a notice and
+    falls through to the prompt; a store error is reported as "accepted but not stored",
+    never success. Password storage for 2FA/keyboard-interactive answers and passphrases is
+    not covered. Tests use a fake command runner (no real keychain/DBus).
 - The app maps `config.SSHConfig` to `Options.SSHSecurity` and the transport notices into the
   startup/reconnect notice text; the config parser validates the document shape
   (unknown keys/values are diagnostics) while the transport still validates the policy and

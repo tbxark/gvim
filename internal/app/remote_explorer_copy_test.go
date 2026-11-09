@@ -160,25 +160,133 @@ func TestRemoteMoveRemovesSourceOnlyAfterCopy(t *testing.T) {
 	}
 }
 
-// TestRemotePasteCollisionRefusesNoOverwrite checks a paste into another directory with
-// an existing name is refused and the existing file is untouched, even with the
-// overwrite conflict choice (remote paste never overwrites).
-func TestRemotePasteCollisionRefusesNoOverwrite(t *testing.T) {
+// TestRemotePasteConflictPolicies checks a paste into another directory with an existing
+// name follows the explorer's conflict choice: cancel reports explorer.ErrConflict (so the
+// root can offer overwrite/rename), skip leaves the destination and reports its path,
+// overwrite removes it and replaces it with the copy.
+func TestRemotePasteConflictPolicies(t *testing.T) {
+	mk := func() (*remoteOpsFake, *remoteExplorerOps) {
+		fake := newRemoteOpsFake().
+			put("/remote/w/other/a.go", "new").
+			put("/remote/w/dst/a.go", "old").
+			put("/remote/w/dst/", "")
+		ops, _ := fake.ops(true)
+		return fake, ops
+	}
+
+	fake, ops := mk()
+	if _, err := ops.Copy(context.Background(), "/remote/w/other/a.go", "/remote/w/dst", expanel.ConflictCancel); !errors.Is(err, expanel.ErrConflict) {
+		t.Fatalf("cancel error = %v, want explorer.ErrConflict", err)
+	}
+	if got := string(fake.files["/remote/w/dst/a.go"]); got != "old" || len(fake.writes) != 0 || len(fake.removes) != 0 {
+		t.Fatalf("cancel changed the destination: content %q writes %v removes %v", got, fake.writes, fake.removes)
+	}
+
+	fake, ops = mk()
+	out, err := ops.Copy(context.Background(), "/remote/w/other/a.go", "/remote/w/dst", expanel.ConflictSkip)
+	if err != nil || out != "/remote/w/dst/a.go" {
+		t.Fatalf("skip = %q, %v; want the existing destination path", out, err)
+	}
+	if got := string(fake.files["/remote/w/dst/a.go"]); got != "old" || len(fake.writes) != 0 {
+		t.Fatalf("skip changed the destination: content %q writes %v", got, fake.writes)
+	}
+
+	fake, ops = mk()
+	out, err = ops.Copy(context.Background(), "/remote/w/other/a.go", "/remote/w/dst", expanel.ConflictOverwrite)
+	if err != nil || out != "/remote/w/dst/a.go" {
+		t.Fatalf("overwrite = %q, %v", out, err)
+	}
+	if got := string(fake.files["/remote/w/dst/a.go"]); got != "new" {
+		t.Fatalf("overwrite content = %q, want the copy", got)
+	}
+}
+
+// TestRemotePasteConflictOverwriteDirectory checks overwrite replaces an existing
+// destination directory (the old contents are removed before the copy; no rollback).
+func TestRemotePasteConflictOverwriteDirectory(t *testing.T) {
+	fake := newRemoteOpsFake().put("/remote/w/other/sub/", "").put("/remote/w/other/sub/new.txt", "new")
+	fake.put("/remote/w/dst/", "").put("/remote/w/dst/sub/", "").put("/remote/w/dst/sub/stale.txt", "stale")
+	ops, _ := fake.ops(true)
+	out, err := ops.Copy(context.Background(), "/remote/w/other/sub", "/remote/w/dst", expanel.ConflictOverwrite)
+	if err != nil || out != "/remote/w/dst/sub" {
+		t.Fatalf("overwrite directory = %q, %v", out, err)
+	}
+	if _, ok := fake.files["/remote/w/dst/sub/stale.txt"]; ok {
+		t.Fatal("the stale destination file survived the overwrite")
+	}
+	if got := string(fake.files["/remote/w/dst/sub/new.txt"]); got != "new" {
+		t.Fatalf("copied content = %q", got)
+	}
+}
+
+// TestRemoteCopyAsRename checks the conflict prompt's rename choice copies under the given
+// name (and refuses a name that is now taken, so the prompt can run again).
+func TestRemoteCopyAsRename(t *testing.T) {
 	fake := newRemoteOpsFake().
 		put("/remote/w/other/a.go", "new").
 		put("/remote/w/dst/a.go", "old").
 		put("/remote/w/dst/", "")
 	ops, _ := fake.ops(true)
-	for _, c := range []expanel.Conflict{expanel.ConflictCancel, expanel.ConflictOverwrite} {
-		if _, err := ops.Copy(context.Background(), "/remote/w/other/a.go", "/remote/w/dst", c); err == nil || !strings.Contains(err.Error(), "already exists") || !strings.Contains(err.Error(), "never overwrites") {
-			t.Fatalf("collision (choice %d) error = %v", int(c), err)
-		}
+	out, err := ops.CopyAs(context.Background(), "/remote/w/other/a.go", "/remote/w/dst", "a-renamed.go", expanel.ConflictCancel)
+	if err != nil || out != "/remote/w/dst/a-renamed.go" {
+		t.Fatalf("CopyAs = %q, %v", out, err)
+	}
+	if got := string(fake.files["/remote/w/dst/a-renamed.go"]); got != "new" {
+		t.Fatalf("renamed copy content = %q", got)
 	}
 	if got := string(fake.files["/remote/w/dst/a.go"]); got != "old" {
-		t.Fatalf("the existing file was overwritten: %q", got)
+		t.Fatalf("the original conflict destination changed: %q", got)
 	}
-	if len(fake.writes) != 0 {
-		t.Fatalf("a refused collision wrote files: %v", fake.writes)
+	if _, err := ops.CopyAs(context.Background(), "/remote/w/other/a.go", "/remote/w/dst", "a.go", expanel.ConflictCancel); !errors.Is(err, expanel.ErrConflict) {
+		t.Fatalf("CopyAs onto a taken name = %v, want explorer.ErrConflict", err)
+	}
+}
+
+// TestRemoteCutPasteConflictPolicies checks a cut paste follows the conflict choice too:
+// cancel reports the conflict with both entries intact, skip cancels the cut (the source is
+// returned, the destination untouched), overwrite replaces the destination and removes the
+// source only after the copy succeeds.
+func TestRemoteCutPasteConflictPolicies(t *testing.T) {
+	mk := func() (*remoteOpsFake, *remoteExplorerOps) {
+		fake := newRemoteOpsFake().
+			put("/remote/w/other/a.go", "new").
+			put("/remote/w/dst/a.go", "old").
+			put("/remote/w/dst/", "")
+		ops, _ := fake.ops(true)
+		return fake, ops
+	}
+	// Move is the plain cancel-policy cut paste.
+	fake, ops := mk()
+	if _, err := ops.Move(context.Background(), "/remote/w/other/a.go", "/remote/w/dst"); !errors.Is(err, expanel.ErrConflict) {
+		t.Fatalf("cut cancel = %v, want explorer.ErrConflict", err)
+	}
+	if got := string(fake.files["/remote/w/other/a.go"]); got != "new" {
+		t.Fatalf("source changed on a cancelled cut: %q", got)
+	}
+	if got := string(fake.files["/remote/w/dst/a.go"]); got != "old" || len(fake.removes) != 0 {
+		t.Fatalf("destination/source changed on a cancelled cut: %q removes %v", got, fake.removes)
+	}
+	fake, ops = mk()
+	out, err := ops.MoveAs(context.Background(), "/remote/w/other/a.go", "/remote/w/dst", "", expanel.ConflictSkip)
+	if err != nil || out != "/remote/w/other/a.go" {
+		t.Fatalf("cut skip = %q, %v; want the source back", out, err)
+	}
+	if _, ok := fake.files["/remote/w/other/a.go"]; !ok {
+		t.Fatal("cut skip removed the source")
+	}
+	if got := string(fake.files["/remote/w/dst/a.go"]); got != "old" {
+		t.Fatalf("cut skip changed the destination: %q", got)
+	}
+	fake, ops = mk()
+	out, err = ops.MoveAs(context.Background(), "/remote/w/other/a.go", "/remote/w/dst", "a-moved.go", expanel.ConflictOverwrite)
+	if err != nil || out != "/remote/w/dst/a-moved.go" {
+		t.Fatalf("cut overwrite/rename = %q, %v", out, err)
+	}
+	if got := string(fake.files["/remote/w/dst/a-moved.go"]); got != "new" {
+		t.Fatalf("moved content = %q", got)
+	}
+	if _, ok := fake.files["/remote/w/other/a.go"]; ok {
+		t.Fatal("the cut source survived the move")
 	}
 }
 

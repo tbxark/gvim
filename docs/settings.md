@@ -383,6 +383,27 @@ simply does nothing). A successful check is remembered for a day in
 version, is silent and never blocks startup. gvim has no self-update: the indicator names the
 release and its release page, and upgrading stays the package manager's or the user's job.
 
+**The update command.** `update_command` (gvim extension, user layer only - a project config
+that sets it is refused with a diagnostic because a repository must never choose a command the
+editor runs) is an optional command line. When it is set, the palette's Fresh updater rows
+**Update fresh** (`update_fresh`) and **Show update output** (`open_update_log`) appear; without it
+they stay hidden and their raw actions keep the "gvim does not update itself" notice. **Update
+fresh** runs the command in a new terminal dock tab named "Update": the argv is the user's shell
+with `-c <command>` on Unix (`$SHELL`, or `/bin/sh` when unset) and `cmd.exe /C <command>` on
+Windows, so a command line with flags and shell syntax works as the user wrote it. The tab keeps
+the command's output after it exits (the dock does not close it), a second Update fresh restarts
+that same tab and keeps the previous transcript above the new run, and **Show update output**
+returns to it (before any run it says no output exists yet). A command that cannot start, or a
+dock that cannot open a tab, is reported on the status row or in the dock; a non-zero exit stays
+visible in the tab's output and does not affect the editor. The command is independent of
+`check_for_updates`: with the check off the two check commands still say checking is off, while
+Update fresh can still run. The value is bounded at 4096 bytes and must not contain NUL bytes. Like `check_for_updates` it has no Settings-page row: it is a
+user preference, not a display or editing option. It runs on the machine gvim
+itself runs on, not a remote workspace authority (Fresh opens its update log from the local
+machine too). With `terminal.close_on_exit` on, the dock removes the
+exited tab like any other terminal, so the output is not kept; the default keeps the exited tab
+as read-only scrollback.
+
 The status element `{update}` paints the release the check found (clicking it opens the Update
 details: the feed, the current and latest versions, when the check last ran and the release
 page). Two palette rows expose the same state: **Check for Updates** asks the feed right now

@@ -187,6 +187,31 @@ func (o *pluginOS) WriteFile(ctx context.Context, path string, data []byte, wo h
 		return err
 	}
 	p := o.abs(path)
+	if wo.Exclusive {
+		if wo.Append {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "%s: a create-new cannot append", p)
+		}
+		if wo.Parents {
+			return pluginapi.Errf(pluginapi.CodeInvalid, "%s: a create-new does not create parent directories", p)
+		}
+		mode := wo.Mode.Perm()
+		if mode == 0 {
+			mode = 0o644
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+		if err != nil {
+			return mapErr(err, p)
+		}
+		_, werr := f.Write(data)
+		cerr := f.Close()
+		if err := errors.Join(werr, cerr); err != nil {
+			// We created the file with O_EXCL, so it is ours to remove: a failed
+			// create-new must not leave a partial file behind.
+			_ = os.Remove(p)
+			return mapErr(err, p)
+		}
+		return nil
+	}
 	if wo.Parents {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return mapErr(err, p)

@@ -24,6 +24,10 @@ type fakeWorkspacePort struct {
 	targets                                  []WorkspaceEntry
 	extractTo, extractTerminalTo             string
 	extractMany                              []string
+	mixSelection                             ExtractSelection
+	mixTarget                                string
+	mixReplace                               bool
+	mixCmd                                   WorkspaceCmd
 	running                                  []WorkspaceRunningTerminal
 	runningQueried                           string
 }

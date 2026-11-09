@@ -78,6 +78,17 @@ func TestFS(t *testing.T) {
 					t.Fatalf("file = %q", got)
 				}
 			}},
+		{name: "exclusive create", body: `T.spy(gvim.fs.write("/work/o.txt", "data", {exclusive = true}))`, want: "true",
+			check: func(t *testing.T, f *plugintest.FakeOS) {
+				if got, _ := f.File("/work/o.txt"); got != "data" {
+					t.Fatalf("file = %q", got)
+				}
+			}},
+		{name: "exclusive create refuses an existing file", setup: func(f *plugintest.FakeOS) { f.SetFile("/work/o.txt", "theirs") },
+			body: `local v, e = gvim.fs.write("/work/o.txt", "mine", {exclusive = true}) T.spy(tostring(v), gvim.err_code(e), gvim.fs.read("/work/o.txt"))`,
+			want: "nil conflict theirs"},
+		{name: "exclusive create refuses parents", body: `local v, e = gvim.fs.write("/work/o.txt", "d", {exclusive = true, parents = true}) T.spy(tostring(v), gvim.err_code(e))`, want: "nil invalid"},
+		{name: "exclusive create refuses append", body: `local v, e = gvim.fs.write("/work/o.txt", "d", {exclusive = true, append = true}) T.spy(tostring(v), gvim.err_code(e))`, want: "nil invalid"},
 		{name: "append", setup: func(f *plugintest.FakeOS) { f.SetFile("/work/log", "ab") },
 			body: `T.spy(gvim.fs.write("/work/log", "cd", {append = true}))`, want: "true",
 			check: func(t *testing.T, f *plugintest.FakeOS) {

@@ -72,9 +72,12 @@ type Model struct {
 	// The palette's sources. The commands always have a table, and files and
 	// ranker are nil when Deps leaves them out.
 	commands []commands.Entry
-	files    palette.Files
-	ranker   palette.Ranker
-	recorder fileRecorder // the ranker's frecency record, when it has one
+	// updateCommands are the Fresh updater rows (Update fresh / Show update output),
+	// offered in the palette only when UpdateHooks.Command is configured.
+	updateCommands []commands.Entry
+	files          palette.Files
+	ranker         palette.Ranker
+	recorder       fileRecorder // the ranker's frecency record, when it has one
 
 	// fileRoot is the palette file-mode root when it is not the explorer's root (a
 	// remote workspace's remote path); empty means the explorer root. A non-empty
@@ -263,8 +266,10 @@ func New(deps Deps) *Model {
 	if cmds == nil {
 		cmds = commands.Commands(nil)
 	}
+	updateRows := hiddenCommandRows(cmds)
 	cmds = withoutHidden(cmds)
 	m := &Model{
+		updateCommands:  updateRows,
 		ed:              deps.Editor,
 		tree:            deps.Explorer,
 		keys:            deps.Keys,
@@ -822,6 +827,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.askRemoteClipboard(remoteClipboardPaste, "", nil, msg.Dir)
 	case prompt.Done:
 		cmd = m.answer(msg)
+	case mixedExtractSelectionMsg:
+		cmd = m.afterMixedExtractSelection(msg.selection)
+	case ExtractConflictMsg:
+		// The extraction command detected target conflicts BEFORE writing anything.
+		// Ask here; the answer retries with replace or cancels untouched.
+		m.pushOverlay(prompt.NewConfirm(m.styles, extractConflictQuestion(msg), extractConflictAnswer{
+			selection: msg.Selection, targetID: msg.TargetID,
+		}))
 	case fileResultMsg:
 		cmd = tea.Batch(m.fileDone(msg), m.gitCmd())
 	case urlOpenedMsg:
@@ -1140,6 +1153,18 @@ type explorerOps interface {
 	CheckRename(oldPath, newPath string) error
 }
 
+// copyAsOps is the optional remote part for the conflict prompt's rename choice: copy
+// under an explicit destination name with the chosen conflict policy.
+type copyAsOps interface {
+	CopyAs(ctx context.Context, src, dstDir, name string, c expanel.Conflict) (string, error)
+}
+
+// moveAsOps is the optional remote part for a cut paste's conflict choice: move with a
+// conflict policy and an optional destination name.
+type moveAsOps interface {
+	MoveAs(ctx context.Context, src, dstDir, name string, c expanel.Conflict) (string, error)
+}
+
 // clipboard is the explorer clipboard: the paths copied or cut, in display order.
 // A path leaves it when its entry is trashed, renamed or moved away.
 type clipboard struct {
@@ -1173,12 +1198,13 @@ const (
 // multi-item paste that run after this one, in order. A conflict prompt keeps them
 // with the job, so an Esc at the prompt drops them too.
 type fileJob struct {
-	kind   jobKind
-	path   string           // the entry: rename, move, copy source, trash
-	dir    string           // the directory: create, mkdir, move and copy destination
-	name   string           // the new name: create, mkdir, rename
-	policy expanel.Conflict // copy only
-	rest   []fileJob        // the jobs of the same paste after this one
+	kind    jobKind
+	path    string           // the entry: rename, move, copy source, trash
+	dir     string           // the directory: create, mkdir, move and copy destination
+	name    string           // the new name: create, mkdir, rename
+	policy  expanel.Conflict // copy and move conflict choice
+	dstName string           // copy/move destination name after a conflict rename
+	rest    []fileJob        // the jobs of the same paste after this one
 }
 
 // fileResultMsg is the result of a fileJob. out is the path the operation
@@ -1198,7 +1224,11 @@ type (
 	renameTag    struct{ path string }
 	deleteTag    struct{ paths []string }
 	overwriteTag struct{ job fileJob }
-	gotoTag      struct{}
+	// remotePasteConflictTag asks a remote paste conflict's overwrite/rename choice;
+	// remotePasteRenameTag carries the new destination name.
+	remotePasteConflictTag struct{ job fileJob }
+	remotePasteRenameTag   struct{ job fileJob }
+	gotoTag                struct{}
 )
 
 // fileRecorder is the ranker's frecency record. A ranker that has one gets the
@@ -1419,11 +1449,50 @@ func (m *Model) askDelete(paths ...string) {
 	m.pushOverlay(prompt.NewConfirm(m.styles, q, deleteTag{paths: paths}))
 }
 
-// askOverwrite asks whether a copy that hit an existing destination may replace
+// askOverwrite asks whether a local copy that hit an existing destination may replace
 // it. Yes runs the copy with the overwrite policy, and No runs it with skip.
 func (m *Model) askOverwrite(job fileJob) {
 	q := "Overwrite " + filepath.Base(job.path) + "?"
 	m.pushOverlay(prompt.NewConfirm(m.styles, q, overwriteTag{job: job}))
+}
+
+// askRemotePasteConflict asks what a remote paste should do when its destination
+// exists: Overwrite replaces it, Rename opens a prefilled name prompt (Esc cancels the
+// paste, including the remaining jobs). Fresh also offers Skip/Skip All; gvim keeps the
+// bounded per-item choice.
+func (m *Model) askRemotePasteConflict(job fileJob) {
+	name := job.dstName
+	if name == "" {
+		name = filepath.Base(job.path)
+	}
+	q := "Remote destination exists on " + m.remoteExplorerTarget() + ": overwrite " + name + "?"
+	m.pushOverlay(prompt.NewConfirmWith(m.styles, q, remotePasteConflictTag{job: job}, prompt.ConfirmOptions{
+		Yes: "Overwrite",
+		No:  "Rename",
+	}))
+}
+
+// askRemotePasteRename opens the new destination name prompt of a remote conflict.
+func (m *Model) askRemotePasteRename(job fileJob) {
+	name := job.dstName
+	if name == "" {
+		name = filepath.Base(job.path)
+	}
+	m.pushOverlay(prompt.NewLine(m.styles, prompt.LineOptions{
+		Label:    pasteAsLabel(m.remoteExplorerTarget()),
+		Input:    name,
+		Tag:      remotePasteRenameTag{job: job},
+		Validate: validateName,
+	}))
+}
+
+// pasteAsLabel names the conflict rename prompt, including the remote target when there
+// is one.
+func pasteAsLabel(target string) string {
+	if target == "" {
+		return "Paste as:"
+	}
+	return "Paste as on " + target + ":"
 }
 
 // validateName is the name check of the explorer prompts. It keeps the prompt
@@ -1478,6 +1547,22 @@ func (m *Model) answer(d prompt.Done) tea.Cmd {
 		if d.Outcome == prompt.Yes {
 			job.policy = expanel.ConflictOverwrite
 		}
+		return m.runJob(job)
+	case remotePasteConflictTag:
+		job := tag.job
+		if d.Outcome == prompt.Yes {
+			job.policy = expanel.ConflictOverwrite
+			return m.runJob(job)
+		}
+		m.askRemotePasteRename(job)
+		return nil
+	case remotePasteRenameTag:
+		job := tag.job
+		if d.Outcome != prompt.Submitted {
+			return nil
+		}
+		job.dstName = d.Text
+		job.policy = expanel.ConflictCancel
 		return m.runJob(job)
 	case overwriteSaveTag:
 		return m.overwriteAnswer(tag, d)
@@ -1577,7 +1662,11 @@ func checkRename(ops explorerOps, job fileJob) error {
 	case jobRename:
 		return ops.CheckRename(job.path, filepath.Join(filepath.Dir(job.path), job.name))
 	case jobMove:
-		return ops.CheckRename(job.path, filepath.Join(job.dir, filepath.Base(job.path)))
+		name := job.dstName
+		if name == "" {
+			name = filepath.Base(job.path)
+		}
+		return ops.CheckRename(job.path, filepath.Join(job.dir, name))
 	}
 	return nil
 }
@@ -1607,8 +1696,25 @@ func (m *Model) runJob(job fileJob) tea.Cmd {
 		case jobRename:
 			out, err = ops.Rename(ctx, job.path, job.name)
 		case jobMove:
-			out, err = ops.Move(ctx, job.path, job.dir)
+			if as, ok := ops.(moveAsOps); ok {
+				policy := job.policy
+				if policy == 0 {
+					policy = expanel.ConflictCancel
+				}
+				out, err = as.MoveAs(ctx, job.path, job.dir, job.dstName, policy)
+			} else {
+				out, err = ops.Move(ctx, job.path, job.dir)
+			}
 		case jobCopy:
+			if job.dstName != "" {
+				as, ok := ops.(copyAsOps)
+				if !ok {
+					err = errors.New("this port cannot rename a paste destination")
+					break
+				}
+				out, err = as.CopyAs(ctx, job.path, job.dir, job.dstName, job.policy)
+				break
+			}
 			out, err = ops.Copy(ctx, job.path, job.dir, job.policy)
 		case jobTrash:
 			err = ops.Trash(ctx, job.path)
@@ -1627,7 +1733,14 @@ func (m *Model) runJob(job fileJob) tea.Cmd {
 // cleared, or replaced, while the move ran.
 func (m *Model) fileDone(r fileResultMsg) tea.Cmd {
 	if r.err != nil {
-		if r.job.kind == jobCopy && r.job.policy == expanel.ConflictCancel && errors.Is(r.err, expanel.ErrConflict) {
+		conflict := errors.Is(r.err, expanel.ErrConflict)
+		// A remote paste conflict offers overwrite, rename or cancel (Esc). The local
+		// adapter keeps its existing overwrite/skip prompt.
+		if conflict && m.remoteExplorerTarget() != "" && (r.job.kind == jobCopy || r.job.kind == jobMove) {
+			m.askRemotePasteConflict(r.job)
+			return nil
+		}
+		if r.job.kind == jobCopy && r.job.policy == expanel.ConflictCancel && conflict {
 			m.askOverwrite(r.job)
 			return nil
 		}
@@ -2876,22 +2989,22 @@ func (m *Model) statusView() statusView {
 // non-zero code (exit 0 is omitted, as Fresh does). A signal exit shows
 // " (signal)" (gvim's extension: the Rust indicator has no signal field).
 func terminalRestartText(info dock.RestartInfo) string {
-	label := "Restart terminal"
+	label := uiText("gvim.status.terminal_restart_shell", "⟳ Restart terminal")
 	if info.Program != "" {
-		verb := "Restart"
 		if info.ResumesAgent {
-			verb = "Resume"
+			label = uiTextVars("gvim.status.terminal_resume", "⟳ Resume %{program}", map[string]any{"program": info.Program})
+		} else {
+			label = uiTextVars("gvim.status.terminal_restart", "⟳ Restart %{program}", map[string]any{"program": info.Program})
 		}
-		label = verb + " " + info.Program
 	}
 	if info.ExitKnown {
 		if info.ExitCode < 0 {
-			label += " (signal)"
+			label = uiTextVars("gvim.status.terminal_restart_signal", "%{label} (signal)", map[string]any{"label": label})
 		} else if info.ExitCode != 0 {
-			label += " (exit " + strconv.Itoa(info.ExitCode) + ")"
+			label = uiTextVars("gvim.status.terminal_restart_code", "%{label} (exit %{code})", map[string]any{"label": label, "code": info.ExitCode})
 		}
 	}
-	return "⟳ " + label
+	return label
 }
 
 // virtualPosition returns the line and column the status row shows for the

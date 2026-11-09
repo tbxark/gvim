@@ -5,7 +5,10 @@ package tui
 // closes this dock tab. No PTY crosses the workspace boundary: the target restores
 // the record and revives it on the first dive (docs/terminal.md, docs/ui.md).
 
-import "github.com/tbxark/gvim/internal/terminal"
+import (
+	"github.com/tbxark/gvim/internal/terminal"
+	"github.com/tbxark/gvim/internal/tui/dock"
+)
 
 // ActiveTerminalTab returns the active dock tab's saved record, or false when the
 // dock has no tab. It runs on the UI goroutine; the record carries the transcript,
@@ -37,4 +40,20 @@ func (m *Model) CloseActiveTerminalTabForExtract(name string) bool {
 	}
 	m.dock.CloseTab()
 	return true
+}
+
+// TerminalTabRefs returns every dock tab as an extract-picker reference.
+func (m *Model) TerminalTabRefs() []dock.TabRef { return m.dock.TabRefs() }
+
+// TerminalTabStateAt returns dock tab i's saved record, for the mixed extract
+// action's capture on the UI goroutine.
+func (m *Model) TerminalTabStateAt(i int) (terminal.SavedTab, bool) {
+	return m.dock.SavedTabAt(i)
+}
+
+// CloseTerminalTabAtForExtract force-closes dock tab i when its saved name still
+// matches name. The extract action already wrote the record into the target, so
+// closing stops the source shell and drops nothing; a changed tab reports false.
+func (m *Model) CloseTerminalTabAtForExtract(i int, name string) bool {
+	return m.dock.CloseTabAtForExtract(i, name)
 }

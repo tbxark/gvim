@@ -1,0 +1,26 @@
+{
+  "en": {
+    "status.restoring_packages": "Restoring NuGet packages for %{project}...",
+    "status.restore_completed": "NuGet restore completed for %{project}",
+    "status.restore_failed": "NuGet restore failed: %{error}",
+    "status.restore_error": "NuGet restore error: %{error}",
+    "status.exit_code": "exit code %{code}",
+    "status.not_csharp": "Open a C# file first (.cs)",
+    "status.not_trusted": "Trust this workspace before restoring its NuGet packages",
+    "status.server_not_found": "C# LSP server not found - click the LSP status for install help",
+    "status.server_error": "C# LSP error: %{error}",
+    "status.copied": "Copied: %{value}",
+    "status.action_failed": "Could not run the action: %{error}",
+    "cmd.restore": "C#: Restore Project",
+    "cmd.restore_desc": "Run dotnet restore for the C# project around the active file",
+    "cmd.show_help": "C#: Show LSP Help",
+    "cmd.show_help_desc": "Install commands and status for the csharp-ls language server",
+    "help.title": "C# Language Server (csharp-ls)",
+    "help.message": "\"csharp-ls\" provides completion, diagnostics, hover docs, go-to-definition and refactoring for C#. Install it as a global .NET tool; the language server starts from the language configuration. NuGet packages are restored automatically when a trusted workspace's .csproj/.sln is opened.",
+    "help.last_error": "Last error: %{error}",
+    "actions.copy": "Copy: %{value}",
+    "actions.restart": "Start/Restart LSP Server",
+    "actions.status": "Show LSP Status",
+    "actions.dismiss": "Dismiss (Esc)"
+  }
+}

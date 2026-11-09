@@ -130,6 +130,11 @@ type sshBackend struct {
 	connecting bool
 	// keepaliveStop stops the current keepalive loop; nil when none runs.
 	keepaliveStop chan struct{}
+	// keepaliveInterval/keepaliveTimeout override the package defaults for this backend
+	// (tests set them before connecting); zero falls back to the package values. They live
+	// per backend so a test never mutates package state that a keepalive goroutine reads.
+	keepaliveInterval time.Duration
+	keepaliveTimeout  time.Duration
 	// resolved is the target/jump/identity resolution of the last dial.
 	resolved sshResolved
 	// jumpClient is the carrier through ProxyJump, kept alive for the target client.
@@ -347,7 +352,7 @@ func (b *sshBackend) dial(ctx context.Context) (*ssh.Client, error) {
 	}
 	b.detail = fmt.Sprintf("host key %s · known_hosts %s · algorithms %s", alg, policy, strings.Join(algorithms, ", "))
 	b.mu.Unlock()
-	b.storeAcceptedPassword(res)
+	b.storeAcceptedPassword(ctx, res)
 	success = true
 	return client, nil
 }
@@ -432,9 +437,26 @@ func (b *sshBackend) stopKeepalive() {
 	}
 }
 
+// keepaliveValues returns this backend's interval/timeout: the per-backend override or the
+// package default. The read is under the backend lock; package defaults are written only at
+// init, so production has no race, and tests override the backend fields before connecting.
+func (b *sshBackend) keepaliveValues() (interval, timeout time.Duration) {
+	b.mu.Lock()
+	interval, timeout = b.keepaliveInterval, b.keepaliveTimeout
+	b.mu.Unlock()
+	if interval <= 0 {
+		interval = keepaliveInterval
+	}
+	if timeout <= 0 {
+		timeout = keepaliveTimeout
+	}
+	return interval, timeout
+}
+
 // keepaliveLoop pings the server until stop or a failed ping.
 func (b *sshBackend) keepaliveLoop(client *ssh.Client, stop <-chan struct{}) {
-	ticker := time.NewTicker(keepaliveInterval)
+	interval, timeout := b.keepaliveValues()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -442,7 +464,7 @@ func (b *sshBackend) keepaliveLoop(client *ssh.Client, stop <-chan struct{}) {
 			return
 		case <-ticker.C:
 		}
-		if err := b.ping(client); err != nil {
+		if err := b.ping(client, timeout); err != nil {
 			b.markDown(fmt.Errorf("keepalive failed: %w", err))
 			_ = client.Close()
 			return
@@ -450,8 +472,8 @@ func (b *sshBackend) keepaliveLoop(client *ssh.Client, stop <-chan struct{}) {
 	}
 }
 
-// ping sends one keepalive global request, bounded by keepaliveTimeout.
-func (b *sshBackend) ping(client *ssh.Client) error {
+// ping sends one keepalive global request, bounded by timeout.
+func (b *sshBackend) ping(client *ssh.Client, timeout time.Duration) error {
 	done := make(chan error, 1)
 	go func() {
 		_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
@@ -460,7 +482,7 @@ func (b *sshBackend) ping(client *ssh.Client) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(keepaliveTimeout):
+	case <-time.After(timeout):
 		return errors.New("keepalive timed out")
 	}
 }
@@ -533,7 +555,7 @@ func (b *sshBackend) clearUsedPassword() {
 
 // storeAcceptedPassword stores a password the server accepted when the user config
 // opted in, and queues an honest notice (never when the store is unavailable).
-func (b *sshBackend) storeAcceptedPassword(res sshResolved) {
+func (b *sshBackend) storeAcceptedPassword(ctx context.Context, res sshResolved) {
 	if !b.opts.StorePassword || b.opts.PasswordStore == nil {
 		return
 	}
@@ -543,7 +565,7 @@ func (b *sshBackend) storeAcceptedPassword(res sshResolved) {
 	if pw == "" || source == "keyring" {
 		return
 	}
-	if err := b.opts.PasswordStore.Store(res.host, res.user, pw); err != nil {
+	if err := b.opts.PasswordStore.Store(ctx, res.host, res.user, pw); err != nil {
 		b.addNotice(fmt.Sprintf("SSH: the password for %s was accepted but not stored in the OS keyring: %v", res.host, err))
 		return
 	}

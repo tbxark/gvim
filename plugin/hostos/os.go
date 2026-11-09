@@ -65,6 +65,11 @@ type WriteOptions struct {
 	Append  bool
 	Mode    fs.FileMode // 0: the mode of the file being replaced, else 0644
 	Parents bool        // create missing parent directories
+	// Exclusive creates the file only when the path does not exist as a file,
+	// directory or symlink; an existing entry makes the write fail (fs.ErrExist) and
+	// is left untouched. It is a create-new, not a replace: Atomic is ignored, Append
+	// and Parents are refused by the backends that cannot honour them atomically.
+	Exclusive bool
 }
 
 // DirEntry is one entry of OS.ReadDir.

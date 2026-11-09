@@ -41,18 +41,29 @@ const (
 	previewMinList = 30
 	// previewTabSize is the number of cells a tab takes in a preview line.
 	previewTabSize = 4
-	// previewNoLines is what a file with no lines shows.
-	previewNoLines = "(empty file)"
-	// previewBinary is what a binary file shows instead of its bytes.
-	previewBinary = "Binary file · not previewed"
-	// previewUnavailable is what a file that cannot be read shows.
-	previewUnavailable = "Preview unavailable"
 	// previewLoading is what the column shows until the read arrives.
 	previewLoading = "…"
 	// previewMore is the mark on the row after the last preview line, when the file
 	// continues.
 	previewMore = "…"
 )
+
+// previewUnavailableText is what a file that cannot be read shows. The preview
+// placeholders resolve at paint time, so a locale switch shows the new text on the next
+// preview; they are accessors rather than constants so the tests compare the same bytes.
+func previewUnavailableText() string {
+	return paletteText("gvim.palette.preview_unavailable", "Preview unavailable")
+}
+
+// previewBinaryText is what a binary file shows instead of its bytes.
+func previewBinaryText() string {
+	return paletteText("gvim.palette.preview_binary", "Binary file · not previewed")
+}
+
+// previewNoLinesText is what a file with no lines shows.
+func previewNoLinesText() string {
+	return paletteText("gvim.palette.preview_no_lines", "(empty file)")
+}
 
 // parseFileTarget splits a file query into the path to rank and an optional line and
 // column target, "path:line" or "path:line:col". Fresh's file finder documents this
@@ -287,15 +298,15 @@ func (p *Palette) paintPreview(g *grid.Grid, geo geometry) {
 	}
 	switch {
 	case s.data.Err != nil:
-		g.Put(geo.prevX, geo.rowsTop, geo.prevEnd, previewUnavailable, muted)
+		g.Put(geo.prevX, geo.rowsTop, geo.prevEnd, previewUnavailableText(), muted)
 		return
 	case s.data.Binary:
-		g.Put(geo.prevX, geo.rowsTop, geo.prevEnd, previewBinary, muted)
+		g.Put(geo.prevX, geo.rowsTop, geo.prevEnd, previewBinaryText(), muted)
 		return
 	}
 	lines := s.data.Lines
 	if len(lines) == 0 {
-		g.Put(geo.prevX, geo.rowsTop, geo.prevEnd, previewNoLines, muted)
+		g.Put(geo.prevX, geo.rowsTop, geo.prevEnd, previewNoLinesText(), muted)
 		return
 	}
 	gutter := len(strconv.Itoa(max(len(lines), p.fileLine)))

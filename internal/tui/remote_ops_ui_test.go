@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	tree "github.com/tbxark/gvim/explorer"
 	"github.com/tbxark/gvim/internal/tui/explorer"
 	"github.com/tbxark/gvim/internal/tui/style"
@@ -45,6 +47,11 @@ type fakeRemoteOps struct {
 	target string
 	copies []string
 	moves  []string
+	// conflict makes a cancel-policy copy/move report explorer.ErrConflict.
+	conflict bool
+	policies []explorer.Conflict
+	copyAs   [][3]string // src, dstDir, name
+	moveAs   []string    // dstDir/name of a move
 }
 
 func (f *fakeRemoteOps) RemoteTarget() string { return f.target }
@@ -58,9 +65,31 @@ func (f *fakeRemoteOps) Move(_ context.Context, src, dstDir string) (string, err
 	f.moves = append(f.moves, src+" -> "+dstDir)
 	return dstDir + "/" + path.Base(src), nil
 }
-func (f *fakeRemoteOps) Copy(_ context.Context, src, dstDir string, _ explorer.Conflict) (string, error) {
+func (f *fakeRemoteOps) MoveAs(_ context.Context, src, dstDir, name string, c explorer.Conflict) (string, error) {
+	f.policies = append(f.policies, c)
+	if f.conflict && c == explorer.ConflictCancel {
+		return "", errors.Join(explorer.ErrConflict, errors.New("exists"))
+	}
+	if name == "" {
+		name = path.Base(src)
+	}
+	dst := dstDir + "/" + name
+	f.moveAs = append(f.moveAs, dst)
+	f.moves = append(f.moves, src+" -> "+dstDir)
+	return dst, nil
+}
+func (f *fakeRemoteOps) Copy(_ context.Context, src, dstDir string, c explorer.Conflict) (string, error) {
+	f.policies = append(f.policies, c)
+	if f.conflict && c == explorer.ConflictCancel {
+		return "", errors.Join(explorer.ErrConflict, errors.New("exists"))
+	}
 	f.copies = append(f.copies, src+" -> "+dstDir)
 	return dstDir + "/" + path.Base(src), nil
+}
+func (f *fakeRemoteOps) CopyAs(_ context.Context, src, dstDir, name string, c explorer.Conflict) (string, error) {
+	f.policies = append(f.policies, c)
+	f.copyAs = append(f.copyAs, [3]string{src, dstDir, name})
+	return dstDir + "/" + name, nil
 }
 func (f *fakeRemoteOps) Rename(context.Context, string, string) (string, error) {
 	return "", errors.New("not called")
@@ -251,5 +280,94 @@ func TestRemoteExplorerWriteRefreshesWithoutBlocking(t *testing.T) {
 	_ = cmd()
 	if loader.callCount() == 0 {
 		t.Fatal("the queued refresh read nothing")
+	}
+}
+
+// remotePasteModel builds a root with a writable remote tree and the fake remote ops.
+func remotePasteModel(t *testing.T, ops *fakeRemoteOps) *Model {
+	t.Helper()
+	tr := &remoteCapTree{rows: []tree.Row{{Name: "a.go", Path: "/r/other/a.go"}}}
+	m := New(Deps{Editor: newFakeEditor("x"), Keys: fakeKeymap{}, Theme: theme.Theme{}, Clock: testClock, Explorer: tr, ShowExplorer: true})
+	m.ops = ops
+	return m
+}
+
+func remotePasteConflictErr() error { return errors.Join(explorer.ErrConflict, errors.New("exists")) }
+
+// TestRemotePasteConflictOffersOverwriteRenameCancel checks a remote paste conflict opens
+// the overwrite/rename choice: No opens the prefilled name prompt, submitting a new name
+// reruns the copy as that name; Yes reruns it with overwrite; Esc cancels with nothing
+// changed.
+func TestRemotePasteConflictOffersOverwriteRenameCancel(t *testing.T) {
+	job := func() fileJob {
+		return fileJob{kind: jobCopy, path: "/r/other/a.go", dir: "/r/dst", policy: explorer.ConflictCancel}
+	}
+
+	// Rename.
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true}
+	m := remotePasteModel(t, ops)
+	_, cmd := m.Update(fileResultMsg{job: job(), err: remotePasteConflictErr()})
+	settle(t, m, cmd)
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want the remote conflict prompt", len(m.overlays))
+	}
+	_, cmd = m.Update(typed("n"))
+	settle(t, m, cmd)
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want the rename prompt", len(m.overlays))
+	}
+	// The prompt is prefilled with the source name: replace it with b.go.
+	for range len("a.go") {
+		m.Update(special(tea.KeyBackspace))
+	}
+	typeText(m, "b.go")
+	_, cmd = m.Update(special(tea.KeyEnter))
+	settle(t, m, cmd)
+	if len(ops.copyAs) != 1 || ops.copyAs[0] != [3]string{"/r/other/a.go", "/r/dst", "b.go"} {
+		t.Fatalf("renamed copy = %v", ops.copyAs)
+	}
+	if len(m.overlays) != 0 {
+		t.Fatal("the rename prompt stayed open")
+	}
+
+	// Overwrite.
+	ops = &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true}
+	m = remotePasteModel(t, ops)
+	_, cmd = m.Update(fileResultMsg{job: job(), err: remotePasteConflictErr()})
+	settle(t, m, cmd)
+	_, cmd = m.Update(typed("y"))
+	settle(t, m, cmd)
+	if len(ops.policies) == 0 || ops.policies[len(ops.policies)-1] != explorer.ConflictOverwrite {
+		t.Fatalf("policies = %v, want the overwrite retry", ops.policies)
+	}
+
+	// Cancel.
+	ops = &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true}
+	m = remotePasteModel(t, ops)
+	_, cmd = m.Update(fileResultMsg{job: job(), err: remotePasteConflictErr()})
+	settle(t, m, cmd)
+	m.Update(special(tea.KeyEscape))
+	if len(m.overlays) != 0 || len(ops.copies) != 0 || len(ops.copyAs) != 0 {
+		t.Fatalf("cancel left overlays %d, copies %v, copyAs %v", len(m.overlays), ops.copies, ops.copyAs)
+	}
+}
+
+// TestRemoteCutPasteConflictOverwrite checks a remote cut paste's conflict also offers the
+// choice and the overwrite retry goes through MoveAs with the chosen policy.
+func TestRemoteCutPasteConflictOverwrite(t *testing.T) {
+	ops := &fakeRemoteOps{target: "SSH:u@h:/r", conflict: true}
+	m := remotePasteModel(t, ops)
+	_, cmd := m.Update(fileResultMsg{job: fileJob{kind: jobMove, path: "/r/other/a.go", dir: "/r/dst"}, err: remotePasteConflictErr()})
+	settle(t, m, cmd)
+	if len(m.overlays) != 1 {
+		t.Fatalf("overlays = %d, want the cut conflict prompt", len(m.overlays))
+	}
+	_, cmd = m.Update(typed("y"))
+	settle(t, m, cmd)
+	if len(ops.policies) == 0 || ops.policies[len(ops.policies)-1] != explorer.ConflictOverwrite {
+		t.Fatalf("policies = %v, want the overwrite move retry", ops.policies)
+	}
+	if len(ops.moveAs) != 1 || ops.moveAs[0] != "/r/dst/a.go" {
+		t.Fatalf("moveAs = %v", ops.moveAs)
 	}
 }

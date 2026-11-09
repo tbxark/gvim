@@ -49,6 +49,10 @@ type UpdateStatus struct {
 // UpdateHooks is the app's release check. Nil (the zero value) disables it, and
 // the commands then say so instead of doing nothing.
 type UpdateHooks struct {
+	// Command is the configured update command argv (update_command, through the
+	// user's shell). Empty hides the Update fresh/update-output rows and leaves the
+	// actions to their not-available notice.
+	Command []string
 	// Check runs off the update goroutine and returns the newer release, or nil
 	// when this build is current, the check is not due yet, or it failed.
 	Check func(ctx context.Context) *UpdateInfo
@@ -117,6 +121,16 @@ func (m *Model) updateAction(action string) (tea.Cmd, bool) {
 	case "show_update_output":
 		m.openUpdateOutput()
 		return nil, true
+	case "update_fresh":
+		if len(m.updates.Command) == 0 {
+			return nil, false // notApplicableNotice keeps the old "does not update itself"
+		}
+		return m.runUpdateCommand(), true
+	case "open_update_log":
+		if len(m.updates.Command) == 0 {
+			return nil, false
+		}
+		return m.focusUpdateOutput(), true
 	}
 	return nil, false
 }

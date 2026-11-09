@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships twenty-three plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-four plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager` and `asm_lsp` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp` and `csharp_support` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -26,6 +26,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `path_complete` | on | Path Completion: Complete Path | none |
 | `lsp_help` | on | none (event driven: an LSP server error puts an install hint on the status row, and the LSP status click opens the help popup) | none |
 | `asm_lsp` | **off** | Assembly: Create .asm-lsp.toml, Assembly: Show LSP Help | none |
+| `csharp_support` | **off** | C#: Restore Project, C#: Show LSP Help | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
 | `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
 | `git_grep` | **off** | Git Grep, Git Grep: Toggle Case Sensitive | none |
@@ -183,7 +184,10 @@ wrong diagnostics, hover docs and definitions. When an assembly file opens (`.as
 nor a global asm-lsp config exists, the plugin offers to create it, guessing the assembler from the
 language and a bounded sample of the buffer (MASM's `proc`/`endp`/`assume`/`.model` tokens
 versus NASM's default; `gas` for `.s`/`gas`) and the instruction set (ARM64 opcodes, RISC-V
-opcodes, else x86/x86-64). The config is written atomically at the project root with asm-lsp's
+opcodes, else x86/x86-64). The config is created exclusively at the project root (a `gvim.fs.write`
+create-new, mapped to the workspace authority's `FileCreator` capability on a remote workspace: a file
+another process created after the offer is never overwritten; a backend without the capability
+refuses instead of racing a check) with asm-lsp's
 `[default_config]` shape and, for non-GAS dialects, the `default_diagnostics = false` block (its
 built-in diagnostics only assemble GAS), then the native **lsp_restart** action is run so a running
 server picks it up. The offer's other choices create the config for another dialect, dismiss it for
@@ -201,6 +205,29 @@ global-config check runs through the workspace file system, so a remote workspac
 home, not the local one; an overlong project root persists its "don't ask again" choice with a
 truncated state key.
 
+
+**csharp_support** (reduced Fresh port): the C# language-server helper. When a `.cs` file opens
+(and, in the real editor, for the files already open when it loads), it walks up from the file at
+most 20 directories looking for a `.csproj`/`.sln` and runs `dotnet restore` on that project root,
+or on the file's directory when no project file is found. A restore runs once per project per
+session; it follows the workspace authority, so a remote workspace restores on the remote host. The
+workspace trust gate is honoured first: in a restricted/blocked workspace the restore is recorded as
+pending and runs when `trust_changed` reports `trusted` (dotnet evaluates repository-controlled
+MSBuild targets, so opening a C# file must not execute them before the user trusts the folder). The
+status row reports restoring/completed/failed, with the first stderr line on failure. An
+`lsp_server_error` that names the C# server (csharp/c#/roslyn/omnisharp) on a C# buffer puts an
+install hint on the status row, and the LSP-status click opens the help popup with a copyable
+`dotnet tool install --global csharp-ls` command, the native Start/Restart LSP Server and Show LSP
+Status actions, and Dismiss. Commands: **C#: Restore Project** (force a restore for the active file's
+project) and **C#: Show LSP Help**; it binds no key and registers no settings. It is opt-in
+(`default_enabled: false`) because it runs dotnet. Reductions (also in porting.md): gvim's plugin API
+cannot set the C# server's root URI, so Fresh's `setLspRootUri` step is replaced by gvim's LSP
+configuration/root detection; there is no server-request event for Roslyn's
+`workspace/_roslyn_projectNeedsRestore`, so that half of Fresh's restore flow is not ported (the
+open-file restore covers the common case); Fresh's "Disable C# LSP" action is replaced by the native
+LSP status menu (gvim has no plugin call to disable a language's server); Fresh's `dotnet --version`
+precheck is replaced by running restore and reporting a start error; and the plugin ships only English
+i18n strings.
 **compare_files** (port of Fresh's own compare plugin; reduced): **Compare Files...** (or **Compare
 Active File With...**) opens the two paths you type and shows them as two editable splits of the
 current tab — changed lines get a background, in-line changes a highlighted span, a gutter glyph and

@@ -96,14 +96,61 @@ func (o *remoteExplorerOps) copyContext(ctx context.Context) (context.Context, c
 
 // Copy copies the remote file/dir src into dstDir and returns the new path. A copy
 // within the source's own directory gets Fresh's free "name copy[.ext]" name (this is
-// also Duplicate); a copy into another directory keeps the name and is REFUSED when
-// that destination already exists (no overwrite, no ErrConflict prompt).
-func (o *remoteExplorerOps) Copy(ctx context.Context, src, dstDir string, _ expanel.Conflict) (string, error) {
+// also Duplicate). A paste into another directory keeps the name; an existing destination
+// follows the explorer's conflict choice: cancel reports ErrConflict (the root then offers
+// overwrite/rename), skip leaves it alone and returns its path, overwrite removes it first
+// (there is no rollback after that removal; a concurrent re-creation is documented as a
+// race).
+func (o *remoteExplorerOps) Copy(ctx context.Context, src, dstDir string, c expanel.Conflict) (string, error) {
+	return o.transfer(ctx, src, dstDir, "", false, c)
+}
+
+// CopyAs copies src into dstDir under name, for a conflict prompt's rename choice. It
+// validates name as one path element and uses the same conflict policy as Copy.
+func (o *remoteExplorerOps) CopyAs(ctx context.Context, src, dstDir, name string, c expanel.Conflict) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("remote copy: empty destination name")
+	}
+	return o.transfer(ctx, src, dstDir, name, false, c)
+}
+
+// Move cuts src into dstDir: it copies the subtree first and removes the source only
+// after the copy fully succeeded. A move into the source's own directory is a no-op
+// (matching the local explorer; the root then cancels the cut). A destination that exists
+// follows the conflict choice: cancel reports ErrConflict, skip leaves both alone and
+// returns the source (the root cancels the cut), overwrite removes the destination first
+// (no rollback; documented race).
+func (o *remoteExplorerOps) Move(ctx context.Context, src, dstDir string) (string, error) {
+	return o.transfer(ctx, src, dstDir, "", true, expanel.ConflictCancel)
+}
+
+// MoveAs is Move with a conflict policy and an optional destination name: an empty name
+// keeps the source's name (the overwrite choice) and a name is the conflict prompt's rename
+// choice.
+func (o *remoteExplorerOps) MoveAs(ctx context.Context, src, dstDir, name string, c expanel.Conflict) (string, error) {
+	return o.transfer(ctx, src, dstDir, name, true, c)
+}
+
+// remotePasteConflictError is a paste destination that already exists. It matches
+// explorer.ErrConflict, so the root can offer overwrite/rename/cancel instead of failing.
+type remotePasteConflictError struct{ dst string }
+
+func (e *remotePasteConflictError) Error() string {
+	return "remote paste destination " + e.dst + " already exists"
+}
+func (e *remotePasteConflictError) Is(target error) bool { return target == expanel.ErrConflict }
+
+// transfer is the shared Copy/CopyAs/Move/MoveAs implementation.
+func (o *remoteExplorerOps) transfer(ctx context.Context, src, dstDir, name string, move bool, c expanel.Conflict) (string, error) {
 	if err := o.check(); err != nil {
 		return "", err
 	}
 	if err := o.copyEndpoints(src, dstDir); err != nil {
 		return "", err
+	}
+	sameDir := path.Clean(path.Dir(src)) == path.Clean(dstDir)
+	if move && sameDir && name == "" {
+		return src, nil
 	}
 	opCtx, cancel := o.copyContext(ctx)
 	defer cancel()
@@ -122,17 +169,44 @@ func (o *remoteExplorerOps) Copy(ctx context.Context, src, dstDir string, _ expa
 	} else if sym {
 		return "", fmt.Errorf("remote file operation: %s is a symbolic link; remote copy does not follow links", src)
 	}
-	name := path.Base(src)
-	if path.Clean(path.Dir(src)) == path.Clean(dstDir) {
-		name, err = o.uniqueCopyName(opCtx, dstDir, name)
+	if name != "" {
+		if err := fsops.Validate(dstDir, name); err != nil {
+			return "", fmt.Errorf("remote copy: %w", err)
+		}
+	}
+	if name == "" && sameDir && !move {
+		name, err = o.uniqueCopyName(opCtx, dstDir, path.Base(src))
 		if err != nil {
 			return "", err
 		}
 	} else {
-		if ok, _, err := o.exists(opCtx, path.Join(dstDir, name)); err != nil {
-			return "", fmt.Errorf("remote file operation: stat %s: %w", path.Join(dstDir, name), err)
-		} else if ok {
-			return "", fmt.Errorf("remote paste refused: %s already exists (remote paste never overwrites)", path.Join(dstDir, name))
+		if name == "" {
+			name = path.Base(src)
+		}
+		dst := path.Join(dstDir, name)
+		if path.Clean(dst) == path.Clean(src) {
+			return "", fmt.Errorf("remote copy: source and destination are the same: %s", src)
+		}
+		dstOK, dstStat, err := o.exists(opCtx, dst)
+		if err != nil {
+			return "", fmt.Errorf("remote file operation: stat %s: %w", dst, err)
+		}
+		if dstOK {
+			switch c {
+			case expanel.ConflictCancel:
+				return "", &remotePasteConflictError{dst: dst}
+			case expanel.ConflictSkip:
+				if move {
+					return src, nil
+				}
+				return dst, nil
+			case expanel.ConflictOverwrite:
+				if err := o.muts.Remove(opCtx, dst, dstStat.Kind == "dir"); err != nil {
+					return "", fmt.Errorf("remote paste overwrite: remove %s: %w", dst, err)
+				}
+			default:
+				return "", fmt.Errorf("remote paste: unknown conflict choice %d", int(c))
+			}
 		}
 	}
 	dst := path.Join(dstDir, name)
@@ -145,58 +219,10 @@ func (o *remoteExplorerOps) Copy(ctx context.Context, src, dstDir string, _ expa
 	if err != nil {
 		return "", &remoteCopyPartialError{dst: dst, files: written, err: err}
 	}
-	return dst, nil
-}
-
-// Move cuts src into dstDir: it copies the subtree first and removes the source only
-// after the copy fully succeeded. A move into the source's own directory is a no-op
-// (matching the local explorer; the root then cancels the cut). A destination that
-// already exists is refused, never overwritten.
-func (o *remoteExplorerOps) Move(ctx context.Context, src, dstDir string) (string, error) {
-	if err := o.check(); err != nil {
-		return "", err
-	}
-	if err := o.copyEndpoints(src, dstDir); err != nil {
-		return "", err
-	}
-	if path.Clean(path.Dir(src)) == path.Clean(dstDir) {
-		return src, nil
-	}
-	opCtx, cancel := o.copyContext(ctx)
-	defer cancel()
-	if err := o.gateOp(opCtx, "move", src); err != nil {
-		return "", err
-	}
-	ok, st, err := o.exists(opCtx, src)
-	if err != nil {
-		return "", fmt.Errorf("remote file operation: stat %s: %w", src, err)
-	}
-	if !ok {
-		return "", fmt.Errorf("remote file operation: %s does not exist", src)
-	}
-	if sym, err := o.symlink(opCtx, src, st); err != nil {
-		return "", err
-	} else if sym {
-		return "", fmt.Errorf("remote file operation: %s is a symbolic link; remote move does not follow links", src)
-	}
-	dst := path.Join(dstDir, path.Base(src))
-	if ok, _, err := o.exists(opCtx, dst); err != nil {
-		return "", fmt.Errorf("remote file operation: stat %s: %w", dst, err)
-	} else if ok {
-		return "", fmt.Errorf("remote paste refused: %s already exists (remote paste never overwrites)", dst)
-	}
-	limits := remoteCopyDefaultLimits
-	nodes, err := o.planCopy(opCtx, src, st, limits)
-	if err != nil {
-		return "", err
-	}
-	written, err := o.writeCopy(opCtx, src, dst, nodes, limits)
-	if err != nil {
-		return "", &remoteCopyPartialError{dst: dst, files: written, err: err}
-	}
-	// The copy is complete: only now is the source removed.
-	if err := o.muts.Remove(opCtx, src, st.Kind == "dir"); err != nil {
-		return "", fmt.Errorf("remote move: copied %s to %s but removing the source failed: %w; the copy is kept", src, dst, err)
+	if move {
+		if err := o.muts.Remove(opCtx, src, st.Kind == "dir"); err != nil {
+			return "", fmt.Errorf("remote move: copied %s to %s but removing the source failed: %w; the copy is kept", src, dst, err)
+		}
 	}
 	return dst, nil
 }

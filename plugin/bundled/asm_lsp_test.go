@@ -256,3 +256,28 @@ func TestAsmLspIgnoresNonAsmBuffers(t *testing.T) {
 		t.Fatalf("claimed an asm error on a markdown buffer: %q", got)
 	}
 }
+
+// TestAsmLspExclusiveCreateDoesNotOverwrite: if another process creates the project file
+// after the offer checked it was absent but before the user confirms, the create-new must
+// refuse and leave that file intact (the popup-time existence check races).
+func TestAsmLspExclusiveCreateDoesNotOverwrite(t *testing.T) {
+	t.Parallel()
+	r := asmRig(t, "/work/a.asm", "section .text\n", nil)
+	ov := asmPopup(r.h)
+	if ov == nil {
+		t.Fatal("no config offer popup")
+	}
+	r.os.SetFile("/work/.asm-lsp.toml", "theirs\n")
+	r.h.Resolve(pluginapi.Completion{Token: ov.Token, Values: []any{"create:nasm"}})
+	if got, _ := r.os.File("/work/.asm-lsp.toml"); got != "theirs\n" {
+		t.Fatalf("the race created or overwrote the file: %q", got)
+	}
+	if got := lastNoticeText(r.h); !strings.Contains(got, "Not overwriting") {
+		t.Fatalf("status = %q, want the explicit refusal", got)
+	}
+	for _, action := range r.host.Cmd().Ran() {
+		if action == "lsp_restart" {
+			t.Fatal("the refused create restarted the LSP")
+		}
+	}
+}
