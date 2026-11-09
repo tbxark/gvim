@@ -4,6 +4,8 @@ package terminal
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -90,5 +92,88 @@ func TestSanitizeForegroundProcessName(t *testing.T) {
 	long := strings.Repeat("x", 100)
 	if got := sanitizeForegroundProcessName(long); len([]rune(got)) != 64 {
 		t.Fatalf("long name length = %d, want 64", len([]rune(got)))
+	}
+}
+
+// fakePSFile is an os.FileInfo for the trusted-path resolver.
+type fakePSFile struct {
+	name  string
+	mode  os.FileMode
+	isdir bool
+}
+
+func (f fakePSFile) Name() string       { return f.name }
+func (f fakePSFile) Size() int64        { return 1 }
+func (f fakePSFile) Mode() os.FileMode  { return f.mode }
+func (f fakePSFile) ModTime() time.Time { return time.Time{} }
+func (f fakePSFile) IsDir() bool        { return f.isdir }
+func (f fakePSFile) Sys() any           { return nil }
+
+// TestResolvePSPathUsesOnlyTrustedAbsolutePaths checks the ps fallback cannot be
+// redirected: it only stats the fixed absolute system candidates, takes the first
+// executable regular file, and skips missing/non-executable/directory entries.
+func TestResolvePSPathUsesOnlyTrustedAbsolutePaths(t *testing.T) {
+	t.Parallel()
+	var calls []string
+	stat := func(path string) (os.FileInfo, error) {
+		calls = append(calls, path)
+		if path == "/usr/bin/ps" {
+			return fakePSFile{name: "ps", mode: 0o555}, nil
+		}
+		return nil, os.ErrNotExist
+	}
+	if got := resolvePSPath(stat); got != "/usr/bin/ps" {
+		t.Fatalf("resolved ps = %q, want /usr/bin/ps", got)
+	}
+	if len(calls) == 0 {
+		t.Fatal("the resolver did not stat any candidate")
+	}
+	for _, path := range calls {
+		if !filepath.IsAbs(path) {
+			t.Fatalf("the resolver statted a non-absolute path %q", path)
+		}
+		allowed := false
+		for _, trust := range trustedPSCandidates {
+			if path == trust {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			t.Fatalf("the resolver statted %q outside the trusted list", path)
+		}
+	}
+	// A non-executable file or a directory is never executed.
+	for _, info := range []fakePSFile{
+		{name: "ps", mode: 0o644},
+		{name: "ps", mode: 0o555, isdir: true},
+	} {
+		if got := resolvePSPath(func(string) (os.FileInfo, error) { return info, nil }); got != "" {
+			t.Fatalf("resolved %q for file %+v, want no ps", got, info)
+		}
+	}
+	if got := resolvePSPath(func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }); got != "" {
+		t.Fatalf("resolved %q with no candidates present, want none", got)
+	}
+}
+
+// TestPsCommNeverRunsPsFromPATH is the regression for the PATH-injection audit:
+// a directory placed first on PATH with an attacker-controlled "ps" must not be
+// executed; the fallback only runs an absolute trusted system binary.
+func TestPsCommNeverRunsPsFromPATH(t *testing.T) {
+	// Not parallel: it changes PATH for the process.
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	malicious := "#!/bin/sh\ntouch " + marker + "\nprintf 'hacked\\n'\n"
+	if err := os.WriteFile(filepath.Join(dir, "ps"), []byte(malicious), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	name := psComm(os.Getpid())
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the PATH-resolved ps was executed")
+	}
+	if strings.Contains(name, "hacked") {
+		t.Fatalf("psComm ran the untrusted ps: %q", name)
 	}
 }

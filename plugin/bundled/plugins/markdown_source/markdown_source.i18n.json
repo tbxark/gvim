@@ -1,0 +1,7 @@
+{
+  "en": {
+    "status.no_active_buffer": "No active buffer to edit",
+    "status.edit_failed": "Could not edit the Markdown list: %{error}",
+    "status.action_failed": "Could not run %{action}: %{error}"
+  }
+}

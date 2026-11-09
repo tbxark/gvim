@@ -853,3 +853,63 @@ func BenchmarkPluginSnapshotAndTail(b *testing.B) {
 		})
 	}
 }
+
+// hostFocus sends a host focus message and delivers the pump tick it returns, so the
+// event reaches the runtime through the deferred plugin pump rather than inside the
+// focus Update.
+func (h *evHarness) hostFocus(msg tea.Msg) []string {
+	h.rt.emitted = nil
+	_, cmd := h.m.Update(msg)
+	for _, out := range deliver(cmd) {
+		h.m.Update(out)
+	}
+	return evRows(h.rt.emitted)
+}
+
+// TestHostWindowFocusEventsAreDeduped covers the outer-terminal focus events: the
+// initial focused state raises nothing, each real transition raises exactly one
+// window_focused/window_blurred, and repeated FocusMsg/BlurMsg reports are ignored.
+func TestHostWindowFocusEventsAreDeduped(t *testing.T) {
+	h := newEvHarness(t, "window_focused", "window_blurred")
+	wantRows(t, h.hostFocus(tea.FocusMsg{}), nil) // the model starts host-focused
+	wantRows(t, h.hostFocus(tea.BlurMsg{}), []string{"window_blurred"})
+	wantRows(t, h.hostFocus(tea.BlurMsg{}), nil)
+	wantRows(t, h.hostFocus(tea.FocusMsg{}), []string{"window_focused"})
+	wantRows(t, h.hostFocus(tea.FocusMsg{}), nil)
+}
+
+// TestHostWindowFocusDoesNotRaiseChromeFocusGained: window_focused/window_blurred are
+// the host-window facts; the existing focus_gained stays the chrome/editor keyboard
+// event and is not raised by a terminal focus change.
+func TestHostWindowFocusDoesNotRaiseChromeFocusGained(t *testing.T) {
+	h := newEvHarness(t, "window_focused", "window_blurred", "focus_gained")
+	wantRows(t, h.hostFocus(tea.BlurMsg{}), []string{"window_blurred"})
+	wantRows(t, h.hostFocus(tea.FocusMsg{}), []string{"window_focused"})
+}
+
+// TestHostWindowFocusEventsNeedASubscriber: with no plugin listening, the terminal focus
+// changes queue nothing and raise nothing.
+func TestHostWindowFocusEventsNeedASubscriber(t *testing.T) {
+	h := newEvHarness(t)
+	wantRows(t, h.hostFocus(tea.BlurMsg{}), nil)
+	wantRows(t, h.hostFocus(tea.FocusMsg{}), nil)
+}
+
+// TestHostWindowFocusEventIsQueuedNotRunInline: the focus message only updates the
+// dock/window state and schedules the pump tick; no runtime event is emitted inside
+// that Update. Delivering the tick causes exactly one window_blurred.
+func TestHostWindowFocusEventIsQueuedNotRunInline(t *testing.T) {
+	h := newEvHarness(t, "window_blurred")
+	h.rt.emitted = nil
+	_, cmd := h.m.Update(tea.BlurMsg{})
+	if len(h.rt.emitted) != 0 {
+		t.Fatalf("blur ran the plugin event inline: %v", evRows(h.rt.emitted))
+	}
+	if cmd == nil {
+		t.Fatal("blur did not schedule the plugin pump tick")
+	}
+	for _, out := range deliver(cmd) {
+		h.m.Update(out)
+	}
+	wantRows(t, evRows(h.rt.emitted), []string{"window_blurred"})
+}

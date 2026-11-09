@@ -1,0 +1,7 @@
+{
+  "name": "markdown_source",
+  "version": "1.0.0",
+  "description": "Markdown source-mode smart list editing: Enter continues lists (an empty item drops its marker), Tab/Shift+Tab indent and cycle bullets; ported from Fresh's markdown_source plugin",
+  "api": 2,
+  "default_enabled": false
+}

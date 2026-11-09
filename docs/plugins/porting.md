@@ -401,6 +401,37 @@ Tests: `plugin/bundled/welcome_test.go` covers the five command titles/no bindin
 built-in action dispatches, greeting and time insertion into an edited buffer with their status
 lines, the language-aware comment prefix, and the read-only insert failure. The plugin is
 `default_enabled: false` so the default palette and idle heap do not grow with demo rows.
+### Markdown source: a native rule set, ported as an opt-in plugin (port residual)
+
+Fresh's `markdown_source.ts` defines a `markdown-source` input mode, activates it when a Markdown
+buffer is shown in source view, and intercepts Enter/Tab/Shift+Tab. gvim implemented those rules
+directly in `editor/markdown.go` before any plugin existed (the built-in `insert_newline`,
+`insert_tab` and `dedent_selection` actions call them for `.md`/`.markdown`/`.mdx` files and the
+markdown/multimarkdown languages). The bundled plugin (`plugin/bundled/plugins/markdown_source/`,
+opt-in) is therefore the explicit Lua port, with these differences:
+
+* it does not define or auto-activate a `markdown-source` input mode. gvim's plugin API has no
+  source/compose view query (the native rule set notes gvim has no other view), and a buffer-local
+  mode would add a status label plus the `(Esc x3 leaves)` hint to every Markdown tab. Instead the
+  plugin registers three hidden normal-context commands with `enter`/`tab`/`shift+tab` bindings;
+  they check the active buffer and fall back to the built-in actions outside Markdown, with a
+  selection, with extra carets or while a plugin input mode is active (Fresh steps aside for its
+  input mode too);
+* the checks are content-based, so `.mdx` (which gvim has no language entry for) works by suffix,
+  matching the native rule set;
+* every successful rule is a direct plugin-buffer edit (`b:delete`/`b:replace`/`b:insert` plus a
+  cursor placement), one undo step per key, rather than a mode handler; failures (read-only buffer,
+  stale state) are status rows;
+* the four-space unit is hardcoded exactly like Fresh's `TAB_SIZE`; `tab_size`/`use_tabs` are not
+  consulted, tabs already in the indent are preserved and Shift+Tab removes four bytes;
+* the plugin is off by default because the native editor already provides the behaviour; enabling it
+  adds the key bindings and keeps the default palette/idle set unchanged.
+
+Tests: `plugin/bundled/markdown_source_test.go` covers the hidden key commands and bindings, the
+Enter table (bullets, ordered increment, checkbox, empty-item marker removal, indented items,
+non-list indent copy, cursor), the Tab table (bullet cycles, checkbox state, ordered/content
+fallback, cursor), Shift+Tab (reverse cycle, indent threshold, `dedent_selection` fallback),
+non-Markdown and selection fallbacks, and the read-only failure status.
 ### Notes for porters (learned from the bundled ports)
 
 * **Never read a whole buffer.** Scanning a 150 000-line file line by line in Lua blows the time budget.

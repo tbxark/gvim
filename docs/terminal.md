@@ -359,9 +359,11 @@ background tabs' exited markers current.
   `FG_POLL_INTERVAL` of about one second): gvim does the same bounded, non-blocking
   poll in a `tea.Cmd` — one `tcgetpgrp` ioctl on the PTY master plus a
   bounded `/proc/<pgid>/comm` read on Linux, or a 500 ms-bounded
-  `ps -o comm= -p <pgid>` on other Unix platforms (no shell involved) — and caches
-  the sanitized name per tab, so a program that starts, exits or is replaced in the
-  foreground updates the label within one poll. A **remote**, **Windows**,
+  `ps -o comm= -p <pgid>` on other Unix platforms (no shell involved; the ps
+  binary is only a fixed absolute system path from `/bin/ps`, `/usr/bin/ps`,
+  `/sbin/ps`, `/usr/sbin/ps`, so `PATH` and a project environment can never
+  redirect it) — and caches the sanitized name per tab, so a program that starts,
+  exits or is replaced in the foreground updates the label within one poll. A **remote**, **Windows**,
   **restored** or **exited** terminal reports no poll capability and falls back to
   the recorded launch program (argv[0]/agent), then the OSC title.
   The strip's duplicate disambiguation and cell-budget truncation still apply, and
@@ -474,8 +476,9 @@ reflected up to one poll interval later. Remote and Windows terminals keep the
 recorded launch program instead (no remote process introspection, no ConPTY
 foreground group); a restored or exited tab keeps the saved title/launch fallback;
 background tabs keep polling; Linux `comm` truncates to 15 characters, a missing
-`ps` degrades to the fallback rather than an error, and the name is sanitized and
-bounded to 64 runes before it reaches a label. Fresh can bring live tabs back without a dive because its layout focuses
+`ps` (or one outside the fixed absolute system paths — a `ps` on `PATH` is
+never executed) degrades to the fallback rather than an error, and the name is
+sanitized and bounded to 64 runes before it reaches a label. Fresh can bring live tabs back without a dive because its layout focuses
 the tab; gvim's dock is not restored into an editor split, so the dive is the
 first user action on the dock. A buffer shared across workspaces and extract-tab
 are the #19b policy decisions and remain open.

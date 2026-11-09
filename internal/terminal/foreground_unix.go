@@ -97,13 +97,45 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// psComm asks ps for the process group leader's command name. The process id is
-// an integer we read from the kernel, never user input; the command is bounded by
-// ctx and the capped stdout, and no shell is involved.
+// trustedPSCandidates are the only absolute system locations the ps fallback may
+// execute, in priority order. The dock's ps fallback is an OS introspection of a
+// local process group, so it must never resolve "ps" through PATH: a project
+// environment or a malicious agent can add a directory to PATH, and a PATH-resolved
+// ps would then run attacker-controlled code on every foreground poll. Only these
+// fixed, root-owned system locations are considered; a relative or custom path is
+// never used.
+var trustedPSCandidates = []string{"/bin/ps", "/usr/bin/ps", "/sbin/ps", "/usr/sbin/ps"}
+
+// resolvePSPath returns the first trusted absolute ps binary that is an existing,
+// executable regular file, or "" when none is available. stat is injectable for
+// tests; production always passes os.Stat. It never consults PATH, exec.LookPath
+// or the process environment.
+func resolvePSPath(stat func(string) (os.FileInfo, error)) string {
+	for _, path := range trustedPSCandidates {
+		info, err := stat(path)
+		if err != nil || info == nil || info.IsDir() {
+			continue
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		return path
+	}
+	return ""
+}
+
+// psComm asks the trusted ps for the process group leader's command name. The
+// process id is an integer we read from the kernel, never user input; the command
+// is bounded by ctx and the capped stdout, no shell is involved, and the binary is
+// a fixed absolute system path chosen by resolvePSPath (never a PATH lookup).
 func psComm(pgid int) string {
+	psPath := resolvePSPath(os.Stat)
+	if psPath == "" {
+		return ""
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), foregroundProcessTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ps", "-o", "comm=", "-p", strconv.Itoa(pgid))
+	cmd := exec.CommandContext(ctx, psPath, "-o", "comm=", "-p", strconv.Itoa(pgid))
 	out := &cappedWriter{max: maxForegroundProcessBytes}
 	cmd.Stdout = out
 	if err := cmd.Run(); err != nil {

@@ -492,18 +492,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The outer terminal window gained the focus: merge it into the dock's focus
 		// reporting (a child that asked for DECSET 1004 events is focused again when
 		// the dock itself has the keyboard) and keep the remote reconnect-on-activate
-		// point.
+		// point. The plugin event is only raised on a real state change: repeated
+		// FocusMsg reports must not replay window_focused for every plugin.
+		changed := !m.hostFocused
 		m.hostFocused = true
 		m.dock.SetHostFocused(true)
-		return m, m.beginAuthorityReconnect()
+		cmd := m.beginAuthorityReconnect()
+		if changed {
+			cmd = tea.Batch(cmd, m.emitHostFocusEvent("window_focused"))
+		}
+		return m, cmd
 	}
 	if _, ok := msg.(tea.BlurMsg); ok {
 		// The outer window lost the focus: no terminal child may think it is focused.
 		// A blur is not a reconnect point (the connection is unrelated to the OS
-		// window).
+		// window). Like focus, the plugin event is only for a real transition.
+		changed := m.hostFocused
 		m.hostFocused = false
 		m.dock.SetHostFocused(false)
-		return m, nil
+		if !changed {
+			return m, nil
+		}
+		return m, m.emitHostFocusEvent("window_blurred")
 	}
 	if forced, ok := msg.(updateForcedMsg); ok {
 		m.applyUpdateStatus(forced.status)
@@ -644,6 +654,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(cmd, m.pumpAfter(func() {}))
 	}
 	return next, cmd
+}
+
+// emitHostFocusEvent queues a host-window focus event for the plugins that subscribe
+// to it and schedules the plugin pump on the next event-loop turn. The focus message
+// itself never calls the runtime: the dock state is updated and Update returns, then
+// pluginDrainMsg flushes the event through the normal pump budget. Without a runtime
+// or a subscriber nothing is queued and no pump is scheduled.
+func (m *Model) emitHostFocusEvent(name string) tea.Cmd {
+	if m.plug.rt == nil || !m.plug.rt.Wants(name) {
+		return nil
+	}
+	m.plugEmit(name, map[string]any{})
+	return m.drainTick()
 }
 
 // bandAppeared reports whether this update gave the status row a message that needs

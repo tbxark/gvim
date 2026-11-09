@@ -1,10 +1,10 @@
 # Bundled plugins
 
-gvim ships twenty-six plugins inside the binary, written in Lua like any other (their sources are under
+gvim ships twenty-seven plugins inside the binary, written in Lua like any other (their sources are under
 `plugin/bundled/plugins/<name>/` in the repository; **Plugin: Manager** shows them, and
 `config.json` can override them). Nine are on by default; `flash`, `vi_mode`, `live_diff`, `git_log`,
 `compare_files`, `merge_conflict`, `dashboard`, `code_tour`, `lsp_navigation`, `find_references`,
-`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support` and `welcome` are off until you turn them on:
+`git_grep`, `git_explorer`, `env_manager`, `asm_lsp`, `csharp_support`, `clangd_support`, `welcome` and `markdown_source` are off until you turn them on:
 
 ```jsonc
 { "plugins": { "vi_mode": { "enabled": true }, "git_blame": { "enabled": false } } }
@@ -29,6 +29,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `csharp_support` | **off** | C#: Restore Project, C#: Show LSP Help | none |
 | `clangd_support` | **off** | Clangd: Switch Source/Header, Clangd: Project Setup, Clangd: Open Project Config | none |
 | `welcome` | **off** | Plugin Demo: Open Help, Plugin Demo: Save File, Plugin Demo: Say Hello, Plugin Demo: Insert Time, Plugin Demo: Insert Comment | none |
+| `markdown_source` | **off** | none (hidden Enter/Tab/Shift+Tab key handlers for Markdown lists) | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
 | `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
 | `git_grep` | **off** | Git Grep, Git Grep: Toggle Case Sensitive | none |
@@ -263,6 +264,26 @@ porting.md): the demo comment chooses its line-comment prefix from the active bu
 of Fresh's fixed `//`; the greeting/time/comment strings are English-only rather than Fresh's 15
 locales; and Fresh's debug-only load message is not reproduced (gvim has no equivalent hidden
 status).
+
+**markdown_source** (port of Fresh's `plugins/markdown_source.ts`): gvim's editor already
+implements Fresh's Markdown source-mode list rules natively (`editor/markdown.go`, called from the
+built-in `insert_newline`/`insert_tab`/`dedent_selection` actions), so this is the explicit Lua
+port, opt-in (`default_enabled: false`) for plugin parity rather than a native-behaviour gap.
+**Enter** on a list item continues it with the same indent and bullet, increments an ordered item
+(keeping its digit count), starts checkboxes unchecked, and drops the marker of an empty item; a
+non-list line copies its leading blanks. **Tab** on a blank unordered/checkbox item indents four
+spaces and cycles the bullet forward (`* → - → + → *`, checkbox state kept); an ordered item or an
+item with content inserts four spaces. **Shift+Tab** on such a blank item with at least four blanks
+of indent removes four and cycles the bullet in reverse (`* → + → - → *`); otherwise it runs
+`dedent_selection`. The three handlers are hidden commands bound in the normal editing context and
+check the active buffer themselves; a non-Markdown buffer, a selection, extra carets or any active
+input mode (vi) falls back to the editor's own action, so nothing outside Markdown source editing is
+intercepted. Reductions (also in porting.md): no `markdown-source` buffer-local mode/status and no
+auto-activation events — gvim's plugin API has no source/compose view query and a buffer mode would
+add an `(Esc x3 leaves)` hint to every Markdown tab; the handlers stay normal-context and fall back
+instead. The plugin does not add indentation/undo semantics beyond Fresh's: four spaces are
+hardcoded (no `tab_size`/`use_tabs`), and the selection/extra-caret path delegates to the built-in
+actions, which already step aside from the native Markdown rules.
 **compare_files** (port of Fresh's own compare plugin; reduced): **Compare Files...** (or **Compare
 Active File With...**) opens the two paths you type and shows them as two editable splits of the
 current tab — changed lines get a background, in-line changes a highlighted span, a gutter glyph and

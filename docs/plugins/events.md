@@ -77,6 +77,8 @@ end, { debounce = 300 })
 | `selection_changed` (hot) | `{buf, range}` | the selection changed; `range` is absent when it was cleared |
 | `viewport_changed` (hot) | `{buf, top_line, height, width}` | the focused pane of the active buffer scrolled or resized |
 | `focus_gained` | `{}` | the editor got its keyboard back after a plugin panel, dock or overlay had it |
+| `window_focused` | `{}` | the outer terminal window gained OS focus |
+| `window_blurred` | `{}` | the outer terminal window lost OS focus |
 | `active_window_changed` | `{previous, current}` | the focused split window changed; ids are plain numbers, absent/0 when there is no focused pane |
 | `chrome_focus_changed` | `{region, plugin?, panel_id?}` | the chrome region with the keyboard changed: `editor`, `explorer`, `dock` or `section` (a plugin section names `plugin`/`panel_id`; the native Contents/Diagnostics sections carry neither); gvim's tab strip is the extension region `tabs`. Overlays and the menu are transient surfaces and do not raise it. |
 | `key_release` | `{key, text?, ctrl, alt, shift, super}` | a key release the terminal backend reported, in the same shape as a plugin key capture. Legacy terminals report no releases and gvim requests no kitty keyboard enhancement flags, so this fires only on backends that deliver release events (for example the Windows console API); a release never edits or moves anything. |
@@ -94,6 +96,15 @@ end, { debounce = 300 })
 | `<plugin>:<name>` | the payload of `gvim.emit` | a plugin emitted it |
 
 Details worth knowing:
+
+* `window_focused`/`window_blurred` report the host terminal window's OS focus, not which gvim
+  surface holds the keyboard. They are raised once per real state change: the model starts
+  host-focused, so startup and repeated `FocusMsg`/`BlurMsg` reports for the same state raise
+  nothing. `focus_gained` remains the chrome/editor keyboard event (a plugin panel, dock or
+  overlay handing the keyboard back) and is not raised by a terminal focus change. The
+  events carry no payload and are queued through the normal plugin event pump after the
+  dock's terminal focus reporting is updated; no plugin callback runs inside the focus
+  message itself and the pump's budget bounds any Lua it drains.
 
 * `chrome_focus_changed` fires once per change of the stable chrome region. It does not fire for
 a menu or an overlay, and the initial editor focus raises nothing. The native Contents and
