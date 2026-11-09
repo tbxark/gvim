@@ -33,7 +33,7 @@ A plugin you put in `~/.config/gvim/plugins/` with the same name replaces a bund
 | `deno_lsp` | **off** | Deno: Check Project, Deno: Copy Install Command, Deno: Language Server Help | none |
 | `slang_lsp` | **off** | Slang: Check slangd / slangc, Slang: Copy Install Command, Slang: Language Server Help | none |
 | `welcome` | **off** | Plugin Demo: Open Help, Plugin Demo: Save File, Plugin Demo: Say Hello, Plugin Demo: Insert Time, Plugin Demo: Insert Comment | none |
-| `welcome_screen` | **off** | Welcome Screen: Show | `auto_open` (true) |
+| `welcome_screen` | **off** | Welcome Screen: Show, Welcome Screen: Toggle Show on Startup | `auto_open` (true) |
 | `markdown_source` | **off** | none (hidden Enter/Tab/Shift+Tab key handlers for Markdown lists) | none |
 | `lsp_navigation` | **off** | Go to LSP Symbol, LSP: Show Definitions, LSP: Show Implementations, LSP: Show Type Definitions | none |
 | `find_references` | **off** | Show References Panel (and the hidden Hide References Panel close command) | none |
@@ -365,10 +365,27 @@ built-in git/disk/weather content; selecting one asks the dashboard plugin to op
 command (a missing dashboard command reports an error), and with no registered section the page
 shows its empty state.
 The plugin is opt-in (`default_enabled: false`) whereas Fresh's page is part of its default startup
-surface; with it enabled, `auto_open` controls the startup tab. Tests: `welcome_screen_test.go`
+surface; with it enabled, `auto_open` controls the startup tab. The page footer also has a
+**Show this screen on startup** switch (action row and the **Welcome Screen: Toggle Show on Startup**
+command): it writes the persistent plugin state key `show_on_startup`, which takes precedence over
+the `auto_open` setting for future launches; toggling it leaves the current page open. This is Fresh's
+startup toggle behavior in a text/action row, not its checkbox widget styling.
+
+**Persistence scope (reduced, not Fresh global).** A direct launch keeps this plugin state in the
+editor-wide `plugin-data/welcome_screen/state.json`, so it survives a normal Stop and a new runtime
+(the test writes a file, Stops, seeds a new runtime, and observes both false and true). A daemon
+workspace instead scopes `gvim.state` to that workspace: the toggle affects only the current
+daemon workspace, whereas Fresh's `getGlobalState("showOnStartup")` is editor-global. Writes are
+asynchronous: `gvim.state.set` returns after updating memory, the file is written after a debounce
+and synchronously on Stop; a write error is logged by the runtime but is **not** returned to this
+plugin or shown as a toggle failure. Switching workspace queues the old workspace's state write as
+a Work item, so a fast switch followed by exit can drop that queued write (the current namespace is
+flushed on Stop; an old queued namespace is not guaranteed to be). The toggle is therefore best-
+effort persistence, not a guarantee of Fresh's global/durable setting. Tests: `welcome_screen_test.go`
 covers manifest/opt-in, page content, real door dispatch, line targets, recent-row activation,
 close stickiness, background auto-open and no-focus-steal, selected-row reveal, auto_open=false,
-dashboard metadata rows and empty fallback.
+the persistent startup toggle (row/command, next-startup auto-open and override precedence),
+cross-Stop/new-runtime persistence, and dashboard metadata rows and empty fallback.
 
 **rust_lsp** (reduced Fresh port): the Rust language-server helper. Fresh's `rust-lsp.ts` reacts to
 Rust LSP errors with rows contributed to the native LSP-Servers popup, clears them on recovery, offers

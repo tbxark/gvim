@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -295,4 +296,359 @@ func TestOverlayExplicitUnbindSwallowsTheBuiltinFallback(t *testing.T) {
 	if len(m3.overlays) != 0 {
 		t.Fatalf("the popup unbind leaked to the prompt: overlays = %d", len(m3.overlays))
 	}
+}
+
+// promptCutClipboard is a native clipboard writer that records writes and can fail.
+type promptCutClipboard struct {
+	writes []string
+	err    error
+}
+
+func (c *promptCutClipboard) Read() (string, error) { return "", nil }
+func (c *promptCutClipboard) Write(s string) error {
+	c.writes = append(c.writes, s)
+	return c.err
+}
+
+// cutOnPromptCtrlX opens a prompt with OnChange recording changes and presses Ctrl+X.
+func cutOnPromptCtrlX(t *testing.T, m *Model, input string) (*prompt.Line, *[]string, tea.Cmd) {
+	t.Helper()
+	changed := &[]string{}
+	p := prompt.NewLine(m.styles, prompt.LineOptions{
+		Label: "Value:", Input: input, Tag: "test",
+		OnChange: func(v string) { *changed = append(*changed, v) },
+	})
+	m.pushOverlay(p)
+	_, cmd := m.Update(ctrl('x'))
+	return p, changed, cmd
+}
+
+func firstPromptCutMsg(t *testing.T, cmd tea.Cmd) promptCutMsg {
+	t.Helper()
+	for _, msg := range collect(cmd) {
+		if m, ok := msg.(promptCutMsg); ok {
+			return m
+		}
+	}
+	t.Fatal("the cut command did not produce a promptCutMsg")
+	return promptCutMsg{}
+}
+
+func firstPromptCopyMsg(t *testing.T, cmd tea.Cmd) promptCopyMsg {
+	t.Helper()
+	for _, msg := range collect(cmd) {
+		if m, ok := msg.(promptCopyMsg); ok {
+			return m
+		}
+	}
+	t.Fatal("the copy command did not produce a promptCopyMsg")
+	return promptCopyMsg{}
+}
+
+// TestPromptCopyReportsNativeWriterResult: Ctrl+C copies the whole prompt text (or a
+// confirm's question) without mutating it. With a native writer the Copied notice waits
+// for that write's result; a failure says so and a reader-only clipboard is reported as
+// an unconfirmed OSC 52 request, never as Copied.
+func TestPromptCopyReportsNativeWriterResult(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|c|ctrl": {Action: "prompt_copy"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		p := pushPrompt(m, "one two")
+		_, cmd := m.Update(ctrl('c'))
+		if m.notice == "Copied" {
+			t.Fatal("Ctrl+C claimed Copied before the native writer ran")
+		}
+		msg := firstPromptCopyMsg(t, cmd)
+		if msg.err != nil || msg.text != "one two" || len(cb.writes) != 1 || cb.writes[0] != "one two" {
+			t.Fatalf("copy msg = %+v writes = %q", msg, cb.writes)
+		}
+		m.Update(msg)
+		if got := p.Value(); got != "one two" {
+			t.Fatalf("Ctrl+C changed the prompt to %q", got)
+		}
+		if m.notice != "Copied" {
+			t.Fatalf("copy notice = %q, want Copied after the writer succeeded", m.notice)
+		}
+	})
+
+	t.Run("failed writer", func(t *testing.T) {
+		cb := &promptCutClipboard{err: errors.New("native clipboard unavailable")}
+		m := overlayModel(t, fakeKeymap{"prompt|c|ctrl": {Action: "prompt_copy"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		p := pushPrompt(m, "keep me")
+		_, cmd := m.Update(ctrl('c'))
+		msg := firstPromptCopyMsg(t, cmd)
+		m.Update(msg)
+		if got := p.Value(); got != "keep me" {
+			t.Fatalf("failed copy changed the prompt: %q", got)
+		}
+		if len(cb.writes) != 1 || cb.writes[0] != "keep me" {
+			t.Fatalf("native writes = %q", cb.writes)
+		}
+		if !strings.Contains(m.notice, "Copy failed") {
+			t.Fatalf("failed copy notice = %q", m.notice)
+		}
+	})
+
+	t.Run("no native writer", func(t *testing.T) {
+		m := overlayModel(t, fakeKeymap{"prompt|c|ctrl": {Action: "prompt_copy"}})
+		m.SetDock(DockPorts{Clipboard: fakeClipboard{}})
+		p := pushPrompt(m, "best effort")
+		_, cmd := m.Update(ctrl('c'))
+		if got := clipboardWrites(cmd); len(got) != 1 || got[0] != "best effort" {
+			t.Fatalf("OSC 52 writes = %q", got)
+		}
+		for _, msg := range collect(cmd) {
+			if _, ok := msg.(promptCopyMsg); ok {
+				t.Fatal("a read-only clipboard produced a copy confirmation")
+			}
+		}
+		if got := p.Value(); got != "best effort" {
+			t.Fatalf("unconfirmed copy changed the prompt: %q", got)
+		}
+		if !strings.Contains(m.notice, "requested") || strings.Contains(m.notice, "Copied") {
+			t.Fatalf("unconfirmed copy notice = %q", m.notice)
+		}
+	})
+
+	t.Run("confirm copies its question", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|c|ctrl": {Action: "prompt_copy"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		m.pushOverlay(prompt.NewConfirm(m.styles, "Delete the file?", "confirm"))
+		_, cmd := m.Update(ctrl('c'))
+		msg := firstPromptCopyMsg(t, cmd)
+		m.Update(msg)
+		if len(cb.writes) != 1 || cb.writes[0] != "Delete the file?" {
+			t.Fatalf("confirm native writes = %q", cb.writes)
+		}
+		if len(m.overlays) == 0 {
+			t.Fatal("confirm Ctrl+C closed the prompt")
+		}
+	})
+
+	t.Run("empty prompt writes nothing", func(t *testing.T) {
+		m := overlayModel(t, fakeKeymap{"prompt|c|ctrl": {Action: "prompt_copy"}})
+		pushPrompt(m, "")
+		_, cmd := m.Update(ctrl('c'))
+		if got := clipboardWrites(cmd); len(got) != 0 {
+			t.Fatalf("empty prompt Ctrl+C wrote %q", got)
+		}
+	})
+}
+
+// TestPromptCutClearsOnlyAfterNativeWrite: Ctrl+X does not clear the field in Update. The
+// native writer runs in the returned command; only its success message clears the same
+// prompt and fires onChange. A failed writer keeps the text and reports the failure; a
+// clipboard with no native writer only requests an OSC 52 copy and keeps the text.
+func TestPromptCutClearsOnlyAfterNativeWrite(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		p, changed, cmd := cutOnPromptCtrlX(t, m, "one two")
+		if got := p.Value(); got != "one two" {
+			t.Fatalf("Update cleared the prompt before confirmation: %q", got)
+		}
+		if len(*changed) != 0 {
+			t.Fatalf("onChange ran before confirmation: %v", *changed)
+		}
+		msg := firstPromptCutMsg(t, cmd)
+		if msg.err != nil || len(cb.writes) != 1 || cb.writes[0] != "one two" {
+			t.Fatalf("cut msg = %+v writes = %q", msg, cb.writes)
+		}
+		m.Update(msg)
+		if got := p.Value(); got != "" {
+			t.Fatalf("successful cut left %q in the prompt", got)
+		}
+		if len(*changed) != 1 || (*changed)[0] != "" {
+			t.Fatalf("onChange after success = %v, want one empty value", *changed)
+		}
+		if m.notice == "" || strings.Contains(m.notice, "failed") {
+			t.Fatalf("cut notice = %q, want a Cut notice", m.notice)
+		}
+	})
+
+	t.Run("failed writer keeps text", func(t *testing.T) {
+		cb := &promptCutClipboard{err: errors.New("native clipboard unavailable")}
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		p, changed, cmd := cutOnPromptCtrlX(t, m, "keep me")
+		msg := firstPromptCutMsg(t, cmd)
+		m.Update(msg)
+		if got := p.Value(); got != "keep me" {
+			t.Fatalf("failed cut lost the prompt text: %q", got)
+		}
+		if len(*changed) != 0 {
+			t.Fatalf("failed cut fired onChange: %v", *changed)
+		}
+		if len(cb.writes) != 1 || cb.writes[0] != "keep me" {
+			t.Fatalf("native writes = %q, want the attempted text", cb.writes)
+		}
+		if !strings.Contains(m.notice, "Cut failed") || !strings.Contains(m.notice, "kept") {
+			t.Fatalf("failed cut notice = %q", m.notice)
+		}
+	})
+
+	t.Run("no native writer keeps text", func(t *testing.T) {
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: fakeClipboard{}})
+		p, changed, cmd := cutOnPromptCtrlX(t, m, "best effort")
+		for _, msg := range collect(cmd) {
+			if _, ok := msg.(promptCutMsg); ok {
+				t.Fatal("a read-only clipboard produced a cut confirmation")
+			}
+		}
+		if got := p.Value(); got != "best effort" {
+			t.Fatalf("unconfirmed cut lost the prompt text: %q", got)
+		}
+		if len(*changed) != 0 {
+			t.Fatalf("unconfirmed cut fired onChange: %v", *changed)
+		}
+		if !strings.Contains(m.notice, "no native clipboard") {
+			t.Fatalf("unconfirmed cut notice = %q", m.notice)
+		}
+	})
+
+	t.Run("late result does not clear another prompt", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		p, _, cmd := cutOnPromptCtrlX(t, m, "first")
+		msg := firstPromptCutMsg(t, cmd)
+		next := pushPrompt(m, "second")
+		m.Update(msg)
+		if got := next.Value(); got != "second" {
+			t.Fatalf("late cut result changed another prompt: %q", got)
+		}
+		if got := p.Value(); got != "first" {
+			t.Fatalf("late cut cleared a prompt it no longer owned: %q", got)
+		}
+	})
+
+	t.Run("edited prompt is not cleared", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		p, changed, cmd := cutOnPromptCtrlX(t, m, "one")
+		msg := firstPromptCutMsg(t, cmd)
+		m.Update(typed("!"))
+		m.Update(msg)
+		if got := p.Value(); got != "one!" {
+			t.Fatalf("late cut cleared newer typing: %q", got)
+		}
+		if len(*changed) != 1 || (*changed)[0] != "one!" {
+			t.Fatalf("onChange = %v, want only the typed edit", *changed)
+		}
+	})
+}
+
+// TestPromptClipboardStaleAndSupersededResults: every copy/cut result is checked against
+// the same active top prompt, the workspace owner and the latest operation token before it
+// may change the notice or the field. Closed/switched prompts, an older workspace
+// generation, and an older cut are ignored.
+func TestPromptClipboardStaleAndSupersededResults(t *testing.T) {
+	t.Run("stale copy after close", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|c|ctrl": {Action: "prompt_copy"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		pushPrompt(m, "copied late")
+		_, cmd := m.Update(ctrl('c'))
+		msg := firstPromptCopyMsg(t, cmd)
+		m.Update(special(tea.KeyEscape))
+		if len(m.overlays) != 0 {
+			t.Fatal("Esc did not close the prompt")
+		}
+		m.notice = "marker"
+		m.Update(msg)
+		if m.notice != "marker" {
+			t.Fatalf("stale copy notice = %q, want the untouched marker", m.notice)
+		}
+	})
+
+	t.Run("stale cut failure after switch", func(t *testing.T) {
+		cb := &promptCutClipboard{err: errors.New("native clipboard unavailable")}
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		p, changed, cmd := cutOnPromptCtrlX(t, m, "first")
+		msg := firstPromptCutMsg(t, cmd)
+		next := pushPrompt(m, "second")
+		m.notice = "marker"
+		m.Update(msg)
+		if m.notice != "marker" {
+			t.Fatalf("stale cut failure notice = %q, want the untouched marker", m.notice)
+		}
+		if got := next.Value(); got != "second" {
+			t.Fatalf("stale cut failure changed another prompt: %q", got)
+		}
+		if got := p.Value(); got != "first" || len(*changed) != 0 {
+			t.Fatalf("stale cut failure changed its old prompt: %q changes %v", got, *changed)
+		}
+	})
+
+	t.Run("second cut while pending is refused", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		p, changed, first := cutOnPromptCtrlX(t, m, "same")
+		_, second := m.Update(ctrl('x'))
+		if second != nil {
+			t.Fatal("a second cut started a command while the first write was pending")
+		}
+		if !strings.Contains(m.notice, "still in progress") {
+			t.Fatalf("duplicate cut notice = %q", m.notice)
+		}
+		if got := p.Value(); got != "same" {
+			t.Fatalf("duplicate cut changed the prompt: %q", got)
+		}
+		msg := firstPromptCutMsg(t, first)
+		m.Update(msg)
+		if got := p.Value(); got != "" {
+			t.Fatalf("first cut did not clear after completing: %q", got)
+		}
+		if len(*changed) != 1 || (*changed)[0] != "" {
+			t.Fatalf("onChange = %v, want one empty value", *changed)
+		}
+		if m.notice != "Cut" {
+			t.Fatalf("notice = %q, want Cut", m.notice)
+		}
+	})
+
+	t.Run("same workspace generation accepted", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		m.SetWorkspaceOwner("ws", 7)
+		p, changed, cmd := cutOnPromptCtrlX(t, m, "same generation")
+		msg := firstPromptCutMsg(t, cmd)
+		m.Update(msg)
+		if got := p.Value(); got != "" {
+			t.Fatalf("same-generation cut did not clear: %q", got)
+		}
+		if len(*changed) != 1 || (*changed)[0] != "" {
+			t.Fatalf("same-generation onChange = %v", *changed)
+		}
+	})
+
+	t.Run("stale workspace generation", func(t *testing.T) {
+		cb := &promptCutClipboard{}
+		m := overlayModel(t, fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}})
+		m.SetDock(DockPorts{Clipboard: cb})
+		m.SetWorkspaceOwner("ws", 7)
+		p, changed, cmd := cutOnPromptCtrlX(t, m, "generation")
+		msg := firstPromptCutMsg(t, cmd)
+		m.SetWorkspaceOwner("ws", 8)
+		m.notice = "marker"
+		m.Update(msg)
+		if got := p.Value(); got != "generation" {
+			t.Fatalf("stale-generation cut cleared the prompt: %q", got)
+		}
+		if len(*changed) != 0 {
+			t.Fatalf("stale-generation cut fired onChange: %v", *changed)
+		}
+		if m.notice != "marker" {
+			t.Fatalf("stale-generation notice = %q, want the untouched marker", m.notice)
+		}
+	})
 }

@@ -2,12 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/tbxark/gvim/editor"
+	"github.com/tbxark/gvim/i18n"
 	"github.com/tbxark/gvim/internal/tui/editorpane"
+	"github.com/tbxark/gvim/internal/tui/palette"
 	"github.com/tbxark/gvim/internal/tui/popup"
+	"github.com/tbxark/gvim/internal/tui/prompt"
 )
 
 // ClipboardWriter is the optional write half of the system clipboard. The ClipboardReader
@@ -36,6 +40,83 @@ type htmlCopiedMsg struct {
 type editorPasteMsg struct {
 	text string
 	err  error
+}
+
+// promptClipNativeGate is the process-wide permission for a native prompt clipboard
+// write. Every workspace model shares the app's SystemClipboard writer, so a hidden warm
+// model's late write and a new workspace's write must not overlap. The permission is
+// acquired in Update and released only by the operation that owns it; a second copy/cut is
+// refused instead of queued, so a hung writer cannot grow an unbounded wait queue. There is
+// no cancellation API for a writer that has already started: a hang keeps the permission
+// until it returns (the limitation is documented in docs/ui.md).
+var promptClipNativeGate atomic.Pointer[promptClipOp]
+
+func promptClipNativeAcquire(op *promptClipOp) bool {
+	return promptClipNativeGate.CompareAndSwap(nil, op)
+}
+
+func promptClipNativeRelease(op *promptClipOp) {
+	promptClipNativeGate.CompareAndSwap(op, nil)
+}
+
+func promptClipNativeBusy() bool {
+	return promptClipNativeGate.Load() != nil
+}
+
+// promptClipOp is the cancellable identity of one native prompt write. The writer command
+// checks it after permission is acquired and before calling Write, so a request canceled
+// while it was still waiting to start never touches the clipboard. started and finished
+// let close/cancel release the permission only when no writer call is in progress. A write
+// already in progress cannot be stopped; the API has no cancel.
+type promptClipOp struct {
+	canceled atomic.Bool
+	started  atomic.Bool
+	finished atomic.Bool
+}
+
+func (o *promptClipOp) cancel() { o.canceled.Store(true) }
+
+// beginWrite marks the write started after a final cancel check. A cancel that lands
+// after this point saw started set and will not release the permission; the command that
+// started is responsible for releasing it when it finishes.
+func (o *promptClipOp) beginWrite() bool {
+	if o.canceled.Load() {
+		return false
+	}
+	o.started.Store(true)
+	return !o.canceled.Load()
+}
+
+// promptClipTarget names the prompt an asynchronous copy/cut started on: a text line or
+// a confirm. The pointer identity, not the text, decides whether a result still belongs to
+// the active top prompt.
+type promptClipTarget struct {
+	line    *prompt.Line
+	confirm *prompt.Confirm
+}
+
+// promptCutMsg is the result of the prompt cut's native clipboard write. The prompt keeps
+// its text until this message reports success, so a failed or absent write cannot lose it.
+// owner and token must still match the live model and the latest prompt clipboard
+// operation; line must still be the active top prompt.
+type promptCutMsg struct {
+	line    *prompt.Line
+	text    string
+	err     error
+	skipped bool
+	owner   palette.Owner
+	token   uint64
+}
+
+// promptCopyMsg is the result of the prompt copy's native clipboard write. Copy has no
+// prompt mutation, but the notice waits for the write so a failure cannot claim Copied.
+type promptCopyMsg struct {
+	target  promptClipTarget
+	text    string
+	err     error
+	skipped bool
+	owner   palette.Owner
+	token   uint64
 }
 
 // clipboardOut returns the command that puts the text of a finished copy or cut on the
@@ -151,6 +232,10 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 			m.notice = uiTextVars("gvim.notice.clipboard.plain_error", "Copied as plain text: %{error}", map[string]any{"error": msg.err.Error()})
 		}
 		return nil, true
+	case promptCutMsg:
+		return m.promptCutResult(msg), true
+	case promptCopyMsg:
+		return m.promptCopyResult(msg), true
 	case editorPasteMsg:
 		if m.explorerFocus {
 			return nil, true
@@ -185,6 +270,69 @@ func (m *Model) clipMessage(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	return nil, false
+}
+
+// promptClipValid reports whether a prompt clipboard result still belongs to the live
+// model and the same active top prompt. Every result (success or failure) is checked before
+// it may change the notice or the prompt: a closed or replaced prompt, a stale workspace
+// generation, or an older operation token is dropped silently.
+func (m *Model) promptClipValid(owner palette.Owner, token uint64, target promptClipTarget) bool {
+	if owner != m.workspaceOwner || token != m.promptClipToken || len(m.overlays) == 0 {
+		return false
+	}
+	top := m.overlays[len(m.overlays)-1]
+	switch {
+	case target.line != nil:
+		line, ok := top.(*prompt.Line)
+		return ok && line == target.line && line.Active()
+	case target.confirm != nil:
+		confirm, ok := top.(*prompt.Confirm)
+		return ok && confirm == target.confirm && confirm.Active()
+	}
+	return false
+}
+
+// promptCutResult applies a native clipboard write result to the prompt it started on.
+// Identity, owner and token are checked first, so a late or superseded cut never changes
+// the notice or another prompt. On success the same line must still hold the copied text
+// before it is cleared; a failure keeps the text and reports the error. No Cut is claimed
+// for a stale or changed result.
+func (m *Model) promptCutResult(msg promptCutMsg) tea.Cmd {
+	if op := m.finishPromptClip(msg.token); op != nil {
+		promptClipNativeRelease(op)
+	}
+	if msg.skipped || !m.promptClipValid(msg.owner, msg.token, promptClipTarget{line: msg.line}) {
+		return nil
+	}
+	if msg.err != nil {
+		m.notice = uiTextVars("gvim.notice.clipboard.cut_failed", "Cut failed: %{error}; the prompt was kept", map[string]any{"error": msg.err.Error()})
+		return nil
+	}
+	if msg.line.Value() != msg.text {
+		m.notice = uiText("gvim.notice.clipboard.cut_changed", "Copied, but the prompt changed before the cut completed; the prompt was kept")
+		return nil
+	}
+	msg.line.CutValue()
+	m.notice = i18n.T("", "clipboard.cut", nil)
+	return nil
+}
+
+// promptCopyResult applies a native clipboard write result to the prompt copy it started
+// on. The same identity/owner/token check runs before any notice, so a copy that finishes
+// after its prompt closed or switched never writes Copied or a failure into the UI.
+func (m *Model) promptCopyResult(msg promptCopyMsg) tea.Cmd {
+	if op := m.finishPromptClip(msg.token); op != nil {
+		promptClipNativeRelease(op)
+	}
+	if msg.skipped || !m.promptClipValid(msg.owner, msg.token, msg.target) {
+		return nil
+	}
+	if msg.err != nil {
+		m.notice = uiTextVars("gvim.notice.clipboard.copy_failed", "Copy failed: %{error}", map[string]any{"error": msg.err.Error()})
+	} else {
+		m.notice = i18n.T("", "clipboard.copied", nil)
+	}
+	return nil
 }
 
 // closeTopPopups closes the popups on top of the overlay stack, which take no text input.

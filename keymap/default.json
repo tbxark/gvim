@@ -224,6 +224,8 @@
     {"key": "k", "modifiers": ["ctrl"], "action": "prompt_delete_to_line_end", "when": "prompt"},
     {"key": "w", "modifiers": ["ctrl"], "action": "prompt_delete_word_backward", "when": "prompt"},
     {"key": "v", "modifiers": ["ctrl"], "action": "prompt_paste", "when": "prompt"},
+    {"key": "c", "modifiers": ["ctrl"], "action": "prompt_copy", "when": "prompt"},
+    {"key": "x", "modifiers": ["ctrl"], "action": "prompt_cut", "when": "prompt"},
     {"key": "f", "modifiers": ["ctrl"], "action": "prompt_confirm", "when": "prompt"},
     {"comment": "Search prompt context (Fresh's searchPrompt context): step matches and toggle the search options without closing the bar", "key": "F3", "modifiers": [], "action": "find_next", "when": "searchPrompt"},
     {"key": "F3", "modifiers": ["shift"], "action": "find_previous", "when": "searchPrompt"},

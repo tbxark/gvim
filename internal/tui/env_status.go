@@ -54,15 +54,17 @@ func (m *Model) envStatusSegment() (statusItem, bool) {
 	return statusItem{}, false
 }
 
-// envStatusClick is the safe click entry of the active-environment segment, the gvim
-// counterpart of Fresh's env-manager status pill click. It never changes trust itself:
-// an untrusted workspace opens the existing cancellable Workspace Trust dialog (the same
-// surface the trust pill and command use); a trusted workspace dispatches the env-manager
-// plugin's own Env: Activate/Reload action (reusing its trust gate, capture and restart
-// path — no activation logic lives in the status row); a workspace with no detected env
-// just says so. A trust port that is unavailable reports its usual notice. Everything is
-// a tea.Cmd/overlay, so Update never blocks; a missing env-manager plugin gets an explicit
+// envStatusClick is the safe click entry of the active-environment segment: an untrusted
+// workspace opens the existing cancellable Workspace Trust dialog (the click never decides
+// trust itself), and a trusted workspace dispatches the env-manager plugin's own
+// Env: Activate/Reload action (its trust gate, env.set and env_changed stay in the plugin
+// host path). A workspace with no detected env says so; a missing plugin gets an explicit
 // notice instead of an unknown-action fallthrough.
+//
+// A host-side native activation path (no plugin) is NOT implemented: the audit found the
+// host API cannot activate with correct ownership and language-server semantics, so no
+// status-row code calls a native Set/reSet or an LSP restart (docs/parity R13-18 records
+// this as unfinished; enabling the env-manager plugin is the supported path).
 func (m *Model) envStatusClick() tea.Cmd {
 	if m.env == nil {
 		return nil

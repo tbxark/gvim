@@ -193,7 +193,21 @@ open.
 **One-line prompt keyboard.** Up/Down walk the prompt history; when the prompt shows a plugin
 suggestion list, Up/Down/Tab/Shift+Tab move the highlight and fill the field, and PageUp/PageDown move
 the highlight by the visible suggestion rows and clamp at the ends (Fresh prompt_page_up/prompt_page_down).
-Enter submits (Ctrl+F from the prompt keymap confirms it) and Esc cancels.
+Ctrl+C copies the whole prompt text and Ctrl+X cuts it (copy then clear), as Fresh's prompt_copy/
+prompt_cut do when the field has no selection. Both actions wait for a native clipboard write to report its result: Copy shows Copied only on
+success and Copy failed on an error, while Cut also waits before clearing. The OSC 52 write alone
+is best-effort, so without a native writer the copy is reported as requested (not Copied) and the
+prompt is kept; a failed cut keeps it too. A late result is applied only to the same
+still-active prompt and only if it belongs to the latest copy/cut (same model generation);
+a closed, switched or superseded prompt result is ignored. Copy/cut are single-flight: when a
+native writer exists it is the only channel used (no OSC 52 beside it), and a process-wide permission
+for that shared system clipboard refuses another workspace's copy/cut with a notice instead of queuing
+it. CancelTransientWork, an owner-generation change and close mark a not-yet-started request canceled;
+the command checks that after it gets the permission and skips ClipboardWriter.Write. A write already
+in progress cannot be canceled (the writer API has no cancel): while it hangs the permission stays
+held and new prompt copies/cuts are refused with a notice. OSC 52-only requests are not confirmable and
+are reported as requested. Enter submits (Ctrl+F from the prompt keymap confirms it)
+and Esc cancels.
 
 **Settings page keyboard.** Typing filters the settings rows; `/` starts Fresh's settings search mode (clear filter, type to search, Enter ends the search keeping the current selection without editing it, Esc cancels the search without closing Settings); Up/Down move, PgUp/PgDn page, Home/End jump, Enter edits, Tab switches layer, Ctrl+S saves and Ctrl+R resets, Delete inherits/resets the row, and Ctrl+E edits the raw JSON. `?` opens Fresh's settings_help panel listing these keys; any key closes it, and Esc then closes the Settings page. The panel uses the existing overlay chrome and does not change focus or the cursor.
 

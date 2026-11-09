@@ -822,7 +822,10 @@ unrelated ignored entries cannot consume its output cap before them; the wider w
 fallback is reserved for a candidate list too large for the bounded explicit batches. Both
 prune hidden path segments and `IGNORED_DIRS` (`.git`, `node_modules`, `target`,
 `__pycache__`, `.hg`, `.svn`, `.DS_Store`) in the candidate filter and carry the non-fatal
-notice. If the widened run hits the remote output cap, the batches are marked `Truncated`
+notice. A failed or timed-out top-level candidate listing keeps the whole-tree fallback
+results and says the ignore scope is unavailable; a **truncated** listing keeps the same
+results, marks the Done batch `Truncated`, and says the candidate listing itself was
+truncated — an incomplete listing is never presented as a complete scope or dropped. If the widened run hits the remote output cap, the batches are marked `Truncated`
 and the notice says the result is incomplete because candidate files beyond the cap were
 not reported — never a complete-looking result; a partial nested candidate set is never
 presented as complete, and a deeper nested repository's own `.gitignore` is not applied in

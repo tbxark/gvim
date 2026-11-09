@@ -237,6 +237,11 @@ func (s *remoteSearch) searchBatches(req searchpanel.SearchRequest, cancel <-cha
 		partialErr = fmt.Sprintf("%s failed on the remote host (exit %d)", tool, res.Code)
 	}
 	truncated := res.Truncated || partialErr != ""
+	if scope != nil && scope.listingTruncated {
+		// The candidate listing was incomplete, so the kept fallback results are a
+		// partial project result even when the widened tool output itself was not capped.
+		truncated = true
+	}
 	if widen && res.Truncated && scope != nil {
 		// A widened run consumed the remote output cap: candidate files beyond the cap
 		// were neither searched nor reported, so the result is explicitly incomplete. The
@@ -496,7 +501,11 @@ type remoteProjectResultScope struct {
 	// expected scope); notice is the non-fatal degradation when that list is missing or
 	// the batches would be too many.
 	gitRepo bool
-	notice  string
+	// listingTruncated is an incomplete (not failed) candidate listing: the fallback
+	// results are kept but the Done batch is marked Truncated and carries the explicit
+	// truncated-listing notice.
+	listingTruncated bool
+	notice           string
 }
 
 // newProjectResultScope probes the remote workspace and, in a git work tree, reads the same
@@ -526,8 +535,13 @@ func (s *remoteSearch) newProjectResultScope(ctx context.Context) *remoteProject
 	}
 	scope.gitRepo = true
 	files, err := s.run(ctx, s.root, []string{"git", "-c", "core.quotePath=false", "ls-files", "-z", "-s", "--cached", "--others", "--exclude-standard"})
-	if err != nil || files.Code != 0 || files.Truncated {
-		scope.notice = appText("gvim.notice.remote_ignore_listing_failed", "remote ignore scope unavailable: the remote git candidate listing failed, timed out or truncated; ignored files may be searched and tracked files that match .gitignore may be omitted")
+	if err != nil || files.Code != 0 {
+		scope.notice = appText("gvim.notice.remote_ignore_listing_failed", "remote ignore scope unavailable: the remote git candidate listing failed or timed out; ignored files may be searched and tracked files that match .gitignore may be omitted")
+		return scope
+	}
+	if files.Truncated {
+		scope.listingTruncated = true
+		scope.notice = appText("gvim.notice.remote_ignore_listing_truncated", "remote ignore scope incomplete: the remote git candidate listing was truncated; ignored files may be searched and tracked files that match .gitignore may be omitted")
 		return scope
 	}
 	scope.listed = true

@@ -141,6 +141,16 @@ type Model struct {
 	restoredScroll bool
 
 	overlays []Overlay // the stack; the last one is on top and gets the input first
+	// promptClipToken is the generation of the latest prompt copy/cut with text. A
+	// clipboard result carrying another token is stale and must not touch the prompt or
+	// the notice; every new prompt copy/cut bumps it. promptClipPending is the
+	// single-flight gate: while a native write is in flight no other copy/cut may start,
+	// so native writes cannot run concurrently or complete out of order. CancelTransientWork
+	// invalidates the token but leaves the gate set until the in-flight command reports.
+	promptClipToken        uint64
+	promptClipPending      bool
+	promptClipPendingToken uint64
+	promptClipOp           *promptClipOp
 
 	// rowTop is the view's offset into a wrapped top line, see viewrow.go.
 	rowTop rowTop
@@ -460,6 +470,7 @@ var dockCloseWait = 2 * time.Second
 // the process.
 func (m *Model) Close() {
 	m.closed.Store(true)
+	m.cancelPromptClipOp()
 	// A signal ends the program without a quit, so the writes in flight are stopped here
 	// and waited for: they remove their temporary files before the process exits.
 	m.large.stop()
@@ -491,7 +502,10 @@ func (m *Model) Closed() bool { return m.closed.Load() }
 // app calls it ON THE UI GOROUTINE (through WorkspaceHost.Do) before tearing down a warm
 // model: once it returns, no source.Update is in flight or can start, so the heavier
 // runtime teardown may run off the UI goroutine without racing model fields. Idempotent.
-func (m *Model) MarkClosed() { m.closed.Store(true) }
+func (m *Model) MarkClosed() {
+	m.closed.Store(true)
+	m.cancelPromptClipOp()
+}
 
 // Init implements tea.Model. It starts the root features' commands: the git status,
 // the auto-save tick and the file watch.

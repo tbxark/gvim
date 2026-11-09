@@ -40,6 +40,43 @@ func TestHostRoutesHiddenModelCommandToSource(t *testing.T) {
 	}
 }
 
+// TestHostHiddenWorkspaceLateCutCannotClearWarmPrompt: a cut starts on workspace A,
+// A is hidden for B and CancelTransientWork runs (as the workspace manager does), then
+// the late result is delivered to the hidden warm model and A is shown again. The token
+// invalidation must keep the still-active prompt and the notice untouched; the host's
+// source-routing alone is not enough.
+func TestHostHiddenWorkspaceLateCutCannotClearWarmPrompt(t *testing.T) {
+	t.Parallel()
+	a := newTestModel(t, newFakeEditor("a"), newFakeTree(1), 80, 24)
+	b := newTestModel(t, newFakeEditor("b"), newFakeTree(1), 80, 24)
+	ownerA := palette.Owner{Workspace: "ws-a", Generation: 1}
+	ownerB := palette.Owner{Workspace: "ws-b", Generation: 2}
+	a.SetWorkspaceOwner(ownerA.Workspace, ownerA.Generation)
+	b.SetWorkspaceOwner(ownerB.Workspace, ownerB.Generation)
+	cb := &promptCutClipboard{}
+	a.SetDock(DockPorts{Clipboard: cb})
+	a.keys = fakeKeymap{"prompt|x|ctrl": {Action: "prompt_cut"}}
+	p := pushPrompt(a, "hidden")
+	h := NewWorkspaceHost(a)
+	_, cmd := h.Update(ctrl('x'))
+	if cmd == nil {
+		t.Fatal("the cut started no command")
+	}
+	// A -> B: A is warm/hidden and its transient work is canceled like the manager does.
+	h.Show(b)
+	a.CancelTransientWork()
+	a.notice = "marker"
+	// The late result is delivered to the hidden source A; then A is shown again.
+	pumpHostCmd(t, h, cmd)
+	h.Show(a)
+	if got := p.Value(); got != "hidden" {
+		t.Fatalf("late cut from hidden workspace cleared the prompt: %q", got)
+	}
+	if a.notice != "marker" {
+		t.Fatalf("late cut from hidden workspace polluted the notice: %q", a.notice)
+	}
+}
+
 // TestHostRewrapsBatchCommandResults: tea.Batch results are re-wrapped per command after
 // the outer envelope is opened, so every inner async result keeps the same source model
 // and can be routed back to it.

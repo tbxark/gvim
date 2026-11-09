@@ -16,11 +16,11 @@ plus its own, so a key Fresh defines once is defined for every preset.
 
 | Preset | Own bindings | In effect |
 |---|---|---|
-| `default` | 250 | 248 |
-| `macos` | 60 | 271 |
-| `macos-gui` | 52 | 322 |
-| `emacs` | 98 | 314 |
-| `vscode` | 9 | 253 |
+| `default` | 252 | 250 |
+| `macos` | 60 | 273 |
+| `macos-gui` | 52 | 324 |
+| `emacs` | 98 | 316 |
+| `vscode` | 9 | 255 |
 
 "Own bindings" is the preset's file; "in effect" is its own and inherited bindings after
 overrides, one per context and chord. Fresh's `completion` and `compositeBuffer` contexts are not
@@ -34,7 +34,14 @@ server (completion, hover, definition, references, implementation, rename, code 
 commands, case transforms, folding and the view, tabs and splits, the explorer, the terminal
 dock, the sidebar section cycle, code tours and compare files. The overlay contexts carry
 Fresh's rows for the keys gvim's surfaces already understand: the prompt field's moves, page keys for
-its suggestion list, word deletion and paste; the find bar's match steps and option toggles; list navigation and cancel;
+its suggestion list, word deletion, paste, and copy/cut of the whole prompt text (the field has no
+selection; copy/cut report only after a native clipboard write confirms them, and a cut keeps the
+prompt on failure or when only OSC 52 is available, where both report requested rather than Copied;
+a late result is dropped unless it belongs to the same active prompt, workspace generation and latest
+copy/cut operation; copy/cut are single-flight, use only the native writer when one exists, and a
+process-wide permission refuses another workspace's write while one is pending rather than queueing it;
+a canceled not-yet-started write is skipped, but a started writer has no cancel and keeps the
+permission until it returns); the find bar's match steps and option toggles; list navigation and cancel;
 the menu bar's walk and close; the settings page's close, activate, reset, slash search and question-mark
 key help; and the dock's focus keys. Each preset keeps its own idiom:
 Emacs has the `C-x` chords and the `M-` keys, VS Code has `Ctrl+K Ctrl+L` and friends, macOS

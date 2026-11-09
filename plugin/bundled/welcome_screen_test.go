@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tbxark/gvim/plugin"
 	"github.com/tbxark/gvim/plugin/bundled"
@@ -39,6 +40,35 @@ func welcomeScreenRig(t *testing.T, opts rigOpts) *rig {
 	return startRig(t, opts)
 }
 
+// welcomeScreenHarness starts one runtime directly from the bundled plugin files. The
+// caller can seed gvim.state before Start and Stop the runtime explicitly, so persistence
+// can be checked across two runtimes rather than within one in-memory session.
+func welcomeScreenHarness(t *testing.T, osys *plugintest.FakeOS, seed []byte) *plugintest.Harness {
+	t.Helper()
+	init, err := fs.ReadFile(bundled.FS, "plugins/welcome_screen/init.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i18n, err := fs.ReadFile(bundled.FS, "plugins/welcome_screen/welcome_screen.i18n.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := plugintest.Files{
+		"welcome_screen/init.lua":                 string(init),
+		"welcome_screen/welcome_screen.i18n.json": string(i18n),
+	}
+	h := plugintest.New(t, files, plugintest.Options{
+		Host: plugintest.NewFakeHost(), OS: osys, Timeout: time.Second, EventBudget: 5 * time.Second,
+	})
+	if seed != nil {
+		if err := h.RT.SeedState(welcomeScreenPluginName, seed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.Start()
+	return h
+}
+
 func TestWelcomeScreenManifestAndCommands(t *testing.T) {
 	data, err := fs.ReadFile(bundled.FS, "plugins/welcome_screen/plugin.json")
 	if err != nil {
@@ -65,8 +95,8 @@ func TestWelcomeScreenManifestAndCommands(t *testing.T) {
 			commands[c.ID] = true
 		}
 	}
-	if !commands["welcome_screen.show"] {
-		t.Fatalf("visible commands = %v, want show", commands)
+	if !commands["welcome_screen.show"] || !commands["welcome_screen.toggle_startup"] {
+		t.Fatalf("visible commands = %v, want show and toggle_startup", commands)
 	}
 	if modes := r.host.Modes[welcomeScreenPluginName]; len(modes) != 1 || modes[0].Name != "welcome_screen" {
 		t.Fatalf("modes = %+v", modes)
@@ -87,24 +117,28 @@ func TestWelcomeScreenPageContentAndTargets(t *testing.T) {
 		"█████", "A terminal text editor", "DASHBOARD", "No dashboard sections registered.",
 		"DOORS", "Open a file", "New buffer", "Recent files",
 		"RECENT FILES", "a.go", "VERBS", "Find file", "Command palette", "Settings",
-		"File explorer", "Help", "j/k or arrows move",
+		"File explorer", "Help", "[✓] Show this screen on startup",
+		"Enter toggles it for future launches", "j/k or arrows move",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("welcome text lacks %q:\n%s", want, text)
 		}
 	}
 	id := welcomeScreenBuffer(r.host)
-	foundAction, foundPath := false, false
+	foundAction, foundPath, foundStartup := false, false, false
 	for _, target := range r.host.LineTargets(id) {
 		if strings.HasPrefix(target.Action, welcomeScreenPluginName+".click_action_") {
 			foundAction = true
+		}
+		if target.Action == welcomeScreenPluginName+".toggle_startup" {
+			foundStartup = true
 		}
 		if target.Path == "/work/a.go" {
 			foundPath = true
 		}
 	}
-	if !foundAction || !foundPath {
-		t.Fatalf("line targets = %+v, want action and recent path targets", r.host.LineTargets(id))
+	if !foundAction || !foundPath || !foundStartup {
+		t.Fatalf("line targets = %+v, want action, startup and recent path targets", r.host.LineTargets(id))
 	}
 	if runs := r.os.Runs(); len(runs) != 0 {
 		t.Fatalf("welcome page started processes: %+v", runs)
@@ -400,5 +434,122 @@ func TestWelcomeScreenAutoOpenHonorsFileLaunch(t *testing.T) {
 	}
 	if id := welcomeScreenBuffer(r.host); id == 0 {
 		t.Fatal("explicit Welcome command was blocked by the file-launch guard")
+	}
+}
+
+func TestWelcomeScreenStartupTogglePersistsInThePage(t *testing.T) {
+	r := welcomeScreenRig(t, rigOpts{script: func(o *plugintest.FakeOS) { o.SetDir("/work") }})
+	if err := r.h.Run("welcome_screen.show", nil); err != nil {
+		t.Fatal(err)
+	}
+	if text := welcomeScreenText(t, r.host); !strings.Contains(text, "[✓] Show this screen on startup") {
+		t.Fatalf("default startup row missing:\n%s", text)
+	}
+	if err := r.h.Run("welcome_screen.toggle_startup", nil); err != nil {
+		t.Fatal(err)
+	}
+	if text := welcomeScreenText(t, r.host); !strings.Contains(text, "[ ] Show this screen on startup") {
+		t.Fatalf("startup row did not turn off:\n%s", text)
+	}
+	notices := r.h.NoticeTexts()
+	if len(notices) == 0 || notices[len(notices)-1] != "Welcome: hidden - reopen via the palette" {
+		t.Fatalf("notices = %q", notices)
+	}
+	// The visible command is the same action the page row targets.
+	if err := r.h.Run("welcome_screen.toggle_startup", nil); err != nil {
+		t.Fatal(err)
+	}
+	if text := welcomeScreenText(t, r.host); !strings.Contains(text, "[✓] Show this screen on startup") {
+		t.Fatalf("startup row did not turn back on:\n%s", text)
+	}
+}
+
+func TestWelcomeScreenStartupToggleControlsNextAutoOpen(t *testing.T) {
+	r := welcomeScreenRig(t, rigOpts{script: func(o *plugintest.FakeOS) { o.SetDir("/work") }})
+	// State override off (the config auto_open default is true) must suppress the page.
+	if err := r.h.Run("welcome_screen.toggle_startup", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.h.Emit(pluginapi.Event{Name: "plugins_loaded"})
+	r.h.Settle()
+	if id := welcomeScreenBuffer(r.host); id != 0 {
+		t.Fatalf("welcome page opened despite show_on_startup=false: %d", id)
+	}
+	// Turning it back on before the first automatic decision lets the next startup event open it.
+	if err := r.h.Run("welcome_screen.toggle_startup", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.h.Emit(pluginapi.Event{Name: "ready"})
+	r.h.Settle()
+	if welcomeScreenBuffer(r.host) == 0 {
+		t.Fatal("welcome page did not open after show_on_startup was turned back on")
+	}
+}
+
+func TestWelcomeScreenStartupToggleOverridesAutoOpenSetting(t *testing.T) {
+	r := welcomeScreenRig(t, rigOpts{
+		settings: map[string]plugin.PluginSettings{welcomeScreenPluginName: {User: map[string]any{"auto_open": false}}},
+		script:   func(o *plugintest.FakeOS) { o.SetDir("/work") },
+	})
+	r.h.Emit(pluginapi.Event{Name: "plugins_loaded"})
+	r.h.Settle()
+	if id := welcomeScreenBuffer(r.host); id != 0 {
+		t.Fatalf("welcome page opened with auto_open=false before an override: %d", id)
+	}
+	// The persistent startup toggle can turn the page on even when the config setting is off.
+	if err := r.h.Run("welcome_screen.toggle_startup", nil); err != nil {
+		t.Fatal(err)
+	}
+	r.h.Emit(pluginapi.Event{Name: "ready"})
+	r.h.Settle()
+	if welcomeScreenBuffer(r.host) == 0 {
+		t.Fatal("show_on_startup=true did not override auto_open=false")
+	}
+}
+
+func TestWelcomeScreenStartupTogglePersistsAcrossStopAndNewRuntime(t *testing.T) {
+	// First runtime: choose off, then Stop (the state writer's synchronous flush).
+	os1 := plugintest.NewFakeOS()
+	h1 := welcomeScreenHarness(t, os1, nil)
+	if err := h1.Run("welcome_screen.toggle_startup", nil); err != nil {
+		t.Fatal(err)
+	}
+	statePath := h1.RT.StateFile(welcomeScreenPluginName)
+	if statePath == "" {
+		t.Fatal("no state file path")
+	}
+	h1.RT.Stop()
+	state1, ok := os1.File(statePath)
+	if !ok || !strings.Contains(state1, "show_on_startup") || !strings.Contains(state1, "false") {
+		t.Fatalf("persisted state = %q (ok %v), want show_on_startup=false", state1, ok)
+	}
+
+	// Second runtime seeded from that file: the persistent override suppresses startup.
+	os2 := plugintest.NewFakeOS()
+	os2.SetFile(statePath, state1)
+	h2 := welcomeScreenHarness(t, os2, []byte(state1))
+	h2.Emit(pluginapi.Event{Name: "plugins_loaded"})
+	h2.Settle()
+	if id := welcomeScreenBuffer(h2.Host); id != 0 {
+		t.Fatalf("second runtime opened the page despite persisted false: %d", id)
+	}
+	// Turn it back on; Stop flushes true for the third runtime.
+	if err := h2.Run("welcome_screen.toggle_startup", nil); err != nil {
+		t.Fatal(err)
+	}
+	h2.RT.Stop()
+	state2, ok := os2.File(statePath)
+	if !ok || !strings.Contains(state2, "true") {
+		t.Fatalf("second persisted state = %q (ok %v), want true", state2, ok)
+	}
+
+	// Third runtime: persisted true opens the background page on plugins_loaded.
+	os3 := plugintest.NewFakeOS()
+	os3.SetFile(statePath, state2)
+	h3 := welcomeScreenHarness(t, os3, []byte(state2))
+	h3.Emit(pluginapi.Event{Name: "plugins_loaded"})
+	h3.Settle()
+	if welcomeScreenBuffer(h3.Host) == 0 {
+		t.Fatal("third runtime did not open the page despite persisted true")
 	}
 }

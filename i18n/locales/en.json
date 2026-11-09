@@ -1149,7 +1149,8 @@
   "gvim.notice.remote_search_nested_repos": "remote search scanned the nested repositories/submodules in place because their candidate lists were unavailable; ignored entries may be scanned and results may be capped",
   "gvim.notice.remote_search_ignored_candidates": "remote search scanned ignored entries because the candidate file list was too large to pass explicitly; results may be capped before every candidate file is searched",
   "gvim.notice.remote_ignore_git_unavailable": "remote ignore scope unavailable: git could not run on the remote host; ignored files may be searched and tracked files that match .gitignore may be omitted",
-  "gvim.notice.remote_ignore_listing_failed": "remote ignore scope unavailable: the remote git candidate listing failed, timed out or truncated; ignored files may be searched and tracked files that match .gitignore may be omitted",
+  "gvim.notice.remote_ignore_listing_failed": "remote ignore scope unavailable: the remote git candidate listing failed or timed out; ignored files may be searched and tracked files that match .gitignore may be omitted",
+  "gvim.notice.remote_ignore_listing_truncated": "remote ignore scope incomplete: the remote git candidate listing was truncated; ignored files may be searched and tracked files that match .gitignore may be omitted",
   "gvim.notice.remote_search_cap": "remote search result is incomplete: the widened fallback scan hit the remote output cap before all candidate files were reported; narrow the scope or refine the query",
   "gvim.notice.remote_live_grep_cap": "remote Live Grep result is incomplete: the widened ignored-file scan hit the remote output cap; narrow the scope or refine the query",
   "gvim.notice.remote_live_grep_stopped": "remote Live Grep stopped early: the widened ignored-file scan failed on the remote host; the shown matches are incomplete",
@@ -1168,5 +1169,11 @@
   "gvim.status.env_locked": "%{name} (locked)",
   "gvim.notice.env_none": "No environment manager detected in this project",
   "gvim.notice.env_activate_unavailable": "Env: Activate is unavailable — enable the env-manager plugin",
-  "gvim.notice.env_reload_unavailable": "Env: Reload is unavailable — enable the env-manager plugin"
+  "gvim.notice.env_reload_unavailable": "Env: Reload is unavailable — enable the env-manager plugin",
+  "gvim.notice.clipboard.cut_unconfirmed": "OSC 52 clipboard write requested; no native clipboard can confirm the cut, so the prompt was kept",
+  "gvim.notice.clipboard.cut_failed": "Cut failed: %{error}; the prompt was kept",
+  "gvim.notice.clipboard.cut_changed": "Copied, but the prompt changed before the cut completed; the prompt was kept",
+  "gvim.notice.clipboard.copy_unconfirmed": "OSC 52 clipboard write requested; no native clipboard can confirm the copy",
+  "gvim.notice.clipboard.copy_failed": "Copy failed: %{error}",
+  "gvim.notice.clipboard.busy": "A clipboard write is still in progress; try again"
 }

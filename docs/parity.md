@@ -21,14 +21,13 @@ spawn gate (#17), and the second i18n extraction (palette/menu/settings/authorit
 below was checked in this tree or in `refs/fresh`, not inferred from the old migration notes.
 Update the affected row when a round lands instead of rewriting it.
 
-Last verified: 2026-11-10, tree commit `a4433fd` (the round-58 commit; the previous round's commit is
-folded in) plus the merged round-59 work. Static gates PASS (Lead, final pass after all writes stopped;
+Last verified: 2026-11-10, tree commit `baeda15` (the round-59 commit; the previous round's commit is
+folded in) plus the merged round-60 work. Static gates PASS (Lead, final pass after all writes stopped;
 default GOCACHE: native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, purity, import rules, menus,
-i18n_check with catalogue heap en 130 KiB / de 83 KiB / both 213 KiB, git diff --check, gofmt clean).
+i18n_check with catalogue heap en 131 KiB / de 83 KiB / both 214 KiB, git diff --check, gofmt clean).
 Final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
-`/tmp/gvim-r59-final3.log`); one earlier run had a timing-only `TestLocalLiveRestoreOptions` failure,
-then isolated 3x and the full rerun passed. The audit ran build/gofmt/i18n_check plus targeted
-round-59 tests/diff review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
+`/tmp/gvim-r60-final4.log`). The audit ran build/gofmt/i18n_check plus targeted round-60 tests/diff
+review. Real-host SSH/jump-box/agent-forwarding/search/explorer/replace/clipboard/streaming large-
 file-save/plugin realpath-walk-copy, keychain security/secret-tool, real-tmux, Windows ConPTY, real-
 host OSC52, multi-head/PTY workspace switching remain UNTESTED. Fresh reference: `refs/fresh` same
 date.
@@ -1530,6 +1529,57 @@ Metrics: palette 240, settings 69 in 14 sections, bundled 22 (9 on)/13 off, idle
 plugin API 242 functions/1478 lines level 2; i18n en 998 / 575 per locale, 560 KiB text (under
 640 KiB cap), ≈649 KiB JSON, heap 114-82-197 KiB. Full suite EXIT 0 (76 packages, log /tmp/gvim-r24-tests.log); real hosts UNTESTED; no
 full-parity claim (residuals in §5 R13-1…R13-24 and §8).
+
+**Round-60 outcome (2026-11-10, merged working tree on `baeda15`).** Four slices landed: the
+native-confirmed prompt copy/cut with prompt identity/owner/token; the welcome startup toggle and its
+direct cross-Stop persistence; the R13-11 remote candidate-listing degradation fix; and the documentation/
+scope withdrawal of the unshippable host-native env activation and env-driven LSP restart. Static gates
+PASS; final full `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL (log
+`/tmp/gvim-r60-final4.log`). The audit read the final diff and ran targeted tests; the Lead ran the full suite.
+**Prompt copy/cut native-confirmed clipboard (item 310).** Prompt Ctrl+C/X copies/cuts the whole field
+(or a confirm question) only after a native clipboard writer confirms; no native writer keeps the text and
+reports an OSC 52 request, a failed writer keeps the text, and Cut clears only after success. Results carry
+prompt pointer identity, workspace owner and a latest-operation token; closed/replaced prompts, stale
+workspace generations and superseded operations are dropped, and Cut success still requires the same
+text before clearing. A process-wide atomic prompt-native gate lets just one prompt native write run across all workspace
+models; a second prompt copy/cut is refused rather than queued; CancelTransientWork cancels/refuses a
+not-yet-started write and invalidates its result token, while a started writer keeps the gate until it
+reports. Native-writer mode sends only the native write (no simultaneous OSC 52). Tests now cover
+success/failure/no-writer/closed/replaced/stale-generation/latest-of-two, native-vs-OSC selection,
+cancel-before-start, in-flight cancel/wait, hidden-model Cancel and cross-model writer rejection. AUDITED RESIDUALS: the gate covers prompt native writes only; editor/dock/plugin native writes bypass it
+and can race the final prompt clipboard content. A writer that has already started cannot be cancelled:
+if it hangs, the gate and promptClipPending stay set, so prompt copy/cut remains busy (documented, no
+timeout). The no-native-writer branches are OSC 52 best effort with no pending gate, so repeated copies/
+cut can deliver OSC 52 out of order. Tests do not drive real native clipboards/terminals or a hanging
+writer. Real native clipboards/terminals UNTESTED (R2-4/R13-18).
+**welcome startup toggle persistence (item 311).** The footer row/command writes `show_on_startup` through
+`gvim.state`; the state boolean overrides `auto_open` for future launches, the current page stays open, and
+the explicit Show command still forces it. Direct launch uses the editor-wide per-plugin state file; the
+new test toggles, Stops, seeds the next runtime from the file and observes both false and true across two
+new runtimes. Daemon workspaces scope `gvim.state` per workspace, so the override is not Fresh's
+editor-global setting; state writes are debounced/in-memory-first, disk failures are runtime warnings
+only, and a workspace switch queues the old namespace write that a fast exit can lose. Tests use the
+plugin harness (manual state seed), not a real app loader/daemon e2e. AUDITED RESIDUALS: daemon
+non-global scope, async write failure not surfaced to the UI, old-namespace queued write not guaranteed
+flushed on Stop, no real app/daemon cross-restart test (R13-6/R13-18).
+**R13-11 candidate-listing degradation (item 312).** A failed/timed-out remote `git ls-files` still keeps
+the fallback search results but carries an explicit failed/timed-out ignore-scope notice and is not marked
+Truncated; a truncated candidate listing keeps results and sets the Done/result Truncated plus a distinct
+"candidate listing was truncated" notice. The fallback never widens to ignored files and no authoritative/
+local fallback is introduced. Tests cover failed and truncated streaming/one-shot results, retained rows
+and Stats. Residuals: real SSH tool/permission/timing behavior is UNTESTED; nested-repo ignore
+semantics and tool-cap/Limit interactions remain open R13-11.
+**native env activation / LSP restart withdrawn (item 305).** The attempted host-native status-click
+activation and env-driven LSP restart are removed: the host cannot own the operation correctly (targeted
+restart can re-root, lose didOpen, undo mute/forced; a cancelled activation can still Set). The status
+click now only dispatches the env-manager plugin's Activate/Reload action; the plugin path keeps its
+env_changed/trust gate but has no LSP restart. A host-native activation and env-driven LSP restart remain
+UNIMPLEMENTED; plugin required; real provider/LSP UNTESTED (R13-18).
+Metrics: palette 242, settings 77 in 14 sections, bundled 32 (9 on)/23 off, 71 bundled-command
+registration sites, plugin API 249 functions/1506 lines level 2; keymap default own 252/in effect
+250, macos 60/273, macos-gui 52/324, emacs 98/316, vscode 9/255; i18n en 1176 / 581 per locale, 575
+KiB text, ≈665 KiB JSON, heap 131-83-214 KiB. Full suite EXIT 0 (77 packages, log /tmp/gvim-r60-
+final3.log); real hosts UNTESTED; no full-parity claim (residuals in §5 R13-1…R13-24 and §8).
 
 **Round-59 outcome (2026-11-10, merged working tree on `a4433fd`).** Five slices landed: the
 F6 modal/overlay exact-unbind-and-legacy-printable fix; the Fresh-compatible welcome_screen fileLaunch
@@ -5689,9 +5739,14 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      surface as the trust pill; the click never decides trust itself), trusted -> the
      env-manager plugin's own Env: Activate (detected) / Env: Reload (active) action, with an
      explicit 'enable the env-manager plugin' notice when that plugin is disabled; no detected
-     env -> a 'no environment manager detected' notice. No activation logic runs in the status
-     row and no Update/render path blocks; unlike Fresh there is no pending-decision popup and
-     after trusting the user clicks again to activate (no trust_changed auto-activation hook).
+     env -> a 'no environment manager detected' notice. A host-native activation path (no
+     plugin) and the env-driven LSP restart Fresh performs on setEnv remain UNIMPLEMENTED: the
+     attempted native Set/LSP-restart path was withdrawn after review (the host API cannot
+     activate with correct ownership and language-server semantics — a targeted LSP restart
+     can re-root, lose didOpen and undo mute/forced, and a cancelled activation could still
+     Set), so the status row never calls it and the env-manager plugin is the supported path.
+     Unlike Fresh there is no pending-decision popup and after trusting the user clicks again to
+     activate (no trust_changed auto-activation hook).
      When the official env-manager plugin is enabled its own status pill replaces the native
      segment (one pill, plugin-owned click path; matched structurally by plugin name+item id,
      so another plugin reusing the id `env` never suppresses it); local unchanged.
@@ -6423,11 +6478,16 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
      decision on render (TestEnvPortCachedStatusDoesNotTriggerWatchRetry), Env: Reload retains recovery.
      Names run textsafe.Clean (Cc/Cf/invalid UTF-8); active stays shown as <name> ✓ after revoke
      (informational, deactivation explicit), detected untrusted <name> (locked). Round59 makes the native
-     segment clickable (untrusted -> Workspace Trust dialog; trusted -> exact env_manager.activate/reload
-     command with notices) and uses structural Extra sources so a plugin item reusing id `env` stays a plugin
-     item; the official env_manager env pill suppresses/duplicates the native segment correctly. Residuals:
+     segment clickable: untrusted -> Workspace Trust dialog; trusted -> env_manager.activate/reload plugin
+     action with enable-plugin notices. A host-native activation (no plugin) and env-driven LSP restart are
+     UNIMPLEMENTED: the attempted native path was withdrawn after review (host set/restart could not own the
+     operation correctly — targeted LSP restart can re-root, lose didOpen and undo mute/forced, and a
+     cancelled activation could still Set), so no status-row code calls a native Set or an LSP restart.
+     Extra sources are structural so a plugin item reusing id `env` stays a plugin item; the official
+     env_manager env pill suppresses/duplicates the native segment correctly. Residuals:
      segment always present and no neutral system value (Fresh opt-in pill), no pending activation after
-     trust (click again), active env not un-applied on revoke, real watcher/provider UNTESTED.
+     trust (click again), active env not un-applied on revoke, native activation + env-driven LSP restart
+     UNIMPLEMENTED, real watcher/provider UNTESTED.
 306. **git_blame parent revision / race / Save As (R13-9).** Blame Previous resolves first parent and
      re-blames only the snapshot line; Blame HEAD clears it; cache key includes revision, view_path ties a
      revision to its path, Save As clears both and bumps generation; snapshot (buffer/path/version/cursor/rev/
@@ -6455,6 +6515,34 @@ matches that (documented design difference). `docs/sidebar.md`, `docs/markdown.m
 309. **Live Grep Alt+M alias (R2-4).** Live Grep overlay accepts alt+q and alt+m for Fresh's
      live_grep_export_quickfix; real overlay Update opens same quickfix list; emacs normal alt+m smart_home
      not active in popup context; docs updated. Residual real host chord UNTESTED.
+310. **Native-confirmed prompt copy/cut (R2-4).** Ctrl+C/X copies the whole prompt field (or a
+     confirm question) only after a native ClipboardWriter confirms; no native writer keeps text and reports
+     OSC 52 request, failed writer keeps text/no Cut, Cut clears only on success. Results carry target
+     prompt identity, workspace owner and latest-operation token; closed/replaced/generation-stale/
+     superseded results are dropped, Cut requires the same text. One process-wide atomic prompt-native gate
+     across all workspace models; a second prompt write is refused, CancelTransientWork cancels/refuses a
+     not-yet-started native write and invalidates its result token, and native-writer mode sends no OSC 52
+     alongside it. Tests cover success/failure/no-writer/closed/replaced/stale-generation/latest-of-two,
+     native-vs-OSC selection, cancel-before-start, in-flight wait, hidden-model Cancel and cross-model
+     rejection. Residuals: the gate is prompt-native-only (editor/dock/plugin native writes bypass it and
+     can race the final content); a started/hung writer cannot be cancelled and keeps gate+pending forever
+     (no timeout); no-native OSC 52 is best effort without a pending gate, so repeated OSC 52 writes can
+     land out of order; no real native/terminal or hung-writer test.
+311. **welcome startup toggle persistent state (R13-6/R13-18).** Footer row/command writes
+     show_on_startup through gvim.state; state boolean overrides auto_open for future launches, current page
+     stays open and Show force is unchanged. Direct launch uses editor-wide per-plugin state; test toggles,
+     Stops, seeds a new runtime and observes false then true across two runtimes. Daemon workspaces scope
+     state per workspace (not Fresh's editor-global), writes are debounced/in-memory-first and disk errors
+     are runtime warnings only; a workspace switch queues the old namespace write that a fast exit may
+     lose. Tests use plugin harness/manual seed; no real app loader/daemon e2e. Residuals: daemon non-
+     global, async write failures not surfaced, old-namespace queued write not guaranteed on Stop, real
+     app/daemon UNTESTED.
+312. **Remote candidate-listing degradation (R13-11).** Failed/timed-out remote git ls-files keeps fallback
+     results with an explicit failed/timed-out ignore-scope notice and no Truncated; a truncated listing
+     keeps results, sets Done/result Truncated and a distinct candidate-listing-truncated notice, without
+     widening to ignored files or local/authoritative fallback. Tests cover streaming/one-shot retained
+     rows/Stats. Residuals: real SSH tool/permission/timing UNTESTED; nested-repo ignore semantics and
+     tool-cap/Limit interactions remain open.
 ## 5. Ranked backlog for the remaining rounds
 
 Sizes are estimates: S ≈ a day or less, M ≈ 1–3 days, L ≈ 3–10 days, XL ≈ more (unvalidated).
@@ -6923,8 +7011,9 @@ Round 13 recorded five open gaps:
   stale/budget/cancel (no rollback/undo); current-file/open-buffers + preview (r18); r23 grep
   project-file scope; r24 both tools share candidate scope (rg --no-ignore --hidden -g !.git +
   candidate filter, so tracked-ignored searchable on both), complete bounded git ls-files
-  authoritative, outside worktree rg defaults/grep hidden-only. OPEN: failed/truncated listing
-  degrades hidden-only without notice (rg keeps defaults; tracked-ignored can be omitted); tool cap
+  authoritative, outside worktree rg defaults/grep hidden-only. Failed/truncated candidate listings
+  now degrade hidden-only while keeping results and carrying an explicit non-fatal notice; a
+  truncated listing also sets the Done batch Truncated (tests cover both). OPEN: tool cap
   + panel Limit before filter → <Limit and widened rg can consume cap; nested repo inner ignore;
   finder snapshot authoritative; window preview (8 MiB scan; unknown-total plain; no semantic/LSP spans); replace no rollback/undo.
 - **R13-12 (P2, S/M; update check + r27 update-command terminal landed; self-update engine open)** —
@@ -8479,6 +8568,15 @@ Round 13 recorded five open gaps:
   Tracks: Live Grep preview/export/resume/Terminals; project-search preview cancellation + 2000 export
   cap; shared textsafe display sanitizer; dashboard display hardening. Real-host checks remain
   UNTESTED. No full-parity claim.
+- **Round-60 verification (2026-11-10, merged tree on `baeda15`).** STATIC GATES PASS (Lead,
+  final pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
+  golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 131 KiB / de 82 KiB /
+  both 214 KiB, git diff --check, gofmt clean). Final full
+  `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line (log
+  `/tmp/gvim-r60-final4.log`). Audit: build/gofmt/i18n_check plus targeted round-60 tests/diff review.
+  Tracks: native-confirmed prompt copy/cut identity/owner/token; welcome startup toggle state
+  persistence; remote candidate-listing degradation; native env activation/LSP restart withdrawal.
+  Real-host checks remain UNTESTED. No full-parity claim.
 - **Round-59 verification (2026-11-10, merged tree on `a4433fd`).** STATIC GATES PASS (Lead,
   final pass after all writes stopped; default GOCACHE: native/CGO_ENABLED=0/Windows build, vet,
   golangci-lint 0, purity, import rules, menus, i18n_check with catalogue heap en 130 KiB / de 83 KiB /
@@ -8551,16 +8649,15 @@ Round 13 recorded five open gaps:
   R10-1…R10-4, R11-2…R11-4, R12-1…R12-5, R13-1…R13-24; #7/#8/#11/#15, R1-1, R1-2, R1-3,
   R2-4, R5-1, R5-5, R6-5, R6-6, R7-1/R7-2/R7-3, R8-5, R9-3/R9-4, R11-1, R13-10 are closed;
   R10-3/R10-4/R11-2…R11-4/R12-2…R12-5/R13-1…R13-24 partially landed with residual lists
-  (round-59 landed F6 overlay/legacy printable unbind, Fresh fileLaunch/welcome manual force, env status
-  click + official pill dedupe, Live Grep Alt+M; full suite EXIT 0 (77 packages, log
-  /tmp/gvim-r59-final3.log); real-host checks UNTESTED).
-- Statuses are read evidence from the tree at the time of writing. Rounds 2–59 had their gate sets
-  run. Round 59 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
+  (round-60 landed prompt copy/cut identity/owner/token, welcome startup toggle state, remote
+  candidate-listing degradation, native env/LSP withdrawal; full suite EXIT 0 (77 packages, log
+  /tmp/gvim-r60-final4.log); real-host checks UNTESTED).
+- Statuses are read evidence from the tree at the time of writing. Rounds 2–60 had their gate sets
+  run. Round 60 static gates PASS (Lead, final pass after all writes stopped; default GOCACHE:
   native/CGO_ENABLED=0/Windows build, vet, golangci-lint 0, gofmt, purity, import rules, menus,
-  i18n_check with catalogue heap en 130 KiB / de 83 KiB / both 213 KiB, git diff --check). Final full
+  i18n_check with catalogue heap en 131 KiB / de 83 KiB / both 214 KiB, git diff --check). Final full
   `go test ./... -p 1 -count=1 -timeout 1200s` EXIT 0: 77 packages ok, no FAIL line, log
-  `/tmp/gvim-r59-final3.log`; one earlier timing-only `TestLocalLiveRestoreOptions` failure reran 3x
-  and in the full suite clean. The audit ran build/gofmt/i18n_check plus targeted round-59 tests and
+  `/tmp/gvim-r60-final4.log`. The audit ran build/gofmt/i18n_check plus targeted round-60 tests and
   diff review only (no full suite); the Lead ran the full suite. Real-host verification remains UNTESTED rather
   than passed: real-SSH editing/search/explorer/replace/clipboard/streaming large-file save/plugin
   realpath-walk-copy, keychain security/secret-tool, keepalive/2FA/agent-forwarding/jump-box/known_hosts

@@ -23,6 +23,13 @@
     "section.empty_recent": "No recent files yet.",
     "section.dashboard_detail": "Open the dashboard",
     "hint": "j/k or arrows move   Enter opens   q closes",
-    "status.action_failed": "Welcome screen: %{error}"
+    "status.action_failed": "Welcome screen: %{error}",
+    "startup.show": "[✓] Show this screen on startup",
+    "startup.hide": "[ ] Show this screen on startup",
+    "startup.detail": "Enter toggles it for future launches",
+    "status.startup_on": "Welcome: shown on startup",
+    "status.startup_off": "Welcome: hidden - reopen via the palette",
+    "cmd.toggle_startup": "Welcome Screen: Toggle Show on Startup",
+    "cmd.toggle_startup_desc": "Show or hide the welcome page on future startup launches"
   }
 }

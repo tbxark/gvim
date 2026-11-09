@@ -496,7 +496,21 @@ opt-in) therefore implements one bounded real core rather than claiming the full
   current buffer the selected row's caret is moved with reveal=true so j/k cannot activate an
   off-screen row in a small viewport; a background page does not move the caret or steal focus.
   This is caret-based row visibility, not Fresh's page focus-follows-cursor/scroll-to-widget
-  composition.
+  composition;
+* Fresh's startup toggle is represented by a footer action row and the **Welcome Screen: Toggle
+  Show on Startup** command. It writes the persistent plugin-state key `show_on_startup` through
+  `gvim.state`; `show_on_startup()` prefers that boolean over the `auto_open` setting, and
+  `auto_open()` reads it for future launches. The current page is not closed by the toggle and the
+  explicit Show command still forces it. The precedence matches Fresh's
+  `getGlobalState("showOnStartup")` over plugin config, and the rendering is a text row rather than
+  Fresh's checkbox/button widget (no footer copy/styling), but the **scope/durability is reduced**:
+  a direct launch uses the editor-wide per-plugin state file and the test covers Stop→new runtime;
+  a daemon workspace scopes state to that workspace (Fresh's is global across workspaces), and the
+  toggle cannot detect asynchronous write failures. `gvim.state.set` returns after the in-memory
+  update; disk errors are runtime warnings only, not a return value or status row. State writes are
+  debounced and flushed on Stop for the current namespace; a workspace switch queues the old
+  namespace's write, and a fast switch followed by exit may lose that queued write. The toggle is
+  therefore best-effort, not equivalent to Fresh's global/durable toggle.
 
 The page is opened automatically as a **background** tab once at startup when `auto_open` is true
 and never steals the foreground; it is not closed when files open and it does not reopen after the
@@ -528,7 +542,9 @@ The docs/bundled table entry and the plugin header carry the same reduced-scope 
 
 Tests: `plugin/bundled/welcome_screen_test.go` covers manifest/opt-in, page content and real door
 dispatch, action/path line targets, recent-row activation, close stickiness, background
-auto-open/no-focus-steal, `auto_open: false`, and dashboard metadata rows plus the empty fallback.
+auto-open/no-focus-steal, `auto_open: false`, the persistent startup toggle (page row/command,
+next-startup suppression/re-enable, its precedence over `auto_open`, and cross-Stop/new-runtime
+state persistence for a direct launch), and dashboard metadata rows plus the empty fallback.
 It loads the plugin through the real loader; no plugin→host end-to-end UI composition test is
 claimed for the unavailable page widget panel.
 

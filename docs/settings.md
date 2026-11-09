@@ -503,7 +503,10 @@ deactivation/reload is explicit). Clicking the indicator is safe: untrusted work
 the existing cancellable Workspace Trust dialog (the click never decides trust itself);
 trusted workspaces dispatch the env-manager plugin's Env: Activate (detected) or Env: Reload
 (active) action, or say to enable the plugin when it is disabled; no detected env gets a
-notice. When the official env-manager plugin is enabled its own `env` status pill replaces
+notice. A host-side native activation (no plugin) and the env-driven LSP restart Fresh does
+on setEnv are NOT implemented: the attempt was withdrawn after audit showed the host API
+cannot activate with correct ownership and language-server semantics; enable the env-manager
+plugin. When the official env-manager plugin is enabled its own `env` status pill replaces
 this native segment (single pill, plugin click path); another plugin's item that merely
 reuses the id `env` does not suppress it. See docs/parity.md residual R13-18.
 

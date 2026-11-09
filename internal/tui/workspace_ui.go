@@ -278,7 +278,13 @@ func (m *Model) SetWorkspaceLabel(label string) { m.workspaceLabel = label }
 // applied by the one now shown. Called by the daemon workspace manager before the model
 // can be shown; a direct launch leaves the zero owner.
 func (m *Model) SetWorkspaceOwner(workspace string, generation uint64) {
-	m.workspaceOwner = palette.Owner{Workspace: workspace, Generation: generation}
+	next := palette.Owner{Workspace: workspace, Generation: generation}
+	if next != m.workspaceOwner {
+		// A pending prompt write belongs to the previous generation: cancel it before it
+		// starts writing, and let the pending result release the gate.
+		m.cancelPromptClipOp()
+	}
+	m.workspaceOwner = next
 }
 
 // WorkspaceOwner returns this model's workspace stable id and generation: the token its
@@ -291,6 +297,12 @@ func (m *Model) WorkspaceOwner() palette.Owner { return m.workspaceOwner }
 // searches and preview reads stop, and their sequence numbers are invalidated. The
 // daemon workspace manager calls it on the UI goroutine; it does no I/O and no search.
 func (m *Model) CancelTransientWork() {
+	// A prompt clipboard operation may still finish after this hidden warm workspace is
+	// shown again. Invalidate its token and mark a not-yet-started write canceled, so its
+	// late result can neither clear the same still-active prompt nor change the notice.
+	// The pending gate stays set until the write command reports, so a new write never
+	// runs beside the old one on the same writer.
+	m.cancelPromptClipOp()
 	for _, ov := range m.overlays {
 		if c, ok := ov.(interface{ CancelWork() }); ok {
 			c.CancelWork()

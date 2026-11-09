@@ -40,7 +40,7 @@ var overlayActionNames = []string{
 	"prompt_move_word_left", "prompt_move_word_right",
 	"prompt_delete_word_backward", "prompt_delete_word_forward",
 	"prompt_select_prev", "prompt_select_next", "prompt_page_up", "prompt_page_down",
-	"prompt_accept_suggestion", "prompt_paste",
+	"prompt_accept_suggestion", "prompt_paste", "prompt_copy", "prompt_cut",
 	// searchPrompt: the find bar's match steps and option toggles.
 	"toggle_search_case_sensitive", "toggle_search_whole_word",
 	"toggle_search_regex", "toggle_search_confirm_each",
@@ -261,6 +261,10 @@ func (m *Model) runOverlayAction(ctx KeyContext, cmd Command) (tea.Cmd, bool) {
 		return m.deliverOverlay(syntheticKey(tea.KeyTab, 0)), true
 	case "prompt_paste":
 		return m.deliverOverlay(syntheticKey('v', tea.ModCtrl)), true
+	case "prompt_copy":
+		return m.promptClipboard(false), true
+	case "prompt_cut":
+		return m.promptClipboard(true), true
 	case "toggle_search_case_sensitive":
 		return m.deliverOverlay(syntheticKey('c', tea.ModAlt)), true
 	case "toggle_search_whole_word":
@@ -382,4 +386,166 @@ func (m *Model) cancelTopOverlay() tea.Cmd {
 // keystroke.
 func syntheticKey(code rune, mod tea.KeyMod) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: code, Mod: mod}
+}
+
+// promptClipboard is Fresh's prompt_copy/prompt_cut when the prompt field has no
+// selection: the whole text prompt is copied, and a cut also clears it, but only after a
+// native clipboard write confirms the copy. A confirm copies its question; cutting a
+// confirm has nothing to clear and is a no-op. The command keeps the overlay's focus and
+// mode unchanged.
+func (m *Model) promptClipboard(cut bool) tea.Cmd {
+	if len(m.overlays) == 0 {
+		return nil
+	}
+	line, _ := m.overlays[len(m.overlays)-1].(*prompt.Line)
+	if line != nil {
+		if cut {
+			return m.promptCut(line)
+		}
+		return m.promptCopy(promptClipTarget{line: line}, line.Value())
+	}
+	confirm, _ := m.overlays[len(m.overlays)-1].(*prompt.Confirm)
+	if cut || confirm == nil {
+		return nil
+	}
+	return m.promptCopy(promptClipTarget{confirm: confirm}, confirm.Question())
+}
+
+// beginPromptClip starts a native prompt clipboard operation. Only the latest
+// operation's asynchronous result may act, and the permission stays set until
+// finishPromptClip sees that operation report. The caller must have acquired the
+// process-wide permission with promptClipNativeAcquire first.
+func (m *Model) beginPromptClip(op *promptClipOp) (uint64, *promptClipOp) {
+	m.promptClipToken++
+	m.promptClipPending = true
+	m.promptClipPendingToken = m.promptClipToken
+	m.promptClipOp = op
+	return m.promptClipToken, op
+}
+
+// finishPromptClip clears the pending operation when its result reports. It returns the
+// operation so only its owner can release the process-wide permission; a stale result
+// returns nil and cannot clear a newer workspace's permission.
+func (m *Model) finishPromptClip(token uint64) *promptClipOp {
+	if !m.promptClipPending || token != m.promptClipPendingToken {
+		return nil
+	}
+	op := m.promptClipOp
+	m.promptClipPending = false
+	m.promptClipPendingToken = 0
+	m.promptClipOp = nil
+	return op
+}
+
+// cancelPromptClipOp invalidates the action token and marks a not-yet-started native write
+// canceled. If no writer call has started (or one already finished), this releases the
+// process-wide permission immediately: a canceled request that never reaches Write must
+// not block other workspaces. A write already inside ClipboardWriter.Write cannot be
+// cancelled; the permission stays set until that command reports or close releases it.
+func (m *Model) cancelPromptClipOp() {
+	op := m.promptClipOp
+	if op != nil {
+		op.cancel()
+		if !op.started.Load() || op.finished.Load() {
+			promptClipNativeRelease(op)
+		}
+	}
+	m.promptClipToken++
+}
+
+// promptClipBusy reports whether a prompt write is pending or the process-wide native
+// permission is held. A second copy/cut is refused instead of queued.
+func (m *Model) promptClipBusy() bool {
+	return m.promptClipPending || promptClipNativeBusy()
+}
+
+// promptCopy copies the whole prompt text without mutating the prompt. It is single-flight
+// with cut: while a native write is pending another copy/cut is refused with a notice, so
+// writes cannot run concurrently or land out of order. A native writer is the only path
+// when one exists: no OSC 52 is sent beside it, so the two channels cannot reorder. Without
+// a native writer only an OSC 52 write is requested as best effort; it is not confirmable.
+func (m *Model) promptCopy(target promptClipTarget, text string) tea.Cmd {
+	if text == "" {
+		return nil
+	}
+	if m.promptClipBusy() {
+		m.notice = uiText("gvim.notice.clipboard.busy", "A clipboard write is still in progress; try again")
+		return nil
+	}
+	w, ok := m.dock.Clipboard().(ClipboardWriter)
+	if !ok {
+		m.promptClipToken++
+		m.notice = uiText("gvim.notice.clipboard.copy_unconfirmed", "OSC 52 clipboard write requested; no native clipboard can confirm the copy")
+		return tea.SetClipboard(text)
+	}
+	op := &promptClipOp{}
+	if !promptClipNativeAcquire(op) {
+		m.notice = uiText("gvim.notice.clipboard.busy", "A clipboard write is still in progress; try again")
+		return nil
+	}
+	token, _ := m.beginPromptClip(op)
+	owner := m.workspaceOwner
+	closed := &m.closed
+	m.notice = ""
+	return func() tea.Msg {
+		if !op.beginWrite() {
+			op.finished.Store(true)
+			if closed.Load() {
+				promptClipNativeRelease(op)
+			}
+			return promptCopyMsg{target: target, text: text, skipped: true, owner: owner, token: token}
+		}
+		err := w.Write(text)
+		op.finished.Store(true)
+		if closed.Load() {
+			promptClipNativeRelease(op)
+		}
+		return promptCopyMsg{target: target, text: text, err: err, owner: owner, token: token}
+	}
+}
+
+// promptCut is the conservative cut: the line is not cleared up front. A native clipboard
+// writer is asked first in a command (never in Update); only its successful result clears
+// the same line. Without a native writer an OSC 52 write is still requested as a
+// best-effort copy, but the line is kept and no Cut is claimed. A failed write keeps the
+// text and reports the error, so neither the field nor onChange changes.
+func (m *Model) promptCut(line *prompt.Line) tea.Cmd {
+	text := line.Value()
+	if text == "" {
+		return nil
+	}
+	if m.promptClipBusy() {
+		m.notice = uiText("gvim.notice.clipboard.busy", "A clipboard write is still in progress; try again")
+		return nil
+	}
+	w, ok := m.dock.Clipboard().(ClipboardWriter)
+	if !ok {
+		m.promptClipToken++
+		m.notice = uiText("gvim.notice.clipboard.cut_unconfirmed", "OSC 52 clipboard write requested; no native clipboard can confirm the cut, so the prompt was kept")
+		return tea.SetClipboard(text)
+	}
+	op := &promptClipOp{}
+	if !promptClipNativeAcquire(op) {
+		m.notice = uiText("gvim.notice.clipboard.busy", "A clipboard write is still in progress; try again")
+		return nil
+	}
+	token, _ := m.beginPromptClip(op)
+	owner := m.workspaceOwner
+	closed := &m.closed
+	m.notice = ""
+	return func() tea.Msg {
+		if !op.beginWrite() {
+			op.finished.Store(true)
+			if closed.Load() {
+				promptClipNativeRelease(op)
+			}
+			return promptCutMsg{line: line, text: text, skipped: true, owner: owner, token: token}
+		}
+		err := w.Write(text)
+		op.finished.Store(true)
+		if closed.Load() {
+			promptClipNativeRelease(op)
+		}
+		return promptCutMsg{line: line, text: text, err: err, owner: owner, token: token}
+	}
 }

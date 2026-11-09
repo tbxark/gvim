@@ -196,6 +196,23 @@ func (l *Line) Active() bool { return !l.closed }
 // Value returns the current input.
 func (l *Line) Value() string { return l.field.Value() }
 
+// CutValue is Fresh's prompt_cut without a selection: copy the whole prompt text and
+// clear the field, as the prompt has no selection to cut in gvim.
+func (l *Line) CutValue() string {
+	text := l.field.Value()
+	if text == "" {
+		return ""
+	}
+	l.field.SetValue("")
+	l.field.CursorEnd()
+	l.errText = ""
+	l.prefill = false
+	if l.onChange != nil {
+		l.onChange("")
+	}
+	return text
+}
+
 // Update handles one message and returns the prompt itself, so the root can stack it
 // as an overlay. Key presses are handled as described on Line. A paste, and the
 // clipboard text that Ctrl+V asked for, go to the text field. The returned command is
@@ -512,6 +529,9 @@ func NewConfirmWith(st style.Styles, label string, tag any, o ConfirmOptions) *C
 
 // Active reports whether the prompt is open.
 func (c *Confirm) Active() bool { return !c.closed }
+
+// Question returns the text the confirm asks, for Fresh's prompt_copy without a selection.
+func (c *Confirm) Question() string { return c.label }
 
 // Update handles one message and returns the confirm itself, so the root can stack it
 // as an overlay. The returned command is the Done message once an answer is given, and

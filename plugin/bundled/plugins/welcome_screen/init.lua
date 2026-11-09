@@ -8,7 +8,10 @@
 --   * doors (open a file, new buffer, recent files);
 --   * verbs (find file, command palette, settings, explorer, help), all real actions;
 --   * dashboard-section rows from gvim.dashboard.sections(), with an explicit empty state;
---   * session recent-file rows (bounded), usable with j/k, arrows, Enter and mouse targets.
+--   * session recent-file rows (bounded), usable with j/k, arrows, Enter and mouse targets;
+--   * Fresh's startup toggle as a footer row/command backed by plugin state (`show_on_startup`
+--     overrides `auto_open` for future launches; direct launches are editor-wide, daemon
+--     workspaces are workspace-scoped, and the state write is best-effort).
 --
 -- It intentionally does NOT claim Fresh's page-widget-panel behavior, Contents/focus/scroll
 -- widget machinery, onboarding levels, orchestrator/workspace/agent cards, auto-attach, or
@@ -24,6 +27,7 @@ local settings = gvim.settings.define {
   },
 }
 
+local STARTUP_KEY = "show_on_startup"
 local MAX_RECENT = 8
 local MAX_SECTIONS = 8
 local MAX_BUFFER_SCAN = 64
@@ -210,6 +214,19 @@ local function dashboard_sections()
   return out
 end
 
+-- show_on_startup mirrors Fresh's showOnStartup(): the persistent plugin-state
+-- override wins over the plugin's auto_open setting. gvim's state is editor-wide on a
+-- direct launch and workspace-scoped in a daemon, so this is not Fresh's global state.
+-- The page's switch writes this override; it affects the NEXT startup, never closes the
+-- current page, and its asynchronous disk write is best-effort.
+local function show_on_startup()
+  local ok, override = pcall(gvim.state.get, STARTUP_KEY, nil)
+  if ok and type(override) == "boolean" then
+    return override
+  end
+  return settings.auto_open
+end
+
 local function push_line(lines, text, style)
   if style then
     lines[#lines + 1] = { segments = { { text = text, style = style } } }
@@ -284,6 +301,9 @@ local function build_page()
   row(t("verb.settings.label"), t("verb.settings.detail"), "action", "open_settings", "welcome_screen.click_action_6")
   row(t("verb.explorer.label"), t("verb.explorer.detail"), "action", "toggle_file_explorer", "welcome_screen.click_action_7")
   row(t("verb.help.label"), t("verb.help.detail"), "action", "show_help", "welcome_screen.click_action_8")
+  blank()
+  local startup_label = show_on_startup() and t("startup.show") or t("startup.hide")
+  row(startup_label, t("startup.detail"), "action", "welcome_screen.toggle_startup", "welcome_screen.toggle_startup")
   blank()
   push_line(lines, "  " .. t("hint"), STYLE.muted)
   return lines, rows
@@ -433,8 +453,21 @@ local function ensure_buffer(focus)
   return created
 end
 
+local function toggle_startup()
+  local next_value = not show_on_startup()
+  local ok, err = gvim.state.set(STARTUP_KEY, next_value)
+  if not ok then
+    gvim.notify(t("status.action_failed", { error = tostring(err) }))
+    return
+  end
+  gvim.notify(t(next_value and "status.startup_on" or "status.startup_off"))
+  if valid_buf() then
+    paint()
+  end
+end
+
 local function auto_open()
-  if not settings.auto_open or state.opened_auto then
+  if not show_on_startup() or state.opened_auto then
     return
   end
   -- Fresh's file launch (fresh FILE, --simple, --diff) asked for those files and
@@ -500,6 +533,13 @@ gvim.command.register {
   run = function()
     ensure_buffer(true)
   end,
+}
+
+gvim.command.register {
+  name = "toggle_startup",
+  title = t("cmd.toggle_startup"),
+  description = t("cmd.toggle_startup_desc"),
+  run = toggle_startup,
 }
 
 gvim.on("plugins_loaded", auto_open)

@@ -846,12 +846,69 @@ func TestRemoteSearchFallsBackWithNoticeWhenListingUnavailable(t *testing.T) {
 		Scope: searchpanel.AllFiles,
 	}, nil))
 	notice := doneBatchNotice(t, batches)
-	if !strings.Contains(notice, "ignore scope unavailable") {
-		t.Fatalf("notice = %q, want the degraded ignore-scope notice", notice)
+	if !strings.Contains(notice, "ignore scope unavailable") || !strings.Contains(notice, "failed or timed out") {
+		t.Fatalf("notice = %q, want the explicit failed/timed-out ignore-scope notice", notice)
+	}
+	if got := strings.Join(remoteSearchFileNames(t, batches), ","); got != "a.go,tracked.log" {
+		t.Fatalf("files = %v, want the fallback results retained", remoteSearchFileNames(t, batches))
+	}
+	for _, batch := range batches {
+		if batch.Done && batch.Truncated {
+			t.Fatalf("failed listing batch marked Truncated: %+v", batch)
+		}
 	}
 	calls := rgCalls(one)
 	if len(calls) == 0 || strings.Contains(strings.Join(calls[0], " "), "--no-ignore") {
 		t.Fatalf("rg calls = %v, want the default whole-tree fallback without widening", calls)
+	}
+}
+
+// TestRemoteSearchTruncatedCandidateListingKeepsResultsWithNotice checks an incomplete
+// (truncated) candidate listing: the fallback whole-tree results are kept, the Done batch
+// is marked Truncated, and the notice names the candidate listing itself as truncated
+// instead of silently degrading the ignore scope.
+func TestRemoteSearchTruncatedCandidateListingKeepsResultsWithNotice(t *testing.T) {
+	ls := gitLsEntry("100644", "a.go") + gitLsEntry("100644", "tracked.log")
+	one := rgScopeOneShot(true, []byte(ls), "a.go:1:1:todo a\ntracked.log:1:1:todo t\n", true)
+	s := newRemoteProjectSearch(one, "/remote/w").withFiles(newRemoteFS())
+	batches := collectRemoteBatches(t, s.ProjectSearchBatches(searchpanel.SearchRequest{
+		Root:  "/remote/w",
+		Query: "todo",
+		Scope: searchpanel.AllFiles,
+	}, nil))
+	if got := strings.Join(remoteSearchFileNames(t, batches), ","); got != "a.go,tracked.log" {
+		t.Fatalf("files = %v, want the fallback results retained", remoteSearchFileNames(t, batches))
+	}
+	var done *searchpanel.SearchBatch
+	for i := range batches {
+		if batches[i].Done {
+			done = &batches[i]
+			break
+		}
+	}
+	if done == nil {
+		t.Fatal("no Done batch")
+	}
+	if !done.Truncated {
+		t.Fatalf("Done batch = %+v, want Truncated for a truncated candidate listing", *done)
+	}
+	if !strings.Contains(done.Notice, "ignore scope incomplete") || !strings.Contains(done.Notice, "candidate listing was truncated") {
+		t.Fatalf("notice = %q, want the explicit truncated-listing notice", done.Notice)
+	}
+	if strings.Contains(done.Notice, "failed or timed out") {
+		t.Fatalf("notice = %q, conflates truncation with failure", done.Notice)
+	}
+	calls := rgCalls(one)
+	if len(calls) == 0 || strings.Contains(strings.Join(calls[0], " "), "--no-ignore") {
+		t.Fatalf("rg calls = %v, want the default whole-tree fallback without widening", calls)
+	}
+	// The non-streaming port keeps the same notice and results.
+	result, err := s.ProjectSearch(searchpanel.SearchRequest{Root: "/remote/w", Query: "todo", Scope: searchpanel.AllFiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Files) != 2 || !result.Truncated || !strings.Contains(result.Notice, "candidate listing was truncated") {
+		t.Fatalf("ProjectSearch result = %+v, want retained results plus the truncation notice", result)
 	}
 }
 
